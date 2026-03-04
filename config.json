@@ -1,0 +1,7 @@
+{
+  "anthropic": {
+    "api_key": "sk-36765a94e6d74b4db65cf5c5585b6844",
+    "base_url": "https://dashscope.aliyuncs.com/apps/anthropic",
+    "model": "glm-4.7"
+  }
+}
