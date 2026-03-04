@@ -80,61 +80,76 @@ def main():
     # 动态加载工具
     tools = build_tools()
 
-    # 构建请求对象
-    request = ChatCompletionRequest(
-        model=config.get("model", "gml-4.7"),
-        messages=[
-            Message(role="system", content=system_prompt),
-            Message(role="user", content=user_message)
-        ],
-        tools=tools,
-        max_tokens=1024
-    )
+    # 初始化消息历史
+    messages = [
+        Message(role="system", content=system_prompt),
+        Message(role="user", content=user_message)
+    ]
 
     try:
-        # 调用 API
-        response = call_chat_completion(request, config["api_key"], debug=False)
+        # 持续对话，直到 task_done 被调用
+        while True:
+            # 构建请求对象
+            request = ChatCompletionRequest(
+                model=config.get("model", "gml-4.7"),
+                messages=messages,
+                tools=tools,
+                max_tokens=1024
+            )
 
-        assistant_message = response.choices[0].message
-        logging.info(f"Finish Reason: {response.choices[0].finish_reason}")
+            # 调用 API
+            response = call_chat_completion(request, config["api_key"], debug=False)
+            assistant_message = response.choices[0].message
+            logging.info(f"Finish Reason: {response.choices[0].finish_reason}")
 
-        # 检查是否有 tool_calls
-        if assistant_message.tool_calls:
-            logging.info("检测到工具调用:")
-            for tool_call in assistant_message.tool_calls:
-                logging.info(f"  Tool ID: {tool_call.id}")
-                logging.info(f"  Function: {tool_call.function['name']}")
-                logging.info(f"  Arguments: {tool_call.function['arguments']}")
+            # 输出思考过程（如果有）
+            if assistant_message.reasoning_content:
+                logging.info(f"--- 思考过程 ---")
+                logging.info(f"{assistant_message.reasoning_content}")
+                logging.info(f"--- 思考结束 ---")
 
-                # 解析参数并调用函数
-                args = json.loads(tool_call.function['arguments'])
-                result = execute_function(tool_call.function['name'], args)
-                logging.info(f"  函数执行结果: {result}")
+            # 输出文本响应（如果有）
+            if assistant_message.content:
+                logging.info(f"--- 文本响应 ---")
+                logging.info(f"{assistant_message.content}")
+                logging.info(f"--- 响应结束 ---")
 
-                # 将工具调用结果添加到消息历史
-                messages = [
-                    Message(role="system", content=system_prompt),
-                    Message(role="user", content=user_message),
-                    Message(role="assistant", content=assistant_message.content, tool_calls=assistant_message.tool_calls),
-                    Message(role="tool", content=result, tool_call_id=tool_call.id)
-                ]
+            # 检查是否有 tool_calls
+            if assistant_message.tool_calls:
+                # 添加 assistant 消息到历史
+                messages.append(Message(role="assistant", content=assistant_message.content, tool_calls=assistant_message.tool_calls))
 
-                # 再次调用 API 获取最终响应
-                followup_request = ChatCompletionRequest(
-                    model=config.get("model", "gml-4.7"),
-                    messages=messages,
-                    tools=tools,
-                    max_tokens=1024
-                )
-                followup_response = call_chat_completion(followup_request, config["api_key"])
-                logging.info(f"最终响应: {followup_response.choices[0].message.content}")
-        else:
-            logging.info(f"直接响应: {assistant_message.content}")
+                # 处理每个工具调用
+                for tool_call in assistant_message.tool_calls:
+                    logging.info(f"Tool ID: {tool_call.id}")
+                    logging.info(f"Function: {tool_call.function['name']}")
+                    logging.info(f"Arguments: {tool_call.function['arguments']}")
 
-        logging.info(f"输入 tokens: {response.usage.input_tokens}")
-        logging.info(f"输出 tokens: {response.usage.output_tokens}")
-        logging.info(f"总 tokens: {response.usage.total_tokens}")
-        logging.info(f"请求 ID: {response.request_id}")
+                    # 检查是否是 task_done
+                    if tool_call.function['name'] == 'task_done':
+                        logging.info("检测到 task_done，结束对话")
+                        return
+
+                    # 解析参数并调用函数
+                    args = json.loads(tool_call.function['arguments'])
+                    result = execute_function(tool_call.function['name'], args)
+                    logging.info(f"函数执行结果: {result}")
+
+                    # 添加 tool 响应到历史
+                    messages.append(Message(role="tool", content=result, tool_call_id=tool_call.id))
+            else:
+                # 直接响应，添加到历史
+                logging.info(f"Assistant 响应: {assistant_message.content}")
+                messages.append(Message(role="assistant", content=assistant_message.content))
+                # 如果没有工具调用且没有内容，说明任务完成
+                if not assistant_message.content:
+                    logging.info("Assistant 无响应，结束对话")
+                    break
+
+            logging.info(f"输入 tokens: {response.usage.input_tokens}")
+            logging.info(f"输出 tokens: {response.usage.output_tokens}")
+            logging.info(f"总 tokens: {response.usage.total_tokens}")
+            logging.info(f"请求 ID: {response.request_id}")
 
     except RuntimeError as e:
         logging.error(f"错误: {e}")

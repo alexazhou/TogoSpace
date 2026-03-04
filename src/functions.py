@@ -1,5 +1,6 @@
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 import datetime
+import logging
 
 
 def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius") -> str:
@@ -41,3 +42,38 @@ def calculate(expression: str) -> str:
         return f"计算结果: {expression} = {result}"
     except Exception as e:
         return f"计算错误: {e}"
+
+
+def get_agent_list() -> List[str]:
+    """返回 agent 列表
+
+    """
+    logging.info(f"get_agent_list: 获取 agent 列表")
+    return ['agent1','agent2','agent3']
+
+
+def create_chat(agent_name: str) -> str:
+    """创建和一个 agent 的聊天，返回创建的聊天窗口名称
+
+    Args:
+        agent_name: 发起聊天的目标 agent 名称
+    """
+    logging.info(f"create_chat: 创建与 {agent_name} 的聊天")
+    return f"to_{agent_name}_room"
+
+
+def send_chat_msg(chat_windows_name:str, msg:str) -> None:
+    """向聊天窗口发送消息
+
+    Args:
+        chat_windows_name: 要发送消息的窗口名称
+        msg: 要发送的消息
+    """
+    logging.info(f"send_chat_msg: 向 {chat_windows_name} 发送消息")
+    return
+
+def task_done() -> None:
+    """通知任务完成
+    """
+    logging.info(f"task_done")
+    return
