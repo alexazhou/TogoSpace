@@ -1,0 +1,7 @@
+{
+  "enabled_functions": [
+    "get_weather",
+    "get_time",
+    "calculate"
+  ]
+}
