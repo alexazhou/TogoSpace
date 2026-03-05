@@ -79,12 +79,15 @@ def set_chat_context(chat_room, agent_name: str) -> None:
     logging.info(f"set_chat_context: 设置上下文 - agent={agent_name}")
 
 
-def send_chat_msg(chat_windows_name: str, msg: str) -> None:
+def send_chat_msg(chat_windows_name: str, msg: str) -> str:
     """向聊天窗口发送消息
 
     Args:
         chat_windows_name: 要发送消息的窗口名称
         msg: 要发送的消息
+
+    Returns:
+        成功返回 "success"
     """
     global _current_chat_room, _current_agent_name
     logging.info(f"send_chat_msg: 向 {chat_windows_name} 发送消息: {msg}")
@@ -95,7 +98,7 @@ def send_chat_msg(chat_windows_name: str, msg: str) -> None:
     else:
         logging.warning("send_chat_msg: 聊天室上下文未设置")
 
-    return
+    return "success"
 
 def task_done() -> None:
     """通知任务完成
