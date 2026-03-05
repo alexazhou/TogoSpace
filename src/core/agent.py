@@ -9,9 +9,11 @@ class Agent:
         self.system_prompt = system_prompt
         self.model = model
 
-    async def generate_response(self, api_client, context: str) -> str:
+    async def generate_response(self, api_client, context_messages: list) -> str:
         """生成回复"""
-        messages = [            {"role": "system", "content": self.system_prompt},            {"role": "user", "content": context}
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            *context_messages
         ]
 
         response = await api_client.call_chat_completion(
