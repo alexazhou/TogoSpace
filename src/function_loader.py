@@ -13,7 +13,7 @@ from functions import *
 def load_enabled_functions() -> List[str]:
     """读取 function_list.json，返回启用的函数名列表"""
     try:
-        with open("../resource/function_list.json", "r", encoding="utf-8") as f:
+        with open("../resource/bk/function_list.json", "r", encoding="utf-8") as f:
             config = json.load(f)
         return config.get("enabled_functions", [])
     except FileNotFoundError:
