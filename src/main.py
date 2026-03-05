@@ -4,8 +4,8 @@ import os
 
 from util.config_util import setup_logger, load_config, load_prompt, load_api_key
 from service.agent_service import Agent
-from service.chat_room_service import ChatRoom
 from service.scheduler_service import Scheduler
+import service.chat_room_service as chat_room
 import service.llm_api_service as api_client
 import service.agent_tool_service as agent_tools
 
@@ -17,11 +17,8 @@ async def main():
 
     config = load_config()
 
-    # 创建聊天室
-    chat_room = ChatRoom(
-        name=config["chat_room"]["name"],
-        initial_topic=config["chat_room"]["initial_topic"]
-    )
+    room_name = config["chat_room"]["name"]
+    chat_room.init(name=room_name, initial_topic=config["chat_room"]["initial_topic"])
 
     # 创建 Agent 实例（数量由配置决定）
     agent_names = [a["name"] for a in config["agents"]]
@@ -39,21 +36,23 @@ async def main():
     logger.info(f"已创建 {len(agents)} 个 Agent: {agent_names}")
 
     # 添加初始话题
-    if chat_room.initial_topic:
-        chat_room.add_message("system", chat_room.initial_topic)
+    initial_topic = chat_room.get_room(room_name).initial_topic
+    if initial_topic:
+        chat_room.add_message(room_name, "system", initial_topic)
 
     api_client.init(load_api_key())
     agent_tools.init()
     try:
         scheduler = Scheduler(
             agents=agents,
-            chat_room=chat_room,
+            room_name=room_name,
             max_turns=config.get("max_turns", 6),
             max_function_calls=config.get("max_function_calls", 5),
         )
         await scheduler.run()
     finally:
         agent_tools.close()
+        chat_room.close_all()
         await api_client.close()
 
 

@@ -1,11 +1,11 @@
-from typing import List
+from typing import Dict, List
 from datetime import datetime
 
 from model.chat_model import ChatMessage
 
 
 class ChatRoom:
-    """聊天室类"""
+    """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
     def __init__(self, name: str, initial_topic: str = ""):
         self.name = name
@@ -13,7 +13,6 @@ class ChatRoom:
         self.initial_topic = initial_topic
 
     def add_message(self, sender: str, content: str) -> None:
-        """添加消息"""
         message = ChatMessage(
             sender=sender,
             content=content,
@@ -22,27 +21,63 @@ class ChatRoom:
         self.messages.append(message)
 
     def get_context(self, max_messages: int = 10) -> str:
-        """获取最近的对话上下文"""
-        recent_messages = self.messages[-max_messages:]
-        context_parts = []
-        for msg in recent_messages:
-            context_parts.append(f"{msg.sender}: {msg.content}")
-        return "\n".join(context_parts)
+        recent = self.messages[-max_messages:]
+        return "\n".join(f"{m.sender}: {m.content}" for m in recent)
 
     def get_context_messages(self, max_messages: int = 10) -> List[dict]:
-        """获取结构化的对话上下文消息列表"""
-        recent_messages = self.messages[-max_messages:]
-        messages = []
-        for msg in recent_messages:
+        recent = self.messages[-max_messages:]
+        result = []
+        for msg in recent:
             if msg.sender == "system":
-                messages.append({"role": "system", "content": msg.content})
+                result.append({"role": "system", "content": msg.content})
             else:
-                messages.append({"role": "user", "content": f"{msg.sender}: {msg.content}"})
-        return messages
+                result.append({"role": "user", "content": f"{msg.sender}: {msg.content}"})
+        return result
 
     def format_log(self) -> str:
-        """格式化聊天记录"""
         lines = [f"=== {self.name} 聊天记录 ==="]
         for msg in self.messages:
             lines.append(f"[{msg.timestamp}] {msg.sender}: {msg.content}")
         return "\n".join(lines)
+
+
+_rooms: Dict[str, ChatRoom] = {}
+
+
+def init(name: str, initial_topic: str = "") -> None:
+    """创建并注册一个聊天室。"""
+    _rooms[name] = ChatRoom(name=name, initial_topic=initial_topic)
+
+
+def close(name: str) -> None:
+    """移除指定聊天室。"""
+    _rooms.pop(name, None)
+
+
+def close_all() -> None:
+    """移除所有聊天室，程序退出前调用。"""
+    _rooms.clear()
+
+
+def get_room(name: str) -> ChatRoom:
+    """返回指定聊天室实例（供需要传递对象的场景使用，如 agent_context）。"""
+    room = _rooms.get(name)
+    if room is None:
+        raise RuntimeError(f"聊天室 '{name}' 不存在，请先调用 init(name)")
+    return room
+
+
+def add_message(name: str, sender: str, content: str) -> None:
+    get_room(name).add_message(sender, content)
+
+
+def get_context(name: str, max_messages: int = 10) -> str:
+    return get_room(name).get_context(max_messages)
+
+
+def get_context_messages(name: str, max_messages: int = 10) -> List[dict]:
+    return get_room(name).get_context_messages(max_messages)
+
+
+def format_log(name: str) -> str:
+    return get_room(name).format_log()

@@ -2,7 +2,7 @@ import logging
 from typing import List
 
 from service.agent_service import Agent
-from service.chat_room_service import ChatRoom
+import service.chat_room_service as chat_room
 import service.agent_tool_service as agent_tools
 
 logger = logging.getLogger(__name__)
@@ -14,12 +14,12 @@ class Scheduler:
     def __init__(
         self,
         agents: List[Agent],
-        chat_room: ChatRoom,
+        room_name: str,
         max_turns: int,
         max_function_calls: int = 5,
     ):
         self.agents = agents
-        self.chat_room = chat_room
+        self.room_name = room_name
         self.max_turns = max_turns
         self.tools = agent_tools.get_tools()
         self.max_function_calls = max_function_calls
@@ -34,11 +34,11 @@ class Scheduler:
             current_agent = self.agents[(turn - 1) % len(self.agents)]
             logger.info(f"\n--- 第 {turn} 轮 ({current_agent.name}) ---")
 
-            context_messages = self.chat_room.get_context_messages()
+            context_messages = chat_room.get_context_messages(self.room_name)
 
             try:
                 agent_context = {
-                    "chat_room": self.chat_room,
+                    "chat_room": chat_room.get_room(self.room_name),
                     "agent_name": current_agent.name
                 }
                 final_response, _ = await current_agent.generate_with_function_calling(
@@ -50,10 +50,10 @@ class Scheduler:
                     max_function_calls=self.max_function_calls
                 )
                 if final_response:
-                    self.chat_room.add_message(current_agent.name, final_response)
+                    chat_room.add_message(self.room_name, current_agent.name, final_response)
                     logger.info(f"{current_agent.name}: {final_response}")
             except Exception as e:
                 logger.error(f"{current_agent.name} 生成回复失败: {e}")
                 return
 
-        logger.info(f"\n{self.chat_room.format_log()}")
+        logger.info(f"\n{chat_room.format_log(self.room_name)}")
