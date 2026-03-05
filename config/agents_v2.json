@@ -1,0 +1,24 @@
+{
+  "agents": [
+    {
+      "name": "alice",
+      "prompt_file": "resource/prompts/alice_system.md",
+      "model": "qwen-flash"
+    },
+    {
+      "name": "bob",
+      "prompt_file": "resource/prompts/bob_system.md",
+      "model": "qwen-flash"
+    },
+    {
+      "name": "charlie",
+      "prompt_file": "resource/prompts/charlie_system.md",
+      "model": "qwen-flash"
+    }
+  ],
+  "chat_room": {
+    "name": "general",
+    "initial_topic": "大家好，今天我们来聊聊生活和工作吧！"
+  },
+  "max_turns": 6
+}

@@ -6,8 +6,7 @@ from types import UnionType
 from typing import Union
 from model import Tool, Function, FunctionParameter
 
-# 导入所有可用函数
-from tools.functions import *
+from tools.functions import FUNCTION_REGISTRY
 
 
 def load_enabled_functions() -> List[str]:
@@ -150,8 +149,7 @@ def build_tools() -> List[Tool]:
 
     for func_name in enabled_functions:
         try:
-            # 从模块获取函数对象
-            func = globals().get(func_name)
+            func = FUNCTION_REGISTRY.get(func_name)
             if func is None or not callable(func):
                 logging.warning(f"Function {func_name} not found or not callable")
                 continue
@@ -198,19 +196,17 @@ def execute_function(func_name: str, args: dict, context: dict = None) -> str:
         函数执行结果的字符串表示
     """
     try:
-        # 从模块获取函数对象
-        func = globals().get(func_name)
+        func = FUNCTION_REGISTRY.get(func_name)
         if func is None:
             raise ValueError(f"Function {func_name} not found")
 
         if not callable(func):
             raise ValueError(f"{func_name} is not callable")
 
-        # 为 send_chat_msg 注入上下文参数
-        if func_name == "send_chat_msg" and context:
+        # 通用上下文注入：检查标记而非硬编码函数名
+        if getattr(func, "needs_context", False) and context:
             args = {**args, "_chat_room": context.get("chat_room"), "_agent_name": context.get("agent_name")}
 
-        # 调用函数
         result = func(**args)
 
         # 确保返回字符串

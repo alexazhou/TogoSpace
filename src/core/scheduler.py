@@ -4,26 +4,19 @@ from typing import List
 from core.agent import Agent
 from core.chat_room import ChatRoom
 from tools.function_loader import build_tools, execute_function
-from utils.api import call_chat_completion
 
 logger = logging.getLogger(__name__)
-
-
-class _APIAdapter:
-    """将 call_chat_completion 函数包装为 api_client 接口"""
-    async def call_chat_completion(self, **kwargs):
-        return await call_chat_completion(**kwargs)
 
 
 class Scheduler:
     """多 Agent 调度器：按轮次让 Agent 依次发言"""
 
-    def __init__(self, agents: List[Agent], chat_room: ChatRoom, max_turns: int):
+    def __init__(self, agents: List[Agent], chat_room: ChatRoom, max_turns: int, api_client):
         self.agents = agents
         self.chat_room = chat_room
         self.max_turns = max_turns
+        self.api_client = api_client
         self.tools = build_tools()
-        self._api_client = _APIAdapter()
 
     async def run(self) -> None:
         """运行调度循环"""
@@ -43,7 +36,7 @@ class Scheduler:
                     "agent_name": current_agent.name
                 }
                 final_response, _ = await current_agent.generate_with_function_calling(
-                    api_client=self._api_client,
+                    api_client=self.api_client,
                     context_messages=context_messages,
                     tools=self.tools,
                     function_executor=lambda name, args: execute_function(

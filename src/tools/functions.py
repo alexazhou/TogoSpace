@@ -86,3 +86,16 @@ def task_done() -> None:
     """
     logging.info(f"task_done")
     return
+
+
+send_chat_msg.needs_context = True
+
+FUNCTION_REGISTRY: dict[str, callable] = {
+    "get_weather": get_weather,
+    "get_time": get_time,
+    "calculate": calculate,
+    "get_agent_list": get_agent_list,
+    "create_chat": create_chat,
+    "send_chat_msg": send_chat_msg,
+    "task_done": task_done,
+}

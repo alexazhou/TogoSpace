@@ -7,6 +7,7 @@ from datetime import datetime
 from core.agent import Agent
 from core.chat_room import ChatRoom
 from core.scheduler import Scheduler
+from utils.api import APIClient
 
 
 def setup_logger() -> None:
@@ -42,6 +43,12 @@ def load_prompt(file_path: str) -> str:
         return f.read().strip()
 
 
+def load_api_key() -> str:
+    config_path = os.path.join(os.path.dirname(__file__), "../config.json")
+    with open(config_path, "r", encoding="utf-8") as f:
+        return json.load(f)["anthropic"]["api_key"]
+
+
 async def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     setup_logger()
@@ -74,12 +81,17 @@ async def main():
     if chat_room.initial_topic:
         chat_room.add_message("system", chat_room.initial_topic)
 
-    scheduler = Scheduler(
-        agents=agents,
-        chat_room=chat_room,
-        max_turns=config.get("max_turns", 6)
-    )
-    await scheduler.run()
+    api_client = APIClient(load_api_key())
+    try:
+        scheduler = Scheduler(
+            agents=agents,
+            chat_room=chat_room,
+            max_turns=config.get("max_turns", 6),
+            api_client=api_client
+        )
+        await scheduler.run()
+    finally:
+        await api_client.close()
 
 
 if __name__ == "__main__":
