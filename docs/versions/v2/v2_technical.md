@@ -288,6 +288,107 @@ if __name__ == "__main__":
 
 ---
 
+## 模块依赖关系
+
+### 三层架构与依赖规则
+
+```
+┌─────────────────────────────────────────────────────┐
+│                     main.py                         │
+│  (程序入口，组装所有层)                               │
+└────────────────────┬────────────────────────────────┘
+                     │ import
+        ┌────────────▼────────────┐
+        │       service 层        │  有状态类，处理业务逻辑
+        ├─────────────────────────┤
+        │  scheduler_service.py   │
+        │  agent_service.py       │
+        │  chat_room_service.py   │
+        │  api_client_service.py  │
+        │  function_service.py    │
+        └────────────┬────────────┘
+                     │ import
+        ┌────────────▼────────────┐
+        │        model 层         │  纯数据定义（dataclass / pydantic）
+        ├─────────────────────────┤
+        │  api_model.py           │
+        │  chat_model.py          │
+        └────────────┬────────────┘
+                     │ import（单向）
+        ┌────────────▼────────────┐
+        │         util 层         │  无状态工具函数
+        ├─────────────────────────┤
+        │  config_util.py         │
+        │  function_loader_util.py│
+        │  functions_util.py      │
+        └─────────────────────────┘
+```
+
+> 依赖方向严格单向：`main → service → model / util`，禁止下层反向引用上层。
+
+---
+
+### 各模块详细依赖
+
+#### util 层（无外部项目内依赖）
+
+| 模块 | 依赖的项目内模块 | 依赖的第三方库 |
+|------|----------------|--------------|
+| `config_util.py` | 无 | 标准库（json, os, logging, datetime） |
+| `functions_util.py` | 无 | 标准库（typing, datetime, logging） |
+| `function_loader_util.py` | `util.functions_util`（FUNCTION_REGISTRY） | 标准库（inspect, json, logging, typing） |
+
+#### model 层
+
+| 模块 | 依赖的项目内模块 | 依赖的第三方库 |
+|------|----------------|--------------|
+| `chat_model.py` | 无 | 标准库（dataclasses） |
+| `api_model.py` | 无 | pydantic |
+
+#### service 层
+
+| 模块 | 依赖的项目内模块 | 依赖的第三方库 |
+|------|----------------|--------------|
+| `chat_room_service.py` | `model.chat_model`（ChatMessage） | 标准库（typing, datetime） |
+| `api_client_service.py` | `model.api_model`（ChatCompletionRequest / Response / ErrorResponse） | aiohttp, certifi |
+| `agent_service.py` | 无（api_client 以参数注入） | 标准库（typing, logging, json） |
+| `function_service.py` | `model.api_model`（Tool, Function, FunctionParameter）<br>`util.function_loader_util`（load_enabled_functions, get_function_metadata）<br>`util.functions_util`（FUNCTION_REGISTRY） | 标准库（logging, typing） |
+| `scheduler_service.py` | `service.agent_service`（Agent）<br>`service.chat_room_service`（ChatRoom）<br>`service.function_service`（build_tools, execute_function） | 标准库（logging, typing） |
+
+#### main.py
+
+| 依赖的项目内模块 |
+|----------------|
+| `util.config_util`（setup_logger, load_config, load_prompt, load_api_key） |
+| `service.agent_service`（Agent） |
+| `service.chat_room_service`（ChatRoom） |
+| `service.scheduler_service`（Scheduler） |
+| `service.api_client_service`（APIClient） |
+
+---
+
+### 关键依赖路径
+
+```
+main.py
+  ├── util.config_util              （读取配置/日志）
+  ├── service.api_client_service
+  │     └── model.api_model         （请求/响应数据结构）
+  ├── service.chat_room_service
+  │     └── model.chat_model        （ChatMessage dataclass）
+  ├── service.agent_service         （无内部依赖，api_client 注入）
+  └── service.scheduler_service
+        ├── service.agent_service
+        ├── service.chat_room_service
+        └── service.function_service
+              ├── model.api_model   （Tool / Function / FunctionParameter）
+              ├── util.function_loader_util
+              │     └── util.functions_util
+              └── util.functions_util（FUNCTION_REGISTRY）
+```
+
+---
+
 ## 技术要点
 
 ### 动态 Agent 加载
