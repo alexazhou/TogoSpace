@@ -20,5 +20,6 @@
     "name": "general",
     "initial_topic": "大家好，今天我们来聊聊生活和工作吧！"
   },
-  "max_turns": 6
+  "max_turns": 6,
+  "max_function_calls": 5
 }

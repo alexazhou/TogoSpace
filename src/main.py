@@ -47,7 +47,8 @@ async def main():
             agents=agents,
             chat_room=chat_room,
             max_turns=config.get("max_turns", 6),
-            api_client=api_client
+            api_client=api_client,
+            max_function_calls=config.get("max_function_calls", 5),
         )
         await scheduler.run()
     finally:

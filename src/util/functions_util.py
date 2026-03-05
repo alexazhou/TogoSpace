@@ -1,6 +1,8 @@
 from typing import Literal, Optional, List
+import ast
 import datetime
 import logging
+import operator
 
 
 def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius") -> str:
@@ -31,6 +33,34 @@ def get_time(timezone: Optional[str] = None) -> str:
         return f"当前本地时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"
 
 
+_SAFE_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+}
+
+
+def _safe_eval(node):
+    if isinstance(node, ast.Constant):
+        if not isinstance(node.value, (int, float)):
+            raise ValueError("只支持数值常量")
+        return node.value
+    if isinstance(node, ast.BinOp):
+        op_type = type(node.op)
+        if op_type not in _SAFE_OPS:
+            raise ValueError(f"不支持的运算符: {op_type.__name__}")
+        return _SAFE_OPS[op_type](_safe_eval(node.left), _safe_eval(node.right))
+    if isinstance(node, ast.UnaryOp):
+        op_type = type(node.op)
+        if op_type not in _SAFE_OPS:
+            raise ValueError(f"不支持的运算符: {op_type.__name__}")
+        return _SAFE_OPS[op_type](_safe_eval(node.operand))
+    raise ValueError(f"不支持的表达式类型: {type(node).__name__}")
+
+
 def calculate(expression: str) -> str:
     """计算数学表达式
 
@@ -38,7 +68,8 @@ def calculate(expression: str) -> str:
         expression: 数学表达式字符串，如 "2 + 3 * 4"
     """
     try:
-        result = eval(expression, {"__builtins__": {}}, {})
+        tree = ast.parse(expression, mode="eval")
+        result = _safe_eval(tree.body)
         return f"计算结果: {expression} = {result}"
     except Exception as e:
         return f"计算错误: {e}"

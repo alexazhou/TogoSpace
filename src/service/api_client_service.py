@@ -13,10 +13,13 @@ from model.api_model import (
 
 logger = logging.getLogger(__name__)
 
+DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+
 
 class APIClient:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, base_url: str = DASHSCOPE_BASE_URL):
         self.api_key = api_key
+        self.base_url = base_url
         ssl_context = ssl.create_default_context(cafile=certifi.where())
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         self._session = aiohttp.ClientSession(connector=connector)
@@ -30,7 +33,7 @@ class APIClient:
         temperature: float = 0.7,
         tools: Optional[List] = None
     ) -> ChatCompletionResponse:
-        url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        url = self.base_url
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
