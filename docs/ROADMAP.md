@@ -68,7 +68,11 @@
 - [技术文档](./versions/v1/v1_technical.md)
 - [开发任务表](./versions/v1/v1_tasks.md)
 
+### V2
+- [产品文档](./versions/v2/v2_product.md)
+- [技术文档](./versions/v2/v2_technical.md)
+- [开发任务表](./versions/v2/v2_tasks.md)
+
 ### 其他版本
-- [V2: 多 Agent 单房间聊天](./versions/v2_multi_agent.md)
 - [V3: 多 Agent 多房间聊天](./versions/v3_multi_room.md)
 - [V4: 状态持久化与聊天恢复](./versions/v4_persistence.md)
