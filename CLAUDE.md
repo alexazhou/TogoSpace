@@ -47,6 +47,12 @@ src/
 cd src && python main.py
 ```
 
+## 工作目录约定
+
+`main.py` 启动时调用 `os.chdir(os.path.dirname(os.path.abspath(__file__)))` 将工作目录固定为 `src/`。
+所有相对路径（如配置文件、prompt 文件）均以 `src/` 为基准。
+测试和其他入口脚本若需要读取这些文件，须自行保证工作目录正确，或使用绝对路径。
+
 ## 配置文件
 
 | 文件 | 说明 |

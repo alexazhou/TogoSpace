@@ -11,12 +11,20 @@ logger = logging.getLogger(__name__)
 class Scheduler:
     """多 Agent 调度器：按轮次让 Agent 依次发言"""
 
-    def __init__(self, agents: List[Agent], chat_room: ChatRoom, max_turns: int, api_client):
+    def __init__(
+        self,
+        agents: List[Agent],
+        chat_room: ChatRoom,
+        max_turns: int,
+        api_client,
+        max_function_calls: int = 5,
+    ):
         self.agents = agents
         self.chat_room = chat_room
         self.max_turns = max_turns
         self.api_client = api_client
         self.tools = build_tools()
+        self.max_function_calls = max_function_calls
 
     async def run(self) -> None:
         """运行调度循环"""
@@ -42,7 +50,7 @@ class Scheduler:
                     function_executor=lambda name, args: execute_function(
                         name, args, context=agent_context
                     ),
-                    max_function_calls=1
+                    max_function_calls=self.max_function_calls
                 )
                 if final_response:
                     self.chat_room.add_message(current_agent.name, final_response)

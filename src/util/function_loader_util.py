@@ -1,17 +1,20 @@
 import inspect
 import json
 import logging
+import os
 from typing import Any, Dict, List, get_type_hints, get_origin, get_args, Literal
 from types import UnionType
 from typing import Union
 
 from util.functions_util import FUNCTION_REGISTRY
 
+_FUNCTION_LIST_PATH = os.path.join(os.path.dirname(__file__), "../../resource/bk/function_list.json")
+
 
 def load_enabled_functions() -> List[str]:
     """读取 function_list.json，返回启用的函数名列表"""
     try:
-        with open("../resource/bk/function_list.json", "r", encoding="utf-8") as f:
+        with open(_FUNCTION_LIST_PATH, "r", encoding="utf-8") as f:
             config = json.load(f)
         return config.get("enabled_functions", [])
     except FileNotFoundError:
