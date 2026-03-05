@@ -4,13 +4,8 @@ import logging
 import ssl
 
 import certifi
-import sys
-import os
 
-# 添加父目录到 path 以导入 model
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-
-from model import (
+from ..model import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ErrorResponse

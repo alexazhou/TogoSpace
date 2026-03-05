@@ -36,6 +36,21 @@ class ChatRoom:
             context_parts.append(f"{msg.sender}: {msg.content}")
         return "\n".join(context_parts)
 
+    def get_context_messages(self, max_messages: int = 10) -> List[dict]:
+        """获取结构化的对话上下文消息列表"""
+        recent_messages = self.messages[-max_messages:]
+        messages = []
+        for msg in recent_messages:
+            if msg.sender == "system":
+                role = "system"
+            else:
+                role = "user"
+            messages.append({
+                "role": role,
+                "content": f"{msg.sender}: {msg.content}"
+            })
+        return messages
+
     def format_log(self) -> str:
         """格式化聊天记录"""
         lines = [f"=== {self.name} 聊天记录 ==="]

@@ -10,9 +10,9 @@ import certifi
 import ssl
 import traceback
 
-from api.client import APIClient
-from core.agent import Agent
-from core.chat_room import ChatRoom
+from .api.client import APIClient
+from .core.agent import Agent
+from .core.chat_room import ChatRoom
 
 
 def setup_logger(log_dir: str = None) -> None:
@@ -135,26 +135,28 @@ async def main():
         for turn in range(1, max_turns + 1):
             logger.info(f"\n--- 第 {turn} 轮 ---")
 
-            for agent in agents:
-                # 获取上下文
-                context = chat_room.get_context()
-                logger.info(f"[{agent.name}] 上下文长度: {len(context)}")
+            # 使用模运算选择当前轮次应该说话的 agent
+            current_agent = agents[(turn - 1) % len(agents)]
 
-                # 生成回复
-                try:
-                    response = await agent.generate_response(
-                        api_client=api_client,
-                        context=context
-                    )
+            # 获取上下文
+            context_messages = chat_room.get_context_messages()
+            logger.info(f"[{current_agent.name}] 上下文消息数: {len(context_messages)}")
 
-                    # 添加消息
-                    chat_room.add_message(agent.name, response)
+            # 生成回复
+            try:
+                response = await current_agent.generate_response(
+                    api_client=api_client,
+                    context_messages=context_messages
+                )
 
-                    logger.info(f"{agent.name}: {response}")
-                except Exception as e:
-                    logger.error(f"{agent.name} 生成回复失败: {e}")
-                    traceback.print_exc()
-                    return
+                # 添加消息
+                chat_room.add_message(current_agent.name, response)
+
+                logger.info(f"{current_agent.name}: {response}")
+            except Exception as e:
+                logger.error(f"{current_agent.name} 生成回复失败: {e}")
+                traceback.print_exc()
+                return
 
         # 输出完整聊天记录
         logger.info(f"\n{chat_room.format_log()}")
