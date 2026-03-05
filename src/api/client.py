@@ -5,7 +5,7 @@ import ssl
 
 import certifi
 
-from ..model import (
+from model import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ErrorResponse

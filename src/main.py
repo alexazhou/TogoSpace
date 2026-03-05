@@ -10,9 +10,9 @@ import certifi
 import ssl
 import traceback
 
-from .api.client import APIClient
-from .core.agent import Agent
-from .core.chat_room import ChatRoom
+from api.client import APIClient
+from core.agent import Agent
+from core.chat_room import ChatRoom
 
 
 def setup_logger(log_dir: str = None) -> None:
