@@ -3,6 +3,39 @@ import logging
 import json
 
 import service.llm_api_service as api_client
+from util.config_util import load_prompt
+
+logger = logging.getLogger(__name__)
+
+_agents: List["Agent"] = []
+
+
+def init(agents_config: list) -> None:
+    """根据配置列表创建 Agent 实例，须在首次调用 get_agents 前调用一次。
+
+    agents_config 每项须包含 name、model、prompt_file 字段。
+    每个 Agent 的 prompt 中 {participants} 占位符会被其他 Agent 名称替换。
+    """
+    global _agents
+    _agents = []
+    all_names = [c["name"] for c in agents_config]
+    for cfg in agents_config:
+        other_names = [n for n in all_names if n != cfg["name"]]
+        prompt = load_prompt(cfg["prompt_file"])
+        prompt = prompt.replace("{participants}", "、".join(other_names))
+        _agents.append(Agent(name=cfg["name"], system_prompt=prompt, model=cfg["model"]))
+    logger.info(f"已创建 {len(_agents)} 个 Agent: {all_names}")
+
+
+def get_agents() -> List["Agent"]:
+    """返回已初始化的 Agent 列表。"""
+    return _agents
+
+
+def close() -> None:
+    """清空 Agent 列表，程序退出前调用。"""
+    global _agents
+    _agents = []
 
 
 class Agent:

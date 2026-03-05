@@ -1,7 +1,6 @@
 import logging
-from typing import List
 
-from service.agent_service import Agent
+import service.agent_service as agent_service
 import service.chat_room_service as chat_room
 import service.agent_tool_service as agent_tools
 
@@ -13,12 +12,10 @@ class Scheduler:
 
     def __init__(
         self,
-        agents: List[Agent],
         room_name: str,
         max_turns: int,
         max_function_calls: int = 5,
     ):
-        self.agents = agents
         self.room_name = room_name
         self.max_turns = max_turns
         self.tools = agent_tools.get_tools()
@@ -26,12 +23,13 @@ class Scheduler:
 
     async def run(self) -> None:
         """运行调度循环"""
-        agent_names = [a.name for a in self.agents]
+        agents = agent_service.get_agents()
+        agent_names = [a.name for a in agents]
         logger.info(f"参与者: {agent_names}")
         logger.info(f"开始 {self.max_turns} 轮对话...")
 
         for turn in range(1, self.max_turns + 1):
-            current_agent = self.agents[(turn - 1) % len(self.agents)]
+            current_agent = agents[(turn - 1) % len(agents)]
             logger.info(f"\n--- 第 {turn} 轮 ({current_agent.name}) ---")
 
             context_messages = chat_room.get_context_messages(self.room_name)
