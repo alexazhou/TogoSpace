@@ -2,7 +2,7 @@ import pytest
 from typing import Optional, Literal
 from service.chat_room_service import ChatRoom
 from util.function_loader_util import python_type_to_json_schema, get_function_metadata
-from service.function_service import execute_function
+from service.agent_tool_service import execute_function
 from util.functions_util import get_weather, send_chat_msg
 
 

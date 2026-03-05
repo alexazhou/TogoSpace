@@ -7,6 +7,7 @@ from service.agent_service import Agent
 from service.chat_room_service import ChatRoom
 from service.scheduler_service import Scheduler
 import service.llm_api_service as api_client
+import service.agent_tool_service as agent_tools
 
 
 async def main():
@@ -42,6 +43,7 @@ async def main():
         chat_room.add_message("system", chat_room.initial_topic)
 
     api_client.init(load_api_key())
+    agent_tools.init()
     try:
         scheduler = Scheduler(
             agents=agents,
@@ -51,6 +53,7 @@ async def main():
         )
         await scheduler.run()
     finally:
+        agent_tools.close()
         await api_client.close()
 
 
