@@ -216,6 +216,8 @@ def execute_function(func_name: str, args: dict, context: dict = None) -> str:
         # 确保返回字符串
         return str(result)
 
+    except ValueError:
+        raise
     except TypeError as e:
         raise ValueError(f"Invalid arguments for function {func_name}: {e}")
     except Exception as e:
