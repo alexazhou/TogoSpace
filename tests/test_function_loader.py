@@ -1,9 +1,9 @@
 import pytest
 from typing import Optional, Literal
-from core.chat_room import ChatRoom
-import function_loader
-from function_loader import python_type_to_json_schema, get_function_metadata, execute_function
-from functions import get_weather, send_chat_msg
+from service.chat_room_service import ChatRoom
+from util.function_loader_util import python_type_to_json_schema, get_function_metadata
+from service.function_service import execute_function
+from util.functions_util import get_weather, send_chat_msg
 
 
 class TestFunctionLoader:

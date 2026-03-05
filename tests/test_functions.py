@@ -1,5 +1,5 @@
-from core.chat_room import ChatRoom
-from functions import get_weather, get_time, calculate, send_chat_msg
+from service.chat_room_service import ChatRoom
+from util.functions_util import get_weather, get_time, calculate, send_chat_msg
 
 
 class TestFunctions:
