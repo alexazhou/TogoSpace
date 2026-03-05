@@ -1,25 +1,25 @@
 import pytest
 from unittest.mock import patch
-from service.function_service import build_tools, execute_function
+from service.agent_tool_service import init, get_tools, execute_function
 from service.chat_room_service import ChatRoom
 
 
 class TestBuildTools:
     def test_build_tools_empty(self):
-        with patch("service.function_service.load_enabled_functions", return_value=[]):
-            tools = build_tools()
-        assert tools == []
+        with patch("service.agent_tool_service.load_enabled_functions", return_value=[]):
+            init()
+        assert get_tools() == []
 
     def test_build_tools_valid_function(self):
-        with patch("service.function_service.load_enabled_functions", return_value=["get_weather"]):
-            tools = build_tools()
-        assert len(tools) == 1
-        assert tools[0].function.name == "get_weather"
+        with patch("service.agent_tool_service.load_enabled_functions", return_value=["get_weather"]):
+            init()
+        assert len(get_tools()) == 1
+        assert get_tools()[0].function.name == "get_weather"
 
     def test_build_tools_unknown_function(self):
-        with patch("service.function_service.load_enabled_functions", return_value=["nonexistent_func"]):
-            tools = build_tools()
-        assert tools == []
+        with patch("service.agent_tool_service.load_enabled_functions", return_value=["nonexistent_func"]):
+            init()
+        assert get_tools() == []
 
 
 class TestExecuteFunction:

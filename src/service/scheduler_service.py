@@ -3,7 +3,7 @@ from typing import List
 
 from service.agent_service import Agent
 from service.chat_room_service import ChatRoom
-from service.function_service import build_tools, execute_function
+import service.agent_tool_service as agent_tools
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class Scheduler:
         self.agents = agents
         self.chat_room = chat_room
         self.max_turns = max_turns
-        self.tools = build_tools()
+        self.tools = agent_tools.get_tools()
         self.max_function_calls = max_function_calls
 
     async def run(self) -> None:
@@ -44,7 +44,7 @@ class Scheduler:
                 final_response, _ = await current_agent.generate_with_function_calling(
                     context_messages=context_messages,
                     tools=self.tools,
-                    function_executor=lambda name, args: execute_function(
+                    function_executor=lambda name, args: agent_tools.execute_function(
                         name, args, context=agent_context
                     ),
                     max_function_calls=self.max_function_calls

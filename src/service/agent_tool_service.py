@@ -1,15 +1,18 @@
 import logging
-from typing import List
+from typing import List, Optional
 
 from model.api_model import Tool, Function, FunctionParameter
 from util.function_loader_util import load_enabled_functions, get_function_metadata
 from util.functions_util import FUNCTION_REGISTRY
 
+_tools: List[Tool] = []
 
-def build_tools() -> List[Tool]:
-    """构建工具列表"""
+
+def init() -> None:
+    """加载启用的函数列表并构建工具，须在首次调用 get_tools 前调用一次。"""
+    global _tools
+    _tools = []
     enabled_functions = load_enabled_functions()
-    tools = []
 
     for func_name in enabled_functions:
         try:
@@ -19,33 +22,36 @@ def build_tools() -> List[Tool]:
                 continue
 
             metadata = get_function_metadata(func_name, func)
-
-            param_properties = metadata["parameters"]["properties"]
-            param_required = metadata["parameters"].get("required", [])
-
-            function_param = FunctionParameter(
-                type=metadata["parameters"]["type"],
-                properties=param_properties,
-                required=param_required
-            )
-
             tool = Tool(
                 function=Function(
                     name=metadata["name"],
                     description=metadata["description"],
-                    parameters=function_param
+                    parameters=FunctionParameter(
+                        type=metadata["parameters"]["type"],
+                        properties=metadata["parameters"]["properties"],
+                        required=metadata["parameters"].get("required", [])
+                    )
                 )
             )
-            tools.append(tool)
+            _tools.append(tool)
             logging.info(f"Loaded function: {func_name}")
 
         except Exception as e:
             logging.error(f"Error loading function {func_name}: {e}")
 
-    return tools
+
+def get_tools() -> List[Tool]:
+    """返回已初始化的工具列表。"""
+    return _tools
 
 
-def execute_function(func_name: str, args: dict, context: dict = None) -> str:
+def close() -> None:
+    """清空工具列表，程序退出前调用。"""
+    global _tools
+    _tools = []
+
+
+def execute_function(func_name: str, args: dict, context: Optional[dict] = None) -> str:
     """动态调用指定函数"""
     try:
         func = FUNCTION_REGISTRY.get(func_name)

@@ -25,7 +25,7 @@ def chat_room():
 class TestScheduler:
     @pytest.mark.asyncio
     async def test_run_calls_each_agent_in_order(self, two_agents, chat_room):
-        with patch("service.scheduler_service.build_tools", return_value=[]):
+        with patch("service.agent_tool_service.get_tools", return_value=[]):
             scheduler = Scheduler(two_agents, chat_room, max_turns=4)
             await scheduler.run()
 
@@ -36,7 +36,7 @@ class TestScheduler:
     @pytest.mark.asyncio
     async def test_run_adds_response_to_chat_room(self, chat_room):
         agent = make_agent("alice", "world")
-        with patch("service.scheduler_service.build_tools", return_value=[]):
+        with patch("service.agent_tool_service.get_tools", return_value=[]):
             scheduler = Scheduler([agent], chat_room, max_turns=1)
             await scheduler.run()
 
@@ -47,7 +47,7 @@ class TestScheduler:
     @pytest.mark.asyncio
     async def test_run_skips_empty_response(self, chat_room):
         agent = make_agent("alice", "")
-        with patch("service.scheduler_service.build_tools", return_value=[]):
+        with patch("service.agent_tool_service.get_tools", return_value=[]):
             scheduler = Scheduler([agent], chat_room, max_turns=2)
             await scheduler.run()
 
@@ -59,7 +59,7 @@ class TestScheduler:
         agent2 = make_agent("agent2")
         agent2.generate_with_function_calling = AsyncMock(side_effect=RuntimeError("boom"))
 
-        with patch("service.scheduler_service.build_tools", return_value=[]):
+        with patch("service.agent_tool_service.get_tools", return_value=[]):
             scheduler = Scheduler([agent1, agent2], chat_room, max_turns=4)
             await scheduler.run()
 
