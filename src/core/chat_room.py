@@ -42,15 +42,9 @@ class ChatRoom:
         messages = []
         for msg in recent_messages:
             if msg.sender == "system":
-                role = "system"
-                content = msg.content
+                messages.append({"role": "system", "content": msg.content})
             else:
-                role = "system"
-                content = f"[系统提醒] {msg.sender} 发来消息: {msg.content}"
-            messages.append({
-                "role": role,
-                "content": content
-            })
+                messages.append({"role": "user", "content": f"{msg.sender}: {msg.content}"})
         return messages
 
     def format_log(self) -> str:
