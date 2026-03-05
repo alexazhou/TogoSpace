@@ -16,13 +16,11 @@ class Scheduler:
         agents: List[Agent],
         chat_room: ChatRoom,
         max_turns: int,
-        api_client,
         max_function_calls: int = 5,
     ):
         self.agents = agents
         self.chat_room = chat_room
         self.max_turns = max_turns
-        self.api_client = api_client
         self.tools = build_tools()
         self.max_function_calls = max_function_calls
 
@@ -44,7 +42,6 @@ class Scheduler:
                     "agent_name": current_agent.name
                 }
                 final_response, _ = await current_agent.generate_with_function_calling(
-                    api_client=self.api_client,
                     context_messages=context_messages,
                     tools=self.tools,
                     function_executor=lambda name, args: execute_function(

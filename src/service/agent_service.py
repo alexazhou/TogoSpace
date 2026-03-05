@@ -2,6 +2,8 @@ from typing import Dict, Any, Optional, List, Tuple
 import logging
 import json
 
+import service.llm_api_service as api_client
+
 
 class Agent:
     """基础 Agent 类"""
@@ -11,14 +13,14 @@ class Agent:
         self.system_prompt = system_prompt
         self.model = model
 
-    async def generate_response(self, api_client, context_messages: list) -> str:
+    async def generate_response(self, context_messages: list) -> str:
         """生成回复"""
         messages = [
             {"role": "system", "content": self.system_prompt},
             *context_messages
         ]
 
-        response = await api_client.call_chat_completion(
+        response = await api_client.send_request(
             model=self.model,
             messages=messages
         )
@@ -27,7 +29,6 @@ class Agent:
 
     async def generate_with_function_calling(
         self,
-        api_client,
         context_messages: List[dict],
         tools: Optional[List[Dict[str, Any]]] = None,
         function_executor: callable = None,
@@ -66,7 +67,7 @@ class Agent:
 
         while function_call_count < max_function_calls:
             # 调用 API
-            response = await api_client.call_chat_completion(
+            response = await api_client.send_request(
                 model=self.model,
                 messages=messages,
                 tools=tools
