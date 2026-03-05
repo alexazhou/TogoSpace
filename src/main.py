@@ -6,7 +6,7 @@ from util.config_util import setup_logger, load_config, load_prompt, load_api_ke
 from service.agent_service import Agent
 from service.chat_room_service import ChatRoom
 from service.scheduler_service import Scheduler
-from service.api_client_service import APIClient
+import service.llm_api_service as api_client
 
 
 async def main():
@@ -41,13 +41,12 @@ async def main():
     if chat_room.initial_topic:
         chat_room.add_message("system", chat_room.initial_topic)
 
-    api_client = APIClient(load_api_key())
+    api_client.init(load_api_key())
     try:
         scheduler = Scheduler(
             agents=agents,
             chat_room=chat_room,
             max_turns=config.get("max_turns", 6),
-            api_client=api_client,
             max_function_calls=config.get("max_function_calls", 5),
         )
         await scheduler.run()
