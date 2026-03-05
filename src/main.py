@@ -2,169 +2,162 @@ import asyncio
 import json
 import logging
 import os
-import ssl
+import sys
+from datetime import datetime
 
 import aiohttp
 import certifi
-from model import (
-    ChatCompletionRequest,
-    ChatCompletionResponse,
-    ErrorResponse,
-    Message,
-    Tool
-)
-from function_loader import build_tools, execute_function
+import ssl
+import traceback
 
-logging.basicConfig(
-    format="%(asctime)s.%(msecs)03d - %(levelname)s - %(message)s",
-    level=logging.INFO,
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
+from api.client import APIClient
+from core.agent import Agent
+from core.chat_room import ChatRoom
 
 
-# ========== 配置加载 ==========
+def setup_logger(log_dir: str = None) -> None:
+    """
+    设置日志系统，输出到控制台和文件
+
+    Args:
+        log_dir: 日志目录路径，如果为 None 则使用项目根目录下的 logs 文件夹
+    """
+    # 确定日志目录
+    if log_dir is None:
+        # 获取项目根目录（src 目录的上一级）
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        log_dir = os.path.join(project_root, "logs")
+
+    # 确保日志目录存在
+    os.makedirs(log_dir, exist_ok=True)
+
+    # 创建带时间戳的日志文件
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    log_file = os.path.join(log_dir, f"v1_chat_{timestamp}.log")
+
+    # 日志格式（包含模块名）
+    log_format = "%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s"
+    date_format = "%Y-%m-%d %H:%M:%S"
+
+    # 配置 root logger，这样所有子 logger 都会继承
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # 清除现有的 handlers
+    root_logger.handlers.clear()
+
+    # 文件处理器
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+
+    # 控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+
+    # 添加 handlers 到 root logger
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+
 
 def load_config() -> dict:
-    with open("../config.json", "r", encoding="utf-8") as f:
+    """加载配置"""
+    config_path = os.path.join(os.path.dirname(__file__), "../config/agents_v1.json")
+    with open(config_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_api_key() -> str:
+    """加载 API Key"""
+    config_path = os.path.join(os.path.dirname(__file__), "../config.json")
+    with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
-    return config["anthropic"]
+        return config["anthropic"]["api_key"]
 
 
-def load_system_prompt() -> str:
-    with open("../resource/bk/system.md", "r", encoding="utf-8") as f:
+def load_prompt(file_path: str) -> str:
+    """加载提示词"""
+    full_path = os.path.join(os.path.dirname(__file__), "../", file_path)
+    with open(full_path, "r", encoding="utf-8") as f:
         return f.read().strip()
 
-
-def load_user_message() -> str:
-    with open("../resource/bk/message.md", "r", encoding="utf-8") as f:
-        return f.read().strip()
-
-
-# ========== API 调用 ==========
-
-async def call_chat_completion(request: ChatCompletionRequest, api_key: str, session: aiohttp.ClientSession, debug: bool = False) -> ChatCompletionResponse:
-    """异步调用 DashScope Chat Completion API"""
-    url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
-    payload = request.model_dump(exclude_none=True)
-
-    if debug:
-        logging.info("=== 请求 payload ===")
-        logging.info(json.dumps(payload, indent=2, ensure_ascii=False))
-
-    async with session.post(url, headers=headers, json=payload) as response:
-        response_data = await response.json()
-
-    if debug:
-        logging.info("=== API 响应数据 ===")
-        logging.info(json.dumps(response_data, indent=2, ensure_ascii=False))
-
-    if response.status == 200:
-        return ChatCompletionResponse.model_validate(response_data)
-    else:
-        error = ErrorResponse.model_validate(response_data)
-        raise RuntimeError(f"API 调用失败: {error.code} - {error.message}")
-
-
-# ========== 主程序 ==========
 
 async def main():
     # 切换到脚本所在目录
     script_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(script_dir)
+
+    # 设置日志
+    setup_logger()
+    logger = logging.getLogger(__name__)
+
+    # 加载配置
     config = load_config()
-    system_prompt = load_system_prompt()
-    user_message = load_user_message()
+    api_key = load_api_key()
 
-    # 动态加载工具
-    tools = build_tools()
+    # 创建聊天室
+    chat_room = ChatRoom(
+        name=config["chat_room"]["name"],
+        initial_topic=config["chat_room"]["initial_topic"]
+    )
 
-    # 初始化消息历史
-    messages = [
-        Message(role="system", content=system_prompt),
-        Message(role="user", content=user_message)
-    ]
+    # 创建 API 客户端 session
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    connector = aiohttp.TCPConnector(ssl=ssl_context)
 
-    try:
-        # 创建 SSL 上下文，使用 certifi 的证书
-        ssl_context = ssl.create_default_context(cafile=certifi.where())
-        connector = aiohttp.TCPConnector(ssl=ssl_context)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        # 创建 API 客户端
+        api_client = APIClient(api_key=api_key, session=session)
 
-        # 创建 aiohttp session
-        async with aiohttp.ClientSession(connector=connector) as session:
-            # 持续对话，直到 task_done 被调用
-            while True:
-                # 构建请求对象
-                request = ChatCompletionRequest(
-                    model=config.get("model", "gml-4.7"),
-                    messages=messages,
-                    tools=tools,
-                    max_tokens=1024
-                )
+        # 创建 Agents
+        agents = []
+        for agent_config in config["agents"]:
+            prompt = load_prompt(agent_config["prompt_file"])
+            agent = Agent(
+                name=agent_config["name"],
+                system_prompt=prompt,
+                model=agent_config["model"]
+            )
+            agents.append(agent)
 
-                # 异步调用 API
-                response = await call_chat_completion(request, config["api_key"], session, debug=False)
-                assistant_message = response.choices[0].message
-                logging.info(f"Finish Reason: {response.choices[0].finish_reason}")
+        logger.info(f"已创建 {len(agents)} 个 Agent: {[a.name for a in agents]}")
 
-                # 输出思考过程（如果有）
-                if assistant_message.reasoning_content:
-                    logging.info(f"--- 思考过程 ---")
-                    logging.info(f"{assistant_message.reasoning_content}")
-                    logging.info(f"--- 思考结束 ---")
+        # 添加初始话题
+        if chat_room.initial_topic:
+            chat_room.add_message("system", chat_room.initial_topic)
+            logger.info(f"初始话题: {chat_room.initial_topic}")
 
-                # 输出文本响应（如果有）
-                if assistant_message.content:
-                    logging.info(f"--- 文本响应 ---")
-                    logging.info(f"{assistant_message.content}")
-                    logging.info(f"--- 响应结束 ---")
+        # 轮流对话
+        max_turns = config.get("max_turns", 5)
+        logger.info(f"开始 {max_turns} 轮对话...")
 
-                # 检查是否有 tool_calls
-                if assistant_message.tool_calls:
-                    # 添加 assistant 消息到历史
-                    messages.append(Message(role="assistant", content=assistant_message.content, tool_calls=assistant_message.tool_calls))
+        for turn in range(1, max_turns + 1):
+            logger.info(f"\n--- 第 {turn} 轮 ---")
 
-                    # 处理每个工具调用
-                    for tool_call in assistant_message.tool_calls:
-                        logging.info(f"Tool ID: {tool_call.id}")
-                        logging.info(f"Function: {tool_call.function['name']}")
-                        logging.info(f"Arguments: {tool_call.function['arguments']}")
+            for agent in agents:
+                # 获取上下文
+                context = chat_room.get_context()
+                logger.info(f"[{agent.name}] 上下文长度: {len(context)}")
 
-                        # 检查是否是 task_done
-                        if tool_call.function['name'] == 'task_done':
-                            logging.info("检测到 task_done，结束对话")
-                            return
+                # 生成回复
+                try:
+                    response = await agent.generate_response(
+                        api_client=api_client,
+                        context=context
+                    )
 
-                        # 解析参数并调用函数
-                        args = json.loads(tool_call.function['arguments'])
-                        result = execute_function(tool_call.function['name'], args)
-                        logging.info(f"函数执行结果: {result}")
+                    # 添加消息
+                    chat_room.add_message(agent.name, response)
 
-                        # 添加 tool 响应到历史
-                        messages.append(Message(role="tool", content=result, tool_call_id=tool_call.id))
-                else:
-                    # 直接响应，添加到历史
-                    logging.info(f"Assistant 响应: {assistant_message.content}")
-                    messages.append(Message(role="assistant", content=assistant_message.content))
-                    # 如果没有工具调用且没有内容，说明任务完成
-                    if not assistant_message.content:
-                        logging.info("Assistant 无响应，结束对话")
-                        break
+                    logger.info(f"{agent.name}: {response}")
+                except Exception as e:
+                    logger.error(f"{agent.name} 生成回复失败: {e}")
+                    traceback.print_exc()
+                    return
 
-                logging.info(f"输入 tokens: {response.usage.input_tokens}")
-                logging.info(f"输出 tokens: {response.usage.output_tokens}")
-                logging.info(f"总 tokens: {response.usage.total_tokens}")
-                logging.info(f"请求 ID: {response.request_id}")
-
-    except RuntimeError as e:
-        logging.error(f"错误: {e}")
-    except Exception as e:
-        logging.error(f"未知错误: {type(e).__name__}: {e}")
+        # 输出完整聊天记录
+        logger.info(f"\n{chat_room.format_log()}")
 
 
 if __name__ == "__main__":
