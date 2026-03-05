@@ -2,8 +2,8 @@ import logging
 from typing import List, Optional
 
 from model.api_model import Tool, Function, FunctionParameter
-from util.function_loader_util import load_enabled_functions, get_function_metadata
-from util.functions_util import FUNCTION_REGISTRY
+from util.tool_loader_util import load_enabled_functions, get_function_metadata
+from util.tool_util import FUNCTION_REGISTRY
 
 _tools: List[Tool] = []
 

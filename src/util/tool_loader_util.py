@@ -6,7 +6,7 @@ from typing import Any, Dict, List, get_type_hints, get_origin, get_args, Litera
 from types import UnionType
 from typing import Union
 
-from util.functions_util import FUNCTION_REGISTRY
+from util.tool_util import FUNCTION_REGISTRY
 
 _FUNCTION_LIST_PATH = os.path.join(os.path.dirname(__file__), "../../resource/bk/function_list.json")
 
