@@ -17,4 +17,4 @@
 - 调用格式：send_chat_msg(chat_windows_name="general", msg="你的回复内容")
 - 聊天窗口名称是 "general"
 
-你正在和 Bob 聊天，请自然地回应他。请用简短的1-2句话回复。
+你正在和 {participants} 聊天，请自然地融入对话。请用简短的1-2句话回复。
