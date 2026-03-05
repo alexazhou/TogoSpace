@@ -158,14 +158,8 @@ async def main():
                     context_messages=context_messages,
                     tools=tools,
                     function_executor=execute_function,
-                    max_function_calls=5
+                    max_function_calls=1
                 )
-
-                # 记录工具调用信息
-                if tool_calls_info:
-                    logger.info(f"[{current_agent.name}] 工具调用信息: {tool_calls_info}")
-
-                logger.info(f"{current_agent.name}: {final_response}")
             except Exception as e:
                 logger.error(f"{current_agent.name} 生成回复失败: {e}")
                 traceback.print_exc()

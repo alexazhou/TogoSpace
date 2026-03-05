@@ -1,11 +1,5 @@
 {
   "enabled_functions": [
-    "get_weather",
-    "get_time",
-    "calculate",
-    "get_agent_list",
-    "create_chat",
-    "send_chat_msg",
-    "task_done"
+    "send_chat_msg"
   ]
 }
