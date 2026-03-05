@@ -1,5 +1,6 @@
 from typing import Dict, Any, Optional, List, Tuple
 import logging
+import json
 
 
 class Agent:
@@ -92,6 +93,13 @@ class Agent:
                 function_name = tool_call.function.get("name")
                 function_args = tool_call.function.get("arguments", {})
                 tool_call_id = tool_call.id
+
+                # 解析函数参数（可能是 JSON 字符串或字典）
+                if isinstance(function_args, str):
+                    try:
+                        function_args = json.loads(function_args)
+                    except json.JSONDecodeError:
+                        function_args = {}
 
                 logger.info(f"[{self.name}] 调用函数: {function_name}, 参数: {function_args}")
 
