@@ -13,6 +13,8 @@ import traceback
 from api.client import APIClient
 from core.agent import Agent
 from core.chat_room import ChatRoom
+from function_loader import build_tools, execute_function
+from functions import set_chat_context
 
 
 def setup_logger(log_dir: str = None) -> None:
@@ -123,6 +125,10 @@ async def main():
 
         logger.info(f"已创建 {len(agents)} 个 Agent: {[a.name for a in agents]}")
 
+        # 构建 tools 列表
+        tools = build_tools()
+        logger.info(f"已加载 {len(tools)} 个工具")
+
         # 添加初始话题
         if chat_room.initial_topic:
             chat_room.add_message("system", chat_room.initial_topic)
@@ -142,17 +148,24 @@ async def main():
             context_messages = chat_room.get_context_messages()
             logger.info(f"[{current_agent.name}] 上下文消息数: {len(context_messages)}")
 
+            # 设置函数调用上下文
+            set_chat_context(chat_room, current_agent.name)
+
             # 生成回复
             try:
-                response = await current_agent.generate_response(
+                final_response, tool_calls_info = await current_agent.generate_with_function_calling(
                     api_client=api_client,
-                    context_messages=context_messages
+                    context_messages=context_messages,
+                    tools=tools,
+                    function_executor=execute_function,
+                    max_function_calls=5
                 )
 
-                # 添加消息
-                chat_room.add_message(current_agent.name, response)
+                # 记录工具调用信息
+                if tool_calls_info:
+                    logger.info(f"[{current_agent.name}] 工具调用信息: {tool_calls_info}")
 
-                logger.info(f"{current_agent.name}: {response}")
+                logger.info(f"{current_agent.name}: {final_response}")
             except Exception as e:
                 logger.error(f"{current_agent.name} 生成回复失败: {e}")
                 traceback.print_exc()
