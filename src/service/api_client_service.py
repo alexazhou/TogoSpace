@@ -5,7 +5,7 @@ from typing import Optional, List
 import aiohttp
 import certifi
 
-from model import (
+from model.api_model import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ErrorResponse

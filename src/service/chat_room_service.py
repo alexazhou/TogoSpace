@@ -1,14 +1,7 @@
-from dataclasses import dataclass
 from typing import List
 from datetime import datetime
 
-
-@dataclass
-class Message:
-    """消息数据类"""
-    sender: str
-    content: str
-    timestamp: str
+from model.chat_model import ChatMessage
 
 
 class ChatRoom:
@@ -16,12 +9,12 @@ class ChatRoom:
 
     def __init__(self, name: str, initial_topic: str = ""):
         self.name = name
-        self.messages: List[Message] = []
+        self.messages: List[ChatMessage] = []
         self.initial_topic = initial_topic
 
     def add_message(self, sender: str, content: str) -> None:
         """添加消息"""
-        message = Message(
+        message = ChatMessage(
             sender=sender,
             content=content,
             timestamp=datetime.now().isoformat()

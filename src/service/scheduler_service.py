@@ -1,9 +1,9 @@
 import logging
 from typing import List
 
-from core.agent import Agent
-from core.chat_room import ChatRoom
-from tools.function_loader import build_tools, execute_function
+from service.agent_service import Agent
+from service.chat_room_service import ChatRoom
+from service.function_service import build_tools, execute_function
 
 logger = logging.getLogger(__name__)
 
