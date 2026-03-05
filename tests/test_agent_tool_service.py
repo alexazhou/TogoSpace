@@ -6,20 +6,16 @@ from service.chat_room_service import ChatRoom
 
 class TestBuildTools:
     def test_build_tools_empty(self):
-        with patch("service.agent_tool_service.load_enabled_functions", return_value=[]):
+        with patch("service.agent_tool_service.FUNCTION_REGISTRY", {}):
             init()
         assert get_tools() == []
 
     def test_build_tools_valid_function(self):
-        with patch("service.agent_tool_service.load_enabled_functions", return_value=["get_weather"]):
+        from util.tool_util import get_weather
+        with patch("service.agent_tool_service.FUNCTION_REGISTRY", {"get_weather": get_weather}):
             init()
         assert len(get_tools()) == 1
         assert get_tools()[0].function.name == "get_weather"
-
-    def test_build_tools_unknown_function(self):
-        with patch("service.agent_tool_service.load_enabled_functions", return_value=["nonexistent_func"]):
-            init()
-        assert get_tools() == []
 
 
 class TestExecuteFunction:

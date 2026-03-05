@@ -1,28 +1,7 @@
 import inspect
-import json
-import logging
-import os
 from typing import Any, Dict, List, get_type_hints, get_origin, get_args, Literal
 from types import UnionType
 from typing import Union
-
-from util.tool_util import FUNCTION_REGISTRY
-
-_FUNCTION_LIST_PATH = os.path.join(os.path.dirname(__file__), "../../resource/bk/function_list.json")
-
-
-def load_enabled_functions() -> List[str]:
-    """读取 function_list.json，返回启用的函数名列表"""
-    try:
-        with open(_FUNCTION_LIST_PATH, "r", encoding="utf-8") as f:
-            config = json.load(f)
-        return config.get("enabled_functions", [])
-    except FileNotFoundError:
-        logging.warning("function_list.json not found, no functions enabled")
-        return []
-    except json.JSONDecodeError as e:
-        logging.error(f"Error parsing function_list.json: {e}")
-        return []
 
 
 def python_type_to_json_schema(python_type: Any) -> Dict[str, Any]:
