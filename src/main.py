@@ -12,7 +12,7 @@ import service.agent_tool_service as agent_tools
 
 
 def _setup_logger() -> None:
-    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../logs")
+    log_dir = os.path.join(os.getcwd(), "../logs")
     os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
