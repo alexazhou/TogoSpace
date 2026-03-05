@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from service.agent_service import Agent
-from service.scheduler_service import Scheduler
+import service.scheduler_service as scheduler
 import service.agent_service as agent_service
 import service.chat_room_service as chat_room
 
@@ -20,6 +20,7 @@ ROOM = "test_room"
 def setup_services():
     chat_room.init(ROOM)
     yield
+    scheduler.stop()
     agent_service.close()
     chat_room.close_all()
 
@@ -30,7 +31,7 @@ class TestScheduler:
         agents = [make_agent("agent1", "reply1"), make_agent("agent2", "reply2")]
         with patch("service.agent_service._agents", agents), \
              patch("service.agent_tool_service.get_tools", return_value=[]):
-            scheduler = Scheduler(room_name=ROOM, max_turns=4)
+            scheduler.init(room_name=ROOM, max_turns=4)
             await scheduler.run()
 
         # turn 1,3 → agent1；turn 2,4 → agent2
@@ -42,7 +43,7 @@ class TestScheduler:
         agents = [make_agent("alice", "world")]
         with patch("service.agent_service._agents", agents), \
              patch("service.agent_tool_service.get_tools", return_value=[]):
-            scheduler = Scheduler(room_name=ROOM, max_turns=1)
+            scheduler.init(room_name=ROOM, max_turns=1)
             await scheduler.run()
 
         room = chat_room.get_room(ROOM)
@@ -55,7 +56,7 @@ class TestScheduler:
         agents = [make_agent("alice", "")]
         with patch("service.agent_service._agents", agents), \
              patch("service.agent_tool_service.get_tools", return_value=[]):
-            scheduler = Scheduler(room_name=ROOM, max_turns=2)
+            scheduler.init(room_name=ROOM, max_turns=2)
             await scheduler.run()
 
         assert len(chat_room.get_room(ROOM).messages) == 0
@@ -68,7 +69,7 @@ class TestScheduler:
 
         with patch("service.agent_service._agents", [agent1, agent2]), \
              patch("service.agent_tool_service.get_tools", return_value=[]):
-            scheduler = Scheduler(room_name=ROOM, max_turns=4)
+            scheduler.init(room_name=ROOM, max_turns=4)
             await scheduler.run()
 
         # 第 1 轮成功（agent1），第 2 轮异常（agent2）后退出
