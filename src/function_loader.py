@@ -105,8 +105,8 @@ def get_function_metadata(func_name: str, func) -> Dict[str, Any]:
     required = []
 
     for param_name, param in sig.parameters.items():
-        # 跳过 self 参数（如果是方法）
-        if param_name == "self":
+        # 跳过 self 参数和私有注入参数（以 _ 开头）
+        if param_name == "self" or param_name.startswith("_"):
             continue
 
         # 获取参数类型
@@ -186,12 +186,13 @@ def build_tools() -> List[Tool]:
     return tools
 
 
-def execute_function(func_name: str, args: dict) -> str:
+def execute_function(func_name: str, args: dict, context: dict = None) -> str:
     """动态调用指定函数
 
     Args:
         func_name: 函数名称
         args: 参数字典
+        context: 可选的上下文字典，包含 chat_room 和 agent_name
 
     Returns:
         函数执行结果的字符串表示
@@ -204,6 +205,10 @@ def execute_function(func_name: str, args: dict) -> str:
 
         if not callable(func):
             raise ValueError(f"{func_name} is not callable")
+
+        # 为 send_chat_msg 注入上下文参数
+        if func_name == "send_chat_msg" and context:
+            args = {**args, "_chat_room": context.get("chat_room"), "_agent_name": context.get("agent_name")}
 
         # 调用函数
         result = func(**args)

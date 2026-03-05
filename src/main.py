@@ -14,7 +14,6 @@ from api.client import APIClient
 from core.agent import Agent
 from core.chat_room import ChatRoom
 from function_loader import build_tools, execute_function
-from functions import set_chat_context
 
 
 def setup_logger(log_dir: str = None) -> None:
@@ -148,16 +147,14 @@ async def main():
             context_messages = chat_room.get_context_messages()
             logger.info(f"[{current_agent.name}] 上下文消息数: {len(context_messages)}")
 
-            # 设置函数调用上下文
-            set_chat_context(chat_room, current_agent.name)
-
             # 生成回复
             try:
+                agent_context = {"chat_room": chat_room, "agent_name": current_agent.name}
                 final_response, tool_calls_info = await current_agent.generate_with_function_calling(
                     api_client=api_client,
                     context_messages=context_messages,
                     tools=tools,
-                    function_executor=execute_function,
+                    function_executor=lambda name, args: execute_function(name, args, context=agent_context),
                     max_function_calls=1
                 )
             except Exception as e:
