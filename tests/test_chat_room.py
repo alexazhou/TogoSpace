@@ -1,4 +1,4 @@
-from core.chat_room import ChatRoom
+from service.chat_room_service import ChatRoom
 
 
 class TestChatRoom:
