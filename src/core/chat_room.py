@@ -43,11 +43,13 @@ class ChatRoom:
         for msg in recent_messages:
             if msg.sender == "system":
                 role = "system"
+                content = msg.content
             else:
-                role = "user"
+                role = "system"
+                content = f"[系统提醒] {msg.sender} 发来消息: {msg.content}"
             messages.append({
                 "role": role,
-                "content": f"{msg.sender}: {msg.content}"
+                "content": content
             })
         return messages
 

@@ -2,6 +2,7 @@ import aiohttp
 import asyncio
 import logging
 import ssl
+from typing import Optional
 
 import certifi
 
@@ -39,7 +40,8 @@ class APIClient:
         model: str,
         messages: list,
         max_tokens: int = 1024,
-        temperature: float = 0.7
+        temperature: float = 0.7,
+        tools: Optional[list] = None
     ) -> ChatCompletionResponse:
         """调用 Chat Completion API"""
         url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
@@ -54,7 +56,8 @@ class APIClient:
             model=model,
             messages=messages,
             max_tokens=max_tokens,
-            temperature=temperature
+            temperature=temperature,
+            tools=tools
         )
 
         payload = request.model_dump(exclude_none=True)

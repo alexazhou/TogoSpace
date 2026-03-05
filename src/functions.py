@@ -2,6 +2,10 @@ from typing import Literal, Optional, List
 import datetime
 import logging
 
+# 全局变量：当前聊天室上下文
+_current_chat_room = None
+_current_agent_name = None
+
 
 def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius") -> str:
     """获取指定地点的天气信息
@@ -62,14 +66,35 @@ def create_chat(agent_name: str) -> str:
     return f"to_{agent_name}_room"
 
 
-def send_chat_msg(chat_windows_name:str, msg:str) -> None:
+def set_chat_context(chat_room, agent_name: str) -> None:
+    """设置函数执行的上下文
+
+    Args:
+        chat_room: 聊天室对象
+        agent_name: 当前 agent 名称
+    """
+    global _current_chat_room, _current_agent_name
+    _current_chat_room = chat_room
+    _current_agent_name = agent_name
+    logging.info(f"set_chat_context: 设置上下文 - agent={agent_name}")
+
+
+def send_chat_msg(chat_windows_name: str, msg: str) -> None:
     """向聊天窗口发送消息
 
     Args:
         chat_windows_name: 要发送消息的窗口名称
         msg: 要发送的消息
     """
-    logging.info(f"send_chat_msg: 向 {chat_windows_name} 发送消息")
+    global _current_chat_room, _current_agent_name
+    logging.info(f"send_chat_msg: 向 {chat_windows_name} 发送消息: {msg}")
+
+    # 通过聊天室添加消息
+    if _current_chat_room is not None:
+        _current_chat_room.add_message(_current_agent_name, msg)
+    else:
+        logging.warning("send_chat_msg: 聊天室上下文未设置")
+
     return
 
 def task_done() -> None:
