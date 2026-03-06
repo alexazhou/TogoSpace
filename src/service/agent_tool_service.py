@@ -3,6 +3,7 @@ import logging
 from typing import List, Optional
 
 from model.api_model import Tool, Function, FunctionParameter
+from model.chat_context import ChatContext
 from util.tool_loader_util import get_function_metadata
 from util.tool_util import FUNCTION_REGISTRY
 
@@ -46,7 +47,7 @@ def close() -> None:
     _tools = []
 
 
-def execute_function(func_name: str, args: dict, context: Optional[dict] = None) -> str:
+def execute_function(func_name: str, args: dict, context: Optional[ChatContext] = None) -> str:
     """动态调用指定函数"""
     try:
         func = FUNCTION_REGISTRY.get(func_name)
@@ -57,13 +58,8 @@ def execute_function(func_name: str, args: dict, context: Optional[dict] = None)
             raise ValueError(f"{func_name} is not callable")
 
         if getattr(func, "needs_context", False) and context:
-            ctx_map = {
-                "_chat_room": context.get("chat_room"),
-                "_agent_name": context.get("agent_name"),
-                "_get_room": context.get("get_room"),
-            }
-            sig_params = inspect.signature(func).parameters
-            args = {**args, **{k: v for k, v in ctx_map.items() if k in sig_params}}
+            if "_context" in inspect.signature(func).parameters:
+                args = {**args, "_context": context}
 
         result = func(**args)
         return str(result)
