@@ -16,7 +16,7 @@ def _setup_logger() -> None:
     os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    log_file = os.path.join(log_dir, f"v2_chat_{timestamp}.log")
+    log_file = os.path.join(log_dir, f"v3_chat_{timestamp}.log")
 
     log_format = "%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s"
     root_logger = logging.getLogger()
@@ -38,21 +38,23 @@ async def main():
 
     config = load_config()
 
-    room_name = config["chat_room"]["name"]
-    chat_room.init(name=room_name, initial_topic=config["chat_room"]["initial_topic"])
-    agent_service.init(config["agents"])
+    rooms_config = config["chat_rooms"]
+    for r in rooms_config:
+        chat_room.init(name=r["name"], initial_topic=r["initial_topic"])
+
+    agent_service.init(config["agents"], rooms_config)
     api_client.init(load_api_key())
     agent_tools.init()
     scheduler.init(
-        room_name=room_name,
-        max_turns=config.get("max_turns", 6),
+        rooms_config=rooms_config,
         max_function_calls=config.get("max_function_calls", 5),
     )
 
-    # 添加初始话题
-    initial_topic = chat_room.get_room(room_name).initial_topic
-    if initial_topic:
-        chat_room.add_message(room_name, "system", initial_topic)
+    # 为每个房间添加初始话题
+    for r in rooms_config:
+        initial_topic = chat_room.get_room(r["name"]).initial_topic
+        if initial_topic:
+            chat_room.add_message(r["name"], "system", initial_topic)
 
     try:
         await scheduler.run()

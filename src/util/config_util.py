@@ -3,7 +3,7 @@ import os
 
 
 def load_config() -> dict:
-    config_path = os.path.join(os.path.dirname(__file__), "../../config/agents_v2.json")
+    config_path = os.path.join(os.path.dirname(__file__), "../../config/agents_v3.json")
     with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)
 

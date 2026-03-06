@@ -1,0 +1,12 @@
+{
+  "agents": [
+    {"name": "alice",   "prompt_file": "resource/prompts/alice_system.md",   "model": "qwen-flash"},
+    {"name": "bob",     "prompt_file": "resource/prompts/bob_system.md",     "model": "qwen-flash"},
+    {"name": "charlie", "prompt_file": "resource/prompts/charlie_system.md", "model": "qwen-flash"}
+  ],
+  "chat_rooms": [
+    {"name": "general", "agents": ["alice", "bob", "charlie"], "initial_topic": "大家好，今天我们来聊聊生活和工作吧！", "max_turns": 6},
+    {"name": "tech",    "agents": ["bob", "charlie"],          "initial_topic": "今天我们聊聊技术话题吧！",              "max_turns": 4}
+  ],
+  "max_function_calls": 5
+}
