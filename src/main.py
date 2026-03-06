@@ -3,7 +3,7 @@ import logging
 import os
 from datetime import datetime
 
-from util.config_util import load_config, load_api_key
+from util.config_util import load_config, load_llm_service_config
 import service.scheduler_service as scheduler
 import service.agent_service as agent_service
 import service.chat_room_service as chat_room
@@ -43,7 +43,8 @@ async def main():
         chat_room.init(name=r["name"], initial_topic=r["initial_topic"])
 
     agent_service.init(config["agents"], rooms_config)
-    api_client.init(load_api_key())
+    llm_cfg = load_llm_service_config()
+    api_client.init(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     agent_tools.init()
     scheduler.init(
         rooms_config=rooms_config,
