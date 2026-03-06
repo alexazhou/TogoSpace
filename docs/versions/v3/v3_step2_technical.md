@@ -138,6 +138,73 @@ agent_team/
 
 ---
 
+## 技术要点
+
+### 调度逻辑
+
+**房间级调度（并发）**：`run()` 通过 `asyncio.gather` 为每个房间启动一个独立的 `_run_room` 协程，所有房间同时推进，互不等待。
+
+```
+run()
+ ├── _run_room("general", max_turns=6)  ─┐
+ └── _run_room("tech",    max_turns=4)  ─┴─ asyncio.gather 并发执行
+```
+
+**房间内 Agent 调度（顺序轮询）**：`_run_room` 内部用 `(turn - 1) % len(agents)` 循环选取当前发言的 Agent，每轮只有一个 Agent 发言，等其回复写回房间后再进入下一轮。
+
+```
+_run_room("general", agents=[alice, bob, charlie], max_turns=6)
+
+第1轮 → alice  发言 → 写入 general
+第2轮 → bob    发言 → 写入 general
+第3轮 → charlie发言 → 写入 general
+第4轮 → alice  发言 → 写入 general
+...
+```
+
+**两个房间并发时的实际执行顺序示例**：
+
+```
+general: alice  发言（等待 LLM）
+tech:    bob    发言（等待 LLM）  ← general 等待期间，tech 同步推进
+general: alice  回复写入
+tech:    bob    回复写入
+general: bob    发言（等待 LLM）
+tech:    charlie发言（等待 LLM）
+...
+```
+
+各房间的 LLM 调用均为 `await`，IO 等待期间 asyncio 事件循环会切换到其他房间的协程继续执行，实现交替推进。
+
+### Agent 无状态与消息历史管理
+
+`Agent` 类本身不持有任何消息历史，`name`、`system_prompt`、`model` 是其全部状态。消息历史统一存储在 `ChatRoom.messages` 中。
+
+每轮发言的流程：
+1. `scheduler` 调用 `chat_room.get_context_messages(room_name)` 从房间取出历史
+2. 将历史作为 `context_messages` 参数注入 `Agent.generate_with_function_calling`
+3. Agent 生成回复后，`scheduler` 调用 `chat_room.add_message` 将回复写回房间
+
+这一设计是 V3 同名 Agent 能在多个房间独立运行的基础——Agent 自身不持有历史，上下文完全由房间提供和隔离，不同房间的 Agent 实例之间不存在任何共享状态。
+
+### 同名 Agent 的实例隔离与上下文隔离
+
+同名 Agent（如 bob）在多个房间中是完全独立的对象实例，隔离体现在两个层面：
+
+**实例隔离**：`agent_service.init` 为每个房间独立调用 `Agent(...)` 构造，bob 在 general 房间和 tech 房间分别持有一个实例。两个实例的 `system_prompt` 不同——`{participants}` 占位符只替换为该房间内的其他成员（general 中为 alice 和 charlie，tech 中只有 charlie）。
+
+**上下文隔离**：`_run_room` 每轮通过 `chat_room.get_context_messages(room_name)` 获取消息历史，该接口只返回指定房间的消息。bob 在 tech 房间发言时，拿到的上下文仅包含 tech 房间的历史，完全感知不到 general 房间发生的对话。
+
+### 配置结构调整
+
+V3 将 V2 的单 `chat_room` 对象改为 `chat_rooms` 数组，`max_turns` 下沉到每个房间配置，允许各房间独立设置对话轮次。全局 `max_function_calls` 保持在顶层。
+
+### 复用 V2 核心组件
+
+`chat_room_service` 内部已使用字典 `_rooms` 存储多个房间实例，V3 无需任何修改即可支持多房间场景。`llm_api_service`、`agent_tool_service` 和所有 model/util 模块同样直接复用。
+
+---
+
 ## 接口定义
 
 ### service/agent_service.py（修改）
@@ -242,26 +309,3 @@ def load_config() -> dict:
 | `util/tool_loader_util.py` | 工具元数据加载，不变 |
 | `util/tool_util.py` | 工具函数注册表，不变 |
 
----
-
-## 技术要点
-
-### 多房间并发
-
-`scheduler_service.run()` 使用 `asyncio.gather` 将每个房间的 `_run_room` 协程并发执行。各房间的 LLM API 调用均为异步，IO 等待期间其他房间可继续推进。
-
-### 同名 Agent 的实例隔离与上下文隔离
-
-同名 Agent（如 bob）在多个房间中是完全独立的对象实例，隔离体现在两个层面：
-
-**实例隔离**：`agent_service.init` 为每个房间独立调用 `Agent(...)` 构造，bob 在 general 房间和 tech 房间分别持有一个实例。两个实例的 `system_prompt` 不同——`{participants}` 占位符只替换为该房间内的其他成员（general 中为 alice 和 charlie，tech 中只有 charlie）。
-
-**上下文隔离**：`_run_room` 每轮通过 `chat_room.get_context_messages(room_name)` 获取消息历史，该接口只返回指定房间的消息。bob 在 tech 房间发言时，拿到的上下文仅包含 tech 房间的历史，完全感知不到 general 房间发生的对话。
-
-### 配置结构调整
-
-V3 将 V2 的单 `chat_room` 对象改为 `chat_rooms` 数组，`max_turns` 下沉到每个房间配置，允许各房间独立设置对话轮次。全局 `max_function_calls` 保持在顶层。
-
-### 复用 V2 核心组件
-
-`chat_room_service` 内部已使用字典 `_rooms` 存储多个房间实例，V3 无需任何修改即可支持多房间场景。`llm_api_service`、`agent_tool_service` 和所有 model/util 模块同样直接复用。
