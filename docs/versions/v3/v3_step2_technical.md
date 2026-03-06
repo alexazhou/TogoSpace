@@ -176,6 +176,69 @@ tech:    charlie发言（等待 LLM）
 
 各房间的 LLM 调用均为 `await`，IO 等待期间 asyncio 事件循环会切换到其他房间的协程继续执行，实现交替推进。
 
+### 历史消息格式与 API 兼容性
+
+`get_context_messages` 将房间历史转换为如下格式传给 Agent：
+
+```json
+[
+  {"role": "system", "content": "大家好，今天我们来聊聊生活和工作吧！"},
+  {"role": "user",   "content": "alice: 大家好！今天天气真棒！"},
+  {"role": "user",   "content": "bob: 嗨，最近在修一个 bug。"},
+  {"role": "user",   "content": "charlie: 有趣，修 bug 和苏格拉底的自我认知有几分相似。"}
+]
+```
+
+所有历史发言（包括当前 Agent 自己之前的发言）统一使用 `role=user`，发言者名称以 `"sender: content"` 格式内嵌在 content 中。
+
+**消息构建方案**：
+
+不同 API 对消息格式的要求不同，需分别处理。当前使用 OpenAI 格式，Anthropic 格式待后续支持。
+
+**OpenAI / DashScope（当前使用）**：允许连续多条 `role=user` 消息，所有历史发言（包括当前 Agent 自己的）统一设为 `role=user`，发言者名称内嵌在 content 中。
+
+以 charlie 视角为例：
+
+```json
+[
+  {"role": "system", "content": "大家好，今天我们来聊聊生活和工作吧！"},
+  {"role": "user",   "content": "alice: 大家好！"},
+  {"role": "user",   "content": "bob: 嗨，最近在修一个 bug。"},
+  {"role": "user",   "content": "charlie: 修 bug 和苏格拉底有几分相似。"},
+  {"role": "user",   "content": "alice: 哈哈，这个比喻太妙了！"},
+  {"role": "user",   "content": "bob: 我更愿意把它比作找漏气的轮胎。"}
+]
+```
+
+**Anthropic（暂不支持）**：要求 `user` / `assistant` 严格交替，连续多条 `role=user` 会报错。需将当前 Agent 自己的历史发言设为 `role=assistant`，连续的其他人发言打包进单条 `role=user` 消息的 `content` 数组中，每人一个 text block，自然形成交替结构。
+
+以 charlie 视角为例：
+
+```json
+[
+  {
+    "role": "user",
+    "content": [
+      {"type": "text", "text": "alice: 大家好！"},
+      {"type": "text", "text": "bob: 嗨，最近在修一个 bug。"}
+    ]
+  },
+  {
+    "role": "assistant",
+    "content": "修 bug 和苏格拉底有几分相似。"
+  },
+  {
+    "role": "user",
+    "content": [
+      {"type": "text", "text": "alice: 哈哈，这个比喻太妙了！"},
+      {"type": "text", "text": "bob: 我更愿意把它比作找漏气的轮胎。"}
+    ]
+  }
+]
+```
+
+边界情况：若历史第一条消息恰好是当前 Agent 自己发的，转换后首条为 `role=assistant`，违反 Anthropic"第一条必须是 user"的要求，需在前面插入一条占位 `user` 消息处理。
+
 ### Agent 无状态与消息历史管理
 
 `Agent` 类本身不持有任何消息历史，`name`、`system_prompt`、`model` 是其全部状态。消息历史统一存储在 `ChatRoom.messages` 中。
@@ -251,44 +314,7 @@ def load_config() -> dict:
 
 ---
 
-## 模块依赖关系
-
-### 三层架构（延续 V2，无变化）
-
-```
-┌─────────────────────────────────────────────────────┐
-│                     main.py                         │
-└────────────────────┬────────────────────────────────┘
-                     │ import
-        ┌────────────▼────────────┐
-        │       service 层        │
-        ├─────────────────────────┤
-        │  scheduler_service.py   │  修改
-        │  agent_service.py       │  修改
-        │  chat_room_service.py   │  不变
-        │  llm_api_service.py     │  不变
-        │  agent_tool_service.py  │  不变
-        └────────────┬────────────┘
-                     │ import
-        ┌────────────▼────────────┐
-        │        model 层         │
-        ├─────────────────────────┤
-        │  api_model.py           │  不变
-        │  chat_model.py          │  不变
-        └────────────┬────────────┘
-                     │ import
-        ┌────────────▼────────────┐
-        │         util 层         │
-        ├─────────────────────────┤
-        │  config_util.py         │  修改（读 v3 配置）
-        │  tool_loader_util.py    │  不变
-        │  tool_util.py           │  不变
-        └─────────────────────────┘
-```
-
-### 各模块详细依赖
-
-#### 修改的模块
+## 修改的模块
 
 | 模块 | 变更 | 依赖的项目内模块 |
 |------|------|----------------|
@@ -297,15 +323,4 @@ def load_config() -> dict:
 | `service/scheduler_service.py` | `init` 接收 `rooms_config` 列表；`run` 用 `asyncio.gather` 并发；新增 `_run_room` | `service.agent_service`<br>`service.chat_room_service`<br>`service.agent_tool_service` |
 | `main.py` | 遍历 `chat_rooms` 初始化；传 `rooms_config` 给 `scheduler.init` | 同 V2，不变 |
 
-#### 不变的模块
-
-| 模块 | 说明 |
-|------|------|
-| `service/chat_room_service.py` | 已基于字典存储，天然支持多房间 |
-| `service/llm_api_service.py` | 无状态 HTTP 客户端，不涉及房间概念 |
-| `service/agent_tool_service.py` | 工具加载与执行，不涉及房间概念 |
-| `model/api_model.py` | 纯数据定义，不变 |
-| `model/chat_model.py` | 纯数据定义，不变 |
-| `util/tool_loader_util.py` | 工具元数据加载，不变 |
-| `util/tool_util.py` | 工具函数注册表，不变 |
 
