@@ -53,13 +53,14 @@ async def _run_room(room_name: str, max_turns: int) -> None:
                 chat_room=chat_room.get_room(room_name),
                 get_room=chat_room.get_room,
             )
-            final_response, _ = await current_agent.generate_with_function_calling(
+            final_response, _ = await agent_service.run(
+                agent=current_agent,
                 context_messages=context_messages,
                 tools=_tools,
                 function_executor=lambda name, args, _ctx=agent_context: agent_tools.execute_function(
                     name, args, context=_ctx
                 ),
-                max_function_calls=_max_function_calls
+                max_function_calls=_max_function_calls,
             )
             if final_response:
                 logger.info(f"[{room_name}] {current_agent.name} (思考): {final_response}")
