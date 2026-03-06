@@ -1,0 +1,267 @@
+# V3: 多 Agent 多房间聊天 - 技术文档
+
+---
+
+## 架构设计
+
+### V2 vs V3 架构对比
+
+V2 中 `scheduler_service` 持有单个房间名，只能调度一个聊天室。V3 将调度器改为支持多房间并发：`scheduler_service.run()` 为每个房间创建独立的 asyncio Task，并行推进各房间的对话轮次。`agent_service` 新增按房间维度检索 Agent 的能力，`chat_room_service` 已天然支持多房间（基于字典存储），无需修改。
+
+同名 Agent 在多个房间中**各自是独立的对象实例**，拥有独立的 `system_prompt`（参与者列表仅限本房间）。`_run_room` 每轮通过 `chat_room.get_context_messages(room_name)` 获取上下文，上下文严格限定在该房间的消息历史中，不会跨房间读取。
+
+### 核心变更点
+
+| 模块 | V2 | V3 |
+|------|----|----|
+| `config/agents_v3.json` | 单 `chat_room` 对象 | `chat_rooms` 数组，每项含 `agents` 子列表 |
+| `util/config_util.py` | 固定读取 `agents_v2.json` | 读取 `agents_v3.json` |
+| `service/agent_service.py` | 单一 Agent 列表，统一注入 `{participants}` | 按房间维度初始化，各房间独立注入参与者 |
+| `service/scheduler_service.py` | 单房间顺序轮询 | 多房间并发（`asyncio.gather`） |
+| `main.py` | 初始化单个房间 + 单个 scheduler | 初始化多个房间，scheduler 并发运行 |
+
+### 类图
+
+```
+┌──────────────────────────┐
+│       agent_service      │
+├──────────────────────────┤
+│ _agents: Dict[room, list]│  # 按房间分组的 Agent 实例
+│                          │  # 同名 Agent 在不同房间是独立对象
+├──────────────────────────┤
+│ init(rooms_config)       │
+│ get_agents(room_name)    │
+│ close()                  │
+└──────────────────────────┘
+          │ uses
+          ▼
+┌──────────────────────────┐        ┌──────────────────────────────┐
+│    chat_room_service     │        │      scheduler_service       │
+├──────────────────────────┤        ├──────────────────────────────┤
+│ _rooms: Dict[str, room]  │◄───────│ _rooms: List[RoomConfig]     │
+│ (复用 V2，无需修改)       │        │ _max_function_calls: int     │
+├──────────────────────────┤        ├──────────────────────────────┤
+│ init() / add_message()   │        │ init(rooms_config, ...)      │
+│ get_context_messages()   │        │ run()  # asyncio.gather      │
+│ format_log()             │        │ _run_room(room_name, turns)  │
+└──────────────────────────┘        │ stop()                       │
+                                    └──────────────────────────────┘
+```
+
+### 数据流
+
+```
+配置文件 → 多个房间配置 → 多组 Agent 实例 → Scheduler（并发）→ 各 ChatRoom → 日志输出
+```
+
+---
+
+## 目录结构
+
+```
+agent_team/
+├── config/
+│   ├── agents_v1.json            # V1 配置（不变）
+│   ├── agents_v2.json            # V2 配置（不变）
+│   └── agents_v3.json            # V3 配置（新增）
+├── resource/
+│   └── prompts/
+│       ├── alice_system.md       # 复用 V2
+│       ├── bob_system.md         # 复用 V2
+│       └── charlie_system.md     # 复用 V2
+├── src/
+│   ├── model/
+│   │   ├── api_model.py          # 复用 V2（不变）
+│   │   └── chat_model.py         # 复用 V2（不变）
+│   ├── service/
+│   │   ├── agent_service.py      # 修改：按房间分组初始化
+│   │   ├── agent_tool_service.py # 复用 V2（不变）
+│   │   ├── chat_room_service.py  # 复用 V2（不变）
+│   │   ├── llm_api_service.py    # 复用 V2（不变）
+│   │   └── scheduler_service.py  # 修改：支持多房间并发
+│   ├── util/
+│   │   ├── config_util.py        # 修改：读取 agents_v3.json
+│   │   ├── tool_loader_util.py   # 复用 V2（不变）
+│   │   └── tool_util.py          # 复用 V2（不变）
+│   └── main.py                   # 修改：初始化多个房间
+└── logs/
+    └── v3_chat_<timestamp>.log   # V3 日志文件
+```
+
+---
+
+## 配置文件
+
+### config/agents_v3.json
+
+```json
+{
+  "agents": [
+    {
+      "name": "alice",
+      "prompt_file": "resource/prompts/alice_system.md",
+      "model": "qwen-flash"
+    },
+    {
+      "name": "bob",
+      "prompt_file": "resource/prompts/bob_system.md",
+      "model": "qwen-flash"
+    },
+    {
+      "name": "charlie",
+      "prompt_file": "resource/prompts/charlie_system.md",
+      "model": "qwen-flash"
+    }
+  ],
+  "chat_rooms": [
+    {
+      "name": "general",
+      "agents": ["alice", "bob", "charlie"],
+      "initial_topic": "大家好，今天我们来聊聊生活和工作吧！",
+      "max_turns": 6
+    },
+    {
+      "name": "tech",
+      "agents": ["bob", "charlie"],
+      "initial_topic": "今天我们聊聊技术话题吧！",
+      "max_turns": 4
+    }
+  ],
+  "max_function_calls": 5
+}
+```
+
+**结构说明**：
+- 顶层 `agents` 定义所有可用 Agent 及其模型和提示词路径
+- `chat_rooms` 数组定义各聊天室，每个房间通过 `agents` 字段引用参与者（按名字）
+- 各房间有独立的 `initial_topic` 和 `max_turns`
+
+---
+
+## 接口定义
+
+### service/agent_service.py（修改）
+
+```python
+# 按房间名分组存储：{room_name: [Agent, ...]}
+# 同名 Agent 在不同房间是独立对象实例
+_agents_by_room: Dict[str, List[Agent]] = {}
+
+def init(agents_config: list, rooms_config: list) -> None:
+    """根据全局 Agent 定义和各房间配置初始化 Agent 实例。
+    每个房间独立创建 Agent 实例，各房间的 {participants} 只包含该房间内的其他成员。
+    """
+
+def get_agents(room_name: str) -> List[Agent]:
+    """返回指定房间的 Agent 列表。"""
+
+def close() -> None:
+    """清空所有 Agent，程序退出前调用。"""
+```
+
+### service/scheduler_service.py（修改）
+
+```python
+def init(rooms_config: list, max_function_calls: int = 5) -> None:
+    """初始化调度器，须在 run() 前调用一次。"""
+
+def stop() -> None:
+    """重置调度器状态。"""
+
+async def run() -> None:
+    """使用 asyncio.gather 并发运行所有房间的对话。"""
+
+async def _run_room(room_name: str, max_turns: int) -> None:
+    """运行单个房间的调度循环，逻辑与 V2 run() 相同，日志加 [room_name] 前缀。"""
+```
+
+### util/config_util.py（修改）
+
+```python
+def load_config() -> dict:
+    """读取 config/agents_v3.json。"""
+```
+
+---
+
+## 模块依赖关系
+
+### 三层架构（延续 V2，无变化）
+
+```
+┌─────────────────────────────────────────────────────┐
+│                     main.py                         │
+└────────────────────┬────────────────────────────────┘
+                     │ import
+        ┌────────────▼────────────┐
+        │       service 层        │
+        ├─────────────────────────┤
+        │  scheduler_service.py   │  修改
+        │  agent_service.py       │  修改
+        │  chat_room_service.py   │  不变
+        │  llm_api_service.py     │  不变
+        │  agent_tool_service.py  │  不变
+        └────────────┬────────────┘
+                     │ import
+        ┌────────────▼────────────┐
+        │        model 层         │
+        ├─────────────────────────┤
+        │  api_model.py           │  不变
+        │  chat_model.py          │  不变
+        └────────────┬────────────┘
+                     │ import
+        ┌────────────▼────────────┐
+        │         util 层         │
+        ├─────────────────────────┤
+        │  config_util.py         │  修改（读 v3 配置）
+        │  tool_loader_util.py    │  不变
+        │  tool_util.py           │  不变
+        └─────────────────────────┘
+```
+
+### 各模块详细依赖
+
+#### 修改的模块
+
+| 模块 | 变更 | 依赖的项目内模块 |
+|------|------|----------------|
+| `util/config_util.py` | 读取路径改为 `agents_v3.json` | 无 |
+| `service/agent_service.py` | `init` 签名新增 `rooms_config`；内部按房间分组存储 | `util.config_util`（load_prompt）<br>`service.llm_api_service` |
+| `service/scheduler_service.py` | `init` 接收 `rooms_config` 列表；`run` 用 `asyncio.gather` 并发；新增 `_run_room` | `service.agent_service`<br>`service.chat_room_service`<br>`service.agent_tool_service` |
+| `main.py` | 遍历 `chat_rooms` 初始化；传 `rooms_config` 给 `scheduler.init` | 同 V2，不变 |
+
+#### 不变的模块
+
+| 模块 | 说明 |
+|------|------|
+| `service/chat_room_service.py` | 已基于字典存储，天然支持多房间 |
+| `service/llm_api_service.py` | 无状态 HTTP 客户端，不涉及房间概念 |
+| `service/agent_tool_service.py` | 工具加载与执行，不涉及房间概念 |
+| `model/api_model.py` | 纯数据定义，不变 |
+| `model/chat_model.py` | 纯数据定义，不变 |
+| `util/tool_loader_util.py` | 工具元数据加载，不变 |
+| `util/tool_util.py` | 工具函数注册表，不变 |
+
+---
+
+## 技术要点
+
+### 多房间并发
+
+`scheduler_service.run()` 使用 `asyncio.gather` 将每个房间的 `_run_room` 协程并发执行。各房间的 LLM API 调用均为异步，IO 等待期间其他房间可继续推进。
+
+### 同名 Agent 的实例隔离与上下文隔离
+
+同名 Agent（如 bob）在多个房间中是完全独立的对象实例，隔离体现在两个层面：
+
+**实例隔离**：`agent_service.init` 为每个房间独立调用 `Agent(...)` 构造，bob 在 general 房间和 tech 房间分别持有一个实例。两个实例的 `system_prompt` 不同——`{participants}` 占位符只替换为该房间内的其他成员（general 中为 alice 和 charlie，tech 中只有 charlie）。
+
+**上下文隔离**：`_run_room` 每轮通过 `chat_room.get_context_messages(room_name)` 获取消息历史，该接口只返回指定房间的消息。bob 在 tech 房间发言时，拿到的上下文仅包含 tech 房间的历史，完全感知不到 general 房间发生的对话。
+
+### 配置结构调整
+
+V3 将 V2 的单 `chat_room` 对象改为 `chat_rooms` 数组，`max_turns` 下沉到每个房间配置，允许各房间独立设置对话轮次。全局 `max_function_calls` 保持在顶层。
+
+### 复用 V2 核心组件
+
+`chat_room_service` 内部已使用字典 `_rooms` 存储多个房间实例，V3 无需任何修改即可支持多房间场景。`llm_api_service`、`agent_tool_service` 和所有 model/util 模块同样直接复用。

@@ -64,15 +64,19 @@
 ## 相关文档
 
 ### V1
-- [产品文档](./versions/v1/v1_product.md)
-- [技术文档](./versions/v1/v1_technical.md)
-- [开发任务表](./versions/v1/v1_tasks.md)
+- [产品文档](./versions/v1/v1_step1_product.md)
+- [技术文档](./versions/v1/v1_step2_technical.md)
+- [开发任务表](./versions/v1/v1_step3_tasks.md)
 
 ### V2
-- [产品文档](./versions/v2/v2_product.md)
-- [技术文档](./versions/v2/v2_technical.md)
-- [开发任务表](./versions/v2/v2_tasks.md)
+- [产品文档](./versions/v2/v2_step1_product.md)
+- [技术文档](./versions/v2/v2_step2_technical.md)
+- [开发任务表](./versions/v2/v2_step3_tasks.md)
+
+### V3
+- [产品文档](./versions/v3/v3_step1_product.md)
+- [技术文档](./versions/v3/v3_step2_technical.md)
+- [开发任务表](./versions/v3/v3_step3_tasks.md)
 
 ### 其他版本
-- [V3: 多 Agent 多房间聊天](./versions/v3_multi_room.md)
 - [V4: 状态持久化与聊天恢复](./versions/v4_persistence.md)
