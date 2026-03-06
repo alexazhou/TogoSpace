@@ -4,7 +4,7 @@ import logging
 import json
 
 import service.llm_api_service as api_client
-from model.api_model import Tool
+from model.api_model import Message, Tool
 from util.config_util import load_prompt
 
 logger = logging.getLogger(__name__)
@@ -64,9 +64,9 @@ async def run(
     Returns:
         (最终回复内容, 工具调用信息列表)
     """
-    messages = [
-        {"role": "system", "content": agent.system_prompt},
-        *context_messages,
+    messages: List[Message] = [
+        Message.text("system", agent.system_prompt),
+        *[Message.model_validate(m) for m in context_messages],
     ]
     tool_calls_info = []
     function_call_count = 0
@@ -74,16 +74,12 @@ async def run(
     while function_call_count < max_function_calls:
         response = await api_client.send_request(
             model=agent.model,
-            messages=messages,
+            messages=[m.to_dict() for m in messages],
             tools=tools,
         )
 
         assistant_message = response.choices[0].message
-        messages.append({
-            "role": "assistant",
-            "content": assistant_message.content,
-            "tool_calls": assistant_message.tool_calls,
-        })
+        messages.append(assistant_message)
 
         if not assistant_message.tool_calls:
             return assistant_message.content or "", tool_calls_info
@@ -119,11 +115,7 @@ async def run(
                 "arguments": function_args,
                 "result": result,
             })
-            messages.append({
-                "role": "tool",
-                "content": result,
-                "tool_call_id": tool_call_id,
-            })
+            messages.append(Message.tool_result(tool_call_id, result))
 
             if function_name == "send_chat_msg":
                 sent_msg = True
