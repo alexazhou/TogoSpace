@@ -14,7 +14,13 @@ def load_prompt(file_path: str) -> str:
         return f.read().strip()
 
 
-def load_api_key() -> str:
+def load_llm_service_config() -> dict:
+    """返回当前激活的 LLM 服务配置（name, base_url, api_key, type）。"""
     config_path = os.path.join(os.path.dirname(__file__), "../../config.json")
     with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)["dashscope"]["api_key"]
+        cfg = json.load(f)
+    active = cfg["active_llm_service"]
+    services = {s["name"]: s for s in cfg["llm_services"]}
+    if active not in services:
+        raise ValueError(f"active_llm_service '{active}' 未在 llm_services 中定义")
+    return services[active]
