@@ -32,6 +32,7 @@ def init(agents_config: list, rooms_config: list) -> None:
             other_names = [n for n in member_names if n != name]
             prompt = load_prompt(cfg["prompt_file"])
             prompt = prompt.replace("{participants}", "、".join(other_names))
+            prompt = prompt.replace("{room_name}", room_name)
             room_agents.append(Agent(name=name, system_prompt=prompt, model=cfg["model"]))
         _agents_by_room[room_name] = room_agents
         logger.info(f"[{room_name}] 已创建 {len(room_agents)} 个 Agent: {member_names}")
@@ -133,6 +134,7 @@ class Agent:
             # 处理工具调用
             logger.info(f"[{self.name}] 检测到 {len(assistant_message.tool_calls)} 个工具调用")
 
+            sent_msg = False
             for tool_call in assistant_message.tool_calls:
                 function_name = tool_call.function.get("name")
                 function_args = tool_call.function.get("arguments", {})
@@ -171,6 +173,14 @@ class Agent:
                     "content": result,
                     "tool_call_id": tool_call_id
                 })
+
+                # send_chat_msg 表示本轮发言结束，不再继续调用模型
+                if function_name == "send_chat_msg":
+                    sent_msg = True
+                    break
+
+            if sent_msg:
+                return "", tool_calls_info
 
             function_call_count += 1
 
