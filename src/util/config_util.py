@@ -17,4 +17,4 @@ def load_prompt(file_path: str) -> str:
 def load_api_key() -> str:
     config_path = os.path.join(os.path.dirname(__file__), "../../config.json")
     with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)["anthropic"]["api_key"]
+        return json.load(f)["dashscope"]["api_key"]

@@ -55,8 +55,8 @@ async def _run_room(room_name: str, max_turns: int) -> None:
             final_response, _ = await current_agent.generate_with_function_calling(
                 context_messages=context_messages,
                 tools=_tools,
-                function_executor=lambda name, args: agent_tools.execute_function(
-                    name, args, context=agent_context
+                function_executor=lambda name, args, _ctx=agent_context: agent_tools.execute_function(
+                    name, args, context=_ctx
                 ),
                 max_function_calls=_max_function_calls
             )

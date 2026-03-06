@@ -57,20 +57,6 @@ class Agent:
         self.system_prompt = system_prompt
         self.model = model
 
-    async def generate_response(self, context_messages: list) -> str:
-        """生成回复"""
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            *context_messages
-        ]
-
-        response = await api_client.send_request(
-            model=self.model,
-            messages=messages
-        )
-
-        return response.choices[0].message.content
-
     async def generate_with_function_calling(
         self,
         context_messages: List[dict],

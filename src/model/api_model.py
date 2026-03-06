@@ -38,7 +38,7 @@ class ToolCall(BaseModel):
 
 class ChatCompletionRequest(BaseModel):
     model: str = Field(default="qwen-plus", description="模型名称")
-    messages: List[Message] = Field(..., description="消息列表")
+    messages: List[dict] = Field(..., description="消息列表")
     max_tokens: Optional[int] = Field(default=1024, description="最大输出 tokens")
     temperature: Optional[float] = Field(default=0.7, description="温度参数")
     stream: Optional[bool] = Field(default=False, description="是否流式输出")

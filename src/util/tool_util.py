@@ -3,6 +3,7 @@ import ast
 import datetime
 import logging
 import operator
+from zoneinfo import ZoneInfo
 
 
 def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius") -> str:
@@ -25,9 +26,12 @@ def get_time(timezone: Optional[str] = None) -> str:
         timezone: 可选的时区名称，如 "Asia/Shanghai"，默认使用本地时区
     """
     if timezone:
-        # 简化处理，实际应使用 pytz 或 zoneinfo
-        now = datetime.datetime.now(datetime.timezone.utc)
-        return f"当前时间（时区 {timezone}）: {now.strftime('%Y-%m-%d %H:%M:%S')} UTC"
+        try:
+            tz = ZoneInfo(timezone)
+            now = datetime.datetime.now(tz)
+            return f"当前时间（时区 {timezone}）: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        except Exception:
+            return f"未知时区: {timezone}"
     else:
         now = datetime.datetime.now()
         return f"当前本地时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"
@@ -75,25 +79,39 @@ def calculate(expression: str) -> str:
         return f"计算错误: {e}"
 
 
-def get_agent_list() -> List[str]:
-    """返回 agent 列表
+def get_agent_list(_chat_room=None) -> List[str]:
+    """返回当前聊天室的 agent 列表（历史发言者，排除 system）
 
     """
     logging.info(f"get_agent_list: 获取 agent 列表")
-    return ['agent1','agent2','agent3']
+    if _chat_room is None:
+        return []
+    senders = []
+    seen = set()
+    for msg in _chat_room.messages:
+        if msg.sender != "system" and msg.sender not in seen:
+            seen.add(msg.sender)
+            senders.append(msg.sender)
+    return senders
 
 
-def create_chat(agent_name: str) -> str:
-    """创建和一个 agent 的聊天，返回创建的聊天窗口名称
+def create_chat(room_name: str, _get_room=None) -> str:
+    """切换到已存在的聊天室，返回房间名称；房间不存在则返回错误提示
 
     Args:
-        agent_name: 发起聊天的目标 agent 名称
+        room_name: 要切换到的聊天室名称
     """
-    logging.info(f"create_chat: 创建与 {agent_name} 的聊天")
-    return f"to_{agent_name}_room"
+    logging.info(f"create_chat: 切换到聊天室 {room_name}")
+    if _get_room is None:
+        return f"错误：无法访问聊天室上下文"
+    try:
+        _get_room(room_name)
+        return room_name
+    except Exception:
+        return f"错误：聊天室 '{room_name}' 不存在"
 
 
-def send_chat_msg(chat_windows_name: str, msg: str, _chat_room=None, _agent_name=None, _get_room=None) -> str:
+def send_chat_msg(chat_windows_name: str, msg: str, _agent_name=None, _get_room=None) -> str:
     """向聊天窗口发送消息
 
     Args:
@@ -123,6 +141,8 @@ def task_done() -> None:
     return
 
 
+get_agent_list.needs_context = True
+create_chat.needs_context = True
 send_chat_msg.needs_context = True
 
 FUNCTION_REGISTRY: dict[str, callable] = {
