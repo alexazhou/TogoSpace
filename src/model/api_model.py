@@ -8,9 +8,23 @@ from pydantic import BaseModel, Field
 class Message(BaseModel):
     role: str = Field(..., description="消息角色: user, assistant, system, tool")
     content: Optional[str] = Field(None, description="消息内容")
-    reasoning_content: Optional[str] = Field(None, description="推理内容（如 CoT 模型）")
+    reasoning_content: Optional[str] = Field(None, description="推理内容（如 CoT 模型），仅响应侧使用")
     tool_calls: Optional[List["ToolCall"]] = Field(None, description="工具调用列表")
     tool_call_id: Optional[str] = Field(None, description="工具调用 ID（tool 角色专用）")
+
+    @classmethod
+    def text(cls, role: str, content: str) -> "Message":
+        """构造普通文本消息（system / user / assistant）。"""
+        return cls(role=role, content=content)
+
+    @classmethod
+    def tool_result(cls, tool_call_id: str, result: str) -> "Message":
+        """构造工具调用结果消息。"""
+        return cls(role="tool", content=result, tool_call_id=tool_call_id)
+
+    def to_dict(self) -> dict:
+        """序列化为发送给 API 的 dict，排除 reasoning_content 和 None 字段。"""
+        return self.model_dump(exclude_none=True, exclude={"reasoning_content"})
 
 
 class FunctionParameter(BaseModel):
