@@ -55,7 +55,7 @@ async def main():
     for r in rooms_config:
         initial_topic = chat_room.get_room(r["name"]).initial_topic
         if initial_topic:
-            chat_room.add_message(r["name"], "system", initial_topic)
+            chat_room.get_room(r["name"]).add_message("system", initial_topic)
 
     try:
         await scheduler.run()

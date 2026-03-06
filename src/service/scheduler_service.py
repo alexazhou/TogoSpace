@@ -45,7 +45,7 @@ async def _run_room(room_name: str, max_turns: int) -> None:
         current_agent = agents[(turn - 1) % len(agents)]
         logger.info(f"[{room_name}]\n--- 第 {turn} 轮 ({current_agent.name}) ---")
 
-        context_messages = chat_room.get_context_messages(room_name)
+        context_messages = chat_room.get_room(room_name).get_context_messages()
 
         try:
             agent_context = ChatContext(
@@ -67,4 +67,4 @@ async def _run_room(room_name: str, max_turns: int) -> None:
             logger.error(f"[{room_name}] {current_agent.name} 生成回复失败: {e}")
             return
 
-    logger.info(f"[{room_name}]\n{chat_room.format_log(room_name)}")
+    logger.info(f"[{room_name}]\n{chat_room.get_room(room_name).format_log()}")
