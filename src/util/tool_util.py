@@ -1,4 +1,7 @@
-from typing import Literal, Optional, List
+from typing import Literal, Optional, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from model.chat_context import ChatContext
 import ast
 import datetime
 import logging
@@ -79,39 +82,39 @@ def calculate(expression: str) -> str:
         return f"计算错误: {e}"
 
 
-def get_agent_list(_chat_room=None) -> List[str]:
+def get_agent_list(_context: "ChatContext" = None) -> List[str]:
     """返回当前聊天室的 agent 列表（历史发言者，排除 system）
 
     """
     logging.info(f"get_agent_list: 获取 agent 列表")
-    if _chat_room is None:
+    if _context is None:
         return []
     senders = []
     seen = set()
-    for msg in _chat_room.messages:
+    for msg in _context.chat_room.messages:
         if msg.sender != "system" and msg.sender not in seen:
             seen.add(msg.sender)
             senders.append(msg.sender)
     return senders
 
 
-def create_chat(room_name: str, _get_room=None) -> str:
+def create_chat(room_name: str, _context: "ChatContext" = None) -> str:
     """切换到已存在的聊天室，返回房间名称；房间不存在则返回错误提示
 
     Args:
         room_name: 要切换到的聊天室名称
     """
     logging.info(f"create_chat: 切换到聊天室 {room_name}")
-    if _get_room is None:
-        return f"错误：无法访问聊天室上下文"
+    if _context is None:
+        return "错误：无法访问聊天室上下文"
     try:
-        _get_room(room_name)
+        _context.get_room(room_name)
         return room_name
     except Exception:
         return f"错误：聊天室 '{room_name}' 不存在"
 
 
-def send_chat_msg(chat_windows_name: str, msg: str, _agent_name=None, _get_room=None) -> str:
+def send_chat_msg(chat_windows_name: str, msg: str, _context: "ChatContext" = None) -> str:
     """向聊天窗口发送消息
 
     Args:
@@ -123,10 +126,10 @@ def send_chat_msg(chat_windows_name: str, msg: str, _agent_name=None, _get_room=
     """
     logging.info(f"send_chat_msg: 向 {chat_windows_name} 发送消息: {msg}")
 
-    if _get_room is not None:
+    if _context is not None:
         try:
-            target_room = _get_room(chat_windows_name)
-            target_room.add_message(_agent_name, msg)
+            target_room = _context.get_room(chat_windows_name)
+            target_room.add_message(_context.agent_name, msg)
         except Exception:
             logging.warning(f"send_chat_msg: 聊天室 '{chat_windows_name}' 不存在，消息已忽略")
     else:
@@ -141,9 +144,8 @@ def task_done() -> None:
     return
 
 
-get_agent_list.needs_context = True
-create_chat.needs_context = True
-send_chat_msg.needs_context = True
+for _f in (get_agent_list, create_chat, send_chat_msg):
+    _f.needs_context = True
 
 FUNCTION_REGISTRY: dict[str, callable] = {
     "get_weather": get_weather,

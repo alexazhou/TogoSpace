@@ -4,6 +4,7 @@ import logging
 import service.agent_service as agent_service
 import service.chat_room_service as chat_room
 import service.agent_tool_service as agent_tools
+from model.chat_context import ChatContext
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +48,11 @@ async def _run_room(room_name: str, max_turns: int) -> None:
         context_messages = chat_room.get_context_messages(room_name)
 
         try:
-            agent_context = {
-                "chat_room": chat_room.get_room(room_name),
-                "agent_name": current_agent.name,
-                "get_room": chat_room.get_room,
-            }
+            agent_context = ChatContext(
+                agent_name=current_agent.name,
+                chat_room=chat_room.get_room(room_name),
+                get_room=chat_room.get_room,
+            )
             final_response, _ = await current_agent.generate_with_function_calling(
                 context_messages=context_messages,
                 tools=_tools,
