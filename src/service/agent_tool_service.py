@@ -1,3 +1,4 @@
+import inspect
 import logging
 from typing import List, Optional
 
@@ -56,7 +57,13 @@ def execute_function(func_name: str, args: dict, context: Optional[dict] = None)
             raise ValueError(f"{func_name} is not callable")
 
         if getattr(func, "needs_context", False) and context:
-            args = {**args, "_chat_room": context.get("chat_room"), "_agent_name": context.get("agent_name"), "_get_room": context.get("get_room")}
+            ctx_map = {
+                "_chat_room": context.get("chat_room"),
+                "_agent_name": context.get("agent_name"),
+                "_get_room": context.get("get_room"),
+            }
+            sig_params = inspect.signature(func).parameters
+            args = {**args, **{k: v for k, v in ctx_map.items() if k in sig_params}}
 
         result = func(**args)
         return str(result)
