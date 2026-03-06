@@ -7,35 +7,45 @@ from util.config_util import load_prompt
 
 logger = logging.getLogger(__name__)
 
-_agents: List["Agent"] = []
+_agents_by_room: Dict[str, List["Agent"]] = {}
 
 
-def init(agents_config: list) -> None:
-    """根据配置列表创建 Agent 实例，须在首次调用 get_agents 前调用一次。
+def init(agents_config: list, rooms_config: list) -> None:
+    """根据配置列表为每个房间独立创建 Agent 实例。
 
     agents_config 每项须包含 name、model、prompt_file 字段。
-    每个 Agent 的 prompt 中 {participants} 占位符会被其他 Agent 名称替换。
+    rooms_config 每项须包含 name、agents 字段。
+    每个房间的 Agent 的 prompt 中 {participants} 仅替换为同房间其他成员。
     """
-    global _agents
-    _agents = []
-    all_names = [c["name"] for c in agents_config]
-    for cfg in agents_config:
-        other_names = [n for n in all_names if n != cfg["name"]]
-        prompt = load_prompt(cfg["prompt_file"])
-        prompt = prompt.replace("{participants}", "、".join(other_names))
-        _agents.append(Agent(name=cfg["name"], system_prompt=prompt, model=cfg["model"]))
-    logger.info(f"已创建 {len(_agents)} 个 Agent: {all_names}")
+    global _agents_by_room
+    _agents_by_room = {}
+
+    # 构建全局 Agent 定义索引
+    agent_defs = {cfg["name"]: cfg for cfg in agents_config}
+
+    for room in rooms_config:
+        room_name = room["name"]
+        member_names = room["agents"]
+        room_agents = []
+        for name in member_names:
+            cfg = agent_defs[name]
+            other_names = [n for n in member_names if n != name]
+            prompt = load_prompt(cfg["prompt_file"])
+            prompt = prompt.replace("{participants}", "、".join(other_names))
+            room_agents.append(Agent(name=name, system_prompt=prompt, model=cfg["model"]))
+        _agents_by_room[room_name] = room_agents
+        logger.info(f"[{room_name}] 已创建 {len(room_agents)} 个 Agent: {member_names}")
 
 
-def get_agents() -> List["Agent"]:
-    """返回已初始化的 Agent 列表。"""
-    return _agents
+def get_agents(room_name: str) -> List["Agent"]:
+    """返回指定房间已初始化的 Agent 列表，房间不存在时返回空列表。"""
+    return _agents_by_room.get(room_name, [])
 
 
 def close() -> None:
-    """清空 Agent 列表，程序退出前调用。"""
-    global _agents
-    _agents = []
+    """清空 Agent 字典，程序退出前调用。"""
+    global _agents_by_room
+    _agents_by_room = {}
 
 
 class Agent:

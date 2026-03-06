@@ -86,6 +86,8 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 - [ ] 修改 `init` 签名：`init(rooms_config: list, max_function_calls: int = 5) -> None`
 - [ ] 修改 `run`：使用 `asyncio.gather` 并发执行每个房间的 `_run_room` 协程
 - [ ] 新增 `_run_room(room_name: str, max_turns: int)` 协程，逻辑与 V2 `run` 相同，但日志中加入房间名前缀 `[room_name]`
+- [ ] `_run_room` 每轮调用 `chat_room.get_context_messages(room_name)` 获取当前房间历史，格式为 OpenAI 兼容的全 `role=user` 列表
+- [ ] Agent 回复写回房间使用 `chat_room.add_message`，Agent 实例本身不保存任何历史
 - [ ] 修改 `stop`：重置 `_rooms_config` 为空列表
 
 **main.py 子任务**:
@@ -117,6 +119,7 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 - [ ] 验证 tech 房间的参与者感知（bob 的 prompt 中只含 charlie，不含 alice）
 - [ ] 验证同一 Agent（bob）在两个房间中感知到的参与者列表不同
 - [ ] 验证各房间消息不串频（general 的消息不出现在 tech 的上下文中）
+- [ ] 验证传给 Agent 的消息列表中，历史发言均为 `role=user`，发言者名称内嵌在 content 中
 - [ ] 验证日志文件生成在 `logs/` 目录，前缀为 `v3_chat_`
 
 **验收标准**:
@@ -190,6 +193,8 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 - [ ] bob 在 tech 房间的 prompt 中只含 charlie（不含 alice）
 - [ ] 多个房间并发运行，日志交替出现
 - [ ] 各房间消息独立，不串频
+- [ ] 传给 Agent 的 context_messages 中所有历史发言均为 `role=user`（OpenAI 格式）
+- [ ] bob 在 general 房间的上下文中不包含 tech 房间的消息（上下文隔离）
 - [ ] 日志文件前缀为 `v3_chat_`
 - [ ] 程序能正常退出
 
