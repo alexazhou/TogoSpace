@@ -49,7 +49,8 @@ async def _run_room(room_name: str, max_turns: int) -> None:
         try:
             agent_context = {
                 "chat_room": chat_room.get_room(room_name),
-                "agent_name": current_agent.name
+                "agent_name": current_agent.name,
+                "get_room": chat_room.get_room,
             }
             final_response, _ = await current_agent.generate_with_function_calling(
                 context_messages=context_messages,
@@ -60,8 +61,7 @@ async def _run_room(room_name: str, max_turns: int) -> None:
                 max_function_calls=_max_function_calls
             )
             if final_response:
-                chat_room.add_message(room_name, current_agent.name, final_response)
-                logger.info(f"[{room_name}] {current_agent.name}: {final_response}")
+                logger.info(f"[{room_name}] {current_agent.name} (思考): {final_response}")
         except Exception as e:
             logger.error(f"[{room_name}] {current_agent.name} 生成回复失败: {e}")
             return

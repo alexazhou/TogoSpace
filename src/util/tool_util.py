@@ -93,7 +93,7 @@ def create_chat(agent_name: str) -> str:
     return f"to_{agent_name}_room"
 
 
-def send_chat_msg(chat_windows_name: str, msg: str, _chat_room=None, _agent_name=None) -> str:
+def send_chat_msg(chat_windows_name: str, msg: str, _chat_room=None, _agent_name=None, _get_room=None) -> str:
     """向聊天窗口发送消息
 
     Args:
@@ -105,8 +105,12 @@ def send_chat_msg(chat_windows_name: str, msg: str, _chat_room=None, _agent_name
     """
     logging.info(f"send_chat_msg: 向 {chat_windows_name} 发送消息: {msg}")
 
-    if _chat_room is not None:
-        _chat_room.add_message(_agent_name, msg)
+    if _get_room is not None:
+        try:
+            target_room = _get_room(chat_windows_name)
+            target_room.add_message(_agent_name, msg)
+        except Exception:
+            logging.warning(f"send_chat_msg: 聊天室 '{chat_windows_name}' 不存在，消息已忽略")
     else:
         logging.warning("send_chat_msg: 聊天室上下文未设置")
 

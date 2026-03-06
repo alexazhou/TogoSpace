@@ -56,7 +56,7 @@ def execute_function(func_name: str, args: dict, context: Optional[dict] = None)
             raise ValueError(f"{func_name} is not callable")
 
         if getattr(func, "needs_context", False) and context:
-            args = {**args, "_chat_room": context.get("chat_room"), "_agent_name": context.get("agent_name")}
+            args = {**args, "_chat_room": context.get("chat_room"), "_agent_name": context.get("agent_name"), "_get_room": context.get("get_room")}
 
         result = func(**args)
         return str(result)
