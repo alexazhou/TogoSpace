@@ -67,17 +67,3 @@ def get_room(name: str) -> ChatRoom:
     return room
 
 
-def add_message(name: str, sender: str, content: str) -> None:
-    get_room(name).add_message(sender, content)
-
-
-def get_context(name: str, max_messages: int = 10) -> str:
-    return get_room(name).get_context(max_messages)
-
-
-def get_context_messages(name: str, max_messages: int = 10) -> List[dict]:
-    return get_room(name).get_context_messages(max_messages)
-
-
-def format_log(name: str) -> str:
-    return get_room(name).format_log()
