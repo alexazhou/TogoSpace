@@ -9,7 +9,7 @@ import service.agent_service as agent_service
 import service.chat_room_service as chat_room
 import service.llm_service as llm_service
 import util.llm_api_util as llm_api_util
-import service.agent_tool_service as agent_tools
+import service.func_tool_service as agent_tools
 
 
 def _setup_logger() -> None:
