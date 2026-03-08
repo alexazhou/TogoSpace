@@ -1,7 +1,7 @@
 import inspect
 import json
 import logging
-from typing import List, Optional, Union
+from typing import List, Optional
 
 from util.llm_api_util import Tool, Function, FunctionParameter
 from model.chat_context import ChatContext
@@ -50,17 +50,14 @@ def close() -> None:
 
 def run_tool_call(
     function_name: str,
-    function_args: Union[str, dict],
+    function_args: str,
     context: Optional[ChatContext] = None,
 ) -> str:
-    """解析 function_args（字符串或 dict）并执行函数，返回结果字符串。"""
-    if isinstance(function_args, str):
-        try:
-            args = json.loads(function_args)
-        except json.JSONDecodeError:
-            args = {}
-    else:
-        args = function_args
+    """解析 function_args JSON 字符串并执行函数，返回结果字符串。"""
+    try:
+        args: dict = json.loads(function_args)
+    except json.JSONDecodeError:
+        args = {}
 
     logging.getLogger(__name__).info(f"调用函数: {function_name}, 参数: {args}")
     try:

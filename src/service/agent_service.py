@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 import logging
 
 import service.llm_service as llm_service
@@ -36,19 +36,27 @@ class Agent:
         response = await llm_service.infer(self.model, ctx)
         return response.choices[0].message
 
-    async def call_once(self, input_message: LlmApiMessage, tools: List[Tool] = None) -> LlmApiMessage:
+    async def call_once(
+        self,
+        input_message: LlmApiMessage,
+        tools: Optional[List[Tool]] = None,
+    ) -> LlmApiMessage:
         """将 input_message 追加到历史后发起一轮 LLM 调用，返回原始 assistant 消息（不处理 tool_calls）。"""
         self._history.append(input_message)
         return await self._infer(tools)
 
-    async def chat(self, input_message: LlmApiMessage, tools: List[Tool] = None, function_executor: callable = None,
+    async def chat(
+        self,
+        input_message: LlmApiMessage,
+        tools: Optional[List[Tool]] = None,
+        function_executor: Optional[Callable[[str, str], str]] = None,
         max_function_calls: int = 5,
     ) -> LlmApiMessage:
         """将 input_message 追加到历史后自动执行 tool calls 循环，直到返回文本输出。"""
         self._history.append(input_message)
 
         for _ in range(max_function_calls):
-            assistant_message = await self._infer(tools)
+            assistant_message: LlmApiMessage = await self._infer(tools)
             self._history.append(assistant_message)
 
             if not assistant_message.tool_calls:
@@ -56,13 +64,13 @@ class Agent:
 
             logger.info(f"[{self.name}] 检测到 {len(assistant_message.tool_calls)} 个工具调用")
 
-            sent_msg = False
+            sent_msg: bool = False
             for tool_call in assistant_message.tool_calls:
-                function_name = tool_call.function.get("name")
-                function_args = tool_call.function.get("arguments", {})
+                function_name: str = tool_call.function.get("name")
+                function_args: str = tool_call.function.get("arguments", "")
 
                 assert function_executor is not None, "function_executor 未配置"
-                result = function_executor(function_name, function_args)
+                result: str = function_executor(function_name, function_args)
 
                 self._history.append(LlmApiMessage.tool_result(tool_call.id, result))
 
@@ -82,16 +90,16 @@ def init(agents_config: list, rooms_config: list) -> None:
     global _agents_by_room
     _agents_by_room = {}
 
-    agent_defs = {cfg["name"]: cfg for cfg in agents_config}
+    agent_defs: Dict[str, dict] = {cfg["name"]: cfg for cfg in agents_config}
 
     for room in rooms_config:
-        room_name = room["name"]
-        member_names = room["agents"]
-        room_agents = []
+        room_name: str = room["name"]
+        member_names: List[str] = room["agents"]
+        room_agents: List[Agent] = []
         for name in member_names:
-            cfg = agent_defs[name]
-            other_names = [n for n in member_names if n != name]
-            prompt = load_prompt(cfg["prompt_file"])
+            cfg: dict = agent_defs[name]
+            other_names: List[str] = [n for n in member_names if n != name]
+            prompt: str = load_prompt(cfg["prompt_file"])
             prompt = prompt.replace("{participants}", "、".join(other_names))
             prompt = prompt.replace("{room_name}", room_name)
             room_agents.append(Agent(name=name, system_prompt=prompt, model=cfg["model"]))
