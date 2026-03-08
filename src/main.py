@@ -7,7 +7,8 @@ from util.config_util import load_config, load_llm_service_config
 import service.scheduler_service as scheduler
 import service.agent_service as agent_service
 import service.chat_room_service as chat_room
-import service.llm_api_service as api_client
+import service.llm_service as llm_service
+import util.llm_api_util as llm_api_util
 import service.agent_tool_service as agent_tools
 
 
@@ -43,7 +44,8 @@ async def main():
         chat_room.init(name=r["name"], initial_topic=r["initial_topic"])
 
     llm_cfg = load_llm_service_config()
-    api_client.init(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
+    llm_api_util.init()
+    llm_service.init(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     agent_tools.init()
     agent_service.init(config["agents"], rooms_config, tools=agent_tools.get_tools())
     scheduler.init(
@@ -64,7 +66,6 @@ async def main():
         agent_service.close()
         agent_tools.close()
         chat_room.close_all()
-        await api_client.close()
 
 
 if __name__ == "__main__":
