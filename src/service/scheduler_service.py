@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 import service.agent_service as agent_service
 import service.chat_room_service as chat_room
 import service.func_tool_service as agent_tools
+from constants import TurnStatus, TurnCheckResult
 from service.agent_service import Agent
 from service.chat_room_service import ChatRoom
 from util.llm_api_util import LlmApiMessage
@@ -61,12 +62,20 @@ async def _run_room(room_name: str, max_turns: int) -> None:
                 last_called["name"] = name
                 return agent_tools.run_tool_call(name, args, context=_ctx)
 
+            def turn_checker(msg: LlmApiMessage) -> TurnCheckResult:
+                if last_called["name"] == "send_chat_msg":
+                    return TurnCheckResult(TurnStatus.SUCCESS)
+                if not msg.tool_calls:
+                    return TurnCheckResult(TurnStatus.ERROR, "你必须调用 send_chat_msg 工具发送消息，不能直接输出文字。")
+                return TurnCheckResult(TurnStatus.CONTINUE)
+
             response: LlmApiMessage = await current_agent.chat(
                 tools=agent_tools.get_tools(),
                 function_executor=executor,
-                should_stop=lambda msg: last_called["name"] == "send_chat_msg",
+                turn_checker=turn_checker,
                 max_function_calls=_max_function_calls,
             )
+
             if response.content:
                 logger.info(f"[{room_name}] {current_agent.name} (思考): {response.content}")
         except Exception as e:
