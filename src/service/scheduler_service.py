@@ -58,13 +58,18 @@ async def _run_room(room_name: str, max_turns: int) -> None:
                 chat_room=room,
                 get_room=chat_room.get_room,
             )
+            last_called: dict = {"name": None}
+
+            def executor(name: str, args: str, _ctx: ChatContext = agent_context) -> str:
+                last_called["name"] = name
+                return agent_tools.run_tool_call(name, args, context=_ctx)
+
             current_agent.set_messages(history_messages)
             response = await current_agent.chat(
                 input_message=latest_message,
                 tools=agent_tools.get_tools(),
-                function_executor=lambda name, args, _ctx=agent_context: agent_tools.run_tool_call(
-                    name, args, context=_ctx
-                ),
+                function_executor=executor,
+                should_stop=lambda msg: last_called["name"] == "send_chat_msg",
                 max_function_calls=_max_function_calls,
             )
             if response.content:

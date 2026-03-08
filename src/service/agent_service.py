@@ -52,9 +52,12 @@ class Agent:
         input_message: LlmApiMessage,
         tools: Optional[List[Tool]] = None,
         function_executor: Optional[Callable[[str, str], str]] = None,
+        should_stop: Optional[Callable[[LlmApiMessage], bool]] = None,
         max_function_calls: int = 5,
     ) -> LlmApiMessage:
-        """将 input_message 追加到历史后自动执行 tool calls 循环，直到返回文本输出。"""
+        """将 input_message 追加到历史后自动执行 tool calls 循环，直到返回文本输出。
+        should_stop: 每次 tool 执行后调用，接收最后一条消息，返回 True 时立即终止循环。
+        """
         self._history.append(input_message)
 
         for _ in range(max_function_calls):
@@ -66,7 +69,7 @@ class Agent:
 
             logger.info(f"[{self.name}] 检测到 {len(assistant_message.tool_calls)} 个工具调用")
 
-            sent_msg: bool = False
+            stopped: bool = False
             for tool_call in assistant_message.tool_calls:
                 function_name: str = tool_call.function.get("name")
                 function_args: str = tool_call.function.get("arguments", "")
@@ -76,11 +79,11 @@ class Agent:
 
                 self._history.append(LlmApiMessage.tool_result(tool_call.id, result))
 
-                if function_name == "send_chat_msg":
-                    sent_msg = True
+                if should_stop and should_stop(self._history[-1]):
+                    stopped = True
                     break
 
-            if sent_msg:
+            if stopped:
                 return LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, "")
 
         logger.warning(f"[{self.name}] 达到最大函数调用次数 {max_function_calls}")
