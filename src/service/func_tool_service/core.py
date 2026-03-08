@@ -3,10 +3,10 @@ import json
 import logging
 from typing import List, Optional
 
-from util.llm_api_util import Tool, Function, FunctionParameter
+from util.llm_api_util import Tool
 from model.chat_context import ChatContext
-from util.tool_loader_util import get_function_metadata
-from util.tool_util import FUNCTION_REGISTRY
+from .tools import FUNCTION_REGISTRY
+from .tool_loader import build_tools
 
 _tools: List[Tool] = []
 
@@ -14,27 +14,7 @@ _tools: List[Tool] = []
 def init() -> None:
     """加载启用的函数列表并构建工具，须在首次调用 get_tools 前调用一次。"""
     global _tools
-    _tools = []
-
-    for func_name, func in FUNCTION_REGISTRY.items():
-        try:
-            metadata = get_function_metadata(func_name, func)
-            tool = Tool(
-                function=Function(
-                    name=metadata["name"],
-                    description=metadata["description"],
-                    parameters=FunctionParameter(
-                        type=metadata["parameters"]["type"],
-                        properties=metadata["parameters"]["properties"],
-                        required=metadata["parameters"].get("required", [])
-                    )
-                )
-            )
-            _tools.append(tool)
-            logging.info(f"Loaded function: {func_name}")
-
-        except Exception as e:
-            logging.error(f"Error loading function {func_name}: {e}")
+    _tools = build_tools(FUNCTION_REGISTRY)
 
 
 def get_tools() -> List[Tool]:
