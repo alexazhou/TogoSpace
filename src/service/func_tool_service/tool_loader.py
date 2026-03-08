@@ -1,7 +1,10 @@
 import inspect
+import logging
 from typing import Any, Dict, List, get_type_hints, get_origin, get_args, Literal
 from types import UnionType
 from typing import Union
+
+from util.llm_api_util import Tool, Function, FunctionParameter
 
 
 def python_type_to_json_schema(python_type: Any) -> Dict[str, Any]:
@@ -84,3 +87,27 @@ def get_function_metadata(func_name: str, func) -> Dict[str, Any]:
             "required": required
         }
     }
+
+
+def build_tools(registry: dict) -> List[Tool]:
+    """遍历 registry，构建并返回工具列表。"""
+    tools: List[Tool] = []
+    for func_name, func in registry.items():
+        try:
+            metadata = get_function_metadata(func_name, func)
+            tool = Tool(
+                function=Function(
+                    name=metadata["name"],
+                    description=metadata["description"],
+                    parameters=FunctionParameter(
+                        type=metadata["parameters"]["type"],
+                        properties=metadata["parameters"]["properties"],
+                        required=metadata["parameters"].get("required", [])
+                    )
+                )
+            )
+            tools.append(tool)
+            logging.info(f"Loaded function: {func_name}")
+        except Exception as e:
+            logging.error(f"Error loading function {func_name}: {e}")
+    return tools
