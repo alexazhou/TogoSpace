@@ -14,9 +14,9 @@ class ChatRoom:
 
     def add_message(self, sender: str, content: str) -> None:
         message = ChatMessage(
-            sender=sender,
+            sender_name=sender,
             content=content,
-            timestamp=datetime.now().isoformat()
+            send_time=datetime.now()
         )
         self.messages.append(message)
 
@@ -28,16 +28,16 @@ class ChatRoom:
         recent = self.messages[-max_messages:]
         result = []
         for msg in recent:
-            if msg.sender == "system":
+            if msg.sender_name == "system":
                 result.append({"role": "system", "content": msg.content})
             else:
-                result.append({"role": "user", "content": f"{msg.sender}: {msg.content}"})
+                result.append({"role": "user", "content": f"{msg.sender_name}: {msg.content}"})
         return result
 
     def format_log(self) -> str:
         lines = [f"=== {self.name} 聊天记录 ==="]
         for msg in self.messages:
-            lines.append(f"[{msg.timestamp}] {msg.sender}: {msg.content}")
+            lines.append(f"[{msg.send_time.isoformat()}] {msg.sender_name}: {msg.content}")
         return "\n".join(lines)
 
 
