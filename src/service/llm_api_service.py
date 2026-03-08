@@ -5,9 +5,10 @@ from typing import Optional, List
 import aiohttp
 import certifi
 
-from model.api_model import (
-    ChatCompletionRequest,
-    ChatCompletionResponse,
+from model.llm_api_model import (
+    LlmApiMessage,
+    LlmApiRequest,
+    LlmApiResponse,
     ErrorResponse
 )
 
@@ -32,11 +33,11 @@ def init(api_key: str, base_url: str = DASHSCOPE_BASE_URL) -> None:
 
 async def send_request(
     model: str,
-    messages: list,
+    messages: List[LlmApiMessage],
     max_tokens: int = 1024,
     temperature: float = 0.7,
     tools: Optional[List] = None,
-) -> ChatCompletionResponse:
+) -> LlmApiResponse:
     """发送 chat completion 请求，复用模块全局 session。"""
     if _session is None:
         raise RuntimeError("api_client_service 未初始化，请先调用 init(api_key)")
@@ -46,14 +47,17 @@ async def send_request(
         "Content-Type": "application/json",
     }
 
-    request = ChatCompletionRequest(
+    request = LlmApiRequest(
         model=model,
         messages=messages,
         max_tokens=max_tokens,
         temperature=temperature,
         tools=tools
     )
-    payload = request.model_dump(exclude_none=True)
+    payload = {
+        **request.model_dump(exclude_none=True, exclude={"messages"}),
+        "messages": [m.to_dict() for m in messages],
+    }
 
     logger.info("=== 请求 payload ===")
     logger.info(f"Model: {model}")
@@ -69,7 +73,7 @@ async def send_request(
 
     if status == 200:
         logger.info("=== API 响应成功 ===")
-        return ChatCompletionResponse.model_validate(response_data)
+        return LlmApiResponse.model_validate(response_data)
 
     if 'error' in response_data:
         error_msg = response_data['error'].get('message', 'Unknown error')

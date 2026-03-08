@@ -3,7 +3,7 @@ import logging
 import json
 
 import service.llm_api_service as api_client
-from model.api_model import Message, Tool
+from model.llm_api_model import LlmApiMessage, Tool
 from util.config_util import load_prompt
 
 logger = logging.getLogger(__name__)
@@ -20,20 +20,20 @@ class Agent:
 
     async def chat(
         self,
-        messages: List[Message],
+        messages: List[LlmApiMessage],
         function_executor: callable = None,
         max_function_calls: int = 5,
-    ) -> Message:
-        """输入上下文消息列表，经 function calling 循环后返回最终的 assistant Message。"""
-        history: List[Message] = [
-            Message.text("system", self.system_prompt),
+    ) -> LlmApiMessage:
+        """输入上下文消息列表，经 function calling 循环后返回最终的 assistant LlmApiMessage。"""
+        history: List[LlmApiMessage] = [
+            LlmApiMessage.text("system", self.system_prompt),
             *messages,
         ]
 
         for _ in range(max_function_calls):
             response = await api_client.send_request(
                 model=self.model,
-                messages=[m.to_dict() for m in history],
+                messages=history,
                 tools=self.tools or None,
             )
 
@@ -68,14 +68,14 @@ class Agent:
                 else:
                     result = "函数执行器未配置"
 
-                history.append(Message.tool_result(tool_call.id, result))
+                history.append(LlmApiMessage.tool_result(tool_call.id, result))
 
                 if function_name == "send_chat_msg":
                     sent_msg = True
                     break
 
             if sent_msg:
-                return Message.text("assistant", "")
+                return LlmApiMessage.text("assistant", "")
 
         logger.warning(f"[{self.name}] 达到最大函数调用次数 {max_function_calls}")
         return assistant_message
