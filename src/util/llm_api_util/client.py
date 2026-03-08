@@ -35,20 +35,11 @@ async def send_request(request: LlmApiRequest, url: str, api_key: str) -> LlmApi
         "messages": [m.to_dict() for m in request.messages],
     }
 
-    logger.info("=== 请求 payload ===")
-    logger.info(f"Model: {request.model}")
-    logger.info(f"Messages count: {len(request.messages)}")
-
     async with _session.post(url, headers=headers, json=payload) as response:
         response_data = await response.json()
         status = response.status
 
-    logger.info("=== API 响应数据 ===")
-    logger.info(f"Status: {status}")
-    logger.info(f"Data: {response_data}")
-
     if status == 200:
-        logger.info("=== API 响应成功 ===")
         return LlmApiResponse.model_validate(response_data)
 
     if 'error' in response_data:
