@@ -42,10 +42,10 @@ async def main():
     for r in rooms_config:
         chat_room.init(name=r["name"], initial_topic=r["initial_topic"])
 
-    agent_service.init(config["agents"], rooms_config)
     llm_cfg = load_llm_service_config()
     api_client.init(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     agent_tools.init()
+    agent_service.init(config["agents"], rooms_config, tools=agent_tools.get_tools())
     scheduler.init(
         rooms_config=rooms_config,
         max_function_calls=config.get("max_function_calls", 5),

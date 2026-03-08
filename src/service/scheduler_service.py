@@ -4,29 +4,27 @@ import logging
 import service.agent_service as agent_service
 import service.chat_room_service as chat_room
 import service.agent_tool_service as agent_tools
+from model.api_model import Message
 from model.chat_context import ChatContext
 
 logger = logging.getLogger(__name__)
 
 _rooms_config: list = []
 _max_function_calls: int = 5
-_tools: list = []
 
 
 def init(rooms_config: list, max_function_calls: int = 5) -> None:
     """初始化调度器，须在 run() 前调用一次。"""
-    global _rooms_config, _max_function_calls, _tools
+    global _rooms_config, _max_function_calls
     _rooms_config = rooms_config
     _max_function_calls = max_function_calls
-    _tools = agent_tools.get_tools()
 
 
 def stop() -> None:
     """重置调度器状态。"""
-    global _rooms_config, _max_function_calls, _tools
+    global _rooms_config, _max_function_calls
     _rooms_config = []
     _max_function_calls = 5
-    _tools = []
 
 
 async def run() -> None:
@@ -45,7 +43,10 @@ async def _run_room(room_name: str, max_turns: int) -> None:
         current_agent = agents[(turn - 1) % len(agents)]
         logger.info(f"[{room_name}]\n--- 第 {turn} 轮 ({current_agent.name}) ---")
 
-        context_messages = chat_room.get_room(room_name).get_context_messages()
+        context_messages = [
+            Message.model_validate(m)
+            for m in chat_room.get_room(room_name).get_context_messages()
+        ]
 
         try:
             agent_context = ChatContext(
@@ -53,17 +54,15 @@ async def _run_room(room_name: str, max_turns: int) -> None:
                 chat_room=chat_room.get_room(room_name),
                 get_room=chat_room.get_room,
             )
-            final_response, _ = await agent_service.run(
-                agent=current_agent,
-                context_messages=context_messages,
-                tools=_tools,
+            response = await current_agent.chat(
+                messages=context_messages,
                 function_executor=lambda name, args, _ctx=agent_context: agent_tools.execute_function(
                     name, args, context=_ctx
                 ),
                 max_function_calls=_max_function_calls,
             )
-            if final_response:
-                logger.info(f"[{room_name}] {current_agent.name} (思考): {final_response}")
+            if response.content:
+                logger.info(f"[{room_name}] {current_agent.name} (思考): {response.content}")
         except Exception as e:
             logger.error(f"[{room_name}] {current_agent.name} 生成回复失败: {e}")
             return
