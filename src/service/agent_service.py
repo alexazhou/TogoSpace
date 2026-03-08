@@ -28,8 +28,8 @@ class Agent:
 
     async def _infer(self, tools: List[Tool]) -> LlmApiMessage:
         """基于当前 _history 发起一次 LLM 调用，返回 assistant 消息。"""
-        assert self._history and self._history[-1].role in (OpenaiLLMApiRole.USER, OpenaiLLMApiRole.TOOL), \
-            f"[{self.name}] _infer 前最后一条消息必须是 user 或 tool，当前为: {self._history[-1].role if self._history else 'empty'}"
+        assert self._history and self._history[-1].role in (OpenaiLLMApiRole.USER, OpenaiLLMApiRole.TOOL, OpenaiLLMApiRole.SYSTEM), \
+            f"[{self.name}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
         ctx = AgentDialogContext(
             system_prompt=self.system_prompt,
             messages=self._history,
