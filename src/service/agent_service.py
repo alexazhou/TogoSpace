@@ -13,31 +13,52 @@ _agents_by_room: Dict[str, List["Agent"]] = {}
 
 
 class Agent:
-    def __init__(self, name: str, system_prompt: str, model: str, tools: List[Tool] = None):
+    def __init__(self, name: str, system_prompt: str, model: str):
         self.name = name
         self.system_prompt = system_prompt
         self.model = model
-        self.tools = tools or []
+        self._history: List[LlmApiMessage] = []
+
+    def set_messages(self, messages: List[LlmApiMessage]) -> None:
+        """设置内部历史消息。"""
+        self._history = list(messages)
+
+    def get_messages(self) -> List[LlmApiMessage]:
+        """返回当前内部历史消息。"""
+        return list(self._history)
+
+    async def _infer(self, tools: List[Tool]) -> LlmApiMessage:
+        """基于当前 _history 发起一次 LLM 调用，返回 assistant 消息。"""
+        ctx = AgentDialogContext(
+            system_prompt=self.system_prompt,
+            messages=self._history,
+            tools=tools or None,
+        )
+        response = await llm_service.infer(self.model, ctx)
+        return response.choices[0].message
+
+    async def call_once(
+        self,
+        input_message: LlmApiMessage,
+        tools: List[Tool] = None,
+    ) -> LlmApiMessage:
+        """将 input_message 追加到历史后发起一轮 LLM 调用，返回原始 assistant 消息（不处理 tool_calls）。"""
+        self._history.append(input_message)
+        return await self._infer(tools)
 
     async def chat(
         self,
-        messages: List[LlmApiMessage],
+        input_message: LlmApiMessage,
+        tools: List[Tool] = None,
         function_executor: callable = None,
         max_function_calls: int = 5,
     ) -> LlmApiMessage:
-        """输入上下文消息列表，经 function calling 循环后返回最终的 assistant LlmApiMessage。"""
-        history: List[LlmApiMessage] = list(messages)
+        """将 input_message 追加到历史后自动执行 tool calls 循环，直到返回文本输出。"""
+        self._history.append(input_message)
 
         for _ in range(max_function_calls):
-            ctx = AgentDialogContext(
-                system_prompt=self.system_prompt,
-                messages=history,
-                tools=self.tools or None,
-            )
-            response = await llm_service.infer(self.model, ctx)
-
-            assistant_message = response.choices[0].message
-            history.append(assistant_message)
+            assistant_message = await self._infer(tools)
+            self._history.append(assistant_message)
 
             if not assistant_message.tool_calls:
                 return assistant_message
@@ -67,7 +88,7 @@ class Agent:
                 else:
                     result = "函数执行器未配置"
 
-                history.append(LlmApiMessage.tool_result(tool_call.id, result))
+                self._history.append(LlmApiMessage.tool_result(tool_call.id, result))
 
                 if function_name == "send_chat_msg":
                     sent_msg = True
@@ -80,7 +101,7 @@ class Agent:
         return assistant_message
 
 
-def init(agents_config: list, rooms_config: list, tools: List[Tool] = None) -> None:
+def init(agents_config: list, rooms_config: list) -> None:
     """根据配置列表为每个房间独立创建 Agent 实例。"""
     global _agents_by_room
     _agents_by_room = {}
@@ -97,7 +118,7 @@ def init(agents_config: list, rooms_config: list, tools: List[Tool] = None) -> N
             prompt = load_prompt(cfg["prompt_file"])
             prompt = prompt.replace("{participants}", "、".join(other_names))
             prompt = prompt.replace("{room_name}", room_name)
-            room_agents.append(Agent(name=name, system_prompt=prompt, model=cfg["model"], tools=tools))
+            room_agents.append(Agent(name=name, system_prompt=prompt, model=cfg["model"]))
         _agents_by_room[room_name] = room_agents
         logger.info(f"[{room_name}] 已创建 {len(room_agents)} 个 Agent: {member_names}")
 
