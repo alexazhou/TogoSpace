@@ -47,13 +47,7 @@ async def _run_room(room_name: str, max_turns: int) -> None:
         logger.info(f"[{room_name}]\n--- 第 {turn} 轮 ({current_agent.name}) ---")
 
         room: ChatRoom = chat_room.get_room(room_name)
-        all_messages: List[LlmApiMessage] = [LlmApiMessage.model_validate(m) for m in room.get_context_messages()]
-        history_messages: List[LlmApiMessage] = all_messages[:-1]
-        latest_message: Optional[LlmApiMessage] = all_messages[-1] if all_messages else None
-
-        if latest_message is None:
-            logger.warning(f"[{room_name}] 消息为空，跳过本轮")
-            continue
+        current_agent.sync_room(room)
 
         try:
             agent_context: ChatContext = ChatContext(
@@ -67,9 +61,7 @@ async def _run_room(room_name: str, max_turns: int) -> None:
                 last_called["name"] = name
                 return agent_tools.run_tool_call(name, args, context=_ctx)
 
-            current_agent.set_messages(history_messages)
             response: LlmApiMessage = await current_agent.chat(
-                input_message=latest_message,
                 tools=agent_tools.get_tools(),
                 function_executor=executor,
                 should_stop=lambda msg: last_called["name"] == "send_chat_msg",

@@ -2,13 +2,15 @@ from typing import Callable, Dict, List, Optional
 import logging
 
 import service.llm_service as llm_service
-from model.chat_model import AgentDialogContext
+from model.chat_model import AgentDialogContext, ChatMessage
+from service.chat_room_service import ChatRoom
 from util.llm_api_util import OpenaiLLMApiRole, LlmApiMessage, Tool
 from util.config_util import load_prompt
 
 logger = logging.getLogger(__name__)
 
-_agents_by_room: Dict[str, List["Agent"]] = {}
+_agents: Dict[str, "Agent"] = {}
+_room_agents: Dict[str, List[str]] = {}  # room_name → agent names (ordered)
 
 
 class Agent:
@@ -18,15 +20,19 @@ class Agent:
         self.model = model
         self._history: List[LlmApiMessage] = []
 
-    def set_messages(self, messages: List[LlmApiMessage]) -> None:
-        """设置内部历史消息。"""
-        self._history = list(messages)
+    def sync_room(self, room: ChatRoom) -> None:
+        """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
+        new_msgs: List[ChatMessage] = room.get_unread_messages(self.name)
+        for msg in new_msgs:
+            if msg.sender_name == self.name:
+                continue
+            if msg.sender_name == "system":
+                self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.SYSTEM, content=msg.content))
+            else:
+                self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"{msg.sender_name}: {msg.content}"))
+        self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"系统提示：当前进入到 {room.name} 房间，请在 {room.name} 房间发言"))
 
-    def get_messages(self) -> List[LlmApiMessage]:
-        """返回当前内部历史消息。"""
-        return list(self._history)
-
-    async def _infer(self, tools: List[Tool]) -> LlmApiMessage:
+    async def _infer(self, tools: Optional[List[Tool]]) -> LlmApiMessage:
         """基于当前 _history 发起一次 LLM 调用，返回 assistant 消息。"""
         assert self._history and self._history[-1].role in (OpenaiLLMApiRole.USER, OpenaiLLMApiRole.TOOL, OpenaiLLMApiRole.SYSTEM), \
             f"[{self.name}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
@@ -38,28 +44,16 @@ class Agent:
         response = await llm_service.infer(self.model, ctx)
         return response.choices[0].message
 
-    async def call_once(
-        self,
-        input_message: LlmApiMessage,
-        tools: Optional[List[Tool]] = None,
-    ) -> LlmApiMessage:
-        """将 input_message 追加到历史后发起一轮 LLM 调用，返回原始 assistant 消息（不处理 tool_calls）。"""
-        self._history.append(input_message)
-        return await self._infer(tools)
-
     async def chat(
         self,
-        input_message: LlmApiMessage,
         tools: Optional[List[Tool]] = None,
         function_executor: Optional[Callable[[str, str], str]] = None,
         should_stop: Optional[Callable[[LlmApiMessage], bool]] = None,
         max_function_calls: int = 5,
     ) -> LlmApiMessage:
-        """将 input_message 追加到历史后自动执行 tool calls 循环，直到返回文本输出。
+        """基于当前 _history 自动执行 tool calls 循环，直到返回文本输出。
         should_stop: 每次 tool 执行后调用，接收最后一条消息，返回 True 时立即终止循环。
         """
-        self._history.append(input_message)
-
         for _ in range(max_function_calls):
             assistant_message: LlmApiMessage = await self._infer(tools)
             self._history.append(assistant_message)
@@ -91,33 +85,43 @@ class Agent:
 
 
 def init(agents_config: list, rooms_config: list) -> None:
-    """根据配置列表为每个房间独立创建 Agent 实例。"""
-    global _agents_by_room
-    _agents_by_room = {}
+    """为每个 Agent 创建单一实例，按房间配置建立成员映射。"""
+    global _agents, _room_agents
+    _agents = {}
+    _room_agents = {}
 
     agent_defs: Dict[str, dict] = {cfg["name"]: cfg for cfg in agents_config}
 
+    # 收集每个 Agent 跨所有房间的其他参与者
+    agent_peers: Dict[str, set] = {name: set() for name in agent_defs}
+    for room in rooms_config:
+        member_names: List[str] = room["agents"]
+        for name in member_names:
+            agent_peers[name].update(n for n in member_names if n != name)
+
+    for name, cfg in agent_defs.items():
+        prompt: str = load_prompt(cfg["prompt_file"])
+        prompt = prompt.replace("{participants}", "、".join(sorted(agent_peers[name])))
+        _agents[name] = Agent(name=name, system_prompt=prompt, model=cfg["model"])
+
     for room in rooms_config:
         room_name: str = room["name"]
-        member_names: List[str] = room["agents"]
-        room_agents: List[Agent] = []
-        for name in member_names:
-            cfg: dict = agent_defs[name]
-            other_names: List[str] = [n for n in member_names if n != name]
-            prompt: str = load_prompt(cfg["prompt_file"])
-            prompt = prompt.replace("{participants}", "、".join(other_names))
-            prompt = prompt.replace("{room_name}", room_name)
-            room_agents.append(Agent(name=name, system_prompt=prompt, model=cfg["model"]))
-        _agents_by_room[room_name] = room_agents
-        logger.info(f"[{room_name}] 已创建 {len(room_agents)} 个 Agent: {member_names}")
+        _room_agents[room_name] = room["agents"]
+        logger.info(f"[{room_name}] 参与者: {room['agents']}")
 
 
 def get_agents(room_name: str) -> List[Agent]:
-    """返回指定房间已初始化的 Agent 列表，房间不存在时返回空列表。"""
-    return _agents_by_room.get(room_name, [])
+    """返回指定房间的 Agent 列表（按配置顺序）。"""
+    return [_agents[n] for n in _room_agents.get(room_name, []) if n in _agents]
+
+
+def get_all_rooms(agent_name: str) -> List[str]:
+    """返回指定 Agent 参与的所有房间名列表。"""
+    return [room for room, names in _room_agents.items() if agent_name in names]
 
 
 def close() -> None:
     """清空 Agent 字典，程序退出前调用。"""
-    global _agents_by_room
-    _agents_by_room = {}
+    global _agents, _room_agents
+    _agents = {}
+    _room_agents = {}
