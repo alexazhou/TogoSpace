@@ -23,13 +23,14 @@ class Agent:
     def sync_room(self, room: ChatRoom) -> None:
         """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
         new_msgs: List[ChatMessage] = room.get_unread_messages(self.name)
+        logger.info(f"[{self.name}] 同步 {room.name} 房间：{len(new_msgs)} 条新消息")
         for msg in new_msgs:
             if msg.sender_name == self.name:
                 continue
             if msg.sender_name == "system":
-                self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.SYSTEM, content=msg.content))
+                self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.SYSTEM, content=f"{room.name} 房间系统消息: {msg.content}"))
             else:
-                self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"{msg.sender_name}: {msg.content}"))
+                self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}"))
         self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"系统提示：当前进入到 {room.name} 房间，请在 {room.name} 房间发言"))
 
     async def _infer(self, tools: Optional[List[Tool]]) -> LlmApiMessage:
