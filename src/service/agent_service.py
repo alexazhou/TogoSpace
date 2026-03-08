@@ -3,7 +3,7 @@ import logging
 
 import service.llm_service as llm_service
 from model.chat_model import AgentDialogContext
-from util.llm_api_util import LlmApiMessage, Tool
+from util.llm_api_util import OpenaiLLMApiRole, LlmApiMessage, Tool
 from util.config_util import load_prompt
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,8 @@ class Agent:
 
     async def _infer(self, tools: List[Tool]) -> LlmApiMessage:
         """基于当前 _history 发起一次 LLM 调用，返回 assistant 消息。"""
+        assert self._history and self._history[-1].role in (OpenaiLLMApiRole.USER, OpenaiLLMApiRole.TOOL), \
+            f"[{self.name}] _infer 前最后一条消息必须是 user 或 tool，当前为: {self._history[-1].role if self._history else 'empty'}"
         ctx = AgentDialogContext(
             system_prompt=self.system_prompt,
             messages=self._history,
@@ -79,7 +81,7 @@ class Agent:
                     break
 
             if sent_msg:
-                return LlmApiMessage.text("assistant", "")
+                return LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, "")
 
         logger.warning(f"[{self.name}] 达到最大函数调用次数 {max_function_calls}")
         return assistant_message
