@@ -33,11 +33,11 @@ src/
 
 ## 三层架构规则
 
-| 层 | 可 import | 说明 |
-|----|-----------|------|
-| `util` | 标准库 + 第三方 | 无状态，不依赖 model/service |
-| `model` | util + 标准库 + 第三方 | 纯数据定义（dataclass/pydantic） |
-| `service` | model + util + 标准库 + 第三方 | 有状态类 |
+| 层 | 可 import | 说明                                |
+|----|-----------|-----------------------------------|
+| `util` | 标准库 + 第三方 | 无状态(或者无需外部管理状态)，不依赖 model/service |
+| `model` | util + 标准库 + 第三方 | 纯数据定义（dataclass/pydantic）         |
+| `service` | model + util + 标准库 + 第三方 | 有状态类                              |
 
 同层之间可以互相引用。禁止下层依赖上层（service 不能被 model/util 引用）。
 
