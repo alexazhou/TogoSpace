@@ -1,6 +1,5 @@
-from typing import Dict, List, Optional
+from typing import Dict, List
 import logging
-import json
 
 import service.llm_service as llm_service
 from model.chat_model import AgentDialogContext
@@ -37,20 +36,12 @@ class Agent:
         response = await llm_service.infer(self.model, ctx)
         return response.choices[0].message
 
-    async def call_once(
-        self,
-        input_message: LlmApiMessage,
-        tools: List[Tool] = None,
-    ) -> LlmApiMessage:
+    async def call_once(self, input_message: LlmApiMessage, tools: List[Tool] = None) -> LlmApiMessage:
         """将 input_message 追加到历史后发起一轮 LLM 调用，返回原始 assistant 消息（不处理 tool_calls）。"""
         self._history.append(input_message)
         return await self._infer(tools)
 
-    async def chat(
-        self,
-        input_message: LlmApiMessage,
-        tools: List[Tool] = None,
-        function_executor: callable = None,
+    async def chat(self, input_message: LlmApiMessage, tools: List[Tool] = None, function_executor: callable = None,
         max_function_calls: int = 5,
     ) -> LlmApiMessage:
         """将 input_message 追加到历史后自动执行 tool calls 循环，直到返回文本输出。"""
@@ -70,23 +61,8 @@ class Agent:
                 function_name = tool_call.function.get("name")
                 function_args = tool_call.function.get("arguments", {})
 
-                if isinstance(function_args, str):
-                    try:
-                        function_args = json.loads(function_args)
-                    except json.JSONDecodeError:
-                        function_args = {}
-
-                logger.info(f"[{self.name}] 调用函数: {function_name}, 参数: {function_args}")
-
-                if function_executor:
-                    try:
-                        result = function_executor(function_name, function_args)
-                        logger.info(f"[{self.name}] 函数执行结果: {result}")
-                    except Exception as e:
-                        logger.error(f"[{self.name}] 函数执行失败: {e}")
-                        result = f"函数执行失败: {str(e)}"
-                else:
-                    result = "函数执行器未配置"
+                assert function_executor is not None, "function_executor 未配置"
+                result = function_executor(function_name, function_args)
 
                 self._history.append(LlmApiMessage.tool_result(tool_call.id, result))
 

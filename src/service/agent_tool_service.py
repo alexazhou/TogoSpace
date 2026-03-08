@@ -1,6 +1,7 @@
 import inspect
+import json
 import logging
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from util.llm_api_util import Tool, Function, FunctionParameter
 from model.chat_context import ChatContext
@@ -45,6 +46,30 @@ def close() -> None:
     """清空工具列表，程序退出前调用。"""
     global _tools
     _tools = []
+
+
+def run_tool_call(
+    function_name: str,
+    function_args: Union[str, dict],
+    context: Optional[ChatContext] = None,
+) -> str:
+    """解析 function_args（字符串或 dict）并执行函数，返回结果字符串。"""
+    if isinstance(function_args, str):
+        try:
+            args = json.loads(function_args)
+        except json.JSONDecodeError:
+            args = {}
+    else:
+        args = function_args
+
+    logging.getLogger(__name__).info(f"调用函数: {function_name}, 参数: {args}")
+    try:
+        result = execute_function(function_name, args, context=context)
+        logging.getLogger(__name__).info(f"函数执行结果: {result}")
+        return result
+    except Exception as e:
+        logging.getLogger(__name__).error(f"函数执行失败: {e}")
+        return f"函数执行失败: {str(e)}"
 
 
 def execute_function(func_name: str, args: dict, context: Optional[ChatContext] = None) -> str:

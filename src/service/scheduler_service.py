@@ -62,7 +62,7 @@ async def _run_room(room_name: str, max_turns: int) -> None:
             response = await current_agent.chat(
                 input_message=latest_message,
                 tools=agent_tools.get_tools(),
-                function_executor=lambda name, args, _ctx=agent_context: agent_tools.execute_function(
+                function_executor=lambda name, args, _ctx=agent_context: agent_tools.run_tool_call(
                     name, args, context=_ctx
                 ),
                 max_function_calls=_max_function_calls,
