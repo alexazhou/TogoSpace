@@ -2,8 +2,9 @@ from typing import Dict, List, Optional
 import logging
 import json
 
-import service.llm_api_service as api_client
-from model.llm_api_model import LlmApiMessage, Tool
+import service.llm_service as llm_service
+from model.chat_model import AgentDialogContext
+from util.llm_api_util import LlmApiMessage, Tool
 from util.config_util import load_prompt
 
 logger = logging.getLogger(__name__)
@@ -25,17 +26,15 @@ class Agent:
         max_function_calls: int = 5,
     ) -> LlmApiMessage:
         """输入上下文消息列表，经 function calling 循环后返回最终的 assistant LlmApiMessage。"""
-        history: List[LlmApiMessage] = [
-            LlmApiMessage.text("system", self.system_prompt),
-            *messages,
-        ]
+        history: List[LlmApiMessage] = list(messages)
 
         for _ in range(max_function_calls):
-            response = await api_client.send_request(
-                model=self.model,
+            ctx = AgentDialogContext(
+                system_prompt=self.system_prompt,
                 messages=history,
                 tools=self.tools or None,
             )
+            response = await llm_service.infer(self.model, ctx)
 
             assistant_message = response.choices[0].message
             history.append(assistant_message)

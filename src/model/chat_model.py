@@ -1,5 +1,10 @@
-from dataclasses import dataclass
+from __future__ import annotations
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import TYPE_CHECKING, List, Optional
+
+if TYPE_CHECKING:
+    from util.llm_api_util import LlmApiMessage, Tool
 
 
 @dataclass
@@ -8,3 +13,11 @@ class ChatMessage:
     sender_name: str
     content: str
     send_time: datetime
+
+
+@dataclass
+class AgentDialogContext:
+    """Agent 发起一次 LLM 请求所需的完整上下文：system prompt + 对话历史 + 模型参数"""
+    system_prompt: str
+    messages: List[LlmApiMessage]
+    tools: Optional[List[Tool]] = field(default=None)

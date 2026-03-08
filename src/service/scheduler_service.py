@@ -4,7 +4,7 @@ import logging
 import service.agent_service as agent_service
 import service.chat_room_service as chat_room
 import service.agent_tool_service as agent_tools
-from model.llm_api_model import LlmApiMessage
+from util.llm_api_util import LlmApiMessage
 from model.chat_context import ChatContext
 
 logger = logging.getLogger(__name__)
