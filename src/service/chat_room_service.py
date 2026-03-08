@@ -11,6 +11,14 @@ class ChatRoom:
         self.name = name
         self.messages: List[ChatMessage] = []
         self.initial_topic = initial_topic
+        self._agent_read_index: Dict[str, int] = {}
+
+    def get_unread_messages(self, agent_name: str) -> List[ChatMessage]:
+        """返回 agent_name 尚未读取的新消息，并推进其读取位置。"""
+        read_idx: int = self._agent_read_index.get(agent_name, 0)
+        new_msgs: List[ChatMessage] = self.messages[read_idx:]
+        self._agent_read_index[agent_name] = len(self.messages)
+        return new_msgs
 
     def add_message(self, sender: str, content: str) -> None:
         message = ChatMessage(
