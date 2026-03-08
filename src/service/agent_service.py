@@ -2,6 +2,7 @@ from typing import Callable, Dict, List, Optional
 import logging
 
 import service.llm_service as llm_service
+from constants import TurnStatus, TurnCheckResult
 from model.chat_model import AgentDialogContext, ChatMessage
 from service.chat_room_service import ChatRoom
 from util.llm_api_util import OpenaiLLMApiRole, LlmApiMessage, Tool
@@ -25,10 +26,10 @@ class Agent:
         new_msgs: List[ChatMessage] = room.get_unread_messages(self.name)
         logger.info(f"[{self.name}] 同步 {room.name} 房间：{len(new_msgs)} 条新消息")
         for msg in new_msgs:
-            if msg.sender_name == self.name:
-                continue
+            #if msg.sender_name == self.name:
+            #    continue
             if msg.sender_name == "system":
-                self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.SYSTEM, content=f"{room.name} 房间系统消息: {msg.content}"))
+                self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}"))
             else:
                 self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}"))
         self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"系统提示：当前进入到 {room.name} 房间，请在 {room.name} 房间发言"))
@@ -49,22 +50,28 @@ class Agent:
         self,
         tools: Optional[List[Tool]] = None,
         function_executor: Optional[Callable[[str, str], str]] = None,
-        should_stop: Optional[Callable[[LlmApiMessage], bool]] = None,
+        turn_checker: Optional[Callable[[LlmApiMessage], TurnCheckResult]] = None,
         max_function_calls: int = 5,
     ) -> LlmApiMessage:
-        """基于当前 _history 自动执行 tool calls 循环，直到返回文本输出。
-        should_stop: 每次 tool 执行后调用，接收最后一条消息，返回 True 时立即终止循环。
+        """基于当前 _history 自动执行 tool calls 循环。
+        turn_checker: 每次 LLM 响应或 tool 执行后调用，根据返回的 TurnCheckResult 决定继续、终止或注入提示重试。
         """
         for _ in range(max_function_calls):
             assistant_message: LlmApiMessage = await self._infer(tools)
             self._history.append(assistant_message)
 
             if not assistant_message.tool_calls:
+                if turn_checker:
+                    check: TurnCheckResult = turn_checker(assistant_message)
+                    if check.status == TurnStatus.ERROR:
+                        logger.warning(f"[{self.name}] checker 返回 ERROR，注入提示重试")
+                        self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, check.error_hint))
+                        continue
                 return assistant_message
 
             logger.info(f"[{self.name}] 检测到 {len(assistant_message.tool_calls)} 个工具调用")
 
-            stopped: bool = False
+            recheck: bool = False
             for tool_call in assistant_message.tool_calls:
                 function_name: str = tool_call.function.get("name")
                 function_args: str = tool_call.function.get("arguments", "")
@@ -72,14 +79,21 @@ class Agent:
                 assert function_executor is not None, "function_executor 未配置"
                 result: str = function_executor(function_name, function_args)
 
-                self._history.append(LlmApiMessage.tool_result(tool_call.id, result))
+                tool_result_msg: LlmApiMessage = LlmApiMessage.tool_result(tool_call.id, result)
+                self._history.append(tool_result_msg)
 
-                if should_stop and should_stop(self._history[-1]):
-                    stopped = True
-                    break
+                if turn_checker:
+                    check = turn_checker(tool_result_msg)
+                    if check.status == TurnStatus.SUCCESS:
+                        return LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, "")
+                    if check.status == TurnStatus.ERROR:
+                        logger.warning(f"[{self.name}] checker 返回 ERROR，注入提示重试")
+                        self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, check.error_hint))
+                        recheck = True
+                        break
 
-            if stopped:
-                return LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, "")
+            if recheck:
+                continue
 
         logger.warning(f"[{self.name}] 达到最大函数调用次数 {max_function_calls}")
         return assistant_message
