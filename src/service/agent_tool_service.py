@@ -2,7 +2,7 @@ import inspect
 import logging
 from typing import List, Optional
 
-from model.api_model import Tool, Function, FunctionParameter
+from model.llm_api_model import Tool, Function, FunctionParameter
 from model.chat_context import ChatContext
 from util.tool_loader_util import get_function_metadata
 from util.tool_util import FUNCTION_REGISTRY

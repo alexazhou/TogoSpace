@@ -4,7 +4,7 @@ import logging
 import service.agent_service as agent_service
 import service.chat_room_service as chat_room
 import service.agent_tool_service as agent_tools
-from model.api_model import Message
+from model.llm_api_model import LlmApiMessage
 from model.chat_context import ChatContext
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ async def _run_room(room_name: str, max_turns: int) -> None:
         logger.info(f"[{room_name}]\n--- 第 {turn} 轮 ({current_agent.name}) ---")
 
         context_messages = [
-            Message.model_validate(m)
+            LlmApiMessage.model_validate(m)
             for m in chat_room.get_room(room_name).get_context_messages()
         ]
 
