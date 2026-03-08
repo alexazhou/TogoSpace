@@ -92,9 +92,9 @@ def get_agent_list(_context: "ChatContext" = None) -> List[str]:
     senders = []
     seen = set()
     for msg in _context.chat_room.messages:
-        if msg.sender != "system" and msg.sender not in seen:
-            seen.add(msg.sender)
-            senders.append(msg.sender)
+        if msg.sender_name != "system" and msg.sender_name not in seen:
+            seen.add(msg.sender_name)
+            senders.append(msg.sender_name)
     return senders
 
 
