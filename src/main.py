@@ -47,7 +47,7 @@ async def main():
     llm_api_util.init()
     llm_service.init(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     agent_tools.init()
-    agent_service.init(config["agents"], rooms_config, tools=agent_tools.get_tools())
+    agent_service.init(config["agents"], rooms_config)
     scheduler.init(
         rooms_config=rooms_config,
         max_function_calls=config.get("max_function_calls", 5),
