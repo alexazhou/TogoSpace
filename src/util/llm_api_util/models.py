@@ -7,6 +7,7 @@ from constants import OpenaiLLMApiRole
 # ========== 主要类 ==========
 
 class LlmApiMessage(BaseModel):
+    # 对应 openai 格式
     role: OpenaiLLMApiRole = Field(..., description="消息角色")
     content: Optional[str] = Field(None, description="消息内容")
     reasoning_content: Optional[str] = Field(None, description="推理内容（如 CoT 模型），仅响应侧使用")
