@@ -1,6 +1,6 @@
 import util.llm_api_util as llm_api
 from model.chat_model import AgentDialogContext
-from util.llm_api_util import LlmApiMessage, LlmApiRequest, LlmApiResponse
+from util.llm_api_util import OpenaiLLMApiRole, LlmApiMessage, LlmApiRequest, LlmApiResponse
 
 _api_key: str = ""
 _base_url: str = ""
@@ -14,7 +14,7 @@ def init(api_key: str, base_url: str) -> None:
 
 async def infer(model: str, ctx: AgentDialogContext) -> LlmApiResponse:
     """根据 AgentDialogContext 组装请求并调用 LLM 推理接口。"""
-    messages = [LlmApiMessage.text("system", ctx.system_prompt), *ctx.messages]
+    messages = [LlmApiMessage.text(OpenaiLLMApiRole.SYSTEM, ctx.system_prompt), *ctx.messages]
     request = LlmApiRequest(
         model=model,
         messages=messages,

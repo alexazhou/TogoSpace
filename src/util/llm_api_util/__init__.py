@@ -1,3 +1,4 @@
+from constants import OpenaiLLMApiRole
 from .models import (
     LlmApiMessage,
     LlmApiRequest,
