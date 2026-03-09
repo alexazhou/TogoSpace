@@ -1,5 +1,7 @@
 import inspect
 import logging
+
+logger = logging.getLogger(__name__)
 from typing import Any, Dict, List, get_type_hints, get_origin, get_args, Literal
 from types import UnionType
 from typing import Union
@@ -107,7 +109,7 @@ def build_tools(registry: dict) -> List[Tool]:
                 )
             )
             tools.append(tool)
-            logging.info(f"Loaded function: {func_name}")
+            logger.info(f"Loaded function: {func_name}")
         except Exception as e:
-            logging.error(f"Error loading function {func_name}: {e}")
+            logger.error(f"Error loading function {func_name}: {e}")
     return tools
