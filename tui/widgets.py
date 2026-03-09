@@ -1,5 +1,5 @@
 from textual.app import ComposeResult
-from textual.containers import ScrollableContainer, Vertical
+from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.widget import Widget
 from textual.widgets import Label, ListItem, ListView, Static
 
@@ -16,7 +16,7 @@ def _get_side(sender: str, agent_order: list[str]) -> str:
     return "left" if idx % 2 == 0 else "right"
 
 
-class MessageBubble(Widget):
+class MessageBubble(Vertical):
     def __init__(self, sender: str, content: str, side: str) -> None:
         super().__init__()
         self._sender = sender
@@ -27,11 +27,17 @@ class MessageBubble(Widget):
         if self._side == "center":
             yield Static(f"[dim italic]{self._content}[/]", classes="bubble-system")
         elif self._side == "right":
-            yield Static(f"[bold cyan]{self._sender}[/bold cyan]", classes="sender sender-right")
-            yield Static(self._content, classes="bubble bubble-right")
+            with Horizontal(classes="bubble-row"):
+                yield Static("", classes="bubble-spacer")
+                with Vertical(classes="bubble-inner"):
+                    yield Static(f"[bold cyan]{self._sender}[/bold cyan]", classes="sender sender-right")
+                    yield Static(self._content, classes="bubble bubble-right")
         else:
-            yield Static(f"[bold green]{self._sender}[/bold green]", classes="sender sender-left")
-            yield Static(self._content, classes="bubble bubble-left")
+            with Horizontal(classes="bubble-row"):
+                with Vertical(classes="bubble-inner"):
+                    yield Static(f"[bold green]{self._sender}[/bold green]", classes="sender sender-left")
+                    yield Static(self._content, classes="bubble bubble-left")
+                yield Static("", classes="bubble-spacer")
 
 
 class MessageView(ScrollableContainer):
