@@ -10,6 +10,10 @@ class OpenaiLLMApiRole(str, Enum):
     TOOL = "tool"
 
 
+class MessageBusTopic(str, Enum):
+    ROOM_AGENT_TURN = "room.agent_turn"  # 轮到某 Agent 发言；payload: agent_name, room_name
+
+
 class RoomState(Enum):
     SCHEDULING = "scheduling"  # 房间正在调度，有事件待处理
     IDLE = "idle"              # 房间空闲，无更多事件
