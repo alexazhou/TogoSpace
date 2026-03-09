@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import logging
 import os
@@ -31,19 +32,19 @@ def _setup_logger() -> None:
         root_logger.addHandler(handler)
 
 
-async def main():
+async def main(config_path: str = None, llm_config_path: str = None, port: int = 8080):
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     _setup_logger()
     logger = logging.getLogger(__name__)
 
-    config = load_config()
+    config = load_config(config_path)
 
     rooms_config = config["chat_rooms"]
     for r in rooms_config:
         chat_room.init(name=r["name"], initial_topic=r["initial_topic"])
 
     message_bus.init()
-    llm_cfg = load_llm_service_config()
+    llm_cfg = load_llm_service_config(llm_config_path)
     llm_api_util.init()
     llm_service.init(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     func_tool_service.init()
@@ -61,8 +62,8 @@ async def main():
 
     init_ws()
     web_server = tornado.httpserver.HTTPServer(make_app())
-    web_server.listen(8080, "0.0.0.0")
-    logger.info("Web API 服务已启动: http://0.0.0.0:8080")
+    web_server.listen(port, "0.0.0.0")
+    logger.info(f"Web API 服务已启动: http://0.0.0.0:{port}")
 
     try:
         await asyncio.gather(
@@ -79,4 +80,9 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default=None, help="agents 配置文件路径")
+    parser.add_argument("--llm-config", default=None, dest="llm_config", help="LLM 服务配置文件路径")
+    parser.add_argument("--port", type=int, default=8080, help="HTTP 监听端口")
+    args = parser.parse_args()
+    asyncio.run(main(config_path=args.config, llm_config_path=args.llm_config, port=args.port))
