@@ -1,28 +1,17 @@
 """unit tests for service.room_service"""
 import pytest
-from unittest.mock import patch, MagicMock
 
 import service.room_service as room_service
 import service.message_bus as message_bus
-from service.room_service import ChatRoom
 from constants import RoomState, MessageBusTopic
+from base import ServiceTestCase
 
 
-@pytest.fixture(autouse=True)
-def clean():
-    message_bus.init()
-    room_service.close_all()
-    yield
-    room_service.close_all()
-    message_bus.stop()
-
-
-class TestChatRoom:
+class TestChatRoom(ServiceTestCase):
     def setup_method(self):
+        super().setup_method()
         room_service.init("test_room")
         self.room = room_service.get_room("test_room")
-
-    # ---------- basic message ----------
 
     def test_add_message(self):
         self.room.add_message("alice", "你好")
@@ -46,11 +35,9 @@ class TestChatRoom:
 
     def test_get_unread_messages_independent_per_agent(self):
         self.room.add_message("alice", "msg")
-        self.room.get_unread_messages("alice")   # alice reads
-        msgs_bob = self.room.get_unread_messages("bob")  # bob hasn't read yet
+        self.room.get_unread_messages("alice")
+        msgs_bob = self.room.get_unread_messages("bob")
         assert len(msgs_bob) == 1
-
-    # ---------- format_log ----------
 
     def test_format_log(self):
         self.room.add_message("alice", "你好")
@@ -61,11 +48,10 @@ class TestChatRoom:
         assert "bob" in log and "世界" in log
 
 
-class TestRoomServiceFunctions:
+class TestRoomServiceFunctions(ServiceTestCase):
     def test_init_creates_room(self):
         room_service.init("myroom")
-        room = room_service.get_room("myroom")
-        assert room.name == "myroom"
+        assert room_service.get_room("myroom").name == "myroom"
 
     def test_get_room_not_found_raises(self):
         with pytest.raises(RuntimeError):
@@ -87,12 +73,11 @@ class TestRoomServiceFunctions:
         room_service.init("r2")
         room_service.setup_members("r1", ["alice", "bob"])
         room_service.setup_members("r2", ["alice", "charlie"])
-        rooms = room_service.get_rooms_for_agent("alice")
-        assert set(rooms) == {"r1", "r2"}
+        assert set(room_service.get_rooms_for_agent("alice")) == {"r1", "r2"}
         assert room_service.get_rooms_for_agent("bob") == ["r1"]
 
 
-class TestRoomTurnScheduling:
+class TestRoomTurnScheduling(ServiceTestCase):
     def test_setup_turns_publishes_first_agent(self):
         room_service.init("r")
         published = []
@@ -105,7 +90,6 @@ class TestRoomTurnScheduling:
         room_service.init("r")
         room = room_service.get_room("r")
         room.setup_turns(["alice", "bob"], max_turns=2)
-
         published = []
         message_bus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: published.append(m.payload))
         room.add_message("alice", "hi")
@@ -123,8 +107,7 @@ class TestRoomTurnScheduling:
         room_service.init("r")
         room = room_service.get_room("r")
         room.setup_turns(["alice"], max_turns=1)
-
         published = []
         message_bus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: published.append(m.payload))
         room.add_message("alice", "done")
-        assert len(published) == 0  # 已达上限，不再发布
+        assert len(published) == 0
