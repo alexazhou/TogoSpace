@@ -6,6 +6,47 @@ from textual.widgets import Label, ListItem, ListView, Static
 from api_client import MessageInfo, AgentInfo, RoomInfo
 
 
+def _char_width(ch: str) -> int:
+    cp = ord(ch)
+    return 2 if (
+        0x1100 <= cp <= 0x115F or 0x2E80 <= cp <= 0x303E
+        or 0x3040 <= cp <= 0xA4CF or 0xA960 <= cp <= 0xA97F
+        or 0xAC00 <= cp <= 0xD7FF or 0xF900 <= cp <= 0xFAFF
+        or 0xFE10 <= cp <= 0xFE1F or 0xFE30 <= cp <= 0xFE6F
+        or 0xFF01 <= cp <= 0xFF60 or 0xFFE0 <= cp <= 0xFFE6
+    ) else 1
+
+
+def _truncate_to_cols(text: str, max_cols: int) -> str:
+    """按显示列宽截断文字，超出时加 …。"""
+    result, used = "", 0
+    for ch in text:
+        w = _char_width(ch)
+        if used + w > max_cols - 1:
+            return result + "…"
+        result += ch
+        used += w
+    return result
+
+
+class PreviewLabel(Static):
+    """动态按自身宽度截断预览文字的单行 Label。"""
+
+    def __init__(self, text: str = "", **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._full_text = text
+
+    def set_preview(self, text: str) -> None:
+        self._full_text = text
+        self.refresh()
+
+    def render(self) -> str:
+        width = self.size.width
+        if width <= 0:
+            return self._full_text
+        return _truncate_to_cols(self._full_text, width)
+
+
 def _get_side(sender: str, agent_order: list[str]) -> str:
     if sender == "system":
         return "center"
@@ -87,7 +128,7 @@ class RoomPanel(Vertical):
             preview = last_previews.get(room.room_id, "暂无消息")
             card = Vertical(
                 Label(room.room_name, classes="room-card-name"),
-                Label(preview, classes="room-card-preview"),
+                PreviewLabel(preview, classes="room-card-preview"),
                 classes="room-card",
             )
             item = ListItem(card, id=f"room-{room.room_id}")
@@ -120,7 +161,7 @@ class RoomPanel(Vertical):
     def update_preview(self, room_id: str, preview: str) -> None:
         try:
             item = self.query_one(f"#room-{room_id}", ListItem)
-            item.query_one(".room-card-preview", Label).update(preview)
+            item.query_one(".room-card-preview", PreviewLabel).set_preview(preview)
         except Exception:
             pass
 

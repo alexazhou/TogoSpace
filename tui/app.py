@@ -10,12 +10,9 @@ from api_client import ApiClient, RoomInfo, WsEvent
 from widgets import MessageView, RoomPanel, StatusBar
 
 
-def _make_preview(sender: str, content: str, max_len: int = 12) -> str:
-    """生成单行预览：sender: content（截断到 max_len 个字符）。"""
-    text = content.replace("\n", " ")
-    if len(text) > max_len:
-        text = text[:max_len] + "…"
-    return f"{sender}: {text}"
+def _make_preview(sender: str, content: str) -> str:
+    """生成预览文字（换行替换为空格），截断由 PreviewLabel 动态处理。"""
+    return f"{sender}: {content.replace(chr(10), ' ')}"
 
 
 class WatcherApp(App):
