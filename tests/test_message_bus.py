@@ -1,18 +1,11 @@
 """unit tests for service.message_bus"""
-import pytest
 import service.message_bus as message_bus
 from service.message_bus import Message
 from constants import MessageBusTopic
+from base import ServiceTestCase
 
 
-@pytest.fixture(autouse=True)
-def clean():
-    message_bus.init()
-    yield
-    message_bus.stop()
-
-
-class TestMessageBus:
+class TestMessageBus(ServiceTestCase):
     def test_subscribe_and_publish(self):
         received = []
         message_bus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: received.append(m))
@@ -30,7 +23,6 @@ class TestMessageBus:
         assert calls == ["a", "b"]
 
     def test_no_subscribers_no_error(self):
-        # 没有订阅者也不应抛出异常
         message_bus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_name="x", room_name="y")
 
     def test_failing_subscriber_does_not_block_others(self):
