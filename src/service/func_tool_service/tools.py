@@ -1,8 +1,8 @@
-from typing import Literal, Optional, List, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from model.chat_context import ChatContext
+from __future__ import annotations
+from typing import Literal, Optional, List
 import ast
+
+from model.chat_context import ChatContext
 import datetime
 import logging
 import operator
@@ -82,7 +82,7 @@ def calculate(expression: str) -> str:
         return f"计算错误: {e}"
 
 
-def get_agent_list(_context: "ChatContext" = None) -> List[str]:
+def get_agent_list(_context: ChatContext = None) -> List[str]:
     """返回当前聊天室的 agent 列表（历史发言者，排除 system）
 
     """
@@ -98,7 +98,7 @@ def get_agent_list(_context: "ChatContext" = None) -> List[str]:
     return senders
 
 
-def create_chat(room_name: str, _context: "ChatContext" = None) -> str:
+def create_chat(room_name: str, _context: ChatContext = None) -> str:
     """切换到已存在的聊天室，返回房间名称；房间不存在则返回错误提示
 
     Args:
@@ -114,7 +114,7 @@ def create_chat(room_name: str, _context: "ChatContext" = None) -> str:
         return f"错误：聊天室 '{room_name}' 不存在"
 
 
-def send_chat_msg(chat_windows_name: str, msg: str, _context: "ChatContext" = None) -> str:
+def send_chat_msg(chat_windows_name: str, msg: str, _context: ChatContext = None) -> str:
     """向聊天窗口发送消息
 
     Args:
