@@ -121,6 +121,7 @@ def init(agents_config: list, rooms_config: list) -> None:
         prompt: str = load_prompt(cfg["prompt_file"])
         prompt = prompt.replace("{participants}", "、".join(sorted(agent_peers[name])))
         _agents[name] = Agent(name=name, system_prompt=prompt, model=cfg["model"])
+        logger.info(f"[{name}] 创建 Agent，model={cfg['model']}")
 
     for room in rooms_config:
         room_name: str = room["name"]
