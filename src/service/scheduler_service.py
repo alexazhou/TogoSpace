@@ -53,7 +53,7 @@ async def run() -> None:
         room = chat_room.get_room(r["name"])
         agents = agent_service.get_agents(r["name"])
         agent_names = [a.name for a in agents]
-        logger.info(f"[{r['name']}] 参与者: {agent_names}，最大轮次: {r['max_turns']}")
+        logger.info(f"[{r['name']}] 初始化轮次配置，最大轮次: {r['max_turns']}")
         room.setup_turns([a.name for a in agents], r["max_turns"])
 
     # 每当有 Task 完成，立刻将 _running 中新增的 Task 补入等待集合
