@@ -1,3 +1,4 @@
+import asyncio
 from typing import Callable, Dict, List, Optional
 import logging
 
@@ -20,6 +21,7 @@ class Agent:
         self.system_prompt = system_prompt
         self.model = model
         self._history: List[LlmApiMessage] = []
+        self.wait_event_queue: asyncio.Queue = asyncio.Queue()
 
     def sync_room(self, room: ChatRoom) -> None:
         """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
@@ -123,6 +125,11 @@ def init(agents_config: list, rooms_config: list) -> None:
         room_name: str = room["name"]
         _room_agents[room_name] = room["agents"]
         logger.info(f"[{room_name}] 参与者: {room['agents']}")
+
+
+def get_all_agents() -> List[Agent]:
+    """返回所有唯一 Agent 实例列表。"""
+    return list(_agents.values())
 
 
 def get_agents(room_name: str) -> List[Agent]:
