@@ -164,6 +164,21 @@ class WatcherApp(App):
         color: #8b949e;
     }
 
+    .agent-card {
+        width: 100%;
+        height: auto;
+        padding: 0 1;
+    }
+
+    .agent-name {
+        width: 1fr;
+    }
+
+    .agent-status {
+        width: auto;
+        text-align: right;
+    }
+
     StatusBar {
         height: 1;
         background: #161b22;
@@ -278,6 +293,7 @@ class WatcherApp(App):
 
         preview = _make_preview(event.sender, event.content)
         self.call_later(room_panel.update_preview, event.room_id, preview)
+        self._refresh_agent_status()
 
         if event.room_id == self._current_room_id:
             self._current_msg_count += 1
@@ -288,6 +304,15 @@ class WatcherApp(App):
         else:
             self._unread[event.room_id] = self._unread.get(event.room_id, 0) + 1
             self.call_later(room_panel.set_unread, event.room_id, self._unread[event.room_id])
+
+    @work(exclusive=False)
+    async def _refresh_agent_status(self) -> None:
+        try:
+            agents = await self._api.get_agents()
+            room_panel = self.query_one(RoomPanel)
+            self.call_later(room_panel.update_agent_status, agents)
+        except Exception:
+            pass
 
     @on(ListView.Selected, "#room-list")
     async def on_room_selected(self, event: ListView.Selected) -> None:

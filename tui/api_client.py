@@ -10,6 +10,7 @@ import aiohttp
 class AgentInfo:
     name: str
     model: str
+    status: str = "idle"  # "active" | "idle"
 
 
 @dataclass
@@ -52,7 +53,7 @@ class ApiClient:
         async with session.get(f"{self._base_url}/agents") as resp:
             resp.raise_for_status()
             data = await resp.json()
-        return [AgentInfo(name=a["name"], model=a["model"]) for a in data["agents"]]
+        return [AgentInfo(name=a["name"], model=a["model"], status=a.get("status", "idle")) for a in data["agents"]]
 
     async def get_rooms(self) -> list[RoomInfo]:
         session = self._get_session()

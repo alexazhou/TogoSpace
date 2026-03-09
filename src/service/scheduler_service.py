@@ -17,6 +17,10 @@ _active_agents: Set[str] = set()   # 有待处理事件或正在运行的 Agent
 _running: Dict[str, asyncio.Task] = {}
 
 
+def is_agent_active(agent_name: str) -> bool:
+    return agent_name in _active_agents
+
+
 def init(rooms_config: list, max_function_calls: int = 5) -> None:
     """初始化调度器，须在 run() 前调用一次。"""
     global _rooms_config, _max_function_calls
