@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List
 
+from service import message_bus
 from model.chat_model import ChatMessage
-from model.agent_event import RoomMessageEvent
-from constants import RoomState
+from constants import RoomState, MessageBusTopic
 
 
 class ChatRoom:
@@ -16,29 +16,25 @@ class ChatRoom:
         self.messages: List[ChatMessage] = []
         self.initial_topic = initial_topic
         self._agent_read_index: Dict[str, int] = {}
-        self._turn_agents: list = []
+        self._turn_agents: List[str] = []
         self._turn_index: int = 0
         self._max_turns: int = 0
         self._turn_pos: int = 0
         self._state: RoomState = RoomState.IDLE
-        self._on_event: Optional[Callable[[str], None]] = None
 
     @property
     def state(self) -> RoomState:
         return self._state
 
-    def setup_turns(self, agents: list, max_turns: int, on_event: Optional[Callable[[str], None]] = None) -> None:
-        """初始化轮次控制，并向第一位参与者推送初始事件。"""
-        self._on_event = on_event
-        self._turn_agents = agents
+    def setup_turns(self, agent_names: List[str], max_turns: int) -> None:
+        """初始化轮次控制，并向第一位参与者发布初始事件。"""
+        self._turn_agents = agent_names
         self._turn_index = 0
         self._max_turns = max_turns
         self._turn_pos = 0
-        if agents and max_turns > 0:
+        if agent_names and max_turns > 0:
             self._state = RoomState.SCHEDULING
-            agents[0].wait_event_queue.put_nowait(RoomMessageEvent(self.name))
-            if self._on_event:
-                self._on_event(agents[0].name)
+            message_bus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_name=agent_names[0], room_name=self.name)
 
     def get_unread_messages(self, agent_name: str) -> List[ChatMessage]:
         """返回 agent_name 尚未读取的新消息，并推进其读取位置。"""
@@ -70,10 +66,8 @@ class ChatRoom:
             self._state = RoomState.IDLE
             return
 
-        next_agent = self._turn_agents[self._turn_pos]
-        next_agent.wait_event_queue.put_nowait(RoomMessageEvent(self.name))
-        if self._on_event:
-            self._on_event(next_agent.name)
+        next_name = self._turn_agents[self._turn_pos]
+        message_bus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_name=next_name, room_name=self.name)
 
     def get_context(self, max_messages: int = 10) -> str:
         recent = self.messages[-max_messages:]

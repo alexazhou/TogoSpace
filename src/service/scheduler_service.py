@@ -2,13 +2,15 @@ import asyncio
 import logging
 from typing import Dict, List, Optional
 
+from service import message_bus
+from service.message_bus import Message
 from util.llm_api_util import LlmApiMessage
 from model.agent_event import RoomMessageEvent
 from model.chat_context import ChatContext
 from service import agent_service, room_service as chat_room, func_tool_service as agent_tools
 from service.agent_service import Agent
 from service.room_service import ChatRoom
-from constants import TurnStatus, TurnCheckResult
+from constants import MessageBusTopic, TurnStatus, TurnCheckResult
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,7 @@ def init(rooms_config: list, max_function_calls: int = 5) -> None:
     global _rooms_config, _max_function_calls
     _rooms_config = rooms_config
     _max_function_calls = max_function_calls
+    message_bus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
 
 
 def stop() -> None:
@@ -32,11 +35,14 @@ def stop() -> None:
     _running = {}
 
 
-def _on_agent_event(agent_name: str) -> None:
-    """收到事件通知：若该 Agent 当前未运行则创建 Task 加入运行列表。"""
+def _on_agent_turn(msg: Message) -> None:
+    """订阅 ROOM_AGENT_TURN：若该 Agent 当前未运行则创建 Task 加入运行列表。"""
+    agent_name: str = msg.payload["agent_name"]
+    room_name: str = msg.payload["room_name"]
+    agent = agent_service.get_agent(agent_name)
+    agent.wait_event_queue.put_nowait(RoomMessageEvent(room_name))
     existing = _running.get(agent_name)
     if existing is None or existing.done():
-        agent = agent_service.get_agent(agent_name)
         _running[agent_name] = asyncio.create_task(_run_agent(agent))
         logger.info(f"[{agent_name}] 加入运行列表")
 
@@ -51,7 +57,7 @@ async def run() -> None:
         agents = agent_service.get_agents(r["name"])
         agent_names = [a.name for a in agents]
         logger.info(f"[{r['name']}] 参与者: {agent_names}，最大轮次: {r['max_turns']}")
-        room.setup_turns(agents, r["max_turns"], on_event=_on_agent_event)
+        room.setup_turns([a.name for a in agents], r["max_turns"])
 
     # 循环 gather 直到所有 Task 完成
     # 每轮 gather 结束后，新创建的 Task 会在下一轮被拾取
