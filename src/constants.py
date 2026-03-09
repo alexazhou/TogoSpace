@@ -10,6 +10,11 @@ class OpenaiLLMApiRole(str, Enum):
     TOOL = "tool"
 
 
+class RoomState(Enum):
+    SCHEDULING = "scheduling"  # 房间正在调度，有事件待处理
+    IDLE = "idle"              # 房间空闲，无更多事件
+
+
 class TurnStatus(str, Enum):
     SUCCESS = "success"    # 本轮对话完成，停止循环
     CONTINUE = "continue"  # 继续执行 tool calls 循环
