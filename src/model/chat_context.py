@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from service.chat_room_service import ChatRoom
+from service.room_service import ChatRoom
 
 
 @dataclass

@@ -6,7 +6,7 @@ from util.llm_api_util import OpenaiLLMApiRole, LlmApiMessage, Tool
 from util.config_util import load_prompt
 from model.chat_model import AgentDialogContext, ChatMessage
 from service import llm_service
-from service.chat_room_service import ChatRoom
+from service.room_service import ChatRoom
 from constants import TurnStatus, TurnCheckResult
 
 logger = logging.getLogger(__name__)

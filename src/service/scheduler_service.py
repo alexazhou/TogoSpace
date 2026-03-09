@@ -5,9 +5,9 @@ from typing import Dict, List, Optional
 from util.llm_api_util import LlmApiMessage
 from model.agent_event import RoomMessageEvent
 from model.chat_context import ChatContext
-from service import agent_service, chat_room_service as chat_room, func_tool_service as agent_tools
+from service import agent_service, room_service as chat_room, func_tool_service as agent_tools
 from service.agent_service import Agent
-from service.chat_room_service import ChatRoom
+from service.room_service import ChatRoom
 from constants import TurnStatus, TurnCheckResult
 
 logger = logging.getLogger(__name__)
