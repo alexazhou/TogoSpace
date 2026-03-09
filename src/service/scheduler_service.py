@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _rooms_config: list = []
 _max_function_calls: int = 5
+_running: Dict[str, asyncio.Task] = {}
 
 
 def init(rooms_config: list, max_function_calls: int = 5) -> None:
@@ -27,43 +28,56 @@ def init(rooms_config: list, max_function_calls: int = 5) -> None:
 
 def stop() -> None:
     """重置调度器状态。"""
-    global _rooms_config, _max_function_calls
+    global _rooms_config, _max_function_calls, _running
     _rooms_config = []
     _max_function_calls = 5
+    _running = {}
+
+
+def _on_agent_event(agent_name: str) -> None:
+    """收到事件通知：若该 Agent 当前未运行则创建 Task 加入运行列表。"""
+    existing = _running.get(agent_name)
+    if existing is None or existing.done():
+        agent = agent_service.get_agent(agent_name)
+        _running[agent_name] = asyncio.create_task(_run_agent(agent))
+        logger.info(f"[{agent_name}] 加入运行列表")
 
 
 async def run() -> None:
-    """以 Agent 为中心的事件驱动调度：为每个房间初始化轮次，并发运行所有 Agent 的事件循环。"""
-    # 计算每个 Agent 期望收到的事件总数（每个房间的 max_turns 次）
-    expected: Dict[str, int] = {}
-    for r in _rooms_config:
-        agents = agent_service.get_agents(r["name"])
-        for a in agents:
-            expected[a.name] = expected.get(a.name, 0) + r["max_turns"]
+    """以 Agent 为中心的事件驱动调度。"""
+    global _running
+    _running = {}
 
-    # 为每个房间初始化轮次（推送首个事件）
     for r in _rooms_config:
         room = chat_room.get_room(r["name"])
         agents = agent_service.get_agents(r["name"])
         agent_names = [a.name for a in agents]
         logger.info(f"[{r['name']}] 参与者: {agent_names}，最大轮次: {r['max_turns']}")
-        room.setup_turns(agents, r["max_turns"])
+        room.setup_turns(agents, r["max_turns"], on_event=_on_agent_event)
 
-    # 并发启动所有 Agent 的事件循环
-    all_agents = agent_service.get_all_agents()
-    await asyncio.gather(*[_run_agent(a, expected.get(a.name, 0)) for a in all_agents])
+    # 循环 gather 直到所有 Task 完成
+    # 每轮 gather 结束后，新创建的 Task 会在下一轮被拾取
+    while True:
+        pending = [t for t in _running.values() if not t.done()]
+        if not pending:
+            break
+        await asyncio.gather(*pending, return_exceptions=True)
+        for name, task in list(_running.items()):
+            if task.done():
+                logger.info(f"[{name}] 从运行列表移除")
+                del _running[name]
 
-    # 打印所有房间聊天记录
     for r in _rooms_config:
         logger.info(f"\n{chat_room.get_room(r['name']).format_log()}")
 
 
-async def _run_agent(agent: Agent, count: int) -> None:
-    """消费 Agent 事件队列，处理 count 个事件后退出。"""
-    for _ in range(count):
-        event: RoomMessageEvent = await agent.wait_event_queue.get()
+async def _run_agent(agent: Agent) -> None:
+    """消费队列中当前所有事件，队列为空后退出。"""
+    while not agent.wait_event_queue.empty():
+        event: RoomMessageEvent = agent.wait_event_queue.get_nowait()
         await _handle_event(agent, event)
         agent.wait_event_queue.task_done()
+    logger.info(f"[{agent.name}] 队列为空，退出运行")
 
 
 async def _handle_event(agent: Agent, event: RoomMessageEvent) -> None:

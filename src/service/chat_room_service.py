@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 from datetime import datetime
 
 from model.chat_model import ChatMessage
-from model.agent_event import RoomMessageEvent
+from model.agent_event import RoomMessageEvent, RoomState
 
 
 class ChatRoom:
@@ -19,15 +19,25 @@ class ChatRoom:
         self._turn_index: int = 0
         self._max_turns: int = 0
         self._turn_pos: int = 0
+        self._state: RoomState = RoomState.IDLE
+        self._on_event: Optional[Callable[[str], None]] = None
 
-    def setup_turns(self, agents: list, max_turns: int) -> None:
+    @property
+    def state(self) -> RoomState:
+        return self._state
+
+    def setup_turns(self, agents: list, max_turns: int, on_event: Optional[Callable[[str], None]] = None) -> None:
         """初始化轮次控制，并向第一位参与者推送初始事件。"""
+        self._on_event = on_event
         self._turn_agents = agents
         self._turn_index = 0
         self._max_turns = max_turns
         self._turn_pos = 0
         if agents and max_turns > 0:
+            self._state = RoomState.SCHEDULING
             agents[0].wait_event_queue.put_nowait(RoomMessageEvent(self.name))
+            if self._on_event:
+                self._on_event(agents[0].name)
 
     def get_unread_messages(self, agent_name: str) -> List[ChatMessage]:
         """返回 agent_name 尚未读取的新消息，并推进其读取位置。"""
@@ -54,12 +64,15 @@ class ChatRoom:
             self._turn_index += 1
             self._turn_pos = 0
 
-        # 达到最大轮次 → 不再推送
+        # 达到最大轮次 → 房间进入空闲，不再推送
         if self._turn_index >= self._max_turns:
+            self._state = RoomState.IDLE
             return
 
         next_agent = self._turn_agents[self._turn_pos]
         next_agent.wait_event_queue.put_nowait(RoomMessageEvent(self.name))
+        if self._on_event:
+            self._on_event(next_agent.name)
 
     def get_context(self, max_messages: int = 10) -> str:
         recent = self.messages[-max_messages:]

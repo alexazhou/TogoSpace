@@ -127,6 +127,11 @@ def init(agents_config: list, rooms_config: list) -> None:
         logger.info(f"[{room_name}] 参与者: {room['agents']}")
 
 
+def get_agent(name: str) -> Agent:
+    """返回指定名称的 Agent 实例。"""
+    return _agents[name]
+
+
 def get_all_agents() -> List[Agent]:
     """返回所有唯一 Agent 实例列表。"""
     return list(_agents.values())
