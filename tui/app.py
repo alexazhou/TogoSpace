@@ -81,6 +81,7 @@ class WatcherApp(App):
         height: 1fr;
         padding: 1 2;
         background: $surface-darken-1;
+        overflow-x: hidden;
     }
 
     MessageBubble {
@@ -89,38 +90,49 @@ class WatcherApp(App):
         height: auto;
     }
 
+    .bubble-row {
+        width: 100%;
+        height: auto;
+    }
+
+    .bubble-spacer {
+        width: 40%;
+        height: auto;
+    }
+
+    .bubble-inner {
+        width: 60%;
+        height: auto;
+    }
+
     .sender {
         text-style: bold;
+        width: 100%;
         height: auto;
     }
 
     .sender-left {
         text-align: left;
-        width: 100%;
     }
 
     .sender-right {
         text-align: right;
-        width: 60%;
-        offset-x: 40%;
     }
 
     .bubble {
         padding: 0 1;
+        width: 100%;
         height: auto;
     }
 
     .bubble-left {
-        width: 60%;
         background: $panel;
         text-align: left;
     }
 
     .bubble-right {
-        width: 60%;
         background: $accent-darken-3;
         text-align: right;
-        offset-x: 40%;
     }
 
     .bubble-system {
