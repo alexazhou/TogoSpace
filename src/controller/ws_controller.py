@@ -23,6 +23,7 @@ def _on_message_added(msg) -> None:
 
 
 async def _broadcast(payload: str) -> None:
+    global _clients
     dead = set()
     for client in _clients:
         try:
