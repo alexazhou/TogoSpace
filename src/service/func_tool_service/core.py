@@ -8,6 +8,8 @@ from model.chat_context import ChatContext
 from .tools import FUNCTION_REGISTRY
 from .tool_loader import build_tools
 
+logger = logging.getLogger(__name__)
+
 _tools: List[Tool] = []
 
 
@@ -39,13 +41,14 @@ def run_tool_call(
     except json.JSONDecodeError:
         args = {}
 
-    logging.getLogger(__name__).info(f"调用函数: {function_name}, 参数: {args}")
+    caller = context.agent_name if context is not None else "unknown"
+    logger.info(f"use_tool: caller={caller}, tool={function_name}, args={args}")
     try:
         result = execute_function(function_name, args, context=context)
-        logging.getLogger(__name__).info(f"函数执行结果: {result}")
+        logger.info(f"函数执行结果: {result}")
         return result
     except Exception as e:
-        logging.getLogger(__name__).error(f"函数执行失败: {e}")
+        logger.error(f"函数执行失败: {e}")
         return f"函数执行失败: {str(e)}"
 
 

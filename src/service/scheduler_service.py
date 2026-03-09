@@ -79,7 +79,7 @@ async def _run_agent(agent: Agent) -> None:
         await _handle_event(agent, event)
         agent.wait_event_queue.task_done()
     _active_agents.discard(agent.name)
-    logger.info(f"Agent 不活跃，退出运行: agent={agent.name}")
+    logger.info(f"agent all task done, go sleep: agent={agent.name}")
 
 
 async def _handle_event(agent: Agent, event: RoomMessageEvent) -> None:

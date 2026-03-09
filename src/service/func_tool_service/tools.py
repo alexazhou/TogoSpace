@@ -127,7 +127,8 @@ def send_chat_msg(chat_windows_name: str, msg: str, _context: ChatContext = None
     Returns:
         成功返回 "success"
     """
-    logger.info(f"发送消息: room={chat_windows_name}, msg={msg}")
+    sender = _context.agent_name if _context is not None else "unknown"
+    logger.info(f"发送消息: sender={sender}, room={chat_windows_name}, msg={msg}")
 
     if _context is not None:
         try:
