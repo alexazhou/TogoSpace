@@ -1,7 +1,6 @@
 """integration tests — 验证多 Agent 完整对话流程（mock LLM，真实 service 层）"""
 import json
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import service.room_service as room_service
@@ -49,7 +48,6 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             agent_service.init(AGENTS_CONFIG, ROOMS_CONFIG)
         scheduler.init(ROOMS_CONFIG)
 
-    @pytest.mark.asyncio
     async def test_two_agents_exchange_messages(self):
         """alice 和 bob 各发一轮消息，general 房间应有消息。"""
         room = room_service.get_room("general")
@@ -74,7 +72,6 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         agent_messages = [m for m in room.messages if m.sender_name != "system"]
         assert len(agent_messages) >= 2
 
-    @pytest.mark.asyncio
     async def test_tool_call_result_appended_to_history(self):
         """验证 tool_call 结果被正确追加到 agent history。"""
         room = room_service.get_room("general")
@@ -93,7 +90,6 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         assert len(tool_results) >= 1
         assert tool_results[0].content == "success"
 
-    @pytest.mark.asyncio
     async def test_turn_checker_forces_send_chat_msg(self):
         """直接输出文字时 turn_checker 应注入 hint，迫使 agent 改用工具。"""
         room = room_service.get_room("general")
@@ -110,7 +106,6 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
         assert any(m.content == "最终消息" for m in room.messages)
 
-    @pytest.mark.asyncio
     async def test_scheduler_terminates_after_max_turns(self):
         """max_turns 用尽后，scheduler.run() 应正常结束，消息数等于轮次 × agent 数。"""
         room = room_service.get_room("general")

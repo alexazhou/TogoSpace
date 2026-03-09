@@ -1,4 +1,4 @@
-"""unit tests for service.scheduler_service"""
+"""integration tests for service.scheduler_service"""
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -21,13 +21,11 @@ def _make_mock_agent(name: str) -> Agent:
 
 
 class TestSchedulerRun(ServiceTestCase):
-    @pytest.mark.asyncio
     async def test_scheduler_exits_when_no_agents_activated(self):
         """没有任何事件发布时，scheduler.run() 应立即退出。"""
         scheduler.init([])
         await asyncio.wait_for(scheduler.run(), timeout=2.0)
 
-    @pytest.mark.asyncio
     async def test_scheduler_runs_agent_on_turn_event(self):
         """发布 ROOM_AGENT_TURN 后，scheduler 应调度对应 agent 处理事件。"""
         room_service.init("r1")
@@ -50,7 +48,6 @@ class TestSchedulerRun(ServiceTestCase):
 
         assert ("alice", "r1") in run_turn_calls
 
-    @pytest.mark.asyncio
     async def test_run_agent_marks_inactive_after_queue_drained(self):
         """队列清空后，agent 应从 _active_agents 中移除。"""
         alice = _make_mock_agent("alice")
@@ -65,14 +62,12 @@ class TestSchedulerRun(ServiceTestCase):
 
         assert "alice" not in scheduler._active_agents
 
-    @pytest.mark.asyncio
     async def test_handle_event_error_does_not_propagate(self):
         """_handle_event 中 run_turn 抛出异常时不应向上传播。"""
         alice = _make_mock_agent("alice")
         with patch("service.scheduler_service.agent_service.run_turn", AsyncMock(side_effect=RuntimeError("boom"))):
             await scheduler._handle_event(alice, RoomMessageEvent("r1"))
 
-    @pytest.mark.asyncio
     async def test_on_agent_turn_creates_task(self):
         """收到 ROOM_AGENT_TURN 消息后，agent 应被标记为活跃，事件入队。"""
         alice = _make_mock_agent("alice")
