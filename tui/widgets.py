@@ -172,7 +172,7 @@ class RoomPanel(Vertical):
             preview = last_previews.get(room.room_id, "暂无消息")
             card = Vertical(
                 Horizontal(
-                    Label(room.room_name, classes="room-card-name"),
+                    Label(f"{room.room_name} [#6e7681][未读:0][/]", classes="room-card-name"),
                     Label(f"[dim]{len(room.members)}人[/dim]", classes="room-card-members"),
                     classes="room-card-header",
                 ),
@@ -203,7 +203,7 @@ class RoomPanel(Vertical):
             room = getattr(self, "_room_map", {}).get(room_id)
             name = room.room_name if room else room_id
             item.query_one(".room-card-name", Label).update(
-                f"{name} [bold red]未读:{n}[/bold red]"
+                f"{name} [bold red][未读:{n}][/bold red]"
             )
         except Exception:
             pass
@@ -213,7 +213,7 @@ class RoomPanel(Vertical):
             item = self.query_one(f"#room-{room_id}", ListItem)
             room = getattr(self, "_room_map", {}).get(room_id)
             name = room.room_name if room else room_id
-            item.query_one(".room-card-name", Label).update(name)
+            item.query_one(".room-card-name", Label).update(f"{name} [#6e7681][未读:0][/]")
         except Exception:
             pass
 
