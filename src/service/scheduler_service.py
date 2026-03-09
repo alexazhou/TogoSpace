@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, List
+from typing import Dict, Set
 
 from service import message_bus
 from service.message_bus import Message
@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 _rooms_config: list = []
 _max_function_calls: int = 5
+_active_agents: Set[str] = set()   # 有待处理事件或正在运行的 Agent
 _running: Dict[str, asyncio.Task] = {}
 
 
@@ -26,59 +27,59 @@ def init(rooms_config: list, max_function_calls: int = 5) -> None:
 
 def stop() -> None:
     """重置调度器状态。"""
-    global _rooms_config, _max_function_calls, _running
+    global _rooms_config, _max_function_calls, _active_agents, _running
     _rooms_config = []
     _max_function_calls = 5
+    _active_agents = set()
     _running = {}
 
 
 def _on_agent_turn(msg: Message) -> None:
-    """订阅 ROOM_AGENT_TURN：若该 Agent 当前未运行则创建 Task 加入运行列表。"""
+    """订阅 ROOM_AGENT_TURN：将事件入队，标记 Agent 为活跃，若未运行则创建 Task。"""
     agent_name: str = msg.payload["agent_name"]
     room_name: str = msg.payload["room_name"]
     agent = agent_service.get_agent(agent_name)
     agent.wait_event_queue.put_nowait(RoomMessageEvent(room_name))
+    _active_agents.add(agent_name)
+    logger.info(f"Agent 激活: agent={agent_name}, room={room_name}")
     existing = _running.get(agent_name)
     if existing is None or existing.done():
         _running[agent_name] = asyncio.create_task(_run_agent(agent))
-        logger.info(f"加入运行列表: agent={agent_name}")
 
 
 async def run() -> None:
-    """以 Agent 为中心的事件驱动调度。"""
-    global _running
+    """以 Agent 为中心的事件驱动调度，所有 Agent 均不活跃后结束。"""
+    global _active_agents, _running
+    _active_agents = set()
     _running = {}
 
     for r in _rooms_config:
         room = chat_room.get_room(r["name"])
-        agents = agent_service.get_agents(r["name"])
-        agent_names = [a.name for a in agents]
         logger.info(f"初始化轮次配置: room={r['name']}, max_turns={r['max_turns']}")
-        room.setup_turns([a.name for a in agents], r["max_turns"])
+        room.setup_turns([a.name for a in agent_service.get_agents(r["name"])], r["max_turns"])
 
-    # 每当有 Task 完成，立刻将 _running 中新增的 Task 补入等待集合
-    pending: set = set(_running.values())
-    while pending:
-        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+    # 循环直到所有 Agent 均不活跃
+    while _active_agents:
+        pending = {t for t in _running.values() if not t.done()}
+        if not pending:
+            break
+        done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
             name = next(n for n, t in _running.items() if t is task)
-            logger.info(f"从运行列表移除: agent={name}")
             del _running[name]
-        for task in _running.values():
-            if not task.done():
-                pending.add(task)
 
     for r in _rooms_config:
         logger.info(f"\n{chat_room.get_room(r['name']).format_log()}")
 
 
 async def _run_agent(agent: Agent) -> None:
-    """消费队列中当前所有事件，队列为空后退出。"""
+    """消费队列中当前所有事件；队列清空后将 Agent 标记为不活跃。"""
     while not agent.wait_event_queue.empty():
         event: RoomMessageEvent = agent.wait_event_queue.get_nowait()
         await _handle_event(agent, event)
         agent.wait_event_queue.task_done()
-    logger.info(f"队列为空，退出运行: agent={agent.name}")
+    _active_agents.discard(agent.name)
+    logger.info(f"Agent 不活跃，退出运行: agent={agent.name}")
 
 
 async def _handle_event(agent: Agent, event: RoomMessageEvent) -> None:
