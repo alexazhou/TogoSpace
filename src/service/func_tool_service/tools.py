@@ -89,7 +89,7 @@ def get_agent_list(_context: ChatContext = None) -> List[str]:
     """返回当前聊天室的 agent 列表（历史发言者，排除 system）
 
     """
-    logger.\1(f"get_agent_list: 获取 agent 列表")
+    logger.info(f"get_agent_list: 获取 agent 列表")
     if _context is None:
         return []
     senders = []
@@ -107,7 +107,7 @@ def create_chat(room_name: str, _context: ChatContext = None) -> str:
     Args:
         room_name: 要切换到的聊天室名称
     """
-    logger.\1(f"create_chat: 切换到聊天室 {room_name}")
+    logger.info(f"create_chat: 切换到聊天室 {room_name}")
     if _context is None:
         return "错误：无法访问聊天室上下文"
     try:
@@ -127,23 +127,23 @@ def send_chat_msg(chat_windows_name: str, msg: str, _context: ChatContext = None
     Returns:
         成功返回 "success"
     """
-    logger.\1(f"send_chat_msg: 向 {chat_windows_name} 发送消息: {msg}")
+    logger.info(f"send_chat_msg: 向 {chat_windows_name} 发送消息: {msg}")
 
     if _context is not None:
         try:
             target_room = _context.get_room(chat_windows_name)
             target_room.add_message(_context.agent_name, msg)
         except Exception:
-            logger.\1(f"send_chat_msg: 聊天室 '{chat_windows_name}' 不存在，消息已忽略")
+            logger.warning(f"send_chat_msg: 聊天室 '{chat_windows_name}' 不存在，消息已忽略")
     else:
-        logger.\1("send_chat_msg: 聊天室上下文未设置")
+        logger.warning("send_chat_msg: 聊天室上下文未设置")
 
     return "success"
 
 def task_done() -> None:
     """通知任务完成
     """
-    logger.\1(f"task_done")
+    logger.info(f"task_done")
     return
 
 

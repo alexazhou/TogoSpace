@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Dict, List
 
 from service import message_bus
 from model.chat_model import ChatMessage
 from constants import RoomState, MessageBusTopic
+
+logger = logging.getLogger(__name__)
 
 
 class ChatRoom:
@@ -96,6 +99,7 @@ _rooms: Dict[str, ChatRoom] = {}
 def init(name: str, initial_topic: str = "") -> None:
     """创建并注册一个聊天室。"""
     _rooms[name] = ChatRoom(name=name, initial_topic=initial_topic)
+    logger.info(f"创建聊天室: name={name}, initial_topic={initial_topic!r}")
 
 
 def close(name: str) -> None:

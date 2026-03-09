@@ -121,12 +121,12 @@ def init(agents_config: list, rooms_config: list) -> None:
         prompt: str = load_prompt(cfg["prompt_file"])
         prompt = prompt.replace("{participants}", "、".join(sorted(agent_peers[name])))
         _agents[name] = Agent(name=name, system_prompt=prompt, model=cfg["model"])
-        logger.info(f"[{name}] 创建 Agent，model={cfg['model']}")
+        logger.info(f"创建 Agent: name={name}, model={cfg['model']}")
 
     for room in rooms_config:
         room_name: str = room["name"]
         _room_agents[room_name] = room["agents"]
-        logger.info(f"[{room_name}] 参与者: {room['agents']}")
+        logger.info(f"[{room_name}] 注册房间成员映射: {room['agents']}")
 
 
 async def run_turn(agent: Agent, room_name: str, max_function_calls: int = 5) -> None:
