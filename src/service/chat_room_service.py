@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Optional
 from datetime import datetime
+from typing import Callable, Dict, List, Optional
 
 from model.chat_model import ChatMessage
-from model.agent_event import RoomMessageEvent, RoomState
+from model.agent_event import RoomMessageEvent
+from constants import RoomState
 
 
 class ChatRoom:
