@@ -54,6 +54,13 @@ class ChatRoom:
             send_time=datetime.now()
         )
         self.messages.append(message)
+        message_bus.publish(
+            MessageBusTopic.ROOM_MSG_ADDED,
+            room_name=self.name,
+            sender=sender,
+            content=content,
+            time=message.send_time.isoformat(),
+        )
 
         if not self._turn_agents:
             return
@@ -135,5 +142,10 @@ def get_room(name: str) -> ChatRoom:
     if room is None:
         raise RuntimeError(f"聊天室 '{name}' 不存在，请先调用 init(name)")
     return room
+
+
+def get_all_rooms() -> List[ChatRoom]:
+    """返回所有聊天室实例列表。"""
+    return list(_rooms.values())
 
 

@@ -3,9 +3,12 @@ import logging
 import os
 from datetime import datetime
 
+import tornado.httpserver
 import util.llm_api_util as llm_api_util
 from util.config_util import load_config, load_llm_service_config
 from service import message_bus, scheduler_service as scheduler, agent_service, room_service as chat_room, llm_service, func_tool_service
+from controller.ws_controller import init as init_ws
+from route import make_app
 
 
 def _setup_logger() -> None:
@@ -56,9 +59,18 @@ async def main():
         if initial_topic:
             chat_room.get_room(r["name"]).add_message("system", initial_topic)
 
+    init_ws()
+    web_server = tornado.httpserver.HTTPServer(make_app())
+    web_server.listen(8080, "0.0.0.0")
+    logger.info("Web API 服务已启动: http://0.0.0.0:8080")
+
     try:
-        await scheduler.run()
+        await asyncio.gather(
+            scheduler.run(),
+            asyncio.Event().wait(),
+        )
     finally:
+        web_server.stop()
         scheduler.stop()
         agent_service.close()
         func_tool_service.close()
