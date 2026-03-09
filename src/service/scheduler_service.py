@@ -56,17 +56,17 @@ async def run() -> None:
         logger.info(f"[{r['name']}] 参与者: {agent_names}，最大轮次: {r['max_turns']}")
         room.setup_turns([a.name for a in agents], r["max_turns"])
 
-    # 循环 gather 直到所有 Task 完成
-    # 每轮 gather 结束后，新创建的 Task 会在下一轮被拾取
-    while True:
-        pending = [t for t in _running.values() if not t.done()]
-        if not pending:
-            break
-        await asyncio.gather(*pending, return_exceptions=True)
-        for name, task in list(_running.items()):
-            if task.done():
-                logger.info(f"[{name}] 从运行列表移除")
-                del _running[name]
+    # 每当有 Task 完成，立刻将 _running 中新增的 Task 补入等待集合
+    pending: set = set(_running.values())
+    while pending:
+        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            name = next(n for n, t in _running.items() if t is task)
+            logger.info(f"[{name}] 从运行列表移除")
+            del _running[name]
+        for task in _running.values():
+            if not task.done():
+                pending.add(task)
 
     for r in _rooms_config:
         logger.info(f"\n{chat_room.get_room(r['name']).format_log()}")
