@@ -41,7 +41,7 @@ def _on_agent_turn(msg: Message) -> None:
     existing = _running.get(agent_name)
     if existing is None or existing.done():
         _running[agent_name] = asyncio.create_task(_run_agent(agent))
-        logger.info(f"[{agent_name}] 加入运行列表")
+        logger.info(f"加入运行列表: agent={agent_name}")
 
 
 async def run() -> None:
@@ -53,7 +53,7 @@ async def run() -> None:
         room = chat_room.get_room(r["name"])
         agents = agent_service.get_agents(r["name"])
         agent_names = [a.name for a in agents]
-        logger.info(f"[{r['name']}] 初始化轮次配置，最大轮次: {r['max_turns']}")
+        logger.info(f"初始化轮次配置: room={r['name']}, max_turns={r['max_turns']}")
         room.setup_turns([a.name for a in agents], r["max_turns"])
 
     # 每当有 Task 完成，立刻将 _running 中新增的 Task 补入等待集合
@@ -62,7 +62,7 @@ async def run() -> None:
         done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
             name = next(n for n, t in _running.items() if t is task)
-            logger.info(f"[{name}] 从运行列表移除")
+            logger.info(f"从运行列表移除: agent={name}")
             del _running[name]
         for task in _running.values():
             if not task.done():
@@ -78,7 +78,7 @@ async def _run_agent(agent: Agent) -> None:
         event: RoomMessageEvent = agent.wait_event_queue.get_nowait()
         await _handle_event(agent, event)
         agent.wait_event_queue.task_done()
-    logger.info(f"[{agent.name}] 队列为空，退出运行")
+    logger.info(f"队列为空，退出运行: agent={agent.name}")
 
 
 async def _handle_event(agent: Agent, event: RoomMessageEvent) -> None:
@@ -86,4 +86,4 @@ async def _handle_event(agent: Agent, event: RoomMessageEvent) -> None:
     try:
         await agent_service.run_turn(agent, event.room_name, _max_function_calls)
     except Exception as e:
-        logger.error(f"[{event.room_name}] {agent.name} 生成回复失败: {e}")
+        logger.error(f"生成回复失败: agent={agent.name}, room={event.room_name}, error={e}")

@@ -18,6 +18,7 @@ class ChatRoom:
         self.name = name
         self.messages: List[ChatMessage] = []
         self.initial_topic = initial_topic
+        self.member_names: List[str] = []
         self._agent_read_index: Dict[str, int] = {}
         self._turn_agents: List[str] = []
         self._turn_index: int = 0
@@ -110,6 +111,22 @@ def close(name: str) -> None:
 def close_all() -> None:
     """移除所有聊天室，程序退出前调用。"""
     _rooms.clear()
+
+
+def setup_members(room_name: str, agent_names: List[str]) -> None:
+    """设置聊天室的 Agent 成员列表。"""
+    _rooms[room_name].member_names = agent_names
+    logger.info(f"注册成员: name={room_name}, 成员={agent_names}")
+
+
+def get_member_names(room_name: str) -> List[str]:
+    """返回聊天室的 Agent 成员名列表。"""
+    return _rooms[room_name].member_names
+
+
+def get_rooms_for_agent(agent_name: str) -> List[str]:
+    """返回指定 Agent 所在的所有房间名列表。"""
+    return [name for name, room in _rooms.items() if agent_name in room.member_names]
 
 
 def get_room(name: str) -> ChatRoom:

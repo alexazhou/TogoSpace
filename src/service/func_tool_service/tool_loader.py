@@ -109,7 +109,7 @@ def build_tools(registry: dict) -> List[Tool]:
                 )
             )
             tools.append(tool)
-            logger.info(f"Loaded function: {func_name}")
+            logger.info(f"加载工具函数: name={func_name}")
         except Exception as e:
-            logger.error(f"Error loading function {func_name}: {e}")
+            logger.error(f"加载工具函数失败: name={func_name}, error={e}")
     return tools

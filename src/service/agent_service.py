@@ -13,7 +13,6 @@ from constants import TurnStatus, TurnCheckResult
 logger = logging.getLogger(__name__)
 
 _agents: Dict[str, "Agent"] = {}
-_room_agents: Dict[str, List[str]] = {}  # room_name → agent names (ordered)
 
 
 class Agent:
@@ -27,7 +26,7 @@ class Agent:
     def sync_room(self, room: ChatRoom) -> None:
         """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
         new_msgs: List[ChatMessage] = room.get_unread_messages(self.name)
-        logger.info(f"[{self.name}] 同步 {room.name} 房间：{len(new_msgs)} 条新消息")
+        logger.info(f"同步房间消息: agent={self.name}, room={room.name}, count={len(new_msgs)}")
         for msg in new_msgs:
             #if msg.sender_name == self.name:
             #    continue
@@ -67,12 +66,12 @@ class Agent:
                 if turn_checker:
                     check: TurnCheckResult = turn_checker(assistant_message)
                     if check.status == TurnStatus.ERROR:
-                        logger.warning(f"[{self.name}] checker 返回 ERROR，注入提示重试")
+                        logger.warning(f"checker 返回 ERROR，注入提示重试: agent={self.name}")
                         self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, check.error_hint))
                         continue
                 return assistant_message
 
-            logger.info(f"[{self.name}] 检测到 {len(assistant_message.tool_calls)} 个工具调用")
+            logger.info(f"检测到工具调用: agent={self.name}, count={len(assistant_message.tool_calls)}")
 
             recheck: bool = False
             for tool_call in assistant_message.tool_calls:
@@ -90,7 +89,7 @@ class Agent:
                     if check.status == TurnStatus.SUCCESS:
                         return LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, "")
                     if check.status == TurnStatus.ERROR:
-                        logger.warning(f"[{self.name}] checker 返回 ERROR，注入提示重试")
+                        logger.warning(f"checker 返回 ERROR，注入提示重试: agent={self.name}")
                         self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, check.error_hint))
                         recheck = True
                         break
@@ -98,24 +97,23 @@ class Agent:
             if recheck:
                 continue
 
-        logger.warning(f"[{self.name}] 达到最大函数调用次数 {max_function_calls}")
+        logger.warning(f"达到最大函数调用次数: agent={self.name}, max={max_function_calls}")
         return assistant_message
 
 
 def init(agents_config: list, rooms_config: list) -> None:
-    """为每个 Agent 创建单一实例，按房间配置建立成员映射。"""
-    global _agents, _room_agents
+    """为每个 Agent 创建单一实例，向 room_service 注册房间成员。"""
+    global _agents
     _agents = {}
-    _room_agents = {}
 
     agent_defs: Dict[str, dict] = {cfg["name"]: cfg for cfg in agents_config}
 
     # 收集每个 Agent 跨所有房间的其他参与者
     agent_peers: Dict[str, set] = {name: set() for name in agent_defs}
     for room in rooms_config:
-        member_names: List[str] = room["agents"]
-        for name in member_names:
-            agent_peers[name].update(n for n in member_names if n != name)
+        names: List[str] = room["agents"]
+        for name in names:
+            agent_peers[name].update(n for n in names if n != name)
 
     for name, cfg in agent_defs.items():
         prompt: str = load_prompt(cfg["prompt_file"])
@@ -124,9 +122,7 @@ def init(agents_config: list, rooms_config: list) -> None:
         logger.info(f"创建 Agent: name={name}, model={cfg['model']}")
 
     for room in rooms_config:
-        room_name: str = room["name"]
-        _room_agents[room_name] = room["agents"]
-        logger.info(f"[{room_name}] 注册房间成员映射: {room['agents']}")
+        room_service.setup_members(room["name"], room["agents"])
 
 
 async def run_turn(agent: Agent, room_name: str, max_function_calls: int = 5) -> None:
@@ -159,7 +155,7 @@ async def run_turn(agent: Agent, room_name: str, max_function_calls: int = 5) ->
         max_function_calls=max_function_calls,
     )
     if response.content:
-        logger.info(f"[{room_name}] {agent.name} (思考): {response.content}")
+        logger.info(f"Agent 思考内容: agent={agent.name}, room={room_name}, content={response.content}")
 
 
 def get_agent(name: str) -> Agent:
@@ -174,16 +170,15 @@ def get_all_agents() -> List[Agent]:
 
 def get_agents(room_name: str) -> List[Agent]:
     """返回指定房间的 Agent 列表（按配置顺序）。"""
-    return [_agents[n] for n in _room_agents.get(room_name, []) if n in _agents]
+    return [_agents[n] for n in room_service.get_member_names(room_name) if n in _agents]
 
 
 def get_all_rooms(agent_name: str) -> List[str]:
     """返回指定 Agent 参与的所有房间名列表。"""
-    return [room for room, names in _room_agents.items() if agent_name in names]
+    return room_service.get_rooms_for_agent(agent_name)
 
 
 def close() -> None:
     """清空 Agent 字典，程序退出前调用。"""
-    global _agents, _room_agents
+    global _agents
     _agents = {}
-    _room_agents = {}
