@@ -65,8 +65,9 @@ async def run() -> None:
             break
         done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
-            name = next(n for n, t in _running.items() if t is task)
-            del _running[name]
+            name = next((n for n, t in _running.items() if t is task), None)
+            if name is not None:
+                del _running[name]
 
     for r in _rooms_config:
         logger.info(f"\n{chat_room.get_room(r['name']).format_log()}")
