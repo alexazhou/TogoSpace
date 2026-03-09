@@ -5,7 +5,7 @@ from datetime import datetime
 
 import util.llm_api_util as llm_api_util
 from util.config_util import load_config, load_llm_service_config
-from service import message_bus, scheduler_service as scheduler, agent_service, room_service as chat_room, llm_service, func_tool_service as agent_tools
+from service import message_bus, scheduler_service as scheduler, agent_service, room_service as chat_room, llm_service, func_tool_service
 
 
 def _setup_logger() -> None:
@@ -43,7 +43,7 @@ async def main():
     llm_cfg = load_llm_service_config()
     llm_api_util.init()
     llm_service.init(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
-    agent_tools.init()
+    func_tool_service.init()
     agent_service.init(config["agents"], rooms_config)
     scheduler.init(
         rooms_config=rooms_config,
@@ -61,7 +61,7 @@ async def main():
     finally:
         scheduler.stop()
         agent_service.close()
-        agent_tools.close()
+        func_tool_service.close()
         chat_room.close_all()
         message_bus.stop()
 
