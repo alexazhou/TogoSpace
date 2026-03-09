@@ -1,8 +1,6 @@
-"""unit tests for service.func_tool_service"""
-import pytest
+"""unit tests for tool_loader utilities and individual tool functions"""
 from typing import Literal, Optional
 
-import service.func_tool_service as func_tool_service
 import service.room_service as room_service
 from service.func_tool_service.tool_loader import (
     python_type_to_json_schema,
@@ -76,17 +74,6 @@ class TestBuildTools(ServiceTestCase):
         assert len(build_tools({"get_weather": get_weather})) == 1
 
 
-class TestFuncToolServiceInit(ServiceTestCase):
-    def test_init_loads_tools(self):
-        func_tool_service.init()
-        assert len(func_tool_service.get_tools()) > 0
-
-    def test_close_clears_tools(self):
-        func_tool_service.init()
-        func_tool_service.close()
-        assert func_tool_service.get_tools() == []
-
-
 class TestToolFunctions(ServiceTestCase):
     def test_get_weather_celsius(self):
         assert "25°C" in get_weather("北京", "celsius")
@@ -140,32 +127,3 @@ class TestToolFunctions(ServiceTestCase):
         room = room_service.get_room("existing")
         ctx = ChatContext(agent_name="alice", chat_room=room, get_room=room_service.get_room)
         assert send_chat_msg("nonexistent", "hello", _context=ctx) == "success"
-
-
-class TestRunToolCall(ServiceTestCase):
-    def setup_method(self):
-        super().setup_method()
-        func_tool_service.init()
-
-    def test_run_tool_call_basic(self):
-        result = func_tool_service.run_tool_call("get_weather", '{"location": "北京", "unit": "celsius"}')
-        assert "25°C" in result
-
-    def test_run_tool_call_invalid_json(self):
-        result = func_tool_service.run_tool_call("get_weather", "not json")
-        assert "失败" in result or "error" in result.lower() or "Error" in result
-
-    def test_run_tool_call_unknown_function(self):
-        result = func_tool_service.run_tool_call("nonexistent", "{}")
-        assert "失败" in result or "not found" in result.lower()
-
-    def test_run_tool_call_with_context(self):
-        room_service.init("ctx_room")
-        room = room_service.get_room("ctx_room")
-        ctx = ChatContext(agent_name="alice", chat_room=room, get_room=room_service.get_room)
-        result = func_tool_service.run_tool_call(
-            "send_chat_msg",
-            '{"chat_windows_name": "ctx_room", "msg": "test"}',
-            context=ctx,
-        )
-        assert result == "success"

@@ -1,4 +1,4 @@
-"""unit tests for service.agent_service — Agent class and module functions"""
+"""integration tests for service.agent_service — Agent class and module functions"""
 import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -31,13 +31,11 @@ class TestAgentChat(ServiceTestCase):
         self.agent = Agent(name="test_agent", system_prompt="你是助手", model="qwen-plus")
         self.agent._history = [LlmApiMessage.text(OpenaiLLMApiRole.USER, "start")]
 
-    @pytest.mark.asyncio
     async def test_chat_no_tool_calls_returns_message(self):
         with patch("service.agent_service.llm_service.infer", AsyncMock(return_value=_make_llm_response("你好"))):
             result = await self.agent.chat()
         assert result.content == "你好"
 
-    @pytest.mark.asyncio
     async def test_chat_with_tool_call_executes_executor(self):
         tool_call = _make_tool_call("get_weather", {"location": "北京", "unit": "celsius"})
         responses = [
@@ -50,7 +48,6 @@ class TestAgentChat(ServiceTestCase):
         executor.assert_called_once()
         assert result.content == "天气不错"
 
-    @pytest.mark.asyncio
     async def test_chat_max_function_calls_limits_loops(self):
         tool_call = _make_tool_call("get_weather", {"location": "北京"})
         mock_infer = AsyncMock(return_value=_make_llm_response(content=None, tool_calls=[tool_call]))
@@ -59,7 +56,6 @@ class TestAgentChat(ServiceTestCase):
             await self.agent.chat(function_executor=executor, max_function_calls=3)
         assert mock_infer.call_count == 3
 
-    @pytest.mark.asyncio
     async def test_chat_turn_checker_success_stops_loop(self):
         tool_call = _make_tool_call("send_chat_msg", {"chat_windows_name": "r", "msg": "hi"})
         executor = MagicMock(return_value="success")
@@ -74,7 +70,6 @@ class TestAgentChat(ServiceTestCase):
             result = await self.agent.chat(function_executor=executor, turn_checker=checker)
         assert result.content == ""
 
-    @pytest.mark.asyncio
     async def test_chat_turn_checker_error_injects_hint(self):
         call_count = {"n": 0}
 
@@ -91,7 +86,6 @@ class TestAgentChat(ServiceTestCase):
             await self.agent.chat(turn_checker=checker, max_function_calls=5)
         assert mock_infer.call_count >= 2
 
-    @pytest.mark.asyncio
     async def test_sync_room_appends_new_messages(self):
         room_service.init("r")
         room = room_service.get_room("r")
@@ -130,7 +124,6 @@ class TestAgentServiceModule(ServiceTestCase):
         with pytest.raises(KeyError):
             agent_service.get_agent("alice")
 
-    @pytest.mark.asyncio
     async def test_run_turn_sends_message_to_room(self):
         self._setup_agents_and_rooms()
         room = room_service.get_room("general")
