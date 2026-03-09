@@ -4,3 +4,4 @@ pydantic>=2.0.0
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
 dashscope>=1.0.0
+textual>=0.50.0
