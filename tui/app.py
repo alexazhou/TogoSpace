@@ -10,6 +10,14 @@ from api_client import ApiClient, RoomInfo, WsEvent
 from widgets import MessageView, RoomPanel, StatusBar
 
 
+def _make_preview(sender: str, content: str, max_len: int = 12) -> str:
+    """生成单行预览：sender: content（截断到 max_len 个字符）。"""
+    text = content.replace("\n", " ")
+    if len(text) > max_len:
+        text = text[:max_len] + "…"
+    return f"{sender}: {text}"
+
+
 class WatcherApp(App):
     TITLE = "Team Agent TUI"
     CSS = """
@@ -52,21 +60,24 @@ class WatcherApp(App):
 
     RoomPanel ListItem {
         padding: 0;
+        margin-bottom: 1;
     }
 
     .room-card {
         padding: 0 1;
         height: auto;
         width: 100%;
-        border-bottom: solid $panel;
     }
 
     .room-card-name {
         text-style: bold;
+        width: 100%;
     }
 
-    .room-card-members {
+    .room-card-preview {
         color: $text-muted;
+        width: 100%;
+        overflow: hidden;
     }
 
     .selected-room {
@@ -186,7 +197,20 @@ class WatcherApp(App):
             rooms = await self._api.get_rooms()
             self._agent_order = [a.name for a in agents]
             self._rooms = rooms
-            room_panel.load(rooms, agents)
+
+            # 并发拉取各房间最后一条消息作为预览
+            last_previews: dict[str, str] = {}
+            async def _fetch_preview(room: RoomInfo) -> None:
+                try:
+                    msgs = await self._api.get_room_messages(room.room_id)
+                    if msgs:
+                        last = msgs[-1]
+                        last_previews[room.room_id] = _make_preview(last.sender, last.content)
+                except Exception:
+                    pass
+            await asyncio.gather(*[_fetch_preview(r) for r in rooms])
+
+            room_panel.load(rooms, agents, last_previews)
             if rooms:
                 await self._select_room(rooms[0].room_id)
         except aiohttp.ClientError:
@@ -240,9 +264,11 @@ class WatcherApp(App):
         status_bar = self.query_one(StatusBar)
         room_panel = self.query_one(RoomPanel)
 
+        preview = _make_preview(event.sender, event.content)
+        self.call_later(room_panel.update_preview, event.room_id, preview)
+
         if event.room_id == self._current_room_id:
             self._current_msg_count += 1
-            # Use call_later to safely schedule UI updates from worker
             self.call_later(
                 message_view.append_message, event.sender, event.content, self._agent_order
             )

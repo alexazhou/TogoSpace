@@ -64,11 +64,18 @@ class RoomPanel(Vertical):
         yield Label("Agent", classes="panel-title")
         yield ListView(id="agent-list")
 
-    # room_id → RoomInfo，用于 set_unread 时读取房间名和人数
+    # room_id → RoomInfo，用于 set_unread 时读取房间名
     _room_map: dict[str, RoomInfo]
 
-    def load(self, rooms: list[RoomInfo], agents: list[AgentInfo]) -> None:
+    def load(
+        self,
+        rooms: list[RoomInfo],
+        agents: list[AgentInfo],
+        last_previews: dict[str, str] | None = None,
+    ) -> None:
         self._room_map = {r.room_id: r for r in rooms}
+        if last_previews is None:
+            last_previews = {}
 
         room_list = self.query_one("#room-list", ListView)
         agent_list = self.query_one("#agent-list", ListView)
@@ -77,9 +84,10 @@ class RoomPanel(Vertical):
         agent_list.clear()
 
         for room in rooms:
+            preview = last_previews.get(room.room_id, "暂无消息")
             card = Vertical(
                 Label(room.room_name, classes="room-card-name"),
-                Label(f"{len(room.members)} 人", classes="room-card-members"),
+                Label(preview, classes="room-card-preview"),
                 classes="room-card",
             )
             item = ListItem(card, id=f"room-{room.room_id}")
@@ -106,6 +114,13 @@ class RoomPanel(Vertical):
             room_name = getattr(self, "_room_map", {}).get(room_id)
             base = room_name.room_name if room_name else room_id
             name_label.update(base)
+        except Exception:
+            pass
+
+    def update_preview(self, room_id: str, preview: str) -> None:
+        try:
+            item = self.query_one(f"#room-{room_id}", ListItem)
+            item.query_one(".room-card-preview", Label).update(preview)
         except Exception:
             pass
 
