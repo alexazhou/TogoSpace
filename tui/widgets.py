@@ -58,11 +58,24 @@ def _get_side(sender: str, agent_order: list[str]) -> str:
 
 
 class MessageBubble(Vertical):
+    MAX_RATIO = 0.6  # 气泡最大占消息区宽度的比例
+
     def __init__(self, sender: str, content: str, side: str) -> None:
         super().__init__()
         self._sender = sender
         self._content = content
         self._side = side
+        self._last_inner_w: int = 0
+
+    def on_resize(self, event) -> None:
+        if self._side == "center":
+            return
+        new_w = max(10, int(event.size.width * self.MAX_RATIO))
+        if new_w == self._last_inner_w:
+            return
+        self._last_inner_w = new_w
+        for inner in self.query(".bubble-inner"):
+            inner.styles.width = new_w
 
     def compose(self) -> ComposeResult:
         if self._side == "center":
@@ -127,7 +140,11 @@ class RoomPanel(Vertical):
         for room in rooms:
             preview = last_previews.get(room.room_id, "暂无消息")
             card = Vertical(
-                Label(room.room_name, classes="room-card-name"),
+                Horizontal(
+                    Label(room.room_name, classes="room-card-name"),
+                    Label(f"[dim]{len(room.members)}人[/dim]", classes="room-card-members"),
+                    classes="room-card-header",
+                ),
                 PreviewLabel(preview, classes="room-card-preview"),
                 classes="room-card",
             )
@@ -141,20 +158,20 @@ class RoomPanel(Vertical):
     def set_unread(self, room_id: str, n: int) -> None:
         try:
             item = self.query_one(f"#room-{room_id}", ListItem)
-            name_label = item.query_one(".room-card-name", Label)
-            room_name = getattr(self, "_room_map", {}).get(room_id)
-            base = room_name.room_name if room_name else room_id
-            name_label.update(f"{base} [{n}]")
+            room = getattr(self, "_room_map", {}).get(room_id)
+            name = room.room_name if room else room_id
+            item.query_one(".room-card-name", Label).update(
+                f"{name} [bold red][{n}][/bold red]"
+            )
         except Exception:
             pass
 
     def clear_unread(self, room_id: str) -> None:
         try:
             item = self.query_one(f"#room-{room_id}", ListItem)
-            name_label = item.query_one(".room-card-name", Label)
-            room_name = getattr(self, "_room_map", {}).get(room_id)
-            base = room_name.room_name if room_name else room_id
-            name_label.update(base)
+            room = getattr(self, "_room_map", {}).get(room_id)
+            name = room.room_name if room else room_id
+            item.query_one(".room-card-name", Label).update(name)
         except Exception:
             pass
 
