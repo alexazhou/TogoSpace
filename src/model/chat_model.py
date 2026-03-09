@@ -1,10 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 
-if TYPE_CHECKING:
-    from util.llm_api_util import LlmApiMessage, Tool
+from util.llm_api_util import LlmApiMessage, Tool
 
 
 @dataclass
