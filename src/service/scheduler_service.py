@@ -1,16 +1,13 @@
 import asyncio
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from service import message_bus
 from service.message_bus import Message
-from util.llm_api_util import LlmApiMessage
 from model.agent_event import RoomMessageEvent
-from model.chat_context import ChatContext
-from service import agent_service, room_service as chat_room, func_tool_service as agent_tools
+from service import agent_service, room_service as chat_room
 from service.agent_service import Agent
-from service.room_service import ChatRoom
-from constants import MessageBusTopic, TurnStatus, TurnCheckResult
+from constants import MessageBusTopic
 
 logger = logging.getLogger(__name__)
 
@@ -85,37 +82,8 @@ async def _run_agent(agent: Agent) -> None:
 
 
 async def _handle_event(agent: Agent, event: RoomMessageEvent) -> None:
-    """处理单个房间消息事件：同步房间消息并驱动 Agent 发言。"""
-    room: ChatRoom = chat_room.get_room(event.room_name)
-    agent.sync_room(room)
-
+    """处理单个房间消息事件：委托 agent_service 完成一轮发言。"""
     try:
-        agent_context = ChatContext(
-            agent_name=agent.name,
-            chat_room=room,
-            get_room=chat_room.get_room,
-        )
-        last_called: Dict[str, Optional[str]] = {"name": None}
-
-        def executor(name: str, args: str, _ctx: ChatContext = agent_context) -> str:
-            last_called["name"] = name
-            return agent_tools.run_tool_call(name, args, context=_ctx)
-
-        def turn_checker(msg: LlmApiMessage) -> TurnCheckResult:
-            if last_called["name"] == "send_chat_msg":
-                return TurnCheckResult(TurnStatus.SUCCESS)
-            if not msg.tool_calls:
-                return TurnCheckResult(TurnStatus.ERROR, "你必须调用 send_chat_msg 工具发送消息，不能直接输出文字。")
-            return TurnCheckResult(TurnStatus.CONTINUE)
-
-        response: LlmApiMessage = await agent.chat(
-            tools=agent_tools.get_tools(),
-            function_executor=executor,
-            turn_checker=turn_checker,
-            max_function_calls=_max_function_calls,
-        )
-
-        if response.content:
-            logger.info(f"[{event.room_name}] {agent.name} (思考): {response.content}")
+        await agent_service.run_turn(agent, event.room_name, _max_function_calls)
     except Exception as e:
         logger.error(f"[{event.room_name}] {agent.name} 生成回复失败: {e}")

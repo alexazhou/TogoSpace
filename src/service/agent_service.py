@@ -5,7 +5,8 @@ from typing import Callable, Dict, List, Optional
 from util.llm_api_util import OpenaiLLMApiRole, LlmApiMessage, Tool
 from util.config_util import load_prompt
 from model.chat_model import AgentDialogContext, ChatMessage
-from service import llm_service
+from model.chat_context import ChatContext
+from service import llm_service, func_tool_service, room_service
 from service.room_service import ChatRoom
 from constants import TurnStatus, TurnCheckResult
 
@@ -125,6 +126,39 @@ def init(agents_config: list, rooms_config: list) -> None:
         room_name: str = room["name"]
         _room_agents[room_name] = room["agents"]
         logger.info(f"[{room_name}] 参与者: {room['agents']}")
+
+
+async def run_turn(agent: Agent, room_name: str, max_function_calls: int = 5) -> None:
+    """同步房间消息，驱动 Agent 完成一轮发言（含 tool call 循环）。"""
+    room: ChatRoom = room_service.get_room(room_name)
+    agent.sync_room(room)
+
+    agent_context = ChatContext(
+        agent_name=agent.name,
+        chat_room=room,
+        get_room=room_service.get_room,
+    )
+    last_called: dict = {"name": None}
+
+    def executor(name: str, args: str, _ctx: ChatContext = agent_context) -> str:
+        last_called["name"] = name
+        return func_tool_service.run_tool_call(name, args, context=_ctx)
+
+    def turn_checker(msg: LlmApiMessage) -> TurnCheckResult:
+        if last_called["name"] == "send_chat_msg":
+            return TurnCheckResult(TurnStatus.SUCCESS)
+        if not msg.tool_calls:
+            return TurnCheckResult(TurnStatus.ERROR, "你必须调用 send_chat_msg 工具发送消息，不能直接输出文字。")
+        return TurnCheckResult(TurnStatus.CONTINUE)
+
+    response: LlmApiMessage = await agent.chat(
+        tools=func_tool_service.get_tools(),
+        function_executor=executor,
+        turn_checker=turn_checker,
+        max_function_calls=max_function_calls,
+    )
+    if response.content:
+        logger.info(f"[{room_name}] {agent.name} (思考): {response.content}")
 
 
 def get_agent(name: str) -> Agent:
