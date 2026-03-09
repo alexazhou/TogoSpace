@@ -29,6 +29,37 @@ def _truncate_to_cols(text: str, max_cols: int) -> str:
     return result
 
 
+def _char_wrap(text: str, width: int) -> str:
+    """按字符边界换行，正确处理 CJK 双宽字符，忽略词边界。"""
+    lines = []
+    for paragraph in text.split("\n"):
+        line, used = "", 0
+        for ch in paragraph:
+            w = _char_width(ch)
+            if used + w > width:
+                lines.append(line)
+                line, used = ch, w
+            else:
+                line += ch
+                used += w
+        lines.append(line)
+    return "\n".join(lines)
+
+
+class BubbleText(Static):
+    """气泡内容：按字符边界换行，避免 ASCII+CJK 混排时的词边界断行问题。"""
+
+    def __init__(self, text: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._text = text
+
+    def render(self) -> str:
+        width = self.size.width
+        if width <= 0:
+            return self._text
+        return _char_wrap(self._text, width)
+
+
 class PreviewLabel(Static):
     """动态按自身宽度截断预览文字的单行 Label。"""
 
@@ -84,13 +115,13 @@ class MessageBubble(Vertical):
             with Horizontal(classes="bubble-row"):
                 yield Static("", classes="bubble-spacer")
                 with Vertical(classes="bubble-inner"):
-                    yield Static(f"[bold cyan]{self._sender}[/bold cyan]", classes="sender sender-right")
-                    yield Static(self._content, classes="bubble bubble-right")
+                    yield Static(f"[bold #c4a55a]{self._sender}[/bold #c4a55a]", classes="sender sender-right")
+                    yield BubbleText(self._content, classes="bubble bubble-right")
         else:
             with Horizontal(classes="bubble-row"):
                 with Vertical(classes="bubble-inner"):
-                    yield Static(f"[bold green]{self._sender}[/bold green]", classes="sender sender-left")
-                    yield Static(self._content, classes="bubble bubble-left")
+                    yield Static(f"[bold #7eb8d4]{self._sender}[/bold #7eb8d4]", classes="sender sender-left")
+                    yield BubbleText(self._content, classes="bubble bubble-left")
                 yield Static("", classes="bubble-spacer")
 
 

@@ -19,7 +19,7 @@ class WatcherApp(App):
     TITLE = "Team Agent TUI"
     CSS = """
     Screen {
-        background: $surface;
+        background: #0d1117;
     }
 
     #main-horizontal {
@@ -29,20 +29,21 @@ class WatcherApp(App):
     RoomPanel {
         width: 25%;
         min-width: 20;
-        border-right: solid $panel;
+        background: #161b22;
+        border-right: solid #30363d;
     }
 
     RoomPanel .panel-title {
         width: 100%;
         text-align: center;
-        background: $panel;
-        color: $text;
+        background: #21262d;
+        color: #8b949e;
         padding: 0 1;
         text-style: bold;
     }
 
     RoomPanel ListView {
-        background: $surface;
+        background: #161b22;
         border: none;
     }
 
@@ -52,7 +53,7 @@ class WatcherApp(App):
 
     #agent-list {
         height: 1fr;
-        border-top: solid $panel;
+        border-top: solid #30363d;
     }
 
     RoomPanel ListItem {
@@ -73,23 +74,24 @@ class WatcherApp(App):
 
     .room-card-name {
         text-style: bold;
+        color: #c9d1d9;
         width: 1fr;
     }
 
     .room-card-members {
         width: auto;
         text-align: right;
-        color: $text-muted;
+        color: #8b949e;
     }
 
     .room-card-preview {
-        color: $text-muted;
+        color: #6e7681;
         width: 100%;
         overflow: hidden;
     }
 
     .selected-room {
-        background: $accent-darken-3;
+        background: #112240;
     }
 
     #right-panel {
@@ -99,7 +101,7 @@ class WatcherApp(App):
     MessageView {
         height: 1fr;
         padding: 1 2;
-        background: $surface-darken-1;
+        background: #0d1117;
         overflow-x: hidden;
     }
 
@@ -145,26 +147,28 @@ class WatcherApp(App):
     }
 
     .bubble-left {
-        background: $panel;
+        background: #112240;
+        color: #c8ccd0;
         text-align: left;
     }
 
     .bubble-right {
-        background: $accent-darken-3;
+        background: #221a0e;
+        color: #c8ccd0;
         text-align: left;
     }
 
     .bubble-system {
         width: 100%;
         text-align: center;
-        color: $text-muted;
+        color: #8b949e;
     }
 
     StatusBar {
         height: 1;
-        background: $panel;
+        background: #161b22;
         padding: 0 2;
-        color: $text-muted;
+        color: #6e7681;
         dock: bottom;
     }
     """
