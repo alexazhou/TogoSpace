@@ -183,7 +183,18 @@ class RoomPanel(Vertical):
             room_list.append(item)
 
         for agent in agents:
-            item = ListItem(Label(f"{agent.name}  [{agent.model}]"))
+            status_markup = (
+                "[bold #56d4b0]● 活跃[/]" if agent.status == "active"
+                else "[#484f58]○ 空闲[/]"
+            )
+            item = ListItem(
+                Horizontal(
+                    Label(f"{agent.name}  [dim]{agent.model}[/dim]", classes="agent-name"),
+                    Label(status_markup, classes="agent-status"),
+                    classes="agent-card",
+                ),
+                id=f"agent-{agent.name}",
+            )
             agent_list.append(item)
 
     def set_unread(self, room_id: str, n: int) -> None:
@@ -192,7 +203,7 @@ class RoomPanel(Vertical):
             room = getattr(self, "_room_map", {}).get(room_id)
             name = room.room_name if room else room_id
             item.query_one(".room-card-name", Label).update(
-                f"{name} [bold red][{n}][/bold red]"
+                f"{name} [bold red]未读:{n}[/bold red]"
             )
         except Exception:
             pass
@@ -212,6 +223,18 @@ class RoomPanel(Vertical):
             item.query_one(".room-card-preview", PreviewLabel).set_preview(preview)
         except Exception:
             pass
+
+    def update_agent_status(self, agents: list) -> None:
+        for agent in agents:
+            try:
+                item = self.query_one(f"#agent-{agent.name}", ListItem)
+                status_markup = (
+                    "[bold #56d4b0]● 活跃[/]" if agent.status == "active"
+                    else "[#484f58]○ 空闲[/]"
+                )
+                item.query_one(".agent-status", Label).update(status_markup)
+            except Exception:
+                pass
 
     def mark_selected(self, room_id: str) -> None:
         for item in self.query("#room-list ListItem"):

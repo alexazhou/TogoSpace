@@ -6,6 +6,7 @@ from datetime import datetime
 class AgentInfo(BaseModel):
     name: str
     model: str
+    status: str  # "active" | "idle"
 
 
 class RoomInfo(BaseModel):
