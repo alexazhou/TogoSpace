@@ -66,9 +66,20 @@ class WatcherApp(App):
         width: 100%;
     }
 
+    .room-card-header {
+        width: 100%;
+        height: auto;
+    }
+
     .room-card-name {
         text-style: bold;
-        width: 100%;
+        width: 1fr;
+    }
+
+    .room-card-members {
+        width: auto;
+        text-align: right;
+        color: $text-muted;
     }
 
     .room-card-preview {
@@ -109,7 +120,7 @@ class WatcherApp(App):
     }
 
     .bubble-inner {
-        width: 60%;
+        width: auto;
         height: auto;
     }
 
@@ -140,7 +151,7 @@ class WatcherApp(App):
 
     .bubble-right {
         background: $accent-darken-3;
-        text-align: right;
+        text-align: left;
     }
 
     .bubble-system {
