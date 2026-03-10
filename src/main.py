@@ -15,7 +15,7 @@ from route import make_app
 
 
 def _setup_logger() -> None:
-    log_dir = os.path.join(os.getcwd(), "../logs")
+    log_dir = os.path.join(os.getcwd(), "../logs/backend")
     os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")

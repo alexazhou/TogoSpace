@@ -20,10 +20,11 @@ agent_team/
 ├── tui/                 # 终端观察台（独立进程）
 ├── config/              # Agent 配置文件（agents_v*.json）
 ├── resource/            # Prompt 文件和函数列表
-│   ├── prompts/         # Agent system prompt（*.md）
-│   └── bk/              # 函数启用列表（function_list.json）
+│   └── prompts/         # Agent system prompt（*.md）
 ├── docs/                # 设计文档
 ├── logs/                # 运行日志（自动生成）
+│   ├── backend/         # 后端日志（v3_chat_<timestamp>.log）
+│   └── tui/             # TUI 日志（tui.log，滚动）
 ├── run/                 # PID 文件（自动生成）
 ├── scripts/             # 启动/停止脚本
 ├── tests/               # 测试
@@ -96,7 +97,7 @@ tui/
 # 前台运行（开发调试）
 cd src && python main.py [--config config/agents_v2.json] [--llm-config config.json] [--port 8080]
 
-# 后台运行（nohup，日志写入 logs/backend_stdout.log）
+# 后台运行（nohup，stdout 写入 logs/backend_stdout.log，运行日志写入 logs/backend/）
 ./scripts/start_backend.sh [--config ...] [--port ...]
 
 # 停止后台后端（通过 run/backend.pid）
