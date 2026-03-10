@@ -2,33 +2,78 @@
 
 ## 项目概述
 
-多 Agent 聊天室框架，支持多个 LLM Agent 按轮次在聊天室中对话，支持 Function Calling。
+多 Agent 聊天室框架，支持多个 LLM Agent 按轮次在聊天室中对话，支持 Function Calling。后端提供 HTTP + WebSocket API，TUI 为终端观察台。
 
 ## 技术栈
 
 - Python 3.11+
-- aiohttp（异步 HTTP）
+- tornado（异步 HTTP + WebSocket 服务器）
 - pydantic（数据验证）
-- DashScope API（阿里云 LLM 服务）
+- textual（TUI 终端界面）
+- 兼容 OpenAI API 格式的 LLM 服务（DashScope 等）
 
-## 目录结构
+## 仓库结构
+
+```
+agent_team/
+├── src/                 # 后端主程序
+├── tui/                 # 终端观察台（独立进程）
+├── config/              # Agent 配置文件（agents_v*.json）
+├── resource/            # Prompt 文件和函数列表
+│   ├── prompts/         # Agent system prompt（*.md）
+│   └── bk/              # 函数启用列表（function_list.json）
+├── docs/                # 设计文档
+├── logs/                # 运行日志（自动生成）
+├── run/                 # PID 文件（自动生成）
+├── scripts/             # 启动/停止脚本
+├── tests/               # 测试
+├── config.json          # API Key 和服务地址配置
+└── requirements.txt     # Python 依赖
+```
+
+## 后端目录结构（src/）
 
 ```
 src/
-├── main.py              # 程序入口
+├── main.py              # 程序入口，初始化所有服务，启动 tornado HTTP 服务器
+├── route.py             # HTTP 路由注册（/agents, /rooms, /ws/events）
+├── constants.py         # 枚举常量（角色、消息总线 Topic、房间状态等）
 ├── model/               # 数据定义层
-│   ├── api_model.py     # Pydantic API 数据模型（Message, Tool, ChatCompletionRequest 等）
-│   └── chat_model.py    # ChatMessage dataclass（聊天室消息）
-├── service/             # 有状态服务层
-│   ├── agent.py         # Agent 类（生成回复、支持 Function Calling）
-│   ├── api_client.py    # APIClient 类（异步 HTTP 调用 DashScope API）
-│   ├── chat_room.py     # ChatRoom 类（管理聊天记录和上下文）
-│   ├── function_service.py  # build_tools / execute_function
-│   └── scheduler.py     # Scheduler 类（多 Agent 轮次调度）
+│   ├── api_model.py     # LLM API 数据模型（Message, Tool 等）
+│   ├── chat_model.py    # ChatMessage dataclass（聊天室消息）
+│   ├── chat_context.py  # 聊天上下文模型
+│   ├── agent_event.py   # Agent 事件模型
+│   └── web_model.py     # HTTP 响应模型
+├── service/             # 有状态服务层（模块级单例）
+│   ├── agent_service.py     # Agent 管理（init / close）
+│   ├── room_service.py      # 聊天室管理（init / get_room / close_all）
+│   ├── scheduler_service.py # 多 Agent 轮次调度（init / run / stop）
+│   ├── llm_service.py       # LLM API 调用封装
+│   ├── message_bus.py       # 内部消息总线（pub/sub）
+│   └── func_tool_service/   # 工具函数服务
+│       ├── core.py          # 工具执行入口（init / close）
+│       ├── tool_loader.py   # 加载启用的工具函数
+│       └── tools.py         # 工具函数实现 + FUNCTION_REGISTRY
+├── controller/          # HTTP 控制器层
+│   ├── base_controller.py   # 基类
+│   ├── agent_controller.py  # GET /agents
+│   ├── room_controller.py   # GET /rooms, GET /rooms/{name}/messages
+│   └── ws_controller.py     # WebSocket /ws/events（推送实时消息）
 └── util/                # 无状态工具层
-    ├── config.py        # setup_logger / load_config / load_prompt / load_api_key
-    ├── function_loader.py   # load_enabled_functions / python_type_to_json_schema / get_function_metadata
-    └── functions.py     # 工具函数实现 + FUNCTION_REGISTRY
+    ├── config_util.py       # load_config / load_llm_service_config
+    └── llm_api_util/        # LLM API 客户端封装
+        ├── client.py
+        └── models.py
+```
+
+## TUI 目录结构（tui/）
+
+```
+tui/
+├── main.py        # TUI 入口，解析参数，单实例检查，启动 WatcherApp
+├── app.py         # Textual App 主类（WatcherApp）
+├── widgets.py     # 自定义 Textual 组件
+└── api_client.py  # 调用后端 HTTP / WebSocket API
 ```
 
 ## 三层架构规则
@@ -43,11 +88,41 @@ src/
 
 同层之间可以互相引用。禁止下层依赖上层（service 不能被 model/util 引用）。
 
-## 运行
+## 服务启动与停止
+
+### 后端
 
 ```bash
-cd src && python main.py
+# 前台运行（开发调试）
+cd src && python main.py [--config config/agents_v2.json] [--llm-config config.json] [--port 8080]
+
+# 后台运行（nohup，日志写入 logs/backend_stdout.log）
+./scripts/start_backend.sh [--config ...] [--port ...]
+
+# 停止后台后端（通过 run/backend.pid）
+./scripts/stop_backend.sh
 ```
+
+### TUI 终端观察台
+
+```bash
+# 前台运行
+./scripts/start_tui.sh [--base-url http://127.0.0.1:8080] [--config config.json]
+
+# 停止（通过 run/tui.pid）
+./scripts/stop_tui.sh
+```
+
+### 默认端口
+
+| 服务 | 默认端口 | 说明 |
+|------|----------|------|
+| 后端 HTTP | 8080 | REST API + WebSocket，可通过 `--port` 覆盖 |
+| TUI | — | 无监听端口，连接后端 8080 |
+
+### PID 文件
+
+两个进程均有单实例保护，运行时 PID 写入 `run/backend.pid` / `run/tui.pid`，进程退出后自动删除。
 
 ## 工作目录约定
 
