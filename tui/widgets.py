@@ -152,7 +152,7 @@ class RoomPanel(Vertical):
     # room_id → RoomInfo，用于 set_unread 时读取房间名
     _room_map: dict[str, RoomInfo]
 
-    def load(
+    async def load(
         self,
         rooms: list[RoomInfo],
         agents: list[AgentInfo],
@@ -165,8 +165,8 @@ class RoomPanel(Vertical):
         room_list = self.query_one("#room-list", ListView)
         agent_list = self.query_one("#agent-list", ListView)
 
-        room_list.clear()
-        agent_list.clear()
+        await room_list.clear()
+        await agent_list.clear()
 
         for room in rooms:
             preview = last_previews.get(room.room_id, "暂无消息")
@@ -180,7 +180,7 @@ class RoomPanel(Vertical):
                 classes="room-card",
             )
             item = ListItem(card, id=f"room-{room.room_id}")
-            room_list.append(item)
+            await room_list.append(item)
 
         for agent in agents:
             status_markup = (
@@ -195,7 +195,7 @@ class RoomPanel(Vertical):
                 ),
                 id=f"agent-{agent.name}",
             )
-            agent_list.append(item)
+            await agent_list.append(item)
 
     def set_unread(self, room_id: str, n: int) -> None:
         try:
@@ -248,7 +248,7 @@ class RoomPanel(Vertical):
 class StatusBar(Static):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._status = "[#6e7681]○ 已断开[/]"
+        self._status = "[bold #f85149]○ 已断开[/]"
         self._count: int | None = None
 
     def _build_text(self) -> str:
@@ -266,9 +266,9 @@ class StatusBar(Static):
 
     def set_disconnected(self, countdown: int | None = None) -> None:
         if countdown:
-            self._status = f"[#6e7681]○ 已断开，{countdown}s 后重连[/]"
+            self._status = f"[bold #f85149]○ 已断开，{countdown}s 后重连[/]"
         else:
-            self._status = "[#6e7681]○ 已断开[/]"
+            self._status = "[bold #f85149]○ 已断开[/]"
         self.update(self._build_text())
 
     def update_count(self, n: int) -> None:

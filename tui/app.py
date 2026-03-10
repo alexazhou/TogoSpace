@@ -216,7 +216,7 @@ class WatcherApp(App):
             yield RoomPanel()
             with Vertical(id="right-panel"):
                 yield MessageView()
-                yield StatusBar("○ 已断开")
+                yield StatusBar()
 
     async def _on_mount(self) -> None:
         log.info("on_mount 触发")
@@ -242,7 +242,7 @@ class WatcherApp(App):
                     pass
             await asyncio.gather(*[_fetch_preview(r) for r in rooms])
 
-            room_panel.load(rooms, agents, last_previews)
+            await room_panel.load(rooms, agents, last_previews)
             if rooms:
                 await self._select_room(rooms[0].room_id)
         except aiohttp.ClientError:
@@ -286,8 +286,8 @@ class WatcherApp(App):
 
             def _on_connected() -> None:
                 status_bar.set_connected()
-                log.info("ws: 连接成功，刷新当前房间数据")
-                self.call_later(self._reload_current_room)
+                log.info("ws: 连接成功，刷新房间/Agent/消息数据")
+                self.call_later(self._reload_on_reconnect)
 
             try:
                 async for event in self._api.ws_events(on_connected=_on_connected):
@@ -305,8 +305,37 @@ class WatcherApp(App):
                 await asyncio.sleep(1)
             status_bar.set_reconnecting()
 
-    async def _reload_current_room(self) -> None:
-        """重连后刷新当前房间的存量消息。"""
+    async def _reload_on_reconnect(self) -> None:
+        """重连后刷新房间列表、Agent 列表及当前房间消息。"""
+        try:
+            agents, rooms = await asyncio.gather(
+                self._api.get_agents(),
+                self._api.get_rooms(),
+            )
+            self._agent_order = [a.name for a in agents]
+            self._rooms = rooms
+
+            last_previews: dict[str, str] = {}
+            async def _fetch_preview(room: RoomInfo) -> None:
+                try:
+                    msgs = await self._api.get_room_messages(room.room_id)
+                    if msgs:
+                        last = msgs[-1]
+                        last_previews[room.room_id] = _make_preview(last.sender, last.content)
+                except Exception:
+                    pass
+            await asyncio.gather(*[_fetch_preview(r) for r in rooms])
+
+            room_panel = self.query_one(RoomPanel)
+            await room_panel.load(rooms, agents, last_previews)
+            if self._current_room_id:
+                room_panel.mark_selected(self._current_room_id)
+            elif rooms:
+                self._current_room_id = rooms[0].room_id
+                room_panel.mark_selected(self._current_room_id)
+        except Exception as e:
+            log.warning("ws: 重连刷新房间/Agent 失败: %s", e)
+
         if self._current_room_id is None:
             return
         try:
@@ -318,7 +347,7 @@ class WatcherApp(App):
             status_bar.update_count(self._current_msg_count)
             log.info("ws: 重连刷新完成，消息数=%d", self._current_msg_count)
         except Exception as e:
-            log.warning("ws: 重连刷新失败: %s", e)
+            log.warning("ws: 重连刷新消息失败: %s", e)
 
     def _on_ws_event(self, event: WsEvent) -> None:
         message_view = self.query_one(MessageView)
