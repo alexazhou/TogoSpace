@@ -239,32 +239,26 @@ class RoomPanel(Vertical):
             pass
 
 
-class StatusBar(Static):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._status = "[bold #f85149]○ 已断开[/]"
-        self._count: int | None = None
+from textual.reactive import reactive
 
-    def _build_text(self) -> str:
-        if self._count is None:
-            return self._status
-        return f"{self._status}  |  消息数: {self._count}"
+class StatusBar(Static):
+    status_markup = reactive("[bold #f85149]○ 已断开[/]")
+    count = reactive(0)
+
+    def render(self) -> str:
+        return f"{self.status_markup}  |  消息数: {self.count}"
 
     def set_connected(self) -> None:
-        self._status = "[bold #56d4b0]● 已连接[/]"
-        self.update(self._build_text())
+        self.status_markup = "[bold #56d4b0]● 已连接[/]"
 
     def set_reconnecting(self) -> None:
-        self._status = "[bold #e3b341]◌ 重连中…[/]"
-        self.update(self._build_text())
+        self.status_markup = "[bold #e3b341]◌ 重连中…[/]"
 
     def set_disconnected(self, countdown: int | None = None) -> None:
         if countdown:
-            self._status = f"[bold #f85149]○ 已断开，{countdown}s 后重连[/]"
+            self.status_markup = f"[bold #f85149]○ 已断开，{countdown}s 后重连[/]"
         else:
-            self._status = "[bold #f85149]○ 已断开[/]"
-        self.update(self._build_text())
+            self.status_markup = "[bold #f85149]○ 已断开[/]"
 
     def update_count(self, n: int) -> None:
-        self._count = n
-        self.update(self._build_text())
+        self.count = n
