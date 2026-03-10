@@ -139,6 +139,31 @@ cd src && python main.py [--config config/agents_v2.json] [--llm-config config.j
 | `config.json` | API Key（`anthropic.api_key` 字段） |
 | `resource/bk/function_list.json` | 启用的函数列表（`enabled_functions` 字段） |
 
+## 终端模拟器 (Terminal Simulator)
+
+项目提供基于 Go 的终端模拟器，用于在无图形界面的环境下（如 AI Agent）运行 TUI 并通过 HTTP 获取截图和发送输入。该版本提供更好的 CJK 宽字符支持，编译为单二进制，无需系统字体依赖，输出格式为 **SVG**。详见 [docs/go_simu_terminal.md](docs/go_simu_terminal.md)。
+
+### 运行方式
+
+```bash
+# 构建
+cd go_simu_terminal && go build -o simu_terminal_go .
+
+# 运行 (确保后端在运行且停止已有 TUI)
+./go_simu_terminal/simu_terminal_go --port 8889 -- .venv/bin/python tui/main.py --base-url http://127.0.0.1:8080
+
+# 截图 (SVG 格式)
+curl http://localhost:8889/screenshot -o screenshot.svg
+```
+
+### 键盘输入接口
+```bash
+# 发送键盘按键 (up, down, left, right, enter, tab, esc, ctrl+a...ctrl+z)
+curl -X POST http://localhost:8889/input -H 'Content-Type: application/json' -d '{"key":"tab"}'
+# 发送原始文本
+curl -X POST http://localhost:8889/input -H 'Content-Type: application/json' -d '{"text":"hello\n"}'
+```
+
 ## 新增工具函数
 
 在 `src/util/functions.py` 中添加函数，并注册到 `FUNCTION_REGISTRY`。
