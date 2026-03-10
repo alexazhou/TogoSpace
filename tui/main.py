@@ -6,15 +6,12 @@ import signal
 import sys
 from logging.handlers import RotatingFileHandler
 
-# Fix working directory to tui/ and allow imports from it
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.getcwd())
+_TUI_DIR = os.path.dirname(os.path.abspath(__file__))
+_LOG_DIR = os.path.join(_TUI_DIR, "../logs/tui")
+_RUN_DIR = os.path.join(_TUI_DIR, "../run")
+_PID_FILE = os.path.join(_RUN_DIR, "tui.pid")
 
 from app import WatcherApp
-
-_LOG_DIR = os.path.join(os.path.dirname(__file__), "../logs/tui")
-_RUN_DIR = os.path.join(os.path.dirname(__file__), "../run")
-_PID_FILE = os.path.join(_RUN_DIR, "tui.pid")
 
 
 def _check_single_instance() -> None:
@@ -51,7 +48,7 @@ def _setup_logging() -> None:
     logging.getLogger("tui").setLevel(logging.DEBUG)
     logging.getLogger("tui").addHandler(handler)
 
-_DEFAULT_CONFIG = os.path.join(os.path.dirname(__file__), "../config.json")
+_DEFAULT_CONFIG = os.path.join(_TUI_DIR, "../config.json")
 
 
 def _load_base_url(config_path: str) -> str:
