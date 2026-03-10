@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import aiohttp
 from textual import on, work
@@ -8,6 +9,8 @@ from textual.widgets import Header, ListView
 
 from api_client import ApiClient, RoomInfo, WsEvent
 from widgets import MessageView, RoomPanel, StatusBar
+
+log = logging.getLogger("tui.app")
 
 
 def _make_preview(sender: str, content: str) -> str:
@@ -205,6 +208,7 @@ class WatcherApp(App):
         self._room_cursor: int = 0
         self._current_room_id: str | None = None
         self._current_msg_count: int = 0
+        self._agent_refresh_pending: bool = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -214,7 +218,8 @@ class WatcherApp(App):
                 yield MessageView()
                 yield StatusBar("○ 已断开")
 
-    async def on_mount(self) -> None:
+    async def _on_mount(self) -> None:
+        log.info("on_mount 触发")
         status_bar = self.query_one(StatusBar)
         message_view = self.query_one(MessageView)
         room_panel = self.query_one(RoomPanel)
@@ -246,6 +251,7 @@ class WatcherApp(App):
                 "system", "无法连接到后端服务，请检查服务是否已启动。", []
             )
 
+        log.info("on_mount 完成，启动 ws loop")
         self._start_ws_loop()
 
     async def _select_room(self, room_id: str) -> None:
@@ -272,16 +278,22 @@ class WatcherApp(App):
         except aiohttp.ClientError:
             await message_view.append_message("system", "加载消息失败，请检查网络连接。", [])
 
-    @work(exclusive=True)
+    @work(exclusive=True, group="ws")
     async def _start_ws_loop(self) -> None:
         status_bar = self.query_one(StatusBar)
         while True:
+            log.info("ws: 开始连接")
             try:
-                status_bar.set_connected()
-                async for event in self._api.ws_events():
+                async for event in self._api.ws_events(on_connected=status_bar.set_connected):
+                    log.debug("ws: 收到事件 room=%s sender=%s", event.room_id, event.sender)
                     self._on_ws_event(event)
-            except Exception:
-                pass
+                log.info("ws: 连接正常关闭（async for 退出）")
+            except asyncio.CancelledError:
+                log.info("ws: worker 被取消，退出循环")
+                raise
+            except Exception as e:
+                log.warning("ws: 连接异常断开: %s: %s", type(e).__name__, e)
+            log.info("ws: 切换为已断开，3 秒后重连")
             status_bar.set_disconnected()
             await asyncio.sleep(3)
             status_bar.set_reconnecting()
@@ -293,7 +305,7 @@ class WatcherApp(App):
 
         preview = _make_preview(event.sender, event.content)
         self.call_later(room_panel.update_preview, event.room_id, preview)
-        self._refresh_agent_status()
+        self._schedule_agent_refresh()
 
         if event.room_id == self._current_room_id:
             self._current_msg_count += 1
@@ -305,8 +317,15 @@ class WatcherApp(App):
             self._unread[event.room_id] = self._unread.get(event.room_id, 0) + 1
             self.call_later(room_panel.set_unread, event.room_id, self._unread[event.room_id])
 
-    @work(exclusive=False)
+    def _schedule_agent_refresh(self) -> None:
+        """节流：已有刷新任务在排队时跳过本次。"""
+        if not self._agent_refresh_pending:
+            self._agent_refresh_pending = True
+            self._refresh_agent_status()
+
+    @work(exclusive=True, group="agent_refresh")
     async def _refresh_agent_status(self) -> None:
+        self._agent_refresh_pending = False
         try:
             agents = await self._api.get_agents()
             room_panel = self.query_one(RoomPanel)
@@ -346,5 +365,9 @@ class WatcherApp(App):
             timeout=3,
         )
 
-    async def on_unmount(self) -> None:
+    def on_exception(self, error: Exception) -> None:
+        log.exception("未捕获异常导致 app 退出: %s", error)
+
+    async def _on_unmount(self) -> None:
+        log.info("app unmount")
         await self._api.close()
