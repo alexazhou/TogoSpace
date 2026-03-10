@@ -283,8 +283,14 @@ class WatcherApp(App):
         status_bar = self.query_one(StatusBar)
         while True:
             log.info("ws: 开始连接")
+
+            def _on_connected() -> None:
+                status_bar.set_connected()
+                log.info("ws: 连接成功，刷新当前房间数据")
+                self.call_later(self._reload_current_room)
+
             try:
-                async for event in self._api.ws_events(on_connected=status_bar.set_connected):
+                async for event in self._api.ws_events(on_connected=_on_connected):
                     log.debug("ws: 收到事件 room=%s sender=%s", event.room_id, event.sender)
                     self._on_ws_event(event)
                 log.info("ws: 连接正常关闭（async for 退出）")
@@ -294,9 +300,25 @@ class WatcherApp(App):
             except Exception as e:
                 log.warning("ws: 连接异常断开: %s: %s", type(e).__name__, e)
             log.info("ws: 切换为已断开，3 秒后重连")
-            status_bar.set_disconnected()
-            await asyncio.sleep(3)
+            for remaining in range(3, 0, -1):
+                status_bar.set_disconnected(remaining)
+                await asyncio.sleep(1)
             status_bar.set_reconnecting()
+
+    async def _reload_current_room(self) -> None:
+        """重连后刷新当前房间的存量消息。"""
+        if self._current_room_id is None:
+            return
+        try:
+            message_view = self.query_one(MessageView)
+            status_bar = self.query_one(StatusBar)
+            messages = await self._api.get_room_messages(self._current_room_id)
+            await message_view.load_messages(messages, self._agent_order)
+            self._current_msg_count = len(messages)
+            status_bar.update_count(self._current_msg_count)
+            log.info("ws: 重连刷新完成，消息数=%d", self._current_msg_count)
+        except Exception as e:
+            log.warning("ws: 重连刷新失败: %s", e)
 
     def _on_ws_event(self, event: WsEvent) -> None:
         message_view = self.query_one(MessageView)

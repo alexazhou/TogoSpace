@@ -264,8 +264,11 @@ class StatusBar(Static):
         self._status = "[bold #e3b341]◌ 重连中…[/]"
         self.update(self._build_text())
 
-    def set_disconnected(self) -> None:
-        self._status = "[#6e7681]○ 已断开[/]"
+    def set_disconnected(self, countdown: int | None = None) -> None:
+        if countdown:
+            self._status = f"[#6e7681]○ 已断开，{countdown}s 后重连[/]"
+        else:
+            self._status = "[#6e7681]○ 已断开[/]"
         self.update(self._build_text())
 
     def update_count(self, n: int) -> None:
