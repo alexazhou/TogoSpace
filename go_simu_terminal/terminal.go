@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/creack/pty"
@@ -12,14 +13,16 @@ import (
 
 // TerminalProcess manages a PTY child process and a headless virtual screen.
 type TerminalProcess struct {
-	term    *headlessterm.Terminal
-	mu      sync.RWMutex // protects term: reader goroutine writes, HTTP handler reads
-	ptmx    *os.File
-	execCmd *exec.Cmd
-	wmu     sync.Mutex // protects ptmx writes (SendInput concurrency)
-	done    chan struct{}
-	cols    int
-	rows    int
+	term      *headlessterm.Terminal
+	mu        sync.RWMutex // protects term: reader goroutine writes, HTTP handler reads
+	ptmx      *os.File
+	execCmd   *exec.Cmd
+	wmu       sync.Mutex // protects ptmx writes (SendInput concurrency)
+	done      chan struct{}
+	cols      int
+	rows      int
+	fontAscii string
+	fontCJK   string
 }
 
 // NewTerminalProcess creates a TerminalProcess with the given dimensions.
@@ -92,6 +95,30 @@ func (t *TerminalProcess) Screenshot() ([]byte, error) {
 	defer t.mu.RUnlock()
 	svg := renderToSVG(t.term, t.cols, t.rows)
 	return []byte(svg), nil
+}
+
+// ScreenshotPNG renders the current screen state to PNG bytes.
+func (t *TerminalProcess) ScreenshotPNG(scale float64) ([]byte, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return renderToPNG(t.term, t.cols, t.rows, scale, t.fontAscii, t.fontCJK)
+}
+
+// SaveScreenshot saves the current screen state to a file.
+func (t *TerminalProcess) SaveScreenshot(filename string, scale float64) error {
+	var data []byte
+	var err error
+	if strings.HasSuffix(strings.ToLower(filename), ".png") {
+		data, err = t.ScreenshotPNG(scale)
+	} else {
+		data, err = t.Screenshot()
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(filename, data, 0644)
 }
 
 // Stop kills the child process and closes the PTY.

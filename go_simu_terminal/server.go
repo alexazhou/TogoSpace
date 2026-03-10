@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -55,8 +56,10 @@ type inputRequest struct {
 	Key  *string `json:"key"`
 }
 
-func serve(cmd []string, port, cols, rows int) {
+func serve(cmd []string, port, cols, rows int, fontAscii, fontCJK string) {
 	process := NewTerminalProcess(cols, rows)
+	process.fontAscii = fontAscii
+	process.fontCJK = fontCJK
 	if err := process.Start(cmd); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start process: %v\n", err)
 		os.Exit(1)
@@ -104,6 +107,24 @@ func serve(cmd []string, port, cols, rows int) {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+
+		scaleStr := r.URL.Query().Get("scale")
+		scale, _ := strconv.ParseFloat(scaleStr, 64)
+		if scale <= 0 {
+			scale = 1.0
+		}
+
+		saveTo := r.URL.Query().Get("save")
+		if saveTo != "" {
+			if err := process.SaveScreenshot(saveTo, scale); err != nil {
+				http.Error(w, fmt.Sprintf("Save error: %v", err), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"ok":true,"saved":true}`))
+			return
+		}
+
 		svgBytes, err := process.Screenshot()
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Screenshot error: %v", err), http.StatusInternalServerError)
@@ -111,6 +132,51 @@ func serve(cmd []string, port, cols, rows int) {
 		}
 		w.Header().Set("Content-Type", "image/svg+xml")
 		w.Write(svgBytes)
+	})
+
+	// GET /export?format=png|svg&filename=...&scale=1.0
+	mux.HandleFunc("/export", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		format := r.URL.Query().Get("format")
+		filename := r.URL.Query().Get("filename")
+		scaleStr := r.URL.Query().Get("scale")
+		scale, _ := strconv.ParseFloat(scaleStr, 64)
+		if scale <= 0 {
+			scale = 1.0
+		}
+
+		if filename == "" {
+			if format == "png" {
+				filename = "screenshot.png"
+			} else {
+				filename = "screenshot.svg"
+			}
+		}
+
+		var data []byte
+		var err error
+		var contentType string
+
+		if format == "png" {
+			data, err = process.ScreenshotPNG(scale)
+			contentType = "image/png"
+		} else {
+			data, err = process.Screenshot()
+			contentType = "image/svg+xml"
+		}
+
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Export error: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+		w.Write(data)
 	})
 
 	srv := &http.Server{
