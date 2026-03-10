@@ -17,6 +17,8 @@ import aiohttp
 from pydantic import BaseModel
 
 # 第三组：项目内部包
+from route import xxx
+from controller.xxx import xxx
 from util.xxx import ...
 from model.xxx import ...
 from service import aaa, bbb_service as bbb, ...   # service 模块用一行引入
@@ -28,9 +30,10 @@ from constants import XxxEnum, XxxDataclass        # constants 放最后
 
 1. **标准库优先**：`import` 形式和 `from ... import` 形式均可，按字母序排列。
 
-2. **第三方包次之**：仅包含通过 `pip` 安装的依赖（如 `aiohttp`、`pydantic`）。若当前文件无第三方依赖，省略该组。
+2. **第三方包次之**：仅包含通过 `pip` 安装的依赖（如 `aiohttp`、`pydantic`、`tornado`）。若当前文件无第三方依赖，省略该组。
 
 3. **内部包放最后**，按以下子顺序排列：
+   - `route` & `controller.*`：路由与控制层
    - `util.*`：工具层，无状态
    - `model.*`：数据层，纯数据定义
    - `service`：服务层模块，**统一用一行** `from service import ...` 引入，别名保持一致（见下表）
@@ -42,7 +45,7 @@ from constants import XxxEnum, XxxDataclass        # constants 放最后
 | 模块 | 别名 |
 |------|------|
 | `scheduler_service` | `scheduler` |
-| `chat_room_service` | `chat_room` |
+| `room_service` | `chat_room` |
 | `func_tool_service` | `agent_tools` |
 | `agent_service` | 无（直接使用） |
 | `llm_service` | 无（直接使用） |
@@ -55,13 +58,16 @@ import asyncio
 import logging
 from typing import Dict, List, Optional
 
+# 第三方包
+import tornado.web
+
 # 内部包
+from route import make_app
+from controller.agent_controller import AgentHandler
 from util.llm_api_util import LlmApiMessage
-from util.config_util import load_prompt
 from model.chat_model import ChatMessage
-from model.agent_event import RoomMessageEvent
-from service import agent_service, chat_room_service as chat_room, func_tool_service as agent_tools
+from service import agent_service, room_service as chat_room, func_tool_service as agent_tools
 from service.agent_service import Agent
-from service.chat_room_service import ChatRoom
-from constants import TurnStatus, TurnCheckResult
+from constants import TurnStatus
 ```
+

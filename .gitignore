@@ -5,3 +5,4 @@ __pycache__
 .log
 logs
 *.pid
+simu_terminal_go
