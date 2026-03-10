@@ -1,9 +1,12 @@
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import AsyncGenerator
 
 import aiohttp
+
+log = logging.getLogger("tui.api")
 
 
 @dataclass
@@ -86,11 +89,14 @@ class ApiClient:
             for m in data["messages"]
         ]
 
-    async def ws_events(self) -> AsyncGenerator[WsEvent, None]:
+    async def ws_events(self, on_connected=None) -> AsyncGenerator[WsEvent, None]:
         ws_url = self._base_url.replace("http://", "ws://").replace("https://", "wss://")
         session = self._get_session()
         try:
-            async with session.ws_connect(f"{ws_url}/ws/events") as ws:
+            async with session.ws_connect(f"{ws_url}/ws/events", heartbeat=5) as ws:
+                log.info("ws_connect 握手成功: %s", f"{ws_url}/ws/events")
+                if on_connected:
+                    on_connected()
                 async for msg in ws:
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         try:
@@ -106,8 +112,11 @@ class ApiClient:
                         except (KeyError, ValueError):
                             continue
                     elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                        log.info("ws: 收到关闭/错误帧, type=%s", msg.type)
                         break
-        except Exception:
+                log.info("ws: async for 结束（服务端关闭连接）")
+        except Exception as e:
+            log.warning("ws_connect 异常: %s: %s", type(e).__name__, e)
             return
 
     async def close(self) -> None:

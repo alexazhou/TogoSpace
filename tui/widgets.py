@@ -248,7 +248,7 @@ class RoomPanel(Vertical):
 class StatusBar(Static):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._status = "○ 已断开"
+        self._status = "[#6e7681]○ 已断开[/]"
         self._count: int | None = None
 
     def _build_text(self) -> str:
@@ -257,15 +257,15 @@ class StatusBar(Static):
         return f"{self._status}  |  消息数: {self._count}"
 
     def set_connected(self) -> None:
-        self._status = "● 已连接"
+        self._status = "[bold #56d4b0]● 已连接[/]"
         self.update(self._build_text())
 
     def set_reconnecting(self) -> None:
-        self._status = "◌ 重连中…"
+        self._status = "[bold #e3b341]◌ 重连中…[/]"
         self.update(self._build_text())
 
     def set_disconnected(self) -> None:
-        self._status = "○ 已断开"
+        self._status = "[#6e7681]○ 已断开[/]"
         self.update(self._build_text())
 
     def update_count(self, n: int) -> None:
