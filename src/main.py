@@ -2,6 +2,8 @@ import argparse
 import asyncio
 import logging
 import os
+import signal
+import sys
 from datetime import datetime
 
 import tornado.httpserver
@@ -32,8 +34,40 @@ def _setup_logger() -> None:
         root_logger.addHandler(handler)
 
 
+_RUN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../run")
+_PID_FILE = os.path.join(_RUN_DIR, "backend.pid")
+
+
+def _check_single_instance() -> None:
+    try:
+        with open(_PID_FILE) as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)
+        print(f"后端已在运行（PID {pid}），拒绝启动第二个实例。", file=sys.stderr)
+        sys.exit(1)
+    except (FileNotFoundError, ValueError):
+        pass
+    except OSError:
+        # 进程不存在，PID 文件是上次异常退出的残留，直接覆盖
+        pass
+
+
+def _write_pid() -> None:
+    os.makedirs(_RUN_DIR, exist_ok=True)
+    with open(_PID_FILE, "w") as f:
+        f.write(str(os.getpid()))
+
+
+def _remove_pid() -> None:
+    try:
+        os.remove(_PID_FILE)
+    except FileNotFoundError:
+        pass
+
+
 async def main(config_path: str = None, llm_config_path: str = None, port: int = 8080):
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    _write_pid()
     _setup_logger()
     logger = logging.getLogger(__name__)
 
@@ -77,9 +111,12 @@ async def main(config_path: str = None, llm_config_path: str = None, port: int =
         func_tool_service.close()
         chat_room.close_all()
         message_bus.stop()
+        _remove_pid()
 
 
 if __name__ == "__main__":
+    _check_single_instance()
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=None, help="agents 配置文件路径")
     parser.add_argument("--llm-config", default=None, dest="llm_config", help="LLM 服务配置文件路径")
