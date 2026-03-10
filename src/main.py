@@ -39,17 +39,16 @@ _PID_FILE = os.path.join(_RUN_DIR, "backend.pid")
 
 
 def _check_single_instance() -> None:
+    os.makedirs(_RUN_DIR, exist_ok=True)
+    # 读取已有 PID，检查进程是否存活
     try:
         with open(_PID_FILE) as f:
             pid = int(f.read().strip())
-        os.kill(pid, 0)
+        os.kill(pid, 0)  # 进程存活则抛 OSError
         print(f"后端已在运行（PID {pid}），拒绝启动第二个实例。", file=sys.stderr)
         sys.exit(1)
-    except (FileNotFoundError, ValueError):
-        pass
-    except OSError:
-        # 进程不存在，PID 文件是上次异常退出的残留，直接覆盖
-        pass
+    except (FileNotFoundError, ValueError, ProcessLookupError):
+        pass  # 文件不存在、内容非法、进程不存在，均视为可启动
 
 
 def _write_pid() -> None:
@@ -67,7 +66,6 @@ def _remove_pid() -> None:
 
 async def main(config_path: str = None, llm_config_path: str = None, port: int = 8080):
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    _write_pid()
     _setup_logger()
     logger = logging.getLogger(__name__)
 
@@ -116,6 +114,7 @@ async def main(config_path: str = None, llm_config_path: str = None, port: int =
 
 if __name__ == "__main__":
     _check_single_instance()
+    _write_pid()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=None, help="agents 配置文件路径")

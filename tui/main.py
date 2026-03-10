@@ -15,15 +15,14 @@ from app import WatcherApp
 
 
 def _check_single_instance() -> None:
+    os.makedirs(_RUN_DIR, exist_ok=True)
     try:
         with open(_PID_FILE) as f:
             pid = int(f.read().strip())
         os.kill(pid, 0)
         print(f"TUI 已在运行（PID {pid}），拒绝启动第二个实例。", file=sys.stderr)
         sys.exit(1)
-    except (FileNotFoundError, ValueError):
-        pass
-    except OSError:
+    except (FileNotFoundError, ValueError, ProcessLookupError):
         pass
 
 
@@ -79,9 +78,9 @@ def main() -> None:
     args = parser.parse_args()
 
     _check_single_instance()
+    _write_pid()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     _setup_logging()
-    _write_pid()
     try:
         base_url = args.base_url or _load_base_url(args.config)
         app = WatcherApp(base_url=base_url)
