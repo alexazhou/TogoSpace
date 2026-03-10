@@ -1,13 +1,45 @@
 package main
 
 import (
+	"bytes"
+	_ "embed"
 	"fmt"
 	"html"
 	"image/color"
+	"os"
 	"strings"
 
+	"github.com/fogleman/gg"
+	"github.com/golang/freetype/truetype"
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/gomono"
+	"golang.org/x/image/font/gofont/gomonobold"
 	headlessterm "github.com/danielgatis/go-headless-term"
 )
+
+//go:embed wqy-microhei.ttc
+var embeddedCJKFont []byte
+
+// loadFontFaceFromBytes loads a font face from bytes with hinting enabled.
+func loadFontFaceFromBytes(fontBytes []byte, size float64) (font.Face, error) {
+	f, err := truetype.Parse(fontBytes)
+	if err != nil {
+		return nil, err
+	}
+	return truetype.NewFace(f, &truetype.Options{
+		Size:    size,
+		Hinting: font.HintingFull,
+	}), nil
+}
+
+// loadFontFaceFromFile loads a font face from a file path.
+func loadFontFaceFromFile(path string, size float64) (font.Face, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return loadFontFaceFromBytes(data, size)
+}
 
 // Cell/layout constants — aligned with Python version.
 const (
@@ -101,9 +133,10 @@ func renderToSVG(term *headlessterm.Terminal, cols, rows int) string {
 
 	var sb strings.Builder
 
+	// Add common CJK mono fonts to the CSS font-family for better fallback.
 	fmt.Fprintf(&sb,
 		`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" `+
-			`style="background:%s;font-family:'SF Mono','Menlo','Consolas',monospace;font-size:%dpx">`,
+			`style="background:%s;font-family:'SF Mono','Menlo','Consolas','WenQuanYi Micro Hei Mono','Noto Sans Mono CJK SC','PingFang SC',monospace;font-size:%dpx">`,
 		imgW, imgH, defaultBGColor, fontSize,
 	)
 
@@ -165,4 +198,123 @@ func renderToSVG(term *headlessterm.Terminal, cols, rows int) string {
 
 	sb.WriteString("</svg>")
 	return sb.String()
+}
+
+// renderToPNG converts the current headless terminal state to a PNG image as bytes.
+// scale allows for high-resolution exports.
+// fontAscii and fontCJK are optional paths to custom font files.
+func renderToPNG(term *headlessterm.Terminal, cols, rows int, scale float64, fontAscii, fontCJK string) ([]byte, error) {
+	if scale <= 0 {
+		scale = 1.0
+	}
+
+	scW := float64(cellW) * scale
+	scH := float64(cellH) * scale
+	scPadX := float64(padX) * scale
+	scPadY := float64(padY) * scale
+	scFontSize := float64(fontSize) * scale
+
+	imgW := int(float64(cols)*scW + scPadX*2)
+	imgH := int(float64(rows)*scH + scPadY*2)
+
+	dc := gg.NewContext(imgW, imgH)
+
+	// Background
+	dc.SetHexColor(defaultBGColor)
+	dc.Clear()
+
+	// Load Fonts
+	var face, faceBold, cjkFace font.Face
+	var err error
+
+	// 1. ASCII Font
+	if fontAscii != "" {
+		fmt.Printf("Using custom ASCII font: %s\n", fontAscii)
+		face, err = loadFontFaceFromFile(fontAscii, scFontSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load custom ASCII font: %v", err)
+		}
+		faceBold = face
+	} else {
+		// Log once if using default
+		face, _ = loadFontFaceFromBytes(gomono.TTF, scFontSize)
+		faceBold, _ = loadFontFaceFromBytes(gomonobold.TTF, scFontSize)
+	}
+
+	// 2. CJK Font
+	if fontCJK != "" {
+		fmt.Printf("Using custom CJK font: %s\n", fontCJK)
+		cjkFace, err = loadFontFaceFromFile(fontCJK, scFontSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load custom CJK font: %v", err)
+		}
+	} else if len(embeddedCJKFont) > 0 {
+		// Log once
+		cjkFace, _ = loadFontFaceFromBytes(embeddedCJKFont, scFontSize)
+	} else {
+		cjkFace = face
+	}
+
+	if fontAscii == "" && fontCJK == "" {
+		fmt.Println("Using embedded fonts: Go Mono (ASCII) and WenQuanYi Micro Hei Mono (CJK)")
+	}
+
+	dc.SetFontFace(face)
+
+	for row := 0; row < rows; row++ {
+		for col := 0; col < cols; col++ {
+			g := term.Cell(row, col)
+			if g == nil {
+				continue
+			}
+
+			if g.IsWideSpacer() {
+				continue
+			}
+
+			bgStr := resolveColor(g.Bg, true)
+			fgStr := resolveColor(g.Fg, false)
+			bold := g.Flags&1 != 0
+
+			ch := g.Char
+			x := scPadX + float64(col)*scW
+			y := scPadY + float64(row)*scH
+			width := scW
+			if g.IsWide() {
+				width = scW * 2
+			}
+
+			// Background rect
+			if bgStr != defaultBGColor {
+				dc.SetHexColor(bgStr)
+				dc.DrawRectangle(x, y, width, scH)
+				dc.Fill()
+			}
+
+			// Text
+			if ch != 0 && ch != ' ' {
+				dc.SetHexColor(fgStr)
+				
+				currentFace := face
+				if bold {
+					currentFace = faceBold
+				}
+				if g.IsWide() || ch > 127 {
+					currentFace = cjkFace
+				}
+				dc.SetFontFace(currentFace)
+
+				// Baseline adjustment
+				baseline := y + scH - (5 * scale)
+				dc.DrawString(string(ch), x, baseline)
+			}
+		}
+	}
+
+	var buf bytes.Buffer
+	err = dc.EncodePNG(&buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
