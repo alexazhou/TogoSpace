@@ -6,6 +6,8 @@ import (
 	"os"
 )
 
+const Version = "v1.1.0"
+
 func main() {
 	port := flag.Int("port", 8888, "HTTP listen port")
 	cols := flag.Int("cols", 140, "Terminal width in columns")
@@ -14,7 +16,13 @@ func main() {
 	scale := flag.Float64("scale", 1.0, "Scale for the snapshot (e.g. 2.0 for high DPI)")
 	fontAscii := flag.String("font-ascii", "", "Path to custom ASCII font (.ttf)")
 	fontCJK := flag.String("font-cjk", "", "Path to custom CJK font (.ttf or .ttc)")
+	version := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *version {
+		fmt.Printf("simu_terminal_go %s\n", Version)
+		return
+	}
 
 	cmd := flag.Args()
 	if len(cmd) == 0 {
