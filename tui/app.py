@@ -220,41 +220,61 @@ class WatcherApp(App):
 
     async def _on_mount(self) -> None:
         log.info("on_mount 触发")
+        await self._refresh_full_ui(is_initial=True)
+        log.info("on_mount 完成，启动 ws loop")
+        self._start_ws_loop()
+
+    async def _fetch_all_previews(self, rooms: list[RoomInfo]) -> dict[str, str]:
+        """并发拉取各房间最后一条消息作为预览。"""
+        previews: dict[str, str] = {}
+
+        async def _fetch(room: RoomInfo) -> None:
+            try:
+                msgs = await self._api.get_room_messages(room.room_id)
+                if msgs:
+                    last = msgs[-1]
+                    previews[room.room_id] = _make_preview(last.sender, last.content)
+            except Exception:
+                pass
+
+        await asyncio.gather(*[_fetch(r) for r in rooms])
+        return previews
+
+    async def _refresh_full_ui(self, is_initial: bool = False) -> None:
+        """刷新房间列表、Agent 列表及 UI 状态。"""
         status_bar = self.query_one(StatusBar)
         message_view = self.query_one(MessageView)
         room_panel = self.query_one(RoomPanel)
 
         try:
-            agents = await self._api.get_agents()
-            rooms = await self._api.get_rooms()
+            agents, rooms = await asyncio.gather(
+                self._api.get_agents(),
+                self._api.get_rooms(),
+            )
             self._agent_order = [a.name for a in agents]
             self._rooms = rooms
 
-            # 并发拉取各房间最后一条消息作为预览
-            last_previews: dict[str, str] = {}
-            async def _fetch_preview(room: RoomInfo) -> None:
-                try:
-                    msgs = await self._api.get_room_messages(room.room_id)
-                    if msgs:
-                        last = msgs[-1]
-                        last_previews[room.room_id] = _make_preview(last.sender, last.content)
-                except Exception:
-                    pass
-            await asyncio.gather(*[_fetch_preview(r) for r in rooms])
+            previews = await self._fetch_all_previews(rooms)
+            await room_panel.load(rooms, agents, previews)
 
-            await room_panel.load(rooms, agents, last_previews)
-            if rooms:
-                await self._select_room(rooms[0].room_id)
+            # 初始加载或重连后恢复选中的房间
+            target_room_id = self._current_room_id or (rooms[0].room_id if rooms else None)
+            if target_room_id:
+                await self._select_room(target_room_id, force_reload=True)
+
+            if not is_initial:
+                status_bar.set_connected()
         except aiohttp.ClientError:
             status_bar.set_disconnected()
-            await message_view.append_message(
-                "system", "无法连接到后端服务，请检查服务是否已启动。", []
-            )
+            if is_initial:
+                await message_view.append_message(
+                    "system", "无法连接到后端服务，请检查服务是否已启动。", []
+                )
 
-        log.info("on_mount 完成，启动 ws loop")
-        self._start_ws_loop()
+    async def _select_room(self, room_id: str, force_reload: bool = False) -> None:
+        if not force_reload and room_id == self._current_room_id:
+            return
 
-    async def _select_room(self, room_id: str) -> None:
         message_view = self.query_one(MessageView)
         status_bar = self.query_one(StatusBar)
         room_panel = self.query_one(RoomPanel)
@@ -263,12 +283,12 @@ class WatcherApp(App):
             messages = await self._api.get_room_messages(room_id)
             await message_view.load_messages(messages, self._agent_order)
             room_panel.mark_selected(room_id)
-            room_panel.clear_unread(room_id)
+            room_panel.update_unread_count(room_id, 0)
             self._unread[room_id] = 0
             self._current_room_id = room_id
             self._current_msg_count = len(messages)
             status_bar.update_count(self._current_msg_count)
-            # Update cursor index
+
             for i, r in enumerate(self._rooms):
                 if r.room_id == room_id:
                     self._room_cursor = i
@@ -285,9 +305,8 @@ class WatcherApp(App):
             log.info("ws: 开始连接")
 
             def _on_connected() -> None:
-                status_bar.set_connected()
                 log.info("ws: 连接成功，刷新房间/Agent/消息数据")
-                self.call_later(self._reload_on_reconnect)
+                self.call_later(self._refresh_full_ui)
 
             try:
                 async for event in self._api.ws_events(on_connected=_on_connected):
@@ -299,6 +318,7 @@ class WatcherApp(App):
                 raise
             except Exception as e:
                 log.warning("ws: 连接异常断开: %s: %s", type(e).__name__, e)
+
             log.info("ws: 切换为已断开，3 秒后重连")
             for remaining in range(3, 0, -1):
                 status_bar.set_disconnected(remaining)
@@ -306,48 +326,8 @@ class WatcherApp(App):
             status_bar.set_reconnecting()
 
     async def _reload_on_reconnect(self) -> None:
-        """重连后刷新房间列表、Agent 列表及当前房间消息。"""
-        try:
-            agents, rooms = await asyncio.gather(
-                self._api.get_agents(),
-                self._api.get_rooms(),
-            )
-            self._agent_order = [a.name for a in agents]
-            self._rooms = rooms
-
-            last_previews: dict[str, str] = {}
-            async def _fetch_preview(room: RoomInfo) -> None:
-                try:
-                    msgs = await self._api.get_room_messages(room.room_id)
-                    if msgs:
-                        last = msgs[-1]
-                        last_previews[room.room_id] = _make_preview(last.sender, last.content)
-                except Exception:
-                    pass
-            await asyncio.gather(*[_fetch_preview(r) for r in rooms])
-
-            room_panel = self.query_one(RoomPanel)
-            await room_panel.load(rooms, agents, last_previews)
-            if self._current_room_id:
-                room_panel.mark_selected(self._current_room_id)
-            elif rooms:
-                self._current_room_id = rooms[0].room_id
-                room_panel.mark_selected(self._current_room_id)
-        except Exception as e:
-            log.warning("ws: 重连刷新房间/Agent 失败: %s", e)
-
-        if self._current_room_id is None:
-            return
-        try:
-            message_view = self.query_one(MessageView)
-            status_bar = self.query_one(StatusBar)
-            messages = await self._api.get_room_messages(self._current_room_id)
-            await message_view.load_messages(messages, self._agent_order)
-            self._current_msg_count = len(messages)
-            status_bar.update_count(self._current_msg_count)
-            log.info("ws: 重连刷新完成，消息数=%d", self._current_msg_count)
-        except Exception as e:
-            log.warning("ws: 重连刷新消息失败: %s", e)
+        """已弃用，功能已合并至 _refresh_full_ui"""
+        pass
 
     def _on_ws_event(self, event: WsEvent) -> None:
         message_view = self.query_one(MessageView)
@@ -366,7 +346,7 @@ class WatcherApp(App):
             self.call_later(status_bar.update_count, self._current_msg_count)
         else:
             self._unread[event.room_id] = self._unread.get(event.room_id, 0) + 1
-            self.call_later(room_panel.set_unread, event.room_id, self._unread[event.room_id])
+            self.call_later(room_panel.update_unread_count, event.room_id, self._unread[event.room_id])
 
     def _schedule_agent_refresh(self) -> None:
         """节流：已有刷新任务在排队时跳过本次。"""

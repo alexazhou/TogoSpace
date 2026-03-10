@@ -149,8 +149,14 @@ class RoomPanel(Vertical):
         yield Label("Agent", classes="panel-title")
         yield ListView(id="agent-list")
 
-    # room_id → RoomInfo，用于 set_unread 时读取房间名
-    _room_map: dict[str, RoomInfo]
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._room_map: dict[str, RoomInfo] = {}
+
+    def _get_agent_status_markup(self, status: str) -> str:
+        if status == "active":
+            return "[bold #56d4b0]● 活跃[/]"
+        return "[#484f58]○ 空闲[/]"
 
     async def load(
         self,
@@ -172,7 +178,7 @@ class RoomPanel(Vertical):
             preview = last_previews.get(room.room_id, "暂无消息")
             card = Vertical(
                 Horizontal(
-                    Label(f"{room.room_name} [#6e7681][未读:0][/]", classes="room-card-name"),
+                    Label("", classes="room-card-name"),
                     Label(f"[dim]{len(room.members)}人[/dim]", classes="room-card-members"),
                     classes="room-card-header",
                 ),
@@ -181,39 +187,29 @@ class RoomPanel(Vertical):
             )
             item = ListItem(card, id=f"room-{room.room_id}")
             await room_list.append(item)
+            self.update_unread_count(room.room_id, 0)
 
         for agent in agents:
-            status_markup = (
-                "[bold #56d4b0]● 活跃[/]" if agent.status == "active"
-                else "[#484f58]○ 空闲[/]"
-            )
             item = ListItem(
                 Horizontal(
                     Label(f"{agent.name}  [dim]{agent.model}[/dim]", classes="agent-name"),
-                    Label(status_markup, classes="agent-status"),
+                    Label(self._get_agent_status_markup(agent.status), classes="agent-status"),
                     classes="agent-card",
                 ),
                 id=f"agent-{agent.name}",
             )
             await agent_list.append(item)
 
-    def set_unread(self, room_id: str, n: int) -> None:
+    def update_unread_count(self, room_id: str, count: int) -> None:
         try:
             item = self.query_one(f"#room-{room_id}", ListItem)
-            room = getattr(self, "_room_map", {}).get(room_id)
+            room = self._room_map.get(room_id)
             name = room.room_name if room else room_id
-            item.query_one(".room-card-name", Label).update(
-                f"{name} [bold red][未读:{n}][/bold red]"
-            )
-        except Exception:
-            pass
-
-    def clear_unread(self, room_id: str) -> None:
-        try:
-            item = self.query_one(f"#room-{room_id}", ListItem)
-            room = getattr(self, "_room_map", {}).get(room_id)
-            name = room.room_name if room else room_id
-            item.query_one(".room-card-name", Label).update(f"{name} [#6e7681][未读:0][/]")
+            if count > 0:
+                markup = f"{name} [bold red][未读:{count}][/bold red]"
+            else:
+                markup = f"{name} [#6e7681][未读:0][/]"
+            item.query_one(".room-card-name", Label).update(markup)
         except Exception:
             pass
 
@@ -224,15 +220,13 @@ class RoomPanel(Vertical):
         except Exception:
             pass
 
-    def update_agent_status(self, agents: list) -> None:
+    def update_agent_status(self, agents: list[AgentInfo]) -> None:
         for agent in agents:
             try:
                 item = self.query_one(f"#agent-{agent.name}", ListItem)
-                status_markup = (
-                    "[bold #56d4b0]● 活跃[/]" if agent.status == "active"
-                    else "[#484f58]○ 空闲[/]"
+                item.query_one(".agent-status", Label).update(
+                    self._get_agent_status_markup(agent.status)
                 )
-                item.query_one(".agent-status", Label).update(status_markup)
             except Exception:
                 pass
 
