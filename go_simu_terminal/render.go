@@ -12,16 +12,20 @@ import (
 	"github.com/fogleman/gg"
 	"github.com/golang/freetype/truetype"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/gomono"
-	"golang.org/x/image/font/gofont/gomonobold"
 	headlessterm "github.com/danielgatis/go-headless-term"
 )
+
+//go:embed Menlo.ttc
+var embeddedASCIIFont []byte
 
 //go:embed wqy-microhei.ttc
 var embeddedCJKFont []byte
 
 // loadFontFaceFromBytes loads a font face from bytes with hinting enabled.
 func loadFontFaceFromBytes(fontBytes []byte, size float64) (font.Face, error) {
+	if len(fontBytes) == 0 {
+		return nil, fmt.Errorf("empty font data")
+	}
 	f, err := truetype.Parse(fontBytes)
 	if err != nil {
 		return nil, err
@@ -236,9 +240,12 @@ func renderToPNG(term *headlessterm.Terminal, cols, rows int, scale float64, fon
 		}
 		faceBold = face
 	} else {
-		// Log once if using default
-		face, _ = loadFontFaceFromBytes(gomono.TTF, scFontSize)
-		faceBold, _ = loadFontFaceFromBytes(gomonobold.TTF, scFontSize)
+		// Default to embedded Menlo
+		face, err = loadFontFaceFromBytes(embeddedASCIIFont, scFontSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load embedded ASCII font: %v", err)
+		}
+		faceBold = face
 	}
 
 	// 2. CJK Font
@@ -256,7 +263,7 @@ func renderToPNG(term *headlessterm.Terminal, cols, rows int, scale float64, fon
 	}
 
 	if fontAscii == "" && fontCJK == "" {
-		fmt.Println("Using embedded fonts: Go Mono (ASCII) and WenQuanYi Micro Hei Mono (CJK)")
+		fmt.Println("Using embedded fonts: Menlo (ASCII) and WenQuanYi Micro Hei Mono (CJK)")
 	}
 
 	dc.SetFontFace(face)
