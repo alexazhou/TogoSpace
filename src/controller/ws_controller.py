@@ -22,6 +22,16 @@ def _on_message_added(msg) -> None:
     asyncio.get_event_loop().create_task(_broadcast(json.dumps(event.model_dump(mode="json"), ensure_ascii=False)))
 
 
+def _on_agent_status_changed(msg) -> None:
+    """message_bus 同步回调，广播 Agent 状态变更。"""
+    payload = {
+        "event": "agent_status",
+        "agent_name": msg.payload["agent_name"],
+        "status": msg.payload["status"],
+    }
+    asyncio.get_event_loop().create_task(_broadcast(json.dumps(payload, ensure_ascii=False)))
+
+
 async def _broadcast(payload: str) -> None:
     global _clients
     dead = set()
@@ -36,6 +46,7 @@ async def _broadcast(payload: str) -> None:
 def init() -> None:
     """订阅消息总线，须在服务启动前调用一次。"""
     message_bus.subscribe(MessageBusTopic.ROOM_MSG_ADDED, _on_message_added)
+    message_bus.subscribe(MessageBusTopic.AGENT_STATUS_CHANGED, _on_agent_status_changed)
 
 
 class EventsWsHandler(tornado.websocket.WebSocketHandler):
