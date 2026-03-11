@@ -37,6 +37,7 @@ class WatcherApp(App):
         self._agent_order: list[str] = []
         self._unread: dict[str, int] = {}
         self._rooms: list[RoomInfo] = []
+        self._agents: list[AgentInfo] = []  # 本地 Agent 状态缓存
         self._room_cursor: int = 0
         self._current_room_id: str | None = None
         self._current_msg_count: int = 0
@@ -85,6 +86,7 @@ class WatcherApp(App):
                 self._api.get_agents(),
                 self._api.get_rooms(),
             )
+            self._agents = agents  # 更新本地缓存
             self._agent_order = [a.name for a in agents]
             self._rooms = rooms
 
@@ -175,12 +177,17 @@ class WatcherApp(App):
 
         if event.event == "agent_status":
             log.debug("ws: 收到 Agent 状态变更 agent=%s status=%s", event.agent_name, event.status)
-            self._schedule_agent_refresh()
+            # 更新本地缓存中的 Agent 状态
+            for agent in self._agents:
+                if agent.name == event.agent_name:
+                    agent.status = event.status
+                    break
+            # 直接使用缓存刷新 UI，无需发起 HTTP 请求
+            self.call_later(room_panel.update_agent_status, list(self._agents))
             return
 
         preview = _make_preview(event.sender, event.content)
         self.call_later(room_panel.update_preview, event.room_id, preview)
-        self._schedule_agent_refresh()
 
         if event.room_id == self._current_room_id:
             self._current_msg_count += 1
@@ -191,22 +198,6 @@ class WatcherApp(App):
         else:
             self._unread[event.room_id] = self._unread.get(event.room_id, 0) + 1
             self.call_later(room_panel.update_unread_count, event.room_id, self._unread[event.room_id])
-
-    def _schedule_agent_refresh(self) -> None:
-        """节流：已有刷新任务在排队时跳过本次。"""
-        if not self._agent_refresh_pending:
-            self._agent_refresh_pending = True
-            self._refresh_agent_status()
-
-    @work(exclusive=True, group="agent_refresh")
-    async def _refresh_agent_status(self) -> None:
-        self._agent_refresh_pending = False
-        try:
-            agents = await self._api.get_agents()
-            room_panel = self.query_one(RoomPanel)
-            self.call_later(room_panel.update_agent_status, agents)
-        except Exception:
-            pass
 
     @on(ListView.Selected, "#room-list")
     async def on_room_selected(self, event: ListView.Selected) -> None:
