@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from service import message_bus
 from model.chat_model import ChatMessage
@@ -15,17 +15,17 @@ class ChatRoom:
     """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
     def __init__(self, name: str, initial_topic: str = "", room_type: RoomType = RoomType.GROUP):
-        self.name = name
-        self.room_type = room_type
-        self.messages: List[ChatMessage] = []
-        self.initial_topic = initial_topic
-        self.member_names: List[str] = []
-        self._agent_read_index: Dict[str, int] = {}
-        self._turn_agents: List[str] = []
-        self._turn_index: int = 0
-        self._max_turns: int = 0
-        self._turn_pos: int = 0
-        self._state: RoomState = RoomState.IDLE
+        self.name: str = name  # 房间名称
+        self.room_type: RoomType = room_type  # 房间类型（私有/群聊）
+        self.messages: List[ChatMessage] = []  # 消息历史记录
+        self.initial_topic: str = initial_topic  # 初始话题
+        self.agents: List[str] = []  # 房间参与者名单（包含 Operator 和 AI Agents）
+        
+        self._agent_read_index: Dict[str, int] = {}  # 每个 Agent 的消息读取进度
+        self._turn_index: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
+        self._max_turns: int = 0  # 最大允许轮次
+        self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
+        self._state: RoomState = RoomState.IDLE  # 房间当前的调度状态
 
     @property
     def state(self) -> RoomState:
@@ -33,13 +33,13 @@ class ChatRoom:
 
     def setup_turns(self, agent_names: List[str], max_turns: int) -> None:
         """初始化轮次控制，并向第一位参与者发布初始事件。"""
-        self._turn_agents = agent_names
+        # 注意：此处不再设置 agents，因为已经在 init 中设置。保持参数名以防外部调用冲突。
         self._turn_index = 0
         self._max_turns = max_turns
         self._turn_pos = 0
-        if agent_names and max_turns > 0:
+        if self.agents and max_turns > 0:
             self._state = RoomState.SCHEDULING
-            message_bus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_name=agent_names[0], room_name=self.name)
+            self._publish_current_turn()
 
     def get_unread_messages(self, agent_name: str) -> List[ChatMessage]:
         """返回 agent_name 尚未读取的新消息，并推进其读取位置。"""
@@ -63,7 +63,7 @@ class ChatRoom:
             time=message.send_time.isoformat(),
         )
 
-        if not self._turn_agents:
+        if not self.agents:
             return
 
         # 1. 唤醒检查：如果房间已停止，任何活动都将重置轮次计数器并恢复调度
@@ -97,9 +97,9 @@ class ChatRoom:
 
     def get_current_turn_agent(self) -> Optional[str]:
         """返回当前理论上应该发言的 Agent 名（忽略 IDLE 状态）。"""
-        if not self._turn_agents:
+        if not self.agents:
             return None
-        return self._turn_agents[self._turn_pos]
+        return self.agents[self._turn_pos]
 
     def _publish_current_turn(self) -> None:
         """发布当前轮次的发言事件。"""
@@ -109,13 +109,13 @@ class ChatRoom:
 
     def _advance_turn(self) -> None:
         """推进轮次位置索引。内部私有方法。"""
-        if not self._turn_agents:
+        if not self.agents:
             return
 
         self._turn_pos += 1
 
         # 本轮所有人发言完毕 → 轮次 +1，重置位置
-        if self._turn_pos >= len(self._turn_agents):
+        if self._turn_pos >= len(self.agents):
             self._turn_index += 1
             self._turn_pos = 0
 
@@ -137,7 +137,7 @@ class ChatRoom:
         result = []
         for msg in recent:
             if msg.sender_name == "system":
-                result.append({"role": "user", "content": msg.content})
+                result.append({"role": "system", "content": msg.content})
             else:
                 result.append({"role": "user", "content": f"{msg.sender_name}: {msg.content}"})
         return result
@@ -155,14 +155,14 @@ _rooms: Dict[str, ChatRoom] = {}
 def init(name: str, agent_names: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP) -> None:
     """创建并初始化一个聊天室，设置成员并发布系统公告。"""
     room = ChatRoom(name=name, initial_topic=initial_topic, room_type=room_type)
-    room.member_names = agent_names
+    room.agents = agent_names
     _rooms[name] = room
     
     logger.info(f"创建并初始化聊天室: name={name}, type={room_type.value}, 成员={agent_names}")
     
     # 发布房间创建公告
     member_list_str = "、".join(agent_names)
-    room.add_message("系统", f"{name} 房间已经创建，当前房间成员：{member_list_str}")
+    room.add_message("system", f"{name} 房间已经创建，当前房间成员：{member_list_str}")
 
 
 def close(name: str) -> None:
@@ -176,17 +176,17 @@ def close_all() -> None:
 
 
 def get_member_names(room_name: str) -> List[str]:
-    """返回聊天室的 Agent 成员名列表。"""
-    return _rooms[room_name].member_names
+    """返回聊天室的参与者名列表。"""
+    return _rooms[room_name].agents
 
 
 def get_rooms_for_agent(agent_name: str) -> List[str]:
-    """返回指定 Agent 所在的所有房间名列表。"""
-    return [name for name, room in _rooms.items() if agent_name in room.member_names]
+    """返回指定参与者所在的所有房间名列表。"""
+    return [name for name, room in _rooms.items() if agent_name in room.agents]
 
 
 def get_room(name: str) -> ChatRoom:
-    """返回指定聊天室实例（供需要传递对象的场景使用，如 agent_context）。"""
+    """返回指定聊天室实例。"""
     room = _rooms.get(name)
     if room is None:
         raise RuntimeError(f"聊天室 '{name}' 不存在，请先调用 init(name)")
@@ -196,5 +196,3 @@ def get_room(name: str) -> ChatRoom:
 def get_all_rooms() -> List[ChatRoom]:
     """返回所有聊天室实例列表。"""
     return list(_rooms.values())
-
-
