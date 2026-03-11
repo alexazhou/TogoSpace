@@ -108,9 +108,6 @@ def init(agents_config: list, rooms_config: list) -> None:
     agent_peers: Dict[str, set] = {name: set() for name in agent_defs}
     for room in rooms_config:
         names: List[str] = list(room["agents"])
-        if room.get("type") == RoomType.PRIVATE:
-            names.insert(0, SpecialAgent.OPERATOR)
-
         for name in names:
             if name in agent_peers:
                 agent_peers[name].update(n for n in names if n != name)
@@ -123,10 +120,7 @@ def init(agents_config: list, rooms_config: list) -> None:
         logger.info(f"创建 Agent: name={name}, model={cfg['model']}")
 
     for room in rooms_config:
-        members = list(room["agents"])
-        if room.get("type") == RoomType.PRIVATE:
-            members.insert(0, SpecialAgent.OPERATOR)
-        room_service.setup_members(room["name"], members)
+        room_service.setup_members(room["name"], room["agents"])
 
 
 async def run_turn(agent: Agent, room_name: str, max_function_calls: int = 5) -> None:
@@ -146,10 +140,10 @@ async def run_turn(agent: Agent, room_name: str, max_function_calls: int = 5) ->
         return func_tool_service.run_tool_call(name, args, context=_ctx)
 
     def turn_checker(msg: LlmApiMessage) -> TurnCheckResult:
-        if last_called["name"] == "send_chat_msg":
+        if last_called["name"] in ("send_chat_msg", "skip_chat_msg"):
             return TurnCheckResult(TurnStatus.SUCCESS)
         if not msg.tool_calls:
-            return TurnCheckResult(TurnStatus.ERROR, "你必须调用 send_chat_msg 工具发送消息，不能直接输出文字。")
+            return TurnCheckResult(TurnStatus.ERROR, "你必须调用 send_chat_msg 发送消息或 skip_chat_msg 跳过发言，不能直接输出文字。")
         return TurnCheckResult(TurnStatus.CONTINUE)
 
     response: LlmApiMessage = await agent.chat(

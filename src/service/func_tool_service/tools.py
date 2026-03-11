@@ -2,14 +2,13 @@ from __future__ import annotations
 import ast
 import logging
 from typing import Literal, Optional, List
+import datetime
+import operator
+from zoneinfo import ZoneInfo
 
 from model.chat_context import ChatContext
 
 logger = logging.getLogger(__name__)
-import datetime
-import logging
-import operator
-from zoneinfo import ZoneInfo
 
 
 def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius") -> str:
@@ -141,6 +140,24 @@ def send_chat_msg(chat_windows_name: str, msg: str, _context: ChatContext = None
 
     return "success"
 
+
+def skip_chat_msg(_context: ChatContext = None) -> str:
+    """跳过本次发言。当你觉得当前话题不需要回复，或者没有话要说时调用此工具。
+
+    Returns:
+        成功返回 "success"
+    """
+    sender = _context.agent_name if _context is not None else "unknown"
+    logger.info(f"Agent 跳过发言: agent={sender}")
+
+    if _context is not None:
+        _context.chat_room.skip_turn()
+    else:
+        logger.warning("跳过发言失败，聊天室上下文未设置")
+
+    return "success"
+
+
 def task_done() -> None:
     """通知任务完成
     """
@@ -148,7 +165,7 @@ def task_done() -> None:
     return
 
 
-for _f in (get_agent_list, create_chat, send_chat_msg):
+for _f in (get_agent_list, create_chat, send_chat_msg, skip_chat_msg):
     _f.needs_context = True
 
 FUNCTION_REGISTRY: dict[str, callable] = {
@@ -158,5 +175,6 @@ FUNCTION_REGISTRY: dict[str, callable] = {
     "get_agent_list": get_agent_list,
     "create_chat": create_chat,
     "send_chat_msg": send_chat_msg,
+    "skip_chat_msg": skip_chat_msg,
     "task_done": task_done,
 }

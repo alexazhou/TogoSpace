@@ -41,7 +41,7 @@ def mock_llm_server():
 def _write_e2e_configs(mock_port: int, tmp_dir: str):
     """写入测试用配置文件，返回 (agents_config_path, llm_config_path)。"""
     src_dir = os.path.join(os.path.dirname(__file__), "../../src")
-    agents_src = os.path.join(src_dir, "../config/agents_v3.2.json")
+    agents_src = os.path.join(src_dir, "../config/agents.json")
     with open(agents_src, "r", encoding="utf-8") as f:
         agents_cfg = json.load(f)
 
