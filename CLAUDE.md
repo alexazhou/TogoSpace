@@ -18,8 +18,9 @@
 agent_team/
 ├── src/                 # 后端主程序
 ├── tui/                 # 终端观察台（独立进程）
-├── config/              # Agent 配置文件（agents_v*.json）
-├── resource/            # Prompt 文件和函数列表
+├── resource/            # 配置文件和 Prompt
+│   ├── agents/          # Agent 定义（*.json，每个 agent 一个文件）
+│   ├── teams/           # Team 定义（*.json，每个 team 一个文件）
 │   └── prompts/         # Agent system prompt（*.md）
 ├── docs/                # 设计文档
 ├── logs/                # 运行日志（自动生成）
@@ -61,7 +62,7 @@ src/
 │   ├── room_controller.py   # GET /rooms, GET /rooms/{name}/messages
 │   └── ws_controller.py     # WebSocket /ws/events（推送实时消息）
 └── util/                # 无状态工具层
-    ├── config_util.py       # load_config / load_llm_service_config
+    ├── config_util.py       # load_agents / load_teams / load_llm_service_config
     └── llm_api_util/        # LLM API 客户端封装
         ├── client.py
         └── models.py
@@ -95,10 +96,10 @@ tui/
 
 ```bash
 # 前台运行（开发调试）
-cd src && python main.py [--config config/agents_v2.json] [--llm-config config.json] [--port 8080]
+cd src && python main.py [--resource-dir resource/] [--llm-config config.json] [--port 8080]
 
 # 后台运行（nohup，stdout 写入 logs/backend_stdout.log，运行日志写入 logs/backend/）
-./scripts/start_backend.sh [--config ...] [--port ...]
+./scripts/start_backend.sh [--resource-dir ...] [--port ...]
 
 # 停止后台后端（通过 run/backend.pid）
 ./scripts/stop_backend.sh
@@ -133,11 +134,52 @@ cd src && python main.py [--config config/agents_v2.json] [--llm-config config.j
 
 ## 配置文件
 
+### Agent + Team 两级配置
+
+配置拆分为 Agent 定义和 Team 定义两个独立概念：
+
+- **Agent 定义** (`resource/agents/<name>.json`)：全局共享的 Agent 属性（prompt/model）
+- **Team 定义** (`resource/teams/<name>.json`)：包含一个或多个 group（聊天室），每个 Team 中的 Agent 实例相互隔离
+
+#### Agent 定义示例
+
+```json
+{
+  "name": "alice",
+  "prompt_file": "resource/prompts/alice_system.md",
+  "model": "glm-4.7"
+}
+```
+
+#### Team 定义示例
+
+```json
+{
+  "name": "default",
+  "groups": [
+    {
+      "name": "general",
+      "type": "group",
+      "agents": ["alice", "bob"],
+      "initial_topic": "大家好！",
+      "max_turns": 6
+    }
+  ],
+  "max_function_calls": 5
+}
+```
+
+#### 数据隔离规则
+
+- Agent 实例 key：`agent_name@team_name`（如 `alice@default`）
+- Room key：`room_name@team_name`（如 `general@default`）
+- 同一 Agent 在不同 Team 拥有独立的对话历史
+
+### 其他配置
+
 | 文件 | 说明 |
 |------|------|
-| `config/agents_v2.json` | Agent 配置（名称、模型、prompt 文件路径、聊天室设置、最大轮次） |
-| `config.json` | API Key（`anthropic.api_key` 字段） |
-| `resource/bk/function_list.json` | 启用的函数列表（`enabled_functions` 字段） |
+| `config.json` | LLM 服务配置（API Key、base_url、active_llm_service） |
 
 ## 终端模拟器 (Terminal Simulator)
 

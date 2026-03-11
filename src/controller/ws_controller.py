@@ -13,8 +13,9 @@ def _on_message_added(msg) -> None:
     """message_bus 同步回调，将广播任务投入事件循环。"""
     event = WsEvent(
         event="message",
-        room_id=msg.payload["room_name"],
+        room_id=msg.payload["room_key"],
         room_name=msg.payload["room_name"],
+        team_name=msg.payload["team_name"],
         sender=msg.payload["sender"],
         content=msg.payload["content"],
         time=msg.payload["time"],
@@ -27,6 +28,7 @@ def _on_agent_status_changed(msg) -> None:
     payload = {
         "event": "agent_status",
         "agent_name": msg.payload["agent_name"],
+        "team_name": msg.payload["team_name"],
         "status": msg.payload["status"],
     }
     asyncio.get_event_loop().create_task(_broadcast(json.dumps(payload, ensure_ascii=False)))

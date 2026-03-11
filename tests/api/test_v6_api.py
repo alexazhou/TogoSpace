@@ -12,6 +12,8 @@ import pytest
 import pytest_asyncio
 from constants import RoomType, SpecialAgent
 
+TEAM = "v6test"
+
 
 def _find_free_port() -> int:
     import socket
@@ -25,35 +27,44 @@ def v6_backend(tmp_path_factory, mock_llm_server):
     """启动一个包含 private 房间的后端进程。"""
     port = _find_free_port()
     tmp_dir = str(tmp_path_factory.mktemp("v6_e2e"))
-    
-    # 准备 v6 特有的配置
-    agents_cfg = {
-        "agents": [
-            {"name": "alice", "prompt_file": "resource/prompts/alice_system.md", "model": "mock-model"}
-        ],
-        "chat_rooms": [
+
+    # 准备 resource 目录结构
+    resource_dir = os.path.join(tmp_dir, "resource")
+    agents_dir = os.path.join(resource_dir, "agents")
+    teams_dir = os.path.join(resource_dir, "teams")
+    os.makedirs(agents_dir, exist_ok=True)
+    os.makedirs(teams_dir, exist_ok=True)
+
+    # Agent 定义
+    alice_agent = {"name": "alice", "prompt_file": "resource/prompts/alice_system.md", "model": "mock-model"}
+    with open(os.path.join(agents_dir, "alice.json"), "w", encoding="utf-8") as f:
+        json.dump(alice_agent, f, ensure_ascii=False)
+
+    # Team 定义
+    team = {
+        "name": TEAM,
+        "groups": [
             {
                 "name": "alice_private",
                 "type": RoomType.PRIVATE.value,
                 "agents": [SpecialAgent.OPERATOR.value, "alice"],
                 "initial_topic": "v6 private test",
-                "max_turns": 10
+                "max_turns": 10,
             },
             {
                 "name": "public_group",
                 "type": RoomType.GROUP.value,
                 "agents": ["alice"],
                 "initial_topic": "v6 group test",
-                "max_turns": 10
-            }
+                "max_turns": 10,
+            },
         ],
-        "max_function_calls": 5
+        "max_function_calls": 5,
     }
-    
-    agents_path = os.path.join(tmp_dir, "agents_v6.json")
-    with open(agents_path, "w", encoding="utf-8") as f:
-        json.dump(agents_cfg, f, ensure_ascii=False)
+    with open(os.path.join(teams_dir, f"{TEAM}.json"), "w", encoding="utf-8") as f:
+        json.dump(team, f, ensure_ascii=False)
 
+    # LLM 配置
     llm_cfg = {
         "llm_services": [
             {
@@ -77,7 +88,7 @@ def v6_backend(tmp_path_factory, mock_llm_server):
         [
             sys.executable,
             os.path.join(src_dir, "main.py"),
-            "--config", agents_path,
+            "--resource-dir", resource_dir,
             "--llm-config", llm_path,
             "--port", str(port),
         ],
@@ -116,37 +127,39 @@ async def client():
 
 @pytest.mark.asyncio
 async def test_room_types_in_list(client: aiohttp.ClientSession, v6_backend: str):
-    """验证 GET /rooms 是否正确返回 room_type 字段。"""
+    """验证 GET /rooms 是否正确返回 room_type 和 team_name 字段。"""
     async with client.get(f"{v6_backend}/rooms") as resp:
         assert resp.status == 200
         data = await resp.json()
-    
+
     rooms = data["rooms"]
     assert len(rooms) == 2
-    
+
     private_room = next(r for r in rooms if r["room_name"] == "alice_private")
     assert private_room["room_type"] == RoomType.PRIVATE.value
+    assert private_room["team_name"] == TEAM
     assert SpecialAgent.OPERATOR.value in private_room["members"]
-    
+
     group_room = next(r for r in rooms if r["room_name"] == "public_group")
     assert group_room["room_type"] == RoomType.GROUP.value
+    assert group_room["team_name"] == TEAM
     assert SpecialAgent.OPERATOR.value not in group_room["members"]
 
 
 @pytest.mark.asyncio
 async def test_post_message_to_private_room(client: aiohttp.ClientSession, v6_backend: str):
     """验证向 private 房间发送消息的功能及其触发的 Agent 响应。"""
-    room_name = "alice_private"
-    
+    room_id = f"alice_private@{TEAM}"
+
     # 1. 发送消息
     payload = {"content": "Hello Alice, I am the operator."}
-    async with client.post(f"{v6_backend}/rooms/{room_name}/messages", json=payload) as resp:
+    async with client.post(f"{v6_backend}/rooms/{room_id}/messages", json=payload) as resp:
         assert resp.status == 200
         data = await resp.json()
         assert data["status"] == "ok"
-    
+
     # 2. 检查消息列表，验证 Operator 消息已存入
-    async with client.get(f"{v6_backend}/rooms/{room_name}/messages") as resp:
+    async with client.get(f"{v6_backend}/rooms/{room_id}/messages") as resp:
         assert resp.status == 200
         data = await resp.json()
         messages = data["messages"]
@@ -160,7 +173,7 @@ async def test_post_message_to_private_room(client: aiohttp.ClientSession, v6_ba
     start_time = time.time()
     messages = []
     while time.time() - start_time < max_wait:
-        async with client.get(f"{v6_backend}/rooms/{room_name}/messages") as resp:
+        async with client.get(f"{v6_backend}/rooms/{room_id}/messages") as resp:
             assert resp.status == 200
             data = await resp.json()
             messages = data["messages"]
@@ -168,11 +181,11 @@ async def test_post_message_to_private_room(client: aiohttp.ClientSession, v6_ba
                 break
         await asyncio.sleep(1)
     else:
-        print(f"\nDebug - Final messages in {room_name}:")
+        print(f"\nDebug - Final messages in {room_id}:")
         for m in messages:
             print(f"  {m['sender']}: {m['content'][:50]}...")
         pytest.fail("Agent Alice 未能在限时内回复 Operator")
-    
+
     # 验证 Alice 的回复
     alice_msg = next(m for m in messages if m["sender"] == "alice")
     assert len(alice_msg["content"]) > 0

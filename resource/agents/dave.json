@@ -1,0 +1,5 @@
+{
+  "name": "dave",
+  "prompt_file": "resource/prompts/dave_system.md",
+  "model": "glm-4.7"
+}

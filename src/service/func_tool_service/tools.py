@@ -11,6 +11,16 @@ from model.chat_context import ChatContext
 logger = logging.getLogger(__name__)
 
 
+def _resolve_room_key(room_name: str, context: ChatContext) -> str:
+    """将用户传入的房间名解析为 room@team 格式的 key。
+
+    如果已经是 room@team 格式则直接返回，否则追加当前 team。
+    """
+    if "@" in room_name:
+        return room_name
+    return f"{room_name}@{context.team_name}"
+
+
 def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius") -> str:
     """获取指定地点的天气信息
 
@@ -110,7 +120,8 @@ def create_chat(room_name: str, _context: ChatContext = None) -> str:
     if _context is None:
         return "错误：无法访问聊天室上下文"
     try:
-        _context.get_room(room_name)
+        room_key = _resolve_room_key(room_name, _context)
+        _context.get_room(room_key)
         return room_name
     except Exception:
         return f"错误：聊天室 '{room_name}' 不存在"
@@ -131,7 +142,8 @@ def send_chat_msg(chat_windows_name: str, msg: str, _context: ChatContext = None
 
     if _context is not None:
         try:
-            target_room = _context.get_room(chat_windows_name)
+            room_key = _resolve_room_key(chat_windows_name, _context)
+            target_room = _context.get_room(room_key)
             target_room.add_message(_context.agent_name, msg)
         except Exception:
             logger.warning(f"发送消息忽略，聊天室不存在: name={chat_windows_name}")

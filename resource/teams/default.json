@@ -1,11 +1,6 @@
 {
-  "agents": [
-    {"name": "alice",   "prompt_file": "resource/prompts/alice_system.md",   "model": "glm-4.7"},
-    {"name": "bob",     "prompt_file": "resource/prompts/bob_system.md",     "model": "glm-4.7"},
-    {"name": "charlie", "prompt_file": "resource/prompts/charlie_system.md", "model": "glm-4.7"},
-    {"name": "dave",    "prompt_file": "resource/prompts/dave_system.md",    "model": "glm-4.7"}
-  ],
-  "chat_rooms": [
+  "name": "default",
+  "groups": [
     {
       "name": "general",
       "type": "group",

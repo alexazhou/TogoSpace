@@ -12,22 +12,34 @@ from constants import TurnStatus, TurnCheckResult, RoomType, SpecialAgent, Messa
 
 logger = logging.getLogger(__name__)
 
-# 全局 Agent 实例池，key 为 agent_name
+# Agent 定义（name → config dict），全局共享
+_agent_defs: Dict[str, dict] = {}
+
+# Agent 实例池，key 为 "agent_name@team_name"
 _agents: Dict[str, "Agent"] = {}
+
+
+def _make_agent_key(agent_name: str, team_name: str) -> str:
+    return f"{agent_name}@{team_name}"
 
 
 class Agent:
     """AI Agent 实体类，维护其性格、对话历史及任务队列"""
 
-    def __init__(self, name: str, system_prompt: str, model: str):
+    def __init__(self, name: str, team_name: str, system_prompt: str, model: str):
         self.name: str = name  # Agent 名称
+        self.team_name: str = team_name  # 所属 Team
         self.system_prompt: str = system_prompt  # 系统提示词（定义性格和规则）
-        self.model: str = model  # 使用s的 LLM 模型名称
+        self.model: str = model  # 使用的 LLM 模型名称
 
         self._history: List[LlmApiMessage] = []  # Agent 的私有对话历史（包含 Tool Call 详情）
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()  # 待处理的房间任务队列
         self._is_running: bool = False  # 标志当前是否正在处理任务协程
         self._last_published_status: Optional[str] = None  # 记录上一次发布的状态，用于幂等校验
+
+    @property
+    def key(self) -> str:
+        return _make_agent_key(self.name, self.team_name)
 
     @property
     def is_active(self) -> bool:
@@ -42,6 +54,7 @@ class Agent:
             message_bus.publish(
                 MessageBusTopic.AGENT_STATUS_CHANGED,
                 agent_name=self.name,
+                team_name=self.team_name,
                 status=current_status
             )
 
@@ -60,21 +73,23 @@ class Agent:
 
                 try:
                     # 驱动 Agent 在指定房间执行一个轮次
-                    await self.run_turn(event.room_name, max_function_calls)
+                    await self.run_turn(event.room_key, max_function_calls)
                 except Exception as e:
-                    logger.error(f"Agent 处理任务失败: agent={self.name}, room={event.room_name}, error={e}")
+                    logger.error(f"Agent 处理任务失败: agent={self.key}, room={event.room_key}, error={e}")
                 finally:
                     self.wait_task_queue.task_done()
         finally:
             self._is_running = False
             self._publish_status()  # 退出前声明 idle (如果队列为空)
-    async def run_turn(self, room_name: str, max_function_calls: int = 5) -> None:
+
+    async def run_turn(self, room_key: str, max_function_calls: int = 5) -> None:
         """同步房间消息，驱动 Agent 完成一轮发言（含 tool call 循环）。"""
-        room: ChatRoom = room_service.get_room(room_name)
+        room: ChatRoom = room_service.get_room(room_key)
         self.sync_room(room)
 
         agent_context = ChatContext(
             agent_name=self.name,
+            team_name=self.team_name,
             chat_room=room,
             get_room=room_service.get_room,
         )
@@ -98,12 +113,12 @@ class Agent:
             max_function_calls=max_function_calls,
         )
         if response.content:
-            logger.info(f"Agent 思考内容: agent={self.name}, room={room_name}, content={response.content}")
+            logger.info(f"Agent 思考内容: agent={self.key}, room={room_key}, content={response.content}")
 
     def sync_room(self, room: ChatRoom) -> None:
         """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
         new_msgs: List[ChatMessage] = room.get_unread_messages(self.name)
-        logger.info(f"同步房间消息: agent={self.name}, room={room.name}, count={len(new_msgs)}")
+        logger.info(f"同步房间消息: agent={self.key}, room={room.name}, count={len(new_msgs)}")
         for msg in new_msgs:
             if msg.sender_name == "system":
                 self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}"))
@@ -113,7 +128,7 @@ class Agent:
     async def _infer(self, tools: Optional[List[Tool]]) -> LlmApiMessage:
         """基于当前 _history 发起一次 LLM 调用，返回 assistant 消息。"""
         assert self._history and self._history[-1].role in (OpenaiLLMApiRole.USER, OpenaiLLMApiRole.TOOL, OpenaiLLMApiRole.SYSTEM), \
-            f"[{self.name}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
+            f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
         ctx = AgentDialogContext(
             system_prompt=self.system_prompt,
             messages=self._history,
@@ -138,12 +153,12 @@ class Agent:
                 if turn_checker:
                     check: TurnCheckResult = turn_checker(assistant_message)
                     if check.status == TurnStatus.ERROR:
-                        logger.warning(f"checker 返回 ERROR，注入提示重试: agent={self.name}")
+                        logger.warning(f"checker 返回 ERROR，注入提示重试: agent={self.key}")
                         self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, check.error_hint))
                         continue
                 return assistant_message
 
-            logger.info(f"检测到工具调用: agent={self.name}, count={len(assistant_message.tool_calls)}")
+            logger.info(f"检测到工具调用: agent={self.key}, count={len(assistant_message.tool_calls)}")
 
             recheck: bool = False
             for tool_call in assistant_message.tool_calls:
@@ -161,7 +176,7 @@ class Agent:
                     if check.status == TurnStatus.SUCCESS:
                         return LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, "")
                     if check.status == TurnStatus.ERROR:
-                        logger.warning(f"checker 返回 ERROR，注入提示重试: agent={self.name}")
+                        logger.warning(f"checker 返回 ERROR，注入提示重试: agent={self.key}")
                         self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, check.error_hint))
                         recheck = True
                         break
@@ -169,60 +184,82 @@ class Agent:
             if recheck:
                 continue
 
-        logger.warning(f"达到最大函数调用次数: agent={self.name}, max={max_function_calls}")
+        logger.warning(f"达到最大函数调用次数: agent={self.key}, max={max_function_calls}")
         return assistant_message
 
 
-def init(agents_config: list, rooms_config: list) -> None:
-    """为每个 Agent 创建单一实例。"""
-    global _agents
+def init(agents_config: list) -> None:
+    """加载 Agent 定义（prompt/model）到 _agent_defs 字典，不创建实例。"""
+    global _agent_defs, _agents
+    _agent_defs = {cfg["name"]: cfg for cfg in agents_config}
     _agents = {}
+    logger.info(f"加载 Agent 定义: {list(_agent_defs.keys())}")
 
-    agent_defs: Dict[str, dict] = {cfg["name"]: cfg for cfg in agents_config}
 
-    # 收集每个 Agent 跨所有房间的其他参与者
-    agent_peers: Dict[str, set] = {name: set() for name in agent_defs}
-    for room in rooms_config:
-        names: List[str] = list(room["agents"])
+def create_team_agents(team_name: str, team_config: dict) -> None:
+    """根据 team 的 groups 中引用的 agent，从 _agent_defs 读取定义，创建 agent@team 实例。"""
+    # 收集该 team 中所有 group 引用的 agent 名称
+    agent_names_in_team: set = set()
+    for group in team_config["groups"]:
+        for name in group["agents"]:
+            if name != SpecialAgent.OPERATOR:
+                agent_names_in_team.add(name)
+
+    # 收集每个 agent 在该 team 中的 peers
+    agent_peers: Dict[str, set] = {name: set() for name in agent_names_in_team}
+    for group in team_config["groups"]:
+        names = [n for n in group["agents"] if n != SpecialAgent.OPERATOR]
         for name in names:
             if name in agent_peers:
                 agent_peers[name].update(n for n in names if n != name)
 
-    for name, cfg in agent_defs.items():
+    for name in agent_names_in_team:
+        if name not in _agent_defs:
+            logger.warning(f"Agent 定义不存在: {name}，跳过创建")
+            continue
+
+        cfg = _agent_defs[name]
         prompt: str = load_prompt(cfg["prompt_file"])
-        participants = sorted(list(agent_peers[name]))
+        participants = sorted(list(agent_peers.get(name, set())))
         prompt = prompt.replace("{participants}", "、".join(participants))
-        _agents[name] = Agent(name=name, system_prompt=prompt, model=cfg["model"])
-        logger.info(f"创建 Agent: name={name}, model={cfg['model']}")
+
+        key = _make_agent_key(name, team_name)
+        _agents[key] = Agent(name=name, team_name=team_name, system_prompt=prompt, model=cfg["model"])
+        logger.info(f"创建 Agent 实例: key={key}, model={cfg['model']}")
 
 
-def get_agent(name: str) -> Agent:
-    """返回指定名称的 Agent 实例。"""
-    return _agents[name]
+def get_agent(agent_name: str, team_name: str) -> Agent:
+    """返回指定 agent@team 的 Agent 实例。"""
+    key = _make_agent_key(agent_name, team_name)
+    return _agents[key]
 
 
-def is_agent_active(name: str) -> bool:
-    """判断指定名称的 Agent 是否活跃。"""
-    agent = _agents.get(name)
+def is_agent_active(agent_name: str, team_name: str) -> bool:
+    """判断指定 agent@team 是否活跃。"""
+    key = _make_agent_key(agent_name, team_name)
+    agent = _agents.get(key)
     return agent.is_active if agent else False
 
 
 def get_all_agents() -> List[Agent]:
-    """返回所有唯一 Agent 实例列表。"""
+    """返回所有 Agent 实例列表。"""
     return list(_agents.values())
 
 
-def get_agents(room_name: str) -> List[Agent]:
-    """返回指定房间的 Agent 实例列表（按配置顺序，排除非 AI 角色）。"""
-    return [_agents[n] for n in room_service.get_member_names(room_name) if n in _agents]
+def get_agents(room_key: str) -> List[Agent]:
+    """返回指定房间 (room@team 格式) 的 Agent 实例列表。"""
+    room = room_service.get_room(room_key)
+    team_name = room.team_name
+    return [_agents[_make_agent_key(n, team_name)] for n in room.agents if _make_agent_key(n, team_name) in _agents]
 
 
-def get_all_rooms(agent_name: str) -> List[str]:
-    """返回指定 Agent 参与的所有房间名列表。"""
-    return room_service.get_rooms_for_agent(agent_name)
+def get_all_rooms(agent_name: str, team_name: str) -> List[str]:
+    """返回指定 Agent 在指定 Team 中参与的所有房间 key 列表。"""
+    return room_service.get_rooms_for_agent(agent_name, team_name)
 
 
 def close() -> None:
     """清空 Agent 字典，程序退出前调用。"""
-    global _agents
+    global _agents, _agent_defs
     _agents = {}
+    _agent_defs = {}

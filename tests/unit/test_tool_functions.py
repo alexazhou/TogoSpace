@@ -17,6 +17,8 @@ from service.func_tool_service.tools import (
 from model.chat_context import ChatContext
 from base import ServiceTestCase
 
+TEAM = "test_team"
+
 
 class TestPythonTypeToJsonSchema(ServiceTestCase):
     def test_str(self):
@@ -75,6 +77,10 @@ class TestBuildTools(ServiceTestCase):
 
 
 class TestToolFunctions(ServiceTestCase):
+    def setup_method(self):
+        super().setup_method()
+        room_service.init()
+
     def test_get_weather_celsius(self):
         assert "25°C" in get_weather("北京", "celsius")
 
@@ -103,11 +109,11 @@ class TestToolFunctions(ServiceTestCase):
         assert get_agent_list() == []
 
     def test_get_agent_list_with_context(self):
-        room_service.init("r", ["alice"])
-        room = room_service.get_room("r")
+        room_service.create_room(TEAM, "r", ["alice"])
+        room = room_service.get_room(f"r@{TEAM}")
         room.add_message("alice", "hi")
         room.add_message("bob", "there")
-        ctx = ChatContext(agent_name="alice", chat_room=room, get_room=room_service.get_room)
+        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room, get_room=room_service.get_room)
         result = get_agent_list(_context=ctx)
         assert "alice" in result and "bob" in result
 
@@ -115,15 +121,15 @@ class TestToolFunctions(ServiceTestCase):
         assert send_chat_msg("some_room", "hello") == "success"
 
     def test_send_chat_msg_with_valid_context(self):
-        room_service.init("myroom", ["alice"])
-        room = room_service.get_room("myroom")
-        ctx = ChatContext(agent_name="alice", chat_room=room, get_room=room_service.get_room)
+        room_service.create_room(TEAM, "myroom", ["alice"])
+        room = room_service.get_room(f"myroom@{TEAM}")
+        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room, get_room=room_service.get_room)
         assert send_chat_msg("myroom", "hello", _context=ctx) == "success"
         assert len(room.messages) == 2  # 1 (init公告) + 1 (new)
         assert room.messages[1].content == "hello"
 
     def test_send_chat_msg_nonexistent_room_returns_success(self):
-        room_service.init("existing", ["alice"])
-        room = room_service.get_room("existing")
-        ctx = ChatContext(agent_name="alice", chat_room=room, get_room=room_service.get_room)
+        room_service.create_room(TEAM, "existing", ["alice"])
+        room = room_service.get_room(f"existing@{TEAM}")
+        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room, get_room=room_service.get_room)
         assert send_chat_msg("nonexistent", "hello", _context=ctx) == "success"

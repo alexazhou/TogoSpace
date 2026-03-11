@@ -7,7 +7,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Header, ListView, Input, Static
 
-from api_client import ApiClient, RoomInfo, WsEvent
+from api_client import ApiClient, RoomInfo, AgentInfo, WsEvent
 from widgets import MessageView, RoomPanel, StatusBar
 
 log = logging.getLogger("tui.app")
@@ -177,9 +177,9 @@ class WatcherApp(App):
 
         if event.event == "agent_status":
             log.debug("ws: 收到 Agent 状态变更 agent=%s status=%s", event.agent_name, event.status)
-            # 更新本地缓存中的 Agent 状态
+            # 更新本地缓存中的 Agent 状态（匹配 name + team）
             for agent in self._agents:
-                if agent.name == event.agent_name:
+                if agent.name == event.agent_name and agent.team_name == event.team_name:
                     agent.status = event.status
                     break
             # 直接使用缓存刷新 UI，无需发起 HTTP 请求
@@ -203,7 +203,9 @@ class WatcherApp(App):
     async def on_room_selected(self, event: ListView.Selected) -> None:
         item = event.item
         if item.id and item.id.startswith("room-"):
-            room_id = item.id[len("room-"):]
+            # Convert CSS-safe ID back to room_id (-- → @)
+            safe_id = item.id[len("room-"):]
+            room_id = safe_id.replace("--", "@", 1)
             await self._select_room(room_id)
 
     @on(Input.Submitted, "#chat-input")

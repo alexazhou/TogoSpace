@@ -39,23 +39,30 @@ def mock_llm_server():
 
 
 def _write_e2e_configs(mock_port: int, tmp_dir: str):
-    """写入测试用配置文件，返回 (agents_config_path, llm_config_path)。"""
-    src_dir = os.path.join(os.path.dirname(__file__), "../../src")
-    agents_src = os.path.join(src_dir, "../config/agents.json")
-    with open(agents_src, "r", encoding="utf-8") as f:
-        agents_cfg = json.load(f)
+    """写入测试用配置文件，返回 resource_dir。"""
+    resource_dir = os.path.join(tmp_dir, "resource")
+    agents_dir = os.path.join(resource_dir, "agents")
+    teams_dir = os.path.join(resource_dir, "teams")
+    os.makedirs(agents_dir, exist_ok=True)
+    os.makedirs(teams_dir, exist_ok=True)
 
-    # max_turns 足够大，确保调度器在整个测试期间持续运行（供 WS 测试观察）
-    agents_cfg["agents"] = [{"name": "alice", "prompt_file": "resource/prompts/alice_system.md", "model": "mock-model"}]
-    agents_cfg["chat_rooms"] = [
-        {"name": "general", "agents": ["alice"], "initial_topic": "e2e 测试话题", "max_turns": 50}
-    ]
-    agents_cfg["max_function_calls"] = 2
+    # Agent 定义
+    alice_agent = {"name": "alice", "prompt_file": "resource/prompts/alice_system.md", "model": "mock-model"}
+    with open(os.path.join(agents_dir, "alice.json"), "w", encoding="utf-8") as f:
+        json.dump(alice_agent, f, ensure_ascii=False)
 
-    agents_path = os.path.join(tmp_dir, "agents_e2e.json")
-    with open(agents_path, "w", encoding="utf-8") as f:
-        json.dump(agents_cfg, f, ensure_ascii=False)
+    # Team 定义
+    team = {
+        "name": "e2e",
+        "groups": [
+            {"name": "general", "type": "group", "agents": ["alice"], "initial_topic": "e2e 测试话题", "max_turns": 50}
+        ],
+        "max_function_calls": 2,
+    }
+    with open(os.path.join(teams_dir, "e2e.json"), "w", encoding="utf-8") as f:
+        json.dump(team, f, ensure_ascii=False)
 
+    # LLM 配置
     llm_cfg = {
         "llm_services": [
             {
@@ -71,7 +78,7 @@ def _write_e2e_configs(mock_port: int, tmp_dir: str):
     with open(llm_path, "w", encoding="utf-8") as f:
         json.dump(llm_cfg, f)
 
-    return agents_path, llm_path
+    return resource_dir, llm_path
 
 
 @pytest.fixture(scope="session")
@@ -88,7 +95,7 @@ def backend_base(backend_port) -> str:
 def backend_process(mock_llm_server, backend_port, backend_base, tmp_path_factory):
     """启动后端子进程，就绪后同步启动 WS 事件收集线程（非阻塞），然后 yield。"""
     tmp_dir = str(tmp_path_factory.mktemp("e2e_config"))
-    agents_path, llm_path = _write_e2e_configs(mock_llm_server.port, tmp_dir)
+    resource_dir, llm_path = _write_e2e_configs(mock_llm_server.port, tmp_dir)
 
     src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../src"))
     env = os.environ.copy()
@@ -98,7 +105,7 @@ def backend_process(mock_llm_server, backend_port, backend_base, tmp_path_factor
         [
             sys.executable,
             os.path.join(src_dir, "main.py"),
-            "--config", agents_path,
+            "--resource-dir", resource_dir,
             "--llm-config", llm_path,
             "--port", str(backend_port),
         ],
