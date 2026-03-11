@@ -62,24 +62,55 @@ class ChatRoom:
             content=content,
             time=message.send_time.isoformat(),
         )
-        self._advance_turn()
 
-    def skip_turn(self) -> None:
-        """跳过当前发言人的轮次，直接推进到下一位。"""
-        logger.info(f"房间 {self.name} 跳过一轮发言")
-        self._advance_turn()
-
-    def _advance_turn(self) -> None:
-        """推进轮次索引并发布事件。内部私有方法。"""
         if not self._turn_agents:
             return
 
-        # 如果当前已达到最大轮次（处于 IDLE 状态），但依然触发了推进（说明有 Agent 主动发言或人类干预）
-        # 则重置轮次计数器，重新进入调度状态
-        if self._state == RoomState.IDLE and self._turn_index >= self._max_turns:
-            logger.info(f"房间 {self.name} 达到最大轮次后仍有活动，重置计数器并重新开始对话循环")
+        # 1. 唤醒检查：如果房间已停止，任何活动都将重置轮次计数器并恢复调度
+        was_idle = (self._state == RoomState.IDLE)
+        if was_idle and self._turn_index >= self._max_turns:
+            logger.info(f"检测到房间 {self.name} 的活动 ({sender})，重置最大轮次计数器并唤醒房间")
             self._turn_index = 0
             self._state = RoomState.SCHEDULING
+
+        # 2. 推进逻辑：只有当前顺序发言人说话，才推进到下一位
+        current_expected = self.get_current_turn_agent()
+        if sender == current_expected:
+            self._advance_turn()
+        else:
+            logger.info(f"房间 {self.name} 收到来自 {sender} 的插话，保持当前发言位 (当前应轮到 {current_expected})")
+            # 如果刚才从 IDLE 唤醒，且是一次插话，我们需要手动重发当前轮次事件以重启循环
+            if was_idle:
+                self._publish_current_turn()
+
+    def skip_turn(self, sender: str = None) -> None:
+        """跳过当前发言人的轮次。通常由 Agent 在 skip_chat_msg 工具中调用。"""
+        current_expected = self.get_current_turn_agent()
+        
+        # 如果指定了发送者且不匹配，则拒绝跳过（防止误操作）
+        if sender and sender != current_expected:
+            logger.warning(f"拒绝跳过申请：{sender} 并非当前发言人 ({current_expected})")
+            return
+
+        logger.info(f"房间 {self.name} 由 {current_expected} 跳过一轮发言")
+        self._advance_turn()
+
+    def get_current_turn_agent(self) -> Optional[str]:
+        """返回当前理论上应该发言的 Agent 名（忽略 IDLE 状态）。"""
+        if not self._turn_agents:
+            return None
+        return self._turn_agents[self._turn_pos]
+
+    def _publish_current_turn(self) -> None:
+        """发布当前轮次的发言事件。"""
+        next_name = self.get_current_turn_agent()
+        if next_name:
+            message_bus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_name=next_name, room_name=self.name)
+
+    def _advance_turn(self) -> None:
+        """推进轮次位置索引。内部私有方法。"""
+        if not self._turn_agents:
+            return
 
         self._turn_pos += 1
 
@@ -88,14 +119,14 @@ class ChatRoom:
             self._turn_index += 1
             self._turn_pos = 0
 
-        # 达到最大轮次 → 房间进入空闲，不再推送
+        # 检查是否达到最大轮次限制
         if self._turn_index >= self._max_turns:
             self._state = RoomState.IDLE
             logger.info(f"房间 {self.name} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
             return
 
-        next_name = self._turn_agents[self._turn_pos]
-        message_bus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_name=next_name, room_name=self.name)
+        # 正常发布下一位成员的发言事件
+        self._publish_current_turn()
 
     def get_context(self, max_messages: int = 10) -> str:
         recent = self.messages[-max_messages:]
