@@ -13,8 +13,8 @@ class TestAgentService(ServiceTestCase):
         room_service.init()
         # 模拟配置初始化
         agents_cfg = [
-            {"name": "alice", "prompt_file": "resource/prompts/alice_system.md", "model": "gpt-3.5-turbo"},
-            {"name": "bob", "prompt_file": "resource/prompts/bob_system.md", "model": "gpt-3.5-turbo"},
+            {"name": "alice", "system_prompt": "Alice prompt {participants}", "model": "gpt-3.5-turbo"},
+            {"name": "bob", "system_prompt": "Bob prompt {participants}", "model": "gpt-3.5-turbo"},
         ]
         team_cfg = {
             "name": TEAM,

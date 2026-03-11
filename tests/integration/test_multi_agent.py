@@ -31,8 +31,8 @@ def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
 
 
 AGENTS_CONFIG = [
-    {"name": "alice", "prompt_file": None, "model": "qwen-plus"},
-    {"name": "bob",   "prompt_file": None, "model": "qwen-plus"},
+    {"name": "alice", "system_prompt": "你是alice, {participants}", "model": "qwen-plus"},
+    {"name": "bob",   "system_prompt": "你是bob, {participants}", "model": "qwen-plus"},
 ]
 
 TEAM_CONFIG = {
@@ -50,9 +50,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room_service.init()
         room_service.create_room(TEAM, "general", ["alice", "bob"])
         func_tool_service.init()
-        with patch("service.agent_service.load_prompt", return_value="你是{participants}"):
-            agent_service.init(AGENTS_CONFIG)
-            agent_service.create_team_agents(TEAM, TEAM_CONFIG)
+        agent_service.init(AGENTS_CONFIG)
+        agent_service.create_team_agents(TEAM, TEAM_CONFIG)
         scheduler.init([TEAM_CONFIG])
 
     async def test_two_agents_exchange_messages(self):

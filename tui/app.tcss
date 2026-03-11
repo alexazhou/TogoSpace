@@ -1,5 +1,5 @@
 Screen {
-    background: #0d1117;
+    background: #161b22;
 }
 
 #main-horizontal {
@@ -9,21 +9,21 @@ Screen {
 RoomPanel {
     width: 25%;
     min-width: 20;
-    background: #161b22;
+    background: #0d1117;
     border-right: solid #30363d;
 }
 
 RoomPanel .panel-title {
     width: 100%;
     text-align: center;
-    background: #21262d;
+    background: #161b22;
     color: #8b949e;
     padding: 0 1;
     text-style: bold;
 }
 
 RoomPanel ListView {
-    background: #161b22;
+    background: #0d1117;
     border: none;
 }
 
@@ -76,12 +76,13 @@ RoomPanel ListItem {
 
 #right-panel {
     width: 1fr;
+    background: #161b22;
 }
 
 MessageView {
     height: 1fr;
     padding: 1 2;
-    background: #0d1117;
+    background: #161b22;
     overflow-x: hidden;
 }
 
@@ -127,14 +128,15 @@ MessageBubble {
 }
 
 .bubble-left {
-    background: #112240;
-    color: #c8ccd0;
+    background: #21262d;
+    color: #c9d1d9;
     text-align: left;
+    border: solid #30363d;
 }
 
 .bubble-right {
-    background: #221a0e;
-    color: #c8ccd0;
+    background: #238636;
+    color: #ffffff;
     text-align: left;
 }
 
@@ -161,9 +163,9 @@ MessageBubble {
 
 StatusBar {
     height: 1;
-    background: #161b22;
+    background: #21262d;
     padding: 0 2;
-    color: #6e7681;
+    color: #8b949e;
 }
 
 #chat-input-container {
@@ -180,7 +182,7 @@ StatusBar {
 
 #chat-input {
     background: #0d1117;
-    border: none;
+    border: solid #30363d;
     height: 1;
-    margin: 0;
+    margin: 1 0;
 }
