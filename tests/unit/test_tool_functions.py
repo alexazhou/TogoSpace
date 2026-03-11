@@ -103,7 +103,7 @@ class TestToolFunctions(ServiceTestCase):
         assert get_agent_list() == []
 
     def test_get_agent_list_with_context(self):
-        room_service.init("r")
+        room_service.init("r", ["alice"])
         room = room_service.get_room("r")
         room.add_message("alice", "hi")
         room.add_message("bob", "there")
@@ -115,15 +115,15 @@ class TestToolFunctions(ServiceTestCase):
         assert send_chat_msg("some_room", "hello") == "success"
 
     def test_send_chat_msg_with_valid_context(self):
-        room_service.init("myroom")
+        room_service.init("myroom", ["alice"])
         room = room_service.get_room("myroom")
         ctx = ChatContext(agent_name="alice", chat_room=room, get_room=room_service.get_room)
         assert send_chat_msg("myroom", "hello", _context=ctx) == "success"
-        assert len(room.messages) == 1
-        assert room.messages[0].content == "hello"
+        assert len(room.messages) == 2  # 1 (init公告) + 1 (new)
+        assert room.messages[1].content == "hello"
 
     def test_send_chat_msg_nonexistent_room_returns_success(self):
-        room_service.init("existing")
+        room_service.init("existing", ["alice"])
         room = room_service.get_room("existing")
         ctx = ChatContext(agent_name="alice", chat_room=room, get_room=room_service.get_room)
         assert send_chat_msg("nonexistent", "hello", _context=ctx) == "success"
