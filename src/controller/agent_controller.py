@@ -13,7 +13,7 @@ class AgentListHandler(BaseHandler):
             AgentInfo(
                 name=a.name,
                 model=a.model,
-                status="active" if scheduler_service.is_agent_active(a.name) else "idle",
+                status="active" if agent_service.is_agent_active(a.name) else "idle",
             ).model_dump(mode="json")
             for a in agents
         ]

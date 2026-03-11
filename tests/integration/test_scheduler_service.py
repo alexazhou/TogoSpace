@@ -60,29 +60,21 @@ class TestSchedulerRun(ServiceTestCase):
             await asyncio.wait_for(run_task, timeout=2.0)
 
     async def test_is_agent_active_logic(self):
-        """验证活跃状态判断逻辑：有任务运行或队列不为空。"""
-        alice = _make_mock_agent("alice")
+        """验证活跃状态判断逻辑：通过模拟 agent.is_active 属性验证。"""
+        alice = MagicMock()
+        alice.name = "alice"
         
-        with patch.object(agent_service, "_agents", {"alice": alice}), \
-             patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
+        with patch.object(agent_service, "_agents", {"alice": alice}):
+            # 1. 模拟 Agent 返回活跃
+            alice.is_active = True
+            assert agent_service.is_agent_active("alice") is True
             
-            # 1. 初始状态：Idle
-            assert scheduler.is_agent_active("alice") is False
+            # 2. 模拟 Agent 返回不活跃
+            alice.is_active = False
+            assert agent_service.is_agent_active("alice") is False
             
-            # 2. 队列不为空 -> Active
-            alice.wait_task_queue.put_nowait(RoomMessageEvent("r1"))
-            assert scheduler.is_agent_active("alice") is True
-            
-            # 3. 队列清空，但任务正在运行 -> Active
-            alice.wait_task_queue.get_nowait()
-            mock_task = MagicMock(spec=asyncio.Task)
-            mock_task.done.return_value = False
-            scheduler._running["alice"] = mock_task
-            assert scheduler.is_agent_active("alice") is True
-            
-            # 4. 任务结束 -> Idle
-            mock_task.done.return_value = True
-            assert scheduler.is_agent_active("alice") is False
+            # 3. Agent 不存在
+            assert agent_service.is_agent_active("unknown") is False
 
     async def test_handle_event_error_logged_in_agent(self):
         """验证 Agent.consume_task 内部错误不导致崩溃（通过检查代码逻辑确保）。"""
@@ -96,7 +88,7 @@ class TestSchedulerRun(ServiceTestCase):
         assert real_agent.wait_task_queue.empty()
 
     async def test_on_agent_turn_creates_task(self):
-        """收到 ROOM_AGENT_TURN 消息后，agent 事件入队并启动 Task。"""
+        """收到 ROOM_AGENT_TURN 消息后，agent 任务入队并启动 Task。"""
         alice = _make_mock_agent("alice")
 
         with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
