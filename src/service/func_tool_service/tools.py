@@ -110,26 +110,26 @@ def get_agent_list(_context: ChatContext = None) -> List[str]:
     return senders
 
 
-def send_chat_msg(chat_windows_name: str, msg: str, _context: ChatContext = None) -> str:
+def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) -> str:
     """向聊天窗口发送消息
 
     Args:
-        chat_windows_name: 要发送消息的窗口名称
+        room_name: 要发送消息的窗口名称
         msg: 要发送的消息
 
     Returns:
         成功返回 "success"
     """
     sender = _context.agent_name if _context is not None else "unknown"
-    logger.info(f"发送消息: sender={sender}, room={chat_windows_name}, msg={msg}")
+    logger.info(f"发送消息: sender={sender}, room={room_name}, msg={msg}")
 
     if _context is not None:
         try:
-            room_key = _resolve_room_key(chat_windows_name, _context)
+            room_key = _resolve_room_key(room_name, _context)
             target_room = _context.get_room(room_key)
             target_room.add_message(_context.agent_name, msg)
         except Exception:
-            logger.warning(f"发送消息忽略，聊天室不存在: name={chat_windows_name}")
+            logger.warning(f"发送消息忽略，聊天室不存在: name={room_name}")
     else:
         logger.warning("发送消息失败，聊天室上下文未设置")
 

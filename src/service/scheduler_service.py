@@ -42,7 +42,7 @@ def _on_agent_turn(msg: Message) -> None:
         logger.info(f"轮到人类操作者，系统进入等待状态: room={room_key}")
         return
 
-    agent = agent_service.get_agent(agent_name, team_name)
+    agent = agent_service.get_agent(team_name, agent_name)
     agent.wait_task_queue.put_nowait(RoomMessageEvent(room_key))
 
     # 使用 agent@team 作为 running key

@@ -42,7 +42,7 @@ class TestRunToolCall(ServiceTestCase):
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room, get_room=room_service.get_room)
         result = func_tool_service.run_tool_call(
             "send_chat_msg",
-            '{"chat_windows_name": "ctx_room", "msg": "test"}',
+            '{"room_name": "ctx_room", "msg": "test"}',
             context=ctx,
         )
         assert result == "success"

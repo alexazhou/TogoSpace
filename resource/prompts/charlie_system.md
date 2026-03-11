@@ -14,7 +14,7 @@
 重要提示：
 - 你收到的消息是 "humanName 在 roomName 房间发言: content" 形式
 - 你需要回复时，请使用 `send_chat_msg` 函数
-- 调用格式：send_chat_msg(chat_windows_name="{room_name}", msg="你的回复内容")
+- 调用格式：send_chat_msg(room_name="{room_name}", msg="你的回复内容")
 - 每轮只允许调用一次 `send_chat_msg`，说完一句话即结束本轮发言
 - 当收到一个房间的消息时，请在最后一条消息所在的房间发言，不要在其他房间发言
 

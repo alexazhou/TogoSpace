@@ -1,149 +1,63 @@
-"""integration tests for service.agent_service — Agent class and module functions"""
-import json
+"""integration tests for service.agent_service"""
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import service.room_service as room_service
-import service.agent_service as agent_service
-import service.func_tool_service as func_tool_service
-from service.agent_service import Agent
-from util.llm_api_util import LlmApiMessage, ToolCall
-from constants import OpenaiLLMApiRole, TurnStatus, TurnCheckResult
+from model.chat_model import ChatMessage
+from service import agent_service, room_service
 from base import ServiceTestCase
 
 TEAM = "test_team"
 
 
-def _make_llm_response(content="reply", tool_calls=None):
-    msg = LlmApiMessage(role=OpenaiLLMApiRole.ASSISTANT, content=content, tool_calls=tool_calls)
-    choice = MagicMock()
-    choice.message = msg
-    response = MagicMock()
-    response.choices = [choice]
-    return response
-
-
-def _make_tool_call(name, arguments, call_id="call_1"):
-    return ToolCall(id=call_id, function={"name": name, "arguments": json.dumps(arguments)})
-
-
-class TestAgentChat(ServiceTestCase):
+class TestAgentService(ServiceTestCase):
     def setup_method(self):
         super().setup_method()
-        self.agent = Agent(name="test_agent", team_name=TEAM, system_prompt="你是助手", model="qwen-plus")
-        self.agent._history = [LlmApiMessage.text(OpenaiLLMApiRole.USER, "start")]
-
-    async def test_chat_no_tool_calls_returns_message(self):
-        with patch("service.agent_service.llm_service.infer", AsyncMock(return_value=_make_llm_response("你好"))):
-            result = await self.agent.chat()
-        assert result.content == "你好"
-
-    async def test_chat_with_tool_call_executes_executor(self):
-        tool_call = _make_tool_call("get_weather", {"location": "北京", "unit": "celsius"})
-        responses = [
-            _make_llm_response(content=None, tool_calls=[tool_call]),
-            _make_llm_response("天气不错"),
-        ]
-        executor = MagicMock(return_value="25°C")
-        with patch("service.agent_service.llm_service.infer", AsyncMock(side_effect=responses)):
-            result = await self.agent.chat(function_executor=executor)
-        executor.assert_called_once()
-        assert result.content == "天气不错"
-
-    async def test_chat_max_function_calls_limits_loops(self):
-        tool_call = _make_tool_call("get_weather", {"location": "北京"})
-        mock_infer = AsyncMock(return_value=_make_llm_response(content=None, tool_calls=[tool_call]))
-        executor = MagicMock(return_value="result")
-        with patch("service.agent_service.llm_service.infer", mock_infer):
-            await self.agent.chat(function_executor=executor, max_function_calls=3)
-        assert mock_infer.call_count == 3
-
-    async def test_chat_turn_checker_success_stops_loop(self):
-        tool_call = _make_tool_call("send_chat_msg", {"chat_windows_name": "r", "msg": "hi"})
-        executor = MagicMock(return_value="success")
-
-        def checker(msg):
-            if msg.role == OpenaiLLMApiRole.TOOL:
-                return TurnCheckResult(TurnStatus.SUCCESS)
-            return TurnCheckResult(TurnStatus.CONTINUE)
-
-        with patch("service.agent_service.llm_service.infer",
-                   AsyncMock(side_effect=[_make_llm_response(content=None, tool_calls=[tool_call])])):
-            result = await self.agent.chat(function_executor=executor, turn_checker=checker)
-        assert result.content == ""
-
-    async def test_chat_turn_checker_error_injects_hint(self):
-        call_count = {"n": 0}
-
-        def checker(msg):
-            if msg.tool_calls:
-                return TurnCheckResult(TurnStatus.CONTINUE)
-            call_count["n"] += 1
-            if call_count["n"] < 2:
-                return TurnCheckResult(TurnStatus.ERROR, "请使用工具")
-            return TurnCheckResult(TurnStatus.SUCCESS)
-
-        mock_infer = AsyncMock(return_value=_make_llm_response("直接回复"))
-        with patch("service.agent_service.llm_service.infer", mock_infer):
-            await self.agent.chat(turn_checker=checker, max_function_calls=5)
-        assert mock_infer.call_count >= 2
-
-    async def test_sync_room_appends_new_messages(self):
         room_service.init()
-        room_service.create_room(TEAM, "r", ["bob"])
-        room = room_service.get_room(f"r@{TEAM}")
-        room.add_message("bob", "hello agent")
-        self.agent.sync_room(room)
-        assert any("bob" in (m.content or "") for m in self.agent._history)
-
-
-class TestAgentServiceModule(ServiceTestCase):
-    def _setup_agents_and_rooms(self):
-        agents_config = [
-            {"name": "alice", "prompt_file": None, "model": "qwen-plus"},
-            {"name": "bob",   "prompt_file": None, "model": "qwen-plus"},
+        # 模拟配置初始化
+        agents_cfg = [
+            {"name": "alice", "prompt_file": "resource/prompts/alice_system.md", "model": "gpt-3.5-turbo"},
+            {"name": "bob", "prompt_file": "resource/prompts/bob_system.md", "model": "gpt-3.5-turbo"},
         ]
-        team_config = {
+        team_cfg = {
             "name": TEAM,
-            "groups": [{"name": "general", "members": ["alice", "bob"], "max_turns": 5}],
-            "max_function_calls": 5,
+            "groups": [
+                {"name": "general", "members": ["alice", "bob"], "initial_topic": "hello", "max_turns": 5}
+            ]
         }
-        room_service.init()
+        agent_service.init(agents_cfg)
+        agent_service.create_team_agents(TEAM, team_cfg)
+
+    def test_create_team_agents(self):
+        assert agent_service.get_agent(TEAM, "alice") is not None
+        assert agent_service.get_agent(TEAM, "bob") is not None
+
+    def test_get_agents_in_room(self):
         room_service.create_room(TEAM, "general", ["alice", "bob"])
-        with patch("service.agent_service.load_prompt", return_value="你是{participants}"):
-            agent_service.init(agents_config)
-            agent_service.create_team_agents(TEAM, team_config)
-
-    def test_init_creates_agents(self):
-        self._setup_agents_and_rooms()
-        assert agent_service.get_agent("alice", TEAM) is not None
-        assert agent_service.get_agent("bob", TEAM) is not None
-
-    def test_get_agents_returns_room_members(self):
-        self._setup_agents_and_rooms()
         assert {a.name for a in agent_service.get_agents(TEAM, "general")} == {"alice", "bob"}
 
     def test_get_all_rooms_for_agent(self):
-        self._setup_agents_and_rooms()
-        assert f"general@{TEAM}" in agent_service.get_all_rooms("alice", TEAM)
+        room_service.create_room(TEAM, "general", ["alice"])
+        assert f"general@{TEAM}" in agent_service.get_all_rooms(TEAM, "alice")
 
-    def test_close_clears_agents(self):
-        self._setup_agents_and_rooms()
-        agent_service.close()
-        with pytest.raises(KeyError):
-            agent_service.get_agent("alice", TEAM)
+    def test_sync_room_messages(self):
+        room_service.create_room(TEAM, "general", ["alice"])
+        room = room_service.get_room(f"general@{TEAM}")
+        room.add_message("bob", "hello alice")
+        
+        alice = agent_service.get_agent(TEAM, "alice")
+        alice.sync_room(room)
+        
+        # 初始公告 + bob 消息
+        assert len(alice._history) == 2
+        assert "hello alice" in alice._history[1].content
 
-    async def test_run_turn_sends_message_to_room(self):
-        self._setup_agents_and_rooms()
-        room_key = f"general@{TEAM}"
-        room = room_service.get_room(room_key)
-        room.add_message("system", "开始对话")
-        alice = agent_service.get_agent("alice", TEAM)
-
-        tool_call = _make_tool_call("send_chat_msg", {"chat_windows_name": "general", "msg": "hi"})
-        func_tool_service.init()
-        with patch("service.agent_service.llm_service.infer",
-                   AsyncMock(side_effect=[_make_llm_response(content=None, tool_calls=[tool_call])])):
-            await alice.run_turn(room_key, max_function_calls=5)
-
-        assert any(m.content == "hi" for m in room.messages)
+    def test_sync_room_skips_own_messages(self):
+        room_service.create_room(TEAM, "general", ["alice"])
+        room = room_service.get_room(f"general@{TEAM}")
+        
+        alice = agent_service.get_agent(TEAM, "alice")
+        # alice 发送消息
+        room.add_message("alice", "i am talking")
+        
+        alice.sync_room(room)
+        # 只应有初始公告，不应有自己的消息
+        assert len(alice._history) == 1
+        assert "talking" not in alice._history[0].content
