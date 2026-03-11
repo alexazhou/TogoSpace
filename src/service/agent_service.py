@@ -38,12 +38,44 @@ class Agent:
                 break
                 
             try:
-                # 调用模块内的 run_turn 驱动 Agent
-                await run_turn(self, event.room_name, max_function_calls)
+                # 驱动 Agent 在指定房间执行一个轮次
+                await self.run_turn(event.room_name, max_function_calls)
             except Exception as e:
                 logger.error(f"Agent 处理任务失败: agent={self.name}, room={event.room_name}, error={e}")
             finally:
                 self.wait_task_queue.task_done()
+
+    async def run_turn(self, room_name: str, max_function_calls: int = 5) -> None:
+        """同步房间消息，驱动 Agent 完成一轮发言（含 tool call 循环）。"""
+        room: ChatRoom = room_service.get_room(room_name)
+        self.sync_room(room)
+
+        agent_context = ChatContext(
+            agent_name=self.name,
+            chat_room=room,
+            get_room=room_service.get_room,
+        )
+        last_called: dict = {"name": None}
+
+        def executor(name: str, args: str, _ctx: ChatContext = agent_context) -> str:
+            last_called["name"] = name
+            return func_tool_service.run_tool_call(name, args, context=_ctx)
+
+        def turn_checker(msg: LlmApiMessage) -> TurnCheckResult:
+            if last_called["name"] in ("send_chat_msg", "skip_chat_msg"):
+                return TurnCheckResult(TurnStatus.SUCCESS)
+            if not msg.tool_calls:
+                return TurnCheckResult(TurnStatus.ERROR, "你必须调用 send_chat_msg 发送消息或 skip_chat_msg 跳过发言，不能直接输出文字。")
+            return TurnCheckResult(TurnStatus.CONTINUE)
+
+        response: LlmApiMessage = await self.chat(
+            tools=func_tool_service.get_tools(),
+            function_executor=executor,
+            turn_checker=turn_checker,
+            max_function_calls=max_function_calls,
+        )
+        if response.content:
+            logger.info(f"Agent 思考内容: agent={self.name}, room={room_name}, content={response.content}")
 
     def sync_room(self, room: ChatRoom) -> None:
         """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
@@ -139,39 +171,6 @@ def init(agents_config: list, rooms_config: list) -> None:
         prompt = prompt.replace("{participants}", "、".join(participants))
         _agents[name] = Agent(name=name, system_prompt=prompt, model=cfg["model"])
         logger.info(f"创建 Agent: name={name}, model={cfg['model']}")
-
-
-async def run_turn(agent: Agent, room_name: str, max_function_calls: int = 5) -> None:
-    """同步房间消息，驱动 Agent 完成一轮发言（含 tool call 循环）。"""
-    room: ChatRoom = room_service.get_room(room_name)
-    agent.sync_room(room)
-
-    agent_context = ChatContext(
-        agent_name=agent.name,
-        chat_room=room,
-        get_room=room_service.get_room,
-    )
-    last_called: dict = {"name": None}
-
-    def executor(name: str, args: str, _ctx: ChatContext = agent_context) -> str:
-        last_called["name"] = name
-        return func_tool_service.run_tool_call(name, args, context=_ctx)
-
-    def turn_checker(msg: LlmApiMessage) -> TurnCheckResult:
-        if last_called["name"] in ("send_chat_msg", "skip_chat_msg"):
-            return TurnCheckResult(TurnStatus.SUCCESS)
-        if not msg.tool_calls:
-            return TurnCheckResult(TurnStatus.ERROR, "你必须调用 send_chat_msg 发送消息或 skip_chat_msg 跳过发言，不能直接输出文字。")
-        return TurnCheckResult(TurnStatus.CONTINUE)
-
-    response: LlmApiMessage = await agent.chat(
-        tools=func_tool_service.get_tools(),
-        function_executor=executor,
-        turn_checker=turn_checker,
-        max_function_calls=max_function_calls,
-    )
-    if response.content:
-        logger.info(f"Agent 思考内容: agent={agent.name}, room={room_name}, content={response.content}")
 
 
 def get_agent(name: str) -> Agent:

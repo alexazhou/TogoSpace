@@ -135,6 +135,7 @@ class TestAgentServiceModule(ServiceTestCase):
         func_tool_service.init()
         with patch("service.agent_service.llm_service.infer",
                    AsyncMock(side_effect=[_make_llm_response(content=None, tool_calls=[tool_call])])):
-            await agent_service.run_turn(alice, "general", max_function_calls=5)
+            await alice.run_turn("general", max_function_calls=5)
 
         assert any(m.content == "hi" for m in room.messages)
+
