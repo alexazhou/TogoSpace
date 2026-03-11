@@ -18,7 +18,7 @@
 agent_team/
 ├── src/                 # 后端主程序
 ├── tui/                 # 终端观察台（独立进程）
-├── resource/            # 配置文件和 Prompt
+├── config/              # 配置文件
 │   ├── agents/          # Agent 定义（*.json，每个 agent 一个文件）
 │   ├── teams/           # Team 定义（*.json，每个 team 一个文件）
 │   └── prompts/         # Agent system prompt（*.md）
@@ -96,10 +96,10 @@ tui/
 
 ```bash
 # 前台运行（开发调试）
-cd src && python main.py [--resource-dir resource/] [--llm-config config.json] [--port 8080]
+cd src && python main.py [--config-dir config/] [--llm-config config.json] [--port 8080]
 
 # 后台运行（nohup，stdout 写入 logs/backend_stdout.log，运行日志写入 logs/backend/）
-./scripts/start_backend.sh [--resource-dir ...] [--port ...]
+./scripts/start_backend.sh [--config-dir ...] [--port ...]
 
 # 停止后台后端（通过 run/backend.pid）
 ./scripts/stop_backend.sh
@@ -133,20 +133,19 @@ cd src && python main.py [--resource-dir resource/] [--llm-config config.json] [
 测试和其他入口脚本若需要读取这些文件，须自行保证工作目录正确，或使用绝对路径。
 
 ## 配置文件
-
 ### Agent + Team 两级配置
 
 配置拆分为 Agent 定义和 Team 定义两个独立概念：
 
-- **Agent 定义** (`resource/agents/<name>.json`)：全局共享的 Agent 属性（prompt/model）
-- **Team 定义** (`resource/teams/<name>.json`)：包含一个或多个 group（聊天室），每个 Team 中的 Agent 实例相互隔离
+- **Agent 定义** (`config/agents/<name>.json`)：全局共享 de Agent 属性（prompt/model）
+- **Team 定义** (`config/teams/<name>.json`)：包含一个或多个 group（聊天室），每个 Team 中的 Agent 实例相互隔离
 
 #### Agent 定义示例
 
 ```json
 {
   "name": "alice",
-  "prompt_file": "resource/prompts/alice_system.md",
+  "system_prompt": "...",
   "model": "glm-4.7"
 }
 ```
@@ -157,6 +156,7 @@ cd src && python main.py [--resource-dir resource/] [--llm-config config.json] [
 {
   "name": "default",
   "groups": [
+...
     {
       "name": "general",
       "type": "group",

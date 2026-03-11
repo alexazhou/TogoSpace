@@ -4,11 +4,11 @@ import os
 from typing import List
 
 
-def load_agents(resource_dir: str = None) -> List[dict]:
-    """扫描 resource/agents/*.json，返回 Agent 定义列表。"""
-    if resource_dir is None:
-        resource_dir = os.path.join(os.path.dirname(__file__), "../../resource")
-    agents_dir = os.path.join(resource_dir, "agents")
+def load_agents(config_dir: str = None) -> List[dict]:
+    """扫描 config/agents/*.json，返回 Agent 定义列表。"""
+    if config_dir is None:
+        config_dir = os.path.join(os.path.dirname(__file__), "../../config")
+    agents_dir = os.path.join(config_dir, "agents")
     result = []
     for path in sorted(glob.glob(os.path.join(agents_dir, "*.json"))):
         with open(path, "r", encoding="utf-8") as f:
@@ -16,11 +16,11 @@ def load_agents(resource_dir: str = None) -> List[dict]:
     return result
 
 
-def load_teams(resource_dir: str = None) -> List[dict]:
-    """扫描 resource/teams/*.json，返回 Team 定义列表。"""
-    if resource_dir is None:
-        resource_dir = os.path.join(os.path.dirname(__file__), "../../resource")
-    teams_dir = os.path.join(resource_dir, "teams")
+def load_teams(config_dir: str = None) -> List[dict]:
+    """扫描 config/teams/*.json，返回 Team 定义列表。"""
+    if config_dir is None:
+        config_dir = os.path.join(os.path.dirname(__file__), "../../config")
+    teams_dir = os.path.join(config_dir, "teams")
     result = []
     for path in sorted(glob.glob(os.path.join(teams_dir, "*.json"))):
         with open(path, "r", encoding="utf-8") as f:
