@@ -19,7 +19,19 @@ _stop_event: asyncio.Event = asyncio.Event()
 
 
 def is_agent_active(agent_name: str) -> bool:
-    return agent_name in _active_agents
+    """如果 Agent 正在运行任务，或者其事件队列中仍有待处理项，则视为活跃。"""
+    task = _running.get(agent_name)
+    if task and not task.done():
+        return True
+    
+    try:
+        agent = agent_service.get_agent(agent_name)
+        if not agent.wait_event_queue.empty():
+            return True
+    except (KeyError, AttributeError):
+        pass
+        
+    return False
 
 
 def init(rooms_config: list, max_function_calls: int = 5) -> None:
@@ -101,13 +113,22 @@ async def run() -> None:
 
 
 async def _run_agent(agent: Agent) -> None:
-    """消费队列中当前所有事件；队列清空后将 Agent 标记为不活跃。"""
-    while not agent.wait_event_queue.empty():
-        event: RoomMessageEvent = agent.wait_event_queue.get_nowait()
-        await _handle_event(agent, event)
-        agent.wait_event_queue.task_done()
-    _active_agents.discard(agent.name)
-    logger.info(f"agent all task done, go sleep: agent={agent.name}")
+    """持续消费队列中的事件，直到队列为空且没有新事件。"""
+    _active_agents.add(agent.name)
+    try:
+        while True:
+            try:
+                # 尝试以非阻塞方式获取事件
+                event: RoomMessageEvent = agent.wait_event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                # 队列空了，退出循环
+                break
+                
+            await _handle_event(agent, event)
+            agent.wait_event_queue.task_done()
+    finally:
+        _active_agents.discard(agent.name)
+        logger.info(f"Agent 进入休眠: agent={agent.name}")
 
 
 async def _handle_event(agent: Agent, event: RoomMessageEvent) -> None:
