@@ -12,16 +12,20 @@ from constants import TurnStatus, TurnCheckResult, RoomType, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
+# 全局 Agent 实例池，key 为 agent_name
 _agents: Dict[str, "Agent"] = {}
 
 
 class Agent:
+    """AI Agent 实体类，维护其性格、对话历史及事件队列"""
+
     def __init__(self, name: str, system_prompt: str, model: str):
-        self.name = name
-        self.system_prompt = system_prompt
-        self.model = model
-        self._history: List[LlmApiMessage] = []
-        self.wait_event_queue: asyncio.Queue = asyncio.Queue()
+        self.name: str = name  # Agent 名称
+        self.system_prompt: str = system_prompt  # 系统提示词（定义性格和规则）
+        self.model: str = model  # 使用的 LLM 模型名称
+        
+        self._history: List[LlmApiMessage] = []  # Agent 的私有对话历史（包含 Tool Call 详情）
+        self.wait_event_queue: asyncio.Queue = asyncio.Queue()  # 待处理的房间消息事件队列
 
     def sync_room(self, room: ChatRoom) -> None:
         """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
@@ -32,8 +36,6 @@ class Agent:
                 self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}"))
             else:
                 self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}"))
-
-        #self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"系统提示：当前进入到 {room.name} 房间，请在 {room.name} 房间发言"))
 
     async def _infer(self, tools: Optional[List[Tool]]) -> LlmApiMessage:
         """基于当前 _history 发起一次 LLM 调用，返回 assistant 消息。"""
@@ -99,7 +101,7 @@ class Agent:
 
 
 def init(agents_config: list, rooms_config: list) -> None:
-    """为每个 Agent 创建单一实例，向 room_service 注册房间成员。"""
+    """为每个 Agent 创建单一实例。"""
     global _agents
     _agents = {}
 
@@ -162,11 +164,6 @@ def get_agent(name: str) -> Agent:
 def get_all_agents() -> List[Agent]:
     """返回所有唯一 Agent 实例列表。"""
     return list(_agents.values())
-
-
-def get_agents(room_name: str) -> List[Agent]:
-    """返回指定房间的 Agent 列表（按配置顺序）。"""
-    return [_agents[n] for n in room_service.get_member_names(room_name) if n in _agents]
 
 
 def get_all_rooms(agent_name: str) -> List[str]:
