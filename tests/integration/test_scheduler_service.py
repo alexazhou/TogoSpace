@@ -16,8 +16,8 @@ from base import ServiceTestCase
 def _make_mock_agent(name: str) -> Agent:
     agent = MagicMock(spec=Agent)
     agent.name = name
-    agent.wait_event_queue = asyncio.Queue()
-    agent.run_events = AsyncMock()
+    agent.wait_task_queue = asyncio.Queue()
+    agent.consume_task = AsyncMock()
     return agent
 
 
@@ -31,7 +31,7 @@ class TestSchedulerRun(ServiceTestCase):
         await asyncio.wait_for(run_task, timeout=2.0)
 
     async def test_scheduler_runs_agent_on_turn_event(self):
-        """发布 ROOM_AGENT_TURN 后，scheduler 应触发 agent.run_events。"""
+        """发布 ROOM_AGENT_TURN 后，scheduler 应触发 agent.consume_task。"""
         room_service.init("r1", ["alice"])
         alice = _make_mock_agent("alice")
 
@@ -53,8 +53,8 @@ class TestSchedulerRun(ServiceTestCase):
             # 稍等片刻让 task 启动
             await asyncio.sleep(0.5)
             
-            # 验证 agent.run_events 被调用
-            alice.run_events.assert_called()
+            # 验证 agent.consume_task 被调用
+            alice.consume_task.assert_called()
             
             scheduler.stop()
             await asyncio.wait_for(run_task, timeout=2.0)
@@ -70,11 +70,11 @@ class TestSchedulerRun(ServiceTestCase):
             assert scheduler.is_agent_active("alice") is False
             
             # 2. 队列不为空 -> Active
-            alice.wait_event_queue.put_nowait(RoomMessageEvent("r1"))
+            alice.wait_task_queue.put_nowait(RoomMessageEvent("r1"))
             assert scheduler.is_agent_active("alice") is True
             
             # 3. 队列清空，但任务正在运行 -> Active
-            alice.wait_event_queue.get_nowait()
+            alice.wait_task_queue.get_nowait()
             mock_task = MagicMock(spec=asyncio.Task)
             mock_task.done.return_value = False
             scheduler._running["alice"] = mock_task
@@ -85,15 +85,15 @@ class TestSchedulerRun(ServiceTestCase):
             assert scheduler.is_agent_active("alice") is False
 
     async def test_handle_event_error_logged_in_agent(self):
-        """验证 Agent.run_events 内部错误不导致崩溃（通过检查代码逻辑确保）。"""
+        """验证 Agent.consume_task 内部错误不导致崩溃（通过检查代码逻辑确保）。"""
         real_agent = Agent("test", "prompt", "model")
-        real_agent.wait_event_queue.put_nowait(RoomMessageEvent("r1"))
+        real_agent.wait_task_queue.put_nowait(RoomMessageEvent("r1"))
         
         with patch("service.agent_service.run_turn", side_effect=RuntimeError("boom")):
             # 应该能正常结束而不抛出异常
-            await real_agent.run_events(max_function_calls=5)
+            await real_agent.consume_task(max_function_calls=5)
         
-        assert real_agent.wait_event_queue.empty()
+        assert real_agent.wait_task_queue.empty()
 
     async def test_on_agent_turn_creates_task(self):
         """收到 ROOM_AGENT_TURN 消息后，agent 事件入队并启动 Task。"""
@@ -106,5 +106,5 @@ class TestSchedulerRun(ServiceTestCase):
             )
             scheduler._on_agent_turn(msg)
 
-        assert not alice.wait_event_queue.empty()
+        assert not alice.wait_task_queue.empty()
         assert "alice" in scheduler._running

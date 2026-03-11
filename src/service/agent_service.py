@@ -17,7 +17,7 @@ _agents: Dict[str, "Agent"] = {}
 
 
 class Agent:
-    """AI Agent 实体类，维护其性格、对话历史及事件队列"""
+    """AI Agent 实体类，维护其性格、对话历史及任务队列"""
 
     def __init__(self, name: str, system_prompt: str, model: str):
         self.name: str = name  # Agent 名称
@@ -25,14 +25,14 @@ class Agent:
         self.model: str = model  # 使用的 LLM 模型名称
         
         self._history: List[LlmApiMessage] = []  # Agent 的私有对话历史（包含 Tool Call 详情）
-        self.wait_event_queue: asyncio.Queue = asyncio.Queue()  # 待处理的房间消息事件队列
+        self.wait_task_queue: asyncio.Queue = asyncio.Queue()  # 待处理的房间任务队列
 
-    async def run_events(self, max_function_calls: int) -> None:
-        """持续消费队列中的事件，直到队列为空。"""
+    async def consume_task(self, max_function_calls: int) -> None:
+        """持续消费队列中的任务，直到队列为空。"""
         while True:
             try:
-                # 尝试以非阻塞方式获取事件
-                event = self.wait_event_queue.get_nowait()
+                # 尝试以非阻塞方式获取任务（RoomMessageEvent）
+                event = self.wait_task_queue.get_nowait()
             except asyncio.QueueEmpty:
                 # 队列空了，退出循环
                 break
@@ -41,9 +41,9 @@ class Agent:
                 # 调用模块内的 run_turn 驱动 Agent
                 await run_turn(self, event.room_name, max_function_calls)
             except Exception as e:
-                logger.error(f"Agent 处理事件失败: agent={self.name}, room={event.room_name}, error={e}")
+                logger.error(f"Agent 处理任务失败: agent={self.name}, room={event.room_name}, error={e}")
             finally:
-                self.wait_event_queue.task_done()
+                self.wait_task_queue.task_done()
 
     def sync_room(self, room: ChatRoom) -> None:
         """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
