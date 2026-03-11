@@ -236,7 +236,10 @@ def create_team_agents(team_name: str, team_config: dict) -> None:
             continue
 
         cfg = _agent_defs[name]
-        prompt: str = load_prompt(cfg["prompt_file"])
+        if "system_prompt" in cfg:
+            prompt = cfg["system_prompt"]
+        else:
+            prompt = load_prompt(cfg["prompt_file"])
         participants = sorted(list(agent_peers.get(name, set())))
         prompt = prompt.replace("{participants}", "、".join(participants))
 

@@ -47,7 +47,7 @@ def _write_e2e_configs(mock_port: int, tmp_dir: str):
     os.makedirs(teams_dir, exist_ok=True)
 
     # Agent 定义
-    alice_agent = {"name": "alice", "prompt_file": "resource/prompts/alice_system.md", "model": "mock-model"}
+    alice_agent = {"name": "alice", "system_prompt": "Mock Alice Prompt for {participants}", "model": "mock-model"}
     with open(os.path.join(agents_dir, "alice.json"), "w", encoding="utf-8") as f:
         json.dump(alice_agent, f, ensure_ascii=False)
 
