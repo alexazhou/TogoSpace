@@ -59,22 +59,26 @@ class TestSchedulerRun(ServiceTestCase):
             scheduler.stop()
             await asyncio.wait_for(run_task, timeout=2.0)
 
-    async def test_is_agent_active_logic(self):
-        """验证活跃状态判断逻辑：通过模拟 agent.is_active 属性验证。"""
-        alice = MagicMock()
-        alice.name = "alice"
+    async def test_agent_is_active_self_contained(self):
+        """验证 Agent 活跃状态的自治逻辑：基于 _is_running 或 队列深度。"""
+        # 使用真实 Agent 对象以测试其内部逻辑
+        alice = Agent("alice", "prompt", "model")
         
-        with patch.object(agent_service, "_agents", {"alice": alice}):
-            # 1. 模拟 Agent 返回活跃
-            alice.is_active = True
-            assert agent_service.is_agent_active("alice") is True
-            
-            # 2. 模拟 Agent 返回不活跃
-            alice.is_active = False
-            assert agent_service.is_agent_active("alice") is False
-            
-            # 3. Agent 不存在
-            assert agent_service.is_agent_active("unknown") is False
+        # 1. 初始状态：Idle
+        assert alice.is_active is False
+        
+        # 2. 队列不为空 -> Active
+        alice.wait_task_queue.put_nowait(RoomMessageEvent("r1"))
+        assert alice.is_active is True
+        
+        # 3. 模拟进入运行状态
+        alice.wait_task_queue.get_nowait()
+        alice._is_running = True
+        assert alice.is_active is True
+        
+        # 4. 运行结束 -> Idle
+        alice._is_running = False
+        assert alice.is_active is False
 
     async def test_handle_event_error_logged_in_agent(self):
         """验证 Agent.consume_task 内部错误不导致崩溃（通过检查代码逻辑确保）。"""
