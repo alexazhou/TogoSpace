@@ -12,6 +12,7 @@ from util.config_util import load_config, load_llm_service_config
 from service import message_bus, scheduler_service as scheduler, agent_service, room_service as chat_room, llm_service, func_tool_service
 from controller.ws_controller import init as init_ws
 from route import make_app
+from constants import RoomType
 
 
 def _setup_logger() -> None:
@@ -70,29 +71,36 @@ async def main(config_path: str = None, llm_config_path: str = None, port: int =
     logger = logging.getLogger(__name__)
 
     config = load_config(config_path)
-
-    from constants import RoomType
     rooms_config = config["chat_rooms"]
-    for r in rooms_config:
-        room_type = RoomType(r.get("type", "group"))
-        chat_room.init(name=r["name"], initial_topic=r["initial_topic"], room_type=room_type)
+    llm_cfg = load_llm_service_config(llm_config_path)
 
     message_bus.init()
-    llm_cfg = load_llm_service_config(llm_config_path)
     llm_api_util.init()
     llm_service.init(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     func_tool_service.init()
     agent_service.init(config["agents"], rooms_config)
+
+    for r in rooms_config:
+        room_type = RoomType(r.get("type", "group"))
+        chat_room.init(
+            name=r["name"],
+            agent_names=r["agents"],
+            initial_topic=r["initial_topic"],
+            room_type=room_type
+        )
+
     scheduler.init(
         rooms_config=rooms_config,
         max_function_calls=config.get("max_function_calls", 5),
     )
 
-    # 为每个房间添加初始话题
+    # 为每个房间添加初始话题（已经在 room_service.init 的公告中处理，此处可保留或移除）
+    # 注意：room_service.init 已经发送了创建公告，如果 initial_topic 很重要且与公告不同，可以保留
     for r in rooms_config:
         initial_topic = chat_room.get_room(r["name"]).initial_topic
         if initial_topic:
-            chat_room.get_room(r["name"]).add_message("system", initial_topic)
+            # chat_room.get_room(r["name"]).add_message("system", initial_topic)
+            pass
 
     init_ws()
     web_server = tornado.httpserver.HTTPServer(make_app())

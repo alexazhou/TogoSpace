@@ -106,7 +106,7 @@ class ChatRoom:
         result = []
         for msg in recent:
             if msg.sender_name == "system":
-                result.append({"role": "system", "content": msg.content})
+                result.append({"role": "user", "content": msg.content})
             else:
                 result.append({"role": "user", "content": f"{msg.sender_name}: {msg.content}"})
         return result
@@ -121,10 +121,17 @@ class ChatRoom:
 _rooms: Dict[str, ChatRoom] = {}
 
 
-def init(name: str, initial_topic: str = "", room_type: RoomType = RoomType.GROUP) -> None:
-    """创建并注册一个聊天室。"""
-    _rooms[name] = ChatRoom(name=name, initial_topic=initial_topic, room_type=room_type)
-    logger.info(f"创建聊天室: name={name}, type={room_type.value}, initial_topic={initial_topic!r}")
+def init(name: str, agent_names: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP) -> None:
+    """创建并初始化一个聊天室，设置成员并发布系统公告。"""
+    room = ChatRoom(name=name, initial_topic=initial_topic, room_type=room_type)
+    room.member_names = agent_names
+    _rooms[name] = room
+    
+    logger.info(f"创建并初始化聊天室: name={name}, type={room_type.value}, 成员={agent_names}")
+    
+    # 发布房间创建公告
+    member_list_str = "、".join(agent_names)
+    room.add_message("系统", f"{name} 房间已经创建，当前房间成员：{member_list_str}")
 
 
 def close(name: str) -> None:
@@ -135,12 +142,6 @@ def close(name: str) -> None:
 def close_all() -> None:
     """移除所有聊天室，程序退出前调用。"""
     _rooms.clear()
-
-
-def setup_members(room_name: str, agent_names: List[str]) -> None:
-    """设置聊天室的 Agent 成员列表。"""
-    _rooms[room_name].member_names = agent_names
-    logger.info(f"注册成员: name={room_name}, 成员={agent_names}")
 
 
 def get_member_names(room_name: str) -> List[str]:

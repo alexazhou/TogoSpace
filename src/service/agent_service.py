@@ -32,7 +32,8 @@ class Agent:
                 self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}"))
             else:
                 self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}"))
-        self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"系统提示：当前进入到 {room.name} 房间，请在 {room.name} 房间发言"))
+
+        #self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"系统提示：当前进入到 {room.name} 房间，请在 {room.name} 房间发言"))
 
     async def _infer(self, tools: Optional[List[Tool]]) -> LlmApiMessage:
         """基于当前 _history 发起一次 LLM 调用，返回 assistant 消息。"""
@@ -118,9 +119,6 @@ def init(agents_config: list, rooms_config: list) -> None:
         prompt = prompt.replace("{participants}", "、".join(participants))
         _agents[name] = Agent(name=name, system_prompt=prompt, model=cfg["model"])
         logger.info(f"创建 Agent: name={name}, model={cfg['model']}")
-
-    for room in rooms_config:
-        room_service.setup_members(room["name"], room["agents"])
 
 
 async def run_turn(agent: Agent, room_name: str, max_function_calls: int = 5) -> None:
