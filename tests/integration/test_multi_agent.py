@@ -38,7 +38,7 @@ AGENTS_CONFIG = [
 TEAM_CONFIG = {
     "name": TEAM,
     "groups": [
-        {"name": "general", "agents": ["alice", "bob"], "max_turns": 2},
+        {"name": "general", "members": ["alice", "bob"], "max_turns": 2},
     ],
     "max_function_calls": 5,
 }

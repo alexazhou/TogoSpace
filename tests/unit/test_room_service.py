@@ -80,7 +80,7 @@ class TestRoomServiceFunctions:
 
     def test_setup_members(self):
         room_service.create_room(TEAM, "r1", ["alice", "bob"])
-        assert room_service.get_member_names(f"r1@{TEAM}") == ["alice", "bob"]
+        assert room_service.get_member_names(TEAM, "r1") == ["alice", "bob"]
 
     def test_get_rooms_for_agent(self):
         room_service.create_room(TEAM, "r1", ["alice"])

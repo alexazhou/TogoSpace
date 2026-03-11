@@ -95,7 +95,7 @@ async def main(resource_dir: str = None, llm_config_path: str = None, port: int 
             chat_room.create_room(
                 team_name=team_name,
                 name=group["name"],
-                agent_names=group["agents"],
+                agent_names=group["members"],
                 initial_topic=group["initial_topic"],
                 room_type=room_type,
             )

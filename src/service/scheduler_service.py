@@ -70,7 +70,7 @@ async def run() -> None:
             room_key = f"{group['name']}@{team_name}"
             room = chat_room.get_room(room_key)
             logger.info(f"初始化轮次配置: room={room_key}, max_turns={group['max_turns']}")
-            room.setup_turns(chat_room.get_member_names(room_key), group["max_turns"])
+            room.setup_turns(group["members"], group["max_turns"])
 
     # 持续运行，直到 _stop_event 被设置
     stop_waiter = asyncio.create_task(_stop_event.wait())

@@ -105,7 +105,7 @@ class TestAgentServiceModule(ServiceTestCase):
         ]
         team_config = {
             "name": TEAM,
-            "groups": [{"name": "general", "agents": ["alice", "bob"], "max_turns": 5}],
+            "groups": [{"name": "general", "members": ["alice", "bob"], "max_turns": 5}],
             "max_function_calls": 5,
         }
         room_service.init()
@@ -121,7 +121,7 @@ class TestAgentServiceModule(ServiceTestCase):
 
     def test_get_agents_returns_room_members(self):
         self._setup_agents_and_rooms()
-        assert {a.name for a in agent_service.get_agents(f"general@{TEAM}")} == {"alice", "bob"}
+        assert {a.name for a in agent_service.get_agents(TEAM, "general")} == {"alice", "bob"}
 
     def test_get_all_rooms_for_agent(self):
         self._setup_agents_and_rooms()

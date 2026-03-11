@@ -55,7 +55,7 @@ def _write_e2e_configs(mock_port: int, tmp_dir: str):
     team = {
         "name": "e2e",
         "groups": [
-            {"name": "general", "type": "group", "agents": ["alice"], "initial_topic": "e2e 测试话题", "max_turns": 50}
+            {"name": "general", "type": "group", "members": ["alice"], "initial_topic": "e2e 测试话题", "max_turns": 50}
         ],
         "max_function_calls": 2,
     }

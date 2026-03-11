@@ -93,17 +93,32 @@ class Agent:
             chat_room=room,
             get_room=room_service.get_room,
         )
-        last_called: dict = {"name": None}
+        last_called: dict = {"name": None, "args": None}
 
         def executor(name: str, args: str, _ctx: ChatContext = agent_context) -> str:
             last_called["name"] = name
+            last_called["args"] = args
             return func_tool_service.run_tool_call(name, args, context=_ctx)
 
         def turn_checker(msg: LlmApiMessage) -> TurnCheckResult:
-            if last_called["name"] in ("send_chat_msg", "skip_chat_msg"):
+            if last_called["name"] == "skip_chat_msg":
                 return TurnCheckResult(TurnStatus.SUCCESS)
+            
+            if last_called["name"] == "send_chat_msg":
+                # 校验是否发送到了当前正在调度的房间
+                import json
+                try:
+                    args_dict = json.loads(last_called["args"])
+                    target_room = args_dict.get("chat_windows_name")
+                    if target_room == room.name or target_room == room.key:
+                        return TurnCheckResult(TurnStatus.SUCCESS)
+                    else:
+                        return TurnCheckResult(TurnStatus.CONTINUE)
+                except Exception:
+                    return TurnCheckResult(TurnStatus.CONTINUE)
+
             if not msg.tool_calls:
-                return TurnCheckResult(TurnStatus.ERROR, "你必须调用 send_chat_msg 发送消息或 skip_chat_msg 跳过发言，不能直接输出文字。")
+                return TurnCheckResult(TurnStatus.ERROR, f"你必须调用 send_chat_msg 向当前房间 {room.name} 发送消息或 skip_chat_msg 跳过发言，不能直接输出文字。")
             return TurnCheckResult(TurnStatus.CONTINUE)
 
         response: LlmApiMessage = await self.chat(
@@ -201,14 +216,14 @@ def create_team_agents(team_name: str, team_config: dict) -> None:
     # 收集该 team 中所有 group 引用的 agent 名称
     agent_names_in_team: set = set()
     for group in team_config["groups"]:
-        for name in group["agents"]:
+        for name in group["members"]:
             if name != SpecialAgent.OPERATOR:
                 agent_names_in_team.add(name)
 
     # 收集每个 agent 在该 team 中的 peers
     agent_peers: Dict[str, set] = {name: set() for name in agent_names_in_team}
     for group in team_config["groups"]:
-        names = [n for n in group["agents"] if n != SpecialAgent.OPERATOR]
+        names = [n for n in group["members"] if n != SpecialAgent.OPERATOR]
         for name in names:
             if name in agent_peers:
                 agent_peers[name].update(n for n in names if n != name)
@@ -246,11 +261,10 @@ def get_all_agents() -> List[Agent]:
     return list(_agents.values())
 
 
-def get_agents(room_key: str) -> List[Agent]:
-    """返回指定房间 (room@team 格式) 的 Agent 实例列表。"""
-    room = room_service.get_room(room_key)
-    team_name = room.team_name
-    return [_agents[_make_agent_key(n, team_name)] for n in room.agents if _make_agent_key(n, team_name) in _agents]
+def get_agents(team_name: str, room_name: str) -> List[Agent]:
+    """返回指定 team 和 room 中的 Agent 实例列表。"""
+    members = room_service.get_member_names(team_name, room_name)
+    return [_agents[_make_agent_key(n, team_name)] for n in members if _make_agent_key(n, team_name) in _agents]
 
 
 def get_all_rooms(agent_name: str, team_name: str) -> List[str]:

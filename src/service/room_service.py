@@ -195,9 +195,9 @@ def close_all() -> None:
     _rooms.clear()
 
 
-def get_member_names(room_key: str) -> List[str]:
+def get_member_names(team_name: str, room_name: str) -> List[str]:
     """返回聊天室的参与者名列表。"""
-    return _rooms[room_key].agents
+    return _rooms[_make_room_key(room_name, team_name)].agents
 
 
 def get_rooms_for_agent(agent_name: str, team_name: str = None) -> List[str]:

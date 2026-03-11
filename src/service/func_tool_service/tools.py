@@ -25,7 +25,7 @@ def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius
     """获取指定地点的天气信息
 
     Args:
-        location: 城市或地点名称
+        location: 城市 or 地点名称
         unit: 温度单位，celsius 或 fahrenheit
     """
     if unit == "celsius":
@@ -110,23 +110,6 @@ def get_agent_list(_context: ChatContext = None) -> List[str]:
     return senders
 
 
-def create_chat(room_name: str, _context: ChatContext = None) -> str:
-    """切换到已存在的聊天室，返回房间名称；房间不存在则返回错误提示
-
-    Args:
-        room_name: 要切换到的聊天室名称
-    """
-    logger.info(f"切换到聊天室: name={room_name}")
-    if _context is None:
-        return "错误：无法访问聊天室上下文"
-    try:
-        room_key = _resolve_room_key(room_name, _context)
-        _context.get_room(room_key)
-        return room_name
-    except Exception:
-        return f"错误：聊天室 '{room_name}' 不存在"
-
-
 def send_chat_msg(chat_windows_name: str, msg: str, _context: ChatContext = None) -> str:
     """向聊天窗口发送消息
 
@@ -177,7 +160,7 @@ def task_done() -> None:
     return
 
 
-for _f in (get_agent_list, create_chat, send_chat_msg, skip_chat_msg):
+for _f in (get_agent_list, send_chat_msg, skip_chat_msg):
     _f.needs_context = True
 
 FUNCTION_REGISTRY: dict[str, callable] = {
@@ -185,7 +168,6 @@ FUNCTION_REGISTRY: dict[str, callable] = {
     "get_time": get_time,
     "calculate": calculate,
     "get_agent_list": get_agent_list,
-    "create_chat": create_chat,
     "send_chat_msg": send_chat_msg,
     "skip_chat_msg": skip_chat_msg,
     "task_done": task_done,
