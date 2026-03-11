@@ -173,6 +173,11 @@ class WatcherApp(App):
         status_bar = self.query_one(StatusBar)
         room_panel = self.query_one(RoomPanel)
 
+        if event.event == "agent_status":
+            log.debug("ws: 收到 Agent 状态变更 agent=%s status=%s", event.agent_name, event.status)
+            self._schedule_agent_refresh()
+            return
+
         preview = _make_preview(event.sender, event.content)
         self.call_later(room_panel.update_preview, event.room_id, preview)
         self._schedule_agent_refresh()

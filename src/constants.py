@@ -13,6 +13,7 @@ class OpenaiLLMApiRole(str, Enum):
 class MessageBusTopic(str, Enum):
     ROOM_AGENT_TURN = "room.agent_turn"  # 轮到某 Agent 发言；payload: agent_name, room_name
     ROOM_MSG_ADDED  = "room.message_added"  # 房间新增消息；payload: room_name, sender, content, time
+    AGENT_STATUS_CHANGED = "agent.status_changed"  # Agent 忙闲状态变更；payload: agent_name, status
 
 
 class RoomType(str, Enum):

@@ -35,11 +35,13 @@ class MessageInfo:
 @dataclass
 class WsEvent:
     event: str
-    room_id: str
-    room_name: str
-    sender: str
-    content: str
-    time: datetime
+    room_id: str | None = None
+    room_name: str | None = None
+    sender: str | None = None
+    content: str | None = None
+    time: datetime | None = None
+    agent_name: str | None = None
+    status: str | None = None
 
 
 class ApiClient:
@@ -108,15 +110,26 @@ class ApiClient:
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         try:
                             data = json.loads(msg.data)
-                            yield WsEvent(
-                                event=data.get("event", "message"),
-                                room_id=data["room_id"],
-                                room_name=data["room_name"],
-                                sender=data["sender"],
-                                content=data["content"],
-                                time=datetime.fromisoformat(data["time"]),
-                            )
-                        except (KeyError, ValueError):
+                            event_type = data.get("event", "message")
+                            if event_type == "message":
+                                yield WsEvent(
+                                    event=event_type,
+                                    room_id=data["room_id"],
+                                    room_name=data["room_name"],
+                                    sender=data["sender"],
+                                    content=data["content"],
+                                    time=datetime.fromisoformat(data["time"]),
+                                )
+                            elif event_type == "agent_status":
+                                yield WsEvent(
+                                    event=event_type,
+                                    agent_name=data["agent_name"],
+                                    status=data["status"],
+                                )
+                            else:
+                                log.warning("ws: 收到未知事件类型: %s", event_type)
+                        except (KeyError, ValueError) as e:
+                            log.warning("ws: 解析事件失败: %s, data=%s", e, msg.data)
                             continue
                     elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                         log.info("ws: 收到关闭/错误帧, type=%s", msg.type)

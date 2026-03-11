@@ -6,9 +6,9 @@ from util.llm_api_util import OpenaiLLMApiRole, LlmApiMessage, Tool
 from util.config_util import load_prompt
 from model.chat_model import AgentDialogContext, ChatMessage
 from model.chat_context import ChatContext
-from service import llm_service, func_tool_service, room_service
+from service import llm_service, func_tool_service, room_service, message_bus
 from service.room_service import ChatRoom
-from constants import TurnStatus, TurnCheckResult, RoomType, SpecialAgent
+from constants import TurnStatus, TurnCheckResult, RoomType, SpecialAgent, MessageBusTopic
 
 logger = logging.getLogger(__name__)
 
@@ -23,19 +23,32 @@ class Agent:
         self.name: str = name  # Agent 名称
         self.system_prompt: str = system_prompt  # 系统提示词（定义性格和规则）
         self.model: str = model  # 使用s的 LLM 模型名称
-        
+
         self._history: List[LlmApiMessage] = []  # Agent 的私有对话历史（包含 Tool Call 详情）
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()  # 待处理的房间任务队列
         self._is_running: bool = False  # 标志当前是否正在处理任务协程
+        self._last_published_status: Optional[str] = None  # 记录上一次发布的状态，用于幂等校验
 
     @property
     def is_active(self) -> bool:
         """如果 Agent 正在运行任务协程，或者其任务队列中仍有待处理项，则视为活跃。"""
         return self._is_running or not self.wait_task_queue.empty()
 
+    def _publish_status(self) -> None:
+        """检查并发布状态变更消息。"""
+        current_status = "active" if self.is_active else "idle"
+        if current_status != self._last_published_status:
+            self._last_published_status = current_status
+            message_bus.publish(
+                MessageBusTopic.AGENT_STATUS_CHANGED,
+                agent_name=self.name,
+                status=current_status
+            )
+
     async def consume_task(self, max_function_calls: int) -> None:
         """持续消费队列中的任务，直到队列为空。"""
         self._is_running = True
+        self._publish_status()  # 启动时声明 active
         try:
             while True:
                 try:
@@ -44,7 +57,7 @@ class Agent:
                 except asyncio.QueueEmpty:
                     # 队列空了，退出循环
                     break
-                    
+
                 try:
                     # 驱动 Agent 在指定房间执行一个轮次
                     await self.run_turn(event.room_name, max_function_calls)
@@ -54,7 +67,7 @@ class Agent:
                     self.wait_task_queue.task_done()
         finally:
             self._is_running = False
-
+            self._publish_status()  # 退出前声明 idle (如果队列为空)
     async def run_turn(self, room_name: str, max_function_calls: int = 5) -> None:
         """同步房间消息，驱动 Agent 完成一轮发言（含 tool call 循环）。"""
         room: ChatRoom = room_service.get_room(room_name)
