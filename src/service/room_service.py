@@ -162,7 +162,10 @@ def init(name: str, agent_names: List[str], initial_topic: str = "", room_type: 
     
     # 发布房间创建公告
     member_list_str = "、".join(agent_names)
-    room.add_message("system", f"{name} 房间已经创建，当前房间成员：{member_list_str}")
+    msg = f"{name} 房间已经创建，当前房间成员：{member_list_str}"
+    if initial_topic:
+        msg += f"\n本房间初始话题：{initial_topic}"
+    room.add_message("system", msg)
 
 
 def close(name: str) -> None:
