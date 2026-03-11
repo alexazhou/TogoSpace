@@ -11,6 +11,8 @@ from util.llm_api_util import LlmApiMessage, ToolCall
 from constants import OpenaiLLMApiRole, TurnStatus, TurnCheckResult
 from base import ServiceTestCase
 
+TEAM = "test_team"
+
 
 def _make_llm_response(content="reply", tool_calls=None):
     msg = LlmApiMessage(role=OpenaiLLMApiRole.ASSISTANT, content=content, tool_calls=tool_calls)
@@ -28,7 +30,7 @@ def _make_tool_call(name, arguments, call_id="call_1"):
 class TestAgentChat(ServiceTestCase):
     def setup_method(self):
         super().setup_method()
-        self.agent = Agent(name="test_agent", system_prompt="你是助手", model="qwen-plus")
+        self.agent = Agent(name="test_agent", team_name=TEAM, system_prompt="你是助手", model="qwen-plus")
         self.agent._history = [LlmApiMessage.text(OpenaiLLMApiRole.USER, "start")]
 
     async def test_chat_no_tool_calls_returns_message(self):
@@ -87,8 +89,9 @@ class TestAgentChat(ServiceTestCase):
         assert mock_infer.call_count >= 2
 
     async def test_sync_room_appends_new_messages(self):
-        room_service.init("r", ["bob"])
-        room = room_service.get_room("r")
+        room_service.init()
+        room_service.create_room(TEAM, "r", ["bob"])
+        room = room_service.get_room(f"r@{TEAM}")
         room.add_message("bob", "hello agent")
         self.agent.sync_room(room)
         assert any("bob" in (m.content or "") for m in self.agent._history)
@@ -100,42 +103,47 @@ class TestAgentServiceModule(ServiceTestCase):
             {"name": "alice", "prompt_file": None, "model": "qwen-plus"},
             {"name": "bob",   "prompt_file": None, "model": "qwen-plus"},
         ]
-        rooms_config = [{"name": "general", "agents": ["alice", "bob"]}]
-        room_service.init("general", ["alice", "bob"])
+        team_config = {
+            "name": TEAM,
+            "groups": [{"name": "general", "agents": ["alice", "bob"], "max_turns": 5}],
+            "max_function_calls": 5,
+        }
+        room_service.init()
+        room_service.create_room(TEAM, "general", ["alice", "bob"])
         with patch("service.agent_service.load_prompt", return_value="你是{participants}"):
-            agent_service.init(agents_config, rooms_config)
+            agent_service.init(agents_config)
+            agent_service.create_team_agents(TEAM, team_config)
 
     def test_init_creates_agents(self):
         self._setup_agents_and_rooms()
-        assert agent_service.get_agent("alice") is not None
-        assert agent_service.get_agent("bob") is not None
+        assert agent_service.get_agent("alice", TEAM) is not None
+        assert agent_service.get_agent("bob", TEAM) is not None
 
     def test_get_agents_returns_room_members(self):
         self._setup_agents_and_rooms()
-        assert {a.name for a in agent_service.get_agents("general")} == {"alice", "bob"}
+        assert {a.name for a in agent_service.get_agents(f"general@{TEAM}")} == {"alice", "bob"}
 
     def test_get_all_rooms_for_agent(self):
         self._setup_agents_and_rooms()
-        assert "general" in agent_service.get_all_rooms("alice")
+        assert f"general@{TEAM}" in agent_service.get_all_rooms("alice", TEAM)
 
     def test_close_clears_agents(self):
         self._setup_agents_and_rooms()
         agent_service.close()
         with pytest.raises(KeyError):
-            agent_service.get_agent("alice")
+            agent_service.get_agent("alice", TEAM)
 
     async def test_run_turn_sends_message_to_room(self):
         self._setup_agents_and_rooms()
-        room = room_service.get_room("general")
-        # 初始时已有 1 条公告，手动加一条
+        room_key = f"general@{TEAM}"
+        room = room_service.get_room(room_key)
         room.add_message("system", "开始对话")
-        alice = agent_service.get_agent("alice")
+        alice = agent_service.get_agent("alice", TEAM)
 
         tool_call = _make_tool_call("send_chat_msg", {"chat_windows_name": "general", "msg": "hi"})
         func_tool_service.init()
         with patch("service.agent_service.llm_service.infer",
                    AsyncMock(side_effect=[_make_llm_response(content=None, tool_calls=[tool_call])])):
-            await alice.run_turn("general", max_function_calls=5)
+            await alice.run_turn(room_key, max_function_calls=5)
 
         assert any(m.content == "hi" for m in room.messages)
-

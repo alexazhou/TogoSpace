@@ -11,6 +11,8 @@ from util.llm_api_util import LlmApiMessage, ToolCall
 from constants import OpenaiLLMApiRole
 from base import ServiceTestCase
 
+TEAM = "test_team"
+
 
 def _make_infer_response(content=None, tool_calls=None):
     msg = LlmApiMessage(role=OpenaiLLMApiRole.ASSISTANT, content=content, tool_calls=tool_calls)
@@ -33,24 +35,30 @@ AGENTS_CONFIG = [
     {"name": "bob",   "prompt_file": None, "model": "qwen-plus"},
 ]
 
-ROOMS_CONFIG = [
-    {"name": "general", "agents": ["alice", "bob"], "max_turns": 2},
-]
+TEAM_CONFIG = {
+    "name": TEAM,
+    "groups": [
+        {"name": "general", "agents": ["alice", "bob"], "max_turns": 2},
+    ],
+    "max_function_calls": 5,
+}
 
 
 class TestIntegrationMultiAgentChat(ServiceTestCase):
     def setup_method(self):
         super().setup_method()
-        for rc in ROOMS_CONFIG:
-            room_service.init(rc["name"], rc["agents"])
+        room_service.init()
+        room_service.create_room(TEAM, "general", ["alice", "bob"])
         func_tool_service.init()
         with patch("service.agent_service.load_prompt", return_value="你是{participants}"):
-            agent_service.init(AGENTS_CONFIG, ROOMS_CONFIG)
-        scheduler.init(ROOMS_CONFIG)
+            agent_service.init(AGENTS_CONFIG)
+            agent_service.create_team_agents(TEAM, TEAM_CONFIG)
+        scheduler.init([TEAM_CONFIG])
 
     async def test_two_agents_exchange_messages(self):
         """alice 和 bob 各发一轮消息，general 房间应有消息。"""
-        room = room_service.get_room("general")
+        room_key = f"general@{TEAM}"
+        room = room_service.get_room(room_key)
 
         alice_reply = _send_msg_tool_call("general", "你好，bob！")
         bob_reply   = _send_msg_tool_call("general", "你好，alice！")
@@ -67,7 +75,6 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
         with patch("service.agent_service.llm_service.infer", fake_infer):
             room.setup_turns(["alice", "bob"], max_turns=1)
-            # 启动后等待一段时间，然后停止以退出循环
             run_task = asyncio.create_task(scheduler.run())
             await asyncio.sleep(1)
             scheduler.stop()
@@ -78,17 +85,18 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
     async def test_tool_call_result_appended_to_history(self):
         """验证 tool_call 结果被正确追加到 agent history。"""
-        room = room_service.get_room("general")
+        room_key = f"general@{TEAM}"
+        room = room_service.get_room(room_key)
         room.add_message("system", "开始聊天")
 
-        alice = agent_service.get_agent("alice")
+        alice = agent_service.get_agent("alice", TEAM)
         tc = _send_msg_tool_call("general", "hello")
         responses = [
             _make_infer_response(tool_calls=[tc]),
             _make_infer_response(content="done"),
         ]
         with patch("service.agent_service.llm_service.infer", AsyncMock(side_effect=responses)):
-            await alice.run_turn("general", max_function_calls=5)
+            await alice.run_turn(room_key, max_function_calls=5)
 
         tool_results = [m for m in alice._history if m.role == OpenaiLLMApiRole.TOOL]
         assert len(tool_results) >= 1
@@ -96,30 +104,31 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
     async def test_turn_checker_forces_send_chat_msg(self):
         """直接输出文字时 turn_checker 应注入 hint，迫使 agent 改用工具。"""
-        room = room_service.get_room("general")
+        room_key = f"general@{TEAM}"
+        room = room_service.get_room(room_key)
         room.add_message("system", "开始聊天")
 
-        alice = agent_service.get_agent("alice")
+        alice = agent_service.get_agent("alice", TEAM)
         tc = _send_msg_tool_call("general", "最终消息")
         responses = [
             _make_infer_response(content="我直接回复"),
             _make_infer_response(tool_calls=[tc]),
         ]
         with patch("service.agent_service.llm_service.infer", AsyncMock(side_effect=responses)):
-            await alice.run_turn("general", max_function_calls=5)
+            await alice.run_turn(room_key, max_function_calls=5)
 
         assert any(m.content == "最终消息" for m in room.messages)
 
     async def test_scheduler_terminates_after_max_turns(self):
-        """max_turns 用尽后，虽然调度器不自动退出，但我们可以通过观察 Room 状态并停止它。"""
-        room = room_service.get_room("general")
+        """max_turns 用尽后，通过观察 Room 状态并停止调度器。"""
+        room_key = f"general@{TEAM}"
+        room = room_service.get_room(room_key)
 
         async def fake_infer(model, ctx):
             return _make_infer_response(tool_calls=[_send_msg_tool_call("general", "a message")])
 
         with patch("service.agent_service.llm_service.infer", fake_infer):
             run_task = asyncio.create_task(scheduler.run())
-            # 等待房间变 IDLE
             for _ in range(20):
                 if room.state.value == "idle":
                     break

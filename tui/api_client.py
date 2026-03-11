@@ -13,6 +13,7 @@ log = logging.getLogger("tui.api")
 class AgentInfo:
     name: str
     model: str
+    team_name: str
     status: str = "idle"  # "active" | "idle"
 
 
@@ -20,6 +21,7 @@ class AgentInfo:
 class RoomInfo:
     room_id: str
     room_name: str
+    team_name: str
     room_type: str
     state: str
     members: list[str]
@@ -37,6 +39,7 @@ class WsEvent:
     event: str
     room_id: str | None = None
     room_name: str | None = None
+    team_name: str | None = None
     sender: str | None = None
     content: str | None = None
     time: datetime | None = None
@@ -59,7 +62,7 @@ class ApiClient:
         async with session.get(f"{self._base_url}/agents") as resp:
             resp.raise_for_status()
             data = await resp.json()
-        return [AgentInfo(name=a["name"], model=a["model"], status=a.get("status", "idle")) for a in data["agents"]]
+        return [AgentInfo(name=a["name"], model=a["model"], team_name=a.get("team_name", ""), status=a.get("status", "idle")) for a in data["agents"]]
 
     async def get_rooms(self) -> list[RoomInfo]:
         session = self._get_session()
@@ -70,6 +73,7 @@ class ApiClient:
             RoomInfo(
                 room_id=r["room_id"],
                 room_name=r["room_name"],
+                team_name=r.get("team_name", ""),
                 room_type=r.get("room_type", "group"),
                 state=r["state"],
                 members=r["members"],
@@ -116,6 +120,7 @@ class ApiClient:
                                     event=event_type,
                                     room_id=data["room_id"],
                                     room_name=data["room_name"],
+                                    team_name=data.get("team_name", ""),
                                     sender=data["sender"],
                                     content=data["content"],
                                     time=datetime.fromisoformat(data["time"]),
@@ -124,6 +129,7 @@ class ApiClient:
                                 yield WsEvent(
                                     event=event_type,
                                     agent_name=data["agent_name"],
+                                    team_name=data.get("team_name", ""),
                                     status=data["status"],
                                 )
                             else:

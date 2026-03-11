@@ -1,0 +1,5 @@
+{
+  "name": "charlie",
+  "prompt_file": "resource/prompts/charlie_system.md",
+  "model": "glm-4.7"
+}

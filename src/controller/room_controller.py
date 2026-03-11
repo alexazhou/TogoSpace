@@ -12,8 +12,9 @@ class RoomListHandler(BaseHandler):
         rooms: List[ChatRoom] = room_service.get_all_rooms()
         data = [
             RoomInfo(
-                room_id=r.name,
+                room_id=r.key,
                 room_name=r.name,
+                team_name=r.team_name,
                 room_type=r.room_type.value,
                 state=r.state.value,
                 members=r.agents,
@@ -37,7 +38,7 @@ class RoomMessagesHandler(BaseHandler):
             for m in room.messages
         ]
         resp = RoomMessagesResponse(
-            room_id=room.name, room_name=room.name, messages=messages
+            room_id=room.key, room_name=room.name, team_name=room.team_name, messages=messages
         )
         self.return_json(resp)
 

@@ -1,0 +1,5 @@
+{
+  "name": "bob",
+  "prompt_file": "resource/prompts/bob_system.md",
+  "model": "glm-4.7"
+}

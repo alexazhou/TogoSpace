@@ -11,46 +11,52 @@ from constants import MessageBusTopic, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
-_rooms_config: list = []
-_max_function_calls: int = 5
+_teams_config: list = []
 _running: Dict[str, asyncio.Task] = {}
 _stop_event: asyncio.Event = asyncio.Event()
 
 
-def init(rooms_config: list, max_function_calls: int = 5) -> None:
+def init(teams_config: list) -> None:
     """初始化调度器，须在 run() 前调用一次。"""
-    global _rooms_config, _max_function_calls
-    _rooms_config = rooms_config
-    _max_function_calls = max_function_calls
+    global _teams_config
+    _teams_config = teams_config
     _stop_event.clear()
     message_bus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
 
 
 def stop() -> None:
     """重置调度器状态。"""
-    global _rooms_config, _max_function_calls, _running
+    global _teams_config, _running
     _stop_event.set()
-    _rooms_config = []
-    _max_function_calls = 5
+    _teams_config = []
     _running = {}
 
 
 def _on_agent_turn(msg: Message) -> None:
     """订阅 ROOM_AGENT_TURN：将任务入队，标记 Agent 为活跃，若未运行则创建 Task。"""
     agent_name: str = msg.payload["agent_name"]
-    room_name: str = msg.payload["room_name"]
+    room_key: str = msg.payload["room_key"]
+    team_name: str = msg.payload["team_name"]
 
     if agent_name == SpecialAgent.OPERATOR:
-        logger.info(f"轮到人类操作者，系统进入等待状态: room={room_name}")
+        logger.info(f"轮到人类操作者，系统进入等待状态: room={room_key}")
         return
 
-    agent = agent_service.get_agent(agent_name)
-    agent.wait_task_queue.put_nowait(RoomMessageEvent(room_name))
-    
-    logger.info(f"Agent 激活: agent={agent_name}, room={room_name}")
-    existing = _running.get(agent_name)
+    agent = agent_service.get_agent(agent_name, team_name)
+    agent.wait_task_queue.put_nowait(RoomMessageEvent(room_key))
+
+    # 使用 agent@team 作为 running key
+    agent_key = agent.key
+    logger.info(f"Agent 激活: agent={agent_key}, room={room_key}")
+    existing = _running.get(agent_key)
     if existing is None or existing.done():
-        _running[agent_name] = asyncio.create_task(agent.consume_task(_max_function_calls))
+        # 从 team config 中获取 max_function_calls
+        max_fc = 5
+        for team in _teams_config:
+            if team["name"] == team_name:
+                max_fc = team.get("max_function_calls", 5)
+                break
+        _running[agent_key] = asyncio.create_task(agent.consume_task(max_fc))
 
 
 async def run() -> None:
@@ -58,21 +64,24 @@ async def run() -> None:
     global _running
     _running = {}
 
-    for r in _rooms_config:
-        room = chat_room.get_room(r["name"])
-        logger.info(f"初始化轮次配置: room={r['name']}, max_turns={r['max_turns']}")
-        room.setup_turns(chat_room.get_member_names(r["name"]), r["max_turns"])
+    for team in _teams_config:
+        team_name = team["name"]
+        for group in team["groups"]:
+            room_key = f"{group['name']}@{team_name}"
+            room = chat_room.get_room(room_key)
+            logger.info(f"初始化轮次配置: room={room_key}, max_turns={group['max_turns']}")
+            room.setup_turns(chat_room.get_member_names(room_key), group["max_turns"])
 
     # 持续运行，直到 _stop_event 被设置
     stop_waiter = asyncio.create_task(_stop_event.wait())
-    
+
     while not _stop_event.is_set():
         # 仅等待未完成的任务
         pending = {t for t in _running.values() if not t.done()}
         pending.add(stop_waiter)
-            
+
         done, _ = await asyncio.wait(
-            pending, 
+            pending,
             return_when=asyncio.FIRST_COMPLETED
         )
         for task in done:
@@ -82,7 +91,7 @@ async def run() -> None:
             names_to_del = [n for n, t in _running.items() if t is task]
             for n in names_to_del:
                 del _running[n]
-        
+
         if stop_waiter.done():
             break
 
@@ -90,5 +99,8 @@ async def run() -> None:
         stop_waiter.cancel()
 
     logger.info("Scheduler 已停止运行")
-    for r in _rooms_config:
-        logger.info(f"\n{chat_room.get_room(r['name']).format_log()}")
+    for team in _teams_config:
+        team_name = team["name"]
+        for group in team["groups"]:
+            room_key = f"{group['name']}@{team_name}"
+            logger.info(f"\n{chat_room.get_room(room_key).format_log()}")

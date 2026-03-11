@@ -8,7 +8,7 @@ from datetime import datetime
 
 import tornado.httpserver
 import util.llm_api_util as llm_api_util
-from util.config_util import load_config, load_llm_service_config
+from util.config_util import load_agents, load_teams, load_llm_service_config
 from service import message_bus, scheduler_service as scheduler, agent_service, room_service as chat_room, llm_service, func_tool_service
 from controller.ws_controller import init as init_ws
 from route import make_app
@@ -65,34 +65,42 @@ def _remove_pid() -> None:
         pass
 
 
-async def main(config_path: str = None, llm_config_path: str = None, port: int = 8080):
+async def main(resource_dir: str = None, llm_config_path: str = None, port: int = 8080):
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     _setup_logger()
     logger = logging.getLogger(__name__)
 
-    config = load_config(config_path)
-    rooms_config = config["chat_rooms"]
+    agents_config = load_agents(resource_dir)
+    teams_config = load_teams(resource_dir)
     llm_cfg = load_llm_service_config(llm_config_path)
 
     message_bus.init()
     llm_api_util.init()
     llm_service.init(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     func_tool_service.init()
-    agent_service.init(config["agents"], rooms_config)
 
-    for r in rooms_config:
-        room_type = RoomType(r.get("type", "group"))
-        chat_room.init(
-            name=r["name"],
-            agent_names=r["agents"],
-            initial_topic=r["initial_topic"],
-            room_type=room_type
-        )
+    # 加载 Agent 定义（不创建实例）
+    agent_service.init(agents_config)
 
-    scheduler.init(
-        rooms_config=rooms_config,
-        max_function_calls=config.get("max_function_calls", 5),
-    )
+    # 初始化房间服务
+    chat_room.init()
+
+    # 遍历每个 Team，创建 Agent 实例和聊天室
+    for team in teams_config:
+        team_name = team["name"]
+        agent_service.create_team_agents(team_name, team)
+
+        for group in team["groups"]:
+            room_type = RoomType(group.get("type", "group"))
+            chat_room.create_room(
+                team_name=team_name,
+                name=group["name"],
+                agent_names=group["agents"],
+                initial_topic=group["initial_topic"],
+                room_type=room_type,
+            )
+
+    scheduler.init(teams_config=teams_config)
 
     init_ws()
     web_server = tornado.httpserver.HTTPServer(make_app())
@@ -119,8 +127,8 @@ if __name__ == "__main__":
     _write_pid()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default=None, help="agents 配置文件路径")
+    parser.add_argument("--resource-dir", default=None, dest="resource_dir", help="resource 目录路径")
     parser.add_argument("--llm-config", default=None, dest="llm_config", help="LLM 服务配置文件路径")
     parser.add_argument("--port", type=int, default=8080, help="HTTP 监听端口")
     args = parser.parse_args()
-    asyncio.run(main(config_path=args.config, llm_config_path=args.llm_config, port=args.port))
+    asyncio.run(main(resource_dir=args.resource_dir, llm_config_path=args.llm_config, port=args.port))

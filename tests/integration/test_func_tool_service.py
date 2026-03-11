@@ -4,6 +4,8 @@ import service.room_service as room_service
 from model.chat_context import ChatContext
 from base import ServiceTestCase
 
+TEAM = "test_team"
+
 
 class TestFuncToolServiceInit(ServiceTestCase):
     def test_init_loads_tools(self):
@@ -19,6 +21,7 @@ class TestFuncToolServiceInit(ServiceTestCase):
 class TestRunToolCall(ServiceTestCase):
     def setup_method(self):
         super().setup_method()
+        room_service.init()
         func_tool_service.init()
 
     def test_run_tool_call_basic(self):
@@ -34,9 +37,9 @@ class TestRunToolCall(ServiceTestCase):
         assert "失败" in result or "not found" in result.lower()
 
     def test_run_tool_call_with_context(self):
-        room_service.init("ctx_room", ["alice"])
-        room = room_service.get_room("ctx_room")
-        ctx = ChatContext(agent_name="alice", chat_room=room, get_room=room_service.get_room)
+        room_service.create_room(TEAM, "ctx_room", ["alice"])
+        room = room_service.get_room(f"ctx_room@{TEAM}")
+        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room, get_room=room_service.get_room)
         result = func_tool_service.run_tool_call(
             "send_chat_msg",
             '{"chat_windows_name": "ctx_room", "msg": "test"}',

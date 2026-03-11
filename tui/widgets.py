@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from textual.app import ComposeResult
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.widget import Widget
@@ -176,22 +178,42 @@ class RoomPanel(Vertical):
         await room_list.clear()
         await agent_list.clear()
 
+        # 按 team 分组展示房间
+        teams: dict[str, list[RoomInfo]] = defaultdict(list)
         for room in rooms:
-            preview = last_previews.get(room.room_id, "暂无消息")
-            card = Vertical(
-                Horizontal(
-                    Label("", classes="room-card-name"),
-                    Label(f"[dim]{len(room.members)}人[/dim]", classes="room-card-members"),
-                    classes="room-card-header",
-                ),
-                PreviewLabel(preview, classes="room-card-preview"),
-                classes="room-card",
-            )
-            item = ListItem(card, id=f"room-{room.room_id}")
-            await room_list.append(item)
-            self.update_unread_count(room.room_id, 0)
+            teams[room.team_name].append(room)
 
+        for team_name, team_rooms in teams.items():
+            # 添加 Team 分组标题
+            team_header = ListItem(
+                Label(f"[bold dim]── {team_name} ──[/]", classes="team-header"),
+            )
+            team_header.disabled = True
+            await room_list.append(team_header)
+
+            for room in team_rooms:
+                preview = last_previews.get(room.room_id, "暂无消息")
+                card = Vertical(
+                    Horizontal(
+                        Label("", classes="room-card-name"),
+                        Label(f"[dim]{len(room.members)}人[/dim]", classes="room-card-members"),
+                        classes="room-card-header",
+                    ),
+                    PreviewLabel(preview, classes="room-card-preview"),
+                    classes="room-card",
+                )
+                # 使用 CSS-safe ID: 将 @ 替换为 --
+                safe_id = room.room_id.replace("@", "--")
+                item = ListItem(card, id=f"room-{safe_id}")
+                await room_list.append(item)
+                self.update_unread_count(room.room_id, 0)
+
+        # Agent 去重展示（同名 agent 跨 team 只显示一次）
+        seen_agents: set[str] = set()
         for agent in agents:
+            if agent.name in seen_agents:
+                continue
+            seen_agents.add(agent.name)
             item = ListItem(
                 Horizontal(
                     Label(f"{agent.name}  [dim]{agent.model}[/dim]", classes="agent-name"),
@@ -202,9 +224,13 @@ class RoomPanel(Vertical):
             )
             await agent_list.append(item)
 
+    def _safe_id(self, room_id: str) -> str:
+        return room_id.replace("@", "--")
+
     def update_unread_count(self, room_id: str, count: int) -> None:
         try:
-            item = self.query_one(f"#room-{room_id}", ListItem)
+            safe_id = self._safe_id(room_id)
+            item = self.query_one(f"#room-{safe_id}", ListItem)
             room = self._room_map.get(room_id)
             name = room.room_name if room else room_id
             if count > 0:
@@ -217,7 +243,8 @@ class RoomPanel(Vertical):
 
     def update_preview(self, room_id: str, preview: str) -> None:
         try:
-            item = self.query_one(f"#room-{room_id}", ListItem)
+            safe_id = self._safe_id(room_id)
+            item = self.query_one(f"#room-{safe_id}", ListItem)
             item.query_one(".room-card-preview", PreviewLabel).set_preview(preview)
         except Exception:
             pass
@@ -236,7 +263,8 @@ class RoomPanel(Vertical):
         for item in self.query("#room-list ListItem"):
             item.remove_class("selected-room")
         try:
-            self.query_one(f"#room-{room_id}", ListItem).add_class("selected-room")
+            safe_id = self._safe_id(room_id)
+            self.query_one(f"#room-{safe_id}", ListItem).add_class("selected-room")
         except Exception:
             pass
 

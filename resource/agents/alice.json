@@ -1,0 +1,5 @@
+{
+  "name": "alice",
+  "prompt_file": "resource/prompts/alice_system.md",
+  "model": "glm-4.7"
+}
