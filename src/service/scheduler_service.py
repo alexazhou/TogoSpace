@@ -17,11 +17,6 @@ _running: Dict[str, asyncio.Task] = {}
 _stop_event: asyncio.Event = asyncio.Event()
 
 
-def get_running_task(agent_name: str) -> Optional[asyncio.Task]:
-    """返回指定 Agent 当前正在运行的任务对象。"""
-    return _running.get(agent_name)
-
-
 def init(rooms_config: list, max_function_calls: int = 5) -> None:
     """初始化调度器，须在 run() 前调用一次。"""
     global _rooms_config, _max_function_calls

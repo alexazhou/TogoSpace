@@ -22,37 +22,38 @@ class Agent:
     def __init__(self, name: str, system_prompt: str, model: str):
         self.name: str = name  # Agent 名称
         self.system_prompt: str = system_prompt  # 系统提示词（定义性格和规则）
-        self.model: str = model  # 使用的 LLM 模型名称
+        self.model: str = model  # 使用s的 LLM 模型名称
         
         self._history: List[LlmApiMessage] = []  # Agent 的私有对话历史（包含 Tool Call 详情）
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()  # 待处理的房间任务队列
+        self._is_running: bool = False  # 标志当前是否正在处理任务协程
 
     @property
     def is_active(self) -> bool:
-        """如果 Agent 正在运行任务，或者其任务队列中仍有待处理项，则视为活跃。"""
-        from service import scheduler_service
-        task = scheduler_service.get_running_task(self.name)
-        if task and not task.done():
-            return True
-        return not self.wait_task_queue.empty()
+        """如果 Agent 正在运行任务协程，或者其任务队列中仍有待处理项，则视为活跃。"""
+        return self._is_running or not self.wait_task_queue.empty()
 
     async def consume_task(self, max_function_calls: int) -> None:
         """持续消费队列中的任务，直到队列为空。"""
-        while True:
-            try:
-                # 尝试以非阻塞方式获取任务（RoomMessageEvent）
-                event = self.wait_task_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                # 队列空了，退出循环
-                break
-                
-            try:
-                # 驱动 Agent 在指定房间执行一个轮次
-                await self.run_turn(event.room_name, max_function_calls)
-            except Exception as e:
-                logger.error(f"Agent 处理任务失败: agent={self.name}, room={event.room_name}, error={e}")
-            finally:
-                self.wait_task_queue.task_done()
+        self._is_running = True
+        try:
+            while True:
+                try:
+                    # 尝试以非阻塞方式获取任务（RoomMessageEvent）
+                    event = self.wait_task_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    # 队列空了，退出循环
+                    break
+                    
+                try:
+                    # 驱动 Agent 在指定房间执行一个轮次
+                    await self.run_turn(event.room_name, max_function_calls)
+                except Exception as e:
+                    logger.error(f"Agent 处理任务失败: agent={self.name}, room={event.room_name}, error={e}")
+                finally:
+                    self.wait_task_queue.task_done()
+        finally:
+            self._is_running = False
 
     async def run_turn(self, room_name: str, max_function_calls: int = 5) -> None:
         """同步房间消息，驱动 Agent 完成一轮发言（含 tool call 循环）。"""
