@@ -16,7 +16,7 @@ class RoomListHandler(BaseHandler):
                 room_name=r.name,
                 room_type=r.room_type.value,
                 state=r.state.value,
-                members=r.member_names,
+                members=r.agents,
             ).model_dump(mode="json")
             for r in rooms
         ]
