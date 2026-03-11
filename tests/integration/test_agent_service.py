@@ -87,7 +87,7 @@ class TestAgentChat(ServiceTestCase):
         assert mock_infer.call_count >= 2
 
     async def test_sync_room_appends_new_messages(self):
-        room_service.init("r")
+        room_service.init("r", ["bob"])
         room = room_service.get_room("r")
         room.add_message("bob", "hello agent")
         self.agent.sync_room(room)
@@ -101,7 +101,7 @@ class TestAgentServiceModule(ServiceTestCase):
             {"name": "bob",   "prompt_file": None, "model": "qwen-plus"},
         ]
         rooms_config = [{"name": "general", "agents": ["alice", "bob"]}]
-        room_service.init("general")
+        room_service.init("general", ["alice", "bob"])
         with patch("service.agent_service.load_prompt", return_value="你是{participants}"):
             agent_service.init(agents_config, rooms_config)
 
@@ -127,6 +127,7 @@ class TestAgentServiceModule(ServiceTestCase):
     async def test_run_turn_sends_message_to_room(self):
         self._setup_agents_and_rooms()
         room = room_service.get_room("general")
+        # 初始时已有 1 条公告，手动加一条
         room.add_message("system", "开始对话")
         alice = agent_service.get_agent("alice")
 

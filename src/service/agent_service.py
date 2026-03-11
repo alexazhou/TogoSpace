@@ -27,6 +27,24 @@ class Agent:
         self._history: List[LlmApiMessage] = []  # Agent 的私有对话历史（包含 Tool Call 详情）
         self.wait_event_queue: asyncio.Queue = asyncio.Queue()  # 待处理的房间消息事件队列
 
+    async def run_events(self, max_function_calls: int) -> None:
+        """持续消费队列中的事件，直到队列为空。"""
+        while True:
+            try:
+                # 尝试以非阻塞方式获取事件
+                event = self.wait_event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                # 队列空了，退出循环
+                break
+                
+            try:
+                # 调用模块内的 run_turn 驱动 Agent
+                await run_turn(self, event.room_name, max_function_calls)
+            except Exception as e:
+                logger.error(f"Agent 处理事件失败: agent={self.name}, room={event.room_name}, error={e}")
+            finally:
+                self.wait_event_queue.task_done()
+
     def sync_room(self, room: ChatRoom) -> None:
         """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
         new_msgs: List[ChatMessage] = room.get_unread_messages(self.name)
@@ -164,6 +182,11 @@ def get_agent(name: str) -> Agent:
 def get_all_agents() -> List[Agent]:
     """返回所有唯一 Agent 实例列表。"""
     return list(_agents.values())
+
+
+def get_agents(room_name: str) -> List[Agent]:
+    """返回指定房间的 Agent 实例列表（按配置顺序，排除非 AI 角色）。"""
+    return [_agents[n] for n in room_service.get_member_names(room_name) if n in _agents]
 
 
 def get_all_rooms(agent_name: str) -> List[str]:
