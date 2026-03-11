@@ -89,7 +89,7 @@ class TestSchedulerRun(ServiceTestCase):
         real_agent = Agent("test", "prompt", "model")
         real_agent.wait_task_queue.put_nowait(RoomMessageEvent("r1"))
         
-        with patch("service.agent_service.run_turn", side_effect=RuntimeError("boom")):
+        with patch.object(real_agent, "run_turn", side_effect=RuntimeError("boom")):
             # 应该能正常结束而不抛出异常
             await real_agent.consume_task(max_function_calls=5)
         
