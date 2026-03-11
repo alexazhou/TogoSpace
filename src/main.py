@@ -94,14 +94,6 @@ async def main(config_path: str = None, llm_config_path: str = None, port: int =
         max_function_calls=config.get("max_function_calls", 5),
     )
 
-    # 为每个房间添加初始话题（已经在 room_service.init 的公告中处理，此处可保留或移除）
-    # 注意：room_service.init 已经发送了创建公告，如果 initial_topic 很重要且与公告不同，可以保留
-    for r in rooms_config:
-        initial_topic = chat_room.get_room(r["name"]).initial_topic
-        if initial_topic:
-            # chat_room.get_room(r["name"]).add_message("system", initial_topic)
-            pass
-
     init_ws()
     web_server = tornado.httpserver.HTTPServer(make_app())
     web_server.listen(port, "0.0.0.0")
