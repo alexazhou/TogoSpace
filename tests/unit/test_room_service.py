@@ -87,8 +87,8 @@ class TestRoomServiceFunctions:
         room_service.create_room(TEAM, "r2", ["bob"])
         room_service.create_room(TEAM, "r3", ["alice", "bob"])
 
-        assert room_service.get_rooms_for_agent("alice", TEAM) == [f"r1@{TEAM}", f"r3@{TEAM}"]
-        assert room_service.get_rooms_for_agent("bob", TEAM) == [f"r2@{TEAM}", f"r3@{TEAM}"]
+        assert room_service.get_rooms_for_agent(TEAM, "alice") == [f"r1@{TEAM}", f"r3@{TEAM}"]
+        assert room_service.get_rooms_for_agent(TEAM, "bob") == [f"r2@{TEAM}", f"r3@{TEAM}"]
 
 
 class TestRoomTurnScheduling:

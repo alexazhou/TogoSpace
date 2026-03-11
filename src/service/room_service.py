@@ -11,7 +11,7 @@ from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 logger = logging.getLogger(__name__)
 
 
-def _make_room_key(room_name: str, team_name: str) -> str:
+def _make_room_key(team_name: str, room_name: str) -> str:
     return f"{room_name}@{team_name}"
 
 
@@ -34,7 +34,7 @@ class ChatRoom:
 
     @property
     def key(self) -> str:
-        return _make_room_key(self.name, self.team_name)
+        return _make_room_key(self.team_name, self.name)
 
     @property
     def state(self) -> RoomState:
@@ -197,10 +197,10 @@ def close_all() -> None:
 
 def get_member_names(team_name: str, room_name: str) -> List[str]:
     """返回聊天室的参与者名列表。"""
-    return _rooms[_make_room_key(room_name, team_name)].agents
+    return _rooms[_make_room_key(team_name, room_name)].agents
 
 
-def get_rooms_for_agent(agent_name: str, team_name: str = None) -> List[str]:
+def get_rooms_for_agent(team_name: str, agent_name: str) -> List[str]:
     """返回指定参与者所在的房间 key 列表。可选按 team 过滤。"""
     results = []
     for key, room in _rooms.items():

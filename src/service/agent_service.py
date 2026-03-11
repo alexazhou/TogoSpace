@@ -19,7 +19,7 @@ _agent_defs: Dict[str, dict] = {}
 _agents: Dict[str, "Agent"] = {}
 
 
-def _make_agent_key(agent_name: str, team_name: str) -> str:
+def _make_agent_key(team_name: str, agent_name: str) -> str:
     return f"{agent_name}@{team_name}"
 
 
@@ -39,7 +39,7 @@ class Agent:
 
     @property
     def key(self) -> str:
-        return _make_agent_key(self.name, self.team_name)
+        return _make_agent_key(self.team_name, self.name)
 
     @property
     def is_active(self) -> bool:
@@ -109,7 +109,7 @@ class Agent:
                 import json
                 try:
                     args_dict = json.loads(last_called["args"])
-                    target_room = args_dict.get("chat_windows_name")
+                    target_room = args_dict.get("room_name")
                     if target_room == room.name or target_room == room.key:
                         return TurnCheckResult(TurnStatus.SUCCESS)
                     else:
@@ -135,6 +135,8 @@ class Agent:
         new_msgs: List[ChatMessage] = room.get_unread_messages(self.name)
         logger.info(f"同步房间消息: agent={self.key}, room={room.name}, count={len(new_msgs)}")
         for msg in new_msgs:
+            if msg.sender_name == self.name:
+                continue
             if msg.sender_name == "system":
                 self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}"))
             else:
@@ -238,20 +240,20 @@ def create_team_agents(team_name: str, team_config: dict) -> None:
         participants = sorted(list(agent_peers.get(name, set())))
         prompt = prompt.replace("{participants}", "、".join(participants))
 
-        key = _make_agent_key(name, team_name)
+        key = _make_agent_key(team_name, name)
         _agents[key] = Agent(name=name, team_name=team_name, system_prompt=prompt, model=cfg["model"])
         logger.info(f"创建 Agent 实例: key={key}, model={cfg['model']}")
 
 
-def get_agent(agent_name: str, team_name: str) -> Agent:
+def get_agent(team_name: str, agent_name: str) -> Agent:
     """返回指定 agent@team 的 Agent 实例。"""
-    key = _make_agent_key(agent_name, team_name)
+    key = _make_agent_key(team_name, agent_name)
     return _agents[key]
 
 
-def is_agent_active(agent_name: str, team_name: str) -> bool:
+def is_agent_active(team_name: str, agent_name: str) -> bool:
     """判断指定 agent@team 是否活跃。"""
-    key = _make_agent_key(agent_name, team_name)
+    key = _make_agent_key(team_name, agent_name)
     agent = _agents.get(key)
     return agent.is_active if agent else False
 
@@ -264,12 +266,12 @@ def get_all_agents() -> List[Agent]:
 def get_agents(team_name: str, room_name: str) -> List[Agent]:
     """返回指定 team 和 room 中的 Agent 实例列表。"""
     members = room_service.get_member_names(team_name, room_name)
-    return [_agents[_make_agent_key(n, team_name)] for n in members if _make_agent_key(n, team_name) in _agents]
+    return [_agents[_make_agent_key(team_name, n)] for n in members if _make_agent_key(team_name, n) in _agents]
 
 
-def get_all_rooms(agent_name: str, team_name: str) -> List[str]:
+def get_all_rooms(team_name: str, agent_name: str) -> List[str]:
     """返回指定 Agent 在指定 Team 中参与的所有房间 key 列表。"""
-    return room_service.get_rooms_for_agent(agent_name, team_name)
+    return room_service.get_rooms_for_agent(team_name, agent_name)
 
 
 def close() -> None:

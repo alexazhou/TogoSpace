@@ -26,7 +26,7 @@ def _make_infer_response(content=None, tool_calls=None):
 def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
     return ToolCall(
         id=call_id,
-        function={"name": "send_chat_msg", "arguments": json.dumps({"chat_windows_name": room_name, "msg": msg})},
+        function={"name": "send_chat_msg", "arguments": json.dumps({"room_name": room_name, "msg": msg})},
     )
 
 
@@ -89,7 +89,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = room_service.get_room(room_key)
         room.add_message("system", "开始聊天")
 
-        alice = agent_service.get_agent("alice", TEAM)
+        alice = agent_service.get_agent(TEAM, "alice")
         tc = _send_msg_tool_call("general", "hello")
         responses = [
             _make_infer_response(tool_calls=[tc]),
@@ -108,7 +108,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = room_service.get_room(room_key)
         room.add_message("system", "开始聊天")
 
-        alice = agent_service.get_agent("alice", TEAM)
+        alice = agent_service.get_agent(TEAM, "alice")
         tc = _send_msg_tool_call("general", "最终消息")
         responses = [
             _make_infer_response(content="我直接回复"),
