@@ -71,9 +71,11 @@ async def main(config_path: str = None, llm_config_path: str = None, port: int =
 
     config = load_config(config_path)
 
+    from constants import RoomType
     rooms_config = config["chat_rooms"]
     for r in rooms_config:
-        chat_room.init(name=r["name"], initial_topic=r["initial_topic"])
+        room_type = RoomType(r.get("type", "group"))
+        chat_room.init(name=r["name"], initial_topic=r["initial_topic"], room_type=room_type)
 
     message_bus.init()
     llm_cfg = load_llm_service_config(llm_config_path)

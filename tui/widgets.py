@@ -81,6 +81,8 @@ class PreviewLabel(Static):
 def _get_side(sender: str, agent_order: list[str]) -> str:
     if sender == "system":
         return "center"
+    if sender == "Operator":
+        return "right"
     try:
         idx = agent_order.index(sender)
     except ValueError:

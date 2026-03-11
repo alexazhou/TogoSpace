@@ -7,7 +7,7 @@ from service.message_bus import Message
 from model.agent_event import RoomMessageEvent
 from service import agent_service, room_service as chat_room
 from service.agent_service import Agent
-from constants import MessageBusTopic
+from constants import MessageBusTopic, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +15,7 @@ _rooms_config: list = []
 _max_function_calls: int = 5
 _active_agents: Set[str] = set()   # 有待处理事件或正在运行的 Agent
 _running: Dict[str, asyncio.Task] = {}
+_stop_event: asyncio.Event = asyncio.Event()
 
 
 def is_agent_active(agent_name: str) -> bool:
@@ -26,12 +27,14 @@ def init(rooms_config: list, max_function_calls: int = 5) -> None:
     global _rooms_config, _max_function_calls
     _rooms_config = rooms_config
     _max_function_calls = max_function_calls
+    _stop_event.clear()
     message_bus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
 
 
 def stop() -> None:
     """重置调度器状态。"""
     global _rooms_config, _max_function_calls, _active_agents, _running
+    _stop_event.set()
     _rooms_config = []
     _max_function_calls = 5
     _active_agents = set()
@@ -42,6 +45,11 @@ def _on_agent_turn(msg: Message) -> None:
     """订阅 ROOM_AGENT_TURN：将事件入队，标记 Agent 为活跃，若未运行则创建 Task。"""
     agent_name: str = msg.payload["agent_name"]
     room_name: str = msg.payload["room_name"]
+
+    if agent_name == SpecialAgent.OPERATOR:
+        logger.info(f"轮到人类操作者，系统进入等待状态: room={room_name}")
+        return
+
     agent = agent_service.get_agent(agent_name)
     agent.wait_event_queue.put_nowait(RoomMessageEvent(room_name))
     _active_agents.add(agent_name)
@@ -52,7 +60,7 @@ def _on_agent_turn(msg: Message) -> None:
 
 
 async def run() -> None:
-    """以 Agent 为中心的事件驱动调度，所有 Agent 均不活跃后结束。"""
+    """持续运行的事件调度器，支持实时接入。"""
     global _active_agents, _running
     _active_agents = set()
     _running = {}
@@ -60,19 +68,34 @@ async def run() -> None:
     for r in _rooms_config:
         room = chat_room.get_room(r["name"])
         logger.info(f"初始化轮次配置: room={r['name']}, max_turns={r['max_turns']}")
-        room.setup_turns([a.name for a in agent_service.get_agents(r["name"])], r["max_turns"])
+        room.setup_turns(chat_room.get_member_names(r["name"]), r["max_turns"])
 
-    # 循环直到所有 Agent 均不活跃
-    while _active_agents:
-        pending = {t for t in _running.values() if not t.done()}
-        if not pending:
-            break
-        done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+    # 持续运行，直到 _stop_event 被设置
+    stop_waiter = asyncio.create_task(_stop_event.wait())
+    
+    while not _stop_event.is_set():
+        pending = {t for n, t in _running.items() if not t.done()}
+        pending.add(stop_waiter)
+            
+        done, _ = await asyncio.wait(
+            pending, 
+            return_when=asyncio.FIRST_COMPLETED
+        )
         for task in done:
-            name = next((n for n, t in _running.items() if t is task), None)
-            if name is not None:
-                del _running[name]
+            if task is stop_waiter:
+                break
+            # 清理已完成的任务引用
+            names_to_del = [n for n, t in _running.items() if t is task]
+            for n in names_to_del:
+                del _running[n]
+        
+        if stop_waiter.done():
+            break
 
+    if not stop_waiter.done():
+        stop_waiter.cancel()
+
+    logger.info("Scheduler 已停止运行")
     for r in _rooms_config:
         logger.info(f"\n{chat_room.get_room(r['name']).format_log()}")
 

@@ -5,7 +5,7 @@ import aiohttp
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Header, ListView
+from textual.widgets import Header, ListView, Input, Static
 
 from api_client import ApiClient, RoomInfo, WsEvent
 from widgets import MessageView, RoomPanel, StatusBar
@@ -28,6 +28,7 @@ class WatcherApp(App):
         ("up", "prev_room", "上一个房间"),
         ("down", "next_room", "下一个房间"),
         ("enter", "select_room", "切换到当前房间"),
+        ("i", "focus_input", "进入输入模式"),
     ]
 
     def __init__(self, base_url: str) -> None:
@@ -47,6 +48,8 @@ class WatcherApp(App):
             yield RoomPanel()
             with Vertical(id="right-panel"):
                 yield MessageView()
+                with Vertical(id="chat-input-container"):
+                    yield Input(placeholder="在此输入消息...", id="chat-input")
                 yield StatusBar()
 
     async def _on_mount(self) -> None:
@@ -109,6 +112,7 @@ class WatcherApp(App):
         message_view = self.query_one(MessageView)
         status_bar = self.query_one(StatusBar)
         room_panel = self.query_one(RoomPanel)
+        input_container = self.query_one("#chat-input-container")
 
         try:
             messages = await self._api.get_room_messages(room_id)
@@ -119,6 +123,14 @@ class WatcherApp(App):
             self._current_room_id = room_id
             self._current_msg_count = len(messages)
             status_bar.update_count(self._current_msg_count)
+
+            # 查找房间信息以确定类型
+            current_room = next((r for r in self._rooms if r.room_id == room_id), None)
+            if current_room and current_room.room_type == "private":
+                input_container.add_class("active")
+            else:
+                input_container.remove_class("active")
+                self.query_one("#chat-input").value = ""
 
             for i, r in enumerate(self._rooms):
                 if r.room_id == room_id:
@@ -155,10 +167,6 @@ class WatcherApp(App):
                 status_bar.set_disconnected(remaining)
                 await asyncio.sleep(1)
             status_bar.set_reconnecting()
-
-    async def _reload_on_reconnect(self) -> None:
-        """已弃用，功能已合并至 _refresh_full_ui"""
-        pass
 
     def _on_ws_event(self, event: WsEvent) -> None:
         message_view = self.query_one(MessageView)
@@ -201,6 +209,23 @@ class WatcherApp(App):
         if item.id and item.id.startswith("room-"):
             room_id = item.id[len("room-"):]
             await self._select_room(room_id)
+
+    @on(Input.Submitted, "#chat-input")
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        content = event.value.strip()
+        if not content or not self._current_room_id:
+            return
+
+        success = await self._api.post_room_message(self._current_room_id, content)
+        if success:
+            self.query_one("#chat-input").value = ""
+        else:
+            self.notify("消息发送失败", severity="error")
+
+    def action_focus_input(self) -> None:
+        current_room = next((r for r in self._rooms if r.room_id == self._current_room_id), None)
+        if current_room and current_room.room_type == "private":
+            self.query_one("#chat-input").focus()
 
     async def action_prev_room(self) -> None:
         if not self._rooms:

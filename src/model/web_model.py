@@ -12,6 +12,7 @@ class AgentInfo(BaseModel):
 class RoomInfo(BaseModel):
     room_id: str       # 当前等于 room_name
     room_name: str
+    room_type: str     # "private" | "group"
     state: str         # "scheduling" | "idle"
     members: List[str]
 

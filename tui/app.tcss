@@ -164,5 +164,23 @@ StatusBar {
     background: #161b22;
     padding: 0 2;
     color: #6e7681;
-    dock: bottom;
+}
+
+#chat-input-container {
+    height: 3;
+    background: #161b22;
+    border-top: solid #30363d;
+    padding: 0 1;
+    display: none;
+}
+
+#chat-input-container.active {
+    display: block;
+}
+
+#chat-input {
+    background: #0d1117;
+    border: none;
+    height: 1;
+    margin: 0;
 }
