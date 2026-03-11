@@ -47,14 +47,14 @@ def v6_backend(tmp_path_factory, mock_llm_server):
             {
                 "name": "alice_private",
                 "type": RoomType.PRIVATE.value,
-                "agents": [SpecialAgent.OPERATOR.value, "alice"],
+                "members": [SpecialAgent.OPERATOR.value, "alice"],
                 "initial_topic": "v6 private test",
                 "max_turns": 10,
             },
             {
                 "name": "public_group",
                 "type": RoomType.GROUP.value,
-                "agents": ["alice"],
+                "members": ["alice"],
                 "initial_topic": "v6 group test",
                 "max_turns": 10,
             },

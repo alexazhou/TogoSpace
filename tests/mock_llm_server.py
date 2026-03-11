@@ -31,18 +31,29 @@ class ChatCompletionsHandler(tornado.web.RequestHandler):
             messages = body.get("messages", [])
             for msg in reversed(messages):
                 content = msg.get("content", "")
-                if "房间发言" in content:
-                    import re
-                    match = re.search(r"在 ([\w_]+) 房间发言", content)
-                    if match:
-                        room_name = match.group(1)
+                if not content:
+                    continue
+                
+                # 1. 匹配普通发言格式: "Alice 在 general 房间发言: ..."
+                match = re.search(r"在 ([\w_]+) 房间发言", content)
+                if match:
+                    # 避免匹配到系统提示词中的 placeholder "roomName"
+                    found = match.group(1)
+                    if found != "roomName":
+                        room_name = found
                         break
-                if "进入到" in content:
-                    import re
-                    match = re.search(r"进入到 ([\w_]+) 房间", content)
-                    if match:
-                        room_name = match.group(1)
-                        break
+                
+                # 2. 匹配系统消息格式: "general 房间系统消息: ..."
+                match = re.search(r"^([\w_]+) 房间系统消息", content)
+                if match:
+                    room_name = match.group(1)
+                    break
+                    
+                # 3. 匹配进入房间格式: "进入到 general 房间"
+                match = re.search(r"进入到 ([\w_]+) 房间", content)
+                if match:
+                    room_name = match.group(1)
+                    break
         except Exception:
             pass
 

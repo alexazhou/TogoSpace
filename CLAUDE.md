@@ -160,7 +160,7 @@ cd src && python main.py [--resource-dir resource/] [--llm-config config.json] [
     {
       "name": "general",
       "type": "group",
-      "agents": ["alice", "bob"],
+      "members": ["alice", "bob"],
       "initial_topic": "大家好！",
       "max_turns": 6
     }

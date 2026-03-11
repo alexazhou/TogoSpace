@@ -43,7 +43,7 @@ class TestSchedulerRun(ServiceTestCase):
         room_service.create_room(TEAM, "r1", ["alice"])
         alice = _make_mock_agent("alice")
 
-        teams_config = [{"name": TEAM, "groups": [{"name": "r1", "agents": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
+        teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
         scheduler.init(teams_config)
 
         with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
@@ -91,7 +91,7 @@ class TestSchedulerRun(ServiceTestCase):
     async def test_on_agent_turn_creates_task(self):
         """收到 ROOM_AGENT_TURN 消息后，agent 任务入队并启动 Task。"""
         alice = _make_mock_agent("alice")
-        teams_config = [{"name": TEAM, "groups": [{"name": "r1", "agents": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
+        teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
         scheduler.init(teams_config)
 
         with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
