@@ -22,7 +22,30 @@ def _find_free_port() -> int:
 
 class ChatCompletionsHandler(tornado.web.RequestHandler):
     async def post(self):
-        await asyncio.sleep(0.3)  # 模拟 LLM 响应延迟，确保调度器在测试期间持续运行
+        await asyncio.sleep(0.3)  # 模拟 LLM 响应延迟
+        
+        # 尝试从请求消息中提取房间名
+        room_name = "general"
+        try:
+            body = json.loads(self.request.body)
+            messages = body.get("messages", [])
+            for msg in reversed(messages):
+                content = msg.get("content", "")
+                if "房间发言" in content:
+                    import re
+                    match = re.search(r"在 ([\w_]+) 房间发言", content)
+                    if match:
+                        room_name = match.group(1)
+                        break
+                if "进入到" in content:
+                    import re
+                    match = re.search(r"进入到 ([\w_]+) 房间", content)
+                    if match:
+                        room_name = match.group(1)
+                        break
+        except Exception:
+            pass
+
         response = {
             "id": "mock-response-id",
             "object": "chat.completion",
@@ -41,8 +64,8 @@ class ChatCompletionsHandler(tornado.web.RequestHandler):
                                 "function": {
                                     "name": "send_chat_msg",
                                     "arguments": json.dumps({
-                                        "chat_windows_name": "general",
-                                        "msg": "Mock LLM 测试消息",
+                                        "chat_windows_name": room_name,
+                                        "msg": f"Mock LLM 在 {room_name} 的回复",
                                     }, ensure_ascii=False),
                                 },
                             }

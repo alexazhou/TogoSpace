@@ -8,7 +8,7 @@ from model.chat_model import AgentDialogContext, ChatMessage
 from model.chat_context import ChatContext
 from service import llm_service, func_tool_service, room_service
 from service.room_service import ChatRoom
-from constants import TurnStatus, TurnCheckResult
+from constants import TurnStatus, TurnCheckResult, RoomType, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +28,6 @@ class Agent:
         new_msgs: List[ChatMessage] = room.get_unread_messages(self.name)
         logger.info(f"同步房间消息: agent={self.name}, room={room.name}, count={len(new_msgs)}")
         for msg in new_msgs:
-            #if msg.sender_name == self.name:
-            #    continue
             if msg.sender_name == "system":
                 self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}"))
             else:
@@ -55,9 +53,7 @@ class Agent:
         turn_checker: Optional[Callable[[LlmApiMessage], TurnCheckResult]] = None,
         max_function_calls: int = 5,
     ) -> LlmApiMessage:
-        """基于当前 _history 自动执行 tool calls 循环。
-        turn_checker: 每次 LLM 响应或 tool 执行后调用，根据返回的 TurnCheckResult 决定继续、终止或注入提示重试。
-        """
+        """基于当前 _history 自动执行 tool calls 循环。"""
         for _ in range(max_function_calls):
             assistant_message: LlmApiMessage = await self._infer(tools)
             self._history.append(assistant_message)
@@ -111,18 +107,26 @@ def init(agents_config: list, rooms_config: list) -> None:
     # 收集每个 Agent 跨所有房间的其他参与者
     agent_peers: Dict[str, set] = {name: set() for name in agent_defs}
     for room in rooms_config:
-        names: List[str] = room["agents"]
+        names: List[str] = list(room["agents"])
+        if room.get("type") == RoomType.PRIVATE:
+            names.insert(0, SpecialAgent.OPERATOR)
+
         for name in names:
-            agent_peers[name].update(n for n in names if n != name)
+            if name in agent_peers:
+                agent_peers[name].update(n for n in names if n != name)
 
     for name, cfg in agent_defs.items():
         prompt: str = load_prompt(cfg["prompt_file"])
-        prompt = prompt.replace("{participants}", "、".join(sorted(agent_peers[name])))
+        participants = sorted(list(agent_peers[name]))
+        prompt = prompt.replace("{participants}", "、".join(participants))
         _agents[name] = Agent(name=name, system_prompt=prompt, model=cfg["model"])
         logger.info(f"创建 Agent: name={name}, model={cfg['model']}")
 
     for room in rooms_config:
-        room_service.setup_members(room["name"], room["agents"])
+        members = list(room["agents"])
+        if room.get("type") == RoomType.PRIVATE:
+            members.insert(0, SpecialAgent.OPERATOR)
+        room_service.setup_members(room["name"], members)
 
 
 async def run_turn(agent: Agent, room_name: str, max_function_calls: int = 5) -> None:

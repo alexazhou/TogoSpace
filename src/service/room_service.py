@@ -6,7 +6,7 @@ from typing import Dict, List
 
 from service import message_bus
 from model.chat_model import ChatMessage
-from constants import RoomState, MessageBusTopic
+from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 class ChatRoom:
     """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
-    def __init__(self, name: str, initial_topic: str = ""):
+    def __init__(self, name: str, initial_topic: str = "", room_type: RoomType = RoomType.GROUP):
         self.name = name
+        self.room_type = room_type
         self.messages: List[ChatMessage] = []
         self.initial_topic = initial_topic
         self.member_names: List[str] = []
@@ -104,10 +105,10 @@ class ChatRoom:
 _rooms: Dict[str, ChatRoom] = {}
 
 
-def init(name: str, initial_topic: str = "") -> None:
+def init(name: str, initial_topic: str = "", room_type: RoomType = RoomType.GROUP) -> None:
     """创建并注册一个聊天室。"""
-    _rooms[name] = ChatRoom(name=name, initial_topic=initial_topic)
-    logger.info(f"创建聊天室: name={name}, initial_topic={initial_topic!r}")
+    _rooms[name] = ChatRoom(name=name, initial_topic=initial_topic, room_type=room_type)
+    logger.info(f"创建聊天室: name={name}, type={room_type.value}, initial_topic={initial_topic!r}")
 
 
 def close(name: str) -> None:

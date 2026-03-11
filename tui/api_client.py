@@ -20,6 +20,7 @@ class AgentInfo:
 class RoomInfo:
     room_id: str
     room_name: str
+    room_type: str
     state: str
     members: list[str]
 
@@ -67,6 +68,7 @@ class ApiClient:
             RoomInfo(
                 room_id=r["room_id"],
                 room_name=r["room_name"],
+                room_type=r.get("room_type", "group"),
                 state=r["state"],
                 members=r["members"],
             )
@@ -88,6 +90,11 @@ class ApiClient:
             )
             for m in data["messages"]
         ]
+
+    async def post_room_message(self, room_id: str, content: str) -> bool:
+        session = self._get_session()
+        async with session.post(f"{self._base_url}/rooms/{room_id}/messages", json={"content": content}) as resp:
+            return resp.status == 200
 
     async def ws_events(self, on_connected=None) -> AsyncGenerator[WsEvent, None]:
         ws_url = self._base_url.replace("http://", "ws://").replace("https://", "wss://")
