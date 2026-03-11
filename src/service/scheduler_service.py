@@ -18,14 +18,14 @@ _stop_event: asyncio.Event = asyncio.Event()
 
 
 def is_agent_active(agent_name: str) -> bool:
-    """如果 Agent 正在运行任务，或者其事件队列中仍有待处理项，则视为活跃。"""
+    """如果 Agent 正在运行任务，或者其任务队列中仍有待处理项，则视为活跃。"""
     task = _running.get(agent_name)
     if task and not task.done():
         return True
     
     try:
         agent = agent_service.get_agent(agent_name)
-        if not agent.wait_event_queue.empty():
+        if not agent.wait_task_queue.empty():
             return True
     except (KeyError, AttributeError):
         pass
@@ -52,7 +52,7 @@ def stop() -> None:
 
 
 def _on_agent_turn(msg: Message) -> None:
-    """订阅 ROOM_AGENT_TURN：将事件入队，标记 Agent 为活跃，若未运行则创建 Task。"""
+    """订阅 ROOM_AGENT_TURN：将任务入队，标记 Agent 为活跃，若未运行则创建 Task。"""
     agent_name: str = msg.payload["agent_name"]
     room_name: str = msg.payload["room_name"]
 
@@ -61,12 +61,12 @@ def _on_agent_turn(msg: Message) -> None:
         return
 
     agent = agent_service.get_agent(agent_name)
-    agent.wait_event_queue.put_nowait(RoomMessageEvent(room_name))
+    agent.wait_task_queue.put_nowait(RoomMessageEvent(room_name))
     
     logger.info(f"Agent 激活: agent={agent_name}, room={room_name}")
     existing = _running.get(agent_name)
     if existing is None or existing.done():
-        _running[agent_name] = asyncio.create_task(agent.run_events(_max_function_calls))
+        _running[agent_name] = asyncio.create_task(agent.consume_task(_max_function_calls))
 
 
 async def run() -> None:
