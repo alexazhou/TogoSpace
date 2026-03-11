@@ -27,6 +27,15 @@ class Agent:
         self._history: List[LlmApiMessage] = []  # Agent 的私有对话历史（包含 Tool Call 详情）
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()  # 待处理的房间任务队列
 
+    @property
+    def is_active(self) -> bool:
+        """如果 Agent 正在运行任务，或者其任务队列中仍有待处理项，则视为活跃。"""
+        from service import scheduler_service
+        task = scheduler_service.get_running_task(self.name)
+        if task and not task.done():
+            return True
+        return not self.wait_task_queue.empty()
+
     async def consume_task(self, max_function_calls: int) -> None:
         """持续消费队列中的任务，直到队列为空。"""
         while True:
@@ -176,6 +185,12 @@ def init(agents_config: list, rooms_config: list) -> None:
 def get_agent(name: str) -> Agent:
     """返回指定名称的 Agent 实例。"""
     return _agents[name]
+
+
+def is_agent_active(name: str) -> bool:
+    """判断指定名称的 Agent 是否活跃。"""
+    agent = _agents.get(name)
+    return agent.is_active if agent else False
 
 
 def get_all_agents() -> List[Agent]:

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, Set
+from typing import Dict, Set, Optional
 
 from service import message_bus
 from service.message_bus import Message
@@ -17,20 +17,9 @@ _running: Dict[str, asyncio.Task] = {}
 _stop_event: asyncio.Event = asyncio.Event()
 
 
-def is_agent_active(agent_name: str) -> bool:
-    """如果 Agent 正在运行任务，或者其任务队列中仍有待处理项，则视为活跃。"""
-    task = _running.get(agent_name)
-    if task and not task.done():
-        return True
-    
-    try:
-        agent = agent_service.get_agent(agent_name)
-        if not agent.wait_task_queue.empty():
-            return True
-    except (KeyError, AttributeError):
-        pass
-        
-    return False
+def get_running_task(agent_name: str) -> Optional[asyncio.Task]:
+    """返回指定 Agent 当前正在运行的任务对象。"""
+    return _running.get(agent_name)
 
 
 def init(rooms_config: list, max_function_calls: int = 5) -> None:
