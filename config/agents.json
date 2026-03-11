@@ -1,0 +1,32 @@
+{
+  "agents": [
+    {"name": "alice",   "prompt_file": "resource/prompts/alice_system.md",   "model": "glm-4.7"},
+    {"name": "bob",     "prompt_file": "resource/prompts/bob_system.md",     "model": "glm-4.7"},
+    {"name": "charlie", "prompt_file": "resource/prompts/charlie_system.md", "model": "glm-4.7"},
+    {"name": "dave",    "prompt_file": "resource/prompts/dave_system.md",    "model": "glm-4.7"}
+  ],
+  "chat_rooms": [
+    {
+      "name": "general",
+      "type": "group",
+      "agents": ["alice", "bob", "dave"],
+      "initial_topic": "大家好，今天我们来聊聊生活和工作吧！",
+      "max_turns": 6
+    },
+    {
+      "name": "tech",
+      "type": "group",
+      "agents": ["alice", "bob", "charlie"],
+      "initial_topic": "今天我们聊聊技术话题吧！",
+      "max_turns": 6
+    },
+    {
+      "name": "alice_private",
+      "type": "private",
+      "agents": ["Operator", "alice"],
+      "initial_topic": "你好 Alice，我是人类操作者。你可以根据我的指令执行任务。",
+      "max_turns": 100
+    }
+  ],
+  "max_function_calls": 5
+}

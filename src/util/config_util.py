@@ -4,7 +4,7 @@ import os
 
 def load_config(path: str = None) -> dict:
     if path is None:
-        path = os.path.join(os.path.dirname(__file__), "../../config/agents_v3.2.json")
+        path = os.path.join(os.path.dirname(__file__), "../../config/agents.json")
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 

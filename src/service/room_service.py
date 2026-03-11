@@ -62,9 +62,24 @@ class ChatRoom:
             content=content,
             time=message.send_time.isoformat(),
         )
+        self._advance_turn()
 
+    def skip_turn(self) -> None:
+        """跳过当前发言人的轮次，直接推进到下一位。"""
+        logger.info(f"房间 {self.name} 跳过一轮发言")
+        self._advance_turn()
+
+    def _advance_turn(self) -> None:
+        """推进轮次索引并发布事件。内部私有方法。"""
         if not self._turn_agents:
             return
+
+        # 如果当前已达到最大轮次（处于 IDLE 状态），但依然触发了推进（说明有 Agent 主动发言或人类干预）
+        # 则重置轮次计数器，重新进入调度状态
+        if self._state == RoomState.IDLE and self._turn_index >= self._max_turns:
+            logger.info(f"房间 {self.name} 达到最大轮次后仍有活动，重置计数器并重新开始对话循环")
+            self._turn_index = 0
+            self._state = RoomState.SCHEDULING
 
         self._turn_pos += 1
 
@@ -76,6 +91,7 @@ class ChatRoom:
         # 达到最大轮次 → 房间进入空闲，不再推送
         if self._turn_index >= self._max_turns:
             self._state = RoomState.IDLE
+            logger.info(f"房间 {self.name} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
             return
 
         next_name = self._turn_agents[self._turn_pos]
