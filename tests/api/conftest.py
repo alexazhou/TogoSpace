@@ -39,10 +39,10 @@ def mock_llm_server():
 
 
 def _write_e2e_configs(mock_port: int, tmp_dir: str):
-    """写入测试用配置文件，返回 resource_dir。"""
-    resource_dir = os.path.join(tmp_dir, "resource")
-    agents_dir = os.path.join(resource_dir, "agents")
-    teams_dir = os.path.join(resource_dir, "teams")
+    """写入测试用配置文件，返回 config_dir。"""
+    config_dir = os.path.join(tmp_dir, "config")
+    agents_dir = os.path.join(config_dir, "agents")
+    teams_dir = os.path.join(config_dir, "teams")
     os.makedirs(agents_dir, exist_ok=True)
     os.makedirs(teams_dir, exist_ok=True)
 
@@ -78,7 +78,7 @@ def _write_e2e_configs(mock_port: int, tmp_dir: str):
     with open(llm_path, "w", encoding="utf-8") as f:
         json.dump(llm_cfg, f)
 
-    return resource_dir, llm_path
+    return config_dir, llm_path
 
 
 @pytest.fixture(scope="session")
@@ -95,7 +95,7 @@ def backend_base(backend_port) -> str:
 def backend_process(mock_llm_server, backend_port, backend_base, tmp_path_factory):
     """启动后端子进程，就绪后同步启动 WS 事件收集线程（非阻塞），然后 yield。"""
     tmp_dir = str(tmp_path_factory.mktemp("e2e_config"))
-    resource_dir, llm_path = _write_e2e_configs(mock_llm_server.port, tmp_dir)
+    config_dir, llm_path = _write_e2e_configs(mock_llm_server.port, tmp_dir)
 
     src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../src"))
     env = os.environ.copy()
@@ -105,7 +105,7 @@ def backend_process(mock_llm_server, backend_port, backend_base, tmp_path_factor
         [
             sys.executable,
             os.path.join(src_dir, "main.py"),
-            "--resource-dir", resource_dir,
+            "--config-dir", config_dir,
             "--llm-config", llm_path,
             "--port", str(backend_port),
         ],

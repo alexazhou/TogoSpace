@@ -65,13 +65,13 @@ def _remove_pid() -> None:
         pass
 
 
-async def main(resource_dir: str = None, llm_config_path: str = None, port: int = 8080):
+async def main(config_dir: str = None, llm_config_path: str = None, port: int = 8080):
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     _setup_logger()
     logger = logging.getLogger(__name__)
 
-    agents_config = load_agents(resource_dir)
-    teams_config = load_teams(resource_dir)
+    agents_config = load_agents(config_dir)
+    teams_config = load_teams(config_dir)
     llm_cfg = load_llm_service_config(llm_config_path)
 
     message_bus.init()
@@ -127,8 +127,8 @@ if __name__ == "__main__":
     _write_pid()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     parser = argparse.ArgumentParser()
-    parser.add_argument("--resource-dir", default=None, dest="resource_dir", help="resource 目录路径")
+    parser.add_argument("--config-dir", default=None, dest="config_dir", help="config 目录路径")
     parser.add_argument("--llm-config", default=None, dest="llm_config", help="LLM 服务配置文件路径")
     parser.add_argument("--port", type=int, default=8080, help="HTTP 监听端口")
     args = parser.parse_args()
-    asyncio.run(main(resource_dir=args.resource_dir, llm_config_path=args.llm_config, port=args.port))
+    asyncio.run(main(config_dir=args.config_dir, llm_config_path=args.llm_config, port=args.port))

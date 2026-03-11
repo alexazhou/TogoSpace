@@ -28,10 +28,10 @@ def v6_backend(tmp_path_factory, mock_llm_server):
     port = _find_free_port()
     tmp_dir = str(tmp_path_factory.mktemp("v6_e2e"))
 
-    # 准备 resource 目录结构
-    resource_dir = os.path.join(tmp_dir, "resource")
-    agents_dir = os.path.join(resource_dir, "agents")
-    teams_dir = os.path.join(resource_dir, "teams")
+    # 准备 config 目录结构
+    config_dir = os.path.join(tmp_dir, "config")
+    agents_dir = os.path.join(config_dir, "agents")
+    teams_dir = os.path.join(config_dir, "teams")
     os.makedirs(agents_dir, exist_ok=True)
     os.makedirs(teams_dir, exist_ok=True)
 
@@ -88,7 +88,7 @@ def v6_backend(tmp_path_factory, mock_llm_server):
         [
             sys.executable,
             os.path.join(src_dir, "main.py"),
-            "--resource-dir", resource_dir,
+            "--config-dir", config_dir,
             "--llm-config", llm_path,
             "--port", str(port),
         ],
