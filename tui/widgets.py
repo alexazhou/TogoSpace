@@ -84,13 +84,6 @@ class MessageBubble(Vertical):
         """将 LLM 在句中插入的单个 \\n 替换为空格，保留 \\n\\n 段落分隔。"""
         return re.sub(r'(?<!\n)\n(?!\n)', ' ', self._content)
 
-    def _content_display_width(self) -> int:
-        """计算显示内容各行中最大的显示列宽。"""
-        return max(
-            (sum(_char_width(ch) for ch in line) for line in self._display_content.split("\n")),
-            default=0,
-        )
-
     def on_resize(self, event) -> None:
         if self._side == "center":
             return
@@ -98,15 +91,11 @@ class MessageBubble(Vertical):
         if new_max_w == self._last_max_w:
             return
         self._last_max_w = new_max_w
-        # padding: 1 2 → 水平共 4 列
-        PADDING = 4
-        content_w = self._content_display_width()
-        # 气泡宽度 = 内容宽 + padding，但不超过 max_w；长文本自动换行
-        bubble_w = max(10, min(content_w + PADDING, new_max_w))
+        # 在 bubble 上设 max_width，让 Textual 自动根据内容计算气泡宽度和换行
         for inner in self.query(".bubble-inner"):
             inner.styles.max_width = new_max_w
             for bubble in inner.query(".bubble"):
-                bubble.styles.width = bubble_w
+                bubble.styles.max_width = new_max_w
 
     def compose(self) -> ComposeResult:
         if self._side == "center":
