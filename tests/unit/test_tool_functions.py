@@ -15,7 +15,7 @@ from service.func_tool_service.tools import (
     get_agent_list,
 )
 from model.chat_context import ChatContext
-from base import ServiceTestCase
+from ..base import ServiceTestCase
 
 TEAM = "test_team"
 

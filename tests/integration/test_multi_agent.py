@@ -9,7 +9,7 @@ import service.func_tool_service as func_tool_service
 import service.scheduler_service as scheduler
 from util.llm_api_util import LlmApiMessage, ToolCall
 from constants import OpenaiLLMApiRole
-from base import ServiceTestCase
+from ..base import ServiceTestCase
 
 TEAM = "test_team"
 
@@ -31,8 +31,8 @@ def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
 
 
 AGENTS_CONFIG = [
-    {"name": "alice", "system_prompt": "你是alice, {participants}", "model": "qwen-plus"},
-    {"name": "bob",   "system_prompt": "你是bob, {participants}", "model": "qwen-plus"},
+    {"name": "alice", "system_prompt": "你是alice", "model": "qwen-plus"},
+    {"name": "bob",   "system_prompt": "你是bob", "model": "qwen-plus"},
 ]
 
 TEAM_CONFIG = {
