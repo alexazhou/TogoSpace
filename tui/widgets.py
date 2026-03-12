@@ -90,6 +90,20 @@ def _get_side(sender: str, agent_order: list[str]) -> str:
 
 class MessageBubble(Vertical):
     MAX_RATIO = 0.8  # 气泡最大占消息区宽度的比例
+    # A palette of colors that look good on dark backgrounds
+    NAME_COLORS = [
+        "#56d4b0", "#7eb8d4", "#c4a55a", "#d4847e", "#b392d4",
+        "#8cc152", "#4fc1e9", "#ffce54", "#fc6e51", "#ac92ec",
+        "#48cfad", "#a0d468", "#5d9cec", "#ed5565", "#fb6e52"
+    ]
+
+    def _get_name_color(self, name: str) -> str:
+        """Get a deterministic color for a name."""
+        if name == "Operator":
+            return "#7f91a4"  # Keep Operator color consistent
+        # Simple hash to pick a color
+        idx = sum(ord(c) for c in name) % len(self.NAME_COLORS)
+        return self.NAME_COLORS[idx]
 
     def __init__(self, sender: str, content: str, side: str) -> None:
         super().__init__()
@@ -97,6 +111,7 @@ class MessageBubble(Vertical):
         self._content = content
         self._side = side
         self._last_max_w: int = 0
+        self._name_color = self._get_name_color(sender)
 
     def on_resize(self, event) -> None:
         if self._side == "center":
@@ -115,12 +130,12 @@ class MessageBubble(Vertical):
             with Horizontal(classes="bubble-row"):
                 yield Static("", classes="bubble-spacer")
                 with Vertical(classes="bubble-inner"):
-                    yield Static(f"[bold #7f91a4]{self._sender}[/bold #7f91a4]", classes="sender sender-right")
+                    yield Static(f"[bold {self._name_color}]{self._sender}[/bold {self._name_color}]", classes="sender sender-right")
                     yield BubbleText(self._content, classes="bubble bubble-right")
         else:
             with Horizontal(classes="bubble-row"):
                 with Vertical(classes="bubble-inner"):
-                    yield Static(f"[bold #56d4b0]{self._sender}[/bold #56d4b0]", classes="sender sender-left")
+                    yield Static(f"[bold {self._name_color}]{self._sender}[/bold {self._name_color}]", classes="sender sender-left")
                     yield BubbleText(self._content, classes="bubble bubble-left")
                 yield Static("", classes="bubble-spacer")
 
