@@ -85,6 +85,7 @@ class ChatRoom:
 
         # 2. 推进逻辑：只有当前顺序发言人说话，才推进到下一位
         current_expected = self.get_current_turn_agent()
+        logger.info(f"房间 {self.key} 收到消息: sender={sender}, current_expected={current_expected}, will_advance={sender == current_expected}")
         if sender == current_expected:
             self._advance_turn()
         else:
@@ -115,6 +116,7 @@ class ChatRoom:
         """发布当前轮次的发言事件。"""
         next_name = self.get_current_turn_agent()
         if next_name:
+            logger.info(f"发布轮次事件: room={self.key}, agent={next_name}, turn_pos={self._turn_pos}/{len(self.agents)}")
             message_bus.publish(
                 MessageBusTopic.ROOM_AGENT_TURN,
                 agent_name=next_name,
@@ -122,11 +124,16 @@ class ChatRoom:
                 room_key=self.key,
                 team_name=self.team_name,
             )
+        else:
+            logger.warning(f"无法发布轮次事件: room={self.key}, next_name is None")
 
     def _advance_turn(self) -> None:
         """推进轮次位置索引。内部私有方法。"""
         if not self.agents:
+            logger.warning(f"房间 {self.key} _advance_turn: agents 为空，跳过")
             return
+
+        logger.info(f"房间 {self.key} _advance_turn: turn_pos={self._turn_pos}/{len(self.agents)}, turn_index={self._turn_index}/{self._max_turns}")
 
         self._turn_pos += 1
 
@@ -134,6 +141,7 @@ class ChatRoom:
         if self._turn_pos >= len(self.agents):
             self._turn_index += 1
             self._turn_pos = 0
+            logger.info(f"房间 {self.key} 完成一轮，turn_index={self._turn_index}")
 
         # 检查是否达到最大轮次限制
         if self._turn_index >= self._max_turns:
@@ -142,6 +150,8 @@ class ChatRoom:
             return
 
         # 正常发布下一位成员的发言事件
+        next_agent = self.agents[self._turn_pos]
+        logger.info(f"房间 {self.key} 推进到下一位: {next_agent}")
         self._publish_current_turn()
 
     def get_context(self, max_messages: int = 10) -> str:
