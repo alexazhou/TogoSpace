@@ -1,1 +1,1 @@
-{"name": "e2e", "groups": [{"name": "general", "type": "group", "members": ["alice"], "initial_topic": "e2e 测试话题", "max_turns": 50}], "max_function_calls": 2}
+{"name": "e2e", "groups": [{"name": "general", "type": "group", "members": ["Operator", "alice"], "initial_topic": "e2e 测试话题", "max_turns": 50}], "max_function_calls": 2}

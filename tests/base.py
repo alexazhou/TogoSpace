@@ -106,6 +106,11 @@ class ServiceTestCase:
 
         cls._backend_config_dir = config_dir
 
+        # 设置 LLM 配置文件路径（如果存在）
+        llm_json = os.path.join(config_dir, "llm.json")
+        if os.path.isfile(llm_json):
+            cls._backend_llm_config = llm_json
+
     @classmethod
     def _start_backend(cls):
         """启动后端子进程，等待 HTTP 服务就绪。"""

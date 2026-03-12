@@ -17,7 +17,7 @@ import tornado.web
 class ChatCompletionsHandler(tornado.web.RequestHandler):
     async def post(self):
         await asyncio.sleep(0.3)  # 模拟 LLM 响应延迟
-        
+
         # 尝试从请求消息中提取房间名
         room_name = "general"
         try:
@@ -39,22 +39,19 @@ class ChatCompletionsHandler(tornado.web.RequestHandler):
                 # 从历史消息中反向寻找最近的房间线索
                 for msg in reversed(messages):
                     content = msg.get("content", "")
-                    if not content: continue
-                    match = re.search(r"在 ([\w\.-]+@[\w\.-]+|[\w\.-]+) 房间发言", content)
+                    if not content:
+                        continue
+                    # 匹配 "在 general 房间发言" 或 "在 alice_private 房间发言"
+                    match = re.search(r"在 (general|alice_private|public_group) 房间发言", content)
                     if match:
-                        val = match.group(1)
-                        if "@" in val: val = val.split("@")[0]
-                        if val != "roomName":
-                            found_room = val
-                            break
-                
+                        found_room = match.group(1)
+                        break
+
                 if not found_room and system_prompt:
-                    match = re.search(r"([\w\.-]+) 房间", system_prompt)
+                    # 从 system_prompt 中提取房间名
+                    match = re.search(r"(general|alice_private|public_group) 房间", system_prompt)
                     if match:
-                        val = match.group(1)
-                        if "@" in val: val = val.split("@")[0]
-                        if val != "roomName":
-                            found_room = val
+                        found_room = match.group(1)
 
             if found_room:
                 room_name = found_room

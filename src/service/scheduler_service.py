@@ -38,11 +38,21 @@ def _on_agent_turn(msg: Message) -> None:
     room_key: str = msg.payload["room_key"]
     team_name: str = msg.payload["team_name"]
 
+    logger.info(f"收到轮次事件: agent={agent_name}, room={room_key}, team={team_name}")
+
     if agent_name == SpecialAgent.OPERATOR:
         logger.info(f"轮到人类操作者，系统进入等待状态: room={room_key}")
         return
 
-    agent = agent_service.get_agent(team_name, agent_name)
+    try:
+        agent = agent_service.get_agent(team_name, agent_name)
+    except KeyError:
+        logger.error(f"Agent 不存在: agent_name={agent_name}, team_name={team_name}, key={agent_name}@{team_name}")
+        return
+    except Exception as e:
+        logger.error(f"获取 Agent 失败: agent_name={agent_name}, team_name={team_name}, error={e}")
+        return
+
     agent.wait_task_queue.put_nowait(RoomMessageEvent(room_key))
 
     # 使用 agent@team 作为 running key
@@ -56,7 +66,10 @@ def _on_agent_turn(msg: Message) -> None:
             if team["name"] == team_name:
                 max_fc = team.get("max_function_calls", 5)
                 break
+        logger.info(f"创建新任务: agent={agent_key}, max_function_calls={max_fc}")
         _running[agent_key] = asyncio.create_task(agent.consume_task(max_fc))
+    else:
+        logger.info(f"Agent 任务已在运行: agent={agent_key}")
 
 
 async def run() -> None:
