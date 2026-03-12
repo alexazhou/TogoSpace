@@ -85,32 +85,28 @@ def _get_side(sender: str, agent_order: list[str]) -> str:
         return "center"
     if sender == "Operator":
         return "right"
-    try:
-        idx = agent_order.index(sender)
-    except ValueError:
-        return "left"
-    return "left" if idx % 2 == 0 else "right"
+    return "left"
 
 
 class MessageBubble(Vertical):
-    MAX_RATIO = 0.7  # 气泡最大占消息区宽度的比例
+    MAX_RATIO = 0.8  # 气泡最大占消息区宽度的比例
 
     def __init__(self, sender: str, content: str, side: str) -> None:
         super().__init__()
         self._sender = sender
         self._content = content
         self._side = side
-        self._last_inner_w: int = 0
+        self._last_max_w: int = 0
 
     def on_resize(self, event) -> None:
         if self._side == "center":
             return
-        new_w = max(10, int(event.size.width * self.MAX_RATIO))
-        if new_w == self._last_inner_w:
+        new_max_w = max(15, int(event.size.width * self.MAX_RATIO))
+        if new_max_w == self._last_max_w:
             return
-        self._last_inner_w = new_w
+        self._last_max_w = new_max_w
         for inner in self.query(".bubble-inner"):
-            inner.styles.width = new_w
+            inner.styles.max_width = new_max_w
 
     def compose(self) -> ComposeResult:
         if self._side == "center":
