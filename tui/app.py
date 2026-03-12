@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 
 import aiohttp
 from textual import on, work
@@ -51,7 +52,14 @@ class WatcherApp(App):
                 yield MessageView()
                 with Vertical(id="chat-input-container"):
                     yield Input(placeholder="在此输入消息...", id="chat-input")
+                yield Static("当前为观察模式", id="chat-input-hint")
                 yield StatusBar()
+
+    async def on_ready(self) -> None:
+        log.info("on_ready 触发, 设置竖线光标")
+        # 设置光标为闪烁竖线 (5: Blinking Bar)
+        sys.stdout.write("\x1b[5 q")
+        sys.stdout.flush()
 
     async def _on_mount(self) -> None:
         log.info("on_mount 触发")
@@ -115,6 +123,7 @@ class WatcherApp(App):
         status_bar = self.query_one(StatusBar)
         room_panel = self.query_one(RoomPanel)
         input_container = self.query_one("#chat-input-container")
+        hint_label = self.query_one("#chat-input-hint")
 
         try:
             messages = await self._api.get_room_messages(room_id)
@@ -130,8 +139,10 @@ class WatcherApp(App):
             current_room = next((r for r in self._rooms if r.room_id == room_id), None)
             if current_room and current_room.room_type == "private":
                 input_container.add_class("active")
+                hint_label.remove_class("active")
             else:
                 input_container.remove_class("active")
+                hint_label.add_class("active")
                 self.query_one("#chat-input").value = ""
 
             for i, r in enumerate(self._rooms):
@@ -191,8 +202,9 @@ class WatcherApp(App):
 
         if event.room_id == self._current_room_id:
             self._current_msg_count += 1
+            time_str = event.time.strftime("%H:%M:%S") if event.time else ""
             self.call_later(
-                message_view.append_message, event.sender, event.content, self._agent_order
+                message_view.append_message, event.sender, event.content, self._agent_order, time_str
             )
             self.call_later(status_bar.update_count, self._current_msg_count)
         else:
@@ -255,4 +267,7 @@ class WatcherApp(App):
 
     async def _on_unmount(self) -> None:
         log.info("app unmount")
+        # 恢复光标为方块 (0: 恢复默认)
+        sys.stdout.write("\x1b[0 q")
+        sys.stdout.flush()
         await self._api.close()

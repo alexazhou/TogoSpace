@@ -56,6 +56,11 @@ RoomPanel ListItem {
     text-style: bold;
     color: #b8c1cc;
     width: 1fr;
+    margin-right: 1;
+}
+
+.room-card-icon {
+    width: 3;
 }
 
 .room-card-members {
@@ -80,8 +85,8 @@ RoomPanel ListItem {
 }
 
 MessageView {
-    height: 1fr;
-    padding: 1 2;
+    height: 3fr;
+    padding: 1 3 1 2;
     background: #0e1621;
     overflow-x: hidden;
 }
@@ -109,7 +114,7 @@ MessageBubble {
 
 .sender {
     text-style: bold;
-    width: 100%;
+    width: auto;
     height: auto;
     margin: 0 1;
 }
@@ -126,6 +131,8 @@ MessageBubble {
     padding: 1 2;
     width: auto;
     height: auto;
+    content-align: left top;
+    text-wrap: wrap;
 }
 
 .bubble-left {
@@ -179,7 +186,7 @@ Header {
 }
 
 #chat-input-container {
-    height: auto;
+    height: 1fr;
     background: #17212b;
     border-top: solid #0e1621;
     padding: 0 1;
@@ -193,8 +200,56 @@ Header {
 #chat-input {
     background: #0e1621;
     border: none;
-    height: 3;
+    height: 100%;
     padding: 0 1;
-    margin: 1 0;
+    margin: 0 0;
     color: #b8c1cc;
+}
+
+#chat-input-hint {
+    height: 1;
+    background: #17212b;
+    color: #4c5e72;
+    text-align: center;
+    border-top: solid #0e1621;
+    display: none;
+}
+
+#chat-input-hint.active {
+    display: block;
+}
+
+.sender-row {
+    width: 100%;
+    height: auto;
+}
+
+.sender-row-left {
+    align: left top;
+}
+
+.sender-row-right {
+    align: right top;
+}
+
+.sender-left {
+    width: auto;
+    text-align: left;
+}
+
+.sender-right {
+    width: auto;
+    text-align: right;
+}
+
+.time {
+    color: #4c5e72;
+    width: auto;
+}
+
+#chat-input:focus > .input--cursor {
+    background: transparent;
+    color: #b8c1cc;
+    border-left: solid #b8c1cc;
+    text-style: none;
 }

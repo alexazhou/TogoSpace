@@ -1,3 +1,5 @@
+import re
+import unicodedata
 from collections import defaultdict
 
 from textual.app import ComposeResult
@@ -9,14 +11,8 @@ from api_client import MessageInfo, AgentInfo, RoomInfo
 
 
 def _char_width(ch: str) -> int:
-    cp = ord(ch)
-    return 2 if (
-        0x1100 <= cp <= 0x115F or 0x2E80 <= cp <= 0x303E
-        or 0x3040 <= cp <= 0xA4CF or 0xA960 <= cp <= 0xA97F
-        or 0xAC00 <= cp <= 0xD7FF or 0xF900 <= cp <= 0xFAFF
-        or 0xFE10 <= cp <= 0xFE1F or 0xFE30 <= cp <= 0xFE6F
-        or 0xFF01 <= cp <= 0xFF60 or 0xFFE0 <= cp <= 0xFFE6
-    ) else 1
+    # W=宽, F=全宽 固定占2列; A=歧义宽（中文环境下终端通常渲染为2列）
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F", "A") else 1
 
 
 def _truncate_to_cols(text: str, max_cols: int) -> str:
@@ -29,37 +25,6 @@ def _truncate_to_cols(text: str, max_cols: int) -> str:
         result += ch
         used += w
     return result
-
-
-def _char_wrap(text: str, width: int) -> str:
-    """按字符边界换行，正确处理 CJK 双宽字符，忽略词边界。"""
-    lines = []
-    for paragraph in text.split("\n"):
-        line, used = "", 0
-        for ch in paragraph:
-            w = _char_width(ch)
-            if used + w > width:
-                lines.append(line)
-                line, used = ch, w
-            else:
-                line += ch
-                used += w
-        lines.append(line)
-    return "\n".join(lines)
-
-
-class BubbleText(Static):
-    """气泡内容：按字符边界换行，避免 ASCII+CJK 混排时的词边界断行问题。"""
-
-    def __init__(self, text: str, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self._text = text
-
-    def render(self) -> str:
-        width = self.size.width
-        if width <= 0:
-            return self._text
-        return _char_wrap(self._text, width)
 
 
 class PreviewLabel(Static):
@@ -105,13 +70,26 @@ class MessageBubble(Vertical):
         idx = sum(ord(c) for c in name) % len(self.NAME_COLORS)
         return self.NAME_COLORS[idx]
 
-    def __init__(self, sender: str, content: str, side: str) -> None:
+    def __init__(self, sender: str, content: str, side: str, time: str = "") -> None:
         super().__init__()
         self._sender = sender
         self._content = content
         self._side = side
+        self._time = time
         self._last_max_w: int = 0
         self._name_color = self._get_name_color(sender)
+
+    @property
+    def _display_content(self) -> str:
+        """将 LLM 在句中插入的单个 \\n 替换为空格，保留 \\n\\n 段落分隔。"""
+        return re.sub(r'(?<!\n)\n(?!\n)', ' ', self._content)
+
+    def _content_display_width(self) -> int:
+        """计算显示内容各行中最大的显示列宽。"""
+        return max(
+            (sum(_char_width(ch) for ch in line) for line in self._display_content.split("\n")),
+            default=0,
+        )
 
     def on_resize(self, event) -> None:
         if self._side == "center":
@@ -120,8 +98,15 @@ class MessageBubble(Vertical):
         if new_max_w == self._last_max_w:
             return
         self._last_max_w = new_max_w
+        # padding: 1 2 → 水平共 4 列
+        PADDING = 4
+        content_w = self._content_display_width()
+        # 气泡宽度 = 内容宽 + padding，但不超过 max_w；长文本自动换行
+        bubble_w = max(10, min(content_w + PADDING, new_max_w))
         for inner in self.query(".bubble-inner"):
             inner.styles.max_width = new_max_w
+            for bubble in inner.query(".bubble"):
+                bubble.styles.width = bubble_w
 
     def compose(self) -> ComposeResult:
         if self._side == "center":
@@ -130,29 +115,35 @@ class MessageBubble(Vertical):
             with Horizontal(classes="bubble-row"):
                 yield Static("", classes="bubble-spacer")
                 with Vertical(classes="bubble-inner"):
-                    yield Static(f"[bold {self._name_color}]{self._sender}[/bold {self._name_color}]", classes="sender sender-right")
-                    yield BubbleText(self._content, classes="bubble bubble-right")
+                    with Horizontal(classes="sender-row sender-row-right"):
+                        yield Static("", classes="bubble-spacer")
+                        yield Static(f"[bold {self._name_color}]{self._sender}[/bold {self._name_color}]", classes="sender sender-right")
+                        yield Static(f" [dim]{self._time}[/]" if self._time else "", classes="time")
+                    yield Static(self._display_content, classes="bubble bubble-right", markup=False)
         else:
             with Horizontal(classes="bubble-row"):
                 with Vertical(classes="bubble-inner"):
-                    yield Static(f"[bold {self._name_color}]{self._sender}[/bold {self._name_color}]", classes="sender sender-left")
-                    yield BubbleText(self._content, classes="bubble bubble-left")
+                    with Horizontal(classes="sender-row sender-row-left"):
+                        yield Static(f"[bold {self._name_color}]{self._sender}[/bold {self._name_color}]", classes="sender sender-left")
+                        yield Static(f" [dim]{self._time}[/]" if self._time else "", classes="time")
+                    yield Static(self._display_content, classes="bubble bubble-left", markup=False)
                 yield Static("", classes="bubble-spacer")
 
 
 class MessageView(ScrollableContainer):
     async def load_messages(self, messages: list[MessageInfo], agent_order: list[str]) -> None:
         await self.remove_children()
-        bubbles = [
-            MessageBubble(m.sender, m.content, _get_side(m.sender, agent_order))
-            for m in messages
-        ]
+        bubbles = []
+        for m in messages:
+            time_str = m.time.strftime("%H:%M:%S") if m.time else ""
+            bubbles.append(MessageBubble(m.sender, m.content, _get_side(m.sender, agent_order), time_str))
+        
         if bubbles:
             await self.mount(*bubbles)
         self.scroll_end(animate=False)
 
-    async def append_message(self, sender: str, content: str, agent_order: list[str]) -> None:
-        bubble = MessageBubble(sender, content, _get_side(sender, agent_order))
+    async def append_message(self, sender: str, content: str, agent_order: list[str], time: str = "") -> None:
+        bubble = MessageBubble(sender, content, _get_side(sender, agent_order), time)
         await self.mount(bubble)
         self.scroll_end(animate=True)
 
@@ -203,9 +194,11 @@ class RoomPanel(Vertical):
             await room_list.append(team_header)
 
             for room in team_rooms:
+                icon = "👤" if room.room_type == "private" else "👥"
                 preview = last_previews.get(room.room_id, "暂无消息")
                 card = Vertical(
                     Horizontal(
+                        Label(f"{icon} ", classes="room-card-icon"),
                         Label("", classes="room-card-name"),
                         Label(f"[dim]{len(room.members)}人[/dim]", classes="room-card-members"),
                         classes="room-card-header",
@@ -244,10 +237,12 @@ class RoomPanel(Vertical):
             item = self.query_one(f"#room-{safe_id}", ListItem)
             room = self._room_map.get(room_id)
             name = room.room_name if room else room_id
+            icon = "👤" if room and room.room_type == "private" else "👥"
             if count > 0:
                 markup = f"{name} [bold #5288c1][{count}][/bold #5288c1]"
             else:
                 markup = f"{name} [#7f91a4][0][/]"
+            item.query_one(".room-card-icon", Label).update(f"{icon} ")
             item.query_one(".room-card-name", Label).update(markup)
         except Exception:
             pass
