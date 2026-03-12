@@ -81,17 +81,17 @@ def _write_e2e_configs(mock_port: int, tmp_dir: str):
     return config_dir, llm_path
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def backend_port() -> int:
     return _find_free_port()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def backend_base(backend_port) -> str:
     return f"http://127.0.0.1:{backend_port}"
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def backend_process(mock_llm_server, backend_port, backend_base, tmp_path_factory):
     """启动后端子进程，就绪后同步启动 WS 事件收集线程（非阻塞），然后 yield。"""
     tmp_dir = str(tmp_path_factory.mktemp("e2e_config"))
@@ -136,7 +136,7 @@ def backend_process(mock_llm_server, backend_port, backend_base, tmp_path_factor
     proc.wait()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def ws_events(backend_process, backend_port) -> list:
     """连接 WebSocket 并等待至少一条事件（最多 20s），在独立线程运行。"""
     collected: list = []
