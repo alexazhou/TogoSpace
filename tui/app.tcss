@@ -2,6 +2,14 @@ Screen {
     background: #0e1621;
 }
 
+Header {
+    background: #17212b;
+    color: #b8c1cc;
+    text-style: bold;
+    dock: top;
+    height: 3;
+}
+
 #main-horizontal {
     height: 1fr;
 }
@@ -79,6 +87,22 @@ RoomPanel ListItem {
     background: #2b5278;
 }
 
+.agent-card {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+}
+
+.agent-name {
+    width: 1fr;
+    color: #b8c1cc;
+}
+
+.agent-status {
+    width: auto;
+    text-align: right;
+}
+
 #right-panel {
     width: 1fr;
     background: #0e1621;
@@ -97,50 +121,35 @@ MessageBubble {
     height: auto;
 }
 
-.bubble-row {
+/* --- 核心消息气泡布局 (保留修复后的逻辑) --- */
+.sender-line {
     width: 100%;
     height: auto;
 }
 
-.bubble-spacer {
-    width: 1fr;
+.bubble-line {
+    width: 100%;
     height: auto;
 }
 
-.bubble-inner {
-    width: auto;
-    height: auto;
-}
-
-.bubble-inner-left {
+.msg-left {
     align-horizontal: left;
 }
 
-.bubble-inner-right {
+.msg-right {
     align-horizontal: right;
-    align: right top;
-    content-align: right top;
 }
 
 .sender {
-    text-style: bold;
     width: auto;
     height: auto;
     margin: 0 1;
+    text-style: bold;
 }
 
-.sender-left {
-    text-align: left;
-}
-
-.sender-right {
-    text-align: right;
-}
-
-.bubble-right-wrap {
-    width: 100%;
-    height: auto;
-    align-horizontal: right;
+.time {
+    color: #4c5e72;
+    width: auto;
 }
 
 .bubble {
@@ -148,21 +157,13 @@ MessageBubble {
     width: auto;
     height: auto;
     content-align: left top;
-    text-wrap: nowrap;
-}
-
-.bubble-left {
+    text-wrap: wrap;
     background: #182533;
     color: #b8c1cc;
-    text-align: left;
-    border: none;
 }
 
-.bubble-right {
+.msg-right .bubble {
     background: #2b5278;
-    color: #b8c1cc;
-    text-align: left;
-    border: none;
 }
 
 .bubble-system {
@@ -171,35 +172,7 @@ MessageBubble {
     color: #7f91a4;
     padding: 1 0;
 }
-
-.agent-card {
-    width: 100%;
-    height: auto;
-    padding: 1 2;
-}
-
-.agent-name {
-    width: 1fr;
-    color: #b8c1cc;
-}
-
-.agent-status {
-    width: auto;
-    text-align: right;
-}
-
-StatusBar {
-    height: 1;
-    background: #17212b;
-    padding: 0 2;
-    color: #7f91a4;
-}
-
-Header {
-    background: #17212b;
-    color: #b8c1cc;
-    text-style: bold;
-}
+/* --- 结束 --- */
 
 #chat-input-container {
     height: 1fr;
@@ -235,37 +208,9 @@ Header {
     display: block;
 }
 
-.sender-row {
-    width: auto;
-    height: auto;
-}
-
-.sender-row-left {
-    align: left top;
-}
-
-.sender-row-right {
-    align: right top;
-}
-
-.sender-left {
-    width: auto;
-    text-align: left;
-}
-
-.sender-right {
-    width: auto;
-    text-align: right;
-}
-
-.time {
-    color: #4c5e72;
-    width: auto;
-}
-
-#chat-input:focus > .input--cursor {
-    background: transparent;
-    color: #b8c1cc;
-    border-left: solid #b8c1cc;
-    text-style: none;
+StatusBar {
+    height: 1;
+    background: #17212b;
+    padding: 0 2;
+    color: #7f91a4;
 }
