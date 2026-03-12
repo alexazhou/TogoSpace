@@ -93,7 +93,7 @@ def _get_side(sender: str, agent_order: list[str]) -> str:
 
 
 class MessageBubble(Vertical):
-    MAX_RATIO = 0.6  # 气泡最大占消息区宽度的比例
+    MAX_RATIO = 0.7  # 气泡最大占消息区宽度的比例
 
     def __init__(self, sender: str, content: str, side: str) -> None:
         super().__init__()
@@ -119,12 +119,12 @@ class MessageBubble(Vertical):
             with Horizontal(classes="bubble-row"):
                 yield Static("", classes="bubble-spacer")
                 with Vertical(classes="bubble-inner"):
-                    yield Static(f"[bold #c4a55a]{self._sender}[/bold #c4a55a]", classes="sender sender-right")
+                    yield Static(f"[bold #7f91a4]{self._sender}[/bold #7f91a4]", classes="sender sender-right")
                     yield BubbleText(self._content, classes="bubble bubble-right")
         else:
             with Horizontal(classes="bubble-row"):
                 with Vertical(classes="bubble-inner"):
-                    yield Static(f"[bold #7eb8d4]{self._sender}[/bold #7eb8d4]", classes="sender sender-left")
+                    yield Static(f"[bold #56d4b0]{self._sender}[/bold #56d4b0]", classes="sender sender-left")
                     yield BubbleText(self._content, classes="bubble bubble-left")
                 yield Static("", classes="bubble-spacer")
 
@@ -160,7 +160,7 @@ class RoomPanel(Vertical):
     def _get_agent_status_markup(self, status: str) -> str:
         if status == "active":
             return "[bold #56d4b0]● 活跃[/]"
-        return "[#484f58]○ 空闲[/]"
+        return "[#7f91a4]○ 空闲[/]"
 
     async def load(
         self,
@@ -234,9 +234,9 @@ class RoomPanel(Vertical):
             room = self._room_map.get(room_id)
             name = room.room_name if room else room_id
             if count > 0:
-                markup = f"{name} [bold red][未读:{count}][/bold red]"
+                markup = f"{name} [bold #5288c1][{count}][/bold #5288c1]"
             else:
-                markup = f"{name} [#6e7681][未读:0][/]"
+                markup = f"{name} [#7f91a4][0][/]"
             item.query_one(".room-card-name", Label).update(markup)
         except Exception:
             pass
