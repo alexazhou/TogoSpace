@@ -2,7 +2,7 @@
 import pytest
 from model.chat_model import ChatMessage
 from service import agent_service, room_service
-from base import ServiceTestCase
+from ..base import ServiceTestCase
 
 TEAM = "test_team"
 
@@ -13,8 +13,8 @@ class TestAgentService(ServiceTestCase):
         room_service.init()
         # 模拟配置初始化
         agents_cfg = [
-            {"name": "alice", "system_prompt": "Alice prompt {participants}", "model": "gpt-3.5-turbo"},
-            {"name": "bob", "system_prompt": "Bob prompt {participants}", "model": "gpt-3.5-turbo"},
+            {"name": "alice", "system_prompt": "Alice prompt", "model": "gpt-3.5-turbo"},
+            {"name": "bob", "system_prompt": "Bob prompt", "model": "gpt-3.5-turbo"},
         ]
         team_cfg = {
             "name": TEAM,
