@@ -124,7 +124,7 @@ MessageBubble {
 
 .bubble {
     padding: 1 2;
-    width: 100%;
+    width: auto;
     height: auto;
 }
 
