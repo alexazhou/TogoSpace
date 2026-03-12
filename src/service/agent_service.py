@@ -222,14 +222,6 @@ def create_team_agents(team_name: str, team_config: dict) -> None:
             if name != SpecialAgent.OPERATOR:
                 agent_names_in_team.add(name)
 
-    # 收集每个 agent 在该 team 中的 peers
-    agent_peers: Dict[str, set] = {name: set() for name in agent_names_in_team}
-    for group in team_config["groups"]:
-        names = [n for n in group["members"] if n != SpecialAgent.OPERATOR]
-        for name in names:
-            if name in agent_peers:
-                agent_peers[name].update(n for n in names if n != name)
-
     # 加载通用规则 Prompt
     base_prompt_tmpl = load_prompt("src/prompts/GroupChat.md")
 
@@ -244,13 +236,8 @@ def create_team_agents(team_name: str, team_config: dict) -> None:
         else:
             agent_specific_prompt = load_prompt(cfg["prompt_file"])
         
-        participants = sorted(list(agent_peers.get(name, set())))
-        participants_str = "、".join(participants)
-        
         # 组合 Prompt: 基础规则 + Agent 性格
-        # 注意：participants 占位符可能在 base 或 agent 自己的 prompt 中
         full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
-        full_prompt = full_prompt.replace("{participants}", participants_str)
 
         key = _make_agent_key(team_name, name)
         _agents[key] = Agent(name=name, team_name=team_name, system_prompt=full_prompt, model=cfg["model"])
