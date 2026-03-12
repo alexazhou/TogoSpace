@@ -54,7 +54,7 @@ RoomPanel ListItem {
 
 .room-card-name {
     text-style: bold;
-    color: #cfd6df;
+    color: #b8c1cc;
     width: 1fr;
 }
 
@@ -65,7 +65,7 @@ RoomPanel ListItem {
 }
 
 .room-card-preview {
-    color: #7f91a4;
+    color: #6c7a8d;
     width: 100%;
     overflow: hidden;
 }
@@ -123,21 +123,21 @@ MessageBubble {
 }
 
 .bubble {
-    padding: 0 1;
+    padding: 1 2;
     width: 100%;
     height: auto;
 }
 
 .bubble-left {
     background: #182533;
-    color: #cfd6df;
+    color: #b8c1cc;
     text-align: left;
     border: none;
 }
 
 .bubble-right {
     background: #2b5278;
-    color: #cfd6df;
+    color: #b8c1cc;
     text-align: left;
     border: none;
 }
@@ -157,7 +157,7 @@ MessageBubble {
 
 .agent-name {
     width: 1fr;
-    color: #cfd6df;
+    color: #b8c1cc;
 }
 
 .agent-status {
@@ -174,7 +174,7 @@ StatusBar {
 
 Header {
     background: #17212b;
-    color: #cfd6df;
+    color: #b8c1cc;
     text-style: bold;
 }
 
@@ -196,5 +196,5 @@ Header {
     height: 3;
     padding: 0 1;
     margin: 1 0;
-    color: #cfd6df;
+    color: #b8c1cc;
 }
