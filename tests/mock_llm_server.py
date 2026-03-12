@@ -5,19 +5,13 @@
 """
 import asyncio
 import json
-import socket
+import re
 import threading
 import time
 
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
-
-
-def _find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 class ChatCompletionsHandler(tornado.web.RequestHandler):
@@ -106,8 +100,12 @@ class ChatCompletionsHandler(tornado.web.RequestHandler):
 
 
 class MockLLMServer:
+    """Mock LLM API server using fixed port 18888 for testing."""
+
+    MOCK_PORT = 18888
+
     def __init__(self):
-        self.port: int = _find_free_port()
+        self.port: int = self.MOCK_PORT
         self._ioloop: tornado.ioloop.IOLoop = None
         self._thread: threading.Thread = None
         self._started = threading.Event()
