@@ -2,7 +2,7 @@
 import service.func_tool_service as func_tool_service
 import service.room_service as room_service
 from model.chat_context import ChatContext
-from ..base import ServiceTestCase
+from ...base import ServiceTestCase
 
 TEAM = "test_team"
 

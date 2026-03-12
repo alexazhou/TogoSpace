@@ -1,27 +1,21 @@
 """integration tests for service.agent_service"""
+import json
+import os
 import pytest
 from model.chat_model import ChatMessage
 from service import agent_service, room_service
-from ..base import ServiceTestCase
+from ...base import ServiceTestCase
 
 TEAM = "test_team"
+_CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
 
 
 class TestAgentService(ServiceTestCase):
     def setup_method(self):
         super().setup_method()
         room_service.init()
-        # 模拟配置初始化
-        agents_cfg = [
-            {"name": "alice", "system_prompt": "Alice prompt", "model": "gpt-3.5-turbo"},
-            {"name": "bob", "system_prompt": "Bob prompt", "model": "gpt-3.5-turbo"},
-        ]
-        team_cfg = {
-            "name": TEAM,
-            "groups": [
-                {"name": "general", "members": ["alice", "bob"], "initial_topic": "hello", "max_turns": 5}
-            ]
-        }
+        agents_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
+        team_cfg   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
         agent_service.init(agents_cfg)
         agent_service.create_team_agents(TEAM, team_cfg)
 
@@ -41,10 +35,10 @@ class TestAgentService(ServiceTestCase):
         room_service.create_room(TEAM, "general", ["alice"])
         room = room_service.get_room(f"general@{TEAM}")
         room.add_message("bob", "hello alice")
-        
+
         alice = agent_service.get_agent(TEAM, "alice")
         alice.sync_room(room)
-        
+
         # 初始公告 + bob 消息
         assert len(alice._history) == 2
         assert "hello alice" in alice._history[1].content
@@ -52,11 +46,11 @@ class TestAgentService(ServiceTestCase):
     def test_sync_room_skips_own_messages(self):
         room_service.create_room(TEAM, "general", ["alice"])
         room = room_service.get_room(f"general@{TEAM}")
-        
+
         alice = agent_service.get_agent(TEAM, "alice")
         # alice 发送消息
         room.add_message("alice", "i am talking")
-        
+
         alice.sync_room(room)
         # 只应有初始公告，不应有自己的消息
         assert len(alice._history) == 1

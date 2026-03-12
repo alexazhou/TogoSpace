@@ -10,7 +10,7 @@ from service.agent_service import Agent
 from service.message_bus import Message
 from model.agent_event import RoomMessageEvent
 from constants import MessageBusTopic
-from ..base import ServiceTestCase
+from ...base import ServiceTestCase
 
 TEAM = "test_team"
 

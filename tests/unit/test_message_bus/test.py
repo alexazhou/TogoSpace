@@ -2,7 +2,7 @@
 import service.message_bus as message_bus
 from service.message_bus import Message
 from constants import MessageBusTopic
-from ..base import ServiceTestCase
+from ...base import ServiceTestCase
 
 
 class TestMessageBus(ServiceTestCase):

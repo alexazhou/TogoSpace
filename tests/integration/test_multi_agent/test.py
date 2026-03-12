@@ -1,5 +1,6 @@
 """integration tests — 验证多 Agent 完整对话流程（mock LLM，真实 service 层）"""
 import json
+import os
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,9 +10,10 @@ import service.func_tool_service as func_tool_service
 import service.scheduler_service as scheduler
 from util.llm_api_util import LlmApiMessage, ToolCall
 from constants import OpenaiLLMApiRole
-from ..base import ServiceTestCase
+from ...base import ServiceTestCase
 
 TEAM = "test_team"
+_CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
 
 
 def _make_infer_response(content=None, tool_calls=None):
@@ -30,29 +32,17 @@ def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
     )
 
 
-AGENTS_CONFIG = [
-    {"name": "alice", "system_prompt": "你是alice", "model": "qwen-plus"},
-    {"name": "bob",   "system_prompt": "你是bob", "model": "qwen-plus"},
-]
-
-TEAM_CONFIG = {
-    "name": TEAM,
-    "groups": [
-        {"name": "general", "members": ["alice", "bob"], "max_turns": 2},
-    ],
-    "max_function_calls": 5,
-}
-
-
 class TestIntegrationMultiAgentChat(ServiceTestCase):
     def setup_method(self):
         super().setup_method()
+        agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
+        team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
         room_service.init()
         room_service.create_room(TEAM, "general", ["alice", "bob"])
         func_tool_service.init()
-        agent_service.init(AGENTS_CONFIG)
-        agent_service.create_team_agents(TEAM, TEAM_CONFIG)
-        scheduler.init([TEAM_CONFIG])
+        agent_service.init(agents_config)
+        agent_service.create_team_agents(TEAM, team_config)
+        scheduler.init([team_config])
 
     async def test_two_agents_exchange_messages(self):
         """alice 和 bob 各发一轮消息，general 房间应有消息。"""
