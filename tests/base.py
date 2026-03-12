@@ -1,9 +1,25 @@
 """所有测试用例的基类，负责统一初始化和清理所有 service 的全局状态。"""
+import os
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
+
 import service.message_bus as message_bus
 import service.room_service as room_service
 import service.agent_service as agent_service
 import service.func_tool_service as func_tool_service
 import service.scheduler_service as scheduler
+
+_SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
+_BACKEND_READY_TIMEOUT = 20
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 class ServiceTestCase:
@@ -11,7 +27,79 @@ class ServiceTestCase:
 
     使用 pytest 的 setup_method / teardown_method 钩子（对应 unittest 的 setUp / tearDown）。
     子类可重写这两个方法，但须在首行调用 super()。
+
+    若子类需要完整的 HTTP 后端，将 requires_backend = True，框架会在整个测试类
+    开始前自动启动后端子进程，结束后自动停止。启动完成后可通过 self.backend_base_url
+    和 self.backend_port 访问服务地址。
     """
+
+    requires_backend: bool = False
+
+    backend_port: int = None
+    backend_base_url: str = None
+    _backend_proc: subprocess.Popen = None
+
+    # ------------------------------------------------------------------
+    # 类级别生命周期（后端子进程）
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def setup_class(cls):
+        if cls.requires_backend:
+            cls._start_backend()
+
+    @classmethod
+    def teardown_class(cls):
+        if cls.requires_backend:
+            cls._stop_backend()
+
+    @classmethod
+    def _start_backend(cls):
+        """启动后端子进程，等待 HTTP 服务就绪。"""
+        port = _find_free_port()
+        env = os.environ.copy()
+        env["PYTHONPATH"] = _SRC_DIR
+
+        proc = subprocess.Popen(
+            [sys.executable, os.path.join(_SRC_DIR, "main.py"), "--port", str(port)],
+            cwd=_SRC_DIR,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+
+        base_url = f"http://127.0.0.1:{port}"
+        deadline = time.time() + _BACKEND_READY_TIMEOUT
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(f"{base_url}/agents", timeout=1) as resp:
+                    if resp.status == 200:
+                        break
+            except Exception:
+                pass
+            time.sleep(0.3)
+        else:
+            proc.terminate()
+            proc.wait()
+            raise RuntimeError(f"后端服务在 {_BACKEND_READY_TIMEOUT}s 内未就绪")
+
+        cls._backend_proc = proc
+        cls.backend_port = port
+        cls.backend_base_url = base_url
+
+    @classmethod
+    def _stop_backend(cls):
+        """终止后端子进程并清理类属性。"""
+        if cls._backend_proc is not None:
+            cls._backend_proc.terminate()
+            cls._backend_proc.wait()
+            cls._backend_proc = None
+            cls.backend_port = None
+            cls.backend_base_url = None
+
+    # ------------------------------------------------------------------
+    # 方法级别生命周期（in-process service 状态）
+    # ------------------------------------------------------------------
 
     def setup_method(self):
         message_bus.init()
