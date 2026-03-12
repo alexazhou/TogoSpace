@@ -118,8 +118,14 @@ class MessageView(ScrollableContainer):
 
     async def append_message(self, sender: str, content: str, agent_order: list[str], time: str = "") -> None:
         bubble = MessageBubble(sender, content, _get_side(sender, agent_order), time)
+        # Check if we are currently at the bottom before adding the new message
+        is_at_bottom = self.scroll_y >= self.max_scroll_y
+        
         await self.mount(bubble)
-        self.scroll_end(animate=False)
+        
+        # Only scroll to the new end if we were already at the bottom
+        if is_at_bottom:
+            self.scroll_end(animate=False)
 
 
 class RoomPanel(Vertical):
