@@ -4,6 +4,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 
@@ -50,6 +51,7 @@ class ServiceTestCase:
     _backend_proc: subprocess.Popen = None
     _backend_config_dir: str = None
     _backend_llm_config: str = None
+    _llm_tmp_path: str = None
 
     mock_llm_server: MockLLMServer = None
     mock_llm_port: int = None
@@ -72,6 +74,9 @@ class ServiceTestCase:
             cls._stop_backend()
         if cls.requires_mock_llm:
             cls._stop_mock_llm()
+        if cls._llm_tmp_path:
+            os.unlink(cls._llm_tmp_path)
+            cls._llm_tmp_path = None
 
     @classmethod
     def _start_mock_llm(cls):
@@ -89,8 +94,29 @@ class ServiceTestCase:
 
     @classmethod
     def _setup_pre_backend(cls):
-        """子类重写此方法，在后端启动前配置 _backend_config_dir 和 _backend_llm_config。"""
-        pass
+        """默认自动检测子类 test.py 同级的 config/ 目录：
+        - 若存在，设置为 _backend_config_dir
+        - 若 config/llm.json 存在，替换 {mock_llm_port} 占位符后写入临时文件
+
+        子类可重写此方法以覆盖默认行为。
+        """
+        test_file = sys.modules[cls.__module__].__file__
+        test_dir = os.path.dirname(os.path.abspath(test_file))
+        config_dir = os.path.join(test_dir, "config")
+        if not os.path.isdir(config_dir):
+            return
+
+        cls._backend_config_dir = config_dir
+
+        llm_json = os.path.join(config_dir, "llm.json")
+        if os.path.isfile(llm_json):
+            with open(llm_json) as f:
+                llm_content = f.read().replace("{mock_llm_port}", str(cls.mock_llm_port))
+            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+            tmp.write(llm_content)
+            tmp.close()
+            cls._backend_llm_config = tmp.name
+            cls._llm_tmp_path = tmp.name
 
     @classmethod
     def _start_backend(cls):

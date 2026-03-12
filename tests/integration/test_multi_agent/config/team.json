@@ -1,0 +1,1 @@
+{"name": "test_team", "groups": [{"name": "general", "members": ["alice", "bob"], "max_turns": 2}], "max_function_calls": 5}
