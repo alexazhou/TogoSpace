@@ -84,15 +84,6 @@ class MessageBubble(Vertical):
         """Replace regular spaces with Non-Breaking Spaces to prevent premature wrapping."""
         return self._content.replace(" ", "\u00A0")
 
-    def on_resize(self, event) -> None:
-        if self._side == "center":
-            return
-        # Calculate max width based on 80% of total width
-        new_max_w = max(20, int(event.size.width * self.MAX_RATIO))
-        # Directly limit the bubble label's max width
-        for bubble in self.query(".bubble"):
-            bubble.styles.max_width = new_max_w
-
     def compose(self) -> ComposeResult:
         if self._side == "center":
             yield Label(f"[dim italic]{self._content}[/]", classes="bubble-system")
@@ -101,7 +92,7 @@ class MessageBubble(Vertical):
         side_class = f"msg-{self._side}"
         
         # Row 1: Sender name and time
-        with Horizontal(classes=f"sender-line {side_class}"):
+        with Horizontal(classes=f"msg-line {side_class}"):
             if self._side == "right":
                 yield Label(f"[dim]{self._time}[/] " if self._time else "", classes="time")
                 yield Label(f"[bold {self._name_color}]{self._sender}[/bold {self._name_color}]", classes="sender")
@@ -110,9 +101,8 @@ class MessageBubble(Vertical):
                 yield Label(f" [dim]{self._time}[/]" if self._time else "", classes="time")
         
         # Row 2: Message bubble
-        with Horizontal(classes=f"bubble-line {side_class}"):
+        with Horizontal(classes=f"msg-line {side_class}"):
             yield Label(self._display_content, classes="bubble", markup=False)
-
 
 class MessageView(ScrollableContainer):
     async def load_messages(self, messages: list[MessageInfo], agent_order: list[str]) -> None:
