@@ -230,6 +230,9 @@ def create_team_agents(team_name: str, team_config: dict) -> None:
             if name in agent_peers:
                 agent_peers[name].update(n for n in names if n != name)
 
+    # 加载通用规则 Prompt
+    base_prompt_tmpl = load_prompt("src/prompts/GroupChat.md")
+
     for name in agent_names_in_team:
         if name not in _agent_defs:
             logger.warning(f"Agent 定义不存在: {name}，跳过创建")
@@ -237,14 +240,20 @@ def create_team_agents(team_name: str, team_config: dict) -> None:
 
         cfg = _agent_defs[name]
         if "system_prompt" in cfg:
-            prompt = cfg["system_prompt"]
+            agent_specific_prompt = cfg["system_prompt"]
         else:
-            prompt = load_prompt(cfg["prompt_file"])
+            agent_specific_prompt = load_prompt(cfg["prompt_file"])
+        
         participants = sorted(list(agent_peers.get(name, set())))
-        prompt = prompt.replace("{participants}", "、".join(participants))
+        participants_str = "、".join(participants)
+        
+        # 组合 Prompt: 基础规则 + Agent 性格
+        # 注意：participants 占位符可能在 base 或 agent 自己的 prompt 中
+        full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
+        full_prompt = full_prompt.replace("{participants}", participants_str)
 
         key = _make_agent_key(team_name, name)
-        _agents[key] = Agent(name=name, team_name=team_name, system_prompt=prompt, model=cfg["model"])
+        _agents[key] = Agent(name=name, team_name=team_name, system_prompt=full_prompt, model=cfg["model"])
         logger.info(f"创建 Agent 实例: key={key}, model={cfg['model']}")
 
 
