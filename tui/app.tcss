@@ -120,14 +120,8 @@ MessageBubble {
     width: 100%;
     height: auto;
 }
-
 /* --- 核心消息气泡布局 (保留修复后的逻辑) --- */
-.sender-line {
-    width: 100%;
-    height: auto;
-}
-
-.bubble-line {
+.msg-line {
     width: 100%;
     height: auto;
 }
@@ -155,6 +149,7 @@ MessageBubble {
 .bubble {
     padding: 1 2;
     width: auto;
+    max-width: 80%;
     height: auto;
     content-align: left top;
     text-wrap: wrap;
@@ -162,9 +157,11 @@ MessageBubble {
     color: #b8c1cc;
 }
 
+/* 右侧气泡背景色 */
 .msg-right .bubble {
     background: #2b5278;
 }
+
 
 .bubble-system {
     width: 100%;
