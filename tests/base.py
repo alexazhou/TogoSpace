@@ -1,10 +1,8 @@
 """所有测试用例的基类，负责统一初始化和清理所有 service 的全局状态。"""
-import json
 import os
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 
@@ -35,16 +33,16 @@ class ServiceTestCase:
         requires_backend = True   — 在整个测试类前后自动启动/停止后端子进程
         requires_mock_llm = True  — 同时自动启动/停止 MockLLMServer
 
-    子类可重写 _setup_pre_backend() 钩子，在后端启动前创建自定义配置文件并设置：
-        cls._backend_config_dir  — 传给 --config-dir 参数
-        cls._backend_llm_config  — 传给 --llm-config 参数（requires_mock_llm=True 时
-                                    可通过 cls.mock_llm_port 获取 mock 地址）
+    配置目录选择：
+        use_custom_config = True  — 使用测试类自己的 config/ 目录
+        use_custom_config = False — 使用 tests/config/ 默认配置目录
 
     启动完成后可通过 self.backend_base_url / self.backend_port 访问服务地址。
     """
 
     requires_backend: bool = False
     requires_mock_llm: bool = False
+    use_custom_config: bool = False
 
     backend_port: int = None
     backend_base_url: str = None
@@ -74,9 +72,6 @@ class ServiceTestCase:
             cls._stop_backend()
         if cls.requires_mock_llm:
             cls._stop_mock_llm()
-        if cls._llm_tmp_path:
-            os.unlink(cls._llm_tmp_path)
-            cls._llm_tmp_path = None
 
     @classmethod
     def _start_mock_llm(cls):
@@ -94,29 +89,22 @@ class ServiceTestCase:
 
     @classmethod
     def _setup_pre_backend(cls):
-        """默认自动检测子类 test.py 同级的 config/ 目录：
-        - 若存在，设置为 _backend_config_dir
-        - 若 config/llm.json 存在，替换 {mock_llm_port} 占位符后写入临时文件
-
-        子类可重写此方法以覆盖默认行为。
+        """配置选择机制：
+        - 若 use_custom_config = True，使用测试类自己的 config/ 目录
+        - 否则使用 tests/config/ 默认配置目录
         """
-        test_file = sys.modules[cls.__module__].__file__
-        test_dir = os.path.dirname(os.path.abspath(test_file))
-        config_dir = os.path.join(test_dir, "config")
+        # 确定使用的配置目录
+        if cls.use_custom_config:
+            test_file = sys.modules[cls.__module__].__file__
+            test_dir = os.path.dirname(os.path.abspath(test_file))
+            config_dir = os.path.join(test_dir, "config")
+        else:
+            config_dir = os.path.join(os.path.dirname(__file__), "config")
+
         if not os.path.isdir(config_dir):
             return
 
         cls._backend_config_dir = config_dir
-
-        llm_json = os.path.join(config_dir, "llm.json")
-        if os.path.isfile(llm_json):
-            with open(llm_json) as f:
-                llm_content = f.read().replace("{mock_llm_port}", str(cls.mock_llm_port))
-            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-            tmp.write(llm_content)
-            tmp.close()
-            cls._backend_llm_config = tmp.name
-            cls._llm_tmp_path = tmp.name
 
     @classmethod
     def _start_backend(cls):

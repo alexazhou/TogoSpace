@@ -13,6 +13,7 @@ TEAM = "v6test"
 class TestV6Api(ServiceTestCase):
     requires_backend = True
     requires_mock_llm = True
+    use_custom_config = True  # 使用 tests/api/test_v6_api/config/
 
     async def test_room_types_in_list(self):
         """验证 GET /rooms 是否正确返回 room_type 和 team_name 字段。"""
