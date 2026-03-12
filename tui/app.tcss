@@ -112,6 +112,16 @@ MessageBubble {
     height: auto;
 }
 
+.bubble-inner-left {
+    align-horizontal: left;
+}
+
+.bubble-inner-right {
+    align-horizontal: right;
+    align: right top;
+    content-align: right top;
+}
+
 .sender {
     text-style: bold;
     width: auto;
@@ -127,12 +137,18 @@ MessageBubble {
     text-align: right;
 }
 
+.bubble-right-wrap {
+    width: 100%;
+    height: auto;
+    align-horizontal: right;
+}
+
 .bubble {
     padding: 1 2;
     width: auto;
     height: auto;
     content-align: left top;
-    text-wrap: wrap;
+    text-wrap: nowrap;
 }
 
 .bubble-left {
@@ -220,7 +236,7 @@ Header {
 }
 
 .sender-row {
-    width: 100%;
+    width: auto;
     height: auto;
 }
 

@@ -1,7 +1,7 @@
-import re
 import unicodedata
 from collections import defaultdict
 
+from rich.text import Text as RichText
 from textual.app import ComposeResult
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.widget import Widget
@@ -78,11 +78,57 @@ class MessageBubble(Vertical):
         self._time = time
         self._last_max_w: int = 0
         self._name_color = self._get_name_color(sender)
+        self._bubble_label: Label | None = None
 
-    @property
-    def _display_content(self) -> str:
-        """将 LLM 在句中插入的单个 \\n 替换为空格，保留 \\n\\n 段落分隔。"""
-        return re.sub(r'(?<!\n)\n(?!\n)', ' ', self._content)
+    def _wrap_content(self, max_cols: int) -> str:
+        """自定义换行算法：CJK 字符在列宽处换行，ASCII 单词在空格处换行。
+        避免 ASCII 单词（如 "Dave"、"100"）孤立在行尾。
+        """
+        if max_cols <= 0:
+            return self._content
+        text = self._content
+        lines: list[str] = []
+        line_chars: list[str] = []
+        line_cols: int = 0
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            if ch == '\n':
+                lines.append(''.join(line_chars))
+                line_chars = []; line_cols = 0; i += 1
+                continue
+            if ch == ' ':
+                line_chars.append(ch); line_cols += 1; i += 1
+                continue
+            cw = _char_width(ch)
+            if cw == 2:
+                if line_cols + cw > max_cols:
+                    lines.append(''.join(line_chars).rstrip())
+                    line_chars = []; line_cols = 0
+                line_chars.append(ch); line_cols += cw; i += 1
+            else:
+                j = i
+                while j < len(text) and _char_width(text[j]) == 1 and text[j] != ' ':
+                    j += 1
+                word = text[i:j]; word_cols = len(word)
+                if line_cols + word_cols > max_cols:
+                    if word_cols <= max_cols:
+                        lines.append(''.join(line_chars).rstrip())
+                        line_chars = list(word); line_cols = word_cols
+                    else:
+                        avail = max_cols - line_cols
+                        if avail > 0:
+                            line_chars.extend(list(word[:avail])); word = word[avail:]
+                        lines.append(''.join(line_chars))
+                        while len(word) > max_cols:
+                            lines.append(word[:max_cols]); word = word[max_cols:]
+                        line_chars = list(word); line_cols = len(word)
+                else:
+                    line_chars.extend(list(word)); line_cols += word_cols
+                i = j
+        if line_chars:
+            lines.append(''.join(line_chars).rstrip())
+        return '\n'.join(lines)
 
     def on_resize(self, event) -> None:
         if self._side == "center":
@@ -91,31 +137,34 @@ class MessageBubble(Vertical):
         if new_max_w == self._last_max_w:
             return
         self._last_max_w = new_max_w
-        # 在 bubble 上设 max_width，让 Textual 自动根据内容计算气泡宽度和换行
         for inner in self.query(".bubble-inner"):
             inner.styles.max_width = new_max_w
-            for bubble in inner.query(".bubble"):
-                bubble.styles.max_width = new_max_w
+        # padding: 1 2 → 左右各 2 = 4 cols
+        content_cols = new_max_w - 4
+        if content_cols > 0 and self._bubble_label is not None:
+            self._bubble_label.update(RichText(self._wrap_content(content_cols)))
 
     def compose(self) -> ComposeResult:
         if self._side == "center":
-            yield Static(f"[dim italic]{self._content}[/]", classes="bubble-system")
+            yield Label(f"[dim italic]{self._content}[/]", classes="bubble-system")
         elif self._side == "right":
+            self._bubble_label = Label(self._content, classes="bubble bubble-right", markup=False)
             with Horizontal(classes="bubble-row"):
                 yield Static("", classes="bubble-spacer")
-                with Vertical(classes="bubble-inner"):
+                with Vertical(classes="bubble-inner bubble-inner-right"):
                     with Horizontal(classes="sender-row sender-row-right"):
-                        yield Static("", classes="bubble-spacer")
-                        yield Static(f"[bold {self._name_color}]{self._sender}[/bold {self._name_color}]", classes="sender sender-right")
-                        yield Static(f" [dim]{self._time}[/]" if self._time else "", classes="time")
-                    yield Static(self._display_content, classes="bubble bubble-right", markup=False)
+                        yield Label(f"[bold {self._name_color}]{self._sender}[/bold {self._name_color}]", classes="sender sender-right")
+                        yield Label(f" [dim]{self._time}[/]" if self._time else "", classes="time")
+                    with Horizontal(classes="bubble-right-wrap"):
+                        yield self._bubble_label
         else:
+            self._bubble_label = Label(self._content, classes="bubble bubble-left", markup=False)
             with Horizontal(classes="bubble-row"):
-                with Vertical(classes="bubble-inner"):
+                with Vertical(classes="bubble-inner bubble-inner-left"):
                     with Horizontal(classes="sender-row sender-row-left"):
-                        yield Static(f"[bold {self._name_color}]{self._sender}[/bold {self._name_color}]", classes="sender sender-left")
-                        yield Static(f" [dim]{self._time}[/]" if self._time else "", classes="time")
-                    yield Static(self._display_content, classes="bubble bubble-left", markup=False)
+                        yield Label(f"[bold {self._name_color}]{self._sender}[/bold {self._name_color}]", classes="sender sender-left")
+                        yield Label(f" [dim]{self._time}[/]" if self._time else "", classes="time")
+                    yield self._bubble_label
                 yield Static("", classes="bubble-spacer")
 
 
