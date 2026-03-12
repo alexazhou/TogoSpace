@@ -119,7 +119,7 @@ class MessageView(ScrollableContainer):
     async def append_message(self, sender: str, content: str, agent_order: list[str], time: str = "") -> None:
         bubble = MessageBubble(sender, content, _get_side(sender, agent_order), time)
         await self.mount(bubble)
-        self.scroll_end(animate=True)
+        self.scroll_end(animate=False)
 
 
 class RoomPanel(Vertical):
