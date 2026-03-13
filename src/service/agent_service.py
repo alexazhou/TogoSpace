@@ -37,6 +37,8 @@ class Agent:
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()  # 待处理的房间任务队列
         self._is_running: bool = False  # 标志当前是否正在处理任务协程
         self._last_published_status: Optional[str] = None  # 记录上一次发布的状态，用于幂等校验
+        self._last_called: dict = {}  # 记录当前轮次最后一次工具调用的名称和参数
+        self._turn_ctx: Optional[ChatContext] = None  # 当前轮次的上下文（run_turn 期间有效）
 
     @property
     def key(self) -> str:
@@ -88,26 +90,21 @@ class Agent:
         room: ChatRoom = room_service.get_room(room_key)
         self.sync_room(room)
 
-        ctx = ChatContext(
+        self._last_called = {}
+        self._turn_ctx = ChatContext(
             agent_name=self.name,
             team_name=self.team_name,
             chat_room=room,
             get_room=room_service.get_room,
         )
-        last_called: dict = {}
-
-        def executor(name: str, args: str) -> str:
-            last_called["name"] = name
-            last_called["args"] = args
-            return func_tool_service.run_tool_call(name, args, context=ctx)
 
         def is_turn_done() -> bool:
-            called = last_called.get("name")
+            called = self._last_called.get("name")
             if called == "skip_chat_msg":
                 return True
             if called == "send_chat_msg":
                 try:
-                    target = json.loads(last_called["args"]).get("room_name")
+                    target = json.loads(self._last_called["args"]).get("room_name")
                     return target == room.name or target == room.key
                 except Exception:
                     return False
@@ -116,9 +113,8 @@ class Agent:
         hint = f"你必须调用 send_chat_msg 向当前房间 {room.name} 发送消息或 skip_chat_msg 跳过发言，不能直接输出文字。"
         max_retries = 3
         for _ in range(max_retries):
-            response = await self.chat(
+            await self.chat(
                 tools=func_tool_service.get_tools(),
-                function_executor=executor,
                 done_check=is_turn_done,
                 max_function_calls=max_function_calls,
             )
@@ -130,21 +126,19 @@ class Agent:
     async def chat(
         self,
         tools: Optional[List[Tool]] = None,
-        function_executor: Optional[Callable[[str, str], str]] = None,
         done_check: Optional[Callable[[], bool]] = None,
         max_function_calls: int = 5,
     ) -> LlmApiMessage:
-        """基于当前 _history 自动执行对话和 tool calls 循环。
+        """基于当前 _history 自动执行一轮对话（含对话中的多次 tool calls ），在满足条件时停止。
 
         停止条件（任一满足即返回）：
-        - LLM 返回无 tool_calls（自然结束）
+        - LLM 返回无 tool_calls（即输出文本，自然结束）
         - done_check() 返回 True（调用方判定完成）
         - 达到 max_function_calls 上限
         """
         assistant_message: Optional[LlmApiMessage] = None
         for _ in range(max_function_calls):
             assistant_message = await self._infer(tools)
-            self._history.append(assistant_message)
 
             if not assistant_message.tool_calls:
                 return assistant_message
@@ -153,8 +147,7 @@ class Agent:
             for tool_call in assistant_message.tool_calls:
                 name = tool_call.function.get("name")
                 args = tool_call.function.get("arguments", "")
-                result = function_executor(name, args)
-                self._history.append(LlmApiMessage.tool_result(tool_call.id, result))
+                self._execute_tool(tool_call.id, name, args)
 
             if done_check and done_check():
                 return assistant_message
@@ -175,7 +168,7 @@ class Agent:
                 self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}"))
 
     async def _infer(self, tools: Optional[List[Tool]]) -> LlmApiMessage:
-        """基于当前 _history 发起一次 LLM 调用，返回 assistant 消息。"""
+        """基于当前 _history 发起一次 LLM 调用，将 assistant 消息写入历史并返回。"""
         assert self._history and self._history[-1].role in (OpenaiLLMApiRole.USER, OpenaiLLMApiRole.TOOL, OpenaiLLMApiRole.SYSTEM), \
             f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
         ctx = AgentDialogContext(
@@ -184,7 +177,15 @@ class Agent:
             tools=tools or None,
         )
         response = await llm_service.infer(self.model, ctx)
-        return response.choices[0].message
+        assistant_message = response.choices[0].message
+        self._history.append(assistant_message)
+        return assistant_message
+
+    def _execute_tool(self, tool_call_id: str, name: str, args: str) -> None:
+        """执行工具调用，将结果写入 _history，并记录调用信息供 run_turn 判定完成条件。"""
+        self._last_called = {"name": name, "args": args}
+        result = func_tool_service.run_tool_call(name, args, context=self._turn_ctx)
+        self._history.append(LlmApiMessage.tool_result(tool_call_id, result))
 
 
 def startup() -> None:
