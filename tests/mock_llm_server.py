@@ -6,7 +6,6 @@
 import asyncio
 import json
 import re
-import socket
 import threading
 import time
 
@@ -15,10 +14,7 @@ import tornado.ioloop
 import tornado.web
 
 
-def _find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+MOCK_LLM_PORT = 19876
 
 
 class ChatCompletionsHandler(tornado.web.RequestHandler):
@@ -104,13 +100,14 @@ class ChatCompletionsHandler(tornado.web.RequestHandler):
 
 
 class MockLLMServer:
-    """Mock LLM API server using dynamic port for testing."""
+    """Mock LLM API server using fixed port for testing."""
 
     def __init__(self):
-        self.port: int = _find_free_port()
+        self.port: int = MOCK_LLM_PORT
         self._ioloop: tornado.ioloop.IOLoop = None
         self._thread: threading.Thread = None
         self._started = threading.Event()
+        self._server: tornado.httpserver.HTTPServer = None
 
     def start(self) -> None:
         def _run():
@@ -121,8 +118,8 @@ class MockLLMServer:
             app = tornado.web.Application([
                 (r"/v1/chat/completions", ChatCompletionsHandler),
             ])
-            server = tornado.httpserver.HTTPServer(app)
-            server.listen(self.port, "127.0.0.1")
+            self._server = tornado.httpserver.HTTPServer(app)
+            self._server.listen(self.port, "127.0.0.1")
             self._started.set()
             self._ioloop.start()
 
@@ -132,6 +129,11 @@ class MockLLMServer:
 
     def stop(self) -> None:
         if self._ioloop is not None:
-            self._ioloop.add_callback(self._ioloop.stop)
+            def _shutdown():
+                if self._server:
+                    self._server.stop()
+                self._ioloop.stop()
+            self._ioloop.add_callback(_shutdown)
             self._thread.join(timeout=5)
             self._ioloop = None
+            self._server = None
