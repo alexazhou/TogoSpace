@@ -183,16 +183,15 @@ cd src && python main.py [--config-dir config/] [--llm-config config.json] [--po
 
 ## 终端模拟器 (Terminal Simulator)
 
-项目提供基于 Go 的终端模拟器，用于在无图形界面的环境下（如 AI Agent）运行 TUI 并通过 HTTP 获取截图和发送输入。该版本提供更好的 CJK 宽字符支持，编译为单二进制，无需系统字体依赖，输出格式为 **SVG**。详见 [docs/go_simu_terminal.md](docs/go_simu_terminal.md)。
+基于 Go 的终端模拟器，用于在无图形界面的环境下（如 AI Agent）运行 TUI 并通过 HTTP 获取截图和发送输入。提供更好的 CJK 宽字符支持，输出格式为 **SVG**。详见 [docs/go_simu_terminal.md](docs/go_simu_terminal.md)。
+
+`simu_terminal_go` 已安装到系统 PATH，可直接使用。
 
 ### 运行方式
 
 ```bash
-# 构建
-cd go_simu_terminal && go build -o simu_terminal_go .
-
 # 运行 (确保后端在运行且停止已有 TUI)
-./go_simu_terminal/simu_terminal_go --port 8889 -- .venv/bin/python tui/main.py --base-url http://127.0.0.1:8080
+simu_terminal_go --port 8889 -- .venv/bin/python tui/main.py --base-url http://127.0.0.1:8080
 
 # 截图 (SVG 格式)
 curl http://localhost:8889/screenshot -o screenshot.svg
