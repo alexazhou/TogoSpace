@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from typing import Callable, Dict, List, Optional
 
@@ -8,7 +9,7 @@ from model.chat_model import AgentDialogContext, ChatMessage
 from model.chat_context import ChatContext
 from service import llm_service, func_tool_service, room_service, message_bus
 from service.room_service import ChatRoom
-from constants import TurnStatus, TurnCheckResult, RoomType, SpecialAgent, MessageBusTopic
+from constants import RoomType, SpecialAgent, MessageBusTopic
 
 logger = logging.getLogger(__name__)
 
@@ -87,48 +88,44 @@ class Agent:
         room: ChatRoom = room_service.get_room(room_key)
         self.sync_room(room)
 
-        agent_context = ChatContext(
+        ctx = ChatContext(
             agent_name=self.name,
             team_name=self.team_name,
             chat_room=room,
             get_room=room_service.get_room,
         )
-        last_called: dict = {"name": None, "args": None}
+        last_called: dict = {}
 
-        def executor(name: str, args: str, _ctx: ChatContext = agent_context) -> str:
+        def executor(name: str, args: str) -> str:
             last_called["name"] = name
             last_called["args"] = args
-            return func_tool_service.run_tool_call(name, args, context=_ctx)
+            return func_tool_service.run_tool_call(name, args, context=ctx)
 
-        def turn_checker(msg: LlmApiMessage) -> TurnCheckResult:
-            if last_called["name"] == "skip_chat_msg":
-                return TurnCheckResult(TurnStatus.SUCCESS)
-            
-            if last_called["name"] == "send_chat_msg":
-                # 校验是否发送到了当前正在调度的房间
-                import json
+        def is_turn_done() -> bool:
+            called = last_called.get("name")
+            if called == "skip_chat_msg":
+                return True
+            if called == "send_chat_msg":
                 try:
-                    args_dict = json.loads(last_called["args"])
-                    target_room = args_dict.get("room_name")
-                    if target_room == room.name or target_room == room.key:
-                        return TurnCheckResult(TurnStatus.SUCCESS)
-                    else:
-                        return TurnCheckResult(TurnStatus.CONTINUE)
+                    target = json.loads(last_called["args"]).get("room_name")
+                    return target == room.name or target == room.key
                 except Exception:
-                    return TurnCheckResult(TurnStatus.CONTINUE)
+                    return False
+            return False
 
-            if not msg.tool_calls:
-                return TurnCheckResult(TurnStatus.ERROR, f"你必须调用 send_chat_msg 向当前房间 {room.name} 发送消息或 skip_chat_msg 跳过发言，不能直接输出文字。")
-            return TurnCheckResult(TurnStatus.CONTINUE)
-
-        response: LlmApiMessage = await self.chat(
-            tools=func_tool_service.get_tools(),
-            function_executor=executor,
-            turn_checker=turn_checker,
-            max_function_calls=max_function_calls,
-        )
-        if response.content:
-            logger.info(f"Agent 思考内容: agent={self.key}, room={room_key}, content={response.content}")
+        hint = f"你必须调用 send_chat_msg 向当前房间 {room.name} 发送消息或 skip_chat_msg 跳过发言，不能直接输出文字。"
+        max_retries = 3
+        for _ in range(max_retries):
+            response = await self.chat(
+                tools=func_tool_service.get_tools(),
+                function_executor=executor,
+                done_check=is_turn_done,
+                max_function_calls=max_function_calls,
+            )
+            if is_turn_done():
+                break
+            # LLM 未调用工具或调用了无关工具，注入提示后重试
+            self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, hint))
 
     def sync_room(self, room: ChatRoom) -> None:
         """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
@@ -158,48 +155,33 @@ class Agent:
         self,
         tools: Optional[List[Tool]] = None,
         function_executor: Optional[Callable[[str, str], str]] = None,
-        turn_checker: Optional[Callable[[LlmApiMessage], TurnCheckResult]] = None,
+        done_check: Optional[Callable[[], bool]] = None,
         max_function_calls: int = 5,
     ) -> LlmApiMessage:
-        """基于当前 _history 自动执行 tool calls 循环。"""
+        """基于当前 _history 自动执行对话和 tool calls 循环。
+
+        停止条件（任一满足即返回）：
+        - LLM 返回无 tool_calls（自然结束）
+        - done_check() 返回 True（调用方判定完成）
+        - 达到 max_function_calls 上限
+        """
+        assistant_message: Optional[LlmApiMessage] = None
         for _ in range(max_function_calls):
-            assistant_message: LlmApiMessage = await self._infer(tools)
+            assistant_message = await self._infer(tools)
             self._history.append(assistant_message)
 
             if not assistant_message.tool_calls:
-                if turn_checker:
-                    check: TurnCheckResult = turn_checker(assistant_message)
-                    if check.status == TurnStatus.ERROR:
-                        logger.warning(f"checker 返回 ERROR，注入提示重试: agent={self.key}")
-                        self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, check.error_hint))
-                        continue
                 return assistant_message
 
             logger.info(f"检测到工具调用: agent={self.key}, count={len(assistant_message.tool_calls)}")
-
-            recheck: bool = False
             for tool_call in assistant_message.tool_calls:
-                function_name: str = tool_call.function.get("name")
-                function_args: str = tool_call.function.get("arguments", "")
+                name = tool_call.function.get("name")
+                args = tool_call.function.get("arguments", "")
+                result = function_executor(name, args)
+                self._history.append(LlmApiMessage.tool_result(tool_call.id, result))
 
-                assert function_executor is not None, "function_executor 未配置"
-                result: str = function_executor(function_name, function_args)
-
-                tool_result_msg: LlmApiMessage = LlmApiMessage.tool_result(tool_call.id, result)
-                self._history.append(tool_result_msg)
-
-                if turn_checker:
-                    check = turn_checker(tool_result_msg)
-                    if check.status == TurnStatus.SUCCESS:
-                        return LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, "")
-                    if check.status == TurnStatus.ERROR:
-                        logger.warning(f"checker 返回 ERROR，注入提示重试: agent={self.key}")
-                        self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, check.error_hint))
-                        recheck = True
-                        break
-
-            if recheck:
-                continue
+            if done_check and done_check():
+                return assistant_message
 
         logger.warning(f"达到最大函数调用次数: agent={self.key}, max={max_function_calls}")
         return assistant_message
