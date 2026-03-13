@@ -127,30 +127,6 @@ class Agent:
             # LLM 未调用工具或调用了无关工具，注入提示后重试
             self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, hint))
 
-    def sync_room(self, room: ChatRoom) -> None:
-        """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
-        new_msgs: List[ChatMessage] = room.get_unread_messages(self.name)
-        logger.info(f"同步房间消息: agent={self.key}, room={room.name}, count={len(new_msgs)}")
-        for msg in new_msgs:
-            if msg.sender_name == self.name:
-                continue
-            if msg.sender_name == "system":
-                self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}"))
-            else:
-                self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}"))
-
-    async def _infer(self, tools: Optional[List[Tool]]) -> LlmApiMessage:
-        """基于当前 _history 发起一次 LLM 调用，返回 assistant 消息。"""
-        assert self._history and self._history[-1].role in (OpenaiLLMApiRole.USER, OpenaiLLMApiRole.TOOL, OpenaiLLMApiRole.SYSTEM), \
-            f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
-        ctx = AgentDialogContext(
-            system_prompt=self.system_prompt,
-            messages=self._history,
-            tools=tools or None,
-        )
-        response = await llm_service.infer(self.model, ctx)
-        return response.choices[0].message
-
     async def chat(
         self,
         tools: Optional[List[Tool]] = None,
@@ -185,6 +161,30 @@ class Agent:
 
         logger.warning(f"达到最大函数调用次数: agent={self.key}, max={max_function_calls}")
         return assistant_message
+
+    def sync_room(self, room: ChatRoom) -> None:
+        """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
+        new_msgs: List[ChatMessage] = room.get_unread_messages(self.name)
+        logger.info(f"同步房间消息: agent={self.key}, room={room.name}, count={len(new_msgs)}")
+        for msg in new_msgs:
+            if msg.sender_name == self.name:
+                continue
+            if msg.sender_name == "system":
+                self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}"))
+            else:
+                self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}"))
+
+    async def _infer(self, tools: Optional[List[Tool]]) -> LlmApiMessage:
+        """基于当前 _history 发起一次 LLM 调用，返回 assistant 消息。"""
+        assert self._history and self._history[-1].role in (OpenaiLLMApiRole.USER, OpenaiLLMApiRole.TOOL, OpenaiLLMApiRole.SYSTEM), \
+            f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
+        ctx = AgentDialogContext(
+            system_prompt=self.system_prompt,
+            messages=self._history,
+            tools=tools or None,
+        )
+        response = await llm_service.infer(self.model, ctx)
+        return response.choices[0].message
 
 
 def startup() -> None:
