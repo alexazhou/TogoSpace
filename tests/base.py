@@ -3,7 +3,6 @@ import os
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 
@@ -50,10 +49,8 @@ class ServiceTestCase:
     _backend_proc: subprocess.Popen = None
     _backend_config_dir: str = None
     _backend_llm_config: str = None
-    _llm_tmp_path: str = None
 
     mock_llm_server: MockLLMServer = None
-    mock_llm_port: int = None
 
     # ------------------------------------------------------------------
     # 类级别生命周期
@@ -73,23 +70,17 @@ class ServiceTestCase:
             cls._stop_backend()
         if cls.requires_mock_llm:
             cls._stop_mock_llm()
-        if cls._llm_tmp_path:
-            os.unlink(cls._llm_tmp_path)
-            cls._llm_tmp_path = None
 
     @classmethod
     def _start_mock_llm(cls):
-        """启动 MockLLMServer，并将端口暴露为 cls.mock_llm_port。"""
         cls.mock_llm_server = MockLLMServer()
         cls.mock_llm_server.start()
-        cls.mock_llm_port = cls.mock_llm_server.port
 
     @classmethod
     def _stop_mock_llm(cls):
         if cls.mock_llm_server is not None:
             cls.mock_llm_server.stop()
             cls.mock_llm_server = None
-            cls.mock_llm_port = None
 
     @classmethod
     def _setup_pre_backend(cls):
@@ -110,16 +101,9 @@ class ServiceTestCase:
 
         cls._backend_config_dir = config_dir
 
-        # 设置 LLM 配置文件路径（如果存在），替换占位符
         llm_json = os.path.join(config_dir, "llm.json")
         if os.path.isfile(llm_json):
-            with open(llm_json) as f:
-                llm_content = f.read().replace("{mock_llm_port}", str(cls.mock_llm_port))
-            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-            tmp.write(llm_content)
-            tmp.close()
-            cls._backend_llm_config = tmp.name
-            cls._llm_tmp_path = tmp.name
+            cls._backend_llm_config = llm_json
 
     @classmethod
     def _start_backend(cls):
