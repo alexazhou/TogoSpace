@@ -183,25 +183,19 @@ cd src && python main.py [--config-dir config/] [--llm-config config.json] [--po
 
 ## 终端模拟器 (Terminal Simulator)
 
-基于 Go 的终端模拟器，用于在无图形界面的环境下（如 AI Agent）运行 TUI 并通过 HTTP 获取截图和发送输入。提供更好的 CJK 宽字符支持，输出格式为 **SVG**。详见 [docs/go_simu_terminal.md](docs/go_simu_terminal.md)。
+[go_simu_terminal](https://github.com/alexazhou/go_simu_terminal) 是一个"无头"终端模拟器，能将终端内容实时渲染为 **PNG** 或 **SVG**，内置 HTTP 控制接口，适合 AI Agent 操作 TUI。详见 [docs/go_simu_terminal.md](docs/go_simu_terminal.md)。
 
 `simu_terminal_go` 已安装到系统 PATH，可直接使用。
 
-### 运行方式
-
 ```bash
-# 运行 (确保后端在运行且停止已有 TUI)
+# 运行 TUI（确保后端在运行且停止已有 TUI）
 simu_terminal_go --port 8889 -- .venv/bin/python tui/main.py --base-url http://127.0.0.1:8080
 
-# 截图 (SVG 格式)
-curl http://localhost:8889/screenshot -o screenshot.svg
-```
+# 截图 - PNG（可直接用 Read tool 读取图片）
+curl "http://localhost:8889/screenshot?format=png&scale=2" -o screenshot.png
 
-### 键盘输入接口
-```bash
-# 发送键盘按键 (up, down, left, right, enter, tab, esc, ctrl+a...ctrl+z)
+# 发送按键 / 文本
 curl -X POST http://localhost:8889/input -H 'Content-Type: application/json' -d '{"key":"tab"}'
-# 发送原始文本
 curl -X POST http://localhost:8889/input -H 'Content-Type: application/json' -d '{"text":"hello\n"}'
 ```
 
