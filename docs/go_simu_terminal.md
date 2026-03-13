@@ -1,85 +1,108 @@
 # Go 版终端模拟器 (Go Simu Terminal)
 
-Go 版终端模拟器是一个轻量级的、无外部依赖的单二进制工具，旨在为 AI Agent 提供 TUI 观测和交互能力。
+[go_simu_terminal](https://github.com/alexazhou/go_simu_terminal) 是一个"无头"终端模拟器，能以无图形界面模式运行命令行程序，并将终端内容实时渲染为 **PNG** 或 **SVG**，内置 HTTP 控制接口，适合 AI Agent 操作 TUI。
 
-## 1. 核心原理
+`simu_terminal_go` 已安装到系统 PATH，可直接使用。
+
+## 核心特性
+
+- **实时渲染**：将终端内容渲染为矢量图 (SVG) 或位图 (PNG)
+- **HTTP 控制**：内置 Web 服务，支持通过 API 发送输入（按键/文本）并获取截图
+- **快照模式**：运行命令完成后自动捕获并保存终端屏幕
+- **多语言支持**：内置 Menlo (ASCII) 和文泉驿微米黑 (CJK) 字体，完美支持中文显示
+- **跨平台**：支持 Linux 和 macOS
+
+## 核心原理
 
 模拟器通过以下层级实现功能：
 
-1.  **PTY 层** (`creack/pty`): 创建伪终端并启动子进程。它负责处理原始字节流的输入输出。
-2.  **仿真层** (`go-headless-term`): 一个 VT220 兼容的无头终端。它解析 PTY 输出的 ANSI 转义序列，并在内存中维护一个逻辑字符网格（Grid）。该层支持：
-    *   **CJK 宽字符**: 自动识别全角字符并分配 2 个单元格宽度。
-    *   **颜色系统**: 支持 ANSI 16 色、256 色及 TrueColor。
-    *   **状态管理**: 管理光标位置、滚动区域和字符属性（粗体、下划线等）。
-3.  **渲染层** (`render.go`): 将内存中的字符网格序列化为 SVG 字符串。
-    *   每个单元格根据颜色生成 `<rect>`（背景）和 `<text>`（前景）。
-    *   宽字符占用 `2 * cellW` 的空间。
-    *   使用 `clip-path` 确保字符不会溢出其所在的行。
-4.  **接口层** (`server.go`): 提供 HTTP API。
+1. **PTY 层** (`creack/pty`): 创建伪终端并启动子进程，处理原始字节流的输入输出。
+2. **仿真层** (`go-headless-term`): VT220 兼容的无头终端，解析 ANSI 转义序列，在内存中维护逻辑字符网格（Grid）。支持 CJK 宽字符、ANSI 16 色/256 色/TrueColor、光标与滚动区域管理。
+3. **渲染层** (`render.go`): 将字符网格序列化为 SVG 或 PNG。宽字符占用 `2 * cellW` 空间，使用 `clip-path` 防止溢出。
+4. **接口层** (`server.go`): 提供 HTTP API。
 
-## 2. 依赖项
+## 使用方法
 
-| 包名 | 用途 |
-| :--- | :--- |
-| `github.com/creack/pty` | PTY 进程创建与 TTY 窗口大小管理 |
-| `github.com/danielgatis/go-headless-term` | 终端仿真、状态机、CJK 宽度计算 |
-| `net/http` | 标准库，提供 API 访问 |
+### 服务模式（Interactive Mode）
 
-## 3. 使用方法
-
-### 构建
+启动交互式终端并开启 HTTP 服务：
 
 ```bash
-cd go_simu_terminal
-go mod tidy
-go build -o simu_terminal_go .
+simu_terminal_go --port 8889 --rows 36 --cols 140 -- .venv/bin/python tui/main.py --base-url http://127.0.0.1:8080
 ```
 
-### 运行
+### 快照模式（Snapshot Mode）
 
-启动模拟器时，在 `--` 之后指定要运行的命令：
+运行命令并直接保存结果到文件：
 
 ```bash
-# 示例：运行 Python TUI
-./go_simu_terminal/simu_terminal_go --port 8889 -- .venv/bin/python tui/main.py --base-url http://127.0.0.1:8080
+# 保存为 PNG
+simu_terminal_go --snapshot output.png --scale 2.0 --timeout 5 -- ls -alh
+
+# 保存为 SVG
+simu_terminal_go --snapshot output.svg --timeout 5 -- ls -alh
 ```
 
 ### 常用参数
 
-*   `--port`: HTTP 服务监听端口（默认 8888）。
-*   `--cols`: 终端宽度，以列为单位（默认 140）。
-*   `--rows`: 终端高度，以行为单位（默认 36）。
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--port` | HTTP 服务监听端口 | `8888` |
+| `--cols` | 终端宽度（列数） | `140` |
+| `--rows` | 终端高度（行数） | `36` |
+| `--scale` | 渲染缩放比例（用于高清导出） | `1.0` |
+| `--snapshot` | 快照模式，保存到指定文件（.png / .svg） | (空) |
+| `--timeout` | 自动退出延时（秒，支持浮点数，0 不启用） | `0` |
+| `--font-ascii` | 自定义 ASCII 字体路径 (.ttf) | (内置 Menlo) |
+| `--font-cjk` | 自定义中文字体路径 (.ttf/.ttc) | (内置文泉驿) |
 
-## 4. API 参考
+## API 参考
 
 ### `GET /screenshot`
-获取当前终端画面的 SVG 截图。
 
-**响应**: `image/svg+xml`
+获取当前终端画面的截图。
+
+- 参数：`format` (png/svg，默认 svg)，`scale` (缩放比例)，`save` (保存到服务器本地路径)
+- 示例：
+  ```bash
+  # PNG（推荐，可直接用 Read tool 读取图片）
+  curl "http://localhost:8889/screenshot?format=png&scale=2" -o screenshot.png
+
+  # SVG
+  curl "http://localhost:8889/screenshot?format=svg" -o screenshot.svg
+  ```
+
+### `GET /export`
+
+以文件下载形式导出当前终端画面。
+
+- 参数：`format` (png/svg)，`scale` (缩放比例)，`filename` (文件名)
+- 示例：
+  ```bash
+  curl "http://localhost:8889/export?format=png&scale=2" -o screenshot.png
+  ```
 
 ### `POST /input`
+
 向终端发送按键或文字。
 
-**请求体**:
-```json
-{
-  "key": "tab",   // 可选值：up, down, left, right, enter, tab, esc, ctrl+a...ctrl+z
-  "text": "hello" // 发送原始字符串
-}
-```
+- 请求体：
+  ```json
+  {
+    "key": "tab",    // 特殊按键：up, down, left, right, enter, tab, esc, ctrl+a...ctrl+z
+    "text": "hello"  // 发送原始字符串（与 key 二选一）
+  }
+  ```
+- 示例：
+  ```bash
+  curl -X POST http://localhost:8889/input -H 'Content-Type: application/json' -d '{"key":"enter"}'
+  curl -X POST http://localhost:8889/input -H 'Content-Type: application/json' -d '{"text":"ls -la\n"}'
+  ```
 
-## 5. CJK 支持说明
+## CJK 支持说明
 
-旧版本 (`vt10x`) 无法正确处理全角字符，导致中文对齐错位。
-当前版本通过 `go-headless-term` 的 `IsWide()` 和 `IsWideSpacer()` 特性解决了此问题：
-*   **IsWide**: 当检测到宽字符（如“中”）时，渲染器将其宽度设为 `cellW * 2`。
-*   **IsWideSpacer**: 跳过宽字符后的占位单元格，避免重复渲染。
-*   **对齐**: SVG 的 `textLength` 属性强制字符精确匹配单元格宽度，确保视觉对齐。
+通过 `go-headless-term` 的 `IsWide()` 和 `IsWideSpacer()` 特性实现正确的中文对齐：
 
-## 6. 测试与验证
-
-获取截图并查看效果：
-```bash
-curl http://localhost:8889/screenshot -o snapshot.svg && open snapshot.svg
-```
-验证颜色、粗体、中文字符位置是否与真实终端一致。
+- **IsWide**：检测到宽字符（如"中"）时，渲染宽度设为 `cellW * 2`
+- **IsWideSpacer**：跳过宽字符后的占位单元格，避免重复渲染
+- **对齐**：SVG 的 `textLength` 属性强制字符精确匹配单元格宽度
