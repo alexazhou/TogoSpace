@@ -16,8 +16,9 @@ class TestAgentService(ServiceTestCase):
         room_service.init()
         agents_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_cfg   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
-        agent_service.init(agents_cfg)
-        agent_service.create_team_agents(TEAM, team_cfg)
+        agent_service.init()
+        agent_service.load_agent_config(agents_cfg)
+        agent_service.create_team_agents([team_cfg])
 
     def test_create_team_agents(self):
         assert agent_service.get_agent(TEAM, "alice") is not None

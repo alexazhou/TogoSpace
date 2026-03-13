@@ -205,43 +205,48 @@ class Agent:
         return assistant_message
 
 
-def init(agents_config: list) -> None:
-    """加载 Agent 定义（prompt/model）到 _agent_defs 字典，不创建实例。"""
+def init() -> None:
+    """初始化 Agent 服务，清空所有状态。"""
     global _agent_defs, _agents
-    _agent_defs = {cfg["name"]: cfg for cfg in agents_config}
+    _agent_defs = {}
     _agents = {}
+
+
+def load_agent_config(agents_config: list) -> None:
+    """加载 Agent 定义（prompt/model）到 _agent_defs 字典，不创建实例。"""
+    global _agent_defs
+    _agent_defs = {cfg["name"]: cfg for cfg in agents_config}
     logger.info(f"加载 Agent 定义: {list(_agent_defs.keys())}")
 
 
-def create_team_agents(team_name: str, team_config: dict) -> None:
-    """根据 team 的 groups 中引用的 agent，从 _agent_defs 读取定义，创建 agent@team 实例。"""
-    # 收集该 team 中所有 group 引用的 agent 名称
-    agent_names_in_team: set = set()
-    for group in team_config["groups"]:
-        for name in group["members"]:
-            if name != SpecialAgent.OPERATOR:
-                agent_names_in_team.add(name)
-
-    # 加载通用规则 Prompt
+def create_team_agents(teams_config: list) -> None:
+    """遍历所有 team，从 _agent_defs 读取定义，创建 agent@team 实例。"""
     base_prompt_tmpl = load_prompt("src/prompts/GroupChat.md")
 
-    for name in agent_names_in_team:
-        if name not in _agent_defs:
-            logger.warning(f"Agent 定义不存在: {name}，跳过创建")
-            continue
+    for team_config in teams_config:
+        team_name = team_config["name"]
 
-        cfg = _agent_defs[name]
-        if "system_prompt" in cfg:
-            agent_specific_prompt = cfg["system_prompt"]
-        else:
-            agent_specific_prompt = load_prompt(cfg["prompt_file"])
-        
-        # 组合 Prompt: 基础规则 + Agent 性格
-        full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
+        agent_names_in_team: set = set()
+        for group in team_config["groups"]:
+            for name in group["members"]:
+                if name != SpecialAgent.OPERATOR:
+                    agent_names_in_team.add(name)
 
-        key = _make_agent_key(team_name, name)
-        _agents[key] = Agent(name=name, team_name=team_name, system_prompt=full_prompt, model=cfg["model"])
-        logger.info(f"创建 Agent 实例: key={key}, model={cfg['model']}")
+        for name in agent_names_in_team:
+            if name not in _agent_defs:
+                logger.warning(f"Agent 定义不存在: {name}，跳过创建")
+                continue
+
+            cfg = _agent_defs[name]
+            if "system_prompt" in cfg:
+                agent_specific_prompt = cfg["system_prompt"]
+            else:
+                agent_specific_prompt = load_prompt(cfg["prompt_file"])
+
+            full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
+            key = _make_agent_key(team_name, name)
+            _agents[key] = Agent(name=name, team_name=team_name, system_prompt=full_prompt, model=cfg["model"])
+            logger.info(f"创建 Agent 实例: key={key}, model={cfg['model']}")
 
 
 def get_agent(team_name: str, agent_name: str) -> Agent:
