@@ -97,6 +97,7 @@ async def main(config_dir: str = None, llm_config_path: str = None, port: int = 
         agent_service.shutdown()
         func_tool_service.shutdown()
         chat_room.shutdown()
+        llm_service.shutdown()
         message_bus.shutdown()
         _remove_pid()
 

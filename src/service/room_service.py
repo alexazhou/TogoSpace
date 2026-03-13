@@ -208,11 +208,6 @@ def create_rooms(teams_config: list) -> None:
             )
 
 
-def shutdown() -> None:
-    """移除所有聊天室，程序退出前调用。"""
-    _rooms.clear()
-
-
 def get_member_names(team_name: str, room_name: str) -> List[str]:
     """返回聊天室的参与者名列表。"""
     return _rooms[_make_room_key(team_name, room_name)].agents
@@ -239,3 +234,8 @@ def get_room(room_key: str) -> ChatRoom:
 def get_all_rooms() -> List[ChatRoom]:
     """返回所有聊天室实例列表。"""
     return list(_rooms.values())
+
+
+def shutdown() -> None:
+    """移除所有聊天室，程序退出前调用。"""
+    _rooms.clear()

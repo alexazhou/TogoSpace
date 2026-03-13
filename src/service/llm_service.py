@@ -21,3 +21,9 @@ async def infer(model: str, ctx: AgentDialogContext) -> LlmApiResponse:
         tools=ctx.tools,
     )
     return await llm_api.send_request(request, _base_url, _api_key)
+
+
+def shutdown() -> None:
+    global _api_key, _base_url
+    _api_key = ""
+    _base_url = ""
