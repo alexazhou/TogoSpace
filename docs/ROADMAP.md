@@ -109,6 +109,13 @@
 - **多团队并发**：支持同时启动多个独立的团队模拟任务，各团队调度逻辑互不干扰。
 - **扩展上下文模型**：同团队内的 Agent 跨房间共享对话感知，为复杂的跨场景协作奠定基础。
 
+### V8: Agent 执行能力
+
+集成 Claude Code Agent SDK，赋予 Agent 真实的执行能力，使其从"只会说话"升级为"能动手做事"：
+
+- **执行能力**：Agent 可按配置读写文件、运行代码、搜索网络，并将执行结果以自然语言反馈到聊天室
+- **混合协作**：普通对话 Agent 与具备执行能力的 Agent 可在同一聊天室共存协作
+
 ---
 
 ## 技术栈
@@ -172,3 +179,7 @@
 ### V7
 - [产品文档](./versions/v7/v7_step1_product.md)
 - [技术文档](./versions/v7/v7_step2_technical.md)
+
+### V8
+- [产品文档](./versions/v8/v8_step1_product.md)
+- [技术文档](./versions/v8/v8_step2_technical.md)
