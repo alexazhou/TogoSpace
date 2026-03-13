@@ -255,12 +255,6 @@ def get_agent(team_name: str, agent_name: str) -> Agent:
     return _agents[key]
 
 
-def is_agent_active(team_name: str, agent_name: str) -> bool:
-    """判断指定 agent@team 是否活跃。"""
-    key = _make_agent_key(team_name, agent_name)
-    agent = _agents.get(key)
-    return agent.is_active if agent else False
-
 
 def get_all_agents() -> List[Agent]:
     """返回所有 Agent 实例列表。"""
