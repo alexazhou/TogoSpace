@@ -27,11 +27,14 @@ def _make_agent_key(team_name: str, agent_name: str) -> str:
 class Agent:
     """AI Agent 实体类，维护其性格、对话历史及任务队列"""
 
-    def __init__(self, name: str, team_name: str, system_prompt: str, model: str):
+    def __init__(self, name: str, team_name: str, system_prompt: str, model: str,
+                 use_agent_sdk: bool = False, allowed_tools: list = None):
         self.name: str = name  # Agent 名称
         self.team_name: str = team_name  # 所属 Team
         self.system_prompt: str = system_prompt  # 系统提示词（定义性格和规则）
         self.model: str = model  # 使用的 LLM 模型名称
+        self.use_agent_sdk: bool = use_agent_sdk  # 是否使用 Claude Agent SDK 驱动
+        self.allowed_tools: list = allowed_tools if allowed_tools is not None else []  # SDK 允许使用的工具列表
 
         self._history: List[LlmApiMessage] = []  # Agent 的私有对话历史（包含 Tool Call 详情）
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()  # 待处理的房间任务队列
@@ -87,6 +90,9 @@ class Agent:
 
     async def run_turn(self, room_key: str, max_function_calls: int = 5) -> None:
         """同步房间消息，驱动 Agent 完成一轮发言（含 tool call 循环）。"""
+        if self.use_agent_sdk:
+            return await self._run_turn_sdk(room_key)
+
         room: ChatRoom = room_service.get_room(room_key)
         self.sync_room(room)
 
@@ -122,6 +128,52 @@ class Agent:
                 break
             # LLM 未调用工具或调用了无关工具，注入提示后重试
             self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, hint))
+
+    async def _run_turn_sdk(self, room_key: str) -> None:
+        """使用 Claude Agent SDK 驱动 Agent 完成一轮发言。"""
+        from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage, tool, create_sdk_mcp_server
+
+        room = room_service.get_room(room_key)
+        agent_name = self.name
+
+        # 构建聊天室上下文 prompt
+        lines = []
+        for m in room.messages:
+            prefix = "[系统]" if m.sender_name == "system" else m.sender_name
+            lines.append(f"{prefix}: {m.content}")
+        context = "\n".join(lines)
+        prompt = (
+            f"你正在参与 {room.name} 聊天室的对话。\n\n"
+            f"聊天记录：\n{context}\n\n"
+            f"现在轮到你（{agent_name}）发言。"
+            f"你必须调用 send_chat_msg 发送消息，或调用 skip_chat_msg 跳过本轮发言。"
+        )
+
+        # 创建群聊工具（闭包捕获 room 和 agent_name）
+        @tool("send_chat_msg", "向聊天室发送消息", {"room_name": str, "msg": str})
+        async def _send(args):
+            room.add_message(agent_name, args["msg"])
+            return {"content": [{"type": "text", "text": "success"}]}
+
+        @tool("skip_chat_msg", "跳过本轮发言", {})
+        async def _skip(args):
+            room.skip_turn(sender=agent_name)
+            return {"content": [{"type": "text", "text": "success"}]}
+
+        server = create_sdk_mcp_server("chat-tools", tools=[_send, _skip])
+
+        options = ClaudeAgentOptions(
+            system_prompt=self.system_prompt,
+            allowed_tools=self.allowed_tools,
+            mcp_servers={"chat": server},
+            permission_mode="bypassPermissions",
+            allow_dangerously_skip_permissions=True,
+            max_turns=10,
+        )
+
+        async for msg in query(prompt=prompt, options=options):
+            if isinstance(msg, ResultMessage) and msg.is_error:
+                logger.error(f"Agent SDK 执行失败: agent={self.key}, room={room_key}")
 
     async def chat(
         self,
@@ -228,7 +280,14 @@ def create_team_agents(teams_config: list) -> None:
 
             full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
             key = _make_agent_key(team_name, name)
-            _agents[key] = Agent(name=name, team_name=team_name, system_prompt=full_prompt, model=cfg["model"])
+            _agents[key] = Agent(
+                name=name,
+                team_name=team_name,
+                system_prompt=full_prompt,
+                model=cfg["model"],
+                use_agent_sdk=cfg.get("use_agent_sdk", False),
+                allowed_tools=cfg.get("allowed_tools", []),
+            )
             logger.info(f"创建 Agent 实例: key={key}, model={cfg['model']}")
 
 

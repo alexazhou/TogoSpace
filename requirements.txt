@@ -6,3 +6,4 @@ pytest-asyncio>=0.21.0
 tornado>=6.0.0
 dashscope>=1.0.0
 textual>=0.50.0
+claude-agent-sdk>=0.1.45

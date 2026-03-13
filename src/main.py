@@ -82,9 +82,8 @@ async def main(config_dir: str = None, llm_config_path: str = None, port: int = 
     agent_service.create_team_agents(teams_config)
 
     chat_room.startup()
-    chat_room.create_rooms(teams_config)
-
     scheduler.startup(teams_config=teams_config)
+    chat_room.create_rooms(teams_config)
 
     web_server = tornado.httpserver.HTTPServer(make_app())
     web_server.listen(port, "0.0.0.0")
