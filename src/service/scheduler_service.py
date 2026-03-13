@@ -13,19 +13,51 @@ logger = logging.getLogger(__name__)
 
 _teams_config: list = []
 _running: Dict[str, asyncio.Task] = {}
-_stop_event: asyncio.Event = asyncio.Event()
+_pool_empty: asyncio.Event = asyncio.Event()
 
 
 def startup(teams_config: list) -> None:
     """初始化调度器，须在 run() 前调用一次。"""
-    global _teams_config, _stop_event
+    global _teams_config, _pool_empty
     _teams_config = teams_config
-    _stop_event = asyncio.Event()
+    _pool_empty = asyncio.Event()  # cleared，run() 将阻塞直到池为空
     message_bus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
 
 
+def add_agent(agent: Agent, max_fc: int) -> None:
+    """将 agent 加入调度池，若已在运行则跳过。"""
+    existing: asyncio.Task | None = _running.get(agent.key)
+    if existing is not None and not existing.done():
+        return
+    _pool_empty.clear()
+    task = asyncio.create_task(agent.consume_task(max_fc))
+    _running[agent.key] = task
+    task.add_done_callback(lambda t: _on_task_done(agent.key, t))
+
+
+def _on_task_done(key: str, task: asyncio.Task) -> None:
+    """Task 完成回调：仅当完成的 task 仍是当前注册的任务时才移出调度池。
+
+    asyncio 在协程返回时立即将 task 标记为 done，但 done callback 通过
+    loop.call_soon 异步调度，稍后才执行。在这段空隙内，同一 agent 可能已被
+    重新入队并在 _running 中注册了新 task。此时若直接 remove_agent，会误删
+    新 task 并取消它。通过 `is` 判断确保只有"自己的"task 完成时才触发移除。
+    """
+    if _running.get(key) is task:
+        remove_agent(key)
+
+
+def remove_agent(agent_key: str) -> None:
+    """从调度池移出 agent；池为空时发出结束信号。"""
+    task = _running.pop(agent_key, None)
+    if task and not task.done():
+        task.cancel()
+    if not _running:
+        _pool_empty.set()
+
+
 def _on_agent_turn(msg: Message) -> None:
-    """订阅 ROOM_AGENT_TURN：将任务入队，标记 Agent 为活跃，若未运行则创建 Task。"""
+    """订阅 ROOM_AGENT_TURN：将任务入队，若 agent 未运行则加入调度池。"""
     agent_name: str = msg.payload["agent_name"]
     room_key: str = msg.payload["room_key"]
     team_name: str = msg.payload["team_name"]
@@ -45,49 +77,17 @@ def _on_agent_turn(msg: Message) -> None:
 
     agent.wait_task_queue.put_nowait(RoomMessageEvent(room_key))
 
-    # 使用 agent@team 作为 running key
-    agent_key = agent.key
-    existing = _running.get(agent_key)
-    if existing is None or existing.done():
-        # 从 team config 中获取 max_function_calls
-        max_fc = 5
-        for team in _teams_config:
-            if team["name"] == team_name:
-                max_fc = team.get("max_function_calls", 5)
-                break
-        _running[agent_key] = asyncio.create_task(agent.consume_task(max_fc))
+    max_fc = 5
+    for team in _teams_config:
+        if team["name"] == team_name:
+            max_fc = team.get("max_function_calls", 5)
+            break
+    add_agent(agent, max_fc)
 
 
 async def run() -> None:
-    """持续运行的事件调度器，支持实时接入。"""
-    global _running
-    _running = {}
-
-    # 持续运行，直到 _stop_event 被设置
-    stop_waiter = asyncio.create_task(_stop_event.wait())
-
-    while not _stop_event.is_set():
-        # 仅等待未完成的任务
-        pending = {t for t in _running.values() if not t.done()}
-        pending.add(stop_waiter)
-
-        done, _ = await asyncio.wait(
-            pending,
-            return_when=asyncio.FIRST_COMPLETED
-        )
-        for task in done:
-            if task is stop_waiter:
-                break
-            # 清理已完成的任务引用
-            names_to_del = [n for n, t in _running.items() if t is task]
-            for n in names_to_del:
-                del _running[n]
-
-        if stop_waiter.done():
-            break
-
-    if not stop_waiter.done():
-        stop_waiter.cancel()
+    """持续运行直到调度池为空。"""
+    await _pool_empty.wait()
 
     logger.info("Scheduler 已停止运行")
     for team in _teams_config:
@@ -98,8 +98,11 @@ async def run() -> None:
 
 
 def shutdown() -> None:
-    """重置调度器状态。"""
+    """清空调度状态，强制结束 run()。"""
     global _teams_config, _running
-    _stop_event.set()
     _teams_config = []
+    for task in _running.values():
+        if not task.done():
+            task.cancel()
     _running = {}
+    _pool_empty.set()
