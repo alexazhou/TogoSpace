@@ -13,14 +13,14 @@ logger = logging.getLogger(__name__)
 
 _teams_config: list = []
 _running: Dict[str, asyncio.Task] = {}
-_pool_empty: asyncio.Event = asyncio.Event()
+_stop_event: asyncio.Event = asyncio.Event()
 
 
 def startup(teams_config: list) -> None:
     """初始化调度器，须在 run() 前调用一次。"""
-    global _teams_config, _pool_empty
+    global _teams_config, _stop_event
     _teams_config = teams_config
-    _pool_empty = asyncio.Event()  # cleared，run() 将阻塞直到池为空
+    _stop_event = asyncio.Event()
     message_bus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
 
 
@@ -29,7 +29,6 @@ def add_agent(agent: Agent, max_fc: int) -> None:
     existing: asyncio.Task | None = _running.get(agent.key)
     if existing is not None and not existing.done():
         return
-    _pool_empty.clear()
     task = asyncio.create_task(agent.consume_task(max_fc))
     _running[agent.key] = task
     task.add_done_callback(lambda t: _on_task_done(agent.key, t))
@@ -48,12 +47,10 @@ def _on_task_done(key: str, task: asyncio.Task) -> None:
 
 
 def remove_agent(agent_key: str) -> None:
-    """从调度池移出 agent；池为空时发出结束信号。"""
+    """从调度池移出 agent。"""
     task = _running.pop(agent_key, None)
     if task and not task.done():
         task.cancel()
-    if not _running:
-        _pool_empty.set()
 
 
 def _on_agent_turn(msg: Message) -> None:
@@ -86,8 +83,8 @@ def _on_agent_turn(msg: Message) -> None:
 
 
 async def run() -> None:
-    """持续运行直到调度池为空。"""
-    await _pool_empty.wait()
+    """持续运行直到 stop() 被调用。"""
+    await _stop_event.wait()
 
     logger.info("Scheduler 已停止运行")
     for team in _teams_config:
@@ -97,12 +94,17 @@ async def run() -> None:
             logger.info(f"\n{chat_room.get_room(room_key).format_log()}")
 
 
+def stop() -> None:
+    """通知 run() 退出循环。"""
+    _stop_event.set()
+
+
 def shutdown() -> None:
     """清空调度状态，强制结束 run()。"""
     global _teams_config, _running
+    stop()
     _teams_config = []
     for task in _running.values():
         if not task.done():
             task.cancel()
     _running = {}
-    _pool_empty.set()

@@ -81,7 +81,7 @@ class Agent:
                     # 驱动 Agent 在指定房间执行一个轮次
                     await self.run_turn(event.room_key, max_function_calls)
                 except Exception as e:
-                    logger.error(f"Agent 处理任务失败: agent={self.key}, room={event.room_key}, error={e}")
+                    logger.error(f"Agent 处理任务失败: agent={self.key}, room={event.room_key}, error={e}", exc_info=True)
                 finally:
                     self.wait_task_queue.task_done()
         finally:
@@ -131,7 +131,8 @@ class Agent:
 
     async def _run_turn_sdk(self, room_key: str) -> None:
         """使用 Claude Agent SDK 驱动 Agent 完成一轮发言。"""
-        from claude_agent_sdk import query, ClaudeAgentOptions, ResultMessage, tool, create_sdk_mcp_server
+        import os
+        from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, ResultMessage, tool, create_sdk_mcp_server
 
         room = room_service.get_room(room_key)
         agent_name = self.name
@@ -150,12 +151,22 @@ class Agent:
         )
 
         # 创建群聊工具（闭包捕获 room 和 agent_name）
-        @tool("send_chat_msg", "向聊天室发送消息", {"room_name": str, "msg": str})
+        @tool("send_chat_msg", "向聊天室发送消息", {
+            "type": "object",
+            "properties": {
+                "room_name": {"type": "string"},
+                "msg": {"type": "string"},
+            },
+            "required": ["room_name", "msg"],
+        })
         async def _send(args):
             room.add_message(agent_name, args["msg"])
             return {"content": [{"type": "text", "text": "success"}]}
 
-        @tool("skip_chat_msg", "跳过本轮发言", {})
+        @tool("skip_chat_msg", "跳过本轮发言", {
+            "type": "object",
+            "properties": {},
+        })
         async def _skip(args):
             room.skip_turn(sender=agent_name)
             return {"content": [{"type": "text", "text": "success"}]}
@@ -167,13 +178,20 @@ class Agent:
             allowed_tools=self.allowed_tools,
             mcp_servers={"chat": server},
             permission_mode="bypassPermissions",
-            allow_dangerously_skip_permissions=True,
             max_turns=10,
         )
 
-        async for msg in query(prompt=prompt, options=options):
-            if isinstance(msg, ResultMessage) and msg.is_error:
-                logger.error(f"Agent SDK 执行失败: agent={self.key}, room={room_key}")
+        # 摘掉 CLAUDECODE，防止 bundled CLI 检测到嵌套 Claude Code 会话后拒绝启动
+        _claudecode = os.environ.pop("CLAUDECODE", None)
+        try:
+            async with ClaudeSDKClient(options=options) as client:
+                await client.query(prompt)
+                async for msg in client.receive_response():
+                    if isinstance(msg, ResultMessage) and msg.is_error:
+                        logger.error(f"Agent SDK 执行失败: agent={self.key}, room={room_key}")
+        finally:
+            if _claudecode is not None:
+                os.environ["CLAUDECODE"] = _claudecode
 
     async def chat(
         self,
