@@ -3,11 +3,11 @@ Screen {
 }
 
 Header {
-    background: #17212b;
+    background: #1c2733;
     color: #b8c1cc;
     text-style: bold;
     dock: top;
-    height: 3;
+    height: 1;
 }
 
 #main-horizontal {
