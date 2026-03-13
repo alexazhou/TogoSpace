@@ -190,6 +190,21 @@ def create_room(team_name: str, name: str, agent_names: List[str], initial_topic
     room.add_message("system", msg)
 
 
+def create_rooms(teams_config: list) -> None:
+    """遍历所有 team，根据 groups 配置批量创建聊天室。"""
+    for team in teams_config:
+        team_name = team["name"]
+        for group in team["groups"]:
+            room_type = RoomType(group.get("type", "group"))
+            create_room(
+                team_name=team_name,
+                name=group["name"],
+                agent_names=group["members"],
+                initial_topic=group["initial_topic"],
+                room_type=room_type,
+            )
+
+
 def close_all() -> None:
     """移除所有聊天室，程序退出前调用。"""
     _rooms.clear()

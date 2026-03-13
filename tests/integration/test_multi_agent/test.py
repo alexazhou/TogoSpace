@@ -40,8 +40,9 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room_service.init()
         room_service.create_room(TEAM, "general", ["alice", "bob"])
         func_tool_service.init()
-        agent_service.init(agents_config)
-        agent_service.create_team_agents(TEAM, team_config)
+        agent_service.init()
+        agent_service.load_agent_config(agents_config)
+        agent_service.create_team_agents([team_config])
         scheduler.init([team_config])
 
     async def test_two_agents_exchange_messages(self):

@@ -21,6 +21,13 @@ def subscribe(topic: str, callback: Callable[[Message], None]) -> None:
     _subscribers.setdefault(topic, []).append(callback)
 
 
+def unsubscribe(topic: str, callback: Callable[[Message], None]) -> None:
+    """取消订阅指定主题。"""
+    callbacks = _subscribers.get(topic, [])
+    if callback in callbacks:
+        callbacks.remove(callback)
+
+
 def publish(topic: str, **payload: Any) -> None:
     """向指定主题的所有订阅者投递消息。"""
     msg = Message(topic=topic, payload=payload)

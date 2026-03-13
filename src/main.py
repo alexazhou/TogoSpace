@@ -10,9 +10,7 @@ import tornado.httpserver
 import util.llm_api_util as llm_api_util
 from util.config_util import load_agents, load_teams, load_llm_service_config
 from service import message_bus, scheduler_service as scheduler, agent_service, room_service as chat_room, llm_service, func_tool_service
-from controller.ws_controller import init as init_ws
 from route import make_app
-from constants import RoomType
 
 
 def _setup_logger() -> None:
@@ -79,38 +77,34 @@ async def main(config_dir: str = None, llm_config_path: str = None, port: int = 
     llm_service.init(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     func_tool_service.init()
 
-    # 加载 Agent 定义（不创建实例）
-    agent_service.init(agents_config)
+    agent_service.init()
+    agent_service.load_agent_config(agents_config)
+    agent_service.create_team_agents(teams_config)
 
-    # 初始化房间服务
     chat_room.init()
-
-    # 遍历每个 Team，创建 Agent 实例和聊天室
-    for team in teams_config:
-        team_name = team["name"]
-        agent_service.create_team_agents(team_name, team)
-
-        for group in team["groups"]:
-            room_type = RoomType(group.get("type", "group"))
-            chat_room.create_room(
-                team_name=team_name,
-                name=group["name"],
-                agent_names=group["members"],
-                initial_topic=group["initial_topic"],
-                room_type=room_type,
-            )
+    chat_room.create_rooms(teams_config)
 
     scheduler.init(teams_config=teams_config)
 
-    init_ws()
     web_server = tornado.httpserver.HTTPServer(make_app())
     web_server.listen(port, "0.0.0.0")
-    logger.info(f"Web API 服务已启动: http://0.0.0.0:{port}")
+
+    n_teams = len(teams_config)
+    n_rooms = len(chat_room.get_all_rooms())
+    n_agents = len(agent_service.get_all_agents())
+
+    async def _log_ready():
+        await asyncio.sleep(0)
+        logger.info(
+            f"后端启动完成 — 监听 http://0.0.0.0:{port}，"
+            f"共加载 {n_teams} 个 team、{n_rooms} 个聊天室、{n_agents} 个 agent 实例"
+        )
 
     try:
         await asyncio.gather(
             scheduler.run(),
             asyncio.Event().wait(),
+            _log_ready(),
         )
     finally:
         web_server.stop()
