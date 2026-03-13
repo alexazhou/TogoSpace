@@ -205,7 +205,7 @@ class Agent:
         return assistant_message
 
 
-def init() -> None:
+def startup() -> None:
     """初始化 Agent 服务，清空所有状态。"""
     global _agent_defs, _agents
     _agent_defs = {}
@@ -278,7 +278,7 @@ def get_all_rooms(team_name: str, agent_name: str) -> List[str]:
     return room_service.get_rooms_for_agent(team_name, agent_name)
 
 
-def close() -> None:
+def shutdown() -> None:
     """清空 Agent 字典，程序退出前调用。"""
     global _agents, _agent_defs
     _agents = {}

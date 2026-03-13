@@ -28,14 +28,14 @@ def _make_mock_agent(name: str, team_name: str = TEAM) -> Agent:
 class TestSchedulerRun(ServiceTestCase):
     def setup_method(self):
         super().setup_method()
-        room_service.init()
+        room_service.startup()
 
     async def test_scheduler_run_terminates_on_stop(self):
-        """调用 scheduler.stop() 后，scheduler.run() 应正常结束。"""
-        scheduler.init([])
+        """调用 scheduler.shutdown() 后，scheduler.run() 应正常结束。"""
+        scheduler.startup([])
         run_task = asyncio.create_task(scheduler.run())
         await asyncio.sleep(0.1)
-        scheduler.stop()
+        scheduler.shutdown()
         await asyncio.wait_for(run_task, timeout=2.0)
 
     async def test_scheduler_runs_agent_on_turn_event(self):
@@ -44,7 +44,7 @@ class TestSchedulerRun(ServiceTestCase):
         alice = _make_mock_agent("alice")
 
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
-        scheduler.init(teams_config)
+        scheduler.startup(teams_config)
 
         with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
             run_task = asyncio.create_task(scheduler.run())
@@ -59,7 +59,7 @@ class TestSchedulerRun(ServiceTestCase):
 
             alice.consume_task.assert_called()
 
-            scheduler.stop()
+            scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)
 
     async def test_agent_is_active_self_contained(self):
@@ -92,7 +92,7 @@ class TestSchedulerRun(ServiceTestCase):
         """收到 ROOM_AGENT_TURN 消息后，agent 任务入队并启动 Task。"""
         alice = _make_mock_agent("alice")
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
-        scheduler.init(teams_config)
+        scheduler.startup(teams_config)
 
         with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
             msg = Message(

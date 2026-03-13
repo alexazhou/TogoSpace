@@ -72,47 +72,32 @@ async def main(config_dir: str = None, llm_config_path: str = None, port: int = 
     teams_config = load_teams(config_dir)
     llm_cfg = load_llm_service_config(llm_config_path)
 
-    message_bus.init()
+    message_bus.startup()
     llm_api_util.init()
-    llm_service.init(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
-    func_tool_service.init()
+    llm_service.startup(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
+    func_tool_service.startup()
 
-    agent_service.init()
+    agent_service.startup()
     agent_service.load_agent_config(agents_config)
     agent_service.create_team_agents(teams_config)
 
-    chat_room.init()
+    chat_room.startup()
     chat_room.create_rooms(teams_config)
 
-    scheduler.init(teams_config=teams_config)
+    scheduler.startup(teams_config=teams_config)
 
     web_server = tornado.httpserver.HTTPServer(make_app())
     web_server.listen(port, "0.0.0.0")
 
-    n_teams = len(teams_config)
-    n_rooms = len(chat_room.get_all_rooms())
-    n_agents = len(agent_service.get_all_agents())
-
-    async def _log_ready():
-        await asyncio.sleep(0)
-        logger.info(
-            f"后端启动完成 — 监听 http://0.0.0.0:{port}，"
-            f"共加载 {n_teams} 个 team、{n_rooms} 个聊天室、{n_agents} 个 agent 实例"
-        )
-
     try:
-        await asyncio.gather(
-            scheduler.run(),
-            asyncio.Event().wait(),
-            _log_ready(),
-        )
+        await scheduler.run()
     finally:
         web_server.stop()
-        scheduler.stop()
-        agent_service.close()
-        func_tool_service.close()
-        chat_room.close_all()
-        message_bus.stop()
+        scheduler.shutdown()
+        agent_service.shutdown()
+        func_tool_service.shutdown()
+        chat_room.shutdown()
+        message_bus.shutdown()
         _remove_pid()
 
 

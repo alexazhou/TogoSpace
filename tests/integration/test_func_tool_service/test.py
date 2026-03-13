@@ -1,4 +1,4 @@
-"""integration tests for service.func_tool_service — 需要 func_tool_service.init()"""
+"""integration tests for service.func_tool_service — 需要 func_tool_service.startup()"""
 import service.func_tool_service as func_tool_service
 import service.room_service as room_service
 from model.chat_context import ChatContext
@@ -9,20 +9,20 @@ TEAM = "test_team"
 
 class TestFuncToolServiceInit(ServiceTestCase):
     def test_init_loads_tools(self):
-        func_tool_service.init()
+        func_tool_service.startup()
         assert len(func_tool_service.get_tools()) > 0
 
     def test_close_clears_tools(self):
-        func_tool_service.init()
-        func_tool_service.close()
+        func_tool_service.startup()
+        func_tool_service.shutdown()
         assert func_tool_service.get_tools() == []
 
 
 class TestRunToolCall(ServiceTestCase):
     def setup_method(self):
         super().setup_method()
-        room_service.init()
-        func_tool_service.init()
+        room_service.startup()
+        func_tool_service.startup()
 
     def test_run_tool_call_basic(self):
         result = func_tool_service.run_tool_call("get_weather", '{"location": "北京", "unit": "celsius"}')

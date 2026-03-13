@@ -168,26 +168,29 @@ class ChatRoom:
 _rooms: Dict[str, ChatRoom] = {}
 
 
-def init() -> None:
+def startup() -> None:
     """初始化房间服务，清空所有房间。"""
     _rooms.clear()
 
 
-def create_room(team_name: str, name: str, agent_names: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP) -> None:
-    """创建并初始化一个聊天室，设置成员并发布系统公告。"""
+def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0) -> None:
+    """创建并初始化一个聊天室，设置成员并发布系统公告。若 max_turns > 0 则初始化轮次。"""
     room = ChatRoom(name=name, team_name=team_name, initial_topic=initial_topic, room_type=room_type)
-    room.agents = agent_names
+    room.agents = members
     room_key = room.key
     _rooms[room_key] = room
 
-    logger.info(f"创建并初始化聊天室: key={room_key}, type={room_type.value}, 成员={agent_names}")
+    logger.info(f"创建并初始化聊天室: key={room_key}, type={room_type.value}, 成员={members}")
 
-    # 发布房间创建公告
-    member_list_str = "、".join(agent_names)
+    member_list_str = "、".join(members)
     msg = f"{name} 房间已经创建，当前房间成员：{member_list_str}"
     if initial_topic:
         msg += f"\n本房间初始话题：{initial_topic}"
     room.add_message("system", msg)
+
+    if max_turns > 0:
+        logger.info(f"初始化轮次配置: room={room_key}, max_turns={max_turns}")
+        room.setup_turns(members, max_turns)
 
 
 def create_rooms(teams_config: list) -> None:
@@ -195,17 +198,17 @@ def create_rooms(teams_config: list) -> None:
     for team in teams_config:
         team_name = team["name"]
         for group in team["groups"]:
-            room_type = RoomType(group.get("type", "group"))
             create_room(
                 team_name=team_name,
                 name=group["name"],
-                agent_names=group["members"],
-                initial_topic=group["initial_topic"],
-                room_type=room_type,
+                members=group["members"],
+                initial_topic=group.get("initial_topic", ""),
+                room_type=RoomType(group.get("type", "group")),
+                max_turns=group.get("max_turns", 0),
             )
 
 
-def close_all() -> None:
+def shutdown() -> None:
     """移除所有聊天室，程序退出前调用。"""
     _rooms.clear()
 

@@ -38,11 +38,11 @@ def publish(topic: str, **payload: Any) -> None:
             logger.error(f"[message_bus] topic={topic} callback={cb.__name__} 异常: {e}")
 
 
-def init() -> None:
+def startup() -> None:
     """初始化消息总线，须在各模块 subscribe 前调用。"""
     _subscribers.clear()
 
 
-def stop() -> None:
+def shutdown() -> None:
     """清空所有订阅，程序退出前调用。"""
     _subscribers.clear()
