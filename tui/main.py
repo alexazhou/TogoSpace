@@ -4,7 +4,7 @@ import logging
 import os
 import signal
 import sys
-from logging.handlers import RotatingFileHandler
+from datetime import datetime
 
 _TUI_DIR = os.path.dirname(os.path.abspath(__file__))
 _LOG_DIR = os.path.join(_TUI_DIR, "../logs/tui")
@@ -41,9 +41,10 @@ def _remove_pid() -> None:
 
 def _setup_logging() -> None:
     os.makedirs(_LOG_DIR, exist_ok=True)
-    log_path = os.path.join(_LOG_DIR, "tui.log")
-    handler = RotatingFileHandler(log_path, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8")
-    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    log_path = os.path.join(_LOG_DIR, f"tui_{timestamp}.log")
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     logging.getLogger("tui").setLevel(logging.DEBUG)
     logging.getLogger("tui").addHandler(handler)
 
