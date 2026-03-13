@@ -12,8 +12,8 @@ TEAM = "test_team"
 
 class TestChatRoom:
     def setup_method(self):
-        room_service.close_all()
-        room_service.init()
+        room_service.shutdown()
+        room_service.startup()
         room_service.create_room(TEAM, "test_room", ["alice"])
         self.room = room_service.get_room(f"test_room@{TEAM}")
 
@@ -64,8 +64,8 @@ class TestChatRoom:
 
 class TestRoomServiceFunctions:
     def setup_method(self):
-        room_service.close_all()
-        room_service.init()
+        room_service.shutdown()
+        room_service.startup()
 
     def test_create_room(self):
         room_service.create_room(TEAM, "myroom", ["alice"])
@@ -75,7 +75,7 @@ class TestRoomServiceFunctions:
 
     def test_close_all(self):
         room_service.create_room(TEAM, "tmp", ["a"])
-        room_service.close_all()
+        room_service.shutdown()
         assert len(room_service._rooms) == 0
 
     def test_setup_members(self):
@@ -93,8 +93,8 @@ class TestRoomServiceFunctions:
 
 class TestRoomTurnScheduling:
     def setup_method(self):
-        room_service.close_all()
-        room_service.init()
+        room_service.shutdown()
+        room_service.startup()
 
     def test_setup_turns_publishes_first_agent(self):
         room_service.create_room(TEAM, "r", ["alice", "bob"])

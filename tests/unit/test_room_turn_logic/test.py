@@ -9,10 +9,10 @@ TEAM = "test_team"
 @pytest.fixture(autouse=True)
 def cleanup_rooms():
     """每个测试前后清理房间数据，确保测试环境隔离。"""
-    room_service.close_all()
-    room_service.init()
+    room_service.shutdown()
+    room_service.startup()
     yield
-    room_service.close_all()
+    room_service.shutdown()
 
 
 def test_strict_turn_advancement():

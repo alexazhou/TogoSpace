@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, Set, Optional
+from typing import Dict
 
 from service import message_bus
 from service.message_bus import Message
@@ -16,15 +16,15 @@ _running: Dict[str, asyncio.Task] = {}
 _stop_event: asyncio.Event = asyncio.Event()
 
 
-def init(teams_config: list) -> None:
+def startup(teams_config: list) -> None:
     """初始化调度器，须在 run() 前调用一次。"""
-    global _teams_config
+    global _teams_config, _stop_event
     _teams_config = teams_config
-    _stop_event.clear()
+    _stop_event = asyncio.Event()
     message_bus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
 
 
-def stop() -> None:
+def shutdown() -> None:
     """重置调度器状态。"""
     global _teams_config, _running
     _stop_event.set()
@@ -70,14 +70,6 @@ async def run() -> None:
     """持续运行的事件调度器，支持实时接入。"""
     global _running
     _running = {}
-
-    for team in _teams_config:
-        team_name = team["name"]
-        for group in team["groups"]:
-            room_key = f"{group['name']}@{team_name}"
-            room = chat_room.get_room(room_key)
-            logger.info(f"初始化轮次配置: room={room_key}, max_turns={group['max_turns']}")
-            room.setup_turns(group["members"], group["max_turns"])
 
     # 持续运行，直到 _stop_event 被设置
     stop_waiter = asyncio.create_task(_stop_event.wait())

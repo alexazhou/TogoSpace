@@ -37,13 +37,13 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         super().setup_method()
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
-        room_service.init()
+        room_service.startup()
         room_service.create_room(TEAM, "general", ["alice", "bob"])
-        func_tool_service.init()
-        agent_service.init()
+        func_tool_service.startup()
+        agent_service.startup()
         agent_service.load_agent_config(agents_config)
         agent_service.create_team_agents([team_config])
-        scheduler.init([team_config])
+        scheduler.startup([team_config])
 
     async def test_two_agents_exchange_messages(self):
         """alice 和 bob 各发一轮消息，general 房间应有消息。"""
@@ -67,7 +67,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             room.setup_turns(["alice", "bob"], max_turns=1)
             run_task = asyncio.create_task(scheduler.run())
             await asyncio.sleep(1)
-            scheduler.stop()
+            scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)
 
         agent_messages = [m for m in room.messages if m.sender_name != "system"]
@@ -119,11 +119,12 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
         with patch("service.agent_service.llm_service.infer", fake_infer):
             run_task = asyncio.create_task(scheduler.run())
+            room.setup_turns(["alice", "bob"], 2)
             for _ in range(20):
                 if room.state.value == "idle":
                     break
                 await asyncio.sleep(0.5)
-            scheduler.stop()
+            scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=5.0)
 
         # 1 条公告 + 2轮×2人 = 5 条消息

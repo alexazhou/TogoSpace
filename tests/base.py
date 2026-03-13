@@ -160,15 +160,15 @@ class ServiceTestCase:
     # ------------------------------------------------------------------
 
     def setup_method(self):
-        message_bus.init()
-        room_service.close_all()
-        agent_service.close()
-        func_tool_service.close()
-        scheduler.stop()
+        message_bus.startup()
+        room_service.shutdown()
+        agent_service.shutdown()
+        func_tool_service.shutdown()
+        scheduler.shutdown()
 
     def teardown_method(self):
-        scheduler.stop()
-        func_tool_service.close()
-        agent_service.close()
-        room_service.close_all()
-        message_bus.stop()
+        scheduler.shutdown()
+        func_tool_service.shutdown()
+        agent_service.shutdown()
+        room_service.shutdown()
+        message_bus.shutdown()
