@@ -3,6 +3,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 
@@ -72,6 +73,9 @@ class ServiceTestCase:
             cls._stop_backend()
         if cls.requires_mock_llm:
             cls._stop_mock_llm()
+        if cls._llm_tmp_path:
+            os.unlink(cls._llm_tmp_path)
+            cls._llm_tmp_path = None
 
     @classmethod
     def _start_mock_llm(cls):
@@ -106,10 +110,16 @@ class ServiceTestCase:
 
         cls._backend_config_dir = config_dir
 
-        # 设置 LLM 配置文件路径（如果存在）
+        # 设置 LLM 配置文件路径（如果存在），替换占位符
         llm_json = os.path.join(config_dir, "llm.json")
         if os.path.isfile(llm_json):
-            cls._backend_llm_config = llm_json
+            with open(llm_json) as f:
+                llm_content = f.read().replace("{mock_llm_port}", str(cls.mock_llm_port))
+            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+            tmp.write(llm_content)
+            tmp.close()
+            cls._backend_llm_config = tmp.name
+            cls._llm_tmp_path = tmp.name
 
     @classmethod
     def _start_backend(cls):
