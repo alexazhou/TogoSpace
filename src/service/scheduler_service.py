@@ -24,14 +24,6 @@ def startup(teams_config: list) -> None:
     message_bus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
 
 
-def shutdown() -> None:
-    """重置调度器状态。"""
-    global _teams_config, _running
-    _stop_event.set()
-    _teams_config = []
-    _running = {}
-
-
 def _on_agent_turn(msg: Message) -> None:
     """订阅 ROOM_AGENT_TURN：将任务入队，标记 Agent 为活跃，若未运行则创建 Task。"""
     agent_name: str = msg.payload["agent_name"]
@@ -103,3 +95,11 @@ async def run() -> None:
         for group in team["groups"]:
             room_key = f"{group['name']}@{team_name}"
             logger.info(f"\n{chat_room.get_room(room_key).format_log()}")
+
+
+def shutdown() -> None:
+    """重置调度器状态。"""
+    global _teams_config, _running
+    _stop_event.set()
+    _teams_config = []
+    _running = {}

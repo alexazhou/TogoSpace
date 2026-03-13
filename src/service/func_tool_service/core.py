@@ -24,12 +24,6 @@ def get_tools() -> List[Tool]:
     return _tools
 
 
-def shutdown() -> None:
-    """清空工具列表，程序退出前调用。"""
-    global _tools
-    _tools = []
-
-
 def run_tool_call(
     function_name: str,
     function_args: str,
@@ -75,3 +69,9 @@ def execute_function(func_name: str, args: dict, context: Optional[ChatContext] 
         raise ValueError(f"Invalid arguments for function {func_name}: {e}")
     except Exception as e:
         raise RuntimeError(f"Error executing function {func_name}: {e}")
+
+
+def shutdown() -> None:
+    """清空工具列表，程序退出前调用。"""
+    global _tools
+    _tools = []
