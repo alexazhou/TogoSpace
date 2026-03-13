@@ -2,6 +2,7 @@
 import asyncio
 import json
 import threading
+import time
 
 import aiohttp
 
@@ -13,54 +14,6 @@ TEAM = "e2e"
 class TestApiE2e(ServiceTestCase):
     requires_backend = True
     requires_mock_llm = True
-
-    ws_events: list = None
-
-    @classmethod
-    def setup_class(cls):
-        super().setup_class()
-        cls._collect_ws_events()
-
-    @classmethod
-    def _collect_ws_events(cls):
-        """在独立线程中连接 WebSocket，等待至少一条 event=message 推送。"""
-        collected: list = []
-        ws_done = threading.Event()
-
-        async def _collect():
-            ws_url = f"ws://127.0.0.1:{cls.backend_port}/ws/events"
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.ws_connect(ws_url) as ws:
-                        try:
-                            async with asyncio.timeout(18):
-                                async for msg in ws:
-                                    if msg.type == aiohttp.WSMsgType.TEXT:
-                                        data = json.loads(msg.data)
-                                        if data.get("event") == "message":
-                                            collected.append(data)
-                                            break
-                                    elif msg.type in (
-                                        aiohttp.WSMsgType.ERROR,
-                                        aiohttp.WSMsgType.CLOSED,
-                                    ):
-                                        break
-                        except asyncio.TimeoutError:
-                            pass
-            except Exception:
-                pass
-            finally:
-                ws_done.set()
-
-        def _thread():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(_collect())
-            loop.close()
-
-        threading.Thread(target=_thread, daemon=True).start()
-        ws_done.wait(timeout=22)
-        cls.ws_events = collected
 
     async def test_get_agents(self):
         async with aiohttp.ClientSession() as client:
@@ -114,8 +67,48 @@ class TestApiE2e(ServiceTestCase):
 
     async def test_ws_receives_message(self):
         """验证 WebSocket 能接收到 event=message 类型的推送。"""
-        assert len(self.ws_events) > 0, "未收到任何 event=message 的 WebSocket 推送"
-        event = self.ws_events[0]
+        # 重新连接 WebSocket 来接收新消息
+        collected = []
+        ws_done = threading.Event()
+
+        async def _collect():
+            ws_url = f"ws://127.0.0.1:{self.backend_port}/ws/events"
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.ws_connect(ws_url) as ws:
+                        # 先发送一条消息来触发推送
+                        async with session.post(
+                            f"{self.backend_base_url}/rooms/general@{TEAM}/messages",
+                            json={"content": "Testing WebSocket"}
+                        ) as resp:
+                            assert resp.status == 200
+
+                        # 等待 WebSocket 推送
+                        async with asyncio.timeout(5):
+                            async for msg in ws:
+                                if msg.type == aiohttp.WSMsgType.TEXT:
+                                    data = json.loads(msg.data)
+                                    if data.get("event") == "message":
+                                        collected.append(data)
+                                        break
+                                elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSED):
+                                    break
+            except Exception as e:
+                pass
+            finally:
+                ws_done.set()
+
+        def _thread():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(_collect())
+            loop.close()
+
+        threading.Thread(target=_thread, daemon=True).start()
+        ws_done.wait(timeout=10)
+
+        assert len(collected) > 0, "未收到任何 event=message 的 WebSocket 推送"
+        event = collected[0]
         assert event.get("event") == "message"
         assert "room_id" in event
         assert "team_name" in event
