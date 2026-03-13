@@ -141,7 +141,7 @@ class RoomPanel(Vertical):
 
     def _get_agent_status_markup(self, status: str) -> str:
         if status == "active":
-            return "[bold #56d4b0]● 活跃[/]"
+            return "[bold #56d4b0]● 忙碌[/]"
         return "[#7f91a4]○ 空闲[/]"
 
     async def load(
