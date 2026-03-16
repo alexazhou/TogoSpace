@@ -96,11 +96,9 @@ class TestRoomTurnScheduling:
         room_service.shutdown()
         room_service.startup()
 
-    def test_setup_turns_publishes_first_agent(self):
-        room_service.create_room(TEAM, "r", ["alice", "bob"])
-        room = room_service.get_room(f"r@{TEAM}")
+    def test_create_room_publishes_first_agent(self):
         with patch("service.message_bus.publish") as mock_publish:
-            room.setup_turns(["alice", "bob"], max_turns=5)
+            room_service.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_AGENT_TURN,
                 agent_name="alice",
@@ -110,9 +108,8 @@ class TestRoomTurnScheduling:
             )
 
     def test_add_message_publishes_next_agent(self):
-        room_service.create_room(TEAM, "r", ["alice", "bob"])
+        room_service.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
         room = room_service.get_room(f"r@{TEAM}")
-        room.setup_turns(["alice", "bob"], max_turns=5)
 
         with patch("service.message_bus.publish") as mock_publish:
             room.add_message("alice", "hello")
@@ -125,18 +122,16 @@ class TestRoomTurnScheduling:
             )
 
     def test_turn_state_becomes_idle_after_max_turns(self):
-        room_service.create_room(TEAM, "r", ["a"])
+        room_service.create_room(TEAM, "r", ["a"], max_turns=1)
         room = room_service.get_room(f"r@{TEAM}")
-        room.setup_turns(["a"], max_turns=1)
         assert room.state == RoomState.SCHEDULING
         room.add_message("a", "msg")
         assert room.state == RoomState.IDLE
 
     def test_no_publish_after_max_turns_reached(self):
-        room_service.create_room(TEAM, "r", ["a"])
+        room_service.create_room(TEAM, "r", ["a"], max_turns=1)
         room = room_service.get_room(f"r@{TEAM}")
-        room.setup_turns(["a"], max_turns=1)
-        room.add_message("a", "msg1") # 第一轮结束
+        room.add_message("a", "msg1")  # 第一轮结束
 
         with patch("service.message_bus.publish") as mock_publish:
             room.add_message("a", "msg2")
