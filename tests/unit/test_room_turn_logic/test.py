@@ -21,10 +21,9 @@ def test_strict_turn_advancement():
     """
     room_name = "test_room"
     agents = ["alice", "bob", "charlie"]
-    room_service.create_room(TEAM, room_name, agents, room_type=RoomType.GROUP)
     room_key = f"{room_name}@{TEAM}"
+    room_service.create_room(TEAM, room_name, agents, room_type=RoomType.GROUP, max_turns=10)
     room = room_service.get_room(room_key)
-    room.setup_turns(agents, max_turns=10)
 
     assert room.get_current_turn_agent() == "alice"
     assert room._turn_pos == 0
@@ -60,9 +59,8 @@ def test_skip_turn_validation():
     """
     room_name = "test_skip"
     agents = ["alice", "bob"]
-    room_service.create_room(TEAM, room_name, agents)
+    room_service.create_room(TEAM, room_name, agents, max_turns=10)
     room = room_service.get_room(f"{room_name}@{TEAM}")
-    room.setup_turns(agents, max_turns=10)
 
     room.skip_turn(sender="bob")
     assert room.get_current_turn_agent() == "alice"
@@ -77,10 +75,9 @@ def test_idle_wakeup_logic():
     """
     room_name = "test_idle"
     agents = ["alice", "bob"]
-    room_service.create_room(TEAM, room_name, agents)
     room_key = f"{room_name}@{TEAM}"
+    room_service.create_room(TEAM, room_name, agents, max_turns=1)
     room = room_service.get_room(room_key)
-    room.setup_turns(agents, max_turns=1)
 
     room.add_message("alice", "hi")
     room.add_message("bob", "bye")
@@ -111,9 +108,8 @@ def test_full_loop_advancement():
     """
     room_name = "test_loop"
     agents = ["a", "b"]
-    room_service.create_room(TEAM, room_name, agents)
+    room_service.create_room(TEAM, room_name, agents, max_turns=5)
     room = room_service.get_room(f"{room_name}@{TEAM}")
-    room.setup_turns(agents, max_turns=5)
 
     assert room._turn_index == 0
 
@@ -136,9 +132,8 @@ def test_all_skip_stops_scheduling():
     """
     room_name = "skip_all"
     agents = ["alice", "bob"]
-    room_service.create_room(TEAM, room_name, agents)
+    room_service.create_room(TEAM, room_name, agents, max_turns=10)
     room = room_service.get_room(f"{room_name}@{TEAM}")
-    room.setup_turns(agents, max_turns=10)
 
     assert room.state == RoomState.SCHEDULING
 
@@ -158,9 +153,8 @@ def test_all_skip_no_further_turn_events():
     """
     room_name = "skip_no_event"
     agents = ["alice", "bob"]
-    room_service.create_room(TEAM, room_name, agents)
+    room_service.create_room(TEAM, room_name, agents, max_turns=10)
     room = room_service.get_room(f"{room_name}@{TEAM}")
-    room.setup_turns(agents, max_turns=10)
 
     with patch("service.message_bus.publish") as mock_publish:
         room.skip_turn(sender="alice")
@@ -170,10 +164,9 @@ def test_all_skip_no_further_turn_events():
             c for c in mock_publish.call_args_list
             if c[0][0] == MessageBusTopic.ROOM_AGENT_TURN
         ]
-        # setup_turns 时发布了 alice 的第一个事件，skip alice → bob 事件，
-        # skip bob → 本轮结束，全员跳过，不再发布任何 TURN 事件
+        # create_room 时已发布 alice 的初始事件（在 mock 外），
+        # mock 内：skip alice → bob 事件，skip bob → 全员跳过，不再发布
         agent_names_notified = [c[1]["agent_name"] for c in turn_calls]
-        # 最后不应再有 alice 或 bob 的新一轮事件
         assert agent_names_notified == ["bob"]
 
 
@@ -184,10 +177,9 @@ def test_all_skip_wakeup_based_on_state_not_turn_index():
     """
     room_name = "skip_idx"
     agents = ["alice", "bob"]
-    room_service.create_room(TEAM, room_name, agents)
     room_key = f"{room_name}@{TEAM}"
+    room_service.create_room(TEAM, room_name, agents, max_turns=10)
     room = room_service.get_room(room_key)
-    room.setup_turns(agents, max_turns=10)
 
     with patch("service.message_bus.publish"):
         room.skip_turn(sender="alice")
@@ -212,10 +204,9 @@ def test_all_skip_wakeup_by_operator():
     """
     room_name = "skip_wakeup"
     agents = [SpecialAgent.OPERATOR, "alice", "bob"]
-    room_service.create_room(TEAM, room_name, agents)
     room_key = f"{room_name}@{TEAM}"
+    room_service.create_room(TEAM, room_name, agents, max_turns=10)
     room = room_service.get_room(room_key)
-    room.setup_turns(agents, max_turns=10)
 
     with patch("service.message_bus.publish"):
         # operator 发言推进到 alice
@@ -245,9 +236,8 @@ def test_partial_skip_does_not_stop():
     """
     room_name = "skip_partial"
     agents = ["alice", "bob", "charlie"]
-    room_service.create_room(TEAM, room_name, agents)
+    room_service.create_room(TEAM, room_name, agents, max_turns=10)
     room = room_service.get_room(f"{room_name}@{TEAM}")
-    room.setup_turns(agents, max_turns=10)
 
     with patch("service.message_bus.publish"):
         room.skip_turn(sender="alice")   # alice 跳过
@@ -266,9 +256,8 @@ def test_operator_excluded_from_skip_check():
     """
     room_name = "skip_op"
     agents = [SpecialAgent.OPERATOR, "alice", "bob"]
-    room_service.create_room(TEAM, room_name, agents)
+    room_service.create_room(TEAM, room_name, agents, max_turns=10)
     room = room_service.get_room(f"{room_name}@{TEAM}")
-    room.setup_turns(agents, max_turns=10)
 
     with patch("service.message_bus.publish"):
         # Operator 正常发言（推进到 alice）
@@ -288,10 +277,8 @@ def test_skip_set_resets_each_round():
     """
     room_name = "skip_reset"
     agents = ["alice", "bob"]
-    room_service.create_room(TEAM, room_name, agents)
-    room_key = f"{room_name}@{TEAM}"
-    room = room_service.get_room(room_key)
-    room.setup_turns(agents, max_turns=10)
+    room_service.create_room(TEAM, room_name, agents, max_turns=10)
+    room = room_service.get_room(f"{room_name}@{TEAM}")
 
     with patch("service.message_bus.publish"):
         # 第一轮：全员跳过 → IDLE
@@ -300,8 +287,8 @@ def test_skip_set_resets_each_round():
     assert room.state == RoomState.IDLE
 
     with patch("service.message_bus.publish"):
-        # Operator 唤醒房间
-        room.add_message("alice", "I'm back")  # alice 自己唤醒并发言，推进到 bob
+        # alice 发消息唤醒房间，同时推进到 bob
+        room.add_message("alice", "I'm back")
     assert room.state == RoomState.SCHEDULING
 
     with patch("service.message_bus.publish"):

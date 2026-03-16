@@ -64,7 +64,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             return _make_infer_response(tool_calls=[_send_msg_tool_call("general", "...")])
 
         with patch("service.agent_service.llm_service.infer", fake_infer):
-            room.setup_turns(["alice", "bob"], max_turns=1)
+            room_service.create_room(TEAM, "general", ["alice", "bob"], max_turns=1)
+            room = room_service.get_room(room_key)
             run_task = asyncio.create_task(scheduler.run())
             await asyncio.sleep(1)
             scheduler.shutdown()
@@ -119,7 +120,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
         with patch("service.agent_service.llm_service.infer", fake_infer):
             run_task = asyncio.create_task(scheduler.run())
-            room.setup_turns(["alice", "bob"], 2)
+            room_service.create_room(TEAM, "general", ["alice", "bob"], max_turns=2)
+            room = room_service.get_room(room_key)
             for _ in range(20):
                 if room.state.value == "idle":
                     break

@@ -18,20 +18,25 @@ def _make_room_key(team_name: str, room_name: str) -> str:
 class ChatRoom:
     """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
-    def __init__(self, name: str, team_name: str, initial_topic: str = "", room_type: RoomType = RoomType.GROUP):
+    def __init__(self, name: str, team_name: str, initial_topic: str = "", room_type: RoomType = RoomType.GROUP,
+                 members: List[str] = None, max_turns: int = 0):
         self.name: str = name  # 房间名称
         self.team_name: str = team_name  # 所属 Team
         self.room_type: RoomType = room_type  # 房间类型（私有/群聊）
         self.messages: List[ChatMessage] = []  # 消息历史记录
         self.initial_topic: str = initial_topic  # 初始话题
-        self.agents: List[str] = []  # 房间参与者名单（包含 Operator 和 AI Agents）
+        self.agents: List[str] = members or []  # 房间参与者名单（包含 Operator 和 AI Agents）
 
         self._agent_read_index: Dict[str, int] = {}  # 每个 Agent 的消息读取进度
         self._turn_index: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
-        self._max_turns: int = 0  # 最大允许轮次
+        self._max_turns: int = max_turns  # 最大允许轮次
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
         self._state: RoomState = RoomState.IDLE  # 房间当前的调度状态
         self._round_skipped: set = set()  # 当前轮次已跳过发言的成员名单
+
+        if self.agents and max_turns > 0:
+            self._state = RoomState.SCHEDULING
+            self._publish_current_turn()
 
     @property
     def key(self) -> str:
@@ -40,16 +45,6 @@ class ChatRoom:
     @property
     def state(self) -> RoomState:
         return self._state
-
-    def setup_turns(self, agent_names: List[str], max_turns: int) -> None:
-        """初始化轮次控制，并向第一位参与者发布初始事件。"""
-        self._turn_index = 0
-        self._max_turns = max_turns
-        self._turn_pos = 0
-        self._round_skipped = set()
-        if self.agents and max_turns > 0:
-            self._state = RoomState.SCHEDULING
-            self._publish_current_turn()
 
     def get_unread_messages(self, agent_name: str) -> List[ChatMessage]:
         """返回 agent_name 尚未读取的新消息，并推进其读取位置。"""
@@ -191,17 +186,15 @@ def startup() -> None:
 
 
 def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0) -> None:
-    """创建并初始化一个聊天室，设置成员并发布系统公告。若 max_turns > 0 则初始化轮次。"""
-    room = ChatRoom(name=name, team_name=team_name, initial_topic=initial_topic, room_type=room_type)
-    room.agents = members
+    """创建并初始化一个聊天室。若 max_turns > 0 则启动轮次调度，发布系统公告。"""
+    room = ChatRoom(name=name, team_name=team_name, initial_topic=initial_topic,
+                    room_type=room_type, members=members, max_turns=max_turns)
     room_key = room.key
     _rooms[room_key] = room
 
     logger.info(f"创建并初始化聊天室: key={room_key}, type={room_type.value}, 成员={members}")
-
     if max_turns > 0:
         logger.info(f"初始化轮次配置: room={room_key}, max_turns={max_turns}")
-        room.setup_turns(members, max_turns)
 
     member_list_str = "、".join(members)
     msg = f"{name} 房间已经创建，当前房间成员：{member_list_str}"
