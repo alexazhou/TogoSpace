@@ -22,7 +22,7 @@ def _setup_logger() -> None:
 
     log_format = "%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s"
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
+    root_logger.setLevel(logging.DEBUG)
     root_logger.handlers.clear()
 
     for handler in [
@@ -79,7 +79,7 @@ async def main(config_dir: str = None, llm_config_path: str = None, port: int = 
 
     agent_service.startup()
     agent_service.load_agent_config(agents_config)
-    agent_service.create_team_agents(teams_config)
+    await agent_service.create_team_agents(teams_config)
 
     chat_room.startup()
     scheduler.startup(teams_config=teams_config)
@@ -93,7 +93,7 @@ async def main(config_dir: str = None, llm_config_path: str = None, port: int = 
     finally:
         web_server.stop()
         scheduler.shutdown()
-        agent_service.shutdown()
+        await agent_service.shutdown()
         func_tool_service.shutdown()
         chat_room.shutdown()
         llm_service.shutdown()

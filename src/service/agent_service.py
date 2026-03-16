@@ -76,12 +76,10 @@ class Agent:
             "required": ["room_name", "msg"],
         })
         async def _send(args):
-            room = _room_slot[0]
-            logger.info(f"SDK MCP tool called: send_chat_msg, agent={self.key}, room={args.get('room_name')}, msg_len={len(args.get('msg', ''))}")
-            room.add_message(agent_name, args["msg"])
-            self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, args["msg"]))
-            _done_slot[0] = True
-            return {"content": [{"type": "text", "text": "success: 消息已发送，本轮发言结束。"}]}
+            room_name = args.get("room_name", "")
+            msg = args.get("msg", "")
+            logger.info(f"SDK MCP tool called: send_chat_msg, agent={self.key}, room={room_name}, msg_len={len(msg)}")
+            return self._sdk_do_send(room_name, msg)
 
         @tool("skip_chat_msg", "跳过本轮发言", {
             "type": "object",
@@ -113,6 +111,26 @@ class Agent:
         await client.connect()
         self._sdk_client = client
         logger.info(f"SDK 持久会话初始化: agent={self.key}")
+
+    def _sdk_do_send(self, room_name: str, msg: str) -> dict:
+        """send_chat_msg MCP 工具的核心逻辑（从闭包提取，便于单元测试）。
+
+        - 发到当前房间：写消息、标记本轮结束（_sdk_done_slot[0] = True）
+        - 发到其他房间：写消息、不标记结束，返回提示要求继续回复当前房间
+        """
+        room_key = room_name if "@" in room_name else f"{room_name}@{self.team_name}"
+        target_room = room_service.get_room(room_key)
+        if target_room is None:
+            logger.warning(f"SDK send_chat_msg: 目标房间不存在 {room_key}，回落到当前房间")
+            target_room = self._sdk_room_slot[0]
+        target_room.add_message(self.name, msg)
+        self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, msg))
+        current_room = self._sdk_room_slot[0]
+        if target_room is current_room:
+            self._sdk_done_slot[0] = True
+            return {"content": [{"type": "text", "text": "success: 消息已发送，本轮发言结束。"}]}
+        else:
+            return {"content": [{"type": "text", "text": f"success: 消息已发送到 {target_room.name}。你还需要调用 send_chat_msg 向当前房间 {current_room.name} 发言，或调用 skip_chat_msg 跳过。"}]}
 
     async def close(self) -> None:
         """关闭持久化 SDK 会话。"""

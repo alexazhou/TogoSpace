@@ -2,25 +2,25 @@
   "name": "default",
   "groups": [
     {
-      "name": "general",
-      "type": "group",
-      "members": ["alice", "bob", "dave"],
-      "initial_topic": "大家好，今天我们来聊聊生活和工作吧！",
-      "max_turns": 6
-    },
-    {
-      "name": "tech",
-      "type": "group",
-      "members": ["alice", "bob", "charlie"],
-      "initial_topic": "今天我们聊聊技术话题吧！",
-      "max_turns": 6
-    },
-    {
-      "name": "alice_private",
+      "name": "Agent助手",
       "type": "private",
-      "members": ["Operator", "alice"],
-      "initial_topic": "你好 Alice，我是人类操作者。你可以根据我的指令执行任务。",
+      "members": ["Operator", "researcher"],
+      "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
       "max_turns": 100
+    },
+    {
+      "name": "项目经理",
+      "type": "private",
+      "members": ["Operator", "project_manager"],
+      "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
+      "max_turns": 100
+    },
+    {
+      "name": "Agent大群",
+      "type": "group",
+      "members": ["project_manager","software_engineer", "test_engineer"],
+      "initial_topic": "按角色分工协作，一起协作完成人类发布的任务",
+      "max_turns": 1000
     }
   ],
   "max_function_calls": 5

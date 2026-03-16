@@ -133,3 +133,29 @@ class TestToolFunctions(ServiceTestCase):
         room = room_service.get_room(f"existing@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room, get_room=room_service.get_room)
         assert send_chat_msg("nonexistent", "hello", _context=ctx) == "success"
+
+    def test_send_chat_msg_cross_room_lands_in_target(self):
+        """跨房间发消息时，消息必须落到目标房间，而不是 agent 当前所在房间。"""
+        room_service.create_room(TEAM, "room_a", ["alice"])
+        room_service.create_room(TEAM, "room_b", ["alice"])
+        room_a = room_service.get_room(f"room_a@{TEAM}")
+        room_b = room_service.get_room(f"room_b@{TEAM}")
+        # alice 当前在 room_a，但发消息到 room_b
+        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room_a, get_room=room_service.get_room)
+        result = send_chat_msg("room_b", "hello from a to b", _context=ctx)
+        assert result == "success"
+        # 消息在 room_b
+        assert any(m.content == "hello from a to b" for m in room_b.messages)
+        # room_a 不应有该消息
+        assert not any(m.content == "hello from a to b" for m in room_a.messages)
+
+    def test_send_chat_msg_cross_room_does_not_pollute_current_room(self):
+        """发到其他房间时，当前房间的消息列表不变。"""
+        room_service.create_room(TEAM, "src", ["bob"])
+        room_service.create_room(TEAM, "dst", ["bob"])
+        src = room_service.get_room(f"src@{TEAM}")
+        dst = room_service.get_room(f"dst@{TEAM}")
+        before_count = len(src.messages)
+        ctx = ChatContext(agent_name="bob", team_name=TEAM, chat_room=src, get_room=room_service.get_room)
+        send_chat_msg("dst", "cross-room msg", _context=ctx)
+        assert len(src.messages) == before_count
