@@ -199,15 +199,15 @@ def create_room(team_name: str, name: str, members: List[str], initial_topic: st
 
     logger.info(f"创建并初始化聊天室: key={room_key}, type={room_type.value}, 成员={members}")
 
+    if max_turns > 0:
+        logger.info(f"初始化轮次配置: room={room_key}, max_turns={max_turns}")
+        room.setup_turns(members, max_turns)
+
     member_list_str = "、".join(members)
     msg = f"{name} 房间已经创建，当前房间成员：{member_list_str}"
     if initial_topic:
         msg += f"\n本房间初始话题：{initial_topic}"
     room.add_message("system", msg)
-
-    if max_turns > 0:
-        logger.info(f"初始化轮次配置: room={room_key}, max_turns={max_turns}")
-        room.setup_turns(members, max_turns)
 
 
 def create_rooms(teams_config: list) -> None:
