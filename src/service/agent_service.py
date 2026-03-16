@@ -246,6 +246,7 @@ class Agent:
                     logger.info(f"SDK 注入发言提醒: agent={self.key}, attempt={attempt}")
                     await client.query(hint)
                 msg_count = 0
+                _interrupted = False
                 async for msg in client.receive_response():
                     msg_count += 1
                     if isinstance(msg, AssistantMessage):
@@ -270,11 +271,12 @@ class Agent:
                             else:
                                 parts.append(f"{type(block).__name__}")
                         logger.info(f"SDK UserMessage: agent={self.key}, content=[{', '.join(parts)}]")
-                        # 工具调用结果返回后，若本轮已完成则立即中断会话
-                        if self._sdk_done_slot[0]:
+                        # 工具调用结果返回后，若本轮已完成则发起中断，但不立即 break，
+                        # 而是让流自然结束，避免 interrupt 响应残留到下一轮
+                        if self._sdk_done_slot[0] and not _interrupted:
                             logger.info(f"SDK 发言完成，主动中断会话: agent={self.key}")
                             await client.interrupt()
-                            break
+                            _interrupted = True
                     elif isinstance(msg, SystemMessage):
                         logger.info(f"SDK SystemMessage: agent={self.key}, subtype={msg.subtype}, data={msg.data}")
                     elif isinstance(msg, ResultMessage):
