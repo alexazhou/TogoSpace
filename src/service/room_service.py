@@ -31,6 +31,7 @@ class ChatRoom:
         self._max_turns: int = 0  # 最大允许轮次
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
         self._state: RoomState = RoomState.IDLE  # 房间当前的调度状态
+        self._round_skipped: set = set()  # 当前轮次已跳过发言的成员名单
 
     @property
     def key(self) -> str:
@@ -45,6 +46,7 @@ class ChatRoom:
         self._turn_index = 0
         self._max_turns = max_turns
         self._turn_pos = 0
+        self._round_skipped = set()
         if self.agents and max_turns > 0:
             self._state = RoomState.SCHEDULING
             self._publish_current_turn()
@@ -76,11 +78,12 @@ class ChatRoom:
         if not self.agents:
             return
 
-        # 1. 唤醒检查：如果房间已停止，任何活动都将重置轮次计数器并恢复调度
+        # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
         was_idle = (self._state == RoomState.IDLE)
-        if was_idle and self._turn_index >= self._max_turns:
-            logger.info(f"检测到房间 {self.key} 的活动 ({sender})，重置最大轮次计数器并唤醒房间")
+        if was_idle:
+            logger.info(f"检测到房间 {self.key} 的活动 ({sender})，重置轮次计数器并唤醒房间")
             self._turn_index = 0
+            self._round_skipped = set()
             self._state = RoomState.SCHEDULING
 
         # 2. 推进逻辑：只有当前顺序发言人说话，才推进到下一位
@@ -93,17 +96,21 @@ class ChatRoom:
             if was_idle:
                 self._publish_current_turn()
 
-    def skip_turn(self, sender: str = None) -> None:
-        """跳过当前发言人的轮次。通常由 Agent 在 skip_chat_msg 工具中调用。"""
+    def skip_turn(self, sender: str = None) -> bool:
+        """跳过当前发言人的轮次。通常由 Agent 在 skip_chat_msg 工具中调用。
+        返回 True 表示跳过成功，False 表示被拒绝（sender 不是当前发言人）。
+        """
         current_expected = self.get_current_turn_agent()
 
         # 如果指定了发送者且不匹配，则拒绝跳过（防止误操作）
         if sender and sender != current_expected:
             logger.warning(f"拒绝跳过申请：{sender} 并非当前发言人 ({current_expected})")
-            return
+            return False
 
         logger.info(f"房间 {self.key} 由 {current_expected} 跳过一轮发言")
+        self._round_skipped.add(current_expected)
         self._advance_turn()
+        return True
 
     def get_current_turn_agent(self) -> Optional[str]:
         """返回当前理论上应该发言的 Agent 名（忽略 IDLE 状态）。"""
@@ -132,14 +139,24 @@ class ChatRoom:
 
         # 本轮所有人发言完毕 → 轮次 +1，重置位置
         if self._turn_pos >= len(self.agents):
+            # 全员名单与跳过名单对比（排除 Operator，它不参与 AI 发言判定）
+            ai_agents = set(a for a in self.agents if a != SpecialAgent.OPERATOR)
+            all_skipped = ai_agents and ai_agents.issubset(self._round_skipped)
+            self._round_skipped = set()  # 下一轮重新收集
             self._turn_index += 1
             self._turn_pos = 0
 
-        # 检查是否达到最大轮次限制
-        if self._turn_index >= self._max_turns:
-            self._state = RoomState.IDLE
-            logger.info(f"房间 {self.key} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
-            return
+            # 全员跳过 → 立即停止调度
+            if all_skipped:
+                self._state = RoomState.IDLE
+                logger.info(f"房间 {self.key} 本轮所有成员均跳过发言，停止调度")
+                return
+
+            # 正常达到最大轮次
+            if self._turn_index >= self._max_turns:
+                self._state = RoomState.IDLE
+                logger.info(f"房间 {self.key} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
+                return
 
         # 正常发布下一位成员的发言事件
         self._publish_current_turn()
