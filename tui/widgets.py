@@ -138,6 +138,7 @@ class RoomPanel(Vertical):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._room_map: dict[str, RoomInfo] = {}
+        self._safe_to_room_id: dict[str, str] = {}
 
     def _get_agent_status_markup(self, status: str) -> str:
         if status == "active":
@@ -186,8 +187,7 @@ class RoomPanel(Vertical):
                     PreviewLabel(preview, classes="room-card-preview"),
                     classes="room-card",
                 )
-                # 使用 CSS-safe ID: 将 @ 替换为 --
-                safe_id = room.room_id.replace("@", "--")
+                safe_id = self._safe_id(room.room_id)
                 item = ListItem(card, id=f"room-{safe_id}")
                 await room_list.append(item)
                 self.update_unread_count(room.room_id, 0)
@@ -209,7 +209,13 @@ class RoomPanel(Vertical):
             await agent_list.append(item)
 
     def _safe_id(self, room_id: str) -> str:
-        return room_id.replace("@", "--")
+        import hashlib
+        h = hashlib.md5(room_id.encode()).hexdigest()[:12]
+        self._safe_to_room_id[h] = room_id
+        return h
+
+    def room_id_from_safe(self, safe_id: str) -> str | None:
+        return self._safe_to_room_id.get(safe_id)
 
     def update_unread_count(self, room_id: str, count: int) -> None:
         try:

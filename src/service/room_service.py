@@ -11,10 +11,6 @@ from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 logger = logging.getLogger(__name__)
 
 
-def _make_room_key(team_name: str, room_name: str) -> str:
-    return f"{room_name}@{team_name}"
-
-
 class ChatRoom:
     """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
@@ -40,7 +36,7 @@ class ChatRoom:
 
     @property
     def key(self) -> str:
-        return _make_room_key(self.team_name, self.name)
+        return f"{self.name}@{self.team_name}"
 
     @property
     def state(self) -> RoomState:
@@ -220,7 +216,7 @@ def create_rooms(teams_config: list) -> None:
 
 def get_member_names(team_name: str, room_name: str) -> List[str]:
     """返回聊天室的参与者名列表。"""
-    return _rooms[_make_room_key(team_name, room_name)].agents
+    return get_room(f"{room_name}@{team_name}").agents
 
 
 def get_rooms_for_agent(team_name: str, agent_name: str) -> List[str]:

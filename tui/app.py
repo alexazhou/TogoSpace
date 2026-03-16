@@ -215,10 +215,11 @@ class WatcherApp(App):
     async def on_room_selected(self, event: ListView.Selected) -> None:
         item = event.item
         if item.id and item.id.startswith("room-"):
-            # Convert CSS-safe ID back to room_id (-- → @)
             safe_id = item.id[len("room-"):]
-            room_id = safe_id.replace("--", "@", 1)
-            await self._select_room(room_id)
+            room_panel = self.query_one(RoomPanel)
+            room_id = room_panel.room_id_from_safe(safe_id)
+            if room_id:
+                await self._select_room(room_id)
 
     @on(Input.Submitted, "#chat-input")
     async def on_input_submitted(self, event: Input.Submitted) -> None:
