@@ -1,7 +1,7 @@
 """integration tests — 验证多 Agent 完整对话流程（mock LLM，真实 service 层）"""
+import asyncio
 import json
 import os
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import service.room_service as room_service
@@ -33,8 +33,7 @@ def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
 
 
 class TestIntegrationMultiAgentChat(ServiceTestCase):
-    def setup_method(self):
-        super().setup_method()
+    async def async_setup_method(self):
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
         room_service.startup()
@@ -42,7 +41,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         func_tool_service.startup()
         agent_service.startup()
         agent_service.load_agent_config(agents_config)
-        agent_service.create_team_agents([team_config])
+        await agent_service.create_team_agents([team_config])
         scheduler.startup([team_config])
 
     async def test_two_agents_exchange_messages(self):
