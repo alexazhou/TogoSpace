@@ -108,3 +108,62 @@ class TestSchedulerRun(ServiceTestCase):
 
         assert not alice.wait_task_queue.empty()
         assert f"alice@{TEAM}" in scheduler._running
+
+    async def test_duplicate_room_event_is_skipped(self):
+        """同一房间连续触发两次 ROOM_AGENT_TURN，队列中只应有一个事件。"""
+        alice = _make_mock_agent("alice")
+        teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
+        await scheduler.startup(teams_config)
+
+        with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
+            msg = Message(
+                topic=MessageBusTopic.ROOM_AGENT_TURN,
+                payload={"agent_name": "alice", "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
+            )
+            scheduler._on_agent_turn(msg)
+            scheduler._on_agent_turn(msg)
+
+        assert alice.wait_task_queue.qsize() == 1
+
+    async def test_different_rooms_not_deduplicated(self):
+        """不同房间的事件不应被去重，各自独立入队。"""
+        alice = _make_mock_agent("alice")
+        teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
+        await scheduler.startup(teams_config)
+
+        with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
+            msg_r1 = Message(
+                topic=MessageBusTopic.ROOM_AGENT_TURN,
+                payload={"agent_name": "alice", "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
+            )
+            msg_r2 = Message(
+                topic=MessageBusTopic.ROOM_AGENT_TURN,
+                payload={"agent_name": "alice", "room_name": "r2", "room_key": f"r2@{TEAM}", "team_name": TEAM},
+            )
+            scheduler._on_agent_turn(msg_r1)
+            scheduler._on_agent_turn(msg_r2)
+
+        assert alice.wait_task_queue.qsize() == 2
+
+    async def test_room_can_requeue_after_consumed(self):
+        """事件被消费后，同一房间应该可以再次入队。"""
+        alice = _make_mock_agent("alice")
+        teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
+        await scheduler.startup(teams_config)
+
+        with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
+            msg = Message(
+                topic=MessageBusTopic.ROOM_AGENT_TURN,
+                payload={"agent_name": "alice", "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
+            )
+            # 第一次入队
+            scheduler._on_agent_turn(msg)
+            assert alice.wait_task_queue.qsize() == 1
+
+            # 消费掉
+            alice.wait_task_queue.get_nowait()
+            assert alice.wait_task_queue.qsize() == 0
+
+            # 再次入队应该成功
+            scheduler._on_agent_turn(msg)
+            assert alice.wait_task_queue.qsize() == 1
