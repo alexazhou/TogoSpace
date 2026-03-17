@@ -10,6 +10,8 @@ _TEAM = "e2e"
 
 
 class _ApiServiceCase(ServiceTestCase):
+    """API 测试基类：复用后端，同时重置进程内单例状态。"""
+
     @classmethod
     def setup_class(cls):
         super().setup_class()
@@ -61,6 +63,7 @@ class TestWsController(_ApiServiceCase):
                 ws_done.set()
 
         def _thread():
+            # 在独立线程里跑事件循环，避免与 pytest-asyncio 当前 loop 冲突。
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(_collect())

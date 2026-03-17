@@ -16,6 +16,7 @@ TEAM = "test_team"
 
 
 def _make_mock_agent(name: str, team_name: str = TEAM) -> Agent:
+    """构造最小可运行的 Agent mock，用于观察 scheduler 调度行为。"""
     agent = MagicMock(spec=Agent)
     agent.name = name
     agent.team_name = team_name
@@ -28,6 +29,7 @@ def _make_mock_agent(name: str, team_name: str = TEAM) -> Agent:
 class TestSchedulerRun(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
+        # scheduler 场景依赖房间数据结构，因此先启动 room_service。
         await cls.areset_services()
         await room_service.startup()
 
@@ -56,6 +58,7 @@ class TestSchedulerRun(ServiceTestCase):
             )
             scheduler._on_agent_turn(msg)
 
+            # consume_task 由后台任务异步消费队列，给一个短暂让渡时间。
             await asyncio.sleep(0.5)
 
             alice.consume_task.assert_called()
@@ -87,6 +90,7 @@ class TestSchedulerRun(ServiceTestCase):
         with patch.object(real_agent, "run_turn", side_effect=RuntimeError("boom")):
             await real_agent.consume_task(max_function_calls=5)
 
+        # 即使 run_turn 报错，队列也应被正确消费，避免任务卡死。
         assert real_agent.wait_task_queue.empty()
 
     async def test_on_agent_turn_creates_task(self):

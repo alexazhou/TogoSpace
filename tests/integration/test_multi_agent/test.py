@@ -17,6 +17,7 @@ _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
 
 
 def _make_infer_response(content=None, tool_calls=None):
+    """构造与 llm_service.infer 返回结构兼容的最小响应对象。"""
     msg = LlmApiMessage(role=OpenaiLLMApiRole.ASSISTANT, content=content, tool_calls=tool_calls)
     choice = MagicMock()
     choice.message = msg
@@ -26,6 +27,7 @@ def _make_infer_response(content=None, tool_calls=None):
 
 
 def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
+    """构造 send_chat_msg 的 ToolCall，便于控制 agent 输出路径。"""
     return ToolCall(
         id=call_id,
         function={"name": "send_chat_msg", "arguments": json.dumps({"room_name": room_name, "msg": msg})},
@@ -35,6 +37,7 @@ def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
 class TestIntegrationMultiAgentChat(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
+        # 按真实启动顺序拉起 service，并加载 integration 专用配置。
         await cls.areset_services()
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
@@ -65,6 +68,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             return _make_infer_response(tool_calls=[_send_msg_tool_call("general", "...")])
 
         with patch("service.agent_service.llm_service.infer", fake_infer):
+            # 重新创建 max_turns=1 的同名房间，快速触发“每人一轮”场景。
             room_service.create_room(TEAM, "general", ["alice", "bob"], max_turns=1)
             room = room_service.get_room(room_key)
             run_task = asyncio.create_task(scheduler.run())
@@ -92,6 +96,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
         tool_results = [m for m in alice._history if m.role == OpenaiLLMApiRole.TOOL]
         assert len(tool_results) >= 1
+        # send_chat_msg 成功返回 "success"，应被写入 TOOL role 消息内容。
         assert tool_results[0].content == "success"
 
     async def test_turn_checker_forces_send_chat_msg(self):
