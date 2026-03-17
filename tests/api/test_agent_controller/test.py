@@ -3,7 +3,19 @@ import aiohttp
 from ...base import ServiceTestCase
 
 
-class TestAgentController(ServiceTestCase):
+class _ApiServiceCase(ServiceTestCase):
+    @classmethod
+    def setup_class(cls):
+        super().setup_class()
+        cls.reset_services()
+
+    @classmethod
+    def teardown_class(cls):
+        cls.cleanup_services()
+        super().teardown_class()
+
+
+class TestAgentController(_ApiServiceCase):
     requires_backend = True
     requires_mock_llm = True
 

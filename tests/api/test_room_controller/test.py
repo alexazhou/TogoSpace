@@ -11,7 +11,19 @@ _TEAM = "e2e"
 _V6_TEAM = "v6test"
 
 
-class TestRoomController(ServiceTestCase):
+class _ApiServiceCase(ServiceTestCase):
+    @classmethod
+    def setup_class(cls):
+        super().setup_class()
+        cls.reset_services()
+
+    @classmethod
+    def teardown_class(cls):
+        cls.cleanup_services()
+        super().teardown_class()
+
+
+class TestRoomController(_ApiServiceCase):
     """测试 RoomListHandler 和 RoomMessagesHandler，使用默认配置。"""
 
     requires_backend = True
@@ -82,7 +94,7 @@ class TestRoomController(ServiceTestCase):
         )
 
 
-class TestRoomControllerPrivate(ServiceTestCase):
+class TestRoomControllerPrivate(_ApiServiceCase):
     """测试 v6 新增的 room_type 字段及私有房间行为，使用自定义配置。"""
 
     requires_backend = True
