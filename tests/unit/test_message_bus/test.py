@@ -39,10 +39,10 @@ class TestMessageBus(ServiceTestCase):
         message_bus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_name="x", room_name="y")
         assert len(received) == 0
 
-    def test_init_clears_subscribers(self):
+    async def test_init_clears_subscribers(self):
         received = []
         message_bus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: received.append(m))
-        message_bus.startup()
+        await message_bus.startup()
         message_bus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_name="x", room_name="y")
         assert len(received) == 0
 

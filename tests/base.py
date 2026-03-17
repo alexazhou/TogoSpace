@@ -175,7 +175,7 @@ class ServiceTestCase:
     # ------------------------------------------------------------------
 
     def setup_method(self):
-        message_bus.startup()
+        self._run_maybe_async(message_bus.startup())
         room_service.shutdown()
         self._run_maybe_async(agent_service.shutdown())
         func_tool_service.shutdown()

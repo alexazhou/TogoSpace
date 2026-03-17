@@ -6,14 +6,14 @@ import service.room_service as room_service
 from service.room_service import ChatRoom
 from model.chat_model import ChatMessage
 from constants import RoomState, MessageBusTopic, RoomType
+from ...base import ServiceTestCase
 
 TEAM = "test_team"
 
 
-class TestChatRoom:
-    def setup_method(self):
-        room_service.shutdown()
-        room_service.startup()
+class TestChatRoom(ServiceTestCase):
+    async def async_setup_method(self):
+        await room_service.startup()
         room_service.create_room(TEAM, "test_room", ["alice"])
         self.room = room_service.get_room(f"test_room@{TEAM}")
 
@@ -62,10 +62,9 @@ class TestChatRoom:
         assert "system" in log
 
 
-class TestRoomServiceFunctions:
-    def setup_method(self):
-        room_service.shutdown()
-        room_service.startup()
+class TestRoomServiceFunctions(ServiceTestCase):
+    async def async_setup_method(self):
+        await room_service.startup()
 
     def test_create_room(self):
         room_service.create_room(TEAM, "myroom", ["alice"])
@@ -91,10 +90,9 @@ class TestRoomServiceFunctions:
         assert room_service.get_rooms_for_agent(TEAM, "bob") == [f"r2@{TEAM}", f"r3@{TEAM}"]
 
 
-class TestRoomTurnScheduling:
-    def setup_method(self):
-        room_service.shutdown()
-        room_service.startup()
+class TestRoomTurnScheduling(ServiceTestCase):
+    async def async_setup_method(self):
+        await room_service.startup()
 
     def test_create_room_publishes_first_agent(self):
         with patch("service.message_bus.publish") as mock_publish:

@@ -77,9 +77,8 @@ class TestBuildTools(ServiceTestCase):
 
 
 class TestToolFunctions(ServiceTestCase):
-    def setup_method(self):
-        super().setup_method()
-        room_service.startup()
+    async def async_setup_method(self):
+        await room_service.startup()
 
     def test_get_weather_celsius(self):
         assert "25°C" in get_weather("北京", "celsius")

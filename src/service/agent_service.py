@@ -377,7 +377,7 @@ class Agent:
         self._history.append(LlmApiMessage.tool_result(tool_call_id, result))
 
 
-def startup() -> None:
+async def startup() -> None:
     """初始化 Agent 服务，清空所有状态。"""
     global _agent_defs, _agents
     _agent_defs = {}

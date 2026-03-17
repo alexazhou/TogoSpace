@@ -10,9 +10,8 @@ TEAM = "test_team"
 class TestSdkDoSend(ServiceTestCase):
     """测试 Agent._sdk_do_send：当前房间 vs 跨房间发言的路由与 done 标记行为。"""
 
-    def setup_method(self):
-        super().setup_method()
-        room_service.startup()
+    async def async_setup_method(self):
+        await room_service.startup()
 
     def _make_agent_with_slots(self, agent_name: str, current_room_name: str):
         """创建房间并为 agent 注入 SDK slots，模拟 _run_turn_sdk 执行前的状态。"""
