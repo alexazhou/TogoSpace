@@ -167,13 +167,6 @@ class RoomPanel(Vertical):
             teams[room.team_name].append(room)
 
         for team_name, team_rooms in teams.items():
-            # 添加 Team 分组标题
-            team_header = ListItem(
-                Label(f"[bold dim]── {team_name} ──[/]", classes="team-header"),
-            )
-            team_header.disabled = True
-            await room_list.append(team_header)
-
             for room in team_rooms:
                 icon = "👤" if room.room_type == "private" else "👥"
                 preview = last_previews.get(room.room_id, "暂无消息")
@@ -225,7 +218,7 @@ class RoomPanel(Vertical):
             name = room.room_name if room else room_id
             icon = "👤" if room and room.room_type == "private" else "👥"
             if count > 0:
-                markup = f"{name} [bold #5288c1][{count}][/bold #5288c1]"
+                markup = f"{name} [bold #f85149][{count}][/bold #f85149][/bold][#7f91a4] 未读[/]"
             else:
                 markup = f"{name} [#7f91a4][0][/]"
             item.query_one(".room-card-icon", Label).update(f"{icon} ")
