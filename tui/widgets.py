@@ -62,7 +62,7 @@ class MessageBubble(Vertical):
     NAME_COLORS = [
         "#56d4b0", "#7eb8d4", "#c4a55a", "#d4847e", "#b392d4",
         "#8cc152", "#4fc1e9", "#ffce54", "#fc6e51", "#ac92ec",
-        "#48cfad", "#a0d468", "#5d9cec", "#ed5565", "#fb6e52"
+        "#e8a838", "#a0d468", "#5d9cec", "#ed5565", "#fb6e52"
     ]
 
     def _get_name_color(self, name: str) -> str:
