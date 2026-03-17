@@ -1,4 +1,6 @@
 """所有测试用例的基类，负责统一初始化和清理所有 service 的全局状态。"""
+import asyncio
+import inspect
 import os
 import socket
 import subprocess
@@ -27,7 +29,10 @@ class ServiceTestCase:
     """基础测试类：每个用例前重置所有 service 状态，用例后清理。
 
     使用 pytest 的 setup_method / teardown_method 钩子（对应 unittest 的 setUp / tearDown）。
-    子类可重写这两个方法，但须在首行调用 super()。
+    若子类需要异步准备/清理，优先重写：
+        - async_setup_class / async_teardown_class
+        - async_setup_method / async_teardown_method
+    基类会通过同步壳自动执行这些 async hook。
 
     后端子进程支持：
         requires_backend = True   — 在整个测试类前后自动启动/停止后端子进程
@@ -63,13 +68,23 @@ class ServiceTestCase:
         if cls.requires_backend:
             cls._setup_pre_backend()
             cls._start_backend()
+        cls._run_maybe_async(cls.async_setup_class())
 
     @classmethod
     def teardown_class(cls):
+        cls._run_maybe_async(cls.async_teardown_class())
         if cls.requires_backend:
             cls._stop_backend()
         if cls.requires_mock_llm:
             cls._stop_mock_llm()
+
+    @classmethod
+    async def async_setup_class(cls):
+        """子类可按需重写：类级别异步初始化。"""
+
+    @classmethod
+    async def async_teardown_class(cls):
+        """子类可按需重写：类级别异步清理。"""
 
     @classmethod
     def _start_mock_llm(cls):
@@ -162,13 +177,28 @@ class ServiceTestCase:
     def setup_method(self):
         message_bus.startup()
         room_service.shutdown()
-        agent_service.shutdown()
+        self._run_maybe_async(agent_service.shutdown())
         func_tool_service.shutdown()
         scheduler.shutdown()
+        self._run_maybe_async(self.async_setup_method())
 
     def teardown_method(self):
-        scheduler.shutdown()
-        func_tool_service.shutdown()
-        agent_service.shutdown()
-        room_service.shutdown()
-        message_bus.shutdown()
+        try:
+            self._run_maybe_async(self.async_teardown_method())
+        finally:
+            scheduler.shutdown()
+            func_tool_service.shutdown()
+            self._run_maybe_async(agent_service.shutdown())
+            room_service.shutdown()
+            message_bus.shutdown()
+
+    async def async_setup_method(self):
+        """子类可按需重写：用例级别异步初始化。"""
+
+    async def async_teardown_method(self):
+        """子类可按需重写：用例级别异步清理。"""
+
+    @staticmethod
+    def _run_maybe_async(result):
+        if inspect.isawaitable(result):
+            asyncio.run(result)
