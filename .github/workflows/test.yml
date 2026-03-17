@@ -38,4 +38,4 @@ jobs:
 
     - name: Run API tests
       run: |
-        PYTHONPATH=src python -m pytest tests/api/test_api_e2e/ -v
+        PYTHONPATH=src python -m pytest tests/api/ -v
