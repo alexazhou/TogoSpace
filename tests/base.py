@@ -26,10 +26,11 @@ def _find_free_port() -> int:
 
 
 class ServiceTestCase:
-    """基础测试类：每个用例前重置所有 service 状态，用例后清理。
+    """基础测试类：统一管理测试类级别的初始化与清理。
 
     类级生命周期由 setup_class / teardown_class 管理。
-    方法级别初始化/清理由子类自行实现（可调用本类提供的 reset_services/cleanup_services 辅助方法）。
+    推荐在 async_setup_class / async_teardown_class 中调用
+    areset_services / acleanup_services 做进程内状态隔离。
 
     后端子进程支持：
         requires_backend = True   — 在整个测试类前后自动启动/停止后端子进程
@@ -60,6 +61,7 @@ class ServiceTestCase:
 
     @classmethod
     def setup_class(cls):
+        # 先启动外部依赖（MockLLM/后端子进程），再执行子类自定义异步初始化。
         if cls.requires_mock_llm:
             cls._start_mock_llm()
         if cls.requires_backend:
@@ -69,6 +71,7 @@ class ServiceTestCase:
 
     @classmethod
     def teardown_class(cls):
+        # 先执行子类清理，再关闭外部依赖，保证清理阶段仍可访问服务。
         cls._run_maybe_async(cls.async_teardown_class())
         if cls.requires_backend:
             cls._stop_backend()
@@ -169,12 +172,12 @@ class ServiceTestCase:
 
     @classmethod
     def reset_services(cls):
-        """重置 in-process service 状态（供子类类级初始化调用）。"""
+        """同步壳：在非异步 setup_class 中安全调用异步重置逻辑。"""
         cls._run_maybe_async(cls.areset_services())
 
     @classmethod
     def cleanup_services(cls):
-        """清理 in-process service 状态（供子类类级清理调用）。"""
+        """同步壳：在非异步 teardown_class 中安全调用异步清理逻辑。"""
         cls._run_maybe_async(cls.acleanup_services())
 
     @classmethod
@@ -197,5 +200,6 @@ class ServiceTestCase:
 
     @staticmethod
     def _run_maybe_async(result):
+        # pytest 的 setup_class/teardown_class 是同步协议，这里统一桥接 awaitable。
         if inspect.isawaitable(result):
             asyncio.run(result)

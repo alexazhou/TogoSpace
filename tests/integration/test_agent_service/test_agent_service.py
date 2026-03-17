@@ -10,6 +10,8 @@ _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
 
 
 class _AgentServiceCase(ServiceTestCase):
+    """AgentService 集成测试基类：统一加载测试专用 agent/team 配置。"""
+
     @classmethod
     async def async_setup_class(cls):
         await cls.areset_services()
@@ -23,24 +25,28 @@ class _AgentServiceCase(ServiceTestCase):
 
 class TestAgentServiceCreateTeamAgents(_AgentServiceCase):
     def test_create_team_agents(self):
+        """create_team_agents 后，team 维度的 agent 实例应全部可检索。"""
         assert agent_service.get_agent(TEAM, "alice") is not None
         assert agent_service.get_agent(TEAM, "bob") is not None
 
 
 class TestAgentServiceGetAgentsInRoom(_AgentServiceCase):
     def test_get_agents_in_room(self):
+        """get_agents 只返回房间成员，并保持成员集合正确。"""
         room_service.create_room(TEAM, "general", ["alice", "bob"])
         assert {a.name for a in agent_service.get_agents(TEAM, "general")} == {"alice", "bob"}
 
 
 class TestAgentServiceGetAllRooms(_AgentServiceCase):
     def test_get_all_rooms_for_agent(self):
+        """get_all_rooms 应返回某个 agent 所在的所有 room_key。"""
         room_service.create_room(TEAM, "general", ["alice"])
         assert f"general@{TEAM}" in agent_service.get_all_rooms(TEAM, "alice")
 
 
 class TestAgentServiceSyncRoomMessages(_AgentServiceCase):
     def test_sync_room_messages(self):
+        """sync_room 会把房间中的新增消息同步进 agent 历史。"""
         room_service.create_room(TEAM, "general", ["alice"])
         room = room_service.get_room(f"general@{TEAM}")
         room.add_message("bob", "hello alice")
@@ -55,6 +61,7 @@ class TestAgentServiceSyncRoomMessages(_AgentServiceCase):
 
 class TestAgentServiceSyncSkipsOwnMessages(_AgentServiceCase):
     def test_sync_room_skips_own_messages(self):
+        """同步时应过滤 agent 自己发过的消息，避免历史自回灌。"""
         room_service.create_room(TEAM, "general", ["alice"])
         room = room_service.get_room(f"general@{TEAM}")
 

@@ -12,6 +12,8 @@ _V6_TEAM = "v6test"
 
 
 class _ApiServiceCase(ServiceTestCase):
+    """API 测试基类：后端复用，进程内 service 每类重置。"""
+
     @classmethod
     def setup_class(cls):
         super().setup_class()
@@ -88,6 +90,7 @@ class TestRoomController(_ApiServiceCase):
                 assert resp.status == 200
                 data = await resp.json()
         messages = data["messages"]
+        # Operator 的消息应被真正落库，而不仅仅返回 HTTP 成功。
         assert any(
             m["sender"] == SpecialAgent.OPERATOR.value and m["content"] == payload["content"]
             for m in messages
@@ -153,6 +156,7 @@ class TestRoomControllerPrivate(_ApiServiceCase):
                     assert resp.status == 200
                     data = await resp.json()
                     messages = data["messages"]
+                    # Agent 回复由调度异步触发，使用轮询等待可观测结果。
                     if any(m["sender"] == "alice" for m in messages):
                         break
             await asyncio.sleep(1)

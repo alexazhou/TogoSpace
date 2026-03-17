@@ -12,6 +12,7 @@ class TestSdkDoSend(ServiceTestCase):
 
     @classmethod
     async def async_setup_class(cls):
+        # 仅依赖 room_service，无需启动完整 agent/service 栈。
         await cls.areset_services()
         await room_service.startup()
 

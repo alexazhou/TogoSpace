@@ -8,8 +8,11 @@ TEAM = "test_team"
 
 
 class TestRoomTurnLogic(ServiceTestCase):
+    """覆盖房间轮转推进、skip_turn 与唤醒边界行为。"""
+
     @classmethod
     async def async_setup_class(cls):
+        # 该文件所有用例都基于真实 ChatRoom 状态机进行断言。
         await cls.areset_services()
         await room_service.startup()
 

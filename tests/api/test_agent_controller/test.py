@@ -4,9 +4,12 @@ from ...base import ServiceTestCase
 
 
 class _ApiServiceCase(ServiceTestCase):
+    """API 测试基类：每个测试类开始前重置一次进程内 service 状态。"""
+
     @classmethod
     def setup_class(cls):
         super().setup_class()
+        # 后端子进程外置，进程内单例需要显式归零，避免类间污染。
         cls.reset_services()
 
     @classmethod
