@@ -28,11 +28,8 @@ def _find_free_port() -> int:
 class ServiceTestCase:
     """基础测试类：每个用例前重置所有 service 状态，用例后清理。
 
-    使用 pytest 的 setup_method / teardown_method 钩子（对应 unittest 的 setUp / tearDown）。
-    若子类需要异步准备/清理，优先重写：
-        - async_setup_class / async_teardown_class
-        - async_setup_method / async_teardown_method
-    基类会通过同步壳自动执行这些 async hook。
+    类级生命周期由 setup_class / teardown_class 管理。
+    方法级别初始化/清理由子类自行实现（可调用本类提供的 reset_services/cleanup_services 辅助方法）。
 
     后端子进程支持：
         requires_backend = True   — 在整个测试类前后自动启动/停止后端子进程
@@ -170,33 +167,33 @@ class ServiceTestCase:
             cls.backend_port = None
             cls.backend_base_url = None
 
-    # ------------------------------------------------------------------
-    # 方法级别生命周期（in-process service 状态）
-    # ------------------------------------------------------------------
+    @classmethod
+    def reset_services(cls):
+        """重置 in-process service 状态（供子类类级初始化调用）。"""
+        cls._run_maybe_async(cls.areset_services())
 
-    def setup_method(self):
-        self._run_maybe_async(message_bus.startup())
+    @classmethod
+    def cleanup_services(cls):
+        """清理 in-process service 状态（供子类类级清理调用）。"""
+        cls._run_maybe_async(cls.acleanup_services())
+
+    @classmethod
+    async def areset_services(cls):
+        """异步重置 in-process service 状态。"""
+        await message_bus.startup()
         room_service.shutdown()
-        self._run_maybe_async(agent_service.shutdown())
+        await agent_service.shutdown()
         func_tool_service.shutdown()
         scheduler.shutdown()
-        self._run_maybe_async(self.async_setup_method())
 
-    def teardown_method(self):
-        try:
-            self._run_maybe_async(self.async_teardown_method())
-        finally:
-            scheduler.shutdown()
-            func_tool_service.shutdown()
-            self._run_maybe_async(agent_service.shutdown())
-            room_service.shutdown()
-            message_bus.shutdown()
-
-    async def async_setup_method(self):
-        """子类可按需重写：用例级别异步初始化。"""
-
-    async def async_teardown_method(self):
-        """子类可按需重写：用例级别异步清理。"""
+    @classmethod
+    async def acleanup_services(cls):
+        """异步清理 in-process service 状态。"""
+        scheduler.shutdown()
+        func_tool_service.shutdown()
+        await agent_service.shutdown()
+        room_service.shutdown()
+        message_bus.shutdown()
 
     @staticmethod
     def _run_maybe_async(result):

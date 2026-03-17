@@ -33,7 +33,9 @@ def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
 
 
 class TestIntegrationMultiAgentChat(ServiceTestCase):
-    async def async_setup_method(self):
+    @classmethod
+    async def async_setup_class(cls):
+        await cls.areset_services()
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
         await room_service.startup()

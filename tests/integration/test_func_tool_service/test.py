@@ -8,7 +8,9 @@ TEAM = "test_team"
 
 
 class TestFuncToolServiceInit(ServiceTestCase):
-    async def async_setup_method(self):
+    @classmethod
+    async def async_setup_class(cls):
+        await cls.areset_services()
         await func_tool_service.startup()
 
     def test_init_loads_tools(self):
@@ -20,7 +22,9 @@ class TestFuncToolServiceInit(ServiceTestCase):
 
 
 class TestRunToolCall(ServiceTestCase):
-    async def async_setup_method(self):
+    @classmethod
+    async def async_setup_class(cls):
+        await cls.areset_services()
         await room_service.startup()
         await func_tool_service.startup()
 

@@ -8,7 +8,9 @@ TEAM = "test_team"
 
 
 class TestRoomTurnLogic(ServiceTestCase):
-    async def async_setup_method(self):
+    @classmethod
+    async def async_setup_class(cls):
+        await cls.areset_services()
         await room_service.startup()
 
     def test_strict_turn_advancement(self):

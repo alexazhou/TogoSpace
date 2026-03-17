@@ -9,8 +9,10 @@ TEAM = "test_team"
 _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
 
 
-class TestAgentService(ServiceTestCase):
-    async def async_setup_method(self):
+class _AgentServiceCase(ServiceTestCase):
+    @classmethod
+    async def async_setup_class(cls):
+        await cls.areset_services()
         await room_service.startup()
         agents_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
@@ -18,18 +20,26 @@ class TestAgentService(ServiceTestCase):
         agent_service.load_agent_config(agents_cfg)
         await agent_service.create_team_agents([team_cfg])
 
+
+class TestAgentServiceCreateTeamAgents(_AgentServiceCase):
     def test_create_team_agents(self):
         assert agent_service.get_agent(TEAM, "alice") is not None
         assert agent_service.get_agent(TEAM, "bob") is not None
 
+
+class TestAgentServiceGetAgentsInRoom(_AgentServiceCase):
     def test_get_agents_in_room(self):
         room_service.create_room(TEAM, "general", ["alice", "bob"])
         assert {a.name for a in agent_service.get_agents(TEAM, "general")} == {"alice", "bob"}
 
+
+class TestAgentServiceGetAllRooms(_AgentServiceCase):
     def test_get_all_rooms_for_agent(self):
         room_service.create_room(TEAM, "general", ["alice"])
         assert f"general@{TEAM}" in agent_service.get_all_rooms(TEAM, "alice")
 
+
+class TestAgentServiceSyncRoomMessages(_AgentServiceCase):
     def test_sync_room_messages(self):
         room_service.create_room(TEAM, "general", ["alice"])
         room = room_service.get_room(f"general@{TEAM}")
@@ -42,6 +52,8 @@ class TestAgentService(ServiceTestCase):
         assert len(alice._history) == 2
         assert "hello alice" in alice._history[1].content
 
+
+class TestAgentServiceSyncSkipsOwnMessages(_AgentServiceCase):
     def test_sync_room_skips_own_messages(self):
         room_service.create_room(TEAM, "general", ["alice"])
         room = room_service.get_room(f"general@{TEAM}")

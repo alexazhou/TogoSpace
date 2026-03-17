@@ -26,7 +26,9 @@ def _make_mock_agent(name: str, team_name: str = TEAM) -> Agent:
 
 
 class TestSchedulerRun(ServiceTestCase):
-    async def async_setup_method(self):
+    @classmethod
+    async def async_setup_class(cls):
+        await cls.areset_services()
         await room_service.startup()
 
     async def test_scheduler_run_terminates_on_stop(self):

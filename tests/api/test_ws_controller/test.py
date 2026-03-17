@@ -9,7 +9,19 @@ from ...base import ServiceTestCase
 _TEAM = "e2e"
 
 
-class TestWsController(ServiceTestCase):
+class _ApiServiceCase(ServiceTestCase):
+    @classmethod
+    def setup_class(cls):
+        super().setup_class()
+        cls.reset_services()
+
+    @classmethod
+    def teardown_class(cls):
+        cls.cleanup_services()
+        super().teardown_class()
+
+
+class TestWsController(_ApiServiceCase):
     """测试 EventsWsHandler，验证 WebSocket 推送行为。"""
 
     requires_backend = True

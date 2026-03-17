@@ -12,17 +12,19 @@ TEAM = "test_team"
 
 
 class TestChatRoom(ServiceTestCase):
-    async def async_setup_method(self):
+    @classmethod
+    async def async_setup_class(cls):
+        await cls.areset_services()
         await room_service.startup()
-        room_service.create_room(TEAM, "test_room", ["alice"])
-        self.room = room_service.get_room(f"test_room@{TEAM}")
 
     def test_add_message(self):
+        room_service.create_room(TEAM, "test_room", ["alice"])
+        room = room_service.get_room(f"test_room@{TEAM}")
         with patch("service.message_bus.publish") as mock_publish:
-            self.room.add_message("alice", "hello")
-            assert len(self.room.messages) == 2  # 1 (init公告) + 1 (new)
-            assert self.room.messages[1].sender_name == "alice"
-            assert self.room.messages[1].content == "hello"
+            room.add_message("alice", "hello")
+            assert len(room.messages) == 2  # 1 (init公告) + 1 (new)
+            assert room.messages[1].sender_name == "alice"
+            assert room.messages[1].content == "hello"
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_MSG_ADDED,
                 room_name="test_room",
@@ -30,40 +32,50 @@ class TestChatRoom(ServiceTestCase):
                 team_name=TEAM,
                 sender="alice",
                 content="hello",
-                time=self.room.messages[1].send_time.isoformat(),
+                time=room.messages[1].send_time.isoformat(),
             )
 
     def test_get_unread_messages_initial(self):
+        room_service.create_room(TEAM, "test_room", ["alice"])
+        room = room_service.get_room(f"test_room@{TEAM}")
         # 初始时，应该有 1 条公告消息
-        msgs = self.room.get_unread_messages("alice")
+        msgs = room.get_unread_messages("alice")
         assert len(msgs) == 1
         assert "房间已经创建" in msgs[0].content
 
     def test_get_unread_messages_advances_index(self):
-        self.room.get_unread_messages("alice")  # 清空初始
-        self.room.add_message("bob", "msg1")
-        msgs = self.room.get_unread_messages("alice")
+        room_service.create_room(TEAM, "test_room", ["alice"])
+        room = room_service.get_room(f"test_room@{TEAM}")
+        room.get_unread_messages("alice")  # 清空初始
+        room.add_message("bob", "msg1")
+        msgs = room.get_unread_messages("alice")
         assert len(msgs) == 1
         assert msgs[0].content == "msg1"
 
-        msgs2 = self.room.get_unread_messages("alice")
+        msgs2 = room.get_unread_messages("alice")
         assert len(msgs2) == 0
 
     def test_get_unread_messages_independent_per_agent(self):
-        self.room.get_unread_messages("alice")
-        self.room.get_unread_messages("bob")
-        self.room.add_message("char", "hi")
-        assert len(self.room.get_unread_messages("alice")) == 1
-        assert len(self.room.get_unread_messages("bob")) == 1
+        room_service.create_room(TEAM, "test_room", ["alice"])
+        room = room_service.get_room(f"test_room@{TEAM}")
+        room.get_unread_messages("alice")
+        room.get_unread_messages("bob")
+        room.add_message("char", "hi")
+        assert len(room.get_unread_messages("alice")) == 1
+        assert len(room.get_unread_messages("bob")) == 1
 
     def test_format_log(self):
-        log = self.room.format_log()
+        room_service.create_room(TEAM, "test_room", ["alice"])
+        room = room_service.get_room(f"test_room@{TEAM}")
+        log = room.format_log()
         assert f"=== test_room@{TEAM} 聊天记录 ===" in log
         assert "system" in log
 
 
 class TestRoomServiceFunctions(ServiceTestCase):
-    async def async_setup_method(self):
+    @classmethod
+    async def async_setup_class(cls):
+        await cls.areset_services()
         await room_service.startup()
 
     def test_create_room(self):
@@ -91,7 +103,9 @@ class TestRoomServiceFunctions(ServiceTestCase):
 
 
 class TestRoomTurnScheduling(ServiceTestCase):
-    async def async_setup_method(self):
+    @classmethod
+    async def async_setup_class(cls):
+        await cls.areset_services()
         await room_service.startup()
 
     def test_create_room_publishes_first_agent(self):
