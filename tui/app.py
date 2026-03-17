@@ -21,6 +21,7 @@ def _make_preview(sender: str, content: str) -> str:
 
 class WatcherApp(App):
     TITLE = "Team Agent TUI"
+    SUB_TITLE = ""
     CSS_PATH = "app.tcss"
 
     BINDINGS = [
