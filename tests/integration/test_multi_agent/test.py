@@ -36,13 +36,13 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
     async def async_setup_method(self):
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
-        room_service.startup()
+        await room_service.startup()
         room_service.create_room(TEAM, "general", ["alice", "bob"])
-        func_tool_service.startup()
-        agent_service.startup()
+        await func_tool_service.startup()
+        await agent_service.startup()
         agent_service.load_agent_config(agents_config)
         await agent_service.create_team_agents([team_config])
-        scheduler.startup([team_config])
+        await scheduler.startup([team_config])
 
     async def test_two_agents_exchange_messages(self):
         """alice 和 bob 各发一轮消息，general 房间应有消息。"""

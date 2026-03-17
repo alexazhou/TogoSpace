@@ -8,21 +8,21 @@ TEAM = "test_team"
 
 
 class TestFuncToolServiceInit(ServiceTestCase):
+    async def async_setup_method(self):
+        await func_tool_service.startup()
+
     def test_init_loads_tools(self):
-        func_tool_service.startup()
         assert len(func_tool_service.get_tools()) > 0
 
     def test_close_clears_tools(self):
-        func_tool_service.startup()
         func_tool_service.shutdown()
         assert func_tool_service.get_tools() == []
 
 
 class TestRunToolCall(ServiceTestCase):
-    def setup_method(self):
-        super().setup_method()
-        room_service.startup()
-        func_tool_service.startup()
+    async def async_setup_method(self):
+        await room_service.startup()
+        await func_tool_service.startup()
 
     def test_run_tool_call_basic(self):
         result = func_tool_service.run_tool_call("get_weather", '{"location": "北京", "unit": "celsius"}')

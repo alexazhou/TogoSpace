@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 _tools: List[Tool] = []
 
 
-def startup() -> None:
+async def startup() -> None:
     """加载启用的函数列表并构建工具，须在首次调用 get_tools 前调用一次。"""
     global _tools
     _tools = build_tools(FUNCTION_REGISTRY)

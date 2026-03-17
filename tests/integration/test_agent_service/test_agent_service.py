@@ -11,10 +11,10 @@ _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
 
 class TestAgentService(ServiceTestCase):
     async def async_setup_method(self):
-        room_service.startup()
+        await room_service.startup()
         agents_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
-        agent_service.startup()
+        await agent_service.startup()
         agent_service.load_agent_config(agents_cfg)
         await agent_service.create_team_agents([team_cfg])
 

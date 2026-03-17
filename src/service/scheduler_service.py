@@ -16,7 +16,7 @@ _running: Dict[str, asyncio.Task] = {}
 _stop_event: asyncio.Event = asyncio.Event()
 
 
-def startup(teams_config: list) -> None:
+async def startup(teams_config: list) -> None:
     """初始化调度器，须在 run() 前调用一次。"""
     global _teams_config, _stop_event
     _teams_config = teams_config

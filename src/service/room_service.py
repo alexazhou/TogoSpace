@@ -176,7 +176,7 @@ class ChatRoom:
 _rooms: Dict[str, ChatRoom] = {}
 
 
-def startup() -> None:
+async def startup() -> None:
     """初始化房间服务，清空所有房间。"""
     _rooms.clear()
 

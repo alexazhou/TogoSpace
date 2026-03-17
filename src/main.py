@@ -72,17 +72,17 @@ async def main(config_dir: str = None, llm_config_path: str = None, port: int = 
     teams_config = load_teams(config_dir)
     llm_cfg = load_llm_service_config(llm_config_path)
 
-    message_bus.startup()
+    await message_bus.startup()
     llm_api_util.init()
-    llm_service.startup(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
-    func_tool_service.startup()
+    await llm_service.startup(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
+    await func_tool_service.startup()
 
-    agent_service.startup()
+    await agent_service.startup()
     agent_service.load_agent_config(agents_config)
     await agent_service.create_team_agents(teams_config)
 
-    chat_room.startup()
-    scheduler.startup(teams_config=teams_config)
+    await chat_room.startup()
+    await scheduler.startup(teams_config=teams_config)
     chat_room.create_rooms(teams_config)
 
     web_server = tornado.httpserver.HTTPServer(make_app())

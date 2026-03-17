@@ -6,7 +6,7 @@ _api_key: str = ""
 _base_url: str = ""
 
 
-def startup(api_key: str, base_url: str) -> None:
+async def startup(api_key: str, base_url: str) -> None:
     global _api_key, _base_url
     _api_key = api_key
     _base_url = base_url
