@@ -1,7 +1,10 @@
+import logging
 import unicodedata
 from collections import defaultdict
 
 from rich.text import Text as RichText
+
+log = logging.getLogger("tui.widgets")
 from textual.app import ComposeResult
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.widget import Widget
@@ -218,13 +221,13 @@ class RoomPanel(Vertical):
             name = room.room_name if room else room_id
             icon = "👤" if room and room.room_type == "private" else "👥"
             if count > 0:
-                markup = f"{name} [bold #f85149][{count}][/bold #f85149][/bold][#7f91a4] 未读[/]"
+                markup = f"{name} [bold #f85149][{count}][/bold #f85149][#7f91a4] 未读[/]"
             else:
                 markup = f"{name} [#7f91a4][0][/]"
             item.query_one(".room-card-icon", Label).update(f"{icon} ")
             item.query_one(".room-card-name", Label).update(markup)
         except Exception:
-            pass
+            log.exception("update_unread_count 失败: room_id=%s count=%s", room_id, count)
 
     def update_preview(self, room_id: str, preview: str) -> None:
         try:
