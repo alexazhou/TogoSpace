@@ -72,6 +72,11 @@ def _on_agent_turn(msg: Message) -> None:
         logger.error(f"获取 Agent 失败: agent_name={agent_name}, team_name={team_name}, error={e}")
         return
 
+    # 去重：同一房间已在队列中则跳过，避免重复调度
+    if any(e.room_key == room_key for e in agent.wait_task_queue._queue):
+        logger.debug(f"跳过重复入队: agent={agent.key}, room={room_key}")
+        return
+
     agent.wait_task_queue.put_nowait(RoomMessageEvent(room_key))
 
     max_fc = 5
