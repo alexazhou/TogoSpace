@@ -45,3 +45,16 @@ def load_llm_service_config(path: str = None) -> dict:
     if active not in services:
         raise ValueError(f"active_llm_service '{active}' 未在 llm_services 中定义")
     return services[active]
+
+
+def load_persistence_config(path: str = None) -> dict:
+    """返回持久化配置，未配置时提供默认值。"""
+    if path is None:
+        path = os.path.join(os.path.dirname(__file__), "../../config.json")
+    with open(path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    persistence = cfg.get("persistence", {})
+    return {
+        "enabled": persistence.get("enabled", False),
+        "db_path": persistence.get("db_path", "./runtime/state/teamagent.db"),
+    }

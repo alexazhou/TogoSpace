@@ -8,8 +8,17 @@ from datetime import datetime
 
 import tornado.httpserver
 import util.llm_api_util as llm_api_util
-from util.config_util import load_agents, load_teams, load_llm_service_config
-from service import message_bus, scheduler_service as scheduler, agent_service, room_service as chat_room, llm_service, func_tool_service
+from util.config_util import load_agents, load_teams, load_llm_service_config, load_persistence_config
+from service import (
+    message_bus,
+    scheduler_service as scheduler,
+    agent_service,
+    room_service as chat_room,
+    llm_service,
+    func_tool_service,
+    persistence_service,
+    orm_service,
+)
 from route import make_app
 
 
@@ -71,11 +80,15 @@ async def main(config_dir: str = None, llm_config_path: str = None, port: int = 
     agents_config = load_agents(config_dir)
     teams_config = load_teams(config_dir)
     llm_cfg = load_llm_service_config(llm_config_path)
+    persistence_cfg = load_persistence_config(llm_config_path)
 
     await message_bus.startup()
     llm_api_util.init()
     await llm_service.startup(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     await func_tool_service.startup()
+    if persistence_cfg["enabled"]:
+        await orm_service.startup(persistence_cfg["db_path"])
+    await persistence_service.startup(enabled=persistence_cfg["enabled"])
 
     await agent_service.startup()
     agent_service.load_agent_config(agents_config)
@@ -83,17 +96,21 @@ async def main(config_dir: str = None, llm_config_path: str = None, port: int = 
 
     await chat_room.startup()
     await scheduler.startup(teams_config=teams_config)
-    chat_room.create_rooms(teams_config)
+    chat_room.create_rooms(teams_config, emit_initial_message=not persistence_cfg["enabled"])
+    persistence_service.restore_runtime_state(agent_service.get_all_agents(), chat_room.get_all_rooms())
 
     web_server = tornado.httpserver.HTTPServer(make_app())
     web_server.listen(port, "0.0.0.0")
 
     try:
+        scheduler.replay_scheduling_rooms()
         await scheduler.run()
     finally:
         web_server.stop()
         scheduler.shutdown()
         await agent_service.shutdown()
+        await persistence_service.shutdown()
+        await orm_service.shutdown()
         func_tool_service.shutdown()
         chat_room.shutdown()
         llm_service.shutdown()
