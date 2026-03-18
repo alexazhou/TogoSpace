@@ -197,3 +197,4 @@
 ### V9
 - [产品文档](./versions/v9/v9_step1_product.md)
 - [技术文档](./versions/v9/v9_step2_technical.md)
+- [开发任务表](./versions/v9/v9_step3_tasks.md)
