@@ -13,6 +13,8 @@ import service.room_service as room_service
 import service.agent_service as agent_service
 import service.func_tool_service as func_tool_service
 import service.scheduler_service as scheduler
+import service.persistence_service as persistence_service
+import service.orm_service as orm_service
 from mock_llm_server import MockLLMServer
 
 _SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
@@ -186,6 +188,8 @@ class ServiceTestCase:
         await message_bus.startup()
         room_service.shutdown()
         await agent_service.shutdown()
+        await persistence_service.shutdown()
+        await orm_service.shutdown()
         func_tool_service.shutdown()
         scheduler.shutdown()
 
@@ -194,6 +198,8 @@ class ServiceTestCase:
         """异步清理 in-process service 状态。"""
         scheduler.shutdown()
         func_tool_service.shutdown()
+        await persistence_service.shutdown()
+        await orm_service.shutdown()
         await agent_service.shutdown()
         room_service.shutdown()
         message_bus.shutdown()

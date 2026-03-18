@@ -120,10 +120,20 @@ class TestRoomTurnScheduling(ServiceTestCase):
         await cls.areset_services()
         await room_service.startup()
 
-    def test_create_room_publishes_first_agent(self):
-        """建房后应立刻发布首个发言人的 TURN 事件。"""
+    def test_create_room_does_not_publish_first_agent(self):
+        """建房后不应立刻发布首个发言人的 TURN 事件。"""
         with patch("service.message_bus.publish") as mock_publish:
             room_service.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
+            topics = [call.args[0] for call in mock_publish.call_args_list]
+            assert MessageBusTopic.ROOM_AGENT_TURN not in topics
+
+    def test_start_scheduling_publishes_first_agent(self):
+        """显式启动调度后，才发布首个发言人的 TURN 事件。"""
+        room_service.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
+        room = room_service.get_room(f"r@{TEAM}")
+
+        with patch("service.message_bus.publish") as mock_publish:
+            room.start_scheduling()
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_AGENT_TURN,
                 agent_name="alice",

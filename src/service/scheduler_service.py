@@ -99,6 +99,11 @@ async def run() -> None:
             logger.info(f"\n{chat_room.get_room(room_key).format_log()}")
 
 
+def replay_scheduling_rooms() -> None:
+    for room in chat_room.get_all_rooms():
+        room.start_scheduling()
+
+
 def stop() -> None:
     """通知 run() 退出循环。"""
     _stop_event.set()

@@ -43,6 +43,7 @@ class Agent:
         self._last_called: dict = {}  # 记录当前轮次最后一次工具调用的名称和参数
         self._turn_ctx: Optional[ChatContext] = None  # 当前轮次的上下文（run_turn 期间有效）
         self._sdk_client = None  # 持久化 SDK 会话客户端（由 init_sdk 赋值）
+        self._persisted_history_len: int = 0  # 已持久化的 _history 长度，用于增量落盘
 
     @property
     def key(self) -> str:
@@ -215,10 +216,12 @@ class Agent:
                 done_check=is_turn_done,
                 max_function_calls=max_function_calls,
             )
+            self._persist_history_delta()
             if is_turn_done():
                 break
             # LLM 未调用工具或调用了无关工具，注入提示后重试
             self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, hint))
+            self._persist_history_delta()
 
     async def _run_turn_sdk(self, room_key: str) -> None:
         """使用持久化 Claude Agent SDK 会话驱动 Agent 完成一轮发言（增量消息注入）。"""
@@ -311,6 +314,8 @@ class Agent:
         except Exception as e:
             logger.error(f"SDK 会话异常: agent={self.key}, room={room_key}, error={e}", exc_info=True)
             raise
+        finally:
+            self._persist_history_delta()
 
     async def chat(
         self,
@@ -355,6 +360,7 @@ class Agent:
                 self._history.append(LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}"))
             else:
                 self._history.append(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}"))
+        self._persist_history_delta()
 
     async def _infer(self, tools: Optional[List[Tool]]) -> LlmApiMessage:
         """基于当前 _history 发起一次 LLM 调用，将 assistant 消息写入历史并返回。"""
@@ -375,6 +381,32 @@ class Agent:
         self._last_called = {"name": name, "args": args}
         result = func_tool_service.run_tool_call(name, args, context=self._turn_ctx)
         self._history.append(LlmApiMessage.tool_result(tool_call_id, result))
+        self._persist_history_delta()
+
+    def dump_history_messages(self) -> List[dict]:
+        return [
+            {"seq": idx, "message_json": msg.model_dump_json(exclude_none=True)}
+            for idx, msg in enumerate(self._history)
+        ]
+
+    def _dump_new_history_messages(self) -> List[dict]:
+        return [
+            {"seq": idx, "message_json": msg.model_dump_json(exclude_none=True)}
+            for idx, msg in enumerate(self._history[self._persisted_history_len:], start=self._persisted_history_len)
+        ]
+
+    def inject_history_messages(self, items: List[dict]) -> None:
+        self._history = [LlmApiMessage.model_validate_json(item["message_json"]) for item in items]
+        self._persisted_history_len = len(self._history)
+
+    def _persist_history_delta(self) -> None:
+        from service import persistence_service
+
+        items = self._dump_new_history_messages()
+        if not items:
+            return
+        persistence_service.append_agent_history_messages(self.key, items)
+        self._persisted_history_len = len(self._history)
 
 
 async def startup() -> None:

@@ -32,7 +32,6 @@ class ChatRoom:
 
         if self.agents and max_turns > 0:
             self._state = RoomState.SCHEDULING
-            self._publish_current_turn()
 
     @property
     def key(self) -> str:
@@ -47,28 +46,45 @@ class ChatRoom:
         read_idx: int = self._agent_read_index.get(agent_name, 0)
         new_msgs: List[ChatMessage] = self.messages[read_idx:]
         self._agent_read_index[agent_name] = len(self.messages)
+        self._persist_read_index()
         return new_msgs
 
     def add_message(self, sender: str, content: str) -> None:
+        self._append_message(sender, content, publish_events=True, persist=True)
+
+    def _append_message(self, sender: str, content: str, publish_events: bool, persist: bool, send_time: datetime | None = None) -> None:
         message = ChatMessage(
             sender_name=sender,
             content=content,
-            send_time=datetime.now()
+            send_time=send_time or datetime.now()
         )
+        if persist:
+            from service import persistence_service
+            persistence_service.append_room_message(
+                room_key=self.key,
+                team_name=self.team_name,
+                sender=sender,
+                content=content,
+                send_time=message.send_time.isoformat(),
+            )
         self.messages.append(message)
-        message_bus.publish(
-            MessageBusTopic.ROOM_MSG_ADDED,
-            room_name=self.name,
-            room_key=self.key,
-            team_name=self.team_name,
-            sender=sender,
-            content=content,
-            time=message.send_time.isoformat(),
-        )
+        if publish_events:
+            message_bus.publish(
+                MessageBusTopic.ROOM_MSG_ADDED,
+                room_name=self.name,
+                room_key=self.key,
+                team_name=self.team_name,
+                sender=sender,
+                content=content,
+                time=message.send_time.isoformat(),
+            )
 
         if not self.agents:
             return
 
+        self._apply_turn_logic(sender, publish_events=publish_events)
+
+    def _apply_turn_logic(self, sender: str, publish_events: bool) -> None:
         # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
         was_idle = (self._state == RoomState.IDLE)
         if was_idle:
@@ -80,11 +96,11 @@ class ChatRoom:
         # 2. 推进逻辑：只有当前顺序发言人说话，才推进到下一位
         current_expected = self.get_current_turn_agent()
         if sender == current_expected:
-            self._advance_turn()
+            self._advance_turn(publish_events=publish_events)
         else:
             logger.info(f"房间 {self.key} 收到来自 {sender} 的插话，保持当前发言位 (当前应轮到 {current_expected})")
             # 如果刚才从 IDLE 唤醒，且是一次插话，我们需要手动重发当前轮次事件以重启循环
-            if was_idle:
+            if was_idle and publish_events:
                 self._publish_current_turn()
 
     def skip_turn(self, sender: str = None) -> bool:
@@ -100,7 +116,7 @@ class ChatRoom:
 
         logger.info(f"房间 {self.key} 由 {current_expected} 跳过一轮发言")
         self._round_skipped.add(current_expected)
-        self._advance_turn()
+        self._advance_turn(publish_events=True)
         return True
 
     def get_current_turn_agent(self) -> Optional[str]:
@@ -121,7 +137,7 @@ class ChatRoom:
                 team_name=self.team_name,
             )
 
-    def _advance_turn(self) -> None:
+    def _advance_turn(self, publish_events: bool) -> None:
         """推进轮次位置索引。内部私有方法。"""
         if not self.agents:
             return
@@ -150,7 +166,42 @@ class ChatRoom:
                 return
 
         # 正常发布下一位成员的发言事件
-        self._publish_current_turn()
+        if publish_events:
+            self._publish_current_turn()
+
+    def start_scheduling(self) -> None:
+        if self._state == RoomState.SCHEDULING:
+            self._publish_current_turn()
+
+    def inject_history_messages(self, messages: List[ChatMessage]) -> None:
+        self.messages = list(messages)
+
+    def inject_agent_read_index(self, agent_read_index: Dict[str, int]) -> None:
+        self._agent_read_index = dict(agent_read_index)
+
+    def export_agent_read_index(self) -> Dict[str, int]:
+        return dict(self._agent_read_index)
+
+    def mark_all_messages_read(self) -> None:
+        tail = len(self.messages)
+        self._agent_read_index = {name: tail for name in self.agents}
+
+    def rebuild_state_from_history(self) -> None:
+        if not self.agents or self._max_turns <= 0:
+            self._state = RoomState.IDLE
+            return
+
+        self._turn_index = 0
+        self._turn_pos = 0
+        self._round_skipped = set()
+        self._state = RoomState.SCHEDULING
+
+        for msg in self.messages:
+            self._apply_turn_logic(msg.sender_name, publish_events=False)
+
+    def _persist_read_index(self) -> None:
+        from service import persistence_service
+        persistence_service.save_room_state(self.key, self._agent_read_index)
 
     def get_context(self, max_messages: int = 10) -> str:
         recent = self.messages[-max_messages:]
@@ -172,6 +223,13 @@ class ChatRoom:
             lines.append(f"[{msg.send_time.isoformat()}] {msg.sender_name}: {msg.content}")
         return "\n".join(lines)
 
+    def build_initial_system_message(self) -> str:
+        member_list_str = "、".join(self.agents)
+        msg = f"{self.name} 房间已经创建，当前房间成员：{member_list_str}"
+        if self.initial_topic:
+            msg += f"\n本房间初始话题：{self.initial_topic}"
+        return msg
+
 
 _rooms: Dict[str, ChatRoom] = {}
 
@@ -181,7 +239,7 @@ async def startup() -> None:
     _rooms.clear()
 
 
-def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0) -> None:
+def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0, emit_initial_message: bool = True) -> None:
     """创建并初始化一个聊天室。若 max_turns > 0 则启动轮次调度，发布系统公告。"""
     room = ChatRoom(name=name, team_name=team_name, initial_topic=initial_topic,
                     room_type=room_type, members=members, max_turns=max_turns)
@@ -192,14 +250,15 @@ def create_room(team_name: str, name: str, members: List[str], initial_topic: st
     if max_turns > 0:
         logger.info(f"初始化轮次配置: room={room_key}, max_turns={max_turns}")
 
-    member_list_str = "、".join(members)
-    msg = f"{name} 房间已经创建，当前房间成员：{member_list_str}"
-    if initial_topic:
-        msg += f"\n本房间初始话题：{initial_topic}"
-    room.add_message("system", msg)
+    if emit_initial_message:
+        member_list_str = "、".join(members)
+        msg = f"{name} 房间已经创建，当前房间成员：{member_list_str}"
+        if initial_topic:
+            msg += f"\n本房间初始话题：{initial_topic}"
+        room.add_message("system", msg)
 
 
-def create_rooms(teams_config: list) -> None:
+def create_rooms(teams_config: list, emit_initial_message: bool = True) -> None:
     """遍历所有 team，根据 groups 配置批量创建聊天室。"""
     for team in teams_config:
         team_name = team["name"]
@@ -211,6 +270,7 @@ def create_rooms(teams_config: list) -> None:
                 initial_topic=group.get("initial_topic", ""),
                 room_type=RoomType(group.get("type", "group")),
                 max_turns=group.get("max_turns", 0),
+                emit_initial_message=emit_initial_message,
             )
 
 
