@@ -58,3 +58,15 @@ class TestRunToolCall(ServiceTestCase):
             context=ctx,
         )
         assert result == "success"
+
+    def test_run_tool_call_with_missing_room_returns_error(self):
+        """目标房间不存在时，工具调用结果应显式失败。"""
+        room_service.create_room(TEAM, "ctx_room_missing", ["alice"])
+        room = room_service.get_room(f"ctx_room_missing@{TEAM}")
+        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room, get_room=room_service.get_room)
+        result = func_tool_service.run_tool_call(
+            "send_chat_msg",
+            '{"room_name": "missing_room", "msg": "test"}',
+            context=ctx,
+        )
+        assert result == f"error: room not found: missing_room@{TEAM}"

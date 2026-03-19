@@ -123,16 +123,18 @@ def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) -> str
     sender = _context.agent_name if _context is not None else "unknown"
     logger.info(f"发送消息: sender={sender}, room={room_name}, msg={msg}")
 
-    if _context is not None:
-        try:
-            room_key = _resolve_room_key(room_name, _context)
-            target_room = _context.get_room(room_key)
-            target_room.add_message(_context.agent_name, msg)
-        except Exception:
-            logger.warning(f"发送消息忽略，聊天室不存在: name={room_name}")
-    else:
+    if _context is None:
         logger.warning("发送消息失败，聊天室上下文未设置")
+        return "error: chat context is not set"
 
+    room_key = _resolve_room_key(room_name, _context)
+    try:
+        target_room = _context.get_room(room_key)
+    except Exception:
+        logger.warning(f"发送消息失败，聊天室不存在: name={room_name}, room_key={room_key}")
+        return f"error: room not found: {room_key}"
+
+    target_room.add_message(_context.agent_name, msg)
     return "success"
 
 
