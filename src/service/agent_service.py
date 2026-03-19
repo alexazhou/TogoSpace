@@ -1,7 +1,13 @@
 import asyncio
 import json
+import os
 import logging
 from typing import Any, Callable, Dict, List, Optional
+
+from claude_agent_sdk import ResultMessage, AssistantMessage, UserMessage, SystemMessage,\
+                                       TextBlock, ToolUseBlock, ToolResultBlock, ThinkingBlock
+
+from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, tool, create_sdk_mcp_server
 
 from util.llm_api_util import OpenaiLLMApiRole, LlmApiMessage, LlmApiResponse, Tool
 from util.config_util import load_prompt
@@ -26,6 +32,49 @@ def _make_agent_key(team_name: str, agent_name: str) -> str:
     return f"{agent_name}@{team_name}"
 
 
+_SEND_CHAT_MSG_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "room_name": {"type": "string"},
+        "msg": {"type": "string"},
+    },
+    "required": ["room_name", "msg"],
+}
+
+_SKIP_CHAT_MSG_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {},
+}
+
+
+def _build_sdk_send_tool(agent: "Agent"):
+    @tool("send_chat_msg", "向聊天室发送消息", _SEND_CHAT_MSG_TOOL_SCHEMA)
+    async def _send(args):
+        room_name = args.get("room_name", "")
+        msg = args.get("msg", "")
+        logger.info(f"SDK MCP tool called: send_chat_msg, agent={agent.key}, room={room_name}, msg_len={len(msg)}")
+        return agent._sdk_do_send(room_name, msg)
+
+    return _send
+
+
+def _build_sdk_skip_tool(agent: "Agent"):
+    @tool("skip_chat_msg", "跳过本轮发言", _SKIP_CHAT_MSG_TOOL_SCHEMA)
+    async def _skip(args):
+        room = agent.current_room
+        if room is None:
+            return {"content": [{"type": "text", "text": "error: 当前没有激活的房间上下文。"}], "isError": True}
+        logger.info(f"SDK MCP tool called: skip_chat_msg, agent={agent.key}")
+        ok = room.skip_turn(sender=agent.name)
+        if not ok:
+            current = room.get_current_turn_agent()
+            return {"content": [{"type": "text", "text": f"error: 现在不是你的发言轮次（当前应由 {current} 发言），请勿再调用任何工具。"}], "isError": True}
+        agent._sdk_done = True
+        return {"content": [{"type": "text", "text": "success: 已跳过本轮发言。"}]}
+
+    return _skip
+
+
 class Agent:
     """AI Agent 实体类，维护其性格、对话历史及任务队列"""
 
@@ -45,6 +94,8 @@ class Agent:
         self._last_called: dict = {}  # 记录当前轮次最后一次工具调用的名称和参数
         self._turn_ctx: Optional[ChatContext] = None  # 当前轮次的上下文（run_turn 期间有效）
         self._sdk_client = None  # 持久化 SDK 会话客户端（由 init_sdk 赋值）
+        self.current_room: Optional[ChatRoom] = None  # SDK 当前轮次所在房间
+        self._sdk_done: bool = False  # SDK 当前轮次是否已通过工具完成发言
 
     @property
     def key(self) -> str:
@@ -57,47 +108,10 @@ class Agent:
 
     async def init_sdk(self) -> None:
         """初始化持久化 SDK 会话（仅对 use_agent_sdk=True 的 Agent 调用一次）。"""
-        import os
-        from claude_agent_sdk import (ClaudeSDKClient, ClaudeAgentOptions,
-                                       tool, create_sdk_mcp_server)
-
-        # 可变容器：工具闭包直接捕获，_run_turn_sdk 通过引用更新
-        _room_slot = [None]
-        _done_slot = [False]
-        self._sdk_room_slot = _room_slot
-        self._sdk_done_slot = _done_slot
-
-        agent_name = self.name
-
-        @tool("send_chat_msg", "向聊天室发送消息", {
-            "type": "object",
-            "properties": {
-                "room_name": {"type": "string"},
-                "msg": {"type": "string"},
-            },
-            "required": ["room_name", "msg"],
-        })
-        async def _send(args):
-            room_name = args.get("room_name", "")
-            msg = args.get("msg", "")
-            logger.info(f"SDK MCP tool called: send_chat_msg, agent={self.key}, room={room_name}, msg_len={len(msg)}")
-            return await self._sdk_do_send(room_name, msg)
-
-        @tool("skip_chat_msg", "跳过本轮发言", {
-            "type": "object",
-            "properties": {},
-        })
-        async def _skip(args):
-            room: ChatRoom = _room_slot[0]
-            logger.info(f"SDK MCP tool called: skip_chat_msg, agent={self.key}")
-            ok = room.skip_turn(sender=agent_name)
-            if not ok:
-                current: Optional[str] = room.get_current_turn_agent()
-                return {"content": [{"type": "text", "text": f"error: 现在不是你的发言轮次（当前应由 {current} 发言），请勿再调用任何工具。"}], "isError": True}
-            _done_slot[0] = True
-            return {"content": [{"type": "text", "text": "success: 已跳过本轮发言。"}]}
-
-        server = create_sdk_mcp_server("chat-tools", tools=[_send, _skip])
+        server = create_sdk_mcp_server(
+            "chat-tools",
+            tools=[_build_sdk_send_tool(self), _build_sdk_skip_tool(self)],
+        )
         options = ClaudeAgentOptions(
             system_prompt=self.system_prompt,
             allowed_tools=self.allowed_tools,
@@ -117,20 +131,24 @@ class Agent:
     async def _sdk_do_send(self, room_name: str, msg: str) -> dict:
         """send_chat_msg MCP 工具的核心逻辑（从闭包提取，便于单元测试）。
 
-        - 发到当前房间：写消息、标记本轮结束（_sdk_done_slot[0] = True）
+        - 发到当前房间：写消息、标记本轮结束（_sdk_done = True）
         - 发到其他房间：写消息、不标记结束，返回提示要求继续回复当前房间
         """
         room_key = room_name if "@" in room_name else f"{room_name}@{self.team_name}"
         target_room: ChatRoom = room_service.get_room(room_key)
         if target_room is None:
             logger.warning(f"SDK send_chat_msg: 目标房间不存在 {room_key}，回落到当前房间")
-            target_room = self._sdk_room_slot[0]
+            target_room = self.current_room
+        if target_room is None:
+            return {"content": [{"type": "text", "text": "error: 当前没有可用的房间上下文。"}], "isError": True}
         await target_room.add_message(self.name, msg)
         await self._append_history_message(LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, msg))
-        current_room: ChatRoom = self._sdk_room_slot[0]
+        current_room = self.current_room
         if target_room is current_room:
-            self._sdk_done_slot[0] = True
+            self._sdk_done = True
             return {"content": [{"type": "text", "text": "success: 消息已发送，本轮发言结束。"}]}
+        if current_room is None:
+            return {"content": [{"type": "text", "text": f"success: 消息已发送到 {target_room.name}。"}]}
         else:
             return {"content": [{"type": "text", "text": f"success: 消息已发送到 {target_room.name}。你还需要调用 send_chat_msg 向当前房间 {current_room.name} 发言，或调用 skip_chat_msg 跳过。"}]}
 
@@ -224,12 +242,11 @@ class Agent:
 
     async def _run_turn_sdk(self, room_key: str) -> None:
         """使用持久化 Claude Agent SDK 会话驱动 Agent 完成一轮发言（增量消息注入）。"""
-        from claude_agent_sdk import (ResultMessage, AssistantMessage, UserMessage, SystemMessage,
-                                       TextBlock, ToolUseBlock, ToolResultBlock, ThinkingBlock)
 
-        room: ChatRoom = room_service.get_room(room_key)
-        self._sdk_room_slot[0] = room    # 更新槽，工具闭包自动可见
-        self._sdk_done_slot[0] = False
+
+        room = room_service.get_room(room_key)
+        self.current_room = room
+        self._sdk_done = False
 
         # 获取增量消息，同步写入 _history（与 sync_room 保持相同格式）
         new_msgs = await room.get_unread_messages(self.name)
@@ -293,7 +310,7 @@ class Agent:
                         logger.info(f"SDK UserMessage: agent={self.key}, content=[{', '.join(parts)}]")
                         # 工具调用结果返回后，若本轮已完成则发起中断，但不立即 break，
                         # 而是让流自然结束，避免 interrupt 响应残留到下一轮
-                        if self._sdk_done_slot[0] and not _interrupted:
+                        if self._sdk_done and not _interrupted:
                             logger.info(f"SDK 发言完成，主动中断会话: agent={self.key}")
                             await client.interrupt()
                             _interrupted = True
@@ -307,7 +324,7 @@ class Agent:
                     else:
                         logger.debug(f"SDK 未知消息: agent={self.key}, type={type(msg).__name__}, data={msg}")
                 logger.info(f"SDK receive_response 结束: agent={self.key}, total_msgs={msg_count}, attempt={attempt}")
-                if self._sdk_done_slot[0]:
+                if self._sdk_done:
                     break
                 logger.warning(f"SDK agent 未调用发言工具（可能只输出 thinking 或纯文字）: agent={self.key}, attempt={attempt}")
         except Exception as e:
