@@ -1,10 +1,19 @@
-from dataclasses import dataclass
+from __future__ import annotations
+
+import peewee
 
 from .base import DbModelBase
 
 
-@dataclass
 class AgentHistoryMessageRecord(DbModelBase):
-    agent_key: str = ""
-    seq: int = 0
-    message_json: str = ""
+    id: int = peewee.AutoField()
+    agent_key: str = peewee.CharField(null=False)
+    seq: int = peewee.IntegerField(null=False)
+    message_json: str = peewee.TextField(null=False)
+    updated_at: str = peewee.CharField(null=False)
+
+    class Meta:
+        table_name = "agent_history_messages"
+        indexes = (
+            (("agent_key", "seq"), True),
+        )

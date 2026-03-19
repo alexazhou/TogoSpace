@@ -50,7 +50,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         agent_service.load_agent_config(agents_config)
         await agent_service.create_team_agents([team_config])
         room_service.create_room(TEAM, "general", ["alice", "bob"], max_turns=2, emit_initial_message=False)
-        persistence_service.restore_runtime_state(agent_service.get_all_agents(), room_service.get_all_rooms())
+        await persistence_service.restore_runtime_state(agent_service.get_all_agents(), room_service.get_all_rooms())
         await scheduler.startup([team_config])
         return team_config
 

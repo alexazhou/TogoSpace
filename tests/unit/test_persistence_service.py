@@ -39,7 +39,7 @@ class TestPersistenceService(ServiceTestCase):
         room_service.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3, emit_initial_message=False)
         restored = room_service.get_room(f"r1@{TEAM}")
 
-        persistence_service.restore_runtime_state([], [restored])
+        self._run_maybe_async(persistence_service.restore_runtime_state([], [restored]))
 
         assert [m.content for m in restored.messages] == [
             "r1 房间已经创建，当前房间成员：alice、bob",
@@ -63,10 +63,12 @@ class TestPersistenceService(ServiceTestCase):
             LlmApiMessage.text(OpenaiLLMApiRole.USER, "u1"),
             LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1"),
         ]
-        persistence_service.append_agent_history_messages(agent.key, agent.dump_history_messages())
+        self._run_maybe_async(
+            persistence_service.append_agent_history_messages(agent.key, agent.dump_history_messages())
+        )
 
         fresh_agent = Agent("alice", TEAM, "sys", "test-model")
-        persistence_service.restore_runtime_state([fresh_agent], [])
+        self._run_maybe_async(persistence_service.restore_runtime_state([fresh_agent], []))
 
         assert [m.content for m in fresh_agent._history] == ["u1", "a1"]
 

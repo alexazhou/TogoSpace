@@ -2,34 +2,40 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from service import orm_service
+from model.db_model.agent_history_message import AgentHistoryMessageRecord
 
 
-def append_agent_history_messages(agent_key: str, messages: list[dict]) -> None:
+async def append_agent_history_messages(agent_key: str, messages: list[dict]) -> None:
     if not messages:
         return
-    conn = orm_service.get_db()
-    conn.executemany(
-        """
-        INSERT OR IGNORE INTO agent_history_messages (agent_key, seq, message_json, updated_at)
-        VALUES (?, ?, ?, ?)
-        """,
-        [
-            (agent_key, item["seq"], item["message_json"], datetime.now().isoformat())
-            for item in messages
-        ],
-    )
+    now = datetime.now().isoformat()
+    payload = [
+        {
+            "agent_key": agent_key,
+            "seq": item["seq"],
+            "message_json": item["message_json"],
+            "updated_at": now,
+        }
+        for item in messages
+    ]
+    await AgentHistoryMessageRecord.insert_many(payload).on_conflict_ignore().aio_execute()
 
 
-def get_agent_history(agent_key: str) -> list[dict]:
-    conn = orm_service.get_db()
-    cursor = conn.execute(
-        """
-        SELECT id, agent_key, seq, message_json, updated_at
-        FROM agent_history_messages
-        WHERE agent_key = ?
-        ORDER BY seq ASC
-        """,
-        (agent_key,),
+async def get_agent_history(agent_key: str) -> list[dict]:
+    rows = await (
+        AgentHistoryMessageRecord
+        .select()
+        .where(AgentHistoryMessageRecord.agent_key == agent_key)
+        .order_by(AgentHistoryMessageRecord.seq.asc())
+        .aio_execute()
     )
-    return [dict(row) for row in cursor.fetchall()]
+    return [
+        {
+            "id": row.id,
+            "agent_key": row.agent_key,
+            "seq": row.seq,
+            "message_json": row.message_json,
+            "updated_at": row.updated_at,
+        }
+        for row in rows
+    ]
