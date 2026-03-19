@@ -21,15 +21,15 @@ class TestSdkDoSend(ServiceTestCase):
         await room_service.create_room(TEAM, current_room_name, [agent_name])
         room = room_service.get_room(f"{current_room_name}@{TEAM}")
         agent = Agent(name=agent_name, team_name=TEAM, system_prompt="test", model="test-model")
-        agent._sdk_room_slot = [room]
-        agent._sdk_done_slot = [False]
+        agent.current_room = room
+        agent._sdk_done = False
         return agent, room
 
     async def test_send_to_current_room_sets_done(self):
-        """发到当前房间后，_sdk_done_slot 应被标记为 True。"""
+        """发到当前房间后，_sdk_done 应被标记为 True。"""
         alice, room = await self._make_agent_with_slots("alice", "lobby")
         await alice._sdk_do_send("lobby", "hi everyone")
-        assert alice._sdk_done_slot[0] is True
+        assert alice._sdk_done is True
 
     async def test_send_to_current_room_message_appears(self):
         """发到当前房间的消息应出现在该房间里。"""
@@ -45,11 +45,11 @@ class TestSdkDoSend(ServiceTestCase):
         assert "本轮发言结束" in text
 
     async def test_send_cross_room_does_not_set_done(self):
-        """发到其他房间时，_sdk_done_slot 不应被标记，当前轮次仍需继续。"""
+        """发到其他房间时，_sdk_done 不应被标记，当前轮次仍需继续。"""
         alice, current_room = await self._make_agent_with_slots("alice", "private")
         await room_service.create_room(TEAM, "group", ["alice"])
         await alice._sdk_do_send("group", "hello group")
-        assert alice._sdk_done_slot[0] is False
+        assert alice._sdk_done is False
 
     async def test_send_cross_room_lands_in_target(self):
         """跨房间消息应出现在目标房间，而非当前房间。"""
