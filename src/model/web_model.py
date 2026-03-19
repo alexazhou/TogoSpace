@@ -1,13 +1,14 @@
 from pydantic import BaseModel
 from typing import List
 from datetime import datetime
+from constants import AgentStatus
 
 
 class AgentInfo(BaseModel):
     name: str
     model: str
     team_name: str
-    status: str  # "active" | "idle"
+    status: AgentStatus
 
 
 class RoomInfo(BaseModel):

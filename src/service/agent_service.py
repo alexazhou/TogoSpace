@@ -17,7 +17,7 @@ from model.agent_event import RoomMessageEvent
 from model.db_model.agent_history_message import AgentHistoryMessageRecord
 from service import llm_service, func_tool_service, room_service, message_bus, persistence_service
 from service.room_service import ChatRoom
-from constants import RoomType, SpecialAgent, MessageBusTopic
+from constants import RoomType, SpecialAgent, MessageBusTopic, AgentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -90,11 +90,10 @@ class Agent:
 
         self._history: List[LlmApiMessage] = []  # Agent 的私有对话历史（包含 Tool Call 详情）
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()  # 待处理的房间任务队列
-        self._is_running: bool = False  # 标志当前是否正在处理任务协程
-        self._last_published_status: Optional[str] = None  # 记录上一次发布的状态，用于幂等校验
+        self.status: AgentStatus = AgentStatus.IDLE  # 当前执行状态
         self._turn_ctx: Optional[ChatContext] = None  # 当前轮次的上下文（run_turn 期间有效）
         self._sdk_client = None  # 持久化 SDK 会话客户端（由 init_sdk 赋值）
-        self.current_room: Optional[ChatRoom] = None  # SDK 当前轮次所在房间
+        self.current_room: Optional[ChatRoom] = None  # 当前轮次所在房间
 
     @property
     def key(self) -> str:
@@ -102,8 +101,8 @@ class Agent:
 
     @property
     def is_active(self) -> bool:
-        """如果 Agent 正在运行任务协程，或者其任务队列中仍有待处理项，则视为活跃。"""
-        return self._is_running or not self.wait_task_queue.empty()
+        """如果 Agent 处于 active，或队列中仍有待处理项，则视为活跃。"""
+        return self.status == AgentStatus.ACTIVE or not self.wait_task_queue.empty()
 
     async def init_sdk(self) -> None:
         """初始化持久化 SDK 会话（仅对 use_agent_sdk=True 的 Agent 调用一次）。"""
@@ -162,22 +161,19 @@ class Agent:
             finally:
                 self._sdk_client = None
 
-    def _publish_status(self) -> None:
-        """检查并发布状态变更消息。"""
-        current_status = "active" if self.is_active else "idle"
-        if current_status != self._last_published_status:
-            self._last_published_status = current_status
-            message_bus.publish(
-                MessageBusTopic.AGENT_STATUS_CHANGED,
-                agent_name=self.name,
-                team_name=self.team_name,
-                status=current_status
-            )
+    def _publish_status(self, status: AgentStatus) -> None:
+        """发布当前 Agent 状态。"""
+        message_bus.publish(
+            MessageBusTopic.AGENT_STATUS_CHANGED,
+            agent_name=self.name,
+            team_name=self.team_name,
+            status=status.value,
+        )
 
     async def consume_task(self, max_function_calls: int) -> None:
         """持续消费队列中的任务，直到队列为空。"""
-        self._is_running = True
-        self._publish_status()  # 启动时声明 active
+        self.status = AgentStatus.ACTIVE
+        self._publish_status(self.status)  # 启动时声明 active
         try:
             while True:
                 try:
@@ -195,16 +191,58 @@ class Agent:
                 finally:
                     self.wait_task_queue.task_done()
         finally:
-            self._is_running = False
-            self._publish_status()  # 退出前声明 idle (如果队列为空)
+            self.status = AgentStatus.IDLE
+            self._publish_status(self.status)  # 退出前声明 idle (如果队列为空)
+
+    async def _sync_room_messages(self, room: ChatRoom, with_prompt_lines: bool = False) -> list[str]:
+        """将 room 中该 agent 的未读消息同步到历史，并按需返回 SDK prompt 展示行。"""
+        new_msgs: List[ChatMessage] = await room.get_unread_messages(self.name)
+        logger.info(f"同步房间消息: agent={self.key}, room={room.name}, count={len(new_msgs)}")
+
+        prompt_lines: list[str] = []
+        for msg in new_msgs:
+            if msg.sender_name == self.name:
+                continue
+
+            if msg.sender_name == "system":
+                await self._append_history_message(
+                    LlmApiMessage(
+                        role=OpenaiLLMApiRole.USER,
+                        content=f"{room.name} 房间系统消息: {msg.content}",
+                    )
+                )
+                if with_prompt_lines:
+                    prompt_lines.append(f"[系统] {msg.content}")
+                continue
+
+            await self._append_history_message(
+                LlmApiMessage.text(
+                    OpenaiLLMApiRole.USER,
+                    f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}",
+                )
+            )
+            if with_prompt_lines:
+                prompt_lines.append(f"{msg.sender_name}: {msg.content}")
+
+        return prompt_lines
 
     async def run_turn(self, room_key: str, max_function_calls: int = 5) -> None:
-        """同步房间消息，驱动 Agent 完成一轮发言（含 tool call 循环）。"""
-        if self.use_agent_sdk:
-            return await self._run_turn_sdk(room_key)
-
+        """按运行模式分发到 native/sdk 的一轮发言实现。"""
         room: ChatRoom = room_service.get_room(room_key)
-        await self.sync_room(room)
+        self.current_room = room
+
+        try:
+            if self.use_agent_sdk:
+                prompt_lines = await self._sync_room_messages(room, with_prompt_lines=True)
+                await self._run_turn_sdk(room_key, room, prompt_lines)
+            else:
+                await self._sync_room_messages(room, with_prompt_lines=False)
+                await self._run_turn_native(room, max_function_calls)
+        finally:
+            self.current_room = None
+
+    async def _run_turn_native(self, room: ChatRoom, max_function_calls: int = 5) -> None:
+        """原生（非 SDK）模式的一轮发言逻辑。"""
 
         self._turn_ctx = ChatContext(
             agent_name=self.name,
@@ -257,28 +295,8 @@ class Agent:
             # LLM 未调用工具或调用了无关工具，注入提示后重试
             await self._append_history_message(LlmApiMessage.text(OpenaiLLMApiRole.USER, hint))
 
-    async def _run_turn_sdk(self, room_key: str) -> None:
+    async def _run_turn_sdk(self, room_key: str, room: ChatRoom, prompt_lines: list[str]) -> None:
         """使用持久化 Claude Agent SDK 会话驱动 Agent 完成一轮发言（增量消息注入）。"""
-
-
-        room = room_service.get_room(room_key)
-        self.current_room = room
-
-        # 获取增量消息，同步写入 _history（与 sync_room 保持相同格式）
-        new_msgs = await room.get_unread_messages(self.name)
-        prompt_lines = []
-        for msg in new_msgs:
-            if msg.sender_name == self.name:
-                continue
-            if msg.sender_name == "system":
-                text = f"{room.name} 房间系统消息: {msg.content}"
-                await self._append_history_message(LlmApiMessage(role=OpenaiLLMApiRole.USER, content=text))
-                prompt_lines.append(f"[系统] {msg.content}")
-            else:
-                text = f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}"
-                await self._append_history_message(LlmApiMessage.text(OpenaiLLMApiRole.USER, text))
-                prompt_lines.append(f"{msg.sender_name}: {msg.content}")
-
         context_text = "\n".join(prompt_lines) if prompt_lines else "(无新消息)"
         turn_prompt = (
             f"新收到的消息：\n{context_text}\n\n"
@@ -346,8 +364,6 @@ class Agent:
         except Exception as e:
             logger.error(f"SDK 会话异常: agent={self.key}, room={room_key}, error={e}", exc_info=True)
             raise
-        finally:
-            self.current_room = None
 
     async def chat(
         self,
@@ -383,15 +399,7 @@ class Agent:
 
     async def sync_room(self, room: ChatRoom) -> None:
         """将聊天室中未读的新消息追加到内部历史，跳过自己发送的消息。"""
-        new_msgs: List[ChatMessage] = await room.get_unread_messages(self.name)
-        logger.info(f"同步房间消息: agent={self.key}, room={room.name}, count={len(new_msgs)}")
-        for msg in new_msgs:
-            if msg.sender_name == self.name:
-                continue
-            if msg.sender_name == "system":
-                await self._append_history_message(LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}"))
-            else:
-                await self._append_history_message(LlmApiMessage.text(OpenaiLLMApiRole.USER, f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}"))
+        await self._sync_room_messages(room, with_prompt_lines=False)
 
     async def _infer(self, tools: Optional[List[Tool]]) -> LlmApiMessage:
         """基于当前 _history 发起一次 LLM 调用，将 assistant 消息写入历史并返回。"""
