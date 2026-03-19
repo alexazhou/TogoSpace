@@ -43,8 +43,8 @@ class ChatRoom:
 
     def get_unread_messages(self, agent_name: str) -> List[ChatMessage]:
         """返回 agent_name 尚未读取的新消息，并推进其读取位置。"""
-        read_idx: int = self._agent_read_index.get(agent_name, 0)
-        new_msgs: List[ChatMessage] = self.messages[read_idx:]
+        read_idx = self._agent_read_index.get(agent_name, 0)
+        new_msgs = self.messages[read_idx:]
         self._agent_read_index[agent_name] = len(self.messages)
         self._persist_read_index()
         return new_msgs
@@ -96,7 +96,7 @@ class ChatRoom:
             self._state = RoomState.SCHEDULING
 
         # 2. 推进逻辑：只有当前顺序发言人说话，才推进到下一位
-        current_expected = self.get_current_turn_agent()
+        current_expected: Optional[str] = self.get_current_turn_agent()
         if sender == current_expected:
             self._advance_turn(publish_events=publish_events)
         else:
@@ -109,7 +109,7 @@ class ChatRoom:
         """跳过当前发言人的轮次。通常由 Agent 在 skip_chat_msg 工具中调用。
         返回 True 表示跳过成功，False 表示被拒绝（sender 不是当前发言人）。
         """
-        current_expected = self.get_current_turn_agent()
+        current_expected: Optional[str] = self.get_current_turn_agent()
 
         # 如果指定了发送者且不匹配，则拒绝跳过（防止误操作）
         if sender and sender != current_expected:
@@ -129,7 +129,7 @@ class ChatRoom:
 
     def _publish_current_turn(self) -> None:
         """发布当前轮次的发言事件。"""
-        next_name = self.get_current_turn_agent()
+        next_name: Optional[str] = self.get_current_turn_agent()
         if next_name:
             message_bus.publish(
                 MessageBusTopic.ROOM_AGENT_TURN,
@@ -295,7 +295,7 @@ def get_rooms_for_agent(team_name: str, agent_name: str) -> List[str]:
 
 def get_room(room_key: str) -> ChatRoom:
     """返回指定聊天室实例（使用 room@team 格式的 key）。"""
-    room = _rooms.get(room_key)
+    room: Optional[ChatRoom] = _rooms.get(room_key)
     if room is None:
         raise RuntimeError(f"聊天室 '{room_key}' 不存在")
     return room

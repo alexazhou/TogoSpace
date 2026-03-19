@@ -1,7 +1,7 @@
 import inspect
 import json
 import logging
-from typing import List, Optional
+from typing import Any, Callable, List, Optional
 
 from util.llm_api_util import Tool
 from model.chat_context import ChatContext
@@ -49,7 +49,7 @@ def run_tool_call(
 def execute_function(func_name: str, args: dict, context: Optional[ChatContext] = None) -> str:
     """动态调用指定函数"""
     try:
-        func = FUNCTION_REGISTRY.get(func_name)
+        func: Callable[..., Any] | None = FUNCTION_REGISTRY.get(func_name)
         if func is None:
             raise ValueError(f"Function {func_name} not found")
 

@@ -13,7 +13,7 @@ def python_type_to_json_schema(python_type: Any) -> Dict[str, Any]:
     """将 Python 类型转换为 JSON Schema 类型定义"""
     # 处理 Optional[T] 或 Union[T, None]
     if get_origin(python_type) in (Union, UnionType):
-        args = get_args(python_type)
+        args: tuple[Any, ...] = get_args(python_type)
         if len(args) == 2 and type(None) in args:
             non_none_type = args[0] if args[1] is type(None) else args[1]
             return python_type_to_json_schema(non_none_type)
@@ -44,7 +44,7 @@ def get_function_metadata(func_name: str, func) -> Dict[str, Any]:
     sig = inspect.signature(func)
 
     try:
-        type_hints = get_type_hints(func)
+        type_hints: Dict[str, Any] = get_type_hints(func)
     except Exception:
         type_hints = {}
 
@@ -93,10 +93,10 @@ def get_function_metadata(func_name: str, func) -> Dict[str, Any]:
 
 def build_tools(registry: dict) -> List[Tool]:
     """遍历 registry，构建并返回工具列表。"""
-    tools: List[Tool] = []
+    tools = []
     for func_name, func in registry.items():
         try:
-            metadata = get_function_metadata(func_name, func)
+            metadata: Dict[str, Any] = get_function_metadata(func_name, func)
             tool = Tool(
                 function=Function(
                     name=metadata["name"],

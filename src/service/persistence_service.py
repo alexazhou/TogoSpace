@@ -41,10 +41,10 @@ def dispatch(coro: Awaitable[_T]) -> _T | asyncio.Task:
     - 若当前无 running loop：直接阻塞执行，便于在同步脚本/测试中复用。
     """
     try:
-        loop = asyncio.get_running_loop()
+        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
-    task = loop.create_task(coro)
+    task: asyncio.Task = loop.create_task(coro)
     _track_task(task)
     return task
 
@@ -91,12 +91,19 @@ async def save_room_state(room_key: str, agent_read_index: dict[str, int]) -> No
     )
 
 
+async def append_agent_history_message(message: AgentHistoryMessageRecord) -> AgentHistoryMessageRecord | None:
+    if not is_enabled():
+        return None
+    return await agent_history_manager.append_agent_history_message(message)
+
+
 async def append_agent_history_messages(agent_key: str, messages: list[AgentHistoryMessageRecord]) -> None:
     if not is_enabled() or not messages:
         return
     if any(item.agent_key != agent_key for item in messages):
         raise ValueError(f"agent history items must belong to {agent_key}")
-    await agent_history_manager.append_agent_history_messages(messages)
+    for item in messages:
+        await append_agent_history_message(item)
 
 
 async def load_room_messages(room_key: str) -> list[RoomMessageRecord]:
@@ -125,12 +132,12 @@ async def restore_runtime_state(agents: list, rooms: list) -> None:
     await _drain_pending_tasks()
 
     for agent in agents:
-        items = await load_agent_history(agent.key)
+        items: list[AgentHistoryMessageRecord] = await load_agent_history(agent.key)
         if items:
             agent.inject_history_messages(items)
 
     for room in rooms:
-        room_msg_rows = await load_room_messages(room.key)
+        room_msg_rows: list[RoomMessageRecord] = await load_room_messages(room.key)
         recovered_from_db = bool(room_msg_rows)
         if room_msg_rows:
             room.inject_history_messages([
@@ -144,7 +151,7 @@ async def restore_runtime_state(agents: list, rooms: list) -> None:
         elif not room.messages:
             room.add_message("system", room.build_initial_system_message())
 
-        room_state = await load_room_state(room.key)
+        room_state: RoomStateRecord | None = await load_room_state(room.key)
         if room_state is not None:
             room.inject_agent_read_index(room_state.agent_read_index)
         elif recovered_from_db and room.messages:

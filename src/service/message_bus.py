@@ -23,7 +23,7 @@ def subscribe(topic: str, callback: Callable[[Message], None]) -> None:
 
 def unsubscribe(topic: str, callback: Callable[[Message], None]) -> None:
     """取消订阅指定主题。"""
-    callbacks = _subscribers.get(topic, [])
+    callbacks: List[Callable[[Message], None]] = _subscribers.get(topic, [])
     if callback in callbacks:
         callbacks.remove(callback)
 

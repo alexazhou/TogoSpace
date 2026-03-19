@@ -38,7 +38,7 @@ class SqlitePoolBackend(PoolBackend):
             await self.connect()
         connect_params = dict(self.connect_params)
         connect_params.setdefault("isolation_level", None)
-        conn = await aiosqlite.connect(self.database, **connect_params)
+        conn: ConnectionProtocol = await aiosqlite.connect(self.database, **connect_params)
         self._acquired_count += 1
         return conn
 

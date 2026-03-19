@@ -64,7 +64,7 @@ def _on_agent_turn(msg: Message) -> None:
         return
 
     try:
-        agent = agent_service.get_agent(team_name, agent_name)
+        agent: Agent = agent_service.get_agent(team_name, agent_name)
     except KeyError:
         logger.error(f"Agent 不存在: agent_name={agent_name}, team_name={team_name}")
         return
