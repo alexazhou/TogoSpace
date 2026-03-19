@@ -62,5 +62,5 @@ class RoomMessagesHandler(BaseHandler):
             self.return_json({"error": "invalid json body"})
             return
 
-        room.add_message(SpecialAgent.OPERATOR, content)
+        await room.add_message(SpecialAgent.OPERATOR, content)
         self.return_json({"status": "ok"})

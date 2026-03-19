@@ -110,7 +110,7 @@ def get_agent_list(_context: ChatContext = None) -> List[str]:
     return senders
 
 
-def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) -> str:
+async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) -> str:
     """向聊天窗口发送消息
 
     Args:
@@ -134,7 +134,7 @@ def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) -> str
         logger.warning(f"发送消息失败，聊天室不存在: name={room_name}, room_key={room_key}")
         return f"error: room not found: {room_key}"
 
-    target_room.add_message(_context.agent_name, msg)
+    await target_room.add_message(_context.agent_name, msg)
     return "success"
 
 

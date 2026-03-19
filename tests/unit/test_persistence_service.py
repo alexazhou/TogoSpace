@@ -17,29 +17,29 @@ class TestPersistenceService(ServiceTestCase):
     def setup_method(self):
         room_service.shutdown()
 
-    def test_restore_runtime_state_restores_room_history_and_read_index(self, tmp_path: Path):
+    async def test_restore_runtime_state_restores_room_history_and_read_index(self, tmp_path: Path):
         db_path = tmp_path / "runtime.db"
 
         async def _persist():
             await orm_service.startup(str(db_path))
             await persistence_service.startup(enabled=True)
 
-        self._run_maybe_async(_persist())
+        await _persist()
 
-        room_service.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3, emit_initial_message=False)
+        await room_service.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3, emit_initial_message=False)
         room = room_service.get_room(f"r1@{TEAM}")
-        room.add_message("system", room.build_initial_system_message())
-        room.add_message("alice", "hello")
-        room.get_unread_messages("bob")
-        room.add_message("bob", "world")
-        room.get_unread_messages("alice")
+        await room.add_message("system", room.build_initial_system_message())
+        await room.add_message("alice", "hello")
+        await room.get_unread_messages("bob")
+        await room.add_message("bob", "world")
+        await room.get_unread_messages("alice")
 
         room_service.shutdown()
-        self._run_maybe_async(room_service.startup())
-        room_service.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3, emit_initial_message=False)
+        await room_service.startup()
+        await room_service.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3, emit_initial_message=False)
         restored = room_service.get_room(f"r1@{TEAM}")
 
-        self._run_maybe_async(persistence_service.restore_runtime_state([], [restored]))
+        await persistence_service.restore_runtime_state([], [restored])
 
         assert [m.content for m in restored.messages] == [
             "r1 房间已经创建，当前房间成员：alice、bob",
@@ -49,26 +49,24 @@ class TestPersistenceService(ServiceTestCase):
         assert restored.export_agent_read_index()["alice"] == 3
         assert restored.export_agent_read_index()["bob"] == 2
 
-    def test_restore_runtime_state_restores_agent_history(self, tmp_path: Path):
+    async def test_restore_runtime_state_restores_agent_history(self, tmp_path: Path):
         db_path = tmp_path / "runtime.db"
 
         async def _persist():
             await orm_service.startup(str(db_path))
             await persistence_service.startup(enabled=True)
 
-        self._run_maybe_async(_persist())
+        await _persist()
 
         agent = Agent("alice", TEAM, "sys", "test-model")
         agent._history = [
             LlmApiMessage.text(OpenaiLLMApiRole.USER, "u1"),
             LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1"),
         ]
-        self._run_maybe_async(
-            persistence_service.append_agent_history_messages(agent.key, agent.dump_history_messages())
-        )
+        await persistence_service.append_agent_history_messages(agent.key, agent.dump_history_messages())
 
         fresh_agent = Agent("alice", TEAM, "sys", "test-model")
-        self._run_maybe_async(persistence_service.restore_runtime_state([fresh_agent], []))
+        await persistence_service.restore_runtime_state([fresh_agent], [])
 
         assert [m.content for m in fresh_agent._history] == ["u1", "a1"]
 

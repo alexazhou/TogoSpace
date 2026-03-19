@@ -24,35 +24,35 @@ class _AgentServiceCase(ServiceTestCase):
 
 
 class TestAgentServiceCreateTeamAgents(_AgentServiceCase):
-    def test_create_team_agents(self):
+    async def test_create_team_agents(self):
         """create_team_agents 后，team 维度的 agent 实例应全部可检索。"""
         assert agent_service.get_agent(TEAM, "alice") is not None
         assert agent_service.get_agent(TEAM, "bob") is not None
 
 
 class TestAgentServiceGetAgentsInRoom(_AgentServiceCase):
-    def test_get_agents_in_room(self):
+    async def test_get_agents_in_room(self):
         """get_agents 只返回房间成员，并保持成员集合正确。"""
-        room_service.create_room(TEAM, "general", ["alice", "bob"])
+        await room_service.create_room(TEAM, "general", ["alice", "bob"])
         assert {a.name for a in agent_service.get_agents(TEAM, "general")} == {"alice", "bob"}
 
 
 class TestAgentServiceGetAllRooms(_AgentServiceCase):
-    def test_get_all_rooms_for_agent(self):
+    async def test_get_all_rooms_for_agent(self):
         """get_all_rooms 应返回某个 agent 所在的所有 room_key。"""
-        room_service.create_room(TEAM, "general", ["alice"])
+        await room_service.create_room(TEAM, "general", ["alice"])
         assert f"general@{TEAM}" in agent_service.get_all_rooms(TEAM, "alice")
 
 
 class TestAgentServiceSyncRoomMessages(_AgentServiceCase):
-    def test_sync_room_messages(self):
+    async def test_sync_room_messages(self):
         """sync_room 会把房间中的新增消息同步进 agent 历史。"""
-        room_service.create_room(TEAM, "general", ["alice"])
+        await room_service.create_room(TEAM, "general", ["alice"])
         room = room_service.get_room(f"general@{TEAM}")
-        room.add_message("bob", "hello alice")
+        await room.add_message("bob", "hello alice")
 
         alice = agent_service.get_agent(TEAM, "alice")
-        alice.sync_room(room)
+        await alice.sync_room(room)
 
         # 初始公告 + bob 消息
         assert len(alice._history) == 2
@@ -60,15 +60,15 @@ class TestAgentServiceSyncRoomMessages(_AgentServiceCase):
 
 
 class TestAgentServiceSyncSkipsOwnMessages(_AgentServiceCase):
-    def test_sync_room_skips_own_messages(self):
+    async def test_sync_room_skips_own_messages(self):
         """同步时应过滤 agent 自己发过的消息，避免历史自回灌。"""
-        room_service.create_room(TEAM, "general", ["alice"])
+        await room_service.create_room(TEAM, "general", ["alice"])
         room = room_service.get_room(f"general@{TEAM}")
 
         alice = agent_service.get_agent(TEAM, "alice")
-        room.add_message("alice", "i am talking")
+        await room.add_message("alice", "i am talking")
 
-        alice.sync_room(room)
+        await alice.sync_room(room)
         # 只应有初始公告，不应有自己的消息
         assert len(alice._history) == 1
         assert "talking" not in alice._history[0].content
