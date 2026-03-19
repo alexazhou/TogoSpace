@@ -4,10 +4,37 @@ import os
 from typing import List
 
 
+def _default_config_dir() -> str:
+    return os.path.join(os.path.dirname(__file__), "../../config")
+
+
+def _default_root_config_path() -> str:
+    return os.path.join(os.path.dirname(__file__), "../../config.json")
+
+
+def _resolve_config_file(config_dir: str | None, preferred_name: str) -> str:
+    if config_dir is None:
+        return _default_root_config_path()
+
+    preferred_path = os.path.join(config_dir, preferred_name)
+    if os.path.isfile(preferred_path):
+        return preferred_path
+
+    fallback_path = os.path.join(config_dir, "config.json")
+    if os.path.isfile(fallback_path):
+        return fallback_path
+
+    llm_path = os.path.join(config_dir, "llm.json")
+    if os.path.isfile(llm_path):
+        return llm_path
+
+    return preferred_path
+
+
 def load_agents(config_dir: str = None) -> List[dict]:
     """扫描 config/agents/*.json，返回 Agent 定义列表。"""
     if config_dir is None:
-        config_dir = os.path.join(os.path.dirname(__file__), "../../config")
+        config_dir = _default_config_dir()
     agents_dir = os.path.join(config_dir, "agents")
     result = []
     for path in sorted(glob.glob(os.path.join(agents_dir, "*.json"))):
@@ -19,7 +46,7 @@ def load_agents(config_dir: str = None) -> List[dict]:
 def load_teams(config_dir: str = None) -> List[dict]:
     """扫描 config/teams/*.json，返回 Team 定义列表。"""
     if config_dir is None:
-        config_dir = os.path.join(os.path.dirname(__file__), "../../config")
+        config_dir = _default_config_dir()
     teams_dir = os.path.join(config_dir, "teams")
     result = []
     for path in sorted(glob.glob(os.path.join(teams_dir, "*.json"))):
@@ -34,10 +61,9 @@ def load_prompt(file_path: str) -> str:
         return f.read().strip()
 
 
-def load_llm_service_config(path: str = None) -> dict:
+def load_llm_service_config(config_dir: str = None) -> dict:
     """返回当前激活的 LLM 服务配置（name, base_url, api_key, type）。"""
-    if path is None:
-        path = os.path.join(os.path.dirname(__file__), "../../config.json")
+    path = _resolve_config_file(config_dir, "llm.json")
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     active = cfg["active_llm_service"]
@@ -47,10 +73,9 @@ def load_llm_service_config(path: str = None) -> dict:
     return services[active]
 
 
-def load_persistence_config(path: str = None) -> dict:
+def load_persistence_config(config_dir: str = None) -> dict:
     """返回持久化配置，未配置时提供默认值。"""
-    if path is None:
-        path = os.path.join(os.path.dirname(__file__), "../../config.json")
+    path = _resolve_config_file(config_dir, "config.json")
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     persistence = cfg.get("persistence", {})

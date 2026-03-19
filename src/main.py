@@ -72,15 +72,25 @@ def _remove_pid() -> None:
         pass
 
 
-async def main(config_dir: str = None, llm_config_path: str = None, port: int = 8080):
+def _load_runtime_configs(config_dir: str = None) -> tuple[dict, dict]:
+    llm_cfg = load_llm_service_config(config_dir)
+    persistence_cfg = load_persistence_config(config_dir)
+    return llm_cfg, persistence_cfg
+
+
+async def main(
+    config_dir: str = None,
+    port: int = 8080,
+):
+    if config_dir is not None:
+        config_dir = os.path.abspath(config_dir)
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     _setup_logger()
     logger = logging.getLogger(__name__)
 
     agents_config = load_agents(config_dir)
     teams_config = load_teams(config_dir)
-    llm_cfg = load_llm_service_config(llm_config_path)
-    persistence_cfg = load_persistence_config(llm_config_path)
+    llm_cfg, persistence_cfg = _load_runtime_configs(config_dir)
 
     await message_bus.startup()
     llm_api_util.init()
@@ -124,7 +134,6 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     parser = argparse.ArgumentParser()
     parser.add_argument("--config-dir", default=None, dest="config_dir", help="config 目录路径")
-    parser.add_argument("--llm-config", default=None, dest="llm_config", help="LLM 服务配置文件路径")
     parser.add_argument("--port", type=int, default=8080, help="HTTP 监听端口")
     args = parser.parse_args()
-    asyncio.run(main(config_dir=args.config_dir, llm_config_path=args.llm_config, port=args.port))
+    asyncio.run(main(config_dir=args.config_dir, port=args.port))
