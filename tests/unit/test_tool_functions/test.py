@@ -144,9 +144,9 @@ class TestToolFunctions(ServiceTestCase):
         result = get_agent_list(_context=ctx)
         assert "alice" in result and "bob" in result
 
-    def test_send_chat_msg_returns_success_no_context(self):
-        """无上下文时 send_chat_msg 仍保持 success 语义。"""
-        assert send_chat_msg("some_room", "hello") == "success"
+    def test_send_chat_msg_returns_error_without_context(self):
+        """无上下文时 send_chat_msg 应返回明确错误，不能伪装成功。"""
+        assert send_chat_msg("some_room", "hello") == "error: chat context is not set"
 
     def test_send_chat_msg_with_valid_context(self):
         """同房间发送成功后，目标房间消息数应增加。"""
@@ -157,12 +157,12 @@ class TestToolFunctions(ServiceTestCase):
         assert len(room.messages) == 2  # 1 (init公告) + 1 (new)
         assert room.messages[1].content == "hello"
 
-    def test_send_chat_msg_nonexistent_room_returns_success(self):
-        """目标房间不存在时保持幂等返回，不抛异常。"""
+    def test_send_chat_msg_nonexistent_room_returns_error(self):
+        """目标房间不存在时应返回明确错误，避免吞掉失败。"""
         room_service.create_room(TEAM, "existing", ["alice"])
         room = room_service.get_room(f"existing@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room, get_room=room_service.get_room)
-        assert send_chat_msg("nonexistent", "hello", _context=ctx) == "success"
+        assert send_chat_msg("nonexistent", "hello", _context=ctx) == f"error: room not found: nonexistent@{TEAM}"
 
     def test_send_chat_msg_cross_room_lands_in_target(self):
         """跨房间发消息时，消息必须落到目标房间，而不是 agent 当前所在房间。"""
