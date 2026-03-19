@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from model.db_model.agent_history_message import AgentHistoryMessageRecord
 
 
 async def append_agent_history_messages(agent_key: str, messages: list[dict]) -> None:
     if not messages:
         return
-    now = datetime.now().isoformat()
     payload = [
         {
             "agent_key": agent_key,
             "seq": item["seq"],
             "message_json": item["message_json"],
-            "updated_at": now,
         }
         for item in messages
     ]

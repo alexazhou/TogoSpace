@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import peewee
 import peewee_async
 
@@ -11,6 +13,54 @@ def bind_database(database: peewee.Database) -> None:
 
 
 class DbModelBase(peewee_async.AioModel):
+    @classmethod
+    def _now_iso(cls) -> str:
+        return datetime.now().isoformat()
+
+    @classmethod
+    def _has_updated_at_field(cls) -> bool:
+        return "updated_at" in cls._meta.fields
+
+    @classmethod
+    def _inject_updated_at(cls, payload: dict) -> dict:
+        if cls._has_updated_at_field() and "updated_at" not in payload:
+            payload["updated_at"] = cls._now_iso()
+        return payload
+
+    @classmethod
+    def insert(cls, *args, **kwargs):
+        if kwargs:
+            kwargs = cls._inject_updated_at(dict(kwargs))
+            return super().insert(*args, **kwargs)
+        if args and isinstance(args[0], dict):
+            first = cls._inject_updated_at(dict(args[0]))
+            return super().insert(first, *args[1:], **kwargs)
+        return super().insert(*args, **kwargs)
+
+    @classmethod
+    def insert_many(cls, rows, fields=None):
+        if cls._has_updated_at_field():
+            rows = [
+                cls._inject_updated_at(dict(row)) if isinstance(row, dict) else row
+                for row in rows
+            ]
+        return super().insert_many(rows, fields=fields)
+
+    @classmethod
+    def update(cls, *args, **kwargs):
+        if cls._has_updated_at_field():
+            if kwargs:
+                if "updated_at" not in kwargs:
+                    kwargs = dict(kwargs)
+                    kwargs["updated_at"] = cls._now_iso()
+                return super().update(*args, **kwargs)
+            if args and isinstance(args[0], dict):
+                first = dict(args[0])
+                if "updated_at" not in first:
+                    first["updated_at"] = cls._now_iso()
+                return super().update(first, *args[1:], **kwargs)
+        return super().update(*args, **kwargs)
+
     class Meta:
         database = _database_proxy
         legacy_table_names = False
