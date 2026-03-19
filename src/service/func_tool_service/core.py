@@ -24,7 +24,7 @@ def get_tools() -> List[Tool]:
     return _tools
 
 
-def run_tool_call(
+async def run_tool_call(
     function_name: str,
     function_args: str,
     context: Optional[ChatContext] = None,
@@ -38,7 +38,7 @@ def run_tool_call(
     caller = context.agent_name if context is not None else "unknown"
     logger.info(f"use_tool: caller={caller}, tool={function_name}, args={args}")
     try:
-        result = execute_function(function_name, args, context=context)
+        result = await execute_function(function_name, args, context=context)
         logger.info(f"函数执行结果: {result}")
         return result
     except Exception as e:
@@ -46,7 +46,7 @@ def run_tool_call(
         return f"函数执行失败: {str(e)}"
 
 
-def execute_function(func_name: str, args: dict, context: Optional[ChatContext] = None) -> str:
+async def execute_function(func_name: str, args: dict, context: Optional[ChatContext] = None) -> str:
     """动态调用指定函数"""
     try:
         func: Callable[..., Any] | None = FUNCTION_REGISTRY.get(func_name)
@@ -61,6 +61,8 @@ def execute_function(func_name: str, args: dict, context: Optional[ChatContext] 
                 args = {**args, "_context": context}
 
         result = func(**args)
+        if inspect.isawaitable(result):
+            result = await result
         return str(result)
 
     except ValueError:

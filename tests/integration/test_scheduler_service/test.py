@@ -43,7 +43,7 @@ class TestSchedulerRun(ServiceTestCase):
 
     async def test_scheduler_runs_agent_on_turn_event(self):
         """发布 ROOM_AGENT_TURN 后，scheduler 应触发 agent.consume_task。"""
-        room_service.create_room(TEAM, "r1", ["alice"])
+        await room_service.create_room(TEAM, "r1", ["alice"])
         alice = _make_mock_agent("alice")
 
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]

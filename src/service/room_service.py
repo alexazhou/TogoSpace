@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from service import message_bus
+from service import message_bus, persistence_service
 from model.chat_model import ChatMessage
 from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 
@@ -41,33 +41,30 @@ class ChatRoom:
     def state(self) -> RoomState:
         return self._state
 
-    def get_unread_messages(self, agent_name: str) -> List[ChatMessage]:
+    async def get_unread_messages(self, agent_name: str) -> List[ChatMessage]:
         """返回 agent_name 尚未读取的新消息，并推进其读取位置。"""
         read_idx = self._agent_read_index.get(agent_name, 0)
         new_msgs = self.messages[read_idx:]
         self._agent_read_index[agent_name] = len(self.messages)
-        self._persist_read_index()
+        await self._persist_read_index()
         return new_msgs
 
-    def add_message(self, sender: str, content: str) -> None:
-        self._append_message(sender, content, publish_events=True, persist=True)
+    async def add_message(self, sender: str, content: str) -> None:
+        await self._append_message(sender, content, publish_events=True, persist=True)
 
-    def _append_message(self, sender: str, content: str, publish_events: bool, persist: bool, send_time: datetime | None = None) -> None:
+    async def _append_message(self, sender: str, content: str, publish_events: bool, persist: bool, send_time: datetime | None = None) -> None:
         message = ChatMessage(
             sender_name=sender,
             content=content,
             send_time=send_time or datetime.now()
         )
         if persist:
-            from service import persistence_service
-            persistence_service.dispatch(
-                persistence_service.append_room_message(
-                    room_key=self.key,
-                    team_name=self.team_name,
-                    sender=sender,
-                    content=content,
-                    send_time=message.send_time.isoformat(),
-                )
+            await persistence_service.append_room_message(
+                room_key=self.key,
+                team_name=self.team_name,
+                sender=sender,
+                content=content,
+                send_time=message.send_time.isoformat(),
             )
         self.messages.append(message)
         if publish_events:
@@ -201,11 +198,8 @@ class ChatRoom:
         for msg in self.messages:
             self._apply_turn_logic(msg.sender_name, publish_events=False)
 
-    def _persist_read_index(self) -> None:
-        from service import persistence_service
-        persistence_service.dispatch(
-            persistence_service.save_room_state(self.key, self._agent_read_index)
-        )
+    async def _persist_read_index(self) -> None:
+        await persistence_service.save_room_state(self.key, self._agent_read_index)
 
     def get_context(self, max_messages: int = 10) -> str:
         recent = self.messages[-max_messages:]
@@ -243,7 +237,7 @@ async def startup() -> None:
     _rooms.clear()
 
 
-def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0, emit_initial_message: bool = True) -> None:
+async def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0, emit_initial_message: bool = True) -> None:
     """创建并初始化一个聊天室。若 max_turns > 0 则启动轮次调度，发布系统公告。"""
     room = ChatRoom(name=name, team_name=team_name, initial_topic=initial_topic,
                     room_type=room_type, members=members, max_turns=max_turns)
@@ -259,15 +253,15 @@ def create_room(team_name: str, name: str, members: List[str], initial_topic: st
         msg = f"{name} 房间已经创建，当前房间成员：{member_list_str}"
         if initial_topic:
             msg += f"\n本房间初始话题：{initial_topic}"
-        room.add_message("system", msg)
+        await room.add_message("system", msg)
 
 
-def create_rooms(teams_config: list, emit_initial_message: bool = True) -> None:
+async def create_rooms(teams_config: list, emit_initial_message: bool = True) -> None:
     """遍历所有 team，根据 groups 配置批量创建聊天室。"""
     for team in teams_config:
         team_name = team["name"]
         for group in team["groups"]:
-            create_room(
+            await create_room(
                 team_name=team_name,
                 name=group["name"],
                 members=group["members"],
