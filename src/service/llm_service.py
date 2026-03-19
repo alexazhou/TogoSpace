@@ -14,7 +14,7 @@ async def startup(api_key: str, base_url: str) -> None:
 
 async def infer(model: str, ctx: AgentDialogContext) -> LlmApiResponse:
     """根据 AgentDialogContext 组装请求并调用 LLM 推理接口。"""
-    messages = [LlmApiMessage.text(OpenaiLLMApiRole.SYSTEM, ctx.system_prompt), *ctx.messages]
+    messages: list[LlmApiMessage] = [LlmApiMessage.text(OpenaiLLMApiRole.SYSTEM, ctx.system_prompt), *ctx.messages]
     request = LlmApiRequest(
         model=model,
         messages=messages,
