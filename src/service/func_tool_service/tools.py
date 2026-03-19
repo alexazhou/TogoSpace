@@ -147,10 +147,15 @@ def skip_chat_msg(_context: ChatContext = None) -> str:
     sender = _context.agent_name if _context is not None else "unknown"
     logger.info(f"Agent 跳过发言: agent={sender}")
 
-    if _context is not None:
-        _context.chat_room.skip_turn()
-    else:
+    if _context is None:
         logger.warning("跳过发言失败，聊天室上下文未设置")
+        return "error: chat context is not set"
+
+    ok = _context.chat_room.skip_turn(sender=_context.agent_name)
+    if not ok:
+        current = _context.chat_room.get_current_turn_agent()
+        logger.warning(f"跳过发言失败，当前应由 {current} 发言: agent={sender}")
+        return f"error: not your turn, current turn agent is {current}"
 
     return "success"
 
