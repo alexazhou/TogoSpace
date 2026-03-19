@@ -7,6 +7,7 @@ from util.llm_api_util import OpenaiLLMApiRole, LlmApiMessage, Tool
 from util.config_util import load_prompt
 from model.chat_model import AgentDialogContext, ChatMessage
 from model.chat_context import ChatContext
+from model.db_model.agent_history_message import AgentHistoryMessageRecord
 from service import llm_service, func_tool_service, room_service, message_bus
 from service.room_service import ChatRoom
 from constants import RoomType, SpecialAgent, MessageBusTopic
@@ -383,20 +384,28 @@ class Agent:
         self._history.append(LlmApiMessage.tool_result(tool_call_id, result))
         self._persist_history_delta()
 
-    def dump_history_messages(self) -> List[dict]:
+    def dump_history_messages(self) -> List[AgentHistoryMessageRecord]:
         return [
-            {"seq": idx, "message_json": msg.model_dump_json(exclude_none=True)}
+            AgentHistoryMessageRecord(
+                agent_key=self.key,
+                seq=idx,
+                message_json=msg.model_dump_json(exclude_none=True),
+            )
             for idx, msg in enumerate(self._history)
         ]
 
-    def _dump_new_history_messages(self) -> List[dict]:
+    def _dump_new_history_messages(self) -> List[AgentHistoryMessageRecord]:
         return [
-            {"seq": idx, "message_json": msg.model_dump_json(exclude_none=True)}
+            AgentHistoryMessageRecord(
+                agent_key=self.key,
+                seq=idx,
+                message_json=msg.model_dump_json(exclude_none=True),
+            )
             for idx, msg in enumerate(self._history[self._persisted_history_len:], start=self._persisted_history_len)
         ]
 
-    def inject_history_messages(self, items: List[dict]) -> None:
-        self._history = [LlmApiMessage.model_validate_json(item["message_json"]) for item in items]
+    def inject_history_messages(self, items: List[AgentHistoryMessageRecord]) -> None:
+        self._history = [LlmApiMessage.model_validate_json(item.message_json) for item in items]
         self._persisted_history_len = len(self._history)
 
     def _persist_history_delta(self) -> None:
