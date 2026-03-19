@@ -29,7 +29,7 @@ agent_team/
 ├── run/                 # PID 文件（自动生成）
 ├── scripts/             # 启动/停止脚本
 ├── tests/               # 测试
-├── config.json          # API Key 和服务地址配置
+├── config.json          # 默认运行时配置（LLM / persistence 等）
 └── requirements.txt     # Python 依赖
 ```
 
@@ -96,7 +96,7 @@ tui/
 
 ```bash
 # 前台运行（开发调试）
-cd src && python main.py [--config-dir config/] [--llm-config config.json] [--port 8080]
+cd src && python main.py [--config-dir ../config] [--port 8080]
 
 # 后台运行（nohup，stdout 写入 logs/backend_stdout.log，运行日志写入 logs/backend/）
 ./scripts/start_backend.sh [--config-dir ...] [--port ...]
@@ -129,8 +129,8 @@ cd src && python main.py [--config-dir config/] [--llm-config config.json] [--po
 ## 工作目录约定
 
 `main.py` 启动时调用 `os.chdir(os.path.dirname(os.path.abspath(__file__)))` 将工作目录固定为 `src/`。
-所有相对路径（如配置文件、prompt 文件）均以 `src/` 为基准。
-测试和其他入口脚本若需要读取这些文件，须自行保证工作目录正确，或使用绝对路径。
+prompt 等仓库内置相对路径仍以 `src/` 为基准。
+`--config-dir` 在启动早期会先转换为绝对路径，因此外部调用方可以安全传相对目录，不会被后续 `chdir` 影响。
 
 ## 配置文件
 ### Agent + Team 两级配置
@@ -177,9 +177,23 @@ cd src && python main.py [--config-dir config/] [--llm-config config.json] [--po
 
 ### 其他配置
 
-| 文件 | 说明 |
-|------|------|
-| `config.json` | LLM 服务配置（API Key、base_url、active_llm_service） |
+后端统一通过一个配置目录加载运行配置：
+
+- `agents/`：Agent 定义
+- `teams/`：Team 定义
+- `llm.json`：可选，专门存放 LLM 配置
+- `config.json`：可选，存放 persistence 等运行时配置；若目录内没有 `llm.json`，也可直接在此文件中同时放置 LLM 配置
+
+加载规则：
+
+- `load_agents()` 读取 `<config-dir>/agents/*.json`
+- `load_teams()` 读取 `<config-dir>/teams/*.json`
+- LLM 优先读取 `<config-dir>/llm.json`
+- persistence 优先读取 `<config-dir>/config.json`
+- 若目录内只有一个 `config.json`，LLM 与 persistence 都从该文件读取
+- 若目录内只有 `llm.json`，persistence 使用默认值
+
+默认情况下，未传 `--config-dir` 时会回退到仓库根目录的 `config/` 与 `config.json`
 
 ## 终端模拟器 (Terminal Simulator)
 

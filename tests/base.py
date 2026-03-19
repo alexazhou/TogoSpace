@@ -53,7 +53,6 @@ class ServiceTestCase:
     backend_base_url: str = None
     _backend_proc: subprocess.Popen = None
     _backend_config_dir: str = None
-    _backend_llm_config: str = None
 
     mock_llm_server: MockLLMServer = None
 
@@ -118,10 +117,6 @@ class ServiceTestCase:
 
         cls._backend_config_dir = config_dir
 
-        llm_json = os.path.join(config_dir, "llm.json")
-        if os.path.isfile(llm_json):
-            cls._backend_llm_config = llm_json
-
     @classmethod
     def _start_backend(cls):
         """启动后端子进程，等待 HTTP 服务就绪。"""
@@ -132,8 +127,6 @@ class ServiceTestCase:
         cmd = [sys.executable, os.path.join(_SRC_DIR, "main.py"), "--port", str(port)]
         if cls._backend_config_dir:
             cmd += ["--config-dir", cls._backend_config_dir]
-        if cls._backend_llm_config:
-            cmd += ["--llm-config", cls._backend_llm_config]
 
         proc = subprocess.Popen(
             cmd,
