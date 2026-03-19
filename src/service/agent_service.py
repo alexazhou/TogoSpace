@@ -69,7 +69,8 @@ def _build_sdk_skip_tool(agent: "Agent"):
         if not ok:
             current = room.get_current_turn_agent()
             return {"content": [{"type": "text", "text": f"error: 现在不是你的发言轮次（当前应由 {current} 发言），请勿再调用任何工具。"}], "isError": True}
-        agent._sdk_done = True
+        # 用 current_room 是否为空表示本轮是否已完成，避免额外状态字段。
+        agent.current_room = None
         return {"content": [{"type": "text", "text": "success: 已跳过本轮发言。"}]}
 
     return _skip
@@ -94,7 +95,6 @@ class Agent:
         self._turn_ctx: Optional[ChatContext] = None  # 当前轮次的上下文（run_turn 期间有效）
         self._sdk_client = None  # 持久化 SDK 会话客户端（由 init_sdk 赋值）
         self.current_room: Optional[ChatRoom] = None  # SDK 当前轮次所在房间
-        self._sdk_done: bool = False  # SDK 当前轮次是否已通过工具完成发言
 
     @property
     def key(self) -> str:
@@ -130,7 +130,7 @@ class Agent:
     async def _sdk_do_send(self, room_name: str, msg: str) -> dict:
         """send_chat_msg MCP 工具的核心逻辑（从闭包提取，便于单元测试）。
 
-        - 发到当前房间：写消息、标记本轮结束（_sdk_done = True）
+        - 发到当前房间：写消息、标记本轮结束（current_room = None）
         - 发到其他房间：写消息、不标记结束，返回提示要求继续回复当前房间
         """
         room_key = room_name if "@" in room_name else f"{room_name}@{self.team_name}"
@@ -144,7 +144,7 @@ class Agent:
         await self._append_history_message(LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, msg))
         current_room = self.current_room
         if target_room is current_room:
-            self._sdk_done = True
+            self.current_room = None
             return {"content": [{"type": "text", "text": "success: 消息已发送，本轮发言结束。"}]}
         if current_room is None:
             return {"content": [{"type": "text", "text": f"success: 消息已发送到 {target_room.name}。"}]}
@@ -263,7 +263,6 @@ class Agent:
 
         room = room_service.get_room(room_key)
         self.current_room = room
-        self._sdk_done = False
 
         # 获取增量消息，同步写入 _history（与 sync_room 保持相同格式）
         new_msgs = await room.get_unread_messages(self.name)
@@ -327,7 +326,7 @@ class Agent:
                         logger.info(f"SDK UserMessage: agent={self.key}, content=[{', '.join(parts)}]")
                         # 工具调用结果返回后，若本轮已完成则发起中断，但不立即 break，
                         # 而是让流自然结束，避免 interrupt 响应残留到下一轮
-                        if self._sdk_done and not _interrupted:
+                        if self.current_room is None and not _interrupted:
                             logger.info(f"SDK 发言完成，主动中断会话: agent={self.key}")
                             await client.interrupt()
                             _interrupted = True
@@ -341,12 +340,14 @@ class Agent:
                     else:
                         logger.debug(f"SDK 未知消息: agent={self.key}, type={type(msg).__name__}, data={msg}")
                 logger.info(f"SDK receive_response 结束: agent={self.key}, total_msgs={msg_count}, attempt={attempt}")
-                if self._sdk_done:
+                if self.current_room is None:
                     break
                 logger.warning(f"SDK agent 未调用发言工具（可能只输出 thinking 或纯文字）: agent={self.key}, attempt={attempt}")
         except Exception as e:
             logger.error(f"SDK 会话异常: agent={self.key}, room={room_key}, error={e}", exc_info=True)
             raise
+        finally:
+            self.current_room = None
 
     async def chat(
         self,
