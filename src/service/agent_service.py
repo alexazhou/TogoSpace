@@ -91,7 +91,6 @@ class Agent:
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()  # 待处理的房间任务队列
         self._is_running: bool = False  # 标志当前是否正在处理任务协程
         self._last_published_status: Optional[str] = None  # 记录上一次发布的状态，用于幂等校验
-        self._last_called: dict = {}  # 记录当前轮次最后一次工具调用的名称和参数
         self._turn_ctx: Optional[ChatContext] = None  # 当前轮次的上下文（run_turn 期间有效）
         self._sdk_client = None  # 持久化 SDK 会话客户端（由 init_sdk 赋值）
         self.current_room: Optional[ChatRoom] = None  # SDK 当前轮次所在房间
@@ -207,21 +206,39 @@ class Agent:
         room: ChatRoom = room_service.get_room(room_key)
         await self.sync_room(room)
 
-        self._last_called = {}
         self._turn_ctx = ChatContext(
             agent_name=self.name,
             team_name=self.team_name,
             chat_room=room,
             get_room=room_service.get_room,
         )
+        turn_history_start: int = len(self._history)
+
+        def _get_last_tool_call() -> Optional[dict]:
+            recent_history = self._history[turn_history_start:]
+            for message in reversed(recent_history):
+                if message.role != OpenaiLLMApiRole.ASSISTANT:
+                    continue
+                tool_calls = message.tool_calls or []
+                if not tool_calls:
+                    continue
+                call = tool_calls[-1]
+                function = call.function if isinstance(call.function, dict) else {}
+                return {
+                    "name": function.get("name"),
+                    "args": function.get("arguments", ""),
+                }
+            return None
 
         def is_turn_done() -> bool:
-            called: Optional[str] = self._last_called.get("name")
-            if called == "skip_chat_msg":
+            called = _get_last_tool_call()
+            if called is None:
+                return False
+            if called.get("name") == "skip_chat_msg":
                 return True
-            if called == "send_chat_msg":
+            if called.get("name") == "send_chat_msg":
                 try:
-                    target: Optional[str] = json.loads(self._last_called["args"]).get("room_name")
+                    target = json.loads(called.get("args", "")).get("room_name")
                     return target == room.name or target == room.key
                 except Exception:
                     return False
@@ -390,8 +407,7 @@ class Agent:
         return assistant_message
 
     async def _execute_tool(self, tool_call_id: str, name: str, args: str) -> None:
-        """执行工具调用，将结果写入 _history，并记录调用信息供 run_turn 判定完成条件。"""
-        self._last_called = {"name": name, "args": args}
+        """执行工具调用，并将结果写入 _history。"""
         result = await func_tool_service.run_tool_call(name, args, context=self._turn_ctx)
         await self._append_history_message(LlmApiMessage.tool_result(tool_call_id, result))
 
