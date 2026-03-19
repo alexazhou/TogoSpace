@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 
 import peewee
 import peewee_async
@@ -10,6 +11,22 @@ _database_proxy: peewee.DatabaseProxy = peewee.DatabaseProxy()
 
 def bind_database(database: peewee.Database) -> None:
     _database_proxy.initialize(database)
+
+
+class JsonDictField(peewee.TextField):
+    """将 dict 与 TEXT(JSON) 自动互转。"""
+
+    def db_value(self, value):
+        if value is None:
+            return None
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+    def python_value(self, value):
+        if value is None:
+            return None
+        if isinstance(value, (dict, list)):
+            return value
+        return json.loads(value)
 
 
 class DbModelBase(peewee_async.AioModel):
