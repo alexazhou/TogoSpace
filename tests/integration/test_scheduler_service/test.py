@@ -9,7 +9,7 @@ import service.scheduler_service as scheduler
 from service.agent_service import Agent
 from service.message_bus import Message
 from model.agent_event import RoomMessageEvent
-from constants import MessageBusTopic
+from constants import MessageBusTopic, AgentStatus
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -67,7 +67,7 @@ class TestSchedulerRun(ServiceTestCase):
             await asyncio.wait_for(run_task, timeout=2.0)
 
     async def test_agent_is_active_self_contained(self):
-        """验证 Agent 活跃状态的自治逻辑：基于 _is_running 或 队列深度。"""
+        """验证 Agent 活跃状态的自治逻辑：基于 status 或 队列深度。"""
         alice = Agent("alice", TEAM, "prompt", "model")
 
         assert alice.is_active is False
@@ -76,10 +76,10 @@ class TestSchedulerRun(ServiceTestCase):
         assert alice.is_active is True
 
         alice.wait_task_queue.get_nowait()
-        alice._is_running = True
+        alice.status = AgentStatus.ACTIVE
         assert alice.is_active is True
 
-        alice._is_running = False
+        alice.status = AgentStatus.IDLE
         assert alice.is_active is False
 
     async def test_handle_event_error_logged_in_agent(self):
