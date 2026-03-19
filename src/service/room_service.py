@@ -60,12 +60,14 @@ class ChatRoom:
         )
         if persist:
             from service import persistence_service
-            persistence_service.append_room_message(
-                room_key=self.key,
-                team_name=self.team_name,
-                sender=sender,
-                content=content,
-                send_time=message.send_time.isoformat(),
+            persistence_service.dispatch(
+                persistence_service.append_room_message(
+                    room_key=self.key,
+                    team_name=self.team_name,
+                    sender=sender,
+                    content=content,
+                    send_time=message.send_time.isoformat(),
+                )
             )
         self.messages.append(message)
         if publish_events:
@@ -201,7 +203,9 @@ class ChatRoom:
 
     def _persist_read_index(self) -> None:
         from service import persistence_service
-        persistence_service.save_room_state(self.key, self._agent_read_index)
+        persistence_service.dispatch(
+            persistence_service.save_room_state(self.key, self._agent_read_index)
+        )
 
     def get_context(self, max_messages: int = 10) -> str:
         recent = self.messages[-max_messages:]

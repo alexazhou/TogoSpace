@@ -1,12 +1,20 @@
-from dataclasses import dataclass
+from __future__ import annotations
+
+import peewee
 
 from .base import DbModelBase
 
 
-@dataclass
 class RoomMessageRecord(DbModelBase):
-    room_key: str = ""
-    team_name: str = ""
-    sender_name: str = ""
-    content: str = ""
-    send_time: str = ""
+    id: int = peewee.AutoField()
+    room_key: str = peewee.CharField(null=False)
+    team_name: str = peewee.CharField(null=False)
+    sender_name: str = peewee.CharField(null=False)
+    content: str = peewee.TextField(null=False)
+    send_time: str = peewee.CharField(null=False)
+
+    class Meta:
+        table_name = "room_messages"
+        indexes = (
+            (("room_key", "id"), False),
+        )

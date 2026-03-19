@@ -1,41 +1,38 @@
 from __future__ import annotations
 
 from model.db_model.room_message import RoomMessageRecord
-from service import orm_service
 
 
-def append_room_message(message: RoomMessageRecord) -> int:
-    conn = orm_service.get_db()
-    cursor = conn.execute(
-        """
-        INSERT INTO room_messages (room_key, team_name, sender_name, content, send_time)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (message.room_key, message.team_name, message.sender_name, message.content, message.send_time),
-    )
-    return int(cursor.lastrowid)
+async def append_room_message(
+    room_key: str,
+    team_name: str,
+    sender_name: str,
+    content: str,
+    send_time: str,
+) -> int:
+    message_id = await RoomMessageRecord.insert(
+        room_key=room_key,
+        team_name=team_name,
+        sender_name=sender_name,
+        content=content,
+        send_time=send_time,
+    ).aio_execute()
+    return int(message_id)
 
 
-def get_room_messages(room_key: str, after_id: int | None = None) -> list[dict]:
-    conn = orm_service.get_db()
-    if after_id is None:
-        cursor = conn.execute(
-            """
-            SELECT id, room_key, team_name, sender_name, content, send_time
-            FROM room_messages
-            WHERE room_key = ?
-            ORDER BY id ASC
-            """,
-            (room_key,),
-        )
-    else:
-        cursor = conn.execute(
-            """
-            SELECT id, room_key, team_name, sender_name, content, send_time
-            FROM room_messages
-            WHERE room_key = ? AND id > ?
-            ORDER BY id ASC
-            """,
-            (room_key, after_id),
-        )
-    return [dict(row) for row in cursor.fetchall()]
+async def get_room_messages(room_key: str, after_id: int | None = None) -> list[dict]:
+    query = RoomMessageRecord.select().where(RoomMessageRecord.room_key == room_key)
+    if after_id is not None:
+        query = query.where(RoomMessageRecord.id > after_id)
+    rows = await query.order_by(RoomMessageRecord.id.asc()).aio_execute()
+    return [
+        {
+            "id": row.id,
+            "room_key": row.room_key,
+            "team_name": row.team_name,
+            "sender_name": row.sender_name,
+            "content": row.content,
+            "send_time": row.send_time,
+        }
+        for row in rows
+    ]

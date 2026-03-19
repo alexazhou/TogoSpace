@@ -405,7 +405,9 @@ class Agent:
         items = self._dump_new_history_messages()
         if not items:
             return
-        persistence_service.append_agent_history_messages(self.key, items)
+        persistence_service.dispatch(
+            persistence_service.append_agent_history_messages(self.key, items)
+        )
         self._persisted_history_len = len(self._history)
 
 

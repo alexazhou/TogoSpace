@@ -1,81 +1,112 @@
-import json
+from __future__ import annotations
+
 import logging
 import os
-import sqlite3
 from typing import Optional
+
+import aiosqlite
+import peewee
+from peewee_async.databases import AioDatabase
+from peewee_async.pool import PoolBackend
+from peewee_async.utils import ConnectionProtocol
+
+from model.db_model.agent_history_message import AgentHistoryMessageRecord
+from model.db_model.base import bind_database
+from model.db_model.room_message import RoomMessageRecord
+from model.db_model.room_state import RoomStateRecord
 
 logger = logging.getLogger(__name__)
 
-_conn: Optional[sqlite3.Connection] = None
+
+class _SqlitePoolState:
+    def __init__(self) -> None:
+        self.closed = False
+
+
+class SqlitePoolBackend(PoolBackend):
+    """peewee-async 适配层：为 SQLite 提供异步连接获取/释放。"""
+
+    def __init__(self, *, database: str, **kwargs) -> None:
+        super().__init__(database=database, **kwargs)
+        self._acquired_count = 0
+
+    async def create(self) -> None:
+        self.pool = _SqlitePoolState()
+
+    async def acquire(self) -> ConnectionProtocol:
+        if self.pool is None or self.pool.closed:
+            await self.connect()
+        connect_params = dict(self.connect_params)
+        connect_params.setdefault("isolation_level", None)
+        conn = await aiosqlite.connect(self.database, **connect_params)
+        self._acquired_count += 1
+        return conn
+
+    async def release(self, conn: ConnectionProtocol) -> None:
+        await conn.close()
+        self._acquired_count = max(0, self._acquired_count - 1)
+
+    async def close(self) -> None:
+        if self.pool is not None:
+            self.pool.closed = True
+
+    def has_acquired_connections(self) -> bool:
+        return self._acquired_count > 0
+
+
+class AioSqliteDatabase(AioDatabase, peewee.SqliteDatabase):
+    pool_backend_cls = SqlitePoolBackend
+
+
+_db: Optional[AioSqliteDatabase] = None
 _db_path: Optional[str] = None
 
 
-def _ensure_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS room_messages (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          room_key TEXT NOT NULL,
-          team_name TEXT NOT NULL,
-          sender_name TEXT NOT NULL,
-          content TEXT NOT NULL,
-          send_time TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_room_messages_room_key_id
-        ON room_messages(room_key, id);
-
-        CREATE TABLE IF NOT EXISTS room_states (
-          room_key TEXT PRIMARY KEY,
-          agent_read_index_json TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS agent_history_messages (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          agent_key TEXT NOT NULL,
-          seq INTEGER NOT NULL,
-          message_json TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        );
-
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_history_agent_seq
-        ON agent_history_messages(agent_key, seq);
-        """
-    )
-    conn.commit()
+def _ensure_schema(database: AioSqliteDatabase) -> None:
+    with database.allow_sync():
+        database.create_tables(
+            [RoomMessageRecord, RoomStateRecord, AgentHistoryMessageRecord],
+            safe=True,
+        )
 
 
 async def startup(db_path: str) -> None:
-    global _conn, _db_path
-    if _conn is not None:
+    global _db, _db_path
+    if _db is not None:
         return
 
     _db_path = db_path
     abs_path = os.path.abspath(db_path)
     os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-    _conn = sqlite3.connect(abs_path, check_same_thread=False)
-    _conn.row_factory = sqlite3.Row
-    _ensure_schema(_conn)
+
+    database = AioSqliteDatabase(
+        abs_path,
+        timeout=30,
+    )
+    bind_database(database)
+    _ensure_schema(database)
+    await database.aio_connect()
+    _db = database
+
     logger.info("ORM service started: db=%s", abs_path)
 
 
 async def shutdown() -> None:
-    global _conn, _db_path
-    if _conn is not None:
-        _conn.close()
-    _conn = None
+    global _db, _db_path
+    if _db is not None:
+        await _db.aio_close()
+    _db = None
     _db_path = None
 
 
-def get_db() -> sqlite3.Connection:
-    if _conn is None:
+def get_db() -> AioSqliteDatabase:
+    if _db is None:
         raise RuntimeError("orm_service not started")
-    return _conn
+    return _db
 
 
 def is_ready() -> bool:
-    return _conn is not None
+    return _db is not None and _db.is_connected
 
 
 def get_db_path() -> Optional[str]:

@@ -1,7 +1,16 @@
-from dataclasses import dataclass
-from datetime import datetime
+from __future__ import annotations
+
+import peewee
+import peewee_async
+
+_database_proxy: peewee.DatabaseProxy = peewee.DatabaseProxy()
 
 
-@dataclass
-class DbModelBase:
-    updated_at: datetime | None = None
+def bind_database(database: peewee.Database) -> None:
+    _database_proxy.initialize(database)
+
+
+class DbModelBase(peewee_async.AioModel):
+    class Meta:
+        database = _database_proxy
+        legacy_table_names = False
