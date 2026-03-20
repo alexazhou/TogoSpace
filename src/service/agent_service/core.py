@@ -133,14 +133,19 @@ class Agent:
 
         return assistant_message
 
-    async def _execute_tool(self, tool_call_id: str, name: str, args: str) -> str:
-        # 执行 LLM 发起的 function call，返回执行结果。
-        # context 携带当前 agent 身份和房间引用，供 send_chat_msg 等需要房间操作的工具使用。
-        context = ChatContext(agent_name=self.name, team_name=self.team_name, chat_room=self.current_room)
-        result = await func_tool_service.run_tool_call(name, args, context=context)
-        await self.append_history_message(LlmApiMessage.tool_result(tool_call_id, result))
+    async def _execute_tool(self) -> None:
+        """执行最后一条 assistant 消息中的所有 tool_calls，并将结果写入 history。"""
+        last_msg = self.get_last_assistant_message()
+        if not last_msg or not last_msg.tool_calls:
+            return
 
-        return result
+        for tool_call in last_msg.tool_calls:
+            function = tool_call.function if isinstance(tool_call.function, dict) else {}
+            name = function.get("name", "")
+            args = function.get("arguments", "")
+            context = ChatContext(agent_name=self.name, team_name=self.team_name, chat_room=self.current_room)
+            result = await func_tool_service.run_tool_call(name, args, context=context)
+            await self.append_history_message(LlmApiMessage.tool_result(tool_call.id, result))
 
     def get_last_assistant_message(self, start_idx: int = 0) -> Optional[LlmApiMessage]:
         """获取历史中最后一条 assistant 消息。"""
