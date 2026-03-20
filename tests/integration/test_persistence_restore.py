@@ -10,7 +10,9 @@ from util.llm_api_util import LlmApiMessage, ToolCall
 from service import (
     room_service,
     agent_service,
+    agent_service as agent_module,
     func_tool_service,
+    message_bus,
     scheduler_service as scheduler,
     orm_service,
     persistence_service,
@@ -37,6 +39,21 @@ def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
 
 
 class TestPersistenceRestoreIntegration(ServiceTestCase):
+    async def _reset_runtime_services(self):
+        scheduler.shutdown()
+        func_tool_service.shutdown()
+        message_bus.shutdown()
+        await persistence_service.shutdown()
+        await orm_service.shutdown()
+        await agent_service.shutdown()
+        room_service.shutdown()
+
+    def setup_method(self):
+        self._run_maybe_async(self._reset_runtime_services())
+
+    def teardown_method(self):
+        self._run_maybe_async(self._reset_runtime_services())
+
     async def _bootstrap(self, db_path: Path):
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
@@ -55,7 +72,6 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         return team_config
 
     async def test_room_requires_explicit_start_before_scheduler_runs(self, tmp_path: Path):
-        await self.areset_services()
         await self._bootstrap(tmp_path / "state.db")
 
         room = room_service.get_room(f"general@{TEAM}")
@@ -81,7 +97,6 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
     async def test_restore_runtime_state_recovers_room_and_agent_history(self, tmp_path: Path):
         db_path = tmp_path / "state.db"
 
-        await self.areset_services()
         await self._bootstrap(db_path)
 
         room = room_service.get_room(f"general@{TEAM}")
@@ -108,9 +123,15 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         assert any(m.content == "from bob" for m in room.messages)
         assert agent_service.get_agent(TEAM, "alice")._history
 
-        await self.acleanup_services()
+        # 手动清理服务以模拟重启
+        scheduler.shutdown()
+        func_tool_service.shutdown()
+        await persistence_service.shutdown()
+        await orm_service.shutdown()
+        await agent_service.shutdown()
+        room_service.shutdown()
 
-        await self.areset_services()
+        # 重启并恢复状态
         await self._bootstrap(db_path)
 
         restored_room = room_service.get_room(f"general@{TEAM}")
