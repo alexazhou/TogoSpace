@@ -83,14 +83,17 @@ class Agent:
         try:
             while True:
                 try:
-                    event: RoomMessageEvent = self.wait_task_queue.get_nowait()
+                    task = self.wait_task_queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
 
                 try:
-                    await self.run_turn(event.room_key, max_function_calls)
+                    if isinstance(task, RoomMessageEvent):
+                        await self.run_turn(task.room_key, max_function_calls)
+                    else:
+                        raise TypeError(f"不支持的 Agent 任务类型: {type(task).__name__}")
                 except Exception as e:
-                    logger.error(f"Agent 处理任务失败: agent={self.key}, room={event.room_key}, error={e}", exc_info=True)
+                    logger.error(f"Agent 处理任务失败: agent={self.key}, task={task!r}, error={e}", exc_info=True)
                 finally:
                     self.wait_task_queue.task_done()
         finally:

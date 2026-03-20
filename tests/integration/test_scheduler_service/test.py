@@ -1,5 +1,6 @@
 """integration tests for service.scheduler_service"""
 import asyncio
+import logging
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -92,6 +93,17 @@ class TestSchedulerRun(ServiceTestCase):
 
         # 即使 run_turn 报错，队列也应被正确消费，避免任务卡死。
         assert real_agent.wait_task_queue.empty()
+
+    async def test_unsupported_task_type_is_logged(self, caplog):
+        """不支持的任务类型应报错并记录日志，且不会卡住队列。"""
+        real_agent = Agent("test", TEAM, "prompt", "model")
+        real_agent.wait_task_queue.put_nowait(object())
+
+        with caplog.at_level(logging.ERROR):
+            await real_agent.consume_task(max_function_calls=5)
+
+        assert real_agent.wait_task_queue.empty()
+        assert "不支持的 Agent 任务类型" in caplog.text
 
     async def test_on_agent_turn_creates_task(self):
         """收到 ROOM_AGENT_TURN 消息后，agent 任务入队并启动 Task。"""
