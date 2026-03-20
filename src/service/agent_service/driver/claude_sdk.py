@@ -4,52 +4,20 @@ import os
 from typing import Any
 
 from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    ResultMessage,
-    SystemMessage,
-    TextBlock,
-    ThinkingBlock,
-    ToolResultBlock,
-    ToolUseBlock,
-    UserMessage,
-    create_sdk_mcp_server,
-    tool,
+    AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, ResultMessage,
+    SystemMessage, TextBlock, ThinkingBlock, ToolResultBlock, ToolUseBlock,
+    UserMessage, create_sdk_mcp_server, tool,
 )
 
 from model.chat_context import ChatContext
-from service import func_tool_service, room_service
+from service import func_tool_service
+from service.func_tool_service.tool_loader import get_function_metadata
+from service.func_tool_service.tools import FUNCTION_REGISTRY
 from service.room_service import ChatRoom
 
 from .base import AgentDriver
 
 logger = logging.getLogger(__name__)
-
-_SEND_CHAT_MSG_TOOL_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "room_name": {"type": "string"},
-        "msg": {"type": "string"},
-    },
-    "required": ["room_name", "msg"],
-}
-
-_SKIP_CHAT_MSG_TOOL_SCHEMA = {
-    "type": "object",
-    "properties": {},
-}
-
-_CLAUDE_SDK_TOOL_SPECS = {
-    "send_chat_msg": {
-        "description": "向聊天室发送消息",
-        "schema": _SEND_CHAT_MSG_TOOL_SCHEMA,
-    },
-    "skip_chat_msg": {
-        "description": "跳过本轮发言",
-        "schema": _SKIP_CHAT_MSG_TOOL_SCHEMA,
-    },
-}
 
 
 def _format_sdk_blocks(blocks) -> list[str]:
@@ -150,20 +118,20 @@ class ClaudeSdkAgentDriver(AgentDriver):
         return prompt_lines
 
     def _build_claude_sdk_tool(self, tool_name: str):
-        spec = _CLAUDE_SDK_TOOL_SPECS[tool_name]
+        meta = get_function_metadata(tool_name, FUNCTION_REGISTRY[tool_name])
 
-        @tool(tool_name, spec["description"], spec["schema"])
+        @tool(tool_name, meta["description"], meta["parameters"])
         async def _wrapped(args):
             context = ChatContext(agent_name=self.host.name, team_name=self.host.team_name, chat_room=self.host.current_room)
             result = await func_tool_service.run_tool_call(tool_name, json.dumps(args), context=context)
 
-            is_error = result.startswith("error:")
+            result_data = json.loads(result)
+            is_error = not result_data.get("success", True)
             if not is_error:
                 if tool_name == "skip_chat_msg":
                     self._turn_done = True
                 elif tool_name == "send_chat_msg":
-                    room_key = f"{args.get('room_name', '')}@{self.host.team_name}"
-                    if room_service.get_room(room_key) is context.chat_room:
+                    if args.get("room_name") == context.chat_room.name:
                         self._turn_done = True
 
             return {"content": [{"type": "text", "text": result}], "isError": is_error}

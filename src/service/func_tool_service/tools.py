@@ -11,8 +11,16 @@ from service import room_service
 
 logger = logging.getLogger(__name__)
 
+# Tool 返回值规范
+# 所有 tool 函数统一返回 dict，由 func_tool_service.run_tool_call 序列化为 JSON 字符串后交给 LLM。
+# 必填字段：
+#   success: bool  — 操作是否成功
+# 可选字段（按情况选用，不强制两者都有）：
+#   message: str   — 文本信息（成功提示、错误说明等）
+#   <其他字段>     — 结构化数据，字段名与语义一致，如 agents: list
 
-def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius") -> str:
+
+def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius") -> dict:
     """获取指定地点的天气信息
 
     Args:
@@ -20,12 +28,12 @@ def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius
         unit: 温度单位，celsius 或 fahrenheit
     """
     if unit == "celsius":
-        return f"{location} 的天气: 25°C, 晴朗"
+        return {"success": True, "message": f"{location} 的天气: 25°C, 晴朗"}
     else:
-        return f"{location} 的天气: 77°F, 晴朗"
+        return {"success": True, "message": f"{location} 的天气: 77°F, 晴朗"}
 
 
-def get_time(timezone: Optional[str] = None) -> str:
+def get_time(timezone: Optional[str] = None) -> dict:
     """获取当前时间
 
     Args:
@@ -35,12 +43,12 @@ def get_time(timezone: Optional[str] = None) -> str:
         try:
             tz = ZoneInfo(timezone)
             now = datetime.datetime.now(tz)
-            return f"当前时间（时区 {timezone}）: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+            return {"success": True, "message": f"当前时间（时区 {timezone}）: {now.strftime('%Y-%m-%d %H:%M:%S')}"}
         except Exception:
-            return f"未知时区: {timezone}"
+            return {"success": False, "message": f"未知时区: {timezone}"}
     else:
         now = datetime.datetime.now()
-        return f"当前本地时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        return {"success": True, "message": f"当前本地时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"}
 
 
 _SAFE_OPS = {
@@ -71,7 +79,7 @@ def _safe_eval(node):
     raise ValueError(f"不支持的表达式类型: {type(node).__name__}")
 
 
-def calculate(expression: str) -> str:
+def calculate(expression: str) -> dict:
     """计算数学表达式
 
     Args:
@@ -80,37 +88,33 @@ def calculate(expression: str) -> str:
     try:
         tree = ast.parse(expression, mode="eval")
         result = _safe_eval(tree.body)
-        return f"计算结果: {expression} = {result}"
+        return {"success": True, "message": f"计算结果: {expression} = {result}"}
     except Exception as e:
-        return f"计算错误: {e}"
+        return {"success": False, "message": f"计算错误: {e}"}
 
 
-def get_agent_list(_context: ChatContext = None) -> List[str]:
-    """返回当前聊天室的 agent 列表（历史发言者，排除 system）
-
-    """
+def get_agent_list(_context: ChatContext = None) -> dict:
+    """返回当前聊天室的 agent 列表（历史发言者，排除 system）"""
     logger.info(f"获取 agent 列表")
     if _context is None:
-        return []
-    return list(dict.fromkeys(
+        return {"success": True, "agents": []}
+    agents = list(dict.fromkeys(
         m.sender_name for m in _context.chat_room.messages
         if m.sender_name != "system"
     ))
+    return {"success": True, "agents": agents}
 
 
-async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) -> str:
+async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) -> dict:
     """向聊天窗口发送消息
 
     Args:
         room_name: 要发送消息的窗口名称
         msg: 要发送的消息
-
-    Returns:
-        成功返回 "success"
     """
     if _context is None:
         logger.warning("发送消息失败，聊天室上下文未设置")
-        return "error: 当前没有可用的房间上下文。"
+        return {"success": False, "message": "当前没有可用的房间上下文。"}
 
     room_key = room_name if "@" in room_name else f"{room_name}@{_context.team_name}"
     logger.info(f"发送消息: sender={_context.agent_name}, room={room_name}, msg={msg}")
@@ -119,30 +123,26 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
         target_room = room_service.get_room(room_key)
     except Exception:
         logger.warning(f"send_chat_msg: 目标房间不存在 {room_key}")
-        return f"error: 目标房间不存在: {room_key}"
+        return {"success": False, "message": f"目标房间不存在: {room_key}"}
 
     await target_room.add_message(_context.agent_name, msg)
 
     if target_room is _context.chat_room:
-        return "success: 消息已发送，本轮发言结束。"
+        return {"success": True, "message": "消息已发送，本轮发言结束。"}
 
     assert _context.chat_room is not None, "send_chat_msg: 跨房间发言时 chat_room 不应为 None"
 
-    return (
-        f"success: 消息已发送到 {target_room.name}。"
+    return {"success": True, "message": (
+        f"消息已发送到 {target_room.name}。"
         f"你还需要调用 send_chat_msg 向当前房间 {_context.chat_room.name} 发言，或调用 skip_chat_msg 跳过。"
-    )
+    )}
 
 
-def skip_chat_msg(_context: ChatContext = None) -> str:
-    """跳过本次发言。当你觉得当前话题不需要回复，或者没有话要说时调用此工具。
-
-    Returns:
-        成功返回 "success"
-    """
+def skip_chat_msg(_context: ChatContext = None) -> dict:
+    """跳过本次发言。当你觉得当前话题不需要回复，或者没有话要说时调用此工具。"""
     if _context is None or _context.chat_room is None:
         logger.warning("跳过发言失败，聊天室上下文未设置")
-        return "error: 当前没有激活的房间上下文。"
+        return {"success": False, "message": "当前没有激活的房间上下文。"}
 
     logger.info(f"Agent 跳过发言: agent={_context.agent_name}")
     ok = _context.chat_room.skip_turn(sender=_context.agent_name)
@@ -150,16 +150,15 @@ def skip_chat_msg(_context: ChatContext = None) -> str:
     if not ok:
         current = _context.chat_room.get_current_turn_agent()
         logger.warning(f"跳过发言失败，当前应由 {current} 发言: agent={_context.agent_name}")
-        return f"error: 现在不是你的发言轮次（当前应由 {current} 发言），请勿再调用任何工具。"
+        return {"success": False, "message": f"现在不是你的发言轮次（当前应由 {current} 发言），请勿再调用任何工具。"}
 
-    return "success: 已跳过本轮发言。"
+    return {"success": True, "message": "已跳过本轮发言。"}
 
 
-def task_done() -> None:
-    """通知任务完成
-    """
+def task_done() -> dict:
+    """通知任务完成"""
     logger.info(f"task_done")
-    return
+    return {"success": True}
 
 
 FUNCTION_REGISTRY: dict[str, callable] = {

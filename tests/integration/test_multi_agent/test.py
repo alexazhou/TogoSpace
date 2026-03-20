@@ -97,8 +97,9 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
         tool_results = [m for m in alice._history if m.role == OpenaiLLMApiRole.TOOL]
         assert len(tool_results) >= 1
-        # send_chat_msg 成功时返回 "success:" 前缀，应被写入 TOOL role 消息内容。
-        assert tool_results[0].content.startswith("success:")
+        # send_chat_msg 成功时返回 JSON {"success": true, ...}，应被写入 TOOL role 消息内容。
+        import json
+        assert json.loads(tool_results[0].content)["success"]
 
     async def test_turn_checker_forces_send_chat_msg(self):
         """直接输出文字时 turn_checker 应注入 hint，迫使 agent 改用工具。"""

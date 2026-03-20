@@ -32,42 +32,38 @@ class TestRunToolCall(ServiceTestCase):
         await room_service.startup()
         await func_tool_service.startup()
 
+    async def _run(self, name, args, **kw):
+        import json
+        return json.loads(await func_tool_service.run_tool_call(name, args, **kw))
+
     async def test_run_tool_call_basic(self):
         """正常 JSON 入参可成功执行工具函数。"""
-        result = await func_tool_service.run_tool_call("get_weather", '{"location": "北京", "unit": "celsius"}')
-        assert "25°C" in result
+        result = await self._run("get_weather", '{"location": "北京", "unit": "celsius"}')
+        assert result["success"] and "25°C" in result["message"]
 
     async def test_run_tool_call_invalid_json(self):
         """非法 JSON 不应抛异常，应返回可读错误文本。"""
-        result = await func_tool_service.run_tool_call("get_weather", "not json")
-        assert "失败" in result or "error" in result.lower() or "Error" in result
+        result = await self._run("get_weather", "not json")
+        assert not result["success"]
 
     async def test_run_tool_call_unknown_function(self):
         """未知函数名应返回失败信息。"""
-        result = await func_tool_service.run_tool_call("nonexistent", "{}")
-        assert "失败" in result or "not found" in result.lower()
+        result = await self._run("nonexistent", "{}")
+        assert not result["success"]
 
     async def test_run_tool_call_with_context(self):
         """上下文注入场景：send_chat_msg 能在上下文房间成功落消息。"""
         await room_service.create_room(TEAM, "ctx_room", ["alice"])
         room = room_service.get_room(f"ctx_room@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
-        result = await func_tool_service.run_tool_call(
-            "send_chat_msg",
-            '{"room_name": "ctx_room", "msg": "test"}',
-            context=ctx,
-        )
-        assert result == "success: 消息已发送，本轮发言结束。"
+        result = await self._run("send_chat_msg", '{"room_name": "ctx_room", "msg": "test"}', context=ctx)
+        assert result["success"] and "消息已发送" in result["message"]
 
     async def test_run_tool_call_with_missing_room_returns_error(self):
         """目标房间不存在时，应返回错误信息。"""
         await room_service.create_room(TEAM, "ctx_room_missing", ["alice"])
         room = room_service.get_room(f"ctx_room_missing@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
-        result = await func_tool_service.run_tool_call(
-            "send_chat_msg",
-            '{"room_name": "missing_room", "msg": "test"}',
-            context=ctx,
-        )
-        assert "error" in result
+        result = await self._run("send_chat_msg", '{"room_name": "missing_room", "msg": "test"}', context=ctx)
+        assert not result["success"]
         assert not any(message.content == "test" for message in room.messages)

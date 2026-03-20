@@ -101,39 +101,41 @@ class TestToolFunctions(ServiceTestCase):
 
     async def test_get_weather_celsius(self):
         """天气工具返回摄氏温度文本。"""
-        assert "25°C" in get_weather("北京", "celsius")
+        assert "25°C" in get_weather("北京", "celsius")["message"]
 
     async def test_get_weather_fahrenheit(self):
         """天气工具返回华氏温度文本。"""
-        assert "77°F" in get_weather("北京", "fahrenheit")
+        assert "77°F" in get_weather("北京", "fahrenheit")["message"]
 
     async def test_get_time_local(self):
         """默认返回本地时区时间。"""
-        assert "当前本地时间" in get_time()
+        assert "当前本地时间" in get_time()["message"]
 
     async def test_get_time_timezone(self):
         """指定时区时，返回内容包含目标时区标识。"""
-        assert "UTC" in get_time(timezone="UTC")
+        assert "UTC" in get_time(timezone="UTC")["message"]
 
     async def test_get_time_invalid_timezone(self):
         """未知时区应返回友好错误提示。"""
-        assert "未知时区" in get_time(timezone="Invalid/Zone")
+        result = get_time(timezone="Invalid/Zone")
+        assert not result["success"] and "未知时区" in result["message"]
 
     async def test_calculate_addition(self):
         """基础算术表达式可执行。"""
-        assert "5" in calculate("2 + 3")
+        assert "5" in calculate("2 + 3")["message"]
 
     async def test_calculate_complex(self):
         """复杂表达式可执行。"""
-        assert "1024" in calculate("2 ** 10")
+        assert "1024" in calculate("2 ** 10")["message"]
 
     async def test_calculate_invalid(self):
         """非法表达式应被拒绝并返回错误信息。"""
-        assert "计算错误" in calculate("import os")
+        result = calculate("import os")
+        assert not result["success"] and "计算错误" in result["message"]
 
     async def test_get_agent_list_without_context(self):
         """无上下文时 get_agent_list 返回空列表。"""
-        assert get_agent_list() == []
+        assert get_agent_list()["agents"] == []
 
     async def test_get_agent_list_with_context(self):
         """有上下文时返回当前房间中可见的发言者列表。"""
@@ -143,18 +145,18 @@ class TestToolFunctions(ServiceTestCase):
         await room.add_message("bob", "there")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
         result = get_agent_list(_context=ctx)
-        assert "alice" in result and "bob" in result
+        assert "alice" in result["agents"] and "bob" in result["agents"]
 
     async def test_send_chat_msg_returns_error_without_context(self):
         """无上下文时 send_chat_msg 应返回明确错误，不能伪装成功。"""
-        assert (await send_chat_msg("some_room", "hello")).startswith("error:")
+        assert not (await send_chat_msg("some_room", "hello"))["success"]
 
     async def test_send_chat_msg_with_valid_context(self):
         """同房间发送成功后，目标房间消息数应增加。"""
         await room_service.create_room(TEAM, "myroom", ["alice"])
         room = room_service.get_room(f"myroom@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
-        assert (await send_chat_msg("myroom", "hello", _context=ctx)).startswith("success:")
+        assert (await send_chat_msg("myroom", "hello", _context=ctx))["success"]
         assert len(room.messages) == 2  # 1 (init公告) + 1 (new)
         assert room.messages[1].content == "hello"
 
@@ -164,7 +166,7 @@ class TestToolFunctions(ServiceTestCase):
         room = room_service.get_room(f"existing@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
         result = await send_chat_msg("nonexistent", "hello", _context=ctx)
-        assert result.startswith("error:") and "nonexistent" in result
+        assert not result["success"] and "nonexistent" in result["message"]
 
     async def test_send_chat_msg_cross_room_lands_in_target(self):
         """跨房间发消息时，消息必须落到目标房间，而不是 agent 当前所在房间。"""
@@ -172,13 +174,10 @@ class TestToolFunctions(ServiceTestCase):
         await room_service.create_room(TEAM, "room_b", ["alice"])
         room_a = room_service.get_room(f"room_a@{TEAM}")
         room_b = room_service.get_room(f"room_b@{TEAM}")
-        # alice 当前在 room_a，但发消息到 room_b
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room_a)
         result = await send_chat_msg("room_b", "hello from a to b", _context=ctx)
-        assert result.startswith("success:")
-        # 消息在 room_b
+        assert result["success"]
         assert any(m.content == "hello from a to b" for m in room_b.messages)
-        # room_a 不应有该消息
         assert not any(m.content == "hello from a to b" for m in room_a.messages)
 
     async def test_send_chat_msg_cross_room_does_not_pollute_current_room(self):
@@ -200,6 +199,6 @@ class TestToolFunctions(ServiceTestCase):
 
         result = skip_chat_msg(_context=ctx)
 
-        assert result.startswith("error:") and "alice" in result
+        assert not result["success"] and "alice" in result["message"]
         assert room.get_current_turn_agent() == "alice"
 
