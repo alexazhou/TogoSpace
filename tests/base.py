@@ -143,16 +143,19 @@ class ServiceTestCase:
             cls.mock_llm_server = None
 
     @classmethod
-    def set_mock_response(cls, message: dict) -> None:
+    def set_mock_response(cls, response: dict) -> None:
         """设置 Mock LLM Server 的响应，推入队列。
 
         Args:
-            message: message 内容，例如 {"content": "测试回复"}
+            response: 响应内容，支持：
+                - 简化格式：{"tool_calls": [{"name": "xxx", "arguments": "..."}]}
+                - 简化格式：{"content": "..."}
+                - 完整格式：{"choices": [{"message": {...}}]}
         """
         url = f"http://{MOCK_LLM_HOST}:{MOCK_LLM_PORT}/set_response"
         req = urllib.request.Request(
             url,
-            data=json.dumps({"response": {"choices": [{"message": message}]}}).encode("utf-8"),
+            data=json.dumps({"response": response}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
