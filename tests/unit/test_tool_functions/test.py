@@ -191,9 +191,9 @@ class TestToolFunctions(ServiceTestCase):
         await send_chat_msg("dst", "cross-room msg", _context=ctx)
         assert len(src.messages) == before_count
 
-    def test_skip_chat_msg_rejects_non_current_agent(self):
+    async def test_skip_chat_msg_rejects_non_current_agent(self):
         """不是当前发言人时，skip_chat_msg 不应推进轮次。"""
-        room_service.create_room(TEAM, "turn_room", ["alice", "bob"], max_turns=3)
+        await room_service.create_room(TEAM, "turn_room", ["alice", "bob"], max_turns=3)
         room = room_service.get_room(f"turn_room@{TEAM}")
         ctx = ChatContext(agent_name="bob", team_name=TEAM, chat_room=room, get_room=room_service.get_room)
 
@@ -202,9 +202,9 @@ class TestToolFunctions(ServiceTestCase):
         assert result == "error: not your turn, current turn agent is alice"
         assert room.get_current_turn_agent() == "alice"
 
-    def test_skip_chat_msg_advances_for_current_agent(self):
+    async def test_skip_chat_msg_advances_for_current_agent(self):
         """当前发言人调用 skip_chat_msg 时应成功推进轮次。"""
-        room_service.create_room(TEAM, "turn_room_ok", ["alice", "bob"], max_turns=3)
+        await room_service.create_room(TEAM, "turn_room_ok", ["alice", "bob"], max_turns=3)
         room = room_service.get_room(f"turn_room_ok@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room, get_room=room_service.get_room)
 
