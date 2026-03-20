@@ -2,6 +2,7 @@
 本地 mock LLM API 服务，用 Tornado 实现。
 支持动态配置响应队列，可在测试中按需设置不同响应。
 队列为空时使用默认响应（send_chat_msg tool call）。
+支持 OpenAI 和 Anthropic 两种格式。
 在独立线程中运行 IOLoop，与 pytest-asyncio 的事件循环互不干扰。
 """
 import asyncio
@@ -20,10 +21,12 @@ MOCK_LLM_PORT = 19876
 MOCK_LLM_HOST = "127.0.0.1"
 MOCK_LLM_API_PATH = "/v1/chat/completions"
 MOCK_LLM_API_URL = f"http://{MOCK_LLM_HOST}:{MOCK_LLM_PORT}{MOCK_LLM_API_PATH}"
+MOCK_LLM_ANTHROPIC_PATH = "/v1/messages"
+MOCK_LLM_ANTHROPIC_URL = f"http://{MOCK_LLM_HOST}:{MOCK_LLM_PORT}{MOCK_LLM_ANTHROPIC_PATH}"
 
 
-def _default_response(room_name: str = "general") -> Dict[str, Any]:
-    """返回默认的 send_chat_msg tool call 响应。"""
+def _default_openai_response(room_name: str = "general") -> Dict[str, Any]:
+    """返回 OpenAI 格式的默认 send_chat_msg tool call 响应。"""
     return {
         "id": "mock-response-id",
         "object": "chat.completion",
@@ -60,6 +63,32 @@ def _default_response(room_name: str = "general") -> Dict[str, Any]:
     }
 
 
+def _default_anthropic_response(room_name: str = "general") -> Dict[str, Any]:
+    """返回 Anthropic 格式的默认 send_chat_msg tool use 响应。"""
+    return {
+        "id": "msg_mock_001",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_mock_001",
+                "name": "send_chat_msg",
+                "input": {
+                    "room_name": room_name,
+                    "msg": f"Mock LLM 在 {room_name} 的回复",
+                },
+            }
+        ],
+        "model": "mock-model",
+        "stop_reason": "tool_use",
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 20,
+        },
+    }
+
+
 class SetResponseHandler(tornado.web.RequestHandler):
     """接收响应并推入队列。"""
 
@@ -85,6 +114,8 @@ class GetResponseHandler(tornado.web.RequestHandler):
 
 
 class ChatCompletionsHandler(tornado.web.RequestHandler):
+    """OpenAI 格式的 chat/completions 端点。"""
+
     async def post(self):
         await asyncio.sleep(0.3)  # 模拟 LLM 响应延迟
 
@@ -133,7 +164,65 @@ class ChatCompletionsHandler(tornado.web.RequestHandler):
         if not queue.empty():
             response_data = await queue.get()
         else:
-            response_data = _default_response(room_name)
+            response_data = _default_openai_response(room_name)
+
+        self.set_header("Content-Type", "application/json")
+        self.write(json.dumps(response_data, ensure_ascii=False))
+
+
+class MessagesHandler(tornado.web.RequestHandler):
+    """Anthropic 格式的 messages 端点。"""
+
+    async def post(self):
+        await asyncio.sleep(0.3)  # 模拟 LLM 响应延迟
+
+        # 尝试从请求消息中提取房间名
+        room_name = "general"
+        try:
+            body = json.loads(self.request.body)
+            messages = body.get("messages", [])
+            system = body.get("system", "")
+
+            found_room = None
+
+            # 1. 针对 V6 测试的硬编码启发式匹配 (最高优先级)
+            if "alice_private" in system or "alice_private" in str(messages):
+                found_room = "alice_private"
+            elif "public_group" in system or "public_group" in str(messages):
+                found_room = "public_group"
+            elif "general" in system or "general" in str(messages):
+                found_room = "general"
+
+            # 2. 如果没匹配到，尝试正则提取
+            if not found_room:
+                # 从历史消息中反向寻找最近的房间线索
+                for msg in reversed(messages):
+                    content = msg.get("content", "")
+                    if not content:
+                        continue
+                    # 匹配 "在 general 房间发言" 或 "在 alice_private 房间发言"
+                    match = re.search(r"在 (general|alice_private|public_group) 房间发言", content)
+                    if match:
+                        found_room = match.group(1)
+                        break
+
+                if not found_room and system:
+                    # 从 system 中提取房间名
+                    match = re.search(r"(general|alice_private|public_group) 房间", system)
+                    if match:
+                        found_room = match.group(1)
+
+            if found_room:
+                room_name = found_room
+        except Exception:
+            pass
+
+        # 从队列获取响应，队列为空时使用默认响应
+        queue = self.application.response_queue
+        if not queue.empty():
+            response_data = await queue.get()
+        else:
+            response_data = _default_anthropic_response(room_name)
 
         self.set_header("Content-Type", "application/json")
         self.write(json.dumps(response_data, ensure_ascii=False))
@@ -145,7 +234,8 @@ class MockLLMServer:
     支持动态响应队列：
     - POST /set_response - 设置响应，推入队列
     - GET /get_response - 获取下一个响应
-    - POST /v1/chat/completions - LLM 推理，从队列取响应或使用默认响应
+    - POST /v1/chat/completions - OpenAI 格式的 LLM 推理端点
+    - POST /v1/messages - Anthropic 格式的 LLM 推理端点
     """
 
     def __init__(self):
@@ -168,6 +258,7 @@ class MockLLMServer:
                 self._ioloop = tornado.ioloop.IOLoop.current()
                 app = tornado.web.Application([
                     (MOCK_LLM_API_PATH, ChatCompletionsHandler),
+                    (MOCK_LLM_ANTHROPIC_PATH, MessagesHandler),
                     ("/set_response", SetResponseHandler),
                     ("/get_response", GetResponseHandler),
                 ])
