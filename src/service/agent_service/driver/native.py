@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Optional
 
-from util.llm_api_util import LlmApiMessage, OpenaiLLMApiRole, Tool, ToolCall
+from util import llm_api_util
 from service import func_tool_service
 from service.room_service import ChatRoom
 
@@ -25,17 +25,17 @@ class NativeAgentDriver(AgentDriver):
             if turn_done:
                 break
 
-            await self.host.append_history_message(LlmApiMessage.text(OpenaiLLMApiRole.USER, hint))
+            await self.host.append_history_message(llm_api_util.LlmApiMessage.text(llm_api_util.OpenaiLLMApiRole.USER, hint))
 
     async def _run_until_reply(
         self,
         room: ChatRoom,
-        tools: Optional[list[Tool]] = None,
+        tools: Optional[list[llm_api_util.Tool]] = None,
         max_function_calls: int = 5,
     ) -> bool:
         # native driver 在一次尝试里持续驱动模型和工具调用，直到本轮回复完成或达到上限。
         for _ in range(max_function_calls):
-            assistant_message: LlmApiMessage = await self.host._infer(tools)
+            assistant_message: llm_api_util.LlmApiMessage = await self.host._infer(tools)
 
             tool_calls = assistant_message.tool_calls
             if not tool_calls:
@@ -45,7 +45,7 @@ class NativeAgentDriver(AgentDriver):
             await self.host._execute_tool()
 
             # 检查最后一个 tool_call 判断轮次是否完成
-            last_call:ToolCall = tool_calls[-1]
+            last_call: llm_api_util.ToolCall = tool_calls[-1]
             function = last_call.function if isinstance(last_call.function, dict) else {}
             name = function.get("name")
             args = function.get("arguments", "")

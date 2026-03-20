@@ -9,8 +9,7 @@ import service.func_tool_service as func_tool_service
 import service.scheduler_service as scheduler
 import service.llm_service as llm_service
 from tests.base import ServiceTestCase
-from util.config_util import load_agents, load_teams, load_llm_service_config
-from util.llm_api_util import init
+from util import config_util, llm_api_util
 
 
 _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
@@ -29,7 +28,7 @@ class TestRealSimpleChat(ServiceTestCase):
         await cls.areset_services()
 
         # 加载 LLM 配置并启动服务
-        llm_cfg = load_llm_service_config(_CONFIG_DIR)
+        llm_cfg = config_util.load_llm_service_config(_CONFIG_DIR)
         await llm_service.startup(llm_cfg.get("api_key", ""), llm_cfg.get("base_url", ""))
 
         # 启动服务
@@ -38,8 +37,8 @@ class TestRealSimpleChat(ServiceTestCase):
         await agent_service.startup()
 
         # 加载配置
-        agents_cfgs = load_agents(_CONFIG_DIR)
-        team_cfgs = load_teams(_CONFIG_DIR)
+        agents_cfgs = config_util.load_agents(_CONFIG_DIR)
+        team_cfgs = config_util.load_teams(_CONFIG_DIR)
 
         agent_service.load_agent_config(agents_cfgs)
         await agent_service.create_team_agents(team_cfgs)

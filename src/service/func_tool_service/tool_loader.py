@@ -6,7 +6,7 @@ from typing import Any, Dict, List, get_type_hints, get_origin, get_args, Litera
 from types import UnionType
 from typing import Union
 
-from util.llm_api_util import Tool, Function, FunctionParameter
+from util import llm_api_util
 
 
 def python_type_to_json_schema(python_type: Any) -> Dict[str, Any]:
@@ -91,17 +91,17 @@ def get_function_metadata(func_name: str, func) -> Dict[str, Any]:
     }
 
 
-def build_tools(registry: dict) -> List[Tool]:
+def build_tools(registry: dict) -> list[llm_api_util.Tool]:
     """遍历 registry，构建并返回工具列表。"""
     tools = []
     for func_name, func in registry.items():
         try:
             metadata: Dict[str, Any] = get_function_metadata(func_name, func)
-            tool = Tool(
-                function=Function(
+            tool = llm_api_util.Tool(
+                function=llm_api_util.Function(
                     name=metadata["name"],
                     description=metadata["description"],
-                    parameters=FunctionParameter(
+                    parameters=llm_api_util.FunctionParameter(
                         type=metadata["parameters"]["type"],
                         properties=metadata["parameters"]["properties"],
                         required=metadata["parameters"].get("required", [])

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
 from service.room_service import ChatRoom
-from util.llm_api_util import LlmApiMessage, Tool
+from util import llm_api_util
 
 
 @dataclass
@@ -26,22 +26,22 @@ class AgentDriverHost(Protocol):
     system_prompt: str
     model: str
     current_room: ChatRoom
-    _history: list[LlmApiMessage]
+    _history: list[llm_api_util.LlmApiMessage]
 
     @property
     def key(self) -> str:
         ...
 
-    async def _infer(self, tools: Optional[list[Tool]]) -> LlmApiMessage:
+    async def _infer(self, tools: Optional[list[llm_api_util.Tool]]) -> llm_api_util.LlmApiMessage:
         ...
 
     async def _execute_tool(self) -> None:
         ...
 
-    def get_last_assistant_message(self, start_idx: int = 0) -> Optional[LlmApiMessage]:
+    def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llm_api_util.LlmApiMessage]:
         ...
 
-    async def append_history_message(self, message: LlmApiMessage) -> None:
+    async def append_history_message(self, message: llm_api_util.LlmApiMessage) -> None:
         ...
 
 
