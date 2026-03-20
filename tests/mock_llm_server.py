@@ -16,6 +16,9 @@ import tornado.web
 
 
 MOCK_LLM_PORT = 19876
+MOCK_LLM_HOST = "127.0.0.1"
+MOCK_LLM_API_PATH = "/v1/chat/completions"
+MOCK_LLM_API_URL = f"http://{MOCK_LLM_HOST}:{MOCK_LLM_PORT}{MOCK_LLM_API_PATH}"
 
 
 class ChatCompletionsHandler(tornado.web.RequestHandler):
@@ -121,10 +124,10 @@ class MockLLMServer:
                 asyncio.set_event_loop(loop)
                 self._ioloop = tornado.ioloop.IOLoop.current()
                 app = tornado.web.Application([
-                    (r"/v1/chat/completions", ChatCompletionsHandler),
+                    (MOCK_LLM_API_PATH, ChatCompletionsHandler),
                 ])
                 self._server = tornado.httpserver.HTTPServer(app)
-                self._server.listen(self.port, "127.0.0.1")
+                self._server.listen(self.port, MOCK_LLM_HOST)
                 self._started.set()
                 self._ioloop.start()
             except Exception as exc:  # pragma: no cover - 仅在异常启动场景触发
