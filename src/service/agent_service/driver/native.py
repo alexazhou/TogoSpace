@@ -50,15 +50,24 @@ class NativeAgentDriver(AgentDriver):
                 args = tool_call.function.get("arguments", "")
                 await self.host._execute_tool(tool_call.id, name, args)
 
-            called: dict[str, str] | None = self.host.get_last_assistant_tool_call(turn_history_start)
-            assert called is not None, f"[{self.host.key}] tool_calls 已返回，但未能从 history 中找到最后一次 assistant tool call"
+            last_msg = self.host.get_last_assistant_message(turn_history_start)
+            assert last_msg is not None, f"[{self.host.key}] tool_calls 已返回，但未能从 history 中找到最后一次 assistant 消息"
 
-            if called.get("name") == "skip_chat_msg":
+            tool_calls = last_msg.tool_calls or []
+            if not tool_calls:
+                return False
+
+            last_call = tool_calls[-1]
+            function = last_call.function if isinstance(last_call.function, dict) else {}
+            name = function.get("name")
+            args = function.get("arguments", "")
+
+            if name == "skip_chat_msg":
                 return True
 
-            if called.get("name") == "send_chat_msg":
+            if name == "send_chat_msg":
                 try:
-                    target = json.loads(called.get("args", "")).get("room_name")
+                    target = json.loads(args).get("room_name")
 
                     if target == room.name or target == room.key:
                         return True
