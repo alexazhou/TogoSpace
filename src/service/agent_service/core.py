@@ -185,6 +185,7 @@ class Agent:
             )
 
         self.current_room = None
+
         return AgentTurnActionResult(ok=True, message="success: 已跳过本轮发言。", turn_finished=True)
 
     async def sync_room(self, room: ChatRoom) -> None:
@@ -215,11 +216,13 @@ class Agent:
 
     def get_last_assistant_tool_call(self, start_idx: int = 0) -> Optional[dict]:
         recent_history = self._history[start_idx:]
+
         for message in reversed(recent_history):
             if message.role != OpenaiLLMApiRole.ASSISTANT:
                 continue
 
             tool_calls = message.tool_calls or []
+
             if not tool_calls:
                 continue
 

@@ -39,6 +39,31 @@ _SKIP_CHAT_MSG_TOOL_SCHEMA = {
 }
 
 
+def _format_sdk_blocks(blocks) -> list[str]:
+    parts: list[str] = []
+
+    for block in (blocks or []):
+        if isinstance(block, TextBlock):
+            parts.append(f"text={block.text[:80]!r}")
+            continue
+
+        if isinstance(block, ToolUseBlock):
+            parts.append(f"tool_use={block.name}({block.input})")
+            continue
+
+        if isinstance(block, ThinkingBlock):
+            parts.append(f"thinking={block.thinking[:60]!r}")
+            continue
+
+        if isinstance(block, ToolResultBlock):
+            parts.append(f"tool_result(id={block.tool_use_id}, is_error={block.is_error})")
+            continue
+
+        parts.append(f"{type(block).__name__}")
+
+    return parts
+
+
 class ClaudeSdkAgentDriver(AgentDriver):
     def __init__(self, host, config):
         super().__init__(host, config)
@@ -67,6 +92,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
     async def shutdown(self) -> None:
         if self._sdk_client is None:
             return
+
         try:
             await self._sdk_client.disconnect()
             logger.info(f"SDK 会话已关闭: agent={self.host.key}")
@@ -159,30 +185,15 @@ class ClaudeSdkAgentDriver(AgentDriver):
                     msg_count += 1
 
                     if isinstance(msg, AssistantMessage):
-                        parts = []
-                        for block in (msg.content or []):
-                            if isinstance(block, TextBlock):
-                                parts.append(f"text={block.text[:80]!r}")
-                            elif isinstance(block, ToolUseBlock):
-                                parts.append(f"tool_use={block.name}({block.input})")
-                            elif isinstance(block, ThinkingBlock):
-                                parts.append(f"thinking={block.thinking[:60]!r}")
-                            else:
-                                parts.append(f"{type(block).__name__}")
+                        parts = _format_sdk_blocks(msg.content)
                         logger.info(
                             f"SDK AssistantMessage: agent={self.host.key}, model={msg.model}, content=[{', '.join(parts)}]"
                         )
 
                     elif isinstance(msg, UserMessage):
-                        parts = []
-                        for block in (msg.content or []):
-                            if isinstance(block, ToolResultBlock):
-                                parts.append(f"tool_result(id={block.tool_use_id}, is_error={block.is_error})")
-                            elif isinstance(block, TextBlock):
-                                parts.append(f"text={block.text[:80]!r}")
-                            else:
-                                parts.append(f"{type(block).__name__}")
+                        parts = _format_sdk_blocks(msg.content)
                         logger.info(f"SDK UserMessage: agent={self.host.key}, content=[{', '.join(parts)}]")
+
                         if self.host.current_room is None and not interrupted:
                             logger.info(f"SDK 发言完成，主动中断会话: agent={self.host.key}")
                             await client.interrupt()
@@ -201,11 +212,14 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
                     else:
                         logger.debug(f"SDK 未知消息: agent={self.host.key}, type={type(msg).__name__}, data={msg}")
+
                 logger.info(
                     f"SDK receive_response 结束: agent={self.host.key}, total_msgs={msg_count}, attempt={attempt}"
                 )
+
                 if self.host.current_room is None:
                     break
+
                 logger.warning(
                     f"SDK agent 未调用发言工具（可能只输出 thinking 或纯文字）: agent={self.host.key}, attempt={attempt}"
                 )

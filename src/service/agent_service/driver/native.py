@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 class NativeAgentDriver(AgentDriver):
-
     async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
         self.host._turn_ctx = ChatContext(
             agent_name=self.host.name,
@@ -36,9 +35,7 @@ class NativeAgentDriver(AgentDriver):
             if turn_done:
                 break
 
-            await self.host.append_history_message(
-                LlmApiMessage.text(OpenaiLLMApiRole.USER, hint)
-            )
+            await self.host.append_history_message(LlmApiMessage.text(OpenaiLLMApiRole.USER, hint))
 
     async def _run_until_reply(
         self,
@@ -69,6 +66,7 @@ class NativeAgentDriver(AgentDriver):
             if called.get("name") == "send_chat_msg":
                 try:
                     target = json.loads(called.get("args", "")).get("room_name")
+
                     if target == room.name or target == room.key:
                         return True
                 except Exception:
