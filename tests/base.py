@@ -16,7 +16,7 @@ import service.func_tool_service as func_tool_service
 import service.scheduler_service as scheduler
 import service.persistence_service as persistence_service
 import service.orm_service as orm_service
-from mock_llm_server import MockLLMServer
+from mock_llm_server import MockLLMServer, MOCK_LLM_API_URL
 
 _SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 _BACKEND_READY_TIMEOUT = 20
@@ -128,7 +128,7 @@ class ServiceTestCase:
         cls.mock_llm_server = MockLLMServer()
         cls.mock_llm_server.start()
         _assert_port_ready(
-            f"http://127.0.0.1:{cls.mock_llm_server.port}/v1/chat/completions",
+            MOCK_LLM_API_URL,
             "MockLLM",
             method="POST",
             data=b"{}",
