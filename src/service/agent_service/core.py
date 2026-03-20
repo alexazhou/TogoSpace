@@ -26,14 +26,7 @@ def _make_agent_key(team_name: str, agent_name: str) -> str:
 class Agent:
     """AI Agent 壳对象：承载稳定状态，driver 负责具体驱动实现。"""
 
-    def __init__(
-        self,
-        name: str,
-        team_name: str,
-        system_prompt: str,
-        model: str,
-        driver_config: Optional[AgentDriverConfig] = None,
-    ):
+    def __init__( self, name: str, team_name: str, system_prompt: str, model: str, driver_config: Optional[AgentDriverConfig] = None):
         self.name: str = name
         self.team_name: str = team_name
         self.system_prompt: str = system_prompt
@@ -101,22 +94,13 @@ class Agent:
             if msg.sender_name == self.name:
                 continue
 
+            message: LlmApiMessage
             if msg.sender_name == "system":
-                await self.append_history_message(
-                    LlmApiMessage(
-                        role=OpenaiLLMApiRole.USER,
-                        content=f"{room.name} 房间系统消息: {msg.content}",
-                    )
-                )
-                synced_count += 1
-                continue
+                message = LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}")
+            else:
+                message = LlmApiMessage.text(OpenaiLLMApiRole.USER, content=f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}")
 
-            await self.append_history_message(
-                LlmApiMessage.text(
-                    OpenaiLLMApiRole.USER,
-                    f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}",
-                )
-            )
+            await self.append_history_message(message)
             synced_count += 1
 
         return synced_count
@@ -149,13 +133,14 @@ class Agent:
 
         return assistant_message
 
-    async def _execute_tool(self, tool_call_id: str, name: str, args: str) -> None:
-        # 供 native driver 调用：执行 LLM 发起的 function call，并将结果以 tool_result
-        # 消息写回 history，使下一轮推理能看到完整的工具调用链。
+    async def _execute_tool(self, tool_call_id: str, name: str, args: str) -> str:
+        # 执行 LLM 发起的 function call，返回执行结果。
         # context 携带当前 agent 身份和房间引用，供 send_chat_msg 等需要房间操作的工具使用。
         context = ChatContext(agent_name=self.name, team_name=self.team_name, chat_room=self.current_room)
         result = await func_tool_service.run_tool_call(name, args, context=context)
         await self.append_history_message(LlmApiMessage.tool_result(tool_call_id, result))
+
+        return result
 
     def get_last_assistant_tool_call(self, start_idx: int = 0) -> Optional[dict]:
         recent_history = self._history[start_idx:]
