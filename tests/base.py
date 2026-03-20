@@ -28,6 +28,33 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
+def _assert_port_ready(
+    url: str,
+    service_name: str,
+    timeout: float = 1.0,
+    method: str = "GET",
+    data: bytes | None = None,
+    headers: dict[str, str] | None = None,
+) -> None:
+    """就绪定义：请求 HTTP URL 且返回 200。"""
+    try:
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers=headers or {},
+            method=method,
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
+            if resp.status != 200:
+                raise RuntimeError(
+                    f"{service_name} 健康检查失败：{method} {url} => {resp.status}"
+                )
+    except Exception as exc:
+        raise RuntimeError(
+            f"{service_name} 健康检查失败：{method} {url} => {exc}"
+        ) from exc
+
+
 class ServiceTestCase:
     """基础测试类：统一管理测试类级别的初始化与清理。
 
@@ -68,9 +95,8 @@ class ServiceTestCase:
             if cls.requires_mock_llm:
                 cls._start_mock_llm()
             if cls.requires_backend:
-                cls._setup_pre_backend()
+                cls._setup_config()
                 cls._start_backend()
-            cls._assert_external_dependencies_ready()
             cls._run_maybe_async(cls.async_setup_class())
         except Exception:
             cls._safe_cleanup_external_dependencies()
@@ -101,6 +127,13 @@ class ServiceTestCase:
     def _start_mock_llm(cls):
         cls.mock_llm_server = MockLLMServer()
         cls.mock_llm_server.start()
+        _assert_port_ready(
+            f"http://127.0.0.1:{cls.mock_llm_server.port}/v1/chat/completions",
+            "MockLLM",
+            method="POST",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+        )
 
     @classmethod
     def _stop_mock_llm(cls):
@@ -109,7 +142,7 @@ class ServiceTestCase:
             cls.mock_llm_server = None
 
     @classmethod
-    def _setup_pre_backend(cls):
+    def _setup_config(cls):
         """配置选择机制：
         - 若 use_custom_config = True，使用测试类自己的 config/ 目录
         - 否则使用 tests/config/ 默认配置目录
@@ -155,10 +188,9 @@ class ServiceTestCase:
                     f"后端进程提前退出（code={proc.returncode}）\n{output}"
                 )
             try:
-                with urllib.request.urlopen(f"{base_url}/agents", timeout=1) as resp:
-                    if resp.status == 200:
-                        break
-            except Exception:
+                _assert_port_ready(f"{base_url}/agents", "后端", timeout=0.5)
+                break
+            except RuntimeError:
                 pass
             time.sleep(0.3)
         else:
@@ -172,6 +204,7 @@ class ServiceTestCase:
         cls._backend_proc = proc
         cls.backend_port = port
         cls.backend_base_url = base_url
+        _assert_port_ready(f"{cls.backend_base_url}/agents", "后端")
 
     @classmethod
     def _stop_backend(cls):
@@ -201,28 +234,6 @@ class ServiceTestCase:
         if cls.requires_mock_llm:
             with contextlib.suppress(Exception):
                 cls._stop_mock_llm()
-
-    @classmethod
-    def _assert_external_dependencies_ready(cls):
-        """在进入测试前确认外部依赖已就绪。"""
-        if cls.requires_mock_llm and cls.mock_llm_server is None:
-            raise RuntimeError("MockLLM 未启动成功：mock_llm_server is None")
-
-        if not cls.requires_backend:
-            return
-        if cls._backend_proc is None or cls.backend_base_url is None:
-            raise RuntimeError("后端未启动成功：进程句柄或 base_url 未设置")
-        if cls._backend_proc.poll() is not None:
-            output = cls._tail_text(cls._read_process_output(cls._backend_proc))
-            raise RuntimeError(
-                f"后端已退出（code={cls._backend_proc.returncode}）\n{output}"
-            )
-        try:
-            with urllib.request.urlopen(f"{cls.backend_base_url}/agents", timeout=1) as resp:
-                if resp.status != 200:
-                    raise RuntimeError(f"后端健康检查失败：GET /agents => {resp.status}")
-        except Exception as exc:
-            raise RuntimeError(f"后端健康检查失败：{exc}") from exc
 
     @staticmethod
     def _read_process_output(proc: subprocess.Popen) -> str:
