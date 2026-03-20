@@ -97,13 +97,16 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
         for message in recent_history:
             content = message.content or ""
+
             if content.startswith(system_prefix):
                 prompt_lines.append(f"[系统] {content[len(system_prefix):]}")
                 continue
+
             if user_sep in content:
                 sender, msg = content.split(user_sep, 1)
                 prompt_lines.append(f"{sender}: {msg}")
                 continue
+
             prompt_lines.append(content)
 
         return prompt_lines
@@ -156,10 +159,12 @@ class ClaudeSdkAgentDriver(AgentDriver):
                 if attempt > 0:
                     logger.info(f"SDK 注入发言提醒: agent={self.host.key}, attempt={attempt}")
                     await client.query(hint)
+
                 msg_count = 0
                 interrupted = False
                 async for msg in client.receive_response():
                     msg_count += 1
+
                     if isinstance(msg, AssistantMessage):
                         parts = []
                         for block in (msg.content or []):
@@ -174,6 +179,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
                         logger.info(
                             f"SDK AssistantMessage: agent={self.host.key}, model={msg.model}, content=[{', '.join(parts)}]"
                         )
+
                     elif isinstance(msg, UserMessage):
                         parts = []
                         for block in (msg.content or []):
@@ -188,8 +194,10 @@ class ClaudeSdkAgentDriver(AgentDriver):
                             logger.info(f"SDK 发言完成，主动中断会话: agent={self.host.key}")
                             await client.interrupt()
                             interrupted = True
+
                     elif isinstance(msg, SystemMessage):
                         logger.info(f"SDK SystemMessage: agent={self.host.key}, subtype={msg.subtype}, data={msg.data}")
+
                     elif isinstance(msg, ResultMessage):
                         if msg.is_error:
                             logger.error(f"SDK 执行失败: agent={self.host.key}, room={room_key}, result={msg.result}")
@@ -197,6 +205,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
                             logger.info(
                                 f"SDK 会话完成: agent={self.host.key}, num_turns={msg.num_turns}, duration_ms={msg.duration_ms}, cost_usd={msg.total_cost_usd}"
                             )
+
                     else:
                         logger.debug(f"SDK 未知消息: agent={self.host.key}, type={type(msg).__name__}, data={msg}")
                 logger.info(

@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from model.chat_context import ChatContext
-from util.llm_api_util import OpenaiLLMApiRole
+from util.llm_api_util import LlmApiMessage, OpenaiLLMApiRole
 from service import func_tool_service, room_service
 from service.room_service import ChatRoom
 
@@ -70,8 +70,10 @@ class NativeAgentDriver(AgentDriver):
                 done_check=is_turn_done,
                 max_function_calls=max_function_calls,
             )
+
             if is_turn_done():
                 break
+
             await self.host.append_history_message(
-                self.host.make_text_message(OpenaiLLMApiRole.USER, hint)
+                LlmApiMessage.text(OpenaiLLMApiRole.USER, hint)
             )
