@@ -19,7 +19,7 @@ from pydantic import BaseModel
 # 第三组：项目内部包
 from route import xxx
 from controller.xxx import xxx
-from util.xxx import ...
+from util import llm_api_util, config_util  # util 模块统一用一行引入
 from model.xxx import ...
 from service import aaa, bbb_service as bbb, ...   # service 模块用一行引入
 from service.xxx import SpecificClass              # 具体类可单独一行
@@ -34,7 +34,7 @@ from constants import XxxEnum, XxxDataclass        # constants 放最后
 
 3. **内部包放最后**，按以下子顺序排列：
    - `route` & `controller.*`：路由与控制层
-   - `util.*`：工具层，无状态
+   - `util`：工具层，**统一用一行** `from util import ...` 引入
    - `model.*`：数据层，纯数据定义
    - `service`：服务层模块，**统一用一行** `from service import ...` 引入，别名保持一致（见下表）
    - `service.XxxClass`：若需导入服务层中的具体类，紧跟在 `from service import ...` 之后
@@ -64,7 +64,7 @@ import tornado.web
 # 内部包
 from route import make_app
 from controller.agent_controller import AgentHandler
-from util.llm_api_util import LlmApiMessage
+from util import llm_api_util, config_util
 from model.chat_model import ChatMessage
 from service import agent_service, room_service as chat_room, func_tool_service as agent_tools
 from service.agent_service import Agent

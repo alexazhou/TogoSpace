@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
 
-from util.llm_api_util import LlmApiMessage, Tool
+from util import llm_api_util
 
 
 @dataclass
@@ -18,5 +18,5 @@ class ChatMessage:
 class AgentDialogContext:
     """Agent 发起一次 LLM 请求所需的完整上下文：system prompt + 对话历史 + 模型参数"""
     system_prompt: str
-    messages: List[LlmApiMessage]
-    tools: Optional[List[Tool]] = field(default=None)
+    messages: List[llm_api_util.LlmApiMessage]
+    tools: Optional[list[llm_api_util.Tool]] = field(default=None)
