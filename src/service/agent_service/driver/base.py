@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Optional, Protocol
 
 from service.room_service import ChatRoom
+from util.llm_api_util import LlmApiMessage, Tool
 
 
 @dataclass
@@ -24,23 +25,23 @@ class AgentDriverHost(Protocol):
     team_name: str
     system_prompt: str
     model: str
-    current_room: Any
-    _history: list[Any]
+    current_room: ChatRoom
+    _history: list[LlmApiMessage]
 
     @property
     def key(self) -> str:
         ...
 
-    async def _infer(self, tools=None):
+    async def _infer(self, tools: Optional[list[Tool]]) -> LlmApiMessage:
         ...
 
-    async def _execute_tool(self, tool_call_id: str, name: str, args: str) -> None:
+    async def _execute_tool(self, tool_call_id: str, name: str, args: str) -> str:
         ...
 
-    def get_last_assistant_message(self, start_idx: int = 0):
+    def get_last_assistant_message(self, start_idx: int = 0) -> Optional[LlmApiMessage]:
         ...
 
-    async def append_history_message(self, message: Any) -> None:
+    async def append_history_message(self, message: LlmApiMessage) -> None:
         ...
 
 
