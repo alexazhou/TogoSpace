@@ -134,9 +134,9 @@ class Agent:
         # Agent 统一维护当前房间上下文和消息同步，driver 只负责跑这一轮聊天逻辑。
         room = room_service.get_room(room_key)
         self.current_room = room
+        synced_count = await self.sync_room_messages(room)
 
         try:
-            synced_count = await self.sync_room_messages(room)
             await self.driver.run_chat_turn(room, synced_count, max_function_calls)
         finally:
             self.current_room = None
@@ -212,6 +212,25 @@ class Agent:
         # tool 执行结果也写回 history，这样下一轮推理能看到完整工具调用链。
         result = await func_tool_service.run_tool_call(name, args, context=self._turn_ctx)
         await self.append_history_message(LlmApiMessage.tool_result(tool_call_id, result))
+
+    def get_last_assistant_tool_call(self, start_idx: int = 0) -> Optional[dict]:
+        recent_history = self._history[start_idx:]
+        for message in reversed(recent_history):
+            if message.role != OpenaiLLMApiRole.ASSISTANT:
+                continue
+
+            tool_calls = message.tool_calls or []
+            if not tool_calls:
+                continue
+
+            call = tool_calls[-1]
+            function = call.function if isinstance(call.function, dict) else {}
+            return {
+                "name": function.get("name"),
+                "args": function.get("arguments", ""),
+            }
+
+        return None
 
     def dump_history_messages(self) -> List[AgentHistoryMessageRecord]:
         return [
