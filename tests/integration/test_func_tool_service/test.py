@@ -51,22 +51,23 @@ class TestRunToolCall(ServiceTestCase):
         """上下文注入场景：send_chat_msg 能在上下文房间成功落消息。"""
         await room_service.create_room(TEAM, "ctx_room", ["alice"])
         room = room_service.get_room(f"ctx_room@{TEAM}")
-        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room, get_room=room_service.get_room)
+        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
         result = await func_tool_service.run_tool_call(
             "send_chat_msg",
             '{"room_name": "ctx_room", "msg": "test"}',
             context=ctx,
         )
-        assert result == "success"
+        assert result == "success: 消息已发送，本轮发言结束。"
 
     async def test_run_tool_call_with_missing_room_returns_error(self):
-        """目标房间不存在时，工具调用结果应显式失败。"""
+        """目标房间不存在时，应返回错误信息。"""
         await room_service.create_room(TEAM, "ctx_room_missing", ["alice"])
         room = room_service.get_room(f"ctx_room_missing@{TEAM}")
-        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room, get_room=room_service.get_room)
+        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
         result = await func_tool_service.run_tool_call(
             "send_chat_msg",
             '{"room_name": "missing_room", "msg": "test"}',
             context=ctx,
         )
-        assert result == f"error: room not found: missing_room@{TEAM}"
+        assert "error" in result
+        assert not any(message.content == "test" for message in room.messages)

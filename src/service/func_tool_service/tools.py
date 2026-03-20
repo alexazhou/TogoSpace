@@ -1,24 +1,15 @@
 from __future__ import annotations
 import ast
-import logging
 from typing import Literal, Optional, List
 import datetime
+import logging
 import operator
 from zoneinfo import ZoneInfo
 
 from model.chat_context import ChatContext
+from service import room_service
 
 logger = logging.getLogger(__name__)
-
-
-def _resolve_room_key(room_name: str, context: ChatContext) -> str:
-    """将用户传入的房间名解析为 room@team 格式的 key。
-
-    如果已经是 room@team 格式则直接返回，否则追加当前 team。
-    """
-    if "@" in room_name:
-        return room_name
-    return f"{room_name}@{context.team_name}"
 
 
 def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius") -> str:
@@ -101,13 +92,10 @@ def get_agent_list(_context: ChatContext = None) -> List[str]:
     logger.info(f"获取 agent 列表")
     if _context is None:
         return []
-    senders = []
-    seen = set()
-    for msg in _context.chat_room.messages:
-        if msg.sender_name != "system" and msg.sender_name not in seen:
-            seen.add(msg.sender_name)
-            senders.append(msg.sender_name)
-    return senders
+    return list(dict.fromkeys(
+        m.sender_name for m in _context.chat_room.messages
+        if m.sender_name != "system"
+    ))
 
 
 async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) -> str:
@@ -120,22 +108,30 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
     Returns:
         成功返回 "success"
     """
-    sender = _context.agent_name if _context is not None else "unknown"
-    logger.info(f"发送消息: sender={sender}, room={room_name}, msg={msg}")
-
     if _context is None:
         logger.warning("发送消息失败，聊天室上下文未设置")
-        return "error: chat context is not set"
+        return "error: 当前没有可用的房间上下文。"
 
-    room_key = _resolve_room_key(room_name, _context)
+    room_key = room_name if "@" in room_name else f"{room_name}@{_context.team_name}"
+    logger.info(f"发送消息: sender={_context.agent_name}, room={room_name}, msg={msg}")
+
     try:
-        target_room = _context.get_room(room_key)
+        target_room = room_service.get_room(room_key)
     except Exception:
-        logger.warning(f"发送消息失败，聊天室不存在: name={room_name}, room_key={room_key}")
-        return f"error: room not found: {room_key}"
+        logger.warning(f"send_chat_msg: 目标房间不存在 {room_key}")
+        return f"error: 目标房间不存在: {room_key}"
 
     await target_room.add_message(_context.agent_name, msg)
-    return "success"
+
+    if target_room is _context.chat_room:
+        return "success: 消息已发送，本轮发言结束。"
+
+    assert _context.chat_room is not None, "send_chat_msg: 跨房间发言时 chat_room 不应为 None"
+
+    return (
+        f"success: 消息已发送到 {target_room.name}。"
+        f"你还需要调用 send_chat_msg 向当前房间 {_context.chat_room.name} 发言，或调用 skip_chat_msg 跳过。"
+    )
 
 
 def skip_chat_msg(_context: ChatContext = None) -> str:
@@ -144,20 +140,19 @@ def skip_chat_msg(_context: ChatContext = None) -> str:
     Returns:
         成功返回 "success"
     """
-    sender = _context.agent_name if _context is not None else "unknown"
-    logger.info(f"Agent 跳过发言: agent={sender}")
-
-    if _context is None:
+    if _context is None or _context.chat_room is None:
         logger.warning("跳过发言失败，聊天室上下文未设置")
-        return "error: chat context is not set"
+        return "error: 当前没有激活的房间上下文。"
 
+    logger.info(f"Agent 跳过发言: agent={_context.agent_name}")
     ok = _context.chat_room.skip_turn(sender=_context.agent_name)
+
     if not ok:
         current = _context.chat_room.get_current_turn_agent()
-        logger.warning(f"跳过发言失败，当前应由 {current} 发言: agent={sender}")
-        return f"error: not your turn, current turn agent is {current}"
+        logger.warning(f"跳过发言失败，当前应由 {current} 发言: agent={_context.agent_name}")
+        return f"error: 现在不是你的发言轮次（当前应由 {current} 发言），请勿再调用任何工具。"
 
-    return "success"
+    return "success: 已跳过本轮发言。"
 
 
 def task_done() -> None:
@@ -166,9 +161,6 @@ def task_done() -> None:
     logger.info(f"task_done")
     return
 
-
-for _f in (get_agent_list, send_chat_msg, skip_chat_msg):
-    _f.needs_context = True
 
 FUNCTION_REGISTRY: dict[str, callable] = {
     "get_weather": get_weather,

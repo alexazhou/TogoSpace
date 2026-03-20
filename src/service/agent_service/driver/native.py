@@ -2,9 +2,8 @@ import json
 import logging
 from typing import Optional
 
-from model.chat_context import ChatContext
 from util.llm_api_util import LlmApiMessage, OpenaiLLMApiRole, Tool
-from service import func_tool_service, room_service
+from service import func_tool_service
 from service.room_service import ChatRoom
 
 from .base import AgentDriver
@@ -14,12 +13,6 @@ logger = logging.getLogger(__name__)
 
 class NativeAgentDriver(AgentDriver):
     async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
-        self.host._turn_ctx = ChatContext(
-            agent_name=self.host.name,
-            team_name=self.host.team_name,
-            chat_room=room,
-            get_room=room_service.get_room,
-        )
         turn_history_start: int = len(self.host._history)
 
         hint = f"你必须调用 send_chat_msg 向当前房间 {room.name} 发送消息或 skip_chat_msg 跳过发言，不能直接输出文字。"
