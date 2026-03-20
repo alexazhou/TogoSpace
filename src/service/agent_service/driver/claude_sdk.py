@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from typing import Any
@@ -17,7 +18,8 @@ from claude_agent_sdk import (
     tool,
 )
 
-from service import room_service
+from model.chat_context import ChatContext
+from service import func_tool_service, room_service
 from service.room_service import ChatRoom
 
 from .base import AgentDriver
@@ -36,6 +38,17 @@ _SEND_CHAT_MSG_TOOL_SCHEMA = {
 _SKIP_CHAT_MSG_TOOL_SCHEMA = {
     "type": "object",
     "properties": {},
+}
+
+_CLAUDE_SDK_TOOL_SPECS = {
+    "send_chat_msg": {
+        "description": "向聊天室发送消息",
+        "schema": _SEND_CHAT_MSG_TOOL_SCHEMA,
+    },
+    "skip_chat_msg": {
+        "description": "跳过本轮发言",
+        "schema": _SKIP_CHAT_MSG_TOOL_SCHEMA,
+    },
 }
 
 
@@ -64,15 +77,20 @@ def _format_sdk_blocks(blocks) -> list[str]:
     return parts
 
 
+
 class ClaudeSdkAgentDriver(AgentDriver):
     def __init__(self, host, config):
         super().__init__(host, config)
-        self._sdk_client = None
+        self._sdk_client: ClaudeSDKClient | None = None
+        self._turn_done: bool = False  # 当前轮次是否已完成发言，由 tool handler 设置，_run_turn_sdk 检查以决定是否中断/退出
 
     async def startup(self) -> None:
         server = create_sdk_mcp_server(
             "chat-tools",
-            tools=[self._build_send_tool(), self._build_skip_tool()],
+            tools=[
+                self._build_claude_sdk_tool("send_chat_msg"),
+                self._build_claude_sdk_tool("skip_chat_msg"),
+            ],
         )
         options = ClaudeAgentOptions(
             system_prompt=self.host.system_prompt,
@@ -102,8 +120,9 @@ class ClaudeSdkAgentDriver(AgentDriver):
             self._sdk_client = None
 
     async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
+        self._turn_done = False
         prompt_lines = self._build_prompt_lines_from_history(room, synced_count)
-        await self._run_turn_sdk(room.key, room, prompt_lines)
+        await self._run_turn_sdk(room, prompt_lines, max_function_calls)
 
     def _build_prompt_lines_from_history(self, room: ChatRoom, synced_count: int) -> list[str]:
         if synced_count <= 0:
@@ -130,35 +149,28 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
         return prompt_lines
 
-    def _build_send_tool(self):
-        @tool("send_chat_msg", "向聊天室发送消息", _SEND_CHAT_MSG_TOOL_SCHEMA)
-        async def _send(args):
-            room_name = args.get("room_name", "")
-            msg = args.get("msg", "")
-            logger.info(
-                f"SDK MCP tool called: send_chat_msg, agent={self.host.key}, room={room_name}, msg_len={len(msg)}"
-            )
-            result = await self.host.send_chat_message(room_name, msg)
-            return {
-                "content": [{"type": "text", "text": result.message}],
-                "isError": not result.ok,
-            }
+    def _build_claude_sdk_tool(self, tool_name: str):
+        spec = _CLAUDE_SDK_TOOL_SPECS[tool_name]
 
-        return _send
+        @tool(tool_name, spec["description"], spec["schema"])
+        async def _wrapped(args):
+            context = ChatContext(agent_name=self.host.name, team_name=self.host.team_name, chat_room=self.host.current_room)
+            result = await func_tool_service.run_tool_call(tool_name, json.dumps(args), context=context)
 
-    def _build_skip_tool(self):
-        @tool("skip_chat_msg", "跳过本轮发言", _SKIP_CHAT_MSG_TOOL_SCHEMA)
-        async def _skip(args):
-            logger.info(f"SDK MCP tool called: skip_chat_msg, agent={self.host.key}")
-            result = self.host.skip_chat_turn()
-            return {
-                "content": [{"type": "text", "text": result.message}],
-                "isError": not result.ok,
-            }
+            is_error = result.startswith("error:")
+            if not is_error:
+                if tool_name == "skip_chat_msg":
+                    self._turn_done = True
+                elif tool_name == "send_chat_msg":
+                    room_key = f"{args.get('room_name', '')}@{self.host.team_name}"
+                    if room_service.get_room(room_key) is context.chat_room:
+                        self._turn_done = True
 
-        return _skip
+            return {"content": [{"type": "text", "text": result}], "isError": is_error}
 
-    async def _run_turn_sdk(self, room_key: str, room: ChatRoom, prompt_lines: list[str]) -> None:
+        return _wrapped
+
+    async def _run_turn_sdk(self, room: ChatRoom, prompt_lines: list[str], max_function_calls: int) -> None:
         context_text = "\n".join(prompt_lines) if prompt_lines else "(无新消息)"
         turn_prompt = (
             f"新收到的消息：\n{context_text}\n\n"
@@ -166,15 +178,19 @@ class ClaudeSdkAgentDriver(AgentDriver):
             f"你必须调用 send_chat_msg 发送消息或 skip_chat_msg 跳过本轮发言。"
         )
 
-        client: Any = self._sdk_client
-        logger.info(f"SDK 注入增量消息: agent={self.host.key}, room={room_key}, new_msgs={len(prompt_lines)}")
+        client = self._sdk_client
+
+        if client is None:
+            raise RuntimeError(f"Claude SDK client 尚未初始化: agent={self.host.key}")
+
+        max_attempts = max(1, max_function_calls)
+        logger.info(f"SDK 注入增量消息: agent={self.host.key}, room={room.key}, new_msgs={len(prompt_lines)}")
 
         try:
             await client.query(turn_prompt)
             logger.info(f"SDK prompt 已发送，等待响应: agent={self.host.key}")
             hint = f"你必须调用 send_chat_msg 将回复发送到 {room.name} 聊天室，或调用 skip_chat_msg 跳过本轮。直接输出的文字不会出现在聊天室里。"
-            max_retries = 3
-            for attempt in range(max_retries):
+            for attempt in range(max_attempts):
                 if attempt > 0:
                     logger.info(f"SDK 注入发言提醒: agent={self.host.key}, attempt={attempt}")
                     await client.query(hint)
@@ -194,7 +210,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
                         parts = _format_sdk_blocks(msg.content)
                         logger.info(f"SDK UserMessage: agent={self.host.key}, content=[{', '.join(parts)}]")
 
-                        if self.host.current_room is None and not interrupted:
+                        if self._turn_done and not interrupted:
                             logger.info(f"SDK 发言完成，主动中断会话: agent={self.host.key}")
                             await client.interrupt()
                             interrupted = True
@@ -204,7 +220,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
                     elif isinstance(msg, ResultMessage):
                         if msg.is_error:
-                            logger.error(f"SDK 执行失败: agent={self.host.key}, room={room_key}, result={msg.result}")
+                            logger.error(f"SDK 执行失败: agent={self.host.key}, room={room.key}, result={msg.result}")
                         else:
                             logger.info(
                                 f"SDK 会话完成: agent={self.host.key}, num_turns={msg.num_turns}, duration_ms={msg.duration_ms}, cost_usd={msg.total_cost_usd}"
@@ -217,12 +233,12 @@ class ClaudeSdkAgentDriver(AgentDriver):
                     f"SDK receive_response 结束: agent={self.host.key}, total_msgs={msg_count}, attempt={attempt}"
                 )
 
-                if self.host.current_room is None:
+                if self._turn_done:
                     break
 
                 logger.warning(
                     f"SDK agent 未调用发言工具（可能只输出 thinking 或纯文字）: agent={self.host.key}, attempt={attempt}"
                 )
         except Exception as e:
-            logger.error(f"SDK 会话异常: agent={self.host.key}, room={room_key}, error={e}", exc_info=True)
+            logger.error(f"SDK 会话异常: agent={self.host.key}, room={room.key}, error={e}", exc_info=True)
             raise

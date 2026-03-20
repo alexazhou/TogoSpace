@@ -1,12 +1,11 @@
 import asyncio
 import logging
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from util.llm_api_util import OpenaiLLMApiRole, LlmApiMessage, LlmApiResponse, Tool
 from util.config_util import load_prompt
-from model.chat_model import AgentDialogContext, ChatMessage
 from model.chat_context import ChatContext
+from model.chat_model import AgentDialogContext, ChatMessage
 from model.agent_event import RoomMessageEvent
 from model.db_model.agent_history_message import AgentHistoryMessageRecord
 from .driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
@@ -22,13 +21,6 @@ _agents: Dict[str, "Agent"] = {}
 
 def _make_agent_key(team_name: str, agent_name: str) -> str:
     return f"{agent_name}@{team_name}"
-
-
-@dataclass
-class AgentTurnActionResult:
-    ok: bool
-    message: str
-    turn_finished: bool = False
 
 
 class Agent:
@@ -50,7 +42,6 @@ class Agent:
         self._history: List[LlmApiMessage] = []
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
         self.status: AgentStatus = AgentStatus.IDLE
-        self._turn_ctx: Optional[ChatContext] = None
         self.current_room: Optional[ChatRoom] = None
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type="native"))
 
@@ -141,53 +132,6 @@ class Agent:
         finally:
             self.current_room = None
 
-    async def send_chat_message(self, room_name: str, msg: str) -> AgentTurnActionResult:
-        # 统一封装发言动作：写入目标房间，并根据是否发到当前房间决定本轮是否结束。
-        room_key = room_name if "@" in room_name else f"{room_name}@{self.team_name}"
-        target_room: ChatRoom = room_service.get_room(room_key)
-
-        if target_room is None:
-            logger.warning(f"send_chat_msg: 目标房间不存在 {room_key}，回落到当前房间")
-            target_room = self.current_room
-
-        if target_room is None:
-            return AgentTurnActionResult(ok=False, message="error: 当前没有可用的房间上下文。")
-
-        await target_room.add_message(self.name, msg)
-        await self.append_history_message(LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, msg))
-        current_room = self.current_room
-
-        if target_room is current_room:
-            self.current_room = None
-            return AgentTurnActionResult(ok=True, message="success: 消息已发送，本轮发言结束。", turn_finished=True)
-
-        if current_room is None:
-            return AgentTurnActionResult(ok=True, message=f"success: 消息已发送到 {target_room.name}。")
-
-        return AgentTurnActionResult(
-            ok=True,
-            message=f"success: 消息已发送到 {target_room.name}。你还需要调用 send_chat_msg 向当前房间 {current_room.name} 发言，或调用 skip_chat_msg 跳过。",
-        )
-
-    def skip_chat_turn(self) -> AgentTurnActionResult:
-        room = self.current_room
-
-        if room is None:
-            return AgentTurnActionResult(ok=False, message="error: 当前没有激活的房间上下文。")
-
-        ok = room.skip_turn(sender=self.name)
-
-        if not ok:
-            current = room.get_current_turn_agent()
-            return AgentTurnActionResult(
-                ok=False,
-                message=f"error: 现在不是你的发言轮次（当前应由 {current} 发言），请勿再调用任何工具。",
-            )
-
-        self.current_room = None
-
-        return AgentTurnActionResult(ok=True, message="success: 已跳过本轮发言。", turn_finished=True)
-
     async def sync_room(self, room: ChatRoom) -> None:
         await self.sync_room_messages(room)
 
@@ -198,11 +142,7 @@ class Agent:
             OpenaiLLMApiRole.TOOL,
             OpenaiLLMApiRole.SYSTEM,
         ), f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
-        ctx = AgentDialogContext(
-            system_prompt=self.system_prompt,
-            messages=self._history,
-            tools=tools or None,
-        )
+        ctx = AgentDialogContext(system_prompt=self.system_prompt, messages=self._history, tools=tools or None)
         response: LlmApiResponse = await llm_service.infer(self.model, ctx)
         assistant_message: LlmApiMessage = response.choices[0].message
         await self.append_history_message(assistant_message)
@@ -210,8 +150,11 @@ class Agent:
         return assistant_message
 
     async def _execute_tool(self, tool_call_id: str, name: str, args: str) -> None:
-        # tool 执行结果也写回 history，这样下一轮推理能看到完整工具调用链。
-        result = await func_tool_service.run_tool_call(name, args, context=self._turn_ctx)
+        # 供 native driver 调用：执行 LLM 发起的 function call，并将结果以 tool_result
+        # 消息写回 history，使下一轮推理能看到完整的工具调用链。
+        # context 携带当前 agent 身份和房间引用，供 send_chat_msg 等需要房间操作的工具使用。
+        context = ChatContext(agent_name=self.name, team_name=self.team_name, chat_room=self.current_room)
+        result = await func_tool_service.run_tool_call(name, args, context=context)
         await self.append_history_message(LlmApiMessage.tool_result(tool_call_id, result))
 
     def get_last_assistant_tool_call(self, start_idx: int = 0) -> Optional[dict]:

@@ -1,6 +1,7 @@
-"""integration tests for Agent.send_chat_message routing behavior"""
+"""integration tests for ClaudeSdkAgentDriver send/skip routing behavior"""
 from service import room_service
 from service.agent_service import Agent
+from service.agent_service.driver.claude_sdk import ClaudeSdkAgentDriver
 from service.agent_service.driver.base import AgentDriverConfig
 
 from ...base import ServiceTestCase
@@ -9,68 +10,111 @@ TEAM = "test_team"
 
 
 class TestSdkDoSend(ServiceTestCase):
-    """测试 Agent.send_chat_message：当前房间 vs 跨房间发言的路由与 done 标记行为。"""
+    """测试 ClaudeSdkAgentDriver._handle_claude_sdk_tool_call：当前房间 vs 跨房间发言的路由与 done 标记行为。"""
 
     @classmethod
     async def async_setup_class(cls):
-        # 仅依赖 room_service，无需启动完整 agent/service 栈。
         await cls.areset_services()
         await room_service.startup()
 
-    async def _make_agent_with_slots(self, agent_name: str, current_room_name: str):
-        """创建房间并为 agent 注入 SDK slots，模拟 _run_turn_sdk 执行前的状态。"""
+    async def _make_driver_with_room(self, agent_name: str, current_room_name: str):
+        """创建房间、agent 和 SDK driver，注入当前房间上下文。"""
         await room_service.create_room(TEAM, current_room_name, [agent_name])
         room = room_service.get_room(f"{current_room_name}@{TEAM}")
-        agent = Agent(
-            name=agent_name,
-            team_name=TEAM,
-            system_prompt="test",
-            model="test-model",
-            driver_config=AgentDriverConfig(driver_type="native"),
-        )
+        agent = Agent(name=agent_name, team_name=TEAM, system_prompt="test", model="test-model",
+                      driver_config=AgentDriverConfig(driver_type="native"))
         agent.current_room = room
-        return agent, room
+        driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
+        return driver, agent, room
 
     async def test_send_to_current_room_sets_done(self):
-        """发到当前房间后，本轮应结束（current_room 置空）。"""
-        alice, room = await self._make_agent_with_slots("alice", "lobby")
-        await alice.send_chat_message("lobby", "hi everyone")
-        assert alice.current_room is None
+        """发到当前房间后，本轮应结束（_turn_done 置 True）。"""
+        driver, agent, room = await self._make_driver_with_room("alice", "lobby")
+        await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "lobby", "msg": "hi everyone"})
+        assert driver._turn_done
 
     async def test_send_to_current_room_message_appears(self):
         """发到当前房间的消息应出现在该房间里。"""
-        alice, room = await self._make_agent_with_slots("alice", "lobby")
-        await alice.send_chat_message("lobby", "hi everyone")
+        driver, agent, room = await self._make_driver_with_room("alice", "lobby")
+        await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "lobby", "msg": "hi everyone"})
         assert any(m.content == "hi everyone" for m in room.messages)
 
     async def test_send_to_current_room_result_says_done(self):
-        """发到当前房间时，返回的 tool result 应包含 '本轮发言结束' 字样。"""
-        alice, room = await self._make_agent_with_slots("alice", "lobby")
-        result = await alice.send_chat_message("lobby", "hi")
-        text = result.message
-        assert "本轮发言结束" in text
+        """发到当前房间时，返回结果应包含 '本轮发言结束' 字样。"""
+        driver, agent, room = await self._make_driver_with_room("alice", "lobby")
+        result = await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "lobby", "msg": "hi"})
+        assert "本轮发言结束" in result["content"][0]["text"]
 
     async def test_send_cross_room_does_not_set_done(self):
         """发到其他房间时，不应结束当前轮次。"""
-        alice, current_room = await self._make_agent_with_slots("alice", "private")
+        driver, agent, current_room = await self._make_driver_with_room("alice", "private")
         await room_service.create_room(TEAM, "group", ["alice"])
-        await alice.send_chat_message("group", "hello group")
-        assert alice.current_room is current_room
+        await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "group", "msg": "hello group"})
+        assert not driver._turn_done
 
     async def test_send_cross_room_lands_in_target(self):
         """跨房间消息应出现在目标房间，而非当前房间。"""
-        alice, current_room = await self._make_agent_with_slots("alice", "private")
+        driver, agent, current_room = await self._make_driver_with_room("alice", "private")
         await room_service.create_room(TEAM, "group", ["alice"])
         group = room_service.get_room(f"group@{TEAM}")
-        await alice.send_chat_message("group", "hello group")
+        await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "group", "msg": "hello group"})
         assert any(m.content == "hello group" for m in group.messages)
         assert not any(m.content == "hello group" for m in current_room.messages)
 
     async def test_send_cross_room_result_prompts_to_reply_current(self):
-        """跨房间发言后，tool result 应提示 agent 还需回复当前房间。"""
-        alice, current_room = await self._make_agent_with_slots("alice", "private")
+        """跨房间发言后，结果应提示 agent 还需回复当前房间。"""
+        driver, agent, current_room = await self._make_driver_with_room("alice", "private")
         await room_service.create_room(TEAM, "group", ["alice"])
-        result = await alice.send_chat_message("group", "hi")
-        text = result.message
+        result = await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "group", "msg": "hi"})
+        text = result["content"][0]["text"]
         assert current_room.name in text
         assert "本轮发言结束" not in text
+
+
+class _FakeClaudeClient:
+    def __init__(self):
+        self.queries: list[str] = []
+
+    async def query(self, prompt: str) -> None:
+        self.queries.append(prompt)
+
+    async def receive_response(self):
+        if False:
+            yield None
+
+    async def interrupt(self) -> None:
+        return None
+
+
+class TestClaudeSdkAgentDriver(ServiceTestCase):
+    @classmethod
+    async def async_setup_class(cls):
+        await cls.areset_services()
+        await room_service.startup()
+
+    async def test_run_chat_turn_requires_started_client(self):
+        await room_service.create_room(TEAM, "lobby", ["alice"])
+        room = room_service.get_room(f"lobby@{TEAM}")
+        agent = Agent(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
+                      driver_config=AgentDriverConfig(driver_type="native"))
+        driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
+
+        try:
+            await driver.run_chat_turn(room, synced_count=0, max_function_calls=1)
+            assert False, "expected RuntimeError"
+        except RuntimeError as exc:
+            assert "尚未初始化" in str(exc)
+
+    async def test_run_chat_turn_uses_max_function_calls_as_retry_limit(self):
+        await room_service.create_room(TEAM, "lobby", ["alice"])
+        room = room_service.get_room(f"lobby@{TEAM}")
+        agent = Agent(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
+                      driver_config=AgentDriverConfig(driver_type="native"))
+        agent.current_room = room
+        driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
+        fake_client = _FakeClaudeClient()
+        driver._sdk_client = fake_client
+
+        await driver.run_chat_turn(room, synced_count=0, max_function_calls=2)
+
+        assert len(fake_client.queries) == 2

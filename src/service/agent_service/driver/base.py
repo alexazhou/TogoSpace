@@ -12,6 +12,13 @@ class AgentDriverConfig:
     options: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class AgentTurnActionResult:
+    ok: bool
+    message: str
+    turn_finished: bool = False
+
+
 class AgentDriverHost(Protocol):
     name: str
     team_name: str
@@ -19,13 +26,9 @@ class AgentDriverHost(Protocol):
     model: str
     current_room: Any
     _history: list[Any]
-    _turn_ctx: Any
 
     @property
     def key(self) -> str:
-        ...
-
-    async def sync_room_messages(self, room: Any) -> int:
         ...
 
     async def _infer(self, tools=None):
@@ -38,12 +41,6 @@ class AgentDriverHost(Protocol):
         ...
 
     async def append_history_message(self, message: Any) -> None:
-        ...
-
-    async def send_chat_message(self, room_name: str, msg: str):
-        ...
-
-    def skip_chat_turn(self):
         ...
 
 

@@ -37,40 +37,36 @@ async def run_tool_call(
 
     caller = context.agent_name if context is not None else "unknown"
     logger.info(f"use_tool: caller={caller}, tool={function_name}, args={args}")
-    try:
-        result = await execute_function(function_name, args, context=context)
-        logger.info(f"函数执行结果: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"函数执行失败: {e}")
-        return f"函数执行失败: {str(e)}"
 
-
-async def execute_function(func_name: str, args: dict, context: Optional[ChatContext] = None) -> str:
-    """动态调用指定函数"""
     try:
-        func: Callable[..., Any] | None = FUNCTION_REGISTRY.get(func_name)
+        func: Callable[..., Any] | None = FUNCTION_REGISTRY.get(function_name)
+
         if func is None:
-            raise ValueError(f"Function {func_name} not found")
+            raise ValueError(f"Function {function_name} not found")
 
         if not callable(func):
-            raise ValueError(f"{func_name} is not callable")
+            raise ValueError(f"{function_name} is not callable")
 
-        if getattr(func, "needs_context", False) and context:
-            if "_context" in inspect.signature(func).parameters:
-                args = {**args, "_context": context}
+        if context and "_context" in inspect.signature(func).parameters:
+            args = {**args, "_context": context}
 
         result = func(**args)
+
         if inspect.isawaitable(result):
             result = await result
-        return str(result)
 
-    except ValueError:
-        raise
-    except TypeError as e:
-        raise ValueError(f"Invalid arguments for function {func_name}: {e}")
+        result = str(result)
+        logger.info(f"函数执行结果: {result}")
+        return result
+
     except Exception as e:
-        raise RuntimeError(f"Error executing function {func_name}: {e}")
+        if isinstance(e, TypeError):
+            error = f"Invalid arguments for function {function_name}: {e}"
+        else:
+            error = str(e)
+
+        logger.error(f"函数执行失败: {e}")
+        return f"函数执行失败: {error}"
 
 
 def shutdown() -> None:

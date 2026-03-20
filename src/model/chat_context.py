@@ -1,6 +1,5 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Callable
 
 from service.room_service import ChatRoom
 
@@ -11,4 +10,3 @@ class ChatContext:
     agent_name: str
     team_name: str
     chat_room: ChatRoom
-    get_room: Callable[[str], ChatRoom]
