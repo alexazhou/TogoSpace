@@ -80,4 +80,24 @@ if not tool_calls:
 - 这段代码是否在“返回/结束当前分支”和“继续后续逻辑”之间切换
 - 加上空行后，是否更容易一眼看出代码结构
 
-如果答案是“是”，就加空行。
+如果答案是”是”，就加空行。
+
+## 7. 参数较少时优先单行
+
+函数调用或构造函数参数较少（通常 1-2 个）时，优先写在一行，保持紧凑。只有参数过多或复杂时才换行。
+
+```python
+# 参数少，单行更紧凑
+message = LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f”{room.name} 房间系统消息: {msg.content}”)
+
+# 参数多，换行更清晰
+agent = Agent(
+    name=name,
+    team_name=team_name,
+    system_prompt=full_prompt,
+    model=cfg[“model”],
+    driver_config=driver_config,
+)
+```
+
+判断标准：一眼能看清所有参数，无需滚动或脑补，就保持单行。
