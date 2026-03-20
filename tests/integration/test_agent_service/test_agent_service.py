@@ -52,9 +52,10 @@ class TestAgentServiceSyncRoomMessages(_AgentServiceCase):
         await room.add_message("bob", "hello alice")
 
         alice = agent_service.get_agent(TEAM, "alice")
-        await alice._sync_room_messages(room, with_prompt_lines=False)
+        synced_count = await alice.sync_room_messages(room)
 
         # 初始公告 + bob 消息
+        assert synced_count == 2
         assert len(alice._history) == 2
         assert "hello alice" in alice._history[1].content
 
@@ -68,7 +69,8 @@ class TestAgentServiceSyncSkipsOwnMessages(_AgentServiceCase):
         alice = agent_service.get_agent(TEAM, "alice")
         await room.add_message("alice", "i am talking")
 
-        await alice._sync_room_messages(room, with_prompt_lines=False)
+        synced_count = await alice.sync_room_messages(room)
         # 只应有初始公告，不应有自己的消息
+        assert synced_count == 1
         assert len(alice._history) == 1
         assert "talking" not in alice._history[0].content
