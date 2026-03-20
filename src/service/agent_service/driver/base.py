@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from service.room_service import ChatRoom
+
 
 @dataclass
 class AgentDriverConfig:
@@ -26,7 +28,10 @@ class AgentDriverHost(Protocol):
     async def sync_room_messages(self, room: Any) -> int:
         ...
 
-    async def chat(self, tools=None, done_check=None, max_function_calls: int = 5):
+    async def _infer(self, tools=None):
+        ...
+
+    async def _execute_tool(self, tool_call_id: str, name: str, args: str) -> None:
         ...
 
     async def append_history_message(self, message: Any) -> None:
@@ -54,5 +59,5 @@ class AgentDriver:
     async def shutdown(self) -> None:
         return None
 
-    async def run_chat_turn(self, room_key: str, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
         raise NotImplementedError

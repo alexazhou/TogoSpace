@@ -131,8 +131,15 @@ class Agent:
         return synced_count
 
     async def run_chat_turn(self, room_key: str, max_function_calls: int = 5) -> None:
-        # 具体如何完成一轮由 driver 决定，Agent 只保留统一入口。
-        await self.driver.run_chat_turn(room_key, max_function_calls)
+        # Agent 统一维护当前房间上下文和消息同步，driver 只负责跑这一轮聊天逻辑。
+        room = room_service.get_room(room_key)
+        self.current_room = room
+
+        try:
+            synced_count = await self.sync_room_messages(room)
+            await self.driver.run_chat_turn(room, synced_count, max_function_calls)
+        finally:
+            self.current_room = None
 
     async def send_chat_message(self, room_name: str, msg: str) -> AgentTurnActionResult:
         # 统一封装发言动作：写入目标房间，并根据是否发到当前房间决定本轮是否结束。
@@ -179,33 +186,6 @@ class Agent:
 
         self.current_room = None
         return AgentTurnActionResult(ok=True, message="success: 已跳过本轮发言。", turn_finished=True)
-
-    async def chat(
-        self,
-        tools: Optional[List[Tool]] = None,
-        done_check: Optional[Callable[[], bool]] = None,
-        max_function_calls: int = 5,
-    ) -> LlmApiMessage:
-        # native driver 复用这段循环：LLM 调工具、写入 tool result，直到完成或达到上限。
-        assistant_message: Optional[LlmApiMessage] = None
-        for _ in range(max_function_calls):
-            assistant_message = await self._infer(tools)
-
-            if not assistant_message.tool_calls:
-                return assistant_message
-
-            logger.info(f"检测到工具调用: agent={self.key}, count={len(assistant_message.tool_calls)}")
-            for tool_call in assistant_message.tool_calls:
-                name = tool_call.function.get("name", "")
-                args = tool_call.function.get("arguments", "")
-                await self._execute_tool(tool_call.id, name, args)
-
-            if done_check and done_check():
-                return assistant_message
-
-        logger.warning(f"达到最大函数调用次数: agent={self.key}, max={max_function_calls}")
-
-        return assistant_message
 
     async def sync_room(self, room: ChatRoom) -> None:
         await self.sync_room_messages(room)

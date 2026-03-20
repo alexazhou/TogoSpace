@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from model.chat_context import ChatContext
-from util.llm_api_util import LlmApiMessage, OpenaiLLMApiRole
+from util.llm_api_util import LlmApiMessage, OpenaiLLMApiRole, Tool
 from service import func_tool_service, room_service
 from service.room_service import ChatRoom
 
@@ -14,15 +14,8 @@ logger = logging.getLogger(__name__)
 
 class NativeAgentDriver(AgentDriver):
 
-    async def run_chat_turn(self, room_key: str, max_function_calls: int = 5) -> None:
-        room: ChatRoom = room_service.get_room(room_key)
-        self.host.current_room = room
-
-        try:
-            await self.host.sync_room_messages(room)
-            await self._run_turn_native(room, max_function_calls)
-        finally:
-            self.host.current_room = None
+    async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
+        await self._run_turn_native(room, max_function_calls)
 
     async def _run_turn_native(self, room: ChatRoom, max_function_calls: int = 5) -> None:
         self.host._turn_ctx = ChatContext(
@@ -66,7 +59,7 @@ class NativeAgentDriver(AgentDriver):
         hint = f"你必须调用 send_chat_msg 向当前房间 {room.name} 发送消息或 skip_chat_msg 跳过发言，不能直接输出文字。"
         max_retries = 3
         for _ in range(max_retries):
-            await self.host.chat(
+            await self._chat_until_done(
                 tools=func_tool_service.get_tools(),
                 done_check=is_turn_done,
                 max_function_calls=max_function_calls,
@@ -78,3 +71,30 @@ class NativeAgentDriver(AgentDriver):
             await self.host.append_history_message(
                 LlmApiMessage.text(OpenaiLLMApiRole.USER, hint)
             )
+
+    async def _chat_until_done(
+        self,
+        tools: Optional[list[Tool]] = None,
+        done_check=None,
+        max_function_calls: int = 5,
+    ) -> LlmApiMessage:
+        # native driver 自己维护工具调用循环，直到完成条件满足或达到上限。
+        assistant_message: Optional[LlmApiMessage] = None
+        for _ in range(max_function_calls):
+            assistant_message = await self.host._infer(tools)
+
+            if not assistant_message.tool_calls:
+                return assistant_message
+
+            logger.info(f"检测到工具调用: agent={self.host.key}, count={len(assistant_message.tool_calls)}")
+            for tool_call in assistant_message.tool_calls:
+                name = tool_call.function.get("name", "")
+                args = tool_call.function.get("arguments", "")
+                await self.host._execute_tool(tool_call.id, name, args)
+
+            if done_check and done_check():
+                return assistant_message
+
+        logger.warning(f"达到最大函数调用次数: agent={self.host.key}, max={max_function_calls}")
+
+        return assistant_message
