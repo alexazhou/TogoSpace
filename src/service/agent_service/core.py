@@ -77,6 +77,7 @@ class Agent:
         )
 
     async def consume_task(self, max_function_calls: int) -> None:
+        # 一个 Agent 可能会连续收到多个房间事件，这里串行消费，避免同一实例并发跑多个回合。
         self.status = AgentStatus.ACTIVE
         self._publish_status(self.status)
         try:
@@ -97,6 +98,7 @@ class Agent:
             self._publish_status(self.status)
 
     async def sync_room_messages(self, room: ChatRoom) -> int:
+        # 把该 Agent 在房间中的未读消息追加到私有 history，返回本次真正同步进去的条数。
         new_msgs: List[ChatMessage] = await room.get_unread_messages(self.name)
         logger.info(f"同步房间消息: agent={self.key}, room={room.name}, count={len(new_msgs)}")
 
@@ -126,25 +128,32 @@ class Agent:
         return synced_count
 
     async def run_turn(self, room_key: str, max_function_calls: int = 5) -> None:
+        # 具体如何完成一轮由 driver 决定，Agent 只保留统一入口。
         await self.driver.run_turn(room_key, max_function_calls)
 
     async def send_chat_message(self, room_name: str, msg: str) -> AgentTurnActionResult:
+        # 统一封装发言动作：写入目标房间，并根据是否发到当前房间决定本轮是否结束。
         room_key = room_name if "@" in room_name else f"{room_name}@{self.team_name}"
         target_room: ChatRoom = room_service.get_room(room_key)
+
         if target_room is None:
             logger.warning(f"send_chat_msg: 目标房间不存在 {room_key}，回落到当前房间")
             target_room = self.current_room
+
         if target_room is None:
             return AgentTurnActionResult(ok=False, message="error: 当前没有可用的房间上下文。")
 
         await target_room.add_message(self.name, msg)
         await self.append_history_message(LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, msg))
         current_room = self.current_room
+
         if target_room is current_room:
             self.current_room = None
             return AgentTurnActionResult(ok=True, message="success: 消息已发送，本轮发言结束。", turn_finished=True)
+
         if current_room is None:
             return AgentTurnActionResult(ok=True, message=f"success: 消息已发送到 {target_room.name}。")
+
         return AgentTurnActionResult(
             ok=True,
             message=f"success: 消息已发送到 {target_room.name}。你还需要调用 send_chat_msg 向当前房间 {current_room.name} 发言，或调用 skip_chat_msg 跳过。",
@@ -152,10 +161,12 @@ class Agent:
 
     def skip_chat_turn(self) -> AgentTurnActionResult:
         room = self.current_room
+
         if room is None:
             return AgentTurnActionResult(ok=False, message="error: 当前没有激活的房间上下文。")
 
         ok = room.skip_turn(sender=self.name)
+
         if not ok:
             current = room.get_current_turn_agent()
             return AgentTurnActionResult(
@@ -172,6 +183,7 @@ class Agent:
         done_check: Optional[Callable[[], bool]] = None,
         max_function_calls: int = 5,
     ) -> LlmApiMessage:
+        # native driver 复用这段循环：LLM 调工具、写入 tool result，直到完成或达到上限。
         assistant_message: Optional[LlmApiMessage] = None
         for _ in range(max_function_calls):
             assistant_message = await self._infer(tools)
@@ -189,12 +201,14 @@ class Agent:
                 return assistant_message
 
         logger.warning(f"达到最大函数调用次数: agent={self.key}, max={max_function_calls}")
+
         return assistant_message
 
     async def sync_room(self, room: ChatRoom) -> None:
         await self.sync_room_messages(room)
 
     async def _infer(self, tools: Optional[List[Tool]]) -> LlmApiMessage:
+        # 每次推理都基于当前 history 组装完整上下文，并把 assistant 回复继续追加回 history。
         assert self._history and self._history[-1].role in (
             OpenaiLLMApiRole.USER,
             OpenaiLLMApiRole.TOOL,
@@ -208,9 +222,11 @@ class Agent:
         response: LlmApiResponse = await llm_service.infer(self.model, ctx)
         assistant_message: LlmApiMessage = response.choices[0].message
         await self.append_history_message(assistant_message)
+
         return assistant_message
 
     async def _execute_tool(self, tool_call_id: str, name: str, args: str) -> None:
+        # tool 执行结果也写回 history，这样下一轮推理能看到完整工具调用链。
         result = await func_tool_service.run_tool_call(name, args, context=self._turn_ctx)
         await self.append_history_message(LlmApiMessage.tool_result(tool_call_id, result))
 
@@ -230,10 +246,6 @@ class Agent:
     async def append_history_message(self, message: LlmApiMessage) -> None:
         self._history.append(message)
         await self._persist_history_message(message)
-
-    @staticmethod
-    def make_text_message(role: str, content: str) -> LlmApiMessage:
-        return LlmApiMessage.text(role, content)
 
     async def _persist_history_message(self, message: LlmApiMessage) -> None:
         seq: int = len(self._history) - 1

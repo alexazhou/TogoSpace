@@ -38,9 +38,6 @@ class AgentDriverHost(Protocol):
     def skip_chat_turn(self):
         ...
 
-    def make_text_message(self, role: str, content: str):
-        ...
-
 
 class AgentDriver:
     def __init__(self, host: AgentDriverHost, config: AgentDriverConfig):
