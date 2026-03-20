@@ -88,7 +88,7 @@ class TestSchedulerRun(ServiceTestCase):
         real_agent = Agent("test", TEAM, "prompt", "model")
         real_agent.wait_task_queue.put_nowait(RoomMessageEvent(f"r1@{TEAM}"))
 
-        with patch.object(real_agent, "run_turn", side_effect=RuntimeError("boom")):
+        with patch.object(real_agent, "run_chat_turn", side_effect=RuntimeError("boom")):
             await real_agent.consume_task(max_function_calls=5)
 
         # 即使 run_turn 报错，队列也应被正确消费，避免任务卡死。

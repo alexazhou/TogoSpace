@@ -89,7 +89,7 @@ class Agent:
 
                 try:
                     if isinstance(task, RoomMessageEvent):
-                        await self.run_turn(task.room_key, max_function_calls)
+                        await self.run_chat_turn(task.room_key, max_function_calls)
                     else:
                         raise TypeError(f"不支持的 Agent 任务类型: {type(task).__name__}")
                 except Exception as e:
@@ -130,9 +130,9 @@ class Agent:
 
         return synced_count
 
-    async def run_turn(self, room_key: str, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, room_key: str, max_function_calls: int = 5) -> None:
         # 具体如何完成一轮由 driver 决定，Agent 只保留统一入口。
-        await self.driver.run_turn(room_key, max_function_calls)
+        await self.driver.run_chat_turn(room_key, max_function_calls)
 
     async def send_chat_message(self, room_name: str, msg: str) -> AgentTurnActionResult:
         # 统一封装发言动作：写入目标房间，并根据是否发到当前房间决定本轮是否结束。

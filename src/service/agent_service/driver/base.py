@@ -54,5 +54,5 @@ class AgentDriver:
     async def shutdown(self) -> None:
         return None
 
-    async def run_turn(self, room_key: str, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, room_key: str, max_function_calls: int = 5) -> None:
         raise NotImplementedError

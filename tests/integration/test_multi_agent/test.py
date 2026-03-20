@@ -93,7 +93,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             _make_infer_response(content="done"),
         ]
         with patch("service.agent_service.llm_service.infer", AsyncMock(side_effect=responses)):
-            await alice.run_turn(room_key, max_function_calls=5)
+            await alice.run_chat_turn(room_key, max_function_calls=5)
 
         tool_results = [m for m in alice._history if m.role == OpenaiLLMApiRole.TOOL]
         assert len(tool_results) >= 1
@@ -113,7 +113,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             _make_infer_response(tool_calls=[tc]),
         ]
         with patch("service.agent_service.llm_service.infer", AsyncMock(side_effect=responses)):
-            await alice.run_turn(room_key, max_function_calls=5)
+            await alice.run_chat_turn(room_key, max_function_calls=5)
 
         assert any(m.content == "最终消息" for m in room.messages)
 
