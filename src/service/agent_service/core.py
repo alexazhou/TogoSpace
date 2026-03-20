@@ -142,24 +142,13 @@ class Agent:
 
         return result
 
-    def get_last_assistant_tool_call(self, start_idx: int = 0) -> Optional[dict]:
+    def get_last_assistant_message(self, start_idx: int = 0) -> Optional[LlmApiMessage]:
+        """获取历史中最后一条 assistant 消息。"""
         recent_history = self._history[start_idx:]
 
         for message in reversed(recent_history):
-            if message.role != OpenaiLLMApiRole.ASSISTANT:
-                continue
-
-            tool_calls = message.tool_calls or []
-
-            if not tool_calls:
-                continue
-
-            call = tool_calls[-1]
-            function = call.function if isinstance(call.function, dict) else {}
-            return {
-                "name": function.get("name"),
-                "args": function.get("arguments", ""),
-            }
+            if message.role == OpenaiLLMApiRole.ASSISTANT:
+                return message
 
         return None
 

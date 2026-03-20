@@ -37,7 +37,7 @@ class AgentDriverHost(Protocol):
     async def _execute_tool(self, tool_call_id: str, name: str, args: str) -> None:
         ...
 
-    def get_last_assistant_tool_call(self, start_idx: int = 0):
+    def get_last_assistant_message(self, start_idx: int = 0):
         ...
 
     async def append_history_message(self, message: Any) -> None:
