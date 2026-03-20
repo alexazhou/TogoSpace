@@ -75,16 +75,9 @@ class ClaudeSdkAgentDriver(AgentDriver):
         finally:
             self._sdk_client = None
 
-    async def run_chat_turn(self, room_key: str, max_function_calls: int = 5) -> None:
-        room: ChatRoom = room_service.get_room(room_key)
-        self.host.current_room = room
-
-        try:
-            synced_count = await self.host.sync_room_messages(room)
-            prompt_lines = self._build_prompt_lines_from_history(room, synced_count)
-            await self._run_turn_sdk(room_key, room, prompt_lines)
-        finally:
-            self.host.current_room = None
+    async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
+        prompt_lines = self._build_prompt_lines_from_history(room, synced_count)
+        await self._run_turn_sdk(room.key, room, prompt_lines)
 
     def _build_prompt_lines_from_history(self, room: ChatRoom, synced_count: int) -> list[str]:
         if synced_count <= 0:
