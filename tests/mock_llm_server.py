@@ -8,6 +8,7 @@ import json
 import re
 import threading
 import time
+from typing import Optional
 
 import tornado.httpserver
 import tornado.ioloop
@@ -108,24 +109,34 @@ class MockLLMServer:
         self._thread: threading.Thread = None
         self._started = threading.Event()
         self._server: tornado.httpserver.HTTPServer = None
+        self._start_error: Optional[Exception] = None
 
     def start(self) -> None:
+        self._started.clear()
+        self._start_error = None
+
         def _run():
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            self._ioloop = tornado.ioloop.IOLoop.current()
-            app = tornado.web.Application([
-                (r"/v1/chat/completions", ChatCompletionsHandler),
-            ])
-            self._server = tornado.httpserver.HTTPServer(app)
-            self._server.listen(self.port, "127.0.0.1")
-            self._started.set()
-            self._ioloop.start()
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                self._ioloop = tornado.ioloop.IOLoop.current()
+                app = tornado.web.Application([
+                    (r"/v1/chat/completions", ChatCompletionsHandler),
+                ])
+                self._server = tornado.httpserver.HTTPServer(app)
+                self._server.listen(self.port, "127.0.0.1")
+                self._started.set()
+                self._ioloop.start()
+            except Exception as exc:  # pragma: no cover - 仅在异常启动场景触发
+                self._start_error = exc
+                self._started.set()
 
         self._thread = threading.Thread(target=_run, daemon=True)
         self._thread.start()
-        self._started.wait(timeout=5)
+        if not self._started.wait(timeout=5):
+            raise RuntimeError(f"MockLLM 启动超时（{self.port}）")
+        if self._start_error is not None:
+            raise RuntimeError(f"MockLLM 启动失败（{self.port}）: {self._start_error}") from self._start_error
 
     def stop(self) -> None:
         if self._ioloop is not None:
@@ -137,3 +148,6 @@ class MockLLMServer:
             self._thread.join(timeout=5)
             self._ioloop = None
             self._server = None
+        self._thread = None
+        self._started.clear()
+        self._start_error = None
