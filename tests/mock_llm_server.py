@@ -90,14 +90,64 @@ def _default_anthropic_response(room_name: str = "general") -> Dict[str, Any]:
 
 
 class SetResponseHandler(tornado.web.RequestHandler):
-    """接收响应并推入队列。"""
+    """接收响应并推入队列。支持简化格式，自动补全完整响应。"""
 
     async def post(self):
         body = json.loads(self.request.body)
-        response = body.get("response")
+        response = self._normalize_response(body.get("response"))
         await self.application.response_queue.put(response)
         self.set_header("Content-Type", "application/json")
         self.write(json.dumps({"status": "ok"}))
+
+    def _normalize_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
+        """将简化格式的响应转换为完整的 OpenAI 格式。
+
+        支持的简化格式：
+        - {"tool_calls": [{"name": "xxx", "arguments": "..."}]}
+        - {"content": "text"}
+        """
+        # 如果已经包含完整字段，直接返回
+        if "id" in response and "choices" in response:
+            return response
+
+        tool_calls = response.get("tool_calls", [])
+        content = response.get("content")
+
+        # 如果 tool_calls 是简化的格式（只包含 name 和 arguments），转换为完整格式
+        if tool_calls:
+            normalized_calls = []
+            for i, tc in enumerate(tool_calls):
+                normalized_calls.append({
+                    "id": f"call_{int(time.time() * 1000)}_{i}",
+                    "type": "function",
+                    "function": {
+                        "name": tc.get("name"),
+                        "arguments": tc.get("arguments", ""),
+                    }
+                })
+            tool_calls = normalized_calls
+
+        # 自动补全完整响应
+        return {
+            "id": f"msg_{int(time.time() * 1000)}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": "mock-model",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": tool_calls if tool_calls else None,
+                },
+                "finish_reason": "tool_calls" if tool_calls else "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30,
+            },
+        }
 
 
 class GetResponseHandler(tornado.web.RequestHandler):
