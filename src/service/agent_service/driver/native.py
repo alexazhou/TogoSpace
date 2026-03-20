@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Optional
 
-from util.llm_api_util import LlmApiMessage, OpenaiLLMApiRole, Tool
+from util.llm_api_util import LlmApiMessage, OpenaiLLMApiRole, Tool, ToolCall
 from service import func_tool_service
 from service.room_service import ChatRoom
 
@@ -39,7 +39,7 @@ class NativeAgentDriver(AgentDriver):
     ) -> bool:
         # native driver 在一次尝试里持续驱动模型和工具调用，直到本轮回复完成或达到上限。
         for _ in range(max_function_calls):
-            assistant_message = await self.host._infer(tools)
+            assistant_message: LlmApiMessage = await self.host._infer(tools)
 
             if not assistant_message.tool_calls:
                 return False
@@ -50,10 +50,10 @@ class NativeAgentDriver(AgentDriver):
                 args = tool_call.function.get("arguments", "")
                 await self.host._execute_tool(tool_call.id, name, args)
 
-            last_msg = self.host.get_last_assistant_message(turn_history_start)
+            last_msg: Optional[LlmApiMessage] = self.host.get_last_assistant_message(turn_history_start)
             assert last_msg is not None, f"[{self.host.key}] tool_calls 已返回，但未能从 history 中找到最后一次 assistant 消息"
 
-            tool_calls = last_msg.tool_calls or []
+            tool_calls: list[ToolCall] = last_msg.tool_calls or []
             if not tool_calls:
                 return False
 
