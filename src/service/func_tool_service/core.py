@@ -55,7 +55,7 @@ async def run_tool_call(
         if inspect.isawaitable(result):
             result = await result
 
-        result = str(result)
+        result = json.dumps(result, ensure_ascii=False)
         logger.info(f"函数执行结果: {result}")
         return result
 
@@ -66,7 +66,7 @@ async def run_tool_call(
             error = str(e)
 
         logger.error(f"函数执行失败: {e}")
-        return f"函数执行失败: {error}"
+        return json.dumps({"success": False, "message": f"函数执行失败: {error}"}, ensure_ascii=False)
 
 
 def shutdown() -> None:
