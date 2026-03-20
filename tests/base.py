@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import inspect
+import json
 import os
 import socket
 import subprocess
@@ -16,7 +17,7 @@ import service.func_tool_service as func_tool_service
 import service.scheduler_service as scheduler
 import service.persistence_service as persistence_service
 import service.orm_service as orm_service
-from mock_llm_server import MockLLMServer, MOCK_LLM_API_URL
+from mock_llm_server import MockLLMServer, MOCK_LLM_API_URL, MOCK_LLM_HOST, MOCK_LLM_PORT
 
 _SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 _BACKEND_READY_TIMEOUT = 20
@@ -140,6 +141,38 @@ class ServiceTestCase:
         if cls.mock_llm_server is not None:
             cls.mock_llm_server.stop()
             cls.mock_llm_server = None
+
+    @classmethod
+    def set_mock_response(cls, message: dict) -> None:
+        """设置 Mock LLM Server 的响应，推入队列。
+
+        Args:
+            message: message 内容，例如 {"content": "测试回复"}
+        """
+        url = f"http://{MOCK_LLM_HOST}:{MOCK_LLM_PORT}/set_response"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps({"response": {"choices": [{"message": message}]}}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"设置 Mock LLM 响应失败: {resp.status}")
+
+    @classmethod
+    def get_mock_response(cls) -> dict | None:
+        """从 Mock LLM Server 响应队列获取下一个响应。
+
+        Returns:
+            响应字典，队列为空时返回 None
+        """
+        url = f"http://{MOCK_LLM_HOST}:{MOCK_LLM_PORT}/get_response"
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"获取 Mock LLM 响应失败: {resp.status}")
+            data = json.loads(resp.read().decode("utf-8"))
+            return data.get("response")
 
     @classmethod
     def _setup_config(cls):
