@@ -13,7 +13,7 @@ from model.chat_context import ChatContext
 from service.func_tool_service.tool_loader import get_function_metadata
 from service.func_tool_service.tools import FUNCTION_REGISTRY
 from service.room_service import ChatRoom
-from util.llm_api_util import LlmApiMessage
+from util.llm_api_util import LlmApiMessage, OpenaiLLMApiRole
 
 from .base import AgentDriver
 
@@ -51,6 +51,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
         super().__init__(host, config)
         self._sdk_client: ClaudeSDKClient | None = None
         self._turn_done: bool = False  # 当前轮次是否已完成发言，由 tool handler 设置，_run_turn_sdk 检查以决定是否中断/退出
+        self._tool_call_counter: int = 0  # tool_call_id 计数器
 
     async def startup(self) -> None:
         server = create_sdk_mcp_server(
@@ -117,21 +118,25 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
         return prompt_lines
 
+    def _next_tool_call_id(self) -> str:
+        """生成下一个 tool_call_id。"""
+        self._tool_call_counter += 1
+        return f"claude_sdk_{self._tool_call_counter}"
+
     def _build_claude_sdk_tool(self, tool_name: str):
         meta = get_function_metadata(tool_name, FUNCTION_REGISTRY[tool_name])
 
         @tool(tool_name, meta["description"], meta["parameters"])
         async def _wrapped(args):
-            context = ChatContext(agent_name=self.host.name, team_name=self.host.team_name, chat_room=self.host.current_room)
-
             # 写入 tool_use 消息到 history
+            tool_call_id = self._next_tool_call_id()
             await self.host.append_history_message(
                 LlmApiMessage(
                     role="assistant",
                     content=None,
                     tool_calls=[
                         {
-                            "id": f"claude_sdk_{tool_name}_{id(args)}",
+                            "id": tool_call_id,
                             "type": "function",
                             "function": {"name": tool_name, "arguments": json.dumps(args, ensure_ascii=False)},
                         }
@@ -139,12 +144,16 @@ class ClaudeSdkAgentDriver(AgentDriver):
                 )
             )
 
-            # 复用 _execute_tool 执行并写入 tool_result
-            result = await self.host._execute_tool(
-                tool_call_id=f"claude_sdk_{tool_name}_{id(args)}",
-                name=tool_name,
-                args=json.dumps(args, ensure_ascii=False),
-            )
+            # 执行最后一条 assistant 消息中的 tool_call 并写入 tool_result
+            await self.host._execute_tool()
+
+            # 获取最后一个 tool_result 消息作为返回值
+            history = self.host._history
+            result = ""
+            for msg in reversed(history):
+                if msg.role == OpenaiLLMApiRole.TOOL and msg.tool_call_id == tool_call_id:
+                    result = msg.content or ""
+                    break
 
             result_data = json.loads(result)
             is_error = not result_data.get("success", True)
@@ -152,7 +161,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
                 if tool_name == "skip_chat_msg":
                     self._turn_done = True
                 elif tool_name == "send_chat_msg":
-                    if args.get("room_name") == context.chat_room.name:
+                    if args.get("room_name") == self.host.current_room.name:
                         self._turn_done = True
 
             return {"content": [{"type": "text", "text": result}], "isError": is_error}

@@ -35,7 +35,7 @@ class AgentDriverHost(Protocol):
     async def _infer(self, tools: Optional[list[Tool]]) -> LlmApiMessage:
         ...
 
-    async def _execute_tool(self, tool_call_id: str, name: str, args: str) -> str:
+    async def _execute_tool(self) -> None:
         ...
 
     def get_last_assistant_message(self, start_idx: int = 0) -> Optional[LlmApiMessage]:
