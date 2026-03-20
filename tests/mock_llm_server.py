@@ -1,6 +1,7 @@
 """
 本地 mock LLM API 服务，用 Tornado 实现。
-固定返回 send_chat_msg tool call 响应，使 agent 能走完一轮发言流程。
+支持动态配置响应队列，可在测试中按需设置不同响应。
+队列为空时使用默认响应（send_chat_msg tool call）。
 在独立线程中运行 IOLoop，与 pytest-asyncio 的事件循环互不干扰。
 """
 import asyncio
@@ -8,7 +9,7 @@ import json
 import re
 import threading
 import time
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import tornado.httpserver
 import tornado.ioloop
@@ -19,6 +20,68 @@ MOCK_LLM_PORT = 19876
 MOCK_LLM_HOST = "127.0.0.1"
 MOCK_LLM_API_PATH = "/v1/chat/completions"
 MOCK_LLM_API_URL = f"http://{MOCK_LLM_HOST}:{MOCK_LLM_PORT}{MOCK_LLM_API_PATH}"
+
+
+def _default_response(room_name: str = "general") -> Dict[str, Any]:
+    """返回默认的 send_chat_msg tool call 响应。"""
+    return {
+        "id": "mock-response-id",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": "mock-model",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_mock_001",
+                            "type": "function",
+                            "function": {
+                                "name": "send_chat_msg",
+                                "arguments": json.dumps({
+                                    "room_name": room_name,
+                                    "msg": f"Mock LLM 在 {room_name} 的回复",
+                                }, ensure_ascii=False),
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 20,
+            "total_tokens": 30,
+        },
+    }
+
+
+class SetResponseHandler(tornado.web.RequestHandler):
+    """接收响应并推入队列。"""
+
+    async def post(self):
+        body = json.loads(self.request.body)
+        response = body.get("response")
+        await self.application.response_queue.put(response)
+        self.set_header("Content-Type", "application/json")
+        self.write(json.dumps({"status": "ok"}))
+
+
+class GetResponseHandler(tornado.web.RequestHandler):
+    """从队列弹出下一个响应。"""
+
+    async def get(self):
+        queue = self.application.response_queue
+        if queue.empty():
+            response = None
+        else:
+            response = await queue.get()
+        self.set_header("Content-Type", "application/json")
+        self.write(json.dumps({"response": response}))
 
 
 class ChatCompletionsHandler(tornado.web.RequestHandler):
@@ -65,46 +128,25 @@ class ChatCompletionsHandler(tornado.web.RequestHandler):
         except Exception:
             pass
 
-        response = {
-            "id": "mock-response-id",
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": "mock-model",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [
-                            {
-                                "id": "call_mock_001",
-                                "type": "function",
-                                "function": {
-                                    "name": "send_chat_msg",
-                                    "arguments": json.dumps({
-                                        "room_name": room_name,
-                                        "msg": f"Mock LLM 在 {room_name} 的回复",
-                                    }, ensure_ascii=False),
-                                },
-                            }
-                        ],
-                    },
-                    "finish_reason": "tool_calls",
-                }
-            ],
-            "usage": {
-                "prompt_tokens": 10,
-                "completion_tokens": 20,
-                "total_tokens": 30,
-            },
-        }
+        # 从队列获取响应，队列为空时使用默认响应
+        queue = self.application.response_queue
+        if not queue.empty():
+            response_data = await queue.get()
+        else:
+            response_data = _default_response(room_name)
+
         self.set_header("Content-Type", "application/json")
-        self.write(json.dumps(response, ensure_ascii=False))
+        self.write(json.dumps(response_data, ensure_ascii=False))
 
 
 class MockLLMServer:
-    """Mock LLM API server using fixed port for testing."""
+    """Mock LLM API server using fixed port for testing.
+
+    支持动态响应队列：
+    - POST /set_response - 设置响应，推入队列
+    - GET /get_response - 获取下一个响应
+    - POST /v1/chat/completions - LLM 推理，从队列取响应或使用默认响应
+    """
 
     def __init__(self):
         self.port: int = MOCK_LLM_PORT
@@ -113,6 +155,7 @@ class MockLLMServer:
         self._started = threading.Event()
         self._server: tornado.httpserver.HTTPServer = None
         self._start_error: Optional[Exception] = None
+        self._response_queue: asyncio.Queue = asyncio.Queue()
 
     def start(self) -> None:
         self._started.clear()
@@ -125,7 +168,10 @@ class MockLLMServer:
                 self._ioloop = tornado.ioloop.IOLoop.current()
                 app = tornado.web.Application([
                     (MOCK_LLM_API_PATH, ChatCompletionsHandler),
+                    ("/set_response", SetResponseHandler),
+                    ("/get_response", GetResponseHandler),
                 ])
+                app.response_queue = self._response_queue
                 self._server = tornado.httpserver.HTTPServer(app)
                 self._server.listen(self.port, MOCK_LLM_HOST)
                 self._started.set()
