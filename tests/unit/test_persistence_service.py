@@ -6,6 +6,15 @@ from util.llm_api_util import LlmApiMessage, OpenaiLLMApiRole
 from ..base import ServiceTestCase
 
 TEAM = "test_team"
+TEAMS_CONFIG = [{
+    "name": TEAM,
+    "groups": [{
+        "name": "r1",
+        "type": "group",
+        "members": ["alice", "bob"],
+        "max_turns": 3,
+    }],
+}]
 
 
 class TestPersistenceService(ServiceTestCase):
@@ -26,9 +35,8 @@ class TestPersistenceService(ServiceTestCase):
 
         await _persist()
 
-        await room_service.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3, emit_initial_message=False)
+        await room_service.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3)
         room = room_service.get_room(f"r1@{TEAM}")
-        await room.add_message("system", room.build_initial_system_message())
         await room.add_message("alice", "hello")
         await room.get_unread_messages("bob")
         await room.add_message("bob", "world")
@@ -36,7 +44,7 @@ class TestPersistenceService(ServiceTestCase):
 
         room_service.shutdown()
         await room_service.startup()
-        await room_service.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3, emit_initial_message=False)
+        await room_service.create_rooms(TEAMS_CONFIG)
         restored = room_service.get_room(f"r1@{TEAM}")
 
         await persistence_service.restore_runtime_state([], [restored])
