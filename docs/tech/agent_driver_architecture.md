@@ -33,8 +33,8 @@
 1. `scheduler_service` 收到 `ROOM_AGENT_TURN`
 2. scheduler 找到对应 `Agent`
 3. scheduler 调用 `agent.consume_task(...)`
-4. `Agent.consume_task()` 调用 `agent.run_turn(...)`
-5. `Agent.run_turn()` 转发到 `self.driver.run_turn(...)`
+4. `Agent.consume_task()` 调用 `agent.run_chat_turn(...)`
+5. `Agent.run_chat_turn()` 转发到 `self.driver.run_chat_turn(...)`
 6. driver 用 `Agent` 暴露的统一能力完成这一轮
 
 也就是说，调度器只依赖 `Agent` 的稳定接口，不依赖具体 driver。
@@ -102,7 +102,7 @@ class AgentDriverConfig:
 class AgentDriver:
     async def startup(self) -> None: ...
     async def shutdown(self) -> None: ...
-    async def run_turn(self, room_key: str, max_function_calls: int = 5) -> None: ...
+    async def run_chat_turn(self, room_key: str, max_function_calls: int = 5) -> None: ...
 ```
 
 职责：
@@ -145,7 +145,7 @@ class AgentDriver:
 
 值得关注的几个方法：
 
-- `run_turn(...)`
+- `run_chat_turn(...)`
   - 只做 driver 分发，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/core.py#L130)
 - `send_chat_message(...)`
   - 统一处理发消息、跨房间发送、回合结束标记，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/core.py#L133)
@@ -300,7 +300,7 @@ class GeminiCliAgentDriver(AgentDriver):
     async def shutdown(self) -> None:
         ...
 
-    async def run_turn(self, room_key: str, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, room_key: str, max_function_calls: int = 5) -> None:
         ...
 ```
 

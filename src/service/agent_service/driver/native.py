@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class NativeAgentDriver(AgentDriver):
-    async def run_turn(self, room_key: str, max_function_calls: int = 5) -> None:
+
+    async def run_chat_turn(self, room_key: str, max_function_calls: int = 5) -> None:
         room: ChatRoom = room_service.get_room(room_key)
         self.host.current_room = room
 
