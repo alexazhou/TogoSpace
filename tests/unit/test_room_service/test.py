@@ -112,6 +112,26 @@ class TestRoomServiceFunctions(ServiceTestCase):
         assert room_service.get_rooms_for_agent(TEAM, "alice") == [f"r1@{TEAM}", f"r3@{TEAM}"]
         assert room_service.get_rooms_for_agent(TEAM, "bob") == [f"r2@{TEAM}", f"r3@{TEAM}"]
 
+    async def test_create_rooms_always_emits_initial_message(self):
+        """批量建房路径应始终生成初始化消息，供后续恢复逻辑覆盖。"""
+        teams_config = [{
+            "name": TEAM,
+            "groups": [{
+                "name": "boot_room",
+                "type": "group",
+                "members": ["alice"],
+                "initial_topic": "boot topic",
+                "max_turns": 5,
+            }],
+        }]
+
+        await room_service.create_rooms(teams_config)
+
+        room = room_service.get_room(f"boot_room@{TEAM}")
+        assert len(room.messages) == 1
+        assert room.messages[0].sender_name == "system"
+        assert "boot topic" in room.messages[0].content
+
 
 class TestRoomTurnScheduling(ServiceTestCase):
     @classmethod

@@ -106,7 +106,7 @@ async def main(
 
     await chat_room.startup()
     await scheduler.startup(teams_config=teams_config)
-    await chat_room.create_rooms(teams_config, emit_initial_message=not persistence_cfg["enabled"])
+    await chat_room.create_rooms(teams_config)
     await persistence_service.restore_runtime_state(agent_service.get_all_agents(), chat_room.get_all_rooms())
 
     web_server = tornado.httpserver.HTTPServer(make_app())

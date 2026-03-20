@@ -237,8 +237,16 @@ async def startup() -> None:
     _rooms.clear()
 
 
-async def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0, emit_initial_message: bool = True) -> None:
-    """创建并初始化一个聊天室。若 max_turns > 0 则启动轮次调度，发布系统公告。"""
+async def _create_room(
+    team_name: str,
+    name: str,
+    members: List[str],
+    initial_topic: str = "",
+    room_type: RoomType = RoomType.GROUP,
+    max_turns: int = 0,
+    persist_initial_message: bool = True,
+) -> None:
+    """内部建房入口。"""
     room = ChatRoom(name=name, team_name=team_name, initial_topic=initial_topic,
                     room_type=room_type, members=members, max_turns=max_turns)
     room_key = room.key
@@ -248,27 +256,43 @@ async def create_room(team_name: str, name: str, members: List[str], initial_top
     if max_turns > 0:
         logger.info(f"初始化轮次配置: room={room_key}, max_turns={max_turns}")
 
-    if emit_initial_message:
-        member_list_str = "、".join(members)
-        msg = f"{name} 房间已经创建，当前房间成员：{member_list_str}"
-        if initial_topic:
-            msg += f"\n本房间初始话题：{initial_topic}"
-        await room.add_message("system", msg)
+    member_list_str = "、".join(members)
+    msg = f"{name} 房间已经创建，当前房间成员：{member_list_str}"
+    if initial_topic:
+        msg += f"\n本房间初始话题：{initial_topic}"
+    await room._append_message("system", msg, publish_events=True, persist=persist_initial_message)
 
 
-async def create_rooms(teams_config: list, emit_initial_message: bool = True) -> None:
-    """遍历所有 team，根据 groups 配置批量创建聊天室。"""
+async def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0) -> None:
+    """创建并初始化一个聊天室。若 max_turns > 0 则启动轮次调度，发布系统公告。"""
+    await _create_room(
+        team_name=team_name,
+        name=name,
+        members=members,
+        initial_topic=initial_topic,
+        room_type=room_type,
+        max_turns=max_turns,
+        persist_initial_message=True,
+    )
+
+
+async def create_rooms(teams_config: list) -> None:
+    """遍历所有 team，根据 groups 配置批量创建聊天室。
+
+    批量启动路径始终先生成初始化消息；若后续启用持久化恢复，恢复出的历史消息
+    会覆盖这段启动期内存消息，从而保持最终房间状态与持久化一致。
+    """
     for team in teams_config:
         team_name = team["name"]
         for group in team["groups"]:
-            await create_room(
+            await _create_room(
                 team_name=team_name,
                 name=group["name"],
                 members=group["members"],
                 initial_topic=group.get("initial_topic", ""),
                 room_type=RoomType(group.get("type", "group")),
                 max_turns=group.get("max_turns", 0),
-                emit_initial_message=emit_initial_message,
+                persist_initial_message=False,
             )
 
 
