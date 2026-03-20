@@ -1,5 +1,6 @@
 """所有测试用例的基类，负责统一初始化和清理所有 service 的全局状态。"""
 import asyncio
+import contextlib
 import inspect
 import os
 import socket
@@ -63,21 +64,30 @@ class ServiceTestCase:
     @classmethod
     def setup_class(cls):
         # 先启动外部依赖（MockLLM/后端子进程），再执行子类自定义异步初始化。
-        if cls.requires_mock_llm:
-            cls._start_mock_llm()
-        if cls.requires_backend:
-            cls._setup_pre_backend()
-            cls._start_backend()
-        cls._run_maybe_async(cls.async_setup_class())
+        try:
+            if cls.requires_mock_llm:
+                cls._start_mock_llm()
+            if cls.requires_backend:
+                cls._setup_pre_backend()
+                cls._start_backend()
+            cls._assert_external_dependencies_ready()
+            cls._run_maybe_async(cls.async_setup_class())
+        except Exception:
+            cls._safe_cleanup_external_dependencies()
+            raise
 
     @classmethod
     def teardown_class(cls):
         # 先执行子类清理，再关闭外部依赖，保证清理阶段仍可访问服务。
-        cls._run_maybe_async(cls.async_teardown_class())
-        if cls.requires_backend:
-            cls._stop_backend()
-        if cls.requires_mock_llm:
-            cls._stop_mock_llm()
+        teardown_error: Exception | None = None
+        try:
+            cls._run_maybe_async(cls.async_teardown_class())
+        except Exception as exc:
+            teardown_error = exc
+        finally:
+            cls._safe_cleanup_external_dependencies()
+        if teardown_error is not None:
+            raise teardown_error
 
     @classmethod
     async def async_setup_class(cls):
@@ -139,6 +149,11 @@ class ServiceTestCase:
         base_url = f"http://127.0.0.1:{port}"
         deadline = time.time() + _BACKEND_READY_TIMEOUT
         while time.time() < deadline:
+            if proc.poll() is not None:
+                output = cls._tail_text(cls._read_process_output(proc))
+                raise RuntimeError(
+                    f"后端进程提前退出（code={proc.returncode}）\n{output}"
+                )
             try:
                 with urllib.request.urlopen(f"{base_url}/agents", timeout=1) as resp:
                     if resp.status == 200:
@@ -147,9 +162,12 @@ class ServiceTestCase:
                 pass
             time.sleep(0.3)
         else:
-            proc.terminate()
-            proc.wait()
-            raise RuntimeError(f"后端服务在 {_BACKEND_READY_TIMEOUT}s 内未就绪")
+            with contextlib.suppress(Exception):
+                proc.terminate()
+            with contextlib.suppress(Exception):
+                proc.wait(timeout=5)
+            output = cls._tail_text(cls._read_process_output(proc))
+            raise RuntimeError(f"后端服务在 {_BACKEND_READY_TIMEOUT}s 内未就绪\n{output}")
 
         cls._backend_proc = proc
         cls.backend_port = port
@@ -159,11 +177,71 @@ class ServiceTestCase:
     def _stop_backend(cls):
         """终止后端子进程并清理类属性。"""
         if cls._backend_proc is not None:
-            cls._backend_proc.terminate()
-            cls._backend_proc.wait()
+            with contextlib.suppress(Exception):
+                if cls._backend_proc.poll() is None:
+                    cls._backend_proc.terminate()
+                    cls._backend_proc.wait(timeout=5)
+                else:
+                    cls._backend_proc.wait(timeout=1)
+            with contextlib.suppress(Exception):
+                if cls._backend_proc.poll() is None:
+                    cls._backend_proc.kill()
+                    cls._backend_proc.wait(timeout=2)
             cls._backend_proc = None
             cls.backend_port = None
             cls.backend_base_url = None
+            cls._backend_config_dir = None
+
+    @classmethod
+    def _safe_cleanup_external_dependencies(cls):
+        """尽最大努力清理外部依赖；用于 setup/teardown 的 finally 路径。"""
+        if cls.requires_backend:
+            with contextlib.suppress(Exception):
+                cls._stop_backend()
+        if cls.requires_mock_llm:
+            with contextlib.suppress(Exception):
+                cls._stop_mock_llm()
+
+    @classmethod
+    def _assert_external_dependencies_ready(cls):
+        """在进入测试前确认外部依赖已就绪。"""
+        if cls.requires_mock_llm and cls.mock_llm_server is None:
+            raise RuntimeError("MockLLM 未启动成功：mock_llm_server is None")
+
+        if not cls.requires_backend:
+            return
+        if cls._backend_proc is None or cls.backend_base_url is None:
+            raise RuntimeError("后端未启动成功：进程句柄或 base_url 未设置")
+        if cls._backend_proc.poll() is not None:
+            output = cls._tail_text(cls._read_process_output(cls._backend_proc))
+            raise RuntimeError(
+                f"后端已退出（code={cls._backend_proc.returncode}）\n{output}"
+            )
+        try:
+            with urllib.request.urlopen(f"{cls.backend_base_url}/agents", timeout=1) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"后端健康检查失败：GET /agents => {resp.status}")
+        except Exception as exc:
+            raise RuntimeError(f"后端健康检查失败：{exc}") from exc
+
+    @staticmethod
+    def _read_process_output(proc: subprocess.Popen) -> str:
+        if proc.stdout is None:
+            return ""
+        try:
+            out = proc.stdout.read()
+        except Exception:
+            return ""
+        if isinstance(out, bytes):
+            return out.decode("utf-8", errors="replace")
+        return out or ""
+
+    @staticmethod
+    def _tail_text(text: str, max_lines: int = 30) -> str:
+        if not text:
+            return "(无输出)"
+        lines = text.strip().splitlines()
+        return "\n".join(lines[-max_lines:])
 
     @classmethod
     def reset_services(cls):
