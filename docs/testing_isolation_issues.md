@@ -24,13 +24,13 @@
 ### 2. 更新测试用例
 
 更新了所有调用 `areset_services` 的测试文件：
-- `tests/integration/test_persistence_service.py`
-- `tests/integration/test_tool_functions/test.py`
+- `tests/integration/test_persistence_service/test.py`
+- `tests/integration/test_func_tool_service/test_tool_functions.py`
 - `tests/integration/test_room_service/test.py`
-- `tests/integration/test_room_turn_logic/test.py`
+- `tests/integration/test_room_service/test_turn_logic.py`
 - `tests/integration/test_agent_service/test_agent_service.py`
 - `tests/integration/test_multi_agent/test.py`
-- `tests/integration/test_persistence_restore.py`
+- `tests/integration/test_persistence_service/test_restore.py`
 - `tests/integration/test_agent_service/test_sdk_do_send.py`
 - `tests/integration/test_func_tool_service/test.py`
 - `tests/integration/test_scheduler_service/test.py`
@@ -82,10 +82,10 @@ objc[11183]: +[NSMutableString initialize] may have been in progress in another 
 
 ```
 ========================= short test summary info ==========================
-FAILED tests/integration/test_persistence_restore.py::TestPersistenceRestoreIntegration::test_restore_runtime_state_recovers_room_and_agent_history
+FAILED tests/integration/test_persistence_service/test_restore.py::TestPersistenceRestoreIntegration::test_restore_runtime_state_recovers_room_and_agent_history
 FAILED tests/integration/test_scheduler_service/test.py::TestSchedulerRun::test_scheduler_runs_agent_on_turn_event
-FAILED tests/integration/test_persistence_service.py::TestPersistenceService::test_restore_runtime_state_restores_room_history_and_read_index
-FAILED tests/integration/test_persistence_service.py::TestPersistenceService::test_restore_runtime_state_restores_agent_history
+FAILED tests/integration/test_persistence_service/test.py::TestPersistenceService::test_restore_runtime_state_restores_room_history_and_read_index
+FAILED tests/integration/test_persistence_service/test.py::TestPersistenceService::test_restore_runtime_state_restores_agent_history
 ======================== 4 failed, 105 passed in 7.52s ===========================
 ```
 
@@ -118,7 +118,7 @@ FAILED tests/integration/test_persistence_service.py::TestPersistenceService::te
 
 #### 方案 A: 在测试方法中添加清理
 
-在 `test_persistence_service.py` 的 `setup_method` 中添加：
+在 `test_persistence_service/test.py` 的 `setup_method` 中添加：
 
 ```python
 def setup_method(self):

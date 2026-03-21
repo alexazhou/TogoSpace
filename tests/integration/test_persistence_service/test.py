@@ -7,7 +7,7 @@ import pytest
 from service import orm_service, persistence_service, room_service
 from service.agent_service import Agent
 from util.llm_api_util import LlmApiMessage, OpenaiLLMApiRole
-from ..base import ServiceTestCase
+from ...base import ServiceTestCase
 
 TEAM = "test_team"
 TEAMS_CONFIG = [{
