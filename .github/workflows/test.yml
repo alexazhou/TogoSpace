@@ -39,3 +39,11 @@ jobs:
     - name: Run API tests
       run: |
         PYTHONPATH=src python -m pytest tests/api/ -v
+
+    - name: Run integration tests
+      run: |
+        PYTHONPATH=src python -m pytest tests/integration/ -v
+
+    - name: Run real tests
+      run: |
+        PYTHONPATH=src python -m pytest tests/real/ -v
