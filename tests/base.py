@@ -129,11 +129,10 @@ class ServiceTestCase:
 
     @classmethod
     def _start_mock_llm(cls):
-        os.environ["TEAMAGENT_MOCK_LLM_PORT"] = str(_find_free_port())
         cls.mock_llm_server = MockLLMServer()
         cls.mock_llm_server.start()
         _assert_port_ready(
-            get_mock_llm_api_url(cls.mock_llm_server.port),
+            get_mock_llm_api_url(),
             "MockLLM",
             method="POST",
             data=b"{}",
