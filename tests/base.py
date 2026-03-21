@@ -89,6 +89,76 @@ class ServiceTestCase:
     mock_llm_server: MockLLMServer = None
 
     # ------------------------------------------------------------------
+    # LLM Patching (In-Process Mocking)
+    # ------------------------------------------------------------------
+
+    @contextlib.contextmanager
+    def patch_infer(self, responses: list[dict] = None, handler=None):
+        """统一封装对 llm_service.infer 的 Mock 注入。
+        
+        用法 (简化字典):
+            with self.patch_infer(responses=[{"content": "你好"}]):
+                await ...
+
+        用法 (工具调用):
+            with self.patch_infer(responses=[{
+                "tool_calls": [{"name": "send_chat_msg", "arguments": {"msg": "hi"}}]
+            }]):
+                await ...
+        """
+        import unittest.mock as mock
+        target = "service.agent_service.llm_service.infer"
+        
+        if responses is not None:
+            # 将简化字典序列转换为 Mock 对象序列
+            mock_responses = [self.normalize_to_mock(r) for r in responses]
+            m = mock.AsyncMock(side_effect=mock_responses)
+            with mock.patch(target, m) as p:
+                yield p
+        elif handler is not None:
+            with mock.patch(target, side_effect=handler) as p:
+                yield p
+        else:
+            with mock.patch(target, new_callable=mock.AsyncMock) as p:
+                yield p
+
+    def normalize_to_mock(self, data: dict):
+        """将简化格式的响应字典转换为完整的 Mock 响应对象。"""
+        import unittest.mock as mock
+        from util.llm_api_util import LlmApiMessage, ToolCall
+        from constants import OpenaiLLMApiRole
+        import json
+
+        if isinstance(data, (mock.MagicMock, mock.AsyncMock)):
+            return data
+
+        content = data.get("content")
+        tool_calls_raw = data.get("tool_calls", [])
+        tool_calls = []
+
+        for tc in tool_calls_raw:
+            args = tc.get("arguments", {})
+            if isinstance(args, dict):
+                args = json.dumps(args, ensure_ascii=False)
+            tool_calls.append(ToolCall(
+                id=tc.get("id", f"call_{int(time.time() * 1000)}"),
+                function={"name": tc["name"], "arguments": args}
+            ))
+
+        msg = LlmApiMessage(
+            role=OpenaiLLMApiRole.ASSISTANT,
+            content=content,
+            tool_calls=tool_calls if tool_calls else None
+        )
+
+        # 模拟结构: resp.choices[0].message
+        mock_resp = mock.MagicMock()
+        mock_choice = mock.MagicMock()
+        mock_choice.message = msg
+        mock_resp.choices = [mock_choice]
+        return mock_resp
+
+    # ------------------------------------------------------------------
     # 类级别生命周期
     # ------------------------------------------------------------------
 

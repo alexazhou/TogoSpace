@@ -3,17 +3,14 @@ import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from constants import OpenaiLLMApiRole
 from tests.base import ServiceTestCase
-from util.llm_api_util import LlmApiMessage, ToolCall
 from service import (
     room_service,
     agent_service,
-    agent_service as agent_module,
     func_tool_service,
     message_bus,
     scheduler_service as scheduler,
@@ -26,22 +23,6 @@ _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "te
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
-
-
-def _make_infer_response(content=None, tool_calls=None):
-    msg = LlmApiMessage(role=OpenaiLLMApiRole.ASSISTANT, content=content, tool_calls=tool_calls)
-    choice = MagicMock()
-    choice.message = msg
-    resp = MagicMock()
-    resp.choices = [choice]
-    return resp
-
-
-def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
-    return ToolCall(
-        id=call_id,
-        function={"name": "send_chat_msg", "arguments": json.dumps({"room_name": room_name, "msg": msg})},
-    )
 
 
 @pytest.mark.forked
@@ -85,9 +66,9 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         assert len(room.messages) == 1
 
         async def fake_infer(model, ctx):
-            return _make_infer_response(tool_calls=[_send_msg_tool_call("general", "hello")])
+            return self.normalize_to_mock({"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "hello"}}]})
 
-        with patch("service.agent_service.llm_service.infer", fake_infer):
+        with self.patch_infer(handler=fake_infer):
             run_task = asyncio.create_task(scheduler.run())
             await asyncio.sleep(0.3)
             agent_messages = [m for m in room.messages if m.sender_name != "system"]
@@ -109,17 +90,16 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         room = room_service.get_room(f"general@{TEAM}")
 
         replies = {
-            "alice": [_make_infer_response(tool_calls=[_send_msg_tool_call("general", "from alice", "a1")])],
-            "bob": [_make_infer_response(tool_calls=[_send_msg_tool_call("general", "from bob", "b1")])],
+            "alice": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "from alice"}, "id": "a1"}]}],
+            "bob": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "from bob"}, "id": "b1"}]}],
         }
 
         async def fake_infer(model, ctx):
             name = next((n for n in replies if n in ctx.system_prompt), None)
-            if name and replies[name]:
-                return replies[name].pop(0)
-            return _make_infer_response(tool_calls=[_send_msg_tool_call("general", "...")])
+            res = replies[name].pop(0) if name and replies[name] else {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "..."}}]}
+            return self.normalize_to_mock(res)
 
-        with patch("service.agent_service.llm_service.infer", fake_infer):
+        with self.patch_infer(handler=fake_infer):
             run_task = asyncio.create_task(scheduler.run())
             room.start_scheduling()
             await asyncio.sleep(1.0)
