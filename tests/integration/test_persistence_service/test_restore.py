@@ -22,7 +22,7 @@ from service import (
 )
 
 TEAM = "test_team"
-_CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test_multi_agent", "config")
+_CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test_chat_flow", "config")
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
