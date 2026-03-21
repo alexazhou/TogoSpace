@@ -29,7 +29,7 @@
 - `tests/integration/test_room_service/test.py`
 - `tests/integration/test_room_service/test_turn_logic.py`
 - `tests/integration/test_agent_service/test_agent_service.py`
-- `tests/integration/test_multi_agent/test.py`
+- `tests/integration/test_chat_flow/test.py`
 - `tests/integration/test_persistence_service/test_restore.py`
 - `tests/integration/test_agent_service/test_sdk_do_send.py`
 - `tests/integration/test_func_tool_service/test.py`
