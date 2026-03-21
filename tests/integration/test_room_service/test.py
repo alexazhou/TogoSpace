@@ -1,6 +1,9 @@
-import pytest
-from unittest.mock import patch, MagicMock
+import os
+import sys
 from datetime import datetime
+from unittest.mock import patch, MagicMock
+
+import pytest
 
 import service.room_service as room_service
 from service.room_service import ChatRoom
@@ -10,12 +13,15 @@ from ...base import ServiceTestCase
 
 TEAM = "test_team"
 
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
+
+@pytest.mark.forked
 class TestChatRoom(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # ChatRoom 测试依赖 room_service 工厂方法创建实例。
-        await cls.areset_services()
         await room_service.startup()
 
     async def test_add_message(self):
@@ -78,11 +84,11 @@ class TestChatRoom(ServiceTestCase):
         assert "system" in log
 
 
+@pytest.mark.forked
 class TestRoomServiceFunctions(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # 只测 room_service 的状态与查询接口。
-        await cls.areset_services()
         await room_service.startup()
 
     async def test_create_room(self):
@@ -133,11 +139,11 @@ class TestRoomServiceFunctions(ServiceTestCase):
         assert "boot topic" in room.messages[0].content
 
 
+@pytest.mark.forked
 class TestRoomTurnScheduling(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # 轮转调度逻辑需要 room_service 的完整状态机。
-        await cls.areset_services()
         await room_service.startup()
 
     async def test_create_room_does_not_publish_first_agent(self):

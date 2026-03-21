@@ -1,8 +1,11 @@
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from constants import OpenaiLLMApiRole
 from tests.base import ServiceTestCase
@@ -21,6 +24,9 @@ from service import (
 TEAM = "test_team"
 _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_multi_agent", "config")
 
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+
 
 def _make_infer_response(content=None, tool_calls=None):
     msg = LlmApiMessage(role=OpenaiLLMApiRole.ASSISTANT, content=content, tool_calls=tool_calls)
@@ -38,6 +44,7 @@ def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
     )
 
 
+@pytest.mark.forked
 class TestPersistenceRestoreIntegration(ServiceTestCase):
     async def _reset_runtime_services(self):
         scheduler.shutdown()

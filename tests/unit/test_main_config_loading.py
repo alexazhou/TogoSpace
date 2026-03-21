@@ -1,6 +1,15 @@
 import json
+import os
+import sys
+
+import pytest
 
 from main import _load_runtime_configs
+
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+
+pytestmark = pytest.mark.forked
 
 
 def test_runtime_configs_load_from_config_dir(tmp_path):

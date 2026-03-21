@@ -1,7 +1,9 @@
 """integration tests for service.scheduler_service"""
 import asyncio
 import logging
+import os
 import pytest
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import service.room_service as room_service
@@ -15,6 +17,9 @@ from ...base import ServiceTestCase
 
 TEAM = "test_team"
 
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+
 
 def _make_mock_agent(name: str, team_name: str = TEAM) -> Agent:
     """构造最小可运行的 Agent mock，用于观察 scheduler 调度行为。"""
@@ -27,15 +32,15 @@ def _make_mock_agent(name: str, team_name: str = TEAM) -> Agent:
     return agent
 
 
+@pytest.mark.forked
 class TestSchedulerRun(ServiceTestCase):
-    @classmethod
-    async def async_setup_class(cls):
-        # scheduler 场景依赖房间数据结构，因此先启动 room_service。
-        await cls.areset_services()
-        await room_service.startup()
+    def setup_method(self):
+        # 清理可能残留的 scheduler 状态，避免测试间污染
+        scheduler.shutdown()
 
     async def test_scheduler_run_terminates_on_stop(self):
         """调用 scheduler.shutdown() 后，scheduler.run() 应正常结束。"""
+        await room_service.startup()
         await scheduler.startup([])
         run_task = asyncio.create_task(scheduler.run())
         await asyncio.sleep(0.1)

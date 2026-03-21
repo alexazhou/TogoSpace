@@ -1,4 +1,9 @@
 """integration tests for service.func_tool_service — 需要 func_tool_service.startup()"""
+import os
+import sys
+
+import pytest
+
 import service.func_tool_service as func_tool_service
 import service.room_service as room_service
 from model.chat_context import ChatContext
@@ -6,12 +11,15 @@ from ...base import ServiceTestCase
 
 TEAM = "test_team"
 
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
+
+@pytest.mark.forked
 class TestFuncToolServiceInit(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # 这组用例只验证工具注册生命周期，不依赖房间状态。
-        await cls.areset_services()
         await func_tool_service.startup()
 
     async def test_init_loads_tools(self):
@@ -24,11 +32,11 @@ class TestFuncToolServiceInit(ServiceTestCase):
         assert func_tool_service.get_tools() == []
 
 
+@pytest.mark.forked
 class TestRunToolCall(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # send_chat_msg 依赖房间上下文，因此同时初始化 room + tool service。
-        await cls.areset_services()
         await room_service.startup()
         await func_tool_service.startup()
 

@@ -1,21 +1,18 @@
+import os
+import sys
+
 import aiohttp
+import pytest
 
 from ...base import ServiceTestCase
 
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
+
+@pytest.mark.forked
 class _ApiServiceCase(ServiceTestCase):
-    """API 测试基类：每个测试类开始前重置一次进程内 service 状态。"""
-
-    @classmethod
-    def setup_class(cls):
-        super().setup_class()
-        # 后端子进程外置，进程内单例需要显式归零，避免类间污染。
-        cls.reset_services()
-
-    @classmethod
-    def teardown_class(cls):
-        cls.cleanup_services()
-        super().teardown_class()
+    """API 测试基类：每个测试类在独立子进程中启动后端与 MockLLM。"""
 
 
 class TestAgentController(_ApiServiceCase):

@@ -17,7 +17,11 @@ import service.func_tool_service as func_tool_service
 import service.scheduler_service as scheduler
 import service.persistence_service as persistence_service
 import service.orm_service as orm_service
-from mock_llm_server import MockLLMServer, MOCK_LLM_API_URL, MOCK_LLM_HOST, MOCK_LLM_PORT
+from mock_llm_server import (
+    MockLLMServer,
+    MOCK_LLM_HOST,
+    get_mock_llm_api_url,
+)
 
 _SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 _BACKEND_READY_TIMEOUT = 20
@@ -60,8 +64,7 @@ class ServiceTestCase:
     """基础测试类：统一管理测试类级别的初始化与清理。
 
     类级生命周期由 setup_class / teardown_class 管理。
-    推荐在 async_setup_class / async_teardown_class 中调用
-    areset_services / acleanup_services 做进程内状态隔离。
+    子类按需在 async_setup_class / async_teardown_class 中初始化 service。
 
     后端子进程支持：
         requires_backend = True   — 在整个测试类前后自动启动/停止后端子进程
@@ -126,10 +129,11 @@ class ServiceTestCase:
 
     @classmethod
     def _start_mock_llm(cls):
+        os.environ["TEAMAGENT_MOCK_LLM_PORT"] = str(_find_free_port())
         cls.mock_llm_server = MockLLMServer()
         cls.mock_llm_server.start()
         _assert_port_ready(
-            MOCK_LLM_API_URL,
+            get_mock_llm_api_url(cls.mock_llm_server.port),
             "MockLLM",
             method="POST",
             data=b"{}",
@@ -152,7 +156,7 @@ class ServiceTestCase:
                 - 简化格式：{"content": "..."}
                 - 完整格式：{"choices": [{"message": {...}}]}
         """
-        url = f"http://{MOCK_LLM_HOST}:{MOCK_LLM_PORT}/set_response"
+        url = f"http://{MOCK_LLM_HOST}:{cls.mock_llm_server.port}/set_response"
         req = urllib.request.Request(
             url,
             data=json.dumps({"response": response}).encode("utf-8"),
@@ -170,7 +174,7 @@ class ServiceTestCase:
         Returns:
             响应字典，队列为空时返回 None
         """
-        url = f"http://{MOCK_LLM_HOST}:{MOCK_LLM_PORT}/get_response"
+        url = f"http://{MOCK_LLM_HOST}:{cls.mock_llm_server.port}/get_response"
         with urllib.request.urlopen(url, timeout=2) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"获取 Mock LLM 响应失败: {resp.status}")
@@ -289,38 +293,6 @@ class ServiceTestCase:
             return "(无输出)"
         lines = text.strip().splitlines()
         return "\n".join(lines[-max_lines:])
-
-    @classmethod
-    def reset_services(cls):
-        """同步壳：在非异步 setup_class 中安全调用异步重置逻辑。"""
-        cls._run_maybe_async(cls.areset_services())
-
-    @classmethod
-    def cleanup_services(cls):
-        """同步壳：在非异步 teardown_class 中安全调用异步清理逻辑。"""
-        cls._run_maybe_async(cls.acleanup_services())
-
-    @classmethod
-    async def areset_services(cls):
-        """异步重置 in-process service 状态。"""
-        await message_bus.startup()
-        room_service.shutdown()
-        await agent_service.shutdown()
-        await persistence_service.shutdown()
-        await orm_service.shutdown()
-        func_tool_service.shutdown()
-        scheduler.shutdown()
-
-    @classmethod
-    async def acleanup_services(cls):
-        """异步清理 in-process service 状态。"""
-        scheduler.shutdown()
-        func_tool_service.shutdown()
-        await persistence_service.shutdown()
-        await orm_service.shutdown()
-        await agent_service.shutdown()
-        room_service.shutdown()
-        message_bus.shutdown()
 
     @staticmethod
     def _run_maybe_async(result):

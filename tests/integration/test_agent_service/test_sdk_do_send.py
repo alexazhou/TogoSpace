@@ -1,4 +1,9 @@
 """integration tests for ClaudeSdkAgentDriver send/skip routing behavior"""
+import os
+import sys
+
+import pytest
+
 from service import room_service
 from service.agent_service import Agent
 from service.agent_service.driver.claude_sdk import ClaudeSdkAgentDriver
@@ -8,13 +13,16 @@ from ...base import ServiceTestCase
 
 TEAM = "test_team"
 
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
+
+@pytest.mark.forked
 class TestSdkDoSend(ServiceTestCase):
     """测试 ClaudeSdkAgentDriver._handle_claude_sdk_tool_call：当前房间 vs 跨房间发言的路由与 done 标记行为。"""
 
     @classmethod
     async def async_setup_class(cls):
-        await cls.areset_services()
         await room_service.startup()
 
     async def _make_driver_with_room(self, agent_name: str, current_room_name: str):
@@ -86,10 +94,10 @@ class _FakeClaudeClient:
         return None
 
 
+@pytest.mark.forked
 class TestClaudeSdkAgentDriver(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
-        await cls.areset_services()
         await room_service.startup()
 
     async def test_run_chat_turn_requires_started_client(self):

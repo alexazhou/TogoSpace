@@ -1,5 +1,9 @@
-"""unit tests for tool_loader utilities and individual tool functions"""
+"""integration tests for tool_loader utilities and service-backed tool functions"""
+import os
+import sys
 from typing import Literal, Optional
+
+import pytest
 
 import service.room_service as room_service
 from service.func_tool_service.tool_loader import (
@@ -20,7 +24,11 @@ from ...base import ServiceTestCase
 
 TEAM = "test_team"
 
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
+
+@pytest.mark.forked
 class TestPythonTypeToJsonSchema(ServiceTestCase):
     async def test_str(self):
         """str 映射为 JSON Schema string。"""
@@ -53,6 +61,7 @@ class TestPythonTypeToJsonSchema(ServiceTestCase):
         assert python_type_to_json_schema(Custom) == {"type": "object"}
 
 
+@pytest.mark.forked
 class TestGetFunctionMetadata(ServiceTestCase):
     async def test_name_is_set(self):
         """metadata 中 name 字段与注册名一致。"""
@@ -76,6 +85,7 @@ class TestGetFunctionMetadata(ServiceTestCase):
         assert "_context" not in props
 
 
+@pytest.mark.forked
 class TestBuildTools(ServiceTestCase):
     async def test_builds_tool_for_each_entry(self):
         """注册表中每个函数都应产出一个 Tool 定义。"""
@@ -92,11 +102,11 @@ class TestBuildTools(ServiceTestCase):
         assert len(build_tools({"get_weather": get_weather})) == 1
 
 
+@pytest.mark.forked
 class TestToolFunctions(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # send_chat_msg/get_agent_list 依赖 room_service 上下文。
-        await cls.areset_services()
         await room_service.startup()
 
     async def test_get_weather_celsius(self):
@@ -201,4 +211,3 @@ class TestToolFunctions(ServiceTestCase):
 
         assert not result["success"] and "alice" in result["message"]
         assert room.get_current_turn_agent() == "alice"
-
