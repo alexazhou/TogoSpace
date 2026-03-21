@@ -308,3 +308,35 @@ class TestRoomTurnLogic(ServiceTestCase):
 
         # 第二轮不是全员跳过（alice 正常发言），房间应继续调度
         assert room.state == RoomState.SCHEDULING
+
+    async def test_sliding_window_skip_stop(self):
+        """
+        测试点：滑动窗口跳过判定。
+        当所有 AI Agent 自上次发言以来都至少跳过一次，立即停止调度（无需等到本轮结束）。
+        场景：Alice 发言 -> Alice 结束 -> Bob 跳过 -> Charlie 跳过 -> (下一轮) Alice 跳过 -> 立即停止。
+        """
+        room_name = "test_sliding"
+        agents = ["alice", "bob", "charlie"]
+        await room_service.create_room(TEAM, room_name, agents, max_turns=10)
+        room = room_service.get_room(f"{room_name}@{TEAM}")
+
+        with patch("service.message_bus.publish"):
+            # 1. Alice 发言
+            await room.add_message("alice", "hello")
+            room.finish_turn("alice") # pos -> 1 (bob)
+            
+            # 2. Bob 跳过
+            room.skip_turn("bob") # pos -> 2 (charlie), skipped={bob}
+            assert room.state == RoomState.SCHEDULING
+            
+            # 3. Charlie 跳过
+            room.skip_turn("charlie") # pos -> 0 (alice), index -> 1, skipped={bob, charlie}
+            assert room.state == RoomState.SCHEDULING
+            
+            # 4. Alice 跳过
+            # 此时 AI 成员全员自上次消息以来都已跳过，应立即停止，不再分发给 Bob
+            room.skip_turn("alice") # pos -> 1 (bob), index -> 1, skipped={bob, charlie, alice}
+            
+        assert room.state == RoomState.IDLE
+        assert room.get_current_turn_agent() == "bob"
+        assert room._turn_index == 1
