@@ -17,7 +17,7 @@ from service.func_tool_service.tools import (
     calculate,
     send_chat_msg,
     get_agent_list,
-    skip_chat_msg,
+    finish_chat_turn,
 )
 from model.chat_context import ChatContext
 from ...base import ServiceTestCase
@@ -201,13 +201,13 @@ class TestToolFunctions(ServiceTestCase):
         await send_chat_msg("dst", "cross-room msg", _context=ctx)
         assert len(src.messages) == before_count
 
-    async def test_skip_chat_msg_rejects_non_current_agent(self):
-        """不是当前发言人时，skip_chat_msg 不应推进轮次。"""
+    async def test_finish_chat_turn_rejects_non_current_agent(self):
+        """不是当前发言人时，finish_chat_turn 不应推进轮次。"""
         await room_service.create_room(TEAM, "turn_room", ["alice", "bob"], max_turns=3)
         room = room_service.get_room(f"turn_room@{TEAM}")
         ctx = ChatContext(agent_name="bob", team_name=TEAM, chat_room=room)
 
-        result = skip_chat_msg(_context=ctx)
+        result = finish_chat_turn(_context=ctx)
 
         assert not result["success"] and "alice" in result["message"]
         assert room.get_current_turn_agent() == "alice"

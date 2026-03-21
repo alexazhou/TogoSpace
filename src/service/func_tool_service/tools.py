@@ -128,31 +128,31 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
     await target_room.add_message(_context.agent_name, msg)
 
     if target_room is _context.chat_room:
-        return {"success": True, "message": "消息已发送，本轮发言结束。"}
+        return {"success": True, "message": f"消息已发送到 {_context.chat_room.name}。你可以继续调用工具，或者调用 finish_chat_turn 结束本轮行动。"}
 
     assert _context.chat_room is not None, "send_chat_msg: 跨房间发言时 chat_room 不应为 None"
 
     return {"success": True, "message": (
         f"消息已发送到 {target_room.name}。"
-        f"你还需要调用 send_chat_msg 向当前房间 {_context.chat_room.name} 发言，或调用 skip_chat_msg 跳过。"
+        f"你还需要在本房间 {_context.chat_room.name} 发言（可选），最后调用 finish_chat_turn 结束本轮。"
     )}
 
 
-def skip_chat_msg(_context: ChatContext = None) -> dict:
-    """跳过本次发言。当你觉得当前话题不需要回复，或者没有话要说时调用此工具。"""
+def finish_chat_turn(_context: ChatContext = None) -> dict:
+    """结束本轮行动。当你完成所有发言和工具调用后，必须调用此工具来切换到下一位成员。"""
     if _context is None or _context.chat_room is None:
-        logger.warning("跳过发言失败，聊天室上下文未设置")
+        logger.warning("结束行动失败，聊天室上下文未设置")
         return {"success": False, "message": "当前没有激活的房间上下文。"}
 
-    logger.info(f"Agent 跳过发言: agent={_context.agent_name}")
-    ok = _context.chat_room.skip_turn(sender=_context.agent_name)
+    logger.info(f"Agent 结束行动: agent={_context.agent_name}")
+    ok = _context.chat_room.finish_turn(sender=_context.agent_name)
 
     if not ok:
         current = _context.chat_room.get_current_turn_agent()
-        logger.warning(f"跳过发言失败，当前应由 {current} 发言: agent={_context.agent_name}")
+        logger.warning(f"结束行动失败，当前应由 {current} 发言: agent={_context.agent_name}")
         return {"success": False, "message": f"现在不是你的发言轮次（当前应由 {current} 发言），请勿再调用任何工具。"}
 
-    return {"success": True, "message": "已跳过本轮发言。"}
+    return {"success": True, "message": "已结束本轮行动。"}
 
 
 def task_done() -> dict:
@@ -167,6 +167,6 @@ FUNCTION_REGISTRY: dict[str, callable] = {
     "calculate": calculate,
     "get_agent_list": get_agent_list,
     "send_chat_msg": send_chat_msg,
-    "skip_chat_msg": skip_chat_msg,
+    "finish_chat_turn": finish_chat_turn,
     "task_done": task_done,
 }

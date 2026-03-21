@@ -6,3 +6,4 @@ __pycache__
 logs
 *.pid
 simu_terminal_go
+.claude/

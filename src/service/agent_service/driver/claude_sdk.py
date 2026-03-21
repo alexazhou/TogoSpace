@@ -58,7 +58,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
             "chat-tools",
             tools=[
                 self._build_claude_sdk_tool("send_chat_msg"),
-                self._build_claude_sdk_tool("skip_chat_msg"),
+                self._build_claude_sdk_tool("finish_chat_turn"),
             ],
         )
         options = ClaudeAgentOptions(
@@ -158,11 +158,8 @@ class ClaudeSdkAgentDriver(AgentDriver):
             result_data = json.loads(result)
             is_error = not result_data.get("success", True)
             if not is_error:
-                if tool_name == "skip_chat_msg":
+                if tool_name == "finish_chat_turn":
                     self._turn_done = True
-                elif tool_name == "send_chat_msg":
-                    if args.get("room_name") == self.host.current_room.name:
-                        self._turn_done = True
 
             return {"content": [{"type": "text", "text": result}], "isError": is_error}
 
@@ -173,7 +170,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
         turn_prompt = (
             f"新收到的消息：\n{context_text}\n\n"
             f"现在轮到你（{self.host.name}）在 {room.name} 发言。"
-            f"你必须调用 send_chat_msg 发送消息或 skip_chat_msg 跳过本轮发言。"
+            f"你必须调用工具来行动。如果你已完成发言和所有工具调用，请务必调用 finish_chat_turn 结束本轮行动。"
         )
 
         client = self._sdk_client
@@ -187,7 +184,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
         try:
             await client.query(turn_prompt)
             logger.info(f"SDK prompt 已发送，等待响应: agent={self.host.key}")
-            hint = f"你必须调用 send_chat_msg 将回复发送到 {room.name} 聊天室，或调用 skip_chat_msg 跳过本轮。直接输出的文字不会出现在聊天室里。"
+            hint = f"你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，请务必调用 finish_chat_turn 结束本轮（即跳过）。直接输出的文字不会出现在聊天室里。"
             for attempt in range(max_attempts):
                 if attempt > 0:
                     logger.info(f"SDK 注入发言提醒: agent={self.host.key}, attempt={attempt}")
