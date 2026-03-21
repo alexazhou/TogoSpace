@@ -241,16 +241,6 @@ factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/agent_se
 - “发到当前房间即本轮结束”的规则
 - “跨房间发消息但当前轮未结束”的规则
 
-## 测试策略
-
-为了保证不同驱动的行为一致性，建议使用 `tests/base.py` 中的 `ServiceTestCase` 进行集成测试：
-
-1. **Mock 推理逻辑**：使用 `self.patch_infer(responses=[...])` 模拟 LLM 返回的内容或工具调用（详见 [测试架构文档](./testing_architecture.md)）。
-2. **验证动作执行**：通过检查 `room.messages` 验证驱动是否正确调用了 `send_chat_msg` 并将其落库。
-3. **状态隔离验证**：验证驱动在处理跨房间消息时，是否能正确维护当前房间的 `synced_count`，避免消息重复同步。
-
-具体测试案例参考：`tests/integration/test_agent_service/`。
-
 ## 配置建议
 
 建议 agent 配置逐步从旧字段迁移到新字段。
