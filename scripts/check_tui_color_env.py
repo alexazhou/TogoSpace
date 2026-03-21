@@ -10,6 +10,8 @@ import subprocess
 import sys
 from importlib import metadata
 
+from rich.console import Console
+
 
 def _print_kv(key: str, value: object) -> None:
     print(f"{key}: {value}")
@@ -53,6 +55,35 @@ def _print_truecolor_demo() -> None:
         print(f"\x1b[38;2;{i};180;210mTRUECOLOR-{i:03d}\x1b[0m")
 
 
+def _print_rich_console_info() -> None:
+    console = Console()
+    print("\nRich console:")
+    _print_kv("rich.is_terminal", console.is_terminal)
+    _print_kv("rich.color_system", console.color_system)
+    _print_kv("rich.legacy_windows", console.legacy_windows)
+
+
+def _print_ansi16_demo() -> None:
+    print("\nANSI 16-color demo:")
+    if not sys.stdout.isatty():
+        print("stdout is not a TTY; skipping ANSI color demo.")
+        return
+    for i in range(16):
+        print(f"\x1b[48;5;{i}m {i:>2} \x1b[0m", end=" ")
+    print()
+
+
+def _print_256_demo() -> None:
+    print("\n256-color demo:")
+    if not sys.stdout.isatty():
+        print("stdout is not a TTY; skipping ANSI color demo.")
+        return
+    steps = [16, 21, 27, 33, 39, 45, 51, 87, 123, 159, 195, 231]
+    for i in steps:
+        print(f"\x1b[48;5;{i}m {i:>3} \x1b[0m", end=" ")
+    print()
+
+
 def main() -> int:
     _print_kv("python", sys.version.replace("\n", " "))
     _print_kv("platform", platform.platform())
@@ -63,6 +94,9 @@ def main() -> int:
     _print_kv("TERM_PROGRAM", os.environ.get("TERM_PROGRAM", ""))
     _print_kv("tput colors", _run_tput_colors())
     _print_kv("isatty(stdout)", sys.stdout.isatty())
+    _print_rich_console_info()
+    _print_ansi16_demo()
+    _print_256_demo()
     _print_truecolor_demo()
     return 0
 
