@@ -4,6 +4,7 @@ import json
 import os
 import sys
 
+import pytest
 import service.room_service as room_service
 import service.agent_service as agent_service
 import service.func_tool_service as func_tool_service
@@ -19,6 +20,7 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
+@pytest.mark.forked
 class TestRealSimpleChat(ServiceTestCase):
     """简单对话场景：两个 agent 在房间中完成对话后退出"""
 

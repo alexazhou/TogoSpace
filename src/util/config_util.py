@@ -70,14 +70,7 @@ def load_llm_service_config(config_dir: str = None) -> dict:
     services = {s["name"]: s for s in cfg["llm_services"]}
     if active not in services:
         raise ValueError(f"active_llm_service '{active}' 未在 llm_services 中定义")
-    service = dict(services[active])
-    mock_port = os.environ.get("TEAMAGENT_MOCK_LLM_PORT")
-    if mock_port and "base_url" in service:
-        service["base_url"] = service["base_url"].replace(
-            "127.0.0.1:19876",
-            f"127.0.0.1:{mock_port}",
-        )
-    return service
+    return dict(services[active])
 
 
 def load_persistence_config(config_dir: str = None) -> dict:

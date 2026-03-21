@@ -1,13 +1,12 @@
 """
 本地 mock LLM API 服务，用 Tornado 实现。
-支持动态配置响应队列，可在测试中按需设置不同响应。
+支持配置响应队列，可在测试中按需设置不同响应。
 队列为空时使用默认响应（send_chat_msg tool call）。
 支持 OpenAI 和 Anthropic 两种格式。
 在独立线程中运行 IOLoop，与 pytest-asyncio 的事件循环互不干扰。
 """
 import asyncio
 import json
-import os
 import re
 import threading
 import time
@@ -24,7 +23,7 @@ MOCK_LLM_PORT = 19876
 
 
 def get_mock_llm_port() -> int:
-    return int(os.environ.get("TEAMAGENT_MOCK_LLM_PORT", str(MOCK_LLM_PORT)))
+    return MOCK_LLM_PORT
 
 
 def get_mock_llm_api_url(port: int | None = None) -> str:
@@ -289,7 +288,7 @@ class MessagesHandler(tornado.web.RequestHandler):
 
 
 class MockLLMServer:
-    """Mock LLM API server using fixed port for testing.
+    """Mock LLM API server using a fixed port for testing.
 
     支持动态响应队列：
     - POST /set_response - 设置响应，推入队列
@@ -299,7 +298,7 @@ class MockLLMServer:
     """
 
     def __init__(self):
-        self.port: int = get_mock_llm_port()
+        self.port: int = MOCK_LLM_PORT
         self._ioloop: tornado.ioloop.IOLoop = None
         self._thread: threading.Thread = None
         self._started = threading.Event()
