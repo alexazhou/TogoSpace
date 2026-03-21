@@ -101,7 +101,11 @@ class ChatRoom:
         else:
             logger.info(f"房间 {self.key} 收到来自 {sender} 的插话，保持当前发言位 (当前应轮到 {current_expected})")
 
-        # 3. 如果刚才从 IDLE 唤醒，我们需要手动重发当前轮次事件以重启循环
+        # 3. 只要有真实消息（非系统消息），就清空跳过记录，让所有人重新有机会回应
+        if sender != "system" and self._round_skipped:
+            self._round_skipped = set()
+
+        # 4. 如果刚才从 IDLE 唤醒，我们需要手动重发当前轮次事件以重启循环
         if was_idle and publish_events:
             self._publish_current_turn()
 
@@ -157,28 +161,26 @@ class ChatRoom:
 
         self._turn_pos += 1
 
-        # 本轮所有人发言完毕 → 轮次 +1，重置位置
+        # 1. 检查是否达到轮次边界
         if self._turn_pos >= len(self.agents):
-            # 全员名单与跳过名单对比（排除 Operator，它不参与 AI 发言判定）
-            ai_agents = set(a for a in self.agents if a != SpecialAgent.OPERATOR)
-            all_skipped = ai_agents and ai_agents.issubset(self._round_skipped)
-            self._round_skipped = set()  # 下一轮重新收集
             self._turn_index += 1
             self._turn_pos = 0
 
-            # 全员跳过 → 立即停止调度
-            if all_skipped:
-                self._state = RoomState.IDLE
-                logger.info(f"房间 {self.key} 本轮所有成员均跳过发言，停止调度")
-                return
-
-            # 正常达到最大轮次
+            # 正常达到最大轮次则停止
             if self._turn_index >= self._max_turns:
                 self._state = RoomState.IDLE
                 logger.info(f"房间 {self.key} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
                 return
 
-        # 正常发布下一位成员的发言事件
+        # 2. 检查是否所有 AI Agent 均已跳过（自上次有消息以来）
+        # 如果是，则立即停止调度，不再移动到下一位
+        ai_agents = set(a for a in self.agents if a != SpecialAgent.OPERATOR)
+        if ai_agents and ai_agents.issubset(self._round_skipped):
+            self._state = RoomState.IDLE
+            logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
+            return
+
+        # 3. 正常发布下一位成员的发言事件
         if publish_events:
             self._publish_current_turn()
 

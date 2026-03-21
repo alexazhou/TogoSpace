@@ -139,7 +139,8 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
 
 
 def finish_chat_turn(_context: ChatContext = None) -> dict:
-    """结束本轮行动。当你完成所有发言和工具调用后，必须调用此工具来切换到下一位成员。"""
+    """结束本轮行动。当你完成所有发言和工具调用后，必须调用此工具来切换到下一位成员。
+    如果你觉得当前话题不需要回复，或者没有话要说，请直接调用此工具来跳过本轮。"""
     if _context is None or _context.chat_room is None:
         logger.warning("结束行动失败，聊天室上下文未设置")
         return {"success": False, "message": "当前没有激活的房间上下文。"}
