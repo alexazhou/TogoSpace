@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import sys
 
 import service.room_service as room_service
 import service.agent_service as agent_service
@@ -14,6 +15,9 @@ from util import config_util, llm_api_util
 
 _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
 
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+
 
 class TestRealSimpleChat(ServiceTestCase):
     """简单对话场景：两个 agent 在房间中完成对话后退出"""
@@ -25,7 +29,6 @@ class TestRealSimpleChat(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         """初始化服务和配置"""
-        await cls.areset_services()
 
         # 加载 LLM 配置并启动服务
         llm_cfg = config_util.load_llm_service_config(_CONFIG_DIR)
@@ -58,7 +61,7 @@ class TestRealSimpleChat(ServiceTestCase):
     async def test_two_agents_chat_and_exit(self):
         """Alice 和 Bob 各发一条消息后房间自动退出"""
         # 初始化 LLM API 客户端（使用当前事件循环）
-        init()
+        llm_api_util.init()
 
         room_key = "general@default"
 

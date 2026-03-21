@@ -1,26 +1,23 @@
 import asyncio
 import json
+import os
+import sys
 import threading
 
 import aiohttp
+import pytest
 
 from ...base import ServiceTestCase
 
 _TEAM = "e2e"
 
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
+
+@pytest.mark.forked
 class _ApiServiceCase(ServiceTestCase):
-    """API 测试基类：复用后端，同时重置进程内单例状态。"""
-
-    @classmethod
-    def setup_class(cls):
-        super().setup_class()
-        cls.reset_services()
-
-    @classmethod
-    def teardown_class(cls):
-        cls.cleanup_services()
-        super().teardown_class()
+    """API 测试基类：每个测试类在独立子进程中启动后端与 MockLLM。"""
 
 
 class TestWsController(_ApiServiceCase):

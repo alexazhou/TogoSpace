@@ -7,6 +7,7 @@
 """
 import asyncio
 import json
+import os
 import re
 import threading
 import time
@@ -16,13 +17,22 @@ import tornado.httpserver
 import tornado.ioloop
 import tornado.web
 
-
-MOCK_LLM_PORT = 19876
 MOCK_LLM_HOST = "127.0.0.1"
 MOCK_LLM_API_PATH = "/v1/chat/completions"
-MOCK_LLM_API_URL = f"http://{MOCK_LLM_HOST}:{MOCK_LLM_PORT}{MOCK_LLM_API_PATH}"
 MOCK_LLM_ANTHROPIC_PATH = "/v1/messages"
-MOCK_LLM_ANTHROPIC_URL = f"http://{MOCK_LLM_HOST}:{MOCK_LLM_PORT}{MOCK_LLM_ANTHROPIC_PATH}"
+MOCK_LLM_PORT = 19876
+
+
+def get_mock_llm_port() -> int:
+    return int(os.environ.get("TEAMAGENT_MOCK_LLM_PORT", str(MOCK_LLM_PORT)))
+
+
+def get_mock_llm_api_url(port: int | None = None) -> str:
+    return f"http://{MOCK_LLM_HOST}:{port or get_mock_llm_port()}{MOCK_LLM_API_PATH}"
+
+
+def get_mock_llm_anthropic_url(port: int | None = None) -> str:
+    return f"http://{MOCK_LLM_HOST}:{port or get_mock_llm_port()}{MOCK_LLM_ANTHROPIC_PATH}"
 
 
 def _default_openai_response(room_name: str = "general") -> Dict[str, Any]:
@@ -289,7 +299,7 @@ class MockLLMServer:
     """
 
     def __init__(self):
-        self.port: int = MOCK_LLM_PORT
+        self.port: int = get_mock_llm_port()
         self._ioloop: tornado.ioloop.IOLoop = None
         self._thread: threading.Thread = None
         self._started = threading.Event()

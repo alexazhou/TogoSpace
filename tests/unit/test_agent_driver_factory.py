@@ -1,4 +1,14 @@
+import os
+import sys
+
+import pytest
+
 from service.agent_service.driver import normalize_driver_config
+
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+
+pytestmark = pytest.mark.forked
 
 
 def test_normalize_driver_config_defaults_to_native():

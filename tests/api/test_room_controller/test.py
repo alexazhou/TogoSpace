@@ -1,4 +1,6 @@
 import asyncio
+import os
+import sys
 import time
 
 import aiohttp
@@ -10,19 +12,13 @@ from ...base import ServiceTestCase
 _TEAM = "e2e"
 _V6_TEAM = "v6test"
 
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
+
+@pytest.mark.forked
 class _ApiServiceCase(ServiceTestCase):
-    """API 测试基类：后端复用，进程内 service 每类重置。"""
-
-    @classmethod
-    def setup_class(cls):
-        super().setup_class()
-        cls.reset_services()
-
-    @classmethod
-    def teardown_class(cls):
-        cls.cleanup_services()
-        super().teardown_class()
+    """API 测试基类：每个测试类在独立子进程中启动后端与 MockLLM。"""
 
 
 class TestRoomController(_ApiServiceCase):

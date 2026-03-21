@@ -1,6 +1,9 @@
 """integration tests for core behavior in service.agent_service"""
 import json
 import os
+import sys
+
+import pytest
 
 from service import agent_service, room_service
 from ...base import ServiceTestCase
@@ -8,13 +11,16 @@ from ...base import ServiceTestCase
 TEAM = "test_team"
 _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
 
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
+
+@pytest.mark.forked
 class _AgentServiceCase(ServiceTestCase):
     """AgentService 集成测试基类：统一加载测试专用 agent/team 配置。"""
 
     @classmethod
     async def async_setup_class(cls):
-        await cls.areset_services()
         await room_service.startup()
         agents_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())

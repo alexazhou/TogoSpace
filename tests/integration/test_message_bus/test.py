@@ -1,10 +1,19 @@
-"""unit tests for service.message_bus"""
+"""integration tests for service.message_bus state transitions"""
+import os
+import sys
+
+import pytest
+
 import service.message_bus as message_bus
 from service.message_bus import Message
 from constants import MessageBusTopic
 from ...base import ServiceTestCase
 
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
+
+@pytest.mark.forked
 class TestMessageBus(ServiceTestCase):
     def test_subscribe_and_publish(self):
         """订阅后发布消息，订阅者应收到 Message 对象及原始 payload。"""

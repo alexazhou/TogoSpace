@@ -2,7 +2,10 @@
 import asyncio
 import json
 import os
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 import service.room_service as room_service
 import service.agent_service as agent_service
@@ -14,6 +17,9 @@ from ...base import ServiceTestCase
 
 TEAM = "test_team"
 _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
+
+if os.name == "posix" and sys.platform == "darwin":
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
 def _make_infer_response(content=None, tool_calls=None):
@@ -34,11 +40,11 @@ def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
     )
 
 
+@pytest.mark.forked
 class TestIntegrationMultiAgentChat(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # 按真实启动顺序拉起 service，并加载 integration 专用配置。
-        await cls.areset_services()
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
         await room_service.startup()
