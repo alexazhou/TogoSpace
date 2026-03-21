@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class NativeAgentDriver(AgentDriver):
     async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
-        hint = f"你必须调用 send_chat_msg 向当前房间 {room.name} 发送消息或 skip_chat_msg 跳过发言，不能直接输出文字。"
+        hint = f"你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，请务必调用 finish_chat_turn 结束本轮（即跳过）。"
         max_retries = 3
         for _ in range(max_retries):
             turn_done = await self._run_until_reply(
@@ -48,18 +48,9 @@ class NativeAgentDriver(AgentDriver):
             last_call: llm_api_util.ToolCall = tool_calls[-1]
             function = last_call.function if isinstance(last_call.function, dict) else {}
             name = function.get("name")
-            args = function.get("arguments", "")
 
-            if name == "skip_chat_msg":
+            if name == "finish_chat_turn":
                 return True
-
-            if name == "send_chat_msg":
-                try:
-                    target = json.loads(args).get("room_name")
-                    if target == room.name or target == room.key:
-                        return True
-                except Exception:
-                    pass
 
         logger.warning(f"达到最大函数调用次数: agent={self.host.key}, max={max_function_calls}")
 

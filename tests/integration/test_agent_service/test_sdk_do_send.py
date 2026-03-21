@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from service import room_service
+from service import room_service, agent_service
 from service.agent_service import Agent
 from service.agent_service.driver.claude_sdk import ClaudeSdkAgentDriver
 from service.agent_service.driver.base import AgentDriverConfig
@@ -35,10 +35,16 @@ class TestSdkDoSend(ServiceTestCase):
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
         return driver, agent, room
 
-    async def test_send_to_current_room_sets_done(self):
-        """发到当前房间后，本轮应结束（_turn_done 置 True）。"""
+    async def test_send_to_current_room_does_not_set_done(self):
+        """发到当前房间后，本轮不应结束（_turn_done 应为 False）。"""
         driver, agent, room = await self._make_driver_with_room("alice", "lobby")
         await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "lobby", "msg": "hi everyone"})
+        assert not driver._turn_done
+
+    async def test_finish_chat_turn_sets_done(self):
+        """调用 finish_chat_turn 后，本轮应结束（_turn_done 置 True）。"""
+        driver, agent, room = await self._make_driver_with_room("alice", "lobby")
+        await driver._build_claude_sdk_tool("finish_chat_turn").handler({})
         assert driver._turn_done
 
     async def test_send_to_current_room_message_appears(self):
@@ -47,11 +53,11 @@ class TestSdkDoSend(ServiceTestCase):
         await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "lobby", "msg": "hi everyone"})
         assert any(m.content == "hi everyone" for m in room.messages)
 
-    async def test_send_to_current_room_result_says_done(self):
-        """发到当前房间时，返回结果应包含 '本轮发言结束' 字样。"""
+    async def test_send_to_current_room_result_prompts_to_finish(self):
+        """发到当前房间时，返回结果应提示可以继续或调用 finish_chat_turn。"""
         driver, agent, room = await self._make_driver_with_room("alice", "lobby")
         result = await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "lobby", "msg": "hi"})
-        assert "本轮发言结束" in result["content"][0]["text"]
+        assert "finish_chat_turn" in result["content"][0]["text"]
 
     async def test_send_cross_room_does_not_set_done(self):
         """发到其他房间时，不应结束当前轮次。"""
@@ -99,6 +105,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         await room_service.startup()
+        await agent_service.startup()
 
     async def test_run_chat_turn_requires_started_client(self):
         await room_service.create_room(TEAM, "lobby", ["alice"])

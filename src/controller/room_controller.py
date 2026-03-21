@@ -63,4 +63,5 @@ class RoomMessagesHandler(BaseHandler):
             return
 
         await room.add_message(SpecialAgent.OPERATOR, content)
+        room.finish_turn(SpecialAgent.OPERATOR)
         self.return_json({"status": "ok"})

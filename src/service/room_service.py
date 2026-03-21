@@ -29,6 +29,7 @@ class ChatRoom:
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
         self._state: RoomState = RoomState.IDLE  # 房间当前的调度状态
         self._round_skipped: set = set()  # 当前轮次已跳过发言的成员名单
+        self._current_turn_has_content: bool = False  # 当前发言人是否已发送内容
 
         if self.agents and max_turns > 0:
             self._state = RoomState.SCHEDULING
@@ -90,33 +91,46 @@ class ChatRoom:
             logger.info(f"检测到房间 {self.key} 的活动 ({sender})，重置轮次计数器并唤醒房间")
             self._turn_index = 0
             self._round_skipped = set()
+            self._current_turn_has_content = False
             self._state = RoomState.SCHEDULING
 
-        # 2. 推进逻辑：只有当前顺序发言人说话，才推进到下一位
+        # 2. 只有当前顺序发言人说话，才标记本轮有内容。不再自动推进
         current_expected: Optional[str] = self.get_current_turn_agent()
         if sender == current_expected:
-            self._advance_turn(publish_events=publish_events)
+            self._current_turn_has_content = True
         else:
             logger.info(f"房间 {self.key} 收到来自 {sender} 的插话，保持当前发言位 (当前应轮到 {current_expected})")
-            # 如果刚才从 IDLE 唤醒，且是一次插话，我们需要手动重发当前轮次事件以重启循环
-            if was_idle and publish_events:
-                self._publish_current_turn()
 
-    def skip_turn(self, sender: str = None) -> bool:
-        """跳过当前发言人的轮次。通常由 Agent 在 skip_chat_msg 工具中调用。
-        返回 True 表示跳过成功，False 表示被拒绝（sender 不是当前发言人）。
+        # 3. 如果刚才从 IDLE 唤醒，我们需要手动重发当前轮次事件以重启循环
+        if was_idle and publish_events:
+            self._publish_current_turn()
+
+    def finish_turn(self, sender: str = None) -> bool:
+        """结束当前发言人的轮次。通常由 Agent 在 finish_chat_turn 工具中调用。
+        返回 True 表示操作成功，False 表示被拒绝（sender 不是当前发言人）。
         """
         current_expected: Optional[str] = self.get_current_turn_agent()
 
-        # 如果指定了发送者且不匹配，则拒绝跳过（防止误操作）
         if sender and sender != current_expected:
-            logger.warning(f"拒绝跳过申请：{sender} 并非当前发言人 ({current_expected})")
+            logger.warning(f"拒绝结束轮次申请：{sender} 并非当前发言人 ({current_expected})")
             return False
 
-        logger.info(f"房间 {self.key} 由 {current_expected} 跳过一轮发言")
-        self._round_skipped.add(current_expected)
+        logger.info(f"房间 {self.key} 由 {current_expected} 结束本轮行动 (has_content={self._current_turn_has_content})")
+
+        # 如果本轮没说话，记录为跳过
+        if not self._current_turn_has_content:
+            self._round_skipped.add(current_expected)
+
+        self._current_turn_has_content = False
         self._advance_turn(publish_events=True)
         return True
+
+    def skip_turn(self, sender: str = None) -> bool:
+        """(已废弃，建议使用 finish_turn) 跳过当前发言人的轮次。
+        为了兼容性暂时保留，逻辑等同于 finish_turn 且强制标记为未发言。
+        """
+        self._current_turn_has_content = False
+        return self.finish_turn(sender=sender)
 
     def get_current_turn_agent(self) -> Optional[str]:
         """返回当前理论上应该发言的 Agent 名（忽略 IDLE 状态）。"""

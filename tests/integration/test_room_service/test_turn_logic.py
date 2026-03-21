@@ -38,6 +38,8 @@ class TestRoomTurnLogic(ServiceTestCase):
 
         with patch("service.message_bus.publish") as mock_publish:
             await room.add_message("alice", "hello")
+            # 消息不再自动推进，手动结束回合
+            room.finish_turn("alice")
             assert room.get_current_turn_agent() == "bob"
             assert room._turn_pos == 1
             mock_publish.assert_any_call(
@@ -50,6 +52,7 @@ class TestRoomTurnLogic(ServiceTestCase):
 
         with patch("service.message_bus.publish") as mock_publish:
             await room.add_message("charlie", "I am interrupting")
+            # 插话不影响当前发言位，且即便插话也不会推进回合
             assert room.get_current_turn_agent() == "bob"
             assert room._turn_pos == 1
             topics = [call[0][0] for call in mock_publish.call_args_list]
@@ -57,6 +60,7 @@ class TestRoomTurnLogic(ServiceTestCase):
             assert MessageBusTopic.ROOM_AGENT_TURN not in topics
 
         await room.add_message("bob", "responding to alice")
+        room.finish_turn("bob")
         assert room.get_current_turn_agent() == "charlie"
         assert room._turn_pos == 2
 
@@ -86,7 +90,9 @@ class TestRoomTurnLogic(ServiceTestCase):
         room = room_service.get_room(room_key)
 
         await room.add_message("alice", "hi")
+        room.finish_turn("alice")
         await room.add_message("bob", "bye")
+        room.finish_turn("bob")
 
         assert room.state == RoomState.IDLE
         assert room._turn_index == 1
@@ -119,9 +125,11 @@ class TestRoomTurnLogic(ServiceTestCase):
         assert room._turn_index == 0
 
         await room.add_message("a", "1")
+        room.finish_turn("a")
         assert room._turn_index == 0
 
         await room.add_message("b", "2")
+        room.finish_turn("b")
         assert room._turn_index == 1
         assert room._turn_pos == 0
         assert room.get_current_turn_agent() == "a"
@@ -212,6 +220,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         with patch("service.message_bus.publish"):
             # operator 发言推进到 alice
             await room.add_message(SpecialAgent.OPERATOR, "start")
+            room.finish_turn(SpecialAgent.OPERATOR)
             room.skip_turn(sender="alice")
             room.skip_turn(sender="bob")
 
@@ -219,7 +228,8 @@ class TestRoomTurnLogic(ServiceTestCase):
 
         with patch("service.message_bus.publish") as mock_publish:
             await room.add_message(SpecialAgent.OPERATOR, "wake up")
-
+            # 唤醒后 Operator 也要结束回合，或者不结束也行，看断言点
+            # 这里断言唤醒后的状态，add_message 应该已经唤醒了
             assert room.state == RoomState.SCHEDULING
             assert room._turn_index == 0
 
@@ -242,6 +252,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         with patch("service.message_bus.publish"):
             room.skip_turn(sender="alice")   # alice 跳过
             await room.add_message("bob", "hi")    # bob 正常发言
+            room.finish_turn("bob")
             room.skip_turn(sender="charlie") # charlie 跳过
 
         # 本轮 bob 发了言，不是全员跳过 -> 轮次正常推进，房间仍在调度
@@ -261,6 +272,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         with patch("service.message_bus.publish"):
             # Operator 正常发言（推进到 alice）
             await room.add_message(SpecialAgent.OPERATOR, "hello")
+            room.finish_turn(SpecialAgent.OPERATOR)
             # 两个 AI Agent 均跳过
             room.skip_turn(sender="alice")
             room.skip_turn(sender="bob")
@@ -287,6 +299,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         with patch("service.message_bus.publish"):
             # alice 发消息唤醒房间，同时推进到 bob
             await room.add_message("alice", "I'm back")
+            room.finish_turn("alice")
         assert room.state == RoomState.SCHEDULING
 
         with patch("service.message_bus.publish"):
