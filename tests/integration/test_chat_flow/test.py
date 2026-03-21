@@ -22,24 +22,6 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-def _make_infer_response(content=None, tool_calls=None):
-    """构造与 llm_service.infer 返回结构兼容的最小响应对象。"""
-    msg = LlmApiMessage(role=OpenaiLLMApiRole.ASSISTANT, content=content, tool_calls=tool_calls)
-    choice = MagicMock()
-    choice.message = msg
-    resp = MagicMock()
-    resp.choices = [choice]
-    return resp
-
-
-def _send_msg_tool_call(room_name: str, msg: str, call_id="c1") -> ToolCall:
-    """构造 send_chat_msg 的 ToolCall，便于控制 agent 输出路径。"""
-    return ToolCall(
-        id=call_id,
-        function={"name": "send_chat_msg", "arguments": json.dumps({"room_name": room_name, "msg": msg})},
-    )
-
-
 @pytest.mark.forked
 class TestIntegrationMultiAgentChat(ServiceTestCase):
     @classmethod
@@ -58,22 +40,18 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
     async def test_two_agents_exchange_messages(self):
         """alice 和 bob 各发一轮消息，general 房间应有消息。"""
         room_key = f"general@{TEAM}"
-        room = room_service.get_room(room_key)
-
-        alice_reply = _send_msg_tool_call("general", "你好，bob！")
-        bob_reply   = _send_msg_tool_call("general", "你好，alice！")
+        
         call_seq = {
-            "alice": [_make_infer_response(tool_calls=[alice_reply])],
-            "bob":   [_make_infer_response(tool_calls=[bob_reply])],
+            "alice": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "你好，bob！"}}]}],
+            "bob":   [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "你好，alice！"}}]}],
         }
 
         async def fake_infer(model, ctx):
             name = next((n for n in call_seq if n in ctx.system_prompt), None)
-            if name and call_seq[name]:
-                return call_seq[name].pop(0)
-            return _make_infer_response(tool_calls=[_send_msg_tool_call("general", "...")])
+            res = call_seq[name].pop(0) if name and call_seq[name] else {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "..."}}]}
+            return self.normalize_to_mock(res)
 
-        with patch("service.agent_service.llm_service.infer", fake_infer):
+        with self.patch_infer(handler=fake_infer):
             # 重新创建 max_turns=1 的同名房间，快速触发“每人一轮”场景。
             await room_service.create_room(TEAM, "general", ["alice", "bob"], max_turns=1)
             room = room_service.get_room(room_key)
@@ -93,18 +71,15 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await room.add_message("system", "开始聊天")
 
         alice = agent_service.get_agent(TEAM, "alice")
-        tc = _send_msg_tool_call("general", "hello")
-        responses = [
-            _make_infer_response(tool_calls=[tc]),
-            _make_infer_response(content="done"),
+        resps = [
+            {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "hello"}}]},
+            {"content": "done"},
         ]
-        with patch("service.agent_service.llm_service.infer", AsyncMock(side_effect=responses)):
+        with self.patch_infer(responses=resps):
             await alice.run_chat_turn(room_key, max_function_calls=5)
 
         tool_results = [m for m in alice._history if m.role == OpenaiLLMApiRole.TOOL]
         assert len(tool_results) >= 1
-        # send_chat_msg 成功时返回 JSON {"success": true, ...}，应被写入 TOOL role 消息内容。
-        import json
         assert json.loads(tool_results[0].content)["success"]
 
     async def test_turn_checker_forces_send_chat_msg(self):
@@ -114,12 +89,11 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await room.add_message("system", "开始聊天")
 
         alice = agent_service.get_agent(TEAM, "alice")
-        tc = _send_msg_tool_call("general", "最终消息")
-        responses = [
-            _make_infer_response(content="我直接回复"),
-            _make_infer_response(tool_calls=[tc]),
+        resps = [
+            {"content": "我直接回复"},
+            {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "最终消息"}}]},
         ]
-        with patch("service.agent_service.llm_service.infer", AsyncMock(side_effect=responses)):
+        with self.patch_infer(responses=resps):
             await alice.run_chat_turn(room_key, max_function_calls=5)
 
         assert any(m.content == "最终消息" for m in room.messages)
@@ -130,9 +104,9 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = room_service.get_room(room_key)
 
         async def fake_infer(model, ctx):
-            return _make_infer_response(tool_calls=[_send_msg_tool_call("general", "a message")])
+            return self.normalize_to_mock({"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "a message"}}]})
 
-        with patch("service.agent_service.llm_service.infer", fake_infer):
+        with self.patch_infer(handler=fake_infer):
             run_task = asyncio.create_task(scheduler.run())
             await room_service.create_room(TEAM, "general", ["alice", "bob"], max_turns=2)
             room = room_service.get_room(room_key)
