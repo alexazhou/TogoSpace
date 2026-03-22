@@ -99,8 +99,9 @@ async def main(
     llmApiUtil.init()
     await llmService.startup(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     await funcToolService.startup()
-    if persistence_cfg["enabled"]:
-        await ormService.startup(persistence_cfg["db_path"])
+
+    # 总是初始化数据库和 ORM（teamService 需要）
+    await ormService.startup(persistence_cfg["db_path"])
     await persistenceService.startup(enabled=persistence_cfg["enabled"])
 
     # 从 teamService 加载 Team 配置（会自动从 JSON 导入到数据库）

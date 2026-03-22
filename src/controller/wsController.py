@@ -3,17 +3,17 @@ import json
 import tornado.websocket
 import service.messageBus as messageBus
 from model.coreModel.gtCoreWebModel import WsEvent
-from constants import messageBusTopic
+from constants import MessageBusTopic
 
 
 class EventsWsHandler(tornado.websocket.WebSocketHandler):
     def open(self):
-        messageBus.subscribe(messageBusTopic.ROOM_MSG_ADDED, self._on_message_added)
-        messageBus.subscribe(messageBusTopic.AGENT_STATUS_CHANGED, self._on_agent_status_changed)
+        messageBus.subscribe(MessageBusTopic.ROOM_MSG_ADDED, self._on_message_added)
+        messageBus.subscribe(MessageBusTopic.AGENT_STATUS_CHANGED, self._on_agent_status_changed)
 
     def on_close(self):
-        messageBus.unsubscribe(messageBusTopic.ROOM_MSG_ADDED, self._on_message_added)
-        messageBus.unsubscribe(messageBusTopic.AGENT_STATUS_CHANGED, self._on_agent_status_changed)
+        messageBus.unsubscribe(MessageBusTopic.ROOM_MSG_ADDED, self._on_message_added)
+        messageBus.unsubscribe(MessageBusTopic.AGENT_STATUS_CHANGED, self._on_agent_status_changed)
 
     def on_message(self, message):
         pass  # 只推不收，忽略客户端消息

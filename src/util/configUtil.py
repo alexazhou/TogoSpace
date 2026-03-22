@@ -66,11 +66,20 @@ def load_llmService_config(config_dir: str = None) -> dict:
     path = _resolve_config_file(config_dir, "llm.json")
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
-    active = cfg["active_llmService"]
-    services = {s["name"]: s for s in cfg["llmServices"]}
-    if active not in services:
-        raise ValueError(f"active_llmService '{active}' 未在 llmServices 中定义")
-    return dict(services[active])
+
+    # 支持两种格式：
+    # 1. llm.json 格式: {"active_llmService": "...", "llmServices": [...]}
+    # 2. config.json 格式: {"LlmServices": [...], "active_LlmService": "..."}
+    active_key = cfg.get("active_llmService") or cfg.get("active_LlmService")
+    services_key = cfg.get("llmServices") or cfg.get("LlmServices")
+
+    if not active_key:
+        active_key = list(services_key.keys())[0] if services_key else None
+
+    services = {s["name"]: s for s in services_key} if services_key else {}
+    if active_key not in services:
+        raise ValueError(f"active_LlmService '{active_key}' 未在 LlmServices 中定义")
+    return dict(services[active_key])
 
 
 def load_persistence_config(config_dir: str = None) -> dict:

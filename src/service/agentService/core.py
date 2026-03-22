@@ -9,7 +9,7 @@ from model.dbModel.gtAgentHistory import GtAgentHistory
 from .driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
 from service.roomService import ChatRoom, ChatContext
-from constants import SpecialAgent, messageBusTopic, AgentStatus
+from constants import SpecialAgent, MessageBusTopic, AgentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +52,10 @@ class Agent:
 
     def _publish_status(self, status: AgentStatus) -> None:
         messageBus.publish(
-            messageBusTopic.AGENT_STATUS_CHANGED,
+            MessageBusTopic.AGENT_STATUS_CHANGED,
             agent_name=self.name,
             team_name=self.team_name,
-            status=status.value,
+            status=status.name,
         )
 
     async def consume_task(self, max_function_calls: int) -> None:

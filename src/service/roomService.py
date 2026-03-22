@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 from service import messageBus, persistenceService
 from model.coreModel.gtCoreChatModel import ChatMessage
-from constants import RoomState, messageBusTopic, RoomType, SpecialAgent
+from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ class ChatRoom:
         self.messages.append(message)
         if publish_events:
             messageBus.publish(
-                messageBusTopic.ROOM_MSG_ADDED,
+                MessageBusTopic.ROOM_MSG_ADDED,
                 room_name=self.name,
                 room_key=self.key,
                 team_name=self.team_name,
@@ -156,7 +156,7 @@ class ChatRoom:
         next_name: Optional[str] = self.get_current_turn_agent()
         if next_name:
             messageBus.publish(
-                messageBusTopic.ROOM_AGENT_TURN,
+                MessageBusTopic.ROOM_AGENT_TURN,
                 agent_name=next_name,
                 room_name=self.name,
                 room_key=self.key,
