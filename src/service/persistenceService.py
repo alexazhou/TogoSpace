@@ -7,7 +7,7 @@ from dal.db import gtAgentHistoryManager, gtRoomMessageManager, gtRoomManager
 from model.coreModel.gtCoreChatModel import ChatMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtRoomMessage import GtRoomMessage
-from service import ormService, roomService
+from service import ormService
 
 logger = logging.getLogger(__name__)
 
@@ -28,23 +28,21 @@ def is_enabled() -> bool:
     return ormService.is_ready()
 
 
-async def append_room_message(room_key: str, sender: str, content: str, send_time: str) -> GtRoomMessage | None:
+async def append_room_message(room_id: int, sender: str, content: str, send_time: str) -> GtRoomMessage | None:
     if not is_enabled():
         return None
-    db_id = roomService.get_room_db_id(room_key)
     return await gtRoomMessageManager.append_room_message(
-        room_id=db_id,
+        room_id=room_id,
         sender_name=sender,
         content=content,
         send_time=send_time,
     )
 
 
-async def save_room(room_key: str, agent_read_index: dict[str, int]) -> None:
+async def save_room(room_id: int, agent_read_index: dict[str, int]) -> None:
     if not is_enabled():
         return
-    db_id = roomService.get_room_db_id(room_key)
-    await gtRoomManager.save_room_state(db_id, agent_read_index)
+    await gtRoomManager.save_room_state(room_id, agent_read_index)
 
 
 async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistory | None:
@@ -62,18 +60,16 @@ async def append_agent_history_messages(agent_key: str, messages: list[GtAgentHi
         await append_agent_history_message(item)
 
 
-async def load_room_messages(room_key: str) -> list[GtRoomMessage]:
+async def load_room_messages(room_id: int) -> list[GtRoomMessage]:
     if not is_enabled():
         return []
-    db_id = roomService.get_room_db_id(room_key)
-    return await gtRoomMessageManager.get_room_messages(db_id)
+    return await gtRoomMessageManager.get_room_messages(room_id)
 
 
-async def load_room_state(room_key: str) -> dict[str, int] | None:
+async def load_room_state(room_id: int) -> dict[str, int] | None:
     if not is_enabled():
         return None
-    db_id = roomService.get_room_db_id(room_key)
-    return await gtRoomManager.get_room_state(db_id)
+    return await gtRoomManager.get_room_state(room_id)
 
 
 async def load_agent_history(agent_key: str) -> list[GtAgentHistory]:
@@ -92,7 +88,7 @@ async def restore_runtime_state(agents: list, rooms: list) -> None:
             agent.inject_history_messages(items)
 
     for room in rooms:
-        room_msg_rows: list[GtRoomMessage] = await load_room_messages(room.key)
+        room_msg_rows: list[GtRoomMessage] = await load_room_messages(room.room_id)
         recovered_from_db = bool(room_msg_rows)
         if room_msg_rows:
             room.inject_history_messages([
@@ -106,7 +102,7 @@ async def restore_runtime_state(agents: list, rooms: list) -> None:
         elif not room.messages:
             await room.add_message("system", room.build_initial_system_message())
 
-        agent_read_index = await load_room_state(room.key)
+        agent_read_index = await load_room_state(room.room_id)
         if agent_read_index is not None:
             room.inject_agent_read_index(agent_read_index)
         elif recovered_from_db and room.messages:

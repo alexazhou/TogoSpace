@@ -103,7 +103,7 @@ class Agent:
 
         return synced_count
 
-    async def run_chat_turn(self, room_id: str, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, room_id: int, max_function_calls: int = 5) -> None:
         # Agent 统一维护当前房间上下文 and 消息同步，driver 只负责跑这一轮聊天逻辑。
         room = roomService.get_room(room_id)
         self.current_room = room

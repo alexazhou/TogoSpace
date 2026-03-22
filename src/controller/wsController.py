@@ -21,7 +21,7 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
     def _on_message_added(self, msg) -> None:
         event = WsEvent(
             event="message",
-            room_id=msg.payload.get("room_id") or msg.payload.get("room_key"),
+            room_id=msg.payload.get("room_id"),
             room_name=msg.payload["room_name"],
             team_name=msg.payload.get("team_name"),
             sender=msg.payload["sender"],

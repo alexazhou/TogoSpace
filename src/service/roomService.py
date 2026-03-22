@@ -23,8 +23,9 @@ class ChatContext:
 class ChatRoom:
     """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
-    def __init__(self, name: str, team_name: str, initial_topic: str = "", room_type: RoomType = RoomType.GROUP,
+    def __init__(self, room_id: int, name: str, team_name: str, initial_topic: str = "", room_type: RoomType = RoomType.GROUP,
                  members: List[str] = None, max_turns: int = 0):
+        self.room_id: int = room_id  # 数据库主键 ID
         self.name: str = name  # 房间名称
         self.team_name: str = team_name  # 所属 Team
         self.room_type: RoomType = room_type  # 房间类型（私有/群聊）
@@ -70,7 +71,7 @@ class ChatRoom:
         )
         if persist:
             await persistenceService.append_room_message(
-                room_id=self.key,
+                room_id=self.room_id,
                 sender=sender,
                 content=content,
                 send_time=message.send_time.isoformat(),
@@ -157,7 +158,7 @@ class ChatRoom:
                 MessageBusTopic.ROOM_AGENT_TURN,
                 agent_name=next_name,
                 room_name=self.name,
-                room_id=self.key,
+                room_id=self.room_id,
                 team_name=self.team_name,
             )
 
@@ -222,7 +223,7 @@ class ChatRoom:
             self._apply_turn_logic(msg.sender_name, publish_events=False)
 
     async def _persist_read_index(self) -> None:
-        await persistenceService.save_room(self.key, self._agent_read_index)
+        await persistenceService.save_room(self.room_id, self._agent_read_index)
 
     def get_context(self, max_messages: int = 10) -> str:
         recent = self.messages[-max_messages:]
@@ -252,35 +253,34 @@ class ChatRoom:
         return msg
 
 
-_rooms: Dict[str, ChatRoom] = {}
-_room_db_ids: Dict[str, int] = {}  # room_key -> db_id 映射
-
-
-def get_room_db_id(room_key: str) -> int:
-    """获取房间对应的数据库 ID。"""
-    db_id = _room_db_ids.get(room_key)
-    if db_id is None:
-        raise RuntimeError(f"房间 '{room_key}' 没有关联的数据库 ID")
-    return db_id
-
-
-def set_room_db_id(room_key: str, db_id: int) -> None:
-    """设置房间对应的数据库 ID。"""
-    _room_db_ids[room_key] = db_id
-
-
-def clear_room_db_ids() -> None:
-    """清空所有房间 db_id 映射。"""
-    _room_db_ids.clear()
+_rooms: Dict[int, ChatRoom] = {}  # db_id -> ChatRoom 映射
 
 
 async def startup() -> None:
     """初始化房间服务，清空所有房间。"""
     _rooms.clear()
-    clear_room_db_ids()
+
+
+def get_room(db_id: int) -> ChatRoom:
+    """返回指定聊天室实例（使用数据库 ID）。"""
+    room: Optional[ChatRoom] = _rooms.get(db_id)
+    if room is None:
+        raise RuntimeError(f"聊天室 ID '{db_id}' 不存在")
+    return room
+
+
+def get_all_rooms() -> List[ChatRoom]:
+    """返回所有聊天室实例列表。"""
+    return list(_rooms.values())
+
+
+def shutdown() -> None:
+    """移除所有聊天室，程序退出前调用。"""
+    _rooms.clear()
 
 
 async def _create_room(
+    room_id: int,
     team_name: str,
     name: str,
     members: List[str],
@@ -290,14 +290,13 @@ async def _create_room(
     persist_initial_message: bool = True,
 ) -> None:
     """内部建房入口。"""
-    room = ChatRoom(name=name, team_name=team_name, initial_topic=initial_topic,
+    room = ChatRoom(room_id=room_id, name=name, team_name=team_name, initial_topic=initial_topic,
                     room_type=room_type, members=members, max_turns=max_turns)
-    room_key = room.key
-    _rooms[room_key] = room
+    _rooms[room_id] = room
 
-    logger.info(f"创建并初始化聊天室: key={room_key}, type={room_type.value}, 成员={members}")
+    logger.info(f"创建并初始化聊天室: room_id={room_id}, type={room_type.value}, 成员={members}")
     if max_turns > 0:
-        logger.info(f"初始化轮次配置: room={room_key}, max_turns={max_turns}")
+        logger.info(f"初始化轮次配置: room_id={room_id}, max_turns={max_turns}")
 
     member_list_str = "、".join(members)
     msg = f"{name} 房间已经创建，当前房间成员：{member_list_str}"
@@ -344,22 +343,14 @@ def get_member_names(team_name: str, room_name: str) -> List[str]:
     return get_room(f"{room_name}@{team_name}").agents
 
 
-def get_rooms_for_agent(team_name: str, agent_name: str) -> List[str]:
-    """返回指定参与者所在的房间 key 列表。可选按 team 过滤。"""
+def get_rooms_for_agent(team_name: str, agent_name: str) -> List[int]:
+    """返回指定参与者所在的房间 db_id 列表。可选按 team 过滤。"""
     results = []
-    for key, room in _rooms.items():
+    for room_id, room in _rooms.items():
         if agent_name in room.agents:
             if team_name is None or room.team_name == team_name:
-                results.append(key)
+                results.append(room_id)
     return results
-
-
-def get_room(room_key: str) -> ChatRoom:
-    """返回指定聊天室实例（使用 room@team 格式的 key）。"""
-    room: Optional[ChatRoom] = _rooms.get(room_key)
-    if room is None:
-        raise RuntimeError(f"聊天室 '{room_key}' 不存在")
-    return room
 
 
 def get_all_rooms() -> List[ChatRoom]:
@@ -384,23 +375,27 @@ async def refresh_rooms_for_team(team_name: str, teams_config: list) -> None:
     await close_team_rooms(team_name)
 
     # 根据新配置重新创建聊天室
+    from dal.db import gtRoomManager
     for room in target_config.get("rooms", []):
-        await _create_room(
-            team_name=team_name,
-            name=room["name"],
-            members=room.get("members", []),
-            initial_topic=room.get("initial_topic", ""),
-            room_type=RoomType.value_of(room.get("type", "group")) or RoomType.GROUP,
-            max_turns=room.get("max_turns", 0),
-            persist_initial_message=False,
-        )
+        room_config = await gtRoomManager.get_room_config(team_name, room["name"])
+        if room_config:
+            await _create_room(
+                room_id=room_config.id,
+                team_name=team_name,
+                name=room["name"],
+                members=room.get("members", []),
+                initial_topic=room.get("initial_topic", ""),
+                room_type=RoomType.value_of(room.get("type", "group")) or RoomType.GROUP,
+                max_turns=room.get("max_turns", 0),
+                persist_initial_message=False,
+            )
 
     logger.info(f"Team '{team_name}' 的聊天室已刷新，共 {len(target_config.get('rooms', []))} 个房间")
 
 
 async def close_team_rooms(team_name: str) -> None:
     """关闭指定 Team 的所有聊天室。"""
-    to_close = [key for key in _rooms.keys() if key.endswith(f"@{team_name}")]
-    for room_key in to_close:
-        del _rooms[room_key]
+    to_close = [room_id for room_id, room in _rooms.items() if room.team_name == team_name]
+    for room_id in to_close:
+        del _rooms[room_id]
     logger.info(f"Team '{team_name}' 的 {len(to_close)} 个聊天室已关闭")

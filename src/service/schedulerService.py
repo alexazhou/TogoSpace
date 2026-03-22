@@ -7,6 +7,7 @@ from service.messageBus import Message
 from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
 from service import agentService, roomService as chat_room
 from service.agentService import Agent
+from dal.db import gtRoomManager
 from constants import MessageBusTopic, SpecialAgent
 
 logger = logging.getLogger(__name__)
@@ -56,11 +57,11 @@ def remove_agent(agent_key: str) -> None:
 def _on_agent_turn(msg: Message) -> None:
     """订阅 ROOM_AGENT_TURN：将任务入队，若 agent 未运行则加入调度池。"""
     agent_name: str = msg.payload["agent_name"]
-    room_id: str = msg.payload["room_id"]
+    room_id: int = msg.payload["room_id"]
     team_name: str = msg.payload["team_name"]
 
     if agent_name == SpecialAgent.OPERATOR:
-        logger.info(f"轮到人类操作者，系统进入等待状态: room={room_id}")
+        logger.info(f"轮到人类操作者，系统进入等待状态: room_id={room_id}")
         return
 
     try:
@@ -74,7 +75,7 @@ def _on_agent_turn(msg: Message) -> None:
 
     # 去重：同一房间已在队列中则跳过，避免重复调度
     if any(e.room_id == room_id for e in agent.wait_task_queue._queue):
-        logger.debug(f"跳过重复入队: agent={agent.key}, room={room_id}")
+        logger.debug(f"跳过重复入队: agent={agent.key}, room_id={room_id}")
         return
 
     agent.wait_task_queue.put_nowait(RoomMessageEvent(room_id))
@@ -95,8 +96,10 @@ async def run() -> None:
     for team in _teams_config:
         team_name = team["name"]
         for room in team["rooms"]:
-            room_id = f"{room['name']}@{team_name}"
-            logger.info(f"\n{chat_room.get_room(room_id).format_log()}")
+            room_config = await gtRoomManager.get_room_config(team_name, room["name"])
+            if room_config:
+                room = chat_room.get_room(room_config.id)
+                logger.info(f"\n{room.format_log()}")
 
 
 def replay_scheduling_rooms() -> None:
