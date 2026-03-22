@@ -19,6 +19,21 @@ from .base import AgentDriver
 
 logger = logging.getLogger(__name__)
 
+# Prompt 模板
+_SYSTEM_MSG_PREFIX_TEMPLATE = "{room_name} 房间系统消息: "
+_USER_MSG_SEP_TEMPLATE = " 在 {room_name} 房间发言: "
+_TURN_PROMPT_TEMPLATE = (
+    "新收到的消息：\n{context}\n\n"
+    "现在轮到你（{agent_name}）在 {room_name} 发言。"
+    "你必须调用工具来行动。如果你已完成发言和所有工具调用，请务必调用 finish_chat_turn 结束本轮行动。"
+)
+_HINT_PROMPT = (
+    "你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，请务必调用 finish_chat_turn 结束本轮（即跳过）。直接输出的文字不会出现在聊天室里。"
+)
+_REMINDER_PROMPT = (
+    "【提醒】检测到你直接输出了文字。这些文字不会出现在聊天室中！你必须使用 `send_chat_msg` 工具来发言。如果你已经说完，请调用 `finish_chat_turn`。"
+)
+
 
 def _format_sdk_blocks(blocks) -> list[str]:
     parts: list[str] = []
@@ -99,8 +114,8 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
         recent_history = self.host._history[-synced_count:]
         prompt_lines: list[str] = []
-        system_prefix = f"{room.name} 房间系统消息: "
-        user_sep = f" 在 {room.name} 房间发言: "
+        system_prefix = _SYSTEM_MSG_PREFIX_TEMPLATE.format(room_name=room.name)
+        user_sep = _USER_MSG_SEP_TEMPLATE.format(room_name=room.name)
 
         for message in recent_history:
             content = message.content or ""
@@ -167,10 +182,10 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
     async def _run_turn_sdk(self, room: ChatRoom, prompt_lines: list[str], max_function_calls: int) -> None:
         context_text = "\n".join(prompt_lines) if prompt_lines else "(无新消息)"
-        turn_prompt = (
-            f"新收到的消息：\n{context_text}\n\n"
-            f"现在轮到你（{self.host.name}）在 {room.name} 发言。"
-            f"你必须调用工具来行动。如果你已完成发言和所有工具调用，请务必调用 finish_chat_turn 结束本轮行动。"
+        turn_prompt = _TURN_PROMPT_TEMPLATE.format(
+            context=context_text,
+            agent_name=self.host.name,
+            room_name=room.name
         )
 
         client = self._sdk_client
@@ -184,7 +199,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
         try:
             await client.query(turn_prompt)
             logger.info(f"SDK prompt 已发送，等待响应: agent={self.host.key}")
-            hint = f"你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，请务必调用 finish_chat_turn 结束本轮（即跳过）。直接输出的文字不会出现在聊天室里。"
+            hint = _HINT_PROMPT
             
             for attempt in range(max_attempts):
                 # 追踪本次尝试是否发生了直接文本输出
@@ -238,12 +253,12 @@ class ClaudeSdkAgentDriver(AgentDriver):
                 )
 
                 if self._turn_done:
-                    # 检查是否存在“无效发言”：输出了文字但房间没收到内容
+                    # 检查是否存在”无效发言”：输出了文字但房间没收到内容
                     if has_direct_text and not room._current_turn_has_content:
-                        logger.warning(f"SDK Agent 输出了文字但未调用 send_chat_msg，强制提醒: agent={self.host.key}")
+                        logger.warning(f”SDK Agent 输出了文字但未调用 send_chat_msg，强制提醒: agent={self.host.key}”)
                         # 重置状态，注入提醒
                         self._turn_done = False
-                        hint = "【提醒】检测到你直接输出了文字。这些文字不会出现在聊天室中！你必须使用 `send_chat_msg` 工具来发言。如果你已经说完，请调用 `finish_chat_turn`。"
+                        hint = _REMINDER_PROMPT
                         continue
                     break
 

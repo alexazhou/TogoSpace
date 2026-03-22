@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from .base import AgentDriverConfig
-from .claudeSdk import ClaudeSdkAgentDriver
-from .native import NativeAgentDriver
+from .claudeSdkDriver import ClaudeSdkAgentDriver
+from .nativeDriver import NativeAgentDriver
 
 
 def normalize_driver_config(agent_cfg: dict[str, Any]) -> AgentDriverConfig:
