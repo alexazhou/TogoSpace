@@ -10,6 +10,7 @@ from dal.db import gtTeamManager
 from constants import enum_to_str
 from service import teamService
 from model.coreModel.gtCoreWebModel import TeamInfo
+from model.dbModel.gtTeam import GtTeam
 
 
 # Request Models
@@ -27,8 +28,8 @@ class UpdateTeamRequest(BaseModel):
 class TeamListHandler(BaseHandler):
     """GET /teams/list.json - 获取所有 Team 列表"""
 
-    async def get(self):
-        teams = await gtTeamManager.get_all_teams()
+    async def get(self) -> None:
+        teams: list[GtTeam] = await gtTeamManager.get_all_teams()
         data = [
             TeamInfo(
                 name=team.name,
@@ -45,7 +46,7 @@ class TeamListHandler(BaseHandler):
 class TeamCreateHandler(BaseHandler):
     """POST /teams/create.json - 创建新 Team（自动触发热更新）"""
 
-    async def post(self):
+    async def post(self) -> None:
         try:
             body = json.loads(self.request.body)
             request = CreateTeamRequest(**body)
@@ -56,7 +57,7 @@ class TeamCreateHandler(BaseHandler):
 
         try:
             # 转换 rooms 为 groups 格式
-            team_config = {
+            team_config: dict = {
                 "name": request.name,
                 "max_function_calls": request.max_function_calls,
                 "groups": request.rooms,
@@ -77,8 +78,8 @@ class TeamCreateHandler(BaseHandler):
 class TeamDetailHandler(BaseHandler):
     """GET /teams/{name}.json - 获取指定 Team 详情"""
 
-    async def get(self, name: str):
-        config = await gtTeamManager.get_team_config(name)
+    async def get(self, name: str) -> None:
+        config: dict | None = await gtTeamManager.get_team_config(name)
         if config is None:
             self.set_status(404)
             self.return_json({"error": f"Team '{name}' not found"})
@@ -92,7 +93,7 @@ class TeamDetailHandler(BaseHandler):
 class TeamModifyHandler(BaseHandler):
     """PUT /teams/{name}/modify.json - 更新 Team 配置（自动触发热更新）"""
 
-    async def put(self, name: str):
+    async def put(self, name: str) -> None:
         try:
             body = json.loads(self.request.body)
             request = UpdateTeamRequest(**body)
@@ -109,7 +110,7 @@ class TeamModifyHandler(BaseHandler):
                 return
 
             # 构建配置
-            team_config = {
+            team_config: dict = {
                 "name": name,
                 "max_function_calls": request.max_function_calls,
             }
@@ -130,7 +131,7 @@ class TeamModifyHandler(BaseHandler):
 class TeamDeleteHandler(BaseHandler):
     """DELETE /teams/{name}/delete.json - 删除 Team（自动触发热更新）"""
 
-    async def delete(self, name: str):
+    async def delete(self, name: str) -> None:
         try:
             # 检查 Team 是否存在
             if not await gtTeamManager.team_exists(name):
