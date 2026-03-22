@@ -7,21 +7,7 @@ from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager
 from constants import RoomType, enum_to_str
 
 
-# Request/Response Models
-class GroupInfo(BaseModel):
-    name: str
-    type: str  # "private" | "group"
-    initial_topic: str | None
-    max_turns: int
-    members: List[str]
-
-
-class TeamInfo(BaseModel):
-    name: str
-    max_function_calls: int | None
-    groups: List[GroupInfo]
-
-
+# Request Models
 class CreateTeamRequest(BaseModel):
     name: str
     max_function_calls: int | None = None
