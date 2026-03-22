@@ -7,8 +7,8 @@ from pydantic import BaseModel
 # 内部包
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager
-from constants import enum_to_str
 from service import teamService
+from util import assertUtil
 
 
 # Request Models
@@ -35,42 +35,28 @@ class TeamCreateHandler(BaseHandler):
     """POST /teams/create.json - 创建新 Team（自动触发热更新）"""
 
     async def post(self) -> None:
-        try:
-            body = json.loads(self.request.body)
-            request = CreateTeamRequest(**body)
-        except (json.JSONDecodeError, TypeError, ValueError) as e:
-            self.set_status(400)
-            self.return_json({"error": f"invalid request: {e}"})
-            return
+        request = self.parse_request(CreateTeamRequest)
 
-        try:
-            # 转换 rooms 为 groups 格式
-            team_config: dict = {
-                "name": request.name,
-                "max_function_calls": request.max_function_calls,
-                "groups": request.rooms,
-            }
+        # 转换 rooms 为 groups 格式
+        team_config = {
+            "name": request.name,
+            "max_function_calls": request.max_function_calls,
+            "groups": request.rooms,
+        }
 
-            # 调用 service 创建 team
-            await teamService.create_team(team_config)
+        # 调用 service 创建 team
+        await teamService.create_team(team_config)
 
-            self.return_json({"status": "created", "name": request.name})
-        except ValueError as e:
-            self.set_status(409)
-            self.return_json({"error": str(e)})
-        except Exception as e:
-            self.set_status(500)
-            self.return_json({"error": str(e)})
+        self.return_json({"status": "created", "name": request.name})
 
 
 class TeamDetailHandler(BaseHandler):
     """GET /teams/{name}.json - 获取指定 Team 详情"""
 
     async def get(self, name: str) -> None:
-        config: dict | None = await gtTeamManager.get_team_config(name)
+        config = await gtTeamManager.get_team_config(name)
         if config is None:
-            self.set_status(404)
-            self.return_json({"error": f"Team '{name}' not found"})
+            self.return_with_error("team_not_found", f"Team '{name}' not found")
             return
 
         # 将 groups 转换为 rooms 以保持 API 一致性
@@ -79,58 +65,40 @@ class TeamDetailHandler(BaseHandler):
 
 
 class TeamModifyHandler(BaseHandler):
-    """PUT /teams/{name}/modify.json - 更新 Team 配置（自动触发热更新）"""
+    """POST /teams/{name}/modify.json - 更新 Team 配置（自动触发热更新）"""
 
-    async def put(self, name: str) -> None:
-        try:
-            body = json.loads(self.request.body)
-            request = UpdateTeamRequest(**body)
-        except (json.JSONDecodeError, TypeError, ValueError) as e:
-            self.set_status(400)
-            self.return_json({"error": f"invalid request: {e}"})
-            return
+    async def post(self, name: str) -> None:
+        request = self.parse_request(UpdateTeamRequest)
 
-        try:
-            # 检查 Team 是否存在
-            if not await gtTeamManager.team_exists(name):
-                self.set_status(404)
-                self.return_json({"error": f"Team '{name}' not found"})
-                return
+        # 检查 Team 是否存在
+        exists = await gtTeamManager.team_exists(name)
+        assertUtil.assertTrue(exists, name="team_exists", error_message=f"Team '{name}' not found", error_code="team_not_found")
 
-            # 构建配置
-            team_config: dict = {
-                "name": name,
-                "max_function_calls": request.max_function_calls,
-            }
+        # 构建配置
+        team_config = {
+            "name": name,
+            "max_function_calls": request.max_function_calls,
+        }
 
-            # 将 rooms 转换为 groups 以兼容内部逻辑
-            if request.rooms is not None:
-                team_config["groups"] = request.rooms
+        # 将 rooms 转换为 groups 以兼容内部逻辑
+        if request.rooms is not None:
+            team_config["groups"] = request.rooms
 
-            # 调用 service 更新 team
-            await teamService.update_team(team_config)
+        # 调用 service 更新 team
+        await teamService.update_team(team_config)
 
-            self.return_json({"status": "updated", "name": name})
-        except Exception as e:
-            self.set_status(500)
-            self.return_json({"error": str(e)})
+        self.return_json({"status": "updated", "name": name})
 
 
 class TeamDeleteHandler(BaseHandler):
-    """DELETE /teams/{name}/delete.json - 删除 Team（自动触发热更新）"""
+    """POST /teams/{name}/delete.json - 删除 Team（自动触发热更新）"""
 
-    async def delete(self, name: str) -> None:
-        try:
-            # 检查 Team 是否存在
-            if not await gtTeamManager.team_exists(name):
-                self.set_status(404)
-                self.return_json({"error": f"Team '{name}' not found"})
-                return
+    async def post(self, name: str) -> None:
+        # 检查 Team 是否存在
+        exists = await gtTeamManager.team_exists(name)
+        assertUtil.assertTrue(exists, name="team_exists", error_message=f"Team '{name}' not found", error_code="team_not_found")
 
-            # 调用 service 删除 team
-            await teamService.delete_team(name)
+        # 调用 service 删除 team
+        await teamService.delete_team(name)
 
-            self.return_json({"status": "deleted", "name": name})
-        except Exception as e:
-            self.set_status(500)
-            self.return_json({"error": str(e)})
+        self.return_json({"status": "deleted", "name": name})

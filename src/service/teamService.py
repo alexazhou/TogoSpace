@@ -8,6 +8,7 @@ from typing import List
 
 from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager
 from constants import RoomType
+from exception import TeamAgentException
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ async def create_team(team_config: dict) -> None:
 
     # 检查 Team 是否已存在
     if await gtTeamManager.team_exists(name):
-        raise ValueError(f"Team '{name}' already exists")
+        raise TeamAgentException(f"Team '{name}' already exists", error_code="TEAM_EXISTS")
 
     # 创建 Team
     await gtTeamManager.upsert_team(team_config)

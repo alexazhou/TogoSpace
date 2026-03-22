@@ -253,9 +253,9 @@ class ClaudeSdkAgentDriver(AgentDriver):
                 )
 
                 if self._turn_done:
-                    # 检查是否存在”无效发言”：输出了文字但房间没收到内容
+                    # 检查是否存在"无效发言"：输出了文字但房间没收到内容
                     if has_direct_text and not room._current_turn_has_content:
-                        logger.warning(f”SDK Agent 输出了文字但未调用 send_chat_msg，强制提醒: agent={self.host.key}”)
+                        logger.warning(f"SDK Agent 输出了文字但未调用 send_chat_msg，强制提醒: agent={self.host.key}")
                         # 重置状态，注入提醒
                         self._turn_done = False
                         hint = _REMINDER_PROMPT

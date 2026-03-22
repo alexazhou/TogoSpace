@@ -13,22 +13,16 @@ class EnhanceEnum(Enum):
         return '[' + self.name + ']'
 
 
-def enum_to_str(value: EnhanceEnum) -> str:
-    if value is None:
-        return None
-    return value.name
-
-
-class OpenaiLLMApiRole(str, Enum):
+class OpenaiLLMApiRole(EnhanceEnum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
     TOOL = "tool"
 
 
-class messageBusTopic(str, Enum):
+class MessageBusTopic(EnhanceEnum):
     ROOM_AGENT_TURN = "room.agent_turn"  # 轮到某 Agent 发言；payload: agent_name, room_name
-    ROOM_MSG_ADDED  = "room.message_added"  # 房间新增消息；payload: room_name, sender, content, time
+    ROOM_MSG_ADDED = "room.message_added"  # 房间新增消息；payload: room_name, sender, content, time
     AGENT_STATUS_CHANGED = "agent.status_changed"  # Agent 忙闲状态变更；payload: agent_name, status(AgentStatus.value)
 
 
@@ -37,15 +31,15 @@ class RoomType(EnhanceEnum):
     GROUP = "group"      # 多 Agent 自治群聊模式
 
 
-class SpecialAgent(str, Enum):
+class SpecialAgent(EnhanceEnum):
     OPERATOR = "Operator"  # 人类操作者虚拟身份
 
 
-class RoomState(Enum):
+class RoomState(EnhanceEnum):
     SCHEDULING = "scheduling"  # 房间正在调度，有事件待处理
     IDLE = "idle"              # 房间空闲，无更多事件
 
 
-class AgentStatus(str, Enum):
+class AgentStatus(EnhanceEnum):
     ACTIVE = "active"
     IDLE = "idle"

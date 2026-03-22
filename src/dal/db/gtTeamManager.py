@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 
 from model.dbModel.gtTeam import GtTeam
-from constants import enum_to_str
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +81,7 @@ async def get_team_config(name: str) -> dict | None:
         members = await gtRoomMemberManager.get_members_by_room(room.room_key)
         groups.append({
             "name": room.name,
-            "type": enum_to_str(room.type),
+            "type": room.type.name,
             "initial_topic": room.initial_topic,
             "max_turns": room.max_turns,
             "members": members,

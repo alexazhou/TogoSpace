@@ -7,7 +7,7 @@ from service.messageBus import Message
 from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
 from service import agentService, roomService as chat_room
 from service.agentService import Agent
-from constants import messageBusTopic, SpecialAgent
+from constants import MessageBusTopic, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ async def startup(teams_config: list) -> None:
     global _teams_config, _stop_event
     _teams_config = teams_config
     _stop_event = asyncio.Event()
-    messageBus.subscribe(messageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
+    messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
 
 
 def add_agent(agent: Agent, max_fc: int) -> None:
