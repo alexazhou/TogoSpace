@@ -31,6 +31,7 @@ application = tornado.web.Application([
     (r"/teams/([^/]+)/rooms/([^/]+).json",               roomController.TeamRoomDetailHandler),
     (r"/teams/([^/]+)/rooms/([^/]+)/modify.json",          roomController.TeamRoomModifyHandler),
     (r"/teams/([^/]+)/rooms/([^/]+)/delete.json",          roomController.TeamRoomDeleteHandler),
-    (r"/teams/([^/]+)/rooms/([^/]+)/members.json",        roomController.RoomMembersHandler),
+    (r"/teams/([^/]+)/rooms/([^/]+)/members.json",        roomController.TeamRoomMembersHandler),
+    (r"/teams/([^/]+)/rooms/([^/]+)/members/modify.json",        roomController.TeamRoomMembersModifyHandler),
 
 ], **tornado_settings)  # type: ignore [arg-type]
