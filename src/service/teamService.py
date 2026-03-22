@@ -73,12 +73,16 @@ async def create_team(team_config: dict) -> None:
 
     await gtRoomManager.upsert_rooms(name, rooms)
 
-    # 创建 Members
+    # 创建 Members 并设置 room_key -> db_id 映射
     for room in rooms:
         room_name = room["name"]
-        room_id = f"{room_name}@{name}"
-        members = room.get("members", [])
-        await gtRoomMemberManager.upsert_room_members(room_id, members)
+        room_config = await gtRoomManager.get_room_config(name, room_name)
+        if room_config:
+            members = room.get("members", [])
+            await gtRoomMemberManager.upsert_room_members(room_config.id, members)
+            room_key = f"{room_name}@{name}"
+            from service import roomService as rs
+            rs.set_room_db_id(room_key, room_config.id)
 
     # 触发热更新
     await hot_reload_team(name)
@@ -101,12 +105,16 @@ async def update_team(team_config: dict) -> None:
 
     await gtRoomManager.upsert_rooms(name, rooms)
 
-    # 更新 Members
+    # 更新 Members 并设置 room_key -> db_id 映射
     for room in rooms:
         room_name = room["name"]
-        room_id = f"{room_name}@{name}"
-        members = room.get("members", [])
-        await gtRoomMemberManager.upsert_room_members(room_id, members)
+        room_config = await gtRoomManager.get_room_config(name, room_name)
+        if room_config:
+            members = room.get("members", [])
+            await gtRoomMemberManager.upsert_room_members(room_config.id, members)
+            room_key = f"{room_name}@{name}"
+            from service import roomService as rs
+            rs.set_room_db_id(room_key, room_config.id)
 
     logger.info(f"Team '{name}' 配置已更新")
 
@@ -144,5 +152,11 @@ async def hot_reload_team(name: str) -> None:
 
     # 刷新聊天室配置
     await roomService.refresh_rooms_for_team(name, team_configs)
+
+    # 设置 room_key -> db_id 映射
+    rooms = await gtRoomManager.get_rooms_by_team(name)
+    for room in rooms:
+        room_key = f"{room.name}@{name}"
+        roomService.set_room_db_id(room_key, room.id)
 
     logger.info(f"Team '{name}' 热更新完成")

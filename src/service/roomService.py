@@ -253,11 +253,31 @@ class ChatRoom:
 
 
 _rooms: Dict[str, ChatRoom] = {}
+_room_db_ids: Dict[str, int] = {}  # room_key -> db_id 映射
+
+
+def get_room_db_id(room_key: str) -> int:
+    """获取房间对应的数据库 ID。"""
+    db_id = _room_db_ids.get(room_key)
+    if db_id is None:
+        raise RuntimeError(f"房间 '{room_key}' 没有关联的数据库 ID")
+    return db_id
+
+
+def set_room_db_id(room_key: str, db_id: int) -> None:
+    """设置房间对应的数据库 ID。"""
+    _room_db_ids[room_key] = db_id
+
+
+def clear_room_db_ids() -> None:
+    """清空所有房间 db_id 映射。"""
+    _room_db_ids.clear()
 
 
 async def startup() -> None:
     """初始化房间服务，清空所有房间。"""
     _rooms.clear()
+    clear_room_db_ids()
 
 
 async def _create_room(

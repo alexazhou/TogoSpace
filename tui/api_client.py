@@ -19,6 +19,7 @@ class AgentInfo:
 
 @dataclass
 class RoomInfo:
+    db_id: int
     room_id: str
     room_name: str
     team_name: str
@@ -59,18 +60,19 @@ class ApiClient:
 
     async def get_agents(self) -> list[AgentInfo]:
         session = self._get_session()
-        async with session.get(f"{self._base_url}/agents") as resp:
+        async with session.get(f"{self._base_url}/agents.json") as resp:
             resp.raise_for_status()
             data = await resp.json()
         return [AgentInfo(name=a["name"], model=a["model"], team_name=a.get("team_name", ""), status=a.get("status", "idle")) for a in data["agents"]]
 
     async def get_rooms(self) -> list[RoomInfo]:
         session = self._get_session()
-        async with session.get(f"{self._base_url}/rooms") as resp:
+        async with session.get(f"{self._base_url}/rooms.json") as resp:
             resp.raise_for_status()
             data = await resp.json()
         return [
             RoomInfo(
+                db_id=r.get("db_id", 0),
                 room_id=r["room_id"],
                 room_name=r["room_name"],
                 team_name=r.get("team_name", ""),
@@ -81,11 +83,11 @@ class ApiClient:
             for r in data["rooms"]
         ]
 
-    async def get_room_messages(self, room_id: str) -> list[MessageInfo]:
+    async def get_room_messages(self, db_id: int) -> list[MessageInfo]:
         session = self._get_session()
-        async with session.get(f"{self._base_url}/rooms/{room_id}/messages") as resp:
+        async with session.get(f"{self._base_url}/rooms/{db_id}/messages.json") as resp:
             if resp.status == 404:
-                raise ValueError(f"Room not found: {room_id}")
+                raise ValueError(f"Room not found: {db_id}")
             resp.raise_for_status()
             data = await resp.json()
         return [
@@ -97,16 +99,16 @@ class ApiClient:
             for m in data["messages"]
         ]
 
-    async def post_room_message(self, room_id: str, content: str) -> bool:
+    async def post_room_message(self, db_id: int, content: str) -> bool:
         session = self._get_session()
-        async with session.post(f"{self._base_url}/rooms/{room_id}/messages", json={"content": content}) as resp:
+        async with session.post(f"{self._base_url}/rooms/{db_id}/messages.json", json={"content": content}) as resp:
             return resp.status == 200
 
     async def ws_events(self, on_connected=None) -> AsyncGenerator[WsEvent, None]:
         ws_url = self._base_url.replace("http://", "ws://").replace("https://", "wss://")
         session = self._get_session()
         try:
-            async with session.ws_connect(f"{ws_url}/ws/events", heartbeat=5) as ws:
+            async with session.ws_connect(f"{ws_url}/ws/events.json", heartbeat=5) as ws:
                 log.info("ws_connect 握手成功: %s", f"{ws_url}/ws/events")
                 if on_connected:
                     on_connected()

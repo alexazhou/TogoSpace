@@ -14,7 +14,7 @@ application = tornado.web.Application([
 
     # Room (运行时)
     (r"/rooms.json",                        roomController.RoomListHandler),
-    (r"/rooms/([^/]+)/messages.json",       roomController.RoomMessagesHandler),
+    (r"/rooms/(\d+)/messages.json",         roomController.RoomMessagesHandler),
 
     # WebSocket
     (r"/ws/events.json",                    wsController.EventsWsHandler),
@@ -22,16 +22,16 @@ application = tornado.web.Application([
     # Team (配置管理)
     (r"/teams/list.json",                   teamController.TeamListHandler),
     (r"/teams/create.json",                 teamController.TeamCreateHandler),
-    (r"/teams/([^/]+).json",                teamController.TeamDetailHandler),
-    (r"/teams/([^/]+)/modify.json",         teamController.TeamModifyHandler),
-    (r"/teams/([^/]+)/delete.json",         teamController.TeamDeleteHandler),
+    (r"/teams/(\d+).json",                  teamController.TeamDetailHandler),
+    (r"/teams/(\d+)/modify.json",           teamController.TeamModifyHandler),
+    (r"/teams/(\d+)/delete.json",           teamController.TeamDeleteHandler),
 
     # Team Rooms (配置管理)
-    (r"/teams/([^/]+)/rooms.json",          roomController.TeamRoomsHandler),
-    (r"/teams/([^/]+)/rooms/([^/]+).json",               roomController.TeamRoomDetailHandler),
-    (r"/teams/([^/]+)/rooms/([^/]+)/modify.json",          roomController.TeamRoomModifyHandler),
-    (r"/teams/([^/]+)/rooms/([^/]+)/delete.json",          roomController.TeamRoomDeleteHandler),
-    (r"/teams/([^/]+)/rooms/([^/]+)/members.json",        roomController.TeamRoomMembersHandler),
-    (r"/teams/([^/]+)/rooms/([^/]+)/members/modify.json",        roomController.TeamRoomMembersModifyHandler),
+    (r"/teams/(\d+)/rooms.json",            roomController.TeamRoomsHandler),
+    (r"/teams/(\d+)/rooms/(\d+).json",     roomController.TeamRoomDetailHandler),
+    (r"/teams/(\d+)/rooms/(\d+)/modify.json",  roomController.TeamRoomModifyHandler),
+    (r"/teams/(\d+)/rooms/(\d+)/delete.json",  roomController.TeamRoomDeleteHandler),
+    (r"/teams/(\d+)/rooms/(\d+)/members.json",  roomController.TeamRoomMembersHandler),
+    (r"/teams/(\d+)/rooms/(\d+)/members/modify.json",  roomController.TeamRoomMembersModifyHandler),
 
 ], **tornado_settings)  # type: ignore [arg-type]

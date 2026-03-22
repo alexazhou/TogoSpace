@@ -50,28 +50,30 @@ class TeamCreateHandler(BaseHandler):
 
 
 class TeamDetailHandler(BaseHandler):
-    """GET /teams/{name}.json - 获取指定 Team 详情"""
+    """GET /teams/{id}.json - 获取指定 Team 详情"""
 
-    async def get(self, name: str) -> None:
-        config = await gtTeamManager.get_team_config(name)
-        assertUtil.assertNotNull(config, error_message=f"Team '{name}' not found", error_code="team_not_found")
+    async def get(self, db_id: str) -> None:
+        team = await gtTeamManager.get_team_by_id(int(db_id))
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{db_id}' not found", error_code="team_not_found")
 
-        self.return_json(config)
+        self.return_json(team)
 
 
 class TeamModifyHandler(BaseHandler):
-    """POST /teams/{name}/modify.json - 更新 Team 配置（自动触发热更新）"""
+    """POST /teams/{id}/modify.json - 更新 Team 配置（自动触发热更新）"""
 
-    async def post(self, name: str) -> None:
+    async def post(self, db_id: str) -> None:
         request = self.parse_request(UpdateTeamRequest)
 
-        # 检查 Team 是否存在
-        exists = await gtTeamManager.team_exists(name)
-        assertUtil.assertTrue(exists, name="team_exists", error_message=f"Team '{name}' not found", error_code="team_not_found")
+        # 通过 ID 获取 Team
+        team = await gtTeamManager.get_team_by_id(int(db_id))
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{db_id}' not found", error_code="team_not_found")
+
+        team_name = team.name
 
         # 构建配置
         team_config = {
-            "name": name,
+            "name": team_name,
             "max_function_calls": request.max_function_calls,
         }
 
@@ -81,18 +83,20 @@ class TeamModifyHandler(BaseHandler):
         # 调用 service 更新 team
         await teamService.update_team(team_config)
 
-        self.return_json({"status": "updated", "name": name})
+        self.return_json({"status": "updated", "name": team_name})
 
 
 class TeamDeleteHandler(BaseHandler):
-    """POST /teams/{name}/delete.json - 删除 Team（自动触发热更新）"""
+    """POST /teams/{id}/delete.json - 删除 Team（自动触发热更新）"""
 
-    async def post(self, name: str) -> None:
-        # 检查 Team 是否存在
-        exists = await gtTeamManager.team_exists(name)
-        assertUtil.assertTrue(exists, name="team_exists", error_message=f"Team '{name}' not found", error_code="team_not_found")
+    async def post(self, db_id: str) -> None:
+        # 通过 ID 获取 Team
+        team = await gtTeamManager.get_team_by_id(int(db_id))
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{db_id}' not found", error_code="team_not_found")
+
+        team_name = team.name
 
         # 调用 service 删除 team
-        await teamService.delete_team(name)
+        await teamService.delete_team(team_name)
 
-        self.return_json({"status": "deleted", "name": name})
+        self.return_json({"status": "deleted", "name": team_name})

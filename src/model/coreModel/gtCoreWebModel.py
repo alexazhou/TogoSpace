@@ -27,11 +27,12 @@ class AgentInfo(BaseModel):
 
 
 class RoomInfo(BaseModel):
-    room_id: str       # room@team 格式
+    db_id: int       # 数据库自增 ID
+    room_id: str     # room@team 格式
     room_name: str
     team_name: str
-    room_type: str     # "private" | "group"
-    state: str         # "scheduling" | "idle"
+    room_type: str   # "private" | "group"
+    state: str       # "scheduling" | "idle"
     members: List[str]
 
 

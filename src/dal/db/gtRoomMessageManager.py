@@ -4,7 +4,7 @@ from model.dbModel.gtRoomMessage import GtRoomMessage
 
 
 async def append_room_message(
-    room_id: str,
+    room_id: int,
     sender_name: str,
     content: str,
     send_time: str,
@@ -17,7 +17,7 @@ async def append_room_message(
     )
 
 
-async def get_room_messages(room_id: str, after_id: int | None = None) -> list[GtRoomMessage]:
+async def get_room_messages(room_id: int, after_id: int | None = None) -> list[GtRoomMessage]:
     query = GtRoomMessage.select().where(GtRoomMessage.room_id == room_id)
     if after_id is not None:
         query = query.where(GtRoomMessage.id > after_id)
