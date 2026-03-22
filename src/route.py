@@ -5,9 +5,9 @@ from controller.wsController import EventsWsHandler
 from controller.teamController import (
     TeamListHandler,
     TeamDetailHandler,
-    TeamGroupsHandler,
-    TeamGroupDetailHandler,
-    GroupMembersHandler,
+    TeamRoomsHandler,
+    TeamRoomDetailHandler,
+    RoomMembersHandler,
 )
 
 
@@ -19,7 +19,7 @@ def make_app() -> tornado.web.Application:
         (r"/ws/events",              EventsWsHandler),
         (r"/teams",                  TeamListHandler),
         (r"/teams/([^/]+)",          TeamDetailHandler),
-        (r"/teams/([^/]+)/groups",   TeamGroupsHandler),
-        (r"/teams/([^/]+)/groups/([^/]+)",            TeamGroupDetailHandler),
-        (r"/teams/([^/]+)/groups/([^/]+)/members",   GroupMembersHandler),
+        (r"/teams/([^/]+)/rooms",   TeamRoomsHandler),
+        (r"/teams/([^/]+)/rooms/([^/]+)",            TeamRoomDetailHandler),
+        (r"/teams/([^/]+)/rooms/([^/]+)/members",   RoomMembersHandler),
     ])
