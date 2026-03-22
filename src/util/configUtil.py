@@ -90,5 +90,5 @@ def load_persistence_config(config_dir: str = None) -> dict:
     persistence = cfg.get("persistence", {})
     return {
         "enabled": persistence.get("enabled", False),
-        "db_path": persistence.get("db_path", "./runtime/state/teamagent.db"),
+        "db_path": persistence.get("db_path", "../../data/teamagent.db"),
     }

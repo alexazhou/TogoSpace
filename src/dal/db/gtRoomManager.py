@@ -32,7 +32,7 @@ async def upsert_rooms(team_id: str, rooms: list) -> None:
     for room in rooms:
         room_name = room["name"]
         room_id = f"{room_name}@{team_id}"
-        room_type = RoomType(room.get("type", "group"))
+        room_type = RoomType.value_of(room.get("type", "group")) or RoomType.GROUP
         initial_topic = room.get("initial_topic", "")
         max_turns = room.get("max_turns", 100)
 
@@ -40,7 +40,7 @@ async def upsert_rooms(team_id: str, rooms: list) -> None:
             "room_id": room_id,
             "team_id": team_id,
             "name": room_name,
-            "type": room_type,
+            "type": room_type.value,
             "initial_topic": initial_topic,
             "max_turns": max_turns,
         })
