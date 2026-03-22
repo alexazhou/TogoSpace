@@ -70,8 +70,7 @@ class ChatRoom:
         )
         if persist:
             await persistenceService.append_room_message(
-                room_key=self.key,
-                team_name=self.team_name,
+                room_id=self.key,
                 sender=sender,
                 content=content,
                 send_time=message.send_time.isoformat(),
@@ -81,8 +80,7 @@ class ChatRoom:
             messageBus.publish(
                 MessageBusTopic.ROOM_MSG_ADDED,
                 room_name=self.name,
-                room_key=self.key,
-                team_name=self.team_name,
+                room_id=self.key,
                 sender=sender,
                 content=content,
                 time=message.send_time.isoformat(),
@@ -159,7 +157,7 @@ class ChatRoom:
                 MessageBusTopic.ROOM_AGENT_TURN,
                 agent_name=next_name,
                 room_name=self.name,
-                room_key=self.key,
+                room_id=self.key,
                 team_name=self.team_name,
             )
 

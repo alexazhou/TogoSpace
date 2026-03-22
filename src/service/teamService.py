@@ -76,9 +76,9 @@ async def create_team(team_config: dict) -> None:
     # 创建 Members
     for room in rooms:
         room_name = room["name"]
-        room_key = f"{room_name}@{name}"
+        room_id = f"{room_name}@{name}"
         members = room.get("members", [])
-        await gtRoomMemberManager.upsert_room_members(room_key, members)
+        await gtRoomMemberManager.upsert_room_members(room_id, members)
 
     # 触发热更新
     await hot_reload_team(name)
@@ -104,9 +104,9 @@ async def update_team(team_config: dict) -> None:
     # 更新 Members
     for room in rooms:
         room_name = room["name"]
-        room_key = f"{room_name}@{name}"
+        room_id = f"{room_name}@{name}"
         members = room.get("members", [])
-        await gtRoomMemberManager.upsert_room_members(room_key, members)
+        await gtRoomMemberManager.upsert_room_members(room_id, members)
 
     logger.info(f"Team '{name}' 配置已更新")
 

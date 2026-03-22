@@ -71,7 +71,7 @@ class Agent:
 
                 try:
                     if isinstance(task, RoomMessageEvent):
-                        await self.run_chat_turn(task.room_key, max_function_calls)
+                        await self.run_chat_turn(task.room_id, max_function_calls)
                     else:
                         raise TypeError(f"不支持的 Agent 任务类型: {type(task).__name__}")
                 except Exception as e:
@@ -103,9 +103,9 @@ class Agent:
 
         return synced_count
 
-    async def run_chat_turn(self, room_key: str, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, room_id: str, max_function_calls: int = 5) -> None:
         # Agent 统一维护当前房间上下文 and 消息同步，driver 只负责跑这一轮聊天逻辑。
-        room = roomService.get_room(room_key)
+        room = roomService.get_room(room_id)
         self.current_room = room
         synced_count = await self.sync_room_messages(room)
 
