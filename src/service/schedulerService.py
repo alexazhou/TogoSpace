@@ -17,6 +17,10 @@ _running: Dict[str, asyncio.Task] = {}
 _stop_event: asyncio.Event = asyncio.Event()
 
 
+def _iter_team_rooms(team_config: dict) -> list[dict]:
+    return team_config.get("rooms") or team_config.get("groups") or []
+
+
 async def startup(teams_config: list) -> None:
     """初始化调度器，须在 run() 前调用一次。"""
     global _teams_config, _stop_event
@@ -95,11 +99,13 @@ async def run() -> None:
     logger.info("Scheduler 已停止运行")
     for team in _teams_config:
         team_name = team["name"]
-        for room in team["rooms"]:
-            room_config = await gtRoomManager.get_room_config(team_name, room["name"])
-            if room_config:
-                room = chat_room.get_room(room_config.id)
-                logger.info(f"\n{room.format_log()}")
+        for room in _iter_team_rooms(team):
+            room_ref = f"{room['name']}@{team_name}"
+            try:
+                runtime_room = chat_room.get_room(room_ref)
+            except RuntimeError:
+                continue
+            logger.info(f"\n{runtime_room.format_log()}")
 
 
 def replay_scheduling_rooms() -> None:

@@ -116,22 +116,25 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
         logger.warning("发送消息失败，聊天室上下文未设置")
         return {"success": False, "message": "当前没有可用的房间上下文。"}
 
-    from dal.db import gtRoomManager
     from service import roomService as rs
-
-    # 通过 room_name 和 team_name 获取 room_id
-    room_config = await gtRoomManager.get_room_config(_context.team_name, room_name)
-    if not room_config:
-        logger.warning(f"send_chat_msg: 目标房间不存在 {room_name}@{_context.team_name}")
-        return {"success": False, "message": f"目标房间不存在: {room_name}@{_context.team_name}"}
 
     logger.info(f"发送消息: sender={_context.agent_name}, room={room_name}, msg={msg}")
 
     try:
-        target_room = rs.get_room(room_config.id)
+        target_room = rs.get_room(f"{room_name}@{_context.team_name}")
     except Exception:
-        logger.warning(f"send_chat_msg: 目标房间不存在 {room_config.id}")
-        return {"success": False, "message": f"目标房间不存在: {room_name}"}
+        try:
+            from dal.db import gtRoomManager, gtTeamManager
+
+            team_row = await gtTeamManager.get_team(_context.team_name)
+            room_config = await gtRoomManager.get_room_config(team_row.id, room_name) if team_row else None
+            target_room = rs.get_room(room_config.id) if room_config else None
+        except Exception:
+            target_room = None
+
+        if target_room is None:
+            logger.warning(f"send_chat_msg: 目标房间不存在 {room_name}@{_context.team_name}")
+            return {"success": False, "message": f"目标房间不存在: {room_name}@{_context.team_name}"}
 
     await target_room.add_message(_context.agent_name, msg)
 
