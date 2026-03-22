@@ -7,7 +7,7 @@ from constants import RoomType
 
 
 # Room Config CRUD
-async def get_rooms_by_team(team_id: str) -> list[GtRoom]:
+async def get_rooms_by_team(team_id: int) -> list[GtRoom]:
     """获取 Team 下的所有 Room。"""
     return list(
         await GtRoom.select()
@@ -22,14 +22,52 @@ async def get_room_by_db_id(db_id: int) -> GtRoom | None:
     return await GtRoom.aio_get_or_none(GtRoom.id == db_id)
 
 
-async def get_room_config(team_id: str, room_name: str) -> GtRoom | None:
+async def get_room_config(team_id: int, room_name: str) -> GtRoom | None:
     """通过 team_id 和 room_name 获取 Room 配置。"""
     return await GtRoom.aio_get_or_none(
         (GtRoom.team_id == team_id) & (GtRoom.name == room_name)
     )
 
 
-async def upsert_rooms(team_id: str, rooms: list) -> None:
+async def ensure_room(
+    db_id: int,
+    team_id: int,
+    room_name: str,
+    room_type: RoomType,
+    initial_topic: str,
+    max_turns: int,
+) -> GtRoom:
+    """确保指定 ID 的 Room 存在，用于无预导入配置时的运行态持久化。"""
+    await (
+        GtRoom.insert(
+            id=db_id,
+            team_id=team_id,
+            name=room_name,
+            type=room_type,
+            initial_topic=initial_topic,
+            max_turns=max_turns,
+        )
+        .on_conflict(
+            conflict_target=[GtRoom.id],
+            update={
+                GtRoom.team_id: team_id,
+                GtRoom.name: room_name,
+                GtRoom.type: room_type,
+                GtRoom.initial_topic: initial_topic,
+                GtRoom.max_turns: max_turns,
+                GtRoom.updated_at: GtRoom._now_iso(),
+            },
+        )
+        .aio_execute()
+    )
+
+    row = await get_room_by_db_id(db_id)
+    if row is None:
+        raise RuntimeError(f"ensure room failed: {db_id}")
+    return row
+
+
+async def upsert_rooms(team_id: int, rooms: list) -> None:
     """创建或更新 Team 下的 Rooms。"""
     # 先删除旧数据
     await delete_rooms_by_team(team_id)
@@ -41,6 +79,7 @@ async def upsert_rooms(team_id: str, rooms: list) -> None:
         room_type = RoomType.value_of(room.get("type", "group")) or RoomType.GROUP
         initial_topic = room.get("initial_topic", "")
         max_turns = room.get("max_turns", 100)
+        updated_at = GtRoom._now_iso()
 
         rows.append({
             "team_id": team_id,
@@ -48,13 +87,14 @@ async def upsert_rooms(team_id: str, rooms: list) -> None:
             "type": room_type.value,
             "initial_topic": initial_topic,
             "max_turns": max_turns,
+            "updated_at": updated_at,
         })
 
     if rows:
         await GtRoom.insert_many(rows).aio_execute()
 
 
-async def delete_rooms_by_team(team_id: str) -> None:
+async def delete_rooms_by_team(team_id: int) -> None:
     """删除 Team 下的所有 Rooms。"""
     await GtRoom.delete().where(GtRoom.team_id == team_id).aio_execute()
 

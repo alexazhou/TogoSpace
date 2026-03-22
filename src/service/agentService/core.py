@@ -15,10 +15,28 @@ logger = logging.getLogger(__name__)
 
 _agent_defs: Dict[str, dict] = {}
 _agents: Dict[str, "Agent"] = {}
+_team_ids: Dict[str, int] = {}  # team_name -> team_id mapping
 
 
 def _make_agent_key(team_name: str, agent_name: str) -> str:
     return f"{agent_name}@{team_name}"
+
+
+def _iter_team_rooms(team_config: dict) -> list[dict]:
+    return team_config.get("rooms") or team_config.get("groups") or []
+
+
+async def load_team_ids(teams_config: list) -> None:
+    """Load team_id for each team name."""
+    from dal.db import gtTeamManager
+    global _team_ids
+    _team_ids = {}
+    for team in teams_config:
+        team_name = team["name"]
+        team_row = await gtTeamManager.get_team(team_name)
+        if team_row:
+            _team_ids[team_name] = team_row.id
+    logger.info(f"Loaded team IDs: {_team_ids}")
 
 
 class Agent:
@@ -35,6 +53,10 @@ class Agent:
         self.status: AgentStatus = AgentStatus.IDLE
         self.current_room: Optional[ChatRoom] = None
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type="native"))
+
+    @property
+    def team_id(self) -> int:
+        return _team_ids.get(self.team_name, 0)
 
     @property
     def key(self) -> str:
@@ -158,7 +180,8 @@ class Agent:
     def dump_history_messages(self) -> List[GtAgentHistory]:
         return [
             GtAgentHistory(
-                agent_key=self.key,
+                team_id=self.team_id,
+                agent_name=self.name,
                 seq=idx,
                 message_json=msg.model_dump_json(exclude_none=True),
             )
@@ -175,7 +198,8 @@ class Agent:
     async def _persist_history_message(self, message: llmApiUtil.LlmApiMessage) -> None:
         seq: int = len(self._history) - 1
         item = GtAgentHistory(
-            agent_key=self.key,
+            team_id=self.team_id,
+            agent_name=self.name,
             seq=seq,
             message_json=message.model_dump_json(exclude_none=True),
         )
@@ -201,7 +225,7 @@ async def create_team_agents(teams_config: list) -> None:
         team_name = team_config["name"]
 
         agent_names_in_team = set()
-        for room in team_config["rooms"]:
+        for room in _iter_team_rooms(team_config):
             for name in room["members"]:
                 if name != SpecialAgent.OPERATOR:
                     agent_names_in_team.add(name)

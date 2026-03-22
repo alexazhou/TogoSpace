@@ -100,12 +100,18 @@ async def main(
     await llmService.startup(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     await funcToolService.startup()
 
-    # 总是初始化数据库和 ORM（teamService 需要）
+    persistence_enabled = persistence_cfg.get("enabled", False)
     await ormService.startup(persistence_cfg["db_path"])
-    await persistenceService.startup(restore_on_startup=persistence_cfg["restore_on_startup"])
+    await persistenceService.startup(
+        enabled=persistence_enabled,
+        restore_on_startup=persistence_enabled,
+    )
 
     # 从 teamService 加载 Team 配置（会自动从 JSON 导入到数据库）
     teams_config = await teamService.startup(config_dir)
+
+    # 加载 team_id 映射
+    await agentService.load_team_ids(teams_config)
 
     await agentService.startup()
     agentService.load_agent_config(agents_config)

@@ -85,10 +85,16 @@ def load_llmService_config(config_dir: str = None) -> dict:
 def load_persistence_config(config_dir: str = None) -> dict:
     """返回持久化配置。"""
     path = _resolve_config_file(config_dir, "config.json")
+    if not os.path.isfile(path):
+        return {
+            "enabled": False,
+            "db_path": "./runtime/state/teamagent.db",
+        }
+
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     persistence = cfg.get("persistence", {})
     return {
-        "db_path": persistence.get("db_path", "../../data/teamagent.db"),
-        "restore_on_startup": persistence.get("restore_on_startup", False),
+        "enabled": persistence.get("enabled", False),
+        "db_path": persistence.get("db_path", "./runtime/state/teamagent.db"),
     }
