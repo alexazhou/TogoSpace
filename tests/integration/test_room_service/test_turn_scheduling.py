@@ -43,12 +43,14 @@ class TestTurnScheduling(ServiceTestCase):
             )
 
     async def test_add_message_publishes_next_agent(self):
-        """当前发言人发言后，系统应调度下一个发言人。"""
+        """当前发言人发言后，调用 finish_turn 才调度下一个发言人。"""
         await roomService.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
         room = roomService.get_room(f"r@{TEAM}")
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message("alice", "hello")
+            # 消息不会自动推进轮次，需要显式调用 finish_turn
+            room.finish_turn("alice")
             mock_publish.assert_any_call(
                 messageBusTopic.ROOM_AGENT_TURN,
                 agent_name="bob",
@@ -63,6 +65,8 @@ class TestTurnScheduling(ServiceTestCase):
         room = roomService.get_room(f"r@{TEAM}")
         assert room.state == RoomState.SCHEDULING
         await room.add_message("a", "msg")
+        # 消息不会自动推进轮次，需要显式调用 finish_turn
+        room.finish_turn("a")
         assert room.state == RoomState.IDLE
 
     async def test_no_publish_after_max_turns_reached(self):
