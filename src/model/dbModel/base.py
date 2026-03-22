@@ -49,6 +49,8 @@ class EnumField(peewee.CharField):
 
 
 class DbModelBase(peewee_async.AioModel):
+    id: int = peewee.AutoField()
+
     @classmethod
     def _now_iso(cls) -> str:
         return datetime.now().isoformat()

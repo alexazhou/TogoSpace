@@ -6,7 +6,7 @@ from .base import DbModelBase
 
 
 class GtTeam(DbModelBase):
-    name: str = peewee.CharField(primary_key=True)
+    name: str = peewee.CharField(unique=True)
     max_function_calls: int = peewee.IntegerField(null=True)
     enabled: int = peewee.IntegerField(default=1)
     created_at: str = peewee.CharField()
