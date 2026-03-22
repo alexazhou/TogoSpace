@@ -301,9 +301,9 @@ if __name__ == "__main__":
         ┌────────────▼────────────┐
         │       service 层        │  有状态类，处理业务逻辑
         ├─────────────────────────┤
-        │  scheduler_service.py   │
-        │  agent_service.py       │
-        │  chat_room_service.py   │
+        │  schedulerService.py   │
+        │  agentService.py       │
+        │  chat_roomService.py   │
         │  api_client_service.py  │
         │  function_service.py    │
         └────────────┬────────────┘
@@ -349,20 +349,20 @@ if __name__ == "__main__":
 
 | 模块 | 依赖的项目内模块 | 依赖的第三方库 |
 |------|----------------|--------------|
-| `chat_room_service.py` | `model.chat_model`（ChatMessage） | 标准库（typing, datetime） |
+| `chat_roomService.py` | `model.chat_model`（ChatMessage） | 标准库（typing, datetime） |
 | `api_client_service.py` | `model.api_model`（ChatCompletionRequest / Response / ErrorResponse） | aiohttp, certifi |
-| `agent_service.py` | 无（api_client 以参数注入） | 标准库（typing, logging, json） |
+| `agentService.py` | 无（api_client 以参数注入） | 标准库（typing, logging, json） |
 | `function_service.py` | `model.api_model`（Tool, Function, FunctionParameter）<br>`util.function_loader_util`（load_enabled_functions, get_function_metadata）<br>`util.functions_util`（FUNCTION_REGISTRY） | 标准库（logging, typing） |
-| `scheduler_service.py` | `service.agent_service`（Agent）<br>`service.chat_room_service`（ChatRoom）<br>`service.function_service`（build_tools, execute_function） | 标准库（logging, typing） |
+| `schedulerService.py` | `service.agentService`（Agent）<br>`service.chat_roomService`（ChatRoom）<br>`service.function_service`（build_tools, execute_function） | 标准库（logging, typing） |
 
 #### main.py
 
 | 依赖的项目内模块 |
 |----------------|
 | `util.config_util`（setup_logger, load_config, load_prompt, load_api_key） |
-| `service.agent_service`（Agent） |
-| `service.chat_room_service`（ChatRoom） |
-| `service.scheduler_service`（Scheduler） |
+| `service.agentService`（Agent） |
+| `service.chat_roomService`（ChatRoom） |
+| `service.schedulerService`（Scheduler） |
 | `service.api_client_service`（APIClient） |
 
 ---
@@ -374,12 +374,12 @@ main.py
   ├── util.config_util              （读取配置/日志）
   ├── service.api_client_service
   │     └── model.api_model         （请求/响应数据结构）
-  ├── service.chat_room_service
+  ├── service.chat_roomService
   │     └── model.chat_model        （ChatMessage dataclass）
-  ├── service.agent_service         （无内部依赖，api_client 注入）
-  └── service.scheduler_service
-        ├── service.agent_service
-        ├── service.chat_room_service
+  ├── service.agentService         （无内部依赖，api_client 注入）
+  └── service.schedulerService
+        ├── service.agentService
+        ├── service.chat_roomService
         └── service.function_service
               ├── model.api_model   （Tool / Function / FunctionParameter）
               ├── util.function_loader_util

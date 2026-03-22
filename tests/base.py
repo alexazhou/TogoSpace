@@ -10,13 +10,13 @@ import sys
 import time
 import urllib.request
 
-import service.message_bus as message_bus
-import service.room_service as room_service
-import service.agent_service as agent_service
-import service.func_tool_service as func_tool_service
-import service.scheduler_service as scheduler
-import service.persistence_service as persistence_service
-import service.orm_service as orm_service
+import service.messageBus as messageBus
+import service.roomService as roomService
+import service.agentService as agentService
+import service.funcToolService as funcToolService
+import service.schedulerService as scheduler
+import service.persistenceService as persistenceService
+import service.ormService as ormService
 from mock_llm_server import (
     MockLLMServer,
     MOCK_LLM_HOST,
@@ -94,7 +94,7 @@ class ServiceTestCase:
 
     @contextlib.contextmanager
     def patch_infer(self, responses: list[dict] = None, handler=None):
-        """统一封装对 llm_service.infer 的 Mock 注入。
+        """统一封装对 llmService.infer 的 Mock 注入。
         
         用法 (简化字典):
             with self.patch_infer(responses=[{"content": "你好"}]):
@@ -107,7 +107,7 @@ class ServiceTestCase:
                 await ...
         """
         import unittest.mock as mock
-        target = "service.agent_service.llm_service.infer"
+        target = "service.agentService.llmService.infer"
         
         if responses is not None:
             # 将简化字典序列转换为 Mock 对象序列

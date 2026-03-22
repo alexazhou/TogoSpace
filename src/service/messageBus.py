@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
 
-from constants import MessageBusTopic
+from constants import messageBusTopic
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ def publish(topic: str, **payload: Any) -> None:
         try:
             cb(msg)
         except Exception as e:
-            logger.error(f"[message_bus] topic={topic} callback={cb.__name__} 异常: {e}")
+            logger.error(f"[messageBus] topic={topic} callback={cb.__name__} 异常: {e}")
 
 
 async def startup() -> None:

@@ -1,6 +1,6 @@
 from typing import List
-import service.agent_service as agent_service
-from service.agent_service import Agent
+import service.agentService as agentService
+from service.agentService import Agent
 from model.web_model import AgentInfo
 from controller.base_controller import BaseHandler
 from constants import AgentStatus
@@ -8,7 +8,7 @@ from constants import AgentStatus
 
 class AgentListHandler(BaseHandler):
     async def get(self):
-        agents: List[Agent] = agent_service.get_all_agents()
+        agents: List[Agent] = agentService.get_all_agents()
         data = [
             AgentInfo(
                 name=a.name,

@@ -19,7 +19,7 @@
 - **目标**: 验证 Service 层之间的协同工作、状态机流转和消息总线行为。
 - **特点**: 
     - 通常在进程内运行（In-Process）。
-    - 涉及 `agent_service`、`room_service`、`scheduler` 的交互。
+    - 涉及 `agentService`、`roomService`、`scheduler` 的交互。
     - 频繁使用 `patch_infer` 注入剧本式 Mock 响应。
 - **示例**: 多 Agent 对话轮次推进、持久化状态恢复、Tool Call 执行链路。
 
@@ -46,7 +46,7 @@
 ### 2.1 进程内拦截 (In-Process Mocking)
 主要用于 **集成测试**。通过基类 `ServiceTestCase.patch_infer` 接口实现。
 
-- **原理**: 使用 `unittest.mock.patch` 拦截 `llm_service.infer` 的底层调用。
+- **原理**: 使用 `unittest.mock.patch` 拦截 `llmService.infer` 的底层调用。
 - **优势**: 
     - **极简数据结构**: 允许传入简化字典 `{"content": "..."}` 或 `{"tool_calls": [...]}`，基类自动转换为复杂的 `LlmApiMessage` 对象。
     - **逻辑灵活**: 支持按顺序返回响应序列，或传入自定义 `handler` 函数根据 Agent 身份动态决定回复。

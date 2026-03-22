@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-import service.room_service as room_service
-import service.agent_service as agent_service
-import service.func_tool_service as func_tool_service
-import service.scheduler_service as scheduler
+import service.roomService as roomService
+import service.agentService as agentService
+import service.funcToolService as funcToolService
+import service.schedulerService as scheduler
 from util.llm_api_util import LlmApiMessage, ToolCall
 from constants import OpenaiLLMApiRole
 from ...base import ServiceTestCase
@@ -29,12 +29,12 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         # 按真实启动顺序拉起 service，并加载 integration 专用配置。
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
-        await room_service.startup()
-        await room_service.create_room(TEAM, "general", ["alice", "bob"])
-        await func_tool_service.startup()
-        await agent_service.startup()
-        agent_service.load_agent_config(agents_config)
-        await agent_service.create_team_agents([team_config])
+        await roomService.startup()
+        await roomService.create_room(TEAM, "general", ["alice", "bob"])
+        await funcToolService.startup()
+        await agentService.startup()
+        agentService.load_agent_config(agents_config)
+        await agentService.create_team_agents([team_config])
         await scheduler.startup([team_config])
 
     async def test_two_agents_exchange_messages(self):
@@ -53,8 +53,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
         with self.patch_infer(handler=fake_infer):
             # 重新创建 max_turns=1 的同名房间，快速触发“每人一轮”场景。
-            await room_service.create_room(TEAM, "general", ["alice", "bob"], max_turns=1)
-            room = room_service.get_room(room_key)
+            await roomService.create_room(TEAM, "general", ["alice", "bob"], max_turns=1)
+            room = roomService.get_room(room_key)
             run_task = asyncio.create_task(scheduler.run())
             room.start_scheduling()
             await asyncio.sleep(1)
@@ -67,10 +67,10 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
     async def test_tool_call_result_appended_to_history(self):
         """验证 tool_call 结果被正确追加到 agent history。"""
         room_key = f"general@{TEAM}"
-        room = room_service.get_room(room_key)
+        room = roomService.get_room(room_key)
         await room.add_message("system", "开始聊天")
 
-        alice = agent_service.get_agent(TEAM, "alice")
+        alice = agentService.get_agent(TEAM, "alice")
         resps = [
             {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "hello"}}]},
             {"content": "done"},
@@ -85,10 +85,10 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
     async def test_turn_checker_forces_send_chat_msg(self):
         """直接输出文字时 turn_checker 应注入 hint，迫使 agent 改用工具。"""
         room_key = f"general@{TEAM}"
-        room = room_service.get_room(room_key)
+        room = roomService.get_room(room_key)
         await room.add_message("system", "开始聊天")
 
-        alice = agent_service.get_agent(TEAM, "alice")
+        alice = agentService.get_agent(TEAM, "alice")
         resps = [
             {"content": "我直接回复"},
             {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "最终消息"}}]},
@@ -101,15 +101,15 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
     async def test_scheduler_terminates_after_max_turns(self):
         """max_turns 用尽后，通过观察 Room 状态并停止调度器。"""
         room_key = f"general@{TEAM}"
-        room = room_service.get_room(room_key)
+        room = roomService.get_room(room_key)
 
         async def fake_infer(model, ctx):
             return self.normalize_to_mock({"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "a message"}}]})
 
         with self.patch_infer(handler=fake_infer):
             run_task = asyncio.create_task(scheduler.run())
-            await room_service.create_room(TEAM, "general", ["alice", "bob"], max_turns=2)
-            room = room_service.get_room(room_key)
+            await roomService.create_room(TEAM, "general", ["alice", "bob"], max_turns=2)
+            room = roomService.get_room(room_key)
             room.start_scheduling()
             for _ in range(20):
                 if room.state.value == "idle":

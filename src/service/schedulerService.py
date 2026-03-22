@@ -2,12 +2,12 @@ import asyncio
 import logging
 from typing import Dict
 
-from service import message_bus
-from service.message_bus import Message
+from service import messageBus
+from service.messageBus import Message
 from model.agent_event import RoomMessageEvent
-from service import agent_service, room_service as chat_room
-from service.agent_service import Agent
-from constants import MessageBusTopic, SpecialAgent
+from service import agentService, roomService as chat_room
+from service.agentService import Agent
+from constants import messageBusTopic, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ async def startup(teams_config: list) -> None:
     global _teams_config, _stop_event
     _teams_config = teams_config
     _stop_event = asyncio.Event()
-    message_bus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
+    messageBus.subscribe(messageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
 
 
 def add_agent(agent: Agent, max_fc: int) -> None:
@@ -64,7 +64,7 @@ def _on_agent_turn(msg: Message) -> None:
         return
 
     try:
-        agent: Agent = agent_service.get_agent(team_name, agent_name)
+        agent: Agent = agentService.get_agent(team_name, agent_name)
     except KeyError:
         logger.error(f"Agent 不存在: agent_name={agent_name}, team_name={team_name}")
         return

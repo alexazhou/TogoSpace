@@ -61,7 +61,7 @@
 
 引入单元测试与集成测试，为后续功能开发提供质量保障：
 
-- 为核心模块（`agent_service`、`room_service`、`scheduler_service`、`func_tool_service`）编写单元测试
+- 为核心模块（`agentService`、`roomService`、`schedulerService`、`funcToolService`）编写单元测试
 - 使用 mock 隔离外部依赖（LLM API、消息总线），确保测试稳定可重复
 - 编写集成测试，验证多 Agent 完整对话流程（消息路由、轮次调度、tool call 执行）
 - 配置 CI 自动运行测试，覆盖率达到基准线

@@ -61,15 +61,15 @@ def load_prompt(file_path: str) -> str:
         return f.read().strip()
 
 
-def load_llm_service_config(config_dir: str = None) -> dict:
+def load_llmService_config(config_dir: str = None) -> dict:
     """返回当前激活的 LLM 服务配置（name, base_url, api_key, type）。"""
     path = _resolve_config_file(config_dir, "llm.json")
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
-    active = cfg["active_llm_service"]
-    services = {s["name"]: s for s in cfg["llm_services"]}
+    active = cfg["active_llmService"]
+    services = {s["name"]: s for s in cfg["llmServices"]}
     if active not in services:
-        raise ValueError(f"active_llm_service '{active}' 未在 llm_services 中定义")
+        raise ValueError(f"active_llmService '{active}' 未在 llmServices 中定义")
     return dict(services[active])
 
 

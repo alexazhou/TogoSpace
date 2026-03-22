@@ -47,22 +47,22 @@ src/
 │   ├── agent_event.py   # Agent 事件模型
 │   └── web_model.py     # HTTP 响应模型
 ├── service/             # 有状态服务层（模块级单例）
-│   ├── agent_service.py     # Agent 管理（init / close）
-│   ├── room_service.py      # 聊天室管理（init / get_room / close_all）
-│   ├── scheduler_service.py # 多 Agent 轮次调度（init / run / stop）
-│   ├── llm_service.py       # LLM API 调用封装
-│   ├── message_bus.py       # 内部消息总线（pub/sub）
-│   └── func_tool_service/   # 工具函数服务
-│       ├── core.py          # 工具执行入口（init / close）
-│       ├── tool_loader.py   # 加载启用的工具函数
-│       └── tools.py         # 工具函数实现 + FUNCTION_REGISTRY
+│   ├── AgentService.py     # Agent 管理（init / close）
+│   ├── RoomService.py      # 聊天室管理（init / get_room / close_all）
+│   ├── SchedulerService.py # 多 Agent 轮次调度（init / run / stop）
+│   ├── LlmService.py       # LLM API 调用封装
+│   ├── MessageBus.py       # 内部消息总线（pub/sub）
+│   └── FuncToolService/   # 工具函数服务
+│       ├── Core.py          # 工具执行入口（init / close）
+│       ├── ToolLoader.py   # 加载启用的工具函数
+│       └── Tools.py         # 工具函数实现 + FUNCTION_REGISTRY
 ├── controller/          # HTTP 控制器层
 │   ├── base_controller.py   # 基类
 │   ├── agent_controller.py  # GET /agents
 │   ├── room_controller.py   # GET /rooms, GET /rooms/{name}/messages
 │   └── ws_controller.py     # WebSocket /ws/events（推送实时消息）
 └── util/                # 无状态工具层
-    ├── config_util.py       # load_agents / load_teams / load_llm_service_config
+    ├── config_util.py       # load_agents / load_teams / load_LlmService_config
     └── llm_api_util/        # LLM API 客户端封装
         ├── client.py
         └── models.py

@@ -1,7 +1,7 @@
 import json
 from typing import List
-import service.room_service as room_service
-from service.room_service import ChatRoom
+import service.roomService as roomService
+from service.roomService import ChatRoom
 from model.web_model import RoomInfo, MessageInfo, RoomMessagesResponse
 from controller.base_controller import BaseHandler
 from constants import SpecialAgent
@@ -9,7 +9,7 @@ from constants import SpecialAgent
 
 class RoomListHandler(BaseHandler):
     async def get(self):
-        rooms: List[ChatRoom] = room_service.get_all_rooms()
+        rooms: List[ChatRoom] = roomService.get_all_rooms()
         data = [
             RoomInfo(
                 room_id=r.key,
@@ -27,7 +27,7 @@ class RoomListHandler(BaseHandler):
 class RoomMessagesHandler(BaseHandler):
     async def get(self, room_id: str):
         try:
-            room: ChatRoom = room_service.get_room(room_id)
+            room: ChatRoom = roomService.get_room(room_id)
         except RuntimeError:
             self.set_status(404)
             self.return_json({"error": f"room '{room_id}' not found"})
@@ -44,7 +44,7 @@ class RoomMessagesHandler(BaseHandler):
 
     async def post(self, room_id: str):
         try:
-            room: ChatRoom = room_service.get_room(room_id)
+            room: ChatRoom = roomService.get_room(room_id)
         except RuntimeError:
             self.set_status(404)
             self.return_json({"error": f"room '{room_id}' not found"})

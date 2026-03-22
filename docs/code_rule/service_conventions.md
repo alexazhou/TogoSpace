@@ -29,12 +29,12 @@ shutdown()      ← 生命周期：清理（必须放在文件最后）
 
 | 模块 | startup 签名 |
 |------|-------------|
-| `message_bus` | `startup()` |
-| `llm_service` | `startup(api_key: str, base_url: str)` |
-| `func_tool_service` | `startup()` |
-| `agent_service` | `startup()` |
-| `room_service` | `startup()` |
-| `scheduler_service` | `startup(teams_config: list)` |
+| `messageBus` | `startup()` |
+| `llmService` | `startup(api_key: str, base_url: str)` |
+| `funcToolService` | `startup()` |
+| `agentService` | `startup()` |
+| `roomService` | `startup()` |
+| `schedulerService` | `startup(teams_config: list)` |
 
 ## main.py 中的调用顺序
 
@@ -42,20 +42,20 @@ startup 按依赖顺序调用，shutdown 在 `finally` 块中逆序调用：
 
 ```python
 # 启动（依赖顺序）
-message_bus.startup()
-llm_service.startup(api_key=..., base_url=...)
-func_tool_service.startup()
-agent_service.startup()
-room_service.startup()
-scheduler_service.startup(teams_config=...)
+messageBus.startup()
+llmService.startup(api_key=..., base_url=...)
+funcToolService.startup()
+agentService.startup()
+roomService.startup()
+schedulerService.startup(teams_config=...)
 
 # 关闭（finally 块，逆序）
-scheduler_service.shutdown()
-agent_service.shutdown()
-func_tool_service.shutdown()
-room_service.shutdown()
-llm_service.shutdown()
-message_bus.shutdown()
+schedulerService.shutdown()
+agentService.shutdown()
+funcToolService.shutdown()
+roomService.shutdown()
+llmService.shutdown()
+messageBus.shutdown()
 ```
 
 ## 测试中的用法
@@ -64,19 +64,19 @@ message_bus.shutdown()
 
 ```python
 def setup_method(self):
-    message_bus.startup()
+    messageBus.startup()
     # 各服务 shutdown() 用于重置状态（替代 startup 前的残留）
-    room_service.shutdown()
-    agent_service.shutdown()
-    func_tool_service.shutdown()
-    scheduler_service.shutdown()
+    roomService.shutdown()
+    agentService.shutdown()
+    funcToolService.shutdown()
+    schedulerService.shutdown()
 
 def teardown_method(self):
-    scheduler_service.shutdown()
-    func_tool_service.shutdown()
-    agent_service.shutdown()
-    room_service.shutdown()
-    message_bus.shutdown()
+    schedulerService.shutdown()
+    funcToolService.shutdown()
+    agentService.shutdown()
+    roomService.shutdown()
+    messageBus.shutdown()
 ```
 
 > 注意：测试中 `shutdown()` 也用于 setup 阶段的状态重置，而非仅在清理时调用。

@@ -10,8 +10,8 @@
 
 同时尽量保持以下稳定：
 
-- `scheduler_service` 不感知具体 driver
-- `room_service` / `message_bus` 不感知具体 driver
+- `schedulerService` 不感知具体 driver
+- `roomService` / `messageBus` 不感知具体 driver
 - Agent 历史、持久化、状态发布逻辑仍然统一
 
 ## 核心思路
@@ -30,7 +30,7 @@
 
 从调度角度看，链路保持不变：
 
-1. `scheduler_service` 收到 `ROOM_AGENT_TURN`
+1. `schedulerService` 收到 `ROOM_AGENT_TURN`
 2. scheduler 找到对应 `Agent`
 3. scheduler 调用 `agent.consume_task(...)`
 4. `Agent.consume_task()` 调用 `agent.run_chat_turn(...)`
@@ -41,17 +41,17 @@
 
 ## 代码位置
 
-- [src/service/agent_service/core.py](../../src/service/agent_service/core.py)
-- [src/service/agent_service/driver/base.py](../../src/service/agent_service/driver/base.py)
-- [src/service/agent_service/driver/factory.py](../../src/service/agent_service/driver/factory.py)
-- [src/service/agent_service/driver/native.py](../../src/service/agent_service/driver/native.py)
-- [src/service/agent_service/driver/claude_sdk.py](../../src/service/agent_service/driver/claude_sdk.py)
+- [src/service/agentService/core.py](../../src/service/agentService/core.py)
+- [src/service/agentService/driver/base.py](../../src/service/agentService/driver/base.py)
+- [src/service/agentService/driver/factory.py](../../src/service/agentService/driver/factory.py)
+- [src/service/agentService/driver/native.py](../../src/service/agentService/driver/native.py)
+- [src/service/agentService/driver/claude_sdk.py](../../src/service/agentService/driver/claude_sdk.py)
 
 ## 当前接口
 
 ### `AgentDriverConfig`
 
-定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/driver/base.py#L7)。
+定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/base.py#L7)。
 
 ```python
 @dataclass
@@ -68,7 +68,7 @@ class AgentDriverConfig:
 
 ### `AgentDriverHost`
 
-定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/driver/base.py#L13)。
+定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/base.py#L13)。
 
 它表示 driver 依赖的宿主协议，也就是 driver 可以从 `Agent` 获得哪些能力。
 
@@ -96,7 +96,7 @@ class AgentDriverConfig:
 
 ### `AgentDriver`
 
-定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/driver/base.py#L45)。
+定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/base.py#L45)。
 
 ```python
 class AgentDriver:
@@ -117,7 +117,7 @@ class AgentDriver:
 
 ## `Agent` 壳对象的职责
 
-`Agent` 现在是系统里的稳定入口，定义见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/core.py#L34)。
+`Agent` 现在是系统里的稳定入口，定义见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/core.py#L34)。
 
 `Agent` 负责：
 
@@ -146,17 +146,17 @@ class AgentDriver:
 值得关注的几个方法：
 
 - `run_chat_turn(...)`
-  - 统一维护当前房间上下文并先同步消息，再把 `room + synced_count` 交给 driver，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/core.py#L133)
+  - 统一维护当前房间上下文并先同步消息，再把 `room + synced_count` 交给 driver，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/core.py#L133)
 - `send_chat_message(...)`
-  - 统一处理发消息、跨房间发送、回合结束标记，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/core.py#L133)
+  - 统一处理发消息、跨房间发送、回合结束标记，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/core.py#L133)
 - `skip_chat_turn()`
-  - 统一处理跳过发言逻辑，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/core.py#L155)
+  - 统一处理跳过发言逻辑，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/core.py#L155)
 - `chat(...)`
-  - 保留给 `native` driver 使用的通用多轮 function calling 循环，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/core.py#L171)
+  - 保留给 `native` driver 使用的通用多轮 function calling 循环，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/core.py#L171)
 
 ## Factory 设计
 
-factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/driver/factory.py#L10)。
+factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/factory.py#L10)。
 
 它做两件事：
 
@@ -189,7 +189,7 @@ factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/agent_se
 
 ### Native Driver
 
-文件： [native.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/driver/native.py)
+文件： [native.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/native.py)
 
 主要逻辑：
 
@@ -202,12 +202,12 @@ factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/agent_se
 适合场景：
 
 - 模型接口是 OpenAI-compatible chat completion
-- 工具调用由当前系统 `func_tool_service` 统一提供
+- 工具调用由当前系统 `funcToolService` 统一提供
 - 历史以 `LlmApiMessage` 为主
 
 ### Claude SDK Driver
 
-文件： [claude_sdk.py](/Volumes/PData/GitDB/agent_team/src/service/agent_service/driver/claude_sdk.py)
+文件： [claude_sdk.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/claude_sdk.py)
 
 主要逻辑：
 
@@ -288,7 +288,7 @@ factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/agent_se
 
 建议新增文件：
 
-- `src/service/agent_service/driver/gemini_cli.py`
+- `src/service/agentService/driver/gemini_cli.py`
 
 建议实现：
 

@@ -10,10 +10,10 @@ from peewee_async.databases import AioDatabase
 from peewee_async.pool import PoolBackend
 from peewee_async.utils import ConnectionProtocol
 
-from model.db_model.agent_history_message import AgentHistoryMessageRecord
-from model.db_model.base import bind_database
-from model.db_model.room_message import RoomMessageRecord
-from model.db_model.room_state import RoomStateRecord
+from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.base import bind_database
+from model.dbModel.gtRoomMessage import GtRoomMessage
+from model.dbModel.gtRoom import GtRoom
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ _db_path: Optional[str] = None
 def _ensure_schema(database: AioSqliteDatabase) -> None:
     with database.allow_sync():
         database.create_tables(
-            [RoomMessageRecord, RoomStateRecord, AgentHistoryMessageRecord],
+            [GtRoomMessage, GtRoom, GtAgentHistory],
             safe=True,
         )
 
@@ -101,7 +101,7 @@ async def shutdown() -> None:
 
 def get_db() -> AioSqliteDatabase:
     if _db is None:
-        raise RuntimeError("orm_service not started")
+        raise RuntimeError("ormService not started")
     return _db
 
 

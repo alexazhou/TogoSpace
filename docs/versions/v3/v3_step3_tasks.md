@@ -2,7 +2,7 @@
 
 ## 任务概览
 
-V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `agent_service` 支持按房间分组、修改 `scheduler_service` 支持多房间并发、修改 `config_util` 读取新配置、修改 `main.py` 初始化多个房间。`chat_room_service`、`llm_api_service`、`agent_tool_service` 及所有 model/util 模块直接复用，无需修改。
+V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `agentService` 支持按房间分组、修改 `schedulerService` 支持多房间并发、修改 `config_util` 读取新配置、修改 `main.py` 初始化多个房间。`chat_roomService`、`llm_api_service`、`agent_tool_service` 及所有 model/util 模块直接复用，无需修改。
 
 共 5 个任务，按依赖关系排序。
 
@@ -49,13 +49,13 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 
 ---
 
-### 任务 3: 修改 agent_service.py
+### 任务 3: 修改 agentService.py
 
-**描述**: 重构 `agent_service` 的初始化逻辑，支持按房间分组创建 Agent 实例
+**描述**: 重构 `agentService` 的初始化逻辑，支持按房间分组创建 Agent 实例
 
 **依赖**: 无（接口变更，main.py 依赖此任务）
 
-**文件**: `src/service/agent_service.py`（修改）
+**文件**: `src/service/agentService.py`（修改）
 
 **子任务**:
 - [ ] 将模块级存储从 `_agents: List[Agent]` 改为 `_agents_by_room: Dict[str, List[Agent]]`
@@ -73,15 +73,15 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 
 ---
 
-### 任务 4: 修改 scheduler_service.py 和 main.py
+### 任务 4: 修改 schedulerService.py 和 main.py
 
 **描述**: 调度器支持多房间并发运行；main.py 初始化多个聊天室
 
 **依赖**: 任务 1、任务 2、任务 3
 
-**文件**: `src/service/scheduler_service.py`（修改）、`src/main.py`（修改）
+**文件**: `src/service/schedulerService.py`（修改）、`src/main.py`（修改）
 
-**scheduler_service.py 子任务**:
+**schedulerService.py 子任务**:
 - [ ] 将 `_room_name: str` 和 `_max_turns: int` 替换为 `_rooms_config: list`
 - [ ] 修改 `init` 签名：`init(rooms_config: list, max_function_calls: int = 5) -> None`
 - [ ] 修改 `run`：使用 `asyncio.gather` 并发执行每个房间的 `_run_room` 协程
@@ -94,7 +94,7 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 - [ ] 将日志文件前缀改为 `v3_chat_`
 - [ ] 从 `config["chat_rooms"]` 获取房间列表
 - [ ] 遍历 `rooms_config`，调用 `chat_room.init` 创建每个房间
-- [ ] 调用 `agent_service.init(config["agents"], rooms_config)` 传入两个参数
+- [ ] 调用 `agentService.init(config["agents"], rooms_config)` 传入两个参数
 - [ ] 调用 `scheduler.init(rooms_config=rooms_config, ...)` 传入房间配置列表（去掉 `room_name` 和 `max_turns`）
 - [ ] 遍历 `rooms_config` 为每个房间添加初始话题
 - [ ] `finally` 块中保持完整的清理逻辑（同 V2）
@@ -138,7 +138,7 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
     │
     └─ 任务 2 (config_util)
                 │
-任务 3 (agent_service) ──┐
+任务 3 (agentService) ──┐
                          └─ 任务 4 (scheduler + main)
                                     │
                                     └─ 任务 5 (集成测试)
@@ -160,12 +160,12 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 
 | 文件 | 说明 |
 |------|------|
-| `src/service/chat_room_service.py` | 已基于字典存储，天然支持多房间 |
+| `src/service/chat_roomService.py` | 已基于字典存储，天然支持多房间 |
 | `src/service/llm_api_service.py` | 无状态 HTTP 客户端，与房间概念无关 |
 | `src/service/agent_tool_service.py` | 工具加载与执行，与房间概念无关 |
 | `src/model/api_model.py` | 纯数据定义 |
 | `src/model/chat_model.py` | 纯数据定义 |
-| `src/util/tool_loader_util.py` | 工具元数据加载 |
+| `src/util/toolLoader_util.py` | 工具元数据加载 |
 | `src/util/tool_util.py` | 工具函数注册表 |
 | `resource/prompts/alice_system.md` | 直接复用 |
 | `resource/prompts/bob_system.md` | 直接复用 |
@@ -177,8 +177,8 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 |------|------|------|
 | `config/agents_v3.json` | 新建 | 多房间配置结构 |
 | `src/util/config_util.py` | 修改 | 读取路径改为 `agents_v3.json` |
-| `src/service/agent_service.py` | 修改 | 按房间分组存储和初始化 |
-| `src/service/scheduler_service.py` | 修改 | `asyncio.gather` 并发多房间 |
+| `src/service/agentService.py` | 修改 | 按房间分组存储和初始化 |
+| `src/service/schedulerService.py` | 修改 | `asyncio.gather` 并发多房间 |
 | `src/main.py` | 修改 | 初始化多个房间，调整 init 调用参数 |
 
 ---
@@ -187,8 +187,8 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 
 - [ ] `agents_v3.json` 格式正确，包含 2 个及以上聊天室
 - [ ] `load_config()` 返回含 `chat_rooms` 字段的字典
-- [ ] `agent_service.get_agents("general")` 返回正确的 Agent 列表
-- [ ] `agent_service.get_agents("tech")` 返回正确的 Agent 列表
+- [ ] `agentService.get_agents("general")` 返回正确的 Agent 列表
+- [ ] `agentService.get_agents("tech")` 返回正确的 Agent 列表
 - [ ] bob 在 general 房间的 prompt 中含 alice 和 charlie
 - [ ] bob 在 tech 房间的 prompt 中只含 charlie（不含 alice）
 - [ ] 多个房间并发运行，日志交替出现

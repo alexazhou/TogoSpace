@@ -5,7 +5,7 @@ import peewee
 from .base import DbModelBase
 
 
-class AgentHistoryMessageRecord(DbModelBase):
+class GtAgentHistory(DbModelBase):
     id: int = peewee.AutoField()
     agent_key: str = peewee.CharField(null=False)
     seq: int = peewee.IntegerField(null=False)
@@ -13,7 +13,7 @@ class AgentHistoryMessageRecord(DbModelBase):
     updated_at: str = peewee.CharField(null=False)
 
     class Meta:
-        table_name = "agent_history_messages"
+        table_name = "agent_histories"
         indexes = (
             (("agent_key", "seq"), True),
         )

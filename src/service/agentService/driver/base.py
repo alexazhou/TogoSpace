@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
-from service.room_service import ChatRoom
+from service.roomService import ChatRoom
 from util import llm_api_util
 
 

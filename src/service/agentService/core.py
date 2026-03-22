@@ -6,11 +6,11 @@ from util import llm_api_util, config_util
 from model.chat_context import ChatContext
 from model.chat_model import AgentDialogContext, ChatMessage
 from model.agent_event import RoomMessageEvent
-from model.db_model.agent_history_message import AgentHistoryMessageRecord
+from model.dbModel.gtAgentHistory import GtAgentHistory
 from .driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
-from service import llm_service, func_tool_service, room_service, message_bus, persistence_service
-from service.room_service import ChatRoom
-from constants import SpecialAgent, MessageBusTopic, AgentStatus
+from service import llmService, funcToolService, roomService, messageBus, persistenceService
+from service.roomService import ChatRoom
+from constants import SpecialAgent, messageBusTopic, AgentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +52,8 @@ class Agent:
         await self.driver.shutdown()
 
     def _publish_status(self, status: AgentStatus) -> None:
-        message_bus.publish(
-            MessageBusTopic.AGENT_STATUS_CHANGED,
+        messageBus.publish(
+            messageBusTopic.AGENT_STATUS_CHANGED,
             agent_name=self.name,
             team_name=self.team_name,
             status=status.value,
@@ -105,8 +105,8 @@ class Agent:
         return synced_count
 
     async def run_chat_turn(self, room_key: str, max_function_calls: int = 5) -> None:
-        # Agent 统一维护当前房间上下文和消息同步，driver 只负责跑这一轮聊天逻辑。
-        room = room_service.get_room(room_key)
+        # Agent 统一维护当前房间上下文 and 消息同步，driver 只负责跑这一轮聊天逻辑。
+        room = roomService.get_room(room_key)
         self.current_room = room
         synced_count = await self.sync_room_messages(room)
 
@@ -126,7 +126,7 @@ class Agent:
             llm_api_util.OpenaiLLMApiRole.SYSTEM,
         ), f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
         ctx = AgentDialogContext(system_prompt=self.system_prompt, messages=self._history, tools=tools or None)
-        response: llm_api_util.LlmApiResponse = await llm_service.infer(self.model, ctx)
+        response: llm_api_util.LlmApiResponse = await llmService.infer(self.model, ctx)
         assistant_message: llm_api_util.LlmApiMessage = response.choices[0].message
         await self.append_history_message(assistant_message)
 
@@ -143,7 +143,7 @@ class Agent:
             name = function.get("name", "")
             args = function.get("arguments", "")
             context = ChatContext(agent_name=self.name, team_name=self.team_name, chat_room=self.current_room)
-            result = await func_tool_service.run_tool_call(name, args, context=context)
+            result = await funcToolService.run_tool_call(name, args, context=context)
             await self.append_history_message(llm_api_util.LlmApiMessage.tool_result(tool_call.id, result))
 
     def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llm_api_util.LlmApiMessage]:
@@ -156,9 +156,9 @@ class Agent:
 
         return None
 
-    def dump_history_messages(self) -> List[AgentHistoryMessageRecord]:
+    def dump_history_messages(self) -> List[GtAgentHistory]:
         return [
-            AgentHistoryMessageRecord(
+            GtAgentHistory(
                 agent_key=self.key,
                 seq=idx,
                 message_json=msg.model_dump_json(exclude_none=True),
@@ -166,7 +166,7 @@ class Agent:
             for idx, msg in enumerate(self._history)
         ]
 
-    def inject_history_messages(self, items: List[AgentHistoryMessageRecord]) -> None:
+    def inject_history_messages(self, items: List[GtAgentHistory]) -> None:
         self._history = [llm_api_util.LlmApiMessage.model_validate_json(item.message_json) for item in items]
 
     async def append_history_message(self, message: llm_api_util.LlmApiMessage) -> None:
@@ -175,12 +175,12 @@ class Agent:
 
     async def _persist_history_message(self, message: llm_api_util.LlmApiMessage) -> None:
         seq: int = len(self._history) - 1
-        item = AgentHistoryMessageRecord(
+        item = GtAgentHistory(
             agent_key=self.key,
             seq=seq,
             message_json=message.model_dump_json(exclude_none=True),
         )
-        await persistence_service.append_agent_history_message(item)
+        await persistenceService.append_agent_history_message(item)
 
 
 async def startup() -> None:
@@ -245,12 +245,12 @@ def get_all_agents() -> List[Agent]:
 
 
 def get_agents(team_name: str, room_name: str) -> List[Agent]:
-    members: List[str] = room_service.get_member_names(team_name, room_name)
+    members: List[str] = roomService.get_member_names(team_name, room_name)
     return [_agents[_make_agent_key(team_name, n)] for n in members if _make_agent_key(team_name, n) in _agents]
 
 
 def get_all_rooms(team_name: str, agent_name: str) -> List[str]:
-    return room_service.get_rooms_for_agent(team_name, agent_name)
+    return roomService.get_rooms_for_agent(team_name, agent_name)
 
 
 async def shutdown() -> None:

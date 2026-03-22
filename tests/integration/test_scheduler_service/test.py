@@ -1,4 +1,4 @@
-"""integration tests for service.scheduler_service"""
+"""integration tests for service.schedulerService"""
 import asyncio
 import logging
 import os
@@ -6,13 +6,13 @@ import pytest
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import service.room_service as room_service
-import service.agent_service as agent_service
-import service.scheduler_service as scheduler
-from service.agent_service import Agent
-from service.message_bus import Message
+import service.roomService as roomService
+import service.agentService as agentService
+import service.schedulerService as scheduler
+from service.agentService import Agent
+from service.messageBus import Message
 from model.agent_event import RoomMessageEvent
-from constants import MessageBusTopic, AgentStatus
+from constants import messageBusTopic, AgentStatus
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -40,7 +40,7 @@ class TestSchedulerRun(ServiceTestCase):
 
     async def test_scheduler_run_terminates_on_stop(self):
         """调用 scheduler.shutdown() 后，scheduler.run() 应正常结束。"""
-        await room_service.startup()
+        await roomService.startup()
         await scheduler.startup([])
         run_task = asyncio.create_task(scheduler.run())
         await asyncio.sleep(0.1)
@@ -49,17 +49,17 @@ class TestSchedulerRun(ServiceTestCase):
 
     async def test_scheduler_runs_agent_on_turn_event(self):
         """发布 ROOM_AGENT_TURN 后，scheduler 应触发 agent.consume_task。"""
-        await room_service.create_room(TEAM, "r1", ["alice"])
+        await roomService.create_room(TEAM, "r1", ["alice"])
         alice = _make_mock_agent("alice")
 
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
         await scheduler.startup(teams_config)
 
-        with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
+        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
             run_task = asyncio.create_task(scheduler.run())
 
             msg = Message(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
+                topic=messageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_name": "alice", "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
             scheduler._on_agent_turn(msg)
@@ -116,9 +116,9 @@ class TestSchedulerRun(ServiceTestCase):
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
         await scheduler.startup(teams_config)
 
-        with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
+        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
             msg = Message(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
+                topic=messageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_name": "alice", "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
             scheduler._on_agent_turn(msg)
@@ -132,9 +132,9 @@ class TestSchedulerRun(ServiceTestCase):
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
         await scheduler.startup(teams_config)
 
-        with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
+        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
             msg = Message(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
+                topic=messageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_name": "alice", "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
             scheduler._on_agent_turn(msg)
@@ -148,13 +148,13 @@ class TestSchedulerRun(ServiceTestCase):
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
         await scheduler.startup(teams_config)
 
-        with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
+        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
             msg_r1 = Message(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
+                topic=messageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_name": "alice", "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
             msg_r2 = Message(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
+                topic=messageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_name": "alice", "room_name": "r2", "room_key": f"r2@{TEAM}", "team_name": TEAM},
             )
             scheduler._on_agent_turn(msg_r1)
@@ -168,9 +168,9 @@ class TestSchedulerRun(ServiceTestCase):
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
         await scheduler.startup(teams_config)
 
-        with patch("service.scheduler_service.agent_service.get_agent", return_value=alice):
+        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
             msg = Message(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
+                topic=messageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_name": "alice", "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
             # 第一次入队

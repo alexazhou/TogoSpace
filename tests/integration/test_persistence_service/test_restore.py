@@ -9,13 +9,13 @@ import pytest
 from constants import OpenaiLLMApiRole
 from tests.base import ServiceTestCase
 from service import (
-    room_service,
-    agent_service,
-    func_tool_service,
-    message_bus,
-    scheduler_service as scheduler,
-    orm_service,
-    persistence_service,
+    roomService,
+    agentService,
+    funcToolService,
+    messageBus,
+    schedulerService as scheduler,
+    ormService,
+    persistenceService,
 )
 
 TEAM = "test_team"
@@ -29,12 +29,12 @@ if os.name == "posix" and sys.platform == "darwin":
 class TestPersistenceRestoreIntegration(ServiceTestCase):
     async def _reset_runtime_services(self):
         scheduler.shutdown()
-        func_tool_service.shutdown()
-        message_bus.shutdown()
-        await persistence_service.shutdown()
-        await orm_service.shutdown()
-        await agent_service.shutdown()
-        room_service.shutdown()
+        funcToolService.shutdown()
+        messageBus.shutdown()
+        await persistenceService.shutdown()
+        await ormService.shutdown()
+        await agentService.shutdown()
+        roomService.shutdown()
 
     def setup_method(self):
         self._run_maybe_async(self._reset_runtime_services())
@@ -46,23 +46,23 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
 
-        await room_service.startup()
-        await func_tool_service.startup()
-        await agent_service.startup()
-        await orm_service.startup(str(db_path))
-        await persistence_service.startup(enabled=True)
+        await roomService.startup()
+        await funcToolService.startup()
+        await agentService.startup()
+        await ormService.startup(str(db_path))
+        await persistenceService.startup(enabled=True)
 
-        agent_service.load_agent_config(agents_config)
-        await agent_service.create_team_agents([team_config])
-        await room_service.create_rooms([team_config])
-        await persistence_service.restore_runtime_state(agent_service.get_all_agents(), room_service.get_all_rooms())
+        agentService.load_agent_config(agents_config)
+        await agentService.create_team_agents([team_config])
+        await roomService.create_rooms([team_config])
+        await persistenceService.restore_runtime_state(agentService.get_all_agents(), roomService.get_all_rooms())
         await scheduler.startup([team_config])
         return team_config
 
     async def test_room_requires_explicit_start_before_scheduler_runs(self, tmp_path: Path):
         await self._bootstrap(tmp_path / "state.db")
 
-        room = room_service.get_room(f"general@{TEAM}")
+        room = roomService.get_room(f"general@{TEAM}")
         assert len(room.messages) == 1
 
         async def fake_infer(model, ctx):
@@ -87,7 +87,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
         await self._bootstrap(db_path)
 
-        room = room_service.get_room(f"general@{TEAM}")
+        room = roomService.get_room(f"general@{TEAM}")
 
         replies = {
             "alice": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "from alice"}, "id": "a1"}]}],
@@ -108,21 +108,21 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
         assert any(m.content == "from alice" for m in room.messages)
         assert any(m.content == "from bob" for m in room.messages)
-        assert agent_service.get_agent(TEAM, "alice")._history
+        assert agentService.get_agent(TEAM, "alice")._history
 
         # 手动清理服务以模拟重启
         scheduler.shutdown()
-        func_tool_service.shutdown()
-        await persistence_service.shutdown()
-        await orm_service.shutdown()
-        await agent_service.shutdown()
-        room_service.shutdown()
+        funcToolService.shutdown()
+        await persistenceService.shutdown()
+        await ormService.shutdown()
+        await agentService.shutdown()
+        roomService.shutdown()
 
         # 重启并恢复状态
         await self._bootstrap(db_path)
 
-        restored_room = room_service.get_room(f"general@{TEAM}")
-        restored_alice = agent_service.get_agent(TEAM, "alice")
+        restored_room = roomService.get_room(f"general@{TEAM}")
+        restored_alice = agentService.get_agent(TEAM, "alice")
 
         assert any(m.content == "from alice" for m in restored_room.messages)
         assert any(m.content == "from bob" for m in restored_room.messages)
