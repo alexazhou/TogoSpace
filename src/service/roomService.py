@@ -302,21 +302,21 @@ async def create_room(team_name: str, name: str, members: List[str], initial_top
 
 
 async def create_rooms(teams_config: list) -> None:
-    """遍历所有 team，根据 groups 配置批量创建聊天室。
+    """遍历所有 team，根据 rooms 配置批量创建聊天室。
 
     批量启动路径始终先生成初始化消息；若后续启用持久化恢复，恢复出的历史消息
     会覆盖这段启动期内存消息，从而保持最终房间状态与持久化一致。
     """
     for team in teams_config:
         team_name = team["name"]
-        for group in team["groups"]:
+        for room in team["rooms"]:
             await _create_room(
                 team_name=team_name,
-                name=group["name"],
-                members=group["members"],
-                initial_topic=group.get("initial_topic", ""),
-                room_type=RoomType(group.get("type", "group")),
-                max_turns=group.get("max_turns", 0),
+                name=room["name"],
+                members=room["members"],
+                initial_topic=room.get("initial_topic", ""),
+                room_type=RoomType(room.get("type", "group")),
+                max_turns=room.get("max_turns", 0),
                 persist_initial_message=False,
             )
 
@@ -366,18 +366,18 @@ async def refresh_rooms_for_team(team_name: str, teams_config: list) -> None:
     await close_team_rooms(team_name)
 
     # 根据新配置重新创建聊天室
-    for group in target_config.get("groups", []):
+    for room in target_config.get("rooms", []):
         await _create_room(
             team_name=team_name,
-            name=group["name"],
-            members=group.get("members", []),
-            initial_topic=group.get("initial_topic", ""),
-            room_type=RoomType(group.get("type", "group")),
-            max_turns=group.get("max_turns", 0),
+            name=room["name"],
+            members=room.get("members", []),
+            initial_topic=room.get("initial_topic", ""),
+            room_type=RoomType(room.get("type", "group")),
+            max_turns=room.get("max_turns", 0),
             persist_initial_message=False,
         )
 
-    logger.info(f"Team '{team_name}' 的聊天室已刷新，共 {len(target_config.get('groups', []))} 个房间")
+    logger.info(f"Team '{team_name}' 的聊天室已刷新，共 {len(target_config.get('rooms', []))} 个房间")
 
 
 async def close_team_rooms(team_name: str) -> None:

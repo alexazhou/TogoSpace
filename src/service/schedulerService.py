@@ -94,8 +94,8 @@ async def run() -> None:
     logger.info("Scheduler 已停止运行")
     for team in _teams_config:
         team_name = team["name"]
-        for group in team["groups"]:
-            room_key = f"{group['name']}@{team_name}"
+        for room in team["rooms"]:
+            room_key = f"{room['name']}@{team_name}"
             logger.info(f"\n{chat_room.get_room(room_key).format_log()}")
 
 

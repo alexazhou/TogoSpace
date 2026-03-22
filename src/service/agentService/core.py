@@ -201,8 +201,8 @@ async def create_team_agents(teams_config: list) -> None:
         team_name = team_config["name"]
 
         agent_names_in_team = set()
-        for group in team_config["groups"]:
-            for name in group["members"]:
+        for room in team_config["rooms"]:
+            for name in room["members"]:
                 if name != SpecialAgent.OPERATOR:
                     agent_names_in_team.add(name)
 

@@ -17,7 +17,7 @@ async def startup(config_dir: str = None) -> list:
     """启动时加载 Team 配置：
     1. 从数据库加载现有配置
     2. 从 JSON 文件扫描新配置，导入数据库
-    3. 为没有 max_turns 的 group 设置默认值 100
+    3. 为没有 max_turns 的 room 设置默认值 100
     4. 返回最终的 Team 配置列表（兼容现有格式）
     """
     # 1. 扫描 JSON 文件
@@ -34,11 +34,11 @@ async def startup(config_dir: str = None) -> list:
 
     # 2. 将 JSON 配置导入数据库（仅当不存在时）
     for name, team_config in json_teams.items():
-        # 为没有 max_turns 的 group 设置默认值 100
-        for group in team_config.get("groups", []):
-            if "max_turns" not in group:
-                group["max_turns"] = 100
-                logger.info(f"为 Team '{name}' 的 Group '{group['name']}' 设置默认 max_turns=100")
+        # 为没有 max_turns 的 room 设置默认值 100
+        for room in team_config.get("rooms", []):
+            if "max_turns" not in room:
+                room["max_turns"] = 100
+                logger.info(f"为 Team '{name}' 的 Room '{room['name']}' 设置默认 max_turns=100")
 
         await gtTeamManager.import_team_from_json(team_config)
 
@@ -65,19 +65,19 @@ async def create_team(team_config: dict) -> None:
     # 创建 Team
     await gtTeamManager.upsert_team(team_config)
 
-    # 创建 Rooms（groups 参数）
-    groups = team_config.get("groups", [])
-    for group in groups:
-        if "max_turns" not in group:
-            group["max_turns"] = 100
+    # 创建 Rooms（rooms 参数）
+    rooms = team_config.get("rooms", [])
+    for room in rooms:
+        if "max_turns" not in room:
+            room["max_turns"] = 100
 
-    await gtRoomManager.upsert_rooms(name, groups)
+    await gtRoomManager.upsert_rooms(name, rooms)
 
     # 创建 Members
-    for group in groups:
-        room_name = group["name"]
+    for room in rooms:
+        room_name = room["name"]
         room_key = f"{room_name}@{name}"
-        members = group.get("members", [])
+        members = room.get("members", [])
         await gtRoomMemberManager.upsert_room_members(room_key, members)
 
     # 触发热更新
@@ -93,19 +93,19 @@ async def update_team(team_config: dict) -> None:
     # 更新 Team 基本信息
     await gtTeamManager.upsert_team(team_config)
 
-    # 更新 Rooms（groups 参数名保持兼容）
-    groups = team_config.get("groups", [])
-    for group in groups:
-        if "max_turns" not in group:
-            group["max_turns"] = 100
+    # 更新 Rooms（rooms 参数名保持兼容）
+    rooms = team_config.get("rooms", [])
+    for room in rooms:
+        if "max_turns" not in room:
+            room["max_turns"] = 100
 
-    await gtRoomManager.upsert_rooms(name, groups)
+    await gtRoomManager.upsert_rooms(name, rooms)
 
     # 更新 Members
-    for group in groups:
-        room_name = group["name"]
+    for room in rooms:
+        room_name = room["name"]
         room_key = f"{room_name}@{name}"
-        members = group.get("members", [])
+        members = room.get("members", [])
         await gtRoomMemberManager.upsert_room_members(room_key, members)
 
     logger.info(f"Team '{name}' 配置已更新")
