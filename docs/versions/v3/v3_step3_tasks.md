@@ -2,7 +2,7 @@
 
 ## 任务概览
 
-V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `agentService` 支持按房间分组、修改 `schedulerService` 支持多房间并发、修改 `config_util` 读取新配置、修改 `main.py` 初始化多个房间。`chat_roomService`、`llm_api_service`、`agent_tool_service` 及所有 model/util 模块直接复用，无需修改。
+V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `agentService` 支持按房间分组、修改 `schedulerService` 支持多房间并发、修改 `configUtil` 读取新配置、修改 `main.py` 初始化多个房间。`chat_roomService`、`llm_api_service`、`agent_tool_service` 及所有 model/util 模块直接复用，无需修改。
 
 共 5 个任务，按依赖关系排序。
 
@@ -33,13 +33,13 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 
 ---
 
-### 任务 2: 修改 config_util.py
+### 任务 2: 修改 configUtil.py
 
 **描述**: 将 `load_config` 的读取路径从 `agents_v2.json` 改为 `agents_v3.json`
 
 **依赖**: 任务 1
 
-**文件**: `src/util/config_util.py`（修改）
+**文件**: `src/util/configUtil.py`（修改）
 
 **子任务**:
 - [ ] 将 `load_config` 中的路径 `../../config/agents_v2.json` 改为 `../../config/agents_v3.json`
@@ -136,7 +136,7 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 ```
 任务 1 (V3 配置文件)
     │
-    └─ 任务 2 (config_util)
+    └─ 任务 2 (configUtil)
                 │
 任务 3 (agentService) ──┐
                          └─ 任务 4 (scheduler + main)
@@ -176,7 +176,7 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 | 文件 | 操作 | 说明 |
 |------|------|------|
 | `config/agents_v3.json` | 新建 | 多房间配置结构 |
-| `src/util/config_util.py` | 修改 | 读取路径改为 `agents_v3.json` |
+| `src/util/configUtil.py` | 修改 | 读取路径改为 `agents_v3.json` |
 | `src/service/agentService.py` | 修改 | 按房间分组存储和初始化 |
 | `src/service/schedulerService.py` | 修改 | `asyncio.gather` 并发多房间 |
 | `src/main.py` | 修改 | 初始化多个房间，调整 init 调用参数 |

@@ -3,14 +3,14 @@ import json
 import logging
 from typing import Any, Callable, List, Optional
 
-from util import llm_api_util
+from util import llmApiUtil
 from model.coreModel.gtCoreChatContext import ChatContext
 from .tools import FUNCTION_REGISTRY
 from .toolLoader import build_tools
 
 logger = logging.getLogger(__name__)
 
-_tools: list[llm_api_util.Tool] = []
+_tools: list[llmApiUtil.Tool] = []
 
 
 async def startup() -> None:
@@ -19,7 +19,7 @@ async def startup() -> None:
     _tools = build_tools(FUNCTION_REGISTRY)
 
 
-def get_tools() -> list[llm_api_util.Tool]:
+def get_tools() -> list[llmApiUtil.Tool]:
     """返回已初始化的工具列表。"""
     return _tools
 

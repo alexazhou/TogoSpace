@@ -1,7 +1,7 @@
 import tornado.web
-from controller.agent_controller import AgentListHandler
-from controller.room_controller import RoomListHandler, RoomMessagesHandler
-from controller.ws_controller import EventsWsHandler
+from controller.agentController import AgentListHandler
+from controller.roomController import RoomListHandler, RoomMessagesHandler
+from controller.wsController import EventsWsHandler
 
 
 def make_app() -> tornado.web.Application:

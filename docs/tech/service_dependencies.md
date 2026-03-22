@@ -14,7 +14,7 @@ graph TD
     controller --> agentService
     controller --> roomService
     controller --> schedulerService
-    controller --> ws_controller
+    controller --> wsController
 
     schedulerService -->|start tasks| agentService
     schedulerService --> roomService

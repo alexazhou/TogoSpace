@@ -8,11 +8,11 @@ from datetime import datetime
 
 import tornado.httpserver
 
-from util import llm_api_util, config_util
-load_agents = config_util.load_agents
-load_teams = config_util.load_teams
-load_llmService_config = config_util.load_llmService_config
-load_persistence_config = config_util.load_persistence_config
+from util import llmApiUtil, configUtil
+load_agents = configUtil.load_agents
+load_teams = configUtil.load_teams
+load_llmService_config = configUtil.load_llmService_config
+load_persistence_config = configUtil.load_persistence_config
 from service import (
     messageBus,
     schedulerService as scheduler,
@@ -97,7 +97,7 @@ async def main(
     llm_cfg, persistence_cfg = _load_runtime_configs(config_dir)
 
     await messageBus.startup()
-    llm_api_util.init()
+    llmApiUtil.init()
     await llmService.startup(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     await funcToolService.startup()
     if persistence_cfg["enabled"]:

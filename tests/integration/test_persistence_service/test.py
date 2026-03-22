@@ -6,7 +6,7 @@ import pytest
 
 from service import ormService, persistenceService, roomService
 from service.agentService import Agent
-from util.llm_api_util import LlmApiMessage, OpenaiLLMApiRole
+from util.llmApiUtil import LlmApiMessage, OpenaiLLMApiRole
 from ...base import ServiceTestCase
 
 TEAM = "test_team"

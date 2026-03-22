@@ -13,7 +13,7 @@ from model.coreModel.gtCoreChatContext import ChatContext
 from service.funcToolService.toolLoader import get_function_metadata
 from service.funcToolService.tools import FUNCTION_REGISTRY
 from service.roomService import ChatRoom
-from util import llm_api_util
+from util import llmApiUtil
 
 from .base import AgentDriver
 
@@ -131,7 +131,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
             # 写入 tool_use 消息到 history
             tool_call_id = self._next_tool_call_id()
             await self.host.append_history_message(
-                llm_api_util.LlmApiMessage(
+                llmApiUtil.LlmApiMessage(
                     role="assistant",
                     content=None,
                     tool_calls=[
@@ -151,7 +151,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
             history = self.host._history
             result = ""
             for msg in reversed(history):
-                if msg.role == llm_api_util.OpenaiLLMApiRole.TOOL and msg.tool_call_id == tool_call_id:
+                if msg.role == llmApiUtil.OpenaiLLMApiRole.TOOL and msg.tool_call_id == tool_call_id:
                     result = msg.content or ""
                     break
 

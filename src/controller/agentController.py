@@ -2,7 +2,7 @@ from typing import List
 import service.agentService as agentService
 from service.agentService import Agent
 from model.coreModel.gtCoreWebModel import AgentInfo
-from controller.base_controller import BaseHandler
+from controller.baseController import BaseHandler
 from constants import AgentStatus
 
 

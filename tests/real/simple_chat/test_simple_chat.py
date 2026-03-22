@@ -11,7 +11,7 @@ import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.llmService as llmService
 from tests.base import ServiceTestCase
-from util import config_util, llm_api_util
+from util import configUtil, llmApiUtil
 
 
 _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
@@ -33,7 +33,7 @@ class TestRealSimpleChat(ServiceTestCase):
         """初始化服务和配置"""
 
         # 加载 LLM 配置并启动服务
-        llm_cfg = config_util.load_llmService_config(_CONFIG_DIR)
+        llm_cfg = configUtil.load_llmService_config(_CONFIG_DIR)
         await llmService.startup(llm_cfg.get("api_key", ""), llm_cfg.get("base_url", ""))
 
         # 启动服务
@@ -42,8 +42,8 @@ class TestRealSimpleChat(ServiceTestCase):
         await agentService.startup()
 
         # 加载配置
-        agents_cfgs = config_util.load_agents(_CONFIG_DIR)
-        team_cfgs = config_util.load_teams(_CONFIG_DIR)
+        agents_cfgs = configUtil.load_agents(_CONFIG_DIR)
+        team_cfgs = configUtil.load_teams(_CONFIG_DIR)
 
         agentService.load_agent_config(agents_cfgs)
         await agentService.create_team_agents(team_cfgs)
@@ -63,7 +63,7 @@ class TestRealSimpleChat(ServiceTestCase):
     async def test_two_agents_chat_and_exit(self):
         """Alice 和 Bob 各发一条消息后房间自动退出"""
         # 初始化 LLM API 客户端（使用当前事件循环）
-        llm_api_util.init()
+        llmApiUtil.init()
 
         room_key = "general@default"
 

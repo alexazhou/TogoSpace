@@ -23,7 +23,7 @@ def init() -> None:
 async def send_request(request: LlmApiRequest, url: str, api_key: str) -> LlmApiResponse:
     """发送 chat completion 请求。"""
     if _session is None:
-        raise RuntimeError("llm_api_util 未初始化，请先调用 init()")
+        raise RuntimeError("llmApiUtil 未初始化，请先调用 init()")
 
     headers = {
         "Authorization": f"Bearer {api_key}",
