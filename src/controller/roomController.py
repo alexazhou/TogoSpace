@@ -54,30 +54,20 @@ class RoomListHandler(BaseHandler):
 
 class RoomMessagesHandler(BaseHandler):
     async def get(self, db_id: str) -> None:
-        # 通过数据库 ID 查询房间配置
-        room_config = await gtRoomManager.get_room_by_db_id(int(db_id))
-        assertUtil.assertNotNull(room_config, error_message=f"Room with id {db_id} not found", error_code="room_not_found")
-
-        # 使用 room_key (name@team_name) 获取内存中的 ChatRoom
-        room_key = f"{room_config.name}@{room_config.team_id}"
-        room: chat_room.ChatRoom = chat_room.get_room(room_key)
+        # 通过数据库 ID 获取内存中的 ChatRoom
+        room: chat_room.ChatRoom = chat_room.get_room(int(db_id))
         messages = [
             MessageInfo(sender=m.sender_name, content=m.content, time=m.send_time)
             for m in room.messages
         ]
         resp = RoomMessagesResponse(
-            room_id=room_key, room_name=room.name, team_name=room.team_name, messages=messages
+            room_id=room.key, room_name=room.name, team_name=room.team_name, messages=messages
         )
         self.return_json(resp)
 
     async def post(self, db_id: str) -> None:
-        # 通过数据库 ID 查询房间配置
-        room_config = await gtRoomManager.get_room_by_db_id(int(db_id))
-        assertUtil.assertNotNull(room_config, error_message=f"Room with id {db_id} not found", error_code="room_not_found")
-
-        # 使用 room_key (name@team_name) 获取内存中的 ChatRoom
-        room_key = f"{room_config.name}@{room_config.team_id}"
-        room: chat_room.ChatRoom = chat_room.get_room(room_key)
+        # 通过数据库 ID 获取内存中的 ChatRoom
+        room: chat_room.ChatRoom = chat_room.get_room(int(db_id))
         body = json.loads(self.request.body)
         content = body.get("content")
         assertUtil.assertNotNull(content, error_message="content is required", error_code="invalid_request")

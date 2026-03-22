@@ -129,15 +129,12 @@ async def import_team_from_json(team_config: dict) -> None:
     rooms = team_config.get("rooms", [])
     await gtRoomManager.upsert_rooms(name, rooms)
 
-    # 导入 Members 并设置 room_key -> db_id 映射
+    # 导入 Members
     for room in rooms:
         room_name = room["name"]
         room_config = await gtRoomManager.get_room_config(name, room_name)
         if room_config:
             members = room.get("members", [])
             await gtRoomMemberManager.upsert_room_members(room_config.id, members)
-            room_key = f"{room_name}@{name}"
-            from service import roomService as rs
-            rs.set_room_db_id(room_key, room_config.id)
 
     logger.info(f"Team '{name}' 已从 JSON 导入数据库")
