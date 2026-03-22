@@ -7,8 +7,7 @@ from .base import DbModelBase
 
 class GtRoomMessage(DbModelBase):
     id: int = peewee.AutoField()
-    room_key: str = peewee.CharField(null=False)
-    team_name: str = peewee.CharField(null=False)
+    room_id: str = peewee.CharField(null=False)
     sender_name: str = peewee.CharField(null=False)
     content: str = peewee.TextField(null=False)
     send_time: str = peewee.CharField(null=False)
@@ -16,5 +15,5 @@ class GtRoomMessage(DbModelBase):
     class Meta:
         table_name = "room_messages"
         indexes = (
-            (("room_key", "id"), False),
+            (("room_id", "id"), False),
         )

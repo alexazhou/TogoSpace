@@ -7,8 +7,8 @@ from constants import RoomType
 
 
 class GtRoom(DbModelBase):
-    room_key: str = peewee.CharField(unique=True)
-    team_name: str = peewee.CharField()
+    room_id: str = peewee.CharField(unique=True)
+    team_id: str = peewee.CharField()
     name: str = peewee.CharField()
     type: RoomType = EnumField(RoomType, null=False)
     initial_topic: str = peewee.CharField(null=True)
@@ -19,7 +19,7 @@ class GtRoom(DbModelBase):
     class Meta:
         table_name = "rooms"
         indexes = (
-            (('team_name', 'name'), True),
+            (('team_id', 'name'), True),
         )
 
 
