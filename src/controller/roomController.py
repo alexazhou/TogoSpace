@@ -272,7 +272,7 @@ class TeamRoomDeleteHandler(BaseHandler):
             self.return_json({"error": str(e)})
 
 
-class RoomMembersHandler(BaseHandler):
+class TeamRoomMembersHandler(BaseHandler):
     """GET /teams/{name}/rooms/{room_name}/members.json - 获取 Room 成员"""
 
     async def get(self, name: str, room_name: str) -> None:
@@ -285,6 +285,8 @@ class RoomMembersHandler(BaseHandler):
         members = await gtRoomMemberManager.get_members_by_room(room_key)
         self.return_json({"members": members})
 
+
+class TeamRoomMembersModifyHandler(BaseHandler):
     """PUT /teams/{name}/rooms/{room_name}/members.json - 更新 Room 成员"""
 
     async def put(self, name: str, room_name: str) -> None:
