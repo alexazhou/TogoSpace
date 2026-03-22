@@ -1,1 +1,1 @@
-from .chat_model import ChatMessage
+from .coreModel.gtCoreChatModel import ChatMessage

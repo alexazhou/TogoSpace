@@ -9,7 +9,7 @@ from claude_agent_sdk import (
     UserMessage, create_sdk_mcp_server, tool,
 )
 
-from model.chat_context import ChatContext
+from model.coreModel.gtCoreChatContext import ChatContext
 from service.funcToolService.toolLoader import get_function_metadata
 from service.funcToolService.tools import FUNCTION_REGISTRY
 from service.roomService import ChatRoom

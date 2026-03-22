@@ -1,4 +1,4 @@
-from model.chat_model import AgentDialogContext
+from model.coreModel.gtCoreChatModel import AgentDialogContext
 from util import llm_api_util
 
 _api_key: str = ""

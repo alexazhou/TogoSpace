@@ -4,7 +4,7 @@ from typing import Dict
 
 from service import messageBus
 from service.messageBus import Message
-from model.agent_event import RoomMessageEvent
+from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
 from service import agentService, roomService as chat_room
 from service.agentService import Agent
 from constants import messageBusTopic, SpecialAgent

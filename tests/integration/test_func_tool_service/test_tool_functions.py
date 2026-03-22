@@ -19,7 +19,7 @@ from service.funcToolService.tools import (
     get_agent_list,
     finish_chat_turn,
 )
-from model.chat_context import ChatContext
+from model.coreModel.gtCoreChatContext import ChatContext
 from ...base import ServiceTestCase
 
 TEAM = "test_team"

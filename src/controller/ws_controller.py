@@ -2,7 +2,7 @@ import asyncio
 import json
 import tornado.websocket
 import service.messageBus as messageBus
-from model.web_model import WsEvent
+from model.coreModel.gtCoreWebModel import WsEvent
 from constants import messageBusTopic
 
 

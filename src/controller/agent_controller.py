@@ -1,7 +1,7 @@
 from typing import List
 import service.agentService as agentService
 from service.agentService import Agent
-from model.web_model import AgentInfo
+from model.coreModel.gtCoreWebModel import AgentInfo
 from controller.base_controller import BaseHandler
 from constants import AgentStatus
 

@@ -349,7 +349,7 @@ if __name__ == "__main__":
 
 | 模块 | 依赖的项目内模块 | 依赖的第三方库 |
 |------|----------------|--------------|
-| `chat_roomService.py` | `model.chat_model`（ChatMessage） | 标准库（typing, datetime） |
+| `chat_roomService.py` | `model.coreModel.gtCoreChatModel`（ChatMessage） | 标准库（typing, datetime） |
 | `api_client_service.py` | `model.api_model`（ChatCompletionRequest / Response / ErrorResponse） | aiohttp, certifi |
 | `agentService.py` | 无（api_client 以参数注入） | 标准库（typing, logging, json） |
 | `function_service.py` | `model.api_model`（Tool, Function, FunctionParameter）<br>`util.function_loader_util`（load_enabled_functions, get_function_metadata）<br>`util.functions_util`（FUNCTION_REGISTRY） | 标准库（logging, typing） |
@@ -375,7 +375,7 @@ main.py
   ├── service.api_client_service
   │     └── model.api_model         （请求/响应数据结构）
   ├── service.chat_roomService
-  │     └── model.chat_model        （ChatMessage dataclass）
+  │     └── model.coreModel.gtCoreChatModel        （ChatMessage dataclass）
   ├── service.agentService         （无内部依赖，api_client 注入）
   └── service.schedulerService
         ├── service.agentService

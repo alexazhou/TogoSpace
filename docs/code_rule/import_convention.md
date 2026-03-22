@@ -65,7 +65,7 @@ import tornado.web
 from route import make_app
 from controller.agent_controller import AgentHandler
 from util import llm_api_util, config_util
-from model.chat_model import ChatMessage
+from model.coreModel.gtCoreChatModel import ChatMessage
 from service import agentService, roomService as chat_room, funcToolService as agent_tools
 from service.agentService import Agent
 from constants import TurnStatus

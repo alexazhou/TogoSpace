@@ -3,9 +3,9 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from util import llm_api_util, config_util
-from model.chat_context import ChatContext
-from model.chat_model import AgentDialogContext, ChatMessage
-from model.agent_event import RoomMessageEvent
+from model.coreModel.gtCoreChatContext import ChatContext
+from model.coreModel.gtCoreChatModel import AgentDialogContext, ChatMessage
+from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from .driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
