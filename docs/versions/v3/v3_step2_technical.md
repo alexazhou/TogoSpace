@@ -15,7 +15,7 @@ V2 中 `schedulerService` 持有单个房间名，只能调度一个聊天室。
 | 模块 | V2 | V3 |
 |------|----|----|
 | `config/agents_v3.json` | 单 `chat_room` 对象 | `chat_rooms` 数组，每项含 `agents` 子列表 |
-| `util/config_util.py` | 固定读取 `agents_v2.json` | 读取 `agents_v3.json` |
+| `util/configUtil.py` | 固定读取 `agents_v2.json` | 读取 `agents_v3.json` |
 | `service/agentService.py` | 单一 Agent 列表，统一注入 `{participants}` | 按房间维度初始化，各房间独立注入参与者 |
 | `service/schedulerService.py` | 单房间顺序轮询 | 多房间并发（`asyncio.gather`） |
 | `main.py` | 初始化单个房间 + 单个 scheduler | 初始化多个房间，scheduler 并发运行 |
@@ -80,7 +80,7 @@ agent_team/
 │   │   ├── llm_api_service.py    # 复用 V2（不变）
 │   │   └── schedulerService.py  # 修改：支持多房间并发
 │   ├── util/
-│   │   ├── config_util.py        # 修改：读取 agents_v3.json
+│   │   ├── configUtil.py        # 修改：读取 agents_v3.json
 │   │   ├── toolLoader_util.py   # 复用 V2（不变）
 │   │   └── tool_util.py          # 复用 V2（不变）
 │   └── main.py                   # 修改：初始化多个房间
@@ -305,7 +305,7 @@ async def _run_room(room_name: str, max_turns: int) -> None:
     """运行单个房间的调度循环，逻辑与 V2 run() 相同，日志加 [room_name] 前缀。"""
 ```
 
-### util/config_util.py（修改）
+### util/configUtil.py（修改）
 
 ```python
 def load_config() -> dict:
@@ -318,8 +318,8 @@ def load_config() -> dict:
 
 | 模块 | 变更 | 依赖的项目内模块 |
 |------|------|----------------|
-| `util/config_util.py` | 读取路径改为 `agents_v3.json` | 无 |
-| `service/agentService.py` | `init` 签名新增 `rooms_config`；内部按房间分组存储 | `util.config_util`（load_prompt）<br>`service.llm_api_service` |
+| `util/configUtil.py` | 读取路径改为 `agents_v3.json` | 无 |
+| `service/agentService.py` | `init` 签名新增 `rooms_config`；内部按房间分组存储 | `util.configUtil`（load_prompt）<br>`service.llm_api_service` |
 | `service/schedulerService.py` | `init` 接收 `rooms_config` 列表；`run` 用 `asyncio.gather` 并发；新增 `_run_room` | `service.agentService`<br>`service.chat_roomService`<br>`service.agent_tool_service` |
 | `main.py` | 遍历 `chat_rooms` 初始化；传 `rooms_config` 给 `scheduler.init` | 同 V2，不变 |
 

@@ -11,7 +11,7 @@ import service.roomService as roomService
 import service.agentService as agentService
 import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
-from util.llm_api_util import LlmApiMessage, ToolCall
+from util.llmApiUtil import LlmApiMessage, ToolCall
 from constants import OpenaiLLMApiRole
 from ...base import ServiceTestCase
 

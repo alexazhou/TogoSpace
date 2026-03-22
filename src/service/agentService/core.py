@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
-from util import llm_api_util, config_util
+from util import llmApiUtil, configUtil
 from model.coreModel.gtCoreChatContext import ChatContext
 from model.coreModel.gtCoreChatModel import AgentDialogContext, ChatMessage
 from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
@@ -31,7 +31,7 @@ class Agent:
         self.system_prompt: str = system_prompt
         self.model: str = model
 
-        self._history: list[llm_api_util.LlmApiMessage] = []
+        self._history: list[llmApiUtil.LlmApiMessage] = []
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
         self.status: AgentStatus = AgentStatus.IDLE
         self.current_room: Optional[ChatRoom] = None
@@ -93,11 +93,11 @@ class Agent:
             if msg.sender_name == self.name:
                 continue
 
-            message: llm_api_util.LlmApiMessage
+            message: llmApiUtil.LlmApiMessage
             if msg.sender_name == "system":
-                message = llm_api_util.LlmApiMessage(role=llm_api_util.OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}")
+                message = llmApiUtil.LlmApiMessage(role=llmApiUtil.OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}")
             else:
-                message = llm_api_util.LlmApiMessage.text(llm_api_util.OpenaiLLMApiRole.USER, content=f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}")
+                message = llmApiUtil.LlmApiMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, content=f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}")
 
             await self.append_history_message(message)
             synced_count += 1
@@ -118,16 +118,16 @@ class Agent:
     async def sync_room(self, room: ChatRoom) -> None:
         await self.sync_room_messages(room)
 
-    async def _infer(self, tools: Optional[list[llm_api_util.Tool]]) -> llm_api_util.LlmApiMessage:
+    async def _infer(self, tools: Optional[list[llmApiUtil.Tool]]) -> llmApiUtil.LlmApiMessage:
         # 每次推理都基于当前 history 组装完整上下文，并把 assistant 回复继续追加回 history。
         assert self._history and self._history[-1].role in (
-            llm_api_util.OpenaiLLMApiRole.USER,
-            llm_api_util.OpenaiLLMApiRole.TOOL,
-            llm_api_util.OpenaiLLMApiRole.SYSTEM,
+            llmApiUtil.OpenaiLLMApiRole.USER,
+            llmApiUtil.OpenaiLLMApiRole.TOOL,
+            llmApiUtil.OpenaiLLMApiRole.SYSTEM,
         ), f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
         ctx = AgentDialogContext(system_prompt=self.system_prompt, messages=self._history, tools=tools or None)
-        response: llm_api_util.LlmApiResponse = await llmService.infer(self.model, ctx)
-        assistant_message: llm_api_util.LlmApiMessage = response.choices[0].message
+        response: llmApiUtil.LlmApiResponse = await llmService.infer(self.model, ctx)
+        assistant_message: llmApiUtil.LlmApiMessage = response.choices[0].message
         await self.append_history_message(assistant_message)
 
         return assistant_message
@@ -144,14 +144,14 @@ class Agent:
             args = function.get("arguments", "")
             context = ChatContext(agent_name=self.name, team_name=self.team_name, chat_room=self.current_room)
             result = await funcToolService.run_tool_call(name, args, context=context)
-            await self.append_history_message(llm_api_util.LlmApiMessage.tool_result(tool_call.id, result))
+            await self.append_history_message(llmApiUtil.LlmApiMessage.tool_result(tool_call.id, result))
 
-    def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llm_api_util.LlmApiMessage]:
+    def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llmApiUtil.LlmApiMessage]:
         """获取历史中最后一条 assistant 消息。"""
         recent_history = self._history[start_idx:]
 
         for message in reversed(recent_history):
-            if message.role == llm_api_util.OpenaiLLMApiRole.ASSISTANT:
+            if message.role == llmApiUtil.OpenaiLLMApiRole.ASSISTANT:
                 return message
 
         return None
@@ -167,13 +167,13 @@ class Agent:
         ]
 
     def inject_history_messages(self, items: List[GtAgentHistory]) -> None:
-        self._history = [llm_api_util.LlmApiMessage.model_validate_json(item.message_json) for item in items]
+        self._history = [llmApiUtil.LlmApiMessage.model_validate_json(item.message_json) for item in items]
 
-    async def append_history_message(self, message: llm_api_util.LlmApiMessage) -> None:
+    async def append_history_message(self, message: llmApiUtil.LlmApiMessage) -> None:
         self._history.append(message)
         await self._persist_history_message(message)
 
-    async def _persist_history_message(self, message: llm_api_util.LlmApiMessage) -> None:
+    async def _persist_history_message(self, message: llmApiUtil.LlmApiMessage) -> None:
         seq: int = len(self._history) - 1
         item = GtAgentHistory(
             agent_key=self.key,
@@ -196,7 +196,7 @@ def load_agent_config(agents_config: list) -> None:
 
 
 async def create_team_agents(teams_config: list) -> None:
-    base_prompt_tmpl = config_util.load_prompt("src/prompts/GroupChat.md")
+    base_prompt_tmpl = configUtil.load_prompt("src/prompts/GroupChat.md")
 
     for team_config in teams_config:
         team_name = team_config["name"]
@@ -216,7 +216,7 @@ async def create_team_agents(teams_config: list) -> None:
             if "system_prompt" in cfg:
                 agent_specific_prompt = cfg["system_prompt"]
             else:
-                agent_specific_prompt = config_util.load_prompt(cfg["prompt_file"])
+                agent_specific_prompt = configUtil.load_prompt(cfg["prompt_file"])
 
             full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
             key = _make_agent_key(team_name, name)

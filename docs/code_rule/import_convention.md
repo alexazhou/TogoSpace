@@ -19,7 +19,7 @@ from pydantic import BaseModel
 # 第三组：项目内部包
 from route import xxx
 from controller.xxx import xxx
-from util import llm_api_util, config_util  # util 模块统一用一行引入
+from util import llmApiUtil, configUtil  # util 模块统一用一行引入
 from model.xxx import ...
 from service import aaa, bbb_service as bbb, ...   # service 模块用一行引入
 from service.xxx import SpecificClass              # 具体类可单独一行
@@ -63,8 +63,8 @@ import tornado.web
 
 # 内部包
 from route import make_app
-from controller.agent_controller import AgentHandler
-from util import llm_api_util, config_util
+from controller.agentController import AgentHandler
+from util import llmApiUtil, configUtil
 from model.coreModel.gtCoreChatModel import ChatMessage
 from service import agentService, roomService as chat_room, funcToolService as agent_tools
 from service.agentService import Agent

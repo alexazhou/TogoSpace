@@ -125,7 +125,7 @@ class ServiceTestCase:
     def normalize_to_mock(self, data: dict):
         """将简化格式的响应字典转换为完整的 Mock 响应对象。"""
         import unittest.mock as mock
-        from util.llm_api_util import LlmApiMessage, ToolCall
+        from util.llmApiUtil import LlmApiMessage, ToolCall
         from constants import OpenaiLLMApiRole
         import json
 

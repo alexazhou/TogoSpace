@@ -318,7 +318,7 @@ if __name__ == "__main__":
         ┌────────────▼────────────┐
         │         util 层         │  无状态工具函数
         ├─────────────────────────┤
-        │  config_util.py         │
+        │  configUtil.py         │
         │  function_loader_util.py│
         │  functions_util.py      │
         └─────────────────────────┘
@@ -334,7 +334,7 @@ if __name__ == "__main__":
 
 | 模块 | 依赖的项目内模块 | 依赖的第三方库 |
 |------|----------------|--------------|
-| `config_util.py` | 无 | 标准库（json, os, logging, datetime） |
+| `configUtil.py` | 无 | 标准库（json, os, logging, datetime） |
 | `functions_util.py` | 无 | 标准库（typing, datetime, logging） |
 | `function_loader_util.py` | `util.functions_util`（FUNCTION_REGISTRY） | 标准库（inspect, json, logging, typing） |
 
@@ -359,7 +359,7 @@ if __name__ == "__main__":
 
 | 依赖的项目内模块 |
 |----------------|
-| `util.config_util`（setup_logger, load_config, load_prompt, load_api_key） |
+| `util.configUtil`（setup_logger, load_config, load_prompt, load_api_key） |
 | `service.agentService`（Agent） |
 | `service.chat_roomService`（ChatRoom） |
 | `service.schedulerService`（Scheduler） |
@@ -371,7 +371,7 @@ if __name__ == "__main__":
 
 ```
 main.py
-  ├── util.config_util              （读取配置/日志）
+  ├── util.configUtil              （读取配置/日志）
   ├── service.api_client_service
   │     └── model.api_model         （请求/响应数据结构）
   ├── service.chat_roomService
