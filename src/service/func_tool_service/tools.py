@@ -133,13 +133,12 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
     assert _context.chat_room is not None, "send_chat_msg: 跨房间发言时 chat_room 不应为 None"
 
     return {"success": True, "message": (
-        f"消息已发送到 {target_room.name}。"
-        f"你还需要在本房间 {_context.chat_room.name} 发言（可选），最后调用 finish_chat_turn 结束本轮。"
+        f"消息已发送到 {target_room.name}。你还可以继续调用工具，或者调用 finish_chat_turn 结束本轮行动。"
     )}
 
 
 def finish_chat_turn(_context: ChatContext = None) -> dict:
-    """结束本轮行动。当你完成所有发言和工具调用后，必须调用此工具来切换到下一位成员。
+    """结束本轮行动。当你完成所有发言和工具调用后，必须调用此工具来把行动机会让给下一位成员。
     如果你觉得当前话题不需要回复，或者没有话要说，请直接调用此工具来跳过本轮。"""
     if _context is None or _context.chat_room is None:
         logger.warning("结束行动失败，聊天室上下文未设置")
