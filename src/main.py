@@ -23,7 +23,7 @@ from service import (
     ormService,
     teamConfigService,
 )
-from route import make_app
+import route
 
 
 def _setup_logger() -> None:
@@ -115,7 +115,7 @@ async def main(
     await chat_room.create_rooms(teams_config)
     await persistenceService.restore_runtime_state(agentService.get_all_agents(), chat_room.get_all_rooms())
 
-    web_server = tornado.httpserver.HTTPServer(make_app())
+    web_server = tornado.httpserver.HTTPServer(route.application)
     web_server.listen(port, "0.0.0.0")
 
     try:
