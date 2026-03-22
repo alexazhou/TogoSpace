@@ -1,7 +1,22 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from constants import AgentStatus
+
+
+class TeamInfo(BaseModel):
+    name: str
+    max_function_calls: Optional[int]
+    enabled: int
+    created_at: str
+    updated_at: str
+
+
+class TeamRoomInfo(BaseModel):
+    name: str
+    type: str
+    initial_topic: Optional[str]
+    max_turns: int
 
 
 class AgentInfo(BaseModel):

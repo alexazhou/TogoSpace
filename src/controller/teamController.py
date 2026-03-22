@@ -9,6 +9,7 @@ from controller.baseController import BaseHandler
 from dal.db import gtTeamManager
 from constants import enum_to_str
 from service import teamService
+from model.coreModel.gtCoreWebModel import TeamInfo
 
 
 # Request Models
@@ -29,13 +30,13 @@ class TeamListHandler(BaseHandler):
     async def get(self):
         teams = await gtTeamManager.get_all_teams()
         data = [
-            {
-                "name": team.name,
-                "max_function_calls": team.max_function_calls,
-                "enabled": team.enabled,
-                "created_at": team.created_at,
-                "updated_at": team.updated_at,
-            }
+            TeamInfo(
+                name=team.name,
+                max_function_calls=team.max_function_calls,
+                enabled=team.enabled,
+                created_at=team.created_at,
+                updated_at=team.updated_at,
+            ).model_dump(mode="json")
             for team in teams
         ]
         self.return_json({"teams": data})

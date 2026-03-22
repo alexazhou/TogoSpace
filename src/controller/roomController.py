@@ -8,7 +8,7 @@ from pydantic import BaseModel
 # 内部包
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager
-from model.coreModel.gtCoreWebModel import RoomInfo, MessageInfo, RoomMessagesResponse
+from model.coreModel.gtCoreWebModel import RoomInfo, MessageInfo, RoomMessagesResponse, TeamRoomInfo
 from service import roomService as chat_room, teamService
 from constants import SpecialAgent, RoomType, enum_to_str
 
@@ -103,15 +103,61 @@ class TeamRoomsHandler(BaseHandler):
 
         rooms = await gtRoomManager.get_rooms_by_team(name)
         data = [
-            {
-                "name": room.name,
-                "type": enum_to_str(room.type),
-                "initial_topic": room.initial_topic,
-                "max_turns": room.max_turns,
-            }
+            TeamRoomInfo(
+                name=room.name,
+                type=enum_to_str(room.type),
+                initial_topic=room.initial_topic,
+                max_turns=room.max_turns,
+            ).model_dump(mode="json")
             for room in rooms
         ]
         self.return_json({"rooms": data})
+
+
+class TeamRoomCreateHandler(BaseHandler):
+    """POST /teams/{name}/rooms.json - 在 Team 下创建 Room"""
+
+    async def post(self, name: str):
+        try:
+            body = json.loads(self.request.body)
+            request = CreateRoomRequest(**body)
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            self.set_status(400)
+            self.return_json({"error": f"invalid request: {e}"})
+            return
+
+        if not await gtTeamManager.team_exists(name):
+            self.set_status(404)
+            self.return_json({"error": f"Team '{name}' not found"})
+            return
+
+        try:
+            # 检查房间是否已存在
+            existing_rooms = await gtRoomManager.get_rooms_by_team(name)
+            existing = next((r for r in existing_rooms if r.name == request.name), None)
+            if existing is not None:
+                self.set_status(409)
+                self.return_json({"error": f"Room '{request.name}' already exists"})
+                return
+
+            # 构建房间配置
+            room_config = {
+                "name": request.name,
+                "type": RoomType(request.type),
+                "initial_topic": request.initial_topic,
+                "max_turns": request.max_turns,
+            }
+
+            await gtRoomManager.upsert_rooms(name, [room_config])
+            await teamService.hot_reload_team(name)
+
+            self.return_json({"status": "created", "room_name": request.name})
+        except ValueError as e:
+            self.set_status(400)
+            self.return_json({"error": str(e)})
+        except Exception as e:
+            self.set_status(500)
+            self.return_json({"error": str(e)})
 
 
 class TeamRoomDetailHandler(BaseHandler):
