@@ -21,7 +21,7 @@ from service import (
     funcToolService,
     persistenceService,
     ormService,
-    teamConfigService,
+    teamService,
 )
 import route
 
@@ -103,8 +103,8 @@ async def main(
         await ormService.startup(persistence_cfg["db_path"])
     await persistenceService.startup(enabled=persistence_cfg["enabled"])
 
-    # 从 teamConfigService 加载 Team 配置（会自动从 JSON 导入到数据库）
-    teams_config = await teamConfigService.startup(config_dir)
+    # 从 teamService 加载 Team 配置（会自动从 JSON 导入到数据库）
+    teams_config = await teamService.startup(config_dir)
 
     await agentService.startup()
     agentService.load_agent_config(agents_config)
