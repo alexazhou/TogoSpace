@@ -32,7 +32,7 @@ class messageBusTopic(str, Enum):
     AGENT_STATUS_CHANGED = "agent.status_changed"  # Agent 忙闲状态变更；payload: agent_name, status(AgentStatus.value)
 
 
-class RoomType(EnhanceEnum, str):
+class RoomType(EnhanceEnum):
     PRIVATE = "private"  # 1v1 单聊模式 (Human + Agent)
     GROUP = "group"      # 多 Agent 自治群聊模式
 
