@@ -55,9 +55,7 @@ class TeamDetailHandler(BaseHandler):
 
     async def get(self, name: str) -> None:
         config = await gtTeamManager.get_team_config(name)
-        if config is None:
-            self.return_with_error("team_not_found", f"Team '{name}' not found")
-            return
+        assertUtil.assertNotNull(config, error_message=f"Team '{name}' not found", error_code="team_not_found")
 
         # 将 groups 转换为 rooms 以保持 API 一致性
         config["rooms"] = config.pop("groups")
