@@ -69,7 +69,7 @@
 
 ## 6. 关键类与方法索引
 
-*   `src/service/room_service.py`: `ChatRoom._apply_turn_logic`, `ChatRoom.finish_turn`
-*   `src/service/scheduler_service.py`: `_on_agent_turn`
-*   `src/service/func_tool_service/tools.py`: `send_chat_msg`, `finish_chat_turn`
-*   `src/service/agent_service/driver/`: 各种 Driver 的 `run_chat_turn` 循环判定。
+*   `src/service/roomService.py`: `ChatRoom._apply_turn_logic`, `ChatRoom.finish_turn`
+*   `src/service/schedulerService.py`: `_on_agent_turn`
+*   `src/service/funcToolService/tools.py`: `send_chat_msg`, `finish_chat_turn`
+*   `src/service/agentService/driver/`: 各种 Driver 的 `run_chat_turn` 循环判定。

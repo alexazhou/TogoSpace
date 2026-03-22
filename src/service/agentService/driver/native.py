@@ -3,8 +3,8 @@ import logging
 from typing import Optional
 
 from util import llm_api_util
-from service import func_tool_service
-from service.room_service import ChatRoom
+from service import funcToolService
+from service.roomService import ChatRoom
 
 from .base import AgentDriver
 
@@ -18,7 +18,7 @@ class NativeAgentDriver(AgentDriver):
         for _ in range(max_retries):
             turn_done = await self._run_until_reply(
                 room=room,
-                tools=func_tool_service.get_tools(),
+                tools=funcToolService.get_tools(),
                 max_function_calls=max_function_calls,
             )
 

@@ -104,7 +104,7 @@ class GeminiCliAgentDriver(AgentDriver): ...
 
 - 公共状态和执行策略清晰分离
 - 新增一种执行方式时，只需新增一个 driver
-- `scheduler_service`、`room_service`、持久化逻辑都可以保持无感
+- `schedulerService`、`roomService`、持久化逻辑都可以保持无感
 - 更符合“策略模式”的问题结构
 
 ### 缺点

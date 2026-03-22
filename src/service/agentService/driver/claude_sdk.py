@@ -10,9 +10,9 @@ from claude_agent_sdk import (
 )
 
 from model.chat_context import ChatContext
-from service.func_tool_service.tool_loader import get_function_metadata
-from service.func_tool_service.tools import FUNCTION_REGISTRY
-from service.room_service import ChatRoom
+from service.funcToolService.toolLoader import get_function_metadata
+from service.funcToolService.tools import FUNCTION_REGISTRY
+from service.roomService import ChatRoom
 from util import llm_api_util
 
 from .base import AgentDriver
@@ -185,7 +185,11 @@ class ClaudeSdkAgentDriver(AgentDriver):
             await client.query(turn_prompt)
             logger.info(f"SDK prompt 已发送，等待响应: agent={self.host.key}")
             hint = f"你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，请务必调用 finish_chat_turn 结束本轮（即跳过）。直接输出的文字不会出现在聊天室里。"
+            
             for attempt in range(max_attempts):
+                # 追踪本次尝试是否发生了直接文本输出
+                has_direct_text = False
+
                 if attempt > 0:
                     logger.info(f"SDK 注入发言提醒: agent={self.host.key}, attempt={attempt}")
                     await client.query(hint)
@@ -200,6 +204,11 @@ class ClaudeSdkAgentDriver(AgentDriver):
                         logger.info(
                             f"SDK AssistantMessage: agent={self.host.key}, model={msg.model}, content=[{', '.join(parts)}]"
                         )
+                        # 检查是否有 TextBlock
+                        for block in msg.content:
+                            if isinstance(block, TextBlock) and block.text.strip():
+                                logger.warning(f"检测到 SDK Agent 直接输出文字: agent={self.host.key}, text={block.text[:50]!r}")
+                                has_direct_text = True
 
                     elif isinstance(msg, UserMessage):
                         parts = _format_sdk_blocks(msg.content)
@@ -229,6 +238,13 @@ class ClaudeSdkAgentDriver(AgentDriver):
                 )
 
                 if self._turn_done:
+                    # 检查是否存在“无效发言”：输出了文字但房间没收到内容
+                    if has_direct_text and not room._current_turn_has_content:
+                        logger.warning(f"SDK Agent 输出了文字但未调用 send_chat_msg，强制提醒: agent={self.host.key}")
+                        # 重置状态，注入提醒
+                        self._turn_done = False
+                        hint = "【提醒】检测到你直接输出了文字。这些文字不会出现在聊天室中！你必须使用 `send_chat_msg` 工具来发言。如果你已经说完，请调用 `finish_chat_turn`。"
+                        continue
                     break
 
                 logger.warning(

@@ -44,11 +44,11 @@ from constants import XxxEnum, XxxDataclass        # constants 放最后
 
 | 模块 | 别名 |
 |------|------|
-| `scheduler_service` | `scheduler` |
-| `room_service` | `chat_room` |
-| `func_tool_service` | `agent_tools` |
-| `agent_service` | 无（直接使用） |
-| `llm_service` | 无（直接使用） |
+| `schedulerService` | `scheduler` |
+| `roomService` | `chat_room` |
+| `funcToolService` | `agent_tools` |
+| `agentService` | 无（直接使用） |
+| `llmService` | 无（直接使用） |
 
 ## 示例
 
@@ -66,8 +66,8 @@ from route import make_app
 from controller.agent_controller import AgentHandler
 from util import llm_api_util, config_util
 from model.chat_model import ChatMessage
-from service import agent_service, room_service as chat_room, func_tool_service as agent_tools
-from service.agent_service import Agent
+from service import agentService, roomService as chat_room, funcToolService as agent_tools
+from service.agentService import Agent
 from constants import TurnStatus
 ```
 

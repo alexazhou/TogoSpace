@@ -22,7 +22,7 @@ class Agent:
 当 `if` 前面已经有一段赋值、调用或状态准备逻辑时，在 `if` 之前加一个空行，让分支入口更醒目。
 
 ```python
-target_room = room_service.get_room(room_key)
+target_room = roomService.get_room(room_key)
 
 if target_room is None:
     ...

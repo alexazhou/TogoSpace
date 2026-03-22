@@ -1,17 +1,17 @@
-"""integration tests for tool_loader utilities and service-backed tool functions"""
+"""integration tests for toolLoader utilities and service-backed tool functions"""
 import os
 import sys
 from typing import Literal, Optional
 
 import pytest
 
-import service.room_service as room_service
-from service.func_tool_service.tool_loader import (
+import service.roomService as roomService
+from service.funcToolService.toolLoader import (
     python_type_to_json_schema,
     get_function_metadata,
     build_tools,
 )
-from service.func_tool_service.tools import (
+from service.funcToolService.tools import (
     get_weather,
     get_time,
     calculate,
@@ -86,7 +86,7 @@ class TestGetFunctionMetadata(ServiceTestCase):
 
 
 @pytest.mark.forked
-class TestBuildTools(ServiceTestCase):
+class TestBuildtools(ServiceTestCase):
     async def test_builds_tool_for_each_entry(self):
         """注册表中每个函数都应产出一个 Tool 定义。"""
         tools = build_tools({"get_weather": get_weather, "get_time": get_time})
@@ -106,8 +106,8 @@ class TestBuildTools(ServiceTestCase):
 class TestToolFunctions(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
-        # send_chat_msg/get_agent_list 依赖 room_service 上下文。
-        await room_service.startup()
+        # send_chat_msg/get_agent_list 依赖 roomService 上下文。
+        await roomService.startup()
 
     async def test_get_weather_celsius(self):
         """天气工具返回摄氏温度文本。"""
@@ -149,8 +149,8 @@ class TestToolFunctions(ServiceTestCase):
 
     async def test_get_agent_list_with_context(self):
         """有上下文时返回当前房间中可见的发言者列表。"""
-        await room_service.create_room(TEAM, "r", ["alice"])
-        room = room_service.get_room(f"r@{TEAM}")
+        await roomService.create_room(TEAM, "r", ["alice"])
+        room = roomService.get_room(f"r@{TEAM}")
         await room.add_message("alice", "hi")
         await room.add_message("bob", "there")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
@@ -163,8 +163,8 @@ class TestToolFunctions(ServiceTestCase):
 
     async def test_send_chat_msg_with_valid_context(self):
         """同房间发送成功后，目标房间消息数应增加。"""
-        await room_service.create_room(TEAM, "myroom", ["alice"])
-        room = room_service.get_room(f"myroom@{TEAM}")
+        await roomService.create_room(TEAM, "myroom", ["alice"])
+        room = roomService.get_room(f"myroom@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
         assert (await send_chat_msg("myroom", "hello", _context=ctx))["success"]
         assert len(room.messages) == 2  # 1 (init公告) + 1 (new)
@@ -172,18 +172,18 @@ class TestToolFunctions(ServiceTestCase):
 
     async def test_send_chat_msg_nonexistent_room_returns_error(self):
         """目标房间不存在时应返回明确错误，避免吞掉失败。"""
-        await room_service.create_room(TEAM, "existing", ["alice"])
-        room = room_service.get_room(f"existing@{TEAM}")
+        await roomService.create_room(TEAM, "existing", ["alice"])
+        room = roomService.get_room(f"existing@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
         result = await send_chat_msg("nonexistent", "hello", _context=ctx)
         assert not result["success"] and "nonexistent" in result["message"]
 
     async def test_send_chat_msg_cross_room_lands_in_target(self):
         """跨房间发消息时，消息必须落到目标房间，而不是 agent 当前所在房间。"""
-        await room_service.create_room(TEAM, "room_a", ["alice"])
-        await room_service.create_room(TEAM, "room_b", ["alice"])
-        room_a = room_service.get_room(f"room_a@{TEAM}")
-        room_b = room_service.get_room(f"room_b@{TEAM}")
+        await roomService.create_room(TEAM, "room_a", ["alice"])
+        await roomService.create_room(TEAM, "room_b", ["alice"])
+        room_a = roomService.get_room(f"room_a@{TEAM}")
+        room_b = roomService.get_room(f"room_b@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room_a)
         result = await send_chat_msg("room_b", "hello from a to b", _context=ctx)
         assert result["success"]
@@ -192,10 +192,10 @@ class TestToolFunctions(ServiceTestCase):
 
     async def test_send_chat_msg_cross_room_does_not_pollute_current_room(self):
         """发到其他房间时，当前房间的消息列表不变。"""
-        await room_service.create_room(TEAM, "src", ["bob"])
-        await room_service.create_room(TEAM, "dst", ["bob"])
-        src = room_service.get_room(f"src@{TEAM}")
-        dst = room_service.get_room(f"dst@{TEAM}")
+        await roomService.create_room(TEAM, "src", ["bob"])
+        await roomService.create_room(TEAM, "dst", ["bob"])
+        src = roomService.get_room(f"src@{TEAM}")
+        dst = roomService.get_room(f"dst@{TEAM}")
         before_count = len(src.messages)
         ctx = ChatContext(agent_name="bob", team_name=TEAM, chat_room=src)
         await send_chat_msg("dst", "cross-room msg", _context=ctx)
@@ -203,8 +203,8 @@ class TestToolFunctions(ServiceTestCase):
 
     async def test_finish_chat_turn_rejects_non_current_agent(self):
         """不是当前发言人时，finish_chat_turn 不应推进轮次。"""
-        await room_service.create_room(TEAM, "turn_room", ["alice", "bob"], max_turns=3)
-        room = room_service.get_room(f"turn_room@{TEAM}")
+        await roomService.create_room(TEAM, "turn_room", ["alice", "bob"], max_turns=3)
+        room = roomService.get_room(f"turn_room@{TEAM}")
         ctx = ChatContext(agent_name="bob", team_name=TEAM, chat_room=room)
 
         result = finish_chat_turn(_context=ctx)

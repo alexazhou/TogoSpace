@@ -6,7 +6,7 @@ from typing import Any, Callable, List, Optional
 from util import llm_api_util
 from model.chat_context import ChatContext
 from .tools import FUNCTION_REGISTRY
-from .tool_loader import build_tools
+from .toolLoader import build_tools
 
 logger = logging.getLogger(__name__)
 

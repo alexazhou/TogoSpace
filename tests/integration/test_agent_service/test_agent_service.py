@@ -1,11 +1,11 @@
-"""integration tests for core behavior in service.agent_service"""
+"""integration tests for core behavior in service.agentService"""
 import json
 import os
 import sys
 
 import pytest
 
-from service import agent_service, room_service
+from service import agentService, roomService
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -16,48 +16,48 @@ if os.name == "posix" and sys.platform == "darwin":
 
 
 @pytest.mark.forked
-class _AgentServiceCase(ServiceTestCase):
-    """AgentService 集成测试基类：统一加载测试专用 agent/team 配置。"""
+class _agentServiceCase(ServiceTestCase):
+    """agentService 集成测试基类：统一加载测试专用 agent/team 配置。"""
 
     @classmethod
     async def async_setup_class(cls):
-        await room_service.startup()
+        await roomService.startup()
         agents_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
-        await agent_service.startup()
-        agent_service.load_agent_config(agents_cfg)
-        await agent_service.create_team_agents([team_cfg])
+        await agentService.startup()
+        agentService.load_agent_config(agents_cfg)
+        await agentService.create_team_agents([team_cfg])
 
 
-class TestAgentServiceCreateTeamAgents(_AgentServiceCase):
+class TestagentServiceCreateTeamAgents(_agentServiceCase):
     async def test_create_team_agents(self):
         """create_team_agents 后，team 维度的 agent 实例应全部可检索。"""
-        assert agent_service.get_agent(TEAM, "alice") is not None
-        assert agent_service.get_agent(TEAM, "bob") is not None
+        assert agentService.get_agent(TEAM, "alice") is not None
+        assert agentService.get_agent(TEAM, "bob") is not None
 
 
-class TestAgentServiceGetAgentsInRoom(_AgentServiceCase):
+class TestagentServiceGetAgentsInRoom(_agentServiceCase):
     async def test_get_agents_in_room(self):
         """get_agents 只返回房间成员，并保持成员集合正确。"""
-        await room_service.create_room(TEAM, "general", ["alice", "bob"])
-        assert {a.name for a in agent_service.get_agents(TEAM, "general")} == {"alice", "bob"}
+        await roomService.create_room(TEAM, "general", ["alice", "bob"])
+        assert {a.name for a in agentService.get_agents(TEAM, "general")} == {"alice", "bob"}
 
 
-class TestAgentServiceGetAllRooms(_AgentServiceCase):
+class TestagentServiceGetAllRooms(_agentServiceCase):
     async def test_get_all_rooms_for_agent(self):
         """get_all_rooms 应返回某个 agent 所在的所有 room_key。"""
-        await room_service.create_room(TEAM, "general", ["alice"])
-        assert f"general@{TEAM}" in agent_service.get_all_rooms(TEAM, "alice")
+        await roomService.create_room(TEAM, "general", ["alice"])
+        assert f"general@{TEAM}" in agentService.get_all_rooms(TEAM, "alice")
 
 
-class TestAgentServiceSyncRoomMessages(_AgentServiceCase):
+class TestagentServiceSyncRoomMessages(_agentServiceCase):
     async def test_sync_room_messages(self):
         """_sync_room_messages 会把房间中的新增消息同步进 agent 历史。"""
-        await room_service.create_room(TEAM, "general", ["alice"])
-        room = room_service.get_room(f"general@{TEAM}")
+        await roomService.create_room(TEAM, "general", ["alice"])
+        room = roomService.get_room(f"general@{TEAM}")
         await room.add_message("bob", "hello alice")
 
-        alice = agent_service.get_agent(TEAM, "alice")
+        alice = agentService.get_agent(TEAM, "alice")
         synced_count = await alice.sync_room_messages(room)
 
         # 初始公告 + bob 消息
@@ -66,13 +66,13 @@ class TestAgentServiceSyncRoomMessages(_AgentServiceCase):
         assert "hello alice" in alice._history[1].content
 
 
-class TestAgentServiceSyncSkipsOwnMessages(_AgentServiceCase):
+class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
     async def test_sync_room_skips_own_messages(self):
         """同步时应过滤 agent 自己发过的消息，避免历史自回灌。"""
-        await room_service.create_room(TEAM, "general", ["alice"])
-        room = room_service.get_room(f"general@{TEAM}")
+        await roomService.create_room(TEAM, "general", ["alice"])
+        room = roomService.get_room(f"general@{TEAM}")
 
-        alice = agent_service.get_agent(TEAM, "alice")
+        alice = agentService.get_agent(TEAM, "alice")
         await room.add_message("alice", "i am talking")
 
         synced_count = await alice.sync_room_messages(room)

@@ -5,7 +5,7 @@ import peewee
 from .base import DbModelBase
 
 
-class RoomMessageRecord(DbModelBase):
+class GtRoomMessage(DbModelBase):
     id: int = peewee.AutoField()
     room_key: str = peewee.CharField(null=False)
     team_name: str = peewee.CharField(null=False)

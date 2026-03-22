@@ -7,12 +7,12 @@ import operator
 from zoneinfo import ZoneInfo
 
 from model.chat_context import ChatContext
-from service import room_service
+from service import roomService
 
 logger = logging.getLogger(__name__)
 
 # Tool 返回值规范
-# 所有 tool 函数统一返回 dict，由 func_tool_service.run_tool_call 序列化为 JSON 字符串后交给 LLM。
+# 所有 tool 函数统一返回 dict，由 funcToolService.run_tool_call 序列化为 JSON 字符串后交给 LLM。
 # 必填字段：
 #   success: bool  — 操作是否成功
 # 可选字段（按情况选用，不强制两者都有）：
@@ -120,7 +120,7 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
     logger.info(f"发送消息: sender={_context.agent_name}, room={room_name}, msg={msg}")
 
     try:
-        target_room = room_service.get_room(room_key)
+        target_room = roomService.get_room(room_key)
     except Exception:
         logger.warning(f"send_chat_msg: 目标房间不存在 {room_key}")
         return {"success": False, "message": f"目标房间不存在: {room_key}"}

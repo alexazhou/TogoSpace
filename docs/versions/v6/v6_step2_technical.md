@@ -20,17 +20,17 @@ V6 版本通过将人类（Operator）引入统一的轮次调度模型，实现
 `POST /rooms/{room_name}/messages`
 - **处理流程**：
     1. 验证当前房间是否确实轮到 "Operator"（可选，为简化起见可允许随时插话）。
-    2. 调用 `room_service.get_room(room_name).add_message("Operator", content)`。
+    2. 调用 `roomService.get_room(room_name).add_message("Operator", content)`。
     3. 现有代码会自动发布 `ROOM_AGENT_TURN(agent_name="Alice")` 从而驱动 Agent。
 
 ## 3. 核心逻辑实现
 
-### 3.1 房间模型调整 (`room_service.py`)
+### 3.1 房间模型调整 (`roomService.py`)
 - `ChatRoom` 类增加 `self.room_type` 属性。
 - **初始化调整**：`setup_turns` 接收的 `agent_names` 列表在 Private 模式下包含 "Operator"。
   - 例：`room.setup_turns(["Operator", "Alice"], max_turns=50)`。
 
-### 3.2 调度器逻辑统一 (`scheduler_service.py`)
+### 3.2 调度器逻辑统一 (`schedulerService.py`)
 - **事件过滤**：在 `_on_agent_turn` 中，增加对 "Operator" 的特殊处理。
   ```python
   def _on_agent_turn(msg: Message) -> None:
@@ -41,7 +41,7 @@ V6 版本通过将人类（Operator）引入统一的轮次调度模型，实现
       # ... 现有 AI 激活逻辑 ...
   ```
 
-### 3.3 Agent Service 适配 (`agent_service.py`)
+### 3.3 Agent Service 适配 (`agentService.py`)
 - **配置扩展**：支持在 `rooms_config` 中指定包含 "Operator" 的成员列表。
 - **Prompt 增强**：在为 Private 房间生成 System Prompt 时，明确告知 Agent 正在与人类对话。
 

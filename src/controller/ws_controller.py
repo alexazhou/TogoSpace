@@ -1,19 +1,19 @@
 import asyncio
 import json
 import tornado.websocket
-import service.message_bus as message_bus
+import service.messageBus as messageBus
 from model.web_model import WsEvent
-from constants import MessageBusTopic
+from constants import messageBusTopic
 
 
 class EventsWsHandler(tornado.websocket.WebSocketHandler):
     def open(self):
-        message_bus.subscribe(MessageBusTopic.ROOM_MSG_ADDED, self._on_message_added)
-        message_bus.subscribe(MessageBusTopic.AGENT_STATUS_CHANGED, self._on_agent_status_changed)
+        messageBus.subscribe(messageBusTopic.ROOM_MSG_ADDED, self._on_message_added)
+        messageBus.subscribe(messageBusTopic.AGENT_STATUS_CHANGED, self._on_agent_status_changed)
 
     def on_close(self):
-        message_bus.unsubscribe(MessageBusTopic.ROOM_MSG_ADDED, self._on_message_added)
-        message_bus.unsubscribe(MessageBusTopic.AGENT_STATUS_CHANGED, self._on_agent_status_changed)
+        messageBus.unsubscribe(messageBusTopic.ROOM_MSG_ADDED, self._on_message_added)
+        messageBus.unsubscribe(messageBusTopic.AGENT_STATUS_CHANGED, self._on_agent_status_changed)
 
     def on_message(self, message):
         pass  # 只推不收，忽略客户端消息

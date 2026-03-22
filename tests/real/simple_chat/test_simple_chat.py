@@ -5,11 +5,11 @@ import os
 import sys
 
 import pytest
-import service.room_service as room_service
-import service.agent_service as agent_service
-import service.func_tool_service as func_tool_service
-import service.scheduler_service as scheduler
-import service.llm_service as llm_service
+import service.roomService as roomService
+import service.agentService as agentService
+import service.funcToolService as funcToolService
+import service.schedulerService as scheduler
+import service.llmService as llmService
 from tests.base import ServiceTestCase
 from util import config_util, llm_api_util
 
@@ -33,23 +33,23 @@ class TestRealSimpleChat(ServiceTestCase):
         """初始化服务和配置"""
 
         # 加载 LLM 配置并启动服务
-        llm_cfg = config_util.load_llm_service_config(_CONFIG_DIR)
-        await llm_service.startup(llm_cfg.get("api_key", ""), llm_cfg.get("base_url", ""))
+        llm_cfg = config_util.load_llmService_config(_CONFIG_DIR)
+        await llmService.startup(llm_cfg.get("api_key", ""), llm_cfg.get("base_url", ""))
 
         # 启动服务
-        await room_service.startup()
-        await func_tool_service.startup()
-        await agent_service.startup()
+        await roomService.startup()
+        await funcToolService.startup()
+        await agentService.startup()
 
         # 加载配置
         agents_cfgs = config_util.load_agents(_CONFIG_DIR)
         team_cfgs = config_util.load_teams(_CONFIG_DIR)
 
-        agent_service.load_agent_config(agents_cfgs)
-        await agent_service.create_team_agents(team_cfgs)
+        agentService.load_agent_config(agents_cfgs)
+        await agentService.create_team_agents(team_cfgs)
 
         # 创建房间
-        await room_service.create_room("default", "general", ["alice", "bob"])
+        await roomService.create_room("default", "general", ["alice", "bob"])
 
         # 启动调度器
         await scheduler.startup(team_cfgs)
@@ -58,7 +58,7 @@ class TestRealSimpleChat(ServiceTestCase):
     async def async_teardown_class(cls):
         """清理服务"""
         scheduler.shutdown()
-        llm_service.shutdown()
+        llmService.shutdown()
 
     async def test_two_agents_chat_and_exit(self):
         """Alice 和 Bob 各发一条消息后房间自动退出"""
@@ -93,7 +93,7 @@ class TestRealSimpleChat(ServiceTestCase):
 
         # 启动调度器
         run_task = asyncio.create_task(scheduler.run())
-        room = room_service.get_room(room_key)
+        room = roomService.get_room(room_key)
         room.start_scheduling()
 
         # 等待对话完成（max_turns=2，每人 1 轮）

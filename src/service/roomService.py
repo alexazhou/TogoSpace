@@ -4,9 +4,9 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from service import message_bus, persistence_service
+from service import messageBus, persistenceService
 from model.chat_model import ChatMessage
-from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
+from constants import RoomState, messageBusTopic, RoomType, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class ChatRoom:
             send_time=send_time or datetime.now()
         )
         if persist:
-            await persistence_service.append_room_message(
+            await persistenceService.append_room_message(
                 room_key=self.key,
                 team_name=self.team_name,
                 sender=sender,
@@ -69,8 +69,8 @@ class ChatRoom:
             )
         self.messages.append(message)
         if publish_events:
-            message_bus.publish(
-                MessageBusTopic.ROOM_MSG_ADDED,
+            messageBus.publish(
+                messageBusTopic.ROOM_MSG_ADDED,
                 room_name=self.name,
                 room_key=self.key,
                 team_name=self.team_name,
@@ -146,8 +146,8 @@ class ChatRoom:
         """发布当前轮次的发言事件。"""
         next_name: Optional[str] = self.get_current_turn_agent()
         if next_name:
-            message_bus.publish(
-                MessageBusTopic.ROOM_AGENT_TURN,
+            messageBus.publish(
+                messageBusTopic.ROOM_AGENT_TURN,
                 agent_name=next_name,
                 room_name=self.name,
                 room_key=self.key,
@@ -215,7 +215,7 @@ class ChatRoom:
             self._apply_turn_logic(msg.sender_name, publish_events=False)
 
     async def _persist_read_index(self) -> None:
-        await persistence_service.save_room_state(self.key, self._agent_read_index)
+        await persistenceService.save_room(self.key, self._agent_read_index)
 
     def get_context(self, max_messages: int = 10) -> str:
         recent = self.messages[-max_messages:]

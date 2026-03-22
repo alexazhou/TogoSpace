@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 
-from service.room_service import ChatRoom
+from service.roomService import ChatRoom
 
 
 @dataclass
