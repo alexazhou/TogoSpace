@@ -13,7 +13,9 @@ from peewee_async.utils import ConnectionProtocol
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.base import bind_database
 from model.dbModel.gtRoomMessage import GtRoomMessage
+from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtRoom import GtRoom
+from model.dbModel.gtRoomMember import GtRoomMember
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +67,7 @@ _db_path: Optional[str] = None
 def _ensure_schema(database: AioSqliteDatabase) -> None:
     with database.allow_sync():
         database.create_tables(
-            [GtRoomMessage, GtRoom, GtAgentHistory],
+            [GtRoomMessage, GtRoom, GtAgentHistory, GtTeam, GtRoomMember],
             safe=True,
         )
 

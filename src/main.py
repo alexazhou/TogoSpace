@@ -10,7 +10,6 @@ import tornado.httpserver
 
 from util import llmApiUtil, configUtil
 load_agents = configUtil.load_agents
-load_teams = configUtil.load_teams
 load_llmService_config = configUtil.load_llmService_config
 load_persistence_config = configUtil.load_persistence_config
 from service import (
@@ -22,6 +21,7 @@ from service import (
     funcToolService,
     persistenceService,
     ormService,
+    teamConfigService,
 )
 from route import make_app
 
@@ -93,7 +93,6 @@ async def main(
     logger = logging.getLogger(__name__)
 
     agents_config = load_agents(config_dir)
-    teams_config = load_teams(config_dir)
     llm_cfg, persistence_cfg = _load_runtime_configs(config_dir)
 
     await messageBus.startup()
@@ -103,6 +102,9 @@ async def main(
     if persistence_cfg["enabled"]:
         await ormService.startup(persistence_cfg["db_path"])
     await persistenceService.startup(enabled=persistence_cfg["enabled"])
+
+    # 从 teamConfigService 加载 Team 配置（会自动从 JSON 导入到数据库）
+    teams_config = await teamConfigService.startup(config_dir)
 
     await agentService.startup()
     agentService.load_agent_config(agents_config)

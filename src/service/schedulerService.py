@@ -118,3 +118,18 @@ def shutdown() -> None:
         if not task.done():
             task.cancel()
     _running = {}
+
+
+def refresh_team_config(team_name: str, teams_config: list) -> None:
+    """刷新指定 Team 的调度配置。"""
+    global _teams_config
+    _teams_config = teams_config
+    logger.info(f"Team '{team_name}' 的调度配置已刷新")
+
+
+def stop_team(team_name: str) -> None:
+    """停止指定 Team 的所有调度任务。"""
+    to_remove = [key for key in _running.keys() if key.endswith(f"@{team_name}")]
+    for agent_key in to_remove:
+        remove_agent(agent_key)
+    logger.info(f"Team '{team_name}' 的 {len(to_remove)} 个调度任务已停止")
