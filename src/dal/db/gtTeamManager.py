@@ -76,10 +76,10 @@ async def get_team_config(name: str) -> dict | None:
     if team is None:
         return None
 
-    groups = []
+    rooms = []
     for room in await gtRoomManager.get_rooms_by_team(name):
         members = await gtRoomMemberManager.get_members_by_room(room.room_key)
-        groups.append({
+        rooms.append({
             "name": room.name,
             "type": room.type.name,
             "initial_topic": room.initial_topic,
@@ -90,7 +90,7 @@ async def get_team_config(name: str) -> dict | None:
     return {
         "name": team.name,
         "max_function_calls": team.max_function_calls,
-        "groups": groups,
+        "rooms": rooms,
     }
 
 
@@ -121,14 +121,14 @@ async def import_team_from_json(team_config: dict) -> None:
     await upsert_team(team_config)
 
     # 导入 Rooms
-    groups = team_config.get("groups", [])
-    await gtRoomManager.upsert_rooms(name, groups)
+    rooms = team_config.get("rooms", [])
+    await gtRoomManager.upsert_rooms(name, rooms)
 
     # 导入 Members
-    for group in groups:
-        room_name = group["name"]
+    for room in rooms:
+        room_name = room["name"]
         room_key = f"{room_name}@{name}"
-        members = group.get("members", [])
+        members = room.get("members", [])
         await gtRoomMemberManager.upsert_room_members(room_key, members)
 
     logger.info(f"Team '{name}' 已从 JSON 导入数据库")

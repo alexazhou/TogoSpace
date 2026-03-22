@@ -1,6 +1,6 @@
 {
   "name": "default",
-  "groups": [
+  "rooms": [
     {
       "name": "Agent助手",
       "type": "private",

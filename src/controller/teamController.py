@@ -37,11 +37,10 @@ class TeamCreateHandler(BaseHandler):
     async def post(self) -> None:
         request = self.parse_request(CreateTeamRequest)
 
-        # 转换 rooms 为 groups 格式
         team_config = {
             "name": request.name,
             "max_function_calls": request.max_function_calls,
-            "groups": request.rooms,
+            "rooms": request.rooms,
         }
 
         # 调用 service 创建 team
@@ -57,8 +56,6 @@ class TeamDetailHandler(BaseHandler):
         config = await gtTeamManager.get_team_config(name)
         assertUtil.assertNotNull(config, error_message=f"Team '{name}' not found", error_code="team_not_found")
 
-        # 将 groups 转换为 rooms 以保持 API 一致性
-        config["rooms"] = config.pop("groups")
         self.return_json(config)
 
 
@@ -78,9 +75,8 @@ class TeamModifyHandler(BaseHandler):
             "max_function_calls": request.max_function_calls,
         }
 
-        # 将 rooms 转换为 groups 以兼容内部逻辑
         if request.rooms is not None:
-            team_config["groups"] = request.rooms
+            team_config["rooms"] = request.rooms
 
         # 调用 service 更新 team
         await teamService.update_team(team_config)

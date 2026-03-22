@@ -22,19 +22,19 @@ async def get_room_config(room_key: str) -> GtRoom | None:
     return await GtRoom.aio_get_or_none(GtRoom.room_key == room_key)
 
 
-async def upsert_rooms(team_name: str, groups: list) -> None:
-    """创建或更新 Team 下的 Rooms（groups 参数名保持兼容）。"""
+async def upsert_rooms(team_name: str, rooms: list) -> None:
+    """创建或更新 Team 下的 Rooms。"""
     # 先删除旧数据
     await delete_rooms_by_team(team_name)
 
     # 插入新数据
     rows = []
-    for group in groups:
-        room_name = group["name"]
+    for room in rooms:
+        room_name = room["name"]
         room_key = f"{room_name}@{team_name}"
-        room_type = RoomType(group.get("type", "group"))
-        initial_topic = group.get("initial_topic", "")
-        max_turns = group.get("max_turns", 100)
+        room_type = RoomType(room.get("type", "group"))
+        initial_topic = room.get("initial_topic", "")
+        max_turns = room.get("max_turns", 100)
 
         rows.append({
             "room_key": room_key,
