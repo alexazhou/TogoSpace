@@ -11,7 +11,7 @@ import service.agentService as agentService
 import service.schedulerService as scheduler
 from service.agentService import Agent
 from service.messageBus import Message
-from model.agent_event import RoomMessageEvent
+from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
 from constants import messageBusTopic, AgentStatus
 from ...base import ServiceTestCase
 

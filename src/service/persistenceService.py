@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 
 from dal.db import gtAgentHistoryManager, gtRoomMessageManager, gtRoomManager
-from model.chat_model import ChatMessage
+from model.coreModel.gtCoreChatModel import ChatMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtRoom import GtRoom

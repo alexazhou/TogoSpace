@@ -4,7 +4,7 @@ import logging
 from typing import Any, Callable, List, Optional
 
 from util import llm_api_util
-from model.chat_context import ChatContext
+from model.coreModel.gtCoreChatContext import ChatContext
 from .tools import FUNCTION_REGISTRY
 from .toolLoader import build_tools
 

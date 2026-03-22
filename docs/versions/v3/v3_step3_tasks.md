@@ -164,7 +164,7 @@ V3 在 V2 基础上扩展，核心变更为：新增 V3 配置文件、修改 `a
 | `src/service/llm_api_service.py` | 无状态 HTTP 客户端，与房间概念无关 |
 | `src/service/agent_tool_service.py` | 工具加载与执行，与房间概念无关 |
 | `src/model/api_model.py` | 纯数据定义 |
-| `src/model/chat_model.py` | 纯数据定义 |
+| `src/model/coreModel/gtCoreChatModel.py` | 纯数据定义 |
 | `src/util/toolLoader_util.py` | 工具元数据加载 |
 | `src/util/tool_util.py` | 工具函数注册表 |
 | `resource/prompts/alice_system.md` | 直接复用 |

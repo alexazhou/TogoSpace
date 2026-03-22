@@ -2,7 +2,7 @@ import json
 from typing import List
 import service.roomService as roomService
 from service.roomService import ChatRoom
-from model.web_model import RoomInfo, MessageInfo, RoomMessagesResponse
+from model.coreModel.gtCoreWebModel import RoomInfo, MessageInfo, RoomMessagesResponse
 from controller.base_controller import BaseHandler
 from constants import SpecialAgent
 

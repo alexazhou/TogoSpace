@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from service import messageBus, persistenceService
-from model.chat_model import ChatMessage
+from model.coreModel.gtCoreChatModel import ChatMessage
 from constants import RoomState, messageBusTopic, RoomType, SpecialAgent
 
 logger = logging.getLogger(__name__)

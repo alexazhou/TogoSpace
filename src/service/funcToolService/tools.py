@@ -6,7 +6,7 @@ import logging
 import operator
 from zoneinfo import ZoneInfo
 
-from model.chat_context import ChatContext
+from model.coreModel.gtCoreChatContext import ChatContext
 from service import roomService
 
 logger = logging.getLogger(__name__)
