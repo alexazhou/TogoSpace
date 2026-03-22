@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -9,6 +10,14 @@ from model.coreModel.gtCoreChatModel import ChatMessage
 from constants import RoomState, messageBusTopic, RoomType, SpecialAgent
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ChatContext:
+    """工具调用时注入的上下文，包含当前 Agent 和聊天室信息。"""
+    agent_name: str
+    team_name: str
+    chat_room: ChatRoom
 
 
 class ChatRoom:

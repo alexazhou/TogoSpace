@@ -6,7 +6,7 @@ import pytest
 
 import service.funcToolService as funcToolService
 import service.roomService as roomService
-from model.coreModel.gtCoreChatContext import ChatContext
+from service.roomService import ChatContext
 from ...base import ServiceTestCase
 
 TEAM = "test_team"

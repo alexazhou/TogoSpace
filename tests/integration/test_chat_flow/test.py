@@ -40,10 +40,10 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
     async def test_two_agents_exchange_messages(self):
         """alice 和 bob 各发一轮消息，general 房间应有消息。"""
         room_key = f"general@{TEAM}"
-        
+
         call_seq = {
-            "alice": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "你好，bob！"}}]}],
-            "bob":   [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "你好，alice！"}}]}],
+            "alice": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "你好，bob！"}}]}, {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]}],
+            "bob":   [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "你好，alice！"}}]}, {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]}],
         }
 
         async def fake_infer(model, ctx):
@@ -73,6 +73,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         alice = agentService.get_agent(TEAM, "alice")
         resps = [
             {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "hello"}}]},
+            {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
             {"content": "done"},
         ]
         with self.patch_infer(responses=resps):
@@ -92,6 +93,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         resps = [
             {"content": "我直接回复"},
             {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "最终消息"}}]},
+            {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
         ]
         with self.patch_infer(responses=resps):
             await alice.run_chat_turn(room_key, max_function_calls=5)
@@ -103,8 +105,29 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room_key = f"general@{TEAM}"
         room = roomService.get_room(room_key)
 
+        # 预定义每个 agent 的调用序列
+        call_seq = {
+            "alice": [
+                {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "a message"}}]},
+                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+                {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "a message"}}]},
+                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+            ],
+            "bob": [
+                {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "a message"}}]},
+                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+                {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "a message"}}]},
+                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+            ],
+        }
+
         async def fake_infer(model, ctx):
-            return self.normalize_to_mock({"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "a message"}}]})
+            name = "alice" if "alice" in ctx.system_prompt else "bob"
+            if call_seq[name]:
+                res = call_seq[name].pop(0)
+            else:
+                res = {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]}
+            return self.normalize_to_mock(res)
 
         with self.patch_infer(handler=fake_infer):
             run_task = asyncio.create_task(scheduler.run())

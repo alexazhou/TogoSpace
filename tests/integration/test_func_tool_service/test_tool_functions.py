@@ -6,6 +6,7 @@ from typing import Literal, Optional
 import pytest
 
 import service.roomService as roomService
+from service.roomService import ChatContext
 from service.funcToolService.toolLoader import (
     python_type_to_json_schema,
     get_function_metadata,
@@ -19,7 +20,6 @@ from service.funcToolService.tools import (
     get_agent_list,
     finish_chat_turn,
 )
-from model.coreModel.gtCoreChatContext import ChatContext
 from ...base import ServiceTestCase
 
 TEAM = "test_team"

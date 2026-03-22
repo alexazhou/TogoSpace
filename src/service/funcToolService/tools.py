@@ -6,8 +6,8 @@ import logging
 import operator
 from zoneinfo import ZoneInfo
 
-from model.coreModel.gtCoreChatContext import ChatContext
-from service import roomService
+from service.roomService import ChatContext
+import service.roomService as roomService
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
     assert _context.chat_room is not None, "send_chat_msg: 跨房间发言时 chat_room 不应为 None"
 
     return {"success": True, "message": (
-        f"消息已发送到 {target_room.name}。你还可以继续调用工具，或者调用 finish_chat_turn 结束本轮行动。"
+        f"消息已发送到 {target_room.name}。你还需要在 {_context.chat_room.name} 房间回复。你还可以继续调用工具，或者调用 finish_chat_turn 结束本轮行动。"
     )}
 
 

@@ -90,8 +90,8 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         room = roomService.get_room(f"general@{TEAM}")
 
         replies = {
-            "alice": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "from alice"}, "id": "a1"}]}],
-            "bob": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "from bob"}, "id": "b1"}]}],
+            "alice": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "from alice"}, "id": "a1"}]}, {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}, "id": "a2"}]}],
+            "bob": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "from bob"}, "id": "b1"}]}, {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}, "id": "b2"}]}],
         }
 
         async def fake_infer(model, ctx):
