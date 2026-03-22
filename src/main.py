@@ -102,7 +102,7 @@ async def main(
 
     # 总是初始化数据库和 ORM（teamService 需要）
     await ormService.startup(persistence_cfg["db_path"])
-    await persistenceService.startup(enabled=persistence_cfg["enabled"])
+    await persistenceService.startup(restore_on_startup=persistence_cfg["restore_on_startup"])
 
     # 从 teamService 加载 Team 配置（会自动从 JSON 导入到数据库）
     teams_config = await teamService.startup(config_dir)

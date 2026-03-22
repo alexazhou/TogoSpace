@@ -6,7 +6,7 @@ from .base import DbModelBase
 
 
 class GtRoomMember(DbModelBase):
-    room_id: str = peewee.CharField()
+    room_id: int = peewee.IntegerField()
     member_name: str = peewee.CharField()
 
     class Meta:

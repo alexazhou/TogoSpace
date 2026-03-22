@@ -74,7 +74,7 @@ class WatcherApp(App):
 
         async def _fetch(room: RoomInfo) -> None:
             try:
-                msgs = await self._api.get_room_messages(room.room_id)
+                msgs = await self._api.get_room_messages(room.db_id)
                 if msgs:
                     last = msgs[-1]
                     previews[room.room_id] = _make_preview(last.sender, last.content)
@@ -127,7 +127,12 @@ class WatcherApp(App):
         hint_label = self.query_one("#chat-input-hint")
 
         try:
-            messages = await self._api.get_room_messages(room_id)
+            # 根据 room_id 查找对应的 db_id
+            current_room = next((r for r in self._rooms if r.room_id == room_id), None)
+            if not current_room:
+                raise ValueError(f"房间不存在: {room_id}")
+
+            messages = await self._api.get_room_messages(current_room.db_id)
             await message_view.load_messages(messages, self._agent_order)
             room_panel.mark_selected(room_id)
             room_panel.update_unread_count(room_id, 0)
@@ -137,8 +142,7 @@ class WatcherApp(App):
             status_bar.update_count(self._current_msg_count)
 
             # 查找房间信息以确定类型
-            current_room = next((r for r in self._rooms if r.room_id == room_id), None)
-            if current_room and current_room.room_type == "private":
+            if current_room.room_type == "private":
                 input_container.add_class("active")
                 hint_label.remove_class("active")
             else:
@@ -228,7 +232,12 @@ class WatcherApp(App):
         if not content or not self._current_room_id:
             return
 
-        success = await self._api.post_room_message(self._current_room_id, content)
+        # 根据 room_id 查找对应的 db_id
+        current_room = next((r for r in self._rooms if r.room_id == self._current_room_id), None)
+        if not current_room:
+            return
+
+        success = await self._api.post_room_message(current_room.db_id, content)
         if success:
             self.query_one("#chat-input").value = ""
         else:

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 # 内部包
 from controller.baseController import BaseHandler
-from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager
+from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager, gtRoomMessageManager
 from model.coreModel.gtCoreWebModel import RoomInfo, MessageInfo, RoomMessagesResponse
 from service import roomService as chat_room, teamService
 from constants import SpecialAgent, RoomType
@@ -35,23 +35,49 @@ class UpdateMembersRequest(BaseModel):
 class RoomListHandler(BaseHandler):
     async def get(self) -> None:
         rooms: List[chat_room.ChatRoom] = chat_room.get_all_rooms()
-        self.return_json({"rooms": rooms})
+        data = []
+        for r in rooms:
+            # 通过 room_id 字符串从数据库查询获取 db_id
+            room_config = await gtRoomManager.get_room_config(r.key)
+            db_id = room_config.id if room_config else 0
+            data.append(RoomInfo(
+                db_id=db_id,
+                room_id=r.key,
+                room_name=r.name,
+                team_name=r.team_name,
+                room_type=r.room_type.value,
+                state=r.state.value,
+                members=r.agents
+            ).model_dump(mode="json"))
+        self.return_json({"rooms": data})
 
 
 class RoomMessagesHandler(BaseHandler):
-    async def get(self, room_id: str) -> None:
-        room: chat_room.ChatRoom = chat_room.get_room(room_id)
+    async def get(self, db_id: str) -> None:
+        # 通过数据库 ID 查询房间配置
+        room_config = await gtRoomManager.get_room_by_db_id(int(db_id))
+        assertUtil.assertNotNull(room_config, error_message=f"Room with id {db_id} not found", error_code="room_not_found")
+
+        # 使用 room_key (name@team_name) 获取内存中的 ChatRoom
+        room_key = f"{room_config.name}@{room_config.team_id}"
+        room: chat_room.ChatRoom = chat_room.get_room(room_key)
         messages = [
             MessageInfo(sender=m.sender_name, content=m.content, time=m.send_time)
             for m in room.messages
         ]
         resp = RoomMessagesResponse(
-            room_id=room.key, room_name=room.name, team_name=room.team_name, messages=messages
+            room_id=room_key, room_name=room.name, team_name=room.team_name, messages=messages
         )
         self.return_json(resp)
 
-    async def post(self, room_id: str) -> None:
-        room: chat_room.ChatRoom = chat_room.get_room(room_id)
+    async def post(self, db_id: str) -> None:
+        # 通过数据库 ID 查询房间配置
+        room_config = await gtRoomManager.get_room_by_db_id(int(db_id))
+        assertUtil.assertNotNull(room_config, error_message=f"Room with id {db_id} not found", error_code="room_not_found")
+
+        # 使用 room_key (name@team_name) 获取内存中的 ChatRoom
+        room_key = f"{room_config.name}@{room_config.team_id}"
+        room: chat_room.ChatRoom = chat_room.get_room(room_key)
         body = json.loads(self.request.body)
         content = body.get("content")
         assertUtil.assertNotNull(content, error_message="content is required", error_code="invalid_request")
@@ -63,27 +89,28 @@ class RoomMessagesHandler(BaseHandler):
 
 # Team Room Management Handlers
 class TeamRoomsHandler(BaseHandler):
-    """GET /teams/{name}/rooms.json - 获取 Team 下的所有 Room"""
+    """GET /teams/{team_id}/rooms.json - 获取 Team 下的所有 Room"""
 
-    async def get(self, name: str) -> None:
-        exists = await gtTeamManager.team_exists(name)
-        assertUtil.assertTrue(exists, error_message=f"Team '{name}' not found", error_code="team_not_found")
+    async def get(self, team_id: str) -> None:
+        team = await gtTeamManager.get_team_by_id(int(team_id))
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
-        rooms = await gtRoomManager.get_rooms_by_team(name)
+        rooms = await gtRoomManager.get_rooms_by_team(team.name)
         self.return_json({"rooms": rooms})
 
 
 class TeamRoomCreateHandler(BaseHandler):
-    """POST /teams/{name}/rooms.json - 在 Team 下创建 Room"""
+    """POST /teams/{team_id}/rooms.json - 在 Team 下创建 Room"""
 
-    async def post(self, name: str) -> None:
+    async def post(self, team_id: str) -> None:
         request = self.parse_request(CreateRoomRequest)
 
-        exists = await gtTeamManager.team_exists(name)
-        assertUtil.assertTrue(exists, error_message=f"Team '{name}' not found", error_code="team_not_found")
+        team = await gtTeamManager.get_team_by_id(int(team_id))
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+        team_name = team.name
 
         # 检查房间是否已存在
-        existing_rooms = await gtRoomManager.get_rooms_by_team(name)
+        existing_rooms = await gtRoomManager.get_rooms_by_team(team_name)
         existing = next((r for r in existing_rooms if r.name == request.name), None)
         assertUtil.assertEqual(existing, None, error_message=f"Room '{request.name}' already exists", error_code="room_exists")
 
@@ -95,24 +122,37 @@ class TeamRoomCreateHandler(BaseHandler):
             "max_turns": request.max_turns,
         }
 
-        await gtRoomManager.upsert_rooms(name, [room_config])
-        await teamService.hot_reload_team(name)
+        # upsert_rooms 会先删除该 team 下所有房间再重新插入，这在只添加一个房间时可能不太合适
+        # 但目前 gtRoomManager 实现如此，暂且遵循。
+        new_rooms_configs = []
+        for r in existing_rooms:
+            new_rooms_configs.append({
+                "name": r.name,
+                "type": r.type.value,
+                "initial_topic": r.initial_topic,
+                "max_turns": r.max_turns,
+            })
+        new_rooms_configs.append(room_config)
+
+        await gtRoomManager.upsert_rooms(team_name, new_rooms_configs)
+        await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "created", "room_name": request.name})
 
 
 class TeamRoomDetailHandler(BaseHandler):
-    """GET /teams/{name}/rooms/{room_name}.json - 获取指定 Room 详情"""
+    """GET /teams/{team_id}/rooms/{room_id}.json - 获取指定 Room 详情"""
 
-    async def get(self, name: str, room_name: str) -> None:
-        exists = await gtTeamManager.team_exists(name)
-        assertUtil.assertTrue(exists, error_message=f"Team '{name}' not found", error_code="team_not_found")
+    async def get(self, team_id: str, room_db_id: str) -> None:
+        team = await gtTeamManager.get_team_by_id(int(team_id))
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
-        room = await gtRoomManager.get_room_config(f"{room_name}@{name}")
-        assertUtil.assertNotNull(room, error_message=f"Room '{room_name}' not found", error_code="room_not_found")
+        room = await gtRoomManager.get_room_by_db_id(int(room_db_id))
+        assertUtil.assertNotNull(room, error_message=f"Room ID '{room_db_id}' not found", error_code="room_not_found")
 
-        members = await gtRoomMemberManager.get_members_by_room(room.room_id)
+        members = await gtRoomMemberManager.get_members_by_room(room.id)
         data = {
+            "id": room.id,
             "name": room.name,
             "type": room.type.name,
             "initial_topic": room.initial_topic,
@@ -123,25 +163,27 @@ class TeamRoomDetailHandler(BaseHandler):
 
 
 class TeamRoomModifyHandler(BaseHandler):
-    """POST /teams/{name}/rooms/{room_name}/modify.json - 更新 Room"""
+    """POST /teams/{team_id}/rooms/{room_id}/modify.json - 更新 Room"""
 
-    async def post(self, name: str, room_name: str) -> None:
+    async def post(self, team_id: str, room_db_id: str) -> None:
         request = self.parse_request(UpdateRoomRequest)
 
-        exists = await gtTeamManager.team_exists(name)
-        assertUtil.assertTrue(exists, error_message=f"Team '{name}' not found", error_code="team_not_found")
+        team = await gtTeamManager.get_team_by_id(int(team_id))
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+        team_name = team.name
 
-        existing_rooms = await gtRoomManager.get_rooms_by_team(name)
-        existing = next((r for r in existing_rooms if r.name == room_name), None)
-        assertUtil.assertNotNull(existing, error_message=f"Room '{room_name}' not found", error_code="room_not_found")
+        room = await gtRoomManager.get_room_by_db_id(int(room_db_id))
+        assertUtil.assertNotNull(room, error_message=f"Room ID '{room_db_id}' not found", error_code="room_not_found")
+        room_name = room.name
 
         room_type = RoomType.value_of(request.type) or RoomType.GROUP
-        initial_topic = request.initial_topic if request.initial_topic is not None else existing.initial_topic
-        max_turns = request.max_turns if request.max_turns is not None else existing.max_turns
+        initial_topic = request.initial_topic if request.initial_topic is not None else room.initial_topic
+        max_turns = request.max_turns if request.max_turns is not None else room.max_turns
 
+        existing_rooms = await gtRoomManager.get_rooms_by_team(team_name)
         all_rooms = []
         for r in existing_rooms:
-            if r.name == room_name:
+            if r.id == int(room_db_id):
                 all_rooms.append({
                     "name": room_name,
                     "type": room_type.name,
@@ -156,27 +198,29 @@ class TeamRoomModifyHandler(BaseHandler):
                     "max_turns": r.max_turns,
                 })
 
-        await gtRoomManager.upsert_rooms(name, all_rooms)
-        await teamService.hot_reload_team(name)
+        await gtRoomManager.upsert_rooms(team_name, all_rooms)
+        await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "room_name": room_name})
 
 
 class TeamRoomDeleteHandler(BaseHandler):
-    """POST /teams/{name}/rooms/{room_name}/delete.json - 删除 Room"""
+    """POST /teams/{team_id}/rooms/{room_id}/delete.json - 删除 Room"""
 
-    async def post(self, name: str, room_name: str) -> None:
-        exists = await gtTeamManager.team_exists(name)
-        assertUtil.assertTrue(exists, error_message=f"Team '{name}' not found", error_code="team_not_found")
+    async def post(self, team_id: str, room_db_id: str) -> None:
+        team = await gtTeamManager.get_team_by_id(int(team_id))
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+        team_name = team.name
 
-        existing_rooms = await gtRoomManager.get_rooms_by_team(name)
-        existing = next((r for r in existing_rooms if r.name == room_name), None)
-        assertUtil.assertNotNull(existing, error_message=f"Room '{room_name}' not found", error_code="room_not_found")
+        room = await gtRoomManager.get_room_by_db_id(int(room_db_id))
+        assertUtil.assertNotNull(room, error_message=f"Room ID '{room_db_id}' not found", error_code="room_not_found")
+        room_name = room.name
+        room_db_id_key = room.id
 
-        room_id = f"{room_name}@{name}"
-        remaining_rooms = [r for r in existing_rooms if r.name != room_name]
+        existing_rooms = await gtRoomManager.get_rooms_by_team(team_name)
+        remaining_rooms = [r for r in existing_rooms if r.id != int(room_db_id)]
 
-        await gtRoomManager.upsert_rooms(name, [
+        await gtRoomManager.upsert_rooms(team_name, [
             {
                 "name": r.name,
                 "type": r.type.name,
@@ -186,39 +230,40 @@ class TeamRoomDeleteHandler(BaseHandler):
             for r in remaining_rooms
         ])
 
-        await gtRoomMemberManager.delete_members_by_room(room_id)
-        await teamService.hot_reload_team(name)
+        await gtRoomMemberManager.delete_members_by_room(room_db_id_key)
+        await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "deleted", "room_name": room_name})
 
 
 class TeamRoomMembersHandler(BaseHandler):
-    """GET /teams/{name}/rooms/{room_name}/members.json - 获取 Room 成员"""
+    """GET /teams/{team_id}/rooms/{room_id}/members.json - 获取 Room 成员"""
 
-    async def get(self, name: str, room_name: str) -> None:
-        exists = await gtTeamManager.team_exists(name)
-        assertUtil.assertTrue(exists, error_message=f"Team '{name}' not found", error_code="team_not_found")
+    async def get(self, team_id: str, room_db_id: str) -> None:
+        team = await gtTeamManager.get_team_by_id(int(team_id))
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
-        room_id = f"{room_name}@{name}"
-        members = await gtRoomMemberManager.get_members_by_room(room_id)
+        room = await gtRoomManager.get_room_by_db_id(int(room_db_id))
+        assertUtil.assertNotNull(room, error_message=f"Room ID '{room_db_id}' not found", error_code="room_not_found")
+
+        members = await gtRoomMemberManager.get_members_by_room(room.id)
         self.return_json({"members": members})
 
 
 class TeamRoomMembersModifyHandler(BaseHandler):
-    """POST /teams/{name}/rooms/{room_name}/members/modify.json - 更新 Room 成员"""
+    """POST /teams/{team_id}/rooms/{room_id}/members/modify.json - 更新 Room 成员"""
 
-    async def post(self, name: str, room_name: str) -> None:
+    async def post(self, team_id: str, room_db_id: str) -> None:
         request = self.parse_request(UpdateMembersRequest)
 
-        exists = await gtTeamManager.team_exists(name)
-        assertUtil.assertTrue(exists, error_message=f"Team '{name}' not found", error_code="team_not_found")
+        team = await gtTeamManager.get_team_by_id(int(team_id))
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+        team_name = team.name
 
-        existing_rooms = await gtRoomManager.get_rooms_by_team(name)
-        existing = next((r for r in existing_rooms if r.name == room_name), None)
-        assertUtil.assertNotNull(existing, error_message=f"Room '{room_name}' not found", error_code="room_not_found")
+        room = await gtRoomManager.get_room_by_db_id(int(room_db_id))
+        assertUtil.assertNotNull(room, error_message=f"Room ID '{room_db_id}' not found", error_code="room_not_found")
 
-        room_id = f"{room_name}@{name}"
-        await gtRoomMemberManager.upsert_room_members(room_id, request.members)
-        await teamService.hot_reload_team(name)
+        await gtRoomMemberManager.upsert_room_members(room.id, request.members)
+        await teamService.hot_reload_team(team_name)
 
-        self.return_json({"status": "updated", "room_name": room_name})
+        self.return_json({"status": "updated", "room_name": room.name})

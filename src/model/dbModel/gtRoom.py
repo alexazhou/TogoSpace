@@ -7,7 +7,6 @@ from constants import RoomType
 
 
 class GtRoom(DbModelBase):
-    room_id: str = peewee.CharField(unique=True)
     team_id: str = peewee.CharField()
     name: str = peewee.CharField()
     type: RoomType = EnumField(RoomType, null=False)
