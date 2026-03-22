@@ -5,6 +5,7 @@ import json
 
 import peewee
 import peewee_async
+from constants import EnhanceEnum
 
 _database_proxy: peewee.DatabaseProxy = peewee.DatabaseProxy()
 
@@ -27,6 +28,24 @@ class JsonDictField(peewee.TextField):
         if isinstance(value, (dict, list)):
             return value
         return json.loads(value)
+
+
+class EnumField(peewee.CharField):
+    """枚举字段，用于在数据库中存储 EnhanceEnum 的 name。"""
+
+    def __init__(self, enum_cls: type[EnhanceEnum], *args, **kwargs):
+        self.enum = enum_cls
+        super(EnumField, self).__init__(*args, **kwargs)
+
+    def db_value(self, value: EnhanceEnum) -> str:
+        if value is None:
+            return None
+        return value.name
+
+    def python_value(self, value) -> EnhanceEnum:
+        if value is None or value == "":
+            return None
+        return getattr(self.enum, value)
 
 
 class DbModelBase(peewee_async.AioModel):

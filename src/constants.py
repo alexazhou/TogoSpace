@@ -1,6 +1,24 @@
 from enum import Enum
 
 
+class EnhanceEnum(Enum):
+    @classmethod
+    def value_of(cls, value: str):
+        for m, mm in cls.__members__.items():
+            if value is not None and m.upper() == value.upper():
+                return mm
+        return None
+
+    def __repr__(self):
+        return '[' + self.name + ']'
+
+
+def enum_to_str(value: EnhanceEnum) -> str:
+    if value is None:
+        return None
+    return value.name
+
+
 class OpenaiLLMApiRole(str, Enum):
     SYSTEM = "system"
     USER = "user"
@@ -14,7 +32,7 @@ class messageBusTopic(str, Enum):
     AGENT_STATUS_CHANGED = "agent.status_changed"  # Agent 忙闲状态变更；payload: agent_name, status(AgentStatus.value)
 
 
-class RoomType(str, Enum):
+class RoomType(EnhanceEnum, str):
     PRIVATE = "private"  # 1v1 单聊模式 (Human + Agent)
     GROUP = "group"      # 多 Agent 自治群聊模式
 

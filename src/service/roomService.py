@@ -352,3 +352,37 @@ def get_all_rooms() -> List[ChatRoom]:
 def shutdown() -> None:
     """移除所有聊天室，程序退出前调用。"""
     _rooms.clear()
+
+
+async def refresh_rooms_for_team(team_name: str, teams_config: list) -> None:
+    """根据新的 Team 配置刷新聊天室。"""
+    # 获取目标 Team 的新配置
+    target_config = next((c for c in teams_config if c["name"] == team_name), None)
+    if target_config is None:
+        logger.warning(f"无法刷新聊天室: Team '{team_name}' 不存在于配置中")
+        return
+
+    # 先关闭该 Team 的所有现有聊天室
+    await close_team_rooms(team_name)
+
+    # 根据新配置重新创建聊天室
+    for group in target_config.get("groups", []):
+        await _create_room(
+            team_name=team_name,
+            name=group["name"],
+            members=group.get("members", []),
+            initial_topic=group.get("initial_topic", ""),
+            room_type=RoomType(group.get("type", "group")),
+            max_turns=group.get("max_turns", 0),
+            persist_initial_message=False,
+        )
+
+    logger.info(f"Team '{team_name}' 的聊天室已刷新，共 {len(target_config.get('groups', []))} 个房间")
+
+
+async def close_team_rooms(team_name: str) -> None:
+    """关闭指定 Team 的所有聊天室。"""
+    to_close = [key for key in _rooms.keys() if key.endswith(f"@{team_name}")]
+    for room_key in to_close:
+        del _rooms[room_key]
+    logger.info(f"Team '{team_name}' 的 {len(to_close)} 个聊天室已关闭")

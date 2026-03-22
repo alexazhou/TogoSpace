@@ -2,13 +2,25 @@ from __future__ import annotations
 
 import peewee
 
-from .base import DbModelBase, JsonDictField
+from .base import DbModelBase, EnumField, JsonDictField
+from constants import RoomType
 
 
 class GtRoom(DbModelBase):
     room_key: str = peewee.CharField(primary_key=True)
-    agent_read_index: dict[str, int] = JsonDictField(null=False)
-    updated_at: str = peewee.CharField(null=False)
+    team_name: str = peewee.CharField()
+    name: str = peewee.CharField()
+    type: RoomType = EnumField(RoomType, null=False)
+    initial_topic: str = peewee.CharField(null=True)
+    max_turns: int = peewee.IntegerField(default=100)
+    agent_read_index: dict[str, int] = JsonDictField(null=True)
+    updated_at: str = peewee.CharField()
 
     class Meta:
         table_name = "rooms"
+        indexes = (
+            (('team_name', 'name'), True),
+        )
+
+
+__all__ = ["GtRoom"]

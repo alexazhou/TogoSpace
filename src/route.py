@@ -2,6 +2,13 @@ import tornado.web
 from controller.agentController import AgentListHandler
 from controller.roomController import RoomListHandler, RoomMessagesHandler
 from controller.wsController import EventsWsHandler
+from controller.teamController import (
+    TeamListHandler,
+    TeamDetailHandler,
+    TeamGroupsHandler,
+    TeamGroupDetailHandler,
+    GroupMembersHandler,
+)
 
 
 def make_app() -> tornado.web.Application:
@@ -10,4 +17,9 @@ def make_app() -> tornado.web.Application:
         (r"/rooms",                  RoomListHandler),
         (r"/rooms/([^/]+)/messages", RoomMessagesHandler),
         (r"/ws/events",              EventsWsHandler),
+        (r"/teams",                  TeamListHandler),
+        (r"/teams/([^/]+)",          TeamDetailHandler),
+        (r"/teams/([^/]+)/groups",   TeamGroupsHandler),
+        (r"/teams/([^/]+)/groups/([^/]+)",            TeamGroupDetailHandler),
+        (r"/teams/([^/]+)/groups/([^/]+)/members",   GroupMembersHandler),
     ])
