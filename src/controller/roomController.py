@@ -8,7 +8,7 @@ from pydantic import BaseModel
 # 内部包
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager
-from model.coreModel.gtCoreWebModel import RoomInfo, MessageInfo, RoomMessagesResponse, TeamRoomInfo
+from model.coreModel.gtCoreWebModel import RoomInfo, MessageInfo, RoomMessagesResponse
 from model.dbModel.gtRoom import GtRoom
 from service import roomService as chat_room, teamService
 from constants import SpecialAgent, RoomType, enum_to_str
@@ -102,17 +102,8 @@ class TeamRoomsHandler(BaseHandler):
             self.return_json({"error": f"Team '{name}' not found"})
             return
 
-        rooms: list[GtRoom] = await gtRoomManager.get_rooms_by_team(name)
-        data = [
-            TeamRoomInfo(
-                name=room.name,
-                type=enum_to_str(room.type),
-                initial_topic=room.initial_topic,
-                max_turns=room.max_turns,
-            ).model_dump(mode="json")
-            for room in rooms
-        ]
-        self.return_json({"rooms": data})
+        rooms = await gtRoomManager.get_rooms_by_team(name)
+        self.return_json({"rooms": rooms})
 
 
 class TeamRoomCreateHandler(BaseHandler):
@@ -134,7 +125,7 @@ class TeamRoomCreateHandler(BaseHandler):
 
         try:
             # 检查房间是否已存在
-            existing_rooms: list[GtRoom] = await gtRoomManager.get_rooms_by_team(name)
+            existing_rooms = await gtRoomManager.get_rooms_by_team(name)
             existing = next((r for r in existing_rooms if r.name == request.name), None)
             if existing is not None:
                 self.set_status(409)
@@ -142,7 +133,7 @@ class TeamRoomCreateHandler(BaseHandler):
                 return
 
             # 构建房间配置
-            room_config: dict = {
+            room_config = {
                 "name": request.name,
                 "type": RoomType(request.type),
                 "initial_topic": request.initial_topic,
@@ -170,14 +161,14 @@ class TeamRoomDetailHandler(BaseHandler):
             self.return_json({"error": f"Team '{name}' not found"})
             return
 
-        room: GtRoom | None = await gtRoomManager.get_room_config(f"{room_name}@{name}")
+        room = await gtRoomManager.get_room_config(f"{room_name}@{name}")
         if room is None:
             self.set_status(404)
             self.return_json({"error": f"Room '{room_name}' not found"})
             return
 
-        members: list[str] = await gtRoomMemberManager.get_members_by_room(room.room_key)
-        data: dict = {
+        members = await gtRoomMemberManager.get_members_by_room(room.room_key)
+        data = {
             "name": room.name,
             "type": enum_to_str(room.type),
             "initial_topic": room.initial_topic,
@@ -205,18 +196,18 @@ class TeamRoomModifyHandler(BaseHandler):
             return
 
         try:
-            existing_rooms: list[GtRoom] = await gtRoomManager.get_rooms_by_team(name)
+            existing_rooms = await gtRoomManager.get_rooms_by_team(name)
             existing = next((r for r in existing_rooms if r.name == room_name), None)
             if existing is None:
                 self.set_status(404)
                 self.return_json({"error": f"Room '{room_name}' not found"})
                 return
 
-            room_type: RoomType = RoomType(request.type) if request.type else existing.type
-            initial_topic: str = request.initial_topic if request.initial_topic is not None else existing.initial_topic
-            max_turns: int = request.max_turns if request.max_turns is not None else existing.max_turns
+            room_type = RoomType(request.type) if request.type else existing.type
+            initial_topic = request.initial_topic if request.initial_topic is not None else existing.initial_topic
+            max_turns = request.max_turns if request.max_turns is not None else existing.max_turns
 
-            all_rooms: list[dict] = []
+            all_rooms = []
             for r in existing_rooms:
                 if r.name == room_name:
                     all_rooms.append({
@@ -252,15 +243,15 @@ class TeamRoomDeleteHandler(BaseHandler):
             return
 
         try:
-            existing_rooms: list[GtRoom] = await gtRoomManager.get_rooms_by_team(name)
+            existing_rooms = await gtRoomManager.get_rooms_by_team(name)
             existing = next((r for r in existing_rooms if r.name == room_name), None)
             if existing is None:
                 self.set_status(404)
                 self.return_json({"error": f"Room '{room_name}' not found"})
                 return
 
-            room_key: str = f"{room_name}@{name}"
-            remaining_rooms: list[GtRoom] = [r for r in existing_rooms if r.name != room_name]
+            room_key = f"{room_name}@{name}"
+            remaining_rooms = [r for r in existing_rooms if r.name != room_name]
 
             await gtRoomManager.upsert_rooms(name, [
                 {
@@ -290,8 +281,8 @@ class RoomMembersHandler(BaseHandler):
             self.return_json({"error": f"Team '{name}' not found"})
             return
 
-        room_key: str = f"{room_name}@{name}"
-        members: list[str] = await gtRoomMemberManager.get_members_by_room(room_key)
+        room_key = f"{room_name}@{name}"
+        members = await gtRoomMemberManager.get_members_by_room(room_key)
         self.return_json({"members": members})
 
     """PUT /teams/{name}/rooms/{room_name}/members.json - 更新 Room 成员"""
@@ -311,14 +302,14 @@ class RoomMembersHandler(BaseHandler):
             return
 
         try:
-            existing_rooms: list[GtRoom] = await gtRoomManager.get_rooms_by_team(name)
+            existing_rooms = await gtRoomManager.get_rooms_by_team(name)
             existing = next((r for r in existing_rooms if r.name == room_name), None)
             if existing is None:
                 self.set_status(404)
                 self.return_json({"error": f"Room '{room_name}' not found"})
                 return
 
-            room_key: str = f"{room_name}@{name}"
+            room_key = f"{room_name}@{name}"
             await gtRoomMemberManager.upsert_room_members(room_key, request.members)
             await teamService.hot_reload_team(name)
 
