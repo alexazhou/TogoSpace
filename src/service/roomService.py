@@ -313,7 +313,7 @@ async def create_rooms(teams_config: list) -> None:
                 name=room["name"],
                 members=room["members"],
                 initial_topic=room.get("initial_topic", ""),
-                room_type=RoomType(room.get("type", "group")),
+                room_type=RoomType.value_of(room.get("type", "group")) or RoomType.GROUP,
                 max_turns=room.get("max_turns", 0),
                 persist_initial_message=False,
             )
@@ -370,7 +370,7 @@ async def refresh_rooms_for_team(team_name: str, teams_config: list) -> None:
             name=room["name"],
             members=room.get("members", []),
             initial_topic=room.get("initial_topic", ""),
-            room_type=RoomType(room.get("type", "group")),
+            room_type=RoomType.value_of(room.get("type", "group")) or RoomType.GROUP,
             max_turns=room.get("max_turns", 0),
             persist_initial_message=False,
         )

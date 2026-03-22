@@ -90,7 +90,7 @@ class TeamRoomCreateHandler(BaseHandler):
         # 构建房间配置
         room_config = {
             "name": request.name,
-            "type": RoomType(request.type),
+            "type": RoomType.value_of(request.type).value if RoomType.value_of(request.type) else RoomType.GROUP.value,
             "initial_topic": request.initial_topic,
             "max_turns": request.max_turns,
         }
@@ -135,7 +135,7 @@ class TeamRoomModifyHandler(BaseHandler):
         existing = next((r for r in existing_rooms if r.name == room_name), None)
         assertUtil.assertNotNull(existing, error_message=f"Room '{room_name}' not found", error_code="room_not_found")
 
-        room_type = RoomType(request.type)
+        room_type = RoomType.value_of(request.type) or RoomType.GROUP
         initial_topic = request.initial_topic if request.initial_topic is not None else existing.initial_topic
         max_turns = request.max_turns if request.max_turns is not None else existing.max_turns
 
