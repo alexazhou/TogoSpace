@@ -17,12 +17,24 @@ class LlmApiMessage(BaseModel):
     @classmethod
     def text(cls, role: OpenaiLLMApiRole, content: str) -> "LlmApiMessage":
         """构造普通文本消息（system / user / assistant）。"""
-        return cls(role=role, content=content)
+        return cls(
+            role=role,
+            content=content,
+            reasoning_content=None,
+            tool_calls=None,
+            tool_call_id=None,
+        )
 
     @classmethod
     def tool_result(cls, tool_call_id: str, result: str) -> "LlmApiMessage":
         """构造工具调用结果消息。"""
-        return cls(role=OpenaiLLMApiRole.TOOL, content=result, tool_call_id=tool_call_id)
+        return cls(
+            role=OpenaiLLMApiRole.TOOL,
+            content=result,
+            reasoning_content=None,
+            tool_calls=None,
+            tool_call_id=tool_call_id,
+        )
 
     def to_dict(self) -> dict:
         """序列化为发送给 API 的 dict，排除 reasoning_content 和 None 字段。"""

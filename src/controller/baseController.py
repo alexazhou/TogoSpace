@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any
+from typing import Any, TypeVar
 import tornado.web
 from pydantic import BaseModel
 from tornado.web import HTTPError
@@ -12,6 +12,7 @@ from exception import TeamAgentException
 
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T", bound=BaseModel)
 
 
 class BaseHandler(tornado.web.RequestHandler):
@@ -43,7 +44,7 @@ class BaseHandler(tornado.web.RequestHandler):
             return {k: self._convert_gt_db(v) for k, v in data.items()}
         return data
 
-    def parse_request(self, model_class: type[BaseModel]) -> BaseModel:
+    def parse_request(self, model_class: type[T]) -> T:
         """解析请求体为指定的 Pydantic 模型。"""
         body = json.loads(self.request.body)
         return model_class(**body)

@@ -4,7 +4,7 @@ import logging
 import zlib
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from service import messageBus, persistenceService
 from model.coreModel.gtCoreChatModel import ChatMessage
@@ -13,10 +13,16 @@ from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 logger = logging.getLogger(__name__)
 
 
-def _normalize_members(members: List[str | SpecialAgent] | None) -> List[str]:
+def _normalize_members(members: Sequence[str | SpecialAgent] | None) -> List[str]:
     if not members:
         return []
     return [member.value if isinstance(member, SpecialAgent) else member for member in members]
+
+
+def _normalize_member_name(member: str | SpecialAgent | None) -> str | None:
+    if isinstance(member, SpecialAgent):
+        return member.value
+    return member
 
 
 @dataclass
@@ -67,19 +73,20 @@ class ChatRoom:
         await self._persist_read_index()
         return new_msgs
 
-    async def add_message(self, sender: str, content: str) -> None:
+    async def add_message(self, sender: str | SpecialAgent, content: str) -> None:
         await self._append_message(sender, content, publish_events=True, persist=True)
 
-    async def _append_message(self, sender: str, content: str, publish_events: bool, persist: bool, send_time: datetime | None = None) -> None:
+    async def _append_message(self, sender: str | SpecialAgent, content: str, publish_events: bool, persist: bool, send_time: datetime | None = None) -> None:
+        normalized_sender = _normalize_member_name(sender)
         message = ChatMessage(
-            sender_name=sender,
+            sender_name=normalized_sender,
             content=content,
             send_time=send_time or datetime.now()
         )
         if persist:
             await persistenceService.append_room_message(
                 room_id=self.room_id,
-                sender=sender,
+                sender=normalized_sender,
                 content=content,
                 send_time=message.send_time.isoformat(),
             )
@@ -91,7 +98,7 @@ class ChatRoom:
                 room_name=self.name,
                 room_key=self.key,
                 team_name=self.team_name,
-                sender=sender,
+                sender=normalized_sender,
                 content=content,
                 time=message.send_time.isoformat(),
             )
@@ -99,7 +106,7 @@ class ChatRoom:
         if not self.agents:
             return
 
-        self._apply_turn_logic(sender, publish_events=publish_events)
+        self._apply_turn_logic(normalized_sender, publish_events=publish_events)
 
     def _apply_turn_logic(self, sender: str, publish_events: bool) -> None:
         # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
@@ -126,14 +133,15 @@ class ChatRoom:
         if was_idle and publish_events:
             self._publish_current_turn()
 
-    def finish_turn(self, sender: str = None) -> bool:
+    def finish_turn(self, sender: str | SpecialAgent = None) -> bool:
         """结束当前发言人的轮次。通常由 Agent 在 finish_chat_turn 工具中调用。
         返回 True 表示操作成功，False 表示被拒绝（sender 不是当前发言人）。
         """
+        normalized_sender = _normalize_member_name(sender)
         current_expected: Optional[str] = self.get_current_turn_agent()
 
-        if sender and sender != current_expected:
-            logger.warning(f"拒绝结束轮次申请：{sender} 并非当前发言人 ({current_expected})")
+        if normalized_sender and normalized_sender != current_expected:
+            logger.warning(f"拒绝结束轮次申请：{normalized_sender} 并非当前发言人 ({current_expected})")
             return False
 
         logger.info(f"房间 {self.key} 由 {current_expected} 结束本轮行动 (has_content={self._current_turn_has_content})")
@@ -146,7 +154,7 @@ class ChatRoom:
         self._advance_turn(publish_events=True)
         return True
 
-    def skip_turn(self, sender: str = None) -> bool:
+    def skip_turn(self, sender: str | SpecialAgent = None) -> bool:
         """(已废弃，建议使用 finish_turn) 跳过当前发言人的轮次。
         为了兼容性暂时保留，逻辑等同于 finish_turn 且强制标记为未发言。
         """
@@ -192,7 +200,7 @@ class ChatRoom:
 
         # 2. 检查是否所有 AI Agent 均已跳过（自上次有消息以来）
         # 如果是，则立即停止调度，不再移动到下一位
-        ai_agents = set(a for a in self.agents if a != SpecialAgent.OPERATOR)
+        ai_agents = set(a for a in self.agents if a != SpecialAgent.OPERATOR.value)
         if ai_agents and ai_agents.issubset(self._round_skipped):
             self._state = RoomState.IDLE
             logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
@@ -237,7 +245,7 @@ class ChatRoom:
 
     def get_context(self, max_messages: int = 10) -> str:
         recent = self.messages[-max_messages:]
-        return "\n".join(f"{m.sender}: {m.content}" for m in recent)
+        return "\n".join(f"{m.sender_name}: {m.content}" for m in recent)
 
     def get_context_messages(self, max_messages: int = 10) -> List[dict]:
         recent = self.messages[-max_messages:]
@@ -439,17 +447,6 @@ def get_rooms_for_agent(team_name: str, agent_name: str) -> List[int]:
             if team_name is None or room.team_name == team_name:
                 results.append(room.room_id)
     return results
-
-
-def get_all_rooms() -> List[ChatRoom]:
-    """返回所有聊天室实例列表。"""
-    return list(_rooms.values())
-
-
-def shutdown() -> None:
-    """移除所有聊天室，程序退出前调用。"""
-    _rooms.clear()
-    _rooms_by_id.clear()
 
 
 async def refresh_rooms_for_team(team_name: str, teams_config: list) -> None:

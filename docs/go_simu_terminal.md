@@ -28,7 +28,7 @@
 启动交互式终端并开启 HTTP 服务：
 
 ```bash
-simu_terminal_go --port 8889 --rows 36 --cols 140 -- .venv/bin/python tui/main.py --base-url http://127.0.0.1:8080
+simu_terminal_go --port 8889 --rows 36 --cols 140 -- .venv/bin/python tui/tui_main.py --base-url http://127.0.0.1:8080
 ```
 
 ### 快照模式（Snapshot Mode）

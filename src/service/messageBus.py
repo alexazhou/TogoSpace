@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
@@ -9,26 +11,26 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Message:
-    topic: str
+    topic: MessageBusTopic
     payload: Dict[str, Any] = field(default_factory=dict)
 
 
-_subscribers: Dict[str, List[Callable[[Message], None]]] = {}
+_subscribers: Dict[MessageBusTopic, List[Callable[[Message], None]]] = {}
 
 
-def subscribe(topic: str, callback: Callable[[Message], None]) -> None:
+def subscribe(topic: MessageBusTopic, callback: Callable[[Message], None]) -> None:
     """订阅指定主题，callback 接收 Message 对象。"""
     _subscribers.setdefault(topic, []).append(callback)
 
 
-def unsubscribe(topic: str, callback: Callable[[Message], None]) -> None:
+def unsubscribe(topic: MessageBusTopic, callback: Callable[[Message], None]) -> None:
     """取消订阅指定主题。"""
     callbacks: List[Callable[[Message], None]] = _subscribers.get(topic, [])
     if callback in callbacks:
         callbacks.remove(callback)
 
 
-def publish(topic: str, **payload: Any) -> None:
+def publish(topic: MessageBusTopic, **payload: Any) -> None:
     """向指定主题的所有订阅者投递消息。"""
     msg = Message(topic=topic, payload=payload)
     for cb in _subscribers.get(topic, []):

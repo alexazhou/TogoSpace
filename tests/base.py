@@ -276,7 +276,7 @@ class ServiceTestCase:
         env = os.environ.copy()
         env["PYTHONPATH"] = _SRC_DIR
 
-        cmd = [sys.executable, os.path.join(_SRC_DIR, "main.py"), "--port", str(port)]
+        cmd = [sys.executable, os.path.join(_SRC_DIR, "backend_main.py"), "--port", str(port)]
         if cls._backend_config_dir:
             cmd += ["--config-dir", cls._backend_config_dir]
 

@@ -41,7 +41,7 @@ class WatcherApp(App):
         self._rooms: list[RoomInfo] = []
         self._agents: list[AgentInfo] = []  # 本地 Agent 状态缓存
         self._room_cursor: int = 0
-        self._current_room_id: str | None = None
+        self._current_room_key: str | None = None
         self._current_msg_count: int = 0
         self._agent_refresh_pending: bool = False
 
@@ -77,7 +77,7 @@ class WatcherApp(App):
                 msgs = await self._api.get_room_messages(room.db_id)
                 if msgs:
                     last = msgs[-1]
-                    previews[room.room_id] = _make_preview(last.sender, last.content)
+                    previews[room.room_key] = _make_preview(last.sender, last.content)
             except Exception:
                 pass
 
@@ -103,9 +103,9 @@ class WatcherApp(App):
             await room_panel.load(rooms, agents, previews)
 
             # 初始加载或重连后恢复选中的房间
-            target_room_id = self._current_room_id or (rooms[0].room_id if rooms else None)
-            if target_room_id:
-                await self._select_room(target_room_id, force_reload=True)
+            target_room_key = self._current_room_key or (rooms[0].room_key if rooms else None)
+            if target_room_key:
+                await self._select_room(target_room_key, force_reload=True)
 
             if not is_initial:
                 status_bar.set_connected()
@@ -116,8 +116,8 @@ class WatcherApp(App):
                     "system", "无法连接到后端服务，请检查服务是否已启动。", []
                 )
 
-    async def _select_room(self, room_id: str, force_reload: bool = False) -> None:
-        if not force_reload and room_id == self._current_room_id:
+    async def _select_room(self, room_key: str, force_reload: bool = False) -> None:
+        if not force_reload and room_key == self._current_room_key:
             return
 
         message_view = self.query_one(MessageView)
@@ -128,16 +128,16 @@ class WatcherApp(App):
 
         try:
             # 根据 room_id 查找对应的 db_id
-            current_room = next((r for r in self._rooms if r.room_id == room_id), None)
+            current_room = next((r for r in self._rooms if r.room_key == room_key), None)
             if not current_room:
-                raise ValueError(f"房间不存在: {room_id}")
+                raise ValueError(f"房间不存在: {room_key}")
 
-            messages = await self._api.get_room_messages(current_room.db_id)
+            messages = await self._api.get_room_messages(current_room.room_id)
             await message_view.load_messages(messages, self._agent_order)
-            room_panel.mark_selected(room_id)
-            room_panel.update_unread_count(room_id, 0)
-            self._unread[room_id] = 0
-            self._current_room_id = room_id
+            room_panel.mark_selected(room_key)
+            room_panel.update_unread_count(room_key, 0)
+            self._unread[room_key] = 0
+            self._current_room_key = room_key
             self._current_msg_count = len(messages)
             status_bar.update_count(self._current_msg_count)
 
@@ -148,14 +148,14 @@ class WatcherApp(App):
             else:
                 input_container.remove_class("active")
                 hint_label.add_class("active")
-                self.query_one("#chat-input").value = ""
+                self.query_one("#chat-input", Input).value = ""
 
             for i, r in enumerate(self._rooms):
-                if r.room_id == room_id:
+                if r.room_key == room_key:
                     self._room_cursor = i
                     break
         except ValueError:
-            await message_view.append_message("system", f"房间不存在: {room_id}", [])
+            await message_view.append_message("system", f"房间不存在: {room_key}", [])
         except aiohttp.ClientError:
             await message_view.append_message("system", "加载消息失败，请检查网络连接。", [])
 
@@ -171,7 +171,7 @@ class WatcherApp(App):
 
             try:
                 async for event in self._api.ws_events(on_connected=_on_connected):
-                    log.debug("ws: 收到事件 room=%s sender=%s", event.room_id, event.sender)
+                    log.debug("ws: 收到事件 room=%s sender=%s", event.room_key, event.sender)
                     self._on_ws_event(event)
                 log.info("ws: 连接正常关闭（async for 退出）")
             except asyncio.CancelledError:
@@ -203,9 +203,10 @@ class WatcherApp(App):
             return
 
         preview = _make_preview(event.sender, event.content)
-        self.call_later(room_panel.update_preview, event.room_id, preview)
+        assert event.room_key is not None
+        self.call_later(room_panel.update_preview, event.room_key, preview)
 
-        if event.room_id == self._current_room_id:
+        if event.room_key == self._current_room_key:
             self._current_msg_count += 1
             time_str = event.time.strftime("%H:%M:%S") if event.time else ""
             self.call_later(
@@ -213,8 +214,8 @@ class WatcherApp(App):
             )
             self.call_later(status_bar.update_count, self._current_msg_count)
         else:
-            self._unread[event.room_id] = self._unread.get(event.room_id, 0) + 1
-            self.call_later(room_panel.update_unread_count, event.room_id, self._unread[event.room_id])
+            self._unread[event.room_key] = self._unread.get(event.room_key, 0) + 1
+            self.call_later(room_panel.update_unread_count, event.room_key, self._unread[event.room_key])
 
     @on(ListView.Selected, "#room-list")
     async def on_room_selected(self, event: ListView.Selected) -> None:
@@ -229,22 +230,21 @@ class WatcherApp(App):
     @on(Input.Submitted, "#chat-input")
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         content = event.value.strip()
-        if not content or not self._current_room_id:
+        if not content or not self._current_room_key:
             return
 
-        # 根据 room_id 查找对应的 db_id
-        current_room = next((r for r in self._rooms if r.room_id == self._current_room_id), None)
+        current_room = next((r for r in self._rooms if r.room_key == self._current_room_key), None)
         if not current_room:
             return
 
-        success = await self._api.post_room_message(current_room.db_id, content)
+        success = await self._api.post_room_message(current_room.room_id, content)
         if success:
-            self.query_one("#chat-input").value = ""
+            self.query_one("#chat-input", Input).value = ""
         else:
             self.notify("消息发送失败", severity="error")
 
     def action_focus_input(self) -> None:
-        current_room = next((r for r in self._rooms if r.room_id == self._current_room_id), None)
+        current_room = next((r for r in self._rooms if r.room_key == self._current_room_key), None)
         if current_room and current_room.room_type == "private":
             self.query_one("#chat-input").focus()
 
@@ -252,18 +252,18 @@ class WatcherApp(App):
         if not self._rooms:
             return
         self._room_cursor = (self._room_cursor - 1) % len(self._rooms)
-        await self._select_room(self._rooms[self._room_cursor].room_id)
+        await self._select_room(self._rooms[self._room_cursor].room_key)
 
     async def action_next_room(self) -> None:
         if not self._rooms:
             return
         self._room_cursor = (self._room_cursor + 1) % len(self._rooms)
-        await self._select_room(self._rooms[self._room_cursor].room_id)
+        await self._select_room(self._rooms[self._room_cursor].room_key)
 
     async def action_select_room(self) -> None:
         if not self._rooms:
             return
-        await self._select_room(self._rooms[self._room_cursor].room_id)
+        await self._select_room(self._rooms[self._room_cursor].room_key)
 
     def action_hint_quit(self) -> None:
         self.notify(

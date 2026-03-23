@@ -64,6 +64,6 @@ class TestmessageBus(ServiceTestCase):
     def test_topic_isolation(self):
         """不同 topic 互不干扰"""
         received = []
-        messageBus.subscribe("other.topic", lambda m: received.append(m))
+        messageBus.subscribe(MessageBusTopic.AGENT_STATUS_CHANGED, lambda m: received.append(m))
         messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_name="x", room_name="y")
         assert len(received) == 0

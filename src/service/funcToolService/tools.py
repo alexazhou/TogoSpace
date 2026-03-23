@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ast
-from typing import Literal, Optional, List
+from typing import Callable, Literal, Optional, List
 import datetime
 import logging
 import operator
@@ -172,7 +172,7 @@ def task_done() -> dict:
     return {"success": True}
 
 
-FUNCTION_REGISTRY: dict[str, callable] = {
+FUNCTION_REGISTRY: dict[str, Callable[..., dict] | Callable[..., object]] = {
     "get_weather": get_weather,
     "get_time": get_time,
     "calculate": calculate,
