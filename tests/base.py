@@ -288,25 +288,16 @@ class ServiceTestCase:
         cls._backend_config_dir = config_dir
 
     @classmethod
-    def cleanup_sqlite_files(cls, db_path: str = None) -> None:
-        """删除 sqlite 数据库文件及其附属日志文件。
-
-        无参数时自动清理测试 DB 路径（及后端子进程使用的 DB）。
-        传入 db_path 时只清理该路径。
-        """
-        paths = [db_path] if db_path is not None else [cls.get_test_db_path()]
-        if db_path is None and cls.requires_backend:
-            persistence_cfg = configUtil.load_persistence_config(cls._backend_config_dir)
-            path = persistence_cfg.get("db_path")
-            if path and path != ":memory:":
-                paths.append(path if os.path.isabs(path) else os.path.abspath(os.path.join(_SRC_DIR, path)))
+    def cleanup_sqlite_files(cls) -> None:
+        """删除测试 DB 文件（含后端子进程使用的 DB）。"""
+        paths = [cls.TEST_DB_PATH]
+        persistence_cfg = configUtil.load_persistence_config(cls._backend_config_dir)
+        path = persistence_cfg.get("db_path")
+        if path:
+            paths.append(path if os.path.isabs(path) else os.path.abspath(os.path.join(_SRC_DIR, path)))
         for p in paths:
             with contextlib.suppress(FileNotFoundError):
                 os.remove(p)
-
-    @classmethod
-    def get_test_db_path(cls) -> str:
-        return cls.TEST_DB_PATH
 
     @classmethod
     def _start_backend(cls):

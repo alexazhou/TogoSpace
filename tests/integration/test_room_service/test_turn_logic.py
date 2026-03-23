@@ -23,7 +23,7 @@ class TestRoomTurnLogic(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # 该文件所有用例都基于真实 ChatRoom 状态机进行断言。
-        db_path = cls.get_test_db_path()
+        db_path = cls.TEST_DB_PATH
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()

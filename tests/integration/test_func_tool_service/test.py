@@ -39,7 +39,7 @@ class TestRunToolCall(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # send_chat_msg 依赖房间上下文，因此同时初始化 room + tool service。
-        db_path = cls.get_test_db_path()
+        db_path = cls.TEST_DB_PATH
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()

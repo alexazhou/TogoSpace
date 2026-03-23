@@ -21,7 +21,7 @@ class _agentServiceCase(ServiceTestCase):
 
     @classmethod
     async def async_setup_class(cls):
-        db_path = cls.get_test_db_path()
+        db_path = cls.TEST_DB_PATH
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
