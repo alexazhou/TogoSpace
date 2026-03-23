@@ -137,7 +137,7 @@ cd src && python main.py [--config-dir config/] [--llm-config config.json] [--po
 
 配置拆分为 Agent 定义和 Team 定义两个独立概念：
 
-- **Agent 定义** (`config/agents/<name>.json`)：全局共享 de Agent 属性（prompt/model）
+- **Agent 定义** (`config/agents/<name>.json`)：全局共享的 Agent 属性（prompt/driver 等）
 - **Team 定义** (`config/teams/<name>.json`)：包含一个或多个 group（聊天室），每个 Team 中的 Agent 实例相互隔离
 
 #### Agent 定义示例
@@ -145,8 +145,7 @@ cd src && python main.py [--config-dir config/] [--llm-config config.json] [--po
 ```json
 {
   "name": "alice",
-  "system_prompt": "...",
-  "model": "glm-4.7"
+  "system_prompt": "..."
 }
 ```
 

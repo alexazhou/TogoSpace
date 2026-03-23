@@ -1,4 +1,10 @@
 [
-  {"name": "alice", "system_prompt": "你是alice", "model": "qwen-plus"},
-  {"name": "bob",   "system_prompt": "你是bob",   "model": "qwen-plus"}
+  {
+    "name": "alice",
+    "system_prompt": "你是alice"
+  },
+  {
+    "name": "bob",
+    "system_prompt": "你是bob"
+  }
 ]

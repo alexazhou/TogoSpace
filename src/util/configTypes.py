@@ -1,3 +1,5 @@
+from typing import Any
+
 from typing_extensions import NotRequired, Required, TypedDict
 
 
@@ -29,4 +31,18 @@ class TeamConfigPatch(TypedDict, total=False):
     max_function_calls: int
 
 
-__all__ = ["TeamRoomConfig", "TeamConfig", "TeamConfigPatch"]
+class AgentConfig(TypedDict, total=False):
+    """Agent definition loaded from config/agents/*.json."""
+
+    name: Required[str]
+    system_prompt: str
+    prompt_file: str
+    model: NotRequired[str]
+    use_agent_sdk: bool
+    allowed_tools: list[str]
+    allowed_Tools: list[str]
+    driver: dict[str, Any]
+    runtime: dict[str, Any]
+
+
+__all__ = ["TeamRoomConfig", "TeamConfig", "TeamConfigPatch", "AgentConfig"]

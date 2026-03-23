@@ -1,1 +1,4 @@
-{"name": "alice", "system_prompt": "Mock Alice Prompt", "model": "mock-model"}
+{
+  "name": "alice",
+  "system_prompt": "Mock Alice Prompt"
+}

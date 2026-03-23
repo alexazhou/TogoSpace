@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 from .base import AgentDriverConfig
 from .claudeSdkDriver import ClaudeSdkAgentDriver
 from .nativeDriver import NativeAgentDriver
 
 
-def normalize_driver_config(agent_cfg: dict[str, Any]) -> AgentDriverConfig:
+def normalize_driver_config(agent_cfg: Mapping[str, Any]) -> AgentDriverConfig:
     driver_cfg = agent_cfg.get("driver")
     if driver_cfg:
         return AgentDriverConfig(
