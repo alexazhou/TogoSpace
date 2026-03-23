@@ -65,7 +65,7 @@ class ChatRoom:
         new_msgs = self.messages[read_idx:]
         self._agent_read_index[agent_name] = len(self.messages)
         if self._state != RoomState.INIT:
-            await persistenceService.save_room(self.room_id, self._agent_read_index)
+            await persistenceService.save_room_runtime(self.room_id, self._agent_read_index)
         return new_msgs
 
     async def add_message(self, sender: str, content: str, send_time: datetime | None = None) -> None:
