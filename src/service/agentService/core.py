@@ -136,6 +136,9 @@ class Agent:
 
         try:
             await self.driver.run_chat_turn(room, synced_count, max_function_calls)
+        except Exception as e:
+            logger.warning(f"run_chat_turn 异常: agent={self.key}, room={room.key}, error={e}")
+            raise
         finally:
             self.current_room = None
 

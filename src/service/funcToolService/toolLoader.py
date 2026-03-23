@@ -45,7 +45,8 @@ def get_function_metadata(func_name: str, func) -> Dict[str, Any]:
 
     try:
         type_hints: Dict[str, Any] = get_type_hints(func)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"获取函数类型提示失败，已忽略: func={func_name}, error={e}")
         type_hints = {}
 
     docstring = inspect.getdoc(func) or ""
