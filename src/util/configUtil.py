@@ -9,7 +9,7 @@ def _default_config_dir() -> str:
 
 
 def _default_root_config_path() -> str:
-    return os.path.join(os.path.dirname(__file__), "../../config.json")
+    return os.path.join(os.path.dirname(__file__), "../../config/setting.json")
 
 
 def _is_test_env() -> bool:
@@ -28,19 +28,17 @@ def _resolve_config_file(config_dir: str | None, preferred_name: str) -> str:
     if config_dir is None:
         return _default_root_config_path()
 
-    preferred_path = os.path.join(config_dir, preferred_name)
-    if os.path.isfile(preferred_path):
-        return preferred_path
+    candidates = [preferred_name, "setting.json", "config.json", "llm.json"]
+    seen: set[str] = set()
+    for name in candidates:
+        if name in seen:
+            continue
+        seen.add(name)
+        path = os.path.join(config_dir, name)
+        if os.path.isfile(path):
+            return path
 
-    fallback_path = os.path.join(config_dir, "config.json")
-    if os.path.isfile(fallback_path):
-        return fallback_path
-
-    llm_path = os.path.join(config_dir, "llm.json")
-    if os.path.isfile(llm_path):
-        return llm_path
-
-    return preferred_path
+    return os.path.join(config_dir, preferred_name)
 
 
 def load_agents(config_dir: str = None) -> List[dict]:
@@ -81,7 +79,7 @@ def load_llmService_config(config_dir: str = None) -> dict:
 
     # 支持两种格式：
     # 1. llm.json 格式: {"active_llmService": "...", "llmServices": [...]}
-    # 2. config.json 格式: {"LlmServices": [...], "active_LlmService": "..."}
+    # 2. setting.json/config.json 格式: {"LlmServices": [...], "active_LlmService": "..."}
     active_key = cfg.get("active_llmService") or cfg.get("active_LlmService")
     services_key = cfg.get("llmServices") or cfg.get("LlmServices")
 
@@ -96,7 +94,7 @@ def load_llmService_config(config_dir: str = None) -> dict:
 
 def load_persistence_config(config_dir: str = None) -> dict:
     """返回持久化配置。"""
-    path = _resolve_config_file(config_dir, "config.json")
+    path = _resolve_config_file(config_dir, "setting.json")
     default_db_path = _default_db_path()
     if not os.path.isfile(path):
         return {
