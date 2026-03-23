@@ -36,7 +36,7 @@ def _setup_logger() -> None:
 
     log_format = "%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s"
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)
+    root_logger.setLevel(logging.INFO)
     root_logger.handlers.clear()
 
     handlers: List[logging.Handler] = [

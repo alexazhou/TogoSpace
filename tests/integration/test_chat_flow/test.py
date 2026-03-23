@@ -11,6 +11,8 @@ import service.roomService as roomService
 import service.agentService as agentService
 import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
+import service.ormService as ormService
+import service.persistenceService as persistenceService
 from util.llmApiUtil import LlmApiMessage, ToolCall
 from constants import OpenaiLLMApiRole
 from ...base import ServiceTestCase
@@ -29,6 +31,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         # 按真实启动顺序拉起 service，并加载 integration 专用配置。
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
+        await ormService.startup(":memory:")
+        await persistenceService.startup()
         await roomService.startup()
         await roomService.create_room(TEAM, "general", ["alice", "bob"])
         await funcToolService.startup()
@@ -36,6 +40,15 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         agentService.load_agent_config(agents_config)
         await agentService.create_team_agents([team_config])
         await scheduler.startup([team_config])
+
+    @classmethod
+    async def async_teardown_class(cls):
+        scheduler.shutdown()
+        await agentService.shutdown()
+        funcToolService.shutdown()
+        roomService.shutdown()
+        await persistenceService.shutdown()
+        await ormService.shutdown()
 
     async def test_two_agents_exchange_messages(self):
         """alice 和 bob 各发一轮消息，general 房间应有消息。"""
@@ -71,12 +84,22 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await room.add_message("system", "开始聊天")
 
         alice = agentService.get_agent(TEAM, "alice")
-        resps = [
-            {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "hello"}}]},
-            {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
-            {"content": "done"},
-        ]
-        with self.patch_infer(responses=resps):
+        call_seq = {
+            "alice": [
+                {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "hello"}}]},
+                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+            ],
+            "bob": [],
+        }
+
+        async def fake_infer(model, ctx):
+            name = "alice" if "alice" in ctx.system_prompt else "bob"
+            if call_seq[name]:
+                return self.normalize_to_mock(call_seq[name].pop(0))
+            # 兜底返回 finish，避免并发调度时 side_effect 耗尽导致 StopIteration。
+            return self.normalize_to_mock({"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]})
+
+        with self.patch_infer(handler=fake_infer):
             await alice.run_chat_turn(room.room_id, max_function_calls=5)
 
         tool_results = [m for m in alice._history if m.role == OpenaiLLMApiRole.TOOL]

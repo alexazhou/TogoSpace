@@ -54,7 +54,12 @@ class RoomMessagesHandler(BaseHandler):
     async def get(self, room_id_str: str) -> None:
         # 通过数据库 ID 获取内存中的 ChatRoom
         room_id = int(room_id_str)
-        room: chat_room.ChatRoom = chat_room.get_room(room_id)
+        room: chat_room.ChatRoom | None = None
+        try:
+            room = chat_room.get_room(room_id)
+        except RuntimeError:
+            pass
+        assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
         messages = [
             MessageInfo(sender=m.sender_name, content=m.content, time=m.send_time)
             for m in room.messages
@@ -67,7 +72,12 @@ class RoomMessagesHandler(BaseHandler):
     async def post(self, room_id_str: str) -> None:
         # 通过数据库 ID 获取内存中的 ChatRoom
         room_id = int(room_id_str)
-        room: chat_room.ChatRoom = chat_room.get_room(room_id)
+        room: chat_room.ChatRoom | None = None
+        try:
+            room = chat_room.get_room(room_id)
+        except RuntimeError:
+            pass
+        assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
         assertUtil.assertTrue(
             room.state != RoomState.INIT,
             error_message="room is in init state, not activated by runtime services",

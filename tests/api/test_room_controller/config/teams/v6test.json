@@ -1,1 +1,18 @@
-{"name": "v6test", "groups": [{"name": "alice_private", "type": "private", "members": ["Operator", "alice"], "initial_topic": "v6 private test", "max_turns": 10}, {"name": "public_group", "type": "group", "members": ["alice"], "initial_topic": "v6 group test", "max_turns": 10}], "max_function_calls": 5}
+{
+  "name": "v6test",
+  "members": ["Operator", "alice"],
+  "preset_rooms": [
+    {
+      "name": "alice_private",
+      "members": ["Operator", "alice"],
+      "initial_topic": "v6 private test",
+      "max_turns": 10
+    },
+    {
+      "name": "public_group",
+      "members": ["alice"],
+      "initial_topic": "v6 group test",
+      "max_turns": 10
+    }
+  ]
+}

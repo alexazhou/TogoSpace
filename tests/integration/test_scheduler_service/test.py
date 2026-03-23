@@ -67,7 +67,7 @@ class TestSchedulerRun(ServiceTestCase):
             members=["alice"],
         )
 
-        teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
+        teams_config = [{"name": TEAM, "preset_rooms": [{"name": "r1", "members": ["alice"], "max_turns": 1}]}]
         await scheduler.startup(teams_config)
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
@@ -142,7 +142,7 @@ class TestSchedulerRun(ServiceTestCase):
             ),
             members=["alice"],
         )
-        teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
+        teams_config = [{"name": TEAM, "preset_rooms": [{"name": "r1", "members": ["alice"], "max_turns": 1}]}]
         await scheduler.startup(teams_config)
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
@@ -172,7 +172,7 @@ class TestSchedulerRun(ServiceTestCase):
             ),
             members=["alice"],
         )
-        teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
+        teams_config = [{"name": TEAM, "preset_rooms": [{"name": "r1", "members": ["alice"], "max_turns": 1}]}]
         await scheduler.startup(teams_config)
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
@@ -216,7 +216,7 @@ class TestSchedulerRun(ServiceTestCase):
             ),
             members=["alice"],
         )
-        teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
+        teams_config = [{"name": TEAM, "preset_rooms": [{"name": "r1", "members": ["alice"], "max_turns": 1}]}]
         await scheduler.startup(teams_config)
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
@@ -250,7 +250,7 @@ class TestSchedulerRun(ServiceTestCase):
             ),
             members=["alice"],
         )
-        teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
+        teams_config = [{"name": TEAM, "preset_rooms": [{"name": "r1", "members": ["alice"], "max_turns": 1}]}]
         await scheduler.startup(teams_config)
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):

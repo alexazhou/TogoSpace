@@ -23,7 +23,7 @@ def _make_agent_key(team_name: str, agent_name: str) -> str:
 
 
 def _iter_team_rooms(team_config: dict) -> list[dict]:
-    return team_config.get("rooms") or team_config.get("groups") or []
+    return team_config.get("preset_rooms") or []
 
 
 async def load_team_ids(teams_config: list) -> None:

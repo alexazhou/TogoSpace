@@ -1,7 +1,4 @@
 # 标准库
-import json
-
-# 第三方包
 from pydantic import BaseModel
 
 # 内部包
@@ -14,13 +11,13 @@ from util import assertUtil
 # Request Models
 class CreateTeamRequest(BaseModel):
     name: str
-    max_function_calls: int | None = None
-    rooms: list[dict]
+    members: list[str]
+    preset_rooms: list[dict]
 
 
 class UpdateTeamRequest(BaseModel):
-    max_function_calls: int | None = None
-    rooms: list[dict] | None = None
+    members: list[str] | None = None
+    preset_rooms: list[dict] | None = None
 
 
 class TeamListHandler(BaseHandler):
@@ -39,8 +36,8 @@ class TeamCreateHandler(BaseHandler):
 
         team_config = {
             "name": request.name,
-            "max_function_calls": request.max_function_calls,
-            "rooms": request.rooms,
+            "members": request.members,
+            "preset_rooms": request.preset_rooms,
         }
 
         # 调用 service 创建 team
@@ -76,11 +73,12 @@ class TeamModifyHandler(BaseHandler):
         # 构建配置
         team_config = {
             "name": team_name,
-            "max_function_calls": request.max_function_calls,
         }
 
-        if request.rooms is not None:
-            team_config["rooms"] = request.rooms
+        if request.members is not None:
+            team_config["members"] = request.members
+        if request.preset_rooms is not None:
+            team_config["preset_rooms"] = request.preset_rooms
 
         # 调用 service 更新 team
         await teamService.update_team(team_config)

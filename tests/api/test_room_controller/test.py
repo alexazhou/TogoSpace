@@ -29,7 +29,7 @@ class TestRoomController(_ApiServiceCase):
 
     async def _get_room_id(self, room_name: str, team_name: str) -> int:
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/rooms") as resp:
+            async with client.get(f"{self.backend_base_url}/rooms.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
         room = next(r for r in data["rooms"] if r["room_name"] == room_name and r["team_name"] == team_name)
@@ -38,7 +38,7 @@ class TestRoomController(_ApiServiceCase):
     async def test_get_rooms(self):
         """验证 GET /rooms 返回正确的房间列表及字段结构。"""
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/rooms") as resp:
+            async with client.get(f"{self.backend_base_url}/rooms.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
         assert "rooms" in data
@@ -54,7 +54,7 @@ class TestRoomController(_ApiServiceCase):
         """验证 GET /rooms/{id}/messages 返回消息列表及元数据字段。"""
         async with aiohttp.ClientSession() as client:
             async with client.get(
-                f"{self.backend_base_url}/rooms/{await self._get_room_id('general', _TEAM)}/messages"
+                f"{self.backend_base_url}/rooms/{await self._get_room_id('general', _TEAM)}/messages.json"
             ) as resp:
                 assert resp.status == 200
                 data = await resp.json()
@@ -72,7 +72,7 @@ class TestRoomController(_ApiServiceCase):
         """验证请求不存在的房间时返回 404。"""
         async with aiohttp.ClientSession() as client:
             async with client.get(
-                f"{self.backend_base_url}/rooms/999999999/messages"
+                f"{self.backend_base_url}/rooms/999999999/messages.json"
             ) as resp:
                 assert resp.status in (400, 404)
 
@@ -82,14 +82,14 @@ class TestRoomController(_ApiServiceCase):
         payload = {"content": "Hello from operator."}
         async with aiohttp.ClientSession() as client:
             async with client.post(
-                f"{self.backend_base_url}/rooms/{room_id}/messages", json=payload
+                f"{self.backend_base_url}/rooms/{room_id}/messages.json", json=payload
             ) as resp:
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["status"] == "ok"
 
             async with client.get(
-                f"{self.backend_base_url}/rooms/{room_id}/messages"
+                f"{self.backend_base_url}/rooms/{room_id}/messages.json"
             ) as resp:
                 assert resp.status == 200
                 data = await resp.json()
@@ -110,7 +110,7 @@ class TestRoomControllerPrivate(_ApiServiceCase):
 
     async def _get_room_id(self, room_name: str, team_name: str) -> int:
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/rooms") as resp:
+            async with client.get(f"{self.backend_base_url}/rooms.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
         room = next(r for r in data["rooms"] if r["room_name"] == room_name and r["team_name"] == team_name)
@@ -119,7 +119,7 @@ class TestRoomControllerPrivate(_ApiServiceCase):
     async def test_room_types_in_list(self):
         """验证 GET /rooms 正确返回 room_type 和 team_name 字段。"""
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/rooms") as resp:
+            async with client.get(f"{self.backend_base_url}/rooms.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
 
@@ -143,13 +143,13 @@ class TestRoomControllerPrivate(_ApiServiceCase):
 
         async with aiohttp.ClientSession() as client:
             async with client.post(
-                f"{self.backend_base_url}/rooms/{room_id}/messages", json=payload
+                f"{self.backend_base_url}/rooms/{room_id}/messages.json", json=payload
             ) as resp:
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["status"] == "ok"
 
-            async with client.get(f"{self.backend_base_url}/rooms/{room_id}/messages") as resp:
+            async with client.get(f"{self.backend_base_url}/rooms/{room_id}/messages.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
                 messages = data["messages"]
@@ -163,7 +163,7 @@ class TestRoomControllerPrivate(_ApiServiceCase):
         while time.time() - start_time < max_wait:
             async with aiohttp.ClientSession() as client:
                 async with client.get(
-                    f"{self.backend_base_url}/rooms/{room_id}/messages"
+                    f"{self.backend_base_url}/rooms/{room_id}/messages.json"
                 ) as resp:
                     assert resp.status == 200
                     data = await resp.json()

@@ -21,6 +21,14 @@ def _normalize_members(members: Sequence[str | SpecialAgent] | None) -> List[str
     return [member.value if isinstance(member, SpecialAgent) else member for member in members]
 
 
+def _infer_room_type(members: Sequence[str]) -> RoomType:
+    normalized = _normalize_members(members)
+    ai_count = len([m for m in normalized if m != SpecialAgent.OPERATOR.value])
+    if SpecialAgent.OPERATOR.value in normalized and ai_count == 1:
+        return RoomType.PRIVATE
+    return RoomType.GROUP
+
+
 @dataclass
 class ChatContext:
     """工具调用时注入的上下文，包含当前 Agent 和聊天室信息。"""
@@ -278,7 +286,7 @@ def _room_key(team_name: str, room_name: str) -> str:
 
 
 def _iter_team_rooms(team_config: dict) -> list[dict]:
-    return team_config.get("rooms") or team_config.get("groups") or []
+    return team_config.get("preset_rooms") or []
 
 
 async def startup() -> None:
@@ -397,7 +405,7 @@ async def create_rooms(teams_config: list) -> None:
                 name=room["name"],
                 members=room["members"],
                 initial_topic=room.get("initial_topic", ""),
-                room_type=RoomType.value_of(room.get("type", "group")) or RoomType.GROUP,
+                room_type=_infer_room_type(room.get("members", [])),
                 max_turns=room.get("max_turns", 0),
             )
 
@@ -444,7 +452,7 @@ async def refresh_rooms_for_team(team_id: int, teams_config: list) -> None:
                 name=room["name"],
                 members=room.get("members", []),
                 initial_topic=room.get("initial_topic", ""),
-                room_type=RoomType.value_of(room.get("type", "group")) or RoomType.GROUP,
+                room_type=_infer_room_type(room.get("members", [])),
                 max_turns=room.get("max_turns", 0),
             )
 

@@ -12,9 +12,8 @@ from ...base import ServiceTestCase
 TEAM = "test_team"
 TEAMS_CONFIG = [{
     "name": TEAM,
-    "groups": [{
+    "preset_rooms": [{
         "name": "r1",
-        "type": "group",
         "members": ["alice", "bob"],
         "max_turns": 3,
     }],

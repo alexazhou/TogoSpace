@@ -1,27 +1,30 @@
 {
   "name": "default",
-  "rooms": [
+  "members": [
+    "Operator",
+    "researcher",
+    "project_manager",
+    "software_engineer",
+    "test_engineer"
+  ],
+  "preset_rooms": [
     {
       "name": "Agent助手",
-      "type": "private",
       "members": ["Operator", "researcher"],
       "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
       "max_turns": 100
     },
     {
       "name": "项目经理",
-      "type": "private",
       "members": ["Operator", "project_manager"],
       "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
       "max_turns": 100
     },
     {
       "name": "Agent大群",
-      "type": "group",
       "members": ["project_manager","software_engineer", "test_engineer"],
       "initial_topic": "按角色分工协作，一起协作完成人类发布的任务",
       "max_turns": 1000
     }
-  ],
-  "max_function_calls": 5
+  ]
 }

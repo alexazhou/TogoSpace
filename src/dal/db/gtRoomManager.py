@@ -3,7 +3,16 @@ from __future__ import annotations
 from peewee import EXCLUDED
 
 from model.dbModel.gtRoom import GtRoom
-from constants import RoomType
+from constants import RoomType, SpecialAgent
+
+
+def _infer_room_type_from_members(members: list[str]) -> RoomType:
+    normalized = set(members or [])
+    # 约定：仅当包含 Operator 且仅有 1 个非 Operator 成员时判定为 PRIVATE
+    ai_count = len([m for m in normalized if m != SpecialAgent.OPERATOR.value])
+    if SpecialAgent.OPERATOR.value in normalized and ai_count == 1:
+        return RoomType.PRIVATE
+    return RoomType.GROUP
 
 
 # Room Config CRUD
@@ -65,7 +74,7 @@ async def upsert_rooms(team_id: int, rooms: list) -> None:
     rows = []
     for room in rooms:
         room_name = room["name"]
-        room_type = RoomType.value_of(room.get("type", "group")) or RoomType.GROUP
+        room_type = _infer_room_type_from_members(room.get("members", []))
         initial_topic = room.get("initial_topic", "")
         max_turns = room.get("max_turns", 100)
         updated_at = GtRoom._now_iso()

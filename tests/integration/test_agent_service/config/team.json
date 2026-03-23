@@ -1,1 +1,12 @@
-{"name": "test_team", "groups": [{"name": "general", "members": ["alice", "bob"], "initial_topic": "hello", "max_turns": 5}]}
+{
+  "name": "test_team",
+  "members": ["alice", "bob"],
+  "preset_rooms": [
+    {
+      "name": "general",
+      "members": ["alice", "bob"],
+      "initial_topic": "hello",
+      "max_turns": 5
+    }
+  ]
+}
