@@ -19,8 +19,8 @@ class AgentInfo:
 
 @dataclass
 class RoomInfo:
-    db_id: int
-    room_id: str
+    room_id: int
+    room_key: str
     room_name: str
     team_name: str
     room_type: str
@@ -38,7 +38,8 @@ class MessageInfo:
 @dataclass
 class WsEvent:
     event: str
-    room_id: str | None = None
+    room_id: int | None = None
+    room_key: str | None = None
     room_name: str | None = None
     team_name: str | None = None
     sender: str | None = None
@@ -72,8 +73,8 @@ class ApiClient:
             data = await resp.json()
         return [
             RoomInfo(
-                db_id=r.get("db_id", 0),
                 room_id=r["room_id"],
+                room_key=r["room_key"],
                 room_name=r["room_name"],
                 team_name=r.get("team_name", ""),
                 room_type=r.get("room_type", "group"),
@@ -121,6 +122,7 @@ class ApiClient:
                                 yield WsEvent(
                                     event=event_type,
                                     room_id=data["room_id"],
+                                    room_key=data.get("room_key"),
                                     room_name=data["room_name"],
                                     team_name=data.get("team_name", ""),
                                     sender=data["sender"],

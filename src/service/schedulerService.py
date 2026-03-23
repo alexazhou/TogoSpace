@@ -78,7 +78,8 @@ def _on_agent_turn(msg: Message) -> None:
         return
 
     # 去重：同一房间已在队列中则跳过，避免重复调度
-    if any(e.room_id == room_id for e in agent.wait_task_queue._queue):
+    queued_events = list(getattr(agent.wait_task_queue, "_queue", []))
+    if any(e.room_id == room_id for e in queued_events):
         logger.debug(f"跳过重复入队: agent={agent.key}, room_id={room_id}")
         return
 

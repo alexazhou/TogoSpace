@@ -37,7 +37,7 @@ agent_team/
 
 ```
 src/
-├── main.py              # 程序入口，初始化所有服务，启动 tornado HTTP 服务器
+├── backend_main.py      # 程序入口，初始化所有服务，启动 tornado HTTP 服务器
 ├── route.py             # HTTP 路由注册（/agents, /rooms, /ws/events）
 ├── constants.py         # 枚举常量（角色、消息总线 Topic、房间状态等）
 ├── model/               # 数据定义层
@@ -72,7 +72,7 @@ src/
 
 ```
 tui/
-├── main.py        # TUI 入口，解析参数，单实例检查，启动 WatcherApp
+├── tui_main.py    # TUI 入口，解析参数，单实例检查，启动 WatcherApp
 ├── app.py         # Textual App 主类（WatcherApp）
 ├── widgets.py     # 自定义 Textual 组件
 └── api_client.py  # 调用后端 HTTP / WebSocket API
@@ -96,7 +96,7 @@ tui/
 
 ```bash
 # 前台运行（开发调试）
-cd src && python main.py [--config-dir ../config] [--port 8080]
+cd src && python backend_main.py [--config-dir ../config] [--port 8080]
 
 # 后台运行（nohup，stdout 写入 logs/backend_stdout.log，运行日志写入 logs/backend/）
 ./scripts/start_backend.sh [--config-dir ...] [--port ...]
@@ -128,7 +128,7 @@ cd src && python main.py [--config-dir ../config] [--port 8080]
 
 ## 工作目录约定
 
-`main.py` 启动时调用 `os.chdir(os.path.dirname(os.path.abspath(__file__)))` 将工作目录固定为 `src/`。
+`backend_main.py` 启动时调用 `os.chdir(os.path.dirname(os.path.abspath(__file__)))` 将工作目录固定为 `src/`。
 prompt 等仓库内置相对路径仍以 `src/` 为基准。
 `--config-dir` 在启动早期会先转换为绝对路径，因此外部调用方可以安全传相对目录，不会被后续 `chdir` 影响。
 
@@ -203,7 +203,7 @@ prompt 等仓库内置相对路径仍以 `src/` 为基准。
 
 ```bash
 # 运行 TUI（确保后端在运行且停止已有 TUI）
-simu_terminal_go --port 8889 -- .venv/bin/python tui/main.py --base-url http://127.0.0.1:8080
+simu_terminal_go --port 8889 -- .venv/bin/python tui/tui_main.py --base-url http://127.0.0.1:8080
 
 # 截图 - PNG（可直接用 Read tool 读取图片）
 curl "http://localhost:8889/screenshot?format=png&scale=2" -o screenshot.png

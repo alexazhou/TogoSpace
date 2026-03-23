@@ -5,6 +5,7 @@ import os
 import signal
 import sys
 from datetime import datetime
+from typing import List
 
 import tornado.httpserver
 
@@ -38,10 +39,11 @@ def _setup_logger() -> None:
     root_logger.setLevel(logging.DEBUG)
     root_logger.handlers.clear()
 
-    for handler in [
+    handlers: List[logging.Handler] = [
         logging.FileHandler(log_file, encoding="utf-8"),
         logging.StreamHandler()
-    ]:
+    ]
+    for handler in handlers:
         handler.setFormatter(logging.Formatter(log_format, datefmt="%Y-%m-%d %H:%M:%S"))
         root_logger.addHandler(handler)
 

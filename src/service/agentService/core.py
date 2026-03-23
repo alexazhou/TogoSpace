@@ -116,7 +116,10 @@ class Agent:
 
             message: llmApiUtil.LlmApiMessage
             if msg.sender_name == "system":
-                message = llmApiUtil.LlmApiMessage(role=llmApiUtil.OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}")
+                message = llmApiUtil.LlmApiMessage.text(
+                    llmApiUtil.OpenaiLLMApiRole.USER,
+                    content=f"{room.name} 房间系统消息: {msg.content}",
+                )
             else:
                 message = llmApiUtil.LlmApiMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, content=f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}")
 
