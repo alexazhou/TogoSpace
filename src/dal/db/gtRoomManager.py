@@ -73,7 +73,7 @@ async def upsert_rooms(team_id: int, rooms: list) -> None:
         rows.append({
             "team_id": team_id,
             "name": room_name,
-            "type": room_type.value,
+            "type": room_type,
             "initial_topic": initial_topic,
             "max_turns": max_turns,
             "updated_at": updated_at,
