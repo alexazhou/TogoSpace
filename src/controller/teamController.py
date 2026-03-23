@@ -26,7 +26,21 @@ class TeamListHandler(BaseHandler):
 
     async def get(self) -> None:
         teams = await gtTeamManager.get_all_teams()
-        self.return_json({"teams": teams})
+        self.return_json(
+            {
+                "teams": [
+                    {
+                        "id": team.id,
+                        "name": team.name,
+                        "max_function_calls": team.max_function_calls,
+                        "enabled": team.enabled,
+                        "created_at": team.created_at,
+                        "updated_at": team.updated_at,
+                    }
+                    for team in teams
+                ]
+            }
+        )
 
 
 class TeamCreateHandler(BaseHandler):
@@ -51,11 +65,42 @@ class TeamDetailHandler(BaseHandler):
     """GET /teams/{id}.json - 获取指定 Team 详情"""
 
     async def get(self, team_id_str: str) -> None:
+        from dal.db import gtRoomManager, gtRoomMemberManager
+
         team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+        if team is None:
+            return
 
-        self.return_json(team)
+        rooms = await gtRoomManager.get_rooms_by_team(team_id)
+        members: set[str] = set()
+        room_items = []
+        for room in rooms:
+            room_members = await gtRoomMemberManager.get_members_by_room(room.id)
+            members.update(room_members)
+            room_items.append(
+                {
+                    "id": room.id,
+                    "name": room.name,
+                    "initial_topic": room.initial_topic,
+                    "max_turns": room.max_turns,
+                    "members": room_members,
+                }
+            )
+
+        self.return_json(
+            {
+                "id": team.id,
+                "name": team.name,
+                "max_function_calls": team.max_function_calls,
+                "enabled": team.enabled,
+                "created_at": team.created_at,
+                "updated_at": team.updated_at,
+                "members": sorted(members),
+                "rooms": room_items,
+            }
+        )
 
 
 class TeamModifyHandler(BaseHandler):

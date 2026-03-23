@@ -277,8 +277,17 @@ def get_agent(team_name: str, agent_name: str) -> Agent:
     return _agents[key]
 
 
+def find_agent(team_name: str, agent_name: str) -> Agent | None:
+    key = _make_agent_key(team_name, agent_name)
+    return _agents.get(key)
+
+
 def get_all_agents() -> List[Agent]:
     return list(_agents.values())
+
+
+def get_agent_definition(agent_name: str) -> dict[str, Any] | None:
+    return _agent_defs.get(agent_name)
 
 
 def get_agents(room_id: int) -> List[Agent]:
