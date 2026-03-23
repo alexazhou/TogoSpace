@@ -20,7 +20,7 @@ class TestAgentController(_ApiServiceCase):
     requires_mock_llm = True
 
     async def test_get_agents(self):
-        """验证 GET /agents 返回正确的 agents 列表及字段结构。"""
+        """验证 GET /agents/list.json 返回可选 agent 模板列表。"""
         async with aiohttp.ClientSession() as client:
             async with client.get(f"{self.backend_base_url}/agents/list.json") as resp:
                 assert resp.status == 200
@@ -31,3 +31,5 @@ class TestAgentController(_ApiServiceCase):
         assert "name" in agent
         assert "model" in agent
         assert "team_name" in agent
+        assert agent["template_name"] == agent["name"]
+        assert agent["team_name"] == ""
