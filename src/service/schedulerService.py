@@ -18,7 +18,7 @@ _stop_event: asyncio.Event = asyncio.Event()
 
 
 def _iter_team_rooms(team_config: dict) -> list[dict]:
-    return team_config.get("rooms") or team_config.get("groups") or []
+    return team_config.get("preset_rooms") or []
 
 
 async def startup(teams_config: list) -> None:

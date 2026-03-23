@@ -7,6 +7,10 @@ from model.dbModel.gtTeam import GtTeam
 logger = logging.getLogger(__name__)
 
 
+def _iter_team_rooms(team_config: dict) -> list[dict]:
+    return team_config.get("preset_rooms") or []
+
+
 # Team CRUD
 async def get_team(name: str) -> GtTeam | None:
     """获取指定 Team。"""
@@ -81,11 +85,12 @@ async def get_team_config(name: str) -> dict | None:
     team_id = team.id
 
     rooms = []
+    all_members: set[str] = set()
     for room in await gtRoomManager.get_rooms_by_team(team_id):
         members = await gtRoomMemberManager.get_members_by_room(room.id)
+        all_members.update(members)
         rooms.append({
             "name": room.name,
-            "type": room.type.name,
             "initial_topic": room.initial_topic,
             "max_turns": room.max_turns,
             "members": members,
@@ -93,8 +98,8 @@ async def get_team_config(name: str) -> dict | None:
 
     return {
         "name": team.name,
-        "max_function_calls": team.max_function_calls,
-        "rooms": rooms,
+        "members": sorted(all_members),
+        "preset_rooms": rooms,
     }
 
 
@@ -126,7 +131,7 @@ async def import_team_from_json(team_config: dict) -> None:
     team_id = team.id
 
     # 导入 Rooms
-    rooms = team_config.get("rooms", [])
+    rooms = _iter_team_rooms(team_config)
     await gtRoomManager.upsert_rooms(team_id, rooms)
 
     # 导入 Members

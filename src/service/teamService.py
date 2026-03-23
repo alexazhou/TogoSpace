@@ -13,6 +13,10 @@ from exception import TeamAgentException
 logger = logging.getLogger(__name__)
 
 
+def _iter_team_rooms(team_config: dict) -> list[dict]:
+    return team_config.get("preset_rooms") or []
+
+
 async def startup(config_dir: str = None) -> list:
     """启动时加载 Team 配置：
     1. 从数据库加载现有配置
@@ -35,7 +39,7 @@ async def startup(config_dir: str = None) -> list:
     # 2. 将 JSON 配置导入数据库（仅当不存在时）
     for name, team_config in json_teams.items():
         # 为没有 max_turns 的 room 设置默认值 100
-        for room in team_config.get("rooms", []):
+        for room in _iter_team_rooms(team_config):
             if "max_turns" not in room:
                 room["max_turns"] = 100
                 logger.info(f"为 Team '{name}' 的 Room '{room['name']}' 设置默认 max_turns=100")
@@ -67,7 +71,7 @@ async def create_team(team_config: dict) -> None:
     team_id = team.id
 
     # 创建 Rooms（rooms 参数）
-    rooms = team_config.get("rooms", [])
+    rooms = _iter_team_rooms(team_config)
     for room in rooms:
         if "max_turns" not in room:
             room["max_turns"] = 100
@@ -96,8 +100,8 @@ async def update_team(team_config: dict) -> None:
     team = await gtTeamManager.upsert_team(team_config)
     team_id = team.id
 
-    # 更新 Rooms（rooms 参数名保持兼容）
-    rooms = team_config.get("rooms", [])
+    # 更新 preset_rooms
+    rooms = _iter_team_rooms(team_config)
     for room in rooms:
         if "max_turns" not in room:
             room["max_turns"] = 100

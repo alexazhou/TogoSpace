@@ -27,17 +27,6 @@ def _default_db_path() -> str:
 def _resolve_config_file(config_dir: str | None, preferred_name: str) -> str:
     if config_dir is None:
         return _default_root_config_path()
-
-    candidates = [preferred_name, "setting.json", "config.json", "llm.json"]
-    seen: set[str] = set()
-    for name in candidates:
-        if name in seen:
-            continue
-        seen.add(name)
-        path = os.path.join(config_dir, name)
-        if os.path.isfile(path):
-            return path
-
     return os.path.join(config_dir, preferred_name)
 
 
@@ -73,24 +62,12 @@ def load_prompt(file_path: str) -> str:
 
 def load_llmService_config(config_dir: str = None) -> dict:
     """返回当前激活的 LLM 服务配置（name, base_url, api_key, type）。"""
-    path = _resolve_config_file(config_dir, "llm.json")
+    path = _resolve_config_file(config_dir, "setting.json")
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
 
-    # 支持多种格式：
-    # 1. setting.json: {"default_llm_server": "...", "llm_services": [...]}
-    # 2. llm.json: {"active_llmService": "...", "llmServices": [...]}
-    # 3. 旧版兼容: {"active_LlmService": "...", "LlmServices": [...]}
-    active_key = (
-        cfg.get("default_llm_server")
-        or cfg.get("active_llmService")
-        or cfg.get("active_LlmService")
-    )
-    services_key = (
-        cfg.get("llm_services")
-        or cfg.get("llmServices")
-        or cfg.get("LlmServices")
-    )
+    active_key = cfg.get("default_llm_server")
+    services_key = cfg.get("llm_services")
 
     all_services = services_key or []
     enabled_services = [s for s in all_services if s.get("enable", True)]
@@ -103,12 +80,7 @@ def load_llmService_config(config_dir: str = None) -> dict:
 
     services = {s["name"]: s for s in enabled_services if s.get("name")}
     if active_key not in services:
-        all_service_names = {s.get("name") for s in all_services if s.get("name")}
-        if active_key in all_service_names:
-            raise ValueError(f"默认 LLM 服务 '{active_key}' 已被禁用（enable=false）")
-        raise ValueError(
-            f"默认 LLM 服务 '{active_key}' 未在 llm_services/llmServices/LlmServices 中定义"
-        )
+        raise ValueError(f"默认 LLM 服务 '{active_key}' 未在 llm_services 中定义或已禁用")
     return dict(services[active_key])
 
 

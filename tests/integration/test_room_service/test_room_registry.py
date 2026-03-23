@@ -59,9 +59,8 @@ class TestRoomRegistry(ServiceTestCase):
         """批量建房路径应始终生成初始化消息，供后续恢复逻辑覆盖。"""
         teams_config = [{
             "name": TEAM,
-            "groups": [{
+            "preset_rooms": [{
                 "name": "boot_room",
-                "type": "group",
                 "members": ["alice"],
                 "initial_topic": "boot topic",
                 "max_turns": 5,

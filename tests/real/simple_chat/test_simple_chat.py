@@ -10,6 +10,8 @@ import service.agentService as agentService
 import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.llmService as llmService
+import service.ormService as ormService
+import service.persistenceService as persistenceService
 from tests.base import ServiceTestCase
 from util import configUtil, llmApiUtil
 
@@ -37,6 +39,8 @@ class TestRealSimpleChat(ServiceTestCase):
         await llmService.startup(llm_cfg.get("api_key", ""), llm_cfg.get("base_url", ""))
 
         # 启动服务
+        await ormService.startup(":memory:")
+        await persistenceService.startup()
         await roomService.startup()
         await funcToolService.startup()
         await agentService.startup()
@@ -48,8 +52,8 @@ class TestRealSimpleChat(ServiceTestCase):
         agentService.load_agent_config(agents_cfgs)
         await agentService.create_team_agents(team_cfgs)
 
-        # 创建房间
-        await roomService.create_room("default", "general", ["alice", "bob"])
+        # 创建房间（max_turns=1 表示 alice/bob 各 1 次发言）
+        await roomService.create_room("default", "general", ["alice", "bob"], max_turns=1)
 
         # 启动调度器
         await scheduler.startup(team_cfgs)
@@ -58,6 +62,11 @@ class TestRealSimpleChat(ServiceTestCase):
     async def async_teardown_class(cls):
         """清理服务"""
         scheduler.shutdown()
+        await agentService.shutdown()
+        funcToolService.shutdown()
+        roomService.shutdown()
+        await persistenceService.shutdown()
+        await ormService.shutdown()
         llmService.shutdown()
 
     async def test_two_agents_chat_and_exit(self):
@@ -67,7 +76,7 @@ class TestRealSimpleChat(ServiceTestCase):
 
         room_key = "general@default"
 
-        # 剧本：Alice 先说话，然后 Bob 回复（max_turns=2）
+        # 剧本：Alice 先说话，然后 Bob 回复（max_turns=1）
 
         # Alice 的第 1 轮：发送 "你好 Bob！" 然后结束轮次
         self.set_mock_response({

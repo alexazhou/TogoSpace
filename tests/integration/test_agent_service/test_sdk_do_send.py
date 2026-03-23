@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from service import roomService, agentService
+from service import roomService, agentService, ormService, persistenceService
 from service.agentService import Agent
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
@@ -23,12 +23,21 @@ class TestSdkDoSend(ServiceTestCase):
 
     @classmethod
     async def async_setup_class(cls):
+        await ormService.startup(":memory:")
+        await persistenceService.startup()
         await roomService.startup()
+
+    @classmethod
+    async def async_teardown_class(cls):
+        roomService.shutdown()
+        await persistenceService.shutdown()
+        await ormService.shutdown()
 
     async def _make_driver_with_room(self, agent_name: str, current_room_name: str):
         """创建房间、agent 和 SDK driver，注入当前房间上下文。"""
         await roomService.create_room(TEAM, current_room_name, [agent_name])
         room = roomService.get_room_by_key(f"{current_room_name}@{TEAM}")
+        room.activate_scheduling()
         agent = Agent(name=agent_name, team_name=TEAM, system_prompt="test", model="test-model",
                       driver_config=AgentDriverConfig(driver_type="native"))
         agent.current_room = room
@@ -104,8 +113,17 @@ class _FakeClaudeClient:
 class TestClaudeSdkAgentDriver(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
+        await ormService.startup(":memory:")
+        await persistenceService.startup()
         await roomService.startup()
         await agentService.startup()
+
+    @classmethod
+    async def async_teardown_class(cls):
+        await agentService.shutdown()
+        roomService.shutdown()
+        await persistenceService.shutdown()
+        await ormService.shutdown()
 
     async def test_run_chat_turn_requires_started_client(self):
         await roomService.create_room(TEAM, "lobby", ["alice"])

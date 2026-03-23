@@ -61,6 +61,19 @@ def _assert_port_ready(
         ) from exc
 
 
+def _assert_tcp_ready(host: str, port: int, service_name: str, timeout: float = 1.0) -> None:
+    deadline = time.time() + timeout
+    last_exc: Exception | None = None
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.3):
+                return
+        except Exception as exc:
+            last_exc = exc
+            time.sleep(0.05)
+    raise RuntimeError(f"{service_name} TCP 健康检查失败：{host}:{port} => {last_exc or 'timeout'}")
+
+
 class ServiceTestCase:
     """基础测试类：统一管理测试类级别的初始化与清理。
 
@@ -335,7 +348,7 @@ class ServiceTestCase:
                     f"后端进程提前退出（code={proc.returncode}）\n{output}"
                 )
             try:
-                _assert_port_ready(f"{base_url}/agents", "后端", timeout=0.5)
+                _assert_tcp_ready("127.0.0.1", port, "后端", timeout=0.3)
                 break
             except RuntimeError:
                 pass
@@ -345,13 +358,17 @@ class ServiceTestCase:
                 proc.terminate()
             with contextlib.suppress(Exception):
                 proc.wait(timeout=5)
+            with contextlib.suppress(Exception):
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=2)
             output = cls._tail_text(cls._read_process_output(proc))
             raise RuntimeError(f"后端服务在 {_BACKEND_READY_TIMEOUT}s 内未就绪\n{output}")
 
         cls._backend_proc = proc
         cls.backend_port = port
         cls.backend_base_url = base_url
-        _assert_port_ready(f"{cls.backend_base_url}/agents", "后端")
+        _assert_tcp_ready("127.0.0.1", cls.backend_port, "后端", timeout=1.0)
 
     @classmethod
     def _stop_backend(cls):

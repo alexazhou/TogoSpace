@@ -1,13 +1,12 @@
 {
   "name": "default",
-  "groups": [
+  "members": ["alice", "bob"],
+  "preset_rooms": [
     {
       "name": "general",
-      "type": "group",
       "members": ["alice", "bob"],
       "initial_topic": "大家好！",
-      "max_turns": 2
+      "max_turns": 1
     }
-  ],
-  "max_function_calls": 5
+  ]
 }

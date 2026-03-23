@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from service import agentService, roomService
+from service import agentService, roomService, ormService, persistenceService
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -21,12 +21,21 @@ class _agentServiceCase(ServiceTestCase):
 
     @classmethod
     async def async_setup_class(cls):
+        await ormService.startup(":memory:")
+        await persistenceService.startup()
         await roomService.startup()
         agents_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
         await agentService.startup()
         agentService.load_agent_config(agents_cfg)
         await agentService.create_team_agents([team_cfg])
+
+    @classmethod
+    async def async_teardown_class(cls):
+        await agentService.shutdown()
+        roomService.shutdown()
+        await persistenceService.shutdown()
+        await ormService.shutdown()
 
 
 class TestagentServiceCreateTeamAgents(_agentServiceCase):

@@ -81,14 +81,14 @@ class TestDalManagers(ServiceTestCase):
     async def test_team_manager_get_team_config_and_get_all_team_configs(self):
         await self._reset_tables()
 
-        team_a = await gtTeamManager.upsert_team({"name": "team_a", "max_function_calls": 5})
-        team_b = await gtTeamManager.upsert_team({"name": "team_b", "max_function_calls": 9})
+        team_a = await gtTeamManager.upsert_team({"name": "team_a"})
+        team_b = await gtTeamManager.upsert_team({"name": "team_b"})
 
         await gtRoomManager.upsert_rooms(team_a.id, [{
             "name": "general",
-            "type": "group",
             "initial_topic": "hello",
             "max_turns": 6,
+            "members": ["alice", "bob"],
         }])
         room = await gtRoomManager.get_room_config(team_a.id, "general")
         assert room is not None
@@ -97,30 +97,26 @@ class TestDalManagers(ServiceTestCase):
         cfg_a = await gtTeamManager.get_team_config("team_a")
         assert cfg_a is not None
         assert cfg_a["name"] == "team_a"
-        assert cfg_a["max_function_calls"] == 5
-        assert len(cfg_a["rooms"]) == 1
-        assert cfg_a["rooms"][0]["name"] == "general"
-        assert cfg_a["rooms"][0]["type"] == "GROUP"
-        assert cfg_a["rooms"][0]["initial_topic"] == "hello"
-        assert cfg_a["rooms"][0]["max_turns"] == 6
-        assert cfg_a["rooms"][0]["members"] == ["alice", "bob"]
+        assert len(cfg_a["preset_rooms"]) == 1
+        assert cfg_a["preset_rooms"][0]["name"] == "general"
+        assert cfg_a["preset_rooms"][0]["initial_topic"] == "hello"
+        assert cfg_a["preset_rooms"][0]["max_turns"] == 6
+        assert cfg_a["preset_rooms"][0]["members"] == ["alice", "bob"]
 
         cfg_none = await gtTeamManager.get_team_config("missing")
         assert cfg_none is None
 
         all_configs = await gtTeamManager.get_all_team_configs()
         assert [c["name"] for c in all_configs] == ["team_a", "team_b"]
-        assert all_configs[1]["rooms"] == []
+        assert all_configs[1]["preset_rooms"] == []
 
     async def test_team_manager_import_team_from_json_imports_and_skips_existing(self):
         await self._reset_tables()
 
         payload = {
             "name": "imported",
-            "max_function_calls": 2,
-            "rooms": [{
+            "preset_rooms": [{
                 "name": "r1",
-                "type": "group",
                 "initial_topic": "topic 1",
                 "max_turns": 8,
                 "members": ["alice", "bob"],
@@ -138,16 +134,14 @@ class TestDalManagers(ServiceTestCase):
         # 已存在时应跳过导入，不覆盖已有记录
         await gtTeamManager.import_team_from_json({
             "name": "imported",
-            "max_function_calls": 99,
-            "rooms": [{
+            "preset_rooms": [{
                 "name": "r2",
-                "type": "private",
-                "members": ["charlie"],
+                "members": ["Operator", "charlie"],
             }],
         })
         imported_after = await gtTeamManager.get_team("imported")
         assert imported_after is not None
-        assert imported_after.max_function_calls == 2
+        assert imported_after.max_function_calls == 5
         assert await gtRoomManager.get_room_config(imported_after.id, "r2") is None
 
     # ------------------------------------------------------------------
@@ -158,8 +152,8 @@ class TestDalManagers(ServiceTestCase):
 
         team = await gtTeamManager.upsert_team({"name": "room_team"})
         await gtRoomManager.upsert_rooms(team.id, [
-            {"name": "z_room", "type": "group", "max_turns": 2},
-            {"name": "a_room", "type": "private", "max_turns": 3},
+            {"name": "z_room", "max_turns": 2, "members": ["alice", "bob"]},
+            {"name": "a_room", "max_turns": 3, "members": ["Operator", "alice"]},
         ])
 
         rooms = await gtRoomManager.get_rooms_by_team(team.id)
@@ -199,11 +193,11 @@ class TestDalManagers(ServiceTestCase):
 
         team = await gtTeamManager.upsert_team({"name": "upsert_team"})
         await gtRoomManager.upsert_rooms(team.id, [
-            {"name": "old_room", "type": "group", "max_turns": 2},
+            {"name": "old_room", "max_turns": 2, "members": ["alice"]},
         ])
         await gtRoomManager.upsert_rooms(team.id, [
-            {"name": "new_room_1", "type": "unknown"},
-            {"name": "new_room_2", "initial_topic": "x"},
+            {"name": "new_room_1", "members": ["alice"]},
+            {"name": "new_room_2", "initial_topic": "x", "members": ["bob"]},
         ])
 
         rooms = await gtRoomManager.get_rooms_by_team(team.id)
@@ -216,8 +210,8 @@ class TestDalManagers(ServiceTestCase):
 
         team = await gtTeamManager.upsert_team({"name": "delete_team"})
         await gtRoomManager.upsert_rooms(team.id, [
-            {"name": "r1", "type": "group"},
-            {"name": "r2", "type": "group"},
+            {"name": "r1", "members": ["alice"]},
+            {"name": "r2", "members": ["bob"]},
         ])
         r1 = await gtRoomManager.get_room_config(team.id, "r1")
         assert r1 is not None
