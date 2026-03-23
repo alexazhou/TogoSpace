@@ -285,6 +285,10 @@ def get_all_agents() -> List[Agent]:
     return list(_agents.values())
 
 
+def get_all_agent_definitions() -> list[dict[str, Any]]:
+    return list(_agent_defs.values())
+
+
 def get_agent_definition(agent_name: str) -> dict[str, Any] | None:
     return _agent_defs.get(agent_name)
 

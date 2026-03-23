@@ -22,10 +22,21 @@ def _serialize_agent(agent: Agent) -> dict[str, Any]:
 class AgentListHandler(BaseHandler):
     async def get(self):
         team_name = self.get_query_argument("team_name", None)
-        agents: List[Agent] = agentService.get_all_agents()
         if team_name:
+            agents: List[Agent] = agentService.get_all_agents()
             agents = [agent for agent in agents if agent.team_name == team_name]
-        data = [_serialize_agent(agent) for agent in agents]
+            data = [_serialize_agent(agent) for agent in agents]
+        else:
+            data = [
+                AgentInfo(
+                    name=str(definition["name"]),
+                    template_name=str(definition["name"]),
+                    model=str(definition.get("model") or ""),
+                    team_name="",
+                    status=AgentStatus.IDLE,
+                ).model_dump(mode="json")
+                for definition in agentService.get_all_agent_definitions()
+            ]
         self.return_json({"agents": data})
 
 
