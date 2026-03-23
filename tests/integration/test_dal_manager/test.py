@@ -12,6 +12,7 @@ from dal.db import (
     gtRoomMemberManager,
     gtRoomMessageManager,
     gtTeamManager,
+    gtTeamMemberManager,
 )
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -19,6 +20,7 @@ from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoomMember import GtRoomMember
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
+from model.dbModel.gtTeamMember import GtTeamMember
 from tests.base import ServiceTestCase
 
 
@@ -39,6 +41,7 @@ class TestDalManagers(ServiceTestCase):
 
     async def _reset_tables(self):
         await GtAgent.delete().aio_execute()
+        await GtTeamMember.delete().aio_execute()
         await GtRoomMember.delete().aio_execute()
         await GtRoomMessage.delete().aio_execute()
         await GtAgentHistory.delete().aio_execute()
@@ -53,21 +56,24 @@ class TestDalManagers(ServiceTestCase):
 
         team = await gtTeamManager.upsert_team({"name": "agent_team"})
 
-        saved_1 = await gtAgentManager.upsert_agent(team.id, "alice", "glm-4.7")
+        saved_1 = await gtAgentManager.upsert_agent(team.id, "alice_1", "glm-4.7", "alice")
         assert saved_1.team_id == team.id
-        assert saved_1.name == "alice"
+        assert saved_1.name == "alice_1"
         assert saved_1.model == "glm-4.7"
+        assert saved_1.template_name == "alice"
 
-        saved_2 = await gtAgentManager.upsert_agent(team.id, "alice", "gpt-4o")
+        saved_2 = await gtAgentManager.upsert_agent(team.id, "alice_1", "gpt-4o", "assistant")
         assert saved_2.id == saved_1.id
         assert saved_2.model == "gpt-4o"
+        assert saved_2.template_name == "assistant"
 
-        row = await gtAgentManager.get_agent(team.id, "alice")
+        row = await gtAgentManager.get_agent(team.id, "alice_1")
         assert row is not None
         assert row.model == "gpt-4o"
+        assert row.template_name == "assistant"
 
         rows = await gtAgentManager.get_agents_by_team(team.id)
-        assert [(r.name, r.model) for r in rows] == [("alice", "gpt-4o")]
+        assert [(r.name, r.model, r.template_name) for r in rows] == [("alice_1", "gpt-4o", "assistant")]
 
     async def test_agent_table_has_model_column(self):
         await self._reset_tables()
@@ -75,6 +81,7 @@ class TestDalManagers(ServiceTestCase):
         cols = await GtAgent.raw("PRAGMA table_info('agents')").aio_execute()
         col_names = {c.name for c in cols}
         assert "model" in col_names
+        assert "template_name" in col_names
 
     # ------------------------------------------------------------------
     # gtTeamManager
@@ -118,25 +125,33 @@ class TestDalManagers(ServiceTestCase):
 
         team_a = await gtTeamManager.upsert_team({"name": "team_a"})
         team_b = await gtTeamManager.upsert_team({"name": "team_b"})
+        await gtTeamMemberManager.upsert_team_members(team_a.id, [
+            {"name": "alice_1", "agent": "alice"},
+            {"name": "bob_1", "agent": "bob"},
+        ])
 
         await gtRoomManager.upsert_rooms(team_a.id, [{
             "name": "general",
             "initial_topic": "hello",
             "max_turns": 6,
-            "members": ["alice", "bob"],
+            "members": ["alice_1", "bob_1"],
         }])
         room = await gtRoomManager.get_room_config(team_a.id, "general")
         assert room is not None
-        await gtRoomMemberManager.upsert_room_members(room.id, ["bob", "alice"])
+        await gtRoomMemberManager.upsert_room_members(room.id, ["bob_1", "alice_1"])
 
         cfg_a = await gtTeamManager.get_team_config("team_a")
         assert cfg_a is not None
         assert cfg_a["name"] == "team_a"
+        assert cfg_a["members"] == [
+            {"name": "alice_1", "agent": "alice"},
+            {"name": "bob_1", "agent": "bob"},
+        ]
         assert len(cfg_a["preset_rooms"]) == 1
         assert cfg_a["preset_rooms"][0]["name"] == "general"
         assert cfg_a["preset_rooms"][0]["initial_topic"] == "hello"
         assert cfg_a["preset_rooms"][0]["max_turns"] == 6
-        assert cfg_a["preset_rooms"][0]["members"] == ["alice", "bob"]
+        assert cfg_a["preset_rooms"][0]["members"] == ["alice_1", "bob_1"]
 
         cfg_none = await gtTeamManager.get_team_config("missing")
         assert cfg_none is None
@@ -150,11 +165,15 @@ class TestDalManagers(ServiceTestCase):
 
         payload = {
             "name": "imported",
+            "members": [
+                {"name": "alice_1", "agent": "alice"},
+                {"name": "bob_1", "agent": "bob"},
+            ],
             "preset_rooms": [{
                 "name": "r1",
                 "initial_topic": "topic 1",
                 "max_turns": 8,
-                "members": ["alice", "bob"],
+                "members": ["alice_1", "bob_1"],
             }],
         }
         await gtTeamManager.import_team_from_json(payload)
@@ -164,11 +183,14 @@ class TestDalManagers(ServiceTestCase):
         room = await gtRoomManager.get_room_config(imported.id, "r1")
         assert room is not None
         assert room.max_turns == 8
-        assert await gtRoomMemberManager.get_members_by_room(room.id) == ["alice", "bob"]
+        assert await gtRoomMemberManager.get_members_by_room(room.id) == ["alice_1", "bob_1"]
 
         # 已存在时应跳过导入，不覆盖已有记录
         await gtTeamManager.import_team_from_json({
             "name": "imported",
+            "members": [
+                {"name": "charlie", "agent": "charlie"},
+            ],
             "preset_rooms": [{
                 "name": "r2",
                 "members": ["Operator", "charlie"],

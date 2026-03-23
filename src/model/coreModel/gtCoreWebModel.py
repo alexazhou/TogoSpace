@@ -21,6 +21,7 @@ class TeamRoomInfo(BaseModel):
 
 class AgentInfo(BaseModel):
     name: str
+    template_name: str | None = None
     model: str
     team_name: str
     status: AgentStatus

@@ -34,7 +34,7 @@ class TestTeamController(_ApiServiceCase):
                 data = await resp.json()
 
         assert data["name"] == "e2e"
-        assert data["members"] == ["Operator", "alice"]
+        assert data["members"] == [{"name": "alice", "agent": "alice"}]
         assert len(data["rooms"]) == 1
         room = data["rooms"][0]
         assert room["name"] == "general"
@@ -44,7 +44,7 @@ class TestTeamController(_ApiServiceCase):
     async def test_create_team_and_fetch_detail(self):
         payload = {
             "name": "new_team",
-            "members": ["alice"],
+            "members": [{"name": "alice", "agent": "alice"}],
             "preset_rooms": [
                 {
                     "name": "团队群聊",
@@ -73,17 +73,17 @@ class TestTeamController(_ApiServiceCase):
                 assert resp.status == 200
                 detail = await resp.json()
 
-        assert detail["members"] == ["alice"]
+        assert detail["members"] == [{"name": "alice", "agent": "alice"}]
         assert len(detail["rooms"]) == 1
         assert detail["rooms"][0]["name"] == "团队群聊"
 
     async def test_team_filtered_agents_and_rooms(self):
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/agents.json?team_name=e2e") as resp:
+            async with client.get(f"{self.backend_base_url}/agents/list.json?team_name=e2e") as resp:
                 assert resp.status == 200
                 agents_data = await resp.json()
 
-            async with client.get(f"{self.backend_base_url}/rooms.json?team_name=e2e") as resp:
+            async with client.get(f"{self.backend_base_url}/rooms/list.json?team_name=e2e") as resp:
                 assert resp.status == 200
                 rooms_data = await resp.json()
 
@@ -104,5 +104,6 @@ class TestTeamController(_ApiServiceCase):
 
         assert data["name"] == "alice"
         assert data["team_name"] == "e2e"
+        assert data["agent_name"] == "alice"
         assert data["driver_type"] == "native"
         assert "Alice" in data["prompt"]

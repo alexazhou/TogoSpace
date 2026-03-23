@@ -3,7 +3,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from util import llmApiUtil, configUtil
-from util.configTypes import TeamConfig, TeamRoomConfig
+from util.configTypes import TeamConfig, TeamRoomConfig, normalize_team_config
 from model.coreModel.gtCoreChatModel import AgentDialogContext, ChatMessage
 from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -44,9 +44,10 @@ async def load_team_ids(teams_config: list[TeamConfig]) -> None:
 class Agent:
     """AI Agent 壳对象：承载稳定状态，driver 负责具体驱动实现。"""
 
-    def __init__( self, name: str, team_name: str, system_prompt: str, model: str, driver_config: Optional[AgentDriverConfig] = None):
+    def __init__( self, name: str, team_name: str, system_prompt: str, model: str, driver_config: Optional[AgentDriverConfig] = None, template_name: str = ""):
         self.name: str = name
         self.team_name: str = team_name
+        self.template_name: str = template_name
         self.system_prompt: str = system_prompt
         self.model: str = model
 
@@ -231,20 +232,17 @@ async def create_team_agents(teams_config: list[TeamConfig]) -> None:
     default_model = llmService.get_default_model()
 
     for team_config in teams_config:
+        team_config = normalize_team_config(team_config)
         team_name = team_config["name"]
 
-        agent_names_in_team: set[str] = set()
-        for room in _iter_team_rooms(team_config):
-            for name in room["members"]:
-                if name != SpecialAgent.OPERATOR.value:
-                    agent_names_in_team.add(name)
-
-        for name in agent_names_in_team:
-            if name not in _agent_defs:
-                logger.warning(f"Agent 定义不存在: {name}，跳过创建")
+        for member in team_config.get("members", []):
+            member_name = member["name"]
+            template_name = member["agent"]
+            if template_name not in _agent_defs:
+                logger.warning(f"Agent 定义不存在: member={member_name}, agent={template_name}，跳过创建")
                 continue
 
-            cfg: dict[str, Any] = _agent_defs[name]
+            cfg: dict[str, Any] = _agent_defs[template_name]
             if "system_prompt" in cfg:
                 agent_specific_prompt = cfg["system_prompt"]
             else:
@@ -252,22 +250,23 @@ async def create_team_agents(teams_config: list[TeamConfig]) -> None:
 
             full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
             model_name = cfg.get("model") or default_model
-            key = _make_agent_key(team_name, name)
+            key = _make_agent_key(team_name, member_name)
             driver_config = normalize_driver_config(cfg)
             agent = Agent(
-                name=name,
+                name=member_name,
                 team_name=team_name,
                 system_prompt=full_prompt,
                 model=model_name,
                 driver_config=driver_config,
+                template_name=template_name,
             )
             _agents[key] = agent
             logger.info(
-                f"创建 Agent 实例: key={key}, model={model_name}, driver={driver_config.driver_type}"
+                f"创建成员实例: key={key}, template={template_name}, model={model_name}, driver={driver_config.driver_type}"
             )
             await agent.startup()
             try:
-                await gtAgentManager.upsert_agent(agent.team_id, agent.name, agent.model)
+                await gtAgentManager.upsert_agent(agent.team_id, agent.name, agent.model, agent.template_name)
             except Exception as e:
                 logger.warning(f"写入 Agent 数据失败: agent={agent.key}, error={e}")
 

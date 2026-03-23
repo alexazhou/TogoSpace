@@ -3,21 +3,26 @@ from pydantic import BaseModel
 
 # 内部包
 from controller.baseController import BaseHandler
-from dal.db import gtTeamManager
+from dal.db import gtTeamManager, gtTeamMemberManager
 from service import teamService
 from util import assertUtil
-from util.configTypes import TeamConfig, TeamRoomConfig
+from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig, normalize_team_config
+
+
+class TeamMemberRequest(BaseModel):
+    name: str
+    agent: str
 
 
 # Request Models
 class CreateTeamRequest(BaseModel):
     name: str
-    members: list[str]
+    members: list[TeamMemberRequest]
     preset_rooms: list[TeamRoomConfig]
 
 
 class UpdateTeamRequest(BaseModel):
-    members: list[str] | None = None
+    members: list[TeamMemberRequest] | None = None
     preset_rooms: list[TeamRoomConfig] | None = None
 
 
@@ -49,11 +54,11 @@ class TeamCreateHandler(BaseHandler):
     async def post(self) -> None:
         request = self.parse_request(CreateTeamRequest)
 
-        team_config: TeamConfig = {
+        team_config: TeamConfig = normalize_team_config({
             "name": request.name,
-            "members": request.members,
+            "members": [member.model_dump(mode="json") for member in request.members],
             "preset_rooms": request.preset_rooms,
-        }
+        })
 
         # 调用 service 创建 team
         await teamService.create_team(team_config)
@@ -74,11 +79,16 @@ class TeamDetailHandler(BaseHandler):
             return
 
         rooms = await gtRoomManager.get_rooms_by_team(team_id)
-        members: set[str] = set()
+        members = [
+            {
+                "name": member.name,
+                "agent": member.agent_name,
+            }
+            for member in await gtTeamMemberManager.get_members_by_team(team_id)
+        ]
         room_items = []
         for room in rooms:
             room_members = await gtRoomMemberManager.get_members_by_room(room.id)
-            members.update(room_members)
             room_items.append(
                 {
                     "id": room.id,
@@ -97,7 +107,7 @@ class TeamDetailHandler(BaseHandler):
                 "enabled": team.enabled,
                 "created_at": team.created_at,
                 "updated_at": team.updated_at,
-                "members": sorted(members),
+                "members": members,
                 "rooms": room_items,
             }
         )
@@ -131,12 +141,12 @@ class TeamModifyHandler(BaseHandler):
             team_config["max_function_calls"] = current_config["max_function_calls"]
 
         if request.members is not None:
-            team_config["members"] = request.members
+            team_config["members"] = [member.model_dump(mode="json") for member in request.members]
         if request.preset_rooms is not None:
             team_config["preset_rooms"] = request.preset_rooms
 
         # 调用 service 更新 team
-        await teamService.update_team(team_config)
+        await teamService.update_team(normalize_team_config(team_config))
 
         self.return_json({"status": "updated", "name": team_name})
 

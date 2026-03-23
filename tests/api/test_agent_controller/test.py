@@ -22,7 +22,7 @@ class TestAgentController(_ApiServiceCase):
     async def test_get_agents(self):
         """验证 GET /agents 返回正确的 agents 列表及字段结构。"""
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/agents.json") as resp:
+            async with client.get(f"{self.backend_base_url}/agents/list.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
         assert "agents" in data

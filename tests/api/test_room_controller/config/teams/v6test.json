@@ -1,6 +1,8 @@
 {
   "name": "v6test",
-  "members": ["Operator", "alice"],
+  "members": [
+    { "name": "alice", "agent": "alice" }
+  ],
   "preset_rooms": [
     {
       "name": "alice_private",
