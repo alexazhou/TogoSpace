@@ -12,6 +12,18 @@ def _default_root_config_path() -> str:
     return os.path.join(os.path.dirname(__file__), "../../config.json")
 
 
+def _is_test_env() -> bool:
+    if os.environ.get("TEAMAGENT_ENV") == "test":
+        return True
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
+    return False
+
+
+def _default_db_path() -> str:
+    return "./test_data/data.db" if _is_test_env() else "./data/data.db"
+
+
 def _resolve_config_file(config_dir: str | None, preferred_name: str) -> str:
     if config_dir is None:
         return _default_root_config_path()
@@ -85,10 +97,11 @@ def load_llmService_config(config_dir: str = None) -> dict:
 def load_persistence_config(config_dir: str = None) -> dict:
     """返回持久化配置。"""
     path = _resolve_config_file(config_dir, "config.json")
+    default_db_path = _default_db_path()
     if not os.path.isfile(path):
         return {
             "enabled": False,
-            "db_path": "./runtime/state/teamagent.db",
+            "db_path": default_db_path,
         }
 
     with open(path, "r", encoding="utf-8") as f:
@@ -96,5 +109,5 @@ def load_persistence_config(config_dir: str = None) -> dict:
     persistence = cfg.get("persistence", {})
     return {
         "enabled": persistence.get("enabled", False),
-        "db_path": persistence.get("db_path", "./runtime/state/teamagent.db"),
+        "db_path": persistence.get("db_path", default_db_path),
     }
