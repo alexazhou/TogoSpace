@@ -31,14 +31,11 @@ class TestDalManagers(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         db_path = cls.get_test_db_path()
-        cls.cleanup_sqlite_files(db_path)
         await ormService.startup(db_path)
 
     @classmethod
     async def async_teardown_class(cls):
-        db_path = cls.get_test_db_path()
         await ormService.shutdown()
-        cls.cleanup_sqlite_files(db_path)
 
     async def _reset_tables(self):
         await GtAgent.delete().aio_execute()

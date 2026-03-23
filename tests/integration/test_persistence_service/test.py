@@ -32,7 +32,6 @@ class TestRestoreRoomHistory(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         cls.db_path = Path(cls.get_test_db_path())
-        cls.cleanup_sqlite_files(str(cls.db_path))
         await persistenceService.shutdown()
         await ormService.shutdown()
         roomService.shutdown()
@@ -66,8 +65,6 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await persistenceService.shutdown()
         await ormService.shutdown()
         roomService.shutdown()
-        if cls.db_path:
-            cls.cleanup_sqlite_files(str(cls.db_path))
 
     async def test_messages_restored(self):
         assert [m.content for m in self.restored.messages] == [
@@ -89,7 +86,6 @@ class TestRestoreAgentHistory(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         cls.db_path = Path(cls.get_test_db_path())
-        cls.cleanup_sqlite_files(str(cls.db_path))
         await persistenceService.shutdown()
         await ormService.shutdown()
         roomService.shutdown()
@@ -120,8 +116,6 @@ class TestRestoreAgentHistory(ServiceTestCase):
         messageBus.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
-        if cls.db_path:
-            cls.cleanup_sqlite_files(str(cls.db_path))
 
     async def test_history_restored(self):
         assert [m.content for m in self.fresh_agent._history] == ["u1", "a1"]

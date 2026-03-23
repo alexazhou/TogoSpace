@@ -32,7 +32,6 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
         db_path = cls.get_test_db_path()
-        cls.cleanup_sqlite_files(db_path)
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
@@ -45,14 +44,12 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
     @classmethod
     async def async_teardown_class(cls):
-        db_path = cls.get_test_db_path()
         scheduler.shutdown()
         await agentService.shutdown()
         funcToolService.shutdown()
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
-        cls.cleanup_sqlite_files(db_path)
 
     async def test_two_agents_exchange_messages(self):
         """alice 和 bob 各发一轮消息，general 房间应有消息。"""

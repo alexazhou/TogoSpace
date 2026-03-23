@@ -5,6 +5,8 @@ import sys
 import pytest
 
 import service.funcToolService as funcToolService
+import service.ormService as ormService
+import service.persistenceService as persistenceService
 import service.roomService as roomService
 from service.roomService import ChatContext
 from ...base import ServiceTestCase
@@ -37,8 +39,18 @@ class TestRunToolCall(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # send_chat_msg 依赖房间上下文，因此同时初始化 room + tool service。
+        db_path = cls.get_test_db_path()
+        await ormService.startup(db_path)
+        await persistenceService.startup()
         await roomService.startup()
         await funcToolService.startup()
+
+    @classmethod
+    async def async_teardown_class(cls):
+        funcToolService.shutdown()
+        roomService.shutdown()
+        await persistenceService.shutdown()
+        await ormService.shutdown()
 
     async def _run(self, name, args, **kw):
         import json

@@ -20,18 +20,15 @@ class TestRoomRegistry(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         db_path = cls.get_test_db_path()
-        cls.cleanup_sqlite_files(db_path)
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
 
     @classmethod
     async def async_teardown_class(cls):
-        db_path = cls.get_test_db_path()
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
-        cls.cleanup_sqlite_files(db_path)
 
     async def test_create_room(self):
         """create_room 后应可通过 key 获取 ChatRoom 实例。"""

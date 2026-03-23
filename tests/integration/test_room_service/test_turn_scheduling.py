@@ -4,6 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
+import service.ormService as ormService
+import service.persistenceService as persistenceService
 import service.roomService as roomService
 from constants import MessageBusTopic, RoomState
 from ...base import ServiceTestCase
@@ -18,7 +20,16 @@ if os.name == "posix" and sys.platform == "darwin":
 class TestTurnScheduling(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
+        db_path = cls.get_test_db_path()
+        await ormService.startup(db_path)
+        await persistenceService.startup()
         await roomService.startup()
+
+    @classmethod
+    async def async_teardown_class(cls):
+        roomService.shutdown()
+        await persistenceService.shutdown()
+        await ormService.shutdown()
 
     async def test_create_room_does_not_publish_first_agent(self):
         """建房后不应立刻发布首个发言人的 TURN 事件。"""
