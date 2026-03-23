@@ -33,6 +33,7 @@ async def run_tool_call(
     try:
         args: dict = json.loads(function_args)
     except json.JSONDecodeError:
+        logger.warning(f"工具参数 JSON 解析失败，已忽略参数: tool={function_name}, args={function_args!r}")
         args = {}
 
     caller = context.agent_name if context is not None else "unknown"
