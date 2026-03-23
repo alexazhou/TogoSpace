@@ -6,7 +6,7 @@ import pytest
 
 from service import roomService, agentService
 from service.agentService import Agent
-from service.agentService.driver.claude_sdk import ClaudeSdkAgentDriver
+from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
 
 from ...base import ServiceTestCase
