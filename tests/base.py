@@ -294,24 +294,15 @@ class ServiceTestCase:
         无参数时自动清理测试 DB 路径（及后端子进程使用的 DB）。
         传入 db_path 时只清理该路径。
         """
-        if db_path is not None:
-            cls._remove_db_file(db_path)
-            return
-
-        cls._remove_db_file(cls.get_test_db_path())
-        if cls.requires_backend:
+        paths = [db_path] if db_path is not None else [cls.get_test_db_path()]
+        if db_path is None and cls.requires_backend:
             persistence_cfg = configUtil.load_persistence_config(cls._backend_config_dir)
             path = persistence_cfg.get("db_path")
             if path and path != ":memory:":
-                abs_path = path if os.path.isabs(path) else os.path.abspath(os.path.join(_SRC_DIR, path))
-                cls._remove_db_file(abs_path)
-
-    @classmethod
-    def _remove_db_file(cls, db_path: str) -> None:
-        db_abs = db_path if os.path.isabs(db_path) else os.path.abspath(db_path)
-        for suffix in ("", "-wal", "-shm", "-journal"):
+                paths.append(path if os.path.isabs(path) else os.path.abspath(os.path.join(_SRC_DIR, path)))
+        for p in paths:
             with contextlib.suppress(FileNotFoundError):
-                os.remove(f"{db_abs}{suffix}")
+                os.remove(p)
 
     @classmethod
     def get_test_db_path(cls) -> str:
