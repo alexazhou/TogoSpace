@@ -21,18 +21,15 @@ class TestChatRoomMessages(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         db_path = cls.get_test_db_path()
-        cls.cleanup_sqlite_files(db_path)
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
 
     @classmethod
     async def async_teardown_class(cls):
-        db_path = cls.get_test_db_path()
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
-        cls.cleanup_sqlite_files(db_path)
 
     async def test_add_message(self):
         """add_message 会追加消息并发布 ROOM_MSG_ADDED 事件。"""

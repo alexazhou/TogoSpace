@@ -181,11 +181,12 @@ class ServiceTestCase:
     def setup_class(cls):
         # 先启动外部依赖（MockLLM/后端子进程），再执行子类自定义异步初始化。
         try:
+            if cls.requires_backend:
+                cls._load_config()
             cls._cleanup_test_db_files()
             if cls.requires_mock_llm:
                 cls._start_mock_llm()
             if cls.requires_backend:
-                cls._setup_config()
                 cls._start_backend()
             cls._run_maybe_async(cls.async_setup_class())
         except Exception:
@@ -202,6 +203,7 @@ class ServiceTestCase:
             teardown_error = exc
         finally:
             cls._safe_cleanup_external_dependencies()
+            cls.cleanup_sqlite_files(cls.get_test_db_path())
         if teardown_error is not None:
             raise teardown_error
 
@@ -267,7 +269,7 @@ class ServiceTestCase:
             return data.get("response")
 
     @classmethod
-    def _setup_config(cls):
+    def _load_config(cls):
         """配置选择机制：
         - 若 use_custom_config = True，使用测试类自己的 config/ 目录
         - 否则使用 tests/config/ 默认配置目录
@@ -288,37 +290,17 @@ class ServiceTestCase:
     @classmethod
     def _cleanup_test_db_files(cls) -> None:
         """每个测试类启动前删除测试 DB，避免残留数据污染。"""
-        config_dir = None
-        if cls.use_custom_config:
-            test_file = sys.modules[cls.__module__].__file__
-            test_dir = os.path.dirname(os.path.abspath(test_file))
-            candidate = os.path.join(test_dir, "config")
-            if os.path.isdir(candidate):
-                config_dir = candidate
-        else:
-            candidate = os.path.join(os.path.dirname(__file__), "config")
-            if os.path.isdir(candidate):
-                config_dir = candidate
+        cls.cleanup_sqlite_files(cls.get_test_db_path())
 
-        old_env = os.environ.get("TEAMAGENT_ENV")
-        os.environ["TEAMAGENT_ENV"] = "test"
-        try:
-            persistence_cfg = configUtil.load_persistence_config(config_dir)
-        finally:
-            if old_env is None:
-                os.environ.pop("TEAMAGENT_ENV", None)
-            else:
-                os.environ["TEAMAGENT_ENV"] = old_env
-
-        db_path = persistence_cfg.get("db_path")
-        if not db_path or db_path == ":memory:":
+        if not cls.requires_backend:
             return
 
-        db_abs_path = db_path if os.path.isabs(db_path) else os.path.abspath(os.path.join(_SRC_DIR, db_path))
-        for suffix in ("", "-wal", "-shm", "-journal"):
-            target = f"{db_abs_path}{suffix}"
-            with contextlib.suppress(FileNotFoundError):
-                os.remove(target)
+        # 清理后端子进程使用的 DB（路径由 config 决定，_load_config 已先于此方法运行）
+        persistence_cfg = configUtil.load_persistence_config(cls._backend_config_dir)
+        db_path = persistence_cfg.get("db_path")
+        if db_path and db_path != ":memory:":
+            db_abs = db_path if os.path.isabs(db_path) else os.path.abspath(os.path.join(_SRC_DIR, db_path))
+            cls.cleanup_sqlite_files(db_abs)
 
     @classmethod
     def cleanup_sqlite_files(cls, db_path: str) -> None:
