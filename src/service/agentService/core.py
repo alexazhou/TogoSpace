@@ -277,7 +277,7 @@ def get_agents(room_id: int) -> List[Agent]:
 
 
 def get_all_rooms(team_name: str, agent_name: str) -> List[int]:
-    return roomService.get_rooms_for_agent(team_name, agent_name)
+    return roomService.get_rooms_for_agent(_team_ids.get(team_name), agent_name)
 
 
 async def shutdown() -> None:

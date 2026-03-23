@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence
 
+from dal.db import gtRoomManager, gtTeamManager
 from service import messageBus, persistenceService
 from model.coreModel.gtCoreChatModel import ChatMessage
 from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
@@ -36,9 +37,10 @@ class ChatContext:
 class ChatRoom:
     """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
-    def __init__(self, room_id: int, name: str, team_name: str, initial_topic: str = "", room_type: RoomType = RoomType.GROUP,
+    def __init__(self, room_id: int, team_id: int, name: str, team_name: str, initial_topic: str = "", room_type: RoomType = RoomType.GROUP,
                  members: List[str] = None, max_turns: int = 0):
         self.room_id: int = room_id  # 数据库主键 ID
+        self.team_id: int = team_id  # 所属 Team 的数据库主键 ID
         self.name: str = name  # 房间名称
         self.team_name: str = team_name  # 所属 Team
         self.room_type: RoomType = room_type  # 房间类型（私有/群聊）
@@ -324,7 +326,6 @@ async def _resolve_room_id(
     room_id: int | None,
     team_name: str,
     name: str,
-    members: List[str],
     initial_topic: str,
     room_type: RoomType,
     max_turns: int,
@@ -334,7 +335,6 @@ async def _resolve_room_id(
 
     resolved_team_id = 0
     if persistenceService.is_enabled():
-        from dal.db import gtRoomManager, gtTeamManager
 
         team_row = await gtTeamManager.get_team(team_name)
         if team_row is not None:
@@ -346,7 +346,6 @@ async def _resolve_room_id(
     synthetic_id = _synthetic_room_id(team_name, name)
 
     if persistenceService.is_enabled():
-        from dal.db import gtRoomManager
 
         await gtRoomManager.ensure_room(
             room_id=synthetic_id,
@@ -371,16 +370,18 @@ async def _create_room(
     persist_initial_message: bool = True,
 ) -> None:
     """内部建房入口。"""
+    team_row = await gtTeamManager.get_team(team_name)
+    team_id = team_row.id if team_row is not None else 0
+
     resolved_room_id = await _resolve_room_id(
         room_id=room_id,
         team_name=team_name,
         name=name,
-        members=members,
         initial_topic=initial_topic,
         room_type=room_type,
         max_turns=max_turns,
     )
-    room = ChatRoom(room_id=resolved_room_id, name=name, team_name=team_name, initial_topic=initial_topic,
+    room = ChatRoom(room_id=resolved_room_id, team_id=team_id, name=name, team_name=team_name, initial_topic=initial_topic,
                     room_type=room_type, members=members, max_turns=max_turns)
     room_key = room.key
     _rooms[room_key] = room
@@ -439,18 +440,24 @@ def get_member_names(room_id: int) -> List[str]:
     return get_room(room_id).agents
 
 
-def get_rooms_for_agent(team_name: str, agent_name: str) -> List[int]:
+def get_rooms_for_agent(team_id: int | None, agent_name: str) -> List[int]:
     """返回指定参与者所在的房间 room_id 列表。可选按 team 过滤。"""
     results = []
     for room in _rooms.values():
         if agent_name in room.agents:
-            if team_name is None or room.team_name == team_name:
+            if team_id is None or room.team_id == team_id:
                 results.append(room.room_id)
     return results
 
 
-async def refresh_rooms_for_team(team_name: str, teams_config: list) -> None:
+async def refresh_rooms_for_team(team_id: int, teams_config: list) -> None:
     """根据新的 Team 配置刷新聊天室。"""
+    team_row = await gtTeamManager.get_team_by_id(team_id)
+    if team_row is None:
+        logger.warning(f"无法刷新聊天室: Team ID '{team_id}' 不存在")
+        return
+    team_name = team_row.name
+
     # 获取目标 Team 的新配置
     target_config = next((c for c in teams_config if c["name"] == team_name), None)
     if target_config is None:
@@ -458,7 +465,7 @@ async def refresh_rooms_for_team(team_name: str, teams_config: list) -> None:
         return
 
     # 先关闭该 Team 的所有现有聊天室
-    await close_team_rooms(team_name)
+    await close_team_rooms(team_id)
 
     # 根据新配置重新创建聊天室
     from dal.db import gtRoomManager
@@ -483,9 +490,15 @@ async def refresh_rooms_for_team(team_name: str, teams_config: list) -> None:
     logger.info(f"Team '{team_name}' 的聊天室已刷新，共 {len(_iter_team_rooms(target_config))} 个房间")
 
 
-async def close_team_rooms(team_name: str) -> None:
+async def close_team_rooms(team_id: int) -> None:
     """关闭指定 Team 的所有聊天室。"""
-    to_close = [room_key for room_key, room in _rooms.items() if room.team_name == team_name]
+    team_row = await gtTeamManager.get_team_by_id(team_id)
+    if team_row is None:
+        logger.warning(f"无法关闭聊天室: Team ID '{team_id}' 不存在")
+        return
+    team_name = team_row.name
+
+    to_close = [room_key for room_key, room in _rooms.items() if room.team_id == team_id]
     for room_key in to_close:
         room = _rooms.pop(room_key)
         _rooms_by_id.pop(room.room_id, None)

@@ -122,7 +122,9 @@ async def delete_team(name: str) -> None:
     """删除 Team 配置并触发热更新。"""
     from service import roomService, schedulerService
 
-    await roomService.close_team_rooms(name)
+    team = await gtTeamManager.get_team(name)
+    if team is not None:
+        await roomService.close_team_rooms(team.id)
     schedulerService.stop_team(name)
 
     # 软删除 Team
@@ -147,6 +149,10 @@ async def hot_reload_team(name: str) -> None:
     schedulerService.refresh_team_config(name, team_configs)
 
     # 刷新聊天室配置
-    await roomService.refresh_rooms_for_team(name, team_configs)
+    team = await gtTeamManager.get_team(name)
+    if team is None:
+        logger.warning(f"热更新失败: Team '{name}' 不存在")
+        return
+    await roomService.refresh_rooms_for_team(team.id, team_configs)
 
     logger.info(f"Team '{name}' 热更新完成")
