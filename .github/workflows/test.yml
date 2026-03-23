@@ -32,6 +32,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    - name: Run mypy
+      run: |
+        bash scripts/run_mypy.sh
+
     - name: Run unit tests
       run: |
         PYTHONPATH=src python -m pytest tests/unit/ -v

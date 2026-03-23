@@ -2,6 +2,7 @@ import asyncio
 import logging
 from typing import Dict
 
+from util.configTypes import TeamConfig, TeamRoomConfig
 from service import messageBus
 from service.messageBus import Message
 from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
@@ -12,16 +13,16 @@ from constants import MessageBusTopic, SpecialAgent, RoomState
 
 logger = logging.getLogger(__name__)
 
-_teams_config: list = []
+_teams_config: list[TeamConfig] = []
 _running: Dict[str, asyncio.Task] = {}
 _stop_event: asyncio.Event = asyncio.Event()
 
 
-def _iter_team_rooms(team_config: dict) -> list[dict]:
+def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
     return team_config.get("preset_rooms") or []
 
 
-async def startup(teams_config: list) -> None:
+async def startup(teams_config: list[TeamConfig]) -> None:
     """初始化调度器，须在 run() 前调用一次。"""
     global _teams_config, _stop_event
     _teams_config = teams_config
@@ -64,7 +65,7 @@ def _on_agent_turn(msg: Message) -> None:
     room_id: int = msg.payload["room_id"]
     team_name: str = msg.payload["team_name"]
 
-    if agent_name == SpecialAgent.OPERATOR:
+    if agent_name == SpecialAgent.OPERATOR.value:
         logger.info(f"轮到人类操作者，系统进入等待状态: room_id={room_id}")
         return
 
@@ -131,7 +132,7 @@ def shutdown() -> None:
     _running = {}
 
 
-def refresh_team_config(team_name: str, teams_config: list) -> None:
+def refresh_team_config(team_name: str, teams_config: list[TeamConfig]) -> None:
     """刷新指定 Team 的调度配置。"""
     global _teams_config
     _teams_config = teams_config

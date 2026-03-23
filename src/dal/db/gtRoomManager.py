@@ -4,6 +4,7 @@ from peewee import EXCLUDED
 
 from model.dbModel.gtRoom import GtRoom
 from constants import RoomType, SpecialAgent
+from util.configTypes import TeamRoomConfig
 
 
 def _infer_room_type_from_members(members: list[str]) -> RoomType:
@@ -65,7 +66,7 @@ async def ensure_room_by_key(
     )
 
 
-async def upsert_rooms(team_id: int, rooms: list) -> None:
+async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
     """创建或更新 Team 下的 Rooms。"""
     # 先删除旧数据
     await delete_rooms_by_team(team_id)

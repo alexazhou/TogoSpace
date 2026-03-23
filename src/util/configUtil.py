@@ -1,7 +1,9 @@
 import glob
 import json
 import os
-from typing import List
+from typing import Any, List, cast
+
+from util.configTypes import TeamConfig
 
 
 def _default_config_dir() -> str:
@@ -30,7 +32,7 @@ def _resolve_config_file(config_dir: str | None, preferred_name: str) -> str:
     return os.path.join(config_dir, preferred_name)
 
 
-def load_agents(config_dir: str = None) -> List[dict]:
+def load_agents(config_dir: str = None) -> List[dict[str, Any]]:
     """扫描 config/agents/*.json，返回 Agent 定义列表。"""
     if config_dir is None:
         config_dir = _default_config_dir()
@@ -42,15 +44,15 @@ def load_agents(config_dir: str = None) -> List[dict]:
     return result
 
 
-def load_teams(config_dir: str = None) -> List[dict]:
+def load_teams(config_dir: str = None) -> List[TeamConfig]:
     """扫描 config/teams/*.json，返回 Team 定义列表。"""
     if config_dir is None:
         config_dir = _default_config_dir()
     teams_dir = os.path.join(config_dir, "teams")
-    result = []
+    result: List[TeamConfig] = []
     for path in sorted(glob.glob(os.path.join(teams_dir, "*.json"))):
         with open(path, "r", encoding="utf-8") as f:
-            result.append(json.load(f))
+            result.append(cast(TeamConfig, json.load(f)))
     return result
 
 

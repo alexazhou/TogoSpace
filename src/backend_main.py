@@ -10,6 +10,7 @@ from typing import List
 import tornado.httpserver
 
 from util import llmApiUtil, configUtil
+from util.configTypes import TeamConfig
 load_agents = configUtil.load_agents
 load_llmService_config = configUtil.load_llmService_config
 load_persistence_config = configUtil.load_persistence_config
@@ -106,7 +107,7 @@ async def main(
     await persistenceService.startup()
 
     # 从 teamService 加载 Team 配置（会自动从 JSON 导入到数据库）
-    teams_config = await teamService.startup(config_dir)
+    teams_config: list[TeamConfig] = await teamService.startup(config_dir)
 
     # 加载 team_id 映射
     await agentService.load_team_ids(teams_config)

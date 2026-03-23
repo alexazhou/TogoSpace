@@ -6,18 +6,19 @@ from controller.baseController import BaseHandler
 from dal.db import gtTeamManager
 from service import teamService
 from util import assertUtil
+from util.configTypes import TeamConfig, TeamRoomConfig
 
 
 # Request Models
 class CreateTeamRequest(BaseModel):
     name: str
     members: list[str]
-    preset_rooms: list[dict]
+    preset_rooms: list[TeamRoomConfig]
 
 
 class UpdateTeamRequest(BaseModel):
     members: list[str] | None = None
-    preset_rooms: list[dict] | None = None
+    preset_rooms: list[TeamRoomConfig] | None = None
 
 
 class TeamListHandler(BaseHandler):
@@ -34,7 +35,7 @@ class TeamCreateHandler(BaseHandler):
     async def post(self) -> None:
         request = self.parse_request(CreateTeamRequest)
 
-        team_config = {
+        team_config: TeamConfig = {
             "name": request.name,
             "members": request.members,
             "preset_rooms": request.preset_rooms,
@@ -70,10 +71,19 @@ class TeamModifyHandler(BaseHandler):
 
         team_name = team.name
 
-        # 构建配置
-        team_config = {
+        current_config = await gtTeamManager.get_team_config(team_name)
+        assertUtil.assertNotNull(current_config, error_message=f"Team '{team_name}' config not found", error_code="team_config_not_found")
+        if current_config is None:
+            return
+
+        # 构建完整配置，确保局部更新不会丢字段
+        team_config: TeamConfig = {
             "name": team_name,
+            "members": list(current_config["members"]),
+            "preset_rooms": list(current_config["preset_rooms"]),
         }
+        if "max_function_calls" in current_config:
+            team_config["max_function_calls"] = current_config["max_function_calls"]
 
         if request.members is not None:
             team_config["members"] = request.members
