@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 
 from model.dbModel.gtTeam import GtTeam
@@ -37,18 +38,21 @@ async def upsert_team(team_config: TeamConfig) -> GtTeam:
     """创建或更新 Team。"""
     name = team_config["name"]
     working_directory = team_config.get("working_directory", "")
+    config_json = json.dumps(team_config.get("config", {}), ensure_ascii=False, sort_keys=True)
     max_function_calls = team_config.get("max_function_calls", 5)
 
     await (
         GtTeam.insert(
             name=name,
             working_directory=working_directory,
+            config=config_json,
             max_function_calls=max_function_calls,
         )
         .on_conflict(
             conflict_target=[GtTeam.name],
             update={
                 GtTeam.working_directory: working_directory,
+                GtTeam.config: config_json,
                 GtTeam.max_function_calls: max_function_calls,
                 GtTeam.updated_at: GtTeam._now_iso(),
             },
@@ -106,6 +110,7 @@ async def get_team_config(name: str) -> TeamConfig | None:
     return {
         "name": team.name,
         "working_directory": team.working_directory,
+        "config": team.get_config(),
         "members": members,
         "preset_rooms": rooms,
         "max_function_calls": team.max_function_calls,

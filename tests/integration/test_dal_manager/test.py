@@ -92,10 +92,12 @@ class TestDalManagers(ServiceTestCase):
         created = await gtTeamManager.upsert_team({
             "name": "team_a",
             "working_directory": "/workspace/team_a",
+            "config": {"slogan": "alpha"},
             "max_function_calls": 3,
         })
         assert created.name == "team_a"
         assert created.working_directory == "/workspace/team_a"
+        assert created.get_config() == {"slogan": "alpha"}
         assert created.max_function_calls == 3
         assert await gtTeamManager.team_exists("team_a") is True
 
@@ -107,10 +109,12 @@ class TestDalManagers(ServiceTestCase):
         updated = await gtTeamManager.upsert_team({
             "name": "team_a",
             "working_directory": "/workspace/team_a_v2",
+            "config": {"slogan": "beta", "rules": "sync first"},
             "max_function_calls": 7,
         })
         assert updated.id == created.id
         assert updated.working_directory == "/workspace/team_a_v2"
+        assert updated.get_config() == {"rules": "sync first", "slogan": "beta"}
         assert updated.max_function_calls == 7
 
         await gtTeamManager.delete_team("team_a")
@@ -133,7 +137,11 @@ class TestDalManagers(ServiceTestCase):
     async def test_team_manager_get_team_config_and_get_all_team_configs(self):
         await self._reset_tables()
 
-        team_a = await gtTeamManager.upsert_team({"name": "team_a", "working_directory": "/workspace/team_a"})
+        team_a = await gtTeamManager.upsert_team({
+            "name": "team_a",
+            "working_directory": "/workspace/team_a",
+            "config": {"slogan": "ship fast"},
+        })
         team_b = await gtTeamManager.upsert_team({"name": "team_b"})
         await gtTeamMemberManager.upsert_team_members(team_a.id, [
             {"name": "alice_1", "agent": "alice"},
@@ -154,6 +162,7 @@ class TestDalManagers(ServiceTestCase):
         assert cfg_a is not None
         assert cfg_a["name"] == "team_a"
         assert cfg_a["working_directory"] == "/workspace/team_a"
+        assert cfg_a["config"] == {"slogan": "ship fast"}
         assert cfg_a["members"] == [
             {"name": "alice_1", "agent": "alice"},
             {"name": "bob_1", "agent": "bob"},

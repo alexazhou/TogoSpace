@@ -23,6 +23,7 @@ class TeamConfig(TypedDict, total=False):
 
     name: Required[str]
     working_directory: NotRequired[str]
+    config: NotRequired[dict[str, Any]]
     members: Required[list[TeamMemberConfig]]
     preset_rooms: Required[list[TeamRoomConfig]]
     max_function_calls: NotRequired[int]
@@ -33,6 +34,7 @@ class TeamConfigPatch(TypedDict, total=False):
 
     name: Required[str]
     working_directory: str
+    config: dict[str, Any]
     members: list[TeamMemberConfig]
     preset_rooms: list[TeamRoomConfig]
     max_function_calls: int
@@ -98,6 +100,7 @@ def normalize_team_config(team_config: dict[str, Any]) -> TeamConfig:
     normalized: TeamConfig = {
         "name": str(team_config["name"]),
         "working_directory": str(team_config.get("working_directory", "")),
+        "config": dict(team_config.get("config", {})),
         "members": normalize_team_members(team_config["members"]),
         "preset_rooms": rooms,
     }
