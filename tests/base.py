@@ -275,6 +275,7 @@ class ServiceTestCase:
         port = _find_free_port()
         env = os.environ.copy()
         env["PYTHONPATH"] = _SRC_DIR
+        env["TEAMAGENT_ENV"] = "test"
 
         cmd = [sys.executable, os.path.join(_SRC_DIR, "backend_main.py"), "--port", str(port)]
         if cls._backend_config_dir:
