@@ -77,18 +77,38 @@ def load_llmService_config(config_dir: str = None) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
 
-    # 支持两种格式：
-    # 1. llm.json 格式: {"active_llmService": "...", "llmServices": [...]}
-    # 2. setting.json/config.json 格式: {"LlmServices": [...], "active_LlmService": "..."}
-    active_key = cfg.get("active_llmService") or cfg.get("active_LlmService")
-    services_key = cfg.get("llmServices") or cfg.get("LlmServices")
+    # 支持多种格式：
+    # 1. setting.json: {"default_llm_server": "...", "llm_services": [...]}
+    # 2. llm.json: {"active_llmService": "...", "llmServices": [...]}
+    # 3. 旧版兼容: {"active_LlmService": "...", "LlmServices": [...]}
+    active_key = (
+        cfg.get("default_llm_server")
+        or cfg.get("active_llmService")
+        or cfg.get("active_LlmService")
+    )
+    services_key = (
+        cfg.get("llm_services")
+        or cfg.get("llmServices")
+        or cfg.get("LlmServices")
+    )
+
+    all_services = services_key or []
+    enabled_services = [s for s in all_services if s.get("enable", True)]
+
+    if not enabled_services:
+        raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
 
     if not active_key:
-        active_key = list(services_key.keys())[0] if services_key else None
+        active_key = enabled_services[0].get("name")
 
-    services = {s["name"]: s for s in services_key} if services_key else {}
+    services = {s["name"]: s for s in enabled_services if s.get("name")}
     if active_key not in services:
-        raise ValueError(f"active_LlmService '{active_key}' 未在 LlmServices 中定义")
+        all_service_names = {s.get("name") for s in all_services if s.get("name")}
+        if active_key in all_service_names:
+            raise ValueError(f"默认 LLM 服务 '{active_key}' 已被禁用（enable=false）")
+        raise ValueError(
+            f"默认 LLM 服务 '{active_key}' 未在 llm_services/llmServices/LlmServices 中定义"
+        )
     return dict(services[active_key])
 
 

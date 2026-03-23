@@ -1,14 +1,15 @@
 {
-  "LlmServices": [
+  "llm_services": [
     {
       "name": "dashscope",
+      "enable": true,
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
       "api_key": "sk-36765a94e6d74b4db65cf5c5585b6844",
       "type": "openai-compatible"
     }
   ],
-  "active_LlmService": "dashscope",
-  "server": {
+  "default_llm_server": "dashscope",
+  "web_server": {
     "host": "127.0.0.1",
     "port": 8080
   }

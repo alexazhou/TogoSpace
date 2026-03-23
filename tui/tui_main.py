@@ -55,7 +55,7 @@ def _load_base_url(config_path: str) -> str:
     try:
         with open(config_path, encoding="utf-8") as f:
             cfg = json.load(f)
-        srv = cfg.get("server", {})
+        srv = cfg.get("web_server") or cfg.get("server", {})
         host = srv.get("host", "127.0.0.1")
         port = srv.get("port", 8080)
         return f"http://{host}:{port}"
