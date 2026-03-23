@@ -25,25 +25,16 @@ if os.name == "posix" and sys.platform == "darwin":
 
 
 @pytest.mark.forked
-class TestpersistenceService(ServiceTestCase):
+class TestRestoreRoomHistory(ServiceTestCase):
+    """重启后 restore_runtime_state 能恢复房间消息历史和已读游标。"""
+
+    db_path: Path = None
+
     @classmethod
     async def async_setup_class(cls):
-        await roomService.startup()
-
-    def setup_method(self):
-        # 清理 roomService / ormService 的全局状态，避免测试间污染
-        roomService.shutdown()
-        self._run_maybe_async(ormService.shutdown())
-
-    async def test_restore_runtime_state_restores_room_history_and_read_index(self, tmp_path: Path):
-        db_path = tmp_path / "runtime_test_room.db"
-
-        async def _persist():
-            await ormService.startup(str(db_path))
-            await persistenceService.startup()
-
-        await _persist()
-
+        cls.db_path = Path(f"/tmp/test_room_history_{os.getpid()}.db")
+        await ormService.startup(str(cls.db_path))
+        await persistenceService.startup()
         await roomService.startup()
         await roomService.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3)
         room = roomService.get_room_by_key(f"r1@{TEAM}")
@@ -52,41 +43,49 @@ class TestpersistenceService(ServiceTestCase):
         await room.add_message("bob", "world")
         await room.get_unread_messages("alice")
 
-        # 手动关闭，模拟进程重启
+        # 模拟进程重启：关闭再重新打开同一 DB
         await persistenceService.shutdown()
         await ormService.shutdown()
         roomService.shutdown()
 
-        # 重启并恢复
-        await ormService.startup(str(db_path))
+        await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await roomService.startup()
         await roomService.create_rooms(TEAMS_CONFIG)
-        restored = roomService.get_room_by_key(f"r1@{TEAM}")
+        cls.restored = roomService.get_room_by_key(f"r1@{TEAM}")
+        await persistenceService.restore_runtime_state([], [cls.restored])
 
-        await persistenceService.restore_runtime_state([], [restored])
+    @classmethod
+    async def async_teardown_class(cls):
+        await persistenceService.shutdown()
+        await ormService.shutdown()
+        roomService.shutdown()
+        if cls.db_path and cls.db_path.exists():
+            cls.db_path.unlink(missing_ok=True)
 
-        assert [m.content for m in restored.messages] == [
+    async def test_messages_restored(self):
+        assert [m.content for m in self.restored.messages] == [
             "r1 房间已经创建，当前房间成员：alice、bob",
             "hello",
             "world",
         ]
-        assert restored.export_agent_read_index()["alice"] == 3
-        assert restored.export_agent_read_index()["bob"] == 2
 
-        # 清理
-        await persistenceService.shutdown()
-        await ormService.shutdown()
-        roomService.shutdown()
+    async def test_read_index_restored(self):
+        assert self.restored.export_agent_read_index()["alice"] == 3
+        assert self.restored.export_agent_read_index()["bob"] == 2
 
-    async def test_restore_runtime_state_restores_agent_history(self, tmp_path: Path):
-        db_path = tmp_path / "runtime_test_agent.db"
 
-        async def _persist():
-            await ormService.startup(str(db_path))
-            await persistenceService.startup()
+@pytest.mark.forked
+class TestRestoreAgentHistory(ServiceTestCase):
+    """重启后 restore_runtime_state 能恢复 Agent 对话历史。"""
 
-        await _persist()
+    db_path: Path = None
+
+    @classmethod
+    async def async_setup_class(cls):
+        cls.db_path = Path(f"/tmp/test_agent_history_{os.getpid()}.db")
+        await ormService.startup(str(cls.db_path))
+        await persistenceService.startup()
 
         agent = Agent("alice", TEAM, "sys", "test-model")
         agent._history = [
@@ -95,19 +94,22 @@ class TestpersistenceService(ServiceTestCase):
         ]
         await persistenceService.append_agent_history_messages(agent.key, agent.dump_history_messages())
 
-        # 手动关闭，模拟进程重启
+        # 模拟进程重启
         await persistenceService.shutdown()
         await ormService.shutdown()
 
-        # 重启并恢复
-        await ormService.startup(str(db_path))
+        await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
 
-        fresh_agent = Agent("alice", TEAM, "sys", "test-model")
-        await persistenceService.restore_runtime_state([fresh_agent], [])
+        cls.fresh_agent = Agent("alice", TEAM, "sys", "test-model")
+        await persistenceService.restore_runtime_state([cls.fresh_agent], [])
 
-        assert [m.content for m in fresh_agent._history] == ["u1", "a1"]
-
-        # 清理
+    @classmethod
+    async def async_teardown_class(cls):
         await persistenceService.shutdown()
         await ormService.shutdown()
+        if cls.db_path and cls.db_path.exists():
+            cls.db_path.unlink(missing_ok=True)
+
+    async def test_history_restored(self):
+        assert [m.content for m in self.fresh_agent._history] == ["u1", "a1"]
