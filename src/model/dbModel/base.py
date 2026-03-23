@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+from typing import Generic, TypeVar, cast
 
 import peewee
 import peewee_async
 from constants import EnhanceEnum
+
+TJson = TypeVar("TJson")
 
 _database_proxy: peewee.DatabaseProxy = peewee.DatabaseProxy()
 
@@ -14,20 +17,20 @@ def bind_database(database: peewee.Database) -> None:
     _database_proxy.initialize(database)
 
 
-class JsonDictField(peewee.TextField):
-    """将 dict 与 TEXT(JSON) 自动互转。"""
+class JsonField(peewee.TextField, Generic[TJson]):
+    """将 JSON 值（dict/list 等）与 TEXT(JSON) 自动互转。"""
 
-    def db_value(self, value):
+    def db_value(self, value: TJson | None) -> str | None:
         if value is None:
             return None
         return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
-    def python_value(self, value):
+    def python_value(self, value) -> TJson | None:
         if value is None:
             return None
         if isinstance(value, (dict, list)):
-            return value
-        return json.loads(value)
+            return cast(TJson, value)
+        return cast(TJson, json.loads(value))
 
 
 class EnumField(peewee.CharField):
