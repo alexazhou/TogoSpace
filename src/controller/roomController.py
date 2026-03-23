@@ -36,7 +36,10 @@ class UpdateMembersRequest(BaseModel):
 
 class RoomListHandler(BaseHandler):
     async def get(self) -> None:
+        team_name = self.get_query_argument("team_name", None)
         rooms: List[chat_room.ChatRoom] = chat_room.get_all_rooms()
+        if team_name:
+            rooms = [room for room in rooms if room.team_name == team_name]
         data = []
         for r in rooms:
             data.append(RoomInfo(

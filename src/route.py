@@ -11,6 +11,7 @@ tornado_settings = {
 application = tornado.web.Application([
     # Agent
     (r"/agents.json",                       agentController.AgentListHandler),
+    (r"/teams/(\d+)/agents/([^/]+).json",   agentController.AgentDetailHandler),
 
     # Room (运行时)
     (r"/rooms.json",                        roomController.RoomListHandler),
