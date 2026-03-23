@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import glob
-import json
 import logging
-import os
 from typing import cast
 
 from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager
@@ -17,27 +14,15 @@ def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
     return team_config.get("preset_rooms") or []
 
 
-async def startup(config_dir: str = None) -> list[TeamConfig]:
+async def startup(json_teams: list[TeamConfig]) -> list[TeamConfig]:
     """启动时加载 Team 配置：
-    1. 从数据库加载现有配置
-    2. 从 JSON 文件扫描新配置，导入数据库
-    3. 为没有 max_turns 的 room 设置默认值 100
-    4. 返回最终的 Team 配置列表（兼容现有格式）
+    1. 接收已解析的 Team 列表，导入数据库
+    2. 为没有 max_turns 的 room 设置默认值 100
+    3. 返回最终的 Team 配置列表（从数据库读取）
     """
-    # 1. 扫描 JSON 文件
-    if config_dir is None:
-        config_dir = os.path.join(os.path.dirname(__file__), "../../config")
-    teams_dir = os.path.join(config_dir, "teams")
-    json_teams: dict[str, TeamConfig] = {}
-    for path in sorted(glob.glob(os.path.join(teams_dir, "*.json"))):
-        with open(path, "r", encoding="utf-8") as f:
-            team_config = cast(TeamConfig, json.load(f))
-            name = team_config["name"]
-            json_teams[name] = team_config
-            logger.info(f"扫描到 Team 配置文件: {path}")
-
-    # 2. 将 JSON 配置导入数据库（仅当不存在时）
-    for name, team_config in json_teams.items():
+    # 将 JSON 配置导入数据库（仅当不存在时）
+    for team_config in json_teams:
+        name = team_config["name"]
         # 为没有 max_turns 的 room 设置默认值 100
         for room in _iter_team_rooms(team_config):
             if "max_turns" not in room:
@@ -46,7 +31,7 @@ async def startup(config_dir: str = None) -> list[TeamConfig]:
 
         await gtTeamManager.import_team_from_json(team_config)
 
-    # 3. 从数据库加载所有配置
+    # 从数据库加载所有配置
     team_configs = await gtTeamManager.get_all_team_configs()
 
     logger.info(f"从数据库加载了 {len(team_configs)} 个 Team 配置")

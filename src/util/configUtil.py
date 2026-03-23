@@ -3,7 +3,7 @@ import json
 import os
 from typing import List, cast
 
-from util.configTypes import AgentConfig, TeamConfig
+from util.configTypes import AgentConfig, AppConfig, LlmServiceConfig, PersistenceConfig, TeamConfig
 
 
 def _default_config_dir() -> str:
@@ -103,3 +103,18 @@ def load_persistence_config(config_dir: str = None) -> dict:
         "enabled": persistence.get("enabled", False),
         "db_path": persistence.get("db_path", default_db_path),
     }
+
+
+def load(config_dir: str = None) -> AppConfig:
+    """一次性加载所有配置，返回有类型的 AppConfig 对象。"""
+    agents = load_agents(config_dir)
+    teams = load_teams(config_dir)
+
+    llm_dict = load_llmService_config(config_dir)
+    _llm_fields = LlmServiceConfig.__dataclass_fields__
+    llm_service = LlmServiceConfig(**{k: v for k, v in llm_dict.items() if k in _llm_fields})
+
+    persistence_dict = load_persistence_config(config_dir)
+    persistence = PersistenceConfig(**persistence_dict)
+
+    return AppConfig(agents=agents, teams=teams, llm_service=llm_service, persistence=persistence)
