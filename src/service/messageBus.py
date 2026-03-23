@@ -33,8 +33,10 @@ def unsubscribe(topic: MessageBusTopic, callback: Callable[[Message], None]) -> 
 def publish(topic: MessageBusTopic, **payload: Any) -> None:
     """向指定主题的所有订阅者投递消息。"""
     msg = Message(topic=topic, payload=payload)
+    logger.info(f"[messageBus] publish topic={topic.value}, payload={payload}")
     for cb in _subscribers.get(topic, []):
         try:
+            logger.debug(f"[messageBus] calling callback {cb.__name__} for topic={topic.value}")
             cb(msg)
         except Exception as e:
             logger.error(f"[messageBus] topic={topic} callback={cb.__name__} 异常: {e}")

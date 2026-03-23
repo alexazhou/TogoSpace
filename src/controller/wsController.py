@@ -1,17 +1,22 @@
 import asyncio
 import json
+import logging
 import tornado.websocket
 import service.messageBus as messageBus
 from model.coreModel.gtCoreWebModel import WsEvent
 from constants import MessageBusTopic
 
+logger = logging.getLogger(__name__)
+
 
 class EventsWsHandler(tornado.websocket.WebSocketHandler):
     def open(self):
+        logger.info("[ws] WebSocket opened")
         messageBus.subscribe(MessageBusTopic.ROOM_MSG_ADDED, self._on_message_added)
         messageBus.subscribe(MessageBusTopic.AGENT_STATUS_CHANGED, self._on_agent_status_changed)
 
     def on_close(self):
+        logger.info("[ws] WebSocket closed")
         messageBus.unsubscribe(MessageBusTopic.ROOM_MSG_ADDED, self._on_message_added)
         messageBus.unsubscribe(MessageBusTopic.AGENT_STATUS_CHANGED, self._on_agent_status_changed)
 
@@ -40,10 +45,15 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
             "team_name": msg.payload["team_name"],
             "status": msg.payload["status"],
         }
+        logger.info(f"[ws] agent_status_changed: {payload}")
         asyncio.get_event_loop().create_task(self._send(json.dumps(payload, ensure_ascii=False)))
 
     async def _send(self, payload: str) -> None:
         try:
+            logger.debug(f"[ws] sending: {payload[:100]}...")
             self.write_message(payload)
+            logger.debug(f"[ws] sent successfully")
         except tornado.websocket.WebSocketClosedError:
-            pass
+            logger.info("[ws] WebSocket closed, skipping message")
+        except Exception as e:
+            logger.error(f"[ws] error sending message: {e}")
