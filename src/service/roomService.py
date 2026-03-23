@@ -94,9 +94,9 @@ class ChatRoom:
             time=message.send_time.isoformat(),
         )
         if self.agents:
-            self._apply_turn_logic(sender, publish_events=True)
+            self._update_turn_state_on_message(sender, publish_events=True)
 
-    def _apply_turn_logic(self, sender: str, publish_events: bool) -> None:
+    def _update_turn_state_on_message(self, sender: str, publish_events: bool) -> None:
         # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
         was_idle = (self._state == RoomState.IDLE)
         if was_idle:
@@ -138,7 +138,7 @@ class ChatRoom:
             self._round_skipped.add(current_expected)
 
         self._current_turn_has_content = False
-        self._advance_turn(publish_events=True)
+        self._update_turn_state_on_finish(publish_events=True)
         return True
 
     def get_current_turn_agent(self) -> Optional[str]:
@@ -160,8 +160,8 @@ class ChatRoom:
                 team_name=self.team_name,
             )
 
-    def _advance_turn(self, publish_events: bool) -> None:
-        """推进轮次位置索引。内部私有方法。"""
+    def _update_turn_state_on_finish(self, publish_events: bool) -> None:
+        """结束当前发言后，推进并更新轮次状态。"""
         if not self.agents:
             return
 
@@ -218,7 +218,7 @@ class ChatRoom:
         self._state = RoomState.SCHEDULING
 
         for msg in self.messages:
-            self._apply_turn_logic(msg.sender_name, publish_events=False)
+            self._update_turn_state_on_message(msg.sender_name, publish_events=False)
 
     def format_log(self) -> str:
         lines = [f"=== {self.key} 聊天记录 ==="]
