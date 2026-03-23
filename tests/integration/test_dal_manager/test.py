@@ -89,8 +89,13 @@ class TestDalManagers(ServiceTestCase):
     async def test_team_manager_get_upsert_delete_and_exists(self):
         await self._reset_tables()
 
-        created = await gtTeamManager.upsert_team({"name": "team_a", "max_function_calls": 3})
+        created = await gtTeamManager.upsert_team({
+            "name": "team_a",
+            "working_directory": "/workspace/team_a",
+            "max_function_calls": 3,
+        })
         assert created.name == "team_a"
+        assert created.working_directory == "/workspace/team_a"
         assert created.max_function_calls == 3
         assert await gtTeamManager.team_exists("team_a") is True
 
@@ -99,8 +104,13 @@ class TestDalManagers(ServiceTestCase):
         assert by_name is not None and by_name.id == created.id
         assert by_id is not None and by_id.name == "team_a"
 
-        updated = await gtTeamManager.upsert_team({"name": "team_a", "max_function_calls": 7})
+        updated = await gtTeamManager.upsert_team({
+            "name": "team_a",
+            "working_directory": "/workspace/team_a_v2",
+            "max_function_calls": 7,
+        })
         assert updated.id == created.id
+        assert updated.working_directory == "/workspace/team_a_v2"
         assert updated.max_function_calls == 7
 
         await gtTeamManager.delete_team("team_a")
@@ -123,7 +133,7 @@ class TestDalManagers(ServiceTestCase):
     async def test_team_manager_get_team_config_and_get_all_team_configs(self):
         await self._reset_tables()
 
-        team_a = await gtTeamManager.upsert_team({"name": "team_a"})
+        team_a = await gtTeamManager.upsert_team({"name": "team_a", "working_directory": "/workspace/team_a"})
         team_b = await gtTeamManager.upsert_team({"name": "team_b"})
         await gtTeamMemberManager.upsert_team_members(team_a.id, [
             {"name": "alice_1", "agent": "alice"},
@@ -143,6 +153,7 @@ class TestDalManagers(ServiceTestCase):
         cfg_a = await gtTeamManager.get_team_config("team_a")
         assert cfg_a is not None
         assert cfg_a["name"] == "team_a"
+        assert cfg_a["working_directory"] == "/workspace/team_a"
         assert cfg_a["members"] == [
             {"name": "alice_1", "agent": "alice"},
             {"name": "bob_1", "agent": "bob"},

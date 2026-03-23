@@ -9,6 +9,7 @@ from .base import DbModelBase
 
 class GtTeam(DbModelBase):
     name: str = peewee.CharField(unique=True)
+    working_directory: str = peewee.CharField(default="")
     max_function_calls: int = peewee.IntegerField(default=5)
     enabled: int = peewee.IntegerField(default=1)
     created_at: str = peewee.CharField(default=lambda: datetime.now().isoformat())

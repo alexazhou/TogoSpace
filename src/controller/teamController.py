@@ -17,11 +17,13 @@ class TeamMemberRequest(BaseModel):
 # Request Models
 class CreateTeamRequest(BaseModel):
     name: str
+    working_directory: str = ""
     members: list[TeamMemberRequest]
     preset_rooms: list[TeamRoomConfig]
 
 
 class UpdateTeamRequest(BaseModel):
+    working_directory: str | None = None
     members: list[TeamMemberRequest] | None = None
     preset_rooms: list[TeamRoomConfig] | None = None
 
@@ -37,6 +39,7 @@ class TeamListHandler(BaseHandler):
                     {
                         "id": team.id,
                         "name": team.name,
+                        "working_directory": team.working_directory,
                         "max_function_calls": team.max_function_calls,
                         "enabled": team.enabled,
                         "created_at": team.created_at,
@@ -56,6 +59,7 @@ class TeamCreateHandler(BaseHandler):
 
         team_config: TeamConfig = normalize_team_config({
             "name": request.name,
+            "working_directory": request.working_directory,
             "members": [member.model_dump(mode="json") for member in request.members],
             "preset_rooms": request.preset_rooms,
         })
@@ -103,6 +107,7 @@ class TeamDetailHandler(BaseHandler):
             {
                 "id": team.id,
                 "name": team.name,
+                "working_directory": team.working_directory,
                 "max_function_calls": team.max_function_calls,
                 "enabled": team.enabled,
                 "created_at": team.created_at,
@@ -134,12 +139,15 @@ class TeamModifyHandler(BaseHandler):
         # 构建完整配置，确保局部更新不会丢字段
         team_config: TeamConfig = {
             "name": team_name,
+            "working_directory": current_config.get("working_directory", ""),
             "members": list(current_config["members"]),
             "preset_rooms": list(current_config["preset_rooms"]),
         }
         if "max_function_calls" in current_config:
             team_config["max_function_calls"] = current_config["max_function_calls"]
 
+        if request.working_directory is not None:
+            team_config["working_directory"] = request.working_directory
         if request.members is not None:
             team_config["members"] = [member.model_dump(mode="json") for member in request.members]
         if request.preset_rooms is not None:
