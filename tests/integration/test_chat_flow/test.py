@@ -31,7 +31,9 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         # 按真实启动顺序拉起 service，并加载 integration 专用配置。
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
-        await ormService.startup(":memory:")
+        db_path = cls.get_test_db_path()
+        cls.cleanup_sqlite_files(db_path)
+        await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
         await roomService.create_room(TEAM, "general", ["alice", "bob"])
@@ -43,12 +45,14 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
     @classmethod
     async def async_teardown_class(cls):
+        db_path = cls.get_test_db_path()
         scheduler.shutdown()
         await agentService.shutdown()
         funcToolService.shutdown()
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
+        cls.cleanup_sqlite_files(db_path)
 
     async def test_two_agents_exchange_messages(self):
         """alice 和 bob 各发一轮消息，general 房间应有消息。"""
@@ -84,6 +88,11 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await room.add_message("system", "开始聊天")
 
         alice = agentService.get_agent(TEAM, "alice")
+        # 避免前序用例中断时残留 assistant 结尾历史，导致本用例 _infer 前置断言失败。
+        if alice._history and alice._history[-1].role == OpenaiLLMApiRole.ASSISTANT:
+            await alice.append_history_message(
+                LlmApiMessage.text(OpenaiLLMApiRole.SYSTEM, "reset test turn state")
+            )
         call_seq = {
             "alice": [
                 {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "hello"}}]},

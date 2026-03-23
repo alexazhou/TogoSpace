@@ -39,7 +39,9 @@ class TestRealSimpleChat(ServiceTestCase):
         await llmService.startup(llm_cfg.get("api_key", ""), llm_cfg.get("base_url", ""))
 
         # 启动服务
-        await ormService.startup(":memory:")
+        db_path = cls.get_test_db_path()
+        cls.cleanup_sqlite_files(db_path)
+        await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
         await funcToolService.startup()
@@ -61,6 +63,7 @@ class TestRealSimpleChat(ServiceTestCase):
     @classmethod
     async def async_teardown_class(cls):
         """清理服务"""
+        db_path = cls.get_test_db_path()
         scheduler.shutdown()
         await agentService.shutdown()
         funcToolService.shutdown()
@@ -68,6 +71,7 @@ class TestRealSimpleChat(ServiceTestCase):
         await persistenceService.shutdown()
         await ormService.shutdown()
         llmService.shutdown()
+        cls.cleanup_sqlite_files(db_path)
 
     async def test_two_agents_chat_and_exit(self):
         """Alice 和 Bob 各发一条消息后房间自动退出"""
