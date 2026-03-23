@@ -25,15 +25,6 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
     return row
 
 
-async def append_agent_history_messages(messages: list[GtAgentHistory]) -> list[GtAgentHistory]:
-    if not messages:
-        return []
-    rows: list[GtAgentHistory] = []
-    for item in messages:
-        rows.append(await append_agent_history_message(item))
-    return rows
-
-
 async def get_agent_history(team_id: int, agent_name: str) -> list[GtAgentHistory]:
     return await (
         GtAgentHistory

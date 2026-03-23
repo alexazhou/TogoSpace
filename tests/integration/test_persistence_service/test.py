@@ -103,7 +103,8 @@ class TestRestoreAgentHistory(ServiceTestCase):
             LlmApiMessage.text(OpenaiLLMApiRole.USER, "u1"),
             LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1"),
         ]
-        await persistenceService.append_agent_history_messages(agent.key, agent.dump_history_messages())
+        for item in agent.dump_history_messages():
+            await persistenceService.append_agent_history_message(item)
 
         # 模拟进程重启
         await persistenceService.shutdown()

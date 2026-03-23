@@ -329,19 +329,18 @@ class TestDalManagers(ServiceTestCase):
         assert saved_2.id == saved_1.id
         assert saved_2.message_json == '{"content":"v1"}'
 
-    async def test_agent_history_manager_append_many_and_get_sorted(self):
+    async def test_agent_history_manager_append_and_get_sorted(self):
         await self._reset_tables()
 
         team = await gtTeamManager.upsert_team({"name": "history_team_2"})
-        assert await gtAgentHistoryManager.append_agent_history_messages([]) == []
 
         items = [
             GtAgentHistory(team_id=team.id, agent_name="alice", seq=2, message_json='{"content":"2"}'),
             GtAgentHistory(team_id=team.id, agent_name="alice", seq=1, message_json='{"content":"1"}'),
             GtAgentHistory(team_id=team.id, agent_name="bob", seq=1, message_json='{"content":"b1"}'),
         ]
-        appended = await gtAgentHistoryManager.append_agent_history_messages(items)
-        assert len(appended) == 3
+        for item in items:
+            await gtAgentHistoryManager.append_agent_history_message(item)
 
         alice_history = await gtAgentHistoryManager.get_agent_history(team.id, "alice")
         assert [h.seq for h in alice_history] == [1, 2]
