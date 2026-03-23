@@ -24,18 +24,16 @@ async def get_room_config(team_id: int, room_name: str) -> GtRoom | None:
     )
 
 
-async def ensure_room(
-    room_id: int,
+async def ensure_room_by_key(
     team_id: int,
     room_name: str,
     room_type: RoomType,
     initial_topic: str,
     max_turns: int,
-) -> None:
-    """确保指定 ID 的 Room 存在，用于无预导入配置时的运行态持久化。"""
+) -> GtRoom:
+    """确保 (team_id, name) 对应的 Room 存在，由 DB 自增分配 id；返回 GtRoom 行。"""
     await (
         GtRoom.insert(
-            id=room_id,
             team_id=team_id,
             name=room_name,
             type=room_type,
@@ -43,10 +41,8 @@ async def ensure_room(
             max_turns=max_turns,
         )
         .on_conflict(
-            conflict_target=[GtRoom.id],
+            conflict_target=[GtRoom.team_id, GtRoom.name],
             update={
-                GtRoom.team_id: team_id,
-                GtRoom.name: room_name,
                 GtRoom.type: room_type,
                 GtRoom.initial_topic: initial_topic,
                 GtRoom.max_turns: max_turns,
@@ -54,6 +50,9 @@ async def ensure_room(
             },
         )
         .aio_execute()
+    )
+    return await GtRoom.aio_get(
+        (GtRoom.team_id == team_id) & (GtRoom.name == room_name)
     )
 
 

@@ -4,6 +4,8 @@ from unittest.mock import patch
 
 import pytest
 
+import service.ormService as ormService
+import service.persistenceService as persistenceService
 import service.roomService as roomService
 from constants import MessageBusTopic
 from ...base import ServiceTestCase
@@ -18,6 +20,8 @@ if os.name == "posix" and sys.platform == "darwin":
 class TestChatRoomMessages(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
+        await ormService.startup(":memory:")
+        await persistenceService.startup()
         await roomService.startup()
 
     async def test_add_message(self):

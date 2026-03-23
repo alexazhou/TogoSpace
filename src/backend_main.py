@@ -102,12 +102,8 @@ async def main(
     await llmService.startup(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
     await funcToolService.startup()
 
-    persistence_enabled = persistence_cfg.get("enabled", False)
     await ormService.startup(persistence_cfg["db_path"])
-    await persistenceService.startup(
-        enabled=persistence_enabled,
-        restore_on_startup=persistence_enabled,
-    )
+    await persistenceService.startup()
 
     # 从 teamService 加载 Team 配置（会自动从 JSON 导入到数据库）
     teams_config = await teamService.startup(config_dir)

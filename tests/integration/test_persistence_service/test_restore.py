@@ -50,7 +50,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await funcToolService.startup()
         await agentService.startup()
         await ormService.startup(str(db_path))
-        await persistenceService.startup(enabled=True)
+        await persistenceService.startup()
 
         agentService.load_agent_config(agents_config)
         await agentService.create_team_agents([team_config])

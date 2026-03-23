@@ -31,21 +31,16 @@ class TestpersistenceService(ServiceTestCase):
         await roomService.startup()
 
     def setup_method(self):
-        # 清理 roomService 的全局状态，避免测试间污染
+        # 清理 roomService / ormService 的全局状态，避免测试间污染
         roomService.shutdown()
-        # 关闭可能残留的 ormService 和 persistenceService 连接
-        try:
-            ormService._session = None
-            persistenceService._enabled = False
-        except Exception:
-            pass
+        self._run_maybe_async(ormService.shutdown())
 
     async def test_restore_runtime_state_restores_room_history_and_read_index(self, tmp_path: Path):
         db_path = tmp_path / "runtime_test_room.db"
 
         async def _persist():
             await ormService.startup(str(db_path))
-            await persistenceService.startup(enabled=True)
+            await persistenceService.startup()
 
         await _persist()
 
@@ -64,7 +59,7 @@ class TestpersistenceService(ServiceTestCase):
 
         # 重启并恢复
         await ormService.startup(str(db_path))
-        await persistenceService.startup(enabled=True)
+        await persistenceService.startup()
         await roomService.startup()
         await roomService.create_rooms(TEAMS_CONFIG)
         restored = roomService.get_room_by_key(f"r1@{TEAM}")
@@ -89,7 +84,7 @@ class TestpersistenceService(ServiceTestCase):
 
         async def _persist():
             await ormService.startup(str(db_path))
-            await persistenceService.startup(enabled=True)
+            await persistenceService.startup()
 
         await _persist()
 
@@ -106,7 +101,7 @@ class TestpersistenceService(ServiceTestCase):
 
         # 重启并恢复
         await ormService.startup(str(db_path))
-        await persistenceService.startup(enabled=True)
+        await persistenceService.startup()
 
         fresh_agent = Agent("alice", TEAM, "sys", "test-model")
         await persistenceService.restore_runtime_state([fresh_agent], [])
