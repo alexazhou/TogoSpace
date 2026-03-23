@@ -63,7 +63,8 @@ async def create_team(team_config: dict) -> None:
         raise TeamAgentException(f"Team '{name}' already exists", error_code="TEAM_EXISTS")
 
     # 创建 Team
-    await gtTeamManager.upsert_team(team_config)
+    team = await gtTeamManager.upsert_team(team_config)
+    team_id = team.id
 
     # 创建 Rooms（rooms 参数）
     rooms = team_config.get("rooms", [])
@@ -71,12 +72,12 @@ async def create_team(team_config: dict) -> None:
         if "max_turns" not in room:
             room["max_turns"] = 100
 
-    await gtRoomManager.upsert_rooms(name, rooms)
+    await gtRoomManager.upsert_rooms(team_id, rooms)
 
     # 创建 Members
     for room in rooms:
         room_name = room["name"]
-        room_config = await gtRoomManager.get_room_config(name, room_name)
+        room_config = await gtRoomManager.get_room_config(team_id, room_name)
         if room_config:
             members = room.get("members", [])
             await gtRoomMemberManager.upsert_room_members(room_config.id, members)
@@ -92,7 +93,8 @@ async def update_team(team_config: dict) -> None:
     name = team_config["name"]
 
     # 更新 Team 基本信息
-    await gtTeamManager.upsert_team(team_config)
+    team = await gtTeamManager.upsert_team(team_config)
+    team_id = team.id
 
     # 更新 Rooms（rooms 参数名保持兼容）
     rooms = team_config.get("rooms", [])
@@ -100,12 +102,12 @@ async def update_team(team_config: dict) -> None:
         if "max_turns" not in room:
             room["max_turns"] = 100
 
-    await gtRoomManager.upsert_rooms(name, rooms)
+    await gtRoomManager.upsert_rooms(team_id, rooms)
 
     # 更新 Members
     for room in rooms:
         room_name = room["name"]
-        room_config = await gtRoomManager.get_room_config(name, room_name)
+        room_config = await gtRoomManager.get_room_config(team_id, room_name)
         if room_config:
             members = room.get("members", [])
             await gtRoomMemberManager.upsert_room_members(room_config.id, members)

@@ -5,13 +5,13 @@ from model.dbModel.gtRoomMessage import GtRoomMessage
 
 async def append_room_message(
     room_id: int,
-    sender_name: str,
+    agent_name: str,
     content: str,
     send_time: str,
 ) -> GtRoomMessage:
     return await GtRoomMessage.aio_create(
         room_id=room_id,
-        sender_name=sender_name,
+        agent_name=agent_name,
         content=content,
         send_time=send_time,
     )

@@ -5,11 +5,11 @@ from model.dbModel.gtRoomMember import GtRoomMember
 
 async def get_members_by_room(room_id: int) -> list[str]:
     """获取 Room 的所有成员名称。"""
-    rows = await GtRoomMember.select(GtRoomMember.member_name).where(
+    rows = await GtRoomMember.select(GtRoomMember.agent_name).where(
         GtRoomMember.room_id == room_id
-    ).order_by(GtRoomMember.member_name).aio_execute()
+    ).order_by(GtRoomMember.agent_name).aio_execute()
 
-    return [row.member_name for row in rows]
+    return [row.agent_name for row in rows]
 
 
 async def upsert_room_members(room_id: int, members: list[str]) -> None:
@@ -20,7 +20,7 @@ async def upsert_room_members(room_id: int, members: list[str]) -> None:
     # 插入新数据
     if members:
         rows = [
-            {"room_id": room_id, "member_name": member}
+            {"room_id": room_id, "agent_name": member}
             for member in members
         ]
         await GtRoomMember.insert_many(rows).aio_execute()

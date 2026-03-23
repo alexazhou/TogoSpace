@@ -7,10 +7,7 @@ from .base import DbModelBase
 
 class GtRoomMember(DbModelBase):
     room_id: int = peewee.IntegerField()
-    member_name: str = peewee.CharField()
+    agent_name: str = peewee.CharField()
 
     class Meta:
         table_name = "room_members"
-        indexes = (
-            (('room_id', 'member_name'), True),
-        )
