@@ -31,7 +31,7 @@ async def ensure_room(
     room_type: RoomType,
     initial_topic: str,
     max_turns: int,
-) -> GtRoom:
+) -> None:
     """确保指定 ID 的 Room 存在，用于无预导入配置时的运行态持久化。"""
     await (
         GtRoom.insert(
@@ -55,11 +55,6 @@ async def ensure_room(
         )
         .aio_execute()
     )
-
-    row = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
-    if row is None:
-        raise RuntimeError(f"ensure room failed: {room_id}")
-    return row
 
 
 async def upsert_rooms(team_id: int, rooms: list) -> None:
