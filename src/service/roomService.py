@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import zlib
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence
@@ -281,10 +280,6 @@ def _room_key(team_name: str, room_name: str) -> str:
     return f"{room_name}@{team_name}"
 
 
-def _synthetic_room_id(team_name: str, room_name: str) -> int:
-    return -(zlib.crc32(_room_key(team_name, room_name).encode("utf-8")) or 1)
-
-
 def _iter_team_rooms(team_config: dict) -> list[dict]:
     return team_config.get("rooms") or team_config.get("groups") or []
 
@@ -335,27 +330,19 @@ async def _create_room(
     """内部建房入口。"""
     # 1. 从 DB 查找 team_id 和已有 room_id
     team_id = 0
-    if persistenceService.is_enabled():
-        team_row = await gtTeamManager.get_team(team_name)
-        if team_row is not None:
-            team_id = team_row.id
-            if room_id is None:
-                room_row = await gtRoomManager.get_room_config(team_row.id, name)
-                if room_row is not None:
-                    room_id = room_row.id
+    team_row = await gtTeamManager.get_team(team_name)
+    if team_row is not None:
+        team_id = team_row.id
 
-    # 2. 仍无 room_id 则生成合成 ID，并确保 DB 有记录
     if room_id is None:
-        room_id = _synthetic_room_id(team_name, name)
-        if persistenceService.is_enabled():
-            await gtRoomManager.ensure_room(
-                room_id=room_id,
-                team_id=team_id,
-                room_name=name,
-                room_type=room_type,
-                initial_topic=initial_topic,
-                max_turns=max_turns,
-            )
+        room_row = await gtRoomManager.ensure_room_by_key(
+            team_id=team_id,
+            room_name=name,
+            room_type=room_type,
+            initial_topic=initial_topic,
+            max_turns=max_turns,
+        )
+        room_id = room_row.id
 
     resolved_room_id = room_id
     room = ChatRoom(room_id=resolved_room_id, team_id=team_id, name=name, team_name=team_name, initial_topic=initial_topic,
