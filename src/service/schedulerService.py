@@ -102,7 +102,7 @@ async def run() -> None:
         for room in _iter_team_rooms(team):
             room_ref = f"{room['name']}@{team_name}"
             try:
-                runtime_room = chat_room.get_room(room_ref)
+                runtime_room = chat_room.get_room_by_key(room_ref)
             except RuntimeError:
                 continue
             logger.info(f"\n{runtime_room.format_log()}")

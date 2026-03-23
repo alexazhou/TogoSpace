@@ -51,7 +51,7 @@ class TestpersistenceService(ServiceTestCase):
 
         await roomService.startup()
         await roomService.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3)
-        room = roomService.get_room(f"r1@{TEAM}")
+        room = roomService.get_room_by_key(f"r1@{TEAM}")
         await room.add_message("alice", "hello")
         await room.get_unread_messages("bob")
         await room.add_message("bob", "world")
@@ -67,7 +67,7 @@ class TestpersistenceService(ServiceTestCase):
         await persistenceService.startup(enabled=True)
         await roomService.startup()
         await roomService.create_rooms(TEAMS_CONFIG)
-        restored = roomService.get_room(f"r1@{TEAM}")
+        restored = roomService.get_room_by_key(f"r1@{TEAM}")
 
         await persistenceService.restore_runtime_state([], [restored])
 

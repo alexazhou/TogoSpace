@@ -13,6 +13,12 @@ from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 logger = logging.getLogger(__name__)
 
 
+def _normalize_members(members: List[str | SpecialAgent] | None) -> List[str]:
+    if not members:
+        return []
+    return [member.value if isinstance(member, SpecialAgent) else member for member in members]
+
+
 @dataclass
 class ChatContext:
     """工具调用时注入的上下文，包含当前 Agent 和聊天室信息。"""
@@ -32,7 +38,7 @@ class ChatRoom:
         self.room_type: RoomType = room_type  # 房间类型（私有/群聊）
         self.messages: List[ChatMessage] = []  # 消息历史记录
         self.initial_topic: str = initial_topic  # 初始话题
-        self.agents: List[str] = members or []  # 房间参与者名单（包含 Operator 和 AI Agents）
+        self.agents: List[str] = _normalize_members(members)  # 房间参与者名单（包含 Operator 和 AI Agents）
 
         self._agent_read_index: Dict[str, int] = {}  # 每个 Agent 的消息读取进度
         self._turn_index: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
@@ -81,8 +87,10 @@ class ChatRoom:
         if publish_events:
             messageBus.publish(
                 MessageBusTopic.ROOM_MSG_ADDED,
+                room_id=self.room_id,
                 room_name=self.name,
-                room_id=self.key,
+                room_key=self.key,
+                team_name=self.team_name,
                 sender=sender,
                 content=content,
                 time=message.send_time.isoformat(),
@@ -158,8 +166,9 @@ class ChatRoom:
             messageBus.publish(
                 MessageBusTopic.ROOM_AGENT_TURN,
                 agent_name=next_name,
-                room_name=self.name,
                 room_id=self.room_id,
+                room_name=self.name,
+                room_key=self.key,
                 team_name=self.team_name,
             )
 
@@ -276,18 +285,19 @@ async def startup() -> None:
     _rooms_by_id.clear()
 
 
-def get_room(room_ref: int | str) -> ChatRoom:
-    """返回指定聊天室实例，兼容 room_key 与数据库 ID。"""
-    room: Optional[ChatRoom]
-    if isinstance(room_ref, str):
-        room = _rooms.get(room_ref)
-        if room is None:
-            raise RuntimeError(f"聊天室 '{room_ref}' 不存在")
-        return room
-
-    room = _rooms_by_id.get(room_ref)
+def get_room_by_key(room_key: str) -> ChatRoom:
+    """通过 room_key（room_name@team_name）返回聊天室实例。"""
+    room = _rooms.get(room_key)
     if room is None:
-        raise RuntimeError(f"聊天室 ID '{room_ref}' 不存在")
+        raise RuntimeError(f"聊天室 '{room_key}' 不存在")
+    return room
+
+
+def get_room(room_id: int) -> ChatRoom:
+    """通过数据库主键 room_id 返回聊天室实例。"""
+    room = _rooms_by_id.get(room_id)
+    if room is None:
+        raise RuntimeError(f"聊天室 ID '{room_id}' 不存在")
     return room
 
 
@@ -368,11 +378,13 @@ async def _create_room(
     _rooms[room_key] = room
     _rooms_by_id[resolved_room_id] = room
 
-    logger.info(f"创建并初始化聊天室: room_id={resolved_room_id}, type={room_type.value}, 成员={members}")
+    normalized_members = room.agents
+
+    logger.info(f"创建并初始化聊天室: room_id={resolved_room_id}, type={room_type.value}, 成员={normalized_members}")
     if max_turns > 0:
         logger.info(f"初始化轮次配置: room_id={resolved_room_id}, max_turns={max_turns}")
 
-    member_list_str = "、".join(members)
+    member_list_str = "、".join(normalized_members)
     msg = f"{name} 房间已经创建，当前房间成员：{member_list_str}"
     if initial_topic:
         msg += f"\n本房间初始话题：{initial_topic}"
@@ -414,18 +426,18 @@ async def create_rooms(teams_config: list) -> None:
             )
 
 
-def get_member_names(team_name: str, room_name: str) -> List[str]:
+def get_member_names(room_id: int) -> List[str]:
     """返回聊天室的参与者名列表。"""
-    return get_room(_room_key(team_name, room_name)).agents
+    return get_room(room_id).agents
 
 
-def get_rooms_for_agent(team_name: str, agent_name: str) -> List[str]:
-    """返回指定参与者所在的房间 key 列表。可选按 team 过滤。"""
+def get_rooms_for_agent(team_name: str, agent_name: str) -> List[int]:
+    """返回指定参与者所在的房间 room_id 列表。可选按 team 过滤。"""
     results = []
-    for room_key, room in _rooms.items():
+    for room in _rooms.values():
         if agent_name in room.agents:
             if team_name is None or room.team_name == team_name:
-                results.append(room_key)
+                results.append(room.room_id)
     return results
 
 

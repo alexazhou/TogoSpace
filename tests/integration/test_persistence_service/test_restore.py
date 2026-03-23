@@ -62,7 +62,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
     async def test_room_requires_explicit_start_before_scheduler_runs(self, tmp_path: Path):
         await self._bootstrap(tmp_path / "state.db")
 
-        room = roomService.get_room(f"general@{TEAM}")
+        room = roomService.get_room_by_key(f"general@{TEAM}")
         assert len(room.messages) == 1
 
         async def fake_infer(model, ctx):
@@ -87,7 +87,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
         await self._bootstrap(db_path)
 
-        room = roomService.get_room(f"general@{TEAM}")
+        room = roomService.get_room_by_key(f"general@{TEAM}")
 
         replies = {
             "alice": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "from alice"}, "id": "a1"}]}, {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}, "id": "a2"}]}],
@@ -121,7 +121,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         # 重启并恢复状态
         await self._bootstrap(db_path)
 
-        restored_room = roomService.get_room(f"general@{TEAM}")
+        restored_room = roomService.get_room_by_key(f"general@{TEAM}")
         restored_alice = agentService.get_agent(TEAM, "alice")
 
         assert any(m.content == "from alice" for m in restored_room.messages)

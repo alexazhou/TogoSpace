@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 import service.roomService as roomService
-from constants import messageBusTopic, RoomState
+from constants import MessageBusTopic, RoomState
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -25,18 +25,19 @@ class TestTurnScheduling(ServiceTestCase):
         with patch("service.messageBus.publish") as mock_publish:
             await roomService.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
             topics = [call.args[0] for call in mock_publish.call_args_list]
-            assert messageBusTopic.ROOM_AGENT_TURN not in topics
+            assert MessageBusTopic.ROOM_AGENT_TURN not in topics
 
     async def test_start_scheduling_publishes_first_agent(self):
         """显式启动调度后，才发布首个发言人的 TURN 事件。"""
         await roomService.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
-        room = roomService.get_room(f"r@{TEAM}")
+        room = roomService.get_room_by_key(f"r@{TEAM}")
 
         with patch("service.messageBus.publish") as mock_publish:
             room.start_scheduling()
             mock_publish.assert_any_call(
-                messageBusTopic.ROOM_AGENT_TURN,
+                MessageBusTopic.ROOM_AGENT_TURN,
                 agent_name="alice",
+                room_id=room.room_id,
                 room_name="r",
                 room_key=f"r@{TEAM}",
                 team_name=TEAM,
@@ -45,15 +46,16 @@ class TestTurnScheduling(ServiceTestCase):
     async def test_add_message_publishes_next_agent(self):
         """当前发言人发言后，调用 finish_turn 才调度下一个发言人。"""
         await roomService.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
-        room = roomService.get_room(f"r@{TEAM}")
+        room = roomService.get_room_by_key(f"r@{TEAM}")
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message("alice", "hello")
             # 消息不会自动推进轮次，需要显式调用 finish_turn
             room.finish_turn("alice")
             mock_publish.assert_any_call(
-                messageBusTopic.ROOM_AGENT_TURN,
+                MessageBusTopic.ROOM_AGENT_TURN,
                 agent_name="bob",
+                room_id=room.room_id,
                 room_name="r",
                 room_key=f"r@{TEAM}",
                 team_name=TEAM,
@@ -62,7 +64,7 @@ class TestTurnScheduling(ServiceTestCase):
     async def test_turn_state_becomes_idle_after_max_turns(self):
         """达到 max_turns 后房间状态应进入 IDLE。"""
         await roomService.create_room(TEAM, "r", ["a"], max_turns=1)
-        room = roomService.get_room(f"r@{TEAM}")
+        room = roomService.get_room_by_key(f"r@{TEAM}")
         assert room.state == RoomState.SCHEDULING
         await room.add_message("a", "msg")
         # 消息不会自动推进轮次，需要显式调用 finish_turn
@@ -72,9 +74,9 @@ class TestTurnScheduling(ServiceTestCase):
     async def test_no_publish_after_max_turns_reached(self):
         """超过最大轮次后继续发消息，不应再发布 TURN 事件。"""
         await roomService.create_room(TEAM, "r", ["a"], max_turns=1)
-        room = roomService.get_room(f"r@{TEAM}")
+        room = roomService.get_room_by_key(f"r@{TEAM}")
         await room.add_message("a", "msg1")
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message("a", "msg2")
-            assert messageBusTopic.ROOM_AGENT_TURN not in [call.args[0] for call in mock_publish.call_args_list]
+            assert MessageBusTopic.ROOM_AGENT_TURN not in [call.args[0] for call in mock_publish.call_args_list]
