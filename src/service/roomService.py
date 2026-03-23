@@ -71,13 +71,10 @@ class ChatRoom:
         read_idx = self._agent_read_index.get(agent_name, 0)
         new_msgs = self.messages[read_idx:]
         self._agent_read_index[agent_name] = len(self.messages)
-        await self._persist_read_index()
+        await persistenceService.save_room(self.room_id, self._agent_read_index)
         return new_msgs
 
-    async def add_message(self, sender: str | SpecialAgent, content: str) -> None:
-        await self._append_message(sender, content, publish_events=True, persist=True)
-
-    async def _append_message(self, sender: str | SpecialAgent, content: str, publish_events: bool, persist: bool, send_time: datetime | None = None) -> None:
+    async def add_message(self, sender: str | SpecialAgent, content: str, persist: bool = True, send_time: datetime | None = None) -> None:
         normalized_sender = _normalize_member_name(sender)
         message = ChatMessage(
             sender_name=normalized_sender,
@@ -92,22 +89,18 @@ class ChatRoom:
                 send_time=message.send_time.isoformat(),
             )
         self.messages.append(message)
-        if publish_events:
-            messageBus.publish(
-                MessageBusTopic.ROOM_MSG_ADDED,
-                room_id=self.room_id,
-                room_name=self.name,
-                room_key=self.key,
-                team_name=self.team_name,
-                sender=normalized_sender,
-                content=content,
-                time=message.send_time.isoformat(),
-            )
-
-        if not self.agents:
-            return
-
-        self._apply_turn_logic(normalized_sender, publish_events=publish_events)
+        messageBus.publish(
+            MessageBusTopic.ROOM_MSG_ADDED,
+            room_id=self.room_id,
+            room_name=self.name,
+            room_key=self.key,
+            team_name=self.team_name,
+            sender=normalized_sender,
+            content=content,
+            time=message.send_time.isoformat(),
+        )
+        if self.agents:
+            self._apply_turn_logic(normalized_sender, publish_events=True)
 
     def _apply_turn_logic(self, sender: str, publish_events: bool) -> None:
         # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
@@ -154,13 +147,6 @@ class ChatRoom:
         self._current_turn_has_content = False
         self._advance_turn(publish_events=True)
         return True
-
-    def skip_turn(self, sender: str | SpecialAgent = None) -> bool:
-        """(已废弃，建议使用 finish_turn) 跳过当前发言人的轮次。
-        为了兼容性暂时保留，逻辑等同于 finish_turn 且强制标记为未发言。
-        """
-        self._current_turn_has_content = False
-        return self.finish_turn(sender=sender)
 
     def get_current_turn_agent(self) -> Optional[str]:
         """返回当前理论上应该发言的 Agent 名（忽略 IDLE 状态）。"""
@@ -241,22 +227,18 @@ class ChatRoom:
         for msg in self.messages:
             self._apply_turn_logic(msg.sender_name, publish_events=False)
 
-    async def _persist_read_index(self) -> None:
-        await persistenceService.save_room(self.room_id, self._agent_read_index)
-
     def get_context(self, max_messages: int = 10) -> str:
         recent = self.messages[-max_messages:]
         return "\n".join(f"{m.sender_name}: {m.content}" for m in recent)
 
     def get_context_messages(self, max_messages: int = 10) -> List[dict]:
         recent = self.messages[-max_messages:]
-        result = []
-        for msg in recent:
-            if msg.sender_name == "system":
-                result.append({"role": "system", "content": msg.content})
-            else:
-                result.append({"role": "user", "content": f"{msg.sender_name}: {msg.content}"})
-        return result
+        return [
+            {"role": "system", "content": msg.content}
+            if msg.sender_name == "system"
+            else {"role": "user", "content": f"{msg.sender_name}: {msg.content}"}
+            for msg in recent
+        ]
 
     def format_log(self) -> str:
         lines = [f"=== {self.key} 聊天记录 ==="]
@@ -357,11 +339,7 @@ async def _create_room(
     if max_turns > 0:
         logger.info(f"初始化轮次配置: room_id={resolved_room_id}, max_turns={max_turns}")
 
-    member_list_str = "、".join(normalized_members)
-    msg = f"{name} 房间已经创建，当前房间成员：{member_list_str}"
-    if initial_topic:
-        msg += f"\n本房间初始话题：{initial_topic}"
-    await room._append_message("system", msg, publish_events=True, persist=persist_initial_message)
+    await room.add_message("system", room.build_initial_system_message(), persist=persist_initial_message)
 
 
 async def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0) -> None:
