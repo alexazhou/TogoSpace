@@ -8,6 +8,8 @@ from typing import Dict, List, Optional, Sequence
 from dal.db import gtRoomManager, gtTeamManager
 from service import messageBus, persistenceService
 from model.coreModel.gtCoreChatModel import ChatMessage
+from model.dbModel.gtRoom import GtRoom
+from model.dbModel.gtTeam import GtTeam
 from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 
 logger = logging.getLogger(__name__)
@@ -36,26 +38,25 @@ class ChatContext:
 class ChatRoom:
     """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
-    def __init__(self, room_id: int, team_id: int, name: str, team_name: str, initial_topic: str = "", room_type: RoomType = RoomType.GROUP,
-                 members: List[str] = None, max_turns: int = 0):
-        self.room_id: int = room_id  # 数据库主键 ID
-        self.team_id: int = team_id  # 所属 Team 的数据库主键 ID
-        self.name: str = name  # 房间名称
-        self.team_name: str = team_name  # 所属 Team
-        self.room_type: RoomType = room_type  # 房间类型（私有/群聊）
+    def __init__(self, team: GtTeam, room: GtRoom, members: List[str] = None):
+        self.room_id: int = room.id  # 数据库主键 ID
+        self.team_id: int = team.id  # 所属 Team 的数据库主键 ID
+        self.name: str = room.name  # 房间名称
+        self.team_name: str = team.name  # 所属 Team
+        self.room_type: RoomType = room.type  # 房间类型（私有/群聊）
         self.messages: List[ChatMessage] = []  # 消息历史记录
-        self.initial_topic: str = initial_topic  # 初始话题
+        self.initial_topic: str = room.initial_topic  # 初始话题
         self.agents: List[str] = _normalize_members(members)  # 房间参与者名单（包含 Operator 和 AI Agents）
 
         self._agent_read_index: Dict[str, int] = {}  # 每个 Agent 的消息读取进度
         self._turn_index: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
-        self._max_turns: int = max_turns  # 最大允许轮次
+        self._max_turns: int = room.max_turns  # 最大允许轮次
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
         self._state: RoomState = RoomState.IDLE  # 房间当前的调度状态
         self._round_skipped: set = set()  # 当前轮次已跳过发言的成员名单
         self._current_turn_has_content: bool = False  # 当前发言人是否已发送内容
 
-        if self.agents and max_turns > 0:
+        if self.agents and room.max_turns > 0:
             self._state = RoomState.SCHEDULING
 
     @property
@@ -298,24 +299,37 @@ async def _create_room(
 ) -> None:
     """内部建房入口。"""
     # 1. 从 DB 查找 team_id 和已有 room_id
-    team_id = 0
     team_row = await gtTeamManager.get_team(team_name)
-    if team_row is not None:
-        team_id = team_row.id
+    if team_row is None:
+        team_row = GtTeam(
+            id=0,
+            name=team_name,
+        )
+
+    room_row: GtRoom | None = None
 
     if room_id is None:
         room_row = await gtRoomManager.ensure_room_by_key(
-            team_id=team_id,
+            team_id=team_row.id,
             room_name=name,
             room_type=room_type,
             initial_topic=initial_topic,
             max_turns=max_turns,
         )
-        room_id = room_row.id
+    else:
+        room_row = GtRoom(
+            id=room_id,
+            team_id=team_row.id,
+            name=name,
+            type=room_type,
+            initial_topic=initial_topic,
+            max_turns=max_turns,
+            agent_read_index=None,
+            updated_at=GtRoom._now_iso(),
+        )
 
-    resolved_room_id = room_id
-    room = ChatRoom(room_id=resolved_room_id, team_id=team_id, name=name, team_name=team_name, initial_topic=initial_topic,
-                    room_type=room_type, members=members, max_turns=max_turns)
+    resolved_room_id = room_row.id
+    room = ChatRoom(team=team_row, room=room_row, members=members)
     room_key = room.key
     _rooms[room_key] = room
     _rooms_by_id[resolved_room_id] = room

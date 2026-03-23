@@ -12,6 +12,8 @@ import service.schedulerService as scheduler
 from service.agentService import Agent
 from service.messageBus import Message
 from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
+from model.dbModel.gtRoom import GtRoom
+from model.dbModel.gtTeam import GtTeam
 from constants import MessageBusTopic, AgentStatus
 from ...base import ServiceTestCase
 
@@ -49,9 +51,21 @@ class TestSchedulerRun(ServiceTestCase):
 
     async def test_scheduler_runs_agent_on_turn_event(self):
         """发布 ROOM_AGENT_TURN 后，scheduler 应触发 agent.consume_task。"""
-        await roomService.create_room(TEAM, "r1", ["alice"])
         alice = _make_mock_agent("alice")
-        room = roomService.get_room_by_key(f"r1@{TEAM}")
+        room = roomService.ChatRoom(
+            team=GtTeam(id=1, name=TEAM),
+            room=GtRoom(
+                id=1,
+                team_id=1,
+                name="r1",
+                type=roomService.RoomType.GROUP,
+                initial_topic="",
+                max_turns=0,
+                agent_read_index=None,
+                updated_at=GtRoom._now_iso(),
+            ),
+            members=["alice"],
+        )
 
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
         await scheduler.startup(teams_config)
@@ -114,7 +128,20 @@ class TestSchedulerRun(ServiceTestCase):
     async def test_on_agent_turn_creates_task(self):
         """收到 ROOM_AGENT_TURN 消息后，agent 任务入队并启动 Task。"""
         alice = _make_mock_agent("alice")
-        room = roomService.ChatRoom(room_id=1, name="r1", team_name=TEAM, members=["alice"])
+        room = roomService.ChatRoom(
+            team=GtTeam(id=1, name=TEAM),
+            room=GtRoom(
+                id=1,
+                team_id=1,
+                name="r1",
+                type=roomService.RoomType.GROUP,
+                initial_topic="",
+                max_turns=0,
+                agent_read_index=None,
+                updated_at=GtRoom._now_iso(),
+            ),
+            members=["alice"],
+        )
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
         await scheduler.startup(teams_config)
 
@@ -131,7 +158,20 @@ class TestSchedulerRun(ServiceTestCase):
     async def test_duplicate_room_event_is_skipped(self):
         """同一房间连续触发两次 ROOM_AGENT_TURN，队列中只应有一个事件。"""
         alice = _make_mock_agent("alice")
-        room = roomService.ChatRoom(room_id=1, name="r1", team_name=TEAM, members=["alice"])
+        room = roomService.ChatRoom(
+            team=GtTeam(id=1, name=TEAM),
+            room=GtRoom(
+                id=1,
+                team_id=1,
+                name="r1",
+                type=roomService.RoomType.GROUP,
+                initial_topic="",
+                max_turns=0,
+                agent_read_index=None,
+                updated_at=GtRoom._now_iso(),
+            ),
+            members=["alice"],
+        )
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
         await scheduler.startup(teams_config)
 
@@ -148,8 +188,34 @@ class TestSchedulerRun(ServiceTestCase):
     async def test_different_rooms_not_deduplicated(self):
         """不同房间的事件不应被去重，各自独立入队。"""
         alice = _make_mock_agent("alice")
-        r1 = roomService.ChatRoom(room_id=1, name="r1", team_name=TEAM, members=["alice"])
-        r2 = roomService.ChatRoom(room_id=2, name="r2", team_name=TEAM, members=["alice"])
+        r1 = roomService.ChatRoom(
+            team=GtTeam(id=1, name=TEAM),
+            room=GtRoom(
+                id=1,
+                team_id=1,
+                name="r1",
+                type=roomService.RoomType.GROUP,
+                initial_topic="",
+                max_turns=0,
+                agent_read_index=None,
+                updated_at=GtRoom._now_iso(),
+            ),
+            members=["alice"],
+        )
+        r2 = roomService.ChatRoom(
+            team=GtTeam(id=1, name=TEAM),
+            room=GtRoom(
+                id=2,
+                team_id=1,
+                name="r2",
+                type=roomService.RoomType.GROUP,
+                initial_topic="",
+                max_turns=0,
+                agent_read_index=None,
+                updated_at=GtRoom._now_iso(),
+            ),
+            members=["alice"],
+        )
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
         await scheduler.startup(teams_config)
 
@@ -170,7 +236,20 @@ class TestSchedulerRun(ServiceTestCase):
     async def test_room_can_requeue_after_consumed(self):
         """事件被消费后，同一房间应该可以再次入队。"""
         alice = _make_mock_agent("alice")
-        room = roomService.ChatRoom(room_id=1, name="r1", team_name=TEAM, members=["alice"])
+        room = roomService.ChatRoom(
+            team=GtTeam(id=1, name=TEAM),
+            room=GtRoom(
+                id=1,
+                team_id=1,
+                name="r1",
+                type=roomService.RoomType.GROUP,
+                initial_topic="",
+                max_turns=0,
+                agent_read_index=None,
+                updated_at=GtRoom._now_iso(),
+            ),
+            members=["alice"],
+        )
         teams_config = [{"name": TEAM, "groups": [{"name": "r1", "members": ["alice"], "max_turns": 1}], "max_function_calls": 5}]
         await scheduler.startup(teams_config)
 
