@@ -119,6 +119,8 @@ async def main(
     await scheduler.startup(teams_config=teams_config)
     await chat_room.create_rooms(teams_config)
     await persistenceService.restore_runtime_state(agentService.get_all_agents(), chat_room.get_all_rooms())
+    activated = chat_room.exit_init_rooms()
+    logger.info("启动激活完成：退出 INIT 房间数=%s", activated)
 
     web_server = tornado.httpserver.HTTPServer(route.application)
     web_server.listen(port, "0.0.0.0")

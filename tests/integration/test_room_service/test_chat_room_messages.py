@@ -28,6 +28,7 @@ class TestChatRoomMessages(ServiceTestCase):
         """add_message 会追加消息并发布 ROOM_MSG_ADDED 事件。"""
         await roomService.create_room(TEAM, "test_room", ["alice"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
+        room.start_scheduling()
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message("alice", "hello")
             assert len(room.messages) == 2

@@ -154,5 +154,7 @@ async def hot_reload_team(name: str) -> None:
         logger.warning(f"热更新失败: Team '{name}' 不存在")
         return
     await roomService.refresh_rooms_for_team(team.id, team_configs)
+    activated = roomService.exit_init_rooms(name)
+    logger.info("Team '%s' 热更新后退出 INIT 房间数=%s", name, activated)
 
     logger.info(f"Team '{name}' 热更新完成")

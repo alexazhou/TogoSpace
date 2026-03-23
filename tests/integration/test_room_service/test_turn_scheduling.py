@@ -47,6 +47,7 @@ class TestTurnScheduling(ServiceTestCase):
         """当前发言人发言后，调用 finish_turn 才调度下一个发言人。"""
         await roomService.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
         room = roomService.get_room_by_key(f"r@{TEAM}")
+        room.start_scheduling()
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message("alice", "hello")
@@ -62,10 +63,11 @@ class TestTurnScheduling(ServiceTestCase):
             )
 
     async def test_turn_state_becomes_idle_after_max_turns(self):
-        """达到 max_turns 后房间状态应进入 IDLE。"""
+        """房间默认 INIT，完成一轮后应进入 IDLE。"""
         await roomService.create_room(TEAM, "r", ["a"], max_turns=1)
         room = roomService.get_room_by_key(f"r@{TEAM}")
-        assert room.state == RoomState.SCHEDULING
+        assert room.state == RoomState.INIT
+        room.start_scheduling()
         await room.add_message("a", "msg")
         # 消息不会自动推进轮次，需要显式调用 finish_turn
         room.finish_turn("a")
@@ -75,6 +77,7 @@ class TestTurnScheduling(ServiceTestCase):
         """超过最大轮次后继续发消息，不应再发布 TURN 事件。"""
         await roomService.create_room(TEAM, "r", ["a"], max_turns=1)
         room = roomService.get_room_by_key(f"r@{TEAM}")
+        room.start_scheduling()
         await room.add_message("a", "msg1")
 
         with patch("service.messageBus.publish") as mock_publish:

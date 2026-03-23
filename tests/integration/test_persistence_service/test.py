@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from service import ormService, persistenceService, roomService
+from service import ormService, persistenceService, roomService, messageBus
 from service.agentService import Agent
 from util.llmApiUtil import LlmApiMessage, OpenaiLLMApiRole
 from ...base import ServiceTestCase
@@ -33,11 +33,17 @@ class TestRestoreRoomHistory(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         cls.db_path = Path(f"/tmp/test_room_history_{os.getpid()}.db")
+        cls.db_path.unlink(missing_ok=True)
+        await persistenceService.shutdown()
+        await ormService.shutdown()
+        roomService.shutdown()
+        await messageBus.startup()
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await roomService.startup()
         await roomService.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3)
         room = roomService.get_room_by_key(f"r1@{TEAM}")
+        room.start_scheduling()
         await room.add_message("alice", "hello")
         await room.get_unread_messages("bob")
         await room.add_message("bob", "world")
@@ -57,6 +63,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
 
     @classmethod
     async def async_teardown_class(cls):
+        messageBus.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
         roomService.shutdown()
@@ -65,7 +72,6 @@ class TestRestoreRoomHistory(ServiceTestCase):
 
     async def test_messages_restored(self):
         assert [m.content for m in self.restored.messages] == [
-            "r1 房间已经创建，当前房间成员：alice、bob",
             "hello",
             "world",
         ]
@@ -84,6 +90,11 @@ class TestRestoreAgentHistory(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         cls.db_path = Path(f"/tmp/test_agent_history_{os.getpid()}.db")
+        cls.db_path.unlink(missing_ok=True)
+        await persistenceService.shutdown()
+        await ormService.shutdown()
+        roomService.shutdown()
+        await messageBus.startup()
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
 
@@ -106,6 +117,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
 
     @classmethod
     async def async_teardown_class(cls):
+        messageBus.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
         if cls.db_path and cls.db_path.exists():

@@ -46,12 +46,10 @@ class ChatRoom:
         self._turn_index: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
         self._max_turns: int = room.max_turns  # 最大允许轮次
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
-        self._state: RoomState = RoomState.IDLE  # 房间当前的调度状态
+        self._state: RoomState = RoomState.INIT  # 房间当前的调度状态
+        self._state_after_init: RoomState = RoomState.SCHEDULING if self.agents and room.max_turns > 0 else RoomState.IDLE
         self._round_skipped: set = set()  # 当前轮次已跳过发言的成员名单
         self._current_turn_has_content: bool = False  # 当前发言人是否已发送内容
-
-        if self.agents and room.max_turns > 0:
-            self._state = RoomState.SCHEDULING
 
     @property
     def key(self) -> str:
@@ -66,23 +64,28 @@ class ChatRoom:
         read_idx = self._agent_read_index.get(agent_name, 0)
         new_msgs = self.messages[read_idx:]
         self._agent_read_index[agent_name] = len(self.messages)
-        await persistenceService.save_room(self.room_id, self._agent_read_index)
+        if self._state != RoomState.INIT:
+            await persistenceService.save_room(self.room_id, self._agent_read_index)
         return new_msgs
 
-    async def add_message(self, sender: str, content: str, persist: bool = True, send_time: datetime | None = None) -> None:
+    async def add_message(self, sender: str, content: str, send_time: datetime | None = None) -> None:
         message = ChatMessage(
             sender_name=sender,
             content=content,
             send_time=send_time or datetime.now()
         )
-        if persist:
-            await persistenceService.append_room_message(
-                room_id=self.room_id,
-                sender=sender,
-                content=content,
-                send_time=message.send_time.isoformat(),
-            )
         self.messages.append(message)
+
+        if self._state == RoomState.INIT:
+            return
+
+        await persistenceService.append_room_message(
+            room_id=self.room_id,
+            sender=sender,
+            content=content,
+            send_time=message.send_time.isoformat(),
+        )
+
         messageBus.publish(
             MessageBusTopic.ROOM_MSG_ADDED,
             room_id=self.room_id,
@@ -94,9 +97,9 @@ class ChatRoom:
             time=message.send_time.isoformat(),
         )
         if self.agents:
-            self._update_turn_state_on_message(sender, publish_events=True)
+            self._update_turn_state_on_message(sender)
 
-    def _update_turn_state_on_message(self, sender: str, publish_events: bool) -> None:
+    def _update_turn_state_on_message(self, sender: str) -> None:
         # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
         was_idle = (self._state == RoomState.IDLE)
         if was_idle:
@@ -118,13 +121,17 @@ class ChatRoom:
             self._round_skipped = set()
 
         # 4. 如果刚才从 IDLE 唤醒，我们需要手动重发当前轮次事件以重启循环
-        if was_idle and publish_events:
+        if was_idle:
             self._publish_current_turn()
 
     def finish_turn(self, sender: str | None = None) -> bool:
         """结束当前发言人的轮次。通常由 Agent 在 finish_chat_turn 工具中调用。
         返回 True 表示操作成功，False 表示被拒绝（sender 不是当前发言人）。
         """
+        if self._state == RoomState.INIT:
+            logger.warning(f"房间 {self.key} 仍处于 INIT，拒绝结束轮次")
+            return False
+
         current_expected: Optional[str] = self.get_current_turn_agent()
 
         if sender and sender != current_expected:
@@ -138,7 +145,7 @@ class ChatRoom:
             self._round_skipped.add(current_expected)
 
         self._current_turn_has_content = False
-        self._update_turn_state_on_finish(publish_events=True)
+        self._update_turn_state_on_finish()
         return True
 
     def get_current_turn_agent(self) -> Optional[str]:
@@ -160,7 +167,7 @@ class ChatRoom:
                 team_name=self.team_name,
             )
 
-    def _update_turn_state_on_finish(self, publish_events: bool) -> None:
+    def _update_turn_state_on_finish(self) -> None:
         """结束当前发言后，推进并更新轮次状态。"""
         if not self.agents:
             return
@@ -187,10 +194,23 @@ class ChatRoom:
             return
 
         # 3. 正常发布下一位成员的发言事件
-        if publish_events:
+        self._publish_current_turn()
+
+    def exit_init_state(self) -> bool:
+        """退出 INIT 状态。仅第一次调用会生效并返回 True。"""
+        if self._state != RoomState.INIT:
+            return False
+
+        self._state = self._state_after_init
+        if self._state == RoomState.SCHEDULING:
             self._publish_current_turn()
+        return True
 
     def start_scheduling(self) -> None:
+        if self._state == RoomState.INIT:
+            self.exit_init_state()
+            return
+
         if self._state == RoomState.SCHEDULING:
             self._publish_current_turn()
 
@@ -208,8 +228,14 @@ class ChatRoom:
         self._agent_read_index = {name: tail for name in self.agents}
 
     def rebuild_state_from_history(self) -> None:
+        keep_init = (self._state == RoomState.INIT)
+
         if not self.agents or self._max_turns <= 0:
-            self._state = RoomState.IDLE
+            self._state_after_init = RoomState.IDLE
+            if keep_init:
+                self._state = RoomState.INIT
+            else:
+                self._state = RoomState.IDLE
             return
 
         self._turn_index = 0
@@ -218,7 +244,11 @@ class ChatRoom:
         self._state = RoomState.SCHEDULING
 
         for msg in self.messages:
-            self._update_turn_state_on_message(msg.sender_name, publish_events=False)
+            self._update_turn_state_on_message(msg.sender_name)
+
+        self._state_after_init = self._state
+        if keep_init:
+            self._state = RoomState.INIT
 
     def format_log(self) -> str:
         lines = [f"=== {self.key} 聊天记录 ==="]
@@ -287,7 +317,6 @@ async def _create_room(
     initial_topic: str = "",
     room_type: RoomType = RoomType.GROUP,
     max_turns: int = 0,
-    persist_initial_message: bool = True,
 ) -> None:
     """内部建房入口。"""
     # 1. 从 DB 查找 team_id 和已有 room_id
@@ -332,11 +361,11 @@ async def _create_room(
     if max_turns > 0:
         logger.info(f"初始化轮次配置: room_id={resolved_room_id}, max_turns={max_turns}")
 
-    await room.add_message("system", room.build_initial_system_message(), persist=persist_initial_message)
+    await room.add_message("system", room.build_initial_system_message())
 
 
 async def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0) -> None:
-    """创建并初始化一个聊天室。若 max_turns > 0 则启动轮次调度，发布系统公告。"""
+    """创建并初始化一个聊天室。创建后房间处于 INIT，需由 service 层显式退出 INIT。"""
     await _create_room(
         room_id=None,
         team_name=team_name,
@@ -345,7 +374,6 @@ async def create_room(team_name: str, name: str, members: List[str], initial_top
         initial_topic=initial_topic,
         room_type=room_type,
         max_turns=max_turns,
-        persist_initial_message=True,
     )
 
 
@@ -366,7 +394,6 @@ async def create_rooms(teams_config: list) -> None:
                 initial_topic=room.get("initial_topic", ""),
                 room_type=RoomType.value_of(room.get("type", "group")) or RoomType.GROUP,
                 max_turns=room.get("max_turns", 0),
-                persist_initial_message=False,
             )
 
 
@@ -414,10 +441,20 @@ async def refresh_rooms_for_team(team_id: int, teams_config: list) -> None:
                 initial_topic=room.get("initial_topic", ""),
                 room_type=RoomType.value_of(room.get("type", "group")) or RoomType.GROUP,
                 max_turns=room.get("max_turns", 0),
-                persist_initial_message=False,
             )
 
     logger.info(f"Team '{team_name}' 的聊天室已刷新，共 {len(_iter_team_rooms(target_config))} 个房间")
+
+
+def exit_init_rooms(team_name: str | None = None) -> int:
+    """内部 API：批量退出 INIT（可按 team 过滤）。"""
+    changed = 0
+    for room in _rooms.values():
+        if team_name is not None and room.team_name != team_name:
+            continue
+        if room.exit_init_state():
+            changed += 1
+    return changed
 
 
 async def close_team_rooms(team_id: int) -> None:

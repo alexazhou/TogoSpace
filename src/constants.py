@@ -36,6 +36,7 @@ class SpecialAgent(EnhanceEnum):
 
 
 class RoomState(EnhanceEnum):
+    INIT = "init"              # 房间初始化态：不推送事件，不持久化
     SCHEDULING = "scheduling"  # 房间正在调度，有事件待处理
     IDLE = "idle"              # 房间空闲，无更多事件
 

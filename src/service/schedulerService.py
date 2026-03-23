@@ -8,7 +8,7 @@ from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
 from service import agentService, roomService as chat_room
 from service.agentService import Agent
 from dal.db import gtRoomManager
-from constants import MessageBusTopic, SpecialAgent
+from constants import MessageBusTopic, SpecialAgent, RoomState
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,8 @@ async def run() -> None:
 
 def replay_scheduling_rooms() -> None:
     for room in chat_room.get_all_rooms():
-        room.start_scheduling()
+        if room.state == RoomState.SCHEDULING:
+            room.start_scheduling()
 
 
 def stop() -> None:
