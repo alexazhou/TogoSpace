@@ -227,19 +227,6 @@ class ChatRoom:
         for msg in self.messages:
             self._apply_turn_logic(msg.sender_name, publish_events=False)
 
-    def get_context(self, max_messages: int = 10) -> str:
-        recent = self.messages[-max_messages:]
-        return "\n".join(f"{m.sender_name}: {m.content}" for m in recent)
-
-    def get_context_messages(self, max_messages: int = 10) -> List[dict]:
-        recent = self.messages[-max_messages:]
-        return [
-            {"role": "system", "content": msg.content}
-            if msg.sender_name == "system"
-            else {"role": "user", "content": f"{msg.sender_name}: {msg.content}"}
-            for msg in recent
-        ]
-
     def format_log(self) -> str:
         lines = [f"=== {self.key} 聊天记录 ==="]
         for msg in self.messages:
