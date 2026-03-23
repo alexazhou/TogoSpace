@@ -21,12 +21,6 @@ def _normalize_members(members: Sequence[str | SpecialAgent] | None) -> List[str
     return [member.value if isinstance(member, SpecialAgent) else member for member in members]
 
 
-def _normalize_member_name(member: str | SpecialAgent | None) -> str | None:
-    if isinstance(member, SpecialAgent):
-        return member.value
-    return member
-
-
 @dataclass
 class ChatContext:
     """工具调用时注入的上下文，包含当前 Agent 和聊天室信息。"""
@@ -75,17 +69,16 @@ class ChatRoom:
         await persistenceService.save_room(self.room_id, self._agent_read_index)
         return new_msgs
 
-    async def add_message(self, sender: str | SpecialAgent, content: str, persist: bool = True, send_time: datetime | None = None) -> None:
-        normalized_sender = _normalize_member_name(sender)
+    async def add_message(self, sender: str, content: str, persist: bool = True, send_time: datetime | None = None) -> None:
         message = ChatMessage(
-            sender_name=normalized_sender,
+            sender_name=sender,
             content=content,
             send_time=send_time or datetime.now()
         )
         if persist:
             await persistenceService.append_room_message(
                 room_id=self.room_id,
-                sender=normalized_sender,
+                sender=sender,
                 content=content,
                 send_time=message.send_time.isoformat(),
             )
@@ -96,12 +89,12 @@ class ChatRoom:
             room_name=self.name,
             room_key=self.key,
             team_name=self.team_name,
-            sender=normalized_sender,
+            sender=sender,
             content=content,
             time=message.send_time.isoformat(),
         )
         if self.agents:
-            self._apply_turn_logic(normalized_sender, publish_events=True)
+            self._apply_turn_logic(sender, publish_events=True)
 
     def _apply_turn_logic(self, sender: str, publish_events: bool) -> None:
         # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
@@ -128,15 +121,14 @@ class ChatRoom:
         if was_idle and publish_events:
             self._publish_current_turn()
 
-    def finish_turn(self, sender: str | SpecialAgent = None) -> bool:
+    def finish_turn(self, sender: str | None = None) -> bool:
         """结束当前发言人的轮次。通常由 Agent 在 finish_chat_turn 工具中调用。
         返回 True 表示操作成功，False 表示被拒绝（sender 不是当前发言人）。
         """
-        normalized_sender = _normalize_member_name(sender)
         current_expected: Optional[str] = self.get_current_turn_agent()
 
-        if normalized_sender and normalized_sender != current_expected:
-            logger.warning(f"拒绝结束轮次申请：{normalized_sender} 并非当前发言人 ({current_expected})")
+        if sender and sender != current_expected:
+            logger.warning(f"拒绝结束轮次申请：{sender} 并非当前发言人 ({current_expected})")
             return False
 
         logger.info(f"房间 {self.key} 由 {current_expected} 结束本轮行动 (has_content={self._current_turn_has_content})")

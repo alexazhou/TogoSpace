@@ -84,7 +84,7 @@ def test_runtime_configs_allow_llm_only_config_dir(tmp_path):
     assert llm_cfg["base_url"] == "http://127.0.0.1:7777/v1/chat/completions"
     assert persistence_cfg == {
         "enabled": False,
-        "db_path": "./test_data/data.db",
+        "db_path": "../test_data/data.db",
     }
 
 
@@ -95,7 +95,7 @@ def test_persistence_default_db_path_in_non_test_env(tmp_path, monkeypatch):
     cfg = configUtil.load_persistence_config(str(tmp_path))
     assert cfg == {
         "enabled": False,
-        "db_path": "./data/data.db",
+        "db_path": "../data/data.db",
     }
 
 
@@ -105,5 +105,5 @@ def test_persistence_default_db_path_in_test_env(tmp_path, monkeypatch):
     cfg = configUtil.load_persistence_config(str(tmp_path))
     assert cfg == {
         "enabled": False,
-        "db_path": "./test_data/data.db",
+        "db_path": "../test_data/data.db",
     }

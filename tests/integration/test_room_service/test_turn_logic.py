@@ -225,15 +225,15 @@ class TestRoomTurnLogic(ServiceTestCase):
 
         with patch("service.messageBus.publish"):
             # operator 发言推进到 alice
-            await room.add_message(SpecialAgent.OPERATOR, "start")
-            room.finish_turn(SpecialAgent.OPERATOR)
+            await room.add_message(SpecialAgent.OPERATOR.value, "start")
+            room.finish_turn(SpecialAgent.OPERATOR.value)
             room.finish_turn(sender="alice")
             room.finish_turn(sender="bob")
 
         assert room.state == RoomState.IDLE
 
         with patch("service.messageBus.publish") as mock_publish:
-            await room.add_message(SpecialAgent.OPERATOR, "wake up")
+            await room.add_message(SpecialAgent.OPERATOR.value, "wake up")
             # 唤醒后 Operator 也要结束回合，或者不结束也行，看断言点
             # 这里断言唤醒后的状态，add_message 应该已经唤醒了
             assert room.state == RoomState.SCHEDULING
@@ -277,8 +277,8 @@ class TestRoomTurnLogic(ServiceTestCase):
 
         with patch("service.messageBus.publish"):
             # Operator 正常发言（推进到 alice）
-            await room.add_message(SpecialAgent.OPERATOR, "hello")
-            room.finish_turn(SpecialAgent.OPERATOR)
+            await room.add_message(SpecialAgent.OPERATOR.value, "hello")
+            room.finish_turn(SpecialAgent.OPERATOR.value)
             # 两个 AI Agent 均跳过
             room.finish_turn(sender="alice")
             room.finish_turn(sender="bob")
