@@ -1,5 +1,4 @@
 {
   "name": "bob",
-  "system_prompt": "你是 Bob，一个友好的聊天机器人。",
-  "model": "mock"
+  "system_prompt": "你是 Bob，一个友好的聊天机器人。"
 }

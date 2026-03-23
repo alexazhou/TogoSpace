@@ -100,7 +100,11 @@ async def main(
 
     await messageBus.startup()
     llmApiUtil.init()
-    await llmService.startup(api_key=llm_cfg["api_key"], base_url=llm_cfg["base_url"])
+    await llmService.startup(
+        api_key=llm_cfg["api_key"],
+        base_url=llm_cfg["base_url"],
+        model=llm_cfg.get("model"),
+    )
     await funcToolService.startup()
 
     await ormService.startup(persistence_cfg["db_path"])

@@ -1,4 +1,10 @@
 [
-  {"name": "alice", "system_prompt": "Alice prompt", "model": "gpt-3.5-turbo"},
-  {"name": "bob",   "system_prompt": "Bob prompt",   "model": "gpt-3.5-turbo"}
+  {
+    "name": "alice",
+    "system_prompt": "Alice prompt"
+  },
+  {
+    "name": "bob",
+    "system_prompt": "Bob prompt"
+  }
 ]
