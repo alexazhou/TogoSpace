@@ -11,7 +11,7 @@ from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager, gtRoomMess
 from model.coreModel.gtCoreWebModel import RoomInfo, MessageInfo, RoomMessagesResponse
 from model.dbModel.gtRoom import GtRoom
 from service import roomService as chat_room, teamService
-from constants import SpecialAgent, RoomType
+from constants import SpecialAgent, RoomType, RoomState
 from util import assertUtil
 
 
@@ -68,6 +68,11 @@ class RoomMessagesHandler(BaseHandler):
         # 通过数据库 ID 获取内存中的 ChatRoom
         room_id = int(room_id_str)
         room: chat_room.ChatRoom = chat_room.get_room(room_id)
+        assertUtil.assertTrue(
+            room.state != RoomState.INIT,
+            error_message="room is in init state, not activated by runtime services",
+            error_code="room_not_ready",
+        )
         body = json.loads(self.request.body)
         content = body.get("content")
         assertUtil.assertNotNull(content, error_message="content is required", error_code="invalid_request")
