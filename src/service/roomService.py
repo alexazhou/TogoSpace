@@ -322,44 +322,6 @@ def shutdown() -> None:
     _rooms_by_id.clear()
 
 
-async def _resolve_room_id(
-    room_id: int | None,
-    team_name: str,
-    name: str,
-    initial_topic: str,
-    room_type: RoomType,
-    max_turns: int,
-) -> tuple[int, int]:
-    """返回 (room_id, team_id)。"""
-    resolved_team_id = 0
-
-    if persistenceService.is_enabled():
-        team_row = await gtTeamManager.get_team(team_name)
-        if team_row is not None:
-            resolved_team_id = team_row.id
-            if room_id is None:
-                room_row = await gtRoomManager.get_room_config(team_row.id, name)
-                if room_row is not None:
-                    return room_row.id, resolved_team_id
-
-    if room_id is not None:
-        return room_id, resolved_team_id
-
-    synthetic_id = _synthetic_room_id(team_name, name)
-
-    if persistenceService.is_enabled():
-        await gtRoomManager.ensure_room(
-            room_id=synthetic_id,
-            team_id=resolved_team_id,
-            room_name=name,
-            room_type=room_type,
-            initial_topic=initial_topic,
-            max_turns=max_turns,
-        )
-
-    return synthetic_id, resolved_team_id
-
-
 async def _create_room(
     room_id: int | None,
     team_name: str,
@@ -371,14 +333,31 @@ async def _create_room(
     persist_initial_message: bool = True,
 ) -> None:
     """内部建房入口。"""
-    resolved_room_id, team_id = await _resolve_room_id(
-        room_id=room_id,
-        team_name=team_name,
-        name=name,
-        initial_topic=initial_topic,
-        room_type=room_type,
-        max_turns=max_turns,
-    )
+    # 1. 从 DB 查找 team_id 和已有 room_id
+    team_id = 0
+    if persistenceService.is_enabled():
+        team_row = await gtTeamManager.get_team(team_name)
+        if team_row is not None:
+            team_id = team_row.id
+            if room_id is None:
+                room_row = await gtRoomManager.get_room_config(team_row.id, name)
+                if room_row is not None:
+                    room_id = room_row.id
+
+    # 2. 仍无 room_id 则生成合成 ID，并确保 DB 有记录
+    if room_id is None:
+        room_id = _synthetic_room_id(team_name, name)
+        if persistenceService.is_enabled():
+            await gtRoomManager.ensure_room(
+                room_id=room_id,
+                team_id=team_id,
+                room_name=name,
+                room_type=room_type,
+                initial_topic=initial_topic,
+                max_turns=max_turns,
+            )
+
+    resolved_room_id = room_id
     room = ChatRoom(room_id=resolved_room_id, team_id=team_id, name=name, team_name=team_name, initial_topic=initial_topic,
                     room_type=room_type, members=members, max_turns=max_turns)
     room_key = room.key
