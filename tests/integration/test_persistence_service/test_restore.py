@@ -74,7 +74,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
             agent_messages = [m for m in room.messages if m.sender_name != "system"]
             assert len(agent_messages) == 0
 
-            room.start_scheduling()
+            room.activate_scheduling()
             await asyncio.sleep(0.8)
             scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)
@@ -101,7 +101,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
         with self.patch_infer(handler=fake_infer):
             run_task = asyncio.create_task(scheduler.run())
-            room.start_scheduling()
+            room.activate_scheduling()
             await asyncio.sleep(1.0)
             scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)

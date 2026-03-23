@@ -36,7 +36,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_key = f"{room_name}@{TEAM}"
         await roomService.create_room(TEAM, room_name, agents, room_type=RoomType.GROUP, max_turns=10)
         room = roomService.get_room_by_key(room_key)
-        room.start_scheduling()
+        assert room.activate_scheduling()
 
         assert room.get_current_turn_agent() == "alice"
         assert room._turn_pos == 0
@@ -78,7 +78,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         agents = ["alice", "bob"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
-        room.start_scheduling()
+        assert room.activate_scheduling()
 
         room.finish_turn(sender="bob")
         assert room.get_current_turn_agent() == "alice"
@@ -95,7 +95,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_key = f"{room_name}@{TEAM}"
         await roomService.create_room(TEAM, room_name, agents, max_turns=1)
         room = roomService.get_room_by_key(room_key)
-        room.start_scheduling()
+        assert room.activate_scheduling()
 
         await room.add_message("alice", "hi")
         room.finish_turn("alice")
@@ -130,7 +130,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         agents = ["a", "b"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=5)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
-        room.start_scheduling()
+        assert room.activate_scheduling()
 
         assert room._turn_index == 0
 
@@ -156,7 +156,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         agents = ["alice", "bob"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
-        room.start_scheduling()
+        assert room.activate_scheduling()
         assert room.state == RoomState.SCHEDULING
 
         with patch("service.messageBus.publish"):
@@ -176,7 +176,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         agents = ["alice", "bob"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
-        room.start_scheduling()
+        assert room.activate_scheduling()
 
         with patch("service.messageBus.publish") as mock_publish:
             room.finish_turn(sender="alice")
@@ -201,7 +201,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_key = f"{room_name}@{TEAM}"
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(room_key)
-        room.start_scheduling()
+        assert room.activate_scheduling()
 
         with patch("service.messageBus.publish"):
             room.finish_turn(sender="alice")
@@ -228,7 +228,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_key = f"{room_name}@{TEAM}"
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(room_key)
-        room.start_scheduling()
+        assert room.activate_scheduling()
 
         with patch("service.messageBus.publish"):
             # operator 发言推进到 alice
@@ -261,7 +261,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         agents = ["alice", "bob", "charlie"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
-        room.start_scheduling()
+        assert room.activate_scheduling()
 
         with patch("service.messageBus.publish"):
             room.finish_turn(sender="alice")   # alice 跳过
@@ -282,7 +282,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         agents = [SpecialAgent.OPERATOR, "alice", "bob"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
-        room.start_scheduling()
+        assert room.activate_scheduling()
 
         with patch("service.messageBus.publish"):
             # Operator 正常发言（推进到 alice）
@@ -304,7 +304,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         agents = ["alice", "bob"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
-        room.start_scheduling()
+        assert room.activate_scheduling()
 
         with patch("service.messageBus.publish"):
             # 第一轮：全员跳过 -> IDLE
@@ -335,7 +335,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         agents = ["alice", "bob", "charlie"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
-        room.start_scheduling()
+        assert room.activate_scheduling()
 
         with patch("service.messageBus.publish"):
             # 1. Alice 发言

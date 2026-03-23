@@ -56,7 +56,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             await roomService.create_room(TEAM, "general", ["alice", "bob"], max_turns=1)
             room = roomService.get_room_by_key(room_key)
             run_task = asyncio.create_task(scheduler.run())
-            room.start_scheduling()
+            room.activate_scheduling()
             await asyncio.sleep(1)
             scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)
@@ -133,7 +133,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             run_task = asyncio.create_task(scheduler.run())
             await roomService.create_room(TEAM, "general", ["alice", "bob"], max_turns=2)
             room = roomService.get_room_by_key(room_key)
-            room.start_scheduling()
+            room.activate_scheduling()
             for _ in range(20):
                 if room.state.value == "idle":
                     break

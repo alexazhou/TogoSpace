@@ -43,7 +43,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await roomService.startup()
         await roomService.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3)
         room = roomService.get_room_by_key(f"r1@{TEAM}")
-        room.start_scheduling()
+        room.activate_scheduling()
         await room.add_message("alice", "hello")
         await room.get_unread_messages("bob")
         await room.add_message("bob", "world")
