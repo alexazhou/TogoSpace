@@ -52,8 +52,9 @@ class TeamCreateHandler(BaseHandler):
 class TeamDetailHandler(BaseHandler):
     """GET /teams/{id}.json - 获取指定 Team 详情"""
 
-    async def get(self, team_id: str) -> None:
-        team = await gtTeamManager.get_team_by_id(int(team_id))
+    async def get(self, team_id_str: str) -> None:
+        team_id = int(team_id_str)
+        team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
         self.return_json(team)
@@ -62,11 +63,12 @@ class TeamDetailHandler(BaseHandler):
 class TeamModifyHandler(BaseHandler):
     """POST /teams/{id}/modify.json - 更新 Team 配置（自动触发热更新）"""
 
-    async def post(self, team_id: str) -> None:
+    async def post(self, team_id_str: str) -> None:
         request = self.parse_request(UpdateTeamRequest)
 
         # 通过 ID 获取 Team
-        team = await gtTeamManager.get_team_by_id(int(team_id))
+        team_id = int(team_id_str)
+        team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
         team_name = team.name
@@ -89,9 +91,10 @@ class TeamModifyHandler(BaseHandler):
 class TeamDeleteHandler(BaseHandler):
     """POST /teams/{id}/delete.json - 删除 Team（自动触发热更新）"""
 
-    async def post(self, team_id: str) -> None:
+    async def post(self, team_id_str: str) -> None:
         # 通过 ID 获取 Team
-        team = await gtTeamManager.get_team_by_id(int(team_id))
+        team_id = int(team_id_str)
+        team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
         team_name = team.name
