@@ -9,6 +9,7 @@ from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from .driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
+from dal.db import gtAgentManager
 from service.roomService import ChatRoom, ChatContext
 from constants import SpecialAgent, MessageBusTopic, AgentStatus
 
@@ -263,6 +264,10 @@ async def create_team_agents(teams_config: list[TeamConfig]) -> None:
                 f"创建 Agent 实例: key={key}, model={cfg['model']}, driver={driver_config.driver_type}"
             )
             await agent.startup()
+            try:
+                await gtAgentManager.upsert_agent(agent.team_id, agent.name, agent.model)
+            except Exception as e:
+                logger.warning(f"写入 Agent 数据失败: agent={agent.key}, error={e}")
 
 
 def get_agent(team_name: str, agent_name: str) -> Agent:
