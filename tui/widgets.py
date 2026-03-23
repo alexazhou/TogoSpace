@@ -141,7 +141,7 @@ class RoomPanel(Vertical):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._room_map: dict[str, RoomInfo] = {}
-        self._safe_to_room_id: dict[str, str] = {}
+        self._safe_to_room_key: dict[str, str] = {}
 
     def _get_agent_status_markup(self, status: str) -> str:
         if status == "active":
@@ -154,7 +154,7 @@ class RoomPanel(Vertical):
         agents: list[AgentInfo],
         last_previews: dict[str, str] | None = None,
     ) -> None:
-        self._room_map = {r.room_id: r for r in rooms}
+        self._room_map = {r.room_key: r for r in rooms}
         if last_previews is None:
             last_previews = {}
 
@@ -172,7 +172,7 @@ class RoomPanel(Vertical):
         for team_name, team_rooms in teams.items():
             for room in team_rooms:
                 icon = "👤" if room.room_type == "private" else "👥"
-                preview = last_previews.get(room.room_id, "暂无消息")
+                preview = last_previews.get(room.room_key, "暂无消息")
                 card = Vertical(
                     Horizontal(
                         Label(f"{icon} ", classes="room-card-icon"),
@@ -183,10 +183,10 @@ class RoomPanel(Vertical):
                     PreviewLabel(preview, classes="room-card-preview"),
                     classes="room-card",
                 )
-                safe_id = self._safe_id(room.room_id)
+                safe_id = self._safe_id(room.room_key)
                 item = ListItem(card, id=f"room-{safe_id}")
                 await room_list.append(item)
-                self.update_unread_count(room.room_id, 0)
+                self.update_unread_count(room.room_key, 0)
 
         # Agent 去重展示（同名 agent 跨 team 只显示一次）
         seen_agents: set[str] = set()
@@ -204,21 +204,21 @@ class RoomPanel(Vertical):
             )
             await agent_list.append(item)
 
-    def _safe_id(self, room_id: str) -> str:
+    def _safe_id(self, room_key: str) -> str:
         import hashlib
-        h = hashlib.md5(room_id.encode()).hexdigest()[:12]
-        self._safe_to_room_id[h] = room_id
+        h = hashlib.md5(room_key.encode()).hexdigest()[:12]
+        self._safe_to_room_key[h] = room_key
         return h
 
-    def room_id_from_safe(self, safe_id: str) -> str | None:
-        return self._safe_to_room_id.get(safe_id)
+    def room_key_from_safe(self, safe_id: str) -> str | None:
+        return self._safe_to_room_key.get(safe_id)
 
-    def update_unread_count(self, room_id: str, count: int) -> None:
+    def update_unread_count(self, room_key: str, count: int) -> None:
         try:
-            safe_id = self._safe_id(room_id)
+            safe_id = self._safe_id(room_key)
             item = self.query_one(f"#room-{safe_id}", ListItem)
-            room = self._room_map.get(room_id)
-            name = room.room_name if room else room_id
+            room = self._room_map.get(room_key)
+            name = room.room_name if room else room_key
             icon = "👤" if room and room.room_type == "private" else "👥"
             if count > 0:
                 markup = f"{name} [bold #f85149][{count}][/bold #f85149][#7f91a4] 未读[/]"
@@ -227,11 +227,11 @@ class RoomPanel(Vertical):
             item.query_one(".room-card-icon", Label).update(f"{icon} ")
             item.query_one(".room-card-name", Label).update(markup)
         except Exception:
-            log.exception("update_unread_count 失败: room_id=%s count=%s", room_id, count)
+            log.exception("update_unread_count 失败: room_key=%s count=%s", room_key, count)
 
-    def update_preview(self, room_id: str, preview: str) -> None:
+    def update_preview(self, room_key: str, preview: str) -> None:
         try:
-            safe_id = self._safe_id(room_id)
+            safe_id = self._safe_id(room_key)
             item = self.query_one(f"#room-{safe_id}", ListItem)
             item.query_one(".room-card-preview", PreviewLabel).set_preview(preview)
         except Exception:
@@ -247,11 +247,11 @@ class RoomPanel(Vertical):
             except Exception:
                 pass
 
-    def mark_selected(self, room_id: str) -> None:
+    def mark_selected(self, room_key: str) -> None:
         for item in self.query("#room-list ListItem"):
             item.remove_class("selected-room")
         try:
-            safe_id = self._safe_id(room_id)
+            safe_id = self._safe_id(room_key)
             self.query_one(f"#room-{safe_id}", ListItem).add_class("selected-room")
         except Exception:
             pass

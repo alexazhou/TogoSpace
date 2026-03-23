@@ -74,7 +74,7 @@ class WatcherApp(App):
 
         async def _fetch(room: RoomInfo) -> None:
             try:
-                msgs = await self._api.get_room_messages(room.db_id)
+                msgs = await self._api.get_room_messages(room.room_id)
                 if msgs:
                     last = msgs[-1]
                     previews[room.room_key] = _make_preview(last.sender, last.content)
@@ -127,7 +127,7 @@ class WatcherApp(App):
         hint_label = self.query_one("#chat-input-hint")
 
         try:
-            # 根据 room_id 查找对应的 db_id
+            # 根据 room_key 找到房间，再用 room_id 拉取消息
             current_room = next((r for r in self._rooms if r.room_key == room_key), None)
             if not current_room:
                 raise ValueError(f"房间不存在: {room_key}")
@@ -223,9 +223,9 @@ class WatcherApp(App):
         if item.id and item.id.startswith("room-"):
             safe_id = item.id[len("room-"):]
             room_panel = self.query_one(RoomPanel)
-            room_id = room_panel.room_id_from_safe(safe_id)
-            if room_id:
-                await self._select_room(room_id)
+            room_key = room_panel.room_key_from_safe(safe_id)
+            if room_key:
+                await self._select_room(room_key)
 
     @on(Input.Submitted, "#chat-input")
     async def on_input_submitted(self, event: Input.Submitted) -> None:
