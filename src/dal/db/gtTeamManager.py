@@ -3,11 +3,12 @@ from __future__ import annotations
 import logging
 
 from model.dbModel.gtTeam import GtTeam
+from util.configTypes import TeamConfig, TeamRoomConfig
 
 logger = logging.getLogger(__name__)
 
 
-def _iter_team_rooms(team_config: dict) -> list[dict]:
+def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
     return team_config.get("preset_rooms") or []
 
 
@@ -32,7 +33,7 @@ async def get_all_teams() -> list[GtTeam]:
     )
 
 
-async def upsert_team(team_config: dict) -> GtTeam:
+async def upsert_team(team_config: TeamConfig) -> GtTeam:
     """创建或更新 Team。"""
     name = team_config["name"]
     max_function_calls = team_config.get("max_function_calls", 5)
@@ -74,7 +75,7 @@ async def team_exists(name: str) -> bool:
 
 
 # 完整配置获取
-async def get_team_config(name: str) -> dict | None:
+async def get_team_config(name: str) -> TeamConfig | None:
     """获取指定 Team 的完整配置（类似 JSON 格式）。"""
     from dal.db import gtRoomManager, gtRoomMemberManager
 
@@ -84,7 +85,7 @@ async def get_team_config(name: str) -> dict | None:
 
     team_id = team.id
 
-    rooms = []
+    rooms: list[TeamRoomConfig] = []
     all_members: set[str] = set()
     for room in await gtRoomManager.get_rooms_by_team(team_id):
         members = await gtRoomMemberManager.get_members_by_room(room.id)
@@ -100,10 +101,11 @@ async def get_team_config(name: str) -> dict | None:
         "name": team.name,
         "members": sorted(all_members),
         "preset_rooms": rooms,
+        "max_function_calls": team.max_function_calls,
     }
 
 
-async def get_all_team_configs() -> list[dict]:
+async def get_all_team_configs() -> list[TeamConfig]:
     """获取所有 Team 的完整配置列表。"""
     result = []
     for team in await get_all_teams():
@@ -114,7 +116,7 @@ async def get_all_team_configs() -> list[dict]:
 
 
 # JSON 到数据库的转换
-async def import_team_from_json(team_config: dict) -> None:
+async def import_team_from_json(team_config: TeamConfig) -> None:
     """从 JSON 配置导入 Team 到数据库。"""
     from dal.db import gtRoomManager, gtRoomMemberManager
 

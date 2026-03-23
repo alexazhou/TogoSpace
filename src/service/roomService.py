@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Sequence
 
 from dal.db import gtRoomManager, gtTeamManager
 from service import messageBus, persistenceService
+from util.configTypes import TeamConfig, TeamRoomConfig
 from model.coreModel.gtCoreChatModel import ChatMessage
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
@@ -285,7 +286,7 @@ def _room_key(team_name: str, room_name: str) -> str:
     return f"{room_name}@{team_name}"
 
 
-def _iter_team_rooms(team_config: dict) -> list[dict]:
+def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
     return team_config.get("preset_rooms") or []
 
 
@@ -390,7 +391,7 @@ async def create_room(team_name: str, name: str, members: List[str], initial_top
     )
 
 
-async def create_rooms(teams_config: list) -> None:
+async def create_rooms(teams_config: list[TeamConfig]) -> None:
     """遍历所有 team，根据 rooms 配置批量创建聊天室。
 
     批量启动路径始终先生成初始化消息；若后续启用持久化恢复，恢复出的历史消息
@@ -425,7 +426,7 @@ def get_rooms_for_agent(team_id: int | None, agent_name: str) -> List[int]:
     return results
 
 
-async def refresh_rooms_for_team(team_id: int, teams_config: list) -> None:
+async def refresh_rooms_for_team(team_id: int, teams_config: list[TeamConfig]) -> None:
     """根据新的 Team 配置刷新聊天室。"""
     team_row = await gtTeamManager.get_team_by_id(team_id)
     if team_row is None:

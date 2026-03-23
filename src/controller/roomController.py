@@ -11,8 +11,9 @@ from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager, gtRoomMess
 from model.coreModel.gtCoreWebModel import RoomInfo, MessageInfo, RoomMessagesResponse
 from model.dbModel.gtRoom import GtRoom
 from service import roomService as chat_room, teamService
-from constants import SpecialAgent, RoomType, RoomState
+from constants import SpecialAgent, RoomState
 from util import assertUtil
+from util.configTypes import TeamRoomConfig
 
 
 # Room Config Request Models
@@ -122,20 +123,21 @@ class TeamRoomCreateHandler(BaseHandler):
         assertUtil.assertEqual(existing, None, error_message=f"Room '{request.name}' already exists", error_code="room_exists")
 
         # 构建房间配置
-        room_config = {
+        room_config: TeamRoomConfig = {
             "name": request.name,
-            "type": RoomType.value_of(request.type).value if RoomType.value_of(request.type) else RoomType.GROUP.value,
+            "members": [],
             "initial_topic": request.initial_topic,
             "max_turns": request.max_turns,
         }
 
         # upsert_rooms 会先删除该 team 下所有房间再重新插入，这在只添加一个房间时可能不太合适
         # 但目前 gtRoomManager 实现如此，暂且遵循。
-        new_rooms_configs = []
+        new_rooms_configs: list[TeamRoomConfig] = []
         for r in existing_rooms:
+            members = await gtRoomMemberManager.get_members_by_room(r.id)
             new_rooms_configs.append({
                 "name": r.name,
-                "type": r.type.value,
+                "members": members,
                 "initial_topic": r.initial_topic,
                 "max_turns": r.max_turns,
             })
@@ -191,24 +193,24 @@ class TeamRoomModifyHandler(BaseHandler):
         assertUtil.assertNotNull(room, error_message=f"Room ID '{room_id}' not found", error_code="room_not_found")
         room_name = room.name
 
-        room_type = RoomType.value_of(request.type) or RoomType.GROUP
         initial_topic = request.initial_topic if request.initial_topic is not None else room.initial_topic
         max_turns = request.max_turns if request.max_turns is not None else room.max_turns
 
         existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
-        all_rooms = []
+        all_rooms: list[TeamRoomConfig] = []
         for r in existing_rooms:
+            members = await gtRoomMemberManager.get_members_by_room(r.id)
             if r.id == room_id:
                 all_rooms.append({
                     "name": room_name,
-                    "type": room_type.name,
+                    "members": members,
                     "initial_topic": initial_topic,
                     "max_turns": max_turns,
                 })
             else:
                 all_rooms.append({
                     "name": r.name,
-                    "type": r.type.name,
+                    "members": members,
                     "initial_topic": r.initial_topic,
                     "max_turns": r.max_turns,
                 })
@@ -239,15 +241,19 @@ class TeamRoomDeleteHandler(BaseHandler):
         existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
         remaining_rooms = [r for r in existing_rooms if r.id != room_id]
 
-        await gtRoomManager.upsert_rooms(team_id, [
-            {
-                "name": r.name,
-                "type": r.type.name,
-                "initial_topic": r.initial_topic,
-                "max_turns": r.max_turns,
-            }
-            for r in remaining_rooms
-        ])
+        room_configs: list[TeamRoomConfig] = []
+        for r in remaining_rooms:
+            members = await gtRoomMemberManager.get_members_by_room(r.id)
+            room_configs.append(
+                {
+                    "name": r.name,
+                    "members": members,
+                    "initial_topic": r.initial_topic,
+                    "max_turns": r.max_turns,
+                }
+            )
+
+        await gtRoomManager.upsert_rooms(team_id, room_configs)
 
         await gtRoomMemberManager.delete_members_by_room(target_room_id)
         await teamService.hot_reload_team(team_name)

@@ -3,6 +3,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from util import llmApiUtil, configUtil
+from util.configTypes import TeamConfig, TeamRoomConfig
 from model.coreModel.gtCoreChatModel import AgentDialogContext, ChatMessage
 from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -22,11 +23,11 @@ def _make_agent_key(team_name: str, agent_name: str) -> str:
     return f"{agent_name}@{team_name}"
 
 
-def _iter_team_rooms(team_config: dict) -> list[dict]:
+def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
     return team_config.get("preset_rooms") or []
 
 
-async def load_team_ids(teams_config: list) -> None:
+async def load_team_ids(teams_config: list[TeamConfig]) -> None:
     """Load team_id for each team name."""
     from dal.db import gtTeamManager
     global _team_ids
@@ -224,16 +225,16 @@ def load_agent_config(agents_config: list) -> None:
     logger.info(f"加载 Agent 定义: {list(_agent_defs.keys())}")
 
 
-async def create_team_agents(teams_config: list) -> None:
+async def create_team_agents(teams_config: list[TeamConfig]) -> None:
     base_prompt_tmpl = configUtil.load_prompt("src/prompts/GroupChat.md")
 
     for team_config in teams_config:
         team_name = team_config["name"]
 
-        agent_names_in_team = set()
+        agent_names_in_team: set[str] = set()
         for room in _iter_team_rooms(team_config):
             for name in room["members"]:
-                if name != SpecialAgent.OPERATOR:
+                if name != SpecialAgent.OPERATOR.value:
                     agent_names_in_team.add(name)
 
         for name in agent_names_in_team:

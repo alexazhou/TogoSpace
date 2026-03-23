@@ -4,20 +4,20 @@ import glob
 import json
 import logging
 import os
-from typing import List
+from typing import cast
 
 from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager
-from constants import RoomType
 from exception import TeamAgentException
+from util.configTypes import TeamConfig, TeamRoomConfig
 
 logger = logging.getLogger(__name__)
 
 
-def _iter_team_rooms(team_config: dict) -> list[dict]:
+def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
     return team_config.get("preset_rooms") or []
 
 
-async def startup(config_dir: str = None) -> list:
+async def startup(config_dir: str = None) -> list[TeamConfig]:
     """启动时加载 Team 配置：
     1. 从数据库加载现有配置
     2. 从 JSON 文件扫描新配置，导入数据库
@@ -28,10 +28,10 @@ async def startup(config_dir: str = None) -> list:
     if config_dir is None:
         config_dir = os.path.join(os.path.dirname(__file__), "../../config")
     teams_dir = os.path.join(config_dir, "teams")
-    json_teams = {}
+    json_teams: dict[str, TeamConfig] = {}
     for path in sorted(glob.glob(os.path.join(teams_dir, "*.json"))):
         with open(path, "r", encoding="utf-8") as f:
-            team_config = json.load(f)
+            team_config = cast(TeamConfig, json.load(f))
             name = team_config["name"]
             json_teams[name] = team_config
             logger.info(f"扫描到 Team 配置文件: {path}")
@@ -53,12 +53,12 @@ async def startup(config_dir: str = None) -> list:
     return team_configs
 
 
-async def reload_from_db() -> list:
+async def reload_from_db() -> list[TeamConfig]:
     """从数据库重新加载配置。"""
     return await gtTeamManager.get_all_team_configs()
 
 
-async def create_team(team_config: dict) -> None:
+async def create_team(team_config: TeamConfig) -> None:
     """创建新 Team（自动触发热更新）。"""
     name = team_config["name"]
 
@@ -92,7 +92,7 @@ async def create_team(team_config: dict) -> None:
     logger.info(f"Team '{name}' 已创建")
 
 
-async def update_team(team_config: dict) -> None:
+async def update_team(team_config: TeamConfig) -> None:
     """更新 Team 配置并触发热更新。"""
     name = team_config["name"]
 
