@@ -1,0 +1,5 @@
+[run]
+data_file = test_data/coverage/.coverage
+
+[xml]
+output = test_data/coverage/coverage.xml
