@@ -183,7 +183,13 @@ class ServiceTestCase:
         try:
             if cls.requires_backend:
                 cls._load_config()
-            cls._cleanup_test_db_files()
+            cls.cleanup_sqlite_files(cls.get_test_db_path())
+            if cls.requires_backend:
+                persistence_cfg = configUtil.load_persistence_config(cls._backend_config_dir)
+                db_path = persistence_cfg.get("db_path")
+                if db_path and db_path != ":memory:":
+                    db_abs = db_path if os.path.isabs(db_path) else os.path.abspath(os.path.join(_SRC_DIR, db_path))
+                    cls.cleanup_sqlite_files(db_abs)
             if cls.requires_mock_llm:
                 cls._start_mock_llm()
             if cls.requires_backend:
@@ -286,21 +292,6 @@ class ServiceTestCase:
             return
 
         cls._backend_config_dir = config_dir
-
-    @classmethod
-    def _cleanup_test_db_files(cls) -> None:
-        """每个测试类启动前删除测试 DB，避免残留数据污染。"""
-        cls.cleanup_sqlite_files(cls.get_test_db_path())
-
-        if not cls.requires_backend:
-            return
-
-        # 清理后端子进程使用的 DB（路径由 config 决定，_load_config 已先于此方法运行）
-        persistence_cfg = configUtil.load_persistence_config(cls._backend_config_dir)
-        db_path = persistence_cfg.get("db_path")
-        if db_path and db_path != ":memory:":
-            db_abs = db_path if os.path.isabs(db_path) else os.path.abspath(os.path.join(_SRC_DIR, db_path))
-            cls.cleanup_sqlite_files(db_abs)
 
     @classmethod
     def cleanup_sqlite_files(cls, db_path: str) -> None:
