@@ -18,12 +18,14 @@ class TeamMemberRequest(BaseModel):
 class CreateTeamRequest(BaseModel):
     name: str
     working_directory: str = ""
+    config: dict = {}
     members: list[TeamMemberRequest]
     preset_rooms: list[TeamRoomConfig]
 
 
 class UpdateTeamRequest(BaseModel):
     working_directory: str | None = None
+    config: dict | None = None
     members: list[TeamMemberRequest] | None = None
     preset_rooms: list[TeamRoomConfig] | None = None
 
@@ -40,6 +42,7 @@ class TeamListHandler(BaseHandler):
                         "id": team.id,
                         "name": team.name,
                         "working_directory": team.working_directory,
+                        "config": team.get_config(),
                         "max_function_calls": team.max_function_calls,
                         "enabled": team.enabled,
                         "created_at": team.created_at,
@@ -60,6 +63,7 @@ class TeamCreateHandler(BaseHandler):
         team_config: TeamConfig = normalize_team_config({
             "name": request.name,
             "working_directory": request.working_directory,
+            "config": request.config,
             "members": [member.model_dump(mode="json") for member in request.members],
             "preset_rooms": request.preset_rooms,
         })
@@ -108,6 +112,7 @@ class TeamDetailHandler(BaseHandler):
                 "id": team.id,
                 "name": team.name,
                 "working_directory": team.working_directory,
+                "config": team.get_config(),
                 "max_function_calls": team.max_function_calls,
                 "enabled": team.enabled,
                 "created_at": team.created_at,
@@ -140,6 +145,7 @@ class TeamModifyHandler(BaseHandler):
         team_config: TeamConfig = {
             "name": team_name,
             "working_directory": current_config.get("working_directory", ""),
+            "config": dict(current_config.get("config", {})),
             "members": list(current_config["members"]),
             "preset_rooms": list(current_config["preset_rooms"]),
         }
@@ -148,6 +154,8 @@ class TeamModifyHandler(BaseHandler):
 
         if request.working_directory is not None:
             team_config["working_directory"] = request.working_directory
+        if request.config is not None:
+            team_config["config"] = request.config
         if request.members is not None:
             team_config["members"] = [member.model_dump(mode="json") for member in request.members]
         if request.preset_rooms is not None:

@@ -35,6 +35,7 @@ class TestTeamController(_ApiServiceCase):
 
         assert data["name"] == "e2e"
         assert data["working_directory"] == ""
+        assert data["config"] == {}
         assert data["members"] == [{"name": "alice", "agent": "alice"}]
         assert len(data["rooms"]) == 1
         room = data["rooms"][0]
@@ -46,6 +47,10 @@ class TestTeamController(_ApiServiceCase):
         payload = {
             "name": "new_team",
             "working_directory": "/tmp/new_team",
+            "config": {
+                "slogan": "使命必达",
+                "rules": "先沟通后执行",
+            },
             "members": [{"name": "alice", "agent": "alice"}],
             "preset_rooms": [
                 {
@@ -77,6 +82,10 @@ class TestTeamController(_ApiServiceCase):
 
         assert detail["members"] == [{"name": "alice", "agent": "alice"}]
         assert detail["working_directory"] == "/tmp/new_team"
+        assert detail["config"] == {
+            "slogan": "使命必达",
+            "rules": "先沟通后执行",
+        }
         assert len(detail["rooms"]) == 1
         assert detail["rooms"][0]["name"] == "团队群聊"
 
