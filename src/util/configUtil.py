@@ -21,7 +21,7 @@ def _is_test_env() -> bool:
 
 
 def _default_db_path() -> str:
-    return "./test_data/data.db" if _is_test_env() else "./data/data.db"
+    return "../test_data/data.db" if _is_test_env() else "../data/data.db"
 
 
 def _resolve_config_file(config_dir: str | None, preferred_name: str) -> str:

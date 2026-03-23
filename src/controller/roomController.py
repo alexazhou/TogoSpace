@@ -72,8 +72,8 @@ class RoomMessagesHandler(BaseHandler):
         content = body.get("content")
         assertUtil.assertNotNull(content, error_message="content is required", error_code="invalid_request")
 
-        await room.add_message(SpecialAgent.OPERATOR, content)
-        room.finish_turn(SpecialAgent.OPERATOR)
+        await room.add_message(SpecialAgent.OPERATOR.value, content)
+        room.finish_turn(SpecialAgent.OPERATOR.value)
         self.return_json({"status": "ok"})
 
 
