@@ -101,6 +101,7 @@ class ServiceTestCase:
     _backend_config_dir: str = None
 
     mock_llm_server: MockLLMServer = None
+    TEST_DB_PATH: str = "/tmp/teamagent_tests.db"
 
     # ------------------------------------------------------------------
     # LLM Patching (In-Process Mocking)
@@ -318,6 +319,19 @@ class ServiceTestCase:
             target = f"{db_abs_path}{suffix}"
             with contextlib.suppress(FileNotFoundError):
                 os.remove(target)
+
+    @classmethod
+    def cleanup_sqlite_files(cls, db_path: str) -> None:
+        """删除 sqlite 数据库文件及其附属日志文件。"""
+        db_abs_path = db_path if os.path.isabs(db_path) else os.path.abspath(db_path)
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            target = f"{db_abs_path}{suffix}"
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(target)
+
+    @classmethod
+    def get_test_db_path(cls) -> str:
+        return cls.TEST_DB_PATH
 
     @classmethod
     def _start_backend(cls):

@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -27,6 +26,8 @@ if os.name == "posix" and sys.platform == "darwin":
 
 @pytest.mark.forked
 class TestPersistenceRestoreIntegration(ServiceTestCase):
+    db_path: str = ""
+
     async def _reset_runtime_services(self):
         scheduler.shutdown()
         funcToolService.shutdown()
@@ -37,19 +38,22 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         roomService.shutdown()
 
     def setup_method(self):
+        self.db_path = self.get_test_db_path()
+        self.cleanup_sqlite_files(self.db_path)
         self._run_maybe_async(self._reset_runtime_services())
 
     def teardown_method(self):
         self._run_maybe_async(self._reset_runtime_services())
+        self.cleanup_sqlite_files(self.db_path)
 
-    async def _bootstrap(self, db_path: Path):
+    async def _bootstrap(self):
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
 
         await roomService.startup()
         await funcToolService.startup()
         await agentService.startup()
-        await ormService.startup(str(db_path))
+        await ormService.startup(self.db_path)
         await persistenceService.startup()
 
         agentService.load_agent_config(agents_config)
@@ -59,8 +63,8 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await scheduler.startup([team_config])
         return team_config
 
-    async def test_room_requires_explicit_start_before_scheduler_runs(self, tmp_path: Path):
-        await self._bootstrap(tmp_path / "state.db")
+    async def test_room_requires_explicit_start_before_scheduler_runs(self):
+        await self._bootstrap()
 
         room = roomService.get_room_by_key(f"general@{TEAM}")
         assert len(room.messages) == 1
@@ -82,10 +86,8 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         agent_messages = [m for m in room.messages if m.sender_name != "system"]
         assert len(agent_messages) >= 1
 
-    async def test_restore_runtime_state_recovers_room_and_agent_history(self, tmp_path: Path):
-        db_path = tmp_path / "state.db"
-
-        await self._bootstrap(db_path)
+    async def test_restore_runtime_state_recovers_room_and_agent_history(self):
+        await self._bootstrap()
 
         room = roomService.get_room_by_key(f"general@{TEAM}")
 
@@ -119,7 +121,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         roomService.shutdown()
 
         # 重启并恢复状态
-        await self._bootstrap(db_path)
+        await self._bootstrap()
 
         restored_room = roomService.get_room_by_key(f"general@{TEAM}")
         restored_alice = agentService.get_agent(TEAM, "alice")

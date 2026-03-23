@@ -228,6 +228,7 @@ def load_agent_config(agents_config: list) -> None:
 
 async def create_team_agents(teams_config: list[TeamConfig]) -> None:
     base_prompt_tmpl = configUtil.load_prompt("src/prompts/GroupChat.md")
+    default_model = llmService.get_default_model()
 
     for team_config in teams_config:
         team_name = team_config["name"]
@@ -250,18 +251,19 @@ async def create_team_agents(teams_config: list[TeamConfig]) -> None:
                 agent_specific_prompt = configUtil.load_prompt(cfg["prompt_file"])
 
             full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
+            model_name = cfg.get("model") or default_model
             key = _make_agent_key(team_name, name)
             driver_config = normalize_driver_config(cfg)
             agent = Agent(
                 name=name,
                 team_name=team_name,
                 system_prompt=full_prompt,
-                model=cfg["model"],
+                model=model_name,
                 driver_config=driver_config,
             )
             _agents[key] = agent
             logger.info(
-                f"创建 Agent 实例: key={key}, model={cfg['model']}, driver={driver_config.driver_type}"
+                f"创建 Agent 实例: key={key}, model={model_name}, driver={driver_config.driver_type}"
             )
             await agent.startup()
             try:

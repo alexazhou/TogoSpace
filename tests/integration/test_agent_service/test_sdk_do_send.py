@@ -23,15 +23,19 @@ class TestSdkDoSend(ServiceTestCase):
 
     @classmethod
     async def async_setup_class(cls):
-        await ormService.startup(":memory:")
+        db_path = cls.get_test_db_path()
+        cls.cleanup_sqlite_files(db_path)
+        await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
 
     @classmethod
     async def async_teardown_class(cls):
+        db_path = cls.get_test_db_path()
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
+        cls.cleanup_sqlite_files(db_path)
 
     async def _make_driver_with_room(self, agent_name: str, current_room_name: str):
         """创建房间、agent 和 SDK driver，注入当前房间上下文。"""
@@ -113,17 +117,21 @@ class _FakeClaudeClient:
 class TestClaudeSdkAgentDriver(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
-        await ormService.startup(":memory:")
+        db_path = cls.get_test_db_path()
+        cls.cleanup_sqlite_files(db_path)
+        await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
         await agentService.startup()
 
     @classmethod
     async def async_teardown_class(cls):
+        db_path = cls.get_test_db_path()
         await agentService.shutdown()
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
+        cls.cleanup_sqlite_files(db_path)
 
     async def test_run_chat_turn_requires_started_client(self):
         await roomService.create_room(TEAM, "lobby", ["alice"])
