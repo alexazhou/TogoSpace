@@ -11,9 +11,6 @@ import tornado.httpserver
 
 from util import llmApiUtil, configUtil
 from util.configTypes import TeamConfig
-load_agents = configUtil.load_agents
-load_llmService_config = configUtil.load_llmService_config
-load_persistence_config = configUtil.load_persistence_config
 from service import (
     messageBus,
     schedulerService as scheduler,
@@ -79,12 +76,6 @@ def _remove_pid() -> None:
         pass
 
 
-def _load_runtime_configs(config_dir: str = None) -> tuple[dict, dict]:
-    llm_cfg = load_llmService_config(config_dir)
-    persistence_cfg = load_persistence_config(config_dir)
-    return llm_cfg, persistence_cfg
-
-
 async def main(
     config_dir: str = None,
     port: int = 8080,
@@ -95,29 +86,28 @@ async def main(
     _setup_logger()
     logger = logging.getLogger(__name__)
 
-    agents_config = load_agents(config_dir)
-    llm_cfg, persistence_cfg = _load_runtime_configs(config_dir)
+    app_config = configUtil.load(config_dir)
 
     await messageBus.startup()
     llmApiUtil.init()
     await llmService.startup(
-        api_key=llm_cfg["api_key"],
-        base_url=llm_cfg["base_url"],
-        model=llm_cfg.get("model"),
+        api_key=app_config.llm_service.api_key,
+        base_url=app_config.llm_service.base_url,
+        model=app_config.llm_service.model,
     )
     await funcToolService.startup()
 
-    await ormService.startup(persistence_cfg["db_path"])
+    await ormService.startup(app_config.persistence.db_path)
     await persistenceService.startup()
 
     # 从 teamService 加载 Team 配置（会自动从 JSON 导入到数据库）
-    teams_config: list[TeamConfig] = await teamService.startup(config_dir)
+    teams_config: list[TeamConfig] = await teamService.startup(app_config.teams)
 
     # 加载 team_id 映射
     await agentService.load_team_ids(teams_config)
 
     await agentService.startup()
-    agentService.load_agent_config(agents_config)
+    agentService.load_agent_config(app_config.agents)
     await agentService.create_team_agents(teams_config)
 
     await chat_room.startup()

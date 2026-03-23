@@ -1,4 +1,5 @@
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, List
 
 from typing_extensions import NotRequired, Required, TypedDict
 
@@ -45,4 +46,29 @@ class AgentConfig(TypedDict, total=False):
     runtime: dict[str, Any]
 
 
-__all__ = ["TeamRoomConfig", "TeamConfig", "TeamConfigPatch", "AgentConfig"]
+@dataclass
+class LlmServiceConfig:
+    name: str
+    base_url: str
+    api_key: str
+    type: str
+    model: str | None = None
+    enable: bool = True
+
+
+@dataclass
+class PersistenceConfig:
+    enabled: bool = False
+    db_path: str = "../data/data.db"
+
+
+@dataclass
+class AppConfig:
+    agents: List[AgentConfig]
+    teams: List[TeamConfig]
+    llm_service: LlmServiceConfig
+    persistence: PersistenceConfig
+
+
+__all__ = ["TeamRoomConfig", "TeamConfig", "TeamConfigPatch", "AgentConfig",
+           "LlmServiceConfig", "PersistenceConfig", "AppConfig"]

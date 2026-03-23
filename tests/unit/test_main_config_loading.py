@@ -2,8 +2,8 @@ import json
 import os
 import sys
 
-from backend_main import _load_runtime_configs
 from util import configUtil
+from util.configTypes import AppConfig, LlmServiceConfig, PersistenceConfig
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
@@ -27,14 +27,13 @@ def test_runtime_configs_load_from_config_dir(tmp_path):
         },
     }), encoding="utf-8")
 
-    llm_cfg, persistence_cfg = _load_runtime_configs(str(tmp_path))
+    app_config = configUtil.load(str(tmp_path))
 
-    assert llm_cfg["name"] == "mock"
-    assert llm_cfg["base_url"] == "http://127.0.0.1:9999/v1/chat/completions"
-    assert persistence_cfg == {
-        "enabled": True,
-        "db_path": "./runtime/test.db",
-    }
+    assert isinstance(app_config, AppConfig)
+    assert app_config.llm_service.name == "mock"
+    assert app_config.llm_service.base_url == "http://127.0.0.1:9999/v1/chat/completions"
+    assert app_config.persistence.enabled is True
+    assert app_config.persistence.db_path == "./runtime/test.db"
 
 
 def test_runtime_configs_skip_disabled_llm_service(tmp_path):
@@ -59,7 +58,7 @@ def test_runtime_configs_skip_disabled_llm_service(tmp_path):
     }), encoding="utf-8")
 
     try:
-        _load_runtime_configs(str(tmp_path))
+        configUtil.load(str(tmp_path))
         assert False, "expected ValueError for disabled default llm server"
     except ValueError as exc:
         assert "已禁用" in str(exc) or "未在 llm_services 中定义或已禁用" in str(exc)
@@ -79,14 +78,12 @@ def test_runtime_configs_allow_llm_only_setting(tmp_path):
         ],
     }), encoding="utf-8")
 
-    llm_cfg, persistence_cfg = _load_runtime_configs(str(tmp_path))
+    app_config = configUtil.load(str(tmp_path))
 
-    assert llm_cfg["name"] == "mock"
-    assert llm_cfg["base_url"] == "http://127.0.0.1:7777/v1/chat/completions"
-    assert persistence_cfg == {
-        "enabled": False,
-        "db_path": "../test_data/data.db",
-    }
+    assert app_config.llm_service.name == "mock"
+    assert app_config.llm_service.base_url == "http://127.0.0.1:7777/v1/chat/completions"
+    assert app_config.persistence.enabled is False
+    assert app_config.persistence.db_path == "../test_data/data.db"
 
 
 def test_persistence_default_db_path_in_non_test_env(tmp_path, monkeypatch):
@@ -108,3 +105,33 @@ def test_persistence_default_db_path_in_test_env(tmp_path, monkeypatch):
         "enabled": False,
         "db_path": "../test_data/data.db",
     }
+
+
+def test_load_returns_appconfig_with_typed_fields(tmp_path):
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "default_llm_server": "svc",
+        "llm_services": [
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+                "model": "gpt-4",
+            }
+        ],
+        "persistence": {
+            "enabled": False,
+            "db_path": "./data/db.sqlite",
+        },
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path))
+
+    assert isinstance(app_config, AppConfig)
+    assert isinstance(app_config.llm_service, LlmServiceConfig)
+    assert isinstance(app_config.persistence, PersistenceConfig)
+    assert app_config.llm_service.model == "gpt-4"
+    assert app_config.llm_service.api_key == "key-123"
+    assert app_config.agents == []
+    assert app_config.teams == []
