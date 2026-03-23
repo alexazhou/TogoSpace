@@ -183,13 +183,7 @@ class ServiceTestCase:
         try:
             if cls.requires_backend:
                 cls._load_config()
-            cls.cleanup_sqlite_files(cls.get_test_db_path())
-            if cls.requires_backend:
-                persistence_cfg = configUtil.load_persistence_config(cls._backend_config_dir)
-                db_path = persistence_cfg.get("db_path")
-                if db_path and db_path != ":memory:":
-                    db_abs = db_path if os.path.isabs(db_path) else os.path.abspath(os.path.join(_SRC_DIR, db_path))
-                    cls.cleanup_sqlite_files(db_abs)
+            cls.cleanup_sqlite_files()
             if cls.requires_mock_llm:
                 cls._start_mock_llm()
             if cls.requires_backend:
@@ -209,7 +203,7 @@ class ServiceTestCase:
             teardown_error = exc
         finally:
             cls._safe_cleanup_external_dependencies()
-            cls.cleanup_sqlite_files(cls.get_test_db_path())
+            cls.cleanup_sqlite_files()
         if teardown_error is not None:
             raise teardown_error
 
@@ -294,13 +288,30 @@ class ServiceTestCase:
         cls._backend_config_dir = config_dir
 
     @classmethod
-    def cleanup_sqlite_files(cls, db_path: str) -> None:
-        """删除 sqlite 数据库文件及其附属日志文件。"""
-        db_abs_path = db_path if os.path.isabs(db_path) else os.path.abspath(db_path)
+    def cleanup_sqlite_files(cls, db_path: str = None) -> None:
+        """删除 sqlite 数据库文件及其附属日志文件。
+
+        无参数时自动清理测试 DB 路径（及后端子进程使用的 DB）。
+        传入 db_path 时只清理该路径。
+        """
+        if db_path is not None:
+            cls._remove_db_file(db_path)
+            return
+
+        cls._remove_db_file(cls.get_test_db_path())
+        if cls.requires_backend:
+            persistence_cfg = configUtil.load_persistence_config(cls._backend_config_dir)
+            path = persistence_cfg.get("db_path")
+            if path and path != ":memory:":
+                abs_path = path if os.path.isabs(path) else os.path.abspath(os.path.join(_SRC_DIR, path))
+                cls._remove_db_file(abs_path)
+
+    @classmethod
+    def _remove_db_file(cls, db_path: str) -> None:
+        db_abs = db_path if os.path.isabs(db_path) else os.path.abspath(db_path)
         for suffix in ("", "-wal", "-shm", "-journal"):
-            target = f"{db_abs_path}{suffix}"
             with contextlib.suppress(FileNotFoundError):
-                os.remove(target)
+                os.remove(f"{db_abs}{suffix}")
 
     @classmethod
     def get_test_db_path(cls) -> str:
