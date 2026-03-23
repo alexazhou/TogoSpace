@@ -112,7 +112,7 @@ async def run() -> None:
 def replay_scheduling_rooms() -> None:
     for room in chat_room.get_all_rooms():
         if room.state == RoomState.SCHEDULING:
-            room.start_scheduling()
+            room.activate_scheduling()
 
 
 def stop() -> None:

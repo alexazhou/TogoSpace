@@ -196,29 +196,34 @@ class ChatRoom:
         # 3. 正常发布下一位成员的发言事件
         self._publish_current_turn()
 
-    def exit_init_state(self) -> bool:
-        """退出 INIT 状态。仅第一次调用会生效并返回 True。"""
-        if self._state != RoomState.INIT:
-            return False
+    def activate_scheduling(self) -> bool:
+        """激活/重发调度。
 
-        self._state = self._state_after_init
-        if self._state == RoomState.SCHEDULING:
-            self._publish_current_turn()
-        return True
+        - INIT: 先切到恢复后的目标状态，再按需发布当前轮次
+        - SCHEDULING: 直接重发当前轮次
+        - IDLE: 不做任何操作
 
-    def start_scheduling(self) -> None:
+        返回是否发生了 INIT -> 非 INIT 的状态切换。
+        """
+        changed = False
         if self._state == RoomState.INIT:
-            self.exit_init_state()
-            return
+            self._state = self._state_after_init
+            changed = True
 
         if self._state == RoomState.SCHEDULING:
             self._publish_current_turn()
 
-    def inject_history_messages(self, messages: List[ChatMessage]) -> None:
-        self.messages = list(messages)
+        return changed
 
-    def inject_agent_read_index(self, agent_read_index: Dict[str, int]) -> None:
-        self._agent_read_index = dict(agent_read_index)
+    def inject_runtime_state(
+        self,
+        messages: List[ChatMessage] | None = None,
+        agent_read_index: Dict[str, int] | None = None,
+    ) -> None:
+        if messages is not None:
+            self.messages = list(messages)
+        if agent_read_index is not None:
+            self._agent_read_index = dict(agent_read_index)
 
     def export_agent_read_index(self) -> Dict[str, int]:
         return dict(self._agent_read_index)
@@ -452,7 +457,7 @@ def exit_init_rooms(team_name: str | None = None) -> int:
     for room in _rooms.values():
         if team_name is not None and room.team_name != team_name:
             continue
-        if room.exit_init_state():
+        if room.activate_scheduling():
             changed += 1
     return changed
 

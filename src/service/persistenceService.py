@@ -67,21 +67,27 @@ async def restore_runtime_state(agents: list, rooms: list) -> None:
     for room in rooms:
         room_msg_rows: list[GtRoomMessage] = await load_room_messages(room.room_id)
         recovered_from_db = bool(room_msg_rows)
+        restored_messages: list[ChatMessage] | None = None
+
         if room_msg_rows:
-            room.inject_history_messages([
+            restored_messages = [
                 ChatMessage(
                     sender_name=row.agent_name,
                     content=row.content,
                     send_time=datetime.fromisoformat(row.send_time),
                 )
                 for row in room_msg_rows
-            ])
+            ]
         elif not room.messages:
             await room.add_message("system", room.build_initial_system_message())
 
         agent_read_index = await load_room_state(room.room_id)
-        if agent_read_index is not None:
-            room.inject_agent_read_index(agent_read_index)
+
+        if restored_messages is not None or agent_read_index is not None:
+            room.inject_runtime_state(
+                messages=restored_messages,
+                agent_read_index=agent_read_index,
+            )
         elif recovered_from_db and room.messages:
             room.mark_all_messages_read()
 
