@@ -48,7 +48,7 @@ def _setup_logging() -> None:
     logging.getLogger("tui").setLevel(logging.DEBUG)
     logging.getLogger("tui").addHandler(handler)
 
-_DEFAULT_CONFIG = os.path.join(_TUI_DIR, "../config.json")
+_DEFAULT_CONFIG = os.path.join(_TUI_DIR, "../config/setting.json")
 
 
 def _load_base_url(config_path: str) -> str:
@@ -69,12 +69,12 @@ def main() -> None:
         "--base-url",
         default=None,
         dest="base_url",
-        help="后端地址，默认从 config.json 读取",
+        help="后端地址，默认从 setting.json 读取",
     )
     parser.add_argument(
         "--config",
         default=_DEFAULT_CONFIG,
-        help="config.json 路径",
+        help="setting.json 路径",
     )
     args = parser.parse_args()
 
