@@ -17,11 +17,6 @@ async def get_rooms_by_team(team_id: int) -> list[GtRoom]:
     )
 
 
-async def get_room_by_db_id(db_id: int) -> GtRoom | None:
-    """通过数据库自增 ID 获取 Room。"""
-    return await GtRoom.aio_get_or_none(GtRoom.id == db_id)
-
-
 async def get_room_config(team_id: int, room_name: str) -> GtRoom | None:
     """通过 team_id 和 room_name 获取 Room 配置。"""
     return await GtRoom.aio_get_or_none(
@@ -30,7 +25,7 @@ async def get_room_config(team_id: int, room_name: str) -> GtRoom | None:
 
 
 async def ensure_room(
-    db_id: int,
+    room_id: int,
     team_id: int,
     room_name: str,
     room_type: RoomType,
@@ -40,7 +35,7 @@ async def ensure_room(
     """确保指定 ID 的 Room 存在，用于无预导入配置时的运行态持久化。"""
     await (
         GtRoom.insert(
-            id=db_id,
+            id=room_id,
             team_id=team_id,
             name=room_name,
             type=room_type,
@@ -61,9 +56,9 @@ async def ensure_room(
         .aio_execute()
     )
 
-    row = await get_room_by_db_id(db_id)
+    row = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
     if row is None:
-        raise RuntimeError(f"ensure room failed: {db_id}")
+        raise RuntimeError(f"ensure room failed: {room_id}")
     return row
 
 
@@ -99,27 +94,27 @@ async def delete_rooms_by_team(team_id: int) -> None:
     await GtRoom.delete().where(GtRoom.team_id == team_id).aio_execute()
 
 
-async def delete_room(db_id: int) -> None:
+async def delete_room(room_id: int) -> None:
     """通过数据库 ID 删除指定 Room。"""
-    await GtRoom.delete().where(GtRoom.id == db_id).aio_execute()
+    await GtRoom.delete().where(GtRoom.id == room_id).aio_execute()
 
 
 # Room State CRUD (persistence)
-async def save_room_state(db_id: int, agent_read_index: dict[str, int]) -> None:
+async def save_room_state(room_id: int, agent_read_index: dict[str, int]) -> None:
     """保存房间运行时状态（agent_read_index）。"""
     await (
         GtRoom.update(
             agent_read_index=agent_read_index,
             updated_at=GtRoom._now_iso(),
         )
-        .where(GtRoom.id == db_id)
+        .where(GtRoom.id == room_id)
         .aio_execute()
     )
 
 
-async def get_room_state(db_id: int) -> dict[str, int] | None:
+async def get_room_state(room_id: int) -> dict[str, int] | None:
     """获取房间运行时状态（agent_read_index）。"""
-    room = await GtRoom.aio_get_or_none(GtRoom.id == db_id)
+    room = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
     if room is None:
         return None
     return room.agent_read_index
