@@ -1,3 +1,15 @@
-from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager, gtRoomMessageManager
+from dal.db import (
+    gtAgentManager,
+    gtTeamManager,
+    gtRoomManager,
+    gtRoomMemberManager,
+    gtRoomMessageManager,
+)
 
-__all__ = ["gtTeamManager", "gtRoomManager", "gtRoomMemberManager"]
+__all__ = [
+    "gtAgentManager",
+    "gtTeamManager",
+    "gtRoomManager",
+    "gtRoomMemberManager",
+    "gtRoomMessageManager",
+]

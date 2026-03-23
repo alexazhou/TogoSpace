@@ -11,6 +11,7 @@ from peewee_async.pool import PoolBackend
 from peewee_async.utils import ConnectionProtocol
 
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.gtAgent import GtAgent
 from model.dbModel.base import bind_database
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
@@ -67,8 +68,24 @@ _db_path: Optional[str] = None
 def _ensure_schema(database: AioSqliteDatabase) -> None:
     with database.allow_sync():
         database.create_tables(
-            [GtRoomMessage, GtRoom, GtAgentHistory, GtTeam, GtRoomMember],
+            [GtRoomMessage, GtRoom, GtAgentHistory, GtTeam, GtRoomMember, GtAgent],
             safe=True,
+        )
+
+
+def _ensure_agent_model_column(database: AioSqliteDatabase) -> None:
+    """兼容迁移：若 agents 表存在但缺少 model 列，自动补齐。"""
+    with database.allow_sync():
+        rows = database.execute_sql("PRAGMA table_info('agents')").fetchall()
+        if not rows:
+            return
+
+        columns = {str(r[1]) for r in rows if len(r) > 1}
+        if "model" in columns:
+            return
+
+        database.execute_sql(
+            "ALTER TABLE agents ADD COLUMN model TEXT NOT NULL DEFAULT ''"
         )
 
 
@@ -87,6 +104,7 @@ async def startup(db_path: str) -> None:
     )
     bind_database(database)
     _ensure_schema(database)
+    _ensure_agent_model_column(database)
     await database.aio_connect()
     _db = database
 
