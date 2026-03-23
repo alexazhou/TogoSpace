@@ -12,6 +12,7 @@ from util import assertUtil, configUtil
 def _serialize_agent(agent: Agent) -> dict[str, Any]:
     return AgentInfo(
         name=agent.name,
+        template_name=agent.template_name or None,
         model=agent.model,
         team_name=agent.team_name,
         status=AgentStatus.ACTIVE if agent.is_active else AgentStatus.IDLE,
@@ -45,10 +46,10 @@ class AgentDetailHandler(BaseHandler):
         if agent is None:
             return
 
-        definition = agentService.get_agent_definition(agent_name)
+        definition = agentService.get_agent_definition(agent.template_name)
         assertUtil.assertNotNull(
             definition,
-            error_message=f"Agent definition '{agent_name}' not found",
+            error_message=f"Agent definition '{agent.template_name}' not found",
             error_code="agent_definition_not_found",
         )
         if definition is None:
@@ -62,6 +63,7 @@ class AgentDetailHandler(BaseHandler):
         self.return_json(
             {
                 **_serialize_agent(agent),
+                "agent_name": agent.template_name,
                 "driver_type": agent.driver.driver_type,
                 "prompt": prompt,
             }

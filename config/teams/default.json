@@ -1,11 +1,10 @@
 {
   "name": "default",
   "members": [
-    "Operator",
-    "researcher",
-    "project_manager",
-    "software_engineer",
-    "test_engineer"
+    { "name": "researcher", "agent": "researcher" },
+    { "name": "project_manager", "agent": "project_manager" },
+    { "name": "software_engineer", "agent": "software_engineer" },
+    { "name": "test_engineer", "agent": "test_engineer" }
   ],
   "preset_rooms": [
     {

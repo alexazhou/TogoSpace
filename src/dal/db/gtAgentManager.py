@@ -3,17 +3,19 @@ from __future__ import annotations
 from model.dbModel.gtAgent import GtAgent
 
 
-async def upsert_agent(team_id: int, name: str, model: str) -> GtAgent:
+async def upsert_agent(team_id: int, name: str, model: str, template_name: str = "") -> GtAgent:
     await (
         GtAgent.insert(
             team_id=team_id,
             name=name,
             model=model,
+            template_name=template_name,
         )
         .on_conflict(
             conflict_target=[GtAgent.team_id, GtAgent.name],
             update={
                 GtAgent.model: model,
+                GtAgent.template_name: template_name,
                 GtAgent.updated_at: GtAgent._now_iso(),
             },
         )

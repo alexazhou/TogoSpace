@@ -5,18 +5,14 @@ import peewee
 from .base import DbModelBase
 
 
-class GtAgent(DbModelBase):
+class GtTeamMember(DbModelBase):
     team_id: int = peewee.IntegerField()
     name: str = peewee.CharField(null=False)
-    model: str = peewee.CharField(default="")
-    template_name: str = peewee.CharField(default="")
+    agent_name: str = peewee.CharField(null=False)
     updated_at: str = peewee.CharField()
 
     class Meta:
-        table_name = "agents"
+        table_name = "team_members"
         indexes = (
             (("team_id", "name"), True),
         )
-
-
-__all__ = ["GtAgent"]

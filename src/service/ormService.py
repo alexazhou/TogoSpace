@@ -15,6 +15,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.base import bind_database
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
+from model.dbModel.gtTeamMember import GtTeamMember
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoomMember import GtRoomMember
 
@@ -68,7 +69,7 @@ _db_path: Optional[str] = None
 def _ensure_schema(database: AioSqliteDatabase) -> None:
     with database.allow_sync():
         database.create_tables(
-            [GtRoomMessage, GtRoom, GtAgentHistory, GtTeam, GtRoomMember, GtAgent],
+            [GtRoomMessage, GtRoom, GtAgentHistory, GtTeam, GtTeamMember, GtRoomMember, GtAgent],
             safe=True,
         )
 
@@ -89,6 +90,21 @@ def _ensure_agent_model_column(database: AioSqliteDatabase) -> None:
         )
 
 
+def _ensure_agent_template_name_column(database: AioSqliteDatabase) -> None:
+    with database.allow_sync():
+        rows = database.execute_sql("PRAGMA table_info('agents')").fetchall()
+        if not rows:
+            return
+
+        columns = {str(r[1]) for r in rows if len(r) > 1}
+        if "template_name" in columns:
+            return
+
+        database.execute_sql(
+            "ALTER TABLE agents ADD COLUMN template_name TEXT NOT NULL DEFAULT ''"
+        )
+
+
 async def startup(db_path: str) -> None:
     global _db, _db_path
     if _db is not None:
@@ -105,6 +121,7 @@ async def startup(db_path: str) -> None:
     bind_database(database)
     _ensure_schema(database)
     _ensure_agent_model_column(database)
+    _ensure_agent_template_name_column(database)
     await database.aio_connect()
     _db = database
 

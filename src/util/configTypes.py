@@ -3,6 +3,10 @@ from typing import Any, List
 
 from typing_extensions import NotRequired, Required, TypedDict
 
+class TeamMemberConfig(TypedDict):
+    name: Required[str]
+    agent: Required[str]
+
 
 class TeamRoomConfig(TypedDict, total=False):
     """Single room item in team config."""
@@ -18,7 +22,7 @@ class TeamConfig(TypedDict, total=False):
     """Canonical team config shape loaded from JSON/DB."""
 
     name: Required[str]
-    members: Required[list[str]]
+    members: Required[list[TeamMemberConfig]]
     preset_rooms: Required[list[TeamRoomConfig]]
     max_function_calls: NotRequired[int]
 
@@ -27,7 +31,7 @@ class TeamConfigPatch(TypedDict, total=False):
     """Update payload shape for partial team updates."""
 
     name: Required[str]
-    members: list[str]
+    members: list[TeamMemberConfig]
     preset_rooms: list[TeamRoomConfig]
     max_function_calls: int
 
@@ -70,5 +74,41 @@ class AppConfig:
     persistence: PersistenceConfig
 
 
-__all__ = ["TeamRoomConfig", "TeamConfig", "TeamConfigPatch", "AgentConfig",
+def normalize_team_members(raw_members: list[Any]) -> list[TeamMemberConfig]:
+    return [
+        {
+            "name": str(member["name"]),
+            "agent": str(member["agent"]),
+        }
+        for member in raw_members
+    ]
+
+
+def normalize_team_config(team_config: dict[str, Any]) -> TeamConfig:
+    rooms = [
+        {
+            **room,
+            "members": [str(member) for member in room.get("members", [])],
+        }
+        for room in team_config.get("preset_rooms", [])
+    ]
+
+    normalized: TeamConfig = {
+        "name": str(team_config["name"]),
+        "members": normalize_team_members(team_config["members"]),
+        "preset_rooms": rooms,
+    }
+
+    if "max_function_calls" in team_config:
+        normalized["max_function_calls"] = int(team_config["max_function_calls"])
+
+    return normalized
+
+
+def get_team_member_map(team_config: TeamConfig) -> dict[str, TeamMemberConfig]:
+    return {member["name"]: member for member in team_config.get("members", [])}
+
+
+__all__ = ["TeamMemberConfig", "TeamRoomConfig", "TeamConfig", "TeamConfigPatch", "AgentConfig",
+           "normalize_team_members", "normalize_team_config", "get_team_member_map",
            "LlmServiceConfig", "PersistenceConfig", "AppConfig"]

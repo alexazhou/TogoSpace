@@ -55,6 +55,8 @@ class RoomListHandler(BaseHandler):
 
 
 class RoomMessagesHandler(BaseHandler):
+    """GET /rooms/{id}/messages/list.json; POST /rooms/{id}/messages/send.json"""
+
     async def get(self, room_id_str: str) -> None:
         # 通过数据库 ID 获取内存中的 ChatRoom
         room_id = int(room_id_str)
@@ -98,7 +100,7 @@ class RoomMessagesHandler(BaseHandler):
 
 # Team Room Management Handlers
 class TeamRoomsHandler(BaseHandler):
-    """GET /teams/{team_id}/rooms.json - 获取 Team 下的所有 Room"""
+    """GET /teams/{team_id}/rooms/list.json - 获取 Team 下的所有 Room"""
 
     async def get(self, team_id_str: str) -> None:
         team_id = int(team_id_str)
@@ -110,7 +112,7 @@ class TeamRoomsHandler(BaseHandler):
 
 
 class TeamRoomCreateHandler(BaseHandler):
-    """POST /teams/{team_id}/rooms.json - 在 Team 下创建 Room"""
+    """POST /teams/{team_id}/rooms/create.json - 在 Team 下创建 Room"""
 
     async def post(self, team_id_str: str) -> None:
         request = self.parse_request(CreateRoomRequest)
@@ -265,7 +267,7 @@ class TeamRoomDeleteHandler(BaseHandler):
 
 
 class TeamRoomMembersHandler(BaseHandler):
-    """GET /teams/{team_id}/rooms/{room_id}/members.json - 获取 Room 成员"""
+    """GET /teams/{team_id}/rooms/{room_id}/members/list.json - 获取 Room 成员"""
 
     async def get(self, team_id_str: str, room_id_str: str) -> None:
         team_id = int(team_id_str)

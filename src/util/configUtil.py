@@ -3,7 +3,7 @@ import json
 import os
 from typing import List, cast
 
-from util.configTypes import AgentConfig, AppConfig, LlmServiceConfig, PersistenceConfig, TeamConfig
+from util.configTypes import AgentConfig, AppConfig, LlmServiceConfig, PersistenceConfig, TeamConfig, normalize_team_config
 
 
 def _default_config_dir() -> str:
@@ -52,7 +52,7 @@ def load_teams(config_dir: str = None) -> List[TeamConfig]:
     result: List[TeamConfig] = []
     for path in sorted(glob.glob(os.path.join(teams_dir, "*.json"))):
         with open(path, "r", encoding="utf-8") as f:
-            result.append(cast(TeamConfig, json.load(f)))
+            result.append(normalize_team_config(cast(dict, json.load(f))))
     return result
 
 

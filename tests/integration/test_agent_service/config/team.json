@@ -1,6 +1,9 @@
 {
   "name": "test_team",
-  "members": ["alice", "bob"],
+  "members": [
+    { "name": "alice", "agent": "alice" },
+    { "name": "bob", "agent": "bob" }
+  ],
   "preset_rooms": [
     {
       "name": "general",

@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 from typing import cast
 
-from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager
+from dal.db import gtTeamManager, gtTeamMemberManager, gtRoomManager, gtRoomMemberManager
 from exception import TeamAgentException
-from util.configTypes import TeamConfig, TeamRoomConfig
+from util.configTypes import TeamConfig, TeamRoomConfig, normalize_team_config
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,8 @@ async def startup(json_teams: list[TeamConfig]) -> list[TeamConfig]:
     3. 返回最终的 Team 配置列表（从数据库读取）
     """
     # 将 JSON 配置导入数据库（仅当不存在时）
-    for team_config in json_teams:
+    for raw_team_config in json_teams:
+        team_config = normalize_team_config(raw_team_config)
         name = team_config["name"]
         # 为没有 max_turns 的 room 设置默认值 100
         for room in _iter_team_rooms(team_config):
@@ -45,6 +46,7 @@ async def reload_from_db() -> list[TeamConfig]:
 
 async def create_team(team_config: TeamConfig) -> None:
     """创建新 Team（自动触发热更新）。"""
+    team_config = normalize_team_config(team_config)
     name = team_config["name"]
 
     # 检查 Team 是否已存在
@@ -54,6 +56,7 @@ async def create_team(team_config: TeamConfig) -> None:
     # 创建 Team
     team = await gtTeamManager.upsert_team(team_config)
     team_id = team.id
+    await gtTeamMemberManager.upsert_team_members(team_id, team_config["members"])
 
     # 创建 Rooms（rooms 参数）
     rooms = _iter_team_rooms(team_config)
@@ -79,11 +82,13 @@ async def create_team(team_config: TeamConfig) -> None:
 
 async def update_team(team_config: TeamConfig) -> None:
     """更新 Team 配置并触发热更新。"""
+    team_config = normalize_team_config(team_config)
     name = team_config["name"]
 
     # 更新 Team 基本信息
     team = await gtTeamManager.upsert_team(team_config)
     team_id = team.id
+    await gtTeamMemberManager.upsert_team_members(team_id, team_config["members"])
 
     # 更新 preset_rooms
     rooms = _iter_team_rooms(team_config)
