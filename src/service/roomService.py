@@ -329,24 +329,25 @@ async def _resolve_room_id(
     initial_topic: str,
     room_type: RoomType,
     max_turns: int,
-) -> int:
-    if room_id is not None:
-        return room_id
-
+) -> tuple[int, int]:
+    """返回 (room_id, team_id)。"""
     resolved_team_id = 0
-    if persistenceService.is_enabled():
 
+    if persistenceService.is_enabled():
         team_row = await gtTeamManager.get_team(team_name)
         if team_row is not None:
             resolved_team_id = team_row.id
-            room_row = await gtRoomManager.get_room_config(team_row.id, name)
-            if room_row is not None:
-                return room_row.id
+            if room_id is None:
+                room_row = await gtRoomManager.get_room_config(team_row.id, name)
+                if room_row is not None:
+                    return room_row.id, resolved_team_id
+
+    if room_id is not None:
+        return room_id, resolved_team_id
 
     synthetic_id = _synthetic_room_id(team_name, name)
 
     if persistenceService.is_enabled():
-
         await gtRoomManager.ensure_room(
             room_id=synthetic_id,
             team_id=resolved_team_id,
@@ -356,7 +357,7 @@ async def _resolve_room_id(
             max_turns=max_turns,
         )
 
-    return synthetic_id
+    return synthetic_id, resolved_team_id
 
 
 async def _create_room(
@@ -370,10 +371,7 @@ async def _create_room(
     persist_initial_message: bool = True,
 ) -> None:
     """内部建房入口。"""
-    team_row = await gtTeamManager.get_team(team_name)
-    team_id = team_row.id if team_row is not None else 0
-
-    resolved_room_id = await _resolve_room_id(
+    resolved_room_id, team_id = await _resolve_room_id(
         room_id=room_id,
         team_name=team_name,
         name=name,
@@ -468,13 +466,8 @@ async def refresh_rooms_for_team(team_id: int, teams_config: list) -> None:
     await close_team_rooms(team_id)
 
     # 根据新配置重新创建聊天室
-    from dal.db import gtRoomManager
     for room in _iter_team_rooms(target_config):
-        room_config = None
-        from dal.db import gtTeamManager
-        team_row = await gtTeamManager.get_team(team_name)
-        if team_row is not None:
-            room_config = await gtRoomManager.get_room_config(team_row.id, room["name"])
+        room_config = await gtRoomManager.get_room_config(team_row.id, room["name"])
         if room_config:
             await _create_room(
                 room_id=room_config.id,
@@ -492,14 +485,8 @@ async def refresh_rooms_for_team(team_id: int, teams_config: list) -> None:
 
 async def close_team_rooms(team_id: int) -> None:
     """关闭指定 Team 的所有聊天室。"""
-    team_row = await gtTeamManager.get_team_by_id(team_id)
-    if team_row is None:
-        logger.warning(f"无法关闭聊天室: Team ID '{team_id}' 不存在")
-        return
-    team_name = team_row.name
-
     to_close = [room_key for room_key, room in _rooms.items() if room.team_id == team_id]
     for room_key in to_close:
         room = _rooms.pop(room_key)
         _rooms_by_id.pop(room.room_id, None)
-    logger.info(f"Team '{team_name}' 的 {len(to_close)} 个聊天室已关闭")
+    logger.info(f"Team ID={team_id} 的 {len(to_close)} 个聊天室已关闭")

@@ -4,7 +4,6 @@ import sys
 import pytest
 
 import service.roomService as roomService
-from dal.db import gtTeamManager
 from service.roomService import ChatRoom
 from ...base import ServiceTestCase
 
@@ -44,14 +43,13 @@ class TestRoomRegistry(ServiceTestCase):
         await roomService.create_room(TEAM, "r1", ["alice"])
         await roomService.create_room(TEAM, "r2", ["bob"])
         await roomService.create_room(TEAM, "r3", ["alice", "bob"])
-        team = await gtTeamManager.get_team(TEAM)
-        assert team is not None
         r1 = roomService.get_room_by_key(f"r1@{TEAM}")
         r2 = roomService.get_room_by_key(f"r2@{TEAM}")
         r3 = roomService.get_room_by_key(f"r3@{TEAM}")
 
-        assert roomService.get_rooms_for_agent(team.id, "alice") == [r1.room_id, r3.room_id]
-        assert roomService.get_rooms_for_agent(team.id, "bob") == [r2.room_id, r3.room_id]
+        # 无持久化环境下 team_id 为 0
+        assert roomService.get_rooms_for_agent(r1.team_id, "alice") == [r1.room_id, r3.room_id]
+        assert roomService.get_rooms_for_agent(r1.team_id, "bob") == [r2.room_id, r3.room_id]
 
     async def test_create_rooms_always_emits_initial_message(self):
         """批量建房路径应始终生成初始化消息，供后续恢复逻辑覆盖。"""
