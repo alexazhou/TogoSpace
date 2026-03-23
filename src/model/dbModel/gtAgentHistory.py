@@ -6,8 +6,8 @@ from .base import DbModelBase
 
 
 class GtAgentHistory(DbModelBase):
-    id: int = peewee.AutoField()
-    agent_key: str = peewee.CharField(null=False)
+    team_id: int = peewee.IntegerField()
+    agent_name: str = peewee.CharField(null=False)
     seq: int = peewee.IntegerField(null=False)
     message_json: str = peewee.TextField(null=False)
     updated_at: str = peewee.CharField(null=False)
@@ -15,5 +15,5 @@ class GtAgentHistory(DbModelBase):
     class Meta:
         table_name = "agent_histories"
         indexes = (
-            (("agent_key", "seq"), True),
+            (("team_id", "agent_name", "seq"), True),
         )
