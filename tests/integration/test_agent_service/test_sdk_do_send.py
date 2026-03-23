@@ -28,7 +28,7 @@ class TestSdkDoSend(ServiceTestCase):
     async def _make_driver_with_room(self, agent_name: str, current_room_name: str):
         """创建房间、agent 和 SDK driver，注入当前房间上下文。"""
         await roomService.create_room(TEAM, current_room_name, [agent_name])
-        room = roomService.get_room(f"{current_room_name}@{TEAM}")
+        room = roomService.get_room_by_key(f"{current_room_name}@{TEAM}")
         agent = Agent(name=agent_name, team_name=TEAM, system_prompt="test", model="test-model",
                       driver_config=AgentDriverConfig(driver_type="native"))
         agent.current_room = room
@@ -70,7 +70,7 @@ class TestSdkDoSend(ServiceTestCase):
         """跨房间消息应出现在目标房间，而非当前房间。"""
         driver, agent, current_room = await self._make_driver_with_room("alice", "private")
         await roomService.create_room(TEAM, "group", ["alice"])
-        group = roomService.get_room(f"group@{TEAM}")
+        group = roomService.get_room_by_key(f"group@{TEAM}")
         await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "group", "msg": "hello group"})
         assert any(m.content == "hello group" for m in group.messages)
         assert not any(m.content == "hello group" for m in current_room.messages)
@@ -109,7 +109,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
 
     async def test_run_chat_turn_requires_started_client(self):
         await roomService.create_room(TEAM, "lobby", ["alice"])
-        room = roomService.get_room(f"lobby@{TEAM}")
+        room = roomService.get_room_by_key(f"lobby@{TEAM}")
         agent = Agent(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
                       driver_config=AgentDriverConfig(driver_type="native"))
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
@@ -122,7 +122,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
 
     async def test_run_chat_turn_uses_max_function_calls_as_retry_limit(self):
         await roomService.create_room(TEAM, "lobby", ["alice"])
-        room = roomService.get_room(f"lobby@{TEAM}")
+        room = roomService.get_room_by_key(f"lobby@{TEAM}")
         agent = Agent(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
                       driver_config=AgentDriverConfig(driver_type="native"))
         agent.current_room = room

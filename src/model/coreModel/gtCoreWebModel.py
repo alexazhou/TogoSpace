@@ -27,8 +27,8 @@ class AgentInfo(BaseModel):
 
 
 class RoomInfo(BaseModel):
-    db_id: int       # 数据库自增 ID
-    room_id: str     # room@team 格式
+    room_id: int     # 数据库主键 ID
+    room_key: str    # room@team 格式
     room_name: str
     team_name: str
     room_type: str   # "private" | "group"
@@ -43,7 +43,8 @@ class MessageInfo(BaseModel):
 
 
 class RoomMessagesResponse(BaseModel):
-    room_id: str
+    room_id: int
+    room_key: str
     room_name: str
     team_name: str
     messages: List[MessageInfo]
@@ -51,7 +52,8 @@ class RoomMessagesResponse(BaseModel):
 
 class WsEvent(BaseModel):
     event: str         # 固定为 "message"
-    room_id: str
+    room_id: int
+    room_key: str
     room_name: str
     team_name: str
     sender: str

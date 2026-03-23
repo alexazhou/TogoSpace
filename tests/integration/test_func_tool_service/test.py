@@ -62,7 +62,7 @@ class TestRunToolCall(ServiceTestCase):
     async def test_run_tool_call_with_context(self):
         """上下文注入场景：send_chat_msg 能在上下文房间成功落消息。"""
         await roomService.create_room(TEAM, "ctx_room", ["alice"])
-        room = roomService.get_room(f"ctx_room@{TEAM}")
+        room = roomService.get_room_by_key(f"ctx_room@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
         result = await self._run("send_chat_msg", '{"room_name": "ctx_room", "msg": "test"}', context=ctx)
         assert result["success"] and "消息已发送" in result["message"]
@@ -70,7 +70,7 @@ class TestRunToolCall(ServiceTestCase):
     async def test_run_tool_call_with_missing_room_returns_error(self):
         """目标房间不存在时，应返回错误信息。"""
         await roomService.create_room(TEAM, "ctx_room_missing", ["alice"])
-        room = roomService.get_room(f"ctx_room_missing@{TEAM}")
+        room = roomService.get_room_by_key(f"ctx_room_missing@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
         result = await self._run("send_chat_msg", '{"room_name": "missing_room", "msg": "test"}', context=ctx)
         assert not result["success"]

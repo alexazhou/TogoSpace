@@ -267,12 +267,13 @@ def get_all_agents() -> List[Agent]:
     return list(_agents.values())
 
 
-def get_agents(team_name: str, room_name: str) -> List[Agent]:
-    members: List[str] = roomService.get_member_names(team_name, room_name)
-    return [_agents[_make_agent_key(team_name, n)] for n in members if _make_agent_key(team_name, n) in _agents]
+def get_agents(room_id: int) -> List[Agent]:
+    room = roomService.get_room(room_id)
+    members: List[str] = roomService.get_member_names(room_id)
+    return [_agents[_make_agent_key(room.team_name, n)] for n in members if _make_agent_key(room.team_name, n) in _agents]
 
 
-def get_all_rooms(team_name: str, agent_name: str) -> List[str]:
+def get_all_rooms(team_name: str, agent_name: str) -> List[int]:
     return roomService.get_rooms_for_agent(team_name, agent_name)
 
 

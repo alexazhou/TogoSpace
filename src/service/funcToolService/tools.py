@@ -121,7 +121,7 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
     logger.info(f"发送消息: sender={_context.agent_name}, room={room_name}, msg={msg}")
 
     try:
-        target_room = rs.get_room(f"{room_name}@{_context.team_name}")
+        target_room = rs.get_room_by_key(f"{room_name}@{_context.team_name}")
     except Exception:
         try:
             from dal.db import gtRoomManager, gtTeamManager

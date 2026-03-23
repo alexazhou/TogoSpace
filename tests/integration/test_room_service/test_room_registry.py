@@ -24,7 +24,7 @@ class TestRoomRegistry(ServiceTestCase):
         await roomService.create_room(TEAM, "myroom", ["alice"])
         key = f"myroom@{TEAM}"
         assert key in roomService._rooms
-        assert isinstance(roomService.get_room(key), ChatRoom)
+        assert isinstance(roomService.get_room_by_key(key), ChatRoom)
 
     async def test_close_all(self):
         """shutdown 会清空全局 rooms 注册表。"""
@@ -35,16 +35,20 @@ class TestRoomRegistry(ServiceTestCase):
     async def test_setup_members(self):
         """get_member_names 返回创建时配置的成员顺序。"""
         await roomService.create_room(TEAM, "r1", ["alice", "bob"])
-        assert roomService.get_member_names(TEAM, "r1") == ["alice", "bob"]
+        room = roomService.get_room_by_key(f"r1@{TEAM}")
+        assert roomService.get_member_names(room.room_id) == ["alice", "bob"]
 
     async def test_get_rooms_for_agent(self):
-        """按 agent 过滤房间时，只返回该 agent 参与的 room_key 列表。"""
+        """按 agent 过滤房间时，只返回该 agent 参与的 room_id 列表。"""
         await roomService.create_room(TEAM, "r1", ["alice"])
         await roomService.create_room(TEAM, "r2", ["bob"])
         await roomService.create_room(TEAM, "r3", ["alice", "bob"])
+        r1 = roomService.get_room_by_key(f"r1@{TEAM}")
+        r2 = roomService.get_room_by_key(f"r2@{TEAM}")
+        r3 = roomService.get_room_by_key(f"r3@{TEAM}")
 
-        assert roomService.get_rooms_for_agent(TEAM, "alice") == [f"r1@{TEAM}", f"r3@{TEAM}"]
-        assert roomService.get_rooms_for_agent(TEAM, "bob") == [f"r2@{TEAM}", f"r3@{TEAM}"]
+        assert roomService.get_rooms_for_agent(TEAM, "alice") == [r1.room_id, r3.room_id]
+        assert roomService.get_rooms_for_agent(TEAM, "bob") == [r2.room_id, r3.room_id]
 
     async def test_create_rooms_always_emits_initial_message(self):
         """批量建房路径应始终生成初始化消息，供后续恢复逻辑覆盖。"""
@@ -61,7 +65,7 @@ class TestRoomRegistry(ServiceTestCase):
 
         await roomService.create_rooms(teams_config)
 
-        room = roomService.get_room(f"boot_room@{TEAM}")
+        room = roomService.get_room_by_key(f"boot_room@{TEAM}")
         assert len(room.messages) == 1
         assert room.messages[0].sender_name == "system"
         assert "boot topic" in room.messages[0].content

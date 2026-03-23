@@ -35,9 +35,13 @@ class TestWsController(_ApiServiceCase):
             ws_url = f"ws://127.0.0.1:{self.backend_port}/ws/events"
             try:
                 async with aiohttp.ClientSession() as session:
+                    async with session.get(f"{self.backend_base_url}/rooms") as resp:
+                        assert resp.status == 200
+                        rooms = (await resp.json())["rooms"]
+                    room_id = next(r["room_id"] for r in rooms if r["room_name"] == "general" and r["team_name"] == _TEAM)
                     async with session.ws_connect(ws_url) as ws:
                         async with session.post(
-                            f"{self.backend_base_url}/rooms/general@{_TEAM}/messages",
+                            f"{self.backend_base_url}/rooms/{room_id}/messages",
                             json={"content": "Testing WebSocket"},
                         ) as resp:
                             assert resp.status == 200
@@ -73,6 +77,7 @@ class TestWsController(_ApiServiceCase):
         event = collected[0]
         assert event.get("event") == "message"
         assert "room_id" in event
+        assert "room_key" in event
         assert "team_name" in event
         assert "sender" in event
         assert "content" in event

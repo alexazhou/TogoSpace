@@ -5,7 +5,7 @@ from unittest.mock import patch, call
 import pytest
 
 from service import roomService
-from constants import RoomType, RoomState, messageBusTopic, SpecialAgent
+from constants import RoomType, RoomState, MessageBusTopic, SpecialAgent
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -31,7 +31,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         agents = ["alice", "bob", "charlie"]
         room_key = f"{room_name}@{TEAM}"
         await roomService.create_room(TEAM, room_name, agents, room_type=RoomType.GROUP, max_turns=10)
-        room = roomService.get_room(room_key)
+        room = roomService.get_room_by_key(room_key)
 
         assert room.get_current_turn_agent() == "alice"
         assert room._turn_pos == 0
@@ -43,8 +43,9 @@ class TestRoomTurnLogic(ServiceTestCase):
             assert room.get_current_turn_agent() == "bob"
             assert room._turn_pos == 1
             mock_publish.assert_any_call(
-                messageBusTopic.ROOM_AGENT_TURN,
+                MessageBusTopic.ROOM_AGENT_TURN,
                 agent_name="bob",
+                room_id=room.room_id,
                 room_name=room_name,
                 room_key=room_key,
                 team_name=TEAM,
@@ -56,8 +57,8 @@ class TestRoomTurnLogic(ServiceTestCase):
             assert room.get_current_turn_agent() == "bob"
             assert room._turn_pos == 1
             topics = [call[0][0] for call in mock_publish.call_args_list]
-            assert messageBusTopic.ROOM_MSG_ADDED in topics
-            assert messageBusTopic.ROOM_AGENT_TURN not in topics
+            assert MessageBusTopic.ROOM_MSG_ADDED in topics
+            assert MessageBusTopic.ROOM_AGENT_TURN not in topics
 
         await room.add_message("bob", "responding to alice")
         room.finish_turn("bob")
@@ -71,7 +72,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "test_skip"
         agents = ["alice", "bob"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
-        room = roomService.get_room(f"{room_name}@{TEAM}")
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
 
         room.skip_turn(sender="bob")
         assert room.get_current_turn_agent() == "alice"
@@ -87,7 +88,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         agents = ["alice", "bob"]
         room_key = f"{room_name}@{TEAM}"
         await roomService.create_room(TEAM, room_name, agents, max_turns=1)
-        room = roomService.get_room(room_key)
+        room = roomService.get_room_by_key(room_key)
 
         await room.add_message("alice", "hi")
         room.finish_turn("alice")
@@ -106,8 +107,9 @@ class TestRoomTurnLogic(ServiceTestCase):
             assert room.get_current_turn_agent() == "alice"
 
             mock_publish.assert_any_call(
-                messageBusTopic.ROOM_AGENT_TURN,
+                MessageBusTopic.ROOM_AGENT_TURN,
                 agent_name="alice",
+                room_id=room.room_id,
                 room_name=room_name,
                 room_key=room_key,
                 team_name=TEAM,
@@ -120,7 +122,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "test_loop"
         agents = ["a", "b"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=5)
-        room = roomService.get_room(f"{room_name}@{TEAM}")
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
 
         assert room._turn_index == 0
 
@@ -145,7 +147,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "skip_all"
         agents = ["alice", "bob"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
-        room = roomService.get_room(f"{room_name}@{TEAM}")
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
 
         assert room.state == RoomState.SCHEDULING
 
@@ -165,7 +167,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "skip_no_event"
         agents = ["alice", "bob"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
-        room = roomService.get_room(f"{room_name}@{TEAM}")
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
 
         with patch("service.messageBus.publish") as mock_publish:
             room.skip_turn(sender="alice")
@@ -173,7 +175,7 @@ class TestRoomTurnLogic(ServiceTestCase):
 
             turn_calls = [
                 c for c in mock_publish.call_args_list
-                if c[0][0] == messageBusTopic.ROOM_AGENT_TURN
+                if c[0][0] == MessageBusTopic.ROOM_AGENT_TURN
             ]
             # create_room 时已发布 alice 的初始事件（在 mock 外），
             # mock 内：skip alice -> bob 事件，skip bob -> 全员跳过，不再发布
@@ -189,7 +191,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         agents = ["alice", "bob"]
         room_key = f"{room_name}@{TEAM}"
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
-        room = roomService.get_room(room_key)
+        room = roomService.get_room_by_key(room_key)
 
         with patch("service.messageBus.publish"):
             room.skip_turn(sender="alice")
@@ -215,7 +217,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         agents = [SpecialAgent.OPERATOR, "alice", "bob"]
         room_key = f"{room_name}@{TEAM}"
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
-        room = roomService.get_room(room_key)
+        room = roomService.get_room_by_key(room_key)
 
         with patch("service.messageBus.publish"):
             # operator 发言推进到 alice
@@ -236,7 +238,7 @@ class TestRoomTurnLogic(ServiceTestCase):
             # 应重新发布当前发言人的 TURN 事件
             turn_calls = [
                 c for c in mock_publish.call_args_list
-                if c[0][0] == messageBusTopic.ROOM_AGENT_TURN
+                if c[0][0] == MessageBusTopic.ROOM_AGENT_TURN
             ]
             assert len(turn_calls) >= 1
 
@@ -247,7 +249,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "skip_partial"
         agents = ["alice", "bob", "charlie"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
-        room = roomService.get_room(f"{room_name}@{TEAM}")
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
 
         with patch("service.messageBus.publish"):
             room.skip_turn(sender="alice")   # alice 跳过
@@ -267,7 +269,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "skip_op"
         agents = [SpecialAgent.OPERATOR, "alice", "bob"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
-        room = roomService.get_room(f"{room_name}@{TEAM}")
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
 
         with patch("service.messageBus.publish"):
             # Operator 正常发言（推进到 alice）
@@ -288,7 +290,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "skip_reset"
         agents = ["alice", "bob"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
-        room = roomService.get_room(f"{room_name}@{TEAM}")
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
 
         with patch("service.messageBus.publish"):
             # 第一轮：全员跳过 -> IDLE
@@ -318,7 +320,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "test_sliding"
         agents = ["alice", "bob", "charlie"]
         await roomService.create_room(TEAM, room_name, agents, max_turns=10)
-        room = roomService.get_room(f"{room_name}@{TEAM}")
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
 
         with patch("service.messageBus.publish"):
             # 1. Alice 发言

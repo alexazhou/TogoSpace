@@ -105,7 +105,7 @@ class TestRealSimpleChat(ServiceTestCase):
 
         # 启动调度器
         run_task = asyncio.create_task(scheduler.run())
-        room = roomService.get_room(room_key)
+        room = roomService.get_room_by_key(room_key)
         room.start_scheduling()
 
         # 等待对话完成（max_turns=2，每人 1 轮）

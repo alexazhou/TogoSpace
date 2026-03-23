@@ -37,12 +37,9 @@ class RoomListHandler(BaseHandler):
         rooms: List[chat_room.ChatRoom] = chat_room.get_all_rooms()
         data = []
         for r in rooms:
-            # 通过 room_id 字符串从数据库查询获取 db_id
-            room_config = await gtRoomManager.get_room_config(r.key)
-            db_id = room_config.id if room_config else 0
             data.append(RoomInfo(
-                db_id=db_id,
-                room_id=r.key,
+                room_id=r.room_id,
+                room_key=r.key,
                 room_name=r.name,
                 team_name=r.team_name,
                 room_type=r.room_type.value,
@@ -61,7 +58,7 @@ class RoomMessagesHandler(BaseHandler):
             for m in room.messages
         ]
         resp = RoomMessagesResponse(
-            room_id=room.key, room_name=room.name, team_name=room.team_name, messages=messages
+            room_id=room.room_id, room_key=room.key, room_name=room.name, team_name=room.team_name, messages=messages
         )
         self.return_json(resp)
 

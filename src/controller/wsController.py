@@ -22,6 +22,7 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
         event = WsEvent(
             event="message",
             room_id=msg.payload.get("room_id"),
+            room_key=msg.payload.get("room_key"),
             room_name=msg.payload["room_name"],
             team_name=msg.payload.get("team_name"),
             sender=msg.payload["sender"],
