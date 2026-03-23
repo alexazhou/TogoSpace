@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 
@@ -37,23 +38,16 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
     return await gtAgentHistoryManager.append_agent_history_message(message)
 
 
-async def load_room_messages(room_id: int) -> list[GtRoomMessage]:
-    return await gtRoomMessageManager.get_room_messages(room_id)
-
-
-async def load_room_state(room_id: int) -> dict[str, int] | None:
-    return await gtRoomManager.get_room_state(room_id)
+async def load_room_runtime(room_id: int) -> tuple[list[GtRoomMessage], dict[str, int] | None]:
+    room_msg_rows, agent_read_index = await asyncio.gather(
+        gtRoomMessageManager.get_room_messages(room_id),
+        gtRoomManager.get_room_state(room_id),
+    )
+    return room_msg_rows, agent_read_index
 
 
 async def load_agent_history(team_id: int, agent_name: str) -> list[GtAgentHistory]:
     return await gtAgentHistoryManager.get_agent_history(team_id, agent_name)
-
-
-def _parse_agent_key(agent_key: str) -> tuple[str, str | None]:
-    if "@" not in agent_key:
-        return agent_key, None
-    agent_name, team_name = agent_key.split("@", 1)
-    return agent_name, team_name
 
 
 async def restore_runtime_state(agents: list, rooms: list) -> None:
@@ -65,7 +59,7 @@ async def restore_runtime_state(agents: list, rooms: list) -> None:
             agent.inject_history_messages(items)
 
     for room in rooms:
-        room_msg_rows: list[GtRoomMessage] = await load_room_messages(room.room_id)
+        room_msg_rows, agent_read_index = await load_room_runtime(room.room_id)
         recovered_from_db = bool(room_msg_rows)
         restored_messages: list[ChatMessage] | None = None
 
@@ -80,8 +74,6 @@ async def restore_runtime_state(agents: list, rooms: list) -> None:
             ]
         elif not room.messages:
             await room.add_message("system", room.build_initial_system_message())
-
-        agent_read_index = await load_room_state(room.room_id)
 
         if restored_messages is not None or agent_read_index is not None:
             room.inject_runtime_state(
@@ -100,7 +92,8 @@ async def append_agent_history_messages(
     messages: list[GtAgentHistory] | None = None,
 ) -> None:
     if messages is None:
-        agent_name, _ = _parse_agent_key(str(team_or_agent_key))
+        agent_key = str(team_or_agent_key)
+        agent_name = agent_key.split("@", 1)[0]
         items = list(agent_name_or_messages)
         for item in items:
             item.agent_name = agent_name

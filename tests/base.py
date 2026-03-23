@@ -17,6 +17,7 @@ import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.persistenceService as persistenceService
 import service.ormService as ormService
+from util import configUtil
 from mock_llm_server import (
     MockLLMServer,
     MOCK_LLM_HOST,
@@ -166,6 +167,7 @@ class ServiceTestCase:
     def setup_class(cls):
         # 先启动外部依赖（MockLLM/后端子进程），再执行子类自定义异步初始化。
         try:
+            cls._cleanup_test_db_files()
             if cls.requires_mock_llm:
                 cls._start_mock_llm()
             if cls.requires_backend:
@@ -268,6 +270,41 @@ class ServiceTestCase:
             return
 
         cls._backend_config_dir = config_dir
+
+    @classmethod
+    def _cleanup_test_db_files(cls) -> None:
+        """每个测试类启动前删除测试 DB，避免残留数据污染。"""
+        config_dir = None
+        if cls.use_custom_config:
+            test_file = sys.modules[cls.__module__].__file__
+            test_dir = os.path.dirname(os.path.abspath(test_file))
+            candidate = os.path.join(test_dir, "config")
+            if os.path.isdir(candidate):
+                config_dir = candidate
+        else:
+            candidate = os.path.join(os.path.dirname(__file__), "config")
+            if os.path.isdir(candidate):
+                config_dir = candidate
+
+        old_env = os.environ.get("TEAMAGENT_ENV")
+        os.environ["TEAMAGENT_ENV"] = "test"
+        try:
+            persistence_cfg = configUtil.load_persistence_config(config_dir)
+        finally:
+            if old_env is None:
+                os.environ.pop("TEAMAGENT_ENV", None)
+            else:
+                os.environ["TEAMAGENT_ENV"] = old_env
+
+        db_path = persistence_cfg.get("db_path")
+        if not db_path or db_path == ":memory:":
+            return
+
+        db_abs_path = db_path if os.path.isabs(db_path) else os.path.abspath(os.path.join(_SRC_DIR, db_path))
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            target = f"{db_abs_path}{suffix}"
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(target)
 
     @classmethod
     def _start_backend(cls):
