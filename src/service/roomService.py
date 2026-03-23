@@ -349,7 +349,7 @@ async def _resolve_room_id(
         from dal.db import gtRoomManager
 
         await gtRoomManager.ensure_room(
-            db_id=synthetic_id,
+            room_id=synthetic_id,
             team_id=resolved_team_id,
             room_name=name,
             room_type=room_type,
