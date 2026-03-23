@@ -36,16 +36,19 @@ async def get_all_teams() -> list[GtTeam]:
 async def upsert_team(team_config: TeamConfig) -> GtTeam:
     """创建或更新 Team。"""
     name = team_config["name"]
+    working_directory = team_config.get("working_directory", "")
     max_function_calls = team_config.get("max_function_calls", 5)
 
     await (
         GtTeam.insert(
             name=name,
+            working_directory=working_directory,
             max_function_calls=max_function_calls,
         )
         .on_conflict(
             conflict_target=[GtTeam.name],
             update={
+                GtTeam.working_directory: working_directory,
                 GtTeam.max_function_calls: max_function_calls,
                 GtTeam.updated_at: GtTeam._now_iso(),
             },
@@ -102,6 +105,7 @@ async def get_team_config(name: str) -> TeamConfig | None:
 
     return {
         "name": team.name,
+        "working_directory": team.working_directory,
         "members": members,
         "preset_rooms": rooms,
         "max_function_calls": team.max_function_calls,

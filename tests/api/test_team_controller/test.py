@@ -34,6 +34,7 @@ class TestTeamController(_ApiServiceCase):
                 data = await resp.json()
 
         assert data["name"] == "e2e"
+        assert data["working_directory"] == ""
         assert data["members"] == [{"name": "alice", "agent": "alice"}]
         assert len(data["rooms"]) == 1
         room = data["rooms"][0]
@@ -44,6 +45,7 @@ class TestTeamController(_ApiServiceCase):
     async def test_create_team_and_fetch_detail(self):
         payload = {
             "name": "new_team",
+            "working_directory": "/tmp/new_team",
             "members": [{"name": "alice", "agent": "alice"}],
             "preset_rooms": [
                 {
@@ -74,6 +76,7 @@ class TestTeamController(_ApiServiceCase):
                 detail = await resp.json()
 
         assert detail["members"] == [{"name": "alice", "agent": "alice"}]
+        assert detail["working_directory"] == "/tmp/new_team"
         assert len(detail["rooms"]) == 1
         assert detail["rooms"][0]["name"] == "团队群聊"
 

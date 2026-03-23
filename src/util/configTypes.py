@@ -22,6 +22,7 @@ class TeamConfig(TypedDict, total=False):
     """Canonical team config shape loaded from JSON/DB."""
 
     name: Required[str]
+    working_directory: NotRequired[str]
     members: Required[list[TeamMemberConfig]]
     preset_rooms: Required[list[TeamRoomConfig]]
     max_function_calls: NotRequired[int]
@@ -31,6 +32,7 @@ class TeamConfigPatch(TypedDict, total=False):
     """Update payload shape for partial team updates."""
 
     name: Required[str]
+    working_directory: str
     members: list[TeamMemberConfig]
     preset_rooms: list[TeamRoomConfig]
     max_function_calls: int
@@ -95,6 +97,7 @@ def normalize_team_config(team_config: dict[str, Any]) -> TeamConfig:
 
     normalized: TeamConfig = {
         "name": str(team_config["name"]),
+        "working_directory": str(team_config.get("working_directory", "")),
         "members": normalize_team_members(team_config["members"]),
         "preset_rooms": rooms,
     }

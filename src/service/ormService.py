@@ -105,6 +105,21 @@ def _ensure_agent_template_name_column(database: AioSqliteDatabase) -> None:
         )
 
 
+def _ensure_team_working_directory_column(database: AioSqliteDatabase) -> None:
+    with database.allow_sync():
+        rows = database.execute_sql("PRAGMA table_info('teams')").fetchall()
+        if not rows:
+            return
+
+        columns = {str(r[1]) for r in rows if len(r) > 1}
+        if "working_directory" in columns:
+            return
+
+        database.execute_sql(
+            "ALTER TABLE teams ADD COLUMN working_directory TEXT NOT NULL DEFAULT ''"
+        )
+
+
 async def startup(db_path: str) -> None:
     global _db, _db_path
     if _db is not None:
@@ -122,6 +137,7 @@ async def startup(db_path: str) -> None:
     _ensure_schema(database)
     _ensure_agent_model_column(database)
     _ensure_agent_template_name_column(database)
+    _ensure_team_working_directory_column(database)
     await database.aio_connect()
     _db = database
 

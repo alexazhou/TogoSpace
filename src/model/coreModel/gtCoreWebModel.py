@@ -6,6 +6,7 @@ from constants import AgentStatus
 
 class TeamInfo(BaseModel):
     name: str
+    working_directory: str
     max_function_calls: Optional[int]
     enabled: int
     created_at: str
