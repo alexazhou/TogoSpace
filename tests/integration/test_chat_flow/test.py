@@ -31,7 +31,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         # 按真实启动顺序拉起 service，并加载 integration 专用配置。
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
         team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
-        db_path = cls.get_test_db_path()
+        db_path = cls.TEST_DB_PATH
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()

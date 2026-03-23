@@ -26,8 +26,6 @@ if os.name == "posix" and sys.platform == "darwin":
 
 @pytest.mark.forked
 class TestPersistenceRestoreIntegration(ServiceTestCase):
-    db_path: str = ""
-
     async def _reset_runtime_services(self):
         scheduler.shutdown()
         funcToolService.shutdown()
@@ -38,13 +36,12 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         roomService.shutdown()
 
     def setup_method(self):
-        self.db_path = self.get_test_db_path()
-        self.cleanup_sqlite_files(self.db_path)
+        self.cleanup_sqlite_files()
         self._run_maybe_async(self._reset_runtime_services())
 
     def teardown_method(self):
         self._run_maybe_async(self._reset_runtime_services())
-        self.cleanup_sqlite_files(self.db_path)
+        self.cleanup_sqlite_files()
 
     async def _bootstrap(self):
         agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
@@ -53,7 +50,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await roomService.startup()
         await funcToolService.startup()
         await agentService.startup()
-        await ormService.startup(self.db_path)
+        await ormService.startup(self.TEST_DB_PATH)
         await persistenceService.startup()
 
         agentService.load_agent_config(agents_config)

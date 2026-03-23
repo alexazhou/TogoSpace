@@ -31,7 +31,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
 
     @classmethod
     async def async_setup_class(cls):
-        cls.db_path = Path(cls.get_test_db_path())
+        cls.db_path = Path(cls.TEST_DB_PATH)
         await persistenceService.shutdown()
         await ormService.shutdown()
         roomService.shutdown()
@@ -85,7 +85,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
 
     @classmethod
     async def async_setup_class(cls):
-        cls.db_path = Path(cls.get_test_db_path())
+        cls.db_path = Path(cls.TEST_DB_PATH)
         await persistenceService.shutdown()
         await ormService.shutdown()
         roomService.shutdown()
