@@ -31,15 +31,12 @@ async def get_all_teams() -> list[GtTeam]:
 async def upsert_team(team_config: dict) -> GtTeam:
     """创建或更新 Team。"""
     name = team_config["name"]
-    max_function_calls = team_config.get("max_function_calls")
+    max_function_calls = team_config.get("max_function_calls", 5)
 
     await (
         GtTeam.insert(
             name=name,
             max_function_calls=max_function_calls,
-            enabled=1,
-            created_at=GtTeam._now_iso(),
-            updated_at=GtTeam._now_iso(),
         )
         .on_conflict(
             conflict_target=[GtTeam.name],
