@@ -2,7 +2,7 @@ import json
 import os
 import sys
 
-from main import _load_runtime_configs
+from backend_main import _load_runtime_configs
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
