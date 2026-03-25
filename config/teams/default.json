@@ -1,34 +1,34 @@
 {
-  "name": "default",
+  "name": "默认团队",
   "members": [
-    { "name": "researcher", "agent": "researcher" },
-    { "name": "project_manager", "agent": "project_manager" },
-    { "name": "software_engineer", "agent": "software_engineer" },
-    { "name": "test_engineer", "agent": "test_engineer" },
-    { "name": "实习生", "agent": "intern_tsp" }
+    { "name": "王老师", "agent": "researcher" },
+    { "name": "小马哥", "agent": "project_manager" },
+    { "name": "小A", "agent": "software_engineer" },
+    { "name": "小B", "agent": "test_engineer" },
+    { "name": "小刘", "agent": "intern_tsp" }
   ],
   "preset_rooms": [
     {
-      "name": "Agent助手",
-      "members": ["Operator", "researcher"],
+      "name": "王老师",
+      "members": ["Operator", "王老师"],
       "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
       "max_turns": 100
     },
     {
-      "name": "项目经理",
-      "members": ["Operator", "project_manager"],
+      "name": "小马哥",
+      "members": ["Operator", "小马哥"],
       "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
       "max_turns": 100
     },
     {
       "name": "Agent大群",
-      "members": ["project_manager","software_engineer", "test_engineer"],
+      "members": ["小马哥", "小A", "小B"],
       "initial_topic": "按角色分工协作，一起协作完成人类发布的任务",
       "max_turns": 1000
     },
     {
-      "name": "实习生",
-      "members": ["Operator", "实习生"],
+      "name": "小刘",
+      "members": ["Operator", "小刘"],
       "initial_topic": "你好，我是人类操作者。你主要协助做文件查找与信息检索。",
       "max_turns": 100
     }
