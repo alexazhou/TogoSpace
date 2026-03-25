@@ -8,6 +8,7 @@ import shlex
 import uuid
 from typing import Any, Optional
 
+from exception import TeamAgentException
 from service import funcToolService
 from service.funcToolService.toolLoader import get_function_metadata
 from service.funcToolService.tools import FUNCTION_REGISTRY
@@ -21,14 +22,6 @@ logger = logging.getLogger(__name__)
 _LOCAL_CHAT_TOOL_NAMES = {"send_chat_msg", "finish_chat_turn"}
 _DEFAULT_PROTOCOL_VERSION = "0.3"
 _DEFAULT_REQUEST_TIMEOUT_SEC = 30
-
-
-class _TspError(Exception):
-    def __init__(self, code: str, message: str, data: Any = None):
-        super().__init__(f"[{code}] {message}")
-        self.code = code
-        self.message = message
-        self.data = data
 
 
 class _TspStdioClient:
@@ -126,10 +119,9 @@ class _TspStdioClient:
             self._in_flight.pop(request_id, None)
 
         if response.get("type") == "error":
-            raise _TspError(
-                code=str(response.get("code", "tsp/error")),
-                message=str(response.get("error", "unknown error")),
-                data=response,
+            raise TeamAgentException(
+                error_message=str(response.get("error", "unknown error")),
+                error_code=str(response.get("code", "tsp/error")),
             )
 
         return response.get("result", {}) or {}
@@ -341,8 +333,8 @@ class TspAgentDriver(AgentDriver):
             if isinstance(result, dict):
                 return result
             return {"success": True, "result": result}
-        except _TspError as e:
-            return {"success": False, "code": e.code, "message": e.message, "error": e.data}
+        except TeamAgentException as e:
+            return {"success": False, "code": e.error_code, "message": e.error_message}
         except Exception as e:
             return {"success": False, "message": f"TSP 工具调用失败: {e}"}
 
