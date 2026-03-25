@@ -28,22 +28,22 @@ class AgentDriverHost(Protocol):
     team_workdir: str
     workspace_root: str
     current_room: ChatRoom
-    _history: list[llmApiUtil.LlmApiMessage]
+    _history: list[llmApiUtil.OpenAIMessage]
 
     @property
     def key(self) -> str:
         ...
 
-    async def _infer(self, tools: Optional[list[llmApiUtil.Tool]]) -> llmApiUtil.LlmApiMessage:
+    async def _infer(self, tools: Optional[list[llmApiUtil.OpenAITool]]) -> llmApiUtil.OpenAIMessage:
         ...
 
     async def _execute_tool(self) -> None:
         ...
 
-    def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llmApiUtil.LlmApiMessage]:
+    def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llmApiUtil.OpenAIMessage]:
         ...
 
-    async def append_history_message(self, message: llmApiUtil.LlmApiMessage) -> None:
+    async def append_history_message(self, message: llmApiUtil.OpenAIMessage) -> None:
         ...
 
 

@@ -5,7 +5,7 @@ from typing import Optional
 import aiohttp
 import certifi
 
-from .models import LlmApiRequest, LlmApiResponse, ErrorResponse
+from .models import OpenAIRequest, OpenAIResponse, OpenAIErrorResponse
 
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ def init() -> None:
     _session = aiohttp.ClientSession(connector=connector)
 
 
-async def send_request(request: LlmApiRequest, url: str, api_key: str) -> LlmApiResponse:
+async def send_request(request: OpenAIRequest, url: str, api_key: str) -> OpenAIResponse:
     """发送 chat completion 请求。"""
     if _session is None:
         raise RuntimeError("llmApiUtil 未初始化，请先调用 init()")
@@ -40,14 +40,14 @@ async def send_request(request: LlmApiRequest, url: str, api_key: str) -> LlmApi
         status = response.status
 
     if status == 200:
-        return LlmApiResponse.model_validate(response_data)
+        return OpenAIResponse.model_validate(response_data)
 
     if 'error' in response_data:
         error_msg = response_data['error'].get('message', 'Unknown error')
         error_code = response_data['error'].get('code', str(status))
     else:
         try:
-            error = ErrorResponse.model_validate(response_data)
+            error = OpenAIErrorResponse.model_validate(response_data)
             error_msg = error.message
             error_code = error.code
         except Exception:

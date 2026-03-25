@@ -200,9 +200,9 @@ class TspAgentDriver(AgentDriver):
     def __init__(self, host, config):
         super().__init__(host, config)
         self._client: Optional[_TspStdioClient] = None
-        self._tsp_tools: dict[str, llmApiUtil.Tool] = {}
+        self._tsp_tools: dict[str, llmApiUtil.OpenAITool] = {}
         _local = funcToolService.get_tools_by_names(_LOCAL_CHAT_TOOL_NAMES)
-        self._local_tools: dict[str, llmApiUtil.Tool] = {t.function.name: t for t in _local}
+        self._local_tools: dict[str, llmApiUtil.OpenAITool] = {t.function.name: t for t in _local}
 
     async def startup(self) -> None:
         options = self.config.options
@@ -249,13 +249,13 @@ class TspAgentDriver(AgentDriver):
             if turn_done:
                 break
             await self.host.append_history_message(
-                llmApiUtil.LlmApiMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, _RUN_CHAT_TURN_HINT)
+                llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, _RUN_CHAT_TURN_HINT)
             )
 
     async def _run_until_reply(
         self,
         room: ChatRoom,
-        tools: Optional[list[llmApiUtil.Tool]] = None,
+        tools: Optional[list[llmApiUtil.OpenAITool]] = None,
         max_function_calls: int = 5,
     ) -> bool:
         if self._client is None:
@@ -274,7 +274,7 @@ class TspAgentDriver(AgentDriver):
         logger.warning("达到最大函数调用次数: agent=%s max=%s", self.host.key, max_function_calls)
         return False
 
-    async def _execute_tool_calls(self, tool_calls: list[llmApiUtil.ToolCall]) -> bool:
+    async def _execute_tool_calls(self, tool_calls: list[llmApiUtil.OpenAIToolCall]) -> bool:
         turn_done = False
         for tool_call in tool_calls:
             function = tool_call.function
@@ -289,7 +289,7 @@ class TspAgentDriver(AgentDriver):
                     chat_room=self.host.current_room,
                 )
                 result_json = await funcToolService.run_tool_call(function_name, function_args, context=context)
-                await self.host.append_history_message(llmApiUtil.LlmApiMessage.tool_result(tool_call_id, result_json))
+                await self.host.append_history_message(llmApiUtil.OpenAIMessage.tool_result(tool_call_id, result_json))
                 if function_name == "finish_chat_turn" and _is_tool_call_succeeded(result_json):
                     turn_done = True
                 continue
@@ -297,11 +297,11 @@ class TspAgentDriver(AgentDriver):
             if function_name in self._tsp_tools:
                 result_dict = await self._execute_tsp_tool(function_name, function_args)
                 result_json = json.dumps(result_dict, ensure_ascii=False)
-                await self.host.append_history_message(llmApiUtil.LlmApiMessage.tool_result(tool_call_id, result_json))
+                await self.host.append_history_message(llmApiUtil.OpenAIMessage.tool_result(tool_call_id, result_json))
                 continue
 
             result_json = json.dumps({"success": False, "message": f"未知工具: {function_name}"}, ensure_ascii=False)
-            await self.host.append_history_message(llmApiUtil.LlmApiMessage.tool_result(tool_call_id, result_json))
+            await self.host.append_history_message(llmApiUtil.OpenAIMessage.tool_result(tool_call_id, result_json))
 
         return turn_done
 
@@ -325,7 +325,7 @@ class TspAgentDriver(AgentDriver):
     def _load_tsp_tools(self, initialize_result: dict[str, Any]) -> None:
         capabilities = initialize_result.get("capabilities") or {}
         tools = capabilities.get("tools") or []
-        resolved: dict[str, llmApiUtil.Tool] = {}
+        resolved: dict[str, llmApiUtil.OpenAITool] = {}
 
         for item in tools:
             assert isinstance(item, dict)
@@ -334,11 +334,11 @@ class TspAgentDriver(AgentDriver):
             input_schema = item.get("input_schema") or item.get("inputSchema") or {}
             assert isinstance(input_schema, dict)
 
-            resolved[name] = llmApiUtil.Tool(
-                function=llmApiUtil.Function(
+            resolved[name] = llmApiUtil.OpenAITool(
+                function=llmApiUtil.OpenAIFunction(
                     name=name,
                     description=str(item.get("description", "")),
-                    parameters=llmApiUtil.FunctionParameter(**input_schema),
+                    parameters=llmApiUtil.OpenAIFunctionParameter(**input_schema),
                 )
             )
 

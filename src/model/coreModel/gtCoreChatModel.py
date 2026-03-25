@@ -18,5 +18,5 @@ class ChatMessage:
 class AgentDialogContext:
     """Agent 发起一次 LLM 请求所需的完整上下文：system prompt + 对话历史 + 模型参数"""
     system_prompt: str
-    messages: List[llmApiUtil.LlmApiMessage]
-    tools: Optional[list[llmApiUtil.Tool]] = field(default=None)
+    messages: List[llmApiUtil.OpenAIMessage]
+    tools: Optional[list[llmApiUtil.OpenAITool]] = field(default=None)

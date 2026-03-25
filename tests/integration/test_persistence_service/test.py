@@ -6,7 +6,7 @@ import pytest
 
 from service import ormService, persistenceService, roomService, messageBus
 from service.agentService import Agent
-from util.llmApiUtil import LlmApiMessage, OpenaiLLMApiRole
+from util.llmApiUtil import OpenAIMessage, OpenaiLLMApiRole
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -99,8 +99,8 @@ class TestRestoreAgentHistory(ServiceTestCase):
 
         agent = Agent("alice", TEAM, "sys", "test-model")
         agent._history = [
-            LlmApiMessage.text(OpenaiLLMApiRole.USER, "u1"),
-            LlmApiMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1"),
+            OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1"),
+            OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1"),
         ]
         for item in agent.dump_history_messages():
             await persistenceService.append_agent_history_message(item)

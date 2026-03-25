@@ -13,7 +13,7 @@ import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.ormService as ormService
 import service.persistenceService as persistenceService
-from util.llmApiUtil import LlmApiMessage, ToolCall
+from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
 from constants import OpenaiLLMApiRole
 from ...base import ServiceTestCase
 
@@ -88,7 +88,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         # 避免前序用例中断时残留 assistant 结尾历史，导致本用例 _infer 前置断言失败。
         if alice._history and alice._history[-1].role == OpenaiLLMApiRole.ASSISTANT:
             await alice.append_history_message(
-                LlmApiMessage.text(OpenaiLLMApiRole.SYSTEM, "reset test turn state")
+                OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset test turn state")
             )
         call_seq = {
             "alice": [

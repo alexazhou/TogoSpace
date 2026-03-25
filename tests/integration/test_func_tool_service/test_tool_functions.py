@@ -90,7 +90,7 @@ class TestGetFunctionMetadata(ServiceTestCase):
 @pytest.mark.forked
 class TestBuildtools(ServiceTestCase):
     async def test_builds_tool_for_each_entry(self):
-        """注册表中每个函数都应产出一个 Tool 定义。"""
+        """注册表中每个函数都应产出一个 OpenAITool 定义。"""
         tools = build_tools({"get_weather": get_weather, "get_time": get_time})
         assert len(tools) == 2
         assert {t.function.name for t in tools} == {"get_weather", "get_time"}

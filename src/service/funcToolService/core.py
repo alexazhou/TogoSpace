@@ -10,7 +10,7 @@ from .toolLoader import build_tools
 
 logger = logging.getLogger(__name__)
 
-_tools: list[llmApiUtil.Tool] = []
+_tools: list[llmApiUtil.OpenAITool] = []
 
 
 async def startup() -> None:
@@ -19,12 +19,12 @@ async def startup() -> None:
     _tools = build_tools(FUNCTION_REGISTRY)
 
 
-def get_tools() -> list[llmApiUtil.Tool]:
+def get_tools() -> list[llmApiUtil.OpenAITool]:
     """返回已初始化的工具列表。"""
     return _tools
 
 
-def get_tools_by_names(names: list[str]) -> list[llmApiUtil.Tool]:
+def get_tools_by_names(names: list[str]) -> list[llmApiUtil.OpenAITool]:
     """根据名称列表从注册表构建并返回对应工具的 schema 列表。"""
     subset = {name: FUNCTION_REGISTRY[name] for name in names if name in FUNCTION_REGISTRY}
     return build_tools(subset)

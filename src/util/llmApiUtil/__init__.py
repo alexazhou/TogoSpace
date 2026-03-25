@@ -1,14 +1,14 @@
 from constants import OpenaiLLMApiRole
 from .models import (
-    LlmApiMessage,
-    LlmApiRequest,
-    LlmApiResponse,
-    ToolCall,
-    FunctionParameter,
-    Function,
-    Tool,
-    Usage,
-    Choice,
-    ErrorResponse,
+    OpenAIMessage,
+    OpenAIRequest,
+    OpenAIResponse,
+    OpenAIToolCall,
+    OpenAIFunctionParameter,
+    OpenAIFunction,
+    OpenAITool,
+    OpenAIUsage,
+    OpenAIChoice,
+    OpenAIErrorResponse,
 )
 from .client import init, send_request
