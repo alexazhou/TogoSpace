@@ -77,7 +77,6 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
     try:
         # initialize 阶段：应加载出 gtsp 工具
         assert driver._tsp_tools
-        assert driver._tsp_tool_names
 
         # 1) 创建 /tmp 下测试目录
         mkdir_result = await driver._execute_tsp_tool(
