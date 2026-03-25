@@ -39,7 +39,7 @@ RoomPanel ListView {
     height: 2fr;
 }
 
-#agent-list {
+#member-list {
     height: 1fr;
     border-top: solid #0e1621;
 }

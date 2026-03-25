@@ -135,8 +135,8 @@ class RoomPanel(Vertical):
     def compose(self) -> ComposeResult:
         yield Label("聊天室", classes="panel-title")
         yield ListView(id="room-list")
-        yield Label("Agent", classes="panel-title")
-        yield ListView(id="agent-list")
+        yield Label("团队成员", classes="panel-title")
+        yield ListView(id="member-list")
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -159,10 +159,10 @@ class RoomPanel(Vertical):
             last_previews = {}
 
         room_list = self.query_one("#room-list", ListView)
-        agent_list = self.query_one("#agent-list", ListView)
+        member_list = self.query_one("#member-list", ListView)
 
         await room_list.clear()
-        await agent_list.clear()
+        await member_list.clear()
 
         # 按 team 分组展示房间
         teams: dict[str, list[RoomInfo]] = defaultdict(list)
@@ -188,21 +188,16 @@ class RoomPanel(Vertical):
                 await room_list.append(item)
                 self.update_unread_count(room.room_key, 0)
 
-        # Agent 去重展示（同名 agent 跨 team 只显示一次）
-        seen_agents: set[str] = set()
-        for agent in agents:
-            if agent.name in seen_agents:
-                continue
-            seen_agents.add(agent.name)
-            item = ListItem(
+        # 成员列表由选中房间所在团队决定，这里先放占位提示
+        await member_list.append(
+            ListItem(
                 Horizontal(
-                    Label(f"{agent.name}  [dim]{agent.model}[/dim]", classes="agent-name"),
-                    Label(self._get_agent_status_markup(agent.status), classes="agent-status"),
+                    Label("[dim]请选择一个房间[/dim]", classes="agent-name"),
+                    Label("", classes="agent-status"),
                     classes="agent-card",
-                ),
-                id=f"agent-{agent.name}",
+                )
             )
-            await agent_list.append(item)
+        )
 
     def _safe_id(self, room_key: str) -> str:
         import hashlib
@@ -237,15 +232,64 @@ class RoomPanel(Vertical):
         except Exception:
             pass
 
-    def update_agent_status(self, agents: list[AgentInfo]) -> None:
-        for agent in agents:
-            try:
-                item = self.query_one(f"#agent-{agent.name}", ListItem)
-                item.query_one(".agent-status", Label).update(
-                    self._get_agent_status_markup(agent.status)
+    async def update_team_members(self, room_key: str | None, agents: list[AgentInfo]) -> None:
+        member_list = self.query_one("#member-list", ListView)
+        await member_list.clear()
+
+        if not room_key:
+            await member_list.append(
+                ListItem(
+                    Horizontal(
+                        Label("[dim]暂无选中房间[/dim]", classes="agent-name"),
+                        Label("", classes="agent-status"),
+                        classes="agent-card",
+                    )
                 )
-            except Exception:
-                pass
+            )
+            return
+
+        room = self._room_map.get(room_key)
+        if room is None:
+            await member_list.append(
+                ListItem(
+                    Horizontal(
+                        Label("[dim]房间不存在[/dim]", classes="agent-name"),
+                        Label("", classes="agent-status"),
+                        classes="agent-card",
+                    )
+                )
+            )
+            return
+
+        team_agents: list[AgentInfo] = [
+            agent for agent in agents if agent.team_name == room.team_name
+        ]
+
+        if not team_agents:
+            await member_list.append(
+                ListItem(
+                    Horizontal(
+                        Label("[dim]该团队暂无成员[/dim]", classes="agent-name"),
+                        Label("", classes="agent-status"),
+                        classes="agent-card",
+                    )
+                )
+            )
+            return
+
+        for idx, agent in enumerate(team_agents):
+            status_markup = self._get_agent_status_markup(agent.status)
+
+            await member_list.append(
+                ListItem(
+                    Horizontal(
+                        Label(f"{agent.name}  [dim]{agent.model}[/dim]", classes="agent-name"),
+                        Label(status_markup, classes="agent-status"),
+                        classes="agent-card",
+                    ),
+                    id=f"member-{idx}",
+                )
+            )
 
     def mark_selected(self, room_key: str) -> None:
         for item in self.query("#room-list ListItem"):
