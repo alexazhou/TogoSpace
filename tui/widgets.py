@@ -51,7 +51,7 @@ class PreviewLabel(Static):
 def _get_side(sender: str, agent_order: list[str]) -> str:
     if sender == "system":
         return "center"
-    if sender == "OPERATOR":
+    if sender.upper() == "OPERATOR":
         return "right"
     return "left"
 
@@ -67,7 +67,7 @@ class MessageBubble(Vertical):
 
     def _get_name_color(self, name: str) -> str:
         """Get a deterministic color for a name."""
-        if name == "OPERATOR":
+        if name.upper() == "OPERATOR":
             return "#7f91a4"  # Keep Operator color consistent
         # Simple hash to pick a color
         idx = sum(ord(c) for c in name) % len(self.NAME_COLORS)
