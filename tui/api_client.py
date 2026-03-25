@@ -77,7 +77,7 @@ class ApiClient:
                 room_key=r["room_key"],
                 room_name=r["room_name"],
                 team_name=r.get("team_name", ""),
-                room_type=r.get("room_type", "group"),
+                room_type=(r.get("room_type", "group") or "group").lower(),
                 state=r["state"],
                 members=r["members"],
             )

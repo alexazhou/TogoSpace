@@ -171,7 +171,7 @@ class RoomPanel(Vertical):
 
         for team_name, team_rooms in teams.items():
             for room in team_rooms:
-                icon = "👤" if room.room_type == "private" else "👥"
+                icon = "👤" if (room.room_type or "").lower() == "private" else "👥"
                 preview = last_previews.get(room.room_key, "暂无消息")
                 card = Vertical(
                     Horizontal(
@@ -219,7 +219,7 @@ class RoomPanel(Vertical):
             item = self.query_one(f"#room-{safe_id}", ListItem)
             room = self._room_map.get(room_key)
             name = room.room_name if room else room_key
-            icon = "👤" if room and room.room_type == "private" else "👥"
+            icon = "👤" if room and (room.room_type or "").lower() == "private" else "👥"
             if count > 0:
                 markup = f"{name} [bold #f85149][{count}][/bold #f85149][#7f91a4] 未读[/]"
             else:
