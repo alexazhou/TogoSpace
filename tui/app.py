@@ -85,7 +85,7 @@ class WatcherApp(App):
         return previews
 
     async def _refresh_full_ui(self, is_initial: bool = False) -> None:
-        """刷新房间列表、Agent 列表及 UI 状态。"""
+        """刷新房间列表、团队成员列表及 UI 状态。"""
         status_bar = self.query_one(StatusBar)
         message_view = self.query_one(MessageView)
         room_panel = self.query_one(RoomPanel)
@@ -106,6 +106,8 @@ class WatcherApp(App):
             target_room_key = self._current_room_key or (rooms[0].room_key if rooms else None)
             if target_room_key:
                 await self._select_room(target_room_key, force_reload=True)
+            else:
+                await room_panel.update_team_members(None, self._agents)
 
             if not is_initial:
                 status_bar.set_connected()
@@ -140,6 +142,7 @@ class WatcherApp(App):
             self._current_room_key = room_key
             self._current_msg_count = len(messages)
             status_bar.update_count(self._current_msg_count)
+            await room_panel.update_team_members(room_key, self._agents)
 
             # 查找房间信息以确定类型
             if (current_room.room_type or "").lower() == "private":
@@ -198,8 +201,12 @@ class WatcherApp(App):
                 if agent.name == event.agent_name and agent.team_name == event.team_name:
                     agent.status = event.status
                     break
-            # 直接使用缓存刷新 UI，无需发起 HTTP 请求
-            self.call_later(room_panel.update_agent_status, list(self._agents))
+            # 直接使用缓存刷新当前团队成员状态，无需发起 HTTP 请求
+            self.run_worker(
+                room_panel.update_team_members(self._current_room_key, list(self._agents)),
+                exclusive=True,
+                group="member-panel",
+            )
             return
 
         preview = _make_preview(event.sender, event.content)
