@@ -25,6 +25,8 @@ class AgentDriverHost(Protocol):
     team_name: str
     system_prompt: str
     model: str
+    team_workdir: str
+    workspace_root: str
     current_room: ChatRoom
     _history: list[llmApiUtil.LlmApiMessage]
 

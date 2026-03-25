@@ -129,7 +129,7 @@ async def delete_team(name: str) -> None:
 
 async def hot_reload_team(name: str) -> None:
     """触发指定 Team 的热更新。"""
-    from service import roomService, schedulerService
+    from service import roomService, schedulerService, agentService
 
     # 重新加载配置
     team_configs = await reload_from_db()
@@ -138,6 +138,12 @@ async def hot_reload_team(name: str) -> None:
     if target_config is None:
         logger.warning(f"热更新失败: Team '{name}' 不存在")
         return
+
+    # 先停掉该 team 的调度任务，避免旧实例在热更新过程中继续消费事件
+    schedulerService.stop_team(name)
+
+    # 刷新 Agent 实例，保证新增/变更成员可被调度命中
+    await agentService.reload_team_agents(name, team_configs)
 
     # 刷新调度器配置
     schedulerService.refresh_team_config(name, team_configs)

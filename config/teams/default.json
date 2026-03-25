@@ -4,7 +4,8 @@
     { "name": "researcher", "agent": "researcher" },
     { "name": "project_manager", "agent": "project_manager" },
     { "name": "software_engineer", "agent": "software_engineer" },
-    { "name": "test_engineer", "agent": "test_engineer" }
+    { "name": "test_engineer", "agent": "test_engineer" },
+    { "name": "实习生", "agent": "intern_tsp" }
   ],
   "preset_rooms": [
     {
@@ -24,6 +25,12 @@
       "members": ["project_manager","software_engineer", "test_engineer"],
       "initial_topic": "按角色分工协作，一起协作完成人类发布的任务",
       "max_turns": 1000
+    },
+    {
+      "name": "实习生",
+      "members": ["Operator", "实习生"],
+      "initial_topic": "你好，我是人类操作者。你主要协助做文件查找与信息检索。",
+      "max_turns": 100
     }
   ]
 }

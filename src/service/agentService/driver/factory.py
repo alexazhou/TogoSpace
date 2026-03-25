@@ -5,6 +5,7 @@ from typing import Any, Mapping
 from .base import AgentDriverConfig
 from .claudeSdkDriver import ClaudeSdkAgentDriver
 from .nativeDriver import NativeAgentDriver
+from .tspDriver import TspAgentDriver
 
 
 def normalize_driver_config(agent_cfg: Mapping[str, Any]) -> AgentDriverConfig:
@@ -36,4 +37,6 @@ def build_agent_driver(host, driver_config: AgentDriverConfig):
         return NativeAgentDriver(host, driver_config)
     if driver_config.driver_type == "claude_sdk":
         return ClaudeSdkAgentDriver(host, driver_config)
+    if driver_config.driver_type == "tsp":
+        return TspAgentDriver(host, driver_config)
     raise ValueError(f"未知 agent driver 类型: {driver_config.driver_type}")
