@@ -45,7 +45,7 @@ class _DummyHost:
     team_workdir: str = "/tmp"
     workspace_root: str = "/tmp/workspaces"
     current_room: object | None = None
-    _history: list[llmApiUtil.LlmApiMessage] = field(default_factory=list)
+    _history: list[llmApiUtil.OpenAIMessage] = field(default_factory=list)
 
     @property
     def key(self) -> str:

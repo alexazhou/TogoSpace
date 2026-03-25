@@ -18,11 +18,11 @@ def get_default_model() -> str:
     return _default_model
 
 
-async def infer(model: str | None, ctx: AgentDialogContext) -> llmApiUtil.LlmApiResponse:
+async def infer(model: str | None, ctx: AgentDialogContext) -> llmApiUtil.OpenAIResponse:
     """根据 AgentDialogContext 组装请求并调用 LLM 推理接口。"""
     resolved_model = model or _default_model
-    messages: list[llmApiUtil.LlmApiMessage] = [llmApiUtil.LlmApiMessage.text(llmApiUtil.OpenaiLLMApiRole.SYSTEM, ctx.system_prompt), *ctx.messages]
-    request = llmApiUtil.LlmApiRequest(
+    messages: list[llmApiUtil.OpenAIMessage] = [llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.SYSTEM, ctx.system_prompt), *ctx.messages]
+    request = llmApiUtil.OpenAIRequest(
         model=resolved_model,
         messages=messages,
         tools=ctx.tools,

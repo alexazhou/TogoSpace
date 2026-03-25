@@ -92,17 +92,17 @@ def get_function_metadata(func_name: str, func) -> Dict[str, Any]:
     }
 
 
-def build_tools(registry: dict) -> list[llmApiUtil.Tool]:
+def build_tools(registry: dict) -> list[llmApiUtil.OpenAITool]:
     """遍历 registry，构建并返回工具列表。"""
     tools = []
     for func_name, func in registry.items():
         try:
             metadata: Dict[str, Any] = get_function_metadata(func_name, func)
-            tool = llmApiUtil.Tool(
-                function=llmApiUtil.Function(
+            tool = llmApiUtil.OpenAITool(
+                function=llmApiUtil.OpenAIFunction(
                     name=metadata["name"],
                     description=metadata["description"],
-                    parameters=llmApiUtil.FunctionParameter(
+                    parameters=llmApiUtil.OpenAIFunctionParameter(
                         type=metadata["parameters"]["type"],
                         properties=metadata["parameters"]["properties"],
                         required=metadata["parameters"].get("required", [])

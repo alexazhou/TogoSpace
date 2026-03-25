@@ -63,7 +63,7 @@ class Agent:
         self.team_workdir: str = team_workdir
         self.workspace_root: str = workspace_root
 
-        self._history: list[llmApiUtil.LlmApiMessage] = []
+        self._history: list[llmApiUtil.OpenAIMessage] = []
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
         self.status: AgentStatus = AgentStatus.IDLE
         self.current_room: Optional[ChatRoom] = None
@@ -129,14 +129,14 @@ class Agent:
             if msg.sender_name == self.name:
                 continue
 
-            message: llmApiUtil.LlmApiMessage
+            message: llmApiUtil.OpenAIMessage
             if msg.sender_name == "system":
-                message = llmApiUtil.LlmApiMessage.text(
+                message = llmApiUtil.OpenAIMessage.text(
                     llmApiUtil.OpenaiLLMApiRole.USER,
                     content=f"{room.name} 房间系统消息: {msg.content}",
                 )
             else:
-                message = llmApiUtil.LlmApiMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, content=f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}")
+                message = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, content=f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}")
 
             await self.append_history_message(message)
             synced_count += 1
@@ -160,7 +160,7 @@ class Agent:
     async def sync_room(self, room: ChatRoom) -> None:
         await self.sync_room_messages(room)
 
-    async def _infer(self, tools: Optional[list[llmApiUtil.Tool]]) -> llmApiUtil.LlmApiMessage:
+    async def _infer(self, tools: Optional[list[llmApiUtil.OpenAITool]]) -> llmApiUtil.OpenAIMessage:
         # 每次推理都基于当前 history 组装完整上下文，并把 assistant 回复继续追加回 history。
         assert self._history and self._history[-1].role in (
             llmApiUtil.OpenaiLLMApiRole.USER,
@@ -168,8 +168,8 @@ class Agent:
             llmApiUtil.OpenaiLLMApiRole.SYSTEM,
         ), f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
         ctx = AgentDialogContext(system_prompt=self.system_prompt, messages=self._history, tools=tools or None)
-        response: llmApiUtil.LlmApiResponse = await llmService.infer(self.model, ctx)
-        assistant_message: llmApiUtil.LlmApiMessage = response.choices[0].message
+        response: llmApiUtil.OpenAIResponse = await llmService.infer(self.model, ctx)
+        assistant_message: llmApiUtil.OpenAIMessage = response.choices[0].message
         await self.append_history_message(assistant_message)
 
         return assistant_message
@@ -186,9 +186,9 @@ class Agent:
             args = function.get("arguments", "")
             context = ChatContext(agent_name=self.name, team_name=self.team_name, chat_room=self.current_room)
             result = await funcToolService.run_tool_call(name, args, context=context)
-            await self.append_history_message(llmApiUtil.LlmApiMessage.tool_result(tool_call.id, result))
+            await self.append_history_message(llmApiUtil.OpenAIMessage.tool_result(tool_call.id, result))
 
-    def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llmApiUtil.LlmApiMessage]:
+    def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llmApiUtil.OpenAIMessage]:
         """获取历史中最后一条 assistant 消息。"""
         recent_history = self._history[start_idx:]
 
@@ -210,13 +210,13 @@ class Agent:
         ]
 
     def inject_history_messages(self, items: List[GtAgentHistory]) -> None:
-        self._history = [llmApiUtil.LlmApiMessage.model_validate_json(item.message_json) for item in items]
+        self._history = [llmApiUtil.OpenAIMessage.model_validate_json(item.message_json) for item in items]
 
-    async def append_history_message(self, message: llmApiUtil.LlmApiMessage) -> None:
+    async def append_history_message(self, message: llmApiUtil.OpenAIMessage) -> None:
         self._history.append(message)
         await self._persist_history_message(message)
 
-    async def _persist_history_message(self, message: llmApiUtil.LlmApiMessage) -> None:
+    async def _persist_history_message(self, message: llmApiUtil.OpenAIMessage) -> None:
         seq: int = len(self._history) - 1
         item = GtAgentHistory(
             team_id=self.team_id,

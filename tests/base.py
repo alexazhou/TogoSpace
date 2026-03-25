@@ -140,7 +140,7 @@ class ServiceTestCase:
     def normalize_to_mock(self, data: dict):
         """将简化格式的响应字典转换为完整的 Mock 响应对象。"""
         import unittest.mock as mock
-        from util.llmApiUtil import LlmApiMessage, ToolCall
+        from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
         from constants import OpenaiLLMApiRole
         import json
 
@@ -155,12 +155,12 @@ class ServiceTestCase:
             args = tc.get("arguments", {})
             if isinstance(args, dict):
                 args = json.dumps(args, ensure_ascii=False)
-            tool_calls.append(ToolCall(
+            tool_calls.append(OpenAIToolCall(
                 id=tc.get("id", f"call_{int(time.time() * 1000)}"),
                 function={"name": tc["name"], "arguments": args}
             ))
 
-        msg = LlmApiMessage(
+        msg = OpenAIMessage(
             role=OpenaiLLMApiRole.ASSISTANT,
             content=content,
             tool_calls=tool_calls if tool_calls else None
