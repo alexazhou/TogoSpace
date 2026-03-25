@@ -47,8 +47,8 @@ class RoomListHandler(BaseHandler):
                 room_key=r.key,
                 room_name=r.name,
                 team_name=r.team_name,
-                room_type=r.room_type.value,
-                state=r.state.value,
+                room_type=r.room_type.name,
+                state=r.state.name,
                 members=r.agents
             ).model_dump(mode="json"))
         self.return_json({"rooms": data})
@@ -93,8 +93,8 @@ class RoomMessagesHandler(BaseHandler):
         content = body.get("content")
         assertUtil.assertNotNull(content, error_message="content is required", error_code="invalid_request")
 
-        await room.add_message(SpecialAgent.OPERATOR.value, content)
-        room.finish_turn(SpecialAgent.OPERATOR.value)
+        await room.add_message(SpecialAgent.OPERATOR.name, content)
+        room.finish_turn(SpecialAgent.OPERATOR.name)
         self.return_json({"status": "ok"})
 
 

@@ -61,14 +61,14 @@ class ApiClient:
 
     async def get_agents(self) -> list[AgentInfo]:
         session = self._get_session()
-        async with session.get(f"{self._base_url}/agents.json") as resp:
+        async with session.get(f"{self._base_url}/agents/list.json") as resp:
             resp.raise_for_status()
             data = await resp.json()
         return [AgentInfo(name=a["name"], model=a["model"], team_name=a.get("team_name", ""), status=a.get("status", "idle")) for a in data["agents"]]
 
     async def get_rooms(self) -> list[RoomInfo]:
         session = self._get_session()
-        async with session.get(f"{self._base_url}/rooms.json") as resp:
+        async with session.get(f"{self._base_url}/rooms/list.json") as resp:
             resp.raise_for_status()
             data = await resp.json()
         return [
@@ -86,7 +86,7 @@ class ApiClient:
 
     async def get_room_messages(self, room_id: int) -> list[MessageInfo]:
         session = self._get_session()
-        async with session.get(f"{self._base_url}/rooms/{room_id}/messages.json") as resp:
+        async with session.get(f"{self._base_url}/rooms/{room_id}/messages/list.json") as resp:
             if resp.status == 404:
                 raise ValueError(f"Room not found: {room_id}")
             resp.raise_for_status()
@@ -102,7 +102,7 @@ class ApiClient:
 
     async def post_room_message(self, room_id: int, content: str) -> bool:
         session = self._get_session()
-        async with session.post(f"{self._base_url}/rooms/{room_id}/messages.json", json={"content": content}) as resp:
+        async with session.post(f"{self._base_url}/rooms/{room_id}/messages/send.json", json={"content": content}) as resp:
             return resp.status == 200
 
     async def ws_events(self, on_connected=None) -> AsyncGenerator[WsEvent, None]:

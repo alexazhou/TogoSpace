@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from typing import List, Optional
 from datetime import datetime
 from constants import AgentStatus
@@ -26,6 +26,10 @@ class AgentInfo(BaseModel):
     model: str
     team_name: str
     status: AgentStatus
+
+    @field_serializer('status')
+    def serialize_status(self, status: AgentStatus) -> str:
+        return status.name
 
 
 class RoomInfo(BaseModel):

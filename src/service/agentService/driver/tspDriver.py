@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 _LOCAL_CHAT_TOOL_NAMES = {"send_chat_msg", "finish_chat_turn"}
 _DEFAULT_PROTOCOL_VERSION = "0.3"
 _DEFAULT_REQUEST_TIMEOUT_SEC = 30
+_RUN_CHAT_TURN_MAX_RETRIES = 3
+_RUN_CHAT_TURN_HINT = (
+    "你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，"
+    "请务必调用 finish_chat_turn 结束本轮（即跳过）。"
+)
 
 
 class _TspStdioClient:
@@ -44,9 +49,11 @@ class _TspStdioClient:
         self._stderr_task = asyncio.create_task(self._read_stderr_loop())
 
     async def disconnect(self) -> None:
-        for task in (self._read_task, self._stderr_task):
-            if task is not None:
-                task.cancel()
+        tasks = [t for t in (self._read_task, self._stderr_task) if t is not None]
+        for t in tasks:
+            t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         self._read_task = None
         self._stderr_task = None
 
@@ -251,12 +258,7 @@ class TspAgentDriver(AgentDriver):
             self._client = None
 
     async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
-        hint = (
-            "你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，"
-            "请务必调用 finish_chat_turn 结束本轮（即跳过）。"
-        )
-        max_retries = 3
-        for _ in range(max_retries):
+        for _ in range(_RUN_CHAT_TURN_MAX_RETRIES):
             turn_done = await self._run_until_reply(
                 room=room,
                 tools=[*self._tsp_tools, *self._local_tools],
@@ -265,7 +267,7 @@ class TspAgentDriver(AgentDriver):
             if turn_done:
                 break
             await self.host.append_history_message(
-                llmApiUtil.LlmApiMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, hint)
+                llmApiUtil.LlmApiMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, _RUN_CHAT_TURN_HINT)
             )
 
     async def _run_until_reply(
