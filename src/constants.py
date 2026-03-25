@@ -14,10 +14,10 @@ class EnhanceEnum(Enum):
 
 
 class OpenaiLLMApiRole(EnhanceEnum):
-    SYSTEM = auto()
-    USER = auto()
-    ASSISTANT = auto()
-    TOOL = auto()
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL = "tool"
 
 
 class MessageBusTopic(EnhanceEnum):
