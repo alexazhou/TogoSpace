@@ -146,6 +146,9 @@ class Agent:
     async def run_chat_turn(self, room_id: int, max_function_calls: int = 5) -> None:
         # Agent 统一维护当前房间上下文 and 消息同步，driver 只负责跑这一轮聊天逻辑。
         room = roomService.get_room(room_id)
+        if room is None:
+            logger.warning(f"run_chat_turn 跳过：room_id={room_id} 不存在, agent={self.key}")
+            return
         self.current_room = room
         synced_count = await self.sync_room_messages(room)
 
@@ -342,6 +345,8 @@ def get_agent_definition(agent_name: str) -> AgentConfig | None:
 
 def get_agents(room_id: int) -> List[Agent]:
     room = roomService.get_room(room_id)
+    if room is None:
+        return []
     members: List[str] = roomService.get_member_names(room_id)
     return [_agents[_make_agent_key(room.team_name, n)] for n in members if _make_agent_key(room.team_name, n) in _agents]
 

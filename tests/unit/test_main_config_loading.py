@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import builtins
 
 import pytest
 from util import configUtil
@@ -191,3 +192,39 @@ def test_load_json_objects_from_dir_raises_for_non_object(tmp_path):
 
     with pytest.raises(ValueError):
         configUtil.load_json_objects_from_dir(str(tmp_path))
+
+
+def test_load_reads_setting_json_once(tmp_path, monkeypatch):
+    setting_file = tmp_path / "setting.json"
+    setting_file.write_text(json.dumps({
+        "default_llm_server": "mock",
+        "llm_services": [
+            {
+                "name": "mock",
+                "enable": True,
+                "base_url": "http://127.0.0.1:7777/v1/chat/completions",
+                "api_key": "llm-only-key",
+                "type": "openai-compatible",
+            }
+        ],
+        "persistence": {
+            "enabled": True,
+            "db_path": "./runtime/test.db",
+        },
+        "workspace_root": "/tmp/workspaces",
+    }), encoding="utf-8")
+
+    target_path = os.path.abspath(setting_file)
+    open_count = {"setting_json": 0}
+    real_open = builtins.open
+
+    def _counting_open(path, *args, **kwargs):
+        if os.path.abspath(path) == target_path:
+            open_count["setting_json"] += 1
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", _counting_open)
+
+    configUtil.load(str(tmp_path))
+
+    assert open_count["setting_json"] == 1

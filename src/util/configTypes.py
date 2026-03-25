@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, List, Optional
 import os
 
@@ -68,6 +68,14 @@ class AppConfig:
     workspace_root: str
 
 
+@dataclass
+class SettingConfig:
+    default_llm_server: str | None = None
+    llm_services: list[dict[str, Any]] = field(default_factory=list)
+    persistence: dict[str, Any] = field(default_factory=dict)
+    workspace_root: str | None = None
+
+
 def resolve_team_workdir(team_name: str, working_directory: str | None, workspace_root: str) -> str:
     if working_directory:
         return working_directory
@@ -80,4 +88,4 @@ def get_team_member_map(team_config: TeamConfig) -> dict[str, TeamMemberConfig]:
 
 __all__ = ["TeamMemberConfig", "TeamRoomConfig", "TeamConfig", "AgentConfig",
            "resolve_team_workdir", "get_team_member_map",
-           "LlmServiceConfig", "PersistenceConfig", "AppConfig"]
+           "LlmServiceConfig", "PersistenceConfig", "AppConfig", "SettingConfig"]

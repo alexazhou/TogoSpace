@@ -41,16 +41,6 @@ class SendMessageRequest(BaseModel):
     content: str | None = None
 
 
-def _get_runtime_room_or_404(room_id: int) -> chat_room.ChatRoom:
-    room: chat_room.ChatRoom | None = None
-    try:
-        room = chat_room.get_room(room_id)
-    except RuntimeError:
-        pass
-    assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
-    return room
-
-
 async def _get_team_or_404(team_id: int):
     team = await gtTeamManager.get_team_by_id(team_id)
     assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
@@ -91,7 +81,8 @@ class RoomMessagesHandler(BaseHandler):
     async def get(self, room_id_str: str) -> None:
         # 通过数据库 ID 获取内存中的 ChatRoom
         room_id = int(room_id_str)
-        room = _get_runtime_room_or_404(room_id)
+        room = chat_room.get_room(room_id)
+        assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
         messages = [
             GtCoreMessageInfo(sender=m.sender_name, content=m.content, time=m.send_time)
             for m in room.messages
@@ -105,7 +96,8 @@ class RoomMessagesHandler(BaseHandler):
         # 通过数据库 ID 获取内存中的 ChatRoom
         request = self.parse_request(SendMessageRequest)
         room_id = int(room_id_str)
-        room = _get_runtime_room_or_404(room_id)
+        room = chat_room.get_room(room_id)
+        assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
         assertUtil.assertTrue(
             room.state != RoomState.INIT,
             error_message="room is in init state, not activated by runtime services",
