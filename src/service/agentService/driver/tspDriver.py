@@ -199,10 +199,9 @@ class TspAgentDriver(AgentDriver):
     def __init__(self, host, config):
         super().__init__(host, config)
         self._client: Optional[_TspStdioClient] = None
-        self._tsp_tools: list[llmApiUtil.Tool] = []
-        self._tsp_tool_names: set[str] = set()
-        self._local_tools = funcToolService.get_tools_by_names(list(_LOCAL_CHAT_TOOL_NAMES))
-        self._local_tool_names = {tool.function.name for tool in self._local_tools}
+        self._tsp_tools: dict[str, llmApiUtil.Tool] = {}
+        _local = funcToolService.get_tools_by_names(list(_LOCAL_CHAT_TOOL_NAMES))
+        self._local_tools: dict[str, llmApiUtil.Tool] = {t.function.name: t for t in _local}
 
     async def startup(self) -> None:
         options = self.config.options
@@ -243,7 +242,7 @@ class TspAgentDriver(AgentDriver):
         for _ in range(_RUN_CHAT_TURN_MAX_RETRIES):
             turn_done = await self._run_until_reply(
                 room=room,
-                tools=[*self._tsp_tools, *self._local_tools],
+                tools=[*self._tsp_tools.values(), *self._local_tools.values()],
                 max_function_calls=max_function_calls,
             )
             if turn_done:
@@ -282,7 +281,7 @@ class TspAgentDriver(AgentDriver):
             function_args = str(function.get("arguments", "{}"))
             tool_call_id = str(tool_call.id or uuid.uuid4().hex)
 
-            if function_name in self._local_tool_names:
+            if function_name in self._local_tools:
                 context = ChatContext(
                     agent_name=self.host.name,
                     team_name=self.host.team_name,
@@ -294,7 +293,7 @@ class TspAgentDriver(AgentDriver):
                     turn_done = True
                 continue
 
-            if function_name in self._tsp_tool_names:
+            if function_name in self._tsp_tools:
                 result_dict = await self._execute_tsp_tool(function_name, function_args)
                 result_json = json.dumps(result_dict, ensure_ascii=False)
                 await self.host.append_history_message(llmApiUtil.LlmApiMessage.tool_result(tool_call_id, result_json))
@@ -325,7 +324,7 @@ class TspAgentDriver(AgentDriver):
     def _load_tsp_tools(self, initialize_result: dict[str, Any]) -> None:
         capabilities = initialize_result.get("capabilities", {}) if isinstance(initialize_result, dict) else {}
         tools = capabilities.get("tools", []) if isinstance(capabilities, dict) else []
-        resolved_tools: list[llmApiUtil.Tool] = []
+        resolved: dict[str, llmApiUtil.Tool] = {}
 
         for item in tools:
             if not isinstance(item, dict):
@@ -343,18 +342,15 @@ class TspAgentDriver(AgentDriver):
                 properties=input_schema.get("properties", {}),
                 required=input_schema.get("required", []),
             )
-            resolved_tools.append(
-                llmApiUtil.Tool(
-                    function=llmApiUtil.Function(
-                        name=name,
-                        description=str(item.get("description", "")),
-                        parameters=parameters,
-                    )
+            resolved[name] = llmApiUtil.Tool(
+                function=llmApiUtil.Function(
+                    name=name,
+                    description=str(item.get("description", "")),
+                    parameters=parameters,
                 )
             )
 
-        self._tsp_tools = resolved_tools
-        self._tsp_tool_names = {tool.function.name for tool in resolved_tools}
+        self._tsp_tools = resolved
 
 
 def _is_tool_call_succeeded(result_json: str) -> bool:
