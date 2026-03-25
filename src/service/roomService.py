@@ -22,6 +22,22 @@ def _normalize_members(members: Sequence[str | SpecialAgent] | None) -> List[str
     return [member.name if isinstance(member, SpecialAgent) else member for member in members]
 
 
+def _same_speaker(left: str | None, right: str | None) -> bool:
+    """比较两个发言者标识。
+
+    对 SpecialAgent（例如 Operator）使用枚举语义比较，避免字符串大小写/命名差异导致误判；
+    其他普通 Agent 仍保持原有字符串精确比较。
+    """
+    if left is None or right is None:
+        return left == right
+
+    left_special = SpecialAgent.value_of(left)
+    right_special = SpecialAgent.value_of(right)
+    if left_special is not None or right_special is not None:
+        return left_special is not None and left_special == right_special
+    return left == right
+
+
 def _infer_room_type(members: Sequence[str]) -> RoomType:
     normalized = _normalize_members(members)
     ai_count = len([m for m in normalized if SpecialAgent.value_of(m) != SpecialAgent.OPERATOR])
@@ -120,7 +136,7 @@ class ChatRoom:
 
         # 2. 只有当前顺序发言人说话，才标记本轮有内容。不再自动推进
         current_expected: Optional[str] = self.get_current_turn_agent()
-        if sender == current_expected:
+        if _same_speaker(sender, current_expected):
             self._current_turn_has_content = True
         else:
             logger.info(f"房间 {self.key} 收到来自 {sender} 的插话，保持当前发言位 (当前应轮到 {current_expected})")
@@ -143,7 +159,7 @@ class ChatRoom:
 
         current_expected: Optional[str] = self.get_current_turn_agent()
 
-        if sender and sender != current_expected:
+        if sender and not _same_speaker(sender, current_expected):
             logger.warning(f"拒绝结束轮次申请：{sender} 并非当前发言人 ({current_expected})")
             return False
 
@@ -420,7 +436,7 @@ def get_rooms_for_agent(team_id: int | None, agent_name: str) -> List[int]:
     """返回指定参与者所在的房间 room_id 列表。可选按 team 过滤。"""
     results = []
     for room in _rooms.values():
-        if agent_name in room.agents:
+        if any(_same_speaker(agent_name, member_name) for member_name in room.agents):
             if team_id is None or room.team_id == team_id:
                 results.append(room.room_id)
     return results
