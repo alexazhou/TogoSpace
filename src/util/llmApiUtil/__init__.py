@@ -1,5 +1,5 @@
 from constants import OpenaiLLMApiRole
-from .models import (
+from .OpenAiModels import (
     OpenAIMessage,
     OpenAIRequest,
     OpenAIResponse,
