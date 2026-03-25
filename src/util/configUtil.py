@@ -3,7 +3,7 @@ import json
 import os
 from typing import Any, List
 
-from util.configTypes import AgentConfig, AppConfig, LlmServiceConfig, PersistenceConfig, TeamConfig
+from util.configTypes import AgentConfig, AppConfig, LlmServiceConfig, PersistenceConfig, SettingConfig, TeamConfig
 
 
 def _default_config_dir() -> str:
@@ -72,16 +72,29 @@ def load_prompt(file_path: str) -> str:
         return f.read().strip()
 
 
-def load_llmService_config(config_dir: str = None) -> LlmServiceConfig:
-    """返回当前激活的 LLM 服务配置。"""
+def load_setting_config(config_dir: str = None) -> SettingConfig:
+    """加载 setting.json 并转为 SettingConfig。文件不存在时返回默认对象。"""
     path = _resolve_config_file(config_dir, "setting.json")
+    if not os.path.isfile(path):
+        return SettingConfig()
+
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
 
-    active_key = cfg.get("default_llm_server")
-    services_key = cfg.get("llm_services")
+    return SettingConfig(
+        default_llm_server=cfg.get("default_llm_server"),
+        llm_services=list(cfg.get("llm_services") or []),
+        persistence=dict(cfg.get("persistence") or {}),
+        workspace_root=str(cfg.get("workspace_root")) if cfg.get("workspace_root") else None,
+    )
 
-    all_services = services_key or []
+
+def load_llmService_config(config_dir: str = None, setting: SettingConfig | None = None) -> LlmServiceConfig:
+    """返回当前激活的 LLM 服务配置。"""
+    setting = setting or load_setting_config(config_dir)
+
+    active_key = setting.default_llm_server
+    all_services = setting.llm_services
     enabled_services = [s for s in all_services if s.get("enable", True)]
 
     if not enabled_services:
@@ -104,37 +117,23 @@ def load_llmService_config(config_dir: str = None) -> LlmServiceConfig:
     )
 
 
-def load_persistence_config(config_dir: str = None) -> dict:
+def load_persistence_config(config_dir: str = None, setting: SettingConfig | None = None) -> dict:
     """返回持久化配置。"""
-    path = _resolve_config_file(config_dir, "setting.json")
+    setting = setting or load_setting_config(config_dir)
     default_db_path = _default_db_path()
-    if not os.path.isfile(path):
-        return {
-            "enabled": False,
-            "db_path": default_db_path,
-        }
-
-    with open(path, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-    persistence = cfg.get("persistence", {})
+    persistence = setting.persistence
     return {
         "enabled": persistence.get("enabled", False),
         "db_path": persistence.get("db_path", default_db_path),
     }
 
 
-def load_workspace_root(config_dir: str = None) -> str:
+def load_workspace_root(config_dir: str = None, setting: SettingConfig | None = None) -> str:
     """返回工作区根目录。"""
-    path = _resolve_config_file(config_dir, "setting.json")
-    if not os.path.isfile(path):
-        return _default_workspace_root()
-
-    with open(path, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-
-    workspace_root = cfg.get("workspace_root")
+    setting = setting or load_setting_config(config_dir)
+    workspace_root = setting.workspace_root
     if workspace_root:
-        return str(workspace_root)
+        return workspace_root
     return _default_workspace_root()
 
 
@@ -143,10 +142,11 @@ def load(config_dir: str = None) -> AppConfig:
     agents = load_agents(config_dir)
     teams = load_teams(config_dir)
 
-    llm_service = load_llmService_config(config_dir)
-    persistence_dict = load_persistence_config(config_dir)
+    setting = load_setting_config(config_dir)
+    llm_service = load_llmService_config(config_dir, setting)
+    persistence_dict = load_persistence_config(config_dir, setting)
     persistence = PersistenceConfig(**persistence_dict)
-    workspace_root = load_workspace_root(config_dir)
+    workspace_root = load_workspace_root(config_dir, setting)
 
     return AppConfig(
         agents=agents,

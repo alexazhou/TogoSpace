@@ -320,12 +320,9 @@ def get_room_by_key(room_key: str) -> ChatRoom:
     return room
 
 
-def get_room(room_id: int) -> ChatRoom:
-    """通过数据库主键 room_id 返回聊天室实例。"""
-    room = _rooms_by_id.get(room_id)
-    if room is None:
-        raise RuntimeError(f"聊天室 ID '{room_id}' 不存在")
-    return room
+def get_room(room_id: int) -> ChatRoom | None:
+    """通过数据库主键 room_id 返回聊天室实例，不存在时返回 None。"""
+    return _rooms_by_id.get(room_id)
 
 
 def get_all_rooms() -> List[ChatRoom]:
@@ -429,7 +426,8 @@ async def create_rooms(teams_config: list[TeamConfig]) -> None:
 
 def get_member_names(room_id: int) -> List[str]:
     """返回聊天室的参与者名列表。"""
-    return get_room(room_id).members
+    room = get_room(room_id)
+    return room.members if room is not None else []
 
 
 def get_rooms_for_agent(team_id: int | None, agent_name: str) -> List[int]:
