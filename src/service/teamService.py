@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import cast
 
 from dal.db import gtTeamManager, gtTeamMemberManager, gtRoomManager, gtRoomMemberManager
 from exception import TeamAgentException
-from util.configTypes import TeamConfig, TeamRoomConfig
+from util.configTypes import TeamConfig
 
 logger = logging.getLogger(__name__)
 
