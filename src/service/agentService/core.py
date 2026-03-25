@@ -6,6 +6,7 @@ from util import llmApiUtil, configUtil
 from util.configTypes import AgentConfig, TeamConfig, TeamRoomConfig, resolve_team_workdir
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreChatMessage
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
+from model.coreModel.gtCoreWebModel import GtCoreAgentInfo
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from .driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
@@ -80,6 +81,15 @@ class Agent:
     @property
     def is_active(self) -> bool:
         return self.status == AgentStatus.ACTIVE or not self.wait_task_queue.empty()
+
+    def get_info(self) -> GtCoreAgentInfo:
+        return GtCoreAgentInfo(
+            name=self.name,
+            template_name=self.template_name or None,
+            model=self.model,
+            team_name=self.team_name,
+            status=AgentStatus.ACTIVE if self.is_active else AgentStatus.IDLE,
+        )
 
     async def startup(self) -> None:
         await self.driver.startup()

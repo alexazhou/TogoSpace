@@ -55,6 +55,19 @@ class TestagentServiceGetAgentsInRoom(_agentServiceCase):
         assert {a.name for a in agentService.get_agents(room.room_id)} == {"alice", "bob"}
 
 
+class TestAgentServiceGetInfo(_agentServiceCase):
+    async def test_get_info(self):
+        """get_info 应返回面向 Web 层的标准 Agent 信息。"""
+        alice = agentService.get_agent(TEAM, "alice")
+
+        info = alice.get_info()
+
+        assert info.name == "alice"
+        assert info.template_name == "alice"
+        assert info.team_name == TEAM
+        assert info.status.name == "IDLE"
+
+
 class TestagentServiceGetAllRooms(_agentServiceCase):
     async def test_get_all_rooms_for_agent(self):
         """get_all_rooms 应返回某个 agent 所在的所有 room_id。"""
