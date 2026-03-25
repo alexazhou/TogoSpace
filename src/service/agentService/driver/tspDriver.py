@@ -183,15 +183,8 @@ class _TspStdioClient:
         self._in_flight.clear()
 
 
-def _parse_tool_filter(value: Any) -> Optional[list[str]]:
-    if value is None:
-        return None
-    if isinstance(value, (list, tuple)):
-        return [str(v) for v in value]
-    return [str(value)]
 
-
-def build_gtsp_command(raw_command: Any, workdir: str, workdir_root: str) -> list[str]:
+def build_gtsp_command(raw_command: Any, workdir: str) -> list[str]:
     if raw_command is None:
         default_binary = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "../../../../assert/execute/gtsp")
@@ -206,8 +199,6 @@ def build_gtsp_command(raw_command: Any, workdir: str, workdir_root: str) -> lis
 
     if "--workdir" not in command and workdir:
         command.extend(["--workdir", workdir])
-    if "--workdir-root" not in command and workdir_root:
-        command.extend(["--workdir-root", workdir_root])
     return command
 
 
@@ -222,14 +213,13 @@ class TspAgentDriver(AgentDriver):
 
     async def startup(self) -> None:
         options = self.config.options
-        workdir = str(options.get("workdir") or self.host.team_workdir)
-        workdir_root = str(options.get("workdir_root") or self.host.workspace_root)
-        command = build_gtsp_command(options.get("command"), workdir, workdir_root)
+        work_dir = str(options.get("workdir") or self.host.team_workdir)
+        command = build_gtsp_command(options.get("command"), work_dir)
 
         timeout_sec = int(options.get("request_timeout_sec", _DEFAULT_REQUEST_TIMEOUT_SEC))
         protocol_version = str(options.get("protocol_version", _DEFAULT_PROTOCOL_VERSION))
-        include = _parse_tool_filter(options.get("tool_include"))
-        exclude = _parse_tool_filter(options.get("tool_exclude"))
+        include: Optional[list[str]] = options.get("tool_include") or None
+        exclude: Optional[list[str]] = options.get("tool_exclude") or None
 
         client = _TspStdioClient(command=command, request_timeout_sec=timeout_sec)
         await client.connect()
