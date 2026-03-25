@@ -1,58 +1,46 @@
 from dataclasses import dataclass, field
-from typing import Any, List
+from typing import Any, List, Optional
 import os
 
-from typing_extensions import NotRequired, Required, TypedDict
+from pydantic import BaseModel, Field
 
-class TeamMemberConfig(TypedDict):
-    name: Required[str]
-    agent: Required[str]
+class TeamMemberConfig(BaseModel):
+    name: str
+    agent: str
 
 
-class TeamRoomConfig(TypedDict, total=False):
+class TeamRoomConfig(BaseModel):
     """Single room item in team config."""
+    id: Optional[int] = None
+    name: str
+    members: List[str]
+    initial_topic: str = ""
+    max_turns: int = 10
 
-    id: int
-    name: Required[str]
-    members: Required[list[str]]
-    initial_topic: str
-    max_turns: int
 
-
-class TeamConfig(TypedDict, total=False):
+class TeamConfig(BaseModel):
     """Canonical team config shape loaded from JSON/DB."""
-
-    name: Required[str]
-    working_directory: NotRequired[str]
-    config: NotRequired[dict[str, Any]]
-    members: Required[list[TeamMemberConfig]]
-    preset_rooms: Required[list[TeamRoomConfig]]
-    max_function_calls: NotRequired[int]
-
-
-class TeamConfigPatch(TypedDict, total=False):
-    """Update payload shape for partial team updates."""
-
-    name: Required[str]
-    working_directory: str
-    config: dict[str, Any]
-    members: list[TeamMemberConfig]
-    preset_rooms: list[TeamRoomConfig]
-    max_function_calls: int
+    name: str
+    working_directory: str = ""
+    config: dict[str, Any] = Field(default_factory=dict)
+    members: List[TeamMemberConfig] = Field(default_factory=list)
+    preset_rooms: List[TeamRoomConfig] = Field(default_factory=list)
+    max_function_calls: Optional[int] = None
 
 
-class AgentConfig(TypedDict, total=False):
+class AgentConfig(BaseModel):
     """Agent definition loaded from config/agents/*.json."""
+    name: str
+    system_prompt: str = ""
+    prompt_file: str = ""
+    model: Optional[str] = None
+    use_agent_sdk: bool = False
+    allowed_tools: List[str] = Field(default_factory=list, alias="allowed_Tools")
+    driver: dict[str, Any] = Field(default_factory=dict)
+    runtime: dict[str, Any] = Field(default_factory=dict)
 
-    name: Required[str]
-    system_prompt: str
-    prompt_file: str
-    model: NotRequired[str]
-    use_agent_sdk: bool
-    allowed_tools: list[str]
-    allowed_Tools: list[str]
-    driver: dict[str, Any]
-    runtime: dict[str, Any]
+    class Config:
+        populate_by_name = True
 
 
 @dataclass
@@ -80,39 +68,6 @@ class AppConfig:
     workspace_root: str
 
 
-def normalize_team_members(raw_members: list[Any]) -> list[TeamMemberConfig]:
-    return [
-        {
-            "name": str(member["name"]),
-            "agent": str(member["agent"]),
-        }
-        for member in raw_members
-    ]
-
-
-def normalize_team_config(team_config: dict[str, Any]) -> TeamConfig:
-    rooms = [
-        {
-            **room,
-            "members": [str(member) for member in room.get("members", [])],
-        }
-        for room in team_config.get("preset_rooms", [])
-    ]
-
-    normalized: TeamConfig = {
-        "name": str(team_config["name"]),
-        "working_directory": str(team_config.get("working_directory", "")),
-        "config": dict(team_config.get("config", {})),
-        "members": normalize_team_members(team_config["members"]),
-        "preset_rooms": rooms,
-    }
-
-    if "max_function_calls" in team_config:
-        normalized["max_function_calls"] = int(team_config["max_function_calls"])
-
-    return normalized
-
-
 def resolve_team_workdir(team_name: str, working_directory: str | None, workspace_root: str) -> str:
     if working_directory:
         return working_directory
@@ -120,9 +75,9 @@ def resolve_team_workdir(team_name: str, working_directory: str | None, workspac
 
 
 def get_team_member_map(team_config: TeamConfig) -> dict[str, TeamMemberConfig]:
-    return {member["name"]: member for member in team_config.get("members", [])}
+    return {member.name: member for member in team_config.members}
 
 
-__all__ = ["TeamMemberConfig", "TeamRoomConfig", "TeamConfig", "TeamConfigPatch", "AgentConfig",
-           "normalize_team_members", "normalize_team_config", "resolve_team_workdir", "get_team_member_map",
+__all__ = ["TeamMemberConfig", "TeamRoomConfig", "TeamConfig", "AgentConfig",
+           "resolve_team_workdir", "get_team_member_map",
            "LlmServiceConfig", "PersistenceConfig", "AppConfig"]

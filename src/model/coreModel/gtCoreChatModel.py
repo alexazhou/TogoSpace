@@ -7,7 +7,7 @@ from util import llmApiUtil
 
 
 @dataclass
-class ChatMessage:
+class GtCoreChatMessage:
     """聊天消息数据类"""
     sender_name: str
     content: str
@@ -15,7 +15,7 @@ class ChatMessage:
 
 
 @dataclass
-class AgentDialogContext:
+class GtCoreAgentDialogContext:
     """Agent 发起一次 LLM 请求所需的完整上下文：system prompt + 对话历史 + 模型参数"""
     system_prompt: str
     messages: List[llmApiUtil.OpenAIMessage]

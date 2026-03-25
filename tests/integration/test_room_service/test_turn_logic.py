@@ -302,6 +302,25 @@ class TestRoomTurnLogic(ServiceTestCase):
         # Operator 未跳过，但 AI 全员跳过 -> 应停止调度
         assert room.state == RoomState.IDLE
 
+    async def test_operator_alias_matches_on_turn_checks(self):
+        """
+        测试点：当前发言位是配置中的 "Operator" 时，运行态传入 "OPERATOR"
+        也应识别为同一 SpecialAgent，不应被判定为插话或非法结束轮次。
+        """
+        room_name = "operator_alias"
+        agents = ["Operator", "alice"]
+        await roomService.create_room(TEAM, room_name, agents, max_turns=10)
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
+        assert room.activate_scheduling()
+        assert room.get_current_turn_agent() == "Operator"
+
+        with patch("service.messageBus.publish"):
+            await room.add_message(SpecialAgent.OPERATOR.name, "hello from operator")
+            ok = room.finish_turn(SpecialAgent.OPERATOR.name)
+            assert ok is True
+
+        assert room.get_current_turn_agent() == "alice"
+
     async def test_skip_set_resets_each_round(self):
         """
         测试点：每轮的跳过记录互不干扰——第一轮全员跳过停止后唤醒，

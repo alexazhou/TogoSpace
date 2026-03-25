@@ -1,3 +1,20 @@
-from .gtCoreChatModel import ChatMessage, AgentDialogContext
-from .gtCoreAgentEvent import RoomMessageEvent
-from .gtCoreWebModel import AgentInfo, RoomInfo, MessageInfo, RoomMessagesResponse, WsEvent
+from .gtCoreChatModel import GtCoreChatMessage, GtCoreAgentDialogContext
+from .gtCoreAgentEvent import GtCoreRoomMessageEvent
+from .gtCoreWebModel import (
+    GtCoreAgentInfo,
+    GtCoreRoomInfo,
+    GtCoreMessageInfo,
+    GtCoreRoomMessagesResponse,
+    GtCoreWsEvent,
+)
+
+__all__ = [
+    "GtCoreChatMessage",
+    "GtCoreAgentDialogContext",
+    "GtCoreRoomMessageEvent",
+    "GtCoreAgentInfo",
+    "GtCoreRoomInfo",
+    "GtCoreMessageInfo",
+    "GtCoreRoomMessagesResponse",
+    "GtCoreWsEvent",
+]

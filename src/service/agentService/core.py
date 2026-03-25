@@ -3,9 +3,9 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from util import llmApiUtil, configUtil
-from util.configTypes import TeamConfig, TeamRoomConfig, normalize_team_config, resolve_team_workdir
-from model.coreModel.gtCoreChatModel import AgentDialogContext, ChatMessage
-from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
+from util.configTypes import AgentConfig, TeamConfig, TeamRoomConfig, resolve_team_workdir
+from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreChatMessage
+from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from .driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
@@ -15,7 +15,7 @@ from constants import SpecialAgent, MessageBusTopic, AgentStatus
 
 logger = logging.getLogger(__name__)
 
-_agent_defs: Dict[str, dict] = {}
+_agent_defs: Dict[str, AgentConfig] = {}
 _agents: Dict[str, "Agent"] = {}
 _team_ids: Dict[str, int] = {}  # team_name -> team_id mapping
 
@@ -25,7 +25,7 @@ def _make_agent_key(team_name: str, agent_name: str) -> str:
 
 
 def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
-    return team_config.get("preset_rooms") or []
+    return team_config.preset_rooms
 
 
 async def load_team_ids(teams_config: list[TeamConfig]) -> None:
@@ -34,7 +34,7 @@ async def load_team_ids(teams_config: list[TeamConfig]) -> None:
     global _team_ids
     _team_ids = {}
     for team in teams_config:
-        team_name = team["name"]
+        team_name = team.name
         team_row = await gtTeamManager.get_team(team_name)
         if team_row:
             _team_ids[team_name] = team_row.id
@@ -107,7 +107,7 @@ class Agent:
                     break
 
                 try:
-                    if isinstance(task, RoomMessageEvent):
+                    if isinstance(task, GtCoreRoomMessageEvent):
                         await self.run_chat_turn(task.room_id, max_function_calls)
                     else:
                         raise TypeError(f"不支持的 Agent 任务类型: {type(task).__name__}")
@@ -121,7 +121,7 @@ class Agent:
 
     async def sync_room_messages(self, room: ChatRoom) -> int:
         # 把该 Agent 在房间中的未读消息追加到私有 history，返回本次真正同步进去的条数。
-        new_msgs: List[ChatMessage] = await room.get_unread_messages(self.name)
+        new_msgs: List[GtCoreChatMessage] = await room.get_unread_messages(self.name)
         logger.info(f"同步房间消息: agent={self.key}, room={room.name}, count={len(new_msgs)}")
 
         synced_count = 0
@@ -167,7 +167,7 @@ class Agent:
             llmApiUtil.OpenaiLLMApiRole.TOOL,
             llmApiUtil.OpenaiLLMApiRole.SYSTEM,
         ), f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
-        ctx = AgentDialogContext(system_prompt=self.system_prompt, messages=self._history, tools=tools or None)
+        ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=self._history, tools=tools or None)
         response: llmApiUtil.OpenAIResponse = await llmService.infer(self.model, ctx)
         assistant_message: llmApiUtil.OpenAIMessage = response.choices[0].message
         await self.append_history_message(assistant_message)
@@ -233,9 +233,9 @@ async def startup() -> None:
     _agents = {}
 
 
-def load_agent_config(agents_config: list) -> None:
+def load_agent_config(agents_config: List[AgentConfig]) -> None:
     global _agent_defs
-    _agent_defs = {cfg["name"]: cfg for cfg in agents_config}
+    _agent_defs = {cfg.name: cfg for cfg in agents_config}
     logger.info(f"加载 Agent 定义: {list(_agent_defs.keys())}")
 
 
@@ -245,29 +245,28 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
     resolved_workspace_root = workspace_root or configUtil.load_workspace_root()
 
     for team_config in teams_config:
-        team_config = normalize_team_config(team_config)
-        team_name = team_config["name"]
+        team_name = team_config.name
         team_workdir = resolve_team_workdir(
             team_name=team_name,
-            working_directory=team_config.get("working_directory"),
+            working_directory=team_config.working_directory,
             workspace_root=resolved_workspace_root,
         )
 
-        for member in team_config.get("members", []):
-            member_name = member["name"]
-            template_name = member["agent"]
+        for member in team_config.members:
+            member_name = member.name
+            template_name = member.agent
             if template_name not in _agent_defs:
                 logger.warning(f"Agent 定义不存在: member={member_name}, agent={template_name}，跳过创建")
                 continue
 
-            cfg: dict[str, Any] = _agent_defs[template_name]
-            if "system_prompt" in cfg:
-                agent_specific_prompt = cfg["system_prompt"]
+            cfg: AgentConfig = _agent_defs[template_name]
+            if cfg.system_prompt:
+                agent_specific_prompt = cfg.system_prompt
             else:
-                agent_specific_prompt = configUtil.load_prompt(cfg["prompt_file"])
+                agent_specific_prompt = configUtil.load_prompt(cfg.prompt_file)
 
             full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
-            model_name = cfg.get("model") or default_model
+            model_name = cfg.model or default_model
             key = _make_agent_key(team_name, member_name)
             driver_config = normalize_driver_config(cfg)
             agent = Agent(
@@ -311,12 +310,12 @@ async def reload_team_agents(team_name: str, teams_config: list[TeamConfig], wor
     # team_id 可能因创建/删除发生变化，热更新时一并刷新映射
     await load_team_ids(teams_config)
 
-    target_config = next((cfg for cfg in teams_config if cfg["name"] == team_name), None)
+    target_config = next((cfg for cfg in teams_config if cfg.name == team_name), None)
     if target_config is None:
         logger.warning(f"重建 Team Agent 失败: team '{team_name}' 不存在于配置中")
         return
 
-    await create_team_agents([normalize_team_config(target_config)], workspace_root=workspace_root)
+    await create_team_agents([target_config], workspace_root=workspace_root)
 
 
 def get_agent(team_name: str, agent_name: str) -> Agent:
@@ -333,11 +332,11 @@ def get_all_agents() -> List[Agent]:
     return list(_agents.values())
 
 
-def get_all_agent_definitions() -> list[dict[str, Any]]:
+def get_all_agent_definitions() -> list[AgentConfig]:
     return list(_agent_defs.values())
 
 
-def get_agent_definition(agent_name: str) -> dict[str, Any] | None:
+def get_agent_definition(agent_name: str) -> AgentConfig | None:
     return _agent_defs.get(agent_name)
 
 

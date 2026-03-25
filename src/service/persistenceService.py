@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 
 from dal.db import gtAgentHistoryManager, gtRoomMessageManager, gtRoomManager, gtTeamManager
-from model.coreModel.gtCoreChatModel import ChatMessage
+from model.coreModel.gtCoreChatModel import GtCoreChatMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service import ormService
@@ -61,11 +61,11 @@ async def restore_runtime_state(agents: list, rooms: list) -> None:
     for room in rooms:
         room_msg_rows, agent_read_index = await load_room_runtime(room.room_id)
         recovered_from_db = bool(room_msg_rows)
-        restored_messages: list[ChatMessage] | None = None
+        restored_messages: list[GtCoreChatMessage] | None = None
 
         if room_msg_rows:
             restored_messages = [
-                ChatMessage(
+                GtCoreChatMessage(
                     sender_name=row.agent_name,
                     content=row.content,
                     send_time=datetime.fromisoformat(row.send_time),

@@ -2,6 +2,7 @@ import json
 import os
 import sys
 
+import pytest
 from util import configUtil
 from util.configTypes import AppConfig, LlmServiceConfig, PersistenceConfig, resolve_team_workdir
 
@@ -174,3 +175,19 @@ def test_resolve_team_workdir_falls_back_to_workspace_root_and_team_name():
         workspace_root="/tmp/workspaces",
     )
     assert resolved == "/tmp/workspaces/default"
+
+
+def test_load_json_objects_from_dir_returns_sorted_objects(tmp_path):
+    (tmp_path / "b.json").write_text(json.dumps({"name": "b"}), encoding="utf-8")
+    (tmp_path / "a.json").write_text(json.dumps({"name": "a"}), encoding="utf-8")
+
+    items = configUtil.load_json_objects_from_dir(str(tmp_path))
+
+    assert [item["name"] for item in items] == ["a", "b"]
+
+
+def test_load_json_objects_from_dir_raises_for_non_object(tmp_path):
+    (tmp_path / "invalid.json").write_text(json.dumps(["not", "object"]), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        configUtil.load_json_objects_from_dir(str(tmp_path))

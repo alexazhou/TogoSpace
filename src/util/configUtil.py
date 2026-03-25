@@ -1,9 +1,9 @@
 import glob
 import json
 import os
-from typing import List, cast
+from typing import Any, List
 
-from util.configTypes import AgentConfig, AppConfig, LlmServiceConfig, PersistenceConfig, TeamConfig, normalize_team_config
+from util.configTypes import AgentConfig, AppConfig, LlmServiceConfig, PersistenceConfig, TeamConfig
 
 
 def _default_config_dir() -> str:
@@ -36,16 +36,25 @@ def _resolve_config_file(config_dir: str | None, preferred_name: str) -> str:
     return os.path.join(config_dir, preferred_name)
 
 
+def load_json_objects_from_dir(dir_path: str) -> list[dict[str, Any]]:
+    """加载目录下全部 json 文件，按文件名排序返回 json 对象列表。"""
+    result: list[dict[str, Any]] = []
+    for path in sorted(glob.glob(os.path.join(dir_path, "*.json"))):
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError(f"JSON 文件内容必须是对象: {path}")
+        result.append(data)
+    return result
+
+
 def load_agents(config_dir: str = None) -> List[AgentConfig]:
     """扫描 config/agents/*.json，返回 Agent 定义列表。"""
     if config_dir is None:
         config_dir = _default_config_dir()
     agents_dir = os.path.join(config_dir, "agents")
-    result: List[AgentConfig] = []
-    for path in sorted(glob.glob(os.path.join(agents_dir, "*.json"))):
-        with open(path, "r", encoding="utf-8") as f:
-            result.append(cast(AgentConfig, json.load(f)))
-    return result
+    raw_agents = load_json_objects_from_dir(agents_dir)
+    return [AgentConfig.model_validate(agent) for agent in raw_agents]
 
 
 def load_teams(config_dir: str = None) -> List[TeamConfig]:
@@ -53,11 +62,8 @@ def load_teams(config_dir: str = None) -> List[TeamConfig]:
     if config_dir is None:
         config_dir = _default_config_dir()
     teams_dir = os.path.join(config_dir, "teams")
-    result: List[TeamConfig] = []
-    for path in sorted(glob.glob(os.path.join(teams_dir, "*.json"))):
-        with open(path, "r", encoding="utf-8") as f:
-            result.append(normalize_team_config(cast(dict, json.load(f))))
-    return result
+    raw_teams = load_json_objects_from_dir(teams_dir)
+    return [TeamConfig.model_validate(team) for team in raw_teams]
 
 
 def load_prompt(file_path: str) -> str:
@@ -66,8 +72,8 @@ def load_prompt(file_path: str) -> str:
         return f.read().strip()
 
 
-def load_llmService_config(config_dir: str = None) -> dict:
-    """返回当前激活的 LLM 服务配置（name, base_url, api_key, type）。"""
+def load_llmService_config(config_dir: str = None) -> LlmServiceConfig:
+    """返回当前激活的 LLM 服务配置。"""
     path = _resolve_config_file(config_dir, "setting.json")
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
@@ -87,7 +93,15 @@ def load_llmService_config(config_dir: str = None) -> dict:
     services = {s["name"]: s for s in enabled_services if s.get("name")}
     if active_key not in services:
         raise ValueError(f"默认 LLM 服务 '{active_key}' 未在 llm_services 中定义或已禁用")
-    return dict(services[active_key])
+    selected = services[active_key]
+    return LlmServiceConfig(
+        name=str(selected["name"]),
+        base_url=str(selected["base_url"]),
+        api_key=str(selected["api_key"]),
+        type=str(selected["type"]),
+        model=str(selected["model"]) if selected.get("model") is not None else None,
+        enable=bool(selected.get("enable", True)),
+    )
 
 
 def load_persistence_config(config_dir: str = None) -> dict:
@@ -129,10 +143,7 @@ def load(config_dir: str = None) -> AppConfig:
     agents = load_agents(config_dir)
     teams = load_teams(config_dir)
 
-    llm_dict = load_llmService_config(config_dir)
-    _llm_fields = LlmServiceConfig.__dataclass_fields__
-    llm_service = LlmServiceConfig(**{k: v for k, v in llm_dict.items() if k in _llm_fields})
-
+    llm_service = load_llmService_config(config_dir)
     persistence_dict = load_persistence_config(config_dir)
     persistence = PersistenceConfig(**persistence_dict)
     workspace_root = load_workspace_root(config_dir)

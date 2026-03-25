@@ -14,6 +14,7 @@ import service.schedulerService as scheduler
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
+from util.configTypes import AgentConfig, TeamConfig
 from constants import OpenaiLLMApiRole
 from ...base import ServiceTestCase
 
@@ -29,8 +30,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # 按真实启动顺序拉起 service，并加载 integration 专用配置。
-        agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
-        team_config   = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
+        agents_config = [AgentConfig.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
+        team_config   = TeamConfig.model_validate(json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read()))
         db_path = cls.TEST_DB_PATH
         await ormService.startup(db_path)
         await persistenceService.startup()

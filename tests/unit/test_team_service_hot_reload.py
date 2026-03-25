@@ -4,12 +4,13 @@ from unittest.mock import AsyncMock
 import pytest
 
 from service import teamService
+from util.configTypes import TeamConfig
 
 
 @pytest.mark.asyncio
 async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
     call_order: list[str] = []
-    team_configs = [{"name": "default", "members": [], "preset_rooms": []}]
+    team_configs = [TeamConfig(name="default", members=[], preset_rooms=[])]
 
     async def _reload_from_db():
         return team_configs

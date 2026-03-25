@@ -5,7 +5,7 @@ from typing import Dict
 from util.configTypes import TeamConfig, TeamRoomConfig
 from service import messageBus
 from service.messageBus import Message
-from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
+from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from service import agentService, roomService as chat_room
 from service.agentService import Agent
 from dal.db import gtRoomManager
@@ -19,7 +19,7 @@ _stop_event: asyncio.Event = asyncio.Event()
 
 
 def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
-    return team_config.get("preset_rooms") or []
+    return team_config.preset_rooms
 
 
 async def startup(teams_config: list[TeamConfig]) -> None:
@@ -84,12 +84,12 @@ def _on_agent_turn(msg: Message) -> None:
         logger.debug(f"跳过重复入队: agent={agent.key}, room_id={room_id}")
         return
 
-    agent.wait_task_queue.put_nowait(RoomMessageEvent(room_id))
+    agent.wait_task_queue.put_nowait(GtCoreRoomMessageEvent(room_id))
 
     max_fc = 5
     for team in _teams_config:
-        if team["name"] == team_name:
-            max_fc = team.get("max_function_calls", 5)
+        if team.name == team_name:
+            max_fc = team.max_function_calls or 5
             break
     add_agent(agent, max_fc)
 
@@ -100,9 +100,9 @@ async def run() -> None:
 
     logger.info("Scheduler 已停止运行")
     for team in _teams_config:
-        team_name = team["name"]
+        team_name = team.name
         for room in _iter_team_rooms(team):
-            room_ref = f"{room['name']}@{team_name}"
+            room_ref = f"{room.name}@{team_name}"
             try:
                 runtime_room = chat_room.get_room_by_key(room_ref)
             except RuntimeError:

@@ -3,7 +3,7 @@ import json
 import logging
 import tornado.websocket
 import service.messageBus as messageBus
-from model.coreModel.gtCoreWebModel import WsEvent
+from model.coreModel.gtCoreWebModel import GtCoreWsEvent
 from constants import MessageBusTopic
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
         pass  # 只推不收，忽略客户端消息
 
     def _on_message_added(self, msg) -> None:
-        event = WsEvent(
+        event = GtCoreWsEvent(
             event="message",
             room_id=msg.payload.get("room_id"),
             room_key=msg.payload.get("room_key"),

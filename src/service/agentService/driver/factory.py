@@ -8,7 +8,12 @@ from .nativeDriver import NativeAgentDriver
 from .tspDriver import TspAgentDriver
 
 
-def normalize_driver_config(agent_cfg: Mapping[str, Any]) -> AgentDriverConfig:
+from util.configTypes import AgentConfig
+
+def normalize_driver_config(agent_cfg: AgentConfig | Mapping[str, Any]) -> AgentDriverConfig:
+    if hasattr(agent_cfg, "model_dump"):
+        agent_cfg = agent_cfg.model_dump()
+
     driver_cfg = agent_cfg.get("driver")
     if driver_cfg:
         return AgentDriverConfig(

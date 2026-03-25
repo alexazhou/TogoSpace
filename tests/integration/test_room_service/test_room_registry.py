@@ -7,6 +7,7 @@ import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
 from service.roomService import ChatRoom
+from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -64,7 +65,7 @@ class TestRoomRegistry(ServiceTestCase):
 
     async def test_create_rooms_always_emits_initial_message(self):
         """批量建房路径应始终生成初始化消息，供后续恢复逻辑覆盖。"""
-        teams_config = [{
+        teams_config = [TeamConfig.model_validate({
             "name": TEAM,
             "members": [
                 {"name": "alice", "agent": "alice"},
@@ -75,7 +76,7 @@ class TestRoomRegistry(ServiceTestCase):
                 "initial_topic": "boot topic",
                 "max_turns": 5,
             }],
-        }]
+        })]
 
         await roomService.create_rooms(teams_config)
 

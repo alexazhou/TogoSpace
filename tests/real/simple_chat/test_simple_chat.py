@@ -5,6 +5,7 @@ import os
 import sys
 
 import pytest
+from src.constants import RoomState
 import service.roomService as roomService
 import service.agentService as agentService
 import service.funcToolService as funcToolService
@@ -36,7 +37,7 @@ class TestRealSimpleChat(ServiceTestCase):
 
         # 加载 LLM 配置并启动服务
         llm_cfg = configUtil.load_llmService_config(_CONFIG_DIR)
-        await llmService.startup(llm_cfg.get("api_key", ""), llm_cfg.get("base_url", ""))
+        await llmService.startup(llm_cfg.api_key, llm_cfg.base_url)
 
         # 启动服务
         await ormService.startup(cls.TEST_DB_PATH)
@@ -119,7 +120,7 @@ class TestRealSimpleChat(ServiceTestCase):
 
         # 等待对话完成（max_turns=2，每人 1 轮）
         for _ in range(10):
-            if room.state.value == "idle":
+            if room.state == RoomState.IDLE:
                 break
             await asyncio.sleep(0.5)
 
@@ -140,4 +141,4 @@ class TestRealSimpleChat(ServiceTestCase):
         assert agent_messages[1].content == "你好 Alice！"
 
         # 验证房间状态为 idle
-        assert room.state.value == "idle"
+        assert room.state == RoomState.IDLE

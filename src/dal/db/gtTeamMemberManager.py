@@ -28,8 +28,8 @@ async def upsert_team_members(team_id: int, members: list[TeamMemberConfig]) -> 
     rows = [
         {
             "team_id": team_id,
-            "name": member["name"],
-            "agent_name": member["agent"],
+            "name": member.name,
+            "agent_name": member.agent,
         }
         for member in members
     ]

@@ -96,7 +96,7 @@ class TestRoomController(_ApiServiceCase):
         messages = data["messages"]
         # Operator 的消息应被真正落库，而不仅仅返回 HTTP 成功。
         assert any(
-            m["sender"] == SpecialAgent.OPERATOR.name and m["content"] == payload["content"]
+            SpecialAgent.value_of(m["sender"]) == SpecialAgent.OPERATOR and m["content"] == payload["content"]
             for m in messages
         )
 
@@ -127,14 +127,15 @@ class TestRoomControllerPrivate(_ApiServiceCase):
         assert len(rooms) == 2
 
         private_room = next(r for r in rooms if r["room_name"] == "alice_private")
-        assert private_room["room_type"] == RoomType.PRIVATE.value
+        assert RoomType.value_of(private_room["room_type"]) == RoomType.PRIVATE
         assert private_room["team_name"] == _V6_TEAM
-        assert SpecialAgent.OPERATOR.name in private_room["members"]
+        assert any(SpecialAgent.value_of(m) == SpecialAgent.OPERATOR for m in private_room["members"])
 
         group_room = next(r for r in rooms if r["room_name"] == "public_group")
-        assert group_room["room_type"] == RoomType.GROUP.value
+        assert RoomType.value_of(group_room["room_type"]) == RoomType.GROUP
         assert group_room["team_name"] == _V6_TEAM
-        assert SpecialAgent.OPERATOR.name not in group_room["members"]
+        assert not any(SpecialAgent.value_of(m) == SpecialAgent.OPERATOR for m in group_room["members"])
+
 
     async def test_post_message_to_private_room(self):
         """验证向 private 房间发送消息后，Operator 消息入库且 Agent 在限时内回复。"""
@@ -153,9 +154,8 @@ class TestRoomControllerPrivate(_ApiServiceCase):
                 assert resp.status == 200
                 data = await resp.json()
                 messages = data["messages"]
-                assert len(messages) >= 2
-                assert messages[1]["sender"] == SpecialAgent.OPERATOR.name
                 assert messages[1]["content"] == payload["content"]
+                assert SpecialAgent.value_of(messages[1]["sender"]) == SpecialAgent.OPERATOR
 
         max_wait = 15
         start_time = time.time()
