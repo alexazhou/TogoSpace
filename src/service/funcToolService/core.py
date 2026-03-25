@@ -24,6 +24,12 @@ def get_tools() -> list[llmApiUtil.Tool]:
     return _tools
 
 
+def get_tools_by_names(names: list[str]) -> list[llmApiUtil.Tool]:
+    """根据名称列表从注册表构建并返回对应工具的 schema 列表。"""
+    subset = {name: FUNCTION_REGISTRY[name] for name in names if name in FUNCTION_REGISTRY}
+    return build_tools(subset)
+
+
 async def run_tool_call(
     function_name: str,
     function_args: str,

@@ -4,14 +4,11 @@ import asyncio
 import json
 import logging
 import os
-import shlex
 import uuid
 from typing import Any, Optional
 
 from exception import TeamAgentException
 from service import funcToolService
-from service.funcToolService.toolLoader import get_function_metadata
-from service.funcToolService.tools import FUNCTION_REGISTRY
 from service.roomService import ChatContext, ChatRoom
 from util import llmApiUtil
 
@@ -184,18 +181,14 @@ class _TspStdioClient:
 
 
 
-def build_gtsp_command(raw_command: Any, workdir: str) -> list[str]:
+def build_gtsp_command(raw_command: Optional[list[str]], workdir: str) -> list[str]:
     if raw_command is None:
         default_binary = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "../../../../assert/execute/gtsp")
         )
         command = [default_binary, "--mode", "stdio"]
-    elif isinstance(raw_command, str):
-        command = shlex.split(raw_command)
-    elif isinstance(raw_command, (list, tuple)):
-        command = [str(item) for item in raw_command]
     else:
-        raise ValueError("driver.options.command must be string or list")
+        command = list(raw_command)
 
     if "--workdir" not in command and workdir:
         command.extend(["--workdir", workdir])
@@ -208,7 +201,7 @@ class TspAgentDriver(AgentDriver):
         self._client: Optional[_TspStdioClient] = None
         self._tsp_tools: list[llmApiUtil.Tool] = []
         self._tsp_tool_names: set[str] = set()
-        self._local_tools = self._build_local_tools()
+        self._local_tools = funcToolService.get_tools_by_names(list(_LOCAL_CHAT_TOOL_NAMES))
         self._local_tool_names = {tool.function.name for tool in self._local_tools}
 
     async def startup(self) -> None:
@@ -217,14 +210,13 @@ class TspAgentDriver(AgentDriver):
         command = build_gtsp_command(options.get("command"), work_dir)
 
         timeout_sec = int(options.get("request_timeout_sec", _DEFAULT_REQUEST_TIMEOUT_SEC))
-        protocol_version = str(options.get("protocol_version", _DEFAULT_PROTOCOL_VERSION))
         include: Optional[list[str]] = options.get("tool_include") or None
         exclude: Optional[list[str]] = options.get("tool_exclude") or None
 
         client = _TspStdioClient(command=command, request_timeout_sec=timeout_sec)
         await client.connect()
         try:
-            result = await client.initialize(protocol_version=protocol_version, include=include, exclude=exclude)
+            result = await client.initialize(protocol_version=_DEFAULT_PROTOCOL_VERSION, include=include, exclude=exclude)
             self._load_tsp_tools(result)
         except Exception:
             await client.disconnect()
@@ -363,26 +355,6 @@ class TspAgentDriver(AgentDriver):
 
         self._tsp_tools = resolved_tools
         self._tsp_tool_names = {tool.function.name for tool in resolved_tools}
-
-    def _build_local_tools(self) -> list[llmApiUtil.Tool]:
-        result: list[llmApiUtil.Tool] = []
-        for tool_name in _LOCAL_CHAT_TOOL_NAMES:
-            func = FUNCTION_REGISTRY[tool_name]
-            metadata = get_function_metadata(tool_name, func)
-            result.append(
-                llmApiUtil.Tool(
-                    function=llmApiUtil.Function(
-                        name=metadata["name"],
-                        description=metadata["description"],
-                        parameters=llmApiUtil.FunctionParameter(
-                            type=metadata["parameters"]["type"],
-                            properties=metadata["parameters"]["properties"],
-                            required=metadata["parameters"].get("required", []),
-                        ),
-                    )
-                )
-            )
-        return result
 
 
 def _is_tool_call_succeeded(result_json: str) -> bool:

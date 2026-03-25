@@ -35,15 +35,6 @@ def test_build_gtsp_command_respects_explicit_command_and_no_duplicate_flags():
     assert "--workdir-root" not in cmd
 
 
-def test_build_gtsp_command_parses_string_command():
-    cmd = build_gtsp_command(
-        "./assert/execute/gtsp --mode stdio",
-        workdir="/tmp/team-a",
-    )
-    assert cmd[0].endswith("assert/execute/gtsp")
-    assert "--mode" in cmd
-    assert "--workdir" in cmd
-
 
 @dataclass
 class _DummyHost:
