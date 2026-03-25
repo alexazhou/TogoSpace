@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import List
 
 import service.agentService as agentService
 from service.agentService import Agent
@@ -9,23 +9,13 @@ from dal.db import gtTeamManager
 from util import assertUtil, configUtil
 
 
-def _serialize_agent(agent: Agent) -> dict[str, Any]:
-    return GtCoreAgentInfo(
-        name=agent.name,
-        template_name=agent.template_name or None,
-        model=agent.model,
-        team_name=agent.team_name,
-        status=AgentStatus.ACTIVE if agent.is_active else AgentStatus.IDLE,
-    ).model_dump(mode="json")
-
-
 class AgentListHandler(BaseHandler):
     async def get(self):
         team_name = self.get_query_argument("team_name", None)
         if team_name:
             agents: List[Agent] = agentService.get_all_agents()
             agents = [agent for agent in agents if agent.team_name == team_name]
-            data = [_serialize_agent(agent) for agent in agents]
+            data = [agent.get_info().model_dump(mode="json") for agent in agents]
         else:
             data = [
                 GtCoreAgentInfo(
@@ -73,7 +63,7 @@ class AgentDetailHandler(BaseHandler):
 
         self.return_json(
             {
-                **_serialize_agent(agent),
+                **agent.get_info().model_dump(mode="json"),
                 "agent_name": agent.template_name,
                 "driver_type": agent.driver.driver_type,
                 "prompt": prompt,
