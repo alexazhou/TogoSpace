@@ -1,8 +1,8 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, List, Optional
 import os
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 class TeamMemberConfig(BaseModel):
     name: str
@@ -43,8 +43,9 @@ class AgentConfig(BaseModel):
         populate_by_name = True
 
 
-@dataclass
-class LlmServiceConfig:
+class LlmServiceConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     name: str
     base_url: str
     api_key: str
@@ -68,11 +69,12 @@ class AppConfig:
     workspace_root: str
 
 
-@dataclass
-class SettingConfig:
+class SettingConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     default_llm_server: str | None = None
-    llm_services: list[dict[str, Any]] = field(default_factory=list)
-    persistence: dict[str, Any] = field(default_factory=dict)
+    llm_services: list[dict[str, Any]] = Field(default_factory=list)
+    persistence: dict[str, Any] = Field(default_factory=dict)
     workspace_root: str | None = None
 
 

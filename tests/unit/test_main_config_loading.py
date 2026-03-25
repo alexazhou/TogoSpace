@@ -90,25 +90,17 @@ def test_runtime_configs_allow_llm_only_setting(tmp_path):
     assert app_config.persistence.db_path == "../test_data/data.db"
 
 
-def test_persistence_default_db_path_in_non_test_env(tmp_path, monkeypatch):
+def test_default_db_path_in_non_test_env(monkeypatch):
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.setenv("TEAMAGENT_ENV", "prod")
 
-    cfg = configUtil.load_persistence_config(str(tmp_path))
-    assert cfg == {
-        "enabled": False,
-        "db_path": "../data/data.db",
-    }
+    assert configUtil.get_db_path() == "../data/data.db"
 
 
-def test_persistence_default_db_path_in_test_env(tmp_path, monkeypatch):
+def test_default_db_path_in_test_env(monkeypatch):
     monkeypatch.setenv("TEAMAGENT_ENV", "test")
 
-    cfg = configUtil.load_persistence_config(str(tmp_path))
-    assert cfg == {
-        "enabled": False,
-        "db_path": "../test_data/data.db",
-    }
+    assert configUtil.get_db_path() == "../test_data/data.db"
 
 
 def test_load_returns_appconfig_with_typed_fields(tmp_path):
@@ -228,3 +220,17 @@ def test_load_reads_setting_json_once(tmp_path, monkeypatch):
     configUtil.load(str(tmp_path))
 
     assert open_count["setting_json"] == 1
+
+
+def test_load_setting_config_ignores_extra_keys(tmp_path):
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "default_llm_server": "mock",
+        "llm_services": [],
+        "workspace_root": "/tmp/ws",
+        "unknown_key": {"keep": False},
+    }), encoding="utf-8")
+
+    setting = configUtil.load_setting_config(str(tmp_path))
+
+    assert setting.default_llm_server == "mock"
+    assert setting.workspace_root == "/tmp/ws"

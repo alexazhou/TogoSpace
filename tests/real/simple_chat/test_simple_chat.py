@@ -35,9 +35,9 @@ class TestRealSimpleChat(ServiceTestCase):
     async def async_setup_class(cls):
         """初始化服务和配置"""
 
-        # 加载 LLM 配置并启动服务
-        llm_cfg = configUtil.load_llmService_config(_CONFIG_DIR)
-        await llmService.startup(llm_cfg.api_key, llm_cfg.base_url)
+        # 加载配置
+        cfg = configUtil.load(_CONFIG_DIR)
+        await llmService.startup(cfg.llm_service.api_key, cfg.llm_service.base_url)
 
         # 启动服务
         await ormService.startup(cls.TEST_DB_PATH)
@@ -46,18 +46,14 @@ class TestRealSimpleChat(ServiceTestCase):
         await funcToolService.startup()
         await agentService.startup()
 
-        # 加载配置
-        agents_cfgs = configUtil.load_agents(_CONFIG_DIR)
-        team_cfgs = configUtil.load_teams(_CONFIG_DIR)
-
-        agentService.load_agent_config(agents_cfgs)
-        await agentService.create_team_agents(team_cfgs)
+        agentService.load_agent_config(cfg.agents)
+        await agentService.create_team_agents(cfg.teams)
 
         # 创建房间（max_turns=1 表示 alice/bob 各 1 次发言）
         await roomService.create_room("default", "general", ["alice", "bob"], max_turns=1)
 
         # 启动调度器
-        await scheduler.startup(team_cfgs)
+        await scheduler.startup(cfg.teams)
 
     @classmethod
     async def async_teardown_class(cls):

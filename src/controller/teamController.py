@@ -9,24 +9,19 @@ from util import assertUtil
 from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig
 
 
-class TeamMemberRequest(BaseModel):
-    name: str
-    agent: str
-
-
 # Request Models
 class CreateTeamRequest(BaseModel):
     name: str
     working_directory: str = ""
     config: dict = Field(default_factory=dict)
-    members: list[TeamMemberRequest]
+    members: list[TeamMemberConfig]
     preset_rooms: list[TeamRoomConfig]
 
 
 class UpdateTeamRequest(BaseModel):
     working_directory: str | None = None
     config: dict | None = None
-    members: list[TeamMemberRequest] | None = None
+    members: list[TeamMemberConfig] | None = None
     preset_rooms: list[TeamRoomConfig] | None = None
 
 
@@ -59,18 +54,7 @@ class TeamCreateHandler(BaseHandler):
 
     async def post(self) -> None:
         request = self.parse_request(CreateTeamRequest)
-
-        members = [
-            TeamMemberConfig(name=m.name, agent=m.agent) for m in request.members
-        ]
-
-        team_config = TeamConfig(
-            name=request.name,
-            working_directory=request.working_directory or "",
-            config=request.config or {},
-            members=members,
-            preset_rooms=request.preset_rooms,
-        )
+        team_config = TeamConfig.model_validate(request.model_dump())
 
         # 调用 service 创建 team
         await teamService.create_team(team_config)
@@ -146,25 +130,8 @@ class TeamModifyHandler(BaseHandler):
             return
 
         # 构建完整配置，确保局部更新不会丢字段
-        team_config = TeamConfig(
-            name=current_config.name,
-            working_directory=current_config.working_directory,
-            config=current_config.config,
-            members=current_config.members,
-            preset_rooms=current_config.preset_rooms,
-            max_function_calls=current_config.max_function_calls
-        )
-
-        if request.working_directory is not None:
-            team_config.working_directory = request.working_directory
-        if request.config is not None:
-            team_config.config = request.config
-        if request.members is not None:
-            team_config.members = [
-                TeamMemberConfig(name=m.name, agent=m.agent) for m in request.members
-            ]
-        if request.preset_rooms is not None:
-            team_config.preset_rooms = request.preset_rooms
+        updates = {k: v for k, v in request.model_dump(exclude_none=True).items()}
+        team_config = current_config.model_copy(update=updates)
 
         # 调用 service 更新 team
         await teamService.update_team(team_config)
