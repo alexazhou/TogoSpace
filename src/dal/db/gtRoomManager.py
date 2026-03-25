@@ -75,10 +75,10 @@ async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
     # 插入新数据
     rows = []
     for room in rooms:
-        room_name = room["name"]
-        room_type = _infer_room_type_from_members(room.get("members", []))
-        initial_topic = room.get("initial_topic", "")
-        max_turns = room.get("max_turns", 100)
+        room_name = room.name
+        room_type = _infer_room_type_from_members(room.members)
+        initial_topic = room.initial_topic
+        max_turns = room.max_turns
         updated_at = GtRoom._now_iso()
 
         rows.append({

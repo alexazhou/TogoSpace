@@ -6,7 +6,7 @@ from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtTeamMemberManager
 from service import teamService
 from util import assertUtil
-from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig, normalize_team_config
+from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig
 
 
 class TeamMemberRequest(BaseModel):
@@ -58,15 +58,24 @@ class TeamCreateHandler(BaseHandler):
     """POST /teams/create.json - 创建新 Team（自动触发热更新）"""
 
     async def post(self) -> None:
+        from util.configTypes import TeamMemberConfig, TeamConfig, TeamRoomConfig
         request = self.parse_request(CreateTeamRequest)
 
-        team_config: TeamConfig = normalize_team_config({
-            "name": request.name,
-            "working_directory": request.working_directory,
-            "config": request.config,
-            "members": [member.model_dump(mode="json") for member in request.members],
-            "preset_rooms": request.preset_rooms,
-        })
+        members = [
+            TeamMemberConfig(name=m.name, agent=m.agent) for m in request.members
+        ]
+        
+        rooms = []
+        if request.preset_rooms:
+             rooms = [TeamRoomConfig.model_validate(r) for r in request.preset_rooms]
+
+        team_config = TeamConfig(
+            name=request.name,
+            working_directory=request.working_directory or "",
+            config=request.config or {},
+            members=members,
+            preset_rooms=rooms,
+        )
 
         # 调用 service 创建 team
         await teamService.create_team(team_config)
@@ -142,27 +151,30 @@ class TeamModifyHandler(BaseHandler):
             return
 
         # 构建完整配置，确保局部更新不会丢字段
-        team_config: TeamConfig = {
-            "name": team_name,
-            "working_directory": current_config.get("working_directory", ""),
-            "config": dict(current_config.get("config", {})),
-            "members": list(current_config["members"]),
-            "preset_rooms": list(current_config["preset_rooms"]),
-        }
-        if "max_function_calls" in current_config:
-            team_config["max_function_calls"] = current_config["max_function_calls"]
+        from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig
+        team_config = TeamConfig(
+            name=current_config.name,
+            working_directory=current_config.working_directory,
+            config=current_config.config,
+            members=current_config.members,
+            preset_rooms=current_config.preset_rooms,
+            max_function_calls=current_config.max_function_calls
+        )
 
         if request.working_directory is not None:
-            team_config["working_directory"] = request.working_directory
+            team_config.working_directory = request.working_directory
         if request.config is not None:
-            team_config["config"] = request.config
+            team_config.config = request.config
         if request.members is not None:
-            team_config["members"] = [member.model_dump(mode="json") for member in request.members]
+            team_config.members = [
+                TeamMemberConfig(name=m.name, agent=m.agent) for m in request.members
+            ]
         if request.preset_rooms is not None:
-            team_config["preset_rooms"] = request.preset_rooms
+            team_config.preset_rooms = [TeamRoomConfig.model_validate(r) for r in request.preset_rooms]
 
         # 调用 service 更新 team
-        await teamService.update_team(normalize_team_config(team_config))
+        await teamService.update_team(team_config)
+
 
         self.return_json({"status": "updated", "name": team_name})
 

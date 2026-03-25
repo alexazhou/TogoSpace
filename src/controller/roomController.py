@@ -8,7 +8,11 @@ from pydantic import BaseModel
 # 内部包
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager, gtRoomMessageManager
-from model.coreModel.gtCoreWebModel import RoomInfo, MessageInfo, RoomMessagesResponse
+from model.coreModel.gtCoreWebModel import (
+    GtCoreMessageInfo,
+    GtCoreRoomInfo,
+    GtCoreRoomMessagesResponse,
+)
 from model.dbModel.gtRoom import GtRoom
 from service import roomService as chat_room, teamService
 from constants import SpecialAgent, RoomState
@@ -42,14 +46,14 @@ class RoomListHandler(BaseHandler):
             rooms = [room for room in rooms if room.team_name == team_name]
         data = []
         for r in rooms:
-            data.append(RoomInfo(
+            data.append(GtCoreRoomInfo(
                 room_id=r.room_id,
                 room_key=r.key,
                 room_name=r.name,
                 team_name=r.team_name,
                 room_type=r.room_type.name,
                 state=r.state.name,
-                members=r.agents
+                members=r.members
             ).model_dump(mode="json"))
         self.return_json({"rooms": data})
 
@@ -67,10 +71,10 @@ class RoomMessagesHandler(BaseHandler):
             pass
         assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
         messages = [
-            MessageInfo(sender=m.sender_name, content=m.content, time=m.send_time)
+            GtCoreMessageInfo(sender=m.sender_name, content=m.content, time=m.send_time)
             for m in room.messages
         ]
-        resp = RoomMessagesResponse(
+        resp = GtCoreRoomMessagesResponse(
             room_id=room.room_id, room_key=room.key, room_name=room.name, team_name=room.team_name, messages=messages
         )
         self.return_json(resp)
@@ -128,24 +132,24 @@ class TeamRoomCreateHandler(BaseHandler):
         assertUtil.assertEqual(existing, None, error_message=f"Room '{request.name}' already exists", error_code="room_exists")
 
         # 构建房间配置
-        room_config: TeamRoomConfig = {
-            "name": request.name,
-            "members": [],
-            "initial_topic": request.initial_topic,
-            "max_turns": request.max_turns,
-        }
+        room_config = TeamRoomConfig(
+            name=request.name,
+            members=[],
+            initial_topic=request.initial_topic,
+            max_turns=request.max_turns,
+        )
 
         # upsert_rooms 会先删除该 team 下所有房间再重新插入，这在只添加一个房间时可能不太合适
         # 但目前 gtRoomManager 实现如此，暂且遵循。
         new_rooms_configs: list[TeamRoomConfig] = []
         for r in existing_rooms:
             members = await gtRoomMemberManager.get_members_by_room(r.id)
-            new_rooms_configs.append({
-                "name": r.name,
-                "members": members,
-                "initial_topic": r.initial_topic,
-                "max_turns": r.max_turns,
-            })
+            new_rooms_configs.append(TeamRoomConfig(
+                name=r.name,
+                members=members,
+                initial_topic=r.initial_topic,
+                max_turns=r.max_turns,
+            ))
         new_rooms_configs.append(room_config)
 
         await gtRoomManager.upsert_rooms(team_id, new_rooms_configs)
@@ -206,19 +210,19 @@ class TeamRoomModifyHandler(BaseHandler):
         for r in existing_rooms:
             members = await gtRoomMemberManager.get_members_by_room(r.id)
             if r.id == room_id:
-                all_rooms.append({
-                    "name": room_name,
-                    "members": members,
-                    "initial_topic": initial_topic,
-                    "max_turns": max_turns,
-                })
+                all_rooms.append(TeamRoomConfig(
+                    name=room_name,
+                    members=members,
+                    initial_topic=initial_topic,
+                    max_turns=max_turns,
+                ))
             else:
-                all_rooms.append({
-                    "name": r.name,
-                    "members": members,
-                    "initial_topic": r.initial_topic,
-                    "max_turns": r.max_turns,
-                })
+                all_rooms.append(TeamRoomConfig(
+                    name=r.name,
+                    members=members,
+                    initial_topic=r.initial_topic,
+                    max_turns=r.max_turns,
+                ))
 
         await gtRoomManager.upsert_rooms(team_id, all_rooms)
         await teamService.hot_reload_team(team_name)
@@ -250,12 +254,12 @@ class TeamRoomDeleteHandler(BaseHandler):
         for r in remaining_rooms:
             members = await gtRoomMemberManager.get_members_by_room(r.id)
             room_configs.append(
-                {
-                    "name": r.name,
-                    "members": members,
-                    "initial_topic": r.initial_topic,
-                    "max_turns": r.max_turns,
-                }
+                TeamRoomConfig(
+                    name=r.name,
+                    members=members,
+                    initial_topic=r.initial_topic,
+                    max_turns=r.max_turns,
+                )
             )
 
         await gtRoomManager.upsert_rooms(team_id, room_configs)

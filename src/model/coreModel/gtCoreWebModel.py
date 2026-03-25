@@ -1,26 +1,10 @@
 from pydantic import BaseModel, field_serializer
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 from constants import AgentStatus
 
 
-class TeamInfo(BaseModel):
-    name: str
-    working_directory: str
-    max_function_calls: Optional[int]
-    enabled: int
-    created_at: str
-    updated_at: str
-
-
-class TeamRoomInfo(BaseModel):
-    name: str
-    type: str
-    initial_topic: Optional[str]
-    max_turns: int
-
-
-class AgentInfo(BaseModel):
+class GtCoreAgentInfo(BaseModel):
     name: str
     template_name: str | None = None
     model: str
@@ -32,7 +16,7 @@ class AgentInfo(BaseModel):
         return status.name
 
 
-class RoomInfo(BaseModel):
+class GtCoreRoomInfo(BaseModel):
     room_id: int     # 数据库主键 ID
     room_key: str    # room@team 格式
     room_name: str
@@ -42,21 +26,21 @@ class RoomInfo(BaseModel):
     members: List[str]
 
 
-class MessageInfo(BaseModel):
+class GtCoreMessageInfo(BaseModel):
     sender: str
     content: str
     time: datetime
 
 
-class RoomMessagesResponse(BaseModel):
+class GtCoreRoomMessagesResponse(BaseModel):
     room_id: int
     room_key: str
     room_name: str
     team_name: str
-    messages: List[MessageInfo]
+    messages: List[GtCoreMessageInfo]
 
 
-class WsEvent(BaseModel):
+class GtCoreWsEvent(BaseModel):
     event: str         # 固定为 "message"
     room_id: int
     room_key: str

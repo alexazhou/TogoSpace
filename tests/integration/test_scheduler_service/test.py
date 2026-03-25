@@ -11,10 +11,11 @@ import service.agentService as agentService
 import service.schedulerService as scheduler
 from service.agentService import Agent
 from service.messageBus import Message
-from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
+from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from constants import MessageBusTopic, AgentStatus
+from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -32,6 +33,14 @@ def _make_mock_agent(name: str, team_name: str = TEAM) -> Agent:
     agent.wait_task_queue = asyncio.Queue()
     agent.consume_task = AsyncMock()
     return agent
+
+
+def _make_team_config() -> TeamConfig:
+    return TeamConfig.model_validate({
+        "name": TEAM,
+        "members": [{"name": "alice", "agent": "alice"}],
+        "preset_rooms": [{"name": "r1", "members": ["alice"], "max_turns": 1}],
+    })
 
 
 @pytest.mark.forked
@@ -67,7 +76,7 @@ class TestSchedulerRun(ServiceTestCase):
             members=["alice"],
         )
 
-        teams_config = [{"name": TEAM, "members": [{"name": "alice", "agent": "alice"}], "preset_rooms": [{"name": "r1", "members": ["alice"], "max_turns": 1}]}]
+        teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
@@ -93,7 +102,7 @@ class TestSchedulerRun(ServiceTestCase):
 
         assert alice.is_active is False
 
-        alice.wait_task_queue.put_nowait(RoomMessageEvent(1))
+        alice.wait_task_queue.put_nowait(GtCoreRoomMessageEvent(1))
         assert alice.is_active is True
 
         alice.wait_task_queue.get_nowait()
@@ -106,7 +115,7 @@ class TestSchedulerRun(ServiceTestCase):
     async def test_handle_event_error_logged_in_agent(self):
         """验证 Agent.consume_task 内部错误不导致崩溃。"""
         real_agent = Agent("test", TEAM, "prompt", "model")
-        real_agent.wait_task_queue.put_nowait(RoomMessageEvent(1))
+        real_agent.wait_task_queue.put_nowait(GtCoreRoomMessageEvent(1))
 
         with patch.object(real_agent, "run_chat_turn", side_effect=RuntimeError("boom")):
             await real_agent.consume_task(max_function_calls=5)
@@ -142,7 +151,7 @@ class TestSchedulerRun(ServiceTestCase):
             ),
             members=["alice"],
         )
-        teams_config = [{"name": TEAM, "members": [{"name": "alice", "agent": "alice"}], "preset_rooms": [{"name": "r1", "members": ["alice"], "max_turns": 1}]}]
+        teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
@@ -172,7 +181,7 @@ class TestSchedulerRun(ServiceTestCase):
             ),
             members=["alice"],
         )
-        teams_config = [{"name": TEAM, "members": [{"name": "alice", "agent": "alice"}], "preset_rooms": [{"name": "r1", "members": ["alice"], "max_turns": 1}]}]
+        teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
@@ -216,7 +225,7 @@ class TestSchedulerRun(ServiceTestCase):
             ),
             members=["alice"],
         )
-        teams_config = [{"name": TEAM, "members": [{"name": "alice", "agent": "alice"}], "preset_rooms": [{"name": "r1", "members": ["alice"], "max_turns": 1}]}]
+        teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
@@ -250,7 +259,7 @@ class TestSchedulerRun(ServiceTestCase):
             ),
             members=["alice"],
         )
-        teams_config = [{"name": TEAM, "members": [{"name": "alice", "agent": "alice"}], "preset_rooms": [{"name": "r1", "members": ["alice"], "max_turns": 1}]}]
+        teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):

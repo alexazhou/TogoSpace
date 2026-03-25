@@ -7,6 +7,7 @@ import pytest
 
 from constants import OpenaiLLMApiRole
 from tests.base import ServiceTestCase
+from util.configTypes import AgentConfig, TeamConfig
 from service import (
     roomService,
     agentService,
@@ -44,8 +45,11 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         self.cleanup_sqlite_files()
 
     async def _bootstrap(self):
-        agents_config = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
-        team_config = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
+        agents_config = [AgentConfig.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
+        team_config = TeamConfig.model_validate(json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read()))
+
+        from src.db import migrate_database
+        migrate_database(self.TEST_DB_PATH)
 
         await roomService.startup()
         await funcToolService.startup()

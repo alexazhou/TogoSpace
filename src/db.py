@@ -225,24 +225,24 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     db_path = _resolve_cli_db_path(args)
 
-    if args.command in {"migrate", "init"}:
-        applied = migrate_database(
+    if args.command == "migrate":
+        applied_now = migrate_database(
             db_path,
             migrations_dir=args.migrations_dir,
             verbose=True,
         )
-        if applied:
-            print(f"Applied {len(applied)} migration(s).")
+        if applied_now:
+            print(f"Applied {len(applied_now)} migration(s).")
         else:
             print("Database is up to date.")
         return 0
 
     if args.command == "status":
-        applied, files = migration_status(
+        applied_migrations, files = migration_status(
             db_path,
             migrations_dir=args.migrations_dir,
         )
-        applied_map = {item.name: item.applied_at for item in applied}
+        applied_map = {item.name: item.applied_at for item in applied_migrations}
 
         print("=== Migration Status ===")
         if not files:
@@ -252,10 +252,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"✅ {name} (Applied at: {applied_map[name]})")
             else:
                 print(f"[ ] {name} (Pending)")
-        print(f"Applied: {len(applied)}")
+        print(f"Applied: {len(applied_migrations)}")
         print(f"Available: {len(files)}")
-        print(f"Pending: {len(files) - len(applied)}")
+        print(f"Pending: {len(files) - len(applied_migrations)}")
         return 0
+
 
     if args.command == "clear":
         if not args.yes:

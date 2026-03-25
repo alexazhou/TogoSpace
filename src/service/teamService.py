@@ -5,13 +5,9 @@ from typing import cast
 
 from dal.db import gtTeamManager, gtTeamMemberManager, gtRoomManager, gtRoomMemberManager
 from exception import TeamAgentException
-from util.configTypes import TeamConfig, TeamRoomConfig, normalize_team_config
+from util.configTypes import TeamConfig, TeamRoomConfig
 
 logger = logging.getLogger(__name__)
-
-
-def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
-    return team_config.get("preset_rooms") or []
 
 
 async def startup(json_teams: list[TeamConfig]) -> list[TeamConfig]:
@@ -21,14 +17,13 @@ async def startup(json_teams: list[TeamConfig]) -> list[TeamConfig]:
     3. 返回最终的 Team 配置列表（从数据库读取）
     """
     # 将 JSON 配置导入数据库（仅当不存在时）
-    for raw_team_config in json_teams:
-        team_config = normalize_team_config(raw_team_config)
-        name = team_config["name"]
+    for team_config in json_teams:
+        name = team_config.name
         # 为没有 max_turns 的 room 设置默认值 100
-        for room in _iter_team_rooms(team_config):
-            if "max_turns" not in room:
-                room["max_turns"] = 100
-                logger.info(f"为 Team '{name}' 的 Room '{room['name']}' 设置默认 max_turns=100")
+        for room in team_config.preset_rooms:
+            if not room.max_turns:
+                room.max_turns = 100
+                logger.info(f"为 Team '{name}' 的 Room '{room.name}' 设置默认 max_turns=100")
 
         await gtTeamManager.import_team_from_json(team_config)
 
@@ -46,8 +41,7 @@ async def reload_from_db() -> list[TeamConfig]:
 
 async def create_team(team_config: TeamConfig) -> None:
     """创建新 Team（自动触发热更新）。"""
-    team_config = normalize_team_config(team_config)
-    name = team_config["name"]
+    name = team_config.name
 
     # 检查 Team 是否已存在
     if await gtTeamManager.team_exists(name):
@@ -56,22 +50,22 @@ async def create_team(team_config: TeamConfig) -> None:
     # 创建 Team
     team = await gtTeamManager.upsert_team(team_config)
     team_id = team.id
-    await gtTeamMemberManager.upsert_team_members(team_id, team_config["members"])
+    await gtTeamMemberManager.upsert_team_members(team_id, team_config.members)
 
     # 创建 Rooms（rooms 参数）
-    rooms = _iter_team_rooms(team_config)
+    rooms = team_config.preset_rooms
     for room in rooms:
-        if "max_turns" not in room:
-            room["max_turns"] = 100
+        if not room.max_turns:
+            room.max_turns = 100
 
     await gtRoomManager.upsert_rooms(team_id, rooms)
 
     # 创建 Members
     for room in rooms:
-        room_name = room["name"]
+        room_name = room.name
         room_config = await gtRoomManager.get_room_config(team_id, room_name)
         if room_config:
-            members = room.get("members", [])
+            members = room.members
             await gtRoomMemberManager.upsert_room_members(room_config.id, members)
 
     # 触发热更新
@@ -82,28 +76,27 @@ async def create_team(team_config: TeamConfig) -> None:
 
 async def update_team(team_config: TeamConfig) -> None:
     """更新 Team 配置并触发热更新。"""
-    team_config = normalize_team_config(team_config)
-    name = team_config["name"]
+    name = team_config.name
 
     # 更新 Team 基本信息
     team = await gtTeamManager.upsert_team(team_config)
     team_id = team.id
-    await gtTeamMemberManager.upsert_team_members(team_id, team_config["members"])
+    await gtTeamMemberManager.upsert_team_members(team_id, team_config.members)
 
     # 更新 preset_rooms
-    rooms = _iter_team_rooms(team_config)
+    rooms = team_config.preset_rooms
     for room in rooms:
-        if "max_turns" not in room:
-            room["max_turns"] = 100
+        if not room.max_turns:
+            room.max_turns = 100
 
     await gtRoomManager.upsert_rooms(team_id, rooms)
 
     # 更新 Members
     for room in rooms:
-        room_name = room["name"]
+        room_name = room.name
         room_config = await gtRoomManager.get_room_config(team_id, room_name)
         if room_config:
-            members = room.get("members", [])
+            members = room.members
             await gtRoomMemberManager.upsert_room_members(room_config.id, members)
 
     logger.info(f"Team '{name}' 配置已更新")
@@ -133,7 +126,7 @@ async def hot_reload_team(name: str) -> None:
 
     # 重新加载配置
     team_configs = await reload_from_db()
-    target_config = next((c for c in team_configs if c["name"] == name), None)
+    target_config = next((c for c in team_configs if c.name == name), None)
 
     if target_config is None:
         logger.warning(f"热更新失败: Team '{name}' 不存在")

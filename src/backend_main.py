@@ -11,9 +11,9 @@ from util import llmApiUtil, configUtil, logUtil
 from util.configTypes import TeamConfig, AppConfig
 from service import (
     messageBus,
-    schedulerService as scheduler,
+    schedulerService,
     agentService,
-    roomService as chat_room,
+    roomService,
     llmService,
     funcToolService,
     persistenceService,
@@ -90,27 +90,27 @@ async def main(config_dir: str = None, port: int = 8080):
     agentService.load_agent_config(app_config.agents)
     await agentService.create_team_agents(teams_config, workspace_root=app_config.workspace_root)
 
-    await chat_room.startup()
-    await scheduler.startup(teams_config=teams_config)
-    await chat_room.create_rooms(teams_config)
-    await persistenceService.restore_runtime_state(agentService.get_all_agents(), chat_room.get_all_rooms())
-    activated = chat_room.exit_init_rooms()
+    await roomService.startup()
+    await schedulerService.startup(teams_config=teams_config)
+    await roomService.create_rooms(teams_config)
+    await persistenceService.restore_runtime_state(agentService.get_all_agents(), roomService.get_all_rooms())
+    activated = roomService.exit_init_rooms()
     logger.info("启动激活完成：退出 INIT. 房间数=%s", activated)
 
     web_server = tornado.httpserver.HTTPServer(route.application)
     web_server.listen(port, "0.0.0.0")
 
     try:
-        scheduler.replay_scheduling_rooms()
-        await scheduler.run()
+        schedulerService.replay_scheduling_rooms()
+        await schedulerService.run()
     finally:
         web_server.stop()
-        scheduler.shutdown()
+        schedulerService.shutdown()
         await agentService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
         funcToolService.shutdown()
-        chat_room.shutdown()
+        roomService.shutdown()
         llmService.shutdown()
         messageBus.shutdown()
         _remove_pid()

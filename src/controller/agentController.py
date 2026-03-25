@@ -2,7 +2,7 @@ from typing import Any, List
 
 import service.agentService as agentService
 from service.agentService import Agent
-from model.coreModel.gtCoreWebModel import AgentInfo
+from model.coreModel.gtCoreWebModel import GtCoreAgentInfo
 from controller.baseController import BaseHandler
 from constants import AgentStatus
 from dal.db import gtTeamManager
@@ -10,7 +10,7 @@ from util import assertUtil, configUtil
 
 
 def _serialize_agent(agent: Agent) -> dict[str, Any]:
-    return AgentInfo(
+    return GtCoreAgentInfo(
         name=agent.name,
         template_name=agent.template_name or None,
         model=agent.model,
@@ -28,10 +28,10 @@ class AgentListHandler(BaseHandler):
             data = [_serialize_agent(agent) for agent in agents]
         else:
             data = [
-                AgentInfo(
-                    name=str(definition["name"]),
-                    template_name=str(definition["name"]),
-                    model=str(definition.get("model") or ""),
+                GtCoreAgentInfo(
+                    name=definition.name,
+                    template_name=definition.name,
+                    model=definition.model or "",
                     team_name="",
                     status=AgentStatus.IDLE,
                 ).model_dump(mode="json")
@@ -66,10 +66,10 @@ class AgentDetailHandler(BaseHandler):
         if definition is None:
             return
 
-        if "system_prompt" in definition:
-            prompt = definition["system_prompt"]
+        if definition.system_prompt:
+            prompt = definition.system_prompt
         else:
-            prompt = configUtil.load_prompt(definition["prompt_file"])
+            prompt = configUtil.load_prompt(definition.prompt_file)
 
         self.return_json(
             {

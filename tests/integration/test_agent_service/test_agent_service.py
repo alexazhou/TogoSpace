@@ -6,6 +6,7 @@ import sys
 import pytest
 
 from service import agentService, roomService, ormService, persistenceService
+from util.configTypes import AgentConfig, TeamConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -25,8 +26,8 @@ class _agentServiceCase(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
-        agents_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())
-        team_cfg = json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read())
+        agents_cfg = [AgentConfig.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
+        team_cfg = TeamConfig.model_validate(json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read()))
         await agentService.startup()
         agentService.load_agent_config(agents_cfg)
         await agentService.create_team_agents([team_cfg])

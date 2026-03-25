@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Sequence
 from dal.db import gtRoomManager, gtTeamManager
 from service import messageBus, persistenceService
 from util.configTypes import TeamConfig, TeamRoomConfig
-from model.coreModel.gtCoreChatModel import ChatMessage
+from model.coreModel.gtCoreChatModel import GtCoreChatMessage
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
@@ -63,16 +63,16 @@ class ChatRoom:
         self.name: str = room.name  # 房间名称
         self.team_name: str = team.name  # 所属 Team
         self.room_type: RoomType = room.type  # 房间类型（私有/群聊）
-        self.messages: List[ChatMessage] = []  # 消息历史记录
+        self.messages: List[GtCoreChatMessage] = []  # 消息历史记录
         self.initial_topic: str = room.initial_topic  # 初始话题
-        self.agents: List[str] = _normalize_members(members)  # 房间参与者名单（包含 Operator 和 AI Agents）
+        self.members: List[str] = _normalize_members(members)  # 房间参与者名单（包含 Operator 和 AI Agents）
 
         self._agent_read_index: Dict[str, int] = {}  # 每个 Agent 的消息读取进度
         self._turn_index: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
         self._max_turns: int = room.max_turns  # 最大允许轮次
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
         self._state: RoomState = RoomState.INIT  # 房间当前的调度状态
-        self._state_after_init: RoomState = RoomState.SCHEDULING if self.agents and room.max_turns > 0 else RoomState.IDLE
+        self._state_after_init: RoomState = RoomState.SCHEDULING if self.members and room.max_turns > 0 else RoomState.IDLE
         self._round_skipped: set = set()  # 当前轮次已跳过发言的成员名单
         self._current_turn_has_content: bool = False  # 当前发言人是否已发送内容
 
@@ -84,7 +84,7 @@ class ChatRoom:
     def state(self) -> RoomState:
         return self._state
 
-    async def get_unread_messages(self, agent_name: str) -> List[ChatMessage]:
+    async def get_unread_messages(self, agent_name: str) -> List[GtCoreChatMessage]:
         """返回 agent_name 尚未读取的新消息，并推进其读取位置。"""
         read_idx = self._agent_read_index.get(agent_name, 0)
         new_msgs = self.messages[read_idx:]
@@ -94,7 +94,7 @@ class ChatRoom:
         return new_msgs
 
     async def add_message(self, sender: str, content: str, send_time: datetime | None = None) -> None:
-        message = ChatMessage(
+        message = GtCoreChatMessage(
             sender_name=sender,
             content=content,
             send_time=send_time or datetime.now()
@@ -121,7 +121,7 @@ class ChatRoom:
             content=content,
             time=message.send_time.isoformat(),
         )
-        if self.agents:
+        if self.members:
             self._update_turn_state_on_message(sender)
 
     def _update_turn_state_on_message(self, sender: str) -> None:
@@ -175,9 +175,9 @@ class ChatRoom:
 
     def get_current_turn_agent(self) -> Optional[str]:
         """返回当前理论上应该发言的 Agent 名（忽略 IDLE 状态）。"""
-        if not self.agents:
+        if not self.members:
             return None
-        return self.agents[self._turn_pos]
+        return self.members[self._turn_pos]
 
     def _publish_current_turn(self) -> None:
         """发布当前轮次的发言事件。"""
@@ -194,13 +194,13 @@ class ChatRoom:
 
     def _update_turn_state_on_finish(self) -> None:
         """结束当前发言后，推进并更新轮次状态。"""
-        if not self.agents:
+        if not self.members:
             return
 
         self._turn_pos += 1
 
         # 1. 检查是否达到轮次边界
-        if self._turn_pos >= len(self.agents):
+        if self._turn_pos >= len(self.members):
             self._turn_index += 1
             self._turn_pos = 0
 
@@ -212,7 +212,7 @@ class ChatRoom:
 
         # 2. 检查是否所有 AI Agent 均已跳过（自上次有消息以来）
         # 如果是，则立即停止调度，不再移动到下一位
-        ai_agents = set(a for a in self.agents if SpecialAgent.value_of(a) != SpecialAgent.OPERATOR)
+        ai_agents = set(a for a in self.members if SpecialAgent.value_of(a) != SpecialAgent.OPERATOR)
         if ai_agents and ai_agents.issubset(self._round_skipped):
             self._state = RoomState.IDLE
             logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
@@ -242,7 +242,7 @@ class ChatRoom:
 
     def inject_runtime_state(
         self,
-        messages: List[ChatMessage] | None = None,
+        messages: List[GtCoreChatMessage] | None = None,
         agent_read_index: Dict[str, int] | None = None,
     ) -> None:
         if messages is not None:
@@ -255,12 +255,12 @@ class ChatRoom:
 
     def mark_all_messages_read(self) -> None:
         tail = len(self.messages)
-        self._agent_read_index = {name: tail for name in self.agents}
+        self._agent_read_index = {name: tail for name in self.members}
 
     def rebuild_state_from_history(self) -> None:
         keep_init = (self._state == RoomState.INIT)
 
-        if not self.agents or self._max_turns <= 0:
+        if not self.members or self._max_turns <= 0:
             self._state_after_init = RoomState.IDLE
             if keep_init:
                 self._state = RoomState.INIT
@@ -287,7 +287,7 @@ class ChatRoom:
         return "\n".join(lines)
 
     def build_initial_system_message(self) -> str:
-        member_list_str = "、".join(self.agents)
+        member_list_str = "、".join(self.members)
         msg = f"{self.name} 房间已经创建，当前房间成员：{member_list_str}"
         if self.initial_topic:
             msg += f"\n本房间初始话题：{self.initial_topic}"
@@ -303,7 +303,7 @@ def _room_key(team_name: str, room_name: str) -> str:
 
 
 def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
-    return team_config.get("preset_rooms") or []
+    return team_config.preset_rooms
 
 
 async def startup() -> None:
@@ -385,7 +385,7 @@ async def _create_room(
     _rooms[room_key] = room
     _rooms_by_id[resolved_room_id] = room
 
-    normalized_members = room.agents
+    normalized_members = room.members
 
     logger.info(f"创建并初始化聊天室: room_id={resolved_room_id}, type={room_type.name}, 成员={normalized_members}")
     if max_turns > 0:
@@ -414,29 +414,29 @@ async def create_rooms(teams_config: list[TeamConfig]) -> None:
     会覆盖这段启动期内存消息，从而保持最终房间状态与持久化一致。
     """
     for team in teams_config:
-        team_name = team["name"]
+        team_name = team.name
         for room in _iter_team_rooms(team):
             await _create_room(
-                room_id=room.get("id"),
+                room_id=room.id,
                 team_name=team_name,
-                name=room["name"],
-                members=room["members"],
-                initial_topic=room.get("initial_topic", ""),
-                room_type=_infer_room_type(room.get("members", [])),
-                max_turns=room.get("max_turns", 0),
+                name=room.name,
+                members=room.members,
+                initial_topic=room.initial_topic,
+                room_type=_infer_room_type(room.members),
+                max_turns=room.max_turns,
             )
 
 
 def get_member_names(room_id: int) -> List[str]:
     """返回聊天室的参与者名列表。"""
-    return get_room(room_id).agents
+    return get_room(room_id).members
 
 
 def get_rooms_for_agent(team_id: int | None, agent_name: str) -> List[int]:
     """返回指定参与者所在的房间 room_id 列表。可选按 team 过滤。"""
     results = []
     for room in _rooms.values():
-        if any(_same_speaker(agent_name, member_name) for member_name in room.agents):
+        if any(_same_speaker(agent_name, member_name) for member_name in room.members):
             if team_id is None or room.team_id == team_id:
                 results.append(room.room_id)
     return results
@@ -451,7 +451,7 @@ async def refresh_rooms_for_team(team_id: int, teams_config: list[TeamConfig]) -
     team_name = team_row.name
 
     # 获取目标 Team 的新配置
-    target_config = next((c for c in teams_config if c["name"] == team_name), None)
+    target_config = next((c for c in teams_config if c.name == team_name), None)
     if target_config is None:
         logger.warning(f"无法刷新聊天室: Team '{team_name}' 不存在于配置中")
         return
@@ -461,16 +461,16 @@ async def refresh_rooms_for_team(team_id: int, teams_config: list[TeamConfig]) -
 
     # 根据新配置重新创建聊天室
     for room in _iter_team_rooms(target_config):
-        room_config = await gtRoomManager.get_room_config(team_row.id, room["name"])
+        room_config = await gtRoomManager.get_room_config(team_row.id, room.name)
         if room_config:
             await _create_room(
                 room_id=room_config.id,
                 team_name=team_name,
-                name=room["name"],
-                members=room.get("members", []),
-                initial_topic=room.get("initial_topic", ""),
-                room_type=_infer_room_type(room.get("members", [])),
-                max_turns=room.get("max_turns", 0),
+                name=room.name,
+                members=room.members,
+                initial_topic=room.initial_topic,
+                room_type=_infer_room_type(room.members),
+                max_turns=room.max_turns,
             )
 
     logger.info(f"Team '{team_name}' 的聊天室已刷新，共 {len(_iter_team_rooms(target_config))} 个房间")

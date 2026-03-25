@@ -7,21 +7,18 @@ import pytest
 from service import ormService, persistenceService, roomService, messageBus
 from service.agentService import Agent
 from util.llmApiUtil import OpenAIMessage, OpenaiLLMApiRole
+from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
-TEAMS_CONFIG = [{
-    "name": TEAM,
-    "members": [
-        {"name": "alice", "agent": "alice"},
-        {"name": "bob", "agent": "bob"},
+TEAMS_CONFIG = [TeamConfig(
+    name=TEAM,
+    members=[
+        TeamMemberConfig(name="alice", agent="alice"),
+        TeamMemberConfig(name="bob", agent="bob"),
     ],
-    "preset_rooms": [{
-        "name": "r1",
-        "members": ["alice", "bob"],
-        "max_turns": 3,
-    }],
-}]
+    preset_rooms=[TeamRoomConfig(name="r1", members=["alice", "bob"], max_turns=3)],
+)]
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
