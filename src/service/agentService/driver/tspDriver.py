@@ -16,7 +16,7 @@ from .base import AgentDriver
 
 logger = logging.getLogger(__name__)
 
-_LOCAL_CHAT_TOOL_NAMES = {"send_chat_msg", "finish_chat_turn"}
+_LOCAL_CHAT_TOOL_NAMES = ["send_chat_msg", "finish_chat_turn"]
 _DEFAULT_PROTOCOL_VERSION = "0.3"
 _DEFAULT_REQUEST_TIMEOUT_SEC = 30
 _RUN_CHAT_TURN_MAX_RETRIES = 3
@@ -46,11 +46,12 @@ class _TspStdioClient:
         self._stderr_task = asyncio.create_task(self._read_stderr_loop())
 
     async def disconnect(self) -> None:
-        tasks = [t for t in (self._read_task, self._stderr_task) if t is not None]
-        for t in tasks:
-            t.cancel()
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        if self._read_task is not None:
+            self._read_task.cancel()
+            await asyncio.gather(self._read_task, return_exceptions=True)
+        if self._stderr_task is not None:
+            self._stderr_task.cancel()
+            await asyncio.gather(self._stderr_task, return_exceptions=True)
         self._read_task = None
         self._stderr_task = None
 
@@ -200,7 +201,7 @@ class TspAgentDriver(AgentDriver):
         super().__init__(host, config)
         self._client: Optional[_TspStdioClient] = None
         self._tsp_tools: dict[str, llmApiUtil.Tool] = {}
-        _local = funcToolService.get_tools_by_names(list(_LOCAL_CHAT_TOOL_NAMES))
+        _local = funcToolService.get_tools_by_names(_LOCAL_CHAT_TOOL_NAMES)
         self._local_tools: dict[str, llmApiUtil.Tool] = {t.function.name: t for t in _local}
 
     async def startup(self) -> None:
@@ -276,7 +277,7 @@ class TspAgentDriver(AgentDriver):
     async def _execute_tool_calls(self, tool_calls: list[llmApiUtil.ToolCall]) -> bool:
         turn_done = False
         for tool_call in tool_calls:
-            function = tool_call.function if isinstance(tool_call.function, dict) else {}
+            function = tool_call.function
             function_name = str(function.get("name", ""))
             function_args = str(function.get("arguments", "{}"))
             tool_call_id = str(tool_call.id or uuid.uuid4().hex)
@@ -307,7 +308,7 @@ class TspAgentDriver(AgentDriver):
     async def _execute_tsp_tool(self, function_name: str, function_args: str) -> dict[str, Any]:
         assert self._client is not None, "TSP client 尚未初始化"
         try:
-            parsed_args = json.loads(function_args) if function_args else {}
+            parsed_args = json.loads(function_args)
         except json.JSONDecodeError as e:
             return {"success": False, "message": f"TSP 参数 JSON 解析失败: {e}"}
 
@@ -322,31 +323,22 @@ class TspAgentDriver(AgentDriver):
             return {"success": False, "message": f"TSP 工具调用失败: {e}"}
 
     def _load_tsp_tools(self, initialize_result: dict[str, Any]) -> None:
-        capabilities = initialize_result.get("capabilities", {}) if isinstance(initialize_result, dict) else {}
-        tools = capabilities.get("tools", []) if isinstance(capabilities, dict) else []
+        capabilities = initialize_result.get("capabilities") or {}
+        tools = capabilities.get("tools") or []
         resolved: dict[str, llmApiUtil.Tool] = {}
 
         for item in tools:
-            if not isinstance(item, dict):
-                continue
-            name = str(item.get("name", "")).strip()
-            if not name:
-                continue
+            assert isinstance(item, dict)
+            assert (name := item["name"])
 
             input_schema = item.get("input_schema") or item.get("inputSchema") or {}
-            if not isinstance(input_schema, dict):
-                input_schema = {}
+            assert isinstance(input_schema, dict)
 
-            parameters = llmApiUtil.FunctionParameter(
-                type=str(input_schema.get("type", "object")),
-                properties=input_schema.get("properties", {}),
-                required=input_schema.get("required", []),
-            )
             resolved[name] = llmApiUtil.Tool(
                 function=llmApiUtil.Function(
                     name=name,
                     description=str(item.get("description", "")),
-                    parameters=parameters,
+                    parameters=llmApiUtil.FunctionParameter(**input_schema),
                 )
             )
 
