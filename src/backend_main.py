@@ -4,13 +4,11 @@ import logging
 import os
 import signal
 import sys
-from datetime import datetime
-from typing import List
 
 import tornado.httpserver
 
-from util import llmApiUtil, configUtil
-from util.configTypes import TeamConfig
+from util import llmApiUtil, configUtil, logUtil
+from util.configTypes import TeamConfig, AppConfig
 from service import (
     messageBus,
     schedulerService as scheduler,
@@ -26,24 +24,7 @@ import route
 
 
 def _setup_logger() -> None:
-    log_dir = os.path.join(os.getcwd(), "../logs/backend")
-    os.makedirs(log_dir, exist_ok=True)
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    log_file = os.path.join(log_dir, f"v3_chat_{timestamp}.log")
-
-    log_format = "%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s"
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    root_logger.handlers.clear()
-
-    handlers: List[logging.Handler] = [
-        logging.FileHandler(log_file, encoding="utf-8"),
-        logging.StreamHandler()
-    ]
-    for handler in handlers:
-        handler.setFormatter(logging.Formatter(log_format, datefmt="%Y-%m-%d %H:%M:%S"))
-        root_logger.addHandler(handler)
+    logUtil.init_backend_logger()
 
 
 _RUN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../run")
@@ -76,20 +57,19 @@ def _remove_pid() -> None:
         pass
 
 
-async def main(
-    config_dir: str = None,
-    port: int = 8080,
-):
-    if config_dir is not None:
-        config_dir = os.path.abspath(config_dir)
+async def main(config_dir: str = None, port: int = 8080):
+
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     _setup_logger()
     logger = logging.getLogger(__name__)
 
-    app_config = configUtil.load(config_dir)
+    if config_dir is not None:
+        config_dir = os.path.abspath(config_dir)
 
-    await messageBus.startup()
+    app_config: AppConfig = configUtil.load(config_dir)
+
     llmApiUtil.init()
+    await messageBus.startup()
     await llmService.startup(
         api_key=app_config.llm_service.api_key,
         base_url=app_config.llm_service.base_url,
@@ -115,7 +95,7 @@ async def main(
     await chat_room.create_rooms(teams_config)
     await persistenceService.restore_runtime_state(agentService.get_all_agents(), chat_room.get_all_rooms())
     activated = chat_room.exit_init_rooms()
-    logger.info("启动激活完成：退出 INIT 房间数=%s", activated)
+    logger.info("启动激活完成：退出 INIT. 房间数=%s", activated)
 
     web_server = tornado.httpserver.HTTPServer(route.application)
     web_server.listen(port, "0.0.0.0")
