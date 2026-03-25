@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from peewee import EXCLUDED
-
 from model.dbModel.gtRoom import GtRoom
 from constants import RoomType, SpecialAgent
 from util.configTypes import TeamRoomConfig

@@ -1,5 +1,5 @@
 # 标准库
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # 内部包
 from controller.baseController import BaseHandler
@@ -18,7 +18,7 @@ class TeamMemberRequest(BaseModel):
 class CreateTeamRequest(BaseModel):
     name: str
     working_directory: str = ""
-    config: dict = {}
+    config: dict = Field(default_factory=dict)
     members: list[TeamMemberRequest]
     preset_rooms: list[TeamRoomConfig]
 
@@ -58,23 +58,18 @@ class TeamCreateHandler(BaseHandler):
     """POST /teams/create.json - 创建新 Team（自动触发热更新）"""
 
     async def post(self) -> None:
-        from util.configTypes import TeamMemberConfig, TeamConfig, TeamRoomConfig
         request = self.parse_request(CreateTeamRequest)
 
         members = [
             TeamMemberConfig(name=m.name, agent=m.agent) for m in request.members
         ]
-        
-        rooms = []
-        if request.preset_rooms:
-             rooms = [TeamRoomConfig.model_validate(r) for r in request.preset_rooms]
 
         team_config = TeamConfig(
             name=request.name,
             working_directory=request.working_directory or "",
             config=request.config or {},
             members=members,
-            preset_rooms=rooms,
+            preset_rooms=request.preset_rooms,
         )
 
         # 调用 service 创建 team
@@ -151,7 +146,6 @@ class TeamModifyHandler(BaseHandler):
             return
 
         # 构建完整配置，确保局部更新不会丢字段
-        from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig
         team_config = TeamConfig(
             name=current_config.name,
             working_directory=current_config.working_directory,
@@ -170,7 +164,7 @@ class TeamModifyHandler(BaseHandler):
                 TeamMemberConfig(name=m.name, agent=m.agent) for m in request.members
             ]
         if request.preset_rooms is not None:
-            team_config.preset_rooms = [TeamRoomConfig.model_validate(r) for r in request.preset_rooms]
+            team_config.preset_rooms = request.preset_rooms
 
         # 调用 service 更新 team
         await teamService.update_team(team_config)
