@@ -24,8 +24,8 @@ def _normalize_members(members: Sequence[str | SpecialAgent] | None) -> List[str
 
 def _infer_room_type(members: Sequence[str]) -> RoomType:
     normalized = _normalize_members(members)
-    ai_count = len([m for m in normalized if m != SpecialAgent.OPERATOR.name])
-    if SpecialAgent.OPERATOR.name in normalized and ai_count == 1:
+    ai_count = len([m for m in normalized if SpecialAgent.value_of(m) != SpecialAgent.OPERATOR])
+    if any(SpecialAgent.value_of(m) == SpecialAgent.OPERATOR for m in normalized) and ai_count == 1:
         return RoomType.PRIVATE
     return RoomType.GROUP
 
@@ -196,7 +196,7 @@ class ChatRoom:
 
         # 2. 检查是否所有 AI Agent 均已跳过（自上次有消息以来）
         # 如果是，则立即停止调度，不再移动到下一位
-        ai_agents = set(a for a in self.agents if a != SpecialAgent.OPERATOR.name)
+        ai_agents = set(a for a in self.agents if SpecialAgent.value_of(a) != SpecialAgent.OPERATOR)
         if ai_agents and ai_agents.issubset(self._round_skipped):
             self._state = RoomState.IDLE
             logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
