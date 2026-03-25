@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Any, List
+import os
 
 from typing_extensions import NotRequired, Required, TypedDict
 
@@ -76,6 +77,7 @@ class AppConfig:
     teams: List[TeamConfig]
     llm_service: LlmServiceConfig
     persistence: PersistenceConfig
+    workspace_root: str
 
 
 def normalize_team_members(raw_members: list[Any]) -> list[TeamMemberConfig]:
@@ -111,10 +113,16 @@ def normalize_team_config(team_config: dict[str, Any]) -> TeamConfig:
     return normalized
 
 
+def resolve_team_workdir(team_name: str, working_directory: str | None, workspace_root: str) -> str:
+    if working_directory:
+        return working_directory
+    return os.path.join(workspace_root, team_name)
+
+
 def get_team_member_map(team_config: TeamConfig) -> dict[str, TeamMemberConfig]:
     return {member["name"]: member for member in team_config.get("members", [])}
 
 
 __all__ = ["TeamMemberConfig", "TeamRoomConfig", "TeamConfig", "TeamConfigPatch", "AgentConfig",
-           "normalize_team_members", "normalize_team_config", "get_team_member_map",
+           "normalize_team_members", "normalize_team_config", "resolve_team_workdir", "get_team_member_map",
            "LlmServiceConfig", "PersistenceConfig", "AppConfig"]

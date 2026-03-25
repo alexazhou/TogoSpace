@@ -10,6 +10,7 @@
     }
   ],
   "default_llm_server": "dashscope",
+  "workspace_root": "/Volumes/PData/GitDB/agent_team/workspace_root",
   "web_server": {
     "host": "127.0.0.1",
     "port": 8080

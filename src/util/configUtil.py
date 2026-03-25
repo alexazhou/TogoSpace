@@ -14,6 +14,10 @@ def _default_root_config_path() -> str:
     return os.path.join(os.path.dirname(__file__), "../../config/setting.json")
 
 
+def _default_workspace_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+
+
 def _is_test_env() -> bool:
     if os.environ.get("TEAMAGENT_ENV") == "test":
         return True
@@ -105,6 +109,21 @@ def load_persistence_config(config_dir: str = None) -> dict:
     }
 
 
+def load_workspace_root(config_dir: str = None) -> str:
+    """返回工作区根目录。"""
+    path = _resolve_config_file(config_dir, "setting.json")
+    if not os.path.isfile(path):
+        return _default_workspace_root()
+
+    with open(path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+
+    workspace_root = cfg.get("workspace_root")
+    if workspace_root:
+        return str(workspace_root)
+    return _default_workspace_root()
+
+
 def load(config_dir: str = None) -> AppConfig:
     """一次性加载所有配置，返回有类型的 AppConfig 对象。"""
     agents = load_agents(config_dir)
@@ -116,5 +135,12 @@ def load(config_dir: str = None) -> AppConfig:
 
     persistence_dict = load_persistence_config(config_dir)
     persistence = PersistenceConfig(**persistence_dict)
+    workspace_root = load_workspace_root(config_dir)
 
-    return AppConfig(agents=agents, teams=teams, llm_service=llm_service, persistence=persistence)
+    return AppConfig(
+        agents=agents,
+        teams=teams,
+        llm_service=llm_service,
+        persistence=persistence,
+        workspace_root=workspace_root,
+    )

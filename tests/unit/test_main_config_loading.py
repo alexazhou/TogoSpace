@@ -3,7 +3,7 @@ import os
 import sys
 
 from util import configUtil
-from util.configTypes import AppConfig, LlmServiceConfig, PersistenceConfig
+from util.configTypes import AppConfig, LlmServiceConfig, PersistenceConfig, resolve_team_workdir
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
@@ -25,6 +25,7 @@ def test_runtime_configs_load_from_config_dir(tmp_path):
             "enabled": True,
             "db_path": "./runtime/test.db",
         },
+        "workspace_root": "/tmp/workspaces",
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
@@ -34,6 +35,7 @@ def test_runtime_configs_load_from_config_dir(tmp_path):
     assert app_config.llm_service.base_url == "http://127.0.0.1:9999/v1/chat/completions"
     assert app_config.persistence.enabled is True
     assert app_config.persistence.db_path == "./runtime/test.db"
+    assert app_config.workspace_root == "/tmp/workspaces"
 
 
 def test_runtime_configs_skip_disabled_llm_service(tmp_path):
@@ -135,3 +137,40 @@ def test_load_returns_appconfig_with_typed_fields(tmp_path):
     assert app_config.llm_service.api_key == "key-123"
     assert app_config.agents == []
     assert app_config.teams == []
+    assert app_config.workspace_root
+
+
+def test_workspace_root_defaults_to_repo_root_when_missing(tmp_path):
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "default_llm_server": "svc",
+        "llm_services": [
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+            }
+        ],
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path))
+    assert os.path.isabs(app_config.workspace_root)
+
+
+def test_resolve_team_workdir_prefers_explicit_working_directory():
+    resolved = resolve_team_workdir(
+        team_name="default",
+        working_directory="/tmp/custom-team-dir",
+        workspace_root="/tmp/workspaces",
+    )
+    assert resolved == "/tmp/custom-team-dir"
+
+
+def test_resolve_team_workdir_falls_back_to_workspace_root_and_team_name():
+    resolved = resolve_team_workdir(
+        team_name="default",
+        working_directory="",
+        workspace_root="/tmp/workspaces",
+    )
+    assert resolved == "/tmp/workspaces/default"

@@ -58,3 +58,21 @@ def test_normalize_driver_config_supports_legacy_runtime_block():
     )
     assert cfg.driver_type == "claude_sdk"
     assert cfg.options == {"allowed_tools": ["Read"], "max_turns": 80}
+
+
+def test_normalize_driver_config_supports_tsp_driver_block():
+    cfg = normalize_driver_config(
+        {
+            "name": "intern_tsp",
+            "driver": {
+                "type": "tsp",
+                "request_timeout_sec": 45,
+                "tool_include": ["list_dir", "read_file"],
+            },
+        }
+    )
+    assert cfg.driver_type == "tsp"
+    assert cfg.options == {
+        "request_timeout_sec": 45,
+        "tool_include": ["list_dir", "read_file"],
+    }

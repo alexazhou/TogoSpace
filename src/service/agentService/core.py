@@ -3,7 +3,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from util import llmApiUtil, configUtil
-from util.configTypes import TeamConfig, TeamRoomConfig, normalize_team_config
+from util.configTypes import TeamConfig, TeamRoomConfig, normalize_team_config, resolve_team_workdir
 from model.coreModel.gtCoreChatModel import AgentDialogContext, ChatMessage
 from model.coreModel.gtCoreAgentEvent import RoomMessageEvent
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -44,12 +44,24 @@ async def load_team_ids(teams_config: list[TeamConfig]) -> None:
 class Agent:
     """AI Agent 壳对象：承载稳定状态，driver 负责具体驱动实现。"""
 
-    def __init__( self, name: str, team_name: str, system_prompt: str, model: str, driver_config: Optional[AgentDriverConfig] = None, template_name: str = ""):
+    def __init__(
+        self,
+        name: str,
+        team_name: str,
+        system_prompt: str,
+        model: str,
+        driver_config: Optional[AgentDriverConfig] = None,
+        template_name: str = "",
+        team_workdir: str = "",
+        workspace_root: str = "",
+    ):
         self.name: str = name
         self.team_name: str = team_name
         self.template_name: str = template_name
         self.system_prompt: str = system_prompt
         self.model: str = model
+        self.team_workdir: str = team_workdir
+        self.workspace_root: str = workspace_root
 
         self._history: list[llmApiUtil.LlmApiMessage] = []
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
@@ -227,13 +239,19 @@ def load_agent_config(agents_config: list) -> None:
     logger.info(f"加载 Agent 定义: {list(_agent_defs.keys())}")
 
 
-async def create_team_agents(teams_config: list[TeamConfig]) -> None:
+async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
     base_prompt_tmpl = configUtil.load_prompt("src/prompts/GroupChat.md")
     default_model = llmService.get_default_model()
+    resolved_workspace_root = workspace_root or configUtil.load_workspace_root()
 
     for team_config in teams_config:
         team_config = normalize_team_config(team_config)
         team_name = team_config["name"]
+        team_workdir = resolve_team_workdir(
+            team_name=team_name,
+            working_directory=team_config.get("working_directory"),
+            workspace_root=resolved_workspace_root,
+        )
 
         for member in team_config.get("members", []):
             member_name = member["name"]
@@ -259,6 +277,8 @@ async def create_team_agents(teams_config: list[TeamConfig]) -> None:
                 model=model_name,
                 driver_config=driver_config,
                 template_name=template_name,
+                team_workdir=team_workdir,
+                workspace_root=resolved_workspace_root,
             )
             _agents[key] = agent
             logger.info(
@@ -269,6 +289,34 @@ async def create_team_agents(teams_config: list[TeamConfig]) -> None:
                 await gtAgentManager.upsert_agent(agent.team_id, agent.name, agent.model, agent.template_name)
             except Exception as e:
                 logger.warning(f"写入 Agent 数据失败: agent={agent.key}, error={e}")
+
+
+async def reload_team_agents(team_name: str, teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
+    """按 Team 维度重建运行时 Agent 实例。
+
+    用于 Team 热更新场景（成员增删改），避免只刷新房间而不刷新 Agent 实例，
+    导致调度阶段找不到新增成员对应的 Agent。
+    """
+    # 先关闭并移除该 team 的旧实例，避免与新实例并存
+    team_suffix = f"@{team_name}"
+    keys_to_remove = [k for k in _agents.keys() if k.endswith(team_suffix)]
+    close_tasks: list[Any] = []
+    for key in keys_to_remove:
+        close_tasks.append(_agents[key].close())
+    if close_tasks:
+        await asyncio.gather(*close_tasks, return_exceptions=True)
+    for key in keys_to_remove:
+        _agents.pop(key, None)
+
+    # team_id 可能因创建/删除发生变化，热更新时一并刷新映射
+    await load_team_ids(teams_config)
+
+    target_config = next((cfg for cfg in teams_config if cfg["name"] == team_name), None)
+    if target_config is None:
+        logger.warning(f"重建 Team Agent 失败: team '{team_name}' 不存在于配置中")
+        return
+
+    await create_team_agents([normalize_team_config(target_config)], workspace_root=workspace_root)
 
 
 def get_agent(team_name: str, agent_name: str) -> Agent:
