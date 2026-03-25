@@ -1,0 +1,2 @@
+ALTER TABLE agents
+ADD COLUMN template_name TEXT NOT NULL DEFAULT '';

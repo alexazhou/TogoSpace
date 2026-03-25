@@ -10,6 +10,7 @@ import sys
 import time
 import urllib.request
 
+import db as db_tool
 import service.messageBus as messageBus
 import service.roomService as roomService
 import service.agentService as agentService
@@ -184,6 +185,7 @@ class ServiceTestCase:
             if cls.requires_backend:
                 cls._load_config()
             cls.cleanup_sqlite_files()
+            cls.prepare_sqlite_schema()
             if cls.requires_mock_llm:
                 cls._start_mock_llm()
             if cls.requires_backend:
@@ -298,6 +300,18 @@ class ServiceTestCase:
         for p in paths:
             with contextlib.suppress(FileNotFoundError):
                 os.remove(p)
+
+    @classmethod
+    def prepare_sqlite_schema(cls) -> None:
+        """为测试预创建数据库 schema，避免依赖 ormService 启动时自动建表。"""
+        paths = [cls.TEST_DB_PATH]
+        persistence_cfg = configUtil.load_persistence_config(cls._backend_config_dir)
+        path = persistence_cfg.get("db_path")
+        if path:
+            paths.append(path if os.path.isabs(path) else os.path.abspath(os.path.join(_SRC_DIR, path)))
+
+        for p in dict.fromkeys(paths):
+            db_tool.migrate_database(p)
 
     @classmethod
     def _start_backend(cls):
