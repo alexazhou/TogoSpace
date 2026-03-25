@@ -5,7 +5,7 @@ from typing import Optional
 import aiohttp
 import certifi
 
-from .models import OpenAIRequest, OpenAIResponse, OpenAIErrorResponse
+from .OpenAiModels import OpenAIRequest, OpenAIResponse, OpenAIErrorResponse
 
 
 logger = logging.getLogger(__name__)
