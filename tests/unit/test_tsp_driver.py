@@ -1,6 +1,8 @@
 import os
 import sys
 import json
+import shutil
+import uuid
 from dataclasses import dataclass, field
 
 import pytest
@@ -13,34 +15,30 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-def test_build_gtsp_command_uses_default_binary_and_workspace_flags():
-    cmd = build_gtsp_command(None, workdir="/tmp/team-a", workdir_root="/tmp/workspaces")
+def test_build_gtsp_command_uses_default_binary_and_workdir_flag():
+    cmd = build_gtsp_command(None, workdir="/tmp/team-a")
     assert cmd[0].endswith("assert/execute/gtsp")
     assert "--mode" in cmd
     assert "stdio" in cmd
     assert "--workdir" in cmd
     assert "/tmp/team-a" in cmd
-    assert "--workdir-root" in cmd
-    assert "/tmp/workspaces" in cmd
+    assert "--workdir-root" not in cmd
 
 
 def test_build_gtsp_command_respects_explicit_command_and_no_duplicate_flags():
     cmd = build_gtsp_command(
         ["./gtsp", "--mode", "stdio", "--workdir", "/custom/workdir"],
         workdir="/tmp/team-a",
-        workdir_root="/tmp/workspaces",
     )
     assert cmd.count("--workdir") == 1
     assert "/custom/workdir" in cmd
-    assert "--workdir-root" in cmd
-    assert "/tmp/workspaces" in cmd
+    assert "--workdir-root" not in cmd
 
 
 def test_build_gtsp_command_parses_string_command():
     cmd = build_gtsp_command(
         "./assert/execute/gtsp --mode stdio",
         workdir="/tmp/team-a",
-        workdir_root="/tmp/workspaces",
     )
     assert cmd[0].endswith("assert/execute/gtsp")
     assert "--mode" in cmd
@@ -62,39 +60,24 @@ class _DummyHost:
     def key(self) -> str:
         return f"{self.name}@{self.team_name}"
 
-def _build_minimal_args(properties: dict, required: list[str]) -> dict[str, object]:
-    payload: dict[str, object] = {}
-    for field_name in required:
-        field_schema = properties.get(field_name, {}) if isinstance(properties, dict) else {}
-        field_type = field_schema.get("type")
-        if field_type == "string":
-            payload[field_name] = "."
-        elif field_type == "integer":
-            payload[field_name] = 0
-        elif field_type == "number":
-            payload[field_name] = 0
-        elif field_type == "boolean":
-            payload[field_name] = False
-        elif field_type == "array":
-            payload[field_name] = []
-        elif field_type == "object":
-            payload[field_name] = {}
-        else:
-            payload[field_name] = ""
-    return payload
-
 
 @pytest.mark.asyncio
 async def test_tsp_driver_e2e_initialize_tool_shutdown():
-    binary_path = build_gtsp_command(None, workdir="/tmp/team-a", workdir_root="/tmp/workspaces")[0]
+    binary_path = build_gtsp_command(None, workdir="/tmp/team-a")[0]
     if not os.path.isfile(binary_path) or not os.access(binary_path, os.X_OK):
         pytest.skip(f"real gtsp binary not available: {binary_path}")
+
+    tmp_dir = f"/tmp/tsp_driver_e2e_{uuid.uuid4().hex[:8]}"
+    file_path = f"{tmp_dir}/hello.txt"
+    expected_content = "hello from tsp e2e\nline2\n"
 
     host = _DummyHost()
     config = AgentDriverConfig(
         driver_type="tsp",
         options={
             "request_timeout_sec": 5,
+            "workdir": "/tmp",
+            "command": [binary_path, "--mode", "stdio", "--workdir-root", "/"],
         },
     )
     driver = TspAgentDriver(host, config)
@@ -105,20 +88,42 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
         assert driver._tsp_tools
         assert driver._tsp_tool_names
 
-        # tool 阶段：挑一个工具发起真实调用
-        candidate_tool = min(driver._tsp_tools, key=lambda t: len(t.function.parameters.required))
-        args = _build_minimal_args(
-            properties=candidate_tool.function.parameters.properties,
-            required=candidate_tool.function.parameters.required,
+        # 1) 创建 /tmp 下测试目录
+        mkdir_result = await driver._execute_tsp_tool(
+            "execute_bash",
+            json.dumps({"command": f"mkdir -p {tmp_dir}"}, ensure_ascii=False),
         )
-        result = await driver._execute_tsp_tool(
-            candidate_tool.function.name,
-            json.dumps(args, ensure_ascii=False),
+        assert isinstance(mkdir_result, dict)
+        assert mkdir_result.get("exit_code") == 0
+
+        # 2) 写文件
+        write_result = await driver._execute_tsp_tool(
+            "write_file",
+            json.dumps({"file_path": file_path, "content": expected_content}, ensure_ascii=False),
         )
-        assert isinstance(result, dict)
-        # 返回可以是成功结果，也可以是参数校验错误；只要无异常返回 dict 即视为 tool 链路已执行
+        assert isinstance(write_result, dict)
+        assert write_result.get("file_path") == file_path
+
+        # 3) list 目录并确认文件存在
+        list_result = await driver._execute_tsp_tool(
+            "list_dir",
+            json.dumps({"dir_path": tmp_dir, "recursive": False}, ensure_ascii=False),
+        )
+        assert isinstance(list_result, dict)
+        items = list_result.get("items", [])
+        names = {item.get("name") for item in items if isinstance(item, dict)}
+        assert "hello.txt" in names
+
+        # 4) read 文件并校验内容一致
+        read_result = await driver._execute_tsp_tool(
+            "read_file",
+            json.dumps({"file_path": file_path}, ensure_ascii=False),
+        )
+        assert isinstance(read_result, dict)
+        assert read_result.get("content") == expected_content
     finally:
         # shutdown 阶段：应能优雅断连
         await driver.shutdown()
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
     assert driver._client is None
