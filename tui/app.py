@@ -142,7 +142,7 @@ class WatcherApp(App):
             status_bar.update_count(self._current_msg_count)
 
             # 查找房间信息以确定类型
-            if current_room.room_type == "private":
+            if (current_room.room_type or "").lower() == "private":
                 input_container.add_class("active")
                 hint_label.remove_class("active")
             else:
@@ -245,7 +245,7 @@ class WatcherApp(App):
 
     def action_focus_input(self) -> None:
         current_room = next((r for r in self._rooms if r.room_key == self._current_room_key), None)
-        if current_room and current_room.room_type == "private":
+        if current_room and (current_room.room_type or "").lower() == "private":
             self.query_one("#chat-input").focus()
 
     async def action_prev_room(self) -> None:
