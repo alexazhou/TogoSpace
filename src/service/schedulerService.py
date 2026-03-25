@@ -65,7 +65,7 @@ def _on_agent_turn(msg: Message) -> None:
     room_id: int = msg.payload["room_id"]
     team_name: str = msg.payload["team_name"]
 
-    if agent_name == SpecialAgent.OPERATOR.name:
+    if SpecialAgent.value_of(agent_name) == SpecialAgent.OPERATOR:
         logger.info(f"轮到人类操作者，系统进入等待状态: room_id={room_id}")
         return
 

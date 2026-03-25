@@ -10,9 +10,9 @@ from util.configTypes import TeamRoomConfig
 def _infer_room_type_from_members(members: list[str]) -> RoomType:
     normalized = {m.upper() for m in (members or [])}
     # 约定：仅当包含 Operator 且仅有 1 个非 Operator 成员时判定为 PRIVATE
-    operator = SpecialAgent.OPERATOR.name
-    ai_count = len([m for m in normalized if m != operator])
-    if operator in normalized and ai_count == 1:
+    ai_count = len([m for m in normalized if SpecialAgent.value_of(m) != SpecialAgent.OPERATOR])
+    has_operator = any(SpecialAgent.value_of(m) == SpecialAgent.OPERATOR for m in normalized)
+    if has_operator and ai_count == 1:
         return RoomType.PRIVATE
     return RoomType.GROUP
 
