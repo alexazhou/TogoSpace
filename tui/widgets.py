@@ -51,7 +51,7 @@ class PreviewLabel(Static):
 def _get_side(sender: str, agent_order: list[str]) -> str:
     if sender == "system":
         return "center"
-    if sender == "Operator":
+    if sender == "OPERATOR":
         return "right"
     return "left"
 
@@ -67,7 +67,7 @@ class MessageBubble(Vertical):
 
     def _get_name_color(self, name: str) -> str:
         """Get a deterministic color for a name."""
-        if name == "Operator":
+        if name == "OPERATOR":
             return "#7f91a4"  # Keep Operator color consistent
         # Simple hash to pick a color
         idx = sum(ord(c) for c in name) % len(self.NAME_COLORS)
@@ -144,7 +144,7 @@ class RoomPanel(Vertical):
         self._safe_to_room_key: dict[str, str] = {}
 
     def _get_agent_status_markup(self, status: str) -> str:
-        if status == "active":
+        if status.lower() == "active":
             return "[bold #56d4b0]● 忙碌[/]"
         return "[#7f91a4]○ 空闲[/]"
 

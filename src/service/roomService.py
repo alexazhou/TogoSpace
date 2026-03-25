@@ -19,13 +19,13 @@ logger = logging.getLogger(__name__)
 def _normalize_members(members: Sequence[str | SpecialAgent] | None) -> List[str]:
     if not members:
         return []
-    return [member.value if isinstance(member, SpecialAgent) else member for member in members]
+    return [member.name if isinstance(member, SpecialAgent) else member for member in members]
 
 
 def _infer_room_type(members: Sequence[str]) -> RoomType:
     normalized = _normalize_members(members)
-    ai_count = len([m for m in normalized if m != SpecialAgent.OPERATOR.value])
-    if SpecialAgent.OPERATOR.value in normalized and ai_count == 1:
+    ai_count = len([m for m in normalized if m != SpecialAgent.OPERATOR.name])
+    if SpecialAgent.OPERATOR.name in normalized and ai_count == 1:
         return RoomType.PRIVATE
     return RoomType.GROUP
 
@@ -196,7 +196,7 @@ class ChatRoom:
 
         # 2. 检查是否所有 AI Agent 均已跳过（自上次有消息以来）
         # 如果是，则立即停止调度，不再移动到下一位
-        ai_agents = set(a for a in self.agents if a != SpecialAgent.OPERATOR.value)
+        ai_agents = set(a for a in self.agents if a != SpecialAgent.OPERATOR.name)
         if ai_agents and ai_agents.issubset(self._round_skipped):
             self._state = RoomState.IDLE
             logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
@@ -371,7 +371,7 @@ async def _create_room(
 
     normalized_members = room.agents
 
-    logger.info(f"创建并初始化聊天室: room_id={resolved_room_id}, type={room_type.value}, 成员={normalized_members}")
+    logger.info(f"创建并初始化聊天室: room_id={resolved_room_id}, type={room_type.name}, 成员={normalized_members}")
     if max_turns > 0:
         logger.info(f"初始化轮次配置: room_id={resolved_room_id}, max_turns={max_turns}")
 
