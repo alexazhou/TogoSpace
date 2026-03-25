@@ -24,7 +24,7 @@ agent_team/
 │   └── prompts/         # Agent system prompt（*.md）
 ├── docs/                # 设计文档
 ├── logs/                # 运行日志（自动生成）
-│   ├── backend/         # 后端日志（v3_chat_<timestamp>.log）
+│   ├── backend/         # 后端日志（按模块拆分 + backend.log + backend_warning.log）
 │   └── tui/             # TUI 日志（tui.log，滚动）
 ├── run/                 # PID 文件（自动生成）
 ├── scripts/             # 启动/停止脚本
