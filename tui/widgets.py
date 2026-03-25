@@ -232,7 +232,12 @@ class RoomPanel(Vertical):
         except Exception:
             pass
 
-    async def update_team_members(self, room_key: str | None, agents: list[AgentInfo]) -> None:
+    async def update_team_members(
+        self,
+        room_key: str | None,
+        agents: list[AgentInfo],
+        room_members: list[str] | None = None,
+    ) -> None:
         member_list = self.query_one("#member-list", ListView)
         await member_list.clear()
 
@@ -261,15 +266,12 @@ class RoomPanel(Vertical):
             )
             return
 
-        team_agents: list[AgentInfo] = [
-            agent for agent in agents if agent.team_name == room.team_name
-        ]
-
-        if not team_agents:
+        member_names = room_members if room_members is not None else room.members
+        if not member_names:
             await member_list.append(
                 ListItem(
                     Horizontal(
-                        Label("[dim]该团队暂无成员[/dim]", classes="agent-name"),
+                        Label("[dim]该房间暂无成员[/dim]", classes="agent-name"),
                         Label("", classes="agent-status"),
                         classes="agent-card",
                     )
@@ -277,13 +279,26 @@ class RoomPanel(Vertical):
             )
             return
 
-        for idx, agent in enumerate(team_agents):
-            status_markup = self._get_agent_status_markup(agent.status)
+        # 同名 agent 可能存在于不同 team，优先使用当前 room.team_name 下的运行态信息
+        by_name_in_team: dict[str, AgentInfo] = {}
+        for agent in agents:
+            if agent.team_name == room.team_name:
+                by_name_in_team[agent.name] = agent
+
+        for idx, member_name in enumerate(member_names):
+            agent = by_name_in_team.get(member_name)
+            if agent is not None:
+                display_name = f"{agent.name}  [dim]{agent.model}[/dim]"
+                status_markup = self._get_agent_status_markup(agent.status)
+            else:
+                # 非 AI 成员（如 Operator）或运行态中暂无该 agent 时，仍展示成员名
+                display_name = f"{member_name}  [dim]human[/dim]"
+                status_markup = "[#7f91a4]·[/]"
 
             await member_list.append(
                 ListItem(
                     Horizontal(
-                        Label(f"{agent.name}  [dim]{agent.model}[/dim]", classes="agent-name"),
+                        Label(display_name, classes="agent-name"),
                         Label(status_markup, classes="agent-status"),
                         classes="agent-card",
                     ),

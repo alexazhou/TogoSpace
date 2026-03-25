@@ -40,6 +40,8 @@ class WatcherApp(App):
         self._unread: dict[str, int] = {}
         self._rooms: list[RoomInfo] = []
         self._agents: list[AgentInfo] = []  # 本地 Agent 状态缓存
+        self._team_ids_by_name: dict[str, int] = {}
+        self._room_members_by_key: dict[str, list[str]] = {}
         self._room_cursor: int = 0
         self._current_room_key: str | None = None
         self._current_msg_count: int = 0
@@ -84,6 +86,27 @@ class WatcherApp(App):
         await asyncio.gather(*[_fetch(r) for r in rooms])
         return previews
 
+    async def _fetch_agents_for_rooms(self, rooms: list[RoomInfo]) -> list[AgentInfo]:
+        """按房间所属 team 拉取运行态 Agent 列表，确保 team_name/status 可用。"""
+        if not rooms:
+            return await self._api.get_agents()
+
+        team_names = sorted({r.team_name for r in rooms if r.team_name})
+        if not team_names:
+            return await self._api.get_agents()
+
+        fetched = await asyncio.gather(*[self._api.get_agents(team_name=t) for t in team_names])
+        merged: list[AgentInfo] = []
+        seen: set[tuple[str, str]] = set()
+        for team_agents in fetched:
+            for agent in team_agents:
+                key = (agent.team_name, agent.name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(agent)
+        return merged
+
     async def _refresh_full_ui(self, is_initial: bool = False) -> None:
         """刷新房间列表、团队成员列表及 UI 状态。"""
         status_bar = self.query_one(StatusBar)
@@ -91,13 +114,16 @@ class WatcherApp(App):
         room_panel = self.query_one(RoomPanel)
 
         try:
-            agents, rooms = await asyncio.gather(
-                self._api.get_agents(),
+            teams, rooms = await asyncio.gather(
+                self._api.get_teams(),
                 self._api.get_rooms(),
             )
+            self._team_ids_by_name = {t.name: t.id for t in teams}
+            agents = await self._fetch_agents_for_rooms(rooms)
             self._agents = agents  # 更新本地缓存
             self._agent_order = [a.name for a in agents]
             self._rooms = rooms
+            self._room_members_by_key = {r.room_key: list(r.members) for r in rooms}
 
             previews = await self._fetch_all_previews(rooms)
             await room_panel.load(rooms, agents, previews)
@@ -142,7 +168,19 @@ class WatcherApp(App):
             self._current_room_key = room_key
             self._current_msg_count = len(messages)
             status_bar.update_count(self._current_msg_count)
-            await room_panel.update_team_members(room_key, self._agents)
+            team_id = self._team_ids_by_name.get(current_room.team_name)
+            room_members = list(current_room.members)
+            if team_id is not None:
+                try:
+                    room_members = await self._api.get_room_members(team_id, current_room.room_id)
+                except Exception as e:
+                    log.warning(
+                        "获取房间成员失败，回退到 rooms/list 的 members: room_key=%s error=%s",
+                        room_key,
+                        e,
+                    )
+            self._room_members_by_key[room_key] = list(room_members)
+            await room_panel.update_team_members(room_key, self._agents, room_members)
 
             # 查找房间信息以确定类型
             if (current_room.room_type or "").lower() == "private":
@@ -202,8 +240,9 @@ class WatcherApp(App):
                     agent.status = event.status
                     break
             # 直接使用缓存刷新当前团队成员状态，无需发起 HTTP 请求
+            current_members = self._room_members_by_key.get(self._current_room_key or "", [])
             self.run_worker(
-                room_panel.update_team_members(self._current_room_key, list(self._agents)),
+                room_panel.update_team_members(self._current_room_key, list(self._agents), current_members),
                 exclusive=True,
                 group="member-panel",
             )
