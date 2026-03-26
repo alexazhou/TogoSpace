@@ -3,11 +3,14 @@ import sys
 import json
 import shutil
 import uuid
+import asyncio
 from dataclasses import dataclass, field
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from util import llmApiUtil
+from exception import TeamAgentException
 from service.agentService.driver.base import AgentDriverConfig
 from service.agentService.driver.tspDriver import build_gtsp_command, TspAgentDriver
 
@@ -117,3 +120,98 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
     assert driver._client is None
+
+@pytest.fixture
+def mock_tsp_host():
+    host = MagicMock()
+    host.name = "tsp_agent"
+    host.team_name = "test_team"
+    host.key = "tsp_agent@test_team"
+    host.team_workdir = "/tmp"
+    host._infer = AsyncMock()
+    host.append_history_message = AsyncMock()
+    host.current_room = MagicMock()
+    return host
+
+@pytest.mark.asyncio
+async def test_tsp_driver_execute_tool_calls_local_vs_tsp(mock_tsp_host):
+    config = AgentDriverConfig(driver_type="tsp", options={})
+    
+    with patch("service.funcToolService.get_tools_by_names", return_value=[
+        llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
+            name="send_chat_msg", 
+            description="", 
+            parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
+        ))
+    ]):
+        driver = TspAgentDriver(mock_tsp_host, config)
+        driver._tsp_tools = {
+            "tsp_tool": llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
+                name="tsp_tool", 
+                description="", 
+                parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
+            ))
+        }
+        
+        # Mock _execute_tsp_tool
+        driver._execute_tsp_tool = AsyncMock(return_value={"success": True})
+        
+        # Case 1: Local tool
+        tool_calls = [
+            llmApiUtil.OpenAIToolCall(id="c1", function={"name": "send_chat_msg", "arguments": "{}"})
+        ]
+        with patch("service.funcToolService.run_tool_call", return_value='{"success": true}'):
+            await driver._execute_tool_calls(tool_calls)
+            mock_tsp_host.append_history_message.assert_called()
+            
+        # Case 2: TSP tool
+        tool_calls = [
+            llmApiUtil.OpenAIToolCall(id="c2", function={"name": "tsp_tool", "arguments": "{}"})
+        ]
+        await driver._execute_tool_calls(tool_calls)
+        driver._execute_tsp_tool.assert_called_with("tsp_tool", "{}")
+        
+        # Case 3: Unknown tool
+        tool_calls = [
+            llmApiUtil.OpenAIToolCall(id="c3", function={"name": "unknown", "arguments": "{}"})
+        ]
+        await driver._execute_tool_calls(tool_calls)
+        last_msg = mock_tsp_host.append_history_message.call_args[0][0]
+        assert "未知工具" in last_msg.content
+
+@pytest.mark.asyncio
+async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host):
+    config = AgentDriverConfig(driver_type="tsp", options={})
+    driver = TspAgentDriver(mock_tsp_host, config)
+    driver._client = MagicMock()
+    driver._client.tool = AsyncMock()
+    
+    # Case 1: JSON Decode Error
+    res = await driver._execute_tsp_tool("tool", "invalid json")
+    assert "JSON 解析失败" in res["message"]
+    
+    # Case 2: TSP Exception
+    driver._client.tool.side_effect = TeamAgentException("tsp error", "tsp/code")
+    res = await driver._execute_tsp_tool("tool", "{}")
+    assert res["code"] == "tsp/code"
+    assert res["message"] == "tsp error"
+    
+    # Case 3: General Exception
+    driver._client.tool.side_effect = RuntimeError("network fail")
+    res = await driver._execute_tsp_tool("tool", "{}")
+    assert "工具调用失败" in res["message"]
+
+@pytest.mark.asyncio
+async def test_tsp_client_fail_pending():
+    from service.agentService.driver.tspDriver import _TspStdioClient
+    client = _TspStdioClient(["mock"])
+    
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    client._in_flight["req1"] = fut
+    
+    client._fail_pending(RuntimeError("closed"))
+    
+    with pytest.raises(RuntimeError, match="closed"):
+        await fut
+    assert len(client._in_flight) == 0
