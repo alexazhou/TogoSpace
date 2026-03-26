@@ -4,7 +4,7 @@ import os
 from typing import Any, Callable, Dict, List, Optional
 
 from util import llmApiUtil, configUtil
-from util.configTypes import AgentConfig, TeamConfig, TeamRoomConfig
+from util.configTypes import AgentTemplate, TeamConfig, TeamRoomConfig
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreChatMessage
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from model.coreModel.gtCoreWebModel import GtCoreAgentInfo
@@ -13,17 +13,17 @@ from .driver import AgentDriverConfig, build_agent_driver, normalize_driver_conf
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
 from dal.db import gtAgentManager
 from service.roomService import ChatRoom, ChatContext
-from constants import SpecialAgent, MessageBusTopic, AgentStatus
+from constants import SpecialAgent, MessageBusTopic, MemberStatus
 
 logger = logging.getLogger(__name__)
 
-_agent_defs: Dict[str, AgentConfig] = {}
-_agents: Dict[str, "Agent"] = {}
+_agent_templates: Dict[str, AgentTemplate] = {}
+_team_members: Dict[str, "TeamMember"] = {}
 _team_ids: Dict[str, int] = {}  # team_name -> team_id mapping
 
 
-def _make_agent_key(team_name: str, agent_name: str) -> str:
-    return f"{agent_name}@{team_name}"
+def _make_member_key(team_name: str, member_name: str) -> str:
+    return f"{member_name}@{team_name}"
 
 
 def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
@@ -43,8 +43,8 @@ async def load_team_ids(teams_config: list[TeamConfig]) -> None:
     logger.info(f"Loaded team IDs: {_team_ids}")
 
 
-class Agent:
-    """AI Agent 壳对象：承载稳定状态，driver 负责具体驱动实现。"""
+class TeamMember:
+    """AI Team Member 实例：承载在特定团队中的身份和状态，driver 负责具体驱动实现。"""
 
     def __init__(
         self,
@@ -57,9 +57,9 @@ class Agent:
         team_workdir: str = "",
         workspace_root: str = "",
     ):
-        self.name: str = name
+        self.name: str = name  # 成员在团队中的昵称
         self.team_name: str = team_name
-        self.template_name: str = template_name
+        self.template_name: str = template_name  # 所使用的 Agent 模版名
         self.system_prompt: str = system_prompt
         self.model: str = model
         self.team_workdir: str = team_workdir
@@ -67,7 +67,7 @@ class Agent:
 
         self._history: list[llmApiUtil.OpenAIMessage] = []
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
-        self.status: AgentStatus = AgentStatus.IDLE
+        self.status: MemberStatus = MemberStatus.IDLE
         self.current_room: Optional[ChatRoom] = None
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type="native"))
 
@@ -77,11 +77,11 @@ class Agent:
 
     @property
     def key(self) -> str:
-        return _make_agent_key(self.team_name, self.name)
+        return _make_member_key(self.team_name, self.name)
 
     @property
     def is_active(self) -> bool:
-        return self.status == AgentStatus.ACTIVE or not self.wait_task_queue.empty()
+        return self.status == MemberStatus.ACTIVE or not self.wait_task_queue.empty()
 
     def get_info(self) -> GtCoreAgentInfo:
         return GtCoreAgentInfo(
@@ -89,7 +89,7 @@ class Agent:
             template_name=self.template_name or None,
             model=self.model,
             team_name=self.team_name,
-            status=AgentStatus.ACTIVE if self.is_active else AgentStatus.IDLE,
+            status=MemberStatus.ACTIVE if self.is_active else MemberStatus.IDLE,
         )
 
     async def startup(self) -> None:
@@ -98,17 +98,16 @@ class Agent:
     async def close(self) -> None:
         await self.driver.shutdown()
 
-    def _publish_status(self, status: AgentStatus) -> None:
+    def _publish_status(self, status: MemberStatus) -> None:
         messageBus.publish(
-            MessageBusTopic.AGENT_STATUS_CHANGED,
-            agent_name=self.name,
+            MessageBusTopic.MEMBER_STATUS_CHANGED,
+            member_name=self.name,
             team_name=self.team_name,
             status=status.name,
         )
 
     async def consume_task(self, max_function_calls: int) -> None:
-        # 一个 Agent 可能会连续收到多个房间事件，这里串行消费，避免同一实例并发跑多个回合。
-        self.status = AgentStatus.ACTIVE
+        self.status = MemberStatus.ACTIVE
         self._publish_status(self.status)
         try:
             while True:
@@ -121,19 +120,18 @@ class Agent:
                     if isinstance(task, GtCoreRoomMessageEvent):
                         await self.run_chat_turn(task.room_id, max_function_calls)
                     else:
-                        raise TypeError(f"不支持的 Agent 任务类型: {type(task).__name__}")
+                        raise TypeError(f"不支持的任务类型: {type(task).__name__}")
                 except Exception as e:
-                    logger.error(f"Agent 处理任务失败: agent={self.key}, task={task!r}, error={e}", exc_info=True)
+                    logger.error(f"成员处理任务失败: member={self.key}, task={task!r}, error={e}", exc_info=True)
                 finally:
                     self.wait_task_queue.task_done()
         finally:
-            self.status = AgentStatus.IDLE
+            self.status = MemberStatus.IDLE
             self._publish_status(self.status)
 
     async def sync_room_messages(self, room: ChatRoom) -> int:
-        # 把该 Agent 在房间中的未读消息追加到私有 history，返回本次真正同步进去的条数。
         new_msgs: List[GtCoreChatMessage] = await room.get_unread_messages(self.name)
-        logger.info(f"同步房间消息: agent={self.key}, room={room.name}, count={len(new_msgs)}")
+        logger.info(f"同步房间消息: member={self.key}, room={room.name}, count={len(new_msgs)}")
 
         synced_count = 0
         for msg in new_msgs:
@@ -155,10 +153,9 @@ class Agent:
         return synced_count
 
     async def run_chat_turn(self, room_id: int, max_function_calls: int = 5) -> None:
-        # Agent 统一维护当前房间上下文 and 消息同步，driver 只负责跑这一轮聊天逻辑。
         room = roomService.get_room(room_id)
         if room is None:
-            logger.warning(f"run_chat_turn 跳过：room_id={room_id} 不存在, agent={self.key}")
+            logger.warning(f"run_chat_turn 跳过：room_id={room_id} 不存在, member={self.key}")
             return
         self.current_room = room
         synced_count = await self.sync_room_messages(room)
@@ -166,7 +163,7 @@ class Agent:
         try:
             await self.driver.run_chat_turn(room, synced_count, max_function_calls)
         except Exception as e:
-            logger.warning(f"run_chat_turn 异常: agent={self.key}, room={room.key}, error={e}")
+            logger.warning(f"run_chat_turn 异常: member={self.key}, room={room.key}, error={e}")
             raise
         finally:
             self.current_room = None
@@ -175,7 +172,6 @@ class Agent:
         await self.sync_room_messages(room)
 
     async def _infer(self, tools: Optional[list[llmApiUtil.OpenAITool]]) -> llmApiUtil.OpenAIMessage:
-        # 每次推理都基于当前 history 组装完整上下文，并把 assistant 回复继续追加回 history。
         assert self._history and self._history[-1].role in (
             llmApiUtil.OpenaiLLMApiRole.USER,
             llmApiUtil.OpenaiLLMApiRole.TOOL,
@@ -189,7 +185,6 @@ class Agent:
         return assistant_message
 
     async def _execute_tool(self) -> None:
-        """执行最后一条 assistant 消息中的所有 tool_calls，并将结果写入 history。"""
         last_msg = self.get_last_assistant_message()
         if not last_msg or not last_msg.tool_calls:
             return
@@ -203,7 +198,6 @@ class Agent:
             await self.append_history_message(llmApiUtil.OpenAIMessage.tool_result(tool_call.id, result))
 
     def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llmApiUtil.OpenAIMessage]:
-        """获取历史中最后一条 assistant 消息。"""
         recent_history = self._history[start_idx:]
 
         for message in reversed(recent_history):
@@ -242,19 +236,21 @@ class Agent:
 
 
 async def startup() -> None:
-    global _agent_defs, _agents
-    _agent_defs = {}
-    _agents = {}
+    global _agent_templates, _team_members
+    _agent_templates = {}
+    _team_members = {}
 
 
-def load_agent_config(agents_config: List[AgentConfig] | None = None) -> None:
-    global _agent_defs
+def load_agent_config(agents_config: List[AgentTemplate] | None = None) -> None:
+    """加载 Agent 模版配置。"""
+    global _agent_templates
     resolved = agents_config if agents_config is not None else configUtil.get_app_config().agents
-    _agent_defs = {cfg.name: cfg for cfg in resolved}
-    logger.info(f"加载 Agent 定义: {list(_agent_defs.keys())}")
+    _agent_templates = {cfg.name: cfg for cfg in resolved}
+    logger.info(f"加载 Agent 模版: {list(_agent_templates.keys())}")
 
 
-async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
+async def create_team_members(teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
+    """创建团队成员实例。"""
     base_prompt_tmpl = configUtil.load_prompt("src/prompts/GroupChat.md")
     default_model = llmService.get_default_model()
     resolved_workspace_root = workspace_root or configUtil.get_app_config().setting.workspace_root
@@ -267,14 +263,14 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
         else:
             team_workdir = os.path.join(resolved_workspace_root, team_name)
 
-        for member in team_config.members:
-            member_name = member.name
-            template_name = member.agent
-            if template_name not in _agent_defs:
-                logger.warning(f"Agent 定义不存在: member={member_name}, agent={template_name}，跳过创建")
+        for member_cfg in team_config.members:
+            member_name = member_cfg.name
+            template_name = member_cfg.agent
+            if template_name not in _agent_templates:
+                logger.warning(f"Agent 模版不存在: member={member_name}, agent={template_name}，跳过创建")
                 continue
 
-            cfg: AgentConfig = _agent_defs[template_name]
+            cfg: AgentTemplate = _agent_templates[template_name]
             if cfg.system_prompt:
                 agent_specific_prompt = cfg.system_prompt
             else:
@@ -282,9 +278,9 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
 
             full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
             model_name = cfg.model or default_model
-            key = _make_agent_key(team_name, member_name)
+            key = _make_member_key(team_name, member_name)
             driver_config = normalize_driver_config(cfg)
-            agent = Agent(
+            member = TeamMember(
                 name=member_name,
                 team_name=team_name,
                 system_prompt=full_prompt,
@@ -294,83 +290,77 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
                 team_workdir=team_workdir,
                 workspace_root=resolved_workspace_root,
             )
-            _agents[key] = agent
+            _team_members[key] = member
             logger.info(
                 f"创建成员实例: key={key}, template={template_name}, model={model_name}, driver={driver_config.driver_type}"
             )
-            await agent.startup()
+            await member.startup()
             try:
-                await gtAgentManager.upsert_agent(agent.team_id, agent.name, agent.model, agent.template_name)
+                await gtAgentManager.upsert_agent(member.team_id, member.name, member.model, member.template_name)
             except Exception as e:
-                logger.warning(f"写入 Agent 数据失败: agent={agent.key}, error={e}")
+                logger.warning(f"写入成员数据失败: member={member.key}, error={e}")
 
 
-async def reload_team_agents(team_name: str, teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
-    """按 Team 维度重建运行时 Agent 实例。
-
-    用于 Team 热更新场景（成员增删改），避免只刷新房间而不刷新 Agent 实例，
-    导致调度阶段找不到新增成员对应的 Agent。
-    """
-    # 先关闭并移除该 team 的旧实例，避免与新实例并存
+async def reload_team_members(team_name: str, teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
+    """按 Team 维度重建运行时成员实例。"""
     team_suffix = f"@{team_name}"
-    keys_to_remove = [k for k in _agents.keys() if k.endswith(team_suffix)]
+    keys_to_remove = [k for k in _team_members.keys() if k.endswith(team_suffix)]
     close_tasks: list[Any] = []
     for key in keys_to_remove:
-        close_tasks.append(_agents[key].close())
+        close_tasks.append(_team_members[key].close())
     if close_tasks:
         await asyncio.gather(*close_tasks, return_exceptions=True)
     for key in keys_to_remove:
-        _agents.pop(key, None)
+        _team_members.pop(key, None)
 
-    # team_id 可能因创建/删除发生变化，热更新时一并刷新映射
     await load_team_ids(teams_config)
 
     target_config = next((cfg for cfg in teams_config if cfg.name == team_name), None)
     if target_config is None:
-        logger.warning(f"重建 Team Agent 失败: team '{team_name}' 不存在于配置中")
+        logger.warning(f"重建 Team 成员失败: team '{team_name}' 不存在于配置中")
         return
 
-    await create_team_agents([target_config], workspace_root=workspace_root)
+    await create_team_members([target_config], workspace_root=workspace_root)
 
 
-def get_agent(team_name: str, agent_name: str) -> Agent:
-    key = _make_agent_key(team_name, agent_name)
-    return _agents[key]
+def get_team_member(team_name: str, member_name: str) -> TeamMember:
+    key = _make_member_key(team_name, member_name)
+    return _team_members[key]
 
 
-def find_agent(team_name: str, agent_name: str) -> Agent | None:
-    key = _make_agent_key(team_name, agent_name)
-    return _agents.get(key)
+def find_team_member(team_name: str, member_name: str) -> TeamMember | None:
+    key = _make_member_key(team_name, member_name)
+    return _team_members.get(key)
 
 
-def get_all_agents() -> List[Agent]:
-    return list(_agents.values())
+def get_all_team_members() -> List[TeamMember]:
+    return list(_team_members.values())
 
 
-def get_all_agent_definitions() -> list[AgentConfig]:
-    return list(_agent_defs.values())
+def get_all_agent_definitions() -> list[AgentTemplate]:
+    return list(_agent_templates.values())
 
 
-def get_agent_definition(agent_name: str) -> AgentConfig | None:
-    return _agent_defs.get(agent_name)
+def get_agent_definition(template_name: str) -> AgentTemplate | None:
+    return _agent_templates.get(template_name)
 
 
-def get_agents(room_id: int) -> List[Agent]:
+def get_team_members(room_id: int) -> List[TeamMember]:
     room = roomService.get_room(room_id)
     if room is None:
         return []
     members: List[str] = roomService.get_member_names(room_id)
-    return [_agents[_make_agent_key(room.team_name, n)] for n in members if _make_agent_key(room.team_name, n) in _agents]
+    return [_team_members[_make_member_key(room.team_name, n)] for n in members if _make_member_key(room.team_name, n) in _team_members]
 
 
-def get_all_rooms(team_name: str, agent_name: str) -> List[int]:
-    return roomService.get_rooms_for_agent(_team_ids.get(team_name), agent_name)
+def get_all_rooms(team_name: str, member_name: str) -> List[int]:
+    return roomService.get_rooms_for_agent(_team_ids.get(team_name), member_name)
 
 
 async def shutdown() -> None:
-    global _agents, _agent_defs
-    close_tasks: List[Any] = [a.close() for a in _agents.values()]
+    global _team_members, _agent_templates
+    close_tasks: List[Any] = [m.close() for m in _team_members.values()]
     if close_tasks:
         await asyncio.gather(*close_tasks, return_exceptions=True)
-    _agents = {}
-    _agent_defs = {}
+    _team_members = {}
+    _agent_templates = {}

@@ -7,7 +7,7 @@ from service import messageBus
 from service.messageBus import Message
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from service import agentService, roomService as chat_room
-from service.agentService import Agent
+from service.agentService import TeamMember
 from dal.db import gtRoomManager
 from constants import MessageBusTopic, SpecialAgent, RoomState
 
@@ -27,71 +27,71 @@ async def startup(teams_config: list[TeamConfig]) -> None:
     global _teams_config, _stop_event
     _teams_config = teams_config
     _stop_event = asyncio.Event()
-    messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
+    messageBus.subscribe(MessageBusTopic.ROOM_MEMBER_TURN, _on_member_turn)
 
 
-def add_agent(agent: Agent, max_fc: int) -> None:
-    """将 agent 加入调度池，若已在运行则跳过。"""
-    existing: asyncio.Task | None = _running.get(agent.key)
+def add_member(member: TeamMember, max_fc: int) -> None:
+    """将成员加入调度池，若已在运行则跳过。"""
+    existing: asyncio.Task | None = _running.get(member.key)
     if existing is not None and not existing.done():
         return
-    task = asyncio.create_task(agent.consume_task(max_fc))
-    _running[agent.key] = task
-    task.add_done_callback(lambda t: _on_task_done(agent.key, t))
+    task = asyncio.create_task(member.consume_task(max_fc))
+    _running[member.key] = task
+    task.add_done_callback(lambda t: _on_task_done(member.key, t))
 
 
 def _on_task_done(key: str, task: asyncio.Task) -> None:
     """Task 完成回调：仅当完成的 task 仍是当前注册的任务时才移出调度池。
 
     asyncio 在协程返回时立即将 task 标记为 done，但 done callback 通过
-    loop.call_soon 异步调度，稍后才执行。在这段空隙内，同一 agent 可能已被
-    重新入队并在 _running 中注册了新 task。此时若直接 remove_agent，会误删
+    loop.call_soon 异步调度，稍后才执行。在这段空隙内，同一成员可能已被
+    重新入队并在 _running 中注册了新 task。此时若直接 remove_member，会误删
     新 task 并取消它。通过 `is` 判断确保只有"自己的"task 完成时才触发移除。
     """
     if _running.get(key) is task:
-        remove_agent(key)
+        remove_member(key)
 
 
-def remove_agent(agent_key: str) -> None:
-    """从调度池移出 agent。"""
-    task = _running.pop(agent_key, None)
+def remove_member(member_key: str) -> None:
+    """从调度池移出成员。"""
+    task = _running.pop(member_key, None)
     if task and not task.done():
         task.cancel()
 
 
-def _on_agent_turn(msg: Message) -> None:
-    """订阅 ROOM_AGENT_TURN：将任务入队，若 agent 未运行则加入调度池。"""
-    agent_name: str = msg.payload["agent_name"]
+def _on_member_turn(msg: Message) -> None:
+    """订阅 ROOM_MEMBER_TURN：将任务入队，若成员未运行则加入调度池。"""
+    member_name: str = msg.payload["member_name"]
     room_id: int = msg.payload["room_id"]
     team_name: str = msg.payload["team_name"]
 
-    if SpecialAgent.value_of(agent_name) == SpecialAgent.OPERATOR:
+    if SpecialAgent.value_of(member_name) == SpecialAgent.OPERATOR:
         logger.info(f"轮到人类操作者，系统进入等待状态: room_id={room_id}")
         return
 
     try:
-        agent: Agent = agentService.get_agent(team_name, agent_name)
+        member: TeamMember = agentService.get_team_member(team_name, member_name)
     except KeyError:
-        logger.error(f"Agent 不存在: agent_name={agent_name}, team_name={team_name}")
+        logger.error(f"成员不存在: member_name={member_name}, team_name={team_name}")
         return
     except Exception as e:
-        logger.error(f"获取 Agent 失败: agent_name={agent_name}, team_name={team_name}, error={e}")
+        logger.error(f"获取成员失败: member_name={member_name}, team_name={team_name}, error={e}")
         return
 
     # 去重：同一房间已在队列中则跳过，避免重复调度
-    queued_events = list(getattr(agent.wait_task_queue, "_queue", []))
+    queued_events = list(getattr(member.wait_task_queue, "_queue", []))
     if any(e.room_id == room_id for e in queued_events):
-        logger.debug(f"跳过重复入队: agent={agent.key}, room_id={room_id}")
+        logger.debug(f"跳过重复入队: member={member.key}, room_id={room_id}")
         return
 
-    agent.wait_task_queue.put_nowait(GtCoreRoomMessageEvent(room_id))
+    member.wait_task_queue.put_nowait(GtCoreRoomMessageEvent(room_id))
 
     max_fc = 5
     for team in _teams_config:
         if team.name == team_name:
             max_fc = team.max_function_calls or 5
             break
-    add_agent(agent, max_fc)
+    add_member(member, max_fc)
 
 
 async def run() -> None:
@@ -142,6 +142,6 @@ def refresh_team_config(team_name: str, teams_config: list[TeamConfig]) -> None:
 def stop_team(team_name: str) -> None:
     """停止指定 Team 的所有调度任务。"""
     to_remove = [key for key in _running.keys() if key.endswith(f"@{team_name}")]
-    for agent_key in to_remove:
-        remove_agent(agent_key)
+    for member_key in to_remove:
+        remove_member(member_key)
     logger.info(f"Team '{team_name}' 的 {len(to_remove)} 个调度任务已停止")

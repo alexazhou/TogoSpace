@@ -145,8 +145,8 @@ async def hot_reload_team(name: str) -> None:
     # 先停掉该 team 的调度任务，避免旧实例在热更新过程中继续消费事件
     schedulerService.stop_team(name)
 
-    # 刷新 Agent 实例，保证新增/变更成员可被调度命中
-    await agentService.reload_team_agents(name, team_configs)
+    # 刷新成员实例，保证新增/变更成员可被调度命中
+    await agentService.reload_team_members(name, team_configs)
 
     # 刷新调度器配置
     schedulerService.refresh_team_config(name, team_configs)

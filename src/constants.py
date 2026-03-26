@@ -25,9 +25,9 @@ class LlmServiceType(EnhanceEnum):
 
 
 class MessageBusTopic(EnhanceEnum):
-    ROOM_AGENT_TURN = auto()      # 轮到某 Agent 发言；payload: agent_name, room_id, room_name, team_name
-    ROOM_MSG_ADDED = auto()       # 房间新增消息；payload: room_id, room_key, room_name, team_name, sender, content, time
-    AGENT_STATUS_CHANGED = auto() # Agent 忙闲状态变更；payload: agent_name, status(AgentStatus.name)
+    ROOM_MEMBER_TURN = auto()      # 轮到某成员发言；payload: member_name, room_id, room_name, team_name
+    ROOM_MSG_ADDED = auto()        # 房间新增消息；payload: room_id, room_key, room_name, team_name, sender, content, time
+    MEMBER_STATUS_CHANGED = auto() # 成员忙闲状态变更；payload: member_name, status(MemberStatus.name)
 
 
 class RoomType(EnhanceEnum):
@@ -45,6 +45,6 @@ class RoomState(EnhanceEnum):
     IDLE = auto()        # 房间空闲，无更多事件
 
 
-class AgentStatus(EnhanceEnum):
+class MemberStatus(EnhanceEnum):
     ACTIVE = auto()
     IDLE = auto()

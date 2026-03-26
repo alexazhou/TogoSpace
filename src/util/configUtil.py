@@ -4,7 +4,7 @@ import os
 from typing import Any, List
 
 from util.configTypes import (
-    AgentConfig,
+    AgentTemplate,
     AppConfig,
     PersistenceConfig,
     SettingConfig,
@@ -24,10 +24,10 @@ def get_db_path() -> str:
     return PersistenceConfig().db_path
 
 
-def _load_agents(config_dir: str) -> List[AgentConfig]:
+def _load_agents(config_dir: str) -> List[AgentTemplate]:
     agents_dir = os.path.join(config_dir, "agents")
     raw_agents = load_json_objects_from_dir(agents_dir)
-    return [AgentConfig.model_validate(agent) for agent in raw_agents]
+    return [AgentTemplate.model_validate(agent) for agent in raw_agents]
 
 
 def _load_teams(config_dir: str) -> List[TeamConfig]:

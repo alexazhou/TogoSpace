@@ -20,9 +20,11 @@ def _is_test_env() -> bool:
 def _default_persistence_db_path() -> str:
     return "../test_data/data.db" if _is_test_env() else "../data/data.db"
 
+
 class TeamMemberConfig(BaseModel):
-    name: str
-    agent: str
+    """Configuration for a member in a team, referencing an agent template."""
+    name: str  # Nickname of the member in the team
+    agent: str  # Name of the AgentTemplate to use
 
 
 class TeamRoomConfig(BaseModel):
@@ -44,8 +46,8 @@ class TeamConfig(BaseModel):
     max_function_calls: Optional[int] = None
 
 
-class AgentConfig(BaseModel):
-    """Agent definition loaded from config/agents/*.json."""
+class AgentTemplate(BaseModel):
+    """Agent definition (template) loaded from config/agents/*.json."""
     name: str
     system_prompt: str = ""
     prompt_file: str = ""
@@ -115,11 +117,8 @@ class SettingConfig(BaseModel):
     def get_default_team_workdir(self, team_name: str) -> str:
         return os.path.join(self.workspace_root, team_name)
 
+
 class AppConfig(BaseModel):
-    agents: List[AgentConfig]
-    teams: List[TeamConfig]
-    setting: SettingConfig
-
-
-__all__ = ["TeamMemberConfig", "TeamRoomConfig", "TeamConfig", "AgentConfig",
-           "LlmServiceType", "LlmServiceConfig", "PersistenceConfig", "AppConfig", "SettingConfig"]
+    setting: SettingConfig = Field(default_factory=SettingConfig)
+    agents: List[AgentTemplate] = Field(default_factory=list)
+    teams: List[TeamConfig] = Field(default_factory=list)
