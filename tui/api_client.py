@@ -51,7 +51,7 @@ class WsEvent:
     sender: str | None = None
     content: str | None = None
     time: datetime | None = None
-    agent_name: str | None = None
+    member_name: str | None = None
     status: str | None = None
 
 
@@ -70,7 +70,7 @@ class ApiClient:
         params: dict[str, str] | None = None
         if team_name:
             params = {"team_name": team_name}
-        async with session.get(f"{self._base_url}/agents/list.json", params=params) as resp:
+        async with session.get(f"{self._base_url}/members/list.json", params=params) as resp:
             resp.raise_for_status()
             data = await resp.json()
         return [AgentInfo(name=a["name"], model=a["model"], team_name=a.get("team_name", ""), status=a.get("status", "idle")) for a in data["agents"]]
@@ -155,10 +155,10 @@ class ApiClient:
                                     content=data["content"],
                                     time=datetime.fromisoformat(data["time"]),
                                 )
-                            elif event_type == "agent_status":
+                            elif event_type == "member_status":
                                 yield WsEvent(
                                     event=event_type,
-                                    agent_name=data["agent_name"],
+                                    member_name=data["member_name"],
                                     team_name=data.get("team_name", ""),
                                     status=data["status"],
                                 )
