@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence
 
-from dal.db import gtRoomManager, gtTeamManager
+from dal.db import gtRoomManager, gtTeamManager, gtTeamMemberManager
 from service import messageBus, persistenceService
 from util.configTypes import TeamConfig, TeamRoomConfig
 from model.coreModel.gtCoreChatModel import GtCoreChatMessage
@@ -57,7 +57,7 @@ class ChatContext:
 class ChatRoom:
     """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
-    def __init__(self, team: GtTeam, room: GtRoom, members: List[str] = None):
+    def __init__(self, team: GtTeam, room: GtRoom, members: List[str] = None, member_id_map: Dict[str, int] | None = None):
         self.room_id: int = room.id  # 数据库主键 ID
         self.team_id: int = team.id  # 所属 Team 的数据库主键 ID
         self.name: str = room.name  # 房间名称
@@ -67,7 +67,10 @@ class ChatRoom:
         self.initial_topic: str = room.initial_topic  # 初始话题
         self.members: List[str] = _normalize_members(members)  # 房间参与者名单（包含 Operator 和 AI Agents）
 
-        self._agent_read_index: Dict[str, int] = {}  # 每个 Agent 的消息读取进度
+        self._member_id_map: Dict[str, int] = member_id_map or {}  # member_name → member_id
+        self._member_name_map: Dict[int, str] = {v: k for k, v in self._member_id_map.items()}  # member_id → member_name
+        self._member_name_map[0] = "system"
+        self._member_read_index: Dict[str, int] = {}  # 每个成员的消息读取进度（name 为 key）
         self._turn_index: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
         self._max_turns: int = room.max_turns  # 最大允许轮次
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
@@ -86,11 +89,12 @@ class ChatRoom:
 
     async def get_unread_messages(self, agent_name: str) -> List[GtCoreChatMessage]:
         """返回 agent_name 尚未读取的新消息，并推进其读取位置。"""
-        read_idx = self._agent_read_index.get(agent_name, 0)
+        read_idx = self._member_read_index.get(agent_name, 0)
         new_msgs = self.messages[read_idx:]
-        self._agent_read_index[agent_name] = len(self.messages)
+        self._member_read_index[agent_name] = len(self.messages)
         if self._state != RoomState.INIT:
-            await persistenceService.save_room_runtime(self.room_id, self._agent_read_index)
+            id_keyed = {str(self._member_id_map.get(k, 0)): v for k, v in self._member_read_index.items()}
+            await persistenceService.save_room_runtime(self.room_id, id_keyed)
         return new_msgs
 
     async def add_message(self, sender: str, content: str, send_time: datetime | None = None) -> None:
@@ -106,7 +110,7 @@ class ChatRoom:
 
         await persistenceService.append_room_message(
             room_id=self.room_id,
-            sender=sender,
+            member_id=self._member_id_map.get(sender, 0),
             content=content,
             send_time=message.send_time.isoformat(),
         )
@@ -243,19 +247,26 @@ class ChatRoom:
     def inject_runtime_state(
         self,
         messages: List[GtCoreChatMessage] | None = None,
-        agent_read_index: Dict[str, int] | None = None,
+        member_read_index: Dict[str, int] | None = None,
     ) -> None:
         if messages is not None:
             self.messages = list(messages)
-        if agent_read_index is not None:
-            self._agent_read_index = dict(agent_read_index)
+        if member_read_index is not None:
+            converted: Dict[str, int] = {}
+            for k, v in member_read_index.items():
+                try:
+                    name = self._member_name_map.get(int(k), k)
+                except (ValueError, TypeError):
+                    name = k  # fallback: key is already a member name (legacy data)
+                converted[name] = v
+            self._member_read_index = converted
 
-    def export_agent_read_index(self) -> Dict[str, int]:
-        return dict(self._agent_read_index)
+    def export_member_read_index(self) -> Dict[str, int]:
+        return dict(self._member_read_index)
 
     def mark_all_messages_read(self) -> None:
         tail = len(self.messages)
-        self._agent_read_index = {name: tail for name in self.members}
+        self._member_read_index = {name: tail for name in self.members}
 
     def rebuild_state_from_history(self) -> None:
         keep_init = (self._state == RoomState.INIT)
@@ -372,12 +383,14 @@ async def _create_room(
             type=room_type,
             initial_topic=initial_topic,
             max_turns=max_turns,
-            agent_read_index=None,
+            member_read_index=None,
             updated_at=GtRoom._now_iso(),
         )
 
     resolved_room_id = room_row.id
-    room = ChatRoom(team=team_row, room=room_row, members=members)
+    member_rows = await gtTeamMemberManager.get_members_by_team(team_row.id)
+    member_id_map = {row.name: row.id for row in member_rows}
+    room = ChatRoom(team=team_row, room=room_row, members=members, member_id_map=member_id_map)
     room_key = room.key
     _rooms[room_key] = room
     _rooms_by_id[resolved_room_id] = room

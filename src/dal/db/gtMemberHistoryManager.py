@@ -7,8 +7,7 @@ async def append_member_history_message(message: GtMemberHistory) -> GtMemberHis
     await (
         GtMemberHistory
         .insert(
-            team_id=message.team_id,
-            member_name=message.member_name,
+            member_id=message.member_id,
             seq=message.seq,
             message_json=message.message_json,
         )
@@ -16,23 +15,19 @@ async def append_member_history_message(message: GtMemberHistory) -> GtMemberHis
         .aio_execute()
     )
     row: GtMemberHistory | None = await GtMemberHistory.aio_get_or_none(
-        (GtMemberHistory.team_id == message.team_id) &
-        (GtMemberHistory.member_name == message.member_name) &
+        (GtMemberHistory.member_id == message.member_id) &
         (GtMemberHistory.seq == message.seq)
     )
     if row is None:
-        raise RuntimeError(f"append member history failed: {message.member_name}@{message.team_id}#{message.seq}")
+        raise RuntimeError(f"append member history failed: member_id={message.member_id}#{message.seq}")
     return row
 
 
-async def get_member_history(team_id: int, member_name: str) -> list[GtMemberHistory]:
+async def get_member_history(member_id: int) -> list[GtMemberHistory]:
     return await (
         GtMemberHistory
         .select()
-        .where(
-            (GtMemberHistory.team_id == team_id) &
-            (GtMemberHistory.member_name == member_name)
-        )
+        .where(GtMemberHistory.member_id == member_id)
         .order_by(GtMemberHistory.seq.asc())
         .aio_execute()
     )

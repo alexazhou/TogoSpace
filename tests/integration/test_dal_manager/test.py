@@ -55,26 +55,17 @@ class TestDalManagers(ServiceTestCase):
     async def test_agent_manager_upsert_and_query_with_model(self):
         await self._reset_tables()
 
-        team = await gtTeamManager.upsert_team(TeamConfig(name="agent_team"))
-
-        saved_1 = await gtAgentManager.upsert_agent(team.id, "alice_1", "glm-4.7", "alice")
-        assert saved_1.team_id == team.id
-        assert saved_1.name == "alice_1"
-        assert saved_1.model == "glm-4.7"
+        saved_1 = await gtAgentManager.upsert_agent("alice", "glm-4.7")
         assert saved_1.template_name == "alice"
+        assert saved_1.model == "glm-4.7"
 
-        saved_2 = await gtAgentManager.upsert_agent(team.id, "alice_1", "gpt-4o", "assistant")
+        saved_2 = await gtAgentManager.upsert_agent("alice", "gpt-4o")
         assert saved_2.id == saved_1.id
         assert saved_2.model == "gpt-4o"
-        assert saved_2.template_name == "assistant"
 
-        row = await gtAgentManager.get_agent(team.id, "alice_1")
+        row = await gtAgentManager.get_agent("alice")
         assert row is not None
         assert row.model == "gpt-4o"
-        assert row.template_name == "assistant"
-
-        rows = await gtAgentManager.get_agents_by_team(team.id)
-        assert [(r.name, r.model, r.template_name) for r in rows] == [("alice_1", "gpt-4o", "assistant")]
 
     async def test_agent_table_has_model_column(self):
         await self._reset_tables()
@@ -322,6 +313,11 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="member_team"))
+        await gtTeamMemberManager.upsert_team_members(team.id, [
+            TeamMemberConfig(name="alice", agent="alice"),
+            TeamMemberConfig(name="bob", agent="bob"),
+            TeamMemberConfig(name="charlie", agent="charlie"),
+        ])
         room = await gtRoomManager.ensure_room_by_key(
             team_id=team.id,
             room_name="member_room",
@@ -357,9 +353,17 @@ class TestDalManagers(ServiceTestCase):
             max_turns=5,
         )
 
-        m1 = await gtRoomMessageManager.append_room_message(room.id, "alice", "hello", "2026-03-23T10:00:00")
-        m2 = await gtRoomMessageManager.append_room_message(room.id, "bob", "world", "2026-03-23T10:01:00")
-        m3 = await gtRoomMessageManager.append_room_message(room.id, "alice", "again", "2026-03-23T10:02:00")
+        await gtTeamMemberManager.upsert_team_members(team.id, [
+            TeamMemberConfig(name="alice", agent="alice"),
+            TeamMemberConfig(name="bob", agent="bob"),
+        ])
+        alice = await gtTeamMemberManager.get_member(team.id, "alice")
+        bob = await gtTeamMemberManager.get_member(team.id, "bob")
+        assert alice is not None and bob is not None
+
+        m1 = await gtRoomMessageManager.append_room_message(room.id, alice.id, "hello", "2026-03-23T10:00:00")
+        m2 = await gtRoomMessageManager.append_room_message(room.id, bob.id, "world", "2026-03-23T10:01:00")
+        m3 = await gtRoomMessageManager.append_room_message(room.id, alice.id, "again", "2026-03-23T10:02:00")
 
         assert m1.id < m2.id < m3.id
         all_msgs = await gtRoomMessageManager.get_room_messages(room.id)
@@ -375,20 +379,22 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="history_team"))
+        await gtTeamMemberManager.upsert_team_members(team.id, [TeamMemberConfig(name="alice", agent="alice")])
+        alice = await gtTeamMemberManager.get_member(team.id, "alice")
+        assert alice is not None
+
         first = GtMemberHistory(
-            team_id=team.id,
-            member_name="alice",
+            member_id=alice.id,
             seq=1,
             message_json='{"content":"v1"}',
         )
         saved_1 = await gtMemberHistoryManager.append_member_history_message(first)
-        assert saved_1.member_name == "alice"
+        assert saved_1.member_id == alice.id
         assert saved_1.seq == 1
         assert saved_1.message_json == '{"content":"v1"}'
 
         duplicate = GtMemberHistory(
-            team_id=team.id,
-            member_name="alice",
+            member_id=alice.id,
             seq=1,
             message_json='{"content":"v2"}',
         )
@@ -400,18 +406,25 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="history_team_2"))
+        await gtTeamMemberManager.upsert_team_members(team.id, [
+            TeamMemberConfig(name="alice", agent="alice"),
+            TeamMemberConfig(name="bob", agent="bob"),
+        ])
+        alice = await gtTeamMemberManager.get_member(team.id, "alice")
+        bob = await gtTeamMemberManager.get_member(team.id, "bob")
+        assert alice is not None and bob is not None
 
         items = [
-            GtMemberHistory(team_id=team.id, member_name="alice", seq=2, message_json='{"content":"2"}'),
-            GtMemberHistory(team_id=team.id, member_name="alice", seq=1, message_json='{"content":"1"}'),
-            GtMemberHistory(team_id=team.id, member_name="bob", seq=1, message_json='{"content":"b1"}'),
+            GtMemberHistory(member_id=alice.id, seq=2, message_json='{"content":"2"}'),
+            GtMemberHistory(member_id=alice.id, seq=1, message_json='{"content":"1"}'),
+            GtMemberHistory(member_id=bob.id, seq=1, message_json='{"content":"b1"}'),
         ]
         for item in items:
             await gtMemberHistoryManager.append_member_history_message(item)
 
-        alice_history = await gtMemberHistoryManager.get_member_history(team.id, "alice")
+        alice_history = await gtMemberHistoryManager.get_member_history(alice.id)
         assert [h.seq for h in alice_history] == [1, 2]
         assert [h.message_json for h in alice_history] == ['{"content":"1"}', '{"content":"2"}']
 
-        bob_history = await gtMemberHistoryManager.get_member_history(team.id, "bob")
+        bob_history = await gtMemberHistoryManager.get_member_history(bob.id)
         assert [h.seq for h in bob_history] == [1]

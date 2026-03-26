@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from dal.db import gtTeamManager, gtTeamMemberManager
 from service import agentService, memberService, ormService, persistenceService, roomService, messageBus
 from service.memberService import TeamMember
 from util.llmApiUtil import OpenAIMessage, OpenaiLLMApiRole
@@ -40,6 +41,11 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await roomService.startup()
+        team = await gtTeamManager.upsert_team(TeamConfig(name=TEAM))
+        await gtTeamMemberManager.upsert_team_members(team.id, [
+            TeamMemberConfig(name="alice", agent="alice"),
+            TeamMemberConfig(name="bob", agent="bob"),
+        ])
         await roomService.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3)
         room = roomService.get_room_by_key(f"r1@{TEAM}")
         room.activate_scheduling()
@@ -74,8 +80,8 @@ class TestRestoreRoomHistory(ServiceTestCase):
         ]
 
     async def test_read_index_restored(self):
-        assert self.restored.export_agent_read_index()["alice"] == 3
-        assert self.restored.export_agent_read_index()["bob"] == 2
+        assert self.restored.export_member_read_index()["alice"] == 3
+        assert self.restored.export_member_read_index()["bob"] == 2
 
 
 @pytest.mark.forked
