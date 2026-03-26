@@ -1,8 +1,7 @@
-from dataclasses import dataclass, field as dataclass_field
 from typing import Any, List, Optional
 import os
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def _default_workspace_root() -> str:
@@ -70,12 +69,11 @@ class LlmServiceConfig(BaseModel):
     enable: bool = True
 
 
-@dataclass
-class PersistenceConfig:
+class PersistenceConfig(BaseModel):
     enabled: bool = False
-    db_path: str = dataclass_field(default_factory=_default_persistence_db_path)
+    db_path: str | None = Field(default_factory=_default_persistence_db_path)
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, __context: Any) -> None:
         value = self.db_path
         if value is None:
             self.db_path = _default_persistence_db_path()
@@ -92,22 +90,15 @@ class SettingConfig(BaseModel):
 
     default_llm_server: str | None = None
     llm_services: list[LlmServiceConfig] = Field(default_factory=list)
-    persistence: PersistenceConfig = Field(default_factory=PersistenceConfig)
-    workspace_root: str = Field(default_factory=_default_workspace_root)
+    persistence: PersistenceConfig | None = Field(default_factory=PersistenceConfig)
+    workspace_root: str | None = Field(default_factory=_default_workspace_root)
 
-    @field_validator("persistence", mode="before")
-    @classmethod
-    def normalize_persistence(cls, value: Any) -> Any:
-        if value is None:
-            return {}
-        return value
-
-    @field_validator("workspace_root", mode="before")
-    @classmethod
-    def normalize_workspace_root(cls, value: Any) -> str:
-        if value is None:
-            return _default_workspace_root()
-        return value
+    def model_post_init(self, __context: Any) -> None:
+        if self.persistence is None:
+            raise ValueError("persistence 不允许为 null")
+        if self.workspace_root is None:
+            raise ValueError("workspace_root 不允许为 null")
+        _ = self.curren_llm_service
 
     @property
     def curren_llm_service(self) -> LlmServiceConfig:
@@ -123,26 +114,14 @@ class SettingConfig(BaseModel):
 
         return services[active_key]
 
-@dataclass
-class AppConfig:
+    def get_default_team_workdir(self, team_name: str) -> str:
+        return os.path.join(self.workspace_root, team_name)
+
+class AppConfig(BaseModel):
     agents: List[AgentConfig]
     teams: List[TeamConfig]
     setting: SettingConfig
 
-    def __post_init__(self) -> None:
-        _ = self.setting.curren_llm_service
-
-
-def resolve_team_workdir(team_name: str, working_directory: str | None, workspace_root: str) -> str:
-    if working_directory:
-        return working_directory
-    return os.path.join(workspace_root, team_name)
-
-
-def get_team_member_map(team_config: TeamConfig) -> dict[str, TeamMemberConfig]:
-    return {member.name: member for member in team_config.members}
-
 
 __all__ = ["TeamMemberConfig", "TeamRoomConfig", "TeamConfig", "AgentConfig",
-           "resolve_team_workdir", "get_team_member_map",
            "LlmServiceConfig", "PersistenceConfig", "AppConfig", "SettingConfig"]

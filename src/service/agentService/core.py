@@ -1,9 +1,10 @@
 import asyncio
 import logging
+import os
 from typing import Any, Callable, Dict, List, Optional
 
 from util import llmApiUtil, configUtil
-from util.configTypes import AgentConfig, TeamConfig, TeamRoomConfig, resolve_team_workdir
+from util.configTypes import AgentConfig, TeamConfig, TeamRoomConfig
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreChatMessage
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from model.coreModel.gtCoreWebModel import GtCoreAgentInfo
@@ -255,15 +256,17 @@ def load_agent_config(agents_config: List[AgentConfig]) -> None:
 async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
     base_prompt_tmpl = configUtil.load_prompt("src/prompts/GroupChat.md")
     default_model = llmService.get_default_model()
-    resolved_workspace_root = workspace_root or configUtil.load_setting_config().workspace_root
+    setting = configUtil.load_setting_config()
+    resolved_workspace_root = workspace_root or setting.workspace_root
 
     for team_config in teams_config:
         team_name = team_config.name
-        team_workdir = resolve_team_workdir(
-            team_name=team_name,
-            working_directory=team_config.working_directory,
-            workspace_root=resolved_workspace_root,
-        )
+        if team_config.working_directory:
+            team_workdir = team_config.working_directory
+        elif workspace_root is None:
+            team_workdir = setting.get_default_team_workdir(team_name)
+        else:
+            team_workdir = os.path.join(resolved_workspace_root, team_name)
 
         for member in team_config.members:
             member_name = member.name
