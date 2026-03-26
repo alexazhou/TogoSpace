@@ -105,6 +105,25 @@ class TestTeamController(_ApiServiceCase):
         assert rooms_data["rooms"][0]["team_name"] == "e2e"
         assert rooms_data["rooms"][0]["room_name"] == "general"
 
+    async def test_team_filtered_agents_and_rooms_by_team_id(self):
+        team_id = await self._get_team_id("e2e")
+
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/members/list.json?team_id={team_id}") as resp:
+                assert resp.status == 200
+                agents_data = await resp.json()
+
+            async with client.get(f"{self.backend_base_url}/rooms/list.json?team_id={team_id}") as resp:
+                assert resp.status == 200
+                rooms_data = await resp.json()
+
+        assert len(agents_data["agents"]) == 1
+        assert agents_data["agents"][0]["team_name"] == "e2e"
+        assert agents_data["agents"][0]["name"] == "alice"
+        assert len(rooms_data["rooms"]) == 1
+        assert rooms_data["rooms"][0]["team_name"] == "e2e"
+        assert rooms_data["rooms"][0]["room_name"] == "general"
+
     async def test_agent_detail_returns_prompt_and_driver(self):
         team_id = await self._get_team_id("e2e")
 

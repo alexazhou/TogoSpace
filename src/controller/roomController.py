@@ -57,7 +57,18 @@ async def _get_team_room_or_404(team_id: int, room_id: int) -> GtRoom:
 
 class RoomListHandler(BaseHandler):
     async def get(self) -> None:
+        team_id_raw = self.get_query_argument("team_id", None)
         team_name = self.get_query_argument("team_name", None)
+        if team_id_raw:
+            team = await gtTeamManager.get_team_by_id(int(team_id_raw))
+            assertUtil.assertNotNull(
+                team,
+                error_message=f"Team ID '{team_id_raw}' not found",
+                error_code="team_not_found",
+            )
+            if team is None:
+                return
+            team_name = team.name
         rooms: List[chat_room.ChatRoom] = chat_room.get_all_rooms()
         if team_name:
             rooms = [room for room in rooms if room.team_name == team_name]
