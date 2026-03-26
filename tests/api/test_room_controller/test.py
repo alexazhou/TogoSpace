@@ -170,7 +170,7 @@ class TestRoomControllerPrivate(_ApiServiceCase):
                     # Agent 回复由调度异步触发，使用轮询等待可观测结果。
                     if any(m["sender"] == "alice" for m in messages):
                         break
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.1)
         else:
             pytest.fail("Agent Alice 未能在限时内回复 Operator")
 

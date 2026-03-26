@@ -20,6 +20,7 @@ MOCK_LLM_HOST = "127.0.0.1"
 MOCK_LLM_API_PATH = "/v1/chat/completions"
 MOCK_LLM_ANTHROPIC_PATH = "/v1/messages"
 MOCK_LLM_PORT = 19876
+MOCK_LLM_RESPONSE_DELAY_SEC = 0.05
 
 
 def get_mock_llm_port() -> int:
@@ -96,6 +97,38 @@ def _default_anthropic_response(room_name: str = "general") -> Dict[str, Any]:
             "output_tokens": 20,
         },
     }
+
+
+def _infer_room_name(
+    messages: list[dict[str, Any]] | None,
+    system_text: str = "",
+) -> str:
+    """优先使用最近消息判断房间，避免历史房间名误导当前响应。"""
+    room_name = "general"
+    messages = messages or []
+
+    for msg in reversed(messages):
+        content = msg.get("content", "")
+        if not content:
+            continue
+        match = re.search(r"在 (general|alice_private|public_group) 房间发言", content)
+        if match:
+            return match.group(1)
+
+    if system_text:
+        match = re.search(r"(general|alice_private|public_group) 房间", system_text)
+        if match:
+            return match.group(1)
+
+    flattened_messages = json.dumps(messages, ensure_ascii=False)
+    if "alice_private" in flattened_messages or "alice_private" in system_text:
+        return "alice_private"
+    if "public_group" in flattened_messages or "public_group" in system_text:
+        return "public_group"
+    if "general" in flattened_messages or "general" in system_text:
+        return "general"
+
+    return room_name
 
 
 class SetResponseHandler(tornado.web.RequestHandler):
@@ -176,45 +209,14 @@ class ChatCompletionsHandler(tornado.web.RequestHandler):
     """OpenAI 格式的 chat/completions 端点。"""
 
     async def post(self):
-        await asyncio.sleep(0.3)  # 模拟 LLM 响应延迟
+        await asyncio.sleep(MOCK_LLM_RESPONSE_DELAY_SEC)
 
-        # 尝试从请求消息中提取房间名
         room_name = "general"
         try:
             body = json.loads(self.request.body)
             messages = body.get("messages", [])
             system_prompt = body.get("system_prompt", "")
-            found_room = None
-
-            # 1. 针对 V6 测试的硬编码启发式匹配 (最高优先级)
-            if "alice_private" in system_prompt or "alice_private" in str(messages):
-                found_room = "alice_private"
-            elif "public_group" in system_prompt or "public_group" in str(messages):
-                found_room = "public_group"
-            elif "general" in system_prompt or "general" in str(messages):
-                found_room = "general"
-
-            # 2. 如果没匹配到，尝试正则提取
-            if not found_room:
-                # 从历史消息中反向寻找最近的房间线索
-                for msg in reversed(messages):
-                    content = msg.get("content", "")
-                    if not content:
-                        continue
-                    # 匹配 "在 general 房间发言" 或 "在 alice_private 房间发言"
-                    match = re.search(r"在 (general|alice_private|public_group) 房间发言", content)
-                    if match:
-                        found_room = match.group(1)
-                        break
-
-                if not found_room and system_prompt:
-                    # 从 system_prompt 中提取房间名
-                    match = re.search(r"(general|alice_private|public_group) 房间", system_prompt)
-                    if match:
-                        found_room = match.group(1)
-
-            if found_room:
-                room_name = found_room
+            room_name = _infer_room_name(messages, system_prompt)
         except Exception:
             pass
 
@@ -233,46 +235,14 @@ class MessagesHandler(tornado.web.RequestHandler):
     """Anthropic 格式的 messages 端点。"""
 
     async def post(self):
-        await asyncio.sleep(0.3)  # 模拟 LLM 响应延迟
+        await asyncio.sleep(MOCK_LLM_RESPONSE_DELAY_SEC)
 
-        # 尝试从请求消息中提取房间名
         room_name = "general"
         try:
             body = json.loads(self.request.body)
             messages = body.get("messages", [])
             system = body.get("system", "")
-
-            found_room = None
-
-            # 1. 针对 V6 测试的硬编码启发式匹配 (最高优先级)
-            if "alice_private" in system or "alice_private" in str(messages):
-                found_room = "alice_private"
-            elif "public_group" in system or "public_group" in str(messages):
-                found_room = "public_group"
-            elif "general" in system or "general" in str(messages):
-                found_room = "general"
-
-            # 2. 如果没匹配到，尝试正则提取
-            if not found_room:
-                # 从历史消息中反向寻找最近的房间线索
-                for msg in reversed(messages):
-                    content = msg.get("content", "")
-                    if not content:
-                        continue
-                    # 匹配 "在 general 房间发言" 或 "在 alice_private 房间发言"
-                    match = re.search(r"在 (general|alice_private|public_group) 房间发言", content)
-                    if match:
-                        found_room = match.group(1)
-                        break
-
-                if not found_room and system:
-                    # 从 system 中提取房间名
-                    match = re.search(r"(general|alice_private|public_group) 房间", system)
-                    if match:
-                        found_room = match.group(1)
-
-            if found_room:
-                room_name = found_room
+            room_name = _infer_room_name(messages, system)
         except Exception:
             pass
 
