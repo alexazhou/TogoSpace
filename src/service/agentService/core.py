@@ -5,9 +5,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 from util import llmApiUtil, configUtil
 from util.configTypes import AgentTemplate, TeamConfig, TeamRoomConfig
-from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreChatMessage
+from model.coreModel.gtCoreChatModel import GtCoreMemberDialogContext, GtCoreChatMessage
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
-from model.coreModel.gtCoreWebModel import GtCoreAgentInfo
+from model.coreModel.gtCoreWebModel import GtCoreMemberInfo
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from .driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
@@ -83,8 +83,8 @@ class TeamMember:
     def is_active(self) -> bool:
         return self.status == MemberStatus.ACTIVE or not self.wait_task_queue.empty()
 
-    def get_info(self) -> GtCoreAgentInfo:
-        return GtCoreAgentInfo(
+    def get_info(self) -> GtCoreMemberInfo:
+        return GtCoreMemberInfo(
             name=self.name,
             template_name=self.template_name or None,
             model=self.model,
@@ -177,7 +177,7 @@ class TeamMember:
             llmApiUtil.OpenaiLLMApiRole.TOOL,
             llmApiUtil.OpenaiLLMApiRole.SYSTEM,
         ), f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
-        ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=self._history, tools=tools or None)
+        ctx = GtCoreMemberDialogContext(system_prompt=self.system_prompt, messages=self._history, tools=tools or None)
         response: llmApiUtil.OpenAIResponse = await llmService.infer(self.model, ctx)
         assistant_message: llmApiUtil.OpenAIMessage = response.choices[0].message
         await self.append_history_message(assistant_message)

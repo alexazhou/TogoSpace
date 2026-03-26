@@ -91,7 +91,7 @@ class TestTeamController(_ApiServiceCase):
 
     async def test_team_filtered_agents_and_rooms(self):
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/agents/list.json?team_name=e2e") as resp:
+            async with client.get(f"{self.backend_base_url}/members/list.json?team_name=e2e") as resp:
                 assert resp.status == 200
                 agents_data = await resp.json()
 
@@ -110,7 +110,7 @@ class TestTeamController(_ApiServiceCase):
         team_id = await self._get_team_id("e2e")
 
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/teams/{team_id}/agents/alice.json") as resp:
+            async with client.get(f"{self.backend_base_url}/teams/{team_id}/members/alice.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
 

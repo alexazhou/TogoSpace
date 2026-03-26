@@ -1,7 +1,7 @@
-from .gtCoreChatModel import GtCoreChatMessage, GtCoreAgentDialogContext
+from .gtCoreChatModel import GtCoreChatMessage, GtCoreMemberDialogContext
 from .gtCoreAgentEvent import GtCoreRoomMessageEvent
 from .gtCoreWebModel import (
-    GtCoreAgentInfo,
+    GtCoreMemberInfo,
     GtCoreRoomInfo,
     GtCoreMessageInfo,
     GtCoreRoomMessagesResponse,
@@ -10,9 +10,9 @@ from .gtCoreWebModel import (
 
 __all__ = [
     "GtCoreChatMessage",
-    "GtCoreAgentDialogContext",
+    "GtCoreMemberDialogContext",
     "GtCoreRoomMessageEvent",
-    "GtCoreAgentInfo",
+    "GtCoreMemberInfo",
     "GtCoreRoomInfo",
     "GtCoreMessageInfo",
     "GtCoreRoomMessagesResponse",
