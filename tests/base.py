@@ -294,7 +294,7 @@ class ServiceTestCase:
         """删除测试 DB 文件（含后端子进程使用的 DB）。"""
         paths = [cls.TEST_DB_PATH]
         setting = configUtil.load_setting_config(cls._backend_config_dir)
-        path = setting.persistence.get("db_path") or configUtil.get_db_path()
+        path = setting.persistence.db_path
         if path:
             paths.append(path if os.path.isabs(path) else os.path.abspath(os.path.join(_SRC_DIR, path)))
         for p in paths:
@@ -306,7 +306,7 @@ class ServiceTestCase:
         """为测试预创建数据库 schema，避免依赖 ormService 启动时自动建表。"""
         paths = [cls.TEST_DB_PATH]
         setting = configUtil.load_setting_config(cls._backend_config_dir)
-        path = setting.persistence.get("db_path") or configUtil.get_db_path()
+        path = setting.persistence.db_path
         if path:
             paths.append(path if os.path.isabs(path) else os.path.abspath(os.path.join(_SRC_DIR, path)))
 
