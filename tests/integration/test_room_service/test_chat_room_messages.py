@@ -94,4 +94,4 @@ class TestChatRoomMessages(ServiceTestCase):
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         log = room.format_log()
         assert f"=== test_room@{TEAM} 聊天记录 ===" in log
-        assert "system" in log
+        assert "SYSTEM" in log

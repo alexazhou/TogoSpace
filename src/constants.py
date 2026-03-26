@@ -36,6 +36,7 @@ class RoomType(EnhanceEnum):
 
 
 class SpecialAgent(EnhanceEnum):
+    SYSTEM = auto()    # 系统消息发送者
     OPERATOR = auto()  # 人类操作者虚拟身份
 
 

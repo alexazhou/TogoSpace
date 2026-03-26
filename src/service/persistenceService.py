@@ -4,6 +4,7 @@ import asyncio
 import logging
 from datetime import datetime
 
+from constants import SpecialAgent
 from dal.db import gtMemberHistoryManager, gtRoomMessageManager, gtRoomManager
 from model.coreModel.gtCoreChatModel import GtCoreChatMessage
 from model.dbModel.gtMemberHistory import GtMemberHistory
@@ -69,14 +70,14 @@ async def restore_runtime_state() -> None:
         if room_msg_rows:
             restored_messages = [
                 GtCoreChatMessage(
-                    sender_name=room._member_name_map.get(row.member_id, "system"),
+                    sender_name=room._member_name_map.get(row.member_id, SpecialAgent.SYSTEM.name),
                     content=row.content,
                     send_time=datetime.fromisoformat(row.send_time),
                 )
                 for row in room_msg_rows
             ]
         elif not room.messages:
-            await room.add_message("system", room.build_initial_system_message())
+            await room.add_message(SpecialAgent.SYSTEM.name, room.build_initial_system_message())
 
         if restored_messages is not None or member_read_index is not None:
             room.inject_runtime_state(

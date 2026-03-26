@@ -6,6 +6,7 @@ import logging
 import operator
 from zoneinfo import ZoneInfo
 
+from constants import SpecialAgent
 from service.roomService import ChatContext
 import service.roomService as roomService
 
@@ -100,7 +101,7 @@ def get_agent_list(_context: ChatContext = None) -> dict:
         return {"success": True, "agents": []}
     agents = list(dict.fromkeys(
         m.sender_name for m in _context.chat_room.messages
-        if m.sender_name != "system"
+        if m.sender_name != SpecialAgent.SYSTEM.name
     ))
     return {"success": True, "agents": agents}
 

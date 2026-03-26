@@ -6,6 +6,7 @@ import pytest
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
+from constants import SpecialAgent
 from dal.db import gtTeamManager
 from service.roomService import ChatRoom
 from util.configTypes import TeamConfig
@@ -85,5 +86,5 @@ class TestRoomRegistry(ServiceTestCase):
 
         room = roomService.get_room_by_key(f"boot_room@{TEAM}")
         assert len(room.messages) == 1
-        assert room.messages[0].sender_name == "system"
+        assert room.messages[0].sender_name == SpecialAgent.SYSTEM.name
         assert "boot topic" in room.messages[0].content
