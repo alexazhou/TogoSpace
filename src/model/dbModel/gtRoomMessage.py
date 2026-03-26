@@ -7,7 +7,7 @@ from .base import DbModelBase
 
 class GtRoomMessage(DbModelBase):
     room_id: int = peewee.IntegerField(null=False)
-    agent_name: str = peewee.CharField(null=False)
+    member_id: int = peewee.IntegerField(null=False, default=0)
     content: str = peewee.TextField(null=False)
     send_time: str = peewee.CharField(null=False)
 

@@ -11,7 +11,7 @@ from model.coreModel.gtCoreWebModel import GtCoreMemberInfo
 from model.dbModel.gtMemberHistory import GtMemberHistory
 from service.agentService.driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
-from dal.db import gtAgentManager
+from dal.db import gtAgentManager, gtTeamMemberManager
 from service.roomService import ChatRoom, ChatContext
 from constants import SpecialAgent, MessageBusTopic, MemberStatus
 
@@ -64,6 +64,7 @@ class TeamMember:
         self.team_workdir: str = team_workdir
         self.workspace_root: str = workspace_root
 
+        self._member_id: int = 0
         self._history: list[llmApiUtil.OpenAIMessage] = []
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
         self.status: MemberStatus = MemberStatus.IDLE
@@ -73,6 +74,10 @@ class TeamMember:
     @property
     def team_id(self) -> int:
         return _team_ids.get(self.team_name, 0)
+
+    @property
+    def member_id(self) -> int:
+        return self._member_id
 
     @property
     def key(self) -> str:
@@ -208,8 +213,7 @@ class TeamMember:
     def dump_history_messages(self) -> List[GtMemberHistory]:
         return [
             GtMemberHistory(
-                team_id=self.team_id,
-                member_name=self.name,
+                member_id=self.member_id,
                 seq=idx,
                 message_json=msg.model_dump_json(exclude_none=True),
             )
@@ -226,8 +230,7 @@ class TeamMember:
     async def _persist_history_message(self, message: llmApiUtil.OpenAIMessage) -> None:
         seq: int = len(self._history) - 1
         item = GtMemberHistory(
-            team_id=self.team_id,
-            member_name=self.name,
+            member_id=self.member_id,
             seq=seq,
             message_json=message.model_dump_json(exclude_none=True),
         )
@@ -288,7 +291,10 @@ async def create_team_members(teams_config: list[TeamConfig], workspace_root: st
             )
             await member.startup()
             try:
-                await gtAgentManager.upsert_agent(member.team_id, member.name, member.model, member.template_name)
+                team_member_row = await gtTeamMemberManager.get_member(member.team_id, member.name)
+                if team_member_row:
+                    member._member_id = team_member_row.id
+                await gtAgentManager.upsert_agent(member.template_name, member.model)
             except Exception as e:
                 logger.warning(f"写入成员数据失败: member={member.key}, error={e}")
 

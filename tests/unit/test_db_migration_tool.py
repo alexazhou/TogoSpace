@@ -67,6 +67,39 @@ def test_migrate_database_upgrades_legacy_schema(tmp_path: Path) -> None:
             CREATE UNIQUE INDEX IF NOT EXISTS agent_histories_team_agent_seq
             ON agent_histories(team_id, agent_name, seq);
 
+            CREATE TABLE team_members (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                agent_name TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE rooms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                initial_topic TEXT,
+                max_turns INTEGER NOT NULL DEFAULT 100,
+                agent_read_index TEXT,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE room_members (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id INTEGER NOT NULL,
+                agent_name TEXT NOT NULL
+            );
+
+            CREATE TABLE room_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id INTEGER NOT NULL,
+                agent_name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                send_time TEXT NOT NULL
+            );
+
             CREATE TABLE _migrations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -82,7 +115,7 @@ def test_migrate_database_upgrades_legacy_schema(tmp_path: Path) -> None:
 
     applied_now = db.migrate_database(db_path)
 
-    assert applied_now == ["0002.sql", "0003.sql", "0004.sql", "0005.sql", "0006.sql"]
+    assert applied_now == ["0002.sql", "0003.sql", "0004.sql", "0005.sql", "0006.sql", "0007.sql", "0008.sql", "0009.sql"]
 
     conn = sqlite3.connect(db_path)
     try:
