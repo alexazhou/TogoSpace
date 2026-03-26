@@ -6,8 +6,8 @@ from util.configTypes import TeamConfig, TeamRoomConfig
 from service import messageBus
 from service.messageBus import Message
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
-from service import agentService, roomService as chat_room
-from service.agentService import TeamMember
+from service import memberService, roomService as chat_room
+from service.memberService import TeamMember
 from dal.db import gtRoomManager
 from constants import MessageBusTopic, SpecialAgent, RoomState
 
@@ -70,7 +70,7 @@ def _on_member_turn(msg: Message) -> None:
         return
 
     try:
-        member: TeamMember = agentService.get_team_member(team_name, member_name)
+        member: TeamMember = memberService.get_team_member(team_name, member_name)
     except KeyError:
         logger.error(f"成员不存在: member_name={member_name}, team_name={team_name}")
         return

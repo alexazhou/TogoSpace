@@ -11,6 +11,7 @@ from util.configTypes import AgentTemplate, TeamConfig
 from service import (
     roomService,
     agentService,
+    memberService,
     funcToolService,
     messageBus,
     schedulerService as scheduler,
@@ -33,7 +34,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         messageBus.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
-        await agentService.shutdown()
+        await memberService.shutdown()
         roomService.shutdown()
 
     def setup_method(self):
@@ -58,7 +59,8 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await persistenceService.startup()
 
         agentService.load_agent_config(agents_config)
-        await agentService.create_team_members([team_config])
+        await memberService.startup()
+        await memberService.create_team_members([team_config])
         await roomService.create_rooms([team_config])
         await persistenceService.restore_runtime_state()
         await scheduler.startup([team_config])
@@ -111,21 +113,21 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
         assert any(m.content == "from alice" for m in room.messages)
         assert any(m.content == "from bob" for m in room.messages)
-        assert agentService.get_team_member(TEAM, "alice")._history
+        assert memberService.get_team_member(TEAM, "alice")._history
 
         # 手动清理服务以模拟重启
         scheduler.shutdown()
         funcToolService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
-        await agentService.shutdown()
+        await memberService.shutdown()
         roomService.shutdown()
 
         # 重启并恢复状态
         await self._bootstrap()
 
         restored_room = roomService.get_room_by_key(f"general@{TEAM}")
-        restored_alice = agentService.get_team_member(TEAM, "alice")
+        restored_alice = memberService.get_team_member(TEAM, "alice")
 
         assert any(m.content == "from alice" for m in restored_room.messages)
         assert any(m.content == "from bob" for m in restored_room.messages)

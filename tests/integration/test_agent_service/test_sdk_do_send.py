@@ -5,7 +5,7 @@ import sys
 import pytest
 
 from service import roomService, agentService, ormService, persistenceService
-from service.agentService import TeamMember
+from service.memberService import TeamMember
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
 

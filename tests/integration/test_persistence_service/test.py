@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from service import agentService, ormService, persistenceService, roomService, messageBus
-from service.agentService import TeamMember
+from service import agentService, memberService, ormService, persistenceService, roomService, messageBus
+from service.memberService import TeamMember
 from util.llmApiUtil import OpenAIMessage, OpenaiLLMApiRole
 from util.configTypes import AgentTemplate, TeamConfig, TeamMemberConfig, TeamRoomConfig
 from ...base import ServiceTestCase
@@ -89,12 +89,12 @@ class TestRestoreAgentHistory(ServiceTestCase):
         cls.db_path = Path(cls.TEST_DB_PATH)
         await persistenceService.shutdown()
         await ormService.shutdown()
-        await agentService.shutdown()
+        await memberService.shutdown()
         roomService.shutdown()
         await messageBus.startup()
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
-        await agentService.startup()
+        await memberService.startup()
 
         agent = TeamMember("alice", TEAM, "sys", "test-model")
         agent._history = [
@@ -107,26 +107,27 @@ class TestRestoreAgentHistory(ServiceTestCase):
         # 模拟进程重启
         await persistenceService.shutdown()
         await ormService.shutdown()
-        await agentService.shutdown()
+        await memberService.shutdown()
 
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await agentService.startup()
         agentService.load_agent_config([AgentTemplate(name="alice", system_prompt="sys")])
-        await agentService.create_team_members([
+        await memberService.startup()
+        await memberService.create_team_members([
             TeamConfig(
                 name=TEAM,
                 members=[TeamMemberConfig(name="alice", agent="alice")],
                 preset_rooms=[],
             )
         ])
-        cls.fresh_agent = agentService.get_team_member(TEAM, "alice")
+        cls.fresh_agent = memberService.get_team_member(TEAM, "alice")
         await persistenceService.restore_runtime_state()
 
     @classmethod
     async def async_teardown_class(cls):
         messageBus.shutdown()
-        await agentService.shutdown()
+        await memberService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
 

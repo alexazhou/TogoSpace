@@ -1,7 +1,8 @@
 from typing import List
 
+import service.memberService as memberService
 import service.agentService as agentService
-from service.agentService import TeamMember
+from service.memberService import TeamMember
 from model.coreModel.gtCoreWebModel import GtCoreMemberInfo
 from controller.baseController import BaseHandler
 from constants import MemberStatus
@@ -13,7 +14,7 @@ class MemberListHandler(BaseHandler):
     async def get(self):
         team_name = self.get_query_argument("team_name", None)
         if team_name:
-            members: List[TeamMember] = agentService.get_all_team_members()
+            members: List[TeamMember] = memberService.get_all_team_members()
             members = [m for m in members if m.team_name == team_name]
             data = [m.get_info().model_dump(mode="json") for m in members]
         else:
@@ -38,7 +39,7 @@ class MemberDetailHandler(BaseHandler):
         if team is None:
             return
 
-        member = agentService.find_team_member(team.name, member_name)
+        member = memberService.find_team_member(team.name, member_name)
         assertUtil.assertNotNull(
             member,
             error_message=f"Member '{member_name}' not found in team '{team.name}'",
