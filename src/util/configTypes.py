@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Any, List, Optional
 import os
 
@@ -50,12 +51,13 @@ class AgentConfig(BaseModel):
     prompt_file: str = ""
     model: Optional[str] = None
     use_agent_sdk: bool = False
-    allowed_tools: List[str] = Field(default_factory=list, alias="allowed_Tools")
+    allowed_tools: List[str] = Field(default_factory=list)
     driver: dict[str, Any] = Field(default_factory=dict)
     runtime: dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        populate_by_name = True
+
+class LlmServiceType(str, Enum):
+    OPENAI_COMPATIBLE = "openai-compatible"
 
 
 class LlmServiceConfig(BaseModel):
@@ -64,14 +66,14 @@ class LlmServiceConfig(BaseModel):
     name: str
     base_url: str
     api_key: str
-    type: str
+    type: LlmServiceType
     model: str | None = None
     enable: bool = True
 
 
 class PersistenceConfig(BaseModel):
     enabled: bool = False
-    db_path: str | None = Field(default_factory=_default_persistence_db_path)
+    db_path: str = Field(default_factory=_default_persistence_db_path)
 
     def model_post_init(self, __context: Any) -> None:
         value = self.db_path
@@ -98,10 +100,10 @@ class SettingConfig(BaseModel):
             raise ValueError("persistence 不允许为 null")
         if self.workspace_root is None:
             raise ValueError("workspace_root 不允许为 null")
-        _ = self.curren_llm_service
+        _ = self.current_llm_service
 
     @property
-    def curren_llm_service(self) -> LlmServiceConfig:
+    def current_llm_service(self) -> LlmServiceConfig:
         enabled_services = [s for s in self.llm_services if s.enable]
         if not enabled_services:
             raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
@@ -124,4 +126,4 @@ class AppConfig(BaseModel):
 
 
 __all__ = ["TeamMemberConfig", "TeamRoomConfig", "TeamConfig", "AgentConfig",
-           "LlmServiceConfig", "PersistenceConfig", "AppConfig", "SettingConfig"]
+           "LlmServiceType", "LlmServiceConfig", "PersistenceConfig", "AppConfig", "SettingConfig"]

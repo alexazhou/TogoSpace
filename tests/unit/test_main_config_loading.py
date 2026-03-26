@@ -5,7 +5,13 @@ import builtins
 
 import pytest
 from util import configUtil
-from util.configTypes import AppConfig, LlmServiceConfig, PersistenceConfig, SettingConfig
+from util.configTypes import (
+    AppConfig,
+    LlmServiceConfig,
+    LlmServiceType,
+    PersistenceConfig,
+    SettingConfig,
+)
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
@@ -31,7 +37,7 @@ def test_runtime_configs_load_from_config_dir(tmp_path):
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
-    llm_cfg = app_config.setting.curren_llm_service
+    llm_cfg = app_config.setting.current_llm_service
 
     assert isinstance(app_config, AppConfig)
     assert llm_cfg.name == "mock"
@@ -82,7 +88,7 @@ def test_runtime_configs_allow_llm_only_setting(tmp_path):
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
-    llm_cfg = app_config.setting.curren_llm_service
+    llm_cfg = app_config.setting.current_llm_service
 
     assert llm_cfg.name == "mock"
     assert llm_cfg.base_url == "http://127.0.0.1:7777/v1/chat/completions"
@@ -123,10 +129,11 @@ def test_load_returns_appconfig_with_typed_fields(tmp_path):
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
-    llm_cfg = app_config.setting.curren_llm_service
+    llm_cfg = app_config.setting.current_llm_service
 
     assert isinstance(app_config, AppConfig)
     assert isinstance(llm_cfg, LlmServiceConfig)
+    assert llm_cfg.type == LlmServiceType.OPENAI_COMPATIBLE
     assert isinstance(app_config.setting, SettingConfig)
     assert isinstance(app_config.setting.persistence, PersistenceConfig)
     assert llm_cfg.model == "gpt-4"

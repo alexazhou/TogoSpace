@@ -67,7 +67,7 @@ async def main(config_dir: str = None, port: int = 8080):
         config_dir = os.path.abspath(config_dir)
 
     app_config: AppConfig = configUtil.load(config_dir)
-    llm_config = app_config.setting.curren_llm_service
+    llm_config = app_config.setting.current_llm_service
 
     llmApiUtil.init()
     await messageBus.startup()
