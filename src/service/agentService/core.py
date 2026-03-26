@@ -255,7 +255,7 @@ def load_agent_config(agents_config: List[AgentConfig]) -> None:
 async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
     base_prompt_tmpl = configUtil.load_prompt("src/prompts/GroupChat.md")
     default_model = llmService.get_default_model()
-    resolved_workspace_root = workspace_root or configUtil.load_workspace_root()
+    resolved_workspace_root = workspace_root or configUtil.load_setting_config().workspace_root
 
     for team_config in teams_config:
         team_name = team_config.name

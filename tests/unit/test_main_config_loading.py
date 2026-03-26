@@ -152,6 +152,87 @@ def test_workspace_root_defaults_to_repo_root_when_missing(tmp_path):
     assert os.path.isabs(app_config.workspace_root)
 
 
+def test_workspace_root_defaults_to_repo_root_when_null(tmp_path):
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "default_llm_server": "svc",
+        "llm_services": [
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+            }
+        ],
+        "workspace_root": None,
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path))
+    assert os.path.isabs(app_config.workspace_root)
+
+
+def test_workspace_root_defaults_to_repo_root_when_blank(tmp_path):
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "default_llm_server": "svc",
+        "llm_services": [
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+            }
+        ],
+        "workspace_root": "   ",
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path))
+    assert os.path.isabs(app_config.workspace_root)
+
+
+def test_persistence_defaults_when_null(tmp_path):
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "default_llm_server": "svc",
+        "llm_services": [
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+            }
+        ],
+        "persistence": None,
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path))
+    assert app_config.persistence.enabled is False
+    assert app_config.persistence.db_path == configUtil.get_db_path()
+
+
+def test_persistence_db_path_defaults_when_blank(tmp_path):
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "default_llm_server": "svc",
+        "llm_services": [
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+            }
+        ],
+        "persistence": {
+            "enabled": True,
+            "db_path": "   ",
+        },
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path))
+    assert app_config.persistence.enabled is True
+    assert app_config.persistence.db_path == configUtil.get_db_path()
+
+
 def test_resolve_team_workdir_prefers_explicit_working_directory():
     resolved = resolve_team_workdir(
         team_name="default",

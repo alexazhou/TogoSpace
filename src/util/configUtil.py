@@ -3,7 +3,13 @@ import json
 import os
 from typing import Any, List
 
-from util.configTypes import AgentConfig, AppConfig, LlmServiceConfig, PersistenceConfig, SettingConfig, TeamConfig
+from util.configTypes import (
+    AgentConfig,
+    AppConfig,
+    LlmServiceConfig,
+    SettingConfig,
+    TeamConfig,
+)
 
 
 def _get_config_dir(config_dir: str | None) -> str:
@@ -12,20 +18,8 @@ def _get_config_dir(config_dir: str | None) -> str:
     return os.path.join(os.path.dirname(__file__), "../../config")
 
 
-def _default_workspace_root() -> str:
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-
-
-def _is_test_env() -> bool:
-    if os.environ.get("TEAMAGENT_ENV") == "test":
-        return True
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        return True
-    return False
-
-
 def get_db_path() -> str:
-    return "../test_data/data.db" if _is_test_env() else "../data/data.db"
+    return SettingConfig().persistence.db_path
 
 
 def load_json_objects_from_dir(dir_path: str) -> list[dict[str, Any]]:
@@ -76,15 +70,6 @@ def load_setting_config(config_dir: str = None) -> SettingConfig:
     return SettingConfig.model_validate(cfg)
 
 
-def load_workspace_root(config_dir: str = None, setting: SettingConfig | None = None) -> str:
-    """返回工作区根目录。"""
-    setting = setting or load_setting_config(config_dir)
-    workspace_root = setting.workspace_root
-    if workspace_root:
-        return workspace_root
-    return _default_workspace_root()
-
-
 def load(config_dir: str = None) -> AppConfig:
     """一次性加载所有配置，返回有类型的 AppConfig 对象。"""
     agents = load_agents(config_dir)
@@ -105,16 +90,10 @@ def load(config_dir: str = None) -> AppConfig:
     selected = services[active_key]
     llm_service = LlmServiceConfig.model_validate(selected)
 
-    persistence = PersistenceConfig(
-        enabled=setting.persistence.get("enabled", False),
-        db_path=setting.persistence.get("db_path", get_db_path()),
-    )
-    workspace_root = load_workspace_root(config_dir, setting)
-
     return AppConfig(
         agents=agents,
         teams=teams,
         llm_service=llm_service,
-        persistence=persistence,
-        workspace_root=workspace_root,
+        persistence=setting.persistence,
+        workspace_root=setting.workspace_root,
     )
