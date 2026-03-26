@@ -6,7 +6,7 @@ from typing import Any, List
 from util.configTypes import (
     AgentConfig,
     AppConfig,
-    LlmServiceConfig,
+    PersistenceConfig,
     SettingConfig,
     TeamConfig,
 )
@@ -19,7 +19,7 @@ def _get_config_dir(config_dir: str | None) -> str:
 
 
 def get_db_path() -> str:
-    return SettingConfig().persistence.db_path
+    return PersistenceConfig().db_path
 
 
 def load_json_objects_from_dir(dir_path: str) -> list[dict[str, Any]]:
@@ -77,22 +77,8 @@ def load(config_dir: str = None) -> AppConfig:
 
     setting = load_setting_config(config_dir)
 
-    enabled_services = [s for s in setting.llm_services if s.get("enable", True)]
-    if not enabled_services:
-        raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
-
-    active_key = setting.default_llm_server or enabled_services[0].get("name")
-    services = {s["name"]: s for s in enabled_services if s.get("name")}
-
-    if active_key not in services:
-        raise ValueError(f"默认 LLM 服务 '{active_key}' 未在 llm_services 中定义或已禁用")
-
-    selected = services[active_key]
-    llm_service = LlmServiceConfig.model_validate(selected)
-
     return AppConfig(
         agents=agents,
         teams=teams,
-        llm_service=llm_service,
         setting=setting,
     )

@@ -67,13 +67,14 @@ async def main(config_dir: str = None, port: int = 8080):
         config_dir = os.path.abspath(config_dir)
 
     app_config: AppConfig = configUtil.load(config_dir)
+    llm_config = app_config.setting.curren_llm_service
 
     llmApiUtil.init()
     await messageBus.startup()
     await llmService.startup(
-        api_key=app_config.llm_service.api_key,
-        base_url=app_config.llm_service.base_url,
-        model=app_config.llm_service.model,
+        api_key=llm_config.api_key,
+        base_url=llm_config.base_url,
+        model=llm_config.model,
     )
     await funcToolService.startup()
 
