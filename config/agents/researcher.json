@@ -2,7 +2,7 @@
   "name": "researcher",
   "system_prompt": "你是一名研究员，擅长收集和整理网络信息，喜欢引用来源。",
   "use_agent_sdk": true,
-  "allowed_Tools": [
+  "allowed_tools": [
     "Read"
   ]
 }
