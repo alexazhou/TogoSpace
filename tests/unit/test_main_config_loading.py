@@ -5,7 +5,7 @@ import builtins
 
 import pytest
 from util import configUtil
-from util.configTypes import AppConfig, LlmServiceConfig, PersistenceConfig, resolve_team_workdir
+from util.configTypes import AppConfig, LlmServiceConfig, PersistenceConfig, SettingConfig, resolve_team_workdir
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
@@ -35,9 +35,9 @@ def test_runtime_configs_load_from_config_dir(tmp_path):
     assert isinstance(app_config, AppConfig)
     assert app_config.llm_service.name == "mock"
     assert app_config.llm_service.base_url == "http://127.0.0.1:9999/v1/chat/completions"
-    assert app_config.persistence.enabled is True
-    assert app_config.persistence.db_path == "./runtime/test.db"
-    assert app_config.workspace_root == "/tmp/workspaces"
+    assert app_config.setting.persistence.enabled is True
+    assert app_config.setting.persistence.db_path == "./runtime/test.db"
+    assert app_config.setting.workspace_root == "/tmp/workspaces"
 
 
 def test_runtime_configs_skip_disabled_llm_service(tmp_path):
@@ -86,8 +86,8 @@ def test_runtime_configs_allow_llm_only_setting(tmp_path):
 
     assert app_config.llm_service.name == "mock"
     assert app_config.llm_service.base_url == "http://127.0.0.1:7777/v1/chat/completions"
-    assert app_config.persistence.enabled is False
-    assert app_config.persistence.db_path == "../test_data/data.db"
+    assert app_config.setting.persistence.enabled is False
+    assert app_config.setting.persistence.db_path == "../test_data/data.db"
 
 
 def test_default_db_path_in_non_test_env(monkeypatch):
@@ -126,12 +126,13 @@ def test_load_returns_appconfig_with_typed_fields(tmp_path):
 
     assert isinstance(app_config, AppConfig)
     assert isinstance(app_config.llm_service, LlmServiceConfig)
-    assert isinstance(app_config.persistence, PersistenceConfig)
+    assert isinstance(app_config.setting, SettingConfig)
+    assert isinstance(app_config.setting.persistence, PersistenceConfig)
     assert app_config.llm_service.model == "gpt-4"
     assert app_config.llm_service.api_key == "key-123"
     assert app_config.agents == []
     assert app_config.teams == []
-    assert app_config.workspace_root
+    assert app_config.setting.workspace_root
 
 
 def test_workspace_root_defaults_to_repo_root_when_missing(tmp_path):
@@ -149,7 +150,7 @@ def test_workspace_root_defaults_to_repo_root_when_missing(tmp_path):
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
-    assert os.path.isabs(app_config.workspace_root)
+    assert os.path.isabs(app_config.setting.workspace_root)
 
 
 def test_workspace_root_defaults_to_repo_root_when_null(tmp_path):
@@ -168,7 +169,7 @@ def test_workspace_root_defaults_to_repo_root_when_null(tmp_path):
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
-    assert os.path.isabs(app_config.workspace_root)
+    assert os.path.isabs(app_config.setting.workspace_root)
 
 
 def test_workspace_root_defaults_to_repo_root_when_blank(tmp_path):
@@ -187,7 +188,7 @@ def test_workspace_root_defaults_to_repo_root_when_blank(tmp_path):
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
-    assert os.path.isabs(app_config.workspace_root)
+    assert os.path.isabs(app_config.setting.workspace_root)
 
 
 def test_persistence_defaults_when_null(tmp_path):
@@ -206,8 +207,8 @@ def test_persistence_defaults_when_null(tmp_path):
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
-    assert app_config.persistence.enabled is False
-    assert app_config.persistence.db_path == configUtil.get_db_path()
+    assert app_config.setting.persistence.enabled is False
+    assert app_config.setting.persistence.db_path == configUtil.get_db_path()
 
 
 def test_persistence_db_path_defaults_when_blank(tmp_path):
@@ -229,8 +230,8 @@ def test_persistence_db_path_defaults_when_blank(tmp_path):
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
-    assert app_config.persistence.enabled is True
-    assert app_config.persistence.db_path == configUtil.get_db_path()
+    assert app_config.setting.persistence.enabled is True
+    assert app_config.setting.persistence.db_path == configUtil.get_db_path()
 
 
 def test_resolve_team_workdir_prefers_explicit_working_directory():

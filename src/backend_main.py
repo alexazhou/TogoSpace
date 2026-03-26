@@ -77,7 +77,7 @@ async def main(config_dir: str = None, port: int = 8080):
     )
     await funcToolService.startup()
 
-    await ormService.startup(app_config.persistence.db_path)
+    await ormService.startup(app_config.setting.persistence.db_path)
     await persistenceService.startup()
 
     # 从 teamService 加载 Team 配置（会自动从 JSON 导入到数据库）
@@ -88,7 +88,7 @@ async def main(config_dir: str = None, port: int = 8080):
 
     await agentService.startup()
     agentService.load_agent_config(app_config.agents)
-    await agentService.create_team_agents(teams_config, workspace_root=app_config.workspace_root)
+    await agentService.create_team_agents(teams_config, workspace_root=app_config.setting.workspace_root)
 
     await roomService.startup()
     await schedulerService.startup(teams_config=teams_config)
