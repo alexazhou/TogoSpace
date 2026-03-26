@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pytspclient import TSPClient, TSPException
 
 from util import llmApiUtil
 from exception import TeamAgentException
@@ -191,7 +192,7 @@ async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host):
     assert "JSON 解析失败" in res["message"]
     
     # Case 2: TSP Exception
-    driver._client.tool.side_effect = TeamAgentException("tsp error", "tsp/code")
+    driver._client.tool.side_effect = TSPException("tsp/code", "tsp error")
     res = await driver._execute_tsp_tool("tool", "{}")
     assert res["code"] == "tsp/code"
     assert res["message"] == "tsp error"
@@ -203,15 +204,14 @@ async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host):
 
 @pytest.mark.asyncio
 async def test_tsp_client_fail_pending():
-    from service.agentService.driver.tspDriver import _TspStdioClient
-    client = _TspStdioClient(["mock"])
+    client = TSPClient(["mock"])
     
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
-    client._in_flight["req1"] = fut
+    client.in_flight["req1"] = fut
     
     client._fail_pending(RuntimeError("closed"))
     
     with pytest.raises(RuntimeError, match="closed"):
         await fut
-    assert len(client._in_flight) == 0
+    assert len(client.in_flight) == 0
