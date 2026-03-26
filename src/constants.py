@@ -20,6 +20,10 @@ class OpenaiLLMApiRole(EnhanceEnum):
     TOOL = "tool"
 
 
+class LlmServiceType(str, Enum):
+    OPENAI_COMPATIBLE = "openai-compatible"
+
+
 class MessageBusTopic(EnhanceEnum):
     ROOM_AGENT_TURN = auto()      # 轮到某 Agent 发言；payload: agent_name, room_id, room_name, team_name
     ROOM_MSG_ADDED = auto()       # 房间新增消息；payload: room_id, room_key, room_name, team_name, sender, content, time

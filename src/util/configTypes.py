@@ -1,8 +1,8 @@
-from enum import Enum
 from typing import Any, List, Optional
 import os
 
 from pydantic import BaseModel, ConfigDict, Field
+from constants import LlmServiceType
 
 
 def _default_workspace_root() -> str:
@@ -54,10 +54,6 @@ class AgentConfig(BaseModel):
     allowed_tools: List[str] = Field(default_factory=list)
     driver: dict[str, Any] = Field(default_factory=dict)
     runtime: dict[str, Any] = Field(default_factory=dict)
-
-
-class LlmServiceType(str, Enum):
-    OPENAI_COMPATIBLE = "openai-compatible"
 
 
 class LlmServiceConfig(BaseModel):
