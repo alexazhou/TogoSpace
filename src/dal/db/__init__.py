@@ -1,5 +1,6 @@
 from dal.db import (
     gtAgentManager,
+    gtMemberHistoryManager,
     gtTeamManager,
     gtTeamMemberManager,
     gtRoomManager,
@@ -9,6 +10,7 @@ from dal.db import (
 
 __all__ = [
     "gtAgentManager",
+    "gtMemberHistoryManager",
     "gtTeamManager",
     "gtTeamMemberManager",
     "gtRoomManager",

@@ -102,7 +102,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
             OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1"),
         ]
         for item in agent.dump_history_messages():
-            await persistenceService.append_agent_history_message(item)
+            await persistenceService.append_member_history_message(item)
 
         # 模拟进程重启
         await persistenceService.shutdown()

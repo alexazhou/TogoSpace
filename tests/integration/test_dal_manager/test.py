@@ -7,7 +7,7 @@ import service.ormService as ormService
 from constants import RoomType
 from dal.db import (
     gtAgentManager,
-    gtAgentHistoryManager,
+    gtMemberHistoryManager,
     gtRoomManager,
     gtRoomMemberManager,
     gtRoomMessageManager,
@@ -15,7 +15,7 @@ from dal.db import (
     gtTeamMemberManager,
 )
 from model.dbModel.gtAgent import GtAgent
-from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.gtMemberHistory import GtMemberHistory
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoomMember import GtRoomMember
 from model.dbModel.gtRoomMessage import GtRoomMessage
@@ -45,7 +45,7 @@ class TestDalManagers(ServiceTestCase):
         await GtTeamMember.delete().aio_execute()
         await GtRoomMember.delete().aio_execute()
         await GtRoomMessage.delete().aio_execute()
-        await GtAgentHistory.delete().aio_execute()
+        await GtMemberHistory.delete().aio_execute()
         await GtRoom.delete().aio_execute()
         await GtTeam.delete().aio_execute()
 
@@ -369,49 +369,49 @@ class TestDalManagers(ServiceTestCase):
         assert [m.content for m in after_m1] == ["world", "again"]
 
     # ------------------------------------------------------------------
-    # gtAgentHistoryManager
+    # gtMemberHistoryManager
     # ------------------------------------------------------------------
-    async def test_agent_history_manager_append_single_is_idempotent(self):
+    async def test_member_history_manager_append_single_is_idempotent(self):
         await self._reset_tables()
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="history_team"))
-        first = GtAgentHistory(
+        first = GtMemberHistory(
             team_id=team.id,
-            agent_name="alice",
+            member_name="alice",
             seq=1,
             message_json='{"content":"v1"}',
         )
-        saved_1 = await gtAgentHistoryManager.append_agent_history_message(first)
-        assert saved_1.agent_name == "alice"
+        saved_1 = await gtMemberHistoryManager.append_member_history_message(first)
+        assert saved_1.member_name == "alice"
         assert saved_1.seq == 1
         assert saved_1.message_json == '{"content":"v1"}'
 
-        duplicate = GtAgentHistory(
+        duplicate = GtMemberHistory(
             team_id=team.id,
-            agent_name="alice",
+            member_name="alice",
             seq=1,
             message_json='{"content":"v2"}',
         )
-        saved_2 = await gtAgentHistoryManager.append_agent_history_message(duplicate)
+        saved_2 = await gtMemberHistoryManager.append_member_history_message(duplicate)
         assert saved_2.id == saved_1.id
         assert saved_2.message_json == '{"content":"v1"}'
 
-    async def test_agent_history_manager_append_and_get_sorted(self):
+    async def test_member_history_manager_append_and_get_sorted(self):
         await self._reset_tables()
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="history_team_2"))
 
         items = [
-            GtAgentHistory(team_id=team.id, agent_name="alice", seq=2, message_json='{"content":"2"}'),
-            GtAgentHistory(team_id=team.id, agent_name="alice", seq=1, message_json='{"content":"1"}'),
-            GtAgentHistory(team_id=team.id, agent_name="bob", seq=1, message_json='{"content":"b1"}'),
+            GtMemberHistory(team_id=team.id, member_name="alice", seq=2, message_json='{"content":"2"}'),
+            GtMemberHistory(team_id=team.id, member_name="alice", seq=1, message_json='{"content":"1"}'),
+            GtMemberHistory(team_id=team.id, member_name="bob", seq=1, message_json='{"content":"b1"}'),
         ]
         for item in items:
-            await gtAgentHistoryManager.append_agent_history_message(item)
+            await gtMemberHistoryManager.append_member_history_message(item)
 
-        alice_history = await gtAgentHistoryManager.get_agent_history(team.id, "alice")
+        alice_history = await gtMemberHistoryManager.get_member_history(team.id, "alice")
         assert [h.seq for h in alice_history] == [1, 2]
         assert [h.message_json for h in alice_history] == ['{"content":"1"}', '{"content":"2"}']
 
-        bob_history = await gtAgentHistoryManager.get_agent_history(team.id, "bob")
+        bob_history = await gtMemberHistoryManager.get_member_history(team.id, "bob")
         assert [h.seq for h in bob_history] == [1]

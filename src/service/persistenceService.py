@@ -4,9 +4,9 @@ import asyncio
 import logging
 from datetime import datetime
 
-from dal.db import gtAgentHistoryManager, gtRoomMessageManager, gtRoomManager, gtTeamManager
+from dal.db import gtMemberHistoryManager, gtRoomMessageManager, gtRoomManager, gtTeamManager
 from model.coreModel.gtCoreChatModel import GtCoreChatMessage
-from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.gtMemberHistory import GtMemberHistory
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service import ormService
 
@@ -42,12 +42,12 @@ async def save_room_runtime(room_id: int, agent_read_index: dict[str, int]) -> N
     await gtRoomManager.save_room_state(room_id, agent_read_index)
 
 
-async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistory | None:
-    return await gtAgentHistoryManager.append_agent_history_message(message)
+async def append_member_history_message(message: GtMemberHistory) -> GtMemberHistory | None:
+    return await gtMemberHistoryManager.append_member_history_message(message)
 
 
-async def load_agent_history_message(team_id: int, agent_name: str) -> list[GtAgentHistory]:
-    return await gtAgentHistoryManager.get_agent_history(team_id, agent_name)
+async def load_member_history_message(team_id: int, member_name: str) -> list[GtMemberHistory]:
+    return await gtMemberHistoryManager.get_member_history(team_id, member_name)
 
 
 async def restore_runtime_state() -> None:
@@ -59,7 +59,7 @@ async def restore_runtime_state() -> None:
     for agent in agents:
         team = await gtTeamManager.get_team(agent.team_name)
         team_id = team.id if team is not None else agent.team_id
-        items: list[GtAgentHistory] = await load_agent_history_message(team_id, agent.name)
+        items: list[GtMemberHistory] = await load_member_history_message(team_id, agent.name)
         if items:
             agent.inject_history_messages(items)
 
