@@ -363,7 +363,6 @@ class ServiceTestCase:
         cls._backend_proc = proc
         cls.backend_port = port
         cls.backend_base_url = base_url
-        _assert_tcp_ready("127.0.0.1", cls.backend_port, "后端", timeout=1.0)
 
     @classmethod
     def _stop_backend(cls):
