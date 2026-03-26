@@ -12,7 +12,18 @@ from util import assertUtil, configUtil
 
 class MemberListHandler(BaseHandler):
     async def get(self):
+        team_id_raw = self.get_query_argument("team_id", None)
         team_name = self.get_query_argument("team_name", None)
+        if team_id_raw:
+            team = await gtTeamManager.get_team_by_id(int(team_id_raw))
+            assertUtil.assertNotNull(
+                team,
+                error_message=f"Team ID '{team_id_raw}' not found",
+                error_code="team_not_found",
+            )
+            if team is None:
+                return
+            team_name = team.name
         if team_name:
             members: List[TeamMember] = memberService.get_all_team_members()
             members = [m for m in members if m.team_name == team_name]
