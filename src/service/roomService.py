@@ -58,6 +58,10 @@ class ChatContext:
 class ChatRoom:
     """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
+    # 特殊成员 ID
+    SYSTEM_MEMBER_ID = -2
+    OPERATOR_MEMBER_ID = -1
+
     def __init__(self, team: GtTeam, room: GtRoom, members: List[GtTeamMember] | None = None):
         self.room_id: int = room.id  # 数据库主键 ID
         self.team_id: int = team.id  # 所属 Team 的数据库主键 ID
@@ -69,7 +73,8 @@ class ChatRoom:
         self._members: List[GtTeamMember] = members or []  # 房间参与者列表
 
         self._member_name_map: Dict[int, str] = {m.id: m.name for m in self._members}
-        self._member_name_map[0] = SpecialAgent.SYSTEM.name
+        self._member_name_map[self.SYSTEM_MEMBER_ID] = SpecialAgent.SYSTEM.name
+        self._member_name_map[self.OPERATOR_MEMBER_ID] = SpecialAgent.OPERATOR.name
         self._member_read_index: Dict[str, int] = {}  # 每个成员的消息读取进度（name 为 key）
         self._turn_index: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
         self._max_turns: int = room.max_turns  # 最大允许轮次
@@ -86,6 +91,12 @@ class ChatRoom:
 
     def get_member_id(self, name: str) -> int:
         """根据成员名称获取 member_id。"""
+        # 处理特殊成员
+        if SpecialAgent.value_of(name) == SpecialAgent.SYSTEM:
+            return self.SYSTEM_MEMBER_ID
+        if SpecialAgent.value_of(name) == SpecialAgent.OPERATOR:
+            return self.OPERATOR_MEMBER_ID
+        # 处理普通成员
         for m in self._members:
             if m.name == name:
                 return m.id
@@ -400,7 +411,7 @@ async def _create_room(
     member_map = {row.name: row for row in member_rows}
 
     # 根据传入的成员名称构建 GtTeamMember 列表
-    # 若成员在数据库中不存在，创建临时对象（id=0）
+    # 若成员在数据库中不存在，创建临时对象
     normalized_members = _normalize_members(members)
     room_members = []
     for name in normalized_members:
@@ -408,7 +419,9 @@ async def _create_room(
             room_members.append(member_map[name])
         else:
             # 为不在数据库中的成员创建临时对象
-            room_members.append(GtTeamMember(id=0, team_id=team_row.id, name=name, agent_name=name))
+            # OPERATOR 使用特殊 id=-1
+            member_id = ChatRoom.OPERATOR_MEMBER_ID if SpecialAgent.value_of(name) == SpecialAgent.OPERATOR else 0
+            room_members.append(GtTeamMember(id=member_id, team_id=team_row.id, name=name, agent_name=name))
 
     room = ChatRoom(team=team_row, room=room_row, members=room_members)
     room_key = room.key
