@@ -8,6 +8,8 @@ import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
 from constants import MessageBusTopic, RoomState
+from dal.db import gtTeamManager
+from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -24,6 +26,9 @@ class TestTurnScheduling(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+
+        # 预创建 team，_create_room 不再自动创建
+        await gtTeamManager.upsert_team(TeamConfig(name=TEAM, members=[], preset_rooms=[]))
 
     @classmethod
     async def async_teardown_class(cls):

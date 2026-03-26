@@ -6,6 +6,7 @@ import pytest
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
+from dal.db import gtTeamManager
 from service.roomService import ChatRoom
 from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
@@ -24,6 +25,9 @@ class TestRoomRegistry(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+
+        # 预创建 team，_create_room 不再自动创建
+        await gtTeamManager.upsert_team(TeamConfig(name=TEAM, members=[], preset_rooms=[]))
 
     @classmethod
     async def async_teardown_class(cls):
@@ -59,7 +63,6 @@ class TestRoomRegistry(ServiceTestCase):
         r2 = roomService.get_room_by_key(f"r2@{TEAM}")
         r3 = roomService.get_room_by_key(f"r3@{TEAM}")
 
-        # 无预建 team 时 team_id 为 0
         assert roomService.get_rooms_for_agent(r1.team_id, "alice") == [r1.room_id, r3.room_id]
         assert roomService.get_rooms_for_agent(r1.team_id, "bob") == [r2.room_id, r3.room_id]
 
