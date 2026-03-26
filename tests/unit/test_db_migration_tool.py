@@ -55,6 +55,18 @@ def test_migrate_database_upgrades_legacy_schema(tmp_path: Path) -> None:
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE agent_histories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_id INTEGER NOT NULL,
+                agent_name TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                message_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS agent_histories_team_agent_seq
+            ON agent_histories(team_id, agent_name, seq);
+
             CREATE TABLE _migrations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -70,7 +82,7 @@ def test_migrate_database_upgrades_legacy_schema(tmp_path: Path) -> None:
 
     applied_now = db.migrate_database(db_path)
 
-    assert applied_now == ["0002.sql", "0003.sql", "0004.sql", "0005.sql"]
+    assert applied_now == ["0002.sql", "0003.sql", "0004.sql", "0005.sql", "0006.sql"]
 
     conn = sqlite3.connect(db_path)
     try:

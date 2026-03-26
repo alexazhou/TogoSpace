@@ -8,7 +8,7 @@ from util.configTypes import TeamConfig, TeamRoomConfig
 from model.coreModel.gtCoreChatModel import GtCoreMemberDialogContext, GtCoreChatMessage
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from model.coreModel.gtCoreWebModel import GtCoreMemberInfo
-from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.gtMemberHistory import GtMemberHistory
 from service.agentService.driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
 from dal.db import gtAgentManager
@@ -205,18 +205,18 @@ class TeamMember:
 
         return None
 
-    def dump_history_messages(self) -> List[GtAgentHistory]:
+    def dump_history_messages(self) -> List[GtMemberHistory]:
         return [
-            GtAgentHistory(
+            GtMemberHistory(
                 team_id=self.team_id,
-                agent_name=self.name,
+                member_name=self.name,
                 seq=idx,
                 message_json=msg.model_dump_json(exclude_none=True),
             )
             for idx, msg in enumerate(self._history)
         ]
 
-    def inject_history_messages(self, items: List[GtAgentHistory]) -> None:
+    def inject_history_messages(self, items: List[GtMemberHistory]) -> None:
         self._history = [llmApiUtil.OpenAIMessage.model_validate_json(item.message_json) for item in items]
 
     async def append_history_message(self, message: llmApiUtil.OpenAIMessage) -> None:
@@ -225,13 +225,13 @@ class TeamMember:
 
     async def _persist_history_message(self, message: llmApiUtil.OpenAIMessage) -> None:
         seq: int = len(self._history) - 1
-        item = GtAgentHistory(
+        item = GtMemberHistory(
             team_id=self.team_id,
-            agent_name=self.name,
+            member_name=self.name,
             seq=seq,
             message_json=message.model_dump_json(exclude_none=True),
         )
-        await persistenceService.append_agent_history_message(item)
+        await persistenceService.append_member_history_message(item)
 
 
 async def startup() -> None:
