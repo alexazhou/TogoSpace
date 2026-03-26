@@ -14,6 +14,7 @@ import db as db_tool
 import service.messageBus as messageBus
 import service.roomService as roomService
 import service.agentService as agentService
+import service.memberService as memberService
 import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.persistenceService as persistenceService
@@ -123,7 +124,7 @@ class ServiceTestCase:
                 await ...
         """
         import unittest.mock as mock
-        target = "service.agentService.llmService.infer"
+        target = "service.memberService.core.llmService.infer"
         
         if responses is not None:
             # 将简化字典序列转换为 Mock 对象序列

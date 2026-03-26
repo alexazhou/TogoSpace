@@ -132,7 +132,7 @@ async def delete_team(name: str) -> None:
 
 async def hot_reload_team(name: str) -> None:
     """触发指定 Team 的热更新。"""
-    from service import roomService, schedulerService, agentService
+    from service import roomService, schedulerService, memberService
 
     # 重新加载配置
     team_configs = await reload_from_db()
@@ -146,7 +146,7 @@ async def hot_reload_team(name: str) -> None:
     schedulerService.stop_team(name)
 
     # 刷新成员实例，保证新增/变更成员可被调度命中
-    await agentService.reload_team_members(name, team_configs)
+    await memberService.reload_team_members(name, team_configs)
 
     # 刷新调度器配置
     schedulerService.refresh_team_config(name, team_configs)

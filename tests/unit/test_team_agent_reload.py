@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from service.agentService import core
+from service.memberService import core
 from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig
 
 

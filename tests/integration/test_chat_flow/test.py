@@ -9,6 +9,7 @@ import pytest
 
 import service.roomService as roomService
 import service.agentService as agentService
+import service.memberService as memberService
 import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.ormService as ormService
@@ -40,13 +41,14 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await funcToolService.startup()
         await agentService.startup()
         agentService.load_agent_config(agents_config)
-        await agentService.create_team_members([team_config])
+        await memberService.startup()
+        await memberService.create_team_members([team_config])
         await scheduler.startup([team_config])
 
     @classmethod
     async def async_teardown_class(cls):
         scheduler.shutdown()
-        await agentService.shutdown()
+        await memberService.shutdown()
         funcToolService.shutdown()
         roomService.shutdown()
         await persistenceService.shutdown()
@@ -85,7 +87,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = roomService.get_room_by_key(room_key)
         await room.add_message("system", "开始聊天")
 
-        alice = agentService.get_team_member(TEAM, "alice")
+        alice = memberService.get_team_member(TEAM, "alice")
         # 避免前序用例中断时残留 assistant 结尾历史，导致本用例 _infer 前置断言失败。
         if alice._history and alice._history[-1].role == OpenaiLLMApiRole.ASSISTANT:
             await alice.append_history_message(
@@ -119,7 +121,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = roomService.get_room_by_key(room_key)
         await room.add_message("system", "开始聊天")
 
-        alice = agentService.get_team_member(TEAM, "alice")
+        alice = memberService.get_team_member(TEAM, "alice")
         resps = [
             {"content": "我直接回复"},
             {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "最终消息"}}]},

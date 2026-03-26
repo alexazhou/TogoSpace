@@ -7,9 +7,9 @@ import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import service.roomService as roomService
-import service.agentService as agentService
+import service.memberService as memberService
 import service.schedulerService as scheduler
-from service.agentService import TeamMember
+from service.memberService import TeamMember
 from service.messageBus import Message
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from model.dbModel.gtRoom import GtRoom
@@ -79,7 +79,7 @@ class TestSchedulerRun(ServiceTestCase):
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
 
-        with patch("service.schedulerService.agentService.get_team_member", return_value=alice):
+        with patch("service.schedulerService.memberService.get_team_member", return_value=alice):
             run_task = asyncio.create_task(scheduler.run())
 
             msg = Message(
@@ -154,7 +154,7 @@ class TestSchedulerRun(ServiceTestCase):
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
 
-        with patch("service.schedulerService.agentService.get_team_member", return_value=alice):
+        with patch("service.schedulerService.memberService.get_team_member", return_value=alice):
             msg = Message(
                 topic=MessageBusTopic.ROOM_MEMBER_TURN,
                 payload={"member_name": "alice", "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
@@ -184,7 +184,7 @@ class TestSchedulerRun(ServiceTestCase):
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
 
-        with patch("service.schedulerService.agentService.get_team_member", return_value=alice):
+        with patch("service.schedulerService.memberService.get_team_member", return_value=alice):
             msg = Message(
                 topic=MessageBusTopic.ROOM_MEMBER_TURN,
                 payload={"member_name": "alice", "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
@@ -228,7 +228,7 @@ class TestSchedulerRun(ServiceTestCase):
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
 
-        with patch("service.schedulerService.agentService.get_team_member", return_value=alice):
+        with patch("service.schedulerService.memberService.get_team_member", return_value=alice):
             msg_r1 = Message(
                 topic=MessageBusTopic.ROOM_MEMBER_TURN,
                 payload={"member_name": "alice", "room_id": r1.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
@@ -262,7 +262,7 @@ class TestSchedulerRun(ServiceTestCase):
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
 
-        with patch("service.schedulerService.agentService.get_team_member", return_value=alice):
+        with patch("service.schedulerService.memberService.get_team_member", return_value=alice):
             msg = Message(
                 topic=MessageBusTopic.ROOM_MEMBER_TURN,
                 payload={"member_name": "alice", "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
@@ -296,7 +296,7 @@ class TestSchedulerRun(ServiceTestCase):
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
         
-        with patch("service.schedulerService.agentService.get_team_member", return_value=alice):
+        with patch("service.schedulerService.memberService.get_team_member", return_value=alice):
             scheduler.add_member(alice, 5)
             assert alice.key in scheduler._running
             
@@ -321,7 +321,7 @@ class TestSchedulerRun(ServiceTestCase):
             topic=MessageBusTopic.ROOM_MEMBER_TURN,
             payload={"member_name": "non-existent", "room_id": 1, "team_name": TEAM},
         )
-        with patch("service.schedulerService.agentService.get_team_member", side_effect=KeyError("not found")):
+        with patch("service.schedulerService.memberService.get_team_member", side_effect=KeyError("not found")):
             with caplog.at_level(logging.ERROR):
                 scheduler._on_member_turn(msg)
         assert "成员不存在" in caplog.text
@@ -333,7 +333,7 @@ class TestSchedulerRun(ServiceTestCase):
             topic=MessageBusTopic.ROOM_MEMBER_TURN,
             payload={"member_name": "error-agent", "room_id": 1, "team_name": TEAM},
         )
-        with patch("service.schedulerService.agentService.get_team_member", side_effect=RuntimeError("unexpected")):
+        with patch("service.schedulerService.memberService.get_team_member", side_effect=RuntimeError("unexpected")):
             with caplog.at_level(logging.ERROR):
                 scheduler._on_member_turn(msg)
         assert "获取成员失败" in caplog.text

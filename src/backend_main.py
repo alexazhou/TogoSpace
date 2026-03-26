@@ -13,6 +13,7 @@ from service import (
     messageBus,
     schedulerService,
     agentService,
+    memberService,
     roomService,
     llmService,
     funcToolService,
@@ -79,12 +80,13 @@ async def main(config_dir: str = None, port: int = 8080):
     await teamService.startup()
     teams_config = teamService.get_teams()
 
-    # 加载 team_id 映射
-    await agentService.load_team_ids(teams_config)
-
     await agentService.startup()
     agentService.load_agent_config()
-    await agentService.create_team_members(teams_config, workspace_root=app_config.setting.workspace_root)
+
+    # 加载 team_id 映射，初始化成员实例
+    await memberService.load_team_ids(teams_config)
+    await memberService.startup()
+    await memberService.create_team_members(teams_config, workspace_root=app_config.setting.workspace_root)
 
     await roomService.startup()
     await schedulerService.startup(teams_config=teams_config)
@@ -102,7 +104,7 @@ async def main(config_dir: str = None, port: int = 8080):
     finally:
         web_server.stop()
         schedulerService.shutdown()
-        await agentService.shutdown()
+        await memberService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
         funcToolService.shutdown()

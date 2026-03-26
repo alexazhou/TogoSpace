@@ -37,10 +37,10 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
     monkeypatch.setattr(teamService, "reload_from_db", _reload_from_db)
     monkeypatch.setattr(teamService.gtTeamManager, "get_team", _get_team)
 
-    from service import schedulerService, roomService, agentService
+    from service import schedulerService, roomService, memberService
 
     monkeypatch.setattr(schedulerService, "stop_team", _stop_team)
-    monkeypatch.setattr(agentService, "reload_team_members", _reload_team_members)
+    monkeypatch.setattr(memberService, "reload_team_members", _reload_team_members)
     monkeypatch.setattr(schedulerService, "refresh_team_config", _refresh_scheduler)
     monkeypatch.setattr(roomService, "refresh_rooms_for_team", _refresh_rooms)
     monkeypatch.setattr(roomService, "exit_init_rooms", _exit_init_rooms)
@@ -60,7 +60,7 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
 async def test_hot_reload_team_returns_if_target_not_found(monkeypatch):
     monkeypatch.setattr(teamService, "reload_from_db", AsyncMock(return_value=[]))
 
-    from service import schedulerService, roomService, agentService
+    from service import schedulerService, roomService, memberService
 
     stop_team = AsyncMock()
     reload_team_members = AsyncMock()
@@ -68,7 +68,7 @@ async def test_hot_reload_team_returns_if_target_not_found(monkeypatch):
     refresh_rooms = AsyncMock()
 
     monkeypatch.setattr(schedulerService, "stop_team", stop_team)
-    monkeypatch.setattr(agentService, "reload_team_members", reload_team_members)
+    monkeypatch.setattr(memberService, "reload_team_members", reload_team_members)
     monkeypatch.setattr(schedulerService, "refresh_team_config", refresh_scheduler)
     monkeypatch.setattr(roomService, "refresh_rooms_for_team", refresh_rooms)
 
