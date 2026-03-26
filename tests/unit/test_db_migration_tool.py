@@ -115,11 +115,13 @@ def test_migrate_database_upgrades_legacy_schema(tmp_path: Path) -> None:
 
     applied_now = db.migrate_database(db_path)
 
-    assert applied_now == ["0002.sql", "0003.sql", "0004.sql", "0005.sql", "0006.sql", "0007.sql", "0008.sql", "0009.sql"]
+    assert applied_now == ["0002.sql", "0003.sql", "0004.sql", "0005.sql", "0006.sql", "0007.sql", "0008.sql", "0009.sql", "0010.sql"]
 
     conn = sqlite3.connect(db_path)
     try:
         assert {"model", "template_name"} <= _columns(conn, "agents")
         assert {"working_directory", "config"} <= _columns(conn, "teams")
+        assert {"member_ids"} <= _columns(conn, "rooms")
+        assert not _columns(conn, "room_members")  # room_members table should be dropped
     finally:
         conn.close()

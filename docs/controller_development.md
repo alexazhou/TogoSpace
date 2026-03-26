@@ -252,7 +252,7 @@ import json
 from typing import List
 from pydantic import BaseModel
 from controller.baseController import BaseHandler
-from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager
+from dal.db import gtTeamManager, gtRoomManager
 from service import teamService
 from constants import RoomType
 from util import assertUtil

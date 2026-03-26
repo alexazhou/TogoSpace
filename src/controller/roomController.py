@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 # 内部包
 from controller.baseController import BaseHandler
-from dal.db import gtTeamManager, gtRoomManager, gtRoomMemberManager
+from dal.db import gtTeamManager, gtRoomManager
 from model.coreModel.gtCoreWebModel import (
     GtCoreMessageInfo,
     GtCoreRoomInfo,
@@ -150,7 +150,7 @@ class TeamRoomCreateHandler(BaseHandler):
         # 但目前 gtRoomManager 实现如此，暂且遵循。
         new_rooms_configs: list[TeamRoomConfig] = []
         for r in existing_rooms:
-            members = await gtRoomMemberManager.get_members_by_room(r.id)
+            members = await gtRoomManager.get_members_by_room(r.id)
             new_rooms_configs.append(TeamRoomConfig(
                 name=r.name,
                 members=members,
@@ -174,7 +174,7 @@ class TeamRoomDetailHandler(BaseHandler):
         await _get_team_or_404(team_id)
         room = await _get_team_room_or_404(team_id, room_id)
 
-        members = await gtRoomMemberManager.get_members_by_room(room.id)
+        members = await gtRoomManager.get_members_by_room(room.id)
         data = {
             "id": room.id,
             "name": room.name,
@@ -206,7 +206,7 @@ class TeamRoomModifyHandler(BaseHandler):
         existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
         all_rooms: list[TeamRoomConfig] = []
         for r in existing_rooms:
-            members = await gtRoomMemberManager.get_members_by_room(r.id)
+            members = await gtRoomManager.get_members_by_room(r.id)
             if r.id == room_id:
                 all_rooms.append(TeamRoomConfig(
                     name=r.name,
@@ -239,14 +239,13 @@ class TeamRoomDeleteHandler(BaseHandler):
 
         room = await _get_team_room_or_404(team_id, room_id)
         room_name = room.name
-        target_room_id = room.id
 
         existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
         remaining_rooms = [r for r in existing_rooms if r.id != room_id]
 
         room_configs: list[TeamRoomConfig] = []
         for r in remaining_rooms:
-            members = await gtRoomMemberManager.get_members_by_room(r.id)
+            members = await gtRoomManager.get_members_by_room(r.id)
             room_configs.append(
                 TeamRoomConfig(
                     name=r.name,
@@ -257,8 +256,6 @@ class TeamRoomDeleteHandler(BaseHandler):
             )
 
         await gtRoomManager.upsert_rooms(team_id, room_configs)
-
-        await gtRoomMemberManager.delete_members_by_room(target_room_id)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "deleted", "room_name": room_name})
@@ -273,7 +270,7 @@ class TeamRoomMembersHandler(BaseHandler):
         await _get_team_or_404(team_id)
         room = await _get_team_room_or_404(team_id, room_id)
 
-        members = await gtRoomMemberManager.get_members_by_room(room.id)
+        members = await gtRoomManager.get_members_by_room(room.id)
         self.return_json({"members": members})
 
 
@@ -290,7 +287,7 @@ class TeamRoomMembersModifyHandler(BaseHandler):
 
         room = await _get_team_room_or_404(team_id, room_id)
 
-        await gtRoomMemberManager.upsert_room_members(room.id, request.members)
+        await gtRoomManager.upsert_room_members(room.id, request.members)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "room_name": room.name})

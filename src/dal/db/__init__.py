@@ -4,7 +4,6 @@ from dal.db import (
     gtTeamManager,
     gtTeamMemberManager,
     gtRoomManager,
-    gtRoomMemberManager,
     gtRoomMessageManager,
 )
 
@@ -14,6 +13,5 @@ __all__ = [
     "gtTeamManager",
     "gtTeamMemberManager",
     "gtRoomManager",
-    "gtRoomMemberManager",
     "gtRoomMessageManager",
 ]

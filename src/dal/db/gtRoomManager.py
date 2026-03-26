@@ -48,6 +48,7 @@ async def ensure_room_by_key(
             type=room_type,
             initial_topic=initial_topic,
             max_turns=max_turns,
+            member_ids=[],
         )
         .on_conflict(
             conflict_target=[GtRoom.team_id, GtRoom.name],
@@ -67,6 +68,9 @@ async def ensure_room_by_key(
 
 async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
     """创建或更新 Team 下的 Rooms。使用 surgical update 确保已存在的 Room ID 不变。"""
+    from model.dbModel.gtTeamMember import GtTeamMember
+    from constants import SpecialAgent
+
     # 1. 获取当前数据库中的所有 Room
     current_rooms = await get_rooms_by_team(team_id)
     current_names = {r.name: r.id for r in current_rooms}
@@ -77,10 +81,22 @@ async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
     if to_delete:
         await GtRoom.delete().where(GtRoom.id.in_(to_delete)).aio_execute()  # type: ignore
 
-    # 3. 逐个更新或插入
+    # 3. 获取 team 的所有成员用于 name -> id 映射
+    member_rows = await GtTeamMember.select().where(GtTeamMember.team_id == team_id).aio_execute()
+    name_to_id = {m.name: m.id for m in member_rows}
+
+    # 4. 逐个更新或插入
     for room_cfg in rooms:
         room_type = _infer_room_type_from_members(room_cfg.members)
-        
+
+        # 将成员名称转换为 member_ids
+        member_ids: list[int] = []
+        for name in room_cfg.members:
+            if SpecialAgent.value_of(name) == SpecialAgent.OPERATOR:
+                member_ids.append(0)  # Operator 使用 0
+            elif name in name_to_id:
+                member_ids.append(name_to_id[name])
+
         await (
             GtRoom.insert(
                 team_id=team_id,
@@ -88,6 +104,7 @@ async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
                 type=room_type,
                 initial_topic=room_cfg.initial_topic,
                 max_turns=room_cfg.max_turns,
+                member_ids=member_ids,
                 updated_at=GtRoom._now_iso(),
             )
             .on_conflict(
@@ -96,6 +113,7 @@ async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
                     GtRoom.type: room_type,
                     GtRoom.initial_topic: room_cfg.initial_topic,
                     GtRoom.max_turns: room_cfg.max_turns,
+                    GtRoom.member_ids: member_ids,
                     GtRoom.updated_at: GtRoom._now_iso(),
                 },
             )
@@ -132,3 +150,53 @@ async def get_room_state(room_id: int) -> dict[str, int] | None:
     if room is None:
         return None
     return room.member_read_index
+
+
+# Room Member Management (inline)
+async def get_members_by_room(room_id: int) -> list[str]:
+    """获取 Room 的所有成员名称。member_id=0 代表 Operator。"""
+    from model.dbModel.gtTeamMember import GtTeamMember
+
+    room = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
+    if room is None or not room.member_ids:
+        return []
+
+    # 分离非零 ID 和 Operator (0)
+    non_zero_ids = [mid for mid in room.member_ids if mid != 0]
+    has_operator = any(mid == 0 for mid in room.member_ids)
+
+    names: list[str] = []
+    if non_zero_ids:
+        member_rows = await GtTeamMember.select().where(
+            GtTeamMember.id.in_(non_zero_ids)  # type: ignore
+        ).aio_execute()
+        id_to_name = {m.id: m.name for m in member_rows}
+        names = [id_to_name[mid] for mid in non_zero_ids if mid in id_to_name]
+
+    if has_operator:
+        names.append("Operator")
+
+    return sorted(names)
+
+
+async def upsert_room_members(room_id: int, members: list[str]) -> None:
+    """更新 Room 的成员列表（通过成员名称）。"""
+    from model.dbModel.gtTeamMember import GtTeamMember
+    from constants import SpecialAgent
+
+    room = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
+    if room is None:
+        return
+
+    team_id = room.team_id
+    member_rows = await GtTeamMember.select().where(GtTeamMember.team_id == team_id).aio_execute()
+    name_to_id = {m.name: m.id for m in member_rows}
+
+    member_ids: list[int] = []
+    for name in members:
+        if SpecialAgent.value_of(name) == SpecialAgent.OPERATOR:
+            member_ids.append(0)  # Operator 使用 0
+        elif name in name_to_id:
+            member_ids.append(name_to_id[name])
+
+    await GtRoom.update(member_ids=member_ids).where(GtRoom.id == room_id).aio_execute()

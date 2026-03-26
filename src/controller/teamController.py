@@ -66,7 +66,7 @@ class TeamDetailHandler(BaseHandler):
     """GET /teams/{id}.json - 获取指定 Team 详情"""
 
     async def get(self, team_id_str: str) -> None:
-        from dal.db import gtRoomManager, gtRoomMemberManager
+        from dal.db import gtRoomManager
 
         team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
@@ -84,7 +84,7 @@ class TeamDetailHandler(BaseHandler):
         ]
         room_items = []
         for room in rooms:
-            room_members = await gtRoomMemberManager.get_members_by_room(room.id)
+            room_members = await gtRoomManager.get_members_by_room(room.id)
             room_items.append(
                 {
                     "id": room.id,

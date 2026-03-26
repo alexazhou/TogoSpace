@@ -84,7 +84,7 @@ async def team_exists(name: str) -> bool:
 # 完整配置获取
 async def get_team_config(name: str) -> TeamConfig | None:
     """获取指定 Team 的完整配置（类似 JSON 格式）。"""
-    from dal.db import gtRoomManager, gtRoomMemberManager, gtTeamMemberManager
+    from dal.db import gtRoomManager, gtTeamMemberManager
     from util.configTypes import TeamMemberConfig, TeamRoomConfig
 
     team = await get_team(name)
@@ -100,7 +100,7 @@ async def get_team_config(name: str) -> TeamConfig | None:
 
     rooms: list[TeamRoomConfig] = []
     for room in await gtRoomManager.get_rooms_by_team(team_id):
-        room_members = await gtRoomMemberManager.get_members_by_room(room.id)
+        room_members = await gtRoomManager.get_members_by_room(room.id)
         rooms.append(TeamRoomConfig(
             name=room.name,
             initial_topic=room.initial_topic,
@@ -131,7 +131,7 @@ async def get_all_team_configs() -> list[TeamConfig]:
 # JSON 到数据库的转换
 async def import_team_from_json(team_config: TeamConfig) -> None:
     """从 JSON 配置导入 Team 到数据库。"""
-    from dal.db import gtRoomManager, gtRoomMemberManager, gtTeamMemberManager
+    from dal.db import gtRoomManager, gtTeamMemberManager
 
     name = team_config.name
 
@@ -146,16 +146,8 @@ async def import_team_from_json(team_config: TeamConfig) -> None:
     team_id = team.id
     await gtTeamMemberManager.upsert_team_members(team_id, team_config.members)
 
-    # 导入 Rooms
+    # 导入 Rooms（upsert_rooms 会处理成员）
     rooms = _iter_team_rooms(team_config)
     await gtRoomManager.upsert_rooms(team_id, rooms)
-
-    # 导入 Members
-    for room in rooms:
-        room_name = room.name
-        room_config = await gtRoomManager.get_room_config(team_id, room_name)
-        if room_config:
-            members = room.members
-            await gtRoomMemberManager.upsert_room_members(room_config.id, members)
 
     logger.info(f"Team '{name}' 已从 JSON 导入数据库")
