@@ -8,7 +8,7 @@ import sys
 import tornado.httpserver
 
 from util import llmApiUtil, configUtil, logUtil
-from util.configTypes import TeamConfig, AppConfig
+from util.configTypes import AppConfig
 from service import (
     messageBus,
     schedulerService,
@@ -67,34 +67,29 @@ async def main(config_dir: str = None, port: int = 8080):
         config_dir = os.path.abspath(config_dir)
 
     app_config: AppConfig = configUtil.load(config_dir)
-    llm_config = app_config.setting.current_llm_service
-
     llmApiUtil.init()
     await messageBus.startup()
-    await llmService.startup(
-        api_key=llm_config.api_key,
-        base_url=llm_config.base_url,
-        model=llm_config.model,
-    )
+    await llmService.startup()
     await funcToolService.startup()
 
     await ormService.startup(app_config.setting.persistence.db_path)
     await persistenceService.startup()
 
     # 从 teamService 加载 Team 配置（会自动从 JSON 导入到数据库）
-    teams_config: list[TeamConfig] = await teamService.startup(app_config.teams)
+    await teamService.startup()
+    teams_config = teamService.get_teams()
 
     # 加载 team_id 映射
     await agentService.load_team_ids(teams_config)
 
     await agentService.startup()
-    agentService.load_agent_config(app_config.agents)
+    agentService.load_agent_config()
     await agentService.create_team_agents(teams_config, workspace_root=app_config.setting.workspace_root)
 
     await roomService.startup()
     await schedulerService.startup(teams_config=teams_config)
     await roomService.create_rooms(teams_config)
-    await persistenceService.restore_runtime_state(agentService.get_all_agents(), roomService.get_all_rooms())
+    await persistenceService.restore_runtime_state()
     activated = roomService.exit_init_rooms()
     logger.info("启动激活完成：退出 INIT. 房间数=%s", activated)
 

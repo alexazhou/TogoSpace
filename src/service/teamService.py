@@ -4,17 +4,27 @@ import logging
 
 from dal.db import gtTeamManager, gtTeamMemberManager, gtRoomManager, gtRoomMemberManager
 from exception import TeamAgentException
+from util import configUtil
 from util.configTypes import TeamConfig
 
 logger = logging.getLogger(__name__)
 
+_teams: list[TeamConfig] = []
 
-async def startup(json_teams: list[TeamConfig]) -> list[TeamConfig]:
+
+def get_teams() -> list[TeamConfig]:
+    return list(_teams)
+
+
+async def startup() -> None:
     """启动时加载 Team 配置：
-    1. 接收已解析的 Team 列表，导入数据库
+    1. 将 JSON 配置导入数据库（仅当不存在时）
     2. 为没有 max_turns 的 room 设置默认值 100
-    3. 返回最终的 Team 配置列表（从数据库读取）
+    3. 从数据库加载最终配置，缓存到模块状态
     """
+    global _teams
+    json_teams = configUtil.get_app_config().teams
+
     # 将 JSON 配置导入数据库（仅当不存在时）
     for team_config in json_teams:
         name = team_config.name
@@ -27,15 +37,16 @@ async def startup(json_teams: list[TeamConfig]) -> list[TeamConfig]:
         await gtTeamManager.import_team_from_json(team_config)
 
     # 从数据库加载所有配置
-    team_configs = await gtTeamManager.get_all_team_configs()
+    _teams = await gtTeamManager.get_all_team_configs()
 
-    logger.info(f"从数据库加载了 {len(team_configs)} 个 Team 配置")
-    return team_configs
+    logger.info(f"从数据库加载了 {len(_teams)} 个 Team 配置")
 
 
 async def reload_from_db() -> list[TeamConfig]:
     """从数据库重新加载配置。"""
-    return await gtTeamManager.get_all_team_configs()
+    global _teams
+    _teams = await gtTeamManager.get_all_team_configs()
+    return list(_teams)
 
 
 async def create_team(team_config: TeamConfig) -> None:

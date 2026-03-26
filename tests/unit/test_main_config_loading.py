@@ -365,7 +365,7 @@ def test_load_reads_setting_json_once(tmp_path, monkeypatch):
     assert open_count["setting_json"] == 1
 
 
-def test_load_setting_config_ignores_extra_keys(tmp_path):
+def test_load_setting_ignores_extra_keys(tmp_path):
     (tmp_path / "setting.json").write_text(json.dumps({
         "default_llm_server": "mock",
         "llm_services": [
@@ -381,7 +381,17 @@ def test_load_setting_config_ignores_extra_keys(tmp_path):
         "unknown_key": {"keep": False},
     }), encoding="utf-8")
 
-    setting = configUtil.load_setting_config(str(tmp_path))
+    setting = configUtil.load(str(tmp_path)).setting
 
     assert setting.default_llm_server == "mock"
     assert setting.workspace_root == "/tmp/ws"
+
+
+def test_get_app_config_raises_when_cache_is_empty(monkeypatch):
+    monkeypatch.setattr(configUtil, "_cached_app_config", None)
+    monkeypatch.setattr(configUtil, "_cached_config_dir", None)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        configUtil.get_app_config()
+
+    assert "请先调用 configUtil.load" in str(exc_info.value)
