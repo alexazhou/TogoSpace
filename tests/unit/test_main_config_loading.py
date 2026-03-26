@@ -31,10 +31,11 @@ def test_runtime_configs_load_from_config_dir(tmp_path):
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
+    llm_cfg = app_config.setting.curren_llm_service
 
     assert isinstance(app_config, AppConfig)
-    assert app_config.llm_service.name == "mock"
-    assert app_config.llm_service.base_url == "http://127.0.0.1:9999/v1/chat/completions"
+    assert llm_cfg.name == "mock"
+    assert llm_cfg.base_url == "http://127.0.0.1:9999/v1/chat/completions"
     assert app_config.setting.persistence.enabled is True
     assert app_config.setting.persistence.db_path == "./runtime/test.db"
     assert app_config.setting.workspace_root == "/tmp/workspaces"
@@ -83,9 +84,10 @@ def test_runtime_configs_allow_llm_only_setting(tmp_path):
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
+    llm_cfg = app_config.setting.curren_llm_service
 
-    assert app_config.llm_service.name == "mock"
-    assert app_config.llm_service.base_url == "http://127.0.0.1:7777/v1/chat/completions"
+    assert llm_cfg.name == "mock"
+    assert llm_cfg.base_url == "http://127.0.0.1:7777/v1/chat/completions"
     assert app_config.setting.persistence.enabled is False
     assert app_config.setting.persistence.db_path == "../test_data/data.db"
 
@@ -123,13 +125,14 @@ def test_load_returns_appconfig_with_typed_fields(tmp_path):
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
+    llm_cfg = app_config.setting.curren_llm_service
 
     assert isinstance(app_config, AppConfig)
-    assert isinstance(app_config.llm_service, LlmServiceConfig)
+    assert isinstance(llm_cfg, LlmServiceConfig)
     assert isinstance(app_config.setting, SettingConfig)
     assert isinstance(app_config.setting.persistence, PersistenceConfig)
-    assert app_config.llm_service.model == "gpt-4"
-    assert app_config.llm_service.api_key == "key-123"
+    assert llm_cfg.model == "gpt-4"
+    assert llm_cfg.api_key == "key-123"
     assert app_config.agents == []
     assert app_config.teams == []
     assert app_config.setting.workspace_root
@@ -172,7 +175,7 @@ def test_workspace_root_defaults_to_repo_root_when_null(tmp_path):
     assert os.path.isabs(app_config.setting.workspace_root)
 
 
-def test_workspace_root_defaults_to_repo_root_when_blank(tmp_path):
+def test_workspace_root_keeps_blank_when_provided(tmp_path):
     (tmp_path / "setting.json").write_text(json.dumps({
         "default_llm_server": "svc",
         "llm_services": [
@@ -188,7 +191,7 @@ def test_workspace_root_defaults_to_repo_root_when_blank(tmp_path):
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
-    assert os.path.isabs(app_config.setting.workspace_root)
+    assert app_config.setting.workspace_root == "   "
 
 
 def test_persistence_defaults_when_null(tmp_path):

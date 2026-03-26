@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from typing import Any, List, Optional
 import os
 
@@ -73,33 +73,33 @@ class LlmServiceConfig(BaseModel):
 @dataclass
 class PersistenceConfig:
     enabled: bool = False
-    db_path: str = "../data/data.db"
+    db_path: str = dataclass_field(default_factory=_default_persistence_db_path)
+
+    def __post_init__(self) -> None:
+        value = self.db_path
+        if value is None:
+            self.db_path = _default_persistence_db_path()
+            return
+        if isinstance(value, str):
+            stripped = value.strip()
+            self.db_path = stripped or _default_persistence_db_path()
+            return
+        raise ValueError("persistence.db_path 必须为字符串")
 
 
 class SettingConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     default_llm_server: str | None = None
-    llm_services: list[dict[str, Any]] = Field(default_factory=list)
-    persistence: PersistenceConfig = Field(
-        default_factory=lambda: PersistenceConfig(db_path=_default_persistence_db_path())
-    )
+    llm_services: list[LlmServiceConfig] = Field(default_factory=list)
+    persistence: PersistenceConfig = Field(default_factory=PersistenceConfig)
     workspace_root: str = Field(default_factory=_default_workspace_root)
 
     @field_validator("persistence", mode="before")
     @classmethod
-    def normalize_persistence(cls, value: Any) -> dict[str, Any] | Any:
+    def normalize_persistence(cls, value: Any) -> Any:
         if value is None:
-            return {"enabled": False, "db_path": _default_persistence_db_path()}
-        if isinstance(value, dict):
-            normalized = dict(value)
-            db_path = normalized.get("db_path")
-            if db_path is None:
-                normalized["db_path"] = _default_persistence_db_path()
-            elif isinstance(db_path, str):
-                stripped = db_path.strip()
-                normalized["db_path"] = stripped or _default_persistence_db_path()
-            return normalized
+            return {}
         return value
 
     @field_validator("workspace_root", mode="before")
@@ -107,20 +107,30 @@ class SettingConfig(BaseModel):
     def normalize_workspace_root(cls, value: Any) -> str:
         if value is None:
             return _default_workspace_root()
-        if isinstance(value, str):
-            stripped = value.strip()
-            if stripped:
-                return stripped
-            return _default_workspace_root()
         return value
 
+    @property
+    def curren_llm_service(self) -> LlmServiceConfig:
+        enabled_services = [s for s in self.llm_services if s.enable]
+        if not enabled_services:
+            raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
+
+        active_key = self.default_llm_server or enabled_services[0].name
+        services = {s.name: s for s in enabled_services}
+
+        if active_key not in services:
+            raise ValueError(f"默认 LLM 服务 '{active_key}' 未在 llm_services 中定义或已禁用")
+
+        return services[active_key]
 
 @dataclass
 class AppConfig:
     agents: List[AgentConfig]
     teams: List[TeamConfig]
-    llm_service: LlmServiceConfig
     setting: SettingConfig
+
+    def __post_init__(self) -> None:
+        _ = self.setting.curren_llm_service
 
 
 def resolve_team_workdir(team_name: str, working_directory: str | None, workspace_root: str) -> str:

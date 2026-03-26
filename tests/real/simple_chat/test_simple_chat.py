@@ -37,7 +37,8 @@ class TestRealSimpleChat(ServiceTestCase):
 
         # 加载配置
         cfg = configUtil.load(_CONFIG_DIR)
-        await llmService.startup(cfg.llm_service.api_key, cfg.llm_service.base_url)
+        llm_cfg = cfg.setting.curren_llm_service
+        await llmService.startup(llm_cfg.api_key, llm_cfg.base_url)
 
         # 启动服务
         await ormService.startup(cls.TEST_DB_PATH)
