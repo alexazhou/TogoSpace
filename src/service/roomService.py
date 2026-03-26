@@ -11,6 +11,7 @@ from util.configTypes import TeamConfig, TeamRoomConfig
 from model.coreModel.gtCoreChatModel import GtCoreChatMessage
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
+from model.dbModel.gtTeamMember import GtTeamMember
 from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ class ChatContext:
 class ChatRoom:
     """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
-    def __init__(self, team: GtTeam, room: GtRoom, members: List[str] = None, member_id_map: Dict[str, int] | None = None):
+    def __init__(self, team: GtTeam, room: GtRoom, members: List[GtTeamMember] | None = None):
         self.room_id: int = room.id  # 数据库主键 ID
         self.team_id: int = team.id  # 所属 Team 的数据库主键 ID
         self.name: str = room.name  # 房间名称
@@ -65,19 +66,30 @@ class ChatRoom:
         self.room_type: RoomType = room.type  # 房间类型（私有/群聊）
         self.messages: List[GtCoreChatMessage] = []  # 消息历史记录
         self.initial_topic: str = room.initial_topic  # 初始话题
-        self.members: List[str] = _normalize_members(members)  # 房间参与者名单（包含 Operator 和 AI Agents）
+        self._members: List[GtTeamMember] = members or []  # 房间参与者列表
 
-        self._member_id_map: Dict[str, int] = member_id_map or {}  # member_name → member_id
-        self._member_name_map: Dict[int, str] = {v: k for k, v in self._member_id_map.items()}  # member_id → member_name
+        self._member_name_map: Dict[int, str] = {m.id: m.name for m in self._members}
         self._member_name_map[0] = "system"
         self._member_read_index: Dict[str, int] = {}  # 每个成员的消息读取进度（name 为 key）
         self._turn_index: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
         self._max_turns: int = room.max_turns  # 最大允许轮次
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
         self._state: RoomState = RoomState.INIT  # 房间当前的调度状态
-        self._state_after_init: RoomState = RoomState.SCHEDULING if self.members and room.max_turns > 0 else RoomState.IDLE
+        self._state_after_init: RoomState = RoomState.SCHEDULING if self._members and room.max_turns > 0 else RoomState.IDLE
         self._round_skipped: set = set()  # 当前轮次已跳过发言的成员名单
         self._current_turn_has_content: bool = False  # 当前发言人是否已发送内容
+
+    @property
+    def members(self) -> List[str]:
+        """返回成员名称列表（向后兼容）。"""
+        return [m.name for m in self._members]
+
+    def get_member_id(self, name: str) -> int:
+        """根据成员名称获取 member_id。"""
+        for m in self._members:
+            if m.name == name:
+                return m.id
+        return 0
 
     @property
     def key(self) -> str:
@@ -93,7 +105,7 @@ class ChatRoom:
         new_msgs = self.messages[read_idx:]
         self._member_read_index[agent_name] = len(self.messages)
         if self._state != RoomState.INIT:
-            id_keyed = {str(self._member_id_map.get(k, 0)): v for k, v in self._member_read_index.items()}
+            id_keyed = {str(self.get_member_id(k)): v for k, v in self._member_read_index.items()}
             await persistenceService.save_room_runtime(self.room_id, id_keyed)
         return new_msgs
 
@@ -110,7 +122,7 @@ class ChatRoom:
 
         await persistenceService.append_room_message(
             room_id=self.room_id,
-            member_id=self._member_id_map.get(sender, 0),
+            member_id=self.get_member_id(sender),
             content=content,
             send_time=message.send_time.isoformat(),
         )
@@ -359,11 +371,7 @@ async def _create_room(
     """内部建房入口。"""
     # 1. 从 DB 查找 team_id 和已有 room_id
     team_row = await gtTeamManager.get_team(team_name)
-    if team_row is None:
-        team_row = GtTeam(
-            id=0,
-            name=team_name,
-        )
+    assert team_row is not None, f"Team '{team_name}' 不存在，调用 _create_room 前应先创建 Team"
 
     room_row: GtRoom | None = None
 
@@ -389,13 +397,23 @@ async def _create_room(
 
     resolved_room_id = room_row.id
     member_rows = await gtTeamMemberManager.get_members_by_team(team_row.id)
-    member_id_map = {row.name: row.id for row in member_rows}
-    room = ChatRoom(team=team_row, room=room_row, members=members, member_id_map=member_id_map)
+    member_map = {row.name: row for row in member_rows}
+
+    # 根据传入的成员名称构建 GtTeamMember 列表
+    # 若成员在数据库中不存在，创建临时对象（id=0）
+    normalized_members = _normalize_members(members)
+    room_members = []
+    for name in normalized_members:
+        if name in member_map:
+            room_members.append(member_map[name])
+        else:
+            # 为不在数据库中的成员创建临时对象
+            room_members.append(GtTeamMember(id=0, team_id=team_row.id, name=name, agent_name=name))
+
+    room = ChatRoom(team=team_row, room=room_row, members=room_members)
     room_key = room.key
     _rooms[room_key] = room
     _rooms_by_id[resolved_room_id] = room
-
-    normalized_members = room.members
 
     logger.info(f"创建并初始化聊天室: room_id={resolved_room_id}, type={room_type.name}, 成员={normalized_members}")
     if max_turns > 0:
