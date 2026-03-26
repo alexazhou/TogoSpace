@@ -7,7 +7,7 @@ import os
 import uuid
 from typing import Any, Optional
 
-from pytspclient import TSPClient, TSPException
+from pytspclient import TSPClient, TSPException, TSPInitializeResult, TSPToolResponse
 
 from exception import TeamAgentException
 from service import funcToolService
@@ -62,7 +62,7 @@ class TspAgentDriver(AgentDriver):
         client = TSPClient(command=command, request_timeout_sec=timeout_sec)
         await client.connect()
         try:
-            result = await client.initialize(
+            result: TSPInitializeResult = await client.initialize(
                 client_info={"name": "agent_team.tsp_driver"},
                 include=include,
                 exclude=exclude,
@@ -162,14 +162,14 @@ class TspAgentDriver(AgentDriver):
             return {"success": False, "message": f"TSP 参数 JSON 解析失败: {e}"}
 
         try:
-            response = await self._client.tool(function_name, parsed_args)
+            response: TSPToolResponse = await self._client.tool(function_name, parsed_args)
             return response.to_dict()
         except TSPException as e:
             return {"success": False, "code": e.code, "message": e.message}
         except Exception as e:
             return {"success": False, "message": f"TSP 工具调用失败: {e}"}
 
-    def _load_tsp_tools(self, initialize_result: Any) -> None:
+    def _load_tsp_tools(self, initialize_result: TSPInitializeResult) -> None:
         resolved: dict[str, llmApiUtil.OpenAITool] = {}
 
         # 使用 pyTSPClient 暴露的 dataclass 结构
