@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from dal.db import gtTeamManager, gtTeamMemberManager, gtRoomManager, gtRoomMemberManager
+from dal.db import gtTeamManager, gtTeamMemberManager, gtRoomManager
 from exception import TeamAgentException
 from util import configUtil
 from util.configTypes import TeamConfig
@@ -76,7 +76,7 @@ async def create_team(team_config: TeamConfig) -> None:
         room_config = await gtRoomManager.get_room_config(team_id, room_name)
         if room_config:
             members = room.members
-            await gtRoomMemberManager.upsert_room_members(room_config.id, members)
+            await gtRoomManager.upsert_room_members(room_config.id, members)
 
     # 触发热更新
     await hot_reload_team(name)
@@ -107,7 +107,7 @@ async def update_team(team_config: TeamConfig) -> None:
         room_config = await gtRoomManager.get_room_config(team_id, room_name)
         if room_config:
             members = room.members
-            await gtRoomMemberManager.upsert_room_members(room_config.id, members)
+            await gtRoomManager.upsert_room_members(room_config.id, members)
 
     logger.info(f"Team '{name}' 配置已更新")
 

@@ -9,7 +9,6 @@ from dal.db import (
     gtAgentManager,
     gtMemberHistoryManager,
     gtRoomManager,
-    gtRoomMemberManager,
     gtRoomMessageManager,
     gtTeamManager,
     gtTeamMemberManager,
@@ -17,7 +16,6 @@ from dal.db import (
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtMemberHistory import GtMemberHistory
 from model.dbModel.gtRoom import GtRoom
-from model.dbModel.gtRoomMember import GtRoomMember
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtTeamMember import GtTeamMember
@@ -43,7 +41,6 @@ class TestDalManagers(ServiceTestCase):
     async def _reset_tables(self):
         await GtAgent.delete().aio_execute()
         await GtTeamMember.delete().aio_execute()
-        await GtRoomMember.delete().aio_execute()
         await GtRoomMessage.delete().aio_execute()
         await GtMemberHistory.delete().aio_execute()
         await GtRoom.delete().aio_execute()
@@ -148,7 +145,7 @@ class TestDalManagers(ServiceTestCase):
         )])
         room = await gtRoomManager.get_room_config(team_a.id, "general")
         assert room is not None
-        await gtRoomMemberManager.upsert_room_members(room.id, ["bob_1", "alice_1"])
+        # Note: upsert_rooms now handles members internally
 
         cfg_a = await gtTeamManager.get_team_config("team_a")
         assert cfg_a is not None
@@ -195,7 +192,7 @@ class TestDalManagers(ServiceTestCase):
         room = await gtRoomManager.get_room_config(imported.id, "r1")
         assert room is not None
         assert room.max_turns == 8
-        assert await gtRoomMemberManager.get_members_by_room(room.id) == ["alice_1", "bob_1"]
+        assert await gtRoomManager.get_members_by_room(room.id) == ["alice_1", "bob_1"]
 
         # 已存在时应跳过导入，不覆盖已有记录
         await gtTeamManager.import_team_from_json(TeamConfig(
@@ -307,9 +304,9 @@ class TestDalManagers(ServiceTestCase):
         assert await gtRoomManager.get_room_state(999999) is None
 
     # ------------------------------------------------------------------
-    # gtRoomMemberManager
+    # gtRoomManager Member Management
     # ------------------------------------------------------------------
-    async def test_room_member_manager_get_upsert_delete(self):
+    async def test_room_manager_get_upsert_delete_members(self):
         await self._reset_tables()
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="member_team"))
@@ -326,17 +323,18 @@ class TestDalManagers(ServiceTestCase):
             max_turns=5,
         )
 
-        assert await gtRoomMemberManager.get_members_by_room(room.id) == []
+        assert await gtRoomManager.get_members_by_room(room.id) == []
 
-        await gtRoomMemberManager.upsert_room_members(room.id, ["charlie", "alice"])
-        assert await gtRoomMemberManager.get_members_by_room(room.id) == ["alice", "charlie"]
+        await gtRoomManager.upsert_room_members(room.id, ["charlie", "alice"])
+        assert await gtRoomManager.get_members_by_room(room.id) == ["alice", "charlie"]
 
         # upsert 会覆盖旧成员
-        await gtRoomMemberManager.upsert_room_members(room.id, ["bob"])
-        assert await gtRoomMemberManager.get_members_by_room(room.id) == ["bob"]
+        await gtRoomManager.upsert_room_members(room.id, ["bob"])
+        assert await gtRoomManager.get_members_by_room(room.id) == ["bob"]
 
-        await gtRoomMemberManager.delete_members_by_room(room.id)
-        assert await gtRoomMemberManager.get_members_by_room(room.id) == []
+        # clear members
+        await gtRoomManager.upsert_room_members(room.id, [])
+        assert await gtRoomManager.get_members_by_room(room.id) == []
 
     # ------------------------------------------------------------------
     # gtRoomMessageManager
