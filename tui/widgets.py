@@ -93,7 +93,6 @@ class MessageBubble(Vertical):
             return
 
         side_class = f"msg-{self._side}"
-        
         # Row 1: Sender name and time
         with Horizontal(classes=f"msg-line {side_class}"):
             if self._side == "right":
@@ -102,7 +101,7 @@ class MessageBubble(Vertical):
             else:
                 yield Label(f"[bold {self._name_color}]{self._sender}[/bold {self._name_color}]", classes="sender")
                 yield Label(f" [dim]{self._time}[/]" if self._time else "", classes="time")
-        
+
         # Row 2: Message bubble
         with Horizontal(classes=f"msg-line {side_class}"):
             yield Label(self._display_content, classes="bubble", markup=False)
