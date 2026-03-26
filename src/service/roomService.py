@@ -184,8 +184,8 @@ class ChatRoom:
         next_name: Optional[str] = self.get_current_turn_agent()
         if next_name:
             messageBus.publish(
-                MessageBusTopic.ROOM_AGENT_TURN,
-                agent_name=next_name,
+                MessageBusTopic.ROOM_MEMBER_TURN,
+                member_name=next_name,
                 room_id=self.room_id,
                 room_name=self.name,
                 room_key=self.key,

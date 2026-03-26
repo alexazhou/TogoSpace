@@ -53,7 +53,7 @@ async def load_agent_history_message(team_id: int, agent_name: str) -> list[GtAg
 async def restore_runtime_state() -> None:
     from service import agentService, roomService
 
-    agents = agentService.get_all_agents()
+    agents = agentService.get_all_team_members()
     rooms = roomService.get_all_rooms()
 
     for agent in agents:

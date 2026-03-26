@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 
 from service import agentService, ormService, persistenceService, roomService, messageBus
-from service.agentService import Agent
+from service.agentService import TeamMember
 from util.llmApiUtil import OpenAIMessage, OpenaiLLMApiRole
-from util.configTypes import AgentConfig, TeamConfig, TeamMemberConfig, TeamRoomConfig
+from util.configTypes import AgentTemplate, TeamConfig, TeamMemberConfig, TeamRoomConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -96,7 +96,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
         await persistenceService.startup()
         await agentService.startup()
 
-        agent = Agent("alice", TEAM, "sys", "test-model")
+        agent = TeamMember("alice", TEAM, "sys", "test-model")
         agent._history = [
             OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1"),
             OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1"),
@@ -112,15 +112,15 @@ class TestRestoreAgentHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await agentService.startup()
-        agentService.load_agent_config([AgentConfig(name="alice", system_prompt="sys")])
-        await agentService.create_team_agents([
+        agentService.load_agent_config([AgentTemplate(name="alice", system_prompt="sys")])
+        await agentService.create_team_members([
             TeamConfig(
                 name=TEAM,
                 members=[TeamMemberConfig(name="alice", agent="alice")],
                 preset_rooms=[],
             )
         ])
-        cls.fresh_agent = agentService.get_agent(TEAM, "alice")
+        cls.fresh_agent = agentService.get_team_member(TEAM, "alice")
         await persistenceService.restore_runtime_state()
 
     @classmethod

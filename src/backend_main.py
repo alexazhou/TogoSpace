@@ -84,7 +84,7 @@ async def main(config_dir: str = None, port: int = 8080):
 
     await agentService.startup()
     agentService.load_agent_config()
-    await agentService.create_team_agents(teams_config, workspace_root=app_config.setting.workspace_root)
+    await agentService.create_team_members(teams_config, workspace_root=app_config.setting.workspace_root)
 
     await roomService.startup()
     await schedulerService.startup(teams_config=teams_config)

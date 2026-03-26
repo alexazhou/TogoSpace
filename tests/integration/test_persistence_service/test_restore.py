@@ -7,7 +7,7 @@ import pytest
 
 from constants import OpenaiLLMApiRole
 from tests.base import ServiceTestCase
-from util.configTypes import AgentConfig, TeamConfig
+from util.configTypes import AgentTemplate, TeamConfig
 from service import (
     roomService,
     agentService,
@@ -45,7 +45,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         self.cleanup_sqlite_files()
 
     async def _bootstrap(self):
-        agents_config = [AgentConfig.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
+        agents_config = [AgentTemplate.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
         team_config = TeamConfig.model_validate(json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read()))
 
         from src.db import migrate_database
@@ -58,7 +58,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await persistenceService.startup()
 
         agentService.load_agent_config(agents_config)
-        await agentService.create_team_agents([team_config])
+        await agentService.create_team_members([team_config])
         await roomService.create_rooms([team_config])
         await persistenceService.restore_runtime_state()
         await scheduler.startup([team_config])
@@ -111,7 +111,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
         assert any(m.content == "from alice" for m in room.messages)
         assert any(m.content == "from bob" for m in room.messages)
-        assert agentService.get_agent(TEAM, "alice")._history
+        assert agentService.get_team_member(TEAM, "alice")._history
 
         # 手动清理服务以模拟重启
         scheduler.shutdown()
@@ -125,7 +125,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await self._bootstrap()
 
         restored_room = roomService.get_room_by_key(f"general@{TEAM}")
-        restored_alice = agentService.get_agent(TEAM, "alice")
+        restored_alice = agentService.get_team_member(TEAM, "alice")
 
         assert any(m.content == "from alice" for m in restored_room.messages)
         assert any(m.content == "from bob" for m in restored_room.messages)

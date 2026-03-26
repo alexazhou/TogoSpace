@@ -1,7 +1,7 @@
 from pydantic import BaseModel, field_serializer
 from typing import List
 from datetime import datetime
-from constants import AgentStatus
+from constants import MemberStatus
 
 
 class GtCoreAgentInfo(BaseModel):
@@ -9,10 +9,10 @@ class GtCoreAgentInfo(BaseModel):
     template_name: str | None = None
     model: str
     team_name: str
-    status: AgentStatus
+    status: MemberStatus
 
     @field_serializer('status')
-    def serialize_status(self, status: AgentStatus) -> str:
+    def serialize_status(self, status: MemberStatus) -> str:
         return status.name
 
 

@@ -6,7 +6,7 @@ import sys
 import pytest
 
 from service import agentService, roomService, ormService, persistenceService
-from util.configTypes import AgentConfig, TeamConfig
+from util.configTypes import AgentTemplate, TeamConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -26,11 +26,11 @@ class _agentServiceCase(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
-        agents_cfg = [AgentConfig.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
+        agents_cfg = [AgentTemplate.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
         team_cfg = TeamConfig.model_validate(json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read()))
         await agentService.startup()
         agentService.load_agent_config(agents_cfg)
-        await agentService.create_team_agents([team_cfg])
+        await agentService.create_team_members([team_cfg])
 
     @classmethod
     async def async_teardown_class(cls):
@@ -41,10 +41,10 @@ class _agentServiceCase(ServiceTestCase):
 
 
 class TestagentServiceCreateTeamAgents(_agentServiceCase):
-    async def test_create_team_agents(self):
-        """create_team_agents 后，team 维度的 agent 实例应全部可检索。"""
-        assert agentService.get_agent(TEAM, "alice") is not None
-        assert agentService.get_agent(TEAM, "bob") is not None
+    async def test_create_team_members(self):
+        """create_team_members 后，team 维度的 agent 实例应全部可检索。"""
+        assert agentService.get_team_member(TEAM, "alice") is not None
+        assert agentService.get_team_member(TEAM, "bob") is not None
 
 
 class TestagentServiceGetAgentsInRoom(_agentServiceCase):
@@ -52,13 +52,13 @@ class TestagentServiceGetAgentsInRoom(_agentServiceCase):
         """get_agents 只返回房间成员，并保持成员集合正确。"""
         await roomService.create_room(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
-        assert {a.name for a in agentService.get_agents(room.room_id)} == {"alice", "bob"}
+        assert {a.name for a in agentService.get_team_members(room.room_id)} == {"alice", "bob"}
 
 
 class TestAgentServiceGetInfo(_agentServiceCase):
     async def test_get_info(self):
         """get_info 应返回面向 Web 层的标准 Agent 信息。"""
-        alice = agentService.get_agent(TEAM, "alice")
+        alice = agentService.get_team_member(TEAM, "alice")
 
         info = alice.get_info()
 
@@ -83,7 +83,7 @@ class TestagentServiceSyncRoomMessages(_agentServiceCase):
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.add_message("bob", "hello alice")
 
-        alice = agentService.get_agent(TEAM, "alice")
+        alice = agentService.get_team_member(TEAM, "alice")
         synced_count = await alice.sync_room_messages(room)
 
         # 初始公告 + bob 消息
@@ -98,7 +98,7 @@ class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
         await roomService.create_room(TEAM, "general", ["alice"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
 
-        alice = agentService.get_agent(TEAM, "alice")
+        alice = agentService.get_team_member(TEAM, "alice")
         await room.add_message("alice", "i am talking")
 
         synced_count = await alice.sync_room_messages(room)
