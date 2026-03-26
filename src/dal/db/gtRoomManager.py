@@ -66,30 +66,41 @@ async def ensure_room_by_key(
 
 
 async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
-    """创建或更新 Team 下的 Rooms。"""
-    # 先删除旧数据
-    await delete_rooms_by_team(team_id)
+    """创建或更新 Team 下的 Rooms。使用 surgical update 确保已存在的 Room ID 不变。"""
+    # 1. 获取当前数据库中的所有 Room
+    current_rooms = await get_rooms_by_team(team_id)
+    current_names = {r.name: r.id for r in current_rooms}
+    new_names = {r.name for r in rooms}
 
-    # 插入新数据
-    rows = []
-    for room in rooms:
-        room_name = room.name
-        room_type = _infer_room_type_from_members(room.members)
-        initial_topic = room.initial_topic
-        max_turns = room.max_turns
-        updated_at = GtRoom._now_iso()
+    # 2. 删除不在新配置中的 Room
+    to_delete = [rid for name, rid in current_names.items() if name not in new_names]
+    if to_delete:
+        await GtRoom.delete().where(GtRoom.id << to_delete).aio_execute()
 
-        rows.append({
-            "team_id": team_id,
-            "name": room_name,
-            "type": room_type,
-            "initial_topic": initial_topic,
-            "max_turns": max_turns,
-            "updated_at": updated_at,
-        })
-
-    if rows:
-        await GtRoom.insert_many(rows).aio_execute()
+    # 3. 逐个更新或插入
+    for room_cfg in rooms:
+        room_type = _infer_room_type_from_members(room_cfg.members)
+        
+        await (
+            GtRoom.insert(
+                team_id=team_id,
+                name=room_cfg.name,
+                type=room_type,
+                initial_topic=room_cfg.initial_topic,
+                max_turns=room_cfg.max_turns,
+                updated_at=GtRoom._now_iso(),
+            )
+            .on_conflict(
+                conflict_target=[GtRoom.team_id, GtRoom.name],
+                update={
+                    GtRoom.type: room_type,
+                    GtRoom.initial_topic: room_cfg.initial_topic,
+                    GtRoom.max_turns: room_cfg.max_turns,
+                    GtRoom.updated_at: GtRoom._now_iso(),
+                },
+            )
+            .aio_execute()
+        )
 
 
 async def delete_rooms_by_team(team_id: int) -> None:
