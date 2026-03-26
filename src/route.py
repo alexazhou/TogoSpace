@@ -1,6 +1,6 @@
 import tornado.web
 
-from controller import agentController, roomController, wsController, teamController
+from controller import memberController, roomController, wsController, teamController
 
 
 tornado_settings = {
@@ -9,9 +9,9 @@ tornado_settings = {
 }
 
 application = tornado.web.Application([
-    # Agent
-    (r"/agents/list.json",                  agentController.AgentListHandler),
-    (r"/teams/(\d+)/agents/([^/]+).json",   agentController.AgentDetailHandler),
+    # Member
+    (r"/members/list.json",                 memberController.MemberListHandler),
+    (r"/teams/(\d+)/members/([^/]+).json",  memberController.MemberDetailHandler),
 
     # Room (运行时)
     (r"/rooms/list.json",                   roomController.RoomListHandler),

@@ -15,7 +15,7 @@ class GtCoreChatMessage:
 
 
 @dataclass
-class GtCoreAgentDialogContext:
+class GtCoreMemberDialogContext:
     """Agent 发起一次 LLM 请求所需的完整上下文：system prompt + 对话历史 + 模型参数"""
     system_prompt: str
     messages: List[llmApiUtil.OpenAIMessage]
