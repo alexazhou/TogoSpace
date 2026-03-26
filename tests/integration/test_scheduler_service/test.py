@@ -278,3 +278,74 @@ class TestSchedulerRun(ServiceTestCase):
             # 再次入队应该成功
             scheduler._on_agent_turn(msg)
             assert alice.wait_task_queue.qsize() == 1
+
+    async def test_refresh_team_config(self):
+        """验证刷新团队配置。"""
+        old_config = _make_team_config()
+        await scheduler.startup([old_config])
+        
+        new_config = _make_team_config()
+        new_config.max_function_calls = 10
+        scheduler.refresh_team_config(TEAM, [new_config])
+        
+        assert scheduler._teams_config[0].max_function_calls == 10
+
+    async def test_stop_team(self):
+        """验证停止特定团队的调度。"""
+        alice = _make_mock_agent("alice")
+        teams_config = [_make_team_config()]
+        await scheduler.startup(teams_config)
+        
+        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
+            scheduler.add_agent(alice, 5)
+            assert alice.key in scheduler._running
+            
+            scheduler.stop_team(TEAM)
+            assert alice.key not in scheduler._running
+
+    async def test_on_agent_turn_operator_ignored(self, caplog):
+        """验证 OPERATOR 身份被忽略不进入调度。"""
+        await scheduler.startup([])
+        msg = Message(
+            topic=MessageBusTopic.ROOM_AGENT_TURN,
+            payload={"agent_name": "OPERATOR", "room_id": 1, "team_name": TEAM},
+        )
+        with caplog.at_level(logging.INFO):
+            scheduler._on_agent_turn(msg)
+        assert "轮到人类操作者，系统进入等待状态" in caplog.text
+
+    async def test_on_agent_turn_agent_not_found(self, caplog):
+        """验证 Agent 找不到时的错误处理。"""
+        await scheduler.startup([])
+        msg = Message(
+            topic=MessageBusTopic.ROOM_AGENT_TURN,
+            payload={"agent_name": "non-existent", "room_id": 1, "team_name": TEAM},
+        )
+        with patch("service.schedulerService.agentService.get_agent", side_effect=KeyError("not found")):
+            with caplog.at_level(logging.ERROR):
+                scheduler._on_agent_turn(msg)
+        assert "Agent 不存在" in caplog.text
+
+    async def test_on_agent_turn_general_exception(self, caplog):
+        """验证获取 Agent 发生通用异常时的错误处理。"""
+        await scheduler.startup([])
+        msg = Message(
+            topic=MessageBusTopic.ROOM_AGENT_TURN,
+            payload={"agent_name": "error-agent", "room_id": 1, "team_name": TEAM},
+        )
+        with patch("service.schedulerService.agentService.get_agent", side_effect=RuntimeError("unexpected")):
+            with caplog.at_level(logging.ERROR):
+                scheduler._on_agent_turn(msg)
+        assert "获取 Agent 失败" in caplog.text
+
+    async def test_remove_agent_non_existent(self):
+        """移除不存在的 agent 不应报错。"""
+        scheduler.remove_agent("non-existent@team")
+        # No exception means success
+
+    async def test_iter_team_rooms(self):
+        """测试内部辅助函数 _iter_team_rooms。"""
+        config = _make_team_config()
+        rooms = scheduler._iter_team_rooms(config)
+        assert len(rooms) == 1
+        assert rooms[0].name == "r1"
