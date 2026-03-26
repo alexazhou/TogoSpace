@@ -209,7 +209,7 @@ class TeamRoomModifyHandler(BaseHandler):
             members = await gtRoomMemberManager.get_members_by_room(r.id)
             if r.id == room_id:
                 all_rooms.append(TeamRoomConfig(
-                    name=room_name,
+                    name=r.name,
                     members=members,
                     initial_topic=initial_topic,
                     max_turns=max_turns,

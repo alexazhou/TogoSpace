@@ -30,7 +30,8 @@ class BaseHandler(tornado.web.RequestHandler):
             return data.isoformat()
         if isinstance(data, DbModelBase):
             # 将 Peewee 模型转换为字典
-            return data.__dict__.get('_data', {})
+            from playhouse.shortcuts import model_to_dict
+            return self._convert_gt_db(model_to_dict(data))
         if hasattr(data, '__dict__'):
             # 通用对象转字典（过滤私有属性）
             result = {}
