@@ -75,7 +75,7 @@ async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
     # 2. 删除不在新配置中的 Room
     to_delete = [rid for name, rid in current_names.items() if name not in new_names]
     if to_delete:
-        await GtRoom.delete().where(GtRoom.id << to_delete).aio_execute()
+        await GtRoom.delete().where(GtRoom.id.in_(to_delete)).aio_execute()  # type: ignore
 
     # 3. 逐个更新或插入
     for room_cfg in rooms:

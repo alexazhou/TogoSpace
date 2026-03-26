@@ -8,6 +8,7 @@ import uuid
 from typing import Any, Optional
 
 from pytspclient import TSPClient, TSPException, TSPInitializeResult, TSPToolResponse
+from service.agentService.driver.base import AgentDriverConfig
 
 from exception import TeamAgentException
 from service import funcToolService
@@ -43,7 +44,7 @@ def build_gtsp_command(raw_command: Optional[list[str]], workdir: str) -> list[s
 
 
 class TspAgentDriver(AgentDriver):
-    def __init__(self, host, config):
+    def __init__(self, host: Any, config: AgentDriverConfig) -> None:
         super().__init__(host, config)
         self._client: Optional[TSPClient] = None
         self._tsp_tools: dict[str, llmApiUtil.OpenAITool] = {}
