@@ -7,7 +7,6 @@ from tests.base import ServiceTestCase
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
-@pytest.mark.forked
 class TestConfigApi(ServiceTestCase):
     requires_backend = True
     requires_mock_llm = True

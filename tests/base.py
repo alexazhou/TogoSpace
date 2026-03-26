@@ -347,7 +347,7 @@ class ServiceTestCase:
                 break
             except RuntimeError:
                 pass
-            time.sleep(0.3)
+            time.sleep(0.05)
         else:
             with contextlib.suppress(Exception):
                 proc.terminate()
