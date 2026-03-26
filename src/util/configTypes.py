@@ -76,15 +76,6 @@ class PersistenceConfig:
     db_path: str = "../data/data.db"
 
 
-@dataclass
-class AppConfig:
-    agents: List[AgentConfig]
-    teams: List[TeamConfig]
-    llm_service: LlmServiceConfig
-    persistence: PersistenceConfig
-    workspace_root: str
-
-
 class SettingConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -122,6 +113,14 @@ class SettingConfig(BaseModel):
                 return stripped
             return _default_workspace_root()
         return value
+
+
+@dataclass
+class AppConfig:
+    agents: List[AgentConfig]
+    teams: List[TeamConfig]
+    llm_service: LlmServiceConfig
+    setting: SettingConfig
 
 
 def resolve_team_workdir(team_name: str, working_directory: str | None, workspace_root: str) -> str:

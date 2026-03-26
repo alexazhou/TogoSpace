@@ -94,6 +94,5 @@ def load(config_dir: str = None) -> AppConfig:
         agents=agents,
         teams=teams,
         llm_service=llm_service,
-        persistence=setting.persistence,
-        workspace_root=setting.workspace_root,
+        setting=setting,
     )
