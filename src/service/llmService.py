@@ -1,37 +1,28 @@
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
-from util import llmApiUtil
-
-_api_key: str = ""
-_base_url: str = ""
-_default_model: str = "qwen-plus"
+from util import configUtil, llmApiUtil
 
 
-async def startup(api_key: str, base_url: str, model: str | None = None) -> None:
-    global _api_key, _base_url, _default_model
-    _api_key = api_key
-    _base_url = base_url
-    if model:
-        _default_model = model
+async def startup() -> None:
+    _ = configUtil.get_app_config().setting.current_llm_service
 
 
 def get_default_model() -> str:
-    return _default_model
+    llm_config = configUtil.get_app_config().setting.current_llm_service
+    return llm_config.model
 
 
 async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> llmApiUtil.OpenAIResponse:
     """根据 GtCoreAgentDialogContext 组装请求并调用 LLM 推理接口。"""
-    resolved_model = model or _default_model
+    llm_config = configUtil.get_app_config().setting.current_llm_service
+    resolved_model = model or llm_config.model
     messages: list[llmApiUtil.OpenAIMessage] = [llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.SYSTEM, ctx.system_prompt), *ctx.messages]
     request = llmApiUtil.OpenAIRequest(
         model=resolved_model,
         messages=messages,
         tools=ctx.tools,
     )
-    return await llmApiUtil.send_request(request, _base_url, _api_key)
+    return await llmApiUtil.send_request(request, llm_config.base_url, llm_config.api_key)
 
 
 def shutdown() -> None:
-    global _api_key, _base_url, _default_model
-    _api_key = ""
-    _base_url = ""
-    _default_model = "qwen-plus"
+    pass

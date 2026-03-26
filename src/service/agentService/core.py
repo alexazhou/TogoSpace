@@ -247,24 +247,23 @@ async def startup() -> None:
     _agents = {}
 
 
-def load_agent_config(agents_config: List[AgentConfig]) -> None:
+def load_agent_config(agents_config: List[AgentConfig] | None = None) -> None:
     global _agent_defs
-    _agent_defs = {cfg.name: cfg for cfg in agents_config}
+    resolved = agents_config if agents_config is not None else configUtil.get_app_config().agents
+    _agent_defs = {cfg.name: cfg for cfg in resolved}
     logger.info(f"加载 Agent 定义: {list(_agent_defs.keys())}")
 
 
 async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
     base_prompt_tmpl = configUtil.load_prompt("src/prompts/GroupChat.md")
     default_model = llmService.get_default_model()
-    setting = configUtil.load_setting_config()
-    resolved_workspace_root = workspace_root or setting.workspace_root
+    resolved_workspace_root = workspace_root or configUtil.get_app_config().setting.workspace_root
+    assert resolved_workspace_root is not None, "workspace_root 未配置"
 
     for team_config in teams_config:
         team_name = team_config.name
         if team_config.working_directory:
             team_workdir = team_config.working_directory
-        elif workspace_root is None:
-            team_workdir = setting.get_default_team_workdir(team_name)
         else:
             team_workdir = os.path.join(resolved_workspace_root, team_name)
 

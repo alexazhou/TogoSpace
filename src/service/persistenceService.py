@@ -50,7 +50,12 @@ async def load_agent_history_message(team_id: int, agent_name: str) -> list[GtAg
     return await gtAgentHistoryManager.get_agent_history(team_id, agent_name)
 
 
-async def restore_runtime_state(agents: list, rooms: list) -> None:
+async def restore_runtime_state() -> None:
+    from service import agentService, roomService
+
+    agents = agentService.get_all_agents()
+    rooms = roomService.get_all_rooms()
+
     for agent in agents:
         team = await gtTeamManager.get_team(agent.team_name)
         team_id = team.id if team is not None else agent.team_id

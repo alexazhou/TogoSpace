@@ -40,7 +40,7 @@ def resolve_migrations_dir(migrations_dir: str | None) -> Path:
 
 
 def load_db_path_from_config(config_dir: str | None) -> str:
-    setting = configUtil.load_setting_config(config_dir)
+    setting = configUtil.load(config_dir).setting
     db_path = setting.persistence.db_path
     if not db_path.strip():
         raise ValueError("Invalid db_path in persistence config")

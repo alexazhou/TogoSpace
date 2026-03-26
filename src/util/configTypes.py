@@ -63,7 +63,7 @@ class LlmServiceConfig(BaseModel):
     base_url: str
     api_key: str
     type: LlmServiceType
-    model: str | None = None
+    model: str = "qwen-plus"
     enable: bool = True
 
 
