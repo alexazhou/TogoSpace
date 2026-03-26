@@ -20,7 +20,7 @@ class OpenaiLLMApiRole(EnhanceEnum):
     TOOL = "tool"
 
 
-class LlmServiceType(str, Enum):
+class LlmServiceType(EnhanceEnum):
     OPENAI_COMPATIBLE = "openai-compatible"
 
 
