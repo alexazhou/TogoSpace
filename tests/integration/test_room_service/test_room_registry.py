@@ -88,3 +88,17 @@ class TestRoomRegistry(ServiceTestCase):
         assert len(room.messages) == 1
         assert room.messages[0].sender_name == SpecialAgent.SYSTEM.name
         assert "boot topic" in room.messages[0].content
+
+    async def test_special_member_ids(self):
+        """SYSTEM 和 OPERATOR 应有特殊的 member_id。"""
+        await roomService.create_room(TEAM, "special_room", ["Operator", "alice"])
+        room = roomService.get_room_by_key(f"special_room@{TEAM}")
+
+        # SYSTEM: member_id = -2
+        assert room.get_member_id(SpecialAgent.SYSTEM.name) == ChatRoom.SYSTEM_MEMBER_ID
+        # OPERATOR: member_id = -1
+        assert room.get_member_id(SpecialAgent.OPERATOR.name) == ChatRoom.OPERATOR_MEMBER_ID
+        # 普通成员: member_id 从数据库获取
+        assert room.get_member_id("alice") == 0  # 测试环境中未写入数据库
+        # 不存在的成员: member_id = 0
+        assert room.get_member_id("unknown") == 0
