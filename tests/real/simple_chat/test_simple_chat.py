@@ -116,11 +116,11 @@ class TestRealSimpleChat(ServiceTestCase):
         room = roomService.get_room_by_key(room_key)
         room.activate_scheduling()
 
-        # 等待对话完成（max_turns=2，每人 1 轮）
-        for _ in range(10):
-            if room.state == RoomState.IDLE:
-                break
-            await asyncio.sleep(0.5)
+        await self.wait_until(
+            lambda: room.state == RoomState.IDLE,
+            timeout=2.0,
+            message="房间未在限时内完成对话并进入 IDLE 状态",
+        )
 
         scheduler.shutdown()
         await asyncio.wait_for(run_task, timeout=5.0)

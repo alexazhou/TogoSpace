@@ -77,12 +77,16 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
         with self.patch_infer(handler=fake_infer):
             run_task = asyncio.create_task(scheduler.run())
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0)
             agent_messages = [m for m in room.messages if m.sender_name != "system"]
             assert len(agent_messages) == 0
 
             room.activate_scheduling()
-            await asyncio.sleep(0.8)
+            await self.wait_until(
+                lambda: len([m for m in room.messages if m.sender_name != "system"]) >= 1,
+                timeout=2.0,
+                message="房间激活后未在限时内收到 Agent 回复",
+            )
             scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)
 
@@ -107,7 +111,12 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         with self.patch_infer(handler=fake_infer):
             run_task = asyncio.create_task(scheduler.run())
             room.activate_scheduling()
-            await asyncio.sleep(1.0)
+            await self.wait_until(
+                lambda: any(m.content == "from alice" for m in room.messages)
+                and any(m.content == "from bob" for m in room.messages),
+                timeout=2.0,
+                message="恢复前的对话未在限时内完成",
+            )
             scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)
 

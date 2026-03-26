@@ -418,3 +418,20 @@ class ServiceTestCase:
         # pytest 的 setup_class/teardown_class 是同步协议，这里统一桥接 awaitable。
         if inspect.isawaitable(result):
             asyncio.run(result)
+
+    @staticmethod
+    async def wait_until(
+        predicate,
+        timeout: float = 2.0,
+        interval: float = 0.05,
+        message: str = "等待条件成立超时",
+    ) -> None:
+        """轮询等待条件成立，避免在测试里写固定长 sleep。"""
+        deadline = time.monotonic() + timeout
+        while True:
+            if predicate():
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise AssertionError(message)
+            await asyncio.sleep(min(interval, remaining))

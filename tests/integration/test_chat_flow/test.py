@@ -16,7 +16,7 @@ import service.ormService as ormService
 import service.persistenceService as persistenceService
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
 from util.configTypes import AgentTemplate, TeamConfig
-from constants import OpenaiLLMApiRole
+from constants import OpenaiLLMApiRole, RoomState
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -74,7 +74,11 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             room = roomService.get_room_by_key(room_key)
             run_task = asyncio.create_task(scheduler.run())
             room.activate_scheduling()
-            await asyncio.sleep(1)
+            await self.wait_until(
+                lambda: len([m for m in room.messages if m.sender_name != "system"]) >= 2,
+                timeout=2.0,
+                message="alice 和 bob 未在限时内完成一轮对话",
+            )
             scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)
 
@@ -166,10 +170,11 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             await roomService.create_room(TEAM, "general", ["alice", "bob"], max_turns=2)
             room = roomService.get_room_by_key(room_key)
             room.activate_scheduling()
-            for _ in range(20):
-                if room.state.value == "idle":
-                    break
-                await asyncio.sleep(0.5)
+            await self.wait_until(
+                lambda: room.state == RoomState.IDLE,
+                timeout=3.0,
+                message="房间未在限时内进入 IDLE 状态",
+            )
             scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=5.0)
 
