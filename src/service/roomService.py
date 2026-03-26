@@ -69,7 +69,7 @@ class ChatRoom:
         self._members: List[GtTeamMember] = members or []  # 房间参与者列表
 
         self._member_name_map: Dict[int, str] = {m.id: m.name for m in self._members}
-        self._member_name_map[0] = "system"
+        self._member_name_map[0] = SpecialAgent.SYSTEM.name
         self._member_read_index: Dict[str, int] = {}  # 每个成员的消息读取进度（name 为 key）
         self._turn_index: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
         self._max_turns: int = room.max_turns  # 最大允许轮次
@@ -158,7 +158,7 @@ class ChatRoom:
             logger.info(f"房间 {self.key} 收到来自 {sender} 的插话，保持当前发言位 (当前应轮到 {current_expected})")
 
         # 3. 只要有真实消息（非系统消息），就清空跳过记录，让所有人重新有机会回应
-        if sender != "system" and self._round_skipped:
+        if sender != SpecialAgent.SYSTEM.name and self._round_skipped:
             self._round_skipped = set()
 
         # 4. 如果刚才从 IDLE 唤醒，我们需要手动重发当前轮次事件以重启循环
@@ -419,7 +419,7 @@ async def _create_room(
     if max_turns > 0:
         logger.info(f"初始化轮次配置: room_id={resolved_room_id}, max_turns={max_turns}")
 
-    await room.add_message("system", room.build_initial_system_message())
+    await room.add_message(SpecialAgent.SYSTEM.name, room.build_initial_system_message())
 
 
 async def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0) -> None:

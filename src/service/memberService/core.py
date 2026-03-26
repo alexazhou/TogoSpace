@@ -143,7 +143,7 @@ class TeamMember:
                 continue
 
             message: llmApiUtil.OpenAIMessage
-            if msg.sender_name == "system":
+            if msg.sender_name == SpecialAgent.SYSTEM.name:
                 message = llmApiUtil.OpenAIMessage.text(
                     llmApiUtil.OpenaiLLMApiRole.USER,
                     content=f"{room.name} 房间系统消息: {msg.content}",
