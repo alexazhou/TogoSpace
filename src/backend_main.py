@@ -12,8 +12,8 @@ from util.configTypes import AppConfig
 from service import (
     messageBus,
     schedulerService,
+    roleTemplateService,
     agentService,
-    memberService,
     roomService,
     llmService,
     funcToolService,
@@ -69,31 +69,40 @@ async def main(config_dir: str = None, port: int = 8080):
 
     app_config: AppConfig = configUtil.load(config_dir)
     llmApiUtil.init()
+
+    # ── 阶段 1：基础启动 ──────────────────────────────────────────────────────
+    logger.info("[启动] 阶段 1/4：基础 service 启动")
     await messageBus.startup()
     await llmService.startup()
     await funcToolService.startup()
-
     await ormService.startup(app_config.setting.persistence.db_path)
     await persistenceService.startup()
+    logger.info("[启动] 阶段 1/4 完成")
 
-    # 从 teamService 加载 Team 配置（会自动从 JSON 导入到数据库）
+    # ── 阶段 2：导入配置 ──────────────────────────────────────────────────────
+    logger.info("[启动] 阶段 2/4：导入 Team / Agent 配置")
     await teamService.startup()
     teams_config = teamService.get_teams()
+    await roleTemplateService.startup()
+    roleTemplateService.load_role_template_config()
+    logger.info("[启动] 阶段 2/4 完成：teams=%s", [t.name for t in teams_config])
 
+    # ── 阶段 3：运行时构建 ────────────────────────────────────────────────────
+    logger.info("[启动] 阶段 3/4：构建运行时（成员 / 房间 / 调度器）")
+    await agentService.load_team_ids(teams_config)
     await agentService.startup()
-    agentService.load_agent_config()
-
-    # 加载 team_id 映射，初始化成员实例
-    await memberService.load_team_ids(teams_config)
-    await memberService.startup()
-    await memberService.create_team_members(teams_config, workspace_root=app_config.setting.workspace_root)
-
+    await agentService.create_team_agents(teams_config, workspace_root=app_config.setting.workspace_root)
     await roomService.startup()
     await schedulerService.startup(teams_config=teams_config)
     await roomService.create_rooms(teams_config)
-    await persistenceService.restore_runtime_state()
+    logger.info("[启动] 阶段 3/4 完成")
+
+    # ── 阶段 4：恢复状态 ──────────────────────────────────────────────────────
+    logger.info("[启动] 阶段 4/4：恢复持久化状态")
+    await agentService.restore_state()
+    await roomService.restore_state()
     activated = roomService.exit_init_rooms()
-    logger.info("启动激活完成：退出 INIT. 房间数=%s", activated)
+    logger.info("[启动] 阶段 4/4 完成：激活房间数=%s", activated)
 
     web_server = tornado.httpserver.HTTPServer(route.application)
     web_server.listen(port, "0.0.0.0")
@@ -104,7 +113,7 @@ async def main(config_dir: str = None, port: int = 8080):
     finally:
         web_server.stop()
         schedulerService.shutdown()
-        await memberService.shutdown()
+        await agentService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
         funcToolService.shutdown()

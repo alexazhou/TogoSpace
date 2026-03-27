@@ -19,7 +19,7 @@ agent_team/
 ├── src/                 # 后端
 ├── tui/                 # 终端前端（Textual）
 ├── frontend/            # Web 前端（Vue 3 + Vite + TypeScript，Git Submodule）
-├── config/              # 运行配置（agents/ teams/ setting.json）
+├── config/              # 运行配置（role_templates/ teams/ setting.json）
 ├── docs/                # 设计与规范文档
 ├── logs/                # 运行日志（自动生成）
 │   ├── backend/
@@ -39,6 +39,7 @@ src/
 ├── constants.py
 ├── controller/
 │   ├── baseController.py
+│   ├── roleTemplateController.py
 │   ├── agentController.py
 │   ├── roomController.py
 │   ├── teamController.py
@@ -51,6 +52,8 @@ src/
 │   ├── ormService.py
 │   ├── persistenceService.py
 │   ├── teamService.py
+│   ├── roleTemplateService/
+│   │   └── core.py
 │   ├── agentService/
 │   │   ├── core.py
 │   │   └── driver/
@@ -159,7 +162,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 
 ## 配置文件约定
 
-- Agent 定义：`config/agents/*.json`
+- RoleTemplate 定义：`config/role_templates/*.json`
 - Team 定义：`config/teams/*.json`
 - 运行配置：`config/setting.json`
   - `llm_services` / `default_llm_server`
@@ -201,6 +204,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 - [docs/tech/agent_driver_vs_subclass.md](docs/tech/agent_driver_vs_subclass.md)
 - [docs/tech/agent_scheduling_logic.md](docs/tech/agent_scheduling_logic.md)
 - [docs/tech/service_dependencies.md](docs/tech/service_dependencies.md)
+- [docs/tech/state_persistence.md](docs/tech/state_persistence.md)
 - [docs/tech/testing_architecture.md](docs/tech/testing_architecture.md)
 - [docs/tech/tui_layout.md](docs/tech/tui_layout.md)
 

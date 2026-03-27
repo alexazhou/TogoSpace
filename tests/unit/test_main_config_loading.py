@@ -138,7 +138,7 @@ def test_load_returns_appconfig_with_typed_fields(tmp_path):
     assert isinstance(app_config.setting.persistence, PersistenceConfig)
     assert llm_cfg.model == "gpt-4"
     assert llm_cfg.api_key == "key-123"
-    assert app_config.agents == []
+    assert app_config.role_templates == []
     assert app_config.teams == []
     assert app_config.setting.workspace_root
 

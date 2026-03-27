@@ -4,7 +4,7 @@ import os
 from typing import Any, List
 
 from util.configTypes import (
-    AgentTemplate,
+    RoleTemplate,
     AppConfig,
     PersistenceConfig,
     SettingConfig,
@@ -24,10 +24,10 @@ def get_db_path() -> str:
     return PersistenceConfig().db_path
 
 
-def _load_agents(config_dir: str) -> List[AgentTemplate]:
-    agents_dir = os.path.join(config_dir, "agents")
-    raw_agents = load_json_objects_from_dir(agents_dir)
-    return [AgentTemplate.model_validate(agent) for agent in raw_agents]
+def _load_role_templates(config_dir: str) -> List[RoleTemplate]:
+    role_templates_dir = os.path.join(config_dir, "role_templates")
+    raw_templates = load_json_objects_from_dir(role_templates_dir)
+    return [RoleTemplate.model_validate(t) for t in raw_templates]
 
 
 def _load_teams(config_dir: str) -> List[TeamConfig]:
@@ -81,12 +81,12 @@ def load(config_dir: str = None, force_reload: bool = False) -> AppConfig:
     if not force_reload and _cached_app_config is not None and _cached_config_dir == resolved_config_dir:
         return _cached_app_config
 
-    agents = _load_agents(resolved_config_dir)
+    role_templates = _load_role_templates(resolved_config_dir)
     teams = _load_teams(resolved_config_dir)
     setting = _load_setting(resolved_config_dir)
 
     app_config = AppConfig(
-        agents=agents,
+        role_templates=role_templates,
         teams=teams,
         setting=setting,
     )

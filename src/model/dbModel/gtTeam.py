@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 
 import peewee
 
@@ -14,8 +13,6 @@ class GtTeam(DbModelBase):
     config: str = peewee.TextField(default="{}")
     max_function_calls: int = peewee.IntegerField(default=5)
     enabled: int = peewee.IntegerField(default=1)
-    created_at: str = peewee.CharField(default=lambda: datetime.now().isoformat())
-    updated_at: str = peewee.CharField(default=lambda: datetime.now().isoformat())
 
     def get_config(self) -> dict:
         try:

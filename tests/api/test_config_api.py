@@ -23,7 +23,7 @@ class TestConfigApi(ServiceTestCase):
         # Create a temporary team for modification and deletion
         payload = {
             "name": "temp_team_mod",
-            "members": [{"name": "alice", "agent": "alice"}],
+            "members": [{"name": "alice", "role_template": "alice"}],
             "preset_rooms": []
         }
         async with aiohttp.ClientSession() as client:
@@ -118,16 +118,16 @@ class TestConfigApi(ServiceTestCase):
         # 5. Room Members Management
         # List Members
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/members/list.json") as resp:
+            async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/list.json") as resp:
                 assert resp.status == 200
                 
             # Modify Members
             members_payload = {"members": ["alice", "Operator"]}
-            async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/members/modify.json", json=members_payload) as resp:
+            async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/modify.json", json=members_payload) as resp:
                 assert resp.status == 200
                 
             # Verify members
-            async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/members/list.json") as resp:
+            async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/list.json") as resp:
                 data = await resp.json()
                 assert set(data["members"]) == {"alice", "Operator"}
 

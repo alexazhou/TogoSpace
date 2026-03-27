@@ -1,4 +1,4 @@
-from model.coreModel.gtCoreChatModel import GtCoreMemberDialogContext
+from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from util import configUtil, llmApiUtil
 
 
@@ -11,8 +11,8 @@ def get_default_model() -> str:
     return llm_config.model
 
 
-async def infer(model: str | None, ctx: GtCoreMemberDialogContext) -> llmApiUtil.OpenAIResponse:
-    """根据 GtCoreMemberDialogContext 组装请求并调用 LLM 推理接口。"""
+async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> llmApiUtil.OpenAIResponse:
+    """根据 GtCoreAgentDialogContext 组装请求并调用 LLM 推理接口。"""
     llm_config = configUtil.get_app_config().setting.current_llm_service
     resolved_model = model or llm_config.model
     messages: list[llmApiUtil.OpenAIMessage] = [llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.SYSTEM, ctx.system_prompt), *ctx.messages]
