@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+
+from constants import EmployStatus
 from model.dbModel.gtTeamMember import GtTeamMember
 from util.configTypes import TeamMemberConfig
 
@@ -20,6 +23,24 @@ async def get_member(team_id: int, name: str) -> GtTeamMember | None:
     )
 
 
+async def get_on_board_members(team_id: int) -> list[GtTeamMember]:
+    return list(
+        await GtTeamMember.select()
+        .where((GtTeamMember.team_id == team_id) & (GtTeamMember.employ_status == EmployStatus.ON_BOARD))
+        .order_by(GtTeamMember.name)
+        .aio_execute()
+    )
+
+
+async def get_off_board_members(team_id: int) -> list[GtTeamMember]:
+    return list(
+        await GtTeamMember.select()
+        .where((GtTeamMember.team_id == team_id) & (GtTeamMember.employ_status == EmployStatus.OFF_BOARD))
+        .order_by(GtTeamMember.name)
+        .aio_execute()
+    )
+
+
 async def upsert_team_members(team_id: int, members: list[TeamMemberConfig]) -> None:
     await delete_members_by_team(team_id)
     if not members:
@@ -30,6 +51,8 @@ async def upsert_team_members(team_id: int, members: list[TeamMemberConfig]) -> 
             "team_id": team_id,
             "name": member.name,
             "agent_name": member.agent,
+            "model": member.model or "",
+            "driver": json.dumps(member.driver, ensure_ascii=False, sort_keys=True),
         }
         for member in members
     ]

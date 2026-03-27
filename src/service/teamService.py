@@ -4,6 +4,7 @@ import logging
 
 from dal.db import gtTeamManager, gtTeamMemberManager, gtRoomManager
 from exception import TeamAgentException
+from service import deptService
 from util import configUtil
 from util.configTypes import TeamConfig
 
@@ -36,6 +37,11 @@ async def startup() -> None:
 
         await gtTeamManager.import_team_from_json(team_config)
 
+        if team_config.dept_tree:
+            team = await gtTeamManager.get_team(name)
+            if team is not None:
+                await deptService.import_dept_tree(team.id, team_config.dept_tree)
+
     # 从数据库加载所有配置
     _teams = await gtTeamManager.get_all_team_configs()
 
@@ -61,6 +67,9 @@ async def create_team(team_config: TeamConfig) -> None:
     team = await gtTeamManager.upsert_team(team_config)
     team_id = team.id
     await gtTeamMemberManager.upsert_team_members(team_id, team_config.members)
+
+    if team_config.dept_tree:
+        await deptService.import_dept_tree(team_id, team_config.dept_tree)
 
     # 创建 Rooms（rooms 参数）
     rooms = team_config.preset_rooms

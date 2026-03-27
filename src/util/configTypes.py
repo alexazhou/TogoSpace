@@ -5,6 +5,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from constants import LlmServiceType
 
 
+class DeptNodeConfig(BaseModel):
+    """递归的部门树节点，对应 config 中 dept_tree 的每个节点。"""
+    dept_name: str
+    dept_responsibility: str = ""
+    manager: str
+    members: List[str] = Field(default_factory=list)
+    children: List["DeptNodeConfig"] = Field(default_factory=list)
+
+
+DeptNodeConfig.model_rebuild()
+
+
 def _default_workspace_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 
@@ -25,6 +37,8 @@ class TeamMemberConfig(BaseModel):
     """Configuration for a member in a team, referencing an agent template."""
     name: str  # Nickname of the member in the team
     agent: str  # Name of the AgentTemplate to use
+    model: Optional[str] = None  # 覆盖 AgentTemplate.model
+    driver: dict[str, Any] = Field(default_factory=dict)  # 覆盖 AgentTemplate.driver
 
 
 class TeamRoomConfig(BaseModel):
@@ -42,6 +56,7 @@ class TeamConfig(BaseModel):
     working_directory: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
     members: List[TeamMemberConfig] = Field(default_factory=list)
+    dept_tree: Optional[DeptNodeConfig] = None
     preset_rooms: List[TeamRoomConfig] = Field(default_factory=list)
     max_function_calls: Optional[int] = None
 

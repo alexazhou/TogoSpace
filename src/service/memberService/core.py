@@ -243,6 +243,59 @@ async def startup() -> None:
     _team_ids = {}
 
 
+async def _build_dept_context(team_id: int, member_name: str) -> str:
+    """查询成员所在部门并格式化为系统提示注入块；不在任何部门时返回空字符串。"""
+    from dal.db import gtTeamMemberManager as _gtTMM, gtDeptManager as _gtDM
+
+    member_row = await _gtTMM.get_member(team_id, member_name)
+    if member_row is None:
+        return ""
+
+    all_depts = await _gtDM.get_all_depts(team_id)
+    if not all_depts:
+        return ""
+
+    # 找到成员所在部门
+    member_dept = None
+    for dept in all_depts:
+        if member_row.id in dept.member_ids:
+            member_dept = dept
+            break
+    if member_dept is None:
+        return ""
+
+    # 建立辅助映射
+    dept_id_map = {d.id: d for d in all_depts}
+    all_members = await _gtTMM.get_members_by_team(team_id)
+    member_id_to_name: dict[int, str] = {m.id: m.name for m in all_members}
+
+    manager_name = member_id_to_name.get(member_dept.manager_id, "")
+    other_members = [
+        member_id_to_name[mid]
+        for mid in member_dept.member_ids
+        if mid in member_id_to_name and member_id_to_name[mid] != member_name
+    ]
+
+    lines = ["---", "组织信息：", f"- 所在部门：{member_dept.name}（{member_dept.responsibility}）"]
+
+    # 上级部门
+    if member_dept.parent_id is not None:
+        parent = dept_id_map.get(member_dept.parent_id)
+        if parent is not None:
+            parent_manager = member_id_to_name.get(parent.manager_id, "")
+            lines.append(f"- 上级部门：{parent.name}（主管：{parent_manager}）")
+
+    # 本部门主管（自己是主管时省略）
+    if manager_name and manager_name != member_name:
+        lines.append(f"- 本部门主管：{manager_name}")
+
+    if other_members:
+        lines.append(f"- 本部门其他成员：{', '.join(other_members)}")
+
+    lines.append("---")
+    return "\n".join(lines)
+
+
 async def create_team_members(teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
     """创建团队成员实例。"""
     from service import agentService
@@ -271,10 +324,25 @@ async def create_team_members(teams_config: list[TeamConfig], workspace_root: st
             else:
                 agent_specific_prompt = configUtil.load_prompt(cfg.prompt_file)
 
+            # model 覆盖：TeamMemberConfig > AgentTemplate > default
+            model_name = member_cfg.model or cfg.model or default_model
+
+            # driver 覆盖：TeamMemberConfig.driver 合并进 AgentTemplate.driver
+            if member_cfg.driver:
+                merged_driver = {**cfg.model_dump().get("driver", {}), **member_cfg.driver}
+                driver_config = normalize_driver_config({"driver": merged_driver})
+            else:
+                driver_config = normalize_driver_config(cfg)
+
+            # 部门上下文注入
+            team_id = _team_ids.get(team_name, 0)
+            dept_context = await _build_dept_context(team_id, member_name) if team_id else ""
+
             full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
-            model_name = cfg.model or default_model
+            if dept_context:
+                full_prompt += "\n\n" + dept_context
+
             key = _make_member_key(team_name, member_name)
-            driver_config = normalize_driver_config(cfg)
             member = TeamMember(
                 name=member_name,
                 team_name=team_name,

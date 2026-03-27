@@ -94,7 +94,12 @@ async def get_team_config(name: str) -> TeamConfig | None:
     team_id = team.id
 
     members: list[TeamMemberConfig] = [
-        TeamMemberConfig(name=member.name, agent=member.agent_name)
+        TeamMemberConfig(
+            name=member.name,
+            agent=member.agent_name,
+            model=member.model or None,
+            driver=json.loads(member.driver) if member.driver and member.driver != "{}" else {},
+        )
         for member in await gtTeamMemberManager.get_members_by_team(team_id)
     ]
 

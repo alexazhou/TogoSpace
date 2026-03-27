@@ -9,6 +9,7 @@ import peewee_async
 from constants import EnhanceEnum
 
 TJson = TypeVar("TJson")
+TEnum = TypeVar("TEnum", bound="EnhanceEnum")
 
 _database_proxy: peewee.DatabaseProxy = peewee.DatabaseProxy()
 
@@ -33,73 +34,82 @@ class JsonField(peewee.TextField, Generic[TJson]):
         return cast(TJson, json.loads(value))
 
 
-class EnumField(peewee.CharField):
-    """枚举字段，用于在数据库中存储 EnhanceEnum 的 name。"""
+class EnumField(peewee.CharField, Generic[TEnum]):
+    """枚举字段，用于在数据库中存储 EnhanceEnum 的 name。
 
-    def __init__(self, enum_cls: type[EnhanceEnum], *args, **kwargs):
+    用法与 JsonField 一致，通过构造时传入枚举类来绑定类型：
+        EnumField(EmployStatus, default=EmployStatus.ON_BOARD)
+    """
+
+    def __init__(self, enum_cls: type[TEnum], *args, **kwargs):
         self.enum = enum_cls
         super(EnumField, self).__init__(*args, **kwargs)
 
-    def db_value(self, value: EnhanceEnum) -> str:
+    def db_value(self, value: TEnum | None) -> str | None:
         if value is None:
             return None
         return value.name
 
-    def python_value(self, value) -> EnhanceEnum:
+    def python_value(self, value) -> TEnum | None:
         if value is None or value == "":
             return None
-        return getattr(self.enum, value)
+        return cast(TEnum, getattr(self.enum, value))
 
 
 class DbModelBase(peewee_async.AioModel):
-    id: int = peewee.AutoField()
+    id:         int = peewee.AutoField()
+    created_at: str = peewee.CharField(default=lambda: datetime.now().isoformat())
+    updated_at: str = peewee.CharField(default=lambda: datetime.now().isoformat())
 
     @classmethod
     def _now_iso(cls) -> str:
         return datetime.now().isoformat()
 
     @classmethod
-    def _has_updated_at_field(cls) -> bool:
-        return "updated_at" in cls._meta.fields
+    def _inject_insert_timestamps(cls, payload: dict) -> dict:
+        now = cls._now_iso()
+        if "created_at" not in payload:
+            payload["created_at"] = now
+        if "updated_at" not in payload:
+            payload["updated_at"] = now
+        return payload
 
     @classmethod
     def _inject_updated_at(cls, payload: dict) -> dict:
-        if cls._has_updated_at_field() and "updated_at" not in payload:
+        if "updated_at" not in payload:
             payload["updated_at"] = cls._now_iso()
         return payload
 
     @classmethod
     def insert(cls, *args, **kwargs):
         if kwargs:
-            kwargs = cls._inject_updated_at(dict(kwargs))
+            kwargs = cls._inject_insert_timestamps(dict(kwargs))
             return super().insert(*args, **kwargs)
         if args and isinstance(args[0], dict):
-            first = cls._inject_updated_at(dict(args[0]))
+            first = cls._inject_insert_timestamps(dict(args[0]))
             return super().insert(first, *args[1:], **kwargs)
         return super().insert(*args, **kwargs)
 
     @classmethod
     def insert_many(cls, rows, fields=None):
-        if cls._has_updated_at_field():
-            rows = [
-                cls._inject_updated_at(dict(row)) if isinstance(row, dict) else row
-                for row in rows
-            ]
+        rows = [
+            cls._inject_insert_timestamps(dict(row)) if isinstance(row, dict) else row
+            for row in rows
+        ]
         return super().insert_many(rows, fields=fields)
 
     @classmethod
     def update(cls, *args, **kwargs):
-        if cls._has_updated_at_field():
-            if kwargs:
-                if "updated_at" not in kwargs:
-                    kwargs = dict(kwargs)
-                    kwargs["updated_at"] = cls._now_iso()
-                return super().update(*args, **kwargs)
-            if args and isinstance(args[0], dict):
-                first = dict(args[0])
-                if "updated_at" not in first:
-                    first["updated_at"] = cls._now_iso()
-                return super().update(first, *args[1:], **kwargs)
+        if kwargs:
+            if "updated_at" not in kwargs:
+                kwargs = dict(kwargs)
+                kwargs["updated_at"] = cls._now_iso()
+            return super().update(*args, **kwargs)
+        if args and isinstance(args[0], dict):
+            first = dict(args[0])
+            if "updated_at" not in first:
+                first["updated_at"] = cls._now_iso()
+            return super().update(first, *args[1:], **kwargs)
         return super().update(*args, **kwargs)
 
     class Meta:
