@@ -242,6 +242,14 @@ async def startup() -> None:
     _team_ids = {}
 
 
+async def restore_state() -> None:
+    """从数据库恢复所有成员的历史消息。"""
+    for agent in get_all_team_members():
+        items = await persistenceService.load_member_history_message(agent.member_id)
+        if items:
+            agent.inject_history_messages(items)
+
+
 async def _build_dept_context(team_id: int, member_name: str) -> str:
     """查询成员所在部门并格式化为系统提示注入块；不在任何部门时返回空字符串。"""
     member_row = await gtTeamMemberManager.get_member(team_id, member_name)
