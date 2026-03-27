@@ -72,7 +72,7 @@ class TestSchedulerRun(ServiceTestCase):
                 initial_topic="",
                 max_turns=0,
                 member_read_index=None,
-                updated_at=GtRoom._now_iso(),
+                updated_at=GtRoom._now(),
             ),
             members=[GtTeamMember(id=0, team_id=1, name="alice", agent_name="alice")],
         )
@@ -148,7 +148,7 @@ class TestSchedulerRun(ServiceTestCase):
                 initial_topic="",
                 max_turns=0,
                 member_read_index=None,
-                updated_at=GtRoom._now_iso(),
+                updated_at=GtRoom._now(),
             ),
             members=[GtTeamMember(id=0, team_id=1, name="alice", agent_name="alice")],
         )
@@ -178,7 +178,7 @@ class TestSchedulerRun(ServiceTestCase):
                 initial_topic="",
                 max_turns=0,
                 member_read_index=None,
-                updated_at=GtRoom._now_iso(),
+                updated_at=GtRoom._now(),
             ),
             members=[GtTeamMember(id=0, team_id=1, name="alice", agent_name="alice")],
         )
@@ -208,7 +208,7 @@ class TestSchedulerRun(ServiceTestCase):
                 initial_topic="",
                 max_turns=0,
                 member_read_index=None,
-                updated_at=GtRoom._now_iso(),
+                updated_at=GtRoom._now(),
             ),
             members=[GtTeamMember(id=0, team_id=1, name="alice", agent_name="alice")],
         )
@@ -222,7 +222,7 @@ class TestSchedulerRun(ServiceTestCase):
                 initial_topic="",
                 max_turns=0,
                 member_read_index=None,
-                updated_at=GtRoom._now_iso(),
+                updated_at=GtRoom._now(),
             ),
             members=[GtTeamMember(id=0, team_id=1, name="alice", agent_name="alice")],
         )
@@ -256,7 +256,7 @@ class TestSchedulerRun(ServiceTestCase):
                 initial_topic="",
                 max_turns=0,
                 member_read_index=None,
-                updated_at=GtRoom._now_iso(),
+                updated_at=GtRoom._now(),
             ),
             members=[GtTeamMember(id=0, team_id=1, name="alice", agent_name="alice")],
         )

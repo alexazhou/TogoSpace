@@ -13,7 +13,7 @@ async def upsert_agent(template_name: str, model: str) -> GtAgent:
             conflict_target=[GtAgent.template_name],
             update={
                 GtAgent.model: model,
-                GtAgent.updated_at: GtAgent._now_iso(),
+                GtAgent.updated_at: GtAgent._now(),
             },
         )
         .aio_execute()

@@ -433,7 +433,7 @@ async def _create_room(
             initial_topic=initial_topic,
             max_turns=max_turns,
             member_read_index=None,
-            updated_at=GtRoom._now_iso(),
+            updated_at=GtRoom._now(),
         )
 
     resolved_room_id = room_row.id
