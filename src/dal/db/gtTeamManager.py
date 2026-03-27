@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
+from . import gtRoomManager, gtTeamMemberManager
 from model.dbModel.gtTeam import GtTeam
 from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig
 
@@ -84,7 +85,6 @@ async def team_exists(name: str) -> bool:
 # 完整配置获取
 async def get_team_config(name: str) -> TeamConfig | None:
     """获取指定 Team 的完整配置（类似 JSON 格式）。"""
-    from dal.db import gtRoomManager, gtTeamMemberManager
 
     team = await get_team(name)
     if team is None:
@@ -135,7 +135,6 @@ async def get_all_team_configs() -> list[TeamConfig]:
 # JSON 到数据库的转换
 async def import_team_from_json(team_config: TeamConfig) -> None:
     """从 JSON 配置导入 Team 到数据库。"""
-    from dal.db import gtRoomManager, gtTeamMemberManager
 
     name = team_config.name
 

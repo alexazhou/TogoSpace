@@ -346,6 +346,36 @@ async def startup() -> None:
     _rooms_by_id.clear()
 
 
+async def restore_state() -> None:
+    """从数据库恢复所有房间的运行时状态。"""
+    for room in get_all_rooms():
+        room_msg_rows, member_read_index = await persistenceService.load_room_runtime(room.room_id)
+        recovered_from_db = bool(room_msg_rows)
+        restored_messages: list[GtCoreChatMessage] | None = None
+
+        if room_msg_rows:
+            restored_messages = [
+                GtCoreChatMessage(
+                    sender_name=room._member_name_map.get(row.member_id, SpecialAgent.SYSTEM.name),
+                    content=row.content,
+                    send_time=datetime.fromisoformat(row.send_time),
+                )
+                for row in room_msg_rows
+            ]
+        elif not room.messages:
+            await room.add_message(SpecialAgent.SYSTEM.name, room.build_initial_system_message())
+
+        if restored_messages is not None or member_read_index is not None:
+            room.inject_runtime_state(
+                messages=restored_messages,
+                member_read_index=member_read_index,
+            )
+        elif recovered_from_db and room.messages:
+            room.mark_all_messages_read()
+
+        room.rebuild_state_from_history()
+
+
 def get_room_by_key(room_key: str) -> ChatRoom:
     """通过 room_key（room_name@team_name）返回聊天室实例。"""
     room = _rooms.get(room_key)
