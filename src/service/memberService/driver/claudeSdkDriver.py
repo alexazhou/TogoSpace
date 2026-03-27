@@ -15,7 +15,7 @@ from service.funcToolService.tools import FUNCTION_REGISTRY
 from service.roomService import ChatRoom
 from util import llmApiUtil
 
-from .base import AgentDriver
+from .base import MemberDriver
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def _format_sdk_blocks(blocks) -> list[str]:
 
 
 
-class ClaudeSdkAgentDriver(AgentDriver):
+class ClaudeSdkMemberDriver(MemberDriver):
     def __init__(self, host, config):
         super().__init__(host, config)
         self._sdk_client: ClaudeSDKClient | None = None
@@ -89,7 +89,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
         client = ClaudeSDKClient(options=options)
         await client.connect()
         self._sdk_client = client
-        logger.info(f"SDK 持久会话初始化: agent={self.host.key}")
+        logger.info(f"SDK 持久会话初始化: member={self.host.key}")
 
     async def shutdown(self) -> None:
         if self._sdk_client is None:
@@ -97,9 +97,9 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
         try:
             await self._sdk_client.disconnect()
-            logger.info(f"SDK 会话已关闭: agent={self.host.key}")
+            logger.info(f"SDK 会话已关闭: member={self.host.key}")
         except Exception as e:
-            logger.error(f"SDK 会话关闭失败: agent={self.host.key}, error={e}", exc_info=True)
+            logger.error(f"SDK 会话关闭失败: member={self.host.key}, error={e}", exc_info=True)
         finally:
             self._sdk_client = None
 
@@ -191,14 +191,14 @@ class ClaudeSdkAgentDriver(AgentDriver):
         client = self._sdk_client
 
         if client is None:
-            raise RuntimeError(f"Claude SDK client 尚未初始化: agent={self.host.key}")
+            raise RuntimeError(f"Claude SDK client 尚未初始化: member={self.host.key}")
 
         max_attempts = max(1, max_function_calls)
-        logger.info(f"SDK 注入增量消息: agent={self.host.key}, room={room.key}, new_msgs={len(prompt_lines)}")
+        logger.info(f"SDK 注入增量消息: member={self.host.key}, room={room.key}, new_msgs={len(prompt_lines)}")
 
         try:
             await client.query(turn_prompt)
-            logger.info(f"SDK prompt 已发送，等待响应: agent={self.host.key}")
+            logger.info(f"SDK prompt 已发送，等待响应: member={self.host.key}")
             hint = _HINT_PROMPT
             
             for attempt in range(max_attempts):
@@ -206,7 +206,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
                 has_direct_text = False
 
                 if attempt > 0:
-                    logger.info(f"SDK 注入发言提醒: agent={self.host.key}, attempt={attempt}")
+                    logger.info(f"SDK 注入发言提醒: member={self.host.key}, attempt={attempt}")
                     await client.query(hint)
 
                 msg_count = 0
@@ -217,45 +217,45 @@ class ClaudeSdkAgentDriver(AgentDriver):
                     if isinstance(msg, AssistantMessage):
                         parts = _format_sdk_blocks(msg.content)
                         logger.info(
-                            f"SDK AssistantMessage: agent={self.host.key}, model={msg.model}, content=[{', '.join(parts)}]"
+                            f"SDK AssistantMessage: member={self.host.key}, model={msg.model}, content=[{', '.join(parts)}]"
                         )
                         # 检查是否有 TextBlock
                         for block in msg.content:
                             if isinstance(block, TextBlock) and block.text.strip():
-                                logger.warning(f"检测到 SDK Agent 直接输出文字: agent={self.host.key}, text={block.text[:50]!r}")
+                                logger.warning(f"检测到 SDK Agent 直接输出文字: member={self.host.key}, text={block.text[:50]!r}")
                                 has_direct_text = True
 
                     elif isinstance(msg, UserMessage):
                         parts = _format_sdk_blocks(msg.content)
-                        logger.info(f"SDK UserMessage: agent={self.host.key}, content=[{', '.join(parts)}]")
+                        logger.info(f"SDK UserMessage: member={self.host.key}, content=[{', '.join(parts)}]")
 
                         if self._turn_done and not interrupted:
-                            logger.info(f"SDK 发言完成，主动中断会话: agent={self.host.key}")
+                            logger.info(f"SDK 发言完成，主动中断会话: member={self.host.key}")
                             await client.interrupt()
                             interrupted = True
 
                     elif isinstance(msg, SystemMessage):
-                        logger.info(f"SDK SystemMessage: agent={self.host.key}, subtype={msg.subtype}, data={msg.data}")
+                        logger.info(f"SDK SystemMessage: member={self.host.key}, subtype={msg.subtype}, data={msg.data}")
 
                     elif isinstance(msg, ResultMessage):
                         if msg.is_error:
-                            logger.error(f"SDK 执行失败: agent={self.host.key}, room={room.key}, result={msg.result}")
+                            logger.error(f"SDK 执行失败: member={self.host.key}, room={room.key}, result={msg.result}")
                         else:
                             logger.info(
-                                f"SDK 会话完成: agent={self.host.key}, num_turns={msg.num_turns}, duration_ms={msg.duration_ms}, cost_usd={msg.total_cost_usd}"
+                                f"SDK 会话完成: member={self.host.key}, num_turns={msg.num_turns}, duration_ms={msg.duration_ms}, cost_usd={msg.total_cost_usd}"
                             )
 
                     else:
-                        logger.debug(f"SDK 未知消息: agent={self.host.key}, type={type(msg).__name__}, data={msg}")
+                        logger.debug(f"SDK 未知消息: member={self.host.key}, type={type(msg).__name__}, data={msg}")
 
                 logger.info(
-                    f"SDK receive_response 结束: agent={self.host.key}, total_msgs={msg_count}, attempt={attempt}"
+                    f"SDK receive_response 结束: member={self.host.key}, total_msgs={msg_count}, attempt={attempt}"
                 )
 
                 if self._turn_done:
                     # 检查是否存在"无效发言"：输出了文字但房间没收到内容
                     if has_direct_text and not room._current_turn_has_content:
-                        logger.warning(f"SDK Agent 输出了文字但未调用 send_chat_msg，强制提醒: agent={self.host.key}")
+                        logger.warning(f"SDK Member 输出了文字但未调用 send_chat_msg，强制提醒: member={self.host.key}")
                         # 重置状态，注入提醒
                         self._turn_done = False
                         hint = _REMINDER_PROMPT
@@ -263,8 +263,8 @@ class ClaudeSdkAgentDriver(AgentDriver):
                     break
 
                 logger.warning(
-                    f"SDK agent 未调用发言工具（可能只输出 thinking 或纯文字）: agent={self.host.key}, attempt={attempt}"
+                    f"SDK agent 未调用发言工具（可能只输出 thinking 或纯文字）: member={self.host.key}, attempt={attempt}"
                 )
         except Exception as e:
-            logger.error(f"SDK 会话异常: agent={self.host.key}, room={room.key}, error={e}", exc_info=True)
+            logger.error(f"SDK 会话异常: member={self.host.key}, room={room.key}, error={e}", exc_info=True)
             raise

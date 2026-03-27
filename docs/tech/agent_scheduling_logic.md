@@ -72,4 +72,4 @@
 *   `src/service/roomService.py`: `ChatRoom._update_turn_state_on_finish`, `ChatRoom.finish_turn`
 *   `src/service/schedulerService.py`: `_on_member_turn`
 *   `src/service/funcToolService/tools.py`: `send_chat_msg`, `finish_chat_turn`
-*   `src/service/agentService/driver/`: 各种 Driver 的 `run_chat_turn` 循环判定。
+*   `src/service/memberService/driver/`: 各种 Driver 的 `run_chat_turn` 循环判定。
