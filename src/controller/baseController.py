@@ -1,11 +1,13 @@
 import json
 import logging
-from typing import Any, TypeVar
-import tornado.web
-from pydantic import BaseModel
-from tornado.web import HTTPError
 from datetime import datetime
 from enum import Enum
+from typing import Any, TypeVar
+
+import tornado.web
+from playhouse.shortcuts import model_to_dict
+from pydantic import BaseModel
+from tornado.web import HTTPError
 
 from model.dbModel.base import DbModelBase
 from exception import TeamAgentException
@@ -30,7 +32,6 @@ class BaseHandler(tornado.web.RequestHandler):
             return data.isoformat()
         if isinstance(data, DbModelBase):
             # 将 Peewee 模型转换为字典
-            from playhouse.shortcuts import model_to_dict
             return self._convert_gt_db(model_to_dict(data))
         if hasattr(data, '__dict__'):
             # 通用对象转字典（过滤私有属性）

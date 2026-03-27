@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 # 内部包
 from controller.baseController import BaseHandler
-from dal.db import gtTeamManager, gtTeamMemberManager
+from dal.db import gtRoomManager, gtTeamManager, gtTeamMemberManager
 from service import teamService
 from util import assertUtil
 from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig
@@ -66,8 +66,6 @@ class TeamDetailHandler(BaseHandler):
     """GET /teams/{id}.json - 获取指定 Team 详情"""
 
     async def get(self, team_id_str: str) -> None:
-        from dal.db import gtRoomManager
-
         team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")

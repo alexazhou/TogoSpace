@@ -11,7 +11,7 @@ from model.coreModel.gtCoreWebModel import GtCoreMemberInfo
 from model.dbModel.gtMemberHistory import GtMemberHistory
 from service.agentService.driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
-from dal.db import gtAgentManager, gtTeamMemberManager
+from dal.db import gtAgentManager, gtDeptManager, gtTeamManager, gtTeamMemberManager
 from service.roomService import ChatRoom, ChatContext
 from constants import SpecialAgent, MessageBusTopic, MemberStatus
 
@@ -31,7 +31,6 @@ def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
 
 async def load_team_ids(teams_config: list[TeamConfig]) -> None:
     """Load team_id for each team name."""
-    from dal.db import gtTeamManager
     global _team_ids
     _team_ids = {}
     for team in teams_config:
@@ -245,13 +244,11 @@ async def startup() -> None:
 
 async def _build_dept_context(team_id: int, member_name: str) -> str:
     """查询成员所在部门并格式化为系统提示注入块；不在任何部门时返回空字符串。"""
-    from dal.db import gtTeamMemberManager as _gtTMM, gtDeptManager as _gtDM
-
-    member_row = await _gtTMM.get_member(team_id, member_name)
+    member_row = await gtTeamMemberManager.get_member(team_id, member_name)
     if member_row is None:
         return ""
 
-    all_depts = await _gtDM.get_all_depts(team_id)
+    all_depts = await gtDeptManager.get_all_depts(team_id)
     if not all_depts:
         return ""
 
@@ -266,7 +263,7 @@ async def _build_dept_context(team_id: int, member_name: str) -> str:
 
     # 建立辅助映射
     dept_id_map = {d.id: d for d in all_depts}
-    all_members = await _gtTMM.get_members_by_team(team_id)
+    all_members = await gtTeamMemberManager.get_members_by_team(team_id)
     member_id_to_name: dict[int, str] = {m.id: m.name for m in all_members}
 
     manager_name = member_id_to_name.get(member_dept.manager_id, "")
