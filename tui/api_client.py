@@ -73,7 +73,15 @@ class ApiClient:
         async with session.get(f"{self._base_url}/agents/list.json", params=params) as resp:
             resp.raise_for_status()
             data = await resp.json()
-        return [AgentInfo(name=a["name"], model=a["model"], team_name=a.get("team_name", ""), status=a.get("status", "idle")) for a in data["agents"]]
+        return [
+            AgentInfo(
+                name=a["name"],
+                model=a["model"],
+                team_name=a.get("team_name", ""),
+                status=a.get("status", "idle"),
+            )
+            for a in data["agents"]
+        ]
 
     async def get_teams(self) -> list[TeamInfo]:
         session = self._get_session()
