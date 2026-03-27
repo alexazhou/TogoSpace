@@ -133,8 +133,8 @@ async def get_all_team_configs() -> list[TeamConfig]:
 
 
 # JSON 到数据库的转换
-async def import_team_from_json(team_config: TeamConfig) -> None:
-    """从 JSON 配置导入 Team 到数据库。"""
+async def import_team_from_config(team_config: TeamConfig) -> None:
+    """从 TeamConfig 导入 Team 到数据库。"""
 
     name = team_config.name
 

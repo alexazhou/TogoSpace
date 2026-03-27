@@ -14,6 +14,7 @@ import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.ormService as ormService
 import service.persistenceService as persistenceService
+from dal.db import gtTeamManager
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
 from util.configTypes import AgentTemplate, TeamConfig
 from constants import OpenaiLLMApiRole, RoomState
@@ -37,11 +38,13 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+        await gtTeamManager.import_team_from_config(team_config)
         await roomService.create_room(TEAM, "general", ["alice", "bob"])
         await funcToolService.startup()
         await agentService.startup()
         agentService.load_agent_config(agents_config)
         await memberService.startup()
+        await memberService.load_team_ids([team_config])
         await memberService.create_team_members([team_config])
         await scheduler.startup([team_config])
 

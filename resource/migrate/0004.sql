@@ -1,2 +1,0 @@
-ALTER TABLE teams
-ADD COLUMN working_directory TEXT NOT NULL DEFAULT '';

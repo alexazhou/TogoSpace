@@ -5,6 +5,7 @@ import sys
 
 import pytest
 
+from dal.db import gtTeamManager
 from service import agentService, memberService, roomService, ormService, persistenceService
 from util.configTypes import AgentTemplate, TeamConfig
 from ...base import ServiceTestCase
@@ -28,9 +29,11 @@ class _agentServiceCase(ServiceTestCase):
         await roomService.startup()
         agents_cfg = [AgentTemplate.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
         team_cfg = TeamConfig.model_validate(json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read()))
+        await gtTeamManager.import_team_from_config(team_cfg)
         await agentService.startup()
         agentService.load_agent_config(agents_cfg)
         await memberService.startup()
+        await memberService.load_team_ids([team_cfg])
         await memberService.create_team_members([team_cfg])
 
     @classmethod

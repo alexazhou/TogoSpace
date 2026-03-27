@@ -35,7 +35,7 @@ async def startup() -> None:
                 room.max_turns = 100
                 logger.info(f"为 Team '{name}' 的 Room '{room.name}' 设置默认 max_turns=100")
 
-        await gtTeamManager.import_team_from_json(team_config)
+        await gtTeamManager.import_team_from_config(team_config)
 
         if team_config.dept_tree:
             team = await gtTeamManager.get_team(name)
