@@ -42,4 +42,4 @@ graph TD
 | `roomService` | 管理聊天室状态、成员名单、严格轮次推进逻辑 | messageBus |
 | `llmService` | 封装大模型 API 调用（OpenAI 兼容协议） | 无 |
 | `funcToolService` | 提供工具注册、加载与执行环境 | 无 |
-| `messageBus` | 轻量级异步事件总线，负责组件间解耦通信 | 无 |
+| `messageBus` | 轻量级异步事件总线，负责组件间解耦通信；在事件循环中 `publish` 采用异步调度，避免慢订阅者阻塞发布链路 | 无 |

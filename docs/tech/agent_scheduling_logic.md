@@ -26,7 +26,7 @@
 ## 3. 回合生命周期
 
 ### 3.1 触发 (Start)
-1.  房间发布 `ROOM_AGENT_TURN` 事件（包含 `agent_name` 和 `room_key`）。
+1.  房间发布 `ROOM_MEMBER_TURN` 事件（包含 `member_name`、`room_id`、`room_key`、`team_name`）。
 2.  `Scheduler` 订阅该事件，并将该房间的任务加入对应 Agent 的 `wait_task_queue`。
 3.  Agent 消费队列，根据驱动类型（Native 或 SDK）启动推理循环。
 
@@ -39,7 +39,7 @@
 *   **AI Agent**：必须显式调用 `finish_chat_turn()` 工具。
     *   底层触发 `ChatRoom.finish_turn()`。
     *   如果 `_current_turn_has_content` 为 `False`，该 Agent 被加入 `_round_skipped`。
-    *   指针 `_turn_pos` 递增，发布下一个成员的 `ROOM_AGENT_TURN` 事件。
+    *   指针 `_turn_pos` 递增，发布下一个成员的 `ROOM_MEMBER_TURN` 事件。
 *   **人类操作者 (Operator)**：
     *   通过 TUI 发送消息时，后端在 `RoomMessagesHandler` 中会自动调用 `finish_turn`，实现“发完即结束”的快捷体验。
 
@@ -69,7 +69,7 @@
 
 ## 6. 关键类与方法索引
 
-*   `src/service/roomService.py`: `ChatRoom._apply_turn_logic`, `ChatRoom.finish_turn`
-*   `src/service/schedulerService.py`: `_on_agent_turn`
+*   `src/service/roomService.py`: `ChatRoom._update_turn_state_on_finish`, `ChatRoom.finish_turn`
+*   `src/service/schedulerService.py`: `_on_member_turn`
 *   `src/service/funcToolService/tools.py`: `send_chat_msg`, `finish_chat_turn`
 *   `src/service/agentService/driver/`: 各种 Driver 的 `run_chat_turn` 循环判定。
