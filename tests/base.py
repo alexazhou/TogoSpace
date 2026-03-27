@@ -8,23 +8,25 @@ import socket
 import subprocess
 import sys
 import time
+import unittest.mock as mock
 import urllib.request
 
 import db as db_tool
 import service.messageBus as messageBus
 import service.roomService as roomService
 import service.agentService as agentService
-import service.memberService as memberService
 import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.persistenceService as persistenceService
 import service.ormService as ormService
 from util import configUtil
+from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
 from mock_llm_server import (
     MockLLMServer,
     MOCK_LLM_HOST,
     get_mock_llm_api_url,
 )
+from constants import OpenaiLLMApiRole
 
 _SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 _BACKEND_READY_TIMEOUT = 20
@@ -123,8 +125,7 @@ class ServiceTestCase:
             }]):
                 await ...
         """
-        import unittest.mock as mock
-        target = "service.memberService.core.llmService.infer"
+        target = "service.agentService.core.llmService.infer"
         
         if responses is not None:
             # 将简化字典序列转换为 Mock 对象序列
@@ -141,11 +142,6 @@ class ServiceTestCase:
 
     def normalize_to_mock(self, data: dict):
         """将简化格式的响应字典转换为完整的 Mock 响应对象。"""
-        import unittest.mock as mock
-        from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
-        from constants import OpenaiLLMApiRole
-        import json
-
         if isinstance(data, (mock.MagicMock, mock.AsyncMock)):
             return data
 

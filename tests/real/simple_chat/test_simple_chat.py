@@ -7,8 +7,8 @@ import sys
 import pytest
 from constants import RoomState
 import service.roomService as roomService
+import service.roleTemplateService as roleTemplateService
 import service.agentService as agentService
-import service.memberService as memberService
 import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.llmService as llmService
@@ -45,11 +45,11 @@ class TestRealSimpleChat(ServiceTestCase):
         await persistenceService.startup()
         await roomService.startup()
         await funcToolService.startup()
-        await agentService.startup()
+        await roleTemplateService.startup()
 
-        agentService.load_agent_config()
-        await memberService.startup()
-        await memberService.create_team_members(cfg.teams)
+        roleTemplateService.load_role_template_config()
+        await agentService.startup()
+        await agentService.create_team_agents(cfg.teams)
 
         # 创建房间（max_turns=1 表示 alice/bob 各 1 次发言）
         await roomService.create_room("default", "general", ["alice", "bob"], max_turns=1)
@@ -61,7 +61,7 @@ class TestRealSimpleChat(ServiceTestCase):
     async def async_teardown_class(cls):
         """清理服务"""
         scheduler.shutdown()
-        await memberService.shutdown()
+        await agentService.shutdown()
         funcToolService.shutdown()
         roomService.shutdown()
         await persistenceService.shutdown()

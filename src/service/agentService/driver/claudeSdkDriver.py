@@ -200,7 +200,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
             await client.query(turn_prompt)
             logger.info(f"SDK prompt 已发送，等待响应: agent={self.host.key}")
             hint = _HINT_PROMPT
-            
+
             for attempt in range(max_attempts):
                 # 追踪本次尝试是否发生了直接文本输出
                 has_direct_text = False

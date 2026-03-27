@@ -4,11 +4,12 @@ import sys
 
 import pytest
 
+from dal.db import gtTeamManager
 from service import roomService, agentService, ormService, persistenceService
-from service.memberService import TeamMember
+from service.agentService import Agent
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
-
+from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -27,6 +28,7 @@ class TestSdkDoSend(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+        await gtTeamManager.import_team_from_config(TeamConfig(name=TEAM))
 
     @classmethod
     async def async_teardown_class(cls):
@@ -39,7 +41,7 @@ class TestSdkDoSend(ServiceTestCase):
         await roomService.create_room(TEAM, current_room_name, [agent_name])
         room = roomService.get_room_by_key(f"{current_room_name}@{TEAM}")
         room.activate_scheduling()
-        agent = TeamMember(name=agent_name, team_name=TEAM, system_prompt="test", model="test-model",
+        agent = Agent(name=agent_name, team_name=TEAM, system_prompt="test", model="test-model",
                       driver_config=AgentDriverConfig(driver_type="native"))
         agent.current_room = room
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
@@ -118,6 +120,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+        await gtTeamManager.import_team_from_config(TeamConfig(name=TEAM))
         await agentService.startup()
 
     @classmethod
@@ -130,7 +133,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
     async def test_run_chat_turn_requires_started_client(self):
         await roomService.create_room(TEAM, "lobby", ["alice"])
         room = roomService.get_room_by_key(f"lobby@{TEAM}")
-        agent = TeamMember(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
+        agent = Agent(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
                       driver_config=AgentDriverConfig(driver_type="native"))
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
 
@@ -143,7 +146,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
     async def test_run_chat_turn_uses_max_function_calls_as_retry_limit(self):
         await roomService.create_room(TEAM, "lobby", ["alice"])
         room = roomService.get_room_by_key(f"lobby@{TEAM}")
-        agent = TeamMember(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
+        agent = Agent(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
                       driver_config=AgentDriverConfig(driver_type="native"))
         agent.current_room = room
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from dal.db import gtTeamManager, gtTeamMemberManager, gtRoomManager
+from dal.db import gtTeamManager, gtAgentManager, gtRoomManager
 from exception import TeamAgentException
+from service import deptService
 from util import configUtil
 from util.configTypes import TeamConfig
 
@@ -34,7 +35,12 @@ async def startup() -> None:
                 room.max_turns = 100
                 logger.info(f"为 Team '{name}' 的 Room '{room.name}' 设置默认 max_turns=100")
 
-        await gtTeamManager.import_team_from_json(team_config)
+        await gtTeamManager.import_team_from_config(team_config)
+
+        if team_config.dept_tree:
+            team = await gtTeamManager.get_team(name)
+            if team is not None:
+                await deptService.import_dept_tree(team.id, team_config.dept_tree)
 
     # 从数据库加载所有配置
     _teams = await gtTeamManager.get_all_team_configs()
@@ -60,7 +66,10 @@ async def create_team(team_config: TeamConfig) -> None:
     # 创建 Team
     team = await gtTeamManager.upsert_team(team_config)
     team_id = team.id
-    await gtTeamMemberManager.upsert_team_members(team_id, team_config.members)
+    await gtAgentManager.upsert_agents(team_id, team_config.members)
+
+    if team_config.dept_tree:
+        await deptService.import_dept_tree(team_id, team_config.dept_tree)
 
     # 创建 Rooms（rooms 参数）
     rooms = team_config.preset_rooms
@@ -91,7 +100,7 @@ async def update_team(team_config: TeamConfig) -> None:
     # 更新 Team 基本信息
     team = await gtTeamManager.upsert_team(team_config)
     team_id = team.id
-    await gtTeamMemberManager.upsert_team_members(team_id, team_config.members)
+    await gtAgentManager.upsert_agents(team_id, team_config.members)
 
     # 更新 preset_rooms
     rooms = team_config.preset_rooms
@@ -132,7 +141,7 @@ async def delete_team(name: str) -> None:
 
 async def hot_reload_team(name: str) -> None:
     """触发指定 Team 的热更新。"""
-    from service import roomService, schedulerService, memberService
+    from service import roomService, schedulerService, agentService
 
     # 重新加载配置
     team_configs = await reload_from_db()
@@ -146,7 +155,7 @@ async def hot_reload_team(name: str) -> None:
     schedulerService.stop_team(name)
 
     # 刷新成员实例，保证新增/变更成员可被调度命中
-    await memberService.reload_team_members(name, team_configs)
+    await agentService.reload_team_agents(name, team_configs)
 
     # 刷新调度器配置
     schedulerService.refresh_team_config(name, team_configs)

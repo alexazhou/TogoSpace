@@ -8,30 +8,30 @@ from .nativeDriver import NativeAgentDriver
 from .tspDriver import TspAgentDriver
 
 
-from util.configTypes import AgentTemplate
+from util.configTypes import RoleTemplate
 
-def normalize_driver_config(agent_cfg: AgentTemplate | Mapping[str, Any]) -> AgentDriverConfig:
-    if hasattr(agent_cfg, "model_dump"):
-        agent_cfg = agent_cfg.model_dump()
+def normalize_driver_config(role_template_cfg: RoleTemplate | Mapping[str, Any]) -> AgentDriverConfig:
+    if hasattr(role_template_cfg, "model_dump"):
+        role_template_cfg = role_template_cfg.model_dump()
 
-    driver_cfg = agent_cfg.get("driver")
+    driver_cfg = role_template_cfg.get("driver")
     if driver_cfg:
         return AgentDriverConfig(
             driver_type=driver_cfg["type"],
             options={k: v for k, v in driver_cfg.items() if k != "type"},
         )
 
-    runtime_cfg = agent_cfg.get("runtime")
+    runtime_cfg = role_template_cfg.get("runtime")
     if runtime_cfg:
         return AgentDriverConfig(
             driver_type=runtime_cfg["type"],
             options={k: v for k, v in runtime_cfg.items() if k != "type"},
         )
 
-    if agent_cfg.get("use_agent_sdk", False):
+    if role_template_cfg.get("use_agent_sdk", False):
         return AgentDriverConfig(
             driver_type="claude_sdk",
-            options={"allowed_tools": agent_cfg.get("allowed_tools", [])},
+            options={"allowed_tools": role_template_cfg.get("allowed_tools", [])},
         )
 
     return AgentDriverConfig(driver_type="native")

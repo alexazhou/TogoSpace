@@ -1,17 +1,19 @@
 from dal.db import (
+    gtRoleTemplateManager,
     gtAgentManager,
-    gtMemberHistoryManager,
+    gtAgentHistoryManager,
+    gtDeptManager,
     gtTeamManager,
-    gtTeamMemberManager,
     gtRoomManager,
     gtRoomMessageManager,
 )
 
 __all__ = [
+    "gtRoleTemplateManager",
     "gtAgentManager",
-    "gtMemberHistoryManager",
+    "gtAgentHistoryManager",
+    "gtDeptManager",
     "gtTeamManager",
-    "gtTeamMemberManager",
     "gtRoomManager",
     "gtRoomMessageManager",
 ]

@@ -5,14 +5,13 @@ import peewee
 from .base import DbModelBase
 
 
-class GtMemberHistory(DbModelBase):
-    member_id: int = peewee.IntegerField()
+class GtAgentHistory(DbModelBase):
+    agent_id: int = peewee.IntegerField()
     seq: int = peewee.IntegerField(null=False)
     message_json: str = peewee.TextField(null=False)
-    updated_at: str = peewee.CharField(null=False)
 
     class Meta:
-        table_name = "member_histories"
+        table_name = "agent_histories"
         indexes = (
-            (("member_id", "seq"), True),
+            (("agent_id", "seq"), True),
         )

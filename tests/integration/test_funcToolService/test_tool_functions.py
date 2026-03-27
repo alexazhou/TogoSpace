@@ -8,7 +8,9 @@ import pytest
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
+from dal.db import gtTeamManager
 from service.roomService import ChatContext
+from util.configTypes import TeamConfig
 from service.funcToolService.toolLoader import (
     python_type_to_json_schema,
     get_function_metadata,
@@ -113,6 +115,7 @@ class TestToolFunctions(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+        await gtTeamManager.upsert_team(TeamConfig(name=TEAM))
 
     @classmethod
     async def async_teardown_class(cls):

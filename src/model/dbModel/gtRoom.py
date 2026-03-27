@@ -12,9 +12,8 @@ class GtRoom(DbModelBase):
     type: RoomType = EnumField(RoomType, null=False)
     initial_topic: str = peewee.CharField(null=True)
     max_turns: int = peewee.IntegerField(default=100)
-    member_ids: list[int] = JsonField[list[int]](default=list)
-    member_read_index: dict[str, int] = JsonField[dict[str, int]](null=True)
-    updated_at: str = peewee.CharField()
+    agent_ids: list[int] = JsonField[list[int]](default=list)
+    agent_read_index: dict[str, int] = JsonField[dict[str, int]](null=True)
 
     class Meta:
         table_name = "rooms"

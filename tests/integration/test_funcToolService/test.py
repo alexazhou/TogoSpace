@@ -1,4 +1,5 @@
 """integration tests for service.funcToolService — 需要 funcToolService.startup()"""
+import json
 import os
 import sys
 
@@ -8,7 +9,9 @@ import service.funcToolService as funcToolService
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
+from dal.db import gtTeamManager
 from service.roomService import ChatContext
+from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -43,6 +46,7 @@ class TestRunToolCall(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+        await gtTeamManager.upsert_team(TeamConfig(name=TEAM))
         await funcToolService.startup()
 
     @classmethod
@@ -53,7 +57,6 @@ class TestRunToolCall(ServiceTestCase):
         await ormService.shutdown()
 
     async def _run(self, name, args, **kw):
-        import json
         return json.loads(await funcToolService.run_tool_call(name, args, **kw))
 
     async def test_run_tool_call_basic(self):

@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import logging
 
+from . import gtRoomManager, gtAgentManager
 from model.dbModel.gtTeam import GtTeam
-from util.configTypes import TeamConfig, TeamRoomConfig
+from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ async def upsert_team(team_config: TeamConfig) -> GtTeam:
                 GtTeam.working_directory: working_directory,
                 GtTeam.config: config_json,
                 GtTeam.max_function_calls: max_function_calls,
-                GtTeam.updated_at: GtTeam._now_iso(),
+                GtTeam.updated_at: GtTeam._now(),
             },
         )
         .aio_execute()
@@ -69,7 +70,7 @@ async def upsert_team(team_config: TeamConfig) -> GtTeam:
 async def delete_team(name: str) -> None:
     """软删除 Team（设置 enabled=0）。"""
     await (
-        GtTeam.update(enabled=0, updated_at=GtTeam._now_iso())
+        GtTeam.update(enabled=0, updated_at=GtTeam._now())
         .where(GtTeam.name == name)
         .aio_execute()
     )
@@ -84,8 +85,6 @@ async def team_exists(name: str) -> bool:
 # 完整配置获取
 async def get_team_config(name: str) -> TeamConfig | None:
     """获取指定 Team 的完整配置（类似 JSON 格式）。"""
-    from dal.db import gtRoomManager, gtTeamMemberManager
-    from util.configTypes import TeamMemberConfig, TeamRoomConfig
 
     team = await get_team(name)
     if team is None:
@@ -93,9 +92,14 @@ async def get_team_config(name: str) -> TeamConfig | None:
 
     team_id = team.id
 
-    members: list[TeamMemberConfig] = [
-        TeamMemberConfig(name=member.name, agent=member.agent_name)
-        for member in await gtTeamMemberManager.get_members_by_team(team_id)
+    members: list[AgentConfig] = [
+        AgentConfig(
+            name=member.name,
+            role_template=member.role_template_name,
+            model=member.model or None,
+            driver=json.loads(member.driver) if member.driver and member.driver != "{}" else {},
+        )
+        for member in await gtAgentManager.get_agents_by_team(team_id)
     ]
 
     rooms: list[TeamRoomConfig] = []
@@ -129,9 +133,8 @@ async def get_all_team_configs() -> list[TeamConfig]:
 
 
 # JSON 到数据库的转换
-async def import_team_from_json(team_config: TeamConfig) -> None:
-    """从 JSON 配置导入 Team 到数据库。"""
-    from dal.db import gtRoomManager, gtTeamMemberManager
+async def import_team_from_config(team_config: TeamConfig) -> None:
+    """从 TeamConfig 导入 Team 到数据库。"""
 
     name = team_config.name
 
@@ -144,7 +147,7 @@ async def import_team_from_json(team_config: TeamConfig) -> None:
     # 导入 Team
     team = await upsert_team(team_config)
     team_id = team.id
-    await gtTeamMemberManager.upsert_team_members(team_id, team_config.members)
+    await gtAgentManager.upsert_agents(team_id, team_config.members)
 
     # 导入 Rooms（upsert_rooms 会处理成员）
     rooms = _iter_team_rooms(team_config)
