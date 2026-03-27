@@ -169,7 +169,7 @@ class TestDalManagers(ServiceTestCase):
         assert [c.name for c in all_configs] == ["team_a", "team_b"]
         assert all_configs[1].preset_rooms == []
 
-    async def test_team_manager_import_team_from_json_imports_and_skips_existing(self):
+    async def test_team_manager_import_team_from_config_imports_and_skips_existing(self):
         await self._reset_tables()
 
         payload = TeamConfig(
@@ -185,7 +185,7 @@ class TestDalManagers(ServiceTestCase):
                 members=["alice_1", "bob_1"],
             )],
         )
-        await gtTeamManager.import_team_from_json(payload)
+        await gtTeamManager.import_team_from_config(payload)
 
         imported = await gtTeamManager.get_team("imported")
         assert imported is not None
@@ -195,7 +195,7 @@ class TestDalManagers(ServiceTestCase):
         assert await gtRoomManager.get_members_by_room(room.id) == ["alice_1", "bob_1"]
 
         # 已存在时应跳过导入，不覆盖已有记录
-        await gtTeamManager.import_team_from_json(TeamConfig(
+        await gtTeamManager.import_team_from_config(TeamConfig(
             name="imported",
             members=[TeamMemberConfig(name="charlie", agent="charlie")],
             preset_rooms=[TeamRoomConfig(name="r2", members=["Operator", "charlie"])],

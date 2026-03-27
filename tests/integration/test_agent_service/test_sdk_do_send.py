@@ -4,11 +4,12 @@ import sys
 
 import pytest
 
+from dal.db import gtTeamManager
 from service import roomService, agentService, ormService, persistenceService
 from service.memberService import TeamMember
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
-
+from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -27,6 +28,7 @@ class TestSdkDoSend(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+        await gtTeamManager.import_team_from_config(TeamConfig(name=TEAM))
 
     @classmethod
     async def async_teardown_class(cls):
@@ -118,6 +120,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+        await gtTeamManager.import_team_from_config(TeamConfig(name=TEAM))
         await agentService.startup()
 
     @classmethod
