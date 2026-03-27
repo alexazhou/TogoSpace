@@ -55,7 +55,7 @@ async def upsert_team(team_config: TeamConfig) -> GtTeam:
                 GtTeam.working_directory: working_directory,
                 GtTeam.config: config_json,
                 GtTeam.max_function_calls: max_function_calls,
-                GtTeam.updated_at: GtTeam._now_iso(),
+                GtTeam.updated_at: GtTeam._now(),
             },
         )
         .aio_execute()
@@ -70,7 +70,7 @@ async def upsert_team(team_config: TeamConfig) -> GtTeam:
 async def delete_team(name: str) -> None:
     """软删除 Team（设置 enabled=0）。"""
     await (
-        GtTeam.update(enabled=0, updated_at=GtTeam._now_iso())
+        GtTeam.update(enabled=0, updated_at=GtTeam._now())
         .where(GtTeam.name == name)
         .aio_execute()
     )

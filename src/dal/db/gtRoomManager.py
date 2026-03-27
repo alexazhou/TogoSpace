@@ -57,7 +57,7 @@ async def ensure_room_by_key(
                 GtRoom.type: room_type,
                 GtRoom.initial_topic: initial_topic,
                 GtRoom.max_turns: max_turns,
-                GtRoom.updated_at: GtRoom._now_iso(),
+                GtRoom.updated_at: GtRoom._now(),
             },
         )
         .aio_execute()
@@ -103,7 +103,7 @@ async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
                 initial_topic=room_cfg.initial_topic,
                 max_turns=room_cfg.max_turns,
                 member_ids=member_ids,
-                updated_at=GtRoom._now_iso(),
+                updated_at=GtRoom._now(),
             )
             .on_conflict(
                 conflict_target=[GtRoom.team_id, GtRoom.name],
@@ -112,7 +112,7 @@ async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
                     GtRoom.initial_topic: room_cfg.initial_topic,
                     GtRoom.max_turns: room_cfg.max_turns,
                     GtRoom.member_ids: member_ids,
-                    GtRoom.updated_at: GtRoom._now_iso(),
+                    GtRoom.updated_at: GtRoom._now(),
                 },
             )
             .aio_execute()
@@ -135,7 +135,7 @@ async def save_room_state(room_id: int, member_read_index: dict[str, int]) -> No
     await (
         GtRoom.update(
             member_read_index=member_read_index,
-            updated_at=GtRoom._now_iso(),
+            updated_at=GtRoom._now(),
         )
         .where(GtRoom.id == room_id)
         .aio_execute()

@@ -58,16 +58,16 @@ class EnumField(peewee.CharField, Generic[TEnum]):
 
 class DbModelBase(peewee_async.AioModel):
     id:         int = peewee.AutoField()
-    created_at: str = peewee.CharField(default=lambda: datetime.now().isoformat())
-    updated_at: str = peewee.CharField(default=lambda: datetime.now().isoformat())
+    created_at: datetime = peewee.DateTimeField(default=datetime.now)
+    updated_at: datetime = peewee.DateTimeField(default=datetime.now)
 
     @classmethod
-    def _now_iso(cls) -> str:
-        return datetime.now().isoformat()
+    def _now(cls) -> datetime:
+        return datetime.now()
 
     @classmethod
     def _inject_insert_timestamps(cls, payload: dict) -> dict:
-        now = cls._now_iso()
+        now = cls._now()
         if "created_at" not in payload:
             payload["created_at"] = now
         if "updated_at" not in payload:
@@ -77,7 +77,7 @@ class DbModelBase(peewee_async.AioModel):
     @classmethod
     def _inject_updated_at(cls, payload: dict) -> dict:
         if "updated_at" not in payload:
-            payload["updated_at"] = cls._now_iso()
+            payload["updated_at"] = cls._now()
         return payload
 
     @classmethod
@@ -103,12 +103,12 @@ class DbModelBase(peewee_async.AioModel):
         if kwargs:
             if "updated_at" not in kwargs:
                 kwargs = dict(kwargs)
-                kwargs["updated_at"] = cls._now_iso()
+                kwargs["updated_at"] = cls._now()
             return super().update(*args, **kwargs)
         if args and isinstance(args[0], dict):
             first = dict(args[0])
             if "updated_at" not in first:
-                first["updated_at"] = cls._now_iso()
+                first["updated_at"] = cls._now()
             return super().update(first, *args[1:], **kwargs)
         return super().update(*args, **kwargs)
 
