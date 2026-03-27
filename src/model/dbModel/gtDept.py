@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import List
-
 import peewee
 
 from .base import DbModelBase, JsonField
@@ -13,7 +11,7 @@ class GtDept(DbModelBase):
     responsibility: str       = peewee.TextField(default="")
     parent_id:      int       = peewee.IntegerField(null=True)
     manager_id:     int       = peewee.IntegerField()
-    member_ids:     list[int] = JsonField(List[int], default=list)
+    member_ids:     list[int] = JsonField(default=list)
 
     class Meta:
         table_name = "depts"

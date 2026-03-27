@@ -64,7 +64,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await roomService.startup()
         await roomService.create_rooms(TEAMS_CONFIG)
         cls.restored = roomService.get_room_by_key(f"r1@{TEAM}")
-        await persistenceService.restore_runtime_state()
+        await roomService.restore_state()
 
     @classmethod
     async def async_teardown_class(cls):
@@ -128,7 +128,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
             )
         ])
         cls.fresh_agent = memberService.get_team_member(TEAM, "alice")
-        await persistenceService.restore_runtime_state()
+        await memberService.restore_state()
 
     @classmethod
     async def async_teardown_class(cls):

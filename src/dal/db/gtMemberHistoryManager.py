@@ -28,6 +28,6 @@ async def get_member_history(member_id: int) -> list[GtMemberHistory]:
         GtMemberHistory
         .select()
         .where(GtMemberHistory.member_id == member_id)
-        .order_by(GtMemberHistory.seq.asc())
+        .order_by(GtMemberHistory.seq.asc())  # type: ignore[attr-defined]
         .aio_execute()
     )
