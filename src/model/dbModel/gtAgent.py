@@ -8,7 +8,6 @@ from .base import DbModelBase
 class GtAgent(DbModelBase):
     template_name: str = peewee.CharField(unique=True)
     model: str = peewee.CharField(default="")
-    updated_at: str = peewee.CharField()
 
     class Meta:
         table_name = "agents"

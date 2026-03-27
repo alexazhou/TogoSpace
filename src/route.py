@@ -1,6 +1,6 @@
 import tornado.web
 
-from controller import agentController, memberController, roomController, wsController, teamController
+from controller import agentController, memberController, roomController, wsController, teamController, deptController
 
 
 tornado_settings = {
@@ -39,5 +39,12 @@ application = tornado.web.Application([
     (r"/teams/(\d+)/rooms/(\d+)/delete.json",  roomController.TeamRoomDeleteHandler),
     (r"/teams/(\d+)/rooms/(\d+)/members/list.json",  roomController.TeamRoomMembersHandler),
     (r"/teams/(\d+)/rooms/(\d+)/members/modify.json",  roomController.TeamRoomMembersModifyHandler),
+
+    # Dept Tree (V10)
+    (r"/teams/(\d+)/dept_tree.json",                                    deptController.DeptTreeHandler),
+    (r"/teams/(\d+)/dept_tree/([^/]+)/manager.json",                    deptController.DeptManagerHandler),
+    (r"/teams/(\d+)/dept_tree/([^/]+)/members.json",                    deptController.DeptMembersHandler),
+    (r"/teams/(\d+)/dept_tree/([^/]+)/members/([^/]+).json",            deptController.DeptMemberDetailHandler),
+    (r"/teams/(\d+)/dept_members.json",                                  deptController.DeptOffBoardMembersHandler),
 
 ], **tornado_settings)  # type: ignore [arg-type]
