@@ -10,7 +10,7 @@
 
 | 对象 | 状态内容 | 存储位置 |
 |------|---------|---------|
-| `TeamMember` | LLM 对话历史（`_history`） | `member_history` 表 |
+| `Agent` | LLM 对话历史（`_history`） | `agent_histories` 表 |
 | `ChatRoom` | 聊天记录（`messages`）+ 各成员读取进度（`_member_read_index`） | `room_messages` 表 + `rooms.member_read_index` 列 |
 
 ---
@@ -22,13 +22,13 @@
 每当成员追加一条消息时（无论是用户输入、LLM 回复还是 Tool 结果），都**同步写入**数据库：
 
 ```
-TeamMember.append_history_message(msg)
+Agent.append_history_message(msg)
   └── _persist_history_message(msg)
-        └── persistenceService.append_member_history_message(GtMemberHistory)
-              └── gtMemberHistoryManager.append_member_history_message()
+        └── persistenceService.append_agent_history_message(GtAgentHistory)
+              └── gtAgentHistoryManager.append_agent_history_message()
 ```
 
-`GtMemberHistory` 记录 `member_id`、`seq`（顺序号）、`message_json`（Pydantic JSON 序列化）。
+`GtAgentHistory` 记录 `agent_id`、`seq`（顺序号）、`message_json`（Pydantic JSON 序列化）。
 
 ### 房间聊天记录
 
@@ -64,16 +64,16 @@ ChatRoom.get_unread_messages(agent_name)
 
 ```
 backend_main.py（阶段 4）
-  ├── memberService.restore_state()
+  ├── agentService.restore_state()
   └── roomService.restore_state()
         └── roomService.exit_init_rooms()   ← 恢复完成后才激活
 ```
 
-### 成员历史恢复（`memberService.restore_state`）
+### 成员历史恢复（`agentService.restore_state`）
 
 ```
-for each TeamMember:
-    items = persistenceService.load_member_history_message(member_id)
+for each Agent:
+    items = persistenceService.load_agent_history_message(agent_id)
     if items:
         agent.inject_history_messages(items)   # 直接替换 _history 列表
 ```
@@ -110,13 +110,13 @@ room_msg_rows, member_read_index = load_room_runtime(room_id)
 ```
 运行时写入：
 
-  TeamMember._history  ──append──►  member_history 表
+  Agent._history  ──append──►  agent_histories 表
   ChatRoom.messages    ──append──►  room_messages 表
   ChatRoom._member_read_index  ──save──►  rooms.member_read_index
 
 启动恢复：
 
-  member_history 表  ──load──►  TeamMember._history
+  agent_histories 表  ──load──►  Agent._history
   room_messages 表   ──load──►  ChatRoom.messages
   rooms.member_read_index  ──load──►  ChatRoom._member_read_index
                                            └── rebuild_state_from_history()
@@ -128,4 +128,4 @@ room_msg_rows, member_read_index = load_room_runtime(room_id)
 
 - **INIT 状态门卫**：房间在 `exit_init_rooms()` 前不会持久化消息。恢复完成后才调用 `exit_init_rooms()`，保证恢复期间写入的初始系统消息不被重复持久化。
 - **member_id 作为 key**：`_member_read_index` 存储时以 `member_id` 为 key，恢复时通过 `_member_name_map` 反查名称。若成员被删除后重建，`member_id` 可能变化，旧的读取进度会丢失（视为从头读）。
-- **seq 顺序保证**：`member_history` 的 `seq` 字段在写入时由 `len(_history) - 1` 计算，恢复时通过 `gtMemberHistoryManager.get_member_history` 按 `seq` 升序读取，保证顺序正确。
+- **seq 顺序保证**：`agent_histories` 的 `seq` 字段在写入时由 `len(_history) - 1` 计算，恢复时通过 `gtAgentHistoryManager.get_agent_history` 按 `seq` 升序读取，保证顺序正确。

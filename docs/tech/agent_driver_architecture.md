@@ -42,16 +42,16 @@
 ## 代码位置
 
 - [src/service/agentService/core.py](../../src/service/agentService/core.py)
-- [src/service/memberService/driver/base.py](../../src/service/memberService/driver/base.py)
-- [src/service/memberService/driver/factory.py](../../src/service/memberService/driver/factory.py)
-- [src/service/memberService/driver/native.py](../../src/service/memberService/driver/native.py)
-- [src/service/memberService/driver/claude_sdk.py](../../src/service/memberService/driver/claude_sdk.py)
+- [src/service/agentService/driver/base.py](../../src/service/agentService/driver/base.py)
+- [src/service/agentService/driver/factory.py](../../src/service/agentService/driver/factory.py)
+- [src/service/agentService/driver/nativeDriver.py](../../src/service/agentService/driver/nativeDriver.py)
+- [src/service/agentService/driver/claudeSdkDriver.py](../../src/service/agentService/driver/claudeSdkDriver.py)
 
 ## 当前接口
 
 ### `AgentDriverConfig`
 
-定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/memberService/driver/base.py#L7)。
+定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/base.py#L11)。
 
 ```python
 @dataclass
@@ -68,7 +68,7 @@ class AgentDriverConfig:
 
 ### `AgentDriverHost`
 
-定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/memberService/driver/base.py#L13)。
+定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/base.py#L17)。
 
 它表示 driver 依赖的宿主协议，也就是 driver 可以从 `Agent` 获得哪些能力。
 
@@ -82,11 +82,10 @@ class AgentDriverConfig:
   - `current_room`
 - 方法
   - `sync_room_messages(...)`
-  - `chat(...)`
+  - `_infer(...)`
+  - `_execute_tool()`
+  - `get_last_assistant_message(...)`
   - `append_history_message(...)`
-  - `send_chat_message(...)`
-  - `skip_chat_turn()`
-  - `make_text_message(...)`
 
 这层协议的价值是：
 
@@ -96,7 +95,7 @@ class AgentDriverConfig:
 
 ### `AgentDriver`
 
-定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/memberService/driver/base.py#L45)。
+定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/base.py#L62)。
 
 ```python
 class AgentDriver:
@@ -136,27 +135,24 @@ class AgentDriver:
   - `dump_history_messages`
   - `inject_history_messages`
 - 公共动作桥接
-  - `send_chat_message`
-  - `skip_chat_turn`
+  - 通过工具调用驱动消息发送与回合结束（`send_chat_msg` / `finish_chat_turn`）
 - 通用推理循环能力
-  - `chat`
   - `_infer`
   - `_execute_tool`
+  - `get_last_assistant_message`
 
 值得关注的几个方法：
 
 - `run_chat_turn(...)`
-  - 统一维护当前房间上下文并先同步消息，再把 `room + synced_count` 交给 driver，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/core.py#L133)
-- `send_chat_message(...)`
-  - 统一处理发消息、跨房间发送、回合结束标记，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/core.py#L133)
-- `skip_chat_turn()`
-  - 统一处理跳过发言逻辑，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/core.py#L155)
-- `chat(...)`
-  - 保留给 `native` driver 使用的通用多轮 function calling 循环，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/core.py#L171)
+  - 统一维护当前房间上下文并先同步消息，再把 `room + synced_count` 交给 driver，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/core.py#L158)
+- `_infer(...)`
+  - 统一执行模型推理并把 assistant 消息写入历史，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/core.py#L177)
+- `_execute_tool(...)`
+  - 统一执行 tool call 并写入 tool 结果消息，见 [core.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/core.py#L190)
 
 ## Factory 设计
 
-factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/memberService/driver/factory.py#L10)。
+factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/factory.py#L13)。
 
 它做两件事：
 
@@ -189,14 +185,14 @@ factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/memberSe
 
 ### Native Driver
 
-文件： [native.py](/Volumes/PData/GitDB/agent_team/src/service/memberService/driver/native.py)
+文件： [nativeDriver.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/nativeDriver.py)
 
 主要逻辑：
 
 - 从房间同步未读消息到历史
 - 构造当前轮的 `ChatContext`
-- 调用 `Agent.chat(...)`
-- 检查本轮是否通过 `send_chat_msg` 或 `skip_chat_msg` 完成
+- 调用 `host._infer(...)` + `host._execute_tool()` 循环
+- 检查本轮是否通过 `send_chat_msg` 或 `finish_chat_turn` 完成
 - 如果没完成，注入 reminder 后重试
 
 适合场景：
@@ -207,12 +203,12 @@ factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/memberSe
 
 ### Claude SDK Driver
 
-文件： [claude_sdk.py](/Volumes/PData/GitDB/agent_team/src/service/memberService/driver/claude_sdk.py)
+文件： [claudeSdkDriver.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/claudeSdkDriver.py)
 
 主要逻辑：
 
 - 在 `startup()` 中建立持久 Claude SDK 会话
-- 通过 MCP tool 暴露 `send_chat_msg` 和 `skip_chat_msg`
+- 通过 MCP tool 暴露 `send_chat_msg` 和 `finish_chat_turn`
 - 每轮把房间增量消息拼成 prompt 发给 SDK
 - 监听 SDK 流式消息
 - 当工具返回表明“本轮结束”后主动 interrupt
@@ -228,12 +224,12 @@ factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/memberSe
 不管是哪种 driver，系统认可的核心动作目前只有两种：
 
 - `send_chat_msg`
-- `skip_chat_msg`
+- `finish_chat_turn`
 
-它们最终都应该映射到 `Agent` 的统一方法：
+它们最终都由 `funcToolService/tools.py` 处理并落到统一后端语义：
 
-- `Agent.send_chat_message(...)`
-- `Agent.skip_chat_turn()`
+- `send_chat_msg` → `ChatRoom.add_message(...)`
+- `finish_chat_turn` → `ChatRoom.finish_turn(...)`
 
 这样可以统一：
 
@@ -288,7 +284,7 @@ factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/memberSe
 
 建议新增文件：
 
-- `src/service/memberService/driver/gemini_cli.py`
+- `src/service/agentService/driver/geminiCliDriver.py`
 
 建议实现：
 
@@ -324,7 +320,7 @@ class GeminiCliAgentDriver(AgentDriver):
 这次设计已经把边界拉出来了，但还有一些可以继续收紧的地方：
 
 - `AgentDriverHost` 目前仍暴露了 `_history`、`_turn_ctx` 这种内部字段
-- `native` driver 仍然使用了 `Agent.chat(...)` 这套偏现状的执行方式
+- `native` driver 仍然沿用“模型推理 + 工具循环”的现状执行方式，尚未抽象为更高层动作协议
 - “动作协议”还没有被单独抽成通用抽象
 
 ## 推荐的后续演进

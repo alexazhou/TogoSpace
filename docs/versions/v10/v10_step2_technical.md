@@ -4,7 +4,7 @@
 
 V10 在 V7 Team 扁平成员列表的基础上，引入层级部门树（`dept_tree`）和完整成员运行配置（`members`）。核心改动集中在两个方向：
 
-- **配置层**：`src/util/configTypes.py` 中的 `TeamConfig` / `TeamMemberConfig` 新增 `dept_tree`、`model`、`driver` 字段
+- **配置层**：`src/util/configTypes.py` 中的 `TeamConfig` / `AgentConfig` 新增 `dept_tree`、`model`、`driver` 字段
 - **持久层**：新增 `depts` 表存储扁平化的部门树，含 `member_ids`（JSON 数组）和 `manager_id` 外键；`team_members` 表仅新增成员状态和运行参数字段
 
 运行时的 Agent 调度逻辑**不变**；部门信息仅影响 Agent 的 system prompt 注入和 API/前端的展示，不引入新的调度路径。
@@ -33,12 +33,12 @@ DeptNodeConfig.model_rebuild()
 - `manager` 必须出现在 `members` 中，否则启动时报错
 - 每个节点的 `manager` 不得为空（部门不允许无主管）
 
-### 2.2 扩展 `TeamMemberConfig`（`src/util/configTypes.py`）
+### 2.2 扩展 `AgentConfig`（`src/util/configTypes.py`）
 
 ```python
-class TeamMemberConfig(BaseModel):
+class AgentConfig(BaseModel):
     name: str           # 成员在团队内的昵称
-    agent: str          # AgentTemplate 名称（原字段 agent 保持不变）
+    role_template: str  # RoleTemplate 名称
     model: Optional[str] = None                        # 覆盖 AgentTemplate 中的 model
     driver: dict[str, Any] = Field(default_factory=dict)  # 覆盖 AgentTemplate 中的 driver
 ```
@@ -51,7 +51,7 @@ class TeamMemberConfig(BaseModel):
 class TeamConfig(BaseModel):
     name: str
     ...
-    members: List[TeamMemberConfig] = Field(default_factory=list)
+    members: List[AgentConfig] = Field(default_factory=list)
     dept_tree: Optional[DeptNodeConfig] = None   # 新增，可选；未配置时沿用扁平模式
     preset_rooms: List[TeamRoomConfig] = Field(default_factory=list)
     ...
@@ -225,11 +225,11 @@ Agent 在构建 system prompt 时，新增一个"部门上下文块"。`agentSer
 在 `agentService` 创建 Agent 实例时，合并优先级：
 
 ```
-TeamMemberConfig.model > AgentTemplate.model > SettingConfig 默认模型
-TeamMemberConfig.driver > AgentTemplate.driver > 默认 native driver
+AgentConfig.model > AgentTemplate.model > SettingConfig 默认模型
+AgentConfig.driver > AgentTemplate.driver > 默认 native driver
 ```
 
-已通过 `normalize_driver_config()` 处理 `AgentTemplate.driver`，V10 在调用前先将 `TeamMemberConfig.driver` 合并进去：
+已通过 `normalize_driver_config()` 处理 `AgentTemplate.driver`，V10 在调用前先将 `AgentConfig.driver` 合并进去：
 
 ```python
 merged_driver = {**agent_template.driver, **member_config.driver} if member_config.driver else agent_template.driver
@@ -244,13 +244,13 @@ merged_model  = member_config.model or agent_template.model
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/teams/{team}/dept_tree` | 返回当前部门树（树形 JSON） |
-| `PUT` | `/teams/{team}/dept_tree/{dept}/manager` | 变更部门主管 |
-| `POST` | `/teams/{team}/dept_tree/{dept}/members` | 将成员加入部门（可选 `is_manager`） |
-| `DELETE` | `/teams/{team}/dept_tree/{dept}/members/{member}` | 将成员移出部门（若为主管需在请求体中传 `new_manager`） |
-| `GET` | `/teams/{team}/members?employ_status=off_board` | 查询所有休闲成员 |
+| `GET` | `/teams/{team_id}/dept_tree.json` | 返回当前部门树（树形 JSON） |
+| `PUT` | `/teams/{team_id}/dept_tree/{dept}/manager.json` | 变更部门主管 |
+| `POST` | `/teams/{team_id}/dept_tree/{dept}/agents.json` | 将成员加入部门（可选 `is_manager`） |
+| `DELETE` | `/teams/{team_id}/dept_tree/{dept}/agents/{agent}.json` | 将成员移出部门（若为主管需在请求体中传 `new_manager`） |
+| `GET` | `/teams/{team_id}/dept_agents.json?employ_status=off_board` | 查询所有休闲成员 |
 
-### 5.2 `GET /teams/{team}/dept_tree` 响应格式
+### 5.2 `GET /teams/{team_id}/dept_tree.json` 响应格式
 
 ```json
 {
@@ -272,9 +272,9 @@ merged_model  = member_config.model or agent_template.model
 
 ### 5.3 现有接口兼容性
 
-- `GET /teams` / `GET /teams/{team}`：返回数据新增可选的 `dept_tree` 字段，未配置时为 `null`
-- `GET /teams/{team}/members`：返回数据新增 `dept`、`is_manager`、`employ_status` 字段
-- 所有现有接口**不破坏**原有字段结构
+- 现有 Team/Room/Message 接口路径保持不变（`.json` 形式），不破坏原有字段结构
+- 部门信息通过新增 `dept_tree` / `dept_agents` 接口提供
+- 运行时成员详情继续通过 `GET /teams/{team_id}/agents/{agent}.json` 获取
 
 ---
 
@@ -297,7 +297,7 @@ V10：加载配置 → 导入 Team → 导入 Members（含 model/driver）
 
 V10 对 `team_members` 表新增字段均有默认值（`employ_status="on_board"`、`model=""`、`driver="{}"`），存量数据无需手动迁移：
 
-- 现有成员默认进入"无部门归属"状态（`dept_id=NULL`），不影响现有调度
+- 现有成员默认进入"无部门归属"状态（不在任何部门 `member_ids` 列表中），不影响现有调度
 - `depts` 表为全新表，仅在 Team 配置了 `dept_tree` 时才有数据
 
 `ormService` 在启动时检查表结构，若目标列缺失则执行 `ALTER TABLE` 补列。
@@ -306,7 +306,7 @@ V10 对 `team_members` 表新增字段均有默认值（`employ_status="on_board
 
 ## 8. 实施顺序建议
 
-1. 新增 `DeptNodeConfig`，扩展 `TeamMemberConfig`（`model`/`driver` 字段），更新 `TeamConfig`
+1. 新增 `DeptNodeConfig`，扩展 `AgentConfig`（`model`/`driver` 字段），更新 `TeamConfig`
 2. 新增 `GtDept` ORM 模型，扩展 `GtTeamMember` 字段，`ormService` 补充建表/补列逻辑
 3. 新增 `gtDeptManager`，扩展 `gtTeamMemberManager`（部门相关读写）
 4. 新增 `deptService`，实现 `import_dept_tree`、`remove_member`、`move_member` 等接口
