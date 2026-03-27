@@ -1,4 +1,5 @@
 """integration tests for service.funcToolService — 需要 funcToolService.startup()"""
+import json
 import os
 import sys
 
@@ -53,7 +54,6 @@ class TestRunToolCall(ServiceTestCase):
         await ormService.shutdown()
 
     async def _run(self, name, args, **kw):
-        import json
         return json.loads(await funcToolService.run_tool_call(name, args, **kw))
 
     async def test_run_tool_call_basic(self):

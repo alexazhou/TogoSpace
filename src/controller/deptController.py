@@ -1,10 +1,12 @@
+import json
+
 from pydantic import BaseModel
 
-from constants import EmployStatus
 from controller.baseController import BaseHandler
-from dal.db import gtTeamManager
+from dal.db import gtTeamManager, gtTeamMemberManager
 from service import deptService
 from util import assertUtil
+from constants import EmployStatus
 
 
 class MoveMemberRequest(BaseModel):
@@ -78,7 +80,6 @@ class DeptMemberDetailHandler(BaseHandler):
         new_manager: str | None = None
         if body:
             try:
-                import json
                 data = json.loads(body)
                 new_manager = data.get("new_manager")
             except Exception:
@@ -102,7 +103,6 @@ class DeptOffBoardMembersHandler(BaseHandler):
         if EmployStatus.value_of(employ_status_raw) == EmployStatus.OFF_BOARD:
             members = await deptService.get_off_board_members(team_id)
         else:
-            from dal.db import gtTeamMemberManager
             members = await gtTeamMemberManager.get_members_by_team(team_id)
         data = [
             {"id": m.id, "name": m.name, "agent": m.agent_name, "employ_status": m.employ_status.name if m.employ_status else None}

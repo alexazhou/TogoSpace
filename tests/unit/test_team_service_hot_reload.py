@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from service import teamService
+from service import memberService, roomService, schedulerService, teamService
 from util.configTypes import TeamConfig
 
 
@@ -37,8 +37,6 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
     monkeypatch.setattr(teamService, "reload_from_db", _reload_from_db)
     monkeypatch.setattr(teamService.gtTeamManager, "get_team", _get_team)
 
-    from service import schedulerService, roomService, memberService
-
     monkeypatch.setattr(schedulerService, "stop_team", _stop_team)
     monkeypatch.setattr(memberService, "reload_team_members", _reload_team_members)
     monkeypatch.setattr(schedulerService, "refresh_team_config", _refresh_scheduler)
@@ -59,8 +57,6 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
 @pytest.mark.asyncio
 async def test_hot_reload_team_returns_if_target_not_found(monkeypatch):
     monkeypatch.setattr(teamService, "reload_from_db", AsyncMock(return_value=[]))
-
-    from service import schedulerService, roomService, memberService
 
     stop_team = AsyncMock()
     reload_team_members = AsyncMock()

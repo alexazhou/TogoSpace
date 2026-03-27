@@ -4,7 +4,7 @@ import json
 import logging
 
 from model.dbModel.gtTeam import GtTeam
-from util.configTypes import TeamConfig, TeamRoomConfig
+from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,6 @@ async def team_exists(name: str) -> bool:
 async def get_team_config(name: str) -> TeamConfig | None:
     """获取指定 Team 的完整配置（类似 JSON 格式）。"""
     from dal.db import gtRoomManager, gtTeamMemberManager
-    from util.configTypes import TeamMemberConfig, TeamRoomConfig
 
     team = await get_team(name)
     if team is None:

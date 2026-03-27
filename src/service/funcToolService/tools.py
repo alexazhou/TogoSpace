@@ -6,9 +6,10 @@ import logging
 import operator
 from zoneinfo import ZoneInfo
 
-from constants import SpecialAgent
+from dal.db import gtRoomManager, gtTeamManager
 from service.roomService import ChatContext
 import service.roomService as roomService
+from constants import SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -117,19 +118,15 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
         logger.warning("发送消息失败，聊天室上下文未设置")
         return {"success": False, "message": "当前没有可用的房间上下文。"}
 
-    from service import roomService as rs
-
     logger.info(f"发送消息: sender={_context.agent_name}, room={room_name}, msg={msg}")
 
     try:
-        target_room = rs.get_room_by_key(f"{room_name}@{_context.team_name}")
+        target_room = roomService.get_room_by_key(f"{room_name}@{_context.team_name}")
     except Exception:
         try:
-            from dal.db import gtRoomManager, gtTeamManager
-
             team_row = await gtTeamManager.get_team(_context.team_name)
             room_config = await gtRoomManager.get_room_config(team_row.id, room_name) if team_row else None
-            target_room = rs.get_room(room_config.id) if room_config else None
+            target_room = roomService.get_room(room_config.id) if room_config else None
         except Exception:
             target_room = None
 

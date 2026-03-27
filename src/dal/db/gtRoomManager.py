@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from model.dbModel.gtRoom import GtRoom
-from constants import RoomType, SpecialAgent
+from model.dbModel.gtTeamMember import GtTeamMember
 from util.configTypes import TeamRoomConfig
+from constants import RoomType, SpecialAgent
 
 
 def _infer_room_type_from_members(members: list[str]) -> RoomType:
@@ -68,9 +69,6 @@ async def ensure_room_by_key(
 
 async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
     """创建或更新 Team 下的 Rooms。使用 surgical update 确保已存在的 Room ID 不变。"""
-    from model.dbModel.gtTeamMember import GtTeamMember
-    from constants import SpecialAgent
-
     # 1. 获取当前数据库中的所有 Room
     current_rooms = await get_rooms_by_team(team_id)
     current_names = {r.name: r.id for r in current_rooms}
@@ -155,8 +153,6 @@ async def get_room_state(room_id: int) -> dict[str, int] | None:
 # Room Member Management (inline)
 async def get_members_by_room(room_id: int) -> list[str]:
     """获取 Room 的所有成员名称。member_id=0 代表 Operator。"""
-    from model.dbModel.gtTeamMember import GtTeamMember
-
     room = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
     if room is None or not room.member_ids:
         return []
@@ -181,9 +177,6 @@ async def get_members_by_room(room_id: int) -> list[str]:
 
 async def upsert_room_members(room_id: int, members: list[str]) -> None:
     """更新 Room 的成员列表（通过成员名称）。"""
-    from model.dbModel.gtTeamMember import GtTeamMember
-    from constants import SpecialAgent
-
     room = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
     if room is None:
         return
