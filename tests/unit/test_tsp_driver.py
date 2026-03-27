@@ -12,8 +12,8 @@ from pytspclient import TSPClient, TSPException
 
 from util import llmApiUtil
 from exception import TeamAgentException
-from service.agentService.driver.base import AgentDriverConfig
-from service.agentService.driver.tspDriver import build_gtsp_command, TspAgentDriver
+from service.memberService.driver.base import MemberDriverConfig
+from service.memberService.driver.tspDriver import build_gtsp_command, TspMemberDriver
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
@@ -67,7 +67,7 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
     expected_content = "hello from tsp e2e\nline2\n"
 
     host = _DummyHost()
-    config = AgentDriverConfig(
+    config = MemberDriverConfig(
         driver_type="tsp",
         options={
             "request_timeout_sec": 5,
@@ -75,7 +75,7 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
             "command": [binary_path, "--mode", "stdio", "--workdir-root", "/"],
         },
     )
-    driver = TspAgentDriver(host, config)
+    driver = TspMemberDriver(host, config)
 
     await driver.startup()
     try:
@@ -136,7 +136,7 @@ def mock_tsp_host():
 
 @pytest.mark.asyncio
 async def test_tsp_driver_execute_tool_calls_local_vs_tsp(mock_tsp_host):
-    config = AgentDriverConfig(driver_type="tsp", options={})
+    config = MemberDriverConfig(driver_type="tsp", options={})
     
     with patch("service.funcToolService.get_tools_by_names", return_value=[
         llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
@@ -145,7 +145,7 @@ async def test_tsp_driver_execute_tool_calls_local_vs_tsp(mock_tsp_host):
             parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
         ))
     ]):
-        driver = TspAgentDriver(mock_tsp_host, config)
+        driver = TspMemberDriver(mock_tsp_host, config)
         driver._tsp_tools = {
             "tsp_tool": llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
                 name="tsp_tool", 
@@ -182,8 +182,8 @@ async def test_tsp_driver_execute_tool_calls_local_vs_tsp(mock_tsp_host):
 
 @pytest.mark.asyncio
 async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host):
-    config = AgentDriverConfig(driver_type="tsp", options={})
-    driver = TspAgentDriver(mock_tsp_host, config)
+    config = MemberDriverConfig(driver_type="tsp", options={})
+    driver = TspMemberDriver(mock_tsp_host, config)
     driver._client = MagicMock()
     driver._client.tool = AsyncMock()
     

@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from service.agentService.driver.nativeDriver import NativeAgentDriver
-from service.agentService.driver.base import AgentDriverConfig
+from service.memberService.driver.nativeDriver import NativeMemberDriver
+from service.memberService.driver.base import MemberDriverConfig
 from util import llmApiUtil
 from constants import OpenaiLLMApiRole
 
@@ -16,8 +16,8 @@ def mock_host():
 
 @pytest.fixture
 def driver(mock_host):
-    config = AgentDriverConfig(driver_type="native", options={})
-    return NativeAgentDriver(mock_host, config)
+    config = MemberDriverConfig(driver_type="native", options={})
+    return NativeMemberDriver(mock_host, config)
 
 @pytest.mark.asyncio
 async def test_native_driver_run_until_reply_no_tool_calls(driver, mock_host):

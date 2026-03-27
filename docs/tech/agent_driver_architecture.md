@@ -42,16 +42,16 @@
 ## 代码位置
 
 - [src/service/agentService/core.py](../../src/service/agentService/core.py)
-- [src/service/agentService/driver/base.py](../../src/service/agentService/driver/base.py)
-- [src/service/agentService/driver/factory.py](../../src/service/agentService/driver/factory.py)
-- [src/service/agentService/driver/native.py](../../src/service/agentService/driver/native.py)
-- [src/service/agentService/driver/claude_sdk.py](../../src/service/agentService/driver/claude_sdk.py)
+- [src/service/memberService/driver/base.py](../../src/service/memberService/driver/base.py)
+- [src/service/memberService/driver/factory.py](../../src/service/memberService/driver/factory.py)
+- [src/service/memberService/driver/native.py](../../src/service/memberService/driver/native.py)
+- [src/service/memberService/driver/claude_sdk.py](../../src/service/memberService/driver/claude_sdk.py)
 
 ## 当前接口
 
 ### `AgentDriverConfig`
 
-定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/base.py#L7)。
+定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/memberService/driver/base.py#L7)。
 
 ```python
 @dataclass
@@ -68,7 +68,7 @@ class AgentDriverConfig:
 
 ### `AgentDriverHost`
 
-定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/base.py#L13)。
+定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/memberService/driver/base.py#L13)。
 
 它表示 driver 依赖的宿主协议，也就是 driver 可以从 `Agent` 获得哪些能力。
 
@@ -96,7 +96,7 @@ class AgentDriverConfig:
 
 ### `AgentDriver`
 
-定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/base.py#L45)。
+定义在 [base.py](/Volumes/PData/GitDB/agent_team/src/service/memberService/driver/base.py#L45)。
 
 ```python
 class AgentDriver:
@@ -156,7 +156,7 @@ class AgentDriver:
 
 ## Factory 设计
 
-factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/factory.py#L10)。
+factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/memberService/driver/factory.py#L10)。
 
 它做两件事：
 
@@ -189,7 +189,7 @@ factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/agentSer
 
 ### Native Driver
 
-文件： [native.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/native.py)
+文件： [native.py](/Volumes/PData/GitDB/agent_team/src/service/memberService/driver/native.py)
 
 主要逻辑：
 
@@ -207,7 +207,7 @@ factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/agentSer
 
 ### Claude SDK Driver
 
-文件： [claude_sdk.py](/Volumes/PData/GitDB/agent_team/src/service/agentService/driver/claude_sdk.py)
+文件： [claude_sdk.py](/Volumes/PData/GitDB/agent_team/src/service/memberService/driver/claude_sdk.py)
 
 主要逻辑：
 
@@ -288,7 +288,7 @@ factory 位于 [factory.py](/Volumes/PData/GitDB/agent_team/src/service/agentSer
 
 建议新增文件：
 
-- `src/service/agentService/driver/gemini_cli.py`
+- `src/service/memberService/driver/gemini_cli.py`
 
 建议实现：
 

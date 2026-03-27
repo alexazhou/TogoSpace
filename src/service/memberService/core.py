@@ -9,7 +9,7 @@ from model.coreModel.gtCoreChatModel import GtCoreMemberDialogContext, GtCoreCha
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from model.coreModel.gtCoreWebModel import GtCoreMemberInfo
 from model.dbModel.gtMemberHistory import GtMemberHistory
-from service.agentService.driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
+from service.memberService.driver import MemberDriverConfig, build_member_driver, normalize_driver_config
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
 from dal.db import gtAgentManager, gtDeptManager, gtTeamManager, gtTeamMemberManager
 from service.roomService import ChatRoom, ChatContext
@@ -50,7 +50,7 @@ class TeamMember:
         team_name: str,
         system_prompt: str,
         model: str,
-        driver_config: Optional[AgentDriverConfig] = None,
+        driver_config: Optional[MemberDriverConfig] = None,
         template_name: str = "",
         team_workdir: str = "",
         workspace_root: str = "",
@@ -68,7 +68,7 @@ class TeamMember:
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
         self.status: MemberStatus = MemberStatus.IDLE
         self.current_room: Optional[ChatRoom] = None
-        self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type="native"))
+        self.driver = build_member_driver(self, driver_config or MemberDriverConfig(driver_type="native"))
 
     @property
     def team_id(self) -> int:
@@ -196,7 +196,7 @@ class TeamMember:
             function = tool_call.function if isinstance(tool_call.function, dict) else {}
             name = function.get("name", "")
             args = function.get("arguments", "")
-            context = ChatContext(agent_name=self.name, team_name=self.team_name, chat_room=self.current_room)
+            context = ChatContext(member_name=self.name, team_name=self.team_name, chat_room=self.current_room)
             result = await funcToolService.run_tool_call(name, args, context=context)
             await self.append_history_message(llmApiUtil.OpenAIMessage.tool_result(tool_call.id, result))
 
@@ -244,10 +244,10 @@ async def startup() -> None:
 
 async def restore_state() -> None:
     """从数据库恢复所有成员的历史消息。"""
-    for agent in get_all_team_members():
-        items = await persistenceService.load_member_history_message(agent.member_id)
+    for member in get_all_team_members():
+        items = await persistenceService.load_member_history_message(member.member_id)
         if items:
-            agent.inject_history_messages(items)
+            member.inject_history_messages(items)
 
 
 async def _build_dept_context(team_id: int, member_name: str) -> str:
@@ -321,13 +321,13 @@ async def create_team_members(teams_config: list[TeamConfig], workspace_root: st
             template_name = member_cfg.agent
             cfg = agentService.get_agent_definition(template_name)
             if cfg is None:
-                logger.warning(f"Agent 模版不存在: member={member_name}, agent={template_name}，跳过创建")
+                logger.warning(f"Member 模版不存在: member={member_name}, template={template_name}，跳过创建")
                 continue
 
             if cfg.system_prompt:
-                agent_specific_prompt = cfg.system_prompt
+                member_specific_prompt = cfg.system_prompt
             else:
-                agent_specific_prompt = configUtil.load_prompt(cfg.prompt_file)
+                member_specific_prompt = configUtil.load_prompt(cfg.prompt_file)
 
             # model 覆盖：TeamMemberConfig > AgentTemplate > default
             model_name = member_cfg.model or cfg.model or default_model
@@ -343,7 +343,7 @@ async def create_team_members(teams_config: list[TeamConfig], workspace_root: st
             team_id = _team_ids.get(team_name, 0)
             dept_context = await _build_dept_context(team_id, member_name) if team_id else ""
 
-            full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
+            full_prompt = base_prompt_tmpl + "\n\n" + member_specific_prompt
             if dept_context:
                 full_prompt += "\n\n" + dept_context
 
