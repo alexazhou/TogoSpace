@@ -11,7 +11,7 @@ class GtDept(DbModelBase):
     responsibility: str       = peewee.TextField(default="")
     parent_id:      int       = peewee.IntegerField(null=True)
     manager_id:     int       = peewee.IntegerField()
-    member_ids:     list[int] = JsonField(default=list)
+    agent_ids:      list[int] = JsonField(default=list)
 
     class Meta:
         table_name = "depts"

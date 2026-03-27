@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 
 from constants import EmployStatus
-from dal.db import gtDeptManager, gtTeamMemberManager
+from dal.db import gtDeptManager, gtAgentManager
 from exception import TeamAgentException
 from model.dbModel.gtDept import GtDept
-from model.dbModel.gtTeamMember import GtTeamMember
+from model.dbModel.gtAgent import GtAgent
 from util.configTypes import DeptNodeConfig
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ async def _import_node(team_id: int, node: DeptNodeConfig, parent_id: int | None
     member_ids: list[int] = []
     manager_id: int | None = None
     for member_name in node.members:
-        row = await gtTeamMemberManager.get_member(team_id, member_name)
+        row = await gtAgentManager.get_agent(team_id, member_name)
         if row is None:
             raise TeamAgentException(
                 f"部门 '{node.dept_name}' 的成员 '{member_name}' 在 team_members 中不存在",
@@ -77,7 +77,7 @@ async def _get_dept_tree_async(team_id: int) -> DeptNodeConfig | None:
     dept_map: dict[int, GtDept] = {d.id: d for d in all_depts}
 
     # 建立 id -> member names 映射（通过 member_ids 反查 team_members）
-    all_members = await gtTeamMemberManager.get_members_by_team(team_id)
+    all_members = await gtAgentManager.get_agents_by_team(team_id)
     member_id_to_name: dict[int, str] = {m.id: m.name for m in all_members}
 
     def build_node(dept: GtDept) -> DeptNodeConfig:
@@ -110,7 +110,7 @@ async def move_member(
     is_manager: bool = False,
 ) -> None:
     """将成员（含 off_board 成员）移入指定部门，可选设为主管。"""
-    member = await gtTeamMemberManager.get_member(team_id, member_name)
+    member = await gtAgentManager.get_agent(team_id, member_name)
     if member is None:
         raise TeamAgentException(
             f"成员 '{member_name}' 不存在",
@@ -156,8 +156,8 @@ async def move_member(
 
     # 将成员设为 on_board
     await (
-        GtTeamMember.update(employ_status=EmployStatus.ON_BOARD)
-        .where((GtTeamMember.team_id == team_id) & (GtTeamMember.name == member_name))
+        GtAgent.update(employ_status=EmployStatus.ON_BOARD)
+        .where((GtAgent.team_id == team_id) & (GtAgent.name == member_name))
         .aio_execute()
     )
 
@@ -170,7 +170,7 @@ async def remove_member(
     new_manager: str | None = None,
 ) -> None:
     """将成员从所在部门移除，设 employ_status=off_board。若成员为主管，new_manager 必须提供。"""
-    member = await gtTeamMemberManager.get_member(team_id, member_name)
+    member = await gtAgentManager.get_agent(team_id, member_name)
     if member is None:
         raise TeamAgentException(
             f"成员 '{member_name}' 不存在",
@@ -188,8 +188,8 @@ async def remove_member(
     if member_dept is None:
         # 不在任何部门，直接设为 off_board
         await (
-            GtTeamMember.update(employ_status=EmployStatus.OFF_BOARD)
-            .where((GtTeamMember.team_id == team_id) & (GtTeamMember.name == member_name))
+            GtAgent.update(employ_status=EmployStatus.OFF_BOARD)
+            .where((GtAgent.team_id == team_id) & (GtAgent.name == member_name))
             .aio_execute()
         )
         logger.info(f"成员 '{member_name}' 不在任何部门，直接设为 off_board")
@@ -206,7 +206,7 @@ async def remove_member(
     new_manager_id = member_dept.manager_id
 
     if is_manager and new_manager is not None:
-        new_manager_row = await gtTeamMemberManager.get_member(team_id, new_manager)
+        new_manager_row = await gtAgentManager.get_agent(team_id, new_manager)
         if new_manager_row is None:
             raise TeamAgentException(
                 f"新主管 '{new_manager}' 不存在",
@@ -229,8 +229,8 @@ async def remove_member(
         member_ids=new_ids,
     )
     await (
-        GtTeamMember.update(employ_status=EmployStatus.OFF_BOARD)
-        .where((GtTeamMember.team_id == team_id) & (GtTeamMember.name == member_name))
+        GtAgent.update(employ_status=EmployStatus.OFF_BOARD)
+        .where((GtAgent.team_id == team_id) & (GtAgent.name == member_name))
         .aio_execute()
     )
 
@@ -249,7 +249,7 @@ async def set_dept_manager(team_id: int, dept_name: str, manager_name: str) -> N
             error_code="DEPT_NOT_FOUND",
         )
 
-    manager_row = await gtTeamMemberManager.get_member(team_id, manager_name)
+    manager_row = await gtAgentManager.get_agent(team_id, manager_name)
     if manager_row is None:
         raise TeamAgentException(
             f"成员 '{manager_name}' 不存在",
@@ -274,14 +274,14 @@ async def set_dept_manager(team_id: int, dept_name: str, manager_name: str) -> N
     logger.info(f"部门 '{dept_name}' 主管已变更为 '{manager_name}'")
 
 
-async def get_off_board_members(team_id: int) -> list[GtTeamMember]:
+async def get_off_board_members(team_id: int) -> list[GtAgent]:
     """返回所有 employ_status=off_board 的成员。"""
-    return await gtTeamMemberManager.get_off_board_members(team_id)
+    return await gtAgentManager.get_off_board_agents(team_id)
 
 
 async def get_member_dept(team_id: int, member_name: str) -> GtDept | None:
     """查询成员所在部门；不在任何部门时返回 None。"""
-    member = await gtTeamMemberManager.get_member(team_id, member_name)
+    member = await gtAgentManager.get_agent(team_id, member_name)
     if member is None:
         return None
     all_depts = await gtDeptManager.get_all_depts(team_id)

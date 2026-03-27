@@ -6,12 +6,12 @@ from util import llmApiUtil
 from service import funcToolService
 from service.roomService import ChatRoom
 
-from .base import MemberDriver
+from .base import AgentDriver
 
 logger = logging.getLogger(__name__)
 
 
-class NativeMemberDriver(MemberDriver):
+class NativeAgentDriver(AgentDriver):
     async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
         hint = f"你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，请务必调用 finish_chat_turn 结束本轮（即跳过）。"
         max_retries = 3
@@ -41,7 +41,7 @@ class NativeMemberDriver(MemberDriver):
             if not tool_calls:
                 return False
 
-            logger.info(f"检测到工具调用: member={self.host.key}, count={len(tool_calls)}")
+            logger.info(f"检测到工具调用: agent={self.host.key}, count={len(tool_calls)}")
             await self.host._execute_tool()
 
             # 检查最后一个 tool_call 判断轮次是否完成
@@ -52,6 +52,6 @@ class NativeMemberDriver(MemberDriver):
             if name == "finish_chat_turn":
                 return True
 
-        logger.warning(f"达到最大函数调用次数: member={self.host.key}, max={max_function_calls}")
+        logger.warning(f"达到最大函数调用次数: agent={self.host.key}, max={max_function_calls}")
 
         return False

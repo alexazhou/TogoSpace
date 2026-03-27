@@ -1,11 +1,11 @@
 {
   "name": "默认团队",
   "members": [
-    { "name": "王老师", "agent": "researcher" },
-    { "name": "小马哥", "agent": "project_manager" },
-    { "name": "小A", "agent": "software_engineer" },
-    { "name": "小B", "agent": "test_engineer" },
-    { "name": "小刘", "agent": "intern_tsp" }
+    { "name": "王老师", "role_template": "researcher" },
+    { "name": "小马哥", "role_template": "project_manager" },
+    { "name": "小A", "role_template": "software_engineer" },
+    { "name": "小B", "role_template": "test_engineer" },
+    { "name": "小刘", "role_template": "intern_tsp" }
   ],
   "preset_rooms": [
     {

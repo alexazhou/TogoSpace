@@ -1,7 +1,7 @@
 import os
 import sys
 
-from service.memberService.driver import normalize_driver_config
+from service.agentService.driver import normalize_driver_config
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")

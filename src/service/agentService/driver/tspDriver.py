@@ -8,14 +8,14 @@ import uuid
 from typing import Any, Optional
 
 from pytspclient import TSPClient, TSPException, TSPInitializeResult, TSPToolResponse
-from service.memberService.driver.base import MemberDriverConfig
+from service.agentService.driver.base import AgentDriverConfig
 
 from exception import TeamAgentException
 from service import funcToolService
 from service.roomService import ChatContext, ChatRoom
 from util import llmApiUtil
 
-from .base import MemberDriver
+from .base import AgentDriver
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +43,8 @@ def build_gtsp_command(raw_command: Optional[list[str]], workdir: str) -> list[s
     return command
 
 
-class TspMemberDriver(MemberDriver):
-    def __init__(self, host: Any, config: MemberDriverConfig) -> None:
+class TspAgentDriver(AgentDriver):
+    def __init__(self, host: Any, config: AgentDriverConfig) -> None:
         super().__init__(host, config)
         self._client: Optional[TSPClient] = None
         self._tsp_tools: dict[str, llmApiUtil.OpenAITool] = {}
@@ -75,7 +75,7 @@ class TspMemberDriver(MemberDriver):
 
         self._client = client
         logger.info(
-            "TSP driver initialized: member=%s command=%s tools=%s",
+            "TSP driver initialized: agent=%s command=%s tools=%s",
             self.host.key,
             command,
             len(self._tsp_tools),
@@ -109,7 +109,7 @@ class TspMemberDriver(MemberDriver):
         max_function_calls: int = 5,
     ) -> bool:
         if self._client is None:
-            raise RuntimeError(f"TSP client 尚未初始化: member={self.host.key}")
+            raise RuntimeError(f"TSP client 尚未初始化: agent={self.host.key}")
 
         for _ in range(max_function_calls):
             assistant_message = await self.host._infer(tools)
@@ -121,7 +121,7 @@ class TspMemberDriver(MemberDriver):
             if turn_done:
                 return True
 
-        logger.warning("达到最大函数调用次数: member=%s max=%s", self.host.key, max_function_calls)
+        logger.warning("达到最大函数调用次数: agent=%s max=%s", self.host.key, max_function_calls)
         return False
 
     async def _execute_tool_calls(self, tool_calls: list[llmApiUtil.OpenAIToolCall]) -> bool:

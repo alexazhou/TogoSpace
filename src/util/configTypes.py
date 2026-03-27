@@ -33,12 +33,12 @@ def _default_persistence_db_path() -> str:
     return "../test_data/data.db" if _is_test_env() else "../data/data.db"
 
 
-class TeamMemberConfig(BaseModel):
-    """Configuration for a member in a team, referencing an agent template."""
-    name: str  # Nickname of the member in the team
-    agent: str  # Name of the AgentTemplate to use
-    model: Optional[str] = None  # 覆盖 AgentTemplate.model
-    driver: dict[str, Any] = Field(default_factory=dict)  # 覆盖 AgentTemplate.driver
+class AgentConfig(BaseModel):
+    """Configuration for an agent in a team, referencing a role template."""
+    name: str  # Nickname of the agent in the team
+    role_template: str  # Name of the RoleTemplate to use
+    model: Optional[str] = None  # 覆盖 RoleTemplate.model
+    driver: dict[str, Any] = Field(default_factory=dict)  # 覆盖 RoleTemplate.driver
 
 
 class TeamRoomConfig(BaseModel):
@@ -55,14 +55,14 @@ class TeamConfig(BaseModel):
     name: str
     working_directory: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
-    members: List[TeamMemberConfig] = Field(default_factory=list)
+    members: List[AgentConfig] = Field(default_factory=list)
     dept_tree: Optional[DeptNodeConfig] = None
     preset_rooms: List[TeamRoomConfig] = Field(default_factory=list)
     max_function_calls: Optional[int] = None
 
 
-class AgentTemplate(BaseModel):
-    """Agent definition (template) loaded from config/agents/*.json."""
+class RoleTemplate(BaseModel):
+    """Role template definition loaded from config/role_templates/*.json."""
     name: str
     system_prompt: str = ""
     prompt_file: str = ""
@@ -135,5 +135,5 @@ class SettingConfig(BaseModel):
 
 class AppConfig(BaseModel):
     setting: SettingConfig = Field(default_factory=SettingConfig)
-    agents: List[AgentTemplate] = Field(default_factory=list)
+    role_templates: List[RoleTemplate] = Field(default_factory=list)
     teams: List[TeamConfig] = Field(default_factory=list)

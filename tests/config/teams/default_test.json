@@ -1,7 +1,7 @@
 {
   "name": "e2e",
   "members": [
-    { "name": "alice", "agent": "alice" }
+    { "name": "alice", "role_template": "alice" }
   ],
   "preset_rooms": [
     {

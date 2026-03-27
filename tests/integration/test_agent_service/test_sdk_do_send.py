@@ -1,4 +1,4 @@
-"""integration tests for ClaudeSdkMemberDriver send/skip routing behavior"""
+"""integration tests for ClaudeSdkAgentDriver send/skip routing behavior"""
 import os
 import sys
 
@@ -6,9 +6,9 @@ import pytest
 
 from dal.db import gtTeamManager
 from service import roomService, agentService, ormService, persistenceService
-from service.memberService import TeamMember
-from service.memberService.driver.claudeSdkDriver import ClaudeSdkMemberDriver
-from service.memberService.driver.base import MemberDriverConfig
+from service.agentService import Agent
+from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
+from service.agentService.driver.base import AgentDriverConfig
 from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
 
@@ -20,7 +20,7 @@ if os.name == "posix" and sys.platform == "darwin":
 
 @pytest.mark.forked
 class TestSdkDoSend(ServiceTestCase):
-    """测试 ClaudeSdkMemberDriver._handle_claude_sdk_tool_call：当前房间 vs 跨房间发言的路由与 done 标记行为。"""
+    """测试 ClaudeSdkAgentDriver._handle_claude_sdk_tool_call：当前房间 vs 跨房间发言的路由与 done 标记行为。"""
 
     @classmethod
     async def async_setup_class(cls):
@@ -41,10 +41,10 @@ class TestSdkDoSend(ServiceTestCase):
         await roomService.create_room(TEAM, current_room_name, [agent_name])
         room = roomService.get_room_by_key(f"{current_room_name}@{TEAM}")
         room.activate_scheduling()
-        agent = TeamMember(name=agent_name, team_name=TEAM, system_prompt="test", model="test-model",
-                      driver_config=MemberDriverConfig(driver_type="native"))
+        agent = Agent(name=agent_name, team_name=TEAM, system_prompt="test", model="test-model",
+                      driver_config=AgentDriverConfig(driver_type="native"))
         agent.current_room = room
-        driver = ClaudeSdkMemberDriver(agent, MemberDriverConfig(driver_type="claude_sdk"))
+        driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
         return driver, agent, room
 
     async def test_send_to_current_room_does_not_set_done(self):
@@ -113,7 +113,7 @@ class _FakeClaudeClient:
 
 
 @pytest.mark.forked
-class TestClaudeSdkMemberDriver(ServiceTestCase):
+class TestClaudeSdkAgentDriver(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         db_path = cls.TEST_DB_PATH
@@ -133,9 +133,9 @@ class TestClaudeSdkMemberDriver(ServiceTestCase):
     async def test_run_chat_turn_requires_started_client(self):
         await roomService.create_room(TEAM, "lobby", ["alice"])
         room = roomService.get_room_by_key(f"lobby@{TEAM}")
-        agent = TeamMember(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
-                      driver_config=MemberDriverConfig(driver_type="native"))
-        driver = ClaudeSdkMemberDriver(agent, MemberDriverConfig(driver_type="claude_sdk"))
+        agent = Agent(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
+                      driver_config=AgentDriverConfig(driver_type="native"))
+        driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
 
         try:
             await driver.run_chat_turn(room, synced_count=0, max_function_calls=1)
@@ -146,10 +146,10 @@ class TestClaudeSdkMemberDriver(ServiceTestCase):
     async def test_run_chat_turn_uses_max_function_calls_as_retry_limit(self):
         await roomService.create_room(TEAM, "lobby", ["alice"])
         room = roomService.get_room_by_key(f"lobby@{TEAM}")
-        agent = TeamMember(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
-                      driver_config=MemberDriverConfig(driver_type="native"))
+        agent = Agent(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
+                      driver_config=AgentDriverConfig(driver_type="native"))
         agent.current_room = room
-        driver = ClaudeSdkMemberDriver(agent, MemberDriverConfig(driver_type="claude_sdk"))
+        driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client
 

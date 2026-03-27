@@ -8,15 +8,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import service.roomService as roomService
+import service.roleTemplateService as roleTemplateService
 import service.agentService as agentService
-import service.memberService as memberService
 import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 from dal.db import gtTeamManager
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
-from util.configTypes import AgentTemplate, TeamConfig
+from util.configTypes import RoleTemplate, TeamConfig
 from constants import OpenaiLLMApiRole, RoomState
 from ...base import ServiceTestCase
 
@@ -32,7 +32,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # 按真实启动顺序拉起 service，并加载 integration 专用配置。
-        agents_config = [AgentTemplate.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
+        agents_config = [RoleTemplate.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
         team_config   = TeamConfig.model_validate(json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read()))
         db_path = cls.TEST_DB_PATH
         await ormService.startup(db_path)
@@ -41,17 +41,17 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await gtTeamManager.import_team_from_config(team_config)
         await roomService.create_room(TEAM, "general", ["alice", "bob"])
         await funcToolService.startup()
+        await roleTemplateService.startup()
+        roleTemplateService.load_role_template_config(agents_config)
         await agentService.startup()
-        agentService.load_agent_config(agents_config)
-        await memberService.startup()
-        await memberService.load_team_ids([team_config])
-        await memberService.create_team_members([team_config])
+        await agentService.load_team_ids([team_config])
+        await agentService.create_team_agents([team_config])
         await scheduler.startup([team_config])
 
     @classmethod
     async def async_teardown_class(cls):
         scheduler.shutdown()
-        await memberService.shutdown()
+        await agentService.shutdown()
         funcToolService.shutdown()
         roomService.shutdown()
         await persistenceService.shutdown()
@@ -94,7 +94,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = roomService.get_room_by_key(room_key)
         await room.add_message("system", "开始聊天")
 
-        alice = memberService.get_team_member(TEAM, "alice")
+        alice = agentService.get_team_agent(TEAM, "alice")
         # 避免前序用例中断时残留 assistant 结尾历史，导致本用例 _infer 前置断言失败。
         if alice._history and alice._history[-1].role == OpenaiLLMApiRole.ASSISTANT:
             await alice.append_history_message(
@@ -128,7 +128,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = roomService.get_room_by_key(room_key)
         await room.add_message("system", "开始聊天")
 
-        alice = memberService.get_team_member(TEAM, "alice")
+        alice = agentService.get_team_agent(TEAM, "alice")
         resps = [
             {"content": "我直接回复"},
             {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "最终消息"}}]},

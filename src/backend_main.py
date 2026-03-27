@@ -12,8 +12,8 @@ from util.configTypes import AppConfig
 from service import (
     messageBus,
     schedulerService,
+    roleTemplateService,
     agentService,
-    memberService,
     roomService,
     llmService,
     funcToolService,
@@ -83,15 +83,15 @@ async def main(config_dir: str = None, port: int = 8080):
     logger.info("[启动] 阶段 2/4：导入 Team / Agent 配置")
     await teamService.startup()
     teams_config = teamService.get_teams()
-    await agentService.startup()
-    agentService.load_agent_config()
+    await roleTemplateService.startup()
+    roleTemplateService.load_role_template_config()
     logger.info("[启动] 阶段 2/4 完成：teams=%s", [t.name for t in teams_config])
 
     # ── 阶段 3：运行时构建 ────────────────────────────────────────────────────
     logger.info("[启动] 阶段 3/4：构建运行时（成员 / 房间 / 调度器）")
-    await memberService.load_team_ids(teams_config)
-    await memberService.startup()
-    await memberService.create_team_members(teams_config, workspace_root=app_config.setting.workspace_root)
+    await agentService.load_team_ids(teams_config)
+    await agentService.startup()
+    await agentService.create_team_agents(teams_config, workspace_root=app_config.setting.workspace_root)
     await roomService.startup()
     await schedulerService.startup(teams_config=teams_config)
     await roomService.create_rooms(teams_config)
@@ -99,7 +99,7 @@ async def main(config_dir: str = None, port: int = 8080):
 
     # ── 阶段 4：恢复状态 ──────────────────────────────────────────────────────
     logger.info("[启动] 阶段 4/4：恢复持久化状态")
-    await memberService.restore_state()
+    await agentService.restore_state()
     await roomService.restore_state()
     activated = roomService.exit_init_rooms()
     logger.info("[启动] 阶段 4/4 完成：激活房间数=%s", activated)
@@ -113,7 +113,7 @@ async def main(config_dir: str = None, port: int = 8080):
     finally:
         web_server.stop()
         schedulerService.shutdown()
-        await memberService.shutdown()
+        await agentService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
         funcToolService.shutdown()

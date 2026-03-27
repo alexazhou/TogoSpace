@@ -70,7 +70,7 @@ class ApiClient:
         params: dict[str, str] | None = None
         if team_name:
             params = {"team_name": team_name}
-        async with session.get(f"{self._base_url}/members/list.json", params=params) as resp:
+        async with session.get(f"{self._base_url}/agents/list.json", params=params) as resp:
             resp.raise_for_status()
             data = await resp.json()
         return [AgentInfo(name=a["name"], model=a["model"], team_name=a.get("team_name", ""), status=a.get("status", "idle")) for a in data["agents"]]
@@ -102,7 +102,7 @@ class ApiClient:
 
     async def get_room_members(self, team_id: int, room_id: int) -> list[str]:
         session = self._get_session()
-        async with session.get(f"{self._base_url}/teams/{team_id}/rooms/{room_id}/members/list.json") as resp:
+        async with session.get(f"{self._base_url}/teams/{team_id}/rooms/{room_id}/agents/list.json") as resp:
             if resp.status == 404:
                 raise ValueError(f"Room members not found: team_id={team_id}, room_id={room_id}")
             resp.raise_for_status()

@@ -6,8 +6,8 @@ from util.configTypes import TeamConfig, TeamRoomConfig
 from service import messageBus
 from service.messageBus import Message
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
-from service import memberService, roomService as chat_room
-from service.memberService import TeamMember
+from service import agentService, roomService as chat_room
+from service.agentService import Agent
 from dal.db import gtRoomManager
 from constants import MessageBusTopic, SpecialAgent, RoomState
 
@@ -30,7 +30,7 @@ async def startup(teams_config: list[TeamConfig]) -> None:
     messageBus.subscribe(MessageBusTopic.ROOM_MEMBER_TURN, _on_member_turn)
 
 
-def add_member(member: TeamMember, max_fc: int) -> None:
+def add_member(member: Agent, max_fc: int) -> None:
     """将成员加入调度池，若已在运行则跳过。"""
     existing: asyncio.Task | None = _running.get(member.key)
     if existing is not None and not existing.done():
@@ -70,7 +70,7 @@ def _on_member_turn(msg: Message) -> None:
         return
 
     try:
-        member: TeamMember = memberService.get_team_member(team_name, member_name)
+        member: Agent = agentService.get_team_agent(team_name, member_name)
     except KeyError:
         logger.error(f"成员不存在: member_name={member_name}, team_name={team_name}")
         return

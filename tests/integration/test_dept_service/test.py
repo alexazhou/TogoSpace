@@ -5,16 +5,16 @@ import aiosqlite
 import pytest
 
 from tests.base import ServiceTestCase
-from dal.db import gtDeptManager, gtTeamManager, gtTeamMemberManager
+from dal.db import gtDeptManager, gtTeamManager, gtAgentManager
 from exception import TeamAgentException
 from model.dbModel.gtDept import GtDept
-from model.dbModel.gtMemberHistory import GtMemberHistory
+from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
-from model.dbModel.gtTeamMember import GtTeamMember
+from model.dbModel.gtAgent import GtAgent
 from service import deptService, ormService
-from util.configTypes import DeptNodeConfig, TeamConfig, TeamMemberConfig
+from util.configTypes import DeptNodeConfig, TeamConfig, AgentConfig
 from constants import EmployStatus
 
 
@@ -34,18 +34,18 @@ class TestDeptService(ServiceTestCase):
 
     async def _reset_tables(self):
         await GtDept.delete().aio_execute()
-        await GtTeamMember.delete().aio_execute()
+        await GtAgent.delete().aio_execute()
         await GtRoomMessage.delete().aio_execute()
-        await GtMemberHistory.delete().aio_execute()
+        await GtAgentHistory.delete().aio_execute()
         await GtRoom.delete().aio_execute()
         await GtTeam.delete().aio_execute()
 
     async def _setup_team_with_members(self, team_name: str, member_names: list[str]) -> GtTeam:
         """创建 team 并写入成员，返回 GtTeam 对象。"""
         team = await gtTeamManager.upsert_team(TeamConfig(name=team_name))
-        await gtTeamMemberManager.upsert_team_members(
+        await gtAgentManager.upsert_agents(
             team.id,
-            [TeamMemberConfig(name=n, agent="dummy") for n in member_names],
+            [AgentConfig(name=n, role_template="dummy") for n in member_names],
         )
         return team
 
@@ -57,8 +57,8 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_members("t1", ["alice", "bob"])
-        alice = await gtTeamMemberManager.get_member(team.id, "alice")
-        bob = await gtTeamMemberManager.get_member(team.id, "bob")
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
         assert alice is not None and bob is not None
 
         dept = await gtDeptManager.upsert_dept(
@@ -86,9 +86,9 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_members("t_upsert", ["alice", "bob", "charlie"])
-        alice = await gtTeamMemberManager.get_member(team.id, "alice")
-        bob = await gtTeamMemberManager.get_member(team.id, "bob")
-        charlie = await gtTeamMemberManager.get_member(team.id, "charlie")
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
+        charlie = await gtAgentManager.get_agent(team.id, "charlie")
         assert alice is not None and bob is not None and charlie is not None
 
         first = await gtDeptManager.upsert_dept(
@@ -110,8 +110,8 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_members("t_all", ["alice", "bob"])
-        alice = await gtTeamMemberManager.get_member(team.id, "alice")
-        bob = await gtTeamMemberManager.get_member(team.id, "bob")
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
         assert alice is not None and bob is not None
 
         root = await gtDeptManager.upsert_dept(
@@ -149,7 +149,7 @@ class TestDeptService(ServiceTestCase):
         assert dept is not None
         assert dept.responsibility == "owns the roadmap"
 
-        alice = await gtTeamMemberManager.get_member(team.id, "alice")
+        alice = await gtAgentManager.get_agent(team.id, "alice")
         assert alice is not None
         assert dept.manager_id == alice.id
         assert alice.id in dept.member_ids
@@ -210,7 +210,7 @@ class TestDeptService(ServiceTestCase):
         dept = await gtDeptManager.get_dept_by_name(team.id, "dept_x")
         assert dept is not None
         assert dept.responsibility == "original"
-        charlie = await gtTeamMemberManager.get_member(team.id, "charlie")
+        charlie = await gtAgentManager.get_agent(team.id, "charlie")
         assert charlie is not None
         assert charlie.id not in dept.member_ids
 
@@ -310,7 +310,7 @@ class TestDeptService(ServiceTestCase):
 
         await deptService.remove_member(team.id, "bob")
 
-        bob = await gtTeamMemberManager.get_member(team.id, "bob")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
         assert bob is not None
         assert bob.employ_status == EmployStatus.OFF_BOARD
 
@@ -351,8 +351,8 @@ class TestDeptService(ServiceTestCase):
         dept = await gtDeptManager.get_dept_by_name(team.id, "handoff_dept")
         assert dept is not None
 
-        alice = await gtTeamMemberManager.get_member(team.id, "alice")
-        bob = await gtTeamMemberManager.get_member(team.id, "bob")
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
         assert alice is not None and bob is not None
 
         assert alice.employ_status == EmployStatus.OFF_BOARD
@@ -383,7 +383,7 @@ class TestDeptService(ServiceTestCase):
         # 没有任何 dept，直接 remove
         await deptService.remove_member(team.id, "alice")
 
-        alice = await gtTeamMemberManager.get_member(team.id, "alice")
+        alice = await gtAgentManager.get_agent(team.id, "alice")
         assert alice is not None
         assert alice.employ_status == EmployStatus.OFF_BOARD
 
@@ -395,9 +395,9 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_members("t_move", ["alice", "bob", "charlie"])
-        alice = await gtTeamMemberManager.get_member(team.id, "alice")
-        bob = await gtTeamMemberManager.get_member(team.id, "bob")
-        charlie = await gtTeamMemberManager.get_member(team.id, "charlie")
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
+        charlie = await gtAgentManager.get_agent(team.id, "charlie")
         assert alice is not None and bob is not None and charlie is not None
 
         # 两个部门：eng (alice, bob) / design (charlie)
@@ -419,7 +419,7 @@ class TestDeptService(ServiceTestCase):
         assert bob.id not in eng_after.member_ids
         assert bob.id in design_after.member_ids
 
-        bob_after = await gtTeamMemberManager.get_member(team.id, "bob")
+        bob_after = await gtAgentManager.get_agent(team.id, "bob")
         assert bob_after is not None
         assert bob_after.employ_status == EmployStatus.ON_BOARD
 
@@ -427,8 +427,8 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_members("t_move_mgr", ["alice", "bob"])
-        alice = await gtTeamMemberManager.get_member(team.id, "alice")
-        bob = await gtTeamMemberManager.get_member(team.id, "bob")
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
         assert alice is not None and bob is not None
 
         dept = await gtDeptManager.upsert_dept(
@@ -457,13 +457,13 @@ class TestDeptService(ServiceTestCase):
 
         # 先把 bob 移出
         await deptService.remove_member(team.id, "bob")
-        bob = await gtTeamMemberManager.get_member(team.id, "bob")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
         assert bob is not None
         assert bob.employ_status == EmployStatus.OFF_BOARD
 
         # 再把 bob 移回
         await deptService.move_member(team.id, "bob", "main")
-        bob_after = await gtTeamMemberManager.get_member(team.id, "bob")
+        bob_after = await gtAgentManager.get_agent(team.id, "bob")
         assert bob_after is not None
         assert bob_after.employ_status == EmployStatus.ON_BOARD
 
@@ -486,7 +486,7 @@ class TestDeptService(ServiceTestCase):
         await deptService.set_dept_manager(team.id, "the_dept", "bob")
 
         dept = await gtDeptManager.get_dept_by_name(team.id, "the_dept")
-        bob = await gtTeamMemberManager.get_member(team.id, "bob")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
         assert dept is not None and bob is not None
         assert dept.manager_id == bob.id
 
@@ -549,18 +549,18 @@ class TestDeptService(ServiceTestCase):
 
         team = await self._setup_team_with_members("t_enum", ["alice"])
 
-        alice = await gtTeamMemberManager.get_member(team.id, "alice")
+        alice = await gtAgentManager.get_agent(team.id, "alice")
         assert alice is not None
         # 默认应为 ON_BOARD
         assert alice.employ_status == EmployStatus.ON_BOARD
 
         # 直接写 OFF_BOARD，再读回，应能正确反序列化
         await (
-            GtTeamMember.update(employ_status=EmployStatus.OFF_BOARD)
-            .where(GtTeamMember.id == alice.id)
+            GtAgent.update(employ_status=EmployStatus.OFF_BOARD)
+            .where(GtAgent.id == alice.id)
             .aio_execute()
         )
-        alice_after = await gtTeamMemberManager.get_member(team.id, "alice")
+        alice_after = await gtAgentManager.get_agent(team.id, "alice")
         assert alice_after is not None
         assert alice_after.employ_status == EmployStatus.OFF_BOARD
 
@@ -569,14 +569,14 @@ class TestDeptService(ServiceTestCase):
         assert db_path is not None
         async with aiosqlite.connect(db_path) as conn:
             async with conn.execute(
-                "SELECT employ_status FROM team_members WHERE id = ?", (alice.id,)
+                "SELECT employ_status FROM agents WHERE id = ?", (alice.id,)
             ) as cursor:
                 row = await cursor.fetchone()
         assert row is not None
         assert row[0] == "OFF_BOARD"
 
     # ------------------------------------------------------------------
-    # TeamMemberConfig model/driver 字段持久化
+    # AgentConfig model/driver 字段持久化
     # ------------------------------------------------------------------
 
     async def test_team_member_model_driver_persist_and_reload(self):
@@ -584,10 +584,10 @@ class TestDeptService(ServiceTestCase):
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="t_model_driver"))
         members = [
-            TeamMemberConfig(name="alice", agent="gpt_agent", model="gpt-4o", driver={"temperature": 0.7}),
-            TeamMemberConfig(name="bob", agent="glm_agent", model="", driver={}),
+            AgentConfig(name="alice", role_template="gpt_agent", model="gpt-4o", driver={"temperature": 0.7}),
+            AgentConfig(name="bob", role_template="glm_agent", model="", driver={}),
         ]
-        await gtTeamMemberManager.upsert_team_members(team.id, members)
+        await gtAgentManager.upsert_agents(team.id, members)
 
         cfg = await gtTeamManager.get_team_config("t_model_driver")
         assert cfg is not None

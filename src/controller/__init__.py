@@ -1,3 +1,3 @@
-from controller import agentController, memberController, roomController, wsController, teamController
+from controller import agentController, roleTemplateController, roomController, wsController, teamController, deptController
 
-__all__ = ["agentController", "memberController", "roomController", "wsController", "teamController"]
+__all__ = ["agentController", "roleTemplateController", "roomController", "wsController", "teamController", "deptController"]

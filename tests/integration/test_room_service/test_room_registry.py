@@ -72,7 +72,7 @@ class TestRoomRegistry(ServiceTestCase):
         teams_config = [TeamConfig.model_validate({
             "name": TEAM,
             "members": [
-                {"name": "alice", "agent": "alice"},
+                {"name": "alice", "role_template": "alice"},
             ],
             "preset_rooms": [{
                 "name": "boot_room",

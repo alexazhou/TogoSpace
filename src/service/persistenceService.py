@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from dal.db import gtMemberHistoryManager, gtRoomMessageManager, gtRoomManager
-from model.dbModel.gtMemberHistory import GtMemberHistory
+from dal.db import gtAgentHistoryManager, gtRoomMessageManager, gtRoomManager
+from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtRoomMessage import GtRoomMessage
 
 logger = logging.getLogger(__name__)
@@ -18,10 +18,10 @@ async def shutdown() -> None:
     pass
 
 
-async def append_room_message(room_id: int, member_id: int, content: str, send_time: str) -> GtRoomMessage | None:
+async def append_room_message(room_id: int, agent_id: int, content: str, send_time: str) -> GtRoomMessage | None:
     return await gtRoomMessageManager.append_room_message(
         room_id=room_id,
-        member_id=member_id,
+        agent_id=agent_id,
         content=content,
         send_time=send_time,
     )
@@ -39,11 +39,11 @@ async def save_room_runtime(room_id: int, member_read_index: dict[str, int]) -> 
     await gtRoomManager.save_room_state(room_id, member_read_index)
 
 
-async def append_member_history_message(message: GtMemberHistory) -> GtMemberHistory | None:
-    return await gtMemberHistoryManager.append_member_history_message(message)
+async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistory | None:
+    return await gtAgentHistoryManager.append_agent_history_message(message)
 
 
-async def load_member_history_message(member_id: int) -> list[GtMemberHistory]:
-    return await gtMemberHistoryManager.get_member_history(member_id)
+async def load_agent_history_message(agent_id: int) -> list[GtAgentHistory]:
+    return await gtAgentHistoryManager.get_agent_history(agent_id)
 
 

@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import logging
 
-from . import gtRoomManager, gtTeamMemberManager
+from . import gtRoomManager, gtAgentManager
 from model.dbModel.gtTeam import GtTeam
-from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig
+from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +92,14 @@ async def get_team_config(name: str) -> TeamConfig | None:
 
     team_id = team.id
 
-    members: list[TeamMemberConfig] = [
-        TeamMemberConfig(
+    members: list[AgentConfig] = [
+        AgentConfig(
             name=member.name,
-            agent=member.agent_name,
+            role_template=member.role_template_name,
             model=member.model or None,
             driver=json.loads(member.driver) if member.driver and member.driver != "{}" else {},
         )
-        for member in await gtTeamMemberManager.get_members_by_team(team_id)
+        for member in await gtAgentManager.get_agents_by_team(team_id)
     ]
 
     rooms: list[TeamRoomConfig] = []
@@ -147,7 +147,7 @@ async def import_team_from_config(team_config: TeamConfig) -> None:
     # 导入 Team
     team = await upsert_team(team_config)
     team_id = team.id
-    await gtTeamMemberManager.upsert_team_members(team_id, team_config.members)
+    await gtAgentManager.upsert_agents(team_id, team_config.members)
 
     # 导入 Rooms（upsert_rooms 会处理成员）
     rooms = _iter_team_rooms(team_config)

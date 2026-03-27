@@ -1,8 +1,8 @@
 {
   "name": "default",
   "members": [
-    { "name": "alice", "agent": "alice" },
-    { "name": "bob", "agent": "bob" }
+    { "name": "alice", "role_template": "alice" },
+    { "name": "bob", "role_template": "bob" }
   ],
   "preset_rooms": [
     {

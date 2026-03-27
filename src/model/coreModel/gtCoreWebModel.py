@@ -4,7 +4,7 @@ from datetime import datetime
 from constants import MemberStatus
 
 
-class GtCoreMemberInfo(BaseModel):
+class GtCoreAgentInfo(BaseModel):
     name: str
     template_name: str | None = None
     model: str
