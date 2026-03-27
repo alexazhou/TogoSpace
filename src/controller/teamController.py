@@ -3,10 +3,10 @@ from pydantic import BaseModel, Field
 
 # 内部包
 from controller.baseController import BaseHandler
-from dal.db import gtRoomManager, gtTeamManager, gtTeamMemberManager
+from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
 from service import teamService
 from util import assertUtil
-from util.configTypes import TeamConfig, TeamMemberConfig, TeamRoomConfig
+from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
 
 
 # Request Models
@@ -14,14 +14,14 @@ class CreateTeamRequest(BaseModel):
     name: str
     working_directory: str = ""
     config: dict = Field(default_factory=dict)
-    members: list[TeamMemberConfig]
+    members: list[AgentConfig]
     preset_rooms: list[TeamRoomConfig]
 
 
 class UpdateTeamRequest(BaseModel):
     working_directory: str | None = None
     config: dict | None = None
-    members: list[TeamMemberConfig] | None = None
+    members: list[AgentConfig] | None = None
     preset_rooms: list[TeamRoomConfig] | None = None
 
 
@@ -76,9 +76,9 @@ class TeamDetailHandler(BaseHandler):
         members = [
             {
                 "name": member.name,
-                "agent": member.agent_name,
+                "role_template": member.role_template_name,
             }
-            for member in await gtTeamMemberManager.get_members_by_team(team_id)
+            for member in await gtAgentManager.get_agents_by_team(team_id)
         ]
         room_items = []
         for room in rooms:

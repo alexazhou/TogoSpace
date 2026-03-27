@@ -26,7 +26,8 @@ def test_migrate_database_applies_all_pending_and_is_idempotent(tmp_path: Path) 
 
     conn = sqlite3.connect(db_path)
     try:
-        assert {"model", "template_name"} <= _columns(conn, "agents")
+        assert {"model", "template_name"} <= _columns(conn, "role_templates")
+        assert {"role_template_name"} <= _columns(conn, "agents")
         assert {"working_directory", "config"} <= _columns(conn, "teams")
     finally:
         conn.close()

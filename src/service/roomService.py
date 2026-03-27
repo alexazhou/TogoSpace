@@ -5,13 +5,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence
 
-from dal.db import gtRoomManager, gtTeamManager, gtTeamMemberManager
+from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
 from service import messageBus, persistenceService
 from util.configTypes import TeamConfig, TeamRoomConfig
 from model.coreModel.gtCoreChatModel import GtCoreChatMessage
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
-from model.dbModel.gtTeamMember import GtTeamMember
+from model.dbModel.gtAgent import GtAgent
 from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ class ChatRoom:
     SYSTEM_MEMBER_ID = -2
     OPERATOR_MEMBER_ID = -1
 
-    def __init__(self, team: GtTeam, room: GtRoom, members: List[GtTeamMember] | None = None):
+    def __init__(self, team: GtTeam, room: GtRoom, members: List[GtAgent] | None = None):
         self.room_id: int = room.id  # 数据库主键 ID
         self.team_id: int = team.id  # 所属 Team 的数据库主键 ID
         self.name: str = room.name  # 房间名称
@@ -70,7 +70,7 @@ class ChatRoom:
         self.room_type: RoomType = room.type  # 房间类型（私有/群聊）
         self.messages: List[GtCoreChatMessage] = []  # 消息历史记录
         self.initial_topic: str = room.initial_topic  # 初始话题
-        self._members: List[GtTeamMember] = members or []  # 房间参与者列表
+        self._members: List[GtAgent] = members or []  # 房间参与者列表
 
         self._member_name_map: Dict[int, str] = {m.id: m.name for m in self._members}
         self._member_name_map[self.SYSTEM_MEMBER_ID] = SpecialAgent.SYSTEM.name
@@ -133,7 +133,7 @@ class ChatRoom:
 
         await persistenceService.append_room_message(
             room_id=self.room_id,
-            member_id=self.get_member_id(sender),
+            agent_id=self.get_member_id(sender),
             content=content,
             send_time=message.send_time.isoformat(),
         )
@@ -356,7 +356,7 @@ async def restore_state() -> None:
         if room_msg_rows:
             restored_messages = [
                 GtCoreChatMessage(
-                    sender_name=room._member_name_map.get(row.member_id, SpecialAgent.SYSTEM.name),
+                    sender_name=room._member_name_map.get(row.agent_id, SpecialAgent.SYSTEM.name),
                     content=row.content,
                     send_time=datetime.fromisoformat(row.send_time),
                 )
@@ -432,15 +432,15 @@ async def _create_room(
             type=room_type,
             initial_topic=initial_topic,
             max_turns=max_turns,
-            member_read_index=None,
+            agent_read_index=None,
             updated_at=GtRoom._now(),
         )
 
     resolved_room_id = room_row.id
-    member_rows = await gtTeamMemberManager.get_members_by_team(team_row.id)
+    member_rows = await gtAgentManager.get_agents_by_team(team_row.id)
     member_map = {row.name: row for row in member_rows}
 
-    # 根据传入的成员名称构建 GtTeamMember 列表
+    # 根据传入的成员名称构建 GtAgent 列表
     # 若成员在数据库中不存在，创建临时对象
     normalized_members = _normalize_members(members)
     room_members = []
@@ -451,7 +451,7 @@ async def _create_room(
             # 为不在数据库中的成员创建临时对象
             # OPERATOR 使用特殊 id=-1
             member_id = ChatRoom.OPERATOR_MEMBER_ID if SpecialAgent.value_of(name) == SpecialAgent.OPERATOR else 0
-            room_members.append(GtTeamMember(id=member_id, team_id=team_row.id, name=name, agent_name=name))
+            room_members.append(GtAgent(id=member_id, team_id=team_row.id, name=name, role_template_name=name))
 
     room = ChatRoom(team=team_row, room=room_row, members=room_members)
     room_key = room.key

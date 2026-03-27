@@ -8,19 +8,19 @@ from util import llmApiUtil
 
 
 @dataclass
-class MemberDriverConfig:
+class AgentDriverConfig:
     driver_type: str
     options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
-class MemberTurnActionResult:
+class AgentTurnActionResult:
     ok: bool
     message: str
     turn_finished: bool = False
 
 
-class MemberDriverHost(Protocol):
+class AgentDriverHost(Protocol):
     name: str
     team_name: str
     system_prompt: str
@@ -47,8 +47,8 @@ class MemberDriverHost(Protocol):
         ...
 
 
-class MemberDriver:
-    def __init__(self, host: MemberDriverHost, config: MemberDriverConfig):
+class AgentDriver:
+    def __init__(self, host: AgentDriverHost, config: AgentDriverConfig):
         self.host = host
         self.config = config
 

@@ -8,11 +8,11 @@ import pytest
 from constants import OpenaiLLMApiRole, SpecialAgent
 from dal.db import gtTeamManager
 from tests.base import ServiceTestCase
-from util.configTypes import AgentTemplate, TeamConfig
+from util.configTypes import RoleTemplate, TeamConfig
 from service import (
     roomService,
+    roleTemplateService,
     agentService,
-    memberService,
     funcToolService,
     messageBus,
     schedulerService as scheduler,
@@ -35,7 +35,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         messageBus.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
-        await memberService.shutdown()
+        await agentService.shutdown()
         roomService.shutdown()
 
     def setup_method(self):
@@ -47,7 +47,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         self.cleanup_sqlite_files()
 
     async def _bootstrap(self):
-        agents_config = [AgentTemplate.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
+        agents_config = [RoleTemplate.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
         team_config = TeamConfig.model_validate(json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read()))
 
         from src.db import migrate_database
@@ -55,17 +55,17 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
         await roomService.startup()
         await funcToolService.startup()
-        await agentService.startup()
+        await roleTemplateService.startup()
         await ormService.startup(self.TEST_DB_PATH)
         await persistenceService.startup()
 
-        agentService.load_agent_config(agents_config)
-        await memberService.startup()
+        roleTemplateService.load_role_template_config(agents_config)
+        await agentService.startup()
         await gtTeamManager.import_team_from_config(team_config)
-        await memberService.load_team_ids([team_config])
-        await memberService.create_team_members([team_config])
+        await agentService.load_team_ids([team_config])
+        await agentService.create_team_agents([team_config])
         await roomService.create_rooms([team_config])
-        await memberService.restore_state()
+        await agentService.restore_state()
         await roomService.restore_state()
         await scheduler.startup([team_config])
         return team_config
@@ -126,21 +126,21 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
         assert any(m.content == "from alice" for m in room.messages)
         assert any(m.content == "from bob" for m in room.messages)
-        assert memberService.get_team_member(TEAM, "alice")._history
+        assert agentService.get_team_agent(TEAM, "alice")._history
 
         # 手动清理服务以模拟重启
         scheduler.shutdown()
         funcToolService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
-        await memberService.shutdown()
+        await agentService.shutdown()
         roomService.shutdown()
 
         # 重启并恢复状态
         await self._bootstrap()
 
         restored_room = roomService.get_room_by_key(f"general@{TEAM}")
-        restored_alice = memberService.get_team_member(TEAM, "alice")
+        restored_alice = agentService.get_team_agent(TEAM, "alice")
 
         assert any(m.content == "from alice" for m in restored_room.messages)
         assert any(m.content == "from bob" for m in restored_room.messages)

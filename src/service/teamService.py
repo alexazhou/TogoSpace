@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from dal.db import gtTeamManager, gtTeamMemberManager, gtRoomManager
+from dal.db import gtTeamManager, gtAgentManager, gtRoomManager
 from exception import TeamAgentException
 from service import deptService
 from util import configUtil
@@ -66,7 +66,7 @@ async def create_team(team_config: TeamConfig) -> None:
     # 创建 Team
     team = await gtTeamManager.upsert_team(team_config)
     team_id = team.id
-    await gtTeamMemberManager.upsert_team_members(team_id, team_config.members)
+    await gtAgentManager.upsert_agents(team_id, team_config.members)
 
     if team_config.dept_tree:
         await deptService.import_dept_tree(team_id, team_config.dept_tree)
@@ -100,7 +100,7 @@ async def update_team(team_config: TeamConfig) -> None:
     # 更新 Team 基本信息
     team = await gtTeamManager.upsert_team(team_config)
     team_id = team.id
-    await gtTeamMemberManager.upsert_team_members(team_id, team_config.members)
+    await gtAgentManager.upsert_agents(team_id, team_config.members)
 
     # 更新 preset_rooms
     rooms = team_config.preset_rooms
@@ -141,7 +141,7 @@ async def delete_team(name: str) -> None:
 
 async def hot_reload_team(name: str) -> None:
     """触发指定 Team 的热更新。"""
-    from service import roomService, schedulerService, memberService
+    from service import roomService, schedulerService, agentService
 
     # 重新加载配置
     team_configs = await reload_from_db()
@@ -155,7 +155,7 @@ async def hot_reload_team(name: str) -> None:
     schedulerService.stop_team(name)
 
     # 刷新成员实例，保证新增/变更成员可被调度命中
-    await memberService.reload_team_members(name, team_configs)
+    await agentService.reload_team_agents(name, team_configs)
 
     # 刷新调度器配置
     schedulerService.refresh_team_config(name, team_configs)

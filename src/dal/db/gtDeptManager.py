@@ -26,7 +26,7 @@ async def upsert_dept(
     responsibility: str,
     parent_id: int | None,
     manager_id: int,
-    member_ids: list[int],
+    agent_ids: list[int],
 ) -> GtDept:
     now = datetime.now().isoformat()
     await (
@@ -36,7 +36,7 @@ async def upsert_dept(
             responsibility=responsibility,
             parent_id=parent_id,
             manager_id=manager_id,
-            member_ids=member_ids,
+            agent_ids=agent_ids,
             created_at=now,
         )
         .on_conflict(
@@ -45,7 +45,7 @@ async def upsert_dept(
                 GtDept.responsibility: responsibility,
                 GtDept.parent_id: parent_id,
                 GtDept.manager_id: manager_id,
-                GtDept.member_ids: member_ids,
+                GtDept.agent_ids: agent_ids,
                 GtDept.updated_at: now,
             },
         )

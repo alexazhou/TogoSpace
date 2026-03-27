@@ -3,7 +3,7 @@ import json
 from pydantic import BaseModel
 
 from controller.baseController import BaseHandler
-from dal.db import gtTeamManager, gtTeamMemberManager
+from dal.db import gtTeamManager, gtAgentManager
 from service import deptService
 from util import assertUtil
 from constants import EmployStatus
@@ -52,7 +52,7 @@ class DeptManagerHandler(BaseHandler):
 
 
 class DeptMembersHandler(BaseHandler):
-    """POST /teams/<id>/dept_tree/<dept>/members.json - 将成员加入部门"""
+    """POST /teams/<id>/dept_tree/<dept>/agents.json - 将成员加入部门"""
 
     async def post(self, team_id_str: str, dept_name: str) -> None:
         team_id = int(team_id_str)
@@ -67,9 +67,9 @@ class DeptMembersHandler(BaseHandler):
 
 
 class DeptMemberDetailHandler(BaseHandler):
-    """DELETE /teams/<id>/dept_tree/<dept>/members/<member>.json - 将成员移出部门"""
+    """DELETE /teams/<id>/dept_tree/<dept>/agents/<agent>.json - 将成员移出部门"""
 
-    async def delete(self, team_id_str: str, dept_name: str, member_name: str) -> None:
+    async def delete(self, team_id_str: str, dept_name: str, agent_name: str) -> None:
         team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
@@ -85,12 +85,12 @@ class DeptMemberDetailHandler(BaseHandler):
             except Exception:
                 pass
 
-        await deptService.remove_member(team_id, member_name, new_manager=new_manager)
+        await deptService.remove_member(team_id, agent_name, new_manager=new_manager)
         self.return_json({"status": "ok"})
 
 
 class DeptOffBoardMembersHandler(BaseHandler):
-    """GET /teams/<id>/dept_members.json?employ_status=off_board - 查询休闲成员"""
+    """GET /teams/<id>/dept_agents.json?employ_status=off_board - 查询休闲成员"""
 
     async def get(self, team_id_str: str) -> None:
         team_id = int(team_id_str)
@@ -101,12 +101,12 @@ class DeptOffBoardMembersHandler(BaseHandler):
 
         employ_status_raw = self.get_query_argument("employ_status", "OFF_BOARD")
         if EmployStatus.value_of(employ_status_raw) == EmployStatus.OFF_BOARD:
-            members = await deptService.get_off_board_members(team_id)
+            agents = await deptService.get_off_board_members(team_id)
         else:
-            members = await gtTeamMemberManager.get_members_by_team(team_id)
+            agents = await gtAgentManager.get_agents_by_team(team_id)
         data = [
-            {"id": m.id, "name": m.name, "agent": m.agent_name, "employ_status": m.employ_status.name if m.employ_status else None}
-            for m in members
+            {"id": m.id, "name": m.name, "role_template": m.role_template_name, "employ_status": m.employ_status.name if m.employ_status else None}
+            for m in agents
         ]
 
-        self.return_json({"members": data})
+        self.return_json({"agents": data})
