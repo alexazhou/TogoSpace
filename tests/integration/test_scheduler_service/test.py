@@ -14,6 +14,7 @@ from service.messageBus import Message
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
+from model.dbModel.gtTeamMember import GtTeamMember
 from constants import MessageBusTopic, MemberStatus
 from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
@@ -73,7 +74,7 @@ class TestSchedulerRun(ServiceTestCase):
                 member_read_index=None,
                 updated_at=GtRoom._now_iso(),
             ),
-            members=["alice"],
+            members=[GtTeamMember(id=0, team_id=1, name="alice", agent_name="alice")],
         )
 
         teams_config = [_make_team_config()]
@@ -149,7 +150,7 @@ class TestSchedulerRun(ServiceTestCase):
                 member_read_index=None,
                 updated_at=GtRoom._now_iso(),
             ),
-            members=["alice"],
+            members=[GtTeamMember(id=0, team_id=1, name="alice", agent_name="alice")],
         )
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
@@ -179,7 +180,7 @@ class TestSchedulerRun(ServiceTestCase):
                 member_read_index=None,
                 updated_at=GtRoom._now_iso(),
             ),
-            members=["alice"],
+            members=[GtTeamMember(id=0, team_id=1, name="alice", agent_name="alice")],
         )
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
@@ -209,7 +210,7 @@ class TestSchedulerRun(ServiceTestCase):
                 member_read_index=None,
                 updated_at=GtRoom._now_iso(),
             ),
-            members=["alice"],
+            members=[GtTeamMember(id=0, team_id=1, name="alice", agent_name="alice")],
         )
         r2 = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -223,7 +224,7 @@ class TestSchedulerRun(ServiceTestCase):
                 member_read_index=None,
                 updated_at=GtRoom._now_iso(),
             ),
-            members=["alice"],
+            members=[GtTeamMember(id=0, team_id=1, name="alice", agent_name="alice")],
         )
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
@@ -257,7 +258,7 @@ class TestSchedulerRun(ServiceTestCase):
                 member_read_index=None,
                 updated_at=GtRoom._now_iso(),
             ),
-            members=["alice"],
+            members=[GtTeamMember(id=0, team_id=1, name="alice", agent_name="alice")],
         )
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)

@@ -5,7 +5,8 @@ import sys
 
 import pytest
 
-from constants import OpenaiLLMApiRole
+from constants import OpenaiLLMApiRole, SpecialAgent
+from dal.db import gtTeamManager
 from tests.base import ServiceTestCase
 from util.configTypes import AgentTemplate, TeamConfig
 from service import (
@@ -60,9 +61,12 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
         agentService.load_agent_config(agents_config)
         await memberService.startup()
+        await gtTeamManager.import_team_from_config(team_config)
+        await memberService.load_team_ids([team_config])
         await memberService.create_team_members([team_config])
         await roomService.create_rooms([team_config])
-        await persistenceService.restore_runtime_state()
+        await memberService.restore_state()
+        await roomService.restore_state()
         await scheduler.startup([team_config])
         return team_config
 
@@ -78,19 +82,19 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         with self.patch_infer(handler=fake_infer):
             run_task = asyncio.create_task(scheduler.run())
             await asyncio.sleep(0)
-            agent_messages = [m for m in room.messages if m.sender_name != "system"]
+            agent_messages = [m for m in room.messages if SpecialAgent.value_of(m.sender_name) != SpecialAgent.SYSTEM]
             assert len(agent_messages) == 0
 
             room.activate_scheduling()
             await self.wait_until(
-                lambda: len([m for m in room.messages if m.sender_name != "system"]) >= 1,
+                lambda: len([m for m in room.messages if SpecialAgent.value_of(m.sender_name) != SpecialAgent.SYSTEM]) >= 1,
                 timeout=2.0,
                 message="房间激活后未在限时内收到 Agent 回复",
             )
             scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)
 
-        agent_messages = [m for m in room.messages if m.sender_name != "system"]
+        agent_messages = [m for m in room.messages if SpecialAgent.value_of(m.sender_name) != SpecialAgent.SYSTEM]
         assert len(agent_messages) >= 1
 
     async def test_restore_runtime_state_recovers_room_and_agent_history(self):
