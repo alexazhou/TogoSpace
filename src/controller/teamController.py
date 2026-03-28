@@ -49,6 +49,7 @@ class TeamListHandler(BaseHandler):
                         "config": team.get_config(),
                         "max_function_calls": team.max_function_calls,
                         "enabled": team.enabled,
+                        "deleted": team.deleted,
                         "created_at": team.created_at,
                         "updated_at": team.updated_at,
                     }
@@ -108,6 +109,7 @@ class TeamDetailHandler(BaseHandler):
                 "config": team.get_config(),
                 "max_function_calls": team.max_function_calls,
                 "enabled": team.enabled,
+                "deleted": team.deleted,
                 "created_at": team.created_at,
                 "updated_at": team.updated_at,
                 "members": members,

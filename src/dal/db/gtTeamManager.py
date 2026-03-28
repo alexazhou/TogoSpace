@@ -17,8 +17,8 @@ def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
 
 # Team CRUD
 async def get_team(name: str) -> GtTeam | None:
-    """获取指定 Team。"""
-    return await GtTeam.aio_get_or_none(GtTeam.name == name)
+    """获取指定 Team（未删除的）。"""
+    return await GtTeam.aio_get_or_none((GtTeam.name == name) & (GtTeam.deleted == 0))
 
 
 async def get_team_by_id(team_id: int) -> GtTeam | None:
@@ -27,8 +27,8 @@ async def get_team_by_id(team_id: int) -> GtTeam | None:
 
 
 async def get_all_teams(enabled: bool | None = None) -> list[GtTeam]:
-    """获取所有 Team。可通过 enabled 参数过滤。"""
-    query = GtTeam.select().order_by(GtTeam.name)
+    """获取所有未删除的 Team。可通过 enabled 参数过滤。"""
+    query = GtTeam.select().where(GtTeam.deleted == 0).order_by(GtTeam.name)
     if enabled is not None:
         query = query.where(GtTeam.enabled == 1 if enabled else GtTeam.enabled == 0)
     return list(await query.aio_execute())
@@ -67,9 +67,9 @@ async def upsert_team(team_config: TeamConfig) -> GtTeam:
 
 
 async def delete_team(name: str) -> None:
-    """软删除 Team（设置 enabled=0）。"""
+    """删除 Team（设置 deleted=1）。"""
     await (
-        GtTeam.update(enabled=0, updated_at=GtTeam._now())
+        GtTeam.update(deleted=1, updated_at=GtTeam._now())
         .where(GtTeam.name == name)
         .aio_execute()
     )
@@ -85,8 +85,8 @@ async def set_team_enabled(team_id: int, enabled: bool) -> None:
 
 
 async def team_exists(name: str) -> bool:
-    """检查 Team 是否存在且已启用。"""
-    row = await GtTeam.aio_get_or_none((GtTeam.name == name) & (GtTeam.enabled == 1))
+    """检查 Team 是否存在且未删除且已启用。"""
+    row = await GtTeam.aio_get_or_none((GtTeam.name == name) & (GtTeam.deleted == 0) & (GtTeam.enabled == 1))
     return row is not None
 
 
