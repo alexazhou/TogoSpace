@@ -1,6 +1,6 @@
 import tornado.web
 
-from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController
+from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController
 
 
 tornado_settings = {
@@ -9,6 +9,9 @@ tornado_settings = {
 }
 
 application = tornado.web.Application([
+    # Global config
+    (r"/config/frontend.json",                       configController.ConfigHandler),
+
     # Role templates
     (r"/role_templates/list.json",                   roleTemplateController.RoleTemplateListHandler),
     (r"/role_templates/([^/]+).json",               roleTemplateController.RoleTemplateDetailHandler),
