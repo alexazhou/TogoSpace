@@ -29,8 +29,6 @@ class DeptTreeHandler(BaseHandler):
         team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
-        if team is None:
-            return
 
         tree = await deptService.get_dept_tree_async(team_id)
         self.return_json({"dept_tree": tree.model_dump() if tree else None})
@@ -43,8 +41,6 @@ class DeptManagerHandler(BaseHandler):
         team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
-        if team is None:
-            return
 
         request = self.parse_request(SetManagerRequest)
         await deptService.set_dept_manager(team_id, dept_name, request.manager)
@@ -58,8 +54,6 @@ class DeptMembersHandler(BaseHandler):
         team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
-        if team is None:
-            return
 
         request = self.parse_request(MoveMemberRequest)
         await deptService.move_member(team_id, request.member, dept_name, is_manager=request.is_manager)
@@ -73,8 +67,6 @@ class DeptMemberDetailHandler(BaseHandler):
         team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
-        if team is None:
-            return
 
         body = self.request.body
         new_manager: str | None = None
@@ -96,8 +88,6 @@ class DeptOffBoardMembersHandler(BaseHandler):
         team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
-        if team is None:
-            return
 
         employ_status_raw = self.get_query_argument("employ_status", "OFF_BOARD")
         if EmployStatus.value_of(employ_status_raw) == EmployStatus.OFF_BOARD:
