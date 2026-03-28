@@ -13,6 +13,7 @@ class GtTeam(DbModelBase):
     config: str = peewee.TextField(default="{}")
     max_function_calls: int = peewee.IntegerField(default=5)
     enabled: int = peewee.IntegerField(default=1)
+    deleted: int = peewee.IntegerField(default=0)
 
     def get_config(self) -> dict:
         try:
