@@ -69,8 +69,7 @@ class RoleTemplate(BaseModel):
     model: Optional[str] = None
     use_agent_sdk: bool = False
     allowed_tools: List[str] = Field(default_factory=list)
-    driver: dict[str, Any] = Field(default_factory=dict)
-    runtime: dict[str, Any] = Field(default_factory=dict)
+    driver: DriverType = DriverType.NATIVE
 
 
 class LlmServiceConfig(BaseModel):
