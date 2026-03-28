@@ -311,10 +311,7 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
 
     for team_config in teams_config:
         team_name = team_config.name
-        if team_config.working_directory:
-            team_workdir = team_config.working_directory
-        else:
-            team_workdir = os.path.join(resolved_workspace_root, team_name)
+        team_workdir = os.path.join(resolved_workspace_root, team_name)
 
         for member_cfg in team_config.members:
             agent_name = member_cfg.name
