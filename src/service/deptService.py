@@ -43,7 +43,7 @@ async def set_dept_tree(team_id: int, root: DeptNodeConfig) -> None:
     if on_board_ids:
         await (
             GtAgent.update(employ_status=EmployStatus.ON_BOARD)
-            .where(GtAgent.id.in_(on_board_ids))
+            .where(GtAgent.id.in_(on_board_ids))  # type: ignore[attr-defined]
             .aio_execute()
         )
 
@@ -52,7 +52,7 @@ async def set_dept_tree(team_id: int, root: DeptNodeConfig) -> None:
     if off_board_ids:
         await (
             GtAgent.update(employ_status=EmployStatus.OFF_BOARD)
-            .where(GtAgent.id.in_(off_board_ids))
+            .where(GtAgent.id.in_(off_board_ids))  # type: ignore[attr-defined]
             .aio_execute()
         )
 

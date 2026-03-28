@@ -108,7 +108,7 @@ async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
     """按 ID 列表查询 agents。"""
     return list(
         await GtAgent.select()
-        .where(GtAgent.id.in_(agent_ids))
+        .where(GtAgent.id.in_(agent_ids))  # type: ignore[attr-defined]
         .aio_execute()
     )
 

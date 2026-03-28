@@ -13,7 +13,7 @@ from service.agentService.driver import AgentDriverConfig, build_agent_driver, n
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
 from dal.db import gtRoleTemplateManager, gtDeptManager, gtTeamManager, gtAgentManager
 from service.roomService import ChatRoom, ChatContext
-from constants import SpecialAgent, MessageBusTopic, MemberStatus
+from constants import SpecialAgent, MessageBusTopic, MemberStatus, DriverType
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ class Agent:
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
         self.status: MemberStatus = MemberStatus.IDLE
         self.current_room: Optional[ChatRoom] = None
-        self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type="native"))
+        self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
 
     @property
     def team_id(self) -> int:
