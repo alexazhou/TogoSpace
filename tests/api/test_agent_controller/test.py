@@ -102,7 +102,7 @@ class TestAgentBatchUpdate(_ApiServiceCase):
                     "name": "alice",
                     "role_template_name": "alice",
                     "model": "gpt-4",
-                    "driver": "native",
+                    "driver": "NATIVE",
                 }
             ]
         }
@@ -135,7 +135,7 @@ class TestAgentBatchUpdate(_ApiServiceCase):
                     "name": "not_exist",
                     "role_template_name": "alice",
                     "model": "",
-                    "driver": "native",
+                    "driver": "NATIVE",
                 }
             ]
         }
