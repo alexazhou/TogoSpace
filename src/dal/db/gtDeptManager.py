@@ -57,3 +57,8 @@ async def upsert_dept(
     if row is None:
         raise RuntimeError(f"dept upsert failed: team_id={team_id}, name={name}")
     return row
+
+
+async def delete_all_depts(team_id: int) -> None:
+    """删除 team 下所有部门。"""
+    await GtDept.delete().where(GtDept.team_id == team_id).aio_execute()
