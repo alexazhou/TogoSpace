@@ -61,13 +61,7 @@ class RoomListHandler(BaseHandler):
         team_name = self.get_query_argument("team_name", None)
         if team_id_raw:
             team = await gtTeamManager.get_team_by_id(int(team_id_raw))
-            assertUtil.assertNotNull(
-                team,
-                error_message=f"Team ID '{team_id_raw}' not found",
-                error_code="team_not_found",
-            )
-            if team is None:
-                return
+            assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id_raw}' not found", error_code="team_not_found")
             team_name = team.name
         rooms: List[chat_room.ChatRoom] = chat_room.get_all_rooms()
         if team_name:

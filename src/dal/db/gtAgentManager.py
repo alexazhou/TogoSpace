@@ -41,22 +41,42 @@ async def get_off_board_agents(team_id: int) -> list[GtAgent]:
     )
 
 
-async def upsert_agents(team_id: int, members: list[AgentConfig]) -> None:
-    await delete_agents_by_team(team_id)
-    if not members:
-        return
+async def upsert_agents(team_id: int, members: list[AgentConfig] | list[dict]) -> None:
+    """增量更新 team 的成员列表。有 id 则按 id 更新，无 id 则插入。"""
+    for member in members:
+        if isinstance(member, dict):
+            member_id = member.get("id")
+            name = member.get("name")
+            role_template = member.get("role_template") or member.get("role_template_name")
+            model = member.get("model") or ""
+            driver = member.get("driver") or "{}"
+            if isinstance(driver, dict):
+                driver = json.dumps(driver, ensure_ascii=False, sort_keys=True)
+        else:
+            member_id = None
+            name = member.name
+            role_template = member.role_template
+            model = member.model or ""
+            driver = json.dumps(member.driver, ensure_ascii=False, sort_keys=True)
 
-    rows = [
-        {
-            "team_id": team_id,
-            "name": member.name,
-            "role_template_name": member.role_template,
-            "model": member.model or "",
-            "driver": json.dumps(member.driver, ensure_ascii=False, sort_keys=True),
-        }
-        for member in members
-    ]
-    await GtAgent.insert_many(rows).aio_execute()
+        if member_id:
+            # 按 id 更新
+            existing = await GtAgent.aio_get_or_none(GtAgent.id == member_id)
+            if existing is not None:
+                existing.name = name
+                existing.role_template_name = role_template
+                existing.model = model
+                existing.driver = driver
+                await existing.aio_save()
+        else:
+            # 无 id 则插入
+            await GtAgent.insert(
+                team_id=team_id,
+                name=name,
+                role_template_name=role_template,
+                model=model,
+                driver=driver,
+            ).aio_execute()
 
 
 async def delete_agents_by_team(team_id: int) -> None:

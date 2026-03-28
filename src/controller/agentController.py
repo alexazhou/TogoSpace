@@ -13,7 +13,7 @@ class AgentUpdateItem(BaseModel):
     driver: str = "{}"
 
 
-class SetAgentsRequest(BaseModel):
+class BatchUpdateAgentsRequest(BaseModel):
     agents: list[AgentUpdateItem]
 
 
@@ -44,18 +44,16 @@ class AgentListHandler(BaseHandler):
         ]
         self.return_json({"agents": data})
 
-    async def put(self):
-        """PUT /agents/list.json?team_id=<id> - 批量更新成员配置"""
-        team_id_raw = self.get_query_argument("team_id", None)
-        if not team_id_raw:
-            self.return_error(error_message="team_id is required", error_code="missing_team_id")
-            return
 
-        team_id = int(team_id_raw)
+class AgentBatchUpdateHandler(BaseHandler):
+    """PUT /teams/<id>/agents/batch_update.json - 批量更新成员配置"""
+
+    async def put(self, team_id_str: str) -> None:
+        team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
-        request = self.parse_request(SetAgentsRequest)
+        request = self.parse_request(BatchUpdateAgentsRequest)
 
         # 检查所有 agent id 是否存在
         agent_ids = [item.id for item in request.agents]

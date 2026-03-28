@@ -139,6 +139,63 @@ assertUtil.assertEqual(
 }
 ```
 
+### 常见问题
+
+#### assertNotNull 后不需要冗余判断
+
+`assertNotNull` 失败会抛出异常，后续代码不会执行，不需要额外判断：
+
+```python
+# ✅ 推荐
+team = await gtTeamManager.get_team_by_id(team_id)
+assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+# 直接继续业务逻辑
+
+# ❌ 不推荐 - 冗余判断
+team = await gtTeamManager.get_team_by_id(team_id)
+assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+if team is None:
+    return  # 永远不会执行
+```
+
+#### 批量操作先检查所有数据存在性
+
+批量更新时，先用一条 in 查询检查所有 id 是否存在，避免更新到一半失败：
+
+```python
+# ✅ 推荐 - 先检查，再更新
+agent_ids = [item.id for item in request.agents]
+existing_agents = await gtAgentManager.get_agents_by_ids(agent_ids)
+assertUtil.assertEqual(len(existing_agents), len(agent_ids), f"input {len(agent_ids)} agent ids, but only found {len(existing_agents)} existed")
+
+for item in request.agents:
+    await gtAgentManager.update_agent(...)
+
+# ❌ 不推荐 - 边检查边更新，可能中途失败
+for item in request.agents:
+    agent = await gtAgentManager.get_agent_by_id(item.id)
+    if agent is None:
+        raise TeamAgentException(...)  # 已更新的数据无法回滚
+    await gtAgentManager.update_agent(...)
+```
+
+#### assert 语句保持简洁
+
+单行 assert，不需要过多换行：
+
+```python
+# ✅ 推荐
+assertUtil.assertEqual(len(existing_agents), len(agent_ids), f"input {len(agent_ids)} agent ids, but only found {len(existing_agents)} existed")
+
+# ❌ 不推荐 - 过多换行
+assertUtil.assertEqual(
+    len(existing_agents),
+    len(agent_ids),
+    error_message=f"Agent IDs not found: expected {len(agent_ids)}, got {len(existing_agents)}",
+    error_code="agent_update_failed",
+)
+```
+
 ---
 
 ## 错误处理
@@ -204,6 +261,36 @@ async def post(self) -> None:
 | 创建/修改/删除 | `POST` | 绝大多数写操作使用 POST（简化调用） |
 | 特殊更新 | `PUT` | 少量场景会使用 PUT（例如部门主管变更） |
 
+### Handler 命名规范
+
+List Handler 只用于查询，写操作使用单独的 Handler：
+
+| Handler 命名 | 用途 | 示例 |
+|--------------|------|------|
+| `XxxListHandler` | 仅 GET，查询列表 | `AgentListHandler` |
+| `XxxBatchUpdateHandler` | PUT/POST，批量更新 | `AgentBatchUpdateHandler` |
+| `XxxCreateHandler` | POST，创建资源 | `TeamCreateHandler` |
+| `XxxDetailHandler` | GET，获取详情 | `AgentDetailHandler` |
+
+```python
+# ✅ 推荐 - 查询和更新分开
+class AgentListHandler(BaseHandler):
+    async def get(self):  # 仅 GET
+        ...
+
+class AgentBatchUpdateHandler(BaseHandler):
+    async def put(self):  # 单独 Handler
+        ...
+
+# ❌ 不推荐 - List Handler 包含写操作
+class AgentListHandler(BaseHandler):
+    async def get(self):
+        ...
+
+    async def put(self):  # 容易混淆
+        ...
+```
+
 ---
 
 ## 路由注册
@@ -216,10 +303,12 @@ from controller import roleTemplateController, agentController, roomController, 
 
 application = tornado.web.Application([
     # Role templates
+    (r"/role_templates/list.json",                   roleTemplateController.RoleTemplateListHandler),
     (r"/role_templates/([^/]+).json",               roleTemplateController.RoleTemplateDetailHandler),
 
     # Agents (运行时成员)
     (r"/agents/list.json",                          agentController.AgentListHandler),
+    (r"/teams/(\d+)/agents/batch_update.json",      agentController.AgentBatchUpdateHandler),
     (r"/teams/(\d+)/agents/([^/]+).json",           agentController.AgentDetailHandler),
 
     # Room (运行时)
@@ -248,10 +337,6 @@ application = tornado.web.Application([
 
     # Dept Tree (V10)
     (r"/teams/(\d+)/dept_tree.json",                                    deptController.DeptTreeHandler),
-    (r"/teams/(\d+)/dept_tree/([^/]+)/manager.json",                    deptController.DeptManagerHandler),
-    (r"/teams/(\d+)/dept_tree/([^/]+)/agents.json",                     deptController.DeptMembersHandler),
-    (r"/teams/(\d+)/dept_tree/([^/]+)/agents/([^/]+).json",             deptController.DeptMemberDetailHandler),
-    (r"/teams/(\d+)/dept_agents.json",                                   deptController.DeptOffBoardMembersHandler),
 ], **tornado_settings)
 ```
 
