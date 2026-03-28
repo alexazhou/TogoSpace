@@ -26,8 +26,6 @@ class RoleTemplateDetailHandler(BaseHandler):
             error_message=f"Role template '{template_name}' not found",
             error_code="role_template_not_found",
         )
-        if definition is None:
-            return
 
         if definition.system_prompt:
             prompt = definition.system_prompt
