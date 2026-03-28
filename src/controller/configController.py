@@ -1,6 +1,11 @@
+import os
 from constants import DriverType
 from controller.baseController import BaseHandler
 from util import configUtil
+
+
+# 基础目录
+_BASE_DIR = os.path.abspath(os.path.expanduser("~/.teamclaw"))
 
 
 class ConfigHandler(BaseHandler):
@@ -30,6 +35,18 @@ class ConfigHandler(BaseHandler):
             "models": models,
             "driver_types": driver_types,
             "default_model": setting.default_llm_server,
+        })
+
+
+class DirectoriesHandler(BaseHandler):
+    """GET /config/directories.json - 获取系统目录配置"""
+
+    async def get(self) -> None:
+        self.return_json({
+            "config_dir": os.path.join(_BASE_DIR, "config"),
+            "workspace_dir": os.path.join(_BASE_DIR, "workspace"),
+            "data_dir": os.path.join(_BASE_DIR, "data"),
+            "log_dir": os.path.join(_BASE_DIR, "log"),
         })
 
 

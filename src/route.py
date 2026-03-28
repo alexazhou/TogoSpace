@@ -11,6 +11,7 @@ tornado_settings = {
 application = tornado.web.Application([
     # Global config
     (r"/config/frontend.json",                       configController.ConfigHandler),
+    (r"/config/directories.json",                    configController.DirectoriesHandler),
 
     # Role templates
     (r"/role_templates/list.json",                   roleTemplateController.RoleTemplateListHandler),
