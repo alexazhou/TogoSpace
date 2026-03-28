@@ -10,6 +10,7 @@ tornado_settings = {
 
 application = tornado.web.Application([
     # Role templates
+    (r"/role_templates/list.json",                   roleTemplateController.RoleTemplateListHandler),
     (r"/role_templates/([^/]+).json",               roleTemplateController.RoleTemplateDetailHandler),
 
     # Agents (运行时成员)
