@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sqlite3
 from typing import Optional
 
 import aiosqlite
@@ -11,6 +10,7 @@ from peewee_async.databases import AioDatabase
 from peewee_async.pool import PoolBackend
 from peewee_async.utils import ConnectionProtocol
 
+from db import migrate_database
 from model.dbModel.base import bind_database
 
 logger = logging.getLogger(__name__)
@@ -60,16 +60,9 @@ _db: Optional[AioSqliteDatabase] = None
 _db_path: Optional[str] = None
 
 
-def _assert_migration_ready(db_path: str) -> None:
-    with sqlite3.connect(db_path) as conn:
-        row = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations'"
-        ).fetchone()
-    if row is None:
-        raise RuntimeError(
-            "Database schema is not initialized. "
-            "Run '.venv/bin/python src/db.py migrate' first."
-        )
+def _needs_migration(db_path: str) -> bool:
+    """检查是否需要执行迁移：数据库文件不存在。"""
+    return not os.path.exists(db_path)
 
 
 async def startup(db_path: str) -> None:
@@ -81,13 +74,21 @@ async def startup(db_path: str) -> None:
     abs_path = os.path.abspath(db_path)
     os.makedirs(os.path.dirname(abs_path), exist_ok=True)
 
+    # 自动执行迁移
+    if _needs_migration(abs_path):
+        logger.info("Database not initialized, running migrations...")
+        applied = migrate_database(abs_path)
+        if applied:
+            logger.info("Applied %d migration(s): %s", len(applied), applied)
+        else:
+            logger.info("Database schema is up to date")
+
     database = AioSqliteDatabase(
         abs_path,
         timeout=30,
     )
     bind_database(database)
     try:
-        _assert_migration_ready(abs_path)
         await database.aio_connect()
         _db = database
     except Exception:
