@@ -100,10 +100,6 @@ async def upsert_agents(team_id: int, members: list[AgentConfig] | list[dict]) -
             next_num += 1
 
 
-async def delete_agents_by_team(team_id: int) -> None:
-    await GtAgent.delete().where(GtAgent.team_id == team_id).aio_execute()
-
-
 async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
     """按 ID 列表查询 agents。"""
     return list(
@@ -158,3 +154,54 @@ async def assign_employee_numbers_for_existing_agents(team_id: int) -> int:
             assigned_count += 1
 
     return assigned_count
+
+
+async def save_members_full_replace(team_id: int, members: list) -> list[GtAgent]:
+    """全量覆盖成员列表：有 id 更新，无 id 创建，不在列表的设为离职状态。返回在职成员列表。"""
+    # 获取当前成员
+    existing_agents = await get_agents_by_team(team_id)
+    existing_ids = {a.id for a in existing_agents}
+    existing_by_id = {a.id: a for a in existing_agents}
+
+    # 收集请求中的 id
+    request_ids = {m.id for m in members if m.id is not None}
+
+    # 不在请求列表中的成员设为离职状态
+    ids_to_offboard = existing_ids - request_ids
+    if ids_to_offboard:
+        for agent_id in ids_to_offboard:
+            agent = existing_by_id[agent_id]
+            agent.employ_status = EmployStatus.OFF_BOARD
+            await agent.aio_save()
+
+    # 获取当前最大工号，用于新成员
+    max_num = await get_max_employee_number(team_id)
+    next_num = max_num + 1
+
+    # 更新有 id 的成员
+    for member in members:
+        if member.id is not None and member.id in existing_by_id:
+            agent = existing_by_id[member.id]
+            agent.name = member.name
+            agent.role_template_name = member.role_template_name
+            agent.model = member.model
+            agent.driver = member.driver
+            agent.employ_status = EmployStatus.ON_BOARD  # 确保在职状态
+            await agent.aio_save()
+
+    # 创建无 id 的成员
+    for member in members:
+        if member.id is None:
+            await GtAgent.insert(
+                team_id=team_id,
+                name=member.name,
+                role_template_name=member.role_template_name,
+                model=member.model,
+                driver=member.driver,
+                employee_number=next_num,
+                employ_status=EmployStatus.ON_BOARD,
+            ).aio_execute()
+            next_num += 1
+
+    # 返回在职成员列表
+    return await get_on_board_agents(team_id)
