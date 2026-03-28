@@ -42,9 +42,5 @@ application = tornado.web.Application([
 
     # Dept Tree (V10)
     (r"/teams/(\d+)/dept_tree.json",                                    deptController.DeptTreeHandler),
-    (r"/teams/(\d+)/dept_tree/([^/]+)/manager.json",                    deptController.DeptManagerHandler),
-    (r"/teams/(\d+)/dept_tree/([^/]+)/agents.json",                     deptController.DeptMembersHandler),
-    (r"/teams/(\d+)/dept_tree/([^/]+)/agents/([^/]+).json",             deptController.DeptMemberDetailHandler),
-    (r"/teams/(\d+)/dept_agents.json",                                   deptController.DeptOffBoardMembersHandler),
 
 ], **tornado_settings)  # type: ignore [arg-type]
