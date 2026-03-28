@@ -61,3 +61,27 @@ async def upsert_agents(team_id: int, members: list[AgentConfig]) -> None:
 
 async def delete_agents_by_team(team_id: int) -> None:
     await GtAgent.delete().where(GtAgent.team_id == team_id).aio_execute()
+
+
+async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
+    """按 ID 列表查询 agents。"""
+    return list(
+        await GtAgent.select()
+        .where(GtAgent.id.in_(agent_ids))
+        .aio_execute()
+    )
+
+
+async def update_agent(agent_id: int, name: str, role_template_name: str, model: str, driver: str) -> GtAgent:
+    """按 ID 更新单个 agent。"""
+    agent = await GtAgent.aio_get_or_none(GtAgent.id == agent_id)
+    if agent is None:
+        raise ValueError(f"Agent ID '{agent_id}' not found")
+
+    agent.name = name
+    agent.role_template_name = role_template_name
+    agent.model = model
+    agent.driver = driver
+    await agent.aio_save()
+
+    return agent
