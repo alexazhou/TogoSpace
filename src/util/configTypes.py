@@ -2,7 +2,7 @@ from typing import Any, List, Optional
 import os
 
 from pydantic import BaseModel, ConfigDict, Field
-from constants import LlmServiceType
+from constants import LlmServiceType, DriverType
 
 
 class DeptNodeConfig(BaseModel):
@@ -38,7 +38,7 @@ class AgentConfig(BaseModel):
     name: str  # Nickname of the agent in the team
     role_template: str  # Name of the RoleTemplate to use
     model: Optional[str] = None  # 覆盖 RoleTemplate.model
-    driver: dict[str, Any] = Field(default_factory=dict)  # 覆盖 RoleTemplate.driver
+    driver: DriverType = DriverType.NATIVE  # 覆盖 RoleTemplate.driver
 
 
 class TeamRoomConfig(BaseModel):

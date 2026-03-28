@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 
+from constants import DriverType
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtAgentManager
 from util import assertUtil
@@ -10,7 +11,7 @@ class AgentUpdateItem(BaseModel):
     name: str
     role_template_name: str
     model: str = ""
-    driver: str = "{}"
+    driver: DriverType = DriverType.NATIVE
 
 
 class BatchUpdateAgentsRequest(BaseModel):
@@ -39,7 +40,7 @@ class AgentListHandler(BaseHandler):
                 "role_template_name": a.role_template_name,
                 "employ_status": a.employ_status.name if a.employ_status else None,
                 "model": a.model,
-                "driver": a.driver,
+                "driver": a.driver.value if a.driver else None,
             }
             for a in agents
         ]

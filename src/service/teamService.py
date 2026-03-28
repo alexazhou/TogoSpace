@@ -38,10 +38,16 @@ async def startup() -> None:
 
         await gtTeamManager.import_team_from_config(team_config)
 
-        if team_config.dept_tree:
-            team = await gtTeamManager.get_team(name)
-            if team is not None:
-                await deptService.import_dept_tree(team.id, team_config.dept_tree)
+        team = await gtTeamManager.get_team(name)
+        if team is None:
+            logger.warning(f"Team '{name}' 导入失败，跳过")
+            continue
+
+        if not team_config.dept_tree:
+            logger.warning(f"Team '{name}' 缺少 dept_tree 配置，跳过导入")
+            continue
+
+        await deptService.import_dept_tree(team.id, team_config.dept_tree)
 
     # 从数据库加载所有配置
     _teams = await gtTeamManager.get_all_team_configs()
