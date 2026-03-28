@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic import BaseModel
 
 from constants import DriverType
@@ -6,16 +7,18 @@ from dal.db import gtTeamManager, gtAgentManager
 from util import assertUtil
 
 
-class AgentUpdateItem(BaseModel):
-    id: int
+class MemberSaveItem(BaseModel):
+    """成员保存项：id 可选，有则更新，无则创建。"""
+    id: Optional[int] = None
     name: str
     role_template_name: str
     model: str = ""
     driver: DriverType = DriverType.NATIVE
 
 
-class BatchUpdateAgentsRequest(BaseModel):
-    agents: list[AgentUpdateItem]
+class MembersSaveRequest(BaseModel):
+    """全量覆盖成员列表请求。"""
+    members: list[MemberSaveItem]
 
 
 class AgentListHandler(BaseHandler):
@@ -47,32 +50,57 @@ class AgentListHandler(BaseHandler):
         self.return_json({"agents": data})
 
 
-class AgentBatchUpdateHandler(BaseHandler):
-    """PUT /teams/<id>/agents/batch_update.json - 批量更新成员配置"""
+class TeamMembersSaveHandler(BaseHandler):
+    """PUT /teams/<id>/members/save.json - 全量覆盖成员列表"""
 
     async def put(self, team_id_str: str) -> None:
         team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
-        request = self.parse_request(BatchUpdateAgentsRequest)
+        request = self.parse_request(MembersSaveRequest)
 
-        # 检查所有 agent id 是否存在
-        agent_ids = [item.id for item in request.agents]
-        existing_agents = await gtAgentManager.get_agents_by_ids(agent_ids)
-        assertUtil.assertEqual(len(existing_agents), len(agent_ids), f"input {len(agent_ids)} agent ids, but only found {len(existing_agents)} existed")
+        # 收集请求中有 id 的成员 ID
+        request_ids = [m.id for m in request.members if m.id is not None]
 
-        # 执行更新
-        for item in request.agents:
-            await gtAgentManager.update_agent(
-                agent_id=item.id,
-                name=item.name,
-                role_template_name=item.role_template_name,
-                model=item.model,
-                driver=item.driver,
-            )
+        # 获取当前 team 所有成员
+        existing_agents = await gtAgentManager.get_agents_by_team(team_id)
+        existing_ids = {a.id for a in existing_agents}
 
-        self.return_json({"status": "ok"})
+        # 校验：请求中有 id 的成员必须存在于当前 team
+        invalid_ids = [id_ for id_ in request_ids if id_ not in existing_ids]
+        assertUtil.assertEqual(
+            len(invalid_ids), 0,
+            error_message=f"成员 ID 不存在于当前 team: {invalid_ids}",
+            error_code="member_not_found",
+        )
+
+        # 校验：最终成员 name 在 team 内必须唯一
+        final_names = [m.name for m in request.members]
+        duplicate_names = [n for n in final_names if final_names.count(n) > 1]
+        assertUtil.assertEqual(
+            len(duplicate_names), 0,
+            error_message=f"成员 name 重复: {duplicate_names}",
+            error_code="duplicate_member_name",
+        )
+
+        # 执行全量覆盖
+        updated_members = await gtAgentManager.save_members_full_replace(team_id, request.members)
+
+        # 返回最新完整成员列表
+        self.return_json({
+            "status": "ok",
+            "members": [
+                {
+                    "id": m.id,
+                    "name": m.name,
+                    "role_template_name": m.role_template_name,
+                    "model": m.model,
+                    "driver": m.driver.value,
+                }
+                for m in updated_members
+            ],
+        })
 
 
 class AgentDetailHandler(BaseHandler):
