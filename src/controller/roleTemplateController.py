@@ -3,6 +3,21 @@ from controller.baseController import BaseHandler
 from util import assertUtil, configUtil
 
 
+class RoleTemplateListHandler(BaseHandler):
+    """GET /role_templates/list.json - 获取所有 role templates"""
+
+    async def get(self) -> None:
+        templates = roleTemplateService.get_all_role_templates()
+        data = [
+            {
+                "name": t.name,
+                "model": t.model or "",
+            }
+            for t in templates
+        ]
+        self.return_json({"role_templates": data})
+
+
 class RoleTemplateDetailHandler(BaseHandler):
     async def get(self, template_name: str) -> None:
         definition = roleTemplateService.get_role_template(template_name)
