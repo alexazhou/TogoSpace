@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from peewee import fn
+from peewee import fn, IntegrityError
 from constants import EmployStatus, DriverType
+from exception import TeamAgentException
 from model.dbModel.gtAgent import GtAgent
 from util.configTypes import AgentConfig
 
@@ -192,16 +193,22 @@ async def save_members_full_replace(team_id: int, members: list) -> list[GtAgent
     # 创建无 id 的成员
     for member in members:
         if member.id is None:
-            await GtAgent.insert(
-                team_id=team_id,
-                name=member.name,
-                role_template_name=member.role_template_name,
-                model=member.model,
-                driver=member.driver,
-                employee_number=next_num,
-                employ_status=EmployStatus.ON_BOARD,
-            ).aio_execute()
-            next_num += 1
+            try:
+                await GtAgent.insert(
+                    team_id=team_id,
+                    name=member.name,
+                    role_template_name=member.role_template_name,
+                    model=member.model,
+                    driver=member.driver,
+                    employee_number=next_num,
+                    employ_status=EmployStatus.ON_BOARD,
+                ).aio_execute()
+                next_num += 1
+            except IntegrityError as e:
+                raise TeamAgentException(
+                    error_message=f'成员名称"{member.name}"已存在',
+                    error_code="MEMBER_NAME_EXISTS",
+                ) from e
 
     # 返回在职成员列表
     return await get_on_board_agents(team_id)
