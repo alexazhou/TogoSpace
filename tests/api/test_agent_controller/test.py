@@ -102,7 +102,7 @@ class TestAgentBatchUpdate(_ApiServiceCase):
                     "name": "alice",
                     "role_template_name": "alice",
                     "model": "gpt-4",
-                    "driver": '{"type": "test"}',
+                    "driver": "native",
                 }
             ]
         }
@@ -122,7 +122,7 @@ class TestAgentBatchUpdate(_ApiServiceCase):
 
         agent = data["agents"][0]
         assert agent["model"] == "gpt-4"
-        assert agent["driver"] == '{"type": "test"}'
+        assert agent["driver"] == "native"
 
     async def test_batch_update_with_invalid_id(self):
         """验证批量更新时使用不存在的 id 返回错误。"""
@@ -135,7 +135,7 @@ class TestAgentBatchUpdate(_ApiServiceCase):
                     "name": "not_exist",
                     "role_template_name": "alice",
                     "model": "",
-                    "driver": "{}",
+                    "driver": "native",
                 }
             ]
         }

@@ -32,5 +32,12 @@
       "initial_topic": "你好，我是人类操作者。你主要协助做文件查找与信息检索。",
       "max_turns": 100
     }
-  ]
+  ],
+  "dept_tree": {
+    "dept_name": "总部",
+    "dept_responsibility": "负责整体运营与协作",
+    "manager": "小马哥",
+    "members": ["小马哥", "王老师", "小A", "小B", "小刘"],
+    "children": []
+  }
 }

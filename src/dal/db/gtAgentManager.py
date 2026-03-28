@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
-
 from peewee import fn
-from constants import EmployStatus
+from constants import EmployStatus, DriverType
 from model.dbModel.gtAgent import GtAgent
 from util.configTypes import AgentConfig
 
@@ -66,15 +64,19 @@ async def upsert_agents(team_id: int, members: list[AgentConfig] | list[dict]) -
             name = member.get("name")
             role_template = member.get("role_template") or member.get("role_template_name")
             model = member.get("model") or ""
-            driver = member.get("driver") or "{}"
-            if isinstance(driver, dict):
-                driver = json.dumps(driver, ensure_ascii=False, sort_keys=True)
+            driver_raw = member.get("driver")
+            if isinstance(driver_raw, str):
+                driver = DriverType.value_of(driver_raw) or DriverType.NATIVE
+            elif isinstance(driver_raw, DriverType):
+                driver = driver_raw
+            else:
+                driver = DriverType.NATIVE
         else:
             member_id = None
             name = member.name
             role_template = member.role_template
             model = member.model or ""
-            driver = json.dumps(member.driver, ensure_ascii=False, sort_keys=True)
+            driver = member.driver if isinstance(member.driver, DriverType) else DriverType.NATIVE
 
         if member_id:
             # 按 id 更新：不改变工号
@@ -111,7 +113,7 @@ async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
     )
 
 
-async def update_agent(agent_id: int, name: str, role_template_name: str, model: str, driver: str) -> GtAgent:
+async def update_agent(agent_id: int, name: str, role_template_name: str, model: str, driver: DriverType) -> GtAgent:
     """按 ID 更新单个 agent。"""
     agent = await GtAgent.aio_get_or_none(GtAgent.id == agent_id)
     if agent is None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
+from constants import DriverType
 from . import gtRoomManager, gtAgentManager
 from model.dbModel.gtTeam import GtTeam
 from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
@@ -97,7 +98,7 @@ async def get_team_config(name: str) -> TeamConfig | None:
             name=member.name,
             role_template=member.role_template_name,
             model=member.model or None,
-            driver=json.loads(member.driver) if member.driver and member.driver != "{}" else {},
+            driver=member.driver if isinstance(member.driver, DriverType) else DriverType.NATIVE,
         )
         for member in await gtAgentManager.get_agents_by_team(team_id)
     ]

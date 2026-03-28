@@ -54,3 +54,9 @@ class MemberStatus(EnhanceEnum):
 class EmployStatus(EnhanceEnum):
     ON_BOARD = auto()   # 在职，挂载在某部门
     OFF_BOARD = auto()  # 休闲，已从部门移除
+
+
+class DriverType(EnhanceEnum):
+    NATIVE = "native"           # 原生 OpenAI API 驱动
+    CLAUDE_SDK = "claude_sdk"   # Claude Agent SDK 驱动
+    TSP = "tsp"                 # TSP 协议驱动

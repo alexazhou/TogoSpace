@@ -332,10 +332,9 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
             # model 覆盖：AgentConfig > RoleTemplate > default
             model_name = member_cfg.model or cfg.model or default_model
 
-            # driver 覆盖：AgentConfig.driver 合并进 RoleTemplate.driver
+            # driver 覆盖：AgentConfig.driver 优先，否则用 RoleTemplate.driver
             if member_cfg.driver:
-                merged_driver = {**cfg.model_dump().get("driver", {}), **member_cfg.driver}
-                driver_config = normalize_driver_config({"driver": merged_driver})
+                driver_config = normalize_driver_config({"driver": member_cfg.driver})
             else:
                 driver_config = normalize_driver_config(cfg)
 
