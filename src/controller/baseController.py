@@ -95,9 +95,10 @@ class BaseHandler(tornado.web.RequestHandler):
             status_code = 400
             self.set_status(400)
 
-        if status_code == 400:
-            self.set_header("Content-Type", "application/json")
+        # 所有错误都返回 JSON 格式
+        self.set_header("Content-Type", "application/json")
 
+        if status_code == 400:
             error_code = self.enhance.get('error_code')
             error_desc = self.enhance.get('error_desc')
 
@@ -110,7 +111,18 @@ class BaseHandler(tornado.web.RequestHandler):
                 "error_code": error_code,
                 "error_desc": error_desc
             }
-            ret_str = json.dumps(ret, ensure_ascii=False)
-            self.write(ret_str)
         else:
-            super().write_error(status_code, **kwargs)
+            # 其他状态码也返回 JSON，包含异常信息
+            error_desc = "Internal Server Error"
+            if exc_info:
+                exc = exc_info[1]
+                if isinstance(exc, Exception):
+                    error_desc = str(exc)
+            ret = {
+                "error_code": None,
+                "error_desc": error_desc
+            }
+            logger.error(f"Unhandled exception: {exc_info}")
+
+        ret_str = json.dumps(ret, ensure_ascii=False)
+        self.write(ret_str)
