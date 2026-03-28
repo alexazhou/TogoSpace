@@ -131,11 +131,17 @@ class TestTeamController(_ApiServiceCase):
                 assert data["status"] == "ok"
                 assert data["enabled"] is False
 
-            # 验证停用后不在列表中
-            async with client.get(f"{self.backend_base_url}/teams/list.json") as resp:
+            # 验证停用后不在启用列表中（使用 enabled=true 参数过滤）
+            async with client.get(f"{self.backend_base_url}/teams/list.json?enabled=true") as resp:
                 teams_data = await resp.json()
             team_names = [t["name"] for t in teams_data["teams"]]
             assert "e2e" not in team_names
+
+            # 验证停用的团队在停用列表中
+            async with client.get(f"{self.backend_base_url}/teams/list.json?enabled=false") as resp:
+                teams_data = await resp.json()
+            team_names = [t["name"] for t in teams_data["teams"]]
+            assert "e2e" in team_names
 
             # 再启用
             async with client.post(
@@ -147,8 +153,8 @@ class TestTeamController(_ApiServiceCase):
                 assert data["status"] == "ok"
                 assert data["enabled"] is True
 
-            # 验证启用后重新出现在列表中
-            async with client.get(f"{self.backend_base_url}/teams/list.json") as resp:
+            # 验证启用后重新出现在启用列表中
+            async with client.get(f"{self.backend_base_url}/teams/list.json?enabled=true") as resp:
                 teams_data = await resp.json()
             team_names = [t["name"] for t in teams_data["teams"]]
             assert "e2e" in team_names

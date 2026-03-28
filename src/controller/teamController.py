@@ -33,7 +33,12 @@ class TeamListHandler(BaseHandler):
     """GET /teams/list.json - 获取所有 Team 列表"""
 
     async def get(self) -> None:
-        teams = await gtTeamManager.get_all_teams()
+        enabled_param = self.get_argument("enabled", default=None)
+        enabled = None
+        if enabled_param is not None:
+            enabled = enabled_param.lower() in ("true", "1", "yes")
+
+        teams = await gtTeamManager.get_all_teams(enabled)
         self.return_json(
             {
                 "teams": [
