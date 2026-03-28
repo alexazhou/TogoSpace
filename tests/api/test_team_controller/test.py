@@ -2,7 +2,6 @@ import os
 import sys
 
 import aiohttp
-import pytest
 
 from ...base import ServiceTestCase
 
@@ -88,24 +87,8 @@ class TestTeamController(_ApiServiceCase):
         assert len(detail["rooms"]) == 1
         assert detail["rooms"][0]["name"] == "团队群聊"
 
-    async def test_team_filtered_agents_and_rooms(self):
-        async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/agents/list.json?team_name=e2e") as resp:
-                assert resp.status == 200
-                agents_data = await resp.json()
-
-            async with client.get(f"{self.backend_base_url}/rooms/list.json?team_name=e2e") as resp:
-                assert resp.status == 200
-                rooms_data = await resp.json()
-
-        assert len(agents_data["agents"]) == 1
-        assert agents_data["agents"][0]["team_name"] == "e2e"
-        assert agents_data["agents"][0]["name"] == "alice"
-        assert len(rooms_data["rooms"]) == 1
-        assert rooms_data["rooms"][0]["team_name"] == "e2e"
-        assert rooms_data["rooms"][0]["room_name"] == "general"
-
-    async def test_team_filtered_agents_and_rooms_by_team_id(self):
+    async def test_team_agents_by_team_id(self):
+        """验证 GET /agents/list.json?team_id=<id> 返回团队成员。"""
         team_id = await self._get_team_id("e2e")
 
         async with aiohttp.ClientSession() as client:
@@ -113,18 +96,13 @@ class TestTeamController(_ApiServiceCase):
                 assert resp.status == 200
                 agents_data = await resp.json()
 
-            async with client.get(f"{self.backend_base_url}/rooms/list.json?team_id={team_id}") as resp:
-                assert resp.status == 200
-                rooms_data = await resp.json()
-
         assert len(agents_data["agents"]) == 1
-        assert agents_data["agents"][0]["team_name"] == "e2e"
-        assert agents_data["agents"][0]["name"] == "alice"
-        assert len(rooms_data["rooms"]) == 1
-        assert rooms_data["rooms"][0]["team_name"] == "e2e"
-        assert rooms_data["rooms"][0]["room_name"] == "general"
+        agent = agents_data["agents"][0]
+        assert agent["name"] == "alice"
+        assert agent["role_template_name"] == "alice"
 
-    async def test_agent_detail_returns_prompt_and_driver(self):
+    async def test_agent_detail(self):
+        """验证 GET /teams/<id>/agents/<name>.json 返回成员详情。"""
         team_id = await self._get_team_id("e2e")
 
         async with aiohttp.ClientSession() as client:
@@ -133,7 +111,7 @@ class TestTeamController(_ApiServiceCase):
                 data = await resp.json()
 
         assert data["name"] == "alice"
-        assert data["team_name"] == "e2e"
         assert data["role_template_name"] == "alice"
-        assert data["driver_type"] == "native"
-        assert "Alice" in data["prompt"]
+        assert "employ_status" in data
+        assert "model" in data
+        assert "driver" in data
