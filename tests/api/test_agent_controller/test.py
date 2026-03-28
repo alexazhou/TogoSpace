@@ -146,3 +146,216 @@ class TestAgentBatchUpdate(_ApiServiceCase):
                 json=payload,
             ) as resp:
                 assert resp.status != 200
+
+
+class TestMembersSave(_ApiServiceCase):
+    """测试 PUT /teams/<id>/members/save.json 全量覆盖成员接口。"""
+
+    requires_backend = True
+    requires_mock_llm = True
+
+    async def _get_team_id(self, team_name: str) -> int:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/teams/list.json") as resp:
+                data = await resp.json()
+        team = next(team for team in data["teams"] if team["name"] == team_name)
+        return team["id"]
+
+    async def _get_agents(self, team_id: int) -> list:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
+                data = await resp.json()
+        return data["agents"]
+
+    async def test_save_members_create_new(self):
+        """验证可以创建新成员。"""
+        team_id = await self._get_team_id("e2e")
+        agents = await self._get_agents(team_id)
+        alice_id = next(a["id"] for a in agents if a["name"] == "alice")
+
+        # 保留 alice，新增 bob
+        payload = {
+            "members": [
+                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": None, "name": "bob", "role_template_name": "alice", "model": "", "driver": "native"},
+            ]
+        }
+
+        async with aiohttp.ClientSession() as client:
+            async with client.put(
+                f"{self.backend_base_url}/teams/{team_id}/members/save.json",
+                json=payload,
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+
+        assert data["status"] == "ok"
+        assert len(data["members"]) == 2
+        names = {m["name"] for m in data["members"]}
+        assert "alice" in names
+        assert "bob" in names
+        # 验证新成员有 id
+        bob = next(m for m in data["members"] if m["name"] == "bob")
+        assert bob["id"] is not None
+        assert "employee_number" in bob
+
+    async def test_save_members_update_existing(self):
+        """验证可以更新现有成员。"""
+        team_id = await self._get_team_id("e2e")
+        agents = await self._get_agents(team_id)
+        alice_id = next(a["id"] for a in agents if a["name"] == "alice")
+
+        # 更新 alice 的 model
+        payload = {
+            "members": [
+                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "gpt-4o", "driver": "native"},
+            ]
+        }
+
+        async with aiohttp.ClientSession() as client:
+            async with client.put(
+                f"{self.backend_base_url}/teams/{team_id}/members/save.json",
+                json=payload,
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+
+        alice = next(m for m in data["members"] if m["name"] == "alice")
+        assert alice["model"] == "gpt-4o"
+
+    async def test_save_members_offboard_missing(self):
+        """验证不在列表中的成员被设为离职状态。"""
+        team_id = await self._get_team_id("e2e")
+        agents = await self._get_agents(team_id)
+        alice_id = next(a["id"] for a in agents if a["name"] == "alice")
+
+        # 先创建 bob
+        payload = {
+            "members": [
+                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": None, "name": "bob", "role_template_name": "alice", "model": "", "driver": "native"},
+            ]
+        }
+        async with aiohttp.ClientSession() as client:
+            async with client.put(
+                f"{self.backend_base_url}/teams/{team_id}/members/save.json",
+                json=payload,
+            ) as resp:
+                assert resp.status == 200
+
+        # 只保留 alice，bob 会被设为离职
+        payload = {
+            "members": [
+                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
+            ]
+        }
+        async with aiohttp.ClientSession() as client:
+            async with client.put(
+                f"{self.backend_base_url}/teams/{team_id}/members/save.json",
+                json=payload,
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+
+        # 在职成员只有 alice
+        assert len(data["members"]) == 1
+        assert data["members"][0]["name"] == "alice"
+
+        # bob 应该还在数据库但状态为 OFF_BOARD
+        all_agents = await self._get_agents(team_id)
+        bob = next((a for a in all_agents if a["name"] == "bob"), None)
+        assert bob is not None
+        assert bob["employ_status"] == "OFF_BOARD"
+
+    async def test_save_members_reuse_offboard_name(self):
+        """验证离职成员的名字可以被新成员复用。"""
+        team_id = await self._get_team_id("e2e")
+        agents = await self._get_agents(team_id)
+        alice_id = next(a["id"] for a in agents if a["name"] == "alice")
+
+        # 创建 bob
+        payload = {
+            "members": [
+                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": None, "name": "bob", "role_template_name": "alice", "model": "", "driver": "native"},
+            ]
+        }
+        async with aiohttp.ClientSession() as client:
+            async with client.put(
+                f"{self.backend_base_url}/teams/{team_id}/members/save.json",
+                json=payload,
+            ) as resp:
+                assert resp.status == 200
+
+        # 让 bob 离职
+        payload = {
+            "members": [
+                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
+            ]
+        }
+        async with aiohttp.ClientSession() as client:
+            async with client.put(
+                f"{self.backend_base_url}/teams/{team_id}/members/save.json",
+                json=payload,
+            ) as resp:
+                assert resp.status == 200
+
+        # 创建新的 bob（复用名字）
+        payload = {
+            "members": [
+                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": None, "name": "bob", "role_template_name": "alice", "model": "", "driver": "native"},
+            ]
+        }
+        async with aiohttp.ClientSession() as client:
+            async with client.put(
+                f"{self.backend_base_url}/teams/{team_id}/members/save.json",
+                json=payload,
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+
+        # 应该有两个在职成员
+        assert len(data["members"]) == 2
+        names = {m["name"] for m in data["members"]}
+        assert names == {"alice", "bob"}
+
+    async def test_save_members_duplicate_names(self):
+        """验证请求中成员名字重复时报错。"""
+        team_id = await self._get_team_id("e2e")
+        agents = await self._get_agents(team_id)
+        alice_id = next(a["id"] for a in agents if a["name"] == "alice")
+
+        # 两个同名成员
+        payload = {
+            "members": [
+                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": None, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
+            ]
+        }
+
+        async with aiohttp.ClientSession() as client:
+            async with client.put(
+                f"{self.backend_base_url}/teams/{team_id}/members/save.json",
+                json=payload,
+            ) as resp:
+                assert resp.status != 200
+                data = await resp.json()
+                assert "重复" in data.get("error_message", "") or "duplicate" in data.get("error_code", "").lower()
+
+    async def test_save_members_invalid_id(self):
+        """验证使用不存在的成员 id 报错。"""
+        team_id = await self._get_team_id("e2e")
+
+        payload = {
+            "members": [
+                {"id": 99999, "name": "not_exist", "role_template_name": "alice", "model": "", "driver": "native"},
+            ]
+        }
+
+        async with aiohttp.ClientSession() as client:
+            async with client.put(
+                f"{self.backend_base_url}/teams/{team_id}/members/save.json",
+                json=payload,
+            ) as resp:
+                assert resp.status != 200

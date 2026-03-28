@@ -18,6 +18,6 @@ class GtAgent(DbModelBase):
     class Meta:
         table_name = "agents"
         indexes = (
-            (("team_id", "name"), True),
+            (("team_id", "name"), False),  # 非唯一索引，允许离职成员名字被复用
             (("team_id", "employee_number"), True),
         )

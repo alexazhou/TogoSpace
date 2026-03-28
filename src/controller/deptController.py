@@ -2,7 +2,7 @@ from pydantic import BaseModel
 
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager
-from service import deptService
+from service import deptService, teamService
 from util import assertUtil
 from util.configTypes import DeptNodeConfig
 
@@ -29,4 +29,8 @@ class DeptTreeHandler(BaseHandler):
 
         request = self.parse_request(SetDeptTreeRequest)
         await deptService.set_dept_tree(team_id, request.dept_tree)
+
+        # 触发热更新
+        await teamService.hot_reload_team(team.name)
+
         self.return_json({"status": "ok"})

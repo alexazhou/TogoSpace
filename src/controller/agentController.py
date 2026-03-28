@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from constants import DriverType
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtAgentManager
+from service import teamService
 from util import assertUtil
 
 
@@ -75,7 +76,7 @@ class TeamMembersSaveHandler(BaseHandler):
             error_code="member_not_found",
         )
 
-        # 校验：最终成员 name 在 team 内必须唯一
+        # 校验：最终成员 name 在请求内必须唯一
         final_names = [m.name for m in request.members]
         duplicate_names = [n for n in final_names if final_names.count(n) > 1]
         assertUtil.assertEqual(
@@ -87,6 +88,9 @@ class TeamMembersSaveHandler(BaseHandler):
         # 执行全量覆盖
         updated_members = await gtAgentManager.save_members_full_replace(team_id, request.members)
 
+        # 触发热更新
+        await teamService.hot_reload_team(team.name)
+
         # 返回最新完整成员列表
         self.return_json({
             "status": "ok",
@@ -94,6 +98,7 @@ class TeamMembersSaveHandler(BaseHandler):
                 {
                     "id": m.id,
                     "name": m.name,
+                    "employee_number": m.employee_number,
                     "role_template_name": m.role_template_name,
                     "model": m.model,
                     "driver": m.driver.value,
