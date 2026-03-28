@@ -10,7 +10,7 @@ from peewee_async.databases import AioDatabase
 from peewee_async.pool import PoolBackend
 from peewee_async.utils import ConnectionProtocol
 
-from db import migrate_database
+from db import check_database_initialized, migrate_database
 from model.dbModel.base import bind_database
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ async def startup(db_path: str) -> None:
     abs_path = os.path.abspath(db_path)
     os.makedirs(os.path.dirname(abs_path), exist_ok=True)
 
-    # 自动执行迁移
+    # 数据库文件不存在时自动执行迁移
     if _needs_migration(abs_path):
         logger.info("Database not initialized, running migrations...")
         applied = migrate_database(abs_path)
@@ -88,6 +88,16 @@ async def startup(db_path: str) -> None:
         timeout=30,
     )
     bind_database(database)
+
+    # 验证数据库是否已初始化
+    if not check_database_initialized(abs_path):
+        with database.allow_sync():
+            database.close()
+        raise RuntimeError(
+            f"Database schema is not initialized. "
+            f"Run '.venv/bin/python src/db.py migrate --db-path {abs_path}' first."
+        )
+
     try:
         await database.aio_connect()
         _db = database
