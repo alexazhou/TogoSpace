@@ -13,9 +13,11 @@ class GtAgent(DbModelBase):
     employ_status: EmployStatus = EnumField(EmployStatus, default=EmployStatus.ON_BOARD)
     model: str = peewee.CharField(default="")
     driver: str = peewee.TextField(default="{}")
+    employee_number: int = peewee.IntegerField(default=0)
 
     class Meta:
         table_name = "agents"
         indexes = (
             (("team_id", "name"), True),
+            (("team_id", "employee_number"), True),
         )
