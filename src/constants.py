@@ -9,6 +9,15 @@ class EnhanceEnum(Enum):
                 return mm
         return None
 
+    @classmethod
+    def _missing_(cls, value):
+        """支持大小写不敏感的 value 匹配，供 Pydantic 使用。"""
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.lower() == value.lower():
+                    return member
+        return None
+
     def __repr__(self):
         return '[' + self.name + ']'
 
