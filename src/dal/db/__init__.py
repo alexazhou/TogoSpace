@@ -6,6 +6,7 @@ from dal.db import (
     gtTeamManager,
     gtRoomManager,
     gtRoomMessageManager,
+    gtSystemConfigManager,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "gtTeamManager",
     "gtRoomManager",
     "gtRoomMessageManager",
+    "gtSystemConfigManager",
 ]
