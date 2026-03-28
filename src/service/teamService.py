@@ -22,6 +22,7 @@ async def startup() -> None:
     1. 将 JSON 配置导入数据库（仅当不存在时）
     2. 为没有 max_turns 的 room 设置默认值 100
     3. 从数据库加载最终配置，缓存到模块状态
+    4. 为已有 agents 分配工号（employee_number）
     """
     global _teams
     json_teams = configUtil.get_app_config().teams
@@ -46,6 +47,14 @@ async def startup() -> None:
     _teams = await gtTeamManager.get_all_team_configs()
 
     logger.info(f"从数据库加载了 {len(_teams)} 个 Team 配置")
+
+    # 为已有 agents 分配工号（处理迁移前的数据）
+    for team_config in _teams:
+        team = await gtTeamManager.get_team(team_config.name)
+        if team is not None:
+            assigned = await gtAgentManager.assign_employee_numbers_for_existing_agents(team.id)
+            if assigned > 0:
+                logger.info(f"为 Team '{team_config.name}' 的 {assigned} 个 agents 分配了工号")
 
 
 async def reload_from_db() -> list[TeamConfig]:

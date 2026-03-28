@@ -35,6 +35,7 @@ class AgentListHandler(BaseHandler):
             {
                 "id": a.id,
                 "name": a.name,
+                "employee_number": a.employee_number,
                 "role_template_name": a.role_template_name,
                 "employ_status": a.employ_status.name if a.employ_status else None,
                 "model": a.model,
@@ -91,6 +92,7 @@ class AgentDetailHandler(BaseHandler):
         self.return_json({
             "id": agent.id,
             "name": agent.name,
+            "employee_number": agent.employee_number,
             "role_template_name": agent.role_template_name,
             "employ_status": agent.employ_status.name if agent.employ_status else None,
             "model": agent.model,
