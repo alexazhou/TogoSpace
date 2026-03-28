@@ -3,13 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
+from constants import DriverType
 from service.roomService import ChatRoom
 from util import llmApiUtil
 
 
 @dataclass
 class AgentDriverConfig:
-    driver_type: str
+    driver_type: DriverType = DriverType.NATIVE
     options: dict[str, Any] = field(default_factory=dict)
 
 
@@ -53,7 +54,7 @@ class AgentDriver:
         self.config = config
 
     @property
-    def driver_type(self) -> str:
+    def driver_type(self) -> DriverType:
         return self.config.driver_type
 
     async def startup(self) -> None:
