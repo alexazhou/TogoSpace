@@ -26,14 +26,12 @@ async def get_team_by_id(team_id: int) -> GtTeam | None:
     return await GtTeam.aio_get_or_none(GtTeam.id == team_id)
 
 
-async def get_all_teams() -> list[GtTeam]:
-    """获取所有启用的 Team。"""
-    return list(
-        await GtTeam.select()
-        .where(GtTeam.enabled == 1)
-        .order_by(GtTeam.name)
-        .aio_execute()
-    )
+async def get_all_teams(enabled: bool | None = None) -> list[GtTeam]:
+    """获取所有 Team。可通过 enabled 参数过滤。"""
+    query = GtTeam.select().order_by(GtTeam.name)
+    if enabled is not None:
+        query = query.where(GtTeam.enabled == 1 if enabled else GtTeam.enabled == 0)
+    return list(await query.aio_execute())
 
 
 async def upsert_team(team_config: TeamConfig) -> GtTeam:
