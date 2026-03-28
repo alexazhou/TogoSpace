@@ -184,6 +184,18 @@ def clear_database(db_path: str | os.PathLike[str]) -> list[str]:
     return dropped_tables
 
 
+def check_database_initialized(db_path: str | os.PathLike[str]) -> bool:
+    """检查数据库是否已初始化（_migrations 表存在）。"""
+    resolved_db_path = resolve_db_path(str(db_path))
+    if not resolved_db_path.exists():
+        return False
+    with sqlite3.connect(str(resolved_db_path)) as conn:
+        row = conn.execute(
+            f"SELECT name FROM sqlite_master WHERE type='table' AND name='{MIGRATIONS_TABLE}'"
+        ).fetchone()
+    return row is not None
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SQLite migration management tool")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -200,6 +212,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("migrate", parents=[common], help="apply pending migrations")
     subparsers.add_parser("status", parents=[common], help="show migration status")
     subparsers.add_parser("init", parents=[common], help="alias of migrate")
+    subparsers.add_parser("check", parents=[common], help="check if database is initialized")
 
     clear_parser = subparsers.add_parser(
         "clear",
@@ -236,6 +249,14 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("Database is up to date.")
         return 0
+
+    if args.command == "check":
+        if check_database_initialized(db_path):
+            print("Database is initialized.")
+            return 0
+        else:
+            print("Database is NOT initialized. Run 'migrate' first.")
+            return 1
 
     if args.command == "status":
         applied_migrations, files = migration_status(
@@ -283,6 +304,7 @@ if __name__ == "__main__":
 
 __all__ = [
     "Migration",
+    "check_database_initialized",
     "clear_database",
     "main",
     "migrate_database",
