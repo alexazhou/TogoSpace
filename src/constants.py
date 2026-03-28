@@ -69,3 +69,8 @@ class DriverType(EnhanceEnum):
     NATIVE = "native"           # 原生 OpenAI API 驱动
     CLAUDE_SDK = "claude_sdk"   # Claude Agent SDK 驱动
     TSP = "tsp"                 # TSP 协议驱动
+
+
+class SystemConfigKey(EnhanceEnum):
+    """系统配置项的 key 枚举。"""
+    WORKING_DIRECTORY = "working_directory"  # 系统级别工作目录
