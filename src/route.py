@@ -15,6 +15,7 @@ application = tornado.web.Application([
 
     # Agents (运行时成员)
     (r"/agents/list.json",                          agentController.AgentListHandler),
+    (r"/teams/(\d+)/agents/batch_update.json",      agentController.AgentBatchUpdateHandler),
     (r"/teams/(\d+)/agents/([^/]+).json",           agentController.AgentDetailHandler),
 
     # Room (运行时)

@@ -69,8 +69,6 @@ class TeamDetailHandler(BaseHandler):
         team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
-        if team is None:
-            return
 
         rooms = await gtRoomManager.get_rooms_by_team(team_id)
         members = [
@@ -124,8 +122,6 @@ class TeamModifyHandler(BaseHandler):
 
         current_config = await gtTeamManager.get_team_config(team_name)
         assertUtil.assertNotNull(current_config, error_message=f"Team '{team_name}' config not found", error_code="team_config_not_found")
-        if current_config is None:
-            return
 
         # 构建完整配置，确保局部更新不会丢字段
         updates = {k: v for k, v in request.model_dump(exclude_none=True).items()}
