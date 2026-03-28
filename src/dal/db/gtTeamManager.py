@@ -77,6 +77,15 @@ async def delete_team(name: str) -> None:
     )
 
 
+async def set_team_enabled(team_id: int, enabled: bool) -> None:
+    """设置 Team 的启用状态。"""
+    await (
+        GtTeam.update(enabled=1 if enabled else 0, updated_at=GtTeam._now())
+        .where(GtTeam.id == team_id)
+        .aio_execute()
+    )
+
+
 async def team_exists(name: str) -> bool:
     """检查 Team 是否存在且已启用。"""
     row = await GtTeam.aio_get_or_none((GtTeam.name == name) & (GtTeam.enabled == 1))

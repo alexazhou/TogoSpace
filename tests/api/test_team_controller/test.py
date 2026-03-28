@@ -115,3 +115,49 @@ class TestTeamController(_ApiServiceCase):
         assert "employ_status" in data
         assert "model" in data
         assert "driver" in data
+
+    async def test_team_set_enabled(self):
+        """验证 POST /teams/{id}/set_enabled.json 设置团队启用状态。"""
+        team_id = await self._get_team_id("e2e")
+
+        async with aiohttp.ClientSession() as client:
+            # 先停用
+            async with client.post(
+                f"{self.backend_base_url}/teams/{team_id}/set_enabled.json",
+                json={"enabled": False},
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["status"] == "ok"
+                assert data["enabled"] is False
+
+            # 验证停用后不在列表中
+            async with client.get(f"{self.backend_base_url}/teams/list.json") as resp:
+                teams_data = await resp.json()
+            team_names = [t["name"] for t in teams_data["teams"]]
+            assert "e2e" not in team_names
+
+            # 再启用
+            async with client.post(
+                f"{self.backend_base_url}/teams/{team_id}/set_enabled.json",
+                json={"enabled": True},
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["status"] == "ok"
+                assert data["enabled"] is True
+
+            # 验证启用后重新出现在列表中
+            async with client.get(f"{self.backend_base_url}/teams/list.json") as resp:
+                teams_data = await resp.json()
+            team_names = [t["name"] for t in teams_data["teams"]]
+            assert "e2e" in team_names
+
+    async def test_team_set_enabled_invalid_id(self):
+        """验证设置不存在的团队启用状态返回错误。"""
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{self.backend_base_url}/teams/99999/set_enabled.json",
+                json={"enabled": True},
+            ) as resp:
+                assert resp.status != 200

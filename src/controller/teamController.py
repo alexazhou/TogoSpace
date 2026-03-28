@@ -25,6 +25,10 @@ class UpdateTeamRequest(BaseModel):
     preset_rooms: list[TeamRoomConfig] | None = None
 
 
+class SetEnabledRequest(BaseModel):
+    enabled: bool
+
+
 class TeamListHandler(BaseHandler):
     """GET /teams/list.json - 获取所有 Team 列表"""
 
@@ -149,3 +153,13 @@ class TeamDeleteHandler(BaseHandler):
         await teamService.delete_team(team_name)
 
         self.return_json({"status": "deleted", "name": team_name})
+
+
+class TeamSetEnabledHandler(BaseHandler):
+    """POST /teams/{id}/set_enabled.json - 设置 Team 启用状态"""
+
+    async def post(self, team_id_str: str) -> None:
+        body = self.parse_request(SetEnabledRequest)
+        await teamService.set_team_enabled(int(team_id_str), body.enabled)
+
+        self.return_json({"status": "ok", "enabled": body.enabled})
