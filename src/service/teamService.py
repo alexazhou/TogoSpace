@@ -4,8 +4,8 @@ import logging
 
 from dal.db import gtTeamManager, gtAgentManager, gtRoomManager
 from exception import TeamAgentException
-from service import deptService
-from util import configUtil
+from service import deptService, roomService, schedulerService, agentService
+from util import configUtil, assertUtil
 from util.configTypes import TeamConfig
 
 logger = logging.getLogger(__name__)
@@ -141,8 +141,6 @@ async def update_team(team_config: TeamConfig) -> None:
 
 async def delete_team(name: str) -> None:
     """删除 Team 配置并触发热更新。"""
-    from service import roomService, schedulerService
-
     team = await gtTeamManager.get_team(name)
     if team is not None:
         await roomService.close_team_rooms(team.id)
@@ -154,9 +152,26 @@ async def delete_team(name: str) -> None:
     logger.info(f"Team '{name}' 已删除")
 
 
+async def set_team_enabled(team_id: int, enabled: bool) -> None:
+    """设置 Team 的启用状态。"""
+    team = await gtTeamManager.get_team_by_id(team_id)
+    assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+
+    await gtTeamManager.set_team_enabled(team_id, enabled)
+
+    team_name = team.name
+    if enabled:
+        # 启用时触发热更新
+        await hot_reload_team(team_name)
+    else:
+        # 停用时停止调度
+        schedulerService.stop_team(team_name)
+
+    logger.info(f"Team '{team_name}' {'已启用' if enabled else '已停用'}")
+
+
 async def hot_reload_team(name: str) -> None:
     """触发指定 Team 的热更新。"""
-    from service import roomService, schedulerService, agentService
 
     # 重新加载配置
     team_configs = await reload_from_db()
