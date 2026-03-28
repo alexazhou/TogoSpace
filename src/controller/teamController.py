@@ -12,14 +12,12 @@ from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
 # Request Models
 class CreateTeamRequest(BaseModel):
     name: str
-    working_directory: str = ""
     config: dict = Field(default_factory=dict)
     members: list[AgentConfig]
     preset_rooms: list[TeamRoomConfig]
 
 
 class UpdateTeamRequest(BaseModel):
-    working_directory: str | None = None
     config: dict | None = None
     members: list[AgentConfig] | None = None
     preset_rooms: list[TeamRoomConfig] | None = None
@@ -45,7 +43,6 @@ class TeamListHandler(BaseHandler):
                     {
                         "id": team.id,
                         "name": team.name,
-                        "working_directory": team.working_directory,
                         "config": team.get_config(),
                         "max_function_calls": team.max_function_calls,
                         "enabled": team.enabled,
@@ -105,7 +102,6 @@ class TeamDetailHandler(BaseHandler):
             {
                 "id": team.id,
                 "name": team.name,
-                "working_directory": team.working_directory,
                 "config": team.get_config(),
                 "max_function_calls": team.max_function_calls,
                 "enabled": team.enabled,

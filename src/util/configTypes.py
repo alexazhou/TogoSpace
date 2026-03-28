@@ -53,7 +53,6 @@ class TeamRoomConfig(BaseModel):
 class TeamConfig(BaseModel):
     """Canonical team config shape loaded from JSON/DB."""
     name: str
-    working_directory: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
     members: List[AgentConfig] = Field(default_factory=list)
     dept_tree: Optional[DeptNodeConfig] = None
