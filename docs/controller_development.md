@@ -301,6 +301,9 @@ List Handler 只用于查询，写操作使用单独的 Handler：
 | `XxxBatchUpdateHandler` | PUT/POST，批量更新 | `AgentBatchUpdateHandler` |
 | `XxxCreateHandler` | POST，创建资源 | `TeamCreateHandler` |
 | `XxxDetailHandler` | GET，获取详情 | `AgentDetailHandler` |
+| `XxxUpdateHandler` | PUT/POST，更新资源 | `DeptTreeUpdateHandler` |
+| `XxxModifyHandler` | POST，修改资源 | `TeamModifyHandler` |
+| `XxxDeleteHandler` | POST，删除资源 | `TeamDeleteHandler` |
 
 ```python
 # ✅ 推荐 - 查询和更新分开
@@ -318,6 +321,36 @@ class AgentListHandler(BaseHandler):
         ...
 
     async def put(self):  # 容易混淆
+        ...
+```
+
+### 单资源查询与更新分离
+
+对于单个资源的查询和更新，应使用不同的 Handler 和带动词的 URL：
+
+| 操作 | URL 格式 | Handler 命名 |
+|------|----------|--------------|
+| 查询 | `/{资源}/{id}.json` | `XxxDetailHandler` |
+| 更新 | `/{资源}/{id}/update.json` | `XxxUpdateHandler` |
+| 修改 | `/{资源}/{id}/modify.json` | `XxxModifyHandler` |
+| 删除 | `/{资源}/{id}/delete.json` | `XxxDeleteHandler` |
+
+```python
+# ✅ 推荐 - 查询和更新使用不同的 Handler
+class DeptTreeDetailHandler(BaseHandler):
+    async def get(self, team_id_str: str):  # GET /teams/1/dept_tree.json
+        ...
+
+class DeptTreeUpdateHandler(BaseHandler):
+    async def put(self, team_id_str: str):  # PUT /teams/1/dept_tree/update.json
+        ...
+
+# ❌ 不推荐 - 同一个 Handler 同时处理查询和更新
+class DeptTreeHandler(BaseHandler):
+    async def get(self, team_id_str: str):
+        ...
+
+    async def put(self, team_id_str: str):  # 容易混淆
         ...
 ```
 
@@ -366,7 +399,8 @@ application = tornado.web.Application([
     (r"/teams/(\d+)/rooms/(\d+)/agents/modify.json",roomController.TeamRoomMembersModifyHandler),
 
     # Dept Tree (V10)
-    (r"/teams/(\d+)/dept_tree.json",                                    deptController.DeptTreeHandler),
+    (r"/teams/(\d+)/dept_tree.json",                deptController.DeptTreeDetailHandler),
+    (r"/teams/(\d+)/dept_tree/update.json",         deptController.DeptTreeUpdateHandler),
 ], **tornado_settings)
 ```
 

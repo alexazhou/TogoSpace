@@ -37,21 +37,21 @@ class TestDeptController(_ApiServiceCase):
         assert data["dept_tree"] is None
 
     async def test_set_and_get_dept_tree(self):
-        """验证 PUT/GET /teams/<id>/dept_tree.json 设置和获取部门树。"""
+        """验证 PUT/GET /teams/<id>/dept_tree/update.json 设置和获取部门树。"""
         team_id = await self._get_team_id("e2e")
 
-        # 设置部门树
+        # 设置部门树（至少需要 2 个成员）
         dept_tree = {
             "dept_name": "技术部",
             "dept_responsibility": "负责技术研发",
             "manager": "alice",
-            "members": ["alice"],
+            "members": ["alice", "bob"],
             "children": [],
         }
 
         async with aiohttp.ClientSession() as client:
             async with client.put(
-                f"{self.backend_base_url}/teams/{team_id}/dept_tree.json",
+                f"{self.backend_base_url}/teams/{team_id}/dept_tree/update.json",
                 json={"dept_tree": dept_tree},
             ) as resp:
                 assert resp.status == 200
@@ -67,3 +67,4 @@ class TestDeptController(_ApiServiceCase):
         assert data["dept_tree"]["dept_name"] == "技术部"
         assert data["dept_tree"]["manager"] == "alice"
         assert "alice" in data["dept_tree"]["members"]
+        assert "bob" in data["dept_tree"]["members"]

@@ -7,6 +7,7 @@ from constants import LlmServiceType, DriverType
 
 class DeptNodeConfig(BaseModel):
     """递归的部门树节点，对应 config 中 dept_tree 的每个节点。"""
+    dept_id: int | None = None  # 可选，增量更新时用于匹配现有部门
     dept_name: str
     dept_responsibility: str = ""
     manager: str
@@ -48,6 +49,8 @@ class TeamRoomConfig(BaseModel):
     members: List[str]
     initial_topic: str = ""
     max_turns: int = 10
+    biz_id: str | None = None
+    tags: List[str] = Field(default_factory=list)
 
 
 class TeamConfig(BaseModel):

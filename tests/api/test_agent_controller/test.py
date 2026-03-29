@@ -44,10 +44,12 @@ class TestAgentController(_ApiServiceCase):
                 data = await resp.json()
 
         assert "agents" in data
-        assert len(data["agents"]) == 1
+        assert len(data["agents"]) == 2
+        names = {a["name"] for a in data["agents"]}
+        assert "alice" in names
+        assert "bob" in names
         agent = data["agents"][0]
         assert "id" in agent
-        assert agent["name"] == "alice"
         assert "employee_number" in agent
         assert isinstance(agent["role_template_id"], int)
         assert agent["team_id"] == team_id

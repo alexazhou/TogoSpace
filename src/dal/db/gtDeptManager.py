@@ -11,6 +11,11 @@ async def get_dept_by_name(team_id: int, name: str) -> GtDept | None:
     )
 
 
+async def get_dept_by_id(dept_id: int) -> GtDept | None:
+    """通过 ID 获取部门。"""
+    return await GtDept.aio_get_or_none(GtDept.id == dept_id)
+
+
 async def get_all_depts(team_id: int) -> list[GtDept]:
     return list(
         await GtDept.select()
@@ -27,8 +32,31 @@ async def upsert_dept(
     parent_id: int | None,
     manager_id: int,
     agent_ids: list[int],
+    dept_id: int | None = None,
 ) -> GtDept:
+    """创建或更新部门。如果提供 dept_id，则按 ID 更新现有部门；否则按 name 创建/更新。"""
     now = datetime.now().isoformat()
+
+    if dept_id is not None:
+        # 按 ID 更新现有部门
+        await (
+            GtDept.update(
+                name=name,
+                responsibility=responsibility,
+                parent_id=parent_id,
+                manager_id=manager_id,
+                agent_ids=agent_ids,
+                updated_at=now,
+            )
+            .where(GtDept.id == dept_id)
+            .aio_execute()
+        )
+        row = await GtDept.aio_get_or_none(GtDept.id == dept_id)
+        if row is None:
+            raise RuntimeError(f"dept update failed: dept_id={dept_id}")
+        return row
+
+    # 按 name 创建/更新
     await (
         GtDept.insert(
             team_id=team_id,

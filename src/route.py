@@ -52,6 +52,7 @@ application = tornado.web.Application([
     (r"/teams/(\d+)/rooms/(\d+)/agents/modify.json",roomController.TeamRoomMembersModifyHandler),
 
     # Dept Tree (V10)
-    (r"/teams/(\d+)/dept_tree.json",                                    deptController.DeptTreeHandler),
+    (r"/teams/(\d+)/dept_tree.json",                deptController.DeptTreeDetailHandler),
+    (r"/teams/(\d+)/dept_tree/update.json",         deptController.DeptTreeUpdateHandler),
 
 ], **tornado_settings)  # type: ignore [arg-type]
