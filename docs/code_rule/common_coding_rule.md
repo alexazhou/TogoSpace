@@ -1,10 +1,29 @@
-# 代码排版规范
+# 通用编码规范
 
-## 目标
+## 1. 显式且精确的逻辑判断
 
-这份规范只关注可读性相关的空行和结构排版，帮助代码在阅读时保持稳定节奏。
+在进行条件判断时，优先使用显式的比较操作，明确区分 `None`、空列表、`0` 或 `False`。避免过度依赖隐式的布尔值判断（truthiness），除非业务逻辑确实需要涵盖所有“虚值”情况。
 
-## 1. 方法前保留一个空行
+- **判断列表/集合为空**：优先使用 `len(items) == 0`。
+- **判断对象是否存在**：优先使用 `is not None` 或 `is None`。
+
+```python
+# 推荐：显式判断长度
+if len(members) == 0:
+    return
+
+# 推荐：显式判断 None
+if agent_id is not None:
+    ...
+
+# 不推荐：隐式判断（容易混淆空列表、None、0 等情况）
+if not members:
+    ...
+```
+
+这种风格能让意图更精确，减少潜在的逻辑陷阱。
+
+## 2. 方法前保留一个空行
 
 类中的每个方法定义前，保留一个空行，不要紧贴上一段逻辑。
 
@@ -17,7 +36,7 @@ class Agent:
         ...
 ```
 
-## 2. `if` 分支前保留一个空行
+## 3. `if` 分支前保留一个空行
 
 当 `if` 前面已经有一段赋值、调用或状态准备逻辑时，在 `if` 之前加一个空行，让分支入口更醒目。
 
@@ -34,7 +53,7 @@ if target_room is None:
 - 一段副作用调用后进入条件判断
 - 多个平级 `if` 分支之间
 
-## 3. `return` 后保留一个空行
+## 4. `return` 后保留一个空行
 
 如果 `return` 后面还有同级分支或后续逻辑，`return` 后应空一行，避免视觉上挤在一起。
 
@@ -45,7 +64,7 @@ if current_room is None:
 return fallback
 ```
 
-## 4. 连续分支之间留空行
+## 5. 连续分支之间留空行
 
 同一层级下，多个 `if / elif / else` 分支如果中间夹着较长逻辑，允许通过空行拉开阅读节奏。
 
@@ -61,7 +80,7 @@ if user_sep in content:
 prompt_lines.append(content)
 ```
 
-## 5. 简单代码不强行加空行
+## 6. 简单代码不强行加空行
 
 这份规范的目标是增强可读性，不是制造无意义的空白。
 
@@ -72,7 +91,7 @@ if not tool_calls:
     return None
 ```
 
-## 6. 优先服务于阅读节奏
+## 7. 优先服务于阅读节奏
 
 当你不确定是否该加空行时，用这个判断标准：
 
@@ -82,20 +101,20 @@ if not tool_calls:
 
 如果答案是”是”，就加空行。
 
-## 7. 参数较少时优先单行
+## 8. 参数较少时优先单行
 
 函数调用或构造函数参数较少（通常 1-2 个）时，优先写在一行，保持紧凑。只有参数过多或复杂时才换行。
 
 ```python
 # 参数少，单行更紧凑
-message = LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f”{room.name} 房间系统消息: {msg.content}”)
+message = LlmApiMessage(role=OpenaiLLMApiRole.USER, content=f"{room.name} 房间系统消息: {msg.content}")
 
 # 参数多，换行更清晰
 agent = Agent(
     name=name,
     team_name=team_name,
     system_prompt=full_prompt,
-    model=cfg[“model”],
+    model=cfg["model"],
     driver_config=driver_config,
 )
 ```

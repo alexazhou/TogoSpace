@@ -194,53 +194,30 @@ async def assign_employee_numbers_for_existing_agents(team_id: int) -> int:
     return assigned_count
 
 
-async def save_members_full_replace(team_id: int, members: list[Any]) -> list[GtAgent]:
-    """全量覆盖成员列表：有 id 更新，无 id 创建，不在列表的设为离职状态。返回在职成员列表。"""
-    existing_agents = await get_agents_by_team(team_id)
-    existing_ids = {a.id for a in existing_agents}
-    existing_by_id = {a.id: a for a in existing_agents}
+async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) -> None:
+    """批量更新成员状态。"""
+    if not agent_ids:
+        return
+    await GtAgent.update(employ_status=status).where(GtAgent.id.in_(agent_ids)).aio_execute()  # type: ignore[attr-defined]
 
-    request_ids = {m.id for m in members if m.id is not None}
 
-    ids_to_offboard = existing_ids - request_ids
-    if ids_to_offboard:
-        for agent_id in ids_to_offboard:
-            agent = existing_by_id[agent_id]
-            agent.employ_status = EmployStatus.OFF_BOARD
-            await agent.aio_save()
+async def batch_save_agents(agents_data: list[dict[str, Any]]) -> None:
+    """批量保存成员：有 id 则更新，无 id 则插入。"""
+    if len(agents_data) == 0:
+        return
 
-    max_num = await get_max_employee_number(team_id)
-    next_num = max_num + 1
+    to_create = []
+    to_update = []
+    for data in agents_data:
+        if data.get("id") is not None:
+            to_update.append(data)
+        else:
+            to_create.append(data)
 
-    for member in members:
-        role_template_id = await _resolve_role_template_id(member)
-        if member.id is not None and member.id in existing_by_id:
-            agent = existing_by_id[member.id]
-            agent.name = member.name
-            agent.role_template_id = role_template_id
-            agent.model = member.model
-            agent.driver = member.driver
-            agent.employ_status = EmployStatus.ON_BOARD
-            await agent.aio_save()
+    if len(to_create) > 0:
+        await GtAgent.insert_many(to_create).aio_execute()
 
-    for member in members:
-        if member.id is None:
-            role_template_id = await _resolve_role_template_id(member)
-            try:
-                await GtAgent.insert(
-                    team_id=team_id,
-                    name=member.name,
-                    role_template_id=role_template_id,
-                    model=member.model,
-                    driver=member.driver,
-                    employee_number=next_num,
-                    employ_status=EmployStatus.ON_BOARD,
-                ).aio_execute()
-                next_num += 1
-            except IntegrityError as e:
-                raise TeamAgentException(
-                    error_message=f'成员名称"{member.name}"已存在',
-                    error_code="MEMBER_NAME_EXISTS",
-                ) from e
-
-    return await get_on_board_agents(team_id)
+    for data in to_update:
+        update_data = data.copy()
+        agent_id = update_data.pop("id")
+        await GtAgent.update(**update_data).where(GtAgent.id == agent_id).aio_execute()

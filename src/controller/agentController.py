@@ -90,7 +90,7 @@ class TeamMembersSaveHandler(BaseHandler):
         )
 
         await _assert_role_templates_exist([m.role_template_id for m in request.members])
-        updated_members = await gtAgentManager.save_members_full_replace(team_id, request.members)
+        updated_members = await agentService.save_team_agents_full_replace(team_id, request.members)
 
         await teamService.hot_reload_team(team.name)
 

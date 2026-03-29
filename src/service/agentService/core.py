@@ -13,7 +13,9 @@ from service.agentService.driver import AgentDriverConfig, build_agent_driver, n
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
 from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from service.roomService import ChatRoom, ChatContext
-from constants import SpecialAgent, MessageBusTopic, MemberStatus, DriverType
+from peewee import IntegrityError
+from exception import TeamAgentException
+from constants import SpecialAgent, MessageBusTopic, MemberStatus, DriverType, EmployStatus
 
 logger = logging.getLogger(__name__)
 
@@ -453,6 +455,76 @@ def get_team_agents(room_id: int) -> List["Agent"]:
 
 def get_all_rooms(team_name: str, agent_name: str) -> List[int]:
     return roomService.get_rooms_for_agent(_team_ids.get(team_name), agent_name)
+
+
+async def _resolve_role_template_id(member: Any) -> int:
+    raw_id = getattr(member, "role_template_id", None)
+    template_name = getattr(member, "role_template", None)
+
+    if isinstance(raw_id, int):
+        return raw_id
+
+    if not template_name:
+        raise TeamAgentException(
+            error_message="成员缺少 role_template_id",
+            error_code="ROLE_TEMPLATE_ID_REQUIRED",
+        )
+
+    template = await gtRoleTemplateManager.get_role_template_by_name(str(template_name))
+    if template is None:
+        raise TeamAgentException(
+            error_message=f"角色模板不存在: {template_name}",
+            error_code="ROLE_TEMPLATE_NOT_FOUND",
+        )
+    return template.id
+
+
+async def save_team_agents_full_replace(team_id: int, members: list[Any]) -> list[Any]:
+    """全量覆盖成员列表：有 id 更新，无 id 创建，不在列表的设为离职状态。返回在职成员列表。"""
+    existing_agents = await gtAgentManager.get_agents_by_team(team_id)
+    existing_ids = {a.id for a in existing_agents}
+    existing_by_id = {a.id: a for a in existing_agents}
+
+    request_ids = {m.id for m in members if m.id is not None}
+
+    # 1. 离职处理
+    ids_to_offboard = existing_ids - request_ids
+    if ids_to_offboard:
+        await gtAgentManager.batch_update_agent_status(list(ids_to_offboard), EmployStatus.OFF_BOARD)
+
+    # 2. 准备保存数据 (含更新和创建)
+    max_num = await gtAgentManager.get_max_employee_number(team_id)
+    next_num = max_num + 1
+    save_data_list = []
+
+    for member in members:
+        role_template_id = await _resolve_role_template_id(member)
+        data = {
+            "name": member.name,
+            "role_template_id": role_template_id,
+            "model": member.model,
+            "driver": member.driver,
+            "employ_status": EmployStatus.ON_BOARD,
+        }
+        if member.id is not None and member.id in existing_by_id:
+            data["id"] = member.id
+        else:
+            data["team_id"] = team_id
+            data["employee_number"] = next_num
+            next_num += 1
+
+        save_data_list.append(data)
+
+    if save_data_list:
+        try:
+            await gtAgentManager.batch_save_agents(save_data_list)
+        except IntegrityError as e:
+            raise TeamAgentException(
+                error_message="成员保存失败，名称可能已存在或工号重复",
+                error_code="MEMBER_SAVE_FAILED",
+            ) from e
+
+    return await gtAgentManager.get_on_board_agents(team_id)
 
 
 async def shutdown() -> None:
