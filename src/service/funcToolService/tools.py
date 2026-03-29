@@ -125,7 +125,10 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
     except Exception:
         try:
             team_row = await gtTeamManager.get_team(_context.team_name)
-            room_config = await gtRoomManager.get_room_config(team_row.id, room_name) if team_row else None
+            room_config = None
+            if team_row:
+                team_rooms = await gtRoomManager.get_rooms_by_team(team_row.id)
+                room_config = next((room for room in team_rooms if room.name == room_name), None)
             target_room = roomService.get_room(room_config.id) if room_config else None
         except Exception:
             target_room = None

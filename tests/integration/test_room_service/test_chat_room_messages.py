@@ -10,7 +10,7 @@ import service.roomService as roomService
 from constants import MessageBusTopic
 from dal.db import gtTeamManager, gtRoomMessageManager
 from exception import TeamAgentException
-from util.configTypes import TeamConfig
+from model.dbModel.gtTeam import GtTeam
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -29,7 +29,7 @@ class TestChatRoomMessages(ServiceTestCase):
         await roomService.startup()
 
         # 预创建 team，_create_room 不再自动创建
-        await gtTeamManager.upsert_team(TeamConfig(name=TEAM, members=[], preset_rooms=[]))
+        await gtTeamManager.save_team(GtTeam(name=TEAM))
 
     @classmethod
     async def async_teardown_class(cls):

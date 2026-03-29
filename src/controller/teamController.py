@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 # 内部包
 from controller.baseController import BaseHandler
 from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
-from service import teamService
+from service import roomService, teamService
 from util import assertUtil
 from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
 
@@ -100,7 +100,7 @@ class TeamDetailHandler(BaseHandler):
         ]
         room_items = []
         for room in rooms:
-            room_members = await gtRoomManager.get_members_by_room(room.id)
+            room_members = await roomService.get_db_room_member_names(room.id)
             room_items.append(
                 {
                     "id": room.id,
@@ -141,7 +141,7 @@ class TeamModifyHandler(BaseHandler):
 
         team_name = team.name
 
-        current_config = await gtTeamManager.get_team_config(team_name)
+        current_config = await teamService.get_team_config(team_name)
         assertUtil.assertNotNull(current_config, error_message=f"Team '{team_name}' config not found", error_code="team_config_not_found")
 
         # 构建完整配置，确保局部更新不会丢字段

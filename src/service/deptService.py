@@ -11,6 +11,7 @@ from exception import TeamAgentException
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
+from service import roomService
 from util.configTypes import DeptNodeConfig
 
 logger = logging.getLogger(__name__)
@@ -253,7 +254,7 @@ async def _save_dept_update_room(team_id: int, node: DeptTreeNode, dept_ids_map:
         existing.biz_id = biz_id
         existing.tags = ["DEPT"]
         await gtRoomManager.save_room(existing)
-        await gtRoomManager.upsert_room_members(existing.id, node.members)
+        await roomService.save_room_members(existing.id, node.members)
     else:
         # 创建新房间，并添加部门成员
         room = await gtRoomManager.save_room(GtRoom(
@@ -266,7 +267,7 @@ async def _save_dept_update_room(team_id: int, node: DeptTreeNode, dept_ids_map:
             biz_id=biz_id,
             tags=["DEPT"],
         ))
-        await gtRoomManager.upsert_room_members(room.id, node.members)
+        await roomService.save_room_members(room.id, node.members)
 
     # 递归处理子部门
     for child in node.children:
