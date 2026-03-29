@@ -18,13 +18,13 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-@pytest.mark.forked
+
 class TestSdkDoSend(ServiceTestCase):
     """测试 ClaudeSdkAgentDriver._handle_claude_sdk_tool_call：当前房间 vs 跨房间发言的路由与 done 标记行为。"""
 
     @classmethod
     async def async_setup_class(cls):
-        db_path = cls.TEST_DB_PATH
+        db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
@@ -112,11 +112,11 @@ class _FakeClaudeClient:
         return None
 
 
-@pytest.mark.forked
+
 class TestClaudeSdkAgentDriver(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
-        db_path = cls.TEST_DB_PATH
+        db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()

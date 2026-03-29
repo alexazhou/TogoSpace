@@ -28,11 +28,11 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-@pytest.mark.forked
+
 class TestDalManagers(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
-        db_path = cls.TEST_DB_PATH
+        db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
 
     @classmethod
@@ -86,7 +86,7 @@ class TestDalManagers(ServiceTestCase):
     async def test_role_template_table_has_model_column(self):
         await self._reset_tables()
 
-        with sqlite3.connect(self.TEST_DB_PATH) as conn:
+        with sqlite3.connect(self._get_test_db_path()) as conn:
             cols = conn.execute("PRAGMA table_info('role_templates')").fetchall()
         col_names = {c[1] for c in cols}
         assert "model" in col_names

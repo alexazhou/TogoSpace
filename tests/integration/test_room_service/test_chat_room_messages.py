@@ -19,11 +19,11 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-@pytest.mark.forked
+
 class TestChatRoomMessages(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
-        db_path = cls.TEST_DB_PATH
+        db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()

@@ -14,7 +14,7 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-@pytest.mark.forked
+
 class TestmessageBus(ServiceTestCase):
     async def test_subscribe_and_publish(self):
         """订阅后发布消息，订阅者应收到 Message 对象及原始 payload。"""

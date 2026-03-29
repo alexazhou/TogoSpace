@@ -32,7 +32,7 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-@pytest.mark.forked
+
 class TestPythonTypeToJsonSchema(ServiceTestCase):
     async def test_str(self):
         """str 映射为 JSON Schema string。"""
@@ -65,7 +65,7 @@ class TestPythonTypeToJsonSchema(ServiceTestCase):
         assert python_type_to_json_schema(Custom) == {"type": "object"}
 
 
-@pytest.mark.forked
+
 class TestGetFunctionMetadata(ServiceTestCase):
     async def test_name_is_set(self):
         """metadata 中 name 字段与注册名一致。"""
@@ -89,7 +89,7 @@ class TestGetFunctionMetadata(ServiceTestCase):
         assert "_context" not in props
 
 
-@pytest.mark.forked
+
 class TestBuildtools(ServiceTestCase):
     async def test_builds_tool_for_each_entry(self):
         """注册表中每个函数都应产出一个 OpenAITool 定义。"""
@@ -106,12 +106,12 @@ class TestBuildtools(ServiceTestCase):
         assert len(build_tools({"get_weather": get_weather})) == 1
 
 
-@pytest.mark.forked
+
 class TestToolFunctions(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # send_chat_msg/get_agent_list 依赖 roomService 上下文。
-        db_path = cls.TEST_DB_PATH
+        db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()

@@ -44,7 +44,7 @@ def _make_team_config() -> TeamConfig:
     })
 
 
-@pytest.mark.forked
+
 class TestSchedulerRun(ServiceTestCase):
     def setup_method(self):
         # 清理可能残留的 scheduler 状态，避免测试间污染

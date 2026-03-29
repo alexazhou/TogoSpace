@@ -23,11 +23,11 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-@pytest.mark.forked
+
 class TestDeptService(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
-        await ormService.startup(cls.TEST_DB_PATH)
+        await ormService.startup(cls._get_test_db_path())
 
     @classmethod
     async def async_teardown_class(cls):

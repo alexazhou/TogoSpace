@@ -25,7 +25,7 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-@pytest.mark.forked
+
 class TestRealSimpleChat(ServiceTestCase):
     """简单对话场景：两个 agent 在房间中完成对话后退出"""
 
@@ -42,7 +42,7 @@ class TestRealSimpleChat(ServiceTestCase):
         await llmService.startup()
 
         # 启动服务
-        await ormService.startup(cls.TEST_DB_PATH)
+        await ormService.startup(cls._get_test_db_path())
         await persistenceService.startup()
         await roomService.startup()
         await funcToolService.startup()

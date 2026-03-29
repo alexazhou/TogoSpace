@@ -26,7 +26,7 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-@pytest.mark.forked
+
 class TestPersistenceRestoreIntegration(ServiceTestCase):
     async def _reset_runtime_services(self):
         scheduler.shutdown()
@@ -50,11 +50,11 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         team_config = cfg.teams[0]
 
         from src.db import migrate_database
-        migrate_database(self.TEST_DB_PATH)
+        migrate_database(self._get_test_db_path())
 
         await roomService.startup()
         await funcToolService.startup()
-        await ormService.startup(self.TEST_DB_PATH)
+        await ormService.startup(self._get_test_db_path())
         await persistenceService.startup()
         await roleTemplateService.startup()
         await agentService.startup()
