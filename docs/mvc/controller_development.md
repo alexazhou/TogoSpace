@@ -62,6 +62,15 @@ async def get(self, team_id_str: str, room_id_str: str) -> None:
     # /teams/{team_id}/rooms/{room_id}.json
 ```
 
+### 优先使用 DB 对象
+
+在定义请求/响应模型或处理数据时，应尽量复用 DB 层已有的模型对象（`GtXxx`），而不是新建一个字段几乎完全相同但名字不同的 DTO/数据对象。
+
+- **请求模型**：如果 API 的输入字段与 `GtXxx` 高度重合，应考虑直接接收或内部转换为 `GtXxx`。
+- **避免冗余**：不要创建类似 `AgentSaveDTO` 这样与 `GtAgent` 职责重叠的中间类。
+- **一致性**：统一使用 `GtXxx` 有助于减少不同层级间的转换成本，并使代码库的领域模型更加清晰。
+- **Service 编排**：Controller 仅负责简单的到 `GtXxx` 的映射，复杂的对象转换、数据补全或逻辑编排应在 Service 层完成。
+
 ---
 
 ## 数据输出序列化
