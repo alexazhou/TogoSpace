@@ -6,10 +6,12 @@ import pytest
 
 from dal.db import gtTeamManager
 from service import roomService, agentService, ormService, persistenceService
+from service import roleTemplateService
 from service.agentService import Agent
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
-from util.configTypes import TeamConfig
+from constants import DriverType, RoleTemplateType
+from util.configTypes import TeamConfig, AgentConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -28,22 +30,38 @@ class TestSdkDoSend(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
-        await gtTeamManager.import_team_from_config(TeamConfig(name=TEAM))
+        await roleTemplateService.startup()
+        await agentService.startup()
+        
+        cfg = TeamConfig(name=TEAM, members=[
+            AgentConfig(name="alice", role_template="alice"),
+            AgentConfig(name="bob", role_template="bob")
+        ])
+        await gtTeamManager.import_team_from_config(cfg)
+        await agentService.load_team_ids([cfg])
+        await agentService.create_team_agents([cfg])
 
     @classmethod
     async def async_teardown_class(cls):
+        await agentService.shutdown()
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
 
     async def _make_driver_with_room(self, agent_name: str, current_room_name: str):
-        """创建房间、agent 和 SDK driver，注入当前房间上下文。"""
+        """创建房间并从服务获取 agent，模拟调度器注入当前房间上下文的行为。"""
+        # 1. roomService 处理持久化和成员关系
         await roomService.create_room(TEAM, current_room_name, [agent_name])
         room = roomService.get_room_by_key(f"{current_room_name}@{TEAM}")
         await room.activate_scheduling()
-        agent = Agent(name=agent_name, team_name=TEAM, system_prompt="test", model="test-model",
-                      driver_config=AgentDriverConfig(driver_type="native"))
+        
+        # 2. 从 agentService 获取在内存中已注册好的 agent
+        agent = agentService.get_team_agent(TEAM, agent_name)
+        
+        # 3. 模拟 schedulerService：进入该房间回合前注入运行时的 current_room
         agent.current_room = room
+        
+        # 4. 驱动绑定
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
         return driver, agent, room
 
@@ -120,6 +138,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+        await roleTemplateService.startup()
         await gtTeamManager.import_team_from_config(TeamConfig(name=TEAM))
         await agentService.startup()
 
@@ -154,5 +173,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         driver._sdk_client = fake_client
 
         await driver.run_chat_turn(room, synced_count=0, max_function_calls=2)
+
+        assert len(fake_client.queries) == 2
 
         assert len(fake_client.queries) == 2
