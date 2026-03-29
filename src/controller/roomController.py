@@ -9,7 +9,6 @@ from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtRoomManager
 from model.coreModel.gtCoreWebModel import (
     GtCoreMessageInfo,
-    GtCoreRoomInfo,
     GtCoreRoomMessagesResponse,
 )
 from model.dbModel.gtRoom import GtRoom
@@ -66,17 +65,7 @@ class RoomListHandler(BaseHandler):
         rooms: List[chat_room.ChatRoom] = chat_room.get_all_rooms()
         if team_name:
             rooms = [room for room in rooms if room.team_name == team_name]
-        data = []
-        for r in rooms:
-            data.append(GtCoreRoomInfo(
-                room_id=r.room_id,
-                room_key=r.key,
-                room_name=r.name,
-                team_name=r.team_name,
-                room_type=r.room_type.name,
-                state=r.state.name,
-                members=r.members
-            ).model_dump(mode="json"))
+        data = [r.to_dict() for r in rooms]
         self.return_json({"rooms": data})
 
 

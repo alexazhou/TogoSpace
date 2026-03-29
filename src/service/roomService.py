@@ -71,6 +71,7 @@ class ChatRoom:
         self.room_type: RoomType = room.type  # 房间类型（私有/群聊）
         self.messages: List[GtCoreChatMessage] = []  # 消息历史记录
         self.initial_topic: str = room.initial_topic  # 初始话题
+        self.tags: List[str] = room.tags or []  # 房间标签
         self._members: List[GtAgent] = members or []  # 房间参与者列表
 
         self._member_name_map: Dict[int, str] = {m.id: m.name for m in self._members}
@@ -360,6 +361,19 @@ class ChatRoom:
         if self.initial_topic:
             msg += f"\n本房间初始话题：{self.initial_topic}"
         return msg
+
+    def to_dict(self) -> dict:
+        """返回用于 API 响应的字典表示，包含运行时状态。"""
+        return {
+            "room_id": self.room_id,
+            "room_key": self.key,
+            "room_name": self.name,
+            "team_name": self.team_name,
+            "room_type": self.room_type.name,
+            "state": self._state.name,
+            "members": self.members,
+            "tags": self.tags,
+        }
 
 
 _rooms: Dict[str, ChatRoom] = {}  # room_key -> ChatRoom
