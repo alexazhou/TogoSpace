@@ -13,7 +13,7 @@
 | :--- | :--- | :--- |
 | `name` | 是 | 配置的唯一标识名，用于 `default_llm_server` 指定。 |
 | `type` | 是 | 供应商类型。可选：`openai-compatible`, `anthropic`, `google`, `deepseek` 等。 |
-| `model` | 是 | 模型名称。建议遵循 LiteLLM 规范：`供应商/模型名`。 |
+| `model` | 是 | 模型名称。**由于系统支持自动补全前缀，此处只需填写模型主体名称。** |
 | `api_key` | 是 | 对应供应商的 API Key。 |
 | `base_url` | 否 | API 端点地址。如果使用官方原生接口，部分供应商可省略。 |
 | `enable` | 是 | 是否启用该服务。 |
@@ -23,53 +23,54 @@
 ## 3. 常见配置示例
 
 ### 3.1 使用 OpenAI 兼容接口 (如 DeepSeek, Qwen, OneAPI)
-这是最通用的配置方式。系统会自动处理 URL 拼接和前缀识别。
+系统会自动补全 `openai/` 前缀。
 
 ```json
 {
-  "name": "deepseek-chat",
+  "name": "qwen-plus",
   "type": "openai-compatible",
-  "model": "deepseek-chat",
+  "model": "qwen-plus",
   "api_key": "sk-your-key",
-  "base_url": "https://api.deepseek.com",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
   "enable": true
 }
 ```
-*提示：系统会自动识别并补全 `openai/` 前缀，同时会自动移除 URL 末尾冗余的 `/chat/completions`。*
 
 ### 3.2 直接使用 Anthropic (Claude)
-直接调用 Anthropic 官方接口，无需 OpenAI 中转。
+系统会自动补全 `anthropic/` 前缀。
 
 ```json
 {
   "name": "claude-sonnet",
   "type": "anthropic",
-  "model": "anthropic/claude-3-5-sonnet-20240620",
+  "model": "claude-3-5-sonnet-20240620",
   "api_key": "sk-ant-...",
-  "base_url": "https://api.anthropic.com",
   "enable": true
 }
 ```
 
 ### 3.3 使用 Google Gemini
+系统会自动补全 `gemini/` 前缀。
+
 ```json
 {
   "name": "gemini-pro",
   "type": "google",
-  "model": "gemini/gemini-1.5-pro",
+  "model": "gemini-1.5-pro",
   "api_key": "your-google-api-key",
   "enable": true
 }
 ```
 
-### 3.4 使用本地模型 (如 Ollama)
+### 3.4 使用 DeepSeek 官方接口
+系统会自动补全 `deepseek/` 前缀。
+
 ```json
 {
-  "name": "ollama-qwen",
-  "type": "openai-compatible",
-  "model": "qwen2",
-  "api_key": "not-needed",
-  "base_url": "http://localhost:11434/v1",
+  "name": "deepseek-chat",
+  "type": "deepseek",
+  "model": "deepseek-chat",
+  "api_key": "sk-...",
   "enable": true
 }
 ```
@@ -79,27 +80,29 @@
 ## 4. 进阶特性说明
 
 ### 4.1 自动模型前缀识别
-为了简化配置，系统会根据 `type` 字段自动为 `model` 添加供应商前缀：
-- **无需手动输入斜杠 `/` 前缀**：
-    - 如果 `type` 为 `openai-compatible`，自动添加 `openai/`。
-    - 如果 `type` 为 `anthropic`，自动添加 `anthropic/`。
-    - 如果 `type` 为 `google`，自动添加 `gemini/`。
-    - 如果 `type` 为 `deepseek`，自动添加 `deepseek/`。
-- **示例**：如果 `type` 是 `anthropic`，`model` 写 `claude-3-5-sonnet`，代码会自动将其转换为 `anthropic/claude-3-5-sonnet`。
-- **覆盖机制**：如果你在 `model` 中手动写了斜杠（如 `custom/my-model`），系统将尊重你的原始设置，不再自动添加前缀。
+系统会根据 `type` 字段自动为 `model` 添加 LiteLLM 所需的路由前缀，因此你在 `model` 中**无需手动填写斜杠 `/` 及其前面的部分**：
+
+| `type` 配置值 | 自动补全的前缀 | 示例转换 |
+| :--- | :--- | :--- |
+| `openai-compatible` | `openai/` | `gpt-4o` -> `openai/gpt-4o` |
+| `anthropic` | `anthropic/` | `claude-3` -> `anthropic/claude-3` |
+| `google` | `gemini/` | `gemini-pro` -> `gemini/gemini-pro` |
+| `deepseek` | `deepseek/` | `deepseek-chat` -> `deepseek/deepseek-chat` |
+
+*注意：如果你在 `model` 中手动包含了斜杠（如 `my-custom/model-x`），系统将保留原样，不再自动补全。*
 
 ### 4.2 API 地址自动纠错
-系统会自动清理 `base_url`：
+底层 `llmApiUtil` 会自动清理 `base_url`，防止请求路径出现重复：
+- 自动移除末尾的 `/chat/completions` 或 `/chat/completions/`。
 - 自动移除末尾多余的斜杠 `/`。
-- 自动移除末尾多余的 `/chat/completions` 路径。
-- **推荐做法**：在配置文件中只写到 `/v1` 或域名根路径，例如 `https://api.openai.com/v1`。
+- **配置建议**：只需写到 API 的基准路径（如 `.../v1`）即可。
 
 ### 4.3 切换默认模型
-在 `setting.json` 的顶层修改 `default_llm_server`：
+在 `setting.json` 的顶层修改 `default_llm_server` 值为对应的 `name` 即可：
 ```json
 {
   "setting": {
-    "default_llm_server": "你的配置名称 (name)",
+    "default_llm_server": "qwen-plus",
     "llm_services": [...]
   }
 }
@@ -108,7 +111,7 @@
 ---
 
 ## 5. 故障排除
-如果遇到 `BadRequestError` 或 `404`：
-1. **检查 URL**：确保 `base_url` 没有重复包含 `/chat/completions`（虽然系统已处理，但建议规范化）。
-2. **检查模型名**：部分供应商必须包含特定前缀，参考 [LiteLLM Providers 列表](https://docs.litellm.ai/docs/providers)。
-3. **API Key**：检查 key 是否过期或权限不足。
+如果遇到 `BadRequestError` (400) 或 `Not Found` (404)：
+1. **核对模型名称**：虽然系统会自动加前缀，但请确保模型主体名称（如 `glm-4`）是该供应商支持的。
+2. **检查 URL 格式**：确保 `base_url` 是供应商要求的基准地址。
+3. **API Key 有效性**：检查 Key 是否正确，以及是否具有调用该模型的权限。
