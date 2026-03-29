@@ -456,7 +456,7 @@ async def _create_room(
     max_turns: int = 0,
 ) -> None:
     """内部建房入口。"""
-    # 1. 从 DB 查找 team_id 和已有 room_id
+    # 1. 从 DB 查找 team_id 和完整 room 行
     team_row = await gtTeamManager.get_team(team_name)
     assert team_row is not None, f"Team '{team_name}' 不存在，调用 _create_room 前应先创建 Team"
 
@@ -471,15 +471,12 @@ async def _create_room(
             max_turns=max_turns,
         )
     else:
-        room_row = GtRoom(
-            id=room_id,
-            team_id=team_row.id,
-            name=name,
-            type=room_type,
-            initial_topic=initial_topic,
-            max_turns=max_turns,
-            agent_read_index=None,
-            updated_at=GtRoom._now(),
+        room_row = await GtRoom.aio_get_or_none(
+            (GtRoom.id == room_id) & (GtRoom.team_id == team_row.id)
+        )
+        assert room_row is not None, (
+            f"聊天室 '{name}@{team_name}' 不存在于数据库，"
+            f"调用 _create_room 时 room_id={room_id}"
         )
 
     resolved_room_id = room_row.id
