@@ -31,6 +31,9 @@ class OpenaiLLMApiRole(EnhanceEnum):
 
 class LlmServiceType(EnhanceEnum):
     OPENAI_COMPATIBLE = "openai-compatible"
+    ANTHROPIC = "anthropic"
+    GOOGLE = "google"
+    DEEPSEEK = "deepseek"
 
 
 class MessageBusTopic(EnhanceEnum):

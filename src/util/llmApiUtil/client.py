@@ -1,56 +1,55 @@
 import logging
-import ssl
 from typing import Optional
 
-import aiohttp
-import certifi
-
-from .OpenAiModels import OpenAIRequest, OpenAIResponse, OpenAIErrorResponse
+import litellm
+from .OpenAiModels import OpenAIRequest, OpenAIResponse
 
 
 logger = logging.getLogger(__name__)
 
-_session: Optional[aiohttp.ClientSession] = None
-
 
 def init() -> None:
-    global _session
-    ssl_context = ssl.create_default_context(cafile=certifi.where())
-    connector = aiohttp.TCPConnector(ssl=ssl_context)
-    _session = aiohttp.ClientSession(connector=connector)
+    """初始化 llmApiUtil。使用 litellm 后，此方法主要用于设置全局配置。"""
+    # 如果需要，可以在这里设置 litellm 的全局配置，例如：
+    # litellm.set_verbose = True
+    # litellm.drop_params = True
+    pass
 
 
 async def send_request(request: OpenAIRequest, url: str, api_key: str) -> OpenAIResponse:
-    """发送 chat completion 请求。"""
-    if _session is None:
-        raise RuntimeError("llmApiUtil 未初始化，请先调用 init()")
+    """使用 litellm 发送 chat completion 请求。"""
+    
+    # 构造 litellm.acompletion 的参数
+    # 如果提供了 url (base_url)，且模型没有 provider 前缀，
+    # 我们默认将其视为 openai 兼容接口，并添加 'openai/' 前缀以确保 litellm 正确路由。
+    model_name = request.model
+    if url and "/" not in model_name:
+        model_name = f"openai/{model_name}"
 
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    messages = [m.to_dict() for m in request.messages]
+    
+    tools = None
+    if request.tools:
+        tools = [t.model_dump(exclude_none=True) for t in request.tools]
 
-    payload = {
-        **request.model_dump(exclude_none=True, exclude={"messages"}),
-        "messages": [m.to_dict() for m in request.messages],
-    }
+    try:
+        response = await litellm.acompletion(
+            model=model_name,
+            messages=messages,
+            api_key=api_key,
+            base_url=url,
+            tools=tools,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            stream=request.stream,
+        )
+        
+        # litellm 返回的是 ModelResponse 对象，它支持 .json() 序列化，且格式与 OpenAI 一致
+        # 我们直接使用 OpenAIResponse.model_validate 转换回我们的 Pydantic 模型
+        response_dict = response.json()
+        return OpenAIResponse.model_validate(response_dict)
 
-    async with _session.post(url, headers=headers, json=payload) as response:
-        response_data = await response.json()
-        status = response.status
-
-    if status == 200:
-        return OpenAIResponse.model_validate(response_data)
-
-    if 'error' in response_data:
-        error_msg = response_data['error'].get('message', 'Unknown error')
-        error_code = response_data['error'].get('code', str(status))
-    else:
-        try:
-            error = OpenAIErrorResponse.model_validate(response_data)
-            error_msg = error.message
-            error_code = error.code
-        except Exception:
-            error_msg = str(response_data)
-            error_code = str(status)
-    raise RuntimeError(f"API 调用失败: {error_code} - {error_msg}")
+    except Exception as e:
+        logger.error(f"LiteLLM API 调用失败: {e}", exc_info=True)
+        # 维持原有的错误抛出行为，虽然错误信息格式可能略有不同
+        raise RuntimeError(f"API 调用失败: {e}")
