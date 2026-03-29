@@ -463,17 +463,18 @@ async def _create_room(
     room_row: GtRoom | None = None
 
     if room_id is None:
-        room_row = await gtRoomManager.ensure_room_by_key(
+        room_row = await gtRoomManager.save_room(GtRoom(
             team_id=team_row.id,
-            room_name=name,
-            room_type=room_type,
+            name=name,
+            type=room_type,
             initial_topic=initial_topic,
             max_turns=max_turns,
-        )
+            agent_ids=[],
+            biz_id=None,
+            tags=[],
+        ))
     else:
-        room_row = await GtRoom.aio_get_or_none(
-            (GtRoom.id == room_id) & (GtRoom.team_id == team_row.id)
-        )
+        room_row = await gtRoomManager.get_room_by_id(room_id)
         assert room_row is not None, (
             f"聊天室 '{name}@{team_name}' 不存在于数据库，"
             f"调用 _create_room 时 room_id={room_id}"

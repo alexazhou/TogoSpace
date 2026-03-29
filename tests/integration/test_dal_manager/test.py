@@ -252,24 +252,25 @@ class TestDalManagers(ServiceTestCase):
         assert a_room.type == RoomType.PRIVATE
         assert await gtRoomManager.get_room_config(team.id, "missing") is None
 
-    async def test_room_manager_ensure_room_by_key_create_and_update(self):
+    async def test_room_manager_save_room_create_and_update(self):
         await self._reset_tables()
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="ensure_team"))
-        first = await gtRoomManager.ensure_room_by_key(
+        first = await gtRoomManager.save_room(GtRoom(
             team_id=team.id,
-            room_name="stable",
-            room_type=RoomType.GROUP,
+            name="stable",
+            type=RoomType.GROUP,
             initial_topic="t1",
             max_turns=4,
-        )
-        second = await gtRoomManager.ensure_room_by_key(
-            team_id=team.id,
-            room_name="stable",
-            room_type=RoomType.PRIVATE,
-            initial_topic="t2",
-            max_turns=9,
-        )
+            agent_ids=[],
+            biz_id=None,
+            tags=[],
+        ))
+
+        first.type = RoomType.PRIVATE
+        first.initial_topic = "t2"
+        first.max_turns = 9
+        second = await gtRoomManager.save_room(first)
 
         assert second.id == first.id
         assert second.type == RoomType.PRIVATE

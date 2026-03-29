@@ -714,6 +714,43 @@ class TestDeptService(ServiceTestCase):
         room_members_after = await gtRoomManager.get_members_by_room(room_after.id)
         assert set(room_members_after) == {"alice", "bob", "charlie", "david"}
 
+    async def test_set_dept_tree_renames_existing_dept_room(self):
+        """验证已存在部门改名后，对应部门群名称会同步更新。"""
+        await self._reset_tables()
+
+        team = await self._setup_team_with_members("t_room_rename", ["alice", "bob"])
+
+        root = deptService.DeptTreeNode(
+            dept_name="engineering",
+            dept_responsibility="开发部门",
+            manager="alice",
+            members=["alice", "bob"],
+        )
+        await deptService.set_dept_tree(team.id, root)
+
+        dept = await gtDeptManager.get_dept_by_name(team.id, "engineering")
+        assert dept is not None
+        biz_id = f"DEPT:{dept.id}"
+        before_room = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
+        assert before_room is not None
+        assert before_room.name == "engineering"
+
+        renamed = deptService.DeptTreeNode(
+            dept_id=dept.id,
+            dept_name="platform",
+            dept_responsibility="平台部门",
+            manager="alice",
+            members=["alice", "bob"],
+        )
+        await deptService.set_dept_tree(team.id, renamed)
+
+        after_room = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
+        assert after_room is not None
+        assert after_room.id == before_room.id
+        assert after_room.name == "platform"
+        assert after_room.initial_topic == "平台部门"
+        assert "DEPT" in after_room.tags
+
     async def test_refresh_rooms_for_team_keeps_dept_room_tags(self):
         """验证热刷新运行态房间时，部门房间标签不会丢失。"""
         await self._reset_tables()
