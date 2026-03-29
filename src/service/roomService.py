@@ -143,6 +143,7 @@ class ChatRoom:
             room_id=self.room_id,
             room_name=self.name,
             room_key=self.key,
+            team_id=self.team_id,
             team_name=self.team_name,
             sender=sender,
             content=content,

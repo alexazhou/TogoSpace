@@ -50,6 +50,7 @@ class TestAgentController(_ApiServiceCase):
         assert agent["name"] == "alice"
         assert "employee_number" in agent
         assert isinstance(agent["role_template_id"], int)
+        assert agent["team_id"] == team_id
         assert "employ_status" in agent
         assert "model" in agent
         assert "driver" in agent
