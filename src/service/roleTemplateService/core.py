@@ -20,7 +20,7 @@ async def startup() -> None:
 
 async def _import_role_template_from_config(config: RoleTemplateConfig) -> None:
     """导入 role template 到数据库。已存在时同步 driver / allowed_tools。"""
-    existing = await gtRoleTemplateManager.get_role_template(config.name)
+    existing = await gtRoleTemplateManager.get_role_template_by_name(config.name)
     if existing is not None:
         if (
             existing.type != RoleTemplateType.SYSTEM

@@ -4,7 +4,7 @@ import json
 import logging
 
 from constants import DriverType
-from . import gtRoomManager, gtAgentManager
+from . import gtRoomManager, gtAgentManager, gtRoleTemplateManager
 from model.dbModel.gtTeam import GtTeam
 from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
 
@@ -97,15 +97,30 @@ async def get_team_config(name: str) -> TeamConfig | None:
 
     team_id = team.id
 
-    members: list[AgentConfig] = [
-        AgentConfig(
-            name=member.name,
-            role_template=member.role_template_name,
-            model=member.model or None,
-            driver=member.driver if isinstance(member.driver, DriverType) else DriverType.NATIVE,
+    agent_rows = await gtAgentManager.get_agents_by_team(team_id)
+    template_rows = await gtRoleTemplateManager.get_role_templates_by_ids(
+        [member.role_template_id for member in agent_rows]
+    )
+    templates_by_id = {template.id: template for template in template_rows}
+
+    members: list[AgentConfig] = []
+    for member in agent_rows:
+        template = templates_by_id.get(member.role_template_id)
+        if template is None:
+            logger.warning(
+                "Agent '%s' 引用的角色模板不存在: role_template_id=%s",
+                member.name,
+                member.role_template_id,
+            )
+            continue
+        members.append(
+            AgentConfig(
+                name=member.name,
+                role_template=template.template_name,
+                model=member.model or None,
+                driver=member.driver if isinstance(member.driver, DriverType) else DriverType.NATIVE,
+            )
         )
-        for member in await gtAgentManager.get_agents_by_team(team_id)
-    ]
 
     rooms: list[TeamRoomConfig] = []
     for room in await gtRoomManager.get_rooms_by_team(team_id):

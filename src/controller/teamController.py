@@ -96,7 +96,7 @@ class TeamDetailHandler(BaseHandler):
         members = [
             {
                 "name": member.name,
-                "role_template": member.role_template_name,
+                "role_template_id": member.role_template_id,
             }
             for member in await gtAgentManager.get_agents_by_team(team_id)
         ]

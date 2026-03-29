@@ -76,7 +76,7 @@ class TestDalManagers(ServiceTestCase):
         assert saved_2.driver == DriverType.TSP
         assert saved_2.allowed_tools == ["list_dir"]
 
-        row = await gtRoleTemplateManager.get_role_template("alice")
+        row = await gtRoleTemplateManager.get_role_template_by_name("alice")
         assert row is not None
         assert row.model == "gpt-4o"
         assert row.type == RoleTemplateType.SYSTEM

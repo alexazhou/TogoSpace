@@ -316,7 +316,7 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
         for member_cfg in team_config.members:
             agent_name = member_cfg.name
             template_name = member_cfg.role_template
-            cfg = await gtRoleTemplateManager.get_role_template(template_name)
+            cfg = await gtRoleTemplateManager.get_role_template_by_name(template_name)
             if cfg is None:
                 logger.warning(f"角色模版不存在: agent={agent_name}, template={template_name}，跳过创建")
                 continue

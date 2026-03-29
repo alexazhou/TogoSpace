@@ -74,7 +74,7 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            members=[GtAgent(id=0, team_id=1, name="alice", role_template_name="alice")],
+            members=[GtAgent(id=0, team_id=1, name="alice", role_template_id=1)],
         )
 
         teams_config = [_make_team_config()]
@@ -150,7 +150,7 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            members=[GtAgent(id=0, team_id=1, name="alice", role_template_name="alice")],
+            members=[GtAgent(id=0, team_id=1, name="alice", role_template_id=1)],
         )
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
@@ -180,7 +180,7 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            members=[GtAgent(id=0, team_id=1, name="alice", role_template_name="alice")],
+            members=[GtAgent(id=0, team_id=1, name="alice", role_template_id=1)],
         )
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
@@ -210,7 +210,7 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            members=[GtAgent(id=0, team_id=1, name="alice", role_template_name="alice")],
+            members=[GtAgent(id=0, team_id=1, name="alice", role_template_id=1)],
         )
         r2 = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -224,7 +224,7 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            members=[GtAgent(id=0, team_id=1, name="alice", role_template_name="alice")],
+            members=[GtAgent(id=0, team_id=1, name="alice", role_template_id=1)],
         )
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
@@ -258,7 +258,7 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            members=[GtAgent(id=0, team_id=1, name="alice", role_template_name="alice")],
+            members=[GtAgent(id=0, team_id=1, name="alice", role_template_id=1)],
         )
         teams_config = [_make_team_config()]
         await scheduler.startup(teams_config)
