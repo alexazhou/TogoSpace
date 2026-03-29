@@ -44,7 +44,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await roomService.startup()
         await roleTemplateService.startup()
         team = await gtTeamManager.upsert_team(TeamConfig(name=TEAM))
-        await gtAgentManager.upsert_agents(team.id, [
+        await gtAgentManager.batch_save_agents(team.id, [
             AgentConfig(name="alice", role_template="alice"),
             AgentConfig(name="bob", role_template="bob"),
         ])

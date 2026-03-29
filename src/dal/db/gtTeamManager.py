@@ -166,7 +166,7 @@ async def import_team_from_config(team_config: TeamConfig) -> None:
     # 导入 Team
     team = await upsert_team(team_config)
     team_id = team.id
-    await gtAgentManager.upsert_agents(team_id, team_config.members)
+    await gtAgentManager.batch_save_agents(team_id, team_config.members)
 
     # 导入 Rooms（upsert_rooms 会处理成员）
     rooms = _iter_team_rooms(team_config)

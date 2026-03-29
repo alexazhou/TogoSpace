@@ -73,7 +73,7 @@ async def create_team(team_config: TeamConfig) -> int:
     # 创建 Team
     team = await gtTeamManager.upsert_team(team_config)
     team_id = team.id
-    await gtAgentManager.upsert_agents(team_id, team_config.members)
+    await gtAgentManager.batch_save_agents(team_id, team_config.members)
 
     if team_config.dept_tree:
         await deptService.import_dept_tree(team_id, team_config.dept_tree)
@@ -100,7 +100,7 @@ async def update_team(team_config: TeamConfig) -> None:
     # 更新 Team 基本信息
     team = await gtTeamManager.upsert_team(team_config)
     team_id = team.id
-    await gtAgentManager.upsert_agents(team_id, team_config.members)
+    await gtAgentManager.batch_save_agents(team_id, team_config.members)
 
     # 更新 preset_rooms
     rooms = team_config.preset_rooms

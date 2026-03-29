@@ -67,13 +67,9 @@ async def get_off_board_agents(team_id: int) -> list[GtAgent]:
     )
 
 
-async def _resolve_role_template_id(member: AgentConfig | dict[str, Any] | Any) -> int:
-    if isinstance(member, dict):
-        raw_id = member.get("role_template_id")
-        template_name = member.get("role_template")
-    else:
-        raw_id = getattr(member, "role_template_id", None)
-        template_name = getattr(member, "role_template", None)
+async def _resolve_role_template_id(member: Any) -> int:
+    raw_id = getattr(member, "role_template_id", None)
+    template_name = getattr(member, "role_template", None)
 
     if isinstance(raw_id, int):
         return raw_id
@@ -101,43 +97,50 @@ def _normalize_driver_value(driver_raw: Any) -> DriverType:
     return DriverType.NATIVE
 
 
-async def upsert_agents(team_id: int, members: list[AgentConfig] | list[dict[str, Any]]) -> None:
-    """增量更新 team 的成员列表。有 id 则按 id 更新，无 id 则插入。"""
+async def batch_save_agents(team_id: int, members: list[Any]) -> None:
+    """批量保存成员：有 id 则更新，无 id 则插入。"""
+    if len(members) == 0:
+        return
+
     max_num = await get_max_employee_number(team_id)
     next_num = max_num + 1
 
+    to_create = []
+    to_update = []
+
     for member in members:
-        if isinstance(member, dict):
-            member_id = member.get("id")
-            name = member.get("name")
-            model = member.get("model") or ""
-            driver = _normalize_driver_value(member.get("driver"))
-        else:
-            member_id = None
-            name = member.name
-            model = member.model or ""
-            driver = _normalize_driver_value(member.driver)
+        member_id = getattr(member, "id", None)
+        name = getattr(member, "name", "")
+        model = getattr(member, "model", "") or ""
+        driver = _normalize_driver_value(getattr(member, "driver", DriverType.NATIVE))
+        employ_status = getattr(member, "employ_status", EmployStatus.ON_BOARD)
 
         role_template_id = await _resolve_role_template_id(member)
 
-        if member_id:
-            existing = await GtAgent.aio_get_or_none(GtAgent.id == member_id)
-            if existing is not None:
-                existing.name = name
-                existing.role_template_id = role_template_id
-                existing.model = model
-                existing.driver = driver
-                await existing.aio_save()
+        data = {
+            "name": name,
+            "role_template_id": role_template_id,
+            "model": model,
+            "driver": driver,
+            "employ_status": employ_status,
+        }
+
+        if member_id is not None:
+            data["id"] = member_id
+            to_update.append(data)
         else:
-            await GtAgent.insert(
-                team_id=team_id,
-                name=name,
-                role_template_id=role_template_id,
-                model=model,
-                driver=driver,
-                employee_number=next_num,
-            ).aio_execute()
+            data["team_id"] = team_id
+            data["employee_number"] = next_num
+            to_create.append(data)
             next_num += 1
+
+    if len(to_create) > 0:
+        await GtAgent.insert_many(to_create).aio_execute()
+
+    for data in to_update:
+        update_data = data.copy()
+        agent_id = update_data.pop("id")
+        await GtAgent.update(**update_data).where(GtAgent.id == agent_id).aio_execute()
 
 
 async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
@@ -165,29 +168,3 @@ async def update_agent(agent_id: int, name: str, role_template_id: int, model: s
 
 
 async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) -> None:
-    """批量更新成员状态。"""
-    if not agent_ids:
-        return
-    await GtAgent.update(employ_status=status).where(GtAgent.id.in_(agent_ids)).aio_execute()  # type: ignore[attr-defined]
-
-
-async def batch_save_agents(agents_data: list[dict[str, Any]]) -> None:
-    """批量保存成员：有 id 则更新，无 id 则插入。"""
-    if len(agents_data) == 0:
-        return
-
-    to_create = []
-    to_update = []
-    for data in agents_data:
-        if data.get("id") is not None:
-            to_update.append(data)
-        else:
-            to_create.append(data)
-
-    if len(to_create) > 0:
-        await GtAgent.insert_many(to_create).aio_execute()
-
-    for data in to_update:
-        update_data = data.copy()
-        agent_id = update_data.pop("id")
-        await GtAgent.update(**update_data).where(GtAgent.id == agent_id).aio_execute()
