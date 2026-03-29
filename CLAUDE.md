@@ -101,6 +101,10 @@ frontend/
 
 同层可互相引用。禁止下层反向依赖上层：`controller -> service -> model -> util`。
 
+## 开发约定
+
+- **代码提交**：开发完成后不要自动提交代码。统一等待用户明确要求「提交」或「commit」后再执行 git commit/push。
+
 ## 启动与停止
 
 ### 后端

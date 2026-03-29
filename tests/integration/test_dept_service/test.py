@@ -5,7 +5,7 @@ import aiosqlite
 import pytest
 
 from tests.base import ServiceTestCase
-from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager
+from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtRoomManager
 from exception import TeamAgentException
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -643,3 +643,118 @@ class TestDeptService(ServiceTestCase):
         # bob 不在任何部门
         bob_dept = await deptService.get_member_dept(team.id, "bob")
         assert bob_dept is None
+
+    # ------------------------------------------------------------------
+    # set_dept_tree 部门房间成员
+    # ------------------------------------------------------------------
+
+    async def test_set_dept_tree_creates_room_with_members(self):
+        """验证 set_dept_tree 创建新部门房间时，部门成员会被自动加入。"""
+        await self._reset_tables()
+
+        team = await self._setup_team_with_members("t_room_create", ["alice", "bob", "charlie"])
+
+        root = deptService.DeptTreeNode(
+            dept_name="engineering",
+            dept_responsibility="开发部门",
+            manager="alice",
+            members=["alice", "bob", "charlie"],
+        )
+
+        await deptService.set_dept_tree(team.id, root)
+
+        # 验证部门房间已创建
+        dept = await gtDeptManager.get_dept_by_name(team.id, "engineering")
+        assert dept is not None
+        biz_id = f"DEPT:{dept.id}"
+        room = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
+        assert room is not None
+        assert room.name == "engineering"
+        assert "DEPT" in room.tags
+
+        # 验证部门成员已加入房间
+        room_members = await gtRoomManager.get_members_by_room(room.id)
+        assert set(room_members) == {"alice", "bob", "charlie"}
+
+    async def test_set_dept_tree_updates_existing_room_members(self):
+        """验证 set_dept_tree 更新已有部门房间时，成员列表会同步更新。"""
+        await self._reset_tables()
+
+        team = await self._setup_team_with_members("t_room_update", ["alice", "bob", "charlie", "david"])
+
+        # 第一次创建
+        root = deptService.DeptTreeNode(
+            dept_name="marketing",
+            dept_responsibility="市场部门",
+            manager="alice",
+            members=["alice", "bob"],
+        )
+        await deptService.set_dept_tree(team.id, root)
+
+        dept = await gtDeptManager.get_dept_by_name(team.id, "marketing")
+        assert dept is not None
+        biz_id = f"DEPT:{dept.id}"
+        room = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
+        assert room is not None
+        room_members = await gtRoomManager.get_members_by_room(room.id)
+        assert set(room_members) == {"alice", "bob"}
+
+        # 第二次更新，增加成员
+        root_updated = deptService.DeptTreeNode(
+            dept_id=dept.id,
+            dept_name="marketing",
+            dept_responsibility="市场部门",
+            manager="alice",
+            members=["alice", "bob", "charlie", "david"],
+        )
+        await deptService.set_dept_tree(team.id, root_updated)
+
+        room_after = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
+        assert room_after is not None
+        room_members_after = await gtRoomManager.get_members_by_room(room_after.id)
+        assert set(room_members_after) == {"alice", "bob", "charlie", "david"}
+
+    async def test_set_dept_tree_hierarchical_rooms_all_have_members(self):
+        """验证层级部门结构中，每个部门房间都有对应的成员。"""
+        await self._reset_tables()
+
+        team = await self._setup_team_with_members(
+            "t_room_hier", ["cto", "ceo", "eng_mgr", "dev_a", "dev_b", "sales_mgr", "sales_a"]
+        )
+
+        root = deptService.DeptTreeNode(
+            dept_name="company",
+            dept_responsibility="公司",
+            manager="cto",
+            members=["cto", "ceo"],  # 至少 2 人
+            children=[
+                deptService.DeptTreeNode(
+                    dept_name="engineering",
+                    dept_responsibility="技术部",
+                    manager="eng_mgr",
+                    members=["eng_mgr", "dev_a", "dev_b"],
+                ),
+                deptService.DeptTreeNode(
+                    dept_name="sales",
+                    dept_responsibility="销售部",
+                    manager="sales_mgr",
+                    members=["sales_mgr", "sales_a"],
+                ),
+            ],
+        )
+
+        await deptService.set_dept_tree(team.id, root)
+
+        # 验证所有部门房间
+        for dept_name, expected_members in [
+            ("company", {"cto", "ceo"}),
+            ("engineering", {"eng_mgr", "dev_a", "dev_b"}),
+            ("sales", {"sales_mgr", "sales_a"}),
+        ]:
+            dept = await gtDeptManager.get_dept_by_name(team.id, dept_name)
+            assert dept is not None
+            biz_id = f"DEPT:{dept.id}"
+            room = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
+            assert room is not None
+            room_members = await gtRoomManager.get_members_by_room(room.id)
+            assert set(room_members) == expected_members

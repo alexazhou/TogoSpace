@@ -247,8 +247,8 @@ async def _save_dept_update_room(team_id: int, node: DeptTreeNode, dept_ids_map:
         # 更新房间成员
         await gtRoomManager.upsert_room_members(existing.id, node.members)
     else:
-        # 创建新房间
-        await gtRoomManager.ensure_room_by_key(
+        # 创建新房间，并添加部门成员
+        room = await gtRoomManager.ensure_room_by_key(
             team_id=team_id,
             room_name=node.dept_name,
             room_type=RoomType.GROUP,
@@ -257,6 +257,7 @@ async def _save_dept_update_room(team_id: int, node: DeptTreeNode, dept_ids_map:
             biz_id=biz_id,
             tags=["DEPT"],
         )
+        await gtRoomManager.upsert_room_members(room.id, node.members)
 
     # 递归处理子部门
     for child in node.children:
