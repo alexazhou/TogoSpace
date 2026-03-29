@@ -54,14 +54,6 @@ async def startup() -> None:
 
     logger.info(f"从数据库加载了 {len(_teams)} 个 Team 配置")
 
-    # 为已有 agents 分配工号（处理迁移前的数据）
-    for team_config in _teams:
-        team = await gtTeamManager.get_team(team_config.name)
-        if team is not None:
-            assigned = await gtAgentManager.assign_employee_numbers_for_existing_agents(team.id)
-            if assigned > 0:
-                logger.info(f"为 Team '{team_config.name}' 的 {assigned} 个 agents 分配了工号")
-
 
 async def reload_from_db() -> list[TeamConfig]:
     """从数据库重新加载配置。"""
