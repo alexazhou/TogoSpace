@@ -10,12 +10,5 @@
       "initial_topic": "e2e 测试话题",
       "max_turns": 50
     }
-  ],
-  "dept_tree": {
-    "dept_name": "总部",
-    "dept_responsibility": "测试团队",
-    "manager": "alice",
-    "members": ["alice"],
-    "children": []
-  }
+  ]
 }

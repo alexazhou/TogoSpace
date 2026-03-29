@@ -22,6 +22,18 @@ class MembersSaveRequest(BaseModel):
     members: list[MemberSaveItem]
 
 
+class AgentUpdateItem(BaseModel):
+    id: int
+    name: str
+    role_template_name: str
+    model: str = ""
+    driver: DriverType = DriverType.NATIVE
+
+
+class AgentBatchUpdateRequest(BaseModel):
+    agents: list[AgentUpdateItem]
+
+
 class AgentListHandler(BaseHandler):
     """GET /agents/list.json?team_id=<id> - 获取 team 的成员配置列表"""
 
@@ -106,6 +118,38 @@ class TeamMembersSaveHandler(BaseHandler):
                 for m in updated_members
             ],
         })
+
+
+class AgentBatchUpdateHandler(BaseHandler):
+    """PUT /teams/<id>/agents/batch_update.json - 兼容旧批量更新接口"""
+
+    async def put(self, team_id_str: str) -> None:
+        team_id = int(team_id_str)
+        team = await gtTeamManager.get_team_by_id(team_id)
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+
+        request = self.parse_request(AgentBatchUpdateRequest)
+
+        agent_ids = [item.id for item in request.agents]
+        existing_agents = await gtAgentManager.get_agents_by_ids(agent_ids)
+        assertUtil.assertEqual(
+            len(existing_agents),
+            len(agent_ids),
+            error_message=f"input {len(agent_ids)} agent ids, but only found {len(existing_agents)} existed",
+            error_code="agent_not_found",
+        )
+
+        for item in request.agents:
+            await gtAgentManager.update_agent(
+                agent_id=item.id,
+                name=item.name,
+                role_template_name=item.role_template_name,
+                model=item.model,
+                driver=item.driver,
+            )
+
+        await teamService.hot_reload_team(team.name)
+        self.return_json({"status": "ok"})
 
 
 class AgentDetailHandler(BaseHandler):

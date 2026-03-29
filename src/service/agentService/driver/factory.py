@@ -42,6 +42,9 @@ def normalize_driver_config(role_template_cfg: RoleTemplateConfig | Mapping[str,
 
 def build_agent_driver(host, driver_config: AgentDriverConfig):
     driver_type = driver_config.driver_type
+    if isinstance(driver_type, str):
+        driver_type = DriverType.value_of(driver_type) or DriverType.NATIVE
+        driver_config.driver_type = driver_type
 
     if driver_type == DriverType.NATIVE:
         return NativeAgentDriver(host, driver_config)

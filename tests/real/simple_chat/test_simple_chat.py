@@ -14,6 +14,7 @@ import service.schedulerService as scheduler
 import service.llmService as llmService
 import service.ormService as ormService
 import service.persistenceService as persistenceService
+import service.teamService as teamService
 from tests.base import ServiceTestCase
 from util import configUtil, llmApiUtil
 
@@ -46,6 +47,7 @@ class TestRealSimpleChat(ServiceTestCase):
         await roomService.startup()
         await funcToolService.startup()
         await roleTemplateService.startup()
+        await teamService.startup()
         await agentService.startup()
         await agentService.create_team_agents(cfg.teams)
 
@@ -125,7 +127,7 @@ class TestRealSimpleChat(ServiceTestCase):
 
         # 验证消息数量：1 条系统公告 + 2 条 agent 消息
         messages = room.messages
-        agent_messages = [m for m in messages if m.sender_name != "system"]
+        agent_messages = [m for m in messages if m.sender_name.lower() != "system"]
 
         assert len(agent_messages) == 2, f"期望 2 条 agent 消息，实际 {len(agent_messages)} 条"
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from constants import DriverType
+from constants import DriverType, RoleTemplateType
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 
 
@@ -8,6 +8,7 @@ async def upsert_role_template(
     template_name: str,
     model: str | None,
     soul: str = "",
+    template_type: RoleTemplateType = RoleTemplateType.SYSTEM,
     driver: DriverType | None = None,
     allowed_tools: list[str] | None = None,
 ) -> GtRoleTemplate:
@@ -17,6 +18,7 @@ async def upsert_role_template(
             template_name=template_name,
             model=model,
             soul=soul,
+            type=template_type,
             driver=driver,
             allowed_tools=allowed_tools,
         )
@@ -25,6 +27,7 @@ async def upsert_role_template(
             update={
                 GtRoleTemplate.model: model,
                 GtRoleTemplate.soul: soul,
+                GtRoleTemplate.type: template_type,
                 GtRoleTemplate.driver: driver,
                 GtRoleTemplate.allowed_tools: allowed_tools,
                 GtRoleTemplate.updated_at: GtRoleTemplate._now(),

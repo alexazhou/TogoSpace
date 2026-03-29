@@ -30,6 +30,7 @@ class TestRoleTemplateController(_ApiServiceCase):
         template = data["role_templates"][0]
         assert "name" in template
         assert "model" in template
+        assert "type" in template
         assert "driver" in template
 
     async def test_get_role_template_detail(self):
@@ -49,5 +50,27 @@ class TestRoleTemplateController(_ApiServiceCase):
         assert detail["name"] == template_name
         assert "model" in detail
         assert "prompt" in detail
+        assert "type" in detail
         assert "driver" in detail
         assert "allowed_tools" in detail
+
+    async def test_create_role_template(self):
+        """验证 POST /role_templates/create.json 创建用户模板。"""
+        payload = {
+            "name": "custom_writer",
+            "soul": "你是一个用户创建的模板",
+            "model": "gpt-4o-mini",
+        }
+
+        async with aiohttp.ClientSession() as client:
+            async with client.post(f"{self.backend_base_url}/role_templates/create.json", json=payload) as resp:
+                assert resp.status == 200
+                created = await resp.json()
+
+            async with client.get(f"{self.backend_base_url}/role_templates/custom_writer.json") as resp:
+                assert resp.status == 200
+                detail = await resp.json()
+
+        assert created["name"] == "custom_writer"
+        assert created["type"] == "user"
+        assert detail["type"] == "user"

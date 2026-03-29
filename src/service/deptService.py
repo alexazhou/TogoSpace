@@ -76,7 +76,7 @@ async def _import_node(team_id: int, node: DeptNodeConfig, parent_id: int | None
             error_code="DEPT_MANAGER_NOT_IN_MEMBERS",
         )
 
-    # 解析 member_ids 和 manager_id
+    # 解析 agent_ids 和 manager_id
     agent_ids: list[int] = []
     manager_id: int | None = None
     for member_name in node.members:
@@ -162,3 +162,151 @@ async def get_member_dept(team_id: int, member_name: str) -> GtDept | None:
         if member.id in dept.agent_ids:
             return dept
     return None
+
+
+async def move_member(
+    team_id: int,
+    member_name: str,
+    target_dept_name: str,
+    is_manager: bool = False,
+) -> None:
+    """将成员移入指定部门，可选设为主管。"""
+    member = await gtAgentManager.get_agent(team_id, member_name)
+    if member is None:
+        raise TeamAgentException(
+            f"成员 '{member_name}' 不存在",
+            error_code="MEMBER_NOT_FOUND",
+        )
+
+    target_dept = await gtDeptManager.get_dept_by_name(team_id, target_dept_name)
+    if target_dept is None:
+        raise TeamAgentException(
+            f"部门 '{target_dept_name}' 不存在",
+            error_code="DEPT_NOT_FOUND",
+        )
+
+    all_depts = await gtDeptManager.get_all_depts(team_id)
+    for dept in all_depts:
+        if member.id in dept.agent_ids:
+            new_ids = [mid for mid in dept.agent_ids if mid != member.id]
+            await gtDeptManager.upsert_dept(
+                team_id=dept.team_id,
+                name=dept.name,
+                responsibility=dept.responsibility,
+                parent_id=dept.parent_id,
+                manager_id=dept.manager_id,
+                agent_ids=new_ids,
+            )
+
+    new_ids = list(target_dept.agent_ids)
+    if member.id not in new_ids:
+        new_ids.append(member.id)
+
+    new_manager_id = member.id if is_manager else target_dept.manager_id
+    await gtDeptManager.upsert_dept(
+        team_id=target_dept.team_id,
+        name=target_dept.name,
+        responsibility=target_dept.responsibility,
+        parent_id=target_dept.parent_id,
+        manager_id=new_manager_id,
+        agent_ids=new_ids,
+    )
+
+    await (
+        GtAgent.update(employ_status=EmployStatus.ON_BOARD)
+        .where((GtAgent.team_id == team_id) & (GtAgent.name == member_name))
+        .aio_execute()
+    )
+
+
+async def remove_member(
+    team_id: int,
+    member_name: str,
+    new_manager: str | None = None,
+) -> None:
+    """将成员从所在部门移除并设为 off_board。若其为主管，需指定新主管。"""
+    member = await gtAgentManager.get_agent(team_id, member_name)
+    if member is None:
+        raise TeamAgentException(
+            f"成员 '{member_name}' 不存在",
+            error_code="MEMBER_NOT_FOUND",
+        )
+
+    member_dept = await get_member_dept(team_id, member_name)
+    if member_dept is None:
+        await (
+            GtAgent.update(employ_status=EmployStatus.OFF_BOARD)
+            .where((GtAgent.team_id == team_id) & (GtAgent.name == member_name))
+            .aio_execute()
+        )
+        return
+
+    is_manager = member.id == member_dept.manager_id
+    if is_manager and new_manager is None:
+        raise TeamAgentException(
+            f"成员 '{member_name}' 是部门 '{member_dept.name}' 的主管，移除时必须指定新主管",
+            error_code="MANAGER_REMOVAL_REQUIRES_NEW_MANAGER",
+        )
+
+    new_ids = [mid for mid in member_dept.agent_ids if mid != member.id]
+    new_manager_id = member_dept.manager_id
+
+    if is_manager and new_manager is not None:
+        new_manager_row = await gtAgentManager.get_agent(team_id, new_manager)
+        if new_manager_row is None:
+            raise TeamAgentException(
+                f"新主管 '{new_manager}' 不存在",
+                error_code="MEMBER_NOT_FOUND",
+            )
+        if new_manager_row.id not in new_ids:
+            raise TeamAgentException(
+                f"新主管 '{new_manager}' 不在部门 '{member_dept.name}' 的成员名单中",
+                error_code="NEW_MANAGER_NOT_IN_DEPT",
+            )
+        new_manager_id = new_manager_row.id
+
+    await gtDeptManager.upsert_dept(
+        team_id=member_dept.team_id,
+        name=member_dept.name,
+        responsibility=member_dept.responsibility,
+        parent_id=member_dept.parent_id,
+        manager_id=new_manager_id,
+        agent_ids=new_ids,
+    )
+    await (
+        GtAgent.update(employ_status=EmployStatus.OFF_BOARD)
+        .where((GtAgent.team_id == team_id) & (GtAgent.name == member_name))
+        .aio_execute()
+    )
+
+
+async def set_dept_manager(team_id: int, dept_name: str, manager_name: str) -> None:
+    """变更部门主管，新主管必须已在该部门中。"""
+    dept = await gtDeptManager.get_dept_by_name(team_id, dept_name)
+    if dept is None:
+        raise TeamAgentException(
+            f"部门 '{dept_name}' 不存在",
+            error_code="DEPT_NOT_FOUND",
+        )
+
+    manager_row = await gtAgentManager.get_agent(team_id, manager_name)
+    if manager_row is None:
+        raise TeamAgentException(
+            f"成员 '{manager_name}' 不存在",
+            error_code="MEMBER_NOT_FOUND",
+        )
+
+    if manager_row.id not in dept.agent_ids:
+        raise TeamAgentException(
+            f"成员 '{manager_name}' 不在部门 '{dept_name}' 的成员名单中",
+            error_code="MEMBER_NOT_IN_DEPT",
+        )
+
+    await gtDeptManager.upsert_dept(
+        team_id=dept.team_id,
+        name=dept.name,
+        responsibility=dept.responsibility,
+        parent_id=dept.parent_id,
+        manager_id=manager_row.id,
+        agent_ids=dept.agent_ids,
+    )
