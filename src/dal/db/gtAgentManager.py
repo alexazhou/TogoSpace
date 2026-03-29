@@ -7,7 +7,6 @@ from peewee import fn, IntegrityError
 from constants import EmployStatus, DriverType
 from exception import TeamAgentException
 from model.dbModel.gtAgent import GtAgent
-from util.configTypes import AgentConfig
 
 from . import gtRoleTemplateManager
 
@@ -67,29 +66,18 @@ async def get_off_board_agents(team_id: int) -> list[GtAgent]:
     )
 
 
-async def _resolve_role_template_id(agent: Any) -> int:
-    raw_id = getattr(agent, "role_template_id", None)
-    template_name = getattr(agent, "role_template", None)
-
-    if isinstance(raw_id, int):
-        return raw_id
-
+async def resolve_role_template_id_by_name(template_name: str) -> int:
+    """按名称查找角色模板 ID。"""
     if not template_name:
-        raise TeamAgentException(
-            error_message="成员缺少 role_template_id",
-            error_code="ROLE_TEMPLATE_ID_REQUIRED",
-        )
+        return 0
 
-    template = await gtRoleTemplateManager.get_role_template_by_name(str(template_name))
+    template = await gtRoleTemplateManager.get_role_template_by_name(template_name)
     if template is None:
-        raise TeamAgentException(
-            error_message=f"角色模板不存在: {template_name}",
-            error_code="ROLE_TEMPLATE_NOT_FOUND",
-        )
+        return 0
     return template.id
 
 
-async def batch_save_agents(team_id: int, agents: list[Any]) -> None:
+async def batch_save_agents(team_id: int, agents: list[GtAgent]) -> None:
     """批量保存成员：有 id 则更新，无 id 则插入。"""
     if len(agents) == 0:
         return
@@ -101,38 +89,21 @@ async def batch_save_agents(team_id: int, agents: list[Any]) -> None:
     to_update = []
 
     for agent in agents:
-        agent_id = getattr(agent, "id", None)
-        name = getattr(agent, "name", "")
-        model = getattr(agent, "model", "") or ""
-        driver = getattr(agent, "driver", DriverType.NATIVE)
-        employ_status = getattr(agent, "employ_status", EmployStatus.ON_BOARD)
-
-        role_template_id = await _resolve_role_template_id(agent)
-
-        data = {
-            "name": name,
-            "role_template_id": role_template_id,
-            "model": model,
-            "driver": driver,
-            "employ_status": employ_status,
-        }
-
-        if agent_id is not None:
-            data["id"] = agent_id
-            to_update.append(data)
+        if agent.id is not None:
+            to_update.append(agent)
         else:
-            data["team_id"] = team_id
-            data["employee_number"] = next_num
-            to_create.append(data)
+            agent.team_id = team_id
+            agent.employee_number = next_num
+            to_create.append(agent)
             next_num += 1
 
     if len(to_create) > 0:
-        await GtAgent.insert_many(to_create).aio_execute()
+        # 批量插入新记录
+        await GtAgent.bulk_create(to_create)
 
-    for data in to_update:
-        update_data = data.copy()
-        agent_id = update_data.pop("id")
-        await GtAgent.update(**update_data).where(GtAgent.id == agent_id).aio_execute()
+    for agent in to_update:
+        # 更新已有记录
+        await agent.aio_save()
 
 
 async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:

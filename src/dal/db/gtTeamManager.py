@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import logging
 
-from constants import DriverType
+from constants import DriverType, EmployStatus
 from . import gtRoomManager, gtAgentManager, gtRoleTemplateManager
 from model.dbModel.gtTeam import GtTeam
+from model.dbModel.gtAgent import GtAgent
 from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,13 @@ async def get_all_team_configs() -> list[TeamConfig]:
     return result
 
 
+async def _resolve_role_template_id(agent_config: AgentConfig) -> int:
+    template = await gtRoleTemplateManager.get_role_template_by_name(agent_config.role_template)
+    if template is None:
+        return 0
+    return template.id
+
+
 # JSON 到数据库的转换
 async def import_team_from_config(team_config: TeamConfig) -> None:
     """从 TeamConfig 导入 Team 到数据库。"""
@@ -166,7 +174,25 @@ async def import_team_from_config(team_config: TeamConfig) -> None:
     # 导入 Team
     team = await upsert_team(team_config)
     team_id = team.id
-    await gtAgentManager.batch_save_agents(team_id, team_config.members)
+
+    agents_to_save = []
+    for cfg in team_config.members:
+        role_template_id = await _resolve_role_template_id(cfg)
+        if role_template_id == 0:
+            logger.warning(f"跳过 Agent '{cfg.name}'：未找到角色模板 '{cfg.role_template}'")
+            continue
+
+        agent = GtAgent(
+            team_id=team_id,
+            name=cfg.name,
+            role_template_id=role_template_id,
+            model=cfg.model or "",
+            driver=cfg.driver,
+            employ_status=EmployStatus.ON_BOARD,
+        )
+        agents_to_save.append(agent)
+
+    await gtAgentManager.batch_save_agents(team_id, agents_to_save)
 
     # 导入 Rooms（upsert_rooms 会处理成员）
     rooms = _iter_team_rooms(team_config)

@@ -7,15 +7,11 @@ from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from service import teamService, agentService
 from util import assertUtil
+from util.configTypes import AgentSaveDTO
 
 
-class MemberSaveItem(BaseModel):
+class MemberSaveItem(AgentSaveDTO):
     """成员保存项：id 可选，有则更新，无则创建。"""
-    id: Optional[int] = None
-    name: str
-    role_template_id: int
-    model: str = ""
-    driver: DriverType = DriverType.NATIVE
 
 
 class MembersSaveRequest(BaseModel):
