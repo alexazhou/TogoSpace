@@ -110,10 +110,10 @@ async def run() -> None:
             logger.info(f"\n{runtime_room.format_log()}")
 
 
-def replay_scheduling_rooms() -> None:
+async def replay_scheduling_rooms() -> None:
     for room in chat_room.get_all_rooms():
         if room.state == RoomState.SCHEDULING:
-            room.activate_scheduling()
+            await room.activate_scheduling()
 
 
 def stop() -> None:

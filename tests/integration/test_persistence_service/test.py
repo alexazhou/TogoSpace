@@ -42,6 +42,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await roomService.startup()
+        await roleTemplateService.startup()
         team = await gtTeamManager.upsert_team(TeamConfig(name=TEAM))
         await gtAgentManager.upsert_agents(team.id, [
             AgentConfig(name="alice", role_template="alice"),
@@ -49,7 +50,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         ])
         await roomService.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3)
         room = roomService.get_room_by_key(f"r1@{TEAM}")
-        room.activate_scheduling()
+        await room.activate_scheduling()
         await room.add_message("alice", "hello")
         await room.get_unread_messages("bob")
         await room.add_message("bob", "world")
@@ -70,12 +71,14 @@ class TestRestoreRoomHistory(ServiceTestCase):
     @classmethod
     async def async_teardown_class(cls):
         messageBus.shutdown()
+        await roleTemplateService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
         roomService.shutdown()
 
     async def test_messages_restored(self):
         assert [m.content for m in self.restored.messages] == [
+            "r1 房间已经创建，当前房间成员：alice、bob",
             "hello",
             "world",
         ]

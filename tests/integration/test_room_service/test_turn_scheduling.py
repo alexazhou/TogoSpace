@@ -49,7 +49,7 @@ class TestTurnScheduling(ServiceTestCase):
         room = roomService.get_room_by_key(f"r@{TEAM}")
 
         with patch("service.messageBus.publish") as mock_publish:
-            room.activate_scheduling()
+            await room.activate_scheduling()
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_MEMBER_TURN,
                 member_name="alice",
@@ -63,7 +63,7 @@ class TestTurnScheduling(ServiceTestCase):
         """当前发言人发言后，调用 finish_turn 才调度下一个发言人。"""
         await roomService.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
         room = roomService.get_room_by_key(f"r@{TEAM}")
-        room.activate_scheduling()
+        await room.activate_scheduling()
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message("alice", "hello")
@@ -83,7 +83,7 @@ class TestTurnScheduling(ServiceTestCase):
         await roomService.create_room(TEAM, "r", ["a"], max_turns=1)
         room = roomService.get_room_by_key(f"r@{TEAM}")
         assert room.state == RoomState.INIT
-        room.activate_scheduling()
+        await room.activate_scheduling()
         await room.add_message("a", "msg")
         # 消息不会自动推进轮次，需要显式调用 finish_turn
         room.finish_turn("a")
@@ -93,7 +93,7 @@ class TestTurnScheduling(ServiceTestCase):
         """超过最大轮次后继续发消息，不应再发布 TURN 事件。"""
         await roomService.create_room(TEAM, "r", ["a"], max_turns=1)
         room = roomService.get_room_by_key(f"r@{TEAM}")
-        room.activate_scheduling()
+        await room.activate_scheduling()
         await room.add_message("a", "msg1")
 
         with patch("service.messageBus.publish") as mock_publish:

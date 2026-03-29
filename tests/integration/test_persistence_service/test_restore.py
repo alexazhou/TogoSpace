@@ -71,7 +71,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await self._bootstrap()
 
         room = roomService.get_room_by_key(f"general@{TEAM}")
-        assert len(room.messages) == 1
+        assert len(room.messages) == 0
 
         async def fake_infer(model, ctx):
             return self.normalize_to_mock({"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "hello"}}]})
@@ -82,7 +82,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
             agent_messages = [m for m in room.messages if SpecialAgent.value_of(m.sender_name) != SpecialAgent.SYSTEM]
             assert len(agent_messages) == 0
 
-            room.activate_scheduling()
+            await room.activate_scheduling()
             await self.wait_until(
                 lambda: len([m for m in room.messages if SpecialAgent.value_of(m.sender_name) != SpecialAgent.SYSTEM]) >= 1,
                 timeout=2.0,
@@ -111,7 +111,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
         with self.patch_infer(handler=fake_infer):
             run_task = asyncio.create_task(scheduler.run())
-            room.activate_scheduling()
+            await room.activate_scheduling()
             await self.wait_until(
                 lambda: any(m.content == "from alice" for m in room.messages)
                 and any(m.content == "from bob" for m in room.messages),

@@ -38,10 +38,10 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+        await roleTemplateService.startup()
         await gtTeamManager.import_team_from_config(team_config)
         await roomService.create_room(TEAM, "general", ["alice", "bob"])
         await funcToolService.startup()
-        await roleTemplateService.startup()
         await agentService.startup()
         await agentService.load_team_ids([team_config])
         await agentService.create_team_agents([team_config])
@@ -75,7 +75,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             await roomService.create_room(TEAM, "general", ["alice", "bob"], max_turns=1)
             room = roomService.get_room_by_key(room_key)
             run_task = asyncio.create_task(scheduler.run())
-            room.activate_scheduling()
+            await room.activate_scheduling()
             await self.wait_until(
                 lambda: len([m for m in room.messages if m.sender_name != "system"]) >= 2,
                 timeout=2.0,
@@ -171,7 +171,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             run_task = asyncio.create_task(scheduler.run())
             await roomService.create_room(TEAM, "general", ["alice", "bob"], max_turns=2)
             room = roomService.get_room_by_key(room_key)
-            room.activate_scheduling()
+            await room.activate_scheduling()
             await self.wait_until(
                 lambda: room.state == RoomState.IDLE,
                 timeout=3.0,

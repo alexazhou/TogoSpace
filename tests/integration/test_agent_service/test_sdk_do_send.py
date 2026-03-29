@@ -40,7 +40,7 @@ class TestSdkDoSend(ServiceTestCase):
         """创建房间、agent 和 SDK driver，注入当前房间上下文。"""
         await roomService.create_room(TEAM, current_room_name, [agent_name])
         room = roomService.get_room_by_key(f"{current_room_name}@{TEAM}")
-        room.activate_scheduling()
+        await room.activate_scheduling()
         agent = Agent(name=agent_name, team_name=TEAM, system_prompt="test", model="test-model",
                       driver_config=AgentDriverConfig(driver_type="native"))
         agent.current_room = room

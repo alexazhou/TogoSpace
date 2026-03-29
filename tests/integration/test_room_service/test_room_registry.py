@@ -67,8 +67,8 @@ class TestRoomRegistry(ServiceTestCase):
         assert roomService.get_rooms_for_agent(r1.team_id, "alice") == [r1.room_id, r3.room_id]
         assert roomService.get_rooms_for_agent(r1.team_id, "bob") == [r2.room_id, r3.room_id]
 
-    async def test_create_rooms_always_emits_initial_message(self):
-        """批量建房路径应始终生成初始化消息，供后续恢复逻辑覆盖。"""
+    async def test_create_rooms_keeps_empty_history_before_activation(self):
+        """批量建房路径在激活前不应预先塞入初始化消息。"""
         teams_config = [TeamConfig.model_validate({
             "name": TEAM,
             "members": [
@@ -85,6 +85,10 @@ class TestRoomRegistry(ServiceTestCase):
         await roomService.create_rooms(teams_config)
 
         room = roomService.get_room_by_key(f"boot_room@{TEAM}")
+        assert room.messages == []
+
+        await room.activate_scheduling()
+
         assert len(room.messages) == 1
         assert room.messages[0].sender_name == SpecialAgent.SYSTEM.name
         assert "boot topic" in room.messages[0].content

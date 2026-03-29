@@ -100,14 +100,14 @@ async def main(config_dir: str = None, port: int = 8080):
     logger.info("[启动] 阶段 4/4：恢复持久化状态")
     await agentService.restore_state()
     await roomService.restore_state()
-    activated = roomService.exit_init_rooms()
+    activated = await roomService.exit_init_rooms()
     logger.info("[启动] 阶段 4/4 完成：激活房间数=%s", activated)
 
     web_server = tornado.httpserver.HTTPServer(route.application)
     web_server.listen(port, "0.0.0.0")
 
     try:
-        schedulerService.replay_scheduling_rooms()
+        await schedulerService.replay_scheduling_rooms()
         await schedulerService.run()
     finally:
         web_server.stop()

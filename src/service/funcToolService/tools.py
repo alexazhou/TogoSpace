@@ -134,6 +134,17 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
             logger.warning(f"send_chat_msg: 目标房间不存在 {room_name}@{_context.team_name}")
             return {"success": False, "message": f"目标房间不存在: {room_name}@{_context.team_name}"}
 
+    if _context.chat_room is not None and target_room.room_id != _context.chat_room.room_id:
+        if not target_room.can_post_message(_context.agent_name):
+            logger.warning(
+                "send_chat_msg: 发言者不在目标房间成员中 sender=%s room=%s@%s members=%s",
+                _context.agent_name,
+                room_name,
+                _context.team_name,
+                target_room.members,
+            )
+            return {"success": False, "message": f"你不在目标房间 {target_room.name} 中，发送失败。"}
+
     await target_room.add_message(_context.agent_name, msg)
 
     if target_room is _context.chat_room:

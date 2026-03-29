@@ -114,7 +114,7 @@ class TestRealSimpleChat(ServiceTestCase):
         # 启动调度器
         run_task = asyncio.create_task(scheduler.run())
         room = roomService.get_room_by_key(room_key)
-        room.activate_scheduling()
+        await room.activate_scheduling()
 
         await self.wait_until(
             lambda: room.state == RoomState.IDLE,

@@ -30,7 +30,7 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
     async def _refresh_rooms(_team_id: int, _cfgs):
         call_order.append("refresh_rooms")
 
-    def _exit_init_rooms(_team_name: str):
+    async def _exit_init_rooms(_team_name: str):
         call_order.append("exit_init_rooms")
         return 0
 
