@@ -26,6 +26,14 @@ class TestAgentController(_ApiServiceCase):
         team = next(team for team in data["teams"] if team["name"] == team_name)
         return team["id"]
 
+    async def _get_role_template_id(self, template_name: str) -> int:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/role_templates/list.json") as resp:
+                assert resp.status == 200
+                data = await resp.json()
+        template = next(item for item in data["role_templates"] if item["name"] == template_name)
+        return template["id"]
+
     async def test_get_agents_by_team(self):
         """验证 GET /agents/list.json?team_id=<id> 返回团队成员列表。"""
         team_id = await self._get_team_id("e2e")
@@ -41,7 +49,7 @@ class TestAgentController(_ApiServiceCase):
         assert "id" in agent
         assert agent["name"] == "alice"
         assert "employee_number" in agent
-        assert agent["role_template_name"] == "alice"
+        assert isinstance(agent["role_template_id"], int)
         assert "employ_status" in agent
         assert "model" in agent
         assert "driver" in agent
@@ -65,7 +73,7 @@ class TestAgentController(_ApiServiceCase):
                 data = await resp.json()
 
         assert data["name"] == "alice"
-        assert data["role_template_name"] == "alice"
+        assert isinstance(data["role_template_id"], int)
         assert "employ_status" in data
         assert "model" in data
         assert "driver" in data
@@ -89,10 +97,18 @@ class TestAgentBatchUpdate(_ApiServiceCase):
         agent = next(a for a in data["agents"] if a["name"] == agent_name)
         return agent["id"]
 
+    async def _get_role_template_id(self, template_name: str) -> int:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/role_templates/list.json") as resp:
+                data = await resp.json()
+        template = next(item for item in data["role_templates"] if item["name"] == template_name)
+        return template["id"]
+
     async def test_batch_update_agents(self):
         """验证 PUT /teams/<id>/agents/batch_update.json 批量更新成员。"""
         team_id = await self._get_team_id("e2e")
         agent_id = await self._get_agent_id(team_id, "alice")
+        template_id = await self._get_role_template_id("alice")
 
         # 更新成员
         payload = {
@@ -100,7 +116,7 @@ class TestAgentBatchUpdate(_ApiServiceCase):
                 {
                     "id": agent_id,
                     "name": "alice",
-                    "role_template_name": "alice",
+                    "role_template_id": template_id,
                     "model": "gpt-4",
                     "driver": "NATIVE",
                 }
@@ -127,13 +143,14 @@ class TestAgentBatchUpdate(_ApiServiceCase):
     async def test_batch_update_with_invalid_id(self):
         """验证批量更新时使用不存在的 id 返回错误。"""
         team_id = await self._get_team_id("e2e")
+        template_id = await self._get_role_template_id("alice")
 
         payload = {
             "agents": [
                 {
                     "id": 99999,
                     "name": "not_exist",
-                    "role_template_name": "alice",
+                    "role_template_id": template_id,
                     "model": "",
                     "driver": "NATIVE",
                 }
@@ -167,17 +184,25 @@ class TestMembersSave(_ApiServiceCase):
                 data = await resp.json()
         return data["agents"]
 
+    async def _get_role_template_id(self, template_name: str) -> int:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/role_templates/list.json") as resp:
+                data = await resp.json()
+        template = next(item for item in data["role_templates"] if item["name"] == template_name)
+        return template["id"]
+
     async def test_save_members_create_new(self):
         """验证可以创建新成员。"""
         team_id = await self._get_team_id("e2e")
         agents = await self._get_agents(team_id)
         alice_id = next(a["id"] for a in agents if a["name"] == "alice")
+        template_id = await self._get_role_template_id("alice")
 
         # 保留 alice，新增 bob
         payload = {
             "members": [
-                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
-                {"id": None, "name": "bob", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": alice_id, "name": "alice", "role_template_id": template_id, "model": "", "driver": "native"},
+                {"id": None, "name": "bob", "role_template_id": template_id, "model": "", "driver": "native"},
             ]
         }
 
@@ -204,11 +229,12 @@ class TestMembersSave(_ApiServiceCase):
         team_id = await self._get_team_id("e2e")
         agents = await self._get_agents(team_id)
         alice_id = next(a["id"] for a in agents if a["name"] == "alice")
+        template_id = await self._get_role_template_id("alice")
 
         # 更新 alice 的 model
         payload = {
             "members": [
-                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "gpt-4o", "driver": "native"},
+                {"id": alice_id, "name": "alice", "role_template_id": template_id, "model": "gpt-4o", "driver": "native"},
             ]
         }
 
@@ -228,12 +254,13 @@ class TestMembersSave(_ApiServiceCase):
         team_id = await self._get_team_id("e2e")
         agents = await self._get_agents(team_id)
         alice_id = next(a["id"] for a in agents if a["name"] == "alice")
+        template_id = await self._get_role_template_id("alice")
 
         # 先创建 bob
         payload = {
             "members": [
-                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
-                {"id": None, "name": "bob", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": alice_id, "name": "alice", "role_template_id": template_id, "model": "", "driver": "native"},
+                {"id": None, "name": "bob", "role_template_id": template_id, "model": "", "driver": "native"},
             ]
         }
         async with aiohttp.ClientSession() as client:
@@ -246,7 +273,7 @@ class TestMembersSave(_ApiServiceCase):
         # 只保留 alice，bob 会被设为离职
         payload = {
             "members": [
-                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": alice_id, "name": "alice", "role_template_id": template_id, "model": "", "driver": "native"},
             ]
         }
         async with aiohttp.ClientSession() as client:
@@ -272,12 +299,13 @@ class TestMembersSave(_ApiServiceCase):
         team_id = await self._get_team_id("e2e")
         agents = await self._get_agents(team_id)
         alice_id = next(a["id"] for a in agents if a["name"] == "alice")
+        template_id = await self._get_role_template_id("alice")
 
         # 创建 bob
         payload = {
             "members": [
-                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
-                {"id": None, "name": "bob", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": alice_id, "name": "alice", "role_template_id": template_id, "model": "", "driver": "native"},
+                {"id": None, "name": "bob", "role_template_id": template_id, "model": "", "driver": "native"},
             ]
         }
         async with aiohttp.ClientSession() as client:
@@ -290,7 +318,7 @@ class TestMembersSave(_ApiServiceCase):
         # 让 bob 离职
         payload = {
             "members": [
-                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": alice_id, "name": "alice", "role_template_id": template_id, "model": "", "driver": "native"},
             ]
         }
         async with aiohttp.ClientSession() as client:
@@ -303,8 +331,8 @@ class TestMembersSave(_ApiServiceCase):
         # 创建新的 bob（复用名字）
         payload = {
             "members": [
-                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
-                {"id": None, "name": "bob", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": alice_id, "name": "alice", "role_template_id": template_id, "model": "", "driver": "native"},
+                {"id": None, "name": "bob", "role_template_id": template_id, "model": "", "driver": "native"},
             ]
         }
         async with aiohttp.ClientSession() as client:
@@ -325,12 +353,13 @@ class TestMembersSave(_ApiServiceCase):
         team_id = await self._get_team_id("e2e")
         agents = await self._get_agents(team_id)
         alice_id = next(a["id"] for a in agents if a["name"] == "alice")
+        template_id = await self._get_role_template_id("alice")
 
         # 两个同名成员
         payload = {
             "members": [
-                {"id": alice_id, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
-                {"id": None, "name": "alice", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": alice_id, "name": "alice", "role_template_id": template_id, "model": "", "driver": "native"},
+                {"id": None, "name": "alice", "role_template_id": template_id, "model": "", "driver": "native"},
             ]
         }
 
@@ -349,7 +378,7 @@ class TestMembersSave(_ApiServiceCase):
 
         payload = {
             "members": [
-                {"id": 99999, "name": "not_exist", "role_template_name": "alice", "model": "", "driver": "native"},
+                {"id": 99999, "name": "not_exist", "role_template_id": 1, "model": "", "driver": "native"},
             ]
         }
 

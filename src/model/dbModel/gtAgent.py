@@ -9,7 +9,7 @@ from .base import DbModelBase, EnumField
 class GtAgent(DbModelBase):
     team_id: int = peewee.IntegerField()
     name: str = peewee.CharField(null=False)
-    role_template_name: str = peewee.CharField(null=False)
+    role_template_id: int = peewee.IntegerField(null=False)
     employ_status: EmployStatus = EnumField(EmployStatus, default=EmployStatus.ON_BOARD)
     model: str = peewee.CharField(default="")
     driver: DriverType = EnumField(DriverType, default=DriverType.NATIVE)

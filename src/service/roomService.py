@@ -451,7 +451,7 @@ async def _create_room(
             # 为不在数据库中的成员创建临时对象
             # OPERATOR 使用特殊 id=-1
             member_id = ChatRoom.OPERATOR_MEMBER_ID if SpecialAgent.value_of(name) == SpecialAgent.OPERATOR else 0
-            room_members.append(GtAgent(id=member_id, team_id=team_row.id, name=name, role_template_name=name))
+            room_members.append(GtAgent(id=member_id, team_id=team_row.id, name=name, role_template_id=0))
 
     room = ChatRoom(team=team_row, room=room_row, members=room_members)
     room_key = room.key

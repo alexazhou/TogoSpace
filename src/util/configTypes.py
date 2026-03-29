@@ -36,7 +36,7 @@ def _default_persistence_db_path() -> str:
 class AgentConfig(BaseModel):
     """Configuration for an agent in a team, referencing a role template."""
     name: str  # Nickname of the agent in the team
-    role_template: str  # Name of the RoleTemplate to use
+    role_template: str  # Name of the RoleTemplate to use in config import/export
     model: Optional[str] = None  # 覆盖 RoleTemplate.model
     driver: DriverType = DriverType.NATIVE  # 覆盖 RoleTemplate.driver
 

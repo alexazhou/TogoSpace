@@ -81,9 +81,9 @@ async def main(config_dir: str = None, port: int = 8080):
 
     # ── 阶段 2：导入配置 ──────────────────────────────────────────────────────
     logger.info("[启动] 阶段 2/4：导入 Team / Agent 配置")
+    await roleTemplateService.startup()
     await teamService.startup()
     teams_config = teamService.get_teams()
-    await roleTemplateService.startup()
     logger.info("[启动] 阶段 2/4 完成：teams=%s", [t.name for t in teams_config])
 
     # ── 阶段 3：运行时构建 ────────────────────────────────────────────────────
