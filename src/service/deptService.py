@@ -10,6 +10,7 @@ from dal.db import gtDeptManager, gtAgentManager, gtRoomManager
 from exception import TeamAgentException
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtRoom import GtRoom
 from util.configTypes import DeptNodeConfig
 
 logger = logging.getLogger(__name__)
@@ -244,19 +245,27 @@ async def _save_dept_update_room(team_id: int, node: DeptTreeNode, dept_ids_map:
     existing = await gtRoomManager.get_room_by_biz_id(team_id, biz_id)
 
     if existing:
-        # 更新房间成员
+        # 更新已有部门房间的名称/话题/标签，并同步成员
+        existing.name = node.dept_name
+        existing.type = RoomType.GROUP
+        existing.initial_topic = node.dept_responsibility or f"{node.dept_name} 部门群聊"
+        existing.max_turns = 10
+        existing.biz_id = biz_id
+        existing.tags = ["DEPT"]
+        await gtRoomManager.save_room(existing)
         await gtRoomManager.upsert_room_members(existing.id, node.members)
     else:
         # 创建新房间，并添加部门成员
-        room = await gtRoomManager.ensure_room_by_key(
+        room = await gtRoomManager.save_room(GtRoom(
             team_id=team_id,
-            room_name=node.dept_name,
-            room_type=RoomType.GROUP,
+            name=node.dept_name,
+            type=RoomType.GROUP,
             initial_topic=node.dept_responsibility or f"{node.dept_name} 部门群聊",
             max_turns=10,
+            agent_ids=[],
             biz_id=biz_id,
             tags=["DEPT"],
-        )
+        ))
         await gtRoomManager.upsert_room_members(room.id, node.members)
 
     # 递归处理子部门

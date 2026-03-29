@@ -41,6 +41,65 @@ async def get_room_by_biz_id(team_id: int, biz_id: str) -> GtRoom | None:
     )
 
 
+async def get_room_by_id(room_id: int) -> GtRoom | None:
+    """通过主键 ID 获取房间。"""
+    return await GtRoom.aio_get_or_none(GtRoom.id == room_id)
+
+
+async def save_room(room: GtRoom) -> GtRoom:
+    """保存房间对象：无 id 时插入，有 id 时更新。"""
+    if room.id is None:
+        room_id = await GtRoom.insert(
+            team_id=room.team_id,
+            name=room.name,
+            type=room.type,
+            initial_topic=room.initial_topic,
+            max_turns=room.max_turns,
+            agent_ids=room.agent_ids or [],
+            agent_read_index=room.agent_read_index,
+            biz_id=room.biz_id,
+            tags=room.tags or [],
+        ).aio_execute()
+        saved = await get_room_by_id(room_id)
+        assert saved is not None, f"room insert failed: team_id={room.team_id}, name={room.name}"
+        return saved
+
+    await (
+        GtRoom.update(
+            team_id=room.team_id,
+            name=room.name,
+            type=room.type,
+            initial_topic=room.initial_topic,
+            max_turns=room.max_turns,
+            agent_ids=room.agent_ids or [],
+            agent_read_index=room.agent_read_index,
+            biz_id=room.biz_id,
+            tags=room.tags or [],
+            updated_at=GtRoom._now(),
+        )
+        .where(GtRoom.id == room.id)
+        .aio_execute()
+    )
+    saved = await get_room_by_id(room.id)
+    assert saved is not None, f"room update failed: room_id={room.id}"
+    return saved
+
+
+async def _resolve_agent_ids(team_id: int, members: list[str]) -> list[int]:
+    """将成员名称转换为 room.agent_ids。"""
+    agent_rows = await GtAgent.select().where(GtAgent.team_id == team_id).aio_execute()
+    name_to_id = {m.name: m.id for m in agent_rows}
+
+    agent_ids: list[int] = []
+    for name in members:
+        if SpecialAgent.value_of(name) == SpecialAgent.OPERATOR:
+            agent_ids.append(0)  # Operator 使用 0
+        elif name in name_to_id:
+            agent_ids.append(name_to_id[name])
+
+    return agent_ids
+
+
 async def ensure_room_by_key(
     team_id: int,
     room_name: str,
@@ -51,34 +110,25 @@ async def ensure_room_by_key(
     tags: list[str] | None = None,
 ) -> GtRoom:
     """确保 (team_id, name) 对应的 Room 存在，由 DB 自增分配 id；返回 GtRoom 行。"""
-    tags = tags or []
-    await (
-        GtRoom.insert(
-            team_id=team_id,
-            name=room_name,
-            type=room_type,
-            initial_topic=initial_topic,
-            max_turns=max_turns,
-            agent_ids=[],
-            biz_id=biz_id,
-            tags=tags,
-        )
-        .on_conflict(
-            conflict_target=[GtRoom.team_id, GtRoom.name],
-            update={
-                GtRoom.type: room_type,
-                GtRoom.initial_topic: initial_topic,
-                GtRoom.max_turns: max_turns,
-                GtRoom.biz_id: biz_id,
-                GtRoom.tags: tags,
-                GtRoom.updated_at: GtRoom._now(),
-            },
-        )
-        .aio_execute()
-    )
-    return await GtRoom.aio_get(
-        (GtRoom.team_id == team_id) & (GtRoom.name == room_name)
-    )
+    existing = await get_room_config(team_id, room_name)
+    if existing is not None:
+        existing.type = room_type
+        existing.initial_topic = initial_topic
+        existing.max_turns = max_turns
+        existing.biz_id = biz_id
+        existing.tags = tags or []
+        return await save_room(existing)
+
+    return await save_room(GtRoom(
+        team_id=team_id,
+        name=room_name,
+        type=room_type,
+        initial_topic=initial_topic,
+        max_turns=max_turns,
+        agent_ids=[],
+        biz_id=biz_id,
+        tags=tags or [],
+    ))
 
 
 async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
@@ -96,24 +146,14 @@ async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
     if to_delete:
         await GtRoom.delete().where(GtRoom.id.in_(to_delete)).aio_execute()  # type: ignore
 
-    # 3. 获取 team 的所有成员用于 name -> id 映射
-    agent_rows = await GtAgent.select().where(GtAgent.team_id == team_id).aio_execute()
-    name_to_id = {m.name: m.id for m in agent_rows}
-
-    # 4. 逐个更新或插入
+    # 3. 逐个更新或插入
+    existing_by_name = {room.name: room for room in current_rooms}
     for room_cfg in rooms:
         room_type = _infer_room_type_from_members(room_cfg.members)
-
-        # 将成员名称转换为 agent_ids
-        agent_ids: list[int] = []
-        for name in room_cfg.members:
-            if SpecialAgent.value_of(name) == SpecialAgent.OPERATOR:
-                agent_ids.append(0)  # Operator 使用 0
-            elif name in name_to_id:
-                agent_ids.append(name_to_id[name])
-
-        await (
-            GtRoom.insert(
+        agent_ids = await _resolve_agent_ids(team_id, room_cfg.members)
+        room = existing_by_name.get(room_cfg.name)
+        if room is None:
+            room = GtRoom(
                 team_id=team_id,
                 name=room_cfg.name,
                 type=room_type,
@@ -122,22 +162,16 @@ async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
                 agent_ids=agent_ids,
                 biz_id=room_cfg.biz_id,
                 tags=room_cfg.tags,
-                updated_at=GtRoom._now(),
             )
-            .on_conflict(
-                conflict_target=[GtRoom.team_id, GtRoom.name],
-                update={
-                    GtRoom.type: room_type,
-                    GtRoom.initial_topic: room_cfg.initial_topic,
-                    GtRoom.max_turns: room_cfg.max_turns,
-                    GtRoom.agent_ids: agent_ids,
-                    GtRoom.biz_id: room_cfg.biz_id,
-                    GtRoom.tags: room_cfg.tags,
-                    GtRoom.updated_at: GtRoom._now(),
-                },
-            )
-            .aio_execute()
-        )
+        else:
+            room.type = room_type
+            room.initial_topic = room_cfg.initial_topic
+            room.max_turns = room_cfg.max_turns
+            room.agent_ids = agent_ids
+            room.biz_id = room_cfg.biz_id
+            room.tags = room_cfg.tags
+
+        await save_room(room)
 
 
 async def delete_rooms_by_team(team_id: int) -> None:
@@ -198,22 +232,12 @@ async def get_members_by_room(room_id: int) -> list[str]:
 
 async def upsert_room_members(room_id: int, members: list[str]) -> None:
     """更新 Room 的成员列表（通过成员名称）。"""
-    room = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
+    room = await get_room_by_id(room_id)
     if room is None:
         return
 
-    team_id = room.team_id
-    agent_rows = await GtAgent.select().where(GtAgent.team_id == team_id).aio_execute()
-    name_to_id = {m.name: m.id for m in agent_rows}
-
-    agent_ids: list[int] = []
-    for name in members:
-        if SpecialAgent.value_of(name) == SpecialAgent.OPERATOR:
-            agent_ids.append(0)  # Operator 使用 0
-        elif name in name_to_id:
-            agent_ids.append(name_to_id[name])
-
-    await GtRoom.update(agent_ids=agent_ids).where(GtRoom.id == room_id).aio_execute()
+    room.agent_ids = await _resolve_agent_ids(room.team_id, members)
+    await save_room(room)
 
 
 async def delete_rooms_by_biz_ids_not_in(team_id: int, biz_ids: list[str]) -> None:
