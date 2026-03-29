@@ -30,6 +30,8 @@ from constants import OpenaiLLMApiRole
 
 _SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 _BACKEND_READY_TIMEOUT = 20
+_TEST_BACKEND_PORT = 18080
+_TEST_MOCK_LLM_PORT = 19876
 
 
 def _find_free_port() -> int:
@@ -76,6 +78,21 @@ def _assert_tcp_ready(host: str, port: int, service_name: str, timeout: float = 
             last_exc = exc
             time.sleep(0.05)
     raise RuntimeError(f"{service_name} TCP 健康检查失败：{host}:{port} => {last_exc or 'timeout'}")
+
+
+def _wait_port_released(host: str, port: int, timeout: float = 3.0) -> None:
+    """等待端口释放（用于 teardown 后确保端口可用）。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind((host, port))
+                # 绑定成功说明端口已释放
+                return
+        except OSError:
+            time.sleep(0.1)
+    # 超时不报错，让下一个测试自己处理
 
 
 class ServiceTestCase:
@@ -216,6 +233,7 @@ class ServiceTestCase:
 
     @classmethod
     def _start_mock_llm(cls):
+        _wait_port_released(MOCK_LLM_HOST, _TEST_MOCK_LLM_PORT)
         cls.mock_llm_server = MockLLMServer()
         cls.mock_llm_server.start()
         _assert_port_ready(
@@ -313,7 +331,9 @@ class ServiceTestCase:
     @classmethod
     def _start_backend(cls):
         """启动后端子进程，等待 HTTP 服务就绪。"""
-        port = _find_free_port()
+        port = _TEST_BACKEND_PORT
+        _wait_port_released("127.0.0.1", port)
+
         env = os.environ.copy()
         env["PYTHONPATH"] = _SRC_DIR
         env["TEAMAGENT_ENV"] = "test"
