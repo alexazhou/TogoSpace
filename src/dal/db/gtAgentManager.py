@@ -67,9 +67,9 @@ async def get_off_board_agents(team_id: int) -> list[GtAgent]:
     )
 
 
-async def _resolve_role_template_id(member: Any) -> int:
-    raw_id = getattr(member, "role_template_id", None)
-    template_name = getattr(member, "role_template", None)
+async def _resolve_role_template_id(agent: Any) -> int:
+    raw_id = getattr(agent, "role_template_id", None)
+    template_name = getattr(agent, "role_template", None)
 
     if isinstance(raw_id, int):
         return raw_id
@@ -89,9 +89,9 @@ async def _resolve_role_template_id(member: Any) -> int:
     return template.id
 
 
-async def batch_save_agents(team_id: int, members: list[Any]) -> None:
+async def batch_save_agents(team_id: int, agents: list[Any]) -> None:
     """批量保存成员：有 id 则更新，无 id 则插入。"""
-    if len(members) == 0:
+    if len(agents) == 0:
         return
 
     max_num = await get_max_employee_number(team_id)
@@ -100,14 +100,14 @@ async def batch_save_agents(team_id: int, members: list[Any]) -> None:
     to_create = []
     to_update = []
 
-    for member in members:
-        member_id = getattr(member, "id", None)
-        name = getattr(member, "name", "")
-        model = getattr(member, "model", "") or ""
-        driver = getattr(member, "driver", DriverType.NATIVE)
-        employ_status = getattr(member, "employ_status", EmployStatus.ON_BOARD)
+    for agent in agents:
+        agent_id = getattr(agent, "id", None)
+        name = getattr(agent, "name", "")
+        model = getattr(agent, "model", "") or ""
+        driver = getattr(agent, "driver", DriverType.NATIVE)
+        employ_status = getattr(agent, "employ_status", EmployStatus.ON_BOARD)
 
-        role_template_id = await _resolve_role_template_id(member)
+        role_template_id = await _resolve_role_template_id(agent)
 
         data = {
             "name": name,
@@ -117,8 +117,8 @@ async def batch_save_agents(team_id: int, members: list[Any]) -> None:
             "employ_status": employ_status,
         }
 
-        if member_id is not None:
-            data["id"] = member_id
+        if agent_id is not None:
+            data["id"] = agent_id
             to_update.append(data)
         else:
             data["team_id"] = team_id

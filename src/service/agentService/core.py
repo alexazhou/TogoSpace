@@ -457,11 +457,11 @@ def get_all_rooms(team_name: str, agent_name: str) -> List[int]:
     return roomService.get_rooms_for_agent(_team_ids.get(team_name), agent_name)
 
 
-async def save_team_agents_full_replace(team_id: int, members: list[Any]) -> list[Any]:
+async def save_team_agents_full_replace(team_id: int, agents: list[Any]) -> list[Any]:
     """全量覆盖成员列表：有 id 更新，无 id 创建，不在列表的设为离职状态。返回在职成员列表。"""
     existing_agents = await gtAgentManager.get_agents_by_team(team_id)
     existing_ids = {a.id for a in existing_agents}
-    request_ids = {m.id for m in members if m.id is not None}
+    request_ids = {a.id for a in agents if a.id is not None}
 
     # 1. 离职处理
     ids_to_offboard = existing_ids - request_ids
@@ -470,7 +470,7 @@ async def save_team_agents_full_replace(team_id: int, members: list[Any]) -> lis
 
     # 2. 批量保存 (内部处理更新和创建)
     try:
-        await gtAgentManager.batch_save_agents(team_id, members)
+        await gtAgentManager.batch_save_agents(team_id, agents)
     except IntegrityError as e:
         raise TeamAgentException(
             error_message="成员保存失败，名称可能已存在或工号重复",

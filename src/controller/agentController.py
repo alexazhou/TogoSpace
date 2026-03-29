@@ -70,7 +70,7 @@ class TeamMembersSaveHandler(BaseHandler):
 
         request = self.parse_request(MembersSaveRequest)
 
-        request_ids = [m.id for m in request.members if m.id is not None]
+        request_ids = [a.id for a in request.members if a.id is not None]
         existing_agents = await gtAgentManager.get_agents_by_team(team_id)
         existing_ids = {a.id for a in existing_agents}
 
@@ -89,8 +89,8 @@ class TeamMembersSaveHandler(BaseHandler):
             error_code="duplicate_member_name",
         )
 
-        await _assert_role_templates_exist([m.role_template_id for m in request.members])
-        updated_members = await agentService.save_team_agents_full_replace(team_id, request.members)
+        await _assert_role_templates_exist([a.role_template_id for a in request.members])
+        updated_agents = await agentService.save_team_agents_full_replace(team_id, request.members)
 
         await teamService.hot_reload_team(team.name)
 
@@ -98,14 +98,14 @@ class TeamMembersSaveHandler(BaseHandler):
             "status": "ok",
             "members": [
                 {
-                    "id": m.id,
-                    "name": m.name,
-                    "employee_number": m.employee_number,
-                    "role_template_id": m.role_template_id,
-                    "model": m.model,
-                    "driver": m.driver.value,
+                    "id": agent.id,
+                    "name": agent.name,
+                    "employee_number": agent.employee_number,
+                    "role_template_id": agent.role_template_id,
+                    "model": agent.model,
+                    "driver": agent.driver.value,
                 }
-                for m in updated_members
+                for agent in updated_agents
             ],
         })
 
