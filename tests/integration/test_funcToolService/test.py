@@ -90,3 +90,17 @@ class TestRunToolCall(ServiceTestCase):
         result = await self._run("send_chat_msg", '{"room_name": "missing_room", "msg": "test"}', context=ctx)
         assert not result["success"]
         assert not any(message.content == "test" for message in room.messages)
+
+    async def test_run_tool_call_returns_false_when_sender_not_in_target_room(self):
+        """tool 内部校验失败时，run_tool_call 应返回 success=false。"""
+        await roomService.create_room(TEAM, "ctx_src", ["alice"])
+        await roomService.create_room(TEAM, "ctx_dst", ["bob"])
+        room = roomService.get_room_by_key(f"ctx_src@{TEAM}")
+        target = roomService.get_room_by_key(f"ctx_dst@{TEAM}")
+        before_count = len(target.messages)
+        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
+
+        result = await self._run("send_chat_msg", '{"room_name": "ctx_dst", "msg": "test"}', context=ctx)
+
+        assert not result["success"]
+        assert len(target.messages) == before_count

@@ -26,10 +26,10 @@ class _agentServiceCase(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+        await roleTemplateService.startup()
         cfg = configUtil.load(_CONFIG_DIR, force_reload=True)
         team_cfg = cfg.teams[0]
         await gtTeamManager.import_team_from_config(team_cfg)
-        await roleTemplateService.startup()
         await agentService.startup()
         await agentService.load_team_ids([team_cfg])
         await agentService.create_team_agents([team_cfg])
@@ -81,8 +81,9 @@ class TestagentServiceGetAllRooms(_agentServiceCase):
 class TestagentServiceSyncRoomMessages(_agentServiceCase):
     async def test_sync_room_messages(self):
         """_sync_room_messages 会把房间中的新增消息同步进 agent 历史。"""
-        await roomService.create_room(TEAM, "general", ["alice"])
+        await roomService.create_room(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
+        await room.activate_scheduling()
         await room.add_message("bob", "hello alice")
 
         alice = agentService.get_team_agent(TEAM, "alice")
@@ -99,6 +100,7 @@ class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
         """同步时应过滤 agent 自己发过的消息，避免历史自回灌。"""
         await roomService.create_room(TEAM, "general", ["alice"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
+        await room.activate_scheduling()
 
         alice = agentService.get_team_agent(TEAM, "alice")
         await room.add_message("alice", "i am talking")

@@ -163,7 +163,7 @@ class TestToolFunctions(ServiceTestCase):
 
     async def test_get_agent_list_with_context(self):
         """有上下文时返回当前房间中可见的发言者列表。"""
-        await roomService.create_room(TEAM, "r", ["alice"])
+        await roomService.create_room(TEAM, "r", ["alice", "bob"])
         room = roomService.get_room_by_key(f"r@{TEAM}")
         await room.add_message("alice", "hi")
         await room.add_message("bob", "there")
@@ -179,6 +179,7 @@ class TestToolFunctions(ServiceTestCase):
         """同房间发送成功后，目标房间消息数应增加。"""
         await roomService.create_room(TEAM, "myroom", ["alice"])
         room = roomService.get_room_by_key(f"myroom@{TEAM}")
+        await room.activate_scheduling()
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
         assert (await send_chat_msg("myroom", "hello", _context=ctx))["success"]
         assert len(room.messages) == 2  # 1 (init公告) + 1 (new)
@@ -214,6 +215,21 @@ class TestToolFunctions(ServiceTestCase):
         ctx = ChatContext(agent_name="bob", team_name=TEAM, chat_room=src)
         await send_chat_msg("dst", "cross-room msg", _context=ctx)
         assert len(src.messages) == before_count
+
+    async def test_send_chat_msg_cross_room_rejects_non_member(self):
+        """跨房间目标存在但发言者不在成员中时，应返回失败且不插入消息。"""
+        await roomService.create_room(TEAM, "src_non_member", ["alice"])
+        await roomService.create_room(TEAM, "dst_non_member", ["bob"])
+        src = roomService.get_room_by_key(f"src_non_member@{TEAM}")
+        dst = roomService.get_room_by_key(f"dst_non_member@{TEAM}")
+        before_count = len(dst.messages)
+        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=src)
+
+        result = await send_chat_msg("dst_non_member", "should fail", _context=ctx)
+
+        assert not result["success"]
+        assert "发送失败" in result["message"]
+        assert len(dst.messages) == before_count
 
     async def test_finish_chat_turn_rejects_non_current_agent(self):
         """不是当前发言人时，finish_chat_turn 不应推进轮次。"""

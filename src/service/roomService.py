@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Sequence
 from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
 from service import messageBus, persistenceService
 from util.configTypes import TeamConfig, TeamRoomConfig
+from util import assertUtil
 from model.coreModel.gtCoreChatModel import GtCoreChatMessage
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
@@ -102,6 +103,17 @@ class ChatRoom:
                 return m.id
         return 0
 
+    def can_post_message(self, sender: str) -> bool:
+        """返回 sender 是否允许向当前房间写消息。"""
+        if SpecialAgent.value_of(sender) == SpecialAgent.SYSTEM:
+            return True
+
+        for member_name in self.members:
+            if _same_speaker(sender, member_name):
+                return True
+
+        return False
+
     @property
     def key(self) -> str:
         return f"{self.name}@{self.team_name}"
@@ -121,6 +133,21 @@ class ChatRoom:
         return new_msgs
 
     async def add_message(self, sender: str, content: str, send_time: datetime | None = None) -> None:
+        await self._append_message(sender, content, send_time=send_time)
+
+    async def _append_message(
+        self,
+        sender: str,
+        content: str,
+        send_time: datetime | None = None,
+        *,
+        update_turn_state: bool = True,
+    ) -> None:
+        assertUtil.assertTrue(
+            self.can_post_message(sender),
+            error_message=f"sender '{sender}' is not a member of room '{self.key}'",
+            error_code="sender_not_in_room",
+        )
         message = GtCoreChatMessage(
             sender_name=sender,
             content=content,
@@ -149,7 +176,7 @@ class ChatRoom:
             content=content,
             time=message.send_time.isoformat(),
         )
-        if self.members:
+        if update_turn_state and self.members:
             self._update_turn_state_on_message(sender)
 
     def _update_turn_state_on_message(self, sender: str) -> None:
@@ -249,7 +276,7 @@ class ChatRoom:
         # 3. 正常发布下一位成员的发言事件
         self._publish_current_turn()
 
-    def activate_scheduling(self) -> bool:
+    async def activate_scheduling(self) -> bool:
         """激活/重发调度。
 
         - INIT: 先切到恢复后的目标状态，再按需发布当前轮次
@@ -262,6 +289,12 @@ class ChatRoom:
         if self._state == RoomState.INIT:
             self._state = self._state_after_init
             changed = True
+            if not self.messages:
+                await self._append_message(
+                    SpecialAgent.SYSTEM.name,
+                    self.build_initial_system_message(),
+                    update_turn_state=False,
+                )
 
         if self._state == RoomState.SCHEDULING:
             self._publish_current_turn()
@@ -363,8 +396,6 @@ async def restore_state() -> None:
                 )
                 for row in room_msg_rows
             ]
-        elif not room.messages:
-            await room.add_message(SpecialAgent.SYSTEM.name, room.build_initial_system_message())
 
         if restored_messages is not None or member_read_index is not None:
             room.inject_runtime_state(
@@ -463,9 +494,6 @@ async def _create_room(
     if max_turns > 0:
         logger.info(f"初始化轮次配置: room_id={resolved_room_id}, max_turns={max_turns}")
 
-    await room.add_message(SpecialAgent.SYSTEM.name, room.build_initial_system_message())
-
-
 async def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0) -> None:
     """创建并初始化一个聊天室。创建后房间处于 INIT，需由 service 层显式退出 INIT。"""
     await _create_room(
@@ -549,13 +577,13 @@ async def refresh_rooms_for_team(team_id: int, teams_config: list[TeamConfig]) -
     logger.info(f"Team '{team_name}' 的聊天室已刷新，共 {len(_iter_team_rooms(target_config))} 个房间")
 
 
-def exit_init_rooms(team_name: str | None = None) -> int:
+async def exit_init_rooms(team_name: str | None = None) -> int:
     """内部 API：批量退出 INIT（可按 team 过滤）。"""
     changed = 0
     for room in _rooms.values():
         if team_name is not None and room.team_name != team_name:
             continue
-        if room.activate_scheduling():
+        if await room.activate_scheduling():
             changed += 1
     return changed
 
