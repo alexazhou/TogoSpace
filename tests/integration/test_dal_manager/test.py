@@ -153,10 +153,12 @@ class TestDalManagers(ServiceTestCase):
             config={"slogan": "ship fast"},
         ))
         team_b = await gtTeamManager.upsert_team(TeamConfig(name="team_b"))
-        await gtAgentManager.batch_save_agents(team_a.id, [
+        configs = [
             AgentConfig(name="alice_1", role_template="alice"),
             AgentConfig(name="bob_1", role_template="bob"),
-        ])
+        ]
+        agents = await ServiceTestCase.convert_to_gt_agents(team_a.id, configs)
+        await gtAgentManager.batch_save_agents(team_a.id, agents)
 
         await gtRoomManager.upsert_rooms(team_a.id, [TeamRoomConfig(
             name="general",
@@ -340,11 +342,13 @@ class TestDalManagers(ServiceTestCase):
         await gtRoleTemplateManager.upsert_role_template("charlie", "gpt-4o")
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="member_team"))
-        await gtAgentManager.batch_save_agents(team.id, [
+        configs = [
             AgentConfig(name="alice", role_template="alice"),
             AgentConfig(name="bob", role_template="bob"),
             AgentConfig(name="charlie", role_template="charlie"),
-        ])
+        ]
+        agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
         room = await gtRoomManager.ensure_room_by_key(
             team_id=team.id,
             room_name="member_room",
@@ -385,10 +389,12 @@ class TestDalManagers(ServiceTestCase):
             max_turns=5,
         )
 
-        await gtAgentManager.batch_save_agents(team.id, [
+        configs = [
             AgentConfig(name="alice", role_template="alice"),
             AgentConfig(name="bob", role_template="bob"),
-        ])
+        ]
+        agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
         alice = await gtAgentManager.get_agent(team.id, "alice")
         bob = await gtAgentManager.get_agent(team.id, "bob")
         assert alice is not None and bob is not None
@@ -414,7 +420,9 @@ class TestDalManagers(ServiceTestCase):
         await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="history_team"))
-        await gtAgentManager.batch_save_agents(team.id, [AgentConfig(name="alice", role_template="alice")])
+        configs = [AgentConfig(name="alice", role_template="alice")]
+        agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
         alice = await gtAgentManager.get_agent(team.id, "alice")
         assert alice is not None
 
@@ -445,10 +453,12 @@ class TestDalManagers(ServiceTestCase):
         await gtRoleTemplateManager.upsert_role_template("bob", "gpt-4o")
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="history_team_2"))
-        await gtAgentManager.batch_save_agents(team.id, [
+        configs = [
             AgentConfig(name="alice", role_template="alice"),
             AgentConfig(name="bob", role_template="bob"),
-        ])
+        ]
+        agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
         alice = await gtAgentManager.get_agent(team.id, "alice")
         bob = await gtAgentManager.get_agent(team.id, "bob")
         assert alice is not None and bob is not None

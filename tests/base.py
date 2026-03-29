@@ -19,6 +19,9 @@ import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.persistenceService as persistenceService
 import service.ormService as ormService
+from dal.db import gtAgentManager
+from model.dbModel.gtAgent import GtAgent
+from util.configTypes import AgentConfig
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
 from mock_llm_server import (
@@ -26,7 +29,7 @@ from mock_llm_server import (
     MOCK_LLM_HOST,
     get_mock_llm_api_url,
 )
-from constants import OpenaiLLMApiRole
+from constants import OpenaiLLMApiRole, EmployStatus
 
 _SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 _BACKEND_READY_TIMEOUT = 20
@@ -492,3 +495,19 @@ class ServiceTestCase:
             if remaining <= 0:
                 raise AssertionError(message)
             await asyncio.sleep(min(interval, remaining))
+
+    @staticmethod
+    async def convert_to_gt_agents(team_id: int, configs: list[AgentConfig]) -> list[GtAgent]:
+        """测试辅助：将 AgentConfig 列表转换为 GtAgent 列表（包含角色模板解析）。"""
+        agents = []
+        for cfg in configs:
+            rt_id = await gtAgentManager.resolve_role_template_id_by_name(cfg.role_template)
+            agents.append(GtAgent(
+                team_id=team_id,
+                name=cfg.name,
+                role_template_id=rt_id,
+                model=cfg.model or "",
+                driver=cfg.driver,
+                employ_status=EmployStatus.ON_BOARD,
+            ))
+        return agents
