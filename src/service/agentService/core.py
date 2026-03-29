@@ -481,6 +481,7 @@ async def save_team_agents_full_replace(team_id: int, agents_data: list[Any]) ->
     """全量覆盖成员列表：有 id 更新，无 id 创建，不在列表的设为离职状态。返回在职成员列表。"""
     existing_agents = await gtAgentManager.get_agents_by_team(team_id)
     existing_ids = {a.id for a in existing_agents}
+    existing_by_id = {a.id: a for a in existing_agents}
     request_ids = {getattr(a, "id", None) for a in agents_data if getattr(a, "id", None) is not None}
 
     # 1. 离职处理
@@ -492,17 +493,31 @@ async def save_team_agents_full_replace(team_id: int, agents_data: list[Any]) ->
     agents_to_save = []
     for data in agents_data:
         role_template_id = await _resolve_role_template_id(data)
-        agent = GtAgent(
-            team_id=team_id,
-            name=getattr(data, "name", ""),
-            role_template_id=role_template_id,
-            model=getattr(data, "model", "") or "",
-            driver=getattr(data, "driver", DriverType.NATIVE),
-            employ_status=EmployStatus.ON_BOARD,
-        )
         agent_id = getattr(data, "id", None)
+
         if agent_id is not None:
-            agent.id = agent_id
+            existing = existing_by_id.get(agent_id)
+            if existing is None:
+                raise TeamAgentException(
+                    error_message=f"成员 ID 不存在于当前 team: {agent_id}",
+                    error_code="member_not_found",
+                )
+            agent = existing
+            agent.name = getattr(data, "name", "")
+            agent.role_template_id = role_template_id
+            agent.model = getattr(data, "model", "") or ""
+            agent.driver = getattr(data, "driver", DriverType.NATIVE)
+            agent.employ_status = EmployStatus.ON_BOARD
+        else:
+            agent = GtAgent(
+                team_id=team_id,
+                name=getattr(data, "name", ""),
+                role_template_id=role_template_id,
+                model=getattr(data, "model", "") or "",
+                driver=getattr(data, "driver", DriverType.NATIVE),
+                employ_status=EmployStatus.ON_BOARD,
+            )
+
         agents_to_save.append(agent)
 
     # 3. 批量保存

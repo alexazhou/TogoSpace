@@ -1,10 +1,12 @@
 """integration tests for core behavior in service.agentService"""
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 
-from dal.db import gtTeamManager
+from constants import DriverType
+from dal.db import gtAgentManager, gtTeamManager
 from service import roleTemplateService, agentService, roomService, ormService, persistenceService
 from util import configUtil
 from ...base import ServiceTestCase
@@ -93,6 +95,42 @@ class TestagentServiceSyncRoomMessages(_agentServiceCase):
         assert synced_count == 2
         assert len(alice._history) == 2
         assert "hello alice" in alice._history[1].content
+
+
+class TestSaveTeamAgentsFullReplace(_agentServiceCase):
+    async def test_preserves_employee_numbers_when_updating_multiple_existing_agents(self):
+        """全量保存多个已有成员时，应保留原有工号，避免唯一约束冲突。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+
+        before_agents = await gtAgentManager.get_on_board_agents(team.id)
+        before_by_name = {agent.name: agent for agent in before_agents}
+        assert {"alice", "bob"}.issubset(before_by_name)
+
+        payload = [
+            SimpleNamespace(
+                id=before_by_name["alice"].id,
+                name="alice",
+                role_template_id=before_by_name["alice"].role_template_id,
+                model="gpt-4o",
+                driver=DriverType.NATIVE,
+            ),
+            SimpleNamespace(
+                id=before_by_name["bob"].id,
+                name="bob",
+                role_template_id=before_by_name["bob"].role_template_id,
+                model="gpt-4.1",
+                driver=DriverType.NATIVE,
+            ),
+        ]
+
+        saved_agents = await agentService.save_team_agents_full_replace(team.id, payload)
+        saved_by_name = {agent.name: agent for agent in saved_agents}
+
+        assert saved_by_name["alice"].employee_number == before_by_name["alice"].employee_number
+        assert saved_by_name["bob"].employee_number == before_by_name["bob"].employee_number
+        assert saved_by_name["alice"].model == "gpt-4o"
+        assert saved_by_name["bob"].model == "gpt-4.1"
 
 
 class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
