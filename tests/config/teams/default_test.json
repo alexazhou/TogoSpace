@@ -1,12 +1,13 @@
 {
   "name": "e2e",
   "members": [
-    { "name": "alice", "role_template": "alice" }
+    { "name": "alice", "role_template": "alice" },
+    { "name": "bob", "role_template": "bob" }
   ],
   "preset_rooms": [
     {
       "name": "general",
-      "members": ["Operator", "alice"],
+      "members": ["Operator", "alice", "bob"],
       "initial_topic": "e2e 测试话题",
       "max_turns": 50
     }

@@ -34,14 +34,24 @@ async def get_room_config(team_id: int, room_name: str) -> GtRoom | None:
     )
 
 
+async def get_room_by_biz_id(team_id: int, biz_id: str) -> GtRoom | None:
+    """通过 biz_id 获取房间。"""
+    return await GtRoom.aio_get_or_none(
+        (GtRoom.team_id == team_id) & (GtRoom.biz_id == biz_id)
+    )
+
+
 async def ensure_room_by_key(
     team_id: int,
     room_name: str,
     room_type: RoomType,
     initial_topic: str,
     max_turns: int,
+    biz_id: str | None = None,
+    tags: list[str] | None = None,
 ) -> GtRoom:
     """确保 (team_id, name) 对应的 Room 存在，由 DB 自增分配 id；返回 GtRoom 行。"""
+    tags = tags or []
     await (
         GtRoom.insert(
             team_id=team_id,
@@ -50,6 +60,8 @@ async def ensure_room_by_key(
             initial_topic=initial_topic,
             max_turns=max_turns,
             agent_ids=[],
+            biz_id=biz_id,
+            tags=tags,
         )
         .on_conflict(
             conflict_target=[GtRoom.team_id, GtRoom.name],
@@ -57,6 +69,8 @@ async def ensure_room_by_key(
                 GtRoom.type: room_type,
                 GtRoom.initial_topic: initial_topic,
                 GtRoom.max_turns: max_turns,
+                GtRoom.biz_id: biz_id,
+                GtRoom.tags: tags,
                 GtRoom.updated_at: GtRoom._now(),
             },
         )
@@ -74,8 +88,11 @@ async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
     current_names = {r.name: r.id for r in current_rooms}
     new_names = {r.name for r in rooms}
 
-    # 2. 删除不在新配置中的 Room
-    to_delete = [rid for name, rid in current_names.items() if name not in new_names]
+    # 2. 删除不在新配置中的 Room（保留有 biz_id 的 DEPT 房间）
+    to_delete = [
+        rid for name, rid in current_names.items()
+        if name not in new_names and not any(r.biz_id for r in current_rooms if r.id == rid)
+    ]
     if to_delete:
         await GtRoom.delete().where(GtRoom.id.in_(to_delete)).aio_execute()  # type: ignore
 
@@ -103,6 +120,8 @@ async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
                 initial_topic=room_cfg.initial_topic,
                 max_turns=room_cfg.max_turns,
                 agent_ids=agent_ids,
+                biz_id=room_cfg.biz_id,
+                tags=room_cfg.tags,
                 updated_at=GtRoom._now(),
             )
             .on_conflict(
@@ -112,6 +131,8 @@ async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
                     GtRoom.initial_topic: room_cfg.initial_topic,
                     GtRoom.max_turns: room_cfg.max_turns,
                     GtRoom.agent_ids: agent_ids,
+                    GtRoom.biz_id: room_cfg.biz_id,
+                    GtRoom.tags: room_cfg.tags,
                     GtRoom.updated_at: GtRoom._now(),
                 },
             )
@@ -193,3 +214,29 @@ async def upsert_room_members(room_id: int, members: list[str]) -> None:
             agent_ids.append(name_to_id[name])
 
     await GtRoom.update(agent_ids=agent_ids).where(GtRoom.id == room_id).aio_execute()
+
+
+async def delete_rooms_by_biz_ids_not_in(team_id: int, biz_ids: list[str]) -> None:
+    """删除 biz_id 不在指定列表中的部门房间（只删除 tags 包含 'DEPT' 的房间）。"""
+    if not biz_ids:
+        # 如果 biz_ids 为空，删除所有 DEPT 房间
+        await (
+            GtRoom.delete()
+            .where(
+                (GtRoom.team_id == team_id) &
+                (GtRoom.tags.contains("DEPT"))  # type: ignore[attr-defined]
+            )
+            .aio_execute()
+        )
+        return
+
+    # 查找所有 tags 包含 "DEPT" 的房间
+    dept_rooms = await GtRoom.select().where(
+        (GtRoom.team_id == team_id) &
+        (GtRoom.tags.contains("DEPT"))  # type: ignore[attr-defined]
+    ).aio_execute()
+
+    # 删除 biz_id 不在列表中的房间
+    to_delete = [r.id for r in dept_rooms if r.biz_id not in biz_ids]
+    if to_delete:
+        await GtRoom.delete().where(GtRoom.id.in_(to_delete)).aio_execute()  # type: ignore

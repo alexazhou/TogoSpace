@@ -33,7 +33,8 @@ class TestTeamController(_ApiServiceCase):
 
     async def test_team_detail_includes_members_and_rooms(self):
         team_id = await self._get_team_id("e2e")
-        template_id = await self._get_role_template_id("alice")
+        alice_template_id = await self._get_role_template_id("alice")
+        bob_template_id = await self._get_role_template_id("bob")
 
         async with aiohttp.ClientSession() as client:
             async with client.get(f"{self.backend_base_url}/teams/{team_id}.json") as resp:
@@ -42,11 +43,13 @@ class TestTeamController(_ApiServiceCase):
 
         assert data["name"] == "e2e"
         assert data["config"] == {}
-        assert data["members"] == [{"name": "alice", "role_template_id": template_id}]
+        assert len(data["members"]) == 2
+        member_names = {m["name"] for m in data["members"]}
+        assert member_names == {"alice", "bob"}
         assert len(data["rooms"]) == 1
         room = data["rooms"][0]
         assert room["name"] == "general"
-        assert room["members"] == ["Operator", "alice"]
+        assert set(room["members"]) == {"Operator", "alice", "bob"}
         assert room["max_turns"] == 50
 
     async def test_create_team_and_fetch_detail(self):
@@ -93,9 +96,10 @@ class TestTeamController(_ApiServiceCase):
                 assert resp.status == 200
                 agents_data = await resp.json()
 
-        assert len(agents_data["agents"]) == 1
+        assert len(agents_data["agents"]) == 2
+        names = {a["name"] for a in agents_data["agents"]}
+        assert names == {"alice", "bob"}
         agent = agents_data["agents"][0]
-        assert agent["name"] == "alice"
         assert isinstance(agent["role_template_id"], int)
 
     async def test_agent_detail(self):
