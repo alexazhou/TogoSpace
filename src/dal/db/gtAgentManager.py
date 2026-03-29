@@ -89,14 +89,6 @@ async def _resolve_role_template_id(member: Any) -> int:
     return template.id
 
 
-def _normalize_driver_value(driver_raw: Any) -> DriverType:
-    if isinstance(driver_raw, str):
-        return DriverType.value_of(driver_raw) or DriverType.NATIVE
-    if isinstance(driver_raw, DriverType):
-        return driver_raw
-    return DriverType.NATIVE
-
-
 async def batch_save_agents(team_id: int, members: list[Any]) -> None:
     """批量保存成员：有 id 则更新，无 id 则插入。"""
     if len(members) == 0:
@@ -112,7 +104,7 @@ async def batch_save_agents(team_id: int, members: list[Any]) -> None:
         member_id = getattr(member, "id", None)
         name = getattr(member, "name", "")
         model = getattr(member, "model", "") or ""
-        driver = _normalize_driver_value(getattr(member, "driver", DriverType.NATIVE))
+        driver = getattr(member, "driver", DriverType.NATIVE)
         employ_status = getattr(member, "employ_status", EmployStatus.ON_BOARD)
 
         role_template_id = await _resolve_role_template_id(member)
