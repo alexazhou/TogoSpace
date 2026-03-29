@@ -1,6 +1,7 @@
 import os
 import sys
 
+from constants import DriverType
 from service.agentService.driver import normalize_driver_config
 
 if os.name == "posix" and sys.platform == "darwin":
@@ -9,20 +10,20 @@ if os.name == "posix" and sys.platform == "darwin":
 
 def test_normalize_driver_config_defaults_to_native():
     cfg = normalize_driver_config({"name": "alice", "model": "test"})
-    assert cfg.driver_type == "native"
+    assert cfg.driver_type == DriverType.NATIVE
     assert cfg.options == {}
 
 
-def test_normalize_driver_config_supports_legacy_claude_sdk_fields():
+def test_normalize_driver_config_supports_claude_sdk_driver_with_allowed_tools():
     cfg = normalize_driver_config(
         {
             "name": "alice",
             "model": "test",
-            "use_agent_sdk": True,
+            "driver": "claude_sdk",
             "allowed_tools": ["Read", "Write"],
         }
     )
-    assert cfg.driver_type == "claude_sdk"
+    assert cfg.driver_type == DriverType.CLAUDE_SDK
     assert cfg.options["allowed_tools"] == ["Read", "Write"]
 
 
@@ -31,7 +32,6 @@ def test_normalize_driver_config_prefers_explicit_driver_block():
         {
             "name": "alice",
             "model": "test",
-            "use_agent_sdk": True,
             "allowed_tools": ["Old"],
             "driver": {
                 "type": "claude_sdk",
@@ -40,7 +40,7 @@ def test_normalize_driver_config_prefers_explicit_driver_block():
             },
         }
     )
-    assert cfg.driver_type == "claude_sdk"
+    assert cfg.driver_type == DriverType.CLAUDE_SDK
     assert cfg.options == {"allowed_tools": ["Read"], "max_turns": 50}
 
 
@@ -56,7 +56,7 @@ def test_normalize_driver_config_supports_legacy_runtime_block():
             },
         }
     )
-    assert cfg.driver_type == "claude_sdk"
+    assert cfg.driver_type == DriverType.CLAUDE_SDK
     assert cfg.options == {"allowed_tools": ["Read"], "max_turns": 80}
 
 
@@ -71,7 +71,7 @@ def test_normalize_driver_config_supports_tsp_driver_block():
             },
         }
     )
-    assert cfg.driver_type == "tsp"
+    assert cfg.driver_type == DriverType.TSP
     assert cfg.options == {
         "request_timeout_sec": 45,
         "tool_include": ["list_dir", "read_file"],

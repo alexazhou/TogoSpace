@@ -4,7 +4,7 @@ import os
 from typing import Any, List
 
 from util.configTypes import (
-    RoleTemplate,
+    RoleTemplateConfig,
     AppConfig,
     PersistenceConfig,
     SettingConfig,
@@ -24,10 +24,22 @@ def get_db_path() -> str:
     return PersistenceConfig().db_path
 
 
-def _load_role_templates(config_dir: str) -> List[RoleTemplate]:
+def _load_prompt(file_path: str) -> str:
+    full_path = os.path.join(os.path.dirname(__file__), "../../", file_path)
+    with open(full_path, "r", encoding="utf-8") as f:
+        return f.read().strip()
+
+
+def _load_role_templates(config_dir: str) -> List[RoleTemplateConfig]:
     role_templates_dir = os.path.join(config_dir, "role_templates")
     raw_templates = load_json_objects_from_dir(role_templates_dir)
-    return [RoleTemplate.model_validate(t) for t in raw_templates]
+    templates: list[RoleTemplateConfig] = []
+    for raw_template in raw_templates:
+        template = RoleTemplateConfig.model_validate(raw_template)
+        if not template.soul and template.prompt_file:
+            template = template.model_copy(update={"soul": _load_prompt(template.prompt_file)})
+        templates.append(template)
+    return templates
 
 
 def _load_teams(config_dir: str) -> List[TeamConfig]:
@@ -61,12 +73,6 @@ def load_json_objects_from_dir(dir_path: str) -> list[dict[str, Any]]:
     return result
 
 
-def load_prompt(file_path: str) -> str:
-    full_path = os.path.join(os.path.dirname(__file__), "../../", file_path)
-    with open(full_path, "r", encoding="utf-8") as f:
-        return f.read().strip()
-
-
 def get_app_config() -> AppConfig:
     if _cached_app_config is None:
         raise RuntimeError("AppConfig 未初始化，请先调用 configUtil.load(...)")
@@ -89,6 +95,7 @@ def load(config_dir: str = None, force_reload: bool = False) -> AppConfig:
         role_templates=role_templates,
         teams=teams,
         setting=setting,
+        group_chat_prompt=_load_prompt("src/prompts/GroupChat.md"),
     )
     _cached_app_config = app_config
     _cached_config_dir = resolved_config_dir

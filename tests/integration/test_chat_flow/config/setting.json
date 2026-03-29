@@ -1,0 +1,13 @@
+{
+  "llm_services": [
+    {
+      "name": "mock",
+      "enable": true,
+      "base_url": "http://127.0.0.1:19876/v1/chat/completions",
+      "api_key": "mock-api-key",
+      "type": "openai-compatible",
+      "model": "mock-model"
+    }
+  ],
+  "default_llm_server": "mock"
+}

@@ -1,35 +1,43 @@
 import logging
-from typing import List
 
+from dal.db import gtRoleTemplateManager
 from util import configUtil
-from util.configTypes import RoleTemplate
+from util.configTypes import RoleTemplateConfig
 
 logger = logging.getLogger(__name__)
 
-_role_templates: dict[str, RoleTemplate] = {}
-
 
 async def startup() -> None:
-    global _role_templates
-    _role_templates = {}
+    configs = configUtil.get_app_config().role_templates
+
+    for template in configs:
+        await _import_role_template_from_config(template)
+
+    db_templates = await gtRoleTemplateManager.get_all_role_templates()
+    logger.info(f"加载角色模版: {[t.template_name for t in db_templates]}")
 
 
-def load_role_template_config(role_templates_config: List[RoleTemplate] | None = None) -> None:
-    """加载角色模版配置。"""
-    global _role_templates
-    resolved = role_templates_config if role_templates_config is not None else configUtil.get_app_config().role_templates
-    _role_templates = {cfg.name: cfg for cfg in resolved}
-    logger.info(f"加载角色模版: {list(_role_templates.keys())}")
+async def _import_role_template_from_config(config: RoleTemplateConfig) -> None:
+    """导入 role template 到数据库。已存在时同步 driver / allowed_tools。"""
+    existing = await gtRoleTemplateManager.get_role_template(config.name)
+    if existing is not None:
+        if existing.driver != config.driver or existing.allowed_tools != config.allowed_tools:
+            await gtRoleTemplateManager.update_role_template(
+                config.name,
+                driver=config.driver,
+                allowed_tools=config.allowed_tools,
+            )
+        return
 
-
-def get_all_role_templates() -> list[RoleTemplate]:
-    return list(_role_templates.values())
-
-
-def get_role_template(template_name: str) -> RoleTemplate | None:
-    return _role_templates.get(template_name)
+    await gtRoleTemplateManager.upsert_role_template(
+        config.name,
+        config.model,
+        config.soul,
+        config.driver,
+        config.allowed_tools,
+    )
+    logger.info(f"Role template '{config.name}' 已导入数据库")
 
 
 async def shutdown() -> None:
-    global _role_templates
-    _role_templates = {}
+    return None
