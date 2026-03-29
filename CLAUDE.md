@@ -52,8 +52,7 @@ src/
 │   ├── ormService.py
 │   ├── persistenceService.py
 │   ├── teamService.py
-│   ├── roleTemplateService/
-│   │   └── core.py
+│   ├── roleTemplateService.py
 │   ├── agentService/
 │   │   ├── core.py
 │   │   └── driver/
