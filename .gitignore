@@ -9,3 +9,6 @@ simu_terminal_go
 .claude/
 data/
 test_data/
+TSP
+gTSP
+assert/
