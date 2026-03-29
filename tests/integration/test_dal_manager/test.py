@@ -153,7 +153,7 @@ class TestDalManagers(ServiceTestCase):
             config={"slogan": "ship fast"},
         ))
         team_b = await gtTeamManager.upsert_team(TeamConfig(name="team_b"))
-        await gtAgentManager.upsert_agents(team_a.id, [
+        await gtAgentManager.batch_save_agents(team_a.id, [
             AgentConfig(name="alice_1", role_template="alice"),
             AgentConfig(name="bob_1", role_template="bob"),
         ])
@@ -340,7 +340,7 @@ class TestDalManagers(ServiceTestCase):
         await gtRoleTemplateManager.upsert_role_template("charlie", "gpt-4o")
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="member_team"))
-        await gtAgentManager.upsert_agents(team.id, [
+        await gtAgentManager.batch_save_agents(team.id, [
             AgentConfig(name="alice", role_template="alice"),
             AgentConfig(name="bob", role_template="bob"),
             AgentConfig(name="charlie", role_template="charlie"),
@@ -385,7 +385,7 @@ class TestDalManagers(ServiceTestCase):
             max_turns=5,
         )
 
-        await gtAgentManager.upsert_agents(team.id, [
+        await gtAgentManager.batch_save_agents(team.id, [
             AgentConfig(name="alice", role_template="alice"),
             AgentConfig(name="bob", role_template="bob"),
         ])
@@ -414,7 +414,7 @@ class TestDalManagers(ServiceTestCase):
         await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="history_team"))
-        await gtAgentManager.upsert_agents(team.id, [AgentConfig(name="alice", role_template="alice")])
+        await gtAgentManager.batch_save_agents(team.id, [AgentConfig(name="alice", role_template="alice")])
         alice = await gtAgentManager.get_agent(team.id, "alice")
         assert alice is not None
 
@@ -445,7 +445,7 @@ class TestDalManagers(ServiceTestCase):
         await gtRoleTemplateManager.upsert_role_template("bob", "gpt-4o")
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="history_team_2"))
-        await gtAgentManager.upsert_agents(team.id, [
+        await gtAgentManager.batch_save_agents(team.id, [
             AgentConfig(name="alice", role_template="alice"),
             AgentConfig(name="bob", role_template="bob"),
         ])

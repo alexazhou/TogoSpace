@@ -47,7 +47,7 @@ class TestDeptService(ServiceTestCase):
         # 先创建角色模板
         await gtRoleTemplateManager.upsert_role_template("dummy", "gpt-4o")
         team = await gtTeamManager.upsert_team(TeamConfig(name=team_name))
-        await gtAgentManager.upsert_agents(
+        await gtAgentManager.batch_save_agents(
             team.id,
             [AgentConfig(name=n, role_template="dummy") for n in member_names],
         )
@@ -595,7 +595,7 @@ class TestDeptService(ServiceTestCase):
             AgentConfig(name="alice", role_template="gpt_agent", model="gpt-4o", driver=DriverType.NATIVE),
             AgentConfig(name="bob", role_template="glm_agent", model="", driver=DriverType.CLAUDE_SDK),
         ]
-        await gtAgentManager.upsert_agents(team.id, members)
+        await gtAgentManager.batch_save_agents(team.id, members)
 
         cfg = await gtTeamManager.get_team_config("t_model_driver")
         assert cfg is not None
