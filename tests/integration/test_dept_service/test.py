@@ -14,7 +14,7 @@ from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
-from service import deptService, ormService
+from service import deptService, ormService, roomService
 from util.configTypes import DeptNodeConfig, TeamConfig, AgentConfig
 from constants import DriverType, EmployStatus
 
@@ -713,6 +713,34 @@ class TestDeptService(ServiceTestCase):
         assert room_after is not None
         room_members_after = await gtRoomManager.get_members_by_room(room_after.id)
         assert set(room_members_after) == {"alice", "bob", "charlie", "david"}
+
+    async def test_refresh_rooms_for_team_keeps_dept_room_tags(self):
+        """验证热刷新运行态房间时，部门房间标签不会丢失。"""
+        await self._reset_tables()
+        await roomService.startup()
+
+        try:
+            team = await self._setup_team_with_members("t_room_tags", ["alice", "bob"])
+
+            root = deptService.DeptTreeNode(
+                dept_name="engineering",
+                dept_responsibility="开发部门",
+                manager="alice",
+                members=["alice", "bob"],
+            )
+            await deptService.set_dept_tree(team.id, root)
+
+            persisted_room = await gtRoomManager.get_room_config(team.id, "engineering")
+            assert persisted_room is not None
+            assert "DEPT" in persisted_room.tags
+
+            team_configs = await gtTeamManager.get_all_team_configs()
+            await roomService.refresh_rooms_for_team(team.id, team_configs)
+
+            runtime_room = roomService.get_room_by_key("engineering@t_room_tags")
+            assert "DEPT" in runtime_room.tags
+        finally:
+            roomService.shutdown()
 
     async def test_set_dept_tree_hierarchical_rooms_all_have_members(self):
         """验证层级部门结构中，每个部门房间都有对应的成员。"""
