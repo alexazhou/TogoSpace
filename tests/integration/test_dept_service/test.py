@@ -42,15 +42,28 @@ class TestDeptService(ServiceTestCase):
         await GtTeam.delete().aio_execute()
         await GtRoleTemplate.delete().aio_execute()
 
+    async def _convert_to_gt_agents(self, team_id: int, configs: list[AgentConfig]) -> list[GtAgent]:
+        agents = []
+        for cfg in configs:
+            rt_id = await gtAgentManager.resolve_role_template_id_by_name(cfg.role_template)
+            agents.append(GtAgent(
+                team_id=team_id,
+                name=cfg.name,
+                role_template_id=rt_id,
+                model=cfg.model or "",
+                driver=cfg.driver,
+                employ_status=EmployStatus.ON_BOARD,
+            ))
+        return agents
+
     async def _setup_team_with_members(self, team_name: str, member_names: list[str]) -> GtTeam:
         """创建 team 并写入成员，返回 GtTeam 对象。"""
         # 先创建角色模板
         await gtRoleTemplateManager.upsert_role_template("dummy", "gpt-4o")
         team = await gtTeamManager.upsert_team(TeamConfig(name=team_name))
-        await gtAgentManager.batch_save_agents(
-            team.id,
-            [AgentConfig(name=n, role_template="dummy") for n in member_names],
-        )
+        configs = [AgentConfig(name=n, role_template="dummy") for n in member_names]
+        agents = await self._convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
         return team
 
     # ------------------------------------------------------------------
@@ -591,11 +604,12 @@ class TestDeptService(ServiceTestCase):
         await gtRoleTemplateManager.upsert_role_template("glm_agent", "glm-4")
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="t_model_driver"))
-        members = [
+        configs = [
             AgentConfig(name="alice", role_template="gpt_agent", model="gpt-4o", driver=DriverType.NATIVE),
             AgentConfig(name="bob", role_template="glm_agent", model="", driver=DriverType.CLAUDE_SDK),
         ]
-        await gtAgentManager.batch_save_agents(team.id, members)
+        agents = await self._convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
 
         cfg = await gtTeamManager.get_team_config("t_model_driver")
         assert cfg is not None

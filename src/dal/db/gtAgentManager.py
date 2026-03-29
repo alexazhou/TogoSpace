@@ -99,7 +99,16 @@ async def batch_save_agents(team_id: int, agents: list[GtAgent]) -> None:
 
     if len(to_create) > 0:
         # 批量插入新记录
-        await GtAgent.bulk_create(to_create)
+        for agent in to_create:
+            await GtAgent.insert(
+                team_id=agent.team_id,
+                name=agent.name,
+                role_template_id=agent.role_template_id,
+                employ_status=agent.employ_status,
+                model=agent.model,
+                driver=agent.driver,
+                employee_number=agent.employee_number,
+            ).aio_execute()
 
     for agent in to_update:
         # 更新已有记录
