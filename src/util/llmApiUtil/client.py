@@ -16,6 +16,20 @@ def init() -> None:
     pass
 
 
+def _clean_base_url(url: str) -> str:
+    """清理 base_url，移除末尾可能存在的 /chat/completions 路径，防止 litellm 重复拼接。"""
+    if not url:
+        return url
+    
+    base_url = url
+    if base_url.endswith("/chat/completions"):
+        base_url = base_url[:-len("/chat/completions")]
+    elif base_url.endswith("/chat/completions/"):
+        base_url = base_url[:-len("/chat/completions/")]
+    
+    return base_url.rstrip("/")
+
+
 async def send_request(request: OpenAIRequest, url: str, api_key: str) -> OpenAIResponse:
     """使用 litellm 发送 chat completion 请求。"""
     
@@ -25,6 +39,9 @@ async def send_request(request: OpenAIRequest, url: str, api_key: str) -> OpenAI
     model_name = request.model
     if url and "/" not in model_name:
         model_name = f"openai/{model_name}"
+
+    # 清理 url：litellm 会自动添加 /chat/completions
+    base_url = _clean_base_url(url)
 
     messages = [m.to_dict() for m in request.messages]
     
@@ -37,7 +54,7 @@ async def send_request(request: OpenAIRequest, url: str, api_key: str) -> OpenAI
             model=model_name,
             messages=messages,
             api_key=api_key,
-            base_url=url,
+            base_url=base_url,
             tools=tools,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
