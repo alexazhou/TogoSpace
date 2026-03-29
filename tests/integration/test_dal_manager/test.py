@@ -1,10 +1,11 @@
 import os
+import sqlite3
 import sys
 
 import pytest
 
 import service.ormService as ormService
-from constants import DriverType, RoomType
+from constants import DriverType, RoleTemplateType, RoomType
 from dal.db import (
     gtRoleTemplateManager,
     gtAgentHistoryManager,
@@ -60,6 +61,7 @@ class TestDalManagers(ServiceTestCase):
         )
         assert saved_1.template_name == "alice"
         assert saved_1.model == "glm-4.7"
+        assert saved_1.type == RoleTemplateType.SYSTEM
         assert saved_1.driver == DriverType.CLAUDE_SDK
         assert saved_1.allowed_tools == ["Read"]
 
@@ -77,16 +79,19 @@ class TestDalManagers(ServiceTestCase):
         row = await gtRoleTemplateManager.get_role_template("alice")
         assert row is not None
         assert row.model == "gpt-4o"
+        assert row.type == RoleTemplateType.SYSTEM
         assert row.driver == DriverType.TSP
         assert row.allowed_tools == ["list_dir"]
 
     async def test_role_template_table_has_model_column(self):
         await self._reset_tables()
 
-        cols = await GtRoleTemplate.raw("PRAGMA table_info('role_templates')").aio_execute()
-        col_names = {c.name for c in cols}
+        with sqlite3.connect(self.TEST_DB_PATH) as conn:
+            cols = conn.execute("PRAGMA table_info('role_templates')").fetchall()
+        col_names = {c[1] for c in cols}
         assert "model" in col_names
         assert "template_name" in col_names
+        assert "type" in col_names
         assert "driver" in col_names
         assert "allowed_tools" in col_names
 

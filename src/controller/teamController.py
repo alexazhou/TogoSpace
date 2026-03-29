@@ -9,15 +9,23 @@ from util import assertUtil
 from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
 
 
+def _split_team_config(config: dict) -> tuple[str, dict]:
+    copied = dict(config)
+    working_directory = copied.pop("working_directory", "")
+    return working_directory, copied
+
+
 # Request Models
 class CreateTeamRequest(BaseModel):
     name: str
+    working_directory: str = ""
     config: dict = Field(default_factory=dict)
     members: list[AgentConfig]
     preset_rooms: list[TeamRoomConfig]
 
 
 class UpdateTeamRequest(BaseModel):
+    working_directory: str | None = None
     config: dict | None = None
     members: list[AgentConfig] | None = None
     preset_rooms: list[TeamRoomConfig] | None = None
@@ -43,7 +51,8 @@ class TeamListHandler(BaseHandler):
                     {
                         "id": team.id,
                         "name": team.name,
-                        "config": team.get_config(),
+                        "working_directory": _split_team_config(team.get_config())[0],
+                        "config": _split_team_config(team.get_config())[1],
                         "max_function_calls": team.max_function_calls,
                         "enabled": team.enabled,
                         "deleted": team.deleted,
@@ -61,7 +70,13 @@ class TeamCreateHandler(BaseHandler):
 
     async def post(self) -> None:
         request = self.parse_request(CreateTeamRequest)
-        team_config = TeamConfig.model_validate(request.model_dump())
+        payload = request.model_dump()
+        working_directory = payload.pop("working_directory", "")
+        config = dict(payload.get("config") or {})
+        if working_directory:
+            config["working_directory"] = working_directory
+        payload["config"] = config
+        team_config = TeamConfig.model_validate(payload)
 
         # 调用 service 创建 team
         await teamService.create_team(team_config)
@@ -102,7 +117,8 @@ class TeamDetailHandler(BaseHandler):
             {
                 "id": team.id,
                 "name": team.name,
-                "config": team.get_config(),
+                "working_directory": _split_team_config(team.get_config())[0],
+                "config": _split_team_config(team.get_config())[1],
                 "max_function_calls": team.max_function_calls,
                 "enabled": team.enabled,
                 "deleted": team.deleted,
@@ -132,6 +148,17 @@ class TeamModifyHandler(BaseHandler):
 
         # 构建完整配置，确保局部更新不会丢字段
         updates = {k: v for k, v in request.model_dump(exclude_none=True).items()}
+        config = dict(current_config.config)
+        if "config" in updates:
+            config.update(updates.pop("config") or {})
+        working_directory = updates.pop("working_directory", None)
+        if working_directory is not None:
+            if working_directory:
+                config["working_directory"] = working_directory
+            else:
+                config.pop("working_directory", None)
+        if config != current_config.config:
+            updates["config"] = config
         team_config = current_config.model_copy(update=updates)
 
         # 调用 service 更新 team

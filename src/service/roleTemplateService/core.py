@@ -1,5 +1,6 @@
 import logging
 
+from constants import RoleTemplateType
 from dal.db import gtRoleTemplateManager
 from util import configUtil
 from util.configTypes import RoleTemplateConfig
@@ -21,9 +22,16 @@ async def _import_role_template_from_config(config: RoleTemplateConfig) -> None:
     """导入 role template 到数据库。已存在时同步 driver / allowed_tools。"""
     existing = await gtRoleTemplateManager.get_role_template(config.name)
     if existing is not None:
-        if existing.driver != config.driver or existing.allowed_tools != config.allowed_tools:
-            await gtRoleTemplateManager.update_role_template(
+        if (
+            existing.type != RoleTemplateType.SYSTEM
+            or existing.driver != config.driver
+            or existing.allowed_tools != config.allowed_tools
+        ):
+            await gtRoleTemplateManager.upsert_role_template(
                 config.name,
+                existing.model,
+                existing.soul,
+                RoleTemplateType.SYSTEM,
                 driver=config.driver,
                 allowed_tools=config.allowed_tools,
             )
@@ -33,6 +41,7 @@ async def _import_role_template_from_config(config: RoleTemplateConfig) -> None:
         config.name,
         config.model,
         config.soul,
+        RoleTemplateType.SYSTEM,
         config.driver,
         config.allowed_tools,
     )

@@ -71,6 +71,11 @@ class DriverType(EnhanceEnum):
     TSP = "tsp"                 # TSP 协议驱动
 
 
+class RoleTemplateType(EnhanceEnum):
+    SYSTEM = "system"   # 启动时从配置导入
+    USER = "user"       # 运行时由后台创建
+
+
 class SystemConfigKey(EnhanceEnum):
     """系统配置项的 key 枚举。"""
     WORKING_DIRECTORY = "working_directory"  # 系统级别工作目录

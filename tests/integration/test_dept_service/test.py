@@ -15,7 +15,7 @@ from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from service import deptService, ormService
 from util.configTypes import DeptNodeConfig, TeamConfig, AgentConfig
-from constants import EmployStatus
+from constants import DriverType, EmployStatus
 
 
 if os.name == "posix" and sys.platform == "darwin":
@@ -67,13 +67,13 @@ class TestDeptService(ServiceTestCase):
             responsibility="build stuff",
             parent_id=None,
             manager_id=alice.id,
-            member_ids=[alice.id, bob.id],
+            agent_ids=[alice.id, bob.id],
         )
         assert dept.name == "engineering"
         assert dept.responsibility == "build stuff"
         assert dept.parent_id is None
         assert dept.manager_id == alice.id
-        assert set(dept.member_ids) == {alice.id, bob.id}
+        assert set(dept.agent_ids) == {alice.id, bob.id}
 
         fetched = await gtDeptManager.get_dept_by_name(team.id, "engineering")
         assert fetched is not None
@@ -93,18 +93,18 @@ class TestDeptService(ServiceTestCase):
 
         first = await gtDeptManager.upsert_dept(
             team_id=team.id, name="eng", responsibility="v1",
-            parent_id=None, manager_id=alice.id, member_ids=[alice.id, bob.id],
+            parent_id=None, manager_id=alice.id, agent_ids=[alice.id, bob.id],
         )
         second = await gtDeptManager.upsert_dept(
             team_id=team.id, name="eng", responsibility="v2",
-            parent_id=None, manager_id=bob.id, member_ids=[alice.id, bob.id, charlie.id],
+            parent_id=None, manager_id=bob.id, agent_ids=[alice.id, bob.id, charlie.id],
         )
 
         # id 不变（upsert），内容已更新
         assert second.id == first.id
         assert second.responsibility == "v2"
         assert second.manager_id == bob.id
-        assert charlie.id in second.member_ids
+        assert charlie.id in second.agent_ids
 
     async def test_dept_manager_get_all_depts_ordered_by_id(self):
         await self._reset_tables()
@@ -116,11 +116,11 @@ class TestDeptService(ServiceTestCase):
 
         root = await gtDeptManager.upsert_dept(
             team_id=team.id, name="root", responsibility="", parent_id=None,
-            manager_id=alice.id, member_ids=[alice.id],
+            manager_id=alice.id, agent_ids=[alice.id],
         )
         child = await gtDeptManager.upsert_dept(
             team_id=team.id, name="child", responsibility="", parent_id=root.id,
-            manager_id=bob.id, member_ids=[bob.id],
+            manager_id=bob.id, agent_ids=[bob.id],
         )
 
         depts = await gtDeptManager.get_all_depts(team.id)
@@ -152,7 +152,7 @@ class TestDeptService(ServiceTestCase):
         alice = await gtAgentManager.get_agent(team.id, "alice")
         assert alice is not None
         assert dept.manager_id == alice.id
-        assert alice.id in dept.member_ids
+        assert alice.id in dept.agent_ids
 
     async def test_import_dept_tree_hierarchical(self):
         await self._reset_tables()
@@ -212,7 +212,7 @@ class TestDeptService(ServiceTestCase):
         assert dept.responsibility == "original"
         charlie = await gtAgentManager.get_agent(team.id, "charlie")
         assert charlie is not None
-        assert charlie.id not in dept.member_ids
+        assert charlie.id not in dept.agent_ids
 
     async def test_import_dept_tree_manager_not_in_members_raises(self):
         await self._reset_tables()
@@ -316,7 +316,7 @@ class TestDeptService(ServiceTestCase):
 
         dept = await gtDeptManager.get_dept_by_name(team.id, "team_dept")
         assert dept is not None
-        assert bob.id not in dept.member_ids
+        assert bob.id not in dept.agent_ids
 
     async def test_remove_member_manager_without_new_manager_raises(self):
         await self._reset_tables()
@@ -356,7 +356,7 @@ class TestDeptService(ServiceTestCase):
         assert alice is not None and bob is not None
 
         assert alice.employ_status == EmployStatus.OFF_BOARD
-        assert alice.id not in dept.member_ids
+        assert alice.id not in dept.agent_ids
         assert dept.manager_id == bob.id
 
     async def test_remove_member_new_manager_not_in_dept_raises(self):
@@ -403,11 +403,11 @@ class TestDeptService(ServiceTestCase):
         # 两个部门：eng (alice, bob) / design (charlie)
         eng = await gtDeptManager.upsert_dept(
             team_id=team.id, name="eng", responsibility="", parent_id=None,
-            manager_id=alice.id, member_ids=[alice.id, bob.id],
+            manager_id=alice.id, agent_ids=[alice.id, bob.id],
         )
         design = await gtDeptManager.upsert_dept(
             team_id=team.id, name="design", responsibility="", parent_id=None,
-            manager_id=charlie.id, member_ids=[charlie.id],
+            manager_id=charlie.id, agent_ids=[charlie.id],
         )
 
         # bob 从 eng 移入 design
@@ -416,8 +416,8 @@ class TestDeptService(ServiceTestCase):
         eng_after = await gtDeptManager.get_dept_by_name(team.id, "eng")
         design_after = await gtDeptManager.get_dept_by_name(team.id, "design")
         assert eng_after is not None and design_after is not None
-        assert bob.id not in eng_after.member_ids
-        assert bob.id in design_after.member_ids
+        assert bob.id not in eng_after.agent_ids
+        assert bob.id in design_after.agent_ids
 
         bob_after = await gtAgentManager.get_agent(team.id, "bob")
         assert bob_after is not None
@@ -433,14 +433,14 @@ class TestDeptService(ServiceTestCase):
 
         dept = await gtDeptManager.upsert_dept(
             team_id=team.id, name="dept_m", responsibility="", parent_id=None,
-            manager_id=alice.id, member_ids=[alice.id],
+            manager_id=alice.id, agent_ids=[alice.id],
         )
 
         await deptService.move_member(team.id, "bob", "dept_m", is_manager=True)
 
         dept_after = await gtDeptManager.get_dept_by_name(team.id, "dept_m")
         assert dept_after is not None
-        assert bob.id in dept_after.member_ids
+        assert bob.id in dept_after.agent_ids
         assert dept_after.manager_id == bob.id
 
     async def test_move_member_off_board_becomes_on_board(self):
@@ -584,8 +584,8 @@ class TestDeptService(ServiceTestCase):
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="t_model_driver"))
         members = [
-            AgentConfig(name="alice", role_template="gpt_agent", model="gpt-4o", driver={"temperature": 0.7}),
-            AgentConfig(name="bob", role_template="glm_agent", model="", driver={}),
+            AgentConfig(name="alice", role_template="gpt_agent", model="gpt-4o", driver=DriverType.NATIVE),
+            AgentConfig(name="bob", role_template="glm_agent", model="", driver=DriverType.CLAUDE_SDK),
         ]
         await gtAgentManager.upsert_agents(team.id, members)
 
@@ -594,9 +594,9 @@ class TestDeptService(ServiceTestCase):
         member_map = {m.name: m for m in cfg.members}
 
         assert member_map["alice"].model == "gpt-4o"
-        assert member_map["alice"].driver == {"temperature": 0.7}
+        assert member_map["alice"].driver == DriverType.NATIVE
         assert member_map["bob"].model is None or member_map["bob"].model == ""
-        assert member_map["bob"].driver == {}
+        assert member_map["bob"].driver == DriverType.CLAUDE_SDK
 
     # ------------------------------------------------------------------
     # get_member_dept
