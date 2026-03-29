@@ -20,8 +20,6 @@ class CreateTeamRequest(BaseModel):
     name: str
     working_directory: str = ""
     config: dict = Field(default_factory=dict)
-    members: list[AgentConfig] = Field(default_factory=list)
-    preset_rooms: list[TeamRoomConfig] = Field(default_factory=list)
 
 
 class UpdateTeamRequest(BaseModel):
