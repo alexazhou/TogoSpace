@@ -60,15 +60,14 @@ class TeamConfig(BaseModel):
     max_function_calls: Optional[int] = None
 
 
-class RoleTemplate(BaseModel):
+class RoleTemplateConfig(BaseModel):
     """Role template definition loaded from config/role_templates/*.json."""
     name: str
-    system_prompt: str = ""
+    soul: str = ""
     prompt_file: str = ""
     model: Optional[str] = None
-    use_agent_sdk: bool = False
-    allowed_tools: List[str] = Field(default_factory=list)
-    driver: DriverType = DriverType.NATIVE
+    allowed_tools: List[str] | None = None
+    driver: DriverType | None = None
 
 
 class LlmServiceConfig(BaseModel):
@@ -133,5 +132,6 @@ class SettingConfig(BaseModel):
 
 class AppConfig(BaseModel):
     setting: SettingConfig = Field(default_factory=SettingConfig)
-    role_templates: List[RoleTemplate] = Field(default_factory=list)
+    role_templates: List[RoleTemplateConfig] = Field(default_factory=list)
     teams: List[TeamConfig] = Field(default_factory=list)
+    group_chat_prompt: str = ""

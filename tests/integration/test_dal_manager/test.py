@@ -4,7 +4,7 @@ import sys
 import pytest
 
 import service.ormService as ormService
-from constants import RoomType
+from constants import DriverType, RoomType
 from dal.db import (
     gtRoleTemplateManager,
     gtAgentHistoryManager,
@@ -52,17 +52,33 @@ class TestDalManagers(ServiceTestCase):
     async def test_role_template_manager_upsert_and_query_with_model(self):
         await self._reset_tables()
 
-        saved_1 = await gtRoleTemplateManager.upsert_role_template("alice", "glm-4.7")
+        saved_1 = await gtRoleTemplateManager.upsert_role_template(
+            "alice",
+            "glm-4.7",
+            driver=DriverType.CLAUDE_SDK,
+            allowed_tools=["Read"],
+        )
         assert saved_1.template_name == "alice"
         assert saved_1.model == "glm-4.7"
+        assert saved_1.driver == DriverType.CLAUDE_SDK
+        assert saved_1.allowed_tools == ["Read"]
 
-        saved_2 = await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
+        saved_2 = await gtRoleTemplateManager.upsert_role_template(
+            "alice",
+            "gpt-4o",
+            driver=DriverType.TSP,
+            allowed_tools=["list_dir"],
+        )
         assert saved_2.id == saved_1.id
         assert saved_2.model == "gpt-4o"
+        assert saved_2.driver == DriverType.TSP
+        assert saved_2.allowed_tools == ["list_dir"]
 
         row = await gtRoleTemplateManager.get_role_template("alice")
         assert row is not None
         assert row.model == "gpt-4o"
+        assert row.driver == DriverType.TSP
+        assert row.allowed_tools == ["list_dir"]
 
     async def test_role_template_table_has_model_column(self):
         await self._reset_tables()
@@ -71,6 +87,8 @@ class TestDalManagers(ServiceTestCase):
         col_names = {c.name for c in cols}
         assert "model" in col_names
         assert "template_name" in col_names
+        assert "driver" in col_names
+        assert "allowed_tools" in col_names
 
     # ------------------------------------------------------------------
     # gtTeamManager
@@ -80,12 +98,10 @@ class TestDalManagers(ServiceTestCase):
 
         created = await gtTeamManager.upsert_team(TeamConfig(
             name="team_a",
-            working_directory="/workspace/team_a",
             config={"slogan": "alpha"},
             max_function_calls=3,
         ))
         assert created.name == "team_a"
-        assert created.working_directory == "/workspace/team_a"
         assert created.get_config() == {"slogan": "alpha"}
         assert created.max_function_calls == 3
         assert await gtTeamManager.team_exists("team_a") is True
@@ -97,20 +113,17 @@ class TestDalManagers(ServiceTestCase):
 
         updated = await gtTeamManager.upsert_team(TeamConfig(
             name="team_a",
-            working_directory="/workspace/team_a_v2",
             config={"slogan": "beta", "rules": "sync first"},
             max_function_calls=7,
         ))
         assert updated.id == created.id
-        assert updated.working_directory == "/workspace/team_a_v2"
         assert updated.get_config() == {"rules": "sync first", "slogan": "beta"}
         assert updated.max_function_calls == 7
 
         await gtTeamManager.delete_team("team_a")
         assert await gtTeamManager.team_exists("team_a") is False
         deleted_row = await gtTeamManager.get_team("team_a")
-        assert deleted_row is not None
-        assert deleted_row.enabled == 0
+        assert deleted_row is None
 
     async def test_team_manager_get_all_teams_returns_only_enabled_sorted(self):
         await self._reset_tables()
@@ -128,7 +141,6 @@ class TestDalManagers(ServiceTestCase):
 
         team_a = await gtTeamManager.upsert_team(TeamConfig(
             name="team_a",
-            working_directory="/workspace/team_a",
             config={"slogan": "ship fast"},
         ))
         team_b = await gtTeamManager.upsert_team(TeamConfig(name="team_b"))
@@ -150,7 +162,6 @@ class TestDalManagers(ServiceTestCase):
         cfg_a = await gtTeamManager.get_team_config("team_a")
         assert cfg_a is not None
         assert cfg_a.name == "team_a"
-        assert cfg_a.working_directory == "/workspace/team_a"
         assert cfg_a.config == {"slogan": "ship fast"}
         assert [(m.name, m.role_template) for m in cfg_a.members] == [
             ("alice_1", "alice"),

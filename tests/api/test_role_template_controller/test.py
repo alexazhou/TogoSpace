@@ -30,6 +30,7 @@ class TestRoleTemplateController(_ApiServiceCase):
         template = data["role_templates"][0]
         assert "name" in template
         assert "model" in template
+        assert "driver" in template
 
     async def test_get_role_template_detail(self):
         """验证 GET /role_templates/<name>.json 返回模板详情。"""
@@ -48,3 +49,5 @@ class TestRoleTemplateController(_ApiServiceCase):
         assert detail["name"] == template_name
         assert "model" in detail
         assert "prompt" in detail
+        assert "driver" in detail
+        assert "allowed_tools" in detail

@@ -84,7 +84,6 @@ async def main(config_dir: str = None, port: int = 8080):
     await teamService.startup()
     teams_config = teamService.get_teams()
     await roleTemplateService.startup()
-    roleTemplateService.load_role_template_config()
     logger.info("[启动] 阶段 2/4 完成：teams=%s", [t.name for t in teams_config])
 
     # ── 阶段 3：运行时构建 ────────────────────────────────────────────────────

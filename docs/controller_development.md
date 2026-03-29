@@ -8,6 +8,7 @@
 - [数据输出序列化](#数据输出序列化)
 - [断言和验证](#断言和验证)
 - [错误处理](#错误处理)
+- [Controller 与 DAL](#controller-与-dal)
 - [URL 定义规范](#url-定义规范)
 - [路由注册](#路由注册)
 - [完整示例](#完整示例)
@@ -236,6 +237,35 @@ async def post(self) -> None:
     if some_condition:
         raise TeamAgentException("Invalid input", "invalid_request")
 ```
+
+---
+
+## Controller 与 DAL
+
+### 默认规则
+
+- 默认优先通过 service 封装业务流程，controller 负责参数解析、断言和响应拼装。
+
+### 允许直连 DAL 的情况
+
+满足以下条件时，controller 可以直接调用 DAL Manager：
+
+- 单表或单领域对象的简单 CRUD
+- 不涉及运行时状态同步
+- 不涉及消息广播或调度器联动
+- 不涉及跨 service 编排
+- 不需要额外业务规则收敛
+
+示例：`roleTemplateController -> gtRoleTemplateManager`
+
+### 不允许直连 DAL 的情况
+
+以下场景仍应通过 service 层：
+
+- 热更新、重建运行时对象
+- 跨表事务或多步编排
+- 持久化恢复流程
+- 需要统一复用的业务校验
 
 ---
 

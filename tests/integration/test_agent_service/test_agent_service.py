@@ -1,5 +1,4 @@
 """integration tests for core behavior in service.agentService"""
-import json
 import os
 import sys
 
@@ -7,7 +6,7 @@ import pytest
 
 from dal.db import gtTeamManager
 from service import roleTemplateService, agentService, roomService, ormService, persistenceService
-from util.configTypes import RoleTemplate, TeamConfig
+from util import configUtil
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -27,11 +26,10 @@ class _agentServiceCase(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
-        agents_cfg = [RoleTemplate.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
-        team_cfg = TeamConfig.model_validate(json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read()))
+        cfg = configUtil.load(_CONFIG_DIR, force_reload=True)
+        team_cfg = cfg.teams[0]
         await gtTeamManager.import_team_from_config(team_cfg)
         await roleTemplateService.startup()
-        roleTemplateService.load_role_template_config(agents_cfg)
         await agentService.startup()
         await agentService.load_team_ids([team_cfg])
         await agentService.create_team_agents([team_cfg])

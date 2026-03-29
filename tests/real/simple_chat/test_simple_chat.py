@@ -46,8 +46,6 @@ class TestRealSimpleChat(ServiceTestCase):
         await roomService.startup()
         await funcToolService.startup()
         await roleTemplateService.startup()
-
-        roleTemplateService.load_role_template_config()
         await agentService.startup()
         await agentService.create_team_agents(cfg.teams)
 

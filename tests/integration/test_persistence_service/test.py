@@ -7,8 +7,9 @@ import pytest
 from dal.db import gtTeamManager, gtAgentManager
 from service import roleTemplateService, agentService, ormService, persistenceService, roomService, messageBus
 from service.agentService import Agent
+from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenaiLLMApiRole
-from util.configTypes import RoleTemplate, TeamConfig, AgentConfig, TeamRoomConfig
+from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -117,8 +118,8 @@ class TestRestoreAgentHistory(ServiceTestCase):
 
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
+        configUtil.load(os.path.join(os.path.dirname(__file__), "../../config"), force_reload=True)
         await roleTemplateService.startup()
-        roleTemplateService.load_role_template_config([RoleTemplate(name="alice", system_prompt="sys")])
         await agentService.startup()
         await agentService.create_team_agents([
             TeamConfig(

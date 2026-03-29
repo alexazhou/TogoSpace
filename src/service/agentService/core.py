@@ -11,7 +11,7 @@ from model.coreModel.gtCoreWebModel import GtCoreAgentInfo
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
-from dal.db import gtRoleTemplateManager, gtDeptManager, gtTeamManager, gtAgentManager
+from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from service.roomService import ChatRoom, ChatContext
 from constants import SpecialAgent, MessageBusTopic, MemberStatus, DriverType
 
@@ -303,10 +303,10 @@ async def _build_dept_context(team_id: int, agent_name: str) -> str:
 
 async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
     """创建团队 Agent 实例。"""
-    from service import roleTemplateService
-    base_prompt_tmpl = configUtil.load_prompt("src/prompts/GroupChat.md")
+    app_config = configUtil.get_app_config()
+    base_prompt_tmpl = app_config.group_chat_prompt
     default_model = llmService.get_default_model()
-    resolved_workspace_root = workspace_root or configUtil.get_app_config().setting.workspace_root
+    resolved_workspace_root = workspace_root or app_config.setting.workspace_root
     assert resolved_workspace_root is not None, "workspace_root 未配置"
 
     for team_config in teams_config:
@@ -316,15 +316,12 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
         for member_cfg in team_config.members:
             agent_name = member_cfg.name
             template_name = member_cfg.role_template
-            cfg = roleTemplateService.get_role_template(template_name)
+            cfg = await gtRoleTemplateManager.get_role_template(template_name)
             if cfg is None:
                 logger.warning(f"角色模版不存在: agent={agent_name}, template={template_name}，跳过创建")
                 continue
 
-            if cfg.system_prompt:
-                agent_specific_prompt = cfg.system_prompt
-            else:
-                agent_specific_prompt = configUtil.load_prompt(cfg.prompt_file)
+            agent_specific_prompt = cfg.soul
 
             # model 覆盖：AgentConfig > RoleTemplate > default
             model_name = member_cfg.model or cfg.model or default_model
@@ -333,7 +330,12 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
             if member_cfg.driver:
                 driver_config = normalize_driver_config({"driver": member_cfg.driver})
             else:
-                driver_config = normalize_driver_config(cfg)
+                driver_config = normalize_driver_config(
+                    {
+                        "driver": cfg.driver,
+                        "allowed_tools": cfg.allowed_tools,
+                    }
+                )
 
             # 部门上下文注入
             team_id = _team_ids.get(team_name, 0)
@@ -363,7 +365,6 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
                 agent_row = await gtAgentManager.get_agent(agent.team_id, agent.name)
                 if agent_row:
                     agent._agent_id = agent_row.id
-                await gtRoleTemplateManager.upsert_role_template(agent.template_name, agent.model)
             except Exception as e:
                 logger.warning(f"写入 Agent 数据失败: agent={agent.key}, error={e}")
 

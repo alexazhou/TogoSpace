@@ -15,8 +15,8 @@ import service.schedulerService as scheduler
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 from dal.db import gtTeamManager
+from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
-from util.configTypes import RoleTemplate, TeamConfig
 from constants import OpenaiLLMApiRole, RoomState
 from ...base import ServiceTestCase
 
@@ -32,8 +32,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # 按真实启动顺序拉起 service，并加载 integration 专用配置。
-        agents_config = [RoleTemplate.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
-        team_config   = TeamConfig.model_validate(json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read()))
+        cfg = configUtil.load(_CONFIG_DIR, force_reload=True)
+        team_config = cfg.teams[0]
         db_path = cls.TEST_DB_PATH
         await ormService.startup(db_path)
         await persistenceService.startup()
@@ -42,7 +42,6 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await roomService.create_room(TEAM, "general", ["alice", "bob"])
         await funcToolService.startup()
         await roleTemplateService.startup()
-        roleTemplateService.load_role_template_config(agents_config)
         await agentService.startup()
         await agentService.load_team_ids([team_config])
         await agentService.create_team_agents([team_config])

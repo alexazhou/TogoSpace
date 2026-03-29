@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 import sys
 
@@ -8,7 +7,7 @@ import pytest
 from constants import OpenaiLLMApiRole, SpecialAgent
 from dal.db import gtTeamManager
 from tests.base import ServiceTestCase
-from util.configTypes import RoleTemplate, TeamConfig
+from util import configUtil
 from service import (
     roomService,
     roleTemplateService,
@@ -47,19 +46,17 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         self.cleanup_sqlite_files()
 
     async def _bootstrap(self):
-        agents_config = [RoleTemplate.model_validate(a) for a in json.loads(open(os.path.join(_CONFIG_DIR, "agents.json")).read())]
-        team_config = TeamConfig.model_validate(json.loads(open(os.path.join(_CONFIG_DIR, "team.json")).read()))
+        cfg = configUtil.load(_CONFIG_DIR, force_reload=True)
+        team_config = cfg.teams[0]
 
         from src.db import migrate_database
         migrate_database(self.TEST_DB_PATH)
 
         await roomService.startup()
         await funcToolService.startup()
-        await roleTemplateService.startup()
         await ormService.startup(self.TEST_DB_PATH)
         await persistenceService.startup()
-
-        roleTemplateService.load_role_template_config(agents_config)
+        await roleTemplateService.startup()
         await agentService.startup()
         await gtTeamManager.import_team_from_config(team_config)
         await agentService.load_team_ids([team_config])
