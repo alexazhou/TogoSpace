@@ -168,3 +168,7 @@ async def update_agent(agent_id: int, name: str, role_template_id: int, model: s
 
 
 async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) -> None:
+    """批量更新成员状态。"""
+    if len(agent_ids) == 0:
+        return
+    await GtAgent.update(employ_status=status).where(GtAgent.id.in_(agent_ids)).aio_execute()  # type: ignore[attr-defined]
