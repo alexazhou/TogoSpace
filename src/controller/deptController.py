@@ -4,11 +4,11 @@ from controller.baseController import BaseHandler
 from dal.db import gtTeamManager
 from service import deptService, teamService
 from util import assertUtil
-from util.configTypes import DeptNodeConfig
+from service.deptService import DeptTreeNode
 
 
 class SetDeptTreeRequest(BaseModel):
-    dept_tree: DeptNodeConfig
+    dept_tree: DeptTreeNode
 
 
 class DeptTreeDetailHandler(BaseHandler):
