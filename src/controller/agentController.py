@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from constants import DriverType
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
-from service import teamService
+from service import teamService, agentService
 from util import assertUtil
 
 
@@ -45,8 +45,6 @@ async def _assert_role_templates_exist(template_ids: list[int]) -> None:
         error_message=f"角色模板不存在: {missing_ids}",
         error_code="role_template_not_found",
     )
-
-
 class AgentListHandler(BaseHandler):
     """GET /agents/list.json?team_id=<id> - 获取 team 的成员配置列表"""
 
@@ -59,21 +57,7 @@ class AgentListHandler(BaseHandler):
         team_id = int(team_id_raw)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
-
-        agents = await gtAgentManager.get_agents_by_team(team_id)
-        data = [
-            {
-                "id": a.id,
-                "name": a.name,
-                "employee_number": a.employee_number,
-                "role_template_id": a.role_template_id,
-                "employ_status": a.employ_status.name if a.employ_status else None,
-                "model": a.model,
-                "driver": a.driver.value if a.driver else None,
-            }
-            for a in agents
-        ]
-        self.return_json({"agents": data})
+        self.return_json({"agents": await agentService.list_team_agent_items(team.id)})
 
 
 class TeamMembersSaveHandler(BaseHandler):

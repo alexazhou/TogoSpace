@@ -91,6 +91,7 @@ class Agent:
             name=self.name,
             template_name=self.template_name or None,
             model=self.model,
+            team_id=self.team_id,
             team_name=self.team_name,
             status=MemberStatus.ACTIVE if self.is_active else MemberStatus.IDLE,
         )
@@ -105,6 +106,7 @@ class Agent:
         messageBus.publish(
             MessageBusTopic.MEMBER_STATUS_CHANGED,
             member_name=self.name,
+            team_id=self.team_id,
             team_name=self.team_name,
             status=status.name,
         )
@@ -403,6 +405,42 @@ def find_team_agent(team_name: str, agent_name: str) -> "Agent | None":
 
 def get_all_agents() -> List["Agent"]:
     return list(_agents.values())
+
+
+def get_team_agent_infos(team_name: str) -> List[GtCoreAgentInfo]:
+    return [agent.get_info() for agent in _agents.values() if agent.team_name == team_name]
+
+
+def get_team_agent_info_map(team_name: str) -> dict[str, GtCoreAgentInfo]:
+    return {info.name: info for info in get_team_agent_infos(team_name)}
+
+
+async def list_team_agent_items(team_id: int) -> list[dict[str, Any]]:
+    team = await gtTeamManager.get_team_by_id(team_id)
+    if team is None:
+        return []
+
+    agents = await gtAgentManager.get_agents_by_team(team.id)
+    runtime_infos = get_team_agent_info_map(team.name)
+    return [
+        {
+            "id": agent.id,
+            "name": agent.name,
+            "employee_number": agent.employee_number,
+            "role_template_id": agent.role_template_id,
+            "team_id": runtime_info.team_id if runtime_info and runtime_info.team_id else agent.team_id,
+            "status": (
+                runtime_info.status.name.lower()
+                if runtime_info is not None
+                else MemberStatus.IDLE.name.lower()
+            ),
+            "employ_status": agent.employ_status.name if agent.employ_status else None,
+            "model": agent.model,
+            "driver": agent.driver.value if agent.driver else None,
+        }
+        for agent in agents
+        for runtime_info in [runtime_infos.get(agent.name)]
+    ]
 
 
 def get_team_agents(room_id: int) -> List["Agent"]:

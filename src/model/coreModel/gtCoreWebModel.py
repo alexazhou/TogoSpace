@@ -8,6 +8,7 @@ class GtCoreAgentInfo(BaseModel):
     name: str
     template_name: str | None = None
     model: str
+    team_id: int
     team_name: str
     status: MemberStatus
 
@@ -45,6 +46,7 @@ class GtCoreWsEvent(BaseModel):
     room_id: int
     room_key: str
     room_name: str
+    team_id: int
     team_name: str
     sender: str
     content: str

@@ -77,6 +77,7 @@ class TestWsController(_ApiServiceCase):
         assert event.get("event") == "message"
         assert "room_id" in event
         assert "room_key" in event
+        assert "team_id" in event
         assert "team_name" in event
         assert "sender" in event
         assert "content" in event

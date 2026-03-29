@@ -29,6 +29,7 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
             room_id=msg.payload.get("room_id"),
             room_key=msg.payload.get("room_key"),
             room_name=msg.payload["room_name"],
+            team_id=msg.payload["team_id"],
             team_name=msg.payload.get("team_name"),
             sender=msg.payload["sender"],
             content=msg.payload["content"],
@@ -42,6 +43,7 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
         payload = {
             "event": "member_status",
             "member_name": msg.payload["member_name"],
+            "team_id": msg.payload["team_id"],
             "team_name": msg.payload["team_name"],
             "status": msg.payload["status"],
         }
