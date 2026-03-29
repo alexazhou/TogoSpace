@@ -6,8 +6,7 @@ from constants import LlmServiceType, DriverType
 
 
 class DeptNodeConfig(BaseModel):
-    """递归的部门树节点，对应 config 中 dept_tree 的每个节点。"""
-    dept_id: int | None = None  # 可选，增量更新时用于匹配现有部门
+    """递归的部门树节点，对应 config 中 dept_tree 的每个节点（配置文件用）。"""
     dept_name: str
     dept_responsibility: str = ""
     manager: str
