@@ -64,10 +64,10 @@ class TestAgentServiceGetInfo(_agentServiceCase):
 
         info = alice.get_info()
 
-        assert info.name == "alice"
-        assert info.template_name == "alice"
-        assert info.team_name == TEAM
-        assert info.status.name == "IDLE"
+        assert info["name"] == "alice"
+        assert info["template_name"] == "alice"
+        assert info["team_name"] == TEAM
+        assert info["status"] == "IDLE"
 
 
 class TestagentServiceGetAllRooms(_agentServiceCase):

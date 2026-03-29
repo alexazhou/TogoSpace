@@ -7,7 +7,6 @@ from util import llmApiUtil, configUtil
 from util.configTypes import TeamConfig, TeamRoomConfig
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreChatMessage
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
-from model.coreModel.gtCoreWebModel import GtCoreAgentInfo
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgent import GtAgent
 from service.agentService.driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
@@ -90,15 +89,16 @@ class Agent:
     def is_active(self) -> bool:
         return self.status == MemberStatus.ACTIVE or not self.wait_task_queue.empty()
 
-    def get_info(self) -> GtCoreAgentInfo:
-        return GtCoreAgentInfo(
-            name=self.name,
-            template_name=self.template_name or None,
-            model=self.model,
-            team_id=self.team_id,
-            team_name=self.team_name,
-            status=MemberStatus.ACTIVE if self.is_active else MemberStatus.IDLE,
-        )
+    def get_info(self) -> dict:
+        """返回用于 API 响应的字典表示，包含运行时状态。"""
+        return {
+            "name": self.name,
+            "template_name": self.template_name or None,
+            "model": self.model,
+            "team_id": self.team_id,
+            "team_name": self.team_name,
+            "status": MemberStatus.ACTIVE.name if self.is_active else MemberStatus.IDLE.name,
+        }
 
     async def startup(self) -> None:
         await self.driver.startup()
@@ -411,12 +411,12 @@ def get_all_agents() -> List["Agent"]:
     return list(_agents.values())
 
 
-def get_team_agent_infos(team_name: str) -> List[GtCoreAgentInfo]:
+def get_team_agent_infos(team_name: str) -> List[dict]:
     return [agent.get_info() for agent in _agents.values() if agent.team_name == team_name]
 
 
-def get_team_agent_info_map(team_name: str) -> dict[str, GtCoreAgentInfo]:
-    return {info.name: info for info in get_team_agent_infos(team_name)}
+def get_team_agent_info_map(team_name: str) -> dict[str, dict]:
+    return {info["name"]: info for info in get_team_agent_infos(team_name)}
 
 
 async def list_team_agent_items(team_id: int) -> list[dict[str, Any]]:
@@ -432,12 +432,8 @@ async def list_team_agent_items(team_id: int) -> list[dict[str, Any]]:
             "name": agent.name,
             "employee_number": agent.employee_number,
             "role_template_id": agent.role_template_id,
-            "team_id": runtime_info.team_id if runtime_info and runtime_info.team_id else agent.team_id,
-            "status": (
-                runtime_info.status.name.lower()
-                if runtime_info is not None
-                else MemberStatus.IDLE.name.lower()
-            ),
+            "team_id": runtime_info.get("team_id", agent.team_id) if runtime_info else agent.team_id,
+            "status": runtime_info.get("status", MemberStatus.IDLE.name) if runtime_info else MemberStatus.IDLE.name,
             "employ_status": agent.employ_status.name if agent.employ_status else None,
             "model": agent.model,
             "driver": agent.driver.value if agent.driver else None,

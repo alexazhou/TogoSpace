@@ -1,30 +1,6 @@
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel
 from typing import List
 from datetime import datetime
-from constants import MemberStatus
-
-
-class GtCoreAgentInfo(BaseModel):
-    name: str
-    template_name: str | None = None
-    model: str
-    team_id: int
-    team_name: str
-    status: MemberStatus
-
-    @field_serializer('status')
-    def serialize_status(self, status: MemberStatus) -> str:
-        return status.name
-
-
-class GtCoreRoomInfo(BaseModel):
-    room_id: int     # 数据库主键 ID
-    room_key: str    # room@team 格式
-    room_name: str
-    team_name: str
-    room_type: str   # "private" | "group"
-    state: str       # "scheduling" | "idle"
-    members: List[str]
 
 
 class GtCoreMessageInfo(BaseModel):
