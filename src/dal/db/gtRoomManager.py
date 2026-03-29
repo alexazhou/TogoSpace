@@ -1,22 +1,7 @@
 from __future__ import annotations
 
 from model.dbModel.gtRoom import GtRoom
-from model.dbModel.gtAgent import GtAgent
-from util.configTypes import TeamRoomConfig
-from constants import RoomType, SpecialAgent
 
-
-def _infer_room_type_from_members(members: list[str]) -> RoomType:
-    normalized = {m.upper() for m in (members or [])}
-    # 约定：仅当包含 Operator 且仅有 1 个非 Operator 成员时判定为 PRIVATE
-    ai_count = len([m for m in normalized if SpecialAgent.value_of(m) != SpecialAgent.OPERATOR])
-    has_operator = any(SpecialAgent.value_of(m) == SpecialAgent.OPERATOR for m in normalized)
-    if has_operator and ai_count == 1:
-        return RoomType.PRIVATE
-    return RoomType.GROUP
-
-
-# Room Config CRUD
 async def get_rooms_by_team(team_id: int) -> list[GtRoom]:
     """获取 Team 下的所有 Room。"""
     return list(
@@ -24,13 +9,6 @@ async def get_rooms_by_team(team_id: int) -> list[GtRoom]:
         .where(GtRoom.team_id == team_id)
         .order_by(GtRoom.name)
         .aio_execute()
-    )
-
-
-async def get_room_config(team_id: int, room_name: str) -> GtRoom | None:
-    """通过 team_id 和 room_name 获取 Room 配置。"""
-    return await GtRoom.aio_get_or_none(
-        (GtRoom.team_id == team_id) & (GtRoom.name == room_name)
     )
 
 
@@ -85,92 +63,9 @@ async def save_room(room: GtRoom) -> GtRoom:
     return saved
 
 
-async def _resolve_agent_ids(team_id: int, members: list[str]) -> list[int]:
-    """将成员名称转换为 room.agent_ids。"""
-    agent_rows = await GtAgent.select().where(GtAgent.team_id == team_id).aio_execute()
-    name_to_id = {m.name: m.id for m in agent_rows}
-
-    agent_ids: list[int] = []
-    for name in members:
-        if SpecialAgent.value_of(name) == SpecialAgent.OPERATOR:
-            agent_ids.append(0)  # Operator 使用 0
-        elif name in name_to_id:
-            agent_ids.append(name_to_id[name])
-
-    return agent_ids
-
-
-async def ensure_room_by_key(
-    team_id: int,
-    room_name: str,
-    room_type: RoomType,
-    initial_topic: str,
-    max_turns: int,
-    biz_id: str | None = None,
-    tags: list[str] | None = None,
-) -> GtRoom:
-    """确保 (team_id, name) 对应的 Room 存在，由 DB 自增分配 id；返回 GtRoom 行。"""
-    existing = await get_room_config(team_id, room_name)
-    if existing is not None:
-        existing.type = room_type
-        existing.initial_topic = initial_topic
-        existing.max_turns = max_turns
-        existing.biz_id = biz_id
-        existing.tags = tags or []
-        return await save_room(existing)
-
-    return await save_room(GtRoom(
-        team_id=team_id,
-        name=room_name,
-        type=room_type,
-        initial_topic=initial_topic,
-        max_turns=max_turns,
-        agent_ids=[],
-        biz_id=biz_id,
-        tags=tags or [],
-    ))
-
-
-async def upsert_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
-    """创建或更新 Team 下的 Rooms。使用 surgical update 确保已存在的 Room ID 不变。"""
-    # 1. 获取当前数据库中的所有 Room
-    current_rooms = await get_rooms_by_team(team_id)
-    current_names = {r.name: r.id for r in current_rooms}
-    new_names = {r.name for r in rooms}
-
-    # 2. 删除不在新配置中的 Room（保留有 biz_id 的 DEPT 房间）
-    to_delete = [
-        rid for name, rid in current_names.items()
-        if name not in new_names and not any(r.biz_id for r in current_rooms if r.id == rid)
-    ]
-    if to_delete:
-        await GtRoom.delete().where(GtRoom.id.in_(to_delete)).aio_execute()  # type: ignore
-
-    # 3. 逐个更新或插入
-    existing_by_name = {room.name: room for room in current_rooms}
-    for room_cfg in rooms:
-        room_type = _infer_room_type_from_members(room_cfg.members)
-        agent_ids = await _resolve_agent_ids(team_id, room_cfg.members)
-        room = existing_by_name.get(room_cfg.name)
-        if room is None:
-            room = GtRoom(
-                team_id=team_id,
-                name=room_cfg.name,
-                type=room_type,
-                initial_topic=room_cfg.initial_topic,
-                max_turns=room_cfg.max_turns,
-                agent_ids=agent_ids,
-                biz_id=room_cfg.biz_id,
-                tags=room_cfg.tags,
-            )
-        else:
-            room.type = room_type
-            room.initial_topic = room_cfg.initial_topic
-            room.max_turns = room_cfg.max_turns
-            room.agent_ids = agent_ids
-            room.biz_id = room_cfg.biz_id
-            room.tags = room_cfg.tags
-
+async def batch_save_rooms(rooms: list[GtRoom]) -> None:
+    """批量保存房间对象。"""
+    for room in rooms:
         await save_room(room)
 
 
@@ -203,41 +98,6 @@ async def get_room_state(room_id: int) -> dict[str, int] | None:
     if room is None:
         return None
     return room.agent_read_index
-
-
-# Room Agent Management (inline)
-async def get_members_by_room(room_id: int) -> list[str]:
-    """获取 Room 的所有成员名称。agent_id=0 代表 Operator。"""
-    room = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
-    if room is None or not room.agent_ids:
-        return []
-
-    # 分离非零 ID 和 Operator (0)
-    non_zero_ids = [mid for mid in room.agent_ids if mid != 0]
-    has_operator = any(mid == 0 for mid in room.agent_ids)
-
-    names: list[str] = []
-    if non_zero_ids:
-        agent_rows = await GtAgent.select().where(
-            GtAgent.id.in_(non_zero_ids)  # type: ignore
-        ).aio_execute()
-        id_to_name = {m.id: m.name for m in agent_rows}
-        names = [id_to_name[mid] for mid in non_zero_ids if mid in id_to_name]
-
-    if has_operator:
-        names.append("Operator")
-
-    return sorted(names)
-
-
-async def upsert_room_members(room_id: int, members: list[str]) -> None:
-    """更新 Room 的成员列表（通过成员名称）。"""
-    room = await get_room_by_id(room_id)
-    if room is None:
-        return
-
-    room.agent_ids = await _resolve_agent_ids(room.team_id, members)
-    await save_room(room)
 
 
 async def delete_rooms_by_biz_ids_not_in(team_id: int, biz_ids: list[str]) -> None:

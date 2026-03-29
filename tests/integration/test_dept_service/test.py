@@ -14,7 +14,7 @@ from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
-from service import deptService, ormService, roomService
+from service import deptService, ormService, roomService, teamService
 from util.configTypes import DeptNodeConfig, TeamConfig, AgentConfig
 from constants import DriverType, EmployStatus
 
@@ -60,7 +60,7 @@ class TestDeptService(ServiceTestCase):
         """创建 team 并写入成员，返回 GtTeam 对象。"""
         # 先创建角色模板
         await gtRoleTemplateManager.upsert_role_template("dummy", "gpt-4o")
-        team = await gtTeamManager.upsert_team(TeamConfig(name=team_name))
+        team = await gtTeamManager.save_team(GtTeam(name=team_name))
         configs = [AgentConfig(name=n, role_template="dummy") for n in member_names]
         agents = await self._convert_to_gt_agents(team.id, configs)
         await gtAgentManager.batch_save_agents(team.id, agents)
@@ -603,7 +603,7 @@ class TestDeptService(ServiceTestCase):
         await gtRoleTemplateManager.upsert_role_template("gpt_agent", "gpt-4o")
         await gtRoleTemplateManager.upsert_role_template("glm_agent", "glm-4")
 
-        team = await gtTeamManager.upsert_team(TeamConfig(name="t_model_driver"))
+        team = await gtTeamManager.save_team(GtTeam(name="t_model_driver"))
         configs = [
             AgentConfig(name="alice", role_template="gpt_agent", model="gpt-4o", driver=DriverType.NATIVE),
             AgentConfig(name="bob", role_template="glm_agent", model="", driver=DriverType.CLAUDE_SDK),
@@ -611,7 +611,7 @@ class TestDeptService(ServiceTestCase):
         agents = await self._convert_to_gt_agents(team.id, configs)
         await gtAgentManager.batch_save_agents(team.id, agents)
 
-        cfg = await gtTeamManager.get_team_config("t_model_driver")
+        cfg = await teamService.get_team_config("t_model_driver")
         assert cfg is not None
         member_map = {m.name: m for m in cfg.members}
 
@@ -673,7 +673,7 @@ class TestDeptService(ServiceTestCase):
         assert "DEPT" in room.tags
 
         # 验证部门成员已加入房间
-        room_members = await gtRoomManager.get_members_by_room(room.id)
+        room_members = await roomService.get_db_room_member_names(room.id)
         assert set(room_members) == {"alice", "bob", "charlie"}
 
     async def test_set_dept_tree_updates_existing_room_members(self):
@@ -696,7 +696,7 @@ class TestDeptService(ServiceTestCase):
         biz_id = f"DEPT:{dept.id}"
         room = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
         assert room is not None
-        room_members = await gtRoomManager.get_members_by_room(room.id)
+        room_members = await roomService.get_db_room_member_names(room.id)
         assert set(room_members) == {"alice", "bob"}
 
         # 第二次更新，增加成员
@@ -711,7 +711,7 @@ class TestDeptService(ServiceTestCase):
 
         room_after = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
         assert room_after is not None
-        room_members_after = await gtRoomManager.get_members_by_room(room_after.id)
+        room_members_after = await roomService.get_db_room_member_names(room_after.id)
         assert set(room_members_after) == {"alice", "bob", "charlie", "david"}
 
     async def test_set_dept_tree_renames_existing_dept_room(self):
@@ -767,11 +767,14 @@ class TestDeptService(ServiceTestCase):
             )
             await deptService.set_dept_tree(team.id, root)
 
-            persisted_room = await gtRoomManager.get_room_config(team.id, "engineering")
+            persisted_room = next(
+                (room for room in await gtRoomManager.get_rooms_by_team(team.id) if room.name == "engineering"),
+                None,
+            )
             assert persisted_room is not None
             assert "DEPT" in persisted_room.tags
 
-            team_configs = await gtTeamManager.get_all_team_configs()
+            team_configs = await teamService.get_all_team_configs_from_db()
             await roomService.refresh_rooms_for_team(team.id, team_configs)
 
             runtime_room = roomService.get_room_by_key("engineering@t_room_tags")
@@ -821,5 +824,5 @@ class TestDeptService(ServiceTestCase):
             biz_id = f"DEPT:{dept.id}"
             room = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
             assert room is not None
-            room_members = await gtRoomManager.get_members_by_room(room.id)
+            room_members = await roomService.get_db_room_member_names(room.id)
             assert set(room_members) == expected_members

@@ -144,7 +144,7 @@ class TeamRoomCreateHandler(BaseHandler):
         # 但目前 gtRoomManager 实现如此，暂且遵循。
         new_rooms_configs: list[TeamRoomConfig] = []
         for r in existing_rooms:
-            members = await gtRoomManager.get_members_by_room(r.id)
+            members = await chat_room.get_db_room_member_names(r.id)
             new_rooms_configs.append(TeamRoomConfig(
                 name=r.name,
                 members=members,
@@ -153,7 +153,7 @@ class TeamRoomCreateHandler(BaseHandler):
             ))
         new_rooms_configs.append(room_config)
 
-        await gtRoomManager.upsert_rooms(team_id, new_rooms_configs)
+        await chat_room.save_team_rooms_from_config(team_id, new_rooms_configs)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "created", "room_name": request.name})
@@ -168,7 +168,7 @@ class TeamRoomDetailHandler(BaseHandler):
         await _get_team_or_404(team_id)
         room = await _get_team_room_or_404(team_id, room_id)
 
-        members = await gtRoomManager.get_members_by_room(room.id)
+        members = await chat_room.get_db_room_member_names(room.id)
         data = {
             "id": room.id,
             "name": room.name,
@@ -200,7 +200,7 @@ class TeamRoomModifyHandler(BaseHandler):
         existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
         all_rooms: list[TeamRoomConfig] = []
         for r in existing_rooms:
-            members = await gtRoomManager.get_members_by_room(r.id)
+            members = await chat_room.get_db_room_member_names(r.id)
             if r.id == room_id:
                 all_rooms.append(TeamRoomConfig(
                     name=r.name,
@@ -216,7 +216,7 @@ class TeamRoomModifyHandler(BaseHandler):
                     max_turns=r.max_turns,
                 ))
 
-        await gtRoomManager.upsert_rooms(team_id, all_rooms)
+        await chat_room.save_team_rooms_from_config(team_id, all_rooms)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "room_name": room_name})
@@ -239,7 +239,7 @@ class TeamRoomDeleteHandler(BaseHandler):
 
         room_configs: list[TeamRoomConfig] = []
         for r in remaining_rooms:
-            members = await gtRoomManager.get_members_by_room(r.id)
+            members = await chat_room.get_db_room_member_names(r.id)
             room_configs.append(
                 TeamRoomConfig(
                     name=r.name,
@@ -249,7 +249,7 @@ class TeamRoomDeleteHandler(BaseHandler):
                 )
             )
 
-        await gtRoomManager.upsert_rooms(team_id, room_configs)
+        await chat_room.save_team_rooms_from_config(team_id, room_configs)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "deleted", "room_name": room_name})
@@ -264,7 +264,7 @@ class TeamRoomMembersHandler(BaseHandler):
         await _get_team_or_404(team_id)
         room = await _get_team_room_or_404(team_id, room_id)
 
-        members = await gtRoomManager.get_members_by_room(room.id)
+        members = await chat_room.get_db_room_member_names(room.id)
         self.return_json({"members": members})
 
 
@@ -281,7 +281,7 @@ class TeamRoomMembersModifyHandler(BaseHandler):
 
         room = await _get_team_room_or_404(team_id, room_id)
 
-        await gtRoomManager.upsert_room_members(room.id, request.members)
+        await chat_room.save_room_members(room.id, request.members)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "room_name": room.name})

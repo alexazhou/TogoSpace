@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from dal.db import gtTeamManager, gtAgentManager
+from model.dbModel.gtTeam import GtTeam
 from service import roleTemplateService, agentService, ormService, persistenceService, roomService, messageBus
 from service.agentService import Agent
 from util import configUtil
@@ -43,7 +44,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await persistenceService.startup()
         await roomService.startup()
         await roleTemplateService.startup()
-        team = await gtTeamManager.upsert_team(TeamConfig(name=TEAM))
+        team = await gtTeamManager.save_team(GtTeam(name=TEAM))
         configs = [
             AgentConfig(name="alice", role_template="alice"),
             AgentConfig(name="bob", role_template="bob"),

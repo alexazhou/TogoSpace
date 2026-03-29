@@ -8,6 +8,7 @@ import pytest
 from constants import DriverType
 from dal.db import gtAgentManager, gtTeamManager
 from service import roleTemplateService, agentService, roomService, ormService, persistenceService
+from service import teamService
 from util import configUtil
 from ...base import ServiceTestCase
 
@@ -31,7 +32,7 @@ class _agentServiceCase(ServiceTestCase):
         await roleTemplateService.startup()
         cfg = configUtil.load(_CONFIG_DIR, force_reload=True)
         team_cfg = cfg.teams[0]
-        await gtTeamManager.import_team_from_config(team_cfg)
+        await teamService.import_team_from_config(team_cfg)
         await agentService.startup()
         await agentService.load_team_ids([team_cfg])
         await agentService.create_team_agents([team_cfg])

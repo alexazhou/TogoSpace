@@ -14,7 +14,7 @@ import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.ormService as ormService
 import service.persistenceService as persistenceService
-from dal.db import gtTeamManager
+import service.teamService as teamService
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
 from constants import OpenaiLLMApiRole, RoomState
@@ -39,7 +39,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await persistenceService.startup()
         await roomService.startup()
         await roleTemplateService.startup()
-        await gtTeamManager.import_team_from_config(team_config)
+        await teamService.import_team_from_config(team_config)
         await roomService.create_room(TEAM, "general", ["alice", "bob"])
         await funcToolService.startup()
         await agentService.startup()
@@ -128,6 +128,10 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await room.add_message("system", "开始聊天")
 
         alice = agentService.get_team_agent(TEAM, "alice")
+        if alice._history and alice._history[-1].role == OpenaiLLMApiRole.ASSISTANT:
+            await alice.append_history_message(
+                OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset turn checker history")
+            )
         resps = [
             {"content": "我直接回复"},
             {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "最终消息"}}]},

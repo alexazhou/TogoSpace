@@ -8,6 +8,7 @@ import service.persistenceService as persistenceService
 import service.roomService as roomService
 from constants import SpecialAgent
 from dal.db import gtTeamManager
+from model.dbModel.gtTeam import GtTeam
 from service.roomService import ChatRoom
 from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
@@ -28,7 +29,7 @@ class TestRoomRegistry(ServiceTestCase):
         await roomService.startup()
 
         # 预创建 team，_create_room 不再自动创建
-        await gtTeamManager.upsert_team(TeamConfig(name=TEAM, members=[], preset_rooms=[]))
+        await gtTeamManager.save_team(GtTeam(name=TEAM))
 
     @classmethod
     async def async_teardown_class(cls):

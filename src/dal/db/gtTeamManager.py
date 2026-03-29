@@ -1,19 +1,8 @@
 from __future__ import annotations
 
 import json
-import logging
 
-from constants import DriverType, EmployStatus
-from . import gtRoomManager, gtAgentManager, gtRoleTemplateManager
 from model.dbModel.gtTeam import GtTeam
-from model.dbModel.gtAgent import GtAgent
-from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
-
-logger = logging.getLogger(__name__)
-
-
-def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
-    return team_config.preset_rooms
 
 
 # Team CRUD
@@ -35,33 +24,37 @@ async def get_all_teams(enabled: bool | None = None) -> list[GtTeam]:
     return list(await query.aio_execute())
 
 
-async def upsert_team(team_config: TeamConfig) -> GtTeam:
-    """创建或更新 Team。"""
-    name = team_config.name
-    config_json = json.dumps(team_config.config, ensure_ascii=False, sort_keys=True)
-    max_function_calls = team_config.max_function_calls if team_config.max_function_calls is not None else 5
+async def save_team(team: GtTeam) -> GtTeam:
+    """保存 Team 对象：无 id 时插入，有 id 时更新。"""
+    config_json = json.dumps(team.get_config(), ensure_ascii=False, sort_keys=True)
+
+    if team.id is None:
+        team_id = await GtTeam.insert(
+            name=team.name,
+            config=config_json,
+            max_function_calls=team.max_function_calls,
+            enabled=team.enabled,
+            deleted=team.deleted,
+        ).aio_execute()
+        saved = await get_team_by_id(team_id)
+        assert saved is not None, f"team insert failed: name={team.name}"
+        return saved
 
     await (
-        GtTeam.insert(
-            name=name,
+        GtTeam.update(
+            name=team.name,
             config=config_json,
-            max_function_calls=max_function_calls,
+            max_function_calls=team.max_function_calls,
+            enabled=team.enabled,
+            deleted=team.deleted,
+            updated_at=GtTeam._now(),
         )
-        .on_conflict(
-            conflict_target=[GtTeam.name],
-            update={
-                GtTeam.config: config_json,
-                GtTeam.max_function_calls: max_function_calls,
-                GtTeam.updated_at: GtTeam._now(),
-            },
-        )
+        .where(GtTeam.id == team.id)
         .aio_execute()
     )
-
-    row = await GtTeam.aio_get_or_none(GtTeam.name == name)
-    if row is None:
-        raise RuntimeError(f"team upsert failed: {name}")
-    return row
+    saved = await get_team_by_id(team.id)
+    assert saved is not None, f"team update failed: team_id={team.id}"
+    return saved
 
 
 async def delete_team(name: str) -> None:
@@ -86,116 +79,3 @@ async def team_exists(name: str) -> bool:
     """检查 Team 是否存在且未删除且已启用。"""
     row = await GtTeam.aio_get_or_none((GtTeam.name == name) & (GtTeam.deleted == 0) & (GtTeam.enabled == 1))
     return row is not None
-
-
-# 完整配置获取
-async def get_team_config(name: str) -> TeamConfig | None:
-    """获取指定 Team 的完整配置（类似 JSON 格式）。"""
-
-    team = await get_team(name)
-    if team is None:
-        return None
-
-    team_id = team.id
-
-    agent_rows = await gtAgentManager.get_agents_by_team(team_id)
-    template_rows = await gtRoleTemplateManager.get_role_templates_by_ids(
-        [agent.role_template_id for agent in agent_rows]
-    )
-    templates_by_id = {template.id: template for template in template_rows}
-
-    agents_list: list[AgentConfig] = []
-    for agent in agent_rows:
-        template = templates_by_id.get(agent.role_template_id)
-        if template is None:
-            logger.warning(
-                "Agent '%s' 引用的角色模板不存在: role_template_id=%s",
-                agent.name,
-                agent.role_template_id,
-            )
-            continue
-        agents_list.append(
-            AgentConfig(
-                name=agent.name,
-                role_template=template.template_name,
-                model=agent.model or None,
-                driver=agent.driver if isinstance(agent.driver, DriverType) else DriverType.NATIVE,
-            )
-        )
-
-    rooms: list[TeamRoomConfig] = []
-    for room in await gtRoomManager.get_rooms_by_team(team_id):
-        room_members = await gtRoomManager.get_members_by_room(room.id)
-        rooms.append(TeamRoomConfig(
-            name=room.name,
-            initial_topic=room.initial_topic,
-            max_turns=room.max_turns,
-            members=room_members,
-        ))
-
-    return TeamConfig(
-        name=team.name,
-        config=team.get_config(),
-        members=agents_list,
-        preset_rooms=rooms,
-        max_function_calls=team.max_function_calls,
-    )
-
-
-async def get_all_team_configs() -> list[TeamConfig]:
-    """获取所有 Team 的完整配置列表。"""
-    result = []
-    for team in await get_all_teams():
-        config = await get_team_config(team.name)
-        if config:
-            result.append(config)
-    return result
-
-
-async def _resolve_role_template_id(agent_config: AgentConfig) -> int:
-    template = await gtRoleTemplateManager.get_role_template_by_name(agent_config.role_template)
-    if template is None:
-        return 0
-    return template.id
-
-
-# JSON 到数据库的转换
-async def import_team_from_config(team_config: TeamConfig) -> None:
-    """从 TeamConfig 导入 Team 到数据库。"""
-
-    name = team_config.name
-
-    # 检查是否已存在
-    existing = await get_team(name)
-    if existing is not None:
-        logger.info(f"Team '{name}' 已存在，跳过导入")
-        return
-
-    # 导入 Team
-    team = await upsert_team(team_config)
-    team_id = team.id
-
-    agents_to_save = []
-    for cfg in team_config.members:
-        role_template_id = await _resolve_role_template_id(cfg)
-        if role_template_id == 0:
-            logger.warning(f"跳过 Agent '{cfg.name}'：未找到角色模板 '{cfg.role_template}'")
-            continue
-
-        agent = GtAgent(
-            team_id=team_id,
-            name=cfg.name,
-            role_template_id=role_template_id,
-            model=cfg.model or "",
-            driver=cfg.driver,
-            employ_status=EmployStatus.ON_BOARD,
-        )
-        agents_to_save.append(agent)
-
-    await gtAgentManager.batch_save_agents(team_id, agents_to_save)
-
-    # 导入 Rooms（upsert_rooms 会处理成员）
-    rooms = _iter_team_rooms(team_config)
-    await gtRoomManager.upsert_rooms(team_id, rooms)
-
-    logger.info(f"Team '{name}' 已从 JSON 导入数据库")

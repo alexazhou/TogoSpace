@@ -5,7 +5,6 @@ import sys
 import pytest
 
 from constants import OpenaiLLMApiRole, SpecialAgent
-from dal.db import gtTeamManager
 from tests.base import ServiceTestCase
 from util import configUtil
 from service import (
@@ -17,6 +16,7 @@ from service import (
     schedulerService as scheduler,
     ormService,
     persistenceService,
+    teamService,
 )
 
 TEAM = "test_team"
@@ -58,7 +58,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await persistenceService.startup()
         await roleTemplateService.startup()
         await agentService.startup()
-        await gtTeamManager.import_team_from_config(team_config)
+        await teamService.import_team_from_config(team_config)
         await agentService.load_team_ids([team_config])
         await agentService.create_team_agents([team_config])
         await roomService.create_rooms([team_config])
