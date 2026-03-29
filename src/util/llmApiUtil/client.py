@@ -34,11 +34,7 @@ async def send_request(request: OpenAIRequest, url: str, api_key: str) -> OpenAI
     """使用 litellm 发送 chat completion 请求。"""
     
     # 构造 litellm.acompletion 的参数
-    # 如果提供了 url (base_url)，且模型没有 provider 前缀，
-    # 我们默认将其视为 openai 兼容接口，并添加 'openai/' 前缀以确保 litellm 正确路由。
     model_name = request.model
-    if url and "/" not in model_name:
-        model_name = f"openai/{model_name}"
 
     # 清理 url：litellm 会自动添加 /chat/completions
     base_url = _clean_base_url(url)
