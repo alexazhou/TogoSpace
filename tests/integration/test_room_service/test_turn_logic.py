@@ -18,14 +18,14 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-@pytest.mark.forked
+
 class TestRoomTurnLogic(ServiceTestCase):
     """覆盖房间轮转推进、finish_turn 与唤醒边界行为。"""
 
     @classmethod
     async def async_setup_class(cls):
         # 该文件所有用例都基于真实 ChatRoom 状态机进行断言。
-        db_path = cls.TEST_DB_PATH
+        db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()

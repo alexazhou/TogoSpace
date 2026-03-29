@@ -30,8 +30,26 @@ from constants import OpenaiLLMApiRole
 
 _SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 _BACKEND_READY_TIMEOUT = 20
-_TEST_BACKEND_PORT = 18080
-_TEST_MOCK_LLM_PORT = 19876
+_BASE_BACKEND_PORT = 18080
+_BASE_MOCK_LLM_PORT = 19876
+
+
+def _get_worker_offset() -> int:
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER")
+    if worker_id and worker_id.startswith("gw"):
+        try:
+            return int(worker_id[2:])
+        except ValueError:
+            return 0
+    return 0
+
+
+def _get_backend_port() -> int:
+    return _BASE_BACKEND_PORT + _get_worker_offset()
+
+
+def _get_mock_llm_port() -> int:
+    return _BASE_MOCK_LLM_PORT + _get_worker_offset()
 
 
 def _find_free_port() -> int:
@@ -122,7 +140,17 @@ class ServiceTestCase:
     _backend_config_dir: str = None
 
     mock_llm_server: MockLLMServer = None
-    TEST_DB_PATH: str = "/tmp/teamagent_tests.db"
+
+    @classmethod
+    def _get_test_db_path(cls) -> str:
+        worker_id = os.environ.get("PYTEST_XDIST_WORKER")
+        if worker_id:
+            return f"/tmp/teamagent_tests_{worker_id}.db"
+        return "/tmp/teamagent_tests.db"
+
+    @property
+    def test_db_path(self) -> str:
+        return self._get_test_db_path()
 
     # ------------------------------------------------------------------
     # LLM Patching (In-Process Mocking)
@@ -196,8 +224,7 @@ class ServiceTestCase:
     def setup_class(cls):
         # 先启动外部依赖（MockLLM/后端子进程），再执行子类自定义异步初始化。
         try:
-            if cls.requires_backend:
-                cls._load_config()
+            cls._load_config()
             cls.cleanup_sqlite_files()
             cls.prepare_sqlite_schema()
             if cls.requires_mock_llm:
@@ -218,8 +245,9 @@ class ServiceTestCase:
         except Exception as exc:
             teardown_error = exc
         finally:
+            if hasattr(cls, "_config_patcher"):
+                cls._config_patcher.stop()
             cls._safe_cleanup_external_dependencies()
-            cls.cleanup_sqlite_files()
         if teardown_error is not None:
             raise teardown_error
 
@@ -233,11 +261,12 @@ class ServiceTestCase:
 
     @classmethod
     def _start_mock_llm(cls):
-        _wait_port_released(MOCK_LLM_HOST, _TEST_MOCK_LLM_PORT)
-        cls.mock_llm_server = MockLLMServer()
+        port = _get_mock_llm_port()
+        _wait_port_released(MOCK_LLM_HOST, port)
+        cls.mock_llm_server = MockLLMServer(port=port)
         cls.mock_llm_server.start()
         _assert_port_ready(
-            get_mock_llm_api_url(),
+            get_mock_llm_api_url(port=port),
             "MockLLM",
             method="POST",
             data=b"{}",
@@ -304,10 +333,23 @@ class ServiceTestCase:
 
         cls._backend_config_dir = config_dir
 
+        # 强制重写配置中的 DB 路径为 worker 专属路径
+        db_path = cls._get_test_db_path()
+        original_load = configUtil.load
+
+        def patched_load(path=None, force_reload=False):
+            cfg = original_load(path or cls._backend_config_dir, force_reload=force_reload)
+            if cfg.setting.persistence:
+                cfg.setting.persistence.db_path = db_path
+            return cfg
+
+        cls._config_patcher = mock.patch("util.configUtil.load", side_effect=patched_load)
+        cls._config_patcher.start()
+
     @classmethod
     def cleanup_sqlite_files(cls) -> None:
         """删除测试 DB 文件（含后端子进程使用的 DB）。"""
-        paths = [cls.TEST_DB_PATH]
+        paths = [cls._get_test_db_path()]
         setting = configUtil.load(cls._backend_config_dir).setting
         path = setting.persistence.db_path
         if path:
@@ -319,7 +361,7 @@ class ServiceTestCase:
     @classmethod
     def prepare_sqlite_schema(cls) -> None:
         """为测试预创建数据库 schema，避免依赖 ormService 启动时自动建表。"""
-        paths = [cls.TEST_DB_PATH]
+        paths = [cls._get_test_db_path()]
         setting = configUtil.load(cls._backend_config_dir).setting
         path = setting.persistence.db_path
         if path:
@@ -331,7 +373,7 @@ class ServiceTestCase:
     @classmethod
     def _start_backend(cls):
         """启动后端子进程，等待 HTTP 服务就绪。"""
-        port = _TEST_BACKEND_PORT
+        port = _get_backend_port()
         _wait_port_released("127.0.0.1", port)
 
         env = os.environ.copy()

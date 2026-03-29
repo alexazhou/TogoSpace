@@ -267,8 +267,8 @@ class MockLLMServer:
     - POST /v1/messages - Anthropic 格式的 LLM 推理端点
     """
 
-    def __init__(self):
-        self.port: int = MOCK_LLM_PORT
+    def __init__(self, port: int = MOCK_LLM_PORT):
+        self.port: int = port
         self._ioloop: tornado.ioloop.IOLoop = None
         self._thread: threading.Thread = None
         self._started = threading.Event()

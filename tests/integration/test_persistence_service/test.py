@@ -26,7 +26,7 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-@pytest.mark.forked
+
 class TestRestoreRoomHistory(ServiceTestCase):
     """重启后 restore_runtime_state 能恢复房间消息历史和已读游标。"""
 
@@ -34,7 +34,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
 
     @classmethod
     async def async_setup_class(cls):
-        cls.db_path = Path(cls.TEST_DB_PATH)
+        cls.db_path = Path(cls._get_test_db_path())
         await persistenceService.shutdown()
         await ormService.shutdown()
         roomService.shutdown()
@@ -88,7 +88,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         assert self.restored.export_member_read_index()["bob"] == 2
 
 
-@pytest.mark.forked
+
 class TestRestoreAgentHistory(ServiceTestCase):
     """重启后 restore_runtime_state 能恢复 Agent 对话历史。"""
 
@@ -96,7 +96,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
 
     @classmethod
     async def async_setup_class(cls):
-        cls.db_path = Path(cls.TEST_DB_PATH)
+        cls.db_path = Path(cls._get_test_db_path())
         await persistenceService.shutdown()
         await ormService.shutdown()
         await agentService.shutdown()

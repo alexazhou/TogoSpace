@@ -133,8 +133,18 @@ frontend/
 ### 测试
 
 ```bash
-# 运行全量测试
-.venv/bin/python3 -m pytest tests/ -v --tb=short --override-ini="addopts="
+# 快速跑所有测试（默认并行，无覆盖率）
+./scripts/run_tests.sh
+
+# 跑覆盖率测试
+./scripts/run_tests.sh --cov
+
+# 指定目录或用例（支持所有 pytest 参数）
+./scripts/run_tests.sh tests/unit
+./scripts/run_tests.sh -k "test_name"
+
+# 调试模式（串行运行）
+./scripts/run_tests.sh --serial
 ```
 
 ### Web 前端

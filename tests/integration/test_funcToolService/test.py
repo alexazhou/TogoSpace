@@ -20,7 +20,7 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-@pytest.mark.forked
+
 class TestfuncToolServiceInit(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
@@ -37,12 +37,12 @@ class TestfuncToolServiceInit(ServiceTestCase):
         assert funcToolService.get_tools() == []
 
 
-@pytest.mark.forked
+
 class TestRunToolCall(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # send_chat_msg 依赖房间上下文，因此同时初始化 room + tool service。
-        db_path = cls.TEST_DB_PATH
+        db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()

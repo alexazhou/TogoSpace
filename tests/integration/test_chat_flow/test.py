@@ -27,14 +27,14 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-@pytest.mark.forked
+
 class TestIntegrationMultiAgentChat(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # 按真实启动顺序拉起 service，并加载 integration 专用配置。
         cfg = configUtil.load(_CONFIG_DIR, force_reload=True)
         team_config = cfg.teams[0]
-        db_path = cls.TEST_DB_PATH
+        db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
