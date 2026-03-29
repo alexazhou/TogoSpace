@@ -40,7 +40,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await roomService.startup()
         await roleTemplateService.startup()
         await teamService.import_team_from_config(team_config)
-        await roomService.create_room(TEAM, "general", ["alice", "bob"])
+        await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
         await funcToolService.startup()
         await agentService.startup()
         await agentService.load_team_ids([team_config])
@@ -72,7 +72,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
         with self.patch_infer(handler=fake_infer):
             # 重新创建 max_turns=1 的同名房间，快速触发“每人一轮”场景。
-            await roomService.create_room(TEAM, "general", ["alice", "bob"], max_turns=1)
+            await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"], max_turns=1)
             room = roomService.get_room_by_key(room_key)
             run_task = asyncio.create_task(scheduler.run())
             await room.activate_scheduling()
@@ -94,11 +94,9 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await room.add_message("system", "开始聊天")
 
         alice = agentService.get_team_agent(TEAM, "alice")
-        # 避免前序用例中断时残留 assistant 结尾历史，导致本用例 _infer 前置断言失败。
-        if alice._history and alice._history[-1].role == OpenaiLLMApiRole.ASSISTANT:
-            await alice.append_history_message(
-                OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset test turn state")
-            )
+        await alice.append_history_message(
+            OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset test turn state")
+        )
         call_seq = {
             "alice": [
                 {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "hello"}}]},
@@ -128,10 +126,9 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await room.add_message("system", "开始聊天")
 
         alice = agentService.get_team_agent(TEAM, "alice")
-        if alice._history and alice._history[-1].role == OpenaiLLMApiRole.ASSISTANT:
-            await alice.append_history_message(
-                OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset turn checker history")
-            )
+        await alice.append_history_message(
+            OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset turn checker history")
+        )
         resps = [
             {"content": "我直接回复"},
             {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "最终消息"}}]},
@@ -173,7 +170,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
         with self.patch_infer(handler=fake_infer):
             run_task = asyncio.create_task(scheduler.run())
-            await roomService.create_room(TEAM, "general", ["alice", "bob"], max_turns=2)
+            await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"], max_turns=2)
             room = roomService.get_room_by_key(room_key)
             await room.activate_scheduling()
             await self.wait_until(
