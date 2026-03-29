@@ -164,36 +164,6 @@ async def update_agent(agent_id: int, name: str, role_template_id: int, model: s
     return agent
 
 
-async def assign_employee_numbers_for_existing_agents(team_id: int) -> int:
-    """为 employee_number=0 的 agents 分配工号。返回已分配的数量。"""
-    agents = list(
-        await GtAgent.select()
-        .where((GtAgent.team_id == team_id) & (GtAgent.employee_number == 0))
-        .order_by(GtAgent.name)
-        .aio_execute()
-    )
-
-    if not agents:
-        return 0
-
-    max_num = await get_max_employee_number(team_id)
-    next_num = max_num + 1
-    assigned_count = 0
-
-    for agent in agents:
-        existing = await GtAgent.aio_get_or_none(
-            (GtAgent.team_id == team_id) &
-            (GtAgent.employee_number == next_num)
-        )
-        if existing is None:
-            agent.employee_number = next_num
-            await agent.aio_save()
-            next_num += 1
-            assigned_count += 1
-
-    return assigned_count
-
-
 async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) -> None:
     """批量更新成员状态。"""
     if not agent_ids:
