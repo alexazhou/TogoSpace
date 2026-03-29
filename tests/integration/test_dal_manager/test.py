@@ -144,6 +144,10 @@ class TestDalManagers(ServiceTestCase):
     async def test_team_manager_get_team_config_and_get_all_team_configs(self):
         await self._reset_tables()
 
+        # 先创建角色模板
+        await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
+        await gtRoleTemplateManager.upsert_role_template("bob", "gpt-4o")
+
         team_a = await gtTeamManager.upsert_team(TeamConfig(
             name="team_a",
             config={"slogan": "ship fast"},
@@ -187,6 +191,11 @@ class TestDalManagers(ServiceTestCase):
 
     async def test_team_manager_import_team_from_config_imports_and_skips_existing(self):
         await self._reset_tables()
+
+        # 先创建角色模板
+        await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
+        await gtRoleTemplateManager.upsert_role_template("bob", "gpt-4o")
+        await gtRoleTemplateManager.upsert_role_template("charlie", "gpt-4o")
 
         payload = TeamConfig(
             name="imported",
@@ -325,6 +334,11 @@ class TestDalManagers(ServiceTestCase):
     async def test_room_manager_get_upsert_delete_members(self):
         await self._reset_tables()
 
+        # 先创建角色模板
+        await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
+        await gtRoleTemplateManager.upsert_role_template("bob", "gpt-4o")
+        await gtRoleTemplateManager.upsert_role_template("charlie", "gpt-4o")
+
         team = await gtTeamManager.upsert_team(TeamConfig(name="member_team"))
         await gtAgentManager.upsert_agents(team.id, [
             AgentConfig(name="alice", role_template="alice"),
@@ -357,6 +371,10 @@ class TestDalManagers(ServiceTestCase):
     # ------------------------------------------------------------------
     async def test_room_message_manager_append_and_query(self):
         await self._reset_tables()
+
+        # 先创建角色模板
+        await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
+        await gtRoleTemplateManager.upsert_role_template("bob", "gpt-4o")
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="msg_team"))
         room = await gtRoomManager.ensure_room_by_key(
@@ -392,6 +410,9 @@ class TestDalManagers(ServiceTestCase):
     async def test_member_history_manager_append_single_is_idempotent(self):
         await self._reset_tables()
 
+        # 先创建角色模板
+        await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
+
         team = await gtTeamManager.upsert_team(TeamConfig(name="history_team"))
         await gtAgentManager.upsert_agents(team.id, [AgentConfig(name="alice", role_template="alice")])
         alice = await gtAgentManager.get_agent(team.id, "alice")
@@ -418,6 +439,10 @@ class TestDalManagers(ServiceTestCase):
 
     async def test_member_history_manager_append_and_get_sorted(self):
         await self._reset_tables()
+
+        # 先创建角色模板
+        await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
+        await gtRoleTemplateManager.upsert_role_template("bob", "gpt-4o")
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="history_team_2"))
         await gtAgentManager.upsert_agents(team.id, [

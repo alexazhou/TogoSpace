@@ -5,7 +5,7 @@ import aiosqlite
 import pytest
 
 from tests.base import ServiceTestCase
-from dal.db import gtDeptManager, gtTeamManager, gtAgentManager
+from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from exception import TeamAgentException
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -13,6 +13,7 @@ from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service import deptService, ormService
 from util.configTypes import DeptNodeConfig, TeamConfig, AgentConfig
 from constants import DriverType, EmployStatus
@@ -39,9 +40,12 @@ class TestDeptService(ServiceTestCase):
         await GtAgentHistory.delete().aio_execute()
         await GtRoom.delete().aio_execute()
         await GtTeam.delete().aio_execute()
+        await GtRoleTemplate.delete().aio_execute()
 
     async def _setup_team_with_members(self, team_name: str, member_names: list[str]) -> GtTeam:
         """创建 team 并写入成员，返回 GtTeam 对象。"""
+        # 先创建角色模板
+        await gtRoleTemplateManager.upsert_role_template("dummy", "gpt-4o")
         team = await gtTeamManager.upsert_team(TeamConfig(name=team_name))
         await gtAgentManager.upsert_agents(
             team.id,
@@ -581,6 +585,10 @@ class TestDeptService(ServiceTestCase):
 
     async def test_team_member_model_driver_persist_and_reload(self):
         await self._reset_tables()
+
+        # 先创建角色模板
+        await gtRoleTemplateManager.upsert_role_template("gpt_agent", "gpt-4o")
+        await gtRoleTemplateManager.upsert_role_template("glm_agent", "glm-4")
 
         team = await gtTeamManager.upsert_team(TeamConfig(name="t_model_driver"))
         members = [

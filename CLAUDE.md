@@ -6,7 +6,7 @@
 
 ## 技术栈
 
-- Python 3.11+
+- Python 3.11+（项目使用 `.venv` 虚拟环境）
 - tornado（异步 HTTP + WebSocket）
 - pydantic（模型校验）
 - textual（TUI）
@@ -108,7 +108,7 @@ frontend/
 
 ```bash
 # 前台运行（开发）
-cd src && python backend_main.py [--config-dir ../config] [--port 8080]
+.venv/bin/python3 src/backend_main.py [--config-dir config] [--port 8080]
 
 # 后台运行
 ./scripts/start_backend.sh [--config-dir ...] [--port ...]
@@ -121,10 +121,20 @@ cd src && python backend_main.py [--config-dir ../config] [--port 8080]
 
 ```bash
 # 前台运行
+.venv/bin/python3 tui/tui_main.py [--base-url http://127.0.0.1:8080] [--config config/setting.json]
+
+# 或使用脚本
 ./scripts/start_tui.sh [--base-url http://127.0.0.1:8080] [--config config/setting.json]
 
 # 停止
 ./scripts/stop_tui.sh
+```
+
+### 测试
+
+```bash
+# 运行全量测试
+.venv/bin/python3 -m pytest tests/ -v --tb=short --override-ini="addopts="
 ```
 
 ### Web 前端

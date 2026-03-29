@@ -20,8 +20,8 @@ class CreateTeamRequest(BaseModel):
     name: str
     working_directory: str = ""
     config: dict = Field(default_factory=dict)
-    members: list[AgentConfig]
-    preset_rooms: list[TeamRoomConfig]
+    members: list[AgentConfig] = Field(default_factory=list)
+    preset_rooms: list[TeamRoomConfig] = Field(default_factory=list)
 
 
 class UpdateTeamRequest(BaseModel):
@@ -79,9 +79,9 @@ class TeamCreateHandler(BaseHandler):
         team_config = TeamConfig.model_validate(payload)
 
         # 调用 service 创建 team
-        await teamService.create_team(team_config)
+        team_id = await teamService.create_team(team_config)
 
-        self.return_json({"status": "created", "name": request.name})
+        self.return_json({"status": "created", "id": team_id, "name": request.name})
 
 
 class TeamDetailHandler(BaseHandler):

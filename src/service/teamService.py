@@ -70,7 +70,7 @@ async def reload_from_db() -> list[TeamConfig]:
     return list(_teams)
 
 
-async def create_team(team_config: TeamConfig) -> None:
+async def create_team(team_config: TeamConfig) -> int:
     """创建新 Team（自动触发热更新）。"""
     name = team_config.name
 
@@ -94,18 +94,11 @@ async def create_team(team_config: TeamConfig) -> None:
 
     await gtRoomManager.upsert_rooms(team_id, rooms)
 
-    # 创建 Members
-    for room in rooms:
-        room_name = room.name
-        room_config = await gtRoomManager.get_room_config(team_id, room_name)
-        if room_config:
-            members = room.members
-            await gtRoomManager.upsert_room_members(room_config.id, members)
-
     # 触发热更新
     await hot_reload_team(name)
 
     logger.info(f"Team '{name}' 已创建")
+    return team_id
 
 
 async def update_team(team_config: TeamConfig) -> None:
@@ -124,14 +117,6 @@ async def update_team(team_config: TeamConfig) -> None:
             room.max_turns = 100
 
     await gtRoomManager.upsert_rooms(team_id, rooms)
-
-    # 更新 Members
-    for room in rooms:
-        room_name = room.name
-        room_config = await gtRoomManager.get_room_config(team_id, room_name)
-        if room_config:
-            members = room.members
-            await gtRoomManager.upsert_room_members(room_config.id, members)
 
     logger.info(f"Team '{name}' 配置已更新")
 

@@ -23,14 +23,13 @@ class TestConfigApi(ServiceTestCase):
         # Create a temporary team for modification and deletion
         payload = {
             "name": "temp_team_mod",
-            "members": [{"name": "alice", "role_template": "alice"}],
-            "preset_rooms": []
         }
         async with aiohttp.ClientSession() as client:
-            await client.post(f"{self.backend_base_url}/teams/create.json", json=payload)
-        
-        team_id = await self._get_team_id("temp_team_mod")
-        
+            async with client.post(f"{self.backend_base_url}/teams/create.json", json=payload) as resp:
+                assert resp.status == 200
+                create_data = await resp.json()
+                team_id = create_data["id"]
+
         # 1. Modify Team
         modify_payload = {
             "working_directory": "/tmp/modified_temp",

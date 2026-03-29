@@ -27,6 +27,7 @@ BACKEND_LOG_CONFIG: Dict[str, Dict[str, object]] = {
     "util.llmApiUtil": {"path": "util/llm_api.log", "global": False},
     "util.assertUtil": {"path": "util/assert.log", "global": False},
     "dal": {"path": "dal/dal.log", "global": False},
+    "LiteLLM": {"path": "litellm/litellm.log", "global": False},
 }
 
 
