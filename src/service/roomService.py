@@ -651,8 +651,8 @@ async def _create_room(
     if max_turns > 0:
         logger.info(f"初始化轮次配置: room_id={resolved_room_id}, max_turns={max_turns}")
 
-async def create_room(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0) -> None:
-    """创建并初始化一个聊天室。创建后房间处于 INIT，需由 service 层显式退出 INIT。"""
+async def ensure_room_record(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0) -> None:
+    """确保房间记录存在并装载运行态。创建后房间处于 INIT，需由 service 层显式退出 INIT。"""
     await _create_room(
         room_id=None,
         team_name=team_name,

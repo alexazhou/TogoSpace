@@ -76,7 +76,7 @@ class TestRunToolCall(ServiceTestCase):
 
     async def test_run_tool_call_with_context(self):
         """上下文注入场景：send_chat_msg 能在上下文房间成功落消息。"""
-        await roomService.create_room(TEAM, "ctx_room", ["alice"])
+        await roomService.ensure_room_record(TEAM, "ctx_room", ["alice"])
         room = roomService.get_room_by_key(f"ctx_room@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
         result = await self._run("send_chat_msg", '{"room_name": "ctx_room", "msg": "test"}', context=ctx)
@@ -84,7 +84,7 @@ class TestRunToolCall(ServiceTestCase):
 
     async def test_run_tool_call_with_missing_room_returns_error(self):
         """目标房间不存在时，应返回错误信息。"""
-        await roomService.create_room(TEAM, "ctx_room_missing", ["alice"])
+        await roomService.ensure_room_record(TEAM, "ctx_room_missing", ["alice"])
         room = roomService.get_room_by_key(f"ctx_room_missing@{TEAM}")
         ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
         result = await self._run("send_chat_msg", '{"room_name": "missing_room", "msg": "test"}', context=ctx)
@@ -93,8 +93,8 @@ class TestRunToolCall(ServiceTestCase):
 
     async def test_run_tool_call_returns_false_when_sender_not_in_target_room(self):
         """tool 内部校验失败时，run_tool_call 应返回 success=false。"""
-        await roomService.create_room(TEAM, "ctx_src", ["alice"])
-        await roomService.create_room(TEAM, "ctx_dst", ["bob"])
+        await roomService.ensure_room_record(TEAM, "ctx_src", ["alice"])
+        await roomService.ensure_room_record(TEAM, "ctx_dst", ["bob"])
         room = roomService.get_room_by_key(f"ctx_src@{TEAM}")
         target = roomService.get_room_by_key(f"ctx_dst@{TEAM}")
         before_count = len(target.messages)

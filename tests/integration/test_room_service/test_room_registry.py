@@ -37,30 +37,30 @@ class TestRoomRegistry(ServiceTestCase):
         await persistenceService.shutdown()
         await ormService.shutdown()
 
-    async def test_create_room(self):
-        """create_room 后应可通过 key 获取 ChatRoom 实例。"""
-        await roomService.create_room(TEAM, "myroom", ["alice"])
+    async def test_ensure_room_record(self):
+        """ensure_room_record 后应可通过 key 获取 ChatRoom 实例。"""
+        await roomService.ensure_room_record(TEAM, "myroom", ["alice"])
         key = f"myroom@{TEAM}"
         assert key in roomService._rooms
         assert isinstance(roomService.get_room_by_key(key), ChatRoom)
 
     async def test_close_all(self):
         """shutdown 会清空全局 rooms 注册表。"""
-        await roomService.create_room(TEAM, "tmp", ["a"])
+        await roomService.ensure_room_record(TEAM, "tmp", ["a"])
         roomService.shutdown()
         assert len(roomService._rooms) == 0
 
     async def test_setup_members(self):
         """get_member_names 返回创建时配置的成员顺序。"""
-        await roomService.create_room(TEAM, "r1", ["alice", "bob"])
+        await roomService.ensure_room_record(TEAM, "r1", ["alice", "bob"])
         room = roomService.get_room_by_key(f"r1@{TEAM}")
         assert roomService.get_member_names(room.room_id) == ["alice", "bob"]
 
     async def test_get_rooms_for_agent(self):
         """按 agent 过滤房间时，只返回该 agent 参与的 room_id 列表。"""
-        await roomService.create_room(TEAM, "r1", ["alice"])
-        await roomService.create_room(TEAM, "r2", ["bob"])
-        await roomService.create_room(TEAM, "r3", ["alice", "bob"])
+        await roomService.ensure_room_record(TEAM, "r1", ["alice"])
+        await roomService.ensure_room_record(TEAM, "r2", ["bob"])
+        await roomService.ensure_room_record(TEAM, "r3", ["alice", "bob"])
         r1 = roomService.get_room_by_key(f"r1@{TEAM}")
         r2 = roomService.get_room_by_key(f"r2@{TEAM}")
         r3 = roomService.get_room_by_key(f"r3@{TEAM}")
@@ -96,7 +96,7 @@ class TestRoomRegistry(ServiceTestCase):
 
     async def test_special_member_ids(self):
         """SYSTEM 和 OPERATOR 应有特殊的 member_id。"""
-        await roomService.create_room(TEAM, "special_room", ["Operator", "alice"])
+        await roomService.ensure_room_record(TEAM, "special_room", ["Operator", "alice"])
         room = roomService.get_room_by_key(f"special_room@{TEAM}")
 
         # SYSTEM: member_id = -2

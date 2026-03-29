@@ -39,7 +39,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
     async def test_add_message(self):
         """add_message 会追加消息并发布 ROOM_MSG_ADDED 事件。"""
-        await roomService.create_room(TEAM, "test_room", ["alice"])
+        await roomService.ensure_room_record(TEAM, "test_room", ["alice"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
         with patch("service.messageBus.publish") as mock_publish:
@@ -61,7 +61,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
     async def test_get_unread_messages_initial(self):
         """首次拉取未读应拿到系统初始化公告。"""
-        await roomService.create_room(TEAM, "test_room", ["alice"])
+        await roomService.ensure_room_record(TEAM, "test_room", ["alice"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
         msgs = await room.get_unread_messages("alice")
@@ -70,7 +70,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
     async def test_get_unread_messages_advances_index(self):
         """读取未读会推进游标，重复读取不应返回旧消息。"""
-        await roomService.create_room(TEAM, "test_room", ["alice", "bob"])
+        await roomService.ensure_room_record(TEAM, "test_room", ["alice", "bob"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
         await room.get_unread_messages("alice")
@@ -84,7 +84,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
     async def test_get_unread_messages_independent_per_agent(self):
         """不同 agent 的未读游标互相独立。"""
-        await roomService.create_room(TEAM, "test_room", ["alice", "bob", "char"])
+        await roomService.ensure_room_record(TEAM, "test_room", ["alice", "bob", "char"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
         await room.get_unread_messages("alice")
@@ -95,7 +95,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
     async def test_add_message_rejects_non_member(self):
         """非房间成员写消息时应被拒绝。"""
-        await roomService.create_room(TEAM, "restricted_room", ["alice"])
+        await roomService.ensure_room_record(TEAM, "restricted_room", ["alice"])
         room = roomService.get_room_by_key(f"restricted_room@{TEAM}")
         await room.activate_scheduling()
 
@@ -104,7 +104,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
     async def test_format_log(self):
         """format_log 输出包含房间标题与消息发送者。"""
-        await roomService.create_room(TEAM, "test_room", ["alice"])
+        await roomService.ensure_room_record(TEAM, "test_room", ["alice"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
         log = room.format_log()
@@ -113,7 +113,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
     async def test_activate_scheduling_persists_initial_message(self):
         """首次激活调度时生成的初始化消息应像普通消息一样落库。"""
-        await roomService.create_room(TEAM, "persist_init_room", ["alice"])
+        await roomService.ensure_room_record(TEAM, "persist_init_room", ["alice"])
         room = roomService.get_room_by_key(f"persist_init_room@{TEAM}")
 
         assert room.messages == []
