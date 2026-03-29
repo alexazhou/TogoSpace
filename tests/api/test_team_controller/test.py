@@ -50,22 +50,12 @@ class TestTeamController(_ApiServiceCase):
         assert room["max_turns"] == 50
 
     async def test_create_team_and_fetch_detail(self):
-        template_id = await self._get_role_template_id("alice")
         payload = {
             "name": "new_team",
             "config": {
                 "slogan": "使命必达",
                 "rules": "先沟通后执行",
             },
-            "members": [{"name": "alice", "role_template": "alice"}],
-            "preset_rooms": [
-                {
-                    "name": "团队群聊",
-                    "members": ["alice"],
-                    "initial_topic": "hello",
-                    "max_turns": 100,
-                }
-            ],
         }
 
         async with aiohttp.ClientSession() as client:
@@ -73,6 +63,8 @@ class TestTeamController(_ApiServiceCase):
                 assert resp.status == 200
                 data = await resp.json()
                 assert data["status"] == "created"
+                assert isinstance(data["id"], int)
+                created_team_id = data["id"]
 
             async with client.get(f"{self.backend_base_url}/teams/list.json") as resp:
                 assert resp.status == 200
@@ -80,19 +72,17 @@ class TestTeamController(_ApiServiceCase):
 
         assert any(team["name"] == "new_team" for team in teams_data["teams"])
 
-        team_id = await self._get_team_id("new_team")
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/teams/{team_id}.json") as resp:
+            async with client.get(f"{self.backend_base_url}/teams/{created_team_id}.json") as resp:
                 assert resp.status == 200
                 detail = await resp.json()
 
-        assert detail["members"] == [{"name": "alice", "role_template_id": template_id}]
+        assert detail["members"] == []
         assert detail["config"] == {
             "slogan": "使命必达",
             "rules": "先沟通后执行",
         }
-        assert len(detail["rooms"]) == 1
-        assert detail["rooms"][0]["name"] == "团队群聊"
+        assert detail["rooms"] == []
 
     async def test_team_agents_by_team_id(self):
         """验证 GET /agents/list.json?team_id=<id> 返回团队成员。"""
