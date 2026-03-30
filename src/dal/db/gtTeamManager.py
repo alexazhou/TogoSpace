@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 from model.dbModel.gtTeam import GtTeam
 
 
@@ -29,12 +27,12 @@ async def get_all_teams(enabled: bool | None = None) -> list[GtTeam]:
 
 async def save_team(team: GtTeam) -> GtTeam:
     """保存 Team 对象：无 id 时插入，有 id 时更新。"""
-    config_json = json.dumps(team.get_config(), ensure_ascii=False, sort_keys=True)
+    config = team.get_config()
 
     if team.id is None:
         team_id = await GtTeam.insert(
             name=team.name,
-            config=config_json,
+            config=config,
             max_function_calls=team.max_function_calls,
             enabled=team.enabled,
             deleted=team.deleted,
@@ -46,7 +44,7 @@ async def save_team(team: GtTeam) -> GtTeam:
     await (
         GtTeam.update(
             name=team.name,
-            config=config_json,
+            config=config,
             max_function_calls=team.max_function_calls,
             enabled=team.enabled,
             deleted=team.deleted,

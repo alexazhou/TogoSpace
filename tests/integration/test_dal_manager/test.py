@@ -125,7 +125,7 @@ class TestDalManagers(ServiceTestCase):
 
         created = await gtTeamManager.save_team(GtTeam(
             name="team_a",
-            config='{"slogan": "alpha"}',
+            config={"slogan": "alpha"},
             max_function_calls=3,
         ))
         assert created.name == "team_a"
@@ -138,7 +138,7 @@ class TestDalManagers(ServiceTestCase):
         assert by_name is not None and by_name.id == created.id
         assert by_id is not None and by_id.name == "team_a"
 
-        created.config = '{"rules": "sync first", "slogan": "beta"}'
+        created.config = {"rules": "sync first", "slogan": "beta"}
         created.max_function_calls = 7
         updated = await gtTeamManager.save_team(created)
         assert updated.id == created.id
@@ -170,7 +170,7 @@ class TestDalManagers(ServiceTestCase):
 
         team_a = await gtTeamManager.save_team(GtTeam(
             name="team_a",
-            config='{"slogan": "ship fast"}',
+            config={"slogan": "ship fast"},
         ))
         team_b = await gtTeamManager.save_team(GtTeam(name="team_b"))
         configs = [

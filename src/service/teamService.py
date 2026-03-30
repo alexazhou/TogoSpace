@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 
 from constants import DriverType, EmployStatus
@@ -25,7 +24,7 @@ def _build_team_row(team_config: TeamConfig, existing: GtTeam | None = None) -> 
     return GtTeam(
         id=existing.id if existing is not None else None,
         name=team_config.name,
-        config=json.dumps(team_config.config, ensure_ascii=False, sort_keys=True),
+        config=dict(team_config.config or {}),
         max_function_calls=team_config.max_function_calls if team_config.max_function_calls is not None else 5,
         enabled=existing.enabled if existing is not None else 1,
         deleted=existing.deleted if existing is not None else 0,
