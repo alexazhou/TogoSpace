@@ -102,7 +102,7 @@ class RoomMessagesHandler(BaseHandler):
 
         await room.add_message(SpecialAgent.OPERATOR.name, content)
         room.finish_turn(SpecialAgent.OPERATOR.name)
-        self.return_json({"status": "ok"})
+        self.return_success()
 
 
 # Team Room Management Handlers
