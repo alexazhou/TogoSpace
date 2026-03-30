@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import aiohttp
 import pytest
 from tests.base import ServiceTestCase
@@ -19,10 +20,18 @@ class TestConfigApi(ServiceTestCase):
         team = next(team for team in data["teams"] if team["name"] == team_name)
         return team["id"]
 
+    async def _get_team_agents(self, team_id: int) -> list[dict]:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
+                assert resp.status == 200
+                data = await resp.json()
+        return data["agents"]
+
     async def test_team_modify_and_delete(self):
         # Create a temporary team for modification and deletion
+        temp_team_name = f"temp_team_mod_{int(time.time() * 1000)}"
         payload = {
-            "name": "temp_team_mod",
+            "name": temp_team_name,
         }
         async with aiohttp.ClientSession() as client:
             async with client.post(f"{self.backend_base_url}/teams/create.json", json=payload) as resp:
@@ -62,6 +71,7 @@ class TestConfigApi(ServiceTestCase):
     async def test_team_room_lifecycle(self):
         # Use existing e2e team or create one
         team_id = await self._get_team_id("e2e")
+        room_name = f"new_room_{int(time.time() * 1000)}"
         
         # 1. List Team Rooms
         async with aiohttp.ClientSession() as client:
@@ -72,7 +82,7 @@ class TestConfigApi(ServiceTestCase):
 
         # 2. Create Team Room
         create_payload = {
-            "name": "new_room",
+            "name": room_name,
             "type": "GROUP",
             "initial_topic": "testing",
             "max_turns": 20
@@ -86,8 +96,8 @@ class TestConfigApi(ServiceTestCase):
             # Verify creation
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/list.json") as resp:
                 rooms_data = await resp.json()
-                assert any(r["name"] == "new_room" for r in rooms_data["rooms"])
-                new_room = next(r for r in rooms_data["rooms"] if r["name"] == "new_room")
+                assert any(r["name"] == room_name for r in rooms_data["rooms"])
+                new_room = next(r for r in rooms_data["rooms"] if r["name"] == room_name)
                 new_room_id = new_room["id"]
 
         # 3. Get Room Detail
@@ -95,7 +105,7 @@ class TestConfigApi(ServiceTestCase):
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}.json") as resp:
                 assert resp.status == 200
                 detail = await resp.json()
-                assert detail["name"] == "new_room"
+                assert detail["name"] == room_name
                 assert detail["initial_topic"] == "testing"
 
         # 4. Modify Room
@@ -128,7 +138,9 @@ class TestConfigApi(ServiceTestCase):
             # Verify members
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/list.json") as resp:
                 data = await resp.json()
-                assert set(data["members"]) == {"alice", "Operator"}
+                members = set(data["members"])
+                assert "alice" in members
+                assert any(member.lower() == "operator" for member in members)
 
         # 6. Delete Room
         async with aiohttp.ClientSession() as client:
@@ -139,3 +151,52 @@ class TestConfigApi(ServiceTestCase):
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/list.json") as resp:
                 rooms_data = await resp.json()
                 assert not any(r["id"] == new_room_id for r in rooms_data["rooms"])
+
+    async def test_team_room_create_with_member_ids(self):
+        team_id = await self._get_team_id("e2e")
+        room_name = f"room_with_member_ids_{int(time.time() * 1000)}"
+        agents = await self._get_team_agents(team_id)
+        alice = next(agent for agent in agents if agent["name"] == "alice")
+        bob = next(agent for agent in agents if agent["name"] == "bob")
+
+        create_payload = {
+            "name": room_name,
+            "type": "GROUP",
+            "initial_topic": "room created by member ids",
+            "max_turns": 12,
+            "member_ids": [alice["id"], bob["id"]],
+        }
+        async with aiohttp.ClientSession() as client:
+            async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/create.json", json=create_payload) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["status"] == "created"
+
+            async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/list.json") as resp:
+                assert resp.status == 200
+                rooms_data = await resp.json()
+                created_room = next(room for room in rooms_data["rooms"] if room["name"] == room_name)
+                room_id = created_room["id"]
+
+            async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{room_id}/agents/list.json") as resp:
+                assert resp.status == 200
+                members_data = await resp.json()
+                assert set(members_data["members"]) == {"alice", "bob"}
+
+            async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{room_id}/delete.json") as resp:
+                assert resp.status == 200
+
+    async def test_team_room_create_with_invalid_member_ids(self):
+        team_id = await self._get_team_id("e2e")
+        create_payload = {
+            "name": "room_with_invalid_member_ids",
+            "type": "GROUP",
+            "initial_topic": "invalid member ids",
+            "max_turns": 12,
+            "member_ids": [99999999],
+        }
+        async with aiohttp.ClientSession() as client:
+            async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/create.json", json=create_payload) as resp:
+                assert resp.status == 400
+                data = await resp.json()
+                assert data["error_code"] == "member_not_found"

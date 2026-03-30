@@ -1,19 +1,20 @@
 # 标准库
+from collections import Counter
 from typing import List
 
 # 第三方包
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # 内部包
 from controller.baseController import BaseHandler
-from dal.db import gtTeamManager, gtRoomManager
+from dal.db import gtTeamManager, gtRoomManager, gtAgentManager
 from model.coreModel.gtCoreWebModel import (
     GtCoreMessageInfo,
     GtCoreRoomMessagesResponse,
 )
 from model.dbModel.gtRoom import GtRoom
 from service import roomService as chat_room, teamService
-from constants import SpecialAgent, RoomState
+from constants import SpecialAgent, RoomState, RoomType
 from util import assertUtil
 from util.configTypes import TeamRoomConfig
 
@@ -21,9 +22,10 @@ from util.configTypes import TeamRoomConfig
 # Room Config Request Models
 class CreateRoomRequest(BaseModel):
     name: str
-    type: str
+    type: RoomType = RoomType.GROUP
     initial_topic: str | None = None
     max_turns: int = 100
+    member_ids: List[int] = Field(default_factory=list)
 
 
 class UpdateRoomRequest(BaseModel):
@@ -38,6 +40,40 @@ class UpdateMembersRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str | None = None
+
+
+async def _resolve_member_names_by_ids(team_id: int, member_ids: List[int]) -> List[str]:
+    if len(member_ids) == 0:
+        return []
+
+    duplicate_ids = sorted([member_id for member_id, count in Counter(member_ids).items() if count > 1])
+    assertUtil.assertEqual(
+        len(duplicate_ids),
+        0,
+        error_message=f"member_ids duplicated: {duplicate_ids}",
+        error_code="duplicate_member_ids",
+    )
+
+    agent_rows = await gtAgentManager.get_agents_by_ids(member_ids)
+    id_to_agent = {agent.id: agent for agent in agent_rows}
+
+    missing_ids = [member_id for member_id in member_ids if member_id not in id_to_agent]
+    assertUtil.assertEqual(
+        len(missing_ids),
+        0,
+        error_message=f"members not found: {missing_ids}",
+        error_code="member_not_found",
+    )
+
+    out_of_team_ids = [member_id for member_id in member_ids if id_to_agent[member_id].team_id != team_id]
+    assertUtil.assertEqual(
+        len(out_of_team_ids),
+        0,
+        error_message=f"members not in team '{team_id}': {out_of_team_ids}",
+        error_code="member_not_in_team",
+    )
+
+    return [id_to_agent[member_id].name for member_id in member_ids]
 
 
 async def _get_team_room_or_404(team_id: int, room_id: int) -> GtRoom:
@@ -131,10 +167,12 @@ class TeamRoomCreateHandler(BaseHandler):
         existing = next((r for r in existing_rooms if r.name == request.name), None)
         assertUtil.assertEqual(existing, None, error_message=f"Room '{request.name}' already exists", error_code="room_exists")
 
+        member_names = await _resolve_member_names_by_ids(team_id, request.member_ids)
+
         # 构建房间配置
         room_config = TeamRoomConfig(
             name=request.name,
-            members=[],
+            members=member_names,
             initial_topic=request.initial_topic,
             max_turns=request.max_turns,
         )
