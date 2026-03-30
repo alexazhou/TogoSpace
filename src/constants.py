@@ -1,20 +1,48 @@
+import re
 from enum import Enum, auto
 
 
 class EnhanceEnum(Enum):
     @classmethod
+    def _normalize_token(cls, value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+
+    @classmethod
     def value_of(cls, value: str):
-        for m, mm in cls.__members__.items():
-            if value is not None and m.upper() == value.upper():
-                return mm
+        if value is None:
+            return None
+
+        if isinstance(value, cls):
+            return value
+
+        try:
+            return cls(value)
+        except (TypeError, ValueError):
+            pass
+
+        if isinstance(value, str):
+            normalized = cls._normalize_token(value)
+            for member in cls:
+                if cls._normalize_token(member.name) == normalized:
+                    return member
+                if isinstance(member.value, str) and cls._normalize_token(member.value) == normalized:
+                    return member
         return None
 
     @classmethod
     def _missing_(cls, value):
-        """支持大小写不敏感的 value 匹配，供 Pydantic 使用。"""
+        """支持字符串大小写不敏感匹配。
+
+        匹配顺序：
+        1. 枚举 name（例如 "GROUP" -> RoomType.GROUP）
+        2. 字符串 value（例如 "native" -> DriverType.NATIVE）
+        """
         if isinstance(value, str):
+            normalized = cls._normalize_token(value)
             for member in cls:
-                if member.value.lower() == value.lower():
+                if cls._normalize_token(member.name) == normalized:
+                    return member
+                if isinstance(member.value, str) and cls._normalize_token(member.value) == normalized:
                     return member
         return None
 
@@ -23,6 +51,7 @@ class EnhanceEnum(Enum):
 
 
 class OpenaiLLMApiRole(EnhanceEnum):
+    # OpenAI 协议要求 role 使用固定小写字符串，不使用 auto()。
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
@@ -30,6 +59,7 @@ class OpenaiLLMApiRole(EnhanceEnum):
 
 
 class LlmServiceType(EnhanceEnum):
+    # 配置文件中的 type 使用固定字符串（含连字符），不使用 auto()。
     OPENAI_COMPATIBLE = "openai-compatible"
     ANTHROPIC = "anthropic"
     GOOGLE = "google"
@@ -69,16 +99,20 @@ class EmployStatus(EnhanceEnum):
 
 
 class DriverType(EnhanceEnum):
+    # 对外 API/配置约定使用固定小写字符串，不使用 auto()。
     NATIVE = "native"           # 原生 OpenAI API 驱动
     CLAUDE_SDK = "claude_sdk"   # Claude Agent SDK 驱动
     TSP = "tsp"                 # TSP 协议驱动
 
 
 class RoleTemplateType(EnhanceEnum):
+    # 角色模板类型是对外字段约定，保存小写字符串，不使用 auto()。
+    # 保留 "system" / "user" 两个固定值。
     SYSTEM = "system"   # 启动时从配置导入
     USER = "user"       # 运行时由后台创建
 
 
 class SystemConfigKey(EnhanceEnum):
     """系统配置项的 key 枚举。"""
+    # DB 中 key 字段是稳定字符串，不使用 auto()。
     WORKING_DIRECTORY = "working_directory"  # 系统级别工作目录
