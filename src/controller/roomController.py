@@ -13,10 +13,9 @@ from model.coreModel.gtCoreWebModel import (
     GtCoreRoomMessagesResponse,
 )
 from model.dbModel.gtRoom import GtRoom
-from service import roomService as chat_room, teamService
+from service import roomService, teamService, agentService
 from constants import SpecialAgent, RoomState, RoomType
 from util import assertUtil
-from util.configTypes import TeamRoomConfig
 
 
 # Room Config Request Models
@@ -25,7 +24,7 @@ class CreateRoomRequest(BaseModel):
     type: RoomType = RoomType.GROUP
     initial_topic: str | None = None
     max_turns: int = 100
-    member_ids: List[int] = Field(default_factory=list)
+    agent_ids: List[int] = Field(default_factory=list)
 
 
 class UpdateRoomRequest(BaseModel):
@@ -35,45 +34,47 @@ class UpdateRoomRequest(BaseModel):
 
 
 class UpdateMembersRequest(BaseModel):
-    members: List[str]
+    agent_ids: List[int] = Field(default_factory=list)
 
 
 class SendMessageRequest(BaseModel):
     content: str | None = None
 
 
-async def _resolve_member_names_by_ids(team_id: int, member_ids: List[int]) -> List[str]:
-    if len(member_ids) == 0:
-        return []
+async def _assert_agent_ids_in_team(team_id: int, agent_ids: List[int]) -> None:
+    if len(agent_ids) == 0:
+        return
 
-    duplicate_ids = sorted([member_id for member_id, count in Counter(member_ids).items() if count > 1])
+    duplicate_ids = sorted([agent_id for agent_id, count in Counter(agent_ids).items() if count > 1])
     assertUtil.assertEqual(
         len(duplicate_ids),
         0,
-        error_message=f"member_ids duplicated: {duplicate_ids}",
-        error_code="duplicate_member_ids",
+        error_message=f"agent_ids duplicated: {duplicate_ids}",
+        error_code="duplicate_agent_ids",
     )
 
-    agent_rows = await gtAgentManager.get_agents_by_ids(member_ids)
+    normal_agent_ids = [agent_id for agent_id in agent_ids if agentService.get_special_agent_by_id(agent_id) is None]
+    agent_rows = await gtAgentManager.get_agents_by_ids(normal_agent_ids)
     id_to_agent = {agent.id: agent for agent in agent_rows}
 
-    missing_ids = [member_id for member_id in member_ids if member_id not in id_to_agent]
+    missing_ids = [
+        agent_id for agent_id in normal_agent_ids
+        if agent_id not in id_to_agent
+    ]
     assertUtil.assertEqual(
         len(missing_ids),
         0,
-        error_message=f"members not found: {missing_ids}",
-        error_code="member_not_found",
+        error_message=f"agents not found: {missing_ids}",
+        error_code="agent_not_found",
     )
 
-    out_of_team_ids = [member_id for member_id in member_ids if id_to_agent[member_id].team_id != team_id]
+    out_of_team_ids = [agent_id for agent_id in normal_agent_ids if id_to_agent[agent_id].team_id != team_id]
     assertUtil.assertEqual(
         len(out_of_team_ids),
         0,
-        error_message=f"members not in team '{team_id}': {out_of_team_ids}",
-        error_code="member_not_in_team",
+        error_message=f"agents not in team '{team_id}': {out_of_team_ids}",
+        error_code="agent_not_in_team",
     )
-
-    return [id_to_agent[member_id].name for member_id in member_ids]
 
 
 async def _get_team_room_or_404(team_id: int, room_id: int) -> GtRoom:
@@ -92,7 +93,7 @@ class RoomListHandler(BaseHandler):
             team = await gtTeamManager.get_team_by_id(int(team_id_raw))
             assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id_raw}' not found", error_code="team_not_found")
             team_name = team.name
-        rooms: List[chat_room.ChatRoom] = chat_room.get_all_rooms()
+        rooms: List[roomService.ChatRoom] = roomService.get_all_rooms()
         if team_name:
             rooms = [room for room in rooms if room.team_name == team_name]
         data = [r.to_dict() for r in rooms]
@@ -105,7 +106,7 @@ class RoomMessagesHandler(BaseHandler):
     async def get(self, room_id_str: str) -> None:
         # 通过数据库 ID 获取内存中的 ChatRoom
         room_id = int(room_id_str)
-        room = chat_room.get_room(room_id)
+        room = roomService.get_room(room_id)
         assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
         messages = [
             GtCoreMessageInfo(sender=m.sender_name, content=m.content, time=m.send_time)
@@ -120,7 +121,7 @@ class RoomMessagesHandler(BaseHandler):
         # 通过数据库 ID 获取内存中的 ChatRoom
         request = self.parse_request(SendMessageRequest)
         room_id = int(room_id_str)
-        room = chat_room.get_room(room_id)
+        room = roomService.get_room(room_id)
         assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
         assertUtil.assertTrue(
             room.state != RoomState.INIT,
@@ -166,31 +167,16 @@ class TeamRoomCreateHandler(BaseHandler):
         existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
         existing = next((r for r in existing_rooms if r.name == request.name), None)
         assertUtil.assertEqual(existing, None, error_message=f"Room '{request.name}' already exists", error_code="room_exists")
+        await _assert_agent_ids_in_team(team_id, request.agent_ids)
 
-        member_names = await _resolve_member_names_by_ids(team_id, request.member_ids)
-
-        # 构建房间配置
-        room_config = TeamRoomConfig(
+        await gtRoomManager.save_room(GtRoom(
+            team_id=team_id,
             name=request.name,
-            members=member_names,
-            initial_topic=request.initial_topic,
+            type=request.type,
+            initial_topic=request.initial_topic or "",
             max_turns=request.max_turns,
-        )
-
-        # upsert_rooms 会先删除该 team 下所有房间再重新插入，这在只添加一个房间时可能不太合适
-        # 但目前 gtRoomManager 实现如此，暂且遵循。
-        new_rooms_configs: list[TeamRoomConfig] = []
-        for r in existing_rooms:
-            members = await chat_room.get_db_room_member_names(r.id)
-            new_rooms_configs.append(TeamRoomConfig(
-                name=r.name,
-                members=members,
-                initial_topic=r.initial_topic,
-                max_turns=r.max_turns,
-            ))
-        new_rooms_configs.append(room_config)
-
-        await chat_room.save_team_rooms_from_config(team_id, new_rooms_configs)
+            agent_ids=list(request.agent_ids),
+        ))
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "created", "room_name": request.name})
@@ -209,14 +195,13 @@ class TeamRoomDetailHandler(BaseHandler):
         )
         room = await _get_team_room_or_404(team_id, room_id)
 
-        members = await chat_room.get_db_room_member_names(room.id)
         data = {
             "id": room.id,
             "name": room.name,
             "type": room.type.name,
             "initial_topic": room.initial_topic,
             "max_turns": room.max_turns,
-            "members": members,
+            "agent_ids": room.agent_ids or [],
         }
         self.return_json(data)
 
@@ -236,29 +221,13 @@ class TeamRoomModifyHandler(BaseHandler):
         room = await _get_team_room_or_404(team_id, room_id)
         room_name = room.name
 
-        initial_topic = request.initial_topic if request.initial_topic is not None else room.initial_topic
-        max_turns = request.max_turns if request.max_turns is not None else room.max_turns
+        room.type = RoomType(request.type)
+        if request.initial_topic is not None:
+            room.initial_topic = request.initial_topic
+        if request.max_turns is not None:
+            room.max_turns = request.max_turns
 
-        existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
-        all_rooms: list[TeamRoomConfig] = []
-        for r in existing_rooms:
-            members = await chat_room.get_db_room_member_names(r.id)
-            if r.id == room_id:
-                all_rooms.append(TeamRoomConfig(
-                    name=r.name,
-                    members=members,
-                    initial_topic=initial_topic,
-                    max_turns=max_turns,
-                ))
-            else:
-                all_rooms.append(TeamRoomConfig(
-                    name=r.name,
-                    members=members,
-                    initial_topic=r.initial_topic,
-                    max_turns=r.max_turns,
-                ))
-
-        await chat_room.save_team_rooms_from_config(team_id, all_rooms)
+        await gtRoomManager.save_room(room)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "room_name": room_name})
@@ -277,29 +246,14 @@ class TeamRoomDeleteHandler(BaseHandler):
         room = await _get_team_room_or_404(team_id, room_id)
         room_name = room.name
 
-        existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
-        remaining_rooms = [r for r in existing_rooms if r.id != room_id]
-
-        room_configs: list[TeamRoomConfig] = []
-        for r in remaining_rooms:
-            members = await chat_room.get_db_room_member_names(r.id)
-            room_configs.append(
-                TeamRoomConfig(
-                    name=r.name,
-                    members=members,
-                    initial_topic=r.initial_topic,
-                    max_turns=r.max_turns,
-                )
-            )
-
-        await chat_room.save_team_rooms_from_config(team_id, room_configs)
+        await gtRoomManager.delete_room(room_id)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "deleted", "room_name": room_name})
 
 
 class TeamRoomMembersHandler(BaseHandler):
-    """GET /teams/{team_id}/rooms/{room_id}/members/list.json - 获取 Room 成员"""
+    """GET /teams/{team_id}/rooms/{room_id}/members/list.json - 获取 Room Agent ID 列表"""
 
     async def get(self, team_id_str: str, room_id_str: str) -> None:
         team_id = int(team_id_str)
@@ -311,12 +265,11 @@ class TeamRoomMembersHandler(BaseHandler):
         )
         room = await _get_team_room_or_404(team_id, room_id)
 
-        members = await chat_room.get_db_room_member_names(room.id)
-        self.return_json({"members": members})
+        self.return_json({"agent_ids": room.agent_ids or []})
 
 
 class TeamRoomMembersModifyHandler(BaseHandler):
-    """POST /teams/{team_id}/rooms/{room_id}/members/modify.json - 更新 Room 成员"""
+    """POST /teams/{team_id}/rooms/{room_id}/members/modify.json - 更新 Room Agent ID 列表"""
 
     async def post(self, team_id_str: str, room_id_str: str) -> None:
         request = self.parse_request(UpdateMembersRequest)
@@ -329,7 +282,8 @@ class TeamRoomMembersModifyHandler(BaseHandler):
 
         room = await _get_team_room_or_404(team_id, room_id)
 
-        await chat_room.save_room_members(room.id, request.members)
+        await _assert_agent_ids_in_team(team_id, request.agent_ids)
+        await roomService.save_room_members(room.id, request.agent_ids)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "room_name": room.name})

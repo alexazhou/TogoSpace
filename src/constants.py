@@ -78,8 +78,8 @@ class RoomType(EnhanceEnum):
 
 
 class SpecialAgent(EnhanceEnum):
-    SYSTEM = auto()    # 系统消息发送者
-    OPERATOR = auto()  # 人类操作者虚拟身份
+    SYSTEM = -2    # 系统消息发送者
+    OPERATOR = -1  # 人类操作者虚拟身份
 
 
 class RoomState(EnhanceEnum):

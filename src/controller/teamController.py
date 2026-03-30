@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from controller.baseController import BaseHandler
 from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
 from model.dbModel.gtTeam import GtTeam
-from service import roomService, teamService
+from service import teamService
 from util import assertUtil
 from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
 
@@ -103,14 +103,13 @@ class TeamDetailHandler(BaseHandler):
         ]
         room_items = []
         for room in rooms:
-            room_members = await roomService.get_db_room_member_names(room.id)
             room_items.append(
                 {
                     "id": room.id,
                     "name": room.name,
                     "initial_topic": room.initial_topic,
                     "max_turns": room.max_turns,
-                    "members": room_members,
+                    "agent_ids": room.agent_ids or [],
                 }
             )
 
@@ -144,27 +143,17 @@ class TeamModifyHandler(BaseHandler):
 
         team_name = team.name
 
-        current_config = await teamService.get_team_config(team_name)
-        assertUtil.assertNotNull(current_config, error_message=f"Team '{team_name}' config not found", error_code="team_config_not_found")
-
-        # 构建完整配置，确保局部更新不会丢字段
-        updates = {k: v for k, v in request.model_dump(exclude_none=True).items()}
-        config = dict(current_config.config)
-        if "config" in updates:
-            config.update(updates.pop("config") or {})
-        working_directory = updates.pop("working_directory", None)
-        if working_directory is not None:
-            if working_directory:
-                config["working_directory"] = working_directory
-            else:
-                config.pop("working_directory", None)
-        if config != current_config.config:
-            updates["config"] = config
-        team_config = current_config.model_copy(update=updates)
-
-        # 调用 service 更新 team
-        await teamService.update_team(team_config)
-
+        if request.working_directory is not None or request.config is not None:
+            await teamService.update_team_base_info(
+                team_id=team_id,
+                working_directory=request.working_directory,
+                config_updates=request.config,
+            )
+        if request.members is not None:
+            await teamService.save_team_members(team_id, request.members)
+        if request.preset_rooms is not None:
+            await teamService.save_team_rooms(team_id, request.preset_rooms)
+        await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "name": team_name})
 

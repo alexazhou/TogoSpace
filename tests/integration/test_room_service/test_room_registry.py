@@ -7,7 +7,8 @@ import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
 from constants import SpecialAgent
-from dal.db import gtTeamManager
+from dal.db import gtTeamManager, gtAgentManager
+from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtTeam import GtTeam
 from service.roomService import ChatRoom
 from util.configTypes import TeamConfig
@@ -29,7 +30,19 @@ class TestRoomRegistry(ServiceTestCase):
         await roomService.startup()
 
         # 预创建 team，_create_room 不再自动创建
-        await gtTeamManager.save_team(GtTeam(name=TEAM))
+        team = await gtTeamManager.save_team(GtTeam(name=TEAM))
+        await gtAgentManager.batch_save_agents(
+            team.id,
+            [
+                GtAgent(team_id=team.id, name="a", role_template_id=0),
+                GtAgent(team_id=team.id, name="alice", role_template_id=0),
+                GtAgent(team_id=team.id, name="bob", role_template_id=0),
+            ],
+        )
+        cls.agent_ids = {
+            agent.name: agent.id
+            for agent in await gtAgentManager.get_agents_by_team(team.id)
+        }
 
     @classmethod
     async def async_teardown_class(cls):
@@ -83,7 +96,7 @@ class TestRoomRegistry(ServiceTestCase):
             }],
         })]
 
-        await roomService.create_rooms(teams_config)
+        await roomService.ensure_rooms_from_config(teams_config)
 
         room = roomService.get_room_by_key(f"boot_room@{TEAM}")
         assert room.messages == []
@@ -104,6 +117,6 @@ class TestRoomRegistry(ServiceTestCase):
         # OPERATOR: member_id = -1
         assert room.get_member_id(SpecialAgent.OPERATOR.name) == ChatRoom.OPERATOR_MEMBER_ID
         # 普通成员: member_id 从数据库获取
-        assert room.get_member_id("alice") == 0  # 测试环境中未写入数据库
+        assert room.get_member_id("alice") == self.agent_ids["alice"]
         # 不存在的成员: member_id = 0
         assert room.get_member_id("unknown") == 0

@@ -10,7 +10,6 @@ _TYPE_TO_PROVIDER = {
     LlmServiceType.DEEPSEEK: "deepseek",
 }
 
-
 async def startup() -> None:
     _ = configUtil.get_app_config().setting.current_llm_service
 
@@ -32,7 +31,7 @@ async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> llmApiUtil.
         messages=messages,
         tools=ctx.tools,
     )
-    return await llmApiUtil.send_request_stream(
+    return await llmApiUtil.send_request_non_stream(
         request,
         llm_config.base_url,
         llm_config.api_key,

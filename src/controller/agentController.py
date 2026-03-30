@@ -2,7 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from constants import DriverType, MemberStatus
+from constants import DriverType, MemberStatus, SpecialAgent
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from service import teamService, agentService
@@ -50,6 +50,7 @@ class AgentListHandler(BaseHandler):
 
     async def get(self):
         team_id_raw = self.get_query_argument("team_id", None)
+        include_special_raw = self.get_query_argument("include_special", "false")
         if not team_id_raw:
             self.return_json({"agents": []})
             return
@@ -58,8 +59,9 @@ class AgentListHandler(BaseHandler):
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
-        agents = await agentService.list_team_agents(team.id)
+        agents = await gtAgentManager.get_agents_by_team(team.id)
         runtime_infos = agentService.get_team_agent_info_map(team.name)
+        include_special = include_special_raw.strip().lower() in {"1", "true", "yes", "on"}
 
         items = []
         for agent in agents:
@@ -78,7 +80,36 @@ class AgentListHandler(BaseHandler):
                 "employ_status": agent.employ_status.name if agent.employ_status else None,
                 "model": agent.model,
                 "driver": agent.driver.value if agent.driver else None,
+                "special": None,
             })
+
+        if include_special:
+            items.extend([
+                {
+                    "id": int(SpecialAgent.OPERATOR.value),
+                    "name": SpecialAgent.OPERATOR.name,
+                    "employee_number": None,
+                    "role_template_id": None,
+                    "team_id": None,
+                    "status": MemberStatus.IDLE.name,
+                    "employ_status": None,
+                    "model": "",
+                    "driver": None,
+                    "special": "operator",
+                },
+                {
+                    "id": int(SpecialAgent.SYSTEM.value),
+                    "name": SpecialAgent.SYSTEM.name,
+                    "employee_number": None,
+                    "role_template_id": None,
+                    "team_id": None,
+                    "status": MemberStatus.IDLE.name,
+                    "employ_status": None,
+                    "model": "",
+                    "driver": None,
+                    "special": "system",
+                },
+            ])
 
         self.return_json({"agents": items})
 

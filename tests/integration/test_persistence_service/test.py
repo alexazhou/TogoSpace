@@ -67,7 +67,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await roomService.startup()
-        await roomService.create_rooms(TEAMS_CONFIG)
+        await roomService.ensure_rooms_from_config(TEAMS_CONFIG)
         cls.restored = roomService.get_room_by_key(f"r1@{TEAM}")
         await roomService.restore_state()
 
