@@ -1,9 +1,12 @@
 # 标准库
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 # 内部包
 from controller.baseController import BaseHandler
 from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
+from model.dbModel.gtTeam import GtTeam
 from service import roomService, teamService
 from util import assertUtil
 from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
@@ -33,6 +36,21 @@ class SetEnabledRequest(BaseModel):
     enabled: bool
 
 
+def _team_to_dict(team: GtTeam) -> dict[str, Any]:
+    working_directory, config = _split_team_config(team.get_config())
+    return {
+        "id": team.id,
+        "name": team.name,
+        "working_directory": working_directory,
+        "config": config,
+        "max_function_calls": team.max_function_calls,
+        "enabled": team.enabled,
+        "deleted": team.deleted,
+        "created_at": team.created_at,
+        "updated_at": team.updated_at,
+    }
+
+
 class TeamListHandler(BaseHandler):
     """GET /teams/list.json - 获取所有 Team 列表"""
 
@@ -43,24 +61,7 @@ class TeamListHandler(BaseHandler):
             enabled = enabled_param.lower() in ("true", "1", "yes")
 
         teams = await gtTeamManager.get_all_teams(enabled)
-        self.return_json(
-            {
-                "teams": [
-                    {
-                        "id": team.id,
-                        "name": team.name,
-                        "working_directory": _split_team_config(team.get_config())[0],
-                        "config": _split_team_config(team.get_config())[1],
-                        "max_function_calls": team.max_function_calls,
-                        "enabled": team.enabled,
-                        "deleted": team.deleted,
-                        "created_at": team.created_at,
-                        "updated_at": team.updated_at,
-                    }
-                    for team in teams
-                ]
-            }
-        )
+        self.return_json({"teams": [_team_to_dict(team) for team in teams]})
 
 
 class TeamCreateHandler(BaseHandler):
