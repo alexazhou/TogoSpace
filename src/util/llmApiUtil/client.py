@@ -1,7 +1,9 @@
 import logging
-from typing import Optional
+from typing import Any
 
 import litellm
+from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
+from litellm.types.utils import ModelResponse, ModelResponseStream, TextCompletionResponse
 from .OpenAiModels import OpenAIRequest, OpenAIResponse
 
 
@@ -30,39 +32,65 @@ def _clean_base_url(url: str) -> str:
     return base_url.rstrip("/")
 
 
-async def send_request(request: OpenAIRequest, url: str, api_key: str) -> OpenAIResponse:
-    """使用 litellm 发送 chat completion 请求。"""
-    
-    # 构造 litellm.acompletion 的参数
+def _build_request_payload(request: OpenAIRequest) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]] | None]:
     model_name = request.model
-
-    # 清理 url：litellm 会自动添加 /chat/completions
-    base_url = _clean_base_url(url)
-
     messages = [m.to_dict() for m in request.messages]
-    
-    tools = None
+    tools: list[dict[str, Any]] | None = None
     if request.tools:
         tools = [t.model_dump(exclude_none=True) for t in request.tools]
+    return model_name, messages, tools
 
-    try:
-        response = await litellm.acompletion(
-            model=model_name,
-            messages=messages,
-            api_key=api_key,
-            base_url=base_url,
-            tools=tools,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            stream=request.stream,
-        )
-        
-        # litellm 返回的是 ModelResponse 对象，它支持 .json() 序列化，且格式与 OpenAI 一致
-        # 我们直接使用 OpenAIResponse.model_validate 转换回我们的 Pydantic 模型
-        response_dict = response.json()
-        return OpenAIResponse.model_validate(response_dict)
 
-    except Exception as e:
-        logger.error(f"LiteLLM API 调用失败: {e}", exc_info=True)
-        # 维持原有的错误抛出行为，虽然错误信息格式可能略有不同
-        raise RuntimeError(f"API 调用失败: {e}")
+async def send_request_stream(request: OpenAIRequest, url: str, api_key: str) -> OpenAIResponse:
+    """流式请求上游模型，并在本地聚合为完整 OpenAIResponse。"""
+    model_name, messages, tools = _build_request_payload(request)
+    base_url = _clean_base_url(url)
+
+    stream_resp: ModelResponse | CustomStreamWrapper = await litellm.acompletion(
+        model=model_name,
+        messages=messages,
+        api_key=api_key,
+        base_url=base_url,
+        tools=tools,
+        temperature=request.temperature,
+        max_tokens=request.max_tokens,
+        stream=True,
+    )
+    if not isinstance(stream_resp, CustomStreamWrapper):
+        raise TypeError(f"期望流式响应类型 CustomStreamWrapper，实际为: {type(stream_resp).__name__}")
+
+    chunks: list[ModelResponseStream] = []
+    async for chunk in stream_resp:
+        if not isinstance(chunk, ModelResponseStream):
+            raise TypeError(f"期望流式 chunk 类型 ModelResponseStream，实际为: {type(chunk).__name__}")
+        chunks.append(chunk)
+
+    merged: ModelResponse | TextCompletionResponse | None = litellm.stream_chunk_builder(chunks=chunks, messages=messages)
+    if merged is None:
+        raise RuntimeError("流式聚合失败：未生成完整响应")
+    if isinstance(merged, TextCompletionResponse):
+        raise TypeError("流式聚合返回了 TextCompletionResponse；当前仅支持 ChatCompletion 的 ModelResponse")
+    if not isinstance(merged, ModelResponse):
+        raise TypeError(f"流式聚合返回了未知类型: {type(merged).__name__}")
+
+    return OpenAIResponse.model_validate(merged.model_dump(exclude_none=False))
+
+
+async def send_request_non_stream(request: OpenAIRequest, url: str, api_key: str) -> OpenAIResponse:
+    """非流式请求上游模型，直接返回完整 OpenAIResponse。"""
+    model_name, messages, tools = _build_request_payload(request)
+    base_url = _clean_base_url(url)
+
+    response: ModelResponse | CustomStreamWrapper = await litellm.acompletion(
+        model=model_name,
+        messages=messages,
+        api_key=api_key,
+        base_url=base_url,
+        tools=tools,
+        temperature=request.temperature,
+        max_tokens=request.max_tokens,
+        stream=False,
+    )
+    if not isinstance(response, ModelResponse):
+        raise TypeError(f"期望非流式响应类型 ModelResponse，实际为: {type(response).__name__}")
+    return OpenAIResponse.model_validate(response.model_dump(exclude_none=False))
