@@ -163,7 +163,7 @@ class AgentBatchUpdateHandler(BaseHandler):
             await agent.aio_save()
 
         await teamService.hot_reload_team(team.name)
-        self.return_json({"status": "ok"})
+        self.return_success()
 
 
 class AgentDetailHandler(BaseHandler):

@@ -67,6 +67,15 @@ class BaseHandler(tornado.web.RequestHandler):
         else:
             self.write(json.dumps(data, ensure_ascii=False))
 
+    def return_success(self, **data) -> None:
+        """返回统一成功响应。
+
+        默认返回 {"status": "ok"}，可通过关键字参数追加字段。
+        """
+        payload = {"status": "ok"}
+        payload.update(data)
+        self.return_json(payload)
+
     def return_with_error(self, error_code: Any = None, error_desc: str = None) -> None:
         """抛出 HTTP 400 错误，并记录错误信息"""
         self.enhance['error_code'] = error_code

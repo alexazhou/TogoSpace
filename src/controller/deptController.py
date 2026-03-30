@@ -37,4 +37,4 @@ class DeptTreeUpdateHandler(BaseHandler):
         # 触发热更新
         await teamService.hot_reload_team(team.name)
 
-        self.return_json({"status": "ok"})
+        self.return_success()
