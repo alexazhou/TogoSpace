@@ -134,6 +134,7 @@ def stop() -> None:
 def shutdown() -> None:
     """清空调度状态，强制结束 run()。"""
     global _teams_config, _running
+    messageBus.unsubscribe(MessageBusTopic.ROOM_MEMBER_TURN, _on_member_turn)
     stop()
     _teams_config = []
     for task in _running.values():
