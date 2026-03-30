@@ -73,6 +73,15 @@ class TestAgentServiceGetInfo(_agentServiceCase):
         assert info["status"] == "IDLE"
 
 
+class TestAgentServiceSystemPrompt(_agentServiceCase):
+    async def test_system_prompt_contains_template_and_member_name(self):
+        """system_prompt 应显式包含模板名称与成员名称，便于模型识别身份。"""
+        alice = agentService.get_team_agent(TEAM, "alice")
+
+        assert "Agent 模板名称：alice" in alice.system_prompt
+        assert "Agent 成员名称：alice" in alice.system_prompt
+
+
 class TestagentServiceGetAllRooms(_agentServiceCase):
     async def test_get_all_rooms_for_agent(self):
         """get_all_rooms 应返回某个 agent 所在的所有 room_id。"""
