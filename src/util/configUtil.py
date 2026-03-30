@@ -95,7 +95,8 @@ def load(config_dir: str = None, force_reload: bool = False) -> AppConfig:
         role_templates=role_templates,
         teams=teams,
         setting=setting,
-        group_chat_prompt=_load_prompt("src/prompts/GroupChat.md"),
+        group_chat_prompt=_load_prompt("src/prompts/Base.md"),
+        agent_identity_prompt=_load_prompt("src/prompts/AgentIdentity.md"),
     )
     _cached_app_config = app_config
     _cached_config_dir = resolved_config_dir

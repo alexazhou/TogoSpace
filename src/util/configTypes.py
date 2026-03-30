@@ -137,3 +137,4 @@ class AppConfig(BaseModel):
     role_templates: List[RoleTemplateConfig] = Field(default_factory=list)
     teams: List[TeamConfig] = Field(default_factory=list)
     group_chat_prompt: str = ""
+    agent_identity_prompt: str = ""

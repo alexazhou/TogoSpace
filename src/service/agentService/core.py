@@ -311,6 +311,7 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
     """创建团队 Agent 实例。"""
     app_config = configUtil.get_app_config()
     base_prompt_tmpl = app_config.group_chat_prompt
+    identity_prompt_tmpl = app_config.agent_identity_prompt
     default_model = llmService.get_default_model()
     resolved_workspace_root = workspace_root or app_config.setting.workspace_root
     assert resolved_workspace_root is not None, "workspace_root 未配置"
@@ -347,14 +348,7 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
             team_id = _team_ids.get(team_name, 0)
             dept_context = await _build_dept_context(team_id, agent_name) if team_id else ""
 
-            identity_prompt = "\n".join(
-                [
-                    "---",
-                    f"Agent 成员名称：{agent_name}",
-                    f"Agent 模板名称：{template_name}",
-                    "---",
-                ]
-            )
+            identity_prompt = identity_prompt_tmpl.format(agent_name=agent_name, template_name=template_name)
             full_prompt = base_prompt_tmpl + "\n\n" + identity_prompt + "\n\n" + agent_specific_prompt
             if dept_context:
                 full_prompt += "\n\n" + dept_context
