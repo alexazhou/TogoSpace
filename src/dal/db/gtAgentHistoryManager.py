@@ -15,8 +15,8 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
         .aio_execute()
     )
     row: GtAgentHistory | None = await GtAgentHistory.aio_get_or_none(
-        (GtAgentHistory.agent_id == message.agent_id) &
-        (GtAgentHistory.seq == message.seq)
+        GtAgentHistory.agent_id == message.agent_id,
+        GtAgentHistory.seq == message.seq,
     )
     if row is None:
         raise RuntimeError(f"append agent history failed: agent_id={message.agent_id}#{message.seq}")
