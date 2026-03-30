@@ -280,6 +280,21 @@ class TestSchedulerRun(ServiceTestCase):
             scheduler._on_member_turn(msg)
             assert alice.wait_task_queue.qsize() == 1
 
+    async def test_task_done_with_pending_queue_event_should_keep_member_scheduled(self):
+        """复现竞态：task 收尾时若队列里已有新事件，不应把成员彻底移出调度池。"""
+        alice = _make_mock_member("alice")
+
+        # 模拟“上一个 task 即将结束时，新事件已入队”的场景。
+        alice.wait_task_queue.put_nowait(GtCoreRoomMessageEvent(1))
+        done_task = asyncio.create_task(asyncio.sleep(0))
+        await done_task
+        scheduler._running[alice.key] = done_task
+
+        scheduler._on_task_done(alice, done_task)
+
+        # 期望：调度器应继续保持该成员可消费状态（否则会出现前端长期忙碌且不再处理新事件）。
+        assert alice.key in scheduler._running
+
     async def test_refresh_team_config(self):
         """验证刷新团队配置。"""
         old_config = _make_team_config()
