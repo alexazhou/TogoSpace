@@ -105,10 +105,10 @@ class TestagentServiceSyncRoomMessages(_agentServiceCase):
         assert synced_count == 1
         assert len(alice._history) == 1
         content = alice._history[0].content or ""
-        assert content.startswith("general 房间轮到你发言，房间消息如下：")
-        assert "【房间《general》】【发言人《SYSTEM》】" in content
-        assert "【房间《general》】【发言人《bob》】" in content
-        assert "】\nhello alice" in content
+        assert content.startswith("【general】 房间轮到你发言，新消息如下：")
+        assert "【房间《general》】【系统提醒】：" in content
+        assert "【房间《general》】【bob】：" in content
+        assert "： hello alice" in content
         assert "你现在可以调用工具行动。" in content
 
 
