@@ -205,7 +205,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
 
         assert len(fake_client.queries) == 1
         first_prompt = fake_client.queries[0]
-        assert "lobby 房间轮到你发言，房间消息如下：" in first_prompt
+        assert "【lobby】 房间轮到你发言，新消息如下：" in first_prompt
         assert "你现在可以调用工具行动。" in first_prompt
         assert first in first_prompt
         assert second in first_prompt
