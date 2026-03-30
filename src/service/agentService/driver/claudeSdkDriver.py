@@ -13,20 +13,13 @@ from service.roomService import ChatContext
 from service.funcToolService.toolLoader import get_function_metadata
 from service.funcToolService.tools import FUNCTION_REGISTRY
 from service.roomService import ChatRoom
+from util.chatMessageFormat import build_turn_context_prompt
 from util import llmApiUtil
 
 from .base import AgentDriver
 
 logger = logging.getLogger(__name__)
 
-# Prompt 模板
-_SYSTEM_MSG_PREFIX_TEMPLATE = "{room_name} 房间系统消息: "
-_USER_MSG_SEP_TEMPLATE = " 在 {room_name} 房间发言: "
-_TURN_PROMPT_TEMPLATE = (
-    "新收到的消息：\n{context}\n\n"
-    "现在轮到你（{agent_name}）在 {room_name} 发言。"
-    "你必须调用工具来行动。如果你已完成发言和所有工具调用，请务必调用 finish_chat_turn 结束本轮行动。"
-)
 _HINT_PROMPT = (
     "你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，请务必调用 finish_chat_turn 结束本轮（即跳过）。直接输出的文字不会出现在聊天室里。"
 )
@@ -113,25 +106,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
             return []
 
         recent_history = self.host._history[-synced_count:]
-        prompt_lines: list[str] = []
-        system_prefix = _SYSTEM_MSG_PREFIX_TEMPLATE.format(room_name=room.name)
-        user_sep = _USER_MSG_SEP_TEMPLATE.format(room_name=room.name)
-
-        for message in recent_history:
-            content = message.content or ""
-
-            if content.startswith(system_prefix):
-                prompt_lines.append(f"[系统] {content[len(system_prefix):]}")
-                continue
-
-            if user_sep in content:
-                sender, msg = content.split(user_sep, 1)
-                prompt_lines.append(f"{sender}: {msg}")
-                continue
-
-            prompt_lines.append(content)
-
-        return prompt_lines
+        return [message.content or "" for message in recent_history]
 
     def _next_tool_call_id(self) -> str:
         """生成下一个 tool_call_id。"""
@@ -181,12 +156,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
         return _wrapped
 
     async def _run_turn_sdk(self, room: ChatRoom, prompt_lines: list[str], max_function_calls: int) -> None:
-        context_text = "\n".join(prompt_lines) if prompt_lines else "(无新消息)"
-        turn_prompt = _TURN_PROMPT_TEMPLATE.format(
-            context=context_text,
-            agent_name=self.host.name,
-            room_name=room.name
-        )
+        turn_prompt = build_turn_context_prompt(room.name, prompt_lines)
 
         client = self._sdk_client
 

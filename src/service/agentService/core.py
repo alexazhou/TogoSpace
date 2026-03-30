@@ -4,6 +4,7 @@ import os
 from typing import Any, List, Optional
 
 from util import llmApiUtil, configUtil
+from util.chatMessageFormat import build_turn_context_prompt, format_room_message
 from util.configTypes import TeamConfig, TeamRoomConfig
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreChatMessage
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
@@ -142,24 +143,22 @@ class Agent:
         new_msgs: List[GtCoreChatMessage] = await room.get_unread_messages(self.name)
         logger.info(f"同步房间消息: agent={self.key}, room={room.name}, count={len(new_msgs)}")
 
-        synced_count = 0
+        message_blocks: list[str] = []
         for msg in new_msgs:
             if msg.sender_name == self.name:
                 continue
 
-            message: llmApiUtil.OpenAIMessage
-            if msg.sender_name == SpecialAgent.SYSTEM.name:
-                message = llmApiUtil.OpenAIMessage.text(
-                    llmApiUtil.OpenaiLLMApiRole.USER,
-                    content=f"{room.name} 房间系统消息: {msg.content}",
-                )
-            else:
-                message = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, content=f"{msg.sender_name} 在 {room.name} 房间发言: {msg.content}")
+            message_blocks.append(format_room_message(room.name, msg.sender_name, msg.content))
 
-            await self.append_history_message(message)
-            synced_count += 1
+        if not message_blocks:
+            return 0
 
-        return synced_count
+        turn_context_message = llmApiUtil.OpenAIMessage.text(
+            llmApiUtil.OpenaiLLMApiRole.USER,
+            content=build_turn_context_prompt(room.name, message_blocks),
+        )
+        await self.append_history_message(turn_context_message)
+        return 1
 
     async def run_chat_turn(self, room_id: int, max_function_calls: int = 5) -> None:
         room = roomService.get_room(room_id)

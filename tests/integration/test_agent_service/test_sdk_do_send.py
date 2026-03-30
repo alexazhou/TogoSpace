@@ -11,6 +11,8 @@ from service.agentService import Agent
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
 from constants import DriverType, RoleTemplateType
+from util import llmApiUtil
+from util.chatMessageFormat import format_room_message
 from util.configTypes import TeamConfig, AgentConfig
 from ...base import ServiceTestCase
 
@@ -177,3 +179,34 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         assert len(fake_client.queries) == 2
 
         assert len(fake_client.queries) == 2
+
+    async def test_run_chat_turn_prompt_has_context_wrappers_and_blank_lines(self):
+        await roomService.ensure_room_record(TEAM, "lobby", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"lobby@{TEAM}")
+        agent = Agent(
+            name="alice",
+            team_name=TEAM,
+            system_prompt="test",
+            model="test-model",
+            driver_config=AgentDriverConfig(driver_type="native"),
+        )
+        driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
+        fake_client = _FakeClaudeClient()
+        driver._sdk_client = fake_client
+
+        first = format_room_message("lobby", "SYSTEM", "房间初始化")
+        second = format_room_message("lobby", "bob", "hello alice")
+        agent._history = [
+            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, first),
+            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, second),
+        ]
+
+        await driver.run_chat_turn(room, synced_count=2, max_function_calls=1)
+
+        assert len(fake_client.queries) == 1
+        first_prompt = fake_client.queries[0]
+        assert "lobby 房间轮到你发言，房间消息如下：" in first_prompt
+        assert "你现在可以调用工具行动。" in first_prompt
+        assert first in first_prompt
+        assert second in first_prompt
+        assert f"{first}\n\n{second}" in first_prompt
