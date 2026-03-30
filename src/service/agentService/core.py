@@ -5,11 +5,12 @@ from typing import Any, List, Optional
 
 from util import llmApiUtil, configUtil
 from util.chatMessageFormat import build_turn_context_prompt, format_room_message
-from util.configTypes import TeamConfig, TeamRoomConfig
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreChatMessage
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtTeam import GtTeam
+from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service.agentService.driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
 from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager
@@ -17,7 +18,6 @@ from service.roomService import ChatRoom, ChatContext
 from peewee import IntegrityError
 from exception import TeamAgentException
 from constants import SpecialAgent, MessageBusTopic, MemberStatus, DriverType, EmployStatus
-from util.configTypes import TeamConfig, TeamRoomConfig, AgentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -29,19 +29,13 @@ def _make_agent_key(team_name: str, agent_name: str) -> str:
     return f"{agent_name}@{team_name}"
 
 
-def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
-    return team_config.preset_rooms
+def get_special_agent_by_id(agent_id: int | None) -> SpecialAgent | None:
+    return SpecialAgent.value_of(agent_id)
 
 
-async def load_team_ids(teams_config: list[TeamConfig]) -> None:
-    """Load team_id for each team name."""
+async def load_team_ids_from_db() -> None:
     global _team_ids
-    _team_ids = {}
-    for team in teams_config:
-        team_name = team.name
-        team_row = await gtTeamManager.get_team(team_name)
-        if team_row:
-            _team_ids[team_name] = team_row.id
+    _team_ids = {team.name: team.id for team in await gtTeamManager.get_all_teams()}
     logger.info(f"Loaded team IDs: {_team_ids}")
 
 
@@ -306,8 +300,7 @@ async def _build_dept_context(team_id: int, agent_name: str) -> str:
     return "\n".join(lines)
 
 
-async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
-    """创建团队 Agent 实例。"""
+async def _create_team_agents(team_row: GtTeam, agent_rows: list[GtAgent], templates_by_id: dict[int, GtRoleTemplate], workspace_root: str | None = None) -> None:
     app_config = configUtil.get_app_config()
     base_prompt_tmpl = app_config.group_chat_prompt
     identity_prompt_tmpl = app_config.agent_identity_prompt
@@ -315,68 +308,64 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
     resolved_workspace_root = workspace_root or app_config.setting.workspace_root
     assert resolved_workspace_root is not None, "workspace_root 未配置"
 
-    for team_config in teams_config:
-        team_name = team_config.name
-        team_workdir = os.path.join(resolved_workspace_root, team_name)
+    team_name = team_row.name
+    team_workdir = os.path.join(resolved_workspace_root, team_name)
+    team_id = _team_ids.get(team_name, team_row.id)
 
-        for member_cfg in team_config.members:
-            agent_name = member_cfg.name
-            template_name = member_cfg.role_template
-            cfg = await gtRoleTemplateManager.get_role_template_by_name(template_name)
-            if cfg is None:
-                logger.warning(f"角色模版不存在: agent={agent_name}, template={template_name}，跳过创建")
-                continue
+    for agent_row in agent_rows:
+        template = templates_by_id.get(agent_row.role_template_id)
+        if template is None:
+            logger.warning(f"角色模版不存在: agent={agent_row.name}, role_template_id={agent_row.role_template_id}，跳过创建")
+            continue
 
-            agent_specific_prompt = cfg.soul
+        agent_name = agent_row.name
+        template_name = template.name
+        agent_specific_prompt = template.soul
+        model_name = agent_row.model or template.model or default_model
+        driver_config = normalize_driver_config(
+            {
+                "driver": agent_row.driver or template.driver,
+                "allowed_tools": template.allowed_tools,
+            }
+        )
+        dept_context = await _build_dept_context(team_id, agent_name) if team_id else ""
 
-            # model 覆盖：AgentConfig > RoleTemplate > default
-            model_name = member_cfg.model or cfg.model or default_model
+        identity_prompt = identity_prompt_tmpl.format(agent_name=agent_name, template_name=template_name)
+        full_prompt = base_prompt_tmpl + "\n\n" + identity_prompt + "\n\n" + agent_specific_prompt
+        if dept_context:
+            full_prompt += "\n\n" + dept_context
 
-            # driver 覆盖：AgentConfig.driver 优先，否则用 RoleTemplate.driver
-            if member_cfg.driver:
-                driver_config = normalize_driver_config({"driver": member_cfg.driver})
-            else:
-                driver_config = normalize_driver_config(
-                    {
-                        "driver": cfg.driver,
-                        "allowed_tools": cfg.allowed_tools,
-                    }
-                )
-
-            # 部门上下文注入
-            team_id = _team_ids.get(team_name, 0)
-            dept_context = await _build_dept_context(team_id, agent_name) if team_id else ""
-
-            identity_prompt = identity_prompt_tmpl.format(agent_name=agent_name, template_name=template_name)
-            full_prompt = base_prompt_tmpl + "\n\n" + identity_prompt + "\n\n" + agent_specific_prompt
-            if dept_context:
-                full_prompt += "\n\n" + dept_context
-
-            key = _make_agent_key(team_name, agent_name)
-            agent = Agent(
-                name=agent_name,
-                team_name=team_name,
-                system_prompt=full_prompt,
-                model=model_name,
-                driver_config=driver_config,
-                template_name=template_name,
-                team_workdir=team_workdir,
-                workspace_root=resolved_workspace_root,
-            )
-            _agents[key] = agent
-            logger.info(
-                f"创建 Agent 实例: key={key}, template={template_name}, model={model_name}, driver={driver_config.driver_type}"
-            )
-            await agent.startup()
-            try:
-                agent_row = await gtAgentManager.get_agent(agent.team_id, agent.name)
-                if agent_row:
-                    agent._agent_id = agent_row.id
-            except Exception as e:
-                logger.warning(f"写入 Agent 数据失败: agent={agent.key}, error={e}")
+        key = _make_agent_key(team_name, agent_name)
+        agent = Agent(
+            name=agent_name,
+            team_name=team_name,
+            system_prompt=full_prompt,
+            model=model_name,
+            driver_config=driver_config,
+            template_name=template_name,
+            team_workdir=team_workdir,
+            workspace_root=resolved_workspace_root,
+        )
+        _agents[key] = agent
+        logger.info(
+            f"创建 Agent 实例: key={key}, template={template_name}, model={model_name}, driver={driver_config.driver_type}"
+        )
+        await agent.startup()
+        agent._agent_id = agent_row.id
 
 
-async def reload_team_agents(team_name: str, teams_config: list[TeamConfig], workspace_root: str | None = None) -> None:
+async def create_team_agents_from_db(workspace_root: str | None = None) -> None:
+    await load_team_ids_from_db()
+    for team_row in await gtTeamManager.get_all_teams():
+        agent_rows = await gtAgentManager.get_agents_by_team(team_row.id)
+        template_rows = await gtRoleTemplateManager.get_role_templates_by_ids(
+            [agent.role_template_id for agent in agent_rows]
+        )
+        templates_by_id = {template.id: template for template in template_rows}
+        await _create_team_agents(team_row, agent_rows, templates_by_id, workspace_root=workspace_root)
+
+
+async def reload_team_agents_from_db(team_name: str, workspace_root: str | None = None) -> None:
     """按 Team 维度重建运行时 Agent 实例。"""
     team_suffix = f"@{team_name}"
     keys_to_remove = [k for k in _agents.keys() if k.endswith(team_suffix)]
@@ -388,14 +377,19 @@ async def reload_team_agents(team_name: str, teams_config: list[TeamConfig], wor
     for key in keys_to_remove:
         _agents.pop(key, None)
 
-    await load_team_ids(teams_config)
+    await load_team_ids_from_db()
 
-    target_config = next((cfg for cfg in teams_config if cfg.name == team_name), None)
-    if target_config is None:
+    team_row = await gtTeamManager.get_team(team_name)
+    if team_row is None:
         logger.warning(f"重建 Team Agent 失败: team '{team_name}' 不存在于配置中")
         return
 
-    await create_team_agents([target_config], workspace_root=workspace_root)
+    agent_rows = await gtAgentManager.get_agents_by_team(team_row.id)
+    template_rows = await gtRoleTemplateManager.get_role_templates_by_ids(
+        [agent.role_template_id for agent in agent_rows]
+    )
+    templates_by_id = {template.id: template for template in template_rows}
+    await _create_team_agents(team_row, agent_rows, templates_by_id, workspace_root=workspace_root)
 
 
 def get_team_agent(team_name: str, agent_name: str) -> "Agent":
@@ -422,7 +416,6 @@ def get_team_agent_info_map(team_name: str) -> dict[str, dict]:
 
 async def list_team_agents(team_id: int) -> list[GtAgent]:
     return await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.ON_BOARD)
-
 
 def get_team_agents(room_id: int) -> List["Agent"]:
     room = roomService.get_room(room_id)

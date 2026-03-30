@@ -780,7 +780,11 @@ class TestDeptService(ServiceTestCase):
             assert persisted_room is not None
             assert "DEPT" in persisted_room.tags
 
-            team_configs = await teamService.get_all_team_configs_from_db()
+            team_configs = []
+            for team_row in await gtTeamManager.get_all_teams():
+                config = await teamService.get_team_config(team_row.name)
+                if config is not None:
+                    team_configs.append(config)
             await roomService.refresh_rooms_for_team(team.id, team_configs)
 
             runtime_room = roomService.get_room_by_key("engineering@t_room_tags")

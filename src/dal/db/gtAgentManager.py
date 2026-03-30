@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from peewee import fn
 
-from constants import EmployStatus, DriverType
+from constants import EmployStatus, DriverType, SpecialAgent
 from model.dbModel.gtAgent import GtAgent
 
 from . import gtRoleTemplateManager
@@ -24,6 +24,21 @@ async def get_agents_by_team(team_id: int) -> list[GtAgent]:
     return list(
         await GtAgent.select()
         .where(GtAgent.team_id == team_id)
+        .order_by(GtAgent.name)
+        .aio_execute()
+    )
+
+
+async def get_agents_by_team_and_names(team_id: int, names: list[str]) -> list[GtAgent]:
+    """按 team + name 列表批量查询成员。"""
+    if not names:
+        return []
+    return list(
+        await GtAgent.select()
+        .where(
+            GtAgent.team_id == team_id,
+            GtAgent.name.in_(names),  # type: ignore[attr-defined]
+        )
         .order_by(GtAgent.name)
         .aio_execute()
     )
@@ -113,6 +128,61 @@ async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
         .where(GtAgent.id.in_(agent_ids))  # type: ignore[attr-defined]
         .aio_execute()
     )
+
+
+def _build_special_agent(special_agent: SpecialAgent) -> GtAgent:
+    return GtAgent(
+        id=int(special_agent.value),
+        team_id=0,
+        name=special_agent.name,
+        role_template_id=0,
+    )
+
+
+async def get_team_agents_by_ids(team_id: int, agent_ids: list[int], include_special: bool = True) -> list[GtAgent]:
+    if not agent_ids:
+        return []
+
+    normal_agent_ids = [agent_id for agent_id in agent_ids if SpecialAgent.value_of(agent_id) is None]
+    agent_rows = await get_agents_by_ids(normal_agent_ids)
+    agent_map = {agent.id: agent for agent in agent_rows if agent.team_id == team_id}
+
+    agents: list[GtAgent] = []
+    for agent_id in agent_ids:
+        special_agent = SpecialAgent.value_of(agent_id)
+        if special_agent is not None:
+            if include_special:
+                agents.append(_build_special_agent(special_agent))
+            continue
+
+        agent = agent_map.get(agent_id)
+        if agent is not None:
+            agents.append(agent)
+
+    return agents
+
+
+async def get_team_agents_by_names(team_id: int, names: list[str], include_special: bool = True) -> list[GtAgent]:
+    if not names:
+        return []
+
+    normal_names = [name for name in names if SpecialAgent.value_of(name) is None]
+    agent_rows = await get_agents_by_team_and_names(team_id, normal_names)
+    agent_map = {agent.name: agent for agent in agent_rows}
+
+    agents: list[GtAgent] = []
+    for name in names:
+        special_agent = SpecialAgent.value_of(name)
+        if special_agent is not None:
+            if include_special:
+                agents.append(_build_special_agent(special_agent))
+            continue
+
+        agent = agent_map.get(name)
+        if agent is not None:
+            agents.append(agent)
+
+    return agents
 
 
 async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) -> None:

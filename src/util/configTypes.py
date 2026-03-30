@@ -30,6 +30,9 @@ def _is_test_env() -> bool:
 
 
 def _default_persistence_db_path() -> str:
+    env_override = os.environ.get("TEAMAGENT_DB_PATH")
+    if env_override and env_override.strip():
+        return env_override.strip()
     return "../test_data/data.db" if _is_test_env() else "../data/data.db"
 
 

@@ -2,30 +2,24 @@ import asyncio
 import logging
 from typing import Dict
 
-from util.configTypes import TeamConfig, TeamRoomConfig
 from service import messageBus
 from service.messageBus import Message
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from service import agentService, roomService as chat_room
 from service.agentService import Agent
-from dal.db import gtRoomManager
+from dal.db import gtTeamManager
 from constants import MessageBusTopic, SpecialAgent, RoomState
 
 logger = logging.getLogger(__name__)
 
-_teams_config: list[TeamConfig] = []
+_team_max_fc: Dict[str, int] = {}
 _running: Dict[str, asyncio.Task] = {}
 _stop_event: asyncio.Event = asyncio.Event()
 
-
-def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
-    return team_config.preset_rooms
-
-
-async def startup(teams_config: list[TeamConfig]) -> None:
+async def startup() -> None:
     """初始化调度器，须在 run() 前调用一次。"""
-    global _teams_config, _stop_event
-    _teams_config = teams_config
+    global _team_max_fc, _stop_event
+    _team_max_fc = {team.name: team.max_function_calls or 5 for team in await gtTeamManager.get_all_teams()}
     _stop_event = asyncio.Event()
     messageBus.subscribe(MessageBusTopic.ROOM_MEMBER_TURN, _on_member_turn)
 
@@ -41,10 +35,7 @@ def add_member(member: Agent, max_fc: int) -> None:
 
 
 def _resolve_max_fc(team_name: str) -> int:
-    for team in _teams_config:
-        if team.name == team_name:
-            return team.max_function_calls or 5
-    return 5
+    return _team_max_fc.get(team_name, 5)
 
 
 def _on_task_done(member: Agent, task: asyncio.Task) -> None:
@@ -109,15 +100,8 @@ async def run() -> None:
     await _stop_event.wait()
 
     logger.info("Scheduler 已停止运行")
-    for team in _teams_config:
-        team_name = team.name
-        for room in _iter_team_rooms(team):
-            room_ref = f"{room.name}@{team_name}"
-            try:
-                runtime_room = chat_room.get_room_by_key(room_ref)
-            except RuntimeError:
-                continue
-            logger.info(f"\n{runtime_room.format_log()}")
+    for runtime_room in chat_room.get_all_rooms():
+        logger.info(f"\n{runtime_room.format_log()}")
 
 
 async def replay_scheduling_rooms() -> None:
@@ -133,20 +117,23 @@ def stop() -> None:
 
 def shutdown() -> None:
     """清空调度状态，强制结束 run()。"""
-    global _teams_config, _running
+    global _team_max_fc, _running
     messageBus.unsubscribe(MessageBusTopic.ROOM_MEMBER_TURN, _on_member_turn)
     stop()
-    _teams_config = []
+    _team_max_fc = {}
     for task in _running.values():
         if not task.done():
             task.cancel()
     _running = {}
 
 
-def refresh_team_config(team_name: str, teams_config: list[TeamConfig]) -> None:
+async def refresh_team_config(team_name: str) -> None:
     """刷新指定 Team 的调度配置。"""
-    global _teams_config
-    _teams_config = teams_config
+    team_row = await gtTeamManager.get_team(team_name)
+    if team_row is None:
+        _team_max_fc.pop(team_name, None)
+        return
+    _team_max_fc[team_name] = team_row.max_function_calls or 5
     logger.info(f"Team '{team_name}' 的调度配置已刷新")
 
 

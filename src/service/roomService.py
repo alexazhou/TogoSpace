@@ -18,12 +18,6 @@ from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 logger = logging.getLogger(__name__)
 
 
-def _normalize_members(members: Sequence[str | SpecialAgent] | None) -> List[str]:
-    if not members:
-        return []
-    return [member.name if isinstance(member, SpecialAgent) else member for member in members]
-
-
 def _same_speaker(left: str | None, right: str | None) -> bool:
     """比较两个发言者标识。
 
@@ -41,7 +35,7 @@ def _same_speaker(left: str | None, right: str | None) -> bool:
 
 
 def _infer_room_type(members: Sequence[str]) -> RoomType:
-    normalized = _normalize_members(members)
+    normalized = [member.name if isinstance(member, SpecialAgent) else member for member in members]
     ai_count = len([m for m in normalized if SpecialAgent.value_of(m) != SpecialAgent.OPERATOR])
     if any(SpecialAgent.value_of(m) == SpecialAgent.OPERATOR for m in normalized) and ai_count == 1:
         return RoomType.PRIVATE
@@ -60,8 +54,8 @@ class ChatRoom:
     """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
     # 特殊成员 ID
-    SYSTEM_MEMBER_ID = -2
-    OPERATOR_MEMBER_ID = -1
+    SYSTEM_MEMBER_ID = int(SpecialAgent.SYSTEM.value)
+    OPERATOR_MEMBER_ID = int(SpecialAgent.OPERATOR.value)
 
     def __init__(self, team: GtTeam, room: GtRoom, members: List[GtAgent] | None = None):
         self.room_id: int = room.id  # 数据库主键 ID
@@ -371,7 +365,7 @@ class ChatRoom:
             "team_name": self.team_name,
             "room_type": self.room_type.name,
             "state": self._state.name,
-            "members": self.members,
+            "agent_ids": [self.get_member_id(member_name) for member_name in self.members],
             "tags": self.tags,
         }
 
@@ -446,100 +440,11 @@ def shutdown() -> None:
     _rooms_by_id.clear()
 
 
-async def ensure_room_by_key(
-    team_id: int,
-    room_name: str,
-    room_type: RoomType,
-    initial_topic: str,
-    max_turns: int,
-    biz_id: str | None = None,
-    tags: list[str] | None = None,
-) -> GtRoom:
-    """确保 (team_id, name) 对应的 Room 存在，并返回数据库房间对象。"""
-    existing = next((room for room in await gtRoomManager.get_rooms_by_team(team_id) if room.name == room_name), None)
-    if existing is not None:
-        existing.type = room_type
-        existing.initial_topic = initial_topic
-        existing.max_turns = max_turns
-        existing.biz_id = biz_id
-        existing.tags = tags or []
-        return await gtRoomManager.save_room(existing)
-
-    return await gtRoomManager.save_room(GtRoom(
-        team_id=team_id,
-        name=room_name,
-        type=room_type,
-        initial_topic=initial_topic,
-        max_turns=max_turns,
-        agent_ids=[],
-        biz_id=biz_id,
-        tags=tags or [],
-    ))
-
-
-async def _resolve_room_agent_ids(team_id: int, members: Sequence[str | SpecialAgent] | None) -> list[int]:
-    normalized_members = _normalize_members(members)
-    if not normalized_members:
-        return []
-
-    agent_rows = await gtAgentManager.get_agents_by_team(team_id)
-    name_to_id = {row.name: row.id for row in agent_rows}
-
-    agent_ids: list[int] = []
-    for member_name in normalized_members:
-        if SpecialAgent.value_of(member_name) == SpecialAgent.OPERATOR:
-            agent_ids.append(0)
-            continue
-        agent_id = name_to_id.get(member_name)
-        if agent_id is not None:
-            agent_ids.append(agent_id)
-    return agent_ids
-
-
-async def get_db_room_member_names(room_id: int) -> list[str]:
+async def save_room_members(room_id: int, agent_ids: Sequence[int]) -> None:
     room = await gtRoomManager.get_room_by_id(room_id)
-    if room is None or not room.agent_ids:
-        return []
+    assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
 
-    non_zero_ids = [agent_id for agent_id in room.agent_ids if agent_id != 0]
-    has_operator = any(agent_id == 0 for agent_id in room.agent_ids)
-
-    member_names: list[str] = []
-    if non_zero_ids:
-        agent_rows = await gtAgentManager.get_agents_by_ids(non_zero_ids)
-        id_to_name = {row.id: row.name for row in agent_rows}
-        member_names = [id_to_name[agent_id] for agent_id in non_zero_ids if agent_id in id_to_name]
-
-    if has_operator:
-        member_names.append(SpecialAgent.OPERATOR.name)
-
-    return sorted(member_names)
-
-
-async def list_team_room_configs(team_id: int) -> list[TeamRoomConfig]:
-    room_rows = await gtRoomManager.get_rooms_by_team(team_id)
-    room_configs: list[TeamRoomConfig] = []
-    for room in room_rows:
-        room_configs.append(
-            TeamRoomConfig(
-                id=room.id,
-                name=room.name,
-                members=await get_db_room_member_names(room.id),
-                initial_topic=room.initial_topic or "",
-                max_turns=room.max_turns,
-                biz_id=room.biz_id,
-                tags=room.tags or [],
-            )
-        )
-    return room_configs
-
-
-async def save_room_members(room_id: int, members: Sequence[str | SpecialAgent]) -> None:
-    room = await gtRoomManager.get_room_by_id(room_id)
-    if room is None:
-        return
-
-    room.agent_ids = await _resolve_room_agent_ids(room.team_id, members)
+    room.agent_ids = list(agent_ids)
     await gtRoomManager.save_room(room)
 
 
@@ -553,7 +458,7 @@ def _find_existing_room(
     return current_by_name.get(room_config.name)
 
 
-async def save_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomConfig]) -> None:
+async def import_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomConfig]) -> None:
     current_rooms = await gtRoomManager.get_rooms_by_team(team_id)
     current_by_id = {room.id: room for room in current_rooms}
     current_by_name = {room.name: room for room in current_rooms}
@@ -588,99 +493,80 @@ async def save_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomConf
             room.biz_id = room_config.biz_id
             room.tags = list(room_config.tags)
 
-        room.agent_ids = await _resolve_room_agent_ids(team_id, room_config.members)
-        rooms_to_save.append(room)
+        room.agent_ids = []
+        saved_room = await gtRoomManager.save_room(room)
+        saved_room.agent_ids = [
+            agent.id
+            for agent in await gtAgentManager.get_team_agents_by_names(
+                team_id,
+                [member.name if isinstance(member, SpecialAgent) else member for member in room_config.members],
+                include_special=True,
+            )
+        ]
+        rooms_to_save.append(saved_room)
 
     await gtRoomManager.batch_save_rooms(rooms_to_save)
 
 
-async def _create_room(
-    room_id: int | None,
-    team_name: str,
-    name: str,
-    members: List[str],
-    initial_topic: str = "",
-    room_type: RoomType = RoomType.GROUP,
-    max_turns: int = 0,
+async def _load_room(
+    team_row: GtTeam,
+    room_row: GtRoom,
+    agent_ids: List[int],
 ) -> None:
-    """内部建房入口。"""
-    # 1. 从 DB 查找 team_id 和完整 room 行
-    team_row = await gtTeamManager.get_team(team_name)
-    assert team_row is not None, f"Team '{team_name}' 不存在，调用 _create_room 前应先创建 Team"
-
-    room_row: GtRoom | None = None
-
-    if room_id is None:
-        room_row = await ensure_room_by_key(
-            team_id=team_row.id,
-            room_name=name,
-            room_type=room_type,
-            initial_topic=initial_topic,
-            max_turns=max_turns,
-        )
-    else:
-        room_row = await gtRoomManager.get_room_by_id(room_id)
-        assert room_row is not None, (
-            f"聊天室 '{name}@{team_name}' 不存在于数据库，"
-            f"调用 _create_room 时 room_id={room_id}"
-        )
-
-    resolved_room_id = room_row.id
-    member_rows = await gtAgentManager.get_agents_by_team(team_row.id)
-    member_map = {row.name: row for row in member_rows}
-
-    # 根据传入的成员名称构建 GtAgent 列表
-    # 若成员在数据库中不存在，创建临时对象
-    normalized_members = _normalize_members(members)
-    room_members = []
-    for name in normalized_members:
-        if name in member_map:
-            room_members.append(member_map[name])
-        else:
-            # 为不在数据库中的成员创建临时对象
-            # OPERATOR 使用特殊 id=-1
-            member_id = ChatRoom.OPERATOR_MEMBER_ID if SpecialAgent.value_of(name) == SpecialAgent.OPERATOR else 0
-            room_members.append(GtAgent(id=member_id, team_id=team_row.id, name=name, role_template_id=0))
+    """将数据库房间装载到运行态。"""
+    room_members = await gtAgentManager.get_team_agents_by_ids(team_row.id, agent_ids, include_special=True)
 
     room = ChatRoom(team=team_row, room=room_row, members=room_members)
-    room_key = room.key
-    _rooms[room_key] = room
-    _rooms_by_id[resolved_room_id] = room
+    _rooms[room.key] = room
+    _rooms_by_id[room.room_id] = room
 
-    logger.info(f"创建并初始化聊天室: room_id={resolved_room_id}, type={room_type.name}, 成员={normalized_members}")
-    if max_turns > 0:
-        logger.info(f"初始化轮次配置: room_id={resolved_room_id}, max_turns={max_turns}")
+    logger.info(f"创建并初始化聊天室: room_id={room.room_id}, type={room.room_type.name}, 成员={[member.name for member in room_members]}")
+    if room_row.max_turns > 0:
+        logger.info(f"初始化轮次配置: room_id={room.room_id}, max_turns={room_row.max_turns}")
 
 async def ensure_room_record(team_name: str, name: str, members: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0) -> None:
     """确保房间记录存在并装载运行态。创建后房间处于 INIT，需由 service 层显式退出 INIT。"""
-    await _create_room(
-        room_id=None,
-        team_name=team_name,
-        name=name,
-        members=members,
-        initial_topic=initial_topic,
-        room_type=room_type,
-        max_turns=max_turns,
+    team_row = await gtTeamManager.get_team(team_name)
+    assert team_row is not None, f"Team '{team_name}' 不存在，调用 ensure_room_record 前应先创建 Team"
+    agent_rows = await gtAgentManager.get_agents_by_team_and_names(team_row.id, members)
+    agent_id_map = {agent.name: agent.id for agent in agent_rows}
+    agent_ids = [
+        int(special.value) if (special := SpecialAgent.value_of(member)) is not None else agent_id_map[member]
+        for member in members
+        if SpecialAgent.value_of(member) is not None or member in agent_id_map
+    ]
+    room_row = await gtRoomManager.get_room_by_team_and_name(team_row.id, name)
+    if room_row is None:
+        room_row = GtRoom(
+            team_id=team_row.id,
+            name=name,
+            type=room_type,
+            initial_topic=initial_topic,
+            max_turns=max_turns,
+            agent_ids=[],
+            biz_id=None,
+            tags=[],
+        )
+    else:
+        room_row.type = room_type
+        room_row.initial_topic = initial_topic
+        room_row.max_turns = max_turns
+    room_row = await gtRoomManager.save_room(room_row)
+    await _load_room(
+        team_row=team_row,
+        room_row=room_row,
+        agent_ids=agent_ids,
     )
 
 
-async def create_rooms(teams_config: list[TeamConfig]) -> None:
-    """遍历所有 team，根据 rooms 配置批量创建聊天室。
-
-    批量启动路径始终先生成初始化消息；若后续启用持久化恢复，恢复出的历史消息
-    会覆盖这段启动期内存消息，从而保持最终房间状态与持久化一致。
-    """
-    for team in teams_config:
-        team_name = team.name
-        for room in _iter_team_rooms(team):
-            await _create_room(
-                room_id=room.id,
-                team_name=team_name,
-                name=room.name,
-                members=room.members,
-                initial_topic=room.initial_topic,
-                room_type=_infer_room_type(room.members),
-                max_turns=room.max_turns,
+async def load_rooms_from_db() -> None:
+    """从数据库装载所有聊天室到运行态。"""
+    for team_row in await gtTeamManager.get_all_teams():
+        for room_row in await gtRoomManager.get_rooms_by_team(team_row.id):
+            await _load_room(
+                team_row=team_row,
+                room_row=room_row,
+                agent_ids=room_row.agent_ids or [],
             )
 
 
@@ -700,39 +586,25 @@ def get_rooms_for_agent(team_id: int | None, agent_name: str) -> List[int]:
     return results
 
 
-async def refresh_rooms_for_team(team_id: int, teams_config: list[TeamConfig]) -> None:
-    """根据新的 Team 配置刷新聊天室。"""
+async def refresh_rooms_for_team(team_id: int) -> None:
+    """根据数据库中的最新数据刷新指定 Team 的聊天室运行态。"""
     team_row = await gtTeamManager.get_team_by_id(team_id)
     if team_row is None:
         logger.warning(f"无法刷新聊天室: Team ID '{team_id}' 不存在")
-        return
-    team_name = team_row.name
-
-    # 获取目标 Team 的新配置
-    target_config = next((c for c in teams_config if c.name == team_name), None)
-    if target_config is None:
-        logger.warning(f"无法刷新聊天室: Team '{team_name}' 不存在于配置中")
         return
 
     # 先关闭该 Team 的所有现有聊天室
     await close_team_rooms(team_id)
 
-    # 根据新配置重新创建聊天室
-    current_rooms = await gtRoomManager.get_rooms_by_team(team_row.id)
-    for room in _iter_team_rooms(target_config):
-        room_config = next((item for item in current_rooms if item.name == room.name), None)
-        if room_config:
-            await _create_room(
-                room_id=room_config.id,
-                team_name=team_name,
-                name=room.name,
-                members=room.members,
-                initial_topic=room.initial_topic,
-                room_type=_infer_room_type(room.members),
-                max_turns=room.max_turns,
-            )
+    room_rows = await gtRoomManager.get_rooms_by_team(team_row.id)
+    for room_row in room_rows:
+        await _load_room(
+            team_row=team_row,
+            room_row=room_row,
+            agent_ids=room_row.agent_ids or [],
+        )
 
-    logger.info(f"Team '{team_name}' 的聊天室已刷新，共 {len(_iter_team_rooms(target_config))} 个房间")
+    logger.info(f"Team '{team_row.name}' 的聊天室已刷新，共 {len(room_rows)} 个房间")
 
 
 async def exit_init_rooms(team_name: str | None = None) -> int:

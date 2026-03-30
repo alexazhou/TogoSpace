@@ -180,7 +180,7 @@ class TestDalManagers(ServiceTestCase):
         agents = await ServiceTestCase.convert_to_gt_agents(team_a.id, configs)
         await gtAgentManager.batch_save_agents(team_a.id, agents)
 
-        await roomService.save_team_rooms_from_config(team_a.id, [TeamRoomConfig(
+        await roomService.import_team_rooms_from_config(team_a.id, [TeamRoomConfig(
             name="general",
             initial_topic="hello",
             max_turns=6,
@@ -207,7 +207,11 @@ class TestDalManagers(ServiceTestCase):
         cfg_none = await teamService.get_team_config("missing")
         assert cfg_none is None
 
-        all_configs = await teamService.get_all_team_configs_from_db()
+        all_configs = []
+        for team in await gtTeamManager.get_all_teams():
+            config = await teamService.get_team_config(team.name)
+            if config is not None:
+                all_configs.append(config)
         assert [c.name for c in all_configs] == ["team_a", "team_b"]
         assert all_configs[1].preset_rooms == []
 
@@ -316,7 +320,7 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.save_team(GtTeam(name="room_team"))
-        await roomService.save_team_rooms_from_config(team.id, [
+        await roomService.import_team_rooms_from_config(team.id, [
             TeamRoomConfig(name="z_room", max_turns=2, members=["alice", "bob"]),
             TeamRoomConfig(name="a_room", max_turns=3, members=["Operator", "alice"]),
         ])
@@ -358,10 +362,10 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.save_team(GtTeam(name="upsert_team"))
-        await roomService.save_team_rooms_from_config(team.id, [
+        await roomService.import_team_rooms_from_config(team.id, [
             TeamRoomConfig(name="old_room", max_turns=2, members=["alice"]),
         ])
-        await roomService.save_team_rooms_from_config(team.id, [
+        await roomService.import_team_rooms_from_config(team.id, [
             TeamRoomConfig(name="new_room_1", members=["alice"]),
             TeamRoomConfig(name="new_room_2", initial_topic="x", members=["bob"]),
         ])
@@ -375,7 +379,7 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.save_team(GtTeam(name="delete_team"))
-        await roomService.save_team_rooms_from_config(team.id, [
+        await roomService.import_team_rooms_from_config(team.id, [
             TeamRoomConfig(name="r1", members=["alice"]),
             TeamRoomConfig(name="r2", members=["bob"]),
         ])
@@ -413,13 +417,14 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.save_team(GtTeam(name="state_team"))
-        room = await roomService.ensure_room_by_key(
+        room = await gtRoomManager.save_room(GtRoom(
             team_id=team.id,
-            room_name="state_room",
-            room_type=RoomType.GROUP,
+            name="state_room",
+            type=RoomType.GROUP,
             initial_topic="",
             max_turns=5,
-        )
+            agent_ids=[],
+        ))
 
         assert await gtRoomManager.get_room_state(room.id) is None
 
@@ -447,21 +452,24 @@ class TestDalManagers(ServiceTestCase):
         ]
         agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
         await gtAgentManager.batch_save_agents(team.id, agents)
-        room = await roomService.ensure_room_by_key(
+        room = await gtRoomManager.save_room(GtRoom(
             team_id=team.id,
-            room_name="member_room",
-            room_type=RoomType.GROUP,
+            name="member_room",
+            type=RoomType.GROUP,
             initial_topic="",
             max_turns=5,
-        )
+            agent_ids=[],
+        ))
+        saved_agents = await gtAgentManager.get_agents_by_team(team.id)
+        agent_ids = {agent.name: agent.id for agent in saved_agents}
 
         assert await roomService.get_db_room_member_names(room.id) == []
 
-        await roomService.save_room_members(room.id, ["charlie", "alice"])
-        assert await roomService.get_db_room_member_names(room.id) == ["alice", "charlie"]
+        await roomService.save_room_members(room.id, [agent_ids["charlie"], agent_ids["alice"]])
+        assert await roomService.get_db_room_member_names(room.id) == ["charlie", "alice"]
 
         # upsert 会覆盖旧成员
-        await roomService.save_room_members(room.id, ["bob"])
+        await roomService.save_room_members(room.id, [agent_ids["bob"]])
         assert await roomService.get_db_room_member_names(room.id) == ["bob"]
 
         # clear members
@@ -479,13 +487,14 @@ class TestDalManagers(ServiceTestCase):
         await self._save_role_template("bob", "gpt-4o")
 
         team = await gtTeamManager.save_team(GtTeam(name="msg_team"))
-        room = await roomService.ensure_room_by_key(
+        room = await gtRoomManager.save_room(GtRoom(
             team_id=team.id,
-            room_name="msg_room",
-            room_type=RoomType.GROUP,
+            name="msg_room",
+            type=RoomType.GROUP,
             initial_topic="",
             max_turns=5,
-        )
+            agent_ids=[],
+        ))
 
         configs = [
             AgentConfig(name="alice", role_template="alice"),

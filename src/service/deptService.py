@@ -254,7 +254,11 @@ async def _save_dept_update_room(team_id: int, node: DeptTreeNode, dept_ids_map:
         existing.biz_id = biz_id
         existing.tags = ["DEPT"]
         await gtRoomManager.save_room(existing)
-        await roomService.save_room_members(existing.id, node.members)
+        agent_ids = [
+            agent.id
+            for agent in await gtAgentManager.get_team_agents_by_names(team_id, node.members, include_special=False)
+        ]
+        await roomService.save_room_members(existing.id, agent_ids)
     else:
         # 创建新房间，并添加部门成员
         room = await gtRoomManager.save_room(GtRoom(
@@ -267,7 +271,11 @@ async def _save_dept_update_room(team_id: int, node: DeptTreeNode, dept_ids_map:
             biz_id=biz_id,
             tags=["DEPT"],
         ))
-        await roomService.save_room_members(room.id, node.members)
+        agent_ids = [
+            agent.id
+            for agent in await gtAgentManager.get_team_agents_by_names(team_id, node.members, include_special=False)
+        ]
+        await roomService.save_room_members(room.id, agent_ids)
 
     # 递归处理子部门
     for child in node.children:

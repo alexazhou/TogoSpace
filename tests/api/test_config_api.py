@@ -127,20 +127,22 @@ class TestConfigApi(ServiceTestCase):
         # 5. Room Members Management
         # List Members
         async with aiohttp.ClientSession() as client:
+            agents = await self._get_team_agents(team_id)
+            alice = next(agent for agent in agents if agent["name"] == "alice")
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/list.json") as resp:
                 assert resp.status == 200
                 
             # Modify Members
-            members_payload = {"members": ["alice", "Operator"]}
+            members_payload = {"member_ids": [alice["id"], -1]}
             async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/modify.json", json=members_payload) as resp:
                 assert resp.status == 200
                 
             # Verify members
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/list.json") as resp:
                 data = await resp.json()
-                members = set(data["members"])
-                assert "alice" in members
-                assert any(member.lower() == "operator" for member in members)
+                member_ids = set(data["member_ids"])
+                assert alice["id"] in member_ids
+                assert -1 in member_ids
 
         # 6. Delete Room
         async with aiohttp.ClientSession() as client:
@@ -181,7 +183,7 @@ class TestConfigApi(ServiceTestCase):
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{room_id}/agents/list.json") as resp:
                 assert resp.status == 200
                 members_data = await resp.json()
-                assert set(members_data["members"]) == {"alice", "bob"}
+                assert set(members_data["member_ids"]) == {alice["id"], bob["id"]}
 
             async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{room_id}/delete.json") as resp:
                 assert resp.status == 200

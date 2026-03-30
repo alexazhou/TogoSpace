@@ -25,6 +25,14 @@ async def get_room_by_id(room_id: int) -> GtRoom | None:
     return await GtRoom.aio_get_or_none(GtRoom.id == room_id)
 
 
+async def get_room_by_team_and_name(team_id: int, name: str) -> GtRoom | None:
+    """通过 team_id + name 获取房间。"""
+    return await GtRoom.aio_get_or_none(
+        GtRoom.team_id == team_id,
+        GtRoom.name == name,
+    )
+
+
 async def save_room(room: GtRoom) -> GtRoom:
     """保存房间对象：无 id 时插入，有 id 时更新。"""
     if room.id is None:

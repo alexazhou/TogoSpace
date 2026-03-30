@@ -61,7 +61,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await teamService.import_team_from_config(team_config)
         await agentService.load_team_ids([team_config])
         await agentService.create_team_agents([team_config])
-        await roomService.create_rooms([team_config])
+        await roomService.ensure_rooms_from_config([team_config])
         await agentService.restore_state()
         await roomService.restore_state()
         await scheduler.startup([team_config])
