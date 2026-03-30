@@ -1,13 +1,14 @@
 """integration tests for core behavior in service.agentService"""
+import asyncio
 import os
 import sys
 from types import SimpleNamespace
 
 import pytest
 
-from constants import DriverType, EmployStatus
+from constants import DriverType, EmployStatus, MessageBusTopic, MemberStatus
 from dal.db import gtAgentManager, gtTeamManager
-from service import roleTemplateService, agentService, roomService, ormService, persistenceService
+from service import roleTemplateService, agentService, roomService, ormService, persistenceService, messageBus
 from service import teamService
 from util import configUtil
 from ...base import ServiceTestCase
@@ -71,6 +72,43 @@ class TestAgentServiceGetInfo(_agentServiceCase):
         assert info["template_name"] == "alice"
         assert info["team_name"] == TEAM
         assert info["status"] == "IDLE"
+
+
+class TestAgentServiceMemberStatusEvent(_agentServiceCase):
+    async def test_member_status_event_contains_real_team_id(self):
+        """订阅 MEMBER_STATUS_CHANGED，验证事件中的 team_id/team_name 正确。"""
+        alice = agentService.get_team_agent(TEAM, "alice")
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+
+        received_payloads: list[dict] = []
+
+        def _on_member_status(msg) -> None:
+            received_payloads.append(dict(msg.payload))
+
+        messageBus.subscribe(MessageBusTopic.MEMBER_STATUS_CHANGED, _on_member_status)
+        try:
+            # 无任务时也会经历 ACTIVE -> IDLE，并发布两次状态事件。
+            await alice.consume_task(max_function_calls=1)
+            await asyncio.sleep(0)
+        finally:
+            messageBus.unsubscribe(MessageBusTopic.MEMBER_STATUS_CHANGED, _on_member_status)
+
+        alice_events = [p for p in received_payloads if p.get("member_name") == "alice"]
+        assert len(alice_events) >= 2
+
+        active_event = next((p for p in alice_events if p.get("status") == MemberStatus.ACTIVE.name), None)
+        idle_event = next((p for p in alice_events if p.get("status") == MemberStatus.IDLE.name), None)
+        assert active_event is not None
+        assert idle_event is not None
+
+        assert active_event["team_id"] == team.id
+        assert active_event["team_id"] > 0
+        assert active_event["team_name"] == TEAM
+
+        assert idle_event["team_id"] == team.id
+        assert idle_event["team_id"] > 0
+        assert idle_event["team_name"] == TEAM
 
 
 class TestAgentServiceSystemPrompt(_agentServiceCase):

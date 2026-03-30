@@ -88,8 +88,8 @@ async def main(config_dir: str = None, port: int = 8080):
 
     # ── 阶段 3：运行时构建 ────────────────────────────────────────────────────
     logger.info("[启动] 阶段 3/4：构建运行时（成员 / 房间 / 调度器）")
-    await agentService.load_team_ids(teams_config)
     await agentService.startup()
+    await agentService.load_team_ids(teams_config)
     await agentService.create_team_agents(teams_config, workspace_root=app_config.setting.workspace_root)
     await roomService.startup()
     await schedulerService.startup(teams_config=teams_config)
