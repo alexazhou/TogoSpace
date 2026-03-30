@@ -78,8 +78,8 @@ class TestAgentServiceSystemPrompt(_agentServiceCase):
         """system_prompt 应显式包含模板名称与成员名称，便于模型识别身份。"""
         alice = agentService.get_team_agent(TEAM, "alice")
 
-        assert "Agent 模板名称：alice" in alice.system_prompt
-        assert "Agent 成员名称：alice" in alice.system_prompt
+        assert "你当前的名字：alice" in alice.system_prompt
+        assert "你是身份：alice" in alice.system_prompt
 
 
 class TestagentServiceGetAllRooms(_agentServiceCase):
