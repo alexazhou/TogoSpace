@@ -18,6 +18,7 @@ class ModifyRoleTemplateRequest(BaseModel):
     name: str | None = None
     soul: str | None = None
     model: str | None = None
+    # 约定：字段未传时会解析为 None，并按“清空该字段”处理
     driver: DriverType | None = None
     allowed_tools: list[str] | None = None
 
@@ -108,6 +109,7 @@ class RoleTemplateModifyHandler(BaseHandler):
             name=next_name or None,
             soul=request.soul,
             model=request.model,
+            # 约定：未传字段等价于清空，因此这里直接透传 None 到 DAL
             driver=request.driver,
             allowed_tools=request.allowed_tools,
         )

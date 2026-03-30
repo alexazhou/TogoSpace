@@ -117,6 +117,8 @@ async def batch_save_agents(team_id: int, agents: list[GtAgent]) -> None:
 
 async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
     """按 ID 列表查询 agents。"""
+    if not agent_ids:
+        return []
     return list(
         await GtAgent.select()
         .where(GtAgent.id.in_(agent_ids))  # type: ignore[attr-defined]

@@ -233,6 +233,20 @@ class TestDalManagers(ServiceTestCase):
         assert next((item for item in await gtRoomManager.get_rooms_by_team(imported_after.id) if item.name == "r2"), None) is None
 
     # ------------------------------------------------------------------
+    # gtAgentManager
+    # ------------------------------------------------------------------
+    async def test_agent_manager_get_agents_by_ids_empty_list_short_circuits(self, monkeypatch):
+        await self._reset_tables()
+
+        def _select_should_not_be_called(*args, **kwargs):
+            raise AssertionError("GtAgent.select should not be called when agent_ids is empty")
+
+        monkeypatch.setattr(gtAgentManager.GtAgent, "select", _select_should_not_be_called)
+
+        rows = await gtAgentManager.get_agents_by_ids([])
+        assert rows == []
+
+    # ------------------------------------------------------------------
     # gtRoomManager
     # ------------------------------------------------------------------
     async def test_room_manager_get_rooms(self):
