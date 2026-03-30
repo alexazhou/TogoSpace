@@ -59,7 +59,9 @@ class TestDeptService(ServiceTestCase):
     async def _setup_team_with_members(self, team_name: str, member_names: list[str]) -> GtTeam:
         """创建 team 并写入成员，返回 GtTeam 对象。"""
         # 先创建角色模板
-        await gtRoleTemplateManager.upsert_role_template("dummy", "gpt-4o")
+        await gtRoleTemplateManager.save_role_template(
+            GtRoleTemplate(template_name="dummy", model="gpt-4o")
+        )
         team = await gtTeamManager.save_team(GtTeam(name=team_name))
         configs = [AgentConfig(name=n, role_template="dummy") for n in member_names]
         agents = await self._convert_to_gt_agents(team.id, configs)
@@ -78,7 +80,7 @@ class TestDeptService(ServiceTestCase):
         bob = await gtAgentManager.get_agent(team.id, "bob")
         assert alice is not None and bob is not None
 
-        dept = await gtDeptManager.upsert_dept(
+        dept = await gtDeptManager.save_dept(
             team_id=team.id,
             name="engineering",
             responsibility="build stuff",
@@ -108,11 +110,11 @@ class TestDeptService(ServiceTestCase):
         charlie = await gtAgentManager.get_agent(team.id, "charlie")
         assert alice is not None and bob is not None and charlie is not None
 
-        first = await gtDeptManager.upsert_dept(
+        first = await gtDeptManager.save_dept(
             team_id=team.id, name="eng", responsibility="v1",
             parent_id=None, manager_id=alice.id, agent_ids=[alice.id, bob.id],
         )
-        second = await gtDeptManager.upsert_dept(
+        second = await gtDeptManager.save_dept(
             team_id=team.id, name="eng", responsibility="v2",
             parent_id=None, manager_id=bob.id, agent_ids=[alice.id, bob.id, charlie.id],
         )
@@ -131,11 +133,11 @@ class TestDeptService(ServiceTestCase):
         bob = await gtAgentManager.get_agent(team.id, "bob")
         assert alice is not None and bob is not None
 
-        root = await gtDeptManager.upsert_dept(
+        root = await gtDeptManager.save_dept(
             team_id=team.id, name="root", responsibility="", parent_id=None,
             manager_id=alice.id, agent_ids=[alice.id],
         )
-        child = await gtDeptManager.upsert_dept(
+        child = await gtDeptManager.save_dept(
             team_id=team.id, name="child", responsibility="", parent_id=root.id,
             manager_id=bob.id, agent_ids=[bob.id],
         )
@@ -418,11 +420,11 @@ class TestDeptService(ServiceTestCase):
         assert alice is not None and bob is not None and charlie is not None
 
         # 两个部门：eng (alice, bob) / design (charlie)
-        eng = await gtDeptManager.upsert_dept(
+        eng = await gtDeptManager.save_dept(
             team_id=team.id, name="eng", responsibility="", parent_id=None,
             manager_id=alice.id, agent_ids=[alice.id, bob.id],
         )
-        design = await gtDeptManager.upsert_dept(
+        design = await gtDeptManager.save_dept(
             team_id=team.id, name="design", responsibility="", parent_id=None,
             manager_id=charlie.id, agent_ids=[charlie.id],
         )
@@ -448,7 +450,7 @@ class TestDeptService(ServiceTestCase):
         bob = await gtAgentManager.get_agent(team.id, "bob")
         assert alice is not None and bob is not None
 
-        dept = await gtDeptManager.upsert_dept(
+        dept = await gtDeptManager.save_dept(
             team_id=team.id, name="dept_m", responsibility="", parent_id=None,
             manager_id=alice.id, agent_ids=[alice.id],
         )
@@ -600,8 +602,12 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         # 先创建角色模板
-        await gtRoleTemplateManager.upsert_role_template("gpt_agent", "gpt-4o")
-        await gtRoleTemplateManager.upsert_role_template("glm_agent", "glm-4")
+        await gtRoleTemplateManager.save_role_template(
+            GtRoleTemplate(template_name="gpt_agent", model="gpt-4o")
+        )
+        await gtRoleTemplateManager.save_role_template(
+            GtRoleTemplate(template_name="glm_agent", model="glm-4")
+        )
 
         team = await gtTeamManager.save_team(GtTeam(name="t_model_driver"))
         configs = [

@@ -7,6 +7,7 @@ from typing import Generic, TypeVar, cast
 import peewee
 import peewee_async
 from constants import EnhanceEnum
+from model.dbModel.auto_timestamp_mixin import AutoTimestampMixin
 
 TJson = TypeVar("TJson")
 TEnum = TypeVar("TEnum", bound="EnhanceEnum")
@@ -56,61 +57,10 @@ class EnumField(peewee.CharField, Generic[TEnum]):
         return cast(TEnum, getattr(self.enum, value))
 
 
-class DbModelBase(peewee_async.AioModel):
+class DbModelBase(AutoTimestampMixin, peewee_async.AioModel):
     id:         int = peewee.AutoField()
     created_at: datetime = peewee.DateTimeField(default=datetime.now)
     updated_at: datetime = peewee.DateTimeField(default=datetime.now)
-
-    @classmethod
-    def _now(cls) -> datetime:
-        return datetime.now()
-
-    @classmethod
-    def _inject_insert_timestamps(cls, payload: dict) -> dict:
-        now = cls._now()
-        if "created_at" not in payload:
-            payload["created_at"] = now
-        if "updated_at" not in payload:
-            payload["updated_at"] = now
-        return payload
-
-    @classmethod
-    def _inject_updated_at(cls, payload: dict) -> dict:
-        if "updated_at" not in payload:
-            payload["updated_at"] = cls._now()
-        return payload
-
-    @classmethod
-    def insert(cls, *args, **kwargs):
-        if kwargs:
-            kwargs = cls._inject_insert_timestamps(dict(kwargs))
-            return super().insert(*args, **kwargs)
-        if args and isinstance(args[0], dict):
-            first = cls._inject_insert_timestamps(dict(args[0]))
-            return super().insert(first, *args[1:], **kwargs)
-        return super().insert(*args, **kwargs)
-
-    @classmethod
-    def insert_many(cls, rows, fields=None):
-        rows = [
-            cls._inject_insert_timestamps(dict(row)) if isinstance(row, dict) else row
-            for row in rows
-        ]
-        return super().insert_many(rows, fields=fields)
-
-    @classmethod
-    def update(cls, *args, **kwargs):
-        if kwargs:
-            if "updated_at" not in kwargs:
-                kwargs = dict(kwargs)
-                kwargs["updated_at"] = cls._now()
-            return super().update(*args, **kwargs)
-        if args and isinstance(args[0], dict):
-            first = dict(args[0])
-            if "updated_at" not in first:
-                first["updated_at"] = cls._now()
-            return super().update(first, *args[1:], **kwargs)
-        return super().update(*args, **kwargs)
 
     class Meta:
         database = _database_proxy

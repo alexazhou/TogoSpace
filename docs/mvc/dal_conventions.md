@@ -87,11 +87,15 @@ imports（from __future__ import annotations 放在最前）
 
 | 函数名模式 | 返回类型 | 说明 |
 |-----------|---------|------|
-| `upsert_xxx(...)` | `GtXxx` | 插入或更新，返回最终行 |
-| `update_xxx(id, ...)` | `GtXxx` | 按字段更新，返回更新后行 |
+| `save_xxx(xxx: GtXxx)` | `GtXxx` | 统一单条保存入口（create / update / upsert） |
+| `update_xxx(...)` | `None \| GtXxx` | 仅用于“局部字段更新”场景（如状态字段） |
 | `batch_save_xxxs(...)` | `None` | 批量保存（有 id 更新，无 id 插入） |
 | `batch_update_xxx_status(...)` | `None` | 批量更新指定字段 |
 | `delete_xxx(id)` | `None \| bool` | 删除指定记录 |
+
+补充约定：
+- 新代码优先使用 `save_xxx(...)`，避免同时维护 `upsert_xxx(...)` + `update_xxx(...)` 两套薄封装入口
+- 如果某个函数只是“查一下再 `aio_save()`”且不增加业务语义，应优先由上层直接操作对象，减少 DAL 冗余接口
 
 ## 查询模式
 
@@ -131,71 +135,54 @@ async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
 
 注意：`in_()` 方法需要 `# type: ignore[attr-defined]` 注释以消除类型检查警告。
 
-## Upsert 模式
+## Save / Upsert 模式
 
-使用 `insert().on_conflict()` 实现插入或更新：
+推荐使用统一的 `save_xxx(xxx: GtXxx)`，内部根据是否有主键决定更新或 upsert。
+
+示例（`save_role_template`）：
 
 ```python
-async def upsert_role_template(
-    template_name: str,
-    model: str | None,
-    soul: str = "",
-    ...
-) -> GtRoleTemplate:
+async def save_role_template(template: GtRoleTemplate) -> GtRoleTemplate:
+    if template.id is not None:
+        await template.aio_save()
+        row = await get_role_template_by_id(template.id)
+        if row is None:
+            raise RuntimeError(f"role template update failed: {template.id}")
+        return row
+
     await (
         GtRoleTemplate.insert(
-            template_name=template_name,
-            model=model,
-            soul=soul,
-            ...
+            template_name=template.template_name,
+            model=template.model,
+            soul=template.soul,
         )
         .on_conflict(
             conflict_target=[GtRoleTemplate.template_name],  # 冲突检测字段
             update={
-                GtRoleTemplate.model: model,
-                GtRoleTemplate.soul: soul,
-                GtRoleTemplate.updated_at: GtRoleTemplate._now(),
+                GtRoleTemplate.model: template.model,
+                GtRoleTemplate.soul: template.soul,
             },
         )
         .aio_execute()
     )
 
-    # upsert 后重新查询返回
-    row = await get_role_template_by_name(template_name)
+    row = await get_role_template_by_name(template.template_name)
     if row is None:
-        raise RuntimeError(f"role template upsert failed: {template_name}")
+        raise RuntimeError(f"role template save failed: {template.template_name}")
     return row
 ```
 
 要点：
+- 优先统一成一个 `save_xxx` 入口，减少接口分裂
 - `conflict_target` 指定唯一索引字段
-- `update` 字典中必须包含 `updated_at: GtXxx._now()`
+- `update` 字典无需手写 `updated_at`（由 `AutoTimestampMixin` 自动注入）
 - 执行后需重新查询返回最新行
 
 ## 更新模式
 
 ### 按字段更新
 
-```python
-async def update_agent(
-    agent_id: int,
-    name: str,
-    role_template_id: int,
-    model: str,
-    driver: DriverType
-) -> GtAgent:
-    agent = await GtAgent.aio_get_or_none(GtAgent.id == agent_id)
-    if agent is None:
-        raise ValueError(f"Agent ID '{agent_id}' not found")
-
-    agent.name = name
-    agent.role_template_id = role_template_id
-    agent.model = model
-    agent.driver = driver
-    await agent.aio_save()
-
-    return agent
-```
+对于“整行对象更新”，优先使用 `save_xxx(xxx: GtXxx)`；`update_xxx(...)` 仅保留给局部字段更新场景。
 
 ### 批量更新
 
@@ -216,16 +203,17 @@ async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) 
 
 - 对 `GtXxx.update(...)`：**不要**手动设置 `updated_at`，由 `DbModelBase.update()` 统一注入
 - 对 `GtXxx.insert(...)`：通常也不需要手动设置时间字段，`DbModelBase.insert()` 会注入 `created_at/updated_at`
-- 例外：`insert().on_conflict(update={...})` 的 `update` 字典中，仍需显式写 `GtXxx.updated_at: GtXxx._now()`
+- 对 `insert().on_conflict(update={...})`：`update` 字典也会自动注入 `updated_at`（通过 `AutoTimestampMixin`）
+- 若显式传入时间字段（无论是字符串 key 还是字段对象 key），框架会保留显式值，不覆盖
 
 ```python
 # ✓ 推荐：常规 update 不手动传 updated_at
 await GtTeam.update(enabled=1).where(GtTeam.id == team_id).aio_execute()
 
-# ✓ 推荐：upsert 的 on_conflict(update=...) 显式设置 updated_at
+# ✓ 推荐：upsert 的 on_conflict(update=...) 无需手动设置 updated_at
 await GtRoleTemplate.insert(...).on_conflict(
     conflict_target=[GtRoleTemplate.template_name],
-    update={GtRoleTemplate.updated_at: GtRoleTemplate._now()},
+    update={GtRoleTemplate.model: "gpt-4o"},
 ).aio_execute()
 ```
 
@@ -347,12 +335,13 @@ Service/Controller 层统一通过 `from dal.db import gtXxxManager` 引用。
 async def get_agent(team_id: int, name: str) -> GtAgent | None:
     return await GtAgent.aio_get_or_none(...)
 
-# 必须存在 → 抛异常
-async def update_agent(agent_id: int, ...) -> GtAgent:
-    agent = await GtAgent.aio_get_or_none(GtAgent.id == agent_id)
-    if agent is None:
-        raise ValueError(f"Agent ID '{agent_id}' not found")
+# save/update 后回查失败 → 抛异常
+async def save_role_template(template: GtRoleTemplate) -> GtRoleTemplate:
     ...
+    row = await get_role_template_by_name(template.template_name)
+    if row is None:
+        raise RuntimeError(f"role template save failed: {template.template_name}")
+    return row
 ```
 
 ## 依赖关系

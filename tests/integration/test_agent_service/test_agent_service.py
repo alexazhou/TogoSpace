@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from constants import DriverType
+from constants import DriverType, EmployStatus
 from dal.db import gtAgentManager, gtTeamManager
 from service import roleTemplateService, agentService, roomService, ormService, persistenceService
 from service import teamService
@@ -104,7 +104,10 @@ class TestSaveTeamAgentsFullReplace(_agentServiceCase):
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
 
-        before_agents = await gtAgentManager.get_on_board_agents(team.id)
+        before_agents = await gtAgentManager.get_agents_by_employ_status(
+            team.id,
+            EmployStatus.ON_BOARD,
+        )
         before_by_name = {agent.name: agent for agent in before_agents}
         assert {"alice", "bob"}.issubset(before_by_name)
 

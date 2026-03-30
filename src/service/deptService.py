@@ -66,7 +66,7 @@ async def set_dept_tree(team_id: int, root: DeptTreeNode) -> None:
 
     # 增量更新/创建部门，并收集 ID 映射
     dept_ids_map: dict[str, int] = {}
-    await _upsert_dept_update_node(team_id, root, parent_id=None, dept_ids_map=dept_ids_map)
+    await _save_dept_update_node(team_id, root, parent_id=None, dept_ids_map=dept_ids_map)
 
     # 同步部门房间
     await _save_dept_update_room(team_id, root, dept_ids_map)
@@ -153,7 +153,7 @@ async def _import_node(team_id: int, node: DeptNodeConfig, parent_id: int | None
 
     assert manager_id is not None  # 前置校验已确保 manager in members
 
-    dept = await gtDeptManager.upsert_dept(
+    dept = await gtDeptManager.save_dept(
         team_id=team_id,
         name=node.dept_name,
         responsibility=node.dept_responsibility,
@@ -168,7 +168,7 @@ async def _import_node(team_id: int, node: DeptNodeConfig, parent_id: int | None
     return dept
 
 
-async def _upsert_dept_update_node(
+async def _save_dept_update_node(
     team_id: int,
     node: DeptTreeNode,
     parent_id: int | None,
@@ -201,14 +201,14 @@ async def _upsert_dept_update_node(
     # 按 dept_id 或 dept_name 匹配现有部门
     if node.dept_id is not None:
         # 优先按 ID 匹配
-        existing = await gtDeptManager.get_dept_by_id(node.dept_id)
+        existing = await GtDept.aio_get_or_none(GtDept.id == node.dept_id)
     else:
         # 按 name 匹配
         existing = await gtDeptManager.get_dept_by_name(team_id, node.dept_name)
 
     if existing:
         # 更新现有部门
-        dept = await gtDeptManager.upsert_dept(
+        dept = await gtDeptManager.save_dept(
             team_id=team_id,
             name=node.dept_name,
             responsibility=node.dept_responsibility,
@@ -219,7 +219,7 @@ async def _upsert_dept_update_node(
         )
     else:
         # 创建新部门
-        dept = await gtDeptManager.upsert_dept(
+        dept = await gtDeptManager.save_dept(
             team_id=team_id,
             name=node.dept_name,
             responsibility=node.dept_responsibility,
@@ -233,7 +233,7 @@ async def _upsert_dept_update_node(
 
     # 递归处理子部门
     for child in node.children:
-        await _upsert_dept_update_node(team_id, child, parent_id=dept.id, dept_ids_map=dept_ids_map)
+        await _save_dept_update_node(team_id, child, parent_id=dept.id, dept_ids_map=dept_ids_map)
 
     return dept
 
@@ -317,7 +317,7 @@ async def _get_dept_tree_async(team_id: int) -> DeptTreeNode | None:
 
 async def get_off_board_members(team_id: int) -> list[GtAgent]:
     """返回所有 employ_status=off_board 的成员。"""
-    return await gtAgentManager.get_off_board_agents(team_id)
+    return await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.OFF_BOARD)
 
 
 async def get_member_dept(team_id: int, member_name: str) -> GtDept | None:
@@ -357,7 +357,7 @@ async def move_member(
     for dept in all_depts:
         if member.id in dept.agent_ids:
             new_ids = [mid for mid in dept.agent_ids if mid != member.id]
-            await gtDeptManager.upsert_dept(
+            await gtDeptManager.save_dept(
                 team_id=dept.team_id,
                 name=dept.name,
                 responsibility=dept.responsibility,
@@ -371,7 +371,7 @@ async def move_member(
         new_ids.append(member.id)
 
     new_manager_id = member.id if is_manager else target_dept.manager_id
-    await gtDeptManager.upsert_dept(
+    await gtDeptManager.save_dept(
         team_id=target_dept.team_id,
         name=target_dept.name,
         responsibility=target_dept.responsibility,
@@ -433,7 +433,7 @@ async def remove_member(
             )
         new_manager_id = new_manager_row.id
 
-    await gtDeptManager.upsert_dept(
+    await gtDeptManager.save_dept(
         team_id=member_dept.team_id,
         name=member_dept.name,
         responsibility=member_dept.responsibility,
@@ -470,7 +470,7 @@ async def set_dept_manager(team_id: int, dept_name: str, manager_name: str) -> N
             error_code="MEMBER_NOT_IN_DEPT",
         )
 
-    await gtDeptManager.upsert_dept(
+    await gtDeptManager.save_dept(
         team_id=dept.team_id,
         name=dept.name,
         responsibility=dept.responsibility,

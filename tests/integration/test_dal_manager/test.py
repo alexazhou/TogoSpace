@@ -49,13 +49,33 @@ class TestDalManagers(ServiceTestCase):
         await GtRoom.delete().aio_execute()
         await GtTeam.delete().aio_execute()
 
+    async def _save_role_template(
+        self,
+        template_name: str,
+        model: str | None,
+        soul: str = "",
+        template_type: RoleTemplateType = RoleTemplateType.SYSTEM,
+        driver: DriverType | None = None,
+        allowed_tools: list[str] | None = None,
+    ) -> GtRoleTemplate:
+        return await gtRoleTemplateManager.save_role_template(
+            GtRoleTemplate(
+                template_name=template_name,
+                model=model,
+                soul=soul,
+                type=template_type,
+                driver=driver,
+                allowed_tools=allowed_tools,
+            )
+        )
+
     # ------------------------------------------------------------------
     # gtRoleTemplateManager
     # ------------------------------------------------------------------
     async def test_role_template_manager_upsert_and_query_with_model(self):
         await self._reset_tables()
 
-        saved_1 = await gtRoleTemplateManager.upsert_role_template(
+        saved_1 = await self._save_role_template(
             "alice",
             "glm-4.7",
             driver=DriverType.CLAUDE_SDK,
@@ -67,7 +87,7 @@ class TestDalManagers(ServiceTestCase):
         assert saved_1.driver == DriverType.CLAUDE_SDK
         assert saved_1.allowed_tools == ["Read"]
 
-        saved_2 = await gtRoleTemplateManager.upsert_role_template(
+        saved_2 = await self._save_role_template(
             "alice",
             "gpt-4o",
             driver=DriverType.TSP,
@@ -145,8 +165,8 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         # 先创建角色模板
-        await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
-        await gtRoleTemplateManager.upsert_role_template("bob", "gpt-4o")
+        await self._save_role_template("alice", "gpt-4o")
+        await self._save_role_template("bob", "gpt-4o")
 
         team_a = await gtTeamManager.save_team(GtTeam(
             name="team_a",
@@ -195,9 +215,9 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         # 先创建角色模板
-        await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
-        await gtRoleTemplateManager.upsert_role_template("bob", "gpt-4o")
-        await gtRoleTemplateManager.upsert_role_template("charlie", "gpt-4o")
+        await self._save_role_template("alice", "gpt-4o")
+        await self._save_role_template("bob", "gpt-4o")
+        await self._save_role_template("charlie", "gpt-4o")
 
         payload = TeamConfig(
             name="imported",
@@ -249,8 +269,8 @@ class TestDalManagers(ServiceTestCase):
     async def test_agent_manager_batch_save_agents_uses_insert_many_for_new_rows(self, monkeypatch):
         await self._reset_tables()
 
-        await gtRoleTemplateManager.upsert_role_template("rt_a", "gpt-4o")
-        await gtRoleTemplateManager.upsert_role_template("rt_b", "gpt-4o")
+        await self._save_role_template("rt_a", "gpt-4o")
+        await self._save_role_template("rt_b", "gpt-4o")
         team = await gtTeamManager.save_team(GtTeam(name="batch_insert_agents_team"))
 
         agents = await ServiceTestCase.convert_to_gt_agents(team.id, [
@@ -273,7 +293,7 @@ class TestDalManagers(ServiceTestCase):
     async def test_agent_manager_batch_save_agents_rejects_mismatched_team_id(self):
         await self._reset_tables()
 
-        await gtRoleTemplateManager.upsert_role_template("rt_a", "gpt-4o")
+        await self._save_role_template("rt_a", "gpt-4o")
         team = await gtTeamManager.save_team(GtTeam(name="batch_save_team_id_check"))
 
         role_template_id = await gtAgentManager.resolve_role_template_id_by_name("rt_a")
@@ -404,7 +424,7 @@ class TestDalManagers(ServiceTestCase):
         assert await gtRoomManager.get_room_state(room.id) is None
 
         state = {"alice": 1, "bob": 3}
-        await gtRoomManager.save_room_state(room.id, state)
+        await gtRoomManager.update_room_state(room.id, state)
         assert await gtRoomManager.get_room_state(room.id) == state
         assert await gtRoomManager.get_room_state(999999) is None
 
@@ -415,9 +435,9 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         # 先创建角色模板
-        await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
-        await gtRoleTemplateManager.upsert_role_template("bob", "gpt-4o")
-        await gtRoleTemplateManager.upsert_role_template("charlie", "gpt-4o")
+        await self._save_role_template("alice", "gpt-4o")
+        await self._save_role_template("bob", "gpt-4o")
+        await self._save_role_template("charlie", "gpt-4o")
 
         team = await gtTeamManager.save_team(GtTeam(name="member_team"))
         configs = [
@@ -455,8 +475,8 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         # 先创建角色模板
-        await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
-        await gtRoleTemplateManager.upsert_role_template("bob", "gpt-4o")
+        await self._save_role_template("alice", "gpt-4o")
+        await self._save_role_template("bob", "gpt-4o")
 
         team = await gtTeamManager.save_team(GtTeam(name="msg_team"))
         room = await roomService.ensure_room_by_key(
@@ -495,7 +515,7 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         # 先创建角色模板
-        await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
+        await self._save_role_template("alice", "gpt-4o")
 
         team = await gtTeamManager.save_team(GtTeam(name="history_team"))
         configs = [AgentConfig(name="alice", role_template="alice")]
@@ -527,8 +547,8 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         # 先创建角色模板
-        await gtRoleTemplateManager.upsert_role_template("alice", "gpt-4o")
-        await gtRoleTemplateManager.upsert_role_template("bob", "gpt-4o")
+        await self._save_role_template("alice", "gpt-4o")
+        await self._save_role_template("bob", "gpt-4o")
 
         team = await gtTeamManager.save_team(GtTeam(name="history_team_2"))
         configs = [

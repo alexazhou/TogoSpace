@@ -420,7 +420,7 @@ def get_team_agent_info_map(team_name: str) -> dict[str, dict]:
 
 
 async def list_team_agents(team_id: int) -> list[GtAgent]:
-    return await gtAgentManager.get_on_board_agents(team_id)
+    return await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.ON_BOARD)
 
 
 def get_team_agents(room_id: int) -> List["Agent"]:
@@ -509,7 +509,7 @@ async def save_team_agents_full_replace(team_id: int, agents_data: list[Any]) ->
             error_code="MEMBER_SAVE_FAILED",
         ) from e
 
-    return await gtAgentManager.get_on_board_agents(team_id)
+    return await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.ON_BOARD)
 
 
 async def shutdown() -> None:

@@ -10,11 +10,6 @@ async def get_dept_by_name(team_id: int, name: str) -> GtDept | None:
     )
 
 
-async def get_dept_by_id(dept_id: int) -> GtDept | None:
-    """通过 ID 获取部门。"""
-    return await GtDept.aio_get_or_none(GtDept.id == dept_id)
-
-
 async def get_all_depts(team_id: int) -> list[GtDept]:
     return list(
         await GtDept.select()
@@ -24,7 +19,7 @@ async def get_all_depts(team_id: int) -> list[GtDept]:
     )
 
 
-async def upsert_dept(
+async def save_dept(
     team_id: int,
     name: str,
     responsibility: str,
@@ -69,7 +64,6 @@ async def upsert_dept(
                 GtDept.parent_id: parent_id,
                 GtDept.manager_id: manager_id,
                 GtDept.agent_ids: agent_ids,
-                GtDept.updated_at: GtDept._now(),
             },
         )
         .aio_execute()

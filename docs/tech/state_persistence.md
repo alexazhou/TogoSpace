@@ -51,7 +51,7 @@ ChatRoom.add_message(sender, content)
 ChatRoom.get_unread_messages(agent_name)
   └── 推进 _member_read_index[agent_name]
         └── persistenceService.save_room_runtime(room_id, id_keyed_index)
-              └── gtRoomManager.save_room_state()  → 写入 rooms.member_read_index
+              └── gtRoomManager.update_room_state()  → 写入 rooms.member_read_index
 ```
 
 存储时 key 从成员名转换为 `member_id`（字符串形式），以解耦成员改名场景。

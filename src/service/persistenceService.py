@@ -36,7 +36,7 @@ async def load_room_runtime(room_id: int) -> tuple[list[GtRoomMessage], dict[str
 
 
 async def save_room_runtime(room_id: int, member_read_index: dict[str, int]) -> None:
-    await gtRoomManager.save_room_state(room_id, member_read_index)
+    await gtRoomManager.update_room_state(room_id, member_read_index)
 
 
 async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistory | None:
@@ -45,5 +45,4 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
 
 async def load_agent_history_message(agent_id: int) -> list[GtAgentHistory]:
     return await gtAgentHistoryManager.get_agent_history(agent_id)
-
 

@@ -2,6 +2,7 @@ import logging
 
 from constants import RoleTemplateType
 from dal.db import gtRoleTemplateManager
+from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from util import configUtil
 from util.configTypes import RoleTemplateConfig
 
@@ -27,23 +28,27 @@ async def _import_role_template_from_config(config: RoleTemplateConfig) -> None:
             or existing.driver != config.driver
             or existing.allowed_tools != config.allowed_tools
         ):
-            await gtRoleTemplateManager.upsert_role_template(
-                config.name,
-                existing.model,
-                existing.soul,
-                RoleTemplateType.SYSTEM,
-                driver=config.driver,
-                allowed_tools=config.allowed_tools,
+            await gtRoleTemplateManager.save_role_template(
+                GtRoleTemplate(
+                    template_name=config.name,
+                    model=existing.model,
+                    soul=existing.soul,
+                    type=RoleTemplateType.SYSTEM,
+                    driver=config.driver,
+                    allowed_tools=config.allowed_tools,
+                )
             )
         return
 
-    await gtRoleTemplateManager.upsert_role_template(
-        config.name,
-        config.model,
-        config.soul,
-        RoleTemplateType.SYSTEM,
-        config.driver,
-        config.allowed_tools,
+    await gtRoleTemplateManager.save_role_template(
+        GtRoleTemplate(
+            template_name=config.name,
+            model=config.model,
+            soul=config.soul,
+            type=RoleTemplateType.SYSTEM,
+            driver=config.driver,
+            allowed_tools=config.allowed_tools,
+        )
     )
     logger.info(f"Role template '{config.name}' 已导入数据库")
 

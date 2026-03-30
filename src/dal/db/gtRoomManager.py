@@ -80,7 +80,7 @@ async def delete_room(room_id: int) -> None:
 
 
 # Room State CRUD (persistence)
-async def save_room_state(room_id: int, agent_read_index: dict[str, int]) -> None:
+async def update_room_state(room_id: int, agent_read_index: dict[str, int]) -> None:
     """保存房间运行时状态（agent_read_index）。"""
     await (
         GtRoom.update(
