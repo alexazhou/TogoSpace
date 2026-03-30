@@ -160,9 +160,7 @@ class AgentBatchUpdateHandler(BaseHandler):
             agent.role_template_id = item.role_template_id
             agent.model = item.model
             agent.driver = item.driver
-            await gtAgentManager.update_agent(
-                agent=agent,
-            )
+            await agent.aio_save()
 
         await teamService.hot_reload_team(team.name)
         self.return_json({"status": "ok"})

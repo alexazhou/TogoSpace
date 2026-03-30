@@ -29,15 +29,6 @@ async def get_agents_by_team(team_id: int) -> list[GtAgent]:
     )
 
 
-async def get_agents_by_role_template_id(role_template_id: int) -> list[GtAgent]:
-    return list(
-        await GtAgent.select()
-        .where(GtAgent.role_template_id == role_template_id)
-        .order_by(GtAgent.name)
-        .aio_execute()
-    )
-
-
 async def get_agent(team_id: int, name: str) -> GtAgent | None:
     return await GtAgent.aio_get_or_none(
         GtAgent.team_id == team_id,
@@ -45,24 +36,13 @@ async def get_agent(team_id: int, name: str) -> GtAgent | None:
     )
 
 
-async def get_on_board_agents(team_id: int) -> list[GtAgent]:
+async def get_agents_by_employ_status(team_id: int, status: EmployStatus) -> list[GtAgent]:
+    """按 team + employ_status 查询成员。"""
     return list(
         await GtAgent.select()
         .where(
             GtAgent.team_id == team_id,
-            GtAgent.employ_status == EmployStatus.ON_BOARD,
-        )
-        .order_by(GtAgent.name)
-        .aio_execute()
-    )
-
-
-async def get_off_board_agents(team_id: int) -> list[GtAgent]:
-    return list(
-        await GtAgent.select()
-        .where(
-            GtAgent.team_id == team_id,
-            GtAgent.employ_status == EmployStatus.OFF_BOARD,
+            GtAgent.employ_status == status,
         )
         .order_by(GtAgent.name)
         .aio_execute()
@@ -133,24 +113,6 @@ async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
         .where(GtAgent.id.in_(agent_ids))  # type: ignore[attr-defined]
         .aio_execute()
     )
-
-
-async def update_agent(agent: GtAgent) -> GtAgent:
-    """按 agent 对象更新单个 agent。"""
-    if agent.id is None:
-        raise ValueError("Agent ID is required")
-
-    row = await GtAgent.aio_get_or_none(GtAgent.id == agent.id)
-    if row is None:
-        raise ValueError(f"Agent ID '{agent.id}' not found")
-
-    row.name = agent.name
-    row.role_template_id = agent.role_template_id
-    row.model = agent.model
-    row.driver = agent.driver
-    await row.aio_save()
-
-    return row
 
 
 async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) -> None:

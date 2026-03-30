@@ -1,45 +1,6 @@
 from __future__ import annotations
 
-from constants import DriverType, RoleTemplateType
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
-
-
-async def upsert_role_template(
-    template_name: str,
-    model: str | None,
-    soul: str = "",
-    template_type: RoleTemplateType = RoleTemplateType.SYSTEM,
-    driver: DriverType | None = None,
-    allowed_tools: list[str] | None = None,
-) -> GtRoleTemplate:
-    """创建或更新 role template。"""
-    await (
-        GtRoleTemplate.insert(
-            template_name=template_name,
-            model=model,
-            soul=soul,
-            type=template_type,
-            driver=driver,
-            allowed_tools=allowed_tools,
-        )
-        .on_conflict(
-            conflict_target=[GtRoleTemplate.template_name],
-            update={
-                GtRoleTemplate.model: model,
-                GtRoleTemplate.soul: soul,
-                GtRoleTemplate.type: template_type,
-                GtRoleTemplate.driver: driver,
-                GtRoleTemplate.allowed_tools: allowed_tools,
-                GtRoleTemplate.updated_at: GtRoleTemplate._now(),
-            },
-        )
-        .aio_execute()
-    )
-
-    row = await get_role_template_by_name(template_name)
-    if row is None:
-        raise RuntimeError(f"role template upsert failed: {template_name}")
-    return row
 
 
 async def get_role_template_by_name(template_name: str) -> GtRoleTemplate | None:
@@ -69,39 +30,44 @@ async def get_all_role_templates() -> list[GtRoleTemplate]:
     return list(await query.aio_execute())
 
 
-async def update_role_template(
-    template_id: int,
-    name: str | None = None,
-    soul: str | None = None,
-    model: str | None = None,
-    driver: DriverType | None = None,
-    allowed_tools: list[str] | None = None,
-) -> GtRoleTemplate:
-    """更新 role template 的指定字段。"""
-    row = await get_role_template_by_id(template_id)
-    if row is None:
-        raise RuntimeError(f"role template not found: {template_id}")
+async def save_role_template(template: GtRoleTemplate) -> GtRoleTemplate:
+    """按对象保存 role template。
 
-    update_fields = {GtRoleTemplate.updated_at: GtRoleTemplate._now()}
-    if name is not None:
-        update_fields[GtRoleTemplate.template_name] = name
-    if soul is not None:
-        update_fields[GtRoleTemplate.soul] = soul
-    if model is not None:
-        update_fields[GtRoleTemplate.model] = model
-    update_fields[GtRoleTemplate.driver] = driver
-    update_fields[GtRoleTemplate.allowed_tools] = allowed_tools
+    - 有 id：按主键更新
+    - 无 id：按 template_name 执行 upsert
+    """
+    if template.id is not None:
+        await template.aio_save()
+        updated = await get_role_template_by_id(template.id)
+        if updated is None:
+            raise RuntimeError(f"role template update failed: {template.id}")
+        return updated
 
     await (
-        GtRoleTemplate.update(update_fields)
-        .where(GtRoleTemplate.id == template_id)
+        GtRoleTemplate.insert(
+            template_name=template.template_name,
+            model=template.model,
+            soul=template.soul,
+            type=template.type,
+            driver=template.driver,
+            allowed_tools=template.allowed_tools,
+        )
+        .on_conflict(
+            conflict_target=[GtRoleTemplate.template_name],
+            update={
+                GtRoleTemplate.model: template.model,
+                GtRoleTemplate.soul: template.soul,
+                GtRoleTemplate.type: template.type,
+                GtRoleTemplate.driver: template.driver,
+                GtRoleTemplate.allowed_tools: template.allowed_tools,
+            },
+        )
         .aio_execute()
     )
-
-    updated = await get_role_template_by_id(template_id)
-    if updated is None:
-        raise RuntimeError(f"role template update failed: {template_id}")
-    return updated
+    created = await get_role_template_by_name(template.template_name)
+    if created is None:
+        raise RuntimeError(f"role template save failed: {template.template_name}")
+    return created
 
 
 async def delete_role_template(template_id: int) -> bool:

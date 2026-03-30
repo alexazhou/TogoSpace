@@ -1,6 +1,8 @@
 from controller.baseController import BaseHandler
 from constants import DriverType, RoleTemplateType
-from dal.db import gtAgentManager, gtRoleTemplateManager
+from dal.db import gtRoleTemplateManager
+from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from pydantic import BaseModel
 from util import assertUtil
 
@@ -15,10 +17,9 @@ class CreateRoleTemplateRequest(BaseModel):
 
 class ModifyRoleTemplateRequest(BaseModel):
     """修改 role template 的请求体。"""
-    name: str | None = None
-    soul: str | None = None
+    name: str
+    soul: str = ""
     model: str | None = None
-    # 约定：字段未传时会解析为 None，并按“清空该字段”处理
     driver: DriverType | None = None
     allowed_tools: list[str] | None = None
 
@@ -57,13 +58,15 @@ class RoleTemplateCreateHandler(BaseHandler):
             error_code="role_template_exists",
         )
 
-        created = await gtRoleTemplateManager.upsert_role_template(
-            request.name,
-            request.model,
-            request.soul,
-            RoleTemplateType.USER,
-            request.driver,
-            request.allowed_tools,
+        created = await gtRoleTemplateManager.save_role_template(
+            GtRoleTemplate(
+                template_name=request.name,
+                model=request.model,
+                soul=request.soul,
+                type=RoleTemplateType.USER,
+                driver=request.driver,
+                allowed_tools=request.allowed_tools,
+            )
         )
 
         self.return_json(_serialize_role_template(created))
@@ -94,8 +97,13 @@ class RoleTemplateModifyHandler(BaseHandler):
 
         request = self.parse_request(ModifyRoleTemplateRequest)
 
-        next_name = (request.name or "").strip()
-        if next_name and next_name != definition.template_name:
+        next_name = request.name.strip()
+        assertUtil.assertTrue(
+            len(next_name) > 0,
+            error_message="Role template name must not be empty",
+            error_code="role_template_name_empty",
+        )
+        if next_name != definition.template_name:
             existing = await gtRoleTemplateManager.get_role_template_by_name(next_name)
             assertUtil.assertEqual(
                 existing,
@@ -104,15 +112,13 @@ class RoleTemplateModifyHandler(BaseHandler):
                 error_code="role_template_exists",
             )
 
-        updated = await gtRoleTemplateManager.update_role_template(
-            int(template_id),
-            name=next_name or None,
-            soul=request.soul,
-            model=request.model,
-            # 约定：未传字段等价于清空，因此这里直接透传 None 到 DAL
-            driver=request.driver,
-            allowed_tools=request.allowed_tools,
-        )
+        definition.template_name = next_name
+        definition.soul = request.soul
+        definition.model = request.model
+        definition.driver = request.driver
+        definition.allowed_tools = request.allowed_tools
+
+        updated = await gtRoleTemplateManager.save_role_template(definition)
 
         self.return_json(_serialize_role_template(updated))
 
@@ -134,10 +140,12 @@ class RoleTemplateDeleteHandler(BaseHandler):
             error_code="role_template_delete_forbidden",
         )
 
-        referenced_agents = await gtAgentManager.get_agents_by_role_template_id(int(template_id))
+        referenced_agents = await GtAgent.aio_get_or_none(
+            GtAgent.role_template_id == int(template_id)
+        )
         assertUtil.assertEqual(
-            len(referenced_agents),
-            0,
+            referenced_agents,
+            None,
             error_message=f"Role template '{definition.template_name}' is in use",
             error_code="role_template_in_use",
         )
