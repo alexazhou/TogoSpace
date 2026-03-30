@@ -15,7 +15,8 @@ async def get_rooms_by_team(team_id: int) -> list[GtRoom]:
 async def get_room_by_biz_id(team_id: int, biz_id: str) -> GtRoom | None:
     """通过 biz_id 获取房间。"""
     return await GtRoom.aio_get_or_none(
-        (GtRoom.team_id == team_id) & (GtRoom.biz_id == biz_id)
+        GtRoom.team_id == team_id,
+        GtRoom.biz_id == biz_id,
     )
 
 
@@ -101,8 +102,8 @@ async def get_room_state(room_id: int) -> dict[str, int] | None:
 async def delete_rooms_by_biz_ids_not_in(team_id: int, biz_ids: list[str]) -> None:
     """删除 biz_id 不在指定列表中的部门房间（只删除 tags 包含 'DEPT' 的房间）。"""
     query = GtRoom.delete().where(
-        (GtRoom.team_id == team_id) &
-        (GtRoom.tags.contains("DEPT"))  # type: ignore[attr-defined]
+        GtRoom.team_id == team_id,
+        GtRoom.tags.contains("DEPT"),  # type: ignore[attr-defined]
     )
 
     if not biz_ids:

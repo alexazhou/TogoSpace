@@ -212,6 +212,23 @@ async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) 
 - 空列表检查避免无效查询
 - `GtXxx.update()` 自动注入 `updated_at`（由 `DbModelBase` 处理）
 
+### `updated_at` 字段约定
+
+- 对 `GtXxx.update(...)`：**不要**手动设置 `updated_at`，由 `DbModelBase.update()` 统一注入
+- 对 `GtXxx.insert(...)`：通常也不需要手动设置时间字段，`DbModelBase.insert()` 会注入 `created_at/updated_at`
+- 例外：`insert().on_conflict(update={...})` 的 `update` 字典中，仍需显式写 `GtXxx.updated_at: GtXxx._now()`
+
+```python
+# ✓ 推荐：常规 update 不手动传 updated_at
+await GtTeam.update(enabled=1).where(GtTeam.id == team_id).aio_execute()
+
+# ✓ 推荐：upsert 的 on_conflict(update=...) 显式设置 updated_at
+await GtRoleTemplate.insert(...).on_conflict(
+    conflict_target=[GtRoleTemplate.template_name],
+    update={GtRoleTemplate.updated_at: GtRoleTemplate._now()},
+).aio_execute()
+```
+
 ## 删除模式
 
 ```python

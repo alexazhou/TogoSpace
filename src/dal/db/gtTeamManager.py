@@ -8,7 +8,10 @@ from model.dbModel.gtTeam import GtTeam
 # Team CRUD
 async def get_team(name: str) -> GtTeam | None:
     """获取指定 Team（未删除的）。"""
-    return await GtTeam.aio_get_or_none((GtTeam.name == name) & (GtTeam.deleted == 0))
+    return await GtTeam.aio_get_or_none(
+        GtTeam.name == name,
+        GtTeam.deleted == 0,
+    )
 
 
 async def get_team_by_id(team_id: int) -> GtTeam | None:
@@ -76,5 +79,9 @@ async def set_team_enabled(team_id: int, enabled: bool) -> None:
 
 async def team_exists(name: str) -> bool:
     """检查 Team 是否存在且未删除且已启用。"""
-    row = await GtTeam.aio_get_or_none((GtTeam.name == name) & (GtTeam.deleted == 0) & (GtTeam.enabled == 1))
+    row = await GtTeam.aio_get_or_none(
+        GtTeam.name == name,
+        GtTeam.deleted == 0,
+        GtTeam.enabled == 1,
+    )
     return row is not None

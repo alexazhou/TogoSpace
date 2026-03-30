@@ -40,15 +40,18 @@ async def get_agents_by_role_template_id(role_template_id: int) -> list[GtAgent]
 
 async def get_agent(team_id: int, name: str) -> GtAgent | None:
     return await GtAgent.aio_get_or_none(
-        (GtAgent.team_id == team_id) &
-        (GtAgent.name == name)
+        GtAgent.team_id == team_id,
+        GtAgent.name == name,
     )
 
 
 async def get_on_board_agents(team_id: int) -> list[GtAgent]:
     return list(
         await GtAgent.select()
-        .where((GtAgent.team_id == team_id) & (GtAgent.employ_status == EmployStatus.ON_BOARD))
+        .where(
+            GtAgent.team_id == team_id,
+            GtAgent.employ_status == EmployStatus.ON_BOARD,
+        )
         .order_by(GtAgent.name)
         .aio_execute()
     )
@@ -57,7 +60,10 @@ async def get_on_board_agents(team_id: int) -> list[GtAgent]:
 async def get_off_board_agents(team_id: int) -> list[GtAgent]:
     return list(
         await GtAgent.select()
-        .where((GtAgent.team_id == team_id) & (GtAgent.employ_status == EmployStatus.OFF_BOARD))
+        .where(
+            GtAgent.team_id == team_id,
+            GtAgent.employ_status == EmployStatus.OFF_BOARD,
+        )
         .order_by(GtAgent.name)
         .aio_execute()
     )
