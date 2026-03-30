@@ -12,10 +12,14 @@ logger = logging.getLogger(__name__)
 
 def init() -> None:
     """初始化 llmApiUtil。使用 litellm 后，此方法主要用于设置全局配置。"""
-    # 如果需要，可以在这里设置 litellm 的全局配置，例如：
-    # litellm.set_verbose = True
-    # litellm.drop_params = True
-    pass
+
+    # 在这里设置 litellm 的全局配置，例如
+
+    # 关闭所有的调试信息和内置的 print 提示（解决 Provider List 等刷屏问题）
+    litellm.suppress_debug_info = True
+
+    # 确保详细模式被关闭
+    litellm.set_verbose = False
 
 
 def _clean_base_url(url: str) -> str:
@@ -41,13 +45,19 @@ def _build_request_payload(request: OpenAIRequest) -> tuple[str, list[dict[str, 
     return model_name, messages, tools
 
 
-async def send_request_stream(request: OpenAIRequest, url: str, api_key: str) -> OpenAIResponse:
+async def send_request_stream(
+    request: OpenAIRequest,
+    url: str,
+    api_key: str,
+    custom_llm_provider: str | None = None,
+) -> OpenAIResponse:
     """流式请求上游模型，并在本地聚合为完整 OpenAIResponse。"""
     model_name, messages, tools = _build_request_payload(request)
     base_url = _clean_base_url(url)
 
     stream_resp: ModelResponse | CustomStreamWrapper = await litellm.acompletion(
         model=model_name,
+        custom_llm_provider=custom_llm_provider,
         messages=messages,
         api_key=api_key,
         base_url=base_url,
@@ -76,13 +86,19 @@ async def send_request_stream(request: OpenAIRequest, url: str, api_key: str) ->
     return OpenAIResponse.model_validate(merged.model_dump(exclude_none=False))
 
 
-async def send_request_non_stream(request: OpenAIRequest, url: str, api_key: str) -> OpenAIResponse:
+async def send_request_non_stream(
+    request: OpenAIRequest,
+    url: str,
+    api_key: str,
+    custom_llm_provider: str | None = None,
+) -> OpenAIResponse:
     """非流式请求上游模型，直接返回完整 OpenAIResponse。"""
     model_name, messages, tools = _build_request_payload(request)
     base_url = _clean_base_url(url)
 
     response: ModelResponse | CustomStreamWrapper = await litellm.acompletion(
         model=model_name,
+        custom_llm_provider=custom_llm_provider,
         messages=messages,
         api_key=api_key,
         base_url=base_url,
