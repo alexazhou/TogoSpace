@@ -35,9 +35,9 @@ class AutoTimestampMixin:
         now = cls._now()
         use_field_keys = cls._uses_field_keys(payload)
         if not cls._has_timestamp_key(payload, "created_at"):
-            payload[cls.created_at if use_field_keys else "created_at"] = now
+            payload[cls.created_at if use_field_keys else "created_at"] = now  # type: ignore[attr-defined]
         if not cls._has_timestamp_key(payload, "updated_at"):
-            payload[cls.updated_at if use_field_keys else "updated_at"] = now
+            payload[cls.updated_at if use_field_keys else "updated_at"] = now  # type: ignore[attr-defined]
         return payload
 
     @classmethod
@@ -46,7 +46,7 @@ class AutoTimestampMixin:
         if use_field_keys is None:
             use_field_keys = cls._uses_field_keys(payload)
         if not cls._has_timestamp_key(payload, "updated_at"):
-            payload[cls.updated_at if use_field_keys else "updated_at"] = cls._now()
+            payload[cls.updated_at if use_field_keys else "updated_at"] = cls._now()  # type: ignore[attr-defined]
         return payload
 
     @classmethod

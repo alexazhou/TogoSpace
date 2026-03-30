@@ -113,6 +113,6 @@ async def delete_rooms_by_biz_ids_not_in(team_id: int, biz_ids: list[str]) -> No
 
     # 兼容旧逻辑：biz_id 为 NULL 的 DEPT 房间也视为“不在列表中”，应被删除
     await query.where(
-        GtRoom.biz_id.is_null(True) |
+        GtRoom.biz_id.is_null(True) |  # type: ignore[attr-defined]
         (~GtRoom.biz_id.in_(biz_ids))  # type: ignore[attr-defined]
     ).aio_execute()
