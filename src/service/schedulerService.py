@@ -37,19 +37,34 @@ def add_member(member: Agent, max_fc: int) -> None:
         return
     task = asyncio.create_task(member.consume_task(max_fc))
     _running[member.key] = task
-    task.add_done_callback(lambda t: _on_task_done(member.key, t))
+    task.add_done_callback(lambda t: _on_task_done(member, t))
 
 
-def _on_task_done(key: str, task: asyncio.Task) -> None:
-    """Task 完成回调：仅当完成的 task 仍是当前注册的任务时才移出调度池。
+def _resolve_max_fc(team_name: str) -> int:
+    for team in _teams_config:
+        if team.name == team_name:
+            return team.max_function_calls or 5
+    return 5
+
+
+def _on_task_done(member: Agent, task: asyncio.Task) -> None:
+    """Task 完成回调：仅清理当前任务，并在收尾竞态时自动续起消费。
 
     asyncio 在协程返回时立即将 task 标记为 done，但 done callback 通过
     loop.call_soon 异步调度，稍后才执行。在这段空隙内，同一成员可能已被
     重新入队并在 _running 中注册了新 task。此时若直接 remove_member，会误删
     新 task 并取消它。通过 `is` 判断确保只有"自己的"task 完成时才触发移除。
     """
-    if _running.get(key) is task:
-        remove_member(key)
+    key = member.key
+    if _running.get(key) is not task:
+        return
+
+    _running.pop(key, None)
+
+    # 收尾竞态兜底：如果 task 结束时队列里还有事件，立即续起一个新 task。
+    if not member.wait_task_queue.empty():
+        logger.info("成员任务收尾时检测到待处理事件，自动续起消费: member=%s", key)
+        add_member(member, _resolve_max_fc(member.team_name))
 
 
 def remove_member(member_key: str) -> None:
@@ -86,12 +101,7 @@ def _on_member_turn(msg: Message) -> None:
 
     member.wait_task_queue.put_nowait(GtCoreRoomMessageEvent(room_id))
 
-    max_fc = 5
-    for team in _teams_config:
-        if team.name == team_name:
-            max_fc = team.max_function_calls or 5
-            break
-    add_member(member, max_fc)
+    add_member(member, _resolve_max_fc(team_name))
 
 
 async def run() -> None:
