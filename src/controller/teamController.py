@@ -12,8 +12,10 @@ from util import assertUtil
 from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
 
 
-def _split_team_config(config: dict) -> tuple[str, dict]:
-    copied = dict(config)
+def _split_team_config(config: dict | None) -> tuple[str, dict]:
+    if not config:
+        return "", {}
+    copied = config.copy()
     working_directory = copied.pop("working_directory", "")
     return working_directory, copied
 
@@ -37,7 +39,7 @@ class SetEnabledRequest(BaseModel):
 
 
 def _team_to_dict(team: GtTeam) -> dict[str, Any]:
-    working_directory, config = _split_team_config(team.get_config())
+    working_directory, config = _split_team_config(team.config)
     return {
         "id": team.id,
         "name": team.name,
@@ -71,7 +73,7 @@ class TeamCreateHandler(BaseHandler):
         request = self.parse_request(CreateTeamRequest)
         payload = request.model_dump()
         working_directory = payload.pop("working_directory", "")
-        config = dict(payload.get("config") or {})
+        config = payload.get("config", {})
         if working_directory:
             config["working_directory"] = working_directory
         payload["config"] = config
@@ -116,8 +118,8 @@ class TeamDetailHandler(BaseHandler):
             {
                 "id": team.id,
                 "name": team.name,
-                "working_directory": _split_team_config(team.get_config())[0],
-                "config": _split_team_config(team.get_config())[1],
+                "working_directory": _split_team_config(team.config)[0],
+                "config": _split_team_config(team.config)[1],
                 "max_function_calls": team.max_function_calls,
                 "enabled": team.enabled,
                 "deleted": team.deleted,

@@ -60,7 +60,7 @@ class TestDalManagers(ServiceTestCase):
     ) -> GtRoleTemplate:
         return await gtRoleTemplateManager.save_role_template(
             GtRoleTemplate(
-                template_name=template_name,
+                name=template_name,
                 model=model,
                 soul=soul,
                 type=template_type,
@@ -81,7 +81,7 @@ class TestDalManagers(ServiceTestCase):
             driver=DriverType.CLAUDE_SDK,
             allowed_tools=["Read"],
         )
-        assert saved_1.template_name == "alice"
+        assert saved_1.name == "alice"
         assert saved_1.model == "glm-4.7"
         assert saved_1.type == RoleTemplateType.SYSTEM
         assert saved_1.driver == DriverType.CLAUDE_SDK
@@ -112,7 +112,7 @@ class TestDalManagers(ServiceTestCase):
             cols = conn.execute("PRAGMA table_info('role_templates')").fetchall()
         col_names = {c[1] for c in cols}
         assert "model" in col_names
-        assert "template_name" in col_names
+        assert "name" in col_names
         assert "type" in col_names
         assert "driver" in col_names
         assert "allowed_tools" in col_names
@@ -129,7 +129,7 @@ class TestDalManagers(ServiceTestCase):
             max_function_calls=3,
         ))
         assert created.name == "team_a"
-        assert created.get_config() == {"slogan": "alpha"}
+        assert created.config == {"slogan": "alpha"}
         assert created.max_function_calls == 3
         assert await gtTeamManager.team_exists("team_a") is True
 
@@ -142,7 +142,7 @@ class TestDalManagers(ServiceTestCase):
         created.max_function_calls = 7
         updated = await gtTeamManager.save_team(created)
         assert updated.id == created.id
-        assert updated.get_config() == {"rules": "sync first", "slogan": "beta"}
+        assert updated.config == {"rules": "sync first", "slogan": "beta"}
         assert updated.max_function_calls == 7
 
         await gtTeamManager.delete_team("team_a")

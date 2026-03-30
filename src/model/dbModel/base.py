@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import logging
 from typing import Generic, TypeVar, cast
 
 import peewee
@@ -13,6 +14,7 @@ TJson = TypeVar("TJson")
 TEnum = TypeVar("TEnum", bound="EnhanceEnum")
 
 _database_proxy: peewee.DatabaseProxy = peewee.DatabaseProxy()
+logger = logging.getLogger(__name__)
 
 
 def bind_database(database: peewee.Database) -> None:
@@ -32,7 +34,17 @@ class JsonField(peewee.TextField, Generic[TJson]):
             return None
         if isinstance(value, (dict, list)):
             return cast(TJson, value)
-        return cast(TJson, json.loads(value))
+        try:
+            return cast(TJson, json.loads(value))
+        except (TypeError, ValueError) as exc:
+            field_name = getattr(self, "name", None) or "<unknown>"
+            logger.warning(
+                "JsonField parse failed for field '%s', returning None: value=%r, error=%s",
+                field_name,
+                value,
+                exc,
+            )
+            return None
 
 
 class EnumField(peewee.CharField, Generic[TEnum]):

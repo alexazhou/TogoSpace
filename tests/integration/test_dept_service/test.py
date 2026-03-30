@@ -60,7 +60,7 @@ class TestDeptService(ServiceTestCase):
         """创建 team 并写入成员，返回 GtTeam 对象。"""
         # 先创建角色模板
         await gtRoleTemplateManager.save_role_template(
-            GtRoleTemplate(template_name="dummy", model="gpt-4o")
+            GtRoleTemplate(name="dummy", model="gpt-4o")
         )
         team = await gtTeamManager.save_team(GtTeam(name=team_name))
         configs = [AgentConfig(name=n, role_template="dummy") for n in member_names]
@@ -603,10 +603,10 @@ class TestDeptService(ServiceTestCase):
 
         # 先创建角色模板
         await gtRoleTemplateManager.save_role_template(
-            GtRoleTemplate(template_name="gpt_agent", model="gpt-4o")
+            GtRoleTemplate(name="gpt_agent", model="gpt-4o")
         )
         await gtRoleTemplateManager.save_role_template(
-            GtRoleTemplate(template_name="glm_agent", model="glm-4")
+            GtRoleTemplate(name="glm_agent", model="glm-4")
         )
 
         team = await gtTeamManager.save_team(GtTeam(name="t_model_driver"))

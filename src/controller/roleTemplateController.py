@@ -24,24 +24,12 @@ class ModifyRoleTemplateRequest(BaseModel):
     allowed_tools: list[str] | None = None
 
 
-def _serialize_role_template(definition) -> dict:
-    return {
-        "id": definition.id,
-        "name": definition.template_name,
-        "model": definition.model or "",
-        "prompt": definition.soul,
-        "type": definition.type.value if definition.type else None,
-        "driver": definition.driver.value if definition.driver else None,
-        "allowed_tools": definition.allowed_tools,
-    }
-
-
 class RoleTemplateListHandler(BaseHandler):
     """GET /role_templates/list.json - 获取所有 role templates"""
 
     async def get(self) -> None:
         templates = await gtRoleTemplateManager.get_all_role_templates()
-        self.return_json({"role_templates": [_serialize_role_template(t) for t in templates]})
+        self.return_json({"role_templates": templates})
 
 
 class RoleTemplateCreateHandler(BaseHandler):
@@ -60,7 +48,7 @@ class RoleTemplateCreateHandler(BaseHandler):
 
         created = await gtRoleTemplateManager.save_role_template(
             GtRoleTemplate(
-                template_name=request.name,
+                name=request.name,
                 model=request.model,
                 soul=request.soul,
                 type=RoleTemplateType.USER,
@@ -69,7 +57,7 @@ class RoleTemplateCreateHandler(BaseHandler):
             )
         )
 
-        self.return_json(_serialize_role_template(created))
+        self.return_json(created)
 
 
 class RoleTemplateDetailHandler(BaseHandler):
@@ -81,7 +69,7 @@ class RoleTemplateDetailHandler(BaseHandler):
             error_code="role_template_not_found",
         )
 
-        self.return_json(_serialize_role_template(definition))
+        self.return_json(definition)
 
 
 class RoleTemplateModifyHandler(BaseHandler):
@@ -103,7 +91,7 @@ class RoleTemplateModifyHandler(BaseHandler):
             error_message="Role template name must not be empty",
             error_code="role_template_name_empty",
         )
-        if next_name != definition.template_name:
+        if next_name != definition.name:
             existing = await gtRoleTemplateManager.get_role_template_by_name(next_name)
             assertUtil.assertEqual(
                 existing,
@@ -112,7 +100,7 @@ class RoleTemplateModifyHandler(BaseHandler):
                 error_code="role_template_exists",
             )
 
-        definition.template_name = next_name
+        definition.name = next_name
         definition.soul = request.soul
         definition.model = request.model
         definition.driver = request.driver
@@ -120,7 +108,7 @@ class RoleTemplateModifyHandler(BaseHandler):
 
         updated = await gtRoleTemplateManager.save_role_template(definition)
 
-        self.return_json(_serialize_role_template(updated))
+        self.return_json(updated)
 
 
 class RoleTemplateDeleteHandler(BaseHandler):
@@ -146,9 +134,9 @@ class RoleTemplateDeleteHandler(BaseHandler):
         assertUtil.assertEqual(
             referenced_agents,
             None,
-            error_message=f"Role template '{definition.template_name}' is in use",
+            error_message=f"Role template '{definition.name}' is in use",
             error_code="role_template_in_use",
         )
 
         await gtRoleTemplateManager.delete_role_template(int(template_id))
-        self.return_json({"status": "deleted", "id": definition.id, "name": definition.template_name})
+        self.return_json({"status": "deleted", "id": definition.id, "name": definition.name})

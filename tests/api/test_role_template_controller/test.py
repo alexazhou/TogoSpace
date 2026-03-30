@@ -1,5 +1,6 @@
 import os
 import sys
+import uuid
 
 import aiohttp
 
@@ -52,15 +53,16 @@ class TestRoleTemplateController(_ApiServiceCase):
         assert detail["id"] == template_id
         assert detail["name"] == template["name"]
         assert "model" in detail
-        assert "prompt" in detail
+        assert "soul" in detail
         assert "type" in detail
         assert "driver" in detail
         assert "allowed_tools" in detail
 
     async def test_create_role_template(self):
         """验证 POST /role_templates/create.json 创建用户模板。"""
+        unique_name = f"custom_writer_{uuid.uuid4().hex[:8]}"
         payload = {
-            "name": "custom_writer",
+            "name": unique_name,
             "soul": "你是一个用户创建的模板",
             "model": "gpt-4o-mini",
         }
@@ -75,19 +77,21 @@ class TestRoleTemplateController(_ApiServiceCase):
                 detail = await resp.json()
 
         assert isinstance(created["id"], int)
-        assert created["name"] == "custom_writer"
-        assert created["type"] == "user"
-        assert detail["type"] == "user"
+        assert created["name"] == unique_name
+        assert created["type"] == "USER"
+        assert detail["type"] == "USER"
 
     async def test_modify_role_template(self):
         """验证 POST /role_templates/<id>/modify.json 修改用户模板。"""
+        source_name = f"custom_editor_{uuid.uuid4().hex[:8]}"
+        target_name = f"{source_name}_renamed"
         create_payload = {
-            "name": "custom_editor",
+            "name": source_name,
             "soul": "初始 Soul",
             "model": "gpt-4o-mini",
         }
         modify_payload = {
-            "name": "custom_editor_renamed",
+            "name": target_name,
             "soul": "更新后的 Soul",
             "model": "gpt-4.1-mini",
             "driver": "native",
@@ -111,13 +115,13 @@ class TestRoleTemplateController(_ApiServiceCase):
                 detail = await resp.json()
 
         assert updated["id"] == created["id"]
-        assert updated["name"] == "custom_editor_renamed"
-        assert updated["prompt"] == "更新后的 Soul"
+        assert updated["name"] == target_name
+        assert updated["soul"] == "更新后的 Soul"
         assert updated["model"] == "gpt-4.1-mini"
-        assert updated["driver"] == "native"
+        assert updated["driver"] == "NATIVE"
         assert updated["allowed_tools"] == ["Read", "Edit"]
-        assert detail["name"] == "custom_editor_renamed"
-        assert detail["prompt"] == "更新后的 Soul"
+        assert detail["name"] == target_name
+        assert detail["soul"] == "更新后的 Soul"
         assert detail["model"] == "gpt-4.1-mini"
-        assert detail["driver"] == "native"
+        assert detail["driver"] == "NATIVE"
         assert detail["allowed_tools"] == ["Read", "Edit"]

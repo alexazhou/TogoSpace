@@ -27,7 +27,7 @@ async def get_all_teams(enabled: bool | None = None) -> list[GtTeam]:
 
 async def save_team(team: GtTeam) -> GtTeam:
     """保存 Team 对象：无 id 时插入，有 id 时更新。"""
-    config = team.get_config()
+    config = team.config or {}
 
     if team.id is None:
         team_id = await GtTeam.insert(

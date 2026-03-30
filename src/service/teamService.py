@@ -24,7 +24,7 @@ def _build_team_row(team_config: TeamConfig, existing: GtTeam | None = None) -> 
     return GtTeam(
         id=existing.id if existing is not None else None,
         name=team_config.name,
-        config=dict(team_config.config or {}),
+        config=team_config.config or {},
         max_function_calls=team_config.max_function_calls if team_config.max_function_calls is not None else 5,
         enabled=existing.enabled if existing is not None else 1,
         deleted=existing.deleted if existing is not None else 0,
@@ -100,7 +100,7 @@ async def get_team_config(name: str) -> TeamConfig | None:
         members.append(
             AgentConfig(
                 name=agent.name,
-                role_template=template.template_name,
+                role_template=template.name,
                 model=agent.model or None,
                 driver=agent.driver if isinstance(agent.driver, DriverType) else DriverType.NATIVE,
             )
@@ -108,7 +108,7 @@ async def get_team_config(name: str) -> TeamConfig | None:
 
     return TeamConfig(
         name=team.name,
-        config=team.get_config(),
+        config=team.config or {},
         members=members,
         preset_rooms=await roomService.list_team_room_configs(team.id),
         max_function_calls=team.max_function_calls,
