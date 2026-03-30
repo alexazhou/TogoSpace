@@ -53,7 +53,6 @@ async def save_room(room: GtRoom) -> GtRoom:
             agent_read_index=room.agent_read_index,
             biz_id=room.biz_id,
             tags=room.tags or [],
-            updated_at=GtRoom._now(),
         )
         .where(GtRoom.id == room.id)
         .aio_execute()
@@ -85,7 +84,6 @@ async def save_room_state(room_id: int, agent_read_index: dict[str, int]) -> Non
     await (
         GtRoom.update(
             agent_read_index=agent_read_index,
-            updated_at=GtRoom._now(),
         )
         .where(GtRoom.id == room_id)
         .aio_execute()
@@ -102,25 +100,18 @@ async def get_room_state(room_id: int) -> dict[str, int] | None:
 
 async def delete_rooms_by_biz_ids_not_in(team_id: int, biz_ids: list[str]) -> None:
     """删除 biz_id 不在指定列表中的部门房间（只删除 tags 包含 'DEPT' 的房间）。"""
-    if not biz_ids:
-        # 如果 biz_ids 为空，删除所有 DEPT 房间
-        await (
-            GtRoom.delete()
-            .where(
-                (GtRoom.team_id == team_id) &
-                (GtRoom.tags.contains("DEPT"))  # type: ignore[attr-defined]
-            )
-            .aio_execute()
-        )
-        return
-
-    # 查找所有 tags 包含 "DEPT" 的房间
-    dept_rooms = await GtRoom.select().where(
+    query = GtRoom.delete().where(
         (GtRoom.team_id == team_id) &
         (GtRoom.tags.contains("DEPT"))  # type: ignore[attr-defined]
-    ).aio_execute()
+    )
 
-    # 删除 biz_id 不在列表中的房间
-    to_delete = [r.id for r in dept_rooms if r.biz_id not in biz_ids]
-    if to_delete:
-        await GtRoom.delete().where(GtRoom.id.in_(to_delete)).aio_execute()  # type: ignore
+    if not biz_ids:
+        # biz_ids 为空时删除 team 下所有 DEPT 房间
+        await query.aio_execute()
+        return
+
+    # 兼容旧逻辑：biz_id 为 NULL 的 DEPT 房间也视为“不在列表中”，应被删除
+    await query.where(
+        GtRoom.biz_id.is_null(True) |
+        (~GtRoom.biz_id.in_(biz_ids))  # type: ignore[attr-defined]
+    ).aio_execute()

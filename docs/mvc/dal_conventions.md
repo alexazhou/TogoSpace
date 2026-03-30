@@ -42,9 +42,9 @@ async def update_agent(agent: Any) -> None:  # 类型不明确
 
 ```
 src/dal/
-├── __init__.py          ← 导出所有 Manager
+├── __init__.py          ← 包标记（不做 Manager 聚合导出）
 └── db/
-    ├── __init__.py
+    ├── __init__.py      ← 包标记（不做 Manager 聚合导出）
     └── gtXxxManager.py  ← 对应 model.dbModel.gtXxx
 ```
 
@@ -302,24 +302,13 @@ async def get_team_config(name: str) -> TeamConfig | None:
 
 ## 导出规范
 
-`src/dal/__init__.py` 导出所有 Manager：
+不在 `src/dal/__init__.py` 或 `src/dal/db/__init__.py` 做 Manager 聚合导出。
 
 ```python
-from dal.db import (
-    gtRoleTemplateManager,
-    gtAgentManager,
-    gtAgentHistoryManager,
-    gtDeptManager,
-    gtTeamManager,
-    gtRoomManager,
-    gtRoomMessageManager,
-    gtSystemConfigManager,
-)
-
-__all__ = [...]
+from dal.db import gtAgentManager, gtTeamManager
 ```
 
-Service 层通过 `from dal import gtAgentManager` 引用。
+Service/Controller 层统一通过 `from dal.db import gtXxxManager` 引用。
 
 ## 类型标注
 

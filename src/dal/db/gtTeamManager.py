@@ -47,7 +47,6 @@ async def save_team(team: GtTeam) -> GtTeam:
             max_function_calls=team.max_function_calls,
             enabled=team.enabled,
             deleted=team.deleted,
-            updated_at=GtTeam._now(),
         )
         .where(GtTeam.id == team.id)
         .aio_execute()
@@ -60,7 +59,7 @@ async def save_team(team: GtTeam) -> GtTeam:
 async def delete_team(name: str) -> None:
     """删除 Team（设置 deleted=1）。"""
     await (
-        GtTeam.update(deleted=1, updated_at=GtTeam._now())
+        GtTeam.update(deleted=1)
         .where(GtTeam.name == name)
         .aio_execute()
     )
@@ -69,7 +68,7 @@ async def delete_team(name: str) -> None:
 async def set_team_enabled(team_id: int, enabled: bool) -> None:
     """设置 Team 的启用状态。"""
     await (
-        GtTeam.update(enabled=1 if enabled else 0, updated_at=GtTeam._now())
+        GtTeam.update(enabled=1 if enabled else 0)
         .where(GtTeam.id == team_id)
         .aio_execute()
     )
