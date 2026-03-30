@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
-
-from peewee import fn, IntegrityError
+from peewee import fn
 
 from constants import EmployStatus, DriverType
-from exception import TeamAgentException
 from model.dbModel.gtAgent import GtAgent
 
 from . import gtRoleTemplateManager
@@ -98,17 +95,18 @@ async def batch_save_agents(team_id: int, agents: list[GtAgent]) -> None:
             next_num += 1
 
     if len(to_create) > 0:
-        # 批量插入新记录
-        for agent in to_create:
-            await GtAgent.insert(
-                team_id=agent.team_id,
-                name=agent.name,
-                role_template_id=agent.role_template_id,
-                employ_status=agent.employ_status,
-                model=agent.model,
-                driver=agent.driver,
-                employee_number=agent.employee_number,
-            ).aio_execute()
+        await GtAgent.insert_many([
+            {
+                "team_id": agent.team_id,
+                "name": agent.name,
+                "role_template_id": agent.role_template_id,
+                "employ_status": agent.employ_status,
+                "model": agent.model,
+                "driver": agent.driver,
+                "employee_number": agent.employee_number,
+            }
+            for agent in to_create
+        ]).aio_execute()
 
     for agent in to_update:
         # 更新已有记录

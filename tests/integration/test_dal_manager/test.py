@@ -246,6 +246,30 @@ class TestDalManagers(ServiceTestCase):
         rows = await gtAgentManager.get_agents_by_ids([])
         assert rows == []
 
+    async def test_agent_manager_batch_save_agents_uses_insert_many_for_new_rows(self, monkeypatch):
+        await self._reset_tables()
+
+        await gtRoleTemplateManager.upsert_role_template("rt_a", "gpt-4o")
+        await gtRoleTemplateManager.upsert_role_template("rt_b", "gpt-4o")
+        team = await gtTeamManager.save_team(GtTeam(name="batch_insert_agents_team"))
+
+        agents = await ServiceTestCase.convert_to_gt_agents(team.id, [
+            AgentConfig(name="alice", role_template="rt_a"),
+            AgentConfig(name="bob", role_template="rt_b"),
+        ])
+
+        # 防回退：新增成员应走 insert_many，而不是逐条 insert
+        def _insert_should_not_be_called(cls, *args, **kwargs):
+            raise AssertionError("GtAgent.insert should not be called when batch creating agents")
+
+        monkeypatch.setattr(gtAgentManager.GtAgent, "insert", classmethod(_insert_should_not_be_called))
+
+        await gtAgentManager.batch_save_agents(team.id, agents)
+
+        rows = await gtAgentManager.get_agents_by_team(team.id)
+        assert [row.name for row in rows] == ["alice", "bob"]
+        assert [row.employee_number for row in rows] == [1, 2]
+
     # ------------------------------------------------------------------
     # gtRoomManager
     # ------------------------------------------------------------------
@@ -325,6 +349,26 @@ class TestDalManagers(ServiceTestCase):
 
         await gtRoomManager.delete_rooms_by_team(team.id)
         assert await gtRoomManager.get_rooms_by_team(team.id) == []
+
+    async def test_room_manager_delete_rooms_by_biz_ids_not_in_keeps_non_dept_null_biz_id(self):
+        await self._reset_tables()
+
+        team = await gtTeamManager.save_team(GtTeam(name="biz_cleanup_team"))
+
+        non_dept_null = await gtRoomManager.save_room(GtRoom(
+            team_id=team.id,
+            name="non_dept_null",
+            type=RoomType.GROUP,
+            initial_topic="",
+            max_turns=5,
+            agent_ids=[],
+            biz_id=None,
+            tags=[],
+        ))
+
+        await gtRoomManager.delete_rooms_by_biz_ids_not_in(team.id, [])
+
+        assert await gtRoomManager.get_room_by_id(non_dept_null.id) is not None
 
     async def test_room_manager_save_and_get_room_state(self):
         await self._reset_tables()
