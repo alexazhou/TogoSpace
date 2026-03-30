@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from model.dbModel.gtDept import GtDept
 
 
@@ -35,8 +33,6 @@ async def upsert_dept(
     dept_id: int | None = None,
 ) -> GtDept:
     """创建或更新部门。如果提供 dept_id，则按 ID 更新现有部门；否则按 name 创建/更新。"""
-    now = datetime.now().isoformat()
-
     if dept_id is not None:
         # 按 ID 更新现有部门
         await (
@@ -46,7 +42,6 @@ async def upsert_dept(
                 parent_id=parent_id,
                 manager_id=manager_id,
                 agent_ids=agent_ids,
-                updated_at=now,
             )
             .where(GtDept.id == dept_id)
             .aio_execute()
@@ -65,7 +60,6 @@ async def upsert_dept(
             parent_id=parent_id,
             manager_id=manager_id,
             agent_ids=agent_ids,
-            created_at=now,
         )
         .on_conflict(
             conflict_target=[GtDept.team_id, GtDept.name],
@@ -74,7 +68,7 @@ async def upsert_dept(
                 GtDept.parent_id: parent_id,
                 GtDept.manager_id: manager_id,
                 GtDept.agent_ids: agent_ids,
-                GtDept.updated_at: now,
+                GtDept.updated_at: GtDept._now(),
             },
         )
         .aio_execute()
