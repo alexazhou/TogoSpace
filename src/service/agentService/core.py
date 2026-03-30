@@ -347,7 +347,15 @@ async def create_team_agents(teams_config: list[TeamConfig], workspace_root: str
             team_id = _team_ids.get(team_name, 0)
             dept_context = await _build_dept_context(team_id, agent_name) if team_id else ""
 
-            full_prompt = base_prompt_tmpl + "\n\n" + agent_specific_prompt
+            identity_prompt = "\n".join(
+                [
+                    "---",
+                    f"Agent 成员名称：{agent_name}",
+                    f"Agent 模板名称：{template_name}",
+                    "---",
+                ]
+            )
+            full_prompt = base_prompt_tmpl + "\n\n" + identity_prompt + "\n\n" + agent_specific_prompt
             if dept_context:
                 full_prompt += "\n\n" + dept_context
 
