@@ -37,7 +37,7 @@ async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> llmApiUtil.
         messages=messages,
         tools=ctx.tools,
     )
-    return await llmApiUtil.send_request(request, llm_config.base_url, llm_config.api_key)
+    return await llmApiUtil.send_request_stream(request, llm_config.base_url, llm_config.api_key)
 
 
 def shutdown() -> None:

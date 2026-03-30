@@ -56,7 +56,6 @@ class OpenAIResponse(BaseModel):
     created: int
     model: str
     choices: List["OpenAIChoice"]
-    usage: "OpenAIUsage"
     system_fingerprint: Optional[str] = None
 
     @property
@@ -90,21 +89,6 @@ class OpenAITool(BaseModel):
 
 
 # ========== 响应侧辅助类 ==========
-
-class OpenAIUsage(BaseModel):
-    prompt_tokens: int = Field(..., description="输入 tokens 数量")
-    completion_tokens: int = Field(..., description="输出 tokens 数量")
-    total_tokens: int = Field(..., description="总 tokens 数量")
-    prompt_tokens_details: Optional[dict] = Field(None, description="输入 tokens 详情")
-    completion_tokens_details: Optional[dict] = Field(None, description="输出 tokens 详情")
-
-    @property
-    def input_tokens(self) -> int:
-        return self.prompt_tokens
-
-    @property
-    def output_tokens(self) -> int:
-        return self.completion_tokens
 
 
 class OpenAIChoice(BaseModel):
