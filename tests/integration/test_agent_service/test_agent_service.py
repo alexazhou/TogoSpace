@@ -101,10 +101,15 @@ class TestagentServiceSyncRoomMessages(_agentServiceCase):
         alice = agentService.get_team_agent(TEAM, "alice")
         synced_count = await alice.sync_room_messages(room)
 
-        # 初始公告 + bob 消息
-        assert synced_count == 2
-        assert len(alice._history) == 2
-        assert "hello alice" in alice._history[1].content
+        # 初始公告 + bob 消息会聚合成一条“轮到发言”上下文消息
+        assert synced_count == 1
+        assert len(alice._history) == 1
+        content = alice._history[0].content or ""
+        assert content.startswith("general 房间轮到你发言，房间消息如下：")
+        assert "【房间《general》】【发言人《SYSTEM》】" in content
+        assert "【房间《general》】【发言人《bob》】" in content
+        assert "】\nhello alice" in content
+        assert "你现在可以调用工具行动。" in content
 
 
 class TestSaveTeamAgentsFullReplace(_agentServiceCase):

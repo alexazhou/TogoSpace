@@ -111,6 +111,9 @@ def _infer_room_name(
         content = msg.get("content", "")
         if not content:
             continue
+        match = re.search(r"【房间《(?P<room>general|alice_private|public_group)》】", content)
+        if match:
+            return str(match.group("room"))
         match = re.search(r"在 (general|alice_private|public_group) 房间发言", content)
         if match:
             return match.group(1)
