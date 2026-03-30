@@ -7,7 +7,7 @@ import pytest
 import service.ormService as ormService
 import service.roomService as roomService
 import service.teamService as teamService
-from constants import DriverType, RoleTemplateType, RoomType
+from constants import DriverType, EmployStatus, RoleTemplateType, RoomType
 from dal.db import (
     gtRoleTemplateManager,
     gtAgentHistoryManager,
@@ -269,6 +269,25 @@ class TestDalManagers(ServiceTestCase):
         rows = await gtAgentManager.get_agents_by_team(team.id)
         assert [row.name for row in rows] == ["alice", "bob"]
         assert [row.employee_number for row in rows] == [1, 2]
+
+    async def test_agent_manager_batch_save_agents_rejects_mismatched_team_id(self):
+        await self._reset_tables()
+
+        await gtRoleTemplateManager.upsert_role_template("rt_a", "gpt-4o")
+        team = await gtTeamManager.save_team(GtTeam(name="batch_save_team_id_check"))
+
+        role_template_id = await gtAgentManager.resolve_role_template_id_by_name("rt_a")
+        wrong_team_agent = GtAgent(
+            team_id=team.id + 1,
+            name="alice",
+            role_template_id=role_template_id,
+            model="",
+            driver=DriverType.NATIVE,
+            employ_status=EmployStatus.ON_BOARD,
+        )
+
+        with pytest.raises(ValueError, match="all agents must have team_id"):
+            await gtAgentManager.batch_save_agents(team.id, [wrong_team_agent])
 
     # ------------------------------------------------------------------
     # gtRoomManager

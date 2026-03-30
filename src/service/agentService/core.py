@@ -419,28 +419,8 @@ def get_team_agent_info_map(team_name: str) -> dict[str, dict]:
     return {info["name"]: info for info in get_team_agent_infos(team_name)}
 
 
-async def list_team_agent_items(team_id: int) -> list[dict[str, Any]]:
-    team = await gtTeamManager.get_team_by_id(team_id)
-    if team is None:
-        return []
-
-    agents = await gtAgentManager.get_agents_by_team(team.id)
-    runtime_infos = get_team_agent_info_map(team.name)
-    return [
-        {
-            "id": agent.id,
-            "name": agent.name,
-            "employee_number": agent.employee_number,
-            "role_template_id": agent.role_template_id,
-            "team_id": runtime_info.get("team_id", agent.team_id) if runtime_info else agent.team_id,
-            "status": runtime_info.get("status", MemberStatus.IDLE.name) if runtime_info else MemberStatus.IDLE.name,
-            "employ_status": agent.employ_status.name if agent.employ_status else None,
-            "model": agent.model,
-            "driver": agent.driver.value if agent.driver else None,
-        }
-        for agent in agents
-        for runtime_info in [runtime_infos.get(agent.name)]
-    ]
+async def list_team_agents(team_id: int) -> list[GtAgent]:
+    return await gtAgentManager.get_on_board_agents(team_id)
 
 
 def get_team_agents(room_id: int) -> List["Agent"]:

@@ -85,6 +85,12 @@ async def batch_save_agents(team_id: int, agents: list[GtAgent]) -> None:
     if len(agents) == 0:
         return
 
+    invalid_team_ids = sorted({agent.team_id for agent in agents if agent.team_id != team_id})
+    if invalid_team_ids:
+        raise ValueError(
+            f"all agents must have team_id={team_id}, got mismatched team_ids={invalid_team_ids}"
+        )
+
     max_num = await get_max_employee_number(team_id)
     next_num = max_num + 1
 
@@ -95,7 +101,6 @@ async def batch_save_agents(team_id: int, agents: list[GtAgent]) -> None:
         if agent.id is not None:
             to_update.append(agent)
         else:
-            agent.team_id = team_id
             agent.employee_number = next_num
             to_create.append(agent)
             next_num += 1
@@ -130,19 +135,22 @@ async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
     )
 
 
-async def update_agent(agent_id: int, name: str, role_template_id: int, model: str, driver: DriverType) -> GtAgent:
-    """按 ID 更新单个 agent。"""
-    agent = await GtAgent.aio_get_or_none(GtAgent.id == agent_id)
-    if agent is None:
-        raise ValueError(f"Agent ID '{agent_id}' not found")
+async def update_agent(agent: GtAgent) -> GtAgent:
+    """按 agent 对象更新单个 agent。"""
+    if agent.id is None:
+        raise ValueError("Agent ID is required")
 
-    agent.name = name
-    agent.role_template_id = role_template_id
-    agent.model = model
-    agent.driver = driver
-    await agent.aio_save()
+    row = await GtAgent.aio_get_or_none(GtAgent.id == agent.id)
+    if row is None:
+        raise ValueError(f"Agent ID '{agent.id}' not found")
 
-    return agent
+    row.name = agent.name
+    row.role_template_id = agent.role_template_id
+    row.model = agent.model
+    row.driver = agent.driver
+    await row.aio_save()
+
+    return row
 
 
 async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) -> None:
