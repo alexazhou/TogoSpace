@@ -40,12 +40,6 @@ class SendMessageRequest(BaseModel):
     content: str | None = None
 
 
-async def _get_team_or_404(team_id: int):
-    team = await gtTeamManager.get_team_by_id(team_id)
-    assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
-    return team
-
-
 async def _get_team_room_or_404(team_id: int, room_id: int) -> GtRoom:
     room = await GtRoom.aio_get_or_none(
         (GtRoom.id == room_id) & (GtRoom.team_id == team_id)
@@ -111,7 +105,11 @@ class TeamRoomsHandler(BaseHandler):
 
     async def get(self, team_id_str: str) -> None:
         team_id = int(team_id_str)
-        await _get_team_or_404(team_id)
+        assertUtil.assertNotNull(
+            await gtTeamManager.get_team_by_id(team_id),
+            error_message=f"Team ID '{team_id}' not found",
+            error_code="team_not_found",
+        )
 
         rooms = await gtRoomManager.get_rooms_by_team(team_id)
         self.return_json({"rooms": rooms})
@@ -124,7 +122,8 @@ class TeamRoomCreateHandler(BaseHandler):
         request = self.parse_request(CreateRoomRequest)
 
         team_id = int(team_id_str)
-        team = await _get_team_or_404(team_id)
+        team = await gtTeamManager.get_team_by_id(team_id)
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
         team_name = team.name
 
         # 检查房间是否已存在
@@ -165,7 +164,11 @@ class TeamRoomDetailHandler(BaseHandler):
     async def get(self, team_id_str: str, room_id_str: str) -> None:
         team_id = int(team_id_str)
         room_id = int(room_id_str)
-        await _get_team_or_404(team_id)
+        assertUtil.assertNotNull(
+            await gtTeamManager.get_team_by_id(team_id),
+            error_message=f"Team ID '{team_id}' not found",
+            error_code="team_not_found",
+        )
         room = await _get_team_room_or_404(team_id, room_id)
 
         members = await chat_room.get_db_room_member_names(room.id)
@@ -188,7 +191,8 @@ class TeamRoomModifyHandler(BaseHandler):
 
         team_id = int(team_id_str)
         room_id = int(room_id_str)
-        team = await _get_team_or_404(team_id)
+        team = await gtTeamManager.get_team_by_id(team_id)
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
         team_name = team.name
 
         room = await _get_team_room_or_404(team_id, room_id)
@@ -228,7 +232,8 @@ class TeamRoomDeleteHandler(BaseHandler):
     async def post(self, team_id_str: str, room_id_str: str) -> None:
         team_id = int(team_id_str)
         room_id = int(room_id_str)
-        team = await _get_team_or_404(team_id)
+        team = await gtTeamManager.get_team_by_id(team_id)
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
         team_name = team.name
 
         room = await _get_team_room_or_404(team_id, room_id)
@@ -261,7 +266,11 @@ class TeamRoomMembersHandler(BaseHandler):
     async def get(self, team_id_str: str, room_id_str: str) -> None:
         team_id = int(team_id_str)
         room_id = int(room_id_str)
-        await _get_team_or_404(team_id)
+        assertUtil.assertNotNull(
+            await gtTeamManager.get_team_by_id(team_id),
+            error_message=f"Team ID '{team_id}' not found",
+            error_code="team_not_found",
+        )
         room = await _get_team_room_or_404(team_id, room_id)
 
         members = await chat_room.get_db_room_member_names(room.id)
@@ -276,7 +285,8 @@ class TeamRoomMembersModifyHandler(BaseHandler):
 
         team_id = int(team_id_str)
         room_id = int(room_id_str)
-        team = await _get_team_or_404(team_id)
+        team = await gtTeamManager.get_team_by_id(team_id)
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
         team_name = team.name
 
         room = await _get_team_room_or_404(team_id, room_id)

@@ -16,7 +16,7 @@ async def startup() -> None:
         await _import_role_template_from_config(template)
 
     db_templates = await gtRoleTemplateManager.get_all_role_templates()
-    logger.info(f"加载角色模版: {[t.template_name for t in db_templates]}")
+    logger.info(f"加载角色模版: {[t.name for t in db_templates]}")
 
 
 async def _import_role_template_from_config(config: RoleTemplateConfig) -> None:
@@ -30,7 +30,7 @@ async def _import_role_template_from_config(config: RoleTemplateConfig) -> None:
         ):
             await gtRoleTemplateManager.save_role_template(
                 GtRoleTemplate(
-                    template_name=config.name,
+                    name=config.name,
                     model=existing.model,
                     soul=existing.soul,
                     type=RoleTemplateType.SYSTEM,
@@ -42,7 +42,7 @@ async def _import_role_template_from_config(config: RoleTemplateConfig) -> None:
 
     await gtRoleTemplateManager.save_role_template(
         GtRoleTemplate(
-            template_name=config.name,
+            name=config.name,
             model=config.model,
             soul=config.soul,
             type=RoleTemplateType.SYSTEM,

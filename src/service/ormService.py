@@ -74,14 +74,16 @@ async def startup(db_path: str) -> None:
     abs_path = os.path.abspath(db_path)
     os.makedirs(os.path.dirname(abs_path), exist_ok=True)
 
-    # 数据库文件不存在时自动执行迁移
+    # 启动时始终检查并执行待处理迁移，保证已有库也能升级到最新 schema。
     if _needs_migration(abs_path):
         logger.info("Database not initialized, running migrations...")
-        applied = migrate_database(abs_path)
-        if applied:
-            logger.info("Applied %d migration(s): %s", len(applied), applied)
-        else:
-            logger.info("Database schema is up to date")
+    else:
+        logger.info("Checking pending migrations for existing database...")
+    applied = migrate_database(abs_path)
+    if applied:
+        logger.info("Applied %d migration(s): %s", len(applied), applied)
+    else:
+        logger.info("Database schema is up to date")
 
     database = AioSqliteDatabase(
         abs_path,
