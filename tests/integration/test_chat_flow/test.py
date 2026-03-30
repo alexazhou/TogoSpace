@@ -74,15 +74,12 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             # 重新创建 max_turns=1 的同名房间，快速触发“每人一轮”场景。
             await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"], max_turns=1)
             room = roomService.get_room_by_key(room_key)
-            run_task = asyncio.create_task(scheduler.run())
             await room.activate_scheduling()
             await self.wait_until(
                 lambda: len([m for m in room.messages if m.sender_name != "system"]) >= 2,
                 timeout=2.0,
                 message="alice 和 bob 未在限时内完成一轮对话",
             )
-            scheduler.shutdown()
-            await asyncio.wait_for(run_task, timeout=2.0)
 
         agent_messages = [m for m in room.messages if m.sender_name != "system"]
         assert len(agent_messages) >= 2
@@ -91,7 +88,6 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         """验证 tool_call 结果被正确追加到 agent history。"""
         room_key = f"general@{TEAM}"
         room = roomService.get_room_by_key(room_key)
-        await room.add_message("system", "开始聊天")
 
         alice = agentService.get_team_agent(TEAM, "alice")
         await alice.append_history_message(
@@ -123,7 +119,6 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         """直接输出文字时 turn_checker 应注入 hint，迫使 agent 改用工具。"""
         room_key = f"general@{TEAM}"
         room = roomService.get_room_by_key(room_key)
-        await room.add_message("system", "开始聊天")
 
         alice = agentService.get_team_agent(TEAM, "alice")
         await alice.append_history_message(
@@ -169,7 +164,6 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             return self.normalize_to_mock(res)
 
         with self.patch_infer(handler=fake_infer):
-            run_task = asyncio.create_task(scheduler.run())
             await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"], max_turns=2)
             room = roomService.get_room_by_key(room_key)
             await room.activate_scheduling()
@@ -178,8 +172,6 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
                 timeout=3.0,
                 message="房间未在限时内进入 IDLE 状态",
             )
-            scheduler.shutdown()
-            await asyncio.wait_for(run_task, timeout=5.0)
 
         # 1 条公告 + 2轮×2人 = 5 条消息
         assert len(room.messages) == 5
