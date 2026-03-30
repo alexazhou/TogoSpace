@@ -38,7 +38,7 @@ def build_turn_context_prompt(room_name: str, message_blocks: list[str]) -> str:
     """构造轮到发言时的上下文说明，统一用于所有 driver。"""
     context = "\n\n".join(message_blocks) if message_blocks else "(无新消息)"
     return (
-        f"【{room_name}】 房间轮到你发言，新消息如下：\n\n"
+        f"【{room_name}】 房间轮到你行动，新消息如下：\n\n"
         f"{context}\n\n"
         f"{_TURN_CONTEXT_SUFFIX}"
     )
