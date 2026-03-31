@@ -35,8 +35,7 @@ class _agentServiceCase(ServiceTestCase):
         team_cfg = cfg.teams[0]
         await teamService.import_team_from_config(team_cfg)
         await agentService.startup()
-        await agentService.load_team_ids([team_cfg])
-        await agentService.create_team_agents([team_cfg])
+        await agentService.create_team_agents_from_db()
 
     @classmethod
     async def async_teardown_class(cls):
@@ -143,7 +142,7 @@ class TestagentServiceSyncRoomMessages(_agentServiceCase):
         assert synced_count == 1
         assert len(alice._history) == 1
         content = alice._history[0].content or ""
-        assert content.startswith("【general】 房间轮到你发言，新消息如下：")
+        assert content.startswith("【general】 房间轮到你行动，新消息如下：")
         assert "【房间《general》】【系统提醒】：" in content
         assert "【房间《general》】【bob】：" in content
         assert "： hello alice" in content

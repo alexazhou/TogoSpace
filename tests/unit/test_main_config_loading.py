@@ -18,6 +18,7 @@ if os.name == "posix" and sys.platform == "darwin":
 
 
 def test_runtime_configs_load_from_config_dir(tmp_path):
+    os.environ.pop("TEAMAGENT_DB_PATH", None)
     (tmp_path / "setting.json").write_text(json.dumps({
         "default_llm_server": "mock",
         "llm_services": [
@@ -74,6 +75,7 @@ def test_runtime_configs_skip_disabled_llm_service(tmp_path):
 
 
 def test_runtime_configs_allow_llm_only_setting(tmp_path):
+    os.environ.pop("TEAMAGENT_DB_PATH", None)
     (tmp_path / "setting.json").write_text(json.dumps({
         "default_llm_server": "mock",
         "llm_services": [
@@ -221,6 +223,7 @@ def test_persistence_defaults_when_null(tmp_path):
 
 
 def test_persistence_db_path_defaults_when_blank(tmp_path):
+    os.environ.pop("TEAMAGENT_DB_PATH", None)
     (tmp_path / "setting.json").write_text(json.dumps({
         "default_llm_server": "svc",
         "llm_services": [

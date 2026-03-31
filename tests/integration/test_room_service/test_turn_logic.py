@@ -8,7 +8,8 @@ from service import roomService
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 from constants import RoomType, RoomState, MessageBusTopic, SpecialAgent
-from dal.db import gtTeamManager
+from dal.db import gtTeamManager, gtAgentManager
+from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtTeam import GtTeam
 from ...base import ServiceTestCase
 
@@ -31,7 +32,17 @@ class TestRoomTurnLogic(ServiceTestCase):
         await roomService.startup()
 
         # 预创建 team，_create_room 不再自动创建
-        await gtTeamManager.save_team(GtTeam(name=TEAM))
+        team = await gtTeamManager.save_team(GtTeam(name=TEAM))
+        await gtAgentManager.batch_save_agents(
+            team.id,
+            [
+                GtAgent(team_id=team.id, name="alice", role_template_id=0),
+                GtAgent(team_id=team.id, name="bob", role_template_id=0),
+                GtAgent(team_id=team.id, name="charlie", role_template_id=0),
+                GtAgent(team_id=team.id, name="a", role_template_id=0),
+                GtAgent(team_id=team.id, name="b", role_template_id=0),
+            ],
+        )
 
     @classmethod
     async def async_teardown_class(cls):
@@ -317,7 +328,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
-        assert room.get_current_turn_agent() == "Operator"
+        assert room.get_current_turn_agent() == SpecialAgent.OPERATOR.name
 
         with patch("service.messageBus.publish"):
             await room.add_message(SpecialAgent.OPERATOR.name, "hello from operator")

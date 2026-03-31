@@ -47,7 +47,7 @@ class TestRoomController(_ApiServiceCase):
         assert "room_name" in room
         assert "team_name" in room
         assert "state" in room
-        assert "members" in room
+        assert "agent_ids" in room
 
     async def test_get_room_messages(self):
         """验证 GET /rooms/{id}/messages 返回消息列表及元数据字段。"""
@@ -122,18 +122,18 @@ class TestRoomControllerPrivate(_ApiServiceCase):
                 assert resp.status == 200
                 data = await resp.json()
 
-        rooms = data["rooms"]
+        rooms = [room for room in data["rooms"] if room["team_name"] == _V6_TEAM]
         assert len(rooms) == 2
 
         private_room = next(r for r in rooms if r["room_name"] == "alice_private")
         assert RoomType.value_of(private_room["room_type"]) == RoomType.PRIVATE
         assert private_room["team_name"] == _V6_TEAM
-        assert any(SpecialAgent.value_of(m) == SpecialAgent.OPERATOR for m in private_room["members"])
+        assert any(agent_id == int(SpecialAgent.OPERATOR.value) for agent_id in private_room["agent_ids"])
 
         group_room = next(r for r in rooms if r["room_name"] == "public_group")
         assert RoomType.value_of(group_room["room_type"]) == RoomType.GROUP
         assert group_room["team_name"] == _V6_TEAM
-        assert not any(SpecialAgent.value_of(m) == SpecialAgent.OPERATOR for m in group_room["members"])
+        assert not any(agent_id == int(SpecialAgent.OPERATOR.value) for agent_id in group_room["agent_ids"])
 
 
     async def test_post_message_to_private_room(self):

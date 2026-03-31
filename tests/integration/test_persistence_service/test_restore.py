@@ -59,12 +59,11 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await roleTemplateService.startup()
         await agentService.startup()
         await teamService.import_team_from_config(team_config)
-        await agentService.load_team_ids([team_config])
-        await agentService.create_team_agents([team_config])
-        await roomService.ensure_rooms_from_config([team_config])
+        await agentService.create_team_agents_from_db()
+        await roomService.load_rooms_from_db()
         await agentService.restore_state()
         await roomService.restore_state()
-        await scheduler.startup([team_config])
+        await scheduler.startup()
         return team_config
 
     async def test_room_requires_explicit_start_before_scheduler_runs(self):

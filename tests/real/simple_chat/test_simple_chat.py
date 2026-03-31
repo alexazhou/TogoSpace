@@ -49,13 +49,13 @@ class TestRealSimpleChat(ServiceTestCase):
         await roleTemplateService.startup()
         await teamService.startup()
         await agentService.startup()
-        await agentService.create_team_agents(cfg.teams)
+        await agentService.create_team_agents_from_db()
 
         # 创建房间（max_turns=1 表示 alice/bob 各 1 次发言）
         await roomService.ensure_room_record("default", "general", ["alice", "bob"], max_turns=1)
 
         # 启动调度器
-        await scheduler.startup(cfg.teams)
+        await scheduler.startup()
 
     @classmethod
     async def async_teardown_class(cls):

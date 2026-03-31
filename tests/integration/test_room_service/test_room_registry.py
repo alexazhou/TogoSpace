@@ -96,7 +96,10 @@ class TestRoomRegistry(ServiceTestCase):
             }],
         })]
 
-        await roomService.ensure_rooms_from_config(teams_config)
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+        await roomService.import_team_rooms_from_config(team.id, teams_config[0].preset_rooms)
+        await roomService.refresh_rooms_for_team(team.id)
 
         room = roomService.get_room_by_key(f"boot_room@{TEAM}")
         assert room.messages == []

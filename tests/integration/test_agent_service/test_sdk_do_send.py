@@ -40,8 +40,7 @@ class TestSdkDoSend(ServiceTestCase):
             AgentConfig(name="bob", role_template="bob")
         ])
         await teamService.import_team_from_config(cfg)
-        await agentService.load_team_ids([cfg])
-        await agentService.create_team_agents([cfg])
+        await agentService.create_team_agents_from_db()
 
     @classmethod
     async def async_teardown_class(cls):
