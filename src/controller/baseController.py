@@ -32,7 +32,7 @@ class BaseHandler(tornado.web.RequestHandler):
             return data.isoformat()
         if isinstance(data, DbModelBase):
             # 将 Peewee 模型转换为字典（包含非数据库字段如 children）
-            result = model_to_dict(data)
+            result = self._convert_gt_db(model_to_dict(data))
             # 处理非数据库字段
             for attr_name in dir(data):
                 if attr_name.startswith('_'):

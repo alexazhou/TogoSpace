@@ -34,6 +34,8 @@ class TestRoleTemplateController(_ApiServiceCase):
         assert "model" in template
         assert "type" in template
         assert "driver" in template
+        assert isinstance(template["created_at"], str)
+        assert isinstance(template["updated_at"], str)
 
     async def test_get_role_template_detail(self):
         """验证 GET /role_templates/<id>.json 返回模板详情。"""
