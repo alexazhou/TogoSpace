@@ -5,12 +5,11 @@ from typing import List
 
 from pydantic import BaseModel, Field
 
-from constants import EmployStatus, RoomType
-from dal.db import gtDeptManager, gtAgentManager, gtRoomManager
+from constants import EmployStatus
+from dal.db import gtDeptManager, gtAgentManager
 from exception import TeamAgentException
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtAgent import GtAgent
-from model.dbModel.gtRoom import GtRoom
 from service import roomService, agentService
 from util.configTypes import DeptNodeConfig
 
@@ -80,12 +79,10 @@ async def save_dept_tree(team_id: int, root: DeptTreeNode) -> None:
     dept_ids_map: dict[str, int] = {}
     await _save_dept_update_node(team_id, root, parent_id=None, dept_ids_map=dept_ids_map)
 
-    # 同步部门房间
-    await _save_dept_update_room(team_id, root, dept_ids_map)
-
-    # 清理不再需要的部门房间
-    all_dept_biz_ids = [f"DEPT:{did}" for did in dept_ids_map.values()]
-    await gtRoomManager.delete_rooms_by_biz_ids_not_in(team_id, all_dept_biz_ids)
+    # 同步部门房间（roomService 只接收房间信息，不感知部门树结构）
+    dept_rooms: list[roomService.DeptRoomSpec] = []
+    _collect_dept_room_specs(root, dept_ids_map, dept_rooms)
+    await roomService.sync_dept_rooms(team_id, dept_rooms)
 
     # 更新成员 employ_status：树内成员 ON_BOARD，其他成员 OFF_BOARD
     on_board_count, off_board_count = await agentService.sync_team_agent_employ_status(team_id, all_member_ids)
@@ -196,40 +193,20 @@ async def _save_dept_update_node(
     return dept
 
 
-async def _save_dept_update_room(team_id: int, node: DeptTreeNode, dept_ids_map: dict[str, int]) -> None:
-    """递归同步部门房间。"""
+def _collect_dept_room_specs(
+    node: DeptTreeNode,
+    dept_ids_map: dict[str, int],
+    rooms: list[roomService.DeptRoomSpec],
+) -> None:
     dept_id = dept_ids_map[node.dept_name]
-    biz_id = f"DEPT:{dept_id}"
-
-    existing = await gtRoomManager.get_room_by_biz_id(team_id, biz_id)
-
-    if existing:
-        # 更新已有部门房间的名称/话题/标签，并同步成员
-        existing.name = node.dept_name
-        existing.type = RoomType.GROUP
-        existing.initial_topic = node.dept_responsibility or f"{node.dept_name} 部门群聊"
-        existing.max_turns = 10
-        existing.biz_id = biz_id
-        existing.tags = ["DEPT"]
-        await gtRoomManager.save_room(existing)
-        await roomService.save_room_members(existing.id, node.member_ids)
-    else:
-        # 创建新房间，并添加部门成员
-        room = await gtRoomManager.save_room(GtRoom(
-            team_id=team_id,
-            name=node.dept_name,
-            type=RoomType.GROUP,
-            initial_topic=node.dept_responsibility or f"{node.dept_name} 部门群聊",
-            max_turns=10,
-            agent_ids=[],
-            biz_id=biz_id,
-            tags=["DEPT"],
-        ))
-        await roomService.save_room_members(room.id, node.member_ids)
-
-    # 递归处理子部门
+    rooms.append(roomService.DeptRoomSpec(
+        biz_id=f"DEPT:{dept_id}",
+        name=node.dept_name,
+        initial_topic=node.dept_responsibility or f"{node.dept_name} 部门群聊",
+        member_ids=list(dict.fromkeys(node.member_ids)),
+    ))
     for child in node.children:
-        await _save_dept_update_room(team_id, child, dept_ids_map)
+        _collect_dept_room_specs(child, dept_ids_map, rooms)
 
 
 async def get_dept_tree(team_id: int) -> DeptTreeNode | None:
