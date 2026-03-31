@@ -438,19 +438,27 @@ def shutdown() -> None:
     _rooms_by_id.clear()
 
 
-async def save_room_members(room_id: int, agent_ids: Sequence[int]) -> None:
+async def save_room_members(room_id: int, agent_ids: list[int]) -> None:
     room = await gtRoomManager.get_room_by_id(room_id)
     assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
 
-    room.agent_ids = list(agent_ids)
+    room.agent_ids = agent_ids
     await gtRoomManager.save_room(room)
 
 
 async def sync_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> None:
-    """按部门房间信息同步房间（创建/更新/删除）。"""
+    """按部门房间信息同步 DEPT 房间。
+
+    行为约定：
+    - 以 biz_id 作为幂等键，存在则更新，不存在则创建。
+    - 每个目标房间都会同步成员列表为 spec.member_ids。
+    - 最后会删除 team 下不在本次 biz_id 列表中的 DEPT 房间。
+    """
+    # 去重并固定“目标态”：同一 biz_id 仅保留最后一条 spec。
     by_biz_id: dict[str, DeptRoomSpec] = {room.biz_id: room for room in rooms}
 
     for spec in by_biz_id.values():
+        # 1) 按 biz_id 查找目标房间，不存在则初始化一个待创建对象。
         existing = await gtRoomManager.get_room_by_biz_id(team_id, spec.biz_id)
         room = existing or GtRoom(
             team_id=team_id,
@@ -471,28 +479,16 @@ async def sync_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> None:
         room.biz_id = spec.biz_id
         room.tags = ["DEPT"]
 
+        # 2) 保存房间元信息，再覆盖成员列表。
         saved_room = await gtRoomManager.save_room(room)
         await save_room_members(saved_room.id, spec.member_ids)
 
+    # 3) 清理不在目标态中的历史 DEPT 房间。
     await gtRoomManager.delete_rooms_by_biz_ids_not_in(team_id, list(by_biz_id.keys()))
-
-
-def _get_existing_room(
-    current_by_id: dict[int, GtRoom],
-    current_by_name: dict[str, GtRoom],
-    room_config: TeamRoomConfig,
-) -> GtRoom | None:
-    if room_config.id is not None:
-        room_by_id = current_by_id.get(room_config.id)
-        if room_by_id is not None:
-            return room_by_id
-    return current_by_name.get(room_config.name)
 
 
 async def crate_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomConfig]) -> None:
     current_rooms = await gtRoomManager.get_rooms_by_team(team_id)
-    current_by_id = {room.id: room for room in current_rooms}
-    current_by_name = {room.name: room for room in current_rooms}
     next_names = {room.name for room in rooms}
     next_ids = {room.id for room in rooms if room.id is not None}
 
@@ -505,7 +501,7 @@ async def crate_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomCon
         await gtRoomManager.delete_room(room_id)
 
     for room_config in rooms:
-        room = _get_existing_room(current_by_id, current_by_name, room_config)
+        room = await gtRoomManager.get_room_by_team_and_id_or_name(team_id, room_config.id, room_config.name)
         if room is None:
             room = GtRoom(
                 team_id=team_id,
