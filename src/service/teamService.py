@@ -161,15 +161,15 @@ async def update_team_base_info(team_id: int, working_directory: str | None = No
     return await gtTeamManager.save_team(team)
 
 
-async def save_team_members(team_id: int, members: list[AgentConfig]) -> None:
+async def update_team_members(team_id: int, members: list[AgentConfig]) -> None:
     await gtAgentManager.batch_save_agents(team_id, await _build_agent_rows(team_id, members))
 
 
-async def save_team_rooms(team_id: int, preset_rooms: list[TeamRoomConfig]) -> None:
+async def crate_team_rooms_from_config(team_id: int, preset_rooms: list[TeamRoomConfig]) -> None:
     for room in preset_rooms:
         if not room.max_turns:
             room.max_turns = 100
-    await roomService.import_team_rooms_from_config(team_id, preset_rooms)
+    await roomService.crate_team_rooms_from_config(team_id, preset_rooms)
 
 
 async def delete_team(name: str) -> None:
