@@ -624,7 +624,7 @@ class TestDeptService(ServiceTestCase):
         agents = await self._convert_to_gt_agents(team.id, configs)
         await gtAgentManager.batch_save_agents(team.id, agents)
 
-        saved_agents = await gtAgentManager.get_agents_by_team(team.id)
+        saved_agents = await gtAgentManager.get_team_agents(team.id)
         member_map = {m.name: m for m in saved_agents}
 
         assert member_map["alice"].model == "gpt-4o"

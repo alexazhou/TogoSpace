@@ -270,7 +270,7 @@ async def _build_dept_context(team_id: int, agent_name: str) -> str:
 
     # 建立辅助映射
     dept_id_map = {d.id: d for d in all_depts}
-    all_agents = await gtAgentManager.get_agents_by_team(team_id)
+    all_agents = await gtAgentManager.get_team_agents(team_id)
     agent_id_to_name: dict[int, str] = {m.id: m.name for m in all_agents}
 
     manager_name = agent_id_to_name.get(agent_dept.manager_id, "")
@@ -357,7 +357,7 @@ async def _create_team_agents(team_row: GtTeam, agent_rows: list[GtAgent], templ
 async def create_team_agents_from_db(workspace_root: str | None = None) -> None:
     await load_team_ids_from_db()
     for team_row in await gtTeamManager.get_all_teams():
-        agent_rows = await gtAgentManager.get_agents_by_team(team_row.id)
+        agent_rows = await gtAgentManager.get_team_agents(team_row.id)
         template_rows = await gtRoleTemplateManager.get_role_templates_by_ids(
             [agent.role_template_id for agent in agent_rows]
         )
@@ -384,7 +384,7 @@ async def reload_team_agents_from_db(team_name: str, workspace_root: str | None 
         logger.warning(f"重建 Team Agent 失败: team '{team_name}' 不存在于配置中")
         return
 
-    agent_rows = await gtAgentManager.get_agents_by_team(team_row.id)
+    agent_rows = await gtAgentManager.get_team_agents(team_row.id)
     template_rows = await gtRoleTemplateManager.get_role_templates_by_ids(
         [agent.role_template_id for agent in agent_rows]
     )
@@ -453,7 +453,7 @@ async def _resolve_role_template_id(agent_data: Any) -> int:
 
 async def save_team_agents_full_replace(team_id: int, agents_data: list[Any]) -> list[GtAgent]:
     """全量覆盖成员列表：有 id 更新，无 id 创建，不在列表的设为离职状态。返回在职成员列表。"""
-    existing_agents = await gtAgentManager.get_agents_by_team(team_id)
+    existing_agents = await gtAgentManager.get_team_agents(team_id)
     existing_ids = {a.id for a in existing_agents}
     existing_by_id = {a.id: a for a in existing_agents}
     request_ids = {getattr(a, "id", None) for a in agents_data if getattr(a, "id", None) is not None}

@@ -197,7 +197,7 @@ class TestDalManagers(ServiceTestCase):
         assert room is not None
         # Note: upsert_rooms now handles members internally
 
-        team_a_agents = await gtAgentManager.get_agents_by_team(team_a.id)
+        team_a_agents = await gtAgentManager.get_team_agents(team_a.id)
         assert [(m.name, m.role_template_id) for m in team_a_agents] == [
             ("alice_1", team_a_agents[0].role_template_id),
             ("bob_1", team_a_agents[1].role_template_id),
@@ -288,7 +288,7 @@ class TestDalManagers(ServiceTestCase):
 
         await gtAgentManager.batch_save_agents(team.id, agents)
 
-        rows = await gtAgentManager.get_agents_by_team(team.id)
+        rows = await gtAgentManager.get_team_agents(team.id)
         assert [row.name for row in rows] == ["alice", "bob"]
         assert [row.employee_number for row in rows] == [1, 2]
 
@@ -458,7 +458,7 @@ class TestDalManagers(ServiceTestCase):
             max_turns=5,
             agent_ids=[],
         ))
-        saved_agents = await gtAgentManager.get_agents_by_team(team.id)
+        saved_agents = await gtAgentManager.get_team_agents(team.id)
         agent_ids = {agent.name: agent.id for agent in saved_agents}
 
         assert await self._get_room_member_names(room.id) == []

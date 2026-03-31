@@ -99,7 +99,7 @@ class TeamDetailHandler(BaseHandler):
                 "name": member.name,
                 "role_template_id": member.role_template_id,
             }
-            for member in await gtAgentManager.get_agents_by_team(team_id)
+            for member in await gtAgentManager.get_team_agents(team_id)
         ]
         room_items = []
         for room in rooms:
