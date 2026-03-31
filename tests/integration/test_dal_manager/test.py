@@ -424,7 +424,7 @@ class TestDalManagers(ServiceTestCase):
         await roomService.crate_team_rooms_from_config(team.id, [
             TeamRoomConfig(name="old_room", max_turns=2, members=["alice"]),
         ])
-        await roomService.override_team_rooms(team.id, [
+        await roomService.overwrite_team_rooms(team.id, [
             GtRoom(
                 team_id=team.id,
                 name="new_room_1",

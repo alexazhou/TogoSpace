@@ -89,7 +89,7 @@ class TestRoomRegistry(ServiceTestCase):
             lambda agent: agent.id,
             await gtAgentManager.get_team_agents_by_names(team.id, ["alice"], include_special=True),
         ))
-        await roomService.override_team_rooms(team.id, [
+        await roomService.overwrite_team_rooms(team.id, [
             GtRoom(
                 team_id=team.id,
                 name="boot_room",

@@ -160,7 +160,7 @@ class TeamModifyHandler(BaseHandler):
         if request.members is not None:
             await teamService.update_team_members(team_id, request.members)
         if request.preset_rooms is not None:
-            await teamService.override_team_rooms(team_id, request.preset_rooms)
+            await teamService.overwrite_team_rooms(team_id, request.preset_rooms)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "name": team_name})

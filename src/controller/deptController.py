@@ -32,7 +32,7 @@ class DeptTreeUpdateHandler(BaseHandler):
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
         request = self.parse_request(SaveDeptTreeRequest)
-        await deptService.override_dept_tree(team_id, request.dept_tree)
+        await deptService.overwrite_dept_tree(team_id, request.dept_tree)
 
         # 触发热更新
         await teamService.hot_reload_team(team.name)

@@ -184,7 +184,7 @@ async def create_team(team_config: TeamConfig) -> int:
 
     # 创建 Rooms（常规流程，不走“配置导入专用”接口）
     if team_config.preset_rooms:
-        await override_team_rooms(team_id, team_config.preset_rooms)
+        await overwrite_team_rooms(team_id, team_config.preset_rooms)
 
     # 触发热更新
     await hot_reload_team(name)
@@ -245,11 +245,11 @@ async def _build_room_rows_from_configs(team_id: int, rooms: list[TeamRoomConfig
     return room_rows
 
 
-async def override_team_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
+async def overwrite_team_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
     for room in rooms:
         if not room.max_turns:
             room.max_turns = 100
-    await roomService.override_team_rooms(team_id, await _build_room_rows_from_configs(team_id, rooms))
+    await roomService.overwrite_team_rooms(team_id, await _build_room_rows_from_configs(team_id, rooms))
 
 
 async def crate_team_rooms_from_config(team_id: int, preset_rooms: list[TeamRoomConfig]) -> None:
