@@ -9,6 +9,7 @@ from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
 from service import messageBus, persistenceService
 from util.configTypes import TeamRoomConfig
 from util import assertUtil
+from exception import TeamAgentException
 from model.coreModel.gtCoreChatModel import GtCoreChatMessage
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
@@ -488,6 +489,70 @@ async def sync_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> None:
 
 
 async def crate_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomConfig]) -> None:
+    """导入配置专用：要求 team 还没有任何房间。"""
+    existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
+    assertUtil.assertTrue(
+        len(existing_rooms) == 0,
+        error_message=f"team_id '{team_id}' already has rooms, use update_team_rooms_from_config instead",
+        error_code="TEAM_ROOMS_ALREADY_EXIST",
+    )
+    room_rows: list[GtRoom] = []
+    for room_config in rooms:
+        room_rows.append(GtRoom(
+            team_id=team_id,
+            name=room_config.name,
+            type=_infer_room_type(room_config.members),
+            initial_topic=room_config.initial_topic,
+            max_turns=room_config.max_turns or 10,
+            agent_ids=list(map(
+                lambda agent: agent.id,
+                await gtAgentManager.get_team_agents_by_names(
+                    team_id,
+                    room_config.members,
+                    include_special=True,
+                ),
+            )),
+            biz_id=room_config.biz_id,
+            tags=list(room_config.tags),
+        ))
+    await batch_create_rooms(team_id, room_rows)
+
+
+async def batch_create_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
+    """批量创建房间（create-only）。若房间已存在则报错。"""
+    room_list = list(rooms)
+    seen_names: set[str] = set()
+    for room in room_list:
+        if room.id is not None:
+            raise TeamAgentException(
+                f"create-only 场景不允许传入 room.id: '{room.id}'",
+                error_code="ROOM_ID_NOT_ALLOWED_ON_CREATE",
+            )
+
+        if room.name in seen_names:
+            raise TeamAgentException(
+                f"房间名称重复: '{room.name}'",
+                error_code="ROOM_NAME_DUPLICATED",
+            )
+        seen_names.add(room.name)
+
+    existing_rooms = await gtRoomManager.get_rooms_by_team_and_names(
+        team_id,
+        [room.name for room in room_list],
+    )
+    if existing_rooms:
+        raise TeamAgentException(
+            f"房间名称已存在: '{existing_rooms[0].name}'",
+            error_code="ROOM_ALREADY_EXISTS",
+        )
+
+    for room in room_list:
+        room.team_id = team_id
+    await gtRoomManager.batch_save_rooms(room_list)
+
+
+async def update_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomConfig]) -> None:
+    """常规更新流程：按配置创建/更新房间，并清理已移除房间。"""
     current_rooms = await gtRoomManager.get_rooms_by_team(team_id)
     next_names = {room.name for room in rooms}
     next_ids = {room.id for room in rooms if room.id is not None}
