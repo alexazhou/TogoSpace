@@ -50,6 +50,16 @@ class ChatContext:
     chat_room: ChatRoom
 
 
+@dataclass(frozen=True)
+class DeptRoomSpec:
+    """部门房间同步输入项（与部门树结构解耦）。"""
+    biz_id: str
+    name: str
+    initial_topic: str
+    member_ids: list[int]
+    max_turns: int = 10
+
+
 class ChatRoom:
     """聊天室数据类（内部实现，外部通过模块级函数访问）"""
 
@@ -434,6 +444,37 @@ async def save_room_members(room_id: int, agent_ids: Sequence[int]) -> None:
 
     room.agent_ids = list(agent_ids)
     await gtRoomManager.save_room(room)
+
+
+async def sync_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> None:
+    """按部门房间信息同步房间（创建/更新/删除）。"""
+    by_biz_id: dict[str, DeptRoomSpec] = {room.biz_id: room for room in rooms}
+
+    for spec in by_biz_id.values():
+        existing = await gtRoomManager.get_room_by_biz_id(team_id, spec.biz_id)
+        room = existing or GtRoom(
+            team_id=team_id,
+            name="",
+            type=RoomType.GROUP,
+            initial_topic="",
+            max_turns=10,
+            agent_ids=[],
+            biz_id=spec.biz_id,
+            tags=["DEPT"],
+        )
+
+        room.team_id = team_id
+        room.name = spec.name
+        room.type = RoomType.GROUP
+        room.initial_topic = spec.initial_topic
+        room.max_turns = spec.max_turns
+        room.biz_id = spec.biz_id
+        room.tags = ["DEPT"]
+
+        saved_room = await gtRoomManager.save_room(room)
+        await save_room_members(saved_room.id, spec.member_ids)
+
+    await gtRoomManager.delete_rooms_by_biz_ids_not_in(team_id, list(by_biz_id.keys()))
 
 
 def _get_existing_room(
