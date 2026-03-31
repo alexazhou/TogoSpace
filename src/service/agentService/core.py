@@ -506,6 +506,19 @@ async def save_team_agents_full_replace(team_id: int, agents_data: list[Any]) ->
     return await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.ON_BOARD)
 
 
+async def sync_team_agent_employ_status(team_id: int, on_board_agent_ids: list[int] | set[int]) -> tuple[int, int]:
+    """按团队成员全集同步在岗/离岗状态，返回 (on_board_count, off_board_count)。"""
+    all_agents = await gtAgentManager.get_team_agents(team_id)
+    on_board_set = set(on_board_agent_ids)
+    on_board_ids = [agent.id for agent in all_agents if agent.id in on_board_set]
+    off_board_ids = [agent.id for agent in all_agents if agent.id not in on_board_set]
+
+    await gtAgentManager.batch_update_agent_status(on_board_ids, EmployStatus.ON_BOARD)
+    await gtAgentManager.batch_update_agent_status(off_board_ids, EmployStatus.OFF_BOARD)
+
+    return len(on_board_ids), len(off_board_ids)
+
+
 async def shutdown() -> None:
     global _agents, _team_ids
     close_tasks: List[Any] = [a.close() for a in _agents.values()]

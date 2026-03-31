@@ -11,7 +11,7 @@ from exception import TeamAgentException
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
-from service import roomService
+from service import roomService, agentService
 from util.configTypes import DeptNodeConfig
 
 logger = logging.getLogger(__name__)
@@ -87,28 +87,10 @@ async def save_dept_tree(team_id: int, root: DeptTreeNode) -> None:
     all_dept_biz_ids = [f"DEPT:{did}" for did in dept_ids_map.values()]
     await gtRoomManager.delete_rooms_by_biz_ids_not_in(team_id, all_dept_biz_ids)
 
-    # 更新成员 employ_status
-    all_agents = await gtAgentManager.get_team_agents(team_id)
+    # 更新成员 employ_status：树内成员 ON_BOARD，其他成员 OFF_BOARD
+    on_board_count, off_board_count = await agentService.sync_team_agent_employ_status(team_id, all_member_ids)
 
-    # 在树中的成员设为 ON_BOARD
-    on_board_ids = [a.id for a in all_agents if a.id in all_member_ids]
-    if on_board_ids:
-        await (
-            GtAgent.update(employ_status=EmployStatus.ON_BOARD)
-            .where(GtAgent.id.in_(on_board_ids))  # type: ignore[attr-defined]
-            .aio_execute()
-        )
-
-    # 不在树中的成员设为 OFF_BOARD
-    off_board_ids = [a.id for a in all_agents if a.id not in all_member_ids]
-    if off_board_ids:
-        await (
-            GtAgent.update(employ_status=EmployStatus.OFF_BOARD)
-            .where(GtAgent.id.in_(off_board_ids))  # type: ignore[attr-defined]
-            .aio_execute()
-        )
-
-    logger.info(f"部门树已更新（team_id={team_id}，on_board={len(on_board_ids)}，off_board={len(off_board_ids)}）")
+    logger.info(f"部门树已更新（team_id={team_id}，on_board={on_board_count}，off_board={off_board_count}）")
 
 async def _import_node(team_id: int, node: DeptNodeConfig, parent_id: int | None) -> GtDept:
     """递归导入单个节点，返回写入后的 GtDept 对象。"""
