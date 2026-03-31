@@ -22,31 +22,15 @@ async def _hydrate_dept_ids(team_id: int, node: GtDept) -> None:
         await _hydrate_dept_ids(team_id, child)
 
 
-def _validate_dept_tree(root: GtDept) -> tuple[set[int], set[int]]:
-    """递归校验部门树并收集成员 ID 与非空 dept id。"""
-    if len(root.agent_ids) < 2:
-        raise TeamAgentException(
-            f"部门 '{root.name}' 成员不足 2 人，无法创建房间",
-            error_code="DEPT_MEMBERS_TOO_FEW",
-        )
-
-    member_ids: set[int] = set(root.agent_ids)
-    dept_ids: set[int] = {root.id} if root.id is not None else set()
-
-    for child in root.children:
-        child_member_ids, child_dept_ids = _validate_dept_tree(child)
-        member_ids.update(child_member_ids)
-        dept_ids.update(child_dept_ids)
-
-    return member_ids, dept_ids
-
-
 async def overwrite_dept_tree(team_id: int, root: GtDept) -> None:
     """增量更新部门树，同步部门房间，更新成员 employ_status。"""
     await _hydrate_dept_ids(team_id, root)
 
     # 单次递归：校验整棵树 + 收集成员 ID 与部门 ID
-    all_member_ids, new_dept_ids = _validate_dept_tree(root)
+    try:
+        all_member_ids, new_dept_ids = root.validate_and_collect_tree_ids()
+    except ValueError as exc:
+        raise TeamAgentException(str(exc), error_code="DEPT_MEMBERS_TOO_FEW") from exc
 
     # 获取现有部门
     existing_depts = await gtDeptManager.get_all_depts(team_id)

@@ -32,6 +32,20 @@ class GtDept(DbModelBase):
         table_name = "depts"
         indexes = ((("team_id", "name"), True),)
 
+    def validate_and_collect_tree_ids(self) -> tuple[set[int], set[int]]:
+        if len(self.agent_ids) < 2:
+            raise ValueError(f"部门 '{self.name}' 成员不足 2 人，无法创建房间")
+
+        member_ids: set[int] = set(self.agent_ids)
+        dept_ids: set[int] = {self.id} if self.id is not None else set()
+
+        for child in self.children:
+            child_member_ids, child_dept_ids = child.validate_and_collect_tree_ids()
+            member_ids.update(child_member_ids)
+            dept_ids.update(child_dept_ids)
+
+        return member_ids, dept_ids
+
     def collect_room_specs(self) -> list[DeptRoomSpec]:
         room_specs: list[DeptRoomSpec] = []
         self._append_room_specs(room_specs)
