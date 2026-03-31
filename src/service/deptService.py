@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from typing import List
 
-from pydantic import BaseModel, Field
-
 from constants import EmployStatus
 from dal.db import gtDeptManager, gtAgentManager
 from exception import TeamAgentException
@@ -15,45 +13,40 @@ from service import roomService, agentService
 logger = logging.getLogger(__name__)
 
 
-class DeptTreeNode(BaseModel):
-    """部门树节点（API 请求/响应用）。
-
-    - 请求时：dept_id 可选，用于增量更新匹配现有部门
-    - 响应时：dept_id 必有值
-    """
-    dept_id: int | None = None
-    dept_name: str
-    dept_responsibility: str = ""
-    manager_id: int
-    member_ids: List[int] = Field(default_factory=list)
-    children: List["DeptTreeNode"] = Field(default_factory=list)
-
-    def validate_and_collect(self) -> tuple[set[int], set[int]]:
-        """递归校验节点并收集成员 ID 与非空 dept_id。"""
-        if len(self.member_ids) < 2:
-            raise TeamAgentException(
-                f"部门 '{self.dept_name}' 成员不足 2 人，无法创建房间",
-                error_code="DEPT_MEMBERS_TOO_FEW",
-            )
-
-        member_ids: set[int] = set(self.member_ids)
-        dept_ids: set[int] = {self.dept_id} if self.dept_id is not None else set()
-
-        for child in self.children:
-            child_member_ids, child_dept_ids = child.validate_and_collect()
-            member_ids.update(child_member_ids)
-            dept_ids.update(child_dept_ids)
-
-        return member_ids, dept_ids
+async def _hydrate_dept_ids(team_id: int, node: GtDept) -> None:
+    if node.id is None:
+        existing = await gtDeptManager.get_dept_by_name(team_id, node.name)
+        if existing is not None:
+            node.id = existing.id
+    for child in node.children:
+        await _hydrate_dept_ids(team_id, child)
 
 
-DeptTreeNode.model_rebuild()
+def _validate_dept_tree(root: GtDept) -> tuple[set[int], set[int]]:
+    """递归校验部门树并收集成员 ID 与非空 dept id。"""
+    if len(root.agent_ids) < 2:
+        raise TeamAgentException(
+            f"部门 '{root.name}' 成员不足 2 人，无法创建房间",
+            error_code="DEPT_MEMBERS_TOO_FEW",
+        )
+
+    member_ids: set[int] = set(root.agent_ids)
+    dept_ids: set[int] = {root.id} if root.id is not None else set()
+
+    for child in root.children:
+        child_member_ids, child_dept_ids = _validate_dept_tree(child)
+        member_ids.update(child_member_ids)
+        dept_ids.update(child_dept_ids)
+
+    return member_ids, dept_ids
 
 
-async def overwrite_dept_tree(team_id: int, root: DeptTreeNode) -> None:
+async def overwrite_dept_tree(team_id: int, root: GtDept) -> None:
     """增量更新部门树，同步部门房间，更新成员 employ_status。"""
+    await _hydrate_dept_ids(team_id, root)
+
     # 单次递归：校验整棵树 + 收集成员 ID 与部门 ID
-    all_member_ids, new_dept_ids = root.validate_and_collect()
+    all_member_ids, new_dept_ids = _validate_dept_tree(root)
 
     # 获取现有部门
     existing_depts = await gtDeptManager.get_all_depts(team_id)
@@ -63,14 +56,11 @@ async def overwrite_dept_tree(team_id: int, root: DeptTreeNode) -> None:
     if to_delete:
         await GtDept.delete().where(GtDept.id.in_(to_delete)).aio_execute()  # type: ignore[attr-defined]
 
-    # 增量更新/创建部门，并收集 ID 映射
-    dept_ids_map: dict[str, int] = {}
-    await _overwrite_dept_subtree(team_id, root, parent_id=None, dept_ids_map=dept_ids_map)
+    # 增量更新/创建部门
+    saved_root = await _overwrite_dept_subtree(team_id, root, parent_id=None)
 
     # 同步部门房间（roomService 只接收房间信息，不感知部门树结构）
-    dept_rooms: list[roomService.DeptRoomSpec] = []
-    _collect_dept_room_specs(root, dept_ids_map, dept_rooms)
-    await roomService.overwrite_dept_rooms(team_id, dept_rooms)
+    await roomService.overwrite_dept_rooms(team_id, saved_root.collect_room_specs())
 
     # 更新成员 employ_status：树内成员 ON_BOARD，其他成员 OFF_BOARD
     on_board_count, off_board_count = await agentService.overwrite_team_agent_employ_status(team_id, all_member_ids)
@@ -80,69 +70,48 @@ async def overwrite_dept_tree(team_id: int, root: DeptTreeNode) -> None:
 
 async def _overwrite_dept_subtree(
     team_id: int,
-    node: DeptTreeNode,
+    node: GtDept,
     parent_id: int | None,
-    dept_ids_map: dict[str, int],
 ) -> GtDept:
     """覆盖式保存部门子树：更新/创建当前节点，并递归处理子节点。"""
-    # 校验：manager_id 必须出现在 member_ids 中
-    if node.manager_id not in node.member_ids:
+    # 校验：manager_id 必须出现在 agent_ids 中
+    if node.manager_id not in node.agent_ids:
         raise TeamAgentException(
-            f"部门 '{node.dept_name}' 的主管 ID '{node.manager_id}' 不在成员名单中",
+            f"部门 '{node.name}' 的主管 ID '{node.manager_id}' 不在成员名单中",
             error_code="DEPT_MANAGER_NOT_IN_MEMBERS",
         )
 
-    agent_ids: list[int] = list(dict.fromkeys(node.member_ids))
+    agent_ids: list[int] = list(dict.fromkeys(node.agent_ids))
     member_rows = await gtAgentManager.get_team_agents_by_ids(team_id, agent_ids, include_special=False)
     existing_member_ids = {row.id for row in member_rows}
-    missing_member_ids = [member_id for member_id in agent_ids if member_id not in existing_member_ids]
+    missing_member_ids = sorted(set(agent_ids) - existing_member_ids)
     if missing_member_ids:
         raise TeamAgentException(
-            f"部门 '{node.dept_name}' 的成员 ID '{missing_member_ids[0]}' 在 team_members 中不存在",
+            f"部门 '{node.name}' 的成员 ID '{missing_member_ids}' 在 team_members 中不存在",
             error_code="DEPT_MEMBER_NOT_FOUND",
         )
 
-    # 按 dept_id 或 dept_name 匹配现有部门
-    if node.dept_id is not None:
-        # 优先按 ID 匹配
-        existing = await GtDept.aio_get_or_none(GtDept.id == node.dept_id)
-    else:
-        # 按 name 匹配
-        existing = await gtDeptManager.get_dept_by_name(team_id, node.dept_name)
-
     dept = await gtDeptManager.save_dept(
         team_id=team_id,
-        name=node.dept_name,
-        responsibility=node.dept_responsibility,
+        name=node.name,
+        responsibility=node.responsibility,
         parent_id=parent_id,
         manager_id=node.manager_id,
         agent_ids=agent_ids,
-        dept_id=existing.id if existing else None,
+        dept_id=node.id,
     )
 
-    # 收集部门名称到 ID 的映射
-    dept_ids_map[node.dept_name] = dept.id
-
     # 递归处理子部门
+    saved_children: list[GtDept] = []
     for child in node.children:
-        await _overwrite_dept_subtree(team_id, child, parent_id=dept.id, dept_ids_map=dept_ids_map)
+        saved_children.append(await _overwrite_dept_subtree(team_id, child, parent_id=dept.id))
+
+    dept.children = saved_children
 
     return dept
 
 
-def _collect_dept_room_specs(node: DeptTreeNode, dept_ids_map: dict[str, int], rooms: list[roomService.DeptRoomSpec]) -> None:
-    dept_id = dept_ids_map[node.dept_name]
-    rooms.append(roomService.DeptRoomSpec(
-        biz_id=f"DEPT:{dept_id}",
-        name=node.dept_name,
-        initial_topic=node.dept_responsibility or f"{node.dept_name} 部门群聊",
-        member_ids=list(dict.fromkeys(node.member_ids)),
-    ))
-    for child in node.children:
-        _collect_dept_room_specs(child, dept_ids_map, rooms)
-
-
-async def get_dept_tree(team_id: int) -> DeptTreeNode | None:
+async def get_dept_tree(team_id: int) -> GtDept | None:
     """从 DB 重建树形结构，返回根节点；无部门时返回 None。"""
     all_depts = await gtDeptManager.get_all_depts(team_id)
     if not all_depts:
@@ -153,22 +122,15 @@ async def get_dept_tree(team_id: int) -> DeptTreeNode | None:
     for dept in all_depts:
         children_map.setdefault(dept.parent_id, []).append(dept)
 
-    def build_node(dept: GtDept) -> DeptTreeNode:
-        children = [build_node(child) for child in children_map.get(dept.id, [])]
-        return DeptTreeNode(
-            dept_id=dept.id,
-            dept_name=dept.name,
-            dept_responsibility=dept.responsibility,
-            manager_id=dept.manager_id,
-            member_ids=list(dept.agent_ids),
-            children=children,
-        )
+    def build_tree(dept: GtDept) -> GtDept:
+        dept.children = [build_tree(child) for child in children_map.get(dept.id, [])]
+        return dept
 
     # 找根节点（parent_id 为 None）
     roots = children_map.get(None, [])
     if not roots:
         return None
-    return build_node(roots[0])
+    return build_tree(roots[0])
 
 
 async def get_off_board_members(team_id: int) -> list[GtAgent]:

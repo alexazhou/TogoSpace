@@ -31,7 +31,7 @@ async def test_reload_team_agents_rebuilds_only_target_team(monkeypatch):
     mock_create_team_agents = AsyncMock()
     monkeypatch.setattr(core, "load_team_ids_from_db", mock_load_team_ids)
     monkeypatch.setattr(core.gtTeamManager, "get_team", mock_get_team)
-    monkeypatch.setattr(core.gtAgentManager, "get_agents_by_team", mock_get_agents)
+    monkeypatch.setattr(core.gtAgentManager, "get_team_agents", mock_get_agents)
     monkeypatch.setattr(core.gtRoleTemplateManager, "get_role_templates_by_ids", mock_get_templates)
     monkeypatch.setattr(core, "_create_team_agents", mock_create_team_agents)
 

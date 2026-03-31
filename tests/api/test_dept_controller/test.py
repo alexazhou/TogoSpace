@@ -52,7 +52,7 @@ class TestDeptController(_ApiServiceCase):
         # 设置部门树（至少需要 2 个成员）
         dept_tree = {
             "dept_name": "技术部",
-            "dept_responsibility": "负责技术研发",
+            "responsibility": "负责技术研发",
             "manager_id": alice_id,
             "member_ids": [alice_id, bob_id],
             "children": [],

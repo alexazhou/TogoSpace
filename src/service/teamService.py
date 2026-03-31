@@ -5,6 +5,7 @@ import logging
 from dal.db import gtTeamManager, gtAgentManager
 from exception import TeamAgentException
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from service import deptService, roomService, schedulerService, agentService
@@ -22,7 +23,7 @@ async def create_team(
     config: dict | None = None,
     max_function_calls: int | None = None,
     members: list[GtAgent] | None = None,
-    dept_tree: deptService.DeptTreeNode | None = None,
+    dept_tree: GtDept | None = None,
     preset_rooms: list[GtRoom] | None = None,
 ) -> int:
     """创建新 Team（自动触发热更新）。"""

@@ -31,8 +31,24 @@ class BaseHandler(tornado.web.RequestHandler):
         if isinstance(data, datetime):
             return data.isoformat()
         if isinstance(data, DbModelBase):
-            # 将 Peewee 模型转换为字典
-            return self._convert_gt_db(model_to_dict(data))
+            # 将 Peewee 模型转换为字典（包含非数据库字段如 children）
+            result = model_to_dict(data)
+            # 处理非数据库字段
+            for attr_name in dir(data):
+                if attr_name.startswith('_'):
+                    continue
+                if attr_name in result:
+                    continue
+                # 检查是否是类属性且不是方法
+                attr_value = getattr(data, attr_name, None)
+                if callable(attr_value):
+                    continue
+                if attr_name in ('id', 'created_at', 'updated_at'):
+                    continue
+                # 添加非数据库字段
+                if attr_value is not None:
+                    result[attr_name] = self._convert_gt_db(attr_value)
+            return result
         if hasattr(data, '__dict__'):
             # 通用对象转字典（过滤私有属性）
             result = {}
