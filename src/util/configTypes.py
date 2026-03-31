@@ -8,7 +8,7 @@ from constants import LlmServiceType, DriverType
 class DeptNodeConfig(BaseModel):
     """递归的部门树节点，对应 config 中 dept_tree 的每个节点（配置文件用）。"""
     dept_name: str
-    dept_responsibility: str = ""
+    responsibility: str = ""
     manager: str
     members: List[str] = Field(default_factory=list)
     children: List["DeptNodeConfig"] = Field(default_factory=list)
