@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Sequence
 
 from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
 from service import messageBus, persistenceService
-from util.configTypes import TeamConfig, TeamRoomConfig
+from util.configTypes import TeamRoomConfig
 from util import assertUtil
 from model.coreModel.gtCoreChatModel import GtCoreChatMessage
 from model.dbModel.gtRoom import GtRoom
@@ -374,14 +374,6 @@ _rooms: Dict[str, ChatRoom] = {}  # room_key -> ChatRoom
 _rooms_by_id: Dict[int, ChatRoom] = {}
 
 
-def _room_key(team_name: str, room_name: str) -> str:
-    return f"{room_name}@{team_name}"
-
-
-def _iter_team_rooms(team_config: TeamConfig) -> list[TeamRoomConfig]:
-    return team_config.preset_rooms
-
-
 async def startup() -> None:
     """初始化房间服务，清空所有房间。"""
     _rooms.clear()
@@ -448,16 +440,6 @@ async def save_room_members(room_id: int, agent_ids: Sequence[int]) -> None:
     await gtRoomManager.save_room(room)
 
 
-def _find_existing_room(
-    current_by_id: dict[int, GtRoom],
-    current_by_name: dict[str, GtRoom],
-    room_config: TeamRoomConfig,
-) -> GtRoom | None:
-    if room_config.id is not None and room_config.id in current_by_id:
-        return current_by_id[room_config.id]
-    return current_by_name.get(room_config.name)
-
-
 async def import_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomConfig]) -> None:
     current_rooms = await gtRoomManager.get_rooms_by_team(team_id)
     current_by_id = {room.id: room for room in current_rooms}
@@ -470,10 +452,12 @@ async def import_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomCo
             continue
         await gtRoomManager.delete_room(current_room.id)
 
-    rooms_to_save: list[GtRoom] = []
     for room_config in rooms:
         max_turns = room_config.max_turns or 10
-        room = _find_existing_room(current_by_id, current_by_name, room_config)
+        if room_config.id is not None and room_config.id in current_by_id:
+            room = current_by_id[room_config.id]
+        else:
+            room = current_by_name.get(room_config.name)
         if room is None:
             room = GtRoom(
                 team_id=team_id,
@@ -493,9 +477,7 @@ async def import_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomCo
             room.biz_id = room_config.biz_id
             room.tags = list(room_config.tags)
 
-        room.agent_ids = []
-        saved_room = await gtRoomManager.save_room(room)
-        saved_room.agent_ids = [
+        room.agent_ids = [
             agent.id
             for agent in await gtAgentManager.get_team_agents_by_names(
                 team_id,
@@ -503,9 +485,7 @@ async def import_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomCo
                 include_special=True,
             )
         ]
-        rooms_to_save.append(saved_room)
-
-    await gtRoomManager.batch_save_rooms(rooms_to_save)
+        await gtRoomManager.save_room(room)
 
 
 async def _load_room(
