@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import List
 
 import peewee
+from playhouse.shortcuts import model_to_dict
 
 from .base import DbModelBase, JsonField
 
@@ -31,6 +32,13 @@ class GtDept(DbModelBase):
     class Meta:
         table_name = "depts"
         indexes = ((("team_id", "name"), True),)
+
+    def to_json(self) -> dict:
+        """转换为 JSON 可序列化的字典，包含非数据库字段 children。"""
+        result = model_to_dict(self)
+        if self.children:
+            result["children"] = [child.to_json() for child in self.children]
+        return result
 
     def validate_and_collect_tree_ids(self) -> tuple[set[int], set[int]]:
         if len(self.agent_ids) < 2:

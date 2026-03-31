@@ -1,16 +1,13 @@
 import json
 import logging
-from datetime import datetime
-from enum import Enum
 from typing import Any, TypeVar
 
 import tornado.web
-from playhouse.shortcuts import model_to_dict
 from pydantic import BaseModel
 from tornado.web import HTTPError
 
-from model.dbModel.base import DbModelBase
 from exception import TeamAgentException
+from util import jsonUtil
 
 
 logger = logging.getLogger(__name__)
@@ -24,64 +21,24 @@ class BaseHandler(tornado.web.RequestHandler):
         super().__init__(*args, **kwargs)
         self.enhance = {}
 
-    def _convert_gt_db(self, data: Any) -> Any:
-        """将 DbModelBase 实例和其他对象转换为字典。"""
-        if isinstance(data, Enum):
-            return data.name
-        if isinstance(data, datetime):
-            return data.isoformat()
-        if isinstance(data, DbModelBase):
-            # 将 Peewee 模型转换为字典（包含非数据库字段如 children）
-            result = self._convert_gt_db(model_to_dict(data))
-            # 处理非数据库字段
-            for attr_name in dir(data):
-                if attr_name.startswith('_'):
-                    continue
-                if attr_name in result:
-                    continue
-                # 检查是否是类属性且不是方法
-                attr_value = getattr(data, attr_name, None)
-                if callable(attr_value):
-                    continue
-                if attr_name in ('id', 'created_at', 'updated_at'):
-                    continue
-                # 添加非数据库字段
-                if attr_value is not None:
-                    result[attr_name] = self._convert_gt_db(attr_value)
-            return result
-        if hasattr(data, '__dict__'):
-            # 通用对象转字典（过滤私有属性）
-            result = {}
-            for k, v in data.__dict__.items():
-                if not k.startswith('_'):
-                    result[k] = self._convert_gt_db(v)
-            return result
-        if isinstance(data, list):
-            return [self._convert_gt_db(item) for item in data]
-        if isinstance(data, dict):
-            return {k: self._convert_gt_db(v) for k, v in data.items()}
-        return data
-
     def parse_request(self, model_class: type[T]) -> T:
         """解析请求体为指定的 Pydantic 模型。"""
         body = json.loads(self.request.body)
         return model_class(**body)
 
-    def return_json(self, data) -> None:
+    def return_json(self, data, config: dict = None) -> None:
         """序列化并写入 JSON 响应。
 
-        - Pydantic BaseModel：调用 model_dump(mode="json") 处理 datetime 等类型
-        - DbModelBase：自动转换为字典
-        - dict / list：直接 json.dumps
+        使用 jsonUtil.json_dump 处理 datetime、Enum、DbModelBase 等类型。
+        DbModelBase 通过 to_json() 方法自动转换。
         """
         self.set_header("Content-Type", "application/json")
         if isinstance(data, BaseModel):
+            # Pydantic 模型使用其内置序列化
             self.write(data.model_dump(mode="json"))
-        elif isinstance(data, (DbModelBase, list, dict)):
-            converted = self._convert_gt_db(data)
-            self.write(json.dumps(converted, ensure_ascii=False))
         else:
-            self.write(json.dumps(data, ensure_ascii=False))
+            # jsonUtil 会自动调用 DbModelBase.to_json()
+            self.write(jsonUtil.json_dump(data, config=config))
 
     def return_success(self, **data) -> None:
         """返回统一成功响应。
@@ -149,5 +106,5 @@ class BaseHandler(tornado.web.RequestHandler):
             }
             logger.error(f"Unhandled exception: {exc_info}")
 
-        ret_str = json.dumps(ret, ensure_ascii=False)
+        ret_str = jsonUtil.json_dump(ret)
         self.write(ret_str)
