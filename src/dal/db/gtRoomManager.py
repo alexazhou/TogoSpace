@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Sequence
+
 from model.dbModel.gtRoom import GtRoom
 
 async def get_rooms_by_team(team_id: int) -> list[GtRoom]:
@@ -31,6 +33,24 @@ async def get_room_by_team_and_name(team_id: int, name: str) -> GtRoom | None:
         GtRoom.team_id == team_id,
         GtRoom.name == name,
     )
+
+
+async def get_rooms_by_team_and_names(team_id: int, names: list[str]) -> list[GtRoom]:
+    """通过 team_id + names 批量获取房间，按 names 顺序返回（不存在的名称自动忽略）。"""
+    if not names:
+        return []
+
+    room_rows = list(
+        await GtRoom.select()
+        .where(
+            GtRoom.team_id == team_id,
+            GtRoom.name.in_(names),  # type: ignore[attr-defined]
+        )
+        .order_by(GtRoom.name)
+        .aio_execute()
+    )
+    room_map = {room.name: room for room in room_rows}
+    return [room_map[name] for name in names if name in room_map]
 
 
 async def get_room_by_team_and_id_or_name(team_id: int, room_id: int | None, name: str) -> GtRoom | None:
@@ -80,8 +100,8 @@ async def save_room(room: GtRoom) -> GtRoom:
     return saved
 
 
-async def batch_save_rooms(rooms: list[GtRoom]) -> None:
-    """批量保存房间对象。"""
+async def batch_save_rooms(rooms: Sequence[GtRoom]) -> None:
+    """批量保存房间对象（逐个 upsert）。"""
     for room in rooms:
         await save_room(room)
 

@@ -331,6 +331,22 @@ class TestDalManagers(ServiceTestCase):
         assert a_room.type == RoomType.PRIVATE
         assert next((item for item in rooms if item.name == "missing"), None) is None
 
+    async def test_room_manager_get_rooms_by_names_keeps_input_order(self):
+        await self._reset_tables()
+
+        team = await gtTeamManager.save_team(GtTeam(name="room_query_team"))
+        await roomService.crate_team_rooms_from_config(team.id, [
+            TeamRoomConfig(name="a_room", members=["alice"]),
+            TeamRoomConfig(name="b_room", members=["bob"]),
+            TeamRoomConfig(name="c_room", members=["alice", "bob"]),
+        ])
+
+        rooms = await gtRoomManager.get_rooms_by_team_and_names(
+            team.id,
+            ["c_room", "missing_room", "a_room", "c_room"],
+        )
+        assert [room.name for room in rooms] == ["c_room", "a_room", "c_room"]
+
     async def test_room_manager_save_room_create_and_update(self):
         await self._reset_tables()
 
@@ -356,6 +372,51 @@ class TestDalManagers(ServiceTestCase):
         assert second.initial_topic == "t2"
         assert second.max_turns == 9
 
+    async def test_room_manager_batch_save_rooms_create_and_update(self):
+        await self._reset_tables()
+
+        team = await gtTeamManager.save_team(GtTeam(name="batch_save_team"))
+
+        existing = await gtRoomManager.save_room(GtRoom(
+            team_id=team.id,
+            name="existing_room",
+            type=RoomType.GROUP,
+            initial_topic="old_topic",
+            max_turns=3,
+            agent_ids=[],
+            biz_id=None,
+            tags=[],
+        ))
+
+        existing.initial_topic = "updated_topic"
+        existing.max_turns = 8
+
+        new_room = GtRoom(
+            team_id=team.id,
+            name="new_room",
+            type=RoomType.PRIVATE,
+            initial_topic="new_topic",
+            max_turns=5,
+            agent_ids=[],
+            biz_id=None,
+            tags=["tagA"],
+        )
+
+        await gtRoomManager.batch_save_rooms([existing, new_room])
+
+        rooms = await gtRoomManager.get_rooms_by_team(team.id)
+        assert [room.name for room in rooms] == ["existing_room", "new_room"]
+
+        existing_after = next(room for room in rooms if room.name == "existing_room")
+        assert existing_after.initial_topic == "updated_topic"
+        assert existing_after.max_turns == 8
+
+        new_after = next(room for room in rooms if room.name == "new_room")
+        assert new_after.type == RoomType.PRIVATE
+        assert new_after.initial_topic == "new_topic"
+        assert new_after.max_turns == 5
+        assert new_after.tags == ["tagA"]
+
     async def test_room_manager_upsert_rooms_delete_replace_and_defaults(self):
         await self._reset_tables()
 
@@ -363,7 +424,7 @@ class TestDalManagers(ServiceTestCase):
         await roomService.crate_team_rooms_from_config(team.id, [
             TeamRoomConfig(name="old_room", max_turns=2, members=["alice"]),
         ])
-        await roomService.crate_team_rooms_from_config(team.id, [
+        await roomService.update_team_rooms_from_config(team.id, [
             TeamRoomConfig(name="new_room_1", members=["alice"]),
             TeamRoomConfig(name="new_room_2", initial_topic="x", members=["bob"]),
         ])
