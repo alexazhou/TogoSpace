@@ -69,7 +69,7 @@ async def import_team_from_config(team_config: TeamConfig) -> None:
     team_id = team.id
 
     await gtAgentManager.batch_save_agents(team_id, await _build_agent_rows(team_id, team_config.members))
-    await roomService.import_team_rooms_from_config(team_id, team_config.preset_rooms)
+    await crate_team_rooms_from_config(team_id, team_config.preset_rooms)
 
     logger.info("Team '%s' 已从配置导入数据库", team_config.name)
 
@@ -136,7 +136,7 @@ async def create_team(team_config: TeamConfig) -> int:
         if not room.max_turns:
             room.max_turns = 100
 
-    await roomService.import_team_rooms_from_config(team_id, rooms)
+    await crate_team_rooms_from_config(team_id, rooms)
 
     # 触发热更新
     await hot_reload_team(name)
