@@ -33,6 +33,15 @@ async def get_room_by_team_and_name(team_id: int, name: str) -> GtRoom | None:
     )
 
 
+async def get_room_by_team_and_id_or_name(team_id: int, room_id: int | None, name: str) -> GtRoom | None:
+    """按配置查询房间：有 room_id 则按 ID 查，否则按 name 查。"""
+    condition = (GtRoom.id == room_id) if room_id is not None else (GtRoom.name == name)
+    return await GtRoom.aio_get_or_none(
+        GtRoom.team_id == team_id,
+        condition,
+    )
+
+
 async def save_room(room: GtRoom) -> GtRoom:
     """保存房间对象：无 id 时插入，有 id 时更新。"""
     if room.id is None:

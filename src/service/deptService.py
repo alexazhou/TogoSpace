@@ -91,28 +91,7 @@ async def save_dept_tree(team_id: int, root: DeptTreeNode) -> None:
 
 async def _import_node(team_id: int, node: DeptNodeConfig, parent_id: int | None) -> GtDept:
     """递归导入单个节点，返回写入后的 GtDept 对象。"""
-    # 校验：manager 必须出现在 members 中
-    if node.manager not in node.members:
-        raise TeamAgentException(
-            f"部门 '{node.dept_name}' 的主管 '{node.manager}' 不在成员名单中",
-            error_code="DEPT_MANAGER_NOT_IN_MEMBERS",
-        )
-
-    # 解析 agent_ids 和 manager_id
-    agent_ids: list[int] = []
-    manager_id: int | None = None
-    for member_name in node.members:
-        row = await gtAgentManager.get_agent(team_id, member_name)
-        if row is None:
-            raise TeamAgentException(
-                f"部门 '{node.dept_name}' 的成员 '{member_name}' 在 team_members 中不存在",
-                error_code="DEPT_MEMBER_NOT_FOUND",
-            )
-        agent_ids.append(row.id)
-        if member_name == node.manager:
-            manager_id = row.id
-
-    assert manager_id is not None  # 前置校验已确保 manager in members
+    agent_ids, manager_id = await _resolve_import_node_member_ids(team_id, node)
 
     dept = await gtDeptManager.save_dept(
         team_id=team_id,
@@ -127,6 +106,33 @@ async def _import_node(team_id: int, node: DeptNodeConfig, parent_id: int | None
         await _import_node(team_id, child, parent_id=dept.id)
 
     return dept
+
+
+async def _resolve_import_node_member_ids(team_id: int, node: DeptNodeConfig) -> tuple[list[int], int]:
+    """将 import 配置中的成员名解析为成员 ID 与主管 ID。"""
+    if node.manager not in node.members:
+        raise TeamAgentException(
+            f"部门 '{node.dept_name}' 的主管 '{node.manager}' 不在成员名单中",
+            error_code="DEPT_MANAGER_NOT_IN_MEMBERS",
+        )
+
+    member_rows = await gtAgentManager.get_team_agents_by_names(
+        team_id,
+        list(node.members),
+        include_special=False,
+    )
+    existing_names = {row.name for row in member_rows}
+    missing_member_names = [member_name for member_name in node.members if member_name not in existing_names]
+    if missing_member_names:
+        raise TeamAgentException(
+            f"部门 '{node.dept_name}' 的成员 '{missing_member_names[0]}' 在 team_members 中不存在",
+            error_code="DEPT_MEMBER_NOT_FOUND",
+        )
+
+    agent_ids = [row.id for row in member_rows]
+    manager_id = next((row.id for row in member_rows if row.name == node.manager), None)
+    assert manager_id is not None
+    return agent_ids, manager_id
 
 
 async def _save_dept_update_node(
@@ -161,27 +167,15 @@ async def _save_dept_update_node(
         # 按 name 匹配
         existing = await gtDeptManager.get_dept_by_name(team_id, node.dept_name)
 
-    if existing:
-        # 更新现有部门
-        dept = await gtDeptManager.save_dept(
-            team_id=team_id,
-            name=node.dept_name,
-            responsibility=node.dept_responsibility,
-            parent_id=parent_id,
-            manager_id=node.manager_id,
-            agent_ids=agent_ids,
-            dept_id=existing.id,
-        )
-    else:
-        # 创建新部门
-        dept = await gtDeptManager.save_dept(
-            team_id=team_id,
-            name=node.dept_name,
-            responsibility=node.dept_responsibility,
-            parent_id=parent_id,
-            manager_id=node.manager_id,
-            agent_ids=agent_ids,
-        )
+    dept = await gtDeptManager.save_dept(
+        team_id=team_id,
+        name=node.dept_name,
+        responsibility=node.dept_responsibility,
+        parent_id=parent_id,
+        manager_id=node.manager_id,
+        agent_ids=agent_ids,
+        dept_id=existing.id if existing else None,
+    )
 
     # 收集部门名称到 ID 的映射
     dept_ids_map[node.dept_name] = dept.id
@@ -193,11 +187,7 @@ async def _save_dept_update_node(
     return dept
 
 
-def _collect_dept_room_specs(
-    node: DeptTreeNode,
-    dept_ids_map: dict[str, int],
-    rooms: list[roomService.DeptRoomSpec],
-) -> None:
+def _collect_dept_room_specs(node: DeptTreeNode, dept_ids_map: dict[str, int], rooms: list[roomService.DeptRoomSpec]) -> None:
     dept_id = dept_ids_map[node.dept_name]
     rooms.append(roomService.DeptRoomSpec(
         biz_id=f"DEPT:{dept_id}",
@@ -329,7 +319,6 @@ async def set_dept_manager(team_id: int, dept_name: str, manager_id: int) -> Non
             f"成员 ID '{manager_id}' 不存在",
             error_code="MEMBER_NOT_FOUND",
         )
-    manager_row = managers[0]
 
     if manager_id not in dept.agent_ids:
         raise TeamAgentException(
@@ -342,6 +331,6 @@ async def set_dept_manager(team_id: int, dept_name: str, manager_id: int) -> Non
         name=dept.name,
         responsibility=dept.responsibility,
         parent_id=dept.parent_id,
-        manager_id=manager_row.id,
+        manager_id=manager_id,
         agent_ids=dept.agent_ids,
     )
