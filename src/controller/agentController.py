@@ -59,7 +59,7 @@ class AgentListHandler(BaseHandler):
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
-        agents = await gtAgentManager.get_agents_by_team(team.id)
+        agents = await gtAgentManager.get_team_agents(team.id)
         runtime_infos = agentService.get_team_agent_info_map(team.name)
         include_special = include_special_raw.strip().lower() in {"1", "true", "yes", "on"}
 
@@ -125,7 +125,7 @@ class TeamMembersSaveHandler(BaseHandler):
         request = self.parse_request(MembersSaveRequest)
 
         request_ids = [a.id for a in request.members if a.id is not None]
-        existing_agents = await gtAgentManager.get_agents_by_team(team_id)
+        existing_agents = await gtAgentManager.get_team_agents(team_id)
         existing_ids = {a.id for a in existing_agents}
 
         invalid_ids = [id_ for id_ in request_ids if id_ not in existing_ids]

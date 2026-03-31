@@ -76,7 +76,7 @@ async def set_dept_tree(team_id: int, root: DeptTreeNode) -> None:
     await gtRoomManager.delete_rooms_by_biz_ids_not_in(team_id, all_dept_biz_ids)
 
     # 更新成员 employ_status
-    all_agents = await gtAgentManager.get_agents_by_team(team_id)
+    all_agents = await gtAgentManager.get_team_agents(team_id)
 
     # 在树中的成员设为 ON_BOARD
     on_board_ids = [a.id for a in all_agents if a.name in all_member_names]
@@ -296,7 +296,7 @@ async def _get_dept_tree_async(team_id: int) -> DeptTreeNode | None:
     dept_map: dict[int, GtDept] = {d.id: d for d in all_depts}
 
     # 建立 id -> member names 映射（通过 agent_ids 反查 team_members）
-    all_agents = await gtAgentManager.get_agents_by_team(team_id)
+    all_agents = await gtAgentManager.get_team_agents(team_id)
     agent_id_to_name: dict[int, str] = {m.id: m.name for m in all_agents}
 
     def build_node(dept: GtDept) -> DeptTreeNode:

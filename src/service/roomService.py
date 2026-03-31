@@ -508,7 +508,7 @@ async def ensure_room_record(team_name: str, name: str, members: List[str], init
     """确保房间记录存在并装载运行态。创建后房间处于 INIT，需由 service 层显式退出 INIT。"""
     team_row = await gtTeamManager.get_team(team_name)
     assert team_row is not None, f"Team '{team_name}' 不存在，调用 ensure_room_record 前应先创建 Team"
-    agent_rows = await gtAgentManager.get_agents_by_team_and_names(team_row.id, members)
+    agent_rows = await gtAgentManager.get_team_agents_by_names(team_row.id, members, include_special=False)
     agent_id_map = {agent.name: agent.id for agent in agent_rows}
     agent_ids = [
         int(special.value) if (special := SpecialAgent.value_of(member)) is not None else agent_id_map[member]

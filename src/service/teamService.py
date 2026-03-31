@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _build_agent_rows(team_id: int, agent_configs: list[AgentConfig]) -> list[GtAgent]:
-    existing_agents = await gtAgentManager.get_agents_by_team(team_id)
+    existing_agents = await gtAgentManager.get_team_agents(team_id)
     existing_by_name = {agent.name: agent for agent in existing_agents}
 
     agent_rows: list[GtAgent] = []
