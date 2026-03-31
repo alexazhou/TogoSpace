@@ -51,10 +51,10 @@ class TestDeptController(_ApiServiceCase):
 
         # 设置部门树（至少需要 2 个成员）
         dept_tree = {
-            "dept_name": "技术部",
+            "name": "技术部",
             "responsibility": "负责技术研发",
             "manager_id": alice_id,
-            "member_ids": [alice_id, bob_id],
+            "agent_ids": [alice_id, bob_id],
             "children": [],
         }
 
@@ -73,7 +73,7 @@ class TestDeptController(_ApiServiceCase):
                 data = await resp.json()
 
         assert data["dept_tree"] is not None
-        assert data["dept_tree"]["dept_name"] == "技术部"
+        assert data["dept_tree"]["name"] == "技术部"
         assert data["dept_tree"]["manager_id"] == alice_id
-        assert alice_id in data["dept_tree"]["member_ids"]
-        assert bob_id in data["dept_tree"]["member_ids"]
+        assert alice_id in data["dept_tree"]["agent_ids"]
+        assert bob_id in data["dept_tree"]["agent_ids"]

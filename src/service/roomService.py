@@ -93,7 +93,11 @@ class ChatRoom:
     @property
     def members(self) -> List[str]:
         """返回成员名称列表（向后兼容）。"""
-        return list(self._member_names)
+        return [
+            member_name
+            for member_name in self._member_names
+            if SpecialAgent.value_of(member_name) != SpecialAgent.SYSTEM
+        ]
 
     def get_member_id(self, name: str) -> int:
         """根据成员名称获取 member_id。"""
@@ -355,7 +359,7 @@ class ChatRoom:
 
     def build_initial_system_message(self) -> str:
         member_list_str = "、".join(self.members)
-        msg = f"{self.name} 房间已经创建，当前房间成员：{member_list_str}"
+        msg = f"系统提示: {self.name} 房间已经创建，当前房间成员：{member_list_str}"
         if self.initial_topic:
             msg += f"\n本房间初始话题：{self.initial_topic}"
         return msg
@@ -369,7 +373,8 @@ class ChatRoom:
             "team_name": self.team_name,
             "room_type": self.room_type.name,
             "state": self._state.name,
-            "agent_ids": [self.get_member_id(member_name) for member_name in self._member_names],
+            "members": list(self.members),
+            "agent_ids": [self.get_member_id(member_name) for member_name in self.members],
             "tags": self.tags,
         }
 

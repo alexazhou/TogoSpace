@@ -360,9 +360,9 @@ const nextDeptTree = buildDeptTreePayload();
 - 根节点总是导出为部门节点
 - 有直属下属的成员导出为部门节点
 - 叶子成员不会再单独导出成一个部门节点
-- 叶子成员会被并入上级部门的 `members` 列表
+- 叶子成员会被并入上级部门的 `agent_ids` 列表
 
-这也是当前“不要给每个人都创建一个部门”的关键实现点。
+这也是当前”不要给每个人都创建一个部门”的关键实现点。
 
 示意如下：
 
@@ -380,14 +380,18 @@ const nextDeptTree = buildDeptTreePayload();
 
 ```json
 {
-  "dept_name": "总部",
-  "manager": "小马哥",
-  "members": ["小马哥", "王老师", "小A"],
+  "id": 1,
+  "name": "总部",
+  "responsibility": "总部职责",
+  "manager_id": 101,
+  "agent_ids": [101, 102, 103],
   "children": [
     {
-      "dept_name": "新部门1",
-      "manager": "小刘",
-      "members": ["小刘", "小孩哥"],
+      "id": 2,
+      "name": "新部门1",
+      "responsibility": "",
+      "manager_id": 104,
+      "agent_ids": [104, 105],
       "children": []
     }
   ]
@@ -396,7 +400,7 @@ const nextDeptTree = buildDeptTreePayload();
 
 然后调用：
 
-- `PUT /teams/{teamId}/dept_tree.json`
+- `PUT /teams/{teamId}/dept_tree/update.json`
 
 ### 6.5 保存顺序
 
