@@ -1,6 +1,5 @@
 import logging
 
-from constants import RoleTemplateType
 from dal.db import gtRoleTemplateManager
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 
@@ -11,44 +10,30 @@ async def startup() -> None:
     return None
 
 
-async def import_role_template(
-    name: str,
-    soul: str = "",
-    model: str | None = None,
-    driver=None,
-    allowed_tools: list[str] | None = None,
-) -> None:
-    """导入 role template 到数据库。已存在时同步 driver / allowed_tools。"""
-    existing = await gtRoleTemplateManager.get_role_template_by_name(name)
+async def save_role_template(role_template: GtRoleTemplate) -> GtRoleTemplate:
+    """保存 role template。已存在时同步字段，不存在时创建。"""
+    existing = await gtRoleTemplateManager.get_role_template_by_name(role_template.name)
     if existing is not None:
         if (
-            existing.type != RoleTemplateType.SYSTEM
-            or existing.driver != driver
-            or existing.allowed_tools != allowed_tools
+            existing.type != role_template.type
+            or existing.driver != role_template.driver
+            or existing.allowed_tools != role_template.allowed_tools
         ):
-            await gtRoleTemplateManager.save_role_template(
+            return await gtRoleTemplateManager.save_role_template(
                 GtRoleTemplate(
-                    name=name,
+                    name=role_template.name,
                     model=existing.model,
                     soul=existing.soul,
-                    type=RoleTemplateType.SYSTEM,
-                    driver=driver,
-                    allowed_tools=allowed_tools,
+                    type=role_template.type,
+                    driver=role_template.driver,
+                    allowed_tools=role_template.allowed_tools,
                 )
             )
-        return
+        return existing
 
-    await gtRoleTemplateManager.save_role_template(
-        GtRoleTemplate(
-            name=name,
-            model=model,
-            soul=soul,
-            type=RoleTemplateType.SYSTEM,
-            driver=driver,
-            allowed_tools=allowed_tools,
-        )
-    )
-    logger.info(f"Role template '{name}' 已导入数据库")
+    created = await gtRoleTemplateManager.save_role_template(role_template)
+    logger.info("Role template '%s' 已保存", role_template.name)
+    return created
 
 
 async def shutdown() -> None:
