@@ -58,7 +58,7 @@ async def import_dept_tree(team_id: int, node: DeptNodeConfig) -> None:
         logger.info(f"dept_tree 已存在（team_id={team_id}），跳过导入")
         return
 
-    await _import_node(team_id, node, parent_id=None)
+    await _import_dept_subtree_from_config(team_id, node, parent_id=None)
     logger.info(f"dept_tree 导入完成（team_id={team_id}，根节点={node.dept_name}）")
 
 
@@ -77,7 +77,7 @@ async def override_dept_tree(team_id: int, root: DeptTreeNode) -> None:
 
     # 增量更新/创建部门，并收集 ID 映射
     dept_ids_map: dict[str, int] = {}
-    await _save_dept_update_node(team_id, root, parent_id=None, dept_ids_map=dept_ids_map)
+    await _override_dept_subtree(team_id, root, parent_id=None, dept_ids_map=dept_ids_map)
 
     # 同步部门房间（roomService 只接收房间信息，不感知部门树结构）
     dept_rooms: list[roomService.DeptRoomSpec] = []
@@ -89,27 +89,8 @@ async def override_dept_tree(team_id: int, root: DeptTreeNode) -> None:
 
     logger.info(f"部门树已更新（team_id={team_id}，on_board={on_board_count}，off_board={off_board_count}）")
 
-async def _import_node(team_id: int, node: DeptNodeConfig, parent_id: int | None) -> GtDept:
-    """递归导入单个节点，返回写入后的 GtDept 对象。"""
-    agent_ids, manager_id = await _resolve_import_node_member_ids(team_id, node)
-
-    dept = await gtDeptManager.save_dept(
-        team_id=team_id,
-        name=node.dept_name,
-        responsibility=node.dept_responsibility,
-        parent_id=parent_id,
-        manager_id=manager_id,
-        agent_ids=agent_ids,
-    )
-
-    for child in node.children:
-        await _import_node(team_id, child, parent_id=dept.id)
-
-    return dept
-
-
-async def _resolve_import_node_member_ids(team_id: int, node: DeptNodeConfig) -> tuple[list[int], int]:
-    """将 import 配置中的成员名解析为成员 ID 与主管 ID。"""
+async def _import_dept_subtree_from_config(team_id: int, node: DeptNodeConfig, parent_id: int | None) -> GtDept:
+    """按配置递归导入部门子树，返回当前节点落库后的 GtDept。"""
     if node.manager not in node.members:
         raise TeamAgentException(
             f"部门 '{node.dept_name}' 的主管 '{node.manager}' 不在成员名单中",
@@ -132,16 +113,29 @@ async def _resolve_import_node_member_ids(team_id: int, node: DeptNodeConfig) ->
     agent_ids = [row.id for row in member_rows]
     manager_id = next((row.id for row in member_rows if row.name == node.manager), None)
     assert manager_id is not None
-    return agent_ids, manager_id
+
+    dept = await gtDeptManager.save_dept(
+        team_id=team_id,
+        name=node.dept_name,
+        responsibility=node.dept_responsibility,
+        parent_id=parent_id,
+        manager_id=manager_id,
+        agent_ids=agent_ids,
+    )
+
+    for child in node.children:
+        await _import_dept_subtree_from_config(team_id, child, parent_id=dept.id)
+
+    return dept
 
 
-async def _save_dept_update_node(
+async def _override_dept_subtree(
     team_id: int,
     node: DeptTreeNode,
     parent_id: int | None,
     dept_ids_map: dict[str, int],
 ) -> GtDept:
-    """增量更新/创建单个部门节点，返回 GtDept 对象。"""
+    """覆盖式保存部门子树：更新/创建当前节点，并递归处理子节点。"""
     # 校验：manager_id 必须出现在 member_ids 中
     if node.manager_id not in node.member_ids:
         raise TeamAgentException(
@@ -182,7 +176,7 @@ async def _save_dept_update_node(
 
     # 递归处理子部门
     for child in node.children:
-        await _save_dept_update_node(team_id, child, parent_id=dept.id, dept_ids_map=dept_ids_map)
+        await _override_dept_subtree(team_id, child, parent_id=dept.id, dept_ids_map=dept_ids_map)
 
     return dept
 
