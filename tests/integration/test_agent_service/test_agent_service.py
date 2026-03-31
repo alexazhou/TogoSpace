@@ -29,10 +29,10 @@ class _agentServiceCase(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
-        await presetService.import_role_templates_from_app_config()
+        await presetService._import_role_templates_from_app_config()
         cfg = configUtil.load(_CONFIG_DIR, force_reload=True)
         team_cfg = cfg.teams[0]
-        await presetService.import_team_from_config(team_cfg)
+        await presetService._import_team_from_config(team_cfg)
         await agentService.startup()
         await agentService.create_team_agents_from_db()
 
