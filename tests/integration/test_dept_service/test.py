@@ -276,10 +276,10 @@ class TestDeptService(ServiceTestCase):
         assert exc_info.value.error_code == "DEPT_MEMBER_NOT_FOUND"
 
     # ------------------------------------------------------------------
-    # deptService.get_dept_tree_async (round-trip)
+    # deptService.get_dept_tree (round-trip)
     # ------------------------------------------------------------------
 
-    async def test_get_dept_tree_async_round_trip(self):
+    async def test_get_dept_tree_round_trip(self):
         await self._reset_tables()
 
         team = await self._setup_team_with_members(
@@ -301,7 +301,7 @@ class TestDeptService(ServiceTestCase):
         )
         await deptService.import_dept_tree(team.id, original)
 
-        rebuilt = await deptService.get_dept_tree_async(team.id)
+        rebuilt = await deptService.get_dept_tree(team.id)
         assert rebuilt is not None
         assert rebuilt.dept_name == "root"
         assert rebuilt.dept_responsibility == "root dept"
@@ -316,11 +316,11 @@ class TestDeptService(ServiceTestCase):
         assert set(child.members) == {"dev_a", "dev_b"}
         assert child.children == []
 
-    async def test_get_dept_tree_async_returns_none_when_no_depts(self):
+    async def test_get_dept_tree_returns_none_when_no_depts(self):
         await self._reset_tables()
 
         team = await self._setup_team_with_members("t_empty", ["alice"])
-        result = await deptService.get_dept_tree_async(team.id)
+        result = await deptService.get_dept_tree(team.id)
         assert result is None
 
     # ------------------------------------------------------------------
@@ -380,7 +380,8 @@ class TestDeptService(ServiceTestCase):
         await deptService.import_dept_tree(team.id, tree)
 
         alice_id = await self._get_agent_id(team.id, "alice")
-        await deptService.remove_member_from_dept(team.id, alice_id, new_manager="bob")
+        bob_id = await self._get_agent_id(team.id, "bob")
+        await deptService.remove_member_from_dept(team.id, alice_id, new_manager_id=bob_id)
 
         dept = await gtDeptManager.get_dept_by_name(team.id, "handoff_dept")
         assert dept is not None
@@ -407,8 +408,9 @@ class TestDeptService(ServiceTestCase):
 
         # charlie 不在部门中
         alice_id = await self._get_agent_id(team.id, "alice")
+        charlie_id = await self._get_agent_id(team.id, "charlie")
         with pytest.raises(TeamAgentException) as exc_info:
-            await deptService.remove_member_from_dept(team.id, alice_id, new_manager="charlie")
+            await deptService.remove_member_from_dept(team.id, alice_id, new_manager_id=charlie_id)
         assert exc_info.value.error_code == "NEW_MANAGER_NOT_IN_DEPT"
 
     async def test_remove_member_from_dept_not_in_any_dept_sets_off_board(self):
@@ -596,11 +598,11 @@ class TestDeptService(ServiceTestCase):
         assert bob_dept is None
 
     # ------------------------------------------------------------------
-    # set_dept_tree 部门房间成员
+    # save_dept_tree 部门房间成员
     # ------------------------------------------------------------------
 
-    async def test_set_dept_tree_creates_room_with_members(self):
-        """验证 set_dept_tree 创建新部门房间时，部门成员会被自动加入。"""
+    async def test_save_dept_tree_creates_room_with_members(self):
+        """验证 save_dept_tree 创建新部门房间时，部门成员会被自动加入。"""
         await self._reset_tables()
 
         team = await self._setup_team_with_members("t_room_create", ["alice", "bob", "charlie"])
@@ -612,7 +614,7 @@ class TestDeptService(ServiceTestCase):
             members=["alice", "bob", "charlie"],
         )
 
-        await deptService.set_dept_tree(team.id, root)
+        await deptService.save_dept_tree(team.id, root)
 
         # 验证部门房间已创建
         dept = await gtDeptManager.get_dept_by_name(team.id, "engineering")
@@ -627,8 +629,8 @@ class TestDeptService(ServiceTestCase):
         room_members = await self._get_room_member_names(room.id)
         assert set(room_members) == {"alice", "bob", "charlie"}
 
-    async def test_set_dept_tree_updates_existing_room_members(self):
-        """验证 set_dept_tree 更新已有部门房间时，成员列表会同步更新。"""
+    async def test_save_dept_tree_updates_existing_room_members(self):
+        """验证 save_dept_tree 更新已有部门房间时，成员列表会同步更新。"""
         await self._reset_tables()
 
         team = await self._setup_team_with_members("t_room_update", ["alice", "bob", "charlie", "david"])
@@ -640,7 +642,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob"],
         )
-        await deptService.set_dept_tree(team.id, root)
+        await deptService.save_dept_tree(team.id, root)
 
         dept = await gtDeptManager.get_dept_by_name(team.id, "marketing")
         assert dept is not None
@@ -658,14 +660,14 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob", "charlie", "david"],
         )
-        await deptService.set_dept_tree(team.id, root_updated)
+        await deptService.save_dept_tree(team.id, root_updated)
 
         room_after = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
         assert room_after is not None
         room_members_after = await self._get_room_member_names(room_after.id)
         assert set(room_members_after) == {"alice", "bob", "charlie", "david"}
 
-    async def test_set_dept_tree_renames_existing_dept_room(self):
+    async def test_save_dept_tree_renames_existing_dept_room(self):
         """验证已存在部门改名后，对应部门群名称会同步更新。"""
         await self._reset_tables()
 
@@ -677,7 +679,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob"],
         )
-        await deptService.set_dept_tree(team.id, root)
+        await deptService.save_dept_tree(team.id, root)
 
         dept = await gtDeptManager.get_dept_by_name(team.id, "engineering")
         assert dept is not None
@@ -693,7 +695,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob"],
         )
-        await deptService.set_dept_tree(team.id, renamed)
+        await deptService.save_dept_tree(team.id, renamed)
 
         after_room = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
         assert after_room is not None
@@ -716,7 +718,7 @@ class TestDeptService(ServiceTestCase):
                 manager="alice",
                 members=["alice", "bob"],
             )
-            await deptService.set_dept_tree(team.id, root)
+            await deptService.save_dept_tree(team.id, root)
 
             persisted_room = next(
                 (room for room in await gtRoomManager.get_rooms_by_team(team.id) if room.name == "engineering"),
@@ -732,7 +734,7 @@ class TestDeptService(ServiceTestCase):
         finally:
             roomService.shutdown()
 
-    async def test_set_dept_tree_hierarchical_rooms_all_have_members(self):
+    async def test_save_dept_tree_hierarchical_rooms_all_have_members(self):
         """验证层级部门结构中，每个部门房间都有对应的成员。"""
         await self._reset_tables()
 
@@ -761,7 +763,7 @@ class TestDeptService(ServiceTestCase):
             ],
         )
 
-        await deptService.set_dept_tree(team.id, root)
+        await deptService.save_dept_tree(team.id, root)
 
         # 验证所有部门房间
         for dept_name, expected_members in [
