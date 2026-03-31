@@ -13,19 +13,8 @@ from service import roomService, agentService
 logger = logging.getLogger(__name__)
 
 
-async def _hydrate_dept_ids(team_id: int, node: GtDept) -> None:
-    if node.id is None:
-        existing = await gtDeptManager.get_dept_by_name(team_id, node.name)
-        if existing is not None:
-            node.id = existing.id
-    for child in node.children:
-        await _hydrate_dept_ids(team_id, child)
-
-
 async def overwrite_dept_tree(team_id: int, root: GtDept) -> None:
     """增量更新部门树，同步部门房间，更新成员 employ_status。"""
-    await _hydrate_dept_ids(team_id, root)
-
     # 单次递归：校验整棵树 + 收集成员 ID 与部门 ID
     try:
         all_member_ids, new_dept_ids = root.validate_and_collect_tree_ids()

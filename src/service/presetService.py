@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 
-from constants import EmployStatus, RoomType, SpecialAgent
+from constants import EmployStatus, RoleTemplateType, RoomType, SpecialAgent
 from dal.db import gtAgentManager, gtRoleTemplateManager, gtTeamManager
 from exception import TeamAgentException
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoom import GtRoom
+from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from model.dbModel.gtTeam import GtTeam
 from service import agentService, deptService, roleTemplateService, roomService
 from util import configUtil
@@ -22,13 +23,14 @@ async def startup() -> None:
 
 async def _import_role_templates_from_app_config() -> None:
     for template in configUtil.get_app_config().role_templates:
-        await roleTemplateService.import_role_template(
+        await roleTemplateService.save_role_template(GtRoleTemplate(
             name=template.name,
             soul=template.soul,
             model=template.model,
+            type=RoleTemplateType.SYSTEM,
             driver=template.driver,
             allowed_tools=template.allowed_tools,
-        )
+        ))
     db_templates = await gtRoleTemplateManager.get_all_role_templates()
     logger.info(f"加载角色模版: {[t.name for t in db_templates]}")
 
