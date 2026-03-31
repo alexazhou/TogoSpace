@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 _agents: dict[str, "Agent"] = {}
 _team_ids: dict[str, int] = {}  # team_name -> team_id mapping
 
-
 def _make_agent_key(team_name: str, agent_name: str) -> str:
     return f"{agent_name}@{team_name}"
 

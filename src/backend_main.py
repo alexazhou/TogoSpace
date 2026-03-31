@@ -12,14 +12,13 @@ from util.configTypes import AppConfig
 from service import (
     messageBus,
     schedulerService,
-    roleTemplateService,
     agentService,
     roomService,
     llmService,
     funcToolService,
     persistenceService,
     ormService,
-    teamService,
+    presetService,
 )
 import route
 
@@ -77,20 +76,22 @@ async def main(config_dir: str = None, port: int = 8080):
     await funcToolService.startup()
     await ormService.startup(app_config.setting.persistence.db_path)
     await persistenceService.startup()
+    await agentService.startup()
+    await roomService.startup()
+    await schedulerService.startup()
+    await presetService.startup()
     logger.info("[启动] 阶段 1/4 完成")
 
     # ── 阶段 2：导入配置 ──────────────────────────────────────────────────────
-    logger.info("[启动] 阶段 2/4：导入 Team / Agent 配置")
-    await roleTemplateService.startup()
-    await teamService.startup()
+    logger.info("[启动] 阶段 2/4：导入 presets（RoleTemplate / Team / Dept / Room）")
+    await presetService.import_from_app_config()
+    for team_config in app_config.teams:
+        await schedulerService.refresh_team_config(team_config.name)
     logger.info("[启动] 阶段 2/4 完成")
 
     # ── 阶段 3：运行时构建 ────────────────────────────────────────────────────
     logger.info("[启动] 阶段 3/4：构建运行时（成员 / 房间 / 调度器）")
-    await agentService.startup()
     await agentService.create_team_agents_from_db(workspace_root=app_config.setting.workspace_root)
-    await roomService.startup()
-    await schedulerService.startup()
     await roomService.load_rooms_from_db()
     logger.info("[启动] 阶段 3/4 完成")
 

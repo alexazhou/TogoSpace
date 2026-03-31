@@ -283,7 +283,7 @@ class TeamRoomMembersModifyHandler(BaseHandler):
         room = await _get_team_room_or_404(team_id, room_id)
 
         await _assert_agent_ids_in_team(team_id, request.agent_ids)
-        await roomService.save_room_members(room.id, request.agent_ids)
+        await roomService.update_room_members(room.id, request.agent_ids)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "room_name": room.name})

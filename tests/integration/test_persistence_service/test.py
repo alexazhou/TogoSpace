@@ -7,7 +7,7 @@ import pytest
 from dal.db import gtTeamManager, gtAgentManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtTeam import GtTeam
-from service import roleTemplateService, agentService, ormService, persistenceService, roomService, messageBus
+from service import presetService, agentService, ormService, persistenceService, roomService, messageBus
 from service.agentService import Agent
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenaiLLMApiRole
@@ -44,7 +44,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await roomService.startup()
-        await roleTemplateService.startup()
+        await presetService.import_role_templates_from_app_config()
         team = await gtTeamManager.save_team(GtTeam(name=TEAM))
         configs = [
             AgentConfig(name="alice", role_template="alice"),
@@ -75,7 +75,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
     @classmethod
     async def async_teardown_class(cls):
         messageBus.shutdown()
-        await roleTemplateService.shutdown()
+        await presetService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
         roomService.shutdown()
@@ -109,7 +109,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await agentService.startup()
-        await roleTemplateService.startup()
+        await presetService.import_role_templates_from_app_config()
         configUtil.load(os.path.join(os.path.dirname(__file__), "../../config"), force_reload=True)
         team = await gtTeamManager.save_team(GtTeam(name=TEAM))
         agents = await ServiceTestCase.convert_to_gt_agents(
@@ -142,7 +142,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         configUtil.load(os.path.join(os.path.dirname(__file__), "../../config"), force_reload=True)
-        await roleTemplateService.startup()
+        await presetService.import_role_templates_from_app_config()
         await agentService.startup()
         await agentService.create_team_agents_from_db()
         cls.fresh_agent = agentService.get_team_agent(TEAM, "alice")

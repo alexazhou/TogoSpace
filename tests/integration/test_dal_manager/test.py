@@ -5,6 +5,7 @@ import sys
 import pytest
 
 import service.ormService as ormService
+import service.presetService as presetService
 import service.roomService as roomService
 import service.teamService as teamService
 from constants import DriverType, EmployStatus, RoleTemplateType, RoomType
@@ -187,12 +188,12 @@ class TestDalManagers(ServiceTestCase):
         agents = await ServiceTestCase.convert_to_gt_agents(team_a.id, configs)
         await gtAgentManager.batch_save_agents(team_a.id, agents)
 
-        await roomService.crate_team_rooms_from_config(team_a.id, [TeamRoomConfig(
+        await roomService.create_team_rooms(team_a.id, await ServiceTestCase.convert_to_gt_rooms(team_a.id, [TeamRoomConfig(
             name="general",
             initial_topic="hello",
             max_turns=6,
             members=["alice_1", "bob_1"],
-        )])
+        )]))
         room = next((item for item in await gtRoomManager.get_rooms_by_team(team_a.id) if item.name == "general"), None)
         assert room is not None
         # Note: upsert_rooms now handles members internally
@@ -234,7 +235,7 @@ class TestDalManagers(ServiceTestCase):
                 members=["alice_1", "bob_1"],
             )],
         )
-        await teamService.import_team_from_config(payload)
+        await presetService.import_team_from_config(payload)
 
         imported = await gtTeamManager.get_team("imported")
         assert imported is not None
@@ -244,7 +245,7 @@ class TestDalManagers(ServiceTestCase):
         assert await self._get_room_member_names(room.id) == ["alice_1", "bob_1"]
 
         # 已存在时应跳过导入，不覆盖已有记录
-        await teamService.import_team_from_config(TeamConfig(
+        await presetService.import_team_from_config(TeamConfig(
             name="imported",
             members=[AgentConfig(name="charlie", role_template="charlie")],
             preset_rooms=[TeamRoomConfig(name="r2", members=["Operator", "charlie"])],
@@ -318,10 +319,10 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.save_team(GtTeam(name="room_team"))
-        await roomService.crate_team_rooms_from_config(team.id, [
+        await roomService.create_team_rooms(team.id, await ServiceTestCase.convert_to_gt_rooms(team.id, [
             TeamRoomConfig(name="z_room", max_turns=2, members=["alice", "bob"]),
             TeamRoomConfig(name="a_room", max_turns=3, members=["Operator", "alice"]),
-        ])
+        ]))
 
         rooms = await gtRoomManager.get_rooms_by_team(team.id)
         assert [r.name for r in rooms] == ["a_room", "z_room"]
@@ -335,11 +336,11 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.save_team(GtTeam(name="room_query_team"))
-        await roomService.crate_team_rooms_from_config(team.id, [
+        await roomService.create_team_rooms(team.id, await ServiceTestCase.convert_to_gt_rooms(team.id, [
             TeamRoomConfig(name="a_room", members=["alice"]),
             TeamRoomConfig(name="b_room", members=["bob"]),
             TeamRoomConfig(name="c_room", members=["alice", "bob"]),
-        ])
+        ]))
 
         rooms = await gtRoomManager.get_rooms_by_team_and_names(
             team.id,
@@ -421,9 +422,9 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.save_team(GtTeam(name="upsert_team"))
-        await roomService.crate_team_rooms_from_config(team.id, [
+        await roomService.create_team_rooms(team.id, await ServiceTestCase.convert_to_gt_rooms(team.id, [
             TeamRoomConfig(name="old_room", max_turns=2, members=["alice"]),
-        ])
+        ]))
         await roomService.overwrite_team_rooms(team.id, [
             GtRoom(
                 team_id=team.id,
@@ -456,10 +457,10 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.save_team(GtTeam(name="delete_team"))
-        await roomService.crate_team_rooms_from_config(team.id, [
+        await roomService.create_team_rooms(team.id, await ServiceTestCase.convert_to_gt_rooms(team.id, [
             TeamRoomConfig(name="r1", members=["alice"]),
             TeamRoomConfig(name="r2", members=["bob"]),
-        ])
+        ]))
         r1 = next((item for item in await gtRoomManager.get_rooms_by_team(team.id) if item.name == "r1"), None)
         assert r1 is not None
 

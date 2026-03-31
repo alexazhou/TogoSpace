@@ -7,14 +7,13 @@ import sys
 import pytest
 from constants import RoomState
 import service.roomService as roomService
-import service.roleTemplateService as roleTemplateService
 import service.agentService as agentService
 import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.llmService as llmService
 import service.ormService as ormService
 import service.persistenceService as persistenceService
-import service.teamService as teamService
+import service.presetService as presetService
 from tests.base import ServiceTestCase
 from util import configUtil, llmApiUtil
 
@@ -46,8 +45,8 @@ class TestRealSimpleChat(ServiceTestCase):
         await persistenceService.startup()
         await roomService.startup()
         await funcToolService.startup()
-        await roleTemplateService.startup()
-        await teamService.startup()
+        await presetService.startup()
+        await presetService.import_from_app_config()
         await agentService.startup()
         await agentService.create_team_agents_from_db()
 
