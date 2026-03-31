@@ -543,15 +543,15 @@ class TestDalManagers(ServiceTestCase):
 
         assert await self._get_room_member_names(room.id) == []
 
-        await roomService.save_room_members(room.id, [agent_ids["charlie"], agent_ids["alice"]])
+        await roomService.update_room_members(room.id, [agent_ids["charlie"], agent_ids["alice"]])
         assert await self._get_room_member_names(room.id) == ["charlie", "alice"]
 
         # upsert 会覆盖旧成员
-        await roomService.save_room_members(room.id, [agent_ids["bob"]])
+        await roomService.update_room_members(room.id, [agent_ids["bob"]])
         assert await self._get_room_member_names(room.id) == ["bob"]
 
         # clear members
-        await roomService.save_room_members(room.id, [])
+        await roomService.update_room_members(room.id, [])
         assert await self._get_room_member_names(room.id) == []
 
     # ------------------------------------------------------------------

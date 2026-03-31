@@ -11,6 +11,7 @@ from util import configUtil
 from util import assertUtil
 from exception import TeamAgentException
 from model.coreModel.gtCoreChatModel import GtCoreChatMessage
+from model.dbModel.gtDept import DeptRoomSpec
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
@@ -55,16 +56,6 @@ class ChatContext:
     agent_name: str
     team_name: str
     chat_room: ChatRoom
-
-
-@dataclass(frozen=True)
-class DeptRoomSpec:
-    """部门房间同步输入项（与部门树结构解耦）。"""
-    biz_id: str
-    name: str
-    initial_topic: str
-    member_ids: list[int]
-    max_turns: int | None = None
 
 
 class ChatRoom:

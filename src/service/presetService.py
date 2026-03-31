@@ -6,6 +6,7 @@ from constants import EmployStatus, RoomType, SpecialAgent
 from dal.db import gtAgentManager, gtRoleTemplateManager, gtTeamManager
 from exception import TeamAgentException
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from service import agentService, deptService, roleTemplateService, roomService
@@ -32,7 +33,7 @@ async def import_role_templates_from_app_config() -> None:
     logger.info(f"加载角色模版: {[t.name for t in db_templates]}")
 
 
-async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> deptService.DeptTreeNode:
+async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> GtDept:
     lookup_names = list(dict.fromkeys([*node.members, node.manager]))
     member_rows = await gtAgentManager.get_team_agents_by_names(
         team_id,
@@ -47,11 +48,11 @@ async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> deptService.
             error_code="DEPT_MEMBER_NOT_FOUND",
         )
 
-    return deptService.DeptTreeNode(
-        dept_name=node.dept_name,
-        dept_responsibility=node.dept_responsibility,
+    return GtDept(
+        name=node.dept_name,
+        responsibility=node.responsibility,
         manager_id=member_id_map[node.manager],
-        member_ids=[member_id_map[name] for name in node.members],
+        agent_ids=[member_id_map[name] for name in node.members],
         children=[await _to_dept_tree_node(team_id, child) for child in node.children],
     )
 
