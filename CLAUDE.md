@@ -150,6 +150,9 @@ frontend/
 ./scripts/run_tests.sh --serial
 ```
 
+- 若在沙盒环境中运行 `tests/api/` 下的 API 测试，通常需要先申请提权。
+- 原因：这类测试会启动本地 mock LLM / HTTP 服务并绑定 `127.0.0.1` 端口，沙盒内可能因端口绑定受限而失败。
+
 ### Web 前端
 
 ```bash

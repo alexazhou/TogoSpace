@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from constants import DriverType, MemberStatus, SpecialAgent
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
+from model.dbModel.gtAgent import GtAgent
 from service import teamService, agentService
 from util import assertUtil
 
@@ -144,7 +145,20 @@ class TeamMembersSaveHandler(BaseHandler):
         )
 
         await _assert_role_templates_exist([a.role_template_id for a in request.members])
-        updated_agents = await agentService.overwrite_team_agents(team_id, request.members)
+        updated_agents = await agentService.overwrite_team_agents(
+            team_id,
+            [
+                GtAgent(
+                    id=item.id,
+                    team_id=team_id,
+                    name=item.name,
+                    role_template_id=item.role_template_id,
+                    model=item.model,
+                    driver=item.driver,
+                )
+                for item in request.members
+            ],
+        )
 
         await teamService.hot_reload_team(team.name)
 

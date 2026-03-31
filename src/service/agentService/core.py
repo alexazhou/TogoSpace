@@ -429,34 +429,12 @@ def get_all_rooms(team_name: str, agent_name: str) -> List[int]:
     return roomService.get_rooms_for_agent(_team_ids.get(team_name), agent_name)
 
 
-async def _resolve_role_template_id(agent_data: Any) -> int:
-    raw_id = getattr(agent_data, "role_template_id", None)
-    template_name = getattr(agent_data, "role_template", None)
-
-    if isinstance(raw_id, int):
-        return raw_id
-
-    if not template_name:
-        raise TeamAgentException(
-            error_message="成员缺少 role_template 或 role_template_id",
-            error_code="ROLE_TEMPLATE_REQUIRED",
-        )
-
-    template = await gtRoleTemplateManager.get_role_template_by_name(str(template_name))
-    if template is None:
-        raise TeamAgentException(
-            error_message=f"角色模板不存在: {template_name}",
-            error_code="ROLE_TEMPLATE_NOT_FOUND",
-        )
-    return template.id
-
-
-async def overwrite_team_agents(team_id: int, agents_data: list[Any]) -> list[GtAgent]:
+async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> list[GtAgent]:
     """全量覆盖成员列表：有 id 更新，无 id 创建，不在列表的设为离职状态。返回在职成员列表。"""
     existing_agents = await gtAgentManager.get_team_agents(team_id)
     existing_ids = {a.id for a in existing_agents}
     existing_by_id = {a.id: a for a in existing_agents}
-    request_ids = {getattr(a, "id", None) for a in agents_data if getattr(a, "id", None) is not None}
+    request_ids = {agent.id for agent in agents_data if agent.id is not None}
 
     # 1. 离职处理
     ids_to_offboard = existing_ids - request_ids
@@ -464,10 +442,9 @@ async def overwrite_team_agents(team_id: int, agents_data: list[Any]) -> list[Gt
         await gtAgentManager.batch_update_agent_status(list(ids_to_offboard), EmployStatus.OFF_BOARD)
 
     # 2. 转换为 GtAgent 对象列表
-    agents_to_save = []
+    agents_to_save: list[GtAgent] = []
     for data in agents_data:
-        role_template_id = await _resolve_role_template_id(data)
-        agent_id = getattr(data, "id", None)
+        agent_id = data.id
 
         if agent_id is not None:
             existing = existing_by_id.get(agent_id)
@@ -477,18 +454,18 @@ async def overwrite_team_agents(team_id: int, agents_data: list[Any]) -> list[Gt
                     error_code="member_not_found",
                 )
             agent = existing
-            agent.name = getattr(data, "name", "")
-            agent.role_template_id = role_template_id
-            agent.model = getattr(data, "model", "") or ""
-            agent.driver = getattr(data, "driver", DriverType.NATIVE)
+            agent.name = data.name
+            agent.role_template_id = data.role_template_id
+            agent.model = data.model or ""
+            agent.driver = data.driver or DriverType.NATIVE
             agent.employ_status = EmployStatus.ON_BOARD
         else:
             agent = GtAgent(
                 team_id=team_id,
-                name=getattr(data, "name", ""),
-                role_template_id=role_template_id,
-                model=getattr(data, "model", "") or "",
-                driver=getattr(data, "driver", DriverType.NATIVE),
+                name=data.name,
+                role_template_id=data.role_template_id,
+                model=data.model or "",
+                driver=data.driver or DriverType.NATIVE,
                 employ_status=EmployStatus.ON_BOARD,
             )
 

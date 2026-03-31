@@ -2,12 +2,12 @@
 import asyncio
 import os
 import sys
-from types import SimpleNamespace
 
 import pytest
 
 from constants import DriverType, EmployStatus, MessageBusTopic, MemberStatus
 from dal.db import gtAgentManager, gtTeamManager
+from model.dbModel.gtAgent import GtAgent
 from service import roleTemplateService, agentService, roomService, ormService, persistenceService, messageBus
 from service import teamService
 from util import configUtil
@@ -163,15 +163,17 @@ class TestSaveTeamAgentsFullReplace(_agentServiceCase):
         assert {"alice", "bob"}.issubset(before_by_name)
 
         payload = [
-            SimpleNamespace(
+            GtAgent(
                 id=before_by_name["alice"].id,
+                team_id=team.id,
                 name="alice",
                 role_template_id=before_by_name["alice"].role_template_id,
                 model="gpt-4o",
                 driver=DriverType.NATIVE,
             ),
-            SimpleNamespace(
+            GtAgent(
                 id=before_by_name["bob"].id,
+                team_id=team.id,
                 name="bob",
                 role_template_id=before_by_name["bob"].role_template_id,
                 model="gpt-4.1",
