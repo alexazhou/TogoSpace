@@ -424,9 +424,27 @@ class TestDalManagers(ServiceTestCase):
         await roomService.crate_team_rooms_from_config(team.id, [
             TeamRoomConfig(name="old_room", max_turns=2, members=["alice"]),
         ])
-        await roomService.update_team_rooms_from_config(team.id, [
-            TeamRoomConfig(name="new_room_1", members=["alice"]),
-            TeamRoomConfig(name="new_room_2", initial_topic="x", members=["bob"]),
+        await roomService.override_team_rooms(team.id, [
+            GtRoom(
+                team_id=team.id,
+                name="new_room_1",
+                type=RoomType.GROUP,
+                initial_topic="",
+                max_turns=10,
+                agent_ids=[],
+                biz_id=None,
+                tags=[],
+            ),
+            GtRoom(
+                team_id=team.id,
+                name="new_room_2",
+                type=RoomType.GROUP,
+                initial_topic="x",
+                max_turns=10,
+                agent_ids=[],
+                biz_id=None,
+                tags=[],
+            ),
         ])
 
         rooms = await gtRoomManager.get_rooms_by_team(team.id)

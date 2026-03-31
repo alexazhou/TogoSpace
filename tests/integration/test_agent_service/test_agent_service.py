@@ -179,7 +179,7 @@ class TestSaveTeamAgentsFullReplace(_agentServiceCase):
             ),
         ]
 
-        saved_agents = await agentService.save_team_agents_full_replace(team.id, payload)
+        saved_agents = await agentService.override_team_agents(team.id, payload)
         saved_by_name = {agent.name: agent for agent in saved_agents}
 
         assert saved_by_name["alice"].employee_number == before_by_name["alice"].employee_number
