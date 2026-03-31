@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 
 import aiohttp
 
@@ -83,6 +84,80 @@ class TestTeamController(_ApiServiceCase):
             "rules": "先沟通后执行",
         }
         assert detail["rooms"] == []
+
+    async def test_team_modify_members_with_role_template_id(self):
+        template_id = await self._get_role_template_id("alice")
+        temp_team_name = f"team_modify_members_{int(time.time() * 1000)}"
+
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{self.backend_base_url}/teams/create.json",
+                json={"name": temp_team_name},
+            ) as resp:
+                assert resp.status == 200
+                create_data = await resp.json()
+                team_id = create_data["id"]
+
+            async with client.post(
+                f"{self.backend_base_url}/teams/{team_id}/modify.json",
+                json={
+                    "members": [
+                        {
+                            "name": "tom",
+                            "role_template_id": template_id,
+                            "model": "gpt-4o",
+                            "driver": "native",
+                        }
+                    ]
+                },
+            ) as resp:
+                assert resp.status == 200
+                modify_data = await resp.json()
+                assert modify_data["status"] == "updated"
+
+            async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
+                assert resp.status == 200
+                agents_data = await resp.json()
+
+            async with client.post(f"{self.backend_base_url}/teams/{team_id}/delete.json") as resp:
+                assert resp.status == 200
+
+        tom = next(agent for agent in agents_data["agents"] if agent["name"] == "tom")
+        assert tom["role_template_id"] == template_id
+        assert tom["model"] == "gpt-4o"
+        assert tom["driver"] == "native"
+
+    async def test_team_modify_members_with_invalid_role_template_id(self):
+        temp_team_name = f"team_modify_invalid_members_{int(time.time() * 1000)}"
+
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{self.backend_base_url}/teams/create.json",
+                json={"name": temp_team_name},
+            ) as resp:
+                assert resp.status == 200
+                create_data = await resp.json()
+                team_id = create_data["id"]
+
+            async with client.post(
+                f"{self.backend_base_url}/teams/{team_id}/modify.json",
+                json={
+                    "members": [
+                        {
+                            "name": "tom",
+                            "role_template_id": 99999999,
+                            "model": "",
+                            "driver": "native",
+                        }
+                    ]
+                },
+            ) as resp:
+                assert resp.status == 400
+                error_data = await resp.json()
+                assert error_data["error_code"] == "role_template_not_found"
+
+            async with client.post(f"{self.backend_base_url}/teams/{team_id}/delete.json") as resp:
+                assert resp.status == 200
 
     async def test_team_agents_by_team_id(self):
         """验证 GET /agents/list.json?team_id=<id> 返回团队成员。"""

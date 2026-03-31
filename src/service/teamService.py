@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from constants import DriverType, EmployStatus
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
@@ -48,6 +49,56 @@ async def _build_agent_rows(team_id: int, agent_configs: list[AgentConfig]) -> l
         existing.employ_status = EmployStatus.ON_BOARD
         existing.model = agent_config.model or ""
         existing.driver = agent_config.driver
+        agent_rows.append(existing)
+
+    return agent_rows
+
+
+async def _build_agent_rows_with_template_ids(team_id: int, members: list[Any]) -> list[GtAgent]:
+    existing_agents = await gtAgentManager.get_team_agents(team_id)
+    existing_by_name = {agent.name: agent for agent in existing_agents}
+
+    template_ids = sorted(
+        {
+            getattr(member, "role_template_id", None)
+            for member in members
+            if isinstance(getattr(member, "role_template_id", None), int)
+        }
+    )
+    templates = await gtRoleTemplateManager.get_role_templates_by_ids(template_ids)
+    valid_template_ids = {template.id for template in templates}
+    missing_template_ids = sorted(set(template_ids) - valid_template_ids)
+    if missing_template_ids:
+        raise TeamAgentException(
+            error_message=f"角色模板不存在: {missing_template_ids}",
+            error_code="role_template_not_found",
+        )
+
+    agent_rows: list[GtAgent] = []
+    for member in members:
+        role_template_id = getattr(member, "role_template_id", None)
+        name = getattr(member, "name", "")
+        existing = existing_by_name.get(name)
+        model = getattr(member, "model", "") or ""
+        driver = getattr(member, "driver", DriverType.NATIVE)
+
+        if existing is None:
+            agent_rows.append(
+                GtAgent(
+                    team_id=team_id,
+                    name=name,
+                    role_template_id=role_template_id,
+                    employ_status=EmployStatus.ON_BOARD,
+                    model=model,
+                    driver=driver,
+                )
+            )
+            continue
+
+        existing.role_template_id = role_template_id
+        existing.employ_status = EmployStatus.ON_BOARD
+        existing.model = model
+        existing.driver = driver
         agent_rows.append(existing)
 
     return agent_rows
@@ -130,13 +181,9 @@ async def create_team(team_config: TeamConfig) -> int:
     if team_config.dept_tree:
         await deptService.import_dept_tree(team_id, team_config.dept_tree)
 
-    # 创建 Rooms（rooms 参数）
-    rooms = team_config.preset_rooms
-    for room in rooms:
-        if not room.max_turns:
-            room.max_turns = 100
-
-    await crate_team_rooms_from_config(team_id, rooms)
+    # 创建 Rooms（常规流程，不走“配置导入专用”接口）
+    if team_config.preset_rooms:
+        await update_team_rooms(team_id, team_config.preset_rooms)
 
     # 触发热更新
     await hot_reload_team(name)
@@ -161,11 +208,19 @@ async def update_team_base_info(team_id: int, working_directory: str | None = No
     return await gtTeamManager.save_team(team)
 
 
-async def update_team_members(team_id: int, members: list[AgentConfig]) -> None:
-    await gtAgentManager.batch_save_agents(team_id, await _build_agent_rows(team_id, members))
+async def update_team_members(team_id: int, members: list[Any]) -> None:
+    await gtAgentManager.batch_save_agents(team_id, await _build_agent_rows_with_template_ids(team_id, members))
+
+
+async def update_team_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
+    for room in rooms:
+        if not room.max_turns:
+            room.max_turns = 100
+    await roomService.update_team_rooms_from_config(team_id, rooms)
 
 
 async def crate_team_rooms_from_config(team_id: int, preset_rooms: list[TeamRoomConfig]) -> None:
+    """仅用于配置导入流程。"""
     for room in preset_rooms:
         if not room.max_turns:
             room.max_turns = 100

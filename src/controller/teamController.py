@@ -4,12 +4,13 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 # 内部包
+from constants import DriverType
 from controller.baseController import BaseHandler
 from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
 from model.dbModel.gtTeam import GtTeam
 from service import teamService
 from util import assertUtil
-from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
+from util.configTypes import TeamConfig, TeamRoomConfig
 
 
 def _split_team_config(config: dict | None) -> tuple[str, dict]:
@@ -27,10 +28,17 @@ class CreateTeamRequest(BaseModel):
     config: dict = Field(default_factory=dict)
 
 
+class TeamMemberUpdateItem(BaseModel):
+    name: str
+    role_template_id: int
+    model: str = ""
+    driver: DriverType = DriverType.NATIVE
+
+
 class UpdateTeamRequest(BaseModel):
     working_directory: str | None = None
     config: dict | None = None
-    members: list[AgentConfig] | None = None
+    members: list[TeamMemberUpdateItem] | None = None
     preset_rooms: list[TeamRoomConfig] | None = None
 
 
@@ -152,7 +160,7 @@ class TeamModifyHandler(BaseHandler):
         if request.members is not None:
             await teamService.update_team_members(team_id, request.members)
         if request.preset_rooms is not None:
-            await teamService.crate_team_rooms_from_config(team_id, request.preset_rooms)
+            await teamService.update_team_rooms(team_id, request.preset_rooms)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "name": team_name})
