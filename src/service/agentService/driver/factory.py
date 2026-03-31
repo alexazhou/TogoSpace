@@ -8,9 +8,8 @@ from .nativeDriver import NativeAgentDriver
 from .claudeSdkDriver import ClaudeSdkAgentDriver
 from .tspDriver import TspAgentDriver
 
-from util.configTypes import RoleTemplateConfig
 
-def normalize_driver_config(role_template_cfg: RoleTemplateConfig | Mapping[str, Any]) -> AgentDriverConfig:
+def normalize_driver_config(role_template_cfg: Mapping[str, Any] | Any) -> AgentDriverConfig:
     if hasattr(role_template_cfg, "model_dump"):
         role_template_cfg = role_template_cfg.model_dump()
 

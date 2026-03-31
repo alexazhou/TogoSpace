@@ -6,7 +6,7 @@ import pytest
 
 from dal.db import gtTeamManager
 from service import roomService, agentService, ormService, persistenceService
-from service import roleTemplateService, teamService
+from service import presetService
 from service.agentService import Agent
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
@@ -32,14 +32,14 @@ class TestSdkDoSend(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
-        await roleTemplateService.startup()
+        await presetService.import_role_templates_from_app_config()
         await agentService.startup()
         
         cfg = TeamConfig(name=TEAM, members=[
             AgentConfig(name="alice", role_template="alice"),
             AgentConfig(name="bob", role_template="bob")
         ])
-        await teamService.import_team_from_config(cfg)
+        await presetService.import_team_from_config(cfg)
         await agentService.create_team_agents_from_db()
 
     @classmethod
@@ -139,8 +139,8 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
-        await roleTemplateService.startup()
-        await teamService.import_team_from_config(TeamConfig(name=TEAM))
+        await presetService.import_role_templates_from_app_config()
+        await presetService.import_team_from_config(TeamConfig(name=TEAM))
         await agentService.startup()
 
     @classmethod

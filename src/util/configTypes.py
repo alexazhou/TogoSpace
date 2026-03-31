@@ -50,7 +50,7 @@ class TeamRoomConfig(BaseModel):
     name: str
     members: List[str]
     initial_topic: str = ""
-    max_turns: int = 10
+    max_turns: int | None = None
     biz_id: str | None = None
     tags: List[str] = Field(default_factory=list)
 
@@ -107,6 +107,7 @@ class SettingConfig(BaseModel):
 
     default_llm_server: str | None = None
     llm_services: list[LlmServiceConfig] = Field(default_factory=list)
+    default_room_max_turns: int = 100
     persistence: PersistenceConfig | None = Field(default_factory=PersistenceConfig)
     workspace_root: str | None = Field(default_factory=_default_workspace_root)
 

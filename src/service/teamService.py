@@ -1,69 +1,28 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from constants import DriverType, EmployStatus, RoomType, SpecialAgent
+from constants import DriverType, EmployStatus
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from exception import TeamAgentException
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from service import deptService, roomService, schedulerService, agentService
-from util import configUtil, assertUtil
-from util.configTypes import AgentConfig, TeamConfig, TeamRoomConfig
+from util import assertUtil
 
 logger = logging.getLogger(__name__)
 
 
-async def _build_agent_rows(team_id: int, agent_configs: list[AgentConfig]) -> list[GtAgent]:
-    existing_agents = await gtAgentManager.get_team_agents(team_id)
-    existing_by_name = {agent.name: agent for agent in existing_agents}
-
-    agent_rows: list[GtAgent] = []
-    for agent_config in agent_configs:
-        template = await gtRoleTemplateManager.get_role_template_by_name(agent_config.role_template)
-        if template is None:
-            logger.warning(
-                "跳过 Agent '%s'：未找到角色模板 '%s'",
-                agent_config.name,
-                agent_config.role_template,
-            )
-            continue
-        role_template_id = template.id
-
-        existing = existing_by_name.get(agent_config.name)
-        if existing is None:
-            agent_rows.append(
-                GtAgent(
-                    team_id=team_id,
-                    name=agent_config.name,
-                    role_template_id=role_template_id,
-                    employ_status=EmployStatus.ON_BOARD,
-                    model=agent_config.model or "",
-                    driver=agent_config.driver,
-                )
-            )
-            continue
-
-        existing.role_template_id = role_template_id
-        existing.employ_status = EmployStatus.ON_BOARD
-        existing.model = agent_config.model or ""
-        existing.driver = agent_config.driver
-        agent_rows.append(existing)
-
-    return agent_rows
-
-
-async def _build_agent_rows_with_template_ids(team_id: int, members: list[Any]) -> list[GtAgent]:
+async def _build_team_member_rows(team_id: int, members: list[GtAgent]) -> list[GtAgent]:
     existing_agents = await gtAgentManager.get_team_agents(team_id)
     existing_by_name = {agent.name: agent for agent in existing_agents}
 
     template_ids = sorted(
         {
-            getattr(member, "role_template_id", None)
+            member.role_template_id
             for member in members
-            if isinstance(getattr(member, "role_template_id", None), int)
+            if isinstance(member.role_template_id, int)
         }
     )
     templates = await gtRoleTemplateManager.get_role_templates_by_ids(template_ids)
@@ -77,11 +36,11 @@ async def _build_agent_rows_with_template_ids(team_id: int, members: list[Any]) 
 
     agent_rows: list[GtAgent] = []
     for member in members:
-        role_template_id = getattr(member, "role_template_id", None)
-        name = getattr(member, "name", "")
+        role_template_id = member.role_template_id
+        name = member.name
         existing = existing_by_name.get(name)
-        model = getattr(member, "model", "") or ""
-        driver = getattr(member, "driver", DriverType.NATIVE)
+        model = member.model or ""
+        driver = member.driver
 
         if existing is None:
             agent_rows.append(
@@ -105,64 +64,19 @@ async def _build_agent_rows_with_template_ids(team_id: int, members: list[Any]) 
     return agent_rows
 
 
-async def import_team_from_config(team_config: TeamConfig) -> None:
-    existing = await gtTeamManager.get_team(team_config.name)
-    if existing is not None:
-        logger.info("Team '%s' 已存在，跳过导入", team_config.name)
-        return
-
-    team = await gtTeamManager.save_team(GtTeam(
-        name=team_config.name,
-        config=team_config.config or {},
-        max_function_calls=team_config.max_function_calls if team_config.max_function_calls is not None else 5,
-        enabled=1,
-        deleted=0,
-    ))
-    team_id = team.id
-
-    await gtAgentManager.batch_save_agents(team_id, await _build_agent_rows(team_id, team_config.members))
-    await crate_team_rooms_from_config(team_id, team_config.preset_rooms)
-
-    logger.info("Team '%s' 已从配置导入数据库", team_config.name)
-
-
 async def startup() -> None:
-    """启动时加载 Team 配置：
-    1. 将 JSON 配置导入数据库（仅当不存在时）
-    2. 为没有 max_turns 的 room 设置默认值 100
-    3. 从数据库加载最终配置，缓存到模块状态
-    4. 为已有 agents 分配工号（employee_number）
-    """
-    json_teams = configUtil.get_app_config().teams
-
-    # 将 JSON 配置导入数据库（仅当不存在时）
-    for team_config in json_teams:
-        name = team_config.name
-        # 为没有 max_turns 的 room 设置默认值 100
-        for room in team_config.preset_rooms:
-            if not room.max_turns:
-                room.max_turns = 100
-                logger.info(f"为 Team '{name}' 的 Room '{room.name}' 设置默认 max_turns=100")
-
-        await import_team_from_config(team_config)
-
-        team = await gtTeamManager.get_team(name)
-        if team is None:
-            logger.warning(f"Team '{name}' 导入失败，跳过")
-            continue
-
-        if not team_config.dept_tree:
-            logger.warning(f"Team '{name}' 缺少 dept_tree 配置，跳过导入")
-            continue
-
-        await deptService.import_dept_tree(team.id, team_config.dept_tree)
-
-    logger.info("Team 配置已导入数据库")
+    return None
 
 
-async def create_team(team_config: TeamConfig) -> int:
+async def create_team(
+    name: str,
+    config: dict | None = None,
+    max_function_calls: int | None = None,
+    members: list[GtAgent] | None = None,
+    dept_tree: deptService.DeptTreeNode | None = None,
+    preset_rooms: list[GtRoom] | None = None,
+) -> int:
     """创建新 Team（自动触发热更新）。"""
-    name = team_config.name
 
     # 检查 Team 是否已存在
     if await gtTeamManager.team_exists(name):
@@ -170,21 +84,21 @@ async def create_team(team_config: TeamConfig) -> int:
 
     # 创建 Team
     team = await gtTeamManager.save_team(GtTeam(
-        name=team_config.name,
-        config=team_config.config or {},
-        max_function_calls=team_config.max_function_calls if team_config.max_function_calls is not None else 5,
+        name=name,
+        config=config or {},
+        max_function_calls=max_function_calls if max_function_calls is not None else 5,
         enabled=1,
         deleted=0,
     ))
     team_id = team.id
-    await gtAgentManager.batch_save_agents(team_id, await _build_agent_rows(team_id, team_config.members))
+    await agentService.overwrite_team_agents(team_id, members or [])
 
-    if team_config.dept_tree:
-        await deptService.import_dept_tree(team_id, team_config.dept_tree)
+    if dept_tree:
+        await deptService.import_dept_tree(team_id, dept_tree)
 
-    # 创建 Rooms（常规流程，不走“配置导入专用”接口）
-    if team_config.preset_rooms:
-        await overwrite_team_rooms(team_id, team_config.preset_rooms)
+    # 创建 Rooms（常规流程，不走”配置导入专用”接口）
+    if preset_rooms:
+        await roomService.overwrite_team_rooms(team_id, preset_rooms)
 
     # 触发热更新
     await hot_reload_team(name)
@@ -209,55 +123,8 @@ async def update_team_base_info(team_id: int, working_directory: str | None = No
     return await gtTeamManager.save_team(team)
 
 
-async def update_team_members(team_id: int, members: list[Any]) -> None:
-    await gtAgentManager.batch_save_agents(team_id, await _build_agent_rows_with_template_ids(team_id, members))
-
-
-def _infer_room_type(members: list[str]) -> RoomType:
-    ai_count = len([member for member in members if SpecialAgent.value_of(member) != SpecialAgent.OPERATOR])
-    if any(SpecialAgent.value_of(member) == SpecialAgent.OPERATOR for member in members) and ai_count == 1:
-        return RoomType.PRIVATE
-    return RoomType.GROUP
-
-
-async def _build_room_rows_from_configs(team_id: int, rooms: list[TeamRoomConfig]) -> list[GtRoom]:
-    room_rows: list[GtRoom] = []
-    for room in rooms:
-        member_ids = list(map(
-            lambda agent: agent.id,
-            await gtAgentManager.get_team_agents_by_names(
-                team_id,
-                room.members,
-                include_special=True,
-            ),
-        ))
-        room_rows.append(GtRoom(
-            id=room.id,
-            team_id=team_id,
-            name=room.name,
-            type=_infer_room_type(room.members),
-            initial_topic=room.initial_topic,
-            max_turns=room.max_turns or 10,
-            agent_ids=member_ids,
-            biz_id=room.biz_id,
-            tags=list(room.tags),
-        ))
-    return room_rows
-
-
-async def overwrite_team_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
-    for room in rooms:
-        if not room.max_turns:
-            room.max_turns = 100
-    await roomService.overwrite_team_rooms(team_id, await _build_room_rows_from_configs(team_id, rooms))
-
-
-async def crate_team_rooms_from_config(team_id: int, preset_rooms: list[TeamRoomConfig]) -> None:
-    """仅用于配置导入流程。"""
-    for room in preset_rooms:
-        if not room.max_turns:
-            room.max_turns = 100
-    await roomService.crate_team_rooms_from_config(team_id, preset_rooms)
+async def update_team_members(team_id: int, members: list[GtAgent]) -> None:
+    await gtAgentManager.batch_save_agents(team_id, await _build_team_member_rows(team_id, members))
 
 
 async def delete_team(name: str) -> None:

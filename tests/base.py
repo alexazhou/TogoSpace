@@ -21,6 +21,7 @@ import service.persistenceService as persistenceService
 import service.ormService as ormService
 from dal.db import gtAgentManager
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtRoom import GtRoom
 from util.configTypes import AgentConfig
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
@@ -29,7 +30,7 @@ from mock_llm_server import (
     MOCK_LLM_HOST,
     get_mock_llm_api_url,
 )
-from constants import OpenaiLLMApiRole, EmployStatus
+from constants import OpenaiLLMApiRole, EmployStatus, RoomType, SpecialAgent
 
 _SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 _BACKEND_READY_TIMEOUT = 20
@@ -518,3 +519,35 @@ class ServiceTestCase:
                 employ_status=EmployStatus.ON_BOARD,
             ))
         return agents
+
+    @staticmethod
+    async def convert_to_gt_rooms(team_id: int, configs: list) -> list[GtRoom]:
+        def infer_room_type(members: list[str]) -> RoomType:
+            ai_count = len([member for member in members if SpecialAgent.value_of(member) != SpecialAgent.OPERATOR])
+            if any(SpecialAgent.value_of(member) == SpecialAgent.OPERATOR for member in members) and ai_count == 1:
+                return RoomType.PRIVATE
+            return RoomType.GROUP
+
+        rooms = []
+        for cfg in configs:
+            members = list(cfg.members)
+            agent_ids = [
+                agent.id
+                for agent in await gtAgentManager.get_team_agents_by_names(
+                    team_id,
+                    members,
+                    include_special=True,
+                )
+            ]
+            rooms.append(GtRoom(
+                id=getattr(cfg, "id", None),
+                team_id=team_id,
+                name=cfg.name,
+                type=infer_room_type(members),
+                initial_topic=cfg.initial_topic,
+                max_turns=roomService.resolve_room_max_turns(cfg.max_turns),
+                agent_ids=agent_ids,
+                biz_id=getattr(cfg, "biz_id", None),
+                tags=list(getattr(cfg, "tags", [])),
+            ))
+        return rooms

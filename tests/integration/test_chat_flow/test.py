@@ -8,13 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import service.roomService as roomService
-import service.roleTemplateService as roleTemplateService
 import service.agentService as agentService
 import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.ormService as ormService
 import service.persistenceService as persistenceService
-import service.teamService as teamService
+import service.presetService as presetService
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
 from constants import OpenaiLLMApiRole, RoomState
@@ -38,8 +37,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
-        await roleTemplateService.startup()
-        await teamService.import_team_from_config(team_config)
+        await presetService.import_role_templates_from_app_config()
+        await presetService.import_team_from_config(team_config)
         await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
         await funcToolService.startup()
         await agentService.startup()

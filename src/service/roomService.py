@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Sequence
 
 from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
 from service import messageBus, persistenceService
-from util.configTypes import TeamRoomConfig
+from util import configUtil
 from util import assertUtil
 from exception import TeamAgentException
 from model.coreModel.gtCoreChatModel import GtCoreChatMessage
@@ -17,6 +17,12 @@ from model.dbModel.gtAgent import GtAgent
 from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_room_max_turns(max_turns: int | None) -> int:
+    if max_turns is not None:
+        return max_turns
+    return configUtil.get_app_config().setting.default_room_max_turns
 
 
 def _same_speaker(left: str | None, right: str | None) -> bool:
@@ -58,7 +64,7 @@ class DeptRoomSpec:
     name: str
     initial_topic: str
     member_ids: list[int]
-    max_turns: int = 10
+    max_turns: int | None = None
 
 
 class ChatRoom:
@@ -439,7 +445,7 @@ def shutdown() -> None:
     _rooms_by_id.clear()
 
 
-async def save_room_members(room_id: int, agent_ids: list[int]) -> None:
+async def update_room_members(room_id: int, agent_ids: list[int]) -> None:
     room = await gtRoomManager.get_room_by_id(room_id)
     assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
 
@@ -476,46 +482,27 @@ async def overwrite_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> N
         room.name = spec.name
         room.type = RoomType.GROUP
         room.initial_topic = spec.initial_topic
-        room.max_turns = spec.max_turns
+        room.max_turns = resolve_room_max_turns(spec.max_turns)
         room.biz_id = spec.biz_id
         room.tags = ["DEPT"]
 
         # 2) 保存房间元信息，再覆盖成员列表。
         saved_room = await gtRoomManager.save_room(room)
-        await save_room_members(saved_room.id, spec.member_ids)
+        await update_room_members(saved_room.id, spec.member_ids)
 
     # 3) 清理不在目标态中的历史 DEPT 房间。
     await gtRoomManager.delete_rooms_by_biz_ids_not_in(team_id, list(by_biz_id.keys()))
 
 
-async def crate_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomConfig]) -> None:
-    """导入配置专用：要求 team 还没有任何房间。"""
+async def create_team_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
+    """创建 team rooms：要求 team 还没有任何房间。"""
     existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
     assertUtil.assertTrue(
         len(existing_rooms) == 0,
         error_message=f"team_id '{team_id}' already has rooms, use overwrite_team_rooms instead",
         error_code="TEAM_ROOMS_ALREADY_EXIST",
     )
-    room_rows: list[GtRoom] = []
-    for room_config in rooms:
-        room_rows.append(GtRoom(
-            team_id=team_id,
-            name=room_config.name,
-            type=_infer_room_type(room_config.members),
-            initial_topic=room_config.initial_topic,
-            max_turns=room_config.max_turns or 10,
-            agent_ids=list(map(
-                lambda agent: agent.id,
-                await gtAgentManager.get_team_agents_by_names(
-                    team_id,
-                    room_config.members,
-                    include_special=True,
-                ),
-            )),
-            biz_id=room_config.biz_id,
-            tags=list(room_config.tags),
-        ))
-    await batch_create_rooms(team_id, room_rows)
+    await batch_create_rooms(team_id, rooms)
 
 
 async def batch_create_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:

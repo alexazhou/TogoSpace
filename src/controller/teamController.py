@@ -4,13 +4,15 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 # 内部包
-from constants import DriverType
+from constants import DriverType, RoomType, SpecialAgent
 from controller.baseController import BaseHandler
 from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
+from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
-from service import teamService
+from service import roomService, teamService
 from util import assertUtil
-from util.configTypes import TeamConfig, TeamRoomConfig
+from util.configTypes import TeamRoomConfig
 
 
 def _split_team_config(config: dict | None) -> tuple[str, dict]:
@@ -19,6 +21,45 @@ def _split_team_config(config: dict | None) -> tuple[str, dict]:
     copied = config.copy()
     working_directory = copied.pop("working_directory", "")
     return working_directory, copied
+
+
+def _infer_room_type(members: list[str]) -> RoomType:
+    ai_count = len([member for member in members if SpecialAgent.value_of(member) != SpecialAgent.OPERATOR])
+    if any(SpecialAgent.value_of(member) == SpecialAgent.OPERATOR for member in members) and ai_count == 1:
+        return RoomType.PRIVATE
+    return RoomType.GROUP
+
+
+async def _to_gt_room(team_id: int, room: TeamRoomConfig) -> GtRoom:
+    member_ids = [
+        agent.id
+        for agent in await gtAgentManager.get_team_agents_by_names(
+            team_id,
+            room.members,
+            include_special=True,
+        )
+    ]
+    return GtRoom(
+        id=room.id,
+        team_id=team_id,
+        name=room.name,
+        type=_infer_room_type(room.members),
+        initial_topic=room.initial_topic,
+        max_turns=roomService.resolve_room_max_turns(room.max_turns),
+        agent_ids=member_ids,
+        biz_id=room.biz_id,
+        tags=list(room.tags),
+    )
+
+
+def _to_gt_agent(team_id: int, member: "TeamMemberUpdateItem") -> GtAgent:
+    return GtAgent(
+        team_id=team_id,
+        name=member.name,
+        role_template_id=member.role_template_id,
+        model=member.model,
+        driver=member.driver,
+    )
 
 
 # Request Models
@@ -79,16 +120,16 @@ class TeamCreateHandler(BaseHandler):
 
     async def post(self) -> None:
         request = self.parse_request(CreateTeamRequest)
-        payload = request.model_dump()
-        working_directory = payload.pop("working_directory", "")
-        config = payload.get("config", {})
+        config = dict(request.config or {})
+        working_directory = request.working_directory
         if working_directory:
             config["working_directory"] = working_directory
-        payload["config"] = config
-        team_config = TeamConfig.model_validate(payload)
 
         # 调用 service 创建 team
-        team_id = await teamService.create_team(team_config)
+        team_id = await teamService.create_team(
+            name=request.name,
+            config=config,
+        )
 
         self.return_json({"status": "created", "id": team_id, "name": request.name})
 
@@ -158,9 +199,15 @@ class TeamModifyHandler(BaseHandler):
                 config_updates=request.config,
             )
         if request.members is not None:
-            await teamService.update_team_members(team_id, request.members)
+            await teamService.update_team_members(
+                team_id,
+                [_to_gt_agent(team_id, member) for member in request.members],
+            )
         if request.preset_rooms is not None:
-            await teamService.overwrite_team_rooms(team_id, request.preset_rooms)
+            await roomService.overwrite_team_rooms(
+                team_id,
+                [await _to_gt_room(team_id, room) for room in request.preset_rooms],
+            )
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "name": team_name})

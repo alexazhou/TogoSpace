@@ -80,6 +80,21 @@ class TestDeptService(ServiceTestCase):
         assert agent is not None
         return agent.id
 
+    async def _to_dept_tree_node(self, team_id: int, node: DeptNodeConfig) -> deptService.DeptTreeNode:
+        member_rows = await gtAgentManager.get_team_agents_by_names(
+            team_id,
+            list(dict.fromkeys([*node.members, node.manager])),
+            include_special=False,
+        )
+        member_id_map = {member.name: member.id for member in member_rows}
+        return deptService.DeptTreeNode(
+            dept_name=node.dept_name,
+            dept_responsibility=node.dept_responsibility,
+            manager_id=member_id_map.get(node.manager, 0),
+            member_ids=[member_id_map.get(name, 0) for name in node.members],
+            children=[await self._to_dept_tree_node(team_id, child) for child in node.children],
+        )
+
     # ------------------------------------------------------------------
     # gtDeptManager CRUD
     # ------------------------------------------------------------------
@@ -174,7 +189,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob"],
         )
-        await deptService.import_dept_tree(team.id, tree)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
         dept = await gtDeptManager.get_dept_by_name(team.id, "product")
         assert dept is not None
@@ -206,7 +221,7 @@ class TestDeptService(ServiceTestCase):
                 )
             ],
         )
-        await deptService.import_dept_tree(team.id, tree)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
         all_depts = await gtDeptManager.get_all_depts(team.id)
         assert len(all_depts) == 2
@@ -227,7 +242,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob"],
         )
-        await deptService.import_dept_tree(team.id, original)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, original))
 
         # 第二次调用应整棵跳过
         modified = DeptNodeConfig(
@@ -236,7 +251,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob", "charlie"],
         )
-        await deptService.import_dept_tree(team.id, modified)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, modified))
 
         dept = await gtDeptManager.get_dept_by_name(team.id, "dept_x")
         assert dept is not None
@@ -257,7 +272,7 @@ class TestDeptService(ServiceTestCase):
             members=["alice", "bob"],
         )
         with pytest.raises(TeamAgentException) as exc_info:
-            await deptService.import_dept_tree(team.id, bad_tree)
+            await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, bad_tree))
         assert exc_info.value.error_code == "DEPT_MANAGER_NOT_IN_MEMBERS"
 
     async def test_import_dept_tree_unknown_member_raises(self):
@@ -272,7 +287,7 @@ class TestDeptService(ServiceTestCase):
             members=["alice", "ghost"],  # ghost 不在 team_members 中
         )
         with pytest.raises(TeamAgentException) as exc_info:
-            await deptService.import_dept_tree(team.id, bad_tree)
+            await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, bad_tree))
         assert exc_info.value.error_code == "DEPT_MEMBER_NOT_FOUND"
 
     # ------------------------------------------------------------------
@@ -299,7 +314,7 @@ class TestDeptService(ServiceTestCase):
                 )
             ],
         )
-        await deptService.import_dept_tree(team.id, original)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, original))
 
         cto_id = await self._get_agent_id(team.id, "cto")
         dev_a_id = await self._get_agent_id(team.id, "dev_a")
@@ -341,7 +356,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob"],
         )
-        await deptService.import_dept_tree(team.id, tree)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
         bob_id = await self._get_agent_id(team.id, "bob")
         await deptService.remove_member_from_dept(team.id, bob_id)
@@ -364,7 +379,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob"],
         )
-        await deptService.import_dept_tree(team.id, tree)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
         alice_id = await self._get_agent_id(team.id, "alice")
         with pytest.raises(TeamAgentException) as exc_info:
@@ -381,7 +396,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob"],
         )
-        await deptService.import_dept_tree(team.id, tree)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
         alice_id = await self._get_agent_id(team.id, "alice")
         bob_id = await self._get_agent_id(team.id, "bob")
@@ -408,7 +423,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob"],
         )
-        await deptService.import_dept_tree(team.id, tree)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
         # charlie 不在部门中
         alice_id = await self._get_agent_id(team.id, "alice")
@@ -443,7 +458,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob"],
         )
-        await deptService.import_dept_tree(team.id, tree)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
         bob_id = await self._get_agent_id(team.id, "bob")
         await deptService.set_dept_manager(team.id, "the_dept", bob_id)
@@ -463,7 +478,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob"],
         )
-        await deptService.import_dept_tree(team.id, tree)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
         # charlie 不在 small_dept 中
         charlie_id = await self._get_agent_id(team.id, "charlie")
@@ -495,7 +510,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob", "charlie"],
         )
-        await deptService.import_dept_tree(team.id, tree)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
         bob_id = await self._get_agent_id(team.id, "bob")
         charlie_id = await self._get_agent_id(team.id, "charlie")
@@ -587,7 +602,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice"],
         )
-        await deptService.import_dept_tree(team.id, tree)
+        await deptService.import_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
         alice = await gtAgentManager.get_agent(team.id, "alice")
         bob = await gtAgentManager.get_agent(team.id, "bob")

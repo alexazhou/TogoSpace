@@ -9,14 +9,13 @@ from tests.base import ServiceTestCase
 from util import configUtil
 from service import (
     roomService,
-    roleTemplateService,
+    presetService,
     agentService,
     funcToolService,
     messageBus,
     schedulerService as scheduler,
     ormService,
     persistenceService,
-    teamService,
 )
 
 TEAM = "test_team"
@@ -56,9 +55,9 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await funcToolService.startup()
         await ormService.startup(self._get_test_db_path())
         await persistenceService.startup()
-        await roleTemplateService.startup()
+        await presetService.import_role_templates_from_app_config()
         await agentService.startup()
-        await teamService.import_team_from_config(team_config)
+        await presetService.import_team_from_config(team_config)
         await agentService.create_team_agents_from_db()
         await roomService.load_rooms_from_db()
         await agentService.restore_state()

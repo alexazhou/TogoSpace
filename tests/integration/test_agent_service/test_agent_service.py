@@ -8,8 +8,7 @@ import pytest
 from constants import DriverType, EmployStatus, MessageBusTopic, MemberStatus
 from dal.db import gtAgentManager, gtTeamManager
 from model.dbModel.gtAgent import GtAgent
-from service import roleTemplateService, agentService, roomService, ormService, persistenceService, messageBus
-from service import teamService
+from service import presetService, agentService, roomService, ormService, persistenceService, messageBus
 from util import configUtil
 from ...base import ServiceTestCase
 
@@ -30,10 +29,10 @@ class _agentServiceCase(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
-        await roleTemplateService.startup()
+        await presetService.import_role_templates_from_app_config()
         cfg = configUtil.load(_CONFIG_DIR, force_reload=True)
         team_cfg = cfg.teams[0]
-        await teamService.import_team_from_config(team_cfg)
+        await presetService.import_team_from_config(team_cfg)
         await agentService.startup()
         await agentService.create_team_agents_from_db()
 
