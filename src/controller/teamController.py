@@ -10,7 +10,7 @@ from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
-from service import roomService, teamService
+from service import roomService, teamService, agentService
 from util import assertUtil
 from util.configTypes import TeamRoomConfig
 
@@ -52,9 +52,9 @@ async def _to_gt_room(team_id: int, room: TeamRoomConfig) -> GtRoom:
     )
 
 
-def _to_gt_agent(team_id: int, member: "TeamMemberUpdateItem") -> GtAgent:
+def _to_gt_agent(member: "TeamMemberUpdateItem") -> GtAgent:
     return GtAgent(
-        team_id=team_id,
+        id=member.id,
         name=member.name,
         role_template_id=member.role_template_id,
         model=member.model,
@@ -70,6 +70,7 @@ class CreateTeamRequest(BaseModel):
 
 
 class TeamMemberUpdateItem(BaseModel):
+    id: int | None = None
     name: str
     role_template_id: int
     model: str = ""
@@ -199,9 +200,9 @@ class TeamModifyHandler(BaseHandler):
                 config_updates=request.config,
             )
         if request.members is not None:
-            await teamService.update_team_members(
+            await agentService.overwrite_team_agents(
                 team_id,
-                [_to_gt_agent(team_id, member) for member in request.members],
+                [_to_gt_agent(member) for member in request.members],
             )
         if request.preset_rooms is not None:
             await roomService.overwrite_team_rooms(

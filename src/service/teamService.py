@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from constants import DriverType, EmployStatus
-from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
+from dal.db import gtTeamManager, gtAgentManager
 from exception import TeamAgentException
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
@@ -12,56 +11,6 @@ from service import deptService, roomService, schedulerService, agentService
 from util import assertUtil
 
 logger = logging.getLogger(__name__)
-
-
-async def _build_team_member_rows(team_id: int, members: list[GtAgent]) -> list[GtAgent]:
-    existing_agents = await gtAgentManager.get_team_agents(team_id)
-    existing_by_name = {agent.name: agent for agent in existing_agents}
-
-    template_ids = sorted(
-        {
-            member.role_template_id
-            for member in members
-            if isinstance(member.role_template_id, int)
-        }
-    )
-    templates = await gtRoleTemplateManager.get_role_templates_by_ids(template_ids)
-    valid_template_ids = {template.id for template in templates}
-    missing_template_ids = sorted(set(template_ids) - valid_template_ids)
-    if missing_template_ids:
-        raise TeamAgentException(
-            error_message=f"角色模板不存在: {missing_template_ids}",
-            error_code="role_template_not_found",
-        )
-
-    agent_rows: list[GtAgent] = []
-    for member in members:
-        role_template_id = member.role_template_id
-        name = member.name
-        existing = existing_by_name.get(name)
-        model = member.model or ""
-        driver = member.driver
-
-        if existing is None:
-            agent_rows.append(
-                GtAgent(
-                    team_id=team_id,
-                    name=name,
-                    role_template_id=role_template_id,
-                    employ_status=EmployStatus.ON_BOARD,
-                    model=model,
-                    driver=driver,
-                )
-            )
-            continue
-
-        existing.role_template_id = role_template_id
-        existing.employ_status = EmployStatus.ON_BOARD
-        existing.model = model
-        existing.driver = driver
-        agent_rows.append(existing)
-
-    return agent_rows
 
 
 async def startup() -> None:
@@ -121,10 +70,6 @@ async def update_team_base_info(team_id: int, working_directory: str | None = No
             config.pop("working_directory", None)
     team.config = config
     return await gtTeamManager.save_team(team)
-
-
-async def update_team_members(team_id: int, members: list[GtAgent]) -> None:
-    await gtAgentManager.batch_save_agents(team_id, await _build_team_member_rows(team_id, members))
 
 
 async def delete_team(name: str) -> None:
