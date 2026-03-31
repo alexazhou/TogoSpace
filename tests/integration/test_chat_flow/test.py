@@ -43,9 +43,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
         await funcToolService.startup()
         await agentService.startup()
-        await agentService.load_team_ids([team_config])
-        await agentService.create_team_agents([team_config])
-        await scheduler.startup([team_config])
+        await agentService.create_team_agents_from_db()
+        await scheduler.startup()
 
     @classmethod
     async def async_teardown_class(cls):
@@ -86,16 +85,16 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
     async def test_tool_call_result_appended_to_history(self):
         """验证 tool_call 结果被正确追加到 agent history。"""
-        room_key = f"general@{TEAM}"
-        room = roomService.get_room_by_key(room_key)
+        await roomService.ensure_room_record(TEAM, "manual_turn", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"manual_turn@{TEAM}")
 
         alice = agentService.get_team_agent(TEAM, "alice")
-        await alice.append_history_message(
+        alice._history = [
             OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset test turn state")
-        )
+        ]
         call_seq = {
             "alice": [
-                {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "hello"}}]},
+                {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "manual_turn", "msg": "hello"}}]},
                 {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
             ],
             "bob": [],
@@ -117,16 +116,16 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
     async def test_turn_checker_forces_send_chat_msg(self):
         """直接输出文字时 turn_checker 应注入 hint，迫使 agent 改用工具。"""
-        room_key = f"general@{TEAM}"
-        room = roomService.get_room_by_key(room_key)
+        await roomService.ensure_room_record(TEAM, "turn_checker_room", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"turn_checker_room@{TEAM}")
 
         alice = agentService.get_team_agent(TEAM, "alice")
-        await alice.append_history_message(
+        alice._history = [
             OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset turn checker history")
-        )
+        ]
         resps = [
             {"content": "我直接回复"},
-            {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "最终消息"}}]},
+            {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "turn_checker_room", "msg": "最终消息"}}]},
             {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
         ]
         with self.patch_infer(responses=resps):

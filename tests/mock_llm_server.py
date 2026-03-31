@@ -297,7 +297,7 @@ class MockLLMServer:
                 app.response_queue = self._response_queue
                 self._server = tornado.httpserver.HTTPServer(app)
                 self._server.listen(self.port, MOCK_LLM_HOST)
-                self._started.set()
+                self._ioloop.add_callback(self._started.set)
                 self._ioloop.start()
             except Exception as exc:  # pragma: no cover - 仅在异常启动场景触发
                 self._start_error = exc

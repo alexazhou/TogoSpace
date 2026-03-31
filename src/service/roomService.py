@@ -551,6 +551,7 @@ async def ensure_room_record(team_name: str, name: str, members: List[str], init
         room_row.type = room_type
         room_row.initial_topic = initial_topic
         room_row.max_turns = max_turns
+    room_row.agent_ids = list(agent_ids)
     room_row = await gtRoomManager.save_room(room_row)
     await _load_room(
         team_row=team_row,

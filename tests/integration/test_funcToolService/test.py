@@ -9,7 +9,8 @@ import service.funcToolService as funcToolService
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
-from dal.db import gtTeamManager
+from dal.db import gtTeamManager, gtAgentManager
+from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtTeam import GtTeam
 from service.roomService import ChatContext
 from ...base import ServiceTestCase
@@ -46,7 +47,11 @@ class TestRunToolCall(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
-        await gtTeamManager.save_team(GtTeam(name=TEAM))
+        team = await gtTeamManager.save_team(GtTeam(name=TEAM))
+        await gtAgentManager.batch_save_agents(
+            team.id,
+            [GtAgent(team_id=team.id, name="alice", role_template_id=0), GtAgent(team_id=team.id, name="bob", role_template_id=0)],
+        )
         await funcToolService.startup()
 
     @classmethod

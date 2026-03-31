@@ -271,6 +271,7 @@ class ServiceTestCase:
         _assert_port_ready(
             get_mock_llm_api_url(port=port),
             "MockLLM",
+            timeout=10.0,
             method="POST",
             data=b"{}",
             headers={"Content-Type": "application/json"},
@@ -448,6 +449,11 @@ class ServiceTestCase:
     @classmethod
     def _safe_cleanup_external_dependencies(cls):
         """尽最大努力清理外部依赖；用于 setup/teardown 的 finally 路径。"""
+        if hasattr(cls, "_config_patcher"):
+            with contextlib.suppress(Exception):
+                cls._config_patcher.stop()
+            with contextlib.suppress(Exception):
+                delattr(cls, "_config_patcher")
         if cls.requires_backend:
             with contextlib.suppress(Exception):
                 cls._stop_backend()

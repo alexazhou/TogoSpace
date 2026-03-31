@@ -133,16 +133,16 @@ class TestConfigApi(ServiceTestCase):
                 assert resp.status == 200
                 
             # Modify Members
-            members_payload = {"member_ids": [alice["id"], -1]}
+            members_payload = {"agent_ids": [alice["id"], -1]}
             async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/modify.json", json=members_payload) as resp:
                 assert resp.status == 200
                 
             # Verify members
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/list.json") as resp:
                 data = await resp.json()
-                member_ids = set(data["member_ids"])
-                assert alice["id"] in member_ids
-                assert -1 in member_ids
+                agent_ids = set(data["agent_ids"])
+                assert alice["id"] in agent_ids
+                assert -1 in agent_ids
 
         # 6. Delete Room
         async with aiohttp.ClientSession() as client:
@@ -166,7 +166,7 @@ class TestConfigApi(ServiceTestCase):
             "type": "GROUP",
             "initial_topic": "room created by member ids",
             "max_turns": 12,
-            "member_ids": [alice["id"], bob["id"]],
+            "agent_ids": [alice["id"], bob["id"]],
         }
         async with aiohttp.ClientSession() as client:
             async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/create.json", json=create_payload) as resp:
@@ -183,7 +183,7 @@ class TestConfigApi(ServiceTestCase):
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{room_id}/agents/list.json") as resp:
                 assert resp.status == 200
                 members_data = await resp.json()
-                assert set(members_data["member_ids"]) == {alice["id"], bob["id"]}
+                assert set(members_data["agent_ids"]) == {alice["id"], bob["id"]}
 
             async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{room_id}/delete.json") as resp:
                 assert resp.status == 200
@@ -195,10 +195,10 @@ class TestConfigApi(ServiceTestCase):
             "type": "GROUP",
             "initial_topic": "invalid member ids",
             "max_turns": 12,
-            "member_ids": [99999999],
+            "agent_ids": [99999999],
         }
         async with aiohttp.ClientSession() as client:
             async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/create.json", json=create_payload) as resp:
                 assert resp.status == 400
                 data = await resp.json()
-                assert data["error_code"] == "member_not_found"
+                assert data["error_code"] == "agent_not_found"

@@ -68,6 +68,13 @@ class TestDeptService(ServiceTestCase):
         await gtAgentManager.batch_save_agents(team.id, agents)
         return team
 
+    async def _get_room_member_names(self, room_id: int) -> list[str]:
+        room = await gtRoomManager.get_room_by_id(room_id)
+        assert room is not None
+        agent_rows = await gtAgentManager.get_agents_by_ids(room.agent_ids or [])
+        by_id = {agent.id: agent.name for agent in agent_rows}
+        return [by_id.get(agent_id, str(agent_id)) for agent_id in room.agent_ids or []]
+
     # ------------------------------------------------------------------
     # gtDeptManager CRUD
     # ------------------------------------------------------------------
@@ -617,13 +624,12 @@ class TestDeptService(ServiceTestCase):
         agents = await self._convert_to_gt_agents(team.id, configs)
         await gtAgentManager.batch_save_agents(team.id, agents)
 
-        cfg = await teamService.get_team_config("t_model_driver")
-        assert cfg is not None
-        member_map = {m.name: m for m in cfg.members}
+        saved_agents = await gtAgentManager.get_agents_by_team(team.id)
+        member_map = {m.name: m for m in saved_agents}
 
         assert member_map["alice"].model == "gpt-4o"
         assert member_map["alice"].driver == DriverType.NATIVE
-        assert member_map["bob"].model is None or member_map["bob"].model == ""
+        assert member_map["bob"].model == ""
         assert member_map["bob"].driver == DriverType.CLAUDE_SDK
 
     # ------------------------------------------------------------------
@@ -679,7 +685,7 @@ class TestDeptService(ServiceTestCase):
         assert "DEPT" in room.tags
 
         # 验证部门成员已加入房间
-        room_members = await roomService.get_db_room_member_names(room.id)
+        room_members = await self._get_room_member_names(room.id)
         assert set(room_members) == {"alice", "bob", "charlie"}
 
     async def test_set_dept_tree_updates_existing_room_members(self):
@@ -702,7 +708,7 @@ class TestDeptService(ServiceTestCase):
         biz_id = f"DEPT:{dept.id}"
         room = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
         assert room is not None
-        room_members = await roomService.get_db_room_member_names(room.id)
+        room_members = await self._get_room_member_names(room.id)
         assert set(room_members) == {"alice", "bob"}
 
         # 第二次更新，增加成员
@@ -717,7 +723,7 @@ class TestDeptService(ServiceTestCase):
 
         room_after = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
         assert room_after is not None
-        room_members_after = await roomService.get_db_room_member_names(room_after.id)
+        room_members_after = await self._get_room_member_names(room_after.id)
         assert set(room_members_after) == {"alice", "bob", "charlie", "david"}
 
     async def test_set_dept_tree_renames_existing_dept_room(self):
@@ -780,12 +786,7 @@ class TestDeptService(ServiceTestCase):
             assert persisted_room is not None
             assert "DEPT" in persisted_room.tags
 
-            team_configs = []
-            for team_row in await gtTeamManager.get_all_teams():
-                config = await teamService.get_team_config(team_row.name)
-                if config is not None:
-                    team_configs.append(config)
-            await roomService.refresh_rooms_for_team(team.id, team_configs)
+            await roomService.refresh_rooms_for_team(team.id)
 
             runtime_room = roomService.get_room_by_key("engineering@t_room_tags")
             assert "DEPT" in runtime_room.tags
@@ -834,5 +835,5 @@ class TestDeptService(ServiceTestCase):
             biz_id = f"DEPT:{dept.id}"
             room = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
             assert room is not None
-            room_members = await roomService.get_db_room_member_names(room.id)
+            room_members = await self._get_room_member_names(room.id)
             assert set(room_members) == expected_members

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from dal.db import gtTeamManager, gtAgentManager
+from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtTeam import GtTeam
 from service import roleTemplateService, agentService, ormService, persistenceService, roomService, messageBus
 from service.agentService import Agent
@@ -67,7 +68,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await roomService.startup()
-        await roomService.ensure_rooms_from_config(TEAMS_CONFIG)
+        await roomService.load_rooms_from_db()
         cls.restored = roomService.get_room_by_key(f"r1@{TEAM}")
         await roomService.restore_state()
 
@@ -108,14 +109,30 @@ class TestRestoreAgentHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await agentService.startup()
-
-        agent = Agent("alice", TEAM, "sys", "test-model")
-        agent._history = [
-            OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1"),
-            OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1"),
-        ]
-        for item in agent.dump_history_messages():
-            await persistenceService.append_agent_history_message(item)
+        await roleTemplateService.startup()
+        configUtil.load(os.path.join(os.path.dirname(__file__), "../../config"), force_reload=True)
+        team = await gtTeamManager.save_team(GtTeam(name=TEAM))
+        agents = await ServiceTestCase.convert_to_gt_agents(
+            team.id,
+            [AgentConfig(name="alice", role_template="alice")],
+        )
+        await gtAgentManager.batch_save_agents(team.id, agents)
+        alice_row = await gtAgentManager.get_agent(team.id, "alice")
+        assert alice_row is not None
+        await persistenceService.append_agent_history_message(
+            GtAgentHistory(
+                agent_id=alice_row.id,
+                seq=0,
+                message_json=OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1").model_dump_json(exclude_none=True),
+            )
+        )
+        await persistenceService.append_agent_history_message(
+            GtAgentHistory(
+                agent_id=alice_row.id,
+                seq=1,
+                message_json=OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1").model_dump_json(exclude_none=True),
+            )
+        )
 
         # 模拟进程重启
         await persistenceService.shutdown()
@@ -127,13 +144,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
         configUtil.load(os.path.join(os.path.dirname(__file__), "../../config"), force_reload=True)
         await roleTemplateService.startup()
         await agentService.startup()
-        await agentService.create_team_agents([
-            TeamConfig(
-                name=TEAM,
-                members=[AgentConfig(name="alice", role_template="alice")],
-                preset_rooms=[],
-            )
-        ])
+        await agentService.create_team_agents_from_db()
         cls.fresh_agent = agentService.get_team_agent(TEAM, "alice")
         await agentService.restore_state()
 
