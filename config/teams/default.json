@@ -35,7 +35,7 @@
   ],
   "dept_tree": {
     "dept_name": "总部",
-    "dept_responsibility": "负责整体运营与协作",
+    "responsibility": "负责整体运营与协作",
     "manager": "小马哥",
     "members": ["小马哥", "王老师", "小A", "小B", "小刘"],
     "children": []
