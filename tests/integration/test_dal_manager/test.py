@@ -187,7 +187,7 @@ class TestDalManagers(ServiceTestCase):
         agents = await ServiceTestCase.convert_to_gt_agents(team_a.id, configs)
         await gtAgentManager.batch_save_agents(team_a.id, agents)
 
-        await roomService.import_team_rooms_from_config(team_a.id, [TeamRoomConfig(
+        await roomService.crate_team_rooms_from_config(team_a.id, [TeamRoomConfig(
             name="general",
             initial_topic="hello",
             max_turns=6,
@@ -318,7 +318,7 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.save_team(GtTeam(name="room_team"))
-        await roomService.import_team_rooms_from_config(team.id, [
+        await roomService.crate_team_rooms_from_config(team.id, [
             TeamRoomConfig(name="z_room", max_turns=2, members=["alice", "bob"]),
             TeamRoomConfig(name="a_room", max_turns=3, members=["Operator", "alice"]),
         ])
@@ -360,10 +360,10 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.save_team(GtTeam(name="upsert_team"))
-        await roomService.import_team_rooms_from_config(team.id, [
+        await roomService.crate_team_rooms_from_config(team.id, [
             TeamRoomConfig(name="old_room", max_turns=2, members=["alice"]),
         ])
-        await roomService.import_team_rooms_from_config(team.id, [
+        await roomService.crate_team_rooms_from_config(team.id, [
             TeamRoomConfig(name="new_room_1", members=["alice"]),
             TeamRoomConfig(name="new_room_2", initial_topic="x", members=["bob"]),
         ])
@@ -377,7 +377,7 @@ class TestDalManagers(ServiceTestCase):
         await self._reset_tables()
 
         team = await gtTeamManager.save_team(GtTeam(name="delete_team"))
-        await roomService.import_team_rooms_from_config(team.id, [
+        await roomService.crate_team_rooms_from_config(team.id, [
             TeamRoomConfig(name="r1", members=["alice"]),
             TeamRoomConfig(name="r2", members=["bob"]),
         ])

@@ -67,6 +67,8 @@ class ChatRoom:
         self.initial_topic: str = room.initial_topic  # 初始话题
         self.tags: List[str] = room.tags or []  # 房间标签
         self._members: List[GtAgent] = members or []  # 房间参与者列表
+        self._member_names: List[str] = [m.name for m in self._members]
+        self._member_id_map: Dict[str, int] = {m.name: m.id for m in self._members}
 
         self._member_name_map: Dict[int, str] = {m.id: m.name for m in self._members}
         self._member_name_map[self.SYSTEM_MEMBER_ID] = SpecialAgent.SYSTEM.name
@@ -83,27 +85,21 @@ class ChatRoom:
     @property
     def members(self) -> List[str]:
         """返回成员名称列表（向后兼容）。"""
-        return [m.name for m in self._members]
+        return list(self._member_names)
 
     def get_member_id(self, name: str) -> int:
         """根据成员名称获取 member_id。"""
-        # 处理特殊成员
-        if SpecialAgent.value_of(name) == SpecialAgent.SYSTEM:
-            return self.SYSTEM_MEMBER_ID
-        if SpecialAgent.value_of(name) == SpecialAgent.OPERATOR:
-            return self.OPERATOR_MEMBER_ID
-        # 处理普通成员
-        for m in self._members:
-            if m.name == name:
-                return m.id
-        return 0
+        special_agent = SpecialAgent.value_of(name)
+        if special_agent is not None:
+            return int(special_agent.value)
+        return self._member_id_map.get(name, 0)
 
     def can_post_message(self, sender: str) -> bool:
         """返回 sender 是否允许向当前房间写消息。"""
         if SpecialAgent.value_of(sender) == SpecialAgent.SYSTEM:
             return True
 
-        for member_name in self.members:
+        for member_name in self._member_names:
             if _same_speaker(sender, member_name):
                 return True
 
@@ -171,7 +167,7 @@ class ChatRoom:
             content=content,
             time=message.send_time.isoformat(),
         )
-        if update_turn_state and self.members:
+        if update_turn_state and self._member_names:
             self._update_turn_state_on_message(sender)
 
     def _update_turn_state_on_message(self, sender: str) -> None:
@@ -225,9 +221,9 @@ class ChatRoom:
 
     def get_current_turn_agent(self) -> Optional[str]:
         """返回当前理论上应该发言的 Agent 名（忽略 IDLE 状态）。"""
-        if not self.members:
+        if not self._member_names:
             return None
-        return self.members[self._turn_pos]
+        return self._member_names[self._turn_pos]
 
     def _publish_current_turn(self) -> None:
         """发布当前轮次的发言事件。"""
@@ -244,13 +240,13 @@ class ChatRoom:
 
     def _update_turn_state_on_finish(self) -> None:
         """结束当前发言后，推进并更新轮次状态。"""
-        if not self.members:
+        if not self._member_names:
             return
 
         self._turn_pos += 1
 
         # 1. 检查是否达到轮次边界
-        if self._turn_pos >= len(self.members):
+        if self._turn_pos >= len(self._member_names):
             self._turn_index += 1
             self._turn_pos = 0
 
@@ -262,7 +258,7 @@ class ChatRoom:
 
         # 2. 检查是否所有 AI Agent 均已跳过（自上次有消息以来）
         # 如果是，则立即停止调度，不再移动到下一位
-        ai_agents = set(a for a in self.members if SpecialAgent.value_of(a) != SpecialAgent.OPERATOR)
+        ai_agents = {a for a in self._member_names if SpecialAgent.value_of(a) != SpecialAgent.OPERATOR}
         if ai_agents and ai_agents.issubset(self._round_skipped):
             self._state = RoomState.IDLE
             logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
@@ -318,12 +314,12 @@ class ChatRoom:
 
     def mark_all_messages_read(self) -> None:
         tail = len(self.messages)
-        self._member_read_index = {name: tail for name in self.members}
+        self._member_read_index = {name: tail for name in self._member_names}
 
     def rebuild_state_from_history(self) -> None:
         keep_init = (self._state == RoomState.INIT)
 
-        if not self.members or self._max_turns <= 0:
+        if not self._member_names or self._max_turns <= 0:
             self._state_after_init = RoomState.IDLE
             if keep_init:
                 self._state = RoomState.INIT
@@ -365,7 +361,7 @@ class ChatRoom:
             "team_name": self.team_name,
             "room_type": self.room_type.name,
             "state": self._state.name,
-            "agent_ids": [self.get_member_id(member_name) for member_name in self.members],
+            "agent_ids": [self.get_member_id(member_name) for member_name in self._member_names],
             "tags": self.tags,
         }
 
@@ -452,17 +448,7 @@ def _get_existing_room(
     return current_by_name.get(room_config.name)
 
 
-def _apply_room_config_to_row(team_id: int, room: GtRoom, room_config: TeamRoomConfig) -> None:
-    room.team_id = team_id
-    room.name = room_config.name
-    room.type = _infer_room_type(room_config.members)
-    room.initial_topic = room_config.initial_topic
-    room.max_turns = room_config.max_turns or 10
-    room.biz_id = room_config.biz_id
-    room.tags = list(room_config.tags)
-
-
-async def import_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomConfig]) -> None:
+async def crate_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomConfig]) -> None:
     current_rooms = await gtRoomManager.get_rooms_by_team(team_id)
     current_by_id = {room.id: room for room in current_rooms}
     current_by_name = {room.name: room for room in current_rooms}
@@ -490,16 +476,23 @@ async def import_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomCo
                 biz_id=None,
                 tags=[],
             )
-        _apply_room_config_to_row(team_id, room, room_config)
 
-        room.agent_ids = [
-            agent.id
-            for agent in await gtAgentManager.get_team_agents_by_names(
+        room.team_id = team_id
+        room.name = room_config.name
+        room.type = _infer_room_type(room_config.members)
+        room.initial_topic = room_config.initial_topic
+        room.max_turns = room_config.max_turns or 10
+        room.biz_id = room_config.biz_id
+        room.tags = list(room_config.tags)
+
+        room.agent_ids = list(map(
+            lambda agent: agent.id,
+            await gtAgentManager.get_team_agents_by_names(
                 team_id,
                 room_config.members,
                 include_special=True,
-            )
-        ]
+            ),
+        ))
         await gtRoomManager.save_room(room)
 
 
@@ -523,13 +516,14 @@ async def ensure_room_record(team_name: str, name: str, members: List[str], init
     """确保房间记录存在并装载运行态。创建后房间处于 INIT，需由 service 层显式退出 INIT。"""
     team_row = await gtTeamManager.get_team(team_name)
     assert team_row is not None, f"Team '{team_name}' 不存在，调用 ensure_room_record 前应先创建 Team"
-    agent_rows = await gtAgentManager.get_team_agents_by_names(team_row.id, members, include_special=False)
-    agent_id_map = {agent.name: agent.id for agent in agent_rows}
-    agent_ids = [
-        int(special.value) if (special := SpecialAgent.value_of(member)) is not None else agent_id_map[member]
-        for member in members
-        if SpecialAgent.value_of(member) is not None or member in agent_id_map
-    ]
+    agent_ids = list(map(
+        lambda agent: agent.id,
+        await gtAgentManager.get_team_agents_by_names(
+            team_row.id,
+            members,
+            include_special=True,
+        ),
+    ))
     room_row = await gtRoomManager.get_room_by_team_and_name(team_row.id, name)
     if room_row is None:
         room_row = GtRoom(
