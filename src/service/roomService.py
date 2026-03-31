@@ -447,7 +447,7 @@ async def save_room_members(room_id: int, agent_ids: list[int]) -> None:
     await gtRoomManager.save_room(room)
 
 
-async def override_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> None:
+async def overwrite_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> None:
     """按部门房间信息同步 DEPT 房间。
 
     行为约定：
@@ -493,7 +493,7 @@ async def crate_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomCon
     existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
     assertUtil.assertTrue(
         len(existing_rooms) == 0,
-        error_message=f"team_id '{team_id}' already has rooms, use override_team_rooms instead",
+        error_message=f"team_id '{team_id}' already has rooms, use overwrite_team_rooms instead",
         error_code="TEAM_ROOMS_ALREADY_EXIST",
     )
     room_rows: list[GtRoom] = []
@@ -551,7 +551,7 @@ async def batch_create_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
     await gtRoomManager.batch_save_rooms(room_list)
 
 
-async def override_team_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
+async def overwrite_team_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
     """常规更新流程：按目标房间集创建/更新房间，并清理已移除房间。"""
     current_rooms = await gtRoomManager.get_rooms_by_team(team_id)
     next_names = {room.name for room in rooms}

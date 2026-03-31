@@ -62,7 +62,7 @@ async def import_dept_tree(team_id: int, node: DeptNodeConfig) -> None:
     logger.info(f"dept_tree 导入完成（team_id={team_id}，根节点={node.dept_name}）")
 
 
-async def override_dept_tree(team_id: int, root: DeptTreeNode) -> None:
+async def overwrite_dept_tree(team_id: int, root: DeptTreeNode) -> None:
     """增量更新部门树，同步部门房间，更新成员 employ_status。"""
     # 单次递归：校验整棵树 + 收集成员 ID 与部门 ID
     all_member_ids, new_dept_ids = root.validate_and_collect()
@@ -77,15 +77,15 @@ async def override_dept_tree(team_id: int, root: DeptTreeNode) -> None:
 
     # 增量更新/创建部门，并收集 ID 映射
     dept_ids_map: dict[str, int] = {}
-    await _override_dept_subtree(team_id, root, parent_id=None, dept_ids_map=dept_ids_map)
+    await _overwrite_dept_subtree(team_id, root, parent_id=None, dept_ids_map=dept_ids_map)
 
     # 同步部门房间（roomService 只接收房间信息，不感知部门树结构）
     dept_rooms: list[roomService.DeptRoomSpec] = []
     _collect_dept_room_specs(root, dept_ids_map, dept_rooms)
-    await roomService.override_dept_rooms(team_id, dept_rooms)
+    await roomService.overwrite_dept_rooms(team_id, dept_rooms)
 
     # 更新成员 employ_status：树内成员 ON_BOARD，其他成员 OFF_BOARD
-    on_board_count, off_board_count = await agentService.override_team_agent_employ_status(team_id, all_member_ids)
+    on_board_count, off_board_count = await agentService.overwrite_team_agent_employ_status(team_id, all_member_ids)
 
     logger.info(f"部门树已更新（team_id={team_id}，on_board={on_board_count}，off_board={off_board_count}）")
 
@@ -129,7 +129,7 @@ async def _import_dept_subtree_from_config(team_id: int, node: DeptNodeConfig, p
     return dept
 
 
-async def _override_dept_subtree(
+async def _overwrite_dept_subtree(
     team_id: int,
     node: DeptTreeNode,
     parent_id: int | None,
@@ -176,7 +176,7 @@ async def _override_dept_subtree(
 
     # 递归处理子部门
     for child in node.children:
-        await _override_dept_subtree(team_id, child, parent_id=dept.id, dept_ids_map=dept_ids_map)
+        await _overwrite_dept_subtree(team_id, child, parent_id=dept.id, dept_ids_map=dept_ids_map)
 
     return dept
 
