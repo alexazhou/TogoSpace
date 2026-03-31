@@ -26,27 +26,27 @@ class DeptTreeNode(BaseModel):
     dept_id: int | None = None
     dept_name: str
     dept_responsibility: str = ""
-    manager: str
-    members: List[str] = Field(default_factory=list)
+    manager_id: int
+    member_ids: List[int] = Field(default_factory=list)
     children: List["DeptTreeNode"] = Field(default_factory=list)
 
-    def validate_and_collect(self) -> tuple[set[str], set[int]]:
-        """递归校验节点并收集成员名与非空 dept_id。"""
-        if len(self.members) < 2:
+    def validate_and_collect(self) -> tuple[set[int], set[int]]:
+        """递归校验节点并收集成员 ID 与非空 dept_id。"""
+        if len(self.member_ids) < 2:
             raise TeamAgentException(
                 f"部门 '{self.dept_name}' 成员不足 2 人，无法创建房间",
                 error_code="DEPT_MEMBERS_TOO_FEW",
             )
 
-        member_names: set[str] = set(self.members)
+        member_ids: set[int] = set(self.member_ids)
         dept_ids: set[int] = {self.dept_id} if self.dept_id is not None else set()
 
         for child in self.children:
-            child_member_names, child_dept_ids = child.validate_and_collect()
-            member_names.update(child_member_names)
+            child_member_ids, child_dept_ids = child.validate_and_collect()
+            member_ids.update(child_member_ids)
             dept_ids.update(child_dept_ids)
 
-        return member_names, dept_ids
+        return member_ids, dept_ids
 
 
 DeptTreeNode.model_rebuild()
@@ -65,8 +65,8 @@ async def import_dept_tree(team_id: int, node: DeptNodeConfig) -> None:
 
 async def save_dept_tree(team_id: int, root: DeptTreeNode) -> None:
     """增量更新部门树，同步部门房间，更新成员 employ_status。"""
-    # 单次递归：校验整棵树 + 收集成员名与部门 ID
-    all_member_names, new_dept_ids = root.validate_and_collect()
+    # 单次递归：校验整棵树 + 收集成员 ID 与部门 ID
+    all_member_ids, new_dept_ids = root.validate_and_collect()
 
     # 获取现有部门
     existing_depts = await gtDeptManager.get_all_depts(team_id)
@@ -91,7 +91,7 @@ async def save_dept_tree(team_id: int, root: DeptTreeNode) -> None:
     all_agents = await gtAgentManager.get_team_agents(team_id)
 
     # 在树中的成员设为 ON_BOARD
-    on_board_ids = [a.id for a in all_agents if a.name in all_member_names]
+    on_board_ids = [a.id for a in all_agents if a.id in all_member_ids]
     if on_board_ids:
         await (
             GtAgent.update(employ_status=EmployStatus.ON_BOARD)
@@ -100,7 +100,7 @@ async def save_dept_tree(team_id: int, root: DeptTreeNode) -> None:
         )
 
     # 不在树中的成员设为 OFF_BOARD
-    off_board_ids = [a.id for a in all_agents if a.name not in all_member_names]
+    off_board_ids = [a.id for a in all_agents if a.id not in all_member_ids]
     if off_board_ids:
         await (
             GtAgent.update(employ_status=EmployStatus.OFF_BOARD)
@@ -157,28 +157,22 @@ async def _save_dept_update_node(
     dept_ids_map: dict[str, int],
 ) -> GtDept:
     """增量更新/创建单个部门节点，返回 GtDept 对象。"""
-    # 校验：manager 必须出现在 members 中
-    if node.manager not in node.members:
+    # 校验：manager_id 必须出现在 member_ids 中
+    if node.manager_id not in node.member_ids:
         raise TeamAgentException(
-            f"部门 '{node.dept_name}' 的主管 '{node.manager}' 不在成员名单中",
+            f"部门 '{node.dept_name}' 的主管 ID '{node.manager_id}' 不在成员名单中",
             error_code="DEPT_MANAGER_NOT_IN_MEMBERS",
         )
 
-    # 解析 agent_ids 和 manager_id
-    agent_ids: list[int] = []
-    manager_id: int | None = None
-    for member_name in node.members:
-        row = await gtAgentManager.get_agent(team_id, member_name)
-        if row is None:
-            raise TeamAgentException(
-                f"部门 '{node.dept_name}' 的成员 '{member_name}' 在 team_members 中不存在",
-                error_code="DEPT_MEMBER_NOT_FOUND",
-            )
-        agent_ids.append(row.id)
-        if member_name == node.manager:
-            manager_id = row.id
-
-    assert manager_id is not None
+    agent_ids: list[int] = list(dict.fromkeys(node.member_ids))
+    member_rows = await gtAgentManager.get_team_agents_by_ids(team_id, agent_ids, include_special=False)
+    existing_member_ids = {row.id for row in member_rows}
+    missing_member_ids = [member_id for member_id in agent_ids if member_id not in existing_member_ids]
+    if missing_member_ids:
+        raise TeamAgentException(
+            f"部门 '{node.dept_name}' 的成员 ID '{missing_member_ids[0]}' 在 team_members 中不存在",
+            error_code="DEPT_MEMBER_NOT_FOUND",
+        )
 
     # 按 dept_id 或 dept_name 匹配现有部门
     if node.dept_id is not None:
@@ -195,7 +189,7 @@ async def _save_dept_update_node(
             name=node.dept_name,
             responsibility=node.dept_responsibility,
             parent_id=parent_id,
-            manager_id=manager_id,
+            manager_id=node.manager_id,
             agent_ids=agent_ids,
             dept_id=existing.id,
         )
@@ -206,7 +200,7 @@ async def _save_dept_update_node(
             name=node.dept_name,
             responsibility=node.dept_responsibility,
             parent_id=parent_id,
-            manager_id=manager_id,
+            manager_id=node.manager_id,
             agent_ids=agent_ids,
         )
 
@@ -236,11 +230,7 @@ async def _save_dept_update_room(team_id: int, node: DeptTreeNode, dept_ids_map:
         existing.biz_id = biz_id
         existing.tags = ["DEPT"]
         await gtRoomManager.save_room(existing)
-        agent_ids = [
-            agent.id
-            for agent in await gtAgentManager.get_team_agents_by_names(team_id, node.members, include_special=False)
-        ]
-        await roomService.save_room_members(existing.id, agent_ids)
+        await roomService.save_room_members(existing.id, node.member_ids)
     else:
         # 创建新房间，并添加部门成员
         room = await gtRoomManager.save_room(GtRoom(
@@ -253,11 +243,7 @@ async def _save_dept_update_room(team_id: int, node: DeptTreeNode, dept_ids_map:
             biz_id=biz_id,
             tags=["DEPT"],
         ))
-        agent_ids = [
-            agent.id
-            for agent in await gtAgentManager.get_team_agents_by_names(team_id, node.members, include_special=False)
-        ]
-        await roomService.save_room_members(room.id, agent_ids)
+        await roomService.save_room_members(room.id, node.member_ids)
 
     # 递归处理子部门
     for child in node.children:
@@ -275,20 +261,14 @@ async def get_dept_tree(team_id: int) -> DeptTreeNode | None:
     for dept in all_depts:
         children_map.setdefault(dept.parent_id, []).append(dept)
 
-    # 建立 id -> member names 映射（通过 agent_ids 反查 team_members）
-    all_agents = await gtAgentManager.get_team_agents(team_id)
-    agent_id_to_name: dict[int, str] = {m.id: m.name for m in all_agents}
-
     def build_node(dept: GtDept) -> DeptTreeNode:
-        manager_name = agent_id_to_name.get(dept.manager_id, "")
-        member_names = [agent_id_to_name[aid] for aid in dept.agent_ids if aid in agent_id_to_name]
         children = [build_node(child) for child in children_map.get(dept.id, [])]
         return DeptTreeNode(
             dept_id=dept.id,
             dept_name=dept.name,
             dept_responsibility=dept.responsibility,
-            manager=manager_name,
-            members=member_names,
+            manager_id=dept.manager_id,
+            member_ids=list(dept.agent_ids),
             children=children,
         )
 

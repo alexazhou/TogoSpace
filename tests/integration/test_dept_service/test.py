@@ -301,19 +301,23 @@ class TestDeptService(ServiceTestCase):
         )
         await deptService.import_dept_tree(team.id, original)
 
+        cto_id = await self._get_agent_id(team.id, "cto")
+        dev_a_id = await self._get_agent_id(team.id, "dev_a")
+        dev_b_id = await self._get_agent_id(team.id, "dev_b")
+
         rebuilt = await deptService.get_dept_tree(team.id)
         assert rebuilt is not None
         assert rebuilt.dept_name == "root"
         assert rebuilt.dept_responsibility == "root dept"
-        assert rebuilt.manager == "cto"
-        assert "cto" in rebuilt.members
+        assert rebuilt.manager_id == cto_id
+        assert cto_id in rebuilt.member_ids
         assert len(rebuilt.children) == 1
 
         child = rebuilt.children[0]
         assert child.dept_name == "dev"
         assert child.dept_responsibility == "development"
-        assert child.manager == "dev_a"
-        assert set(child.members) == {"dev_a", "dev_b"}
+        assert child.manager_id == dev_a_id
+        assert set(child.member_ids) == {dev_a_id, dev_b_id}
         assert child.children == []
 
     async def test_get_dept_tree_returns_none_when_no_depts(self):
@@ -606,12 +610,15 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_members("t_room_create", ["alice", "bob", "charlie"])
+        alice_id = await self._get_agent_id(team.id, "alice")
+        bob_id = await self._get_agent_id(team.id, "bob")
+        charlie_id = await self._get_agent_id(team.id, "charlie")
 
         root = deptService.DeptTreeNode(
             dept_name="engineering",
             dept_responsibility="开发部门",
-            manager="alice",
-            members=["alice", "bob", "charlie"],
+            manager_id=alice_id,
+            member_ids=[alice_id, bob_id, charlie_id],
         )
 
         await deptService.save_dept_tree(team.id, root)
@@ -634,13 +641,17 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_members("t_room_update", ["alice", "bob", "charlie", "david"])
+        alice_id = await self._get_agent_id(team.id, "alice")
+        bob_id = await self._get_agent_id(team.id, "bob")
+        charlie_id = await self._get_agent_id(team.id, "charlie")
+        david_id = await self._get_agent_id(team.id, "david")
 
         # 第一次创建
         root = deptService.DeptTreeNode(
             dept_name="marketing",
             dept_responsibility="市场部门",
-            manager="alice",
-            members=["alice", "bob"],
+            manager_id=alice_id,
+            member_ids=[alice_id, bob_id],
         )
         await deptService.save_dept_tree(team.id, root)
 
@@ -657,8 +668,8 @@ class TestDeptService(ServiceTestCase):
             dept_id=dept.id,
             dept_name="marketing",
             dept_responsibility="市场部门",
-            manager="alice",
-            members=["alice", "bob", "charlie", "david"],
+            manager_id=alice_id,
+            member_ids=[alice_id, bob_id, charlie_id, david_id],
         )
         await deptService.save_dept_tree(team.id, root_updated)
 
@@ -672,12 +683,14 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_members("t_room_rename", ["alice", "bob"])
+        alice_id = await self._get_agent_id(team.id, "alice")
+        bob_id = await self._get_agent_id(team.id, "bob")
 
         root = deptService.DeptTreeNode(
             dept_name="engineering",
             dept_responsibility="开发部门",
-            manager="alice",
-            members=["alice", "bob"],
+            manager_id=alice_id,
+            member_ids=[alice_id, bob_id],
         )
         await deptService.save_dept_tree(team.id, root)
 
@@ -692,8 +705,8 @@ class TestDeptService(ServiceTestCase):
             dept_id=dept.id,
             dept_name="platform",
             dept_responsibility="平台部门",
-            manager="alice",
-            members=["alice", "bob"],
+            manager_id=alice_id,
+            member_ids=[alice_id, bob_id],
         )
         await deptService.save_dept_tree(team.id, renamed)
 
@@ -711,12 +724,14 @@ class TestDeptService(ServiceTestCase):
 
         try:
             team = await self._setup_team_with_members("t_room_tags", ["alice", "bob"])
+            alice_id = await self._get_agent_id(team.id, "alice")
+            bob_id = await self._get_agent_id(team.id, "bob")
 
             root = deptService.DeptTreeNode(
                 dept_name="engineering",
                 dept_responsibility="开发部门",
-                manager="alice",
-                members=["alice", "bob"],
+                manager_id=alice_id,
+                member_ids=[alice_id, bob_id],
             )
             await deptService.save_dept_tree(team.id, root)
 
@@ -741,24 +756,31 @@ class TestDeptService(ServiceTestCase):
         team = await self._setup_team_with_members(
             "t_room_hier", ["cto", "ceo", "eng_mgr", "dev_a", "dev_b", "sales_mgr", "sales_a"]
         )
+        cto_id = await self._get_agent_id(team.id, "cto")
+        ceo_id = await self._get_agent_id(team.id, "ceo")
+        eng_mgr_id = await self._get_agent_id(team.id, "eng_mgr")
+        dev_a_id = await self._get_agent_id(team.id, "dev_a")
+        dev_b_id = await self._get_agent_id(team.id, "dev_b")
+        sales_mgr_id = await self._get_agent_id(team.id, "sales_mgr")
+        sales_a_id = await self._get_agent_id(team.id, "sales_a")
 
         root = deptService.DeptTreeNode(
             dept_name="company",
             dept_responsibility="公司",
-            manager="cto",
-            members=["cto", "ceo"],  # 至少 2 人
+            manager_id=cto_id,
+            member_ids=[cto_id, ceo_id],  # 至少 2 人
             children=[
                 deptService.DeptTreeNode(
                     dept_name="engineering",
                     dept_responsibility="技术部",
-                    manager="eng_mgr",
-                    members=["eng_mgr", "dev_a", "dev_b"],
+                    manager_id=eng_mgr_id,
+                    member_ids=[eng_mgr_id, dev_a_id, dev_b_id],
                 ),
                 deptService.DeptTreeNode(
                     dept_name="sales",
                     dept_responsibility="销售部",
-                    manager="sales_mgr",
-                    members=["sales_mgr", "sales_a"],
+                    manager_id=sales_mgr_id,
+                    member_ids=[sales_mgr_id, sales_a_id],
                 ),
             ],
         )
