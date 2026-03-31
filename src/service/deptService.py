@@ -284,10 +284,6 @@ async def _save_dept_update_room(team_id: int, node: DeptTreeNode, dept_ids_map:
 
 async def get_dept_tree_async(team_id: int) -> DeptTreeNode | None:
     """从 DB 重建树形结构，返回根节点；无部门时返回 None。"""
-    return await _get_dept_tree_async(team_id)
-
-
-async def _get_dept_tree_async(team_id: int) -> DeptTreeNode | None:
     all_depts = await gtDeptManager.get_all_depts(team_id)
     if not all_depts:
         return None
@@ -328,36 +324,34 @@ async def get_off_board_members(team_id: int) -> list[GtAgent]:
     return await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.OFF_BOARD)
 
 
-async def get_member_dept(team_id: int, member_name: str) -> GtDept | None:
+async def get_member_dept(team_id: int, agent_id: int) -> GtDept | None:
     """查询成员所在部门；不在任何部门时返回 None。"""
-    member = await gtAgentManager.get_agent(team_id, member_name)
-    if member is None:
-        return None
     all_depts = await gtDeptManager.get_all_depts(team_id)
     for dept in all_depts:
-        if member.id in dept.agent_ids:
+        if agent_id in dept.agent_ids:
             return dept
     return None
 
 
 async def remove_member_from_dept(
     team_id: int,
-    member_name: str,
+    agent_id: int,
     new_manager: str | None = None,
 ) -> None:
     """将成员从所在部门移除并设为 off_board。若其为主管，需指定新主管。"""
-    member = await gtAgentManager.get_agent(team_id, member_name)
-    if member is None:
+    members = await gtAgentManager.get_team_agents_by_ids(team_id, [agent_id], include_special=False)
+    if len(members) == 0:
         raise TeamAgentException(
-            f"成员 '{member_name}' 不存在",
+            f"成员 ID '{agent_id}' 不存在",
             error_code="MEMBER_NOT_FOUND",
         )
+    member = members[0]
 
-    member_dept = await get_member_dept(team_id, member_name)
+    member_dept = await get_member_dept(team_id, agent_id)
     if member_dept is None:
         await (
             GtAgent.update(employ_status=EmployStatus.OFF_BOARD)
-            .where((GtAgent.team_id == team_id) & (GtAgent.name == member_name))
+            .where((GtAgent.team_id == team_id) & (GtAgent.id == agent_id))
             .aio_execute()
         )
         return
@@ -365,7 +359,7 @@ async def remove_member_from_dept(
     is_manager = member.id == member_dept.manager_id
     if is_manager and new_manager is None:
         raise TeamAgentException(
-            f"成员 '{member_name}' 是部门 '{member_dept.name}' 的主管，移除时必须指定新主管",
+            f"成员 '{member.name}' 是部门 '{member_dept.name}' 的主管，移除时必须指定新主管",
             error_code="MANAGER_REMOVAL_REQUIRES_NEW_MANAGER",
         )
 
@@ -396,12 +390,12 @@ async def remove_member_from_dept(
     )
     await (
         GtAgent.update(employ_status=EmployStatus.OFF_BOARD)
-        .where((GtAgent.team_id == team_id) & (GtAgent.name == member_name))
+        .where((GtAgent.team_id == team_id) & (GtAgent.id == agent_id))
         .aio_execute()
     )
 
 
-async def set_dept_manager(team_id: int, dept_name: str, manager_name: str) -> None:
+async def set_dept_manager(team_id: int, dept_name: str, manager_id: int) -> None:
     """变更部门主管，新主管必须已在该部门中。"""
     dept = await gtDeptManager.get_dept_by_name(team_id, dept_name)
     if dept is None:
@@ -410,16 +404,17 @@ async def set_dept_manager(team_id: int, dept_name: str, manager_name: str) -> N
             error_code="DEPT_NOT_FOUND",
         )
 
-    manager_row = await gtAgentManager.get_agent(team_id, manager_name)
-    if manager_row is None:
+    managers = await gtAgentManager.get_team_agents_by_ids(team_id, [manager_id], include_special=False)
+    if len(managers) == 0:
         raise TeamAgentException(
-            f"成员 '{manager_name}' 不存在",
+            f"成员 ID '{manager_id}' 不存在",
             error_code="MEMBER_NOT_FOUND",
         )
+    manager_row = managers[0]
 
-    if manager_row.id not in dept.agent_ids:
+    if manager_id not in dept.agent_ids:
         raise TeamAgentException(
-            f"成员 '{manager_name}' 不在部门 '{dept_name}' 的成员名单中",
+            f"成员 ID '{manager_id}' 不在部门 '{dept_name}' 的成员名单中",
             error_code="MEMBER_NOT_IN_DEPT",
         )
 
