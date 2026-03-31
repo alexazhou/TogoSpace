@@ -45,6 +45,17 @@ async def _assert_agent_ids_in_team(team_id: int, agent_ids: List[int]) -> None:
     if len(agent_ids) == 0:
         return
 
+    system_ids = [
+        agent_id for agent_id in agent_ids
+        if agentService.get_special_agent_by_id(agent_id) == SpecialAgent.SYSTEM
+    ]
+    assertUtil.assertEqual(
+        len(system_ids),
+        0,
+        error_message=f"system agent is not allowed in room members: {system_ids}",
+        error_code="system_agent_not_allowed",
+    )
+
     duplicate_ids = sorted([agent_id for agent_id, count in Counter(agent_ids).items() if count > 1])
     assertUtil.assertEqual(
         len(duplicate_ids),
@@ -167,6 +178,11 @@ class TeamRoomCreateHandler(BaseHandler):
         existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
         existing = next((r for r in existing_rooms if r.name == request.name), None)
         assertUtil.assertEqual(existing, None, error_message=f"Room '{request.name}' already exists", error_code="room_exists")
+        assertUtil.assertTrue(
+            len(request.agent_ids) >= 2,
+            error_message="room must have at least 2 members",
+            error_code="room_members_too_few",
+        )
         await _assert_agent_ids_in_team(team_id, request.agent_ids)
 
         await gtRoomManager.save_room(GtRoom(
