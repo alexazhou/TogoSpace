@@ -145,7 +145,7 @@ async def import_teams_from_app_config() -> None:
             logger.warning(f"Team '{team_config.name}' 缺少 dept_tree 配置，跳过导入")
             continue
 
-        await deptService.import_dept_tree(team.id, await _to_dept_tree_node(team.id, team_config.dept_tree))
+        await deptService.overwrite_dept_tree(team.id, await _to_dept_tree_node(team.id, team_config.dept_tree))
 
     logger.info("Team 配置已导入数据库")
 
