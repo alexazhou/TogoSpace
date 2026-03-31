@@ -144,7 +144,7 @@ class TeamMembersSaveHandler(BaseHandler):
         )
 
         await _assert_role_templates_exist([a.role_template_id for a in request.members])
-        updated_agents = await agentService.save_team_agents_full_replace(team_id, request.members)
+        updated_agents = await agentService.override_team_agents(team_id, request.members)
 
         await teamService.hot_reload_team(team.name)
 

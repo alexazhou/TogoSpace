@@ -447,7 +447,7 @@ async def save_room_members(room_id: int, agent_ids: list[int]) -> None:
     await gtRoomManager.save_room(room)
 
 
-async def sync_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> None:
+async def override_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> None:
     """按部门房间信息同步 DEPT 房间。
 
     行为约定：
@@ -493,7 +493,7 @@ async def crate_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomCon
     existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
     assertUtil.assertTrue(
         len(existing_rooms) == 0,
-        error_message=f"team_id '{team_id}' already has rooms, use update_team_rooms_from_config instead",
+        error_message=f"team_id '{team_id}' already has rooms, use override_team_rooms instead",
         error_code="TEAM_ROOMS_ALREADY_EXIST",
     )
     room_rows: list[GtRoom] = []
@@ -551,8 +551,8 @@ async def batch_create_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
     await gtRoomManager.batch_save_rooms(room_list)
 
 
-async def update_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomConfig]) -> None:
-    """常规更新流程：按配置创建/更新房间，并清理已移除房间。"""
+async def override_team_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
+    """常规更新流程：按目标房间集创建/更新房间，并清理已移除房间。"""
     current_rooms = await gtRoomManager.get_rooms_by_team(team_id)
     next_names = {room.name for room in rooms}
     next_ids = {room.id for room in rooms if room.id is not None}
@@ -565,8 +565,8 @@ async def update_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomCo
     for room_id in obsolete_room_ids:
         await gtRoomManager.delete_room(room_id)
 
-    for room_config in rooms:
-        room = await gtRoomManager.get_room_by_team_and_id_or_name(team_id, room_config.id, room_config.name)
+    for room_input in rooms:
+        room = await gtRoomManager.get_room_by_team_and_id_or_name(team_id, room_input.id, room_input.name)
         if room is None:
             room = GtRoom(
                 team_id=team_id,
@@ -580,21 +580,13 @@ async def update_team_rooms_from_config(team_id: int, rooms: Sequence[TeamRoomCo
             )
 
         room.team_id = team_id
-        room.name = room_config.name
-        room.type = _infer_room_type(room_config.members)
-        room.initial_topic = room_config.initial_topic
-        room.max_turns = room_config.max_turns or 10
-        room.biz_id = room_config.biz_id
-        room.tags = list(room_config.tags)
-
-        room.agent_ids = list(map(
-            lambda agent: agent.id,
-            await gtAgentManager.get_team_agents_by_names(
-                team_id,
-                room_config.members,
-                include_special=True,
-            ),
-        ))
+        room.name = room_input.name
+        room.type = room_input.type
+        room.initial_topic = room_input.initial_topic
+        room.max_turns = room_input.max_turns
+        room.biz_id = room_input.biz_id
+        room.tags = list(room_input.tags or [])
+        room.agent_ids = list(room_input.agent_ids or [])
         await gtRoomManager.save_room(room)
 
 

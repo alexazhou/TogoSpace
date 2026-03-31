@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from constants import DriverType, EmployStatus
+from constants import DriverType, EmployStatus, RoomType, SpecialAgent
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from exception import TeamAgentException
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from service import deptService, roomService, schedulerService, agentService
 from util import configUtil, assertUtil
@@ -183,7 +184,7 @@ async def create_team(team_config: TeamConfig) -> int:
 
     # 创建 Rooms（常规流程，不走“配置导入专用”接口）
     if team_config.preset_rooms:
-        await update_team_rooms(team_id, team_config.preset_rooms)
+        await override_team_rooms(team_id, team_config.preset_rooms)
 
     # 触发热更新
     await hot_reload_team(name)
@@ -212,11 +213,43 @@ async def update_team_members(team_id: int, members: list[Any]) -> None:
     await gtAgentManager.batch_save_agents(team_id, await _build_agent_rows_with_template_ids(team_id, members))
 
 
-async def update_team_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
+def _infer_room_type(members: list[str]) -> RoomType:
+    ai_count = len([member for member in members if SpecialAgent.value_of(member) != SpecialAgent.OPERATOR])
+    if any(SpecialAgent.value_of(member) == SpecialAgent.OPERATOR for member in members) and ai_count == 1:
+        return RoomType.PRIVATE
+    return RoomType.GROUP
+
+
+async def _build_room_rows_from_configs(team_id: int, rooms: list[TeamRoomConfig]) -> list[GtRoom]:
+    room_rows: list[GtRoom] = []
+    for room in rooms:
+        member_ids = list(map(
+            lambda agent: agent.id,
+            await gtAgentManager.get_team_agents_by_names(
+                team_id,
+                room.members,
+                include_special=True,
+            ),
+        ))
+        room_rows.append(GtRoom(
+            id=room.id,
+            team_id=team_id,
+            name=room.name,
+            type=_infer_room_type(room.members),
+            initial_topic=room.initial_topic,
+            max_turns=room.max_turns or 10,
+            agent_ids=member_ids,
+            biz_id=room.biz_id,
+            tags=list(room.tags),
+        ))
+    return room_rows
+
+
+async def override_team_rooms(team_id: int, rooms: list[TeamRoomConfig]) -> None:
     for room in rooms:
         if not room.max_turns:
             room.max_turns = 100
-    await roomService.update_team_rooms_from_config(team_id, rooms)
+    await roomService.override_team_rooms(team_id, await _build_room_rows_from_configs(team_id, rooms))
 
 
 async def crate_team_rooms_from_config(team_id: int, preset_rooms: list[TeamRoomConfig]) -> None:

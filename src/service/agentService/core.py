@@ -451,7 +451,7 @@ async def _resolve_role_template_id(agent_data: Any) -> int:
     return template.id
 
 
-async def save_team_agents_full_replace(team_id: int, agents_data: list[Any]) -> list[GtAgent]:
+async def override_team_agents(team_id: int, agents_data: list[Any]) -> list[GtAgent]:
     """全量覆盖成员列表：有 id 更新，无 id 创建，不在列表的设为离职状态。返回在职成员列表。"""
     existing_agents = await gtAgentManager.get_team_agents(team_id)
     existing_ids = {a.id for a in existing_agents}
@@ -506,7 +506,7 @@ async def save_team_agents_full_replace(team_id: int, agents_data: list[Any]) ->
     return await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.ON_BOARD)
 
 
-async def sync_team_agent_employ_status(team_id: int, on_board_agent_ids: list[int] | set[int]) -> tuple[int, int]:
+async def override_team_agent_employ_status(team_id: int, on_board_agent_ids: list[int] | set[int]) -> tuple[int, int]:
     """按团队成员全集同步在岗/离岗状态，返回 (on_board_count, off_board_count)。"""
     all_agents = await gtAgentManager.get_team_agents(team_id)
     on_board_set = set(on_board_agent_ids)

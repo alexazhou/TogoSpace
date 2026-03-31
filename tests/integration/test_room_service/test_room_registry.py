@@ -6,12 +6,12 @@ import pytest
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
-from constants import SpecialAgent
+from constants import RoomType, SpecialAgent
 from dal.db import gtTeamManager, gtAgentManager
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from service.roomService import ChatRoom
-from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -83,22 +83,24 @@ class TestRoomRegistry(ServiceTestCase):
 
     async def test_create_rooms_keeps_empty_history_before_activation(self):
         """批量建房路径在激活前不应预先塞入初始化消息。"""
-        teams_config = [TeamConfig.model_validate({
-            "name": TEAM,
-            "members": [
-                {"name": "alice", "role_template": "alice"},
-            ],
-            "preset_rooms": [{
-                "name": "boot_room",
-                "members": ["alice"],
-                "initial_topic": "boot topic",
-                "max_turns": 5,
-            }],
-        })]
-
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
-        await roomService.update_team_rooms_from_config(team.id, teams_config[0].preset_rooms)
+        member_ids = list(map(
+            lambda agent: agent.id,
+            await gtAgentManager.get_team_agents_by_names(team.id, ["alice"], include_special=True),
+        ))
+        await roomService.override_team_rooms(team.id, [
+            GtRoom(
+                team_id=team.id,
+                name="boot_room",
+                type=RoomType.GROUP,
+                initial_topic="boot topic",
+                max_turns=5,
+                agent_ids=member_ids,
+                biz_id=None,
+                tags=[],
+            ),
+        ])
         await roomService.refresh_rooms_for_team(team.id)
 
         room = roomService.get_room_by_key(f"boot_room@{TEAM}")
