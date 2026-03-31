@@ -184,7 +184,7 @@ demo_json_str_6 = '''{
 
 
 class TestJsonUtil:
-    """jsonUtil 测试"""
+    """jsonUtil 基础测试"""
 
     def test_json_dump(self):
         obj = build_demo_instance()

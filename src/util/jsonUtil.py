@@ -1,5 +1,7 @@
 import logging
 import json
+import sys
+from typing import ForwardRef, get_type_hints
 
 from enum import Enum, auto
 import datetime as dt
@@ -47,6 +49,45 @@ def get_format_from_type(cls: type, config: dict) -> str:
         date_format = config.get(JSONConfig.time_format)
 
     return date_format
+
+
+def _resolve_forward_ref(type_annotation, context_class: type = None) -> type:
+    """解析前向引用类型。
+
+    例如 List["GtDept"] 或 List[ForwardRef("GtDept")] 会被解析为实际的 GtDept 类。
+    如果不是前向引用（如 list[int]），返回 None。
+    """
+    # 已经是类型，直接返回 None（不是前向引用）
+    if isinstance(type_annotation, type):
+        return None
+
+    # ForwardRef 对象（Python 3.11+）
+    if isinstance(type_annotation, ForwardRef):
+        type_name = type_annotation.__forward_arg__
+        # 优先从上下文类的模块中查找
+        if context_class is not None:
+            module = sys.modules.get(context_class.__module__)
+            if module and hasattr(module, type_name):
+                return getattr(module, type_name)
+        # 全局查找
+        for module in sys.modules.values():
+            if module and hasattr(module, type_name):
+                return getattr(module, type_name)
+        raise TypeError(f"Cannot resolve forward reference: {type_name}")
+
+    # 字符串形式的前向引用
+    if isinstance(type_annotation, str):
+        if context_class is not None:
+            module = sys.modules.get(context_class.__module__)
+            if module and hasattr(module, type_annotation):
+                return getattr(module, type_annotation)
+        for module in sys.modules.values():
+            if module and hasattr(module, type_annotation):
+                return getattr(module, type_annotation)
+        raise TypeError(f"Cannot resolve forward reference: {type_annotation}")
+
+    # 其他情况（如 list[int] 的 list），不是前向引用
+    return None
 
 
 def json_dump(obj: object, config: Dict = None) -> str:
@@ -100,10 +141,16 @@ def json_data_to_object(data: Union[Dict, List, str], cls: Type[T] = Dict, confi
     if config is not None:
         final_config.update(config)
 
-    def json_to_model(data: Union[Dict, List, str], cls_annotation: Type):
+    def json_to_model(data: Union[Dict, List, str], cls_annotation: Type, context_class: type = None):
 
         if data is None:
             return None
+
+        # 解析前向引用（仅当是 ForwardRef 或 str 时才解析）
+        if isinstance(cls_annotation, (ForwardRef, str)):
+            resolved = _resolve_forward_ref(cls_annotation, context_class)
+            if resolved is not None:
+                cls_annotation = resolved
 
         cls = annotation_to_type(cls_annotation)
         if issubclass(cls, (str, int, float)):
@@ -113,9 +160,14 @@ def json_data_to_object(data: Union[Dict, List, str], cls: Type[T] = Dict, confi
                 return data
             else:
                 nest_type_annotation = cls_annotation.__args__[0]
+                # 尝试解析前向引用
+                if isinstance(nest_type_annotation, (ForwardRef, str)):
+                    resolved = _resolve_forward_ref(nest_type_annotation, context_class)
+                    if resolved is not None:
+                        nest_type_annotation = resolved
                 ret_list = []
                 for nest_item_data in data:
-                    ret_list.append(json_to_model(nest_item_data, nest_type_annotation))
+                    ret_list.append(json_to_model(nest_item_data, nest_type_annotation, context_class))
                 return ret_list
         elif issubclass(cls, (Dict)):
             if data is None or cls_annotation == Dict:
@@ -128,7 +180,7 @@ def json_data_to_object(data: Union[Dict, List, str], cls: Type[T] = Dict, confi
                 assert type(data) == dict
                 for nest_item_data_k in data.keys():
                     nest_item_data_v = data[nest_item_data_k]
-                    ret_dict[json_to_model(nest_item_data_k, nest_type_annotation_k)] = json_to_model(nest_item_data_v, nest_type_annotation_v)
+                    ret_dict[json_to_model(nest_item_data_k, nest_type_annotation_k, context_class)] = json_to_model(nest_item_data_v, nest_type_annotation_v, context_class)
 
                 return ret_dict
 
@@ -176,7 +228,7 @@ def json_data_to_object(data: Union[Dict, List, str], cls: Type[T] = Dict, confi
                     raise Exception(f"unknown data key:{name}")
 
                 if attr_cls is not None:
-                    attr_value = json_to_model(attr_json_value, attr_cls)
+                    attr_value = json_to_model(attr_json_value, attr_cls, cls)
                     empty_item.__setattr__(name, attr_value)
 
             return empty_item
@@ -185,11 +237,17 @@ def json_data_to_object(data: Union[Dict, List, str], cls: Type[T] = Dict, confi
 
 
 def get_cls_args_annotations(cls, args):
-    """获取类中带有的注解的参数（同时会递归获取父类的）"""
-    if hasattr(cls, '__annotations__') is False:
-        return args
+    """获取类中带有的注解的参数（同时会递归获取父类的）
 
-    for k, v in cls.__annotations__.items():
+    使用 get_type_hints 来正确解析字符串形式的注解（PEP 563）。
+    """
+    try:
+        hints = get_type_hints(cls)
+    except Exception:
+        # 如果 get_type_hints 失败，回退到 __annotations__
+        hints = getattr(cls, '__annotations__', {})
+
+    for k, v in hints.items():
         if k not in args.keys():
             args[k] = v
 
