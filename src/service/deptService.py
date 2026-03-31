@@ -340,62 +340,7 @@ async def get_member_dept(team_id: int, member_name: str) -> GtDept | None:
     return None
 
 
-async def move_member(
-    team_id: int,
-    member_name: str,
-    target_dept_name: str,
-    is_manager: bool = False,
-) -> None:
-    """将成员移入指定部门，可选设为主管。"""
-    member = await gtAgentManager.get_agent(team_id, member_name)
-    if member is None:
-        raise TeamAgentException(
-            f"成员 '{member_name}' 不存在",
-            error_code="MEMBER_NOT_FOUND",
-        )
-
-    target_dept = await gtDeptManager.get_dept_by_name(team_id, target_dept_name)
-    if target_dept is None:
-        raise TeamAgentException(
-            f"部门 '{target_dept_name}' 不存在",
-            error_code="DEPT_NOT_FOUND",
-        )
-
-    all_depts = await gtDeptManager.get_all_depts(team_id)
-    for dept in all_depts:
-        if member.id in dept.agent_ids:
-            new_ids = [mid for mid in dept.agent_ids if mid != member.id]
-            await gtDeptManager.save_dept(
-                team_id=dept.team_id,
-                name=dept.name,
-                responsibility=dept.responsibility,
-                parent_id=dept.parent_id,
-                manager_id=dept.manager_id,
-                agent_ids=new_ids,
-            )
-
-    new_ids = list(target_dept.agent_ids)
-    if member.id not in new_ids:
-        new_ids.append(member.id)
-
-    new_manager_id = member.id if is_manager else target_dept.manager_id
-    await gtDeptManager.save_dept(
-        team_id=target_dept.team_id,
-        name=target_dept.name,
-        responsibility=target_dept.responsibility,
-        parent_id=target_dept.parent_id,
-        manager_id=new_manager_id,
-        agent_ids=new_ids,
-    )
-
-    await (
-        GtAgent.update(employ_status=EmployStatus.ON_BOARD)
-        .where((GtAgent.team_id == team_id) & (GtAgent.name == member_name))
-        .aio_execute()
-    )
-
-
-async def remove_member(
+async def remove_member_from_dept(
     team_id: int,
     member_name: str,
     new_manager: str | None = None,
