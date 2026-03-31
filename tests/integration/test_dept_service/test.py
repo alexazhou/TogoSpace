@@ -75,6 +75,11 @@ class TestDeptService(ServiceTestCase):
         by_id = {agent.id: agent.name for agent in agent_rows}
         return [by_id.get(agent_id, str(agent_id)) for agent_id in room.agent_ids or []]
 
+    async def _get_agent_id(self, team_id: int, member_name: str) -> int:
+        agent = await gtAgentManager.get_agent(team_id, member_name)
+        assert agent is not None
+        return agent.id
+
     # ------------------------------------------------------------------
     # gtDeptManager CRUD
     # ------------------------------------------------------------------
@@ -334,7 +339,8 @@ class TestDeptService(ServiceTestCase):
         )
         await deptService.import_dept_tree(team.id, tree)
 
-        await deptService.remove_member_from_dept(team.id, "bob")
+        bob_id = await self._get_agent_id(team.id, "bob")
+        await deptService.remove_member_from_dept(team.id, bob_id)
 
         bob = await gtAgentManager.get_agent(team.id, "bob")
         assert bob is not None
@@ -356,8 +362,9 @@ class TestDeptService(ServiceTestCase):
         )
         await deptService.import_dept_tree(team.id, tree)
 
+        alice_id = await self._get_agent_id(team.id, "alice")
         with pytest.raises(TeamAgentException) as exc_info:
-            await deptService.remove_member_from_dept(team.id, "alice")
+            await deptService.remove_member_from_dept(team.id, alice_id)
         assert exc_info.value.error_code == "MANAGER_REMOVAL_REQUIRES_NEW_MANAGER"
 
     async def test_remove_member_from_dept_manager_with_new_manager_succeeds(self):
@@ -372,7 +379,8 @@ class TestDeptService(ServiceTestCase):
         )
         await deptService.import_dept_tree(team.id, tree)
 
-        await deptService.remove_member_from_dept(team.id, "alice", new_manager="bob")
+        alice_id = await self._get_agent_id(team.id, "alice")
+        await deptService.remove_member_from_dept(team.id, alice_id, new_manager="bob")
 
         dept = await gtDeptManager.get_dept_by_name(team.id, "handoff_dept")
         assert dept is not None
@@ -398,8 +406,9 @@ class TestDeptService(ServiceTestCase):
         await deptService.import_dept_tree(team.id, tree)
 
         # charlie 不在部门中
+        alice_id = await self._get_agent_id(team.id, "alice")
         with pytest.raises(TeamAgentException) as exc_info:
-            await deptService.remove_member_from_dept(team.id, "alice", new_manager="charlie")
+            await deptService.remove_member_from_dept(team.id, alice_id, new_manager="charlie")
         assert exc_info.value.error_code == "NEW_MANAGER_NOT_IN_DEPT"
 
     async def test_remove_member_from_dept_not_in_any_dept_sets_off_board(self):
@@ -407,7 +416,8 @@ class TestDeptService(ServiceTestCase):
 
         team = await self._setup_team_with_members("t_nodept", ["alice"])
         # 没有任何 dept，直接 remove
-        await deptService.remove_member_from_dept(team.id, "alice")
+        alice_id = await self._get_agent_id(team.id, "alice")
+        await deptService.remove_member_from_dept(team.id, alice_id)
 
         alice = await gtAgentManager.get_agent(team.id, "alice")
         assert alice is not None
@@ -429,7 +439,8 @@ class TestDeptService(ServiceTestCase):
         )
         await deptService.import_dept_tree(team.id, tree)
 
-        await deptService.set_dept_manager(team.id, "the_dept", "bob")
+        bob_id = await self._get_agent_id(team.id, "bob")
+        await deptService.set_dept_manager(team.id, "the_dept", bob_id)
 
         dept = await gtDeptManager.get_dept_by_name(team.id, "the_dept")
         bob = await gtAgentManager.get_agent(team.id, "bob")
@@ -449,8 +460,9 @@ class TestDeptService(ServiceTestCase):
         await deptService.import_dept_tree(team.id, tree)
 
         # charlie 不在 small_dept 中
+        charlie_id = await self._get_agent_id(team.id, "charlie")
         with pytest.raises(TeamAgentException) as exc_info:
-            await deptService.set_dept_manager(team.id, "small_dept", "charlie")
+            await deptService.set_dept_manager(team.id, "small_dept", charlie_id)
         assert exc_info.value.error_code == "MEMBER_NOT_IN_DEPT"
 
     async def test_set_dept_manager_dept_not_found_raises(self):
@@ -458,8 +470,9 @@ class TestDeptService(ServiceTestCase):
 
         team = await self._setup_team_with_members("t_setmgr_nodept", ["alice"])
 
+        alice_id = await self._get_agent_id(team.id, "alice")
         with pytest.raises(TeamAgentException) as exc_info:
-            await deptService.set_dept_manager(team.id, "ghost_dept", "alice")
+            await deptService.set_dept_manager(team.id, "ghost_dept", alice_id)
         assert exc_info.value.error_code == "DEPT_NOT_FOUND"
 
     # ------------------------------------------------------------------
@@ -478,8 +491,10 @@ class TestDeptService(ServiceTestCase):
         )
         await deptService.import_dept_tree(team.id, tree)
 
-        await deptService.remove_member_from_dept(team.id, "bob")
-        await deptService.remove_member_from_dept(team.id, "charlie")
+        bob_id = await self._get_agent_id(team.id, "bob")
+        charlie_id = await self._get_agent_id(team.id, "charlie")
+        await deptService.remove_member_from_dept(team.id, bob_id)
+        await deptService.remove_member_from_dept(team.id, charlie_id)
 
         off_board = await deptService.get_off_board_members(team.id)
         names = {m.name for m in off_board}
@@ -568,12 +583,16 @@ class TestDeptService(ServiceTestCase):
         )
         await deptService.import_dept_tree(team.id, tree)
 
-        alice_dept = await deptService.get_member_dept(team.id, "alice")
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
+        assert alice is not None and bob is not None
+
+        alice_dept = await deptService.get_member_dept(team.id, alice.id)
         assert alice_dept is not None
         assert alice_dept.name == "found_dept"
 
         # bob 不在任何部门
-        bob_dept = await deptService.get_member_dept(team.id, "bob")
+        bob_dept = await deptService.get_member_dept(team.id, bob.id)
         assert bob_dept is None
 
     # ------------------------------------------------------------------
