@@ -334,104 +334,6 @@ class TestDeptService(ServiceTestCase):
         assert result is None
 
     # ------------------------------------------------------------------
-    # deptService.remove_member_from_dept
-    # ------------------------------------------------------------------
-
-    async def test_remove_member_from_dept_sets_off_board(self):
-        await self._reset_tables()
-
-        team = await self._setup_team_with_members("t_remove", ["alice", "bob"])
-        tree = DeptNodeConfig(dept_name="team_dept",
-            responsibility="",
-            manager="alice",
-            members=["alice", "bob"],
-        )
-        await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
-
-        bob_id = await self._get_agent_id(team.id, "bob")
-        await deptService.remove_member_from_dept(team.id, bob_id)
-
-        bob = await gtAgentManager.get_agent(team.id, "bob")
-        assert bob is not None
-        assert bob.employ_status == EmployStatus.OFF_BOARD
-
-        dept = await gtDeptManager.get_dept_by_name(team.id, "team_dept")
-        assert dept is not None
-        assert bob.id not in dept.agent_ids
-
-    async def test_remove_member_from_dept_manager_without_new_manager_raises(self):
-        await self._reset_tables()
-
-        team = await self._setup_team_with_members("t_mgr_err", ["alice", "bob"])
-        tree = DeptNodeConfig(dept_name="mgr_dept",
-            responsibility="",
-            manager="alice",
-            members=["alice", "bob"],
-        )
-        await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
-
-        alice_id = await self._get_agent_id(team.id, "alice")
-        with pytest.raises(TeamAgentException) as exc_info:
-            await deptService.remove_member_from_dept(team.id, alice_id)
-        assert exc_info.value.error_code == "MANAGER_REMOVAL_REQUIRES_NEW_MANAGER"
-
-    async def test_remove_member_from_dept_manager_with_new_manager_succeeds(self):
-        await self._reset_tables()
-
-        team = await self._setup_team_with_members("t_mgr_ok", ["alice", "bob"])
-        tree = DeptNodeConfig(dept_name="handoff_dept",
-            responsibility="",
-            manager="alice",
-            members=["alice", "bob"],
-        )
-        await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
-
-        alice_id = await self._get_agent_id(team.id, "alice")
-        bob_id = await self._get_agent_id(team.id, "bob")
-        await deptService.remove_member_from_dept(team.id, alice_id, new_manager_id=bob_id)
-
-        dept = await gtDeptManager.get_dept_by_name(team.id, "handoff_dept")
-        assert dept is not None
-
-        alice = await gtAgentManager.get_agent(team.id, "alice")
-        bob = await gtAgentManager.get_agent(team.id, "bob")
-        assert alice is not None and bob is not None
-
-        assert alice.employ_status == EmployStatus.OFF_BOARD
-        assert alice.id not in dept.agent_ids
-        assert dept.manager_id == bob.id
-
-    async def test_remove_member_from_dept_new_manager_not_in_dept_raises(self):
-        await self._reset_tables()
-
-        team = await self._setup_team_with_members("t_mgr_bad", ["alice", "bob", "charlie"])
-        tree = DeptNodeConfig(dept_name="bad_handoff_dept",
-            responsibility="",
-            manager="alice",
-            members=["alice", "bob"],
-        )
-        await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
-
-        # charlie 不在部门中
-        alice_id = await self._get_agent_id(team.id, "alice")
-        charlie_id = await self._get_agent_id(team.id, "charlie")
-        with pytest.raises(TeamAgentException) as exc_info:
-            await deptService.remove_member_from_dept(team.id, alice_id, new_manager_id=charlie_id)
-        assert exc_info.value.error_code == "NEW_MANAGER_NOT_IN_DEPT"
-
-    async def test_remove_member_from_dept_not_in_any_dept_sets_off_board(self):
-        await self._reset_tables()
-
-        team = await self._setup_team_with_members("t_nodept", ["alice"])
-        # 没有任何 dept，直接 remove
-        alice_id = await self._get_agent_id(team.id, "alice")
-        await deptService.remove_member_from_dept(team.id, alice_id)
-
-        alice = await gtAgentManager.get_agent(team.id, "alice")
-        assert alice is not None
-        assert alice.employ_status == EmployStatus.OFF_BOARD
-
-    # ------------------------------------------------------------------
     # deptService.set_dept_manager
     # ------------------------------------------------------------------
 
@@ -498,8 +400,11 @@ class TestDeptService(ServiceTestCase):
 
         bob_id = await self._get_agent_id(team.id, "bob")
         charlie_id = await self._get_agent_id(team.id, "charlie")
-        await deptService.remove_member_from_dept(team.id, bob_id)
-        await deptService.remove_member_from_dept(team.id, charlie_id)
+        await (
+            GtAgent.update(employ_status=EmployStatus.OFF_BOARD)
+            .where((GtAgent.team_id == team.id) & (GtAgent.id.in_([bob_id, charlie_id])))
+            .aio_execute()
+        )
 
         off_board = await deptService.get_off_board_members(team.id)
         names = {m.name for m in off_board}
