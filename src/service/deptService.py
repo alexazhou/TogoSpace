@@ -50,17 +50,6 @@ class DeptTreeNode(BaseModel):
 DeptTreeNode.model_rebuild()
 
 
-async def import_dept_tree(team_id: int, node: DeptTreeNode) -> None:
-    """递归将 dept_tree 配置写入数据库（首次导入；根节点已存在时整棵树跳过）。"""
-    existing = await gtDeptManager.get_dept_by_name(team_id, node.dept_name)
-    if existing is not None:
-        logger.info(f"dept_tree 已存在（team_id={team_id}），跳过导入")
-        return
-
-    await _import_dept_subtree(team_id, node, parent_id=None)
-    logger.info(f"dept_tree 导入完成（team_id={team_id}，根节点={node.dept_name}）")
-
-
 async def overwrite_dept_tree(team_id: int, root: DeptTreeNode) -> None:
     """增量更新部门树，同步部门房间，更新成员 employ_status。"""
     # 单次递归：校验整棵树 + 收集成员 ID 与部门 ID
@@ -87,38 +76,6 @@ async def overwrite_dept_tree(team_id: int, root: DeptTreeNode) -> None:
     on_board_count, off_board_count = await agentService.overwrite_team_agent_employ_status(team_id, all_member_ids)
 
     logger.info(f"部门树已更新（team_id={team_id}，on_board={on_board_count}，off_board={off_board_count}）")
-
-async def _import_dept_subtree(team_id: int, node: DeptTreeNode, parent_id: int | None) -> GtDept:
-    """按部门树递归导入部门子树，返回当前节点落库后的 GtDept。"""
-    if node.manager_id not in node.member_ids:
-        raise TeamAgentException(
-            f"部门 '{node.dept_name}' 的主管 ID '{node.manager_id}' 不在成员名单中",
-            error_code="DEPT_MANAGER_NOT_IN_MEMBERS",
-        )
-
-    agent_ids: list[int] = list(dict.fromkeys(node.member_ids))
-    member_rows = await gtAgentManager.get_team_agents_by_ids(team_id, agent_ids, include_special=False)
-    existing_member_ids = {row.id for row in member_rows}
-    missing_member_ids = [member_id for member_id in agent_ids if member_id not in existing_member_ids]
-    if missing_member_ids:
-        raise TeamAgentException(
-            f"部门 '{node.dept_name}' 的成员 ID '{missing_member_ids[0]}' 在 team_members 中不存在",
-            error_code="DEPT_MEMBER_NOT_FOUND",
-        )
-
-    dept = await gtDeptManager.save_dept(
-        team_id=team_id,
-        name=node.dept_name,
-        responsibility=node.dept_responsibility,
-        parent_id=parent_id,
-        manager_id=node.manager_id,
-        agent_ids=agent_ids,
-    )
-
-    for child in node.children:
-        await _import_dept_subtree(team_id, child, parent_id=dept.id)
-
-    return dept
 
 
 async def _overwrite_dept_subtree(

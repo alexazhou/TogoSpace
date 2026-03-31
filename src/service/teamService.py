@@ -43,7 +43,7 @@ async def create_team(
     await agentService.overwrite_team_agents(team_id, members or [])
 
     if dept_tree:
-        await deptService.import_dept_tree(team_id, dept_tree)
+        await deptService.overwrite_dept_tree(team_id, dept_tree)
 
     # 创建 Rooms（常规流程，不走”配置导入专用”接口）
     if preset_rooms:
