@@ -20,7 +20,7 @@ async def startup() -> None:
     return None
 
 
-async def import_role_templates_from_app_config() -> None:
+async def _import_role_templates_from_app_config() -> None:
     for template in configUtil.get_app_config().role_templates:
         await roleTemplateService.import_role_template(
             name=template.name,
@@ -109,7 +109,7 @@ async def _to_gt_agents(team_id: int, team_config: TeamConfig) -> list[GtAgent]:
     return agents
 
 
-async def import_team_from_config(team_config: TeamConfig):
+async def _import_team_from_config(team_config: TeamConfig) -> GtTeam | None:
     existing = await gtTeamManager.get_team(team_config.name)
     if existing is not None:
         logger.info("Team '%s' 已存在，跳过导入", team_config.name)
@@ -135,9 +135,9 @@ async def import_team_from_config(team_config: TeamConfig):
     return team
 
 
-async def import_teams_from_app_config() -> None:
+async def _import_teams_from_app_config() -> None:
     for team_config in configUtil.get_app_config().teams:
-        team = await import_team_from_config(team_config)
+        team = await _import_team_from_config(team_config)
         if team is None:
             logger.info("Team '%s' 已存在，跳过整组 preset 导入", team_config.name)
             continue
@@ -152,8 +152,8 @@ async def import_teams_from_app_config() -> None:
 
 
 async def import_from_app_config() -> None:
-    await import_role_templates_from_app_config()
-    await import_teams_from_app_config()
+    await _import_role_templates_from_app_config()
+    await _import_teams_from_app_config()
 
 
 async def shutdown() -> None:

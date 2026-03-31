@@ -44,7 +44,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await roomService.startup()
-        await presetService.import_role_templates_from_app_config()
+        await presetService._import_role_templates_from_app_config()
         team = await gtTeamManager.save_team(GtTeam(name=TEAM))
         configs = [
             AgentConfig(name="alice", role_template="alice"),
@@ -109,7 +109,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await agentService.startup()
-        await presetService.import_role_templates_from_app_config()
+        await presetService._import_role_templates_from_app_config()
         configUtil.load(os.path.join(os.path.dirname(__file__), "../../config"), force_reload=True)
         team = await gtTeamManager.save_team(GtTeam(name=TEAM))
         agents = await ServiceTestCase.convert_to_gt_agents(
@@ -142,7 +142,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         configUtil.load(os.path.join(os.path.dirname(__file__), "../../config"), force_reload=True)
-        await presetService.import_role_templates_from_app_config()
+        await presetService._import_role_templates_from_app_config()
         await agentService.startup()
         await agentService.create_team_agents_from_db()
         cls.fresh_agent = agentService.get_team_agent(TEAM, "alice")

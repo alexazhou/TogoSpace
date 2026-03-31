@@ -235,7 +235,7 @@ class TestDalManagers(ServiceTestCase):
                 members=["alice_1", "bob_1"],
             )],
         )
-        await presetService.import_team_from_config(payload)
+        await presetService._import_team_from_config(payload)
 
         imported = await gtTeamManager.get_team("imported")
         assert imported is not None
@@ -245,7 +245,7 @@ class TestDalManagers(ServiceTestCase):
         assert await self._get_room_member_names(room.id) == ["alice_1", "bob_1"]
 
         # 已存在时应跳过导入，不覆盖已有记录
-        await presetService.import_team_from_config(TeamConfig(
+        await presetService._import_team_from_config(TeamConfig(
             name="imported",
             members=[AgentConfig(name="charlie", role_template="charlie")],
             preset_rooms=[TeamRoomConfig(name="r2", members=["Operator", "charlie"])],
