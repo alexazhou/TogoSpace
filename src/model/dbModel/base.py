@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import logging
-from typing import Generic, TypeVar, cast
+from typing import Generic, List, TypeVar, cast
 
 import peewee
 import peewee_async
+from playhouse.shortcuts import model_to_dict
 from constants import EnhanceEnum
 from model.dbModel.auto_timestamp_mixin import AutoTimestampMixin
 
@@ -74,6 +75,12 @@ class DbModelBase(AutoTimestampMixin, peewee_async.AioModel):
     created_at: datetime = peewee.DateTimeField(default=datetime.now)
     updated_at: datetime = peewee.DateTimeField(default=datetime.now)
 
+    JSON_EXCLUDE: List[str] = []  # 序列化时排除的字段
+
     class Meta:
         database = _database_proxy
         legacy_table_names = False
+
+    def to_json(self) -> dict:
+        """转换为 JSON 可序列化的字典。"""
+        return model_to_dict(self, exclude=self.JSON_EXCLUDE)
