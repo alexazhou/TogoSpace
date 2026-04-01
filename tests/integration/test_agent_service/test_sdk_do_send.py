@@ -12,7 +12,7 @@ from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
 from constants import DriverType, RoleTemplateType
 from util import llmApiUtil
-from util.chatMessageFormat import format_room_message
+from util.chatMessageFormat import build_turn_context_prompt, format_room_message
 from util.configTypes import TeamConfig, AgentConfig
 from ...base import ServiceTestCase
 
@@ -195,12 +195,12 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
 
         first = format_room_message("lobby", "SYSTEM", "房间初始化")
         second = format_room_message("lobby", "bob", "hello alice")
+        turn_prompt = build_turn_context_prompt("lobby", [first, second])
         agent._history = [
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, first),
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, second),
+            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_prompt),
         ]
 
-        await driver.run_chat_turn(room, synced_count=2, max_function_calls=1)
+        await driver.run_chat_turn(room, synced_count=1, max_function_calls=1)
 
         assert len(fake_client.queries) == 1
         first_prompt = fake_client.queries[0]

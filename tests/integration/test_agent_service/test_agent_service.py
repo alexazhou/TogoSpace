@@ -9,7 +9,8 @@ from constants import DriverType, EmployStatus, MessageBusTopic, MemberStatus
 from dal.db import gtAgentManager, gtTeamManager
 from model.dbModel.gtAgent import GtAgent
 from service import presetService, agentService, roomService, ormService, persistenceService, messageBus
-from util import configUtil
+from util import configUtil, llmApiUtil
+from util.chatMessageFormat import build_turn_context_prompt, format_room_message
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -147,6 +148,28 @@ class TestagentServiceSyncRoomMessages(_agentServiceCase):
         assert "【房间《general》】【bob】：" in content
         assert "： hello alice" in content
         assert "你现在可以调用工具行动。" in content
+
+    async def test_sync_room_messages_appends_complete_turn_prompt_as_last_history(self):
+        """sync_room_messages 追加到 history 的最后一条必须是完整 turn prompt。"""
+        await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"general@{TEAM}")
+        await room.activate_scheduling()
+        await room.add_message("bob", "hello alice")
+
+        alice = agentService.get_team_agent(TEAM, "alice")
+        existing = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, "older context")
+        alice._history = [existing]
+
+        synced_count = await alice.sync_room_messages(room)
+
+        system_line = format_room_message("general", "SYSTEM", room.build_initial_system_message())
+        bob_line = format_room_message("general", "bob", "hello alice")
+        expected_prompt = build_turn_context_prompt("general", [system_line, bob_line])
+
+        assert synced_count == 1
+        assert len(alice._history) == 2
+        assert alice._history[-1].content == expected_prompt
+        assert alice._history[0].content == "older context"
 
 
 class TestSaveTeamAgentsFullReplace(_agentServiceCase):
