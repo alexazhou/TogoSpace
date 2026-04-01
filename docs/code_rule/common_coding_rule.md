@@ -120,3 +120,20 @@ agent = Agent(
 ```
 
 判断标准：一眼能看清所有参数，无需滚动或脑补，就保持单行。
+
+## 9. 日志和 assert 优先单行
+
+`logger.info(...)`、`logger.warning(...)`、`logger.error(...)` 以及 `assert ...` 这类语句，默认优先写成单行，保持紧凑，便于快速扫读。
+
+只有在单行明显过长时才换行。建议阈值为 100 个字符左右；未超过时不要为了形式刻意拆行。
+
+```python
+# 推荐：能单行看清时保持单行
+assert room is not None, f"room 不存在: room_id={room_id}"
+logger.warning(f"检测到 SDK Agent 直接输出文字: agent={agent.key}, text={text[:50]!r}")
+
+# 推荐：明显过长时再换行
+assert some_really_long_condition, (
+    f"这里的错误消息很长，单行会明显影响阅读，因此允许换行"
+)
+```
