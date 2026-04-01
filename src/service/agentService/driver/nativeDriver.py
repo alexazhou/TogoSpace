@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class NativeAgentDriver(AgentDriver):
+
     async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
         hint = f"你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，请务必调用 finish_chat_turn 结束本轮（即跳过）。"
         max_retries = 3
