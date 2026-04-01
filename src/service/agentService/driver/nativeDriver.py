@@ -34,6 +34,7 @@ class NativeAgentDriver(AgentDriver):
         tools: Optional[list[llmApiUtil.OpenAITool]] = None,
         max_function_calls: int = 5,
     ) -> bool:
+
         # native driver 在一次尝试里持续驱动模型和工具调用，直到本轮回复完成或达到上限。
         for _ in range(max_function_calls):
             assistant_message: llmApiUtil.OpenAIMessage = await self.host._infer(tools)

@@ -14,6 +14,7 @@ import service.schedulerService as scheduler
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.presetService as presetService
+from model.dbModel.gtAgentHistory import GtAgentHistory
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
 from constants import OpenaiLLMApiRole, RoomState
@@ -89,7 +90,11 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
         alice = agentService.get_team_agent(TEAM, "alice")
         alice._history = [
-            OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset test turn state")
+            GtAgentHistory.from_openai_message(
+                alice.agent_id,
+                0,
+                OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset test turn state"),
+            )
         ]
         call_seq = {
             "alice": [
@@ -120,7 +125,11 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
         alice = agentService.get_team_agent(TEAM, "alice")
         alice._history = [
-            OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset turn checker history")
+            GtAgentHistory.from_openai_message(
+                alice.agent_id,
+                0,
+                OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset turn checker history"),
+            )
         ]
         resps = [
             {"content": "我直接回复"},

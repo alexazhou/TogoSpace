@@ -63,7 +63,7 @@ class Agent:
         self.workspace_root: str = workspace_root
 
         self._agent_id: int = 0
-        self._history: list[llmApiUtil.OpenAIMessage] = []
+        self._history: list[GtAgentHistory] = []
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
         self.status: MemberStatus = MemberStatus.IDLE
         self.current_room: Optional[ChatRoom] = None
@@ -197,7 +197,11 @@ class Agent:
             llmApiUtil.OpenaiLLMApiRole.TOOL,
             llmApiUtil.OpenaiLLMApiRole.SYSTEM,
         ), f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
-        ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=self._history, tools=tools or None)
+        ctx = GtCoreAgentDialogContext(
+            system_prompt=self.system_prompt,
+            messages=[item.openai_message for item in self._history],
+            tools=tools or None,
+        )
         infer_result = await llmService.infer(self.model, ctx)
         if infer_result.ok == False or infer_result.response is None:
             error_message = infer_result.error_message or "unknown inference error"
@@ -225,36 +229,21 @@ class Agent:
     def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llmApiUtil.OpenAIMessage]:
         recent_history = self._history[start_idx:]
 
-        for message in reversed(recent_history):
-            if message.role == llmApiUtil.OpenaiLLMApiRole.ASSISTANT:
-                return message
+        for item in reversed(recent_history):
+            if item.role == llmApiUtil.OpenaiLLMApiRole.ASSISTANT:
+                return item.openai_message
 
         return None
 
     def dump_history_messages(self) -> List[GtAgentHistory]:
-        return [
-            GtAgentHistory(
-                agent_id=self.agent_id,
-                seq=idx,
-                message_json=msg.model_dump_json(exclude_none=True),
-            )
-            for idx, msg in enumerate(self._history)
-        ]
+        return list(self._history)
 
     def inject_history_messages(self, items: List[GtAgentHistory]) -> None:
-        self._history = [llmApiUtil.OpenAIMessage.model_validate_json(item.message_json) for item in items]
+        self._history = list(items)
 
     async def append_history_message(self, message: llmApiUtil.OpenAIMessage) -> None:
-        self._history.append(message)
-        await self._persist_history_message(message)
-
-    async def _persist_history_message(self, message: llmApiUtil.OpenAIMessage) -> None:
-        seq: int = len(self._history) - 1
-        item = GtAgentHistory(
-            agent_id=self._agent_id,
-            seq=seq,
-            message_json=message.model_dump_json(exclude_none=True),
-        )
+        item = GtAgentHistory.from_openai_message(self._agent_id, len(self._history), message)
+        self._history.append(item)
         await persistenceService.append_agent_history_message(item)
 
 
