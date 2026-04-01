@@ -98,15 +98,16 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
     async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
         self._turn_done = False
-        prompt_lines = self._build_prompt_lines_from_history(room, synced_count)
-        await self._run_turn_sdk(room, prompt_lines, max_function_calls)
-
-    def _build_prompt_lines_from_history(self, room: ChatRoom, synced_count: int) -> list[str]:
-        if synced_count <= 0:
-            return []
-
-        recent_history = self.host._history[-synced_count:]
-        return [message.content or "" for message in recent_history]
+        prompt_prefix = f"【{room.name}】 房间轮到你行动，新消息如下："
+        if synced_count > 0 and self.host._history:
+            turn_prompt = self.host._history[-1].content or ""
+            if not turn_prompt.startswith(prompt_prefix):
+                raise ValueError(
+                    f"ClaudeSdkAgentDriver 只接受完整 turn_prompt: agent={self.host.key}, room={room.key}"
+                )
+        else:
+            turn_prompt = build_turn_context_prompt(room.name, [])
+        await self._run_turn_sdk(room, turn_prompt, synced_count, max_function_calls)
 
     def _next_tool_call_id(self) -> str:
         """生成下一个 tool_call_id。"""
@@ -155,16 +156,14 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
         return _wrapped
 
-    async def _run_turn_sdk(self, room: ChatRoom, prompt_lines: list[str], max_function_calls: int) -> None:
-        turn_prompt = build_turn_context_prompt(room.name, prompt_lines)
-
+    async def _run_turn_sdk(self, room: ChatRoom, turn_prompt: str, synced_count: int, max_function_calls: int) -> None:
         client = self._sdk_client
 
         if client is None:
             raise RuntimeError(f"Claude SDK client 尚未初始化: agent={self.host.key}")
 
         max_attempts = max(1, max_function_calls)
-        logger.info(f"SDK 注入增量消息: agent={self.host.key}, room={room.key}, new_msgs={len(prompt_lines)}")
+        logger.info(f"SDK 注入增量消息: agent={self.host.key}, room={room.key}, new_msgs={synced_count}")
 
         try:
             await client.query(turn_prompt)
