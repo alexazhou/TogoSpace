@@ -59,17 +59,18 @@ class TestagentServiceGetAgentsInRoom(_agentServiceCase):
         assert {a.name for a in agentService.get_team_agents(room.room_id)} == {"alice", "bob"}
 
 
-class TestAgentServiceGetInfo(_agentServiceCase):
-    async def test_get_info(self):
-        """get_info 应返回面向 Web 层的标准 Agent 信息。"""
+class TestAgentServiceStatusMap(_agentServiceCase):
+    async def test_get_team_agent_status_map(self):
+        """运行时状态查询应按 agent_id 返回 ACTIVE/IDLE。"""
         alice = agentService.get_team_agent(TEAM, "alice")
+        status_map = agentService.get_team_agent_status_map(TEAM)
+        assert status_map[alice.agent_id] == MemberStatus.IDLE.name
 
-        info = alice.get_info()
+        alice.status = MemberStatus.ACTIVE
+        status_map = agentService.get_team_agent_status_map(TEAM)
+        assert status_map[alice.agent_id] == MemberStatus.ACTIVE.name
 
-        assert info["name"] == "alice"
-        assert info["template_name"] == "alice"
-        assert info["team_name"] == TEAM
-        assert info["status"] == "IDLE"
+        alice.status = MemberStatus.IDLE
 
 
 class TestAgentServiceMemberStatusEvent(_agentServiceCase):

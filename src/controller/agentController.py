@@ -61,22 +61,19 @@ class AgentListHandler(BaseHandler):
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
         agents = await gtAgentManager.get_team_agents(team.id)
-        runtime_infos = agentService.get_team_agent_info_map(team.name)
+        runtime_status_map = agentService.get_team_agent_status_map(team.name)
         include_special = include_special_raw.strip().lower() in {"1", "true", "yes", "on"}
 
         items = []
         for agent in agents:
-            runtime_info = runtime_infos.get(agent.name)
-            runtime_team_id = runtime_info.get("team_id") if runtime_info else None
-            item_team_id = runtime_team_id if isinstance(runtime_team_id, int) and runtime_team_id > 0 else agent.team_id
-            item_status = runtime_info.get("status", MemberStatus.IDLE.name) if runtime_info else MemberStatus.IDLE.name
+            item_status = runtime_status_map.get(agent.id, MemberStatus.IDLE.name)
 
             items.append({
                 "id": agent.id,
                 "name": agent.name,
                 "employee_number": agent.employee_number,
                 "role_template_id": agent.role_template_id,
-                "team_id": item_team_id,
+                "team_id": agent.team_id,
                 "status": item_status,
                 "employ_status": agent.employ_status.name if agent.employ_status else None,
                 "model": agent.model,

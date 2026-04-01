@@ -83,17 +83,6 @@ class Agent:
     def is_active(self) -> bool:
         return self.status == MemberStatus.ACTIVE or not self.wait_task_queue.empty()
 
-    def get_info(self) -> dict:
-        """返回用于 API 响应的字典表示，包含运行时状态。"""
-        return {
-            "name": self.name,
-            "template_name": self.template_name or None,
-            "model": self.model,
-            "team_id": self.team_id,
-            "team_name": self.team_name,
-            "status": MemberStatus.ACTIVE.name if self.is_active else MemberStatus.IDLE.name,
-        }
-
     async def startup(self) -> None:
         await self.driver.startup()
 
@@ -405,12 +394,12 @@ def get_all_agents() -> List["Agent"]:
     return list(_agents.values())
 
 
-def get_team_agent_infos(team_name: str) -> List[dict]:
-    return [agent.get_info() for agent in _agents.values() if agent.team_name == team_name]
-
-
-def get_team_agent_info_map(team_name: str) -> dict[str, dict]:
-    return {info["name"]: info for info in get_team_agent_infos(team_name)}
+def get_team_agent_status_map(team_name: str) -> dict[int, str]:
+    return {
+        agent.agent_id: (MemberStatus.ACTIVE.name if agent.is_active else MemberStatus.IDLE.name)
+        for agent in _agents.values()
+        if agent.team_name == team_name and agent.agent_id > 0
+    }
 
 
 async def list_team_agents(team_id: int) -> list[GtAgent]:
