@@ -23,9 +23,8 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
     async def _refresh_rooms(_team_id: int):
         call_order.append("refresh_rooms")
 
-    async def _exit_init_rooms(_team_name: str):
-        call_order.append("exit_init_rooms")
-        return 0
+    async def _start_scheduling(_team_name: str):
+        call_order.append("start_scheduling")
 
     monkeypatch.setattr(teamService.gtTeamManager, "get_team", _get_team)
 
@@ -33,7 +32,7 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
     monkeypatch.setattr(agentService, "reload_team_agents_from_db", _reload_team_agents)
     monkeypatch.setattr(schedulerService, "refresh_team_config", _refresh_scheduler)
     monkeypatch.setattr(roomService, "refresh_rooms_for_team", _refresh_rooms)
-    monkeypatch.setattr(roomService, "exit_init_rooms", _exit_init_rooms)
+    monkeypatch.setattr(schedulerService, "start_scheduling", _start_scheduling)
 
     await teamService.hot_reload_team("default")
 
@@ -42,7 +41,7 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
         "reload_team_agents",
         "refresh_scheduler",
         "refresh_rooms",
-        "exit_init_rooms",
+        "start_scheduling",
     ]
 
 

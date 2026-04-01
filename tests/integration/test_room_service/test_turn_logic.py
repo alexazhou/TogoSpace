@@ -126,14 +126,14 @@ class TestRoomTurnLogic(ServiceTestCase):
         room.finish_turn("bob")
 
         assert room.state == RoomState.IDLE
-        assert room._turn_index == 1
+        assert room._turn_count == 1
         assert room.get_current_turn_agent() == "alice"
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message("bob", "wait, one more thing")
 
             assert room.state == RoomState.SCHEDULING
-            assert room._turn_index == 0
+            assert room._turn_count == 0
             assert room.get_current_turn_agent() == "alice"
 
             mock_publish.assert_any_call(
@@ -155,15 +155,15 @@ class TestRoomTurnLogic(ServiceTestCase):
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
-        assert room._turn_index == 0
+        assert room._turn_count == 0
 
         await room.add_message("a", "1")
         room.finish_turn("a")
-        assert room._turn_index == 0
+        assert room._turn_count == 0
 
         await room.add_message("b", "2")
         room.finish_turn("b")
-        assert room._turn_index == 1
+        assert room._turn_count == 1
         assert room._turn_pos == 0
         assert room.get_current_turn_agent() == "a"
 
@@ -214,10 +214,10 @@ class TestRoomTurnLogic(ServiceTestCase):
             agent_names_notified = [c[1]["member_name"] for c in turn_calls]
             assert agent_names_notified == ["bob"]
 
-    async def test_all_skip_wakeup_based_on_state_not_turn_index(self):
+    async def test_all_skip_wakeup_based_on_state_not_turn_count(self):
         """
-        测试点：全员跳过进入 IDLE 时，_turn_index 不会被人为抬高到 _max_turns；
-        唤醒逻辑只依赖房间状态（IDLE），与 _turn_index 无关。
+        测试点：全员跳过进入 IDLE 时，_turn_count 不会被人为抬高到 _max_turns；
+        唤醒逻辑只依赖房间状态（IDLE），与 _turn_count 无关。
         """
         room_name = "skip_idx"
         agents = ["alice", "bob"]
@@ -231,16 +231,16 @@ class TestRoomTurnLogic(ServiceTestCase):
             room.finish_turn(sender="bob")
 
         assert room.state == RoomState.IDLE
-        # _turn_index 应为自然推进值（1），不被强制拉到 _max_turns
-        assert room._turn_index == 1
-        assert room._turn_index < room._max_turns
+        # _turn_count 应为自然推进值（1），不被强制拉到 _max_turns
+        assert room._turn_count == 1
+        assert room._turn_count < room._max_turns
 
-        # 即便 _turn_index 远小于 _max_turns，发消息依然能唤醒房间
+        # 即便 _turn_count 远小于 _max_turns，发消息依然能唤醒房间
         with patch("service.messageBus.publish"):
             await room.add_message("alice", "back")
 
         assert room.state == RoomState.SCHEDULING
-        assert room._turn_index == 0
+        assert room._turn_count == 0
 
     async def test_all_skip_wakeup_by_operator(self):
         """
@@ -262,7 +262,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message(SpecialAgent.OPERATOR.name, "wake up")
             assert room.state == RoomState.SCHEDULING
-            assert room._turn_index == 0
+            assert room._turn_count == 0
             assert room.get_current_turn_agent() == "alice"
 
             turn_calls = [
@@ -290,7 +290,7 @@ class TestRoomTurnLogic(ServiceTestCase):
 
         # 本轮 bob 发了言，不是全员跳过 -> 轮次正常推进，房间仍在调度
         assert room.state == RoomState.SCHEDULING
-        assert room._turn_index == 1
+        assert room._turn_count == 1
 
     async def test_operator_auto_skip_keeps_all_skip_stop_logic(self):
         """
@@ -441,4 +441,4 @@ class TestRoomTurnLogic(ServiceTestCase):
             
         assert room.state == RoomState.IDLE
         assert room.get_current_turn_agent() == "bob"
-        assert room._turn_index == 1
+        assert room._turn_count == 1

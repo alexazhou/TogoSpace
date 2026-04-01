@@ -8,7 +8,7 @@ from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from service import agentService, roomService as chat_room
 from service.agentService import Agent
 from dal.db import gtTeamManager
-from constants import MessageBusTopic, SpecialAgent, RoomState
+from constants import MessageBusTopic, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -104,10 +104,15 @@ async def run() -> None:
         logger.info(f"\n{runtime_room.format_log()}")
 
 
+async def start_scheduling(team_name: str | None = None) -> None:
+    """统一开始调度入口：激活/重放房间轮次事件。"""
+    await chat_room.activate_rooms(team_name)
+    logger.info("开始调度完成: team=%s", team_name or "ALL")
+
+
 async def replay_scheduling_rooms() -> None:
-    for room in chat_room.get_all_rooms():
-        if room.state == RoomState.SCHEDULING:
-            await room.activate_scheduling()
+    """兼容入口：重放可调度房间。"""
+    await start_scheduling()
 
 
 def stop() -> None:

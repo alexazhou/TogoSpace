@@ -82,7 +82,7 @@ class ChatRoom:
         self._member_name_map[self.SYSTEM_MEMBER_ID] = SpecialAgent.SYSTEM.name
         self._member_name_map[self.OPERATOR_MEMBER_ID] = SpecialAgent.OPERATOR.name
         self._member_read_index: Dict[str, int] = {}  # 每个成员的消息读取进度（name 为 key）
-        self._turn_index: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
+        self._turn_count: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
         self._max_turns: int = room.max_turns  # 最大允许轮次
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
         self._state: RoomState = RoomState.INIT  # 房间当前的调度状态
@@ -187,7 +187,7 @@ class ChatRoom:
         was_idle = (self._state == RoomState.IDLE)
         if was_idle:
             logger.info(f"检测到房间 {self.key} 的活动 ({sender})，重置轮次计数器并唤醒房间")
-            self._turn_index = 0
+            self._turn_count = 0
             self._round_skipped = set()
             self._current_turn_has_content = False
             self._state = RoomState.SCHEDULING
@@ -205,7 +205,9 @@ class ChatRoom:
 
         # 4. 如果刚才从 IDLE 唤醒，我们需要手动重发当前轮次事件以重启循环
         if was_idle:
-            self._publish_current_turn()
+            next_member = self._resolve_next_dispatchable_member()
+            if next_member is not None:
+                self._publish_current_turn(next_member)
 
     def finish_turn(self, sender: str | None = None) -> bool:
         """结束当前发言人的轮次。通常由 Agent 在 finish_chat_turn 工具中调用。
@@ -228,7 +230,16 @@ class ChatRoom:
             self._round_skipped.add(current_expected)
 
         self._current_turn_has_content = False
-        self._update_turn_state_on_finish()
+
+        if not self._member_names:
+            return True
+
+        if not self._go_next_turn():
+            return True
+
+        next_member = self._resolve_next_dispatchable_member()
+        if next_member is not None:
+            self._publish_current_turn(next_member)
         return True
 
     def get_current_turn_agent(self) -> Optional[str]:
@@ -245,8 +256,25 @@ class ChatRoom:
             and len(self._member_names) > 2
         )
 
-    def _publish_current_turn(self) -> None:
-        """发布当前轮次的发言事件。"""
+    def _publish_current_turn(self, member_name: str) -> None:
+        """仅发布指定成员的发言事件，不处理状态推进。"""
+        messageBus.publish(
+            MessageBusTopic.ROOM_MEMBER_TURN,
+            member_name=member_name,
+            room_id=self.room_id,
+            room_name=self.name,
+            room_key=self.key,
+            team_name=self.team_name,
+        )
+
+    def _resolve_next_dispatchable_member(self) -> Optional[str]:
+        """根据当前状态解析下一位可被调度的成员名；若应停止则返回 None。"""
+        if not self._member_names:
+            return None
+
+        if self._try_stop_scheduling():
+            return None
+
         while True:
             next_name: Optional[str] = self.get_current_turn_agent()
 
@@ -255,61 +283,38 @@ class ChatRoom:
                 self._round_skipped.add(next_name)
                 self._current_turn_has_content = False
 
-                self._turn_pos += 1
-
-                if self._turn_pos >= len(self._member_names):
-                    self._turn_index += 1
-                    self._turn_pos = 0
-
-                    if self._turn_index >= self._max_turns:
-                        self._state = RoomState.IDLE
-                        logger.info(f"房间 {self.key} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
-                        return
-
-                ai_agents = {a for a in self._member_names if SpecialAgent.value_of(a) != SpecialAgent.OPERATOR}
-                if ai_agents and ai_agents.issubset(self._round_skipped):
-                    self._state = RoomState.IDLE
-                    logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
-                    return
+                if not self._go_next_turn():
+                    return None
                 continue
 
-            messageBus.publish(
-                MessageBusTopic.ROOM_MEMBER_TURN,
-                member_name=next_name,
-                room_id=self.room_id,
-                room_name=self.name,
-                room_key=self.key,
-                team_name=self.team_name,
-            )
-            return
+            return next_name
 
-    def _update_turn_state_on_finish(self) -> None:
-        """结束当前发言后，推进并更新轮次状态。"""
-        if not self._member_names:
-            return
-
-        self._turn_pos += 1
-
-        # 1. 检查是否达到轮次边界
-        if self._turn_pos >= len(self._member_names):
-            self._turn_index += 1
-            self._turn_pos = 0
-
-            # 正常达到最大轮次则停止
-            if self._turn_index >= self._max_turns:
+    def _try_stop_scheduling(self) -> bool:
+        """集中判断并应用停止条件；满足任一条件则切到 IDLE 并返回 True。"""
+        if self._turn_count >= self._max_turns:
+            if self._state != RoomState.IDLE:
                 self._state = RoomState.IDLE
                 logger.info(f"房间 {self.key} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
-                return
+            return True
 
-        # 2. 检查是否所有 AI Agent 均已跳过（自上次有消息以来）
-        # 如果是，则立即停止调度，不再移动到下一位
         ai_agents = {a for a in self._member_names if SpecialAgent.value_of(a) != SpecialAgent.OPERATOR}
         if ai_agents and ai_agents.issubset(self._round_skipped):
-            self._state = RoomState.IDLE
-            logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
-            return
+            if self._state != RoomState.IDLE:
+                self._state = RoomState.IDLE
+                logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
+            return True
+        return False
 
-        self._publish_current_turn()
+    def _go_next_turn(self) -> bool:
+        """推进到下一发言位；若命中停止条件则返回 False。"""
+        self._turn_pos = (self._turn_pos + 1) % len(self._member_names)
+
+        # turn_pos 回到 0 代表跨轮（从最后一位回到首位）；
+        # 只有在跨轮时才推进 turn_count。
+        if self._turn_pos == 0:
+            self._turn_count += 1
+
+        return not self._try_stop_scheduling()
 
     async def activate_scheduling(self) -> bool:
         """激活/重发调度。
@@ -332,7 +337,9 @@ class ChatRoom:
                 )
 
         if self._state == RoomState.SCHEDULING:
-            self._publish_current_turn()
+            next_member = self._resolve_next_dispatchable_member()
+            if next_member is not None:
+                self._publish_current_turn(next_member)
 
         return changed
 
@@ -371,7 +378,7 @@ class ChatRoom:
                 self._state = RoomState.IDLE
             return
 
-        self._turn_index = 0
+        self._turn_count = 0
         self._turn_pos = 0
         self._round_skipped = set()
         self._state = RoomState.SCHEDULING
@@ -706,15 +713,12 @@ async def refresh_rooms_for_team(team_id: int) -> None:
     logger.info(f"Team '{team_row.name}' 的聊天室已刷新，共 {len(room_rows)} 个房间")
 
 
-async def exit_init_rooms(team_name: str | None = None) -> int:
-    """内部 API：批量退出 INIT（可按 team 过滤）。"""
-    changed = 0
+async def activate_rooms(team_name: str | None = None) -> None:
+    """统一激活入口：对目标房间调用 activate_scheduling（可按 team 过滤）。"""
     for room in _rooms.values():
         if team_name is not None and room.team_name != team_name:
             continue
-        if await room.activate_scheduling():
-            changed += 1
-    return changed
+        await room.activate_scheduling()
 
 
 async def close_team_rooms(team_id: int) -> None:
