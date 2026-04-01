@@ -305,13 +305,6 @@ class ChatRoom:
             return True
         return False
 
-    def resume_scheduling(self) -> None:
-        """外部触发：重发当前轮次事件，用于 Agent 失败后续跑。"""
-        next_member = self._resolve_next_dispatchable_member()
-        if next_member is not None:
-            self._publish_current_turn(next_member)
-            logger.info(f"房间 {self.key} 恢复调度，当前发言人: {next_member}")
-
     def _go_next_turn(self) -> bool:
         """推进到下一发言位；若命中停止条件则返回 False。"""
         self._turn_pos = (self._turn_pos + 1) % len(self._member_names)
