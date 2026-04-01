@@ -65,11 +65,11 @@ class ApiClient:
             self._session = aiohttp.ClientSession()
         return self._session
 
-    async def get_agents(self, team_name: str | None = None) -> list[AgentInfo]:
+    async def get_agents(self, team_id: int | None = None) -> list[AgentInfo]:
         session = self._get_session()
         params: dict[str, str] | None = None
-        if team_name:
-            params = {"team_name": team_name}
+        if team_id is not None:
+            params = {"team_id": str(team_id)}
         async with session.get(f"{self._base_url}/agents/list.json", params=params) as resp:
             resp.raise_for_status()
             data = await resp.json()
