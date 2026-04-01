@@ -254,9 +254,6 @@ class TestRoomTurnLogic(ServiceTestCase):
         assert await room.activate_scheduling()
 
         with patch("service.messageBus.publish"):
-            # operator 发言推进到 alice
-            await room.add_message(SpecialAgent.OPERATOR.name, "start")
-            room.finish_turn(SpecialAgent.OPERATOR.name)
             room.finish_turn(sender="alice")
             room.finish_turn(sender="bob")
 
@@ -264,17 +261,16 @@ class TestRoomTurnLogic(ServiceTestCase):
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message(SpecialAgent.OPERATOR.name, "wake up")
-            # 唤醒后 Operator 也要结束回合，或者不结束也行，看断言点
-            # 这里断言唤醒后的状态，add_message 应该已经唤醒了
             assert room.state == RoomState.SCHEDULING
             assert room._turn_index == 0
+            assert room.get_current_turn_agent() == "alice"
 
-            # 应重新发布当前发言人的 TURN 事件
             turn_calls = [
                 c for c in mock_publish.call_args_list
                 if c[0][0] == MessageBusTopic.ROOM_MEMBER_TURN
             ]
             assert len(turn_calls) >= 1
+            assert turn_calls[-1][1]["member_name"] == "alice"
 
     async def test_partial_skip_does_not_stop(self):
         """
@@ -296,27 +292,74 @@ class TestRoomTurnLogic(ServiceTestCase):
         assert room.state == RoomState.SCHEDULING
         assert room._turn_index == 1
 
-    async def test_operator_excluded_from_skip_check(self):
+    async def test_operator_auto_skip_keeps_all_skip_stop_logic(self):
         """
-        测试点：房间含 Operator 时，全员跳过判定仅针对 AI Agent，
-        即使 Operator 未跳过，其余 AI Agent 全部跳过也应触发停止。
+        测试点：多人群里 Operator 自动 skip 后，仍能正确复用“AI 全员 skip 即停止”的逻辑。
         """
         room_name = "skip_op"
-        agents = [SpecialAgent.OPERATOR, "alice", "bob"]
+        agents = ["alice", SpecialAgent.OPERATOR, "bob"]
         await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
-        with patch("service.messageBus.publish"):
-            # Operator 正常发言（推进到 alice）
-            await room.add_message(SpecialAgent.OPERATOR.name, "hello")
-            room.finish_turn(SpecialAgent.OPERATOR.name)
-            # 两个 AI Agent 均跳过
+        with patch("service.messageBus.publish") as mock_publish:
             room.finish_turn(sender="alice")
+            turn_calls = [
+                c for c in mock_publish.call_args_list
+                if c[0][0] == MessageBusTopic.ROOM_MEMBER_TURN
+            ]
+            assert [c[1]["member_name"] for c in turn_calls] == ["bob"]
+
+        with patch("service.messageBus.publish"):
             room.finish_turn(sender="bob")
 
-        # Operator 未跳过，但 AI 全员跳过 -> 应停止调度
         assert room.state == RoomState.IDLE
+
+    async def test_multi_member_group_auto_skips_operator_turn(self):
+        """
+        测试点：多人群里遇到 Operator 回合时，不等待人类输入，直接自动跳到下一位 AI。
+        """
+        room_name = "operator_auto_skip"
+        agents = ["alice", SpecialAgent.OPERATOR, "bob"]
+        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
+        assert await room.activate_scheduling()
+        assert room.get_current_turn_agent() == "alice"
+
+        with patch("service.messageBus.publish") as mock_publish:
+            await room.add_message("alice", "hello from alice")
+            ok = room.finish_turn("alice")
+            assert ok is True
+
+        turn_calls = [
+            c for c in mock_publish.call_args_list
+            if c[0][0] == MessageBusTopic.ROOM_MEMBER_TURN
+        ]
+        assert [c[1]["member_name"] for c in turn_calls] == ["bob"]
+        assert room.get_current_turn_agent() == "bob"
+
+    async def test_two_member_group_still_waits_for_operator_turn(self):
+        """
+        测试点：两人群里遇到 Operator 时，仍保持原有等待逻辑，不自动 skip。
+        """
+        room_name = "operator_wait_group"
+        agents = ["alice", SpecialAgent.OPERATOR]
+        await roomService.ensure_room_record(TEAM, room_name, agents, room_type=RoomType.GROUP, max_turns=10)
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
+        assert await room.activate_scheduling()
+        assert room.get_current_turn_agent() == "alice"
+
+        with patch("service.messageBus.publish") as mock_publish:
+            await room.add_message("alice", "hello from alice")
+            ok = room.finish_turn("alice")
+            assert ok is True
+
+        turn_calls = [
+            c for c in mock_publish.call_args_list
+            if c[0][0] == MessageBusTopic.ROOM_MEMBER_TURN
+        ]
+        assert [c[1]["member_name"] for c in turn_calls] == [SpecialAgent.OPERATOR.name]
+        assert room.get_current_turn_agent() == SpecialAgent.OPERATOR.name
 
     async def test_operator_alias_matches_on_turn_checks(self):
         """

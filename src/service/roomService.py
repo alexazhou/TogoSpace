@@ -237,10 +237,42 @@ class ChatRoom:
             return None
         return self._member_names[self._turn_pos]
 
+    def _should_auto_skip_operator_turn(self, member_name: str | None) -> bool:
+        return (
+            member_name is not None
+            and SpecialAgent.value_of(member_name) == SpecialAgent.OPERATOR
+            and self.room_type == RoomType.GROUP
+            and len(self._member_names) > 2
+        )
+
     def _publish_current_turn(self) -> None:
         """发布当前轮次的发言事件。"""
-        next_name: Optional[str] = self.get_current_turn_agent()
-        if next_name:
+        while True:
+            next_name: Optional[str] = self.get_current_turn_agent()
+
+            if self._should_auto_skip_operator_turn(next_name):
+                logger.info(f"房间 {self.key} 自动跳过人类操作者回合: member={next_name}")
+                self._round_skipped.add(next_name)
+                self._current_turn_has_content = False
+
+                self._turn_pos += 1
+
+                if self._turn_pos >= len(self._member_names):
+                    self._turn_index += 1
+                    self._turn_pos = 0
+
+                    if self._turn_index >= self._max_turns:
+                        self._state = RoomState.IDLE
+                        logger.info(f"房间 {self.key} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
+                        return
+
+                ai_agents = {a for a in self._member_names if SpecialAgent.value_of(a) != SpecialAgent.OPERATOR}
+                if ai_agents and ai_agents.issubset(self._round_skipped):
+                    self._state = RoomState.IDLE
+                    logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
+                    return
+                continue
+
             messageBus.publish(
                 MessageBusTopic.ROOM_MEMBER_TURN,
                 member_name=next_name,
@@ -249,6 +281,7 @@ class ChatRoom:
                 room_key=self.key,
                 team_name=self.team_name,
             )
+            return
 
     def _update_turn_state_on_finish(self) -> None:
         """结束当前发言后，推进并更新轮次状态。"""
@@ -276,7 +309,6 @@ class ChatRoom:
             logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
             return
 
-        # 3. 正常发布下一位成员的发言事件
         self._publish_current_turn()
 
     async def activate_scheduling(self) -> bool:
