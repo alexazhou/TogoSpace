@@ -6,7 +6,7 @@ from constants import DriverType, MemberStatus, SpecialAgent
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from model.dbModel.gtAgent import GtAgent
-from service import teamService, agentService
+from service import teamService, agentService, roomService
 from util import assertUtil
 
 
@@ -66,15 +66,13 @@ class AgentListHandler(BaseHandler):
 
         items = []
         for agent in agents:
-            item_status = runtime_status_map.get(agent.id, MemberStatus.IDLE.name)
-
             items.append({
                 "id": agent.id,
                 "name": agent.name,
                 "employee_number": agent.employee_number,
                 "role_template_id": agent.role_template_id,
                 "team_id": agent.team_id,
-                "status": item_status,
+                "status": runtime_status_map.get(agent.id, MemberStatus.IDLE).name,
                 "employ_status": agent.employ_status.name if agent.employ_status else None,
                 "model": agent.model,
                 "driver": agent.driver.value if agent.driver else None,
@@ -232,3 +230,20 @@ class AgentDetailHandler(BaseHandler):
             "model": agent.model,
             "driver": agent.driver.value if agent.driver else None,
         })
+
+
+class AgentResumeHandler(BaseHandler):
+    """POST /agents/<agent_id>/resume.json - 对 FAILED 状态的 Agent 触发续跑"""
+
+    async def post(self, agent_id_str: str) -> None:
+        agent_id = int(agent_id_str)
+        agent = agentService.find_agent_by_id(agent_id)
+        assertUtil.assertNotNull(agent, None, f"运行时 Agent ID '{agent_id}' 不存在", "agent_not_found")
+        assertUtil.assertTrue(agent.status == MemberStatus.FAILED, None, f"Agent '{agent.key}' 当前状态不是 FAILED（当前: {agent.status.name}）", "agent_not_failed")
+
+        room_id = agent.resume_failed()
+        room = roomService.get_room(room_id)
+        assertUtil.assertNotNull(room, None, f"Agent 的失败房间 room_id={room_id} 不存在", "room_not_found")
+        room.resume_scheduling()
+
+        self.return_json({"status": "resumed", "agent_key": agent.key, "room_id": room_id})

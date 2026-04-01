@@ -8,7 +8,7 @@ from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from service import agentService, roomService as chat_room
 from service.agentService import Agent
 from dal.db import gtTeamManager
-from constants import MessageBusTopic, SpecialAgent
+from constants import MessageBusTopic, MemberStatus, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +25,15 @@ async def startup() -> None:
 
 
 def add_member(member: Agent, max_fc: int) -> None:
-    """将成员加入调度池，若已在运行则跳过。"""
-    existing: asyncio.Task | None = _running.get(member.key)
-    if existing is not None and not existing.done():
+    """将成员加入调度池，若已在运行或处于 FAILED 状态则跳过。"""
+    if member.status == MemberStatus.FAILED:
         return
+
+    existing: asyncio.Task | None = _running.get(member.key)
+
+    if existing is not None and existing.done() == False:
+        return
+
     task = asyncio.create_task(member.consume_task(max_fc))
     _running[member.key] = task
     task.add_done_callback(lambda t: _on_task_done(member, t))

@@ -21,6 +21,8 @@ from constants import SpecialAgent, MessageBusTopic, MemberStatus, DriverType, E
 
 logger = logging.getLogger(__name__)
 
+MAX_INFER_RETRIES = 3
+
 _agents: dict[str, "Agent"] = {}
 _team_ids: dict[str, int] = {}  # team_name -> team_id mapping
 
@@ -89,6 +91,16 @@ class Agent:
     async def close(self) -> None:
         await self.driver.shutdown()
 
+    def resume_failed(self) -> int:
+        """清除 FAILED 状态，从队头任务读取 room_id 返回，供调用方触发续跑。"""
+        if self.status != MemberStatus.FAILED:
+            raise ValueError(f"Agent {self.key} 当前状态不是 FAILED（当前: {self.status.name}）")
+        task = self.wait_task_queue._queue[0]
+        room_id: int = task.room_id
+        self.status = MemberStatus.IDLE
+        self._publish_status(self.status)
+        return room_id
+
     def _publish_status(self, status: MemberStatus) -> None:
         messageBus.publish(
             MessageBusTopic.MEMBER_STATUS_CHANGED,
@@ -102,24 +114,45 @@ class Agent:
         self.status = MemberStatus.ACTIVE
         self._publish_status(self.status)
         try:
-            while True:
-                try:
-                    task = self.wait_task_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
+            while self.wait_task_queue.empty() == False:
+                task = self.wait_task_queue._queue[0]  # peek，先不弹出
 
-                try:
-                    if isinstance(task, GtCoreRoomMessageEvent):
-                        await self.run_chat_turn(task.room_id, max_function_calls)
-                    else:
-                        raise TypeError(f"不支持的任务类型: {type(task).__name__}")
-                except Exception as e:
-                    logger.error(f"Agent 处理任务失败: agent={self.key}, task={task!r}, error={e}", exc_info=True)
-                finally:
-                    self.wait_task_queue.task_done()
+                task_succeeded = False
+                last_error: Exception | None = None
+                for attempt in range(1, MAX_INFER_RETRIES + 1):
+                    try:
+                        if isinstance(task, GtCoreRoomMessageEvent):
+                            await self.run_chat_turn(task.room_id, max_function_calls)
+                        else:
+                            raise TypeError(f"不支持的任务类型: {type(task).__name__}")
+                        task_succeeded = True
+                        break
+                    except Exception as e:
+                        last_error = e
+                        logger.warning(
+                            f"Agent 任务执行失败 (第 {attempt}/{MAX_INFER_RETRIES} 次): "
+                            f"agent={self.key}, task={task!r}, error={e}",
+                            exc_info=(attempt == MAX_INFER_RETRIES),
+                        )
+
+
+                if task_succeeded == False:
+                    logger.error(
+                        f"Agent 推理连续失败 {MAX_INFER_RETRIES} 次，标记为 FAILED: "
+                        f"agent={self.key}, last_error={last_error}",
+                    )
+
+                    self.status = MemberStatus.FAILED
+                    self._publish_status(self.status)
+                    return  # 任务留在队头，等 resume 后重新消费
+
+                # 成功后才弹出
+                self.wait_task_queue.get_nowait()
+                self.wait_task_queue.task_done()
         finally:
-            self.status = MemberStatus.IDLE
-            self._publish_status(self.status)
+            if self.status != MemberStatus.FAILED:
+                self.status = MemberStatus.IDLE
+                self._publish_status(self.status)
 
     async def sync_room_messages(self, room: ChatRoom) -> int:
         new_msgs: List[GtCoreChatMessage] = await room.get_unread_messages(self.name)
@@ -168,7 +201,12 @@ class Agent:
             llmApiUtil.OpenaiLLMApiRole.SYSTEM,
         ), f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
         ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=self._history, tools=tools or None)
-        response: llmApiUtil.OpenAIResponse = await llmService.infer(self.model, ctx)
+        infer_result = await llmService.infer(self.model, ctx)
+        if infer_result.ok == False or infer_result.response is None:
+            error_message = infer_result.error_message or "unknown inference error"
+            raise RuntimeError(f"LLM 推理失败: agent={self.key}, error={error_message}") from infer_result.error
+
+        response: llmApiUtil.OpenAIResponse = infer_result.response
         assistant_message: llmApiUtil.OpenAIMessage = response.choices[0].message
         await self.append_history_message(assistant_message)
 
@@ -400,6 +438,10 @@ def get_team_agent_status_map(team_name: str) -> dict[int, MemberStatus]:
         for agent in _agents.values()
         if agent.team_name == team_name and agent.agent_id > 0
     }
+
+
+def find_agent_by_id(agent_id: int) -> "Agent | None":
+    return next((a for a in _agents.values() if a.agent_id == agent_id), None)
 
 
 async def list_team_agents(team_id: int) -> list[GtAgent]:
