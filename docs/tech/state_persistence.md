@@ -60,13 +60,14 @@ ChatRoom.get_unread_messages(agent_name)
 
 ## 恢复时机
 
-恢复发生在启动阶段 4，位于房间创建完成、`exit_init_rooms()` 之前：
+恢复发生在启动阶段 4，房间恢复完成后通过调度器统一入口激活：
 
 ```
 backend_main.py（阶段 4）
   ├── agentService.restore_state()
-  └── roomService.restore_state()
-        └── roomService.exit_init_rooms()   ← 恢复完成后才激活
+  ├── roomService.restore_state()
+  └── schedulerService.start_scheduling()
+        └── roomService.activate_rooms()   ← 恢复完成后才激活
 ```
 
 ### 成员历史恢复（`agentService.restore_state`）
@@ -101,7 +102,7 @@ room_msg_rows, member_read_index = load_room_runtime(room_id)
 
 `inject_runtime_state` 在还原 `_member_read_index` 时会把 key 从 `member_id` 字符串反查回成员名，兼容旧格式（key 已经是名称时直接使用）。
 
-`rebuild_state_from_history` 重放所有消息以推演出正确的轮次计数器状态（`_turn_index`、`_turn_pos`、`_state`），确保重启后调度逻辑的连续性。
+`rebuild_state_from_history` 重放所有消息以推演出正确的轮次计数器状态（`_turn_count`、`_turn_pos`、`_state`），确保重启后调度逻辑的连续性。
 
 ---
 
@@ -126,6 +127,6 @@ room_msg_rows, member_read_index = load_room_runtime(room_id)
 
 ## 注意事项
 
-- **INIT 状态门卫**：房间在 `exit_init_rooms()` 前不会持久化消息。恢复完成后才调用 `exit_init_rooms()`，保证恢复期间写入的初始系统消息不被重复持久化。
+- **INIT 状态门卫**：房间在 `start_scheduling()`（内部触发 `activate_rooms()`）前不会持久化消息。恢复完成后才激活，保证恢复期间写入的初始系统消息不被重复持久化。
 - **member_id 作为 key**：`_member_read_index` 存储时以 `member_id` 为 key，恢复时通过 `_member_name_map` 反查名称。若成员被删除后重建，`member_id` 可能变化，旧的读取进度会丢失（视为从头读）。
 - **seq 顺序保证**：`agent_histories` 的 `seq` 字段在写入时由 `len(_history) - 1` 计算，恢复时通过 `gtAgentHistoryManager.get_agent_history` 按 `seq` 升序读取，保证顺序正确。
