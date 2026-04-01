@@ -36,7 +36,7 @@ class GtDept(DbModelBase):
     def to_json(self) -> dict:
         """转换为 JSON 可序列化的字典，包含非数据库字段 children。"""
         result = model_to_dict(self)
-        if self.children:
+        if self.children is not None:
             result["children"] = [child.to_json() for child in self.children]
         return result
 
