@@ -5,13 +5,16 @@ from functools import cached_property
 import peewee
 from util import llmApiUtil
 
-from .base import DbModelBase
+from constants import AgentHistoryTag
+
+from .base import DbModelBase, EnumListField
 
 
 class GtAgentHistory(DbModelBase):
     agent_id: int = peewee.IntegerField()
     seq: int = peewee.IntegerField(null=False)
     message_json: str = peewee.TextField(null=False)
+    tags: list[AgentHistoryTag] = EnumListField[AgentHistoryTag](AgentHistoryTag, default=list)
 
     class Meta:
         table_name = "agent_histories"
@@ -20,11 +23,18 @@ class GtAgentHistory(DbModelBase):
         )
 
     @classmethod
-    def from_openai_message(cls, agent_id: int, seq: int, message: llmApiUtil.OpenAIMessage) -> "GtAgentHistory":
+    def from_openai_message(
+        cls,
+        agent_id: int,
+        seq: int,
+        message: llmApiUtil.OpenAIMessage,
+        tags: list[AgentHistoryTag] | None = None,
+    ) -> "GtAgentHistory":
         return cls(
             agent_id=agent_id,
             seq=seq,
             message_json=message.model_dump_json(exclude_none=True),
+            tags=[] if tags is None else list(tags),
         )
 
     @cached_property
