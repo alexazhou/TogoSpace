@@ -19,6 +19,7 @@ import service.funcToolService as funcToolService
 import service.schedulerService as scheduler
 import service.persistenceService as persistenceService
 import service.ormService as ormService
+import service.llmService as llmService
 from dal.db import gtAgentManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
@@ -175,18 +176,31 @@ class ServiceTestCase:
                 await ...
         """
         target = "service.agentService.core.llmService.infer"
-        
+
+        async def _to_infer_result(value):
+            if isinstance(value, llmService.InferResult):
+                return value
+            return llmService.InferResult.success(value)
+
         if responses is not None:
             # 将简化字典序列转换为 Mock 对象序列
-            mock_responses = [self.normalize_to_mock(r) for r in responses]
+            mock_responses = [llmService.InferResult.success(self.normalize_to_mock(r)) for r in responses]
             m = mock.AsyncMock(side_effect=mock_responses)
             with mock.patch(target, m) as p:
                 yield p
         elif handler is not None:
-            with mock.patch(target, side_effect=handler) as p:
+            async def _wrapped_handler(*args, **kwargs):
+                try:
+                    value = await handler(*args, **kwargs)
+                except Exception as e:
+                    return llmService.InferResult.failure(e)
+                return await _to_infer_result(value)
+
+            with mock.patch(target, side_effect=_wrapped_handler) as p:
                 yield p
         else:
-            with mock.patch(target, new_callable=mock.AsyncMock) as p:
+            default = mock.AsyncMock(return_value=llmService.InferResult.success(self.normalize_to_mock({"content": "ok"})))
+            with mock.patch(target, default) as p:
                 yield p
 
     def normalize_to_mock(self, data: dict):

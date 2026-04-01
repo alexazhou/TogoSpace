@@ -32,6 +32,7 @@ def _make_mock_member(name: str, team_name: str = TEAM) -> Agent:
     agent.name = name
     agent.team_name = team_name
     agent.key = f"{name}@{team_name}"
+    agent.status = MemberStatus.IDLE
     agent.wait_task_queue = asyncio.Queue()
     agent.consume_task = AsyncMock()
     return agent
@@ -124,25 +125,26 @@ class TestSchedulerRun(ServiceTestCase):
         assert alice.is_active is False
 
     async def test_handle_event_error_logged_in_agent(self):
-        """验证 Agent.consume_task 内部错误不导致崩溃。"""
+        """验证 Agent.consume_task 内部错误后进入 FAILED 状态，任务留在队头等待续跑。"""
         real_agent = Agent("test", TEAM, "prompt", "model")
         real_agent.wait_task_queue.put_nowait(GtCoreRoomMessageEvent(1))
 
         with patch.object(real_agent, "run_chat_turn", side_effect=RuntimeError("boom")):
             await real_agent.consume_task(max_function_calls=5)
 
-        # 即使 run_turn 报错，队列也应被正确消费，避免任务卡死。
-        assert real_agent.wait_task_queue.empty()
+        assert real_agent.status == MemberStatus.FAILED
+        assert not real_agent.wait_task_queue.empty()
 
     async def test_unsupported_task_type_is_logged(self, caplog):
-        """不支持的任务类型应报错并记录日志，且不会卡住队列。"""
+        """不支持的任务类型应报错并记录日志，agent 进入 FAILED 状态，任务留在队头。"""
         real_agent = Agent("test", TEAM, "prompt", "model")
         real_agent.wait_task_queue.put_nowait(object())
 
         with caplog.at_level(logging.ERROR):
             await real_agent.consume_task(max_function_calls=5)
 
-        assert real_agent.wait_task_queue.empty()
+        assert real_agent.status == MemberStatus.FAILED
+        assert not real_agent.wait_task_queue.empty()
         assert "不支持的任务类型" in caplog.text
 
     async def test_on_agent_turn_creates_task(self, monkeypatch):

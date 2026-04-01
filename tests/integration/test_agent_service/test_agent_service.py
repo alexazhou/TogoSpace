@@ -64,11 +64,11 @@ class TestAgentServiceStatusMap(_agentServiceCase):
         """运行时状态查询应按 agent_id 返回 ACTIVE/IDLE。"""
         alice = agentService.get_team_agent(TEAM, "alice")
         status_map = agentService.get_team_agent_status_map(TEAM)
-        assert status_map[alice.agent_id] == MemberStatus.IDLE.name
+        assert status_map[alice.agent_id] == MemberStatus.IDLE
 
         alice.status = MemberStatus.ACTIVE
         status_map = agentService.get_team_agent_status_map(TEAM)
-        assert status_map[alice.agent_id] == MemberStatus.ACTIVE.name
+        assert status_map[alice.agent_id] == MemberStatus.ACTIVE
 
         alice.status = MemberStatus.IDLE
 
