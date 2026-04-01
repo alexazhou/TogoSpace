@@ -90,7 +90,8 @@ class RoomState(EnhanceEnum):
 
 class MemberStatus(EnhanceEnum):
     ACTIVE = auto()
-    IDLE = auto()
+    IDLE   = auto()
+    FAILED = auto()  # 推理连续失败超过重试次数
 
 
 class EmployStatus(EnhanceEnum):
