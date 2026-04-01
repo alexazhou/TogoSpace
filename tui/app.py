@@ -91,11 +91,23 @@ class WatcherApp(App):
         if not rooms:
             return await self._api.get_agents()
 
-        team_names = sorted({r.team_name for r in rooms if r.team_name})
-        if not team_names:
+        team_entries = sorted(
+            {
+                (team_name, self._team_ids_by_name.get(team_name))
+                for team_name in {r.team_name for r in rooms if r.team_name}
+            },
+            key=lambda item: item[0],
+        )
+        team_entries = [(team_name, team_id) for team_name, team_id in team_entries if isinstance(team_id, int)]
+        if not team_entries:
             return await self._api.get_agents()
 
-        fetched = await asyncio.gather(*[self._api.get_agents(team_name=t) for t in team_names])
+        fetched = await asyncio.gather(
+            *[
+                self._api.get_agents(team_id=team_id)
+                for team_name, team_id in team_entries
+            ]
+        )
         merged: list[AgentInfo] = []
         seen: set[tuple[str, str]] = set()
         for team_agents in fetched:
