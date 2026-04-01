@@ -87,7 +87,7 @@ class ChatRoom:
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
         self._state: RoomState = RoomState.INIT  # 房间当前的调度状态
         self._state_after_init: RoomState = RoomState.SCHEDULING if self._members and room.max_turns > 0 else RoomState.IDLE
-        self._round_skipped: set = set()  # 当前轮次已跳过发言的成员名单
+        self._round_skipped_set: set = set()  # 当前轮次已跳过发言的成员名单
         self._current_turn_has_content: bool = False  # 当前发言人是否已发送内容
 
     @property
@@ -188,7 +188,7 @@ class ChatRoom:
         if was_idle:
             logger.info(f"检测到房间 {self.key} 的活动 ({sender})，重置轮次计数器并唤醒房间")
             self._turn_count = 0
-            self._round_skipped = set()
+            self._round_skipped_set = set()
             self._current_turn_has_content = False
             self._state = RoomState.SCHEDULING
 
@@ -200,8 +200,8 @@ class ChatRoom:
             logger.info(f"房间 {self.key} 收到来自 {sender} 的插话，保持当前发言位 (当前应轮到 {current_expected})")
 
         # 3. 只要有真实消息（非系统消息），就清空跳过记录，让所有人重新有机会回应
-        if sender != SpecialAgent.SYSTEM.name and self._round_skipped:
-            self._round_skipped = set()
+        if sender != SpecialAgent.SYSTEM.name and self._round_skipped_set:
+            self._round_skipped_set = set()
 
         # 4. 如果刚才从 IDLE 唤醒，我们需要手动重发当前轮次事件以重启循环
         if was_idle:
@@ -227,7 +227,7 @@ class ChatRoom:
 
         # 如果本轮没说话，记录为跳过
         if not self._current_turn_has_content:
-            self._round_skipped.add(current_expected)
+            self._round_skipped_set.add(current_expected)
 
         self._current_turn_has_content = False
 
@@ -280,7 +280,7 @@ class ChatRoom:
 
             if self._should_auto_skip_operator_turn(next_name):
                 logger.info(f"房间 {self.key} 自动跳过人类操作者回合: member={next_name}")
-                self._round_skipped.add(next_name)
+                self._round_skipped_set.add(next_name)
                 self._current_turn_has_content = False
 
                 if not self._go_next_turn():
@@ -298,7 +298,7 @@ class ChatRoom:
             return True
 
         ai_agents = {a for a in self._member_names if SpecialAgent.value_of(a) != SpecialAgent.OPERATOR}
-        if ai_agents and ai_agents.issubset(self._round_skipped):
+        if ai_agents and ai_agents.issubset(self._round_skipped_set):
             if self._state != RoomState.IDLE:
                 self._state = RoomState.IDLE
                 logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
@@ -380,7 +380,7 @@ class ChatRoom:
 
         self._turn_count = 0
         self._turn_pos = 0
-        self._round_skipped = set()
+        self._round_skipped_set = set()
         self._state = RoomState.SCHEDULING
 
         for msg in self.messages:

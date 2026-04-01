@@ -13,7 +13,7 @@
 - `_turn_pos`：当前发言位索引（指向 `_member_names`）。
 - `_turn_count`：已完成整轮数（所有成员完整走一圈计 1）。
 - `_current_turn_has_content`：当前发言位是否已产出真实消息。
-- `_round_skipped`：自上次真实消息以来，已“跳过发言”的成员集合。
+- `_round_skipped_set`：自上次真实消息以来，已“跳过发言”的成员集合。
 - `_state`：`INIT / SCHEDULING / IDLE`。
 
 ## 3. 启动与入口
@@ -46,7 +46,7 @@
 - Agent 必须调用 `finish_chat_turn`
 - `ChatRoom.finish_turn` 会：
   1. 校验当前发言人
-  2. 如本轮无内容则加入 `_round_skipped`
+  2. 如本轮无内容则加入 `_round_skipped_set`
   3. 推进到下一发言位
   4. 解析下一位可调度成员并发布事件（或停止）
 
@@ -56,19 +56,19 @@
 停止逻辑集中在 `ChatRoom._try_stop_scheduling()`，满足任一条件进入 `IDLE`：
 
 1. `_turn_count >= _max_turns`
-2. 所有 AI 成员都在 `_round_skipped` 中（滑动窗口）
+2. 所有 AI 成员都在 `_round_skipped_set` 中（滑动窗口）
 
 ### 5.2 Operator 自动跳过
 在群聊且成员数 > 2 时，若当前发言位为 `OPERATOR`，会自动跳过到下一位 AI（不等待人类输入）。
 
 ### 5.3 真实消息会重置跳过窗口
-只要收到非系统消息，`_round_skipped` 会清空，重新开始“全员跳过”判定窗口。
+只要收到非系统消息，`_round_skipped_set` 会清空，重新开始“全员跳过”判定窗口。
 
 ## 6. IDLE 唤醒
 
 房间处于 `IDLE` 时，任何新消息都会触发唤醒：
 
-1. 重置 `_turn_count`、`_round_skipped`、`_current_turn_has_content`
+1. 重置 `_turn_count`、`_round_skipped_set`、`_current_turn_has_content`
 2. 切回 `SCHEDULING`
 3. 重新解析并发布下一位 `ROOM_MEMBER_TURN`
 
