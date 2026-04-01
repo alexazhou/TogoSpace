@@ -35,16 +35,20 @@ graph TD
     deptService --> agentService
 ```
 
-## 说明
+## 核心原则
+
+1.  **自治性**：Service 层负责维护各自领域的内存状态与业务逻辑。
+2.  **持久化编排**：Service 层负责将业务领域对象转换为数据库对象（`GtXxx`），并调用 DAL 层进行持久化。DAL 层保持纯粹，不感知业务 DTO 或配置类。
+3.  **单向依赖**：严格遵守从 Controller -> Service -> DAL -> Model 的调用链，禁止反向依赖。
 
 | 模块 | 角色 | 依赖 |
 |------|------|------|
 | `main` | 程序入口，按序初始化所有服务，启动 Tornado 与全局调度器 | roleTemplateService / agentService / roomService / schedulerService / llmService / funcToolService / messageBus / persistenceService / ormService / teamService |
 | `schedulerService` | 任务生命周期管理，监听轮次事件并激活 Agent 内部任务协程 | agentService / roomService / messageBus |
 | `roleTemplateService` | 角色模板导入服务，启动时将 `AppConfig.role_templates` 写入数据库 | 无 |
-| `agentService` | **[自治核心]** 维护 Agent 实例及其任务队列，执行对话轮次与 Tool 调用，自主维护活跃状态 | llmService / roomService / funcToolService / persistenceService / messageBus |
-| `roomService` | 管理聊天室状态、成员名单、严格轮次推进逻辑 | messageBus / persistenceService |
-| `teamService` | Team/Room 配置管理与热更新，导入配置并编排运行态重载 | deptService / agentService / roomService / schedulerService |
+| `agentService` | **[自治核心]** 维护 Agent 实例及其任务队列，执行对话轮次与 Tool 调用，**负责 Agent 配置的持久化编排与对象转换**，自主维护活跃状态 | llmService / roomService / funcToolService / persistenceService / messageBus |
+| `roomService` | 管理聊天室状态、成员名单、严格轮次推进逻辑，**负责房间配置与成员关系的持久化编排** | messageBus / persistenceService |
+| `teamService` | Team/Room 配置管理与热更新，导入配置并**编排跨服务的运行态重载**（协调 Agent 与 Room 的更新） | deptService / agentService / roomService / schedulerService |
 | `deptService` | 部门树与成员归属管理，同步创建/更新部门房间并维护成员列表（V10） | roomService / agentService |
 | `persistenceService` | 纯 DAL 门面，封装消息历史与房间运行时状态的读写；不依赖其他 service | 无 |
 | `llmService` | 封装大模型 API 调用（OpenAI 兼容协议） | 无 |
