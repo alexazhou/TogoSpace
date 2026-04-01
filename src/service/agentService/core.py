@@ -394,9 +394,9 @@ def get_all_agents() -> List["Agent"]:
     return list(_agents.values())
 
 
-def get_team_agent_status_map(team_name: str) -> dict[int, str]:
+def get_team_agent_status_map(team_name: str) -> dict[int, MemberStatus]:
     return {
-        agent.agent_id: (MemberStatus.ACTIVE.name if agent.is_active else MemberStatus.IDLE.name)
+        agent.agent_id: agent.status
         for agent in _agents.values()
         if agent.team_name == team_name and agent.agent_id > 0
     }
