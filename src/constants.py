@@ -117,3 +117,8 @@ class SystemConfigKey(EnhanceEnum):
     """系统配置项的 key 枚举。"""
     # DB 中 key 字段是稳定字符串，不使用 auto()。
     WORKING_DIRECTORY = "working_directory"  # 系统级别工作目录
+
+
+class AgentHistoryTag(EnhanceEnum):
+    ROOM_TASK_MSG = "ROOM_TASK_MSG"
+    COMPACT_CMD = "COMPACT_CMD"

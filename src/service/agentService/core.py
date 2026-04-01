@@ -17,7 +17,7 @@ from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateM
 from service.roomService import ChatRoom, ChatContext
 from peewee import IntegrityError
 from exception import TeamAgentException
-from constants import SpecialAgent, MessageBusTopic, MemberStatus, DriverType, EmployStatus
+from constants import AgentHistoryTag, SpecialAgent, MessageBusTopic, MemberStatus, DriverType, EmployStatus
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +172,10 @@ class Agent:
             llmApiUtil.OpenaiLLMApiRole.USER,
             content=build_turn_context_prompt(room.name, message_blocks),
         )
-        await self.append_history_message(turn_context_message)
+        await self.append_history_message(
+            turn_context_message,
+            tags=[AgentHistoryTag.ROOM_TASK_MSG],
+        )
         return 1
 
     async def run_chat_turn(self, room_id: int, max_function_calls: int = 5) -> None:
@@ -241,8 +244,12 @@ class Agent:
     def inject_history_messages(self, items: List[GtAgentHistory]) -> None:
         self._history = list(items)
 
-    async def append_history_message(self, message: llmApiUtil.OpenAIMessage) -> None:
-        item = GtAgentHistory.from_openai_message(self._agent_id, len(self._history), message)
+    async def append_history_message(
+        self,
+        message: llmApiUtil.OpenAIMessage,
+        tags: list[AgentHistoryTag] | None = None,
+    ) -> None:
+        item = GtAgentHistory.from_openai_message(self._agent_id, len(self._history), message, tags=tags)
         self._history.append(item)
         await persistenceService.append_agent_history_message(item)
 

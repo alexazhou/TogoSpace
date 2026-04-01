@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from constants import DriverType, EmployStatus, MessageBusTopic, MemberStatus
+from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic, MemberStatus
 from dal.db import gtAgentManager, gtTeamManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -149,6 +149,7 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         assert "【房间《general》】【bob】：" in content
         assert "： hello alice" in content
         assert "你现在可以调用工具行动。" in content
+        assert alice._history[0].tags == [AgentHistoryTag.ROOM_TASK_MSG]
 
     async def test_pull_room_messages_to_history_appends_complete_turn_prompt_as_last_history(self):
         """pull_room_messages_to_history 追加到 history 的最后一条必须是完整 turn prompt。"""
@@ -170,7 +171,9 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         assert synced_count == 1
         assert len(alice._history) == 2
         assert alice._history[-1].content == expected_prompt
+        assert alice._history[-1].tags == [AgentHistoryTag.ROOM_TASK_MSG]
         assert alice._history[0].content == "older context"
+        assert alice._history[0].tags == []
 
 
 class TestSaveTeamAgentsFullReplace(_agentServiceCase):

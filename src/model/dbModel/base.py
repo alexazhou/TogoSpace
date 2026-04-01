@@ -70,6 +70,41 @@ class EnumField(peewee.CharField, Generic[TEnum]):
         return cast(TEnum, getattr(self.enum, value))
 
 
+class EnumListField(JsonField[list[TEnum]], Generic[TEnum]):
+    """枚举列表字段，用 JSON 数组存储枚举 name，读取时恢复为枚举对象列表。"""
+
+    def __init__(self, enum_cls: type[TEnum], *args, **kwargs):
+        self.enum = enum_cls
+        super().__init__(*args, **kwargs)
+
+    def db_value(self, value: list[TEnum] | list[str] | None) -> str | None:
+        if value is None:
+            return None
+
+        names: list[str] = []
+        for item in value:
+            enum_value = self.enum.value_of(item)
+            if enum_value is None:
+                raise ValueError(f"invalid enum list item for {self.enum.__name__}: {item!r}")
+            names.append(enum_value.name)
+
+        return super().db_value(names)
+
+    def python_value(self, value) -> list[TEnum] | None:
+        raw_items = super().python_value(value)
+        if raw_items is None:
+            return None
+
+        enum_items: list[TEnum] = []
+        for item in raw_items:
+            enum_value = self.enum.value_of(item)
+            if enum_value is None:
+                raise ValueError(f"invalid enum list item for {self.enum.__name__}: {item!r}")
+            enum_items.append(cast(TEnum, enum_value))
+
+        return enum_items
+
+
 class DbModelBase(AutoTimestampMixin, peewee_async.AioModel):
     id:         int = peewee.AutoField()
     created_at: datetime = peewee.DateTimeField(default=datetime.now)

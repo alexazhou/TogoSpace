@@ -8,7 +8,7 @@ import service.ormService as ormService
 import service.presetService as presetService
 import service.roomService as roomService
 import service.teamService as teamService
-from constants import DriverType, EmployStatus, RoleTemplateType, RoomType
+from constants import AgentHistoryTag, DriverType, EmployStatus, RoleTemplateType, RoomType
 from dal.db import (
     gtRoleTemplateManager,
     gtAgentHistoryManager,
@@ -615,20 +615,24 @@ class TestDalManagers(ServiceTestCase):
             agent_id=alice.id,
             seq=1,
             message_json='{"content":"v1"}',
+            tags=[AgentHistoryTag.ROOM_TASK_MSG],
         )
         saved_1 = await gtAgentHistoryManager.append_agent_history_message(first)
         assert saved_1.agent_id == alice.id
         assert saved_1.seq == 1
         assert saved_1.message_json == '{"content":"v1"}'
+        assert saved_1.tags == [AgentHistoryTag.ROOM_TASK_MSG]
 
         duplicate = GtAgentHistory(
             agent_id=alice.id,
             seq=1,
             message_json='{"content":"v2"}',
+            tags=[AgentHistoryTag.COMPACT_CMD],
         )
         saved_2 = await gtAgentHistoryManager.append_agent_history_message(duplicate)
         assert saved_2.id == saved_1.id
         assert saved_2.message_json == '{"content":"v1"}'
+        assert saved_2.tags == [AgentHistoryTag.ROOM_TASK_MSG]
 
     async def test_member_history_manager_append_and_get_sorted(self):
         await self._reset_tables()
@@ -649,9 +653,19 @@ class TestDalManagers(ServiceTestCase):
         assert alice is not None and bob is not None
 
         items = [
-            GtAgentHistory(agent_id=alice.id, seq=2, message_json='{"content":"2"}'),
-            GtAgentHistory(agent_id=alice.id, seq=1, message_json='{"content":"1"}'),
-            GtAgentHistory(agent_id=bob.id, seq=1, message_json='{"content":"b1"}'),
+            GtAgentHistory(
+                agent_id=alice.id,
+                seq=2,
+                message_json='{"content":"2"}',
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+            GtAgentHistory(
+                agent_id=alice.id,
+                seq=1,
+                message_json='{"content":"1"}',
+                tags=[AgentHistoryTag.ROOM_TASK_MSG],
+            ),
+            GtAgentHistory(agent_id=bob.id, seq=1, message_json='{"content":"b1"}', tags=[]),
         ]
         for item in items:
             await gtAgentHistoryManager.append_agent_history_message(item)
@@ -659,6 +673,11 @@ class TestDalManagers(ServiceTestCase):
         alice_history = await gtAgentHistoryManager.get_agent_history(alice.id)
         assert [h.seq for h in alice_history] == [1, 2]
         assert [h.message_json for h in alice_history] == ['{"content":"1"}', '{"content":"2"}']
+        assert [h.tags for h in alice_history] == [
+            [AgentHistoryTag.ROOM_TASK_MSG],
+            [AgentHistoryTag.COMPACT_CMD],
+        ]
 
         bob_history = await gtAgentHistoryManager.get_agent_history(bob.id)
         assert [h.seq for h in bob_history] == [1]
+        assert [h.tags for h in bob_history] == [[]]
