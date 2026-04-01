@@ -154,7 +154,7 @@ class Agent:
                 self.status = MemberStatus.IDLE
                 self._publish_status(self.status)
 
-    async def sync_room_messages(self, room: ChatRoom) -> int:
+    async def pull_room_messages_to_history(self, room: ChatRoom) -> int:
         new_msgs: List[GtCoreChatMessage] = await room.get_unread_messages(self.name)
         logger.info(f"同步房间消息: agent={self.key}, room={room.name}, count={len(new_msgs)}")
 
@@ -181,7 +181,7 @@ class Agent:
             logger.warning(f"run_chat_turn 跳过：room_id={room_id} 不存在, agent={self.key}")
             return
         self.current_room = room
-        synced_count = await self.sync_room_messages(room)
+        synced_count = await self.pull_room_messages_to_history(room)
 
         try:
             await self.driver.run_chat_turn(room, synced_count, max_function_calls)
@@ -190,9 +190,6 @@ class Agent:
             raise
         finally:
             self.current_room = None
-
-    async def sync_room(self, room: ChatRoom) -> None:
-        await self.sync_room_messages(room)
 
     async def _infer(self, tools: Optional[list[llmApiUtil.OpenAITool]]) -> llmApiUtil.OpenAIMessage:
         assert self._history and self._history[-1].role in (
