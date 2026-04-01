@@ -5,6 +5,7 @@ import sys
 import pytest
 
 from dal.db import gtTeamManager
+from model.dbModel.gtAgentHistory import GtAgentHistory
 from service import roomService, agentService, ormService, persistenceService
 from service import presetService
 from service.agentService import Agent
@@ -197,7 +198,11 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         second = format_room_message("lobby", "bob", "hello alice")
         turn_prompt = build_turn_context_prompt("lobby", [first, second])
         agent._history = [
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_prompt),
+            GtAgentHistory.from_openai_message(
+                agent.agent_id,
+                0,
+                llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_prompt),
+            ),
         ]
 
         await driver.run_chat_turn(room, synced_count=1, max_function_calls=1)

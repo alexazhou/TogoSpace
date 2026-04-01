@@ -8,6 +8,7 @@ import pytest
 from constants import DriverType, EmployStatus, MessageBusTopic, MemberStatus
 from dal.db import gtAgentManager, gtTeamManager
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtAgentHistory import GtAgentHistory
 from service import presetService, agentService, roomService, ormService, persistenceService, messageBus
 from util import configUtil, llmApiUtil
 from util.chatMessageFormat import build_turn_context_prompt, format_room_message
@@ -158,7 +159,7 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
 
         alice = agentService.get_team_agent(TEAM, "alice")
         existing = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, "older context")
-        alice._history = [existing]
+        alice._history = [GtAgentHistory.from_openai_message(alice.agent_id, 0, existing)]
 
         synced_count = await alice.pull_room_messages_to_history(room)
 

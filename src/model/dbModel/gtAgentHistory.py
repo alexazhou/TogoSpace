@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from functools import cached_property
+
 import peewee
+from util import llmApiUtil
 
 from .base import DbModelBase
 
@@ -15,3 +18,31 @@ class GtAgentHistory(DbModelBase):
         indexes = (
             (("agent_id", "seq"), True),
         )
+
+    @classmethod
+    def from_openai_message(cls, agent_id: int, seq: int, message: llmApiUtil.OpenAIMessage) -> "GtAgentHistory":
+        return cls(
+            agent_id=agent_id,
+            seq=seq,
+            message_json=message.model_dump_json(exclude_none=True),
+        )
+
+    @cached_property
+    def openai_message(self) -> llmApiUtil.OpenAIMessage:
+        return llmApiUtil.OpenAIMessage.model_validate_json(self.message_json)
+
+    @property
+    def role(self):
+        return self.openai_message.role
+
+    @property
+    def content(self):
+        return self.openai_message.content
+
+    @property
+    def tool_calls(self):
+        return self.openai_message.tool_calls
+
+    @property
+    def tool_call_id(self):
+        return self.openai_message.tool_call_id

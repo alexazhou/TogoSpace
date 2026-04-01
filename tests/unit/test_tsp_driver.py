@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pytspclient import TSPClient, TSPException
 
+from model.dbModel.gtAgentHistory import GtAgentHistory
 from util import llmApiUtil
 from exception import TeamAgentException
 from service.agentService.driver.base import AgentDriverConfig
@@ -49,7 +50,7 @@ class _DummyHost:
     team_workdir: str = "/tmp"
     workspace_root: str = "/tmp/workspaces"
     current_room: object | None = None
-    _history: list[llmApiUtil.OpenAIMessage] = field(default_factory=list)
+    _history: list[GtAgentHistory] = field(default_factory=list)
 
     @property
     def key(self) -> str:
