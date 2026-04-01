@@ -128,16 +128,16 @@ class TestagentServiceGetAllRooms(_agentServiceCase):
         assert room.room_id in agentService.get_all_rooms(TEAM, "alice")
 
 
-class TestagentServiceSyncRoomMessages(_agentServiceCase):
-    async def test_sync_room_messages(self):
-        """_sync_room_messages 会把房间中的新增消息同步进 agent 历史。"""
+class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
+    async def test_pull_room_messages_to_history(self):
+        """pull_room_messages_to_history 会把房间中的新增消息拉取进 agent 历史。"""
         await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
         await room.add_message("bob", "hello alice")
 
         alice = agentService.get_team_agent(TEAM, "alice")
-        synced_count = await alice.sync_room_messages(room)
+        synced_count = await alice.pull_room_messages_to_history(room)
 
         # 初始公告 + bob 消息会聚合成一条“轮到发言”上下文消息
         assert synced_count == 1
@@ -149,8 +149,8 @@ class TestagentServiceSyncRoomMessages(_agentServiceCase):
         assert "： hello alice" in content
         assert "你现在可以调用工具行动。" in content
 
-    async def test_sync_room_messages_appends_complete_turn_prompt_as_last_history(self):
-        """sync_room_messages 追加到 history 的最后一条必须是完整 turn prompt。"""
+    async def test_pull_room_messages_to_history_appends_complete_turn_prompt_as_last_history(self):
+        """pull_room_messages_to_history 追加到 history 的最后一条必须是完整 turn prompt。"""
         await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
@@ -160,7 +160,7 @@ class TestagentServiceSyncRoomMessages(_agentServiceCase):
         existing = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, "older context")
         alice._history = [existing]
 
-        synced_count = await alice.sync_room_messages(room)
+        synced_count = await alice.pull_room_messages_to_history(room)
 
         system_line = format_room_message("general", "SYSTEM", room.build_initial_system_message())
         bob_line = format_room_message("general", "bob", "hello alice")
@@ -223,7 +223,7 @@ class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
         alice = agentService.get_team_agent(TEAM, "alice")
         await room.add_message("alice", "i am talking")
 
-        synced_count = await alice.sync_room_messages(room)
+        synced_count = await alice.pull_room_messages_to_history(room)
         # 只应有初始公告，不应有自己的消息
         assert synced_count == 1
         assert len(alice._history) == 1
