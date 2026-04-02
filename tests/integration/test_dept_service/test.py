@@ -246,7 +246,11 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             members=["alice", "bob", "charlie"],
         )
-        await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, modified))
+        modified_root = await self._to_dept_tree_node(team.id, modified)
+        existing = await gtDeptManager.get_dept_by_name(team.id, "dept_x")
+        assert existing is not None
+        modified_root.id = existing.id
+        await deptService.overwrite_dept_tree(team.id, modified_root)
 
         dept = await gtDeptManager.get_dept_by_name(team.id, "dept_x")
         assert dept is not None
