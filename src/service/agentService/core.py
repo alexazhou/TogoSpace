@@ -14,7 +14,7 @@ from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup, build_agent_driver, normalize_driver_config
 from service.agentService.agentHistroy import AgentHistory
-from service.agentService.toolRegistry import AgentToolRegistry
+from service.agentService.toolRegistry import AgentToolRegistry, ToolExecutionResult
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
 from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from service.roomService import ChatRoom, ToolCallContext
@@ -107,7 +107,8 @@ class Agent:
         """清除 FAILED 状态，从队头任务读取 room_id 返回，供调用方触发续跑。"""
         if self.status != MemberStatus.FAILED:
             raise ValueError(f"Agent {self.key} 当前状态不是 FAILED（当前: {self.status.name}）")
-        task = self.wait_task_queue._queue[0]
+
+        task: GtCoreRoomMessageEvent = self.wait_task_queue._queue[0]
         room_id: int = task.room_id
         self.status = MemberStatus.IDLE
         self._publish_status(self.status)
@@ -127,7 +128,7 @@ class Agent:
         self._publish_status(self.status)
         try:
             while self.wait_task_queue.empty() == False:
-                task = self.wait_task_queue._queue[0]  # peek，先不弹出
+                task: Any = self.wait_task_queue._queue[0]  # peek，先不弹出
 
                 task_succeeded = False
                 last_error: Exception | None = None
@@ -191,10 +192,11 @@ class Agent:
         return 1
 
     async def run_chat_turn(self, room_id: int, max_function_calls: int = 5) -> None:
-        room = roomService.get_room(room_id)
+        room: ChatRoom | None = roomService.get_room(room_id)
         if room is None:
             logger.warning(f"run_chat_turn 跳过：room_id={room_id} 不存在, agent={self.key}")
             return
+
         self.current_room = room
         synced_count = await self.pull_room_messages_to_history(room)
 
@@ -218,7 +220,7 @@ class Agent:
 
     async def _run_chat_turn_with_host_loop(self, max_function_calls: int) -> None:
         turn_setup: AgentTurnSetup = self.driver.turn_setup
-        tools = self.tool_registry.export_openai_tools()
+        tools: list[llmApiUtil.OpenAITool] = self.tool_registry.export_openai_tools()
 
         max_retries = max(1, turn_setup.max_retries)
         for _ in range(max_retries):
@@ -236,21 +238,21 @@ class Agent:
         tools: Optional[list[llmApiUtil.OpenAITool]],
         max_function_calls: int,
     ) -> bool:
-        context = ToolCallContext(
+        context: ToolCallContext = ToolCallContext(
             agent_name=self.name,
             team_name=self.team_name,
             chat_room=self.current_room,
         )
         for _ in range(max_function_calls):
-            assistant_message = await self._infer(tools)
-            tool_calls = assistant_message.tool_calls
+            assistant_message: llmApiUtil.OpenAIMessage = await self._infer(tools)
+            tool_calls: list[llmApiUtil.OpenAIToolCall] | None = assistant_message.tool_calls
             if not tool_calls:
                 return False
 
             logger.info(f"检测到工具调用: agent={self.key}, count={len(tool_calls)}")
             turn_done = False
             for tool_call in tool_calls:
-                exec_result = await self.tool_registry.execute_tool_call(tool_call, context)
+                exec_result: ToolExecutionResult = await self.tool_registry.execute_tool_call(tool_call, context)
                 await self.append_history_message(
                     llmApiUtil.OpenAIMessage.tool_result(exec_result.tool_call_id, exec_result.result_json),
                     tags=exec_result.tags,
@@ -271,30 +273,35 @@ class Agent:
             messages=self._history.export_openai_message_list(),
             tools=tools or None,
         )
-        infer_result = await llmService.infer(self.model, ctx)
+        infer_result: llmService.InferResult = await llmService.infer(self.model, ctx)
         if infer_result.ok == False or infer_result.response is None:
             error_message = infer_result.error_message or "unknown inference error"
             raise RuntimeError(f"LLM 推理失败: agent={self.key}, error={error_message}") from infer_result.error
 
-        response: llmApiUtil.OpenAIResponse = infer_result.response
-        assistant_message: llmApiUtil.OpenAIMessage = response.choices[0].message
+        response = infer_result.response
+        assistant_message = response.choices[0].message
         await self.append_history_message(assistant_message)
 
         return assistant_message
 
     async def _execute_tool(self) -> None:
-        last_msg = self._history.get_last_assistant_message()
+        last_msg: llmApiUtil.OpenAIMessage | None = self._history.get_last_assistant_message()
         if not last_msg or not last_msg.tool_calls:
             return
 
         for tool_call in last_msg.tool_calls:
-            function = tool_call.function if isinstance(tool_call.function, dict) else {}
+            function: dict[str, Any] = tool_call.function if isinstance(tool_call.function, dict) else {}
             name = function.get("name", "")
             args = function.get("arguments", "")
-            context = ToolCallContext(agent_name=self.name, team_name=self.team_name, chat_room=self.current_room, tool_name=name)
-            result_data = await funcToolService.run_tool_call(args, context=context)
+            context: ToolCallContext = ToolCallContext(
+                agent_name=self.name,
+                team_name=self.team_name,
+                chat_room=self.current_room,
+                tool_name=name,
+            )
+            result_data: dict[str, Any] = await funcToolService.run_tool_call(args, context=context)
             result = json.dumps(result_data, ensure_ascii=False)
-            tags = None
+            tags: list[AgentHistoryTag] | None = None
             if name == "finish_chat_turn" and GtAgentHistory.is_tool_call_succeeded(result):
                 tags = [AgentHistoryTag.ROOM_TURN_FINISH]
 
@@ -314,7 +321,7 @@ class Agent:
         message: llmApiUtil.OpenAIMessage,
         tags: list[AgentHistoryTag] | None = None,
     ) -> None:
-        item = self._history.append_message(message, tags=tags)
+        item: GtAgentHistory = self._history.append_message(message, tags=tags)
         await persistenceService.append_agent_history_message(item)
 
 
