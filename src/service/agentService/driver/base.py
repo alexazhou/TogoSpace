@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
-from constants import DriverType
+from constants import AgentHistoryTag, DriverType
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.roomService import ChatRoom
 from util import llmApiUtil
@@ -45,7 +45,11 @@ class AgentDriverHost(Protocol):
     def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llmApiUtil.OpenAIMessage]:
         ...
 
-    async def append_history_message(self, message: llmApiUtil.OpenAIMessage) -> None:
+    async def append_history_message(
+        self,
+        message: llmApiUtil.OpenAIMessage,
+        tags: list[AgentHistoryTag] | None = None,
+    ) -> None:
         ...
 
 

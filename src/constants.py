@@ -120,5 +120,6 @@ class SystemConfigKey(EnhanceEnum):
 
 
 class AgentHistoryTag(EnhanceEnum):
-    ROOM_TASK_MSG = "ROOM_TASK_MSG"
+    ROOM_TURN_BEGIN = "ROOM_TURN_BEGIN"
+    ROOM_TURN_FINISH = "ROOM_TURN_FINISH"
     COMPACT_CMD = "COMPACT_CMD"
