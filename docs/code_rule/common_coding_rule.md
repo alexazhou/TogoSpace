@@ -141,3 +141,24 @@ assert some_really_long_condition, (
     f"这里的错误消息很长，单行会明显影响阅读，因此允许换行"
 )
 ```
+
+## 10. 方法内局部变量的类型注解按“是否一眼能看出来”决定
+
+方法内部的局部变量，不需要机械地全部加类型注解。
+
+判断标准：
+
+- 如果变量来自某个方法调用，而返回类型从调用点一眼看不出来，应该加类型注解
+- 如果变量类型从右侧表达式一眼就能确定，就不要加，避免噪音
+
+```python
+# 推荐：调用点看不出返回类型，补注解
+assistant_message: llmApiUtil.OpenAIMessage = await self._infer(tools)
+infer_result: llmService.InferResult = await llmService.infer(self.model, ctx)
+
+# 不推荐：右侧一眼就知道类型，不需要补注解
+result = json.dumps(result_data, ensure_ascii=False)
+max_retries = max(1, turn_setup.max_retries)
+```
+
+核心原则不是“尽量多写类型”，而是“只在能明显提升阅读效率时写类型”。
