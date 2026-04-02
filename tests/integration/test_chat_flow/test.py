@@ -90,13 +90,13 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await room.activate_scheduling()
 
         alice = agentService.get_team_agent(TEAM, "alice")
-        alice._history = [
+        alice.inject_history_messages([
             GtAgentHistory.from_openai_message(
                 alice.agent_id,
                 0,
                 OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset test turn state"),
             )
-        ]
+        ])
         call_seq = {
             "alice": [
                 {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "manual_turn", "msg": "hello"}}]},
@@ -126,13 +126,13 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = roomService.get_room_by_key(f"turn_checker_room@{TEAM}")
 
         alice = agentService.get_team_agent(TEAM, "alice")
-        alice._history = [
+        alice.inject_history_messages([
             GtAgentHistory.from_openai_message(
                 alice.agent_id,
                 0,
                 OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset turn checker history"),
             )
-        ]
+        ])
         resps = [
             {"content": "我直接回复"},
             {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "turn_checker_room", "msg": "最终消息"}}]},

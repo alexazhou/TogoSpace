@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
 from constants import AgentHistoryTag, DriverType
-from model.dbModel.gtAgentHistory import GtAgentHistory
+from service.agentService.history import AgentHistory
 from service.roomService import ChatRoom
 from util import llmApiUtil
 
@@ -30,7 +30,7 @@ class AgentDriverHost(Protocol):
     team_workdir: str
     workspace_root: str
     current_room: ChatRoom
-    _history: list[GtAgentHistory]
+    _history: AgentHistory
 
     @property
     def key(self) -> str:
@@ -40,9 +40,6 @@ class AgentDriverHost(Protocol):
         ...
 
     async def _execute_tool(self) -> None:
-        ...
-
-    def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llmApiUtil.OpenAIMessage]:
         ...
 
     async def append_history_message(

@@ -101,8 +101,9 @@ class ClaudeSdkAgentDriver(AgentDriver):
         prompt_prefix = f"【{room.name}】 房间轮到你行动，新消息如下："
 
         if synced_count > 0:
-            assert len(self.host._history) > 0, f"synced_count={synced_count} 时 history 不应为空: agent={self.host.key}"
-            turn_prompt = self.host._history[-1].content
+            latest_history = self.host._history.last()
+            assert latest_history is not None, f"synced_count={synced_count} 时 history 不应为空: agent={self.host.key}"
+            turn_prompt = latest_history.content
             assert turn_prompt is not None, f"turn_prompt 不应为 None: agent={self.host.key}, room={room.key}"
 
             if turn_prompt.startswith(prompt_prefix) is False:
@@ -144,12 +145,8 @@ class ClaudeSdkAgentDriver(AgentDriver):
             await self.host._execute_tool()
 
             # 获取最后一个 tool_result 消息作为返回值
-            history = self.host._history
-            result = ""
-            for msg in reversed(history):
-                if msg.role == llmApiUtil.OpenaiLLMApiRole.TOOL and msg.tool_call_id == tool_call_id:
-                    result = msg.content or ""
-                    break
+            result_history = self.host._history.find_tool_result_by_call_id(tool_call_id)
+            result = (result_history.content if result_history else "") or ""
 
             result_data = json.loads(result)
             is_error = result_data.get("success", True) is not True
