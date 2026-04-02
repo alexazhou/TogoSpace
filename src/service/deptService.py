@@ -15,21 +15,20 @@ logger = logging.getLogger(__name__)
 
 async def overwrite_dept_tree(team_id: int, root: GtDept) -> None:
     """增量更新部门树，同步部门房间，更新成员 employ_status。"""
-    # 单次递归：校验整棵树 + 收集成员 ID 与部门 ID
+    # 单次递归：校验整棵树 + 收集成员 ID。
     try:
-        all_member_ids, new_dept_ids = root.validate_and_collect_tree_ids()
+        all_member_ids, _ = root.validate_and_collect_tree_ids()
     except ValueError as exc:
         raise TeamAgentException(str(exc), error_code="DEPT_MEMBERS_TOO_FEW") from exc
+    input_dept_ids = root.collect_dept_ids()
 
-    # 获取现有部门
+    # 先删除不在传入 id 集合中的旧部门，再执行覆盖保存。
     existing_depts = await gtDeptManager.get_all_depts(team_id)
-
-    # 删除不在新树中的部门（按 ID）
-    to_delete = [d.id for d in existing_depts if d.id not in new_dept_ids]
+    to_delete = [d.id for d in existing_depts if d.id not in input_dept_ids]
     if to_delete:
         await GtDept.delete().where(GtDept.id.in_(to_delete)).aio_execute()  # type: ignore[attr-defined]
 
-    # 增量更新/创建部门
+    # 增量更新/创建部门（有 id 更新、无 id 新建）
     saved_root = await _overwrite_dept_subtree(team_id, root, parent_id=None)
 
     # 同步部门房间（roomService 只接收房间信息，不感知部门树结构）
