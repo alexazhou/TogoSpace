@@ -18,9 +18,6 @@ class AgentHistory:
     def agent_id(self) -> int:
         return self._agent_id
 
-    def bind_agent_id(self, agent_id: int) -> None:
-        self._agent_id = agent_id
-
     def __len__(self) -> int:
         return len(self._items)
 
@@ -55,7 +52,7 @@ class AgentHistory:
             llmApiUtil.OpenaiLLMApiRole.SYSTEM,
         ), f"[{agent_key}] _infer 前最后一条消息不能是 assistant，当前为: {last_role if last_role else 'empty'}"
 
-    def openai_messages(self) -> list[llmApiUtil.OpenAIMessage]:
+    def export_openai_message_list(self) -> list[llmApiUtil.OpenAIMessage]:
         return [item.openai_message for item in self._items]
 
     def append_message(

@@ -12,7 +12,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service.agentService.driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
-from service.agentService.history import AgentHistory
+from service.agentService.agentHistroy import AgentHistory
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
 from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from service.roomService import ChatRoom, ChatContext
@@ -54,6 +54,7 @@ class Agent:
         template_name: str = "",
         team_workdir: str = "",
         workspace_root: str = "",
+        agent_id: int = 0,
     ):
         self.name: str = name  # Agent 在团队中的昵称
         self.team_name: str = team_name
@@ -63,8 +64,8 @@ class Agent:
         self.team_workdir: str = team_workdir
         self.workspace_root: str = workspace_root
 
-        self._agent_id: int = 0
-        self._history_store: AgentHistory = AgentHistory(self._agent_id)
+        self._agent_id: int = agent_id
+        self._history_store: AgentHistory = AgentHistory(agent_id)
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
         self.status: MemberStatus = MemberStatus.IDLE
         self.current_room: Optional[ChatRoom] = None
@@ -73,10 +74,6 @@ class Agent:
     @property
     def _history(self) -> AgentHistory:
         return self._history_store
-
-    def set_agent_id(self, agent_id: int) -> None:
-        self._agent_id = agent_id
-        self._history.bind_agent_id(agent_id)
 
     @property
     def team_id(self) -> int:
@@ -207,7 +204,7 @@ class Agent:
         self._history.assert_infer_ready(self.key)
         ctx = GtCoreAgentDialogContext(
             system_prompt=self.system_prompt,
-            messages=self._history.openai_messages(),
+            messages=self._history.export_openai_message_list(),
             tools=tools or None,
         )
         infer_result = await llmService.infer(self.model, ctx)
@@ -366,13 +363,13 @@ async def _create_team_agents(team_row: GtTeam, agent_rows: list[GtAgent], templ
             template_name=template_name,
             team_workdir=team_workdir,
             workspace_root=resolved_workspace_root,
+            agent_id=agent_row.id,
         )
         _agents[key] = agent
         logger.info(
             f"创建 Agent 实例: key={key}, template={template_name}, model={model_name}, driver={driver_config.driver_type}"
         )
         await agent.startup()
-        agent.set_agent_id(agent_row.id)
 
 
 async def create_team_agents_from_db(workspace_root: str | None = None) -> None:
