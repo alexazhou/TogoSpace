@@ -4,7 +4,7 @@ import logging
 from typing import Any, Callable, List, Optional
 
 from util import llmApiUtil
-from service.roomService import ChatContext
+from service.roomService import ToolCallContext
 from .tools import FUNCTION_REGISTRY
 from .toolLoader import build_tools
 
@@ -31,11 +31,15 @@ def get_tools_by_names(names: list[str]) -> list[llmApiUtil.OpenAITool]:
 
 
 async def run_tool_call(
-    function_name: str,
     function_args: str,
-    context: Optional[ChatContext] = None,
-) -> str:
-    """解析 function_args JSON 字符串并执行函数，返回结果字符串。"""
+    context: Optional[ToolCallContext] = None,
+) -> dict[str, Any]:
+    """解析 function_args JSON 字符串并执行函数，返回结果字典。"""
+    function_name = context.tool_name if context is not None else ""
+    if not function_name:
+        logger.error("函数执行失败: tool_name 为空")
+        return {"success": False, "message": "函数执行失败: tool_name 为空"}
+
     try:
         args: dict = json.loads(function_args)
     except json.JSONDecodeError:
@@ -62,7 +66,9 @@ async def run_tool_call(
         if inspect.isawaitable(result):
             result = await result
 
-        result = json.dumps(result, ensure_ascii=False)
+        if not isinstance(result, dict):
+            result = {"success": True, "result": result}
+
         logger.info(f"函数执行结果: {result}")
         return result
 
@@ -73,7 +79,7 @@ async def run_tool_call(
             error = str(e)
 
         logger.error(f"函数执行失败: {e}")
-        return json.dumps({"success": False, "message": f"函数执行失败: {error}"}, ensure_ascii=False)
+        return {"success": False, "message": f"函数执行失败: {error}"}
 
 
 def shutdown() -> None:
