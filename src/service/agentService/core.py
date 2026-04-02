@@ -12,6 +12,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service.agentService.driver import AgentDriverConfig, build_agent_driver, normalize_driver_config
+from service.agentService.history import AgentHistory
 from service import llmService, funcToolService, roomService, messageBus, persistenceService
 from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from service.roomService import ChatRoom, ChatContext
@@ -63,11 +64,19 @@ class Agent:
         self.workspace_root: str = workspace_root
 
         self._agent_id: int = 0
-        self._history: list[GtAgentHistory] = []
+        self._history_store: AgentHistory = AgentHistory(self._agent_id)
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
         self.status: MemberStatus = MemberStatus.IDLE
         self.current_room: Optional[ChatRoom] = None
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
+
+    @property
+    def _history(self) -> AgentHistory:
+        return self._history_store
+
+    def set_agent_id(self, agent_id: int) -> None:
+        self._agent_id = agent_id
+        self._history.bind_agent_id(agent_id)
 
     @property
     def team_id(self) -> int:
@@ -195,14 +204,10 @@ class Agent:
             self.current_room = None
 
     async def _infer(self, tools: Optional[list[llmApiUtil.OpenAITool]]) -> llmApiUtil.OpenAIMessage:
-        assert self._history and self._history[-1].role in (
-            llmApiUtil.OpenaiLLMApiRole.USER,
-            llmApiUtil.OpenaiLLMApiRole.TOOL,
-            llmApiUtil.OpenaiLLMApiRole.SYSTEM,
-        ), f"[{self.key}] _infer 前最后一条消息不能是 assistant，当前为: {self._history[-1].role if self._history else 'empty'}"
+        self._history.assert_infer_ready(self.key)
         ctx = GtCoreAgentDialogContext(
             system_prompt=self.system_prompt,
-            messages=[item.openai_message for item in self._history],
+            messages=self._history.openai_messages(),
             tools=tools or None,
         )
         infer_result = await llmService.infer(self.model, ctx)
@@ -217,7 +222,7 @@ class Agent:
         return assistant_message
 
     async def _execute_tool(self) -> None:
-        last_msg = self.get_last_assistant_message()
+        last_msg = self._history.get_last_assistant_message()
         if not last_msg or not last_msg.tool_calls:
             return
 
@@ -236,28 +241,18 @@ class Agent:
                 tags=tags,
             )
 
-    def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llmApiUtil.OpenAIMessage]:
-        recent_history = self._history[start_idx:]
-
-        for item in reversed(recent_history):
-            if item.role == llmApiUtil.OpenaiLLMApiRole.ASSISTANT:
-                return item.openai_message
-
-        return None
-
     def dump_history_messages(self) -> List[GtAgentHistory]:
-        return list(self._history)
+        return self._history.dump()
 
     def inject_history_messages(self, items: List[GtAgentHistory]) -> None:
-        self._history = list(items)
+        self._history.replace(items)
 
     async def append_history_message(
         self,
         message: llmApiUtil.OpenAIMessage,
         tags: list[AgentHistoryTag] | None = None,
     ) -> None:
-        item = GtAgentHistory.from_openai_message(self._agent_id, len(self._history), message, tags=tags)
-        self._history.append(item)
+        item = self._history.append_message(message, tags=tags)
         await persistenceService.append_agent_history_message(item)
 
 
@@ -272,7 +267,7 @@ async def restore_state() -> None:
     for agent in get_all_agents():
         items = await persistenceService.load_agent_history_message(agent.agent_id)
         if items:
-            agent.inject_history_messages(items)
+            agent._history.replace(items)
 
 
 async def _build_dept_context(team_id: int, agent_name: str) -> str:
@@ -377,7 +372,7 @@ async def _create_team_agents(team_row: GtTeam, agent_rows: list[GtAgent], templ
             f"创建 Agent 实例: key={key}, template={template_name}, model={model_name}, driver={driver_config.driver_type}"
         )
         await agent.startup()
-        agent._agent_id = agent_row.id
+        agent.set_agent_id(agent_row.id)
 
 
 async def create_team_agents_from_db(workspace_root: str | None = None) -> None:

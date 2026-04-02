@@ -197,13 +197,13 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         first = format_room_message("lobby", "SYSTEM", "房间初始化")
         second = format_room_message("lobby", "bob", "hello alice")
         turn_prompt = build_turn_context_prompt("lobby", [first, second])
-        agent._history = [
+        agent.inject_history_messages([
             GtAgentHistory.from_openai_message(
                 agent.agent_id,
                 0,
                 llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_prompt),
             ),
-        ]
+        ])
 
         await driver.run_chat_turn(room, synced_count=1, max_function_calls=1)
 
