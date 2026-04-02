@@ -174,7 +174,7 @@ class Agent:
         )
         await self.append_history_message(
             turn_context_message,
-            tags=[AgentHistoryTag.ROOM_TASK_MSG],
+            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         )
         return 1
 
@@ -227,7 +227,14 @@ class Agent:
             args = function.get("arguments", "")
             context = ChatContext(agent_name=self.name, team_name=self.team_name, chat_room=self.current_room)
             result = await funcToolService.run_tool_call(name, args, context=context)
-            await self.append_history_message(llmApiUtil.OpenAIMessage.tool_result(tool_call.id, result))
+            tags = None
+            if name == "finish_chat_turn" and GtAgentHistory.is_tool_call_succeeded(result):
+                tags = [AgentHistoryTag.ROOM_TURN_FINISH]
+
+            await self.append_history_message(
+                llmApiUtil.OpenAIMessage.tool_result(tool_call.id, result),
+                tags=tags,
+            )
 
     def get_last_assistant_message(self, start_idx: int = 0) -> Optional[llmApiUtil.OpenAIMessage]:
         recent_history = self._history[start_idx:]

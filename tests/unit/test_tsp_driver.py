@@ -13,6 +13,7 @@ from pytspclient import TSPClient, TSPException
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from util import llmApiUtil
 from exception import TeamAgentException
+from constants import AgentHistoryTag
 from service.agentService.driver.base import AgentDriverConfig
 from service.agentService.driver.tspDriver import build_gtsp_command, TspAgentDriver
 
@@ -144,6 +145,11 @@ async def test_tsp_driver_execute_tool_calls_local_vs_tsp(mock_tsp_host):
             name="send_chat_msg", 
             description="", 
             parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
+        )),
+        llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
+            name="finish_chat_turn",
+            description="",
+            parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
         ))
     ]):
         driver = TspAgentDriver(mock_tsp_host, config)
@@ -165,6 +171,17 @@ async def test_tsp_driver_execute_tool_calls_local_vs_tsp(mock_tsp_host):
         with patch("service.funcToolService.run_tool_call", return_value='{"success": true}'):
             await driver._execute_tool_calls(tool_calls)
             mock_tsp_host.append_history_message.assert_called()
+        mock_tsp_host.append_history_message.reset_mock()
+
+        # Case 1.1: finish_chat_turn 本地工具成功时，应在 tool_result 上打 ROOM_TURN_FINISH
+        tool_calls = [
+            llmApiUtil.OpenAIToolCall(id="c1_1", function={"name": "finish_chat_turn", "arguments": "{}"})
+        ]
+        with patch("service.funcToolService.run_tool_call", return_value='{"success": true}'):
+            await driver._execute_tool_calls(tool_calls)
+            assert mock_tsp_host.append_history_message.call_args.kwargs["tags"] == [
+                AgentHistoryTag.ROOM_TURN_FINISH
+            ]
             
         # Case 2: TSP tool
         tool_calls = [

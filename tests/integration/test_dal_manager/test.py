@@ -615,13 +615,13 @@ class TestDalManagers(ServiceTestCase):
             agent_id=alice.id,
             seq=1,
             message_json='{"content":"v1"}',
-            tags=[AgentHistoryTag.ROOM_TASK_MSG],
+            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         )
         saved_1 = await gtAgentHistoryManager.append_agent_history_message(first)
         assert saved_1.agent_id == alice.id
         assert saved_1.seq == 1
         assert saved_1.message_json == '{"content":"v1"}'
-        assert saved_1.tags == [AgentHistoryTag.ROOM_TASK_MSG]
+        assert saved_1.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
         duplicate = GtAgentHistory(
             agent_id=alice.id,
@@ -632,7 +632,7 @@ class TestDalManagers(ServiceTestCase):
         saved_2 = await gtAgentHistoryManager.append_agent_history_message(duplicate)
         assert saved_2.id == saved_1.id
         assert saved_2.message_json == '{"content":"v1"}'
-        assert saved_2.tags == [AgentHistoryTag.ROOM_TASK_MSG]
+        assert saved_2.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
     async def test_member_history_manager_append_and_get_sorted(self):
         await self._reset_tables()
@@ -663,7 +663,7 @@ class TestDalManagers(ServiceTestCase):
                 agent_id=alice.id,
                 seq=1,
                 message_json='{"content":"1"}',
-                tags=[AgentHistoryTag.ROOM_TASK_MSG],
+                tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
             ),
             GtAgentHistory(agent_id=bob.id, seq=1, message_json='{"content":"b1"}', tags=[]),
         ]
@@ -674,7 +674,7 @@ class TestDalManagers(ServiceTestCase):
         assert [h.seq for h in alice_history] == [1, 2]
         assert [h.message_json for h in alice_history] == ['{"content":"1"}', '{"content":"2"}']
         assert [h.tags for h in alice_history] == [
-            [AgentHistoryTag.ROOM_TASK_MSG],
+            [AgentHistoryTag.ROOM_TURN_BEGIN],
             [AgentHistoryTag.COMPACT_CMD],
         ]
 

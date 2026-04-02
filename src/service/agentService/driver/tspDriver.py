@@ -10,7 +10,9 @@ from typing import Any, Optional
 from pytspclient import TSPClient, TSPException, TSPInitializeResult, TSPToolResponse
 from service.agentService.driver.base import AgentDriverConfig
 
+from constants import AgentHistoryTag
 from exception import TeamAgentException
+from model.dbModel.gtAgentHistory import GtAgentHistory
 from service import funcToolService
 from service.roomService import ChatContext, ChatRoom
 from util import llmApiUtil
@@ -139,8 +141,14 @@ class TspAgentDriver(AgentDriver):
                     chat_room=self.host.current_room,
                 )
                 result_json = await funcToolService.run_tool_call(function_name, function_args, context=context)
-                await self.host.append_history_message(llmApiUtil.OpenAIMessage.tool_result(tool_call_id, result_json))
-                if function_name == "finish_chat_turn" and _is_tool_call_succeeded(result_json):
+                is_finish_turn = function_name == "finish_chat_turn"
+                is_finish_succeeded = is_finish_turn and GtAgentHistory.is_tool_call_succeeded(result_json)
+                tags = [AgentHistoryTag.ROOM_TURN_FINISH] if is_finish_succeeded else None
+                await self.host.append_history_message(
+                    llmApiUtil.OpenAIMessage.tool_result(tool_call_id, result_json),
+                    tags=tags,
+                )
+                if is_finish_succeeded:
                     turn_done = True
                 continue
 
@@ -187,11 +195,3 @@ class TspAgentDriver(AgentDriver):
             )
 
         self._tsp_tools = resolved
-
-
-def _is_tool_call_succeeded(result_json: str) -> bool:
-    try:
-        data = json.loads(result_json)
-    except json.JSONDecodeError:
-        return False
-    return bool(data.get("success"))

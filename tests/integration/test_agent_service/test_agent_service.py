@@ -149,7 +149,7 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         assert "【房间《general》】【bob】：" in content
         assert "： hello alice" in content
         assert "你现在可以调用工具行动。" in content
-        assert alice._history[0].tags == [AgentHistoryTag.ROOM_TASK_MSG]
+        assert alice._history[0].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
     async def test_pull_room_messages_to_history_appends_complete_turn_prompt_as_last_history(self):
         """pull_room_messages_to_history 追加到 history 的最后一条必须是完整 turn prompt。"""
@@ -171,7 +171,7 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         assert synced_count == 1
         assert len(alice._history) == 2
         assert alice._history[-1].content == expected_prompt
-        assert alice._history[-1].tags == [AgentHistoryTag.ROOM_TASK_MSG]
+        assert alice._history[-1].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
         assert alice._history[0].content == "older context"
         assert alice._history[0].tags == []
 

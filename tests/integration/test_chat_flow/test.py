@@ -17,7 +17,7 @@ import service.presetService as presetService
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
-from constants import OpenaiLLMApiRole, RoomState
+from constants import AgentHistoryTag, OpenaiLLMApiRole, RoomState
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -87,6 +87,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         """验证 tool_call 结果被正确追加到 agent history。"""
         await roomService.ensure_room_record(TEAM, "manual_turn", ["alice", "bob"])
         room = roomService.get_room_by_key(f"manual_turn@{TEAM}")
+        await room.activate_scheduling()
 
         alice = agentService.get_team_agent(TEAM, "alice")
         alice._history = [
@@ -117,6 +118,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         tool_results = [m for m in alice._history if m.role == OpenaiLLMApiRole.TOOL]
         assert len(tool_results) >= 1
         assert json.loads(tool_results[0].content)["success"]
+        assert any(AgentHistoryTag.ROOM_TURN_FINISH in msg.tags for msg in tool_results)
 
     async def test_turn_checker_forces_send_chat_msg(self):
         """直接输出文字时 turn_checker 应注入 hint，迫使 agent 改用工具。"""

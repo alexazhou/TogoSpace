@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import cached_property
+import json
 
 import peewee
 from util import llmApiUtil
@@ -56,3 +57,11 @@ class GtAgentHistory(DbModelBase):
     @property
     def tool_call_id(self):
         return self.openai_message.tool_call_id
+
+    @staticmethod
+    def is_tool_call_succeeded(result_json: str | None) -> bool:
+        try:
+            data = json.loads(result_json)
+        except Exception:
+            return False
+        return bool(data.get("success"))
