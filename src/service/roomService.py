@@ -51,11 +51,12 @@ def _infer_room_type(members: Sequence[str]) -> RoomType:
 
 
 @dataclass
-class ChatContext:
-    """工具调用时注入的上下文，包含当前 Agent 和聊天室信息。"""
+class ToolCallContext:
+    """工具调用时注入的上下文，包含当前 Agent、工具名和聊天室信息。"""
     agent_name: str
     team_name: str
     chat_room: ChatRoom
+    tool_name: str = ""
 
 
 class ChatRoom:

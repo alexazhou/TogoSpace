@@ -1,23 +1,18 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
-import uuid
 from typing import Any, Optional
 
 from pytspclient import TSPClient, TSPException, TSPInitializeResult, TSPToolResponse
 from service.agentService.driver.base import AgentDriverConfig
 
-from constants import AgentHistoryTag
-from exception import TeamAgentException
-from model.dbModel.gtAgentHistory import GtAgentHistory
 from service import funcToolService
-from service.roomService import ChatContext, ChatRoom
+from service.roomService import ToolCallContext, ChatRoom
 from util import llmApiUtil
 
-from .base import AgentDriver
+from .base import AgentDriver, AgentTurnSetup
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +71,7 @@ class TspAgentDriver(AgentDriver):
             raise
 
         self._client = client
+        self._register_host_tools()
         logger.info(
             "TSP driver initialized: agent=%s command=%s tools=%s",
             self.host.key,
@@ -91,80 +87,44 @@ class TspAgentDriver(AgentDriver):
         finally:
             self._client = None
 
-    async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
-        for _ in range(_RUN_CHAT_TURN_MAX_RETRIES):
-            turn_done = await self._run_until_reply(
-                room=room,
-                tools=[*self._tsp_tools.values(), *self._local_tools.values()],
-                max_function_calls=max_function_calls,
-            )
-            if turn_done:
-                break
-            await self.host.append_history_message(
-                llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, _RUN_CHAT_TURN_HINT)
-            )
+    @property
+    def host_managed_turn_loop(self) -> bool:
+        return True
 
-    async def _run_until_reply(
-        self,
-        room: ChatRoom,
-        tools: Optional[list[llmApiUtil.OpenAITool]] = None,
-        max_function_calls: int = 5,
-    ) -> bool:
+    def _register_host_tools(self) -> None:
         if self._client is None:
             raise RuntimeError(f"TSP client 尚未初始化: agent={self.host.key}")
+        self.host.tool_registry.clear()
 
-        for _ in range(max_function_calls):
-            assistant_message = await self.host._infer(tools)
-            tool_calls = assistant_message.tool_calls
-            if not tool_calls:
-                return False
+        for function_name, tool in self._local_tools.items():
+            self.host.tool_registry.register(
+                tool,
+                funcToolService.run_tool_call,
+                marks_turn_finish=function_name == "finish_chat_turn",
+            )
 
-            turn_done = await self._execute_tool_calls(tool_calls)
-            if turn_done:
-                return True
+        for tool in self._tsp_tools.values():
+            self.host.tool_registry.register(tool, self._execute_tsp_tool)
 
-        logger.warning("达到最大函数调用次数: agent=%s max=%s", self.host.key, max_function_calls)
-        return False
+    @property
+    def turn_setup(self) -> AgentTurnSetup:
+        return AgentTurnSetup(
+            max_retries=_RUN_CHAT_TURN_MAX_RETRIES,
+            hint_prompt=_RUN_CHAT_TURN_HINT,
+        )
 
-    async def _execute_tool_calls(self, tool_calls: list[llmApiUtil.OpenAIToolCall]) -> bool:
-        turn_done = False
-        for tool_call in tool_calls:
-            function = tool_call.function
-            function_name = str(function.get("name", ""))
-            function_args = str(function.get("arguments", "{}"))
-            tool_call_id = str(tool_call.id or uuid.uuid4().hex)
+    async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
+        raise RuntimeError("TspAgentDriver 不再直接执行 run_chat_turn，请使用 Agent.run_chat_turn")
 
-            if function_name in self._local_tools:
-                context = ChatContext(
-                    agent_name=self.host.name,
-                    team_name=self.host.team_name,
-                    chat_room=self.host.current_room,
-                )
-                result_json = await funcToolService.run_tool_call(function_name, function_args, context=context)
-                is_finish_turn = function_name == "finish_chat_turn"
-                is_finish_succeeded = is_finish_turn and GtAgentHistory.is_tool_call_succeeded(result_json)
-                tags = [AgentHistoryTag.ROOM_TURN_FINISH] if is_finish_succeeded else None
-                await self.host.append_history_message(
-                    llmApiUtil.OpenAIMessage.tool_result(tool_call_id, result_json),
-                    tags=tags,
-                )
-                if is_finish_succeeded:
-                    turn_done = True
-                continue
-
-            if function_name in self._tsp_tools:
-                result_dict = await self._execute_tsp_tool(function_name, function_args)
-                result_json = json.dumps(result_dict, ensure_ascii=False)
-                await self.host.append_history_message(llmApiUtil.OpenAIMessage.tool_result(tool_call_id, result_json))
-                continue
-
-            result_json = json.dumps({"success": False, "message": f"未知工具: {function_name}"}, ensure_ascii=False)
-            await self.host.append_history_message(llmApiUtil.OpenAIMessage.tool_result(tool_call_id, result_json))
-
-        return turn_done
-
-    async def _execute_tsp_tool(self, function_name: str, function_args: str) -> dict[str, Any]:
+    async def _execute_tsp_tool(
+        self,
+        function_args: str,
+        context: ToolCallContext | None = None,
+    ) -> dict[str, Any]:
         assert self._client is not None, "TSP client 尚未初始化"
+        function_name = context.tool_name if context is not None else ""
+        if not function_name:
+            return {"success": False, "message": "TSP 工具调用失败: tool_name 为空"}
         try:
             parsed_args = json.loads(function_args)
         except json.JSONDecodeError as e:

@@ -12,10 +12,11 @@ from pytspclient import TSPClient, TSPException
 
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from util import llmApiUtil
-from exception import TeamAgentException
 from constants import AgentHistoryTag
 from service.agentService.driver.base import AgentDriverConfig
 from service.agentService.driver.tspDriver import build_gtsp_command, TspAgentDriver
+from service.agentService.toolRegistry import AgentToolRegistry
+from service.roomService import ToolCallContext
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
@@ -52,6 +53,7 @@ class _DummyHost:
     workspace_root: str = "/tmp/workspaces"
     current_room: object | None = None
     _history: list[GtAgentHistory] = field(default_factory=list)
+    tool_registry: AgentToolRegistry = field(default_factory=AgentToolRegistry)
 
     @property
     def key(self) -> str:
@@ -85,25 +87,28 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
         assert driver._tsp_tools
 
         # 1) 创建 /tmp 下测试目录
+        mkdir_ctx = ToolCallContext(agent_name="e2e", team_name="default", chat_room=MagicMock(), tool_name="execute_bash")
         mkdir_result = await driver._execute_tsp_tool(
-            "execute_bash",
             json.dumps({"command": f"mkdir -p {tmp_dir}"}, ensure_ascii=False),
+            mkdir_ctx,
         )
         assert isinstance(mkdir_result, dict)
         assert mkdir_result.get("exit_code") == 0
 
         # 2) 写文件
+        write_ctx = ToolCallContext(agent_name="e2e", team_name="default", chat_room=MagicMock(), tool_name="write_file")
         write_result = await driver._execute_tsp_tool(
-            "write_file",
             json.dumps({"file_path": file_path, "content": expected_content}, ensure_ascii=False),
+            write_ctx,
         )
         assert isinstance(write_result, dict)
         assert write_result.get("file_path") == file_path
 
         # 3) list 目录并确认文件存在
+        list_ctx = ToolCallContext(agent_name="e2e", team_name="default", chat_room=MagicMock(), tool_name="list_dir")
         list_result = await driver._execute_tsp_tool(
-            "list_dir",
             json.dumps({"dir_path": tmp_dir, "recursive": False}, ensure_ascii=False),
+            list_ctx,
         )
         assert isinstance(list_result, dict)
         items = list_result.get("items", [])
@@ -111,9 +116,10 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
         assert "hello.txt" in names
 
         # 4) read 文件并校验内容一致
+        read_ctx = ToolCallContext(agent_name="e2e", team_name="default", chat_room=MagicMock(), tool_name="read_file")
         read_result = await driver._execute_tsp_tool(
-            "read_file",
             json.dumps({"file_path": file_path}, ensure_ascii=False),
+            read_ctx,
         )
         assert isinstance(read_result, dict)
         assert read_result.get("content") == expected_content
@@ -134,10 +140,11 @@ def mock_tsp_host():
     host._infer = AsyncMock()
     host.append_history_message = AsyncMock()
     host.current_room = MagicMock()
+    host.tool_registry = AgentToolRegistry()
     return host
 
 @pytest.mark.asyncio
-async def test_tsp_driver_execute_tool_calls_local_vs_tsp(mock_tsp_host):
+async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host):
     config = AgentDriverConfig(driver_type="tsp", options={})
     
     with patch("service.funcToolService.get_tools_by_names", return_value=[
@@ -153,6 +160,7 @@ async def test_tsp_driver_execute_tool_calls_local_vs_tsp(mock_tsp_host):
         ))
     ]):
         driver = TspAgentDriver(mock_tsp_host, config)
+        driver._client = MagicMock()
         driver._tsp_tools = {
             "tsp_tool": llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
                 name="tsp_tool", 
@@ -160,43 +168,59 @@ async def test_tsp_driver_execute_tool_calls_local_vs_tsp(mock_tsp_host):
                 parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
             ))
         }
-        
-        # Mock _execute_tsp_tool
-        driver._execute_tsp_tool = AsyncMock(return_value={"success": True})
-        
-        # Case 1: Local tool
-        tool_calls = [
-            llmApiUtil.OpenAIToolCall(id="c1", function={"name": "send_chat_msg", "arguments": "{}"})
-        ]
-        with patch("service.funcToolService.run_tool_call", return_value='{"success": true}'):
-            await driver._execute_tool_calls(tool_calls)
-            mock_tsp_host.append_history_message.assert_called()
-        mock_tsp_host.append_history_message.reset_mock()
 
-        # Case 1.1: finish_chat_turn 本地工具成功时，应在 tool_result 上打 ROOM_TURN_FINISH
-        tool_calls = [
-            llmApiUtil.OpenAIToolCall(id="c1_1", function={"name": "finish_chat_turn", "arguments": "{}"})
-        ]
-        with patch("service.funcToolService.run_tool_call", return_value='{"success": true}'):
-            await driver._execute_tool_calls(tool_calls)
-            assert mock_tsp_host.append_history_message.call_args.kwargs["tags"] == [
-                AgentHistoryTag.ROOM_TURN_FINISH
-            ]
-            
-        # Case 2: TSP tool
-        tool_calls = [
-            llmApiUtil.OpenAIToolCall(id="c2", function={"name": "tsp_tool", "arguments": "{}"})
-        ]
-        await driver._execute_tool_calls(tool_calls)
-        driver._execute_tsp_tool.assert_called_with("tsp_tool", "{}")
-        
-        # Case 3: Unknown tool
-        tool_calls = [
-            llmApiUtil.OpenAIToolCall(id="c3", function={"name": "unknown", "arguments": "{}"})
-        ]
-        await driver._execute_tool_calls(tool_calls)
-        last_msg = mock_tsp_host.append_history_message.call_args[0][0]
-        assert "未知工具" in last_msg.content
+        driver._execute_tsp_tool = AsyncMock(return_value={"success": True})
+        run_tool_call = AsyncMock(return_value={"success": True})
+        with patch("service.funcToolService.run_tool_call", run_tool_call):
+            driver._register_host_tools()
+            context = ToolCallContext(
+                agent_name="alice",
+                team_name="team",
+                chat_room=MagicMock(),
+            )
+            finish_result = await mock_tsp_host.tool_registry.execute_tool_call(
+                llmApiUtil.OpenAIToolCall(id="c1", function={"name": "finish_chat_turn", "arguments": "{}"}),
+                context=context,
+            )
+
+        setup = driver.turn_setup
+        assert setup.max_retries == 3
+
+        exported_names = [tool.function.name for tool in mock_tsp_host.tool_registry.export_openai_tools()]
+        assert exported_names == ["send_chat_msg", "finish_chat_turn", "tsp_tool"]
+
+        run_tool_call.assert_called_once()
+        called_args, called_context = run_tool_call.call_args.args
+        assert called_args == "{}"
+        assert called_context.agent_name == "alice"
+        assert called_context.team_name == "team"
+        assert called_context.tool_name == "finish_chat_turn"
+        assert finish_result.turn_finished is True
+        assert finish_result.tags == [AgentHistoryTag.ROOM_TURN_FINISH]
+
+        tsp_result = await mock_tsp_host.tool_registry.execute_tool_call(
+            llmApiUtil.OpenAIToolCall(id="c2", function={"name": "tsp_tool", "arguments": "{}"}),
+            context=context,
+        )
+        driver._execute_tsp_tool.assert_called_once()
+        tsp_called_args, tsp_called_context = driver._execute_tsp_tool.call_args.args
+        assert tsp_called_args == "{}"
+        assert tsp_called_context.tool_name == "tsp_tool"
+        assert json.loads(tsp_result.result_json)["success"] is True
+
+        unknown_result = await mock_tsp_host.tool_registry.execute_tool_call(
+            llmApiUtil.OpenAIToolCall(id="c3", function={"name": "unknown", "arguments": "{}"}),
+            context=context,
+        )
+        assert "未知工具" in unknown_result.result_json
+
+
+@pytest.mark.asyncio
+async def test_tsp_driver_run_chat_turn_is_disabled(mock_tsp_host):
+    config = AgentDriverConfig(driver_type="tsp", options={})
+    driver = TspAgentDriver(mock_tsp_host, config)
+    with pytest.raises(RuntimeError, match="不再直接执行 run_chat_turn"):
+        await driver.run_chat_turn(room=MagicMock(), synced_count=0)
 
 @pytest.mark.asyncio
 async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host):
@@ -206,18 +230,19 @@ async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host):
     driver._client.tool = AsyncMock()
     
     # Case 1: JSON Decode Error
-    res = await driver._execute_tsp_tool("tool", "invalid json")
+    ctx = ToolCallContext(agent_name="alice", team_name="team", chat_room=MagicMock(), tool_name="tool")
+    res = await driver._execute_tsp_tool("invalid json", ctx)
     assert "JSON 解析失败" in res["message"]
     
     # Case 2: TSP Exception
     driver._client.tool.side_effect = TSPException("tsp/code", "tsp error")
-    res = await driver._execute_tsp_tool("tool", "{}")
+    res = await driver._execute_tsp_tool("{}", ctx)
     assert res["code"] == "tsp/code"
     assert res["message"] == "tsp error"
     
     # Case 3: General Exception
     driver._client.tool.side_effect = RuntimeError("network fail")
-    res = await driver._execute_tsp_tool("tool", "{}")
+    res = await driver._execute_tsp_tool("{}", ctx)
     assert "工具调用失败" in res["message"]
 
 @pytest.mark.asyncio

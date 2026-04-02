@@ -1,59 +1,36 @@
-import json
-import logging
-from typing import Optional
-
-from util import llmApiUtil
 from service import funcToolService
 from service.roomService import ChatRoom
 
-from .base import AgentDriver
+from .base import AgentDriver, AgentTurnSetup
 
-logger = logging.getLogger(__name__)
+_RUN_CHAT_TURN_HINT = (
+    "你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，"
+    "请务必调用 finish_chat_turn 结束本轮（即跳过）。"
+)
+_RUN_CHAT_TURN_MAX_RETRIES = 3
 
 
 class NativeAgentDriver(AgentDriver):
+    @property
+    def host_managed_turn_loop(self) -> bool:
+        return True
 
-    async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
-        hint = f"你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，请务必调用 finish_chat_turn 结束本轮（即跳过）。"
-        max_retries = 3
-        for _ in range(max_retries):
-            turn_done = await self._run_until_reply(
-                room=room,
-                tools=funcToolService.get_tools(),
-                max_function_calls=max_function_calls,
+    async def startup(self) -> None:
+        self.host.tool_registry.clear()
+        for tool in funcToolService.get_tools():
+            function_name = tool.function.name
+            self.host.tool_registry.register(
+                tool,
+                funcToolService.run_tool_call,
+                marks_turn_finish=function_name == "finish_chat_turn",
             )
 
-            if turn_done:
-                break
+    @property
+    def turn_setup(self) -> AgentTurnSetup:
+        return AgentTurnSetup(
+            max_retries=_RUN_CHAT_TURN_MAX_RETRIES,
+            hint_prompt=_RUN_CHAT_TURN_HINT,
+        )
 
-            await self.host.append_history_message(llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, hint))
-
-    async def _run_until_reply(
-        self,
-        room: ChatRoom,
-        tools: Optional[list[llmApiUtil.OpenAITool]] = None,
-        max_function_calls: int = 5,
-    ) -> bool:
-
-        # native driver 在一次尝试里持续驱动模型和工具调用，直到本轮回复完成或达到上限。
-        for _ in range(max_function_calls):
-            assistant_message: llmApiUtil.OpenAIMessage = await self.host._infer(tools)
-
-            tool_calls = assistant_message.tool_calls
-            if not tool_calls:
-                return False
-
-            logger.info(f"检测到工具调用: agent={self.host.key}, count={len(tool_calls)}")
-            await self.host._execute_tool()
-
-            # 检查最后一个 tool_call 判断轮次是否完成
-            last_call: llmApiUtil.OpenAIToolCall = tool_calls[-1]
-            function = last_call.function if isinstance(last_call.function, dict) else {}
-            name = function.get("name")
-
-            if name == "finish_chat_turn":
-                return True
-
-        logger.warning(f"达到最大函数调用次数: agent={self.host.key}, max={max_function_calls}")
-
-        return False
+    async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
+        raise RuntimeError("NativeAgentDriver 不再直接执行 run_chat_turn，请使用 Agent.run_chat_turn")

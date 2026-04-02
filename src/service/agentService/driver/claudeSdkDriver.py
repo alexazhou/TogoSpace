@@ -9,7 +9,7 @@ from claude_agent_sdk import (
     UserMessage, create_sdk_mcp_server, tool,
 )
 
-from service.roomService import ChatContext
+from service.roomService import ToolCallContext
 from service.funcToolService.toolLoader import get_function_metadata
 from service.funcToolService.tools import FUNCTION_REGISTRY
 from service.roomService import ChatRoom

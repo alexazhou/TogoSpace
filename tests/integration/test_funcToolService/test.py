@@ -2,6 +2,8 @@
 import json
 import os
 import sys
+from dataclasses import replace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -12,7 +14,7 @@ import service.roomService as roomService
 from dal.db import gtTeamManager, gtAgentManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtTeam import GtTeam
-from service.roomService import ChatContext
+from service.roomService import ToolCallContext
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -62,7 +64,17 @@ class TestRunToolCall(ServiceTestCase):
         await ormService.shutdown()
 
     async def _run(self, name, args, **kw):
-        return json.loads(await funcToolService.run_tool_call(name, args, **kw))
+        context = kw.get("context")
+        if context is None:
+            context = ToolCallContext(
+                agent_name="tester",
+                team_name=TEAM,
+                chat_room=MagicMock(),
+                tool_name=name,
+            )
+        else:
+            context = replace(context, tool_name=name)
+        return await funcToolService.run_tool_call(args, context=context)
 
     async def test_run_tool_call_basic(self):
         """正常 JSON 入参可成功执行工具函数。"""
@@ -83,7 +95,7 @@ class TestRunToolCall(ServiceTestCase):
         """上下文注入场景：send_chat_msg 能在上下文房间成功落消息。"""
         await roomService.ensure_room_record(TEAM, "ctx_room", ["alice"])
         room = roomService.get_room_by_key(f"ctx_room@{TEAM}")
-        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
+        ctx = ToolCallContext(agent_name="alice", team_name=TEAM, chat_room=room)
         result = await self._run("send_chat_msg", '{"room_name": "ctx_room", "msg": "test"}', context=ctx)
         assert result["success"] and "消息已发送" in result["message"]
 
@@ -91,7 +103,7 @@ class TestRunToolCall(ServiceTestCase):
         """目标房间不存在时，应返回错误信息。"""
         await roomService.ensure_room_record(TEAM, "ctx_room_missing", ["alice"])
         room = roomService.get_room_by_key(f"ctx_room_missing@{TEAM}")
-        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
+        ctx = ToolCallContext(agent_name="alice", team_name=TEAM, chat_room=room)
         result = await self._run("send_chat_msg", '{"room_name": "missing_room", "msg": "test"}', context=ctx)
         assert not result["success"]
         assert not any(message.content == "test" for message in room.messages)
@@ -103,7 +115,7 @@ class TestRunToolCall(ServiceTestCase):
         room = roomService.get_room_by_key(f"ctx_src@{TEAM}")
         target = roomService.get_room_by_key(f"ctx_dst@{TEAM}")
         before_count = len(target.messages)
-        ctx = ChatContext(agent_name="alice", team_name=TEAM, chat_room=room)
+        ctx = ToolCallContext(agent_name="alice", team_name=TEAM, chat_room=room)
 
         result = await self._run("send_chat_msg", '{"room_name": "ctx_dst", "msg": "test"}', context=ctx)
 

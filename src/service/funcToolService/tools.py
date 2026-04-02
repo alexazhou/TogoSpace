@@ -7,7 +7,7 @@ import operator
 from zoneinfo import ZoneInfo
 
 from dal.db import gtRoomManager, gtTeamManager
-from service.roomService import ChatContext
+from service.roomService import ToolCallContext
 import service.roomService as roomService
 from constants import SpecialAgent
 
@@ -95,7 +95,7 @@ def calculate(expression: str) -> dict:
         return {"success": False, "message": f"计算错误: {e}"}
 
 
-def get_agent_list(_context: ChatContext = None) -> dict:
+def get_agent_list(_context: ToolCallContext = None) -> dict:
     """返回当前聊天室的 agent 列表（历史发言者，排除 system）"""
     logger.info(f"获取 agent 列表")
     if _context is None:
@@ -107,7 +107,7 @@ def get_agent_list(_context: ChatContext = None) -> dict:
     return {"success": True, "agents": agents}
 
 
-async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) -> dict:
+async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = None) -> dict:
     """向聊天窗口发送消息
 
     Args:
@@ -160,7 +160,7 @@ async def send_chat_msg(room_name: str, msg: str, _context: ChatContext = None) 
     )}
 
 
-def finish_chat_turn(_context: ChatContext = None) -> dict:
+def finish_chat_turn(_context: ToolCallContext = None) -> dict:
     """结束本轮行动。当你完成所有发言和工具调用后，必须调用此工具来把行动机会让给下一位成员。
     如果你觉得当前话题不需要回复，或者没有话要说，请直接调用此工具来跳过本轮。"""
     if _context is None or _context.chat_room is None:
