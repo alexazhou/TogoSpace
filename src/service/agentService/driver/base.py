@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
 from constants import AgentHistoryTag, DriverType
-from service.agentService.history import AgentHistory
+from service.agentService.agentHistroy import AgentHistory
 from service.roomService import ChatRoom
 from util import llmApiUtil
 
