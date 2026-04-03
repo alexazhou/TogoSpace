@@ -10,11 +10,11 @@ from claude_agent_sdk import (
 )
 
 from service.roomService import ToolCallContext
+from service.agentService.promptBuilder import build_turn_context_prompt
 from service.funcToolService.toolLoader import get_function_metadata
 from service.funcToolService.tools import FUNCTION_REGISTRY
 from service.roomService import ChatRoom
 from constants import AgentHistoryStage, AgentHistoryStatus
-from util.chatMessageFormat import build_turn_context_prompt
 from util import llmApiUtil
 
 from .base import AgentDriver

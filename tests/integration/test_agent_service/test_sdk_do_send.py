@@ -10,12 +10,12 @@ from model.dbModel.gtAgentHistory import GtAgentHistory
 from service import roomService, agentService, ormService, persistenceService
 from service import presetService
 from service.agentService import Agent
+from service.agentService.promptBuilder import build_turn_context_prompt, format_room_message
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
 from constants import DriverType, RoleTemplateType
 from util import llmApiUtil
-from util.chatMessageFormat import build_turn_context_prompt, format_room_message
-from util.configTypes import TeamConfig, AgentConfig
+from util.configTypes import TeamConfig, AgentConfig, DeptNodeConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -37,10 +37,19 @@ class TestSdkDoSend(ServiceTestCase):
         await presetService._import_role_templates_from_app_config()
         await agentService.startup()
         
-        cfg = TeamConfig(name=TEAM, members=[
-            AgentConfig(name="alice", role_template="alice"),
-            AgentConfig(name="bob", role_template="bob")
-        ])
+        cfg = TeamConfig(
+            name=TEAM,
+            members=[
+                AgentConfig(name="alice", role_template="alice"),
+                AgentConfig(name="bob", role_template="bob"),
+            ],
+            dept_tree=DeptNodeConfig(
+                dept_name="研发部",
+                responsibility="负责协作与开发",
+                manager="alice",
+                members=["alice", "bob"],
+            ),
+        )
         await presetService._import_team_from_config(cfg)
         await agentService.create_team_agents_from_db()
 

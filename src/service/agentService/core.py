@@ -9,8 +9,9 @@ from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service.agentService.agent import Agent
 from service.agentService.driver import normalize_driver_config
+from service.agentService.promptBuilder import build_agent_system_prompt
 from service import llmService, roomService, persistenceService
-from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager
+from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from peewee import IntegrityError
 from exception import TeamAgentException
 from constants import MemberStatus, DriverType, EmployStatus
@@ -32,57 +33,6 @@ async def restore_state() -> None:
             agent._history.replace(items)
 
 
-async def _build_dept_context(team_id: int, agent_name: str) -> str:
-    """查询 Agent 所在部门并格式化为系统提示注入块；不在任何部门时返回空字符串。"""
-    agent_row = await gtAgentManager.get_agent(team_id, agent_name)
-    if agent_row is None:
-        return ""
-
-    all_depts = await gtDeptManager.get_all_depts(team_id)
-    if not all_depts:
-        return ""
-
-    # 找到 Agent 所在部门
-    agent_dept = None
-    for dept in all_depts:
-        if agent_row.id in dept.agent_ids:
-            agent_dept = dept
-            break
-    if agent_dept is None:
-        return ""
-
-    # 建立辅助映射
-    dept_id_map = {d.id: d for d in all_depts}
-    all_agents = await gtAgentManager.get_team_agents(team_id)
-    agent_id_to_name: dict[int, str] = {m.id: m.name for m in all_agents}
-
-    manager_name = agent_id_to_name.get(agent_dept.manager_id, "")
-    other_agents = [
-        agent_id_to_name[mid]
-        for mid in agent_dept.agent_ids
-        if mid in agent_id_to_name and agent_id_to_name[mid] != agent_name
-    ]
-
-    lines = ["---", "组织信息：", f"- 所在部门：{agent_dept.name}（{agent_dept.responsibility}）"]
-
-    # 上级部门
-    if agent_dept.parent_id is not None:
-        parent = dept_id_map.get(agent_dept.parent_id)
-        if parent is not None:
-            parent_manager = agent_id_to_name.get(parent.manager_id, "")
-            lines.append(f"- 上级部门：{parent.name}（主管：{parent_manager}）")
-
-    # 本部门主管（自己是主管时省略）
-    if manager_name and manager_name != agent_name:
-        lines.append(f"- 本部门主管：{manager_name}")
-
-    if other_agents:
-        lines.append(f"- 本部门其他成员：{', '.join(other_agents)}")
-
-    lines.append("---")
-    return "\n".join(lines)
-
-
 async def _create_team_agents(team_row: GtTeam, agent_rows: list[GtAgent], templates_by_id: dict[int, GtRoleTemplate], workspace_root: str | None = None) -> None:
     app_config = configUtil.get_app_config()
     base_prompt_tmpl = app_config.group_chat_prompt
@@ -96,14 +46,13 @@ async def _create_team_agents(team_row: GtTeam, agent_rows: list[GtAgent], templ
     team_id = team_row.id
 
     for agent_row in agent_rows:
-        template = templates_by_id.get(agent_row.role_template_id)
-        if template is None:
-            logger.warning(f"角色模版不存在: agent={agent_row.name}, role_template_id={agent_row.role_template_id}，跳过创建")
-            continue
+        assert agent_row.role_template_id in templates_by_id, (
+            f"角色模版不存在: agent={agent_row.name}, role_template_id={agent_row.role_template_id}"
+        )
+        template = templates_by_id[agent_row.role_template_id]
 
         agent_name = agent_row.name
         template_name = template.name
-        agent_specific_prompt = template.soul
         model_name = agent_row.model or template.model or default_model
         agent_row.model = model_name
         driver_config = normalize_driver_config(
@@ -112,12 +61,14 @@ async def _create_team_agents(team_row: GtTeam, agent_rows: list[GtAgent], templ
                 "allowed_tools": template.allowed_tools,
             }
         )
-        dept_context = await _build_dept_context(team_id, agent_name) if team_id else ""
-
-        identity_prompt = identity_prompt_tmpl.format(agent_name=agent_name, template_name=template_name)
-        full_prompt = base_prompt_tmpl + "\n\n" + identity_prompt + "\n\n" + agent_specific_prompt
-        if dept_context:
-            full_prompt += "\n\n" + dept_context
+        full_prompt = await build_agent_system_prompt(
+            team_id=team_id,
+            agent_name=agent_name,
+            template_name=template_name,
+            template_soul=template.soul,
+            base_prompt_tmpl=base_prompt_tmpl,
+            identity_prompt_tmpl=identity_prompt_tmpl,
+        )
 
         assert agent_row.id is not None and agent_row.id > 0, f"invalid agent id: {agent_row.id}"
         agent = Agent(

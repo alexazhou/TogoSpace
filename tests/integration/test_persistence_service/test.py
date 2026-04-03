@@ -6,12 +6,13 @@ import pytest
 
 from dal.db import gtTeamManager, gtAgentManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.gtDept import GtDept
 from model.dbModel.gtTeam import GtTeam
-from service import presetService, agentService, ormService, persistenceService, roomService, messageBus
+from service import presetService, agentService, ormService, persistenceService, roomService, messageBus, deptService
 from service.agentService import Agent
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenaiLLMApiRole
-from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
+from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig, DeptNodeConfig
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -21,6 +22,12 @@ TEAMS_CONFIG = [TeamConfig(
         AgentConfig(name="alice", role_template="alice"),
         AgentConfig(name="bob", role_template="bob"),
     ],
+    dept_tree=DeptNodeConfig(
+        dept_name="研发部",
+        responsibility="负责协作与开发",
+        manager="alice",
+        members=["alice", "bob"],
+    ),
     preset_rooms=[TeamRoomConfig(name="r1", members=["alice", "bob"], max_turns=3)],
 )]
 
@@ -114,11 +121,25 @@ class TestRestoreAgentHistory(ServiceTestCase):
         team = await gtTeamManager.save_team(GtTeam(name=TEAM))
         agents = await ServiceTestCase.convert_to_gt_agents(
             team.id,
-            [AgentConfig(name="alice", role_template="alice")],
+            [
+                AgentConfig(name="alice", role_template="alice"),
+                AgentConfig(name="bob", role_template="bob"),
+            ],
         )
         await gtAgentManager.batch_save_agents(team.id, agents)
         alice_row = await gtAgentManager.get_agent(team.id, "alice")
+        bob_row = await gtAgentManager.get_agent(team.id, "bob")
         assert alice_row is not None
+        assert bob_row is not None
+        await deptService.overwrite_dept_tree(
+            team.id,
+            GtDept(
+                name="研发部",
+                responsibility="负责协作与开发",
+                manager_id=alice_row.id,
+                agent_ids=[alice_row.id, bob_row.id],
+            ),
+        )
         await persistenceService.append_agent_history_message(
             GtAgentHistory(
                 agent_id=alice_row.id,

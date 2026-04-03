@@ -4,6 +4,13 @@
     { "name": "alice", "role_template": "alice" },
     { "name": "bob", "role_template": "bob" }
   ],
+  "dept_tree": {
+    "dept_name": "研发部",
+    "responsibility": "负责协作与开发",
+    "manager": "alice",
+    "members": ["alice", "bob"],
+    "children": []
+  },
   "preset_rooms": [
     {
       "name": "general",
