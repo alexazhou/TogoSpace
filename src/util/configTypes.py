@@ -10,7 +10,7 @@ class DeptNodeConfig(BaseModel):
     dept_name: str
     responsibility: str = ""
     manager: str
-    members: List[str] = Field(default_factory=list)
+    agents: List[str] = Field(default_factory=list)
     children: List["DeptNodeConfig"] = Field(default_factory=list)
 
 
@@ -48,7 +48,7 @@ class TeamRoomConfig(BaseModel):
     """Single room item in team config."""
     id: Optional[int] = None
     name: str
-    members: List[str]
+    agents: List[str]
     initial_topic: str = ""
     max_turns: int | None = None
     biz_id: str | None = None
@@ -59,7 +59,7 @@ class TeamConfig(BaseModel):
     """Canonical team config shape loaded from JSON/DB."""
     name: str
     config: dict[str, Any] = Field(default_factory=dict)
-    members: List[AgentConfig] = Field(default_factory=list)
+    agents: List[AgentConfig] = Field(default_factory=list)
     dept_tree: Optional[DeptNodeConfig] = None
     preset_rooms: List[TeamRoomConfig] = Field(default_factory=list)
 

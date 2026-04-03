@@ -80,12 +80,17 @@ class TestConfigApi(ServiceTestCase):
                 data = await resp.json()
                 assert len(data["rooms"]) >= 1
 
+        agents = await self._get_team_agents(team_id)
+        alice = next(agent for agent in agents if agent["name"] == "alice")
+        bob = next(agent for agent in agents if agent["name"] == "bob")
+
         # 2. Create Team Room
         create_payload = {
             "name": room_name,
             "type": "GROUP",
             "initial_topic": "testing",
-            "max_turns": 20
+            "max_turns": 20,
+            "agent_ids": [alice["id"], bob["id"]],
         }
         async with aiohttp.ClientSession() as client:
             async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/create.json", json=create_payload) as resp:
@@ -124,20 +129,18 @@ class TestConfigApi(ServiceTestCase):
                 assert detail["initial_topic"] == "updated topic"
                 assert detail["max_turns"] == 30
 
-        # 5. Room Members Management
-        # List Members
+        # 5. Room Agents Management
+        # List Agents
         async with aiohttp.ClientSession() as client:
-            agents = await self._get_team_agents(team_id)
-            alice = next(agent for agent in agents if agent["name"] == "alice")
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/list.json") as resp:
                 assert resp.status == 200
                 
-            # Modify Members
-            members_payload = {"agent_ids": [alice["id"], -1]}
-            async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/modify.json", json=members_payload) as resp:
+            # Modify Agents
+            agents_payload = {"agent_ids": [alice["id"], -1]}
+            async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/modify.json", json=agents_payload) as resp:
                 assert resp.status == 200
                 
-            # Verify members
+            # Verify agents
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/agents/list.json") as resp:
                 data = await resp.json()
                 agent_ids = set(data["agent_ids"])
@@ -154,9 +157,9 @@ class TestConfigApi(ServiceTestCase):
                 rooms_data = await resp.json()
                 assert not any(r["id"] == new_room_id for r in rooms_data["rooms"])
 
-    async def test_team_room_create_with_member_ids(self):
+    async def test_team_room_create_with_agent_ids(self):
         team_id = await self._get_team_id("e2e")
-        room_name = f"room_with_member_ids_{int(time.time() * 1000)}"
+        room_name = f"room_with_agent_ids_{int(time.time() * 1000)}"
         agents = await self._get_team_agents(team_id)
         alice = next(agent for agent in agents if agent["name"] == "alice")
         bob = next(agent for agent in agents if agent["name"] == "bob")
@@ -164,7 +167,7 @@ class TestConfigApi(ServiceTestCase):
         create_payload = {
             "name": room_name,
             "type": "GROUP",
-            "initial_topic": "room created by member ids",
+            "initial_topic": "room created by agent ids",
             "max_turns": 12,
             "agent_ids": [alice["id"], bob["id"]],
         }
@@ -182,18 +185,18 @@ class TestConfigApi(ServiceTestCase):
 
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{room_id}/agents/list.json") as resp:
                 assert resp.status == 200
-                members_data = await resp.json()
-                assert set(members_data["agent_ids"]) == {alice["id"], bob["id"]}
+                agents_data = await resp.json()
+                assert set(agents_data["agent_ids"]) == {alice["id"], bob["id"]}
 
             async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{room_id}/delete.json") as resp:
                 assert resp.status == 200
 
-    async def test_team_room_create_with_invalid_member_ids(self):
+    async def test_team_room_create_with_invalid_agent_ids(self):
         team_id = await self._get_team_id("e2e")
         create_payload = {
-            "name": "room_with_invalid_member_ids",
+            "name": "room_with_invalid_agent_ids",
             "type": "GROUP",
-            "initial_topic": "invalid member ids",
+            "initial_topic": "invalid agent ids",
             "max_turns": 12,
             "agent_ids": [99999999],
         }

@@ -21,7 +21,7 @@ async def startup() -> None:
 async def create_team(
     name: str,
     config: dict | None = None,
-    members: list[GtAgent] | None = None,
+    agents: list[GtAgent] | None = None,
     dept_tree: GtDept | None = None,
     preset_rooms: list[GtRoom] | None = None,
 ) -> int:
@@ -39,7 +39,7 @@ async def create_team(
         deleted=0,
     ))
     team_id = team.id
-    await agentService.overwrite_team_agents(team_id, members or [])
+    await agentService.overwrite_team_agents(team_id, agents or [])
 
     if dept_tree:
         await deptService.overwrite_dept_tree(team_id, dept_tree)

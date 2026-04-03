@@ -40,7 +40,7 @@ async def get_rooms_by_team_and_names(team_id: int, names: list[str]) -> list[Gt
     if not names:
         return []
 
-    room_rows = list(
+    gt_rooms = list(
         await GtRoom.select()
         .where(
             GtRoom.team_id == team_id,
@@ -49,7 +49,7 @@ async def get_rooms_by_team_and_names(team_id: int, names: list[str]) -> list[Gt
         .order_by(GtRoom.name)
         .aio_execute()
     )
-    room_map = {room.name: room for room in room_rows}
+    room_map = {room.name: room for room in gt_rooms}
     return [room_map[name] for name in names if name in room_map]
 
 

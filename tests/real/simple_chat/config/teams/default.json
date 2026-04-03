@@ -1,6 +1,6 @@
 {
   "name": "default",
-  "members": [
+  "agents": [
     { "name": "alice", "role_template": "alice" },
     { "name": "bob", "role_template": "bob" }
   ],
@@ -8,13 +8,13 @@
     "dept_name": "聊天组",
     "responsibility": "负责简单对话",
     "manager": "alice",
-    "members": ["alice", "bob"],
+    "agents": ["alice", "bob"],
     "children": []
   },
   "preset_rooms": [
     {
       "name": "general",
-      "members": ["alice", "bob"],
+      "agents": ["alice", "bob"],
       "initial_topic": "大家好！",
       "max_turns": 1
     }

@@ -70,7 +70,7 @@ class TestDalManagers(ServiceTestCase):
             )
         )
 
-    async def _get_room_member_names(self, room_id: int) -> list[str]:
+    async def _get_room_agent_names(self, room_id: int) -> list[str]:
         room = await gtRoomManager.get_room_by_id(room_id)
         assert room is not None
         agent_rows = await gtAgentManager.get_agents_by_ids(room.agent_ids or [])
@@ -188,11 +188,11 @@ class TestDalManagers(ServiceTestCase):
             name="general",
             initial_topic="hello",
             max_turns=6,
-            members=["alice_1", "bob_1"],
+            agents=["alice_1", "bob_1"],
         )]))
         room = next((item for item in await gtRoomManager.get_rooms_by_team(team_a.id) if item.name == "general"), None)
         assert room is not None
-        # Note: upsert_rooms now handles members internally
+        # Note: upsert_rooms now handles agents internally
 
         team_a_agents = await gtAgentManager.get_team_agents(team_a.id)
         assert [(m.name, m.role_template_id) for m in team_a_agents] == [
@@ -203,7 +203,7 @@ class TestDalManagers(ServiceTestCase):
         assert room.name == "general"
         assert room.initial_topic == "hello"
         assert room.max_turns == 6
-        assert await self._get_room_member_names(room.id) == ["alice_1", "bob_1"]
+        assert await self._get_room_agent_names(room.id) == ["alice_1", "bob_1"]
 
         teams = await gtTeamManager.get_all_teams()
         assert [team.name for team in teams] == ["team_a", "team_b"]
@@ -220,7 +220,7 @@ class TestDalManagers(ServiceTestCase):
 
         payload = TeamConfig(
             name="imported",
-            members=[
+            agents=[
                 AgentConfig(name="alice_1", role_template="alice"),
                 AgentConfig(name="bob_1", role_template="bob"),
             ],
@@ -228,7 +228,7 @@ class TestDalManagers(ServiceTestCase):
                 name="r1",
                 initial_topic="topic 1",
                 max_turns=8,
-                members=["alice_1", "bob_1"],
+                agents=["alice_1", "bob_1"],
             )],
         )
         await presetService._import_team_from_config(payload)
@@ -238,13 +238,13 @@ class TestDalManagers(ServiceTestCase):
         room = next((item for item in await gtRoomManager.get_rooms_by_team(imported.id) if item.name == "r1"), None)
         assert room is not None
         assert room.max_turns == 8
-        assert await self._get_room_member_names(room.id) == ["alice_1", "bob_1"]
+        assert await self._get_room_agent_names(room.id) == ["alice_1", "bob_1"]
 
         # 已存在时应跳过导入，不覆盖已有记录
         await presetService._import_team_from_config(TeamConfig(
             name="imported",
-            members=[AgentConfig(name="charlie", role_template="charlie")],
-            preset_rooms=[TeamRoomConfig(name="r2", members=["Operator", "charlie"])],
+            agents=[AgentConfig(name="charlie", role_template="charlie")],
+            preset_rooms=[TeamRoomConfig(name="r2", agents=["Operator", "charlie"])],
         ))
         imported_after = await gtTeamManager.get_team("imported")
         assert imported_after is not None
@@ -315,8 +315,8 @@ class TestDalManagers(ServiceTestCase):
 
         team = await gtTeamManager.save_team(GtTeam(name="room_team"))
         await roomService.create_team_rooms(team.id, await ServiceTestCase.convert_to_gt_rooms(team.id, [
-            TeamRoomConfig(name="z_room", max_turns=2, members=["alice", "bob"]),
-            TeamRoomConfig(name="a_room", max_turns=3, members=["Operator", "alice"]),
+            TeamRoomConfig(name="z_room", max_turns=2, agents=["alice", "bob"]),
+            TeamRoomConfig(name="a_room", max_turns=3, agents=["Operator", "alice"]),
         ]))
 
         rooms = await gtRoomManager.get_rooms_by_team(team.id)
@@ -332,9 +332,9 @@ class TestDalManagers(ServiceTestCase):
 
         team = await gtTeamManager.save_team(GtTeam(name="room_query_team"))
         await roomService.create_team_rooms(team.id, await ServiceTestCase.convert_to_gt_rooms(team.id, [
-            TeamRoomConfig(name="a_room", members=["alice"]),
-            TeamRoomConfig(name="b_room", members=["bob"]),
-            TeamRoomConfig(name="c_room", members=["alice", "bob"]),
+            TeamRoomConfig(name="a_room", agents=["alice"]),
+            TeamRoomConfig(name="b_room", agents=["bob"]),
+            TeamRoomConfig(name="c_room", agents=["alice", "bob"]),
         ]))
 
         rooms = await gtRoomManager.get_rooms_by_team_and_names(
@@ -418,7 +418,7 @@ class TestDalManagers(ServiceTestCase):
 
         team = await gtTeamManager.save_team(GtTeam(name="upsert_team"))
         await roomService.create_team_rooms(team.id, await ServiceTestCase.convert_to_gt_rooms(team.id, [
-            TeamRoomConfig(name="old_room", max_turns=2, members=["alice"]),
+            TeamRoomConfig(name="old_room", max_turns=2, agents=["alice"]),
         ]))
         await roomService.overwrite_team_rooms(team.id, [
             GtRoom(
@@ -453,8 +453,8 @@ class TestDalManagers(ServiceTestCase):
 
         team = await gtTeamManager.save_team(GtTeam(name="delete_team"))
         await roomService.create_team_rooms(team.id, await ServiceTestCase.convert_to_gt_rooms(team.id, [
-            TeamRoomConfig(name="r1", members=["alice"]),
-            TeamRoomConfig(name="r2", members=["bob"]),
+            TeamRoomConfig(name="r1", agents=["alice"]),
+            TeamRoomConfig(name="r2", agents=["bob"]),
         ]))
         r1 = next((item for item in await gtRoomManager.get_rooms_by_team(team.id) if item.name == "r1"), None)
         assert r1 is not None
@@ -517,7 +517,7 @@ class TestDalManagers(ServiceTestCase):
         await self._save_role_template("bob", "gpt-4o")
         await self._save_role_template("charlie", "gpt-4o")
 
-        team = await gtTeamManager.save_team(GtTeam(name="member_team"))
+        team = await gtTeamManager.save_team(GtTeam(name="agent_team"))
         configs = [
             AgentConfig(name="alice", role_template="alice"),
             AgentConfig(name="bob", role_template="bob"),
@@ -527,7 +527,7 @@ class TestDalManagers(ServiceTestCase):
         await gtAgentManager.batch_save_agents(team.id, agents)
         room = await gtRoomManager.save_room(GtRoom(
             team_id=team.id,
-            name="member_room",
+            name="agent_room",
             type=RoomType.GROUP,
             initial_topic="",
             max_turns=5,
@@ -536,18 +536,18 @@ class TestDalManagers(ServiceTestCase):
         saved_agents = await gtAgentManager.get_team_agents(team.id)
         agent_ids = {agent.name: agent.id for agent in saved_agents}
 
-        assert await self._get_room_member_names(room.id) == []
+        assert await self._get_room_agent_names(room.id) == []
 
-        await roomService.update_room_members(room.id, [agent_ids["charlie"], agent_ids["alice"]])
-        assert await self._get_room_member_names(room.id) == ["charlie", "alice"]
+        await roomService.update_room_agents(room.id, [agent_ids["charlie"], agent_ids["alice"]])
+        assert await self._get_room_agent_names(room.id) == ["charlie", "alice"]
 
         # upsert 会覆盖旧成员
-        await roomService.update_room_members(room.id, [agent_ids["bob"]])
-        assert await self._get_room_member_names(room.id) == ["bob"]
+        await roomService.update_room_agents(room.id, [agent_ids["bob"]])
+        assert await self._get_room_agent_names(room.id) == ["bob"]
 
-        # clear members
-        await roomService.update_room_members(room.id, [])
-        assert await self._get_room_member_names(room.id) == []
+        # clear agents
+        await roomService.update_room_agents(room.id, [])
+        assert await self._get_room_agent_names(room.id) == []
 
     # ------------------------------------------------------------------
     # gtRoomMessageManager
@@ -593,7 +593,7 @@ class TestDalManagers(ServiceTestCase):
     # ------------------------------------------------------------------
     # gtAgentHistoryManager
     # ------------------------------------------------------------------
-    async def test_member_history_manager_append_single_is_idempotent(self):
+    async def test_agent_history_manager_append_single_is_idempotent(self):
         await self._reset_tables()
 
         # 先创建角色模板
@@ -632,7 +632,7 @@ class TestDalManagers(ServiceTestCase):
         assert saved_2.message_json == '{"content":"v1"}'
         assert saved_2.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
-    async def test_member_history_manager_append_and_get_sorted(self):
+    async def test_agent_history_manager_append_and_get_sorted(self):
         await self._reset_tables()
 
         # 先创建角色模板
@@ -681,7 +681,7 @@ class TestDalManagers(ServiceTestCase):
         assert [h.seq for h in bob_history] == [1]
         assert [h.tags for h in bob_history] == [[]]
 
-    async def test_member_history_manager_update_status_by_id(self):
+    async def test_agent_history_manager_update_status_by_id(self):
         await self._reset_tables()
 
         await self._save_role_template("alice", "gpt-4o")

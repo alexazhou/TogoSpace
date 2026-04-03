@@ -61,7 +61,7 @@ class TestTurnScheduling(ServiceTestCase):
             await room.activate_scheduling()
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_AGENT_TURN,
-                agent_id=room.get_member_id("alice"),
+                agent_id=room.get_agent_id("alice"),
                 room_id=room.room_id,
                 room_name="r",
                 room_key=f"r@{TEAM}",
@@ -80,7 +80,7 @@ class TestTurnScheduling(ServiceTestCase):
             room.finish_turn("alice")
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_AGENT_TURN,
-                agent_id=room.get_member_id("bob"),
+                agent_id=room.get_agent_id("bob"),
                 room_id=room.room_id,
                 room_name="r",
                 room_key=f"r@{TEAM}",

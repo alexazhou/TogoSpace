@@ -1,25 +1,26 @@
 {
   "name": "v6test",
-  "members": [
-    { "name": "alice", "role_template": "alice" }
+  "agents": [
+    { "name": "alice", "role_template": "alice" },
+    { "name": "bob", "role_template": "bob" }
   ],
   "dept_tree": {
     "dept_name": "测试组",
     "responsibility": "负责房间测试",
     "manager": "alice",
-    "members": ["alice"],
+    "agents": ["alice", "bob"],
     "children": []
   },
   "preset_rooms": [
     {
       "name": "alice_private",
-      "members": ["Operator", "alice"],
+      "agents": ["Operator", "alice"],
       "initial_topic": "v6 private test",
       "max_turns": 10
     },
     {
       "name": "public_group",
-      "members": ["alice"],
+      "agents": ["alice", "bob"],
       "initial_topic": "v6 group test",
       "max_turns": 10
     }

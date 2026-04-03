@@ -69,7 +69,7 @@ class LlmServiceType(EnhanceEnum):
 class MessageBusTopic(EnhanceEnum):
     ROOM_AGENT_TURN = auto()       # 轮到某 Agent 发言；payload: agent_id, room_id, room_name, team_name
     ROOM_MSG_ADDED = auto()        # 房间新增消息；payload: room_id, room_key, room_name, team_name, sender, content, time
-    AGENT_STATUS_CHANGED = auto()  # Agent 忙闲状态变更；payload: gt_agent, status(MemberStatus.name)
+    AGENT_STATUS_CHANGED = auto()  # Agent 忙闲状态变更；payload: gt_agent, status(AgentStatus.name)
 
 
 class RoomType(EnhanceEnum):
@@ -88,7 +88,7 @@ class RoomState(EnhanceEnum):
     IDLE = auto()        # 房间空闲，无更多事件
 
 
-class MemberStatus(EnhanceEnum):
+class AgentStatus(EnhanceEnum):
     ACTIVE = auto()
     IDLE   = auto()
     FAILED = auto()  # 推理连续失败超过重试次数

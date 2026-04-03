@@ -63,11 +63,11 @@ class TestRoomRegistry(ServiceTestCase):
         roomService.shutdown()
         assert len(roomService._rooms) == 0
 
-    async def test_setup_members(self):
-        """get_member_names 返回创建时配置的成员顺序。"""
+    async def test_setup_agents(self):
+        """get_agent_names 返回创建时配置的参与者顺序。"""
         await roomService.ensure_room_record(TEAM, "r1", ["alice", "bob"])
         room = roomService.get_room_by_key(f"r1@{TEAM}")
-        assert roomService.get_member_names(room.room_id) == ["alice", "bob"]
+        assert roomService.get_agent_names(room.room_id) == ["alice", "bob"]
 
     async def test_get_rooms_for_agent(self):
         """按 agent 过滤房间时，只返回该 agent 参与的 room_id 列表。"""
@@ -85,7 +85,7 @@ class TestRoomRegistry(ServiceTestCase):
         """批量建房路径在激活前不应预先塞入初始化消息。"""
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
-        member_ids = list(map(
+        agent_ids = list(map(
             lambda agent: agent.id,
             await gtAgentManager.get_team_agents_by_names(team.id, ["alice"], include_special=True),
         ))
@@ -96,7 +96,7 @@ class TestRoomRegistry(ServiceTestCase):
                 type=RoomType.GROUP,
                 initial_topic="boot topic",
                 max_turns=5,
-                agent_ids=member_ids,
+                agent_ids=agent_ids,
                 biz_id=None,
                 tags=[],
             ),
@@ -112,16 +112,12 @@ class TestRoomRegistry(ServiceTestCase):
         assert room.messages[0].sender_name == SpecialAgent.SYSTEM.name
         assert "boot topic" in room.messages[0].content
 
-    async def test_special_member_ids(self):
-        """SYSTEM 和 OPERATOR 应有特殊的 member_id。"""
+    async def test_special_agent_ids(self):
+        """SYSTEM 和 OPERATOR 应有特殊的 agent_id。"""
         await roomService.ensure_room_record(TEAM, "special_room", ["Operator", "alice"])
         room = roomService.get_room_by_key(f"special_room@{TEAM}")
 
-        # SYSTEM: member_id = -2
-        assert room.get_member_id(SpecialAgent.SYSTEM.name) == ChatRoom.SYSTEM_MEMBER_ID
-        # OPERATOR: member_id = -1
-        assert room.get_member_id(SpecialAgent.OPERATOR.name) == ChatRoom.OPERATOR_MEMBER_ID
-        # 普通成员: member_id 从数据库获取
-        assert room.get_member_id("alice") == self.agent_ids["alice"]
-        # 不存在的成员: member_id = 0
-        assert room.get_member_id("unknown") == 0
+        assert room.get_agent_id(SpecialAgent.SYSTEM.name) == ChatRoom.SYSTEM_MEMBER_ID
+        assert room.get_agent_id(SpecialAgent.OPERATOR.name) == ChatRoom.OPERATOR_MEMBER_ID
+        assert room.get_agent_id("alice") == self.agent_ids["alice"]
+        assert room.get_agent_id("unknown") == 0

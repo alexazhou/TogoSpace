@@ -539,20 +539,20 @@ class ServiceTestCase:
 
     @staticmethod
     async def convert_to_gt_rooms(team_id: int, configs: list) -> list[GtRoom]:
-        def infer_room_type(members: list[str]) -> RoomType:
-            ai_count = len([member for member in members if SpecialAgent.value_of(member) != SpecialAgent.OPERATOR])
-            if any(SpecialAgent.value_of(member) == SpecialAgent.OPERATOR for member in members) and ai_count == 1:
+        def infer_room_type(agent_names: list[str]) -> RoomType:
+            ai_count = len([agent_name for agent_name in agent_names if SpecialAgent.value_of(agent_name) != SpecialAgent.OPERATOR])
+            if any(SpecialAgent.value_of(agent_name) == SpecialAgent.OPERATOR for agent_name in agent_names) and ai_count == 1:
                 return RoomType.PRIVATE
             return RoomType.GROUP
 
         rooms = []
         for cfg in configs:
-            members = list(cfg.members)
+            agent_names = list(cfg.agents)
             agent_ids = [
                 agent.id
                 for agent in await gtAgentManager.get_team_agents_by_names(
                     team_id,
-                    members,
+                    agent_names,
                     include_special=True,
                 )
             ]
@@ -560,7 +560,7 @@ class ServiceTestCase:
                 id=getattr(cfg, "id", None),
                 team_id=team_id,
                 name=cfg.name,
-                type=infer_room_type(members),
+                type=infer_room_type(agent_names),
                 initial_topic=cfg.initial_topic,
                 max_turns=roomService.resolve_room_max_turns(cfg.max_turns),
                 agent_ids=agent_ids,

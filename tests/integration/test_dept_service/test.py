@@ -56,42 +56,42 @@ class TestDeptService(ServiceTestCase):
             ))
         return agents
 
-    async def _setup_team_with_members(self, team_name: str, member_names: list[str]) -> GtTeam:
-        """创建 team 并写入成员，返回 GtTeam 对象。"""
+    async def _setup_team_with_agents(self, team_name: str, agent_names: list[str]) -> GtTeam:
+        """创建 team 并写入 Agent，返回 GtTeam 对象。"""
         # 先创建角色模板
         await gtRoleTemplateManager.save_role_template(
             GtRoleTemplate(name="dummy", model="gpt-4o")
         )
         team = await gtTeamManager.save_team(GtTeam(name=team_name))
-        configs = [AgentConfig(name=n, role_template="dummy") for n in member_names]
+        configs = [AgentConfig(name=n, role_template="dummy") for n in agent_names]
         agents = await self._convert_to_gt_agents(team.id, configs)
         await gtAgentManager.batch_save_agents(team.id, agents)
         return team
 
-    async def _get_room_member_names(self, room_id: int) -> list[str]:
+    async def _get_room_agent_names(self, room_id: int) -> list[str]:
         room = await gtRoomManager.get_room_by_id(room_id)
         assert room is not None
         agent_rows = await gtAgentManager.get_agents_by_ids(room.agent_ids or [])
         by_id = {agent.id: agent.name for agent in agent_rows}
         return [by_id.get(agent_id, str(agent_id)) for agent_id in room.agent_ids or []]
 
-    async def _get_agent_id(self, team_id: int, member_name: str) -> int:
-        agent = await gtAgentManager.get_agent(team_id, member_name)
+    async def _get_agent_id(self, team_id: int, agent_name: str) -> int:
+        agent = await gtAgentManager.get_agent(team_id, agent_name)
         assert agent is not None
         return agent.id
 
     async def _to_dept_tree_node(self, team_id: int, node: DeptNodeConfig) -> GtDept:
-        member_rows = await gtAgentManager.get_team_agents_by_names(
+        agent_rows = await gtAgentManager.get_team_agents_by_names(
             team_id,
-            list(dict.fromkeys([*node.members, node.manager])),
+            list(dict.fromkeys([*node.agents, node.manager])),
             include_special=False,
         )
-        member_id_map = {member.name: member.id for member in member_rows}
+        agent_id_map = {agent.name: agent.id for agent in agent_rows}
         return GtDept(
             name=node.dept_name,
             responsibility=node.responsibility,
-            manager_id=member_id_map.get(node.manager, 0),
-            agent_ids=[member_id_map.get(name, 0) for name in node.members],
+            manager_id=agent_id_map.get(node.manager, 0),
+            agent_ids=[agent_id_map.get(name, 0) for name in node.agents],
             children=[await self._to_dept_tree_node(team_id, child) for child in node.children],
         )
 
@@ -102,7 +102,7 @@ class TestDeptService(ServiceTestCase):
     async def test_dept_manager_upsert_and_get_by_name(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t1", ["alice", "bob"])
+        team = await self._setup_team_with_agents("t1", ["alice", "bob"])
         alice = await gtAgentManager.get_agent(team.id, "alice")
         bob = await gtAgentManager.get_agent(team.id, "bob")
         assert alice is not None and bob is not None
@@ -131,7 +131,7 @@ class TestDeptService(ServiceTestCase):
     async def test_dept_manager_upsert_updates_on_conflict(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_upsert", ["alice", "bob", "charlie"])
+        team = await self._setup_team_with_agents("t_upsert", ["alice", "bob", "charlie"])
         alice = await gtAgentManager.get_agent(team.id, "alice")
         bob = await gtAgentManager.get_agent(team.id, "bob")
         charlie = await gtAgentManager.get_agent(team.id, "charlie")
@@ -155,7 +155,7 @@ class TestDeptService(ServiceTestCase):
     async def test_dept_manager_get_all_depts_ordered_by_id(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_all", ["alice", "bob"])
+        team = await self._setup_team_with_agents("t_all", ["alice", "bob"])
         alice = await gtAgentManager.get_agent(team.id, "alice")
         bob = await gtAgentManager.get_agent(team.id, "bob")
         assert alice is not None and bob is not None
@@ -181,12 +181,12 @@ class TestDeptService(ServiceTestCase):
     async def test_import_dept_tree_single_node(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_import", ["alice", "bob"])
+        team = await self._setup_team_with_agents("t_import", ["alice", "bob"])
 
         tree = DeptNodeConfig(dept_name="product",
             responsibility="owns the roadmap",
             manager="alice",
-            members=["alice", "bob"],
+            agents=["alice", "bob"],
         )
         await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
@@ -202,19 +202,19 @@ class TestDeptService(ServiceTestCase):
     async def test_import_dept_tree_hierarchical(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members(
+        team = await self._setup_team_with_agents(
             "t_hier", ["cto", "eng_lead", "dev_a", "dev_b"]
         )
 
         tree = DeptNodeConfig(dept_name="company",
             responsibility="top level",
             manager="cto",
-            members=["cto", "eng_lead"],
+            agents=["cto", "eng_lead"],
             children=[
                 DeptNodeConfig(dept_name="engineering",
                     responsibility="builds product",
                     manager="eng_lead",
-                    members=["eng_lead", "dev_a", "dev_b"],
+                    agents=["eng_lead", "dev_a", "dev_b"],
                 )
             ],
         )
@@ -231,12 +231,12 @@ class TestDeptService(ServiceTestCase):
     async def test_overwrite_dept_tree_updates_existing(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_overwrite", ["alice", "bob", "charlie"])
+        team = await self._setup_team_with_agents("t_overwrite", ["alice", "bob", "charlie"])
 
         original = DeptNodeConfig(dept_name="dept_x",
             responsibility="original",
             manager="alice",
-            members=["alice", "bob"],
+            agents=["alice", "bob"],
         )
         await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, original))
 
@@ -244,7 +244,7 @@ class TestDeptService(ServiceTestCase):
         modified = DeptNodeConfig(dept_name="dept_x",
             responsibility="updated",
             manager="alice",
-            members=["alice", "bob", "charlie"],
+            agents=["alice", "bob", "charlie"],
         )
         modified_root = await self._to_dept_tree_node(team.id, modified)
         existing = await gtDeptManager.get_dept_by_name(team.id, "dept_x")
@@ -262,30 +262,30 @@ class TestDeptService(ServiceTestCase):
     async def test_import_dept_tree_manager_not_in_members_raises(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_err", ["alice", "bob"])
+        team = await self._setup_team_with_agents("t_err", ["alice", "bob"])
 
         bad_tree = DeptNodeConfig(dept_name="broken",
             responsibility="",
-            manager="charlie",  # charlie 不在 members 中
-            members=["alice", "bob"],
+            manager="charlie",  # charlie 不在 agents 中
+            agents=["alice", "bob"],
         )
         with pytest.raises(TeamAgentException) as exc_info:
             await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, bad_tree))
-        assert exc_info.value.error_code == "DEPT_MANAGER_NOT_IN_MEMBERS"
+        assert exc_info.value.error_code == "DEPT_MANAGER_NOT_IN_AGENTS"
 
-    async def test_import_dept_tree_unknown_member_raises(self):
+    async def test_import_dept_tree_unknown_agent_raises(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_unknown", ["alice"])
+        team = await self._setup_team_with_agents("t_unknown", ["alice"])
 
         bad_tree = DeptNodeConfig(dept_name="dept_y",
             responsibility="",
             manager="alice",
-            members=["alice", "ghost"],  # ghost 不在 team_members 中
+            agents=["alice", "ghost"],  # ghost 不在 team_agents 中
         )
         with pytest.raises(TeamAgentException) as exc_info:
             await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, bad_tree))
-        assert exc_info.value.error_code == "DEPT_MEMBER_NOT_FOUND"
+        assert exc_info.value.error_code == "DEPT_AGENT_NOT_FOUND"
 
     # ------------------------------------------------------------------
     # deptService.get_dept_tree (round-trip)
@@ -294,18 +294,18 @@ class TestDeptService(ServiceTestCase):
     async def test_get_dept_tree_round_trip(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members(
+        team = await self._setup_team_with_agents(
             "t_round", ["cto", "dev_a", "dev_b"]
         )
         original = DeptNodeConfig(dept_name="root",
             responsibility="root dept",
             manager="cto",
-            members=["cto", "dev_a"],
+            agents=["cto", "dev_a"],
             children=[
                 DeptNodeConfig(dept_name="dev",
                     responsibility="development",
                     manager="dev_a",
-                    members=["dev_a", "dev_b"],
+                    agents=["dev_a", "dev_b"],
                 )
             ],
         )
@@ -333,7 +333,7 @@ class TestDeptService(ServiceTestCase):
     async def test_get_dept_tree_returns_none_when_no_depts(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_empty", ["alice"])
+        team = await self._setup_team_with_agents("t_empty", ["alice"])
         result = await deptService.get_dept_tree(team.id)
         assert result is None
 
@@ -344,11 +344,11 @@ class TestDeptService(ServiceTestCase):
     async def test_set_dept_manager_changes_manager(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_setmgr", ["alice", "bob"])
+        team = await self._setup_team_with_agents("t_setmgr", ["alice", "bob"])
         tree = DeptNodeConfig(dept_name="the_dept",
             responsibility="",
             manager="alice",
-            members=["alice", "bob"],
+            agents=["alice", "bob"],
         )
         await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
@@ -360,14 +360,14 @@ class TestDeptService(ServiceTestCase):
         assert dept is not None and bob is not None
         assert dept.manager_id == bob.id
 
-    async def test_set_dept_manager_member_not_in_dept_raises(self):
+    async def test_set_dept_manager_agent_not_in_dept_raises(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_setmgr_err", ["alice", "bob", "charlie"])
+        team = await self._setup_team_with_agents("t_setmgr_err", ["alice", "bob", "charlie"])
         tree = DeptNodeConfig(dept_name="small_dept",
             responsibility="",
             manager="alice",
-            members=["alice", "bob"],
+            agents=["alice", "bob"],
         )
         await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
@@ -375,12 +375,12 @@ class TestDeptService(ServiceTestCase):
         charlie_id = await self._get_agent_id(team.id, "charlie")
         with pytest.raises(TeamAgentException) as exc_info:
             await deptService.set_dept_manager(team.id, "small_dept", charlie_id)
-        assert exc_info.value.error_code == "MEMBER_NOT_IN_DEPT"
+        assert exc_info.value.error_code == "AGENT_NOT_IN_DEPT"
 
     async def test_set_dept_manager_dept_not_found_raises(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_setmgr_nodept", ["alice"])
+        team = await self._setup_team_with_agents("t_setmgr_nodept", ["alice"])
 
         alice_id = await self._get_agent_id(team.id, "alice")
         with pytest.raises(TeamAgentException) as exc_info:
@@ -388,17 +388,17 @@ class TestDeptService(ServiceTestCase):
         assert exc_info.value.error_code == "DEPT_NOT_FOUND"
 
     # ------------------------------------------------------------------
-    # get_off_board_members
+    # get_off_board_agents
     # ------------------------------------------------------------------
 
-    async def test_get_off_board_members(self):
+    async def test_get_off_board_agents(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_offboard", ["alice", "bob", "charlie"])
+        team = await self._setup_team_with_agents("t_offboard", ["alice", "bob", "charlie"])
         tree = DeptNodeConfig(dept_name="base",
             responsibility="",
             manager="alice",
-            members=["alice", "bob", "charlie"],
+            agents=["alice", "bob", "charlie"],
         )
         await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
@@ -410,7 +410,7 @@ class TestDeptService(ServiceTestCase):
             .aio_execute()
         )
 
-        off_board = await deptService.get_off_board_members(team.id)
+        off_board = await deptService.get_off_board_agents(team.id)
         names = {m.name for m in off_board}
         assert names == {"bob", "charlie"}
         assert all(m.employ_status == EmployStatus.OFF_BOARD for m in off_board)
@@ -422,7 +422,7 @@ class TestDeptService(ServiceTestCase):
     async def test_employ_status_enum_field_serialization(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_enum", ["alice"])
+        team = await self._setup_team_with_agents("t_enum", ["alice"])
 
         alice = await gtAgentManager.get_agent(team.id, "alice")
         assert alice is not None
@@ -454,7 +454,7 @@ class TestDeptService(ServiceTestCase):
     # AgentConfig model/driver 字段持久化
     # ------------------------------------------------------------------
 
-    async def test_team_member_model_driver_persist_and_reload(self):
+    async def test_team_agent_model_driver_persist_and_reload(self):
         await self._reset_tables()
 
         # 先创建角色模板
@@ -474,26 +474,26 @@ class TestDeptService(ServiceTestCase):
         await gtAgentManager.batch_save_agents(team.id, agents)
 
         saved_agents = await gtAgentManager.get_team_agents(team.id)
-        member_map = {m.name: m for m in saved_agents}
+        agent_map = {agent.name: agent for agent in saved_agents}
 
-        assert member_map["alice"].model == "gpt-4o"
-        assert member_map["alice"].driver == DriverType.NATIVE
-        assert member_map["bob"].model == ""
-        assert member_map["bob"].driver == DriverType.CLAUDE_SDK
+        assert agent_map["alice"].model == "gpt-4o"
+        assert agent_map["alice"].driver == DriverType.NATIVE
+        assert agent_map["bob"].model == ""
+        assert agent_map["bob"].driver == DriverType.CLAUDE_SDK
 
     # ------------------------------------------------------------------
-    # get_member_dept
+    # get_agent_dept
     # ------------------------------------------------------------------
 
-    async def test_get_member_dept_returns_correct_dept(self):
+    async def test_get_agent_dept_returns_correct_dept(self):
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_get_dept", ["alice", "bob", "charlie"])
+        team = await self._setup_team_with_agents("t_get_dept", ["alice", "bob", "charlie"])
         tree = DeptNodeConfig(
             dept_name="found_dept",
             responsibility="",
             manager="alice",
-            members=["alice", "bob"],
+            agents=["alice", "bob"],
         )
         await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
@@ -502,23 +502,23 @@ class TestDeptService(ServiceTestCase):
         charlie = await gtAgentManager.get_agent(team.id, "charlie")
         assert alice is not None and bob is not None and charlie is not None
 
-        alice_dept = await deptService.get_member_dept(team.id, alice.id)
+        alice_dept = await deptService.get_agent_dept(team.id, alice.id)
         assert alice_dept is not None
         assert alice_dept.name == "found_dept"
 
         # charlie 不在任何部门
-        charlie_dept = await deptService.get_member_dept(team.id, charlie.id)
+        charlie_dept = await deptService.get_agent_dept(team.id, charlie.id)
         assert charlie_dept is None
 
     # ------------------------------------------------------------------
-    # overwrite_dept_tree 部门房间成员
+    # overwrite_dept_tree 部门房间 agents
     # ------------------------------------------------------------------
 
-    async def test_overwrite_dept_tree_creates_room_with_members(self):
-        """验证 overwrite_dept_tree 创建新部门房间时，部门成员会被自动加入。"""
+    async def test_overwrite_dept_tree_creates_room_with_agents(self):
+        """验证 overwrite_dept_tree 创建新部门房间时，部门 Agent 会被自动加入。"""
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_room_create", ["alice", "bob", "charlie"])
+        team = await self._setup_team_with_agents("t_room_create", ["alice", "bob", "charlie"])
         alice_id = await self._get_agent_id(team.id, "alice")
         bob_id = await self._get_agent_id(team.id, "bob")
         charlie_id = await self._get_agent_id(team.id, "charlie")
@@ -541,15 +541,14 @@ class TestDeptService(ServiceTestCase):
         assert room.name == "engineering"
         assert "DEPT" in room.tags
 
-        # 验证部门成员已加入房间
-        room_members = await self._get_room_member_names(room.id)
-        assert set(room_members) == {"alice", "bob", "charlie"}
+        room_agents = await self._get_room_agent_names(room.id)
+        assert set(room_agents) == {"alice", "bob", "charlie"}
 
-    async def test_overwrite_dept_tree_updates_existing_room_members(self):
-        """验证 overwrite_dept_tree 更新已有部门房间时，成员列表会同步更新。"""
+    async def test_overwrite_dept_tree_updates_existing_room_agents(self):
+        """验证 overwrite_dept_tree 更新已有部门房间时，Agent 列表会同步更新。"""
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_room_update", ["alice", "bob", "charlie", "david"])
+        team = await self._setup_team_with_agents("t_room_update", ["alice", "bob", "charlie", "david"])
         alice_id = await self._get_agent_id(team.id, "alice")
         bob_id = await self._get_agent_id(team.id, "bob")
         charlie_id = await self._get_agent_id(team.id, "charlie")
@@ -569,8 +568,8 @@ class TestDeptService(ServiceTestCase):
         biz_id = f"DEPT:{dept.id}"
         room = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
         assert room is not None
-        room_members = await self._get_room_member_names(room.id)
-        assert set(room_members) == {"alice", "bob"}
+        room_agents = await self._get_room_agent_names(room.id)
+        assert set(room_agents) == {"alice", "bob"}
 
         # 第二次更新，增加成员
         root_updated = GtDept(
@@ -584,14 +583,14 @@ class TestDeptService(ServiceTestCase):
 
         room_after = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
         assert room_after is not None
-        room_members_after = await self._get_room_member_names(room_after.id)
-        assert set(room_members_after) == {"alice", "bob", "charlie", "david"}
+        room_agents_after = await self._get_room_agent_names(room_after.id)
+        assert set(room_agents_after) == {"alice", "bob", "charlie", "david"}
 
     async def test_overwrite_dept_tree_renames_existing_dept_room(self):
         """验证已存在部门改名后，对应部门群名称会同步更新。"""
         await self._reset_tables()
 
-        team = await self._setup_team_with_members("t_room_rename", ["alice", "bob"])
+        team = await self._setup_team_with_agents("t_room_rename", ["alice", "bob"])
         alice_id = await self._get_agent_id(team.id, "alice")
         bob_id = await self._get_agent_id(team.id, "bob")
 
@@ -632,7 +631,7 @@ class TestDeptService(ServiceTestCase):
         await roomService.startup()
 
         try:
-            team = await self._setup_team_with_members("t_room_tags", ["alice", "bob"])
+            team = await self._setup_team_with_agents("t_room_tags", ["alice", "bob"])
             alice_id = await self._get_agent_id(team.id, "alice")
             bob_id = await self._get_agent_id(team.id, "bob")
 
@@ -658,11 +657,11 @@ class TestDeptService(ServiceTestCase):
         finally:
             roomService.shutdown()
 
-    async def test_overwrite_dept_tree_hierarchical_rooms_all_have_members(self):
-        """验证层级部门结构中，每个部门房间都有对应的成员。"""
+    async def test_overwrite_dept_tree_hierarchical_rooms_all_have_agents(self):
+        """验证层级部门结构中，每个部门房间都有对应的 Agent。"""
         await self._reset_tables()
 
-        team = await self._setup_team_with_members(
+        team = await self._setup_team_with_agents(
             "t_room_hier", ["cto", "ceo", "eng_mgr", "dev_a", "dev_b", "sales_mgr", "sales_a"]
         )
         cto_id = await self._get_agent_id(team.id, "cto")
@@ -697,7 +696,7 @@ class TestDeptService(ServiceTestCase):
         await deptService.overwrite_dept_tree(team.id, root)
 
         # 验证所有部门房间
-        for dept_name, expected_members in [
+        for dept_name, expected_agents in [
             ("company", {"cto", "ceo"}),
             ("engineering", {"eng_mgr", "dev_a", "dev_b"}),
             ("sales", {"sales_mgr", "sales_a"}),
@@ -707,5 +706,5 @@ class TestDeptService(ServiceTestCase):
             biz_id = f"DEPT:{dept.id}"
             room = await gtRoomManager.get_room_by_biz_id(team.id, biz_id)
             assert room is not None
-            room_members = await self._get_room_member_names(room.id)
-            assert set(room_members) == expected_members
+            room_agents = await self._get_room_agent_names(room.id)
+            assert set(room_agents) == expected_agents

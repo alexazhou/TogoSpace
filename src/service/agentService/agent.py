@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any, Awaitable, Callable, List, Optional
 
-from constants import AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag, DriverType, MessageBusTopic, MemberStatus, RoomState
+from constants import AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag, DriverType, MessageBusTopic, AgentStatus, RoomState
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreChatMessage
 from model.dbModel.gtAgent import GtAgent
@@ -39,7 +39,7 @@ class Agent:
         self._history_store: AgentHistory = AgentHistory(self.gt_agent.id or 0)
         self.tool_registry: AgentToolRegistry = AgentToolRegistry()
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
-        self.status: MemberStatus = MemberStatus.IDLE
+        self.status: AgentStatus = AgentStatus.IDLE
         self.current_room: Optional[ChatRoom] = None
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
 
@@ -49,7 +49,7 @@ class Agent:
 
     @property
     def is_active(self) -> bool:
-        return self.status == MemberStatus.ACTIVE or self.wait_task_queue.empty() is False
+        return self.status == AgentStatus.ACTIVE or self.wait_task_queue.empty() is False
 
     async def startup(self) -> None:
         await self.driver.startup()
@@ -67,17 +67,17 @@ class Agent:
 
     def resume_failed(self) -> int:
         """清除 FAILED 状态，从队头任务读取 room_id 返回，供调用方触发续跑。"""
-        if self.status != MemberStatus.FAILED:
+        if self.status != AgentStatus.FAILED:
             raise ValueError(f"Agent ID={self.gt_agent.id} 当前状态不是 FAILED（当前: {self.status.name}）")
 
         task = self._peek_task()
         assert isinstance(task, GtCoreRoomMessageEvent), "resume_failed requires pending room message event"
         room_id: int = task.room_id
-        self.status = MemberStatus.IDLE
+        self.status = AgentStatus.IDLE
         self._publish_status(self.status)
         return room_id
 
-    def _publish_status(self, status: MemberStatus) -> None:
+    def _publish_status(self, status: AgentStatus) -> None:
         messageBus.publish(
             MessageBusTopic.AGENT_STATUS_CHANGED,
             gt_agent=self.gt_agent,
@@ -85,7 +85,7 @@ class Agent:
         )
 
     async def consume_task(self, max_function_calls: int) -> None:
-        self.status = MemberStatus.ACTIVE
+        self.status = AgentStatus.ACTIVE
         self._publish_status(self.status)
         try:
             while self.wait_task_queue.empty() is False:
@@ -111,15 +111,15 @@ class Agent:
                     logger.error(
                         f"Agent 推理连续失败 {MAX_INFER_RETRIES} 次，标记为 FAILED: agent_id={self.gt_agent.id}, last_error={last_error}"
                     )
-                    self.status = MemberStatus.FAILED
+                    self.status = AgentStatus.FAILED
                     self._publish_status(self.status)
                     return
 
                 self.wait_task_queue.get_nowait()
                 self.wait_task_queue.task_done()
         finally:
-            if self.status != MemberStatus.FAILED:
-                self.status = MemberStatus.IDLE
+            if self.status != AgentStatus.FAILED:
+                self.status = AgentStatus.IDLE
                 self._publish_status(self.status)
 
     async def pull_room_messages_to_history(self, room: ChatRoom) -> int:

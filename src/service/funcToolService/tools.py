@@ -138,11 +138,11 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
     if _context.chat_room is not None and target_room.room_id != _context.chat_room.room_id:
         if not target_room.can_post_message(_context.agent_name):
             logger.warning(
-                "send_chat_msg: 发言者不在目标房间成员中 sender=%s room=%s team_id=%s members=%s",
+                "send_chat_msg: 发言者不在目标房间 agents 中 sender=%s room=%s team_id=%s agents=%s",
                 _context.agent_name,
                 room_name,
                 _context.team_id,
-                target_room.members,
+                target_room.agents,
             )
             return {"success": False, "message": f"你不在目标房间 {target_room.name} 中，发送失败。"}
 

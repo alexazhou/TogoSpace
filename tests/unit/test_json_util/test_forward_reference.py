@@ -20,20 +20,20 @@ class TreeNode:
 
     类似于 GtDept 的结构：
     - 有基础字段（id, name 等）
-    - 有列表字段（member_ids）
+    - 有列表字段（agent_ids）
     - 有前向引用的 children 字段
     """
     id: int
     name: str
     manager_id: int
-    member_ids: list[int]
+    agent_ids: list[int]
     children: List["TreeNode"]
 
     def __init__(self, id: int = None, name: str = "", manager_id: int = None):
         self.id = id
         self.name = name
         self.manager_id = manager_id
-        self.member_ids = []
+        self.agent_ids = []
         self.children = []
 
     def __eq__(self, other):
@@ -41,7 +41,7 @@ class TreeNode:
                 self.id == other.id and
                 self.name == other.name and
                 self.manager_id == other.manager_id and
-                self.member_ids == other.member_ids and
+                self.agent_ids == other.agent_ids and
                 len(self.children) == len(other.children) and
                 all(c1 == c2 for c1, c2 in zip(self.children, other.children)))
 
@@ -51,7 +51,7 @@ class TreeNode:
             "id": self.id,
             "name": self.name,
             "manager_id": self.manager_id,
-            "member_ids": self.member_ids,
+            "agent_ids": self.agent_ids,
         }
         if self.children:
             result["children"] = [child.to_json() for child in self.children]
@@ -67,13 +67,13 @@ class TestForwardReference:
             "id": 1,
             "name": "root",
             "manager_id": 10,
-            "member_ids": [10, 20, 30],
+            "agent_ids": [10, 20, 30],
             "children": [
                 {
                     "id": 2,
                     "name": "child",
                     "manager_id": 20,
-                    "member_ids": [20, 21],
+                    "agent_ids": [20, 21],
                     "children": []
                 }
             ]
@@ -84,7 +84,7 @@ class TestForwardReference:
         assert result.id == 1
         assert result.name == "root"
         assert result.manager_id == 10
-        assert result.member_ids == [10, 20, 30]
+        assert result.agent_ids == [10, 20, 30]
         assert len(result.children) == 1
         assert result.children[0].id == 2
         assert result.children[0].name == "child"
@@ -96,25 +96,25 @@ class TestForwardReference:
             "id": 1,
             "name": "root",
             "manager_id": 10,
-            "member_ids": [10],
+            "agent_ids": [10],
             "children": [
                 {
                     "id": 2,
                     "name": "level1",
                     "manager_id": 20,
-                    "member_ids": [20],
+                    "agent_ids": [20],
                     "children": [
                         {
                             "id": 3,
                             "name": "level2",
                             "manager_id": 30,
-                            "member_ids": [30],
+                            "agent_ids": [30],
                             "children": [
                                 {
                                     "id": 4,
                                     "name": "level3",
                                     "manager_id": 40,
-                                    "member_ids": [40],
+                                    "agent_ids": [40],
                                     "children": []
                                 }
                             ]
@@ -138,27 +138,27 @@ class TestForwardReference:
             "id": 1,
             "name": "root",
             "manager_id": 10,
-            "member_ids": [10, 20, 30, 40],
+            "agent_ids": [10, 20, 30, 40],
             "children": [
                 {
                     "id": 2,
                     "name": "child1",
                     "manager_id": 20,
-                    "member_ids": [20, 21],
+                    "agent_ids": [20, 21],
                     "children": []
                 },
                 {
                     "id": 3,
                     "name": "child2",
                     "manager_id": 30,
-                    "member_ids": [30, 31],
+                    "agent_ids": [30, 31],
                     "children": []
                 },
                 {
                     "id": 4,
                     "name": "child3",
                     "manager_id": 40,
-                    "member_ids": [40, 41],
+                    "agent_ids": [40, 41],
                     "children": []
                 }
             ]
@@ -174,13 +174,13 @@ class TestForwardReference:
     def test_serialization_with_to_json(self):
         """测试通过 to_json 方法序列化包含前向引用的对象。"""
         child1 = TreeNode(id=2, name="child1", manager_id=20)
-        child1.member_ids = [20, 21]
+        child1.agent_ids = [20, 21]
 
         child2 = TreeNode(id=3, name="child2", manager_id=30)
-        child2.member_ids = [30, 31]
+        child2.agent_ids = [30, 31]
 
         root = TreeNode(id=1, name="root", manager_id=10)
-        root.member_ids = [10, 20, 30]
+        root.agent_ids = [10, 20, 30]
         root.children = [child1, child2]
 
         result_str = jsonUtil.json_dump(root)
@@ -189,7 +189,7 @@ class TestForwardReference:
         assert result["id"] == 1
         assert result["name"] == "root"
         assert result["manager_id"] == 10
-        assert result["member_ids"] == [10, 20, 30]
+        assert result["agent_ids"] == [10, 20, 30]
         assert len(result["children"]) == 2
         assert result["children"][0]["id"] == 2
         assert result["children"][1]["id"] == 3
@@ -197,10 +197,10 @@ class TestForwardReference:
     def test_round_trip(self):
         """测试序列化后反序列化的往返一致性。"""
         child = TreeNode(id=2, name="child", manager_id=20)
-        child.member_ids = [20, 21]
+        child.agent_ids = [20, 21]
 
         original = TreeNode(id=1, name="root", manager_id=10)
-        original.member_ids = [10, 20]
+        original.agent_ids = [10, 20]
         original.children = [child]
 
         # 序列化后反序列化
@@ -210,7 +210,7 @@ class TestForwardReference:
         assert result == original
         assert result.id == original.id
         assert result.name == original.name
-        assert result.member_ids == original.member_ids
+        assert result.agent_ids == original.agent_ids
         assert len(result.children) == len(original.children)
         assert result.children[0].id == original.children[0].id
 
@@ -220,7 +220,7 @@ class TestForwardReference:
             "id": 1,
             "name": "leaf",
             "manager_id": 10,
-            "member_ids": [10],
+            "agent_ids": [10],
             "children": []
         }'''
 
@@ -236,7 +236,7 @@ class TestForwardReference:
             "id": 1,
             "name": "node",
             "manager_id": 10,
-            "member_ids": [10]
+            "agent_ids": [10]
         }'''
 
         result = jsonUtil.json_load(tree_json, TreeNode)

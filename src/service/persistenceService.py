@@ -29,15 +29,15 @@ async def append_room_message(room_id: int, agent_id: int, content: str, send_ti
 
 
 async def load_room_runtime(room_id: int) -> tuple[list[GtRoomMessage], dict[str, int] | None]:
-    room_msg_rows, member_read_index = await asyncio.gather(
+    gt_room_messages, agent_read_index = await asyncio.gather(
         gtRoomMessageManager.get_room_messages(room_id),
         gtRoomManager.get_room_state(room_id),
     )
-    return room_msg_rows, member_read_index
+    return gt_room_messages, agent_read_index
 
 
-async def save_room_runtime(room_id: int, member_read_index: dict[str, int]) -> None:
-    await gtRoomManager.update_room_state(room_id, member_read_index)
+async def save_room_runtime(room_id: int, agent_read_index: dict[str, int]) -> None:
+    await gtRoomManager.update_room_state(room_id, agent_read_index)
 
 
 async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistory | None:
