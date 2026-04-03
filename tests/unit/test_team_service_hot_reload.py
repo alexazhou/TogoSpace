@@ -16,8 +16,8 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
     def _stop_team(_team_id: int):
         call_order.append("stop_team")
 
-    async def _reload_team_agents(_team_id: int):
-        call_order.append("reload_team_agents")
+    async def _reload_team(_team_id: int):
+        call_order.append("reload_team")
 
     async def _refresh_rooms(_team_id: int):
         call_order.append("refresh_rooms")
@@ -28,7 +28,7 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
     monkeypatch.setattr(teamService.gtTeamManager, "get_team", _get_team)
 
     monkeypatch.setattr(schedulerService, "stop_team", _stop_team)
-    monkeypatch.setattr(agentService, "reload_team_agents_from_db", _reload_team_agents)
+    monkeypatch.setattr(agentService, "reload_team", _reload_team)
     monkeypatch.setattr(roomService, "refresh_rooms_for_team", _refresh_rooms)
     monkeypatch.setattr(schedulerService, "start_scheduling", _start_scheduling)
 
@@ -36,7 +36,7 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
 
     assert call_order == [
         "stop_team",
-        "reload_team_agents",
+        "reload_team",
         "refresh_rooms",
         "start_scheduling",
     ]
@@ -47,15 +47,15 @@ async def test_hot_reload_team_returns_if_target_not_found(monkeypatch):
     monkeypatch.setattr(teamService.gtTeamManager, "get_team", AsyncMock(return_value=None))
 
     stop_team = Mock()
-    reload_team_agents = AsyncMock()
+    reload_team = AsyncMock()
     refresh_rooms = AsyncMock()
 
     monkeypatch.setattr(schedulerService, "stop_team", stop_team)
-    monkeypatch.setattr(agentService, "reload_team_agents_from_db", reload_team_agents)
+    monkeypatch.setattr(agentService, "reload_team", reload_team)
     monkeypatch.setattr(roomService, "refresh_rooms_for_team", refresh_rooms)
 
     await teamService.hot_reload_team("missing")
 
     stop_team.assert_not_called()
-    reload_team_agents.assert_not_awaited()
+    reload_team.assert_not_awaited()
     refresh_rooms.assert_not_awaited()

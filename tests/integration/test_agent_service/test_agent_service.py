@@ -36,7 +36,7 @@ class _agentServiceCase(ServiceTestCase):
         team_cfg = cfg.teams[0]
         await presetService._import_team_from_config(team_cfg)
         await agentService.startup()
-        await agentService.create_team_agents_from_db()
+        await agentService.load_all_team()
 
     @classmethod
     async def async_teardown_class(cls):
