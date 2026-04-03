@@ -10,7 +10,6 @@ from .base import DbModelBase, JsonField
 class GtTeam(DbModelBase):
     name: str = peewee.CharField(unique=True)
     config: dict[str, Any] = JsonField[dict[str, Any]](default=dict)
-    max_function_calls: int = peewee.IntegerField(default=5)
     enabled: int = peewee.IntegerField(default=1)
     deleted: int = peewee.IntegerField(default=0)
 

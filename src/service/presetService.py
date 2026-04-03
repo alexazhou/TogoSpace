@@ -120,7 +120,6 @@ async def _import_team_from_config(team_config: TeamConfig) -> GtTeam | None:
     team = await gtTeamManager.save_team(GtTeam(
         name=team_config.name,
         config=team_config.config or {},
-        max_function_calls=team_config.max_function_calls if team_config.max_function_calls is not None else 5,
         enabled=1,
         deleted=0,
     ))

@@ -134,11 +134,9 @@ class TestDalManagers(ServiceTestCase):
         created = await gtTeamManager.save_team(GtTeam(
             name="team_a",
             config={"slogan": "alpha"},
-            max_function_calls=3,
         ))
         assert created.name == "team_a"
         assert created.config == {"slogan": "alpha"}
-        assert created.max_function_calls == 3
         assert await gtTeamManager.team_exists("team_a") is True
 
         by_name = await gtTeamManager.get_team("team_a")
@@ -147,11 +145,9 @@ class TestDalManagers(ServiceTestCase):
         assert by_id is not None and by_id.name == "team_a"
 
         created.config = {"rules": "sync first", "slogan": "beta"}
-        created.max_function_calls = 7
         updated = await gtTeamManager.save_team(created)
         assert updated.id == created.id
         assert updated.config == {"rules": "sync first", "slogan": "beta"}
-        assert updated.max_function_calls == 7
 
         await gtTeamManager.delete_team("team_a")
         assert await gtTeamManager.team_exists("team_a") is False
@@ -252,7 +248,6 @@ class TestDalManagers(ServiceTestCase):
         ))
         imported_after = await gtTeamManager.get_team("imported")
         assert imported_after is not None
-        assert imported_after.max_function_calls == 5
         assert next((item for item in await gtRoomManager.get_rooms_by_team(imported_after.id) if item.name == "r2"), None) is None
 
     # ------------------------------------------------------------------

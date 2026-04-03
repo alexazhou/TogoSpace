@@ -47,7 +47,7 @@ async def _assert_agent_ids_in_team(team_id: int, agent_ids: List[int]) -> None:
 
     system_ids = [
         agent_id for agent_id in agent_ids
-        if agentService.get_special_agent_by_id(agent_id) == SpecialAgent.SYSTEM
+        if SpecialAgent.value_of(agent_id) == SpecialAgent.SYSTEM
     ]
     assertUtil.assertEqual(
         len(system_ids),
@@ -64,7 +64,7 @@ async def _assert_agent_ids_in_team(team_id: int, agent_ids: List[int]) -> None:
         error_code="duplicate_agent_ids",
     )
 
-    normal_agent_ids = [agent_id for agent_id in agent_ids if agentService.get_special_agent_by_id(agent_id) is None]
+    normal_agent_ids = [agent_id for agent_id in agent_ids if SpecialAgent.value_of(agent_id) is None]
     agent_rows = await gtAgentManager.get_agents_by_ids(normal_agent_ids)
     id_to_agent = {agent.id: agent for agent in agent_rows}
 

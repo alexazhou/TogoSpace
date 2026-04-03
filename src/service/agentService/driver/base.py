@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
 from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, DriverType
+from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistroy import AgentHistory
 from service.agentService.toolRegistry import AgentToolRegistry
@@ -31,19 +32,13 @@ class AgentTurnSetup:
 
 
 class AgentDriverHost(Protocol):
-    name: str
-    team_name: str
+    gt_agent: GtAgent
     system_prompt: str
-    model: str
     team_workdir: str
     workspace_root: str
     current_room: ChatRoom
     _history: AgentHistory
     tool_registry: AgentToolRegistry
-
-    @property
-    def key(self) -> str:
-        ...
 
     async def _infer(self, tools: Optional[list[llmApiUtil.OpenAITool]]) -> llmApiUtil.OpenAIMessage:
         ...

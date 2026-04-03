@@ -74,7 +74,7 @@ class TspAgentDriver(AgentDriver):
         self._register_host_tools()
         logger.info(
             "TSP driver initialized: agent=%s command=%s tools=%s",
-            self.host.key,
+            self.host.gt_agent.id,
             command,
             len(self._tsp_tools),
         )
@@ -93,7 +93,7 @@ class TspAgentDriver(AgentDriver):
 
     def _register_host_tools(self) -> None:
         if self._client is None:
-            raise RuntimeError(f"TSP client 尚未初始化: agent={self.host.key}")
+            raise RuntimeError(f"TSP client 尚未初始化: agent_id={self.host.gt_agent.id}")
         self.host.tool_registry.clear()
 
         for function_name, tool in self._local_tools.items():
@@ -121,8 +121,10 @@ class TspAgentDriver(AgentDriver):
         function_args: str,
         context: ToolCallContext | None = None,
     ) -> dict[str, Any]:
+
         assert self._client is not None, "TSP client 尚未初始化"
         function_name = context.tool_name if context is not None else ""
+
         if not function_name:
             return {"success": False, "message": "TSP 工具调用失败: tool_name 为空"}
         try:

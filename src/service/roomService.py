@@ -54,7 +54,7 @@ def _infer_room_type(members: Sequence[str]) -> RoomType:
 class ToolCallContext:
     """工具调用时注入的上下文，包含当前 Agent、工具名和聊天室信息。"""
     agent_name: str
-    team_name: str
+    team_id: int
     chat_room: ChatRoom
     tool_name: str = ""
 
@@ -258,10 +258,11 @@ class ChatRoom:
         )
 
     def _publish_current_turn(self, member_name: str) -> None:
-        """仅发布指定成员的发言事件，不处理状态推进。"""
+        """仅发布指定 Agent 的发言事件，不处理状态推进。"""
+        agent_id = self.get_member_id(member_name)
         messageBus.publish(
-            MessageBusTopic.ROOM_MEMBER_TURN,
-            member_name=member_name,
+            MessageBusTopic.ROOM_AGENT_TURN,
+            agent_id=agent_id,
             room_id=self.room_id,
             room_name=self.name,
             room_key=self.key,

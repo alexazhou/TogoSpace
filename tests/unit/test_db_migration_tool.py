@@ -30,6 +30,7 @@ def test_migrate_database_applies_all_pending_and_is_idempotent(tmp_path: Path) 
         agent_columns = _columns(conn, "agents")
         assert {"role_template_id"} <= agent_columns
         assert "role_template_name" not in agent_columns
-        assert {"config", "max_function_calls"} <= _columns(conn, "teams")
+        assert {"config"} <= _columns(conn, "teams")
+        assert "max_function_calls" not in _columns(conn, "teams")
     finally:
         conn.close()

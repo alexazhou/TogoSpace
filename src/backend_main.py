@@ -85,8 +85,6 @@ async def main(config_dir: str = None, port: int = 8080):
     # ── 阶段 2：导入配置 ──────────────────────────────────────────────────────
     logger.info("[启动] 阶段 2/4：导入 presets（RoleTemplate / Team / Dept / Room）")
     await presetService.import_from_app_config()
-    for team_config in app_config.teams:
-        await schedulerService.refresh_team_config(team_config.name)
     logger.info("[启动] 阶段 2/4 完成")
 
     # ── 阶段 3：运行时构建 ────────────────────────────────────────────────────

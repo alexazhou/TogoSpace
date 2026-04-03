@@ -61,7 +61,7 @@ class AgentListHandler(BaseHandler):
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
         agents = await gtAgentManager.get_team_agents(team.id)
-        runtime_status_map = agentService.get_team_agent_status_map(team.name)
+        runtime_status_map = agentService.get_team_runtime_status_map(team.id)
         include_special = include_special_raw.strip().lower() in {"1", "true", "yes", "on"}
 
         items = []
@@ -237,13 +237,17 @@ class AgentResumeHandler(BaseHandler):
 
     async def post(self, agent_id_str: str) -> None:
         agent_id = int(agent_id_str)
-        agent = agentService.find_agent_by_id(agent_id)
+        agent = None
+        try:
+            agent = agentService.get_agent(agent_id)
+        except KeyError:
+            pass
         assertUtil.assertNotNull(agent, None, f"运行时 Agent ID '{agent_id}' 不存在", "agent_not_found")
-        assertUtil.assertTrue(agent.status == MemberStatus.FAILED, None, f"Agent '{agent.key}' 当前状态不是 FAILED（当前: {agent.status.name}）", "agent_not_failed")
+        assertUtil.assertTrue(agent.status == MemberStatus.FAILED, None, f"Agent ID={agent.gt_agent.id} 当前状态不是 FAILED（当前: {agent.status.name}）", "agent_not_failed")
 
         room_id = agent.resume_failed()
         room = roomService.get_room(room_id)
         assertUtil.assertNotNull(room, None, f"Agent 的失败房间 room_id={room_id} 不存在", "room_not_found")
         await room.activate_scheduling()
 
-        self.return_json({"status": "resumed", "agent_key": agent.key, "room_id": room_id})
+        self.return_json({"status": "resumed", "agent_id": agent.gt_agent.id, "room_id": room_id})

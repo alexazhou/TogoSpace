@@ -145,7 +145,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
         await presetService._import_role_templates_from_app_config()
         await agentService.startup()
         await agentService.create_team_agents_from_db()
-        cls.fresh_agent = agentService.get_team_agent(TEAM, "alice")
+        cls.fresh_agent = agentService.get_agent(alice_row.id)
         await agentService.restore_state()
 
     @classmethod

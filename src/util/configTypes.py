@@ -62,7 +62,6 @@ class TeamConfig(BaseModel):
     members: List[AgentConfig] = Field(default_factory=list)
     dept_tree: Optional[DeptNodeConfig] = None
     preset_rooms: List[TeamRoomConfig] = Field(default_factory=list)
-    max_function_calls: Optional[int] = None
 
 
 class RoleTemplateConfig(BaseModel):

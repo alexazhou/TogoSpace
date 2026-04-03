@@ -17,7 +17,7 @@ import service.presetService as presetService
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
-from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiLLMApiRole, RoomState
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, MemberStatus, OpenaiLLMApiRole, RoomState
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -89,10 +89,10 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = roomService.get_room_by_key(f"manual_turn@{TEAM}")
         await room.activate_scheduling()
 
-        alice = agentService.get_team_agent(TEAM, "alice")
+        alice = agentService.get_agent(room.get_member_id("alice"))
         alice.inject_history_messages([
             GtAgentHistory.from_openai_message(
-                alice.agent_id,
+                alice.gt_agent.id,
                 0,
                 OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset test turn state"),
             )
@@ -128,10 +128,10 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "turn_checker_room", ["alice", "bob"])
         room = roomService.get_room_by_key(f"turn_checker_room@{TEAM}")
 
-        alice = agentService.get_team_agent(TEAM, "alice")
+        alice = agentService.get_agent(room.get_member_id("alice"))
         alice.inject_history_messages([
             GtAgentHistory.from_openai_message(
-                alice.agent_id,
+                alice.gt_agent.id,
                 0,
                 OpenAIMessage.text(OpenaiLLMApiRole.SYSTEM, "reset turn checker history"),
             )
@@ -148,8 +148,15 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
     async def test_scheduler_terminates_after_max_turns(self):
         """max_turns 用尽后，通过观察 Room 状态并停止调度器。"""
+        scheduler.shutdown()
+        await scheduler.startup()
         room_key = f"general@{TEAM}"
         room = roomService.get_room_by_key(room_key)
+        for member_name in ["alice", "bob"]:
+            agent = agentService.get_agent(room.get_member_id(member_name))
+            agent.status = MemberStatus.IDLE
+            agent.wait_task_queue = asyncio.Queue()
+            agent.inject_history_messages([])
 
         # 预定义每个 agent 的调用序列
         call_seq = {

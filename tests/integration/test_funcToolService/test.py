@@ -68,7 +68,7 @@ class TestRunToolCall(ServiceTestCase):
         if context is None:
             context = ToolCallContext(
                 agent_name="tester",
-                team_name=TEAM,
+                team_id=1,
                 chat_room=MagicMock(),
                 tool_name=name,
             )
@@ -95,7 +95,7 @@ class TestRunToolCall(ServiceTestCase):
         """上下文注入场景：send_chat_msg 能在上下文房间成功落消息。"""
         await roomService.ensure_room_record(TEAM, "ctx_room", ["alice"])
         room = roomService.get_room_by_key(f"ctx_room@{TEAM}")
-        ctx = ToolCallContext(agent_name="alice", team_name=TEAM, chat_room=room)
+        ctx = ToolCallContext(agent_name="alice", team_id=room.team_id, chat_room=room)
         result = await self._run("send_chat_msg", '{"room_name": "ctx_room", "msg": "test"}', context=ctx)
         assert result["success"] and "消息已发送" in result["message"]
 
@@ -103,7 +103,7 @@ class TestRunToolCall(ServiceTestCase):
         """目标房间不存在时，应返回错误信息。"""
         await roomService.ensure_room_record(TEAM, "ctx_room_missing", ["alice"])
         room = roomService.get_room_by_key(f"ctx_room_missing@{TEAM}")
-        ctx = ToolCallContext(agent_name="alice", team_name=TEAM, chat_room=room)
+        ctx = ToolCallContext(agent_name="alice", team_id=room.team_id, chat_room=room)
         result = await self._run("send_chat_msg", '{"room_name": "missing_room", "msg": "test"}', context=ctx)
         assert not result["success"]
         assert not any(message.content == "test" for message in room.messages)
@@ -115,7 +115,7 @@ class TestRunToolCall(ServiceTestCase):
         room = roomService.get_room_by_key(f"ctx_src@{TEAM}")
         target = roomService.get_room_by_key(f"ctx_dst@{TEAM}")
         before_count = len(target.messages)
-        ctx = ToolCallContext(agent_name="alice", team_name=TEAM, chat_room=room)
+        ctx = ToolCallContext(agent_name="alice", team_id=room.team_id, chat_room=room)
 
         result = await self._run("send_chat_msg", '{"room_name": "ctx_dst", "msg": "test"}', context=ctx)
 
