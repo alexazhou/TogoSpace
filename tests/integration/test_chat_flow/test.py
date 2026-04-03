@@ -43,7 +43,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
         await funcToolService.startup()
         await agentService.startup()
-        await agentService.create_team_agents_from_db()
+        await agentService.load_all_team()
         await scheduler.startup()
 
     @classmethod

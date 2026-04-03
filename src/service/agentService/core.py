@@ -5,8 +5,6 @@ from typing import Any, List
 
 from util import configUtil
 from model.dbModel.gtAgent import GtAgent
-from model.dbModel.gtTeam import GtTeam
-from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service.agentService.agent import Agent
 from service.agentService.driver import normalize_driver_config
 from service.agentService.promptBuilder import build_agent_system_prompt
@@ -33,7 +31,18 @@ async def restore_state() -> None:
             agent._history.replace(items)
 
 
-async def _create_team_agents(gt_team: GtTeam, gt_agents: list[GtAgent], templates_by_id: dict[int, GtRoleTemplate], workspace_root: str | None = None) -> None:
+async def _load_team(team_id: int, workspace_root: str | None = None) -> None:
+    gt_team = await gtTeamManager.get_team_by_id(team_id)
+    if gt_team is None:
+        logger.warning(f"加载 Team Agent 失败: team_id={team_id} 不存在于配置中")
+        return
+
+    gt_agents = await gtAgentManager.get_team_agents(team_id)
+    gt_role_templates = await gtRoleTemplateManager.get_role_templates_by_ids(
+        [agent.role_template_id for agent in gt_agents]
+    )
+    templates_by_id = {template.id: template for template in gt_role_templates}
+
     app_config = configUtil.get_app_config()
     base_prompt_tmpl = app_config.group_chat_prompt
     identity_prompt_tmpl = app_config.agent_identity_prompt
@@ -85,18 +94,7 @@ async def _create_team_agents(gt_team: GtTeam, gt_agents: list[GtAgent], templat
         await agent.startup()
 
 
-async def create_team_agents_from_db(workspace_root: str | None = None) -> None:
-    for gt_team in await gtTeamManager.get_all_teams():
-        gt_agents = await gtAgentManager.get_team_agents(gt_team.id)
-        gt_role_templates = await gtRoleTemplateManager.get_role_templates_by_ids(
-            [agent.role_template_id for agent in gt_agents]
-        )
-        templates_by_id = {template.id: template for template in gt_role_templates}
-        await _create_team_agents(gt_team, gt_agents, templates_by_id, workspace_root=workspace_root)
-
-
-async def reload_team_agents_from_db(team_id: int, workspace_root: str | None = None) -> None:
-    """按 Team 维度重建运行时 Agent 实例。"""
+async def _unload_team(team_id: int) -> None:
     keys_to_remove = [agent_id for agent_id, agent in _agents.items() if agent.gt_agent.team_id == team_id]
     close_tasks: list[Any] = []
     for agent_id in keys_to_remove:
@@ -106,17 +104,16 @@ async def reload_team_agents_from_db(team_id: int, workspace_root: str | None = 
     for agent_id in keys_to_remove:
         _agents.pop(agent_id, None)
 
-    gt_team = await gtTeamManager.get_team_by_id(team_id)
-    if gt_team is None:
-        logger.warning(f"重建 Team Agent 失败: team_id={team_id} 不存在于配置中")
-        return
 
-    gt_agents = await gtAgentManager.get_team_agents(gt_team.id)
-    gt_role_templates = await gtRoleTemplateManager.get_role_templates_by_ids(
-        [agent.role_template_id for agent in gt_agents]
-    )
-    templates_by_id = {template.id: template for template in gt_role_templates}
-    await _create_team_agents(gt_team, gt_agents, templates_by_id, workspace_root=workspace_root)
+async def load_all_team(workspace_root: str | None = None) -> None:
+    for gt_team in await gtTeamManager.get_all_teams():
+        await _load_team(gt_team.id, workspace_root=workspace_root)
+
+
+async def reload_team(team_id: int, workspace_root: str | None = None) -> None:
+    """按 Team 维度重建运行时 Agent 实例。"""
+    await _unload_team(team_id)
+    await _load_team(team_id, workspace_root=workspace_root)
 
 
 def get_agent(agent_id: int) -> "Agent":

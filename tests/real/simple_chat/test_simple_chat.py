@@ -48,7 +48,7 @@ class TestRealSimpleChat(ServiceTestCase):
         await presetService.startup()
         await presetService.import_from_app_config()
         await agentService.startup()
-        await agentService.create_team_agents_from_db()
+        await agentService.load_all_team()
 
         # 创建房间（max_turns=1 表示 alice/bob 各 1 次发言）
         await roomService.ensure_room_record("default", "general", ["alice", "bob"], max_turns=1)

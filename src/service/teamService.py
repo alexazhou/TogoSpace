@@ -113,7 +113,7 @@ async def hot_reload_team(name: str) -> None:
     schedulerService.stop_team(team.id)
 
     # 刷新成员实例，保证新增/变更成员可被调度命中
-    await agentService.reload_team_agents_from_db(team.id)
+    await agentService.reload_team(team.id)
 
     # 刷新聊天室配置
     await roomService.refresh_rooms_for_team(team.id)

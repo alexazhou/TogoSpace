@@ -165,7 +165,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
         configUtil.load(os.path.join(os.path.dirname(__file__), "../../config"), force_reload=True)
         await presetService._import_role_templates_from_app_config()
         await agentService.startup()
-        await agentService.create_team_agents_from_db()
+        await agentService.load_all_team()
         cls.fresh_agent = agentService.get_agent(gt_alice.id)
         await agentService.restore_state()
 
