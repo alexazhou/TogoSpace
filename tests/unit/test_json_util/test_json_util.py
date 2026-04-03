@@ -2,6 +2,7 @@ import json
 from decimal import Decimal
 from datetime import datetime
 import datetime as dt
+from typing import Optional
 
 import pytest
 
@@ -65,6 +66,46 @@ class DemoList:
 
 class DemoSubclass(DemoList):
     name2: str
+
+
+class DemoNullable:
+    a: str | None
+    b: int | None
+
+    def __init__(self):
+        self.a = None
+        self.b = None
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.__dict__ == other.__dict__
+
+
+class DemoOptional:
+    a: Optional[str]
+    b: Optional[int]
+
+    def __init__(self):
+        self.a = None
+        self.b = None
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.__dict__ == other.__dict__
+
+
+class DemoUnsupportedUnion:
+    a: int | str | None
+
+    def __init__(self):
+        self.a = None
+
+
+class DemoNoneLeft:
+    a: None | str
+    b: None | int
+
+    def __init__(self):
+        self.a = None
+        self.b = None
 
 
 def build_demo_instance(a="1", b=2, c=Decimal("3.33"), d=datetime(2020, 12, 15, 17, 59, 30, 111000)):
@@ -265,3 +306,30 @@ class TestJsonUtil:
         obj.f = None
         ret2 = jsonUtil.object_to_json_data(obj)
         assert list(ret2.keys()) == ['a', 'b', 'c', 'd', 'e', 'f']
+
+    def test_union_pipe_nullable(self):
+        ret = jsonUtil.json_data_to_object({"a": "hello", "b": 123}, DemoNullable)
+        assert ret.a == "hello"
+        assert ret.b == 123
+
+        ret_none = jsonUtil.json_data_to_object({"a": None, "b": None}, DemoNullable)
+        assert ret_none.a is None
+        assert ret_none.b is None
+
+    def test_optional_nullable(self):
+        ret = jsonUtil.json_data_to_object({"a": "world", "b": 456}, DemoOptional)
+        assert ret.a == "world"
+        assert ret.b == 456
+
+    def test_union_none_left_nullable(self):
+        ret = jsonUtil.json_data_to_object({"a": "left", "b": 789}, DemoNoneLeft)
+        assert ret.a == "left"
+        assert ret.b == 789
+
+        ret_none = jsonUtil.json_data_to_object({"a": None, "b": None}, DemoNoneLeft)
+        assert ret_none.a is None
+        assert ret_none.b is None
+
+    def test_unsupported_union_with_multiple_non_none_types(self):
+        with pytest.raises(TypeError, match="Only Optional\\[T\\] / T \\| None is supported"):
+            jsonUtil.json_data_to_object({"a": "x"}, DemoUnsupportedUnion)
