@@ -3,10 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
-from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, DriverType
+from constants import DriverType
 from model.dbModel.gtAgent import GtAgent
-from model.dbModel.gtAgentHistory import GtAgentHistory
-from service.agentService.agentHistroy import AgentHistory
+from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService.toolRegistry import AgentToolRegistry
 from service.roomService import ChatRoom
 from util import llmApiUtil
@@ -37,23 +36,13 @@ class AgentDriverHost(Protocol):
     team_workdir: str
     workspace_root: str
     current_room: ChatRoom
-    _history: AgentHistory
+    _history: AgentHistoryStore
     tool_registry: AgentToolRegistry
 
     async def _infer(self, tools: Optional[list[llmApiUtil.OpenAITool]]) -> llmApiUtil.OpenAIMessage:
         ...
 
     async def _execute_tool(self) -> None:
-        ...
-
-    async def append_history_message(
-        self,
-        message: llmApiUtil.OpenAIMessage,
-        stage: AgentHistoryStage | None = None,
-        status: AgentHistoryStatus | None = None,
-        error_message: str | None = None,
-        tags: list[AgentHistoryTag] | None = None,
-    ) -> GtAgentHistory:
         ...
 
 

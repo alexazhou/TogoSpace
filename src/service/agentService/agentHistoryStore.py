@@ -4,11 +4,12 @@ from typing import Iterable, Iterator
 
 from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiLLMApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from service import persistenceService
 from util import llmApiUtil
 
 
-class AgentHistory:
-    """Agent 历史消息容器：统一管理历史读写与查询。"""
+class AgentHistoryStore:
+    """Agent 历史消息存储：统一管理历史读写、查询与持久化。"""
 
     def __init__(self, agent_id: int, items: Iterable[GtAgentHistory] | None = None):
         self._agent_id = agent_id
@@ -84,6 +85,69 @@ class AgentHistory:
         self._items.append(item)
         return item
 
+    async def append_history_message(
+        self,
+        message: llmApiUtil.OpenAIMessage,
+        stage: AgentHistoryStage | None = None,
+        status: AgentHistoryStatus | None = None,
+        error_message: str | None = None,
+        tags: list[AgentHistoryTag] | None = None,
+    ) -> GtAgentHistory:
+        item = self.append_message(
+            message,
+            stage=stage,
+            status=status,
+            error_message=error_message,
+            tags=tags,
+        )
+        saved = await persistenceService.append_agent_history_message(item)
+        if saved is not None:
+            item.id = saved.id
+        return item
+
+    async def append_stage_init(
+        self,
+        stage: AgentHistoryStage,
+        tool_call_id: str | None = None,
+        tags: list[AgentHistoryTag] | None = None,
+    ) -> GtAgentHistory:
+        init_message = llmApiUtil.OpenAIMessage(
+            role=self._infer_role_from_stage(stage),
+            tool_call_id=tool_call_id,
+        )
+        return await self.append_history_message(
+            init_message,
+            stage=stage,
+            status=AgentHistoryStatus.INIT,
+            tags=tags,
+        )
+
+    async def finalize_history_item(
+        self,
+        history_item: GtAgentHistory,
+        message: llmApiUtil.OpenAIMessage | None,
+        status: AgentHistoryStatus,
+        error_message: str | None = None,
+        tags: list[AgentHistoryTag] | None = None,
+    ) -> None:
+        message_json: str | None = None
+        if message is not None:
+            message_json = message.model_dump_json(exclude_none=True)
+            history_item.message_json = message_json
+        history_item.status = status
+        history_item.error_message = error_message
+        if tags is not None:
+            history_item.tags = list(tags)
+
+        assert history_item.id is not None, "history row id should not be None after append"
+        await persistenceService.update_agent_history_by_id(
+            history_id=history_item.id,
+            message_json=message_json,
+            status=status,
+            error_message=error_message,
+            tags=(history_item.tags if tags is not None else None),
+        )
+
     def get_last_assistant_message(self, start_idx: int = 0) -> llmApiUtil.OpenAIMessage | None:
         recent_history = self._items[start_idx:]
         for item in reversed(recent_history):
@@ -96,3 +160,13 @@ class AgentHistory:
             if item.role == llmApiUtil.OpenaiLLMApiRole.TOOL and item.tool_call_id == tool_call_id:
                 return item
         return None
+
+    @staticmethod
+    def _infer_role_from_stage(stage: AgentHistoryStage) -> llmApiUtil.OpenaiLLMApiRole:
+        if stage == AgentHistoryStage.INPUT:
+            return llmApiUtil.OpenaiLLMApiRole.USER
+        if stage == AgentHistoryStage.INFER:
+            return llmApiUtil.OpenaiLLMApiRole.ASSISTANT
+        if stage == AgentHistoryStage.TOOL_RESULT:
+            return llmApiUtil.OpenaiLLMApiRole.TOOL
+        raise ValueError(f"不支持的 history stage: {stage}")

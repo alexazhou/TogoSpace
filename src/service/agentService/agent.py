@@ -8,8 +8,8 @@ from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreChatMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from service import funcToolService, llmService, messageBus, persistenceService, roomService
-from service.agentService.agentHistroy import AgentHistory
+from service import funcToolService, llmService, messageBus, roomService
+from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup, build_agent_driver
 from service.agentService.promptBuilder import build_turn_context_prompt, format_room_message
 from service.agentService.toolRegistry import AgentToolRegistry, ToolExecutionResult
@@ -36,7 +36,7 @@ class Agent:
         self.system_prompt: str = system_prompt
         self.team_workdir: str = team_workdir
         self.workspace_root: str = workspace_root
-        self._history_store: AgentHistory = AgentHistory(self.gt_agent.id or 0)
+        self._history_store: AgentHistoryStore = AgentHistoryStore(self.gt_agent.id or 0)
         self.tool_registry: AgentToolRegistry = AgentToolRegistry()
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
         self.status: AgentStatus = AgentStatus.IDLE
@@ -44,7 +44,7 @@ class Agent:
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
 
     @property
-    def _history(self) -> AgentHistory:
+    def _history(self) -> AgentHistoryStore:
         return self._history_store
 
     @property
@@ -139,7 +139,7 @@ class Agent:
             llmApiUtil.OpenaiLLMApiRole.USER,
             content=build_turn_context_prompt(room.name, message_blocks),
         )
-        await self.append_history_message(
+        await self._history.append_history_message(
             turn_context_message,
             stage=AgentHistoryStage.INPUT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
@@ -175,7 +175,7 @@ class Agent:
             if turn_done:
                 return
             if len(turn_setup.hint_prompt) > 0:
-                await self.append_history_message(
+                await self._history.append_history_message(
                     llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_setup.hint_prompt),
                     stage=AgentHistoryStage.INPUT,
                 )
@@ -223,11 +223,11 @@ class Agent:
             messages=self._history.export_openai_message_list(),
             tools=ctx_tools,
         )
-        history_item = await self._append_stage_init(stage=AgentHistoryStage.INFER)
+        history_item = await self._history.append_stage_init(stage=AgentHistoryStage.INFER)
         infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
         if infer_result.ok is False or infer_result.response is None:
             error_message = infer_result.error_message or "unknown inference error"
-            await self._finalize_history_item(
+            await self._history.finalize_history_item(
                 history_item=history_item,
                 message=None,
                 status=AgentHistoryStatus.FAILED,
@@ -237,7 +237,7 @@ class Agent:
 
         response = infer_result.response
         assistant_message = response.choices[0].message
-        await self._finalize_history_item(
+        await self._history.finalize_history_item(
             history_item=history_item,
             message=assistant_message,
             status=AgentHistoryStatus.SUCCESS,
@@ -272,13 +272,13 @@ class Agent:
         executor: Callable[[], Awaitable[ToolExecutionResult]],
     ) -> ToolExecutionResult:
         assert tool_call.id, "tool_call.id should not be empty"
-        history_item = await self._append_stage_init(
+        history_item = await self._history.append_stage_init(
             stage=AgentHistoryStage.TOOL_RESULT,
             tool_call_id=str(tool_call.id),
         )
         exec_result = await executor()
         final_message = llmApiUtil.OpenAIMessage.tool_result(exec_result.tool_call_id, exec_result.result_json)
-        await self._finalize_history_item(
+        await self._history.finalize_history_item(
             history_item=history_item,
             message=final_message,
             status=exec_result.status,
@@ -315,83 +315,8 @@ class Agent:
             tags=tags,
         )
 
-    async def _append_stage_init(
-        self,
-        stage: AgentHistoryStage,
-        tool_call_id: str | None = None,
-        tags: list[AgentHistoryTag] | None = None,
-    ) -> GtAgentHistory:
-        if stage == AgentHistoryStage.INPUT:
-            role = llmApiUtil.OpenaiLLMApiRole.USER
-        elif stage == AgentHistoryStage.INFER:
-            role = llmApiUtil.OpenaiLLMApiRole.ASSISTANT
-        elif stage == AgentHistoryStage.TOOL_RESULT:
-            role = llmApiUtil.OpenaiLLMApiRole.TOOL
-        else:
-            raise ValueError(f"不支持的 history stage: {stage}")
-
-        init_message = llmApiUtil.OpenAIMessage(role=role, tool_call_id=tool_call_id)
-        append_kwargs: dict[str, Any] = {"stage": stage, "status": AgentHistoryStatus.INIT}
-        if tags is not None:
-            append_kwargs["tags"] = tags
-
-        item: GtAgentHistory = self._history.append_message(init_message, **append_kwargs)
-        saved = await persistenceService.append_agent_history_message(item)
-        if saved is not None:
-            item.id = saved.id
-        return item
-
-    async def _finalize_history_item(
-        self,
-        history_item: GtAgentHistory,
-        message: llmApiUtil.OpenAIMessage | None,
-        status: AgentHistoryStatus,
-        error_message: str | None = None,
-        tags: list[AgentHistoryTag] | None = None,
-    ) -> None:
-        message_json: str | None = None
-        if message is not None:
-            message_json = message.model_dump_json(exclude_none=True)
-            history_item.message_json = message_json
-        history_item.status = status
-        history_item.error_message = error_message
-        if tags is not None:
-            history_item.tags = list(tags)
-
-        assert history_item.id is not None, "history row id should not be None after append"
-        await persistenceService.update_agent_history_by_id(
-            history_id=history_item.id,
-            message_json=message_json,
-            status=status,
-            error_message=error_message,
-            tags=(history_item.tags if tags is not None else None),
-        )
-
     def dump_history_messages(self) -> List[GtAgentHistory]:
         return self._history.dump()
 
     def inject_history_messages(self, items: List[GtAgentHistory]) -> None:
         self._history.replace(items)
-
-    async def append_history_message(
-        self,
-        message: llmApiUtil.OpenAIMessage,
-        stage: AgentHistoryStage | None = None,
-        status: AgentHistoryStatus | None = None,
-        error_message: str | None = None,
-        tags: list[AgentHistoryTag] | None = None,
-    ) -> GtAgentHistory:
-        target_status = status or AgentHistoryStatus.SUCCESS
-        append_kwargs: dict[str, Any] = {"status": target_status}
-        if stage is not None:
-            append_kwargs["stage"] = stage
-        if error_message is not None:
-            append_kwargs["error_message"] = error_message
-        if tags is not None:
-            append_kwargs["tags"] = tags
-
-        item: GtAgentHistory = self._history.append_message(message, **append_kwargs)
-        saved = await persistenceService.append_agent_history_message(item)
-        if saved is not None:
-            item.id = saved.id
-        return item
