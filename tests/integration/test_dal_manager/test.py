@@ -8,7 +8,7 @@ import service.ormService as ormService
 import service.presetService as presetService
 import service.roomService as roomService
 import service.teamService as teamService
-from constants import AgentHistoryTag, DriverType, EmployStatus, RoleTemplateType, RoomType
+from constants import AgentHistoryTag, AgentHistoryStage, DriverType, EmployStatus, RoleTemplateType, RoomType
 from dal.db import (
     gtRoleTemplateManager,
     gtAgentHistoryManager,
@@ -621,6 +621,9 @@ class TestDalManagers(ServiceTestCase):
         assert saved_1.agent_id == alice.id
         assert saved_1.seq == 1
         assert saved_1.message_json == '{"content":"v1"}'
+        assert saved_1.stage == AgentHistoryStage.INPUT
+        assert saved_1.success is None
+        assert saved_1.error_message is None
         assert saved_1.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
         duplicate = GtAgentHistory(
@@ -673,6 +676,7 @@ class TestDalManagers(ServiceTestCase):
         alice_history = await gtAgentHistoryManager.get_agent_history(alice.id)
         assert [h.seq for h in alice_history] == [1, 2]
         assert [h.message_json for h in alice_history] == ['{"content":"1"}', '{"content":"2"}']
+        assert [h.stage for h in alice_history] == [AgentHistoryStage.INPUT, AgentHistoryStage.INPUT]
         assert [h.tags for h in alice_history] == [
             [AgentHistoryTag.ROOM_TURN_BEGIN],
             [AgentHistoryTag.COMPACT_CMD],

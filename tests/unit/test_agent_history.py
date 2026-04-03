@@ -1,6 +1,6 @@
 import pytest
 
-from constants import AgentHistoryTag, OpenaiLLMApiRole
+from constants import AgentHistoryTag, AgentHistoryStage, OpenaiLLMApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistroy import AgentHistory
 from util import llmApiUtil
@@ -17,6 +17,9 @@ def test_agent_history_append_message_persists_seq_and_tags():
     assert item.agent_id == 7
     assert item.seq == 0
     assert item.content == "hello"
+    assert item.stage == AgentHistoryStage.INPUT
+    assert item.success is None
+    assert item.error_message is None
     assert item.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
     assert len(history) == 1
     assert history.last() is not None
@@ -108,4 +111,27 @@ def test_agent_history_find_tool_result_by_call_id_returns_matching_history_item
     assert item is not None
     assert item.tool_call_id == "call_2"
     assert item.content == '{"success": false}'
+    assert item.stage == AgentHistoryStage.TOOL_RESULT
     assert history.find_tool_result_by_call_id("missing") is None
+
+
+def test_from_openai_message_assigns_stage_by_role():
+    user_item = GtAgentHistory.from_openai_message(
+        9,
+        0,
+        llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u"),
+    )
+    assistant_item = GtAgentHistory.from_openai_message(
+        9,
+        1,
+        llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a"),
+    )
+    tool_item = GtAgentHistory.from_openai_message(
+        9,
+        2,
+        llmApiUtil.OpenAIMessage.tool_result("c1", '{"success": true}'),
+    )
+
+    assert user_item.stage == AgentHistoryStage.INPUT
+    assert assistant_item.stage == AgentHistoryStage.INFER
+    assert tool_item.stage == AgentHistoryStage.TOOL_RESULT

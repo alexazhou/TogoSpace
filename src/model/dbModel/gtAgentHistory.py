@@ -6,15 +6,18 @@ import json
 import peewee
 from util import llmApiUtil
 
-from constants import AgentHistoryTag
+from constants import AgentHistoryTag, AgentHistoryStage, OpenaiLLMApiRole
 
-from .base import DbModelBase, EnumListField
+from .base import DbModelBase, EnumField, EnumListField
 
 
 class GtAgentHistory(DbModelBase):
     agent_id: int = peewee.IntegerField()
     seq: int = peewee.IntegerField(null=False)
     message_json: str = peewee.TextField(null=False)
+    stage: AgentHistoryStage = EnumField[AgentHistoryStage](AgentHistoryStage, null=False, default=AgentHistoryStage.INPUT)
+    success: bool | None = peewee.BooleanField(null=True)
+    error_message: str | None = peewee.TextField(null=True)
     tags: list[AgentHistoryTag] = EnumListField[AgentHistoryTag](AgentHistoryTag, default=list)
 
     class Meta:
@@ -29,12 +32,18 @@ class GtAgentHistory(DbModelBase):
         agent_id: int,
         seq: int,
         message: llmApiUtil.OpenAIMessage,
+        stage: AgentHistoryStage | None = None,
+        success: bool | None = None,
+        error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
     ) -> "GtAgentHistory":
         return cls(
             agent_id=agent_id,
             seq=seq,
             message_json=message.model_dump_json(exclude_none=True),
+            stage=stage or cls.infer_stage_from_message(message),
+            success=success,
+            error_message=error_message,
             tags=[] if tags is None else list(tags),
         )
 
@@ -59,9 +68,31 @@ class GtAgentHistory(DbModelBase):
         return self.openai_message.tool_call_id
 
     @staticmethod
+    def infer_stage_from_message(message: llmApiUtil.OpenAIMessage) -> AgentHistoryStage:
+        role = OpenaiLLMApiRole.value_of(message.role)
+        if role in (OpenaiLLMApiRole.SYSTEM, OpenaiLLMApiRole.USER):
+            return AgentHistoryStage.INPUT
+        if role == OpenaiLLMApiRole.ASSISTANT:
+            return AgentHistoryStage.INFER
+        if role == OpenaiLLMApiRole.TOOL:
+            return AgentHistoryStage.TOOL_RESULT
+        return AgentHistoryStage.INPUT
+
+    @staticmethod
     def is_tool_call_succeeded(result_json: str | None) -> bool:
         try:
             data = json.loads(result_json)
         except Exception:
             return False
         return bool(data.get("success"))
+
+    @staticmethod
+    def extract_tool_call_error_message(result_json: str | None) -> str | None:
+        try:
+            data = json.loads(result_json)
+        except Exception:
+            return None
+        if bool(data.get("success")):
+            return None
+        message = data.get("message")
+        return None if message is None else str(message)

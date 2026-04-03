@@ -20,7 +20,7 @@ from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateM
 from service.roomService import ChatRoom, ToolCallContext
 from peewee import IntegrityError
 from exception import TeamAgentException
-from constants import AgentHistoryTag, SpecialAgent, MessageBusTopic, MemberStatus, DriverType, EmployStatus
+from constants import AgentHistoryTag, AgentHistoryStage, SpecialAgent, MessageBusTopic, MemberStatus, DriverType, EmployStatus, RoomState
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +187,7 @@ class Agent:
         )
         await self.append_history_message(
             turn_context_message,
+            stage=AgentHistoryStage.INPUT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         )
         return 1
@@ -230,7 +231,8 @@ class Agent:
 
             if turn_setup.hint_prompt:
                 await self.append_history_message(
-                    llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_setup.hint_prompt)
+                    llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_setup.hint_prompt),
+                    stage=AgentHistoryStage.INPUT,
                 )
 
     async def _run_until_reply(
@@ -255,9 +257,15 @@ class Agent:
                 exec_result: ToolExecutionResult = await self.tool_registry.execute_tool_call(tool_call, context)
                 await self.append_history_message(
                     llmApiUtil.OpenAIMessage.tool_result(exec_result.tool_call_id, exec_result.result_json),
+                    stage=AgentHistoryStage.TOOL_RESULT,
+                    success=exec_result.success,
+                    error_message=exec_result.error_message,
                     tags=exec_result.tags,
                 )
-                if exec_result.turn_finished:
+                if exec_result.turn_finished and (
+                    exec_result.success is True
+                    or (self.current_room is not None and self.current_room.state == RoomState.INIT)
+                ):
                     turn_done = True
 
             if turn_done:
@@ -280,7 +288,11 @@ class Agent:
 
         response = infer_result.response
         assistant_message = response.choices[0].message
-        await self.append_history_message(assistant_message)
+        await self.append_history_message(
+            assistant_message,
+            stage=AgentHistoryStage.INFER,
+            success=True,
+        )
 
         return assistant_message
 
@@ -301,12 +313,20 @@ class Agent:
             )
             result_data: dict[str, Any] = await funcToolService.run_tool_call(args, context=context)
             result = json.dumps(result_data, ensure_ascii=False)
+            raw_success = result_data.get("success")
+            success = None if raw_success is None else bool(raw_success)
+            error_message = None
+            if success is False and result_data.get("message") is not None:
+                error_message = str(result_data.get("message"))
             tags: list[AgentHistoryTag] | None = None
-            if name == "finish_chat_turn" and GtAgentHistory.is_tool_call_succeeded(result):
+            if name == "finish_chat_turn" and success is True:
                 tags = [AgentHistoryTag.ROOM_TURN_FINISH]
 
             await self.append_history_message(
                 llmApiUtil.OpenAIMessage.tool_result(tool_call.id, result),
+                stage=AgentHistoryStage.TOOL_RESULT,
+                success=success,
+                error_message=error_message,
                 tags=tags,
             )
 
@@ -319,9 +339,18 @@ class Agent:
     async def append_history_message(
         self,
         message: llmApiUtil.OpenAIMessage,
+        stage: AgentHistoryStage | None = None,
+        success: bool | None = None,
+        error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
     ) -> None:
-        item: GtAgentHistory = self._history.append_message(message, tags=tags)
+        item: GtAgentHistory = self._history.append_message(
+            message,
+            stage=stage,
+            success=success,
+            error_message=error_message,
+            tags=tags,
+        )
         await persistenceService.append_agent_history_message(item)
 
 

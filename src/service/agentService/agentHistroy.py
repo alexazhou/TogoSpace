@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable, Iterator
 
-from constants import AgentHistoryTag, OpenaiLLMApiRole
+from constants import AgentHistoryTag, AgentHistoryStage, OpenaiLLMApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from util import llmApiUtil
 
@@ -58,12 +58,18 @@ class AgentHistory:
     def append_message(
         self,
         message: llmApiUtil.OpenAIMessage,
+        stage: AgentHistoryStage | None = None,
+        success: bool | None = None,
+        error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
     ) -> GtAgentHistory:
         item = GtAgentHistory.from_openai_message(
             agent_id=self._agent_id,
             seq=len(self._items),
             message=message,
+            stage=stage,
+            success=success,
+            error_message=error_message,
             tags=tags,
         )
         self._items.append(item)

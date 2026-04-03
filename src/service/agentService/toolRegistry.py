@@ -5,7 +5,6 @@ from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable
 
 from constants import AgentHistoryTag
-from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.roomService import ToolCallContext
 from util import llmApiUtil
 
@@ -16,6 +15,8 @@ ToolHandler = Callable[[str, ToolCallContext], Awaitable[dict[str, Any]]]
 class ToolExecutionResult:
     tool_call_id: str
     result_json: str
+    success: bool | None = None
+    error_message: str | None = None
     tags: list[AgentHistoryTag] | None = None
     turn_finished: bool = False
 
@@ -64,25 +65,35 @@ class AgentToolRegistry:
 
         registered = self._tools_by_name.get(function_name)
         if registered is None:
+            result = {"success": False, "message": f"未知工具: {function_name}"}
             return ToolExecutionResult(
                 tool_call_id=tool_call_id,
-                result_json=json.dumps({"success": False, "message": f"未知工具: {function_name}"}, ensure_ascii=False),
+                result_json=json.dumps(result, ensure_ascii=False),
+                success=False,
+                error_message=str(result["message"]),
             )
 
         try:
             enriched_context = replace(context, tool_name=function_name)
             result = await registered.handler(function_args, enriched_context)
             assert isinstance(result, dict), f"tool result must be dict, got {type(result).__name__}"
-            result_json = json.dumps(result, ensure_ascii=False)
         except Exception as e:
-            result_json = json.dumps({"success": False, "message": f"工具调用失败: {e}"}, ensure_ascii=False)
+            result = {"success": False, "message": f"工具调用失败: {e}"}
 
-        tool_succeeded = GtAgentHistory.is_tool_call_succeeded(result_json)
+        raw_success = result.get("success")
+        success = None if raw_success is None else bool(raw_success)
+        tool_succeeded = success is True
+        error_message = None
+        if success is False and result.get("message") is not None:
+            error_message = str(result.get("message"))
+        result_json = json.dumps(result, ensure_ascii=False)
         turn_finished = registered.marks_turn_finish
         tags = [AgentHistoryTag.ROOM_TURN_FINISH] if (turn_finished and tool_succeeded) else None
         return ToolExecutionResult(
             tool_call_id=tool_call_id,
             result_json=result_json,
+            success=success,
+            error_message=error_message,
             tags=tags,
             turn_finished=turn_finished,
         )
