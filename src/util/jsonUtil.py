@@ -1,7 +1,8 @@
 import logging
 import json
 import sys
-from typing import ForwardRef, get_type_hints
+from types import UnionType
+from typing import ForwardRef, get_args, get_origin, get_type_hints
 
 from enum import Enum, auto
 import datetime as dt
@@ -90,6 +91,25 @@ def _resolve_forward_ref(type_annotation, context_class: type = None) -> type:
     return None
 
 
+def _unwrap_optional_union(annotation_type):
+    """仅支持 Optional[T] / T | None 形式的联合类型。"""
+    origin = get_origin(annotation_type)
+    if origin not in (Union, UnionType):
+        return annotation_type
+
+    args = get_args(annotation_type)
+    non_none_args = [arg for arg in args if arg is not type(None)]
+    none_count = len(args) - len(non_none_args)
+
+    if none_count != 1 or len(non_none_args) != 1:
+        raise TypeError(
+            "Only Optional[T] / T | None is supported for union annotations, "
+            f"got: {annotation_type!r}"
+        )
+
+    return non_none_args[0]
+
+
 def json_dump(obj: object, config: Dict = None) -> str:
 
     final_config = default_json_config.copy()
@@ -151,6 +171,7 @@ def json_data_to_object(data: Union[Dict, List, str], cls: Type[T] = Dict, confi
             resolved = _resolve_forward_ref(cls_annotation, context_class)
             if resolved is not None:
                 cls_annotation = resolved
+        cls_annotation = _unwrap_optional_union(cls_annotation)
 
         cls = annotation_to_type(cls_annotation)
         if issubclass(cls, (str, int, float)):
