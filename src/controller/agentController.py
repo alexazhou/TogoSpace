@@ -2,7 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from constants import DriverType, MemberStatus, SpecialAgent
+from constants import DriverType, AgentStatus, SpecialAgent
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from model.dbModel.gtAgent import GtAgent
@@ -10,8 +10,8 @@ from service import teamService, agentService, roomService
 from util import assertUtil
 
 
-class MemberSaveItem(BaseModel):
-    """成员保存项：id 可选，有则更新，无则创建。"""
+class AgentSaveItem(BaseModel):
+    """Agent 保存项：id 可选，有则更新，无则创建。"""
     id: Optional[int] = None
     name: str
     role_template_id: int
@@ -19,9 +19,9 @@ class MemberSaveItem(BaseModel):
     driver: DriverType = DriverType.NATIVE
 
 
-class MembersSaveRequest(BaseModel):
-    """全量覆盖成员列表请求。"""
-    members: list[MemberSaveItem]
+class AgentsSaveRequest(BaseModel):
+    """全量覆盖 Agent 列表请求。"""
+    agents: list[AgentSaveItem]
 
 
 class AgentUpdateItem(BaseModel):
@@ -37,8 +37,8 @@ class AgentBatchUpdateRequest(BaseModel):
 
 
 async def _assert_role_templates_exist(template_ids: list[int]) -> None:
-    template_rows = await gtRoleTemplateManager.get_role_templates_by_ids(list(set(template_ids)))
-    existing_ids = {template.id for template in template_rows}
+    gt_role_templates = await gtRoleTemplateManager.get_role_templates_by_ids(list(set(template_ids)))
+    existing_ids = {template.id for template in gt_role_templates}
     missing_ids = sorted(set(template_ids) - existing_ids)
     assertUtil.assertEqual(
         len(missing_ids),
@@ -72,7 +72,7 @@ class AgentListHandler(BaseHandler):
                 "employee_number": agent.employee_number,
                 "role_template_id": agent.role_template_id,
                 "team_id": agent.team_id,
-                "status": runtime_status_map.get(agent.id, MemberStatus.IDLE).name,
+                "status": runtime_status_map.get(agent.id, AgentStatus.IDLE).name,
                 "employ_status": agent.employ_status.name if agent.employ_status else None,
                 "model": agent.model,
                 "driver": agent.driver.value if agent.driver else None,
@@ -87,7 +87,7 @@ class AgentListHandler(BaseHandler):
                     "employee_number": None,
                     "role_template_id": None,
                     "team_id": None,
-                    "status": MemberStatus.IDLE.name,
+                    "status": AgentStatus.IDLE.name,
                     "employ_status": None,
                     "model": "",
                     "driver": None,
@@ -99,7 +99,7 @@ class AgentListHandler(BaseHandler):
                     "employee_number": None,
                     "role_template_id": None,
                     "team_id": None,
-                    "status": MemberStatus.IDLE.name,
+                    "status": AgentStatus.IDLE.name,
                     "employ_status": None,
                     "model": "",
                     "driver": None,
@@ -110,36 +110,36 @@ class AgentListHandler(BaseHandler):
         self.return_json({"agents": items})
 
 
-class TeamMembersSaveHandler(BaseHandler):
-    """PUT /teams/<id>/members/save.json - 全量覆盖成员列表"""
+class TeamAgentsSaveHandler(BaseHandler):
+    """PUT /teams/<id>/agents/save.json - 全量覆盖 Agent 列表"""
 
     async def put(self, team_id_str: str) -> None:
         team_id = int(team_id_str)
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
-        request = self.parse_request(MembersSaveRequest)
+        request = self.parse_request(AgentsSaveRequest)
 
-        request_ids = [a.id for a in request.members if a.id is not None]
+        request_ids = [a.id for a in request.agents if a.id is not None]
         existing_agents = await gtAgentManager.get_team_agents(team_id)
         existing_ids = {a.id for a in existing_agents}
 
         invalid_ids = [id_ for id_ in request_ids if id_ not in existing_ids]
         assertUtil.assertEqual(
             len(invalid_ids), 0,
-            error_message=f"成员 ID 不存在于当前 team: {invalid_ids}",
-            error_code="member_not_found",
+            error_message=f"Agent ID 不存在于当前 team: {invalid_ids}",
+            error_code="agent_not_found",
         )
 
-        final_names = [m.name for m in request.members]
+        final_names = [m.name for m in request.agents]
         duplicate_names = [n for n in final_names if final_names.count(n) > 1]
         assertUtil.assertEqual(
             len(duplicate_names), 0,
-            error_message=f"成员 name 重复: {duplicate_names}",
-            error_code="duplicate_member_name",
+            error_message=f"agent name 重复: {duplicate_names}",
+            error_code="duplicate_agent_name",
         )
 
-        await _assert_role_templates_exist([a.role_template_id for a in request.members])
+        await _assert_role_templates_exist([a.role_template_id for a in request.agents])
         updated_agents = await agentService.overwrite_team_agents(
             team_id,
             [
@@ -151,7 +151,7 @@ class TeamMembersSaveHandler(BaseHandler):
                     model=item.model,
                     driver=item.driver,
                 )
-                for item in request.members
+                for item in request.agents
             ],
         )
 
@@ -159,7 +159,7 @@ class TeamMembersSaveHandler(BaseHandler):
 
         self.return_json({
             "status": "ok",
-            "members": [
+            "agents": [
                 {
                     "id": agent.id,
                     "name": agent.name,
@@ -243,7 +243,7 @@ class AgentResumeHandler(BaseHandler):
         except KeyError:
             pass
         assertUtil.assertNotNull(agent, None, f"运行时 Agent ID '{agent_id}' 不存在", "agent_not_found")
-        assertUtil.assertTrue(agent.status == MemberStatus.FAILED, None, f"Agent ID={agent.gt_agent.id} 当前状态不是 FAILED（当前: {agent.status.name}）", "agent_not_failed")
+        assertUtil.assertTrue(agent.status == AgentStatus.FAILED, None, f"Agent ID={agent.gt_agent.id} 当前状态不是 FAILED（当前: {agent.status.name}）", "agent_not_failed")
 
         room_id = agent.resume_failed()
         room = roomService.get_room(room_id)

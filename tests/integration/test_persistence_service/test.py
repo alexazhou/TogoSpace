@@ -18,7 +18,7 @@ from ...base import ServiceTestCase
 TEAM = "test_team"
 TEAMS_CONFIG = [TeamConfig(
     name=TEAM,
-    members=[
+    agents=[
         AgentConfig(name="alice", role_template="alice"),
         AgentConfig(name="bob", role_template="bob"),
     ],
@@ -26,9 +26,9 @@ TEAMS_CONFIG = [TeamConfig(
         dept_name="研发部",
         responsibility="负责协作与开发",
         manager="alice",
-        members=["alice", "bob"],
+        agents=["alice", "bob"],
     ),
-    preset_rooms=[TeamRoomConfig(name="r1", members=["alice", "bob"], max_turns=3)],
+    preset_rooms=[TeamRoomConfig(name="r1", agents=["alice", "bob"], max_turns=3)],
 )]
 
 if os.name == "posix" and sys.platform == "darwin":
@@ -89,14 +89,14 @@ class TestRestoreRoomHistory(ServiceTestCase):
 
     async def test_messages_restored(self):
         assert [m.content for m in self.restored.messages] == [
-            "系统提示: r1 房间已经创建，当前房间成员：alice、bob",
+            "系统提示: r1 房间已经创建，当前房间 Agent：alice、bob",
             "hello",
             "world",
         ]
 
     async def test_read_index_restored(self):
-        assert self.restored.export_member_read_index()["alice"] == 3
-        assert self.restored.export_member_read_index()["bob"] == 2
+        assert self.restored.export_agent_read_index()["alice"] == 3
+        assert self.restored.export_agent_read_index()["bob"] == 2
 
 
 
@@ -127,29 +127,29 @@ class TestRestoreAgentHistory(ServiceTestCase):
             ],
         )
         await gtAgentManager.batch_save_agents(team.id, agents)
-        alice_row = await gtAgentManager.get_agent(team.id, "alice")
-        bob_row = await gtAgentManager.get_agent(team.id, "bob")
-        assert alice_row is not None
-        assert bob_row is not None
+        gt_alice = await gtAgentManager.get_agent(team.id, "alice")
+        gt_bob = await gtAgentManager.get_agent(team.id, "bob")
+        assert gt_alice is not None
+        assert gt_bob is not None
         await deptService.overwrite_dept_tree(
             team.id,
             GtDept(
                 name="研发部",
                 responsibility="负责协作与开发",
-                manager_id=alice_row.id,
-                agent_ids=[alice_row.id, bob_row.id],
+                manager_id=gt_alice.id,
+                agent_ids=[gt_alice.id, gt_bob.id],
             ),
         )
         await persistenceService.append_agent_history_message(
             GtAgentHistory(
-                agent_id=alice_row.id,
+                agent_id=gt_alice.id,
                 seq=0,
                 message_json=OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1").model_dump_json(exclude_none=True),
             )
         )
         await persistenceService.append_agent_history_message(
             GtAgentHistory(
-                agent_id=alice_row.id,
+                agent_id=gt_alice.id,
                 seq=1,
                 message_json=OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1").model_dump_json(exclude_none=True),
             )
@@ -166,7 +166,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
         await presetService._import_role_templates_from_app_config()
         await agentService.startup()
         await agentService.create_team_agents_from_db()
-        cls.fresh_agent = agentService.get_agent(alice_row.id)
+        cls.fresh_agent = agentService.get_agent(gt_alice.id)
         await agentService.restore_state()
 
     @classmethod

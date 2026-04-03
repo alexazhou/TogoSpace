@@ -153,8 +153,8 @@ async def get_team_agents_by_ids(team_id: int, agent_ids: list[int], include_spe
         return []
 
     normal_agent_ids = [agent_id for agent_id in agent_ids if SpecialAgent.value_of(agent_id) is None]
-    agent_rows = await get_agents_by_ids(normal_agent_ids)
-    agent_map = {agent.id: agent for agent in agent_rows if agent.team_id == team_id}
+    gt_agents = await get_agents_by_ids(normal_agent_ids)
+    agent_map = {agent.id: agent for agent in gt_agents if agent.team_id == team_id}
     return _build_team_agents_in_order(agent_ids, agent_map, include_special)
 
 
@@ -163,9 +163,9 @@ async def get_team_agents_by_names(team_id: int, names: list[str], include_speci
         return []
 
     normal_names = [name for name in names if SpecialAgent.value_of(name) is None]
-    agent_rows = []
+    gt_agents = []
     if normal_names:
-        agent_rows = list(
+        gt_agents = list(
             await GtAgent.select()
             .where(
                 GtAgent.team_id == team_id,
@@ -174,7 +174,7 @@ async def get_team_agents_by_names(team_id: int, names: list[str], include_speci
             .order_by(GtAgent.name)
             .aio_execute()
         )
-    agent_map = {agent.name: agent for agent in agent_rows}
+    agent_map = {agent.name: agent for agent in gt_agents}
     return _build_team_agents_in_order(names, agent_map, include_special)
 
 

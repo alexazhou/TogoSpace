@@ -33,7 +33,7 @@ class UpdateRoomRequest(BaseModel):
     max_turns: int | None = None
 
 
-class UpdateMembersRequest(BaseModel):
+class UpdateAgentsRequest(BaseModel):
     agent_ids: List[int] = Field(default_factory=list)
 
 
@@ -52,7 +52,7 @@ async def _assert_agent_ids_in_team(team_id: int, agent_ids: List[int]) -> None:
     assertUtil.assertEqual(
         len(system_ids),
         0,
-        error_message=f"system agent is not allowed in room members: {system_ids}",
+        error_message=f"system agent is not allowed in room agents: {system_ids}",
         error_code="system_agent_not_allowed",
     )
 
@@ -65,8 +65,8 @@ async def _assert_agent_ids_in_team(team_id: int, agent_ids: List[int]) -> None:
     )
 
     normal_agent_ids = [agent_id for agent_id in agent_ids if SpecialAgent.value_of(agent_id) is None]
-    agent_rows = await gtAgentManager.get_agents_by_ids(normal_agent_ids)
-    id_to_agent = {agent.id: agent for agent in agent_rows}
+    gt_agents = await gtAgentManager.get_agents_by_ids(normal_agent_ids)
+    id_to_agent = {agent.id: agent for agent in gt_agents}
 
     missing_ids = [
         agent_id for agent_id in normal_agent_ids
@@ -178,12 +178,12 @@ class TeamRoomCreateHandler(BaseHandler):
         existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
         existing = next((r for r in existing_rooms if r.name == request.name), None)
         assertUtil.assertEqual(existing, None, error_message=f"Room '{request.name}' already exists", error_code="room_exists")
+        await _assert_agent_ids_in_team(team_id, request.agent_ids)
         assertUtil.assertTrue(
             len(request.agent_ids) >= 2,
-            error_message="room must have at least 2 members",
-            error_code="room_members_too_few",
+            error_message="room must have at least 2 agents",
+            error_code="room_agents_too_few",
         )
-        await _assert_agent_ids_in_team(team_id, request.agent_ids)
 
         await gtRoomManager.save_room(GtRoom(
             team_id=team_id,
@@ -268,8 +268,8 @@ class TeamRoomDeleteHandler(BaseHandler):
         self.return_json({"status": "deleted", "room_name": room_name})
 
 
-class TeamRoomMembersHandler(BaseHandler):
-    """GET /teams/{team_id}/rooms/{room_id}/members/list.json - 获取 Room Agent ID 列表"""
+class TeamRoomAgentsHandler(BaseHandler):
+    """GET /teams/{team_id}/rooms/{room_id}/agents/list.json - 获取 Room Agent ID 列表"""
 
     async def get(self, team_id_str: str, room_id_str: str) -> None:
         team_id = int(team_id_str)
@@ -284,11 +284,11 @@ class TeamRoomMembersHandler(BaseHandler):
         self.return_json({"agent_ids": room.agent_ids or []})
 
 
-class TeamRoomMembersModifyHandler(BaseHandler):
-    """POST /teams/{team_id}/rooms/{room_id}/members/modify.json - 更新 Room Agent ID 列表"""
+class TeamRoomAgentsModifyHandler(BaseHandler):
+    """POST /teams/{team_id}/rooms/{room_id}/agents/modify.json - 更新 Room Agent ID 列表"""
 
     async def post(self, team_id_str: str, room_id_str: str) -> None:
-        request = self.parse_request(UpdateMembersRequest)
+        request = self.parse_request(UpdateAgentsRequest)
 
         team_id = int(team_id_str)
         room_id = int(room_id_str)
@@ -299,7 +299,7 @@ class TeamRoomMembersModifyHandler(BaseHandler):
         room = await _get_team_room_or_404(team_id, room_id)
 
         await _assert_agent_ids_in_team(team_id, request.agent_ids)
-        await roomService.update_room_members(room.id, request.agent_ids)
+        await roomService.update_room_agents(room.id, request.agent_ids)
         await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "room_name": room.name})

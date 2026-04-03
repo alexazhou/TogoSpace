@@ -14,10 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 async def overwrite_dept_tree(team_id: int, root: GtDept) -> None:
-    """增量更新部门树，同步部门房间，更新成员 employ_status。"""
-    # 单次递归：校验整棵树 + 收集成员 ID。
+    """增量更新部门树，同步部门房间，更新 Agent employ_status。"""
+    # 单次递归：校验整棵树 + 收集 Agent ID。
     try:
-        all_member_ids, _ = root.validate_and_collect_tree_ids()
+        all_agent_ids, _ = root.validate_and_collect_tree_ids()
     except ValueError as exc:
         raise TeamAgentException(str(exc), error_code="DEPT_MEMBERS_TOO_FEW") from exc
     input_dept_ids = root.collect_dept_ids()
@@ -34,8 +34,8 @@ async def overwrite_dept_tree(team_id: int, root: GtDept) -> None:
     # 同步部门房间（roomService 只接收房间信息，不感知部门树结构）
     await roomService.overwrite_dept_rooms(team_id, saved_root.collect_room_specs())
 
-    # 更新成员 employ_status：树内成员 ON_BOARD，其他成员 OFF_BOARD
-    on_board_count, off_board_count = await agentService.overwrite_team_agent_employ_status(team_id, all_member_ids)
+    # 更新 Agent employ_status：树内 Agent ON_BOARD，其他 Agent OFF_BOARD
+    on_board_count, off_board_count = await agentService.overwrite_team_agent_employ_status(team_id, all_agent_ids)
 
     logger.info(f"部门树已更新（team_id={team_id}，on_board={on_board_count}，off_board={off_board_count}）")
 
@@ -49,18 +49,18 @@ async def _overwrite_dept_subtree(
     # 校验：manager_id 必须出现在 agent_ids 中
     if node.manager_id not in node.agent_ids:
         raise TeamAgentException(
-            f"部门 '{node.name}' 的主管 ID '{node.manager_id}' 不在成员名单中",
-            error_code="DEPT_MANAGER_NOT_IN_MEMBERS",
+            f"部门 '{node.name}' 的主管 ID '{node.manager_id}' 不在 Agent 名单中",
+            error_code="DEPT_MANAGER_NOT_IN_AGENTS",
         )
 
     agent_ids: list[int] = list(dict.fromkeys(node.agent_ids))
-    member_rows = await gtAgentManager.get_team_agents_by_ids(team_id, agent_ids, include_special=False)
-    existing_member_ids = {row.id for row in member_rows}
-    missing_member_ids = sorted(set(agent_ids) - existing_member_ids)
-    if missing_member_ids:
+    gt_agents = await gtAgentManager.get_team_agents_by_ids(team_id, agent_ids, include_special=False)
+    existing_agent_ids = {row.id for row in gt_agents}
+    missing_agent_ids = sorted(set(agent_ids) - existing_agent_ids)
+    if missing_agent_ids:
         raise TeamAgentException(
-            f"部门 '{node.name}' 的成员 ID '{missing_member_ids}' 在 team_members 中不存在",
-            error_code="DEPT_MEMBER_NOT_FOUND",
+            f"部门 '{node.name}' 的 Agent ID '{missing_agent_ids}' 在 team_agents 中不存在",
+            error_code="DEPT_AGENT_NOT_FOUND",
         )
 
     dept = await gtDeptManager.save_dept(
@@ -105,13 +105,13 @@ async def get_dept_tree(team_id: int) -> GtDept | None:
     return build_tree(roots[0])
 
 
-async def get_off_board_members(team_id: int) -> list[GtAgent]:
-    """返回所有 employ_status=off_board 的成员。"""
+async def get_off_board_agents(team_id: int) -> list[GtAgent]:
+    """返回所有 employ_status=off_board 的 Agent。"""
     return await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.OFF_BOARD)
 
 
-async def get_member_dept(team_id: int, agent_id: int) -> GtDept | None:
-    """查询成员所在部门；不在任何部门时返回 None。"""
+async def get_agent_dept(team_id: int, agent_id: int) -> GtDept | None:
+    """查询 Agent 所在部门；不在任何部门时返回 None。"""
     all_depts = await gtDeptManager.get_all_depts(team_id)
     for dept in all_depts:
         if agent_id in dept.agent_ids:
@@ -131,14 +131,14 @@ async def set_dept_manager(team_id: int, dept_name: str, manager_id: int) -> Non
     managers = await gtAgentManager.get_team_agents_by_ids(team_id, [manager_id], include_special=False)
     if len(managers) == 0:
         raise TeamAgentException(
-            f"成员 ID '{manager_id}' 不存在",
-            error_code="MEMBER_NOT_FOUND",
+            f"Agent ID '{manager_id}' 不存在",
+            error_code="AGENT_NOT_FOUND",
         )
 
     if manager_id not in dept.agent_ids:
         raise TeamAgentException(
-            f"成员 ID '{manager_id}' 不在部门 '{dept_name}' 的成员名单中",
-            error_code="MEMBER_NOT_IN_DEPT",
+            f"Agent ID '{manager_id}' 不在部门 '{dept_name}' 的 Agent 名单中",
+            error_code="AGENT_NOT_IN_DEPT",
         )
 
     await gtDeptManager.save_dept(

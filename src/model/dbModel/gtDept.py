@@ -14,7 +14,7 @@ class DeptRoomSpec:
     biz_id: str
     name: str
     initial_topic: str
-    member_ids: list[int]
+    agent_ids: list[int]
     max_turns: int | None = None
 
 
@@ -44,14 +44,14 @@ class GtDept(DbModelBase):
         if len(self.agent_ids) < 2:
             raise ValueError(f"部门 '{self.name}' 成员不足 2 人，无法创建房间")
 
-        member_ids: set[int] = set(self.agent_ids)
+        agent_ids: set[int] = set(self.agent_ids)
         dept_ids: set[int] = self.collect_dept_ids()
 
         for child in self.children:
-            child_member_ids, _ = child.validate_and_collect_tree_ids()
-            member_ids.update(child_member_ids)
+            child_agent_ids, _ = child.validate_and_collect_tree_ids()
+            agent_ids.update(child_agent_ids)
 
-        return member_ids, dept_ids
+        return agent_ids, dept_ids
 
     def collect_dept_ids(self) -> set[int]:
         dept_ids: set[int] = {self.id} if self.id is not None else set()
@@ -70,7 +70,7 @@ class GtDept(DbModelBase):
             biz_id=f"DEPT:{self.id}",
             name=self.name,
             initial_topic=self.responsibility or f"{self.name} 部门群聊",
-            member_ids=list(dict.fromkeys(self.agent_ids)),
+            agent_ids=list(dict.fromkeys(self.agent_ids)),
         ))
         for child in self.children:
             child._append_room_specs(room_specs)

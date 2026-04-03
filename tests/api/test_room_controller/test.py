@@ -47,9 +47,9 @@ class TestRoomController(_ApiServiceCase):
         assert "room_name" in room
         assert "team_name" in room
         assert "state" in room
-        assert "members" in room
+        assert "agents" in room
         assert "agent_ids" in room
-        assert "SYSTEM" not in room["members"]
+        assert "SYSTEM" not in room["agents"]
 
     async def test_get_room_messages(self):
         """验证 GET /rooms/{id}/messages 返回消息列表及元数据字段。"""

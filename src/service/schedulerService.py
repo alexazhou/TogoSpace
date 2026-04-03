@@ -8,7 +8,7 @@ from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from service import agentService, roomService as chat_room
 from service.agentService import Agent
 from dal.db import gtTeamManager
-from constants import MessageBusTopic, MemberStatus
+from constants import MessageBusTopic, AgentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ async def startup() -> None:
 
 def add_agent(agent: Agent, max_fc: int) -> None:
     """将 Agent 加入调度池，若已在运行或处于 FAILED 状态则跳过。"""
-    if agent.status == MemberStatus.FAILED:
+    if agent.status == AgentStatus.FAILED:
         return
 
     agent_id = agent.gt_agent.id

@@ -39,7 +39,7 @@ class TestSdkDoSend(ServiceTestCase):
         
         cfg = TeamConfig(
             name=TEAM,
-            members=[
+            agents=[
                 AgentConfig(name="alice", role_template="alice"),
                 AgentConfig(name="bob", role_template="bob"),
             ],
@@ -47,7 +47,7 @@ class TestSdkDoSend(ServiceTestCase):
                 dept_name="研发部",
                 responsibility="负责协作与开发",
                 manager="alice",
-                members=["alice", "bob"],
+                agents=["alice", "bob"],
             ),
         )
         await presetService._import_team_from_config(cfg)
@@ -68,7 +68,7 @@ class TestSdkDoSend(ServiceTestCase):
         await room.activate_scheduling()
         
         # 2. 从 agentService 获取在内存中已注册好的 agent
-        agent = agentService.get_agent(room.get_member_id(agent_name))
+        agent = agentService.get_agent(room.get_agent_id(agent_name))
         
         # 3. 模拟 schedulerService：进入该房间回合前注入运行时的 current_room
         agent.current_room = room

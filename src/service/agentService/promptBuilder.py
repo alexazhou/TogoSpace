@@ -19,33 +19,33 @@ def build_turn_context_prompt(room_name: str, message_blocks: list[str]) -> str:
 
 
 async def _build_dept_context(team_id: int, agent_name: str) -> str:
-    agent_row = await gtAgentManager.get_agent(team_id, agent_name)
-    assert agent_row is not None, f"agent not found: team_id={team_id}, agent_name={agent_name}"
+    gt_agent = await gtAgentManager.get_agent(team_id, agent_name)
+    assert gt_agent is not None, f"agent not found: team_id={team_id}, agent_name={agent_name}"
 
-    all_depts = await gtDeptManager.get_all_depts(team_id)
-    assert len(all_depts) > 0, f"team has no departments: team_id={team_id}, agent_name={agent_name}"
+    gt_depts = await gtDeptManager.get_all_depts(team_id)
+    assert len(gt_depts) > 0, f"team has no departments: team_id={team_id}, agent_name={agent_name}"
 
-    agent_dept = None
-    for dept in all_depts:
-        if agent_row.id in dept.agent_ids:
-            agent_dept = dept
+    gt_dept = None
+    for item in gt_depts:
+        if gt_agent.id in item.agent_ids:
+            gt_dept = item
             break
-    assert agent_dept is not None, f"agent has no department: team_id={team_id}, agent_name={agent_name}"
+    assert gt_dept is not None, f"agent has no department: team_id={team_id}, agent_name={agent_name}"
 
-    dept_id_map = {d.id: d for d in all_depts}
-    all_agents = await gtAgentManager.get_team_agents(team_id)
-    agent_id_to_name: dict[int, str] = {m.id: m.name for m in all_agents}
+    dept_id_map = {d.id: d for d in gt_depts}
+    gt_agents = await gtAgentManager.get_team_agents(team_id)
+    agent_id_to_name: dict[int, str] = {m.id: m.name for m in gt_agents}
 
-    manager_name = agent_id_to_name.get(agent_dept.manager_id, "")
+    manager_name = agent_id_to_name.get(gt_dept.manager_id, "")
     other_agents = [
         agent_id_to_name[mid]
-        for mid in agent_dept.agent_ids
+        for mid in gt_dept.agent_ids
         if mid in agent_id_to_name and agent_id_to_name[mid] != agent_name
     ]
 
-    lines = ["---", "组织信息：", f"- 所在部门：{agent_dept.name}（{agent_dept.responsibility}）"]
-    if agent_dept.parent_id is not None:
-        parent = dept_id_map.get(agent_dept.parent_id)
+    lines = ["---", "组织信息：", f"- 所在部门：{gt_dept.name}（{gt_dept.responsibility}）"]
+    if gt_dept.parent_id is not None:
+        parent = dept_id_map.get(gt_dept.parent_id)
         if parent is not None:
             parent_manager = agent_id_to_name.get(parent.manager_id, "")
             lines.append(f"- 上级部门：{parent.name}（主管：{parent_manager}）")

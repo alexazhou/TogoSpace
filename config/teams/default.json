@@ -1,6 +1,6 @@
 {
   "name": "默认团队",
-  "members": [
+  "agents": [
     { "name": "王老师", "role_template": "researcher" },
     { "name": "小马哥", "role_template": "project_manager" },
     { "name": "小A", "role_template": "software_engineer" },
@@ -10,25 +10,25 @@
   "preset_rooms": [
     {
       "name": "王老师",
-      "members": ["Operator", "王老师"],
+      "agents": ["Operator", "王老师"],
       "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
       "max_turns": 100
     },
     {
       "name": "小马哥",
-      "members": ["Operator", "小马哥"],
+      "agents": ["Operator", "小马哥"],
       "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
       "max_turns": 100
     },
     {
       "name": "Agent大群",
-      "members": ["小马哥", "小A", "小B"],
+      "agents": ["小马哥", "小A", "小B"],
       "initial_topic": "按角色分工协作，一起协作完成人类发布的任务",
       "max_turns": 1000
     },
     {
       "name": "小刘",
-      "members": ["Operator", "小刘"],
+      "agents": ["Operator", "小刘"],
       "initial_topic": "你好，我是人类操作者。你主要协助做文件查找与信息检索。",
       "max_turns": 100
     }
@@ -37,7 +37,7 @@
     "dept_name": "总部",
     "responsibility": "负责整体运营与协作",
     "manager": "小马哥",
-    "members": ["小马哥", "王老师", "小A", "小B", "小刘"],
+    "agents": ["小马哥", "王老师", "小A", "小B", "小刘"],
     "children": []
   }
 }

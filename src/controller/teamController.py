@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 # 内部包
 from constants import DriverType, RoomType, SpecialAgent
 from controller.baseController import BaseHandler
-from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
+from dal.db import gtRoomManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtDeptManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
@@ -23,19 +23,19 @@ def _split_team_config(config: dict | None) -> tuple[str, dict]:
     return working_directory, copied
 
 
-def _infer_room_type(members: list[str]) -> RoomType:
-    ai_count = len([member for member in members if SpecialAgent.value_of(member) != SpecialAgent.OPERATOR])
-    if any(SpecialAgent.value_of(member) == SpecialAgent.OPERATOR for member in members) and ai_count == 1:
+def _infer_room_type(agent_names: list[str]) -> RoomType:
+    ai_count = len([agent_name for agent_name in agent_names if SpecialAgent.value_of(agent_name) != SpecialAgent.OPERATOR])
+    if any(SpecialAgent.value_of(agent_name) == SpecialAgent.OPERATOR for agent_name in agent_names) and ai_count == 1:
         return RoomType.PRIVATE
     return RoomType.GROUP
 
 
 async def _to_gt_room(team_id: int, room: TeamRoomConfig) -> GtRoom:
-    member_ids = [
+    gt_agent_ids = [
         agent.id
         for agent in await gtAgentManager.get_team_agents_by_names(
             team_id,
-            room.members,
+            room.agents,
             include_special=True,
         )
     ]
@@ -43,22 +43,34 @@ async def _to_gt_room(team_id: int, room: TeamRoomConfig) -> GtRoom:
         id=room.id,
         team_id=team_id,
         name=room.name,
-        type=_infer_room_type(room.members),
+        type=_infer_room_type(room.agents),
         initial_topic=room.initial_topic,
         max_turns=roomService.resolve_room_max_turns(room.max_turns),
-        agent_ids=member_ids,
+        agent_ids=gt_agent_ids,
         biz_id=room.biz_id,
         tags=list(room.tags),
     )
 
 
-def _to_gt_agent(member: "TeamMemberUpdateItem") -> GtAgent:
+async def _assert_role_templates_exist(template_ids: list[int]) -> None:
+    gt_role_templates = await gtRoleTemplateManager.get_role_templates_by_ids(list(set(template_ids)))
+    existing_ids = {template.id for template in gt_role_templates}
+    missing_ids = sorted(set(template_ids) - existing_ids)
+    assertUtil.assertEqual(
+        len(missing_ids),
+        0,
+        error_message=f"角色模板不存在: {missing_ids}",
+        error_code="role_template_not_found",
+    )
+
+
+def _to_gt_agent(agent: "TeamAgentUpdateItem") -> GtAgent:
     return GtAgent(
-        id=member.id,
-        name=member.name,
-        role_template_id=member.role_template_id,
-        model=member.model,
-        driver=member.driver,
+        id=agent.id,
+        name=agent.name,
+        role_template_id=agent.role_template_id,
+        model=agent.model,
+        driver=agent.driver,
     )
 
 
@@ -69,7 +81,7 @@ class CreateTeamRequest(BaseModel):
     config: dict = Field(default_factory=dict)
 
 
-class TeamMemberUpdateItem(BaseModel):
+class TeamAgentUpdateItem(BaseModel):
     id: int | None = None
     name: str
     role_template_id: int
@@ -80,7 +92,7 @@ class TeamMemberUpdateItem(BaseModel):
 class UpdateTeamRequest(BaseModel):
     working_directory: str | None = None
     config: dict | None = None
-    members: list[TeamMemberUpdateItem] | None = None
+    agents: list[TeamAgentUpdateItem] | None = None
     preset_rooms: list[TeamRoomConfig] | None = None
 
 
@@ -143,12 +155,12 @@ class TeamDetailHandler(BaseHandler):
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
         rooms = await gtRoomManager.get_rooms_by_team(team_id)
-        members = [
+        agents = [
             {
-                "name": member.name,
-                "role_template_id": member.role_template_id,
+                "name": agent.name,
+                "role_template_id": agent.role_template_id,
             }
-            for member in await gtAgentManager.get_team_agents(team_id)
+            for agent in await gtAgentManager.get_team_agents(team_id)
         ]
         room_items = []
         for room in rooms:
@@ -172,7 +184,7 @@ class TeamDetailHandler(BaseHandler):
                 "deleted": team.deleted,
                 "created_at": team.created_at,
                 "updated_at": team.updated_at,
-                "members": members,
+                "agents": agents,
                 "rooms": room_items,
             }
         )
@@ -197,17 +209,20 @@ class TeamModifyHandler(BaseHandler):
                 working_directory=request.working_directory,
                 config_updates=request.config,
             )
-        if request.members is not None:
+        if request.agents is not None:
+            await _assert_role_templates_exist([agent.role_template_id for agent in request.agents])
             await agentService.overwrite_team_agents(
                 team_id,
-                [_to_gt_agent(member) for member in request.members],
+                [_to_gt_agent(agent) for agent in request.agents],
             )
         if request.preset_rooms is not None:
             await roomService.overwrite_team_rooms(
                 team_id,
                 [await _to_gt_room(team_id, room) for room in request.preset_rooms],
             )
-        await teamService.hot_reload_team(team_name)
+        has_depts = len(await gtDeptManager.get_all_depts(team_id)) > 0
+        if has_depts:
+            await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "name": team_name})
 

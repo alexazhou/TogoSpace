@@ -32,7 +32,7 @@ class TestTeamController(_ApiServiceCase):
         template = next(item for item in data["role_templates"] if item["name"] == template_name)
         return template["id"]
 
-    async def test_team_detail_includes_members_and_rooms(self):
+    async def test_team_detail_includes_agents_and_rooms(self):
         team_id = await self._get_team_id("e2e")
         async with aiohttp.ClientSession() as client:
             async with client.get(f"{self.backend_base_url}/teams/{team_id}.json") as resp:
@@ -41,14 +41,15 @@ class TestTeamController(_ApiServiceCase):
 
         assert data["name"] == "e2e"
         assert data["config"] == {}
-        assert len(data["members"]) == 2
-        member_names = {m["name"] for m in data["members"]}
-        assert member_names == {"alice", "bob"}
-        assert len(data["rooms"]) == 1
-        room = data["rooms"][0]
-        assert room["name"] == "general"
-        assert len(room["agent_ids"]) == 3
-        assert room["max_turns"] == 50
+        assert len(data["agents"]) == 2
+        agent_names = {a["name"] for a in data["agents"]}
+        assert agent_names == {"alice", "bob"}
+        assert len(data["rooms"]) == 2
+        rooms_by_name = {room["name"]: room for room in data["rooms"]}
+        assert set(rooms_by_name.keys()) == {"general", "测试组"}
+        assert len(rooms_by_name["general"]["agent_ids"]) == 3
+        assert rooms_by_name["general"]["max_turns"] == 50
+        assert len(rooms_by_name["测试组"]["agent_ids"]) == 2
 
     async def test_create_team_and_fetch_detail(self):
         payload = {
@@ -78,14 +79,14 @@ class TestTeamController(_ApiServiceCase):
                 assert resp.status == 200
                 detail = await resp.json()
 
-        assert detail["members"] == []
+        assert detail["agents"] == []
         assert detail["config"] == {
             "slogan": "使命必达",
             "rules": "先沟通后执行",
         }
         assert detail["rooms"] == []
 
-    async def test_team_modify_members_with_role_template_id(self):
+    async def test_team_modify_agents_with_role_template_id(self):
         template_id = await self._get_role_template_id("alice")
         temp_team_name = f"team_modify_members_{int(time.time() * 1000)}"
 
@@ -101,7 +102,7 @@ class TestTeamController(_ApiServiceCase):
             async with client.post(
                 f"{self.backend_base_url}/teams/{team_id}/modify.json",
                 json={
-                    "members": [
+                    "agents": [
                         {
                             "name": "tom",
                             "role_template_id": template_id,
@@ -127,7 +128,7 @@ class TestTeamController(_ApiServiceCase):
         assert tom["model"] == "gpt-4o"
         assert tom["driver"] == "native"
 
-    async def test_team_modify_members_with_invalid_role_template_id(self):
+    async def test_team_modify_agents_with_invalid_role_template_id(self):
         temp_team_name = f"team_modify_invalid_members_{int(time.time() * 1000)}"
 
         async with aiohttp.ClientSession() as client:
@@ -142,7 +143,7 @@ class TestTeamController(_ApiServiceCase):
             async with client.post(
                 f"{self.backend_base_url}/teams/{team_id}/modify.json",
                 json={
-                    "members": [
+                    "agents": [
                         {
                             "name": "tom",
                             "role_template_id": 99999999,

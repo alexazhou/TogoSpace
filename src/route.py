@@ -24,7 +24,7 @@ application = tornado.web.Application([
     (r"/agents/list.json",                          agentController.AgentListHandler),
     (r"/agents/(\d+)/resume.json",                  agentController.AgentResumeHandler),
     (r"/teams/(\d+)/agents/batch_update.json",      agentController.AgentBatchUpdateHandler),
-    (r"/teams/(\d+)/members/save.json",             agentController.TeamMembersSaveHandler),
+    (r"/teams/(\d+)/agents/save.json",              agentController.TeamAgentsSaveHandler),
     (r"/teams/(\d+)/agents/([^/]+).json",           agentController.AgentDetailHandler),
 
     # Room (运行时)
@@ -49,8 +49,8 @@ application = tornado.web.Application([
     (r"/teams/(\d+)/rooms/(\d+).json",              roomController.TeamRoomDetailHandler),
     (r"/teams/(\d+)/rooms/(\d+)/modify.json",       roomController.TeamRoomModifyHandler),
     (r"/teams/(\d+)/rooms/(\d+)/delete.json",       roomController.TeamRoomDeleteHandler),
-    (r"/teams/(\d+)/rooms/(\d+)/agents/list.json",  roomController.TeamRoomMembersHandler),
-    (r"/teams/(\d+)/rooms/(\d+)/agents/modify.json",roomController.TeamRoomMembersModifyHandler),
+    (r"/teams/(\d+)/rooms/(\d+)/agents/list.json",  roomController.TeamRoomAgentsHandler),
+    (r"/teams/(\d+)/rooms/(\d+)/agents/modify.json",roomController.TeamRoomAgentsModifyHandler),
 
     # Dept Tree (V10)
     (r"/teams/(\d+)/dept_tree.json",                deptController.DeptTreeDetailHandler),

@@ -17,7 +17,7 @@ import service.presetService as presetService
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
-from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, MemberStatus, OpenaiLLMApiRole, RoomState
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, AgentStatus, OpenaiLLMApiRole, RoomState
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -89,7 +89,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = roomService.get_room_by_key(f"manual_turn@{TEAM}")
         await room.activate_scheduling()
 
-        alice = agentService.get_agent(room.get_member_id("alice"))
+        alice = agentService.get_agent(room.get_agent_id("alice"))
         alice.inject_history_messages([
             GtAgentHistory.from_openai_message(
                 alice.gt_agent.id,
@@ -128,7 +128,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "turn_checker_room", ["alice", "bob"])
         room = roomService.get_room_by_key(f"turn_checker_room@{TEAM}")
 
-        alice = agentService.get_agent(room.get_member_id("alice"))
+        alice = agentService.get_agent(room.get_agent_id("alice"))
         alice.inject_history_messages([
             GtAgentHistory.from_openai_message(
                 alice.gt_agent.id,
@@ -152,9 +152,9 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await scheduler.startup()
         room_key = f"general@{TEAM}"
         room = roomService.get_room_by_key(room_key)
-        for member_name in ["alice", "bob"]:
-            agent = agentService.get_agent(room.get_member_id(member_name))
-            agent.status = MemberStatus.IDLE
+        for agent_name in ["alice", "bob"]:
+            agent = agentService.get_agent(room.get_agent_id(agent_name))
+            agent.status = AgentStatus.IDLE
             agent.wait_task_queue = asyncio.Queue()
             agent.inject_history_messages([])
 

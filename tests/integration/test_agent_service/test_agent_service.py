@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic, MemberStatus
+from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic, AgentStatus
 from dal.db import gtAgentManager, gtTeamManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -72,27 +72,27 @@ class TestAgentServiceStatusMap(_agentServiceCase):
         """运行时状态查询应按 agent_id 返回 ACTIVE/IDLE。"""
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
-        alice_row = await gtAgentManager.get_agent(team.id, "alice")
-        assert alice_row is not None
-        alice = agentService.get_agent(alice_row.id)
+        gt_alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert gt_alice is not None
+        alice = agentService.get_agent(gt_alice.id)
         status_map = agentService.get_team_runtime_status_map(team.id)
-        assert status_map[alice.gt_agent.id] == MemberStatus.IDLE
+        assert status_map[alice.gt_agent.id] == AgentStatus.IDLE
 
-        alice.status = MemberStatus.ACTIVE
+        alice.status = AgentStatus.ACTIVE
         status_map = agentService.get_team_runtime_status_map(team.id)
-        assert status_map[alice.gt_agent.id] == MemberStatus.ACTIVE
+        assert status_map[alice.gt_agent.id] == AgentStatus.ACTIVE
 
-        alice.status = MemberStatus.IDLE
+        alice.status = AgentStatus.IDLE
 
 
-class TestAgentServiceMemberStatusEvent(_agentServiceCase):
+class TestAgentServiceAgentStatusEvent(_agentServiceCase):
     async def test_agent_status_event_contains_real_team_id(self):
         """订阅 AGENT_STATUS_CHANGED，验证事件中的 team_id 正确。"""
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
-        alice_row = await gtAgentManager.get_agent(team.id, "alice")
-        assert alice_row is not None
-        alice = agentService.get_agent(alice_row.id)
+        gt_alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert gt_alice is not None
+        alice = agentService.get_agent(gt_alice.id)
 
         received_payloads: list[dict] = []
 
@@ -110,8 +110,8 @@ class TestAgentServiceMemberStatusEvent(_agentServiceCase):
         alice_events = [p for p in received_payloads if p.get("gt_agent") is not None and p["gt_agent"].name == "alice"]
         assert len(alice_events) >= 2
 
-        active_event = next((p for p in alice_events if p.get("status") == MemberStatus.ACTIVE.name), None)
-        idle_event = next((p for p in alice_events if p.get("status") == MemberStatus.IDLE.name), None)
+        active_event = next((p for p in alice_events if p.get("status") == AgentStatus.ACTIVE.name), None)
+        idle_event = next((p for p in alice_events if p.get("status") == AgentStatus.IDLE.name), None)
         assert active_event is not None
         assert idle_event is not None
 
@@ -125,13 +125,13 @@ class TestAgentServiceMemberStatusEvent(_agentServiceCase):
 
 
 class TestAgentServiceSystemPrompt(_agentServiceCase):
-    async def test_system_prompt_contains_template_and_member_name(self):
-        """system_prompt 应显式包含模板名称与成员名称，便于模型识别身份。"""
+    async def test_system_prompt_contains_template_and_agent_name(self):
+        """system_prompt 应显式包含模板名称与 Agent 名称，便于模型识别身份。"""
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
-        alice_row = await gtAgentManager.get_agent(team.id, "alice")
-        assert alice_row is not None
-        alice = agentService.get_agent(alice_row.id)
+        gt_alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert gt_alice is not None
+        alice = agentService.get_agent(gt_alice.id)
 
         assert "你当前的名字：alice" in alice.system_prompt
         assert "你是身份：alice" in alice.system_prompt
@@ -153,7 +153,7 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         await room.activate_scheduling()
         await room.add_message("bob", "hello alice")
 
-        alice = agentService.get_agent(room.get_member_id("alice"))
+        alice = agentService.get_agent(room.get_agent_id("alice"))
         synced_count = await alice.pull_room_messages_to_history(room)
 
         # 初始公告 + bob 消息会聚合成一条“轮到发言”上下文消息
@@ -174,7 +174,7 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         await room.activate_scheduling()
         await room.add_message("bob", "hello alice")
 
-        alice = agentService.get_agent(room.get_member_id("alice"))
+        alice = agentService.get_agent(room.get_agent_id("alice"))
         existing = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, "older context")
         alice.inject_history_messages([GtAgentHistory.from_openai_message(alice.gt_agent.id, 0, existing)])
 
@@ -240,7 +240,7 @@ class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
 
-        alice = agentService.get_agent(room.get_member_id("alice"))
+        alice = agentService.get_agent(room.get_agent_id("alice"))
         await room.add_message("alice", "i am talking")
 
         synced_count = await alice.pull_room_messages_to_history(room)

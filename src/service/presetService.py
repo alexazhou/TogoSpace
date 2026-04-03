@@ -36,42 +36,42 @@ async def _import_role_templates_from_app_config() -> None:
 
 
 async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> GtDept:
-    lookup_names = list(dict.fromkeys([*node.members, node.manager]))
-    member_rows = await gtAgentManager.get_team_agents_by_names(
+    lookup_names = list(dict.fromkeys([*node.agents, node.manager]))
+    gt_agents = await gtAgentManager.get_team_agents_by_names(
         team_id,
         lookup_names,
         include_special=False,
     )
-    member_id_map = {member.name: member.id for member in member_rows}
-    missing_names = [name for name in lookup_names if name not in member_id_map]
+    agent_id_map = {agent.name: agent.id for agent in gt_agents}
+    missing_names = [name for name in lookup_names if name not in agent_id_map]
     if missing_names:
         raise TeamAgentException(
-            f"部门 '{node.dept_name}' 的成员 '{missing_names[0]}' 在 team_members 中不存在",
-            error_code="DEPT_MEMBER_NOT_FOUND",
+            f"部门 '{node.dept_name}' 的 Agent '{missing_names[0]}' 在 team_agents 中不存在",
+            error_code="DEPT_AGENT_NOT_FOUND",
         )
 
     return GtDept(
         name=node.dept_name,
         responsibility=node.responsibility,
-        manager_id=member_id_map[node.manager],
-        agent_ids=[member_id_map[name] for name in node.members],
+        manager_id=agent_id_map[node.manager],
+        agent_ids=[agent_id_map[name] for name in node.agents],
         children=[await _to_dept_tree_node(team_id, child) for child in node.children],
     )
 
 
-def _infer_room_type(members: list[str]) -> RoomType:
-    ai_count = len([member for member in members if SpecialAgent.value_of(member) != SpecialAgent.OPERATOR])
-    if any(SpecialAgent.value_of(member) == SpecialAgent.OPERATOR for member in members) and ai_count == 1:
+def _infer_room_type(agent_names: list[str]) -> RoomType:
+    ai_count = len([agent_name for agent_name in agent_names if SpecialAgent.value_of(agent_name) != SpecialAgent.OPERATOR])
+    if any(SpecialAgent.value_of(agent_name) == SpecialAgent.OPERATOR for agent_name in agent_names) and ai_count == 1:
         return RoomType.PRIVATE
     return RoomType.GROUP
 
 
 async def _to_gt_room(team_id: int, room_config: TeamRoomConfig) -> GtRoom:
-    member_ids = [
+    agent_ids = [
         agent.id
         for agent in await gtAgentManager.get_team_agents_by_names(
             team_id,
-            room_config.members,
+            room_config.agents,
             include_special=True,
         )
     ]
@@ -79,10 +79,10 @@ async def _to_gt_room(team_id: int, room_config: TeamRoomConfig) -> GtRoom:
         id=room_config.id,
         team_id=team_id,
         name=room_config.name,
-        type=_infer_room_type(room_config.members),
+        type=_infer_room_type(room_config.agents),
         initial_topic=room_config.initial_topic,
         max_turns=roomService.resolve_room_max_turns(room_config.max_turns),
-        agent_ids=member_ids,
+        agent_ids=agent_ids,
         biz_id=room_config.biz_id,
         tags=list(room_config.tags),
     )
@@ -90,23 +90,23 @@ async def _to_gt_room(team_id: int, room_config: TeamRoomConfig) -> GtRoom:
 
 async def _to_gt_agents(team_id: int, team_config: TeamConfig) -> list[GtAgent]:
     agents: list[GtAgent] = []
-    for member in team_config.members:
-        role_template = await gtRoleTemplateManager.get_role_template_by_name(member.role_template)
+    for agent in team_config.agents:
+        role_template = await gtRoleTemplateManager.get_role_template_by_name(agent.role_template)
         if role_template is None:
             logger.warning(
                 "跳过 Agent '%s'：未找到角色模板 '%s'",
-                member.name,
-                member.role_template,
+                agent.name,
+                agent.role_template,
             )
             continue
 
         agents.append(GtAgent(
             team_id=team_id,
-            name=member.name,
+            name=agent.name,
             role_template_id=role_template.id,
             employ_status=EmployStatus.ON_BOARD,
-            model=member.model or "",
-            driver=member.driver,
+            model=agent.model or "",
+            driver=agent.driver,
         ))
     return agents
 
