@@ -156,7 +156,7 @@ class Agent:
         synced_count = await self.pull_room_messages_to_history(room)
         try:
             if self.driver.host_managed_turn_loop:
-                await self._ensure_driver_started()
+                assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
                 await self._run_chat_turn_with_host_loop(max_function_calls)
             else:
                 await self.driver.run_chat_turn(room, synced_count, max_function_calls)
@@ -165,12 +165,6 @@ class Agent:
             raise
         finally:
             self.current_room = None
-
-    async def _ensure_driver_started(self) -> None:
-        if self.driver.started:
-            return
-        await self.driver.startup()
-        self.driver.mark_started()
 
     async def _run_chat_turn_with_host_loop(self, max_function_calls: int) -> None:
         turn_setup: AgentTurnSetup = self.driver.turn_setup
