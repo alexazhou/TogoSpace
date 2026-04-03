@@ -14,6 +14,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from util import llmApiUtil
 from constants import AgentHistoryTag
+from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService.driver.base import AgentDriverConfig
 from service.agentService.driver.tspDriver import build_gtsp_command, TspAgentDriver
 from service.agentService.toolRegistry import AgentToolRegistry
@@ -54,7 +55,7 @@ class _DummyHost:
     team_workdir: str = "/tmp"
     workspace_root: str = "/tmp/workspaces"
     current_room: object | None = None
-    _history: list[GtAgentHistory] = field(default_factory=list)
+    _history: AgentHistoryStore = field(default_factory=lambda: AgentHistoryStore(agent_id=1))
     tool_registry: AgentToolRegistry = field(default_factory=AgentToolRegistry)
 
 

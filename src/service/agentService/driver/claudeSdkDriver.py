@@ -128,7 +128,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
         async def _wrapped(args):
             # 写入 tool_use 消息到 history
             tool_call_id = self._next_tool_call_id()
-            await self.host.append_history_message(
+            await self.host._history.append_history_message(
                 llmApiUtil.OpenAIMessage(
                     role="assistant",
                     content=None,

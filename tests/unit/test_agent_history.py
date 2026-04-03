@@ -2,12 +2,12 @@ import pytest
 
 from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiLLMApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from service.agentService.agentHistroy import AgentHistory
+from service.agentService.agentHistoryStore import AgentHistoryStore
 from util import llmApiUtil
 
 
 def test_agent_history_append_message_persists_seq_and_tags():
-    history = AgentHistory(agent_id=7)
+    history = AgentHistoryStore(agent_id=7)
 
     item = history.append_message(
         llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "hello"),
@@ -28,7 +28,7 @@ def test_agent_history_append_message_persists_seq_and_tags():
 
 
 def test_agent_history_last_role_returns_none_for_empty_history():
-    history = AgentHistory(agent_id=1)
+    history = AgentHistoryStore(agent_id=1)
 
     assert history.last() is None
     assert history.last_role() is None
@@ -42,7 +42,7 @@ def test_agent_history_assert_infer_ready_accepts_user_tool_and_system():
     ]
 
     for index, role in enumerate(allowed_roles):
-        history = AgentHistory(agent_id=1)
+        history = AgentHistoryStore(agent_id=1)
         message = llmApiUtil.OpenAIMessage.text(role, f"msg-{index}")
         if role == OpenaiLLMApiRole.TOOL:
             message = llmApiUtil.OpenAIMessage.tool_result("tool_1", '{"success": true}')
@@ -52,7 +52,7 @@ def test_agent_history_assert_infer_ready_accepts_user_tool_and_system():
 
 
 def test_agent_history_assert_infer_ready_rejects_assistant_tail():
-    history = AgentHistory(agent_id=1)
+    history = AgentHistoryStore(agent_id=1)
     history.append_message(llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "hi"))
 
     with pytest.raises(AssertionError, match="assistant"):
@@ -60,7 +60,7 @@ def test_agent_history_assert_infer_ready_rejects_assistant_tail():
 
 
 def test_agent_history_assert_infer_ready_accepts_failed_or_init_infer_tail():
-    history_failed = AgentHistory(agent_id=1)
+    history_failed = AgentHistoryStore(agent_id=1)
     history_failed.append_message(
         llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, ""),
         stage=AgentHistoryStage.INFER,
@@ -69,7 +69,7 @@ def test_agent_history_assert_infer_ready_accepts_failed_or_init_infer_tail():
     )
     history_failed.assert_infer_ready("alice@test_team")
 
-    history_init = AgentHistory(agent_id=1)
+    history_init = AgentHistoryStore(agent_id=1)
     history_init.append_message(
         llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, ""),
         stage=AgentHistoryStage.INFER,
@@ -81,7 +81,7 @@ def test_agent_history_assert_infer_ready_accepts_failed_or_init_infer_tail():
 def test_agent_history_export_openai_message_list_round_trips_messages():
     user_msg = llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")
     tool_msg = llmApiUtil.OpenAIMessage.tool_result("call_1", '{"success": true}')
-    history = AgentHistory(
+    history = AgentHistoryStore(
         agent_id=2,
         items=[
             GtAgentHistory.from_openai_message(2, 0, user_msg),
@@ -96,7 +96,7 @@ def test_agent_history_export_openai_message_list_round_trips_messages():
 
 
 def test_agent_history_get_last_assistant_message_respects_start_index():
-    history = AgentHistory(
+    history = AgentHistoryStore(
         agent_id=3,
         items=[
             GtAgentHistory.from_openai_message(3, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
@@ -116,7 +116,7 @@ def test_agent_history_get_last_assistant_message_respects_start_index():
 
 
 def test_agent_history_find_tool_result_by_call_id_returns_matching_history_item():
-    history = AgentHistory(
+    history = AgentHistoryStore(
         agent_id=4,
         items=[
             GtAgentHistory.from_openai_message(4, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
