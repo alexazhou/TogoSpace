@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable
 
-from constants import AgentHistoryTag
+from constants import AgentHistoryTag, AgentHistoryStatus
 from service.roomService import ToolCallContext
 from util import llmApiUtil
 
@@ -15,7 +15,7 @@ ToolHandler = Callable[[str, ToolCallContext], Awaitable[dict[str, Any]]]
 class ToolExecutionResult:
     tool_call_id: str
     result_json: str
-    success: bool | None = None
+    status: AgentHistoryStatus = AgentHistoryStatus.SUCCESS
     error_message: str | None = None
     tags: list[AgentHistoryTag] | None = None
     turn_finished: bool = False
@@ -69,7 +69,7 @@ class AgentToolRegistry:
             return ToolExecutionResult(
                 tool_call_id=tool_call_id,
                 result_json=json.dumps(result, ensure_ascii=False),
-                success=False,
+                status=AgentHistoryStatus.FAILED,
                 error_message=str(result["message"]),
             )
 
@@ -81,10 +81,10 @@ class AgentToolRegistry:
             result = {"success": False, "message": f"工具调用失败: {e}"}
 
         raw_success = result.get("success")
-        success = None if raw_success is None else bool(raw_success)
-        tool_succeeded = success is True
+        status = AgentHistoryStatus.FAILED if raw_success is False else AgentHistoryStatus.SUCCESS
+        tool_succeeded = status == AgentHistoryStatus.SUCCESS
         error_message = None
-        if success is False and result.get("message") is not None:
+        if status == AgentHistoryStatus.FAILED and result.get("message") is not None:
             error_message = str(result.get("message"))
         result_json = json.dumps(result, ensure_ascii=False)
         turn_finished = registered.marks_turn_finish
@@ -92,7 +92,7 @@ class AgentToolRegistry:
         return ToolExecutionResult(
             tool_call_id=tool_call_id,
             result_json=result_json,
-            success=success,
+            status=status,
             error_message=error_message,
             tags=tags,
             turn_finished=turn_finished,

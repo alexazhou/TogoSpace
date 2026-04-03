@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable, Iterator
 
-from constants import AgentHistoryTag, AgentHistoryStage, OpenaiLLMApiRole
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiLLMApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from util import llmApiUtil
 
@@ -59,7 +59,7 @@ class AgentHistory:
         self,
         message: llmApiUtil.OpenAIMessage,
         stage: AgentHistoryStage | None = None,
-        success: bool | None = None,
+        status: AgentHistoryStatus | None = None,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
     ) -> GtAgentHistory:
@@ -68,7 +68,7 @@ class AgentHistory:
             seq=len(self._items),
             message=message,
             stage=stage,
-            success=success,
+            status=status,
             error_message=error_message,
             tags=tags,
         )

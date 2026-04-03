@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from constants import AgentHistoryStatus, AgentHistoryTag
 from dal.db import gtAgentHistoryManager, gtRoomMessageManager, gtRoomManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtRoomMessage import GtRoomMessage
@@ -43,6 +44,22 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
     return await gtAgentHistoryManager.append_agent_history_message(message)
 
 
+async def update_agent_history_by_id(
+    history_id: int,
+    *,
+    message_json: str | None = None,
+    status: AgentHistoryStatus | None = None,
+    error_message: str | None = None,
+    tags: list[AgentHistoryTag] | None = None,
+) -> GtAgentHistory | None:
+    return await gtAgentHistoryManager.update_agent_history_by_id(
+        history_id=history_id,
+        message_json=message_json,
+        status=status,
+        error_message=error_message,
+        tags=tags,
+    )
+
+
 async def load_agent_history_message(agent_id: int) -> list[GtAgentHistory]:
     return await gtAgentHistoryManager.get_agent_history(agent_id)
-
