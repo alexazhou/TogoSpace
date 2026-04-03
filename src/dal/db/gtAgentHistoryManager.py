@@ -10,6 +10,9 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
             agent_id=message.agent_id,
             seq=message.seq,
             message_json=message.message_json,
+            stage=message.stage,
+            success=message.success,
+            error_message=message.error_message,
             tags=message.tags,
         )
         .on_conflict_ignore()

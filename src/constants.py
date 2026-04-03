@@ -123,3 +123,9 @@ class AgentHistoryTag(EnhanceEnum):
     ROOM_TURN_BEGIN = "ROOM_TURN_BEGIN"
     ROOM_TURN_FINISH = "ROOM_TURN_FINISH"
     COMPACT_CMD = "COMPACT_CMD"
+
+
+class AgentHistoryStage(EnhanceEnum):
+    INPUT = "INPUT"              # 用户输入/上下文注入
+    INFER = "INFER"              # 大模型推理结果（文本+工具调用指令）
+    TOOL_RESULT = "TOOL_RESULT"  # 工具执行结果
