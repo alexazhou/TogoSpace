@@ -3,6 +3,13 @@
   "members": [
     { "name": "alice", "role_template": "alice" }
   ],
+  "dept_tree": {
+    "dept_name": "测试组",
+    "responsibility": "负责房间测试",
+    "manager": "alice",
+    "members": ["alice"],
+    "children": []
+  },
   "preset_rooms": [
     {
       "name": "alice_private",

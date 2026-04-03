@@ -103,7 +103,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         }
 
         async def fake_infer(model, ctx):
-            name = next((n for n in replies if n in ctx.system_prompt), None)
+            name = next((n for n in replies if f"你当前的名字：{n}" in ctx.system_prompt), None)
             res = replies[name].pop(0) if name and replies[name] else {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "..."}}]}
             return self.normalize_to_mock(res)
 

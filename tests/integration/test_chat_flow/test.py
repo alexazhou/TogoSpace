@@ -65,7 +65,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         }
 
         async def fake_infer(model, ctx):
-            name = next((n for n in call_seq if n in ctx.system_prompt), None)
+            name = next((n for n in call_seq if f"你当前的名字：{n}" in ctx.system_prompt), None)
             res = call_seq[name].pop(0) if name and call_seq[name] else {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "..."}}]}
             return self.normalize_to_mock(res)
 
@@ -106,7 +106,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         }
 
         async def fake_infer(model, ctx):
-            name = "alice" if "alice" in ctx.system_prompt else "bob"
+            name = "alice" if "你当前的名字：alice" in ctx.system_prompt else "bob"
             if call_seq[name]:
                 return self.normalize_to_mock(call_seq[name].pop(0))
             # 兜底返回 finish，避免并发调度时 side_effect 耗尽导致 StopIteration。
@@ -175,7 +175,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         }
 
         async def fake_infer(model, ctx):
-            name = "alice" if "alice" in ctx.system_prompt else "bob"
+            name = "alice" if "你当前的名字：alice" in ctx.system_prompt else "bob"
             if call_seq[name]:
                 res = call_seq[name].pop(0)
             else:

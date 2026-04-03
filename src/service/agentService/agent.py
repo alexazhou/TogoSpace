@@ -11,10 +11,10 @@ from model.dbModel.gtAgentHistory import GtAgentHistory
 from service import funcToolService, llmService, messageBus, persistenceService, roomService
 from service.agentService.agentHistroy import AgentHistory
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup, build_agent_driver
+from service.agentService.promptBuilder import build_turn_context_prompt, format_room_message
 from service.agentService.toolRegistry import AgentToolRegistry, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
 from util import llmApiUtil
-from util.chatMessageFormat import build_turn_context_prompt, format_room_message
 
 logger = logging.getLogger(__name__)
 

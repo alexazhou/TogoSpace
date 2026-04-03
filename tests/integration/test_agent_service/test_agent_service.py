@@ -10,8 +10,8 @@ from dal.db import gtAgentManager, gtTeamManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service import presetService, agentService, roomService, ormService, persistenceService, messageBus
+from service.agentService.promptBuilder import build_turn_context_prompt, format_room_message
 from util import configUtil, llmApiUtil
-from util.chatMessageFormat import build_turn_context_prompt, format_room_message
 from ...base import ServiceTestCase
 
 TEAM = "test_team"

@@ -1,6 +1,7 @@
 """所有测试用例的基类，负责统一初始化和清理所有 service 的全局状态。"""
 import asyncio
 import contextlib
+import hashlib
 import inspect
 import json
 import os
@@ -149,9 +150,11 @@ class ServiceTestCase:
     @classmethod
     def _get_test_db_path(cls) -> str:
         worker_id = os.environ.get("PYTEST_XDIST_WORKER")
+        class_key = f"{cls.__module__}.{cls.__name__}"
+        class_hash = hashlib.md5(class_key.encode("utf-8")).hexdigest()[:10]
         if worker_id:
-            return f"/tmp/teamagent_tests_{worker_id}.db"
-        return "/tmp/teamagent_tests.db"
+            return f"/tmp/teamagent_tests_{worker_id}_{class_hash}.db"
+        return f"/tmp/teamagent_tests_{class_hash}.db"
 
     @property
     def test_db_path(self) -> str:

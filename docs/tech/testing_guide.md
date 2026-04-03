@@ -13,8 +13,10 @@
 - **并行策略**: 默认按文件（`--dist loadfile`）分发任务，确保同一个测试类中的用例在同一个 Worker 中按序执行。
 
 ### 1.2 数据库隔离 (Database Isolation)
-- **动态路径**: 每个 Worker 拥有专属的 SQLite 数据库文件。
-    - 路径模板: `/tmp/teamagent_tests_{worker_id}.db` (例如 `gw0`, `gw1`)。
+- **动态路径**: 每个测试类都会得到独立的 SQLite 数据库文件；并行时再叠加 Worker 维度隔离。
+    - 路径模板:
+      - 并行模式: `/tmp/teamagent_tests_{worker_id}_{class_hash}.db`
+      - 串行模式: `/tmp/teamagent_tests_{class_hash}.db`
 - **配置注入**: `ServiceTestCase` 会在 `setup_class` 时通过 `mock.patch` 拦截全局配置加载器 `util.configUtil.load`。
     - **作用**: 强制将 `persistence.db_path` 指向该 Worker 的专属路径。
     - **一致性**: 确保当前测试进程、内部 Service 以及通过 `subprocess` 启动的后端进程都读写同一个隔离的数据库。

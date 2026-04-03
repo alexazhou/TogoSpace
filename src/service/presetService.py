@@ -132,6 +132,8 @@ async def _import_team_from_config(team_config: TeamConfig) -> GtTeam | None:
         team.id,
         [await _to_gt_room(team.id, room) for room in team_config.preset_rooms],
     )
+    if team_config.dept_tree is not None:
+        await deptService.overwrite_dept_tree(team.id, await _to_dept_tree_node(team.id, team_config.dept_tree))
     logger.info("Team '%s' 已从配置导入数据库", team_config.name)
     return team
 
@@ -142,12 +144,6 @@ async def _import_teams_from_app_config() -> None:
         if team is None:
             logger.info("Team '%s' 已存在，跳过整组 preset 导入", team_config.name)
             continue
-
-        if not team_config.dept_tree:
-            logger.warning(f"Team '{team_config.name}' 缺少 dept_tree 配置，跳过导入")
-            continue
-
-        await deptService.overwrite_dept_tree(team.id, await _to_dept_tree_node(team.id, team_config.dept_tree))
 
     logger.info("Team 配置已导入数据库")
 
