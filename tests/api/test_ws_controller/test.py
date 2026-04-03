@@ -82,8 +82,8 @@ class TestWsController(_ApiServiceCase):
         assert "sender" in event
         assert "content" in event
 
-    async def test_ws_member_status_contains_real_team_id(self):
-        """member_status 事件中的 team_id 应为真实 Team ID（非 0）。"""
+    async def test_ws_agent_status_contains_real_team_id(self):
+        """agent_status 事件中的 team_id 应为真实 Team ID（非 0）。"""
         ws_url = f"ws://127.0.0.1:{self.backend_port}/ws/events.json"
 
         async with aiohttp.ClientSession() as session:
@@ -116,14 +116,14 @@ class TestWsController(_ApiServiceCase):
                         if msg.type != aiohttp.WSMsgType.TEXT:
                             continue
                         data = json.loads(msg.data)
-                        if data.get("event") != "member_status":
+                        if data.get("event") != "agent_status":
                             continue
-                        if data.get("member_name") not in {"alice", "bob"}:
+                        if data.get("agent_name") not in {"alice", "bob"}:
                             continue
                         matched = data
                         break
 
-                assert matched is not None, "未收到 alice/bob 的 member_status 事件"
+                assert matched is not None, "未收到 alice/bob 的 agent_status 事件"
                 assert matched["team_id"] == team_id
                 assert matched["team_id"] > 0
-                assert matched["team_name"] == _TEAM
+                assert "team_name" not in matched

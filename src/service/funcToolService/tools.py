@@ -6,7 +6,7 @@ import logging
 import operator
 from zoneinfo import ZoneInfo
 
-from dal.db import gtRoomManager, gtTeamManager
+from dal.db import gtRoomManager
 from service.roomService import ToolCallContext
 import service.roomService as roomService
 from constants import SpecialAgent
@@ -121,29 +121,27 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
     logger.info(f"发送消息: sender={_context.agent_name}, room={room_name}, msg={msg}")
 
     try:
-        target_room = roomService.get_room_by_key(f"{room_name}@{_context.team_name}")
+        room_config = await gtRoomManager.get_room_by_team_and_name(_context.team_id, room_name)
+        target_room = roomService.get_room(room_config.id) if room_config is not None else None
     except Exception:
         try:
-            team_row = await gtTeamManager.get_team(_context.team_name)
-            room_config = None
-            if team_row:
-                team_rooms = await gtRoomManager.get_rooms_by_team(team_row.id)
-                room_config = next((room for room in team_rooms if room.name == room_name), None)
+            team_rooms = await gtRoomManager.get_rooms_by_team(_context.team_id)
+            room_config = next((room for room in team_rooms if room.name == room_name), None)
             target_room = roomService.get_room(room_config.id) if room_config else None
         except Exception:
             target_room = None
 
-        if target_room is None:
-            logger.warning(f"send_chat_msg: 目标房间不存在 {room_name}@{_context.team_name}")
-            return {"success": False, "message": f"目标房间不存在: {room_name}@{_context.team_name}"}
+    if target_room is None:
+        logger.warning(f"send_chat_msg: 目标房间不存在 room={room_name} team_id={_context.team_id}")
+        return {"success": False, "message": f"目标房间不存在: {room_name} (team_id={_context.team_id})"}
 
     if _context.chat_room is not None and target_room.room_id != _context.chat_room.room_id:
         if not target_room.can_post_message(_context.agent_name):
             logger.warning(
-                "send_chat_msg: 发言者不在目标房间成员中 sender=%s room=%s@%s members=%s",
+                "send_chat_msg: 发言者不在目标房间成员中 sender=%s room=%s team_id=%s members=%s",
                 _context.agent_name,
                 room_name,
-                _context.team_name,
+                _context.team_id,
                 target_room.members,
             )
             return {"success": False, "message": f"你不在目标房间 {target_room.name} 中，发送失败。"}

@@ -23,7 +23,8 @@ def _make_tool(name: str) -> llmApiUtil.OpenAITool:
 @pytest.fixture
 def mock_host():
     host = MagicMock()
-    host.key = "test_agent@test_team"
+    host.gt_agent = MagicMock()
+    host.gt_agent.id = 1
     host.tool_registry = AgentToolRegistry()
     return host
 
@@ -47,7 +48,7 @@ async def test_native_driver_setup_registers_tools(driver, mock_host):
         await driver.startup()
         context = ToolCallContext(
             agent_name="alice",
-            team_name="team",
+            team_id=1,
             chat_room=MagicMock(),
         )
         result = await mock_host.tool_registry.execute_tool_call(
@@ -70,7 +71,7 @@ async def test_native_driver_setup_registers_tools(driver, mock_host):
     called_args, called_context = run_tool_call.call_args.args
     assert called_args == "{}"
     assert called_context.agent_name == "alice"
-    assert called_context.team_name == "team"
+    assert called_context.team_id == 1
     assert called_context.tool_name == "finish_chat_turn"
     assert result.turn_finished is True
     assert result.tags == [AgentHistoryTag.ROOM_TURN_FINISH]

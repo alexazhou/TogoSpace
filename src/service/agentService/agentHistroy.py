@@ -44,7 +44,7 @@ class AgentHistory:
             return None
         return last_item.role
 
-    def assert_infer_ready(self, agent_key: str) -> None:
+    def assert_infer_ready(self, agent_label: str) -> None:
         last_item = self.last()
         if (
             last_item is not None
@@ -59,7 +59,7 @@ class AgentHistory:
             llmApiUtil.OpenaiLLMApiRole.USER,
             llmApiUtil.OpenaiLLMApiRole.TOOL,
             llmApiUtil.OpenaiLLMApiRole.SYSTEM,
-        ), f"[{agent_key}] _infer 前最后一条消息不能是 assistant，当前为: {last_role if last_role else 'empty'}"
+        ), f"[{agent_label}] _infer 前最后一条消息不能是 assistant，当前为: {last_role if last_role else 'empty'}"
 
     def export_openai_message_list(self) -> list[llmApiUtil.OpenAIMessage]:
         return [item.openai_message for item in self._items]

@@ -21,7 +21,6 @@ async def startup() -> None:
 async def create_team(
     name: str,
     config: dict | None = None,
-    max_function_calls: int | None = None,
     members: list[GtAgent] | None = None,
     dept_tree: GtDept | None = None,
     preset_rooms: list[GtRoom] | None = None,
@@ -36,7 +35,6 @@ async def create_team(
     team = await gtTeamManager.save_team(GtTeam(
         name=name,
         config=config or {},
-        max_function_calls=max_function_calls if max_function_calls is not None else 5,
         enabled=1,
         deleted=0,
     ))
@@ -78,7 +76,7 @@ async def delete_team(name: str) -> None:
     team = await gtTeamManager.get_team(name)
     if team is not None:
         await roomService.close_team_rooms(team.id)
-    schedulerService.stop_team(name)
+        schedulerService.stop_team(team.id)
 
     # 软删除 Team
     await gtTeamManager.delete_team(name)
@@ -99,28 +97,25 @@ async def set_team_enabled(team_id: int, enabled: bool) -> None:
         await hot_reload_team(team_name)
     else:
         # 停用时停止调度
-        schedulerService.stop_team(team_name)
+        schedulerService.stop_team(team_id)
 
     logger.info(f"Team '{team_name}' {'已启用' if enabled else '已停用'}")
 
 
 async def hot_reload_team(name: str) -> None:
     """触发指定 Team 的热更新。"""
-
-    # 先停掉该 team 的调度任务，避免旧实例在热更新过程中继续消费事件
-    schedulerService.stop_team(name)
-
-    # 刷新成员实例，保证新增/变更成员可被调度命中
-    await agentService.reload_team_agents_from_db(name)
-
-    # 刷新调度器配置
-    await schedulerService.refresh_team_config(name)
-
-    # 刷新聊天室配置
     team = await gtTeamManager.get_team(name)
     if team is None:
         logger.warning(f"热更新失败: Team '{name}' 不存在")
         return
+
+    # 先停掉该 team 的调度任务，避免旧实例在热更新过程中继续消费事件
+    schedulerService.stop_team(team.id)
+
+    # 刷新成员实例，保证新增/变更成员可被调度命中
+    await agentService.reload_team_agents_from_db(team.id)
+
+    # 刷新聊天室配置
     await roomService.refresh_rooms_for_team(team.id)
     await schedulerService.start_scheduling(name)
     logger.info("Team '%s' 热更新后已触发调度启动", name)

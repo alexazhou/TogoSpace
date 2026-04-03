@@ -33,7 +33,6 @@ async def save_team(team: GtTeam) -> GtTeam:
         team_id = await GtTeam.insert(
             name=team.name,
             config=config,
-            max_function_calls=team.max_function_calls,
             enabled=team.enabled,
             deleted=team.deleted,
         ).aio_execute()
@@ -45,7 +44,6 @@ async def save_team(team: GtTeam) -> GtTeam:
         GtTeam.update(
             name=team.name,
             config=config,
-            max_function_calls=team.max_function_calls,
             enabled=team.enabled,
             deleted=team.deleted,
         )

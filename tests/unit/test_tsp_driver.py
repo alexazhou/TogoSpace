@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pytspclient import TSPClient, TSPException
 
+from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from util import llmApiUtil
 from constants import AgentHistoryTag
@@ -45,6 +46,7 @@ def test_build_gtsp_command_respects_explicit_command_and_no_duplicate_flags():
 
 @dataclass
 class _DummyHost:
+    gt_agent: GtAgent = field(default_factory=lambda: GtAgent(id=1, team_id=1, name="实习生", role_template_id=1, model="mock-model"))
     name: str = "实习生"
     team_name: str = "default"
     system_prompt: str = ""
@@ -54,10 +56,6 @@ class _DummyHost:
     current_room: object | None = None
     _history: list[GtAgentHistory] = field(default_factory=list)
     tool_registry: AgentToolRegistry = field(default_factory=AgentToolRegistry)
-
-    @property
-    def key(self) -> str:
-        return f"{self.name}@{self.team_name}"
 
 
 @pytest.mark.asyncio
@@ -87,7 +85,7 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
         assert driver._tsp_tools
 
         # 1) 创建 /tmp 下测试目录
-        mkdir_ctx = ToolCallContext(agent_name="e2e", team_name="default", chat_room=MagicMock(), tool_name="execute_bash")
+        mkdir_ctx = ToolCallContext(agent_name="e2e", team_id=1, chat_room=MagicMock(), tool_name="execute_bash")
         mkdir_result = await driver._execute_tsp_tool(
             json.dumps({"command": f"mkdir -p {tmp_dir}"}, ensure_ascii=False),
             mkdir_ctx,
@@ -96,7 +94,7 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
         assert mkdir_result.get("exit_code") == 0
 
         # 2) 写文件
-        write_ctx = ToolCallContext(agent_name="e2e", team_name="default", chat_room=MagicMock(), tool_name="write_file")
+        write_ctx = ToolCallContext(agent_name="e2e", team_id=1, chat_room=MagicMock(), tool_name="write_file")
         write_result = await driver._execute_tsp_tool(
             json.dumps({"file_path": file_path, "content": expected_content}, ensure_ascii=False),
             write_ctx,
@@ -105,7 +103,7 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
         assert write_result.get("file_path") == file_path
 
         # 3) list 目录并确认文件存在
-        list_ctx = ToolCallContext(agent_name="e2e", team_name="default", chat_room=MagicMock(), tool_name="list_dir")
+        list_ctx = ToolCallContext(agent_name="e2e", team_id=1, chat_room=MagicMock(), tool_name="list_dir")
         list_result = await driver._execute_tsp_tool(
             json.dumps({"dir_path": tmp_dir, "recursive": False}, ensure_ascii=False),
             list_ctx,
@@ -116,7 +114,7 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
         assert "hello.txt" in names
 
         # 4) read 文件并校验内容一致
-        read_ctx = ToolCallContext(agent_name="e2e", team_name="default", chat_room=MagicMock(), tool_name="read_file")
+        read_ctx = ToolCallContext(agent_name="e2e", team_id=1, chat_room=MagicMock(), tool_name="read_file")
         read_result = await driver._execute_tsp_tool(
             json.dumps({"file_path": file_path}, ensure_ascii=False),
             read_ctx,
@@ -133,9 +131,10 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
 @pytest.fixture
 def mock_tsp_host():
     host = MagicMock()
+    host.gt_agent = MagicMock()
+    host.gt_agent.id = 1
     host.name = "tsp_agent"
     host.team_name = "test_team"
-    host.key = "tsp_agent@test_team"
     host.team_workdir = "/tmp"
     host._infer = AsyncMock()
     host.append_history_message = AsyncMock()
@@ -175,7 +174,7 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host):
             driver._register_host_tools()
             context = ToolCallContext(
                 agent_name="alice",
-                team_name="team",
+                team_id=1,
                 chat_room=MagicMock(),
             )
             finish_result = await mock_tsp_host.tool_registry.execute_tool_call(
@@ -193,7 +192,7 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host):
         called_args, called_context = run_tool_call.call_args.args
         assert called_args == "{}"
         assert called_context.agent_name == "alice"
-        assert called_context.team_name == "team"
+        assert called_context.team_id == 1
         assert called_context.tool_name == "finish_chat_turn"
         assert finish_result.turn_finished is True
         assert finish_result.tags == [AgentHistoryTag.ROOM_TURN_FINISH]
@@ -230,7 +229,7 @@ async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host):
     driver._client.tool = AsyncMock()
     
     # Case 1: JSON Decode Error
-    ctx = ToolCallContext(agent_name="alice", team_name="team", chat_room=MagicMock(), tool_name="tool")
+    ctx = ToolCallContext(agent_name="alice", team_id=1, chat_room=MagicMock(), tool_name="tool")
     res = await driver._execute_tsp_tool("invalid json", ctx)
     assert "JSON 解析失败" in res["message"]
     

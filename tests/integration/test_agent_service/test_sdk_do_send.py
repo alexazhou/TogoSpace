@@ -5,6 +5,7 @@ import sys
 import pytest
 
 from dal.db import gtTeamManager
+from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service import roomService, agentService, ormService, persistenceService
 from service import presetService
@@ -58,7 +59,7 @@ class TestSdkDoSend(ServiceTestCase):
         await room.activate_scheduling()
         
         # 2. 从 agentService 获取在内存中已注册好的 agent
-        agent = agentService.get_team_agent(TEAM, agent_name)
+        agent = agentService.get_agent(room.get_member_id(agent_name))
         
         # 3. 模拟 schedulerService：进入该房间回合前注入运行时的 current_room
         agent.current_room = room
@@ -154,8 +155,11 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
     async def test_run_chat_turn_requires_started_client(self):
         await roomService.ensure_room_record(TEAM, "lobby", ["alice"])
         room = roomService.get_room_by_key(f"lobby@{TEAM}")
-        agent = Agent(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
-                      driver_config=AgentDriverConfig(driver_type="native"))
+        agent = Agent(
+            gt_agent=GtAgent(id=1, team_id=1, name="alice", role_template_id=1, model="test-model"),
+            system_prompt="test",
+            driver_config=AgentDriverConfig(driver_type="native"),
+        )
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
 
         try:
@@ -167,8 +171,11 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
     async def test_run_chat_turn_uses_max_function_calls_as_retry_limit(self):
         await roomService.ensure_room_record(TEAM, "lobby", ["alice"])
         room = roomService.get_room_by_key(f"lobby@{TEAM}")
-        agent = Agent(name="alice", team_name=TEAM, system_prompt="test", model="test-model",
-                      driver_config=AgentDriverConfig(driver_type="native"))
+        agent = Agent(
+            gt_agent=GtAgent(id=1, team_id=1, name="alice", role_template_id=1, model="test-model"),
+            system_prompt="test",
+            driver_config=AgentDriverConfig(driver_type="native"),
+        )
         agent.current_room = room
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
         fake_client = _FakeClaudeClient()
@@ -184,10 +191,8 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "lobby", ["alice", "bob"])
         room = roomService.get_room_by_key(f"lobby@{TEAM}")
         agent = Agent(
-            name="alice",
-            team_name=TEAM,
+            gt_agent=GtAgent(id=1, team_id=1, name="alice", role_template_id=1, model="test-model"),
             system_prompt="test",
-            model="test-model",
             driver_config=AgentDriverConfig(driver_type="native"),
         )
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
@@ -199,7 +204,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         turn_prompt = build_turn_context_prompt("lobby", [first, second])
         agent.inject_history_messages([
             GtAgentHistory.from_openai_message(
-                agent.agent_id,
+                agent.gt_agent.id,
                 0,
                 llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_prompt),
             ),

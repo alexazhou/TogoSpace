@@ -50,7 +50,7 @@ class TestTurnScheduling(ServiceTestCase):
         with patch("service.messageBus.publish") as mock_publish:
             await roomService.ensure_room_record(TEAM, "r", ["alice", "bob"], max_turns=5)
             topics = [call.args[0] for call in mock_publish.call_args_list]
-            assert MessageBusTopic.ROOM_MEMBER_TURN not in topics
+            assert MessageBusTopic.ROOM_AGENT_TURN not in topics
 
     async def test_start_scheduling_publishes_first_agent(self):
         """显式启动调度后，才发布首个发言人的 TURN 事件。"""
@@ -60,8 +60,8 @@ class TestTurnScheduling(ServiceTestCase):
         with patch("service.messageBus.publish") as mock_publish:
             await room.activate_scheduling()
             mock_publish.assert_any_call(
-                MessageBusTopic.ROOM_MEMBER_TURN,
-                member_name="alice",
+                MessageBusTopic.ROOM_AGENT_TURN,
+                agent_id=room.get_member_id("alice"),
                 room_id=room.room_id,
                 room_name="r",
                 room_key=f"r@{TEAM}",
@@ -79,8 +79,8 @@ class TestTurnScheduling(ServiceTestCase):
             # 消息不会自动推进轮次，需要显式调用 finish_turn
             room.finish_turn("alice")
             mock_publish.assert_any_call(
-                MessageBusTopic.ROOM_MEMBER_TURN,
-                member_name="bob",
+                MessageBusTopic.ROOM_AGENT_TURN,
+                agent_id=room.get_member_id("bob"),
                 room_id=room.room_id,
                 room_name="r",
                 room_key=f"r@{TEAM}",
@@ -107,4 +107,4 @@ class TestTurnScheduling(ServiceTestCase):
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message("a", "msg2")
-            assert MessageBusTopic.ROOM_MEMBER_TURN not in [call.args[0] for call in mock_publish.call_args_list]
+            assert MessageBusTopic.ROOM_AGENT_TURN not in [call.args[0] for call in mock_publish.call_args_list]

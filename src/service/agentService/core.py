@@ -1,443 +1,33 @@
 import asyncio
-import json
 import logging
 import os
-from typing import Any, List, Optional
+from typing import Any, List
 
-from util import llmApiUtil, configUtil
-from util.chatMessageFormat import build_turn_context_prompt, format_room_message
-from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreChatMessage
-from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
-from model.dbModel.gtAgentHistory import GtAgentHistory
+from util import configUtil
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
-from service.agentService.driver import AgentDriverConfig, AgentTurnSetup, build_agent_driver, normalize_driver_config
-from service.agentService.agentHistroy import AgentHistory
-from service.agentService.toolRegistry import AgentToolRegistry, ToolExecutionResult
-from service import llmService, funcToolService, roomService, messageBus, persistenceService
+from service.agentService.agent import Agent
+from service.agentService.driver import normalize_driver_config
+from service import llmService, roomService, persistenceService
 from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager
-from service.roomService import ChatRoom, ToolCallContext
 from peewee import IntegrityError
 from exception import TeamAgentException
-from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, SpecialAgent, MessageBusTopic, MemberStatus, DriverType, EmployStatus, RoomState
+from constants import MemberStatus, DriverType, EmployStatus
 
 logger = logging.getLogger(__name__)
 
-MAX_INFER_RETRIES = 3
-
-_agents: dict[str, "Agent"] = {}
-_team_ids: dict[str, int] = {}  # team_name -> team_id mapping
-
-def _make_agent_key(team_name: str, agent_name: str) -> str:
-    return f"{agent_name}@{team_name}"
-
-
-def get_special_agent_by_id(agent_id: int | None) -> SpecialAgent | None:
-    return SpecialAgent.value_of(agent_id)
-
-
-async def load_team_ids_from_db() -> None:
-    global _team_ids
-    _team_ids = {team.name: team.id for team in await gtTeamManager.get_all_teams()}
-    logger.info(f"Loaded team IDs: {_team_ids}")
-
-
-class Agent:
-    """AI Team Agent 实例：承载在特定团队中的身份和状态，driver 负责具体驱动实现。"""
-
-    def __init__(
-        self,
-        name: str,
-        team_name: str,
-        system_prompt: str,
-        model: str,
-        driver_config: Optional[AgentDriverConfig] = None,
-        template_name: str = "",
-        team_workdir: str = "",
-        workspace_root: str = "",
-        agent_id: int = 0,
-    ):
-        self.name: str = name  # Agent 在团队中的昵称
-        self.team_name: str = team_name
-        self.template_name: str = template_name  # 所使用的角色模版名
-        self.system_prompt: str = system_prompt
-        self.model: str = model
-        self.team_workdir: str = team_workdir
-        self.workspace_root: str = workspace_root
-
-        self._agent_id: int = agent_id
-        self._history_store: AgentHistory = AgentHistory(agent_id)
-        self.tool_registry: AgentToolRegistry = AgentToolRegistry()
-        self.wait_task_queue: asyncio.Queue = asyncio.Queue()
-        self.status: MemberStatus = MemberStatus.IDLE
-        self.current_room: Optional[ChatRoom] = None
-        self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
-
-    @property
-    def _history(self) -> AgentHistory:
-        return self._history_store
-
-    @property
-    def team_id(self) -> int:
-        return _team_ids.get(self.team_name, 0)
-
-    @property
-    def agent_id(self) -> int:
-        return self._agent_id
-
-    @property
-    def key(self) -> str:
-        return _make_agent_key(self.team_name, self.name)
-
-    @property
-    def is_active(self) -> bool:
-        return self.status == MemberStatus.ACTIVE or not self.wait_task_queue.empty()
-
-    async def startup(self) -> None:
-        await self.driver.startup()
-        self.driver.mark_started()
-
-    async def close(self) -> None:
-        await self.driver.shutdown()
-        self.driver.mark_stopped()
-        self.tool_registry.clear()
-
-    def resume_failed(self) -> int:
-        """清除 FAILED 状态，从队头任务读取 room_id 返回，供调用方触发续跑。"""
-        if self.status != MemberStatus.FAILED:
-            raise ValueError(f"Agent {self.key} 当前状态不是 FAILED（当前: {self.status.name}）")
-
-        task: GtCoreRoomMessageEvent = self.wait_task_queue._queue[0]
-        room_id: int = task.room_id
-        self.status = MemberStatus.IDLE
-        self._publish_status(self.status)
-        return room_id
-
-    def _publish_status(self, status: MemberStatus) -> None:
-        messageBus.publish(
-            MessageBusTopic.MEMBER_STATUS_CHANGED,
-            member_name=self.name,
-            team_id=self.team_id,
-            team_name=self.team_name,
-            status=status.name,
-        )
-
-    async def consume_task(self, max_function_calls: int) -> None:
-        self.status = MemberStatus.ACTIVE
-        self._publish_status(self.status)
-        try:
-            while self.wait_task_queue.empty() == False:
-                task: Any = self.wait_task_queue._queue[0]  # peek，先不弹出
-
-                task_succeeded = False
-                last_error: Exception | None = None
-                for attempt in range(1, MAX_INFER_RETRIES + 1):
-                    try:
-                        if isinstance(task, GtCoreRoomMessageEvent):
-                            await self.run_chat_turn(task.room_id, max_function_calls)
-                        else:
-                            raise TypeError(f"不支持的任务类型: {type(task).__name__}")
-                        task_succeeded = True
-                        break
-                    except Exception as e:
-                        last_error = e
-                        logger.warning(
-                            f"Agent 任务执行失败 (第 {attempt}/{MAX_INFER_RETRIES} 次): "
-                            f"agent={self.key}, task={task!r}, error={e}",
-                            exc_info=(attempt == MAX_INFER_RETRIES),
-                        )
-
-
-                if task_succeeded == False:
-                    logger.error(
-                        f"Agent 推理连续失败 {MAX_INFER_RETRIES} 次，标记为 FAILED: "
-                        f"agent={self.key}, last_error={last_error}",
-                    )
-
-                    self.status = MemberStatus.FAILED
-                    self._publish_status(self.status)
-                    return  # 任务留在队头，等 resume 后重新消费
-
-                # 成功后才弹出
-                self.wait_task_queue.get_nowait()
-                self.wait_task_queue.task_done()
-        finally:
-            if self.status != MemberStatus.FAILED:
-                self.status = MemberStatus.IDLE
-                self._publish_status(self.status)
-
-    async def pull_room_messages_to_history(self, room: ChatRoom) -> int:
-        new_msgs: List[GtCoreChatMessage] = await room.get_unread_messages(self.name)
-        logger.info(f"同步房间消息: agent={self.key}, room={room.name}, count={len(new_msgs)}")
-
-        message_blocks: list[str] = []
-        for msg in new_msgs:
-            if msg.sender_name == self.name:
-                continue
-
-            message_blocks.append(format_room_message(room.name, msg.sender_name, msg.content))
-
-        if not message_blocks:
-            return 0
-
-        turn_context_message = llmApiUtil.OpenAIMessage.text(
-            llmApiUtil.OpenaiLLMApiRole.USER,
-            content=build_turn_context_prompt(room.name, message_blocks),
-        )
-        await self.append_history_message(
-            turn_context_message,
-            stage=AgentHistoryStage.INPUT,
-            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
-        )
-        return 1
-
-    async def run_chat_turn(self, room_id: int, max_function_calls: int = 5) -> None:
-        room: ChatRoom | None = roomService.get_room(room_id)
-        if room is None:
-            logger.warning(f"run_chat_turn 跳过：room_id={room_id} 不存在, agent={self.key}")
-            return
-
-        self.current_room = room
-        synced_count = await self.pull_room_messages_to_history(room)
-
-        try:
-            if self.driver.host_managed_turn_loop:
-                await self._ensure_driver_started()
-                await self._run_chat_turn_with_host_loop(max_function_calls)
-            else:
-                await self.driver.run_chat_turn(room, synced_count, max_function_calls)
-        except Exception as e:
-            logger.warning(f"run_chat_turn 异常: agent={self.key}, room={room.key}, error={e}")
-            raise
-        finally:
-            self.current_room = None
-
-    async def _ensure_driver_started(self) -> None:
-        if self.driver.started:
-            return
-        await self.driver.startup()
-        self.driver.mark_started()
-
-    async def _run_chat_turn_with_host_loop(self, max_function_calls: int) -> None:
-        turn_setup: AgentTurnSetup = self.driver.turn_setup
-        tools: list[llmApiUtil.OpenAITool] = self.tool_registry.export_openai_tools()
-
-        max_retries = max(1, turn_setup.max_retries)
-        for _ in range(max_retries):
-            turn_done = await self._run_until_reply(tools=tools, max_function_calls=max_function_calls)
-            if turn_done:
-                return
-
-            if turn_setup.hint_prompt:
-                await self.append_history_message(
-                    llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_setup.hint_prompt),
-                    stage=AgentHistoryStage.INPUT,
-                )
-
-    async def _run_until_reply(
-        self,
-        tools: Optional[list[llmApiUtil.OpenAITool]],
-        max_function_calls: int,
-    ) -> bool:
-        context: ToolCallContext = ToolCallContext(
-            agent_name=self.name,
-            team_name=self.team_name,
-            chat_room=self.current_room,
-        )
-        for _ in range(max_function_calls):
-            assistant_message: llmApiUtil.OpenAIMessage = await self._infer(tools)
-            tool_calls: list[llmApiUtil.OpenAIToolCall] | None = assistant_message.tool_calls
-            if not tool_calls:
-                return False
-
-            logger.info(f"检测到工具调用: agent={self.key}, count={len(tool_calls)}")
-            turn_done = False
-            for tool_call in tool_calls:
-                assert tool_call.id, "tool_call.id should not be empty"
-                history_item = await self._append_stage_init(
-                    role=llmApiUtil.OpenaiLLMApiRole.TOOL,
-                    stage=AgentHistoryStage.TOOL_RESULT,
-                    tool_call_id=str(tool_call.id),
-                )
-                exec_result: ToolExecutionResult = await self.tool_registry.execute_tool_call(tool_call, context)
-                await self._finalize_tool_result_history(
-                    history_item=history_item,
-                    tool_call_id=exec_result.tool_call_id,
-                    result_json=exec_result.result_json,
-                    status=exec_result.status,
-                    error_message=exec_result.error_message,
-                    tags=exec_result.tags,
-                )
-                if exec_result.turn_finished and (
-                    exec_result.status == AgentHistoryStatus.SUCCESS
-                    or (self.current_room is not None and self.current_room.state == RoomState.INIT)
-                ):
-                    turn_done = True
-
-            if turn_done:
-                return True
-
-        logger.warning(f"达到最大函数调用次数: agent={self.key}, max={max_function_calls}")
-        return False
-
-    async def _infer(self, tools: Optional[list[llmApiUtil.OpenAITool]]) -> llmApiUtil.OpenAIMessage:
-        self._history.assert_infer_ready(self.key)
-        ctx = GtCoreAgentDialogContext(
-            system_prompt=self.system_prompt,
-            messages=self._history.export_openai_message_list(),
-            tools=tools or None,
-        )
-        history_item = await self._append_stage_init(
-            role=llmApiUtil.OpenaiLLMApiRole.ASSISTANT,
-            stage=AgentHistoryStage.INFER,
-        )
-        infer_result: llmService.InferResult = await llmService.infer(self.model, ctx)
-        if infer_result.ok == False or infer_result.response is None:
-            error_message = infer_result.error_message or "unknown inference error"
-            await self._finalize_history_item(
-                history_item=history_item,
-                message=None,
-                status=AgentHistoryStatus.FAILED,
-                error_message=error_message,
-            )
-            raise RuntimeError(f"LLM 推理失败: agent={self.key}, error={error_message}") from infer_result.error
-
-        response = infer_result.response
-        assistant_message = response.choices[0].message
-        await self._finalize_history_item(
-            history_item=history_item,
-            message=assistant_message,
-            status=AgentHistoryStatus.SUCCESS,
-        )
-
-        return assistant_message
-
-    async def _execute_tool(self) -> None:
-        last_msg: llmApiUtil.OpenAIMessage | None = self._history.get_last_assistant_message()
-        if not last_msg or not last_msg.tool_calls:
-            return
-
-        for tool_call in last_msg.tool_calls:
-            assert tool_call.id, "tool_call.id should not be empty"
-            history_item = await self._append_stage_init(
-                role=llmApiUtil.OpenaiLLMApiRole.TOOL,
-                stage=AgentHistoryStage.TOOL_RESULT,
-                tool_call_id=str(tool_call.id),
-            )
-            function: dict[str, Any] = tool_call.function if isinstance(tool_call.function, dict) else {}
-            name = function.get("name", "")
-            args = function.get("arguments", "")
-            context: ToolCallContext = ToolCallContext(
-                agent_name=self.name,
-                team_name=self.team_name,
-                chat_room=self.current_room,
-                tool_name=name,
-            )
-            result_data: dict[str, Any] = await funcToolService.run_tool_call(args, context=context)
-            result = json.dumps(result_data, ensure_ascii=False)
-            raw_success = result_data.get("success")
-            status = AgentHistoryStatus.FAILED if raw_success is False else AgentHistoryStatus.SUCCESS
-            error_message = None
-            if status == AgentHistoryStatus.FAILED and result_data.get("message") is not None:
-                error_message = str(result_data.get("message"))
-            tags: list[AgentHistoryTag] | None = None
-            if name == "finish_chat_turn" and status == AgentHistoryStatus.SUCCESS:
-                tags = [AgentHistoryTag.ROOM_TURN_FINISH]
-
-            final_message = llmApiUtil.OpenAIMessage.tool_result(str(tool_call.id), result)
-            await self._finalize_history_item(
-                history_item=history_item,
-                message=final_message,
-                status=status,
-                error_message=error_message,
-                tags=tags,
-            )
-
-    async def _append_stage_init(
-        self,
-        role: llmApiUtil.OpenaiLLMApiRole,
-        stage: AgentHistoryStage,
-        tool_call_id: str | None = None,
-    ) -> GtAgentHistory:
-        """为指定阶段先落一条 INIT 记录。"""
-        init_message = llmApiUtil.OpenAIMessage(role=role, tool_call_id=tool_call_id)
-        item: GtAgentHistory = self._history.append_message(
-            init_message,
-            stage=stage,
-            status=AgentHistoryStatus.INIT,
-        )
-        saved = await persistenceService.append_agent_history_message(item)
-        if saved is not None:
-            item.id = saved.id
-        return item
-
-    async def _finalize_history_item(
-        self,
-        history_item: GtAgentHistory,
-        message: llmApiUtil.OpenAIMessage | None,
-        status: AgentHistoryStatus,
-        error_message: str | None = None,
-        tags: list[AgentHistoryTag] | None = None,
-    ) -> None:
-        message_json: str | None = None
-        if message is not None:
-            message_json = message.model_dump_json(exclude_none=True)
-            history_item.message_json = message_json
-        history_item.status = status
-        history_item.error_message = error_message
-        if tags is not None:
-            history_item.tags = list(tags)
-
-        assert history_item.id is not None, "history row id should not be None after append"
-        await persistenceService.update_agent_history_by_id(
-            history_id=history_item.id,
-            message_json=message_json,
-            status=status,
-            error_message=error_message,
-            tags=(history_item.tags if tags is not None else None),
-        )
-
-    def dump_history_messages(self) -> List[GtAgentHistory]:
-        return self._history.dump()
-
-    def inject_history_messages(self, items: List[GtAgentHistory]) -> None:
-        self._history.replace(items)
-
-    async def append_history_message(
-        self,
-        message: llmApiUtil.OpenAIMessage,
-        stage: AgentHistoryStage | None = None,
-        status: AgentHistoryStatus | None = None,
-        error_message: str | None = None,
-        tags: list[AgentHistoryTag] | None = None,
-    ) -> GtAgentHistory:
-        target_status = status or AgentHistoryStatus.SUCCESS
-        append_kwargs: dict[str, Any] = {"status": target_status}
-        if stage is not None:
-            append_kwargs["stage"] = stage
-        if error_message is not None:
-            append_kwargs["error_message"] = error_message
-        if tags is not None:
-            append_kwargs["tags"] = tags
-
-        item: GtAgentHistory = self._history.append_message(message, **append_kwargs)
-        saved = await persistenceService.append_agent_history_message(item)
-        if saved is not None:
-            item.id = saved.id
-        return item
-
+_agents: dict[int, "Agent"] = {}
 
 async def startup() -> None:
-    global _agents, _team_ids
+    global _agents
     _agents = {}
-    _team_ids = {}
 
 
 async def restore_state() -> None:
     """从数据库恢复所有 Agent 的历史消息。"""
-    for agent in get_all_agents():
-        items = await persistenceService.load_agent_history_message(agent.agent_id)
+    for agent in _agents.values():
+        items = await persistenceService.load_agent_history_message(agent.gt_agent.id)
         if items:
             agent._history.replace(items)
 
@@ -503,7 +93,7 @@ async def _create_team_agents(team_row: GtTeam, agent_rows: list[GtAgent], templ
 
     team_name = team_row.name
     team_workdir = os.path.join(resolved_workspace_root, team_name)
-    team_id = _team_ids.get(team_name, team_row.id)
+    team_id = team_row.id
 
     for agent_row in agent_rows:
         template = templates_by_id.get(agent_row.role_template_id)
@@ -515,6 +105,7 @@ async def _create_team_agents(team_row: GtTeam, agent_rows: list[GtAgent], templ
         template_name = template.name
         agent_specific_prompt = template.soul
         model_name = agent_row.model or template.model or default_model
+        agent_row.model = model_name
         driver_config = normalize_driver_config(
             {
                 "driver": agent_row.driver or template.driver,
@@ -528,27 +119,22 @@ async def _create_team_agents(team_row: GtTeam, agent_rows: list[GtAgent], templ
         if dept_context:
             full_prompt += "\n\n" + dept_context
 
-        key = _make_agent_key(team_name, agent_name)
+        assert agent_row.id is not None and agent_row.id > 0, f"invalid agent id: {agent_row.id}"
         agent = Agent(
-            name=agent_name,
-            team_name=team_name,
+            gt_agent=agent_row,
             system_prompt=full_prompt,
-            model=model_name,
             driver_config=driver_config,
-            template_name=template_name,
             team_workdir=team_workdir,
             workspace_root=resolved_workspace_root,
-            agent_id=agent_row.id,
         )
-        _agents[key] = agent
+        _agents[agent_row.id] = agent
         logger.info(
-            f"创建 Agent 实例: key={key}, template={template_name}, model={model_name}, driver={driver_config.driver_type}"
+            f"创建 Agent 实例: agent_id={agent_row.id}, template={template_name}, model={model_name}, driver={driver_config.driver_type}"
         )
         await agent.startup()
 
 
 async def create_team_agents_from_db(workspace_root: str | None = None) -> None:
-    await load_team_ids_from_db()
     for team_row in await gtTeamManager.get_all_teams():
         agent_rows = await gtAgentManager.get_team_agents(team_row.id)
         template_rows = await gtRoleTemplateManager.get_role_templates_by_ids(
@@ -558,23 +144,20 @@ async def create_team_agents_from_db(workspace_root: str | None = None) -> None:
         await _create_team_agents(team_row, agent_rows, templates_by_id, workspace_root=workspace_root)
 
 
-async def reload_team_agents_from_db(team_name: str, workspace_root: str | None = None) -> None:
+async def reload_team_agents_from_db(team_id: int, workspace_root: str | None = None) -> None:
     """按 Team 维度重建运行时 Agent 实例。"""
-    team_suffix = f"@{team_name}"
-    keys_to_remove = [k for k in _agents.keys() if k.endswith(team_suffix)]
+    keys_to_remove = [agent_id for agent_id, agent in _agents.items() if agent.gt_agent.team_id == team_id]
     close_tasks: list[Any] = []
-    for key in keys_to_remove:
-        close_tasks.append(_agents[key].close())
+    for agent_id in keys_to_remove:
+        close_tasks.append(_agents[agent_id].close())
     if close_tasks:
         await asyncio.gather(*close_tasks, return_exceptions=True)
-    for key in keys_to_remove:
-        _agents.pop(key, None)
+    for agent_id in keys_to_remove:
+        _agents.pop(agent_id, None)
 
-    await load_team_ids_from_db()
-
-    team_row = await gtTeamManager.get_team(team_name)
+    team_row = await gtTeamManager.get_team_by_id(team_id)
     if team_row is None:
-        logger.warning(f"重建 Team Agent 失败: team '{team_name}' 不存在于配置中")
+        logger.warning(f"重建 Team Agent 失败: team_id={team_id} 不存在于配置中")
         return
 
     agent_rows = await gtAgentManager.get_team_agents(team_row.id)
@@ -585,45 +168,26 @@ async def reload_team_agents_from_db(team_name: str, workspace_root: str | None 
     await _create_team_agents(team_row, agent_rows, templates_by_id, workspace_root=workspace_root)
 
 
-def get_team_agent(team_name: str, agent_name: str) -> "Agent":
-    key = _make_agent_key(team_name, agent_name)
-    return _agents[key]
+def get_agent(agent_id: int) -> "Agent":
+    agent = _agents.get(agent_id)
+    if agent is None:
+        raise KeyError(f"agent not found: agent_id={agent_id}")
+    return agent
 
 
-def find_team_agent(team_name: str, agent_name: str) -> "Agent | None":
-    key = _make_agent_key(team_name, agent_name)
-    return _agents.get(key)
-
-
-def get_all_agents() -> List["Agent"]:
-    return list(_agents.values())
-
-
-def get_team_agent_status_map(team_name: str) -> dict[int, MemberStatus]:
+def get_team_runtime_status_map(team_id: int) -> dict[int, MemberStatus]:
     return {
-        agent.agent_id: agent.status
+        agent.gt_agent.id: agent.status
         for agent in _agents.values()
-        if agent.team_name == team_name and agent.agent_id > 0
+        if agent.gt_agent.id > 0 and agent.gt_agent.team_id == team_id
     }
 
-
-def find_agent_by_id(agent_id: int) -> "Agent | None":
-    return next((a for a in _agents.values() if a.agent_id == agent_id), None)
-
-
-async def list_team_agents(team_id: int) -> list[GtAgent]:
-    return await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.ON_BOARD)
-
-def get_team_agents(room_id: int) -> List["Agent"]:
+def get_room_agents(room_id: int) -> List["Agent"]:
     room = roomService.get_room(room_id)
     if room is None:
         return []
     members: List[str] = roomService.get_member_names(room_id)
-    return [_agents[_make_agent_key(room.team_name, n)] for n in members if _make_agent_key(room.team_name, n) in _agents]
-
-
-def get_all_rooms(team_name: str, agent_name: str) -> List[int]:
-    return roomService.get_rooms_for_agent(_team_ids.get(team_name), agent_name)
+    return [_agents[member_id] for n in members if (member_id := room.get_member_id(n)) in _agents]
 
 
 async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> list[GtAgent]:
@@ -694,9 +258,8 @@ async def overwrite_team_agent_employ_status(team_id: int, on_board_agent_ids: l
 
 
 async def shutdown() -> None:
-    global _agents, _team_ids
+    global _agents
     close_tasks: List[Any] = [a.close() for a in _agents.values()]
     if close_tasks:
         await asyncio.gather(*close_tasks, return_exceptions=True)
     _agents = {}
-    _team_ids = {}

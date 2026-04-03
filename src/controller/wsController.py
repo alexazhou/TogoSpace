@@ -13,12 +13,12 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
     def open(self):
         logger.info("[ws] WebSocket opened")
         messageBus.subscribe(MessageBusTopic.ROOM_MSG_ADDED, self._on_message_added)
-        messageBus.subscribe(MessageBusTopic.MEMBER_STATUS_CHANGED, self._on_member_status_changed)
+        messageBus.subscribe(MessageBusTopic.AGENT_STATUS_CHANGED, self._on_agent_status_changed)
 
     def on_close(self):
         logger.info("[ws] WebSocket closed")
         messageBus.unsubscribe(MessageBusTopic.ROOM_MSG_ADDED, self._on_message_added)
-        messageBus.unsubscribe(MessageBusTopic.MEMBER_STATUS_CHANGED, self._on_member_status_changed)
+        messageBus.unsubscribe(MessageBusTopic.AGENT_STATUS_CHANGED, self._on_agent_status_changed)
 
     def on_message(self, message):
         pass  # 只推不收，忽略客户端消息
@@ -39,15 +39,16 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
             self._send(json.dumps(event.model_dump(mode="json"), ensure_ascii=False))
         )
 
-    def _on_member_status_changed(self, msg) -> None:
+    def _on_agent_status_changed(self, msg) -> None:
+        gt_agent = msg.payload["gt_agent"]
         payload = {
-            "event": "member_status",
-            "member_name": msg.payload["member_name"],
-            "team_id": msg.payload["team_id"],
-            "team_name": msg.payload["team_name"],
+            "event": "agent_status",
+            "agent_name": gt_agent.name,
+            "agent_id": gt_agent.id,
+            "team_id": gt_agent.team_id,
             "status": msg.payload["status"],
         }
-        logger.info(f"[ws] member_status_changed: {payload}")
+        logger.info(f"[ws] agent_status_changed: {payload}")
         asyncio.get_event_loop().create_task(self._send(json.dumps(payload, ensure_ascii=False)))
 
     async def _send(self, payload: str) -> None:
