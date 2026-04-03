@@ -20,7 +20,7 @@ from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateM
 from service.roomService import ChatRoom, ToolCallContext
 from peewee import IntegrityError
 from exception import TeamAgentException
-from constants import AgentHistoryTag, AgentHistoryStage, SpecialAgent, MessageBusTopic, MemberStatus, DriverType, EmployStatus, RoomState
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, SpecialAgent, MessageBusTopic, MemberStatus, DriverType, EmployStatus, RoomState
 
 logger = logging.getLogger(__name__)
 
@@ -254,16 +254,19 @@ class Agent:
             logger.info(f"检测到工具调用: agent={self.key}, count={len(tool_calls)}")
             turn_done = False
             for tool_call in tool_calls:
+                assert tool_call.id, "tool_call.id should not be empty"
+                history_item = await self._append_tool_result_init(str(tool_call.id))
                 exec_result: ToolExecutionResult = await self.tool_registry.execute_tool_call(tool_call, context)
-                await self.append_history_message(
-                    llmApiUtil.OpenAIMessage.tool_result(exec_result.tool_call_id, exec_result.result_json),
-                    stage=AgentHistoryStage.TOOL_RESULT,
-                    success=exec_result.success,
+                await self._finalize_tool_result_history(
+                    history_item=history_item,
+                    tool_call_id=exec_result.tool_call_id,
+                    result_json=exec_result.result_json,
+                    status=exec_result.status,
                     error_message=exec_result.error_message,
                     tags=exec_result.tags,
                 )
                 if exec_result.turn_finished and (
-                    exec_result.success is True
+                    exec_result.status == AgentHistoryStatus.SUCCESS
                     or (self.current_room is not None and self.current_room.state == RoomState.INIT)
                 ):
                     turn_done = True
@@ -291,7 +294,7 @@ class Agent:
         await self.append_history_message(
             assistant_message,
             stage=AgentHistoryStage.INFER,
-            success=True,
+            status=AgentHistoryStatus.SUCCESS,
         )
 
         return assistant_message
@@ -302,6 +305,8 @@ class Agent:
             return
 
         for tool_call in last_msg.tool_calls:
+            assert tool_call.id, "tool_call.id should not be empty"
+            history_item = await self._append_tool_result_init(str(tool_call.id))
             function: dict[str, Any] = tool_call.function if isinstance(tool_call.function, dict) else {}
             name = function.get("name", "")
             args = function.get("arguments", "")
@@ -314,21 +319,62 @@ class Agent:
             result_data: dict[str, Any] = await funcToolService.run_tool_call(args, context=context)
             result = json.dumps(result_data, ensure_ascii=False)
             raw_success = result_data.get("success")
-            success = None if raw_success is None else bool(raw_success)
+            status = AgentHistoryStatus.FAILED if raw_success is False else AgentHistoryStatus.SUCCESS
             error_message = None
-            if success is False and result_data.get("message") is not None:
+            if status == AgentHistoryStatus.FAILED and result_data.get("message") is not None:
                 error_message = str(result_data.get("message"))
             tags: list[AgentHistoryTag] | None = None
-            if name == "finish_chat_turn" and success is True:
+            if name == "finish_chat_turn" and status == AgentHistoryStatus.SUCCESS:
                 tags = [AgentHistoryTag.ROOM_TURN_FINISH]
 
-            await self.append_history_message(
-                llmApiUtil.OpenAIMessage.tool_result(tool_call.id, result),
-                stage=AgentHistoryStage.TOOL_RESULT,
-                success=success,
+            await self._finalize_tool_result_history(
+                history_item=history_item,
+                tool_call_id=str(tool_call.id),
+                result_json=result,
+                status=status,
                 error_message=error_message,
                 tags=tags,
             )
+
+    async def _append_tool_result_init(self, tool_call_id: str) -> GtAgentHistory:
+        """工具执行前先落 INIT 记录，tool message content 为空字符串。"""
+        init_message = llmApiUtil.OpenAIMessage.tool_result(tool_call_id, "")
+        item: GtAgentHistory = self._history.append_message(
+            init_message,
+            stage=AgentHistoryStage.TOOL_RESULT,
+            status=AgentHistoryStatus.INIT,
+            error_message=None,
+            tags=None,
+        )
+        saved = await persistenceService.append_agent_history_message(item)
+        if saved is not None:
+            item.id = saved.id
+        return item
+
+    async def _finalize_tool_result_history(
+        self,
+        history_item: GtAgentHistory,
+        tool_call_id: str,
+        result_json: str,
+        status: AgentHistoryStatus,
+        error_message: str | None,
+        tags: list[AgentHistoryTag] | None,
+    ) -> None:
+        final_message = llmApiUtil.OpenAIMessage.tool_result(tool_call_id, result_json)
+        history_item.message_json = final_message.model_dump_json(exclude_none=True)
+        history_item.status = status
+        history_item.error_message = error_message
+        if tags is not None:
+            history_item.tags = list(tags)
+
+        assert history_item.id is not None, "history row id should not be None after append"
+        await persistenceService.update_agent_history_by_id(
+            history_id=history_item.id,
+            message_json=history_item.message_json,
+            status=status,
+            error_message=error_message,
+            tags=(history_item.tags if tags is not None else None),
+        )
 
     def dump_history_messages(self) -> List[GtAgentHistory]:
         return self._history.dump()
@@ -340,18 +386,22 @@ class Agent:
         self,
         message: llmApiUtil.OpenAIMessage,
         stage: AgentHistoryStage | None = None,
-        success: bool | None = None,
+        status: AgentHistoryStatus | None = None,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
-    ) -> None:
+    ) -> GtAgentHistory:
+        target_status = status or AgentHistoryStatus.SUCCESS
         item: GtAgentHistory = self._history.append_message(
             message,
             stage=stage,
-            success=success,
+            status=target_status,
             error_message=error_message,
             tags=tags,
         )
-        await persistenceService.append_agent_history_message(item)
+        saved = await persistenceService.append_agent_history_message(item)
+        if saved is not None:
+            item.id = saved.id
+        return item
 
 
 async def startup() -> None:

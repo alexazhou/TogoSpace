@@ -8,7 +8,7 @@ import service.ormService as ormService
 import service.presetService as presetService
 import service.roomService as roomService
 import service.teamService as teamService
-from constants import AgentHistoryTag, AgentHistoryStage, DriverType, EmployStatus, RoleTemplateType, RoomType
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, DriverType, EmployStatus, RoleTemplateType, RoomType
 from dal.db import (
     gtRoleTemplateManager,
     gtAgentHistoryManager,
@@ -622,7 +622,7 @@ class TestDalManagers(ServiceTestCase):
         assert saved_1.seq == 1
         assert saved_1.message_json == '{"content":"v1"}'
         assert saved_1.stage == AgentHistoryStage.INPUT
-        assert saved_1.success is None
+        assert saved_1.status == AgentHistoryStatus.INIT
         assert saved_1.error_message is None
         assert saved_1.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
@@ -685,3 +685,39 @@ class TestDalManagers(ServiceTestCase):
         bob_history = await gtAgentHistoryManager.get_agent_history(bob.id)
         assert [h.seq for h in bob_history] == [1]
         assert [h.tags for h in bob_history] == [[]]
+
+    async def test_member_history_manager_update_status_by_id(self):
+        await self._reset_tables()
+
+        await self._save_role_template("alice", "gpt-4o")
+
+        team = await gtTeamManager.save_team(GtTeam(name="history_team_3"))
+        configs = [AgentConfig(name="alice", role_template="alice")]
+        agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert alice is not None
+
+        saved = await gtAgentHistoryManager.append_agent_history_message(
+            GtAgentHistory(
+                agent_id=alice.id,
+                seq=1,
+                message_json='{"content":"v1"}',
+                tags=[],
+            )
+        )
+        assert saved.id is not None
+        assert saved.status == AgentHistoryStatus.INIT
+
+        updated = await gtAgentHistoryManager.update_agent_history_by_id(
+            history_id=saved.id,
+            message_json='{"role":"tool","tool_call_id":"call_1","content":"{\\"success\\": true}"}',
+            status=AgentHistoryStatus.FAILED,
+            error_message="tool failed",
+            tags=[AgentHistoryTag.ROOM_TURN_FINISH],
+        )
+        assert updated.id == saved.id
+        assert updated.message_json == '{"role":"tool","tool_call_id":"call_1","content":"{\\"success\\": true}"}'
+        assert updated.status == AgentHistoryStatus.FAILED
+        assert updated.error_message == "tool failed"
+        assert updated.tags == [AgentHistoryTag.ROOM_TURN_FINISH]

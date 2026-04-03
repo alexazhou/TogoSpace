@@ -6,7 +6,7 @@ import json
 import peewee
 from util import llmApiUtil
 
-from constants import AgentHistoryTag, AgentHistoryStage, OpenaiLLMApiRole
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiLLMApiRole
 
 from .base import DbModelBase, EnumField, EnumListField
 
@@ -16,7 +16,7 @@ class GtAgentHistory(DbModelBase):
     seq: int = peewee.IntegerField(null=False)
     message_json: str = peewee.TextField(null=False)
     stage: AgentHistoryStage = EnumField[AgentHistoryStage](AgentHistoryStage, null=False, default=AgentHistoryStage.INPUT)
-    success: bool | None = peewee.BooleanField(null=True)
+    status: AgentHistoryStatus = EnumField[AgentHistoryStatus](AgentHistoryStatus, null=False, default=AgentHistoryStatus.INIT)
     error_message: str | None = peewee.TextField(null=True)
     tags: list[AgentHistoryTag] = EnumListField[AgentHistoryTag](AgentHistoryTag, default=list)
 
@@ -33,7 +33,7 @@ class GtAgentHistory(DbModelBase):
         seq: int,
         message: llmApiUtil.OpenAIMessage,
         stage: AgentHistoryStage | None = None,
-        success: bool | None = None,
+        status: AgentHistoryStatus | None = None,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
     ) -> "GtAgentHistory":
@@ -42,7 +42,7 @@ class GtAgentHistory(DbModelBase):
             seq=seq,
             message_json=message.model_dump_json(exclude_none=True),
             stage=stage or cls.infer_stage_from_message(message),
-            success=success,
+            status=status or AgentHistoryStatus.SUCCESS,
             error_message=error_message,
             tags=[] if tags is None else list(tags),
         )

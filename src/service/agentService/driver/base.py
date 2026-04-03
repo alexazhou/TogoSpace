@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
-from constants import AgentHistoryTag, AgentHistoryStage, DriverType
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, DriverType
+from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistroy import AgentHistory
 from service.agentService.toolRegistry import AgentToolRegistry
 from service.roomService import ChatRoom
@@ -54,10 +55,10 @@ class AgentDriverHost(Protocol):
         self,
         message: llmApiUtil.OpenAIMessage,
         stage: AgentHistoryStage | None = None,
-        success: bool | None = None,
+        status: AgentHistoryStatus | None = None,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
-    ) -> None:
+    ) -> GtAgentHistory:
         ...
 
 

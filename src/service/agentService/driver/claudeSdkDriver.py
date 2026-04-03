@@ -13,7 +13,7 @@ from service.roomService import ToolCallContext
 from service.funcToolService.toolLoader import get_function_metadata
 from service.funcToolService.tools import FUNCTION_REGISTRY
 from service.roomService import ChatRoom
-from constants import AgentHistoryStage
+from constants import AgentHistoryStage, AgentHistoryStatus
 from util.chatMessageFormat import build_turn_context_prompt
 from util import llmApiUtil
 
@@ -141,7 +141,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
                     ],
                 ),
                 stage=AgentHistoryStage.INFER,
-                success=True,
+                status=AgentHistoryStatus.SUCCESS,
             )
 
             # 执行最后一条 assistant 消息中的 tool_call 并写入 tool_result

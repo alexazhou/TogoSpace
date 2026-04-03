@@ -1,6 +1,6 @@
 import pytest
 
-from constants import AgentHistoryTag, AgentHistoryStage, OpenaiLLMApiRole
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiLLMApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistroy import AgentHistory
 from util import llmApiUtil
@@ -18,7 +18,7 @@ def test_agent_history_append_message_persists_seq_and_tags():
     assert item.seq == 0
     assert item.content == "hello"
     assert item.stage == AgentHistoryStage.INPUT
-    assert item.success is None
+    assert item.status == AgentHistoryStatus.SUCCESS
     assert item.error_message is None
     assert item.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
     assert len(history) == 1

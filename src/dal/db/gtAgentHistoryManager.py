@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from constants import AgentHistoryTag
+from constants import AgentHistoryStatus
 from model.dbModel.gtAgentHistory import GtAgentHistory
 
 
@@ -11,7 +13,7 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
             seq=message.seq,
             message_json=message.message_json,
             stage=message.stage,
-            success=message.success,
+            status=message.status,
             error_message=message.error_message,
             tags=message.tags,
         )
@@ -24,6 +26,42 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
     )
     if row is None:
         raise RuntimeError(f"append agent history failed: agent_id={message.agent_id}#{message.seq}")
+    return row
+
+
+async def update_agent_history_by_id(
+    history_id: int,
+    *,
+    message_json: str | None = None,
+    status: AgentHistoryStatus | None = None,
+    error_message: str | None = None,
+    tags: list[AgentHistoryTag] | None = None,
+) -> GtAgentHistory:
+    update_fields: dict = {}
+    if message_json is not None:
+        update_fields["message_json"] = message_json
+    if status is not None:
+        update_fields["status"] = status
+    if error_message is not None:
+        update_fields["error_message"] = error_message
+    if tags is not None:
+        update_fields["tags"] = tags
+    if not update_fields:
+        raise ValueError(f"update agent history by id has no fields to update: id={history_id}")
+
+    await (
+        GtAgentHistory
+        .update(**update_fields)
+        .where(
+            GtAgentHistory.id == history_id,
+        )
+        .aio_execute()
+    )
+    row: GtAgentHistory | None = await GtAgentHistory.aio_get_or_none(
+        GtAgentHistory.id == history_id,
+    )
+    if row is None:
+        raise RuntimeError(f"update agent history status failed: id={history_id}")
     return row
 
 
