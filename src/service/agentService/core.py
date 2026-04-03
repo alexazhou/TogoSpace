@@ -284,16 +284,23 @@ class Agent:
             messages=self._history.export_openai_message_list(),
             tools=tools or None,
         )
+        history_item = await self._append_infer_init()
         infer_result: llmService.InferResult = await llmService.infer(self.model, ctx)
         if infer_result.ok == False or infer_result.response is None:
             error_message = infer_result.error_message or "unknown inference error"
+            await self._finalize_infer_history(
+                history_item=history_item,
+                message=None,
+                status=AgentHistoryStatus.FAILED,
+                error_message=error_message,
+            )
             raise RuntimeError(f"LLM 推理失败: agent={self.key}, error={error_message}") from infer_result.error
 
         response = infer_result.response
         assistant_message = response.choices[0].message
-        await self.append_history_message(
-            assistant_message,
-            stage=AgentHistoryStage.INFER,
+        await self._finalize_infer_history(
+            history_item=history_item,
+            message=assistant_message,
             status=AgentHistoryStatus.SUCCESS,
         )
 
@@ -337,8 +344,14 @@ class Agent:
             )
 
     async def _append_tool_result_init(self, tool_call_id: str) -> GtAgentHistory:
-        """工具执行前先落 INIT 记录，tool message content 为空字符串。"""
-        init_message = llmApiUtil.OpenAIMessage.tool_result(tool_call_id, "")
+        """工具执行前先落 INIT 记录，tool message content 为空（None）。"""
+        init_message = llmApiUtil.OpenAIMessage(
+            role=llmApiUtil.OpenaiLLMApiRole.TOOL,
+            content=None,
+            reasoning_content=None,
+            tool_calls=None,
+            tool_call_id=tool_call_id,
+        )
         item: GtAgentHistory = self._history.append_message(
             init_message,
             stage=AgentHistoryStage.TOOL_RESULT,
@@ -350,6 +363,49 @@ class Agent:
         if saved is not None:
             item.id = saved.id
         return item
+
+    async def _append_infer_init(self) -> GtAgentHistory:
+        """推理前先落 INIT 记录，assistant message content 为空（None）。"""
+        init_message = llmApiUtil.OpenAIMessage(
+            role=llmApiUtil.OpenaiLLMApiRole.ASSISTANT,
+            content=None,
+            reasoning_content=None,
+            tool_calls=None,
+            tool_call_id=None,
+        )
+        item: GtAgentHistory = self._history.append_message(
+            init_message,
+            stage=AgentHistoryStage.INFER,
+            status=AgentHistoryStatus.INIT,
+            error_message=None,
+            tags=None,
+        )
+        saved = await persistenceService.append_agent_history_message(item)
+        if saved is not None:
+            item.id = saved.id
+        return item
+
+    async def _finalize_infer_history(
+        self,
+        history_item: GtAgentHistory,
+        message: llmApiUtil.OpenAIMessage | None,
+        status: AgentHistoryStatus,
+        error_message: str | None = None,
+    ) -> None:
+        message_json: str | None = None
+        if message is not None:
+            message_json = message.model_dump_json(exclude_none=True)
+            history_item.message_json = message_json
+        history_item.status = status
+        history_item.error_message = error_message
+
+        assert history_item.id is not None, "history row id should not be None after append"
+        await persistenceService.update_agent_history_by_id(
+            history_id=history_item.id,
+            message_json=message_json,
+            status=status,
+            error_message=error_message,
+        )
 
     async def _finalize_tool_result_history(
         self,

@@ -45,6 +45,15 @@ class AgentHistory:
         return last_item.role
 
     def assert_infer_ready(self, agent_key: str) -> None:
+        last_item = self.last()
+        if (
+            last_item is not None
+            and last_item.role == llmApiUtil.OpenaiLLMApiRole.ASSISTANT
+            and last_item.stage == AgentHistoryStage.INFER
+            and last_item.status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED)
+        ):
+            return
+
         last_role = self.last_role()
         assert last_role in (
             llmApiUtil.OpenaiLLMApiRole.USER,

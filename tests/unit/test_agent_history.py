@@ -59,6 +59,25 @@ def test_agent_history_assert_infer_ready_rejects_assistant_tail():
         history.assert_infer_ready("alice@test_team")
 
 
+def test_agent_history_assert_infer_ready_accepts_failed_or_init_infer_tail():
+    history_failed = AgentHistory(agent_id=1)
+    history_failed.append_message(
+        llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, ""),
+        stage=AgentHistoryStage.INFER,
+        status=AgentHistoryStatus.FAILED,
+        error_message="mock error",
+    )
+    history_failed.assert_infer_ready("alice@test_team")
+
+    history_init = AgentHistory(agent_id=1)
+    history_init.append_message(
+        llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, ""),
+        stage=AgentHistoryStage.INFER,
+        status=AgentHistoryStatus.INIT,
+    )
+    history_init.assert_infer_ready("alice@test_team")
+
+
 def test_agent_history_export_openai_message_list_round_trips_messages():
     user_msg = llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")
     tool_msg = llmApiUtil.OpenAIMessage.tool_result("call_1", '{"success": true}')
