@@ -31,8 +31,8 @@ class TestRoomController(_ApiServiceCase):
             async with client.get(f"{self.backend_base_url}/rooms/list.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
-        room = next(r for r in data["rooms"] if r["room_name"] == room_name and r["team_name"] == team_name)
-        return room["room_id"]
+        room = next(r for r in data["rooms"] if r["gt_room"]["name"] == room_name and r["team_name"] == team_name)
+        return room["gt_room"]["id"]
 
     async def test_get_rooms(self):
         """验证 GET /rooms 返回正确的房间列表及字段结构。"""
@@ -43,12 +43,12 @@ class TestRoomController(_ApiServiceCase):
         assert "rooms" in data
         assert len(data["rooms"]) > 0
         room = data["rooms"][0]
-        assert "room_id" in room
-        assert "room_name" in room
+        assert "gt_room" in room
         assert "team_name" in room
         assert "state" in room
         assert "agents" in room
-        assert "agent_ids" in room
+        assert "id" in room["gt_room"]
+        assert "agent_ids" in room["gt_room"]
         assert "SYSTEM" not in room["agents"]
 
     async def test_get_room_messages(self):
@@ -114,8 +114,8 @@ class TestRoomControllerPrivate(_ApiServiceCase):
             async with client.get(f"{self.backend_base_url}/rooms/list.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
-        room = next(r for r in data["rooms"] if r["room_name"] == room_name and r["team_name"] == team_name)
-        return room["room_id"]
+        room = next(r for r in data["rooms"] if r["gt_room"]["name"] == room_name and r["team_name"] == team_name)
+        return room["gt_room"]["id"]
 
     async def test_room_types_in_list(self):
         """验证 GET /rooms 正确返回 room_type 和 team_name 字段。"""
@@ -127,15 +127,15 @@ class TestRoomControllerPrivate(_ApiServiceCase):
         rooms = [room for room in data["rooms"] if room["team_name"] == _V6_TEAM]
         assert len(rooms) == 2
 
-        private_room = next(r for r in rooms if r["room_name"] == "alice_private")
-        assert RoomType.value_of(private_room["room_type"]) == RoomType.PRIVATE
+        private_room = next(r for r in rooms if r["gt_room"]["name"] == "alice_private")
+        assert RoomType.value_of(private_room["gt_room"]["type"]) == RoomType.PRIVATE
         assert private_room["team_name"] == _V6_TEAM
-        assert any(agent_id == int(SpecialAgent.OPERATOR.value) for agent_id in private_room["agent_ids"])
+        assert any(agent_id == int(SpecialAgent.OPERATOR.value) for agent_id in private_room["gt_room"]["agent_ids"])
 
-        group_room = next(r for r in rooms if r["room_name"] == "public_group")
-        assert RoomType.value_of(group_room["room_type"]) == RoomType.GROUP
+        group_room = next(r for r in rooms if r["gt_room"]["name"] == "public_group")
+        assert RoomType.value_of(group_room["gt_room"]["type"]) == RoomType.GROUP
         assert group_room["team_name"] == _V6_TEAM
-        assert not any(agent_id == int(SpecialAgent.OPERATOR.value) for agent_id in group_room["agent_ids"])
+        assert not any(agent_id == int(SpecialAgent.OPERATOR.value) for agent_id in group_room["gt_room"]["agent_ids"])
 
 
     async def test_post_message_to_private_room(self):
