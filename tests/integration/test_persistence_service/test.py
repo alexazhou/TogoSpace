@@ -62,10 +62,12 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "r1", ["alice", "bob"], max_turns=3)
         room = roomService.get_room_by_key(f"r1@{TEAM}")
         await room.activate_scheduling()
-        await room.add_message("alice", "hello")
-        await room.get_unread_messages("bob")
-        await room.add_message("bob", "world")
-        await room.get_unread_messages("alice")
+        alice_id = room.get_agent_id_by_name("alice")
+        bob_id = room.get_agent_id_by_name("bob")
+        await room.add_message(alice_id, "hello")
+        await room.get_unread_messages(bob_id)
+        await room.add_message(bob_id, "world")
+        await room.get_unread_messages(alice_id)
 
         # 模拟进程重启：关闭再重新打开同一 DB
         await persistenceService.shutdown()

@@ -174,8 +174,10 @@ class TestToolFunctions(ServiceTestCase):
         """有上下文时返回当前房间中可见的发言者列表。"""
         await roomService.ensure_room_record(TEAM, "r", ["alice", "bob"])
         room = roomService.get_room_by_key(f"r@{TEAM}")
-        await room.add_message("alice", "hi")
-        await room.add_message("bob", "there")
+        alice_id = room.get_agent_id_by_name("alice")
+        bob_id = room.get_agent_id_by_name("bob")
+        await room.add_message(alice_id, "hi")
+        await room.add_message(bob_id, "there")
         ctx = ToolCallContext(agent_name="alice", team_id=room.team_id, chat_room=room)
         result = get_agent_list(_context=ctx)
         assert "alice" in result["agents"] and "bob" in result["agents"]

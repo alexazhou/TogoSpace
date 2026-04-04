@@ -78,8 +78,8 @@ class TestRoomRegistry(ServiceTestCase):
         r2 = roomService.get_room_by_key(f"r2@{TEAM}")
         r3 = roomService.get_room_by_key(f"r3@{TEAM}")
 
-        assert roomService.get_rooms_for_agent(r1.team_id, "alice") == [r1.room_id, r3.room_id]
-        assert roomService.get_rooms_for_agent(r1.team_id, "bob") == [r2.room_id, r3.room_id]
+        assert roomService.get_rooms_for_agent(r1.team_id, self.agent_ids["alice"]) == [r1.room_id, r3.room_id]
+        assert roomService.get_rooms_for_agent(r1.team_id, self.agent_ids["bob"]) == [r2.room_id, r3.room_id]
 
     async def test_create_rooms_keeps_empty_history_before_activation(self):
         """批量建房路径在激活前不应预先塞入初始化消息。"""
@@ -117,7 +117,7 @@ class TestRoomRegistry(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "special_room", ["Operator", "alice"])
         room = roomService.get_room_by_key(f"special_room@{TEAM}")
 
-        assert room.get_agent_id(SpecialAgent.SYSTEM.name) == ChatRoom.SYSTEM_MEMBER_ID
-        assert room.get_agent_id(SpecialAgent.OPERATOR.name) == ChatRoom.OPERATOR_MEMBER_ID
-        assert room.get_agent_id("alice") == self.agent_ids["alice"]
-        assert room.get_agent_id("unknown") == 0
+        assert room.get_agent_id_by_name(SpecialAgent.SYSTEM.name) == ChatRoom.SYSTEM_MEMBER_ID
+        assert room.get_agent_id_by_name(SpecialAgent.OPERATOR.name) == ChatRoom.OPERATOR_MEMBER_ID
+        assert room.get_agent_id_by_name("alice") == self.agent_ids["alice"]
+        assert room.get_agent_id_by_name("unknown") == 0

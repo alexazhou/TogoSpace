@@ -141,13 +141,8 @@ class ChatRoom:
     def state(self) -> RoomState:
         return self._state
 
-    async def get_unread_messages(self, agent: int | str) -> List[GtCoreChatMessage]:
-        """返回 agent 尚未读取的新消息，并推进其读取位置。
-
-        Args:
-            agent: agent_id (int) 或 agent_name (str，兼容旧接口)
-        """
-        agent_id = agent if isinstance(agent, int) else self.get_agent_id_by_name(agent)
+    async def get_unread_messages(self, agent_id: int) -> List[GtCoreChatMessage]:
+        """返回 agent_id 尚未读取的新消息，并推进其读取位置。"""
         read_idx = self._agent_read_index.get(agent_id, 0)
         new_msgs = self.messages[read_idx:]
         self._agent_read_index[agent_id] = len(self.messages)
@@ -156,15 +151,8 @@ class ChatRoom:
             await gtRoomManager.update_room_state(self.room_id, id_keyed)
         return new_msgs
 
-    async def add_message(self, sender: int | str, content: str, send_time: datetime | None = None) -> None:
-        """添加消息到房间。
-
-        Args:
-            sender: 发送者 agent_id (int) 或 agent_name (str，兼容旧接口)
-            content: 消息内容
-            send_time: 发送时间
-        """
-        sender_id = sender if isinstance(sender, int) else self.get_agent_id_by_name(sender)
+    async def add_message(self, sender_id: int, content: str, send_time: datetime | None = None) -> None:
+        """添加消息到房间。"""
         await self._append_message(sender_id, content, send_time=send_time)
 
     async def _append_message(
@@ -234,11 +222,8 @@ class ChatRoom:
             if next_agent_id is not None:
                 self._publish_current_turn(next_agent_id)
 
-    def finish_turn(self, sender: int | str | None = None) -> bool:
+    def finish_turn(self, sender_id: int | None = None) -> bool:
         """结束当前发言人的轮次。通常由 Agent 在 finish_chat_turn 工具中调用。
-
-        Args:
-            sender: 发送者 agent_id (int) 或 agent_name (str，兼容旧接口)
 
         返回 True 表示操作成功，False 表示被拒绝（sender 不是当前发言人）。
         """
@@ -247,10 +232,6 @@ class ChatRoom:
             return False
 
         current_expected: Optional[int] = self.get_current_turn_agent()
-
-        sender_id: int | None = None
-        if sender is not None:
-            sender_id = sender if isinstance(sender, int) else self.get_agent_id_by_name(sender)
 
         if sender_id is not None and sender_id != current_expected:
             logger.warning(f"拒绝结束轮次申请：agent_id={sender_id} 并非当前发言人 (agent_id={current_expected})")
@@ -287,10 +268,6 @@ class ChatRoom:
         if agent_id is None:
             return None
         return self._get_agent_name(agent_id)
-
-    def get_agent_id(self, name: str) -> int:
-        """根据 Agent 名称获取 agent_id（兼容旧接口）。"""
-        return self.get_agent_id_by_name(name)
 
     def _should_auto_skip_agent_turn(self, agent_id: int | None) -> bool:
         """判断当前发言位是否应被自动跳过（不等待外部输入）。
@@ -764,33 +741,19 @@ def get_agent_names(room_id: int) -> List[str]:
     return room.agents if room is not None else []
 
 
-def get_rooms_for_agent(team_id: int | None, agent: int | str) -> List[int]:
-        """返回指定参与者所在的房间 room_id 列表。可选按 team 过滤。
+def get_rooms_for_agent(team_id: int | None, agent_id: int) -> List[int]:
+    """返回指定参与者所在的房间 room_id 列表。可选按 team 过滤。
 
-        Args:
-            team_id: Team ID，为 None 时不过滤
-            agent: agent_id (int) 或 agent_name (str)
-        """
-        agent_id = agent if isinstance(agent, int) else None
-        if agent_id is None and isinstance(agent, str):
-            # 通过 name 查找 agent_id
-            for room in _rooms.values():
-                if team_id is not None and room.team_id != team_id:
-                    continue
-                aid = room.get_agent_id_by_name(agent)
-                if aid > 0:
-                    agent_id = aid
-                    break
-
-        if agent_id is None:
-            return []
-
-        results = []
-        for room in _rooms.values():
-            if agent_id in room._agent_ids:
-                if team_id is None or room.team_id == team_id:
-                    results.append(room.room_id)
-        return results
+    Args:
+        team_id: Team ID，为 None 时不过滤
+        agent_id: Agent ID
+    """
+    results = []
+    for room in _rooms.values():
+        if agent_id in room._agent_ids:
+            if team_id is None or room.team_id == team_id:
+                results.append(room.room_id)
+    return results
 
 
 async def refresh_rooms_for_team(team_id: int) -> None:
