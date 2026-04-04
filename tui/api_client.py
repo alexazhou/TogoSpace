@@ -47,11 +47,13 @@ class WsEvent:
     room_id: int | None = None
     room_key: str | None = None
     room_name: str | None = None
+    team_id: int | None = None
     team_name: str | None = None
     sender: str | None = None
     content: str | None = None
     time: datetime | None = None
-    member_name: str | None = None
+    agent_id: int | None = None
+    agent_name: str | None = None
     status: str | None = None
 
 
@@ -158,16 +160,18 @@ class ApiClient:
                                     room_id=data["room_id"],
                                     room_key=data.get("room_key"),
                                     room_name=data["room_name"],
+                                    team_id=data.get("team_id"),
                                     team_name=data.get("team_name", ""),
                                     sender=data["sender"],
                                     content=data["content"],
                                     time=datetime.fromisoformat(data["time"]),
                                 )
-                            elif event_type == "member_status":
+                            elif event_type == "agent_status":
                                 yield WsEvent(
                                     event=event_type,
-                                    member_name=data["member_name"],
-                                    team_name=data.get("team_name", ""),
+                                    agent_id=data["agent_id"],
+                                    agent_name=data["agent_name"],
+                                    team_id=data["team_id"],
                                     status=data["status"],
                                 )
                             else:
