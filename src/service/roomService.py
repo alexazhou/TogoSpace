@@ -246,9 +246,7 @@ class ChatRoom:
         if not self._agent_ids:
             return True
 
-        if not self._go_next_turn():
-            return True
-
+        self._go_next_turn()
         next_agent_id = self._resolve_next_dispatchable_agent()
         if next_agent_id is not None:
             self._publish_current_turn(next_agent_id)
@@ -307,13 +305,13 @@ class ChatRoom:
            - 若是普通 Agent，返回其 ID 供上层发布事件
 
         返回 None 表示当前不应发布调度事件，原因可能是：
-        - 房间已命中停止条件（_try_stop_scheduling 返回 True）
+        - 房间已命中停止条件（_should_stop_scheduling 返回 True）
         - 当前发言位是需要等待外部输入的 SpecialAgent（如 PRIVATE 房间的 OPERATOR）
         """
         if not self._agent_ids:
             return None
 
-        if self._try_stop_scheduling():
+        if self._should_stop_scheduling():
             return None
 
         while True:
@@ -327,7 +325,7 @@ class ChatRoom:
                 self._current_turn_has_content = False
 
                 self._go_next_turn()
-                if self._try_stop_scheduling():
+                if self._should_stop_scheduling():
                     return None
                 continue
 
@@ -341,7 +339,7 @@ class ChatRoom:
 
             return next_id
 
-    def _try_stop_scheduling(self) -> bool:
+    def _should_stop_scheduling(self) -> bool:
         """集中判断并应用停止条件；满足任一条件则切到 IDLE 并返回 True。"""
         if self._turn_count >= self._max_turns:
             if self._state != RoomState.IDLE:
@@ -358,7 +356,7 @@ class ChatRoom:
             return True
         return False
 
-    def _go_next_turn(self) -> bool:
+    def _go_next_turn(self) -> None:
         """推进到下一发言位。"""
         self._turn_pos = (self._turn_pos + 1) % len(self._agent_ids)
 
@@ -366,8 +364,6 @@ class ChatRoom:
         # 只有在跨轮时才推进 turn_count。
         if self._turn_pos == 0:
             self._turn_count += 1
-
-        return True
 
     async def activate_scheduling(self) -> bool:
         """激活/重发调度。
