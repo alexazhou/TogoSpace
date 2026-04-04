@@ -269,7 +269,7 @@ class ChatRoom:
             return None
         return self._get_agent_name(agent_id)
 
-    def _should_auto_skip_agent_turn(self, agent_id: int | None) -> bool:
+    def _should_auto_skip_agent_turn(self) -> bool:
         """判断当前发言位是否应被自动跳过（不等待外部输入）。
 
         仅针对 GROUP 房间中的 OPERATOR：当成员数 > 2 时，OPERATOR 的回合会被自动跳过，
@@ -277,6 +277,7 @@ class ChatRoom:
 
         返回 True 表示应自动跳过并推进；返回 False 表示需等待该成员完成本轮。
         """
+        agent_id = self.get_current_turn_agent()
         return (
             agent_id is not None
             and agent_id == self.OPERATOR_MEMBER_ID
@@ -322,7 +323,7 @@ class ChatRoom:
         while True:
             next_id: Optional[int] = self.get_current_turn_agent()
 
-            if self._should_auto_skip_agent_turn(next_id):
+            if self._should_auto_skip_agent_turn():
                 logger.info(f"房间 {self.key} 自动跳过人类操作者回合: agent_id={next_id}")
                 if next_id is not None:
                     self._round_skipped_set.add(next_id)
