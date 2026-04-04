@@ -80,8 +80,7 @@
 
 注意：
 
-- 事件名已经是 `ROOM_AGENT_TURN`，不再是旧文档里的 `ROOM_MEMBER_TURN`。
-- `_publish_current_turn()` 当前不会为 `SpecialAgent` 发布调度事件。
+- `SpecialAgent` 的等待/跳过逻辑在 `_resolve_next_dispatchable_agent()` 中处理；`_publish_current_turn()` 只负责发布普通 Agent 事件。
 
 ### 4.2 Scheduler 创建数据库任务
 

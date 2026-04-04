@@ -30,7 +30,7 @@
 
 从调度角度看，链路保持不变：
 
-1. `schedulerService` 收到 `ROOM_MEMBER_TURN`
+1. `schedulerService` 收到 `ROOM_AGENT_TURN`
 2. scheduler 找到对应 `Agent`
 3. scheduler 调用 `agent.consume_task(...)`
 4. `Agent.consume_task()` 调用 `agent.run_chat_turn(...)`

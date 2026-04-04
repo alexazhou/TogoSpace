@@ -255,7 +255,7 @@ class ChatRoom:
             return None
         return self._agent_names[self._turn_pos]
 
-    def _should_auto_skip_operator_turn(self, agent_name: str | None) -> bool:
+    def _should_auto_skip_agent_turn(self, agent_name: str | None) -> bool:
         return (
             agent_name is not None
             and SpecialAgent.value_of(agent_name) == SpecialAgent.OPERATOR
@@ -265,15 +265,6 @@ class ChatRoom:
 
     def _publish_current_turn(self, agent_name: str) -> None:
         """仅发布指定 Agent 的发言事件，不处理状态推进。"""
-        special_agent = SpecialAgent.value_of(agent_name)
-        if special_agent is not None:
-            logger.info(
-                "当前发言位为特殊成员，跳过 ROOM_AGENT_TURN 发布: room=%s, agent=%s",
-                self.key,
-                special_agent.name,
-            )
-            return
-
         gt_agent = self.get_gt_agent(agent_name)
         assert gt_agent is not None, f"room agent not found while publishing turn: room={self.key}, agent={agent_name}"
         messageBus.publish(
@@ -283,7 +274,12 @@ class ChatRoom:
         )
 
     def _resolve_next_dispatchable_agent(self) -> Optional[str]:
-        """根据当前状态解析下一位可被调度的 Agent 名；若应停止则返回 None。"""
+        """根据当前状态解析下一位可发布 ROOM_AGENT_TURN 的普通 Agent 名。
+
+        返回 None 表示当前不应发布调度事件，可能是因为：
+        - 房间已命中停止条件
+        - 当前发言位是需要等待人工输入的特殊成员
+        """
         if not self._agent_names:
             return None
 
@@ -293,7 +289,7 @@ class ChatRoom:
         while True:
             next_name: Optional[str] = self.get_current_turn_agent()
 
-            if self._should_auto_skip_operator_turn(next_name):
+            if self._should_auto_skip_agent_turn(next_name):
                 logger.info(f"房间 {self.key} 自动跳过人类操作者回合: agent={next_name}")
                 self._round_skipped_set.add(next_name)
                 self._current_turn_has_content = False
@@ -301,6 +297,15 @@ class ChatRoom:
                 if not self._go_next_turn():
                     return None
                 continue
+
+            special_agent = SpecialAgent.value_of(next_name)
+            if special_agent is not None:
+                logger.info(
+                    "当前发言位为特殊成员，等待外部输入，不发布 ROOM_AGENT_TURN: room=%s, agent=%s",
+                    self.key,
+                    special_agent.name,
+                )
+                return None
 
             return next_name
 
