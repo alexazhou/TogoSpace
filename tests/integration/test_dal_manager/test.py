@@ -8,10 +8,11 @@ import service.ormService as ormService
 import service.presetService as presetService
 import service.roomService as roomService
 import service.teamService as teamService
-from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, DriverType, EmployStatus, RoleTemplateType, RoomType
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, AgentTaskStatus, AgentTaskType, DriverType, EmployStatus, RoleTemplateType, RoomType
 from dal.db import (
     gtRoleTemplateManager,
     gtAgentHistoryManager,
+    gtAgentTaskManager,
     gtRoomManager,
     gtRoomMessageManager,
     gtTeamManager,
@@ -19,6 +20,7 @@ from dal.db import (
 )
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
@@ -45,6 +47,7 @@ class TestDalManagers(ServiceTestCase):
     async def _reset_tables(self):
         await GtRoleTemplate.delete().aio_execute()
         await GtAgent.delete().aio_execute()
+        await GtAgentTask.delete().aio_execute()
         await GtRoomMessage.delete().aio_execute()
         await GtAgentHistory.delete().aio_execute()
         await GtRoom.delete().aio_execute()
@@ -716,3 +719,66 @@ class TestDalManagers(ServiceTestCase):
         assert updated.status == AgentHistoryStatus.FAILED
         assert updated.error_message == "tool failed"
         assert updated.tags == [AgentHistoryTag.ROOM_TURN_FINISH]
+
+    # ------------------------------------------------------------------
+    # gtAgentTaskManager
+    # ------------------------------------------------------------------
+    async def test_agent_task_manager_get_first_pending_task_returns_earliest(self):
+        """没有 failed 任务时，返回最早的 pending 任务。"""
+        await self._reset_tables()
+
+        await self._save_role_template("alice", "gpt-4o")
+        team = await gtTeamManager.save_team(GtTeam(name="task_team"))
+        configs = [AgentConfig(name="alice", role_template="alice")]
+        agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert alice is not None
+
+        # 创建多个 pending 任务
+        task1 = await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 1})
+        task2 = await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 2})
+
+        first = await gtAgentTaskManager.get_first_pending_task(alice.id)
+        assert first is not None
+        assert first.id == task1.id
+
+    async def test_agent_task_manager_get_first_pending_task_blocked_by_failed(self):
+        """有 failed 任务时，不能获取到 pending 任务。"""
+        await self._reset_tables()
+
+        await self._save_role_template("alice", "gpt-4o")
+        team = await gtTeamManager.save_team(GtTeam(name="task_team_2"))
+        configs = [AgentConfig(name="alice", role_template="alice")]
+        agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert alice is not None
+
+        # 创建一个 failed 任务
+        task1 = await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 1})
+        await gtAgentTaskManager.update_task_status(task1.id, AgentTaskStatus.FAILED, "something went wrong")
+
+        # 创建更多 pending 任务
+        await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 2})
+        await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 3})
+
+        # 有 failed 任务时，不能获取到 pending 任务
+        first = await gtAgentTaskManager.get_first_pending_task(alice.id)
+        assert first is None
+
+    async def test_agent_task_manager_get_first_pending_task_no_pending(self):
+        """没有 pending 任务时返回 None。"""
+        await self._reset_tables()
+
+        await self._save_role_template("alice", "gpt-4o")
+        team = await gtTeamManager.save_team(GtTeam(name="task_team_3"))
+        configs = [AgentConfig(name="alice", role_template="alice")]
+        agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert alice is not None
+
+        # 没有 pending 任务
+        first = await gtAgentTaskManager.get_first_pending_task(alice.id)
+        assert first is None
