@@ -170,7 +170,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         for agent_name in ["alice", "bob"]:
             agent = agentService.get_agent(room.get_agent_id(agent_name))
             agent.status = AgentStatus.IDLE
-            agent.current_task = None
+            agent.current_db_task = None
             agent.inject_history_messages([])
 
         # 预定义每个 agent 的调用序列

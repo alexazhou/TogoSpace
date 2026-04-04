@@ -55,7 +55,7 @@ class _DummyHost:
     model: str = "mock-model"
     team_workdir: str = "/tmp"
     workspace_root: str = "/tmp/workspaces"
-    current_task: GtAgentTask | None = None
+    current_db_task: GtAgentTask | None = None
     _history: AgentHistoryStore = field(default_factory=lambda: AgentHistoryStore(agent_id=1))
     tool_registry: AgentToolRegistry = field(default_factory=AgentToolRegistry)
 
@@ -140,7 +140,7 @@ def mock_tsp_host():
     host.team_workdir = "/tmp"
     host._infer = AsyncMock()
     host.append_history_message = AsyncMock()
-    host.current_task = MagicMock()
+    host.current_db_task = MagicMock()
     host.tool_registry = AgentToolRegistry()
     return host
 
