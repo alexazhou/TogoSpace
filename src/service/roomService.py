@@ -124,9 +124,7 @@ class ChatRoom:
         return 0
 
     def get_gt_agent(self, agent_id: int) -> GtAgent | None:
-        """根据 agent_id 获取运行态房间中的普通 Agent 对象。"""
-        if agent_id in (self.SYSTEM_MEMBER_ID, self.OPERATOR_MEMBER_ID):
-            return None
+        """根据 agent_id 获取运行态房间中的 Agent 对象（包含 SpecialAgent）。"""
         return self._get_agent_by_id(agent_id)
 
     def can_post_message(self, sender_id: int) -> bool:
@@ -206,7 +204,7 @@ class ChatRoom:
             self._state = RoomState.SCHEDULING
 
         # 2. 只有当前顺序发言人说话，才标记本轮有内容。不再自动推进
-        current_expected: Optional[int] = self.get_current_turn_agent()
+        current_expected = self._get_current_turn_agent_id()
         if sender_id == current_expected:
             self._current_turn_has_content = True
         else:
@@ -231,7 +229,7 @@ class ChatRoom:
             logger.warning(f"房间 {self.key} 仍处于 INIT，拒绝结束轮次")
             return False
 
-        current_expected: Optional[int] = self.get_current_turn_agent()
+        current_expected = self._get_current_turn_agent_id()
 
         if sender_id is not None and sender_id != current_expected:
             logger.warning(f"拒绝结束轮次申请：agent_id={sender_id} 并非当前发言人 (agent_id={current_expected})")
@@ -256,18 +254,23 @@ class ChatRoom:
             self._publish_current_turn(next_agent_id)
         return True
 
-    def get_current_turn_agent(self) -> Optional[int]:
-        """返回当前理论上应该发言的 Agent ID（忽略 IDLE 状态）。"""
+    def _get_current_turn_agent_id(self) -> Optional[int]:
+        """返回当前理论上应该发言的 Agent ID（内部方法，忽略 IDLE 状态）。"""
         if not self._agent_ids:
             return None
         return self._agent_ids[self._turn_pos]
 
-    def get_current_turn_agent_name(self) -> Optional[str]:
-        """返回当前理论上应该发言的 Agent 名称（用于日志和测试）。"""
-        agent_id = self.get_current_turn_agent()
+    def get_current_turn_agent(self) -> Optional[GtAgent]:
+        """返回当前理论上应该发言的 GtAgent 对象（忽略 IDLE 状态）。"""
+        agent_id = self._get_current_turn_agent_id()
         if agent_id is None:
             return None
-        return self._get_agent_name(agent_id)
+        return self.get_gt_agent(agent_id)
+
+    def get_current_turn_agent_name(self) -> Optional[str]:
+        """返回当前理论上应该发言的 Agent 名称（用于日志和测试）。"""
+        agent = self.get_current_turn_agent()
+        return agent.name if agent else None
 
     def _should_auto_skip_agent_turn(self) -> bool:
         """判断当前发言位是否应被自动跳过（不等待外部输入）。
@@ -277,7 +280,7 @@ class ChatRoom:
 
         返回 True 表示应自动跳过并推进；返回 False 表示需等待该成员完成本轮。
         """
-        agent_id = self.get_current_turn_agent()
+        agent_id = self._get_current_turn_agent_id()
         return (
             agent_id is not None
             and agent_id == self.OPERATOR_MEMBER_ID
@@ -321,7 +324,8 @@ class ChatRoom:
             return None
 
         while True:
-            next_id: Optional[int] = self.get_current_turn_agent()
+            next_agent = self.get_current_turn_agent()
+            next_id = next_agent.id if next_agent else None
 
             if self._should_auto_skip_agent_turn():
                 logger.info(f"房间 {self.key} 自动跳过人类操作者回合: agent_id={next_id}")
