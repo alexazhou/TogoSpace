@@ -72,7 +72,7 @@ class TestSchedulerRun(ServiceTestCase):
         await asyncio.wait_for(run_task, timeout=2.0)
 
     async def test_scheduler_runs_agent_on_turn_event(self, monkeypatch):
-        """发布 ROOM_AGENT_TURN 后，scheduler 应触发 Agent 的消费 task 管理。"""
+        """发布 ROOM_AGENT_TURN 后，scheduler 应触发 Agent 启动消费协程。"""
         alice = _make_mock_agent("alice")
         room = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -113,7 +113,7 @@ class TestSchedulerRun(ServiceTestCase):
             # scheduler 内部只做委派，给一个短暂让渡时间以保持测试时序稳定。
             await asyncio.sleep(0.5)
 
-            alice.ensure_consumer_task_running.assert_called_once_with()
+            alice.start_consumer_task.assert_called_once_with()
 
             scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)
@@ -160,7 +160,7 @@ class TestSchedulerRun(ServiceTestCase):
         assert real_agent.status == AgentStatus.FAILED
 
     async def test_on_agent_turn_creates_task(self, monkeypatch):
-        """收到 ROOM_AGENT_TURN 消息后，创建任务并触发消费 task 启动。"""
+        """收到 ROOM_AGENT_TURN 消息后，创建任务并触发消费协程启动。"""
         alice = _make_mock_agent("alice")
         room = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -195,7 +195,7 @@ class TestSchedulerRun(ServiceTestCase):
             )
             await scheduler._on_agent_turn(msg)
 
-        alice.ensure_consumer_task_running.assert_called_once_with()
+        alice.start_consumer_task.assert_called_once_with()
 
     async def test_duplicate_room_event_is_skipped(self, monkeypatch):
         """同一房间连续触发两次 ROOM_AGENT_TURN，第二次应被跳过。"""

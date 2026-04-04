@@ -28,7 +28,7 @@ def stop_agent_task(agent_id: int) -> None:
 
 
 async def _on_agent_turn(msg: EventBusMessage) -> None:
-    """订阅 ROOM_AGENT_TURN：创建任务记录，并在需要时启动消费 task。"""
+    """订阅 ROOM_AGENT_TURN：创建任务记录，并在需要时启动消费协程。"""
     agent_id: int = msg.payload["agent_id"]
     room_id: int = msg.payload["room_id"]
 
@@ -49,7 +49,7 @@ async def _on_agent_turn(msg: EventBusMessage) -> None:
         {"room_id": room_id},
     )
 
-    agent.ensure_consumer_task_running()
+    agent.start_consumer_task()
 
 
 async def run() -> None:
