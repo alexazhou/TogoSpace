@@ -1,7 +1,6 @@
 import os
 import sys
 
-import aiosqlite
 import pytest
 
 from tests.base import ServiceTestCase
@@ -440,13 +439,10 @@ class TestDeptService(ServiceTestCase):
         assert alice_after.employ_status == EmployStatus.OFF_BOARD
 
         # 确认 DB 中存的是字符串 "OFF_BOARD"，而非数字或小写
-        db_path = ormService.get_db_path()
-        assert db_path is not None
-        async with aiosqlite.connect(db_path) as conn:
-            async with conn.execute(
-                "SELECT employ_status FROM agents WHERE id = ?", (alice.id,)
-            ) as cursor:
-                row = await cursor.fetchone()
+        db = ormService.get_db()
+        with db.allow_sync():
+            cursor = db.execute_sql("SELECT employ_status FROM agents WHERE id = ?", (alice.id,))
+            row = cursor.fetchone()
         assert row is not None
         assert row[0] == "OFF_BOARD"
 

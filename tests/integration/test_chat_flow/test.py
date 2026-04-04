@@ -19,6 +19,7 @@ from model.dbModel.gtAgentTask import GtAgentTask
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
 from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, AgentStatus, AgentTaskType, OpenaiLLMApiRole, RoomState
+from service import messageBus
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -55,6 +56,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
+        await messageBus.shutdown()
 
     async def test_two_agents_exchange_messages(self):
         """alice 和 bob 各发一轮消息，general 房间应有消息。"""
