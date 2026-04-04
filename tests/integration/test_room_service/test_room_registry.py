@@ -109,7 +109,7 @@ class TestRoomRegistry(ServiceTestCase):
         await room.activate_scheduling()
 
         assert len(room.messages) == 1
-        assert room.messages[0].sender_name == SpecialAgent.SYSTEM.name
+        assert room.messages[0].sender_id == room.SYSTEM_MEMBER_ID
         assert "boot topic" in room.messages[0].content
 
     async def test_special_agent_ids(self):

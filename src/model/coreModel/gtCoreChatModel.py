@@ -9,7 +9,7 @@ from util import llmApiUtil
 @dataclass
 class GtCoreChatMessage:
     """聊天消息数据类"""
-    sender_name: str
+    sender_id: int  # 发送者 agent_id（SpecialAgent 使用固定负值 ID）
     content: str
     send_time: datetime
 

@@ -51,15 +51,16 @@ class TestChatRoomMessages(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "test_room", ["alice"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
+        alice_id = room.get_agent_id_by_name("alice")
         with patch("service.messageBus.publish") as mock_publish:
-            await room.add_message("alice", "hello")
+            await room.add_message(alice_id, "hello")
             assert len(room.messages) == 2
-            assert room.messages[1].sender_name == "alice"
+            assert room.messages[1].sender_id == alice_id
             assert room.messages[1].content == "hello"
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_MSG_ADDED,
                 gt_room=room.gt_room,
-                sender="alice",
+                sender_id=alice_id,
                 content="hello",
                 time=room.messages[1].send_time.isoformat(),
             )
@@ -69,7 +70,8 @@ class TestChatRoomMessages(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "test_room", ["alice"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
-        msgs = await room.get_unread_messages("alice")
+        alice_id = room.get_agent_id_by_name("alice")
+        msgs = await room.get_unread_messages(alice_id)
         assert len(msgs) == 1
         assert "房间已经创建" in msgs[0].content
 
@@ -78,13 +80,15 @@ class TestChatRoomMessages(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "test_room", ["alice", "bob"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
-        await room.get_unread_messages("alice")
-        await room.add_message("bob", "msg1")
-        msgs = await room.get_unread_messages("alice")
+        alice_id = room.get_agent_id_by_name("alice")
+        bob_id = room.get_agent_id_by_name("bob")
+        await room.get_unread_messages(alice_id)
+        await room.add_message(bob_id, "msg1")
+        msgs = await room.get_unread_messages(alice_id)
         assert len(msgs) == 1
         assert msgs[0].content == "msg1"
 
-        msgs2 = await room.get_unread_messages("alice")
+        msgs2 = await room.get_unread_messages(alice_id)
         assert len(msgs2) == 0
 
     async def test_get_unread_messages_independent_per_agent(self):
@@ -92,20 +96,23 @@ class TestChatRoomMessages(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "test_room", ["alice", "bob", "char"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
-        await room.get_unread_messages("alice")
-        await room.get_unread_messages("bob")
-        await room.add_message("char", "hi")
-        assert len(await room.get_unread_messages("alice")) == 1
-        assert len(await room.get_unread_messages("bob")) == 1
+        alice_id = room.get_agent_id_by_name("alice")
+        bob_id = room.get_agent_id_by_name("bob")
+        char_id = room.get_agent_id_by_name("char")
+        await room.get_unread_messages(alice_id)
+        await room.get_unread_messages(bob_id)
+        await room.add_message(char_id, "hi")
+        assert len(await room.get_unread_messages(alice_id)) == 1
+        assert len(await room.get_unread_messages(bob_id)) == 1
 
     async def test_add_message_rejects_non_member(self):
         """非房间成员写消息时应被拒绝。"""
         await roomService.ensure_room_record(TEAM, "restricted_room", ["alice"])
         room = roomService.get_room_by_key(f"restricted_room@{TEAM}")
         await room.activate_scheduling()
-
+        # bob 不在房间中，使用一个不存在的 agent_id
         with pytest.raises(TeamAgentException):
-            await room.add_message("bob", "hello")
+            await room.add_message(99999, "hello")
 
     async def test_format_log(self):
         """format_log 输出包含房间标题与消息发送者。"""

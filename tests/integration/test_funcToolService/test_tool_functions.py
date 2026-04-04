@@ -249,4 +249,4 @@ class TestToolFunctions(ServiceTestCase):
         result = finish_chat_turn(_context=ctx)
 
         assert not result["success"] and "alice" in result["message"]
-        assert room.get_current_turn_agent() == "alice"
+        assert room.get_current_turn_agent_name() == "alice"

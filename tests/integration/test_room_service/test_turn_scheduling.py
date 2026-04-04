@@ -56,12 +56,13 @@ class TestTurnScheduling(ServiceTestCase):
         """显式启动调度后，才发布首个发言人的 TURN 事件。"""
         await roomService.ensure_room_record(TEAM, "r", ["alice", "bob"], max_turns=5)
         room = roomService.get_room_by_key(f"r@{TEAM}")
+        alice_id = room.get_agent_id_by_name("alice")
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.activate_scheduling()
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_AGENT_TURN,
-                gt_agent=room.get_gt_agent("alice"),
+                gt_agent=room.get_gt_agent(alice_id),
                 room_id=room.room_id,
             )
 
@@ -70,6 +71,7 @@ class TestTurnScheduling(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "r", ["alice", "bob"], max_turns=5)
         room = roomService.get_room_by_key(f"r@{TEAM}")
         await room.activate_scheduling()
+        bob_id = room.get_agent_id_by_name("bob")
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message("alice", "hello")
@@ -77,7 +79,7 @@ class TestTurnScheduling(ServiceTestCase):
             room.finish_turn("alice")
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_AGENT_TURN,
-                gt_agent=room.get_gt_agent("bob"),
+                gt_agent=room.get_gt_agent(bob_id),
                 room_id=room.room_id,
             )
 

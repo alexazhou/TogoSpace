@@ -73,14 +73,16 @@
 
 当房间进入 `SCHEDULING`，或当前发言人 `finish_turn()` 成功后，`ChatRoom` 会：
 
-1. 调用 `_resolve_next_dispatchable_agent()`
-2. 判断是否命中停止条件
-3. 如有下一位普通 Agent，则 `_publish_current_turn()`
-4. 发布 `ROOM_AGENT_TURN`
+1. 调用 `_resolve_next_dispatchable_agent()` 解析下一位可调度 Agent
+2. 若返回 `None`，表示命中停止条件或当前需等待特殊成员输入
+3. 若返回 Agent 名，调用 `_publish_current_turn()` 发布 `ROOM_AGENT_TURN`
 
 注意：
 
-- `SpecialAgent` 的等待/跳过逻辑在 `_resolve_next_dispatchable_agent()` 中处理；`_publish_current_turn()` 只负责发布普通 Agent 事件。
+- `_resolve_next_dispatchable_agent()` 内部处理两层过滤：
+  - 自动跳过：GROUP 房间中的 `OPERATOR`（满足条件时自动推进到下一位）
+  - 等待输入：任何 `SpecialAgent` 当前发言位都会返回 `None`，等待外部调用 `finish_turn()`
+- `_publish_current_turn()` 只负责发布事件，不再检查 SpecialAgent（由上层保证传入的都是普通 Agent）
 
 ### 4.2 Scheduler 创建数据库任务
 
@@ -180,7 +182,7 @@
 - 房间类型是 `GROUP`
 - 房间成员数大于 2
 
-`_resolve_next_dispatchable_agent()` 会自动跳过 `OPERATOR`，直接推进到下一位 AI 成员。
+`_resolve_next_dispatchable_agent()` 内部的 `_should_auto_skip_agent_turn()` 会自动跳过 `OPERATOR`，将其加入 `_round_skipped_set` 并推进到下一位 AI 成员。
 
 ### 6.3 Private 房间中的 Operator
 
@@ -188,12 +190,12 @@
 
 当前行为是：
 
-- 当前发言位可以停在 `OPERATOR`
-- `roomService` 不会为 `OPERATOR` 发布 `ROOM_AGENT_TURN`
+- `_resolve_next_dispatchable_agent()` 检测到当前发言位是 `OPERATOR`（SpecialAgent）时返回 `None`
+- 房间停在 `OPERATOR` 发言位，等待外部输入
 - 前端 / API 通过 `roomController.RoomMessagesHandler.post()` 让 `OPERATOR` 写入消息
 - 写入消息后由控制器显式调用 `room.finish_turn(SpecialAgent.OPERATOR.name)`，再把轮次交给 AI
 
-也就是说，私聊中的 `OPERATOR` 回合是“等待人类输入”，而不是调度器回合。
+也就是说，私聊中的 `OPERATOR` 回合是”等待人类输入”，调度器不会为此发布 `ROOM_AGENT_TURN`。
 
 ## 7. IDLE 唤醒
 
@@ -215,6 +217,7 @@
 - `ChatRoom.add_message`
 - `ChatRoom.finish_turn`
 - `ChatRoom._resolve_next_dispatchable_agent`
+- `ChatRoom._should_auto_skip_agent_turn`
 - `ChatRoom._publish_current_turn`
 - `ChatRoom._try_stop_scheduling`
 - `activate_rooms`

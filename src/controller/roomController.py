@@ -120,7 +120,7 @@ class RoomMessagesHandler(BaseHandler):
         room = roomService.get_room(room_id)
         assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
         messages = [
-            GtCoreMessageInfo(sender=m.sender_name, content=m.content, time=m.send_time)
+            GtCoreMessageInfo(sender=room._get_agent_name(m.sender_id), content=m.content, time=m.send_time)
             for m in room.messages
         ]
         resp = GtCoreRoomMessagesResponse(
@@ -142,8 +142,8 @@ class RoomMessagesHandler(BaseHandler):
         content = request.content
         assertUtil.assertNotNull(content, error_message="content is required", error_code="invalid_request")
 
-        await room.add_message(SpecialAgent.OPERATOR.name, content)
-        room.finish_turn(SpecialAgent.OPERATOR.name)
+        await room.add_message(room.OPERATOR_MEMBER_ID, content)
+        room.finish_turn(room.OPERATOR_MEMBER_ID)
         self.return_success()
 
 
