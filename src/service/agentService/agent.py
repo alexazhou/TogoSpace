@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 from typing import Any, Awaitable, Callable, List, Optional
@@ -37,7 +36,6 @@ class Agent:
         self.agent_workdir: str = agent_workdir
         self._history_store: AgentHistoryStore = AgentHistoryStore(self.gt_agent.id or 0)
         self.tool_registry: AgentToolRegistry = AgentToolRegistry()
-        self.wait_task_queue: asyncio.Queue[GtAgentTask] = asyncio.Queue()
         self.status: AgentStatus = AgentStatus.IDLE
         self.current_task: Optional[GtAgentTask] = None
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
@@ -48,7 +46,12 @@ class Agent:
 
     @property
     def is_active(self) -> bool:
-        return self.status == AgentStatus.ACTIVE or self.wait_task_queue.empty() is False
+        """检查 Agent 是否活跃（状态为 ACTIVE 或有正在处理的任务）。"""
+        return self.status == AgentStatus.ACTIVE or self.current_task is not None
+
+    async def has_pending_tasks(self) -> bool:
+        """检查是否有待处理的任务。"""
+        return await gtAgentTaskManager.has_pending_or_running_tasks(self.gt_agent.id)
 
     async def startup(self) -> None:
         await self.driver.startup()
@@ -58,24 +61,6 @@ class Agent:
         await self.driver.shutdown()
         self.driver.mark_stopped()
         self.tool_registry.clear()
-
-    def _peek_task(self) -> GtAgentTask | None:
-        if self.wait_task_queue.empty():
-            return None
-        return self.wait_task_queue._queue[0]
-
-    def resume_failed(self) -> int:
-        """清除 FAILED 状态，从队头任务读取 room_id 返回，供调用方触发续跑。"""
-        if self.status != AgentStatus.FAILED:
-            raise ValueError(f"Agent ID={self.gt_agent.id} 当前状态不是 FAILED（当前: {self.status.name}）")
-
-        task = self._peek_task()
-        assert task is not None, "resume_failed requires pending task"
-        room_id: int = task.task_data.get("room_id")
-        assert room_id is not None, "resume_failed requires task with room_id"
-        self.status = AgentStatus.IDLE
-        self._publish_status(self.status)
-        return room_id
 
     def _publish_status(self, status: AgentStatus) -> None:
         messageBus.publish(
@@ -88,27 +73,35 @@ class Agent:
         )
 
     async def consume_task(self, max_function_calls: int) -> None:
+        """从数据库获取并处理任务，直到没有待处理任务为止。"""
         self.status = AgentStatus.ACTIVE
         self._publish_status(self.status)
         try:
-            while self.wait_task_queue.empty() is False:
-                task = self._peek_task()
+            while True:
+                # 从数据库获取第一个待处理任务
+                task = await gtAgentTaskManager.get_first_pending_task(self.gt_agent.id)
+                if task is None:
+                    break  # 没有待处理任务了
+
+                # 原子地认领任务（乐观锁）
+                claimed_task = await gtAgentTaskManager.claim_task(task.id)
+                if claimed_task is None:
+                    # 任务已被其他消费者认领，继续尝试下一个
+                    continue
+
+                self.current_task = claimed_task
                 task_succeeded = False
                 last_error: Exception | None = None
 
-                # 更新任务状态为 RUNNING
-                await gtAgentTaskManager.update_task_status(task.id, AgentTaskStatus.RUNNING)
-                self.current_task = task
-
                 for attempt in range(1, MAX_INFER_RETRIES + 1):
                     try:
-                        await self.run_chat_turn(task, max_function_calls)
+                        await self.run_chat_turn(claimed_task, max_function_calls)
                         task_succeeded = True
                         break
                     except Exception as e:
                         last_error = e
                         logger.warning(
-                            f"Agent 任务执行失败 (第 {attempt}/{MAX_INFER_RETRIES} 次): agent_id={self.gt_agent.id}, task={task!r}, error={e}",
+                            f"Agent 任务执行失败 (第 {attempt}/{MAX_INFER_RETRIES} 次): agent_id={self.gt_agent.id}, task={claimed_task!r}, error={e}",
                             exc_info=(attempt == MAX_INFER_RETRIES),
                         )
 
@@ -118,17 +111,15 @@ class Agent:
                     )
                     # 更新任务状态为 FAILED
                     error_msg = str(last_error) if last_error else None
-                    await gtAgentTaskManager.update_task_status(task.id, AgentTaskStatus.FAILED, error_message=error_msg)
+                    await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.FAILED, error_message=error_msg)
                     self.status = AgentStatus.FAILED
                     self.current_task = None
                     self._publish_status(self.status)
                     return
 
                 # 更新任务状态为 COMPLETED
-                await gtAgentTaskManager.update_task_status(task.id, AgentTaskStatus.COMPLETED)
+                await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.COMPLETED)
                 self.current_task = None
-                self.wait_task_queue.get_nowait()
-                self.wait_task_queue.task_done()
         finally:
             if self.status != AgentStatus.FAILED:
                 self.status = AgentStatus.IDLE

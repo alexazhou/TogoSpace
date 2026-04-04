@@ -58,6 +58,34 @@ async def get_pending_tasks(agent_id: int) -> list[GtAgentTask]:
     )
 
 
+async def get_first_pending_task(agent_id: int) -> GtAgentTask | None:
+    """获取 Agent 的第一个待处理任务。"""
+    return await GtAgentTask.aio_get_or_none(
+        GtAgentTask.agent_id == agent_id,
+        GtAgentTask.status == AgentTaskStatus.PENDING,
+    )
+
+
+async def claim_task(task_id: int) -> GtAgentTask | None:
+    """原子地认领任务：将 PENDING 状态改为 RUNNING。
+
+    使用乐观锁保证只有一个消费者能成功认领。
+    返回更新后的任务，如果任务已被其他消费者认领则返回 None。
+    """
+    result = await (
+        GtAgentTask
+        .update(status=AgentTaskStatus.RUNNING)
+        .where(
+            GtAgentTask.id == task_id,
+            GtAgentTask.status == AgentTaskStatus.PENDING,
+        )
+        .aio_execute()
+    )
+    if result == 0:
+        return None
+    return await GtAgentTask.aio_get_or_none(GtAgentTask.id == task_id)
+
+
 async def get_running_task(agent_id: int) -> GtAgentTask | None:
     """获取 Agent 正在处理的任务。"""
     return await GtAgentTask.aio_get_or_none(
@@ -88,3 +116,18 @@ async def delete_task(task_id: int) -> None:
         .where(GtAgentTask.id == task_id)
         .aio_execute()
     )
+
+
+async def has_pending_or_running_tasks(agent_id: int) -> bool:
+    """检查 Agent 是否有待处理或正在处理的任务。"""
+    count = await (
+        GtAgentTask
+        .select()
+        .where(
+            GtAgentTask.agent_id == agent_id,
+            GtAgentTask.status.in_([AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING]),
+        )
+        .count()
+        .aio_execute()
+    )
+    return count > 0
