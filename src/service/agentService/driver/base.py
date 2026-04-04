@@ -33,7 +33,7 @@ class AgentTurnSetup:
 class AgentDriverHost(Protocol):
     gt_agent: GtAgent
     system_prompt: str
-    team_workdir: str
+    agent_workdir: str
     current_room: ChatRoom
     _history: AgentHistoryStore
     tool_registry: AgentToolRegistry
