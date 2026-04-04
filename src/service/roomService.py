@@ -308,7 +308,6 @@ class ChatRoom:
 
         返回 None 表示当前不应发布调度事件，原因可能是：
         - 房间已命中停止条件（_try_stop_scheduling 返回 True）
-        - GROUP 房间遍历一圈后所有成员都被跳过（_go_next_turn 返回 False）
         - 当前发言位是需要等待外部输入的 SpecialAgent（如 PRIVATE 房间的 OPERATOR）
         """
         if not self._agent_ids:
@@ -327,7 +326,8 @@ class ChatRoom:
                     self._round_skipped_set.add(next_id)
                 self._current_turn_has_content = False
 
-                if not self._go_next_turn():
+                self._go_next_turn()
+                if self._try_stop_scheduling():
                     return None
                 continue
 
@@ -359,7 +359,7 @@ class ChatRoom:
         return False
 
     def _go_next_turn(self) -> bool:
-        """推进到下一发言位；若命中停止条件则返回 False。"""
+        """推进到下一发言位。"""
         self._turn_pos = (self._turn_pos + 1) % len(self._agent_ids)
 
         # turn_pos 回到 0 代表跨轮（从最后一位回到首位）；
@@ -367,7 +367,7 @@ class ChatRoom:
         if self._turn_pos == 0:
             self._turn_count += 1
 
-        return not self._try_stop_scheduling()
+        return True
 
     async def activate_scheduling(self) -> bool:
         """激活/重发调度。
