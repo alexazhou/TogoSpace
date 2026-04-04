@@ -127,7 +127,6 @@ async def has_pending_or_running_tasks(agent_id: int) -> bool:
             GtAgentTask.agent_id == agent_id,
             GtAgentTask.status.in_([AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING]),
         )
-        .count()
-        .aio_execute()
+        .aio_count()
     )
     return count > 0
