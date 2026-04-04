@@ -3,7 +3,7 @@ import logging
 from typing import Dict
 
 from service import messageBus
-from service.messageBus import Message
+from service.messageBus import EventBusMessage
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from service import agentService, roomService as chat_room
 from service.agentService import Agent
@@ -72,7 +72,7 @@ def remove_agent(agent_id: int) -> None:
         task.cancel()
 
 
-def _on_agent_turn(msg: Message) -> None:
+def _on_agent_turn(msg: EventBusMessage) -> None:
     """订阅 ROOM_AGENT_TURN：将 Agent 任务入队，若 Agent 未运行则加入调度池。"""
     agent_id: int = msg.payload["agent_id"]
     room_id: int = msg.payload["room_id"]

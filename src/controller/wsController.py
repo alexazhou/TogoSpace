@@ -27,7 +27,7 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
     def on_message(self, message):
         pass  # 只推不收，忽略客户端消息
 
-    def _on_event(self, msg: messageBus.Message) -> None:
+    def _on_event(self, msg: messageBus.EventBusMessage) -> None:
         logger.info(f"[ws] event: topic={msg.topic.name}, payload={msg.payload}")
         asyncio.get_event_loop().create_task(self._send(jsonUtil.json_dump(msg.payload)))
 

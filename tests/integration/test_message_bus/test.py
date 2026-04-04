@@ -6,7 +6,7 @@ import sys
 import pytest
 
 import service.messageBus as messageBus
-from service.messageBus import Message
+from service.messageBus import EventBusMessage
 from constants import MessageBusTopic
 from ...base import ServiceTestCase
 
@@ -17,13 +17,13 @@ if os.name == "posix" and sys.platform == "darwin":
 
 class TestmessageBus(ServiceTestCase):
     async def test_subscribe_and_publish(self):
-        """订阅后发布消息，订阅者应收到 Message 对象及原始 payload。"""
+        """订阅后发布消息，订阅者应收到 EventBusMessage 对象及原始 payload。"""
         received = []
         messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: received.append(m))
         messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_id=1, room_name="r1")
         await asyncio.sleep(0)
         assert len(received) == 1
-        assert isinstance(received[0], Message)
+        assert isinstance(received[0], EventBusMessage)
         assert received[0].payload["agent_id"] == 1
         assert received[0].payload["room_name"] == "r1"
 

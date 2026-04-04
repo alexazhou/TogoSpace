@@ -11,7 +11,7 @@ import service.roomService as roomService
 import service.agentService as agentService
 import service.schedulerService as scheduler
 from service.agentService import Agent
-from service.messageBus import Message
+from service.messageBus import EventBusMessage
 from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
@@ -99,7 +99,7 @@ class TestSchedulerRun(ServiceTestCase):
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
             run_task = asyncio.create_task(scheduler.run())
 
-            msg = Message(
+            msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
@@ -174,7 +174,7 @@ class TestSchedulerRun(ServiceTestCase):
         await scheduler.startup()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
-            msg = Message(
+            msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
@@ -205,7 +205,7 @@ class TestSchedulerRun(ServiceTestCase):
         await scheduler.startup()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
-            msg = Message(
+            msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
@@ -250,11 +250,11 @@ class TestSchedulerRun(ServiceTestCase):
         await scheduler.startup()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
-            msg_r1 = Message(
+            msg_r1 = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": r1.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
-            msg_r2 = Message(
+            msg_r2 = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": r2.room_id, "room_name": "r2", "room_key": f"r2@{TEAM}", "team_name": TEAM},
             )
@@ -285,7 +285,7 @@ class TestSchedulerRun(ServiceTestCase):
         await scheduler.startup()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
-            msg = Message(
+            msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
@@ -348,7 +348,7 @@ class TestSchedulerRun(ServiceTestCase):
         )
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
-        msg = Message(
+        msg = EventBusMessage(
             topic=MessageBusTopic.ROOM_AGENT_TURN,
             payload={"agent_id": 1, "room_id": 1, "team_name": TEAM},
         )
@@ -375,7 +375,7 @@ class TestSchedulerRun(ServiceTestCase):
         )
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
-        msg = Message(
+        msg = EventBusMessage(
             topic=MessageBusTopic.ROOM_AGENT_TURN,
             payload={"agent_id": 1, "room_id": 1, "team_name": TEAM},
         )
