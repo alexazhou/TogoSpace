@@ -34,7 +34,6 @@ class AgentDriverHost(Protocol):
     gt_agent: GtAgent
     system_prompt: str
     team_workdir: str
-    workspace_root: str
     current_room: ChatRoom
     _history: AgentHistoryStore
     tool_registry: AgentToolRegistry

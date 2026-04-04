@@ -30,12 +30,10 @@ class Agent:
         system_prompt: str,
         driver_config: Optional[AgentDriverConfig] = None,
         team_workdir: str = "",
-        workspace_root: str = "",
     ):
         self.gt_agent: GtAgent = gt_agent
         self.system_prompt: str = system_prompt
         self.team_workdir: str = team_workdir
-        self.workspace_root: str = workspace_root
         self._history_store: AgentHistoryStore = AgentHistoryStore(self.gt_agent.id or 0)
         self.tool_registry: AgentToolRegistry = AgentToolRegistry()
         self.wait_task_queue: asyncio.Queue = asyncio.Queue()
