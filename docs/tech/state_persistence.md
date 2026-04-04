@@ -17,15 +17,15 @@
 
 ## 保存时机
 
+写入操作由业务模块直接调用 dal manager 完成，不经过中间封装层。
+
 ### 成员对话历史
 
 每当成员追加一条消息时（无论是用户输入、LLM 回复还是 Tool 结果），都**同步写入**数据库：
 
 ```
-Agent.append_history_message(msg)
-  └── _persist_history_message(msg)
-        └── persistenceService.append_agent_history_message(GtAgentHistory)
-              └── gtAgentHistoryManager.append_agent_history_message()
+AgentHistoryStore.append_history_message(msg)
+  └── gtAgentHistoryManager.append_agent_history_message(GtAgentHistory)
 ```
 
 `GtAgentHistory` 记录 `agent_id`、`seq`（顺序号）、`message_json`（Pydantic JSON 序列化）。
@@ -37,8 +37,7 @@ Agent.append_history_message(msg)
 ```
 ChatRoom.add_message(sender, content)
   ├── [INIT 状态] → 仅写内存，跳过持久化
-  └── [非 INIT]  → persistenceService.append_room_message()
-                      └── gtRoomMessageManager.append_room_message()
+  └── [非 INIT]  → gtRoomMessageManager.append_room_message()
 ```
 
 这避免了每次启动时写入初始系统消息（房间创建时总处于 INIT）。
@@ -50,8 +49,7 @@ ChatRoom.add_message(sender, content)
 ```
 ChatRoom.get_unread_messages(agent_name)
   └── 推进 _member_read_index[agent_name]
-        └── persistenceService.save_room_runtime(room_id, id_keyed_index)
-              └── gtRoomManager.update_room_state()  → 写入 rooms.member_read_index
+        └── gtRoomManager.update_room_state()  → 写入 rooms.member_read_index
 ```
 
 存储时 key 从成员名转换为 `member_id`（字符串形式），以解耦成员改名场景。
@@ -60,12 +58,14 @@ ChatRoom.get_unread_messages(agent_name)
 
 ## 恢复时机
 
-恢复发生在启动阶段 4，房间恢复完成后通过调度器统一入口激活：
+恢复发生在启动阶段 4，由 `persistenceService` 提供加载方法：
 
 ```
 backend_main.py（阶段 4）
   ├── agentService.restore_state()
+  │     └── persistenceService.load_agent_history_message()
   ├── roomService.restore_state()
+  │     └── persistenceService.load_room_runtime()
   └── schedulerService.start_scheduling()
         └── roomService.activate_rooms()   ← 恢复完成后才激活
 ```
@@ -86,7 +86,7 @@ for each Agent:
 每个房间按以下逻辑处理：
 
 ```
-room_msg_rows, member_read_index = load_room_runtime(room_id)
+room_msg_rows, member_read_index = persistenceService.load_room_runtime(room_id)
 
 情况 A：数据库有聊天记录
   → 将 GtRoomMessage 行转换为 GtCoreChatMessage 列表
@@ -109,18 +109,21 @@ room_msg_rows, member_read_index = load_room_runtime(room_id)
 ## 数据流总览
 
 ```
-运行时写入：
+运行时写入（业务模块 → dal manager）：
 
-  Agent._history  ──append──►  agent_histories 表
-  ChatRoom.messages    ──append──►  room_messages 表
-  ChatRoom._member_read_index  ──save──►  rooms.member_read_index
+  AgentHistoryStore      ──append──►  gtAgentHistoryManager  ──►  agent_histories 表
+  ChatRoom.add_message   ──append──►  gtRoomMessageManager   ──►  room_messages 表
+  ChatRoom.get_unread    ──update──►  gtRoomManager          ──►  rooms.member_read_index
 
-启动恢复：
+启动恢复（persistenceService → dal manager → 业务模块）：
 
-  agent_histories 表  ──load──►  Agent._history
-  room_messages 表   ──load──►  ChatRoom.messages
-  rooms.member_read_index  ──load──►  ChatRoom._member_read_index
-                                           └── rebuild_state_from_history()
+  persistenceService.load_agent_history_message()
+      └── gtAgentHistoryManager.get_agent_history()  ──►  Agent._history
+
+  persistenceService.load_room_runtime()
+      ├── gtRoomMessageManager.get_room_messages()   ──►  ChatRoom.messages
+      └── gtRoomManager.get_room_state()             ──►  ChatRoom._member_read_index
+                                                        └── rebuild_state_from_history()
 ```
 
 ---
