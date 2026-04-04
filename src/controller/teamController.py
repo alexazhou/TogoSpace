@@ -64,6 +64,17 @@ async def _assert_role_templates_exist(template_ids: list[int]) -> None:
     )
 
 
+async def _get_room_agent_names(team_id: int, agent_ids: list[int]) -> list[str]:
+    return [
+        agent.name
+        for agent in await gtAgentManager.get_team_agents_by_ids(
+            team_id,
+            agent_ids,
+            include_special=True,
+        )
+    ]
+
+
 def _to_gt_agent(agent: "TeamAgentUpdateItem") -> GtAgent:
     return GtAgent(
         id=agent.id,
@@ -164,13 +175,18 @@ class TeamDetailHandler(BaseHandler):
         ]
         room_items = []
         for room in rooms:
+            agent_ids = list(room.agent_ids or [])
             room_items.append(
                 {
                     "id": room.id,
                     "name": room.name,
+                    "type": room.type.name,
                     "initial_topic": room.initial_topic,
                     "max_turns": room.max_turns,
-                    "agent_ids": room.agent_ids or [],
+                    "agent_ids": agent_ids,
+                    "agents": await _get_room_agent_names(team_id, agent_ids),
+                    "biz_id": room.biz_id,
+                    "tags": list(room.tags or []),
                 }
             )
 

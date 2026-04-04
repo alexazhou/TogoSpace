@@ -458,17 +458,22 @@ class ChatRoom:
         return msg
 
     def to_dict(self) -> dict:
-        """返回用于 API 响应的字典表示，包含运行时状态。"""
+        """返回用于 API 响应的字典表示，包含 gt_room 详情与运行时状态。"""
         return {
-            "room_id": self.room_id,
-            "room_key": self.key,
-            "room_name": self.name,
+            "gt_room": {
+                "id": self.gt_room.id,
+                "team_id": self.gt_room.team_id,
+                "name": self.gt_room.name,
+                "type": self.gt_room.type.name,
+                "initial_topic": self.gt_room.initial_topic,
+                "max_turns": self.gt_room.max_turns,
+                "agent_ids": list(self.gt_room.agent_ids or []),
+                "biz_id": self.gt_room.biz_id,
+                "tags": list(self.gt_room.tags or []),
+            },
             "team_name": self.team_name,
-            "room_type": self.room_type.name,
             "state": self._state.name,
             "agents": list(self.agents),
-            "agent_ids": list(self._agent_ids),
-            "tags": self.tags,
         }
 
 

@@ -48,8 +48,10 @@ class TestTeamController(_ApiServiceCase):
         rooms_by_name = {room["name"]: room for room in data["rooms"]}
         assert set(rooms_by_name.keys()) == {"general", "测试组"}
         assert len(rooms_by_name["general"]["agent_ids"]) == 3
+        assert len(rooms_by_name["general"]["agents"]) == 3
         assert rooms_by_name["general"]["max_turns"] == 50
         assert len(rooms_by_name["测试组"]["agent_ids"]) == 2
+        assert len(rooms_by_name["测试组"]["agents"]) == 2
 
     async def test_create_team_and_fetch_detail(self):
         payload = {
