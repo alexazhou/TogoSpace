@@ -91,7 +91,7 @@ class RoomState(EnhanceEnum):
 class AgentStatus(EnhanceEnum):
     ACTIVE = auto()
     IDLE   = auto()
-    FAILED = auto()  # 推理连续失败超过重试次数
+    FAILED = auto()  # 任务执行失败
 
 
 class EmployStatus(EnhanceEnum):

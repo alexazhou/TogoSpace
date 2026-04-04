@@ -19,8 +19,6 @@ from util import asyncUtil, llmApiUtil
 
 logger = logging.getLogger(__name__)
 
-MAX_INFER_RETRIES = 3
-
 
 class Agent:
     """AI Team Agent 实例：承载在特定团队中的身份和状态，driver 负责具体驱动实现。"""
@@ -121,24 +119,14 @@ class Agent:
                     continue
 
                 self.current_db_task = claimed_task
-                task_succeeded = False
                 last_error: Exception | None = None
-
-                for attempt in range(1, MAX_INFER_RETRIES + 1):
-                    try:
-                        await self.run_chat_turn(claimed_task, effective_max_fc)
-                        task_succeeded = True
-                        break
-                    except Exception as e:
-                        last_error = e
-                        logger.warning(
-                            f"Agent 任务执行失败 (第 {attempt}/{MAX_INFER_RETRIES} 次): agent_id={self.gt_agent.id}, task={claimed_task!r}, error={e}",
-                            exc_info=(attempt == MAX_INFER_RETRIES),
-                        )
-
-                if task_succeeded is False:
+                try:
+                    await self.run_chat_turn(claimed_task, effective_max_fc)
+                except Exception as e:
+                    last_error = e
                     logger.error(
-                        f"Agent 推理连续失败 {MAX_INFER_RETRIES} 次，标记为 FAILED: agent_id={self.gt_agent.id}, last_error={last_error}"
+                        f"Agent 任务执行失败并标记为 FAILED: agent_id={self.gt_agent.id}, task={claimed_task!r}, error={e}",
+                        exc_info=True,
                     )
                     # 更新任务状态为 FAILED
                     error_msg = str(last_error) if last_error else None
@@ -155,6 +143,7 @@ class Agent:
             if self.status != AgentStatus.FAILED:
                 self.status = AgentStatus.IDLE
                 self._publish_status(self.status)
+
             if self.consumer_task is current_consumer:
                 self.consumer_task = None
                 has_pending = await gtAgentTaskManager.has_pending_or_running_tasks(self.gt_agent.id)
