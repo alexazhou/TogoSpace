@@ -3,7 +3,6 @@ from .gtCoreAgentEvent import GtCoreRoomMessageEvent
 from .gtCoreWebModel import (
     GtCoreMessageInfo,
     GtCoreRoomMessagesResponse,
-    GtCoreWsEvent,
 )
 
 __all__ = [
@@ -12,5 +11,4 @@ __all__ = [
     "GtCoreRoomMessageEvent",
     "GtCoreMessageInfo",
     "GtCoreRoomMessagesResponse",
-    "GtCoreWsEvent",
 ]

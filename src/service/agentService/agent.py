@@ -80,8 +80,11 @@ class Agent:
     def _publish_status(self, status: AgentStatus) -> None:
         messageBus.publish(
             MessageBusTopic.AGENT_STATUS_CHANGED,
-            gt_agent=self.gt_agent,
-            status=status.name,
+            event="agent_status",
+            agent_id=self.gt_agent.id,
+            agent_name=self.gt_agent.name,
+            team_id=self.gt_agent.team_id,
+            status=status,
         )
 
     async def consume_task(self, max_function_calls: int) -> None:
@@ -139,8 +142,7 @@ class Agent:
             llmApiUtil.OpenaiLLMApiRole.USER,
             content=build_turn_context_prompt(room.name, message_blocks),
         )
-        await self._history.append_history_message(
-            turn_context_message,
+        await self._history.append_history_message(turn_context_message,
             stage=AgentHistoryStage.INPUT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         )

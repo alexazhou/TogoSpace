@@ -4,7 +4,6 @@ from .coreModel import (
     GtCoreMessageInfo,
     GtCoreRoomMessageEvent,
     GtCoreRoomMessagesResponse,
-    GtCoreWsEvent,
 )
 
 __all__ = [
@@ -13,5 +12,4 @@ __all__ = [
     "GtCoreRoomMessageEvent",
     "GtCoreMessageInfo",
     "GtCoreRoomMessagesResponse",
-    "GtCoreWsEvent",
 ]
