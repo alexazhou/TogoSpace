@@ -30,7 +30,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
     async def _reset_runtime_services(self):
         scheduler.shutdown()
         funcToolService.shutdown()
-        messageBus.shutdown()
+        await messageBus.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
         await agentService.shutdown()

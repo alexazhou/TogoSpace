@@ -53,7 +53,7 @@ class TestmessageBus(ServiceTestCase):
         """shutdown 后已注册订阅者应全部清空。"""
         received = []
         messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: received.append(m))
-        messageBus.shutdown()
+        await messageBus.shutdown()
         messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_id=1, room_name="y")
         await asyncio.sleep(0)
         assert len(received) == 0

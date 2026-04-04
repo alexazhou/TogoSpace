@@ -81,7 +81,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
 
     @classmethod
     async def async_teardown_class(cls):
-        messageBus.shutdown()
+        await messageBus.shutdown()
         await presetService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
@@ -171,7 +171,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
 
     @classmethod
     async def async_teardown_class(cls):
-        messageBus.shutdown()
+        await messageBus.shutdown()
         await agentService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
