@@ -85,7 +85,6 @@ async def _load_team(team_id: int, workspace_root: str | None = None) -> None:
             system_prompt=full_prompt,
             driver_config=driver_config,
             team_workdir=team_workdir,
-            workspace_root=resolved_workspace_root,
         )
         _agents[gt_agent.id] = agent
         logger.info(
