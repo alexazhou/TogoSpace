@@ -121,9 +121,15 @@ class Agent:
                     await self.run_chat_turn(claimed_task, effective_max_fc)
                 except Exception as e:
                     last_error = e
+                    room_id = claimed_task.task_data.get("room_id")
+                    room = roomService.get_room(room_id) if room_id is not None else None
+                    room_key = room.key if room is not None else f"room_id={room_id}"
                     logger.error(
-                        f"Agent 任务执行失败并标记为 FAILED: agent_id={self.gt_agent.id}, task={claimed_task!r}, error={e}",
-                        exc_info=True,
+                        "Agent 任务执行失败并标记为 FAILED: agent_id=%s, room=%s, task=%s, error=%s",
+                        self.gt_agent.id,
+                        room_key,
+                        claimed_task.id,
+                        e,
                     )
                     # 更新任务状态为 FAILED
                     error_msg = str(last_error) if last_error else None
@@ -184,15 +190,11 @@ class Agent:
             return
 
         synced_count = await self.pull_room_messages_to_history(room)
-        try:
-            if self.driver.host_managed_turn_loop:
-                assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
-                await self._run_chat_turn_with_host_loop(room, max_function_calls)
-            else:
-                await self.driver.run_chat_turn(task, synced_count, max_function_calls)
-        except Exception as e:
-            logger.warning(f"run_chat_turn 异常: agent_id={self.gt_agent.id}, room={room.key}, error={e}")
-            raise
+        if self.driver.host_managed_turn_loop:
+            assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
+            await self._run_chat_turn_with_host_loop(room, max_function_calls)
+        else:
+            await self.driver.run_chat_turn(task, synced_count, max_function_calls)
 
     async def _run_chat_turn_with_host_loop(self, room: ChatRoom, max_function_calls: int) -> None:
         turn_setup: AgentTurnSetup = self.driver.turn_setup

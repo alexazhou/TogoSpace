@@ -69,7 +69,7 @@ class TestagentServiceGetAgentsInRoom(_agentServiceCase):
 
 class TestAgentServiceStatusMap(_agentServiceCase):
     async def test_get_team_runtime_status_map(self):
-        """运行时状态查询应按 agent_id 返回 ACTIVE/IDLE。"""
+        """运行时状态查询应按 agent_id 返回 ACTIVE/IDLE/FAILED。"""
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
         gt_alice = await gtAgentManager.get_agent(team.id, "alice")
@@ -81,6 +81,10 @@ class TestAgentServiceStatusMap(_agentServiceCase):
         alice.status = AgentStatus.ACTIVE
         status_map = agentService.get_team_runtime_status_map(team.id)
         assert status_map[alice.gt_agent.id] == AgentStatus.ACTIVE
+
+        alice.status = AgentStatus.FAILED
+        status_map = agentService.get_team_runtime_status_map(team.id)
+        assert status_map[alice.gt_agent.id] == AgentStatus.FAILED
 
         alice.status = AgentStatus.IDLE
 

@@ -14,7 +14,7 @@ class AgentInfo:
     name: str
     model: str
     team_name: str
-    status: str = "idle"  # "active" | "idle"
+    status: str = "idle"  # "active" | "idle" | "failed"
 
 
 @dataclass
