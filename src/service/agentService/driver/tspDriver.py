@@ -9,7 +9,8 @@ from pytspclient import TSPClient, TSPException, TSPInitializeResult, TSPToolRes
 from service.agentService.driver.base import AgentDriverConfig
 
 from service import funcToolService
-from service.roomService import ToolCallContext, ChatRoom
+from service.roomService import ToolCallContext
+from model.dbModel.gtAgentTask import GtAgentTask
 from util import llmApiUtil
 
 from .base import AgentDriver, AgentTurnSetup
@@ -113,7 +114,7 @@ class TspAgentDriver(AgentDriver):
             hint_prompt=_RUN_CHAT_TURN_HINT,
         )
 
-    async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, task: GtAgentTask, synced_count: int, max_function_calls: int = 5) -> None:
         raise RuntimeError("TspAgentDriver 不再直接执行 run_chat_turn，请使用 Agent.run_chat_turn")
 
     async def _execute_tsp_tool(

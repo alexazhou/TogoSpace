@@ -24,11 +24,17 @@ async def startup() -> None:
 
 
 async def restore_state() -> None:
-    """从数据库恢复所有 Agent 的历史消息。"""
+    """从数据库恢复所有 Agent 的历史消息和待处理任务。"""
     for agent in _agents.values():
+        # 加载历史消息
         items = await persistenceService.load_agent_history_message(agent.gt_agent.id)
         if items:
             agent._history.replace(items)
+
+        # 加载待处理任务
+        tasks = await persistenceService.load_agent_pending_tasks(agent.gt_agent.id)
+        for task in tasks:
+            agent.wait_task_queue.put_nowait(task)
 
 
 async def _load_team(team_id: int, workspace_root: str | None = None) -> None:

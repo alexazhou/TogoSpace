@@ -1,5 +1,5 @@
 from service import funcToolService
-from service.roomService import ChatRoom
+from model.dbModel.gtAgentTask import GtAgentTask
 
 from .base import AgentDriver, AgentTurnSetup
 
@@ -32,5 +32,5 @@ class NativeAgentDriver(AgentDriver):
             hint_prompt=_RUN_CHAT_TURN_HINT,
         )
 
-    async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, task: GtAgentTask, synced_count: int, max_function_calls: int = 5) -> None:
         raise RuntimeError("NativeAgentDriver 不再直接执行 run_chat_turn，请使用 Agent.run_chat_turn")

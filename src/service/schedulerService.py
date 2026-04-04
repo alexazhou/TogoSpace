@@ -4,11 +4,11 @@ from typing import Dict
 
 from service import messageBus
 from service.messageBus import EventBusMessage
-from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
 from service import agentService, roomService as chat_room
 from service.agentService import Agent
-from dal.db import gtTeamManager
-from constants import MessageBusTopic, AgentStatus
+from dal.db import gtTeamManager, gtAgentTaskManager
+from constants import MessageBusTopic, AgentStatus, AgentTaskType
+from model.dbModel.gtAgentTask import GtAgentTask
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def remove_agent(agent_id: int) -> None:
         task.cancel()
 
 
-def _on_agent_turn(msg: EventBusMessage) -> None:
+async def _on_agent_turn(msg: EventBusMessage) -> None:
     """订阅 ROOM_AGENT_TURN：将 Agent 任务入队，若 Agent 未运行则加入调度池。"""
     agent_id: int = msg.payload["agent_id"]
     room_id: int = msg.payload["room_id"]
@@ -82,12 +82,18 @@ def _on_agent_turn(msg: EventBusMessage) -> None:
     agent = agentService.get_agent(agent_id)
 
     # 去重：同一房间已在队列中则跳过，避免重复调度
-    queued_events = list(getattr(agent.wait_task_queue, "_queue", []))
-    if any(e.room_id == room_id for e in queued_events):
+    queued_tasks: list[GtAgentTask] = list(getattr(agent.wait_task_queue, "_queue", []))
+    if any(t.task_data.get("room_id") == room_id for t in queued_tasks):
         logger.debug(f"跳过重复入队: agent_id={agent_id}, room_id={room_id}")
         return
 
-    agent.wait_task_queue.put_nowait(GtCoreRoomMessageEvent(room_id))
+    # 创建任务记录并入队
+    task = await gtAgentTaskManager.create_task(
+        agent_id,
+        AgentTaskType.ROOM_MESSAGE,
+        {"room_id": room_id},
+    )
+    agent.wait_task_queue.put_nowait(task)
 
     add_agent(agent, _global_max_fc)
 

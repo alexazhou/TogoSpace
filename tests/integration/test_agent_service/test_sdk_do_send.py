@@ -7,13 +7,14 @@ import pytest
 from dal.db import gtTeamManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.gtAgentTask import GtAgentTask
 from service import roomService, agentService, ormService, persistenceService
 from service import presetService
 from service.agentService import Agent
 from service.agentService.promptBuilder import build_turn_context_prompt, format_room_message
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
-from constants import DriverType, RoleTemplateType
+from constants import DriverType, RoleTemplateType, AgentTaskType
 from util import llmApiUtil
 from util.configTypes import TeamConfig, AgentConfig, DeptNodeConfig
 from ...base import ServiceTestCase
@@ -61,18 +62,24 @@ class TestSdkDoSend(ServiceTestCase):
         await ormService.shutdown()
 
     async def _make_driver_with_room(self, agent_name: str, current_room_name: str):
-        """创建房间并从服务获取 agent，模拟调度器注入当前房间上下文的行为。"""
+        """创建房间并从服务获取 agent，模拟调度器注入当前任务上下文的行为。"""
         # 1. roomService 处理持久化和成员关系
         await roomService.ensure_room_record(TEAM, current_room_name, [agent_name])
         room = roomService.get_room_by_key(f"{current_room_name}@{TEAM}")
         await room.activate_scheduling()
-        
+
         # 2. 从 agentService 获取在内存中已注册好的 agent
         agent = agentService.get_agent(room.get_agent_id(agent_name))
-        
-        # 3. 模拟 schedulerService：进入该房间回合前注入运行时的 current_room
-        agent.current_room = room
-        
+
+        # 3. 模拟 schedulerService：进入该房间回合前注入运行时的 current_task
+        task = GtAgentTask(
+            id=1,
+            agent_id=agent.gt_agent.id,
+            task_type=AgentTaskType.ROOM_MESSAGE,
+            task_data={"room_id": room.room_id},
+        )
+        agent.current_task = task
+
         # 4. 驱动绑定
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
         return driver, agent, room
@@ -170,9 +177,15 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             driver_config=AgentDriverConfig(driver_type="native"),
         )
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
+        task = GtAgentTask(
+            id=1,
+            agent_id=1,
+            task_type=AgentTaskType.ROOM_MESSAGE,
+            task_data={"room_id": room.room_id},
+        )
 
         try:
-            await driver.run_chat_turn(room, synced_count=0, max_function_calls=1)
+            await driver.run_chat_turn(task, synced_count=0, max_function_calls=1)
             assert False, "expected RuntimeError"
         except RuntimeError as exc:
             assert "尚未初始化" in str(exc)
@@ -185,12 +198,18 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             system_prompt="test",
             driver_config=AgentDriverConfig(driver_type="native"),
         )
-        agent.current_room = room
+        task = GtAgentTask(
+            id=1,
+            agent_id=1,
+            task_type=AgentTaskType.ROOM_MESSAGE,
+            task_data={"room_id": room.room_id},
+        )
+        agent.current_task = task
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client
 
-        await driver.run_chat_turn(room, synced_count=0, max_function_calls=2)
+        await driver.run_chat_turn(task, synced_count=0, max_function_calls=2)
 
         assert len(fake_client.queries) == 2
 
@@ -203,6 +222,12 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             gt_agent=GtAgent(id=1, team_id=1, name="alice", role_template_id=1, model="test-model"),
             system_prompt="test",
             driver_config=AgentDriverConfig(driver_type="native"),
+        )
+        task = GtAgentTask(
+            id=1,
+            agent_id=1,
+            task_type=AgentTaskType.ROOM_MESSAGE,
+            task_data={"room_id": room.room_id},
         )
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
         fake_client = _FakeClaudeClient()
@@ -219,7 +244,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             ),
         ])
 
-        await driver.run_chat_turn(room, synced_count=1, max_function_calls=1)
+        await driver.run_chat_turn(task, synced_count=1, max_function_calls=1)
 
         assert len(fake_client.queries) == 1
         first_prompt = fake_client.queries[0]

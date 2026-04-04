@@ -5,9 +5,9 @@ from typing import Any, Optional, Protocol
 
 from constants import DriverType
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtAgentTask import GtAgentTask
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService.toolRegistry import AgentToolRegistry
-from service.roomService import ChatRoom
 from util import llmApiUtil
 
 
@@ -34,7 +34,7 @@ class AgentDriverHost(Protocol):
     gt_agent: GtAgent
     system_prompt: str
     agent_workdir: str
-    current_room: ChatRoom
+    current_task: GtAgentTask
     _history: AgentHistoryStore
     tool_registry: AgentToolRegistry
 
@@ -79,5 +79,5 @@ class AgentDriver:
     def turn_setup(self) -> AgentTurnSetup:
         return AgentTurnSetup()
 
-    async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, task: GtAgentTask, synced_count: int, max_function_calls: int = 5) -> None:
         raise NotImplementedError

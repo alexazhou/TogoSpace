@@ -135,3 +135,16 @@ class AgentHistoryStatus(EnhanceEnum):
     INIT = "INIT"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
+
+
+class AgentTaskType(EnhanceEnum):
+    """Agent 任务类型枚举。"""
+    ROOM_MESSAGE = "ROOM_MESSAGE"  # 聊天室消息处理任务
+
+
+class AgentTaskStatus(EnhanceEnum):
+    """Agent 任务状态枚举。"""
+    PENDING = "PENDING"    # 待处理
+    RUNNING = "RUNNING"    # 正在处理
+    COMPLETED = "COMPLETED"  # 已完成
+    FAILED = "FAILED"      # 失败

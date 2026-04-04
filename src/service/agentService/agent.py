@@ -3,11 +3,12 @@ import json
 import logging
 from typing import Any, Awaitable, Callable, List, Optional
 
-from constants import AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag, DriverType, MessageBusTopic, AgentStatus, RoomState
-from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
+from constants import AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag, AgentTaskStatus, DriverType, MessageBusTopic, AgentStatus, RoomState
+from model.dbModel.gtAgentTask import GtAgentTask
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreChatMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from dal.db import gtAgentTaskManager
 from service import funcToolService, llmService, messageBus, roomService
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup, build_agent_driver
@@ -36,9 +37,9 @@ class Agent:
         self.agent_workdir: str = agent_workdir
         self._history_store: AgentHistoryStore = AgentHistoryStore(self.gt_agent.id or 0)
         self.tool_registry: AgentToolRegistry = AgentToolRegistry()
-        self.wait_task_queue: asyncio.Queue = asyncio.Queue()
+        self.wait_task_queue: asyncio.Queue[GtAgentTask] = asyncio.Queue()
         self.status: AgentStatus = AgentStatus.IDLE
-        self.current_room: Optional[ChatRoom] = None
+        self.current_task: Optional[GtAgentTask] = None
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
 
     @property
@@ -58,7 +59,7 @@ class Agent:
         self.driver.mark_stopped()
         self.tool_registry.clear()
 
-    def _peek_task(self) -> Any | None:
+    def _peek_task(self) -> GtAgentTask | None:
         if self.wait_task_queue.empty():
             return None
         return self.wait_task_queue._queue[0]
@@ -69,8 +70,9 @@ class Agent:
             raise ValueError(f"Agent ID={self.gt_agent.id} 当前状态不是 FAILED（当前: {self.status.name}）")
 
         task = self._peek_task()
-        assert isinstance(task, GtCoreRoomMessageEvent), "resume_failed requires pending room message event"
-        room_id: int = task.room_id
+        assert task is not None, "resume_failed requires pending task"
+        room_id: int = task.task_data.get("room_id")
+        assert room_id is not None, "resume_failed requires task with room_id"
         self.status = AgentStatus.IDLE
         self._publish_status(self.status)
         return room_id
@@ -93,12 +95,14 @@ class Agent:
                 task = self._peek_task()
                 task_succeeded = False
                 last_error: Exception | None = None
+
+                # 更新任务状态为 RUNNING
+                await gtAgentTaskManager.update_task_status(task.id, AgentTaskStatus.RUNNING)
+                self.current_task = task
+
                 for attempt in range(1, MAX_INFER_RETRIES + 1):
                     try:
-                        if isinstance(task, GtCoreRoomMessageEvent):
-                            await self.run_chat_turn(task.room_id, max_function_calls)
-                        else:
-                            raise TypeError(f"不支持的任务类型: {type(task).__name__}")
+                        await self.run_chat_turn(task, max_function_calls)
                         task_succeeded = True
                         break
                     except Exception as e:
@@ -112,10 +116,17 @@ class Agent:
                     logger.error(
                         f"Agent 推理连续失败 {MAX_INFER_RETRIES} 次，标记为 FAILED: agent_id={self.gt_agent.id}, last_error={last_error}"
                     )
+                    # 更新任务状态为 FAILED
+                    error_msg = str(last_error) if last_error else None
+                    await gtAgentTaskManager.update_task_status(task.id, AgentTaskStatus.FAILED, error_message=error_msg)
                     self.status = AgentStatus.FAILED
+                    self.current_task = None
                     self._publish_status(self.status)
                     return
 
+                # 更新任务状态为 COMPLETED
+                await gtAgentTaskManager.update_task_status(task.id, AgentTaskStatus.COMPLETED)
+                self.current_task = None
                 self.wait_task_queue.get_nowait()
                 self.wait_task_queue.task_done()
         finally:
@@ -146,32 +157,34 @@ class Agent:
         )
         return 1
 
-    async def run_chat_turn(self, room_id: int, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, task: GtAgentTask, max_function_calls: int = 5) -> None:
+        room_id = task.task_data.get("room_id")
+        if room_id is None:
+            logger.warning(f"run_chat_turn 跳过：task 缺少 room_id, agent_id={self.gt_agent.id}, task_id={task.id}")
+            return
+
         room: ChatRoom | None = roomService.get_room(room_id)
         if room is None:
             logger.warning(f"run_chat_turn 跳过：room_id={room_id} 不存在, agent_id={self.gt_agent.id}")
             return
 
-        self.current_room = room
         synced_count = await self.pull_room_messages_to_history(room)
         try:
             if self.driver.host_managed_turn_loop:
                 assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
-                await self._run_chat_turn_with_host_loop(max_function_calls)
+                await self._run_chat_turn_with_host_loop(room, max_function_calls)
             else:
-                await self.driver.run_chat_turn(room, synced_count, max_function_calls)
+                await self.driver.run_chat_turn(task, synced_count, max_function_calls)
         except Exception as e:
             logger.warning(f"run_chat_turn 异常: agent_id={self.gt_agent.id}, room={room.key}, error={e}")
             raise
-        finally:
-            self.current_room = None
 
-    async def _run_chat_turn_with_host_loop(self, max_function_calls: int) -> None:
+    async def _run_chat_turn_with_host_loop(self, room: ChatRoom, max_function_calls: int) -> None:
         turn_setup: AgentTurnSetup = self.driver.turn_setup
         tools: list[llmApiUtil.OpenAITool] = self.tool_registry.export_openai_tools()
         max_retries = max(1, turn_setup.max_retries)
         for _ in range(max_retries):
-            turn_done = await self._run_until_reply(tools=tools, max_function_calls=max_function_calls)
+            turn_done = await self._run_until_reply(room, tools=tools, max_function_calls=max_function_calls)
             if turn_done:
                 return
             if len(turn_setup.hint_prompt) > 0:
@@ -180,13 +193,11 @@ class Agent:
                     stage=AgentHistoryStage.INPUT,
                 )
 
-    async def _run_until_reply(self, tools: Optional[list[llmApiUtil.OpenAITool]], max_function_calls: int) -> bool:
-        current_room = self.current_room
-        assert current_room is not None, "current_room should not be None while running chat turn"
+    async def _run_until_reply(self, room: ChatRoom, tools: Optional[list[llmApiUtil.OpenAITool]], max_function_calls: int) -> bool:
         context: ToolCallContext = ToolCallContext(
             agent_name=self.gt_agent.name,
-            team_id=current_room.team_id,
-            chat_room=current_room,
+            team_id=room.team_id,
+            chat_room=room,
         )
         for _ in range(max_function_calls):
             assistant_message: llmApiUtil.OpenAIMessage = await self._infer(tools)
@@ -203,7 +214,7 @@ class Agent:
                 )
                 if exec_result.turn_finished and (
                     exec_result.status == AgentHistoryStatus.SUCCESS
-                    or current_room.state == RoomState.INIT
+                    or room.state == RoomState.INIT
                 ):
                     turn_done = True
 
@@ -245,8 +256,13 @@ class Agent:
         return assistant_message
 
     async def _execute_tool(self) -> None:
-        current_room = self.current_room
-        assert current_room is not None, "current_room should not be None while executing tool"
+        current_task = self.current_task
+        assert current_task is not None, "current_task should not be None while executing tool"
+        room_id = current_task.task_data.get("room_id")
+        assert room_id is not None, "current_task should have room_id"
+        room = roomService.get_room(room_id)
+        assert room is not None, f"room should exist: room_id={room_id}"
+
         last_msg: llmApiUtil.OpenAIMessage | None = self._history.get_last_assistant_message()
         if last_msg is None or last_msg.tool_calls is None or len(last_msg.tool_calls) == 0:
             return
@@ -257,8 +273,8 @@ class Agent:
             args = function.get("arguments", "")
             context: ToolCallContext = ToolCallContext(
                 agent_name=self.gt_agent.name,
-                team_id=current_room.team_id,
-                chat_room=current_room,
+                team_id=room.team_id,
+                chat_room=room,
                 tool_name=name,
             )
             await self._execute_tool_call_with_history(
