@@ -39,6 +39,7 @@ class SqlitePoolBackend(PoolBackend):
     def __init__(self, *, database: str, **kwargs) -> None:
         super().__init__(database=database, **kwargs)
         self._acquired_count = 0
+        self._connections: dict[int, ConnectionProtocol] = {}  # id -> conn
 
     async def create(self) -> None:
         self.pool = _SqlitePoolState()
@@ -50,15 +51,26 @@ class SqlitePoolBackend(PoolBackend):
         connect_params.setdefault("isolation_level", None)
         conn: ConnectionProtocol = await aiosqlite.connect(self.database, **connect_params)
         self._acquired_count += 1
+        self._connections[id(conn)] = conn
         return conn
 
     async def release(self, conn: ConnectionProtocol) -> None:
+        conn_id = id(conn)
         await conn.close()
         self._acquired_count = max(0, self._acquired_count - 1)
+        self._connections.pop(conn_id, None)
 
     async def close(self) -> None:
+        """关闭所有连接，确保 aiosqlite 后台线程正确退出。"""
         if self.pool is not None:
             self.pool.closed = True
+        for conn_id, conn in list(self._connections.items()):
+            try:
+                await conn.close()
+            except Exception:
+                pass
+        self._connections.clear()
+        self._acquired_count = 0
 
     def has_acquired_connections(self) -> bool:
         return self._acquired_count > 0
