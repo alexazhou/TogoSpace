@@ -107,21 +107,21 @@ class TestAgentServiceAgentStatusEvent(_agentServiceCase):
         finally:
             messageBus.unsubscribe(MessageBusTopic.AGENT_STATUS_CHANGED, _on_agent_status)
 
-        alice_events = [p for p in received_payloads if p.get("gt_agent") is not None and p["gt_agent"].name == "alice"]
+        alice_events = [p for p in received_payloads if p.get("agent_name") == "alice"]
         assert len(alice_events) >= 2
 
-        active_event = next((p for p in alice_events if p.get("status") == AgentStatus.ACTIVE.name), None)
-        idle_event = next((p for p in alice_events if p.get("status") == AgentStatus.IDLE.name), None)
+        active_event = next((p for p in alice_events if p.get("status") == AgentStatus.ACTIVE), None)
+        idle_event = next((p for p in alice_events if p.get("status") == AgentStatus.IDLE), None)
         assert active_event is not None
         assert idle_event is not None
 
-        assert active_event["gt_agent"].id == alice.gt_agent.id
-        assert active_event["gt_agent"].team_id == team.id
-        assert active_event["gt_agent"].team_id > 0
+        assert active_event["agent_id"] == alice.gt_agent.id
+        assert active_event["team_id"] == team.id
+        assert active_event["team_id"] > 0
 
-        assert idle_event["gt_agent"].id == alice.gt_agent.id
-        assert idle_event["gt_agent"].team_id == team.id
-        assert idle_event["gt_agent"].team_id > 0
+        assert idle_event["agent_id"] == alice.gt_agent.id
+        assert idle_event["team_id"] == team.id
+        assert idle_event["team_id"] > 0
 
 
 class TestAgentServiceSystemPrompt(_agentServiceCase):

@@ -58,6 +58,7 @@ class TestChatRoomMessages(ServiceTestCase):
             assert room.messages[1].content == "hello"
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_MSG_ADDED,
+                event="message",
                 room_id=room.room_id,
                 room_name="test_room",
                 room_key=f"test_room@{TEAM}",

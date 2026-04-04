@@ -18,7 +18,6 @@ class Message:
 
 
 _subscribers: Dict[MessageBusTopic, List[Callable[[Message], None]]] = {}
-_pending_tasks: set[asyncio.Task] = set()
 
 
 def subscribe(topic: MessageBusTopic, callback: Callable[[Message], None]) -> None:
@@ -50,38 +49,18 @@ def publish(topic: MessageBusTopic, **payload: Any) -> None:
 def _invoke_callback(callback: Callable[[Message], None], msg: Message) -> None:
     callback_name = getattr(callback, "__name__", repr(callback))
     try:
-        logger.debug(f"[messageBus] calling callback {callback_name} for topic={msg.topic.name}")
         result = callback(msg)
         if inspect.isawaitable(result):
-            task = asyncio.create_task(_await_callback_result(result, msg.topic, callback_name))
-            _pending_tasks.add(task)
-            task.add_done_callback(_pending_tasks.discard)
+            asyncio.create_task(result, name=f"messageBus-{msg.topic.name}-{callback_name}")
     except Exception as e:
         logger.error(f"[messageBus] topic={msg.topic} callback={callback_name} 异常: {e}")
 
 
-async def _await_callback_result(awaitable: Any, topic: MessageBusTopic, callback_name: str) -> None:
-    try:
-        await awaitable
-    except Exception as e:
-        logger.error(f"[messageBus] topic={topic} callback={callback_name} 异常: {e}")
-
-
 async def startup() -> None:
     """初始化消息总线，须在各模块 subscribe 前调用。"""
-    global _pending_tasks
-    for task in list(_pending_tasks):
-        if not task.done():
-            task.cancel()
-    _pending_tasks = set()
     _subscribers.clear()
 
 
-def shutdown() -> None:
+async def shutdown() -> None:
     """清空所有订阅，程序退出前调用。"""
-    global _pending_tasks
-    for task in list(_pending_tasks):
-        if not task.done():
-            task.cancel()
-    _pending_tasks = set()
     _subscribers.clear()
