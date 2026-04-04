@@ -5,6 +5,7 @@ import os
 from typing import Optional
 
 import aiosqlite
+import aiosqlite.core as _aiosqlite_core
 import peewee
 from peewee_async.databases import AioDatabase
 from peewee_async.pool import PoolBackend
@@ -14,6 +15,17 @@ from db import check_database_initialized, migrate_database
 from model.dbModel.base import bind_database
 
 logger = logging.getLogger(__name__)
+
+# aiosqlite.Connection 继承 Thread 且默认 daemon=False，
+# 若连接因 asyncio 任务取消等原因未被正常 close()，其工作线程会阻塞进程退出。
+# 在 __init__ 阶段（线程 start 之前）将 daemon 设为 True，使泄漏的连接不阻塞退出。
+_orig_aiosqlite_init = _aiosqlite_core.Connection.__init__
+
+def _patched_aiosqlite_init(self, *args, **kwargs):
+    _orig_aiosqlite_init(self, *args, **kwargs)
+    self.daemon = True
+
+_aiosqlite_core.Connection.__init__ = _patched_aiosqlite_init
 
 
 class _SqlitePoolState:
