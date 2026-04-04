@@ -67,8 +67,8 @@ class LlmServiceType(EnhanceEnum):
 
 
 class MessageBusTopic(EnhanceEnum):
-    ROOM_AGENT_TURN = auto()       # 轮到某 Agent 发言；payload: agent_id, room_id, room_name, team_name
-    ROOM_MSG_ADDED = auto()        # 房间新增消息；payload: event, room_id, room_key, room_name, team_id, team_name, sender, content, time
+    ROOM_AGENT_TURN = auto()       # 轮到某 Agent 发言；payload: gt_agent(GtAgent), room_id
+    ROOM_MSG_ADDED = auto()        # 房间新增消息；payload: gt_room(GtRoom), sender, content, time
     AGENT_STATUS_CHANGED = auto()  # Agent 忙闲状态变更；payload: gt_agent(GtAgent), status(AgentStatus)
 
 

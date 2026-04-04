@@ -61,11 +61,8 @@ class TestTurnScheduling(ServiceTestCase):
             await room.activate_scheduling()
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_AGENT_TURN,
-                agent_id=room.get_agent_id("alice"),
+                gt_agent=room.get_gt_agent("alice"),
                 room_id=room.room_id,
-                room_name="r",
-                room_key=f"r@{TEAM}",
-                team_name=TEAM,
             )
 
     async def test_add_message_publishes_next_agent(self):
@@ -80,11 +77,8 @@ class TestTurnScheduling(ServiceTestCase):
             room.finish_turn("alice")
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_AGENT_TURN,
-                agent_id=room.get_agent_id("bob"),
+                gt_agent=room.get_gt_agent("bob"),
                 room_id=room.room_id,
-                room_name="r",
-                room_key=f"r@{TEAM}",
-                team_name=TEAM,
             )
 
     async def test_turn_state_becomes_idle_after_max_turns(self):

@@ -45,10 +45,8 @@ class MessageInfo:
 class WsEvent:
     event: str
     room_id: int | None = None
-    room_key: str | None = None
     room_name: str | None = None
     team_id: int | None = None
-    team_name: str | None = None
     sender: str | None = None
     content: str | None = None
     time: datetime | None = None
@@ -155,13 +153,12 @@ class ApiClient:
                             data = json.loads(msg.data)
                             event_type = data.get("event", "message")
                             if event_type == "message":
+                                gt_room = data["gt_room"]
                                 yield WsEvent(
                                     event=event_type,
-                                    room_id=data["room_id"],
-                                    room_key=data.get("room_key"),
-                                    room_name=data["room_name"],
-                                    team_id=data.get("team_id"),
-                                    team_name=data.get("team_name", ""),
+                                    room_id=gt_room["id"],
+                                    room_name=gt_room["name"],
+                                    team_id=gt_room["team_id"],
                                     sender=data["sender"],
                                     content=data["content"],
                                     time=datetime.fromisoformat(data["time"]),

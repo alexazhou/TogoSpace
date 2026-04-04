@@ -224,7 +224,7 @@ class WatcherApp(App):
 
             try:
                 async for event in self._api.ws_events(on_connected=_on_connected):
-                    log.debug("ws: 收到事件 room=%s sender=%s", event.room_key, event.sender)
+                    log.debug("ws: 收到事件 room_id=%s sender=%s", event.room_id, event.sender)
                     self._on_ws_event(event)
                 log.info("ws: 连接正常关闭（async for 退出）")
             except asyncio.CancelledError:
@@ -264,10 +264,14 @@ class WatcherApp(App):
             return
 
         preview = _make_preview(event.sender, event.content)
-        assert event.room_key is not None
-        self.call_later(room_panel.update_preview, event.room_key, preview)
+        room = next((r for r in self._rooms if r.room_id == event.room_id), None)
+        if room is None:
+            log.debug("ws: 收到未知房间的消息事件 room_id=%s", event.room_id)
+            return
 
-        if event.room_key == self._current_room_key:
+        self.call_later(room_panel.update_preview, room.room_key, preview)
+
+        if room.room_key == self._current_room_key:
             self._current_msg_count += 1
             time_str = event.time.strftime("%H:%M:%S") if event.time else ""
             self.call_later(
@@ -275,8 +279,8 @@ class WatcherApp(App):
             )
             self.call_later(status_bar.update_count, self._current_msg_count)
         else:
-            self._unread[event.room_key] = self._unread.get(event.room_key, 0) + 1
-            self.call_later(room_panel.update_unread_count, event.room_key, self._unread[event.room_key])
+            self._unread[room.room_key] = self._unread.get(room.room_key, 0) + 1
+            self.call_later(room_panel.update_unread_count, room.room_key, self._unread[room.room_key])
 
     @on(ListView.Selected, "#room-list")
     async def on_room_selected(self, event: ListView.Selected) -> None:

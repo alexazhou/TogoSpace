@@ -68,6 +68,7 @@ class ChatRoom:
     OPERATOR_MEMBER_ID = int(SpecialAgent.OPERATOR.value)
 
     def __init__(self, team: GtTeam, room: GtRoom, agents: List[GtAgent] | None = None):
+        self.gt_room: GtRoom = room
         self.room_id: int = room.id  # 数据库主键 ID
         self.team_id: int = team.id  # 所属 Team 的数据库主键 ID
         self.name: str = room.name  # 房间名称
@@ -106,6 +107,15 @@ class ChatRoom:
         if special_agent is not None:
             return int(special_agent.value)
         return self._agent_id_map.get(name, 0)
+
+    def get_gt_agent(self, name: str) -> GtAgent | None:
+        """根据 Agent 名称获取运行态房间中的普通 Agent 对象。"""
+        if SpecialAgent.value_of(name) is not None:
+            return None
+        for agent in self._agents:
+            if _same_speaker(agent.name, name):
+                return agent
+        return None
 
     def can_post_message(self, sender: str) -> bool:
         """返回 sender 是否允许向当前房间写消息。"""
@@ -171,12 +181,7 @@ class ChatRoom:
 
         messageBus.publish(
             MessageBusTopic.ROOM_MSG_ADDED,
-            event="message",
-            room_id=self.room_id,
-            room_name=self.name,
-            room_key=self.key,
-            team_id=self.team_id,
-            team_name=self.team_name,
+            gt_room=self.gt_room,
             sender=sender,
             content=content,
             time=message.send_time.isoformat(),
@@ -260,14 +265,21 @@ class ChatRoom:
 
     def _publish_current_turn(self, agent_name: str) -> None:
         """仅发布指定 Agent 的发言事件，不处理状态推进。"""
-        agent_id = self.get_agent_id(agent_name)
+        special_agent = SpecialAgent.value_of(agent_name)
+        if special_agent is not None:
+            logger.info(
+                "当前发言位为特殊成员，跳过 ROOM_AGENT_TURN 发布: room=%s, agent=%s",
+                self.key,
+                special_agent.name,
+            )
+            return
+
+        gt_agent = self.get_gt_agent(agent_name)
+        assert gt_agent is not None, f"room agent not found while publishing turn: room={self.key}, agent={agent_name}"
         messageBus.publish(
             MessageBusTopic.ROOM_AGENT_TURN,
-            agent_id=agent_id,
+            gt_agent=gt_agent,
             room_id=self.room_id,
-            room_name=self.name,
-            room_key=self.key,
-            team_name=self.team_name,
         )
 
     def _resolve_next_dispatchable_agent(self) -> Optional[str]:
