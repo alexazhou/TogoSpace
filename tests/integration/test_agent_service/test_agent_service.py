@@ -142,7 +142,8 @@ class TestagentServiceGetAllRooms(_agentServiceCase):
         """roomService.get_rooms_for_agent 应返回某个 agent 所在的所有 room_id。"""
         await roomService.ensure_room_record(TEAM, "general", ["alice"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
-        assert room.room_id in roomService.get_rooms_for_agent(room.team_id, "alice")
+        alice_id = room.get_agent_id_by_name("alice")
+        assert room.room_id in roomService.get_rooms_for_agent(room.team_id, alice_id)
 
 
 class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
@@ -151,9 +152,10 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
-        await room.add_message("bob", "hello alice")
+        bob_id = room.get_agent_id_by_name("bob")
+        await room.add_message(bob_id, "hello alice")
 
-        alice = agentService.get_agent(room.get_agent_id("alice"))
+        alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
         synced_count = await alice.pull_room_messages_to_history(room)
 
         # 初始公告 + bob 消息会聚合成一条“轮到发言”上下文消息
@@ -172,9 +174,10 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
-        await room.add_message("bob", "hello alice")
+        bob_id = room.get_agent_id_by_name("bob")
+        await room.add_message(bob_id, "hello alice")
 
-        alice = agentService.get_agent(room.get_agent_id("alice"))
+        alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
         existing = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, "older context")
         alice.inject_history_messages([GtAgentHistory.from_openai_message(alice.gt_agent.id, 0, existing)])
 
@@ -240,8 +243,9 @@ class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
 
-        alice = agentService.get_agent(room.get_agent_id("alice"))
-        await room.add_message("alice", "i am talking")
+        alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
+        alice_id = room.get_agent_id_by_name("alice")
+        await room.add_message(alice_id, "i am talking")
 
         synced_count = await alice.pull_room_messages_to_history(room)
         # 只应有初始公告，不应有自己的消息

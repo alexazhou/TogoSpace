@@ -169,7 +169,8 @@ def finish_chat_turn(_context: ToolCallContext = None) -> dict:
         return {"success": False, "message": "当前没有激活的房间上下文。"}
 
     logger.info(f"Agent 结束行动: agent={_context.agent_name}")
-    ok = _context.chat_room.finish_turn(sender=_context.agent_name)
+    agent_id = _context.chat_room.get_agent_id_by_name(_context.agent_name)
+    ok = _context.chat_room.finish_turn(sender_id=agent_id)
 
     if not ok:
         current_name = _context.chat_room.get_current_turn_agent_name()

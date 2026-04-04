@@ -69,7 +69,7 @@ class TestSdkDoSend(ServiceTestCase):
         await room.activate_scheduling()
 
         # 2. 从 agentService 获取在内存中已注册好的 agent
-        agent = agentService.get_agent(room.get_agent_id(agent_name))
+        agent = agentService.get_agent(room.get_agent_id_by_name(agent_name))
 
         # 3. 模拟 schedulerService：进入该房间回合前注入运行时的 current_db_task
         task = GtAgentTask(

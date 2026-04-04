@@ -92,7 +92,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = roomService.get_room_by_key(f"manual_turn@{TEAM}")
         await room.activate_scheduling()
 
-        alice = agentService.get_agent(room.get_agent_id("alice"))
+        alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
         alice.inject_history_messages([
             GtAgentHistory.from_openai_message(
                 alice.gt_agent.id,
@@ -137,7 +137,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "turn_checker_room", ["alice", "bob"])
         room = roomService.get_room_by_key(f"turn_checker_room@{TEAM}")
 
-        alice = agentService.get_agent(room.get_agent_id("alice"))
+        alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
         alice.inject_history_messages([
             GtAgentHistory.from_openai_message(
                 alice.gt_agent.id,
@@ -168,7 +168,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room_key = f"general@{TEAM}"
         room = roomService.get_room_by_key(room_key)
         for agent_name in ["alice", "bob"]:
-            agent = agentService.get_agent(room.get_agent_id(agent_name))
+            agent = agentService.get_agent(room.get_agent_id_by_name(agent_name))
             agent.status = AgentStatus.IDLE
             agent.current_db_task = None
             agent.inject_history_messages([])
