@@ -50,7 +50,7 @@ class TspAgentDriver(AgentDriver):
 
     async def startup(self) -> None:
         options = self.config.options
-        work_dir = str(options.get("workdir") or self.host.team_workdir)
+        work_dir = str(options.get("workdir") or self.host.agent_workdir)
         command = build_gtsp_command(options.get("command"), work_dir)
 
         timeout_sec = int(options.get("request_timeout_sec", _DEFAULT_REQUEST_TIMEOUT_SEC))
