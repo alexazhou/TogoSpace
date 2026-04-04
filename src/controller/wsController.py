@@ -28,8 +28,11 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
         pass  # 只推不收，忽略客户端消息
 
     def _on_event(self, msg: messageBus.EventBusMessage) -> None:
-        logger.info(f"[ws] event: topic={msg.topic.name}, payload={msg.payload}")
-        asyncio.get_event_loop().create_task(self._send(jsonUtil.json_dump(msg.payload)))
+        payload = dict(msg.payload)
+        if msg.topic == MessageBusTopic.AGENT_STATUS_CHANGED:
+            payload["event"] = "agent_status"
+        logger.info(f"[ws] event: topic={msg.topic.name}, payload={payload}")
+        asyncio.get_event_loop().create_task(self._send(jsonUtil.json_dump(payload)))
 
     async def _send(self, payload: str) -> None:
         try:
