@@ -59,7 +59,18 @@ async def get_pending_tasks(agent_id: int) -> list[GtAgentTask]:
 
 
 async def get_first_pending_task(agent_id: int) -> GtAgentTask | None:
-    """获取 Agent 的第一个待处理任务。"""
+    """获取 Agent 的第一个待处理任务。
+
+    如果存在失败的任务，则不返回任何 pending 任务（不能跳过失败任务）。
+    """
+    # 先检查是否有失败的任务
+    failed_task = await GtAgentTask.aio_get_or_none(
+        GtAgentTask.agent_id == agent_id,
+        GtAgentTask.status == AgentTaskStatus.FAILED,
+    )
+    if failed_task is not None:
+        return None
+
     return await GtAgentTask.aio_get_or_none(
         GtAgentTask.agent_id == agent_id,
         GtAgentTask.status == AgentTaskStatus.PENDING,
