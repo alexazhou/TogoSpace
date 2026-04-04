@@ -70,6 +70,28 @@ class OpenAIToolCall(BaseModel):
     type: str = Field(default="function")
     function: dict
 
+    def verify(self) -> "OpenAIToolCall":
+        """验证字段完整性，返回 self 便于链式调用。"""
+        assert isinstance(self.id, str) and self.id, "tool_call.id 应为非空 str"
+        assert isinstance(self.function, dict), "tool_call.function 应为 dict"
+        name = self.function.get("name")
+        assert isinstance(name, str) and name, "tool_call.function.name 应为非空 str"
+        args = self.function.get("arguments", "{}")
+        assert isinstance(args, str), "tool_call.function.arguments 应为 str"
+        return self
+
+    @property
+    def function_name(self) -> str:
+        return self.function["name"]
+
+    @property
+    def function_args(self) -> str:
+        return self.function.get("arguments", "{}")
+
+    @property
+    def tool_call_id(self) -> str:
+        return self.id
+
 
 class OpenAIFunctionParameter(BaseModel):
     type: str
