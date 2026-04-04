@@ -78,12 +78,12 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             room = roomService.get_room_by_key(room_key)
             await room.activate_scheduling()
             await self.wait_until(
-                lambda: len([m for m in room.messages if m.sender_name != "system"]) >= 2,
+                lambda: len([m for m in room.messages if m.sender_id != room.SYSTEM_MEMBER_ID]) >= 2,
                 timeout=2.0,
                 message="alice 和 bob 未在限时内完成一轮对话",
             )
 
-        agent_messages = [m for m in room.messages if m.sender_name != "system"]
+        agent_messages = [m for m in room.messages if m.sender_id != room.SYSTEM_MEMBER_ID]
         assert len(agent_messages) >= 2
 
     async def test_tool_call_result_appended_to_history(self):

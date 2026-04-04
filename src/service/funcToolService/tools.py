@@ -101,8 +101,9 @@ def get_agent_list(_context: ToolCallContext = None) -> dict:
     if _context is None:
         return {"success": True, "agents": []}
     agents = list(dict.fromkeys(
-        m.sender_name for m in _context.chat_room.messages
-        if m.sender_name != SpecialAgent.SYSTEM.name
+        _context.chat_room._get_agent_name(m.sender_id)
+        for m in _context.chat_room.messages
+        if m.sender_id != _context.chat_room.SYSTEM_MEMBER_ID
     ))
     return {"success": True, "agents": agents}
 
@@ -136,7 +137,8 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
         return {"success": False, "message": f"目标房间不存在: {room_name} (team_id={_context.team_id})"}
 
     if _context.chat_room is not None and target_room.room_id != _context.chat_room.room_id:
-        if not target_room.can_post_message(_context.agent_name):
+        sender_id = _context.chat_room.get_agent_id_by_name(_context.agent_name)
+        if not target_room.can_post_message(sender_id):
             logger.warning(
                 "send_chat_msg: 发言者不在目标房间 agents 中 sender=%s room=%s team_id=%s agents=%s",
                 _context.agent_name,
@@ -146,7 +148,8 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
             )
             return {"success": False, "message": f"你不在目标房间 {target_room.name} 中，发送失败。"}
 
-    await target_room.add_message(_context.agent_name, msg)
+    sender_id = _context.chat_room.get_agent_id_by_name(_context.agent_name) if _context.chat_room else 0
+    await target_room.add_message(sender_id, msg)
 
     if target_room is _context.chat_room:
         return {"success": True, "message": f"消息已发送到 {_context.chat_room.name}。你可以继续调用工具，或者调用 finish_chat_turn 结束本轮行动。"}
@@ -169,9 +172,9 @@ def finish_chat_turn(_context: ToolCallContext = None) -> dict:
     ok = _context.chat_room.finish_turn(sender=_context.agent_name)
 
     if not ok:
-        current = _context.chat_room.get_current_turn_agent()
-        logger.warning(f"结束行动失败，当前应由 {current} 发言: agent={_context.agent_name}")
-        return {"success": False, "message": f"现在不是你的发言轮次（当前应由 {current} 发言），请勿再调用任何工具。"}
+        current_name = _context.chat_room.get_current_turn_agent_name()
+        logger.warning(f"结束行动失败，当前应由 {current_name} 发言: agent={_context.agent_name}")
+        return {"success": False, "message": f"现在不是你的发言轮次（当前应由 {current_name} 发言），请勿再调用任何工具。"}
 
     return {"success": True, "message": "已结束本轮行动。"}
 

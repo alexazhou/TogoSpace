@@ -77,19 +77,19 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         with self.patch_infer(handler=fake_infer):
             run_task = asyncio.create_task(scheduler.run())
             await asyncio.sleep(0)
-            agent_messages = [m for m in room.messages if SpecialAgent.value_of(m.sender_name) != SpecialAgent.SYSTEM]
+            agent_messages = [m for m in room.messages if m.sender_id != room.SYSTEM_MEMBER_ID]
             assert len(agent_messages) == 0
 
             await room.activate_scheduling()
             await self.wait_until(
-                lambda: len([m for m in room.messages if SpecialAgent.value_of(m.sender_name) != SpecialAgent.SYSTEM]) >= 1,
+                lambda: len([m for m in room.messages if m.sender_id != room.SYSTEM_MEMBER_ID]) >= 1,
                 timeout=2.0,
                 message="房间激活后未在限时内收到 Agent 回复",
             )
             scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)
 
-        agent_messages = [m for m in room.messages if SpecialAgent.value_of(m.sender_name) != SpecialAgent.SYSTEM]
+        agent_messages = [m for m in room.messages if m.sender_id != room.SYSTEM_MEMBER_ID]
         assert len(agent_messages) >= 1
 
     async def test_restore_runtime_state_recovers_room_and_agent_history(self):

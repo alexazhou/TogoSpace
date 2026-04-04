@@ -149,14 +149,15 @@ class Agent:
                     self.start_consumer_task()
 
     async def pull_room_messages_to_history(self, room: ChatRoom) -> int:
-        new_msgs: List[GtCoreChatMessage] = await room.get_unread_messages(self.gt_agent.name)
+        new_msgs: List[GtCoreChatMessage] = await room.get_unread_messages(self.gt_agent.id)
         logger.info(f"同步房间消息: agent_id={self.gt_agent.id}, room={room.name}, count={len(new_msgs)}")
 
         message_blocks: list[str] = []
         for msg in new_msgs:
-            if msg.sender_name == self.gt_agent.name:
+            if msg.sender_id == self.gt_agent.id:
                 continue
-            message_blocks.append(format_room_message(room.name, msg.sender_name, msg.content))
+            sender_name = room._get_agent_name(msg.sender_id)
+            message_blocks.append(format_room_message(room.name, sender_name, msg.content))
 
         if len(message_blocks) == 0:
             return 0

@@ -78,55 +78,60 @@ class ChatRoom:
         self.initial_topic: str = room.initial_topic  # 初始话题
         self.tags: List[str] = room.tags or []  # 房间标签
         self._agents: List[GtAgent] = agents or []  # 房间参与者列表
-        self._agent_names: List[str] = [agent.name for agent in self._agents]
-        self._agent_id_map: Dict[str, int] = {agent.name: agent.id for agent in self._agents}
-        self._agent_name_map: Dict[int, str] = {agent.id: agent.name for agent in self._agents}
-        self._agent_name_map[self.SYSTEM_MEMBER_ID] = SpecialAgent.SYSTEM.name
-        self._agent_name_map[self.OPERATOR_MEMBER_ID] = SpecialAgent.OPERATOR.name
-        self._agent_read_index: Dict[str, int] = {}  # 每个 Agent 的消息读取进度（name 为 key）
+        self._agent_ids: List[int] = [agent.id for agent in self._agents]  # agent_id 列表，调度逻辑频繁使用索引访问
+        self._agent_read_index: Dict[int, int] = {}  # 每个 Agent 的消息读取进度（agent_id 为 key）
         self._turn_count: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
         self._max_turns: int = room.max_turns  # 最大允许轮次
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
         self._state: RoomState = RoomState.INIT  # 房间当前的调度状态
         self._state_after_init: RoomState = RoomState.SCHEDULING if self._agents and room.max_turns > 0 else RoomState.IDLE
-        self._round_skipped_set: set = set()  # 当前轮次已跳过发言的 Agent 名单
+        self._round_skipped_set: set[int] = set()  # 当前轮次已跳过发言的 Agent ID 集合
         self._current_turn_has_content: bool = False  # 当前发言人是否已发送内容
 
     @property
     def agents(self) -> List[str]:
-        """返回 Agent 名称列表。"""
+        """返回 Agent 名称列表（用于 API 响应）。"""
         return [
-            agent_name
-            for agent_name in self._agent_names
-            if SpecialAgent.value_of(agent_name) != SpecialAgent.SYSTEM
+            agent.name
+            for agent in self._agents
+            if agent.id != self.SYSTEM_MEMBER_ID
         ]
 
-    def get_agent_id(self, name: str) -> int:
+    def _get_agent_by_id(self, agent_id: int) -> GtAgent | None:
+        """根据 agent_id 获取 GtAgent 对象。"""
+        for agent in self._agents:
+            if agent.id == agent_id:
+                return agent
+        return None
+
+    def _get_agent_name(self, agent_id: int) -> str:
+        """根据 agent_id 获取名称，用于显示。"""
+        if agent_id == self.SYSTEM_MEMBER_ID:
+            return SpecialAgent.SYSTEM.name
+        if agent_id == self.OPERATOR_MEMBER_ID:
+            return SpecialAgent.OPERATOR.name
+        agent = self._get_agent_by_id(agent_id)
+        return agent.name if agent else str(agent_id)
+
+    def get_agent_id_by_name(self, name: str) -> int:
         """根据 Agent 名称获取 agent_id。"""
         special_agent = SpecialAgent.value_of(name)
         if special_agent is not None:
             return int(special_agent.value)
-        return self._agent_id_map.get(name, 0)
-
-    def get_gt_agent(self, name: str) -> GtAgent | None:
-        """根据 Agent 名称获取运行态房间中的普通 Agent 对象。"""
-        if SpecialAgent.value_of(name) is not None:
-            return None
         for agent in self._agents:
-            if _same_speaker(agent.name, name):
-                return agent
-        return None
+            if agent.name == name:
+                return agent.id
+        return 0
 
-    def can_post_message(self, sender: str) -> bool:
-        """返回 sender 是否允许向当前房间写消息。"""
-        if SpecialAgent.value_of(sender) == SpecialAgent.SYSTEM:
-            return True
+    def get_gt_agent(self, agent_id: int) -> GtAgent | None:
+        """根据 agent_id 获取运行态房间中的普通 Agent 对象。"""
+        if agent_id in (self.SYSTEM_MEMBER_ID, self.OPERATOR_MEMBER_ID):
+            return None
+        return self._get_agent_by_id(agent_id)
 
-        for agent_name in self._agent_names:
-            if _same_speaker(sender, agent_name):
-                return True
-
-        return False
+    def can_post_message(self, sender_id: int) -> bool:
+        """返回 sender_id 是否允许向当前房间写消息。"""
+        return sender_id in self._agent_ids or sender_id == self.SYSTEM_MEMBER_ID
 
     @property
     def key(self) -> str:
@@ -136,34 +141,47 @@ class ChatRoom:
     def state(self) -> RoomState:
         return self._state
 
-    async def get_unread_messages(self, agent_name: str) -> List[GtCoreChatMessage]:
-        """返回 agent_name 尚未读取的新消息，并推进其读取位置。"""
-        read_idx = self._agent_read_index.get(agent_name, 0)
+    async def get_unread_messages(self, agent: int | str) -> List[GtCoreChatMessage]:
+        """返回 agent 尚未读取的新消息，并推进其读取位置。
+
+        Args:
+            agent: agent_id (int) 或 agent_name (str，兼容旧接口)
+        """
+        agent_id = agent if isinstance(agent, int) else self.get_agent_id_by_name(agent)
+        read_idx = self._agent_read_index.get(agent_id, 0)
         new_msgs = self.messages[read_idx:]
-        self._agent_read_index[agent_name] = len(self.messages)
+        self._agent_read_index[agent_id] = len(self.messages)
         if self._state != RoomState.INIT:
-            id_keyed = {str(self.get_agent_id(k)): v for k, v in self._agent_read_index.items()}
+            id_keyed = {str(k): v for k, v in self._agent_read_index.items()}
             await gtRoomManager.update_room_state(self.room_id, id_keyed)
         return new_msgs
 
-    async def add_message(self, sender: str, content: str, send_time: datetime | None = None) -> None:
-        await self._append_message(sender, content, send_time=send_time)
+    async def add_message(self, sender: int | str, content: str, send_time: datetime | None = None) -> None:
+        """添加消息到房间。
+
+        Args:
+            sender: 发送者 agent_id (int) 或 agent_name (str，兼容旧接口)
+            content: 消息内容
+            send_time: 发送时间
+        """
+        sender_id = sender if isinstance(sender, int) else self.get_agent_id_by_name(sender)
+        await self._append_message(sender_id, content, send_time=send_time)
 
     async def _append_message(
         self,
-        sender: str,
+        sender_id: int,
         content: str,
         send_time: datetime | None = None,
         *,
         update_turn_state: bool = True,
     ) -> None:
         assertUtil.assertTrue(
-            self.can_post_message(sender),
-            error_message=f"sender '{sender}' is not an agent of room '{self.key}'",
+            self.can_post_message(sender_id),
+            error_message=f"sender_id '{sender_id}' is not an agent of room '{self.key}'",
             error_code="sender_not_in_room",
         )
         message = GtCoreChatMessage(
-            sender_name=sender,
+            sender_id=sender_id,
             content=content,
             send_time=send_time or datetime.now()
         )
@@ -174,7 +192,7 @@ class ChatRoom:
 
         await gtRoomMessageManager.append_room_message(
             room_id=self.room_id,
-            agent_id=self.get_agent_id(sender),
+            agent_id=sender_id,
             content=content,
             send_time=message.send_time.isoformat(),
         )
@@ -182,132 +200,170 @@ class ChatRoom:
         messageBus.publish(
             MessageBusTopic.ROOM_MSG_ADDED,
             gt_room=self.gt_room,
-            sender=sender,
+            sender_id=sender_id,
             content=content,
             time=message.send_time.isoformat(),
         )
-        if update_turn_state and self._agent_names:
-            self._update_turn_state_on_message(sender)
+        if update_turn_state and self._agent_ids:
+            self._update_turn_state_on_message(sender_id)
 
-    def _update_turn_state_on_message(self, sender: str) -> None:
+    def _update_turn_state_on_message(self, sender_id: int) -> None:
         # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
         was_idle = (self._state == RoomState.IDLE)
         if was_idle:
-            logger.info(f"检测到房间 {self.key} 的活动 ({sender})，重置轮次计数器并唤醒房间")
+            logger.info(f"检测到房间 {self.key} 的活动 (agent_id={sender_id})，重置轮次计数器并唤醒房间")
             self._turn_count = 0
             self._round_skipped_set = set()
             self._current_turn_has_content = False
             self._state = RoomState.SCHEDULING
 
         # 2. 只有当前顺序发言人说话，才标记本轮有内容。不再自动推进
-        current_expected: Optional[str] = self.get_current_turn_agent()
-        if _same_speaker(sender, current_expected):
+        current_expected: Optional[int] = self.get_current_turn_agent()
+        if sender_id == current_expected:
             self._current_turn_has_content = True
         else:
-            logger.info(f"房间 {self.key} 收到来自 {sender} 的插话，保持当前发言位 (当前应轮到 {current_expected})")
+            logger.info(f"房间 {self.key} 收到来自 agent_id={sender_id} 的插话，保持当前发言位 (当前应轮到 agent_id={current_expected})")
 
         # 3. 只要有真实消息（非系统消息），就清空跳过记录，让所有人重新有机会回应
-        if sender != SpecialAgent.SYSTEM.name and self._round_skipped_set:
+        if sender_id != self.SYSTEM_MEMBER_ID and self._round_skipped_set:
             self._round_skipped_set = set()
 
         # 4. 如果刚才从 IDLE 唤醒，我们需要手动重发当前轮次事件以重启循环
         if was_idle:
-            next_agent = self._resolve_next_dispatchable_agent()
-            if next_agent is not None:
-                self._publish_current_turn(next_agent)
+            next_agent_id = self._resolve_next_dispatchable_agent()
+            if next_agent_id is not None:
+                self._publish_current_turn(next_agent_id)
 
-    def finish_turn(self, sender: str | None = None) -> bool:
+    def finish_turn(self, sender: int | str | None = None) -> bool:
         """结束当前发言人的轮次。通常由 Agent 在 finish_chat_turn 工具中调用。
+
+        Args:
+            sender: 发送者 agent_id (int) 或 agent_name (str，兼容旧接口)
+
         返回 True 表示操作成功，False 表示被拒绝（sender 不是当前发言人）。
         """
         if self._state == RoomState.INIT:
             logger.warning(f"房间 {self.key} 仍处于 INIT，拒绝结束轮次")
             return False
 
-        current_expected: Optional[str] = self.get_current_turn_agent()
+        current_expected: Optional[int] = self.get_current_turn_agent()
 
-        if sender and not _same_speaker(sender, current_expected):
-            logger.warning(f"拒绝结束轮次申请：{sender} 并非当前发言人 ({current_expected})")
+        sender_id: int | None = None
+        if sender is not None:
+            sender_id = sender if isinstance(sender, int) else self.get_agent_id_by_name(sender)
+
+        if sender_id is not None and sender_id != current_expected:
+            logger.warning(f"拒绝结束轮次申请：agent_id={sender_id} 并非当前发言人 (agent_id={current_expected})")
             return False
 
-        logger.info(f"房间 {self.key} 由 {current_expected} 结束本轮行动 (has_content={self._current_turn_has_content})")
+        logger.info(f"房间 {self.key} 由 agent_id={current_expected} 结束本轮行动 (has_content={self._current_turn_has_content})")
 
         # 如果本轮没说话，记录为跳过
-        if not self._current_turn_has_content:
+        if not self._current_turn_has_content and current_expected is not None:
             self._round_skipped_set.add(current_expected)
 
         self._current_turn_has_content = False
 
-        if not self._agent_names:
+        if not self._agent_ids:
             return True
 
         if not self._go_next_turn():
             return True
 
-        next_agent = self._resolve_next_dispatchable_agent()
-        if next_agent is not None:
-            self._publish_current_turn(next_agent)
+        next_agent_id = self._resolve_next_dispatchable_agent()
+        if next_agent_id is not None:
+            self._publish_current_turn(next_agent_id)
         return True
 
-    def get_current_turn_agent(self) -> Optional[str]:
-        """返回当前理论上应该发言的 Agent 名（忽略 IDLE 状态）。"""
-        if not self._agent_names:
+    def get_current_turn_agent(self) -> Optional[int]:
+        """返回当前理论上应该发言的 Agent ID（忽略 IDLE 状态）。"""
+        if not self._agent_ids:
             return None
-        return self._agent_names[self._turn_pos]
+        return self._agent_ids[self._turn_pos]
 
-    def _should_auto_skip_agent_turn(self, agent_name: str | None) -> bool:
+    def get_current_turn_agent_name(self) -> Optional[str]:
+        """返回当前理论上应该发言的 Agent 名称（用于日志和测试）。"""
+        agent_id = self.get_current_turn_agent()
+        if agent_id is None:
+            return None
+        return self._get_agent_name(agent_id)
+
+    def get_agent_id(self, name: str) -> int:
+        """根据 Agent 名称获取 agent_id（兼容旧接口）。"""
+        return self.get_agent_id_by_name(name)
+
+    def _should_auto_skip_agent_turn(self, agent_id: int | None) -> bool:
+        """判断当前发言位是否应被自动跳过（不等待外部输入）。
+
+        仅针对 GROUP 房间中的 OPERATOR：当成员数 > 2 时，OPERATOR 的回合会被自动跳过，
+        直接推进到下一位 AI 成员，无需等待人类输入。
+
+        返回 True 表示应自动跳过并推进；返回 False 表示需等待该成员完成本轮。
+        """
         return (
-            agent_name is not None
-            and SpecialAgent.value_of(agent_name) == SpecialAgent.OPERATOR
+            agent_id is not None
+            and agent_id == self.OPERATOR_MEMBER_ID
             and self.room_type == RoomType.GROUP
-            and len(self._agent_names) > 2
+            and len(self._agent_ids) > 2
         )
 
-    def _publish_current_turn(self, agent_name: str) -> None:
+    def _is_special_agent(self, agent_id: int | None) -> bool:
+        """判断是否为特殊成员（SYSTEM/OPERATOR）。"""
+        return agent_id in (self.SYSTEM_MEMBER_ID, self.OPERATOR_MEMBER_ID)
+
+    def _publish_current_turn(self, agent_id: int) -> None:
         """仅发布指定 Agent 的发言事件，不处理状态推进。"""
-        gt_agent = self.get_gt_agent(agent_name)
-        assert gt_agent is not None, f"room agent not found while publishing turn: room={self.key}, agent={agent_name}"
+        gt_agent = self.get_gt_agent(agent_id)
+        assert gt_agent is not None, f"room agent not found while publishing turn: room={self.key}, agent_id={agent_id}"
         messageBus.publish(
             MessageBusTopic.ROOM_AGENT_TURN,
             gt_agent=gt_agent,
             room_id=self.room_id,
         )
 
-    def _resolve_next_dispatchable_agent(self) -> Optional[str]:
-        """根据当前状态解析下一位可发布 ROOM_AGENT_TURN 的普通 Agent 名。
+    def _resolve_next_dispatchable_agent(self) -> Optional[int]:
+        """解析下一位可发布 ROOM_AGENT_TURN 的普通 Agent ID。
 
-        返回 None 表示当前不应发布调度事件，可能是因为：
-        - 房间已命中停止条件
-        - 当前发言位是需要等待人工输入的特殊成员
+        处理流程：
+        1. 先检查停止条件，若满足则返回 None
+        2. 循环遍历当前发言位：
+           - 若命中 _should_auto_skip_agent_turn()，自动跳过并推进到下一位
+           - 若当前发言位是 SpecialAgent（非自动跳过场景），返回 None 等待外部输入
+           - 若是普通 Agent，返回其 ID 供上层发布事件
+
+        返回 None 表示当前不应发布调度事件，原因可能是：
+        - 房间已命中停止条件（_try_stop_scheduling 返回 True）
+        - GROUP 房间遍历一圈后所有成员都被跳过（_go_next_turn 返回 False）
+        - 当前发言位是需要等待外部输入的 SpecialAgent（如 PRIVATE 房间的 OPERATOR）
         """
-        if not self._agent_names:
+        if not self._agent_ids:
             return None
 
         if self._try_stop_scheduling():
             return None
 
         while True:
-            next_name: Optional[str] = self.get_current_turn_agent()
+            next_id: Optional[int] = self.get_current_turn_agent()
 
-            if self._should_auto_skip_agent_turn(next_name):
-                logger.info(f"房间 {self.key} 自动跳过人类操作者回合: agent={next_name}")
-                self._round_skipped_set.add(next_name)
+            if self._should_auto_skip_agent_turn(next_id):
+                logger.info(f"房间 {self.key} 自动跳过人类操作者回合: agent_id={next_id}")
+                if next_id is not None:
+                    self._round_skipped_set.add(next_id)
                 self._current_turn_has_content = False
 
                 if not self._go_next_turn():
                     return None
                 continue
 
-            special_agent = SpecialAgent.value_of(next_name)
-            if special_agent is not None:
+            if self._is_special_agent(next_id):
                 logger.info(
-                    "当前发言位为特殊成员，等待外部输入，不发布 ROOM_AGENT_TURN: room=%s, agent=%s",
+                    "当前发言位为特殊成员，等待外部输入，不发布 ROOM_AGENT_TURN: room=%s, agent_id=%s",
                     self.key,
-                    special_agent.name,
+                    next_id,
                 )
                 return None
 
-            return next_name
+            return next_id
 
     def _try_stop_scheduling(self) -> bool:
         """集中判断并应用停止条件；满足任一条件则切到 IDLE 并返回 True。"""
@@ -317,8 +373,9 @@ class ChatRoom:
                 logger.info(f"房间 {self.key} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
             return True
 
-        ai_agents = {a for a in self._agent_names if SpecialAgent.value_of(a) != SpecialAgent.OPERATOR}
-        if ai_agents and ai_agents.issubset(self._round_skipped_set):
+        # 获取所有非 OPERATOR 的 AI agent ID
+        ai_agent_ids = {aid for aid in self._agent_ids if aid != self.OPERATOR_MEMBER_ID}
+        if ai_agent_ids and ai_agent_ids.issubset(self._round_skipped_set):
             if self._state != RoomState.IDLE:
                 self._state = RoomState.IDLE
                 logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
@@ -327,7 +384,7 @@ class ChatRoom:
 
     def _go_next_turn(self) -> bool:
         """推进到下一发言位；若命中停止条件则返回 False。"""
-        self._turn_pos = (self._turn_pos + 1) % len(self._agent_names)
+        self._turn_pos = (self._turn_pos + 1) % len(self._agent_ids)
 
         # turn_pos 回到 0 代表跨轮（从最后一位回到首位）；
         # 只有在跨轮时才推进 turn_count。
@@ -351,15 +408,15 @@ class ChatRoom:
             changed = True
             if not self.messages:
                 await self._append_message(
-                    SpecialAgent.SYSTEM.name,
+                    self.SYSTEM_MEMBER_ID,
                     self.build_initial_system_message(),
                     update_turn_state=False,
                 )
 
         if self._state == RoomState.SCHEDULING:
-            next_agent = self._resolve_next_dispatchable_agent()
-            if next_agent is not None:
-                self._publish_current_turn(next_agent)
+            next_agent_id = self._resolve_next_dispatchable_agent()
+            if next_agent_id is not None:
+                self._publish_current_turn(next_agent_id)
 
         return changed
 
@@ -371,26 +428,30 @@ class ChatRoom:
         if messages is not None:
             self.messages = list(messages)
         if agent_read_index is not None:
-            converted: Dict[str, int] = {}
+            converted: Dict[int, int] = {}
             for k, v in agent_read_index.items():
                 try:
-                    name = self._agent_name_map.get(int(k), k)
+                    agent_id = int(k)
+                    converted[agent_id] = v
                 except (ValueError, TypeError):
-                    name = k
-                converted[name] = v
+                    pass  # 忽略无效的 key
             self._agent_read_index = converted
 
     def export_agent_read_index(self) -> Dict[str, int]:
-        return dict(self._agent_read_index)
+        """导出消息读取进度，key 为 agent_name。"""
+        return {
+            self._get_agent_name(aid): idx
+            for aid, idx in self._agent_read_index.items()
+        }
 
     def mark_all_messages_read(self) -> None:
         tail = len(self.messages)
-        self._agent_read_index = {name: tail for name in self._agent_names}
+        self._agent_read_index = {agent_id: tail for agent_id in self._agent_ids}
 
     def rebuild_state_from_history(self) -> None:
         keep_init = (self._state == RoomState.INIT)
 
-        if not self._agent_names or self._max_turns <= 0:
+        if not self._agent_ids or self._max_turns <= 0:
             self._state_after_init = RoomState.IDLE
             if keep_init:
                 self._state = RoomState.INIT
@@ -404,7 +465,7 @@ class ChatRoom:
         self._state = RoomState.SCHEDULING
 
         for msg in self.messages:
-            self._update_turn_state_on_message(msg.sender_name)
+            self._update_turn_state_on_message(msg.sender_id)
 
         self._state_after_init = self._state
         if keep_init:
@@ -413,7 +474,8 @@ class ChatRoom:
     def format_log(self) -> str:
         lines = [f"=== {self.key} 聊天记录 ==="]
         for msg in self.messages:
-            lines.append(f"[{msg.send_time.isoformat()}] {msg.sender_name}: {msg.content}")
+            sender_name = self._get_agent_name(msg.sender_id)
+            lines.append(f"[{msg.send_time.isoformat()}] {sender_name}: {msg.content}")
         return "\n".join(lines)
 
     def build_initial_system_message(self) -> str:
@@ -433,7 +495,7 @@ class ChatRoom:
             "room_type": self.room_type.name,
             "state": self._state.name,
             "agents": list(self.agents),
-            "agent_ids": [self.get_agent_id(agent_name) for agent_name in self.agents],
+            "agent_ids": list(self._agent_ids),
             "tags": self.tags,
         }
 
@@ -458,7 +520,7 @@ async def restore_state() -> None:
         if gt_room_messages:
             restored_messages = [
                 GtCoreChatMessage(
-                    sender_name=room._agent_name_map.get(row.agent_id, SpecialAgent.SYSTEM.name),
+                    sender_id=row.agent_id,
                     content=row.content,
                     send_time=datetime.fromisoformat(row.send_time),
                 )
@@ -702,14 +764,33 @@ def get_agent_names(room_id: int) -> List[str]:
     return room.agents if room is not None else []
 
 
-def get_rooms_for_agent(team_id: int | None, agent_name: str) -> List[int]:
-    """返回指定参与者所在的房间 room_id 列表。可选按 team 过滤。"""
-    results = []
-    for room in _rooms.values():
-        if any(_same_speaker(agent_name, room_agent_name) for room_agent_name in room.agents):
-            if team_id is None or room.team_id == team_id:
-                results.append(room.room_id)
-    return results
+def get_rooms_for_agent(team_id: int | None, agent: int | str) -> List[int]:
+        """返回指定参与者所在的房间 room_id 列表。可选按 team 过滤。
+
+        Args:
+            team_id: Team ID，为 None 时不过滤
+            agent: agent_id (int) 或 agent_name (str)
+        """
+        agent_id = agent if isinstance(agent, int) else None
+        if agent_id is None and isinstance(agent, str):
+            # 通过 name 查找 agent_id
+            for room in _rooms.values():
+                if team_id is not None and room.team_id != team_id:
+                    continue
+                aid = room.get_agent_id_by_name(agent)
+                if aid > 0:
+                    agent_id = aid
+                    break
+
+        if agent_id is None:
+            return []
+
+        results = []
+        for room in _rooms.values():
+            if agent_id in room._agent_ids:
+                if team_id is None or room.team_id == team_id:
+                    results.append(room.room_id)
+        return results
 
 
 async def refresh_rooms_for_team(team_id: int) -> None:
