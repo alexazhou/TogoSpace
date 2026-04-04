@@ -15,9 +15,17 @@ logger = logging.getLogger(__name__)
 class Message:
     topic: MessageBusTopic
     payload: Dict[str, Any] = field(default_factory=dict)
+    event_id: int = 0
 
 
 _subscribers: Dict[MessageBusTopic, List[Callable[[Message], None]]] = {}
+_event_id_counter: int = 0
+
+
+def _next_event_id() -> int:
+    global _event_id_counter
+    _event_id_counter += 1
+    return _event_id_counter
 
 
 def subscribe(topic: MessageBusTopic, callback: Callable[[Message], None]) -> None:
@@ -37,8 +45,8 @@ def publish(topic: MessageBusTopic, **payload: Any) -> None:
 
     回调统一在当前运行中的 asyncio 事件循环里异步调度，避免慢订阅者阻塞发布链路。
     """
-    msg = Message(topic=topic, payload=payload)
-    logger.info(f"[messageBus] publish topic={topic.name}, payload={payload}")
+    msg = Message(event_id=_next_event_id(), topic=topic, payload=payload)
+    logger.info(f"[messageBus] publish event_id={msg.event_id} topic={topic.name}, payload={payload}")
     callbacks = list(_subscribers.get(topic, []))
     loop = asyncio.get_running_loop()
 
@@ -51,13 +59,15 @@ def _invoke_callback(callback: Callable[[Message], None], msg: Message) -> None:
     try:
         result = callback(msg)
         if inspect.isawaitable(result):
-            asyncio.create_task(result, name=f"messageBus-{msg.topic.name}-{callback_name}")
+            asyncio.create_task(result, name=f"mb-{msg.event_id}-{callback_name}")
     except Exception as e:
-        logger.error(f"[messageBus] topic={msg.topic} callback={callback_name} 异常: {e}")
+        logger.error(f"[messageBus] event_id={msg.event_id} topic={msg.topic} callback={callback_name} 异常: {e}")
 
 
 async def startup() -> None:
     """初始化消息总线，须在各模块 subscribe 前调用。"""
+    global _event_id_counter
+    _event_id_counter = 0
     _subscribers.clear()
 
 
