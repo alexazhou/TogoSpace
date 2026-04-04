@@ -238,7 +238,7 @@ class ChatRoom:
         logger.info(f"房间 {self.key} 由 agent_id={current_expected} 结束本轮行动 (has_content={self._current_turn_has_content})")
 
         # 如果本轮没说话，记录为跳过
-        if not self._current_turn_has_content and current_expected is not None:
+        if not self._current_turn_has_content:
             self._round_skipped_set.add(current_expected)
 
         self._current_turn_has_content = False
@@ -254,23 +254,18 @@ class ChatRoom:
             self._publish_current_turn(next_agent_id)
         return True
 
-    def _get_current_turn_agent_id(self) -> Optional[int]:
+    def _get_current_turn_agent_id(self) -> int:
         """返回当前理论上应该发言的 Agent ID（内部方法，忽略 IDLE 状态）。"""
-        if not self._agent_ids:
-            return None
+        assert self._agent_ids, f"房间 {self.key} 没有任何参与者"
         return self._agent_ids[self._turn_pos]
 
-    def get_current_turn_agent(self) -> Optional[GtAgent]:
+    def get_current_turn_agent(self) -> GtAgent:
         """返回当前理论上应该发言的 GtAgent 对象（忽略 IDLE 状态）。"""
-        agent_id = self._get_current_turn_agent_id()
-        if agent_id is None:
-            return None
-        return self.get_gt_agent(agent_id)
+        return self.get_gt_agent(self._get_current_turn_agent_id())
 
-    def get_current_turn_agent_name(self) -> Optional[str]:
+    def get_current_turn_agent_name(self) -> str:
         """返回当前理论上应该发言的 Agent 名称（用于日志和测试）。"""
-        agent = self.get_current_turn_agent()
-        return agent.name if agent else None
+        return self.get_current_turn_agent().name
 
     def _should_auto_skip_agent_turn(self) -> bool:
         """判断当前发言位是否应被自动跳过（不等待外部输入）。
@@ -282,8 +277,7 @@ class ChatRoom:
         """
         agent_id = self._get_current_turn_agent_id()
         return (
-            agent_id is not None
-            and agent_id == self.OPERATOR_MEMBER_ID
+            agent_id == self.OPERATOR_MEMBER_ID
             and self.room_type == RoomType.GROUP
             and len(self._agent_ids) > 2
         )
