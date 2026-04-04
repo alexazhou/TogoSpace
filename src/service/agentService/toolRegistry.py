@@ -55,13 +55,10 @@ class AgentToolRegistry:
         return [item.tool for item in self._tools_by_name.values()]
 
     async def execute_tool_call(self, tool_call: llmApiUtil.OpenAIToolCall, context: ToolCallContext) -> ToolExecutionResult:
-        assert tool_call.function, "tool_call.function 不应为空"
-        function = tool_call.function
-        function_name = str(function.get("name", ""))
-        assert function_name, "tool_call.function.name 不应为空"
-        function_args = str(function.get("arguments", "{}"))
-        assert tool_call.id, "tool_call.id 不应为空"
-        tool_call_id = str(tool_call.id)
+        tool_call.verify()
+        function_name = tool_call.function_name
+        function_args = tool_call.function_args
+        tool_call_id = tool_call.tool_call_id
 
         registered = self._tools_by_name.get(function_name)
         if registered is None:
