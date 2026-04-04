@@ -83,10 +83,7 @@ class Agent:
     def _publish_status(self, status: AgentStatus) -> None:
         messageBus.publish(
             MessageBusTopic.AGENT_STATUS_CHANGED,
-            event="agent_status",
-            agent_id=self.gt_agent.id,
-            agent_name=self.gt_agent.name,
-            team_id=self.gt_agent.team_id,
+            gt_agent=self.gt_agent,
             status=status,
         )
 

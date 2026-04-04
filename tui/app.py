@@ -248,9 +248,12 @@ class WatcherApp(App):
             log.debug("ws: 收到成员状态变更 agent=%s status=%s", event.agent_name, event.status)
             # 更新本地缓存中的 Agent 状态（匹配 name + team）
             for agent in self._agents:
-                if agent.name == event.agent_name and agent.team_name == event.team_name:
-                    agent.status = event.status or "idle"
-                    break
+                if agent.name != event.agent_name:
+                    continue
+                if self._team_ids_by_name.get(agent.team_name) != event.team_id:
+                    continue
+                agent.status = event.status or "idle"
+                break
             # 直接使用缓存刷新当前团队成员状态，无需发起 HTTP 请求
             current_members = self._room_members_by_key.get(self._current_room_key or "", [])
             self.run_worker(

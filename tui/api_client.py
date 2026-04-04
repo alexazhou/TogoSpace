@@ -167,11 +167,12 @@ class ApiClient:
                                     time=datetime.fromisoformat(data["time"]),
                                 )
                             elif event_type == "agent_status":
+                                gt_agent = data["gt_agent"]
                                 yield WsEvent(
                                     event=event_type,
-                                    agent_id=data["agent_id"],
-                                    agent_name=data["agent_name"],
-                                    team_id=data["team_id"],
+                                    agent_id=gt_agent["id"],
+                                    agent_name=gt_agent["name"],
+                                    team_id=gt_agent["team_id"],
                                     status=data["status"],
                                 )
                             else:
