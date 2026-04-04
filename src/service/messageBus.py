@@ -12,13 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class Message:
+class EventBusMessage:
     topic: MessageBusTopic
     payload: Dict[str, Any] = field(default_factory=dict)
-    event_id: int = 0
+    event_id: int | None = field(default=None, init=False)  # 由 publish 自动设置，None 表示未发布
 
 
-_subscribers: Dict[MessageBusTopic, List[Callable[[Message], None]]] = {}
+_subscribers: Dict[MessageBusTopic, List[Callable[[EventBusMessage], None]]] = {}
 _event_id_counter: int = 0
 
 
@@ -28,14 +28,14 @@ def _next_event_id() -> int:
     return _event_id_counter
 
 
-def subscribe(topic: MessageBusTopic, callback: Callable[[Message], None]) -> None:
-    """订阅指定主题，callback 接收 Message 对象。"""
+def subscribe(topic: MessageBusTopic, callback: Callable[[EventBusMessage], None]) -> None:
+    """订阅指定主题，callback 接收 EventBusMessage 对象。"""
     _subscribers.setdefault(topic, []).append(callback)
 
 
-def unsubscribe(topic: MessageBusTopic, callback: Callable[[Message], None]) -> None:
+def unsubscribe(topic: MessageBusTopic, callback: Callable[[EventBusMessage], None]) -> None:
     """取消订阅指定主题。"""
-    callbacks: List[Callable[[Message], None]] = _subscribers.get(topic, [])
+    callbacks: List[Callable[[EventBusMessage], None]] = _subscribers.get(topic, [])
     if callback in callbacks:
         callbacks.remove(callback)
 
@@ -45,7 +45,8 @@ def publish(topic: MessageBusTopic, **payload: Any) -> None:
 
     回调统一在当前运行中的 asyncio 事件循环里异步调度，避免慢订阅者阻塞发布链路。
     """
-    msg = Message(event_id=_next_event_id(), topic=topic, payload=payload)
+    msg = EventBusMessage(topic=topic, payload=payload)
+    msg.event_id = _next_event_id()
     logger.info(f"[messageBus] publish event_id={msg.event_id} topic={topic.name}, payload={payload}")
     callbacks = list(_subscribers.get(topic, []))
     loop = asyncio.get_running_loop()
@@ -54,7 +55,7 @@ def publish(topic: MessageBusTopic, **payload: Any) -> None:
         loop.call_soon(_invoke_callback, cb, msg)
 
 
-def _invoke_callback(callback: Callable[[Message], None], msg: Message) -> None:
+def _invoke_callback(callback: Callable[[EventBusMessage], None], msg: EventBusMessage) -> None:
     callback_name = getattr(callback, "__name__", repr(callback))
     try:
         result = callback(msg)
