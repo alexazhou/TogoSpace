@@ -12,6 +12,7 @@ from pytspclient import TSPClient, TSPException
 
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.gtAgentTask import GtAgentTask
 from util import llmApiUtil
 from constants import AgentHistoryTag
 from service.agentService.agentHistoryStore import AgentHistoryStore
@@ -54,7 +55,7 @@ class _DummyHost:
     model: str = "mock-model"
     team_workdir: str = "/tmp"
     workspace_root: str = "/tmp/workspaces"
-    current_room: object | None = None
+    current_task: GtAgentTask | None = None
     _history: AgentHistoryStore = field(default_factory=lambda: AgentHistoryStore(agent_id=1))
     tool_registry: AgentToolRegistry = field(default_factory=AgentToolRegistry)
 
@@ -139,7 +140,7 @@ def mock_tsp_host():
     host.team_workdir = "/tmp"
     host._infer = AsyncMock()
     host.append_history_message = AsyncMock()
-    host.current_room = MagicMock()
+    host.current_task = MagicMock()
     host.tool_registry = AgentToolRegistry()
     return host
 
@@ -219,8 +220,9 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host):
 async def test_tsp_driver_run_chat_turn_is_disabled(mock_tsp_host):
     config = AgentDriverConfig(driver_type="tsp", options={})
     driver = TspAgentDriver(mock_tsp_host, config)
+    task = MagicMock(spec=GtAgentTask)
     with pytest.raises(RuntimeError, match="不再直接执行 run_chat_turn"):
-        await driver.run_chat_turn(room=MagicMock(), synced_count=0)
+        await driver.run_chat_turn(task=task, synced_count=0)
 
 @pytest.mark.asyncio
 async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host):

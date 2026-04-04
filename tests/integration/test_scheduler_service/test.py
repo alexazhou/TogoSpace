@@ -12,11 +12,11 @@ import service.agentService as agentService
 import service.schedulerService as scheduler
 from service.agentService import Agent
 from service.messageBus import EventBusMessage
-from model.coreModel.gtCoreAgentEvent import GtCoreRoomMessageEvent
+from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
-from constants import MessageBusTopic, AgentStatus
+from constants import MessageBusTopic, AgentStatus, AgentTaskType
 from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
 
@@ -32,7 +32,7 @@ def _make_mock_agent(name: str, team_name: str = TEAM, agent_id: int = 1) -> Age
     agent.gt_agent = SimpleNamespace(id=agent_id, team_id=1, name=name, model="mock")
     agent.status = AgentStatus.IDLE
     agent.wait_task_queue = asyncio.Queue()
-    agent.current_room = SimpleNamespace(team_name=team_name, team_id=1)
+    agent.current_task = None
     agent.consume_task = AsyncMock()
     return agent
 
@@ -96,14 +96,21 @@ class TestSchedulerRun(ServiceTestCase):
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
 
-        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
+        with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
+             patch("service.schedulerService.gtAgentTaskManager.create_task") as mock_create_task:
+            mock_create_task.return_value = GtAgentTask(
+                id=1,
+                agent_id=1,
+                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_data={"room_id": room.room_id},
+            )
             run_task = asyncio.create_task(scheduler.run())
 
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
-            scheduler._on_agent_turn(msg)
+            await scheduler._on_agent_turn(msg)
 
             # consume_task 由后台任务异步消费队列，给一个短暂让渡时间。
             await asyncio.sleep(0.5)
@@ -119,7 +126,8 @@ class TestSchedulerRun(ServiceTestCase):
 
         assert alice.is_active is False
 
-        alice.wait_task_queue.put_nowait(GtCoreRoomMessageEvent(1))
+        task = GtAgentTask(agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": 1})
+        alice.wait_task_queue.put_nowait(task)
         assert alice.is_active is True
 
         alice.wait_task_queue.get_nowait()
@@ -132,25 +140,17 @@ class TestSchedulerRun(ServiceTestCase):
     async def test_handle_event_error_logged_in_agent(self):
         """验证 Agent.consume_task 内部错误后进入 FAILED 状态，任务留在队头等待续跑。"""
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
-        real_agent.wait_task_queue.put_nowait(GtCoreRoomMessageEvent(1))
+        task = GtAgentTask(agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": 1})
+        task.id = 1  # 模拟已保存的任务
+        real_agent.wait_task_queue.put_nowait(task)
 
-        with patch.object(real_agent, "run_chat_turn", side_effect=RuntimeError("boom")):
+        with patch.object(real_agent, "run_chat_turn", side_effect=RuntimeError("boom")), \
+             patch("service.agentService.agent.gtAgentTaskManager") as mock_task_manager:
+            mock_task_manager.update_task_status = AsyncMock()
             await real_agent.consume_task(max_function_calls=5)
 
         assert real_agent.status == AgentStatus.FAILED
         assert not real_agent.wait_task_queue.empty()
-
-    async def test_unsupported_task_type_is_logged(self, caplog):
-        """不支持的任务类型应报错并记录日志，agent 进入 FAILED 状态，任务留在队头。"""
-        real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
-        real_agent.wait_task_queue.put_nowait(object())
-
-        with caplog.at_level(logging.ERROR):
-            await real_agent.consume_task(max_function_calls=5)
-
-        assert real_agent.status == AgentStatus.FAILED
-        assert not real_agent.wait_task_queue.empty()
-        assert "不支持的任务类型" in caplog.text
 
     async def test_on_agent_turn_creates_task(self, monkeypatch):
         """收到 ROOM_AGENT_TURN 消息后，agent 任务入队并启动 Task。"""
@@ -173,12 +173,19 @@ class TestSchedulerRun(ServiceTestCase):
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
 
-        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
+        with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
+             patch("service.schedulerService.gtAgentTaskManager.create_task") as mock_create_task:
+            mock_create_task.return_value = GtAgentTask(
+                id=1,
+                agent_id=1,
+                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_data={"room_id": room.room_id},
+            )
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
-            scheduler._on_agent_turn(msg)
+            await scheduler._on_agent_turn(msg)
 
         assert not alice.wait_task_queue.empty()
         assert alice.gt_agent.id in scheduler._running_tasks
@@ -204,13 +211,20 @@ class TestSchedulerRun(ServiceTestCase):
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
 
-        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
+        with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
+             patch("service.schedulerService.gtAgentTaskManager.create_task") as mock_create_task:
+            mock_create_task.return_value = GtAgentTask(
+                id=1,
+                agent_id=1,
+                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_data={"room_id": room.room_id},
+            )
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
-            scheduler._on_agent_turn(msg)
-            scheduler._on_agent_turn(msg)
+            await scheduler._on_agent_turn(msg)
+            await scheduler._on_agent_turn(msg)
 
         assert alice.wait_task_queue.qsize() == 1
 
@@ -249,7 +263,12 @@ class TestSchedulerRun(ServiceTestCase):
         _patch_scheduler_rooms(monkeypatch, r1, r2)
         await scheduler.startup()
 
-        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
+        with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
+             patch("service.schedulerService.gtAgentTaskManager.create_task") as mock_create_task:
+            mock_create_task.side_effect = [
+                GtAgentTask(id=1, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": r1.room_id}),
+                GtAgentTask(id=2, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": r2.room_id}),
+            ]
             msg_r1 = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": r1.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
@@ -258,8 +277,8 @@ class TestSchedulerRun(ServiceTestCase):
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": r2.room_id, "room_name": "r2", "room_key": f"r2@{TEAM}", "team_name": TEAM},
             )
-            scheduler._on_agent_turn(msg_r1)
-            scheduler._on_agent_turn(msg_r2)
+            await scheduler._on_agent_turn(msg_r1)
+            await scheduler._on_agent_turn(msg_r2)
 
         assert alice.wait_task_queue.qsize() == 2
 
@@ -284,13 +303,20 @@ class TestSchedulerRun(ServiceTestCase):
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
 
-        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
+        with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
+             patch("service.schedulerService.gtAgentTaskManager.create_task") as mock_create_task:
+            mock_create_task.return_value = GtAgentTask(
+                id=1,
+                agent_id=1,
+                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_data={"room_id": room.room_id},
+            )
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
             # 第一次入队
-            scheduler._on_agent_turn(msg)
+            await scheduler._on_agent_turn(msg)
             assert alice.wait_task_queue.qsize() == 1
 
             # 消费掉
@@ -298,15 +324,16 @@ class TestSchedulerRun(ServiceTestCase):
             assert alice.wait_task_queue.qsize() == 0
 
             # 再次入队应该成功
-            scheduler._on_agent_turn(msg)
+            await scheduler._on_agent_turn(msg)
             assert alice.wait_task_queue.qsize() == 1
 
     async def test_task_done_with_pending_queue_event_should_keep_agent_scheduled(self):
         """复现竞态：task 收尾时若队列里已有新事件，不应把 Agent 彻底移出调度池。"""
         alice = _make_mock_agent("alice")
 
-        # 模拟“上一个 task 即将结束时，新事件已入队”的场景。
-        alice.wait_task_queue.put_nowait(GtCoreRoomMessageEvent(1))
+        # 模拟"上一个 task 即将结束时，新事件已入队"的场景。
+        task = GtAgentTask(agent_id=alice.gt_agent.id, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": 1})
+        alice.wait_task_queue.put_nowait(task)
         done_task = asyncio.create_task(asyncio.sleep(0))
         await done_task
         scheduler._running_tasks[alice.gt_agent.id] = done_task
@@ -354,7 +381,7 @@ class TestSchedulerRun(ServiceTestCase):
         )
         with patch("service.schedulerService.agentService.get_agent", side_effect=KeyError("not found")):
             with pytest.raises(KeyError, match="not found"):
-                scheduler._on_agent_turn(msg)
+                await scheduler._on_agent_turn(msg)
 
     async def test_on_agent_turn_general_exception(self, monkeypatch):
         """验证获取 Agent 发生通用异常时会直接抛出。"""
@@ -381,7 +408,7 @@ class TestSchedulerRun(ServiceTestCase):
         )
         with patch("service.schedulerService.agentService.get_agent", side_effect=RuntimeError("unexpected")):
             with pytest.raises(RuntimeError, match="unexpected"):
-                scheduler._on_agent_turn(msg)
+                await scheduler._on_agent_turn(msg)
 
     async def test_remove_agent_non_existent(self):
         """移除不存在的 agent 不应报错。"""

@@ -9,11 +9,12 @@ from claude_agent_sdk import (
     UserMessage, create_sdk_mcp_server, tool,
 )
 
-from service.roomService import ToolCallContext
+from service.roomService import ToolCallContext, ChatRoom
 from service.agentService.promptBuilder import build_turn_context_prompt
 from service.funcToolService.toolLoader import get_function_metadata
 from service.funcToolService.tools import FUNCTION_REGISTRY
-from service.roomService import ChatRoom
+from service import roomService
+from model.dbModel.gtAgentTask import GtAgentTask
 from constants import AgentHistoryStage, AgentHistoryStatus
 from util import llmApiUtil
 
@@ -97,7 +98,17 @@ class ClaudeSdkAgentDriver(AgentDriver):
         finally:
             self._sdk_client = None
 
-    async def run_chat_turn(self, room: ChatRoom, synced_count: int, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, task: GtAgentTask, synced_count: int, max_function_calls: int = 5) -> None:
+        room_id = task.task_data.get("room_id")
+        if room_id is None:
+            logger.warning(f"run_chat_turn 跳过：task 缺少 room_id, agent_id={self.host.gt_agent.id}, task_id={task.id}")
+            return
+
+        room = roomService.get_room(room_id)
+        if room is None:
+            logger.warning(f"run_chat_turn 跳过：room_id={room_id} 不存在, agent_id={self.host.gt_agent.id}")
+            return
+
         self._turn_done = False
         prompt_prefix = f"【{room.name}】 房间轮到你行动，新消息如下："
 
