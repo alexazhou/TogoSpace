@@ -5,7 +5,8 @@ from service import messageBus
 from service.messageBus import EventBusMessage
 from service import agentService, roomService as chat_room
 from dal.db import gtAgentTaskManager
-from constants import MessageBusTopic, AgentTaskType
+from model.dbModel.gtAgent import GtAgent
+from constants import MessageBusTopic, AgentTaskType, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +30,23 @@ def stop_agent_task(agent_id: int) -> None:
 
 async def _on_agent_turn(msg: EventBusMessage) -> None:
     """订阅 ROOM_AGENT_TURN：创建任务记录，并在需要时启动消费协程。"""
-    agent_id: int = msg.payload["agent_id"]
+    gt_agent: GtAgent = msg.payload["gt_agent"]
+    agent_id: int = gt_agent.id
     room_id: int = msg.payload["room_id"]
+
+    special_agent = SpecialAgent.value_of(agent_id)
+    if special_agent is not None:
+        logger.info(
+            "跳过特殊成员回合调度: agent_id=%s, special_agent=%s, room_id=%s",
+            agent_id,
+            special_agent.name,
+            room_id,
+        )
+        return
 
     room = chat_room.get_room(room_id)
     assert room is not None, f"room must exist before scheduling: room_id={room_id}, agent_id={agent_id}"
-    agent = agentService.get_agent(agent_id)
+    agent = agentService.get_agent(gt_agent.id)
 
     # 去重：检查数据库中是否已有该房间的 PENDING 任务
     pending_tasks = await gtAgentTaskManager.get_pending_tasks(agent_id)
@@ -44,7 +56,7 @@ async def _on_agent_turn(msg: EventBusMessage) -> None:
 
     # 创建任务记录
     await gtAgentTaskManager.create_task(
-        agent_id,
+        gt_agent.id,
         AgentTaskType.ROOM_MESSAGE,
         {"room_id": room_id},
     )

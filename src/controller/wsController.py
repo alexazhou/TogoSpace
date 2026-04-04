@@ -29,6 +29,8 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
 
     def _on_event(self, msg: messageBus.EventBusMessage) -> None:
         payload = dict(msg.payload)
+        if msg.topic == MessageBusTopic.ROOM_MSG_ADDED:
+            payload["event"] = "message"
         if msg.topic == MessageBusTopic.AGENT_STATUS_CHANGED:
             payload["event"] = "agent_status"
         logger.info(f"[ws] event: topic={msg.topic.name}, payload={payload}")

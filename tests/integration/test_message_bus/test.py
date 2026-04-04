@@ -2,6 +2,7 @@
 import asyncio
 import os
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,32 +21,32 @@ class TestmessageBus(ServiceTestCase):
         """订阅后发布消息，订阅者应收到 EventBusMessage 对象及原始 payload。"""
         received = []
         messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: received.append(m))
-        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_id=1, room_name="r1")
+        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, gt_agent=SimpleNamespace(id=1, name="alice"), room_id=1)
         await asyncio.sleep(0)
         assert len(received) == 1
         assert isinstance(received[0], EventBusMessage)
-        assert received[0].payload["agent_id"] == 1
-        assert received[0].payload["room_name"] == "r1"
+        assert received[0].payload["gt_agent"].id == 1
+        assert received[0].payload["room_id"] == 1
 
     async def test_multiple_subscribers_all_called(self):
         """同一 topic 的多个订阅者应按注册顺序都被调用。"""
         calls = []
         messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: calls.append("a"))
         messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: calls.append("b"))
-        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_id=1, room_name="y")
+        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, gt_agent=SimpleNamespace(id=1, name="alice"), room_id=1)
         await asyncio.sleep(0)
         assert calls == ["a", "b"]
 
     async def test_no_subscribers_no_error(self):
         """没有订阅者时发布消息不应抛异常。"""
-        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_id=1, room_name="y")
+        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, gt_agent=SimpleNamespace(id=1, name="alice"), room_id=1)
 
     async def test_failing_subscriber_does_not_block_others(self):
         """单个订阅者异常不应阻断其他订阅者。"""
         calls = []
         messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: (_ for _ in ()).throw(RuntimeError("boom")))
         messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: calls.append("ok"))
-        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_id=1, room_name="y")
+        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, gt_agent=SimpleNamespace(id=1, name="alice"), room_id=1)
         await asyncio.sleep(0)
         assert "ok" in calls
 
@@ -54,7 +55,7 @@ class TestmessageBus(ServiceTestCase):
         received = []
         messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: received.append(m))
         await messageBus.shutdown()
-        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_id=1, room_name="y")
+        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, gt_agent=SimpleNamespace(id=1, name="alice"), room_id=1)
         await asyncio.sleep(0)
         assert len(received) == 0
 
@@ -63,14 +64,14 @@ class TestmessageBus(ServiceTestCase):
         received = []
         messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: received.append(m))
         await messageBus.startup()
-        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_id=1, room_name="y")
+        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, gt_agent=SimpleNamespace(id=1, name="alice"), room_id=1)
         assert len(received) == 0
 
     async def test_publish_in_running_loop_is_deferred(self):
         """在事件循环中 publish 应异步调度回调，避免阻塞当前发布链路。"""
         received = []
         messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, lambda m: received.append(m))
-        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_id=1, room_name="y")
+        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, gt_agent=SimpleNamespace(id=1, name="alice"), room_id=1)
         assert len(received) == 0
         await asyncio.sleep(0)
         assert len(received) == 1
@@ -79,6 +80,6 @@ class TestmessageBus(ServiceTestCase):
         """不同 topic 互不干扰"""
         received = []
         messageBus.subscribe(MessageBusTopic.AGENT_STATUS_CHANGED, lambda m: received.append(m))
-        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, agent_id=1, room_name="y")
+        messageBus.publish(MessageBusTopic.ROOM_AGENT_TURN, gt_agent=SimpleNamespace(id=1, name="alice"), room_id=1)
         await asyncio.sleep(0)
         assert len(received) == 0

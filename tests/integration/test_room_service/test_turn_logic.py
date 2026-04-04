@@ -72,11 +72,8 @@ class TestRoomTurnLogic(ServiceTestCase):
             assert room._turn_pos == 1
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_AGENT_TURN,
-                agent_id=room.get_agent_id("bob"),
+                gt_agent=room.get_gt_agent("bob"),
                 room_id=room.room_id,
-                room_name=room_name,
-                room_key=room_key,
-                team_name=TEAM,
             )
 
         with patch("service.messageBus.publish") as mock_publish:
@@ -138,11 +135,8 @@ class TestRoomTurnLogic(ServiceTestCase):
 
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_AGENT_TURN,
-                agent_id=room.get_agent_id("alice"),
+                gt_agent=room.get_gt_agent("alice"),
                 room_id=room.room_id,
-                room_name=room_name,
-                room_key=room_key,
-                team_name=TEAM,
             )
 
     async def test_full_loop_advancement(self):
@@ -211,7 +205,7 @@ class TestRoomTurnLogic(ServiceTestCase):
             ]
             # start_scheduling 时已发布 alice 的初始事件（在 mock 外），
             # mock 内：finish alice -> bob 事件，finish bob -> 全员跳过，不再发布
-            agent_ids_notified = [c[1]["agent_id"] for c in turn_calls]
+            agent_ids_notified = [c[1]["gt_agent"].id for c in turn_calls]
             assert agent_ids_notified == [room.get_agent_id("bob")]
 
     async def test_all_skip_wakeup_based_on_state_not_turn_count(self):
@@ -270,7 +264,7 @@ class TestRoomTurnLogic(ServiceTestCase):
                 if c[0][0] == MessageBusTopic.ROOM_AGENT_TURN
             ]
             assert len(turn_calls) >= 1
-            assert turn_calls[-1][1]["agent_id"] == room.get_agent_id("alice")
+            assert turn_calls[-1][1]["gt_agent"].id == room.get_agent_id("alice")
 
     async def test_partial_skip_does_not_stop(self):
         """
@@ -308,7 +302,7 @@ class TestRoomTurnLogic(ServiceTestCase):
                 c for c in mock_publish.call_args_list
                 if c[0][0] == MessageBusTopic.ROOM_AGENT_TURN
             ]
-            assert [c[1]["agent_id"] for c in turn_calls] == [room.get_agent_id("bob")]
+            assert [c[1]["gt_agent"].id for c in turn_calls] == [room.get_agent_id("bob")]
 
         with patch("service.messageBus.publish"):
             room.finish_turn(sender="bob")
@@ -335,12 +329,12 @@ class TestRoomTurnLogic(ServiceTestCase):
             c for c in mock_publish.call_args_list
             if c[0][0] == MessageBusTopic.ROOM_AGENT_TURN
         ]
-        assert [c[1]["agent_id"] for c in turn_calls] == [room.get_agent_id("bob")]
+        assert [c[1]["gt_agent"].id for c in turn_calls] == [room.get_agent_id("bob")]
         assert room.get_current_turn_agent() == "bob"
 
     async def test_two_agent_group_still_waits_for_operator_turn(self):
         """
-        测试点：两人群里遇到 Operator 时，仍保持原有等待逻辑，不自动 skip。
+        测试点：两人群里遇到 Operator 时，仍保持等待逻辑，但不再发布特殊成员 turn 事件。
         """
         room_name = "operator_wait_group"
         agents = ["alice", SpecialAgent.OPERATOR]
@@ -358,7 +352,7 @@ class TestRoomTurnLogic(ServiceTestCase):
             c for c in mock_publish.call_args_list
             if c[0][0] == MessageBusTopic.ROOM_AGENT_TURN
         ]
-        assert [c[1]["agent_id"] for c in turn_calls] == [int(SpecialAgent.OPERATOR.value)]
+        assert turn_calls == []
         assert room.get_current_turn_agent() == SpecialAgent.OPERATOR.name
 
     async def test_operator_alias_matches_on_turn_checks(self):
