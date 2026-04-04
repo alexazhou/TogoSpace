@@ -8,7 +8,6 @@ import asyncio
 
 from dal.db import gtAgentHistoryManager, gtAgentTaskManager, gtRoomMessageManager, gtRoomManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from model.dbModel.gtAgentTask import GtAgentTask
 from constants import AgentTaskStatus
 
 
@@ -38,17 +37,9 @@ async def load_agent_history_message(agent_id: int) -> list[GtAgentHistory]:
     return await gtAgentHistoryManager.get_agent_history(agent_id)
 
 
-async def load_agent_pending_tasks(agent_id: int) -> list[GtAgentTask]:
-    """加载 Agent 的待处理任务（用于恢复）。
-
-    RUNNING 状态的任务会被重置为 PENDING（上次未完成）。
-    """
+async def reset_running_tasks(agent_id: int) -> None:
+    """将 Agent 的 RUNNING 任务重置为 PENDING（用于启动时恢复）。"""
     tasks = await gtAgentTaskManager.get_pending_and_running_tasks(agent_id)
-    reset_tasks: list[GtAgentTask] = []
     for task in tasks:
         if task.status == AgentTaskStatus.RUNNING:
-            # 重置 RUNNING 状态为 PENDING
             await gtAgentTaskManager.update_task_status(task.id, AgentTaskStatus.PENDING)
-            task.status = AgentTaskStatus.PENDING
-        reset_tasks.append(task)
-    return reset_tasks

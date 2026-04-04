@@ -7,7 +7,7 @@ from service.messageBus import EventBusMessage
 from service import agentService, roomService as chat_room
 from service.agentService import Agent
 from dal.db import gtTeamManager, gtAgentTaskManager
-from constants import MessageBusTopic, AgentStatus, AgentTaskType
+from constants import MessageBusTopic, AgentStatus, AgentTaskType, AgentTaskStatus
 from model.dbModel.gtAgentTask import GtAgentTask
 
 logger = logging.getLogger(__name__)
@@ -43,8 +43,16 @@ def add_agent(agent: Agent, max_fc: int) -> None:
     task.add_done_callback(lambda t: _on_task_done(agent, t))
 
 
+async def _check_and_continue_agent(agent: Agent) -> None:
+    """检查 Agent 是否有待处理任务，如果有则续起消费。"""
+    has_pending = await gtAgentTaskManager.has_pending_or_running_tasks(agent.gt_agent.id)
+    if has_pending:
+        logger.info("Agent 任务收尾时检测到待处理任务，自动续起消费: agent_id=%s", agent.gt_agent.id)
+        add_agent(agent, _global_max_fc)
+
+
 def _on_task_done(agent: Agent, task: asyncio.Task) -> None:
-    """Task 完成回调：仅清理当前 Agent 任务，并在收尾竞态时自动续起消费。
+    """Task 完成回调：清理当前 Agent 任务，并在有待处理任务时自动续起消费。
 
     asyncio 在协程返回时立即将 task 标记为 done，但 done callback 通过
     loop.call_soon 异步调度，稍后才执行。在这段空隙内，同一 Agent 可能已被
@@ -58,10 +66,8 @@ def _on_task_done(agent: Agent, task: asyncio.Task) -> None:
     _running_tasks.pop(agent_id, None)
     _running_agents.pop(agent_id, None)
 
-    # 收尾竞态兜底：如果 task 结束时队列里还有事件，立即续起一个新 task。
-    if not agent.wait_task_queue.empty():
-        logger.info("Agent 任务收尾时检测到待处理事件，自动续起消费: agent_id=%s", agent_id)
-        add_agent(agent, _global_max_fc)
+    # 收尾竞态兜底：异步检查是否有待处理任务，如果有则续起消费
+    asyncio.create_task(_check_and_continue_agent(agent))
 
 
 def remove_agent(agent_id: int) -> None:
@@ -73,7 +79,7 @@ def remove_agent(agent_id: int) -> None:
 
 
 async def _on_agent_turn(msg: EventBusMessage) -> None:
-    """订阅 ROOM_AGENT_TURN：将 Agent 任务入队，若 Agent 未运行则加入调度池。"""
+    """订阅 ROOM_AGENT_TURN：创建任务记录，若 Agent 未运行则加入调度池。"""
     agent_id: int = msg.payload["agent_id"]
     room_id: int = msg.payload["room_id"]
 
@@ -81,19 +87,18 @@ async def _on_agent_turn(msg: EventBusMessage) -> None:
     assert room is not None, f"room must exist before scheduling: room_id={room_id}, agent_id={agent_id}"
     agent = agentService.get_agent(agent_id)
 
-    # 去重：同一房间已在队列中则跳过，避免重复调度
-    queued_tasks: list[GtAgentTask] = list(getattr(agent.wait_task_queue, "_queue", []))
-    if any(t.task_data.get("room_id") == room_id for t in queued_tasks):
-        logger.debug(f"跳过重复入队: agent_id={agent_id}, room_id={room_id}")
+    # 去重：检查数据库中是否已有该房间的 PENDING 任务
+    pending_tasks = await gtAgentTaskManager.get_pending_tasks(agent_id)
+    if any(t.task_data.get("room_id") == room_id for t in pending_tasks):
+        logger.debug(f"跳过重复任务创建: agent_id={agent_id}, room_id={room_id}")
         return
 
-    # 创建任务记录并入队
-    task = await gtAgentTaskManager.create_task(
+    # 创建任务记录
+    await gtAgentTaskManager.create_task(
         agent_id,
         AgentTaskType.ROOM_MESSAGE,
         {"room_id": room_id},
     )
-    agent.wait_task_queue.put_nowait(task)
 
     add_agent(agent, _global_max_fc)
 

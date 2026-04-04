@@ -16,7 +16,7 @@ from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
-from constants import MessageBusTopic, AgentStatus, AgentTaskType
+from constants import MessageBusTopic, AgentStatus, AgentTaskType, AgentTaskStatus
 from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
 
@@ -31,9 +31,9 @@ def _make_mock_agent(name: str, team_name: str = TEAM, agent_id: int = 1) -> Age
     agent = MagicMock(spec=Agent)
     agent.gt_agent = SimpleNamespace(id=agent_id, team_id=1, name=name, model="mock")
     agent.status = AgentStatus.IDLE
-    agent.wait_task_queue = asyncio.Queue()
     agent.current_task = None
     agent.consume_task = AsyncMock()
+    agent.has_pending_tasks = AsyncMock(return_value=False)
     return agent
 
 
@@ -97,13 +97,14 @@ class TestSchedulerRun(ServiceTestCase):
         await scheduler.startup()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
-             patch("service.schedulerService.gtAgentTaskManager.create_task") as mock_create_task:
-            mock_create_task.return_value = GtAgentTask(
+             patch("service.schedulerService.gtAgentTaskManager") as mock_task_manager:
+            mock_task_manager.create_task = AsyncMock(return_value=GtAgentTask(
                 id=1,
                 agent_id=1,
                 task_type=AgentTaskType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
-            )
+            ))
+            mock_task_manager.get_pending_tasks = AsyncMock(return_value=[])
             run_task = asyncio.create_task(scheduler.run())
 
             msg = EventBusMessage(
@@ -120,40 +121,49 @@ class TestSchedulerRun(ServiceTestCase):
             scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)
 
-    async def test_agent_is_active_self_contained(self):
-        """验证 Agent 活跃状态的自治逻辑：基于 status 或 队列深度。"""
+    async def test_agent_is_active_based_on_status_and_current_task(self):
+        """验证 Agent 活跃状态：基于 status 或 current_task。"""
         alice = Agent(GtAgent(id=1, team_id=1, name="alice", role_template_id=1, model="model"), "prompt")
 
         assert alice.is_active is False
 
-        task = GtAgentTask(agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": 1})
-        alice.wait_task_queue.put_nowait(task)
-        assert alice.is_active is True
-
-        alice.wait_task_queue.get_nowait()
         alice.status = AgentStatus.ACTIVE
         assert alice.is_active is True
 
         alice.status = AgentStatus.IDLE
         assert alice.is_active is False
 
-    async def test_handle_event_error_logged_in_agent(self):
-        """验证 Agent.consume_task 内部错误后进入 FAILED 状态，任务留在队头等待续跑。"""
-        real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
-        task = GtAgentTask(agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": 1})
-        task.id = 1  # 模拟已保存的任务
-        real_agent.wait_task_queue.put_nowait(task)
+        # 有 current_task 时也是活跃的
+        alice.current_task = GtAgentTask(id=1, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": 1})
+        assert alice.is_active is True
 
-        with patch.object(real_agent, "run_chat_turn", side_effect=RuntimeError("boom")), \
-             patch("service.agentService.agent.gtAgentTaskManager") as mock_task_manager:
+    async def test_handle_event_error_logged_in_agent(self):
+        """验证 Agent.consume_task 内部错误后进入 FAILED 状态。"""
+        real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
+
+        with patch("service.agentService.agent.gtAgentTaskManager") as mock_task_manager:
+            mock_task_manager.get_first_pending_task = AsyncMock(return_value=GtAgentTask(
+                id=1,
+                agent_id=1,
+                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_data={"room_id": 1},
+            ))
+            mock_task_manager.claim_task = AsyncMock(return_value=GtAgentTask(
+                id=1,
+                agent_id=1,
+                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_data={"room_id": 1},
+                status=AgentTaskStatus.RUNNING,
+            ))
             mock_task_manager.update_task_status = AsyncMock()
-            await real_agent.consume_task(max_function_calls=5)
+
+            with patch.object(real_agent, "run_chat_turn", side_effect=RuntimeError("boom")):
+                await real_agent.consume_task(max_function_calls=5)
 
         assert real_agent.status == AgentStatus.FAILED
-        assert not real_agent.wait_task_queue.empty()
 
     async def test_on_agent_turn_creates_task(self, monkeypatch):
-        """收到 ROOM_AGENT_TURN 消息后，agent 任务入队并启动 Task。"""
+        """收到 ROOM_AGENT_TURN 消息后，创建任务并启动 consume_task。"""
         alice = _make_mock_agent("alice")
         room = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -174,24 +184,24 @@ class TestSchedulerRun(ServiceTestCase):
         await scheduler.startup()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
-             patch("service.schedulerService.gtAgentTaskManager.create_task") as mock_create_task:
-            mock_create_task.return_value = GtAgentTask(
+             patch("service.schedulerService.gtAgentTaskManager") as mock_task_manager:
+            mock_task_manager.create_task = AsyncMock(return_value=GtAgentTask(
                 id=1,
                 agent_id=1,
                 task_type=AgentTaskType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
-            )
+            ))
+            mock_task_manager.get_pending_tasks = AsyncMock(return_value=[])
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
             await scheduler._on_agent_turn(msg)
 
-        assert not alice.wait_task_queue.empty()
         assert alice.gt_agent.id in scheduler._running_tasks
 
     async def test_duplicate_room_event_is_skipped(self, monkeypatch):
-        """同一房间连续触发两次 ROOM_AGENT_TURN，队列中只应有一个事件。"""
+        """同一房间连续触发两次 ROOM_AGENT_TURN，第二次应被跳过。"""
         alice = _make_mock_agent("alice")
         room = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -212,24 +222,31 @@ class TestSchedulerRun(ServiceTestCase):
         await scheduler.startup()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
-             patch("service.schedulerService.gtAgentTaskManager.create_task") as mock_create_task:
-            mock_create_task.return_value = GtAgentTask(
+             patch("service.schedulerService.gtAgentTaskManager") as mock_task_manager:
+            mock_task_manager.create_task = AsyncMock(return_value=GtAgentTask(
                 id=1,
                 agent_id=1,
                 task_type=AgentTaskType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
-            )
+            ))
+            # 第一次调用返回已有任务，第二次调用返回空列表
+            mock_task_manager.get_pending_tasks = AsyncMock(return_value=[
+                GtAgentTask(id=1, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": room.room_id}),
+            ])
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
             )
             await scheduler._on_agent_turn(msg)
+
+            # 第二次调用：get_pending_tasks 返回已有任务，create_task 不应被调用
+            create_call_count = mock_task_manager.create_task.call_count
             await scheduler._on_agent_turn(msg)
 
-        assert alice.wait_task_queue.qsize() == 1
+            assert mock_task_manager.create_task.call_count == create_call_count
 
     async def test_different_rooms_not_deduplicated(self, monkeypatch):
-        """不同房间的事件不应被去重，各自独立入队。"""
+        """不同房间的事件不应被去重，各自独立创建任务。"""
         alice = _make_mock_agent("alice")
         r1 = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -264,11 +281,12 @@ class TestSchedulerRun(ServiceTestCase):
         await scheduler.startup()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
-             patch("service.schedulerService.gtAgentTaskManager.create_task") as mock_create_task:
-            mock_create_task.side_effect = [
+             patch("service.schedulerService.gtAgentTaskManager") as mock_task_manager:
+            mock_task_manager.create_task = AsyncMock(side_effect=[
                 GtAgentTask(id=1, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": r1.room_id}),
                 GtAgentTask(id=2, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": r2.room_id}),
-            ]
+            ])
+            mock_task_manager.get_pending_tasks = AsyncMock(return_value=[])
             msg_r1 = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"agent_id": 1, "room_id": r1.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
@@ -280,79 +298,31 @@ class TestSchedulerRun(ServiceTestCase):
             await scheduler._on_agent_turn(msg_r1)
             await scheduler._on_agent_turn(msg_r2)
 
-        assert alice.wait_task_queue.qsize() == 2
+        assert mock_task_manager.create_task.call_count == 2
 
-    async def test_room_can_requeue_after_consumed(self, monkeypatch):
-        """事件被消费后，同一房间应该可以再次入队。"""
+    async def test_task_done_with_pending_tasks_continues(self):
+        """task 完成后如果还有待处理任务，应自动续起消费。"""
         alice = _make_mock_agent("alice")
-        room = roomService.ChatRoom(
-            team=GtTeam(id=1, name=TEAM),
-            room=GtRoom(
-                id=1,
-                team_id=1,
-                name="r1",
-                type=roomService.RoomType.GROUP,
-                initial_topic="",
-                max_turns=0,
-                agent_read_index=None,
-                updated_at=GtRoom._now(),
-            ),
-            agents=[GtAgent(id=1, team_id=1, name="alice", role_template_id=1)],
-        )
-        _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
-        _patch_scheduler_rooms(monkeypatch, room)
-        await scheduler.startup()
+        alice.consume_task = AsyncMock()
 
-        with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
-             patch("service.schedulerService.gtAgentTaskManager.create_task") as mock_create_task:
-            mock_create_task.return_value = GtAgentTask(
-                id=1,
-                agent_id=1,
-                task_type=AgentTaskType.ROOM_MESSAGE,
-                task_data={"room_id": room.room_id},
-            )
-            msg = EventBusMessage(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
-                payload={"agent_id": 1, "room_id": room.room_id, "room_name": "r1", "room_key": f"r1@{TEAM}", "team_name": TEAM},
-            )
-            # 第一次入队
-            await scheduler._on_agent_turn(msg)
-            assert alice.wait_task_queue.qsize() == 1
+        # 直接测试 _check_and_continue_agent，避免异步回调的时序问题
+        with patch("service.schedulerService.gtAgentTaskManager.has_pending_or_running_tasks", AsyncMock(return_value=True)):
+            await scheduler._check_and_continue_agent(alice)
 
-            # 消费掉
-            alice.wait_task_queue.get_nowait()
-            assert alice.wait_task_queue.qsize() == 0
-
-            # 再次入队应该成功
-            await scheduler._on_agent_turn(msg)
-            assert alice.wait_task_queue.qsize() == 1
-
-    async def test_task_done_with_pending_queue_event_should_keep_agent_scheduled(self):
-        """复现竞态：task 收尾时若队列里已有新事件，不应把 Agent 彻底移出调度池。"""
-        alice = _make_mock_agent("alice")
-
-        # 模拟"上一个 task 即将结束时，新事件已入队"的场景。
-        task = GtAgentTask(agent_id=alice.gt_agent.id, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": 1})
-        alice.wait_task_queue.put_nowait(task)
-        done_task = asyncio.create_task(asyncio.sleep(0))
-        await done_task
-        scheduler._running_tasks[alice.gt_agent.id] = done_task
-
-        scheduler._on_task_done(alice, done_task)
-
-        # 期望：调度器应继续保持该 Agent 可消费状态。
+        # 期望：调度器应将 Agent 加入运行任务
         assert alice.gt_agent.id in scheduler._running_tasks
+        alice.consume_task.assert_called_once()
 
     async def test_stop_team(self, monkeypatch):
         """验证停止特定团队的调度。"""
         alice = _make_mock_agent("alice")
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         await scheduler.startup()
-        
+
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
             scheduler.add_agent(alice, 5)
             assert alice.gt_agent.id in scheduler._running_tasks
-            
+
             scheduler.stop_team(1)
             assert alice.gt_agent.id not in scheduler._running_tasks
 

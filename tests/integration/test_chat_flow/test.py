@@ -15,9 +15,10 @@ import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.presetService as presetService
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.gtAgentTask import GtAgentTask
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
-from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, AgentStatus, OpenaiLLMApiRole, RoomState
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, AgentStatus, AgentTaskType, OpenaiLLMApiRole, RoomState
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -112,8 +113,14 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             # 兜底返回 finish，避免并发调度时 side_effect 耗尽导致 StopIteration。
             return self.normalize_to_mock({"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]})
 
+        task = GtAgentTask(
+            id=1,
+            agent_id=alice.gt_agent.id,
+            task_type=AgentTaskType.ROOM_MESSAGE,
+            task_data={"room_id": room.room_id},
+        )
         with self.patch_infer(handler=fake_infer):
-            await alice.run_chat_turn(room.room_id, max_function_calls=5)
+            await alice.run_chat_turn(task, max_function_calls=5)
 
         tool_results = [m for m in alice._history if m.role == OpenaiLLMApiRole.TOOL]
         assert len(tool_results) >= 1
@@ -141,8 +148,14 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "turn_checker_room", "msg": "最终消息"}}]},
             {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
         ]
+        task = GtAgentTask(
+            id=2,
+            agent_id=alice.gt_agent.id,
+            task_type=AgentTaskType.ROOM_MESSAGE,
+            task_data={"room_id": room.room_id},
+        )
         with self.patch_infer(responses=resps):
-            await alice.run_chat_turn(room.room_id, max_function_calls=5)
+            await alice.run_chat_turn(task, max_function_calls=5)
 
         assert any(m.content == "最终消息" for m in room.messages)
 
@@ -155,7 +168,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         for agent_name in ["alice", "bob"]:
             agent = agentService.get_agent(room.get_agent_id(agent_name))
             agent.status = AgentStatus.IDLE
-            agent.wait_task_queue = asyncio.Queue()
+            agent.current_task = None
             agent.inject_history_messages([])
 
         # 预定义每个 agent 的调用序列
