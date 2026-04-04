@@ -170,6 +170,7 @@ class ChatRoom:
 
         messageBus.publish(
             MessageBusTopic.ROOM_MSG_ADDED,
+            event="message",
             room_id=self.room_id,
             room_name=self.name,
             room_key=self.key,
