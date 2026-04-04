@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Any, Awaitable, Callable, List, Optional
@@ -30,14 +31,17 @@ class Agent:
         system_prompt: str,
         driver_config: Optional[AgentDriverConfig] = None,
         agent_workdir: str = "",
+        max_function_calls: int = 5,
     ):
         self.gt_agent: GtAgent = gt_agent
         self.system_prompt: str = system_prompt
         self.agent_workdir: str = agent_workdir
+        self.max_function_calls: int = max(1, max_function_calls)
         self._history_store: AgentHistoryStore = AgentHistoryStore(self.gt_agent.id or 0)
         self.tool_registry: AgentToolRegistry = AgentToolRegistry()
         self.status: AgentStatus = AgentStatus.IDLE
-        self.current_task: Optional[GtAgentTask] = None
+        self.consumer_task: asyncio.Task | None = None
+        self.current_db_task: Optional[GtAgentTask] = None
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
 
     @property
@@ -47,7 +51,7 @@ class Agent:
     @property
     def is_active(self) -> bool:
         """检查 Agent 是否活跃（状态为 ACTIVE 或有正在处理的任务）。"""
-        return self.status == AgentStatus.ACTIVE or self.current_task is not None
+        return self.status == AgentStatus.ACTIVE or self.current_db_task is not None
 
     async def has_pending_tasks(self) -> bool:
         """检查是否有待处理的任务。"""
@@ -58,9 +62,50 @@ class Agent:
         self.driver.mark_started()
 
     async def close(self) -> None:
+        self.stop_consumer_task()
         await self.driver.shutdown()
         self.driver.mark_stopped()
         self.tool_registry.clear()
+
+    def ensure_consumer_task_running(self) -> None:
+        """确保当前 Agent 的消费协程已启动。"""
+        existing = self.consumer_task
+        if existing is not None and existing.done() is False:
+            return
+
+        task = asyncio.create_task(self.consume_task())
+        self.consumer_task = task
+        task.add_done_callback(self._on_consumer_task_done)
+
+    def stop_consumer_task(self) -> None:
+        """停止当前 Agent 的消费协程。"""
+        task = self.consumer_task
+        self.consumer_task = None
+        if task is None or task.done():
+            return
+        try:
+            if task.get_loop().is_closed():
+                return
+            task.cancel()
+        except RuntimeError:
+            return
+
+    async def _continue_consumer_if_needed(self) -> None:
+        has_pending = await gtAgentTaskManager.has_pending_or_running_tasks(self.gt_agent.id)
+        if has_pending:
+            logger.info("Agent 任务收尾时检测到待处理任务，自动续起消费: agent_id=%s", self.gt_agent.id)
+            self.ensure_consumer_task_running()
+
+    def _on_consumer_task_done(self, task: asyncio.Task) -> None:
+        """消费协程完成后清理句柄，并在需要时自动续起。"""
+        if self.consumer_task is not task:
+            return
+
+        self.consumer_task = None
+        try:
+            asyncio.create_task(self._continue_consumer_if_needed())
+        except RuntimeError:
+            return
 
     def _publish_status(self, status: AgentStatus) -> None:
         messageBus.publish(
@@ -72,8 +117,9 @@ class Agent:
             status=status,
         )
 
-    async def consume_task(self, max_function_calls: int) -> None:
+    async def consume_task(self, max_function_calls: int | None = None) -> None:
         """从数据库获取并处理任务，直到没有待处理任务为止。"""
+        effective_max_fc = self.max_function_calls if max_function_calls is None else max(1, max_function_calls)
         self.status = AgentStatus.ACTIVE
         self._publish_status(self.status)
         try:
@@ -89,13 +135,13 @@ class Agent:
                     # 任务已被其他消费者认领，继续尝试下一个
                     continue
 
-                self.current_task = claimed_task
+                self.current_db_task = claimed_task
                 task_succeeded = False
                 last_error: Exception | None = None
 
                 for attempt in range(1, MAX_INFER_RETRIES + 1):
                     try:
-                        await self.run_chat_turn(claimed_task, max_function_calls)
+                        await self.run_chat_turn(claimed_task, effective_max_fc)
                         task_succeeded = True
                         break
                     except Exception as e:
@@ -113,13 +159,13 @@ class Agent:
                     error_msg = str(last_error) if last_error else None
                     await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.FAILED, error_message=error_msg)
                     self.status = AgentStatus.FAILED
-                    self.current_task = None
+                    self.current_db_task = None
                     self._publish_status(self.status)
                     return
 
                 # 更新任务状态为 COMPLETED
                 await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.COMPLETED)
-                self.current_task = None
+                self.current_db_task = None
         finally:
             if self.status != AgentStatus.FAILED:
                 self.status = AgentStatus.IDLE
@@ -247,10 +293,10 @@ class Agent:
         return assistant_message
 
     async def _execute_tool(self) -> None:
-        current_task = self.current_task
-        assert current_task is not None, "current_task should not be None while executing tool"
-        room_id = current_task.task_data.get("room_id")
-        assert room_id is not None, "current_task should have room_id"
+        current_db_task = self.current_db_task
+        assert current_db_task is not None, "current_db_task should not be None while executing tool"
+        room_id = current_db_task.task_data.get("room_id")
+        assert room_id is not None, "current_db_task should have room_id"
         room = roomService.get_room(room_id)
         assert room is not None, f"room should exist: room_id={room_id}"
 

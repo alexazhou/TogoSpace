@@ -1,85 +1,34 @@
 import asyncio
 import logging
-from typing import Dict
 
 from service import messageBus
 from service.messageBus import EventBusMessage
 from service import agentService, roomService as chat_room
-from service.agentService import Agent
-from dal.db import gtTeamManager, gtAgentTaskManager
-from constants import MessageBusTopic, AgentStatus, AgentTaskType, AgentTaskStatus
-from model.dbModel.gtAgentTask import GtAgentTask
+from dal.db import gtAgentTaskManager
+from constants import MessageBusTopic, AgentTaskType
 
 logger = logging.getLogger(__name__)
 
-_global_max_fc: int = 5
-_running_tasks: Dict[int, asyncio.Task] = {}
-_running_agents: Dict[int, Agent] = {}
 _stop_event: asyncio.Event = asyncio.Event()
 
 async def startup() -> None:
     """初始化调度器，须在 run() 前调用一次。"""
-    global _global_max_fc, _running_agents, _stop_event
-    _global_max_fc = 5
-    _running_agents = {}
+    global _stop_event
     _stop_event = asyncio.Event()
     messageBus.subscribe(MessageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
 
 
-def add_agent(agent: Agent, max_fc: int) -> None:
-    """将 Agent 加入调度池，若已在运行或处于 FAILED 状态则跳过。"""
-    if agent.status == AgentStatus.FAILED:
+def stop_agent_task(agent_id: int) -> None:
+    """停止 Agent 对应的消费 task。"""
+    try:
+        agent = agentService.get_agent(agent_id)
+    except KeyError:
         return
-
-    agent_id = agent.gt_agent.id
-    existing: asyncio.Task | None = _running_tasks.get(agent_id)
-
-    if existing is not None and existing.done() == False:
-        return
-
-    task = asyncio.create_task(agent.consume_task(max_fc))
-    _running_tasks[agent_id] = task
-    _running_agents[agent_id] = agent
-    task.add_done_callback(lambda t: _on_task_done(agent, t))
-
-
-async def _check_and_continue_agent(agent: Agent) -> None:
-    """检查 Agent 是否有待处理任务，如果有则续起消费。"""
-    has_pending = await gtAgentTaskManager.has_pending_or_running_tasks(agent.gt_agent.id)
-    if has_pending:
-        logger.info("Agent 任务收尾时检测到待处理任务，自动续起消费: agent_id=%s", agent.gt_agent.id)
-        add_agent(agent, _global_max_fc)
-
-
-def _on_task_done(agent: Agent, task: asyncio.Task) -> None:
-    """Task 完成回调：清理当前 Agent 任务，并在有待处理任务时自动续起消费。
-
-    asyncio 在协程返回时立即将 task 标记为 done，但 done callback 通过
-    loop.call_soon 异步调度，稍后才执行。在这段空隙内，同一 Agent 可能已被
-    重新入队并在 _running_tasks 中注册了新 task。此时若直接 remove_agent，会误删
-    新 task 并取消它。通过 `is` 判断确保只有"自己的"task 完成时才触发移除。
-    """
-    agent_id = agent.gt_agent.id
-    if _running_tasks.get(agent_id) is not task:
-        return
-
-    _running_tasks.pop(agent_id, None)
-    _running_agents.pop(agent_id, None)
-
-    # 收尾竞态兜底：异步检查是否有待处理任务，如果有则续起消费
-    asyncio.create_task(_check_and_continue_agent(agent))
-
-
-def remove_agent(agent_id: int) -> None:
-    """从调度池移出 Agent。"""
-    task = _running_tasks.pop(agent_id, None)
-    _running_agents.pop(agent_id, None)
-    if task and not task.done():
-        task.cancel()
+    agent.stop_consumer_task()
 
 
 async def _on_agent_turn(msg: EventBusMessage) -> None:
-    """订阅 ROOM_AGENT_TURN：创建任务记录，若 Agent 未运行则加入调度池。"""
+    """订阅 ROOM_AGENT_TURN：创建任务记录，并在需要时启动消费 task。"""
     agent_id: int = msg.payload["agent_id"]
     room_id: int = msg.payload["room_id"]
 
@@ -100,7 +49,7 @@ async def _on_agent_turn(msg: EventBusMessage) -> None:
         {"room_id": room_id},
     )
 
-    add_agent(agent, _global_max_fc)
+    agent.ensure_consumer_task_running()
 
 
 async def run() -> None:
@@ -118,11 +67,6 @@ async def start_scheduling(team_name: str | None = None) -> None:
     logger.info("开始调度完成: team=%s", team_name or "ALL")
 
 
-async def replay_scheduling_rooms() -> None:
-    """兼容入口：重放可调度房间。"""
-    await start_scheduling()
-
-
 def stop() -> None:
     """通知 run() 退出循环。"""
     _stop_event.set()
@@ -130,25 +74,15 @@ def stop() -> None:
 
 def shutdown() -> None:
     """清空调度状态，强制结束 run()。"""
-    global _running_tasks, _running_agents
     messageBus.unsubscribe(MessageBusTopic.ROOM_AGENT_TURN, _on_agent_turn)
     stop()
-    for task in _running_tasks.values():
-        if task.done():
-            continue
-        try:
-            if task.get_loop().is_closed():
-                continue
-            task.cancel()
-        except RuntimeError:
-            continue
-    _running_tasks = {}
-    _running_agents = {}
+    for agent in agentService.get_all_agents():
+        agent.stop_consumer_task()
 
 
 def stop_team(team_id: int) -> None:
-    """停止指定 Team 的所有调度任务。"""
-    to_remove = [agent_id for agent_id, agent in _running_agents.items() if agent.gt_agent.team_id == team_id]
-    for agent_id in to_remove:
-        remove_agent(agent_id)
-    logger.info(f"Team ID={team_id} 的 {len(to_remove)} 个调度任务已停止")
+    """停止指定 Team 的所有运行中消费 task。"""
+    team_agents = agentService.get_team_agents(team_id)
+    for agent in team_agents:
+        agent.stop_consumer_task()
+    logger.info(f"Team ID={team_id} 的 {len(team_agents)} 个消费 task 已停止")

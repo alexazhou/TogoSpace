@@ -31,7 +31,8 @@ def _make_mock_agent(name: str, team_name: str = TEAM, agent_id: int = 1) -> Age
     agent = MagicMock(spec=Agent)
     agent.gt_agent = SimpleNamespace(id=agent_id, team_id=1, name=name, model="mock")
     agent.status = AgentStatus.IDLE
-    agent.current_task = None
+    agent.max_function_calls = 5
+    agent.current_db_task = None
     agent.consume_task = AsyncMock()
     agent.has_pending_tasks = AsyncMock(return_value=False)
     return agent
@@ -46,11 +47,7 @@ def _make_team_config() -> TeamConfig:
 
 
 def _patch_scheduler_teams(monkeypatch, teams: list[SimpleNamespace] | None = None) -> None:
-    monkeypatch.setattr(
-        scheduler.gtTeamManager,
-        "get_all_teams",
-        AsyncMock(return_value=teams or []),
-    )
+    return None
 
 
 def _patch_scheduler_rooms(monkeypatch, *rooms: roomService.ChatRoom) -> None:
@@ -75,7 +72,7 @@ class TestSchedulerRun(ServiceTestCase):
         await asyncio.wait_for(run_task, timeout=2.0)
 
     async def test_scheduler_runs_agent_on_turn_event(self, monkeypatch):
-        """发布 ROOM_AGENT_TURN 后，scheduler 应触发 agent.consume_task。"""
+        """发布 ROOM_AGENT_TURN 后，scheduler 应触发 Agent 的消费 task 管理。"""
         alice = _make_mock_agent("alice")
         room = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -113,16 +110,16 @@ class TestSchedulerRun(ServiceTestCase):
             )
             await scheduler._on_agent_turn(msg)
 
-            # consume_task 由后台任务异步消费队列，给一个短暂让渡时间。
+            # scheduler 内部只做委派，给一个短暂让渡时间以保持测试时序稳定。
             await asyncio.sleep(0.5)
 
-            alice.consume_task.assert_called()
+            alice.ensure_consumer_task_running.assert_called_once_with()
 
             scheduler.shutdown()
             await asyncio.wait_for(run_task, timeout=2.0)
 
-    async def test_agent_is_active_based_on_status_and_current_task(self):
-        """验证 Agent 活跃状态：基于 status 或 current_task。"""
+    async def test_agent_is_active_based_on_status_and_current_db_task(self):
+        """验证 Agent 活跃状态：基于 status 或 current_db_task。"""
         alice = Agent(GtAgent(id=1, team_id=1, name="alice", role_template_id=1, model="model"), "prompt")
 
         assert alice.is_active is False
@@ -133,8 +130,8 @@ class TestSchedulerRun(ServiceTestCase):
         alice.status = AgentStatus.IDLE
         assert alice.is_active is False
 
-        # 有 current_task 时也是活跃的
-        alice.current_task = GtAgentTask(id=1, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": 1})
+        # 有 current_db_task 时也是活跃的
+        alice.current_db_task = GtAgentTask(id=1, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": 1})
         assert alice.is_active is True
 
     async def test_handle_event_error_logged_in_agent(self):
@@ -163,7 +160,7 @@ class TestSchedulerRun(ServiceTestCase):
         assert real_agent.status == AgentStatus.FAILED
 
     async def test_on_agent_turn_creates_task(self, monkeypatch):
-        """收到 ROOM_AGENT_TURN 消息后，创建任务并启动 consume_task。"""
+        """收到 ROOM_AGENT_TURN 消息后，创建任务并触发消费 task 启动。"""
         alice = _make_mock_agent("alice")
         room = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -198,7 +195,7 @@ class TestSchedulerRun(ServiceTestCase):
             )
             await scheduler._on_agent_turn(msg)
 
-        assert alice.gt_agent.id in scheduler._running_tasks
+        alice.ensure_consumer_task_running.assert_called_once_with()
 
     async def test_duplicate_room_event_is_skipped(self, monkeypatch):
         """同一房间连续触发两次 ROOM_AGENT_TURN，第二次应被跳过。"""
@@ -300,31 +297,16 @@ class TestSchedulerRun(ServiceTestCase):
 
         assert mock_task_manager.create_task.call_count == 2
 
-    async def test_task_done_with_pending_tasks_continues(self):
-        """task 完成后如果还有待处理任务，应自动续起消费。"""
-        alice = _make_mock_agent("alice")
-        alice.consume_task = AsyncMock()
-
-        # 直接测试 _check_and_continue_agent，避免异步回调的时序问题
-        with patch("service.schedulerService.gtAgentTaskManager.has_pending_or_running_tasks", AsyncMock(return_value=True)):
-            await scheduler._check_and_continue_agent(alice)
-
-        # 期望：调度器应将 Agent 加入运行任务
-        assert alice.gt_agent.id in scheduler._running_tasks
-        alice.consume_task.assert_called_once()
-
     async def test_stop_team(self, monkeypatch):
         """验证停止特定团队的调度。"""
         alice = _make_mock_agent("alice")
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         await scheduler.startup()
 
-        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
-            scheduler.add_agent(alice, 5)
-            assert alice.gt_agent.id in scheduler._running_tasks
-
+        with patch("service.schedulerService.agentService.get_team_agents", return_value=[alice]):
             scheduler.stop_team(1)
-            assert alice.gt_agent.id not in scheduler._running_tasks
+
+        alice.stop_consumer_task.assert_called_once_with()
 
     async def test_on_agent_turn_agent_not_found(self, monkeypatch):
         """验证 Agent 找不到时会直接抛出异常。"""
@@ -380,12 +362,14 @@ class TestSchedulerRun(ServiceTestCase):
             with pytest.raises(RuntimeError, match="unexpected"):
                 await scheduler._on_agent_turn(msg)
 
-    async def test_remove_agent_non_existent(self):
-        """移除不存在的 agent 不应报错。"""
-        scheduler.remove_agent(-1)
+    async def test_stop_agent_task_non_existent(self):
+        """停止不存在的 agent task 不应报错。"""
+        scheduler.stop_agent_task(-1)
         # No exception means success
 
-    async def test_startup_uses_global_default_max_function_calls(self, monkeypatch):
-        """启动时应使用全局统一的 max_function_calls 默认值。"""
-        await scheduler.startup()
-        assert scheduler._global_max_fc == 5
+    async def test_stop_agent_task_delegates_to_agent(self):
+        """stop_agent_task 应委派给 Agent 自身的消费 task 管理。"""
+        alice = _make_mock_agent("alice")
+        with patch("service.schedulerService.agentService.get_agent", return_value=alice):
+            scheduler.stop_agent_task(alice.gt_agent.id)
+        alice.stop_consumer_task.assert_called_once_with()

@@ -71,14 +71,14 @@ class TestSdkDoSend(ServiceTestCase):
         # 2. 从 agentService 获取在内存中已注册好的 agent
         agent = agentService.get_agent(room.get_agent_id(agent_name))
 
-        # 3. 模拟 schedulerService：进入该房间回合前注入运行时的 current_task
+        # 3. 模拟 schedulerService：进入该房间回合前注入运行时的 current_db_task
         task = GtAgentTask(
             id=1,
             agent_id=agent.gt_agent.id,
             task_type=AgentTaskType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
-        agent.current_task = task
+        agent.current_db_task = task
 
         # 4. 驱动绑定
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
@@ -204,7 +204,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             task_type=AgentTaskType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
-        agent.current_task = task
+        agent.current_db_task = task
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client

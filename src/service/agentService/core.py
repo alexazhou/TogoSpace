@@ -18,6 +18,13 @@ logger = logging.getLogger(__name__)
 
 _agents: dict[int, "Agent"] = {}
 
+
+def _resolve_max_function_calls(team_config: dict | None) -> int:
+    value = (team_config or {}).get("max_function_calls", 5)
+    if isinstance(value, int):
+        return max(1, value)
+    return 5
+
 async def startup() -> None:
     global _agents
     _agents = {}
@@ -53,6 +60,7 @@ async def _load_team(team_id: int, workspace_root: str | None = None) -> None:
     default_model = llmService.get_default_model()
     resolved_workspace_root = workspace_root or app_config.setting.workspace_root
     assert resolved_workspace_root is not None, "workspace_root 未配置"
+    max_function_calls = _resolve_max_function_calls(gt_team.config)
 
     team_name = gt_team.name
     team_workdir = os.path.join(resolved_workspace_root, team_name)
@@ -89,6 +97,7 @@ async def _load_team(team_id: int, workspace_root: str | None = None) -> None:
             system_prompt=full_prompt,
             driver_config=driver_config,
             agent_workdir=team_workdir,
+            max_function_calls=max_function_calls,
         )
         _agents[gt_agent.id] = agent
         logger.info(
@@ -124,6 +133,14 @@ def get_agent(agent_id: int) -> "Agent":
     if agent is None:
         raise KeyError(f"agent not found: agent_id={agent_id}")
     return agent
+
+
+def get_all_agents() -> list["Agent"]:
+    return list(_agents.values())
+
+
+def get_team_agents(team_id: int) -> list["Agent"]:
+    return [agent for agent in _agents.values() if agent.gt_agent.team_id == team_id]
 
 
 def get_team_runtime_status_map(team_id: int) -> dict[int, AgentStatus]:
