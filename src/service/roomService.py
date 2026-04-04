@@ -5,8 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence
 
-from dal.db import gtRoomManager, gtTeamManager, gtAgentManager
-from service import messageBus, persistenceService
+from dal.db import gtRoomManager, gtTeamManager, gtAgentManager, gtRoomMessageManager
+from service import messageBus
+from service import persistenceService  # 仅用于 restore_state
 from util import configUtil
 from util import assertUtil
 from exception import TeamAgentException
@@ -132,7 +133,7 @@ class ChatRoom:
         self._agent_read_index[agent_name] = len(self.messages)
         if self._state != RoomState.INIT:
             id_keyed = {str(self.get_agent_id(k)): v for k, v in self._agent_read_index.items()}
-            await persistenceService.save_room_runtime(self.room_id, id_keyed)
+            await gtRoomManager.update_room_state(self.room_id, id_keyed)
         return new_msgs
 
     async def add_message(self, sender: str, content: str, send_time: datetime | None = None) -> None:
@@ -161,7 +162,7 @@ class ChatRoom:
         if self._state == RoomState.INIT:
             return
 
-        await persistenceService.append_room_message(
+        await gtRoomMessageManager.append_room_message(
             room_id=self.room_id,
             agent_id=self.get_agent_id(sender),
             content=content,

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from dal.db import gtTeamManager, gtAgentManager
+from dal.db import gtTeamManager, gtAgentManager, gtAgentHistoryManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtTeam import GtTeam
@@ -140,14 +140,14 @@ class TestRestoreAgentHistory(ServiceTestCase):
                 agent_ids=[gt_alice.id, gt_bob.id],
             ),
         )
-        await persistenceService.append_agent_history_message(
+        await gtAgentHistoryManager.append_agent_history_message(
             GtAgentHistory(
                 agent_id=gt_alice.id,
                 seq=0,
                 message_json=OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1").model_dump_json(exclude_none=True),
             )
         )
-        await persistenceService.append_agent_history_message(
+        await gtAgentHistoryManager.append_agent_history_message(
             GtAgentHistory(
                 agent_id=gt_alice.id,
                 seq=1,

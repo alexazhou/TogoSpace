@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Iterable, Iterator
 
 from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiLLMApiRole
+from dal.db import gtAgentHistoryManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from service import persistenceService
 from util import llmApiUtil
 
 
@@ -100,7 +100,7 @@ class AgentHistoryStore:
             error_message=error_message,
             tags=tags,
         )
-        saved = await persistenceService.append_agent_history_message(item)
+        saved = await gtAgentHistoryManager.append_agent_history_message(item)
         if saved is not None:
             item.id = saved.id
         return item
@@ -140,7 +140,7 @@ class AgentHistoryStore:
             history_item.tags = list(tags)
 
         assert history_item.id is not None, "history row id should not be None after append"
-        await persistenceService.update_agent_history_by_id(
+        await gtAgentHistoryManager.update_agent_history_by_id(
             history_id=history_item.id,
             message_json=message_json,
             status=status,
