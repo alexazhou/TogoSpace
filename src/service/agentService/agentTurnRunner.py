@@ -254,17 +254,11 @@ class AgentTurnRunner:
                         turn_done = True
                     continue
 
-            if history_item is not None:
-                exec_result = await self._execute_and_record_tool_call(
-                    tool_call,
-                    lambda: self._agent.tool_registry.execute_tool_call(tool_call, context),
-                    existing_item=history_item,
-                )
-            else:
-                exec_result = await self._execute_and_record_tool_call(
-                    tool_call,
-                    lambda: self._agent.tool_registry.execute_tool_call(tool_call, context),
-                )
+            exec_result = await self._execute_and_record_tool_call(
+                tool_call,
+                lambda: self._agent.tool_registry.execute_tool_call(tool_call, context),
+                existing_item=history_item,
+            )
             if exec_result.turn_finished and (
                 exec_result.status == AgentHistoryStatus.SUCCESS
                 or room.state == RoomState.INIT
