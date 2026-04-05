@@ -101,9 +101,6 @@ class Agent:
     async def resume_failed(self) -> int:
         return await self.task_consumer.resume_failed()
 
-    async def run_chat_turn(self, task: GtAgentTask, max_function_calls: int = 5, resumed: bool = False) -> None:
-        await self.turn_runner.run_chat_turn(task, max_function_calls, resumed=resumed)
-
 
     # ─── AgentDriverHost 协议 ───────────────────────────────────
     # Driver 通过 self.host 回调以下方法，Agent 必须保留这些入口。
