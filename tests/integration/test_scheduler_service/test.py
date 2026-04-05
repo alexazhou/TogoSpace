@@ -31,7 +31,7 @@ def _make_mock_agent(name: str, team_name: str = TEAM, agent_id: int = 1) -> Age
     agent = MagicMock(spec=Agent)
     agent.gt_agent = SimpleNamespace(id=agent_id, team_id=1, name=name, model="mock")
     agent.status = AgentStatus.IDLE
-    agent.max_function_calls = 5
+    agent.turn_runner = SimpleNamespace(max_function_calls=5)
     agent.current_db_task = None
     agent.consume_task = AsyncMock()
     return agent

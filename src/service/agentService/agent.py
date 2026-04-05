@@ -42,11 +42,10 @@ class Agent:
         self.gt_agent: GtAgent = gt_agent
         self.system_prompt: str = system_prompt
         self.agent_workdir: str = agent_workdir
-        self.max_function_calls: int = max(1, max_function_calls)
-        self._history_store: AgentHistoryStore = AgentHistoryStore(self.gt_agent.id or 0)
+        self._history_store: AgentHistoryStore = AgentHistoryStore(self.gt_agent.id)
         self._tool_registry: AgentToolRegistry = AgentToolRegistry()
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
-        self.turn_runner: AgentTurnRunner = AgentTurnRunner(self)
+        self.turn_runner: AgentTurnRunner = AgentTurnRunner(self, max_function_calls=max_function_calls)
         self.task_consumer: AgentTaskConsumer = AgentTaskConsumer(
             gt_agent=self.gt_agent,
             turn_runner=self.turn_runner,
