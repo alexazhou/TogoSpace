@@ -39,7 +39,6 @@ async def load_agent_history_message(agent_id: int) -> list[GtAgentHistory]:
 
 async def reset_running_tasks(agent_id: int) -> None:
     """将 Agent 的 RUNNING 任务重置为 PENDING（用于启动时恢复）。"""
-    tasks = await gtAgentTaskManager.get_pending_and_running_tasks(agent_id)
+    tasks = await gtAgentTaskManager.get_running_tasks(agent_id)
     for task in tasks:
-        if task.status == AgentTaskStatus.RUNNING:
-            await gtAgentTaskManager.update_task_status(task.id, AgentTaskStatus.PENDING)
+        await gtAgentTaskManager.update_task_status(task.id, AgentTaskStatus.PENDING)

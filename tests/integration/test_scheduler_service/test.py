@@ -138,7 +138,7 @@ class TestSchedulerRun(ServiceTestCase):
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
 
         with patch("service.agentService.agent.gtAgentTaskManager") as mock_task_manager:
-            mock_task_manager.get_first_pending_task = AsyncMock(return_value=GtAgentTask(
+            mock_task_manager.get_first_unfinish_task = AsyncMock(return_value=GtAgentTask(
                 id=1,
                 agent_id=1,
                 task_type=AgentTaskType.ROOM_MESSAGE,
@@ -163,7 +163,7 @@ class TestSchedulerRun(ServiceTestCase):
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
 
         with patch("service.agentService.agent.gtAgentTaskManager") as mock_task_manager:
-            mock_task_manager.get_first_pending_task = AsyncMock(return_value=GtAgentTask(
+            mock_task_manager.get_first_unfinish_task = AsyncMock(return_value=GtAgentTask(
                 id=1,
                 agent_id=1,
                 task_type=AgentTaskType.ROOM_MESSAGE,

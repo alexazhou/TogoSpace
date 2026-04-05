@@ -104,10 +104,12 @@ class Agent:
         self._publish_status(self.status)
         try:
             while True:
-                # 从数据库获取第一个待处理任务
-                task = await gtAgentTaskManager.get_first_pending_task(self.gt_agent.id)
+                # 从数据库获取最早的未完成任务；FAILED 任务会阻断后续任务继续执行
+                task = await gtAgentTaskManager.get_first_unfinish_task(self.gt_agent.id)
                 if task is None:
                     break  # 没有待处理任务了
+                if task.status != AgentTaskStatus.PENDING:
+                    break
 
                 # 原子地认领任务（乐观锁）
                 claimed_task = await gtAgentTaskManager.claim_task(task.id)
