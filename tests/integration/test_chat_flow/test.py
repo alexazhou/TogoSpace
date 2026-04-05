@@ -122,7 +122,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task_data={"room_id": room.room_id},
         )
         with self.patch_infer(handler=fake_infer):
-            await alice.run_chat_turn(task)
+            await alice.turn_runner.run_chat_turn(task)
 
         tool_results = [m for m in alice._history if m.role == OpenaiLLMApiRole.TOOL]
         assert len(tool_results) >= 1
@@ -157,7 +157,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task_data={"room_id": room.room_id},
         )
         with self.patch_infer(responses=resps):
-            await alice.run_chat_turn(task, max_function_calls=5)
+            await alice.turn_runner.run_chat_turn(task)
 
         assert any(m.content == "最终消息" for m in room.messages)
 
@@ -169,8 +169,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = roomService.get_room_by_key(room_key)
         for agent_name in ["alice", "bob"]:
             agent = agentService.get_agent(room.get_agent_id_by_name(agent_name))
-            agent.status = AgentStatus.IDLE
-            agent.current_db_task = None
+            agent.task_consumer.status = AgentStatus.IDLE
+            agent.task_consumer.current_db_task = None
             agent.inject_history_messages([])
 
         # 预定义每个 agent 的调用序列

@@ -1,32 +1,30 @@
-import asyncio
 import logging
 from typing import List, Optional
 
-from constants import DriverType, MessageBusTopic, AgentStatus
+from constants import DriverType, AgentStatus
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from service import messageBus
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService.agentTaskConsumer import AgentTaskConsumer
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver import AgentDriverConfig, build_agent_driver
 from service.agentService.toolRegistry import AgentToolRegistry
-from util import asyncUtil, llmApiUtil
+from util import llmApiUtil
 
 logger = logging.getLogger(__name__)
 
 
 class Agent:
-    """AI Team Agent — 协调器角色。
+    """AI Team Agent — facade 角色。
 
     Agent 本身只负责：
-    - 运行时属性与生命周期（startup / close）
+    - 生命周期管理（startup / close）
     - 组件装配（driver, turn_runner, task_consumer）
-    - 对外 API 入口（consume_task, resume_failed, run_chat_turn 等）
-    - 状态广播
+    - 对外 API 入口（start_consumer_task, resume_failed 等）的一层转发
+    - AgentDriverHost 协议（供 driver 回调）
 
-    实际的任务消费与执行逻辑在 AgentTaskConsumer 中，
+    任务运行时状态与消费逻辑在 AgentTaskConsumer 中，
     Turn 级推理与工具调用逻辑在 AgentTurnRunner 中。
     """
 
@@ -47,21 +45,33 @@ class Agent:
         self.max_function_calls: int = max(1, max_function_calls)
         self._history_store: AgentHistoryStore = AgentHistoryStore(self.gt_agent.id or 0)
         self._tool_registry: AgentToolRegistry = AgentToolRegistry()
-        self.status: AgentStatus = AgentStatus.IDLE
-        self._aio_consumer_task: asyncio.Task | None = None
-        self.current_db_task: Optional[GtAgentTask] = None
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
         self.turn_runner: AgentTurnRunner = AgentTurnRunner(self)
-        self.task_consumer: AgentTaskConsumer = AgentTaskConsumer(self)
+        self.task_consumer: AgentTaskConsumer = AgentTaskConsumer(
+            gt_agent=self.gt_agent,
+            turn_runner=self.turn_runner,
+        )
+
+    @property
+    def status(self) -> AgentStatus:
+        return self.task_consumer.status
+
+    @property
+    def current_db_task(self) -> Optional[GtAgentTask]:
+        return self.task_consumer.current_db_task
 
     @property
     def _history(self) -> AgentHistoryStore:
         return self._history_store
 
     @property
+    def tool_registry(self) -> AgentToolRegistry:
+        return self._tool_registry
+
+    @property
     def is_active(self) -> bool:
         """检查 Agent 是否活跃（状态为 ACTIVE 或有正在处理的任务）。"""
-        return self.status == AgentStatus.ACTIVE or self.current_db_task is not None
+        return self.task_consumer.status == AgentStatus.ACTIVE or self.task_consumer.current_db_task is not None
 
     async def startup(self) -> None:
         await self.driver.startup()
@@ -69,10 +79,7 @@ class Agent:
     async def close(self) -> None:
         self.stop_consumer_task()
         await self.driver.shutdown()
-        self._tool_registry.clear()
-
-    def _publish_status(self, status: AgentStatus) -> None:
-        messageBus.publish(MessageBusTopic.AGENT_STATUS_CHANGED, gt_agent=self.gt_agent, status=status)
+        self.tool_registry.clear()
 
     def dump_history_messages(self) -> List[GtAgentHistory]:
         return self._history.dump()
@@ -85,17 +92,11 @@ class Agent:
 
     def start_consumer_task(self, initial_task: GtAgentTask | None = None) -> None:
         """如果没有消费协程在运行，则启动一个。"""
-        existing = self._aio_consumer_task
-        if existing is not None and not existing.done():
-            return
-
-        self._aio_consumer_task = asyncio.create_task(self.task_consumer.consume(initial_task=initial_task))
+        self.task_consumer.start(initial_task)
 
     def stop_consumer_task(self) -> None:
         """停止当前 Agent 的消费协程。"""
-        task = self._aio_consumer_task
-        self._aio_consumer_task = None
-        asyncUtil.cancel_task_safely(task)
+        self.task_consumer.stop()
 
     async def resume_failed(self) -> None:
         await self.task_consumer.resume_failed()

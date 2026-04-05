@@ -80,7 +80,7 @@ class TestSdkDoSend(ServiceTestCase):
             task_type=AgentTaskType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
-        agent.current_db_task = task
+        agent.task_consumer.current_db_task = task
 
         # 4. 驱动绑定（不调 startup，手动注册 tool_registry）
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
@@ -215,7 +215,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             task_type=AgentTaskType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
-        agent.current_db_task = task
+        agent.task_consumer.current_db_task = task
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client

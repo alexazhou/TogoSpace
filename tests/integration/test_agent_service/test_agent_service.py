@@ -80,15 +80,15 @@ class TestAgentServiceStatusMap(_agentServiceCase):
         status_map = agentService.get_team_runtime_status_map(team.id)
         assert status_map[alice.gt_agent.id] == AgentStatus.IDLE
 
-        alice.status = AgentStatus.ACTIVE
+        alice.task_consumer.status = AgentStatus.ACTIVE
         status_map = agentService.get_team_runtime_status_map(team.id)
         assert status_map[alice.gt_agent.id] == AgentStatus.ACTIVE
 
-        alice.status = AgentStatus.FAILED
+        alice.task_consumer.status = AgentStatus.FAILED
         status_map = agentService.get_team_runtime_status_map(team.id)
         assert status_map[alice.gt_agent.id] == AgentStatus.FAILED
 
-        alice.status = AgentStatus.IDLE
+        alice.task_consumer.status = AgentStatus.IDLE
 
 
 class TestAgentServiceAgentStatusEvent(_agentServiceCase):
@@ -108,7 +108,7 @@ class TestAgentServiceAgentStatusEvent(_agentServiceCase):
         messageBus.subscribe(MessageBusTopic.AGENT_STATUS_CHANGED, _on_agent_status)
         try:
             # 无任务时也会经历 ACTIVE -> IDLE，并发布两次状态事件。
-            await alice.consume_task(max_function_calls=1)
+            await alice.task_consumer.consume()
             await asyncio.sleep(0)
         finally:
             messageBus.unsubscribe(MessageBusTopic.AGENT_STATUS_CHANGED, _on_agent_status)
@@ -162,7 +162,7 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         await room.add_message(bob_id, "hello alice")
 
         alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
-        synced_count = await alice.pull_room_messages_to_history(room)
+        synced_count = await alice.turn_runner.pull_room_messages_to_history(room)
 
         # 初始公告 + bob 消息会聚合成一条“轮到发言”上下文消息
         assert synced_count == 1
@@ -187,7 +187,7 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         existing = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, "older context")
         alice.inject_history_messages([GtAgentHistory.from_openai_message(alice.gt_agent.id, 0, existing)])
 
-        synced_count = await alice.pull_room_messages_to_history(room)
+        synced_count = await alice.turn_runner.pull_room_messages_to_history(room)
 
         system_line = format_room_message("general", "SYSTEM", room.build_initial_system_message())
         bob_line = format_room_message("general", "bob", "hello alice")
@@ -253,7 +253,7 @@ class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
         alice_id = room.get_agent_id_by_name("alice")
         await room.add_message(alice_id, "i am talking")
 
-        synced_count = await alice.pull_room_messages_to_history(room)
+        synced_count = await alice.turn_runner.pull_room_messages_to_history(room)
         # 只应有初始公告，不应有自己的消息
         assert synced_count == 1
         assert len(alice._history) == 1
@@ -277,9 +277,9 @@ class TestAgentResumeFailed(_agentServiceCase):
             AgentTaskStatus.FAILED,
             error_message="boom",
         )
-        alice.status = AgentStatus.FAILED
+        alice.task_consumer.status = AgentStatus.FAILED
         restart_spy = MagicMock()
-        alice.start_consumer_task = restart_spy
+        alice.task_consumer.start = restart_spy
 
         await alice.resume_failed()
         refreshed_task = await GtAgentTask.aio_get_or_none(GtAgentTask.id == failed_task.id)

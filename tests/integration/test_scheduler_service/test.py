@@ -123,18 +123,18 @@ class TestSchedulerRun(ServiceTestCase):
 
         assert alice.is_active is False
 
-        alice.status = AgentStatus.ACTIVE
+        alice.task_consumer.status = AgentStatus.ACTIVE
         assert alice.is_active is True
 
-        alice.status = AgentStatus.IDLE
+        alice.task_consumer.status = AgentStatus.IDLE
         assert alice.is_active is False
 
         # 有 current_db_task 时也是活跃的
-        alice.current_db_task = GtAgentTask(id=1, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": 1})
+        alice.task_consumer.current_db_task = GtAgentTask(id=1, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": 1})
         assert alice.is_active is True
 
     async def test_handle_event_error_logged_in_agent(self):
-        """验证 Agent.consume_task 内部错误后进入 FAILED 状态。"""
+        """验证 Agent.task_consumer.consume 内部错误后进入 FAILED 状态。"""
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
 
         with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_task_manager:
@@ -154,7 +154,7 @@ class TestSchedulerRun(ServiceTestCase):
             mock_task_manager.update_task_status = AsyncMock()
 
             with patch.object(real_agent.turn_runner, "run_chat_turn", side_effect=RuntimeError("boom")):
-                await real_agent.consume_task(max_function_calls=5)
+                await real_agent.task_consumer.consume()
 
         assert real_agent.status == AgentStatus.FAILED
 
@@ -181,10 +181,8 @@ class TestSchedulerRun(ServiceTestCase):
 
             with patch.object(real_agent.turn_runner, "run_chat_turn", side_effect=RuntimeError("boom")):
                 restart_spy = MagicMock()
-                real_agent.start_consumer_task = restart_spy
-                task = asyncio.create_task(real_agent.consume_task(max_function_calls=5))
-                real_agent.consumer_task = task
-                await task
+                real_agent.task_consumer.start = restart_spy
+                await real_agent.task_consumer.consume()
 
         assert real_agent.status == AgentStatus.FAILED
         restart_spy.assert_not_called()

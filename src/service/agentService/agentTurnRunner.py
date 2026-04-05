@@ -85,7 +85,7 @@ class AgentTurnRunner:
     async def _run_chat_turn_with_host_loop(self, room: ChatRoom) -> None:
         """Host-managed turn loop：循环推理+工具调用，直到 turn 完成或达到最大重试次数。"""
         turn_setup: AgentTurnSetup = self._agent.driver.turn_setup
-        tools: list[llmApiUtil.OpenAITool] = self._agent._tool_registry.export_openai_tools()
+        tools: list[llmApiUtil.OpenAITool] = self._agent.tool_registry.export_openai_tools()
         max_retries = max(1, turn_setup.max_retries)
         for _ in range(max_retries):
             turn_done = await self._run_until_reply(room, tools=tools)
@@ -99,7 +99,7 @@ class AgentTurnRunner:
 
     async def _resume_chat_turn_with_host_loop(self, room: ChatRoom) -> None:
         """续跑 host-managed turn loop：根据最后一条 history item 的阶段和状态，从断点处恢复执行。"""
-        tools: list[llmApiUtil.OpenAITool] = self._agent._tool_registry.export_openai_tools()
+        tools: list[llmApiUtil.OpenAITool] = self._agent.tool_registry.export_openai_tools()
         turn_start_idx = self._agent._history.get_unfinished_turn_start_index()
         if turn_start_idx is None:
             await self._run_chat_turn_with_host_loop(room)
@@ -257,7 +257,7 @@ class AgentTurnRunner:
 
             exec_result = await self._execute_and_record_tool_call(
                 tool_call,
-                lambda: self._agent._tool_registry.execute_tool_call(tool_call, context),
+                lambda: self._agent.tool_registry.execute_tool_call(tool_call, context),
                 existing_item=history_item,
             )
             if exec_result.turn_finished and (

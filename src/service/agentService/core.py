@@ -42,7 +42,7 @@ async def restore_state() -> None:
         await persistenceService.fail_running_tasks(agent.gt_agent.id)
 
         first_task = await gtAgentTaskManager.get_first_unfinish_task(agent.gt_agent.id)
-        agent.status = AgentStatus.FAILED if (
+        agent.task_consumer.status = AgentStatus.FAILED if (
             first_task is not None and first_task.status == AgentTaskStatus.FAILED
         ) else AgentStatus.IDLE
 
