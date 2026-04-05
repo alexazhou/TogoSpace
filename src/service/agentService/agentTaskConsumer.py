@@ -35,12 +35,7 @@ class AgentTaskConsumer:
         if current_consumer is not None and agent.consumer_task not in (None, current_consumer):
             existing = agent.consumer_task
             if existing.done() is False:
-                logger.warning(
-                    "检测到重复启动的消费协程: agent_id=%s, existing_task=%s, current_task=%s",
-                    agent.gt_agent.id,
-                    id(existing),
-                    id(current_consumer),
-                )
+                logger.warning(f"检测到重复启动的消费协程: agent_id={agent.gt_agent.id}, existing_task={id(existing)}, current_task={id(current_consumer)}")
         effective_max_fc = agent.max_function_calls if max_function_calls is None else max(1, max_function_calls)
         if agent.status != AgentStatus.ACTIVE:
             agent.status = AgentStatus.ACTIVE
@@ -56,11 +51,7 @@ class AgentTaskConsumer:
                     if task.status != AgentTaskStatus.PENDING:
                         break
 
-                    claimed_task = await gtAgentTaskManager.transition_task_status(
-                        task.id,
-                        AgentTaskStatus.PENDING,
-                        AgentTaskStatus.RUNNING,
-                    )
+                    claimed_task = await gtAgentTaskManager.transition_task_status(task.id, AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING)
                     if claimed_task is None:
                         continue
 
@@ -84,18 +75,12 @@ class AgentTaskConsumer:
                     return
                 has_pending = await gtAgentTaskManager.has_consumable_task(agent.gt_agent.id)
                 if has_pending:
-                    logger.info("Agent 任务收尾时检测到待处理任务，自动续起消费: agent_id=%s", agent.gt_agent.id)
+                    logger.info(f"Agent 任务收尾时检测到待处理任务，自动续起消费: agent_id={agent.gt_agent.id}")
                     agent.start_consumer_task()
 
     # ─── 单任务执行（原 AgentTaskExecutor.execute） ───────────
 
-    async def _execute_task(
-        self,
-        claimed_task: GtAgentTask,
-        max_function_calls: int,
-        *,
-        resumed: bool,
-    ) -> bool:
+    async def _execute_task(self, claimed_task: GtAgentTask, max_function_calls: int, *, resumed: bool) -> bool:
         """执行一条已处于 RUNNING 状态的任务。
 
         返回 True 表示任务完成，可继续后续任务；返回 False 表示任务失败，消费流程应立即停止。
@@ -108,18 +93,8 @@ class AgentTaskConsumer:
             room_id = claimed_task.task_data.get("room_id")
             room = roomService.get_room(room_id) if room_id is not None else None
             room_key = room.key if room is not None else f"room_id={room_id}"
-            logger.error(
-                "Agent 任务执行失败并标记为 FAILED: agent_id=%s, room=%s, task=%s, error=%s",
-                agent.gt_agent.id,
-                room_key,
-                claimed_task.id,
-                e,
-            )
-            await gtAgentTaskManager.update_task_status(
-                claimed_task.id,
-                AgentTaskStatus.FAILED,
-                error_message=str(e),
-            )
+            logger.error(f"Agent 任务执行失败并标记为 FAILED: agent_id={agent.gt_agent.id}, room={room_key}, task={claimed_task.id}, error={e}")
+            await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.FAILED, error_message=str(e))
             agent.status = AgentStatus.FAILED
             agent.current_db_task = None
             agent._publish_status(agent.status)
@@ -142,11 +117,7 @@ class AgentTaskConsumer:
         if room_id is None:
             raise RuntimeError(f"failed task missing room_id: agent_id={agent.gt_agent.id}, task_id={failed_task.id}")
 
-        resumed_task = await gtAgentTaskManager.transition_task_status(
-            failed_task.id,
-            AgentTaskStatus.FAILED,
-            AgentTaskStatus.RUNNING,
-        )
+        resumed_task = await gtAgentTaskManager.transition_task_status(failed_task.id, AgentTaskStatus.FAILED, AgentTaskStatus.RUNNING)
         if resumed_task is None:
             raise RuntimeError(f"failed task resume conflict: agent_id={agent.gt_agent.id}, task_id={failed_task.id}")
 

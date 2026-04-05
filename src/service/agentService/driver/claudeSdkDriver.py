@@ -185,6 +185,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
         return _wrapped
 
     async def _run_turn_sdk(self, room: ChatRoom, turn_prompt: str, synced_count: int, max_function_calls: int) -> None:
+        """执行一次 SDK turn：发送 prompt → 多次尝试等待 agent 使用工具完成发言。"""
         client = self._sdk_client
 
         if client is None:
@@ -199,55 +200,15 @@ class ClaudeSdkAgentDriver(AgentDriver):
             hint = _HINT_PROMPT
 
             for attempt in range(max_attempts):
-                # 追踪本次尝试是否发生了直接文本输出
-                has_direct_text = False
-
                 if attempt > 0:
                     logger.info(f"SDK 注入发言提醒: agent_id={self.host.gt_agent.id}, attempt={attempt}")
                     await client.query(hint)
 
-                msg_count = 0
-                interrupted = False
-                async for msg in client.receive_response():
-                    msg_count += 1
-
-                    if isinstance(msg, AssistantMessage):
-                        parts = _format_sdk_blocks(msg.content)
-                        logger.info(f"SDK AssistantMessage: agent_id={self.host.gt_agent.id}, model={msg.model}, content=[{', '.join(parts)}]")
-                        # 检查是否有 TextBlock
-                        for block in msg.content:
-                            if isinstance(block, TextBlock) and len(block.text.strip()) > 0:
-                                logger.warning(f"检测到 SDK Agent 直接输出文字: agent_id={self.host.gt_agent.id}, text={block.text[:50]!r}")
-                                has_direct_text = True
-
-                    elif isinstance(msg, UserMessage):
-                        parts = _format_sdk_blocks(msg.content)
-                        logger.info(f"SDK UserMessage: agent_id={self.host.gt_agent.id}, content=[{', '.join(parts)}]")
-
-                        if self._turn_done is True and interrupted is False:
-                            logger.info(f"SDK 发言完成，主动中断会话: agent_id={self.host.gt_agent.id}")
-                            await client.interrupt()
-                            interrupted = True
-
-                    elif isinstance(msg, SystemMessage):
-                        logger.info(f"SDK SystemMessage: agent_id={self.host.gt_agent.id}, subtype={msg.subtype}, data={msg.data}")
-
-                    elif isinstance(msg, ResultMessage):
-                        if msg.is_error is True:
-                            logger.error(f"SDK 执行失败: agent_id={self.host.gt_agent.id}, room={room.key}, result={msg.result}")
-                        else:
-                            logger.info(f"SDK 会话完成: agent_id={self.host.gt_agent.id}, num_turns={msg.num_turns}, duration_ms={msg.duration_ms}, cost_usd={msg.total_cost_usd}")
-
-                    else:
-                        logger.debug(f"SDK 未知消息: agent_id={self.host.gt_agent.id}, type={type(msg).__name__}, data={msg}")
-
-                logger.info(f"SDK receive_response 结束: agent_id={self.host.gt_agent.id}, total_msgs={msg_count}, attempt={attempt}")
+                has_direct_text = await self._consume_response_stream(client, room)
 
                 if self._turn_done is True:
-                    # 检查是否存在"无效发言"：输出了文字但房间没收到内容
-                    if has_direct_text is True and room._current_turn_has_content is False:
+                    if has_direct_text and room._current_turn_has_content is False:
                         logger.warning(f"SDK Agent 输出了文字但未调用 send_chat_msg，强制提醒: agent_id={self.host.gt_agent.id}")
-                        # 重置状态，注入提醒
                         self._turn_done = False
                         hint = _REMINDER_PROMPT
                         continue
@@ -257,3 +218,43 @@ class ClaudeSdkAgentDriver(AgentDriver):
         except Exception as e:
             logger.error(f"SDK 会话异常: agent_id={self.host.gt_agent.id}, room={room.key}, error={e}", exc_info=True)
             raise
+
+    async def _consume_response_stream(self, client: ClaudeSDKClient, room: ChatRoom) -> bool:
+        """消费一轮 SDK 响应流，处理各类消息。返回是否检测到直接文本输出。"""
+        has_direct_text = False
+        msg_count = 0
+        interrupted = False
+
+        async for msg in client.receive_response():
+            msg_count += 1
+
+            if isinstance(msg, AssistantMessage):
+                parts = _format_sdk_blocks(msg.content)
+                logger.info(f"SDK AssistantMessage: agent_id={self.host.gt_agent.id}, model={msg.model}, content=[{', '.join(parts)}]")
+                for block in msg.content:
+                    if isinstance(block, TextBlock) and len(block.text.strip()) > 0:
+                        logger.warning(f"检测到 SDK Agent 直接输出文字: agent_id={self.host.gt_agent.id}, text={block.text[:50]!r}")
+                        has_direct_text = True
+
+            elif isinstance(msg, UserMessage):
+                parts = _format_sdk_blocks(msg.content)
+                logger.info(f"SDK UserMessage: agent_id={self.host.gt_agent.id}, content=[{', '.join(parts)}]")
+                if self._turn_done is True and interrupted is False:
+                    logger.info(f"SDK 发言完成，主动中断会话: agent_id={self.host.gt_agent.id}")
+                    await client.interrupt()
+                    interrupted = True
+
+            elif isinstance(msg, SystemMessage):
+                logger.info(f"SDK SystemMessage: agent_id={self.host.gt_agent.id}, subtype={msg.subtype}, data={msg.data}")
+
+            elif isinstance(msg, ResultMessage):
+                if msg.is_error is True:
+                    logger.error(f"SDK 执行失败: agent_id={self.host.gt_agent.id}, room={room.key}, result={msg.result}")
+                else:
+                    logger.info(f"SDK 会话完成: agent_id={self.host.gt_agent.id}, num_turns={msg.num_turns}, duration_ms={msg.duration_ms}, cost_usd={msg.total_cost_usd}")
+
+            else:
+                logger.debug(f"SDK 未知消息: agent_id={self.host.gt_agent.id}, type={type(msg).__name__}, data={msg}")
+
+        logger.info(f"SDK receive_response 结束: agent_id={self.host.gt_agent.id}, total_msgs={msg_count}")
+        return has_direct_text
