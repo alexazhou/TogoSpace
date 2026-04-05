@@ -148,8 +148,17 @@ async def delete_rooms_by_biz_ids_not_in(team_id: int, biz_ids: list[str]) -> No
         await query.aio_execute()
         return
 
-    # 兼容旧逻辑：biz_id 为 NULL 的 DEPT 房间也视为“不在列表中”，应被删除
+    # 兼容旧逻辑：biz_id 为 NULL 的 DEPT 房间也视为"不在列表中"，应被删除
     await query.where(
         GtRoom.biz_id.is_null(True) |  # type: ignore[attr-defined]
         (~GtRoom.biz_id.in_(biz_ids))  # type: ignore[attr-defined]
     ).aio_execute()
+
+
+async def reset_room_read_index(team_id: int) -> None:
+    """重置 Team 下所有房间的 agent_read_index。"""
+    await (
+        GtRoom.update(agent_read_index=None)
+        .where(GtRoom.team_id == team_id)
+        .aio_execute()
+    )

@@ -43,6 +43,7 @@ application = tornado.web.Application([
     (r"/teams/(\d+)/modify.json",                   teamController.TeamModifyHandler),
     (r"/teams/(\d+)/delete.json",                   teamController.TeamDeleteHandler),
     (r"/teams/(\d+)/set_enabled.json",              teamController.TeamSetEnabledHandler),
+    (r"/teams/(\d+)/clear_data.json",               teamController.TeamClearDataHandler),
 
     # Team Rooms (配置管理)
     (r"/teams/(\d+)/rooms/list.json",               roomController.TeamRoomsHandler),

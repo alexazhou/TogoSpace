@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from dal.db import gtTeamManager, gtAgentManager
+from dal.db import gtTeamManager, gtAgentManager, gtAgentTaskManager, gtAgentHistoryManager, gtRoomMessageManager, gtRoomManager
 from exception import TeamAgentException
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
@@ -121,3 +121,34 @@ async def hot_reload_team(name: str) -> None:
     logger.info("Team '%s' 热更新后已触发调度启动", name)
 
     logger.info(f"Team '{name}' 热更新完成")
+
+
+async def clear_team_data(team_id: int) -> dict[str, int]:
+    """清空团队运行数据（消息、历史、任务）。
+
+    保留团队配置（成员、房间结构、部门结构）。
+
+    Returns:
+        删除统计 {"tasks": n, "histories": n, "messages": n}
+    """
+    # 1. 停止运行时
+    schedulerService.stop_team(team_id)
+    await roomService.close_team_rooms(team_id)
+    await agentService._unload_team(team_id)
+
+    # 2. 清空数据库（按依赖顺序）
+    tasks_deleted = await gtAgentTaskManager.delete_tasks_by_team(team_id)
+    histories_deleted = await gtAgentHistoryManager.delete_history_by_team(team_id)
+    messages_deleted = await gtRoomMessageManager.delete_messages_by_team(team_id)
+
+    # 3. 重置房间的 agent_read_index
+    await gtRoomManager.reset_room_read_index(team_id)
+
+    result = {
+        "tasks": tasks_deleted,
+        "histories": histories_deleted,
+        "messages": messages_deleted,
+    }
+
+    logger.info(f"Team ID={team_id} 数据已清空: {result}")
+    return result

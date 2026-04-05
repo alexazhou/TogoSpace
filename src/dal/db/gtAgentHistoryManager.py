@@ -3,6 +3,7 @@ from __future__ import annotations
 from constants import AgentHistoryTag
 from constants import AgentHistoryStatus
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from . import gtAgentManager
 
 
 async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistory:
@@ -71,5 +72,19 @@ async def get_agent_history(agent_id: int) -> list[GtAgentHistory]:
         .select()
         .where(GtAgentHistory.agent_id == agent_id)
         .order_by(GtAgentHistory.seq.asc())  # type: ignore[attr-defined]
+        .aio_execute()
+    )
+
+
+async def delete_history_by_team(team_id: int) -> int:
+    """删除 Team 下所有 Agent 的历史记录，返回删除数量。"""
+    agents = await gtAgentManager.get_team_agents(team_id)
+    agent_ids = [agent.id for agent in agents if agent.id is not None]
+    if not agent_ids:
+        return 0
+    return await (
+        GtAgentHistory
+        .delete()
+        .where(GtAgentHistory.agent_id.in_(agent_ids))  # type: ignore[attr-defined]
         .aio_execute()
     )
