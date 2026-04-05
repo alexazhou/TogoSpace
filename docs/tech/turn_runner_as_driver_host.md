@@ -1,5 +1,7 @@
 # TurnRunner 成为 AgentDriverHost — 技术方案
 
+> **状态：已完成。** 本方案已全部实施。TurnRunner 实现 AgentDriverHost 协议，自建 driver/tool_registry/history，由 Consumer 内部创建。Agent 不再暴露 turn_runner。
+
 ## 背景
 
 当前 `AgentTurnRunner` 持有 `self._agent: Agent` 引用，从中读取 7 项数据（gt_agent、driver、_history、tool_registry、max_function_calls、system_prompt、current_db_task）。这导致 TurnRunner 与 Agent 存在双向耦合：
@@ -163,23 +165,21 @@ class AgentDriverHost(Protocol):
 ## 最终组件关系
 
 ```
-Agent (facade — 仅持有 gt_agent + 两个组件引用)
- ├── turn_runner: AgentTurnRunner (实现 AgentDriverHost，拥有全部 turn 资源)
- │    ├── gt_agent, system_prompt, agent_workdir, max_function_calls  (构造时传入)
- │    ├── _history: AgentHistoryStore    (自建)
- │    ├── tool_registry: AgentToolRegistry  (自建)
- │    ├── driver: AgentDriver            (自建，host=self)
- │    ├── _infer(), _execute_tool()      (Driver 回调)
- │    └── run_chat_turn(), pull_room_messages_to_history()
- ├── task_consumer: AgentTaskConsumer (拥有运行时状态)
- │    ├── gt_agent (GtAgent 模型)
- │    ├── turn_runner (引用)
- │    ├── status, current_db_task, _aio_consumer_task
- │    └── start(), stop(), consume(), resume_failed()
- └── (无 driver / tool_registry / history 字段)
+Agent (facade — 仅持有 gt_agent + system_prompt + task_consumer)
+ └── task_consumer: AgentTaskConsumer (拥有运行时状态，内部创建 TurnRunner)
+      ├── gt_agent (GtAgent 模型)
+      ├── status, current_db_task, _aio_consumer_task
+      ├── start(), stop(), consume(), resume_failed()
+      └── _turn_runner: AgentTurnRunner (内部创建，实现 AgentDriverHost)
+           ├── gt_agent, system_prompt, agent_workdir, max_function_calls  (构造时传入)
+           ├── _history: AgentHistoryStore    (自建)
+           ├── tool_registry: AgentToolRegistry  (自建)
+           ├── driver: AgentDriver            (自建，host=self)
+           ├── _infer(), _execute_tool()      (Driver 回调)
+           └── run_chat_turn(), pull_room_messages_to_history()
 ```
 
-Agent 不再出现在 TurnRunner 或 Consumer 的依赖中。三个组件之间：
-- Consumer → TurnRunner（调用 run_chat_turn）
+Agent 不再出现在 TurnRunner 或 Consumer 的依赖中。组件关系：
+- Consumer 内部创建并持有 TurnRunner（调用 run_chat_turn）
 - Driver → TurnRunner（作为 host 回调 _infer/_execute_tool）
-- Agent 只负责组装和对外 API
+- Agent 只负责对外 API facade，通过 task_consumer 代理一切
