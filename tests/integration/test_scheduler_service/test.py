@@ -34,7 +34,6 @@ def _make_mock_agent(name: str, team_name: str = TEAM, agent_id: int = 1) -> Age
     agent.max_function_calls = 5
     agent.current_db_task = None
     agent.consume_task = AsyncMock()
-    agent.has_pending_tasks = AsyncMock(return_value=False)
     return agent
 
 
@@ -178,7 +177,7 @@ class TestSchedulerRun(ServiceTestCase):
                 status=AgentTaskStatus.RUNNING,
             ))
             mock_task_manager.update_task_status = AsyncMock()
-            mock_task_manager.has_pending_or_running_tasks = AsyncMock(return_value=True)
+            mock_task_manager.has_consumable_task = AsyncMock(return_value=True)
 
             with patch.object(real_agent, "run_chat_turn", side_effect=RuntimeError("boom")):
                 restart_spy = MagicMock()

@@ -98,14 +98,6 @@ async def claim_task(task_id: int) -> GtAgentTask | None:
     return await GtAgentTask.aio_get_or_none(GtAgentTask.id == task_id)
 
 
-async def get_running_task(agent_id: int) -> GtAgentTask | None:
-    """获取 Agent 正在处理的任务。"""
-    return await GtAgentTask.aio_get_or_none(
-        GtAgentTask.agent_id == agent_id,
-        GtAgentTask.status == AgentTaskStatus.RUNNING,
-    )
-
-
 async def get_pending_and_running_tasks(agent_id: int) -> list[GtAgentTask]:
     """获取 Agent 的待处理和正在处理的任务（用于恢复）。"""
     return await (
@@ -120,17 +112,7 @@ async def get_pending_and_running_tasks(agent_id: int) -> list[GtAgentTask]:
     )
 
 
-async def delete_task(task_id: int) -> None:
-    """删除任务记录。"""
-    await (
-        GtAgentTask
-        .delete()
-        .where(GtAgentTask.id == task_id)
-        .aio_execute()
-    )
-
-
-async def has_pending_or_running_tasks(agent_id: int) -> bool:
+async def has_consumable_task(agent_id: int) -> bool:
     """检查 Agent 是否仍有可继续消费的待处理任务。
 
     该判断复用 get_first_pending_task() 的规则：

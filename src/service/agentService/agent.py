@@ -51,10 +51,6 @@ class Agent:
         """检查 Agent 是否活跃（状态为 ACTIVE 或有正在处理的任务）。"""
         return self.status == AgentStatus.ACTIVE or self.current_db_task is not None
 
-    async def has_pending_tasks(self) -> bool:
-        """检查是否有待处理的任务。"""
-        return await gtAgentTaskManager.has_pending_or_running_tasks(self.gt_agent.id)
-
     async def startup(self) -> None:
         await self.driver.startup()
         self.driver.mark_started()
@@ -155,7 +151,7 @@ class Agent:
                 self.consumer_task = None
                 if self.status == AgentStatus.FAILED:
                     return
-                has_pending = await gtAgentTaskManager.has_pending_or_running_tasks(self.gt_agent.id)
+                has_pending = await gtAgentTaskManager.has_consumable_task(self.gt_agent.id)
                 if has_pending:
                     logger.info("Agent 任务收尾时检测到待处理任务，自动续起消费: agent_id=%s", self.gt_agent.id)
                     self.start_consumer_task()
