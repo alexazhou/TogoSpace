@@ -83,13 +83,10 @@ async def test_consume_stops_on_failed_task(consumer, mock_agent):
     running_task.task_data = {"room_id": 1}
 
     with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_manager:
-        with patch("service.agentService.agentTaskConsumer.roomService") as mock_room_service:
             mock_manager.get_first_unfinish_task = AsyncMock(side_effect=[pending_task, None])
             mock_manager.transition_task_status = AsyncMock(return_value=running_task)
             mock_manager.update_task_status = AsyncMock()
             mock_manager.has_consumable_task = AsyncMock(return_value=False)
-
-            mock_room_service.get_room = MagicMock(return_value=None)
 
             mock_agent.turn_runner.run_chat_turn = AsyncMock(side_effect=RuntimeError("inference failed"))
 

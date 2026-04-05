@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from constants import AgentTaskStatus, AgentStatus
 from model.dbModel.gtAgentTask import GtAgentTask
 from dal.db import gtAgentTaskManager
-from service import roomService
 
 if TYPE_CHECKING:
     from service.agentService.agent import Agent
@@ -92,10 +91,7 @@ class AgentTaskConsumer:
         try:
             await agent.turn_runner.run_chat_turn(claimed_task, max_function_calls, resumed=resumed)
         except Exception as e:
-            room_id = claimed_task.task_data.get("room_id")
-            room = roomService.get_room(room_id) if room_id is not None else None
-            room_key = room.key if room is not None else f"room_id={room_id}"
-            logger.error(f"Agent 任务执行失败并标记为 FAILED: agent_id={agent.gt_agent.id}, room={room_key}, task={claimed_task.id}, error={e}")
+            logger.error(f"Agent 任务执行失败: agent_id={agent.gt_agent.id}, task={claimed_task.id}, error={e}")
             await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.FAILED, error_message=str(e))
             agent.status = AgentStatus.FAILED
             agent.current_db_task = None
