@@ -49,7 +49,7 @@ class Agent:
         self._history_store: AgentHistoryStore = AgentHistoryStore(self.gt_agent.id or 0)
         self.tool_registry: AgentToolRegistry = AgentToolRegistry()
         self.status: AgentStatus = AgentStatus.IDLE
-        self.consumer_task: asyncio.Task | None = None
+        self.aio_consumer_task: asyncio.Task | None = None
         self.current_db_task: Optional[GtAgentTask] = None
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
         self.turn_runner: AgentTurnRunner = AgentTurnRunner(self)
@@ -66,20 +66,14 @@ class Agent:
 
     async def startup(self) -> None:
         await self.driver.startup()
-        self.driver.mark_started()
 
     async def close(self) -> None:
         self.stop_consumer_task()
         await self.driver.shutdown()
-        self.driver.mark_stopped()
         self.tool_registry.clear()
 
     def _publish_status(self, status: AgentStatus) -> None:
-        messageBus.publish(
-            MessageBusTopic.AGENT_STATUS_CHANGED,
-            gt_agent=self.gt_agent,
-            status=status,
-        )
+        messageBus.publish(MessageBusTopic.AGENT_STATUS_CHANGED, gt_agent=self.gt_agent, status=status)
 
     def dump_history_messages(self) -> List[GtAgentHistory]:
         return self._history.dump()
@@ -91,22 +85,17 @@ class Agent:
     # ─── 任务管理 ──────────────────────────────────────────────
 
     def start_consumer_task(self, initial_task: GtAgentTask | None = None) -> None:
-        """启动当前 Agent 的消费协程；若已在运行则跳过。若没有待处理 task，协程会自行退出。"""
-        if initial_task is None and self.status == AgentStatus.FAILED:
-            logger.info("Agent 已处于 FAILED 状态，跳过消费协程启动: agent_id=%s", self.gt_agent.id)
+        """如果没有消费协程在运行，则启动一个。"""
+        existing = self.aio_consumer_task
+        if existing is not None and not existing.done():
             return
 
-        existing = self.consumer_task
-        if existing is not None and existing.done() is False:
-            return
-
-        task = asyncio.create_task(self.task_consumer.consume(initial_task=initial_task))
-        self.consumer_task = task
+        self.aio_consumer_task = asyncio.create_task(self.task_consumer.consume(initial_task=initial_task))
 
     def stop_consumer_task(self) -> None:
         """停止当前 Agent 的消费协程。"""
-        task = self.consumer_task
-        self.consumer_task = None
+        task = self.aio_consumer_task
+        self.aio_consumer_task = None
         asyncUtil.cancel_task_safely(task)
 
     async def resume_failed(self) -> int:

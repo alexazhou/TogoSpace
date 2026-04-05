@@ -59,21 +59,15 @@ class AgentDriver:
     def started(self) -> bool:
         return self._started
 
-    def mark_started(self) -> None:
-        self._started = True
-
-    def mark_stopped(self) -> None:
-        self._started = False
-
     @property
     def host_managed_turn_loop(self) -> bool:
         return False
 
     async def startup(self) -> None:
-        return None
+        self._started = True
 
     async def shutdown(self) -> None:
-        return None
+        self._started = False
 
     @property
     def turn_setup(self) -> AgentTurnSetup:

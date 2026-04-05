@@ -50,6 +50,7 @@ class TspAgentDriver(AgentDriver):
         self._local_tools: dict[str, llmApiUtil.OpenAITool] = {t.function.name: t for t in _local}
 
     async def startup(self) -> None:
+        await super().startup()
         options = self.config.options
         work_dir = str(options.get("workdir") or self.host.agent_workdir)
         command = build_gtsp_command(options.get("command"), work_dir)
@@ -82,11 +83,13 @@ class TspAgentDriver(AgentDriver):
 
     async def shutdown(self) -> None:
         if self._client is None:
+            await super().shutdown()
             return
         try:
             await self._client.shutdown()
         finally:
             self._client = None
+        await super().shutdown()
 
     @property
     def host_managed_turn_loop(self) -> bool:

@@ -66,6 +66,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
     _SDK_TOOL_NAMES = ("send_chat_msg", "finish_chat_turn")
 
     async def startup(self) -> None:
+        await super().startup()
         # 仅注册 SDK 使用的两个工具到 tool_registry
         self.host.tool_registry.clear()
         for t in funcToolService.get_tools_by_names(list(self._SDK_TOOL_NAMES)):
@@ -99,6 +100,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
     async def shutdown(self) -> None:
         if self._sdk_client is None:
+            await super().shutdown()
             return
 
         try:
@@ -108,6 +110,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
             logger.error(f"SDK 会话关闭失败: agent_id={self.host.gt_agent.id}, error={e}", exc_info=True)
         finally:
             self._sdk_client = None
+        await super().shutdown()
 
     async def run_chat_turn(self, task: GtAgentTask, synced_count: int, max_function_calls: int = 5) -> None:
         room_id = task.task_data.get("room_id")

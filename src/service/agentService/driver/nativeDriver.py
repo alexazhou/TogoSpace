@@ -16,6 +16,7 @@ class NativeAgentDriver(AgentDriver):
         return True
 
     async def startup(self) -> None:
+        await super().startup()
         self.host.tool_registry.clear()
         for tool in funcToolService.get_tools():
             function_name = tool.function.name
