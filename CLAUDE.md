@@ -237,6 +237,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 - [docs/tech/agent_driver_vs_subclass.md](docs/tech/agent_driver_vs_subclass.md)
 - [docs/tech/agent_scheduling_logic.md](docs/tech/agent_scheduling_logic.md)
 - [docs/tech/agent_task_consumer_plan_a.md](docs/tech/agent_task_consumer_plan_a.md)
+- [docs/tech/task_lifecycle.md](docs/tech/task_lifecycle.md)
 - [docs/tech/turn_runner_as_driver_host.md](docs/tech/turn_runner_as_driver_host.md)
 - [docs/tech/service_dependencies.md](docs/tech/service_dependencies.md)
 - [docs/tech/state_persistence.md](docs/tech/state_persistence.md)
