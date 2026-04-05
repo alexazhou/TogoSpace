@@ -146,7 +146,7 @@ class ChatRoom:
         self._agent_read_index[agent_id] = len(self.messages)
         if self._state != RoomState.INIT:
             id_keyed = {str(k): v for k, v in self._agent_read_index.items()}
-            await gtRoomManager.update_room_state(self.room_id, id_keyed)
+            await gtRoomManager.update_room_state(self.room_id, id_keyed, self._turn_pos)
         return new_msgs
 
     async def add_message(self, sender_id: int, content: str, send_time: datetime | None = None) -> None:
@@ -220,7 +220,7 @@ class ChatRoom:
             if next_agent_id is not None:
                 self._publish_current_turn(next_agent_id)
 
-    def finish_turn(self, sender_id: int | None = None) -> bool:
+    async def finish_turn(self, sender_id: int | None = None) -> bool:
         """结束当前发言人的轮次。通常由 Agent 在 finish_chat_turn 工具中调用。
 
         返回 True 表示操作成功，False 表示被拒绝（sender 不是当前发言人）。
@@ -247,6 +247,7 @@ class ChatRoom:
             return True
 
         self._go_next_turn()
+        await self._persist_turn_pos()
         next_agent_id = self._resolve_next_dispatchable_agent()
         if next_agent_id is not None:
             self._publish_current_turn(next_agent_id)
@@ -256,6 +257,11 @@ class ChatRoom:
         """返回当前理论上应该发言的 Agent ID（内部方法，忽略 IDLE 状态）。"""
         assert self._agent_ids, f"房间 {self.key} 没有任何参与者"
         return self._agent_ids[self._turn_pos]
+
+    async def _persist_turn_pos(self) -> None:
+        """将 _turn_pos 持久化到数据库（在 finish_turn 后调用）。"""
+        id_keyed = {str(k): v for k, v in self._agent_read_index.items()}
+        await gtRoomManager.update_room_state(self.room_id, id_keyed, self._turn_pos)
 
     def get_current_turn_agent(self) -> GtAgent:
         """返回当前理论上应该发言的 GtAgent 对象（忽略 IDLE 状态）。"""
@@ -396,6 +402,7 @@ class ChatRoom:
         self,
         messages: List[GtCoreChatMessage] | None = None,
         agent_read_index: Dict[str, int] | None = None,
+        turn_pos: int | None = None,
     ) -> None:
         if messages is not None:
             self.messages = list(messages)
@@ -408,6 +415,8 @@ class ChatRoom:
                 except (ValueError, TypeError):
                     pass  # 忽略无效的 key
             self._agent_read_index = converted
+        if turn_pos is not None:
+            self._turn_pos = turn_pos
 
     def export_agent_read_index(self) -> Dict[str, int]:
         """导出消息读取进度，key 为 agent_name。"""
@@ -420,7 +429,13 @@ class ChatRoom:
         tail = len(self.messages)
         self._agent_read_index = {agent_id: tail for agent_id in self._agent_ids}
 
-    def rebuild_state_from_history(self) -> None:
+    def rebuild_state_from_history(self, persisted_turn_pos: int | None = None) -> None:
+        """从消息历史重建房间调度状态。
+
+        Args:
+            persisted_turn_pos: 从数据库恢复的发言位索引。
+                如果提供，则使用该值而非重置为 0，确保重启后发言位正确。
+        """
         keep_init = (self._state == RoomState.INIT)
 
         if not self._agent_ids or self._max_turns <= 0:
@@ -432,7 +447,10 @@ class ChatRoom:
             return
 
         self._turn_count = 0
-        self._turn_pos = 0
+        if persisted_turn_pos is not None and 0 <= persisted_turn_pos < len(self._agent_ids):
+            self._turn_pos = persisted_turn_pos
+        else:
+            self._turn_pos = 0
         self._round_skipped_set = set()
         self._state = RoomState.SCHEDULING
 
@@ -490,7 +508,7 @@ async def startup() -> None:
 async def restore_state() -> None:
     """从数据库恢复所有房间的运行时状态。"""
     for room in get_all_rooms():
-        gt_room_messages, agent_read_index = await persistenceService.load_room_runtime(room.room_id)
+        gt_room_messages, agent_read_index, turn_pos = await persistenceService.load_room_runtime(room.room_id)
         recovered_from_db = bool(gt_room_messages)
         restored_messages: list[GtCoreChatMessage] | None = None
 
@@ -508,11 +526,12 @@ async def restore_state() -> None:
             room.inject_runtime_state(
                 messages=restored_messages,
                 agent_read_index=agent_read_index,
+                turn_pos=turn_pos,
             )
         elif recovered_from_db and room.messages:
             room.mark_all_messages_read()
 
-        room.rebuild_state_from_history()
+        room.rebuild_state_from_history(persisted_turn_pos=turn_pos if recovered_from_db else None)
 
 
 def get_room_by_key(room_key: str) -> ChatRoom:

@@ -502,12 +502,19 @@ class TestDalManagers(ServiceTestCase):
             agent_ids=[],
         ))
 
-        assert await gtRoomManager.get_room_state(room.id) is None
+        read_index, turn_pos = await gtRoomManager.get_room_state(room.id)
+        assert read_index is None
+        assert turn_pos == 0
 
         state = {"alice": 1, "bob": 3}
-        await gtRoomManager.update_room_state(room.id, state)
-        assert await gtRoomManager.get_room_state(room.id) == state
-        assert await gtRoomManager.get_room_state(999999) is None
+        await gtRoomManager.update_room_state(room.id, state, turn_pos=2)
+        read_index, turn_pos = await gtRoomManager.get_room_state(room.id)
+        assert read_index == state
+        assert turn_pos == 2
+
+        read_index_missing, turn_pos_missing = await gtRoomManager.get_room_state(999999)
+        assert read_index_missing is None
+        assert turn_pos_missing == 0
 
     # ------------------------------------------------------------------
     # gtRoomManager Member Management

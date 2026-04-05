@@ -161,7 +161,7 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
     )}
 
 
-def finish_chat_turn(_context: ToolCallContext = None) -> dict:
+async def finish_chat_turn(_context: ToolCallContext = None) -> dict:
     """结束本轮行动。当你完成所有发言和工具调用后，必须调用此工具来把行动机会让给下一位成员。
     如果你觉得当前话题不需要回复，或者没有话要说，请直接调用此工具来跳过本轮。"""
     if _context is None or _context.chat_room is None:
@@ -170,7 +170,7 @@ def finish_chat_turn(_context: ToolCallContext = None) -> dict:
 
     logger.info(f"Agent 结束行动: agent={_context.agent_name}")
     agent_id = _context.chat_room.get_agent_id_by_name(_context.agent_name)
-    ok = _context.chat_room.finish_turn(sender_id=agent_id)
+    ok = await _context.chat_room.finish_turn(sender_id=agent_id)
 
     if not ok:
         current_name = _context.chat_room.get_current_turn_agent_name()

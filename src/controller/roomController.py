@@ -143,7 +143,7 @@ class RoomMessagesHandler(BaseHandler):
         assertUtil.assertNotNull(content, error_message="content is required", error_code="invalid_request")
 
         await room.add_message(room.OPERATOR_MEMBER_ID, content)
-        room.finish_turn(room.OPERATOR_MEMBER_ID)
+        await room.finish_turn(room.OPERATOR_MEMBER_ID)
         self.return_success()
 
 

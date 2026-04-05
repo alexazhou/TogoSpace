@@ -71,7 +71,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message(alice_id, "hello")
             # 消息不再自动推进，手动结束回合
-            room.finish_turn(alice_id)
+            await room.finish_turn(alice_id)
             assert room.get_current_turn_agent_name() == "bob"
             assert room._turn_pos == 1
             mock_publish.assert_any_call(
@@ -90,7 +90,7 @@ class TestRoomTurnLogic(ServiceTestCase):
             assert MessageBusTopic.ROOM_AGENT_TURN not in topics
 
         await room.add_message(bob_id, "responding to alice")
-        room.finish_turn(bob_id)
+        await room.finish_turn(bob_id)
         assert room.get_current_turn_agent_name() == "charlie"
         assert room._turn_pos == 2
 
@@ -107,10 +107,10 @@ class TestRoomTurnLogic(ServiceTestCase):
         alice_id = room.get_agent_id_by_name("alice")
         bob_id = room.get_agent_id_by_name("bob")
 
-        room.finish_turn(bob_id)
+        await room.finish_turn(bob_id)
         assert room.get_current_turn_agent_name() == "alice"
 
-        room.finish_turn(alice_id)
+        await room.finish_turn(alice_id)
         assert room.get_current_turn_agent_name() == "bob"
 
     async def test_idle_wakeup_logic(self):
@@ -128,9 +128,9 @@ class TestRoomTurnLogic(ServiceTestCase):
         bob_id = room.get_agent_id_by_name("bob")
 
         await room.add_message(alice_id, "hi")
-        room.finish_turn(alice_id)
+        await room.finish_turn(alice_id)
         await room.add_message(bob_id, "bye")
-        room.finish_turn(bob_id)
+        await room.finish_turn(bob_id)
 
         assert room.state == RoomState.IDLE
         assert room._turn_count == 1
@@ -165,11 +165,11 @@ class TestRoomTurnLogic(ServiceTestCase):
         assert room._turn_count == 0
 
         await room.add_message(a_id, "1")
-        room.finish_turn(a_id)
+        await room.finish_turn(a_id)
         assert room._turn_count == 0
 
         await room.add_message(b_id, "2")
-        room.finish_turn(b_id)
+        await room.finish_turn(b_id)
         assert room._turn_count == 1
         assert room._turn_pos == 0
         assert room.get_current_turn_agent_name() == "a"
@@ -192,11 +192,11 @@ class TestRoomTurnLogic(ServiceTestCase):
         alice_id = room.get_agent_id_by_name("alice")
         bob_id = room.get_agent_id_by_name("bob")
         with patch("service.messageBus.publish"):
-            room.finish_turn(sender_id=alice_id)
+            await room.finish_turn(sender_id=alice_id)
             # 仅 alice 跳过，bob 尚未发言 -> 仍在调度
             assert room.state == RoomState.SCHEDULING
 
-            room.finish_turn(sender_id=bob_id)
+            await room.finish_turn(sender_id=bob_id)
             # alice + bob 均跳过，本轮结束 -> IDLE
             assert room.state == RoomState.IDLE
 
@@ -213,8 +213,8 @@ class TestRoomTurnLogic(ServiceTestCase):
         alice_id = room.get_agent_id_by_name("alice")
         bob_id = room.get_agent_id_by_name("bob")
         with patch("service.messageBus.publish") as mock_publish:
-            room.finish_turn(sender_id=alice_id)
-            room.finish_turn(sender_id=bob_id)
+            await room.finish_turn(sender_id=alice_id)
+            await room.finish_turn(sender_id=bob_id)
 
             turn_calls = [
                 c for c in mock_publish.call_args_list
@@ -238,8 +238,8 @@ class TestRoomTurnLogic(ServiceTestCase):
         assert await room.activate_scheduling()
 
         with patch("service.messageBus.publish"):
-            room.finish_turn(sender_id=room.get_agent_id_by_name("alice"))
-            room.finish_turn(sender_id=room.get_agent_id_by_name("bob"))
+            await room.finish_turn(sender_id=room.get_agent_id_by_name("alice"))
+            await room.finish_turn(sender_id=room.get_agent_id_by_name("bob"))
 
         assert room.state == RoomState.IDLE
         # _turn_count 应为自然推进值（1），不被强制拉到 _max_turns
@@ -268,8 +268,8 @@ class TestRoomTurnLogic(ServiceTestCase):
         alice_id = room.get_agent_id_by_name("alice")
         bob_id = room.get_agent_id_by_name("bob")
         with patch("service.messageBus.publish"):
-            room.finish_turn(sender_id=alice_id)
-            room.finish_turn(sender_id=bob_id)
+            await room.finish_turn(sender_id=alice_id)
+            await room.finish_turn(sender_id=bob_id)
 
         assert room.state == RoomState.IDLE
 
@@ -298,10 +298,10 @@ class TestRoomTurnLogic(ServiceTestCase):
 
         with patch("service.messageBus.publish"):
             bob_id = room.get_agent_id_by_name("bob")
-            room.finish_turn(sender_id=room.get_agent_id_by_name("alice"))   # alice 跳过
+            await room.finish_turn(sender_id=room.get_agent_id_by_name("alice"))   # alice 跳过
             await room.add_message(bob_id, "hi")    # bob 正常发言
-            room.finish_turn(bob_id)
-            room.finish_turn(sender_id=room.get_agent_id_by_name("charlie")) # charlie 跳过
+            await room.finish_turn(bob_id)
+            await room.finish_turn(sender_id=room.get_agent_id_by_name("charlie")) # charlie 跳过
 
         # 本轮 bob 发了言，不是全员跳过 -> 轮次正常推进，房间仍在调度
         assert room.state == RoomState.SCHEDULING
@@ -320,7 +320,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         alice_id = room.get_agent_id_by_name("alice")
         bob_id = room.get_agent_id_by_name("bob")
         with patch("service.messageBus.publish") as mock_publish:
-            room.finish_turn(sender_id=alice_id)
+            await room.finish_turn(sender_id=alice_id)
             turn_calls = [
                 c for c in mock_publish.call_args_list
                 if c[0][0] == MessageBusTopic.ROOM_AGENT_TURN
@@ -328,7 +328,7 @@ class TestRoomTurnLogic(ServiceTestCase):
             assert [c[1]["gt_agent"].id for c in turn_calls] == [bob_id]
 
         with patch("service.messageBus.publish"):
-            room.finish_turn(sender_id=bob_id)
+            await room.finish_turn(sender_id=bob_id)
 
         assert room.state == RoomState.IDLE
 
@@ -346,7 +346,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         alice_id = room.get_agent_id_by_name("alice")
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message(alice_id, "hello from alice")
-            ok = room.finish_turn(alice_id)
+            ok = await room.finish_turn(alice_id)
             assert ok is True
 
         turn_calls = [
@@ -370,7 +370,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         alice_id = room.get_agent_id_by_name("alice")
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message(alice_id, "hello from alice")
-            ok = room.finish_turn(alice_id)
+            ok = await room.finish_turn(alice_id)
             assert ok is True
 
         turn_calls = [
@@ -394,7 +394,7 @@ class TestRoomTurnLogic(ServiceTestCase):
 
         with patch("service.messageBus.publish"):
             await room.add_message(room.OPERATOR_MEMBER_ID, "hello from operator")
-            ok = room.finish_turn(room.OPERATOR_MEMBER_ID)
+            ok = await room.finish_turn(room.OPERATOR_MEMBER_ID)
             assert ok is True
 
         assert room.get_current_turn_agent_name() == "alice"
@@ -414,19 +414,19 @@ class TestRoomTurnLogic(ServiceTestCase):
         bob_id = room.get_agent_id_by_name("bob")
         with patch("service.messageBus.publish"):
             # 第一轮：全员跳过 -> IDLE
-            room.finish_turn(sender_id=alice_id)
-            room.finish_turn(sender_id=bob_id)
+            await room.finish_turn(sender_id=alice_id)
+            await room.finish_turn(sender_id=bob_id)
         assert room.state == RoomState.IDLE
 
         with patch("service.messageBus.publish"):
             # alice 发消息唤醒房间，同时推进到 bob
             await room.add_message(alice_id, "I'm back")
-            room.finish_turn(alice_id)
+            await room.finish_turn(alice_id)
         assert room.state == RoomState.SCHEDULING
 
         with patch("service.messageBus.publish"):
             # 第二轮：只有 bob 跳过，alice 已发言
-            room.finish_turn(sender_id=bob_id)
+            await room.finish_turn(sender_id=bob_id)
 
         # 第二轮不是全员跳过（alice 正常发言），房间应继续调度
         assert room.state == RoomState.SCHEDULING
@@ -449,19 +449,19 @@ class TestRoomTurnLogic(ServiceTestCase):
         with patch("service.messageBus.publish"):
             # 1. Alice 发言
             await room.add_message(alice_id, "hello")
-            room.finish_turn(alice_id) # pos -> 1 (bob)
+            await room.finish_turn(alice_id) # pos -> 1 (bob)
 
             # 2. Bob 跳过
-            room.finish_turn(bob_id) # pos -> 2 (charlie), skipped={bob}
+            await room.finish_turn(bob_id) # pos -> 2 (charlie), skipped={bob}
             assert room.state == RoomState.SCHEDULING
 
             # 3. Charlie 跳过
-            room.finish_turn(charlie_id) # pos -> 0 (alice), index -> 1, skipped={bob, charlie}
+            await room.finish_turn(charlie_id) # pos -> 0 (alice), index -> 1, skipped={bob, charlie}
             assert room.state == RoomState.SCHEDULING
 
             # 4. Alice 跳过
             # 此时 AI 成员全员自上次消息以来都已跳过，应立即停止，不再分发给 Bob
-            room.finish_turn(alice_id) # pos -> 1 (bob), index -> 1, skipped={bob, charlie, alice}
+            await room.finish_turn(alice_id) # pos -> 1 (bob), index -> 1, skipped={bob, charlie, alice}
 
         assert room.state == RoomState.IDLE
         assert room.get_current_turn_agent_name() == "bob"
