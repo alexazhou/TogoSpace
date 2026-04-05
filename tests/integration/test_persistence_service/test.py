@@ -4,8 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from dal.db import gtTeamManager, gtAgentManager, gtAgentHistoryManager
+from constants import AgentTaskStatus, AgentTaskType
+from dal.db import gtTeamManager, gtAgentManager, gtAgentHistoryManager, gtAgentTaskManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtTeam import GtTeam
 from service import presetService, agentService, ormService, persistenceService, roomService, messageBus, deptService
@@ -106,6 +108,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
     """重启后 restore_runtime_state 能恢复 Agent 对话历史。"""
 
     db_path: Path = None
+    running_task_id: int | None = None
 
     @classmethod
     async def async_setup_class(cls):
@@ -156,6 +159,13 @@ class TestRestoreAgentHistory(ServiceTestCase):
                 message_json=OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1").model_dump_json(exclude_none=True),
             )
         )
+        running_task = await gtAgentTaskManager.create_task(
+            gt_alice.id,
+            AgentTaskType.ROOM_MESSAGE,
+            {"room_id": 1},
+        )
+        await gtAgentTaskManager.update_task_status(running_task.id, AgentTaskStatus.RUNNING)
+        cls.running_task_id = running_task.id
 
         # 模拟进程重启
         await persistenceService.shutdown()
@@ -180,3 +190,10 @@ class TestRestoreAgentHistory(ServiceTestCase):
 
     async def test_history_restored(self):
         assert [m.content for m in self.fresh_agent._history] == ["u1", "a1"]
+
+    async def test_running_task_marked_failed_after_restore(self):
+        assert self.running_task_id is not None
+        task = await GtAgentTask.aio_get_or_none(GtAgentTask.id == self.running_task_id)
+        assert task is not None
+        assert task.status == AgentTaskStatus.FAILED
+        assert task.error_message == "task interrupted by process restart"

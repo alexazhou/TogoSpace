@@ -37,8 +37,12 @@ async def load_agent_history_message(agent_id: int) -> list[GtAgentHistory]:
     return await gtAgentHistoryManager.get_agent_history(agent_id)
 
 
-async def reset_running_tasks(agent_id: int) -> None:
-    """将 Agent 的 RUNNING 任务重置为 PENDING（用于启动时恢复）。"""
+async def fail_running_tasks(agent_id: int) -> None:
+    """将 Agent 的 RUNNING 任务标记为 FAILED（用于启动时恢复）。"""
     tasks = await gtAgentTaskManager.get_running_tasks(agent_id)
     for task in tasks:
-        await gtAgentTaskManager.update_task_status(task.id, AgentTaskStatus.PENDING)
+        await gtAgentTaskManager.update_task_status(
+            task.id,
+            AgentTaskStatus.FAILED,
+            error_message="task interrupted by process restart",
+        )
