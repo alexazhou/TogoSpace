@@ -101,7 +101,7 @@ class TestSchedulerRun(ServiceTestCase):
                 task_type=AgentTaskType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             ))
-            mock_task_manager.get_pending_tasks = AsyncMock(return_value=[])
+            mock_task_manager.has_pending_room_task = AsyncMock(return_value=False)
             run_task = asyncio.create_task(scheduler.run())
 
             msg = EventBusMessage(
@@ -159,6 +159,37 @@ class TestSchedulerRun(ServiceTestCase):
 
         assert real_agent.status == AgentStatus.FAILED
 
+    async def test_failed_agent_does_not_restart_consumer_when_pending_tasks_remain(self):
+        """任务失败后，即使仍有 pending task，也不应自动续起消费。"""
+        real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
+
+        with patch("service.agentService.agent.gtAgentTaskManager") as mock_task_manager:
+            mock_task_manager.get_first_pending_task = AsyncMock(return_value=GtAgentTask(
+                id=1,
+                agent_id=1,
+                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_data={"room_id": 1},
+            ))
+            mock_task_manager.claim_task = AsyncMock(return_value=GtAgentTask(
+                id=1,
+                agent_id=1,
+                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_data={"room_id": 1},
+                status=AgentTaskStatus.RUNNING,
+            ))
+            mock_task_manager.update_task_status = AsyncMock()
+            mock_task_manager.has_pending_or_running_tasks = AsyncMock(return_value=True)
+
+            with patch.object(real_agent, "run_chat_turn", side_effect=RuntimeError("boom")):
+                restart_spy = MagicMock()
+                real_agent.start_consumer_task = restart_spy
+                task = asyncio.create_task(real_agent.consume_task(max_function_calls=5))
+                real_agent.consumer_task = task
+                await task
+
+        assert real_agent.status == AgentStatus.FAILED
+        restart_spy.assert_not_called()
+
     async def test_on_agent_turn_creates_task(self, monkeypatch):
         """收到 ROOM_AGENT_TURN 消息后，创建任务并触发消费协程启动。"""
         alice = _make_mock_agent("alice")
@@ -188,7 +219,7 @@ class TestSchedulerRun(ServiceTestCase):
                 task_type=AgentTaskType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             ))
-            mock_task_manager.get_pending_tasks = AsyncMock(return_value=[])
+            mock_task_manager.has_pending_room_task = AsyncMock(return_value=False)
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"gt_agent": alice.gt_agent, "room_id": room.room_id},
@@ -254,17 +285,14 @@ class TestSchedulerRun(ServiceTestCase):
                 task_type=AgentTaskType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             ))
-            # 第一次调用返回已有任务，第二次调用返回空列表
-            mock_task_manager.get_pending_tasks = AsyncMock(return_value=[
-                GtAgentTask(id=1, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": room.room_id}),
-            ])
+            mock_task_manager.has_pending_room_task = AsyncMock(return_value=True)
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"gt_agent": alice.gt_agent, "room_id": room.room_id},
             )
             await scheduler._on_agent_turn(msg)
 
-            # 第二次调用：get_pending_tasks 返回已有任务，create_task 不应被调用
+            # 已存在同房间 pending 任务时，create_task 不应被调用
             create_call_count = mock_task_manager.create_task.call_count
             await scheduler._on_agent_turn(msg)
 
@@ -311,7 +339,7 @@ class TestSchedulerRun(ServiceTestCase):
                 GtAgentTask(id=1, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": r1.room_id}),
                 GtAgentTask(id=2, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": r2.room_id}),
             ])
-            mock_task_manager.get_pending_tasks = AsyncMock(return_value=[])
+            mock_task_manager.has_pending_room_task = AsyncMock(side_effect=[False, False])
             msg_r1 = EventBusMessage(
                 topic=MessageBusTopic.ROOM_AGENT_TURN,
                 payload={"gt_agent": alice.gt_agent, "room_id": r1.room_id},

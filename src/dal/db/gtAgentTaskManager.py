@@ -44,9 +44,9 @@ async def update_task_status(
     return row
 
 
-async def get_pending_tasks(agent_id: int) -> list[GtAgentTask]:
-    """获取 Agent 的待处理任务列表。"""
-    return await (
+async def has_pending_room_task(agent_id: int, room_id: int) -> bool:
+    """检查 Agent 是否已存在同房间的 PENDING 任务。"""
+    tasks = await (
         GtAgentTask
         .select()
         .where(
@@ -56,6 +56,7 @@ async def get_pending_tasks(agent_id: int) -> list[GtAgentTask]:
         .order_by(GtAgentTask.id.asc())
         .aio_execute()
     )
+    return any(task.task_data.get("room_id") == room_id for task in tasks)
 
 
 async def get_first_pending_task(agent_id: int) -> GtAgentTask | None:
@@ -130,14 +131,10 @@ async def delete_task(task_id: int) -> None:
 
 
 async def has_pending_or_running_tasks(agent_id: int) -> bool:
-    """检查 Agent 是否有待处理或正在处理的任务。"""
-    count = await (
-        GtAgentTask
-        .select()
-        .where(
-            GtAgentTask.agent_id == agent_id,
-            GtAgentTask.status.in_([AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING]),
-        )
-        .aio_count()
-    )
-    return count > 0
+    """检查 Agent 是否仍有可继续消费的待处理任务。
+
+    该判断复用 get_first_pending_task() 的规则：
+    - 只要存在 FAILED 任务，就不再视为可继续消费
+    - 仅当存在可认领的 PENDING 任务时返回 True
+    """
+    return await get_first_pending_task(agent_id) is not None
