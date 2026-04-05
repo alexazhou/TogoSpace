@@ -65,7 +65,7 @@ class AgentHistoryStore:
     def export_openai_message_list(self) -> list[llmApiUtil.OpenAIMessage]:
         return [item.openai_message for item in self._items]
 
-    def append_message(
+    async def append_history_message(
         self,
         message: llmApiUtil.OpenAIMessage,
         stage: AgentHistoryStage | None = None,
@@ -73,6 +73,7 @@ class AgentHistoryStore:
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
     ) -> GtAgentHistory:
+        """追加消息到历史并持久化到数据库。"""
         item = GtAgentHistory.from_openai_message(
             agent_id=self._agent_id,
             seq=len(self._items),
@@ -83,23 +84,6 @@ class AgentHistoryStore:
             tags=tags,
         )
         self._items.append(item)
-        return item
-
-    async def append_history_message(
-        self,
-        message: llmApiUtil.OpenAIMessage,
-        stage: AgentHistoryStage | None = None,
-        status: AgentHistoryStatus | None = None,
-        error_message: str | None = None,
-        tags: list[AgentHistoryTag] | None = None,
-    ) -> GtAgentHistory:
-        item = self.append_message(
-            message,
-            stage=stage,
-            status=status,
-            error_message=error_message,
-            tags=tags,
-        )
         saved = await gtAgentHistoryManager.append_agent_history_message(item)
         if saved is not None:
             item.id = saved.id
