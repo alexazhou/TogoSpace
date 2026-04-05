@@ -804,3 +804,30 @@ class TestDalManagers(ServiceTestCase):
         assert [task.id for task in tasks] == [running_task.id]
         assert all(task.status == AgentTaskStatus.RUNNING for task in tasks)
         assert pending_task.id not in [task.id for task in tasks]
+
+    async def test_agent_task_manager_delete_tasks_by_team_uses_team_filter(self):
+        """按 team_id 删除任务时，应直接基于 Agent 表条件删除对应团队任务。"""
+        await self._reset_tables()
+
+        await self._save_role_template("alice", "gpt-4o")
+        team_a = await gtTeamManager.save_team(GtTeam(name="task_team_delete_a"))
+        team_b = await gtTeamManager.save_team(GtTeam(name="task_team_delete_b"))
+
+        agents_a = await ServiceTestCase.convert_to_gt_agents(team_a.id, [AgentConfig(name="alice", role_template="alice")])
+        agents_b = await ServiceTestCase.convert_to_gt_agents(team_b.id, [AgentConfig(name="alice", role_template="alice")])
+        await gtAgentManager.batch_save_agents(team_a.id, agents_a)
+        await gtAgentManager.batch_save_agents(team_b.id, agents_b)
+
+        alice_a = await gtAgentManager.get_agent(team_a.id, "alice")
+        alice_b = await gtAgentManager.get_agent(team_b.id, "alice")
+        assert alice_a is not None
+        assert alice_b is not None
+
+        task_a = await gtAgentTaskManager.create_task(alice_a.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 1})
+        task_b = await gtAgentTaskManager.create_task(alice_b.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 2})
+
+        deleted_count = await gtAgentTaskManager.delete_tasks_by_team(team_a.id)
+
+        assert deleted_count == 1
+        assert await GtAgentTask.aio_get_or_none(GtAgentTask.id == task_a.id) is None
+        assert await GtAgentTask.aio_get_or_none(GtAgentTask.id == task_b.id) is not None
