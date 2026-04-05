@@ -33,7 +33,7 @@ class AgentTurnRunner:
 
     # ─── Turn 运行方法 ──────────────────────────────────────
 
-    async def run_chat_turn(self, task: GtAgentTask, max_function_calls: int = 5, resumed: bool = False) -> None:
+    async def run_chat_turn(self, task: GtAgentTask, resumed: bool = False) -> None:
         """执行一个完整 chat turn：同步房间消息 → 推理 → 工具调用循环。
         若 resumed=True 且存在未完成 turn，则走续跑路径。"""
         room_id = task.task_data.get("room_id")
@@ -48,14 +48,14 @@ class AgentTurnRunner:
 
         if self._agent.driver.host_managed_turn_loop:
             if resumed and self._agent._history.has_unfinished_turn():
-                await self._resume_chat_turn_with_host_loop(room, max_function_calls)
+                await self._resume_chat_turn_with_host_loop(room)
                 return
             synced_count = await self.pull_room_messages_to_history(room)
             assert self._agent.driver.started is True, f"driver 尚未启动: agent_id={self._agent.gt_agent.id}"
-            await self._run_chat_turn_with_host_loop(room, max_function_calls)
+            await self._run_chat_turn_with_host_loop(room)
         else:
             synced_count = await self.pull_room_messages_to_history(room)
-            await self._agent.driver.run_chat_turn(task, synced_count, max_function_calls)
+            await self._agent.driver.run_chat_turn(task, synced_count)
 
     async def pull_room_messages_to_history(self, room: ChatRoom) -> int:
         """从房间拉取未读消息并追加到 history。返回追加的消息条目数（0 或 1）。"""
@@ -82,13 +82,13 @@ class AgentTurnRunner:
         )
         return 1
 
-    async def _run_chat_turn_with_host_loop(self, room: ChatRoom, max_function_calls: int) -> None:
+    async def _run_chat_turn_with_host_loop(self, room: ChatRoom) -> None:
         """Host-managed turn loop：循环推理+工具调用，直到 turn 完成或达到最大重试次数。"""
         turn_setup: AgentTurnSetup = self._agent.driver.turn_setup
         tools: list[llmApiUtil.OpenAITool] = self._agent._tool_registry.export_openai_tools()
         max_retries = max(1, turn_setup.max_retries)
         for _ in range(max_retries):
-            turn_done = await self._run_until_reply(room, tools=tools, max_function_calls=max_function_calls)
+            turn_done = await self._run_until_reply(room, tools=tools)
             if turn_done:
                 return
             if len(turn_setup.hint_prompt) > 0:
@@ -97,16 +97,16 @@ class AgentTurnRunner:
                     stage=AgentHistoryStage.INPUT,
                 )
 
-    async def _resume_chat_turn_with_host_loop(self, room: ChatRoom, max_function_calls: int) -> None:
+    async def _resume_chat_turn_with_host_loop(self, room: ChatRoom) -> None:
         """续跑 host-managed turn loop：根据最后一条 history item 的阶段和状态，从断点处恢复执行。"""
         tools: list[llmApiUtil.OpenAITool] = self._agent._tool_registry.export_openai_tools()
         turn_start_idx = self._agent._history.get_unfinished_turn_start_index()
         if turn_start_idx is None:
-            await self._run_chat_turn_with_host_loop(room, max_function_calls)
+            await self._run_chat_turn_with_host_loop(room)
             return
         last_item = self._agent._history.last()
         if last_item is None:
-            await self._run_chat_turn_with_host_loop(room, max_function_calls)
+            await self._run_chat_turn_with_host_loop(room)
             return
 
         if last_item.stage == AgentHistoryStage.INFER and last_item.status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED):
@@ -141,10 +141,11 @@ class AgentTurnRunner:
                 if turn_done:
                     return
 
-        await self._run_chat_turn_with_host_loop(room, max_function_calls)
+        await self._run_chat_turn_with_host_loop(room)
 
-    async def _run_until_reply(self, room: ChatRoom, tools: Optional[list[llmApiUtil.OpenAITool]], max_function_calls: int) -> bool:
+    async def _run_until_reply(self, room: ChatRoom, tools: Optional[list[llmApiUtil.OpenAITool]]) -> bool:
         """在 max_function_calls 次内循环：推理 → 工具调用。返回 True 表示 turn 结束（agent 调用了 finish 工具）。"""
+        max_function_calls = self._agent.max_function_calls
         for _ in range(max_function_calls):
             assistant_message: llmApiUtil.OpenAIMessage = await self._infer(tools)
             tool_calls = assistant_message.tool_calls or []

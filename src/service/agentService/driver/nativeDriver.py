@@ -33,5 +33,5 @@ class NativeAgentDriver(AgentDriver):
             hint_prompt=_RUN_CHAT_TURN_HINT,
         )
 
-    async def run_chat_turn(self, task: GtAgentTask, synced_count: int, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, task: GtAgentTask, synced_count: int) -> None:
         raise RuntimeError("NativeAgentDriver 不再直接执行 run_chat_turn，请使用 Agent.run_chat_turn")
