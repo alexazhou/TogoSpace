@@ -174,8 +174,7 @@ async def finish_chat_turn(_context: ToolCallContext = None) -> dict:
 
     if not ok:
         current_name = _context.chat_room.get_current_turn_agent_name()
-        logger.warning(f"结束行动失败，当前应由 {current_name} 发言: agent={_context.agent_name}")
-        return {"success": False, "message": f"现在不是你的发言轮次（当前应由 {current_name} 发言），请勿再调用任何工具。"}
+        logger.warning(f"finish_turn 被房间拒绝（发言位不匹配），但仍视为行动结束: agent={_context.agent_name}, current_turn={current_name}, room={_context.chat_room.key}")
 
     return {"success": True, "message": "已结束本轮行动。"}
 

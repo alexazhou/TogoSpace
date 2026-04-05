@@ -243,12 +243,12 @@ class TestToolFunctions(ServiceTestCase):
         assert len(dst.messages) == before_count
 
     async def test_finish_chat_turn_rejects_non_current_agent(self):
-        """不是当前发言人时，finish_chat_turn 不应推进轮次。"""
+        """不是当前发言人时，finish_chat_turn 仍返回 success（agent 行动结束语义），但不推进轮次。"""
         await roomService.ensure_room_record(TEAM, "turn_room", ["alice", "bob"], max_turns=3)
         room = roomService.get_room_by_key(f"turn_room@{TEAM}")
         ctx = ToolCallContext(agent_name="bob", team_id=room.team_id, chat_room=room)
 
         result = await finish_chat_turn(_context=ctx)
 
-        assert not result["success"] and "alice" in result["message"]
+        assert result["success"]
         assert room.get_current_turn_agent_name() == "alice"
