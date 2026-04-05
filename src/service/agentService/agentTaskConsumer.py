@@ -3,27 +3,43 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from constants import AgentTaskStatus, AgentStatus, MessageBusTopic
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
 from dal.db import gtAgentTaskManager
 from service import messageBus
+from service.agentService.agentTurnRunner import AgentTurnRunner
+from service.agentService.driver import AgentDriverConfig
 from util import assertUtil, asyncUtil
-
-if TYPE_CHECKING:
-    from service.agentService.agentTurnRunner import AgentTurnRunner
 
 logger = logging.getLogger(__name__)
 
 
 class AgentTaskConsumer:
-    """任务管道：认领 → 执行 → 状态流转。合并了原 AgentTaskExecutor 的职责。"""
+    """任务管道：认领 → 执行 → 状态流转。合并了原 AgentTaskExecutor 的职责。
 
-    def __init__(self, *, gt_agent: GtAgent, turn_runner: AgentTurnRunner):
+    自行构建 AgentTurnRunner，对外只暴露任务消费接口。
+    """
+
+    def __init__(
+        self,
+        *,
+        gt_agent: GtAgent,
+        system_prompt: str,
+        agent_workdir: str = "",
+        max_function_calls: int = 5,
+        driver_config: AgentDriverConfig | None = None,
+    ):
         self.gt_agent: GtAgent = gt_agent
-        self._turn_runner: AgentTurnRunner = turn_runner
+        self._turn_runner: AgentTurnRunner = AgentTurnRunner(
+            gt_agent=gt_agent,
+            system_prompt=system_prompt,
+            agent_workdir=agent_workdir,
+            max_function_calls=max_function_calls,
+            driver_config=driver_config,
+        )
         self.status: AgentStatus = AgentStatus.IDLE
         self._aio_consumer_task: asyncio.Task | None = None
         self.current_db_task: Optional[GtAgentTask] = None

@@ -1,36 +1,57 @@
-"""AgentTurnRunner: Turn 内部逻辑 — 消息同步、host loop、推理、工具调用编排。"""
+"""AgentTurnRunner: Turn 内部逻辑 — 消息同步、host loop、推理、工具调用编排。
+
+同时实现 AgentDriverHost 协议，作为 Driver 的宿主。
+"""
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional
+from typing import Awaitable, Callable, List, Optional
 
 from constants import (
     AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag,
-    RoomState,
+    DriverType, RoomState,
 )
 from model.coreModel.gtCoreChatModel import GtCoreChatMessage
+from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from service import llmService, roomService
-from service.agentService.driver import AgentTurnSetup
+from service.agentService.agentHistoryStore import AgentHistoryStore
+from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
+from service.agentService.driver.factory import build_agent_driver
 from service.agentService.promptBuilder import build_turn_context_prompt, format_room_message
-from service.agentService.toolRegistry import ToolExecutionResult
+from service.agentService.toolRegistry import AgentToolRegistry, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
 from util import llmApiUtil
-
-if TYPE_CHECKING:
-    from service.agentService.agent import Agent
 
 logger = logging.getLogger(__name__)
 
 
 class AgentTurnRunner:
-    """负责 Turn 内部逻辑：消息同步、host loop 执行、推理、工具调用编排。"""
+    """负责 Turn 内部逻辑：消息同步、host loop 执行、推理、工具调用编排。
 
-    def __init__(self, agent: Agent, max_function_calls: int = 5):
-        self._agent = agent
-        self.max_function_calls = max(1, max_function_calls)
+    同时实现 AgentDriverHost 协议，是 Driver 的宿主（host）。
+    自行构建 driver / tool_registry / history，不持有 Agent 引用。
+    """
+
+    def __init__(
+        self,
+        *,
+        gt_agent: GtAgent,
+        system_prompt: str,
+        agent_workdir: str = "",
+        max_function_calls: int = 5,
+        driver_config: AgentDriverConfig | None = None,
+    ):
+        self.gt_agent: GtAgent = gt_agent
+        self.system_prompt: str = system_prompt
+        self.agent_workdir: str = agent_workdir
+        self.max_function_calls: int = max(1, max_function_calls)
+        self._history: AgentHistoryStore = AgentHistoryStore(gt_agent.id or 0)
+        self.tool_registry: AgentToolRegistry = AgentToolRegistry()
+        self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
+        self._current_room: ChatRoom | None = None
 
     # ─── Turn 运行方法 ──────────────────────────────────────
 
@@ -39,33 +60,37 @@ class AgentTurnRunner:
         若 resumed=True 且存在未完成 turn，则走续跑路径。"""
         room_id = task.task_data.get("room_id")
         if room_id is None:
-            logger.warning(f"run_chat_turn 跳过：task 缺少 room_id, agent_id={self._agent.gt_agent.id}, task_id={task.id}")
+            logger.warning(f"run_chat_turn 跳过：task 缺少 room_id, agent_id={self.gt_agent.id}, task_id={task.id}")
             return
 
         room: ChatRoom | None = roomService.get_room(room_id)
         if room is None:
-            logger.warning(f"run_chat_turn 跳过：room_id={room_id} 不存在, agent_id={self._agent.gt_agent.id}")
+            logger.warning(f"run_chat_turn 跳过：room_id={room_id} 不存在, agent_id={self.gt_agent.id}")
             return
 
-        if self._agent.driver.host_managed_turn_loop:
-            if resumed and self._agent._history.has_unfinished_turn():
-                await self._resume_chat_turn_with_host_loop(room)
-                return
-            synced_count = await self.pull_room_messages_to_history(room)
-            assert self._agent.driver.started is True, f"driver 尚未启动: agent_id={self._agent.gt_agent.id}"
-            await self._run_chat_turn_with_host_loop(room)
-        else:
-            synced_count = await self.pull_room_messages_to_history(room)
-            await self._agent.driver.run_chat_turn(task, synced_count)
+        self._current_room = room
+        try:
+            if self.driver.host_managed_turn_loop:
+                if resumed and self._history.has_unfinished_turn():
+                    await self._resume_chat_turn_with_host_loop(room)
+                    return
+                synced_count = await self.pull_room_messages_to_history(room)
+                assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
+                await self._run_chat_turn_with_host_loop(room)
+            else:
+                synced_count = await self.pull_room_messages_to_history(room)
+                await self.driver.run_chat_turn(task, synced_count)
+        finally:
+            self._current_room = None
 
     async def pull_room_messages_to_history(self, room: ChatRoom) -> int:
         """从房间拉取未读消息并追加到 history。返回追加的消息条目数（0 或 1）。"""
-        new_msgs: List[GtCoreChatMessage] = await room.get_unread_messages(self._agent.gt_agent.id)
-        logger.info(f"同步房间消息: agent_id={self._agent.gt_agent.id}, room={room.name}, count={len(new_msgs)}")
+        new_msgs: List[GtCoreChatMessage] = await room.get_unread_messages(self.gt_agent.id)
+        logger.info(f"同步房间消息: agent_id={self.gt_agent.id}, room={room.name}, count={len(new_msgs)}")
 
         message_blocks: list[str] = []
         for msg in new_msgs:
-            if msg.sender_id == self._agent.gt_agent.id:
+            if msg.sender_id == self.gt_agent.id:
                 continue
             sender_name = room._get_agent_name(msg.sender_id)
             message_blocks.append(format_room_message(room.name, sender_name, msg.content))
@@ -77,7 +102,7 @@ class AgentTurnRunner:
             llmApiUtil.OpenaiLLMApiRole.USER,
             content=build_turn_context_prompt(room.name, message_blocks),
         )
-        await self._agent._history.append_history_message(turn_context_message,
+        await self._history.append_history_message(turn_context_message,
             stage=AgentHistoryStage.INPUT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         )
@@ -85,27 +110,27 @@ class AgentTurnRunner:
 
     async def _run_chat_turn_with_host_loop(self, room: ChatRoom) -> None:
         """Host-managed turn loop：循环推理+工具调用，直到 turn 完成或达到最大重试次数。"""
-        turn_setup: AgentTurnSetup = self._agent.driver.turn_setup
-        tools: list[llmApiUtil.OpenAITool] = self._agent.tool_registry.export_openai_tools()
+        turn_setup: AgentTurnSetup = self.driver.turn_setup
+        tools: list[llmApiUtil.OpenAITool] = self.tool_registry.export_openai_tools()
         max_retries = max(1, turn_setup.max_retries)
         for _ in range(max_retries):
             turn_done = await self._run_until_reply(room, tools=tools)
             if turn_done:
                 return
             if len(turn_setup.hint_prompt) > 0:
-                await self._agent._history.append_history_message(
+                await self._history.append_history_message(
                     llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_setup.hint_prompt),
                     stage=AgentHistoryStage.INPUT,
                 )
 
     async def _resume_chat_turn_with_host_loop(self, room: ChatRoom) -> None:
         """续跑 host-managed turn loop：根据最后一条 history item 的阶段和状态，从断点处恢复执行。"""
-        tools: list[llmApiUtil.OpenAITool] = self._agent.tool_registry.export_openai_tools()
-        turn_start_idx = self._agent._history.get_unfinished_turn_start_index()
+        tools: list[llmApiUtil.OpenAITool] = self.tool_registry.export_openai_tools()
+        turn_start_idx = self._history.get_unfinished_turn_start_index()
         if turn_start_idx is None:
             await self._run_chat_turn_with_host_loop(room)
             return
-        last_item = self._agent._history.last()
+        last_item = self._history.last()
         if last_item is None:
             await self._run_chat_turn_with_host_loop(room)
             return
@@ -120,9 +145,9 @@ class AgentTurnRunner:
 
         elif last_item.stage == AgentHistoryStage.TOOL_RESULT and last_item.status == AgentHistoryStatus.INIT:
             tool_call_id = str(last_item.tool_call_id or "")
-            tool_call = self._agent._history.find_tool_call_by_id(tool_call_id, start_idx=turn_start_idx)
+            tool_call = self._history.find_tool_call_by_id(tool_call_id, start_idx=turn_start_idx)
             if tool_call is None:
-                raise RuntimeError(f"resume tool call not found: agent_id={self._agent.gt_agent.id}, tool_call_id={tool_call_id}")
+                raise RuntimeError(f"resume tool call not found: agent_id={self.gt_agent.id}, tool_call_id={tool_call_id}")
             turn_done = await self._dispatch_tool_calls(
                 room,
                 [tool_call],
@@ -132,7 +157,7 @@ class AgentTurnRunner:
                 return
 
         else:
-            last_assistant = self._agent._history.get_last_assistant_message(start_idx=turn_start_idx)
+            last_assistant = self._history.get_last_assistant_message(start_idx=turn_start_idx)
             if last_assistant is not None and last_assistant.tool_calls:
                 turn_done = await self._dispatch_tool_calls(
                     room,
@@ -146,8 +171,7 @@ class AgentTurnRunner:
 
     async def _run_until_reply(self, room: ChatRoom, tools: Optional[list[llmApiUtil.OpenAITool]]) -> bool:
         """在 max_function_calls 次内循环：推理 → 工具调用。返回 True 表示 turn 结束（agent 调用了 finish 工具）。"""
-        max_function_calls = self.max_function_calls
-        for _ in range(max_function_calls):
+        for _ in range(self.max_function_calls):
             assistant_message: llmApiUtil.OpenAIMessage = await self._infer(tools)
             tool_calls = assistant_message.tool_calls or []
             if len(tool_calls) == 0:
@@ -157,8 +181,10 @@ class AgentTurnRunner:
             if turn_done:
                 return True
 
-        logger.warning(f"达到最大函数调用次数: agent_id={self._agent.gt_agent.id}, max={max_function_calls}")
+        logger.warning(f"达到最大函数调用次数: agent_id={self.gt_agent.id}, max={self.max_function_calls}")
         return False
+
+    # ─── AgentDriverHost 协议方法 ──────────────────────────
 
     async def _infer(
         self,
@@ -167,9 +193,9 @@ class AgentTurnRunner:
         resume_item: GtAgentHistory | None = None,
     ) -> llmApiUtil.OpenAIMessage:
         """执行一次 LLM 推理。若 resume_item 不为 None，则为续跑（复用已有 history item，跳过最后一条消息）。"""
-        history = self._agent._history
+        history = self._history
         if resume_item is None:
-            history.assert_infer_ready(f"agent_id={self._agent.gt_agent.id}")
+            history.assert_infer_ready(f"agent_id={self.gt_agent.id}")
 
         ctx_tools: list[llmApiUtil.OpenAITool] | None = None
         if tools is not None and len(tools) > 0:
@@ -180,12 +206,12 @@ class AgentTurnRunner:
             messages = messages[:-1]
 
         ctx = GtCoreAgentDialogContext(
-            system_prompt=self._agent.system_prompt,
+            system_prompt=self.system_prompt,
             messages=messages,
             tools=ctx_tools,
         )
         history_item = resume_item or await history.append_stage_init(stage=AgentHistoryStage.INFER)
-        infer_result: llmService.InferResult = await llmService.infer(self._agent.gt_agent.model, ctx)
+        infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
         if infer_result.ok is False or infer_result.response is None:
             error_message = infer_result.error_message or "unknown inference error"
             await history.finalize_history_item(
@@ -194,7 +220,7 @@ class AgentTurnRunner:
                 status=AgentHistoryStatus.FAILED,
                 error_message=error_message,
             )
-            raise RuntimeError(f"LLM 推理失败: agent_id={self._agent.gt_agent.id}, error={error_message}") from infer_result.error
+            raise RuntimeError(f"LLM 推理失败: agent_id={self.gt_agent.id}, error={error_message}") from infer_result.error
 
         assistant_message = infer_result.response.choices[0].message
         await history.finalize_history_item(
@@ -206,15 +232,11 @@ class AgentTurnRunner:
 
     async def _execute_tool(self) -> None:
         """执行最后一条 assistant 消息中的所有 tool calls（AgentDriverHost 协议方法）。
-        通过 tool_registry 统一分发，所有 driver 共享同一条执行路径。"""
-        current_db_task = self._agent.current_db_task
-        assert current_db_task is not None, "current_db_task should not be None while executing tool"
-        room_id = current_db_task.task_data.get("room_id")
-        assert room_id is not None, "current_db_task should have room_id"
-        room = roomService.get_room(room_id)
-        assert room is not None, f"room should exist: room_id={room_id}"
+        通过 _current_room 获取房间上下文，由 run_chat_turn 在调用前设置。"""
+        room = self._current_room
+        assert room is not None, "no current room context while executing tool"
 
-        last_msg: llmApiUtil.OpenAIMessage | None = self._agent._history.get_last_assistant_message()
+        last_msg: llmApiUtil.OpenAIMessage | None = self._history.get_last_assistant_message()
         if last_msg is None or last_msg.tool_calls is None or len(last_msg.tool_calls) == 0:
             return
 
@@ -232,9 +254,9 @@ class AgentTurnRunner:
         reuse_history_items: 续跑时复用已有 history item。
         execute_only_missing: 仅执行尚未有结果的 tool call（跳过已完成的）。
         返回 True 表示 turn 已完成。"""
-        logger.info(f"检测到工具调用: agent_id={self._agent.gt_agent.id}, count={len(tool_calls)}")
+        logger.info(f"检测到工具调用: agent_id={self.gt_agent.id}, count={len(tool_calls)}")
         context: ToolCallContext = ToolCallContext(
-            agent_name=self._agent.gt_agent.name,
+            agent_name=self.gt_agent.name,
             team_id=room.team_id,
             chat_room=room,
         )
@@ -242,7 +264,7 @@ class AgentTurnRunner:
         for tool_call in tool_calls:
             tool_call_id = str(tool_call.id or "")
             history_item = None
-            existing_result = self._agent._history.find_tool_result_by_call_id(tool_call_id)
+            existing_result = self._history.find_tool_result_by_call_id(tool_call_id)
             if reuse_history_items is not None:
                 history_item = reuse_history_items.get(tool_call_id)
             elif execute_only_missing and existing_result is not None:
@@ -258,7 +280,7 @@ class AgentTurnRunner:
 
             exec_result = await self._execute_and_record_tool_call(
                 tool_call,
-                lambda: self._agent.tool_registry.execute_tool_call(tool_call, context),
+                lambda: self.tool_registry.execute_tool_call(tool_call, context),
                 existing_item=history_item,
             )
             if exec_result.turn_finished and (
@@ -277,14 +299,14 @@ class AgentTurnRunner:
     ) -> ToolExecutionResult:
         """执行单个 tool call 并记录到 history。若 existing_item 不为 None，则复用已有 history item（续跑场景）。"""
         assert tool_call.id, "tool_call.id should not be empty"
-        history_item = existing_item or await self._agent._history.append_stage_init(
+        history_item = existing_item or await self._history.append_stage_init(
             stage=AgentHistoryStage.TOOL_RESULT,
             tool_call_id=str(tool_call.id),
         )
         assert history_item.id is not None, "history_item.id should not be None after append"
         exec_result = await executor()
         final_message = llmApiUtil.OpenAIMessage.tool_result(exec_result.tool_call_id, exec_result.result_json)
-        await self._agent._history.finalize_history_item(
+        await self._history.finalize_history_item(
             history_id=history_item.id,
             message=final_message,
             status=exec_result.status,

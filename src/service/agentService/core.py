@@ -36,7 +36,7 @@ async def restore_state() -> None:
         # 加载历史消息
         items = await persistenceService.load_agent_history_message(agent.gt_agent.id)
         if items:
-            agent._history.replace(items)
+            agent.inject_history_messages(items)
 
         # 启动恢复时将上次中断的 RUNNING 任务标记为 FAILED
         await persistenceService.fail_running_tasks(agent.gt_agent.id)

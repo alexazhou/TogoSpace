@@ -3,58 +3,51 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryStage, AgentHistoryTag, OpenaiLLMApiRole
+from constants import AgentHistoryStage, AgentHistoryTag, DriverType
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.coreModel.gtCoreChatModel import GtCoreChatMessage
 from service.agentService.agentTurnRunner import AgentTurnRunner
+from service.agentService.driver.base import AgentDriverConfig
 from service.roomService import ChatRoom
-from util import llmApiUtil
+
+
+def _make_turn_runner() -> AgentTurnRunner:
+    """构造一个最小可运行的 TurnRunner，driver 使用默认 NATIVE。"""
+    gt_agent = GtAgent(id=1, team_id=1, name="TestAgent", role_template_id=1, model="mock")
+    runner = AgentTurnRunner(
+        gt_agent=gt_agent,
+        system_prompt="You are a test agent.",
+        max_function_calls=5,
+        driver_config=AgentDriverConfig(driver_type=DriverType.NATIVE),
+    )
+    # 替换 _history 为 mock，避免单元测试触及数据库
+    mock_history = MagicMock()
+    mock_history.has_unfinished_turn = MagicMock(return_value=False)
+    mock_history.append_history_message = AsyncMock()
+    mock_history.export_openai_tools = MagicMock(return_value=[])
+    runner._history = mock_history
+    return runner
 
 
 @pytest.fixture
-def mock_agent():
-    agent = MagicMock()
-    agent.gt_agent = MagicMock(spec=GtAgent)
-    agent.gt_agent.id = 1
-    agent.gt_agent.name = "TestAgent"
-    agent.system_prompt = "You are a test agent."
-    agent.driver = MagicMock()
-    agent.driver.host_managed_turn_loop = True
-    agent.driver.started = True
-    agent.driver.turn_setup = MagicMock()
-    agent.driver.turn_setup.max_retries = 1
-    agent.driver.turn_setup.hint_prompt = ""
-
-    agent._history = MagicMock()
-    agent._history.has_unfinished_turn = MagicMock(return_value=False)
-    agent._history.append_history_message = AsyncMock()
-    agent._history.export_openai_tools = MagicMock(return_value=[])
-
-    agent._tool_registry = MagicMock()
-    agent._tool_registry.export_openai_tools = MagicMock(return_value=[])
-
-    return agent
-
-
-@pytest.fixture
-def turn_runner(mock_agent):
-    return AgentTurnRunner(mock_agent, max_function_calls=5)
+def turn_runner():
+    return _make_turn_runner()
 
 
 @pytest.mark.asyncio
-async def test_run_chat_turn_skips_when_room_id_missing(turn_runner, mock_agent):
+async def test_run_chat_turn_skips_when_room_id_missing(turn_runner):
     task = MagicMock(spec=GtAgentTask)
     task.id = 100
     task.task_data = {}  # 无 room_id
 
     await turn_runner.run_chat_turn(task)
 
-    mock_agent._history.append_history_message.assert_not_called()
+    turn_runner._history.append_history_message.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_run_chat_turn_skips_when_room_not_found(turn_runner, mock_agent):
+async def test_run_chat_turn_skips_when_room_not_found(turn_runner):
     task = MagicMock(spec=GtAgentTask)
     task.id = 100
     task.task_data = {"room_id": 999}
@@ -64,11 +57,11 @@ async def test_run_chat_turn_skips_when_room_not_found(turn_runner, mock_agent):
 
         await turn_runner.run_chat_turn(task)
 
-        mock_agent._history.append_history_message.assert_not_called()
+        turn_runner._history.append_history_message.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_pull_room_messages_syncs_to_history(turn_runner, mock_agent):
+async def test_pull_room_messages_syncs_to_history(turn_runner):
     room = MagicMock(spec=ChatRoom)
     room.name = "test_room"
     room.team_id = 1
@@ -78,22 +71,19 @@ async def test_pull_room_messages_syncs_to_history(turn_runner, mock_agent):
     msg.sender_id = 2  # 非 agent 自身
     msg.content = "Hello"
 
-    with patch("service.agentService.agentTurnRunner.roomService") as mock_room_service:
-        with patch.object(turn_runner, "_run_chat_turn_with_host_loop", new=AsyncMock()):
-            room.get_unread_messages = AsyncMock(return_value=[msg])
-            mock_room_service.get_room = MagicMock(return_value=room)
+    room.get_unread_messages = AsyncMock(return_value=[msg])
 
-            count = await turn_runner.pull_room_messages_to_history(room)
+    count = await turn_runner.pull_room_messages_to_history(room)
 
-            assert count == 1
-            mock_agent._history.append_history_message.assert_called_once()
-            call_args = mock_agent._history.append_history_message.call_args
-            assert call_args[1]["stage"] == AgentHistoryStage.INPUT
-            assert AgentHistoryTag.ROOM_TURN_BEGIN in call_args[1]["tags"]
+    assert count == 1
+    turn_runner._history.append_history_message.assert_called_once()
+    call_args = turn_runner._history.append_history_message.call_args
+    assert call_args[1]["stage"] == AgentHistoryStage.INPUT
+    assert AgentHistoryTag.ROOM_TURN_BEGIN in call_args[1]["tags"]
 
 
 @pytest.mark.asyncio
-async def test_pull_room_messages_skips_own_messages(turn_runner, mock_agent):
+async def test_pull_room_messages_skips_own_messages(turn_runner):
     room = MagicMock(spec=ChatRoom)
     room.name = "test_room"
     room._get_agent_name = MagicMock(return_value="TestAgent")
@@ -108,11 +98,11 @@ async def test_pull_room_messages_skips_own_messages(turn_runner, mock_agent):
     count = await turn_runner.pull_room_messages_to_history(room)
 
     assert count == 0
-    mock_agent._history.append_history_message.assert_not_called()
+    turn_runner._history.append_history_message.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_pull_room_messages_returns_zero_when_empty(turn_runner, mock_agent):
+async def test_pull_room_messages_returns_zero_when_empty(turn_runner):
     room = MagicMock(spec=ChatRoom)
     room.name = "test_room"
     room.get_unread_messages = AsyncMock(return_value=[])
@@ -120,4 +110,4 @@ async def test_pull_room_messages_returns_zero_when_empty(turn_runner, mock_agen
     count = await turn_runner.pull_room_messages_to_history(room)
 
     assert count == 0
-    mock_agent._history.append_history_message.assert_not_called()
+    turn_runner._history.append_history_message.assert_not_called()

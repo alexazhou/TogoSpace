@@ -34,7 +34,6 @@ class AgentDriverHost(Protocol):
     gt_agent: GtAgent
     system_prompt: str
     agent_workdir: str
-    current_db_task: GtAgentTask
     _history: AgentHistoryStore
     tool_registry: AgentToolRegistry
 
