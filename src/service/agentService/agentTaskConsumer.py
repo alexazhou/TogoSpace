@@ -26,7 +26,6 @@ class AgentTaskConsumer:
 
     async def consume(
         self,
-        max_function_calls: int | None = None,
         initial_task: GtAgentTask | None = None,
     ) -> None:
         """从数据库获取并处理任务，直到没有待处理任务为止。"""
@@ -37,7 +36,6 @@ class AgentTaskConsumer:
             if existing.done() is False:
                 logger.warning(f"检测到重复启动的消费协程: agent_id={agent.gt_agent.id}, existing_task={id(existing)}, current_task={id(current_consumer)}")
 
-        effective_max_fc = agent.max_function_calls if max_function_calls is None else max(1, max_function_calls)
         if agent.status != AgentStatus.ACTIVE:
             agent.status = AgentStatus.ACTIVE
             agent._publish_status(agent.status)
@@ -56,11 +54,7 @@ class AgentTaskConsumer:
                 if claimed_task is None:
                     continue
 
-            completed = await self._execute_task(
-                claimed_task,
-                effective_max_fc,
-                resumed=resumed,
-            )
+            completed = await self._execute_task(claimed_task, resumed=resumed)
             if completed is False:
                 break
             claimed_task = None
@@ -81,7 +75,7 @@ class AgentTaskConsumer:
 
     # ─── 单任务执行（原 AgentTaskExecutor.execute） ───────────
 
-    async def _execute_task(self, claimed_task: GtAgentTask, max_function_calls: int, *, resumed: bool) -> bool:
+    async def _execute_task(self, claimed_task: GtAgentTask, *, resumed: bool) -> bool:
         """执行一条已处于 RUNNING 状态的任务。
 
         返回 True 表示任务完成，可继续后续任务；返回 False 表示任务失败，消费流程应立即停止。
@@ -89,7 +83,7 @@ class AgentTaskConsumer:
         agent = self._agent
         agent.current_db_task = claimed_task
         try:
-            await agent.turn_runner.run_chat_turn(claimed_task, max_function_calls, resumed=resumed)
+            await agent.turn_runner.run_chat_turn(claimed_task, resumed=resumed)
         except Exception as e:
             logger.error(f"Agent 任务执行失败: agent_id={agent.gt_agent.id}, task={claimed_task.id}, error={e}")
             await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.FAILED, error_message=str(e))

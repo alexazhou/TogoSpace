@@ -122,7 +122,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task_data={"room_id": room.room_id},
         )
         with self.patch_infer(handler=fake_infer):
-            await alice.run_chat_turn(task, max_function_calls=5)
+            await alice.run_chat_turn(task)
 
         tool_results = [m for m in alice._history if m.role == OpenaiLLMApiRole.TOOL]
         assert len(tool_results) >= 1

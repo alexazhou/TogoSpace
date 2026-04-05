@@ -195,7 +195,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         )
 
         try:
-            await driver.run_chat_turn(task, synced_count=0, max_function_calls=1)
+            await driver.run_chat_turn(task, synced_count=0)
             assert False, "expected RuntimeError"
         except RuntimeError as exc:
             assert "尚未初始化" in str(exc)
@@ -207,6 +207,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             gt_agent=GtAgent(id=1, team_id=1, name="alice", role_template_id=1, model="test-model"),
             system_prompt="test",
             driver_config=AgentDriverConfig(driver_type="native"),
+            max_function_calls=2,
         )
         task = GtAgentTask(
             id=1,
@@ -219,7 +220,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client
 
-        await driver.run_chat_turn(task, synced_count=0, max_function_calls=2)
+        await driver.run_chat_turn(task, synced_count=0)
 
         assert len(fake_client.queries) == 2
 
@@ -232,6 +233,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             gt_agent=GtAgent(id=1, team_id=1, name="alice", role_template_id=1, model="test-model"),
             system_prompt="test",
             driver_config=AgentDriverConfig(driver_type="native"),
+            max_function_calls=1,
         )
         task = GtAgentTask(
             id=1,
@@ -254,7 +256,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             ),
         ])
 
-        await driver.run_chat_turn(task, synced_count=1, max_function_calls=1)
+        await driver.run_chat_turn(task, synced_count=1)
 
         assert len(fake_client.queries) == 1
         first_prompt = fake_client.queries[0]

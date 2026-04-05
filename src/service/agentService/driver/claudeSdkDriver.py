@@ -111,7 +111,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
             self._sdk_client = None
         await super().shutdown()
 
-    async def run_chat_turn(self, task: GtAgentTask, synced_count: int, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, task: GtAgentTask, synced_count: int) -> None:
         room_id = task.task_data.get("room_id")
         if room_id is None:
             logger.warning(f"run_chat_turn 跳过：task 缺少 room_id, agent_id={self.host.gt_agent.id}, task_id={task.id}")
@@ -138,7 +138,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
         else:
             turn_prompt = build_turn_context_prompt(room.name, [])
 
-        await self._run_turn_sdk(room, turn_prompt, synced_count, max_function_calls)
+        await self._run_turn_sdk(room, turn_prompt, synced_count)
 
     def _next_tool_call_id(self) -> str:
         """生成下一个 tool_call_id。"""
@@ -186,14 +186,14 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
         return _wrapped
 
-    async def _run_turn_sdk(self, room: ChatRoom, turn_prompt: str, synced_count: int, max_function_calls: int) -> None:
+    async def _run_turn_sdk(self, room: ChatRoom, turn_prompt: str, synced_count: int) -> None:
         """执行一次 SDK turn：发送 prompt → 多次尝试等待 agent 使用工具完成发言。"""
         client = self._sdk_client
 
         if client is None:
             raise RuntimeError(f"Claude SDK client 尚未初始化: agent_id={self.host.gt_agent.id}")
 
-        max_attempts = max(1, max_function_calls)
+        max_attempts = max(1, self.host.max_function_calls)
         logger.info(f"SDK 注入增量消息: agent_id={self.host.gt_agent.id}, room={room.key}, new_msgs={synced_count}")
 
         try:

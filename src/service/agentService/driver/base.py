@@ -73,5 +73,5 @@ class AgentDriver:
     def turn_setup(self) -> AgentTurnSetup:
         return AgentTurnSetup()
 
-    async def run_chat_turn(self, task: GtAgentTask, synced_count: int, max_function_calls: int = 5) -> None:
+    async def run_chat_turn(self, task: GtAgentTask, synced_count: int) -> None:
         raise NotImplementedError
