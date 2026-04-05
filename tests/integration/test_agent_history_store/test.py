@@ -106,3 +106,97 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         assert len(messages) == 2
         assert messages[0].content == "user input"
         assert messages[1].content == "assistant response"
+
+    async def test_append_history_message_persists_seq_and_tags(self):
+        await self._reset_table()
+        history = AgentHistoryStore(agent_id=7)
+
+        item = await history.append_history_message(
+            llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "hello"),
+            stage=AgentHistoryStage.INPUT,
+            status=AgentHistoryStatus.SUCCESS,
+            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+        )
+
+        assert item.id is not None
+        assert item.agent_id == 7
+        assert item.seq == 0
+        assert item.content == "hello"
+        assert item.stage == AgentHistoryStage.INPUT
+        assert item.status == AgentHistoryStatus.SUCCESS
+        assert item.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
+        assert len(history) == 1
+        assert history.last() is not None
+        assert history.last().seq == item.seq
+
+    async def test_assert_infer_ready_accepts_user_tool_and_system(self):
+        await self._reset_table()
+        allowed_roles = [
+            OpenaiLLMApiRole.USER,
+            OpenaiLLMApiRole.TOOL,
+            OpenaiLLMApiRole.SYSTEM,
+        ]
+
+        for index, role in enumerate(allowed_roles):
+            await GtAgentHistory.delete().aio_execute()
+            history = AgentHistoryStore(agent_id=10 + index)
+            message = llmApiUtil.OpenAIMessage.text(role, f"msg-{index}")
+            if role == OpenaiLLMApiRole.TOOL:
+                message = llmApiUtil.OpenAIMessage.tool_result("tool_1", '{"success": true}')
+
+            await history.append_history_message(message)
+            history.assert_infer_ready("test_agent")
+
+    async def test_assert_infer_ready_rejects_assistant_tail(self):
+        await self._reset_table()
+        history = AgentHistoryStore(agent_id=20)
+
+        await history.append_history_message(
+            llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "hi"),
+            stage=AgentHistoryStage.INFER,
+            status=AgentHistoryStatus.SUCCESS,
+        )
+
+        with pytest.raises(AssertionError, match="assistant"):
+            history.assert_infer_ready("test_agent")
+
+    async def test_assert_infer_ready_accepts_failed_or_init_infer_tail(self):
+        await GtAgentHistory.delete().aio_execute()
+        history_failed = AgentHistoryStore(agent_id=21)
+        await history_failed.append_history_message(
+            llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, ""),
+            stage=AgentHistoryStage.INFER,
+            status=AgentHistoryStatus.FAILED,
+            error_message="mock error",
+        )
+        history_failed.assert_infer_ready("test_agent")
+
+        await GtAgentHistory.delete().aio_execute()
+        history_init = AgentHistoryStore(agent_id=22)
+        init_item = await history_init.append_stage_init(stage=AgentHistoryStage.INFER)
+        history_init.assert_infer_ready("test_agent")
+
+    async def test_unfinished_turn(self):
+        await self._reset_table()
+        history = AgentHistoryStore(agent_id=30)
+
+        await history.append_history_message(
+            llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1"),
+            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+        )
+        await history.append_history_message(
+            llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1"),
+            stage=AgentHistoryStage.INFER,
+            status=AgentHistoryStatus.SUCCESS,
+        )
+
+        assert history.has_unfinished_turn() is True
+        assert history.get_unfinished_turn_start_index() == 0
+
+        await history.append_history_message(
+            llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "done"),
+            tags=[AgentHistoryTag.ROOM_TURN_FINISH],
+        )
+
+        assert history.has_unfinished_turn() is False
+        assert history.get_unfinished_turn_start_index() is None

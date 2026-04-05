@@ -1,3 +1,4 @@
+"""AgentHistoryStore 单元测试：测试纯内存操作（不依赖数据库）。"""
 import pytest
 
 from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiLLMApiRole
@@ -6,76 +7,11 @@ from service.agentService.agentHistoryStore import AgentHistoryStore
 from util import llmApiUtil
 
 
-def test_agent_history_append_message_persists_seq_and_tags():
-    history = AgentHistoryStore(agent_id=7)
-
-    item = history.append_message(
-        llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "hello"),
-        tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
-    )
-
-    assert item.agent_id == 7
-    assert item.seq == 0
-    assert item.content == "hello"
-    assert item.stage == AgentHistoryStage.INPUT
-    assert item.status == AgentHistoryStatus.SUCCESS
-    assert item.error_message is None
-    assert item.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
-    assert len(history) == 1
-    assert history.last() is not None
-    assert history.last().seq == item.seq
-    assert history.last().content == item.content
-
-
 def test_agent_history_last_role_returns_none_for_empty_history():
     history = AgentHistoryStore(agent_id=1)
 
     assert history.last() is None
     assert history.last_role() is None
-
-
-def test_agent_history_assert_infer_ready_accepts_user_tool_and_system():
-    allowed_roles = [
-        OpenaiLLMApiRole.USER,
-        OpenaiLLMApiRole.TOOL,
-        OpenaiLLMApiRole.SYSTEM,
-    ]
-
-    for index, role in enumerate(allowed_roles):
-        history = AgentHistoryStore(agent_id=1)
-        message = llmApiUtil.OpenAIMessage.text(role, f"msg-{index}")
-        if role == OpenaiLLMApiRole.TOOL:
-            message = llmApiUtil.OpenAIMessage.tool_result("tool_1", '{"success": true}')
-
-        history.append_message(message)
-        history.assert_infer_ready("alice@test_team")
-
-
-def test_agent_history_assert_infer_ready_rejects_assistant_tail():
-    history = AgentHistoryStore(agent_id=1)
-    history.append_message(llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "hi"))
-
-    with pytest.raises(AssertionError, match="assistant"):
-        history.assert_infer_ready("alice@test_team")
-
-
-def test_agent_history_assert_infer_ready_accepts_failed_or_init_infer_tail():
-    history_failed = AgentHistoryStore(agent_id=1)
-    history_failed.append_message(
-        llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, ""),
-        stage=AgentHistoryStage.INFER,
-        status=AgentHistoryStatus.FAILED,
-        error_message="mock error",
-    )
-    history_failed.assert_infer_ready("alice@test_team")
-
-    history_init = AgentHistoryStore(agent_id=1)
-    history_init.append_message(
-        llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, ""),
-        stage=AgentHistoryStage.INFER,
-        status=AgentHistoryStatus.INIT,
-    )
-    history_init.assert_infer_ready("alice@test_team")
 
 
 def test_agent_history_export_openai_message_list_round_trips_messages():
@@ -235,32 +171,7 @@ def test_agent_history_find_tool_call_by_id():
     assert history.find_tool_call_by_id("") is None
 
 
-def test_agent_history_unfinished_turn():
-    history = AgentHistoryStore(
-        agent_id=1,
-        items=[
-            GtAgentHistory.from_openai_message(
-                1, 0,
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1"),
-                tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
-            ),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
-        ],
-    )
-
-    assert history.has_unfinished_turn() is True
-    assert history.get_unfinished_turn_start_index() == 0
-
-    history.append_message(
-        llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "done"),
-        tags=[AgentHistoryTag.ROOM_TURN_FINISH],
-    )
-
-    assert history.has_unfinished_turn() is False
-    assert history.get_unfinished_turn_start_index() is None
-
-
-def test_agent_history_unfinished_turn_with_completed_turn():
+def test_agent_history_unfinished_turn_with_items():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
