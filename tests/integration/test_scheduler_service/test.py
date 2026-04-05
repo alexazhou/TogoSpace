@@ -144,7 +144,7 @@ class TestSchedulerRun(ServiceTestCase):
                 task_type=AgentTaskType.ROOM_MESSAGE,
                 task_data={"room_id": 1},
             ))
-            mock_task_manager.claim_task = AsyncMock(return_value=GtAgentTask(
+            mock_task_manager.transition_task_status = AsyncMock(return_value=GtAgentTask(
                 id=1,
                 agent_id=1,
                 task_type=AgentTaskType.ROOM_MESSAGE,
@@ -169,7 +169,7 @@ class TestSchedulerRun(ServiceTestCase):
                 task_type=AgentTaskType.ROOM_MESSAGE,
                 task_data={"room_id": 1},
             ))
-            mock_task_manager.claim_task = AsyncMock(return_value=GtAgentTask(
+            mock_task_manager.transition_task_status = AsyncMock(return_value=GtAgentTask(
                 id=1,
                 agent_id=1,
                 task_type=AgentTaskType.ROOM_MESSAGE,
