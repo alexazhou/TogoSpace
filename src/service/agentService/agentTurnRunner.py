@@ -75,6 +75,10 @@ class AgentTurnRunner:
                     await self._resume_chat_turn_with_host_loop(room)
                     return
                 synced_count = await self.pull_room_messages_to_history(room)
+                if synced_count == 0 and room.state != RoomState.INIT:
+                    logger.info(f"无新消息，自动跳过本轮: agent_id={self.gt_agent.id}, room={room.name}")
+                    await room.finish_turn(self.gt_agent.id)
+                    return
                 assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
                 await self._run_chat_turn_with_host_loop(room)
             else:
