@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from constants import AgentTaskStatus, AgentTaskType
+from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
 
 
@@ -120,3 +121,18 @@ async def update_task_status(
     if row is None:
         raise RuntimeError(f"update task status failed: task_id={task_id}")
     return row
+
+
+async def delete_tasks_by_team(team_id: int) -> int:
+    """删除 Team 下所有 Agent 的任务记录，返回删除数量。"""
+    agent_ids_query = (
+        GtAgent
+        .select(GtAgent.id)
+        .where(GtAgent.team_id == team_id)
+    )
+    return await (
+        GtAgentTask
+        .delete()
+        .where(GtAgentTask.agent_id.in_(agent_ids_query))  # type: ignore[attr-defined]
+        .aio_execute()
+    )
