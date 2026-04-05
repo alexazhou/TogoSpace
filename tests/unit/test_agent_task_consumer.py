@@ -7,6 +7,7 @@ from constants import AgentStatus, AgentTaskStatus
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
 from service.agentService.agentTaskConsumer import AgentTaskConsumer
+from util.assertUtil import MakeSureException
 
 
 @pytest.fixture
@@ -101,7 +102,7 @@ async def test_resume_failed_raises_when_no_failed_task(consumer, mock_agent):
     with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_manager:
         mock_manager.get_first_unfinish_task = AsyncMock(return_value=None)
 
-        with pytest.raises(RuntimeError, match="no failed task to resume"):
+        with pytest.raises(MakeSureException, match="no failed task to resume"):
             await consumer.resume_failed()
 
 
