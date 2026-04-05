@@ -9,10 +9,10 @@ from service.agentService.agent import Agent
 from service.agentService.driver import normalize_driver_config
 from service.agentService.promptBuilder import build_agent_system_prompt
 from service import llmService, roomService, persistenceService
-from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
+from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtAgentTaskManager
 from peewee import IntegrityError
 from exception import TeamAgentException
-from constants import AgentStatus, DriverType, EmployStatus
+from constants import AgentStatus, AgentTaskStatus, DriverType, EmployStatus
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,11 @@ async def restore_state() -> None:
 
         # 启动恢复时将上次中断的 RUNNING 任务标记为 FAILED
         await persistenceService.fail_running_tasks(agent.gt_agent.id)
+
+        first_task = await gtAgentTaskManager.get_first_unfinish_task(agent.gt_agent.id)
+        agent.status = AgentStatus.FAILED if (
+            first_task is not None and first_task.status == AgentTaskStatus.FAILED
+        ) else AgentStatus.IDLE
 
 
 async def _load_team(team_id: int, workspace_root: str | None = None) -> None:

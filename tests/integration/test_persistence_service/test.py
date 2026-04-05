@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from constants import AgentTaskStatus, AgentTaskType
+from constants import AgentStatus, AgentTaskStatus, AgentTaskType
 from dal.db import gtTeamManager, gtAgentManager, gtAgentHistoryManager, gtAgentTaskManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
@@ -197,3 +197,6 @@ class TestRestoreAgentHistory(ServiceTestCase):
         assert task is not None
         assert task.status == AgentTaskStatus.FAILED
         assert task.error_message == "task interrupted by process restart"
+
+    async def test_agent_runtime_status_marked_failed_after_restore(self):
+        assert self.fresh_agent.status == AgentStatus.FAILED
