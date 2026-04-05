@@ -93,7 +93,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
 
     async def test_messages_restored(self):
         assert [m.content for m in self.restored.messages] == [
-            "系统提示: r1 房间已经创建，当前房间 Agent：alice、bob",
+            "系统提示: r1 房间已经创建，当前房间成员：alice、bob",
             "hello",
             "world",
         ]
