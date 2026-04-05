@@ -108,28 +108,35 @@ class AgentHistoryStore:
 
     async def finalize_history_item(
         self,
-        history_item: GtAgentHistory,
+        history_id: int,
         message: llmApiUtil.OpenAIMessage | None,
         status: AgentHistoryStatus,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
     ) -> None:
-        message_json: str | None = None
-        if message is not None:
-            message_json = message.model_dump_json(exclude_none=True)
-            history_item.message_json = message_json
-        history_item.status = status
-        history_item.error_message = error_message
-        if tags is not None:
-            history_item.tags = list(tags)
+        """完成 history item：更新内存对象并持久化到数据库。
 
-        assert history_item.id is not None, "history row id should not be None after append"
+        tags 参数：若不为 None，写入数据库；若为 None，不更新 tags 字段。
+        """
+        # 更新内存对象
+        for item in self._items:
+            if item.id == history_id:
+                if message is not None:
+                    item.message_json = message.model_dump_json(exclude_none=True)
+                item.status = status
+                item.error_message = error_message
+                if tags is not None:
+                    item.tags = list(tags)
+                break
+
+        # 持久化到数据库
+        message_json = message.model_dump_json(exclude_none=True) if message is not None else None
         await gtAgentHistoryManager.update_agent_history_by_id(
-            history_id=history_item.id,
+            history_id=history_id,
             message_json=message_json,
             status=status,
             error_message=error_message,
-            tags=(history_item.tags if tags is not None else None),
+            tags=list(tags) if tags is not None else None,
         )
 
     def get_last_assistant_message(self, start_idx: int = 0) -> llmApiUtil.OpenAIMessage | None:
