@@ -723,7 +723,7 @@ class TestDalManagers(ServiceTestCase):
     # ------------------------------------------------------------------
     # gtAgentTaskManager
     # ------------------------------------------------------------------
-    async def test_agent_task_manager_get_first_pending_task_returns_earliest(self):
+    async def test_agent_task_manager_get_first_unfinish_task_returns_earliest_pending(self):
         """没有 failed 任务时，返回最早的 pending 任务。"""
         await self._reset_tables()
 
@@ -739,12 +739,12 @@ class TestDalManagers(ServiceTestCase):
         task1 = await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 1})
         task2 = await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 2})
 
-        first = await gtAgentTaskManager.get_first_pending_task(alice.id)
+        first = await gtAgentTaskManager.get_first_unfinish_task(alice.id)
         assert first is not None
         assert first.id == task1.id
 
-    async def test_agent_task_manager_get_first_pending_task_blocked_by_failed(self):
-        """有 failed 任务时，不能获取到 pending 任务。"""
+    async def test_agent_task_manager_get_first_unfinish_task_returns_failed(self):
+        """有 failed 任务时，应返回最早的 failed 任务本身。"""
         await self._reset_tables()
 
         await self._save_role_template("alice", "gpt-4o")
@@ -763,12 +763,13 @@ class TestDalManagers(ServiceTestCase):
         await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 2})
         await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 3})
 
-        # 有 failed 任务时，不能获取到 pending 任务
-        first = await gtAgentTaskManager.get_first_pending_task(alice.id)
-        assert first is None
+        first = await gtAgentTaskManager.get_first_unfinish_task(alice.id)
+        assert first is not None
+        assert first.id == task1.id
+        assert first.status == AgentTaskStatus.FAILED
 
-    async def test_agent_task_manager_get_first_pending_task_no_pending(self):
-        """没有 pending 任务时返回 None。"""
+    async def test_agent_task_manager_get_first_unfinish_task_no_unfinish(self):
+        """没有未完成任务时返回 None。"""
         await self._reset_tables()
 
         await self._save_role_template("alice", "gpt-4o")
@@ -780,5 +781,26 @@ class TestDalManagers(ServiceTestCase):
         assert alice is not None
 
         # 没有 pending 任务
-        first = await gtAgentTaskManager.get_first_pending_task(alice.id)
+        first = await gtAgentTaskManager.get_first_unfinish_task(alice.id)
         assert first is None
+
+    async def test_agent_task_manager_get_running_tasks_returns_running_only(self):
+        """仅返回 RUNNING 任务，不包含 pending。"""
+        await self._reset_tables()
+
+        await self._save_role_template("alice", "gpt-4o")
+        team = await gtTeamManager.save_team(GtTeam(name="task_team_4"))
+        configs = [AgentConfig(name="alice", role_template="alice")]
+        agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert alice is not None
+
+        pending_task = await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 1})
+        running_task = await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 2})
+        await gtAgentTaskManager.update_task_status(running_task.id, AgentTaskStatus.RUNNING)
+
+        tasks = await gtAgentTaskManager.get_running_tasks(alice.id)
+        assert [task.id for task in tasks] == [running_task.id]
+        assert all(task.status == AgentTaskStatus.RUNNING for task in tasks)
+        assert pending_task.id not in [task.id for task in tasks]

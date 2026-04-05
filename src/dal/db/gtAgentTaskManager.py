@@ -20,30 +20,6 @@ async def create_task(
     return task
 
 
-async def update_task_status(
-    task_id: int,
-    status: AgentTaskStatus,
-    error_message: str | None = None,
-) -> GtAgentTask:
-    """更新任务状态。"""
-    update_fields: dict = {"status": status}
-    if error_message is not None:
-        update_fields["error_message"] = error_message
-
-    await (
-        GtAgentTask
-        .update(**update_fields)
-        .where(GtAgentTask.id == task_id)
-        .aio_execute()
-    )
-    row: GtAgentTask | None = await GtAgentTask.aio_get_or_none(
-        GtAgentTask.id == task_id,
-    )
-    if row is None:
-        raise RuntimeError(f"update task status failed: task_id={task_id}")
-    return row
-
-
 async def has_pending_room_task(agent_id: int, room_id: int) -> bool:
     """检查 Agent 是否已存在同房间的 PENDING 任务。"""
     tasks = await (
@@ -59,23 +35,33 @@ async def has_pending_room_task(agent_id: int, room_id: int) -> bool:
     return any(task.task_data.get("room_id") == room_id for task in tasks)
 
 
-async def get_first_pending_task(agent_id: int) -> GtAgentTask | None:
-    """获取 Agent 的第一个待处理任务。
+async def get_first_unfinish_task(agent_id: int) -> GtAgentTask | None:
+    """获取 Agent 最早的未完成任务。
 
-    如果存在失败的任务，则不返回任何 pending 任务（不能跳过失败任务）。
+    未完成任务当前定义为 PENDING 或 FAILED。
+    这样失败任务会按顺序阻断后续任务，但调用方仍能拿到该失败任务本身。
     """
-    # 先检查是否有失败的任务
-    failed_task = await GtAgentTask.aio_get_or_none(
-        GtAgentTask.agent_id == agent_id,
-        GtAgentTask.status == AgentTaskStatus.FAILED,
+    return await (
+        GtAgentTask
+        .select()
+        .where(
+            GtAgentTask.agent_id == agent_id,
+            GtAgentTask.status.in_([AgentTaskStatus.PENDING, AgentTaskStatus.FAILED]),
+        )
+        .order_by(GtAgentTask.id.asc())
+        .aio_first()
     )
-    if failed_task is not None:
-        return None
 
-    return await GtAgentTask.aio_get_or_none(
-        GtAgentTask.agent_id == agent_id,
-        GtAgentTask.status == AgentTaskStatus.PENDING,
-    )
+
+async def has_consumable_task(agent_id: int) -> bool:
+    """检查 Agent 是否仍有可继续消费的待处理任务。
+
+    该判断复用 get_first_unfinish_task() 的规则：
+    - 最早的未完成任务若为 FAILED，则不再视为可继续消费
+    - 仅当最早的未完成任务为可认领的 PENDING 时返回 True
+    """
+    first_task = await get_first_unfinish_task(agent_id)
+    return first_task is not None and first_task.status == AgentTaskStatus.PENDING
 
 
 async def claim_task(task_id: int) -> GtAgentTask | None:
@@ -98,25 +84,39 @@ async def claim_task(task_id: int) -> GtAgentTask | None:
     return await GtAgentTask.aio_get_or_none(GtAgentTask.id == task_id)
 
 
-async def get_pending_and_running_tasks(agent_id: int) -> list[GtAgentTask]:
-    """获取 Agent 的待处理和正在处理的任务（用于恢复）。"""
+async def get_running_tasks(agent_id: int) -> list[GtAgentTask]:
+    """获取 Agent 的 RUNNING 任务（用于启动恢复）。"""
     return await (
         GtAgentTask
         .select()
         .where(
             GtAgentTask.agent_id == agent_id,
-            GtAgentTask.status.in_([AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING]),
+            GtAgentTask.status == AgentTaskStatus.RUNNING,
         )
         .order_by(GtAgentTask.id.asc())
         .aio_execute()
     )
 
 
-async def has_consumable_task(agent_id: int) -> bool:
-    """检查 Agent 是否仍有可继续消费的待处理任务。
+async def update_task_status(
+    task_id: int,
+    status: AgentTaskStatus,
+    error_message: str | None = None,
+) -> GtAgentTask:
+    """更新任务状态。"""
+    update_fields: dict = {"status": status}
+    if error_message is not None:
+        update_fields["error_message"] = error_message
 
-    该判断复用 get_first_pending_task() 的规则：
-    - 只要存在 FAILED 任务，就不再视为可继续消费
-    - 仅当存在可认领的 PENDING 任务时返回 True
-    """
-    return await get_first_pending_task(agent_id) is not None
+    await (
+        GtAgentTask
+        .update(**update_fields)
+        .where(GtAgentTask.id == task_id)
+        .aio_execute()
+    )
+    row: GtAgentTask | None = await GtAgentTask.aio_get_or_none(
+        GtAgentTask.id == task_id,
+    )
+    if row is None:
+        raise RuntimeError(f"update task status failed: task_id={task_id}")
+    return row
