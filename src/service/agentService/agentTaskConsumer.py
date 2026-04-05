@@ -32,8 +32,8 @@ class AgentTaskConsumer:
         """从数据库获取并处理任务，直到没有待处理任务为止。"""
         agent = self._agent
         current_consumer = asyncio.current_task()
-        if current_consumer is not None and agent.aio_consumer_task not in (None, current_consumer):
-            existing = agent.aio_consumer_task
+        if current_consumer is not None and agent._aio_consumer_task not in (None, current_consumer):
+            existing = agent._aio_consumer_task
             if existing.done() is False:
                 logger.warning(f"检测到重复启动的消费协程: agent_id={agent.gt_agent.id}, existing_task={id(existing)}, current_task={id(current_consumer)}")
         effective_max_fc = agent.max_function_calls if max_function_calls is None else max(1, max_function_calls)
@@ -69,8 +69,8 @@ class AgentTaskConsumer:
                 agent.status = AgentStatus.IDLE
                 agent._publish_status(agent.status)
 
-            if agent.aio_consumer_task is current_consumer:
-                agent.aio_consumer_task = None
+            if agent._aio_consumer_task is current_consumer:
+                agent._aio_consumer_task = None
                 if agent.status == AgentStatus.FAILED:
                     return
                 has_pending = await gtAgentTaskManager.has_consumable_task(agent.gt_agent.id)

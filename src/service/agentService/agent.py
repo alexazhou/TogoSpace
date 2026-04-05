@@ -12,7 +12,6 @@ from service.agentService.agentTaskConsumer import AgentTaskConsumer
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver import AgentDriverConfig, build_agent_driver
 from service.agentService.toolRegistry import AgentToolRegistry
-from service.roomService import ChatRoom
 from util import asyncUtil, llmApiUtil
 
 logger = logging.getLogger(__name__)
@@ -47,9 +46,9 @@ class Agent:
         self.agent_workdir: str = agent_workdir
         self.max_function_calls: int = max(1, max_function_calls)
         self._history_store: AgentHistoryStore = AgentHistoryStore(self.gt_agent.id or 0)
-        self.tool_registry: AgentToolRegistry = AgentToolRegistry()
+        self._tool_registry: AgentToolRegistry = AgentToolRegistry()
         self.status: AgentStatus = AgentStatus.IDLE
-        self.aio_consumer_task: asyncio.Task | None = None
+        self._aio_consumer_task: asyncio.Task | None = None
         self.current_db_task: Optional[GtAgentTask] = None
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
         self.turn_runner: AgentTurnRunner = AgentTurnRunner(self)
@@ -70,7 +69,7 @@ class Agent:
     async def close(self) -> None:
         self.stop_consumer_task()
         await self.driver.shutdown()
-        self.tool_registry.clear()
+        self._tool_registry.clear()
 
     def _publish_status(self, status: AgentStatus) -> None:
         messageBus.publish(MessageBusTopic.AGENT_STATUS_CHANGED, gt_agent=self.gt_agent, status=status)
@@ -86,16 +85,16 @@ class Agent:
 
     def start_consumer_task(self, initial_task: GtAgentTask | None = None) -> None:
         """如果没有消费协程在运行，则启动一个。"""
-        existing = self.aio_consumer_task
+        existing = self._aio_consumer_task
         if existing is not None and not existing.done():
             return
 
-        self.aio_consumer_task = asyncio.create_task(self.task_consumer.consume(initial_task=initial_task))
+        self._aio_consumer_task = asyncio.create_task(self.task_consumer.consume(initial_task=initial_task))
 
     def stop_consumer_task(self) -> None:
         """停止当前 Agent 的消费协程。"""
-        task = self.aio_consumer_task
-        self.aio_consumer_task = None
+        task = self._aio_consumer_task
+        self._aio_consumer_task = None
         asyncUtil.cancel_task_safely(task)
 
     async def resume_failed(self) -> int:
@@ -104,9 +103,6 @@ class Agent:
 
     # ─── AgentDriverHost 协议 ───────────────────────────────────
     # Driver 通过 self.host 回调以下方法，Agent 必须保留这些入口。
-
-    async def pull_room_messages_to_history(self, room: ChatRoom) -> int:
-        return await self.turn_runner.pull_room_messages_to_history(room)
 
     async def _infer(self, tools: Optional[list[llmApiUtil.OpenAITool]]) -> llmApiUtil.OpenAIMessage:
         return await self.turn_runner._infer(tools)

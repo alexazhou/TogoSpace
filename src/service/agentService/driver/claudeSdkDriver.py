@@ -67,11 +67,10 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
     async def startup(self) -> None:
         await super().startup()
-        # 仅注册 SDK 使用的两个工具到 tool_registry
-        self.host.tool_registry.clear()
+        self.host._tool_registry.clear()
         for t in funcToolService.get_tools_by_names(list(self._SDK_TOOL_NAMES)):
             fn_name = t.function.name
-            self.host.tool_registry.register(
+            self.host._tool_registry.register(
                 t,
                 funcToolService.run_tool_call,
                 marks_turn_finish=fn_name == "finish_chat_turn",
