@@ -452,7 +452,7 @@ class ChatRoom:
 
     def build_initial_system_message(self) -> str:
         agent_list_str = "、".join(self.agents)
-        msg = f"系统提示: {self.name} 房间已经创建，当前房间 Agent：{agent_list_str}"
+        msg = f"系统提示: {self.name} 房间已经创建，当前房间成员：{agent_list_str}"
         if self.initial_topic:
             msg += f"\n本房间初始话题：{self.initial_topic}"
         return msg
