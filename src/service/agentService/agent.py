@@ -67,6 +67,10 @@ class Agent:
 
     def start_consumer_task(self) -> None:
         """启动当前 Agent 的消费协程；若已在运行则跳过。若没有待处理 task，协程会自行退出。"""
+        if self.status == AgentStatus.FAILED:
+            logger.info("Agent 已处于 FAILED 状态，跳过消费协程启动: agent_id=%s", self.gt_agent.id)
+            return
+
         existing = self.consumer_task
         if existing is not None and existing.done() is False:
             return
@@ -149,6 +153,8 @@ class Agent:
 
             if self.consumer_task is current_consumer:
                 self.consumer_task = None
+                if self.status == AgentStatus.FAILED:
+                    return
                 has_pending = await gtAgentTaskManager.has_pending_or_running_tasks(self.gt_agent.id)
                 if has_pending:
                     logger.info("Agent 任务收尾时检测到待处理任务，自动续起消费: agent_id=%s", self.gt_agent.id)

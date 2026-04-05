@@ -49,8 +49,7 @@ async def _on_agent_turn(msg: EventBusMessage) -> None:
     agent = agentService.get_agent(gt_agent.id)
 
     # 去重：检查数据库中是否已有该房间的 PENDING 任务
-    pending_tasks = await gtAgentTaskManager.get_pending_tasks(agent_id)
-    if any(t.task_data.get("room_id") == room_id for t in pending_tasks):
+    if await gtAgentTaskManager.has_pending_room_task(agent_id, room_id):
         logger.debug(f"跳过重复任务创建: agent_id={agent_id}, room_id={room_id}")
         return
 
