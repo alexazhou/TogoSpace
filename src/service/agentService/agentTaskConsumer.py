@@ -51,9 +51,9 @@ class AgentTaskConsumer:
         """如果没有消费协程在运行，则启动一个。"""
         existing = self._aio_consumer_task
         if existing is not None and not existing.done():
-            logger.debug(f"消费协程已在运行，跳过启动: agent_id={self.gt_agent.id}")
+            logger.debug(f"消费协程已在运行，跳过启动: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
             return
-        logger.info(f"启动消费协程: agent_id={self.gt_agent.id}, initial_task={initial_task.id if initial_task else None}")
+        logger.info(f"启动消费协程: {self.gt_agent.name}(agent_id={self.gt_agent.id}), initial_task={initial_task.id if initial_task else None}")
         self._aio_consumer_task = asyncio.create_task(self.consume(initial_task=initial_task))
 
     def stop(self) -> None:
@@ -61,7 +61,7 @@ class AgentTaskConsumer:
         task = self._aio_consumer_task
         self._aio_consumer_task = None
         if task is not None:
-            logger.info(f"停止消费协程: agent_id={self.gt_agent.id}, task_done={task.done()}")
+            logger.info(f"停止消费协程: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_done={task.done()}")
         asyncUtil.cancel_task_safely(task)
 
     # ─── 消费循环 ─────────────────────────────────────────────
@@ -71,28 +71,28 @@ class AgentTaskConsumer:
         if current_consumer is not None and self._aio_consumer_task not in (None, current_consumer):
             existing = self._aio_consumer_task
             if existing.done() is False:
-                logger.warning(f"检测到重复启动的消费协程: agent_id={self.gt_agent.id}, existing_task={id(existing)}, current_task={id(current_consumer)}")
+                logger.warning(f"检测到重复启动的消费协程: {self.gt_agent.name}(agent_id={self.gt_agent.id}), existing_task={id(existing)}, current_task={id(current_consumer)}")
 
         if self.status != AgentStatus.ACTIVE:
             self.status = AgentStatus.ACTIVE
             self._publish_status(self.status)
 
-        logger.info(f"进入消费循环: agent_id={self.gt_agent.id}, initial_task={initial_task.id if initial_task else None}")
+        logger.info(f"进入消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id}), initial_task={initial_task.id if initial_task else None}")
         claimed_task = initial_task
         resumed = initial_task is not None
         while True:
             if claimed_task is None:
                 task = await gtAgentTaskManager.get_first_unfinish_task(self.gt_agent.id)
                 if task is None:
-                    logger.info(f"无待处理任务，退出消费循环: agent_id={self.gt_agent.id}")
+                    logger.info(f"无待处理任务，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
                     break
                 if task.status != AgentTaskStatus.PENDING:
-                    logger.info(f"首个未完成任务非 PENDING，退出消费循环: agent_id={self.gt_agent.id}, task_id={task.id}, task_status={task.status}")
+                    logger.info(f"首个未完成任务非 PENDING，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={task.id}, task_status={task.status}")
                     break
 
                 claimed_task = await gtAgentTaskManager.transition_task_status(task.id, AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING)
                 if claimed_task is None:
-                    logger.debug(f"任务认领失败（已被其他消费者抢占），重试: agent_id={self.gt_agent.id}, task_id={task.id}")
+                    logger.debug(f"任务认领失败（已被其他消费者抢占），重试: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={task.id}")
                     continue
 
             completed = await self._execute_task(claimed_task, resumed=resumed)
@@ -105,14 +105,14 @@ class AgentTaskConsumer:
         if self.status != AgentStatus.FAILED:
             self.status = AgentStatus.IDLE
             self._publish_status(self.status)
-            logger.info(f"消费循环结束，状态回到 IDLE: agent_id={self.gt_agent.id}")
+            logger.info(f"消费循环结束，状态回到 IDLE: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
 
         if self._aio_consumer_task is current_consumer:
             self._aio_consumer_task = None
             if self.status != AgentStatus.FAILED:
                 has_pending = await gtAgentTaskManager.has_consumable_task(self.gt_agent.id)
                 if has_pending:
-                    logger.info(f"Agent 任务收尾时检测到待处理任务，自动续起消费: agent_id={self.gt_agent.id}")
+                    logger.info(f"Agent 任务收尾时检测到待处理任务，自动续起消费: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
                     self.start()
 
     # ─── 单任务执行（原 AgentTaskExecutor.execute） ───────────
@@ -122,18 +122,18 @@ class AgentTaskConsumer:
         返回 True 表示任务完成，可继续后续任务；返回 False 表示任务失败，消费流程应立即停止。
         """
         self.current_db_task = claimed_task
-        logger.info(f"开始执行任务: agent_id={self.gt_agent.id}, task_id={claimed_task.id}, resumed={resumed}")
+        logger.info(f"开始执行任务: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}, resumed={resumed}")
         try:
             await self._turn_runner.run_chat_turn(claimed_task, resumed=resumed)
         except Exception as e:
-            logger.error(f"Agent 任务执行失败: agent_id={self.gt_agent.id}, task_id={claimed_task.id}, error={e}")
+            logger.error(f"Agent 任务执行失败: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}, error={e}")
             await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.FAILED, error_message=str(e))
             self.status = AgentStatus.FAILED
             self.current_db_task = None
             self._publish_status(self.status)
             return False
 
-        logger.info(f"任务执行完成: agent_id={self.gt_agent.id}, task_id={claimed_task.id}")
+        logger.info(f"任务执行完成: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}")
         await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.COMPLETED)
         self.current_db_task = None
         return True
@@ -142,13 +142,13 @@ class AgentTaskConsumer:
     async def resume_failed(self) -> None:
         """恢复最早的 FAILED 任务，并重新启动消费。"""
         failed_task = await gtAgentTaskManager.get_first_unfinish_task(self.gt_agent.id)
-        assertUtil.assertNotNull(failed_task, error_message=f"no failed task to resume: agent_id={self.gt_agent.id}")
-        assertUtil.assertEqual(failed_task.status, AgentTaskStatus.FAILED, error_message=f"task is not FAILED: agent_id={self.gt_agent.id}")
+        assertUtil.assertNotNull(failed_task, error_message=f"no failed task to resume: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
+        assertUtil.assertEqual(failed_task.status, AgentTaskStatus.FAILED, error_message=f"task is not FAILED: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
 
         resumed_task = await gtAgentTaskManager.transition_task_status(failed_task.id, AgentTaskStatus.FAILED, AgentTaskStatus.RUNNING)
-        assertUtil.assertNotNull(resumed_task, error_message=f"failed task resume conflict: agent_id={self.gt_agent.id}, task_id={failed_task.id}")
+        assertUtil.assertNotNull(resumed_task, error_message=f"failed task resume conflict: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={failed_task.id}")
 
-        logger.info(f"恢复失败任务: agent_id={self.gt_agent.id}, task_id={failed_task.id}")
+        logger.info(f"恢复失败任务: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={failed_task.id}")
         self.status = AgentStatus.ACTIVE
         self._publish_status(self.status)
         self.start(initial_task=resumed_task)
