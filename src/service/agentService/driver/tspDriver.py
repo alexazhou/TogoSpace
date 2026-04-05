@@ -98,17 +98,17 @@ class TspAgentDriver(AgentDriver):
     def _register_host_tools(self) -> None:
         if self._client is None:
             raise RuntimeError(f"TSP client 尚未初始化: agent_id={self.host.gt_agent.id}")
-        self.host.tool_registry.clear()
+        self.host._tool_registry.clear()
 
         for function_name, tool in self._local_tools.items():
-            self.host.tool_registry.register(
+            self.host._tool_registry.register(
                 tool,
                 funcToolService.run_tool_call,
                 marks_turn_finish=function_name == "finish_chat_turn",
             )
 
         for tool in self._tsp_tools.values():
-            self.host.tool_registry.register(tool, self._execute_tsp_tool)
+            self.host._tool_registry.register(tool, self._execute_tsp_tool)
 
     @property
     def turn_setup(self) -> AgentTurnSetup:
