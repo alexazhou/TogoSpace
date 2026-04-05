@@ -281,10 +281,9 @@ class TestAgentResumeFailed(_agentServiceCase):
         restart_spy = MagicMock()
         alice.start_consumer_task = restart_spy
 
-        resumed_room_id = await alice.resume_failed()
+        await alice.resume_failed()
         refreshed_task = await GtAgentTask.aio_get_or_none(GtAgentTask.id == failed_task.id)
 
-        assert resumed_room_id == room.room_id
         assert alice.status == AgentStatus.ACTIVE
         assert refreshed_task is not None
         assert refreshed_task.id == failed_task.id
