@@ -17,10 +17,10 @@ class NativeAgentDriver(AgentDriver):
 
     async def startup(self) -> None:
         await super().startup()
-        self.host._tool_registry.clear()
+        self.host.tool_registry.clear()
         for tool in funcToolService.get_tools():
             function_name = tool.function.name
-            self.host._tool_registry.register(
+            self.host.tool_registry.register(
                 tool,
                 funcToolService.run_tool_call,
                 marks_turn_finish=function_name == "finish_chat_turn",
