@@ -1,5 +1,8 @@
 # Agent Task Consumer Plan A
 
+> **状态：已完成。** 本方案已全部实施，且后续进一步完成了 TurnRunner 解耦（详见 `turn_runner_as_driver_host.md`）。
+> 最终架构超越了本方案的"暂不处理"范围——TurnRunner 已实现 AgentDriverHost 协议，由 Consumer 内部创建并持有，Agent 成为纯 facade。
+
 ## 背景
 
 当前 `Agent` 已经开始承担协调器角色，但任务运行时状态仍散落在 `Agent` 与 `AgentTaskConsumer` 之间，导致职责边界仍不够清晰。
@@ -328,11 +331,11 @@ PYTHONPATH=src .venv/bin/python -m pytest -o addopts='' \
 
 ## 暂不处理的事项
 
-本方案阶段中，以下内容暂不修改：
+> **以下事项已在后续重构中全部完成：**
 
-- `driver` host 模型
-- `AgentTurnRunner` 与 `Agent` 的依赖关系
-- `_history` / `tool_registry` 的归属
-- 引入额外接口层或 protocol
+~~本方案阶段中，以下内容暂不修改：~~
 
-这些问题留到 `Agent` facade 进一步稳定之后再处理。
+- ~~`driver` host 模型~~ → 已完成：TurnRunner 实现 AgentDriverHost
+- ~~`AgentTurnRunner` 与 `Agent` 的依赖关系~~ → 已完成：TurnRunner 不持有 Agent
+- ~~`_history` / `tool_registry` 的归属~~ → 已完成：均由 TurnRunner 自建
+- ~~引入额外接口层或 protocol~~ → 已完成：AgentDriverHost Protocol 已收紧
