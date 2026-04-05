@@ -31,15 +31,15 @@ async def startup() -> None:
 
 
 async def restore_state() -> None:
-    """从数据库恢复所有 Agent 的历史消息，并重置 RUNNING 任务为 PENDING。"""
+    """从数据库恢复所有 Agent 的历史消息，并将遗留 RUNNING 任务标记为 FAILED。"""
     for agent in _agents.values():
         # 加载历史消息
         items = await persistenceService.load_agent_history_message(agent.gt_agent.id)
         if items:
             agent._history.replace(items)
 
-        # 重置 RUNNING 任务为 PENDING（上次未完成）
-        await persistenceService.reset_running_tasks(agent.gt_agent.id)
+        # 启动恢复时将上次中断的 RUNNING 任务标记为 FAILED
+        await persistenceService.fail_running_tasks(agent.gt_agent.id)
 
 
 async def _load_team(team_id: int, workspace_root: str | None = None) -> None:
