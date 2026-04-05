@@ -70,8 +70,10 @@ class AgentTaskConsumer:
         current_consumer = asyncio.current_task()
         if current_consumer is not None and self._aio_consumer_task not in (None, current_consumer):
             existing = self._aio_consumer_task
-            if existing.done() is False:
-                logger.warning(f"检测到重复启动的消费协程: {self.gt_agent.name}(agent_id={self.gt_agent.id}), existing_task={id(existing)}, current_task={id(current_consumer)}")
+            assert existing is None or existing.done(), (
+                f"消费协程重入: {self.gt_agent.name}(agent_id={self.gt_agent.id}), "
+                f"existing_task={id(existing)}, current_task={id(current_consumer)}"
+            )
 
         if self.status != AgentStatus.ACTIVE:
             self.status = AgentStatus.ACTIVE
