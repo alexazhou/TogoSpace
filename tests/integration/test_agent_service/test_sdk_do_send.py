@@ -9,7 +9,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
 from service import roomService, agentService, ormService, persistenceService
-from service import presetService
+from service import funcToolService, presetService
 from service.agentService import Agent
 from service.agentService.promptBuilder import build_turn_context_prompt, format_room_message
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
@@ -35,6 +35,7 @@ class TestSdkDoSend(ServiceTestCase):
         await ormService.startup(db_path)
         await persistenceService.startup()
         await roomService.startup()
+        await funcToolService.startup()
         await presetService._import_role_templates_from_app_config()
         await agentService.startup()
         
@@ -57,6 +58,7 @@ class TestSdkDoSend(ServiceTestCase):
     @classmethod
     async def async_teardown_class(cls):
         await agentService.shutdown()
+        funcToolService.shutdown()
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
@@ -80,8 +82,16 @@ class TestSdkDoSend(ServiceTestCase):
         )
         agent.current_db_task = task
 
-        # 4. 驱动绑定
+        # 4. 驱动绑定（不调 startup，手动注册 tool_registry）
         driver = ClaudeSdkAgentDriver(agent, AgentDriverConfig(driver_type="claude_sdk"))
+        agent.tool_registry.clear()
+        for t in funcToolService.get_tools_by_names(["send_chat_msg", "finish_chat_turn"]):
+            fn_name = t.function.name
+            agent.tool_registry.register(
+                t,
+                funcToolService.run_tool_call,
+                marks_turn_finish=fn_name == "finish_chat_turn",
+            )
         return driver, agent, room
 
     async def test_send_to_current_room_does_not_set_done(self):

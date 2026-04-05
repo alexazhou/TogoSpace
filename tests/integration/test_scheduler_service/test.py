@@ -137,7 +137,7 @@ class TestSchedulerRun(ServiceTestCase):
         """验证 Agent.consume_task 内部错误后进入 FAILED 状态。"""
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
 
-        with patch("service.agentService.agent.gtAgentTaskManager") as mock_task_manager:
+        with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_task_manager:
             mock_task_manager.get_first_unfinish_task = AsyncMock(return_value=GtAgentTask(
                 id=1,
                 agent_id=1,
@@ -153,7 +153,7 @@ class TestSchedulerRun(ServiceTestCase):
             ))
             mock_task_manager.update_task_status = AsyncMock()
 
-            with patch.object(real_agent, "run_chat_turn", side_effect=RuntimeError("boom")):
+            with patch.object(real_agent.turn_runner, "run_chat_turn", side_effect=RuntimeError("boom")):
                 await real_agent.consume_task(max_function_calls=5)
 
         assert real_agent.status == AgentStatus.FAILED
@@ -162,7 +162,7 @@ class TestSchedulerRun(ServiceTestCase):
         """任务失败后，即使仍有 pending task，也不应自动续起消费。"""
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
 
-        with patch("service.agentService.agent.gtAgentTaskManager") as mock_task_manager:
+        with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_task_manager:
             mock_task_manager.get_first_unfinish_task = AsyncMock(return_value=GtAgentTask(
                 id=1,
                 agent_id=1,
@@ -179,7 +179,7 @@ class TestSchedulerRun(ServiceTestCase):
             mock_task_manager.update_task_status = AsyncMock()
             mock_task_manager.has_consumable_task = AsyncMock(return_value=True)
 
-            with patch.object(real_agent, "run_chat_turn", side_effect=RuntimeError("boom")):
+            with patch.object(real_agent.turn_runner, "run_chat_turn", side_effect=RuntimeError("boom")):
                 restart_spy = MagicMock()
                 real_agent.start_consumer_task = restart_spy
                 task = asyncio.create_task(real_agent.consume_task(max_function_calls=5))
