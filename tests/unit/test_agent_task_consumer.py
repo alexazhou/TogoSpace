@@ -122,9 +122,8 @@ async def test_resume_failed_starts_consumer_with_resumed_task(consumer, mock_ag
         mock_manager.get_first_unfinish_task = AsyncMock(return_value=failed_task)
         mock_manager.transition_task_status = AsyncMock(return_value=resumed_task)
 
-        room_id = await consumer.resume_failed()
+        await consumer.resume_failed()
 
-        assert room_id == 42
         mock_manager.transition_task_status.assert_called_once_with(100, AgentTaskStatus.FAILED, AgentTaskStatus.RUNNING)
         mock_agent.start_consumer_task.assert_called_once_with(initial_task=resumed_task)
 

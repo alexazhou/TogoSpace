@@ -23,11 +23,7 @@ class AgentTaskConsumer:
         self._agent = agent
 
     # ─── 消费循环 ─────────────────────────────────────────────
-
-    async def consume(
-        self,
-        initial_task: GtAgentTask | None = None,
-    ) -> None:
+    async def consume(self, initial_task: GtAgentTask | None = None) -> None:
         """从数据库获取并处理任务，直到没有待处理任务为止。"""
         agent = self._agent
         current_consumer = asyncio.current_task()
@@ -74,7 +70,6 @@ class AgentTaskConsumer:
                     agent.start_consumer_task()
 
     # ─── 单任务执行（原 AgentTaskExecutor.execute） ───────────
-
     async def _execute_task(self, claimed_task: GtAgentTask, *, resumed: bool) -> bool:
         """执行一条已处于 RUNNING 状态的任务。
 
@@ -97,16 +92,12 @@ class AgentTaskConsumer:
         return True
 
     # ─── 恢复失败任务 ────────────────────────────────────────
-
-    async def resume_failed(self) -> int:
+    async def resume_failed(self) -> None:
         """恢复最早的 FAILED 任务，并重新启动消费。"""
         agent = self._agent
         failed_task = await gtAgentTaskManager.get_first_unfinish_task(agent.gt_agent.id)
         assertUtil.assertNotNull(failed_task, error_message=f"no failed task to resume: agent_id={agent.gt_agent.id}")
         assertUtil.assertEqual(failed_task.status, AgentTaskStatus.FAILED, error_message=f"task is not FAILED: agent_id={agent.gt_agent.id}")
-
-        room_id = failed_task.task_data.get("room_id")
-        assertUtil.assertNotNull(room_id, error_message=f"failed task missing room_id: agent_id={agent.gt_agent.id}, task_id={failed_task.id}")
 
         resumed_task = await gtAgentTaskManager.transition_task_status(failed_task.id, AgentTaskStatus.FAILED, AgentTaskStatus.RUNNING)
         assertUtil.assertNotNull(resumed_task, error_message=f"failed task resume conflict: agent_id={agent.gt_agent.id}, task_id={failed_task.id}")
@@ -114,4 +105,3 @@ class AgentTaskConsumer:
         agent.status = AgentStatus.ACTIVE
         agent._publish_status(agent.status)
         agent.start_consumer_task(initial_task=resumed_task)
-        return room_id

@@ -279,9 +279,6 @@ class AgentResumeHandler(BaseHandler):
         assertUtil.assertNotNull(agent, None, f"运行时 Agent ID '{agent_id}' 不存在", "agent_not_found")
         assertUtil.assertTrue(agent.status == AgentStatus.FAILED, None, f"Agent ID={agent.gt_agent.id} 当前状态不是 FAILED（当前: {agent.status.name}）", "agent_not_failed")
 
-        room_id = await agent.resume_failed()
-        room = roomService.get_room(room_id)
-        assertUtil.assertNotNull(room, None, f"Agent 的失败房间 room_id={room_id} 不存在", "room_not_found")
-        await room.activate_scheduling()
+        await agent.resume_failed()
 
-        self.return_json({"status": "resumed", "agent_id": agent.gt_agent.id, "room_id": room_id})
+        self.return_json({"status": "resumed", "agent_id": agent.gt_agent.id})

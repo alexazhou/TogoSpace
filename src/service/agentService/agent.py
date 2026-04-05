@@ -97,8 +97,8 @@ class Agent:
         self._aio_consumer_task = None
         asyncUtil.cancel_task_safely(task)
 
-    async def resume_failed(self) -> int:
-        return await self.task_consumer.resume_failed()
+    async def resume_failed(self) -> None:
+        await self.task_consumer.resume_failed()
 
 
     # ─── AgentDriverHost 协议 ───────────────────────────────────
