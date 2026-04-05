@@ -43,9 +43,31 @@ async def _assert_role_templates_exist(template_ids: list[int]) -> None:
     assertUtil.assertEqual(
         len(missing_ids),
         0,
-        error_message=f"角色模板不存在: {missing_ids}",
-        error_code="role_template_not_found",
-    )
+            error_message=f"角色模板不存在: {missing_ids}",
+            error_code="role_template_not_found",
+        )
+
+
+async def _build_agent_detail_payload(agent: GtAgent) -> dict:
+    team = await gtTeamManager.get_team_by_id(agent.team_id)
+    runtime_status_map = agentService.get_team_runtime_status_map(agent.team_id)
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "agent_name": agent.name,
+        "employee_number": agent.employee_number,
+        "role_template_id": agent.role_template_id,
+        "team_id": agent.team_id,
+        "team_name": team.name if team is not None else None,
+        "status": runtime_status_map.get(agent.id, AgentStatus.IDLE).name,
+        "employ_status": agent.employ_status.name if agent.employ_status else None,
+        "model": agent.model,
+        "driver": agent.driver.value if agent.driver else None,
+        "driver_type": agent.driver.value if agent.driver else None,
+        "prompt": "",
+    }
+
+
 class AgentListHandler(BaseHandler):
     """GET /agents/list.json?team_id=<id> - 获取 team 的成员配置列表"""
 
@@ -221,15 +243,22 @@ class AgentDetailHandler(BaseHandler):
             error_code="agent_not_found",
         )
 
-        self.return_json({
-            "id": agent.id,
-            "name": agent.name,
-            "employee_number": agent.employee_number,
-            "role_template_id": agent.role_template_id,
-            "employ_status": agent.employ_status.name if agent.employ_status else None,
-            "model": agent.model,
-            "driver": agent.driver.value if agent.driver else None,
-        })
+        self.return_json(await _build_agent_detail_payload(agent))
+
+
+class AgentDetailByIdHandler(BaseHandler):
+    """GET /agents/<id>.json - 获取单个成员配置详情"""
+
+    async def get(self, agent_id_str: str) -> None:
+        agent_id = int(agent_id_str)
+        agents = await gtAgentManager.get_agents_by_ids([agent_id])
+        agent = agents[0] if agents else None
+        assertUtil.assertNotNull(
+            agent,
+            error_message=f"Agent ID '{agent_id}' not found",
+            error_code="agent_not_found",
+        )
+        self.return_json(await _build_agent_detail_payload(agent))
 
 
 class AgentResumeHandler(BaseHandler):
