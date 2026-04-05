@@ -101,13 +101,6 @@ class Agent:
     async def resume_failed(self) -> int:
         return await self.task_consumer.resume_failed()
 
-    async def consume_task(
-        self,
-        max_function_calls: int | None = None,
-        initial_task: GtAgentTask | None = None,
-    ) -> None:
-        await self.task_consumer.consume(max_function_calls=max_function_calls, initial_task=initial_task)
-
     async def run_chat_turn(self, task: GtAgentTask, max_function_calls: int = 5, resumed: bool = False) -> None:
         await self.turn_runner.run_chat_turn(task, max_function_calls, resumed=resumed)
 
