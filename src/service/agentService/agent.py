@@ -87,6 +87,22 @@ class Agent:
             status=status,
         )
 
+    async def resume_failed(self) -> int:
+        """恢复最早的 FAILED 任务，并重新启动消费。"""
+        failed_task = await gtAgentTaskManager.get_first_unfinish_task(self.gt_agent.id)
+        if failed_task is None or failed_task.status != AgentTaskStatus.FAILED:
+            raise RuntimeError(f"no failed task to resume: agent_id={self.gt_agent.id}")
+
+        room_id = failed_task.task_data.get("room_id")
+        if room_id is None:
+            raise RuntimeError(f"failed task missing room_id: agent_id={self.gt_agent.id}, task_id={failed_task.id}")
+
+        await gtAgentTaskManager.update_task_status(failed_task.id, AgentTaskStatus.PENDING)
+        self.status = AgentStatus.IDLE
+        self._publish_status(self.status)
+        self.start_consumer_task()
+        return room_id
+
     async def consume_task(self, max_function_calls: int | None = None) -> None:
         """从数据库获取并处理任务，直到没有待处理任务为止。"""
         current_consumer = asyncio.current_task()

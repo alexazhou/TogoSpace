@@ -2,11 +2,12 @@
 import asyncio
 import os
 import sys
+from unittest.mock import MagicMock
 
 import pytest
 
-from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic, AgentStatus
-from dal.db import gtAgentManager, gtTeamManager
+from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic, AgentStatus, AgentTaskStatus, AgentTaskType
+from dal.db import gtAgentManager, gtTeamManager, gtAgentTaskManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service import presetService, agentService, roomService, ormService, persistenceService, messageBus
@@ -256,3 +257,35 @@ class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
         assert synced_count == 1
         assert len(alice._history) == 1
         assert "talking" not in alice._history[0].content
+
+
+class TestAgentResumeFailed(_agentServiceCase):
+    async def test_resume_failed_marks_task_pending_and_restarts_consumer(self):
+        """FAILED 状态的 Agent 恢复时，应将最早失败任务转回 PENDING 并重启消费。"""
+        await roomService.ensure_room_record(TEAM, "resume_room", ["alice"])
+        room = roomService.get_room_by_key(f"resume_room@{TEAM}")
+        alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
+
+        failed_task = await gtAgentTaskManager.create_task(
+            alice.gt_agent.id,
+            AgentTaskType.ROOM_MESSAGE,
+            {"room_id": room.room_id},
+        )
+        await gtAgentTaskManager.update_task_status(
+            failed_task.id,
+            AgentTaskStatus.FAILED,
+            error_message="boom",
+        )
+        alice.status = AgentStatus.FAILED
+        restart_spy = MagicMock()
+        alice.start_consumer_task = restart_spy
+
+        resumed_room_id = await alice.resume_failed()
+        refreshed_task = await gtAgentTaskManager.get_first_unfinish_task(alice.gt_agent.id)
+
+        assert resumed_room_id == room.room_id
+        assert alice.status == AgentStatus.IDLE
+        assert refreshed_task is not None
+        assert refreshed_task.id == failed_task.id
+        assert refreshed_task.status == AgentTaskStatus.PENDING
+        restart_spy.assert_called_once_with()
