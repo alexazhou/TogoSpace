@@ -36,10 +36,12 @@ class AgentTaskConsumer:
             existing = agent._aio_consumer_task
             if existing.done() is False:
                 logger.warning(f"检测到重复启动的消费协程: agent_id={agent.gt_agent.id}, existing_task={id(existing)}, current_task={id(current_consumer)}")
+
         effective_max_fc = agent.max_function_calls if max_function_calls is None else max(1, max_function_calls)
         if agent.status != AgentStatus.ACTIVE:
             agent.status = AgentStatus.ACTIVE
             agent._publish_status(agent.status)
+
         try:
             claimed_task = initial_task
             resumed = initial_task is not None

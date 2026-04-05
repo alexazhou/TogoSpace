@@ -154,3 +154,134 @@ def test_from_openai_message_assigns_stage_by_role():
     assert user_item.stage == AgentHistoryStage.INPUT
     assert assistant_item.stage == AgentHistoryStage.INFER
     assert tool_item.stage == AgentHistoryStage.TOOL_RESULT
+
+
+def test_agent_history_len_and_iter():
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u2")),
+        ],
+    )
+
+    assert len(history) == 3
+    contents = [item.content for item in history]
+    assert contents == ["u1", "a1", "u2"]
+
+
+def test_agent_history_getitem():
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+        ],
+    )
+
+    assert history[0].content == "u1"
+    assert history[1].content == "a1"
+    assert history[-1].content == "a1"
+
+
+def test_agent_history_replace_and_dump():
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+        ],
+    )
+
+    new_items = [
+        GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "new1")),
+        GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "new2")),
+    ]
+    history.replace(new_items)
+
+    assert len(history) == 2
+    dumped = history.dump()
+    assert len(dumped) == 2
+    assert dumped[0].content == "new1"
+    assert dumped[1].content == "new2"
+
+
+def test_agent_history_find_tool_call_by_id():
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="call_123",
+        function={"name": "send_chat_msg", "arguments": '{"msg": "hello"}'},
+    )
+    assistant_msg = llmApiUtil.OpenAIMessage(
+        role=OpenaiLLMApiRole.ASSISTANT,
+        content="",
+        tool_calls=[tool_call],
+    )
+
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, assistant_msg),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.tool_result("call_123", '{"ok": true}')),
+        ],
+    )
+
+    found = history.find_tool_call_by_id("call_123")
+    assert found is not None
+    assert found.id == "call_123"
+    assert found.function["name"] == "send_chat_msg"
+
+    assert history.find_tool_call_by_id("nonexistent") is None
+    assert history.find_tool_call_by_id("") is None
+
+
+def test_agent_history_unfinished_turn():
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(
+                1, 0,
+                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1"),
+                tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+            ),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+        ],
+    )
+
+    assert history.has_unfinished_turn() is True
+    assert history.get_unfinished_turn_start_index() == 0
+
+    history.append_message(
+        llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "done"),
+        tags=[AgentHistoryTag.ROOM_TURN_FINISH],
+    )
+
+    assert history.has_unfinished_turn() is False
+    assert history.get_unfinished_turn_start_index() is None
+
+
+def test_agent_history_unfinished_turn_with_completed_turn():
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(
+                1, 0,
+                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1"),
+                tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+            ),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(
+                1, 2,
+                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "done"),
+                tags=[AgentHistoryTag.ROOM_TURN_FINISH],
+            ),
+            GtAgentHistory.from_openai_message(
+                1, 3,
+                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u2"),
+                tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+            ),
+        ],
+    )
+
+    assert history.has_unfinished_turn() is True
+    assert history.get_unfinished_turn_start_index() == 3
