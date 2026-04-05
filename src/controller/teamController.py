@@ -268,3 +268,23 @@ class TeamSetEnabledHandler(BaseHandler):
         await teamService.set_team_enabled(int(team_id_str), body.enabled)
 
         self.return_json({"status": "ok", "enabled": body.enabled})
+
+
+class TeamClearDataHandler(BaseHandler):
+    """POST /teams/{id}/clear_data.json - 清空团队运行数据"""
+
+    async def post(self, team_id_str: str) -> None:
+        team_id = int(team_id_str)
+        team = await gtTeamManager.get_team_by_id(team_id)
+        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+
+        result = await teamService.clear_team_data(team_id)
+
+        # 清空后触发热更新，重建运行态
+        await teamService.hot_reload_team(team.name)
+
+        self.return_json({
+            "status": "cleared",
+            "team_id": team_id,
+            "deleted": result,
+        })
