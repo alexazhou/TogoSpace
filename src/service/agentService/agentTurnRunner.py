@@ -28,8 +28,9 @@ logger = logging.getLogger(__name__)
 class AgentTurnRunner:
     """负责 Turn 内部逻辑：消息同步、host loop 执行、推理、工具调用编排。"""
 
-    def __init__(self, agent: Agent):
+    def __init__(self, agent: Agent, max_function_calls: int = 5):
         self._agent = agent
+        self.max_function_calls = max(1, max_function_calls)
 
     # ─── Turn 运行方法 ──────────────────────────────────────
 
@@ -145,7 +146,7 @@ class AgentTurnRunner:
 
     async def _run_until_reply(self, room: ChatRoom, tools: Optional[list[llmApiUtil.OpenAITool]]) -> bool:
         """在 max_function_calls 次内循环：推理 → 工具调用。返回 True 表示 turn 结束（agent 调用了 finish 工具）。"""
-        max_function_calls = self._agent.max_function_calls
+        max_function_calls = self.max_function_calls
         for _ in range(max_function_calls):
             assistant_message: llmApiUtil.OpenAIMessage = await self._infer(tools)
             tool_calls = assistant_message.tool_calls or []

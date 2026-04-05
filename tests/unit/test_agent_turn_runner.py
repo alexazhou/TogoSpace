@@ -19,7 +19,6 @@ def mock_agent():
     agent.gt_agent.id = 1
     agent.gt_agent.name = "TestAgent"
     agent.system_prompt = "You are a test agent."
-    agent.max_function_calls = 5
     agent.driver = MagicMock()
     agent.driver.host_managed_turn_loop = True
     agent.driver.started = True
@@ -40,7 +39,7 @@ def mock_agent():
 
 @pytest.fixture
 def turn_runner(mock_agent):
-    return AgentTurnRunner(mock_agent)
+    return AgentTurnRunner(mock_agent, max_function_calls=5)
 
 
 @pytest.mark.asyncio

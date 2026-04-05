@@ -193,7 +193,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
         if client is None:
             raise RuntimeError(f"Claude SDK client 尚未初始化: agent_id={self.host.gt_agent.id}")
 
-        max_attempts = max(1, self.host.max_function_calls)
+        max_attempts = self.host.turn_runner.max_function_calls
         logger.info(f"SDK 注入增量消息: agent_id={self.host.gt_agent.id}, room={room.key}, new_msgs={synced_count}")
 
         try:
