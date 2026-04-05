@@ -69,28 +69,63 @@ class ChatRoom:
 
     def __init__(self, team: GtTeam, room: GtRoom, agents: List[GtAgent] | None = None):
         self.gt_room: GtRoom = room
-        self.room_id: int = room.id  # 数据库主键 ID
-        self.team_id: int = team.id  # 所属 Team 的数据库主键 ID
-        self.name: str = room.name  # 房间名称
-        self.team_name: str = team.name  # 所属 Team
-        self.room_type: RoomType = room.type  # 房间类型（私有/群聊）
+        self.gt_team: GtTeam = team
         self.messages: List[GtCoreChatMessage] = []  # 消息历史记录
-        self.initial_topic: str = room.initial_topic  # 初始话题
-        self.tags: List[str] = room.tags or []  # 房间标签
         self._agents: List[GtAgent] = agents or []  # 房间参与者列表
         self._agent_ids: List[int] = [agent.id for agent in self._agents]  # agent_id 列表，调度逻辑频繁使用索引访问
         self._agent_read_index: Dict[int, int] = {}  # 每个 Agent 的消息读取进度（agent_id 为 key）
         self._turn_count: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
-        self._max_turns: int = room.max_turns  # 最大允许轮次
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
         self._state: RoomState = RoomState.INIT  # 房间当前的调度状态
-        self._state_after_init: RoomState = RoomState.SCHEDULING if self._agents and room.max_turns > 0 else RoomState.IDLE
         self._round_skipped_set: set[int] = set()  # 当前轮次已跳过发言的 Agent ID 集合
         self._current_turn_has_content: bool = False  # 当前发言人是否已发送内容
 
+    # ─── 从 gt_room / gt_team 派生的只读属性 ────────────────────
+
     @property
-    def agents(self) -> List[str]:
-        """返回 Agent 名称列表（用于 API 响应）。"""
+    def room_id(self) -> int:
+        return self.gt_room.id
+
+    @property
+    def team_id(self) -> int:
+        return self.gt_team.id
+
+    @property
+    def name(self) -> str:
+        return self.gt_room.name
+
+    @property
+    def team_name(self) -> str:
+        return self.gt_team.name
+
+    @property
+    def room_type(self) -> RoomType:
+        return self.gt_room.type
+
+    @property
+    def initial_topic(self) -> str:
+        return self.gt_room.initial_topic
+
+    @property
+    def tags(self) -> List[str]:
+        return self.gt_room.tags or []
+
+    @property
+    def _max_turns(self) -> int:
+        return self.gt_room.max_turns
+
+    @property
+    def agents(self) -> List[int]:
+        """返回 Agent ID 列表（排除系统成员，用于 API 响应）。"""
+        return [
+            agent.id
+            for agent in self._agents
+            if agent.id != self.SYSTEM_MEMBER_ID
+        ]
+
+    @property
+    def agent_names(self) -> List[str]:
+        """返回 Agent 名称列表（排除系统成员，用于展示）。"""
         return [
             agent.name
             for agent in self._agents
@@ -197,7 +232,7 @@ class ChatRoom:
         # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
         was_idle = (self._state == RoomState.IDLE)
         if was_idle:
-            logger.info(f"检测到房间 {self.key} 的活动 (agent_id={sender_id})，重置轮次计数器并唤醒房间")
+            logger.info(f"检测到房间 {self.key} 的活动 ({self._get_agent_name(sender_id)}(agent_id={sender_id}))，重置轮次计数器并唤醒房间")
             self._turn_count = 0
             self._round_skipped_set = set()
             self._current_turn_has_content = False
@@ -208,7 +243,7 @@ class ChatRoom:
         if sender_id == current_expected:
             self._current_turn_has_content = True
         else:
-            logger.info(f"房间 {self.key} 收到来自 agent_id={sender_id} 的插话，保持当前发言位 (当前应轮到 agent_id={current_expected})")
+            logger.info(f"房间 {self.key} 收到来自 {self._get_agent_name(sender_id)}(agent_id={sender_id}) 的插话，保持当前发言位 (当前应轮到 {self._get_agent_name(current_expected)}(agent_id={current_expected}))")
 
         # 3. 只要有真实消息（非系统消息），就清空跳过记录，让所有人重新有机会回应
         if sender_id != self.SYSTEM_MEMBER_ID and self._round_skipped_set:
@@ -232,10 +267,10 @@ class ChatRoom:
         current_expected = self._get_current_turn_agent_id()
 
         if sender_id is not None and sender_id != current_expected:
-            logger.warning(f"拒绝结束轮次申请：agent_id={sender_id} 并非当前发言人 (agent_id={current_expected})")
+            logger.warning(f"房间 {self.key} 拒绝结束轮次申请：{self._get_agent_name(sender_id)}(agent_id={sender_id}) 并非当前发言人 {self._get_agent_name(current_expected)}(agent_id={current_expected})")
             return False
 
-        logger.info(f"房间 {self.key} 由 agent_id={current_expected} 结束本轮行动 (has_content={self._current_turn_has_content})")
+        logger.info(f"房间 {self.key} 由 {self._get_agent_name(current_expected)}(agent_id={current_expected}) 结束本轮行动 (has_content={self._current_turn_has_content})")
 
         # 如果本轮没说话，记录为跳过
         if not self._current_turn_has_content:
@@ -325,7 +360,7 @@ class ChatRoom:
             next_id = next_agent.id if next_agent else None
 
             if self._should_auto_skip_agent_turn():
-                logger.info(f"房间 {self.key} 自动跳过人类操作者回合: agent_id={next_id}")
+                logger.info(f"房间 {self.key} 自动跳过人类操作者回合: {self._get_agent_name(next_id)}(agent_id={next_id})")
                 if next_id is not None:
                     self._round_skipped_set.add(next_id)
                 self._current_turn_has_content = False
@@ -337,8 +372,9 @@ class ChatRoom:
 
             if self._is_special_agent(next_id):
                 logger.info(
-                    "当前发言位为特殊成员，等待外部输入，不发布 ROOM_AGENT_TURN: room=%s, agent_id=%s",
+                    "当前发言位为特殊成员，等待外部输入，不发布 ROOM_AGENT_TURN: room=%s, %s(agent_id=%s)",
                     self.key,
+                    self._get_agent_name(next_id),
                     next_id,
                 )
                 return None
@@ -374,7 +410,7 @@ class ChatRoom:
     async def activate_scheduling(self) -> bool:
         """激活/重发调度。
 
-        - INIT: 先切到恢复后的目标状态，再按需发布当前轮次
+        - INIT: 根据当前条件决定目标状态（SCHEDULING 或 IDLE），发送初始消息
         - SCHEDULING: 直接重发当前轮次
         - IDLE: 不做任何操作
 
@@ -382,8 +418,16 @@ class ChatRoom:
         """
         changed = False
         if self._state == RoomState.INIT:
-            self._state = self._state_after_init
+            self._state = (
+                RoomState.SCHEDULING
+                if self._agent_ids and self._max_turns > 0
+                else RoomState.IDLE
+            )
             changed = True
+            logger.info(
+                "[%s] 房间激活: INIT -> %s (agents=%d, max_turns=%d)",
+                self.key, self._state.name, len(self._agent_ids), self._max_turns,
+            )
             if not self.messages:
                 await self._append_message(
                     self.SYSTEM_MEMBER_ID,
@@ -430,20 +474,15 @@ class ChatRoom:
         self._agent_read_index = {agent_id: tail for agent_id in self._agent_ids}
 
     def rebuild_state_from_history(self, persisted_turn_pos: int | None = None) -> None:
-        """从消息历史重建房间调度状态。
+        """从持久化数据重建房间调度数据（turn_pos 等），但不切换状态。
+
+        状态始终保持 INIT，由 activate_scheduling() 统一决定目标状态。
+        不逐条回放消息（回放会产生误判的"插话"日志且无法正确推进发言位）。
 
         Args:
             persisted_turn_pos: 从数据库恢复的发言位索引。
-                如果提供，则使用该值而非重置为 0，确保重启后发言位正确。
         """
-        keep_init = (self._state == RoomState.INIT)
-
         if not self._agent_ids or self._max_turns <= 0:
-            self._state_after_init = RoomState.IDLE
-            if keep_init:
-                self._state = RoomState.INIT
-            else:
-                self._state = RoomState.IDLE
             return
 
         self._turn_count = 0
@@ -452,14 +491,7 @@ class ChatRoom:
         else:
             self._turn_pos = 0
         self._round_skipped_set = set()
-        self._state = RoomState.SCHEDULING
-
-        for msg in self.messages:
-            self._update_turn_state_on_message(msg.sender_id)
-
-        self._state_after_init = self._state
-        if keep_init:
-            self._state = RoomState.INIT
+        self._current_turn_has_content = False
 
     def format_log(self) -> str:
         lines = [f"=== {self.key} 聊天记录 ==="]
@@ -469,7 +501,7 @@ class ChatRoom:
         return "\n".join(lines)
 
     def build_initial_system_message(self) -> str:
-        agent_list_str = "、".join(self.agents)
+        agent_list_str = "、".join(self.agent_names)
         msg = f"系统提示: {self.name} 房间已经创建，当前房间成员：{agent_list_str}"
         if self.initial_topic:
             msg += f"\n本房间初始话题：{self.initial_topic}"
@@ -757,7 +789,7 @@ async def load_rooms_from_db() -> None:
 def get_agent_names(room_id: int) -> List[str]:
     """返回聊天室的参与者名列表。"""
     room = get_room(room_id)
-    return room.agents if room is not None else []
+    return room.agent_names if room is not None else []
 
 
 def get_rooms_for_agent(team_id: int | None, agent_id: int) -> List[int]:
