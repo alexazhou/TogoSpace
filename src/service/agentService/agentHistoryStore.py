@@ -155,11 +155,36 @@ class AgentHistoryStore:
                 return item.openai_message
         return None
 
+    def find_tool_call_by_id(self, tool_call_id: str, start_idx: int = 0) -> llmApiUtil.OpenAIToolCall | None:
+        """在 assistant 消息的 tool_calls 中查找指定 tool_call_id 的调用。"""
+        if len(tool_call_id) == 0:
+            return None
+        for item in reversed(self._items[start_idx:]):
+            if item.role != OpenaiLLMApiRole.ASSISTANT or item.tool_calls is None:
+                continue
+            for tool_call in item.tool_calls:
+                if str(tool_call.id or "") == tool_call_id:
+                    return tool_call
+        return None
+
     def find_tool_result_by_call_id(self, tool_call_id: str) -> GtAgentHistory | None:
         for item in reversed(self._items):
             if item.role == llmApiUtil.OpenaiLLMApiRole.TOOL and item.tool_call_id == tool_call_id:
                 return item
         return None
+
+    def get_unfinished_turn_start_index(self) -> int | None:
+        """从尾部向前查找最近一次未完成 turn 的起始 index。"""
+        for idx in range(len(self._items) - 1, -1, -1):
+            item = self._items[idx]
+            if AgentHistoryTag.ROOM_TURN_FINISH in item.tags:
+                return None
+            if AgentHistoryTag.ROOM_TURN_BEGIN in item.tags:
+                return idx
+        return None
+
+    def has_unfinished_turn(self) -> bool:
+        return self.get_unfinished_turn_start_index() is not None
 
     @staticmethod
     def _infer_role_from_stage(stage: AgentHistoryStage) -> llmApiUtil.OpenaiLLMApiRole:

@@ -13,7 +13,7 @@ from service.roomService import ToolCallContext, ChatRoom
 from service.agentService.promptBuilder import build_turn_context_prompt
 from service.funcToolService.toolLoader import get_function_metadata
 from service.funcToolService.tools import FUNCTION_REGISTRY
-from service import roomService
+from service import funcToolService, roomService
 from model.dbModel.gtAgentTask import GtAgentTask
 from constants import AgentHistoryStage, AgentHistoryStatus
 from util import llmApiUtil
@@ -63,12 +63,23 @@ class ClaudeSdkAgentDriver(AgentDriver):
         self._turn_done: bool = False  # 当前轮次是否已完成发言，由 tool handler 设置，_run_turn_sdk 检查以决定是否中断/退出
         self._tool_call_counter: int = 0  # tool_call_id 计数器
 
+    _SDK_TOOL_NAMES = ("send_chat_msg", "finish_chat_turn")
+
     async def startup(self) -> None:
+        # 仅注册 SDK 使用的两个工具到 tool_registry
+        self.host.tool_registry.clear()
+        for t in funcToolService.get_tools_by_names(list(self._SDK_TOOL_NAMES)):
+            fn_name = t.function.name
+            self.host.tool_registry.register(
+                t,
+                funcToolService.run_tool_call,
+                marks_turn_finish=fn_name == "finish_chat_turn",
+            )
+
         server = create_sdk_mcp_server(
             "chat-tools",
             tools=[
-                self._build_claude_sdk_tool("send_chat_msg"),
-                self._build_claude_sdk_tool("finish_chat_turn"),
+                self._build_claude_sdk_tool(name) for name in self._SDK_TOOL_NAMES
             ],
         )
         options = ClaudeAgentOptions(
