@@ -10,6 +10,7 @@ from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic
 from dal.db import gtAgentManager, gtTeamManager, gtAgentTaskManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.gtAgentTask import GtAgentTask
 from service import presetService, agentService, roomService, ormService, persistenceService, messageBus
 from service.agentService.promptBuilder import build_turn_context_prompt, format_room_message
 from util import configUtil, llmApiUtil
@@ -260,8 +261,8 @@ class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
 
 
 class TestAgentResumeFailed(_agentServiceCase):
-    async def test_resume_failed_marks_task_pending_and_restarts_consumer(self):
-        """FAILED 状态的 Agent 恢复时，应将最早失败任务转回 PENDING 并重启消费。"""
+    async def test_resume_failed_marks_task_running_and_restarts_consumer(self):
+        """FAILED 状态的 Agent 恢复时，应将最早失败任务转为 RUNNING 并重启统一执行流程。"""
         await roomService.ensure_room_record(TEAM, "resume_room", ["alice"])
         room = roomService.get_room_by_key(f"resume_room@{TEAM}")
         alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
@@ -281,11 +282,15 @@ class TestAgentResumeFailed(_agentServiceCase):
         alice.start_consumer_task = restart_spy
 
         resumed_room_id = await alice.resume_failed()
-        refreshed_task = await gtAgentTaskManager.get_first_unfinish_task(alice.gt_agent.id)
+        refreshed_task = await GtAgentTask.aio_get_or_none(GtAgentTask.id == failed_task.id)
 
         assert resumed_room_id == room.room_id
-        assert alice.status == AgentStatus.IDLE
+        assert alice.status == AgentStatus.ACTIVE
         assert refreshed_task is not None
         assert refreshed_task.id == failed_task.id
-        assert refreshed_task.status == AgentTaskStatus.PENDING
-        restart_spy.assert_called_once_with()
+        assert refreshed_task.status == AgentTaskStatus.RUNNING
+        restart_spy.assert_called_once()
+        resumed_task = restart_spy.call_args.kwargs.get("initial_task")
+        assert resumed_task is not None
+        assert resumed_task.id == failed_task.id
+        assert resumed_task.status == AgentTaskStatus.RUNNING

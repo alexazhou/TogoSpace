@@ -805,6 +805,31 @@ class TestDalManagers(ServiceTestCase):
         assert all(task.status == AgentTaskStatus.RUNNING for task in tasks)
         assert pending_task.id not in [task.id for task in tasks]
 
+    async def test_agent_task_manager_transition_task_status_switches_failed_to_running(self):
+        """transition_task_status 应原子地将 FAILED 任务切为 RUNNING。"""
+        await self._reset_tables()
+
+        await self._save_role_template("alice", "gpt-4o")
+        team = await gtTeamManager.save_team(GtTeam(name="task_team_5"))
+        configs = [AgentConfig(name="alice", role_template="alice")]
+        agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert alice is not None
+
+        failed_task = await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 1})
+        await gtAgentTaskManager.update_task_status(failed_task.id, AgentTaskStatus.FAILED, "boom")
+
+        resumed_task = await gtAgentTaskManager.transition_task_status(
+            failed_task.id,
+            AgentTaskStatus.FAILED,
+            AgentTaskStatus.RUNNING,
+        )
+
+        assert resumed_task is not None
+        assert resumed_task.id == failed_task.id
+        assert resumed_task.status == AgentTaskStatus.RUNNING
+
     async def test_agent_task_manager_delete_tasks_by_team_uses_team_filter(self):
         """按 team_id 删除任务时，应直接基于 Agent 表条件删除对应团队任务。"""
         await self._reset_tables()

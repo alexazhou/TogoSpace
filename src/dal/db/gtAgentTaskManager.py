@@ -65,18 +65,22 @@ async def has_consumable_task(agent_id: int) -> bool:
     return first_task is not None and first_task.status == AgentTaskStatus.PENDING
 
 
-async def claim_task(task_id: int) -> GtAgentTask | None:
-    """原子地认领任务：将 PENDING 状态改为 RUNNING。
+async def transition_task_status(
+    task_id: int,
+    from_status: AgentTaskStatus,
+    to_status: AgentTaskStatus,
+) -> GtAgentTask | None:
+    """原子地迁移任务状态。
 
-    使用乐观锁保证只有一个消费者能成功认领。
-    返回更新后的任务，如果任务已被其他消费者认领则返回 None。
+    仅当任务当前状态等于 ``from_status`` 时，才会更新为 ``to_status``。
+    若任务状态已变化，则返回 None。
     """
     result = await (
         GtAgentTask
-        .update(status=AgentTaskStatus.RUNNING)
+        .update(status=to_status)
         .where(
             GtAgentTask.id == task_id,
-            GtAgentTask.status == AgentTaskStatus.PENDING,
+            GtAgentTask.status == from_status,
         )
         .aio_execute()
     )
