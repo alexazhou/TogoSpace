@@ -19,17 +19,17 @@ async def shutdown() -> None:
     pass
 
 
-async def load_room_runtime(room_id: int) -> tuple[list[GtRoomMessage], dict[str, int] | None]:
-    """加载房间的聊天记录和成员读取进度。
+async def load_room_runtime(room_id: int) -> tuple[list[GtRoomMessage], dict[str, int] | None, int]:
+    """加载房间的聊天记录、成员读取进度和发言位索引。
 
     Returns:
-        (room_messages, agent_read_index) - 消息列表和成员读取位置映射
+        (room_messages, agent_read_index, turn_pos)
     """
-    gt_room_messages, agent_read_index = await asyncio.gather(
+    gt_room_messages, (agent_read_index, turn_pos) = await asyncio.gather(
         gtRoomMessageManager.get_room_messages(room_id),
         gtRoomManager.get_room_state(room_id),
     )
-    return gt_room_messages, agent_read_index
+    return gt_room_messages, agent_read_index, turn_pos
 
 
 async def load_agent_history_message(agent_id: int) -> list[GtAgentHistory]:

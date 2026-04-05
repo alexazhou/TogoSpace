@@ -117,23 +117,24 @@ async def delete_room(room_id: int) -> None:
 
 
 # Room State CRUD (persistence)
-async def update_room_state(room_id: int, agent_read_index: dict[str, int]) -> None:
-    """保存房间运行时状态（agent_read_index）。"""
+async def update_room_state(room_id: int, agent_read_index: dict[str, int], turn_pos: int = 0) -> None:
+    """保存房间运行时状态（agent_read_index + turn_pos）。"""
     await (
         GtRoom.update(
             agent_read_index=agent_read_index,
+            turn_pos=turn_pos,
         )
         .where(GtRoom.id == room_id)
         .aio_execute()
     )
 
 
-async def get_room_state(room_id: int) -> dict[str, int] | None:
-    """获取房间运行时状态（agent_read_index）。"""
+async def get_room_state(room_id: int) -> tuple[dict[str, int] | None, int]:
+    """获取房间运行时状态（agent_read_index, turn_pos）。"""
     room = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
     if room is None:
-        return None
-    return room.agent_read_index
+        return None, 0
+    return room.agent_read_index, room.turn_pos
 
 
 async def delete_rooms_by_biz_ids_not_in(team_id: int, biz_ids: list[str]) -> None:

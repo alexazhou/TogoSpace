@@ -77,7 +77,7 @@ class TestTurnScheduling(ServiceTestCase):
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message(alice_id, "hello")
             # 消息不会自动推进轮次，需要显式调用 finish_turn
-            room.finish_turn(alice_id)
+            await room.finish_turn(alice_id)
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_AGENT_TURN,
                 gt_agent=room.get_gt_agent(bob_id),
@@ -93,7 +93,7 @@ class TestTurnScheduling(ServiceTestCase):
         a_id = room.get_agent_id_by_name("a")
         await room.add_message(a_id, "msg")
         # 消息不会自动推进轮次，需要显式调用 finish_turn
-        room.finish_turn(a_id)
+        await room.finish_turn(a_id)
         assert room.state == RoomState.IDLE
 
     async def test_no_publish_after_max_turns_reached(self):

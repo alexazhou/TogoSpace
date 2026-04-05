@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from functools import cached_property
 import json
 
 import peewee
@@ -47,7 +46,7 @@ class GtAgentHistory(DbModelBase):
             tags=[] if tags is None else list(tags),
         )
 
-    @cached_property
+    @property
     def openai_message(self) -> llmApiUtil.OpenAIMessage:
         return llmApiUtil.OpenAIMessage.model_validate_json(self.message_json)
 
