@@ -58,10 +58,11 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
 
         init_item = await history.append_stage_init(stage=AgentHistoryStage.INFER)
         assert init_item.status == AgentHistoryStatus.INIT
+        assert init_item.id is not None
 
         final_msg = llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "response text")
         await history.finalize_history_item(
-            history_item=init_item,
+            history_id=init_item.id,
             message=final_msg,
             status=AgentHistoryStatus.SUCCESS,
         )
@@ -78,8 +79,9 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         history = AgentHistoryStore(agent_id=4)
 
         init_item = await history.append_stage_init(stage=AgentHistoryStage.TOOL_RESULT, tool_call_id="call_1")
+        assert init_item.id is not None
         await history.finalize_history_item(
-            history_item=init_item,
+            history_id=init_item.id,
             message=llmApiUtil.OpenAIMessage.tool_result("call_1", '{"error": "failed"}'),
             status=AgentHistoryStatus.FAILED,
             error_message="tool execution error",
@@ -98,8 +100,9 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
 
         # 2. 推理
         infer_item = await history.append_stage_init(stage=AgentHistoryStage.INFER)
+        assert infer_item.id is not None
         assistant_msg = llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "assistant response")
-        await history.finalize_history_item(infer_item, assistant_msg, AgentHistoryStatus.SUCCESS)
+        await history.finalize_history_item(infer_item.id, assistant_msg, AgentHistoryStatus.SUCCESS)
 
         assert len(history) == 2
         messages = history.export_openai_message_list()

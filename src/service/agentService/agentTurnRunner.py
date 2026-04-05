@@ -187,7 +187,7 @@ class AgentTurnRunner:
         if infer_result.ok is False or infer_result.response is None:
             error_message = infer_result.error_message or "unknown inference error"
             await history.finalize_history_item(
-                history_item=history_item,
+                history_id=history_item.id,
                 message=None,
                 status=AgentHistoryStatus.FAILED,
                 error_message=error_message,
@@ -196,7 +196,7 @@ class AgentTurnRunner:
 
         assistant_message = infer_result.response.choices[0].message
         await history.finalize_history_item(
-            history_item=history_item,
+            history_id=history_item.id,
             message=assistant_message,
             status=AgentHistoryStatus.SUCCESS,
         )
@@ -279,10 +279,11 @@ class AgentTurnRunner:
             stage=AgentHistoryStage.TOOL_RESULT,
             tool_call_id=str(tool_call.id),
         )
+        assert history_item.id is not None, "history_item.id should not be None after append"
         exec_result = await executor()
         final_message = llmApiUtil.OpenAIMessage.tool_result(exec_result.tool_call_id, exec_result.result_json)
         await self._agent._history.finalize_history_item(
-            history_item=history_item,
+            history_id=history_item.id,
             message=final_message,
             status=exec_result.status,
             error_message=exec_result.error_message,
