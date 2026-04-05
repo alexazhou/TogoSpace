@@ -2,9 +2,9 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from constants import DriverType, AgentStatus, SpecialAgent
+from constants import DriverType, AgentStatus, AgentTaskStatus, SpecialAgent
 from controller.baseController import BaseHandler
-from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
+from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtAgentTaskManager
 from model.dbModel.gtAgent import GtAgent
 from service import teamService, agentService, roomService
 from util import assertUtil
@@ -51,6 +51,10 @@ async def _assert_role_templates_exist(template_ids: list[int]) -> None:
 async def _build_agent_detail_payload(agent: GtAgent) -> dict:
     team = await gtTeamManager.get_team_by_id(agent.team_id)
     runtime_status_map = agentService.get_team_runtime_status_map(agent.team_id)
+    first_task = await gtAgentTaskManager.get_first_unfinish_task(agent.id)
+    current_error_message = None
+    if first_task is not None and first_task.status == AgentTaskStatus.FAILED:
+        current_error_message = first_task.error_message
     return {
         "id": agent.id,
         "name": agent.name,
@@ -65,6 +69,7 @@ async def _build_agent_detail_payload(agent: GtAgent) -> dict:
         "driver": agent.driver.value if agent.driver else None,
         "driver_type": agent.driver.value if agent.driver else None,
         "prompt": "",
+        "error_message": current_error_message,
     }
 
 
