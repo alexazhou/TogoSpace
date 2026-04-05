@@ -122,9 +122,9 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task_data={"room_id": room.room_id},
         )
         with self.patch_infer(handler=fake_infer):
-            await alice.turn_runner.run_chat_turn(task)
+            await alice.task_consumer._turn_runner.run_chat_turn(task)
 
-        tool_results = [m for m in alice._history if m.role == OpenaiLLMApiRole.TOOL]
+        tool_results = [m for m in alice.task_consumer._turn_runner._history if m.role == OpenaiLLMApiRole.TOOL]
         assert len(tool_results) >= 1
         assert json.loads(tool_results[0].content)["success"]
         assert tool_results[0].stage == AgentHistoryStage.TOOL_RESULT
@@ -157,7 +157,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task_data={"room_id": room.room_id},
         )
         with self.patch_infer(responses=resps):
-            await alice.turn_runner.run_chat_turn(task)
+            await alice.task_consumer._turn_runner.run_chat_turn(task)
 
         assert any(m.content == "最终消息" for m in room.messages)
 

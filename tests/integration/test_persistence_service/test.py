@@ -189,7 +189,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
         await ormService.shutdown()
 
     async def test_history_restored(self):
-        assert [m.content for m in self.fresh_agent._history] == ["u1", "a1"]
+        assert [m.content for m in self.fresh_agent.task_consumer._turn_runner._history] == ["u1", "a1"]
 
     async def test_running_task_marked_failed_after_restore(self):
         assert self.running_task_id is not None

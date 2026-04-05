@@ -162,18 +162,18 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         await room.add_message(bob_id, "hello alice")
 
         alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
-        synced_count = await alice.turn_runner.pull_room_messages_to_history(room)
+        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
 
         # 初始公告 + bob 消息会聚合成一条“轮到发言”上下文消息
         assert synced_count == 1
-        assert len(alice._history) == 1
-        content = alice._history[0].content or ""
+        assert len(alice.task_consumer._turn_runner._history) == 1
+        content = alice.task_consumer._turn_runner._history[0].content or ""
         assert content.startswith("【general】 房间轮到你行动，新消息如下：")
         assert "【房间《general》】【系统提醒】：" in content
         assert "【房间《general》】【bob】：" in content
         assert "： hello alice" in content
         assert "你现在可以调用工具行动。" in content
-        assert alice._history[0].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
+        assert alice.task_consumer._turn_runner._history[0].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
     async def test_pull_room_messages_to_history_appends_complete_turn_prompt_as_last_history(self):
         """pull_room_messages_to_history 追加到 history 的最后一条必须是完整 turn prompt。"""
@@ -187,18 +187,18 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         existing = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, "older context")
         alice.inject_history_messages([GtAgentHistory.from_openai_message(alice.gt_agent.id, 0, existing)])
 
-        synced_count = await alice.turn_runner.pull_room_messages_to_history(room)
+        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
 
         system_line = format_room_message("general", "SYSTEM", room.build_initial_system_message())
         bob_line = format_room_message("general", "bob", "hello alice")
         expected_prompt = build_turn_context_prompt("general", [system_line, bob_line])
 
         assert synced_count == 1
-        assert len(alice._history) == 2
-        assert alice._history[-1].content == expected_prompt
-        assert alice._history[-1].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
-        assert alice._history[0].content == "older context"
-        assert alice._history[0].tags == []
+        assert len(alice.task_consumer._turn_runner._history) == 2
+        assert alice.task_consumer._turn_runner._history[-1].content == expected_prompt
+        assert alice.task_consumer._turn_runner._history[-1].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
+        assert alice.task_consumer._turn_runner._history[0].content == "older context"
+        assert alice.task_consumer._turn_runner._history[0].tags == []
 
 
 class TestSaveTeamAgentsFullReplace(_agentServiceCase):
@@ -253,11 +253,11 @@ class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
         alice_id = room.get_agent_id_by_name("alice")
         await room.add_message(alice_id, "i am talking")
 
-        synced_count = await alice.turn_runner.pull_room_messages_to_history(room)
+        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
         # 只应有初始公告，不应有自己的消息
         assert synced_count == 1
-        assert len(alice._history) == 1
-        assert "talking" not in alice._history[0].content
+        assert len(alice.task_consumer._turn_runner._history) == 1
+        assert "talking" not in alice.task_consumer._turn_runner._history[0].content
 
 
 class TestAgentResumeFailed(_agentServiceCase):

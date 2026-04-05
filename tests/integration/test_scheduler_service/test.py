@@ -31,7 +31,6 @@ def _make_mock_agent(name: str, team_name: str = TEAM, agent_id: int = 1) -> Age
     agent = MagicMock(spec=Agent)
     agent.gt_agent = SimpleNamespace(id=agent_id, team_id=1, name=name, model="mock")
     agent.status = AgentStatus.IDLE
-    agent.turn_runner = SimpleNamespace(max_function_calls=5)
     agent.current_db_task = None
     agent.consume_task = AsyncMock()
     return agent
@@ -153,7 +152,7 @@ class TestSchedulerRun(ServiceTestCase):
             ))
             mock_task_manager.update_task_status = AsyncMock()
 
-            with patch.object(real_agent.turn_runner, "run_chat_turn", side_effect=RuntimeError("boom")):
+            with patch.object(real_agent.task_consumer._turn_runner, "run_chat_turn", side_effect=RuntimeError("boom")):
                 await real_agent.task_consumer.consume()
 
         assert real_agent.status == AgentStatus.FAILED
@@ -179,7 +178,7 @@ class TestSchedulerRun(ServiceTestCase):
             mock_task_manager.update_task_status = AsyncMock()
             mock_task_manager.has_consumable_task = AsyncMock(return_value=True)
 
-            with patch.object(real_agent.turn_runner, "run_chat_turn", side_effect=RuntimeError("boom")):
+            with patch.object(real_agent.task_consumer._turn_runner, "run_chat_turn", side_effect=RuntimeError("boom")):
                 restart_spy = MagicMock()
                 real_agent.task_consumer.start = restart_spy
                 await real_agent.task_consumer.consume()
