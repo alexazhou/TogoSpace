@@ -255,19 +255,21 @@ class ChatRoom:
             if next_agent_id is not None:
                 self._publish_current_turn(next_agent_id)
 
-    async def finish_turn(self, sender_id: int | None = None) -> bool:
+    async def finish_turn(self, agent_id: int) -> bool:
         """结束当前发言人的轮次。通常由 Agent 在 finish_chat_turn 工具中调用。
 
-        返回 True 表示操作成功，False 表示被拒绝（sender 不是当前发言人）。
+        返回 True 表示操作成功，False 表示被拒绝（agent 不是当前发言人）。
         """
+        assertUtil.assertNotNull(agent_id, error_message=f"agent_id 不能为空, room={self.key}")
+
         if self._state == RoomState.INIT:
             logger.warning(f"房间 {self.key} 仍处于 INIT，拒绝结束轮次")
             return False
 
         current_expected = self._get_current_turn_agent_id()
 
-        if sender_id is not None and sender_id != current_expected:
-            logger.warning(f"房间 {self.key} 拒绝结束轮次申请：{self._get_agent_name(sender_id)}(agent_id={sender_id}) 并非当前发言人 {self._get_agent_name(current_expected)}(agent_id={current_expected})")
+        if agent_id != current_expected:
+            logger.warning(f"房间 {self.key} 拒绝结束轮次申请：{self._get_agent_name(agent_id)}(agent_id={agent_id}) 并非当前发言人 {self._get_agent_name(current_expected)}(agent_id={current_expected})")
             return False
 
         logger.info(
