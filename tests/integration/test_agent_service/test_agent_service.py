@@ -184,7 +184,7 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         await room.add_message(bob_id, "hello alice")
 
         alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
-        existing = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, "older context")
+        existing = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "older context")
         alice.inject_history_messages([GtAgentHistory.from_openai_message(alice.gt_agent.id, 0, existing)])
 
         synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)

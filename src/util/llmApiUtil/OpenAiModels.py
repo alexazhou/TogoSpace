@@ -1,21 +1,21 @@
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
-from constants import OpenaiLLMApiRole
+from constants import OpenaiApiRole
 
 
 # ========== 主要类 ==========
 
 class OpenAIMessage(BaseModel):
     # 对应 openai 格式
-    role: OpenaiLLMApiRole = Field(..., description="消息角色")
+    role: OpenaiApiRole = Field(..., description="消息角色")
     content: Optional[str] = Field(None, description="消息内容")
     reasoning_content: Optional[str] = Field(None, description="推理内容（如 CoT 模型），仅响应侧使用")
     tool_calls: Optional[List["OpenAIToolCall"]] = Field(None, description="工具调用列表")
     tool_call_id: Optional[str] = Field(None, description="工具调用 ID（tool 角色专用）")
 
     @classmethod
-    def text(cls, role: OpenaiLLMApiRole, content: str) -> "OpenAIMessage":
+    def text(cls, role: OpenaiApiRole, content: str) -> "OpenAIMessage":
         """构造普通文本消息（system / user / assistant）。"""
         return cls(
             role=role,
@@ -29,7 +29,7 @@ class OpenAIMessage(BaseModel):
     def tool_result(cls, tool_call_id: str, result: str) -> "OpenAIMessage":
         """构造工具调用结果消息。"""
         return cls(
-            role=OpenaiLLMApiRole.TOOL,
+            role=OpenaiApiRole.TOOL,
             content=result,
             reasoning_content=None,
             tool_calls=None,

@@ -1,7 +1,7 @@
 """compactPolicy 单元测试。"""
 import pytest
 
-from constants import OpenaiLLMApiRole
+from constants import OpenaiApiRole
 from service.agentService.promptBuilder import (
     build_compact_instruction,
     build_compact_resume_prompt,
@@ -98,7 +98,7 @@ def test_build_compact_resume_prompt_wraps_summary():
 # ─── estimate_tokens ─────────────────────────────────────
 
 def test_estimate_tokens_returns_positive_int():
-    msgs = [llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "Hello world")]
+    msgs = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "Hello world")]
     result = estimate_tokens("gpt-4o", msgs, system_prompt="You are helpful.")
     assert isinstance(result, int)
     assert result > 0

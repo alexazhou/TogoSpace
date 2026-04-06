@@ -32,7 +32,7 @@ from mock_llm_server import (
     MOCK_LLM_HOST,
     get_mock_llm_api_url,
 )
-from constants import OpenaiLLMApiRole, EmployStatus, RoomType, SpecialAgent
+from constants import OpenaiApiRole, EmployStatus, RoomType, SpecialAgent
 
 _SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 _BACKEND_READY_TIMEOUT = 20
@@ -235,7 +235,7 @@ class ServiceTestCase:
             ))
 
         msg = OpenAIMessage(
-            role=OpenaiLLMApiRole.ASSISTANT,
+            role=OpenaiApiRole.ASSISTANT,
             content=content,
             tool_calls=tool_calls if tool_calls else None
         )

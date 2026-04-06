@@ -3,7 +3,7 @@ import pytest
 
 from util.configTypes import LlmServiceConfig
 from util.llmApiUtil import OpenAIResponse, OpenAIUsage, OpenAIChoice, OpenAIMessage
-from constants import OpenaiLLMApiRole
+from constants import OpenaiApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory
 
 
@@ -59,7 +59,7 @@ def test_openai_response_with_usage():
         choices=[
             OpenAIChoice(
                 index=0,
-                message=OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "hello"),
+                message=OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "hello"),
                 finish_reason="stop",
             )
         ],
@@ -77,7 +77,7 @@ def test_openai_response_without_usage():
         choices=[
             OpenAIChoice(
                 index=0,
-                message=OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "hello"),
+                message=OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "hello"),
                 finish_reason="stop",
             )
         ],
@@ -103,13 +103,13 @@ def test_openai_response_usage_from_dict():
 # ─── GtAgentHistory usage_json 字段 ──────────────────────
 
 def test_gt_agent_history_usage_json_default_none():
-    msg = OpenAIMessage.text(OpenaiLLMApiRole.USER, "hello")
+    msg = OpenAIMessage.text(OpenaiApiRole.USER, "hello")
     item = GtAgentHistory.from_openai_message(1, 0, msg)
     assert item.usage_json is None
 
 
 def test_gt_agent_history_usage_json_settable():
-    msg = OpenAIMessage.text(OpenaiLLMApiRole.USER, "hello")
+    msg = OpenAIMessage.text(OpenaiApiRole.USER, "hello")
     item = GtAgentHistory.from_openai_message(1, 0, msg)
     item.usage_json = '{"estimated_prompt_tokens": 100}'
     assert item.usage_json == '{"estimated_prompt_tokens": 100}'

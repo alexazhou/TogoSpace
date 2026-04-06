@@ -36,7 +36,7 @@ async def test_infer_passes_default_openclaw_headers(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, "hello")],
+        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
     )
 
     result = await llmService.infer(None, ctx)
@@ -71,7 +71,7 @@ async def test_infer_passes_configured_headers_without_default_merge(monkeypatch
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, "hello")],
+        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
     )
 
     result = await llmService.infer(None, ctx)

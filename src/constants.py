@@ -50,7 +50,7 @@ class EnhanceEnum(Enum):
         return '[' + self.name + ']'
 
 
-class OpenaiLLMApiRole(EnhanceEnum):
+class OpenaiApiRole(EnhanceEnum):
     # OpenAI 协议要求 role 使用固定小写字符串，不使用 auto()。
     SYSTEM = "system"
     USER = "user"
