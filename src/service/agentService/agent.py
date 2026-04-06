@@ -75,9 +75,9 @@ class Agent:
 
     # ─── 任务管理 ──────────────────────────────────────────────
 
-    def start_consumer_task(self, initial_task: GtAgentTask | None = None) -> None:
+    def start_consumer_task(self) -> None:
         """如果没有消费协程在运行，则启动一个。"""
-        self.task_consumer.start(initial_task)
+        self.task_consumer.start()
 
     def stop_consumer_task(self) -> None:
         """停止当前 Agent 的消费协程。"""
