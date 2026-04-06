@@ -222,7 +222,7 @@ class AgentHistoryStore:
             if item.role != OpenaiApiRole.ASSISTANT or item.tool_calls is None:
                 continue
             for tool_call in item.tool_calls:
-                if str(tool_call.id or "") == tool_call_id:
+                if tool_call.id == tool_call_id:
                     return tool_call
         return None
 
