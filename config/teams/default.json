@@ -21,12 +21,6 @@
       "max_turns": 100
     },
     {
-      "name": "Agent大群",
-      "agents": ["小马哥", "小A", "小B"],
-      "initial_topic": "按角色分工协作，一起协作完成人类发布的任务",
-      "max_turns": 1000
-    },
-    {
       "name": "小刘",
       "agents": ["Operator", "小刘"],
       "initial_topic": "你好，我是人类操作者。你主要协助做文件查找与信息检索。",

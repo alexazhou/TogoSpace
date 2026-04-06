@@ -11,9 +11,9 @@
     {
       "name": "local_proxy",
       "enable": true,
-      "model": "ppio/pa/claude-sonnet-4-6",
+      "model": "glm-4.7",
       "base_url": "http://127.0.0.1:8787/llm/v1/messages",
-      "api_key": "a440ad09-51fd-4510-9ca8-bf6a1d1c0291",
+      "api_key": "test-token-123",
       "type": "anthropic"
     }
   ],
