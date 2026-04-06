@@ -1,5 +1,5 @@
 from controller.baseController import BaseHandler
-from constants import DriverType, RoleTemplateType
+from constants import RoleTemplateType
 from dal.db import gtRoleTemplateManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
@@ -11,7 +11,6 @@ class CreateRoleTemplateRequest(BaseModel):
     name: str
     soul: str = ""
     model: str | None = None
-    driver: DriverType | None = None
     allowed_tools: list[str] | None = None
 
 
@@ -20,7 +19,6 @@ class ModifyRoleTemplateRequest(BaseModel):
     name: str
     soul: str = ""
     model: str | None = None
-    driver: DriverType | None = None
     allowed_tools: list[str] | None = None
 
 
@@ -29,7 +27,7 @@ class RoleTemplateListHandler(BaseHandler):
 
     async def get(self) -> None:
         templates = await gtRoleTemplateManager.get_all_role_templates()
-        self.return_json({"role_templates": templates})
+        self.return_json({"role_templates": [_serialize_role_template(template) for template in templates]})
 
 
 class RoleTemplateCreateHandler(BaseHandler):
@@ -52,12 +50,11 @@ class RoleTemplateCreateHandler(BaseHandler):
                 model=request.model,
                 soul=request.soul,
                 type=RoleTemplateType.USER,
-                driver=request.driver,
                 allowed_tools=request.allowed_tools,
             )
         )
 
-        self.return_json(created)
+        self.return_json(_serialize_role_template(created))
 
 
 class RoleTemplateDetailHandler(BaseHandler):
@@ -69,7 +66,7 @@ class RoleTemplateDetailHandler(BaseHandler):
             error_code="role_template_not_found",
         )
 
-        self.return_json(definition)
+        self.return_json(_serialize_role_template(definition))
 
 
 class RoleTemplateModifyHandler(BaseHandler):
@@ -103,12 +100,11 @@ class RoleTemplateModifyHandler(BaseHandler):
         definition.name = next_name
         definition.soul = request.soul
         definition.model = request.model
-        definition.driver = request.driver
         definition.allowed_tools = request.allowed_tools
 
         updated = await gtRoleTemplateManager.save_role_template(definition)
 
-        self.return_json(updated)
+        self.return_json(_serialize_role_template(updated))
 
 
 class RoleTemplateDeleteHandler(BaseHandler):
@@ -140,3 +136,16 @@ class RoleTemplateDeleteHandler(BaseHandler):
 
         await gtRoleTemplateManager.delete_role_template(int(template_id))
         self.return_json({"status": "deleted", "id": definition.id, "name": definition.name})
+
+
+def _serialize_role_template(template: GtRoleTemplate) -> dict:
+    return {
+        "id": template.id,
+        "name": template.name,
+        "model": template.model,
+        "soul": template.soul,
+        "type": template.type.name if template.type else None,
+        "allowed_tools": template.allowed_tools,
+        "created_at": template.created_at.isoformat() if template.created_at else None,
+        "updated_at": template.updated_at.isoformat() if template.updated_at else None,
+    }

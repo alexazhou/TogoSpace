@@ -8,6 +8,5 @@
     "Bash",
     "Glob",
     "Grep"
-  ],
-  "driver": "claude_sdk"
+  ]
 }

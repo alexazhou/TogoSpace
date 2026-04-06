@@ -5,6 +5,5 @@
     "Read",
     "send_chat_msg",
     "finish_chat_turn"
-  ],
-  "driver": "claude_sdk"
+  ]
 }

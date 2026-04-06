@@ -16,7 +16,6 @@ async def save_role_template(role_template: GtRoleTemplate) -> GtRoleTemplate:
     if existing is not None:
         if (
             existing.type != role_template.type
-            or existing.driver != role_template.driver
             or existing.allowed_tools != role_template.allowed_tools
         ):
             return await gtRoleTemplateManager.save_role_template(
@@ -25,7 +24,6 @@ async def save_role_template(role_template: GtRoleTemplate) -> GtRoleTemplate:
                     model=existing.model,
                     soul=existing.soul,
                     type=role_template.type,
-                    driver=role_template.driver,
                     allowed_tools=role_template.allowed_tools,
                 )
             )

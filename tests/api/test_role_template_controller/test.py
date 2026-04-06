@@ -33,7 +33,7 @@ class TestRoleTemplateController(_ApiServiceCase):
         assert "name" in template
         assert "model" in template
         assert "type" in template
-        assert "driver" in template
+        assert "driver" not in template
         assert isinstance(template["created_at"], str)
         assert isinstance(template["updated_at"], str)
 
@@ -57,7 +57,7 @@ class TestRoleTemplateController(_ApiServiceCase):
         assert "model" in detail
         assert "soul" in detail
         assert "type" in detail
-        assert "driver" in detail
+        assert "driver" not in detail
         assert "allowed_tools" in detail
 
     async def test_create_role_template(self):
@@ -96,7 +96,6 @@ class TestRoleTemplateController(_ApiServiceCase):
             "name": target_name,
             "soul": "更新后的 Soul",
             "model": "gpt-4.1-mini",
-            "driver": "native",
             "allowed_tools": ["Read", "Edit"],
         }
 
@@ -120,10 +119,8 @@ class TestRoleTemplateController(_ApiServiceCase):
         assert updated["name"] == target_name
         assert updated["soul"] == "更新后的 Soul"
         assert updated["model"] == "gpt-4.1-mini"
-        assert updated["driver"] == "NATIVE"
         assert updated["allowed_tools"] == ["Read", "Edit"]
         assert detail["name"] == target_name
         assert detail["soul"] == "更新后的 Soul"
         assert detail["model"] == "gpt-4.1-mini"
-        assert detail["driver"] == "NATIVE"
         assert detail["allowed_tools"] == ["Read", "Edit"]
