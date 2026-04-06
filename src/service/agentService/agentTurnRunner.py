@@ -113,7 +113,7 @@ class AgentTurnRunner:
             return 0
 
         await self._history.append_history_message(
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, build_turn_context_prompt(room.name, message_blocks)),
+            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, build_turn_context_prompt(room.name, message_blocks)),
             stage=AgentHistoryStage.INPUT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         )
@@ -141,7 +141,7 @@ class AgentTurnRunner:
                 return
             if len(turn_setup.hint_prompt) > 0:
                 await self._history.append_history_message(
-                    llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_setup.hint_prompt),
+                    llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_setup.hint_prompt),
                     stage=AgentHistoryStage.INPUT,
                 )
 
@@ -260,7 +260,7 @@ class AgentTurnRunner:
             if pending_infer is not None:
                 history_item = pending_infer
             else:
-                history_item = await history.append_stage_init(stage=AgentHistoryStage.INFER)
+                history_item = await history.append_history_init_item(stage=AgentHistoryStage.INFER)
 
             # ── 发起 LLM 请求 ──
             ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools)
@@ -371,7 +371,7 @@ class AgentTurnRunner:
 
         compact_instruction = build_compact_instruction(max_tokens=llm_config.compact_summary_max_tokens)
         instruction_msg = llmApiUtil.OpenAIMessage.text(
-            llmApiUtil.OpenaiLLMApiRole.USER, compact_instruction,
+            llmApiUtil.OpenaiApiRole.USER, compact_instruction,
         )
         await self._history.append_history_message(
             instruction_msg,
@@ -397,7 +397,7 @@ class AgentTurnRunner:
 
         compact_context = build_compact_resume_prompt(summary_message.content or "")
         context_msg = llmApiUtil.OpenAIMessage.text(
-            llmApiUtil.OpenaiLLMApiRole.USER, compact_context,
+            llmApiUtil.OpenaiApiRole.USER, compact_context,
         )
         await self._history.append_history_message(
             context_msg,
@@ -480,7 +480,7 @@ class AgentTurnRunner:
     ) -> ToolExecutionResult:
         """执行单个 tool call 并记录到 history。若 existing_item 不为 None，则复用已有 history item（续跑场景）。"""
         assert tool_call.id, "tool_call.id should not be empty"
-        history_item = existing_item or await self._history.append_stage_init(
+        history_item = existing_item or await self._history.append_history_init_item(
             stage=AgentHistoryStage.TOOL_RESULT,
             tool_call_id=str(tool_call.id),
         )

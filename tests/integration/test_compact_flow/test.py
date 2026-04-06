@@ -11,7 +11,7 @@ import service.llmService as llmService
 import service.ormService as ormService
 from constants import (
     AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag,
-    DriverType, OpenaiLLMApiRole,
+    DriverType, OpenaiApiRole,
 )
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -62,7 +62,7 @@ def _make_runner(history: AgentHistoryStore) -> AgentTurnRunner:
 
 def _make_mock_response(content: str):
     """构造 mock LLM 响应对象。"""
-    msg = llmApiUtil.OpenAIMessage(role=OpenaiLLMApiRole.ASSISTANT, content=content)
+    msg = llmApiUtil.OpenAIMessage(role=OpenaiApiRole.ASSISTANT, content=content)
     mock_resp = MagicMock()
     mock_choice = MagicMock()
     mock_choice.message = msg
@@ -87,17 +87,17 @@ class TestCompactFlow(ServiceTestCase):
         history = AgentHistoryStore(agent_id=agent_id)
 
         for i in range(turns):
-            user_msg = llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, f"用户消息 {i}")
+            user_msg = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"用户消息 {i}")
             await history.append_history_message(
                 user_msg, stage=AgentHistoryStage.INPUT, status=AgentHistoryStatus.SUCCESS,
             )
-            assistant_msg = llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, f"助手回复 {i}")
+            assistant_msg = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, f"助手回复 {i}")
             await history.append_history_message(
                 assistant_msg, stage=AgentHistoryStage.INFER, status=AgentHistoryStatus.SUCCESS,
             )
 
         # 追加一条新的 user 消息，使 history 处于 infer-ready 状态
-        final_user = llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "最新的用户输入")
+        final_user = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "最新的用户输入")
         await history.append_history_message(
             final_user, stage=AgentHistoryStage.INPUT, status=AgentHistoryStatus.SUCCESS,
         )
@@ -162,7 +162,7 @@ class TestCompactFlow(ServiceTestCase):
         # 3. 最后一条消息应该是 assistant 的正常回复
         last = history.last()
         assert last is not None
-        assert last.role == OpenaiLLMApiRole.ASSISTANT
+        assert last.role == OpenaiApiRole.ASSISTANT
         assert last.status == AgentHistoryStatus.SUCCESS
         assert last.content == "好的，我来回答你的最新问题。"
 
@@ -192,20 +192,20 @@ class TestCompactFlow(ServiceTestCase):
         compact_cmd = compact_items[0]
         compact_idx = list(history).index(compact_cmd)
         assert compact_cmd.stage == AgentHistoryStage.INPUT
-        assert compact_cmd.role == OpenaiLLMApiRole.USER
+        assert compact_cmd.role == OpenaiApiRole.USER
 
         # COMPACT_CMD 后应紧跟 summary (INFER/ASSISTANT)
         if compact_idx + 1 < len(history):
             summary_item = list(history)[compact_idx + 1]
             assert summary_item.stage == AgentHistoryStage.INFER
-            assert summary_item.role == OpenaiLLMApiRole.ASSISTANT
+            assert summary_item.role == OpenaiApiRole.ASSISTANT
             assert summary_item.content == "摘要内容"
 
         # summary 后应紧跟 context_resume (INPUT/USER)
         if compact_idx + 2 < len(history):
             context_item = list(history)[compact_idx + 2]
             assert context_item.stage == AgentHistoryStage.INPUT
-            assert context_item.role == OpenaiLLMApiRole.USER
+            assert context_item.role == OpenaiApiRole.USER
             assert "压缩摘要" in context_item.content or "摘要内容" in context_item.content
 
     async def test_compact_trim_removes_old_messages_from_memory(self):

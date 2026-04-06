@@ -13,12 +13,12 @@ from service.agentService.agentHistoryStore import CompactPlan
 from service import llmService
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver.base import AgentDriverConfig
-from util.llmApiUtil import OpenAIMessage, OpenAIToolCall, OpenaiLLMApiRole
+from util.llmApiUtil import OpenAIMessage, OpenAIToolCall, OpenaiApiRole
 
 
 def _make_mock_response(content="ok", tool_calls=None, usage=None):
     msg = OpenAIMessage(
-        role=OpenaiLLMApiRole.ASSISTANT,
+        role=OpenaiApiRole.ASSISTANT,
         content=content,
         tool_calls=tool_calls,
     )
@@ -56,14 +56,14 @@ def _make_runner_and_history():
     history = MagicMock()
     history.assert_infer_ready = MagicMock()
     history.build_infer_messages = MagicMock(return_value=[
-        OpenAIMessage(role=OpenaiLLMApiRole.USER, content="hello"),
+        OpenAIMessage(role=OpenaiApiRole.USER, content="hello"),
     ])
     history.get_pending_infer_item = MagicMock(return_value=None)
     history.build_compact_plan = MagicMock(return_value=CompactPlan(
-        source_messages=[OpenAIMessage(role=OpenaiLLMApiRole.USER, content="hello")],
+        source_messages=[OpenAIMessage(role=OpenaiApiRole.USER, content="hello")],
         insert_seq=1,
     ))
-    history.append_stage_init = AsyncMock(return_value=_make_history_item())
+    history.append_history_init_item = AsyncMock(return_value=_make_history_item())
     history.finalize_history_item = AsyncMock()
     history.append_history_message = AsyncMock(return_value=_make_history_item(2))
     history.trim_to_compact_window = MagicMock()
@@ -106,7 +106,7 @@ async def test_infer_normal_no_compact():
         msg = await runner._infer(tools=None)
 
     assert msg.content == "回答"
-    history.append_stage_init.assert_called_once()
+    history.append_history_init_item.assert_called_once()
     history.finalize_history_item.assert_called_once()
     history.trim_to_compact_window.assert_not_called()
 
@@ -126,7 +126,7 @@ async def test_infer_reuses_pending_infer_item():
         msg = await runner._infer(tools=None)
 
     assert msg.content == "续跑回答"
-    history.append_stage_init.assert_not_called()
+    history.append_history_init_item.assert_not_called()
     call_kwargs = history.finalize_history_item.call_args[1]
     assert call_kwargs["history_id"] == 99
 
@@ -166,7 +166,7 @@ async def test_infer_pre_check_still_over_after_compact():
         with pytest.raises(RuntimeError, match="compact 后仍超限"):
             await runner._infer(tools=None)
 
-    history.append_stage_init.assert_not_called()
+    history.append_history_init_item.assert_not_called()
 
 
 @pytest.mark.asyncio

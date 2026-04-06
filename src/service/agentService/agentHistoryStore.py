@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Iterator
 
-from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiLLMApiRole
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiApiRole
 from dal.db import gtAgentHistoryManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from util import llmApiUtil
@@ -68,7 +68,7 @@ class AgentHistoryStore:
             return None
         return self._items[-1]
 
-    def last_role(self) -> OpenaiLLMApiRole | None:
+    def last_role(self) -> OpenaiApiRole | None:
         last_item = self.last()
         if last_item is None:
             return None
@@ -86,9 +86,9 @@ class AgentHistoryStore:
 
         last_role = self.last_role()
         assert last_role in (
-            llmApiUtil.OpenaiLLMApiRole.USER,
-            llmApiUtil.OpenaiLLMApiRole.TOOL,
-            llmApiUtil.OpenaiLLMApiRole.SYSTEM,
+            llmApiUtil.OpenaiApiRole.USER,
+            llmApiUtil.OpenaiApiRole.TOOL,
+            llmApiUtil.OpenaiApiRole.SYSTEM,
         ), f"[{agent_label}] _infer 前最后一条消息不能是 assistant，当前为: {last_role if last_role else 'empty'}"
 
     def export_openai_message_list(self) -> list[llmApiUtil.OpenAIMessage]:
@@ -153,7 +153,7 @@ class AgentHistoryStore:
             item.id = saved.id
         return item
 
-    async def append_stage_init(
+    async def append_history_init_item(
         self,
         stage: AgentHistoryStage,
         tool_call_id: str | None = None,
@@ -210,7 +210,7 @@ class AgentHistoryStore:
     def get_last_assistant_message(self, start_idx: int = 0) -> llmApiUtil.OpenAIMessage | None:
         recent_history = self._items[start_idx:]
         for item in reversed(recent_history):
-            if item.role == llmApiUtil.OpenaiLLMApiRole.ASSISTANT:
+            if item.role == llmApiUtil.OpenaiApiRole.ASSISTANT:
                 return item.openai_message
         return None
 
@@ -219,7 +219,7 @@ class AgentHistoryStore:
         if len(tool_call_id) == 0:
             return None
         for item in reversed(self._items[start_idx:]):
-            if item.role != OpenaiLLMApiRole.ASSISTANT or item.tool_calls is None:
+            if item.role != OpenaiApiRole.ASSISTANT or item.tool_calls is None:
                 continue
             for tool_call in item.tool_calls:
                 if str(tool_call.id or "") == tool_call_id:
@@ -228,7 +228,7 @@ class AgentHistoryStore:
 
     def find_tool_result_by_call_id(self, tool_call_id: str) -> GtAgentHistory | None:
         for item in reversed(self._items):
-            if item.role == llmApiUtil.OpenaiLLMApiRole.TOOL and item.tool_call_id == tool_call_id:
+            if item.role == llmApiUtil.OpenaiApiRole.TOOL and item.tool_call_id == tool_call_id:
                 return item
         return None
 
@@ -286,7 +286,7 @@ class AgentHistoryStore:
                 and self._items[compact_idx + 1].stage == AgentHistoryStage.INFER
                 and self._items[compact_idx + 1].status == AgentHistoryStatus.SUCCESS
                 and self._items[compact_idx + 2].stage == AgentHistoryStage.INPUT
-                and self._items[compact_idx + 2].role == llmApiUtil.OpenaiLLMApiRole.USER
+                and self._items[compact_idx + 2].role == llmApiUtil.OpenaiApiRole.USER
             ):
                 runtime_items = list(suffix[2:])
             else:
@@ -307,7 +307,7 @@ class AgentHistoryStore:
             return None
 
         for idx in range(len(visible_items) - 1, -1, -1):
-            if visible_items[idx].role == llmApiUtil.OpenaiLLMApiRole.USER:
+            if visible_items[idx].role == llmApiUtil.OpenaiApiRole.USER:
                 return idx
 
         return len(visible_items) - 1
@@ -319,11 +319,11 @@ class AgentHistoryStore:
         return None
 
     @staticmethod
-    def _infer_role_from_stage(stage: AgentHistoryStage) -> llmApiUtil.OpenaiLLMApiRole:
+    def _infer_role_from_stage(stage: AgentHistoryStage) -> llmApiUtil.OpenaiApiRole:
         if stage == AgentHistoryStage.INPUT:
-            return llmApiUtil.OpenaiLLMApiRole.USER
+            return llmApiUtil.OpenaiApiRole.USER
         if stage == AgentHistoryStage.INFER:
-            return llmApiUtil.OpenaiLLMApiRole.ASSISTANT
+            return llmApiUtil.OpenaiApiRole.ASSISTANT
         if stage == AgentHistoryStage.TOOL_RESULT:
-            return llmApiUtil.OpenaiLLMApiRole.TOOL
+            return llmApiUtil.OpenaiApiRole.TOOL
         raise ValueError(f"不支持的 history stage: {stage}")
