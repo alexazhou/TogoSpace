@@ -295,19 +295,22 @@ async def test_execute_compact_inserts_cmd_summary_context_and_trims():
 
     assert history.insert_history_message_at_seq.await_count == 3
 
-    cmd_call = history.insert_history_message_at_seq.await_args_list[0]
-    assert cmd_call.kwargs["insert_seq"] == 1
+    # build_history_item receives kwargs; insert_history_message_at_seq receives built item
+    assert history.build_history_item.call_count == 3
+
+    cmd_call = history.build_history_item.call_args_list[0]
+    assert cmd_call.kwargs["seq"] == 1
     assert cmd_call.kwargs["tags"] == [AgentHistoryTag.COMPACT_CMD]
 
-    summary_call = history.insert_history_message_at_seq.await_args_list[1]
-    assert summary_call.kwargs["insert_seq"] == 2
+    summary_call = history.build_history_item.call_args_list[1]
+    assert summary_call.kwargs["seq"] == 2
     assert summary_call.kwargs["stage"] == AgentHistoryStage.INFER
-    assert summary_call.kwargs["message"].content == "压缩摘要"
+    assert summary_call.args[0].content == "压缩摘要"
 
-    context_call = history.insert_history_message_at_seq.await_args_list[2]
-    assert context_call.kwargs["insert_seq"] == 3
+    context_call = history.build_history_item.call_args_list[2]
+    assert context_call.kwargs["seq"] == 3
     assert context_call.kwargs["stage"] == AgentHistoryStage.INPUT
-    assert "以下是之前对话的压缩摘要" in context_call.kwargs["message"].content
+    assert "以下是之前对话的压缩摘要" in context_call.args[0].content
 
     history.trim_to_compact_window.assert_called_once()
 
