@@ -210,6 +210,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
         max_attempts = self.host.max_function_calls
         logger.info(f"SDK 注入增量消息: agent_id={self.host.gt_agent.id}, room={room.key}, new_msgs={synced_count}")
 
+        last_error_text: str | None = None
         try:
             await client.query(turn_prompt)
             logger.info(f"SDK prompt 已发送，等待响应: agent_id={self.host.gt_agent.id}")
@@ -220,7 +221,11 @@ class ClaudeSdkAgentDriver(AgentDriver):
                     logger.info(f"SDK 注入发言提醒: agent_id={self.host.gt_agent.id}, attempt={attempt}")
                     await client.query(hint)
 
-                has_direct_text = await self._consume_response_stream(client, room)
+                has_direct_text, error_text = await self._consume_response_stream(client, room)
+
+                if error_text is not None:
+                    last_error_text = error_text
+                    raise RuntimeError(f"SDK 会话返回错误: agent_id={self.host.gt_agent.id}, error={error_text}")
 
                 if self._turn_done is True:
                     if has_direct_text and room._current_turn_has_content is False:
@@ -235,9 +240,16 @@ class ClaudeSdkAgentDriver(AgentDriver):
             logger.error(f"SDK 会话异常: agent_id={self.host.gt_agent.id}, room={room.key}, error={e}", exc_info=True)
             raise
 
-    async def _consume_response_stream(self, client: ClaudeSDKClient, room: ChatRoom) -> bool:
-        """消费一轮 SDK 响应流，处理各类消息。返回是否检测到直接文本输出。"""
+        if not self._turn_done:
+            raise RuntimeError(
+                f"SDK 达到最大尝试次数但未完成行动: agent_id={self.host.gt_agent.id}, "
+                f"max_attempts={max_attempts}, last_error={last_error_text}"
+            )
+
+    async def _consume_response_stream(self, client: ClaudeSDKClient, room: ChatRoom) -> tuple[bool, str | None]:
+        """消费一轮 SDK 响应流，处理各类消息。返回 (是否检测到直接文本输出, 错误文本或None)。"""
         has_direct_text = False
+        error_text: str | None = None
         msg_count = 0
         interrupted = False
 
@@ -265,6 +277,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
 
             elif isinstance(msg, ResultMessage):
                 if msg.is_error is True:
+                    error_text = str(msg.result) if msg.result else "unknown SDK error"
                     logger.error(f"SDK 执行失败: agent_id={self.host.gt_agent.id}, room={room.key}, result={msg.result}")
                 else:
                     logger.info(f"SDK 会话完成: agent_id={self.host.gt_agent.id}, num_turns={msg.num_turns}, duration_ms={msg.duration_ms}, cost_usd={msg.total_cost_usd}")
@@ -273,4 +286,4 @@ class ClaudeSdkAgentDriver(AgentDriver):
                 logger.debug(f"SDK 未知消息: agent_id={self.host.gt_agent.id}, type={type(msg).__name__}, data={msg}")
 
         logger.info(f"SDK receive_response 结束: agent_id={self.host.gt_agent.id}, total_msgs={msg_count}")
-        return has_direct_text
+        return has_direct_text, error_text

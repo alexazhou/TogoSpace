@@ -287,9 +287,8 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client
 
-        await driver.run_chat_turn(task, synced_count=0)
-
-        assert len(fake_client.queries) == 2
+        with pytest.raises(RuntimeError, match="SDK 达到最大尝试次数但未完成行动"):
+            await driver.run_chat_turn(task, synced_count=0)
 
         assert len(fake_client.queries) == 2
 
@@ -323,7 +322,8 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             ),
         ])
 
-        await driver.run_chat_turn(task, synced_count=1)
+        with pytest.raises(RuntimeError, match="SDK 达到最大尝试次数但未完成行动"):
+            await driver.run_chat_turn(task, synced_count=1)
 
         assert len(fake_client.queries) == 1
         first_prompt = fake_client.queries[0]
