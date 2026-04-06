@@ -41,6 +41,16 @@ class SendMessageRequest(BaseModel):
     content: str | None = None
 
 
+def _infer_room_type_from_agent_ids(agent_ids: List[int]) -> RoomType:
+    ai_count = len([
+        agent_id for agent_id in agent_ids
+        if SpecialAgent.value_of(agent_id) != SpecialAgent.OPERATOR
+    ])
+    if any(SpecialAgent.value_of(agent_id) == SpecialAgent.OPERATOR for agent_id in agent_ids) and ai_count == 1:
+        return RoomType.PRIVATE
+    return RoomType.GROUP
+
+
 async def _assert_agent_ids_in_team(team_id: int, agent_ids: List[int]) -> None:
     if len(agent_ids) == 0:
         return
@@ -184,11 +194,12 @@ class TeamRoomCreateHandler(BaseHandler):
             error_message="room must have at least 2 agents",
             error_code="room_agents_too_few",
         )
+        room_type = _infer_room_type_from_agent_ids(request.agent_ids)
 
         await gtRoomManager.save_room(GtRoom(
             team_id=team_id,
             name=request.name,
-            type=request.type,
+            type=room_type,
             initial_topic=request.initial_topic or "",
             max_turns=request.max_turns,
             agent_ids=list(request.agent_ids),

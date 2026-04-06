@@ -3,6 +3,7 @@ import sys
 import time
 import aiohttp
 import pytest
+from constants import RoomType, SpecialAgent
 from tests.base import ServiceTestCase
 
 if os.name == "posix" and sys.platform == "darwin":
@@ -187,6 +188,40 @@ class TestConfigApi(ServiceTestCase):
                 assert resp.status == 200
                 agents_data = await resp.json()
                 assert set(agents_data["agent_ids"]) == {alice["id"], bob["id"]}
+
+            async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{room_id}/delete.json") as resp:
+                assert resp.status == 200
+
+    async def test_team_room_create_auto_infers_private_type_for_agent_and_operator(self):
+        team_id = await self._get_team_id("e2e")
+        room_name = f"room_private_auto_{int(time.time() * 1000)}"
+        agents = await self._get_team_agents(team_id)
+        alice = next(agent for agent in agents if agent["name"] == "alice")
+
+        create_payload = {
+            "name": room_name,
+            "type": "GROUP",
+            "initial_topic": "private room",
+            "max_turns": 12,
+            "agent_ids": [alice["id"], int(SpecialAgent.OPERATOR.value)],
+        }
+        async with aiohttp.ClientSession() as client:
+            async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/create.json", json=create_payload) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["status"] == "created"
+
+            async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/list.json") as resp:
+                assert resp.status == 200
+                rooms_data = await resp.json()
+                created_room = next(room for room in rooms_data["rooms"] if room["name"] == room_name)
+                room_id = created_room["id"]
+
+            async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{room_id}.json") as resp:
+                assert resp.status == 200
+                detail = await resp.json()
+                assert RoomType.value_of(detail["type"]) == RoomType.PRIVATE
+                assert set(detail["agent_ids"]) == {alice["id"], int(SpecialAgent.OPERATOR.value)}
 
             async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{room_id}/delete.json") as resp:
                 assert resp.status == 200
