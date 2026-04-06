@@ -241,14 +241,18 @@ class AgentHistoryStore:
 
     def has_pending_tool_calls_in_unfinished_turn(self) -> bool:
         """检查未完成 turn 中是否有未执行的工具。"""
+        return self.get_first_pending_tool_call_in_unfinished_turn() is not None
+
+    def get_first_pending_tool_call_in_unfinished_turn(self) -> llmApiUtil.OpenAIToolCall | None:
+        """获取未完成 turn 中第一个未执行的 tool_call。"""
         last_assistant = self.get_last_assistant_message_in_unfinished_turn()
         if last_assistant is None or not last_assistant.tool_calls:
-            return False
+            return None
         for tc in last_assistant.tool_calls:
             result = self.find_tool_result_by_call_id(tc.id)
             if result is None or result.status == AgentHistoryStatus.INIT:
-                return True
-        return False
+                return tc
+        return None
 
     def get_unfinished_turn_start_index(self) -> int | None:
         """从尾部向前查找最近一次未完成 turn 的起始 index。"""
