@@ -69,15 +69,12 @@ class AgentTurnRunner:
         try:
             if self.driver.host_managed_turn_loop:
                 assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
-                if self._history.has_unfinished_turn():
-                    await self._run_turn_with_host_loop(room, resumed=True)
-                    return
-
-                synced_count = await self.pull_room_messages_to_history(room)
-                if synced_count == 0 and room.state != RoomState.INIT:
-                    logger.info(f"无新消息，自动跳过本轮: {self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}")
-                    await room.finish_turn(self.gt_agent.id)
-                    return
+                if not self._history.has_unfinished_turn():
+                    synced_count = await self.pull_room_messages_to_history(room)
+                    if synced_count == 0 and room.state != RoomState.INIT:
+                        logger.info(f"无新消息，自动跳过本轮: {self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}")
+                        await room.finish_turn(self.gt_agent.id)
+                        return
 
                 await self._run_turn_with_host_loop(room)
 
@@ -107,12 +104,12 @@ class AgentTurnRunner:
         )
         return 1
 
-    async def _run_turn_with_host_loop(self, room: ChatRoom, resumed: bool = False) -> None:
+    async def _run_turn_with_host_loop(self, room: ChatRoom) -> None:
         """Host-managed turn loop：循环推理+工具调用，支持从断点恢复。"""
         tools: list[llmApiUtil.OpenAITool] = self.tool_registry.export_openai_tools()
 
         # 断点恢复逻辑
-        if resumed:
+        if self._history.has_unfinished_turn():
             turn_start_idx = self._history.get_unfinished_turn_start_index()
             if turn_start_idx is not None:
                 last_item = self._history.last()
