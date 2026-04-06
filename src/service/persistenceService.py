@@ -8,7 +8,8 @@ import asyncio
 
 from dal.db import gtAgentHistoryManager, gtAgentTaskManager, gtRoomMessageManager, gtRoomManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from constants import AgentHistoryTag, AgentTaskStatus
+from constants import AgentTaskStatus
+from service.agentService.agentHistoryStore import AgentHistoryStore
 
 
 async def startup() -> None:
@@ -35,7 +36,7 @@ async def load_room_runtime(room_id: int) -> tuple[list[GtRoomMessage], dict[str
 async def load_agent_history_message(agent_id: int) -> list[GtAgentHistory]:
     """加载 Agent 的对话历史，启动恢复时按 compact 规则裁剪加载范围。
 
-    若存在 COMPACT_CMD tag 的消息，只返回最新 COMPACT_CMD 及其之后的消息。
+    若存在 compact 记录，只返回恢复当前 compact 视图所需的最小消息窗口。
     """
     items = await gtAgentHistoryManager.get_agent_history(agent_id)
     return _trim_to_latest_compact(items)
@@ -53,8 +54,9 @@ async def fail_running_tasks(agent_id: int) -> None:
 
 
 def _trim_to_latest_compact(items: list[GtAgentHistory]) -> list[GtAgentHistory]:
-    """若存在 COMPACT_CMD，只保留最新 COMPACT_CMD 及其之后的消息。"""
-    for idx in range(len(items) - 1, -1, -1):
-        if AgentHistoryTag.COMPACT_CMD in items[idx].tags:
-            return items[idx:]
-    return items
+    """按 compact 视图规则裁剪恢复窗口。"""
+    history = AgentHistoryStore(agent_id=0, items=items)
+    start = history.get_runtime_window_start_index()
+    if start is None:
+        return items
+    return items[start:]

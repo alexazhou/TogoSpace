@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Awaitable, Callable, List, Optional
 
@@ -21,7 +22,12 @@ from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService import compactPolicy
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
 from service.agentService.driver.factory import build_agent_driver
-from service.agentService.promptBuilder import build_turn_context_prompt, format_room_message
+from service.agentService.promptBuilder import (
+    build_compact_instruction,
+    build_compact_resume_prompt,
+    build_turn_context_prompt,
+    format_room_message,
+)
 from service.agentService.toolRegistry import AgentToolRegistry, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
 from util import configUtil, llmApiUtil
@@ -117,10 +123,11 @@ class AgentTurnRunner:
             llmApiUtil.OpenaiLLMApiRole.USER,
             content=build_turn_context_prompt(room.name, message_blocks),
         )
-        await self._history.append_history_message(turn_context_message,
+        await self._history.append_history_message(self._history.build_history_item(
+            turn_context_message,
             stage=AgentHistoryStage.INPUT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
-        )
+        ))
         return 1
 
     async def _run_chat_turn_with_host_loop(self, room: ChatRoom) -> None:
@@ -134,8 +141,10 @@ class AgentTurnRunner:
                 return
             if len(turn_setup.hint_prompt) > 0:
                 await self._history.append_history_message(
-                    llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_setup.hint_prompt),
-                    stage=AgentHistoryStage.INPUT,
+                    self._history.build_history_item(
+                        llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_setup.hint_prompt),
+                        stage=AgentHistoryStage.INPUT,
+                    )
                 )
 
     async def _resume_chat_turn_with_host_loop(self, room: ChatRoom) -> None:
@@ -151,7 +160,7 @@ class AgentTurnRunner:
             return
 
         if last_item.stage == AgentHistoryStage.INFER and last_item.status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED):
-            assistant_message = await self._infer(tools, resume_item=last_item)
+            assistant_message = await self._infer(tools)
             tool_calls = assistant_message.tool_calls or []
             if tool_calls:
                 turn_done = await self._dispatch_tool_calls(room, tool_calls)
@@ -201,90 +210,154 @@ class AgentTurnRunner:
 
     # ─── AgentDriverHost 协议方法 ──────────────────────────
 
-    def _resolve_compact_config(self) -> tuple[str, configUtil.LlmServiceConfig, int]:
-        """获取 compact 相关配置：(resolved_model, llm_config, threshold)。"""
+    def _resolve_compact_config(self) -> tuple[str, configUtil.LlmServiceConfig, int, int]:
+        """获取 compact 相关配置：(resolved_model, llm_config, trigger_tokens, hard_limit_tokens)。"""
         llm_config = configUtil.get_app_config().setting.current_llm_service
         resolved_model = self.gt_agent.model or llm_config.model
-        threshold = compactPolicy.calc_compact_trigger_tokens(resolved_model, llm_config)
-        return resolved_model, llm_config, threshold
+        trigger_tokens = compactPolicy.calc_compact_trigger_tokens(resolved_model, llm_config)
+        hard_limit_tokens = compactPolicy.calc_hard_limit_tokens(resolved_model, llm_config)
+        return resolved_model, llm_config, trigger_tokens, hard_limit_tokens
+
+    @staticmethod
+    def _build_usage_json(
+        *,
+        estimated_prompt_tokens: int | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        total_tokens: int | None = None,
+        pre_check_triggered: bool = False,
+        overflow_retry: bool = False,
+    ) -> str:
+        payload = {
+            "estimated_prompt_tokens": estimated_prompt_tokens,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "pre_check_triggered": pre_check_triggered,
+            "overflow_retry": overflow_retry,
+        }
+        return json.dumps(payload, ensure_ascii=False)
 
     async def _infer(
         self,
         tools: Optional[list[llmApiUtil.OpenAITool]],
         *,
-        resume_item: GtAgentHistory | None = None,
         _skip_compact: bool = False,
     ) -> llmApiUtil.OpenAIMessage:
-        """执行一次 LLM 推理，集成 token 预算 pre-check / post-check / overflow retry。
+        """执行一次 LLM 推理，集成 token 预算 pre-check / overflow retry。
 
-        若 resume_item 不为 None，则为续跑（复用已有 history item，跳过最后一条消息）。
         若 _skip_compact 为 True，跳过所有 compact 检查（避免 compact 推理时递归）。
         """
         history = self._history
-        if resume_item is None:
-            history.assert_infer_ready(f"agent_id={self.gt_agent.id}")
+        history.assert_infer_ready(f"agent_id={self.gt_agent.id}")
 
-        ctx_tools: list[llmApiUtil.OpenAITool] | None = None
-        if tools is not None and len(tools) > 0:
-            ctx_tools = tools
-
-        # ── 构造消息 + Pre-check ──
-        messages = history.build_infer_messages()
-        if resume_item is not None:
-            messages = messages[:-1]
-        resolved_model, _, _ = self._resolve_compact_config()
-        estimated_tokens = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
-
+        resolved_model, _, trigger_tokens, hard_limit_tokens = self._resolve_compact_config()
+        estimated_tokens = 0
         pre_check_triggered = False
-        if not _skip_compact:
-            messages, estimated_tokens, pre_check_triggered = await self._pre_check_compact(
-                resume_item, messages, estimated_tokens,
-            )
+        overflow_retry = False
+        usage: llmApiUtil.OpenAIUsage | None = None
+        history_item: GtAgentHistory | None = None
 
-        # ── 发起 LLM 请求 ──
-        ctx = GtCoreAgentDialogContext(
-            system_prompt=self.system_prompt, messages=messages, tools=ctx_tools,
-        )
-        history_item = resume_item or await history.append_stage_init(stage=AgentHistoryStage.INFER)
-        infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
+        try:
+            # ── 构造消息 + Pre-check ──
+            messages = history.build_infer_messages()
+            estimated_tokens = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
 
-        # ── 处理失败 ──
-        if infer_result.ok is False or infer_result.response is None:
-            infer_result = await self._handle_infer_failure(
-                infer_result, history_item, estimated_tokens, resume_item, ctx_tools,
-                _skip_compact=_skip_compact, pre_check_triggered=pre_check_triggered,
-            )
+            if not _skip_compact:
+                messages, estimated_tokens, pre_check_triggered = await self._pre_check_compact(
+                    messages, estimated_tokens,
+                )
 
-        # ── Post-check ──
-        if not _skip_compact:
-            assistant_message, usage, post_check_triggered = await self._post_check_compact(
-                history_item, estimated_tokens, infer_result, ctx_tools,
+            pending_infer = history.get_pending_infer_item()
+            if pending_infer is not None:
+                history_item = pending_infer
+            else:
+                history_item = await history.append_stage_init(stage=AgentHistoryStage.INFER)
+
+            # ── 发起 LLM 请求 ──
+            ctx = GtCoreAgentDialogContext(
+                system_prompt=self.system_prompt, messages=messages, tools=tools,
             )
-        else:
+            infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
+
+            # ── overflow retry ──
+            if infer_result.ok is False or infer_result.response is None:
+                error = infer_result.error
+                if (
+                    not _skip_compact
+                    and error is not None
+                    and compactPolicy.is_context_overflow_error(error)
+                    and not pre_check_triggered
+                ):
+                    logger.info(
+                        "overflow retry 触发: %s(agent_id=%d), error=%s",
+                        self.gt_agent.name, self.gt_agent.id, infer_result.error_message,
+                    )
+                    overflow_retry = True
+                    await self._execute_compact()
+                    messages = history.build_infer_messages()
+                    estimated_tokens = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
+                    if estimated_tokens >= hard_limit_tokens:
+                        raise RuntimeError(
+                            f"overflow compact 后仍超限: agent_id={self.gt_agent.id}"
+                        ) from error
+
+                    ctx = GtCoreAgentDialogContext(
+                        system_prompt=self.system_prompt, messages=messages, tools=tools,
+                    )
+                    infer_result = await llmService.infer(self.gt_agent.model, ctx)
+
+                if infer_result.ok is False or infer_result.response is None:
+                    error_message = infer_result.error_message or "unknown inference error"
+                    if overflow_retry:
+                        raise RuntimeError(
+                            f"LLM 推理失败(overflow retry): agent_id={self.gt_agent.id}, error={error_message}"
+                        ) from infer_result.error
+                    raise RuntimeError(
+                        f"LLM 推理失败: agent_id={self.gt_agent.id}, error={error_message}"
+                    ) from infer_result.error
+
             usage = infer_result.usage
             assistant_message = infer_result.response.choices[0].message
-            post_check_triggered = False
 
-        # ── 记录 usage 并 finalize ──
-        usage_json = compactPolicy.build_usage_payload(
-            estimated_prompt_tokens=estimated_tokens,
-            prompt_tokens=usage.prompt_tokens if usage else None,
-            completion_tokens=usage.completion_tokens if usage else None,
-            total_tokens=usage.total_tokens if usage else None,
-            pre_check_triggered=pre_check_triggered,
-            post_check_triggered=post_check_triggered,
-        )
-        await history.finalize_history_item(
-            history_id=history_item.id,
-            message=assistant_message,
-            status=AgentHistoryStatus.SUCCESS,
-            usage_json=usage_json,
-        )
-        return assistant_message
+            # ── 记录 usage 并 finalize ──
+            usage_json = self._build_usage_json(
+                estimated_prompt_tokens=estimated_tokens,
+                prompt_tokens=usage.prompt_tokens if usage else None,
+                completion_tokens=usage.completion_tokens if usage else None,
+                total_tokens=usage.total_tokens if usage else None,
+                pre_check_triggered=pre_check_triggered,
+                overflow_retry=overflow_retry,
+            )
+            await history.finalize_history_item(
+                history_id=history_item.id,
+                message=assistant_message,
+                status=AgentHistoryStatus.SUCCESS,
+                usage_json=usage_json,
+            )
+            return assistant_message
+        except Exception as e:
+            if history_item is None:
+                raise
+            usage_json = self._build_usage_json(
+                estimated_prompt_tokens=estimated_tokens or None,
+                prompt_tokens=usage.prompt_tokens if usage else None,
+                completion_tokens=usage.completion_tokens if usage else None,
+                total_tokens=usage.total_tokens if usage else None,
+                pre_check_triggered=pre_check_triggered,
+                overflow_retry=overflow_retry,
+            )
+            await history.finalize_history_item(
+                history_id=history_item.id,
+                message=None,
+                status=AgentHistoryStatus.FAILED,
+                error_message=str(e),
+                usage_json=usage_json,
+            )
+            raise
 
     async def _pre_check_compact(
         self,
-        resume_item: GtAgentHistory | None,
         messages: list[llmApiUtil.OpenAIMessage],
         estimated_tokens: int,
     ) -> tuple[list[llmApiUtil.OpenAIMessage], int, bool]:
@@ -292,203 +365,86 @@ class AgentTurnRunner:
 
         Returns: (messages, estimated_tokens, pre_check_triggered)
         """
-        resolved_model, _, threshold = self._resolve_compact_config()
-        if not compactPolicy.should_trigger_pre_check(estimated_tokens, threshold):
+        resolved_model, _, trigger_tokens, hard_limit_tokens = self._resolve_compact_config()
+        if estimated_tokens < trigger_tokens:
             return messages, estimated_tokens, False
 
         logger.info(
             "pre-check compact 触发: %s(agent_id=%d), estimated=%d, trigger=%d",
-            self.gt_agent.name, self.gt_agent.id, estimated_tokens, threshold,
+            self.gt_agent.name, self.gt_agent.id, estimated_tokens, trigger_tokens,
         )
         await self._execute_compact()
         messages = self._history.build_infer_messages()
-        if resume_item is not None:
-            messages = messages[:-1]
         estimated_tokens = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
-        if compactPolicy.should_fail_after_compact(estimated_tokens, threshold):
+        if estimated_tokens >= hard_limit_tokens:
             raise RuntimeError(
                 f"compact 后仍超限: agent_id={self.gt_agent.id}, "
-                f"estimated={estimated_tokens}, trigger={threshold}"
+                f"estimated={estimated_tokens}, hard_limit={hard_limit_tokens}"
             )
         return messages, estimated_tokens, True
 
-    async def _handle_infer_failure(
-        self,
-        infer_result: llmService.InferResult,
-        history_item: GtAgentHistory,
-        estimated_tokens: int,
-        resume_item: GtAgentHistory | None,
-        ctx_tools: list[llmApiUtil.OpenAITool] | None,
-        *,
-        _skip_compact: bool,
-        pre_check_triggered: bool,
-    ) -> llmService.InferResult:
-        """处理推理失败：若为 overflow 且可重试则 compact + retry，否则 finalize 并 raise。"""
-        history = self._history
-        error = infer_result.error
-        resolved_model, _, threshold = self._resolve_compact_config()
-
-        # 可以尝试 overflow compact + retry?
-        if (
-            not _skip_compact
-            and error is not None
-            and compactPolicy.is_context_overflow_error(error)
-            and not pre_check_triggered
-        ):
-            logger.info(
-                "overflow retry 触发: %s(agent_id=%d), error=%s",
-                self.gt_agent.name, self.gt_agent.id, infer_result.error_message,
-            )
-            await self._execute_compact()
-            messages = history.build_infer_messages()
-            if resume_item is not None:
-                messages = messages[:-1]
-            retry_estimated = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
-            if compactPolicy.should_fail_after_compact(retry_estimated, threshold):
-                usage_json = compactPolicy.build_usage_payload(
-                    estimated_prompt_tokens=retry_estimated, overflow_retry=True,
-                )
-                await history.finalize_history_item(
-                    history_id=history_item.id, message=None,
-                    status=AgentHistoryStatus.FAILED,
-                    error_message="compact 后仍超限",
-                    usage_json=usage_json,
-                )
-                raise RuntimeError(
-                    f"overflow compact 后仍超限: agent_id={self.gt_agent.id}"
-                ) from error
-
-            ctx = GtCoreAgentDialogContext(
-                system_prompt=self.system_prompt, messages=messages, tools=ctx_tools,
-            )
-            infer_result = await llmService.infer(self.gt_agent.model, ctx)
-            if infer_result.ok is False or infer_result.response is None:
-                error_message = infer_result.error_message or "overflow retry failed"
-                usage_json = compactPolicy.build_usage_payload(
-                    estimated_prompt_tokens=retry_estimated, overflow_retry=True,
-                )
-                await history.finalize_history_item(
-                    history_id=history_item.id, message=None,
-                    status=AgentHistoryStatus.FAILED,
-                    error_message=error_message,
-                    usage_json=usage_json,
-                )
-                raise RuntimeError(
-                    f"LLM 推理失败(overflow retry): agent_id={self.gt_agent.id}, error={error_message}"
-                ) from infer_result.error
-            return infer_result
-
-        # 不可重试的失败
-        error_message = infer_result.error_message or "unknown inference error"
-        usage_json = compactPolicy.build_usage_payload(estimated_prompt_tokens=estimated_tokens)
-        await history.finalize_history_item(
-            history_id=history_item.id, message=None,
-            status=AgentHistoryStatus.FAILED,
-            error_message=error_message,
-            usage_json=usage_json,
-        )
-        raise RuntimeError(
-            f"LLM 推理失败: agent_id={self.gt_agent.id}, error={error_message}"
-        ) from infer_result.error
-
-    async def _post_check_compact(
-        self,
-        history_item: GtAgentHistory,
-        estimated_tokens: int,
-        infer_result: llmService.InferResult,
-        ctx_tools: list[llmApiUtil.OpenAITool] | None,
-    ) -> tuple[llmApiUtil.OpenAIMessage, llmApiUtil.OpenAIUsage | None, bool]:
-        """Post-check：若实际 prompt token 超阈值且有 tool_calls，compact + re-infer。
-
-        Returns: (assistant_message, usage, post_check_triggered)
-        """
-        resolved_model, _, threshold = self._resolve_compact_config()
-        usage = infer_result.usage
-        actual_prompt_tokens = usage.prompt_tokens if usage else None
-        assistant_message = infer_result.response.choices[0].message
-        has_tool_calls = bool(assistant_message.tool_calls)
-
-        if (
-            actual_prompt_tokens is None
-            or not compactPolicy.should_trigger_post_check(actual_prompt_tokens, threshold, has_tool_calls)
-        ):
-            return assistant_message, usage, False
-
-        logger.info(
-            "post-check compact 触发: %s(agent_id=%d), actual_prompt=%d, trigger=%d",
-            self.gt_agent.name, self.gt_agent.id, actual_prompt_tokens, threshold,
-        )
-        await self._execute_compact()
-        messages = self._history.build_infer_messages()
-        re_estimated = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
-        if compactPolicy.should_fail_after_compact(re_estimated, threshold):
-            usage_json = compactPolicy.build_usage_payload(
-                estimated_prompt_tokens=re_estimated,
-                prompt_tokens=actual_prompt_tokens,
-                completion_tokens=usage.completion_tokens if usage else None,
-                total_tokens=usage.total_tokens if usage else None,
-                post_check_triggered=True,
-            )
-            await self._history.finalize_history_item(
-                history_id=history_item.id, message=None,
-                status=AgentHistoryStatus.FAILED,
-                error_message="post-check compact 后仍超限",
-                usage_json=usage_json,
-            )
-            raise RuntimeError(
-                f"post-check compact 后仍超限: agent_id={self.gt_agent.id}"
-            )
-
-        # re-infer
-        ctx = GtCoreAgentDialogContext(
-            system_prompt=self.system_prompt, messages=messages, tools=ctx_tools,
-        )
-        infer_result = await llmService.infer(self.gt_agent.model, ctx)
-        if infer_result.ok is False or infer_result.response is None:
-            error_message = infer_result.error_message or "post-check re-infer failed"
-            await self._history.finalize_history_item(
-                history_id=history_item.id, message=None,
-                status=AgentHistoryStatus.FAILED,
-                error_message=error_message,
-            )
-            raise RuntimeError(
-                f"LLM 推理失败(post-check re-infer): agent_id={self.gt_agent.id}, error={error_message}"
-            ) from infer_result.error
-        return infer_result.response.choices[0].message, infer_result.usage, True
-
     async def _execute_compact(self) -> None:
-        """执行一次 compact：插入带 COMPACT_CMD 的压缩指令 → _infer 推理 → 内存裁剪。
+        """执行一次 compact：写入 COMPACT_CMD → 生成原始摘要 → 写入 user 摘要上下文 → 内存裁剪。
 
         流程：
         1. 追加压缩指令（user 消息，直接带 COMPACT_CMD tag）
-        2. _infer(_skip_compact=True) — build_infer_messages 检测到 compact 进行中，
-           返回完整历史（含指令），LLM 生成摘要
-        3. 内存裁剪
+        2. 直接调用 llmService.infer 生成原始 assistant 摘要
+        3. 追加一条新的 user 摘要上下文消息，供后续推理使用
+        4. 内存裁剪
         """
-        _, llm_config, _ = self._resolve_compact_config()
-        source_messages = self._history.build_compact_source_messages()
-        if not source_messages:
+        _, llm_config, _, _ = self._resolve_compact_config()
+        compact_plan = self._history.build_compact_plan()
+        if not compact_plan.source_messages or compact_plan.insert_seq is None:
             logger.warning("compact 跳过：无可压缩消息, agent_id=%d", self.gt_agent.id)
             return
 
-        compact_instruction = compactPolicy.build_compact_instruction(
+        compact_instruction = build_compact_instruction(
             max_tokens=llm_config.compact_summary_max_tokens,
         )
         instruction_msg = llmApiUtil.OpenAIMessage.text(
             llmApiUtil.OpenaiLLMApiRole.USER, compact_instruction,
         )
-        await self._history.append_history_message(
+        await self._history.insert_history_message_at_seq(self._history.build_history_item(
             instruction_msg,
+            seq=compact_plan.insert_seq,
             stage=AgentHistoryStage.INPUT,
             status=AgentHistoryStatus.SUCCESS,
             tags=[AgentHistoryTag.COMPACT_CMD],
+        ))
+
+        ctx = GtCoreAgentDialogContext(
+            system_prompt=self.system_prompt,
+            messages=compact_plan.source_messages + [instruction_msg],
+            tools=None,
         )
+        infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
+        if infer_result.ok is False or infer_result.response is None:
+            error_message = infer_result.error_message or "compact inference failed"
+            raise RuntimeError(
+                f"LLM 推理失败(compact): agent_id={self.gt_agent.id}, error={error_message}"
+            ) from infer_result.error
 
-        # 通过 _infer 走正常推理路径（不带工具，跳过 compact 检查）
-        await self._infer(tools=None, _skip_compact=True)
+        summary_message = infer_result.response.choices[0].message
+        await self._history.insert_history_message_at_seq(self._history.build_history_item(
+            summary_message,
+            seq=compact_plan.insert_seq + 1,
+            stage=AgentHistoryStage.INFER,
+            status=AgentHistoryStatus.SUCCESS,
+        ))
 
-        # 内存裁剪：只保留 COMPACT_CMD 及之后的消息
-        self._history.drop_messages_before_latest_compact()
+        compact_context = build_compact_resume_prompt(summary_message.content or "")
+        context_msg = llmApiUtil.OpenAIMessage.text(
+            llmApiUtil.OpenaiLLMApiRole.USER, compact_context,
+        )
+        await self._history.insert_history_message_at_seq(self._history.build_history_item(
+            context_msg,
+            seq=compact_plan.insert_seq + 2,
+            stage=AgentHistoryStage.INPUT,
+            status=AgentHistoryStatus.SUCCESS,
+        ))
+
+        # 内存裁剪：只保留恢复 compact 视图所需的最小消息窗口
+        self._history.trim_to_compact_window()
         logger.info(
             "compact 完成: %s(agent_id=%d)",
             self.gt_agent.name, self.gt_agent.id,

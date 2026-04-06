@@ -1,19 +1,16 @@
 """compactPolicy 单元测试。"""
-import json
-
 import pytest
 
 from constants import OpenaiLLMApiRole
-from service.agentService.compactPolicy import (
+from service.agentService.promptBuilder import (
     build_compact_instruction,
-    build_usage_payload,
+    build_compact_resume_prompt,
+)
+from service.agentService.compactPolicy import (
     calc_compact_trigger_tokens,
+    calc_hard_limit_tokens,
     estimate_tokens,
     is_context_overflow_error,
-    resolve_context_window,
-    should_fail_after_compact,
-    should_trigger_post_check,
-    should_trigger_pre_check,
 )
 from util import llmApiUtil
 from util.configTypes import LlmServiceConfig
@@ -34,16 +31,16 @@ def _make_llm_config(**overrides) -> LlmServiceConfig:
     return LlmServiceConfig(**defaults)
 
 
-# ─── resolve_context_window ──────────────────────────────
+# ─── calc_hard_limit_tokens ──────────────────────────────
 
-def test_resolve_context_window_uses_builtin_default():
-    cfg = _make_llm_config(context_window_tokens=32000)
-    assert resolve_context_window("gpt-4o", cfg) == 128000
+def test_calc_hard_limit_tokens_uses_builtin_default():
+    cfg = _make_llm_config(context_window_tokens=32000, reserve_output_tokens=4096)
+    assert calc_hard_limit_tokens("gpt-4o", cfg) == 123904
 
 
-def test_resolve_context_window_falls_back_to_config():
-    cfg = _make_llm_config(context_window_tokens=50000)
-    assert resolve_context_window("unknown-model-xyz", cfg) == 50000
+def test_calc_hard_limit_tokens_falls_back_to_config():
+    cfg = _make_llm_config(context_window_tokens=50000, reserve_output_tokens=2000)
+    assert calc_hard_limit_tokens("unknown-model-xyz", cfg) == 48000
 
 
 # ─── calc_compact_trigger_tokens ─────────────────────────
@@ -62,31 +59,6 @@ def test_calc_compact_trigger_tokens_known_model():
     assert result == 105318
 
 
-# ─── should_trigger_pre_check ────────────────────────────
-
-def test_should_trigger_pre_check_true():
-    assert should_trigger_pre_check(10000, 10000) is True
-    assert should_trigger_pre_check(10001, 10000) is True
-
-
-def test_should_trigger_pre_check_false():
-    assert should_trigger_pre_check(9999, 10000) is False
-
-
-# ─── should_trigger_post_check ───────────────────────────
-
-def test_should_trigger_post_check_true_with_tool_calls():
-    assert should_trigger_post_check(10000, 10000, has_tool_calls=True) is True
-
-
-def test_should_trigger_post_check_false_without_tool_calls():
-    assert should_trigger_post_check(10000, 10000, has_tool_calls=False) is False
-
-
-def test_should_trigger_post_check_false_below_threshold():
-    assert should_trigger_post_check(9999, 10000, has_tool_calls=True) is False
-
-
 # ─── is_context_overflow_error ───────────────────────────
 
 def test_is_context_overflow_error_matches_known_patterns():
@@ -103,13 +75,6 @@ def test_is_context_overflow_error_rejects_unrelated():
     assert is_context_overflow_error(Exception("connection timeout")) is False
 
 
-# ─── should_fail_after_compact ───────────────────────────
-
-def test_should_fail_after_compact():
-    assert should_fail_after_compact(10000, 10000) is True
-    assert should_fail_after_compact(9999, 10000) is False
-
-
 # ─── build_compact_instruction ────────────────────────────
 
 def test_build_compact_instruction_includes_max_tokens():
@@ -124,30 +89,10 @@ def test_build_compact_instruction_is_concise():
     assert len(instruction) < 500
 
 
-# ─── build_usage_payload ─────────────────────────────────
-
-def test_build_usage_payload_round_trips():
-    payload_str = build_usage_payload(
-        estimated_prompt_tokens=1000,
-        prompt_tokens=950,
-        completion_tokens=200,
-        total_tokens=1150,
-        pre_check_triggered=True,
-        post_check_triggered=False,
-        overflow_retry=False,
-    )
-    data = json.loads(payload_str)
-    assert data["estimated_prompt_tokens"] == 1000
-    assert data["prompt_tokens"] == 950
-    assert data["pre_check_triggered"] is True
-    assert data["overflow_retry"] is False
-
-
-def test_build_usage_payload_allows_none_fields():
-    payload_str = build_usage_payload(estimated_prompt_tokens=500)
-    data = json.loads(payload_str)
-    assert data["estimated_prompt_tokens"] == 500
-    assert data["prompt_tokens"] is None
+def test_build_compact_resume_prompt_wraps_summary():
+    context = build_compact_resume_prompt("  摘要内容  ")
+    assert "以下是之前对话的压缩摘要" in context
+    assert "摘要内容" in context
 
 
 # ─── estimate_tokens ─────────────────────────────────────

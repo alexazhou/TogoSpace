@@ -2,6 +2,18 @@ from constants import SpecialAgent
 from dal.db import gtAgentManager, gtDeptManager
 
 _TURN_CONTEXT_SUFFIX = "你现在可以调用工具行动。如果你已完成发言和所有工具调用，请务必调用 finish_chat_turn 结束本轮行动。"
+_COMPACT_PROMPT_TEMPLATE = """\
+因为上下文长度即将超出限制，请总结以上的工作内容，作为后续工作的起点。
+
+要求：
+- 保留对当前任务仍然有用的事实、约束、决定、未完成事项
+- 保留与工具调用结果相关的关键信息
+- 删除寒暄、重复表达和已失效上下文
+- 输出要简洁、结构化，便于后续继续推理
+- 摘要长度尽量简短，不超过 {max_tokens} tokens"""
+_COMPACT_RESUME_TEMPLATE = """以下是之前对话的压缩摘要，请基于这些已知信息继续后续任务：
+
+{summary}"""
 
 
 def format_room_message(room_name: str, sender_name: str, content: str) -> str:
@@ -16,6 +28,14 @@ def build_turn_context_prompt(room_name: str, message_blocks: list[str]) -> str:
         f"{context}\n\n"
         f"{_TURN_CONTEXT_SUFFIX}"
     )
+
+
+def build_compact_instruction(max_tokens: int) -> str:
+    return _COMPACT_PROMPT_TEMPLATE.format(max_tokens=max_tokens)
+
+
+def build_compact_resume_prompt(summary: str) -> str:
+    return _COMPACT_RESUME_TEMPLATE.format(summary=summary.strip())
 
 
 async def _build_dept_context(team_id: int, agent_name: str) -> str:
