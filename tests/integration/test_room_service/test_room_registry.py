@@ -120,4 +120,4 @@ class TestRoomRegistry(ServiceTestCase):
         assert room.get_agent_id_by_name(SpecialAgent.SYSTEM.name) == ChatRoom.SYSTEM_MEMBER_ID
         assert room.get_agent_id_by_name(SpecialAgent.OPERATOR.name) == ChatRoom.OPERATOR_MEMBER_ID
         assert room.get_agent_id_by_name("alice") == self.agent_ids["alice"]
-        assert room.get_agent_id_by_name("unknown") == 0
+        assert room.get_agent_id_by_name("unknown") is None
