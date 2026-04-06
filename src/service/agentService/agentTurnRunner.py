@@ -146,21 +146,6 @@ class AgentTurnRunner:
         if last_item is None:
             raise RuntimeError(f"history 为空，无法推进: agent_id={self.gt_agent.id}")
 
-        # TOOL_RESULT.SUCCESS 特殊处理：检查是否有未完成的工具
-        if last_item.stage == AgentHistoryStage.TOOL_RESULT and last_item.status == AgentHistoryStatus.SUCCESS:
-            last_assistant = self._history.get_last_assistant_message_in_unfinished_turn()
-            if last_assistant is not None and last_assistant.tool_calls:
-                for tc in last_assistant.tool_calls:
-                    result = self._history.find_tool_result_by_call_id(tc.id)
-                    if result is None or result.status == AgentHistoryStatus.INIT:
-                        # 有未完成的工具，转去执行
-                        turn_done = await self._dispatch_tool_calls(
-                            room, last_assistant.tool_calls, execute_only_missing=True
-                        )
-                        return "turn_done" if turn_done else "continue"
-            # 没有未完成的工具，继续推理
-            return await self._step_infer(tools)
-
         match (last_item.stage, last_item.status):
             case (AgentHistoryStage.INPUT, _) | \
                  (AgentHistoryStage.INFER, AgentHistoryStatus.INIT | AgentHistoryStatus.FAILED):
@@ -168,6 +153,16 @@ class AgentTurnRunner:
 
             case (AgentHistoryStage.INFER, AgentHistoryStatus.SUCCESS):
                 return await self._step_execute_tools(room, tools)
+
+            # TOOL_RESULT.SUCCESS 且有未完成的工具 → 执行工具
+            case (AgentHistoryStage.TOOL_RESULT, AgentHistoryStatus.SUCCESS) if self._history.has_pending_tool_calls_in_unfinished_turn():
+                last_assistant = self._history.get_last_assistant_message_in_unfinished_turn()
+                turn_done = await self._dispatch_tool_calls(room, last_assistant.tool_calls, execute_only_missing=True)
+                return "turn_done" if turn_done else "continue"
+
+            # TOOL_RESULT.SUCCESS 且没有未完成的工具 → 推理
+            case (AgentHistoryStage.TOOL_RESULT, AgentHistoryStatus.SUCCESS):
+                return await self._step_infer(tools)
 
             case (AgentHistoryStage.TOOL_RESULT, AgentHistoryStatus.INIT):
                 return await self._step_resume_tool(room, last_item)
