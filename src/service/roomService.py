@@ -7,7 +7,6 @@ from typing import Dict, List, Optional, Sequence
 
 from dal.db import gtRoomManager, gtTeamManager, gtAgentManager, gtRoomMessageManager
 from service import messageBus
-from service import persistenceService  # 仅用于 restore_state
 from util import configUtil
 from util import assertUtil
 from exception import TeamAgentException
@@ -543,7 +542,8 @@ async def startup() -> None:
 
 
 async def _restore_room_state(room: ChatRoom) -> None:
-    gt_room_messages, agent_read_index, turn_pos = await persistenceService.load_room_runtime(room.room_id)
+    gt_room_messages = await gtRoomMessageManager.get_room_messages(room.room_id)
+    agent_read_index, turn_pos = await gtRoomManager.get_room_state(room.room_id)
     recovered_from_db = bool(gt_room_messages)
     restored_messages: list[GtCoreRoomMessage] | None = None
 
