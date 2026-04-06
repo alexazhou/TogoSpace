@@ -3,6 +3,7 @@ from .OpenAiModels import (
     OpenAIMessage,
     OpenAIRequest,
     OpenAIResponse,
+    OpenAIUsage,
     OpenAIToolCall,
     OpenAIFunctionParameter,
     OpenAIFunction,

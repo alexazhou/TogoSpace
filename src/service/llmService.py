@@ -29,6 +29,12 @@ class InferResult:
     def failure(cls, error: Exception) -> "InferResult":
         return cls(ok=False, error_message=str(error), error=error)
 
+    @property
+    def usage(self) -> llmApiUtil.OpenAIUsage | None:
+        if self.response is None:
+            return None
+        return self.response.usage
+
 
 async def startup() -> None:
     _ = configUtil.get_app_config().setting.current_llm_service

@@ -50,6 +50,13 @@ class OpenAIRequest(BaseModel):
     tools: Optional[List["OpenAITool"]] = Field(None, description="工具列表")
 
 
+class OpenAIUsage(BaseModel):
+    """LLM 响应中的 token 用量统计。"""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
 class OpenAIResponse(BaseModel):
     id: str
     object: str
@@ -57,6 +64,7 @@ class OpenAIResponse(BaseModel):
     model: str
     choices: List["OpenAIChoice"]
     system_fingerprint: Optional[str] = None
+    usage: Optional[OpenAIUsage] = None
 
     @property
     def request_id(self) -> str:

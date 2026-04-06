@@ -17,6 +17,7 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
             status=message.status,
             error_message=message.error_message,
             tags=message.tags,
+            usage_json=message.usage_json,
         )
         .on_conflict_ignore()
         .aio_execute()
@@ -37,6 +38,7 @@ async def update_agent_history_by_id(
     status: AgentHistoryStatus | None = None,
     error_message: str | None = None,
     tags: list[AgentHistoryTag] | None = None,
+    usage_json: str | None = None,
 ) -> GtAgentHistory:
     update_fields: dict = {}
     if message_json is not None:
@@ -47,6 +49,8 @@ async def update_agent_history_by_id(
         update_fields["error_message"] = error_message
     if tags is not None:
         update_fields["tags"] = tags
+    if usage_json is not None:
+        update_fields["usage_json"] = usage_json
     if not update_fields:
         raise ValueError(f"update agent history by id has no fields to update: id={history_id}")
 

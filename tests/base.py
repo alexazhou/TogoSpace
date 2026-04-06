@@ -240,11 +240,12 @@ class ServiceTestCase:
             tool_calls=tool_calls if tool_calls else None
         )
 
-        # 模拟结构: resp.choices[0].message
+        # 模拟结构: resp.choices[0].message, resp.usage
         mock_resp = mock.MagicMock()
         mock_choice = mock.MagicMock()
         mock_choice.message = msg
         mock_resp.choices = [mock_choice]
+        mock_resp.usage = None
         return mock_resp
 
     # ------------------------------------------------------------------

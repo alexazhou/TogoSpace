@@ -72,6 +72,7 @@ class AgentHistoryStore:
         status: AgentHistoryStatus | None = None,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
+        usage_json: str | None = None,
     ) -> GtAgentHistory:
         """追加消息到历史并持久化到数据库。"""
         item = GtAgentHistory.from_openai_message(
@@ -83,6 +84,8 @@ class AgentHistoryStore:
             error_message=error_message,
             tags=tags,
         )
+        if usage_json is not None:
+            item.usage_json = usage_json
         self._items.append(item)
         saved = await gtAgentHistoryManager.append_agent_history_message(item)
         if saved is not None:
@@ -113,6 +116,7 @@ class AgentHistoryStore:
         status: AgentHistoryStatus,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
+        usage_json: str | None = None,
     ) -> None:
         """完成 history item：更新内存对象并持久化到数据库。
 
@@ -127,6 +131,8 @@ class AgentHistoryStore:
                 item.error_message = error_message
                 if tags is not None:
                     item.tags = list(tags)
+                if usage_json is not None:
+                    item.usage_json = usage_json
                 break
 
         # 持久化到数据库
@@ -137,6 +143,7 @@ class AgentHistoryStore:
             status=status,
             error_message=error_message,
             tags=list(tags) if tags is not None else None,
+            usage_json=usage_json,
         )
 
     def get_last_assistant_message(self, start_idx: int = 0) -> llmApiUtil.OpenAIMessage | None:
@@ -176,6 +183,71 @@ class AgentHistoryStore:
 
     def has_unfinished_turn(self) -> bool:
         return self.get_unfinished_turn_start_index() is not None
+
+    # ─── Compact 相关方法 ─────────────────────────────────────
+
+    def find_latest_compact_index(self) -> int | None:
+        """从尾部向前查找最新一条带 COMPACT_CMD tag 的消息下标。"""
+        for idx in range(len(self._items) - 1, -1, -1):
+            if AgentHistoryTag.COMPACT_CMD in self._items[idx].tags:
+                return idx
+        return None
+
+    def build_infer_messages(self) -> list[llmApiUtil.OpenAIMessage]:
+        """构造本次 _infer() 真正发给模型的消息列表，尊重 COMPACT_CMD 边界。
+
+        判断逻辑：
+        - 最新 COMPACT_CMD 是最后一条 → compact 进行中，忽略它，退回到上一个边界
+        - 最新 COMPACT_CMD 不是最后一条 → compact 已完成，从它开始
+        - 无 COMPACT_CMD → 返回全部
+        """
+        compact_idx = self.find_latest_compact_index()
+        if compact_idx is None:
+            return self.export_openai_message_list()
+
+        # compact 进行中：最新 COMPACT_CMD 是最后一条，需要忽略它
+        if compact_idx == len(self._items) - 1:
+            # 在它之前找上一个 COMPACT_CMD
+            for idx in range(compact_idx - 1, -1, -1):
+                if AgentHistoryTag.COMPACT_CMD in self._items[idx].tags:
+                    return [item.openai_message for item in self._items[idx:]]
+            # 没有更早的 COMPACT_CMD → 返回全部
+            return self.export_openai_message_list()
+
+        # compact 已完成：从 COMPACT_CMD 开始
+        return [item.openai_message for item in self._items[compact_idx:]]
+
+    def build_compact_source_messages(self) -> list[llmApiUtil.OpenAIMessage]:
+        """提取待压缩的源消息。
+
+        逻辑：
+        1. 跳过尾部连续的 COMPACT_CMD（可能是刚追加的压缩结果）
+        2. 在剩余范围内，从最新的 COMPACT_CMD（含）开始到末尾
+        3. 若无 COMPACT_CMD，返回全部
+
+        这样即使在追加 COMPACT_CMD 之后调用也不会出错。
+        """
+        # 1. 跳过尾部 COMPACT_CMD
+        end = len(self._items)
+        while end > 0 and AgentHistoryTag.COMPACT_CMD in self._items[end - 1].tags:
+            end -= 1
+        if end == 0:
+            return []
+
+        # 2. 在 [0, end) 中找最新的 COMPACT_CMD 作为起点
+        start = 0
+        for idx in range(end - 1, -1, -1):
+            if AgentHistoryTag.COMPACT_CMD in self._items[idx].tags:
+                start = idx
+                break
+
+        return [item.openai_message for item in self._items[start:end]]
+
+    def drop_messages_before_latest_compact(self) -> None:
+        """内存裁剪：只保留最新 COMPACT_CMD 及其之后的消息。"""
+        compact_idx = self.find_latest_compact_index()
+        if compact_idx is not None and compact_idx > 0:
+            self._items = self._items[compact_idx:]
 
     @staticmethod
     def _infer_role_from_stage(stage: AgentHistoryStage) -> llmApiUtil.OpenaiLLMApiRole:

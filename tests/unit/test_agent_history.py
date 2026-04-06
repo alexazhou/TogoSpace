@@ -196,3 +196,242 @@ def test_agent_history_unfinished_turn_with_items():
 
     assert history.has_unfinished_turn() is True
     assert history.get_unfinished_turn_start_index() == 3
+
+
+# ─── Compact 相关方法 ────────────────────────────────────
+
+
+def test_find_latest_compact_index_returns_none_without_compact():
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+        ],
+    )
+    assert history.find_latest_compact_index() is None
+
+
+def test_find_latest_compact_index_returns_correct_index():
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(
+                1, 1,
+                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "compact summary 1"),
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u2")),
+            GtAgentHistory.from_openai_message(
+                1, 3,
+                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "compact summary 2"),
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+            GtAgentHistory.from_openai_message(1, 4, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a2")),
+        ],
+    )
+    assert history.find_latest_compact_index() == 3
+
+
+def test_build_infer_messages_without_compact_returns_all():
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+        ],
+    )
+    msgs = history.build_infer_messages()
+    assert len(msgs) == 2
+    assert msgs[0].content == "u1"
+
+
+def test_build_infer_messages_with_compact_returns_from_compact():
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "old msg")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "old reply")),
+            GtAgentHistory.from_openai_message(
+                1, 2,
+                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "compact summary"),
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "new msg")),
+        ],
+    )
+    msgs = history.build_infer_messages()
+    assert len(msgs) == 2
+    assert msgs[0].content == "compact summary"
+    assert msgs[1].content == "new msg"
+
+
+def test_build_infer_messages_compact_in_progress_returns_all():
+    """COMPACT_CMD 是最后一条 → compact 进行中，返回全部消息。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(
+                1, 2,
+                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "compact instruction"),
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+        ],
+    )
+    msgs = history.build_infer_messages()
+    assert len(msgs) == 3
+    assert msgs[0].content == "u1"
+    assert msgs[2].content == "compact instruction"
+
+
+def test_build_infer_messages_compact_in_progress_with_previous_compact():
+    """二次 compact 进行中：退回到上一个 COMPACT_CMD 作为起点。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "very old")),
+            GtAgentHistory.from_openai_message(
+                1, 1,
+                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "old compact"),
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "old summary")),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "new msg")),
+            GtAgentHistory.from_openai_message(
+                1, 4,
+                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "new compact instruction"),
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+        ],
+    )
+    msgs = history.build_infer_messages()
+    # 退回到 old compact，返回从它开始的全部消息
+    assert len(msgs) == 4
+    assert msgs[0].content == "old compact"
+    assert msgs[-1].content == "new compact instruction"
+
+
+
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "old1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "old2")),
+            GtAgentHistory.from_openai_message(
+                1, 2,
+                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "compact"),
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "new")),
+        ],
+    )
+    history.drop_messages_before_latest_compact()
+    assert len(history) == 2
+    assert history[0].content == "compact"
+    assert history[1].content == "new"
+
+
+def test_drop_messages_before_latest_compact_noop_without_compact():
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+        ],
+    )
+    history.drop_messages_before_latest_compact()
+    assert len(history) == 1
+
+
+def test_build_compact_source_messages_returns_all():
+    """无 COMPACT_CMD 时返回全部消息。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+        ],
+    )
+    msgs = history.build_compact_source_messages()
+    assert len(msgs) == 2
+
+
+def test_build_compact_source_messages_with_compact_cmd():
+    """有 COMPACT_CMD 在中间时，返回从 COMPACT_CMD 到末尾（不含尾部 COMPACT_CMD）。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "old1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "old2")),
+            GtAgentHistory.from_openai_message(
+                1, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "compact summary"),
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "new1")),
+        ],
+    )
+    msgs = history.build_compact_source_messages()
+    assert len(msgs) == 2
+    assert msgs[0].content == "compact summary"
+    assert msgs[1].content == "new1"
+
+
+def test_build_compact_source_messages_skips_trailing_compact():
+    """COMPACT_CMD 在尾部时被跳过，返回其前面的消息。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(
+                1, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "summary"),
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+        ],
+    )
+    msgs = history.build_compact_source_messages()
+    assert len(msgs) == 2
+    assert msgs[0].content == "u1"
+    assert msgs[1].content == "a1"
+
+
+def test_build_compact_source_messages_after_append():
+    """模拟追加 COMPACT_CMD 后调用：尾部新 COMPACT_CMD 被跳过，返回正确范围。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(
+                1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "old summary"),
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u2")),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a2")),
+            GtAgentHistory.from_openai_message(
+                1, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "new summary"),
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+        ],
+    )
+    msgs = history.build_compact_source_messages()
+    # 尾部 "new summary" 被跳过；从 "old summary" 开始到 "a2"
+    assert len(msgs) == 3
+    assert msgs[0].content == "old summary"
+    assert msgs[1].content == "u2"
+    assert msgs[2].content == "a2"
+
+
+def test_build_compact_source_messages_only_compact_cmd():
+    """仅有 COMPACT_CMD 时返回空列表。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            GtAgentHistory.from_openai_message(
+                1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "summary"),
+                tags=[AgentHistoryTag.COMPACT_CMD],
+            ),
+        ],
+    )
+    msgs = history.build_compact_source_messages()
+    assert len(msgs) == 0
