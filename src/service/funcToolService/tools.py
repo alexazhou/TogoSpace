@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ast
-from typing import Callable, Literal, Optional, List
+from typing import Callable, Optional, List
 import datetime
 import logging
 import operator
@@ -20,19 +20,6 @@ logger = logging.getLogger(__name__)
 # 可选字段（按情况选用，不强制两者都有）：
 #   message: str   — 文本信息（成功提示、错误说明等）
 #   <其他字段>     — 结构化数据，字段名与语义一致，如 agents: list
-
-
-def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius") -> dict:
-    """获取指定地点的天气信息
-
-    Args:
-        location: 城市 or 地点名称
-        unit: 温度单位，celsius 或 fahrenheit
-    """
-    if unit == "celsius":
-        return {"success": True, "message": f"{location} 的天气: 25°C, 晴朗"}
-    else:
-        return {"success": True, "message": f"{location} 的天气: 77°F, 晴朗"}
 
 
 def get_time(timezone: Optional[str] = None) -> dict:
@@ -178,19 +165,10 @@ async def finish_chat_turn(_context: ToolCallContext = None) -> dict:
 
     return {"success": True, "message": "已结束本轮行动。"}
 
-
-def task_done() -> dict:
-    """通知任务完成"""
-    logger.info(f"task_done")
-    return {"success": True}
-
-
 FUNCTION_REGISTRY: dict[str, Callable[..., dict] | Callable[..., object]] = {
-    "get_weather": get_weather,
     "get_time": get_time,
     "calculate": calculate,
     "get_agent_list": get_agent_list,
     "send_chat_msg": send_chat_msg,
     "finish_chat_turn": finish_chat_turn,
-    "task_done": task_done,
 }

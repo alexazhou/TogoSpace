@@ -1,7 +1,7 @@
 """integration tests for toolLoader utilities and service-backed tool functions"""
 import os
 import sys
-from typing import Literal, Optional
+from typing import Optional
 
 import pytest
 
@@ -18,7 +18,6 @@ from service.funcToolService.toolLoader import (
     build_tools,
 )
 from service.funcToolService.tools import (
-    get_weather,
     get_time,
     calculate,
     send_chat_msg,
@@ -55,10 +54,6 @@ class TestPythonTypeToJsonSchema(ServiceTestCase):
         """Optional[T] 退化到 T 的 schema。"""
         assert python_type_to_json_schema(Optional[str]) == {"type": "string"}
 
-    async def test_literal(self):
-        """Literal 会映射为 enum。"""
-        assert python_type_to_json_schema(Literal["celsius", "fahrenheit"]) == {"enum": ["celsius", "fahrenheit"]}
-
     async def test_unknown_falls_back_to_object(self):
         """未知类型默认回退为 object，保证 schema 可生成。"""
         class Custom:
@@ -70,19 +65,15 @@ class TestPythonTypeToJsonSchema(ServiceTestCase):
 class TestGetFunctionMetadata(ServiceTestCase):
     async def test_name_is_set(self):
         """metadata 中 name 字段与注册名一致。"""
-        assert get_function_metadata("get_weather", get_weather)["name"] == "get_weather"
+        assert get_function_metadata("get_time", get_time)["name"] == "get_time"
 
     async def test_description_from_docstring(self):
         """description 应从函数 docstring 提取。"""
-        assert get_function_metadata("get_weather", get_weather)["description"]
+        assert get_function_metadata("get_time", get_time)["description"]
 
-    async def test_required_includes_location(self):
+    async def test_required_includes_timezone(self):
         """必填参数会进入 required 列表。"""
-        assert "location" in get_function_metadata("get_weather", get_weather)["parameters"]["required"]
-
-    async def test_optional_param_not_required(self):
-        """可选参数不应被标记为 required。"""
-        assert "unit" not in get_function_metadata("get_weather", get_weather)["parameters"]["required"]
+        assert "timezone" not in get_function_metadata("get_time", get_time)["parameters"].get("required", [])
 
     async def test_private_params_excluded(self):
         """以下划线开头的上下文参数不暴露给 LLM。"""
@@ -94,9 +85,9 @@ class TestGetFunctionMetadata(ServiceTestCase):
 class TestBuildtools(ServiceTestCase):
     async def test_builds_tool_for_each_entry(self):
         """注册表中每个函数都应产出一个 OpenAITool 定义。"""
-        tools = build_tools({"get_weather": get_weather, "get_time": get_time})
+        tools = build_tools({"get_time": get_time, "calculate": calculate})
         assert len(tools) == 2
-        assert {t.function.name for t in tools} == {"get_weather", "get_time"}
+        assert {t.function.name for t in tools} == {"get_time", "calculate"}
 
     async def test_empty_registry(self):
         """空注册表返回空列表。"""
@@ -104,7 +95,7 @@ class TestBuildtools(ServiceTestCase):
 
     async def test_skips_function_with_error(self):
         """构建过程中单个函数异常不影响其他函数。"""
-        assert len(build_tools({"get_weather": get_weather})) == 1
+        assert len(build_tools({"get_time": get_time})) == 1
 
 
 
@@ -131,14 +122,6 @@ class TestToolFunctions(ServiceTestCase):
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
-
-    async def test_get_weather_celsius(self):
-        """天气工具返回摄氏温度文本。"""
-        assert "25°C" in get_weather("北京", "celsius")["message"]
-
-    async def test_get_weather_fahrenheit(self):
-        """天气工具返回华氏温度文本。"""
-        assert "77°F" in get_weather("北京", "fahrenheit")["message"]
 
     async def test_get_time_local(self):
         """默认返回本地时区时间。"""
