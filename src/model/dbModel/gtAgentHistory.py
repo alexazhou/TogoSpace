@@ -18,6 +18,7 @@ class GtAgentHistory(DbModelBase):
     status: AgentHistoryStatus = EnumField[AgentHistoryStatus](AgentHistoryStatus, null=False, default=AgentHistoryStatus.INIT)
     error_message: str | None = peewee.TextField(null=True)
     tags: list[AgentHistoryTag] = EnumListField[AgentHistoryTag](AgentHistoryTag, default=list)
+    usage_json: str | None = peewee.TextField(null=True)
 
     class Meta:
         table_name = "agent_histories"
