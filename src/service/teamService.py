@@ -117,6 +117,7 @@ async def hot_reload_team(name: str) -> None:
 
     # 刷新聊天室配置
     await roomService.refresh_rooms_for_team(team.id)
+    await roomService.restore_state_for_team(team.id)
     await schedulerService.start_scheduling(name)
     logger.info("Team '%s' 热更新后已触发调度启动", name)
 

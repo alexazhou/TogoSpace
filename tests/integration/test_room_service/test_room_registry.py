@@ -7,7 +7,7 @@ import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
 from constants import RoomType, SpecialAgent
-from dal.db import gtTeamManager, gtAgentManager
+from dal.db import gtTeamManager, gtAgentManager, gtRoomMessageManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
@@ -111,6 +111,30 @@ class TestRoomRegistry(ServiceTestCase):
         assert len(room.messages) == 1
         assert room.messages[0].sender_id == room.SYSTEM_MEMBER_ID
         assert "boot topic" in room.messages[0].content
+
+    async def test_restore_state_for_team_prevents_duplicate_initial_messages_after_refresh(self):
+        """刷新 Team 房间运行态后，恢复历史再激活，不应重复写初始消息。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+
+        await roomService.ensure_room_record(TEAM, "restore_safe_room", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"restore_safe_room@{TEAM}")
+
+        await room.activate_scheduling()
+        rows = await gtRoomMessageManager.get_room_messages(room.room_id)
+        assert len(rows) == 1
+        assert "房间已经创建" in rows[0].content
+
+        await roomService.refresh_rooms_for_team(team.id)
+        await roomService.restore_state_for_team(team.id)
+        await roomService.activate_rooms(TEAM)
+
+        reloaded_room = roomService.get_room_by_key(f"restore_safe_room@{TEAM}")
+        assert len(reloaded_room.messages) == 1
+
+        rows = await gtRoomMessageManager.get_room_messages(reloaded_room.room_id)
+        assert len(rows) == 1
+        assert "房间已经创建" in rows[0].content
 
     async def test_special_agent_ids(self):
         """SYSTEM 和 OPERATOR 应有特殊的 agent_id。"""

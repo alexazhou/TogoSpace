@@ -22,6 +22,9 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
     async def _refresh_rooms(_team_id: int):
         call_order.append("refresh_rooms")
 
+    async def _restore_rooms(_team_id: int):
+        call_order.append("restore_rooms")
+
     async def _start_scheduling(_team_name: str):
         call_order.append("start_scheduling")
 
@@ -30,6 +33,7 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
     monkeypatch.setattr(schedulerService, "stop_team", _stop_team)
     monkeypatch.setattr(agentService, "reload_team", _reload_team)
     monkeypatch.setattr(roomService, "refresh_rooms_for_team", _refresh_rooms)
+    monkeypatch.setattr(roomService, "restore_state_for_team", _restore_rooms)
     monkeypatch.setattr(schedulerService, "start_scheduling", _start_scheduling)
 
     await teamService.hot_reload_team("default")
@@ -38,6 +42,7 @@ async def test_hot_reload_team_refreshes_agents_before_rooms(monkeypatch):
         "stop_team",
         "reload_team",
         "refresh_rooms",
+        "restore_rooms",
         "start_scheduling",
     ]
 
@@ -49,13 +54,16 @@ async def test_hot_reload_team_returns_if_target_not_found(monkeypatch):
     stop_team = Mock()
     reload_team = AsyncMock()
     refresh_rooms = AsyncMock()
+    restore_rooms = AsyncMock()
 
     monkeypatch.setattr(schedulerService, "stop_team", stop_team)
     monkeypatch.setattr(agentService, "reload_team", reload_team)
     monkeypatch.setattr(roomService, "refresh_rooms_for_team", refresh_rooms)
+    monkeypatch.setattr(roomService, "restore_state_for_team", restore_rooms)
 
     await teamService.hot_reload_team("missing")
 
     stop_team.assert_not_called()
     reload_team.assert_not_awaited()
     refresh_rooms.assert_not_awaited()
+    restore_rooms.assert_not_awaited()
