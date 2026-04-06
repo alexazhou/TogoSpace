@@ -27,7 +27,7 @@ class RoleTemplateListHandler(BaseHandler):
 
     async def get(self) -> None:
         templates = await gtRoleTemplateManager.get_all_role_templates()
-        self.return_json({"role_templates": [_serialize_role_template(template) for template in templates]})
+        self.return_json({"role_templates": templates})
 
 
 class RoleTemplateCreateHandler(BaseHandler):
@@ -54,7 +54,7 @@ class RoleTemplateCreateHandler(BaseHandler):
             )
         )
 
-        self.return_json(_serialize_role_template(created))
+        self.return_json(created)
 
 
 class RoleTemplateDetailHandler(BaseHandler):
@@ -66,7 +66,7 @@ class RoleTemplateDetailHandler(BaseHandler):
             error_code="role_template_not_found",
         )
 
-        self.return_json(_serialize_role_template(definition))
+        self.return_json(definition)
 
 
 class RoleTemplateModifyHandler(BaseHandler):
@@ -104,7 +104,7 @@ class RoleTemplateModifyHandler(BaseHandler):
 
         updated = await gtRoleTemplateManager.save_role_template(definition)
 
-        self.return_json(_serialize_role_template(updated))
+        self.return_json(updated)
 
 
 class RoleTemplateDeleteHandler(BaseHandler):
@@ -136,16 +136,3 @@ class RoleTemplateDeleteHandler(BaseHandler):
 
         await gtRoleTemplateManager.delete_role_template(int(template_id))
         self.return_json({"status": "deleted", "id": definition.id, "name": definition.name})
-
-
-def _serialize_role_template(template: GtRoleTemplate) -> dict:
-    return {
-        "id": template.id,
-        "name": template.name,
-        "model": template.model,
-        "soul": template.soul,
-        "type": template.type.name if template.type else None,
-        "allowed_tools": template.allowed_tools,
-        "created_at": template.created_at.isoformat() if template.created_at else None,
-        "updated_at": template.updated_at.isoformat() if template.updated_at else None,
-    }
