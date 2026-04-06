@@ -318,7 +318,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             GtAgentHistory.from_openai_message(
                 agent.gt_agent.id,
                 0,
-                llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_prompt),
+                llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt),
             ),
         ])
 

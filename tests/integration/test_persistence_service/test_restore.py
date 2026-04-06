@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from constants import OpenaiLLMApiRole, SpecialAgent
+from constants import OpenaiApiRole, SpecialAgent
 from tests.base import ServiceTestCase
 from util import configUtil
 from service import (

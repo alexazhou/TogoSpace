@@ -5,7 +5,7 @@ import json
 import peewee
 from util import llmApiUtil
 
-from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiLLMApiRole
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiApiRole
 
 from .base import DbModelBase, EnumField, EnumListField
 
@@ -69,12 +69,12 @@ class GtAgentHistory(DbModelBase):
 
     @staticmethod
     def infer_stage_from_message(message: llmApiUtil.OpenAIMessage) -> AgentHistoryStage:
-        role = OpenaiLLMApiRole.value_of(message.role)
-        if role in (OpenaiLLMApiRole.SYSTEM, OpenaiLLMApiRole.USER):
+        role = OpenaiApiRole.value_of(message.role)
+        if role in (OpenaiApiRole.SYSTEM, OpenaiApiRole.USER):
             return AgentHistoryStage.INPUT
-        if role == OpenaiLLMApiRole.ASSISTANT:
+        if role == OpenaiApiRole.ASSISTANT:
             return AgentHistoryStage.INFER
-        if role == OpenaiLLMApiRole.TOOL:
+        if role == OpenaiApiRole.TOOL:
             return AgentHistoryStage.TOOL_RESULT
         return AgentHistoryStage.INPUT
 

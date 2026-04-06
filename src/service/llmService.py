@@ -53,7 +53,7 @@ async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> InferResult
         resolved_provider = _TYPE_TO_PROVIDER.get(llm_config.type)
 
         messages: list[llmApiUtil.OpenAIMessage] = [
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.SYSTEM, ctx.system_prompt),
+            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.SYSTEM, ctx.system_prompt),
             *ctx.messages,
         ]
         request = llmApiUtil.OpenAIRequest(
