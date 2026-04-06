@@ -1,4 +1,4 @@
-"""_infer() 与 compact 流程单元测试。"""
+"""_infer_to_item() 与 compact 流程单元测试。"""
 from __future__ import annotations
 
 import json
@@ -97,16 +97,16 @@ _ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compactPolicy.estimate_t
 async def test_infer_normal_no_compact():
     runner, history = _make_runner_and_history()
     resp = _make_mock_response(content="回答")
+    output_item = _make_history_item()
 
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(resp))),
         patch(_ESTIMATE_PATCH, return_value=1000),
     ):
-        msg = await runner._infer(tools=None)
+        msg = await runner._infer_to_item(output_item, tools=[])
 
     assert msg.content == "回答"
-    history.append_history_init_item.assert_called_once()
     history.finalize_history_item.assert_called_once()
     history.trim_to_compact_window.assert_not_called()
 
@@ -115,7 +115,6 @@ async def test_infer_normal_no_compact():
 async def test_infer_reuses_pending_infer_item():
     runner, history = _make_runner_and_history()
     pending_item = _make_history_item(99)
-    history.get_pending_infer_item.return_value = pending_item
     resp = _make_mock_response(content="续跑回答")
 
     with (
@@ -123,10 +122,9 @@ async def test_infer_reuses_pending_infer_item():
         patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(resp))),
         patch(_ESTIMATE_PATCH, return_value=500),
     ):
-        msg = await runner._infer(tools=None)
+        msg = await runner._infer_to_item(pending_item, tools=[])
 
     assert msg.content == "续跑回答"
-    history.append_history_init_item.assert_not_called()
     call_kwargs = history.finalize_history_item.call_args[1]
     assert call_kwargs["history_id"] == 99
 
@@ -134,6 +132,7 @@ async def test_infer_reuses_pending_infer_item():
 @pytest.mark.asyncio
 async def test_infer_pre_check_triggers_compact():
     runner, history = _make_runner_and_history()
+    output_item = _make_history_item()
     compact_resp = _make_mock_response(content="摘要")
     main_resp = _make_mock_response(content="压缩后的回答")
 
@@ -145,7 +144,7 @@ async def test_infer_pre_check_triggers_compact():
         ])),
         patch(_ESTIMATE_PATCH, side_effect=[TRIGGER_TOKENS + 100, 5000]),
     ):
-        msg = await runner._infer(tools=None)
+        msg = await runner._infer_to_item(output_item, tools=[])
 
     assert msg.content == "压缩后的回答"
     history.trim_to_compact_window.assert_called_once()
@@ -156,6 +155,7 @@ async def test_infer_pre_check_triggers_compact():
 @pytest.mark.asyncio
 async def test_infer_pre_check_still_over_after_compact():
     runner, history = _make_runner_and_history()
+    output_item = _make_history_item()
     compact_resp = _make_mock_response(content="摘要")
 
     with (
@@ -164,14 +164,13 @@ async def test_infer_pre_check_still_over_after_compact():
         patch(_ESTIMATE_PATCH, side_effect=[TRIGGER_TOKENS + 100, HARD_LIMIT_TOKENS + 10]),
     ):
         with pytest.raises(RuntimeError, match="compact 后仍超限"):
-            await runner._infer(tools=None)
-
-    history.append_history_init_item.assert_not_called()
+            await runner._infer_to_item(output_item, tools=[])
 
 
 @pytest.mark.asyncio
 async def test_infer_overflow_triggers_compact_retry():
     runner, history = _make_runner_and_history()
+    output_item = _make_history_item()
     overflow_error = Exception("context_length_exceeded: maximum context length is 32000")
     compact_resp = _make_mock_response(content="摘要")
     retry_resp = _make_mock_response(content="重试成功")
@@ -185,7 +184,7 @@ async def test_infer_overflow_triggers_compact_retry():
         ])),
         patch(_ESTIMATE_PATCH, side_effect=[5000, 5000]),
     ):
-        msg = await runner._infer(tools=None)
+        msg = await runner._infer_to_item(output_item, tools=[])
 
     assert msg.content == "重试成功"
     usage_data = json.loads(history.finalize_history_item.call_args[1]["usage_json"])
@@ -196,6 +195,7 @@ async def test_infer_overflow_triggers_compact_retry():
 @pytest.mark.asyncio
 async def test_infer_overflow_after_precheck_no_retry():
     runner, history = _make_runner_and_history()
+    output_item = _make_history_item()
     compact_resp = _make_mock_response(content="摘要")
     overflow_error = Exception("context_length_exceeded: maximum context length is 32000")
 
@@ -208,7 +208,7 @@ async def test_infer_overflow_after_precheck_no_retry():
         patch(_ESTIMATE_PATCH, side_effect=[TRIGGER_TOKENS + 100, 5000]),
     ):
         with pytest.raises(RuntimeError, match="LLM 推理失败"):
-            await runner._infer(tools=None)
+            await runner._infer_to_item(output_item, tools=[])
 
     history.trim_to_compact_window.assert_called_once()
 
@@ -216,6 +216,7 @@ async def test_infer_overflow_after_precheck_no_retry():
 @pytest.mark.asyncio
 async def test_infer_non_overflow_failure_raises():
     runner, history = _make_runner_and_history()
+    output_item = _make_history_item()
     generic_error = Exception("rate limit exceeded")
 
     with (
@@ -224,7 +225,7 @@ async def test_infer_non_overflow_failure_raises():
         patch(_ESTIMATE_PATCH, return_value=5000),
     ):
         with pytest.raises(RuntimeError, match="LLM 推理失败"):
-            await runner._infer(tools=None)
+            await runner._infer_to_item(output_item, tools=[])
 
     history.trim_to_compact_window.assert_not_called()
 
@@ -232,6 +233,7 @@ async def test_infer_non_overflow_failure_raises():
 @pytest.mark.asyncio
 async def test_infer_overflow_compact_still_over_fails():
     runner, history = _make_runner_and_history()
+    output_item = _make_history_item()
     overflow_error = Exception("context_length_exceeded: max is 32000")
     compact_resp = _make_mock_response(content="摘要")
 
@@ -244,7 +246,7 @@ async def test_infer_overflow_compact_still_over_fails():
         patch(_ESTIMATE_PATCH, side_effect=[5000, HARD_LIMIT_TOKENS + 10]),
     ):
         with pytest.raises(RuntimeError, match="overflow compact 后仍超限"):
-            await runner._infer(tools=None)
+            await runner._infer_to_item(output_item, tools=[])
 
     history.finalize_history_item.assert_called_once()
     assert history.finalize_history_item.call_args[1]["status"] == AgentHistoryStatus.FAILED
@@ -253,6 +255,7 @@ async def test_infer_overflow_compact_still_over_fails():
 @pytest.mark.asyncio
 async def test_infer_usage_recorded_in_finalize():
     runner, history = _make_runner_and_history()
+    output_item = _make_history_item()
     usage = _make_usage(prompt=1000, completion=200, total=1200)
     resp = _make_mock_response(content="ok", usage=usage)
 
@@ -261,7 +264,7 @@ async def test_infer_usage_recorded_in_finalize():
         patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(resp))),
         patch(_ESTIMATE_PATCH, return_value=500),
     ):
-        await runner._infer(tools=None)
+        await runner._infer_to_item(output_item, tools=[])
 
     usage_data = json.loads(history.finalize_history_item.call_args[1]["usage_json"])
     assert usage_data["estimated_prompt_tokens"] == 500

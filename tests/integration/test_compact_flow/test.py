@@ -107,10 +107,10 @@ class TestCompactFlow(ServiceTestCase):
         """完整流程：pre-check 触发 compact → 验证 history 结构。
 
         估算 token 序列：
-        1. _infer 开始时估算 → 超过 trigger → 触发 _execute_compact
+        1. _infer_to_item 开始时估算 → 超过 trigger → 触发 _execute_compact
         2. _execute_compact 内部不调 estimate（直接 llmService.infer）
         3. compact 完成后 _pre_check_compact 再次估算 → 低于 trigger → 通过
-        4. 主流程 _infer 发起正常 LLM 请求
+        4. 主流程 _infer_to_item 发起正常 LLM 请求
         """
         history = await self._reset_and_build_history(agent_id=99, turns=5)
         runner = _make_runner(history)
@@ -122,9 +122,9 @@ class TestCompactFlow(ServiceTestCase):
         normal_resp = _make_mock_response("好的，我来回答你的最新问题。")
 
         # estimate 调用序列：
-        # 1st: _infer 主流程估算 → 超 trigger
+        # 1st: _infer_to_item 主流程估算 → 超 trigger
         # 2nd: compact 后重新估算 → 低于 trigger
-        # 两次都是 _infer 中的 estimate_tokens 调用
+        # 两次都是 _infer_to_item 中的 estimate_tokens 调用
         estimate_calls = iter([_TRIGGER + 50, 100])
 
         with (
@@ -135,7 +135,8 @@ class TestCompactFlow(ServiceTestCase):
             ])),
             mock.patch(_ESTIMATE_PATCH, side_effect=estimate_calls),
         ):
-            result = await runner._infer(tools=None)
+            output_item = await history.append_history_init_item(stage=AgentHistoryStage.INFER)
+            result = await runner._infer_to_item(output_item, tools=[])
 
         assert result.content == "好的，我来回答你的最新问题。"
 

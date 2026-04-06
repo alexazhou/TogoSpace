@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Awaitable, Callable, List, Optional
+from typing import List
 
 from constants import (
     AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag,
@@ -146,59 +146,183 @@ class AgentTurnRunner:
         if last_item is None:
             raise RuntimeError(f"history 为空，无法推进: agent_id={self.gt_agent.id}")
 
-        match (last_item.stage, last_item.status):
-            case (AgentHistoryStage.INPUT, _) | \
-                 (AgentHistoryStage.INFER, AgentHistoryStatus.INIT | AgentHistoryStatus.FAILED):
-                return await self._step_infer(tools)
+        stage, status = last_item.stage, last_item.status
 
-            case (AgentHistoryStage.INFER, AgentHistoryStatus.SUCCESS):
-                return await self._step_execute_tools(room, tools)
+        # TOOL_RESULT 成功且有待处理工具 → 插入 INIT record，下一轮执行
+        if stage == AgentHistoryStage.TOOL_RESULT and status == AgentHistoryStatus.SUCCESS:
+            pending_tc = self._history.get_first_pending_tool_call_in_unfinished_turn()
+            if pending_tc is not None:
+                await self._history.append_history_init_item(
+                    stage=AgentHistoryStage.TOOL_RESULT,
+                    tool_call_id=pending_tc.id,
+                )
+                return "continue"
+            return await self._execute_infer(
+                await self._history.append_history_init_item(stage=AgentHistoryStage.INFER),
+                tools,
+            )
 
-            # TOOL_RESULT.SUCCESS 且有未完成的工具 → 执行工具
-            case (AgentHistoryStage.TOOL_RESULT, AgentHistoryStatus.SUCCESS) if self._history.has_pending_tool_calls_in_unfinished_turn():
-                last_assistant = self._history.get_last_assistant_message_in_unfinished_turn()
-                turn_done = await self._dispatch_tool_calls(room, last_assistant.tool_calls, execute_only_missing=True)
-                return "turn_done" if turn_done else "continue"
+        # INPUT 或 INFER 失败/待处理 → 推理
+        if stage == AgentHistoryStage.INPUT:
+            return await self._execute_infer(
+                await self._history.append_history_init_item(stage=AgentHistoryStage.INFER),
+                tools,
+            )
+        if stage == AgentHistoryStage.INFER and status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED):
+            return await self._execute_infer(last_item, tools)
 
-            # TOOL_RESULT.SUCCESS 且没有未完成的工具 → 推理
-            case (AgentHistoryStage.TOOL_RESULT, AgentHistoryStatus.SUCCESS):
-                return await self._step_infer(tools)
+        # INFER 成功 → 执行工具
+        if stage == AgentHistoryStage.INFER and status == AgentHistoryStatus.SUCCESS:
+            first_tc = (last_item.tool_calls or [None])[0]
+            if first_tc is None:
+                return "no_tool_calls"
+            output_item = await self._history.append_history_init_item(
+                stage=AgentHistoryStage.TOOL_RESULT,
+                tool_call_id=first_tc.id,
+            )
+            return await self._run_tool(first_tc, output_item, room)
 
-            case (AgentHistoryStage.TOOL_RESULT, AgentHistoryStatus.INIT):
-                return await self._step_resume_tool(room, last_item)
+        # TOOL_RESULT 待处理 → 恢复执行
+        if stage == AgentHistoryStage.TOOL_RESULT and status == AgentHistoryStatus.INIT:
+            tool_call = self._history.find_tool_call_by_id_in_unfinished_turn(last_item.tool_call_id)
+            if tool_call is None:
+                raise RuntimeError(f"工具调用不存在: agent_id={self.gt_agent.id}, tool_call_id={last_item.tool_call_id}")
+            return await self._run_tool(tool_call, last_item, room)
 
-            case _:
-                raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, stage={last_item.stage}, status={last_item.status}")
+        raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, stage={stage}, status={status}")
 
-    async def _step_infer(self, tools: list[llmApiUtil.OpenAITool]) -> str:
-        """执行推理步骤。返回 'no_tool_calls' 或 'continue'。"""
-        assistant_message = await self._infer(tools)
+    async def _execute_infer(self, output_item: GtAgentHistory, tools: list[llmApiUtil.OpenAITool]) -> str:
+        """执行推理，结果写入 output_item。返回 'no_tool_calls' 或 'continue'。"""
+        assistant_message = await self._infer_to_item(output_item, tools)
         tool_calls = assistant_message.tool_calls or []
         return "no_tool_calls" if len(tool_calls) == 0 else "continue"
 
-    async def _step_execute_tools(self, room: ChatRoom, tools: list[llmApiUtil.OpenAITool]) -> str:
-        """执行推理产生的工具调用。返回 'turn_done' 或 'continue'。"""
-        last_assistant = self._history.get_last_assistant_message()
-        if last_assistant is None or not last_assistant.tool_calls:
-            return "no_tool_calls"
+    async def _infer_to_item(
+        self,
+        output_item: GtAgentHistory,
+        tools: list[llmApiUtil.OpenAITool],
+        *,
+        _skip_compact: bool = False,
+    ) -> llmApiUtil.OpenAIMessage:
+        """执行推理，结果写入 output_item。"""
+        history = self._history
+        history.assert_infer_ready(f"agent_id={self.gt_agent.id}")
 
-        turn_done = await self._dispatch_tool_calls(room, last_assistant.tool_calls)
-        return "turn_done" if turn_done else "continue"
+        resolved_model, _, trigger_tokens, hard_limit_tokens = self._resolve_compact_config()
+        estimated_tokens = 0
+        pre_check_triggered = False
+        overflow_retry = False
+        usage: llmApiUtil.OpenAIUsage | None = None
 
-    async def _step_resume_tool(self, room: ChatRoom, pending_item: GtAgentHistory) -> str:
-        """恢复执行单个待处理的工具。返回 'turn_done' 或 'continue'。"""
-        tool_call_id = pending_item.tool_call_id
-        tool_call = self._history.find_tool_call_by_id_in_unfinished_turn(tool_call_id)
+        try:
+            messages = history.build_infer_messages()
+            estimated_tokens = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
 
-        if tool_call is None:
-            raise RuntimeError(f"工具调用不存在: agent_id={self.gt_agent.id}, tool_call_id={tool_call_id}")
+            if not _skip_compact:
+                messages, estimated_tokens, pre_check_triggered = await self._pre_check_compact(messages, estimated_tokens)
 
-        turn_done = await self._dispatch_tool_calls(
-            room,
-            [tool_call],
-            reuse_history_items={tool_call_id: pending_item},
+            ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools)
+            infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
+
+            # overflow retry
+            if infer_result.ok is False or infer_result.response is None:
+                error = infer_result.error
+                if (
+                    not _skip_compact
+                    and error is not None
+                    and compactPolicy.is_context_overflow_error(error)
+                    and not pre_check_triggered
+                ):
+                    logger.info(f"overflow retry 触发: {self.gt_agent.name}(agent_id={self.gt_agent.id}), error={infer_result.error_message}")
+                    overflow_retry = True
+                    await self._execute_compact()
+                    messages = history.build_infer_messages()
+                    estimated_tokens = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
+                    if estimated_tokens >= hard_limit_tokens:
+                        raise RuntimeError(f"overflow compact 后仍超限: agent_id={self.gt_agent.id}") from error
+
+                    ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools)
+                    infer_result = await llmService.infer(self.gt_agent.model, ctx)
+
+                if infer_result.ok is False or infer_result.response is None:
+                    error_message = infer_result.error_message or "unknown inference error"
+                    if overflow_retry:
+                        raise RuntimeError(f"LLM 推理失败(overflow retry): agent_id={self.gt_agent.id}, error={error_message}") from infer_result.error
+                    raise RuntimeError(f"LLM 推理失败: agent_id={self.gt_agent.id}, error={error_message}") from infer_result.error
+
+            usage = infer_result.usage
+            assistant_message = infer_result.response.choices[0].message
+
+            usage_json = self._build_usage_json(
+                estimated_prompt_tokens=estimated_tokens,
+                prompt_tokens=usage.prompt_tokens if usage else None,
+                completion_tokens=usage.completion_tokens if usage else None,
+                total_tokens=usage.total_tokens if usage else None,
+                pre_check_triggered=pre_check_triggered,
+                overflow_retry=overflow_retry,
+            )
+            await history.finalize_history_item(
+                history_id=output_item.id,
+                message=assistant_message,
+                status=AgentHistoryStatus.SUCCESS,
+                usage_json=usage_json,
+            )
+            return assistant_message
+        except Exception as e:
+            usage_json = self._build_usage_json(
+                estimated_prompt_tokens=estimated_tokens or None,
+                prompt_tokens=usage.prompt_tokens if usage else None,
+                completion_tokens=usage.completion_tokens if usage else None,
+                total_tokens=usage.total_tokens if usage else None,
+                pre_check_triggered=pre_check_triggered,
+                overflow_retry=overflow_retry,
+            )
+            await history.finalize_history_item(
+                history_id=output_item.id,
+                message=None,
+                status=AgentHistoryStatus.FAILED,
+                error_message=str(e),
+                usage_json=usage_json,
+            )
+            raise
+
+    async def _run_tool(self, tool_call: llmApiUtil.OpenAIToolCall, output_item: GtAgentHistory, room: ChatRoom) -> str:
+        """执行单个工具调用，结果写入 output_item。返回 'turn_done' 或 'continue'。"""
+        context = ToolCallContext(
+            agent_name=self.gt_agent.name,
+            team_id=room.team_id,
+            chat_room=room,
+        )
+        exec_result = await self.tool_registry.execute_tool_call(tool_call, context)
+        final_message = llmApiUtil.OpenAIMessage.tool_result(exec_result.tool_call_id, exec_result.result_json)
+        await self._history.finalize_history_item(
+            history_id=output_item.id,
+            message=final_message,
+            status=exec_result.status,
+            error_message=exec_result.error_message,
+            tags=exec_result.tags,
+        )
+        turn_done = exec_result.turn_finished and (
+            exec_result.status == AgentHistoryStatus.SUCCESS or room.state == RoomState.INIT
         )
         return "turn_done" if turn_done else "continue"
+
+    async def _execute_tool(self) -> None:
+        """执行最后一条 assistant 消息中的所有 tool calls（AgentDriverHost 协议方法）。
+        通过 _current_room 获取房间上下文，由 run_chat_turn 在调用前设置。"""
+        room = self._current_room
+        assert room is not None, "no current room context while executing tool"
+
+        last_msg: llmApiUtil.OpenAIMessage | None = self._history.get_last_assistant_message()
+        if last_msg is None or last_msg.tool_calls is None or len(last_msg.tool_calls) == 0:
+            return
+
+        for tool_call in last_msg.tool_calls:
+            output_item = await self._history.append_history_init_item(
+                stage=AgentHistoryStage.TOOL_RESULT,
+                tool_call_id=tool_call.id,
+            )
+            await self._run_tool(tool_call, output_item, room)
 
     # ─── AgentDriverHost 协议方法 ──────────────────────────
 
@@ -229,113 +353,6 @@ class AgentTurnRunner:
             "overflow_retry": overflow_retry,
         }
         return json.dumps(payload, ensure_ascii=False)
-
-    async def _infer(
-        self,
-        tools: Optional[list[llmApiUtil.OpenAITool]],
-        *,
-        _skip_compact: bool = False,
-    ) -> llmApiUtil.OpenAIMessage:
-        """执行一次 LLM 推理，集成 token 预算 pre-check / overflow retry。
-
-        若 _skip_compact 为 True，跳过所有 compact 检查（避免 compact 推理时递归）。
-        """
-        history = self._history
-        history.assert_infer_ready(f"agent_id={self.gt_agent.id}")
-
-        resolved_model, _, trigger_tokens, hard_limit_tokens = self._resolve_compact_config()
-        estimated_tokens = 0
-        pre_check_triggered = False
-        overflow_retry = False
-        usage: llmApiUtil.OpenAIUsage | None = None
-        history_item: GtAgentHistory | None = None
-
-        try:
-            # ── 构造消息 + Pre-check ──
-            messages = history.build_infer_messages()
-            estimated_tokens = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
-
-            if not _skip_compact:
-                messages, estimated_tokens, pre_check_triggered = await self._pre_check_compact(
-                    messages, estimated_tokens,
-                )
-
-            pending_infer = history.get_pending_infer_item()
-            if pending_infer is not None:
-                history_item = pending_infer
-            else:
-                history_item = await history.append_history_init_item(stage=AgentHistoryStage.INFER)
-
-            # ── 发起 LLM 请求 ──
-            ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools)
-            infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
-
-            # ── overflow retry ──
-            if infer_result.ok is False or infer_result.response is None:
-                error = infer_result.error
-                if (
-                    not _skip_compact
-                    and error is not None
-                    and compactPolicy.is_context_overflow_error(error)
-                    and not pre_check_triggered
-                ):
-                    logger.info(f"overflow retry 触发: {self.gt_agent.name}(agent_id={self.gt_agent.id}), error={infer_result.error_message}")
-                    overflow_retry = True
-                    await self._execute_compact()
-                    messages = history.build_infer_messages()
-                    estimated_tokens = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
-                    if estimated_tokens >= hard_limit_tokens:
-                        raise RuntimeError(f"overflow compact 后仍超限: agent_id={self.gt_agent.id}") from error
-
-                    ctx = GtCoreAgentDialogContext(
-                        system_prompt=self.system_prompt, messages=messages, tools=tools,
-                    )
-                    infer_result = await llmService.infer(self.gt_agent.model, ctx)
-
-                if infer_result.ok is False or infer_result.response is None:
-                    error_message = infer_result.error_message or "unknown inference error"
-                    if overflow_retry:
-                        raise RuntimeError(f"LLM 推理失败(overflow retry): agent_id={self.gt_agent.id}, error={error_message}") from infer_result.error
-                    raise RuntimeError(f"LLM 推理失败: agent_id={self.gt_agent.id}, error={error_message}") from infer_result.error
-
-            usage = infer_result.usage
-            assistant_message = infer_result.response.choices[0].message
-
-            # ── 记录 usage 并 finalize ──
-            usage_json = self._build_usage_json(
-                estimated_prompt_tokens=estimated_tokens,
-                prompt_tokens=usage.prompt_tokens if usage else None,
-                completion_tokens=usage.completion_tokens if usage else None,
-                total_tokens=usage.total_tokens if usage else None,
-                pre_check_triggered=pre_check_triggered,
-                overflow_retry=overflow_retry,
-            )
-            await history.finalize_history_item(
-                history_id=history_item.id,
-                message=assistant_message,
-                status=AgentHistoryStatus.SUCCESS,
-                usage_json=usage_json,
-            )
-            return assistant_message
-        except Exception as e:
-            if history_item is None:
-                raise
-            usage_json = self._build_usage_json(
-                estimated_prompt_tokens=estimated_tokens or None,
-                prompt_tokens=usage.prompt_tokens if usage else None,
-                completion_tokens=usage.completion_tokens if usage else None,
-                total_tokens=usage.total_tokens if usage else None,
-                pre_check_triggered=pre_check_triggered,
-                overflow_retry=overflow_retry,
-            )
-            await history.finalize_history_item(
-                history_id=history_item.id,
-                message=None,
-                status=AgentHistoryStatus.FAILED,
-                error_message=str(e),
-                usage_json=usage_json,
-            )
-            raise
 
     async def _pre_check_compact(
         self,
@@ -412,89 +429,4 @@ class AgentTurnRunner:
 
         # 内存裁剪：只保留恢复 compact 视图所需的最小消息窗口
         self._history.trim_to_compact_window()
-        logger.info(f"compact 完成: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
-
-    async def _execute_tool(self) -> None:
-        """执行最后一条 assistant 消息中的所有 tool calls（AgentDriverHost 协议方法）。
-        通过 _current_room 获取房间上下文，由 run_chat_turn 在调用前设置。"""
-        room = self._current_room
-        assert room is not None, "no current room context while executing tool"
-
-        last_msg: llmApiUtil.OpenAIMessage | None = self._history.get_last_assistant_message()
-        if last_msg is None or last_msg.tool_calls is None or len(last_msg.tool_calls) == 0:
-            return
-
-        await self._dispatch_tool_calls(room, last_msg.tool_calls)
-
-    async def _dispatch_tool_calls(
-        self,
-        room: ChatRoom,
-        tool_calls: list[llmApiUtil.OpenAIToolCall],
-        *,
-        reuse_history_items: dict[str, GtAgentHistory] | None = None,
-        execute_only_missing: bool = False,
-    ) -> bool:
-        """批量执行 tool calls 并记录到 history。
-        reuse_history_items: 续跑时复用已有 history item。
-        execute_only_missing: 仅执行尚未有结果的 tool call（跳过已完成的）。
-        返回 True 表示 turn 已完成。"""
-        tool_names = [tc.function_name for tc in tool_calls]
-        logger.info(f"检测到工具调用: {self.gt_agent.name}(agent_id={self.gt_agent.id}), tools={tool_names}")
-        context: ToolCallContext = ToolCallContext(
-            agent_name=self.gt_agent.name,
-            team_id=room.team_id,
-            chat_room=room,
-        )
-        turn_done = False
-        for tool_call in tool_calls:
-            tool_call_id = tool_call.id
-            history_item = None
-            existing_result = self._history.find_tool_result_by_call_id(tool_call_id)
-            if reuse_history_items is not None:
-                history_item = reuse_history_items.get(tool_call_id)
-            elif execute_only_missing and existing_result is not None:
-                if existing_result.status == AgentHistoryStatus.INIT:
-                    history_item = existing_result
-                else:
-                    if AgentHistoryTag.ROOM_TURN_FINISH in existing_result.tags and (
-                        existing_result.status == AgentHistoryStatus.SUCCESS
-                        or room.state == RoomState.INIT
-                    ):
-                        turn_done = True
-                    continue
-
-            exec_result = await self._execute_and_record_tool_call(
-                tool_call,
-                lambda: self.tool_registry.execute_tool_call(tool_call, context),
-                existing_item=history_item,
-            )
-            if exec_result.turn_finished and (
-                exec_result.status == AgentHistoryStatus.SUCCESS
-                or room.state == RoomState.INIT
-            ):
-                turn_done = True
-        return turn_done
-
-    async def _execute_and_record_tool_call(
-        self,
-        tool_call: llmApiUtil.OpenAIToolCall,
-        executor: Callable[[], Awaitable[ToolExecutionResult]],
-        *,
-        existing_item: GtAgentHistory | None = None,
-    ) -> ToolExecutionResult:
-        """执行单个 tool call 并记录到 history。若 existing_item 不为 None，则复用已有 history item（续跑场景）。"""
-        history_item = existing_item or await self._history.append_history_init_item(
-            stage=AgentHistoryStage.TOOL_RESULT,
-            tool_call_id=tool_call.id,
-        )
-        assert history_item.id is not None, "history_item.id should not be None after append"
-        exec_result = await executor()
-        final_message = llmApiUtil.OpenAIMessage.tool_result(exec_result.tool_call_id, exec_result.result_json)
-        await self._history.finalize_history_item(
-            history_id=history_item.id,
-            message=final_message,
-            status=exec_result.status,
-            error_message=exec_result.error_message,
-            tags=exec_result.tags,
-        )
-        return exec_result
+        
