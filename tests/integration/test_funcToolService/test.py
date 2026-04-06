@@ -78,12 +78,12 @@ class TestRunToolCall(ServiceTestCase):
 
     async def test_run_tool_call_basic(self):
         """正常 JSON 入参可成功执行工具函数。"""
-        result = await self._run("get_weather", '{"location": "北京", "unit": "celsius"}')
-        assert result["success"] and "25°C" in result["message"]
+        result = await self._run("get_time", '{"timezone": "UTC"}')
+        assert result["success"] and "UTC" in result["message"]
 
     async def test_run_tool_call_invalid_json(self):
         """非法 JSON 不应抛异常，应返回可读错误文本。"""
-        result = await self._run("get_weather", "not json")
+        result = await self._run("calculate", "not json")
         assert not result["success"]
 
     async def test_run_tool_call_unknown_function(self):
