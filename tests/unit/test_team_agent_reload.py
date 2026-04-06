@@ -4,8 +4,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from service.agentService import core
-from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
-
 
 class _DummyAgent:
     def __init__(self, team_id: int) -> None:
@@ -47,3 +45,19 @@ async def test_reload_team_no_target_only_closes_existing(monkeypatch):
     assert old.closed is True
     assert core._agents == {}
     mock_load_team.assert_awaited_once_with(1, workspace_root=None)
+
+
+def test_resolve_team_workdir_prefers_explicit_working_directory():
+    team = SimpleNamespace(name="default", config={"working_directory": "/tmp/custom-team-dir"})
+
+    resolved = core._resolve_team_workdir(team, "/tmp/workspaces")
+
+    assert resolved == "/tmp/custom-team-dir"
+
+
+def test_resolve_team_workdir_falls_back_to_workspace_root():
+    team = SimpleNamespace(name="default", config={})
+
+    resolved = core._resolve_team_workdir(team, "/tmp/workspaces")
+
+    assert resolved == "/tmp/workspaces/default"
