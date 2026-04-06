@@ -171,11 +171,9 @@ class AgentTurnRunner:
         """TOOL_RESULT 成功后，检查是否有未完成的工具，否则推理。"""
         last_assistant = self._history.get_last_assistant_message_in_unfinished_turn()
         if last_assistant is not None and last_assistant.tool_calls:
-            # 检查是否有未执行的工具
             for tc in last_assistant.tool_calls:
-                result = self._history.find_tool_result_by_call_id(str(tc.id or ""))
+                result = self._history.find_tool_result_by_call_id(tc.id)
                 if result is None or result.status == AgentHistoryStatus.INIT:
-                    # 有未执行的工具，先执行它们
                     turn_done = await self._dispatch_tool_calls(
                         room, last_assistant.tool_calls, execute_only_missing=True
                     )
@@ -200,7 +198,7 @@ class AgentTurnRunner:
 
     async def _step_resume_tool(self, room: ChatRoom, pending_item: GtAgentHistory) -> str:
         """恢复执行单个待处理的工具。返回 'turn_done' 或 'continue'。"""
-        tool_call_id = str(pending_item.tool_call_id or "")
+        tool_call_id = pending_item.tool_call_id
         tool_call = self._history.find_tool_call_by_id_in_unfinished_turn(tool_call_id)
 
         if tool_call is None:
@@ -460,7 +458,7 @@ class AgentTurnRunner:
         )
         turn_done = False
         for tool_call in tool_calls:
-            tool_call_id = str(tool_call.id or "")
+            tool_call_id = tool_call.id
             history_item = None
             existing_result = self._history.find_tool_result_by_call_id(tool_call_id)
             if reuse_history_items is not None:
@@ -496,10 +494,9 @@ class AgentTurnRunner:
         existing_item: GtAgentHistory | None = None,
     ) -> ToolExecutionResult:
         """执行单个 tool call 并记录到 history。若 existing_item 不为 None，则复用已有 history item（续跑场景）。"""
-        assert tool_call.id, "tool_call.id should not be empty"
         history_item = existing_item or await self._history.append_history_init_item(
             stage=AgentHistoryStage.TOOL_RESULT,
-            tool_call_id=str(tool_call.id),
+            tool_call_id=tool_call.id,
         )
         assert history_item.id is not None, "history_item.id should not be None after append"
         exec_result = await executor()
