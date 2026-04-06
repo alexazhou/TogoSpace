@@ -88,19 +88,19 @@ class TestCompactFlow(ServiceTestCase):
 
         for i in range(turns):
             user_msg = llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, f"用户消息 {i}")
-            await history.append_history_message(history.build_history_item(
+            await history.append_history_message(
                 user_msg, stage=AgentHistoryStage.INPUT, status=AgentHistoryStatus.SUCCESS,
-            ))
+            )
             assistant_msg = llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, f"助手回复 {i}")
-            await history.append_history_message(history.build_history_item(
+            await history.append_history_message(
                 assistant_msg, stage=AgentHistoryStage.INFER, status=AgentHistoryStatus.SUCCESS,
-            ))
+            )
 
         # 追加一条新的 user 消息，使 history 处于 infer-ready 状态
         final_user = llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "最新的用户输入")
-        await history.append_history_message(history.build_history_item(
+        await history.append_history_message(
             final_user, stage=AgentHistoryStage.INPUT, status=AgentHistoryStatus.SUCCESS,
-        ))
+        )
         return history
 
     async def test_pre_check_compact_triggers_and_produces_correct_history(self):
