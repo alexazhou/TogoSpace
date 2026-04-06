@@ -2,7 +2,6 @@ import logging
 from typing import List, Optional
 
 from constants import AgentStatus
-from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentTaskConsumer import AgentTaskConsumer
@@ -50,13 +49,9 @@ class Agent:
         return self.task_consumer.status
 
     @property
-    def current_db_task(self) -> Optional[GtAgentTask]:
-        return self.task_consumer.current_db_task
-
-    @property
     def is_active(self) -> bool:
-        """检查 Agent 是否活跃（状态为 ACTIVE 或有正在处理的任务）。"""
-        return self.task_consumer.status == AgentStatus.ACTIVE or self.task_consumer.current_db_task is not None
+        """检查 Agent 是否活跃。"""
+        return self.task_consumer.status == AgentStatus.ACTIVE
 
     async def startup(self) -> None:
         await self.task_consumer._turn_runner.driver.startup()

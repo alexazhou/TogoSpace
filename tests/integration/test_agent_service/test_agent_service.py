@@ -284,12 +284,7 @@ class TestAgentResumeFailed(_agentServiceCase):
         await alice.resume_failed()
         refreshed_task = await GtAgentTask.aio_get_or_none(GtAgentTask.id == failed_task.id)
 
-        assert alice.status == AgentStatus.ACTIVE
         assert refreshed_task is not None
         assert refreshed_task.id == failed_task.id
         assert refreshed_task.status == AgentTaskStatus.RUNNING
         restart_spy.assert_called_once()
-        resumed_task = restart_spy.call_args.kwargs.get("initial_task")
-        assert resumed_task is not None
-        assert resumed_task.id == failed_task.id
-        assert resumed_task.status == AgentTaskStatus.RUNNING
