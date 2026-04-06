@@ -50,6 +50,7 @@ async def send_request_stream(
     url: str,
     api_key: str,
     custom_llm_provider: str | None = None,
+    extra_headers: dict[str, str] | None = None,
 ) -> OpenAIResponse:
     """流式请求上游模型，并在本地聚合为完整 OpenAIResponse。"""
     model_name, messages, tools = _build_request_payload(request)
@@ -62,6 +63,7 @@ async def send_request_stream(
         api_key=api_key,
         base_url=base_url,
         tools=tools,
+        extra_headers=extra_headers,
         temperature=request.temperature,
         max_tokens=request.max_tokens,
         stream=True,
@@ -91,6 +93,7 @@ async def send_request_non_stream(
     url: str,
     api_key: str,
     custom_llm_provider: str | None = None,
+    extra_headers: dict[str, str] | None = None,
 ) -> OpenAIResponse:
     """非流式请求上游模型，直接返回完整 OpenAIResponse。"""
     model_name, messages, tools = _build_request_payload(request)
@@ -103,6 +106,7 @@ async def send_request_non_stream(
         api_key=api_key,
         base_url=base_url,
         tools=tools,
+        extra_headers=extra_headers,
         temperature=request.temperature,
         max_tokens=request.max_tokens,
         stream=False,
