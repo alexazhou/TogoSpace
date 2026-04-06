@@ -25,6 +25,19 @@ def _resolve_max_function_calls(team_config: dict | None) -> int:
         return max(1, value)
     return 5
 
+
+def _resolve_team_workdir(gt_team: Any, workspace_root: str | None) -> str:
+    team_config = gt_team.config or {}
+    configured_workdir = ""
+    if isinstance(team_config, dict):
+        configured_workdir = str(team_config.get("working_directory") or "").strip()
+
+    if configured_workdir:
+        return configured_workdir
+
+    assert workspace_root is not None, "workspace_root 未配置"
+    return os.path.join(workspace_root, gt_team.name)
+
 async def startup() -> None:
     global _agents
     _agents = {}
@@ -64,11 +77,11 @@ async def _load_team(team_id: int, workspace_root: str | None = None) -> None:
     identity_prompt_tmpl = app_config.agent_identity_prompt
     default_model = llmService.get_default_model()
     resolved_workspace_root = workspace_root or app_config.setting.workspace_root
-    assert resolved_workspace_root is not None, "workspace_root 未配置"
     max_function_calls = _resolve_max_function_calls(gt_team.config)
 
     team_name = gt_team.name
-    team_workdir = os.path.join(resolved_workspace_root, team_name)
+    team_workdir = _resolve_team_workdir(gt_team, resolved_workspace_root)
+    os.makedirs(team_workdir, exist_ok=True)
     team_id = gt_team.id
 
     for gt_agent in gt_agents:
