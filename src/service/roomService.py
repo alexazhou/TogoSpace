@@ -270,7 +270,11 @@ class ChatRoom:
             logger.warning(f"房间 {self.key} 拒绝结束轮次申请：{self._get_agent_name(sender_id)}(agent_id={sender_id}) 并非当前发言人 {self._get_agent_name(current_expected)}(agent_id={current_expected})")
             return False
 
-        logger.info(f"房间 {self.key} 由 {self._get_agent_name(current_expected)}(agent_id={current_expected}) 结束本轮行动 (has_content={self._current_turn_has_content})")
+        logger.info(
+            "房间 %s 由 %s(agent_id=%d) 结束本轮行动 (has_content=%s, turn_pos=%d/%d, turn_count=%d)",
+            self.key, self._get_agent_name(current_expected), current_expected,
+            self._current_turn_has_content, self._turn_pos, len(self._agent_ids), self._turn_count,
+        )
 
         # 如果本轮没说话，记录为跳过
         if not self._current_turn_has_content:
