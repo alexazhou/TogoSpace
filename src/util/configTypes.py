@@ -36,6 +36,10 @@ def _default_persistence_db_path() -> str:
     return "../test_data/data.db" if _is_test_env() else "../data/data.db"
 
 
+def _default_llm_extra_headers() -> dict[str, str]:
+    return {"User-Agent": "openclaw"}
+
+
 class AgentConfig(BaseModel):
     """Configuration for an agent in a team, referencing a role template."""
     name: str  # Nickname of the agent in the team
@@ -82,6 +86,7 @@ class LlmServiceConfig(BaseModel):
     type: LlmServiceType
     model: str = "qwen-plus"
     enable: bool = True
+    extra_headers: dict[str, str] = Field(default_factory=_default_llm_extra_headers)
 
 
 class PersistenceConfig(BaseModel):

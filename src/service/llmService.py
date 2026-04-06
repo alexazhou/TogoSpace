@@ -60,6 +60,7 @@ async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> InferResult
             llm_config.base_url,
             llm_config.api_key,
             custom_llm_provider=resolved_provider,
+            extra_headers=llm_config.extra_headers,
         )
         return InferResult.success(response)
     except Exception as e:
