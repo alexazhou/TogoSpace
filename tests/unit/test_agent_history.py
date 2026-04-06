@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiLLMApiRole
+from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from util import llmApiUtil
@@ -17,7 +17,7 @@ def test_agent_history_last_role_returns_none_for_empty_history():
 
 
 def test_agent_history_export_openai_message_list_round_trips_messages():
-    user_msg = llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")
+    user_msg = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")
     tool_msg = llmApiUtil.OpenAIMessage.tool_result("call_1", '{"success": true}')
     history = AgentHistoryStore(
         agent_id=2,
@@ -29,7 +29,7 @@ def test_agent_history_export_openai_message_list_round_trips_messages():
 
     exported = history.export_openai_message_list()
 
-    assert [msg.role for msg in exported] == [OpenaiLLMApiRole.USER, OpenaiLLMApiRole.TOOL]
+    assert [msg.role for msg in exported] == [OpenaiApiRole.USER, OpenaiApiRole.TOOL]
     assert [msg.content for msg in exported] == ["u1", '{"success": true}']
 
 
@@ -37,10 +37,10 @@ def test_agent_history_get_last_assistant_message_respects_start_index():
     history = AgentHistoryStore(
         agent_id=3,
         items=[
-            GtAgentHistory.from_openai_message(3, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
-            GtAgentHistory.from_openai_message(3, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
-            GtAgentHistory.from_openai_message(3, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u2")),
-            GtAgentHistory.from_openai_message(3, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a2")),
+            GtAgentHistory.from_openai_message(3, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(3, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(3, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2")),
+            GtAgentHistory.from_openai_message(3, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a2")),
         ],
     )
 
@@ -57,7 +57,7 @@ def test_agent_history_find_tool_result_by_call_id_returns_matching_history_item
     history = AgentHistoryStore(
         agent_id=4,
         items=[
-            GtAgentHistory.from_openai_message(4, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(4, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
             GtAgentHistory.from_openai_message(4, 1, llmApiUtil.OpenAIMessage.tool_result("call_1", '{"success": true}')),
             GtAgentHistory.from_openai_message(4, 2, llmApiUtil.OpenAIMessage.tool_result("call_2", '{"success": false}')),
         ],
@@ -76,12 +76,12 @@ def test_from_openai_message_assigns_stage_by_role():
     user_item = GtAgentHistory.from_openai_message(
         9,
         0,
-        llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u"),
+        llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u"),
     )
     assistant_item = GtAgentHistory.from_openai_message(
         9,
         1,
-        llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a"),
+        llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a"),
     )
     tool_item = GtAgentHistory.from_openai_message(
         9,
@@ -98,9 +98,9 @@ def test_agent_history_len_and_iter():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
-            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u2")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2")),
         ],
     )
 
@@ -113,8 +113,8 @@ def test_agent_history_getitem():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
         ],
     )
 
@@ -127,13 +127,13 @@ def test_agent_history_replace_and_dump():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
         ],
     )
 
     new_items = [
-        GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "new1")),
-        GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "new2")),
+        GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "new1")),
+        GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "new2")),
     ]
     history.replace(new_items)
 
@@ -150,7 +150,7 @@ def test_agent_history_find_tool_call_by_id():
         function={"name": "send_chat_msg", "arguments": '{"msg": "hello"}'},
     )
     assistant_msg = llmApiUtil.OpenAIMessage(
-        role=OpenaiLLMApiRole.ASSISTANT,
+        role=OpenaiApiRole.ASSISTANT,
         content="",
         tool_calls=[tool_call],
     )
@@ -158,7 +158,7 @@ def test_agent_history_find_tool_call_by_id():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
             GtAgentHistory.from_openai_message(1, 1, assistant_msg),
             GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.tool_result("call_123", '{"ok": true}')),
         ],
@@ -179,18 +179,18 @@ def test_agent_history_unfinished_turn_with_items():
         items=[
             GtAgentHistory.from_openai_message(
                 1, 0,
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1"),
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
                 tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
             ),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
             GtAgentHistory.from_openai_message(
                 1, 2,
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "done"),
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "done"),
                 tags=[AgentHistoryTag.ROOM_TURN_FINISH],
             ),
             GtAgentHistory.from_openai_message(
                 1, 3,
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u2"),
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2"),
                 tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
             ),
         ],
@@ -207,8 +207,8 @@ def test_build_infer_messages_without_compact_returns_all():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
         ],
     )
     msgs = history.build_infer_messages()
@@ -219,26 +219,26 @@ def test_build_infer_messages_with_completed_compact_uses_context_suffix():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "old1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "old2")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "old1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "old2")),
             GtAgentHistory.from_openai_message(
                 1, 2,
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "compact cmd"),
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact cmd"),
                 tags=[AgentHistoryTag.COMPACT_CMD],
             ),
             GtAgentHistory.from_openai_message(
                 1, 3,
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "summary"),
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "summary"),
                 stage=AgentHistoryStage.INFER,
                 status=AgentHistoryStatus.SUCCESS,
             ),
             GtAgentHistory.from_openai_message(
                 1, 4,
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "compact context"),
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact context"),
                 stage=AgentHistoryStage.INPUT,
             ),
-            GtAgentHistory.from_openai_message(1, 5, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "keep last")),
-            GtAgentHistory.from_openai_message(1, 6, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "next")),
+            GtAgentHistory.from_openai_message(1, 5, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep last")),
+            GtAgentHistory.from_openai_message(1, 6, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "next")),
         ],
     )
 
@@ -251,14 +251,14 @@ def test_build_infer_messages_with_unfinished_compact_skips_only_cmd():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "old1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "old2")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "old1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "old2")),
             GtAgentHistory.from_openai_message(
                 1, 2,
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "compact cmd"),
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact cmd"),
                 tags=[AgentHistoryTag.COMPACT_CMD],
             ),
-            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "keep last")),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep last")),
         ],
     )
 
@@ -271,10 +271,10 @@ def test_build_compact_source_messages_preserves_latest_user_segment():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
-            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u2")),
-            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a2")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2")),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a2")),
         ],
     )
 
@@ -288,15 +288,15 @@ def test_build_compact_source_messages_excludes_pending_infer():
     pending_infer = GtAgentHistory.from_openai_message(
         1,
         2,
-        llmApiUtil.OpenAIMessage(role=OpenaiLLMApiRole.ASSISTANT),
+        llmApiUtil.OpenAIMessage(role=OpenaiApiRole.ASSISTANT),
         stage=AgentHistoryStage.INFER,
         status=AgentHistoryStatus.INIT,
     )
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
             pending_infer,
         ],
     )
@@ -311,10 +311,10 @@ def test_build_compact_source_messages_keeps_tool_call_chain_after_latest_user()
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
-            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u2")),
-            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "tool call")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2")),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "tool call")),
             GtAgentHistory.from_openai_message(1, 4, llmApiUtil.OpenAIMessage.tool_result("call_1", '{"ok": true}')),
         ],
     )
@@ -329,10 +329,10 @@ def test_build_compact_plan_returns_insert_seq_of_latest_user_message():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
-            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u2")),
-            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a2")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2")),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a2")),
         ],
     )
 
@@ -343,15 +343,15 @@ def test_build_infer_messages_excludes_pending_infer_tail():
     pending_infer = GtAgentHistory.from_openai_message(
         1,
         2,
-        llmApiUtil.OpenAIMessage(role=OpenaiLLMApiRole.ASSISTANT),
+        llmApiUtil.OpenAIMessage(role=OpenaiApiRole.ASSISTANT),
         stage=AgentHistoryStage.INFER,
         status=AgentHistoryStatus.FAILED,
     )
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "a1")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
             pending_infer,
         ],
     )
@@ -365,16 +365,16 @@ def test_trim_to_compact_window_keeps_compact_suffix():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "old1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "old2")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "old1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "old2")),
             GtAgentHistory.from_openai_message(
                 1, 2,
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "compact cmd"),
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact cmd"),
                 tags=[AgentHistoryTag.COMPACT_CMD],
             ),
-            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "summary")),
-            GtAgentHistory.from_openai_message(1, 4, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "context")),
-            GtAgentHistory.from_openai_message(1, 5, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "keep")),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "summary")),
+            GtAgentHistory.from_openai_message(1, 4, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "context")),
+            GtAgentHistory.from_openai_message(1, 5, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep")),
         ],
     )
 
@@ -386,7 +386,7 @@ def test_trim_to_compact_window_keeps_compact_suffix():
 def test_get_runtime_window_start_index_without_compact_returns_none():
     history = AgentHistoryStore(
         agent_id=1,
-        items=[GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1"))],
+        items=[GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"))],
     )
 
     assert history.get_runtime_window_start_index() is None
@@ -396,14 +396,14 @@ def test_get_runtime_window_start_index_returns_latest_compact_index():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
             GtAgentHistory.from_openai_message(
                 1, 1,
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "compact cmd"),
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact cmd"),
                 tags=[AgentHistoryTag.COMPACT_CMD],
             ),
-            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "summary")),
-            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "context")),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "summary")),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "context")),
         ],
     )
 
@@ -415,8 +415,8 @@ async def test_append_history_message_with_seq_inserts_at_position():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "u2")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2")),
         ],
     )
 
@@ -425,7 +425,7 @@ async def test_append_history_message_with_seq_inserts_at_position():
         AsyncMock(side_effect=lambda item: item),
     ):
         inserted = await history.append_history_message(
-            llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "mid"),
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "mid"),
             seq=1,
         )
 
@@ -439,15 +439,15 @@ async def test_append_history_message_uses_last_seq_after_compact_trim():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "old1")),
+            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "old1")),
             GtAgentHistory.from_openai_message(
                 1, 1,
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "compact cmd"),
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact cmd"),
                 tags=[AgentHistoryTag.COMPACT_CMD],
             ),
-            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "summary")),
-            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "context")),
-            GtAgentHistory.from_openai_message(1, 4, llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "keep")),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "summary")),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "context")),
+            GtAgentHistory.from_openai_message(1, 4, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep")),
         ],
     )
     history.trim_to_compact_window()
@@ -457,7 +457,7 @@ async def test_append_history_message_uses_last_seq_after_compact_trim():
         AsyncMock(side_effect=lambda item: item),
     ):
         appended = await history.append_history_message(
-            llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "next"),
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "next"),
         )
 
     assert appended.seq == 5
