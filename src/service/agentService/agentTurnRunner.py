@@ -56,9 +56,9 @@ class AgentTurnRunner:
 
     # ─── Turn 运行方法 ──────────────────────────────────────
 
-    async def run_chat_turn(self, task: GtAgentTask, resumed: bool = False) -> None:
+    async def run_chat_turn(self, task: GtAgentTask) -> None:
         """执行一个完整 chat turn：同步房间消息 → 推理 → 工具调用循环。
-        若 resumed=True 且存在未完成 turn，则走续跑路径。"""
+        若存在未完成 turn，则走续跑路径。"""
         room_id = task.task_data.get("room_id")
         assertNotNull(room_id, error_message=f"task 缺少 room_id, agent_id={self.gt_agent.id}, task_id={task.id}")
 
@@ -69,7 +69,7 @@ class AgentTurnRunner:
         try:
             if self.driver.host_managed_turn_loop:
                 assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
-                if resumed and self._history.has_unfinished_turn():
+                if self._history.has_unfinished_turn():
                     await self._run_turn_with_host_loop(room, resumed=True)
                     return
 

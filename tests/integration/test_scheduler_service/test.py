@@ -128,10 +128,6 @@ class TestSchedulerRun(ServiceTestCase):
         alice.task_consumer.status = AgentStatus.IDLE
         assert alice.is_active is False
 
-        # 有 current_db_task 时也是活跃的
-        alice.task_consumer.current_db_task = GtAgentTask(id=1, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": 1})
-        assert alice.is_active is True
-
     async def test_handle_event_error_logged_in_agent(self):
         """验证 Agent.task_consumer.consume 内部错误后进入 FAILED 状态。"""
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")

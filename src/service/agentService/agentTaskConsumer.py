@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 
 from constants import AgentTaskStatus, AgentStatus, MessageBusTopic
 from model.dbModel.gtAgent import GtAgent
@@ -42,7 +41,6 @@ class AgentTaskConsumer:
         )
         self.status: AgentStatus = AgentStatus.IDLE
         self._aio_consumer_task: asyncio.Task | None = None
-        self.current_db_task: Optional[GtAgentTask] = None
 
     def _publish_status(self, status: AgentStatus) -> None:
         messageBus.publish(MessageBusTopic.AGENT_STATUS_CHANGED, gt_agent=self.gt_agent, status=status)
@@ -99,12 +97,10 @@ class AgentTaskConsumer:
             else:
                 claimed_task = task  # 已经是 RUNNING，直接使用
 
-            resumed = self._turn_runner._history.has_unfinished_turn()
-            self.current_db_task = claimed_task
-            logger.info(f"开始执行任务: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}, resumed={resumed}")
+            logger.info(f"开始执行任务: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}")
 
             try:
-                await self._turn_runner.run_chat_turn(claimed_task, resumed=resumed)
+                await self._turn_runner.run_chat_turn(claimed_task)
             except Exception as e:
                 logger.error(f"Agent 任务执行失败: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}, error={e}")
                 await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.FAILED, error_message=str(e))
@@ -114,7 +110,6 @@ class AgentTaskConsumer:
 
             logger.info(f"任务执行完成: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}")
             await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.COMPLETED)
-            self.current_db_task = None
 
         # 清理逻辑
         if self.status != AgentStatus.FAILED:
