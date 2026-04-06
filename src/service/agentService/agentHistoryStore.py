@@ -226,6 +226,13 @@ class AgentHistoryStore:
                     return tool_call
         return None
 
+    def find_tool_call_by_id_in_unfinished_turn(self, tool_call_id: str) -> llmApiUtil.OpenAIToolCall | None:
+        """在未完成 turn 内查找指定 tool_call_id 的调用。"""
+        start_idx = self.get_unfinished_turn_start_index()
+        if start_idx is None:
+            return None
+        return self.find_tool_call_by_id(tool_call_id, start_idx=start_idx)
+
     def find_tool_result_by_call_id(self, tool_call_id: str) -> GtAgentHistory | None:
         for item in reversed(self._items):
             if item.role == llmApiUtil.OpenaiApiRole.TOOL and item.tool_call_id == tool_call_id:
@@ -241,6 +248,13 @@ class AgentHistoryStore:
             if AgentHistoryTag.ROOM_TURN_BEGIN in item.tags:
                 return idx
         return None
+
+    def get_last_assistant_message_in_unfinished_turn(self) -> llmApiUtil.OpenAIMessage | None:
+        """获取未完成 turn 内的最后一条 assistant 消息，若无未完成 turn 则返回 None。"""
+        start_idx = self.get_unfinished_turn_start_index()
+        if start_idx is None:
+            return None
+        return self.get_last_assistant_message(start_idx=start_idx)
 
     def has_unfinished_turn(self) -> bool:
         return self.get_unfinished_turn_start_index() is not None

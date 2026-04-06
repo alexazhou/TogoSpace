@@ -169,19 +169,17 @@ class AgentTurnRunner:
 
     async def _step_after_tool_result(self, room: ChatRoom, tools: list[llmApiUtil.OpenAITool]) -> str:
         """TOOL_RESULT 成功后，检查是否有未完成的工具，否则推理。"""
-        turn_start_idx = self._history.get_unfinished_turn_start_index()
-        if turn_start_idx is not None:
-            last_assistant = self._history.get_last_assistant_message(start_idx=turn_start_idx)
-            if last_assistant is not None and last_assistant.tool_calls:
-                # 检查是否有未执行的工具
-                for tc in last_assistant.tool_calls:
-                    result = self._history.find_tool_result_by_call_id(str(tc.id or ""))
-                    if result is None or result.status == AgentHistoryStatus.INIT:
-                        # 有未执行的工具，先执行它们
-                        turn_done = await self._dispatch_tool_calls(
-                            room, last_assistant.tool_calls, execute_only_missing=True
-                        )
-                        return "turn_done" if turn_done else "continue"
+        last_assistant = self._history.get_last_assistant_message_in_unfinished_turn()
+        if last_assistant is not None and last_assistant.tool_calls:
+            # 检查是否有未执行的工具
+            for tc in last_assistant.tool_calls:
+                result = self._history.find_tool_result_by_call_id(str(tc.id or ""))
+                if result is None or result.status == AgentHistoryStatus.INIT:
+                    # 有未执行的工具，先执行它们
+                    turn_done = await self._dispatch_tool_calls(
+                        room, last_assistant.tool_calls, execute_only_missing=True
+                    )
+                    return "turn_done" if turn_done else "continue"
 
         return await self._step_infer(tools)
 
@@ -203,8 +201,7 @@ class AgentTurnRunner:
     async def _step_resume_tool(self, room: ChatRoom, pending_item: GtAgentHistory) -> str:
         """恢复执行单个待处理的工具。返回 'turn_done' 或 'continue'。"""
         tool_call_id = str(pending_item.tool_call_id or "")
-        turn_start_idx = self._history.get_unfinished_turn_start_index()
-        tool_call = self._history.find_tool_call_by_id(tool_call_id, start_idx=turn_start_idx)
+        tool_call = self._history.find_tool_call_by_id_in_unfinished_turn(tool_call_id)
 
         if tool_call is None:
             raise RuntimeError(f"工具调用不存在: agent_id={self.gt_agent.id}, tool_call_id={tool_call_id}")
