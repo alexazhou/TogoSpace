@@ -163,7 +163,7 @@ async def finish_chat_turn(_context: ToolCallContext = None) -> dict:
     if agent_id is None:
         logger.warning(f"finish_chat_turn: agent 不在房间中 agent={_context.agent_name}, room={_context.chat_room.key}")
         return {"success": True, "message": "已结束本轮行动。"}
-    ok = await _context.chat_room.finish_turn(sender_id=agent_id)
+    ok = await _context.chat_room.finish_turn(agent_id)
 
     if not ok:
         current_name = _context.chat_room.get_current_turn_agent_name()
