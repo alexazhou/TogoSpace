@@ -148,15 +148,15 @@ class ChatRoom:
         agent = self._get_agent_by_id(agent_id)
         return agent.name if agent else str(agent_id)
 
-    def get_agent_id_by_name(self, name: str) -> int:
-        """根据 Agent 名称获取 agent_id。"""
+    def get_agent_id_by_name(self, name: str) -> int | None:
+        """根据 Agent 名称获取 agent_id。未找到时返回 None。"""
         special_agent = SpecialAgent.value_of(name)
         if special_agent is not None:
             return int(special_agent.value)
         for agent in self._agents:
             if agent.name == name:
                 return agent.id
-        return 0
+        return None
 
     def get_gt_agent(self, agent_id: int) -> GtAgent | None:
         """根据 agent_id 获取运行态房间中的 Agent 对象（包含 SpecialAgent）。"""

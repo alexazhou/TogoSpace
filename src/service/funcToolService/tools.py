@@ -125,7 +125,7 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
 
     if _context.chat_room is not None and target_room.room_id != _context.chat_room.room_id:
         sender_id = _context.chat_room.get_agent_id_by_name(_context.agent_name)
-        if not target_room.can_post_message(sender_id):
+        if sender_id is None or not target_room.can_post_message(sender_id):
             logger.warning(
                 "send_chat_msg: 发言者不在目标房间 agents 中 sender=%s room=%s team_id=%s agents=%s",
                 _context.agent_name,
@@ -135,7 +135,10 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
             )
             return {"success": False, "message": f"你不在目标房间 {target_room.name} 中，发送失败。"}
 
-    sender_id = _context.chat_room.get_agent_id_by_name(_context.agent_name) if _context.chat_room else 0
+    sender_id = _context.chat_room.get_agent_id_by_name(_context.agent_name) if _context.chat_room else None
+    if sender_id is None:
+        logger.warning(f"send_chat_msg: 发言者不在当前房间中 sender={_context.agent_name}")
+        return {"success": False, "message": f"发言者 {_context.agent_name} 不在当前房间中"}
     await target_room.add_message(sender_id, msg)
 
     if target_room is _context.chat_room:
@@ -157,6 +160,9 @@ async def finish_chat_turn(_context: ToolCallContext = None) -> dict:
 
     logger.info(f"Agent 结束行动: agent={_context.agent_name}")
     agent_id = _context.chat_room.get_agent_id_by_name(_context.agent_name)
+    if agent_id is None:
+        logger.warning(f"finish_chat_turn: agent 不在房间中 agent={_context.agent_name}, room={_context.chat_room.key}")
+        return {"success": True, "message": "已结束本轮行动。"}
     ok = await _context.chat_room.finish_turn(sender_id=agent_id)
 
     if not ok:
