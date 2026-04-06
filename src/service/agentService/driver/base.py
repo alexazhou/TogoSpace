@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from constants import DriverType
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService.toolRegistry import AgentToolRegistry
-from util import llmApiUtil
 
 
 @dataclass
@@ -37,9 +36,6 @@ class AgentDriverHost(Protocol):
     agent_workdir: str
     _history: AgentHistoryStore
     tool_registry: AgentToolRegistry
-
-    async def _infer(self, tools: Optional[list[llmApiUtil.OpenAITool]]) -> llmApiUtil.OpenAIMessage:
-        ...
 
     async def _execute_tool(self) -> None:
         ...
