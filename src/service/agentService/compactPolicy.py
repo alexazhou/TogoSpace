@@ -68,10 +68,10 @@ def estimate_tokens(
         return litellm.token_counter(model=model, messages=msg_dicts)
     except Exception as e:
         logger.warning("token 估算失败，回退到字符估算: error=%s", e)
-        return _fallback_char_estimate(messages, system_prompt)
+        return estimate_token_by_char(messages, system_prompt)
 
 
-def _fallback_char_estimate(messages: list[llmApiUtil.OpenAIMessage], system_prompt: str | None = None) -> int:
+def estimate_token_by_char(messages: list[llmApiUtil.OpenAIMessage], system_prompt: str | None = None) -> int:
     """字符数 / 4 的粗略估算，作为 litellm 失败时的兜底。"""
     total_chars = len(system_prompt or "")
     for msg in messages:
