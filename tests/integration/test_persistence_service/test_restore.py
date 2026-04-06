@@ -36,12 +36,12 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await agentService.shutdown()
         roomService.shutdown()
 
-    def setup_method(self):
+    @pytest.fixture(autouse=True)
+    async def _reset_between_tests(self):
         self.cleanup_sqlite_files()
-        self._run_maybe_async(self._reset_runtime_services())
-
-    def teardown_method(self):
-        self._run_maybe_async(self._reset_runtime_services())
+        await self._reset_runtime_services()
+        yield
+        await self._reset_runtime_services()
         self.cleanup_sqlite_files()
 
     async def _bootstrap(self):

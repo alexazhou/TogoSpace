@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
@@ -49,6 +50,7 @@ class AgentDriver:
         self.host = host
         self.config = config
         self._started: bool = False
+        self._startup_loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def driver_type(self) -> DriverType:
@@ -64,9 +66,18 @@ class AgentDriver:
 
     async def startup(self) -> None:
         self._started = True
+        self._startup_loop = asyncio.get_running_loop()
 
     async def shutdown(self) -> None:
+        if self._startup_loop is not None:
+            current_loop = asyncio.get_running_loop()
+            assert current_loop is self._startup_loop, (
+                f"AgentDriver.shutdown() 必须在 startup() 所用的事件循环上调用，"
+                f"否则 asyncio IO 对象无法正常关闭。"
+                f"startup_loop={id(self._startup_loop)}, current_loop={id(current_loop)}"
+            )
         self._started = False
+        self._startup_loop = None
 
     @property
     def turn_setup(self) -> AgentTurnSetup:
