@@ -100,9 +100,21 @@ class AgentTaskConsumer:
                 claimed_task = task  # 已经是 RUNNING，直接使用
 
             resumed = self._turn_runner._history.has_unfinished_turn()
-            completed = await self._execute_task(claimed_task, resumed=resumed)
-            if completed is False:
+            self.current_db_task = claimed_task
+            logger.info(f"开始执行任务: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}, resumed={resumed}")
+
+            try:
+                await self._turn_runner.run_chat_turn(claimed_task, resumed=resumed)
+            except Exception as e:
+                logger.error(f"Agent 任务执行失败: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}, error={e}")
+                await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.FAILED, error_message=str(e))
+                self.status = AgentStatus.FAILED
+                self._publish_status(self.status)
                 break
+
+            logger.info(f"任务执行完成: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}")
+            await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.COMPLETED)
+            self.current_db_task = None
 
         # 清理逻辑
         if self.status != AgentStatus.FAILED:
@@ -117,30 +129,6 @@ class AgentTaskConsumer:
                 if has_pending:
                     logger.info(f"Agent 任务收尾时检测到待处理任务，自动续起消费: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
                     self.start()
-
-    # ─── 单任务执行（原 AgentTaskExecutor.execute） ───────────
-    async def _execute_task(self, claimed_task: GtAgentTask, *, resumed: bool) -> bool:
-        """执行一条已处于 RUNNING 状态的任务。
-
-        返回 True 表示任务完成，可继续后续任务；返回 False 表示任务失败，消费流程应立即停止。
-        """
-        self.current_db_task = claimed_task
-        logger.info(f"开始执行任务: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}, resumed={resumed}")
-
-        try:
-            await self._turn_runner.run_chat_turn(claimed_task, resumed=resumed)
-        except Exception as e:
-            logger.error(f"Agent 任务执行失败: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}, error={e}")
-            await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.FAILED, error_message=str(e))
-            self.status = AgentStatus.FAILED
-            self.current_db_task = None
-            self._publish_status(self.status)
-            return False
-
-        logger.info(f"任务执行完成: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}")
-        await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.COMPLETED)
-        self.current_db_task = None
-        return True
 
     # ─── 恢复失败任务 ────────────────────────────────────────
     async def resume_failed(self) -> None:
