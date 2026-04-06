@@ -10,7 +10,7 @@ from claude_agent_sdk import (
 )
 
 from service.roomService import ToolCallContext, ChatRoom
-from service.agentService.promptBuilder import build_turn_context_prompt
+from service.agentService import promptBuilder
 from service.funcToolService.toolLoader import get_function_metadata
 from service.funcToolService.tools import FUNCTION_REGISTRY
 from service import funcToolService, roomService
@@ -150,7 +150,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
                     f"ClaudeSdkAgentDriver 只接受完整 turn_prompt: agent_id={self.host.gt_agent.id}, room={room.key}"
                 )
         else:
-            turn_prompt = build_turn_context_prompt(room.name, [])
+            turn_prompt = promptBuilder.build_turn_begin_prompt(room.name, [])
 
         await self._run_turn_sdk(room, turn_prompt, synced_count)
 

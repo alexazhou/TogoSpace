@@ -12,7 +12,7 @@ from model.dbModel.gtAgentTask import GtAgentTask
 from service import roomService, agentService, ormService, persistenceService
 from service import funcToolService, presetService
 from service.agentService import Agent
-from service.agentService.promptBuilder import build_turn_context_prompt, format_room_message
+from service.agentService import promptBuilder
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
 from service.funcToolService.tools import FUNCTION_REGISTRY
@@ -311,9 +311,9 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client
 
-        first = format_room_message("lobby", "SYSTEM", "房间初始化")
-        second = format_room_message("lobby", "bob", "hello alice")
-        turn_prompt = build_turn_context_prompt("lobby", [first, second])
+        first = promptBuilder.format_room_message("lobby", "SYSTEM", "房间初始化")
+        second = promptBuilder.format_room_message("lobby", "bob", "hello alice")
+        turn_prompt = promptBuilder.build_turn_begin_prompt("lobby", [first, second])
         agent.inject_history_messages([
             GtAgentHistory.from_openai_message(
                 agent.gt_agent.id,

@@ -11,7 +11,7 @@ from service import persistenceService  # 仅用于 restore_state
 from util import configUtil
 from util import assertUtil
 from exception import TeamAgentException
-from model.coreModel.gtCoreChatModel import GtCoreChatMessage
+from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 from model.dbModel.gtDept import DeptRoomSpec
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
@@ -70,7 +70,7 @@ class ChatRoom:
     def __init__(self, team: GtTeam, room: GtRoom, agents: List[GtAgent] | None = None):
         self.gt_room: GtRoom = room
         self.gt_team: GtTeam = team
-        self.messages: List[GtCoreChatMessage] = []  # 消息历史记录
+        self.messages: List[GtCoreRoomMessage] = []  # 消息历史记录
         self._agents: List[GtAgent] = agents or []  # 房间参与者列表
         self._agent_ids: List[int] = [agent.id for agent in self._agents]  # agent_id 列表，调度逻辑频繁使用索引访问
         self._agent_read_index: Dict[int, int] = {}  # 每个 Agent 的消息读取进度（agent_id 为 key）
@@ -174,7 +174,7 @@ class ChatRoom:
     def state(self) -> RoomState:
         return self._state
 
-    async def get_unread_messages(self, agent_id: int) -> List[GtCoreChatMessage]:
+    async def get_unread_messages(self, agent_id: int) -> List[GtCoreRoomMessage]:
         """返回 agent_id 尚未读取的新消息，并推进其读取位置。"""
         read_idx = self._agent_read_index.get(agent_id, 0)
         new_msgs = self.messages[read_idx:]
@@ -201,8 +201,9 @@ class ChatRoom:
             error_message=f"sender_id '{sender_id}' is not an agent of room '{self.key}'",
             error_code="sender_not_in_room",
         )
-        message = GtCoreChatMessage(
+        message = GtCoreRoomMessage(
             sender_id=sender_id,
+            sender_name=self._get_agent_name(sender_id),
             content=content,
             send_time=send_time or datetime.now()
         )
@@ -448,7 +449,7 @@ class ChatRoom:
 
     def inject_runtime_state(
         self,
-        messages: List[GtCoreChatMessage] | None = None,
+        messages: List[GtCoreRoomMessage] | None = None,
         agent_read_index: Dict[str, int] | None = None,
         turn_pos: int | None = None,
     ) -> None:
@@ -544,17 +545,17 @@ async def startup() -> None:
 async def _restore_room_state(room: ChatRoom) -> None:
     gt_room_messages, agent_read_index, turn_pos = await persistenceService.load_room_runtime(room.room_id)
     recovered_from_db = bool(gt_room_messages)
-    restored_messages: list[GtCoreChatMessage] | None = None
+    restored_messages: list[GtCoreRoomMessage] | None = None
 
     if gt_room_messages:
-        restored_messages = [
-            GtCoreChatMessage(
+        restored_messages = []
+        for row in gt_room_messages:
+            restored_messages.append(GtCoreRoomMessage(
                 sender_id=row.agent_id,
+                sender_name=room._get_agent_name(row.agent_id),
                 content=row.content,
                 send_time=datetime.fromisoformat(row.send_time),
-            )
-            for row in gt_room_messages
-        ]
+            ))
 
     if restored_messages is not None or agent_read_index is not None:
         room.inject_runtime_state(

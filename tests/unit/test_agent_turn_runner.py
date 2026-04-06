@@ -6,7 +6,7 @@ import pytest
 from constants import AgentHistoryStage, AgentHistoryTag, DriverType
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
-from model.coreModel.gtCoreChatModel import GtCoreChatMessage
+from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver.base import AgentDriverConfig
 from service.roomService import ChatRoom
@@ -66,10 +66,10 @@ async def test_pull_room_messages_syncs_to_history(turn_runner):
     room = MagicMock(spec=ChatRoom)
     room.name = "test_room"
     room.team_id = 1
-    room._get_agent_name = MagicMock(return_value="OtherAgent")
 
-    msg = MagicMock(spec=GtCoreChatMessage)
+    msg = MagicMock(spec=GtCoreRoomMessage)
     msg.sender_id = 2  # 非 agent 自身
+    msg.sender_name = "OtherAgent"
     msg.content = "Hello"
 
     room.get_unread_messages = AsyncMock(return_value=[msg])
@@ -87,11 +87,11 @@ async def test_pull_room_messages_syncs_to_history(turn_runner):
 async def test_pull_room_messages_skips_own_messages(turn_runner):
     room = MagicMock(spec=ChatRoom)
     room.name = "test_room"
-    room._get_agent_name = MagicMock(return_value="TestAgent")
 
     # 自己发的消息，应跳过
-    msg = MagicMock(spec=GtCoreChatMessage)
+    msg = MagicMock(spec=GtCoreRoomMessage)
     msg.sender_id = 1  # agent.gt_agent.id
+    msg.sender_name = "TestAgent"
     msg.content = "My message"
 
     room.get_unread_messages = AsyncMock(return_value=[msg])

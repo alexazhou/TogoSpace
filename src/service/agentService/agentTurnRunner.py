@@ -12,22 +12,15 @@ from constants import (
     AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag,
     DriverType, RoomState,
 )
-from model.coreModel.gtCoreChatModel import GtCoreChatMessage
+from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreRoomMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
-from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from service import llmService, roomService
 from service.agentService.agentHistoryStore import AgentHistoryStore
-from service.agentService import compactPolicy
+from service.agentService import compactPolicy, promptBuilder
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
 from service.agentService.driver.factory import build_agent_driver
-from service.agentService.promptBuilder import (
-    build_compact_instruction,
-    build_compact_resume_prompt,
-    build_turn_context_prompt,
-    format_room_message,
-)
 from service.agentService.toolRegistry import AgentToolRegistry, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
 from util import configUtil, llmApiUtil
@@ -93,24 +86,19 @@ class AgentTurnRunner:
 
     async def pull_room_messages_to_history(self, room: ChatRoom) -> int:
         """从房间拉取未读消息并追加到 history。返回追加的消息条目数（0 或 1）。"""
-        new_msgs: List[GtCoreChatMessage] = await room.get_unread_messages(self.gt_agent.id)
+        new_msgs: List[GtCoreRoomMessage] = await room.get_unread_messages(self.gt_agent.id)
 
-        message_blocks: list[str] = []
-        own_count = 0
-        for msg in new_msgs:
-            if msg.sender_id == self.gt_agent.id:
-                own_count += 1
-                continue
-            sender_name = room._get_agent_name(msg.sender_id)
-            message_blocks.append(format_room_message(room.name, sender_name, msg.content))
+        own_count = sum(1 for msg in new_msgs if msg.sender_id == self.gt_agent.id)
+        logger.info(f"同步房间消息: agent={self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}, raw={len(new_msgs)}, own={own_count}, others={len(new_msgs) - own_count}")
 
-        logger.info(f"同步房间消息: agent={self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}, raw={len(new_msgs)}, own={own_count}, others={len(message_blocks)}")
-
-        if len(message_blocks) == 0:
+        if len(new_msgs) == own_count:
             return 0
 
+        turn_prompt = promptBuilder.build_turn_begin_prompt_from_messages(
+            room.name, new_msgs, self.gt_agent.id
+        )
         await self._history.append_history_message(
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, build_turn_context_prompt(room.name, message_blocks)),
+            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt),
             stage=AgentHistoryStage.INPUT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         )
@@ -366,7 +354,7 @@ class AgentTurnRunner:
             logger.warning("compact 跳过：无可压缩消息, agent_id=%d", self.gt_agent.id)
             return
 
-        compact_instruction = build_compact_instruction(max_tokens=llm_config.compact_summary_max_tokens)
+        compact_instruction = promptBuilder.build_compact_instruction(max_tokens=llm_config.compact_summary_max_tokens)
         instruction_msg = llmApiUtil.OpenAIMessage.text(
             llmApiUtil.OpenaiApiRole.USER, compact_instruction,
         )
@@ -392,7 +380,7 @@ class AgentTurnRunner:
             status=AgentHistoryStatus.SUCCESS,
         )
 
-        compact_context = build_compact_resume_prompt(summary_message.content or "")
+        compact_context = promptBuilder.build_compact_resume_prompt(summary_message.content or "")
         context_msg = llmApiUtil.OpenAIMessage.text(
             llmApiUtil.OpenaiApiRole.USER, compact_context,
         )
