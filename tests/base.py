@@ -40,6 +40,16 @@ _BASE_BACKEND_PORT = 18080
 _BASE_MOCK_LLM_PORT = 19876
 
 
+def _cancel_all_tasks(loop: asyncio.AbstractEventLoop) -> None:
+    """取消事件循环上的所有待处理 task（与 asyncio.run 的清理逻辑一致）。"""
+    tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
+    if not tasks:
+        return
+    for task in tasks:
+        task.cancel()
+    loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+
+
 def _get_worker_offset() -> int:
     worker_id = os.environ.get("PYTEST_XDIST_WORKER")
     if worker_id and worker_id.startswith("gw"):
@@ -241,9 +251,13 @@ class ServiceTestCase:
     # 类级别生命周期
     # ------------------------------------------------------------------
 
+    _class_loop: asyncio.AbstractEventLoop = None
+
     @classmethod
     def setup_class(cls):
-        # 先启动外部依赖（MockLLM/后端子进程），再执行子类自定义异步初始化。
+        # 创建类级别事件循环，确保 setup 与 teardown 共用同一个 loop，
+        # 避免 TSP 等驱动的 asyncio 资源跨循环后无法正常关闭。
+        cls._class_loop = asyncio.new_event_loop()
         try:
             cls._load_config()
             cls.cleanup_sqlite_files()
@@ -252,9 +266,10 @@ class ServiceTestCase:
                 cls._start_mock_llm()
             if cls.requires_backend:
                 cls._start_backend()
-            cls._run_maybe_async(cls.async_setup_class())
+            cls._run_on_class_loop(cls.async_setup_class())
         except Exception:
             cls._safe_cleanup_external_dependencies()
+            cls._close_class_loop()
             raise
 
     @classmethod
@@ -262,13 +277,14 @@ class ServiceTestCase:
         # 先执行子类清理，再关闭外部依赖，保证清理阶段仍可访问服务。
         teardown_error: Exception | None = None
         try:
-            cls._run_maybe_async(cls.async_teardown_class())
+            cls._run_on_class_loop(cls.async_teardown_class())
         except Exception as exc:
             teardown_error = exc
         finally:
             if hasattr(cls, "_config_patcher"):
                 cls._config_patcher.stop()
             cls._safe_cleanup_external_dependencies()
+            cls._close_class_loop()
         if teardown_error is not None:
             raise teardown_error
 
@@ -498,10 +514,38 @@ class ServiceTestCase:
         lines = text.strip().splitlines()
         return "\n".join(lines[-max_lines:])
 
-    @staticmethod
-    def _run_maybe_async(result):
-        # pytest 的 setup_class/teardown_class 是同步协议，这里统一桥接 awaitable。
-        if inspect.isawaitable(result):
+    @classmethod
+    def _run_on_class_loop(cls, coro):
+        """在类级别事件循环上运行协程，保证 setup/teardown 共用同一 loop。"""
+        if not inspect.isawaitable(coro):
+            return
+        loop = cls._class_loop
+        if loop is None or loop.is_closed():
+            asyncio.run(coro)
+            return
+        loop.run_until_complete(coro)
+
+    @classmethod
+    def _close_class_loop(cls):
+        """关闭类级别事件循环。"""
+        loop = cls._class_loop
+        cls._class_loop = None
+        if loop is not None and not loop.is_closed():
+            try:
+                _cancel_all_tasks(loop)
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            finally:
+                loop.close()
+
+    @classmethod
+    def _run_maybe_async(cls, result):
+        """同步桥接 awaitable：优先使用类级别事件循环，否则回退到 asyncio.run。"""
+        if not inspect.isawaitable(result):
+            return
+        loop = getattr(cls, "_class_loop", None)
+        if loop is not None and not loop.is_closed():
+            loop.run_until_complete(result)
+        else:
             asyncio.run(result)
 
     @staticmethod
