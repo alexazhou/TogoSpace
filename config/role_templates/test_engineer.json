@@ -17,6 +17,5 @@
     "mcp__chrome__new_page",
     "mcp__chrome__list_pages",
     "mcp__chrome__wait_for"
-  ],
-  "driver": "claude_sdk"
+  ]
 }

@@ -83,7 +83,7 @@ async def _load_team(team_id: int, workspace_root: str | None = None) -> None:
         gt_agent.model = model_name
         driver_config = normalize_driver_config(
             {
-                "driver": gt_agent.driver or gt_role_template.driver,
+                "driver": gt_agent.driver,
                 "allowed_tools": gt_role_template.allowed_tools,
             }
         )

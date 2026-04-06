@@ -1,6 +1,7 @@
 """integration tests for ClaudeSdkAgentDriver send/skip routing behavior"""
 import os
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -14,6 +15,7 @@ from service.agentService import Agent
 from service.agentService.promptBuilder import build_turn_context_prompt, format_room_message
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
+from service.funcToolService.tools import FUNCTION_REGISTRY
 from constants import DriverType, RoleTemplateType, AgentTaskType
 from util import llmApiUtil
 from util.configTypes import TeamConfig, AgentConfig, DeptNodeConfig
@@ -202,6 +204,67 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             assert False, "expected RuntimeError"
         except RuntimeError as exc:
             assert "尚未初始化" in str(exc)
+
+    async def test_startup_without_allowed_tools_opens_all_local_tools_and_omits_sdk_allowlist(self):
+        agent = Agent(
+            gt_agent=GtAgent(id=1, team_id=1, name="alice", role_template_id=1, model="test-model"),
+            system_prompt="test",
+            driver_config=AgentDriverConfig(driver_type="native"),
+        )
+        driver = ClaudeSdkAgentDriver(agent.task_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))
+
+        captured_options = {}
+
+        class _FakeClaudeClient:
+            def __init__(self, options):
+                captured_options.update(options)
+
+            async def connect(self) -> None:
+                return None
+
+            async def disconnect(self) -> None:
+                return None
+
+        with patch("service.agentService.driver.claudeSdkDriver.create_sdk_mcp_server", return_value=object()), \
+             patch("service.agentService.driver.claudeSdkDriver.ClaudeAgentOptions", side_effect=lambda **kwargs: kwargs), \
+             patch("service.agentService.driver.claudeSdkDriver.ClaudeSDKClient", side_effect=_FakeClaudeClient):
+            await driver.startup()
+
+        exported_names = [tool.function.name for tool in agent.task_consumer._turn_runner.tool_registry.export_openai_tools()]
+        assert set(exported_names) == set(FUNCTION_REGISTRY.keys())
+        assert "allowed_tools" not in captured_options
+
+    async def test_startup_with_allowed_tools_keeps_local_tools_narrow_and_passes_sdk_allowlist(self):
+        agent = Agent(
+            gt_agent=GtAgent(id=1, team_id=1, name="alice", role_template_id=1, model="test-model"),
+            system_prompt="test",
+            driver_config=AgentDriverConfig(driver_type="native"),
+        )
+        driver = ClaudeSdkAgentDriver(
+            agent.task_consumer._turn_runner,
+            AgentDriverConfig(driver_type="claude_sdk", options={"allowed_tools": ["Read"]}),
+        )
+
+        captured_options = {}
+
+        class _FakeClaudeClient:
+            def __init__(self, options):
+                captured_options.update(options)
+
+            async def connect(self) -> None:
+                return None
+
+            async def disconnect(self) -> None:
+                return None
+
+        with patch("service.agentService.driver.claudeSdkDriver.create_sdk_mcp_server", return_value=object()), \
+             patch("service.agentService.driver.claudeSdkDriver.ClaudeAgentOptions", side_effect=lambda **kwargs: kwargs), \
+             patch("service.agentService.driver.claudeSdkDriver.ClaudeSDKClient", side_effect=_FakeClaudeClient):
+            await driver.startup()
+
+        exported_names = [tool.function.name for tool in agent.task_consumer._turn_runner.tool_registry.export_openai_tools()]
+        assert exported_names == ["send_chat_msg", "finish_chat_turn"]
+        assert captured_options["allowed_tools"] == ["Read"]
 
     async def test_run_chat_turn_uses_max_function_calls_as_retry_limit(self):
         await roomService.ensure_room_record(TEAM, "lobby", ["alice"])

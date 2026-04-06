@@ -28,7 +28,6 @@ async def _import_role_templates_from_app_config() -> None:
             soul=template.soul,
             model=template.model,
             type=RoleTemplateType.SYSTEM,
-            driver=template.driver,
             allowed_tools=template.allowed_tools,
         ))
     db_templates = await gtRoleTemplateManager.get_all_role_templates()

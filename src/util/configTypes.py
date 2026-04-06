@@ -41,7 +41,7 @@ class AgentConfig(BaseModel):
     name: str  # Nickname of the agent in the team
     role_template: str  # Name of the RoleTemplate to use in config import/export
     model: Optional[str] = None  # 覆盖 RoleTemplate.model
-    driver: DriverType = DriverType.NATIVE  # 覆盖 RoleTemplate.driver
+    driver: DriverType = DriverType.TSP
 
 
 class TeamRoomConfig(BaseModel):
@@ -71,7 +71,6 @@ class RoleTemplateConfig(BaseModel):
     prompt_file: str = ""
     model: Optional[str] = None
     allowed_tools: List[str] | None = None
-    driver: DriverType | None = None
 
 
 class LlmServiceConfig(BaseModel):

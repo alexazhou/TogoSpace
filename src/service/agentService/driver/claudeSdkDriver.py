@@ -63,12 +63,21 @@ class ClaudeSdkAgentDriver(AgentDriver):
         self._turn_done: bool = False  # 当前轮次是否已完成发言，由 tool handler 设置，_run_turn_sdk 检查以决定是否中断/退出
         self._tool_call_counter: int = 0  # tool_call_id 计数器
 
-    _SDK_TOOL_NAMES = ("send_chat_msg", "finish_chat_turn")
+    _CHAT_TOOL_NAMES = ("send_chat_msg", "finish_chat_turn")
+
+    def _has_explicit_allowed_tools(self) -> bool:
+        return "allowed_tools" in self.config.options
+
+    def _get_local_tool_names(self) -> list[str]:
+        if self._has_explicit_allowed_tools():
+            return list(self._CHAT_TOOL_NAMES)
+        return list(FUNCTION_REGISTRY.keys())
 
     async def startup(self) -> None:
         await super().startup()
         self.host.tool_registry.clear()
-        for t in funcToolService.get_tools_by_names(list(self._SDK_TOOL_NAMES)):
+        local_tool_names = self._get_local_tool_names()
+        for t in funcToolService.get_tools_by_names(local_tool_names):
             fn_name = t.function.name
             self.host.tool_registry.register(
                 t,
@@ -79,16 +88,21 @@ class ClaudeSdkAgentDriver(AgentDriver):
         server = create_sdk_mcp_server(
             "chat-tools",
             tools=[
-                self._build_claude_sdk_tool(name) for name in self._SDK_TOOL_NAMES
+                self._build_claude_sdk_tool(name) for name in local_tool_names
             ],
         )
-        options = ClaudeAgentOptions(
-            system_prompt=self.host.system_prompt,
-            allowed_tools=self.config.options.get("allowed_tools", []),
-            mcp_servers={"chat": server},
-            permission_mode="bypassPermissions",
-            max_turns=self.config.options.get("max_turns", 100),
-        )
+        option_args = {
+            "tools": {"type": "preset", "preset": "claude_code"},
+            "system_prompt": self.host.system_prompt,
+            "mcp_servers": {"chat": server},
+            "permission_mode": "bypassPermissions",
+            "max_turns": self.config.options.get("max_turns", 100),
+            "cwd": self.host.agent_workdir,
+            "add_dirs": [self.host.agent_workdir],
+        }
+        if self._has_explicit_allowed_tools():
+            option_args["allowed_tools"] = self.config.options.get("allowed_tools")
+        options = ClaudeAgentOptions(**option_args)
 
         os.environ.pop("CLAUDECODE", None)
 
