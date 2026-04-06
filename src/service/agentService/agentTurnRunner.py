@@ -146,40 +146,34 @@ class AgentTurnRunner:
         if last_item is None:
             raise RuntimeError(f"history 为空，无法推进: agent_id={self.gt_agent.id}")
 
+        # TOOL_RESULT.SUCCESS 特殊处理：检查是否有未完成的工具
+        if last_item.stage == AgentHistoryStage.TOOL_RESULT and last_item.status == AgentHistoryStatus.SUCCESS:
+            last_assistant = self._history.get_last_assistant_message_in_unfinished_turn()
+            if last_assistant is not None and last_assistant.tool_calls:
+                for tc in last_assistant.tool_calls:
+                    result = self._history.find_tool_result_by_call_id(tc.id)
+                    if result is None or result.status == AgentHistoryStatus.INIT:
+                        # 有未完成的工具，转去执行
+                        turn_done = await self._dispatch_tool_calls(
+                            room, last_assistant.tool_calls, execute_only_missing=True
+                        )
+                        return "turn_done" if turn_done else "continue"
+            # 没有未完成的工具，继续推理
+            return await self._step_infer(tools)
+
         match (last_item.stage, last_item.status):
-            # 需要推理的场景：INPUT 消息后、INFER 失败/待处理、TOOL_RESULT 成功后
             case (AgentHistoryStage.INPUT, _) | \
                  (AgentHistoryStage.INFER, AgentHistoryStatus.INIT | AgentHistoryStatus.FAILED):
                 return await self._step_infer(tools)
 
-            # TOOL_RESULT 成功后，先检查是否有未完成的工具
-            case (AgentHistoryStage.TOOL_RESULT, AgentHistoryStatus.SUCCESS):
-                return await self._step_after_tool_result(room, tools)
-
-            # 需要执行工具：INFER 成功后
             case (AgentHistoryStage.INFER, AgentHistoryStatus.SUCCESS):
                 return await self._step_execute_tools(room, tools)
 
-            # 需要重新执行单个工具：TOOL_RESULT 待处理
             case (AgentHistoryStage.TOOL_RESULT, AgentHistoryStatus.INIT):
                 return await self._step_resume_tool(room, last_item)
 
             case _:
                 raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, stage={last_item.stage}, status={last_item.status}")
-
-    async def _step_after_tool_result(self, room: ChatRoom, tools: list[llmApiUtil.OpenAITool]) -> str:
-        """TOOL_RESULT 成功后，检查是否有未完成的工具，否则推理。"""
-        last_assistant = self._history.get_last_assistant_message_in_unfinished_turn()
-        if last_assistant is not None and last_assistant.tool_calls:
-            for tc in last_assistant.tool_calls:
-                result = self._history.find_tool_result_by_call_id(tc.id)
-                if result is None or result.status == AgentHistoryStatus.INIT:
-                    turn_done = await self._dispatch_tool_calls(
-                        room, last_assistant.tool_calls, execute_only_missing=True
-                    )
-                    return "turn_done" if turn_done else "continue"
-
-        return await self._step_infer(tools)
 
     async def _step_infer(self, tools: list[llmApiUtil.OpenAITool]) -> str:
         """执行推理步骤。返回 'no_tool_calls' 或 'continue'。"""
