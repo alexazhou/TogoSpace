@@ -76,7 +76,10 @@ class AgentTurnRunner:
                     return
                 synced_count = await self.pull_room_messages_to_history(room)
                 if synced_count == 0 and room.state != RoomState.INIT:
-                    logger.info(f"无新消息，自动跳过本轮: agent_id={self.gt_agent.id}, room={room.name}")
+                    logger.info(
+                        "无新消息，自动跳过本轮: %s(agent_id=%d), room=%s",
+                        self.gt_agent.name, self.gt_agent.id, room.name,
+                    )
                     await room.finish_turn(self.gt_agent.id)
                     return
                 assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
@@ -90,14 +93,21 @@ class AgentTurnRunner:
     async def pull_room_messages_to_history(self, room: ChatRoom) -> int:
         """从房间拉取未读消息并追加到 history。返回追加的消息条目数（0 或 1）。"""
         new_msgs: List[GtCoreChatMessage] = await room.get_unread_messages(self.gt_agent.id)
-        logger.info(f"同步房间消息: agent_id={self.gt_agent.id}, room={room.name}, count={len(new_msgs)}")
 
         message_blocks: list[str] = []
+        own_count = 0
         for msg in new_msgs:
             if msg.sender_id == self.gt_agent.id:
+                own_count += 1
                 continue
             sender_name = room._get_agent_name(msg.sender_id)
             message_blocks.append(format_room_message(room.name, sender_name, msg.content))
+
+        logger.info(
+            "同步房间消息: agent=%s(agent_id=%d), room=%s, raw=%d, own=%d, others=%d",
+            self.gt_agent.name, self.gt_agent.id, room.name,
+            len(new_msgs), own_count, len(message_blocks),
+        )
 
         if len(message_blocks) == 0:
             return 0
@@ -258,7 +268,11 @@ class AgentTurnRunner:
         reuse_history_items: 续跑时复用已有 history item。
         execute_only_missing: 仅执行尚未有结果的 tool call（跳过已完成的）。
         返回 True 表示 turn 已完成。"""
-        logger.info(f"检测到工具调用: agent_id={self.gt_agent.id}, count={len(tool_calls)}")
+        tool_names = [tc.function_name for tc in tool_calls]
+        logger.info(
+            "检测到工具调用: %s(agent_id=%d), tools=%s",
+            self.gt_agent.name, self.gt_agent.id, tool_names,
+        )
         context: ToolCallContext = ToolCallContext(
             agent_name=self.gt_agent.name,
             team_id=room.team_id,
