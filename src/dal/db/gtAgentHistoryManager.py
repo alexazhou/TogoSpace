@@ -31,6 +31,41 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
     return row
 
 
+async def shift_agent_history_seq_from(agent_id: int, from_seq: int, delta: int) -> None:
+    """将指定 agent 下 seq >= from_seq 的历史整体平移。
+
+    为避免唯一索引(agent_id, seq)冲突，delta>0 时按 seq 降序更新。
+    """
+    if delta == 0:
+        return
+
+    rows = await (
+        GtAgentHistory
+        .select()
+        .where(
+            GtAgentHistory.agent_id == agent_id,
+            GtAgentHistory.seq >= from_seq,
+        )
+        .order_by(
+            GtAgentHistory.seq.desc() if delta > 0 else GtAgentHistory.seq.asc()  # type: ignore[attr-defined]
+        )
+        .aio_execute()
+    )
+    for row in rows:
+        await (
+            GtAgentHistory
+            .update(seq=row.seq + delta)
+            .where(GtAgentHistory.id == row.id)
+            .aio_execute()
+        )
+
+
+async def insert_agent_history_message_at_seq(message: GtAgentHistory) -> GtAgentHistory:
+    """在指定 seq 插入历史消息，并将其后的消息整体后移。"""
+    await shift_agent_history_seq_from(message.agent_id, message.seq, 1)
+    return await append_agent_history_message(message)
+
+
 async def update_agent_history_by_id(
     history_id: int,
     *,
