@@ -76,7 +76,7 @@ class AgentTurnRunner:
                         await room.finish_turn(self.gt_agent.id)
                         return
 
-                await self._run_turn_with_host_loop(room)
+                await self._run_turn_loop(room)
 
             else:
                 synced_count = await self.pull_room_messages_to_history(room)
@@ -104,82 +104,117 @@ class AgentTurnRunner:
         )
         return 1
 
-    async def _run_turn_with_host_loop(self, room: ChatRoom) -> None:
-        """Host-managed turn loop：循环推理+工具调用，支持从断点恢复。"""
-        tools: list[llmApiUtil.OpenAITool] = self.tool_registry.export_openai_tools()
-
-        # 断点恢复逻辑
-        if self._history.has_unfinished_turn():
-            turn_start_idx = self._history.get_unfinished_turn_start_index()
-            if turn_start_idx is not None:
-                last_item = self._history.last()
-                if last_item is not None:
-                    if await self._resume_from_breakpoint(room, tools, turn_start_idx, last_item):
-                        return
-
-        # 主循环
+    async def _run_turn_loop(self, room: ChatRoom) -> None:
+        """基于 history 状态推进的统一循环。"""
+        tools = self.tool_registry.export_openai_tools()
         turn_setup: AgentTurnSetup = self.driver.turn_setup
-        max_retries = max(1, turn_setup.max_retries)
-        for _ in range(max_retries):
-            turn_done = await self._run_until_reply(room, tools=tools)
-            if turn_done:
+        call_count = 0
+
+        while call_count < self.max_function_calls:
+            result = await self._advance_step(room, tools)
+
+            # 调用了 finish，turn 结束
+            if result == "turn_done":
                 return
-            if len(turn_setup.hint_prompt) > 0:
-                await self._history.append_history_message(
-                    llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_setup.hint_prompt),
-                    stage=AgentHistoryStage.INPUT,
-                )
 
-    async def _resume_from_breakpoint(
-        self,
-        room: ChatRoom,
-        tools: list[llmApiUtil.OpenAITool],
-        turn_start_idx: int,
-        last_item: GtAgentHistory,
-    ) -> bool:
-        """从断点恢复执行。返回 True 表示 turn 已完成。"""
-        if last_item.stage == AgentHistoryStage.INFER and last_item.status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED):
-            assistant_message = await self._infer(tools)
-            tool_calls = assistant_message.tool_calls or []
-            if tool_calls:
-                return await self._dispatch_tool_calls(room, tool_calls)
+            # 无工具调用
+            if result == "no_tool_calls":
+                # 有 hint_prompt，追加提示继续推理
+                if len(turn_setup.hint_prompt) > 0:
+                    await self._history.append_history_message(
+                        llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_setup.hint_prompt),
+                        stage=AgentHistoryStage.INPUT,
+                    )
+                    continue
+                # 无 hint_prompt，turn 结束
+                return
 
-        elif last_item.stage == AgentHistoryStage.TOOL_RESULT and last_item.status == AgentHistoryStatus.INIT:
-            tool_call_id = str(last_item.tool_call_id or "")
-            tool_call = self._history.find_tool_call_by_id(tool_call_id, start_idx=turn_start_idx)
-            if tool_call is None:
-                raise RuntimeError(f"resume tool call not found: agent_id={self.gt_agent.id}, tool_call_id={tool_call_id}")
-            return await self._dispatch_tool_calls(
-                room,
-                [tool_call],
-                reuse_history_items={tool_call_id: last_item},
-            )
-
-        else:
-            last_assistant = self._history.get_last_assistant_message(start_idx=turn_start_idx)
-            if last_assistant is not None and last_assistant.tool_calls:
-                return await self._dispatch_tool_calls(
-                    room,
-                    last_assistant.tool_calls,
-                    execute_only_missing=True,
-                )
-
-        return False
-
-    async def _run_until_reply(self, room: ChatRoom, tools: Optional[list[llmApiUtil.OpenAITool]]) -> bool:
-        """在 max_function_calls 次内循环：推理 → 工具调用。返回 True 表示 turn 结束（agent 调用了 finish 工具）。"""
-        for _ in range(self.max_function_calls):
-            assistant_message: llmApiUtil.OpenAIMessage = await self._infer(tools)
-            tool_calls = assistant_message.tool_calls or []
-            if len(tool_calls) == 0:
-                return False
-
-            turn_done = await self._dispatch_tool_calls(room, tool_calls)
-            if turn_done:
-                return True
+            # 有工具调用继续，计数
+            call_count += 1
 
         logger.warning(f"达到最大函数调用次数: agent_id={self.gt_agent.id}, max={self.max_function_calls}")
-        return False
+
+    async def _advance_step(self, room: ChatRoom, tools: list[llmApiUtil.OpenAITool]) -> str:
+        """根据当前 history 状态推进一步。
+
+        返回:
+            "turn_done": turn 已结束（调用了 finish）
+            "no_tool_calls": 推理无工具调用
+            "continue": 继续循环
+        """
+        last_item = self._history.last()
+        if last_item is None:
+            raise RuntimeError(f"history 为空，无法推进: agent_id={self.gt_agent.id}")
+
+        match (last_item.stage, last_item.status):
+            # 需要推理的场景：INPUT 消息后、INFER 失败/待处理、TOOL_RESULT 成功后
+            case (AgentHistoryStage.INPUT, _) | \
+                 (AgentHistoryStage.INFER, AgentHistoryStatus.INIT | AgentHistoryStatus.FAILED):
+                return await self._step_infer(tools)
+
+            # TOOL_RESULT 成功后，先检查是否有未完成的工具
+            case (AgentHistoryStage.TOOL_RESULT, AgentHistoryStatus.SUCCESS):
+                return await self._step_after_tool_result(room, tools)
+
+            # 需要执行工具：INFER 成功后
+            case (AgentHistoryStage.INFER, AgentHistoryStatus.SUCCESS):
+                return await self._step_execute_tools(room, tools)
+
+            # 需要重新执行单个工具：TOOL_RESULT 待处理
+            case (AgentHistoryStage.TOOL_RESULT, AgentHistoryStatus.INIT):
+                return await self._step_resume_tool(room, last_item)
+
+            case _:
+                raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, stage={last_item.stage}, status={last_item.status}")
+
+    async def _step_after_tool_result(self, room: ChatRoom, tools: list[llmApiUtil.OpenAITool]) -> str:
+        """TOOL_RESULT 成功后，检查是否有未完成的工具，否则推理。"""
+        turn_start_idx = self._history.get_unfinished_turn_start_index()
+        if turn_start_idx is not None:
+            last_assistant = self._history.get_last_assistant_message(start_idx=turn_start_idx)
+            if last_assistant is not None and last_assistant.tool_calls:
+                # 检查是否有未执行的工具
+                for tc in last_assistant.tool_calls:
+                    result = self._history.find_tool_result_by_call_id(str(tc.id or ""))
+                    if result is None or result.status == AgentHistoryStatus.INIT:
+                        # 有未执行的工具，先执行它们
+                        turn_done = await self._dispatch_tool_calls(
+                            room, last_assistant.tool_calls, execute_only_missing=True
+                        )
+                        return "turn_done" if turn_done else "continue"
+
+        return await self._step_infer(tools)
+
+    async def _step_infer(self, tools: list[llmApiUtil.OpenAITool]) -> str:
+        """执行推理步骤。返回 'no_tool_calls' 或 'continue'。"""
+        assistant_message = await self._infer(tools)
+        tool_calls = assistant_message.tool_calls or []
+        return "no_tool_calls" if len(tool_calls) == 0 else "continue"
+
+    async def _step_execute_tools(self, room: ChatRoom, tools: list[llmApiUtil.OpenAITool]) -> str:
+        """执行推理产生的工具调用。返回 'turn_done' 或 'continue'。"""
+        last_assistant = self._history.get_last_assistant_message()
+        if last_assistant is None or not last_assistant.tool_calls:
+            return "no_tool_calls"
+
+        turn_done = await self._dispatch_tool_calls(room, last_assistant.tool_calls)
+        return "turn_done" if turn_done else "continue"
+
+    async def _step_resume_tool(self, room: ChatRoom, pending_item: GtAgentHistory) -> str:
+        """恢复执行单个待处理的工具。返回 'turn_done' 或 'continue'。"""
+        tool_call_id = str(pending_item.tool_call_id or "")
+        turn_start_idx = self._history.get_unfinished_turn_start_index()
+        tool_call = self._history.find_tool_call_by_id(tool_call_id, start_idx=turn_start_idx)
+
+        if tool_call is None:
+            raise RuntimeError(f"工具调用不存在: agent_id={self.gt_agent.id}, tool_call_id={tool_call_id}")
+
+        turn_done = await self._dispatch_tool_calls(
+            room,
+            [tool_call],
+            reuse_history_items={tool_call_id: pending_item},
+        )
+        return "turn_done" if turn_done else "continue"
 
     # ─── AgentDriverHost 协议方法 ──────────────────────────
 
