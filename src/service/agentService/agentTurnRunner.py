@@ -68,16 +68,19 @@ class AgentTurnRunner:
         self._current_room = room
         try:
             if self.driver.host_managed_turn_loop:
+                assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
                 if resumed and self._history.has_unfinished_turn():
                     await self._run_turn_with_host_loop(room, resumed=True)
                     return
+
                 synced_count = await self.pull_room_messages_to_history(room)
                 if synced_count == 0 and room.state != RoomState.INIT:
                     logger.info(f"无新消息，自动跳过本轮: {self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}")
                     await room.finish_turn(self.gt_agent.id)
                     return
-                assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
+
                 await self._run_turn_with_host_loop(room)
+
             else:
                 synced_count = await self.pull_room_messages_to_history(room)
                 await self.driver.run_chat_turn(task, synced_count)

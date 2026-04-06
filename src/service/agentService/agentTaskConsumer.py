@@ -47,14 +47,14 @@ class AgentTaskConsumer:
     def _publish_status(self, status: AgentStatus) -> None:
         messageBus.publish(MessageBusTopic.AGENT_STATUS_CHANGED, gt_agent=self.gt_agent, status=status)
 
-    def start(self, initial_task: GtAgentTask | None = None) -> None:
+    def start(self) -> None:
         """如果没有消费协程在运行，则启动一个。"""
         existing = self._aio_consumer_task
         if existing is not None and not existing.done():
             logger.debug(f"消费协程已在运行，跳过启动: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
             return
-        logger.info(f"启动消费协程: {self.gt_agent.name}(agent_id={self.gt_agent.id}), initial_task={initial_task.id if initial_task else None}")
-        self._aio_consumer_task = asyncio.create_task(self.consume(initial_task=initial_task))
+        logger.info(f"启动消费协程: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
+        self._aio_consumer_task = asyncio.create_task(self.consume())
 
     def stop(self) -> None:
         """停止消费协程。"""
@@ -65,7 +65,7 @@ class AgentTaskConsumer:
         asyncUtil.cancel_task_safely(task)
 
     # ─── 消费循环 ─────────────────────────────────────────────
-    async def consume(self, initial_task: GtAgentTask | None = None) -> None:
+    async def consume(self) -> None:
         """从数据库获取并处理任务，直到没有待处理任务为止。"""
         current_consumer = asyncio.current_task()
         if current_consumer is not None and self._aio_consumer_task not in (None, current_consumer):
@@ -79,32 +79,30 @@ class AgentTaskConsumer:
             self.status = AgentStatus.ACTIVE
             self._publish_status(self.status)
 
-        logger.info(f"进入消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id}), initial_task={initial_task.id if initial_task else None}")
-        claimed_task = initial_task
-        resumed = initial_task is not None
+        logger.info(f"进入消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
         while True:
+            task = await gtAgentTaskManager.get_first_unfinish_task(self.gt_agent.id)
 
-            if claimed_task is None:
-                task = await gtAgentTaskManager.get_first_unfinish_task(self.gt_agent.id)
+            if task is None:
+                logger.info(f"无待处理任务，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
+                break
 
-                if task is None:
-                    logger.info(f"无待处理任务，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
-                    break
+            if task.status not in (AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING):
+                logger.info(f"首个未完成任务非 PENDING/RUNNING，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={task.id}, task_status={task.status}")
+                break
 
-                if task.status != AgentTaskStatus.PENDING:
-                    logger.info(f"首个未完成任务非 PENDING，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={task.id}, task_status={task.status}")
-                    break
-
+            if task.status == AgentTaskStatus.PENDING:
                 claimed_task = await gtAgentTaskManager.transition_task_status(task.id, AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING)
                 if claimed_task is None:
                     logger.debug(f"任务认领失败（已被其他消费者抢占），重试: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={task.id}")
                     continue
+            else:
+                claimed_task = task  # 已经是 RUNNING，直接使用
 
+            resumed = self._turn_runner._history.has_unfinished_turn()
             completed = await self._execute_task(claimed_task, resumed=resumed)
             if completed is False:
                 break
-            claimed_task = None
-            resumed = False
 
         # 清理逻辑
         if self.status != AgentStatus.FAILED:
@@ -155,6 +153,4 @@ class AgentTaskConsumer:
         assertUtil.assertNotNull(resumed_task, error_message=f"failed task resume conflict: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={failed_task.id}")
 
         logger.info(f"恢复失败任务: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={failed_task.id}")
-        self.status = AgentStatus.ACTIVE
-        self._publish_status(self.status)
-        self.start(initial_task=resumed_task)
+        self.start()
