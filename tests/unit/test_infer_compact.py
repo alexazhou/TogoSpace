@@ -65,7 +65,7 @@ def _make_runner_and_history():
     ))
     history.append_stage_init = AsyncMock(return_value=_make_history_item())
     history.finalize_history_item = AsyncMock()
-    history.insert_history_message_at_seq = AsyncMock(return_value=_make_history_item(2))
+    history.append_history_message = AsyncMock(return_value=_make_history_item(2))
     history.trim_to_compact_window = MagicMock()
     runner._history = history
     return runner, history
@@ -278,7 +278,7 @@ async def test_execute_compact_skips_when_no_source():
     with patch(_CONFIG_PATCH, return_value=_mock_config()):
         await runner._execute_compact()
 
-    history.insert_history_message_at_seq.assert_not_called()
+    history.append_history_message.assert_not_called()
     history.trim_to_compact_window.assert_not_called()
 
 
@@ -293,21 +293,19 @@ async def test_execute_compact_inserts_cmd_summary_context_and_trims():
     ):
         await runner._execute_compact()
 
-    assert history.insert_history_message_at_seq.await_count == 3
+    assert history.append_history_message.await_count == 3
 
-    # build_history_item receives kwargs; insert_history_message_at_seq receives built item
-    assert history.build_history_item.call_count == 3
-
-    cmd_call = history.build_history_item.call_args_list[0]
+    # Verify seq and tags in append_history_message calls
+    cmd_call = history.append_history_message.call_args_list[0]
     assert cmd_call.kwargs["seq"] == 1
     assert cmd_call.kwargs["tags"] == [AgentHistoryTag.COMPACT_CMD]
 
-    summary_call = history.build_history_item.call_args_list[1]
+    summary_call = history.append_history_message.call_args_list[1]
     assert summary_call.kwargs["seq"] == 2
     assert summary_call.kwargs["stage"] == AgentHistoryStage.INFER
     assert summary_call.args[0].content == "压缩摘要"
 
-    context_call = history.build_history_item.call_args_list[2]
+    context_call = history.append_history_message.call_args_list[2]
     assert context_call.kwargs["seq"] == 3
     assert context_call.kwargs["stage"] == AgentHistoryStage.INPUT
     assert "以下是之前对话的压缩摘要" in context_call.args[0].content
@@ -327,5 +325,5 @@ async def test_execute_compact_failure_raises():
         with pytest.raises(RuntimeError, match="LLM 推理失败\\(compact\\)"):
             await runner._execute_compact()
 
-    assert history.insert_history_message_at_seq.await_count == 1
+    assert history.append_history_message.await_count == 1
     history.trim_to_compact_window.assert_not_called()

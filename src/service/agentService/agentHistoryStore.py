@@ -105,7 +105,7 @@ class AgentHistoryStore:
             return last_item
         return None
 
-    def build_history_item(
+    async def append_history_message(
         self,
         message: llmApiUtil.OpenAIMessage,
         *,
@@ -116,10 +116,14 @@ class AgentHistoryStore:
         tags: list[AgentHistoryTag] | None = None,
         usage_json: str | None = None,
     ) -> GtAgentHistory:
-        """基于 OpenAIMessage 构造 history item，但不写入内存和数据库。"""
+        """追加或插入消息到历史并持久化。
+
+        若 seq 为 None，追加到末尾；若 seq 有值，按 seq 插入并后移后续消息。
+        """
+        target_seq = self.next_seq() if seq is None else seq
         item = GtAgentHistory.from_openai_message(
             agent_id=self._agent_id,
-            seq=self.next_seq() if seq is None else seq,
+            seq=target_seq,
             message=message,
             stage=stage,
             status=status,
@@ -128,42 +132,25 @@ class AgentHistoryStore:
         )
         if usage_json is not None:
             item.usage_json = usage_json
-        return item
 
-    async def append_history_message(
-        self,
-        item: GtAgentHistory,
-    ) -> GtAgentHistory:
-        """追加消息到历史并持久化到数据库。"""
-        item.agent_id = self._agent_id
-        item.seq = self.next_seq()
-        self._items.append(item)
-        saved = await gtAgentHistoryManager.append_agent_history_message(item)
+        if seq is None:
+            # 追加到末尾
+            self._items.append(item)
+            saved = await gtAgentHistoryManager.append_agent_history_message(item)
+        else:
+            # 按 seq 插入
+            insert_idx = len(self._items)
+            for idx, existing in enumerate(self._items):
+                if existing.seq >= seq:
+                    insert_idx = idx
+                    break
+            saved = await gtAgentHistoryManager.insert_agent_history_message_at_seq(item)
+            for existing in self._items[insert_idx:]:
+                existing.seq += 1
+            self._items.insert(insert_idx, item)
+
         if saved is not None:
             item.id = saved.id
-        return item
-
-    async def insert_history_message_at_seq(
-        self,
-        item: GtAgentHistory,
-    ) -> GtAgentHistory:
-        """按 seq 在历史中间插入消息，并整体后移其后的消息。"""
-        item.agent_id = self._agent_id
-        insert_seq = item.seq
-
-        insert_idx = len(self._items)
-        for idx, existing in enumerate(self._items):
-            if existing.seq >= insert_seq:
-                insert_idx = idx
-                break
-
-        saved = await gtAgentHistoryManager.insert_agent_history_message_at_seq(item)
-        if saved is not None:
-            item.id = saved.id
-
-        for existing in self._items[insert_idx:]:
-            existing.seq += 1
-        self._items.insert(insert_idx, item)
         return item
 
     async def append_stage_init(
@@ -176,12 +163,12 @@ class AgentHistoryStore:
             role=self._infer_role_from_stage(stage),
             tool_call_id=tool_call_id,
         )
-        return await self.append_history_message(self.build_history_item(
+        return await self.append_history_message(
             init_message,
             stage=stage,
             status=AgentHistoryStatus.INIT,
             tags=tags,
-        ))
+        )
 
     async def finalize_history_item(
         self,

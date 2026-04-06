@@ -411,7 +411,7 @@ def test_get_runtime_window_start_index_returns_latest_compact_index():
 
 
 @pytest.mark.asyncio
-async def test_insert_history_message_at_seq_shifts_memory_and_preserves_order():
+async def test_append_history_message_with_seq_inserts_at_position():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
@@ -424,11 +424,9 @@ async def test_insert_history_message_at_seq_shifts_memory_and_preserves_order()
         "service.agentService.agentHistoryStore.gtAgentHistoryManager.insert_agent_history_message_at_seq",
         AsyncMock(side_effect=lambda item: item),
     ):
-        inserted = await history.insert_history_message_at_seq(
-            history.build_history_item(
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "mid"),
-                seq=1,
-            )
+        inserted = await history.append_history_message(
+            llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.USER, "mid"),
+            seq=1,
         )
 
     assert inserted.seq == 1
@@ -459,9 +457,7 @@ async def test_append_history_message_uses_last_seq_after_compact_trim():
         AsyncMock(side_effect=lambda item: item),
     ):
         appended = await history.append_history_message(
-            history.build_history_item(
-                llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "next"),
-            )
+            llmApiUtil.OpenAIMessage.text(OpenaiLLMApiRole.ASSISTANT, "next"),
         )
 
     assert appended.seq == 5

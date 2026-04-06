@@ -167,21 +167,19 @@ class ClaudeSdkAgentDriver(AgentDriver):
             # 写入 tool_use 消息到 history
             tool_call_id = self._next_tool_call_id()
             await self.host._history.append_history_message(
-                self.host._history.build_history_item(
-                    llmApiUtil.OpenAIMessage(
-                        role="assistant",
-                        content=None,
-                        tool_calls=[
-                            {
-                                "id": tool_call_id,
-                                "type": "function",
-                                "function": {"name": tool_name, "arguments": json.dumps(args, ensure_ascii=False)},
-                            }
-                        ],
-                    ),
-                    stage=AgentHistoryStage.INFER,
-                    status=AgentHistoryStatus.SUCCESS,
-                )
+                llmApiUtil.OpenAIMessage(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[
+                        {
+                            "id": tool_call_id,
+                            "type": "function",
+                            "function": {"name": tool_name, "arguments": json.dumps(args, ensure_ascii=False)},
+                        }
+                    ],
+                ),
+                stage=AgentHistoryStage.INFER,
+                status=AgentHistoryStatus.SUCCESS,
             )
 
             # 执行最后一条 assistant 消息中的 tool_call 并写入 tool_result

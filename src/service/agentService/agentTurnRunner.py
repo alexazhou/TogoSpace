@@ -112,15 +112,11 @@ class AgentTurnRunner:
         if len(message_blocks) == 0:
             return 0
 
-        turn_context_message = llmApiUtil.OpenAIMessage.text(
-            llmApiUtil.OpenaiLLMApiRole.USER,
-            content=build_turn_context_prompt(room.name, message_blocks),
-        )
-        await self._history.append_history_message(self._history.build_history_item(
-            turn_context_message,
+        await self._history.append_history_message(
+            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, build_turn_context_prompt(room.name, message_blocks)),
             stage=AgentHistoryStage.INPUT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
-        ))
+        )
         return 1
 
     async def _run_turn_with_host_loop(self, room: ChatRoom, resumed: bool = False) -> None:
@@ -145,10 +141,8 @@ class AgentTurnRunner:
                 return
             if len(turn_setup.hint_prompt) > 0:
                 await self._history.append_history_message(
-                    self._history.build_history_item(
-                        llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_setup.hint_prompt),
-                        stage=AgentHistoryStage.INPUT,
-                    )
+                    llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiLLMApiRole.USER, turn_setup.hint_prompt),
+                    stage=AgentHistoryStage.INPUT,
                 )
 
     async def _resume_from_breakpoint(
@@ -379,13 +373,13 @@ class AgentTurnRunner:
         instruction_msg = llmApiUtil.OpenAIMessage.text(
             llmApiUtil.OpenaiLLMApiRole.USER, compact_instruction,
         )
-        await self._history.insert_history_message_at_seq(self._history.build_history_item(
+        await self._history.append_history_message(
             instruction_msg,
             seq=compact_plan.insert_seq,
             stage=AgentHistoryStage.INPUT,
             status=AgentHistoryStatus.SUCCESS,
             tags=[AgentHistoryTag.COMPACT_CMD],
-        ))
+        )
 
         ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=compact_plan.source_messages + [instruction_msg], tools=None)
         infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
@@ -394,23 +388,23 @@ class AgentTurnRunner:
             raise RuntimeError(f"LLM 推理失败(compact): agent_id={self.gt_agent.id}, error={error_message}") from infer_result.error
 
         summary_message = infer_result.response.choices[0].message
-        await self._history.insert_history_message_at_seq(self._history.build_history_item(
+        await self._history.append_history_message(
             summary_message,
             seq=compact_plan.insert_seq + 1,
             stage=AgentHistoryStage.INFER,
             status=AgentHistoryStatus.SUCCESS,
-        ))
+        )
 
         compact_context = build_compact_resume_prompt(summary_message.content or "")
         context_msg = llmApiUtil.OpenAIMessage.text(
             llmApiUtil.OpenaiLLMApiRole.USER, compact_context,
         )
-        await self._history.insert_history_message_at_seq(self._history.build_history_item(
+        await self._history.append_history_message(
             context_msg,
             seq=compact_plan.insert_seq + 2,
             stage=AgentHistoryStage.INPUT,
             status=AgentHistoryStatus.SUCCESS,
-        ))
+        )
 
         # 内存裁剪：只保留恢复 compact 视图所需的最小消息窗口
         self._history.trim_to_compact_window()

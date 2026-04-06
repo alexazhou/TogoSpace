@@ -83,11 +83,14 @@ class AgentTaskConsumer:
         claimed_task = initial_task
         resumed = initial_task is not None
         while True:
+
             if claimed_task is None:
                 task = await gtAgentTaskManager.get_first_unfinish_task(self.gt_agent.id)
+
                 if task is None:
                     logger.info(f"无待处理任务，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
                     break
+
                 if task.status != AgentTaskStatus.PENDING:
                     logger.info(f"首个未完成任务非 PENDING，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={task.id}, task_status={task.status}")
                     break
@@ -125,6 +128,7 @@ class AgentTaskConsumer:
         """
         self.current_db_task = claimed_task
         logger.info(f"开始执行任务: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}, resumed={resumed}")
+
         try:
             await self._turn_runner.run_chat_turn(claimed_task, resumed=resumed)
         except Exception as e:
