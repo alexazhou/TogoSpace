@@ -153,7 +153,7 @@ assert some_really_long_condition, (
 
 ```python
 # 推荐：调用点看不出返回类型，补注解
-assistant_message: llmApiUtil.OpenAIMessage = await self._infer(tools)
+assistant_message: llmApiUtil.OpenAIMessage = await self._infer_to_item(output_item, tools)
 infer_result: llmService.InferResult = await llmService.infer(self.model, ctx)
 
 # 不推荐：右侧一眼就知道类型，不需要补注解

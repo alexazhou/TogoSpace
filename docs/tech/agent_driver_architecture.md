@@ -38,7 +38,7 @@ Agent (facade)
            ├── _history: AgentHistoryStore    (自建)
            ├── tool_registry: AgentToolRegistry  (自建)
            ├── driver: AgentDriver            (自建，host=self)
-           └── _infer(), _execute_tool()      (Driver 回调)
+           └── _execute_tool()                (Driver 回调)
 ```
 
 ## 运行流程
@@ -99,7 +99,6 @@ class AgentDriverHost(Protocol):
     _history: AgentHistoryStore
     tool_registry: AgentToolRegistry
 
-    async def _infer(self, tools: Optional[list[OpenAITool]]) -> OpenAIMessage: ...
     async def _execute_tool(self) -> None: ...
 ```
 
@@ -112,7 +111,6 @@ class AgentDriverHost(Protocol):
 | `host.agent_workdir` | — | ✓ | — |
 | `host._history` | — | — | ✓ |
 | `host.tool_registry` | ✓ | ✓ | ✓ |
-| `host._infer()` | — | — | — |
 | `host._execute_tool()` | — | — | ✓ |
 
 这层协议的价值是：
@@ -150,8 +148,8 @@ TurnRunner 负责：
 
 - Turn 级资源管理（自建 driver、tool_registry、_history）
 - 房间消息同步（`pull_room_messages_to_history`）
-- 推理调用（`_infer`）
-- 工具调用编排（`_execute_tool`、`_dispatch_tool_calls`）
+- 推理调用（`_execute_infer`、`_infer_to_item`）
+- 工具调用编排（`_run_tool`、`_execute_tool`）
 - 执行 turn 主循环并调用 driver
 
 TurnRunner 构造时只接收值类型参数：
