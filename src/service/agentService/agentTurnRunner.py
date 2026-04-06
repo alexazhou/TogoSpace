@@ -31,6 +31,7 @@ from service.agentService.promptBuilder import (
 from service.agentService.toolRegistry import AgentToolRegistry, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
 from util import configUtil, llmApiUtil
+from util.assertUtil import assertNotNull
 
 logger = logging.getLogger(__name__)
 
@@ -66,14 +67,10 @@ class AgentTurnRunner:
         """执行一个完整 chat turn：同步房间消息 → 推理 → 工具调用循环。
         若 resumed=True 且存在未完成 turn，则走续跑路径。"""
         room_id = task.task_data.get("room_id")
-        if room_id is None:
-            logger.warning(f"run_chat_turn 跳过：task 缺少 room_id, agent_id={self.gt_agent.id}, task_id={task.id}")
-            return
+        assertNotNull(room_id, error_message=f"task 缺少 room_id, agent_id={self.gt_agent.id}, task_id={task.id}")
 
-        room: ChatRoom | None = roomService.get_room(room_id)
-        if room is None:
-            logger.warning(f"run_chat_turn 跳过：room_id={room_id} 不存在, agent_id={self.gt_agent.id}")
-            return
+        room = roomService.get_room(room_id)
+        assertNotNull(room, error_message=f"room_id={room_id} 不存在, agent_id={self.gt_agent.id}")
 
         self._current_room = room
         try:
