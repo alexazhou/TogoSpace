@@ -35,19 +35,21 @@ def turn_runner():
     return _make_turn_runner()
 
 
+from util.assertUtil import MakeSureException
+
+
 @pytest.mark.asyncio
-async def test_run_chat_turn_skips_when_room_id_missing(turn_runner):
+async def test_run_chat_turn_raises_when_room_id_missing(turn_runner):
     task = MagicMock(spec=GtAgentTask)
     task.id = 100
     task.task_data = {}  # 无 room_id
 
-    await turn_runner.run_chat_turn(task)
-
-    turn_runner._history.append_history_message.assert_not_called()
+    with pytest.raises(MakeSureException, match="缺少 room_id"):
+        await turn_runner.run_chat_turn(task)
 
 
 @pytest.mark.asyncio
-async def test_run_chat_turn_skips_when_room_not_found(turn_runner):
+async def test_run_chat_turn_raises_when_room_not_found(turn_runner):
     task = MagicMock(spec=GtAgentTask)
     task.id = 100
     task.task_data = {"room_id": 999}
@@ -55,9 +57,8 @@ async def test_run_chat_turn_skips_when_room_not_found(turn_runner):
     with patch("service.agentService.agentTurnRunner.roomService") as mock_room_service:
         mock_room_service.get_room = MagicMock(return_value=None)
 
-        await turn_runner.run_chat_turn(task)
-
-        turn_runner._history.append_history_message.assert_not_called()
+        with pytest.raises(MakeSureException, match="不存在"):
+            await turn_runner.run_chat_turn(task)
 
 
 @pytest.mark.asyncio
