@@ -12,7 +12,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
 from service import presetService, agentService, roomService, ormService, persistenceService, messageBus
-from service.agentService.promptBuilder import build_turn_context_prompt, format_room_message
+from service.agentService import promptBuilder
 from util import configUtil, llmApiUtil
 from ...base import ServiceTestCase
 
@@ -189,9 +189,9 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
 
         synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
 
-        system_line = format_room_message("general", "SYSTEM", room.build_initial_system_message())
-        bob_line = format_room_message("general", "bob", "hello alice")
-        expected_prompt = build_turn_context_prompt("general", [system_line, bob_line])
+        system_line = promptBuilder.format_room_message("general", "SYSTEM", room.build_initial_system_message())
+        bob_line = promptBuilder.format_room_message("general", "bob", "hello alice")
+        expected_prompt = promptBuilder.build_turn_begin_prompt("general", [system_line, bob_line])
 
         assert synced_count == 1
         assert len(alice.task_consumer._turn_runner._history) == 2

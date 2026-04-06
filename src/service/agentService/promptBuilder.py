@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from constants import SpecialAgent
 from dal.db import gtAgentManager, gtDeptManager
+from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 
 _TURN_CONTEXT_SUFFIX = "你现在可以调用工具行动。如果你已完成发言和所有工具调用，请务必调用 finish_chat_turn 结束本轮行动。"
 _COMPACT_PROMPT_TEMPLATE = """\
@@ -21,13 +24,27 @@ def format_room_message(room_name: str, sender_name: str, content: str) -> str:
     return f"【房间《{room_name}》】【{sender_label}】： {content}"
 
 
-def build_turn_context_prompt(room_name: str, message_blocks: list[str]) -> str:
+def build_turn_begin_prompt(room_name: str, message_blocks: list[str]) -> str:
     context = "\n\n".join(message_blocks) if len(message_blocks) > 0 else "(无新消息)"
     return (
         f"【{room_name}】 房间轮到你行动，新消息如下：\n\n"
         f"{context}\n\n"
         f"{_TURN_CONTEXT_SUFFIX}"
     )
+
+
+def build_turn_begin_prompt_from_messages(
+    room_name: str,
+    messages: list[GtCoreRoomMessage],
+    exclude_agent_id: int,
+) -> str:
+    """从消息列表构建 turn begin prompt，自动过滤自己的消息并格式化。"""
+    message_blocks: list[str] = []
+    for msg in messages:
+        if msg.sender_id == exclude_agent_id:
+            continue
+        message_blocks.append(format_room_message(room_name, msg.sender_name, msg.content))
+    return build_turn_begin_prompt(room_name, message_blocks)
 
 
 def build_compact_instruction(max_tokens: int) -> str:

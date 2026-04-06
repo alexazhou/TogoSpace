@@ -1,4 +1,4 @@
-from .gtCoreChatModel import GtCoreChatMessage, GtCoreAgentDialogContext
+from .gtCoreChatModel import GtCoreAgentDialogContext, GtCoreRoomMessage
 from .gtCoreAgentEvent import GtCoreRoomMessageEvent
 from .gtCoreWebModel import (
     GtCoreMessageInfo,
@@ -6,7 +6,7 @@ from .gtCoreWebModel import (
 )
 
 __all__ = [
-    "GtCoreChatMessage",
+    "GtCoreRoomMessage",
     "GtCoreAgentDialogContext",
     "GtCoreRoomMessageEvent",
     "GtCoreMessageInfo",
