@@ -541,33 +541,45 @@ async def startup() -> None:
     _rooms_by_id.clear()
 
 
+async def _restore_room_state(room: ChatRoom) -> None:
+    gt_room_messages, agent_read_index, turn_pos = await persistenceService.load_room_runtime(room.room_id)
+    recovered_from_db = bool(gt_room_messages)
+    restored_messages: list[GtCoreChatMessage] | None = None
+
+    if gt_room_messages:
+        restored_messages = [
+            GtCoreChatMessage(
+                sender_id=row.agent_id,
+                content=row.content,
+                send_time=datetime.fromisoformat(row.send_time),
+            )
+            for row in gt_room_messages
+        ]
+
+    if restored_messages is not None or agent_read_index is not None:
+        room.inject_runtime_state(
+            messages=restored_messages,
+            agent_read_index=agent_read_index,
+            turn_pos=turn_pos,
+        )
+    elif recovered_from_db and room.messages:
+        room.mark_all_messages_read()
+
+    room.rebuild_state_from_history(persisted_turn_pos=turn_pos if recovered_from_db else None)
+
+
 async def restore_state() -> None:
     """从数据库恢复所有房间的运行时状态。"""
     for room in get_all_rooms():
-        gt_room_messages, agent_read_index, turn_pos = await persistenceService.load_room_runtime(room.room_id)
-        recovered_from_db = bool(gt_room_messages)
-        restored_messages: list[GtCoreChatMessage] | None = None
+        await _restore_room_state(room)
 
-        if gt_room_messages:
-            restored_messages = [
-                GtCoreChatMessage(
-                    sender_id=row.agent_id,
-                    content=row.content,
-                    send_time=datetime.fromisoformat(row.send_time),
-                )
-                for row in gt_room_messages
-            ]
 
-        if restored_messages is not None or agent_read_index is not None:
-            room.inject_runtime_state(
-                messages=restored_messages,
-                agent_read_index=agent_read_index,
-                turn_pos=turn_pos,
-            )
-        elif recovered_from_db and room.messages:
-            room.mark_all_messages_read()
-
-        room.rebuild_state_from_history(persisted_turn_pos=turn_pos if recovered_from_db else None)
+async def restore_state_for_team(team_id: int) -> None:
+    """从数据库恢复指定 Team 下房间的运行时状态。"""
+    for room in get_all_rooms():
+        if room.team_id != team_id:
+            continue
+        await _restore_room_state(room)
 
 
 def get_room_by_key(room_key: str) -> ChatRoom:
