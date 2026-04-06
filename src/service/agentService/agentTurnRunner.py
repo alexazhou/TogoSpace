@@ -79,18 +79,15 @@ class AgentTurnRunner:
         try:
             if self.driver.host_managed_turn_loop:
                 if resumed and self._history.has_unfinished_turn():
-                    await self._resume_chat_turn_with_host_loop(room)
+                    await self._run_turn_with_host_loop(room, resumed=True)
                     return
                 synced_count = await self.pull_room_messages_to_history(room)
                 if synced_count == 0 and room.state != RoomState.INIT:
-                    logger.info(
-                        "无新消息，自动跳过本轮: %s(agent_id=%d), room=%s",
-                        self.gt_agent.name, self.gt_agent.id, room.name,
-                    )
+                    logger.info(f"无新消息，自动跳过本轮: {self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}")
                     await room.finish_turn(self.gt_agent.id)
                     return
                 assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
-                await self._run_chat_turn_with_host_loop(room)
+                await self._run_turn_with_host_loop(room)
             else:
                 synced_count = await self.pull_room_messages_to_history(room)
                 await self.driver.run_chat_turn(task, synced_count)
@@ -110,11 +107,7 @@ class AgentTurnRunner:
             sender_name = room._get_agent_name(msg.sender_id)
             message_blocks.append(format_room_message(room.name, sender_name, msg.content))
 
-        logger.info(
-            "同步房间消息: agent=%s(agent_id=%d), room=%s, raw=%d, own=%d, others=%d",
-            self.gt_agent.name, self.gt_agent.id, room.name,
-            len(new_msgs), own_count, len(message_blocks),
-        )
+        logger.info(f"同步房间消息: agent={self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}, raw={len(new_msgs)}, own={own_count}, others={len(message_blocks)}")
 
         if len(message_blocks) == 0:
             return 0
@@ -130,10 +123,21 @@ class AgentTurnRunner:
         ))
         return 1
 
-    async def _run_chat_turn_with_host_loop(self, room: ChatRoom) -> None:
-        """Host-managed turn loop：循环推理+工具调用，直到 turn 完成或达到最大重试次数。"""
-        turn_setup: AgentTurnSetup = self.driver.turn_setup
+    async def _run_turn_with_host_loop(self, room: ChatRoom, resumed: bool = False) -> None:
+        """Host-managed turn loop：循环推理+工具调用，支持从断点恢复。"""
         tools: list[llmApiUtil.OpenAITool] = self.tool_registry.export_openai_tools()
+
+        # 断点恢复逻辑
+        if resumed:
+            turn_start_idx = self._history.get_unfinished_turn_start_index()
+            if turn_start_idx is not None:
+                last_item = self._history.last()
+                if last_item is not None:
+                    if await self._resume_from_breakpoint(room, tools, turn_start_idx, last_item):
+                        return
+
+        # 主循环
+        turn_setup: AgentTurnSetup = self.driver.turn_setup
         max_retries = max(1, turn_setup.max_retries)
         for _ in range(max_retries):
             turn_done = await self._run_until_reply(room, tools=tools)
@@ -147,51 +151,41 @@ class AgentTurnRunner:
                     )
                 )
 
-    async def _resume_chat_turn_with_host_loop(self, room: ChatRoom) -> None:
-        """续跑 host-managed turn loop：根据最后一条 history item 的阶段和状态，从断点处恢复执行。"""
-        tools: list[llmApiUtil.OpenAITool] = self.tool_registry.export_openai_tools()
-        turn_start_idx = self._history.get_unfinished_turn_start_index()
-        if turn_start_idx is None:
-            await self._run_chat_turn_with_host_loop(room)
-            return
-        last_item = self._history.last()
-        if last_item is None:
-            await self._run_chat_turn_with_host_loop(room)
-            return
-
+    async def _resume_from_breakpoint(
+        self,
+        room: ChatRoom,
+        tools: list[llmApiUtil.OpenAITool],
+        turn_start_idx: int,
+        last_item: GtAgentHistory,
+    ) -> bool:
+        """从断点恢复执行。返回 True 表示 turn 已完成。"""
         if last_item.stage == AgentHistoryStage.INFER and last_item.status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED):
             assistant_message = await self._infer(tools)
             tool_calls = assistant_message.tool_calls or []
             if tool_calls:
-                turn_done = await self._dispatch_tool_calls(room, tool_calls)
-                if turn_done:
-                    return
+                return await self._dispatch_tool_calls(room, tool_calls)
 
         elif last_item.stage == AgentHistoryStage.TOOL_RESULT and last_item.status == AgentHistoryStatus.INIT:
             tool_call_id = str(last_item.tool_call_id or "")
             tool_call = self._history.find_tool_call_by_id(tool_call_id, start_idx=turn_start_idx)
             if tool_call is None:
                 raise RuntimeError(f"resume tool call not found: agent_id={self.gt_agent.id}, tool_call_id={tool_call_id}")
-            turn_done = await self._dispatch_tool_calls(
+            return await self._dispatch_tool_calls(
                 room,
                 [tool_call],
                 reuse_history_items={tool_call_id: last_item},
             )
-            if turn_done:
-                return
 
         else:
             last_assistant = self._history.get_last_assistant_message(start_idx=turn_start_idx)
             if last_assistant is not None and last_assistant.tool_calls:
-                turn_done = await self._dispatch_tool_calls(
+                return await self._dispatch_tool_calls(
                     room,
                     last_assistant.tool_calls,
                     execute_only_missing=True,
                 )
-                if turn_done:
-                    return
 
-        await self._run_chat_turn_with_host_loop(room)
+        return False
 
     async def _run_until_reply(self, room: ChatRoom, tools: Optional[list[llmApiUtil.OpenAITool]]) -> bool:
         """在 max_function_calls 次内循环：推理 → 工具调用。返回 True 表示 turn 结束（agent 调用了 finish 工具）。"""
@@ -275,9 +269,7 @@ class AgentTurnRunner:
                 history_item = await history.append_stage_init(stage=AgentHistoryStage.INFER)
 
             # ── 发起 LLM 请求 ──
-            ctx = GtCoreAgentDialogContext(
-                system_prompt=self.system_prompt, messages=messages, tools=tools,
-            )
+            ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools)
             infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
 
             # ── overflow retry ──
@@ -289,18 +281,13 @@ class AgentTurnRunner:
                     and compactPolicy.is_context_overflow_error(error)
                     and not pre_check_triggered
                 ):
-                    logger.info(
-                        "overflow retry 触发: %s(agent_id=%d), error=%s",
-                        self.gt_agent.name, self.gt_agent.id, infer_result.error_message,
-                    )
+                    logger.info(f"overflow retry 触发: {self.gt_agent.name}(agent_id={self.gt_agent.id}), error={infer_result.error_message}")
                     overflow_retry = True
                     await self._execute_compact()
                     messages = history.build_infer_messages()
                     estimated_tokens = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
                     if estimated_tokens >= hard_limit_tokens:
-                        raise RuntimeError(
-                            f"overflow compact 后仍超限: agent_id={self.gt_agent.id}"
-                        ) from error
+                        raise RuntimeError(f"overflow compact 后仍超限: agent_id={self.gt_agent.id}") from error
 
                     ctx = GtCoreAgentDialogContext(
                         system_prompt=self.system_prompt, messages=messages, tools=tools,
@@ -310,12 +297,8 @@ class AgentTurnRunner:
                 if infer_result.ok is False or infer_result.response is None:
                     error_message = infer_result.error_message or "unknown inference error"
                     if overflow_retry:
-                        raise RuntimeError(
-                            f"LLM 推理失败(overflow retry): agent_id={self.gt_agent.id}, error={error_message}"
-                        ) from infer_result.error
-                    raise RuntimeError(
-                        f"LLM 推理失败: agent_id={self.gt_agent.id}, error={error_message}"
-                    ) from infer_result.error
+                        raise RuntimeError(f"LLM 推理失败(overflow retry): agent_id={self.gt_agent.id}, error={error_message}") from infer_result.error
+                    raise RuntimeError(f"LLM 推理失败: agent_id={self.gt_agent.id}, error={error_message}") from infer_result.error
 
             usage = infer_result.usage
             assistant_message = infer_result.response.choices[0].message
@@ -369,18 +352,12 @@ class AgentTurnRunner:
         if estimated_tokens < trigger_tokens:
             return messages, estimated_tokens, False
 
-        logger.info(
-            "pre-check compact 触发: %s(agent_id=%d), estimated=%d, trigger=%d",
-            self.gt_agent.name, self.gt_agent.id, estimated_tokens, trigger_tokens,
-        )
+        logger.info(f"pre-check compact 触发: {self.gt_agent.name}(agent_id={self.gt_agent.id}), estimated={estimated_tokens}, trigger={trigger_tokens}")
         await self._execute_compact()
         messages = self._history.build_infer_messages()
         estimated_tokens = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
         if estimated_tokens >= hard_limit_tokens:
-            raise RuntimeError(
-                f"compact 后仍超限: agent_id={self.gt_agent.id}, "
-                f"estimated={estimated_tokens}, hard_limit={hard_limit_tokens}"
-            )
+            raise RuntimeError(f"compact 后仍超限: agent_id={self.gt_agent.id}, estimated={estimated_tokens}, hard_limit={hard_limit_tokens}")
         return messages, estimated_tokens, True
 
     async def _execute_compact(self) -> None:
@@ -398,9 +375,7 @@ class AgentTurnRunner:
             logger.warning("compact 跳过：无可压缩消息, agent_id=%d", self.gt_agent.id)
             return
 
-        compact_instruction = build_compact_instruction(
-            max_tokens=llm_config.compact_summary_max_tokens,
-        )
+        compact_instruction = build_compact_instruction(max_tokens=llm_config.compact_summary_max_tokens)
         instruction_msg = llmApiUtil.OpenAIMessage.text(
             llmApiUtil.OpenaiLLMApiRole.USER, compact_instruction,
         )
@@ -412,17 +387,11 @@ class AgentTurnRunner:
             tags=[AgentHistoryTag.COMPACT_CMD],
         ))
 
-        ctx = GtCoreAgentDialogContext(
-            system_prompt=self.system_prompt,
-            messages=compact_plan.source_messages + [instruction_msg],
-            tools=None,
-        )
+        ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=compact_plan.source_messages + [instruction_msg], tools=None)
         infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
         if infer_result.ok is False or infer_result.response is None:
             error_message = infer_result.error_message or "compact inference failed"
-            raise RuntimeError(
-                f"LLM 推理失败(compact): agent_id={self.gt_agent.id}, error={error_message}"
-            ) from infer_result.error
+            raise RuntimeError(f"LLM 推理失败(compact): agent_id={self.gt_agent.id}, error={error_message}") from infer_result.error
 
         summary_message = infer_result.response.choices[0].message
         await self._history.insert_history_message_at_seq(self._history.build_history_item(
@@ -445,10 +414,7 @@ class AgentTurnRunner:
 
         # 内存裁剪：只保留恢复 compact 视图所需的最小消息窗口
         self._history.trim_to_compact_window()
-        logger.info(
-            "compact 完成: %s(agent_id=%d)",
-            self.gt_agent.name, self.gt_agent.id,
-        )
+        logger.info(f"compact 完成: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
 
     async def _execute_tool(self) -> None:
         """执行最后一条 assistant 消息中的所有 tool calls（AgentDriverHost 协议方法）。
@@ -475,10 +441,7 @@ class AgentTurnRunner:
         execute_only_missing: 仅执行尚未有结果的 tool call（跳过已完成的）。
         返回 True 表示 turn 已完成。"""
         tool_names = [tc.function_name for tc in tool_calls]
-        logger.info(
-            "检测到工具调用: %s(agent_id=%d), tools=%s",
-            self.gt_agent.name, self.gt_agent.id, tool_names,
-        )
+        logger.info(f"检测到工具调用: {self.gt_agent.name}(agent_id={self.gt_agent.id}), tools={tool_names}")
         context: ToolCallContext = ToolCallContext(
             agent_name=self.gt_agent.name,
             team_id=room.team_id,
