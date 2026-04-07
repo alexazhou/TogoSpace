@@ -126,12 +126,9 @@ class AgentHistoryStore:
         tool_call_id: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
     ) -> GtAgentHistory:
-        init_message = llmApiUtil.OpenAIMessage(
+        item = GtAgentHistory.build_placeholder(
             role=role,
             tool_call_id=tool_call_id,
-        )
-        item = GtAgentHistory.build(
-            init_message,
             status=AgentHistoryStatus.INIT,
             tags=tags,
         )
@@ -150,11 +147,15 @@ class AgentHistoryStore:
 
         tags 参数：若不为 None，写入数据库；若为 None，不更新 tags 字段。
         """
+        message_json = message.model_dump(mode="json", exclude_none=True) if message is not None else None
+
         # 更新内存对象
         for item in self._items:
             if item.id == history_id:
                 if message is not None:
-                    item.message_json = message.model_dump(mode="json", exclude_none=True)
+                    item.role = message.role
+                    item.tool_call_id = message.tool_call_id
+                    item.message_json = message_json
                 item.status = status
                 item.error_message = error_message
                 if tags is not None:
@@ -164,20 +165,24 @@ class AgentHistoryStore:
                 break
 
         # 持久化到数据库
-        message_json = message.model_dump(mode="json", exclude_none=True) if message is not None else None
-        await gtAgentHistoryManager.update_agent_history_by_id(
-            history_id=history_id,
-            message_json=message_json,
-            status=status,
-            error_message=error_message,
-            tags=list(tags) if tags is not None else None,
-            usage=usage,
-        )
+        update_kwargs: dict = {
+            "history_id": history_id,
+            "status": status,
+            "error_message": error_message,
+            "usage": usage,
+        }
+        if tags is not None:
+            update_kwargs["tags"] = list(tags)
+        if message is not None:
+            update_kwargs["role"] = message.role
+            update_kwargs["tool_call_id"] = message.tool_call_id
+            update_kwargs["message_json"] = message_json
+        await gtAgentHistoryManager.update_agent_history_by_id(**update_kwargs)
 
     def get_last_assistant_message(self, start_idx: int = 0) -> llmApiUtil.OpenAIMessage | None:
         recent_history = self._items[start_idx:]
         for item in reversed(recent_history):
-            if item.role == llmApiUtil.OpenaiApiRole.ASSISTANT:
+            if item.role == llmApiUtil.OpenaiApiRole.ASSISTANT and item.has_message:
                 return item.openai_message
         return None
 
@@ -189,7 +194,7 @@ class AgentHistoryStore:
         if start_idx is None:
             return None
         for item in reversed(self._items[start_idx:]):
-            if item.role != OpenaiApiRole.ASSISTANT or item.tool_calls is None:
+            if item.role != OpenaiApiRole.ASSISTANT or not item.has_message or item.tool_calls is None:
                 continue
             for tool_call in item.tool_calls:
                 if tool_call.id == tool_call_id:
@@ -236,7 +241,7 @@ class AgentHistoryStore:
         items = list(self._items)
         if self.get_pending_infer_item() is not None:
             items = items[:-1]
-        return [item.openai_message for item in items]
+        return [item.openai_message for item in items if item.has_message]
 
     def build_compact_plan(self) -> CompactPlan | None:
         """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。
@@ -266,6 +271,7 @@ class AgentHistoryStore:
         items = list(self._items)
         if self.get_pending_infer_item() is not None:
             items = items[:-1]
+        items = [item for item in items if item.has_message]
 
         if not items:
             return None
