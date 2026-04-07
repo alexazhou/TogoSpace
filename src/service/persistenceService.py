@@ -8,8 +8,7 @@ import asyncio
 
 from dal.db import gtAgentHistoryManager, gtAgentTaskManager, gtRoomMessageManager, gtRoomManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from constants import AgentTaskStatus
-from service.agentService.agentHistoryStore import AgentHistoryStore
+from constants import AgentHistoryTag, AgentTaskStatus
 
 
 async def startup() -> None:
@@ -54,9 +53,8 @@ async def fail_running_tasks(agent_id: int) -> None:
 
 
 def _trim_to_latest_compact(items: list[GtAgentHistory]) -> list[GtAgentHistory]:
-    """按 compact 视图规则裁剪恢复窗口。"""
-    history = AgentHistoryStore(agent_id=0, items=items)
-    start = history.get_runtime_window_start_index()
-    if start is None:
-        return items
-    return items[start:]
+    """按 compact 视图规则裁剪恢复窗口。从 DB 加载时 COMPACT_SUMMARY 可在任意位置，需扫描定位。"""
+    for idx in range(len(items) - 1, -1, -1):
+        if AgentHistoryTag.COMPACT_SUMMARY in items[idx].tags:
+            return items[idx:]
+    return items

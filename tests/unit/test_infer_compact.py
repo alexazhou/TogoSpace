@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag, DriverType
+from constants import AgentHistoryStatus, DriverType
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistoryStore import CompactPlan
@@ -66,7 +66,7 @@ def _make_runner_and_history():
     history.append_history_init_item = AsyncMock(return_value=_make_history_item())
     history.finalize_history_item = AsyncMock()
     history.append_history_message = AsyncMock(return_value=_make_history_item(2))
-    history.trim_to_compact_window = MagicMock()
+    history.insert_compact_summary = AsyncMock(return_value=_make_history_item(2))
     runner._history = history
     return runner, history
 
@@ -108,7 +108,7 @@ async def test_infer_normal_no_compact():
 
     assert msg.content == "回答"
     history.finalize_history_item.assert_called_once()
-    history.trim_to_compact_window.assert_not_called()
+    history.insert_compact_summary.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -147,7 +147,7 @@ async def test_infer_pre_check_triggers_compact():
         msg = await runner._infer_to_item(output_item, tools=[])
 
     assert msg.content == "压缩后的回答"
-    history.trim_to_compact_window.assert_called_once()
+    history.insert_compact_summary.assert_awaited_once()
     usage_data = json.loads(history.finalize_history_item.call_args[1]["usage_json"])
     assert usage_data["pre_check_triggered"] is True
 
@@ -189,7 +189,7 @@ async def test_infer_overflow_triggers_compact_retry():
     assert msg.content == "重试成功"
     usage_data = json.loads(history.finalize_history_item.call_args[1]["usage_json"])
     assert usage_data["overflow_retry"] is True
-    history.trim_to_compact_window.assert_called_once()
+    history.insert_compact_summary.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -210,7 +210,7 @@ async def test_infer_overflow_after_precheck_no_retry():
         with pytest.raises(RuntimeError, match="LLM 推理失败"):
             await runner._infer_to_item(output_item, tools=[])
 
-    history.trim_to_compact_window.assert_called_once()
+    history.insert_compact_summary.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -227,7 +227,7 @@ async def test_infer_non_overflow_failure_raises():
         with pytest.raises(RuntimeError, match="LLM 推理失败"):
             await runner._infer_to_item(output_item, tools=[])
 
-    history.trim_to_compact_window.assert_not_called()
+    history.insert_compact_summary.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -282,8 +282,7 @@ async def test_execute_compact_skips_when_no_source():
         result = await runner._execute_compact()
 
     assert result is False
-    history.append_history_message.assert_not_called()
-    history.trim_to_compact_window.assert_not_called()
+    history.insert_compact_summary.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -298,15 +297,11 @@ async def test_execute_compact_inserts_summary_and_trims():
         result = await runner._execute_compact()
 
     assert result is True
-    assert history.append_history_message.await_count == 1
+    history.insert_compact_summary.assert_awaited_once()
 
-    call = history.append_history_message.call_args_list[0]
+    call = history.insert_compact_summary.call_args_list[0]
     assert call.kwargs["seq"] == 1
-    assert call.kwargs["tags"] == [AgentHistoryTag.COMPACT_SUMMARY]
-    assert call.kwargs["stage"] == AgentHistoryStage.INPUT
     assert "以下是之前对话的压缩摘要" in call.args[0].content
-
-    history.trim_to_compact_window.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -321,5 +316,4 @@ async def test_execute_compact_failure_returns_false():
         result = await runner._execute_compact()
 
     assert result is False
-    history.append_history_message.assert_not_called()
-    history.trim_to_compact_window.assert_not_called()
+    history.insert_compact_summary.assert_not_awaited()

@@ -201,9 +201,12 @@ class AgentHistoryStore:
                 return item.openai_message
         return None
 
-    def find_tool_call_by_id(self, tool_call_id: str, start_idx: int = 0) -> llmApiUtil.OpenAIToolCall | None:
-        """在 assistant 消息的 tool_calls 中查找指定 tool_call_id 的调用。"""
-        if len(tool_call_id) == 0:
+    def find_tool_call_by_id_in_unfinished_turn(self, tool_call_id: str) -> llmApiUtil.OpenAIToolCall | None:
+        """在未完成 turn 内查找指定 tool_call_id 的调用。"""
+        if not tool_call_id:
+            return None
+        start_idx = self.get_unfinished_turn_start_index()
+        if start_idx is None:
             return None
         for item in reversed(self._items[start_idx:]):
             if item.role != OpenaiApiRole.ASSISTANT or item.tool_calls is None:
@@ -212,13 +215,6 @@ class AgentHistoryStore:
                 if tool_call.id == tool_call_id:
                     return tool_call
         return None
-
-    def find_tool_call_by_id_in_unfinished_turn(self, tool_call_id: str) -> llmApiUtil.OpenAIToolCall | None:
-        """在未完成 turn 内查找指定 tool_call_id 的调用。"""
-        start_idx = self.get_unfinished_turn_start_index()
-        if start_idx is None:
-            return None
-        return self.find_tool_call_by_id(tool_call_id, start_idx=start_idx)
 
     def find_tool_result_by_call_id(self, tool_call_id: str) -> GtAgentHistory | None:
         for item in reversed(self._items):
@@ -270,7 +266,14 @@ class AgentHistoryStore:
     def build_compact_plan(self) -> CompactPlan:
         """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。"""
         items = self._get_window_items(exclude_pending_infer=True)
-        preserve_start_idx = self._find_compact_preserve_start_index(items)
+        # 找最后一条 USER 消息作为保留起点；无 USER 消息时保留最后一条
+        preserve_start_idx: int | None = None
+        for idx in range(len(items) - 1, -1, -1):
+            if items[idx].role == llmApiUtil.OpenaiApiRole.USER:
+                preserve_start_idx = idx
+                break
+        if preserve_start_idx is None:
+            preserve_start_idx = len(items) - 1 if items else None
         if preserve_start_idx is None or preserve_start_idx <= 0:
             return CompactPlan(source_messages=[], insert_seq=None)
 
@@ -279,19 +282,47 @@ class AgentHistoryStore:
             insert_seq=items[preserve_start_idx].seq,
         )
 
-    def trim_to_compact_window(self) -> None:
-        """内存裁剪：只保留最新 COMPACT_SUMMARY 及其之后的消息。"""
-        start = self._find_latest_compact_summary_index()
-        if start is not None and start > 0:
-            self._items = self._items[start:]
+    async def insert_compact_summary(
+        self,
+        message: llmApiUtil.OpenAIMessage,
+        seq: int,
+    ) -> GtAgentHistory:
+        """插入 COMPACT_SUMMARY 消息并立即裁剪旧消息（原子操作）。
 
-    def get_runtime_window_start_index(self) -> int | None:
-        """返回当前运行时 history 窗口在原始列表中的起始下标。"""
-        return self._find_latest_compact_summary_index()
+        操作完成后满足不变量：_items[0] 为 COMPACT_SUMMARY。
+        """
+        item = await self.append_history_message(
+            message,
+            seq=seq,
+            stage=AgentHistoryStage.INPUT,
+            status=AgentHistoryStatus.SUCCESS,
+            tags=[AgentHistoryTag.COMPACT_SUMMARY],
+        )
+        self._trim_to_compact_window()
+        return item
+
+    def _trim_to_compact_window(self) -> None:
+        """内存裁剪：只保留 COMPACT_SUMMARY 及其之后的消息。仅由 insert_compact_summary 调用。"""
+        for idx, item in enumerate(self._items):
+            if AgentHistoryTag.COMPACT_SUMMARY in item.tags:
+                if idx > 0:
+                    self._items = self._items[idx:]
+                return
+
+    def _assert_compact_invariant(self) -> None:
+        """断言：COMPACT_SUMMARY（若存在）必须在 _items[0]。"""
+        for i, item in enumerate(self._items):
+            if AgentHistoryTag.COMPACT_SUMMARY in item.tags:
+                assert i == 0, (
+                    f"[agent_id={self._agent_id}] compact 不变量违反："
+                    f"COMPACT_SUMMARY 在 index={i}，必须在 index=0"
+                )
+                return
 
     def _get_window_items(self, *, exclude_pending_infer: bool) -> list[GtAgentHistory]:
-        compact_idx = self._find_latest_compact_summary_index()
-        items = list(self._items[compact_idx:] if compact_idx is not None else self._items)
+        """构造推理或 compact 所用消息窗口。不变量：COMPACT_SUMMARY 若存在，必在 _items[0]。"""
+        self._assert_compact_invariant()
+        items = list(self._items)
         if (
             exclude_pending_infer
             and items
@@ -300,18 +331,6 @@ class AgentHistoryStore:
         ):
             items = items[:-1]
         return items
-
-    def _find_compact_preserve_start_index(self, visible_items: list[GtAgentHistory]) -> int | None:
-        for idx in range(len(visible_items) - 1, -1, -1):
-            if visible_items[idx].role == llmApiUtil.OpenaiApiRole.USER:
-                return idx
-        return None if not visible_items else len(visible_items) - 1
-
-    def _find_latest_compact_summary_index(self) -> int | None:
-        for idx in range(len(self._items) - 1, -1, -1):
-            if AgentHistoryTag.COMPACT_SUMMARY in self._items[idx].tags:
-                return idx
-        return None
 
     @staticmethod
     def _infer_role_from_stage(stage: AgentHistoryStage) -> llmApiUtil.OpenaiApiRole:

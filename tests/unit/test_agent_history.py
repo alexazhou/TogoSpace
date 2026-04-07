@@ -144,7 +144,7 @@ def test_agent_history_replace_and_dump():
     assert dumped[1].content == "new2"
 
 
-def test_agent_history_find_tool_call_by_id():
+def test_agent_history_find_tool_call_by_id_in_unfinished_turn():
     tool_call = llmApiUtil.OpenAIToolCall(
         id="call_123",
         function={"name": "send_chat_msg", "arguments": '{"msg": "hello"}'},
@@ -158,19 +158,23 @@ def test_agent_history_find_tool_call_by_id():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
+            GtAgentHistory.from_openai_message(
+                1, 0,
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
+                tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+            ),
             GtAgentHistory.from_openai_message(1, 1, assistant_msg),
             GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.tool_result("call_123", '{"ok": true}')),
         ],
     )
 
-    found = history.find_tool_call_by_id("call_123")
+    found = history.find_tool_call_by_id_in_unfinished_turn("call_123")
     assert found is not None
     assert found.id == "call_123"
     assert found.function["name"] == "send_chat_msg"
 
-    assert history.find_tool_call_by_id("nonexistent") is None
-    assert history.find_tool_call_by_id("") is None
+    assert history.find_tool_call_by_id_in_unfinished_turn("nonexistent") is None
+    assert history.find_tool_call_by_id_in_unfinished_turn("") is None
 
 
 def test_agent_history_unfinished_turn_with_items():
@@ -216,18 +220,17 @@ def test_build_infer_messages_without_compact_returns_all():
 
 
 def test_build_infer_messages_with_compact_includes_summary_and_after():
+    # 不变量：COMPACT_SUMMARY 在 _items[0]，build_infer_messages 返回所有消息
     history = AgentHistoryStore(
         agent_id=1,
         items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "old1")),
-            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "old2")),
             GtAgentHistory.from_openai_message(
-                1, 2,
+                1, 0,
                 llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact summary"),
                 tags=[AgentHistoryTag.COMPACT_SUMMARY],
             ),
-            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep last")),
-            GtAgentHistory.from_openai_message(1, 4, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "next")),
+            GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep last")),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "next")),
         ],
     )
 
@@ -346,6 +349,7 @@ def test_build_infer_messages_excludes_pending_infer_tail():
 
 
 def test_trim_to_compact_window_keeps_compact_suffix():
+    # _trim_to_compact_window 在 insert_compact_summary 中调用，确保 COMPACT_SUMMARY 落在 index=0
     history = AgentHistoryStore(
         agent_id=1,
         items=[
@@ -360,35 +364,9 @@ def test_trim_to_compact_window_keeps_compact_suffix():
         ],
     )
 
-    history.trim_to_compact_window()
+    history._trim_to_compact_window()
 
     assert [item.content for item in history] == ["compact summary", "keep"]
-
-
-def test_get_runtime_window_start_index_without_compact_returns_none():
-    history = AgentHistoryStore(
-        agent_id=1,
-        items=[GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"))],
-    )
-
-    assert history.get_runtime_window_start_index() is None
-
-
-def test_get_runtime_window_start_index_returns_latest_compact_index():
-    history = AgentHistoryStore(
-        agent_id=1,
-        items=[
-            GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
-            GtAgentHistory.from_openai_message(
-                1, 1,
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact summary"),
-                tags=[AgentHistoryTag.COMPACT_SUMMARY],
-            ),
-            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep")),
-        ],
-    )
-
-    assert history.get_runtime_window_start_index() == 1
 
 
 @pytest.mark.asyncio
@@ -431,7 +409,7 @@ async def test_append_history_message_uses_last_seq_after_compact_trim():
             GtAgentHistory.from_openai_message(1, 4, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep")),
         ],
     )
-    history.trim_to_compact_window()
+    history._trim_to_compact_window()
 
     with patch(
         "service.agentService.agentHistoryStore.gtAgentHistoryManager.append_agent_history_message",
