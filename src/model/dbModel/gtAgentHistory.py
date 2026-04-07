@@ -16,11 +16,11 @@ class GtAgentHistory(DbModelBase):
     agent_id: int = peewee.IntegerField()
     seq: int = peewee.IntegerField(null=False)
     message_json: dict[str, Any] = JsonField(null=False)
-    stage: AgentHistoryStage = EnumField[AgentHistoryStage](AgentHistoryStage, null=False, default=AgentHistoryStage.INPUT)
-    status: AgentHistoryStatus = EnumField[AgentHistoryStatus](AgentHistoryStatus, null=False, default=AgentHistoryStatus.INIT)
+    stage: AgentHistoryStage = EnumField(AgentHistoryStage, null=False, default=AgentHistoryStage.INPUT)
+    status: AgentHistoryStatus = EnumField(AgentHistoryStatus, null=False, default=AgentHistoryStatus.INIT)
     error_message: str | None = peewee.TextField(null=True)
-    tags: list[AgentHistoryTag] = EnumListField[AgentHistoryTag](AgentHistoryTag, default=list)
-    usage: HistoryUsage | None = JsonFieldWithClass[HistoryUsage](HistoryUsage, null=True)
+    tags: list[AgentHistoryTag] = EnumListField(AgentHistoryTag, default=list)
+    usage: HistoryUsage | None = JsonFieldWithClass(HistoryUsage, null=True)
 
     class Meta:
         table_name = "agent_histories"

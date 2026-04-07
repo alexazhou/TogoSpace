@@ -11,7 +11,7 @@ class GtRoleTemplate(DbModelBase):
     model: str | None = peewee.CharField(null=True)
     soul: str = peewee.TextField(default="")
     type: RoleTemplateType = EnumField(RoleTemplateType, default=RoleTemplateType.SYSTEM)
-    allowed_tools: list[str] | None = JsonField[list[str]](null=True)
+    allowed_tools: list[str] | None = JsonField(null=True)
 
     class Meta:
         table_name = "role_templates"
