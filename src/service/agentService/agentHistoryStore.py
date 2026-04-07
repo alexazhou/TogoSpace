@@ -234,11 +234,16 @@ class AgentHistoryStore:
 
     def build_infer_messages(self) -> list[llmApiUtil.OpenAIMessage]:
         """构造本次 _infer() 真正发给模型的消息列表。"""
-        return [item.openai_message for item in self._get_window_items(exclude_pending_infer=True)]
+        items = list(self._items)
+        if self.get_pending_infer_item() is not None:
+            items = items[:-1]
+        return [item.openai_message for item in items]
 
     def build_compact_plan(self) -> CompactPlan:
         """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。"""
-        items = self._get_window_items(exclude_pending_infer=True)
+        items = list(self._items)
+        if self.get_pending_infer_item() is not None:
+            items = items[:-1]
         # 找最后一条 USER 消息作为保留起点；无 USER 消息时保留最后一条
         preserve_start_idx: int | None = None
         for idx in range(len(items) - 1, -1, -1):
@@ -281,20 +286,3 @@ class AgentHistoryStore:
                 if idx > 0:
                     self._items = self._items[idx:]
                 return
-
-    def _assert_compact_invariant(self) -> None:
-        """断言：COMPACT_SUMMARY（若存在）必须在 _items[0]。"""
-        for i, item in enumerate(self._items):
-            if AgentHistoryTag.COMPACT_SUMMARY in item.tags:
-                assert i == 0, (
-                    f"[agent_id={self._agent_id}] compact 不变量违反："
-                    f"COMPACT_SUMMARY 在 index={i}，必须在 index=0"
-                )
-                return
-
-    def _get_window_items(self, *, exclude_pending_infer: bool) -> list[GtAgentHistory]:
-        """构造推理或 compact 所用消息窗口。"""
-        items = list(self._items)
-        if exclude_pending_infer and self.get_pending_infer_item() is not None:
-            items = items[:-1]
-        return items
