@@ -1,6 +1,6 @@
 import tornado.web
 
-from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController
+from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController
 
 
 tornado_settings = {
@@ -57,5 +57,10 @@ application = tornado.web.Application([
     # Dept Tree (V10)
     (r"/teams/(\d+)/dept_tree.json",                deptController.DeptTreeDetailHandler),
     (r"/teams/(\d+)/dept_tree/update.json",         deptController.DeptTreeUpdateHandler),
+
+    # Activities (V11)
+    (r"/activities.json",                            activityController.ActivitiesHandler),
+    (r"/agents/(\d+)/activities.json",               activityController.AgentActivitiesHandler),
+    (r"/teams/(\d+)/activities.json",                activityController.TeamActivitiesHandler),
 
 ], **tornado_settings)  # type: ignore [arg-type]

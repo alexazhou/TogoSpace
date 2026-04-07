@@ -4,11 +4,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from constants import AgentTaskStatus, AgentStatus, MessageBusTopic
+from constants import AgentTaskStatus, AgentStatus, AgentActivityType, AgentActivityStatus, MessageBusTopic
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
 from dal.db import gtAgentTaskManager
-from service import messageBus
+from service import messageBus, agentActivityService
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver import AgentDriverConfig
 from util import assertUtil, asyncUtil
@@ -76,6 +76,11 @@ class AgentTaskConsumer:
         if self.status != AgentStatus.ACTIVE:
             self.status = AgentStatus.ACTIVE
             self._publish_status(self.status)
+            await agentActivityService.add_activity(
+                gt_agent=self.gt_agent,
+                activity_type=AgentActivityType.AGENT_STATE, status=AgentActivityStatus.SUCCEEDED,
+                detail=AgentStatus.ACTIVE.name,
+            )
 
         logger.info(f"进入消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
         while True:
@@ -106,6 +111,11 @@ class AgentTaskConsumer:
                 await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.FAILED, error_message=str(e))
                 self.status = AgentStatus.FAILED
                 self._publish_status(self.status)
+                await agentActivityService.add_activity(
+                    gt_agent=self.gt_agent,
+                    activity_type=AgentActivityType.AGENT_STATE, status=AgentActivityStatus.FAILED,
+                    detail=AgentStatus.FAILED.name, error_message=str(e),
+                )
                 break
 
             logger.info(f"任务执行完成: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}")
@@ -115,6 +125,11 @@ class AgentTaskConsumer:
         if self.status != AgentStatus.FAILED:
             self.status = AgentStatus.IDLE
             self._publish_status(self.status)
+            await agentActivityService.add_activity(
+                gt_agent=self.gt_agent,
+                activity_type=AgentActivityType.AGENT_STATE, status=AgentActivityStatus.SUCCEEDED,
+                detail=AgentStatus.IDLE.name,
+            )
             logger.info(f"消费循环结束，状态回到 IDLE: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
 
         if self._aio_consumer_task is current_consumer:

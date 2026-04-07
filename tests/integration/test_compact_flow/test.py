@@ -25,7 +25,18 @@ from util import llmApiUtil
 
 _CONFIG_PATCH = "service.agentService.agentTurnRunner.configUtil.get_app_config"
 _INFER_PATCH = "service.agentService.agentTurnRunner.llmService.infer"
+_INFER_STREAM_PATCH = "service.agentService.agentTurnRunner.llmService.infer_stream"
 _ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
+_ACTIVITY_PATCH = "service.agentService.agentTurnRunner.agentActivityService"
+
+
+def _mock_activity_service():
+    m = MagicMock()
+    act = MagicMock()
+    act.id = 1
+    m.add_activity = AsyncMock(return_value=act)
+    m.update_activity_progress = AsyncMock(return_value=act)
+    return m
 
 # context_window=500, reserve=100 → hard_limit=400, trigger=floor(400*0.85)=340
 _CONTEXT_WINDOW = 500
@@ -129,11 +140,14 @@ class TestCompactFlow(ServiceTestCase):
 
         with (
             mock.patch(_CONFIG_PATCH, return_value=_mock_config()),
-            mock.patch(_INFER_PATCH, AsyncMock(side_effect=[
-                llmService.InferResult.success(compact_summary_resp),  # compact LLM 调用
-                llmService.InferResult.success(normal_resp),           # 正常推理 LLM 调用
-            ])),
+            mock.patch(_INFER_PATCH, AsyncMock(
+                return_value=llmService.InferResult.success(compact_summary_resp),
+            )),
+            mock.patch(_INFER_STREAM_PATCH, AsyncMock(
+                return_value=llmService.InferResult.success(normal_resp),
+            )),
             mock.patch(_ESTIMATE_PATCH, side_effect=estimate_calls),
+            mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
         ):
             output_item = await history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
             result = await runner._infer_to_item(output_item, tools=[])
@@ -180,6 +194,7 @@ class TestCompactFlow(ServiceTestCase):
             mock.patch(_INFER_PATCH, AsyncMock(
                 return_value=llmService.InferResult.success(compact_resp),
             )),
+            mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
         ):
             result = await runner._execute_compact()
 
@@ -209,6 +224,7 @@ class TestCompactFlow(ServiceTestCase):
             mock.patch(_INFER_PATCH, AsyncMock(
                 return_value=llmService.InferResult.success(compact_resp),
             )),
+            mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
         ):
             await runner._execute_compact()
 
@@ -234,6 +250,7 @@ class TestCompactFlow(ServiceTestCase):
             mock.patch(_INFER_PATCH, AsyncMock(
                 return_value=llmService.InferResult.success(compact_resp),
             )),
+            mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
         ):
             await runner._execute_compact()
 
