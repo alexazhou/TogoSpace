@@ -50,6 +50,8 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
 
         assert item.id is not None
         assert item.role == OpenaiApiRole.ASSISTANT
+        assert item.message_json is None
+        assert item.has_message is False
         assert item.status == AgentHistoryStatus.INIT
 
     async def test_finalize_history_item_updates_db(self):
@@ -89,6 +91,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
 
         assert init_item.status == AgentHistoryStatus.FAILED
         assert init_item.error_message == "tool execution error"
+        assert init_item.tool_call_id == "call_1"
 
     async def test_full_flow_append_and_finalize(self):
         await self._reset_table()

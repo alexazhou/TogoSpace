@@ -149,6 +149,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
             GtAgentHistory(
                 agent_id=gt_alice.id,
                 seq=0,
+                role=OpenaiApiRole.USER,
                 message_json=OpenAIMessage.text(OpenaiApiRole.USER, "u1").model_dump(mode="json", exclude_none=True),
             )
         )
@@ -156,6 +157,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
             GtAgentHistory(
                 agent_id=gt_alice.id,
                 seq=1,
+                role=OpenaiApiRole.ASSISTANT,
                 message_json=OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1").model_dump(mode="json", exclude_none=True),
             )
         )

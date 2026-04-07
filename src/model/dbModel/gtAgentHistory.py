@@ -15,7 +15,9 @@ from .historyUsage import HistoryUsage
 class GtAgentHistory(DbModelBase):
     agent_id: int = peewee.IntegerField()
     seq: int = peewee.IntegerField(null=False)
-    message_json: dict[str, Any] = JsonField(null=False)
+    role: OpenaiApiRole = EnumField(OpenaiApiRole, null=False)
+    tool_call_id: str | None = peewee.TextField(null=True)
+    message_json: dict[str, Any] | None = JsonField(null=True)
     status: AgentHistoryStatus = EnumField(AgentHistoryStatus, null=False, default=AgentHistoryStatus.INIT)
     error_message: str | None = peewee.TextField(null=True)
     tags: list[AgentHistoryTag] = EnumListField(AgentHistoryTag, default=list)
@@ -46,6 +48,8 @@ class GtAgentHistory(DbModelBase):
         - tags: 若未指定，默认空列表
         """
         return cls(
+            role=message.role,
+            tool_call_id=message.tool_call_id,
             message_json=message.model_dump(mode="json", exclude_none=True),
             status=status or AgentHistoryStatus.SUCCESS,
             error_message=error_message,
@@ -54,24 +58,62 @@ class GtAgentHistory(DbModelBase):
         )
 
     @property
-    def openai_message(self) -> llmApiUtil.OpenAIMessage:
+    def has_message(self) -> bool:
+        return self.message_json is not None
+
+    @classmethod
+    def build_placeholder(
+        cls,
+        *,
+        role: OpenaiApiRole,
+        tool_call_id: str | None = None,
+        status: AgentHistoryStatus = AgentHistoryStatus.INIT,
+        error_message: str | None = None,
+        tags: list[AgentHistoryTag] | None = None,
+        usage: HistoryUsage | None = None,
+    ) -> "GtAgentHistory":
+        if status == AgentHistoryStatus.SUCCESS:
+            raise ValueError("placeholder history item cannot have SUCCESS status")
+        if role == OpenaiApiRole.TOOL and not tool_call_id:
+            raise ValueError("tool placeholder requires tool_call_id")
+        if role != OpenaiApiRole.TOOL and tool_call_id is not None:
+            raise ValueError("tool_call_id is only allowed for tool history items")
+        return cls(
+            role=role,
+            tool_call_id=tool_call_id,
+            message_json=None,
+            status=status,
+            error_message=error_message,
+            tags=[] if tags is None else list(tags),
+            usage=usage,
+        )
+
+    @property
+    def openai_message_or_none(self) -> llmApiUtil.OpenAIMessage | None:
+        if self.message_json is None:
+            return None
         return llmApiUtil.OpenAIMessage.model_validate(self.message_json)
 
     @property
-    def role(self):
-        return self.openai_message.role
+    def openai_message(self) -> llmApiUtil.OpenAIMessage:
+        message = self.openai_message_or_none
+        if message is None:
+            raise ValueError(f"history item {self.id or '<unsaved>'} has no message_json")
+        return message
 
     @property
     def content(self):
-        return self.openai_message.content
+        message = self.openai_message_or_none
+        if message is None:
+            return None
+        return message.content
 
     @property
     def tool_calls(self):
-        return self.openai_message.tool_calls
-
-    @property
-    def tool_call_id(self):
-        return self.openai_message.tool_call_id
+        message = self.openai_message_or_none
+        if message is None:
+            return None
+        return message.tool_calls
 
     @staticmethod
     def is_tool_call_succeeded(result_json: str | None) -> bool:

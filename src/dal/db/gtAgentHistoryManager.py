@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from constants import AgentHistoryTag
 from constants import AgentHistoryStatus
+from constants import OpenaiApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.historyUsage import HistoryUsage
 from . import gtAgentManager
+
+_UNSET = object()
 
 
 async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistory:
@@ -13,6 +16,8 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
         .insert(
             agent_id=message.agent_id,
             seq=message.seq,
+            role=message.role,
+            tool_call_id=message.tool_call_id,
             message_json=message.message_json,
             status=message.status,
             error_message=message.error_message,
@@ -69,22 +74,28 @@ async def insert_agent_history_message_at_seq(message: GtAgentHistory) -> GtAgen
 async def update_agent_history_by_id(
     history_id: int,
     *,
-    message_json: dict | None = None,
-    status: AgentHistoryStatus | None = None,
-    error_message: str | None = None,
-    tags: list[AgentHistoryTag] | None = None,
-    usage: HistoryUsage | None = None,
+    role: OpenaiApiRole | object = _UNSET,
+    tool_call_id: str | None | object = _UNSET,
+    message_json: dict | None | object = _UNSET,
+    status: AgentHistoryStatus | object = _UNSET,
+    error_message: str | None | object = _UNSET,
+    tags: list[AgentHistoryTag] | None | object = _UNSET,
+    usage: HistoryUsage | None | object = _UNSET,
 ) -> GtAgentHistory:
     update_fields: dict = {}
-    if message_json is not None:
+    if role is not _UNSET:
+        update_fields["role"] = role
+    if tool_call_id is not _UNSET:
+        update_fields["tool_call_id"] = tool_call_id
+    if message_json is not _UNSET:
         update_fields["message_json"] = message_json
-    if status is not None:
+    if status is not _UNSET:
         update_fields["status"] = status
-    if error_message is not None:
+    if error_message is not _UNSET:
         update_fields["error_message"] = error_message
-    if tags is not None:
+    if tags is not _UNSET:
         update_fields["tags"] = tags
-    if usage is not None:
+    if usage is not _UNSET:
         update_fields["usage"] = usage
     if not update_fields:
         raise ValueError(f"update agent history by id has no fields to update: id={history_id}")

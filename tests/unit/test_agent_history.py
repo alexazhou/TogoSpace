@@ -50,6 +50,36 @@ def test_agent_history_openai_message_round_trips():
     assert [msg.content for msg in exported] == ["u1", '{"success": true}']
 
 
+def test_agent_history_placeholder_has_no_message_but_keeps_runtime_metadata():
+    item = GtAgentHistory.build_placeholder(
+        role=OpenaiApiRole.TOOL,
+        tool_call_id="call_1",
+    )
+
+    assert item.role == OpenaiApiRole.TOOL
+    assert item.tool_call_id == "call_1"
+    assert item.has_message is False
+    assert item.openai_message_or_none is None
+    assert item.content is None
+    assert item.tool_calls is None
+
+
+def test_build_infer_messages_skips_placeholder_items():
+    history = AgentHistoryStore(
+        agent_id=5,
+        items=[
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), agent_id=5, seq=0),
+            GtAgentHistory.build_placeholder(role=OpenaiApiRole.ASSISTANT, status=AgentHistoryStatus.INIT),
+        ],
+    )
+    history[1].agent_id = 5
+    history[1].seq = 1
+
+    msgs = history.build_infer_messages()
+
+    assert [msg.content for msg in msgs] == ["u1"]
+
+
 def test_agent_history_get_last_assistant_message_respects_start_index():
     history = AgentHistoryStore(
         agent_id=3,
