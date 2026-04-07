@@ -132,7 +132,9 @@ class TestSchedulerRun(ServiceTestCase):
         """验证 Agent.task_consumer.consume 内部错误后进入 FAILED 状态。"""
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
 
-        with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_task_manager:
+        with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_task_manager, \
+             patch("service.agentService.agentTaskConsumer.agentActivityService") as mock_activity_svc:
+            mock_activity_svc.add_activity = AsyncMock()
             mock_task_manager.get_first_unfinish_task = AsyncMock(return_value=GtAgentTask(
                 id=1,
                 agent_id=1,
@@ -157,7 +159,9 @@ class TestSchedulerRun(ServiceTestCase):
         """任务失败后，即使仍有 pending task，也不应自动续起消费。"""
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
 
-        with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_task_manager:
+        with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_task_manager, \
+             patch("service.agentService.agentTaskConsumer.agentActivityService") as mock_activity_svc:
+            mock_activity_svc.add_activity = AsyncMock()
             mock_task_manager.get_first_unfinish_task = AsyncMock(return_value=GtAgentTask(
                 id=1,
                 agent_id=1,

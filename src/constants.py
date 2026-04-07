@@ -67,9 +67,10 @@ class LlmServiceType(EnhanceEnum):
 
 
 class MessageBusTopic(EnhanceEnum):
-    ROOM_AGENT_TURN = auto()       # 轮到某 Agent 发言；payload: gt_agent(GtAgent), room_id
-    ROOM_MSG_ADDED = auto()        # 房间新增消息；payload: gt_room(GtRoom), sender, content, time
-    AGENT_STATUS_CHANGED = auto()  # Agent 忙闲状态变更；payload: gt_agent(GtAgent), status(AgentStatus)
+    ROOM_AGENT_TURN = auto()           # 轮到某 Agent 发言；payload: gt_agent(GtAgent), room_id
+    ROOM_MSG_ADDED = auto()            # 房间新增消息；payload: gt_room(GtRoom), sender, content, time
+    AGENT_STATUS_CHANGED = auto()      # Agent 忙闲状态变更；payload: gt_agent(GtAgent), status(AgentStatus)
+    AGENT_ACTIVITY_CHANGED = auto()    # Agent 活动记录变更；payload: event, data
 
 
 class RoomType(EnhanceEnum):
@@ -129,6 +130,20 @@ class AgentHistoryStatus(EnhanceEnum):
     INIT = "INIT"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
+
+
+class AgentActivityType(EnhanceEnum):
+    LLM_INFER = auto()
+    TOOL_CALL = auto()
+    COMPACT = auto()
+    AGENT_STATE = auto()
+
+
+class AgentActivityStatus(EnhanceEnum):
+    STARTED = auto()
+    SUCCEEDED = auto()
+    FAILED = auto()
+    CANCELLED = auto()
 
 
 class AgentTaskType(EnhanceEnum):

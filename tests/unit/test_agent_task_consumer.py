@@ -27,7 +27,11 @@ def mock_turn_runner():
 @pytest.fixture
 def consumer(mock_gt_agent, mock_turn_runner):
     with patch("service.agentService.agentTaskConsumer.AgentTurnRunner", return_value=mock_turn_runner):
-        return AgentTaskConsumer(gt_agent=mock_gt_agent, system_prompt="test")
+        with patch("service.agentService.agentTaskConsumer.agentActivityService") as mock_activity_svc:
+            mock_activity_svc.add_activity = AsyncMock()
+            c = AgentTaskConsumer(gt_agent=mock_gt_agent, system_prompt="test")
+            c._mock_activity_service = mock_activity_svc
+            yield c
 
 
 @pytest.mark.asyncio

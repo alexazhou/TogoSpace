@@ -33,11 +33,23 @@ def subscribe(topic: MessageBusTopic, callback: Callable[[EventBusMessage], None
     _subscribers.setdefault(topic, []).append(callback)
 
 
+def subscribe_many(topics: list[MessageBusTopic], callback: Callable[[EventBusMessage], None]) -> None:
+    """一次订阅多个主题，callback 接收 EventBusMessage 对象。"""
+    for topic in topics:
+        subscribe(topic, callback)
+
+
 def unsubscribe(topic: MessageBusTopic, callback: Callable[[EventBusMessage], None]) -> None:
     """取消订阅指定主题。"""
     callbacks: List[Callable[[EventBusMessage], None]] = _subscribers.get(topic, [])
     if callback in callbacks:
         callbacks.remove(callback)
+
+
+def unsubscribe_many(topics: list[MessageBusTopic], callback: Callable[[EventBusMessage], None]) -> None:
+    """一次取消多个主题的订阅。"""
+    for topic in topics:
+        unsubscribe(topic, callback)
 
 
 def publish(topic: MessageBusTopic, **payload: Any) -> None:

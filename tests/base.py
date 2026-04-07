@@ -176,7 +176,10 @@ class ServiceTestCase:
 
     @contextlib.contextmanager
     def patch_infer(self, responses: list[dict] = None, handler=None):
-        """统一封装对 llmService.infer 的 Mock 注入。
+        """统一封装对 llmService.infer / infer_stream 的 Mock 注入。
+
+        同时 patch infer 和 infer_stream，使 compact（调用 infer）与
+        agentTurnRunner（调用 infer_stream）共享同一个 mock 队列。
         
         用法 (简化字典):
             with self.patch_infer(responses=[{"content": "你好"}]):
@@ -189,6 +192,7 @@ class ServiceTestCase:
                 await ...
         """
         target = "service.agentService.core.llmService.infer"
+        target_stream = "service.agentService.core.llmService.infer_stream"
 
         async def _to_infer_result(value):
             if isinstance(value, llmService.InferResult):
@@ -199,21 +203,23 @@ class ServiceTestCase:
             # 将简化字典序列转换为 Mock 对象序列
             mock_responses = [llmService.InferResult.success(self.normalize_to_mock(r)) for r in responses]
             m = mock.AsyncMock(side_effect=mock_responses)
-            with mock.patch(target, m) as p:
+            with mock.patch(target, m), mock.patch(target_stream, m) as p:
                 yield p
         elif handler is not None:
             async def _wrapped_handler(*args, **kwargs):
+                kwargs.pop("on_progress", None)
                 try:
                     value = await handler(*args, **kwargs)
                 except Exception as e:
                     return llmService.InferResult.failure(e)
                 return await _to_infer_result(value)
 
-            with mock.patch(target, side_effect=_wrapped_handler) as p:
+            with mock.patch(target, side_effect=_wrapped_handler), \
+                 mock.patch(target_stream, side_effect=_wrapped_handler) as p:
                 yield p
         else:
             default = mock.AsyncMock(return_value=llmService.InferResult.success(self.normalize_to_mock({"content": "ok"})))
-            with mock.patch(target, default) as p:
+            with mock.patch(target, default), mock.patch(target_stream, default) as p:
                 yield p
 
     def normalize_to_mock(self, data: dict):

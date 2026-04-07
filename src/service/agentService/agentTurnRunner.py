@@ -5,9 +5,11 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import List
 
 from constants import (
+    AgentActivityStatus, AgentActivityType,
     AgentHistoryStatus, AgentHistoryTag,
     DriverType, OpenaiApiRole, RoomState,
 )
@@ -16,7 +18,8 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.historyUsage import CompactStage, HistoryUsage
-from service import llmService, roomService
+from service import agentActivityService, llmService, roomService
+from service.agentActivityService import AgentActivityMeta
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService import compact, promptBuilder
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
@@ -53,6 +56,14 @@ class AgentTurnRunner:
         self.tool_registry: AgentToolRegistry = AgentToolRegistry()
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
         self._current_room: ChatRoom | None = None
+
+    def _base_metadata(self, **extra) -> AgentActivityMeta:
+        """构建活动记录 metadata，自动附加 room_id。"""
+        meta = AgentActivityMeta(
+            room_id=self._current_room.room_id if self._current_room is not None else None,
+            **extra,
+        )
+        return meta
 
     # ─── Turn 运行方法 ──────────────────────────────────────
 
@@ -210,9 +221,19 @@ class AgentTurnRunner:
         usage: llmApiUtil.OpenAIUsage | None = None
         assistant_committed = False
 
+        # 活动记录：LLM_INFER STARTED
+        room = self._current_room
+        activity_metadata = self._base_metadata(model=resolved_model)
+
+        activity = await agentActivityService.add_activity(
+            gt_agent=self.gt_agent, activity_type=AgentActivityType.LLM_INFER, metadata=activity_metadata,
+        )
+        activity_id = activity.id
+
         try:
             messages = history.build_infer_messages()
             estimated_tokens = compact.estimate_tokens(resolved_model, messages, self.system_prompt)
+            activity_metadata.estimated_prompt_tokens = estimated_tokens
 
             messages, estimated_tokens, pre_compact_triggered = await self._check_compact(
                 messages,
@@ -224,7 +245,27 @@ class AgentTurnRunner:
                 compact_stage = "pre"
 
             ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools)
-            infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
+
+            # 流式推理 + 节流更新
+            last_progress_time = time.monotonic()
+            chunk_count_since_update = 0
+            _THROTTLE_INTERVAL = 0.2  # 200ms
+            _THROTTLE_CHUNK_COUNT = 10
+
+            async def _on_progress(progress: llmService.InferStreamProgress) -> None:
+                nonlocal last_progress_time, chunk_count_since_update
+                chunk_count_since_update += 1
+                now = time.monotonic()
+                if chunk_count_since_update >= _THROTTLE_CHUNK_COUNT or (now - last_progress_time) >= _THROTTLE_INTERVAL:
+                    patch = AgentActivityMeta()
+                    patch.apply_progress(progress)
+                    await agentActivityService.update_activity_progress(activity_id, metadata_patch=patch)
+                    last_progress_time = now
+                    chunk_count_since_update = 0
+
+            infer_result: llmService.InferResult = await llmService.infer_stream(
+                self.gt_agent.model, ctx, on_progress=_on_progress,
+            )
 
             # overflow retry
             if infer_result.ok is False or infer_result.response is None:
@@ -236,6 +277,10 @@ class AgentTurnRunner:
                 ):
                     logger.info(f"overflow retry 触发: {self.gt_agent.name}(agent_id={self.gt_agent.id}), error={infer_result.error_message}")
                     overflow_retry = True
+
+                    # 标记当前 infer 活动为 FAILED
+                    await agentActivityService.update_activity_progress(activity_id, status=AgentActivityStatus.FAILED, error_message=infer_result.error_message, metadata_patch=AgentActivityMeta(error_kind="context_overflow"))
+
                     compact_ok = await self._execute_compact()
                     if not compact_ok:
                         raise RuntimeError(f"overflow compact 失败: agent_id={self.gt_agent.id}") from error
@@ -244,8 +289,22 @@ class AgentTurnRunner:
                     if estimated_tokens >= hard_limit_tokens:
                         raise RuntimeError(f"overflow compact 后仍超限: agent_id={self.gt_agent.id}") from error
 
+                    # 新建 infer 活动记录
+                    retry_metadata = self._base_metadata(
+                        model=resolved_model, estimated_prompt_tokens=estimated_tokens, overflow_retry=True,
+                    )
+                    activity = await agentActivityService.add_activity(
+                        gt_agent=self.gt_agent, activity_type=AgentActivityType.LLM_INFER,
+                        detail="overflow 重试", metadata=retry_metadata,
+                    )
+                    activity_id = activity.id
+                    last_progress_time = time.monotonic()
+                    chunk_count_since_update = 0
+
                     ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools)
-                    infer_result = await llmService.infer(self.gt_agent.model, ctx)
+                    infer_result = await llmService.infer_stream(
+                        self.gt_agent.model, ctx, on_progress=_on_progress,
+                    )
 
                 if infer_result.ok is False or infer_result.response is None:
                     error_message = infer_result.error_message or "unknown inference error"
@@ -270,6 +329,11 @@ class AgentTurnRunner:
                 usage=usage_data,
             )
             assistant_committed = True
+
+            # 活动记录：LLM_INFER SUCCEEDED
+            final_meta = AgentActivityMeta()
+            final_meta.apply_usage(usage)
+            await agentActivityService.update_activity_progress(activity_id, status=AgentActivityStatus.SUCCEEDED, metadata_patch=final_meta)
 
             post_check_messages = history.build_infer_messages()
             _, _, post_check_triggered = await self._check_compact(
@@ -328,10 +392,19 @@ class AgentTurnRunner:
                 error_message=str(e),
                 usage=usage_data,
             )
+            # 活动记录：LLM_INFER FAILED
+            await agentActivityService.update_activity_progress(activity_id, status=AgentActivityStatus.FAILED, error_message=str(e))
             raise
 
     async def _run_tool_to_item(self, tool_call: llmApiUtil.OpenAIToolCall, output_item: GtAgentHistory, room: ChatRoom) -> str:
         """执行单个工具调用，结果写入 output_item。返回 'turn_done' 或 'continue'。"""
+        tool_name = tool_call.function_name
+        tool_metadata = self._base_metadata(tool_name=tool_name, tool_call_id=tool_call.id)
+        tool_activity = await agentActivityService.add_activity(
+            gt_agent=self.gt_agent, activity_type=AgentActivityType.TOOL_CALL,
+            detail=tool_name, metadata=tool_metadata,
+        )
+
         context = ToolCallContext(
             agent_name=self.gt_agent.name,
             team_id=room.team_id,
@@ -346,6 +419,10 @@ class AgentTurnRunner:
             error_message=exec_result.error_message,
             tags=exec_result.tags,
         )
+
+        # 活动记录：TOOL_CALL SUCCEEDED / FAILED
+        await agentActivityService.update_activity_progress(tool_activity.id, status=AgentActivityStatus.SUCCEEDED if exec_result.status == AgentHistoryStatus.SUCCESS else AgentActivityStatus.FAILED, error_message=exec_result.error_message)
+
         turn_done = exec_result.turn_finished and (
             exec_result.status == AgentHistoryStatus.SUCCESS or room.state == RoomState.INIT
         )
@@ -439,9 +516,15 @@ class AgentTurnRunner:
     async def _execute_compact(self) -> bool:
         """执行一次 compact：生成摘要 → 插入 COMPACT_SUMMARY → 内存裁剪。返回是否成功。"""
         _, llm_config, _, _ = self._resolve_compact_config()
+
+        compact_activity = await agentActivityService.add_activity(
+            gt_agent=self.gt_agent, activity_type=AgentActivityType.COMPACT, metadata=self._base_metadata(),
+        )
+
         compact_plan = self._history.build_compact_plan()
         if compact_plan is None:
             logger.warning("compact 跳过：无可压缩消息, agent_id=%d", self.gt_agent.id)
+            await agentActivityService.update_activity_progress(compact_activity.id, status=AgentActivityStatus.FAILED, error_message="无可压缩消息")
             return False
 
         summary_text = await compact.compact_messages(
@@ -452,10 +535,14 @@ class AgentTurnRunner:
         )
         if summary_text is None:
             logger.warning("compact 失败：LLM 返回无效, agent_id=%d", self.gt_agent.id)
+            await agentActivityService.update_activity_progress(compact_activity.id, status=AgentActivityStatus.FAILED, error_message="LLM 返回无效")
             return False
 
         await self._history.insert_compact_summary(
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, summary_text),
             seq=compact_plan.insert_seq,
         )
+
+        # 活动记录：COMPACT SUCCEEDED
+        await agentActivityService.update_activity_progress(compact_activity.id, status=AgentActivityStatus.SUCCEEDED)
         return True

@@ -1,4 +1,6 @@
+import inspect
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import litellm
@@ -51,8 +53,12 @@ async def send_request_stream(
     api_key: str,
     custom_llm_provider: str | None = None,
     extra_headers: dict[str, str] | None = None,
+    on_chunk: Callable[[ModelResponseStream], Awaitable[None] | None] | None = None,
 ) -> OpenAIResponse:
-    """流式请求上游模型，并在本地聚合为完整 OpenAIResponse。"""
+    """流式请求上游模型，并在本地聚合为完整 OpenAIResponse。
+
+    若提供 on_chunk，每收到一个 chunk 后立即回调（支持同步和异步回调）。
+    """
     model_name, messages, tools = _build_request_payload(request)
     base_url = _clean_base_url(url)
 
@@ -76,6 +82,10 @@ async def send_request_stream(
         if not isinstance(chunk, ModelResponseStream):
             raise TypeError(f"期望流式 chunk 类型 ModelResponseStream，实际为: {type(chunk).__name__}")
         chunks.append(chunk)
+        if on_chunk is not None:
+            result = on_chunk(chunk)
+            if inspect.isawaitable(result):
+                await result
 
     merged: ModelResponse | TextCompletionResponse | None = litellm.stream_chunk_builder(chunks=chunks, messages=messages)
     if merged is None:
