@@ -88,30 +88,17 @@ class AgentHistoryStore:
 
     async def append_history_message(
         self,
-        message: llmApiUtil.OpenAIMessage,
+        item: GtAgentHistory,
         *,
         seq: int | None = None,
-        stage: AgentHistoryStage | None = None,
-        status: AgentHistoryStatus | None = None,
-        error_message: str | None = None,
-        tags: list[AgentHistoryTag] | None = None,
-        usage: HistoryUsage | None = None,
     ) -> GtAgentHistory:
         """追加或插入消息到历史并持久化。
 
         若 seq 为 None，追加到末尾；若 seq 有值，按 seq 插入并后移后续消息。
         """
         target_seq = self._next_seq() if seq is None else seq
-        item = GtAgentHistory.from_openai_message(
-            agent_id=self._agent_id,
-            seq=target_seq,
-            message=message,
-            stage=stage,
-            status=status,
-            error_message=error_message,
-            tags=tags,
-        )
-        item.usage = usage
+        item.agent_id = self._agent_id
+        item.seq = target_seq
 
         if seq is None:
             # 追加到末尾
@@ -143,12 +130,13 @@ class AgentHistoryStore:
             role=GtAgentHistory.infer_role_from_stage(stage),
             tool_call_id=tool_call_id,
         )
-        return await self.append_history_message(
+        item = GtAgentHistory.build(
             init_message,
             stage=stage,
             status=AgentHistoryStatus.INIT,
             tags=tags,
         )
+        return await self.append_history_message(item)
 
     async def finalize_history_item(
         self,
@@ -276,15 +264,15 @@ class AgentHistoryStore:
 
         操作完成后满足不变量：_items[0] 为 COMPACT_SUMMARY。
         """
-        item = await self.append_history_message(
+        item = GtAgentHistory.build(
             message,
-            seq=seq,
             stage=AgentHistoryStage.INPUT,
             status=AgentHistoryStatus.SUCCESS,
             tags=[AgentHistoryTag.COMPACT_SUMMARY],
         )
+        inserted = await self.append_history_message(item, seq=seq)
         self._trim_to_compact_window()
-        return item
+        return inserted
 
     def _trim_to_compact_window(self) -> None:
         """内存裁剪：只保留 COMPACT_SUMMARY 及其之后的消息。仅由 insert_compact_summary 调用。"""

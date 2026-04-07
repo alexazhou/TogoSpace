@@ -15,6 +15,7 @@ from service.funcToolService.toolLoader import get_function_metadata
 from service.funcToolService.tools import FUNCTION_REGISTRY
 from service import funcToolService, roomService
 from model.dbModel.gtAgentTask import GtAgentTask
+from model.dbModel.gtAgentHistory import GtAgentHistory
 from constants import AgentHistoryStage, AgentHistoryStatus
 from util import llmApiUtil
 
@@ -166,7 +167,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
         async def _wrapped(args):
             # 写入 tool_use 消息到 history
             tool_call_id = self._next_tool_call_id()
-            await self.host._history.append_history_message(
+            await self.host._history.append_history_message(GtAgentHistory.build(
                 llmApiUtil.OpenAIMessage(
                     role="assistant",
                     content=None,
@@ -180,7 +181,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
                 ),
                 stage=AgentHistoryStage.INFER,
                 status=AgentHistoryStatus.SUCCESS,
-            )
+            ))
 
             # 执行最后一条 assistant 消息中的 tool_call 并写入 tool_result
             await self.host.execute_pending_tools()

@@ -105,12 +105,12 @@ def test_openai_response_usage_from_dict():
 
 def test_gt_agent_history_usage_default_none():
     msg = OpenAIMessage.text(OpenaiApiRole.USER, "hello")
-    item = GtAgentHistory.from_openai_message(1, 0, msg)
+    item = GtAgentHistory.build(msg)
     assert item.usage is None
 
 
 def test_gt_agent_history_usage_settable():
     msg = OpenAIMessage.text(OpenaiApiRole.USER, "hello")
-    item = GtAgentHistory.from_openai_message(1, 0, msg)
+    item = GtAgentHistory.build(msg)
     item.usage = HistoryUsage(estimated_prompt_tokens=100)
     assert item.usage == HistoryUsage(estimated_prompt_tokens=100)

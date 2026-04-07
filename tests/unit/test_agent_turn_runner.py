@@ -79,8 +79,9 @@ async def test_pull_room_messages_syncs_to_history(turn_runner):
     assert count == 1
     turn_runner._history.append_history_message.assert_called_once()
     call_args = turn_runner._history.append_history_message.call_args
-    assert call_args.kwargs["stage"] == AgentHistoryStage.INPUT
-    assert AgentHistoryTag.ROOM_TURN_BEGIN in call_args.kwargs["tags"]
+    item = call_args.args[0]  # 第一个位置参数是 GtAgentHistory
+    assert item.stage == AgentHistoryStage.INPUT
+    assert AgentHistoryTag.ROOM_TURN_BEGIN in item.tags
 
 
 @pytest.mark.asyncio

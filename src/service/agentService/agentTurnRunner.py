@@ -97,11 +97,11 @@ class AgentTurnRunner:
         turn_prompt = promptBuilder.build_turn_begin_prompt_from_messages(
             room.name, new_msgs, self.gt_agent.id
         )
-        await self._history.append_history_message(
+        await self._history.append_history_message(GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt),
             stage=AgentHistoryStage.INPUT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
-        )
+        ))
         return 1
 
     async def _run_turn_loop(self, room: ChatRoom) -> None:
@@ -121,10 +121,10 @@ class AgentTurnRunner:
             if result == "no_tool_calls":
                 # 有 hint_prompt，追加提示继续推理
                 if len(turn_setup.hint_prompt) > 0:
-                    await self._history.append_history_message(
+                    await self._history.append_history_message(GtAgentHistory.build(
                         llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_setup.hint_prompt),
                         stage=AgentHistoryStage.INPUT,
-                    )
+                    ))
                     continue
                 # 无 hint_prompt，turn 结束
                 return

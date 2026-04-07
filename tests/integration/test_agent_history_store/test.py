@@ -1,4 +1,6 @@
 """AgentHistoryStore 集成测试：测试需要真实数据库的异步方法。"""
+from __future__ import annotations
+
 import pytest
 
 import service.ormService as ormService
@@ -26,11 +28,11 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         await self._reset_table()
         history = AgentHistoryStore(agent_id=1)
 
-        item = await history.append_history_message(
+        item = await history.append_history_message(GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "hello db"),
             stage=AgentHistoryStage.INPUT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
-        )
+        ))
 
         assert item.id is not None
         assert item.agent_id == 1
@@ -96,11 +98,11 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
 
         # 1. 用户输入
         user_msg = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "user input")
-        await history.append_history_message(
+        await history.append_history_message(GtAgentHistory.build(
             user_msg,
             stage=AgentHistoryStage.INPUT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
-        )
+        ))
 
         # 2. 推理
         infer_item = await history.append_history_init_item(stage=AgentHistoryStage.INFER)
@@ -118,12 +120,12 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         await self._reset_table()
         history = AgentHistoryStore(agent_id=7)
 
-        item = await history.append_history_message(
+        item = await history.append_history_message(GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "hello"),
             stage=AgentHistoryStage.INPUT,
             status=AgentHistoryStatus.SUCCESS,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
-        )
+        ))
 
         assert item.id is not None
         assert item.agent_id == 7
@@ -151,30 +153,30 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
             if role == OpenaiApiRole.TOOL:
                 message = llmApiUtil.OpenAIMessage.tool_result("tool_1", '{"success": true}')
 
-            await history.append_history_message(message)
+            await history.append_history_message(GtAgentHistory.build(message))
             assert history.is_infer_ready() is True
 
     async def test_is_infer_ready_rejects_assistant_tail(self):
         await self._reset_table()
         history = AgentHistoryStore(agent_id=20)
 
-        await history.append_history_message(
+        await history.append_history_message(GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "hi"),
             stage=AgentHistoryStage.INFER,
             status=AgentHistoryStatus.SUCCESS,
-        )
+        ))
 
         assert history.is_infer_ready() is False
 
     async def test_is_infer_ready_accepts_failed_or_init_infer_tail(self):
         await GtAgentHistory.delete().aio_execute()
         history_failed = AgentHistoryStore(agent_id=21)
-        await history_failed.append_history_message(
+        await history_failed.append_history_message(GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, ""),
             stage=AgentHistoryStage.INFER,
             status=AgentHistoryStatus.FAILED,
             error_message="mock error",
-        )
+        ))
         assert history_failed.is_infer_ready() is True
 
         await GtAgentHistory.delete().aio_execute()
@@ -186,23 +188,23 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         await self._reset_table()
         history = AgentHistoryStore(agent_id=30)
 
-        await history.append_history_message(
+        await history.append_history_message(GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
-        )
-        await history.append_history_message(
+        ))
+        await history.append_history_message(GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"),
             stage=AgentHistoryStage.INFER,
             status=AgentHistoryStatus.SUCCESS,
-        )
+        ))
 
         assert history.has_active_turn() is True
         assert history.get_current_turn_start_index() == 0
 
-        await history.append_history_message(
+        await history.append_history_message(GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "done"),
             tags=[AgentHistoryTag.ROOM_TURN_FINISH],
-        )
+        ))
 
         assert history.has_active_turn() is False
         assert history.get_current_turn_start_index() is None
