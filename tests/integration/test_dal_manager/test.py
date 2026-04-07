@@ -611,13 +611,13 @@ class TestDalManagers(ServiceTestCase):
         first = GtAgentHistory(
             agent_id=alice.id,
             seq=1,
-            message_json='{"content":"v1"}',
+            message_json={"content": "v1"},
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         )
         saved_1 = await gtAgentHistoryManager.append_agent_history_message(first)
         assert saved_1.agent_id == alice.id
         assert saved_1.seq == 1
-        assert saved_1.message_json == '{"content":"v1"}'
+        assert saved_1.message_json == {"content": "v1"}
         assert saved_1.stage == AgentHistoryStage.INPUT
         assert saved_1.status == AgentHistoryStatus.INIT
         assert saved_1.error_message is None
@@ -626,12 +626,12 @@ class TestDalManagers(ServiceTestCase):
         duplicate = GtAgentHistory(
             agent_id=alice.id,
             seq=1,
-            message_json='{"content":"v2"}',
+            message_json={"content": "v2"},
             tags=[AgentHistoryTag.COMPACT_SUMMARY],
         )
         saved_2 = await gtAgentHistoryManager.append_agent_history_message(duplicate)
         assert saved_2.id == saved_1.id
-        assert saved_2.message_json == '{"content":"v1"}'
+        assert saved_2.message_json == {"content": "v1"}
         assert saved_2.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
     async def test_agent_history_manager_append_and_get_sorted(self):
@@ -656,23 +656,23 @@ class TestDalManagers(ServiceTestCase):
             GtAgentHistory(
                 agent_id=alice.id,
                 seq=2,
-                message_json='{"content":"2"}',
+                message_json={"content": "2"},
                 tags=[AgentHistoryTag.COMPACT_SUMMARY],
             ),
             GtAgentHistory(
                 agent_id=alice.id,
                 seq=1,
-                message_json='{"content":"1"}',
+                message_json={"content": "1"},
                 tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
             ),
-            GtAgentHistory(agent_id=bob.id, seq=1, message_json='{"content":"b1"}', tags=[]),
+            GtAgentHistory(agent_id=bob.id, seq=1, message_json={"content": "b1"}, tags=[]),
         ]
         for item in items:
             await gtAgentHistoryManager.append_agent_history_message(item)
 
         alice_history = await gtAgentHistoryManager.get_agent_history(alice.id)
         assert [h.seq for h in alice_history] == [1, 2]
-        assert [h.message_json for h in alice_history] == ['{"content":"1"}', '{"content":"2"}']
+        assert [h.message_json for h in alice_history] == [{"content": "1"}, {"content": "2"}]
         assert [h.stage for h in alice_history] == [AgentHistoryStage.INPUT, AgentHistoryStage.INPUT]
         assert [h.tags for h in alice_history] == [
             [AgentHistoryTag.ROOM_TURN_BEGIN],
@@ -699,7 +699,7 @@ class TestDalManagers(ServiceTestCase):
             GtAgentHistory(
                 agent_id=alice.id,
                 seq=1,
-                message_json='{"content":"v1"}',
+                message_json={"content": "v1"},
                 tags=[],
             )
         )
@@ -708,13 +708,13 @@ class TestDalManagers(ServiceTestCase):
 
         updated = await gtAgentHistoryManager.update_agent_history_by_id(
             history_id=saved.id,
-            message_json='{"role":"tool","tool_call_id":"call_1","content":"{\\"success\\": true}"}',
+            message_json={"role": "tool", "tool_call_id": "call_1", "content": "{\"success\": true}"},
             status=AgentHistoryStatus.FAILED,
             error_message="tool failed",
             tags=[AgentHistoryTag.ROOM_TURN_FINISH],
         )
         assert updated.id == saved.id
-        assert updated.message_json == '{"role":"tool","tool_call_id":"call_1","content":"{\\"success\\": true}"}'
+        assert updated.message_json == {"role": "tool", "tool_call_id": "call_1", "content": "{\"success\": true}"}
         assert updated.status == AgentHistoryStatus.FAILED
         assert updated.error_message == "tool failed"
         assert updated.tags == [AgentHistoryTag.ROOM_TURN_FINISH]

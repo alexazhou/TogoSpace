@@ -1,24 +1,25 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import peewee
 from util import llmApiUtil
 
 from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiApiRole
 
-from .base import DbModelBase, EnumField, EnumListField
+from .base import DbModelBase, EnumField, EnumListField, JsonField
 
 
 class GtAgentHistory(DbModelBase):
     agent_id: int = peewee.IntegerField()
     seq: int = peewee.IntegerField(null=False)
-    message_json: str = peewee.TextField(null=False)
+    message_json: dict[str, Any] = JsonField(null=False)
     stage: AgentHistoryStage = EnumField[AgentHistoryStage](AgentHistoryStage, null=False, default=AgentHistoryStage.INPUT)
     status: AgentHistoryStatus = EnumField[AgentHistoryStatus](AgentHistoryStatus, null=False, default=AgentHistoryStatus.INIT)
     error_message: str | None = peewee.TextField(null=True)
     tags: list[AgentHistoryTag] = EnumListField[AgentHistoryTag](AgentHistoryTag, default=list)
-    usage_json: str | None = peewee.TextField(null=True)
+    usage_json: dict[str, Any] | None = JsonField(null=True)
 
     class Meta:
         table_name = "agent_histories"
@@ -40,7 +41,7 @@ class GtAgentHistory(DbModelBase):
         return cls(
             agent_id=agent_id,
             seq=seq,
-            message_json=message.model_dump_json(exclude_none=True),
+            message_json=message.model_dump(mode="json", exclude_none=True),
             stage=stage or cls.infer_stage_from_message(message),
             status=status or AgentHistoryStatus.SUCCESS,
             error_message=error_message,
@@ -49,7 +50,7 @@ class GtAgentHistory(DbModelBase):
 
     @property
     def openai_message(self) -> llmApiUtil.OpenAIMessage:
-        return llmApiUtil.OpenAIMessage.model_validate_json(self.message_json)
+        return llmApiUtil.OpenAIMessage.model_validate(self.message_json)
 
     @property
     def role(self):

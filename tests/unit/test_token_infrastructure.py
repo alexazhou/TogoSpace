@@ -111,5 +111,5 @@ def test_gt_agent_history_usage_json_default_none():
 def test_gt_agent_history_usage_json_settable():
     msg = OpenAIMessage.text(OpenaiApiRole.USER, "hello")
     item = GtAgentHistory.from_openai_message(1, 0, msg)
-    item.usage_json = '{"estimated_prompt_tokens": 100}'
-    assert item.usage_json == '{"estimated_prompt_tokens": 100}'
+    item.usage_json = {"estimated_prompt_tokens": 100}
+    assert item.usage_json == {"estimated_prompt_tokens": 100}
