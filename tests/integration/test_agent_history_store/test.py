@@ -50,7 +50,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
 
         assert item.id is not None
         assert item.role == OpenaiApiRole.ASSISTANT
-        assert item.message_json is None
+        assert item.message is None
         assert item.has_message is False
         assert item.status == AgentHistoryStatus.INIT
 
