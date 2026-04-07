@@ -241,6 +241,7 @@ class AgentHistoryStore:
 
     def build_compact_plan(self) -> CompactPlan:
         """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。"""
+        self._assert_compact_invariant()
         items = list(self._items)
         if self.get_pending_infer_item() is not None:
             items = items[:-1]
@@ -277,6 +278,7 @@ class AgentHistoryStore:
         )
         inserted = await self.append_history_message(item, seq=seq)
         self._trim_to_compact_window()
+        self._assert_compact_invariant()
         return inserted
 
     def _trim_to_compact_window(self) -> None:
@@ -285,4 +287,14 @@ class AgentHistoryStore:
             if AgentHistoryTag.COMPACT_SUMMARY in item.tags:
                 if idx > 0:
                     self._items = self._items[idx:]
+                return
+
+    def _assert_compact_invariant(self) -> None:
+        """断言：COMPACT_SUMMARY（若存在）必须在 _items[0]。"""
+        for i, item in enumerate(self._items):
+            if AgentHistoryTag.COMPACT_SUMMARY in item.tags:
+                assert i == 0, (
+                    f"[agent_id={self._agent_id}] compact 不变量违反："
+                    f"COMPACT_SUMMARY 在 index={i}，必须在 index=0"
+                )
                 return
