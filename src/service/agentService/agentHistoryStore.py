@@ -293,8 +293,7 @@ class AgentHistoryStore:
                 return
 
     def _get_window_items(self, *, exclude_pending_infer: bool) -> list[GtAgentHistory]:
-        """构造推理或 compact 所用消息窗口。不变量：COMPACT_SUMMARY 若存在，必在 _items[0]。"""
-        self._assert_compact_invariant()
+        """构造推理或 compact 所用消息窗口。"""
         items = list(self._items)
         if exclude_pending_infer and self.get_pending_infer_item() is not None:
             items = items[:-1]
