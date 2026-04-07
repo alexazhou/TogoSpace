@@ -9,7 +9,7 @@ from .base import DbModelBase, JsonField
 
 class GtTeam(DbModelBase):
     name: str = peewee.CharField(unique=True)
-    config: dict[str, Any] = JsonField[dict[str, Any]](default=dict)
+    config: dict[str, Any] = JsonField(default=dict)
     enabled: int = peewee.IntegerField(default=1)
     deleted: int = peewee.IntegerField(default=0)
 
