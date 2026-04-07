@@ -243,34 +243,51 @@ class AgentHistoryStore:
         """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。
 
         压缩区间选取逻辑：
-        1. 从后往前找最后一条 USER 消息作为保留起点
-        2. 保留该 USER 消息及其之后的所有消息（通常是新一轮对话的开始）
-        3. 压缩该 USER 消息之前的所有消息
-        4. COMPACT_SUMMARY 插入到保留起点的位置
+        1. 从后往前找最后一条 USER 消息
+        2. 往前跳过连续的 TOOL 消息（保证 tool call 链完整）
+        3. 压缩该位置之前的所有消息
+        4. COMPACT_SUMMARY 插入到该位置
 
         示例（压缩前）：
-            [USER: u1, ASSISTANT: a1, USER: u2, ASSISTANT: a2]
-                                            ^-- preserve_start_idx=2
+            [USER: u1, ASSISTANT: a1(tool_call), TOOL: r1, TOOL: r2, USER: u2]
+                                                        ^-- TOOL     ^-- USER
+            跳过 TOOL r1, r2 后，preserve_start_idx 指向 ASSISTANT a1
+
         压缩后：
-            [COMPACT_SUMMARY, USER: u2, ASSISTANT: a2]
+            [COMPACT_SUMMARY, ASSISTANT: a1, TOOL: r1, TOOL: r2, USER: u2]
 
         返回：
             - source_messages: 待压缩的消息列表
-            - insert_seq: COMPACT_SUMMARY 的插入位置（即保留起点的 seq）
+            - insert_seq: COMPACT_SUMMARY 的插入位置
         """
         self._assert_compact_invariant()
         items = list(self._items)
         if self.get_pending_infer_item() is not None:
             items = items[:-1]
-        # 找最后一条 USER 消息作为保留起点
-        preserve_start_idx: int | None = None
+
+        if not items:
+            return CompactPlan(source_messages=[], insert_seq=None)
+
+        # 找最后一条 USER 消息
+        last_user_idx: int | None = None
         for idx in range(len(items) - 1, -1, -1):
             if items[idx].role == llmApiUtil.OpenaiApiRole.USER:
-                preserve_start_idx = idx
+                last_user_idx = idx
                 break
-        if preserve_start_idx is None:
-            preserve_start_idx = len(items) - 1 if items else None
-        if preserve_start_idx is None or preserve_start_idx <= 0:
+
+        if last_user_idx is None:
+            # 无 USER 消息，保留全部
+            return CompactPlan(source_messages=[], insert_seq=None)
+
+        # 往前跳过连续的 TOOL 消息
+        preserve_start_idx = last_user_idx
+        for idx in range(last_user_idx - 1, -1, -1):
+            if items[idx].role == llmApiUtil.OpenaiApiRole.TOOL:
+                preserve_start_idx = idx
+            else:
+                break
+
+        if preserve_start_idx <= 0:
             return CompactPlan(source_messages=[], insert_seq=None)
 
         return CompactPlan(
