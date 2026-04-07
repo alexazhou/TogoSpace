@@ -182,14 +182,14 @@ class AgentTurnRunner:
                 stage=AgentHistoryStage.TOOL_RESULT,
                 tool_call_id=first_tc.id,
             )
-            return await self._run_tool(first_tc, output_item, room)
+            return await self._run_tool_to_item(first_tc, output_item, room)
 
         # TOOL_RESULT 待处理 → 恢复执行
         if stage == AgentHistoryStage.TOOL_RESULT and status == AgentHistoryStatus.INIT:
             tool_call = self._history.find_tool_call_by_id_in_unfinished_turn(last_item.tool_call_id)
             if tool_call is None:
                 raise RuntimeError(f"工具调用不存在: agent_id={self.gt_agent.id}, tool_call_id={last_item.tool_call_id}")
-            return await self._run_tool(tool_call, last_item, room)
+            return await self._run_tool_to_item(tool_call, last_item, room)
 
         raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, stage={stage}, status={status}")
 
@@ -278,7 +278,7 @@ class AgentTurnRunner:
             )
             raise
 
-    async def _run_tool(self, tool_call: llmApiUtil.OpenAIToolCall, output_item: GtAgentHistory, room: ChatRoom) -> str:
+    async def _run_tool_to_item(self, tool_call: llmApiUtil.OpenAIToolCall, output_item: GtAgentHistory, room: ChatRoom) -> str:
         """执行单个工具调用，结果写入 output_item。返回 'turn_done' 或 'continue'。"""
         context = ToolCallContext(
             agent_name=self.gt_agent.name,
@@ -299,9 +299,14 @@ class AgentTurnRunner:
         )
         return "turn_done" if turn_done else "continue"
 
-    async def _execute_tool(self) -> None:
-        """执行最后一条 assistant 消息中的所有 tool calls（AgentDriverHost 协议方法）。
-        通过 _current_room 获取房间上下文，由 run_chat_turn 在调用前设置。"""
+    # ─── AgentDriverHost 协议方法 ──────────────────────────
+
+    async def execute_pending_tools(self) -> None:
+        """执行最后一条 assistant 消息中的所有 tool calls。
+
+        AgentDriverHost 协议方法，通过 _current_room 获取房间上下文，
+        由 run_chat_turn 在调用前设置。
+        """
         room = self._current_room
         assert room is not None, "no current room context while executing tool"
 
@@ -314,9 +319,9 @@ class AgentTurnRunner:
                 stage=AgentHistoryStage.TOOL_RESULT,
                 tool_call_id=tool_call.id,
             )
-            await self._run_tool(tool_call, output_item, room)
+            await self._run_tool_to_item(tool_call, output_item, room)
 
-    # ─── AgentDriverHost 协议方法 ──────────────────────────
+    # ─── 内部辅助方法 ─────────────────────────────
 
     def _resolve_compact_config(self) -> tuple[str, configUtil.LlmServiceConfig, int, int]:
         """获取 compact 相关配置：(resolved_model, llm_config, trigger_tokens, hard_limit_tokens)。"""
