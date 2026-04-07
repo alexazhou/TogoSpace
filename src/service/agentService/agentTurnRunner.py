@@ -157,19 +157,21 @@ class AgentTurnRunner:
                     tool_call_id=pending_tc.id,
                 )
                 return "continue"
-            return await self._execute_infer(
-                await self._history.append_history_init_item(stage=AgentHistoryStage.INFER),
-                tools,
-            )
+            output_item = await self._history.append_history_init_item(stage=AgentHistoryStage.INFER)
+            assistant_message = await self._infer_to_item(output_item, tools)
+            tool_calls = assistant_message.tool_calls or []
+            return "no_tool_calls" if len(tool_calls) == 0 else "continue"
 
         # INPUT 或 INFER 失败/待处理 → 推理
         if stage == AgentHistoryStage.INPUT:
-            return await self._execute_infer(
-                await self._history.append_history_init_item(stage=AgentHistoryStage.INFER),
-                tools,
-            )
+            output_item = await self._history.append_history_init_item(stage=AgentHistoryStage.INFER)
+            assistant_message = await self._infer_to_item(output_item, tools)
+            tool_calls = assistant_message.tool_calls or []
+            return "no_tool_calls" if len(tool_calls) == 0 else "continue"
         if stage == AgentHistoryStage.INFER and status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED):
-            return await self._execute_infer(last_item, tools)
+            assistant_message = await self._infer_to_item(last_item, tools)
+            tool_calls = assistant_message.tool_calls or []
+            return "no_tool_calls" if len(tool_calls) == 0 else "continue"
 
         # INFER 成功 → 执行工具
         if stage == AgentHistoryStage.INFER and status == AgentHistoryStatus.SUCCESS:
@@ -191,18 +193,10 @@ class AgentTurnRunner:
 
         raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, stage={stage}, status={status}")
 
-    async def _execute_infer(self, output_item: GtAgentHistory, tools: list[llmApiUtil.OpenAITool]) -> str:
-        """执行推理，结果写入 output_item。返回 'no_tool_calls' 或 'continue'。"""
-        assistant_message = await self._infer_to_item(output_item, tools)
-        tool_calls = assistant_message.tool_calls or []
-        return "no_tool_calls" if len(tool_calls) == 0 else "continue"
-
     async def _infer_to_item(
         self,
         output_item: GtAgentHistory,
         tools: list[llmApiUtil.OpenAITool],
-        *,
-        _skip_compact: bool = False,
     ) -> llmApiUtil.OpenAIMessage:
         """执行推理，结果写入 output_item。"""
         history = self._history
@@ -218,8 +212,7 @@ class AgentTurnRunner:
             messages = history.build_infer_messages()
             estimated_tokens = compactPolicy.estimate_tokens(resolved_model, messages, self.system_prompt)
 
-            if not _skip_compact:
-                messages, estimated_tokens, pre_check_triggered = await self._pre_check_compact(messages, estimated_tokens)
+            messages, estimated_tokens, pre_check_triggered = await self._pre_check_compact(messages, estimated_tokens)
 
             ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools)
             infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
@@ -228,8 +221,7 @@ class AgentTurnRunner:
             if infer_result.ok is False or infer_result.response is None:
                 error = infer_result.error
                 if (
-                    not _skip_compact
-                    and error is not None
+                    error is not None
                     and compactPolicy.is_context_overflow_error(error)
                     and not pre_check_triggered
                 ):
