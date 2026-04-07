@@ -15,7 +15,7 @@ from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreRoom
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
-from model.dbModel.historyUsage import HistoryUsage
+from model.dbModel.historyUsage import CompactStage, HistoryUsage
 from service import llmService, roomService
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService import compact, promptBuilder
@@ -205,15 +205,23 @@ class AgentTurnRunner:
 
         resolved_model, _, trigger_tokens, hard_limit_tokens = self._resolve_compact_config()
         estimated_tokens = 0
-        pre_check_triggered = False
+        compact_stage: CompactStage = "none"
         overflow_retry = False
         usage: llmApiUtil.OpenAIUsage | None = None
+        assistant_committed = False
 
         try:
             messages = history.build_infer_messages()
             estimated_tokens = compact.estimate_tokens(resolved_model, messages, self.system_prompt)
 
-            messages, estimated_tokens, pre_check_triggered = await self._pre_check_compact(messages, estimated_tokens)
+            messages, estimated_tokens, pre_compact_triggered = await self._check_compact(
+                messages,
+                trigger_prompt_tokens=estimated_tokens,
+                estimated_tokens=estimated_tokens,
+                check_stage="pre-check",
+            )
+            if pre_compact_triggered:
+                compact_stage = "pre"
 
             ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools)
             infer_result: llmService.InferResult = await llmService.infer(self.gt_agent.model, ctx)
@@ -224,7 +232,7 @@ class AgentTurnRunner:
                 if (
                     error is not None
                     and compact.is_context_overflow_error(error)
-                    and not pre_check_triggered
+                    and compact_stage != "pre"
                 ):
                     logger.info(f"overflow retry 触发: {self.gt_agent.name}(agent_id={self.gt_agent.id}), error={infer_result.error_message}")
                     overflow_retry = True
@@ -247,13 +255,12 @@ class AgentTurnRunner:
 
             usage = infer_result.usage
             assistant_message = infer_result.response.choices[0].message
-
             usage_data = self._build_usage(
                 estimated_prompt_tokens=estimated_tokens,
                 prompt_tokens=usage.prompt_tokens if usage else None,
                 completion_tokens=usage.completion_tokens if usage else None,
                 total_tokens=usage.total_tokens if usage else None,
-                pre_check_triggered=pre_check_triggered,
+                compact_stage=compact_stage,
                 overflow_retry=overflow_retry,
             )
             await history.finalize_history_item(
@@ -262,14 +269,56 @@ class AgentTurnRunner:
                 status=AgentHistoryStatus.SUCCESS,
                 usage=usage_data,
             )
+            assistant_committed = True
+
+            post_check_messages = history.build_infer_messages()
+            _, _, post_check_triggered = await self._check_compact(
+                post_check_messages,
+                trigger_prompt_tokens=usage.prompt_tokens if usage and usage.prompt_tokens is not None else estimated_tokens,
+                estimated_tokens=estimated_tokens,
+                check_stage="post-check",
+            )
+            if post_check_triggered and compact_stage == "none":
+                compact_stage = "post"
+                await history.finalize_history_item(
+                    history_id=output_item.id,
+                    message=None,
+                    status=AgentHistoryStatus.SUCCESS,
+                    usage=self._build_usage(
+                        estimated_prompt_tokens=estimated_tokens,
+                        prompt_tokens=usage.prompt_tokens if usage else None,
+                        completion_tokens=usage.completion_tokens if usage else None,
+                        total_tokens=usage.total_tokens if usage else None,
+                        compact_stage=compact_stage,
+                        overflow_retry=overflow_retry,
+                    ),
+                )
             return assistant_message
         except Exception as e:
+            if assistant_committed:
+                if compact_stage == "none" and usage and usage.prompt_tokens is not None and usage.prompt_tokens >= trigger_tokens:
+                    compact_stage = "post"
+                    await history.finalize_history_item(
+                        history_id=output_item.id,
+                        message=None,
+                        status=AgentHistoryStatus.SUCCESS,
+                        usage=self._build_usage(
+                            estimated_prompt_tokens=estimated_tokens,
+                            prompt_tokens=usage.prompt_tokens,
+                            completion_tokens=usage.completion_tokens,
+                            total_tokens=usage.total_tokens,
+                            compact_stage=compact_stage,
+                            overflow_retry=overflow_retry,
+                        ),
+                    )
+                raise
+
             usage_data = self._build_usage(
                 estimated_prompt_tokens=estimated_tokens or None,
                 prompt_tokens=usage.prompt_tokens if usage else None,
                 completion_tokens=usage.completion_tokens if usage else None,
                 total_tokens=usage.total_tokens if usage else None,
-                pre_check_triggered=pre_check_triggered,
+                compact_stage=compact_stage,
                 overflow_retry=overflow_retry,
             )
             await history.finalize_history_item(
@@ -341,7 +390,7 @@ class AgentTurnRunner:
         prompt_tokens: int | None = None,
         completion_tokens: int | None = None,
         total_tokens: int | None = None,
-        pre_check_triggered: bool = False,
+        compact_stage: CompactStage = "none",
         overflow_retry: bool = False,
     ) -> HistoryUsage:
         return HistoryUsage(
@@ -349,32 +398,42 @@ class AgentTurnRunner:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
-            pre_check_triggered=pre_check_triggered,
+            compact_stage=compact_stage,
             overflow_retry=overflow_retry,
         )
 
-    async def _pre_check_compact(
+    async def _check_compact(
         self,
         messages: list[llmApiUtil.OpenAIMessage],
+        *,
+        trigger_prompt_tokens: int,
         estimated_tokens: int,
+        check_stage: str,
     ) -> tuple[list[llmApiUtil.OpenAIMessage], int, bool]:
-        """Pre-check：若估算 token 超阈值则执行 compact。
+        """在指定检查阶段检测 prompt token，必要时执行 compact。
 
-        Returns: (messages, estimated_tokens, pre_check_triggered)
+        Returns: (messages, estimated_tokens, compact_triggered)
         """
         resolved_model, _, trigger_tokens, hard_limit_tokens = self._resolve_compact_config()
-        if estimated_tokens < trigger_tokens:
+        if trigger_prompt_tokens < trigger_tokens:
             return messages, estimated_tokens, False
 
-        logger.info(f"pre-check compact 触发: {self.gt_agent.name}(agent_id={self.gt_agent.id}), estimated={estimated_tokens}, trigger={trigger_tokens}")
+        logger.info(
+            f"{check_stage} compact 触发: {self.gt_agent.name}(agent_id={self.gt_agent.id}), "
+            f"prompt_tokens={trigger_prompt_tokens}, trigger={trigger_tokens}"
+        )
         compact_ok = await self._execute_compact()
         if not compact_ok:
-            logger.warning(f"pre-check compact 失败，跳过压缩继续推理: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
-            return messages, estimated_tokens, False
+            raise RuntimeError(f"{check_stage} compact 失败: agent_id={self.gt_agent.id}")
+
         messages = self._history.build_infer_messages()
         estimated_tokens = compact.estimate_tokens(resolved_model, messages, self.system_prompt)
         if estimated_tokens >= hard_limit_tokens:
-            raise RuntimeError(f"compact 后仍超限: agent_id={self.gt_agent.id}, estimated={estimated_tokens}, hard_limit={hard_limit_tokens}")
+            raise RuntimeError(
+                f"{check_stage} compact 后仍超限: agent_id={self.gt_agent.id}, "
+                f"estimated={estimated_tokens}, hard_limit={hard_limit_tokens}"
+            )
+
         return messages, estimated_tokens, True
 
     async def _execute_compact(self) -> bool:
