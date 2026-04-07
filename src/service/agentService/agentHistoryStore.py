@@ -239,19 +239,24 @@ class AgentHistoryStore:
             items = items[:-1]
         return [item.openai_message for item in items]
 
-    def build_compact_plan(self) -> CompactPlan:
+    def build_compact_plan(self) -> CompactPlan | None:
         """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。
 
         压缩区间选取逻辑：
         1. 从后往前找最后一条 USER 消息
-        2. 往前跳过连续的 TOOL 消息（保证 tool call 链完整）
+        2. 若 USER 前面有连续的 TOOL 消息（tool call 结果），往前跳过它们以保证 tool call 链完整
         3. 压缩该位置之前的所有消息
         4. COMPACT_SUMMARY 插入到该位置
+
+        TOOL 跳过逻辑适用场景：
+        - 当 USER 消息前面有 TOOL 消息时，说明这个 USER 是在 tool 执行完成后的新输入
+        - 这些 TOOL 消息是更早 ASSISTANT 的 tool_call 执行结果，必须与其配对保留
+        - 若 USER 前面没有 TOOL（如 ASSISTANT 无 tool_calls、另一个 USER），则无需跳过
 
         示例（压缩前）：
             [USER: u1, ASSISTANT: a1(tool_call), TOOL: r1, TOOL: r2, USER: u2]
                                                         ^-- TOOL     ^-- USER
-            跳过 TOOL r1, r2 后，preserve_start_idx 指向 ASSISTANT a1
+            USER u2 前面有 TOOL r1, r2，跳过它们后，preserve_start_idx 指向 ASSISTANT a1
 
         压缩后：
             [COMPACT_SUMMARY, ASSISTANT: a1, TOOL: r1, TOOL: r2, USER: u2]
@@ -266,7 +271,7 @@ class AgentHistoryStore:
             items = items[:-1]
 
         if not items:
-            return CompactPlan(source_messages=[], insert_seq=None)
+            return None
 
         # 找最后一条 USER 消息
         last_user_idx: int | None = None
@@ -277,9 +282,9 @@ class AgentHistoryStore:
 
         if last_user_idx is None:
             # 无 USER 消息，保留全部
-            return CompactPlan(source_messages=[], insert_seq=None)
+            return None
 
-        # 往前跳过连续的 TOOL 消息
+        # 若 USER 前面有连续的 TOOL 消息，往前跳过以保证 tool call 链完整
         preserve_start_idx = last_user_idx
         for idx in range(last_user_idx - 1, -1, -1):
             if items[idx].role == llmApiUtil.OpenaiApiRole.TOOL:
@@ -288,7 +293,7 @@ class AgentHistoryStore:
                 break
 
         if preserve_start_idx <= 0:
-            return CompactPlan(source_messages=[], insert_seq=None)
+            return None
 
         return CompactPlan(
             source_messages=[item.openai_message for item in items[:preserve_start_idx]],

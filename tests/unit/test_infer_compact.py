@@ -274,7 +274,7 @@ async def test_infer_usage_recorded_in_finalize():
 @pytest.mark.asyncio
 async def test_execute_compact_skips_when_no_source():
     runner, history = _make_runner_and_history()
-    history.build_compact_plan.return_value = CompactPlan(source_messages=[], insert_seq=None)
+    history.build_compact_plan.return_value = None
 
     with patch(_CONFIG_PATCH, return_value=_mock_config()):
         result = await runner._execute_compact()
