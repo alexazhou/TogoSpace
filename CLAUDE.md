@@ -111,6 +111,20 @@ frontend/
 
 - **代码提交**：开发完成后不要自动提交代码。统一等待用户明确要求「提交」或「commit」后再执行 git commit/push。
 
+## Compact 约定（当前实现）
+
+- 相关实现位于 `src/service/agentService/agentTurnRunner.py`、`src/service/agentService/compact.py`、`src/service/agentService/agentHistoryStore.py`、`src/model/dbModel/historyUsage.py`、`src/service/persistenceService.py`。
+- `_check_compact(...)` 会在两处触发：
+  - 推理请求发起前，基于估算 token 执行 `pre-check`
+  - assistant 响应成功写入 history 之后，基于实际 `usage.prompt_tokens` 优先执行 `post-check`
+- `pre-check`、`post-check`、overflow retry 中的 compact 一旦失败，当前实现都会直接抛异常；不要再按“失败后继续推理”的旧语义修改代码或补测试。
+- `agent_histories.usage` 中用 `compact_stage` 记录本轮 compact 阶段，取值为 `none`、`pre`、`post`：
+  - `none`：本轮未触发 compact
+  - `pre`：请求发出前触发了 compact
+  - `post`：assistant 已成功写入 history，随后触发了 post-check compact
+- post-check 发生在 assistant 已提交之后，因此 post-check compact 失败时，history 中会保留本次 assistant 的 `SUCCESS` 记录，但调用栈仍会继续抛异常给上层。
+- runtime 内存窗口与启动恢复窗口都以最新 `COMPACT_SUMMARY` 为边界：只保留该摘要及其之后的消息。
+
 ## 启动与停止
 
 ### 后端
@@ -237,6 +251,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 - [docs/tech/agent_driver_vs_subclass.md](docs/tech/agent_driver_vs_subclass.md)
 - [docs/tech/agent_scheduling_logic.md](docs/tech/agent_scheduling_logic.md)
 - [docs/tech/agent_task_consumer_plan_a.md](docs/tech/agent_task_consumer_plan_a.md)
+- [docs/tech/token_compaction.md](docs/tech/token_compaction.md)
 - [docs/tech/task_lifecycle.md](docs/tech/task_lifecycle.md)
 - [docs/tech/turn_runner_as_driver_host.md](docs/tech/turn_runner_as_driver_host.md)
 - [docs/tech/service_dependencies.md](docs/tech/service_dependencies.md)
