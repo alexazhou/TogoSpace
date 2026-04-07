@@ -69,7 +69,7 @@ class AgentTurnRunner:
         try:
             if self.driver.host_managed_turn_loop:
                 assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
-                if not self._history.has_unfinished_turn():
+                if not self._history.has_active_turn():
                     synced_count = await self.pull_room_messages_to_history(room)
                     if synced_count == 0 and room.state != RoomState.INIT:
                         logger.info(f"无新消息，自动跳过本轮: {self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}")
@@ -150,7 +150,7 @@ class AgentTurnRunner:
 
         # TOOL_RESULT 成功且有待处理工具 → 插入 INIT record，下一轮执行
         if stage == AgentHistoryStage.TOOL_RESULT and status == AgentHistoryStatus.SUCCESS:
-            pending_tc = self._history.get_first_pending_tool_call_in_unfinished_turn()
+            pending_tc = self._history.get_first_pending_tool_call()
             if pending_tc is not None:
                 await self._history.append_history_init_item(
                     stage=AgentHistoryStage.TOOL_RESULT,
@@ -186,7 +186,7 @@ class AgentTurnRunner:
 
         # TOOL_RESULT 待处理 → 恢复执行
         if stage == AgentHistoryStage.TOOL_RESULT and status == AgentHistoryStatus.INIT:
-            tool_call = self._history.find_tool_call_by_id_in_unfinished_turn(last_item.tool_call_id)
+            tool_call = self._history.find_tool_call_by_id(last_item.tool_call_id)
             if tool_call is None:
                 raise RuntimeError(f"工具调用不存在: agent_id={self.gt_agent.id}, tool_call_id={last_item.tool_call_id}")
             return await self._run_tool_to_item(tool_call, last_item, room)

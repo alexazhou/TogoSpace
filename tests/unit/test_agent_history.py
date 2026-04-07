@@ -144,7 +144,7 @@ def test_agent_history_replace_and_dump():
     assert dumped[1].content == "new2"
 
 
-def test_agent_history_find_tool_call_by_id_in_unfinished_turn():
+def test_agent_history_find_tool_call_by_id():
     tool_call = llmApiUtil.OpenAIToolCall(
         id="call_123",
         function={"name": "send_chat_msg", "arguments": '{"msg": "hello"}'},
@@ -168,13 +168,13 @@ def test_agent_history_find_tool_call_by_id_in_unfinished_turn():
         ],
     )
 
-    found = history.find_tool_call_by_id_in_unfinished_turn("call_123")
+    found = history.find_tool_call_by_id("call_123")
     assert found is not None
     assert found.id == "call_123"
     assert found.function["name"] == "send_chat_msg"
 
-    assert history.find_tool_call_by_id_in_unfinished_turn("nonexistent") is None
-    assert history.find_tool_call_by_id_in_unfinished_turn("") is None
+    assert history.find_tool_call_by_id("nonexistent") is None
+    assert history.find_tool_call_by_id("") is None
 
 
 def test_agent_history_unfinished_turn_with_items():
@@ -200,8 +200,8 @@ def test_agent_history_unfinished_turn_with_items():
         ],
     )
 
-    assert history.has_unfinished_turn() is True
-    assert history.get_unfinished_turn_start_index() == 3
+    assert history.has_active_turn() is True
+    assert history.get_turn_start_index() == 3
 
 
 # ─── Compact 相关方法 ────────────────────────────────────
