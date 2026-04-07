@@ -109,7 +109,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         await history.finalize_history_item(infer_item.id, assistant_msg, AgentHistoryStatus.SUCCESS)
 
         assert len(history) == 2
-        messages = history.export_openai_message_list()
+        messages = [item.openai_message for item in history]
         assert len(messages) == 2
         assert messages[0].content == "user input"
         assert messages[1].content == "assistant response"
@@ -198,7 +198,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         )
 
         assert history.has_active_turn() is True
-        assert history.get_turn_start_index() == 0
+        assert history.get_current_turn_start_index() == 0
 
         await history.append_history_message(
             llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "done"),
@@ -206,4 +206,4 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         )
 
         assert history.has_active_turn() is False
-        assert history.get_turn_start_index() is None
+        assert history.get_current_turn_start_index() is None
