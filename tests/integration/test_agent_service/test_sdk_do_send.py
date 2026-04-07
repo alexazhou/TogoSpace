@@ -314,13 +314,12 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         first = promptBuilder.format_room_message("lobby", "SYSTEM", "房间初始化")
         second = promptBuilder.format_room_message("lobby", "bob", "hello alice")
         turn_prompt = promptBuilder.build_turn_begin_prompt("lobby", [first, second])
-        agent.inject_history_messages([
-            GtAgentHistory.from_openai_message(
-                agent.gt_agent.id,
-                0,
-                llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt),
-            ),
-        ])
+        item = GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt),
+        )
+        item.agent_id = agent.gt_agent.id
+        item.seq = 0
+        agent.inject_history_messages([item])
 
         with pytest.raises(RuntimeError, match="SDK 达到最大尝试次数但未完成行动"):
             await driver.run_chat_turn(task, synced_count=1)

@@ -29,24 +29,32 @@ class GtAgentHistory(DbModelBase):
         )
 
     @classmethod
-    def from_openai_message(
+    def build(
         cls,
-        agent_id: int,
-        seq: int,
         message: llmApiUtil.OpenAIMessage,
+        *,
         stage: AgentHistoryStage | None = None,
         status: AgentHistoryStatus | None = None,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
+        usage: HistoryUsage | None = None,
     ) -> "GtAgentHistory":
+        """构建 GtAgentHistory 对象。
+
+        agent_id 和 seq 由 Store 层填充。
+
+        自动推断规则：
+        - stage: 若未指定，根据 message.role 推断（USER/SYSTEM→INPUT, ASSISTANT→INFER, TOOL→TOOL_RESULT）
+        - status: 若未指定，默认 SUCCESS
+        - tags: 若未指定，默认空列表
+        """
         return cls(
-            agent_id=agent_id,
-            seq=seq,
             message_json=message.model_dump(mode="json", exclude_none=True),
             stage=stage or cls.infer_stage_from_message(message),
             status=status or AgentHistoryStatus.SUCCESS,
             error_message=error_message,
             tags=[] if tags is None else list(tags),
+            usage=usage,
         )
 
     @property

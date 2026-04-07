@@ -93,13 +93,12 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await room.activate_scheduling()
 
         alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
-        alice.inject_history_messages([
-            GtAgentHistory.from_openai_message(
-                alice.gt_agent.id,
-                0,
-                OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset test turn state"),
-            )
-        ])
+        item = GtAgentHistory.build(
+            OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset test turn state"),
+        )
+        item.agent_id = alice.gt_agent.id
+        item.seq = 0
+        alice.inject_history_messages([item])
         call_seq = {
             "alice": [
                 {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "manual_turn", "msg": "hello"}}]},
@@ -138,13 +137,12 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = roomService.get_room_by_key(f"turn_checker_room@{TEAM}")
 
         alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
-        alice.inject_history_messages([
-            GtAgentHistory.from_openai_message(
-                alice.gt_agent.id,
-                0,
-                OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset turn checker history"),
-            )
-        ])
+        item = GtAgentHistory.build(
+            OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset turn checker history"),
+        )
+        item.agent_id = alice.gt_agent.id
+        item.seq = 0
+        alice.inject_history_messages([item])
         resps = [
             {"content": "我直接回复"},
             {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "turn_checker_room", "msg": "最终消息"}}]},

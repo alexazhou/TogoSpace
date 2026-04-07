@@ -4,16 +4,24 @@ from service import persistenceService
 from util import llmApiUtil
 
 
+def _make_item(message: llmApiUtil.OpenAIMessage, *, seq: int = 0, tags=None) -> GtAgentHistory:
+    """测试辅助函数。"""
+    item = GtAgentHistory.build(message, tags=tags)
+    item.agent_id = 1
+    item.seq = seq
+    return item
+
+
 def test_trim_to_latest_compact_keeps_compact_suffix():
     items = [
-        GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "old1")),
-        GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "old2")),
-        GtAgentHistory.from_openai_message(
-            1, 2,
+        _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "old1"), seq=0),
+        _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "old2"), seq=1),
+        _make_item(
             llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact summary"),
+            seq=2,
             tags=[AgentHistoryTag.COMPACT_SUMMARY],
         ),
-        GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep")),
+        _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep"), seq=3),
     ]
 
     trimmed = persistenceService._trim_to_latest_compact(items)
