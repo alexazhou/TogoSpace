@@ -242,23 +242,21 @@ class AgentHistoryStore:
         """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。
 
         压缩区间选取逻辑：
-        1. 从后往前找最后一条 USER 消息
-        2. 若 USER 前面有连续的 TOOL 消息（tool call 结果），往前跳过它们以保证 tool call 链完整
-        3. 压缩该位置之前的所有消息
-        4. COMPACT_SUMMARY 插入到该位置
+        1. 检查末尾是否为 USER 消息
+        2. 若是，跳过连续的 USER 消息（保留最新的用户输入），压缩剩余部分
+        3. 若不是，压缩全部消息
 
-        TOOL 跳过逻辑适用场景：
-        - 当 USER 消息前面有 TOOL 消息时，说明这个 USER 是在 tool 执行完成后的新输入
-        - 这些 TOOL 消息是更早 ASSISTANT 的 tool_call 执行结果，必须与其配对保留
-        - 若 USER 前面没有 TOOL（如 ASSISTANT 无 tool_calls、另一个 USER），则无需跳过
+        示例：
+            [USER: u1, ASSISTANT: a1, USER: u2]
+                                   ^-- 跳过 u2
+            压缩 [USER: u1, ASSISTANT: a1]
 
-        示例（压缩前）：
-            [USER: u1, ASSISTANT: a1(tool_call), TOOL: r1, TOOL: r2, USER: u2]
-                                                        ^-- TOOL     ^-- USER
-            USER u2 前面有 TOOL r1, r2，跳过它们后，preserve_start_idx 指向 ASSISTANT a1
+            [USER: u1, ASSISTANT: a1(tool_call), TOOL: r1, USER: u2]
+                                                          ^-- 跳过 u2
+            压缩 [USER: u1, ASSISTANT: a1(tool_call), TOOL: r1]
+            tool call 链自然完整
 
-        压缩后：
-            [COMPACT_SUMMARY, ASSISTANT: a1, TOOL: r1, TOOL: r2, USER: u2]
+            [USER: u1, ASSISTANT: a1] → 末尾不是 USER，压缩全部
 
         返回：
             - source_messages: 待压缩的消息列表
@@ -272,26 +270,23 @@ class AgentHistoryStore:
         if not items:
             return None
 
-        # 找最后一条 USER 消息
-        last_user_idx: int | None = None
+        # 检查末尾是否为 USER
+        if items[-1].role != llmApiUtil.OpenaiApiRole.USER:
+            # 末尾不是 USER，压缩全部
+            return CompactPlan(
+                source_messages=[item.openai_message for item in items],
+                insert_seq=items[0].seq,
+            )
+
+        # 从末尾跳过连续的 USER 消息
+        preserve_start_idx = len(items) - 1
         for idx in range(len(items) - 1, -1, -1):
             if items[idx].role == llmApiUtil.OpenaiApiRole.USER:
-                last_user_idx = idx
-                break
-
-        if last_user_idx is None:
-            # 无 USER 消息，保留全部
-            return None
-
-        # 若 USER 前面有连续的 TOOL 消息，往前跳过以保证 tool call 链完整
-        preserve_start_idx = last_user_idx
-        for idx in range(last_user_idx - 1, -1, -1):
-            if items[idx].role == llmApiUtil.OpenaiApiRole.TOOL:
                 preserve_start_idx = idx
             else:
                 break
 
-        if preserve_start_idx <= 0:
+        if preserve_start_idx == 0:
             return None
 
         return CompactPlan(
@@ -322,8 +317,7 @@ class AgentHistoryStore:
         """内存裁剪：只保留 COMPACT_SUMMARY 及其之后的消息。仅由 insert_compact_summary 调用。"""
         for idx, item in enumerate(self._items):
             if AgentHistoryTag.COMPACT_SUMMARY in item.tags:
-                if idx > 0:
-                    self._items = self._items[idx:]
+                self._items = self._items[idx:]
                 return
 
     def _assert_compact_invariant(self) -> None:
