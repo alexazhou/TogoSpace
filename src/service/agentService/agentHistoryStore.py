@@ -240,12 +240,29 @@ class AgentHistoryStore:
         return [item.openai_message for item in items]
 
     def build_compact_plan(self) -> CompactPlan:
-        """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。"""
+        """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。
+
+        压缩区间选取逻辑：
+        1. 从后往前找最后一条 USER 消息作为保留起点
+        2. 保留该 USER 消息及其之后的所有消息（通常是新一轮对话的开始）
+        3. 压缩该 USER 消息之前的所有消息
+        4. COMPACT_SUMMARY 插入到保留起点的位置
+
+        示例（压缩前）：
+            [USER: u1, ASSISTANT: a1, USER: u2, ASSISTANT: a2]
+                                            ^-- preserve_start_idx=2
+        压缩后：
+            [COMPACT_SUMMARY, USER: u2, ASSISTANT: a2]
+
+        返回：
+            - source_messages: 待压缩的消息列表
+            - insert_seq: COMPACT_SUMMARY 的插入位置（即保留起点的 seq）
+        """
         self._assert_compact_invariant()
         items = list(self._items)
         if self.get_pending_infer_item() is not None:
             items = items[:-1]
-        # 找最后一条 USER 消息作为保留起点；无 USER 消息时保留最后一条
+        # 找最后一条 USER 消息作为保留起点
         preserve_start_idx: int | None = None
         for idx in range(len(items) - 1, -1, -1):
             if items[idx].role == llmApiUtil.OpenaiApiRole.USER:
