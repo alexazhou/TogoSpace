@@ -200,7 +200,10 @@ class AgentTurnRunner:
     ) -> llmApiUtil.OpenAIMessage:
         """执行推理，结果写入 output_item。"""
         history = self._history
-        history.assert_infer_ready(f"agent_id={self.gt_agent.id}")
+        assert history.is_infer_ready(), (
+            f"[agent_id={self.gt_agent.id}] infer 前历史状态非法，"
+            f"末尾角色: {history._last_role() or 'empty'}"
+        )
 
         resolved_model, _, trigger_tokens, hard_limit_tokens = self._resolve_compact_config()
         estimated_tokens = 0

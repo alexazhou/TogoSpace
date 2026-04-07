@@ -13,7 +13,7 @@ def test_agent_history_last_role_returns_none_for_empty_history():
     history = AgentHistoryStore(agent_id=1)
 
     assert history.last() is None
-    assert history.last_role() is None
+    assert history._last_role() is None
 
 
 def test_agent_history_openai_message_round_trips():

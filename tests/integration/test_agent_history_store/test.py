@@ -136,7 +136,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         assert history.last() is not None
         assert history.last().seq == item.seq
 
-    async def test_assert_infer_ready_accepts_user_tool_and_system(self):
+    async def test_is_infer_ready_accepts_user_tool_and_system(self):
         await self._reset_table()
         allowed_roles = [
             OpenaiApiRole.USER,
@@ -152,9 +152,9 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
                 message = llmApiUtil.OpenAIMessage.tool_result("tool_1", '{"success": true}')
 
             await history.append_history_message(message)
-            history.assert_infer_ready("test_agent")
+            assert history.is_infer_ready() is True
 
-    async def test_assert_infer_ready_rejects_assistant_tail(self):
+    async def test_is_infer_ready_rejects_assistant_tail(self):
         await self._reset_table()
         history = AgentHistoryStore(agent_id=20)
 
@@ -164,10 +164,9 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
             status=AgentHistoryStatus.SUCCESS,
         )
 
-        with pytest.raises(AssertionError, match="assistant"):
-            history.assert_infer_ready("test_agent")
+        assert history.is_infer_ready() is False
 
-    async def test_assert_infer_ready_accepts_failed_or_init_infer_tail(self):
+    async def test_is_infer_ready_accepts_failed_or_init_infer_tail(self):
         await GtAgentHistory.delete().aio_execute()
         history_failed = AgentHistoryStore(agent_id=21)
         await history_failed.append_history_message(
@@ -176,12 +175,12 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
             status=AgentHistoryStatus.FAILED,
             error_message="mock error",
         )
-        history_failed.assert_infer_ready("test_agent")
+        assert history_failed.is_infer_ready() is True
 
         await GtAgentHistory.delete().aio_execute()
         history_init = AgentHistoryStore(agent_id=22)
-        init_item = await history_init.append_history_init_item(stage=AgentHistoryStage.INFER)
-        history_init.assert_infer_ready("test_agent")
+        await history_init.append_history_init_item(stage=AgentHistoryStage.INFER)
+        assert history_init.is_infer_ready() is True
 
     async def test_unfinished_turn(self):
         await self._reset_table()
