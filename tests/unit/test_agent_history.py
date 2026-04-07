@@ -123,7 +123,7 @@ def test_agent_history_getitem():
     assert history[-1].content == "a1"
 
 
-def test_agent_history_replace_and_dump():
+def test_agent_history_replace():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
@@ -138,10 +138,9 @@ def test_agent_history_replace_and_dump():
     history.replace(new_items)
 
     assert len(history) == 2
-    dumped = history.dump()
-    assert len(dumped) == 2
-    assert dumped[0].content == "new1"
-    assert dumped[1].content == "new2"
+    items = list(history)
+    assert items[0].content == "new1"
+    assert items[1].content == "new2"
 
 
 def test_agent_history_find_tool_call_by_id():

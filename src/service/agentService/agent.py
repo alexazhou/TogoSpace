@@ -61,9 +61,6 @@ class Agent:
         await self.task_consumer._turn_runner.driver.shutdown()
         self.task_consumer._turn_runner.tool_registry.clear()
 
-    def dump_history_messages(self) -> List[GtAgentHistory]:
-        return self.task_consumer._turn_runner._history.dump()
-
     def inject_history_messages(self, items: List[GtAgentHistory]) -> None:
         self.task_consumer._turn_runner._history.replace(items)
 
