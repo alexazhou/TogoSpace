@@ -147,7 +147,7 @@ async def test_infer_pre_check_triggers_compact():
     assert msg.content == "压缩后的回答"
     history.insert_compact_summary.assert_awaited_once()
     usage_data = history.finalize_history_item.call_args[1]["usage"]
-    assert usage_data.pre_check_triggered is True
+    assert usage_data.compact_stage == "pre"
 
 
 @pytest.mark.asyncio
@@ -163,6 +163,73 @@ async def test_infer_pre_check_still_over_after_compact():
     ):
         with pytest.raises(RuntimeError, match="compact 后仍超限"):
             await runner._infer_to_item(output_item, tools=[])
+
+
+@pytest.mark.asyncio
+async def test_infer_pre_check_compact_failure_raises():
+    runner, history = _make_runner_and_history()
+    output_item = _make_history_item()
+    history.build_compact_plan.return_value = None
+
+    with (
+        patch(_CONFIG_PATCH, return_value=_mock_config()),
+        patch(_ESTIMATE_PATCH, return_value=TRIGGER_TOKENS + 100),
+    ):
+        with pytest.raises(RuntimeError, match="pre-check compact 失败"):
+            await runner._infer_to_item(output_item, tools=[])
+
+    history.insert_compact_summary.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_infer_post_check_triggers_compact():
+    runner, history = _make_runner_and_history()
+    output_item = _make_history_item()
+    usage = _make_usage(prompt=TRIGGER_TOKENS + 100, completion=200, total=TRIGGER_TOKENS + 300)
+    main_resp = _make_mock_response(content="正常回答", usage=usage)
+    compact_resp = _make_mock_response(content="摘要")
+
+    with (
+        patch(_CONFIG_PATCH, return_value=_mock_config()),
+        patch(_INFER_PATCH, AsyncMock(side_effect=[
+            llmService.InferResult.success(main_resp),
+            llmService.InferResult.success(compact_resp),
+        ])),
+        patch(_ESTIMATE_PATCH, side_effect=[5000, 4000]),
+    ):
+        msg = await runner._infer_to_item(output_item, tools=[])
+
+    assert msg.content == "正常回答"
+    history.insert_compact_summary.assert_awaited_once()
+    usage_data = history.finalize_history_item.call_args[1]["usage"]
+    assert usage_data.compact_stage == "post"
+    assert usage_data.prompt_tokens == TRIGGER_TOKENS + 100
+
+
+@pytest.mark.asyncio
+async def test_infer_post_check_compact_failure_raises():
+    runner, history = _make_runner_and_history()
+    output_item = _make_history_item()
+    usage = _make_usage(prompt=TRIGGER_TOKENS + 100, completion=200, total=TRIGGER_TOKENS + 300)
+    main_resp = _make_mock_response(content="正常回答", usage=usage)
+    history.build_compact_plan.return_value = None
+
+    with (
+        patch(_CONFIG_PATCH, return_value=_mock_config()),
+        patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(main_resp))),
+        patch(_ESTIMATE_PATCH, return_value=5000),
+    ):
+        with pytest.raises(RuntimeError, match="post-check compact 失败"):
+            await runner._infer_to_item(output_item, tools=[])
+
+    history.insert_compact_summary.assert_not_awaited()
+    assert history.finalize_history_item.await_count == 2
+    first_call = history.finalize_history_item.await_args_list[0]
+    second_call = history.finalize_history_item.await_args_list[1]
+    assert first_call.kwargs["status"] == AgentHistoryStatus.SUCCESS
+    assert first_call.kwargs["usage"].compact_stage == "none"
+    assert second_call.kwargs["status"] == AgentHistoryStatus.SUCCESS
+    assert second_call.kwargs["usage"].compact_stage == "post"
 
 
 @pytest.mark.asyncio
@@ -266,6 +333,7 @@ async def test_infer_usage_recorded_in_finalize():
 
     usage_data = history.finalize_history_item.call_args[1]["usage"]
     assert usage_data.estimated_prompt_tokens == 500
+    assert usage_data.compact_stage == "none"
     assert usage_data.prompt_tokens == 1000
     assert usage_data.completion_tokens == 200
     assert usage_data.total_tokens == 1200

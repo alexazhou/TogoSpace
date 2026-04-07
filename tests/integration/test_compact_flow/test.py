@@ -109,7 +109,7 @@ class TestCompactFlow(ServiceTestCase):
         估算 token 序列：
         1. _infer_to_item 开始时估算 → 超过 trigger → 触发 _execute_compact
         2. _execute_compact 内部不调 estimate（直接 llmService.infer）
-        3. compact 完成后 _pre_check_compact 再次估算 → 低于 trigger → 通过
+        3. compact 完成后 _check_compact 再次估算 → 低于 trigger → 通过
         4. 主流程 _infer_to_item 发起正常 LLM 请求
         """
         history = await self._reset_and_build_history(agent_id=99, turns=5)
