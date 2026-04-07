@@ -13,28 +13,15 @@ from util import llmApiUtil
 class CompactPlan:
     """Compact 边界分析结果。
 
-    用于描述一次 compact 需要压缩哪些消息，以及 `COMPACT_CMD`
+    用于描述一次 compact 需要压缩哪些消息，以及 `COMPACT_SUMMARY`
     应该插入到哪个 `seq` 位置。
     """
 
     #: 需要送给 compact 模型进行总结的历史消息。
     source_messages: list[llmApiUtil.OpenAIMessage]
-    #: `COMPACT_CMD` 需要插入的目标 `seq`；`None` 表示当前没有可执行的 compact 计划。
+    #: `COMPACT_SUMMARY` 需要插入的目标 `seq`；`None` 表示当前没有可执行的 compact 计划。
     insert_seq: int | None
 
-
-@dataclass
-class RuntimeWindow:
-    """当前运行时可见的历史窗口。
-
-    该窗口已经排除了最新一次 compact 之前失效的历史，可直接作为
-    infer/compact 视图计算的基础。
-    """
-
-    #: 当前运行时窗口在 `self._items` 中的起始下标；`None` 表示窗口为空。
-    start_index: int | None
-    #: 当前运行时仍然有效、可参与后续推理或 compact 计算的 history 项。
-    items: list[GtAgentHistory]
 
 
 class AgentHistoryStore:
@@ -278,72 +265,51 @@ class AgentHistoryStore:
 
     def build_infer_messages(self) -> list[llmApiUtil.OpenAIMessage]:
         """构造本次 _infer() 真正发给模型的消息列表。"""
-        runtime_window = self._build_runtime_window(exclude_pending_infer=True)
-        return [item.openai_message for item in runtime_window.items]
+        return [item.openai_message for item in self._get_window_items(exclude_pending_infer=True)]
 
     def build_compact_plan(self) -> CompactPlan:
-        """计算本次 compact 的压缩源与插入点。"""
-        runtime_window = self._build_runtime_window(exclude_pending_infer=True)
-        preserve_start_idx = self._find_compact_preserve_start_index(runtime_window.items)
+        """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。"""
+        items = self._get_window_items(exclude_pending_infer=True)
+        preserve_start_idx = self._find_compact_preserve_start_index(items)
         if preserve_start_idx is None or preserve_start_idx <= 0:
             return CompactPlan(source_messages=[], insert_seq=None)
 
         return CompactPlan(
-            source_messages=[item.openai_message for item in runtime_window.items[:preserve_start_idx]],
-            insert_seq=runtime_window.items[preserve_start_idx].seq,
+            source_messages=[item.openai_message for item in items[:preserve_start_idx]],
+            insert_seq=items[preserve_start_idx].seq,
         )
 
     def trim_to_compact_window(self) -> None:
-        """内存裁剪：只保留最新 COMPACT_CMD 及其之后的消息。"""
-        start = self.get_runtime_window_start_index()
+        """内存裁剪：只保留最新 COMPACT_SUMMARY 及其之后的消息。"""
+        start = self._find_latest_compact_summary_index()
         if start is not None and start > 0:
             self._items = self._items[start:]
 
     def get_runtime_window_start_index(self) -> int | None:
         """返回当前运行时 history 窗口在原始列表中的起始下标。"""
-        return self._build_runtime_window(exclude_pending_infer=False).start_index
+        return self._find_latest_compact_summary_index()
 
-    def _build_runtime_window(self, *, exclude_pending_infer: bool) -> RuntimeWindow:
-        compact_idx = self._find_latest_compact_index()
-        if compact_idx is None:
-            runtime_items = list(self._items)
-            start_index = None
-        else:
-            suffix = self._items[compact_idx:]
-            if (
-                compact_idx + 2 < len(self._items)
-                and self._items[compact_idx + 1].stage == AgentHistoryStage.INFER
-                and self._items[compact_idx + 1].status == AgentHistoryStatus.SUCCESS
-                and self._items[compact_idx + 2].stage == AgentHistoryStage.INPUT
-                and self._items[compact_idx + 2].role == llmApiUtil.OpenaiApiRole.USER
-            ):
-                runtime_items = list(suffix[2:])
-            else:
-                runtime_items = list(self._items[:compact_idx]) + list(suffix[1:])
-            start_index = compact_idx
-
+    def _get_window_items(self, *, exclude_pending_infer: bool) -> list[GtAgentHistory]:
+        compact_idx = self._find_latest_compact_summary_index()
+        items = list(self._items[compact_idx:] if compact_idx is not None else self._items)
         if (
             exclude_pending_infer
-            and runtime_items
-            and runtime_items[-1].stage == AgentHistoryStage.INFER
-            and runtime_items[-1].status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED)
+            and items
+            and items[-1].stage == AgentHistoryStage.INFER
+            and items[-1].status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED)
         ):
-            runtime_items = runtime_items[:-1]
-        return RuntimeWindow(start_index=start_index, items=runtime_items)
+            items = items[:-1]
+        return items
 
     def _find_compact_preserve_start_index(self, visible_items: list[GtAgentHistory]) -> int | None:
-        if not visible_items:
-            return None
-
         for idx in range(len(visible_items) - 1, -1, -1):
             if visible_items[idx].role == llmApiUtil.OpenaiApiRole.USER:
                 return idx
+        return None if not visible_items else len(visible_items) - 1
 
-        return len(visible_items) - 1
-
-    def _find_latest_compact_index(self) -> int | None:
+    def _find_latest_compact_summary_index(self) -> int | None:
         for idx in range(len(self._items) - 1, -1, -1):
-            if AgentHistoryTag.COMPACT_CMD in self._items[idx].tags:
+            if AgentHistoryTag.COMPACT_SUMMARY in self._items[idx].tags:
                 return idx
         return None
 

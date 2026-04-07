@@ -1,4 +1,4 @@
-"""compactPolicy — Token 预算与 overflow 识别。"""
+"""compact — Token 预算、overflow 识别与 compact 执行。"""
 from __future__ import annotations
 
 import logging
@@ -7,6 +7,9 @@ from typing import Any
 
 import litellm
 
+from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
+from service import llmService
+from service.agentService import promptBuilder
 from util import llmApiUtil
 from util.configTypes import LlmServiceConfig
 
@@ -86,3 +89,38 @@ def is_context_overflow_error(error: Exception) -> bool:
     """判断异常是否属于"上下文超长"错误。"""
     error_text = str(error).lower()
     return any(kw in error_text for kw in _OVERFLOW_KEYWORDS)
+
+
+# ─── compact 执行 ─────────────────────────────────────────
+
+async def compact_messages(
+    messages: list[llmApiUtil.OpenAIMessage],
+    system_prompt: str,
+    model: str,
+    max_tokens: int = 2048,
+) -> str | None:
+    """压缩消息列表，返回已包含引导语的摘要文本，失败时返回 None。
+
+    Args:
+        messages: 待压缩的消息列表
+        system_prompt: 系统提示（用于正确理解上下文）
+        model: 模型名称
+        max_tokens: 摘要最大 token 数
+
+    Returns:
+        摘要文本（已包含引导语）或 None（压缩失败）
+    """
+    instruction = promptBuilder.build_compact_instruction(max_tokens)
+    ctx = GtCoreAgentDialogContext(
+        system_prompt=system_prompt,
+        messages=messages + [llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, instruction)],
+        tools=None,
+    )
+    try:
+        infer_result = await llmService.infer(model, ctx)
+        if infer_result.ok is False or infer_result.response is None:
+            return None
+        summary = infer_result.response.choices[0].message.content or ""
+        return promptBuilder.build_compact_resume_prompt(summary)
+    except Exception:
+        return None

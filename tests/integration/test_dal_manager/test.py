@@ -627,7 +627,7 @@ class TestDalManagers(ServiceTestCase):
             agent_id=alice.id,
             seq=1,
             message_json='{"content":"v2"}',
-            tags=[AgentHistoryTag.COMPACT_CMD],
+            tags=[AgentHistoryTag.COMPACT_SUMMARY],
         )
         saved_2 = await gtAgentHistoryManager.append_agent_history_message(duplicate)
         assert saved_2.id == saved_1.id
@@ -657,7 +657,7 @@ class TestDalManagers(ServiceTestCase):
                 agent_id=alice.id,
                 seq=2,
                 message_json='{"content":"2"}',
-                tags=[AgentHistoryTag.COMPACT_CMD],
+                tags=[AgentHistoryTag.COMPACT_SUMMARY],
             ),
             GtAgentHistory(
                 agent_id=alice.id,
@@ -676,7 +676,7 @@ class TestDalManagers(ServiceTestCase):
         assert [h.stage for h in alice_history] == [AgentHistoryStage.INPUT, AgentHistoryStage.INPUT]
         assert [h.tags for h in alice_history] == [
             [AgentHistoryTag.ROOM_TURN_BEGIN],
-            [AgentHistoryTag.COMPACT_CMD],
+            [AgentHistoryTag.COMPACT_SUMMARY],
         ]
 
         bob_history = await gtAgentHistoryManager.get_agent_history(bob.id)

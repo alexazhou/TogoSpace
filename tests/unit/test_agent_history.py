@@ -215,7 +215,7 @@ def test_build_infer_messages_without_compact_returns_all():
     assert [msg.content for msg in msgs] == ["u1", "a1"]
 
 
-def test_build_infer_messages_with_completed_compact_uses_context_suffix():
+def test_build_infer_messages_with_compact_includes_summary_and_after():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
@@ -223,42 +223,26 @@ def test_build_infer_messages_with_completed_compact_uses_context_suffix():
             GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "old2")),
             GtAgentHistory.from_openai_message(
                 1, 2,
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact cmd"),
-                tags=[AgentHistoryTag.COMPACT_CMD],
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact summary"),
+                tags=[AgentHistoryTag.COMPACT_SUMMARY],
             ),
-            GtAgentHistory.from_openai_message(
-                1, 3,
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "summary"),
-                stage=AgentHistoryStage.INFER,
-                status=AgentHistoryStatus.SUCCESS,
-            ),
-            GtAgentHistory.from_openai_message(
-                1, 4,
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact context"),
-                stage=AgentHistoryStage.INPUT,
-            ),
-            GtAgentHistory.from_openai_message(1, 5, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep last")),
-            GtAgentHistory.from_openai_message(1, 6, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "next")),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep last")),
+            GtAgentHistory.from_openai_message(1, 4, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "next")),
         ],
     )
 
     msgs = history.build_infer_messages()
 
-    assert [msg.content for msg in msgs] == ["compact context", "keep last", "next"]
+    assert [msg.content for msg in msgs] == ["compact summary", "keep last", "next"]
 
 
-def test_build_infer_messages_with_unfinished_compact_skips_only_cmd():
+def test_build_infer_messages_without_compact_returns_all():
     history = AgentHistoryStore(
         agent_id=1,
         items=[
             GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "old1")),
             GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "old2")),
-            GtAgentHistory.from_openai_message(
-                1, 2,
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact cmd"),
-                tags=[AgentHistoryTag.COMPACT_CMD],
-            ),
-            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep last")),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep last")),
         ],
     )
 
@@ -369,18 +353,16 @@ def test_trim_to_compact_window_keeps_compact_suffix():
             GtAgentHistory.from_openai_message(1, 1, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "old2")),
             GtAgentHistory.from_openai_message(
                 1, 2,
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact cmd"),
-                tags=[AgentHistoryTag.COMPACT_CMD],
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact summary"),
+                tags=[AgentHistoryTag.COMPACT_SUMMARY],
             ),
-            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "summary")),
-            GtAgentHistory.from_openai_message(1, 4, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "context")),
-            GtAgentHistory.from_openai_message(1, 5, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep")),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep")),
         ],
     )
 
     history.trim_to_compact_window()
 
-    assert [item.content for item in history] == ["compact cmd", "summary", "context", "keep"]
+    assert [item.content for item in history] == ["compact summary", "keep"]
 
 
 def test_get_runtime_window_start_index_without_compact_returns_none():
@@ -399,11 +381,10 @@ def test_get_runtime_window_start_index_returns_latest_compact_index():
             GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
             GtAgentHistory.from_openai_message(
                 1, 1,
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact cmd"),
-                tags=[AgentHistoryTag.COMPACT_CMD],
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact summary"),
+                tags=[AgentHistoryTag.COMPACT_SUMMARY],
             ),
-            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "summary")),
-            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "context")),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep")),
         ],
     )
 
@@ -442,11 +423,11 @@ async def test_append_history_message_uses_last_seq_after_compact_trim():
             GtAgentHistory.from_openai_message(1, 0, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "old1")),
             GtAgentHistory.from_openai_message(
                 1, 1,
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact cmd"),
-                tags=[AgentHistoryTag.COMPACT_CMD],
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact summary"),
+                tags=[AgentHistoryTag.COMPACT_SUMMARY],
             ),
-            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "summary")),
-            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "context")),
+            GtAgentHistory.from_openai_message(1, 2, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep1")),
+            GtAgentHistory.from_openai_message(1, 3, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "keep2")),
             GtAgentHistory.from_openai_message(1, 4, llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep")),
         ],
     )
