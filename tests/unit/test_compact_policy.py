@@ -1,16 +1,22 @@
 """compact 单元测试。"""
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from constants import OpenaiApiRole
-from service.agentService.promptBuilder import (
-    build_compact_instruction,
-    build_compact_resume_prompt,
-)
+from service import llmService
 from service.agentService.compact import (
     calc_compact_trigger_tokens,
     calc_hard_limit_tokens,
+    compact_messages,
     estimate_tokens,
     is_context_overflow_error,
+)
+from service.agentService.promptBuilder import (
+    build_compact_instruction,
+    build_compact_resume_prompt,
 )
 from util import llmApiUtil
 from util.configTypes import LlmServiceConfig
@@ -108,3 +114,70 @@ def test_estimate_tokens_with_empty_messages():
     result = estimate_tokens("gpt-4o", [], system_prompt="sys")
     assert isinstance(result, int)
     assert result > 0
+
+
+# ─── compact_messages ─────────────────────────────────────
+
+_INFER_PATCH = "service.agentService.compact.llmService.infer"
+
+
+def _make_mock_response(content: str):
+    """构造 mock LLM 响应。"""
+    msg = llmApiUtil.OpenAIMessage(
+        role=OpenaiApiRole.ASSISTANT,
+        content=content,
+    )
+    resp = MagicMock()
+    choice = MagicMock()
+    choice.message = msg
+    resp.choices = [choice]
+    return resp
+
+
+@pytest.mark.asyncio
+async def test_compact_messages_success():
+    """成功压缩，返回包含引导语的摘要。"""
+    messages = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "历史消息")]
+    mock_resp = _make_mock_response("这是摘要内容")
+
+    with patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(mock_resp))):
+        result = await compact_messages(messages, "system_prompt", "gpt-4o")
+
+    assert result is not None
+    assert "以下是之前对话的压缩摘要" in result
+    assert "这是摘要内容" in result
+
+
+@pytest.mark.asyncio
+async def test_compact_messages_infer_failed():
+    """LLM 推理失败，返回 None。"""
+    messages = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "历史消息")]
+
+    with patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.failure(Exception("API error")))):
+        result = await compact_messages(messages, "system_prompt", "gpt-4o")
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_compact_messages_empty_content():
+    """LLM 返回空内容，仍返回带引导语的空摘要。"""
+    messages = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "历史消息")]
+    mock_resp = _make_mock_response("")
+
+    with patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(mock_resp))):
+        result = await compact_messages(messages, "system_prompt", "gpt-4o")
+
+    assert result is not None
+    assert "以下是之前对话的压缩摘要" in result
+
+
+@pytest.mark.asyncio
+async def test_compact_messages_exception():
+    """LLM 调用抛出异常，返回 None。"""
+    messages = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "历史消息")]
+
+    with patch(_INFER_PATCH, AsyncMock(side_effect=Exception("network error"))):
+        result = await compact_messages(messages, "system_prompt", "gpt-4o")
+
+    assert result is None
