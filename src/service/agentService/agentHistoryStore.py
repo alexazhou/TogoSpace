@@ -140,7 +140,7 @@ class AgentHistoryStore:
         tags: list[AgentHistoryTag] | None = None,
     ) -> GtAgentHistory:
         init_message = llmApiUtil.OpenAIMessage(
-            role=self._infer_role_from_stage(stage),
+            role=GtAgentHistory.infer_role_from_stage(stage),
             tool_call_id=tool_call_id,
         )
         return await self.append_history_message(
@@ -311,13 +311,3 @@ class AgentHistoryStore:
         if exclude_pending_infer and self.get_pending_infer_item() is not None:
             items = items[:-1]
         return items
-
-    @staticmethod
-    def _infer_role_from_stage(stage: AgentHistoryStage) -> llmApiUtil.OpenaiApiRole:
-        if stage == AgentHistoryStage.INPUT:
-            return llmApiUtil.OpenaiApiRole.USER
-        if stage == AgentHistoryStage.INFER:
-            return llmApiUtil.OpenaiApiRole.ASSISTANT
-        if stage == AgentHistoryStage.TOOL_RESULT:
-            return llmApiUtil.OpenaiApiRole.TOOL
-        raise ValueError(f"不支持的 history stage: {stage}")
