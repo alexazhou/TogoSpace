@@ -78,9 +78,6 @@ class AgentHistoryStore:
             llmApiUtil.OpenaiApiRole.SYSTEM,
         ), f"[{agent_label}] _infer 前最后一条消息不能是 assistant，当前为: {last_role if last_role else 'empty'}"
 
-    def export_openai_message_list(self) -> list[llmApiUtil.OpenAIMessage]:
-        return [item.openai_message for item in self._items]
-
     def get_pending_infer_item(self) -> GtAgentHistory | None:
         """返回尾部可复用的 pending infer item；否则返回 None。"""
         last_item = self.last()
@@ -205,7 +202,7 @@ class AgentHistoryStore:
         """在未完成 turn 内查找指定 tool_call_id 的调用。"""
         if not tool_call_id:
             return None
-        start_idx = self.get_turn_start_index()
+        start_idx = self.get_current_turn_start_index()
         if start_idx is None:
             return None
         for item in reversed(self._items[start_idx:]):
@@ -222,13 +219,12 @@ class AgentHistoryStore:
                 return item
         return None
 
-    def has_pending_tool_calls(self) -> bool:
-        """检查未完成 turn 中是否有未执行的工具。"""
-        return self.get_first_pending_tool_call() is not None
-
     def get_first_pending_tool_call(self) -> llmApiUtil.OpenAIToolCall | None:
         """获取未完成 turn 中第一个未执行的 tool_call。"""
-        last_assistant = self.get_last_turn_assistant_message()
+        start_idx = self.get_current_turn_start_index()
+        if start_idx is None:
+            return None
+        last_assistant = self.get_last_assistant_message(start_idx=start_idx)
         if last_assistant is None or not last_assistant.tool_calls:
             return None
         for tc in last_assistant.tool_calls:
@@ -237,7 +233,7 @@ class AgentHistoryStore:
                 return tc
         return None
 
-    def get_turn_start_index(self) -> int | None:
+    def get_current_turn_start_index(self) -> int | None:
         """从尾部向前查找最近一次未完成 turn 的起始 index。"""
         for idx in range(len(self._items) - 1, -1, -1):
             item = self._items[idx]
@@ -247,15 +243,8 @@ class AgentHistoryStore:
                 return idx
         return None
 
-    def get_last_turn_assistant_message(self) -> llmApiUtil.OpenAIMessage | None:
-        """获取未完成 turn 内的最后一条 assistant 消息，若无未完成 turn 则返回 None。"""
-        start_idx = self.get_turn_start_index()
-        if start_idx is None:
-            return None
-        return self.get_last_assistant_message(start_idx=start_idx)
-
     def has_active_turn(self) -> bool:
-        return self.get_turn_start_index() is not None
+        return self.get_current_turn_start_index() is not None
 
     # ─── Compact 相关方法 ─────────────────────────────────────
 

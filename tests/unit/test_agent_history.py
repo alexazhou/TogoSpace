@@ -16,7 +16,7 @@ def test_agent_history_last_role_returns_none_for_empty_history():
     assert history.last_role() is None
 
 
-def test_agent_history_export_openai_message_list_round_trips_messages():
+def test_agent_history_openai_message_round_trips():
     user_msg = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")
     tool_msg = llmApiUtil.OpenAIMessage.tool_result("call_1", '{"success": true}')
     history = AgentHistoryStore(
@@ -27,7 +27,7 @@ def test_agent_history_export_openai_message_list_round_trips_messages():
         ],
     )
 
-    exported = history.export_openai_message_list()
+    exported = [item.openai_message for item in history]
 
     assert [msg.role for msg in exported] == [OpenaiApiRole.USER, OpenaiApiRole.TOOL]
     assert [msg.content for msg in exported] == ["u1", '{"success": true}']
@@ -201,7 +201,7 @@ def test_agent_history_unfinished_turn_with_items():
     )
 
     assert history.has_active_turn() is True
-    assert history.get_turn_start_index() == 3
+    assert history.get_current_turn_start_index() == 3
 
 
 # ─── Compact 相关方法 ────────────────────────────────────
