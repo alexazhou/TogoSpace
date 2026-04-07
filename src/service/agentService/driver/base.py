@@ -37,7 +37,7 @@ class AgentDriverHost(Protocol):
     _history: AgentHistoryStore
     tool_registry: AgentToolRegistry
 
-    async def _execute_tool(self) -> None:
+    async def execute_pending_tools(self) -> None:
         ...
 
 

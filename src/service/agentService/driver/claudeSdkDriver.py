@@ -183,7 +183,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
             )
 
             # 执行最后一条 assistant 消息中的 tool_call 并写入 tool_result
-            await self.host._execute_tool()
+            await self.host.execute_pending_tools()
 
             # 获取最后一个 tool_result 消息作为返回值
             result_history = self.host._history.find_tool_result_by_call_id(tool_call_id)
