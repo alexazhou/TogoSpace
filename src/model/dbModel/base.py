@@ -7,6 +7,7 @@ from typing import Any, Generic, List, TypeVar, cast
 
 import peewee
 import peewee_async
+from pydantic import BaseModel
 from playhouse.shortcuts import model_to_dict
 from constants import EnhanceEnum
 from model.dbModel.auto_timestamp_mixin import AutoTimestampMixin
@@ -15,6 +16,7 @@ from util import jsonUtil
 TJson = TypeVar("TJson")
 TEnum = TypeVar("TEnum", bound="EnhanceEnum")
 TClassJson = TypeVar("TClassJson")
+TPydanticModel = TypeVar("TPydanticModel", bound=BaseModel)
 
 _database_proxy: peewee.DatabaseProxy = peewee.DatabaseProxy()
 logger = logging.getLogger(__name__)
@@ -76,6 +78,36 @@ class JsonFieldWithClass(peewee.TextField, Generic[TClassJson]):
         except Exception as exc:
             field_name = getattr(self, "name", None) or "<unknown>"
             logger.warning("JsonFieldWithClass parse failed for field '%s', returning None: value=%r, error=%s", field_name, value, exc)
+            return None
+
+
+class PydanticJsonField(peewee.TextField, Generic[TPydanticModel]):
+    """将 Pydantic BaseModel 与 TEXT(JSON) 自动互转。"""
+
+    def __init__(self, model_cls: type[TPydanticModel], *args, **kwargs):
+        self.model_cls = model_cls
+        super().__init__(*args, **kwargs)
+
+    def db_value(self, value: TPydanticModel | dict[str, Any] | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, self.model_cls):
+            return value.model_dump_json(exclude_none=True)
+        validated = self.model_cls.model_validate(value)
+        return validated.model_dump_json(exclude_none=True)
+
+    def python_value(self, value) -> TPydanticModel | None:
+        if value is None:
+            return None
+        if isinstance(value, self.model_cls):
+            return value
+        try:
+            if isinstance(value, str):
+                return self.model_cls.model_validate_json(value)
+            return self.model_cls.model_validate(value)
+        except Exception as exc:
+            field_name = getattr(self, "name", None) or "<unknown>"
+            logger.warning("PydanticJsonField parse failed for field '%s', returning None: value=%r, error=%s", field_name, value, exc)
             return None
 
 

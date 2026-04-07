@@ -5,6 +5,7 @@ from constants import AgentHistoryStatus
 from constants import OpenaiApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.historyUsage import HistoryUsage
+from util import llmApiUtil
 from . import gtAgentManager
 
 _UNSET = object()
@@ -18,7 +19,7 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
             seq=message.seq,
             role=message.role,
             tool_call_id=message.tool_call_id,
-            message_json=message.message_json,
+            message=message.message,
             status=message.status,
             error_message=message.error_message,
             tags=message.tags,
@@ -76,7 +77,7 @@ async def update_agent_history_by_id(
     *,
     role: OpenaiApiRole | object = _UNSET,
     tool_call_id: str | None | object = _UNSET,
-    message_json: dict | None | object = _UNSET,
+    message: llmApiUtil.OpenAIMessage | None | object = _UNSET,
     status: AgentHistoryStatus | object = _UNSET,
     error_message: str | None | object = _UNSET,
     tags: list[AgentHistoryTag] | None | object = _UNSET,
@@ -87,8 +88,8 @@ async def update_agent_history_by_id(
         update_fields["role"] = role
     if tool_call_id is not _UNSET:
         update_fields["tool_call_id"] = tool_call_id
-    if message_json is not _UNSET:
-        update_fields["message_json"] = message_json
+    if message is not _UNSET:
+        update_fields["message"] = message
     if status is not _UNSET:
         update_fields["status"] = status
     if error_message is not _UNSET:

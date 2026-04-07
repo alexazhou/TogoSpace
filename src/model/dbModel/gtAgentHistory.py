@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import peewee
 from util import llmApiUtil
 
 from constants import AgentHistoryTag, AgentHistoryStatus, OpenaiApiRole
 
-from .base import DbModelBase, EnumField, EnumListField, JsonField, JsonFieldWithClass
+from .base import DbModelBase, EnumField, EnumListField, JsonFieldWithClass, PydanticJsonField
 from .historyUsage import HistoryUsage
 
 
@@ -17,7 +16,7 @@ class GtAgentHistory(DbModelBase):
     seq: int = peewee.IntegerField(null=False)
     role: OpenaiApiRole = EnumField(OpenaiApiRole, null=False)
     tool_call_id: str | None = peewee.TextField(null=True)
-    message_json: dict[str, Any] | None = JsonField(null=True)
+    message: llmApiUtil.OpenAIMessage | None = PydanticJsonField(llmApiUtil.OpenAIMessage, null=True)
     status: AgentHistoryStatus = EnumField(AgentHistoryStatus, null=False, default=AgentHistoryStatus.INIT)
     error_message: str | None = peewee.TextField(null=True)
     tags: list[AgentHistoryTag] = EnumListField(AgentHistoryTag, default=list)
@@ -50,7 +49,7 @@ class GtAgentHistory(DbModelBase):
         return cls(
             role=message.role,
             tool_call_id=message.tool_call_id,
-            message_json=message.model_dump(mode="json", exclude_none=True),
+            message=message,
             status=status or AgentHistoryStatus.SUCCESS,
             error_message=error_message,
             tags=[] if tags is None else list(tags),
@@ -59,7 +58,7 @@ class GtAgentHistory(DbModelBase):
 
     @property
     def has_message(self) -> bool:
-        return self.message_json is not None
+        return self.message is not None
 
     @classmethod
     def build_placeholder(
@@ -81,7 +80,7 @@ class GtAgentHistory(DbModelBase):
         return cls(
             role=role,
             tool_call_id=tool_call_id,
-            message_json=None,
+            message=None,
             status=status,
             error_message=error_message,
             tags=[] if tags is None else list(tags),
@@ -90,15 +89,13 @@ class GtAgentHistory(DbModelBase):
 
     @property
     def openai_message_or_none(self) -> llmApiUtil.OpenAIMessage | None:
-        if self.message_json is None:
-            return None
-        return llmApiUtil.OpenAIMessage.model_validate(self.message_json)
+        return self.message
 
     @property
     def openai_message(self) -> llmApiUtil.OpenAIMessage:
         message = self.openai_message_or_none
         if message is None:
-            raise ValueError(f"history item {self.id or '<unsaved>'} has no message_json")
+            raise ValueError(f"history item {self.id or '<unsaved>'} has no message")
         return message
 
     @property

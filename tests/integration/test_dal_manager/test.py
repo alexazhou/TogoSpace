@@ -25,6 +25,7 @@ from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
+from util import llmApiUtil
 from util.configTypes import TeamConfig, AgentConfig, TeamRoomConfig
 from tests.base import ServiceTestCase
 
@@ -612,13 +613,13 @@ class TestDalManagers(ServiceTestCase):
             agent_id=alice.id,
             seq=1,
             role=OpenaiApiRole.USER,
-            message_json={"role": "user", "content": "v1"},
+            message=llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v1"),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         )
         saved_1 = await gtAgentHistoryManager.append_agent_history_message(first)
         assert saved_1.agent_id == alice.id
         assert saved_1.seq == 1
-        assert saved_1.message_json == {"role": "user", "content": "v1"}
+        assert saved_1.message == llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v1")
         assert saved_1.status == AgentHistoryStatus.INIT
         assert saved_1.error_message is None
         assert saved_1.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
@@ -627,12 +628,12 @@ class TestDalManagers(ServiceTestCase):
             agent_id=alice.id,
             seq=1,
             role=OpenaiApiRole.USER,
-            message_json={"role": "user", "content": "v2"},
+            message=llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v2"),
             tags=[AgentHistoryTag.COMPACT_SUMMARY],
         )
         saved_2 = await gtAgentHistoryManager.append_agent_history_message(duplicate)
         assert saved_2.id == saved_1.id
-        assert saved_2.message_json == {"role": "user", "content": "v1"}
+        assert saved_2.message == llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v1")
         assert saved_2.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
     async def test_agent_history_manager_append_and_get_sorted(self):
@@ -658,26 +659,32 @@ class TestDalManagers(ServiceTestCase):
                 agent_id=alice.id,
                 seq=2,
                 role=OpenaiApiRole.USER,
-                message_json={"role": "user", "content": "2"},
+                message=llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "2"),
                 tags=[AgentHistoryTag.COMPACT_SUMMARY],
             ),
             GtAgentHistory(
                 agent_id=alice.id,
                 seq=1,
                 role=OpenaiApiRole.USER,
-                message_json={"role": "user", "content": "1"},
+                message=llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "1"),
                 tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
             ),
-            GtAgentHistory(agent_id=bob.id, seq=1, role=OpenaiApiRole.USER, message_json={"role": "user", "content": "b1"}, tags=[]),
+            GtAgentHistory(
+                agent_id=bob.id,
+                seq=1,
+                role=OpenaiApiRole.USER,
+                message=llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "b1"),
+                tags=[],
+            ),
         ]
         for item in items:
             await gtAgentHistoryManager.append_agent_history_message(item)
 
         alice_history = await gtAgentHistoryManager.get_agent_history(alice.id)
         assert [h.seq for h in alice_history] == [1, 2]
-        assert [h.message_json for h in alice_history] == [
-            {"role": "user", "content": "1"},
-            {"role": "user", "content": "2"},
+        assert [h.message for h in alice_history] == [
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "1"),
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "2"),
         ]
         assert [h.tags for h in alice_history] == [
             [AgentHistoryTag.ROOM_TURN_BEGIN],
@@ -705,7 +712,7 @@ class TestDalManagers(ServiceTestCase):
                 agent_id=alice.id,
                 seq=1,
                 role=OpenaiApiRole.USER,
-                message_json={"role": "user", "content": "v1"},
+                message=llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v1"),
                 tags=[],
             )
         )
@@ -716,7 +723,7 @@ class TestDalManagers(ServiceTestCase):
             history_id=saved.id,
             role=OpenaiApiRole.TOOL,
             tool_call_id="call_1",
-            message_json={"role": "tool", "tool_call_id": "call_1", "content": "{\"success\": true}"},
+            message=llmApiUtil.OpenAIMessage.tool_result("call_1", '{"success": true}'),
             status=AgentHistoryStatus.FAILED,
             error_message="tool failed",
             tags=[AgentHistoryTag.ROOM_TURN_FINISH],
@@ -724,7 +731,7 @@ class TestDalManagers(ServiceTestCase):
         assert updated.id == saved.id
         assert updated.role == OpenaiApiRole.TOOL
         assert updated.tool_call_id == "call_1"
-        assert updated.message_json == {"role": "tool", "tool_call_id": "call_1", "content": "{\"success\": true}"}
+        assert updated.message == llmApiUtil.OpenAIMessage.tool_result("call_1", '{"success": true}')
         assert updated.status == AgentHistoryStatus.FAILED
         assert updated.error_message == "tool failed"
         assert updated.tags == [AgentHistoryTag.ROOM_TURN_FINISH]

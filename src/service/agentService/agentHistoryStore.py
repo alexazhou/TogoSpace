@@ -147,15 +147,13 @@ class AgentHistoryStore:
 
         tags 参数：若不为 None，写入数据库；若为 None，不更新 tags 字段。
         """
-        message_json = message.model_dump(mode="json", exclude_none=True) if message is not None else None
-
         # 更新内存对象
         for item in self._items:
             if item.id == history_id:
                 if message is not None:
                     item.role = message.role
                     item.tool_call_id = message.tool_call_id
-                    item.message_json = message_json
+                    item.message = message
                 item.status = status
                 item.error_message = error_message
                 if tags is not None:
@@ -176,7 +174,7 @@ class AgentHistoryStore:
         if message is not None:
             update_kwargs["role"] = message.role
             update_kwargs["tool_call_id"] = message.tool_call_id
-            update_kwargs["message_json"] = message_json
+            update_kwargs["message"] = message
         await gtAgentHistoryManager.update_agent_history_by_id(**update_kwargs)
 
     def get_last_assistant_message(self, start_idx: int = 0) -> llmApiUtil.OpenAIMessage | None:
