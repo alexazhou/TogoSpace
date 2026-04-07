@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List
+from typing import List
 
 from constants import (
     AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag,
@@ -15,6 +15,7 @@ from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreRoom
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
+from model.dbModel.historyUsage import HistoryUsage
 from service import llmService, roomService
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService import compact, promptBuilder
@@ -249,7 +250,7 @@ class AgentTurnRunner:
             usage = infer_result.usage
             assistant_message = infer_result.response.choices[0].message
 
-            usage_json = self._build_usage_json(
+            usage_data = self._build_usage(
                 estimated_prompt_tokens=estimated_tokens,
                 prompt_tokens=usage.prompt_tokens if usage else None,
                 completion_tokens=usage.completion_tokens if usage else None,
@@ -261,11 +262,11 @@ class AgentTurnRunner:
                 history_id=output_item.id,
                 message=assistant_message,
                 status=AgentHistoryStatus.SUCCESS,
-                usage_json=usage_json,
+                usage=usage_data,
             )
             return assistant_message
         except Exception as e:
-            usage_json = self._build_usage_json(
+            usage_data = self._build_usage(
                 estimated_prompt_tokens=estimated_tokens or None,
                 prompt_tokens=usage.prompt_tokens if usage else None,
                 completion_tokens=usage.completion_tokens if usage else None,
@@ -278,7 +279,7 @@ class AgentTurnRunner:
                 message=None,
                 status=AgentHistoryStatus.FAILED,
                 error_message=str(e),
-                usage_json=usage_json,
+                usage=usage_data,
             )
             raise
 
@@ -336,7 +337,7 @@ class AgentTurnRunner:
         return resolved_model, llm_config, trigger_tokens, hard_limit_tokens
 
     @staticmethod
-    def _build_usage_json(
+    def _build_usage(
         *,
         estimated_prompt_tokens: int | None = None,
         prompt_tokens: int | None = None,
@@ -344,15 +345,15 @@ class AgentTurnRunner:
         total_tokens: int | None = None,
         pre_check_triggered: bool = False,
         overflow_retry: bool = False,
-    ) -> dict[str, Any]:
-        return {
-            "estimated_prompt_tokens": estimated_prompt_tokens,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-            "pre_check_triggered": pre_check_triggered,
-            "overflow_retry": overflow_retry,
-        }
+    ) -> HistoryUsage:
+        return HistoryUsage(
+            estimated_prompt_tokens=estimated_prompt_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            pre_check_triggered=pre_check_triggered,
+            overflow_retry=overflow_retry,
+        )
 
     async def _pre_check_compact(
         self,

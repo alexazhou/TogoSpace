@@ -1,4 +1,5 @@
-from model.dbModel.base import JsonField
+from model.dbModel.base import JsonField, JsonFieldWithClass
+from model.dbModel.historyUsage import HistoryUsage
 
 
 def test_json_field_python_value_returns_parsed_value_for_valid_json():
@@ -20,3 +21,13 @@ def test_json_field_python_value_keeps_dict_and_list():
     field = JsonField()
     assert field.python_value({"a": 1}) == {"a": 1}
     assert field.python_value([1, 2, 3]) == [1, 2, 3]
+
+
+def test_json_field_with_class_round_trips_custom_class():
+    field = JsonFieldWithClass(HistoryUsage)
+    value = HistoryUsage(estimated_prompt_tokens=123, overflow_retry=True)
+
+    dumped = field.db_value(value)
+    loaded = field.python_value(dumped)
+
+    assert loaded == value

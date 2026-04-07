@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 from typing import Iterable, Iterator
 
 from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiApiRole
 from dal.db import gtAgentHistoryManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.historyUsage import HistoryUsage
 from util import llmApiUtil
 
 
@@ -95,7 +95,7 @@ class AgentHistoryStore:
         status: AgentHistoryStatus | None = None,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
-        usage_json: dict[str, Any] | None = None,
+        usage: HistoryUsage | None = None,
     ) -> GtAgentHistory:
         """追加或插入消息到历史并持久化。
 
@@ -111,8 +111,7 @@ class AgentHistoryStore:
             error_message=error_message,
             tags=tags,
         )
-        if usage_json is not None:
-            item.usage_json = usage_json
+        item.usage = usage
 
         if seq is None:
             # 追加到末尾
@@ -158,7 +157,7 @@ class AgentHistoryStore:
         status: AgentHistoryStatus,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
-        usage_json: dict[str, Any] | None = None,
+        usage: HistoryUsage | None = None,
     ) -> None:
         """完成 history item：更新内存对象并持久化到数据库。
 
@@ -173,8 +172,8 @@ class AgentHistoryStore:
                 item.error_message = error_message
                 if tags is not None:
                     item.tags = list(tags)
-                if usage_json is not None:
-                    item.usage_json = usage_json
+                if usage is not None:
+                    item.usage = usage
                 break
 
         # 持久化到数据库
@@ -185,7 +184,7 @@ class AgentHistoryStore:
             status=status,
             error_message=error_message,
             tags=list(tags) if tags is not None else None,
-            usage_json=usage_json,
+            usage=usage,
         )
 
     def get_last_assistant_message(self, start_idx: int = 0) -> llmApiUtil.OpenAIMessage | None:

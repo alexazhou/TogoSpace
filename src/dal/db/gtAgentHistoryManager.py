@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
-
 from constants import AgentHistoryTag
 from constants import AgentHistoryStatus
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.historyUsage import HistoryUsage
 from . import gtAgentManager
 
 
@@ -19,7 +18,7 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
             status=message.status,
             error_message=message.error_message,
             tags=message.tags,
-            usage_json=message.usage_json,
+            usage=message.usage,
         )
         .on_conflict_ignore()
         .aio_execute()
@@ -71,11 +70,11 @@ async def insert_agent_history_message_at_seq(message: GtAgentHistory) -> GtAgen
 async def update_agent_history_by_id(
     history_id: int,
     *,
-    message_json: dict[str, Any] | None = None,
+    message_json: dict | None = None,
     status: AgentHistoryStatus | None = None,
     error_message: str | None = None,
     tags: list[AgentHistoryTag] | None = None,
-    usage_json: dict[str, Any] | None = None,
+    usage: HistoryUsage | None = None,
 ) -> GtAgentHistory:
     update_fields: dict = {}
     if message_json is not None:
@@ -86,8 +85,8 @@ async def update_agent_history_by_id(
         update_fields["error_message"] = error_message
     if tags is not None:
         update_fields["tags"] = tags
-    if usage_json is not None:
-        update_fields["usage_json"] = usage_json
+    if usage is not None:
+        update_fields["usage"] = usage
     if not update_fields:
         raise ValueError(f"update agent history by id has no fields to update: id={history_id}")
 
