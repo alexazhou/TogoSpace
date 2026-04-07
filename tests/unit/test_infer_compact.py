@@ -54,7 +54,7 @@ def _make_runner_and_history():
     )
 
     history = MagicMock()
-    history.assert_infer_ready = MagicMock()
+    history.is_infer_ready = MagicMock(return_value=True)
     history.build_infer_messages = MagicMock(return_value=[
         OpenAIMessage(role=OpenaiApiRole.USER, content="hello"),
     ])

@@ -52,28 +52,27 @@ class AgentHistoryStore:
             return None
         return self._items[-1]
 
-    def last_role(self) -> OpenaiApiRole | None:
+    def _last_role(self) -> OpenaiApiRole | None:
         last_item = self.last()
         if last_item is None:
             return None
         return last_item.role
 
-    def next_seq(self) -> int:
+    def _next_seq(self) -> int:
         last_item = self.last()
         if last_item is None:
             return 0
         return last_item.seq + 1
 
-    def assert_infer_ready(self, agent_label: str) -> None:
+    def is_infer_ready(self) -> bool:
+        """历史末尾是否处于可发起推理的状态。"""
         if self.get_pending_infer_item() is not None:
-            return
-
-        last_role = self.last_role()
-        assert last_role in (
+            return True
+        return self._last_role() in (
             llmApiUtil.OpenaiApiRole.USER,
             llmApiUtil.OpenaiApiRole.TOOL,
             llmApiUtil.OpenaiApiRole.SYSTEM,
-        ), f"[{agent_label}] _infer 前最后一条消息不能是 assistant，当前为: {last_role if last_role else 'empty'}"
+        )
 
     def get_pending_infer_item(self) -> GtAgentHistory | None:
         """返回尾部可复用的 pending infer item；否则返回 None。"""
@@ -101,7 +100,7 @@ class AgentHistoryStore:
 
         若 seq 为 None，追加到末尾；若 seq 有值，按 seq 插入并后移后续消息。
         """
-        target_seq = self.next_seq() if seq is None else seq
+        target_seq = self._next_seq() if seq is None else seq
         item = GtAgentHistory.from_openai_message(
             agent_id=self._agent_id,
             seq=target_seq,
