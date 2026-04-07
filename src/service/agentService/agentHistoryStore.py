@@ -47,9 +47,6 @@ class AgentHistoryStore:
     def replace(self, items: Iterable[GtAgentHistory]) -> None:
         self._items = list(items)
 
-    def dump(self) -> list[GtAgentHistory]:
-        return list(self._items)
-
     def last(self) -> GtAgentHistory | None:
         if not self._items:
             return None
