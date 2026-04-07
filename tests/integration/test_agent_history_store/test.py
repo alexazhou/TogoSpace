@@ -197,13 +197,13 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
             status=AgentHistoryStatus.SUCCESS,
         )
 
-        assert history.has_unfinished_turn() is True
-        assert history.get_unfinished_turn_start_index() == 0
+        assert history.has_active_turn() is True
+        assert history.get_turn_start_index() == 0
 
         await history.append_history_message(
             llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "done"),
             tags=[AgentHistoryTag.ROOM_TURN_FINISH],
         )
 
-        assert history.has_unfinished_turn() is False
-        assert history.get_unfinished_turn_start_index() is None
+        assert history.has_active_turn() is False
+        assert history.get_turn_start_index() is None

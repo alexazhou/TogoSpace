@@ -23,7 +23,7 @@ def _make_turn_runner() -> AgentTurnRunner:
     )
     # 替换 _history 为 mock，避免单元测试触及数据库
     mock_history = MagicMock()
-    mock_history.has_unfinished_turn = MagicMock(return_value=False)
+    mock_history.has_active_turn = MagicMock(return_value=False)
     mock_history.append_history_message = AsyncMock()
     mock_history.export_openai_tools = MagicMock(return_value=[])
     runner._history = mock_history

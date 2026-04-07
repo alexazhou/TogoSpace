@@ -58,7 +58,6 @@ def _make_runner_and_history():
     history.build_infer_messages = MagicMock(return_value=[
         OpenAIMessage(role=OpenaiApiRole.USER, content="hello"),
     ])
-    history.get_pending_infer_item = MagicMock(return_value=None)
     history.build_compact_plan = MagicMock(return_value=CompactPlan(
         source_messages=[OpenAIMessage(role=OpenaiApiRole.USER, content="hello")],
         insert_seq=1,

@@ -201,11 +201,11 @@ class AgentHistoryStore:
                 return item.openai_message
         return None
 
-    def find_tool_call_by_id_in_unfinished_turn(self, tool_call_id: str) -> llmApiUtil.OpenAIToolCall | None:
+    def find_tool_call_by_id(self, tool_call_id: str) -> llmApiUtil.OpenAIToolCall | None:
         """在未完成 turn 内查找指定 tool_call_id 的调用。"""
         if not tool_call_id:
             return None
-        start_idx = self.get_unfinished_turn_start_index()
+        start_idx = self.get_turn_start_index()
         if start_idx is None:
             return None
         for item in reversed(self._items[start_idx:]):
@@ -222,13 +222,13 @@ class AgentHistoryStore:
                 return item
         return None
 
-    def has_pending_tool_calls_in_unfinished_turn(self) -> bool:
+    def has_pending_tool_calls(self) -> bool:
         """检查未完成 turn 中是否有未执行的工具。"""
-        return self.get_first_pending_tool_call_in_unfinished_turn() is not None
+        return self.get_first_pending_tool_call() is not None
 
-    def get_first_pending_tool_call_in_unfinished_turn(self) -> llmApiUtil.OpenAIToolCall | None:
+    def get_first_pending_tool_call(self) -> llmApiUtil.OpenAIToolCall | None:
         """获取未完成 turn 中第一个未执行的 tool_call。"""
-        last_assistant = self.get_last_assistant_message_in_unfinished_turn()
+        last_assistant = self.get_last_turn_assistant_message()
         if last_assistant is None or not last_assistant.tool_calls:
             return None
         for tc in last_assistant.tool_calls:
@@ -237,7 +237,7 @@ class AgentHistoryStore:
                 return tc
         return None
 
-    def get_unfinished_turn_start_index(self) -> int | None:
+    def get_turn_start_index(self) -> int | None:
         """从尾部向前查找最近一次未完成 turn 的起始 index。"""
         for idx in range(len(self._items) - 1, -1, -1):
             item = self._items[idx]
@@ -247,15 +247,15 @@ class AgentHistoryStore:
                 return idx
         return None
 
-    def get_last_assistant_message_in_unfinished_turn(self) -> llmApiUtil.OpenAIMessage | None:
+    def get_last_turn_assistant_message(self) -> llmApiUtil.OpenAIMessage | None:
         """获取未完成 turn 内的最后一条 assistant 消息，若无未完成 turn 则返回 None。"""
-        start_idx = self.get_unfinished_turn_start_index()
+        start_idx = self.get_turn_start_index()
         if start_idx is None:
             return None
         return self.get_last_assistant_message(start_idx=start_idx)
 
-    def has_unfinished_turn(self) -> bool:
-        return self.get_unfinished_turn_start_index() is not None
+    def has_active_turn(self) -> bool:
+        return self.get_turn_start_index() is not None
 
     # ─── Compact 相关方法 ─────────────────────────────────────
 
@@ -323,12 +323,7 @@ class AgentHistoryStore:
         """构造推理或 compact 所用消息窗口。不变量：COMPACT_SUMMARY 若存在，必在 _items[0]。"""
         self._assert_compact_invariant()
         items = list(self._items)
-        if (
-            exclude_pending_infer
-            and items
-            and items[-1].stage == AgentHistoryStage.INFER
-            and items[-1].status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED)
-        ):
+        if exclude_pending_infer and self.get_pending_infer_item() is not None:
             items = items[:-1]
         return items
 
