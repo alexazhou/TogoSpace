@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from constants import AgentHistoryTag
 from constants import AgentHistoryStatus
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -69,11 +71,11 @@ async def insert_agent_history_message_at_seq(message: GtAgentHistory) -> GtAgen
 async def update_agent_history_by_id(
     history_id: int,
     *,
-    message_json: str | None = None,
+    message_json: dict[str, Any] | None = None,
     status: AgentHistoryStatus | None = None,
     error_message: str | None = None,
     tags: list[AgentHistoryTag] | None = None,
-    usage_json: str | None = None,
+    usage_json: dict[str, Any] | None = None,
 ) -> GtAgentHistory:
     update_fields: dict = {}
     if message_json is not None:

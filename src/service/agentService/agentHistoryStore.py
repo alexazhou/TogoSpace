@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 from typing import Iterable, Iterator
 
 from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiApiRole
@@ -94,7 +95,7 @@ class AgentHistoryStore:
         status: AgentHistoryStatus | None = None,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
-        usage_json: str | None = None,
+        usage_json: dict[str, Any] | None = None,
     ) -> GtAgentHistory:
         """追加或插入消息到历史并持久化。
 
@@ -157,7 +158,7 @@ class AgentHistoryStore:
         status: AgentHistoryStatus,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
-        usage_json: str | None = None,
+        usage_json: dict[str, Any] | None = None,
     ) -> None:
         """完成 history item：更新内存对象并持久化到数据库。
 
@@ -167,7 +168,7 @@ class AgentHistoryStore:
         for item in self._items:
             if item.id == history_id:
                 if message is not None:
-                    item.message_json = message.model_dump_json(exclude_none=True)
+                    item.message_json = message.model_dump(mode="json", exclude_none=True)
                 item.status = status
                 item.error_message = error_message
                 if tags is not None:
@@ -177,7 +178,7 @@ class AgentHistoryStore:
                 break
 
         # 持久化到数据库
-        message_json = message.model_dump_json(exclude_none=True) if message is not None else None
+        message_json = message.model_dump(mode="json", exclude_none=True) if message is not None else None
         await gtAgentHistoryManager.update_agent_history_by_id(
             history_id=history_id,
             message_json=message_json,

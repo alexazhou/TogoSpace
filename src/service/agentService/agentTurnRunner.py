@@ -4,9 +4,8 @@
 """
 from __future__ import annotations
 
-import json
 import logging
-from typing import List
+from typing import Any, List
 
 from constants import (
     AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag,
@@ -345,8 +344,8 @@ class AgentTurnRunner:
         total_tokens: int | None = None,
         pre_check_triggered: bool = False,
         overflow_retry: bool = False,
-    ) -> str:
-        payload = {
+    ) -> dict[str, Any]:
+        return {
             "estimated_prompt_tokens": estimated_prompt_tokens,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
@@ -354,7 +353,6 @@ class AgentTurnRunner:
             "pre_check_triggered": pre_check_triggered,
             "overflow_retry": overflow_retry,
         }
-        return json.dumps(payload, ensure_ascii=False)
 
     async def _pre_check_compact(
         self,

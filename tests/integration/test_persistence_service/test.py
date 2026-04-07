@@ -149,14 +149,14 @@ class TestRestoreAgentHistory(ServiceTestCase):
             GtAgentHistory(
                 agent_id=gt_alice.id,
                 seq=0,
-                message_json=OpenAIMessage.text(OpenaiApiRole.USER, "u1").model_dump_json(exclude_none=True),
+                message_json=OpenAIMessage.text(OpenaiApiRole.USER, "u1").model_dump(mode="json", exclude_none=True),
             )
         )
         await gtAgentHistoryManager.append_agent_history_message(
             GtAgentHistory(
                 agent_id=gt_alice.id,
                 seq=1,
-                message_json=OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1").model_dump_json(exclude_none=True),
+                message_json=OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1").model_dump(mode="json", exclude_none=True),
             )
         )
         running_task = await gtAgentTaskManager.create_task(
