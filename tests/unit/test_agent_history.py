@@ -228,7 +228,25 @@ def test_build_infer_messages_without_compact_returns_all_2():
     assert [msg.content for msg in msgs] == ["old1", "old2", "keep last"]
 
 
-def test_build_compact_source_messages_preserves_latest_user_segment():
+def test_build_compact_source_messages_skips_trailing_user():
+    """末尾是 USER 时，跳过 USER 压缩前面的消息。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"), seq=1),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2"), seq=2),
+        ],
+    )
+
+    plan = history.build_compact_plan()
+
+    assert [msg.content for msg in plan.source_messages] == ["u1", "a1"]
+    assert plan.insert_seq == 2
+
+
+def test_build_compact_compress_all_when_trailing_is_assistant():
+    """末尾是 ASSISTANT 时压缩全部。"""
     history = AgentHistoryStore(
         agent_id=1,
         items=[
@@ -241,11 +259,47 @@ def test_build_compact_source_messages_preserves_latest_user_segment():
 
     plan = history.build_compact_plan()
 
+    assert [msg.content for msg in plan.source_messages] == ["u1", "a1", "u2", "a2"]
+    assert plan.insert_seq == 0
+
+
+def test_build_compact_compress_all_when_trailing_is_tool():
+    """末尾是 TOOL 时压缩全部。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"), seq=1),
+            _make_item(llmApiUtil.OpenAIMessage.tool_result("call_1", '{"ok": true}'), seq=2),
+        ],
+    )
+
+    plan = history.build_compact_plan()
+
+    assert [msg.content for msg in plan.source_messages] == ["u1", "a1", '{"ok": true}']
+    assert plan.insert_seq == 0
+
+
+def test_build_compact_skips_multiple_trailing_users():
+    """末尾多个连续 USER 时，全部跳过。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"), seq=1),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2"), seq=2),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u3"), seq=3),
+        ],
+    )
+
+    plan = history.build_compact_plan()
+
     assert [msg.content for msg in plan.source_messages] == ["u1", "a1"]
     assert plan.insert_seq == 2
 
 
-def test_build_compact_source_messages_excludes_pending_infer():
+def test_build_compact_excludes_pending_infer_and_compress_all():
+    """pending infer 被排除后，末尾是 ASSISTANT，压缩全部。"""
     pending_infer = _make_item(
         llmApiUtil.OpenAIMessage(role=OpenaiApiRole.ASSISTANT),
         seq=2,
@@ -262,10 +316,13 @@ def test_build_compact_source_messages_excludes_pending_infer():
 
     plan = history.build_compact_plan()
 
-    assert plan is None
+    # pending infer 被排除，剩下 [u1, a1]，末尾是 ASSISTANT，压缩全部
+    assert [msg.content for msg in plan.source_messages] == ["u1", "a1"]
+    assert plan.insert_seq == 0
 
 
-def test_build_compact_source_messages_keeps_tool_call_chain_after_latest_user():
+def test_build_compact_preserves_tool_call_chain_when_trailing_is_user():
+    """末尾是 USER 时，tool call 链在压缩后自然完整。"""
     history = AgentHistoryStore(
         agent_id=1,
         items=[
@@ -274,23 +331,25 @@ def test_build_compact_source_messages_keeps_tool_call_chain_after_latest_user()
             _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2"), seq=2),
             _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "tool call"), seq=3),
             _make_item(llmApiUtil.OpenAIMessage.tool_result("call_1", '{"ok": true}'), seq=4),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u3"), seq=5),
         ],
     )
 
     plan = history.build_compact_plan()
 
-    assert [msg.content for msg in plan.source_messages] == ["u1", "a1"]
-    assert plan.insert_seq == 2
+    # 跳过 u3，压缩 u3 之前的全部
+    assert [msg.content for msg in plan.source_messages] == ["u1", "a1", "u2", "tool call", '{"ok": true}']
+    assert plan.insert_seq == 5
 
 
-def test_build_compact_plan_returns_insert_seq_of_latest_user_message():
+def test_build_compact_insert_seq_when_trailing_is_user():
+    """末尾是 USER 时，insert_seq 是被保留的第一条消息的 seq。"""
     history = AgentHistoryStore(
         agent_id=1,
         items=[
             _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0),
             _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"), seq=1),
             _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2"), seq=2),
-            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a2"), seq=3),
         ],
     )
 
