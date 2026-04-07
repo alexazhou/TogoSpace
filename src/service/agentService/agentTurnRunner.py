@@ -8,8 +8,8 @@ import logging
 from typing import List
 
 from constants import (
-    AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag,
-    DriverType, RoomState,
+    AgentHistoryStatus, AgentHistoryTag,
+    DriverType, OpenaiApiRole, RoomState,
 )
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreRoomMessage
 from model.dbModel.gtAgent import GtAgent
@@ -99,7 +99,6 @@ class AgentTurnRunner:
         )
         await self._history.append_history_message(GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt),
-            stage=AgentHistoryStage.INPUT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
         return 1
@@ -123,7 +122,6 @@ class AgentTurnRunner:
                 if len(turn_setup.hint_prompt) > 0:
                     await self._history.append_history_message(GtAgentHistory.build(
                         llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_setup.hint_prompt),
-                        stage=AgentHistoryStage.INPUT,
                     ))
                     continue
                 # 无 hint_prompt，turn 结束
@@ -146,52 +144,52 @@ class AgentTurnRunner:
         if last_item is None:
             raise RuntimeError(f"history 为空，无法推进: agent_id={self.gt_agent.id}")
 
-        stage, status = last_item.stage, last_item.status
+        role, status = last_item.role, last_item.status
 
-        # TOOL_RESULT 成功且有待处理工具 → 插入 INIT record，下一轮执行
-        if stage == AgentHistoryStage.TOOL_RESULT and status == AgentHistoryStatus.SUCCESS:
+        # TOOL 成功且有待处理工具 → 插入 INIT record，下一轮执行
+        if role == OpenaiApiRole.TOOL and status == AgentHistoryStatus.SUCCESS:
             pending_tc = self._history.get_first_pending_tool_call()
             if pending_tc is not None:
                 await self._history.append_history_init_item(
-                    stage=AgentHistoryStage.TOOL_RESULT,
+                    role=OpenaiApiRole.TOOL,
                     tool_call_id=pending_tc.id,
                 )
                 return "continue"
-            output_item = await self._history.append_history_init_item(stage=AgentHistoryStage.INFER)
+            output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
             assistant_message = await self._infer_to_item(output_item, tools)
             tool_calls = assistant_message.tool_calls or []
             return "no_tool_calls" if len(tool_calls) == 0 else "continue"
 
-        # INPUT 或 INFER 失败/待处理 → 推理
-        if stage == AgentHistoryStage.INPUT:
-            output_item = await self._history.append_history_init_item(stage=AgentHistoryStage.INFER)
+        # USER 或 SYSTEM → 推理
+        if role in (OpenaiApiRole.USER, OpenaiApiRole.SYSTEM):
+            output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
             assistant_message = await self._infer_to_item(output_item, tools)
             tool_calls = assistant_message.tool_calls or []
             return "no_tool_calls" if len(tool_calls) == 0 else "continue"
-        if stage == AgentHistoryStage.INFER and status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED):
+        if role == OpenaiApiRole.ASSISTANT and status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED):
             assistant_message = await self._infer_to_item(last_item, tools)
             tool_calls = assistant_message.tool_calls or []
             return "no_tool_calls" if len(tool_calls) == 0 else "continue"
 
-        # INFER 成功 → 执行工具
-        if stage == AgentHistoryStage.INFER and status == AgentHistoryStatus.SUCCESS:
+        # ASSISTANT 成功 → 执行工具
+        if role == OpenaiApiRole.ASSISTANT and status == AgentHistoryStatus.SUCCESS:
             first_tc = (last_item.tool_calls or [None])[0]
             if first_tc is None:
                 return "no_tool_calls"
             output_item = await self._history.append_history_init_item(
-                stage=AgentHistoryStage.TOOL_RESULT,
+                role=OpenaiApiRole.TOOL,
                 tool_call_id=first_tc.id,
             )
             return await self._run_tool_to_item(first_tc, output_item, room)
 
-        # TOOL_RESULT 待处理 → 恢复执行
-        if stage == AgentHistoryStage.TOOL_RESULT and status == AgentHistoryStatus.INIT:
+        # TOOL 待处理 → 恢复执行
+        if role == OpenaiApiRole.TOOL and status == AgentHistoryStatus.INIT:
             tool_call = self._history.find_tool_call_by_id(last_item.tool_call_id)
             if tool_call is None:
                 raise RuntimeError(f"工具调用不存在: agent_id={self.gt_agent.id}, tool_call_id={last_item.tool_call_id}")
             return await self._run_tool_to_item(tool_call, last_item, room)
 
-        raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, stage={stage}, status={status}")
+        raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, role={role}, status={status}")
 
     async def _infer_to_item(
         self,
@@ -321,7 +319,7 @@ class AgentTurnRunner:
 
         for tool_call in last_msg.tool_calls:
             output_item = await self._history.append_history_init_item(
-                stage=AgentHistoryStage.TOOL_RESULT,
+                role=OpenaiApiRole.TOOL,
                 tool_call_id=tool_call.id,
             )
             await self._run_tool_to_item(tool_call, output_item, room)

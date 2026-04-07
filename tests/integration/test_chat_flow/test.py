@@ -18,7 +18,7 @@ from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
-from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, AgentStatus, AgentTaskType, OpenaiApiRole, RoomState
+from constants import AgentHistoryTag, AgentHistoryStatus, AgentStatus, AgentTaskType, OpenaiApiRole, RoomState
 from service import messageBus
 from ...base import ServiceTestCase
 
@@ -126,7 +126,6 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         tool_results = [m for m in alice.task_consumer._turn_runner._history if m.role == OpenaiApiRole.TOOL]
         assert len(tool_results) >= 1
         assert json.loads(tool_results[0].content)["success"]
-        assert tool_results[0].stage == AgentHistoryStage.TOOL_RESULT
         assert tool_results[0].status == AgentHistoryStatus.SUCCESS
         assert tool_results[0].error_message is None
         assert any(AgentHistoryTag.ROOM_TURN_FINISH in msg.tags for msg in tool_results)
