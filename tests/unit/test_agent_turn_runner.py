@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryStage, AgentHistoryTag, DriverType
+from constants import AgentHistoryTag, DriverType, OpenaiApiRole
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
@@ -80,7 +80,7 @@ async def test_pull_room_messages_syncs_to_history(turn_runner):
     turn_runner._history.append_history_message.assert_called_once()
     call_args = turn_runner._history.append_history_message.call_args
     item = call_args.args[0]  # 第一个位置参数是 GtAgentHistory
-    assert item.stage == AgentHistoryStage.INPUT
+    assert item.role == OpenaiApiRole.USER
     assert AgentHistoryTag.ROOM_TURN_BEGIN in item.tags
 
 

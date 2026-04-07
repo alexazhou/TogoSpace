@@ -16,7 +16,7 @@ from service.funcToolService.tools import FUNCTION_REGISTRY
 from service import funcToolService, roomService
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from constants import AgentHistoryStage, AgentHistoryStatus
+from constants import AgentHistoryStatus, OpenaiApiRole
 from util import llmApiUtil
 
 from .base import AgentDriver
@@ -179,7 +179,6 @@ class ClaudeSdkAgentDriver(AgentDriver):
                         }
                     ],
                 ),
-                stage=AgentHistoryStage.INFER,
                 status=AgentHistoryStatus.SUCCESS,
             ))
 

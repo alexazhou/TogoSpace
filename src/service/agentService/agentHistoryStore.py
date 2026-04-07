@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Iterator
 
-from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiApiRole
+from constants import AgentHistoryTag, AgentHistoryStatus, OpenaiApiRole
 from dal.db import gtAgentHistoryManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.historyUsage import HistoryUsage
@@ -80,7 +80,7 @@ class AgentHistoryStore:
         last_item = self.last()
         if (
             last_item is not None
-            and last_item.stage == AgentHistoryStage.INFER
+            and last_item.role == OpenaiApiRole.ASSISTANT
             and last_item.status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED)
         ):
             return last_item
@@ -122,17 +122,16 @@ class AgentHistoryStore:
 
     async def append_history_init_item(
         self,
-        stage: AgentHistoryStage,
+        role: OpenaiApiRole,
         tool_call_id: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
     ) -> GtAgentHistory:
         init_message = llmApiUtil.OpenAIMessage(
-            role=GtAgentHistory.infer_role_from_stage(stage),
+            role=role,
             tool_call_id=tool_call_id,
         )
         item = GtAgentHistory.build(
             init_message,
-            stage=stage,
             status=AgentHistoryStatus.INIT,
             tags=tags,
         )
@@ -311,7 +310,6 @@ class AgentHistoryStore:
         """
         item = GtAgentHistory.build(
             message,
-            stage=AgentHistoryStage.INPUT,
             status=AgentHistoryStatus.SUCCESS,
             tags=[AgentHistoryTag.COMPACT_SUMMARY],
         )

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiApiRole
+from constants import AgentHistoryTag, AgentHistoryStatus, OpenaiApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from util import llmApiUtil
@@ -16,12 +16,11 @@ def _make_item(
     *,
     agent_id: int = 1,
     seq: int = 0,
-    stage: AgentHistoryStage | None = None,
     status: AgentHistoryStatus | None = None,
     tags: list[AgentHistoryTag] | None = None,
 ) -> GtAgentHistory:
     """测试辅助函数：创建 GtAgentHistory 并填充 agent_id 和 seq。"""
-    item = GtAgentHistory.build(message, stage=stage, status=status, tags=tags)
+    item = GtAgentHistory.build(message, status=status, tags=tags)
     item.agent_id = agent_id
     item.seq = seq
     return item
@@ -86,18 +85,8 @@ def test_agent_history_find_tool_result_by_call_id_returns_matching_history_item
     assert item is not None
     assert item.tool_call_id == "call_2"
     assert item.content == '{"success": false}'
-    assert item.stage == AgentHistoryStage.TOOL_RESULT
+    assert item.role == OpenaiApiRole.TOOL
     assert history.find_tool_result_by_call_id("missing") is None
-
-
-def test_build_assigns_stage_by_role():
-    user_item = _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u"), agent_id=9, seq=0)
-    assistant_item = _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a"), agent_id=9, seq=1)
-    tool_item = _make_item(llmApiUtil.OpenAIMessage.tool_result("c1", '{"success": true}'), agent_id=9, seq=2)
-
-    assert user_item.stage == AgentHistoryStage.INPUT
-    assert assistant_item.stage == AgentHistoryStage.INFER
-    assert tool_item.stage == AgentHistoryStage.TOOL_RESULT
 
 
 def test_agent_history_len_and_iter():
@@ -260,7 +249,6 @@ def test_build_compact_source_messages_excludes_pending_infer():
     pending_infer = _make_item(
         llmApiUtil.OpenAIMessage(role=OpenaiApiRole.ASSISTANT),
         seq=2,
-        stage=AgentHistoryStage.INFER,
         status=AgentHistoryStatus.INIT,
     )
     history = AgentHistoryStore(
@@ -313,7 +301,6 @@ def test_build_infer_messages_excludes_pending_infer_tail():
     pending_infer = _make_item(
         llmApiUtil.OpenAIMessage(role=OpenaiApiRole.ASSISTANT),
         seq=2,
-        stage=AgentHistoryStage.INFER,
         status=AgentHistoryStatus.FAILED,
     )
     history = AgentHistoryStore(

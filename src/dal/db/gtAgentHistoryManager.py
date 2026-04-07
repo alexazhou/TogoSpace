@@ -14,7 +14,6 @@ async def append_agent_history_message(message: GtAgentHistory) -> GtAgentHistor
             agent_id=message.agent_id,
             seq=message.seq,
             message_json=message.message_json,
-            stage=message.stage,
             status=message.status,
             error_message=message.error_message,
             tags=message.tags,

@@ -10,7 +10,7 @@ import pytest
 import service.llmService as llmService
 import service.ormService as ormService
 from constants import (
-    AgentHistoryStage, AgentHistoryStatus, AgentHistoryTag,
+    AgentHistoryStatus, AgentHistoryTag,
     DriverType, OpenaiApiRole,
 )
 from model.dbModel.gtAgent import GtAgent
@@ -89,17 +89,17 @@ class TestCompactFlow(ServiceTestCase):
         for i in range(turns):
             user_msg = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"用户消息 {i}")
             await history.append_history_message(GtAgentHistory.build(
-                user_msg, stage=AgentHistoryStage.INPUT, status=AgentHistoryStatus.SUCCESS,
+                user_msg, status=AgentHistoryStatus.SUCCESS,
             ))
             assistant_msg = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, f"助手回复 {i}")
             await history.append_history_message(GtAgentHistory.build(
-                assistant_msg, stage=AgentHistoryStage.INFER, status=AgentHistoryStatus.SUCCESS,
+                assistant_msg, status=AgentHistoryStatus.SUCCESS,
             ))
 
         # 追加一条新的 user 消息，使 history 处于 infer-ready 状态
         final_user = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "最新的用户输入")
         await history.append_history_message(GtAgentHistory.build(
-            final_user, stage=AgentHistoryStage.INPUT, status=AgentHistoryStatus.SUCCESS,
+            final_user, status=AgentHistoryStatus.SUCCESS,
         ))
         return history
 
@@ -135,7 +135,7 @@ class TestCompactFlow(ServiceTestCase):
             ])),
             mock.patch(_ESTIMATE_PATCH, side_effect=estimate_calls),
         ):
-            output_item = await history.append_history_init_item(stage=AgentHistoryStage.INFER)
+            output_item = await history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
             result = await runner._infer_to_item(output_item, tools=[])
 
         assert result.content == "好的，我来回答你的最新问题。"
@@ -190,7 +190,6 @@ class TestCompactFlow(ServiceTestCase):
         assert len(compact_items) == 1, f"应有 1 条 COMPACT_SUMMARY，实际: {len(compact_items)}"
 
         summary_item = compact_items[0]
-        assert summary_item.stage == AgentHistoryStage.INPUT
         assert summary_item.role == OpenaiApiRole.USER
         # 内容应包含摘要引导语和摘要内容
         assert "以下是之前对话的压缩摘要" in summary_item.content
