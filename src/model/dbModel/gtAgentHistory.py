@@ -68,6 +68,16 @@ class GtAgentHistory(DbModelBase):
         return self.openai_message.tool_call_id
 
     @staticmethod
+    def infer_role_from_stage(stage: AgentHistoryStage) -> OpenaiApiRole:
+        if stage == AgentHistoryStage.INPUT:
+            return OpenaiApiRole.USER
+        if stage == AgentHistoryStage.INFER:
+            return OpenaiApiRole.ASSISTANT
+        if stage == AgentHistoryStage.TOOL_RESULT:
+            return OpenaiApiRole.TOOL
+        raise ValueError(f"不支持的 history stage: {stage}")
+
+    @staticmethod
     def infer_stage_from_message(message: llmApiUtil.OpenAIMessage) -> AgentHistoryStage:
         role = OpenaiApiRole.value_of(message.role)
         if role in (OpenaiApiRole.SYSTEM, OpenaiApiRole.USER):
