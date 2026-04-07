@@ -235,22 +235,23 @@ VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 
 - [docs/ROADMAP.md](docs/ROADMAP.md)：里程碑与阶段目标
 - [docs/文档规范.md](docs/文档规范.md)：文档书写规范
-- [docs/controller_development.md](docs/controller_development.md)：Controller 开发说明
+- [docs/mvc/controller_development.md](docs/mvc/controller_development.md)：Controller 开发说明
 - [docs/go_simu_terminal.md](docs/go_simu_terminal.md)：终端模拟器使用说明
 
 ### 代码规范
 
-- [docs/code_rule/service_conventions.md](docs/code_rule/service_conventions.md)
+- [docs/code_rule/common_coding_rule.md](docs/code_rule/common_coding_rule.md)
+- [docs/code_rule/enum_conventions.md](docs/code_rule/enum_conventions.md)
 - [docs/code_rule/logger_convention.md](docs/code_rule/logger_convention.md)
 - [docs/code_rule/import_convention.md](docs/code_rule/import_convention.md)
-- [docs/code_rule/formatting_convention.md](docs/code_rule/formatting_convention.md)
+- [docs/mvc/service_conventions.md](docs/mvc/service_conventions.md)
+- [docs/mvc/dal_conventions.md](docs/mvc/dal_conventions.md)
 
 ### 技术设计
 
 - [docs/tech/agent_driver_architecture.md](docs/tech/agent_driver_architecture.md)
 - [docs/tech/agent_driver_vs_subclass.md](docs/tech/agent_driver_vs_subclass.md)
 - [docs/tech/agent_scheduling_logic.md](docs/tech/agent_scheduling_logic.md)
-- [docs/tech/agent_task_consumer_plan_a.md](docs/tech/agent_task_consumer_plan_a.md)
 - [docs/tech/token_compaction.md](docs/tech/token_compaction.md)
 - [docs/tech/task_lifecycle.md](docs/tech/task_lifecycle.md)
 - [docs/tech/turn_runner_as_driver_host.md](docs/tech/turn_runner_as_driver_host.md)
@@ -261,4 +262,4 @@ VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 
 ### 版本文档
 
-- `docs/versions/v*/`：按版本沉淀的产品、技术、任务文档（v1 ~ v9）
+- `docs/versions/v*/`：按版本沉淀的产品、技术、任务文档（v1 ~ v10）
