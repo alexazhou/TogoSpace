@@ -395,14 +395,8 @@ class AgentTurnRunner:
             logger.warning("compact 失败：LLM 返回无效, agent_id=%d", self.gt_agent.id)
             return False
 
-        await self._history.append_history_message(
+        await self._history.insert_compact_summary(
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, summary_text),
             seq=compact_plan.insert_seq,
-            stage=AgentHistoryStage.INPUT,
-            status=AgentHistoryStatus.SUCCESS,
-            tags=[AgentHistoryTag.COMPACT_SUMMARY],
         )
-
-        # 内存裁剪：只保留 COMPACT_SUMMARY 及其之后的消息
-        self._history.trim_to_compact_window()
         return True
