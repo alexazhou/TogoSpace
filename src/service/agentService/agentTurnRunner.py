@@ -383,7 +383,7 @@ class AgentTurnRunner:
         """执行一次 compact：生成摘要 → 插入 COMPACT_SUMMARY → 内存裁剪。返回是否成功。"""
         _, llm_config, _, _ = self._resolve_compact_config()
         compact_plan = self._history.build_compact_plan()
-        if not compact_plan.source_messages or compact_plan.insert_seq is None:
+        if compact_plan is None:
             logger.warning("compact 跳过：无可压缩消息, agent_id=%d", self.gt_agent.id)
             return False
 

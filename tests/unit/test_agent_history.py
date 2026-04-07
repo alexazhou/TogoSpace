@@ -274,8 +274,7 @@ def test_build_compact_source_messages_excludes_pending_infer():
 
     plan = history.build_compact_plan()
 
-    assert plan.source_messages == []
-    assert plan.insert_seq is None
+    assert plan is None
 
 
 def test_build_compact_source_messages_keeps_tool_call_chain_after_latest_user():
