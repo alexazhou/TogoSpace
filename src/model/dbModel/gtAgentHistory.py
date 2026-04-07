@@ -8,7 +8,8 @@ from util import llmApiUtil
 
 from constants import AgentHistoryTag, AgentHistoryStage, AgentHistoryStatus, OpenaiApiRole
 
-from .base import DbModelBase, EnumField, EnumListField, JsonField
+from .base import DbModelBase, EnumField, EnumListField, JsonField, JsonFieldWithClass
+from .historyUsage import HistoryUsage
 
 
 class GtAgentHistory(DbModelBase):
@@ -19,7 +20,7 @@ class GtAgentHistory(DbModelBase):
     status: AgentHistoryStatus = EnumField[AgentHistoryStatus](AgentHistoryStatus, null=False, default=AgentHistoryStatus.INIT)
     error_message: str | None = peewee.TextField(null=True)
     tags: list[AgentHistoryTag] = EnumListField[AgentHistoryTag](AgentHistoryTag, default=list)
-    usage_json: dict[str, Any] | None = JsonField(null=True)
+    usage: HistoryUsage | None = JsonFieldWithClass[HistoryUsage](HistoryUsage, null=True)
 
     class Meta:
         table_name = "agent_histories"

@@ -146,8 +146,8 @@ async def test_infer_pre_check_triggers_compact():
 
     assert msg.content == "压缩后的回答"
     history.insert_compact_summary.assert_awaited_once()
-    usage_data = history.finalize_history_item.call_args[1]["usage_json"]
-    assert usage_data["pre_check_triggered"] is True
+    usage_data = history.finalize_history_item.call_args[1]["usage"]
+    assert usage_data.pre_check_triggered is True
 
 
 @pytest.mark.asyncio
@@ -185,8 +185,8 @@ async def test_infer_overflow_triggers_compact_retry():
         msg = await runner._infer_to_item(output_item, tools=[])
 
     assert msg.content == "重试成功"
-    usage_data = history.finalize_history_item.call_args[1]["usage_json"]
-    assert usage_data["overflow_retry"] is True
+    usage_data = history.finalize_history_item.call_args[1]["usage"]
+    assert usage_data.overflow_retry is True
     history.insert_compact_summary.assert_awaited_once()
 
 
@@ -264,11 +264,11 @@ async def test_infer_usage_recorded_in_finalize():
     ):
         await runner._infer_to_item(output_item, tools=[])
 
-    usage_data = history.finalize_history_item.call_args[1]["usage_json"]
-    assert usage_data["estimated_prompt_tokens"] == 500
-    assert usage_data["prompt_tokens"] == 1000
-    assert usage_data["completion_tokens"] == 200
-    assert usage_data["total_tokens"] == 1200
+    usage_data = history.finalize_history_item.call_args[1]["usage"]
+    assert usage_data.estimated_prompt_tokens == 500
+    assert usage_data.prompt_tokens == 1000
+    assert usage_data.completion_tokens == 200
+    assert usage_data.total_tokens == 1200
 
 
 @pytest.mark.asyncio

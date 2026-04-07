@@ -5,6 +5,7 @@ from util.configTypes import LlmServiceConfig
 from util.llmApiUtil import OpenAIResponse, OpenAIUsage, OpenAIChoice, OpenAIMessage
 from constants import OpenaiApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.historyUsage import HistoryUsage
 
 
 # ─── LlmServiceConfig token 预算字段 ────────────────────
@@ -100,16 +101,16 @@ def test_openai_response_usage_from_dict():
     assert resp.usage.total_tokens == 280
 
 
-# ─── GtAgentHistory usage_json 字段 ──────────────────────
+# ─── GtAgentHistory usage 字段 ───────────────────────────
 
-def test_gt_agent_history_usage_json_default_none():
+def test_gt_agent_history_usage_default_none():
     msg = OpenAIMessage.text(OpenaiApiRole.USER, "hello")
     item = GtAgentHistory.from_openai_message(1, 0, msg)
-    assert item.usage_json is None
+    assert item.usage is None
 
 
-def test_gt_agent_history_usage_json_settable():
+def test_gt_agent_history_usage_settable():
     msg = OpenAIMessage.text(OpenaiApiRole.USER, "hello")
     item = GtAgentHistory.from_openai_message(1, 0, msg)
-    item.usage_json = {"estimated_prompt_tokens": 100}
-    assert item.usage_json == {"estimated_prompt_tokens": 100}
+    item.usage = HistoryUsage(estimated_prompt_tokens=100)
+    assert item.usage == HistoryUsage(estimated_prompt_tokens=100)

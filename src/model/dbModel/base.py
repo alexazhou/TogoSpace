@@ -3,16 +3,18 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import logging
-from typing import Generic, List, TypeVar, cast
+from typing import Any, Generic, List, TypeVar, cast
 
 import peewee
 import peewee_async
 from playhouse.shortcuts import model_to_dict
 from constants import EnhanceEnum
 from model.dbModel.auto_timestamp_mixin import AutoTimestampMixin
+from util import jsonUtil
 
 TJson = TypeVar("TJson")
 TEnum = TypeVar("TEnum", bound="EnhanceEnum")
+TClassJson = TypeVar("TClassJson")
 
 _database_proxy: peewee.DatabaseProxy = peewee.DatabaseProxy()
 logger = logging.getLogger(__name__)
@@ -39,12 +41,41 @@ class JsonField(peewee.TextField, Generic[TJson]):
             return cast(TJson, json.loads(value))
         except (TypeError, ValueError) as exc:
             field_name = getattr(self, "name", None) or "<unknown>"
-            logger.warning(
-                "JsonField parse failed for field '%s', returning None: value=%r, error=%s",
-                field_name,
-                value,
-                exc,
-            )
+            logger.warning("JsonField parse failed for field '%s', returning None: value=%r, error=%s", field_name, value, exc)
+            return None
+
+
+class JsonFieldWithClass(peewee.TextField, Generic[TClassJson]):
+    """将自定义类对象与 TEXT(JSON) 自动互转。"""
+
+    def __init__(
+        self,
+        json_cls: type[TClassJson],
+        json_config: dict[jsonUtil.JSONConfig, Any] | None = None,
+        *args,
+        **kwargs,
+    ):
+        self.json_cls = json_cls
+        self.json_config = json_config
+        super().__init__(*args, **kwargs)
+
+    def db_value(self, value: TClassJson | None) -> str | None:
+        if value is None:
+            return None
+        return jsonUtil.json_dump(value, config=self.json_config)
+
+    def python_value(self, value) -> TClassJson | None:
+        if value is None:
+            return None
+        if isinstance(value, self.json_cls):
+            return value
+        try:
+            if isinstance(value, str):
+                return cast(TClassJson, jsonUtil.json_load(value, self.json_cls, config=self.json_config))
+            return cast(TClassJson, jsonUtil.json_data_to_object(value, self.json_cls, config=self.json_config))
+        except Exception as exc:
+            field_name = getattr(self, "name", None) or "<unknown>"
+            logger.warning("JsonFieldWithClass parse failed for field '%s', returning None: value=%r, error=%s", field_name, value, exc)
             return None
 
 
