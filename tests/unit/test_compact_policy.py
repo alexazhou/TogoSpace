@@ -1,4 +1,4 @@
-"""compactPolicy 单元测试。"""
+"""compact 单元测试。"""
 import pytest
 
 from constants import OpenaiApiRole
@@ -6,7 +6,7 @@ from service.agentService.promptBuilder import (
     build_compact_instruction,
     build_compact_resume_prompt,
 )
-from service.agentService.compactPolicy import (
+from service.agentService.compact import (
     calc_compact_trigger_tokens,
     calc_hard_limit_tokens,
     estimate_tokens,

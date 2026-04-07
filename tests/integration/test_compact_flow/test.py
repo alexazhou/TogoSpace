@@ -25,7 +25,7 @@ from util import llmApiUtil
 
 _CONFIG_PATCH = "service.agentService.agentTurnRunner.configUtil.get_app_config"
 _INFER_PATCH = "service.agentService.agentTurnRunner.llmService.infer"
-_ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compactPolicy.estimate_tokens"
+_ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
 
 # context_window=500, reserve=100 → hard_limit=400, trigger=floor(400*0.85)=340
 _CONTEXT_WINDOW = 500
@@ -143,15 +143,13 @@ class TestCompactFlow(ServiceTestCase):
         # ── 验证 history 结构 ──
         # compact 后 trim_to_compact_window 会裁剪旧消息
         # 剩余结构应为：
-        #   [context_resume(USER), 最新用户输入(USER), INFER_INIT→SUCCESS(ASSISTANT)]
-        # 其中 COMPACT_CMD + summary 在 trim 后被移到窗口之前了
+        #   [COMPACT_SUMMARY(USER), 最新用户输入(USER), INFER→SUCCESS(ASSISTANT)]
         #
-        # 但具体结构取决于 _build_runtime_window 的逻辑
         # 关键验证点：
 
-        # 1. history 中应有 COMPACT_CMD 标记的消息
-        has_compact_cmd = any(AgentHistoryTag.COMPACT_CMD in item.tags for item in history)
-        assert has_compact_cmd, "history 中应存在 COMPACT_CMD 标记"
+        # 1. history 中应有 COMPACT_SUMMARY 标记的消息
+        has_compact_summary = any(AgentHistoryTag.COMPACT_SUMMARY in item.tags for item in history)
+        assert has_compact_summary, "history 中应存在 COMPACT_SUMMARY 标记"
 
         # 2. build_infer_messages 应该只返回 compact 窗口内的消息（不含旧历史）
         infer_messages = history.build_infer_messages()
@@ -167,8 +165,8 @@ class TestCompactFlow(ServiceTestCase):
         assert last.status == AgentHistoryStatus.SUCCESS
         assert last.content == "好的，我来回答你的最新问题。"
 
-    async def test_compact_inserts_three_messages_cmd_summary_context(self):
-        """验证 _execute_compact 插入了三条消息：COMPACT_CMD、summary、context_resume。"""
+    async def test_compact_inserts_one_summary_message(self):
+        """验证 _execute_compact 插入了 1 条 COMPACT_SUMMARY 消息。"""
         history = await self._reset_and_build_history(agent_id=100, turns=3)
         runner = _make_runner(history)
 
@@ -183,31 +181,20 @@ class TestCompactFlow(ServiceTestCase):
                 return_value=llmService.InferResult.success(compact_resp),
             )),
         ):
-            await runner._execute_compact()
+            result = await runner._execute_compact()
 
-        # _execute_compact 插入 3 条消息后做了 trim
-        # 找到 COMPACT_CMD
-        compact_items = [item for item in history if AgentHistoryTag.COMPACT_CMD in item.tags]
-        assert len(compact_items) == 1, f"应有 1 条 COMPACT_CMD，实际: {len(compact_items)}"
+        assert result is True
 
-        compact_cmd = compact_items[0]
-        compact_idx = list(history).index(compact_cmd)
-        assert compact_cmd.stage == AgentHistoryStage.INPUT
-        assert compact_cmd.role == OpenaiApiRole.USER
+        # trim 后 history 中应有且仅有 1 条 COMPACT_SUMMARY 消息
+        compact_items = [item for item in history if AgentHistoryTag.COMPACT_SUMMARY in item.tags]
+        assert len(compact_items) == 1, f"应有 1 条 COMPACT_SUMMARY，实际: {len(compact_items)}"
 
-        # COMPACT_CMD 后应紧跟 summary (INFER/ASSISTANT)
-        if compact_idx + 1 < len(history):
-            summary_item = list(history)[compact_idx + 1]
-            assert summary_item.stage == AgentHistoryStage.INFER
-            assert summary_item.role == OpenaiApiRole.ASSISTANT
-            assert summary_item.content == "摘要内容"
-
-        # summary 后应紧跟 context_resume (INPUT/USER)
-        if compact_idx + 2 < len(history):
-            context_item = list(history)[compact_idx + 2]
-            assert context_item.stage == AgentHistoryStage.INPUT
-            assert context_item.role == OpenaiApiRole.USER
-            assert "压缩摘要" in context_item.content or "摘要内容" in context_item.content
+        summary_item = compact_items[0]
+        assert summary_item.stage == AgentHistoryStage.INPUT
+        assert summary_item.role == OpenaiApiRole.USER
+        # 内容应包含摘要引导语和摘要内容
+        assert "以下是之前对话的压缩摘要" in summary_item.content
+        assert "摘要内容" in summary_item.content
 
     async def test_compact_trim_removes_old_messages_from_memory(self):
         """验证 compact 后 trim_to_compact_window 移除了旧消息。"""
@@ -236,9 +223,8 @@ class TestCompactFlow(ServiceTestCase):
                 assert msg.content != f"用户消息 {i}", f"旧消息不应出现: {msg.content}"
                 assert msg.content != f"助手回复 {i}", f"旧消息不应出现: {msg.content}"
 
-    async def test_build_infer_messages_after_compact_excludes_cmd_and_summary(self):
-        """compact 完成后 build_infer_messages 应跳过 COMPACT_CMD + summary，
-        只返回 context_resume 之后的消息。"""
+    async def test_build_infer_messages_after_compact_contains_summary_and_current_input(self):
+        """compact 完成后 build_infer_messages 应包含 COMPACT_SUMMARY 及其之后的消息。"""
         history = await self._reset_and_build_history(agent_id=102, turns=3)
         runner = _make_runner(history)
 
@@ -254,12 +240,12 @@ class TestCompactFlow(ServiceTestCase):
 
         infer_messages = history.build_infer_messages()
 
-        # infer_messages 不应包含 compact 指令本身的内容
+        # infer_messages 不应包含 compact 指令本身的内容（指令仅在 compact_messages 内部使用）
         for msg in infer_messages:
             assert "因为上下文长度即将超出限制" not in (msg.content or ""), \
                 "infer_messages 不应包含 compact 指令"
 
-        # 但应包含上下文恢复消息（含摘要内容）
+        # 应包含上下文恢复消息（含摘要内容）
         resume_found = any("摘要" in (msg.content or "") for msg in infer_messages)
         assert resume_found, "infer_messages 应包含上下文恢复消息"
 

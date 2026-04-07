@@ -90,7 +90,7 @@ HARD_LIMIT_TOKENS = 27904
 
 _CONFIG_PATCH = "service.agentService.agentTurnRunner.configUtil.get_app_config"
 _INFER_PATCH = "service.agentService.agentTurnRunner.llmService.infer"
-_ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compactPolicy.estimate_tokens"
+_ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
 
 
 @pytest.mark.asyncio
@@ -279,14 +279,15 @@ async def test_execute_compact_skips_when_no_source():
     history.build_compact_plan.return_value = CompactPlan(source_messages=[], insert_seq=None)
 
     with patch(_CONFIG_PATCH, return_value=_mock_config()):
-        await runner._execute_compact()
+        result = await runner._execute_compact()
 
+    assert result is False
     history.append_history_message.assert_not_called()
     history.trim_to_compact_window.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_execute_compact_inserts_cmd_summary_context_and_trims():
+async def test_execute_compact_inserts_summary_and_trims():
     runner, history = _make_runner_and_history()
     compact_resp = _make_mock_response(content="压缩摘要")
 
@@ -294,30 +295,22 @@ async def test_execute_compact_inserts_cmd_summary_context_and_trims():
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(compact_resp))),
     ):
-        await runner._execute_compact()
+        result = await runner._execute_compact()
 
-    assert history.append_history_message.await_count == 3
+    assert result is True
+    assert history.append_history_message.await_count == 1
 
-    # Verify seq and tags in append_history_message calls
-    cmd_call = history.append_history_message.call_args_list[0]
-    assert cmd_call.kwargs["seq"] == 1
-    assert cmd_call.kwargs["tags"] == [AgentHistoryTag.COMPACT_CMD]
-
-    summary_call = history.append_history_message.call_args_list[1]
-    assert summary_call.kwargs["seq"] == 2
-    assert summary_call.kwargs["stage"] == AgentHistoryStage.INFER
-    assert summary_call.args[0].content == "压缩摘要"
-
-    context_call = history.append_history_message.call_args_list[2]
-    assert context_call.kwargs["seq"] == 3
-    assert context_call.kwargs["stage"] == AgentHistoryStage.INPUT
-    assert "以下是之前对话的压缩摘要" in context_call.args[0].content
+    call = history.append_history_message.call_args_list[0]
+    assert call.kwargs["seq"] == 1
+    assert call.kwargs["tags"] == [AgentHistoryTag.COMPACT_SUMMARY]
+    assert call.kwargs["stage"] == AgentHistoryStage.INPUT
+    assert "以下是之前对话的压缩摘要" in call.args[0].content
 
     history.trim_to_compact_window.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_execute_compact_failure_raises():
+async def test_execute_compact_failure_returns_false():
     runner, history = _make_runner_and_history()
     error = Exception("LLM service unavailable")
 
@@ -325,8 +318,8 @@ async def test_execute_compact_failure_raises():
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.failure(error))),
     ):
-        with pytest.raises(RuntimeError, match="LLM 推理失败\\(compact\\)"):
-            await runner._execute_compact()
+        result = await runner._execute_compact()
 
-    assert history.append_history_message.await_count == 1
+    assert result is False
+    history.append_history_message.assert_not_called()
     history.trim_to_compact_window.assert_not_called()
