@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 _WS_TOPICS = [
     MessageBusTopic.ROOM_MSG_ADDED,
+    MessageBusTopic.ROOM_STATUS_CHANGED,
     MessageBusTopic.AGENT_STATUS_CHANGED,
     MessageBusTopic.AGENT_ACTIVITY_CHANGED,
 ]
@@ -30,6 +31,8 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
         payload = dict(msg.payload)
         if msg.topic == MessageBusTopic.ROOM_MSG_ADDED:
             payload["event"] = "message"
+        if msg.topic == MessageBusTopic.ROOM_STATUS_CHANGED:
+            payload["event"] = "room_status"
         if msg.topic == MessageBusTopic.AGENT_STATUS_CHANGED:
             payload["event"] = "agent_status"
         if msg.topic == MessageBusTopic.AGENT_ACTIVITY_CHANGED:
