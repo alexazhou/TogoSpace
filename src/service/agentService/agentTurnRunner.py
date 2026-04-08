@@ -237,20 +237,11 @@ class AgentTurnRunner:
         overflow_retry = False
         usage: llmApiUtil.OpenAIUsage | None = None
         assistant_committed = False
-
-        # 活动记录：LLM_INFER STARTED
-        room = self._current_room
-        activity_metadata = self._base_metadata(model=resolved_model)
-
-        activity = await agentActivityService.add_activity(
-            gt_agent=self.gt_agent, activity_type=AgentActivityType.LLM_INFER, metadata=activity_metadata,
-        )
-        activity_id = activity.id
+        activity_id: int | None = None
 
         try:
             messages = history.build_infer_messages()
             estimated_tokens = compact.estimate_tokens(resolved_model, messages, self.system_prompt)
-            activity_metadata.estimated_prompt_tokens = estimated_tokens
 
             messages, estimated_tokens, pre_compact_triggered = await self._check_compact(
                 messages,
@@ -260,6 +251,13 @@ class AgentTurnRunner:
             )
             if pre_compact_triggered:
                 compact_stage = "pre"
+
+            # 活动记录：LLM_INFER STARTED（pre-check compact 已完成，不会与 COMPACT 并行）
+            activity = await agentActivityService.add_activity(
+                gt_agent=self.gt_agent, activity_type=AgentActivityType.LLM_INFER,
+                metadata=self._base_metadata(model=resolved_model, estimated_prompt_tokens=estimated_tokens),
+            )
+            activity_id = activity.id
 
             ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools)
 
@@ -409,8 +407,9 @@ class AgentTurnRunner:
                 error_message=str(e),
                 usage=usage_data,
             )
-            # 活动记录：LLM_INFER FAILED
-            await agentActivityService.update_activity_progress(activity_id, status=AgentActivityStatus.FAILED, error_message=str(e))
+            # 活动记录：LLM_INFER FAILED（pre-check compact 失败时 activity_id 为 None，无需更新）
+            if activity_id is not None:
+                await agentActivityService.update_activity_progress(activity_id, status=AgentActivityStatus.FAILED, error_message=str(e))
             raise
 
     async def _run_tool_to_item(self, tool_call: llmApiUtil.OpenAIToolCall, output_item: GtAgentHistory, room: ChatRoom) -> TurnStepResult:
