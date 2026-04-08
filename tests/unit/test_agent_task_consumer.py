@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentStatus, AgentTaskStatus
+from constants import AgentActivityStatus, AgentActivityType, AgentStatus, AgentTaskStatus
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
 from service.agentService.agentTaskConsumer import AgentTaskConsumer
@@ -95,6 +95,40 @@ async def test_consume_stops_on_failed_task(consumer, mock_gt_agent, mock_turn_r
 
             assert consumer.status == AgentStatus.FAILED
             mock_manager.update_task_status.assert_called_once_with(100, AgentTaskStatus.FAILED, error_message="inference failed")
+            assert consumer._mock_activity_service.add_activity.await_args_list[-1].kwargs == {
+                "gt_agent": mock_gt_agent,
+                "activity_type": AgentActivityType.AGENT_STATE,
+                "status": AgentActivityStatus.SUCCEEDED,
+                "detail": AgentStatus.FAILED.name,
+                "error_message": "inference failed",
+            }
+
+
+@pytest.mark.asyncio
+async def test_consume_running_task_retries_and_keeps_failed_status_on_error(consumer, mock_gt_agent, mock_turn_runner):
+    running_task = MagicMock(spec=GtAgentTask)
+    running_task.id = 101
+    running_task.status = AgentTaskStatus.RUNNING
+    running_task.task_data = {"room_id": 42}
+
+    with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_manager:
+        mock_manager.get_first_unfinish_task = AsyncMock(side_effect=[running_task])
+        mock_manager.update_task_status = AsyncMock()
+
+        mock_turn_runner.run_chat_turn = AsyncMock(side_effect=RuntimeError("retry failed"))
+
+        await consumer.consume()
+
+        mock_turn_runner.run_chat_turn.assert_called_once_with(running_task)
+        mock_manager.update_task_status.assert_called_once_with(101, AgentTaskStatus.FAILED, error_message="retry failed")
+        assert consumer.status == AgentStatus.FAILED
+        assert consumer._mock_activity_service.add_activity.await_args_list[-1].kwargs == {
+            "gt_agent": mock_gt_agent,
+            "activity_type": AgentActivityType.AGENT_STATE,
+            "status": AgentActivityStatus.SUCCEEDED,
+            "detail": AgentStatus.FAILED.name,
+            "error_message": "retry failed",
+        }
 
 
 @pytest.mark.asyncio

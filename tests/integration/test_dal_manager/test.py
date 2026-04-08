@@ -784,6 +784,27 @@ class TestDalManagers(ServiceTestCase):
         assert first.id == task1.id
         assert first.status == AgentTaskStatus.FAILED
 
+    async def test_agent_task_manager_get_first_unfinish_task_returns_running(self):
+        """恢复中的 running 任务，也应被视为最早未完成任务。"""
+        await self._reset_tables()
+
+        await self._save_role_template("alice", "gpt-4o")
+        team = await gtTeamManager.save_team(GtTeam(name="task_team_running"))
+        configs = [AgentConfig(name="alice", role_template="alice")]
+        agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
+        await gtAgentManager.batch_save_agents(team.id, agents)
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert alice is not None
+
+        task1 = await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 1})
+        await gtAgentTaskManager.update_task_status(task1.id, AgentTaskStatus.RUNNING)
+        await gtAgentTaskManager.create_task(alice.id, AgentTaskType.ROOM_MESSAGE, {"room_id": 2})
+
+        first = await gtAgentTaskManager.get_first_unfinish_task(alice.id)
+        assert first is not None
+        assert first.id == task1.id
+        assert first.status == AgentTaskStatus.RUNNING
+
     async def test_agent_task_manager_get_first_unfinish_task_no_unfinish(self):
         """没有未完成任务时返回 None。"""
         await self._reset_tables()

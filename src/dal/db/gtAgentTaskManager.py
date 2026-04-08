@@ -39,15 +39,15 @@ async def has_pending_room_task(agent_id: int, room_id: int) -> bool:
 async def get_first_unfinish_task(agent_id: int) -> GtAgentTask | None:
     """获取 Agent 最早的未完成任务。
 
-    未完成任务当前定义为 PENDING 或 FAILED。
-    这样失败任务会按顺序阻断后续任务，但调用方仍能拿到该失败任务本身。
+    未完成任务当前定义为 PENDING / RUNNING / FAILED。
+    这样失败任务会按顺序阻断后续任务，而恢复中的 RUNNING 任务也能继续被消费。
     """
     return await (
         GtAgentTask
         .select()
         .where(
             GtAgentTask.agent_id == agent_id,
-            GtAgentTask.status.in_([AgentTaskStatus.PENDING, AgentTaskStatus.FAILED]),
+            GtAgentTask.status.in_([AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING, AgentTaskStatus.FAILED]),
         )
         .order_by(GtAgentTask.id.asc())
         .aio_first()

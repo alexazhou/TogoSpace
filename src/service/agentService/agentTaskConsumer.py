@@ -112,9 +112,8 @@ class AgentTaskConsumer:
                 self.status = AgentStatus.FAILED
                 self._publish_status(self.status)
                 await agentActivityService.add_activity(
-                    gt_agent=self.gt_agent,
-                    activity_type=AgentActivityType.AGENT_STATE, status=AgentActivityStatus.FAILED,
-                    detail=AgentStatus.FAILED.name, error_message=str(e),
+                    gt_agent=self.gt_agent, activity_type=AgentActivityType.AGENT_STATE,
+                    status=AgentActivityStatus.SUCCEEDED, detail=AgentStatus.FAILED.name, error_message=str(e),
                 )
                 break
 
