@@ -22,3 +22,4 @@ class GtCoreAgentDialogContext:
     messages: List[llmApiUtil.OpenAIMessage]
     tools: Optional[list[llmApiUtil.OpenAITool]] = field(default=None)
     tool_choice: Optional[str | dict[str, Any]] = field(default=None)
+    prompt_cache: bool = field(default=True)

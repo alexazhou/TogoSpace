@@ -77,10 +77,12 @@ async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> InferResult
             messages=messages,
             tools=ctx.tools,
             tool_choice=ctx.tool_choice,
+            prompt_cache=ctx.prompt_cache,
         )
         logger.info(
-            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s",
+            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s",
             request_id, False, resolved_model, resolved_provider, len(messages), len(ctx.tools or []), ctx.tool_choice,
+            ctx.prompt_cache,
         )
         response = await llmApiUtil.send_request_non_stream(
             request,
@@ -142,10 +144,12 @@ async def infer_stream(
             messages=messages,
             tools=ctx.tools,
             tool_choice=ctx.tool_choice,
+            prompt_cache=ctx.prompt_cache,
         )
         logger.info(
-            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s",
+            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s",
             request_id, True, resolved_model, resolved_provider, len(messages), len(ctx.tools or []), ctx.tool_choice,
+            ctx.prompt_cache,
         )
 
         completion_tokens = 0

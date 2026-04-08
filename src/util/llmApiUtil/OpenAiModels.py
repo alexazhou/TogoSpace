@@ -1,7 +1,8 @@
 from typing import Any, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from constants import OpenaiApiRole
+from util.commonUtil import first_not_none
 
 
 # ========== 主要类 ==========
@@ -49,6 +50,18 @@ class OpenAIRequest(BaseModel):
     stream: Optional[bool] = Field(default=False, description="是否流式输出")
     tools: Optional[List["OpenAITool"]] = Field(None, description="工具列表")
     tool_choice: Optional[str | dict[str, Any]] = Field(None, description="工具调用策略")
+    prompt_cache: bool = Field(default=False, description="是否启用 prompt cache")
+
+
+class PromptCacheUsage(BaseModel):
+    """项目内部统一的缓存信息视图。
+
+    约定：
+    - `None` 表示上游未返回 / 当前无法确认
+    - `0` 表示上游明确返回了 0
+    """
+    cached_tokens: Optional[int] = None
+    cache_write_tokens: Optional[int] = None
 
 
 class OpenAIUsage(BaseModel):
@@ -56,7 +69,21 @@ class OpenAIUsage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    prompt_cache_usage: Optional[PromptCacheUsage] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_prompt_cache_usage(cls, value):
+        if not isinstance(value, dict) or value.get("prompt_cache_usage") is not None:
+            return value
+
+        ptd = value.get("prompt_tokens_details") or {}
+        cached = first_not_none(ptd.get("cached_tokens"), value.get("cache_read_input_tokens"))
+        write  = first_not_none(value.get("cache_creation_input_tokens"), ptd.get("cache_creation_tokens"))
+
+        if cached is None and write is None:
+            return value
+        return {**value, "prompt_cache_usage": {"cached_tokens": cached, "cache_write_tokens": write}}
 
 class OpenAIResponse(BaseModel):
     id: str
