@@ -61,6 +61,16 @@ INIT ──activate──► SCHEDULING ──max_turns/all_skipped──► IDL
 
 **`has_content=False` 不是 Bug** — LLM 认为当前无需发言是正常行为。
 
+### Turn / Step 概念
+
+- `turn`：处理“某个房间轮到当前 Agent 发言”的整轮过程
+- `step`：turn 内部的一次推进动作，例如一次推理、一次执行工具、一次恢复待执行工具
+
+排查日志时建议按这个层级理解：
+
+- 看房间是否推进，要看 turn 是否完成（通常由 `finish_chat_turn` 触发）
+- 看为什么 turn 卡住，要看某个 step 是否一直落在 `NO_ACTION`
+
 ---
 
 ## 排查流程

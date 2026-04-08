@@ -32,7 +32,6 @@ class Agent:
         system_prompt: str,
         driver_config: Optional[AgentDriverConfig] = None,
         agent_workdir: str = "",
-        max_function_calls: int = 5,
     ):
         self.gt_agent: GtAgent = gt_agent
         self.system_prompt: str = system_prompt
@@ -40,7 +39,6 @@ class Agent:
             gt_agent=gt_agent,
             system_prompt=system_prompt,
             agent_workdir=agent_workdir,
-            max_function_calls=max_function_calls,
             driver_config=driver_config,
         )
 

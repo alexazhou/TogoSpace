@@ -11,7 +11,7 @@ from typing import List
 from constants import (
     AgentActivityStatus, AgentActivityType,
     AgentHistoryStatus, AgentHistoryTag,
-    DriverType, OpenaiApiRole, RoomState,
+    DriverType, OpenaiApiRole, RoomState, TurnStepResult,
 )
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreRoomMessage
 from model.dbModel.gtAgent import GtAgent
@@ -45,13 +45,11 @@ class AgentTurnRunner:
         gt_agent: GtAgent,
         system_prompt: str,
         agent_workdir: str = "",
-        max_function_calls: int = 5,
         driver_config: AgentDriverConfig | None = None,
     ):
         self.gt_agent: GtAgent = gt_agent
         self.system_prompt: str = system_prompt
         self.agent_workdir: str = agent_workdir
-        self.max_function_calls: int = max(1, max_function_calls)
         self._history: AgentHistoryStore = AgentHistoryStore(gt_agent.id or 0)
         self.tool_registry: AgentToolRegistry = AgentToolRegistry()
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
@@ -118,38 +116,38 @@ class AgentTurnRunner:
         """基于 history 状态推进的统一循环。"""
         tools = self.tool_registry.export_openai_tools()
         turn_setup: AgentTurnSetup = self.driver.turn_setup
-        call_count = 0
+        failed_action_count = 0
 
-        while call_count < self.max_function_calls:
+        while True:
             result = await self._advance_step(room, tools)
 
-            # 调用了 finish，turn 结束
-            if result == "turn_done":
+            if result == TurnStepResult.TURN_DONE:
                 return
-
-            # 无工具调用
-            if result == "no_tool_calls":
-                # 有 hint_prompt，追加提示继续推理
-                if len(turn_setup.hint_prompt) > 0:
+            if result == TurnStepResult.CONTINUE:
+                failed_action_count = 0
+                continue
+            if result == TurnStepResult.NO_ACTION:
+                failed_action_count += 1
+                assistant_message = self._history.get_last_assistant_message()
+                failure_kind = "direct_text" if assistant_message is not None and len((assistant_message.content or "").strip()) > 0 else "no_action"
+                if len(turn_setup.hint_prompt) > 0 and failed_action_count <= turn_setup.max_retries:
+                    logger.warning(f"检测到失败行动，准备重试: agent_id={self.gt_agent.id}, kind={failure_kind}, retry={failed_action_count}/{turn_setup.max_retries}")
                     await self._history.append_history_message(GtAgentHistory.build(
                         llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_setup.hint_prompt),
                     ))
                     continue
-                # 无 hint_prompt，turn 结束
-                return
+                raise RuntimeError(
+                    f"达到失败行动重试上限仍未完成行动: agent_id={self.gt_agent.id}, "
+                    f"kind={failure_kind}, failed_actions={failed_action_count}, max_retries={turn_setup.max_retries}"
+                )
 
-            # 有工具调用继续，计数
-            call_count += 1
-
-        logger.warning(f"达到最大函数调用次数: agent_id={self.gt_agent.id}, max={self.max_function_calls}")
-
-    async def _advance_step(self, room: ChatRoom, tools: list[llmApiUtil.OpenAITool]) -> str:
-        """根据当前 history 状态推进一步。
+    async def _advance_step(self, room: ChatRoom, tools: list[llmApiUtil.OpenAITool]) -> TurnStepResult:
+        """根据当前 history 状态推进一个 step。
 
         返回:
-            "turn_done": turn 已结束（调用了 finish）
-            "no_tool_calls": 推理无工具调用
-            "continue": 继续循环
+            `TURN_DONE`：当前 step 执行后，turn 已结束（调用了 finish）
+            `NO_ACTION`：当前 step 未产出可执行动作
+            `CONTINUE`：当前 step 已完成，turn 继续推进到下一个 step
         """
         last_item = self._history.last()
         if last_item is None:
@@ -165,28 +163,28 @@ class AgentTurnRunner:
                     role=OpenaiApiRole.TOOL,
                     tool_call_id=pending_tc.id,
                 )
-                return "continue"
+                return TurnStepResult.CONTINUE
             output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
             assistant_message = await self._infer_to_item(output_item, tools)
             tool_calls = assistant_message.tool_calls or []
-            return "no_tool_calls" if len(tool_calls) == 0 else "continue"
+            return TurnStepResult.NO_ACTION if len(tool_calls) == 0 else TurnStepResult.CONTINUE
 
         # USER 或 SYSTEM → 推理
         if role in (OpenaiApiRole.USER, OpenaiApiRole.SYSTEM):
             output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
             assistant_message = await self._infer_to_item(output_item, tools)
             tool_calls = assistant_message.tool_calls or []
-            return "no_tool_calls" if len(tool_calls) == 0 else "continue"
+            return TurnStepResult.NO_ACTION if len(tool_calls) == 0 else TurnStepResult.CONTINUE
         if role == OpenaiApiRole.ASSISTANT and status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED):
             assistant_message = await self._infer_to_item(last_item, tools)
             tool_calls = assistant_message.tool_calls or []
-            return "no_tool_calls" if len(tool_calls) == 0 else "continue"
+            return TurnStepResult.NO_ACTION if len(tool_calls) == 0 else TurnStepResult.CONTINUE
 
         # ASSISTANT 成功 → 执行工具
         if role == OpenaiApiRole.ASSISTANT and status == AgentHistoryStatus.SUCCESS:
             first_tc = (last_item.tool_calls or [None])[0]
             if first_tc is None:
-                return "no_tool_calls"
+                return TurnStepResult.NO_ACTION
             output_item = await self._history.append_history_init_item(
                 role=OpenaiApiRole.TOOL,
                 tool_call_id=first_tc.id,
@@ -396,8 +394,8 @@ class AgentTurnRunner:
             await agentActivityService.update_activity_progress(activity_id, status=AgentActivityStatus.FAILED, error_message=str(e))
             raise
 
-    async def _run_tool_to_item(self, tool_call: llmApiUtil.OpenAIToolCall, output_item: GtAgentHistory, room: ChatRoom) -> str:
-        """执行单个工具调用，结果写入 output_item。返回 'turn_done' 或 'continue'。"""
+    async def _run_tool_to_item(self, tool_call: llmApiUtil.OpenAIToolCall, output_item: GtAgentHistory, room: ChatRoom) -> TurnStepResult:
+        """执行单个工具调用，结果写入 output_item。返回 `TURN_DONE` 或 `CONTINUE`。"""
         tool_name = tool_call.function_name
         tool_metadata = self._base_metadata(tool_name=tool_name, tool_call_id=tool_call.id)
         tool_activity = await agentActivityService.add_activity(
@@ -426,7 +424,7 @@ class AgentTurnRunner:
         turn_done = exec_result.turn_finished and (
             exec_result.status == AgentHistoryStatus.SUCCESS or room.state == RoomState.INIT
         )
-        return "turn_done" if turn_done else "continue"
+        return TurnStepResult.TURN_DONE if turn_done else TurnStepResult.CONTINUE
 
     # ─── AgentDriverHost 协议方法 ──────────────────────────
 

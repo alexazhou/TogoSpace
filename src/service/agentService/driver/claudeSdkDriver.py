@@ -19,7 +19,7 @@ from model.dbModel.gtAgentHistory import GtAgentHistory
 from constants import AgentHistoryStatus, OpenaiApiRole
 from util import llmApiUtil
 
-from .base import AgentDriver
+from .base import AgentDriver, AgentTurnSetup
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ _HINT_PROMPT = (
 _REMINDER_PROMPT = (
     "【提醒】检测到你直接输出了文字。这些文字不会出现在聊天室中！你必须使用 `send_chat_msg` 工具来发言。如果你已经说完，请调用 `finish_chat_turn`。"
 )
+_RUN_CHAT_TURN_MAX_RETRIES = 3
 
 
 def _format_sdk_blocks(blocks) -> list[str]:
@@ -73,6 +74,10 @@ class ClaudeSdkAgentDriver(AgentDriver):
         if self._has_explicit_allowed_tools():
             return list(self._CHAT_TOOL_NAMES)
         return list(FUNCTION_REGISTRY.keys())
+
+    @property
+    def turn_setup(self) -> AgentTurnSetup:
+        return AgentTurnSetup(max_retries=_RUN_CHAT_TURN_MAX_RETRIES)
 
     async def startup(self) -> None:
         await super().startup()
@@ -207,7 +212,8 @@ class ClaudeSdkAgentDriver(AgentDriver):
         if client is None:
             raise RuntimeError(f"Claude SDK client 尚未初始化: agent_id={self.host.gt_agent.id}")
 
-        max_attempts = self.host.max_function_calls
+        turn_setup = self.turn_setup
+        failed_action_count = 0
         logger.info(f"SDK 注入增量消息: agent_id={self.host.gt_agent.id}, room={room.key}, new_msgs={synced_count}")
 
         last_error_text: str | None = None
@@ -215,13 +221,15 @@ class ClaudeSdkAgentDriver(AgentDriver):
             await client.query(turn_prompt)
             logger.info(f"SDK prompt 已发送，等待响应: agent_id={self.host.gt_agent.id}")
             hint = _HINT_PROMPT
+            attempt = 0
 
-            for attempt in range(max_attempts):
+            while True:
                 if attempt > 0:
-                    logger.info(f"SDK 注入发言提醒: agent_id={self.host.gt_agent.id}, attempt={attempt}")
+                    logger.info(f"SDK 注入发言提醒: agent_id={self.host.gt_agent.id}, retry={failed_action_count}/{turn_setup.max_retries}, attempt={attempt}")
                     await client.query(hint)
+                attempt += 1
 
-                has_direct_text, error_text = await self._consume_response_stream(client, room)
+                has_direct_text, has_tool_progress, error_text = await self._consume_response_stream(client, room)
 
                 if error_text is not None:
                     last_error_text = error_text
@@ -231,24 +239,35 @@ class ClaudeSdkAgentDriver(AgentDriver):
                     if has_direct_text and room._current_turn_has_content is False:
                         logger.warning(f"SDK Agent 输出了文字但未调用 send_chat_msg，强制提醒: agent_id={self.host.gt_agent.id}")
                         self._turn_done = False
+                        failed_action_count += 1
+                        if failed_action_count > turn_setup.max_retries:
+                            break
                         hint = _REMINDER_PROMPT
                         continue
                     break
 
-                logger.warning(f"SDK agent 未调用发言工具（可能只输出 thinking 或纯文字）: agent_id={self.host.gt_agent.id}, attempt={attempt}")
+                failed_action_count += 1
+                failure_kind = "direct_text" if has_direct_text else "no_action"
+                if has_tool_progress is True:
+                    failed_action_count = 0
+                    continue
+                logger.warning(f"SDK 检测到失败行动: agent_id={self.host.gt_agent.id}, kind={failure_kind}, retry={failed_action_count}/{turn_setup.max_retries}")
+                if failed_action_count > turn_setup.max_retries:
+                    break
         except Exception as e:
             logger.error(f"SDK 会话异常: agent_id={self.host.gt_agent.id}, room={room.key}, error={e}", exc_info=True)
             raise
 
         if not self._turn_done:
             raise RuntimeError(
-                f"SDK 达到最大尝试次数但未完成行动: agent_id={self.host.gt_agent.id}, "
-                f"max_attempts={max_attempts}, last_error={last_error_text}"
+                f"SDK 达到失败行动重试上限仍未完成行动: agent_id={self.host.gt_agent.id}, "
+                f"failed_actions={failed_action_count}, max_retries={turn_setup.max_retries}, last_error={last_error_text}"
             )
 
-    async def _consume_response_stream(self, client: ClaudeSDKClient, room: ChatRoom) -> tuple[bool, str | None]:
-        """消费一轮 SDK 响应流，处理各类消息。返回 (是否检测到直接文本输出, 错误文本或None)。"""
+    async def _consume_response_stream(self, client: ClaudeSDKClient, room: ChatRoom) -> tuple[bool, bool, str | None]:
+        """消费一轮 SDK 响应流，处理各类消息。返回 (是否检测到直接文本输出, 是否有工具推进, 错误文本或None)。"""
         has_direct_text = False
+        has_tool_progress = False
         error_text: str | None = None
         msg_count = 0
         interrupted = False
@@ -263,10 +282,15 @@ class ClaudeSdkAgentDriver(AgentDriver):
                     if isinstance(block, TextBlock) and len(block.text.strip()) > 0:
                         logger.warning(f"检测到 SDK Agent 直接输出文字: agent_id={self.host.gt_agent.id}, text={block.text[:50]!r}")
                         has_direct_text = True
+                    if isinstance(block, ToolUseBlock):
+                        has_tool_progress = True
 
             elif isinstance(msg, UserMessage):
                 parts = _format_sdk_blocks(msg.content)
                 logger.info(f"SDK UserMessage: agent_id={self.host.gt_agent.id}, content=[{', '.join(parts)}]")
+                for block in msg.content:
+                    if isinstance(block, ToolResultBlock):
+                        has_tool_progress = True
                 if self._turn_done is True and interrupted is False:
                     logger.info(f"SDK 发言完成，主动中断会话: agent_id={self.host.gt_agent.id}")
                     await client.interrupt()
@@ -286,4 +310,4 @@ class ClaudeSdkAgentDriver(AgentDriver):
                 logger.debug(f"SDK 未知消息: agent_id={self.host.gt_agent.id}, type={type(msg).__name__}, data={msg}")
 
         logger.info(f"SDK receive_response 结束: agent_id={self.host.gt_agent.id}, total_msgs={msg_count}")
-        return has_direct_text, error_text
+        return has_direct_text, has_tool_progress, error_text

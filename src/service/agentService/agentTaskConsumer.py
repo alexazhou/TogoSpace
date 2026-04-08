@@ -28,7 +28,6 @@ class AgentTaskConsumer:
         gt_agent: GtAgent,
         system_prompt: str,
         agent_workdir: str = "",
-        max_function_calls: int = 5,
         driver_config: AgentDriverConfig | None = None,
     ):
         self.gt_agent: GtAgent = gt_agent
@@ -36,7 +35,6 @@ class AgentTaskConsumer:
             gt_agent=gt_agent,
             system_prompt=system_prompt,
             agent_workdir=agent_workdir,
-            max_function_calls=max_function_calls,
             driver_config=driver_config,
         )
         self.status: AgentStatus = AgentStatus.IDLE
