@@ -83,6 +83,16 @@ def _request_payload_for_log(request: OpenAIRequest, *, stream: bool) -> dict[st
     return payload
 
 
+# LiteLLM 会在这两个位置自动注入 cache_control: ephemeral，触发 Anthropic prompt cache。
+# 对不支持缓存的 provider，LiteLLM 会静默忽略此参数。
+_CACHE_INJECTION_POINTS = [
+    {"location": "message", "role": "system"},   # system prompt 通常最稳定，优先缓存
+    {"location": "message", "index": -1},        # 最后一条消息作为第二个缓存边界
+]
+
+
+
+
 async def send_request_stream(
     request: OpenAIRequest,
     url: str,
@@ -99,8 +109,9 @@ async def send_request_stream(
     model_name, messages, tools = _build_request_payload(request)
     base_url = _clean_base_url(url)
     logger.info(
-        "LLM upstream request start: request_id=%s, stream=%s, provider=%s, base_url=%s, extra_headers=%s, payload=%s",
+        "LLM upstream request start: request_id=%s, stream=%s, provider=%s, base_url=%s, extra_headers=%s, prompt_cache=%s, payload=%s",
         request_id, True, custom_llm_provider, base_url, _to_log_json(_sanitize_headers(extra_headers)),
+        request.prompt_cache,
         _to_log_json(_request_payload_for_log(request, stream=True)),
     )
 
@@ -117,6 +128,8 @@ async def send_request_stream(
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             stream=True,
+            # prompt_cache=True 时注入缓存边界；LiteLLM 负责转换为各 provider 格式
+            **({"cache_control_injection_points": _CACHE_INJECTION_POINTS} if request.prompt_cache else {}),
         )
         if not isinstance(stream_resp, CustomStreamWrapper):
             raise TypeError(f"期望流式响应类型 CustomStreamWrapper，实际为: {type(stream_resp).__name__}")
@@ -165,8 +178,9 @@ async def send_request_non_stream(
     model_name, messages, tools = _build_request_payload(request)
     base_url = _clean_base_url(url)
     logger.info(
-        "LLM upstream request start: request_id=%s, stream=%s, provider=%s, base_url=%s, extra_headers=%s, payload=%s",
+        "LLM upstream request start: request_id=%s, stream=%s, provider=%s, base_url=%s, extra_headers=%s, prompt_cache=%s, payload=%s",
         request_id, False, custom_llm_provider, base_url, _to_log_json(_sanitize_headers(extra_headers)),
+        request.prompt_cache,
         _to_log_json(_request_payload_for_log(request, stream=False)),
     )
 
@@ -183,6 +197,8 @@ async def send_request_non_stream(
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             stream=False,
+            # prompt_cache=True 时注入缓存边界；LiteLLM 负责转换为各 provider 格式
+            **({"cache_control_injection_points": _CACHE_INJECTION_POINTS} if request.prompt_cache else {}),
         )
         if not isinstance(response, ModelResponse):
             raise TypeError(f"期望非流式响应类型 ModelResponse，实际为: {type(response).__name__}")

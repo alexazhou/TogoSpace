@@ -4,6 +4,7 @@ from .OpenAiModels import (
     OpenAIRequest,
     OpenAIResponse,
     OpenAIUsage,
+    PromptCacheUsage,
     OpenAIToolCall,
     OpenAIFunctionParameter,
     OpenAIFunction,

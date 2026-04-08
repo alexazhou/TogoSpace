@@ -73,6 +73,7 @@ async def test_infer_passes_default_openclaw_headers(monkeypatch):
     assert captured["custom_llm_provider"] == "openai"
     assert captured["extra_headers"] == {"User-Agent": "openclaw"}
     assert captured["request"].tool_choice == "none"
+    assert captured["request"].prompt_cache is True
     assert isinstance(captured["request_id"], str)
     assert len(captured["request_id"]) == 32
     assert result.request_id == captured["request_id"]
@@ -143,6 +144,39 @@ async def test_infer_stream_passes_request_id(monkeypatch):
     assert result.ok is True
     fake_send_request_stream.assert_awaited_once()
     assert fake_send_request_stream.await_args.args[0].tool_choice == "none"
+    assert fake_send_request_stream.await_args.args[0].prompt_cache is True
     assert isinstance(fake_send_request_stream.await_args.kwargs["request_id"], str)
     assert len(fake_send_request_stream.await_args.kwargs["request_id"]) == 32
     assert result.request_id == fake_send_request_stream.await_args.kwargs["request_id"]
+
+
+@pytest.mark.asyncio
+async def test_infer_uses_context_prompt_cache_policy_when_provided(monkeypatch):
+    fake_send_request_non_stream = AsyncMock(return_value=_build_response())
+
+    monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
+        default_llm_server="svc",
+        llm_services=[
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1/chat/completions",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+            }
+        ],
+    )))
+    monkeypatch.setattr(llmService.llmApiUtil, "send_request_non_stream", fake_send_request_non_stream)
+
+    ctx = GtCoreAgentDialogContext(
+        system_prompt="system prompt",
+        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        prompt_cache=False,
+    )
+
+    result = await llmService.infer(None, ctx)
+
+    assert result.ok is True
+    fake_send_request_non_stream.assert_awaited_once()
+    request = fake_send_request_non_stream.await_args.args[0]
+    assert request.prompt_cache is False
