@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import List
@@ -62,6 +63,19 @@ class AgentTurnRunner:
             **extra,
         )
         return meta
+
+    def _extract_tool_command(self, tool_call: llmApiUtil.OpenAIToolCall) -> str | None:
+        if tool_call.function_name != "execute_bash":
+            return None
+        try:
+            parsed_args = json.loads(tool_call.function_args)
+        except Exception:
+            return None
+        command = parsed_args.get("command")
+        if not isinstance(command, str):
+            return None
+        command = command.strip()
+        return command if len(command) > 0 else None
 
     # ─── Turn 运行方法 ──────────────────────────────────────
 
@@ -402,7 +416,7 @@ class AgentTurnRunner:
     async def _run_tool_to_item(self, tool_call: llmApiUtil.OpenAIToolCall, output_item: GtAgentHistory, room: ChatRoom) -> TurnStepResult:
         """执行单个工具调用，结果写入 output_item。返回 `TURN_DONE` 或 `CONTINUE`。"""
         tool_name = tool_call.function_name
-        tool_metadata = self._base_metadata(tool_name=tool_name, tool_call_id=tool_call.id)
+        tool_metadata = self._base_metadata(tool_name=tool_name, tool_call_id=tool_call.id, command=self._extract_tool_command(tool_call))
         tool_activity = await agentActivityService.add_activity(
             gt_agent=self.gt_agent, activity_type=AgentActivityType.TOOL_CALL,
             detail=tool_name, metadata=tool_metadata,

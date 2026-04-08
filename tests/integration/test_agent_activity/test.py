@@ -264,6 +264,15 @@ class TestAgentActivityService(ServiceTestCase):
         assert updated.metadata["model"] == "override"
         assert updated.metadata["final_prompt_tokens"] == 100
 
+    async def test_add_activity_keeps_tool_command_metadata(self):
+        await self._reset()
+        activity = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(), activity_type=AgentActivityType.TOOL_CALL,
+            metadata=AgentActivityMeta(tool_name="execute_bash", command="cat /tmp/demo.txt"),
+        )
+        assert activity.metadata["tool_name"] == "execute_bash"
+        assert activity.metadata["command"] == "cat /tmp/demo.txt"
+
     # ── update_activity_progress：FAILED 状态附带 error_message ──
 
     async def test_update_progress_failed_with_error(self):
