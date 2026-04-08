@@ -281,7 +281,8 @@ class AgentHistoryStore:
         if preserve_start_idx >= len(items):
             return CompactPlan(
                 source_messages=[item.openai_message for item in items],
-                insert_seq=items[0].seq,
+                # 追加到末尾：summary seq > 所有被压缩消息，保留区为空，避免旧消息残留
+                insert_seq=items[-1].seq + 1,
             )
 
         return CompactPlan(
@@ -358,23 +359,40 @@ class AgentHistoryStore:
         """插入 COMPACT_SUMMARY 消息并立即裁剪旧消息（原子操作）。
 
         操作完成后满足不变量：_items[0] 为 COMPACT_SUMMARY。
+
+        逻辑：
+        - seq 之前的所有消息（旧前缀）被裁掉
+        - seq 及之后的消息（保留尾部）seq 整体 +1，紧跟 summary 之后
+        - compress_all 场景下 seq = items[-1].seq + 1，保留区为空，_items = [summary]
         """
+        # 找出需要保留的尾部（seq >= insert_seq 的消息）
+        preserve_idx = len(self._items)
+        for idx, existing in enumerate(self._items):
+            if existing.seq >= seq:
+                preserve_idx = idx
+                break
+        preserved_items = self._items[preserve_idx:]
+
+        # 构造新 summary item，直接写库
         item = GtAgentHistory.build(
             message,
             status=AgentHistoryStatus.SUCCESS,
             tags=[AgentHistoryTag.COMPACT_SUMMARY],
         )
-        inserted = await self.append_history_message(item, seq=seq)
-        self._trim_to_compact_window()
-        self._assert_compact_invariant()
-        return inserted
+        item.agent_id = self._agent_id
+        item.seq = seq
+        saved = await gtAgentHistoryManager.insert_agent_history_message_at_seq(item)
+        if saved is not None:
+            item.id = saved.id
 
-    def _trim_to_compact_window(self) -> None:
-        """内存裁剪：只保留 COMPACT_SUMMARY 及其之后的消息。仅由 insert_compact_summary 调用。"""
-        for idx, item in enumerate(self._items):
-            if AgentHistoryTag.COMPACT_SUMMARY in item.tags:
-                self._items = self._items[idx:]
-                return
+        # 保留尾部消息 seq 后移一位（为 summary 让位）
+        for existing in preserved_items:
+            existing.seq += 1
+
+        # 原子替换：summary + 保留尾部，旧前缀全部丢弃
+        self._items = [item] + preserved_items
+        self._assert_compact_invariant()
+        return item
 
     def _assert_compact_invariant(self) -> None:
         """断言：COMPACT_SUMMARY（若存在）必须在 _items[0]。"""
