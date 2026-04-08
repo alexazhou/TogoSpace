@@ -1,5 +1,8 @@
 from dataclasses import asdict, dataclass
 from collections.abc import Awaitable, Callable
+import json
+import logging
+import uuid
 from typing import Optional
 
 from constants import LlmServiceType
@@ -14,6 +17,8 @@ _TYPE_TO_PROVIDER = {
     LlmServiceType.DEEPSEEK: "deepseek",
 }
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class InferResult:
@@ -21,14 +26,15 @@ class InferResult:
     response: Optional[llmApiUtil.OpenAIResponse] = None
     error_message: str = ""
     error: Optional[Exception] = None
+    request_id: str = ""
 
     @classmethod
-    def success(cls, response: llmApiUtil.OpenAIResponse) -> "InferResult":
-        return cls(ok=True, response=response)
+    def success(cls, response: llmApiUtil.OpenAIResponse, request_id: str = "") -> "InferResult":
+        return cls(ok=True, response=response, request_id=request_id)
 
     @classmethod
-    def failure(cls, error: Exception) -> "InferResult":
-        return cls(ok=False, error_message=str(error), error=error)
+    def failure(cls, error: Exception, request_id: str = "") -> "InferResult":
+        return cls(ok=False, error_message=str(error), error=error, request_id=request_id)
 
     @property
     def usage(self) -> llmApiUtil.OpenAIUsage | None:
@@ -46,8 +52,17 @@ def get_default_model() -> str:
     return llm_config.model
 
 
+def _usage_to_log_json(usage: llmApiUtil.OpenAIUsage | None) -> str:
+    if usage is None:
+        return "null"
+    return json.dumps(usage.model_dump(mode="json", exclude_none=False), ensure_ascii=False, default=str)
+
+
 async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> InferResult:
     """根据 GtCoreAgentDialogContext 组装请求并调用 LLM 推理接口，统一返回成功/失败结果。"""
+    request_id = uuid.uuid4().hex
+    resolved_model = model
+    resolved_provider: str | None = None
     try:
         llm_config = configUtil.get_app_config().setting.current_llm_service
         resolved_model = model or llm_config.model
@@ -62,16 +77,29 @@ async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> InferResult
             messages=messages,
             tools=ctx.tools,
         )
+        logger.info(
+            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d",
+            request_id, False, resolved_model, resolved_provider, len(messages), len(ctx.tools or []),
+        )
         response = await llmApiUtil.send_request_non_stream(
             request,
             llm_config.base_url,
             llm_config.api_key,
             custom_llm_provider=resolved_provider,
             extra_headers=llm_config.extra_headers,
+            request_id=request_id,
         )
-        return InferResult.success(response)
+        logger.info(
+            "LLM infer success: request_id=%s, stream=%s, upstream_request_id=%s, usage=%s",
+            request_id, False, response.request_id, _usage_to_log_json(response.usage),
+        )
+        return InferResult.success(response, request_id=request_id)
     except Exception as e:
-        return InferResult.failure(e)
+        logger.exception(
+            "LLM infer failed: request_id=%s, stream=%s, model=%s, provider=%s",
+            request_id, False, resolved_model, resolved_provider,
+        )
+        return InferResult.failure(e, request_id=request_id)
 
 
 def shutdown() -> None:
@@ -96,6 +124,9 @@ async def infer_stream(
     on_progress: Callable[[InferStreamProgress], Awaitable[None] | None] | None = None,
 ) -> InferResult:
     """流式推理：边迭代 chunk 边回调 on_progress，完成后返回与 infer() 一致的 InferResult。"""
+    request_id = uuid.uuid4().hex
+    resolved_model = model
+    resolved_provider: str | None = None
     try:
         llm_config = configUtil.get_app_config().setting.current_llm_service
         resolved_model = model or llm_config.model
@@ -109,6 +140,10 @@ async def infer_stream(
             model=resolved_model,
             messages=messages,
             tools=ctx.tools,
+        )
+        logger.info(
+            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d",
+            request_id, True, resolved_model, resolved_provider, len(messages), len(ctx.tools or []),
         )
 
         completion_tokens = 0
@@ -155,7 +190,16 @@ async def infer_stream(
             custom_llm_provider=resolved_provider,
             extra_headers=llm_config.extra_headers,
             on_chunk=_on_chunk,
+            request_id=request_id,
         )
-        return InferResult.success(response)
+        logger.info(
+            "LLM infer success: request_id=%s, stream=%s, upstream_request_id=%s, usage=%s",
+            request_id, True, response.request_id, _usage_to_log_json(response.usage),
+        )
+        return InferResult.success(response, request_id=request_id)
     except Exception as e:
-        return InferResult.failure(e)
+        logger.exception(
+            "LLM infer failed: request_id=%s, stream=%s, model=%s, provider=%s",
+            request_id, True, resolved_model, resolved_provider,
+        )
+        return InferResult.failure(e, request_id=request_id)
