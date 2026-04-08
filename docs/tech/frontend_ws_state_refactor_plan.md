@@ -55,11 +55,11 @@
 - 拆成页面壳 + composables + 较轻的展示组件
 - 页面只保留编排职责
 
-### 2.3 AgentDetailDialog 拆分
+### 2.3 AgentActivityDialog 拆分
 
 当前问题：
 
-- [frontend/src/components/AgentDetailDialog.vue](/Volumes/PDATA/GitDB/TeamAgent/frontend/src/components/AgentDetailDialog.vue) 已经是大型组件
+- [frontend/src/components/AgentActivityDialog.vue](/Volumes/PDATA/GitDB/TeamAgent/frontend/src/components/AgentActivityDialog.vue) 已经是大型组件
 - 同时承担：
   - 详情拉取
   - 活动列表拉取
@@ -162,7 +162,7 @@
 页面和组件只订阅自己需要的状态切片，例如：
 
 - `ConsolePage` 订阅当前 team 的房间、消息、agent 状态、连接状态
-- `AgentDetailDialog` 订阅指定 agent 的状态和活动流
+- `AgentActivityDialog` 订阅指定 agent 的状态和活动流
 
 ## 4. 推荐目录结构
 
@@ -189,20 +189,29 @@ frontend/src/realtime/
 
 ## 5. 建议的改造顺序
 
-### 第一阶段：建立实时基础设施
+### 第一阶段：建立实时基础设施 `已完成`
 
 先建立：
 
 - `wsClient.ts`
 - `eventNormalizer.ts`
 - `runtimeStore.ts`
+- `selectors.ts`
 
 目标：
 
 - 先把单一连接和全局状态中心建起来
 - 不急着大规模改页面
 
-### 第二阶段：迁移 ConsolePage
+当前进度：
+
+- 已建立全局唯一 WS 连接
+- 已建立统一事件 normalize 层
+- 已建立 `runtimeStore`
+- 已建立 `selectors`
+- `App.vue` 已接入全局 realtime client
+
+### 第二阶段：迁移 ConsolePage `进行中`
 
 优先迁移 `ConsolePage`，因为它是当前最重、最核心、最容易继续膨胀的页面。
 
@@ -212,9 +221,20 @@ frontend/src/realtime/
 - 去掉页面内的实时事件分发逻辑
 - 保留页面自己的路由、输入框、布局状态
 
-### 第三阶段：迁移 AgentDetailDialog
+当前进度：
 
-在实时中心稳定后，再迁移 `AgentDetailDialog`。
+- `ConsolePage` 已移除自建 WS 与重连逻辑
+- 房间列表、成员列表、消息窗口已拆成独立面板组件
+- 运行时数据读取已接到 `useConsoleRuntimeState.ts`
+- 消息滚动逻辑已抽到 `useConsoleMessageScroll.ts`
+- 仍待继续下沉：
+  - 左侧分栏拖拽
+  - 创建房间弹窗状态与提交流程
+  - 其他页面级编排状态
+
+### 第三阶段：迁移 AgentActivityDialog `部分完成`
+
+在实时中心稳定后，再迁移 `AgentActivityDialog`。
 
 目标：
 
@@ -222,7 +242,14 @@ frontend/src/realtime/
 - 将 agent 活动流改为全局订阅
 - 组件只保留展示和交互
 
-### 第四阶段：收敛全局状态边界
+当前进度：
+
+- 组件已从 `AgentDetailDialog` 更名为 `AgentActivityDialog`
+- 已移除组件自建 WS 与重连逻辑
+- 已改为通过 `runtimeStore` + `selectors` 读取活动和状态
+- 后续仍可继续拆出更轻的详情展示和活动列表逻辑
+
+### 第四阶段：收敛全局状态边界 `未开始`
 
 在 `runtimeStore` 起来之后，再统一收敛：
 
@@ -234,7 +261,7 @@ frontend/src/realtime/
 
 - 让“全局共享状态”和“页面局部状态”边界稳定下来
 
-### 第五阶段：收敛 normalize 逻辑
+### 第五阶段：收敛 normalize 逻辑 `部分完成`
 
 把散落在页面、弹窗和 API 层里的 normalize 逻辑统一收进一层。
 
@@ -243,7 +270,13 @@ frontend/src/realtime/
 - 页面不再直接兼容后端原始结构
 - 后端字段变化时，影响范围尽量小
 
-### 第六阶段：拆 SettingsPage
+当前进度：
+
+- WebSocket 事件 normalize 已进入 `frontend/src/realtime/eventNormalizer.ts`
+- 页面读接口已开始通过 `frontend/src/realtime/selectors.ts` 收口
+- API 返回结构 normalize 仍有一部分留在 `api.ts`
+
+### 第六阶段：拆 SettingsPage `未开始`
 
 实时链路稳定后，再处理 `SettingsPage` 这类大页面。
 
@@ -252,7 +285,7 @@ frontend/src/realtime/
 - 它复杂，但不是实时链路核心路径
 - 适合放在实时改造之后单独推进
 
-### 第七阶段：去掉 API 层 UI 副作用
+### 第七阶段：去掉 API 层 UI 副作用 `未开始`
 
 把 `api.ts` 中直接触发 toast 的逻辑逐步迁走。
 
@@ -261,7 +294,7 @@ frontend/src/realtime/
 - 这是长期维护问题
 - 但不需要抢在实时层之前处理
 
-### 第八阶段：补工程护栏
+### 第八阶段：补工程护栏 `未开始`
 
 最后补：
 
@@ -290,3 +323,24 @@ frontend/src/realtime/
 - 每个组件自己做事件解析和重连
 - 页面本地状态直接充当后端实时真相
 - 在没有测试护栏的情况下继续堆大组件
+
+## 7. 当前阶段性进度
+
+已完成：
+
+- 全局唯一 WebSocket 连接
+- 统一 realtime 事件 normalize
+- `runtimeStore` 与 `selectors`
+- `ConsolePage` 的三块主面板拆分
+- `ConsolePage` 的运行时状态与消息滚动 composable 拆分
+- `AgentActivityDialog` 接入全局实时状态中心
+
+进行中：
+
+- 继续收敛 `ConsolePage` 的页面编排逻辑
+
+未开始：
+
+- `SettingsPage` 拆分
+- API 层去 UI 副作用
+- lint 与前端测试护栏
