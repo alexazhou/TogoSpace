@@ -245,9 +245,10 @@ class AgentHistoryStore:
         """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。
 
         压缩区间选取逻辑：
-        1. 检查末尾是否为 USER 消息
-        2. 若是，跳过连续的 USER 消息（保留最新的用户输入），压缩剩余部分
-        3. 若不是，压缩全部消息
+        1. 若尾部存在 pending infer 占位，先排除占位
+        2. 从尾部跳过连续的 USER 消息（保留最新用户输入）
+        3. 若保留区之前存在未完成的 tool_call 尾巴，则从该 assistant(tool_call) 起整体保留
+        4. 压缩更早的稳定前缀
 
         示例：
             [USER: u1, ASSISTANT: a1, USER: u2]
@@ -255,9 +256,8 @@ class AgentHistoryStore:
             压缩 [USER: u1, ASSISTANT: a1]
 
             [USER: u1, ASSISTANT: a1(tool_call), TOOL: r1, USER: u2]
-                                                          ^-- 跳过 u2
-            压缩 [USER: u1, ASSISTANT: a1(tool_call), TOOL: r1]
-            tool call 链自然完整
+                                   ^------------------------^-- 未完成 tool_call 尾巴 + 最新 USER 一并保留
+            压缩 [USER: u1]
 
             [USER: u1, ASSISTANT: a1] → 末尾不是 USER，压缩全部
 
@@ -274,29 +274,81 @@ class AgentHistoryStore:
         if not items:
             return None
 
-        # 检查末尾是否为 USER
-        if items[-1].role != llmApiUtil.OpenaiApiRole.USER:
-            # 末尾不是 USER，压缩全部
+        preserve_start_idx = self._calc_compact_preserve_start_idx(items)
+        if preserve_start_idx == 0:
+            return None
+
+        if preserve_start_idx >= len(items):
             return CompactPlan(
                 source_messages=[item.openai_message for item in items],
                 insert_seq=items[0].seq,
             )
 
-        # 从末尾跳过连续的 USER 消息
-        preserve_start_idx = len(items) - 1
-        for idx in range(len(items) - 1, -1, -1):
-            if items[idx].role == llmApiUtil.OpenaiApiRole.USER:
-                preserve_start_idx = idx
-            else:
-                break
-
-        if preserve_start_idx == 0:
-            return None
-
         return CompactPlan(
             source_messages=[item.openai_message for item in items[:preserve_start_idx]],
             insert_seq=items[preserve_start_idx].seq,
         )
+
+    def _calc_compact_preserve_start_idx(self, items: list[GtAgentHistory]) -> int:
+        """计算 compact 时需要保留的尾部起点。
+
+        返回值语义：
+        - `0`：没有可压缩消息
+        - `len(items)`：全部消息都可压缩
+        - 其余：从该 index 开始的尾部消息需要保留
+        """
+        preserve_start_idx = self._skip_trailing_users(items, len(items))
+        unfinished_tail_start = self._find_unfinished_tool_tail_start(items, preserve_start_idx)
+        if unfinished_tail_start is not None:
+            preserve_start_idx = min(preserve_start_idx, unfinished_tail_start)
+        return preserve_start_idx
+
+    @staticmethod
+    def _skip_trailing_users(items: list[GtAgentHistory], end_idx: int) -> int:
+        """跳过末尾连续 USER，返回需要保留的第一条 USER 的 index。"""
+        idx = end_idx
+        while idx > 0 and items[idx - 1].role == llmApiUtil.OpenaiApiRole.USER:
+            idx -= 1
+        return idx
+
+    @staticmethod
+    def _find_unfinished_tool_tail_start(
+        items: list[GtAgentHistory],
+        end_idx: int,
+    ) -> int | None:
+        """查找尾部未完成 tool_call 链的起点。
+
+        若 `items[:end_idx]` 的末尾存在：
+        - `ASSISTANT(tool_calls...)`
+        - 后跟 0..n 条对应 `TOOL(tool_result)`
+        - 但 assistant 声明的全部 tool_call 尚未在该区间闭合
+
+        则返回该 assistant 的 index；否则返回 None。
+        """
+        if end_idx <= 0:
+            return None
+
+        assistant_idx = end_idx - 1
+        while assistant_idx >= 0 and items[assistant_idx].role == llmApiUtil.OpenaiApiRole.TOOL:
+            assistant_idx -= 1
+
+        if assistant_idx < 0:
+            return None
+
+        assistant_item = items[assistant_idx]
+        tool_calls = assistant_item.tool_calls or []
+        if assistant_item.role != llmApiUtil.OpenaiApiRole.ASSISTANT or not tool_calls:
+            return None
+
+        expected_ids = {tool_call.id for tool_call in tool_calls}
+        seen_ids = {
+            item.tool_call_id
+            for item in items[assistant_idx + 1:end_idx]
+            if item.role == llmApiUtil.OpenaiApiRole.TOOL and item.tool_call_id in expected_ids
+        }
+        if expected_ids.issubset(seen_ids):
+            return None
+        return assistant_idx
 
     async def insert_compact_summary(
         self,

@@ -129,11 +129,18 @@ compact 完成后，运行时内存窗口的核心形状为：
 规则：
 
 - 若尾部存在 pending infer 占位，先排除占位
-- 若尾部不是 `USER`，压缩全部可见消息
-- 若尾部是 `USER`，则从尾部向前跳过连续的 `USER` 消息，保留这段最新用户输入，把前缀压缩
+- 从尾部向前跳过连续的 `USER` 消息；这些最新用户输入属于保留区，不进入 compact source
+- 在“去掉末尾 `USER`”后的视图上，若尾部存在未完成的 tool call 链，则从对应的 `ASSISTANT(tool_calls...)` 起整体保留，不进入 compact source
+- 这里的“未完成”指 assistant 声明的 `tool_calls` 尚未全部在后续 `TOOL(tool_result)` 消息中闭合
+- 若某段 `ASSISTANT(tool_calls...) -> TOOL(tool_result)...` 已完整闭合，则它属于稳定历史，可以被 compact
 - 若压缩前缀为空，则返回 `None`
 
-`insert_seq` 指向第一条保留消息的 `seq`，因此 `COMPACT_SUMMARY` 会插在“保留尾部”之前。
+因此，compact source 始终只包含“稳定前缀”：
+
+- 不包含末尾最新用户消息
+- 不包含未完成工具调用尾巴
+
+`insert_seq` 指向第一条保留消息的 `seq`；若不存在保留尾部，则 `COMPACT_SUMMARY` 插入到当前窗口起点。
 
 ## 8. Usage 记录
 

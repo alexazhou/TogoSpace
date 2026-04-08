@@ -134,18 +134,44 @@ def _make_mock_response(content: str):
     return resp
 
 
+def _make_tool() -> llmApiUtil.OpenAITool:
+    return llmApiUtil.OpenAITool.model_validate({
+        "type": "function",
+        "function": {
+            "name": "finish_chat_turn",
+            "description": "结束本轮行动",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    })
+
+
 @pytest.mark.asyncio
 async def test_compact_messages_success():
     """成功压缩，返回包含引导语的摘要。"""
     messages = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "历史消息")]
     mock_resp = _make_mock_response("这是摘要内容")
+    tools = [_make_tool()]
+    captured: dict[str, object] = {}
 
-    with patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(mock_resp))):
-        result = await compact_messages(messages, "system_prompt", "gpt-4o")
+    async def _fake_infer(model, ctx):
+        captured["model"] = model
+        captured["ctx"] = ctx
+        return llmService.InferResult.success(mock_resp)
+
+    with patch(_INFER_PATCH, AsyncMock(side_effect=_fake_infer)):
+        result = await compact_messages(messages, "system_prompt", "gpt-4o", tools=tools)
 
     assert result is not None
     assert "以下是之前对话的压缩摘要" in result
     assert "这是摘要内容" in result
+    ctx = captured["ctx"]
+    assert ctx.tools == tools
+    assert ctx.tool_choice == "none"
+    assert "不要使用任何工具" in ctx.messages[-1].content
 
 
 @pytest.mark.asyncio
@@ -170,6 +196,24 @@ async def test_compact_messages_empty_content():
 
     assert result is not None
     assert "以下是之前对话的压缩摘要" in result
+
+
+@pytest.mark.asyncio
+async def test_compact_messages_tool_calls_in_response_treated_as_failure():
+    messages = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "历史消息")]
+    tool_call_response = _make_mock_response("")
+    tool_call_response.choices[0].message.tool_calls = [
+        llmApiUtil.OpenAIToolCall.model_validate({
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "finish_chat_turn", "arguments": "{}"},
+        })
+    ]
+
+    with patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(tool_call_response))):
+        result = await compact_messages(messages, "system_prompt", "gpt-4o", tools=[_make_tool()])
+
+    assert result is None
 
 
 @pytest.mark.asyncio

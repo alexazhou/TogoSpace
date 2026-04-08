@@ -12,6 +12,7 @@ _COMPACT_PROMPT_TEMPLATE = """\
 - 保留对当前任务仍然有用的事实、约束、决定、未完成事项
 - 保留与工具调用结果相关的关键信息
 - 删除寒暄、重复表达和已失效上下文
+- 不要使用任何工具，也不要输出任何 tool call / function call
 - 输出要简洁、结构化，便于后续继续推理
 - 摘要长度尽量简短，不超过 {max_tokens} tokens"""
 _COMPACT_RESUME_TEMPLATE = """以下是之前对话的压缩摘要，请基于这些已知信息继续后续任务：

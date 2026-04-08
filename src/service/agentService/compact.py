@@ -97,6 +97,7 @@ async def compact_messages(
     messages: list[llmApiUtil.OpenAIMessage],
     system_prompt: str,
     model: str,
+    tools: list[llmApiUtil.OpenAITool] | None = None,
     max_tokens: int = 2048,
 ) -> str | None:
     """压缩消息列表，返回已包含引导语的摘要文本，失败时返回 None。
@@ -105,6 +106,7 @@ async def compact_messages(
         messages: 待压缩的消息列表
         system_prompt: 系统提示（用于正确理解上下文）
         model: 模型名称
+        tools: 透传当前工具列表，以保持请求形态稳定
         max_tokens: 摘要最大 token 数
 
     Returns:
@@ -114,13 +116,17 @@ async def compact_messages(
     ctx = GtCoreAgentDialogContext(
         system_prompt=system_prompt,
         messages=messages + [llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, instruction)],
-        tools=None,
+        tools=tools,
+        tool_choice="none",
     )
     try:
         infer_result = await llmService.infer(model, ctx)
         if infer_result.ok is False or infer_result.response is None:
             return None
-        summary = infer_result.response.choices[0].message.content or ""
+        response_message = infer_result.response.choices[0].message
+        if response_message.tool_calls:
+            return None
+        summary = response_message.content or ""
         return promptBuilder.build_compact_resume_prompt(summary)
     except Exception:
         return None

@@ -62,6 +62,7 @@ async def test_infer_passes_default_openclaw_headers(monkeypatch):
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        tool_choice="none",
     )
 
     result = await llmService.infer(None, ctx)
@@ -71,6 +72,7 @@ async def test_infer_passes_default_openclaw_headers(monkeypatch):
     assert captured["api_key"] == "key-123"
     assert captured["custom_llm_provider"] == "openai"
     assert captured["extra_headers"] == {"User-Agent": "openclaw"}
+    assert captured["request"].tool_choice == "none"
     assert isinstance(captured["request_id"], str)
     assert len(captured["request_id"]) == 32
     assert result.request_id == captured["request_id"]
@@ -133,12 +135,14 @@ async def test_infer_stream_passes_request_id(monkeypatch):
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        tool_choice="none",
     )
 
     result = await llmService.infer_stream(None, ctx)
 
     assert result.ok is True
     fake_send_request_stream.assert_awaited_once()
+    assert fake_send_request_stream.await_args.args[0].tool_choice == "none"
     assert isinstance(fake_send_request_stream.await_args.kwargs["request_id"], str)
     assert len(fake_send_request_stream.await_args.kwargs["request_id"]) == 32
     assert result.request_id == fake_send_request_stream.await_args.kwargs["request_id"]

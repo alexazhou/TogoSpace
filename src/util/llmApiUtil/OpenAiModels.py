@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, List, Optional
 from pydantic import BaseModel, Field
 
 from constants import OpenaiApiRole
@@ -48,6 +48,7 @@ class OpenAIRequest(BaseModel):
     temperature: Optional[float] = Field(default=0.7, description="温度参数")
     stream: Optional[bool] = Field(default=False, description="是否流式输出")
     tools: Optional[List["OpenAITool"]] = Field(None, description="工具列表")
+    tool_choice: Optional[str | dict[str, Any]] = Field(None, description="工具调用策略")
 
 
 class OpenAIUsage(BaseModel):
