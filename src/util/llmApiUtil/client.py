@@ -1,3 +1,4 @@
+import json
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
@@ -10,6 +11,7 @@ from .OpenAiModels import OpenAIRequest, OpenAIResponse
 
 
 logger = logging.getLogger(__name__)
+_REDACTED_HEADER_KEYS = {"authorization", "api-key", "x-api-key", "proxy-authorization"}
 
 
 def init() -> None:
@@ -47,6 +49,40 @@ def _build_request_payload(request: OpenAIRequest) -> tuple[str, list[dict[str, 
     return model_name, messages, tools
 
 
+def _sanitize_headers(headers: dict[str, str] | None) -> dict[str, str] | None:
+    if headers is None:
+        return None
+    sanitized: dict[str, str] = {}
+    for key, value in headers.items():
+        if key.lower() in _REDACTED_HEADER_KEYS or "token" in key.lower():
+            sanitized[key] = "***"
+        else:
+            sanitized[key] = value
+    return sanitized
+
+
+def _to_log_data(value: Any) -> Any:
+    if value is None:
+        return None
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json", exclude_none=False)
+    if isinstance(value, dict):
+        return {k: _to_log_data(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_log_data(v) for v in value]
+    return value
+
+
+def _to_log_json(value: Any) -> str:
+    return json.dumps(_to_log_data(value), ensure_ascii=False, default=str)
+
+
+def _request_payload_for_log(request: OpenAIRequest, *, stream: bool) -> dict[str, Any]:
+    payload = request.model_dump(mode="json", exclude_none=True)
+    payload["stream"] = stream
+    return payload
+
+
 async def send_request_stream(
     request: OpenAIRequest,
     url: str,
@@ -54,6 +90,7 @@ async def send_request_stream(
     custom_llm_provider: str | None = None,
     extra_headers: dict[str, str] | None = None,
     on_chunk: Callable[[ModelResponseStream], Awaitable[None] | None] | None = None,
+    request_id: str = "",
 ) -> OpenAIResponse:
     """流式请求上游模型，并在本地聚合为完整 OpenAIResponse。
 
@@ -61,41 +98,58 @@ async def send_request_stream(
     """
     model_name, messages, tools = _build_request_payload(request)
     base_url = _clean_base_url(url)
-
-    stream_resp: ModelResponse | CustomStreamWrapper = await litellm.acompletion(
-        model=model_name,
-        custom_llm_provider=custom_llm_provider,
-        messages=messages,
-        api_key=api_key,
-        base_url=base_url,
-        tools=tools,
-        extra_headers=extra_headers,
-        temperature=request.temperature,
-        max_tokens=request.max_tokens,
-        stream=True,
+    logger.info(
+        "LLM upstream request start: request_id=%s, stream=%s, provider=%s, base_url=%s, extra_headers=%s, payload=%s",
+        request_id, True, custom_llm_provider, base_url, _to_log_json(_sanitize_headers(extra_headers)),
+        _to_log_json(_request_payload_for_log(request, stream=True)),
     )
-    if not isinstance(stream_resp, CustomStreamWrapper):
-        raise TypeError(f"期望流式响应类型 CustomStreamWrapper，实际为: {type(stream_resp).__name__}")
 
-    chunks: list[ModelResponseStream] = []
-    async for chunk in stream_resp:
-        if not isinstance(chunk, ModelResponseStream):
-            raise TypeError(f"期望流式 chunk 类型 ModelResponseStream，实际为: {type(chunk).__name__}")
-        chunks.append(chunk)
-        if on_chunk is not None:
-            result = on_chunk(chunk)
-            if inspect.isawaitable(result):
-                await result
+    try:
+        stream_resp: ModelResponse | CustomStreamWrapper = await litellm.acompletion(
+            model=model_name,
+            custom_llm_provider=custom_llm_provider,
+            messages=messages,
+            api_key=api_key,
+            base_url=base_url,
+            tools=tools,
+            extra_headers=extra_headers,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            stream=True,
+        )
+        if not isinstance(stream_resp, CustomStreamWrapper):
+            raise TypeError(f"期望流式响应类型 CustomStreamWrapper，实际为: {type(stream_resp).__name__}")
 
-    merged: ModelResponse | TextCompletionResponse | None = litellm.stream_chunk_builder(chunks=chunks, messages=messages)
-    if merged is None:
-        raise RuntimeError("流式聚合失败：未生成完整响应")
-    if isinstance(merged, TextCompletionResponse):
-        raise TypeError("流式聚合返回了 TextCompletionResponse；当前仅支持 ChatCompletion 的 ModelResponse")
-    if not isinstance(merged, ModelResponse):
-        raise TypeError(f"流式聚合返回了未知类型: {type(merged).__name__}")
+        chunks: list[ModelResponseStream] = []
+        async for chunk in stream_resp:
+            if not isinstance(chunk, ModelResponseStream):
+                raise TypeError(f"期望流式 chunk 类型 ModelResponseStream，实际为: {type(chunk).__name__}")
+            chunks.append(chunk)
+            logger.info(
+                "LLM upstream stream chunk: request_id=%s, chunk_index=%d, payload=%s",
+                request_id, len(chunks), _to_log_json(chunk),
+            )
+            if on_chunk is not None:
+                result = on_chunk(chunk)
+                if inspect.isawaitable(result):
+                    await result
 
-    return OpenAIResponse.model_validate(merged.model_dump(exclude_none=False))
+        merged: ModelResponse | TextCompletionResponse | None = litellm.stream_chunk_builder(chunks=chunks, messages=messages)
+        if merged is None:
+            raise RuntimeError("流式聚合失败：未生成完整响应")
+        if isinstance(merged, TextCompletionResponse):
+            raise TypeError("流式聚合返回了 TextCompletionResponse；当前仅支持 ChatCompletion 的 ModelResponse")
+        if not isinstance(merged, ModelResponse):
+            raise TypeError(f"流式聚合返回了未知类型: {type(merged).__name__}")
+
+        logger.info(
+            "LLM upstream request success: request_id=%s, stream=%s, chunk_count=%d, payload=%s",
+            request_id, True, len(chunks), _to_log_json(merged),
+        )
+        return OpenAIResponse.model_validate(merged.model_dump(exclude_none=False))
+    except Exception:
+        logger.exception("LLM upstream request failed: request_id=%s, stream=%s", request_id, True)
+        raise
 
 
 async def send_request_non_stream(
@@ -104,23 +158,37 @@ async def send_request_non_stream(
     api_key: str,
     custom_llm_provider: str | None = None,
     extra_headers: dict[str, str] | None = None,
+    request_id: str = "",
 ) -> OpenAIResponse:
     """非流式请求上游模型，直接返回完整 OpenAIResponse。"""
     model_name, messages, tools = _build_request_payload(request)
     base_url = _clean_base_url(url)
-
-    response: ModelResponse | CustomStreamWrapper = await litellm.acompletion(
-        model=model_name,
-        custom_llm_provider=custom_llm_provider,
-        messages=messages,
-        api_key=api_key,
-        base_url=base_url,
-        tools=tools,
-        extra_headers=extra_headers,
-        temperature=request.temperature,
-        max_tokens=request.max_tokens,
-        stream=False,
+    logger.info(
+        "LLM upstream request start: request_id=%s, stream=%s, provider=%s, base_url=%s, extra_headers=%s, payload=%s",
+        request_id, False, custom_llm_provider, base_url, _to_log_json(_sanitize_headers(extra_headers)),
+        _to_log_json(_request_payload_for_log(request, stream=False)),
     )
-    if not isinstance(response, ModelResponse):
-        raise TypeError(f"期望非流式响应类型 ModelResponse，实际为: {type(response).__name__}")
-    return OpenAIResponse.model_validate(response.model_dump(exclude_none=False))
+
+    try:
+        response: ModelResponse | CustomStreamWrapper = await litellm.acompletion(
+            model=model_name,
+            custom_llm_provider=custom_llm_provider,
+            messages=messages,
+            api_key=api_key,
+            base_url=base_url,
+            tools=tools,
+            extra_headers=extra_headers,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            stream=False,
+        )
+        if not isinstance(response, ModelResponse):
+            raise TypeError(f"期望非流式响应类型 ModelResponse，实际为: {type(response).__name__}")
+        logger.info(
+            "LLM upstream request success: request_id=%s, stream=%s, payload=%s",
+            request_id, False, _to_log_json(response),
+        )
+        return OpenAIResponse.model_validate(response.model_dump(exclude_none=False))
+    except Exception:
+        logger.exception("LLM upstream request failed: request_id=%s, stream=%s", request_id, False)
+        raise
