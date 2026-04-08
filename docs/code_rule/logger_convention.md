@@ -47,7 +47,39 @@ logger.info(f"[{name}] 创建 Agent，model={model}")
 logger.info(f"[{room}] {agent} 生成回复失败: {e}")
 ```
 
-## 4. 日志级别使用规范
+## 4. 默认使用 f-string
+
+本项目日志默认使用 f-string，不使用 `%s` 占位风格。
+
+保持一条日志在视觉上完整可读，比套用通用 logging 占位习惯更重要。
+
+```python
+# ✅ 正确：统一使用 f-string
+logger.info(f"开始执行任务: {agent_name}(agent_id={agent_id}), task_id={task_id}")
+logger.warning(f"finish_turn 被房间拒绝: agent={agent_name}, room={room_name}, current_turn={current_name}")
+
+# ❌ 不推荐：使用 %s 占位
+logger.info("开始执行任务: %s(agent_id=%s), task_id=%s", agent_name, agent_id, task_id)
+```
+
+## 5. 日志优先保持单行
+
+日志调用默认优先单行，便于扫读，也更符合当前仓库的大多数写法。
+
+只有在单行明显过长、已经影响阅读时，才允许拆成多行；不要把本来能一眼看完的日志机械地拆成多行。
+
+```python
+# ✅ 正确：能单行看清时保持单行
+logger.info(f"首个未完成任务状态不可消费，退出消费循环: {agent_name}(agent_id={agent_id}), task_id={task_id}, task_status={task_status}")
+
+# ❌ 不推荐：无明显必要却拆成多行
+logger.info(
+    f"首个未完成任务状态不可消费，退出消费循环: {agent_name}(agent_id={agent_id}), "
+    f"task_id={task_id}, task_status={task_status}"
+)
+```
+
+## 6. 日志级别使用规范
 
 | 级别 | 适用场景 |
 |------|----------|

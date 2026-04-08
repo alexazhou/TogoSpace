@@ -125,7 +125,39 @@ agent = Agent(
 
 判断标准：一眼能看清所有参数，无需滚动或脑补，就保持单行。
 
-## 9. 日志和 assert 优先单行
+## 9. 修改现有代码时优先使用紧凑排版风格
+
+当你是在已有代码基础上做修改时，优先使用紧凑排版风格，不要机械地套用“每个参数单独一行”这类展开式写法。
+
+尤其是下面这类语句：
+
+- `logger.xxx(...)`
+- `assert ...`
+- 参数不多的函数调用
+- 参数很多但仍能在 1-2 行内清晰读完的调用
+
+不要因为新增了一两个参数，就把原本可以紧凑表达的调用强行改成每行一个参数。
+
+```python
+# 推荐：优先保持紧凑排版
+await agentActivityService.add_activity(
+    gt_agent=self.gt_agent, activity_type=AgentActivityType.AGENT_STATE,
+    status=AgentActivityStatus.SUCCEEDED, detail=status.name, error_message=error_message,
+)
+
+# 不推荐：参数并不复杂，却机械地每行拆一个
+await agentActivityService.add_activity(
+    gt_agent=self.gt_agent,
+    activity_type=AgentActivityType.AGENT_STATE,
+    status=AgentActivityStatus.SUCCEEDED,
+    detail=status.name,
+    error_message=error_message,
+)
+```
+
+判断标准不是“能不能拆”，而是“拆开之后是否真的更清晰”。如果没有明显提升可读性，就保持紧凑。
+
+## 10. 日志和 assert 优先单行
 
 `logger.info(...)`、`logger.warning(...)`、`logger.error(...)` 以及 `assert ...` 这类语句，默认优先写成单行，保持紧凑，便于快速扫读。
 
@@ -142,7 +174,7 @@ assert some_really_long_condition, (
 )
 ```
 
-## 10. 方法内局部变量的类型注解按“是否一眼能看出来”决定
+## 11. 方法内局部变量的类型注解按“是否一眼能看出来”决定
 
 方法内部的局部变量，不需要机械地全部加类型注解。
 
