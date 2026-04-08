@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryTag, DriverType, OpenaiApiRole, TurnStepResult
+from constants import AgentHistoryStatus, AgentHistoryTag, DriverType, OpenaiApiRole, TurnStepResult
+from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
@@ -152,3 +153,28 @@ async def test_run_turn_loop_retries_failed_action_by_max_retries(turn_runner):
         await turn_runner._run_turn_loop(room)
 
     assert turn_runner._history.append_history_message.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_advance_step_continues_to_infer_when_tool_failed(turn_runner):
+    room = MagicMock(spec=ChatRoom)
+    failed_tool_item = GtAgentHistory.build(
+        llmApiUtil.OpenAIMessage.tool_result("tool-call-1", '{"success":false,"message":"boom"}'),
+        status=AgentHistoryStatus.FAILED,
+        error_message="boom",
+    )
+    assistant_output_item = GtAgentHistory.build_placeholder(role=OpenaiApiRole.ASSISTANT)
+    assistant_message = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.ASSISTANT, "handled tool failure")
+    turn_runner._history.last = MagicMock(return_value=failed_tool_item)
+    turn_runner._history.append_history_init_item = AsyncMock(return_value=assistant_output_item)
+    turn_runner._infer_to_item = AsyncMock(return_value=assistant_message)
+    turn_runner._history.find_tool_call_by_id = MagicMock()
+    turn_runner._history.get_first_pending_tool_call = MagicMock()
+
+    result = await turn_runner._advance_step(room, [])
+
+    assert result == TurnStepResult.NO_ACTION
+    turn_runner._history.append_history_init_item.assert_awaited_once_with(role=OpenaiApiRole.ASSISTANT)
+    turn_runner._infer_to_item.assert_awaited_once_with(assistant_output_item, [])
+    turn_runner._history.find_tool_call_by_id.assert_not_called()
+    turn_runner._history.get_first_pending_tool_call.assert_not_called()

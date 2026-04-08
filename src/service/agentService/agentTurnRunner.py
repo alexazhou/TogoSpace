@@ -168,6 +168,11 @@ class AgentTurnRunner:
             assistant_message = await self._infer_to_item(output_item, tools)
             tool_calls = assistant_message.tool_calls or []
             return TurnStepResult.NO_ACTION if len(tool_calls) == 0 else TurnStepResult.CONTINUE
+        if role == OpenaiApiRole.TOOL and status == AgentHistoryStatus.FAILED:
+            output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
+            assistant_message = await self._infer_to_item(output_item, tools)
+            tool_calls = assistant_message.tool_calls or []
+            return TurnStepResult.NO_ACTION if len(tool_calls) == 0 else TurnStepResult.CONTINUE
 
         # USER 或 SYSTEM → 推理
         if role in (OpenaiApiRole.USER, OpenaiApiRole.SYSTEM):
