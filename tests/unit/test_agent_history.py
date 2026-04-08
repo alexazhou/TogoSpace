@@ -26,6 +26,34 @@ def _make_item(
     return item
 
 
+def _make_assistant_tool_call_item(
+    *,
+    seq: int,
+    tool_call_ids: list[str],
+    content: str = "",
+    agent_id: int = 1,
+    status: AgentHistoryStatus | None = None,
+    tags: list[AgentHistoryTag] | None = None,
+) -> GtAgentHistory:
+    tool_calls = [
+        llmApiUtil.OpenAIToolCall.model_validate({
+            "id": tool_call_id,
+            "type": "function",
+            "function": {
+                "name": f"tool_{index}",
+                "arguments": "{}",
+            },
+        })
+        for index, tool_call_id in enumerate(tool_call_ids, start=1)
+    ]
+    message = llmApiUtil.OpenAIMessage(
+        role=OpenaiApiRole.ASSISTANT,
+        content=content,
+        tool_calls=tool_calls,
+    )
+    return _make_item(message, agent_id=agent_id, seq=seq, status=status, tags=tags)
+
+
 def test_agent_history_last_role_returns_none_for_empty_history():
     history = AgentHistoryStore(agent_id=1)
 
@@ -351,8 +379,8 @@ def test_build_compact_excludes_pending_infer_and_compress_all():
     assert plan.insert_seq == 0
 
 
-def test_build_compact_preserves_tool_call_chain_when_trailing_is_user():
-    """末尾是 USER 时，tool call 链在压缩后自然完整。"""
+def test_build_compact_can_include_completed_tool_call_chain_when_trailing_is_user():
+    """完整闭合的 tool_call/tool_result 链可以进入 compact source。"""
     history = AgentHistoryStore(
         agent_id=1,
         items=[
@@ -384,6 +412,61 @@ def test_build_compact_insert_seq_when_trailing_is_user():
     )
 
     assert history.build_compact_plan().insert_seq == 2
+
+
+def test_build_compact_excludes_unfinished_trailing_tool_call():
+    """末尾 assistant 的未完成 tool_call 不应进入 compact source。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"), seq=1),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2"), seq=2),
+            _make_assistant_tool_call_item(seq=3, tool_call_ids=["call_1"]),
+        ],
+    )
+
+    plan = history.build_compact_plan()
+
+    assert [msg.content for msg in plan.source_messages] == ["u1", "a1", "u2"]
+    assert plan.insert_seq == 3
+
+
+def test_build_compact_excludes_unfinished_tool_call_tail_before_last_user():
+    """同时存在末尾 user 和未完成 tool_call 时，compact source 只保留更早的稳定消息。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"), seq=1),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u2"), seq=2),
+            _make_assistant_tool_call_item(seq=3, tool_call_ids=["call_1"]),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u3"), seq=4),
+        ],
+    )
+
+    plan = history.build_compact_plan()
+
+    assert [msg.content for msg in plan.source_messages] == ["u1", "a1", "u2"]
+    assert plan.insert_seq == 3
+
+
+def test_build_compact_excludes_partial_multi_tool_call_tail():
+    """多工具调用只完成部分结果时，应整体排除该 assistant 及其尾部结果。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"), seq=1),
+            _make_assistant_tool_call_item(seq=2, tool_call_ids=["call_1", "call_2"]),
+            _make_item(llmApiUtil.OpenAIMessage.tool_result("call_1", '{"ok": true}'), seq=3),
+        ],
+    )
+
+    plan = history.build_compact_plan()
+
+    assert [msg.content for msg in plan.source_messages] == ["u1", "a1"]
+    assert plan.insert_seq == 2
 
 
 def test_build_infer_messages_excludes_pending_infer_tail():

@@ -548,6 +548,7 @@ class AgentTurnRunner:
             messages=compact_plan.source_messages,
             system_prompt=self.system_prompt,
             model=self.gt_agent.model,
+            tools=self.tool_registry.export_openai_tools(),
             max_tokens=llm_config.compact_summary_max_tokens,
         )
         if summary_text is None:

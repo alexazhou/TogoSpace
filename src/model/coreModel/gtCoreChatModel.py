@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from util import llmApiUtil
 
@@ -21,3 +21,4 @@ class GtCoreAgentDialogContext:
     system_prompt: str
     messages: List[llmApiUtil.OpenAIMessage]
     tools: Optional[list[llmApiUtil.OpenAITool]] = field(default=None)
+    tool_choice: Optional[str | dict[str, Any]] = field(default=None)
