@@ -157,3 +157,10 @@ class AgentTaskStatus(EnhanceEnum):
     RUNNING = "RUNNING"    # 正在处理
     COMPLETED = "COMPLETED"  # 已完成
     FAILED = "FAILED"      # 失败
+
+
+class TurnStepResult(EnhanceEnum):
+    """Turn 内部单步推进结果枚举。"""
+    TURN_DONE = "TURN_DONE"          # 当前 turn 已完成，通常表示 finish_chat_turn 已执行成功
+    NO_ACTION = "NO_ACTION"          # 当前 step 未产出可执行动作，需要按失败行动逻辑处理
+    CONTINUE = "CONTINUE"            # 当前 turn 仍需继续推进，进入下一个 step

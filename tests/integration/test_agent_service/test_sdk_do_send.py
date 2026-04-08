@@ -266,14 +266,13 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         assert exported_names == ["send_chat_msg", "finish_chat_turn"]
         assert captured_options["allowed_tools"] == ["Read"]
 
-    async def test_run_chat_turn_uses_max_function_calls_as_retry_limit(self):
+    async def test_run_chat_turn_uses_max_retries_as_failed_action_retry_limit(self):
         await roomService.ensure_room_record(TEAM, "lobby", ["alice"])
         room = roomService.get_room_by_key(f"lobby@{TEAM}")
         agent = Agent(
             gt_agent=GtAgent(id=1, team_id=1, name="alice", role_template_id=1, model="test-model"),
             system_prompt="test",
             driver_config=AgentDriverConfig(driver_type="native"),
-            max_function_calls=2,
         )
         task = GtAgentTask(
             id=1,
@@ -287,8 +286,9 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client
 
-        with pytest.raises(RuntimeError, match="SDK 达到最大尝试次数但未完成行动"):
-            await driver.run_chat_turn(task, synced_count=0)
+        with patch("service.agentService.driver.claudeSdkDriver._RUN_CHAT_TURN_MAX_RETRIES", 1):
+            with pytest.raises(RuntimeError, match="SDK 达到失败行动重试上限仍未完成行动"):
+                await driver.run_chat_turn(task, synced_count=0)
 
         assert len(fake_client.queries) == 2
 
@@ -299,7 +299,6 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             gt_agent=GtAgent(id=1, team_id=1, name="alice", role_template_id=1, model="test-model"),
             system_prompt="test",
             driver_config=AgentDriverConfig(driver_type="native"),
-            max_function_calls=1,
         )
         task = GtAgentTask(
             id=1,
@@ -321,8 +320,9 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         item.seq = 0
         agent.inject_history_messages([item])
 
-        with pytest.raises(RuntimeError, match="SDK 达到最大尝试次数但未完成行动"):
-            await driver.run_chat_turn(task, synced_count=1)
+        with patch("service.agentService.driver.claudeSdkDriver._RUN_CHAT_TURN_MAX_RETRIES", 0):
+            with pytest.raises(RuntimeError, match="SDK 达到失败行动重试上限仍未完成行动"):
+                await driver.run_chat_turn(task, synced_count=1)
 
         assert len(fake_client.queries) == 1
         first_prompt = fake_client.queries[0]

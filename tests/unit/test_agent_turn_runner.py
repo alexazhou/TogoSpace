@@ -1,15 +1,17 @@
 """AgentTurnRunner 单元测试：测试 Turn 执行逻辑。"""
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryTag, DriverType, OpenaiApiRole
+from constants import AgentHistoryTag, DriverType, OpenaiApiRole, TurnStepResult
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver.base import AgentDriverConfig
 from service.roomService import ChatRoom
+from util import llmApiUtil
 
 
 def _make_turn_runner() -> AgentTurnRunner:
@@ -18,7 +20,6 @@ def _make_turn_runner() -> AgentTurnRunner:
     runner = AgentTurnRunner(
         gt_agent=gt_agent,
         system_prompt="You are a test agent.",
-        max_function_calls=5,
         driver_config=AgentDriverConfig(driver_type=DriverType.NATIVE),
     )
     # 替换 _history 为 mock，避免单元测试触及数据库
@@ -113,3 +114,41 @@ async def test_pull_room_messages_returns_zero_when_empty(turn_runner):
 
     assert count == 0
     turn_runner._history.append_history_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_turn_loop_does_not_stop_on_long_tool_chain(turn_runner):
+    room = MagicMock(spec=ChatRoom)
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.turn_setup = SimpleNamespace(max_retries=3, hint_prompt="hint")
+    turn_runner._advance_step = AsyncMock(side_effect=[
+        TurnStepResult.CONTINUE,
+        TurnStepResult.CONTINUE,
+        TurnStepResult.CONTINUE,
+        TurnStepResult.CONTINUE,
+        TurnStepResult.CONTINUE,
+        TurnStepResult.CONTINUE,
+        TurnStepResult.TURN_DONE,
+    ])
+
+    await turn_runner._run_turn_loop(room)
+
+    assert turn_runner._advance_step.await_count == 7
+
+
+@pytest.mark.asyncio
+async def test_run_turn_loop_retries_failed_action_by_max_retries(turn_runner):
+    room = MagicMock(spec=ChatRoom)
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.turn_setup = SimpleNamespace(max_retries=2, hint_prompt="retry hint")
+    turn_runner._advance_step = AsyncMock(side_effect=[
+        TurnStepResult.NO_ACTION,
+        TurnStepResult.NO_ACTION,
+        TurnStepResult.NO_ACTION,
+    ])
+    turn_runner._history.get_last_assistant_message = MagicMock(return_value=llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.ASSISTANT, "plain text"))
+
+    with pytest.raises(RuntimeError, match="达到失败行动重试上限仍未完成行动"):
+        await turn_runner._run_turn_loop(room)
+
+    assert turn_runner._history.append_history_message.await_count == 2

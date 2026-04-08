@@ -48,7 +48,6 @@ def _make_runner_and_history():
     runner = AgentTurnRunner(
         gt_agent=gt_agent,
         system_prompt="You are a test agent.",
-        max_function_calls=5,
         driver_config=AgentDriverConfig(driver_type=DriverType.NATIVE),
     )
 

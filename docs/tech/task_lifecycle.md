@@ -22,7 +22,7 @@ schedulerService          AgentTaskConsumer          gtAgentTaskManager         
 | `schedulerService` | 监听房间轮次事件，创建任务记录（DB），触发消费 |
 | `AgentTaskConsumer` | 消费循环主体：认领任务 → 执行 → 状态流转 → 失败恢复 |
 | `gtAgentTaskManager` | DAL 层，所有任务状态的数据库读写 |
-| `AgentTurnRunner` | 单轮对话执行，Consumer 不关心其内部实现 |
+| `AgentTurnRunner` | 单轮 turn 执行，内部再按 step 推进消息同步、推理与工具调用 |
 
 ## 2. 状态定义
 

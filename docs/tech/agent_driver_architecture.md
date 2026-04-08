@@ -34,7 +34,7 @@ Agent (facade)
  └── task_consumer: AgentTaskConsumer (任务管道)
       ├── 拥有: status, current_db_task, 消费协程
       └── _turn_runner: AgentTurnRunner (内部创建，实现 AgentDriverHost)
-           ├── gt_agent, system_prompt, agent_workdir, max_function_calls
+           ├── gt_agent, system_prompt, agent_workdir
            ├── _history: AgentHistoryStore    (自建)
            ├── tool_registry: AgentToolRegistry  (自建)
            ├── driver: AgentDriver            (自建，host=self)
@@ -150,7 +150,18 @@ TurnRunner 负责：
 - 房间消息同步（`pull_room_messages_to_history`）
 - 推理调用（`_execute_infer`、`_infer_to_item`）
 - 工具调用编排（`_run_tool`、`_execute_tool`）
-- 执行 turn 主循环并调用 driver
+- 执行 turn 主循环，并通过 `_advance_step()` 逐 step 推进当前房间发言
+
+其中有两个概念需要区分：
+
+- `turn`：处理“某个房间轮到当前 agent 发言”的整轮过程，对应 `run_chat_turn(...)`
+- `step`：turn 内部的一次推进动作，例如一次推理、一次执行工具、一次恢复待执行工具
+
+`TurnStepResult` 用于描述单个 step 执行后的结果：
+
+- `TURN_DONE`：当前 step 执行后，整个 turn 已完成
+- `NO_ACTION`：当前 step 未产出可执行动作，需要按失败行动逻辑处理
+- `CONTINUE`：当前 step 已完成，turn 继续推进到下一个 step
 
 TurnRunner 构造时只接收值类型参数：
 
@@ -161,7 +172,6 @@ class AgentTurnRunner:
         gt_agent: GtAgent,
         system_prompt: str,
         agent_workdir: str = "",
-        max_function_calls: int = 5,
         driver_config: AgentDriverConfig | None = None,
     ):
         self._history = AgentHistoryStore(gt_agent.id or 0)
@@ -200,8 +210,8 @@ factory 位于 `driver/factory.py`。
 - 使用 host 的 `tool_registry` 获取可用工具
 - 调用 `host._infer(tools)` 执行模型推理
 - 收到 tool_calls 后返回给 TurnRunner 的 `_dispatch_tool_calls()` 处理
-- 检查本轮是否通过 `send_chat_msg` 或 `finish_chat_turn` 完成
-- 如果没完成，注入 reminder 后重试
+- 检查当前 turn 是否通过 `send_chat_msg` 或 `finish_chat_turn` 完成
+- 若某个 step 未产出可执行动作，则按 `turn_setup.max_retries` 注入 reminder 并重试
 
 适合场景：
 
