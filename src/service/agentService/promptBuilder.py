@@ -28,7 +28,7 @@ def format_room_message(room_name: str, sender_name: str, content: str) -> str:
 def build_turn_begin_prompt(room_name: str, message_blocks: list[str]) -> str:
     context = "\n\n".join(message_blocks) if len(message_blocks) > 0 else "(无新消息)"
     return (
-        f"【{room_name}】 房间轮到你行动，新消息如下：\n\n"
+        f"当前轮到你行动，房间名:【{room_name}】,新消息如下:\n\n"
         f"{context}\n\n"
         f"{_TURN_CONTEXT_SUFFIX}"
     )

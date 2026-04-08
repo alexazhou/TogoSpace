@@ -254,6 +254,9 @@ class ChatRoom:
             next_agent_id = self._resolve_next_dispatchable_agent()
             if next_agent_id is not None:
                 self._publish_current_turn(next_agent_id)
+            else:
+                # 无可调度 Agent（如等待 OPERATOR 输入），仍需广播状态变更
+                self._publish_room_status()
 
     async def finish_turn(self, agent_id: int) -> bool:
         """结束当前发言人的轮次。通常由 Agent 在 finish_chat_turn 工具中调用。
@@ -340,6 +343,18 @@ class ChatRoom:
             gt_agent=gt_agent,
             room_id=self.room_id,
         )
+        self._publish_room_status()
+
+    def _publish_room_status(self) -> None:
+        """广播房间状态快照（state + 当前发言人）给前端。不推送 INIT 状态。"""
+        if self._state == RoomState.INIT:
+            return
+        messageBus.publish(
+            MessageBusTopic.ROOM_STATUS_CHANGED,
+            gt_room=self.gt_room,
+            state=self._state.name,
+            current_turn_agent=self._build_current_turn_agent_dict(),
+        )
 
     def _resolve_next_dispatchable_agent(self) -> Optional[int]:
         """解析下一位可发布 ROOM_AGENT_TURN 的普通 Agent ID。
@@ -393,6 +408,7 @@ class ChatRoom:
             if self._state != RoomState.IDLE:
                 self._state = RoomState.IDLE
                 logger.info(f"房间 {self.key} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
+                self._publish_room_status()
             return True
 
         # 获取所有非 OPERATOR 的 AI agent ID
@@ -401,6 +417,7 @@ class ChatRoom:
             if self._state != RoomState.IDLE:
                 self._state = RoomState.IDLE
                 logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
+                self._publish_room_status()
             return True
         return False
 
@@ -445,6 +462,9 @@ class ChatRoom:
             next_agent_id = self._resolve_next_dispatchable_agent()
             if next_agent_id is not None:
                 self._publish_current_turn(next_agent_id)
+            elif changed:
+                # INIT→SCHEDULING 但当前无可调度 Agent，仍广播初始状态
+                self._publish_room_status()
 
         return changed
 
@@ -513,6 +533,13 @@ class ChatRoom:
             msg += f"\n本房间初始话题：{self.initial_topic}"
         return msg
 
+    def _build_current_turn_agent_dict(self) -> dict | None:
+        """构建当前发言人信息字典，供 API 响应和事件广播复用。"""
+        if self._state != RoomState.SCHEDULING or not self._agent_ids:
+            return None
+        agent_id = self._get_current_turn_agent_id()
+        return {"id": agent_id, "name": self._get_agent_name(agent_id)}
+
     def to_dict(self) -> dict:
         """返回用于 API 响应的字典表示，包含 gt_room 详情与运行时状态。"""
         return {
@@ -529,6 +556,7 @@ class ChatRoom:
             },
             "team_name": self.team_name,
             "state": self._state.name,
+            "current_turn_agent": self._build_current_turn_agent_dict(),
             "agents": list(self.agents),
         }
 
