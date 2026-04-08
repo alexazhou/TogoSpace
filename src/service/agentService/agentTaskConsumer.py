@@ -42,8 +42,16 @@ class AgentTaskConsumer:
         self.status: AgentStatus = AgentStatus.IDLE
         self._aio_consumer_task: asyncio.Task | None = None
 
-    def _publish_status(self, status: AgentStatus) -> None:
+    async def _set_status(self, status: AgentStatus, error_message: str | None = None) -> None:
+        """统一处理 Agent 状态切换：更新运行时状态、广播事件并记录活动。"""
+        if self.status == status:
+            return
+        self.status = status
         messageBus.publish(MessageBusTopic.AGENT_STATUS_CHANGED, gt_agent=self.gt_agent, status=status)
+        await agentActivityService.add_activity(
+            gt_agent=self.gt_agent, activity_type=AgentActivityType.AGENT_STATE,
+            status=AgentActivityStatus.SUCCEEDED, detail=status.name, error_message=error_message,
+        )
 
     def start(self) -> None:
         """如果没有消费协程在运行，则启动一个。"""
@@ -73,25 +81,23 @@ class AgentTaskConsumer:
                 f"existing_task={id(existing)}, current_task={id(current_consumer)}"
             )
 
-        if self.status != AgentStatus.ACTIVE:
-            self.status = AgentStatus.ACTIVE
-            self._publish_status(self.status)
-            await agentActivityService.add_activity(
-                gt_agent=self.gt_agent,
-                activity_type=AgentActivityType.AGENT_STATE, status=AgentActivityStatus.SUCCEEDED,
-                detail=AgentStatus.ACTIVE.name,
-            )
-
-        logger.info(f"进入消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
         while True:
+            await self._set_status(AgentStatus.ACTIVE)
             task = await gtAgentTaskManager.get_first_unfinish_task(self.gt_agent.id)
+
+            logger.info(f"检查待处理任务: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
 
             if task is None:
                 logger.info(f"无待处理任务，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
                 break
 
+            if task.status == AgentTaskStatus.FAILED:
+                logger.info(f"首个未完成任务为 FAILED，保持失败状态并退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={task.id}")
+                await self._set_status(AgentStatus.FAILED, task.error_message)
+                break
+
             if task.status not in (AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING):
-                logger.info(f"首个未完成任务非 PENDING/RUNNING，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={task.id}, task_status={task.status}")
+                logger.info(f"首个未完成任务状态不可消费，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={task.id}, task_status={task.status}")
                 break
 
             if task.status == AgentTaskStatus.PENDING:
@@ -109,12 +115,7 @@ class AgentTaskConsumer:
             except Exception as e:
                 logger.error(f"Agent 任务执行失败: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}, error={e}")
                 await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.FAILED, error_message=str(e))
-                self.status = AgentStatus.FAILED
-                self._publish_status(self.status)
-                await agentActivityService.add_activity(
-                    gt_agent=self.gt_agent, activity_type=AgentActivityType.AGENT_STATE,
-                    status=AgentActivityStatus.SUCCEEDED, detail=AgentStatus.FAILED.name, error_message=str(e),
-                )
+                await self._set_status(AgentStatus.FAILED, str(e))
                 break
 
             logger.info(f"任务执行完成: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}")
@@ -122,13 +123,7 @@ class AgentTaskConsumer:
 
         # 清理逻辑
         if self.status != AgentStatus.FAILED:
-            self.status = AgentStatus.IDLE
-            self._publish_status(self.status)
-            await agentActivityService.add_activity(
-                gt_agent=self.gt_agent,
-                activity_type=AgentActivityType.AGENT_STATE, status=AgentActivityStatus.SUCCEEDED,
-                detail=AgentStatus.IDLE.name,
-            )
+            await self._set_status(AgentStatus.IDLE)
             logger.info(f"消费循环结束，状态回到 IDLE: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
 
         if self._aio_consumer_task is current_consumer:
