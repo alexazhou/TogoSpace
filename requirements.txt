@@ -17,3 +17,4 @@ types-peewee==3.19.0.20260109
 mypy==1.8.0
 pystray>=1.0.0
 Pillow>=10.0.0
+pytspclient>=0.1.1

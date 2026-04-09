@@ -28,7 +28,6 @@ a = Analysis(
     [os.path.join(REPO_ROOT, "src", "app_entry.py")],
     pathex=[
         os.path.join(REPO_ROOT, "src"),
-        "/Volumes/PData/GitDB/GTAgentHands/pyTSPClient",  # editable install
     ],
     binaries=[],
     datas=[
