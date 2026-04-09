@@ -3,6 +3,8 @@ import os
 from logging.handlers import RotatingFileHandler
 from typing import Dict, Optional
 
+import appPaths
+
 LOG_FORMAT = "%(asctime)s.%(msecs)03d - %(name)s - %(levelname)s - %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 MAX_BYTES = 100 * 1024 * 1024
@@ -74,7 +76,7 @@ def init_backend_logger(log_dir: str | None = None) -> None:
     """
 
     if log_dir is None:
-        log_dir = os.path.join(os.getcwd(), "../logs/backend")
+        log_dir = appPaths.LOGS_DIR
     os.makedirs(log_dir, exist_ok=True)
 
     formatter = logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT)

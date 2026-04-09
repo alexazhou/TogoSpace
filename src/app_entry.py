@@ -1,5 +1,7 @@
 import asyncio
 import os
+import shutil
+import subprocess
 import sys
 import threading
 import webbrowser
@@ -72,6 +74,42 @@ def _on_quit(icon, item) -> None:
     icon.stop()
 
 
+def _on_open_config_dir(icon, item) -> None:
+    config_dir = os.path.expanduser("~/.agent_team")
+    os.makedirs(config_dir, exist_ok=True)
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", config_dir])
+    elif sys.platform == "win32":
+        subprocess.Popen(["explorer", config_dir])
+    else:
+        subprocess.Popen(["xdg-open", config_dir])
+
+
+def _on_reset_data(icon, item) -> None:
+    if sys.platform == "darwin":
+        result = subprocess.run(
+            ["osascript", "-e",
+             'display dialog "确定要重置所有数据吗？\\n所有聊天室、成员、消息记录将被删除，此操作不可撤销。"'
+             ' buttons {"取消", "确认重置"} default button "取消" with icon caution'],
+            capture_output=True,
+        )
+        confirmed = result.returncode == 0 and "确认重置" in result.stdout.decode("utf-8", errors="ignore")
+    else:
+        confirmed = True  # 非 macOS 暂不弹窗，直接执行
+
+    if not confirmed:
+        return
+
+    if _backend_loop and not _backend_loop.is_closed():
+        _backend_loop.call_soon_threadsafe(_backend_loop.stop)
+
+    data_dir = appPaths.DATA_DIR
+    if os.path.isdir(data_dir):
+        shutil.rmtree(data_dir)
+
+    icon.stop()
+
+
 def _setup(icon: pystray.Icon) -> None:
     global _tray_icon
     _tray_icon = icon
@@ -99,6 +137,9 @@ def _build_icon() -> pystray.Icon:
             pystray.MenuItem(_status_text, None, enabled=False),
             pystray.MenuItem("打开 Web 界面", _on_open),
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("打开配置目录", _on_open_config_dir),
+            pystray.MenuItem("重置数据", _on_reset_data),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem(f"版本: v{__version__}", None, enabled=False),
             pystray.MenuItem("退出", _on_quit),
         ),
@@ -109,9 +150,13 @@ def _build_icon() -> pystray.Icon:
 # ── 入口 ──────────────────────────────────────────────────────────────────────
 
 def main():
-    # 覆盖 ASSETS_DIR：打包后指向 _MEIPASS/assets/，开发模式保持默认
+    # 打包模式：静态资源指向 _MEIPASS/assets/，可写数据指向 ~/.agent_team/
     if getattr(sys, "frozen", False):
-        appPaths.ASSETS_DIR = os.path.join(sys._MEIPASS, "assets")
+        appPaths.ASSETS_DIR    = os.path.join(sys._MEIPASS, "assets")
+        _user_dir              = os.path.expanduser("~/.agent_team")
+        appPaths.DATA_DIR      = os.path.join(_user_dir, "data")
+        appPaths.LOGS_DIR      = os.path.join(_user_dir, "logs", "backend")
+        appPaths.WORKSPACE_ROOT = os.path.join(_user_dir, "workspace")
     icon = _build_icon()
     icon.run(setup=_setup)
 
