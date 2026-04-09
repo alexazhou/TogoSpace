@@ -1,6 +1,7 @@
 import glob
 import json
 import os
+import shutil
 from typing import Any, List
 
 import appPaths
@@ -56,8 +57,20 @@ def _load_teams(config_dir: str) -> List[TeamConfig]:
 
 def _load_setting(config_dir: str) -> SettingConfig:
     path = os.path.join(config_dir, "setting.json")
+
+    # 自动创建配置目录
+    os.makedirs(config_dir, exist_ok=True)
+
     if not os.path.isfile(path):
-        return SettingConfig()
+        # 从模板复制配置文件
+        template_path = os.path.join(appPaths.ASSETS_DIR, "config_template.json")
+        if os.path.isfile(template_path):
+            shutil.copy(template_path, path)
+        else:
+            raise FileNotFoundError(
+                f"配置模板不存在: {template_path}\n"
+                f"请检查程序安装是否完整。"
+            )
 
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
