@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 import threading
 import webbrowser
@@ -6,6 +7,7 @@ import webbrowser
 import pystray
 from PIL import Image, ImageDraw
 
+import appPaths
 import backend_main
 from version import __version__
 
@@ -107,6 +109,9 @@ def _build_icon() -> pystray.Icon:
 # ── 入口 ──────────────────────────────────────────────────────────────────────
 
 def main():
+    # 覆盖 ASSETS_DIR：打包后指向 _MEIPASS/assets/，开发模式保持默认
+    if getattr(sys, "frozen", False):
+        appPaths.ASSETS_DIR = os.path.join(sys._MEIPASS, "assets")
     icon = _build_icon()
     icon.run(setup=_setup)
 
