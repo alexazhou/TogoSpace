@@ -382,8 +382,8 @@ class ServiceTestCase:
         db_path = cls._get_test_db_path()
         original_load = configUtil.load
 
-        def patched_load(path=None, force_reload=False):
-            cfg = original_load(path or cls._backend_config_dir, force_reload=force_reload)
+        def patched_load(path=None, preset_dir=None, force_reload=False):
+            cfg = original_load(path or cls._backend_config_dir, preset_dir=preset_dir, force_reload=force_reload)
             if cfg.setting.persistence:
                 cfg.setting.persistence.db_path = db_path
             return cfg
