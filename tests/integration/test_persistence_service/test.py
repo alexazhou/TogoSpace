@@ -61,7 +61,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         ]
         agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
         await gtAgentManager.batch_save_agents(team.id, agents)
-        await roomService.ensure_room_record(TEAM, "r1", ["alice", "bob"], max_turns=3)
+        await ServiceTestCase.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3)
         room = roomService.get_room_by_key(f"r1@{TEAM}")
         await room.activate_scheduling()
         alice_id = room.get_agent_id_by_name("alice")

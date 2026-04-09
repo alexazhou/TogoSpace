@@ -39,6 +39,7 @@ class _agentServiceCase(ServiceTestCase):
         await presetService._import_team_from_config(team_cfg)
         await agentService.startup()
         await agentService.load_all_team()
+        await roomService.load_rooms_from_db()
 
     @classmethod
     async def async_teardown_class(cls):
@@ -64,7 +65,6 @@ class TestagentServiceCreateTeamAgents(_agentServiceCase):
 class TestagentServiceGetAgentsInRoom(_agentServiceCase):
     async def test_get_agents_in_room(self):
         """get_agents 只返回房间成员，并保持成员集合正确。"""
-        await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         assert {a.gt_agent.name for a in agentService.get_room_agents(room.room_id)} == {"alice", "bob"}
 
@@ -146,7 +146,6 @@ class TestAgentServiceSystemPrompt(_agentServiceCase):
 class TestagentServiceGetAllRooms(_agentServiceCase):
     async def test_get_all_rooms_for_agent(self):
         """roomService.get_rooms_for_agent 应返回某个 agent 所在的所有 room_id。"""
-        await roomService.ensure_room_record(TEAM, "general", ["alice"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         alice_id = room.get_agent_id_by_name("alice")
         assert room.room_id in roomService.get_rooms_for_agent(room.team_id, alice_id)
@@ -155,7 +154,7 @@ class TestagentServiceGetAllRooms(_agentServiceCase):
 class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
     async def test_pull_room_messages_to_history(self):
         """pull_room_messages_to_history 会把房间中的新增消息拉取进 agent 历史。"""
-        await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
+        await self.create_room(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
         bob_id = room.get_agent_id_by_name("bob")
@@ -177,7 +176,7 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
 
     async def test_pull_room_messages_to_history_appends_complete_turn_prompt_as_last_history(self):
         """pull_room_messages_to_history 追加到 history 的最后一条必须是完整 turn prompt。"""
-        await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
+        await self.create_room(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
         bob_id = room.get_agent_id_by_name("bob")
@@ -248,7 +247,7 @@ class TestSaveTeamAgentsFullReplace(_agentServiceCase):
 class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
     async def test_sync_room_skips_own_messages(self):
         """同步时应过滤 agent 自己发过的消息，避免历史自回灌。"""
-        await roomService.ensure_room_record(TEAM, "general", ["alice"])
+        await self.create_room(TEAM, "general", ["alice"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
 
@@ -266,7 +265,7 @@ class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
 class TestAgentResumeFailed(_agentServiceCase):
     async def test_resume_failed_marks_task_running_and_restarts_consumer(self):
         """FAILED 状态的 Agent 恢复时，应将最早失败任务转为 RUNNING 并重启统一执行流程。"""
-        await roomService.ensure_room_record(TEAM, "resume_room", ["alice"])
+        await self.create_room(TEAM, "resume_room", ["alice"])
         room = roomService.get_room_by_key(f"resume_room@{TEAM}")
         alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
 

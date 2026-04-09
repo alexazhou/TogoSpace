@@ -42,7 +42,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await roomService.startup()
         await presetService._import_role_templates_from_app_config()
         await presetService._import_team_from_config(team_config)
-        await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"])
+        await roomService.load_rooms_from_db()
         await funcToolService.startup()
         await agentService.startup()
         await agentService.load_all_team()
@@ -73,8 +73,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             return self.normalize_to_mock(res)
 
         with self.patch_infer(handler=fake_infer):
-            # 重新创建 max_turns=1 的同名房间，快速触发“每人一轮”场景。
-            await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"], max_turns=1)
+            # 重新创建 max_turns=1 的同名房间，快速触发"每人一轮"场景。
+            await self.create_room(TEAM, "general", ["alice", "bob"], max_turns=1)
             room = roomService.get_room_by_key(room_key)
             await room.activate_scheduling()
             await self.wait_until(
@@ -88,7 +88,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
     async def test_tool_call_result_appended_to_history(self):
         """验证 tool_call 结果被正确追加到 agent history。"""
-        await roomService.ensure_room_record(TEAM, "manual_turn", ["alice", "bob"])
+        await self.create_room(TEAM, "manual_turn", ["alice", "bob"])
         room = roomService.get_room_by_key(f"manual_turn@{TEAM}")
         await room.activate_scheduling()
 
@@ -132,7 +132,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
     async def test_turn_checker_forces_send_chat_msg(self):
         """直接输出文字时 turn_checker 应注入 hint，迫使 agent 改用工具。"""
-        await roomService.ensure_room_record(TEAM, "turn_checker_room", ["alice", "bob"])
+        await self.create_room(TEAM, "turn_checker_room", ["alice", "bob"])
         room = roomService.get_room_by_key(f"turn_checker_room@{TEAM}")
 
         alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
@@ -195,7 +195,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             return self.normalize_to_mock(res)
 
         with self.patch_infer(handler=fake_infer):
-            await roomService.ensure_room_record(TEAM, "general", ["alice", "bob"], max_turns=2)
+            await self.create_room(TEAM, "general", ["alice", "bob"], max_turns=2)
             room = roomService.get_room_by_key(room_key)
             await room.activate_scheduling()
             await self.wait_until(

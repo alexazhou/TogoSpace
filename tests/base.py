@@ -21,7 +21,7 @@ import service.schedulerService as scheduler
 import service.persistenceService as persistenceService
 import service.ormService as ormService
 import service.llmService as llmService
-from dal.db import gtAgentManager
+from dal.db import gtAgentManager, gtTeamManager, gtRoomManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
 from util.configTypes import AgentConfig
@@ -571,6 +571,40 @@ class ServiceTestCase:
             if remaining <= 0:
                 raise AssertionError(message)
             await asyncio.sleep(min(interval, remaining))
+
+    @staticmethod
+    async def create_room(
+        team_name: str,
+        room_name: str,
+        agent_names: list[str],
+        initial_topic: str = "",
+        room_type: RoomType = RoomType.GROUP,
+        max_turns: int = 0,
+    ) -> None:
+        """测试辅助：通过生产 API（gtRoomManager.save_room + load_rooms_from_db）创建或更新房间。"""
+        gt_team = await gtTeamManager.get_team(team_name)
+        assert gt_team is not None, f"Team '{team_name}' 不存在"
+        agents = await gtAgentManager.get_team_agents_by_names(gt_team.id, agent_names, include_special=True)
+        agent_ids = [a.id for a in agents]
+        gt_room = await gtRoomManager.get_room_by_team_and_name(gt_team.id, room_name)
+        if gt_room is None:
+            gt_room = GtRoom(
+                team_id=gt_team.id,
+                name=room_name,
+                type=room_type,
+                initial_topic=initial_topic,
+                max_turns=max_turns,
+                agent_ids=agent_ids,
+                biz_id=None,
+                tags=[],
+            )
+        else:
+            gt_room.type = room_type
+            gt_room.initial_topic = initial_topic
+            gt_room.max_turns = max_turns
+            gt_room.agent_ids = agent_ids
+        await gtRoomManager.save_room(gt_room)
+        await roomService.load_rooms_from_db()
 
     @staticmethod
     async def convert_to_gt_agents(team_id: int, configs: list[AgentConfig]) -> list[GtAgent]:

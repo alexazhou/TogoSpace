@@ -780,43 +780,6 @@ async def _load_room(
     if gt_room.max_turns > 0:
         logger.info(f"初始化轮次配置: room_id={room.room_id}, max_turns={gt_room.max_turns}")
 
-async def ensure_room_record(team_name: str, name: str, agent_names: List[str], initial_topic: str = "", room_type: RoomType = RoomType.GROUP, max_turns: int = 0) -> None:
-    """确保房间记录存在并装载运行态。创建后房间处于 INIT，需由 service 层显式退出 INIT。"""
-    gt_team = await gtTeamManager.get_team(team_name)
-    assert gt_team is not None, f"Team '{team_name}' 不存在，调用 ensure_room_record 前应先创建 Team"
-    agent_ids = list(map(
-        lambda agent: agent.id,
-        await gtAgentManager.get_team_agents_by_names(
-            gt_team.id,
-            agent_names,
-            include_special=True,
-        ),
-    ))
-    gt_room = await gtRoomManager.get_room_by_team_and_name(gt_team.id, name)
-    if gt_room is None:
-        gt_room = GtRoom(
-            team_id=gt_team.id,
-            name=name,
-            type=room_type,
-            initial_topic=initial_topic,
-            max_turns=max_turns,
-            agent_ids=[],
-            biz_id=None,
-            tags=[],
-        )
-    else:
-        gt_room.type = room_type
-        gt_room.initial_topic = initial_topic
-        gt_room.max_turns = max_turns
-    gt_room.agent_ids = list(agent_ids)
-    gt_room = await gtRoomManager.save_room(gt_room)
-    await _load_room(
-        gt_team=gt_team,
-        gt_room=gt_room,
-        agent_ids=agent_ids,
-    )
-
-
 async def load_rooms_from_db() -> None:
     """从数据库装载所有聊天室到运行态。"""
     for gt_team in await gtTeamManager.get_all_teams():

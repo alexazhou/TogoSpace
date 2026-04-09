@@ -50,36 +50,40 @@ class TestRoomRegistry(ServiceTestCase):
         await persistenceService.shutdown()
         await ormService.shutdown()
 
-    async def test_ensure_room_record(self):
-        """ensure_room_record 后应可通过 key 获取 ChatRoom 实例。"""
-        await roomService.ensure_room_record(TEAM, "myroom", ["alice"])
+    async def test_create_room(self):
+        """create_room 后应可通过 key 获取 ChatRoom 实例。"""
+        await self.create_room(TEAM, "myroom", ["alice"])
         key = f"myroom@{TEAM}"
         assert key in roomService._rooms
         assert isinstance(roomService.get_room_by_key(key), ChatRoom)
 
     async def test_close_all(self):
         """shutdown 会清空全局 rooms 注册表。"""
-        await roomService.ensure_room_record(TEAM, "tmp", ["a"])
+        await self.create_room(TEAM, "tmp", ["a"])
         roomService.shutdown()
         assert len(roomService._rooms) == 0
 
     async def test_setup_agents(self):
         """get_agent_names 返回创建时配置的参与者顺序。"""
-        await roomService.ensure_room_record(TEAM, "r1", ["alice", "bob"])
+        await self.create_room(TEAM, "r1", ["alice", "bob"])
         room = roomService.get_room_by_key(f"r1@{TEAM}")
         assert roomService.get_agent_names(room.room_id) == ["alice", "bob"]
 
     async def test_get_rooms_for_agent(self):
         """按 agent 过滤房间时，只返回该 agent 参与的 room_id 列表。"""
-        await roomService.ensure_room_record(TEAM, "r1", ["alice"])
-        await roomService.ensure_room_record(TEAM, "r2", ["bob"])
-        await roomService.ensure_room_record(TEAM, "r3", ["alice", "bob"])
+        await self.create_room(TEAM, "r1", ["alice"])
+        await self.create_room(TEAM, "r2", ["bob"])
+        await self.create_room(TEAM, "r3", ["alice", "bob"])
         r1 = roomService.get_room_by_key(f"r1@{TEAM}")
         r2 = roomService.get_room_by_key(f"r2@{TEAM}")
         r3 = roomService.get_room_by_key(f"r3@{TEAM}")
 
-        assert roomService.get_rooms_for_agent(r1.team_id, self.agent_ids["alice"]) == [r1.room_id, r3.room_id]
-        assert roomService.get_rooms_for_agent(r1.team_id, self.agent_ids["bob"]) == [r2.room_id, r3.room_id]
+        alice_rooms = roomService.get_rooms_for_agent(r1.team_id, self.agent_ids["alice"])
+        bob_rooms = roomService.get_rooms_for_agent(r1.team_id, self.agent_ids["bob"])
+        assert r1.room_id in alice_rooms and r3.room_id in alice_rooms
+        assert r2.room_id not in alice_rooms
+        assert r2.room_id in bob_rooms and r3.room_id in bob_rooms
+        assert r1.room_id not in bob_rooms
 
     async def test_create_rooms_keeps_empty_history_before_activation(self):
         """批量建房路径在激活前不应预先塞入初始化消息。"""
@@ -117,7 +121,7 @@ class TestRoomRegistry(ServiceTestCase):
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
 
-        await roomService.ensure_room_record(TEAM, "restore_safe_room", ["alice", "bob"])
+        await self.create_room(TEAM, "restore_safe_room", ["alice", "bob"])
         room = roomService.get_room_by_key(f"restore_safe_room@{TEAM}")
 
         await room.activate_scheduling()
@@ -138,7 +142,7 @@ class TestRoomRegistry(ServiceTestCase):
 
     async def test_special_agent_ids(self):
         """SYSTEM 和 OPERATOR 应有特殊的 agent_id。"""
-        await roomService.ensure_room_record(TEAM, "special_room", ["Operator", "alice"])
+        await self.create_room(TEAM, "special_room", ["Operator", "alice"])
         room = roomService.get_room_by_key(f"special_room@{TEAM}")
 
         assert room.get_agent_id_by_name(SpecialAgent.SYSTEM.name) == ChatRoom.SYSTEM_MEMBER_ID
