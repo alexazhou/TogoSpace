@@ -5,7 +5,7 @@ from util import configUtil
 
 
 # 基础目录
-_BASE_DIR = os.path.abspath(os.path.expanduser("~/.teamclaw"))
+_BASE_DIR = os.path.abspath(os.path.expanduser("~/.agent_team"))
 
 
 class ConfigHandler(BaseHandler):

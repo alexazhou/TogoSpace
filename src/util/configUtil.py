@@ -13,10 +13,16 @@ from util.configTypes import (
 
 _cached_app_config: AppConfig | None = None
 _cached_config_dir: str | None = None
+_cached_preset_dir: str | None = None
 
 
 def _resolve_config_dir(config_dir: str | None) -> str:
-    base = config_dir or os.path.join(os.path.dirname(__file__), "../../config")
+    base = config_dir or os.path.expanduser("~/.agent_team")
+    return os.path.abspath(base)
+
+
+def _resolve_preset_dir() -> str:
+    base = os.path.join(os.path.dirname(__file__), "../../preset")
     return os.path.abspath(base)
 
 
@@ -81,14 +87,15 @@ def get_app_config() -> AppConfig:
 
 def load(config_dir: str = None, force_reload: bool = False) -> AppConfig:
     """一次性加载所有配置，写入缓存并返回。"""
-    global _cached_app_config, _cached_config_dir
+    global _cached_app_config, _cached_config_dir, _cached_preset_dir
 
     resolved_config_dir = _resolve_config_dir(config_dir)
+    resolved_preset_dir = _resolve_preset_dir()
     if not force_reload and _cached_app_config is not None and _cached_config_dir == resolved_config_dir:
         return _cached_app_config
 
-    role_templates = _load_role_templates(resolved_config_dir)
-    teams = _load_teams(resolved_config_dir)
+    role_templates = _load_role_templates(resolved_preset_dir)
+    teams = _load_teams(resolved_preset_dir)
     setting = _load_setting(resolved_config_dir)
 
     app_config = AppConfig(
@@ -100,4 +107,5 @@ def load(config_dir: str = None, force_reload: bool = False) -> AppConfig:
     )
     _cached_app_config = app_config
     _cached_config_dir = resolved_config_dir
+    _cached_preset_dir = resolved_preset_dir
     return app_config

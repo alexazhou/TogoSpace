@@ -19,7 +19,7 @@ agent_team/
 ├── src/                 # 后端
 ├── tui/                 # 终端前端（Textual）
 ├── frontend/            # Web 前端（Vue 3 + Vite + TypeScript，Git Submodule）
-├── config/              # 运行配置（role_templates/ teams/ setting.json）
+├── preset/              # 预置内容（role_templates/ teams/），随源码版本管理
 ├── docs/                # 设计与规范文档
 ├── logs/                # 运行日志（自动生成）
 │   ├── backend/
@@ -144,10 +144,10 @@ frontend/
 
 ```bash
 # 前台运行
-.venv/bin/python3 tui/tui_main.py [--base-url http://127.0.0.1:8080] [--config config/setting.json]
+.venv/bin/python3 tui/tui_main.py [--base-url http://127.0.0.1:8080] [--config ~/.agent_team/setting.json]
 
 # 或使用脚本
-./scripts/start_tui.sh [--base-url http://127.0.0.1:8080] [--config config/setting.json]
+./scripts/start_tui.sh [--base-url http://127.0.0.1:8080] [--config ~/.agent_team/setting.json]
 
 # 停止
 ./scripts/stop_tui.sh
@@ -209,13 +209,15 @@ VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 
 ## 配置文件约定
 
-- RoleTemplate 定义：`config/role_templates/*.json`
-- Team 定义：`config/teams/*.json`
-- 运行配置：`config/setting.json`
-  - `llm_services` / `default_llm_server`
-  - `persistence`
+配置分为两类，路径与版本控制策略不同：
 
-默认 `--config-dir` 未指定时，回退到仓库内 `config/`。
+| 类别 | 内容 | 路径 | 版本控制 |
+|------|------|------|----------|
+| **preset**（预置内容） | RoleTemplate / Team | `preset/role_templates/*.json`、`preset/teams/*.json` | 是，随源码提交 |
+| **config**（运行配置） | LLM 服务、API key、persistence 等 | `~/.agent_team/setting.json` | 否，用户私有 |
+
+- `preset/` 固定由代码自动查找，不可通过参数指定。
+- 运行配置默认读取 `~/.agent_team/setting.json`；可用 `--config-dir <dir>` 指定其他目录（目录下需有 `setting.json`）。
 
 ## 前端仓库说明（双前端）
 

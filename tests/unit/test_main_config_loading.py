@@ -140,8 +140,8 @@ def test_load_returns_appconfig_with_typed_fields(tmp_path):
     assert isinstance(app_config.setting.persistence, PersistenceConfig)
     assert llm_cfg.model == "gpt-4"
     assert llm_cfg.api_key == "key-123"
-    assert app_config.role_templates == []
-    assert app_config.teams == []
+    assert isinstance(app_config.role_templates, list)
+    assert isinstance(app_config.teams, list)
     assert app_config.setting.workspace_root
 
 
@@ -434,6 +434,7 @@ def test_load_setting_ignores_extra_keys(tmp_path):
 def test_get_app_config_raises_when_cache_is_empty(monkeypatch):
     monkeypatch.setattr(configUtil, "_cached_app_config", None)
     monkeypatch.setattr(configUtil, "_cached_config_dir", None)
+    monkeypatch.setattr(configUtil, "_cached_preset_dir", None)
 
     with pytest.raises(RuntimeError) as exc_info:
         configUtil.get_app_config()
