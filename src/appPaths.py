@@ -5,6 +5,7 @@
 app_entry.py 在后端启动前覆盖为用户目录（~/.agent_team/）。
 """
 import os
+import platform
 
 _SRC = os.path.dirname(os.path.abspath(__file__))   # = repo/src/
 _ROOT = os.path.join(_SRC, "..")                     # = repo/
@@ -20,3 +21,34 @@ LOGS_DIR: str      = os.path.abspath(os.path.join(_ROOT, "logs", "backend"))
 
 # Agent 工作目录根（可写）
 WORKSPACE_ROOT: str = os.path.abspath(_ROOT)
+
+
+def get_gtsp_binary_path() -> str:
+    """
+    根据当前平台返回 gtsp 可执行文件路径。
+
+    支持的平台：
+    - macOS (darwin): amd64 / arm64
+    """
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+
+    # 映射架构名称
+    arch_map = {
+        "x86_64": "amd64",
+        "amd64": "amd64",
+        "arm64": "arm64",
+        "aarch64": "arm64",
+    }
+    arch = arch_map.get(machine, machine)
+
+    # 构建二进制文件名
+    binary_name = f"gtsp-{system}-{arch}"
+    binary_path = os.path.join(ASSETS_DIR, "execute", "gtsp", binary_name)
+
+    if not os.path.exists(binary_path):
+        raise FileNotFoundError(
+            f"gtsp binary not found for current platform: {binary_path}"
+        )
+
+    return binary_path
