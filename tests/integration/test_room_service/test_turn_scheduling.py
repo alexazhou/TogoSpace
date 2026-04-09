@@ -48,13 +48,13 @@ class TestTurnScheduling(ServiceTestCase):
     async def test_create_room_does_not_publish_first_agent(self):
         """建房后不应立刻发布首个发言人的 TURN 事件（INIT 状态不广播状态变更）。"""
         with patch("service.messageBus.publish") as mock_publish:
-            await roomService.ensure_room_record(TEAM, "r", ["alice", "bob"], max_turns=5)
+            await self.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
             topics = [call.args[0] for call in mock_publish.call_args_list]
             assert MessageBusTopic.ROOM_STATUS_CHANGED not in topics
 
     async def test_start_scheduling_publishes_first_agent(self):
         """显式启动调度后，才发布首个发言人的状态变更事件。"""
-        await roomService.ensure_room_record(TEAM, "r", ["alice", "bob"], max_turns=5)
+        await self.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
         room = roomService.get_room_by_key(f"r@{TEAM}")
         alice_id = room.get_agent_id_by_name("alice")
 
@@ -70,7 +70,7 @@ class TestTurnScheduling(ServiceTestCase):
 
     async def test_add_message_publishes_next_agent(self):
         """当前发言人发言后，调用 finish_turn 才调度下一个发言人。"""
-        await roomService.ensure_room_record(TEAM, "r", ["alice", "bob"], max_turns=5)
+        await self.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
         room = roomService.get_room_by_key(f"r@{TEAM}")
         await room.activate_scheduling()
         bob_id = room.get_agent_id_by_name("bob")
@@ -89,7 +89,7 @@ class TestTurnScheduling(ServiceTestCase):
 
     async def test_turn_state_becomes_idle_after_max_turns(self):
         """房间默认 INIT，完成一轮后应进入 IDLE。"""
-        await roomService.ensure_room_record(TEAM, "r", ["a"], max_turns=1)
+        await self.create_room(TEAM, "r", ["a"], max_turns=1)
         room = roomService.get_room_by_key(f"r@{TEAM}")
         assert room.state == RoomState.INIT
         await room.activate_scheduling()
@@ -101,7 +101,7 @@ class TestTurnScheduling(ServiceTestCase):
 
     async def test_no_publish_after_max_turns_reached(self):
         """超过最大轮次后继续发消息，不应再触发新的调度。"""
-        await roomService.ensure_room_record(TEAM, "r", ["a"], max_turns=1)
+        await self.create_room(TEAM, "r", ["a"], max_turns=1)
         room = roomService.get_room_by_key(f"r@{TEAM}")
         await room.activate_scheduling()
         a_id = room.get_agent_id_by_name("a")

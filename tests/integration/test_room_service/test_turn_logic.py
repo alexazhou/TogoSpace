@@ -57,7 +57,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "test_room"
         agents = ["alice", "bob", "charlie"]
         room_key = f"{room_name}@{TEAM}"
-        await roomService.ensure_room_record(TEAM, room_name, agents, room_type=RoomType.GROUP, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, room_type=RoomType.GROUP, max_turns=10)
         room = roomService.get_room_by_key(room_key)
         assert await room.activate_scheduling()
 
@@ -106,7 +106,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "test_skip"
         agents = ["alice", "bob"]
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
@@ -126,7 +126,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "test_idle"
         agents = ["alice", "bob"]
         room_key = f"{room_name}@{TEAM}"
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=1)
+        await self.create_room(TEAM, room_name, agents, max_turns=1)
         room = roomService.get_room_by_key(room_key)
         assert await room.activate_scheduling()
 
@@ -163,7 +163,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "test_loop"
         agents = ["a", "b"]
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=5)
+        await self.create_room(TEAM, room_name, agents, max_turns=5)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
@@ -192,7 +192,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "skip_all"
         agents = ["alice", "bob"]
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
         assert room.state == RoomState.SCHEDULING
@@ -214,7 +214,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "skip_no_event"
         agents = ["alice", "bob"]
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
@@ -242,7 +242,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "skip_idx"
         agents = ["alice", "bob"]
         room_key = f"{room_name}@{TEAM}"
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(room_key)
         assert await room.activate_scheduling()
 
@@ -270,7 +270,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "skip_wakeup"
         agents = [SpecialAgent.OPERATOR, "alice", "bob"]
         room_key = f"{room_name}@{TEAM}"
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(room_key)
         assert await room.activate_scheduling()
 
@@ -302,7 +302,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "skip_partial"
         agents = ["alice", "bob", "charlie"]
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
@@ -323,7 +323,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "skip_op"
         agents = ["alice", SpecialAgent.OPERATOR, "bob"]
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
@@ -349,7 +349,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "operator_auto_skip"
         agents = ["alice", SpecialAgent.OPERATOR, "bob"]
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
         assert room.get_current_turn_agent_name() == "alice"
@@ -375,7 +375,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "operator_wait_group"
         agents = ["alice", SpecialAgent.OPERATOR]
-        await roomService.ensure_room_record(TEAM, room_name, agents, room_type=RoomType.GROUP, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, room_type=RoomType.GROUP, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
         assert room.get_current_turn_agent_name() == "alice"
@@ -402,7 +402,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "operator_alias"
         agents = ["Operator", "alice"]
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
         assert room.get_current_turn_agent_name() == SpecialAgent.OPERATOR.name
@@ -421,7 +421,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "skip_reset"
         agents = ["alice", "bob"]
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
@@ -454,7 +454,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "test_sliding"
         agents = ["alice", "bob", "charlie"]
-        await roomService.ensure_room_record(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 

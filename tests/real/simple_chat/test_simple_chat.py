@@ -50,8 +50,8 @@ class TestRealSimpleChat(ServiceTestCase):
         await agentService.startup()
         await agentService.load_all_team()
 
-        # 创建房间（max_turns=1 表示 alice/bob 各 1 次发言）
-        await roomService.ensure_room_record("default", "general", ["alice", "bob"], max_turns=1)
+        # 加载房间（preset_rooms 已由 presetService 写入 DB，此处只需装载运行态）
+        await roomService.load_rooms_from_db()
 
         # 启动调度器
         await scheduler.startup()
