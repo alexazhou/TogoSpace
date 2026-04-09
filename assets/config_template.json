@@ -1,0 +1,17 @@
+{
+  "_comment": "AgentTeam 配置文件，请根据实际 LLM 服务修改",
+
+  "default_llm_server": "qwen",
+
+  "llm_services": [
+    {
+      "name": "qwen",
+      "enable": true,
+      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "api_key": "YOUR_API_KEY_HERE",
+      "type": "openai-compatible",
+      "model": "qwen-plus",
+      "context_window_tokens": 32000
+    }
+  ]
+}
