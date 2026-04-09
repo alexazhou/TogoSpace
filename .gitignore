@@ -11,7 +11,9 @@ data/
 test_data/
 TSP
 gTSP
-assets/execute/
+assets/execute/*
+!assets/execute/gtsp/
+!assets/execute/gtsp/gtsp-*
 assets/frontend/
 assets/icon.icns
 .pyinstaller/

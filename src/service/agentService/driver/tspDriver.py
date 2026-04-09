@@ -31,7 +31,7 @@ _RUN_CHAT_TURN_HINT = (
 
 def build_gtsp_command(raw_command: Optional[list[str]], workdir: str) -> list[str]:
     if raw_command is None:
-        default_binary = os.path.join(appPaths.ASSETS_DIR, "execute", "gtsp")
+        default_binary = appPaths.get_gtsp_binary_path()
         command = [default_binary, "--mode", "stdio"]
     else:
         command = list(raw_command)
@@ -151,6 +151,10 @@ class TspAgentDriver(AgentDriver):
         for tool in initialize_result.capabilities.tools:
             name = tool.name
             input_schema = tool.input_schema
+
+            # JSON Schema 中 required 字段是可选的，OpenAI API 需要，默认为空列表
+            if "required" not in input_schema:
+                input_schema["required"] = []
 
             resolved[name] = llmApiUtil.OpenAITool(
                 function=llmApiUtil.OpenAIFunction(
