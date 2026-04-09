@@ -4,7 +4,11 @@ import tornado.web
 
 from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController
 
-_FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "../assets/frontend")
+import sys as _sys
+if getattr(_sys, "frozen", False):
+    _FRONTEND_DIST = os.path.join(_sys._MEIPASS, "assets/frontend")
+else:
+    _FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "../assets/frontend")
 
 
 class _SPAHandler(tornado.web.StaticFileHandler):
