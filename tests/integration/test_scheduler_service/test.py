@@ -16,7 +16,7 @@ from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
-from constants import MessageBusTopic, AgentStatus, AgentTaskType, AgentTaskStatus, SpecialAgent
+from constants import MessageBusTopic, AgentStatus, AgentTaskType, AgentTaskStatus
 from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
 
@@ -53,6 +53,14 @@ def _patch_scheduler_rooms(monkeypatch, *rooms: roomService.ChatRoom) -> None:
     monkeypatch.setattr(scheduler.chat_room, "get_room", lambda room_id: room_map.get(room_id))
 
 
+def _make_scheduling_payload(room: roomService.ChatRoom, gt_agent) -> dict:
+    """构建 need_scheduling=True 的标准事件 payload。"""
+    return {
+        "gt_room": room.gt_room,
+        "need_scheduling": True,
+        "current_turn_agent": gt_agent,
+    }
+
 
 class TestSchedulerRun(ServiceTestCase):
     def setup_method(self):
@@ -70,7 +78,7 @@ class TestSchedulerRun(ServiceTestCase):
         await asyncio.wait_for(run_task, timeout=2.0)
 
     async def test_scheduler_runs_agent_on_turn_event(self, monkeypatch):
-        """发布 ROOM_AGENT_TURN 后，scheduler 应触发 Agent 启动消费协程。"""
+        """收到 need_scheduling=True 的事件后，scheduler 应触发 Agent 启动消费协程。"""
         alice = _make_mock_agent("alice")
         room = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -103,10 +111,10 @@ class TestSchedulerRun(ServiceTestCase):
             run_task = asyncio.create_task(scheduler.run())
 
             msg = EventBusMessage(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
-                payload={"gt_agent": alice.gt_agent, "room_id": room.room_id},
+                topic=MessageBusTopic.ROOM_STATUS_CHANGED,
+                payload=_make_scheduling_payload(room, alice.gt_agent),
             )
-            await scheduler._on_agent_turn(msg)
+            await scheduler._on_room_status_changed(msg)
 
             # scheduler 内部只做委派，给一个短暂让渡时间以保持测试时序稳定。
             await asyncio.sleep(0.5)
@@ -187,7 +195,7 @@ class TestSchedulerRun(ServiceTestCase):
         restart_spy.assert_not_called()
 
     async def test_on_agent_turn_creates_task(self, monkeypatch):
-        """收到 ROOM_AGENT_TURN 消息后，创建任务并触发消费协程启动。"""
+        """收到 need_scheduling=True 消息后，创建任务并触发消费协程启动。"""
         alice = _make_mock_agent("alice")
         room = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -217,43 +225,28 @@ class TestSchedulerRun(ServiceTestCase):
             ))
             mock_task_manager.has_pending_room_task = AsyncMock(return_value=False)
             msg = EventBusMessage(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
-                payload={"gt_agent": alice.gt_agent, "room_id": room.room_id},
+                topic=MessageBusTopic.ROOM_STATUS_CHANGED,
+                payload=_make_scheduling_payload(room, alice.gt_agent),
             )
-            await scheduler._on_agent_turn(msg)
+            await scheduler._on_room_status_changed(msg)
 
         alice.start_consumer_task.assert_called_once_with()
 
-    async def test_on_agent_turn_skips_special_agent(self, monkeypatch):
-        """收到特殊成员的 ROOM_AGENT_TURN 消息后，应直接跳过调度。"""
-        room = roomService.ChatRoom(
-            team=GtTeam(id=1, name=TEAM),
-            room=GtRoom(
-                id=1,
-                team_id=1,
-                name="r1",
-                type=roomService.RoomType.PRIVATE,
-                initial_topic="",
-                max_turns=0,
-                agent_read_index=None,
-                updated_at=GtRoom._now(),
-            ),
-            agents=[GtAgent(id=1, team_id=1, name="alice", role_template_id=1)],
-        )
-        _patch_scheduler_rooms(monkeypatch, room)
+    async def test_need_scheduling_false_skips_scheduling(self, monkeypatch):
+        """need_scheduling=False 时不应创建任务（特殊成员、IDLE 等场景均由 roomService 设置该标志）。"""
         await scheduler.startup()
 
         with patch("service.schedulerService.gtAgentTaskManager") as mock_task_manager:
             msg = EventBusMessage(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
-                payload={"gt_agent": SimpleNamespace(id=int(SpecialAgent.OPERATOR.value), name=SpecialAgent.OPERATOR.name), "room_id": room.room_id},
+                topic=MessageBusTopic.ROOM_STATUS_CHANGED,
+                payload={"need_scheduling": False},
             )
-            await scheduler._on_agent_turn(msg)
+            await scheduler._on_room_status_changed(msg)
 
         mock_task_manager.create_task.assert_not_called()
 
     async def test_duplicate_room_event_is_skipped(self, monkeypatch):
-        """同一房间连续触发两次 ROOM_AGENT_TURN，第二次应被跳过。"""
+        """同一房间连续触发两次调度事件，第二次应被跳过。"""
         alice = _make_mock_agent("alice")
         room = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -283,14 +276,14 @@ class TestSchedulerRun(ServiceTestCase):
             ))
             mock_task_manager.has_pending_room_task = AsyncMock(return_value=True)
             msg = EventBusMessage(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
-                payload={"gt_agent": alice.gt_agent, "room_id": room.room_id},
+                topic=MessageBusTopic.ROOM_STATUS_CHANGED,
+                payload=_make_scheduling_payload(room, alice.gt_agent),
             )
-            await scheduler._on_agent_turn(msg)
+            await scheduler._on_room_status_changed(msg)
 
             # 已存在同房间 pending 任务时，create_task 不应被调用
             create_call_count = mock_task_manager.create_task.call_count
-            await scheduler._on_agent_turn(msg)
+            await scheduler._on_room_status_changed(msg)
 
             assert mock_task_manager.create_task.call_count == create_call_count
 
@@ -337,15 +330,15 @@ class TestSchedulerRun(ServiceTestCase):
             ])
             mock_task_manager.has_pending_room_task = AsyncMock(side_effect=[False, False])
             msg_r1 = EventBusMessage(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
-                payload={"gt_agent": alice.gt_agent, "room_id": r1.room_id},
+                topic=MessageBusTopic.ROOM_STATUS_CHANGED,
+                payload=_make_scheduling_payload(r1, alice.gt_agent),
             )
             msg_r2 = EventBusMessage(
-                topic=MessageBusTopic.ROOM_AGENT_TURN,
-                payload={"gt_agent": alice.gt_agent, "room_id": r2.room_id},
+                topic=MessageBusTopic.ROOM_STATUS_CHANGED,
+                payload=_make_scheduling_payload(r2, alice.gt_agent),
             )
-            await scheduler._on_agent_turn(msg_r1)
-            await scheduler._on_agent_turn(msg_r2)
+            await scheduler._on_room_status_changed(msg_r1)
+            await scheduler._on_room_status_changed(msg_r2)
 
         assert mock_task_manager.create_task.call_count == 2
 
@@ -380,12 +373,12 @@ class TestSchedulerRun(ServiceTestCase):
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
         msg = EventBusMessage(
-            topic=MessageBusTopic.ROOM_AGENT_TURN,
-            payload={"gt_agent": GtAgent(id=1, team_id=1, name="non-existent", role_template_id=1), "room_id": 1},
+            topic=MessageBusTopic.ROOM_STATUS_CHANGED,
+            payload=_make_scheduling_payload(room, GtAgent(id=1, team_id=1, name="non-existent", role_template_id=1)),
         )
         with patch("service.schedulerService.agentService.get_agent", side_effect=KeyError("not found")):
             with pytest.raises(KeyError, match="not found"):
-                await scheduler._on_agent_turn(msg)
+                await scheduler._on_room_status_changed(msg)
 
     async def test_on_agent_turn_general_exception(self, monkeypatch):
         """验证获取 Agent 发生通用异常时会直接抛出。"""
@@ -407,12 +400,12 @@ class TestSchedulerRun(ServiceTestCase):
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
         msg = EventBusMessage(
-            topic=MessageBusTopic.ROOM_AGENT_TURN,
-            payload={"gt_agent": GtAgent(id=1, team_id=1, name="error-agent", role_template_id=1), "room_id": 1},
+            topic=MessageBusTopic.ROOM_STATUS_CHANGED,
+            payload=_make_scheduling_payload(room, GtAgent(id=1, team_id=1, name="error-agent", role_template_id=1)),
         )
         with patch("service.schedulerService.agentService.get_agent", side_effect=RuntimeError("unexpected")):
             with pytest.raises(RuntimeError, match="unexpected"):
-                await scheduler._on_agent_turn(msg)
+                await scheduler._on_room_status_changed(msg)
 
     async def test_stop_agent_task_non_existent(self):
         """停止不存在的 agent task 不应报错。"""

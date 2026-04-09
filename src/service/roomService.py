@@ -253,7 +253,7 @@ class ChatRoom:
         if was_idle:
             next_agent_id = self._resolve_next_dispatchable_agent()
             if next_agent_id is not None:
-                self._publish_current_turn(next_agent_id)
+                self._publish_room_status(need_scheduling=True)
             else:
                 # 无可调度 Agent（如等待 OPERATOR 输入），仍需广播状态变更
                 self._publish_room_status()
@@ -294,7 +294,7 @@ class ChatRoom:
         await self._persist_turn_pos()
         next_agent_id = self._resolve_next_dispatchable_agent()
         if next_agent_id is not None:
-            self._publish_current_turn(next_agent_id)
+            self._publish_room_status(need_scheduling=True)
         return True
 
     def _get_current_turn_agent_id(self) -> int:
@@ -334,26 +334,21 @@ class ChatRoom:
         """判断是否为特殊成员（SYSTEM/OPERATOR）。"""
         return agent_id in (self.SYSTEM_MEMBER_ID, self.OPERATOR_MEMBER_ID)
 
-    def _publish_current_turn(self, agent_id: int) -> None:
-        """仅发布指定 Agent 的发言事件，不处理状态推进。"""
-        gt_agent = self.get_gt_agent(agent_id)
-        assert gt_agent is not None, f"room agent not found while publishing turn: room={self.key}, agent_id={agent_id}"
-        messageBus.publish(
-            MessageBusTopic.ROOM_AGENT_TURN,
-            gt_agent=gt_agent,
-            room_id=self.room_id,
-        )
-        self._publish_room_status()
-
-    def _publish_room_status(self) -> None:
+    def _publish_room_status(self, need_scheduling: bool = False) -> None:
         """广播房间状态快照（state + 当前发言人）给前端。不推送 INIT 状态。"""
         if self._state == RoomState.INIT:
             return
+        current_turn_agent = (
+            self.get_gt_agent(self._get_current_turn_agent_id())
+            if self._state == RoomState.SCHEDULING and self._agent_ids
+            else None
+        )
         messageBus.publish(
             MessageBusTopic.ROOM_STATUS_CHANGED,
             gt_room=self.gt_room,
-            state=self._state.name,
-            current_turn_agent=self._build_current_turn_agent_dict(),
+            state=self._state,
+            current_turn_agent=current_turn_agent,
+            need_scheduling=need_scheduling,
         )
 
     def _resolve_next_dispatchable_agent(self) -> Optional[int]:
@@ -461,7 +456,7 @@ class ChatRoom:
         if self._state == RoomState.SCHEDULING:
             next_agent_id = self._resolve_next_dispatchable_agent()
             if next_agent_id is not None:
-                self._publish_current_turn(next_agent_id)
+                self._publish_room_status(need_scheduling=True)
             elif changed:
                 # INIT→SCHEDULING 但当前无可调度 Agent，仍广播初始状态
                 self._publish_room_status()

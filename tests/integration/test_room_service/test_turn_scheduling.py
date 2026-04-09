@@ -46,14 +46,14 @@ class TestTurnScheduling(ServiceTestCase):
         await ormService.shutdown()
 
     async def test_create_room_does_not_publish_first_agent(self):
-        """建房后不应立刻发布首个发言人的 TURN 事件。"""
+        """建房后不应立刻发布首个发言人的 TURN 事件（INIT 状态不广播状态变更）。"""
         with patch("service.messageBus.publish") as mock_publish:
             await roomService.ensure_room_record(TEAM, "r", ["alice", "bob"], max_turns=5)
             topics = [call.args[0] for call in mock_publish.call_args_list]
-            assert MessageBusTopic.ROOM_AGENT_TURN not in topics
+            assert MessageBusTopic.ROOM_STATUS_CHANGED not in topics
 
     async def test_start_scheduling_publishes_first_agent(self):
-        """显式启动调度后，才发布首个发言人的 TURN 事件。"""
+        """显式启动调度后，才发布首个发言人的状态变更事件。"""
         await roomService.ensure_room_record(TEAM, "r", ["alice", "bob"], max_turns=5)
         room = roomService.get_room_by_key(f"r@{TEAM}")
         alice_id = room.get_agent_id_by_name("alice")
@@ -61,9 +61,11 @@ class TestTurnScheduling(ServiceTestCase):
         with patch("service.messageBus.publish") as mock_publish:
             await room.activate_scheduling()
             mock_publish.assert_any_call(
-                MessageBusTopic.ROOM_AGENT_TURN,
-                gt_agent=room.get_gt_agent(alice_id),
-                room_id=room.room_id,
+                MessageBusTopic.ROOM_STATUS_CHANGED,
+                gt_room=room.gt_room,
+                state=RoomState.SCHEDULING,
+                current_turn_agent=room.get_gt_agent(alice_id),
+                need_scheduling=True,
             )
 
     async def test_add_message_publishes_next_agent(self):
@@ -71,17 +73,18 @@ class TestTurnScheduling(ServiceTestCase):
         await roomService.ensure_room_record(TEAM, "r", ["alice", "bob"], max_turns=5)
         room = roomService.get_room_by_key(f"r@{TEAM}")
         await room.activate_scheduling()
-        alice_id = room.get_agent_id_by_name("alice")
         bob_id = room.get_agent_id_by_name("bob")
 
         with patch("service.messageBus.publish") as mock_publish:
-            await room.add_message(alice_id, "hello")
+            await room.add_message(room.get_agent_id_by_name("alice"), "hello")
             # 消息不会自动推进轮次，需要显式调用 finish_turn
-            await room.finish_turn(alice_id)
+            await room.finish_turn(room.get_agent_id_by_name("alice"))
             mock_publish.assert_any_call(
-                MessageBusTopic.ROOM_AGENT_TURN,
-                gt_agent=room.get_gt_agent(bob_id),
-                room_id=room.room_id,
+                MessageBusTopic.ROOM_STATUS_CHANGED,
+                gt_room=room.gt_room,
+                state=RoomState.SCHEDULING,
+                current_turn_agent=room.get_gt_agent(bob_id),
+                need_scheduling=True,
             )
 
     async def test_turn_state_becomes_idle_after_max_turns(self):
@@ -97,7 +100,7 @@ class TestTurnScheduling(ServiceTestCase):
         assert room.state == RoomState.IDLE
 
     async def test_no_publish_after_max_turns_reached(self):
-        """超过最大轮次后继续发消息，不应再发布 TURN 事件。"""
+        """超过最大轮次后继续发消息，不应再触发新的调度。"""
         await roomService.ensure_room_record(TEAM, "r", ["a"], max_turns=1)
         room = roomService.get_room_by_key(f"r@{TEAM}")
         await room.activate_scheduling()
@@ -106,4 +109,9 @@ class TestTurnScheduling(ServiceTestCase):
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message(a_id, "msg2")
-            assert MessageBusTopic.ROOM_AGENT_TURN not in [call.args[0] for call in mock_publish.call_args_list]
+            scheduling_calls = [
+                c for c in mock_publish.call_args_list
+                if c[0][0] == MessageBusTopic.ROOM_STATUS_CHANGED
+                and c[1].get("need_scheduling")
+            ]
+            assert scheduling_calls == []
