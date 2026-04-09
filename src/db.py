@@ -204,7 +204,7 @@ def _build_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--migrations-dir",
         default=None,
-        help="migration directory path (default: resource/migrate)",
+        help="migration directory path (default: assets/migrate)",
     )
 
     subparsers.add_parser("migrate", parents=[common], help="apply pending migrations")
