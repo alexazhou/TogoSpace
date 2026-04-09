@@ -3,6 +3,7 @@ import json
 import os
 from typing import Any, List
 
+import appPaths
 from util.configTypes import (
     RoleTemplateConfig,
     AppConfig,
@@ -22,8 +23,7 @@ def _resolve_config_dir(config_dir: str | None) -> str:
 
 
 def _resolve_preset_dir() -> str:
-    base = os.path.join(os.path.dirname(__file__), "../../preset")
-    return os.path.abspath(base)
+    return os.path.join(appPaths.ASSETS_DIR, "preset")
 
 
 def get_db_path() -> str:
@@ -31,7 +31,7 @@ def get_db_path() -> str:
 
 
 def _load_prompt(file_path: str) -> str:
-    full_path = os.path.join(os.path.dirname(__file__), "../../", file_path)
+    full_path = os.path.join(appPaths.ASSETS_DIR, file_path)
     with open(full_path, "r", encoding="utf-8") as f:
         return f.read().strip()
 
@@ -106,8 +106,8 @@ def load(config_dir: str = None, preset_dir: str = None, force_reload: bool = Fa
         role_templates=role_templates,
         teams=teams,
         setting=setting,
-        group_chat_prompt=_load_prompt("src/prompts/Base.md"),
-        agent_identity_prompt=_load_prompt("src/prompts/AgentIdentity.md"),
+        group_chat_prompt=_load_prompt("prompts/Base.md"),
+        agent_identity_prompt=_load_prompt("prompts/AgentIdentity.md"),
     )
     _cached_app_config = app_config
     _cached_config_dir = resolved_config_dir

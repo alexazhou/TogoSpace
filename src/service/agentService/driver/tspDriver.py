@@ -6,6 +6,8 @@ import os
 from typing import Any, Optional
 
 from pytspclient import TSPClient, TSPException, TSPInitializeResult, TSPToolResponse
+
+import appPaths
 from service.agentService.driver.base import AgentDriverConfig
 
 from service import funcToolService
@@ -29,9 +31,7 @@ _RUN_CHAT_TURN_HINT = (
 
 def build_gtsp_command(raw_command: Optional[list[str]], workdir: str) -> list[str]:
     if raw_command is None:
-        default_binary = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "../../../../assert/execute/gtsp")
-        )
+        default_binary = os.path.join(appPaths.ASSETS_DIR, "execute", "gtsp")
         command = [default_binary, "--mode", "stdio"]
     else:
         command = list(raw_command)

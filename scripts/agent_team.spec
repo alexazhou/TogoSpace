@@ -26,12 +26,15 @@ if not APP_ICON:
 
 a = Analysis(
     [os.path.join(REPO_ROOT, "src", "app_entry.py")],
-    pathex=[os.path.join(REPO_ROOT, "src")],
+    pathex=[
+        os.path.join(REPO_ROOT, "src"),
+        "/Volumes/PData/GitDB/GTAgentHands/pyTSPClient",  # editable install
+    ],
     binaries=[],
     datas=[
-        (os.path.join(REPO_ROOT, "preset"),          "preset"),
-        (os.path.join(REPO_ROOT, "src", "prompts"),  "src/prompts"),
-        (os.path.join(REPO_ROOT, "assets", "frontend"), "assets/frontend"),
+        (os.path.join(REPO_ROOT, "assets"), "assets"),
+        # litellm 含大量 json/yaml 数据文件，需整包打入
+        (os.path.join(REPO_ROOT, ".venv", "lib", "python3.11", "site-packages", "litellm"), "litellm"),
     ],
     hiddenimports=[
         # tornado
@@ -59,10 +62,17 @@ a = Analysis(
         "PIL",
         "PIL.Image",
         "PIL.ImageDraw",
+        # project-specific
+        "pytspclient",
+        # tiktoken plugin (namespace package, needs explicit import)
+        "tiktoken_ext",
+        "tiktoken_ext.openai_public",
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[
+        os.path.join(SPECPATH, "rthook_tiktoken.py"),
+    ],
     excludes=["tkinter", "textual"],
     noarchive=False,
 )

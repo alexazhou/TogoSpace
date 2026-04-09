@@ -8,13 +8,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import appPaths
 from util import configUtil
 
 MIGRATIONS_TABLE = "_migrations"
 MIGRATION_NAME_PATTERN = re.compile(r"^\d{4}.*\.sql$")
-DEFAULT_MIGRATIONS_DIR = (
-    Path(__file__).resolve().parent.parent / "resource" / "migrate"
-)
 
 
 @dataclass(frozen=True)
@@ -32,7 +30,7 @@ def resolve_db_path(db_path: str) -> Path:
 
 def resolve_migrations_dir(migrations_dir: str | None) -> Path:
     if migrations_dir is None:
-        return DEFAULT_MIGRATIONS_DIR
+        return Path(appPaths.ASSETS_DIR) / "migrate"
     path = Path(migrations_dir)
     if path.is_absolute():
         return path

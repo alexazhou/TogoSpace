@@ -1,0 +1,37 @@
+{
+  "name": "默认团队",
+  "agents": [
+    { "name": "王老师", "role_template": "researcher" },
+    { "name": "小马哥", "role_template": "project_manager" },
+    { "name": "小A", "role_template": "software_engineer" },
+    { "name": "小B", "role_template": "test_engineer" },
+    { "name": "小刘", "role_template": "intern_tsp" }
+  ],
+  "preset_rooms": [
+    {
+      "name": "王老师",
+      "agents": ["Operator", "王老师"],
+      "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
+      "max_turns": 100
+    },
+    {
+      "name": "小马哥",
+      "agents": ["Operator", "小马哥"],
+      "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
+      "max_turns": 100
+    },
+    {
+      "name": "小刘",
+      "agents": ["Operator", "小刘"],
+      "initial_topic": "你好，我是人类操作者。你主要协助做文件查找与信息检索。",
+      "max_turns": 100
+    }
+  ],
+  "dept_tree": {
+    "dept_name": "总部",
+    "responsibility": "负责整体运营与协作",
+    "manager": "小马哥",
+    "agents": ["小马哥", "王老师", "小A", "小B", "小刘"],
+    "children": []
+  }
+}
