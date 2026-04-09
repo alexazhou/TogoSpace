@@ -13,3 +13,7 @@ TSP
 gTSP
 assert/
 assets/frontend/
+assets/icon.icns
+.pyinstaller/
+dist/
+build/
