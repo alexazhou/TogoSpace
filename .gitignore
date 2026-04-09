@@ -19,3 +19,4 @@ assets/icon.icns
 .pyinstaller/
 dist/
 build/
+workspace_root/
