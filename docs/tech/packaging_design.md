@@ -145,7 +145,7 @@ PyInstaller 不支持交叉编译，需在对应平台上执行打包：
 pyinstaller --windowed --onedir \
   --add-data "preset:preset" \
   --add-data "src/prompts:src/prompts" \
-  --add-data "frontend/dist:frontend/dist" \
+  --add-data "assets/frontend:assets/frontend" \
   --icon assets/icon.icns \
   src/app_entry.py
 ```
@@ -156,7 +156,7 @@ pyinstaller --windowed --onedir \
 |------|------|------|
 | `preset/` | 内嵌 bundle（只读） | role_templates / teams 预置内容，随版本发布 |
 | `src/prompts/` | 内嵌 bundle（只读） | 系统 prompt 文件，随版本发布 |
-| `frontend/dist/` | 内嵌 bundle（只读） | Web 前端构建产物，由后端托管 |
+| `assets/frontend/` | 内嵌 bundle（只读） | Web 前端构建产物，由后端托管；打包前需手动从 `frontend/dist` 复制 |
 | `~/.agent_team/` | 用户主目录（可写） | `setting.json` 等用户配置，已在用户目录，无需处理 |
 
 ### 主要注意事项
@@ -182,5 +182,5 @@ pyinstaller --windowed --onedir \
 - [x] 端口冲突：报错提示用户去修改 `~/.agent_team/setting.json` 中的端口配置
 - [x] 图标资源：临时生成占位图，存放于 `assets/`
 - [x] 版本号来源：`src/version.py` 中的 `__version__`
-- [x] Web 前端：由后端托管静态文件，需将 `frontend/dist` 打包进 bundle
+- [x] Web 前端：由后端托管静态文件，构建产物放 `assets/frontend/`，打包时内嵌
 - [x] `app_entry.py` 位置：放在 `src/` 下

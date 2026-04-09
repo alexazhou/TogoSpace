@@ -1,6 +1,23 @@
+import os
+
 import tornado.web
 
 from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController
+
+_FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "../assets/frontend")
+
+
+class _SPAHandler(tornado.web.StaticFileHandler):
+    """Vue SPA fallback：文件不存在时回退到 index.html。"""
+
+    async def get(self, path: str, include_body: bool = True) -> None:
+        try:
+            await super().get(path, include_body)
+        except tornado.web.HTTPError as e:
+            if e.status_code == 404:
+                await super().get("index.html", include_body)
+            else:
+                raise
 
 
 tornado_settings = {
@@ -62,5 +79,8 @@ application = tornado.web.Application([
     (r"/activities.json",                            activityController.ActivitiesHandler),
     (r"/agents/(\d+)/activities.json",               activityController.AgentActivitiesHandler),
     (r"/teams/(\d+)/activities.json",                activityController.TeamActivitiesHandler),
+
+    # 前端静态文件（必须放最后，SPA fallback）
+    (r"/(.*)", _SPAHandler, {"path": _FRONTEND_DIST, "default_filename": "index.html"}),
 
 ], **tornado_settings)  # type: ignore [arg-type]
