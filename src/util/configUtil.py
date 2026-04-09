@@ -85,12 +85,16 @@ def get_app_config() -> AppConfig:
     return _cached_app_config
 
 
-def load(config_dir: str = None, force_reload: bool = False) -> AppConfig:
-    """一次性加载所有配置，写入缓存并返回。"""
+def load(config_dir: str = None, preset_dir: str = None, force_reload: bool = False) -> AppConfig:
+    """一次性加载所有配置，写入缓存并返回。
+
+    Args:
+        preset_dir: 指定 role_templates/teams 的查找目录；为 None 时使用默认 preset/。
+    """
     global _cached_app_config, _cached_config_dir, _cached_preset_dir
 
     resolved_config_dir = _resolve_config_dir(config_dir)
-    resolved_preset_dir = _resolve_preset_dir()
+    resolved_preset_dir = os.path.abspath(preset_dir) if preset_dir else _resolve_preset_dir()
     if not force_reload and _cached_app_config is not None and _cached_config_dir == resolved_config_dir:
         return _cached_app_config
 

@@ -45,7 +45,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         self.cleanup_sqlite_files()
 
     async def _bootstrap(self):
-        cfg = configUtil.load(_CONFIG_DIR, force_reload=True)
+        cfg = configUtil.load(_CONFIG_DIR, preset_dir=_CONFIG_DIR, force_reload=True)
         team_config = cfg.teams[0]
 
         from src.db import migrate_database

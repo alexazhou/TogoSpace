@@ -34,7 +34,7 @@ class _agentServiceCase(ServiceTestCase):
         await persistenceService.startup()
         await roomService.startup()
         await presetService._import_role_templates_from_app_config()
-        cfg = configUtil.load(_CONFIG_DIR, force_reload=True)
+        cfg = configUtil.load(_CONFIG_DIR, preset_dir=_CONFIG_DIR, force_reload=True)
         team_cfg = cfg.teams[0]
         await presetService._import_team_from_config(team_cfg)
         await agentService.startup()
@@ -168,7 +168,7 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         assert synced_count == 1
         assert len(alice.task_consumer._turn_runner._history) == 1
         content = alice.task_consumer._turn_runner._history[0].content or ""
-        assert content.startswith("【general】 房间轮到你行动，新消息如下：")
+        assert content.startswith("当前轮到你行动，房间名:【general】,新消息如下:")
         assert "【房间《general》】【系统提醒】：" in content
         assert "【房间《general》】【bob】：" in content
         assert "： hello alice" in content

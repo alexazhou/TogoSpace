@@ -34,7 +34,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
         # 按真实启动顺序拉起 service，并加载 integration 专用配置。
-        cfg = configUtil.load(_CONFIG_DIR, force_reload=True)
+        cfg = configUtil.load(_CONFIG_DIR, preset_dir=_CONFIG_DIR, force_reload=True)
         team_config = cfg.teams[0]
         db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
