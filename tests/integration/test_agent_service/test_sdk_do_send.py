@@ -312,7 +312,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
 
         first = promptBuilder.format_room_message("lobby", "SYSTEM", "房间初始化")
         second = promptBuilder.format_room_message("lobby", "bob", "hello alice")
-        turn_prompt = promptBuilder.build_turn_begin_prompt("lobby", [first, second])
+        turn_prompt = f"【lobby】 房间轮到你行动，新消息如下：\n\n{first}\n\n{second}\n\n你现在可以调用工具行动。"
         item = GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt),
         )
