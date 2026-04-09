@@ -4,7 +4,9 @@ import shutil
 import subprocess
 import sys
 import threading
+import tkinter as tk
 import webbrowser
+from tkinter import messagebox
 
 import pystray
 from PIL import Image, ImageDraw
@@ -85,19 +87,27 @@ def _on_open_config_dir(icon, item) -> None:
         subprocess.Popen(["xdg-open", config_dir])
 
 
-def _on_reset_data(icon, item) -> None:
-    if sys.platform == "darwin":
-        result = subprocess.run(
-            ["osascript", "-e",
-             'display dialog "确定要重置所有数据吗？\\n所有聊天室、成员、消息记录将被删除，此操作不可撤销。"'
-             ' buttons {"取消", "确认重置"} default button "取消" with icon caution'],
-            capture_output=True,
-        )
-        confirmed = result.returncode == 0 and "确认重置" in result.stdout.decode("utf-8", errors="ignore")
-    else:
-        confirmed = True  # 非 macOS 暂不弹窗，直接执行
+def _tk_dialog(fn, *args, **kwargs):
+    """在隐藏的 Tk 根窗口上弹出对话框，完成后销毁根窗口。"""
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        return fn(*args, parent=root, **kwargs)
+    finally:
+        root.destroy()
 
-    if not confirmed:
+
+def _confirm(message: str) -> bool:
+    return _tk_dialog(messagebox.askyesno, "AgentTeam", message, icon="warning")
+
+
+def _alert(title: str, message: str) -> None:
+    _tk_dialog(messagebox.showinfo, title, message)
+
+
+def _on_reset_data(icon, item) -> None:
+    if not _confirm("确定要重置所有数据吗？\n所有聊天室、成员、消息记录将被删除，此操作不可撤销。"):
         return
 
     if _backend_loop and not _backend_loop.is_closed():
@@ -107,6 +117,7 @@ def _on_reset_data(icon, item) -> None:
     if os.path.isdir(data_dir):
         shutil.rmtree(data_dir)
 
+    _alert("重置成功", "数据已清除，请重新启动程序。")
     icon.stop()
 
 
