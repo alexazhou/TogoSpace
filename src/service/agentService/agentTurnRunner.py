@@ -520,6 +520,11 @@ class AgentTurnRunner:
             raise RuntimeError(f"{check_stage} compact 失败: agent_id={self.gt_agent.id}")
 
         messages = self._history.build_infer_messages()
+        msg_summary = ", ".join(f"{m.role}:{len(m.content or '') if not m.tool_calls else 'TC'}" for m in messages)
+        logger.info(
+            "[compact-recheck] agent_id=%d, message_count=%d, messages=[%s]",
+            self.gt_agent.id, len(messages), msg_summary,
+        )
         estimated_tokens = compact.estimate_tokens(resolved_model, messages, self.system_prompt)
         if estimated_tokens >= hard_limit_tokens:
             raise RuntimeError(

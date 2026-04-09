@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Iterable, Iterator
 
@@ -8,6 +9,8 @@ from dal.db import gtAgentHistoryManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.historyUsage import HistoryUsage
 from util import llmApiUtil
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -279,15 +282,27 @@ class AgentHistoryStore:
             return None
 
         if preserve_start_idx >= len(items):
+            insert_seq = items[-1].seq + 1
+            logger.info(
+                "[compact-plan] agent_id=%d, total_items=%d, preserve_start_idx=%d(compress_all), "
+                "insert_seq=%d, compressed=%d, preserved=0",
+                self._agent_id, len(items), preserve_start_idx, insert_seq, len(items),
+            )
             return CompactPlan(
                 source_messages=[item.openai_message for item in items],
-                # 追加到末尾：summary seq > 所有被压缩消息，保留区为空，避免旧消息残留
-                insert_seq=items[-1].seq + 1,
+                insert_seq=insert_seq,
             )
 
+        insert_seq = items[preserve_start_idx].seq
+        logger.info(
+            "[compact-plan] agent_id=%d, total_items=%d, preserve_start_idx=%d, "
+            "insert_seq=%d, compressed=%d, preserved=%d",
+            self._agent_id, len(items), preserve_start_idx, insert_seq,
+            preserve_start_idx, len(items) - preserve_start_idx,
+        )
         return CompactPlan(
             source_messages=[item.openai_message for item in items[:preserve_start_idx]],
-            insert_seq=items[preserve_start_idx].seq,
+            insert_seq=insert_seq,
         )
 
     def _calc_compact_preserve_start_idx(self, items: list[GtAgentHistory]) -> int:
@@ -365,6 +380,8 @@ class AgentHistoryStore:
         - seq 及之后的消息（保留尾部）seq 整体 +1，紧跟 summary 之后
         - compress_all 场景下 seq = items[-1].seq + 1，保留区为空，_items = [summary]
         """
+        items_before = len(self._items)
+
         # 找出需要保留的尾部（seq >= insert_seq 的消息）
         preserve_idx = len(self._items)
         for idx, existing in enumerate(self._items):
@@ -389,8 +406,18 @@ class AgentHistoryStore:
         for existing in preserved_items:
             existing.seq += 1
 
+        has_old_cs = any(AgentHistoryTag.COMPACT_SUMMARY in p.tags for p in preserved_items)
+
         # 原子替换：summary + 保留尾部，旧前缀全部丢弃
         self._items = [item] + preserved_items
+
+        logger.info(
+            "[compact-insert] agent_id=%d, insert_seq=%d, items_before=%d, "
+            "preserve_idx=%d, preserved=%d, items_after=%d, has_old_cs_in_preserved=%s",
+            self._agent_id, seq, items_before,
+            preserve_idx, len(preserved_items), len(self._items), has_old_cs,
+        )
+
         self._assert_compact_invariant()
         return item
 
