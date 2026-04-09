@@ -64,7 +64,6 @@ def _make_runner(history: AgentHistoryStore) -> AgentTurnRunner:
     runner = AgentTurnRunner(
         gt_agent=gt_agent,
         system_prompt="You are a helpful assistant.",
-        max_function_calls=5,
         driver_config=AgentDriverConfig(driver_type=DriverType.NATIVE),
     )
     runner._history = history
