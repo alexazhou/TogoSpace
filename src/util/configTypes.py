@@ -3,6 +3,7 @@ import os
 
 from pydantic import BaseModel, ConfigDict, Field
 from constants import LlmServiceType, DriverType
+import appPaths
 
 
 class DeptNodeConfig(BaseModel):
@@ -18,7 +19,7 @@ DeptNodeConfig.model_rebuild()
 
 
 def _default_workspace_root() -> str:
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    return appPaths.WORKSPACE_ROOT
 
 
 def _is_test_env() -> bool:
@@ -33,7 +34,9 @@ def _default_persistence_db_path() -> str:
     env_override = os.environ.get("TEAMAGENT_DB_PATH")
     if env_override and env_override.strip():
         return env_override.strip()
-    return "../test_data/data.db" if _is_test_env() else "../data/data.db"
+    if _is_test_env():
+        return "../test_data/data.db"  # 相对路径，由 db.resolve_db_path 解析为 repo/test_data/
+    return os.path.join(appPaths.DATA_DIR, "data.db")
 
 
 def _default_llm_extra_headers() -> dict[str, str]:

@@ -1,11 +1,22 @@
 """
-运行时资源路径模块。
+运行时路径模块。
 
-ASSETS_DIR 指向 assets/ 目录的绝对路径：
-  - 开发环境（backend_main.py 直接运行）：默认指向仓库根目录下的 assets/
-  - 打包运行（app_entry.py）：由 app_entry.py 在后端启动前覆盖为 sys._MEIPASS
+所有变量在开发模式下指向仓库内默认位置，打包模式下由
+app_entry.py 在后端启动前覆盖为用户目录（~/.agent_team/）。
 """
 import os
 
-# 默认：相对于本文件（src/appPaths.py）的 ../assets/
-ASSETS_DIR: str = os.path.abspath(os.path.join(os.path.dirname(__file__), "../assets"))
+_SRC = os.path.dirname(os.path.abspath(__file__))   # = repo/src/
+_ROOT = os.path.join(_SRC, "..")                     # = repo/
+
+# 静态资源（prompts / preset / migrate 等，只读）
+ASSETS_DIR: str    = os.path.abspath(os.path.join(_ROOT, "assets"))
+
+# 运行数据（SQLite 等，可写）
+DATA_DIR: str      = os.path.abspath(os.path.join(_ROOT, "data"))
+
+# 后端日志（可写）
+LOGS_DIR: str      = os.path.abspath(os.path.join(_ROOT, "logs", "backend"))
+
+# Agent 工作目录根（可写）
+WORKSPACE_ROOT: str = os.path.abspath(_ROOT)

@@ -102,7 +102,7 @@ def test_default_db_path_in_non_test_env(monkeypatch):
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.setenv("TEAMAGENT_ENV", "prod")
 
-    assert configUtil.get_db_path() == "../data/data.db"
+    assert configUtil.get_db_path().endswith("data/data.db")
 
 
 def test_default_db_path_in_test_env(monkeypatch):
