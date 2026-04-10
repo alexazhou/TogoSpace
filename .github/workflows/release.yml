@@ -61,9 +61,14 @@ jobs:
         security default-keychain -s build.keychain
         security unlock-keychain -p actions build.keychain
 
-        # 导入证书
+        # 导入证书（密码可能为空）
         echo "${{ secrets.APPLE_CERTIFICATE_P12 }}" | base64 -d > cert.p12
-        security import cert.p12 -k build.keychain -P "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+        CERT_PASSWORD="${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
+        if [ -n "$CERT_PASSWORD" ]; then
+          security import cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+        else
+          security import cert.p12 -k build.keychain -T /usr/bin/codesign
+        fi
         rm cert.p12
 
         # 允许 codesign 访问 keychain
