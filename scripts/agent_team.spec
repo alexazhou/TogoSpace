@@ -11,7 +11,7 @@ _ver_src = open(os.path.join(REPO_ROOT, "src", "version.py")).read()
 APP_VERSION = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', _ver_src).group(1)
 
 # macOS universal2：同时支持 arm64 和 x86_64
-TARGET_ARCH = "universal2"
+TARGET_ARCH = "arm64"
 print(f"ℹ️  target_arch: {TARGET_ARCH}")
 
 _icon_path = os.path.join(REPO_ROOT, "assets", "icon.icns")

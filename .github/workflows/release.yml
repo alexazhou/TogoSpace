@@ -50,17 +50,14 @@ jobs:
         rm -f package-lock.json
         npm install
 
-    - name: Build macOS app (universal2)
+    - name: Build macOS app
       run: python scripts/build_mac.py
-
-    - name: Verify universal2 architecture
-      run: python scripts/check/check_universal_arch.py dist/*.app
 
     - name: Zip app bundle
       run: |
         APP_PATH=$(ls -d dist/*.app | head -1)
         APP_NAME=$(basename "$APP_PATH")
-        ZIP_NAME="${APP_NAME%.app}-macos-universal.zip"
+        ZIP_NAME="${APP_NAME%.app}-macos.zip"
         ditto -c -k --keepParent "$APP_PATH" "dist/${ZIP_NAME}"
         echo "ZIP_PATH=dist/${ZIP_NAME}" >> $GITHUB_ENV
 
