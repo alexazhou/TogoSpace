@@ -64,26 +64,10 @@ jobs:
 
     - name: Import Apple certificate (optional)
       if: ${{ env.APPLE_CERTIFICATE_P12 != '' }}
-      run: |
-        # 创建临时 keychain
-        security create-keychain -p actions build.keychain
-        security default-keychain -s build.keychain
-        security unlock-keychain -p actions build.keychain
-        security set-keychain-settings -lut 21600 build.keychain
-
-        # 导入证书（-A 允许所有应用访问，避免交互式提示）
-        echo "$APPLE_CERTIFICATE_P12" | base64 -d > cert.p12
-        if [ -n "$APPLE_CERTIFICATE_PASSWORD" ]; then
-          security import cert.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -A -T /usr/bin/codesign
-        else
-          security import cert.p12 -k build.keychain -A -T /usr/bin/codesign
-        fi
-        rm cert.p12
-
-        # 允许 codesign 访问 keychain（避免签名时弹出授权窗口）
-        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions build.keychain
-
-        echo "✅ Certificate imported successfully"
+      uses: apple-actions/import-codesign-certs@v3
+      with:
+        p12-file-base64: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+        p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
 
     - name: Sign app (optional)
       if: ${{ env.APPLE_CERTIFICATE_P12 != '' }}
