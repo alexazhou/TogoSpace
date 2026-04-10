@@ -393,7 +393,14 @@ class TestRoomTurnLogic(ServiceTestCase):
             and c[1].get("current_turn_agent") is not None
         ]
         assert turn_calls == []
+        assert room.state == RoomState.IDLE
         assert room.get_current_turn_agent_name() == SpecialAgent.OPERATOR.name
+        idle_calls = [
+            c for c in mock_publish.call_args_list
+            if c[0][0] == MessageBusTopic.ROOM_STATUS_CHANGED
+            and c[1].get("state") == RoomState.IDLE
+        ]
+        assert len(idle_calls) == 1
 
     async def test_operator_alias_matches_on_turn_checks(self):
         """
@@ -413,6 +420,33 @@ class TestRoomTurnLogic(ServiceTestCase):
             assert ok is True
 
         assert room.get_current_turn_agent_name() == "alice"
+
+    async def test_private_room_idle_when_operator_is_next(self):
+        """
+        测试点：PRIVATE 房间 AI 发言结束后，发言位变为 OPERATOR，
+        房间应切换到 IDLE 状态并广播，前端可正确显示"空闲"。
+        """
+        room_name = "priv_idle"
+        agents = ["alice", SpecialAgent.OPERATOR]
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
+        await room.activate_scheduling()
+        assert room.get_current_turn_agent_name() == "alice"
+
+        alice_id = room.get_agent_id_by_name("alice")
+        with patch("service.messageBus.publish") as mock_publish:
+            await room.add_message(alice_id, "hello from alice")
+            ok = await room.finish_turn(alice_id)
+            assert ok is True
+
+        assert room.state == RoomState.IDLE
+        assert room.get_current_turn_agent_name() == SpecialAgent.OPERATOR.name
+        idle_calls = [
+            c for c in mock_publish.call_args_list
+            if c[0][0] == MessageBusTopic.ROOM_STATUS_CHANGED
+            and c[1].get("state") == RoomState.IDLE
+        ]
+        assert len(idle_calls) == 1
 
     async def test_skip_set_resets_each_round(self):
         """

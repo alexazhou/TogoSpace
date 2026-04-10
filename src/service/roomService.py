@@ -295,6 +295,12 @@ class ChatRoom:
         next_agent_id = self._resolve_next_dispatchable_agent()
         if next_agent_id is not None:
             self._publish_room_status(need_scheduling=True)
+        else:
+            # 停止条件已由 _should_stop_scheduling() 处理（切 IDLE + 发布）；
+            # 若状态仍为 SCHEDULING，说明是 OPERATOR 等待情形，切换到 IDLE
+            if self._state == RoomState.SCHEDULING:
+                self._state = RoomState.IDLE
+                self._publish_room_status()
         return True
 
     def _get_current_turn_agent_id(self) -> int:
@@ -457,9 +463,12 @@ class ChatRoom:
             next_agent_id = self._resolve_next_dispatchable_agent()
             if next_agent_id is not None:
                 self._publish_room_status(need_scheduling=True)
-            elif changed:
-                # INIT→SCHEDULING 但当前无可调度 Agent，仍广播初始状态
-                self._publish_room_status()
+            else:
+                # 停止条件已由 _should_stop_scheduling() 处理（切 IDLE + 发布）；
+                # 若状态仍为 SCHEDULING，说明是 OPERATOR 等待情形，切换到 IDLE
+                if self._state == RoomState.SCHEDULING:
+                    self._state = RoomState.IDLE
+                    self._publish_room_status()
 
         return changed
 
