@@ -17,6 +17,7 @@ jobs:
       with:
         token: ${{ secrets.GH_PAT }}
         submodules: recursive
+        lfs: true
 
     - name: Set up Python 3.11
       uses: actions/setup-python@v5
