@@ -76,7 +76,7 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
         options={
             "request_timeout_sec": 5,
             "workdir": "/tmp",
-            "command": [binary_path, "--mode", "stdio", "--workdir-root", "/"],
+            "command": [binary_path, "--mode", "stdio", "--access-root", "/"],
         },
     )
     driver = TspAgentDriver(host, config)
