@@ -13,6 +13,9 @@ _ROOT = os.path.join(_SRC, "..")                     # = repo/
 # 静态资源（prompts / preset / migrate 等，只读）
 ASSETS_DIR: str    = os.path.abspath(os.path.join(_ROOT, "assets"))
 
+# Preset 目录（role_templates / teams），可通过环境变量覆盖
+PRESET_DIR: str    = os.path.abspath(os.environ.get("TEAMAGENT_PRESET_DIR") or os.path.join(ASSETS_DIR, "preset"))
+
 # 运行数据（SQLite 等，可写）
 DATA_DIR: str      = os.path.abspath(os.path.join(_ROOT, "data"))
 
