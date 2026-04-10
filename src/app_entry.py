@@ -13,15 +13,14 @@ from PIL import Image, ImageDraw
 
 import appPaths
 import backend_main
+from util import configUtil
 from version import __version__
-
-_DEFAULT_PORT = 8080
-_WEB_URL = f"http://localhost:{_DEFAULT_PORT}"
 
 # 后端状态，由后端线程写入，菜单回调读取
 _backend_status: str = "启动中…"
 _backend_loop: asyncio.AbstractEventLoop | None = None
 _tray_icon: pystray.Icon | None = None
+_web_url: str = "http://localhost:8080"  # 启动后更新
 
 
 def _set_status(status: str) -> None:
@@ -34,15 +33,21 @@ def _set_status(status: str) -> None:
 # ── 后端线程 ──────────────────────────────────────────────────────────────────
 
 def _run_backend() -> None:
-    global _backend_loop
+    global _backend_loop, _web_url
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     _backend_loop = loop
 
+    # 加载配置获取 bind_host 和 bind_port
+    app_config = configUtil.load()
+    bind_host = app_config.setting.bind_host
+    bind_port = app_config.setting.bind_port
+    _web_url = f"http://localhost:{bind_port}"
+
     try:
         _set_status("运行中")
-        loop.run_until_complete(backend_main.main(port=_DEFAULT_PORT))
+        loop.run_until_complete(backend_main.main(port=bind_port))
         _set_status("已停止")
     except Exception as e:
         _set_status(f"启动失败: {e}")
@@ -67,7 +72,7 @@ def _status_text(item) -> str:
 
 
 def _on_open(icon, item) -> None:
-    webbrowser.open(_WEB_URL)
+    webbrowser.open(_web_url)
 
 
 def _on_quit(icon, item) -> None:
