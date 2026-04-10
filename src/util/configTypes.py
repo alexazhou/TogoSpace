@@ -92,8 +92,8 @@ class LlmServiceConfig(BaseModel):
     extra_headers: dict[str, str] = Field(default_factory=_default_llm_extra_headers)
 
     # Token 预算与自动压缩配置
-    context_window_tokens: int = 32000
-    reserve_output_tokens: int = 4096
+    context_window_tokens: int = 65536
+    reserve_output_tokens: int = 8192
     compact_trigger_ratio: float = Field(default=0.85, ge=0.0, le=1.0)
     compact_summary_max_tokens: int = 2048
 

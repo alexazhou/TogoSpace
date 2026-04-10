@@ -329,7 +329,13 @@ class AgentTurnRunner:
                     raise RuntimeError(f"LLM 推理失败: agent_id={self.gt_agent.id}, error={error_message}") from infer_result.error
 
             usage = infer_result.usage
-            assistant_message = infer_result.response.choices[0].message
+            choice = infer_result.response.choices[0]
+            if choice.finish_reason == "length":
+                raise RuntimeError(
+                    f"LLM 输出被截断（finish_reason=length），max_tokens 不足以完成本次推理: "
+                    f"agent_id={self.gt_agent.id}, completion_tokens={usage.completion_tokens if usage else '?'}"
+                )
+            assistant_message = choice.message
             usage_data = self._build_usage(
                 estimated_prompt_tokens=estimated_tokens,
                 prompt_tokens=usage.prompt_tokens if usage else None,
