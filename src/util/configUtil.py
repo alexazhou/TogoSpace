@@ -24,6 +24,9 @@ def _resolve_config_dir(config_dir: str | None) -> str:
 
 
 def _resolve_preset_dir() -> str:
+    env_override = os.environ.get("TEAMAGENT_PRESET_DIR")
+    if env_override:
+        return os.path.abspath(env_override)
     return os.path.join(appPaths.ASSETS_DIR, "preset")
 
 
