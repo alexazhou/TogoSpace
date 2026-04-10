@@ -2,8 +2,6 @@
 import importlib.util
 import os
 import re
-import sys
-import platform
 
 # SPECPATH 是 PyInstaller 内置变量，指向本 spec 文件所在目录
 REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
@@ -12,11 +10,9 @@ REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 _ver_src = open(os.path.join(REPO_ROOT, "src", "version.py")).read()
 APP_VERSION = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', _ver_src).group(1)
 
-# 目标架构（可通过环境变量覆盖，默认跟随当前机器）
-target_arch = os.environ.get("TARGET_ARCH", "").strip()
-if not target_arch:
-    target_arch = "arm64" if "arm" in platform.machine().lower() else "x86_64"
-print(f"ℹ️  target_arch: {target_arch}")
+# macOS universal2：同时支持 arm64 和 x86_64
+TARGET_ARCH = "universal2"
+print(f"ℹ️  target_arch: {TARGET_ARCH}")
 
 _icon_path = os.path.join(REPO_ROOT, "assets", "icon.icns")
 APP_ICON = _icon_path if os.path.exists(_icon_path) else None
@@ -92,7 +88,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=target_arch,
+    target_arch=TARGET_ARCH,
     icon=APP_ICON,
 )
 

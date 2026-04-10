@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-macos:
-    runs-on: macos-latest
+    runs-on: macos-13  # Intel runner for universal2 build
     timeout-minutes: 30
     permissions:
       contents: write
@@ -50,14 +50,17 @@ jobs:
         rm -f package-lock.json
         npm install
 
-    - name: Build macOS app
+    - name: Build macOS app (universal2)
       run: python scripts/build_mac.py
+
+    - name: Verify universal2 architecture
+      run: python scripts/check/check_universal_arch.py dist/*.app
 
     - name: Zip app bundle
       run: |
         APP_PATH=$(ls -d dist/*.app | head -1)
         APP_NAME=$(basename "$APP_PATH")
-        ZIP_NAME="${APP_NAME%.app}-macos.zip"
+        ZIP_NAME="${APP_NAME%.app}-macos-universal.zip"
         ditto -c -k --keepParent "$APP_PATH" "dist/${ZIP_NAME}"
         echo "ZIP_PATH=dist/${ZIP_NAME}" >> $GITHUB_ENV
 
