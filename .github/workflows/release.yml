@@ -52,10 +52,10 @@ jobs:
 
     - name: Zip app bundle
       run: |
-        APP_NAME=$(ls dist/*.app | head -1 | xargs basename)
+        APP_PATH=$(ls -d dist/*.app | head -1)
+        APP_NAME=$(basename "$APP_PATH")
         ZIP_NAME="${APP_NAME%.app}-macos.zip"
-        cd dist
-        ditto -c -k --keepParent "${APP_NAME}" "${ZIP_NAME}"
+        ditto -c -k --keepParent "$APP_PATH" "dist/${ZIP_NAME}"
         echo "ZIP_PATH=dist/${ZIP_NAME}" >> $GITHUB_ENV
 
     - name: Create GitHub Release
