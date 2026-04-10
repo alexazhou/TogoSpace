@@ -28,6 +28,7 @@ from service.agentService.driver.factory import build_agent_driver
 from service.agentService.toolRegistry import AgentToolRegistry, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
 from util import configUtil, llmApiUtil
+from util.configTypes import LlmServiceConfig
 from util.assertUtil import assertNotNull
 
 logger = logging.getLogger(__name__)
@@ -468,7 +469,7 @@ class AgentTurnRunner:
 
     # ─── 内部辅助方法 ─────────────────────────────
 
-    def _resolve_compact_config(self) -> tuple[str, configUtil.LlmServiceConfig, int, int]:
+    def _resolve_compact_config(self) -> tuple[str, LlmServiceConfig, int, int]:
         """获取 compact 相关配置：(resolved_model, llm_config, trigger_tokens, hard_limit_tokens)。"""
         llm_config = configUtil.get_app_config().setting.current_llm_service
         resolved_model = self.gt_agent.model or llm_config.model

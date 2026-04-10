@@ -114,7 +114,7 @@ async def main(config_dir: str = None, port: int = 8080):
         funcToolService.shutdown()
         roomService.shutdown()
         llmService.shutdown()
-        messageBus.shutdown()
+        await messageBus.shutdown()
         _remove_pid()
 
 
