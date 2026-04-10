@@ -7,6 +7,7 @@ on:
 jobs:
   test:
     runs-on: macos-latest
+    timeout-minutes: 5
     strategy:
       matrix:
         python-version: ["3.11"]
@@ -32,7 +33,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install -r requirements.txt pytest-timeout
 
     - name: Run mypy
       run: |
@@ -40,16 +41,16 @@ jobs:
 
     - name: Run unit tests
       run: |
-        PYTHONPATH=src python -m pytest tests/unit/ -v
+        PYTHONPATH=src python -m pytest tests/unit/ -v --timeout=30
 
     - name: Run API tests
       run: |
-        PYTHONPATH=src python -m pytest tests/api/ -v
+        PYTHONPATH=src python -m pytest tests/api/ -v --timeout=30
 
     - name: Run integration tests
       run: |
-        PYTHONPATH=src python -m pytest tests/integration/ -v
+        PYTHONPATH=src python -m pytest tests/integration/ -v --timeout=30
 
     - name: Run real tests
       run: |
-        PYTHONPATH=src python -m pytest tests/real/ -v
+        PYTHONPATH=src python -m pytest tests/real/ -v --timeout=30

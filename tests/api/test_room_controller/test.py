@@ -125,7 +125,8 @@ class TestRoomControllerPrivate(_ApiServiceCase):
                 data = await resp.json()
 
         rooms = [room for room in data["rooms"] if room["team_name"] == _V6_TEAM]
-        assert len(rooms) == 2
+        # v6test 包含 3 个房间：alice_private（preset）、public_group（preset）、测试组（dept_tree 自动创建）
+        assert len(rooms) == 3
 
         private_room = next(r for r in rooms if r["gt_room"]["name"] == "alice_private")
         assert RoomType.value_of(private_room["gt_room"]["type"]) == RoomType.PRIVATE

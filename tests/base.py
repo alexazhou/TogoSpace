@@ -39,6 +39,10 @@ _BACKEND_READY_TIMEOUT = 20
 _BASE_BACKEND_PORT = 18080
 _BASE_MOCK_LLM_PORT = 19876
 
+# 禁止系统代理（如 Surge）拦截本地回环流量，防止旧连接复用导致健康检查和 LLM 调用挂起。
+os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost")
+os.environ.setdefault("no_proxy", "127.0.0.1,localhost")
+
 
 def _cancel_all_tasks(loop: asyncio.AbstractEventLoop) -> None:
     """取消事件循环上的所有待处理 task（与 asyncio.run 的清理逻辑一致）。"""
@@ -74,6 +78,12 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
+def _no_proxy_urlopen(request: urllib.request.Request, timeout: float):
+    """不使用系统代理打开 URL，避免 Surge 等代理工具干扰本地 HTTP 健康检查。"""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return opener.open(request, timeout=timeout)
+
+
 def _assert_port_ready(
     url: str,
     service_name: str,
@@ -90,7 +100,7 @@ def _assert_port_ready(
             headers=headers or {},
             method=method,
         )
-        with urllib.request.urlopen(request, timeout=timeout) as resp:
+        with _no_proxy_urlopen(request, timeout=timeout) as resp:
             if resp.status != 200:
                 raise RuntimeError(
                     f"{service_name} 健康检查失败：{method} {url} => {resp.status}"
@@ -341,7 +351,7 @@ class ServiceTestCase:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=2) as resp:
+        with _no_proxy_urlopen(req, timeout=2) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"设置 Mock LLM 响应失败: {resp.status}")
 
@@ -353,7 +363,8 @@ class ServiceTestCase:
             响应字典，队列为空时返回 None
         """
         url = f"http://{MOCK_LLM_HOST}:{cls.mock_llm_server.port}/get_response"
-        with urllib.request.urlopen(url, timeout=2) as resp:
+        req = urllib.request.Request(url, method="GET")
+        with _no_proxy_urlopen(req, timeout=2) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"获取 Mock LLM 响应失败: {resp.status}")
             data = json.loads(resp.read().decode("utf-8"))
@@ -383,7 +394,7 @@ class ServiceTestCase:
         original_load = configUtil.load
 
         def patched_load(path=None, preset_dir=None, force_reload=False):
-            cfg = original_load(path or cls._backend_config_dir, preset_dir=preset_dir, force_reload=force_reload)
+            cfg = original_load(path or cls._backend_config_dir, preset_dir=preset_dir or cls._backend_config_dir, force_reload=force_reload)
             if cfg.setting.persistence:
                 cfg.setting.persistence.db_path = db_path
             return cfg
