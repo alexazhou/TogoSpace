@@ -122,6 +122,8 @@ class SettingConfig(BaseModel):
     default_room_max_turns: int = 100
     persistence: PersistenceConfig | None = Field(default_factory=PersistenceConfig)
     workspace_root: str | None = Field(default_factory=_default_workspace_root)
+    bind_host: str = "0.0.0.0"  # HTTP 服务绑定地址
+    bind_port: int = 8080       # HTTP 服务绑定端口
 
     def model_post_init(self, __context: Any) -> None:
         if self.persistence is None:

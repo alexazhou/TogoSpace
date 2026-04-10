@@ -59,7 +59,7 @@ def _remove_pid() -> None:
         pass
 
 
-async def main(config_dir: str = None, port: int = 8080):
+async def main(config_dir: str = None, port: int | None = None):
 
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     _setup_logger()
@@ -74,7 +74,11 @@ async def main(config_dir: str = None, port: int = 8080):
     _config_dir = config_dir or os.path.expanduser("~/.agent_team")
     logger.info("[启动] 版本=v%s", __version__)
     logger.info("[启动] config=%s | preset=%s | data=%s", _config_dir, appPaths.PRESET_DIR, appPaths.DATA_DIR)
-    logger.info("[启动] 监听地址：0.0.0.0:%d", port)
+
+    # 端口优先使用命令行参数，其次使用配置文件
+    bind_host = app_config.setting.bind_host
+    bind_port = port if port is not None else app_config.setting.bind_port
+    logger.info("[启动] 监听地址：%s:%d", bind_host, bind_port)
 
     # ── 阶段 1：基础启动 ──────────────────────────────────────────────────────
     logger.info("[启动] 阶段 1/4：基础 service 启动")
@@ -108,7 +112,7 @@ async def main(config_dir: str = None, port: int = 8080):
     logger.info("[启动] 阶段 4/4 完成")
 
     web_server = tornado.httpserver.HTTPServer(route.application)
-    web_server.listen(port, "0.0.0.0")
+    web_server.listen(bind_port, bind_host)
 
     try:
         await schedulerService.run()
@@ -131,6 +135,6 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     parser = argparse.ArgumentParser()
     parser.add_argument("--config-dir", default=None, dest="config_dir", help="config 目录路径")
-    parser.add_argument("--port", type=int, default=8080, help="HTTP 监听端口")
+    parser.add_argument("--port", type=int, default=None, help="HTTP 监听端口（覆盖配置文件）")
     args = parser.parse_args()
     asyncio.run(main(config_dir=args.config_dir, port=args.port))
