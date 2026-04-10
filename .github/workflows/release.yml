@@ -41,17 +41,11 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-    - name: Cache npm dependencies
-      uses: actions/cache@v4
-      with:
-        path: frontend/node_modules
-        key: ${{ runner.os }}-npm-${{ hashFiles('frontend/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-npm-
-
     - name: Install frontend dependencies
       working-directory: frontend
-      run: npm install
+      run: |
+        rm -f package-lock.json
+        npm install
 
     - name: Build macOS app
       run: python scripts/build_mac.py
