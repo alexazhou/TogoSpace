@@ -78,6 +78,7 @@ async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> InferResult
             tools=ctx.tools,
             tool_choice=ctx.tool_choice,
             prompt_cache=ctx.prompt_cache,
+            max_tokens=llm_config.reserve_output_tokens,
         )
         logger.info(
             "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s",
@@ -145,6 +146,7 @@ async def infer_stream(
             tools=ctx.tools,
             tool_choice=ctx.tool_choice,
             prompt_cache=ctx.prompt_cache,
+            max_tokens=llm_config.reserve_output_tokens,
         )
         logger.info(
             "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s",
