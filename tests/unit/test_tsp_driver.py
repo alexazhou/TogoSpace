@@ -26,7 +26,10 @@ if os.name == "posix" and sys.platform == "darwin":
 
 
 def test_build_gtsp_command_uses_default_binary_and_workdir_flag():
-    cmd = build_gtsp_command(None, workdir="/tmp/team-a")
+    try:
+        cmd = build_gtsp_command(None, workdir="/tmp/team-a")
+    except FileNotFoundError as e:
+        pytest.skip(f"gtsp binary not available on this platform: {e}")
     assert "assets/execute/gtsp" in cmd[0]
     assert "--mode" in cmd
     assert "stdio" in cmd
@@ -62,7 +65,10 @@ class _DummyHost:
 
 @pytest.mark.asyncio
 async def test_tsp_driver_e2e_initialize_tool_shutdown():
-    binary_path = build_gtsp_command(None, workdir="/tmp/team-a")[0]
+    try:
+        binary_path = build_gtsp_command(None, workdir="/tmp/team-a")[0]
+    except FileNotFoundError as e:
+        pytest.skip(f"real gtsp binary not available: {e}")
     if not os.path.isfile(binary_path) or not os.access(binary_path, os.X_OK):
         pytest.skip(f"real gtsp binary not available: {binary_path}")
 
