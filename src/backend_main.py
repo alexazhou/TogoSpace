@@ -20,7 +20,9 @@ from service import (
     ormService,
     presetService,
 )
+import appPaths
 import route
+from version import __version__
 
 
 def _setup_logger() -> None:
@@ -68,6 +70,11 @@ async def main(config_dir: str = None, port: int = 8080):
 
     app_config: AppConfig = configUtil.load(config_dir)
     llmApiUtil.init()
+
+    _config_dir = config_dir or os.path.expanduser("~/.agent_team")
+    logger.info("[启动] 版本=v%s", __version__)
+    logger.info("[启动] config=%s | preset=%s | data=%s", _config_dir, appPaths.PRESET_DIR, appPaths.DATA_DIR)
+    logger.info("[启动] 监听地址：0.0.0.0:%d", port)
 
     # ── 阶段 1：基础启动 ──────────────────────────────────────────────────────
     logger.info("[启动] 阶段 1/4：基础 service 启动")
