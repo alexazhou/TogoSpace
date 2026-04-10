@@ -12,6 +12,15 @@ jobs:
     permissions:
       contents: write
 
+    env:
+      # 通过环境变量传递 secrets，用于条件判断
+      APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
     steps:
     - uses: actions/checkout@v4
       with:
@@ -54,7 +63,7 @@ jobs:
       run: python scripts/build_mac.py
 
     - name: Import Apple certificate (optional)
-      if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+      if: ${{ env.APPLE_CERTIFICATE_P12 != '' }}
       run: |
         # 创建临时 keychain
         security create-keychain -p actions build.keychain
@@ -62,10 +71,9 @@ jobs:
         security unlock-keychain -p actions build.keychain
 
         # 导入证书（密码可能为空）
-        echo "${{ secrets.APPLE_CERTIFICATE_P12 }}" | base64 -d > cert.p12
-        CERT_PASSWORD="${{ secrets.APPLE_CERTIFICATE_PASSWORD }}"
-        if [ -n "$CERT_PASSWORD" ]; then
-          security import cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+        echo "$APPLE_CERTIFICATE_P12" | base64 -d > cert.p12
+        if [ -n "$APPLE_CERTIFICATE_PASSWORD" ]; then
+          security import cert.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
         else
           security import cert.p12 -k build.keychain -T /usr/bin/codesign
         fi
@@ -75,22 +83,22 @@ jobs:
         security set-key-partition-list -S apple-tool:,apple: -s -k actions build.keychain
 
     - name: Sign app (optional)
-      if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+      if: ${{ env.APPLE_CERTIFICATE_P12 != '' }}
       run: |
         APP_PATH=$(ls -d dist/*.app | head -1)
         codesign --deep --force --options=runtime \
-          --sign "${{ secrets.APPLE_SIGNING_IDENTITY }}" \
+          --sign "$APPLE_SIGNING_IDENTITY" \
           --entitlements scripts/check/entitlements.plist \
           "$APP_PATH"
 
     - name: Verify signature (optional)
-      if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+      if: ${{ env.APPLE_CERTIFICATE_P12 != '' }}
       run: |
         APP_PATH=$(ls -d dist/*.app | head -1)
         codesign --verify --deep --strict "$APP_PATH"
 
     - name: Notarize app (optional)
-      if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.APPLE_ID != '' }}
+      if: ${{ env.APPLE_CERTIFICATE_P12 != '' && env.APPLE_ID != '' }}
       run: |
         APP_PATH=$(ls -d dist/*.app | head -1)
         APP_NAME=$(basename "$APP_PATH")
@@ -100,9 +108,9 @@ jobs:
 
         # 提交公证并等待结果
         xcrun notarytool submit "notarize.zip" \
-          --apple-id "${{ secrets.APPLE_ID }}" \
-          --password "${{ secrets.APPLE_APP_PASSWORD }}" \
-          --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_APP_PASSWORD" \
+          --team-id "$APPLE_TEAM_ID" \
           --wait
 
         # Staple 公证结果到 app
