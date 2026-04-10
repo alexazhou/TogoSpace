@@ -8,6 +8,7 @@ import asyncio
 
 from dal.db import gtAgentHistoryManager, gtAgentTaskManager, gtRoomMessageManager, gtRoomManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.gtRoomMessage import GtRoomMessage
 from constants import AgentHistoryTag, AgentTaskStatus
 
 
