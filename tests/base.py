@@ -426,6 +426,9 @@ class ServiceTestCase:
         env["TEAMAGENT_ENV"] = "test"
         env["TEAMAGENT_DB_PATH"] = cls._get_test_db_path()
 
+        if cls._backend_config_dir:
+            env["TEAMAGENT_PRESET_DIR"] = cls._backend_config_dir
+
         cmd = [sys.executable, os.path.join(_SRC_DIR, "backend_main.py"), "--port", str(port)]
         if cls._backend_config_dir:
             cmd += ["--config-dir", cls._backend_config_dir]
