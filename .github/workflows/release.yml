@@ -11,12 +11,9 @@ jobs:
     timeout-minutes: 30
 
     steps:
-    - name: Configure SSH submodule access
-      run: |
-        git config --global url."https://${{ secrets.GH_PAT }}@github.com/".insteadOf "git@github.com:"
-
     - uses: actions/checkout@v4
       with:
+        token: ${{ secrets.GH_PAT }}
         submodules: recursive
 
     - name: Set up Python 3.11
