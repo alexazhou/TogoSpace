@@ -35,8 +35,33 @@ def get_mock_llm_anthropic_url(port: int | None = None) -> str:
     return f"http://{MOCK_LLM_HOST}:{port or get_mock_llm_port()}{MOCK_LLM_ANTHROPIC_PATH}"
 
 
-def _default_openai_response(room_name: str = "general") -> Dict[str, Any]:
-    """返回 OpenAI 格式的默认 send_chat_msg tool call 响应。"""
+def _default_openai_response(room_name: str = "general", with_send: bool = True) -> Dict[str, Any]:
+    """返回 OpenAI 格式的默认响应。
+
+    with_send=True：send_chat_msg + finish_chat_turn（有 Operator 消息时）
+    with_send=False：finish_chat_turn only（仅 SYSTEM 初始化消息时，避免污染房间历史）
+    """
+    tool_calls: list[Dict[str, Any]] = []
+    if with_send:
+        tool_calls.append({
+            "id": "call_mock_001",
+            "type": "function",
+            "function": {
+                "name": "send_chat_msg",
+                "arguments": json.dumps({
+                    "room_name": room_name,
+                    "msg": f"Mock LLM 在 {room_name} 的回复",
+                }, ensure_ascii=False),
+            },
+        })
+    tool_calls.append({
+        "id": "call_mock_002",
+        "type": "function",
+        "function": {
+            "name": "finish_chat_turn",
+            "arguments": "{}",
+        },
+    })
     return {
         "id": "mock-response-id",
         "object": "chat.completion",
@@ -48,19 +73,7 @@ def _default_openai_response(room_name: str = "general") -> Dict[str, Any]:
                 "message": {
                     "role": "assistant",
                     "content": None,
-                    "tool_calls": [
-                        {
-                            "id": "call_mock_001",
-                            "type": "function",
-                            "function": {
-                                "name": "send_chat_msg",
-                                "arguments": json.dumps({
-                                    "room_name": room_name,
-                                    "msg": f"Mock LLM 在 {room_name} 的回复",
-                                }, ensure_ascii=False),
-                            },
-                        }
-                    ],
+                    "tool_calls": tool_calls,
                 },
                 "finish_reason": "tool_calls",
             }
@@ -71,6 +84,19 @@ def _default_openai_response(room_name: str = "general") -> Dict[str, Any]:
             "total_tokens": 30,
         },
     }
+
+
+def _has_operator_message(messages: list[Dict[str, Any]] | None) -> bool:
+    """检查消息历史中是否包含来自 Operator 的消息（即人类操作员主动发言）。
+
+    sender_name 由 roomService._get_agent_name 生成，Operator 返回 "OPERATOR"（大写），
+    因此格式化后为 「【OPERATOR】」。
+    """
+    for msg in (messages or []):
+        content = msg.get("content") or ""
+        if "【OPERATOR】" in content:
+            return True
+    return False
 
 
 def _default_anthropic_response(room_name: str = "general") -> Dict[str, Any]:
@@ -208,6 +234,54 @@ class GetResponseHandler(tornado.web.RequestHandler):
         self.write(json.dumps({"response": response}))
 
 
+def _to_sse_chunks(response_data: Dict[str, Any]) -> list[str]:
+    """将 chat.completion 响应转换为 SSE 流格式的 chunk 列表。"""
+    resp_id = response_data.get("id", f"mock-{int(time.time() * 1000)}")
+    created = response_data.get("created", int(time.time()))
+    model = response_data.get("model", "mock-model")
+    choices = response_data.get("choices", [{}])
+    choice = choices[0] if choices else {}
+    message = choice.get("message", {})
+    finish_reason = choice.get("finish_reason", "stop")
+    tool_calls = message.get("tool_calls") or []
+    content = message.get("content")
+
+    base = {"id": resp_id, "object": "chat.completion.chunk", "created": created, "model": model}
+    chunks = []
+
+    # 首个 delta：角色
+    first_delta: Dict[str, Any] = {"role": "assistant", "content": None}
+    chunks.append({**base, "choices": [{"index": 0, "delta": first_delta, "finish_reason": None}]})
+
+    if tool_calls:
+        for tc in tool_calls:
+            tc_index = tc.get("index", 0) if "index" in tc else tool_calls.index(tc)
+            fn = tc.get("function", {})
+            # 工具名称 chunk
+            chunks.append({**base, "choices": [{"index": 0, "delta": {"tool_calls": [{
+                "index": tc_index,
+                "id": tc.get("id", f"call_mock_{tc_index}"),
+                "type": "function",
+                "function": {"name": fn.get("name", ""), "arguments": ""},
+            }]}, "finish_reason": None}]})
+            # arguments chunk
+            args = fn.get("arguments", "")
+            if isinstance(args, dict):
+                args = json.dumps(args, ensure_ascii=False)
+            if args:
+                chunks.append({**base, "choices": [{"index": 0, "delta": {"tool_calls": [{
+                    "index": tc_index,
+                    "function": {"arguments": args},
+                }]}, "finish_reason": None}]})
+    elif content:
+        chunks.append({**base, "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}]})
+
+    # 结束 chunk
+    chunks.append({**base, "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+                   "usage": response_data.get("usage", {})})
+    return [f"data: {json.dumps(c, ensure_ascii=False)}\n\n" for c in chunks] + ["data: [DONE]\n\n"]
+
+
 class ChatCompletionsHandler(tornado.web.RequestHandler):
     """OpenAI 格式的 chat/completions 端点。"""
 
@@ -215,11 +289,14 @@ class ChatCompletionsHandler(tornado.web.RequestHandler):
         await asyncio.sleep(MOCK_LLM_RESPONSE_DELAY_SEC)
 
         room_name = "general"
+        is_stream = False
+        messages = []
         try:
             body = json.loads(self.request.body)
             messages = body.get("messages", [])
             system_prompt = body.get("system_prompt", "")
             room_name = _infer_room_name(messages, system_prompt)
+            is_stream = bool(body.get("stream", False))
         except Exception:
             pass
 
@@ -228,10 +305,18 @@ class ChatCompletionsHandler(tornado.web.RequestHandler):
         if not queue.empty():
             response_data = await queue.get()
         else:
-            response_data = _default_openai_response(room_name)
+            with_send = _has_operator_message(messages)
+            response_data = _default_openai_response(room_name, with_send=with_send)
 
-        self.set_header("Content-Type", "application/json")
-        self.write(json.dumps(response_data, ensure_ascii=False))
+        if is_stream:
+            self.set_header("Content-Type", "text/event-stream")
+            self.set_header("Cache-Control", "no-cache")
+            for chunk in _to_sse_chunks(response_data):
+                self.write(chunk)
+                self.flush()
+        else:
+            self.set_header("Content-Type", "application/json")
+            self.write(json.dumps(response_data, ensure_ascii=False))
 
 
 class MessagesHandler(tornado.web.RequestHandler):

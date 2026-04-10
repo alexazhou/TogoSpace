@@ -29,6 +29,7 @@ class TestWsController(_ApiServiceCase):
         """验证 POST 消息后 WebSocket 能收到 event=message 推送，且字段结构正确。"""
         collected = []
         ws_done = threading.Event()
+        room_id_holder = []
 
         async def _collect():
             ws_url = f"ws://127.0.0.1:{self.backend_port}/ws/events.json"
@@ -37,7 +38,8 @@ class TestWsController(_ApiServiceCase):
                     async with session.get(f"{self.backend_base_url}/rooms/list.json") as resp:
                         assert resp.status == 200
                         rooms = (await resp.json())["rooms"]
-                    room_id = next(r["room_id"] for r in rooms if r["room_name"] == "general" and r["team_name"] == _TEAM)
+                    room_id = next(r["gt_room"]["id"] for r in rooms if r["gt_room"]["name"] == "general" and r["team_name"] == _TEAM)
+                    room_id_holder.append(room_id)
                     async with session.ws_connect(ws_url) as ws:
                         async with session.post(
                             f"{self.backend_base_url}/rooms/{room_id}/messages/send.json",
@@ -76,10 +78,10 @@ class TestWsController(_ApiServiceCase):
         event = collected[0]
         assert event.get("event") == "message"
         assert "gt_room" in event
-        assert event["gt_room"]["id"] == room_id
+        assert event["gt_room"]["id"] == room_id_holder[0]
         assert event["gt_room"]["team_id"] > 0
         assert event["gt_room"]["name"] == "general"
-        assert "sender" in event
+        assert "sender_id" in event
         assert "content" in event
 
     async def test_ws_agent_status_contains_real_team_id(self):
@@ -96,7 +98,7 @@ class TestWsController(_ApiServiceCase):
             async with session.get(f"{self.backend_base_url}/rooms/list.json") as resp:
                 assert resp.status == 200
                 rooms = (await resp.json())["rooms"]
-            room_id = next(r["room_id"] for r in rooms if r["room_name"] == "general" and r["team_name"] == _TEAM)
+            room_id = next(r["gt_room"]["id"] for r in rooms if r["gt_room"]["name"] == "general" and r["team_name"] == _TEAM)
 
             # 预置若干次 finish，确保调度链路能快速闭环，稳定产出 status 事件。
             finish_response = {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]}

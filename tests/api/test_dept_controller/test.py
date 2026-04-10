@@ -33,14 +33,19 @@ class TestDeptController(_ApiServiceCase):
 
     async def test_get_dept_tree_empty(self):
         """验证 GET /teams/<id>/dept_tree.json 无部门树时返回 null。"""
-        team_id = await self._get_team_id("e2e")
-
         async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{self.backend_base_url}/teams/create.json",
+                json={"name": "dept_empty_test"},
+            ) as resp:
+                assert resp.status == 200
+                created = await resp.json()
+                team_id = created["id"]
+
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/dept_tree.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
 
-        # e2e team 没有配置 dept_tree
         assert data["dept_tree"] is None
 
     async def test_set_and_get_dept_tree(self):
