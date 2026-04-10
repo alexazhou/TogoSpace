@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-macos:
-    runs-on: macos-13  # Intel runner for universal2 build
+    runs-on: macos-latest
     timeout-minutes: 30
     permissions:
       contents: write
