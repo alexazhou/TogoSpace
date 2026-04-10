@@ -88,8 +88,14 @@ jobs:
         # 设置 partition list
         security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k tempkey "$KEYCHAIN_PATH"
 
-        # 将 keychain 加入搜索列表
-        security list-keychains -d user -s "$KEYCHAIN_PATH"
+        # 将临时 keychain 加入搜索列表并设为默认
+        security list-keychains -d user > /tmp/keychains.txt
+        KEYCHAINS=$(cat /tmp/keychains.txt | tr -d '\n')
+        security list-keychains -d user -s "$KEYCHAIN_PATH" $KEYCHAINS
+        security default-keychain -s "$KEYCHAIN_PATH"
+
+        # 验证身份是否可用
+        security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
         rm "$CERT_PATH"
         echo "✅ Certificate imported to $KEYCHAIN_PATH"
