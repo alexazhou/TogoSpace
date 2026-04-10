@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+import importlib.util
 import os
 import re
 import sys
@@ -33,7 +34,7 @@ a = Analysis(
     datas=[
         (os.path.join(REPO_ROOT, "assets"), "assets"),
         # litellm 含大量 json/yaml 数据文件，需整包打入
-        (os.path.join(REPO_ROOT, ".venv", "lib", "python3.11", "site-packages", "litellm"), "litellm"),
+        (importlib.util.find_spec("litellm").submodule_search_locations[0], "litellm"),
     ],
     hiddenimports=[
         # tornado
