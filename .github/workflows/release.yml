@@ -84,6 +84,28 @@ jobs:
         APP_PATH=$(ls -d dist/*.app | head -1)
         codesign --verify --deep --strict "$APP_PATH"
 
+    - name: Notarize app (optional)
+      if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' && secrets.APPLE_ID != '' }}
+      run: |
+        APP_PATH=$(ls -d dist/*.app | head -1)
+        APP_NAME=$(basename "$APP_PATH")
+
+        # 打包为 zip 用于公证提交
+        ditto -c -k --keepParent "$APP_PATH" "notarize.zip"
+
+        # 提交公证并等待结果
+        xcrun notarytool submit "notarize.zip" \
+          --apple-id "${{ secrets.APPLE_ID }}" \
+          --password "${{ secrets.APPLE_APP_PASSWORD }}" \
+          --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+          --wait
+
+        # Staple 公证结果到 app
+        xcrun stapler staple "$APP_PATH"
+
+        rm "notarize.zip"
+        echo "✅ Notarization completed"
+
     - name: Zip app bundle
       run: |
         APP_PATH=$(ls -d dist/*.app | head -1)
