@@ -102,9 +102,17 @@ jobs:
 
     - name: Sign app (optional)
       if: ${{ env.APPLE_CERTIFICATE_P12 != '' }}
+      env:
+        KEYCHAIN_PATH: ${{ runner.temp }}/app-signing.keychain-db
       run: |
+        # 确保 keychain 解锁
+        security unlock-keychain -p tempkey "$KEYCHAIN_PATH"
+
         APP_PATH=$(ls -d dist/*.app | head -1)
+
+        # 使用 --keychain 参数指定 keychain
         codesign --deep --force --options=runtime \
+          --keychain "$KEYCHAIN_PATH" \
           --sign "$APPLE_SIGNING_IDENTITY" \
           --entitlements scripts/check/entitlements.plist \
           "$APP_PATH"
@@ -114,6 +122,7 @@ jobs:
       run: |
         APP_PATH=$(ls -d dist/*.app | head -1)
         codesign --verify --deep --strict "$APP_PATH"
+        codesign -dvv "$APP_PATH" | head -20
 
     - name: Notarize app (optional)
       if: ${{ env.APPLE_CERTIFICATE_P12 != '' && env.APPLE_ID != '' }}
