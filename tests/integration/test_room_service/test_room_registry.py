@@ -105,7 +105,7 @@ class TestRoomRegistry(ServiceTestCase):
                 tags=[],
             ),
         ])
-        await roomService.refresh_rooms_for_team(team.id)
+        await roomService.load_team_rooms(team.id)
 
         room = roomService.get_room_by_key(f"boot_room@{TEAM}")
         assert room.messages == []
@@ -116,7 +116,7 @@ class TestRoomRegistry(ServiceTestCase):
         assert room.messages[0].sender_id == room.SYSTEM_MEMBER_ID
         assert "boot topic" in room.messages[0].content
 
-    async def test_restore_state_for_team_prevents_duplicate_initial_messages_after_refresh(self):
+    async def test_restore_team_rooms_runtime_state_prevents_duplicate_initial_messages_after_refresh(self):
         """刷新 Team 房间运行态后，恢复历史再激活，不应重复写初始消息。"""
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
@@ -129,8 +129,8 @@ class TestRoomRegistry(ServiceTestCase):
         assert len(rows) == 1
         assert "房间已经创建" in rows[0].content
 
-        await roomService.refresh_rooms_for_team(team.id)
-        await roomService.restore_state_for_team(team.id)
+        await roomService.load_team_rooms(team.id)
+        await roomService.restore_team_rooms_runtime_state(team.id)
         await roomService.activate_rooms(TEAM)
 
         reloaded_room = roomService.get_room_by_key(f"restore_safe_room@{TEAM}")

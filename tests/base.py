@@ -595,7 +595,7 @@ class ServiceTestCase:
         room_type: RoomType = RoomType.GROUP,
         max_turns: int = 0,
     ) -> None:
-        """测试辅助：通过生产 API（gtRoomManager.save_room + load_rooms_from_db）创建或更新房间。"""
+        """测试辅助：通过生产 API（gtRoomManager.save_room + load_all_rooms）创建或更新房间。"""
         gt_team = await gtTeamManager.get_team(team_name)
         assert gt_team is not None, f"Team '{team_name}' 不存在"
         agents = await gtAgentManager.get_team_agents_by_names(gt_team.id, agent_names, include_special=True)
@@ -618,7 +618,7 @@ class ServiceTestCase:
             gt_room.max_turns = max_turns
             gt_room.agent_ids = agent_ids
         await gtRoomManager.save_room(gt_room)
-        await roomService.load_rooms_from_db()
+        await roomService.load_all_rooms()
 
     @staticmethod
     async def convert_to_gt_agents(team_id: int, configs: list[AgentConfig]) -> list[GtAgent]:

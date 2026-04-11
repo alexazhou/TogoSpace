@@ -79,9 +79,9 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await roomService.startup()
-        await roomService.load_rooms_from_db()
+        await roomService.load_all_rooms()
         cls.restored = roomService.get_room_by_key(f"r1@{TEAM}")
-        await roomService.restore_state()
+        await roomService.restore_all_rooms_runtime_state()
 
     @classmethod
     async def async_teardown_class(cls):
@@ -179,9 +179,9 @@ class TestRestoreAgentHistory(ServiceTestCase):
         configUtil.load(os.path.join(os.path.dirname(__file__), "../../config"), force_reload=True)
         await presetService._import_role_templates_from_app_config()
         await agentService.startup()
-        await agentService.load_all_team()
+        await agentService.load_all_team_agents()
         cls.fresh_agent = agentService.get_agent(gt_alice.id)
-        await agentService.restore_state()
+        await agentService.restore_all_agents_runtime_state()
 
     @classmethod
     async def async_teardown_class(cls):

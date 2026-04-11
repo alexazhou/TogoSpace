@@ -42,10 +42,10 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await roomService.startup()
         await presetService._import_role_templates_from_app_config()
         await presetService._import_team_from_config(team_config)
-        await roomService.load_rooms_from_db()
+        await roomService.load_all_rooms()
         await funcToolService.startup()
         await agentService.startup()
-        await agentService.load_all_team()
+        await agentService.load_all_team_agents()
         await scheduler.startup()
 
     @classmethod

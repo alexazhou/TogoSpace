@@ -2,7 +2,7 @@
 import asyncio
 import os
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -11,7 +11,7 @@ from dal.db import gtAgentManager, gtTeamManager, gtAgentTaskManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
-from service import presetService, agentService, roomService, ormService, persistenceService, messageBus
+from service import presetService, agentService, roomService, ormService, persistenceService, messageBus, teamService
 from service.agentService import promptBuilder
 from util import configUtil, llmApiUtil
 from ...base import ServiceTestCase
@@ -38,8 +38,8 @@ class _agentServiceCase(ServiceTestCase):
         team_cfg = cfg.teams[0]
         await presetService._import_team_from_config(team_cfg)
         await agentService.startup()
-        await agentService.load_all_team()
-        await roomService.load_rooms_from_db()
+        await agentService.load_all_team_agents()
+        await roomService.load_all_rooms()
 
     @classmethod
     async def async_teardown_class(cls):
@@ -260,6 +260,48 @@ class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
         assert synced_count == 1
         assert len(alice.task_consumer._turn_runner._history) == 1
         assert "talking" not in alice.task_consumer._turn_runner._history[0].content
+
+
+class TestTeamRuntimeRestoreKeepsAgentHistory(_agentServiceCase):
+    async def test_restart_team_runtime_preserves_cross_room_history(self):
+        """Team runtime 重启后，agent history 应保留，后续私聊可继续叠加到同一上下文。"""
+        await self.create_room(TEAM, "general", ["alice", "bob"])
+        general_room = roomService.get_room_by_key(f"general@{TEAM}")
+        await general_room.activate_scheduling()
+
+        bob_id = general_room.get_agent_id_by_name("bob")
+        await general_room.add_message(bob_id, "hello alice")
+
+        alice_id = general_room.get_agent_id_by_name("alice")
+        alice = agentService.get_agent(alice_id)
+        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(general_room)
+        assert synced_count == 1
+        assert any("房间名:【general】" in (item.content or "") for item in alice.task_consumer._turn_runner._history)
+
+        await self.create_room(
+            TEAM,
+            "alice_private",
+            ["alice", "Operator"],
+            room_type=roomService.RoomType.PRIVATE,
+        )
+        private_room = roomService.get_room_by_key(f"alice_private@{TEAM}")
+        await private_room.activate_scheduling()
+
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+        with patch("service.agentService.agent.Agent.startup", new=AsyncMock()), \
+             patch("service.agentService.agent.Agent.close", new=AsyncMock()), \
+             patch("service.teamService.schedulerService.start_scheduling", new=AsyncMock()):
+            await teamService.restart_team_runtime(team.id)
+
+        reloaded_alice = agentService.get_agent(alice_id)
+        private_room = roomService.get_room_by_key(f"alice_private@{TEAM}")
+        private_synced_count = await reloaded_alice.task_consumer._turn_runner.pull_room_messages_to_history(private_room)
+
+        assert private_synced_count == 1
+        history_contents = [item.content or "" for item in reloaded_alice.task_consumer._turn_runner._history]
+        assert any("房间名:【general】" in content for content in history_contents)
+        assert any("房间名:【alice_private】" in content for content in history_contents)
 
 
 class TestAgentResumeFailed(_agentServiceCase):

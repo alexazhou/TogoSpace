@@ -48,10 +48,10 @@ class TestRealSimpleChat(ServiceTestCase):
         await presetService.startup()
         await presetService.import_from_app_config()
         await agentService.startup()
-        await agentService.load_all_team()
+        await agentService.load_all_team_agents()
 
         # 加载房间（preset_rooms 已由 presetService 写入 DB，此处只需装载运行态）
-        await roomService.load_rooms_from_db()
+        await roomService.load_all_rooms()
 
         # 启动调度器
         await scheduler.startup()

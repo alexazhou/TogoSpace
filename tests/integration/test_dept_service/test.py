@@ -621,8 +621,8 @@ class TestDeptService(ServiceTestCase):
         assert after_room.initial_topic == "平台部门"
         assert "DEPT" in after_room.tags
 
-    async def test_refresh_rooms_for_team_keeps_dept_room_tags(self):
-        """验证热刷新运行态房间时，部门房间标签不会丢失。"""
+    async def test_load_team_rooms_keeps_dept_room_tags(self):
+        """验证重新加载 Team 房间内存对象时，部门房间标签不会丢失。"""
         await self._reset_tables()
         await roomService.startup()
 
@@ -646,7 +646,7 @@ class TestDeptService(ServiceTestCase):
             assert persisted_room is not None
             assert "DEPT" in persisted_room.tags
 
-            await roomService.refresh_rooms_for_team(team.id)
+            await roomService.load_team_rooms(team.id)
 
             runtime_room = roomService.get_room_by_key("engineering@t_room_tags")
             assert "DEPT" in runtime_room.tags
