@@ -1,4 +1,4 @@
-# 测试架构设计文档
+# 测试执行架构文档
 
 本文档记录了 TeamAgent 项目的测试体系架构、Mock 逻辑、目录拆分原则以及配置加载机制。
 
@@ -95,6 +95,17 @@
 
 为了确保测试间互不干扰（特别是 Service 层的单例状态），项目采取了以下措施：
 
-- **进程隔离**: 对涉及全局状态的测试类，使用 `@pytest.mark.forked` 在独立子进程中运行每个类。
-- **显式重置**: 在 `ServiceTestCase.setup_method` 中，统一调用所有 service 的 `shutdown()` 方法清空内存数据，并重新调用 `startup()`。
-- **端口随机化**: 后端进程每次启动使用 `_find_free_port()` 探测可用端口，支持并发运行多组测试。
+### 5.1 进程级隔离
+- **并发框架**: 使用 `pytest-xdist`，每个测试 Worker 运行在独立的 Python 进程中。
+- **并行策略**: 默认按测试类（`--dist loadscope`）分发任务，同一测试类的用例在同一个 Worker 中按序执行，不同测试类可并行。
+- **测试模式**: 后端进程在测试环境 (`TEAMAGENT_ENV=test`) 下跳过 PID 检查，允许多实例并行运行在不同端口。
+
+### 5.2 状态重置
+- **类级重置**: 在 `ServiceTestCase.setup_class` 中清空数据库、重建 Schema、启动外部依赖。
+- **Service 级重置**: 集成测试通常在 `async_setup_class` 中显式调用 `service.startup()`，并在 `async_teardown_class` 中调用 `shutdown()`，清空内存中的单例状态。
+
+### 5.3 端口隔离
+- **自动偏移**: 基于 Worker ID 计算端口偏移量，避免多进程抢占。
+    - **后端端口**: `18080 + worker_offset`
+    - **Mock LLM 端口**: `19876 + worker_offset`
+- **生命周期**: 在启动服务前调用 `_wait_port_released` 确保端口清理干净。
