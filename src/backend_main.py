@@ -34,6 +34,9 @@ _PID_FILE = os.path.join(_RUN_DIR, "backend.pid")
 
 
 def _check_single_instance() -> None:
+    # 测试环境允许多实例并行运行（不同端口）
+    if os.environ.get("TEAMAGENT_ENV") == "test":
+        return
     os.makedirs(_RUN_DIR, exist_ok=True)
     # 读取已有 PID，检查进程是否存活
     try:
@@ -47,12 +50,18 @@ def _check_single_instance() -> None:
 
 
 def _write_pid() -> None:
+    # 测试环境不写 PID 文件
+    if os.environ.get("TEAMAGENT_ENV") == "test":
+        return
     os.makedirs(_RUN_DIR, exist_ok=True)
     with open(_PID_FILE, "w") as f:
         f.write(str(os.getpid()))
 
 
 def _remove_pid() -> None:
+    # 测试环境不处理 PID 文件
+    if os.environ.get("TEAMAGENT_ENV") == "test":
+        return
     try:
         os.remove(_PID_FILE)
     except FileNotFoundError:

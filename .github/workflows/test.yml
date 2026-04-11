@@ -41,13 +41,9 @@ jobs:
       run: |
         bash scripts/run_mypy.sh
 
-    - name: Run unit & integration tests (parallel)
+    - name: Run tests (parallel)
       run: |
-        PYTHONPATH=src python -m pytest tests/unit tests/integration -n auto --dist loadfile --timeout=30
-
-    - name: Run API tests (serial)
-      run: |
-        PYTHONPATH=src python -m pytest tests/api --timeout=60
+        PYTHONPATH=src python -m pytest tests/unit tests/api tests/integration -n auto --dist loadfile --timeout=60
 
     - name: Run real tests
       run: |
