@@ -13,7 +13,7 @@ else
 fi
 
 # Default options (Fast Mode)
-OPTS=("-n" "auto" "--dist" "loadfile")
+OPTS=("-n" "auto" "--dist" "loadscope")
 COV_OPTS=()
 PASSTHROUGH=()
 
