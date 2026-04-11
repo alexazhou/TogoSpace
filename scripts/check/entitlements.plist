@@ -14,8 +14,12 @@
     <key>com.apple.security.automation.apple-events</key>
     <true/>
 
-    <!-- 禁用库验证（某些第三方库可能需要） -->
-    <key>com.apple.security.cs.disable-library-validation</key>
+    <!-- 允许 JIT（cffi/cryptography 等包需要） -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- 允许未签名的可执行内存 -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
 </dict>
 </plist>
