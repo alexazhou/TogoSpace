@@ -20,3 +20,4 @@ assets/icon.icns
 dist/
 build/
 workspace_root/
+build_config.json

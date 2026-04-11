@@ -1,0 +1,8 @@
+{
+  "apple_id": "your-apple-id@example.com",
+  "app_specific_password": "xxxx-xxxx-xxxx-xxxx",
+  "team_id": "YOUR_TEAM_ID",
+  "signing_identity_hash": "YOUR_SIGNING_IDENTITY_HASH",
+  "signing_identity_name": "Developer ID Application: Your Name (YOUR_TEAM_ID)",
+  "_comment": "复制此文件为 build_config.json 并填写实际值。app_specific_password 在 appleid.apple.com 生成。"
+}
