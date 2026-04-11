@@ -18,7 +18,7 @@ jobs:
           - arch: arm64
             runner: macos-latest
           - arch: x86_64
-            runner: macos-13-large
+            runner: macos-13
 
     env:
       TARGET_ARCH: ${{ matrix.arch }}
