@@ -409,6 +409,24 @@ def test_load_reads_setting_json_once(tmp_path, monkeypatch):
     assert open_count["setting_json"] == 1
 
 
+def test_load_creates_setting_json_and_readme_when_missing(tmp_path):
+    configUtil.load(str(tmp_path), force_reload=True)
+
+    setting_file = tmp_path / "setting.json"
+    readme_file = tmp_path / "setting.README.md"
+
+    assert setting_file.is_file()
+    assert readme_file.is_file()
+
+    setting_data = json.loads(setting_file.read_text(encoding="utf-8"))
+    assert setting_data["default_llm_server"] == "qwen"
+    assert "llm_services" in setting_data
+
+    readme_text = readme_file.read_text(encoding="utf-8")
+    assert "setting.json 配置说明" in readme_text
+    assert "default_llm_server" in readme_text
+
+
 def test_load_setting_ignores_extra_keys(tmp_path):
     (tmp_path / "setting.json").write_text(json.dumps({
         "default_llm_server": "mock",
