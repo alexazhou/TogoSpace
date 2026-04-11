@@ -10,7 +10,8 @@
 
 ### 1.1 进程级隔离 (Process Isolation)
 - **并发框架**: 使用 `pytest-xdist`。每个测试 Worker 运行在独立的 Python 进程中。
-- **并行策略**: 默认按文件（`--dist loadfile`）分发任务，确保同一个测试类中的用例在同一个 Worker 中按序执行。
+- **并行策略**: 默认按测试类（`--dist loadscope`）分发任务，同一测试类的用例在同一个 Worker 中按序执行，不同测试类可并行。
+- **测试模式**: 后端进程在测试环境 (`TEAMAGENT_ENV=test`) 下跳过 PID 检查，允许多实例并行运行在不同端口。
 
 ### 1.2 数据库隔离 (Database Isolation)
 - **动态路径**: 每个测试类都会得到独立的 SQLite 数据库文件；并行时再叠加 Worker 维度隔离。
