@@ -10,8 +10,10 @@ REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 _ver_src = open(os.path.join(REPO_ROOT, "src", "version.py")).read()
 APP_VERSION = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', _ver_src).group(1)
 
-# macOS universal2：同时支持 arm64 和 x86_64
-TARGET_ARCH = "arm64"
+# 从环境变量读取目标架构，默认为当前机器架构
+import platform
+_default_arch = "arm64" if platform.machine() == "arm64" else "x86_64"
+TARGET_ARCH = os.environ.get("TARGET_ARCH", _default_arch)
 print(f"ℹ️  target_arch: {TARGET_ARCH}")
 
 _icon_path = os.path.join(REPO_ROOT, "assets", "icon.icns")
