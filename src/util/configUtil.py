@@ -55,6 +55,23 @@ def _load_teams(config_dir: str) -> List[TeamConfig]:
     return [TeamConfig.model_validate(team) for team in raw_teams]
 
 
+def _copy_template_if_missing(src_name: str, dest_dir: str, dest_name: str | None = None) -> None:
+    resolved_dest_name = dest_name or src_name
+    src_path = os.path.join(appPaths.ASSETS_DIR, src_name)
+    dest_path = os.path.join(dest_dir, resolved_dest_name)
+
+    if os.path.isfile(dest_path):
+        return
+
+    if not os.path.isfile(src_path):
+        raise FileNotFoundError(
+            f"配置模板不存在: {src_path}\n"
+            f"请检查程序安装是否完整。"
+        )
+
+    shutil.copy(src_path, dest_path)
+
+
 def _load_setting(config_dir: str) -> SettingConfig:
     path = os.path.join(config_dir, "setting.json")
 
@@ -62,15 +79,9 @@ def _load_setting(config_dir: str) -> SettingConfig:
     os.makedirs(config_dir, exist_ok=True)
 
     if not os.path.isfile(path):
-        # 从模板复制配置文件
-        template_path = os.path.join(appPaths.ASSETS_DIR, "config_template.json")
-        if os.path.isfile(template_path):
-            shutil.copy(template_path, path)
-        else:
-            raise FileNotFoundError(
-                f"配置模板不存在: {template_path}\n"
-                f"请检查程序安装是否完整。"
-            )
+        # 从模板复制配置文件，并附带配置说明文档
+        _copy_template_if_missing("config_template.json", config_dir, "setting.json")
+        _copy_template_if_missing("setting.README.md", config_dir)
 
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
