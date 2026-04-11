@@ -1,0 +1,168 @@
+# AgentTeam 版本发布手册
+
+本文档描述发布新版本的完整流程。
+
+## 1. 更新版本号
+
+需要同时更新两个位置的版本号：
+
+### 1.1 后端版本号
+
+编辑 `src/version.py`：
+```python
+__version__ = "0.1.7"  # 替换为新版本号
+```
+
+### 1.2 前端版本号
+
+编辑 `frontend/package.json`：
+```json
+{
+  "name": "team-agent-frontend",
+  "version": "0.1.7",  // 替换为新版本号
+  ...
+}
+```
+
+### 1.3 提交版本号更新
+
+```bash
+# 主仓库
+git add src/version.py
+git commit -m "chore: bump version to 0.1.7"
+
+# 前端子仓库
+cd frontend
+git add package.json
+git commit -m "chore: bump version to 0.1.7"
+git push
+cd ..
+
+# 更新主仓库的 submodule 引用
+git add frontend
+git commit -m "chore: update frontend submodule to v0.1.7"
+
+git push origin master
+```
+
+## 2. 创建 Git Tag
+
+```bash
+# 创建 tag
+git tag v0.1.7
+
+# 推送 tag（触发 CI 构建 arm64 版本）
+git push origin v0.1.7
+```
+
+推送 tag 后，GitHub Actions 会自动触发：
+- 构建 arm64 版本
+- 签名 + 公证
+- 创建 Release 并上传安装包
+
+## 3. 本地构建（x86_64 版本）
+
+CI 仅构建 arm64，x86_64 需本地构建并上传。
+
+### 3.1 准备配置文件
+
+确保 `scripts/build_config.json` 存在并配置正确：
+```json
+{
+  "apple_id": "your-apple-id@example.com",
+  "app_specific_password": "xxxx-xxxx-xxxx-xxxx",
+  "team_id": "YOUR_TEAM_ID",
+  "signing_identity_hash": "YOUR_SIGNING_IDENTITY_HASH"
+}
+```
+
+### 3.2 执行构建脚本
+
+```bash
+# 构建带签名和公证的 x86_64 版本
+python scripts/build_release.py --arch x86_64
+
+# 或跳过公证（仅签名打包，用于快速测试）
+python scripts/build_release.py --arch x86_64 --skip-notarize
+```
+
+输出：`dist/AgentTeam-0.1.7-macos-x86_64.zip`
+
+## 4. 上传到 Release
+
+```bash
+# 上传 x86_64 安装包到已有 Release
+gh release upload v0.1.7 dist/AgentTeam-0.1.7-macos-x86_64.zip
+```
+
+## 5. 验证 Release
+
+```bash
+# 查看 Release 信息
+gh release view v0.1.7
+```
+
+确认包含两个安装包：
+- `AgentTeam-0.1.7-macos-arm64.zip` (CI 构建)
+- `AgentTeam-0.1.7-macos-x86_64.zip` (本地构建)
+
+## 6. 完整流程示例
+
+```bash
+# 1. 更新版本号
+vim src/version.py                    # 改为 0.1.7
+vim frontend/package.json             # 改为 0.1.7
+
+cd frontend
+git add package.json
+git commit -m "chore: bump version to 0.1.7"
+git push
+cd ..
+
+git add src/version.py frontend
+git commit -m "chore: bump version to 0.1.7"
+git push origin master
+
+# 2. 创建并推送 tag
+git tag v0.1.7
+git push origin v0.1.7
+
+# 3. 等待 CI 完成（约 5-10 分钟）
+# 在 GitHub Actions 页面查看进度
+
+# 4. 本地构建 x86_64
+python scripts/build_release.py --arch x86_64
+
+# 5. 上传到 Release
+gh release upload v0.1.7 dist/AgentTeam-0.1.7-macos-x86_64.zip
+
+# 6. 验证
+gh release view v0.1.7
+```
+
+## 附录
+
+### build_release.py 参数说明
+
+| 参数 | 说明 |
+|------|------|
+| `--arch arm64/x86_64` | 目标架构，默认自动检测 |
+| `--skip-build` | 跳过构建，仅签名公证已有 app |
+| `--skip-notarize` | 跳过公证，仅签名打包 |
+| `--clean` | 构建前清理 dist 和 build 目录 |
+
+### 常用命令
+
+```bash
+# 查看 CI 构建状态
+gh run list --branch master
+
+# 查看 Release 列表
+gh release list
+
+# 删除本地 tag
+git tag -d v0.1.7
+
+# 删除远程 tag
+git push origin --delete v0.1.7
+```
