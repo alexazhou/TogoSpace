@@ -27,6 +27,9 @@ class _SPAHandler(tornado.web.StaticFileHandler):
 tornado_settings = {
     'debug': False,
     'compress_response': True,
+    # WebSocket 心跳配置（Tornado 内置）
+    'websocket_ping_interval': 30,   # 每 30 秒发送一次 ping
+    'websocket_ping_timeout': 60,    # 60 秒未收到 pong 则关闭连接
 }
 
 application = tornado.web.Application([
