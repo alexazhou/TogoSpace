@@ -110,11 +110,14 @@ frontend/
 ## 开发约定
 
 - **代码提交**：开发完成后不要自动提交代码。统一等待用户明确要求「提交」或「commit」后再执行 git commit/push。
-- **前端子模块同步**：提交后端代码时，若发现前端子模块（`frontend/`）有新的 commit，需同步更新后端仓库中的子模块指针版本：
+- **前端子模块同步（提交时）**：提交后端代码时，若发现前端子模块（`frontend/`）有新的 commit，需同步更新后端仓库中的子模块指针版本：
     ```bash
     cd frontend && git pull origin master
     cd .. && git add frontend && git commit -m "chore: update frontend submodule"
     ```
+- **前端子模块同步（拉取时）**：拉取后端代码后，若前端子模块指针发生变化：
+    - **可 fast-forward**：直接执行 `git submodule update --init --recursive` 拉取更新
+    - **不可 fast-forward**：询问用户处理方式（如 stash 本地改动、强制覆盖等）
 
 ## Compact 约定（当前实现）
 
