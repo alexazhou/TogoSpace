@@ -110,6 +110,11 @@ frontend/
 ## 开发约定
 
 - **代码提交**：开发完成后不要自动提交代码。统一等待用户明确要求「提交」或「commit」后再执行 git commit/push。
+- **前端子模块同步**：提交后端代码时，若发现前端子模块（`frontend/`）有新的 commit，需同步更新后端仓库中的子模块指针版本：
+    ```bash
+    cd frontend && git pull origin master
+    cd .. && git add frontend && git commit -m "chore: update frontend submodule"
+    ```
 
 ## Compact 约定（当前实现）
 
@@ -156,7 +161,7 @@ frontend/
 ### 测试
 
 ```bash
-# 快速跑所有测试（默认并行，无覆盖率）
+# 快速跑默认测试（默认并行，无覆盖率，仅 unit + integration）
 ./scripts/run_tests.sh
 
 # 跑覆盖率测试
@@ -168,8 +173,13 @@ frontend/
 
 # 调试模式（串行运行）
 ./scripts/run_tests.sh --serial
+
+# 运行 API 测试（需要启动后端进程，不在默认范围内）
+./scripts/run_tests.sh tests/api
 ```
 
+- 默认测试范围：`tests/unit` + `tests/integration`，不含 `tests/api`。
+- API 测试会启动真实后端子进程和 Mock LLM 服务，执行时间较长，需手动指定运行。
 - 全量测试执行时间约 15-20 秒，超时时间设置 30 秒即可。
 - 若在沙盒环境中运行 `tests/api/` 下的 API 测试，通常需要先申请提权。
 - 原因：这类测试会启动本地 mock LLM / HTTP 服务并绑定 `127.0.0.1` 端口，沙盒内可能因端口绑定受限而失败。
