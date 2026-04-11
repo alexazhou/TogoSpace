@@ -7,21 +7,13 @@ on:
 
 jobs:
   build-macos:
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-latest
     timeout-minutes: 30
     permissions:
       contents: write
 
-    strategy:
-      matrix:
-        include:
-          - arch: arm64
-            runner: macos-latest
-          - arch: x86_64
-            runner: macos-13
-
     env:
-      TARGET_ARCH: ${{ matrix.arch }}
+      TARGET_ARCH: arm64
       # 通过环境变量传递 secrets，用于条件判断
       APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -51,10 +43,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-${{ matrix.arch }}-pip-release-${{ hashFiles('**/requirements.txt') }}
+        key: ${{ runner.os }}-pip-release-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
-          ${{ runner.os }}-${{ matrix.arch }}-pip-release-
-          ${{ runner.os }}-${{ matrix.arch }}-pip-
+          ${{ runner.os }}-pip-release-
           ${{ runner.os }}-pip-
 
     - name: Install Python dependencies
@@ -160,32 +151,9 @@ jobs:
       run: |
         APP_PATH=$(ls -d dist/*.app | head -1)
         APP_NAME=$(basename "$APP_PATH")
-        # 在文件名中包含架构信息
-        ZIP_NAME="${APP_NAME%.app}-macos-${{ matrix.arch }}.zip"
+        ZIP_NAME="${APP_NAME%.app}-macos-arm64.zip"
         ditto -c -k --keepParent "$APP_PATH" "dist/${ZIP_NAME}"
         echo "ZIP_PATH=dist/${ZIP_NAME}" >> $GITHUB_ENV
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: AgentTeam-${{ matrix.arch }}
-        path: ${{ env.ZIP_PATH }}
-
-  release:
-    needs: build-macos
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
-        merge-multiple: true
-
-    - name: List artifacts
-      run: ls -la artifacts/
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
@@ -194,6 +162,6 @@ jobs:
         tag_name: ${{ github.ref_name }}
         draft: false
         prerelease: false
-        files: artifacts/*.zip
+        files: ${{ env.ZIP_PATH }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
