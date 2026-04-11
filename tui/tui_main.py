@@ -48,7 +48,7 @@ def _setup_logging() -> None:
     logging.getLogger("tui").setLevel(logging.DEBUG)
     logging.getLogger("tui").addHandler(handler)
 
-_DEFAULT_CONFIG = os.path.expanduser("~/.agent_team/setting.json")
+_DEFAULT_CONFIG = os.path.expanduser("~/.team_agent/setting.json")
 
 
 def _load_base_url(config_path: str) -> str:

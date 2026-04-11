@@ -71,7 +71,7 @@ async def main(config_dir: str = None, port: int | None = None):
     app_config: AppConfig = configUtil.load(config_dir)
     llmApiUtil.init()
 
-    _config_dir = config_dir or os.path.expanduser("~/.agent_team")
+    _config_dir = config_dir or os.path.expanduser("~/.team_agent")
     logger.info("[启动] 版本=v%s", __version__)
     logger.info("[启动] config=%s | preset=%s | data=%s", _config_dir, appPaths.PRESET_DIR, appPaths.DATA_DIR)
 

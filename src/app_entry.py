@@ -82,7 +82,7 @@ def _on_quit(icon, item) -> None:
 
 
 def _on_open_config_dir(icon, item) -> None:
-    config_dir = os.path.expanduser("~/.agent_team")
+    config_dir = os.path.expanduser("~/.team_agent")
     os.makedirs(config_dir, exist_ok=True)
     if sys.platform == "darwin":
         subprocess.Popen(["open", config_dir])
@@ -166,11 +166,11 @@ def _build_icon() -> pystray.Icon:
 # ── 入口 ──────────────────────────────────────────────────────────────────────
 
 def main():
-    # 打包模式：静态资源指向 _MEIPASS/assets/，可写数据指向 ~/.agent_team/
+    # 打包模式：静态资源指向 _MEIPASS/assets/，可写数据指向 ~/.team_agent/
     if getattr(sys, "frozen", False):
         appPaths.ASSETS_DIR    = os.path.join(sys._MEIPASS, "assets")
         appPaths.PRESET_DIR    = os.path.join(appPaths.ASSETS_DIR, "preset")
-        _user_dir              = os.path.expanduser("~/.agent_team")
+        _user_dir              = os.path.expanduser("~/.team_agent")
         appPaths.DATA_DIR      = os.path.join(_user_dir, "data")
         appPaths.LOGS_DIR      = os.path.join(_user_dir, "logs", "backend")
         appPaths.WORKSPACE_ROOT = os.path.join(_user_dir, "workspace")

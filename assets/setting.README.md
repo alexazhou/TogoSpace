@@ -1,11 +1,12 @@
 # setting.json 说明
 
-`setting.json` 用于配置运行时参数，主要包括 LLM 服务、持久化路径和工作目录。
+`setting.json` 是 AgentTeam 的运行时配置文件，用于配置 LLM 服务、持久化路径和工作目录等参数。
+
+**注意**：修改配置文件后，需要重启 AgentTeam 应用才能生效。
 
 默认位置：
 
-- `~/.agent_team/setting.json`
-- 或启动时通过 `--config-dir` 指定目录
+- `~/.team_agent/setting.json`
 
 ## 最小示例
 
@@ -34,11 +35,15 @@
 
 ## `llm_services` 常用字段
 
-- `name`：服务唯一标识
+- `name`：服务唯一标识（仅用于区分不同服务配置，不等于模型名称，不要与 `model` 字段混淆）
 - `enable`：是否启用
 - `base_url`：接口地址
 - `api_key`：API Key
-- `type`：常见值 `openai-compatible` / `anthropic` / `google` / `deepseek`
+- `type`：API 格式类型，支持以下四种：
+  - `openai-compatible`：OpenAI 兼容格式（适用于大部分国产模型服务商如阿里云、智谱、Moonshot 等）
+  - `anthropic`：Anthropic 原生格式（适用于 Claude 模型）
+  - `google`：Google Gemini 格式
+  - `deepseek`：DeepSeek 原生格式
 - `model`：模型名
 - `context_window_tokens`：上下文窗口大小
 - `reserve_output_tokens`：预留输出 token，默认 `8192`
@@ -67,6 +72,4 @@
 
 ## 注意
 
-- `setting.json` 只放运行配置，不放 team / role template 预置内容
-- API Key 不要提交到 Git
 - 删除 `setting.json` 后，下次启动会自动重新生成示例文件

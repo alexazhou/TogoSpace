@@ -118,7 +118,7 @@ threading.Thread(target=run_backend, daemon=True).start()
 
 ### 首次启动行为
 
-若 `~/.agent_team/setting.json` 不存在：
+若 `~/.team_agent/setting.json` 不存在：
 
 1. 自动创建默认配置文件（`SettingConfig` 默认值序列化写入）
 2. 托盘弹出系统通知，提示用户去编辑该文件配置 LLM 服务
@@ -157,7 +157,7 @@ pyinstaller --windowed --onedir \
 | `preset/` | 内嵌 bundle（只读） | role_templates / teams 预置内容，随版本发布 |
 | `src/prompts/` | 内嵌 bundle（只读） | 系统 prompt 文件，随版本发布 |
 | `assets/frontend/` | 内嵌 bundle（只读） | Web 前端构建产物，由后端托管；打包前需手动从 `frontend/dist` 复制 |
-| `~/.agent_team/` | 用户主目录（可写） | `setting.json` 等用户配置，已在用户目录，无需处理 |
+| `~/.team_agent/` | 用户主目录（可写） | `setting.json` 等用户配置，已在用户目录，无需处理 |
 
 ### 主要注意事项
 
@@ -178,8 +178,8 @@ pyinstaller --windowed --onedir \
 ## 待讨论问题
 
 - [x] 后端运行方式：同进程多线程，主线程托盘 + 子线程 tornado
-- [x] config 目录：用户配置已在 `~/.agent_team/`，天然可写，无需处理
-- [x] 端口冲突：报错提示用户去修改 `~/.agent_team/setting.json` 中的端口配置
+- [x] config 目录：用户配置已在 `~/.team_agent/`，天然可写，无需处理
+- [x] 端口冲突：报错提示用户去修改 `~/.team_agent/setting.json` 中的端口配置
 - [x] 图标资源：临时生成占位图，存放于 `assets/`
 - [x] 版本号来源：`src/version.py` 中的 `__version__`
 - [x] Web 前端：由后端托管静态文件，构建产物放 `assets/frontend/`，打包时内嵌

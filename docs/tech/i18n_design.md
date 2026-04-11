@@ -429,7 +429,7 @@ function toggleLocale() {
 
 ### 6.1 后端验证
 
-1. 修改 `~/.agent_team/setting.json`：`{"locale": "en"}`
+1. 修改 `~/.team_agent/setting.json`：`{"locale": "en"}`
 2. 启动后端：`./scripts/start_backend.sh`
 3. 调用 API 触发错误（如请求不存在的 team）
 4. 验证 `error_desc` 返回英文消息
