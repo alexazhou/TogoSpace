@@ -169,6 +169,7 @@ def main():
     # 打包模式：静态资源指向 _MEIPASS/assets/，可写数据指向 ~/.agent_team/
     if getattr(sys, "frozen", False):
         appPaths.ASSETS_DIR    = os.path.join(sys._MEIPASS, "assets")
+        appPaths.PRESET_DIR    = os.path.join(appPaths.ASSETS_DIR, "preset")
         _user_dir              = os.path.expanduser("~/.agent_team")
         appPaths.DATA_DIR      = os.path.join(_user_dir, "data")
         appPaths.LOGS_DIR      = os.path.join(_user_dir, "logs", "backend")
