@@ -264,6 +264,8 @@ async def _test_llm_service(config: LlmServiceConfig) -> dict:
         model=config.model,
         messages=[OpenAIMessage.text(OpenaiApiRole.USER, "hi")],
         max_tokens=16,
+        tools=None,
+        tool_choice=None,
     )
 
     start_time = time.monotonic()
