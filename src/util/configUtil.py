@@ -2,7 +2,7 @@ import glob
 import json
 import os
 import shutil
-from typing import Any, List
+from typing import Any, Callable, List
 
 import appPaths
 from util.configTypes import (
@@ -137,3 +137,43 @@ def load(config_dir: str = None, preset_dir: str = None, force_reload: bool = Fa
     _cached_config_dir = resolved_config_dir
     _cached_preset_dir = resolved_preset_dir
     return app_config
+
+
+def update_setting(mutator: Callable[[SettingConfig], None]) -> None:
+    """原子性地修改内存中的 SettingConfig，然后同步写回文件。
+
+    mutator 函数接收当前 SettingConfig，直接就地修改字段值。
+    调用完成后自动触发 _save_setting_to_file()。
+    """
+    if _cached_app_config is None:
+        raise RuntimeError("AppConfig 未初始化，请先调用 configUtil.load(...)")
+    mutator(_cached_app_config.setting)
+    _save_setting_to_file()
+
+
+def _save_setting_to_file() -> None:
+    """将当前内存中的 SettingConfig 序列化后写回 setting.json。
+
+    写入策略：先写临时文件再 os.replace，确保原子性。
+    采用 JSON 合并写回：读取原文件 → 更新 llm_services / default_llm_server → 写回，
+    保留原文件中的 _comment 等非模型字段。
+    使用 exclude_unset=True 仅写入显式设置过的字段，保持配置文件精简。
+    """
+    path = os.path.join(_cached_config_dir, "setting.json")
+
+    # 读取原始 JSON（保留 _comment 等非模型字段）
+    with open(path, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    setting = _cached_app_config.setting
+    raw["llm_services"] = [
+        s.model_dump(exclude_unset=True, mode="json") for s in setting.llm_services
+    ]
+    raw["default_llm_server"] = setting.default_llm_server
+
+    # 原子写入
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(raw, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp_path, path)
