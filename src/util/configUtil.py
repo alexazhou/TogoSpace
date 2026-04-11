@@ -109,6 +109,17 @@ def get_app_config() -> AppConfig:
     return _cached_app_config
 
 
+def is_initialized() -> bool:
+    """判断系统是否已完成 LLM 服务初始化配置。
+
+    至少有一个已启用的服务时返回 True，否则返回 False。
+    """
+    setting = get_app_config().setting
+    if not setting.llm_services:
+        return False
+    return any(service.enable for service in setting.llm_services)
+
+
 def load(config_dir: str = None, preset_dir: str = None, force_reload: bool = False) -> AppConfig:
     """一次性加载所有配置，写入缓存并返回。
 

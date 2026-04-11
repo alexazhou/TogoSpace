@@ -2,7 +2,7 @@ import os
 
 import tornado.web
 
-from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController, settingController
+from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController, settingController, systemController, initController
 
 import sys as _sys
 if getattr(_sys, "frozen", False):
@@ -44,6 +44,10 @@ application = tornado.web.Application([
     (r"/config/llm_services/(\d+)/modify.json",      settingController.LlmServiceModifyHandler),
     (r"/config/llm_services/(\d+)/delete.json",      settingController.LlmServiceDeleteHandler),
     (r"/config/llm_services/(\d+)/set_default.json",  settingController.LlmServiceSetDefaultHandler),
+
+    # System Status & Quick Init (V13)
+    (r"/system/status.json",                         systemController.SystemStatusHandler),
+    (r"/config/quick_init.json",                     initController.QuickInitHandler),
 
     # Role templates
     (r"/role_templates/list.json",                   roleTemplateController.RoleTemplateListHandler),
