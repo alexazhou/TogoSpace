@@ -43,7 +43,7 @@ jobs:
 
     - name: Run tests (parallel)
       run: |
-        PYTHONPATH=src python -m pytest tests/unit tests/api tests/integration -n auto --dist loadfile --timeout=60
+        PYTHONPATH=src python -m pytest tests/unit tests/api tests/integration -n auto --dist loadscope --timeout=60
 
     - name: Run real tests
       run: |
