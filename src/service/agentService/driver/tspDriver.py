@@ -38,6 +38,13 @@ def build_gtsp_command(raw_command: Optional[list[str]], workdir: str) -> list[s
 
     if "--workdir" not in command and workdir:
         command.extend(["--workdir", workdir])
+
+    # 添加日志路径，使用用户可写目录（避免 App Translocation 只读问题）
+    if "--log-path" not in command:
+        log_path = os.path.join(appPaths.LOGS_DIR, "gtsp")
+        os.makedirs(log_path, exist_ok=True)
+        command.extend(["--log-path", log_path])
+
     return command
 
 
