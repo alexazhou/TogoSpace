@@ -19,8 +19,7 @@
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "api_key": "YOUR_API_KEY_HERE",
       "type": "openai-compatible",
-      "model": "qwen-plus",
-      "context_window_tokens": 32000
+      "model": "qwen-plus"
     }
   ]
 }
@@ -31,8 +30,6 @@
 - `default_llm_server`：默认使用的服务名，必须等于某个 `llm_services[].name`
 - `llm_services`：模型服务列表，至少要有一个 `enable=true`
 - `default_room_max_turns`：房间默认最大轮次，默认 `100`
-- `persistence.enabled`：是否启用持久化
-- `persistence.db_path`：SQLite 路径
 - `workspace_root`：团队默认工作目录根路径
 
 ## `llm_services` 常用字段
