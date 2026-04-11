@@ -543,7 +543,7 @@ class AgentTurnRunner:
 
     async def _execute_compact(self) -> bool:
         """执行一次 compact：生成摘要 → 插入 COMPACT_SUMMARY → 内存裁剪。返回是否成功。"""
-        _, llm_config, _, _ = self._resolve_compact_config()
+        resolved_model, llm_config, _, _ = self._resolve_compact_config()
 
         compact_activity = await agentActivityService.add_activity(
             gt_agent=self.gt_agent, activity_type=AgentActivityType.COMPACT, metadata=self._base_metadata(),
@@ -558,7 +558,7 @@ class AgentTurnRunner:
         summary_text = await compact.compact_messages(
             messages=compact_plan.source_messages,
             system_prompt=self.system_prompt,
-            model=self.gt_agent.model,
+            model=resolved_model,
             tools=self.tool_registry.export_openai_tools(),
             max_tokens=llm_config.compact_summary_max_tokens,
         )
