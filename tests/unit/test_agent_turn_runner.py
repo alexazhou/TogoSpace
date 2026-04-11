@@ -178,3 +178,71 @@ async def test_advance_step_continues_to_infer_when_tool_failed(turn_runner):
     turn_runner._infer_to_item.assert_awaited_once_with(assistant_output_item, [])
     turn_runner._history.find_tool_call_by_id.assert_not_called()
     turn_runner._history.get_first_pending_tool_call.assert_not_called()
+
+
+from util import configUtil
+from util.configTypes import AppConfig, SettingConfig
+
+
+@pytest.mark.asyncio
+async def test_resolve_compact_config_uses_agent_model_when_set(monkeypatch):
+    """Agent model 有值时，_resolve_compact_config 返回 Agent 的 model。"""
+    gt_agent = GtAgent(id=1, team_id=1, name="TestAgent", role_template_id=1, model="agent-model")
+    runner = AgentTurnRunner(
+        gt_agent=gt_agent,
+        system_prompt="You are a test agent.",
+        driver_config=AgentDriverConfig(driver_type=DriverType.NATIVE),
+    )
+
+    monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
+        default_llm_server="svc",
+        llm_services=[
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1/chat/completions",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+                "model": "configured-model",
+                "context_window_tokens": 128000,
+                "reserve_output_tokens": 8192,
+                "compact_trigger_ratio": 0.85,
+            }
+        ],
+    )))
+
+    resolved_model, llm_config, trigger_tokens, hard_limit_tokens = runner._resolve_compact_config()
+
+    assert resolved_model == "agent-model"
+
+
+@pytest.mark.asyncio
+async def test_resolve_compact_config_uses_config_model_when_agent_model_empty(monkeypatch):
+    """Agent model 为空时，_resolve_compact_config 返回配置中的 model。"""
+    gt_agent = GtAgent(id=1, team_id=1, name="TestAgent", role_template_id=1, model="")  # model 为空
+    runner = AgentTurnRunner(
+        gt_agent=gt_agent,
+        system_prompt="You are a test agent.",
+        driver_config=AgentDriverConfig(driver_type=DriverType.NATIVE),
+    )
+
+    monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
+        default_llm_server="svc",
+        llm_services=[
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1/chat/completions",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+                "model": "configured-model",
+                "context_window_tokens": 128000,
+                "reserve_output_tokens": 8192,
+                "compact_trigger_ratio": 0.85,
+            }
+        ],
+    )))
+
+    resolved_model, llm_config, trigger_tokens, hard_limit_tokens = runner._resolve_compact_config()
+
+    assert resolved_model == "configured-model"

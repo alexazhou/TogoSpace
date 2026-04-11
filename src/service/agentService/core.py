@@ -84,8 +84,8 @@ async def _load_team(team_id: int, workspace_root: str | None = None) -> None:
 
         agent_name = gt_agent.name
         template_name = gt_role_template.name
+        # model 用于日志记录，推理时如果 gt_agent.model 为空则使用配置中的 model
         model_name = gt_agent.model or gt_role_template.model or default_model
-        gt_agent.model = model_name
         driver_config = normalize_driver_config(
             {
                 "driver": gt_agent.driver,

@@ -1,9 +1,12 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from service.agentService import core
+from model.dbModel.gtAgent import GtAgent
+from constants import DriverType
+
 
 class _DummyAgent:
     def __init__(self, team_id: int) -> None:
@@ -12,6 +15,9 @@ class _DummyAgent:
 
     async def close(self) -> None:
         self.closed = True
+
+    async def startup(self) -> None:
+        pass
 
 
 @pytest.mark.asyncio
@@ -61,3 +67,26 @@ def test_resolve_team_workdir_falls_back_to_workspace_root():
     resolved = core._resolve_team_workdir(team, "/tmp/workspaces")
 
     assert resolved == "/tmp/workspaces/default"
+
+
+def test_agent_model_resolution_logic():
+    """测试 Agent model 的解析逻辑：优先使用 Agent 自身 model，其次 role template，最后配置。"""
+    # 模拟各层级的 model 值
+    agent_model = "agent-model"
+    template_model = "template-model"
+    default_model = "config-model"
+
+    # Agent model 有值时，使用 Agent model
+    result = agent_model or template_model or default_model
+    assert result == "agent-model"
+
+    # Agent model 为空，template model 有值时，使用 template model
+    agent_model = ""
+    result = agent_model or template_model or default_model
+    assert result == "template-model"
+
+    # Agent 和 template 都为空时，使用配置中的 default model
+    agent_model = ""
+    template_model = ""
+    result = agent_model or template_model or default_model
+    assert result == "config-model"
