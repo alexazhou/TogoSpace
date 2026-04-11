@@ -423,7 +423,7 @@ def test_load_creates_setting_json_and_readme_when_missing(tmp_path):
     assert "llm_services" in setting_data
 
     readme_text = readme_file.read_text(encoding="utf-8")
-    assert "setting.json 配置说明" in readme_text
+    assert "setting.json 说明" in readme_text
     assert "default_llm_server" in readme_text
 
 
