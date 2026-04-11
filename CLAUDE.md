@@ -265,3 +265,12 @@ VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 ### 版本文档
 
 - `docs/versions/v*/`：按版本沉淀的产品、技术、任务文档（v1 ~ v10）
+
+### 版本发布
+
+- [docs/RELEASE_HANDBOOK.md](docs/RELEASE_HANDBOOK.md)：版本发布操作手册
+
+相关工具：
+- `scripts/build_mac.py`：构建 macOS app（开发调试用）
+- `scripts/build_release.py`：构建 + 签名 + 公证 + 打包（发布用）
+- `scripts/build_config.json`：本地发布配置（从 `build_config.json.example` 复制填写）
