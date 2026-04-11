@@ -72,7 +72,7 @@ def _status_text(item) -> str:
 
 
 def _on_open(icon, item) -> None:
-    webbrowser.open(_web_url)
+    webbrowser.open(_web_url, new=0)
 
 
 def _on_quit(icon, item) -> None:
