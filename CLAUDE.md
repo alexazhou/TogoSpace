@@ -144,10 +144,10 @@ frontend/
 
 ```bash
 # 前台运行
-.venv/bin/python3 tui/tui_main.py [--base-url http://127.0.0.1:8080] [--config ~/.agent_team/setting.json]
+.venv/bin/python3 tui/tui_main.py [--base-url http://127.0.0.1:8080] [--config ~/.team_agent/setting.json]
 
 # 或使用脚本
-./scripts/start_tui.sh [--base-url http://127.0.0.1:8080] [--config ~/.agent_team/setting.json]
+./scripts/start_tui.sh [--base-url http://127.0.0.1:8080] [--config ~/.team_agent/setting.json]
 
 # 停止
 ./scripts/stop_tui.sh
@@ -214,10 +214,10 @@ VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 | 类别 | 内容 | 路径 | 版本控制 |
 |------|------|------|----------|
 | **preset**（预置内容） | RoleTemplate / Team | `preset/role_templates/*.json`、`preset/teams/*.json` | 是，随源码提交 |
-| **config**（运行配置） | LLM 服务、API key、persistence 等 | `~/.agent_team/setting.json` | 否，用户私有 |
+| **config**（运行配置） | LLM 服务、API key、persistence 等 | `~/.team_agent/setting.json` | 否，用户私有 |
 
 - `preset/` 固定由代码自动查找，不可通过参数指定。
-- 运行配置默认读取 `~/.agent_team/setting.json`；可用 `--config-dir <dir>` 指定其他目录（目录下需有 `setting.json`）。
+- 运行配置默认读取 `~/.team_agent/setting.json`；可用 `--config-dir <dir>` 指定其他目录（目录下需有 `setting.json`）。
 
 ## 前端仓库说明（双前端）
 
