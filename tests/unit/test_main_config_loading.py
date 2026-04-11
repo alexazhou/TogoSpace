@@ -69,8 +69,11 @@ def test_runtime_configs_skip_disabled_llm_service(tmp_path):
         ],
     }), encoding="utf-8")
 
+    # V13: 配置加载不再因 default 指向已禁用服务而立刻失败
+    # 但访问 current_llm_service 时仍应抛出 ValueError
+    app_config = configUtil.load(str(tmp_path))
     with pytest.raises(ValueError) as exc_info:
-        configUtil.load(str(tmp_path))
+        _ = app_config.setting.current_llm_service
     assert "已禁用" in str(exc_info.value) or "未在 llm_services 中定义或已禁用" in str(exc_info.value)
 
 
@@ -458,3 +461,68 @@ def test_get_app_config_raises_when_cache_is_empty(monkeypatch):
         configUtil.get_app_config()
 
     assert "请先调用 configUtil.load" in str(exc_info.value)
+
+
+def test_empty_llm_services_config_loads_successfully(tmp_path):
+    """V13: llm_services 为空时配置可以正常加载，不抛异常。"""
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "llm_services": [],
+        "default_llm_server": None,
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path), force_reload=True)
+    assert app_config.setting.llm_services == []
+    assert app_config.setting.is_llm_configured is False
+
+
+def test_empty_llm_services_current_llm_service_raises(tmp_path):
+    """V13: llm_services 为空时访问 current_llm_service 仍应抛出 ValueError。"""
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "llm_services": [],
+        "default_llm_server": None,
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path), force_reload=True)
+    with pytest.raises(ValueError) as exc_info:
+        _ = app_config.setting.current_llm_service
+    assert "未配置可用的 LLM 服务" in str(exc_info.value)
+
+
+def test_all_disabled_llm_services_loads_successfully(tmp_path):
+    """V13: 所有 LLM 服务禁用时配置可以正常加载。"""
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "llm_services": [
+            {
+                "name": "disabled",
+                "enable": False,
+                "base_url": "http://localhost/v1",
+                "api_key": "key",
+                "type": "openai-compatible",
+            }
+        ],
+        "default_llm_server": "disabled",
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path), force_reload=True)
+    assert app_config.setting.is_llm_configured is False
+    with pytest.raises(ValueError):
+        _ = app_config.setting.current_llm_service
+
+
+def test_is_llm_configured_true_with_enabled_service(tmp_path):
+    """V13: 至少一个 enable=True 的服务时 is_llm_configured 为 True。"""
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "llm_services": [
+            {
+                "name": "mock",
+                "enable": True,
+                "base_url": "http://localhost/v1",
+                "api_key": "key",
+                "type": "openai-compatible",
+            }
+        ],
+        "default_llm_server": "mock",
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path), force_reload=True)
+    assert app_config.setting.is_llm_configured is True

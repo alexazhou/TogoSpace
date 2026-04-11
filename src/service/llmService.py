@@ -44,7 +44,9 @@ class InferResult:
 
 
 async def startup() -> None:
-    _ = configUtil.get_app_config().setting.current_llm_service
+    setting = configUtil.get_app_config().setting
+    if not setting.is_llm_configured:
+        logger.warning("当前未配置可用的 LLM 服务，Agent 推理功能不可用。请通过 Web Console 或手动编辑 setting.json 完成配置。")
 
 
 def get_default_model() -> str:

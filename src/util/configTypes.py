@@ -130,7 +130,11 @@ class SettingConfig(BaseModel):
             raise ValueError("persistence 不允许为 null")
         if self.workspace_root is None:
             raise ValueError("workspace_root 不允许为 null")
-        _ = self.current_llm_service
+
+    @property
+    def is_llm_configured(self) -> bool:
+        """是否已配置可用的 LLM 服务（至少一个已启用）。"""
+        return any(s.enable for s in self.llm_services)
 
     @property
     def current_llm_service(self) -> LlmServiceConfig:
