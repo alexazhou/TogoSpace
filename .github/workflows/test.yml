@@ -35,23 +35,15 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt pytest-timeout
+        pip install -r requirements.txt pytest-timeout pytest-xdist
 
     - name: Run mypy
       run: |
         bash scripts/run_mypy.sh
 
-    - name: Run unit tests
+    - name: Run tests
       run: |
-        PYTHONPATH=src python -m pytest tests/unit/ -v --timeout=30
-
-    - name: Run API tests
-      run: |
-        PYTHONPATH=src python -m pytest tests/api/ -v --timeout=30
-
-    - name: Run integration tests
-      run: |
-        PYTHONPATH=src python -m pytest tests/integration/ -v --timeout=30
+        PYTHONPATH=src python -m pytest tests/unit tests/api tests/integration -n auto --dist loadfile --timeout=30
 
     - name: Run real tests
       run: |
