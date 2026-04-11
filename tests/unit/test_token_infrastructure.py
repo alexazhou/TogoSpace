@@ -14,7 +14,7 @@ def test_llm_config_default_token_budget_fields():
     cfg = LlmServiceConfig(
         name="test", base_url="http://x", api_key="k", type="openai-compatible"
     )
-    assert cfg.context_window_tokens == 65536
+    assert cfg.context_window_tokens == 131072
     assert cfg.reserve_output_tokens == 8192
     assert cfg.compact_trigger_ratio == 0.85
     assert cfg.compact_summary_max_tokens == 2048
