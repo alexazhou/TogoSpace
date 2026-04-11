@@ -575,11 +575,72 @@ async def startup() -> None:
     _rooms_by_id.clear()
 
 
-async def _restore_room_state(room: ChatRoom) -> None:
+async def _load_room(
+    gt_team: GtTeam,
+    gt_room: GtRoom,
+    agent_ids: List[int],
+) -> None:
+    """将数据库房间装载到运行态。"""
+    room_agents = await gtAgentManager.get_team_agents_by_ids(gt_team.id, agent_ids, include_special=True)
+
+    room = ChatRoom(team=gt_team, room=gt_room, agents=room_agents)
+    _rooms[room.key] = room
+    _rooms_by_id[room.room_id] = room
+
+    logger.info(f"创建并初始化聊天室: room_id={room.room_id}, type={room.room_type.name}, agents={[agent.name for agent in room_agents]}")
+    if gt_room.max_turns > 0:
+        logger.info(f"初始化轮次配置: room_id={room.room_id}, max_turns={gt_room.max_turns}")
+
+
+async def load_team_rooms(team_id: int) -> None:
+    """从数据库读取指定 Team 的房间配置，并重建对应的内存房间对象。"""
+    gt_team = await gtTeamManager.get_team_by_id(team_id)
+    if gt_team is None:
+        logger.warning(f"加载 Team 房间失败: Team ID '{team_id}' 不存在")
+        return
+
+    await close_team_rooms(team_id)
+
+    gt_rooms = await gtRoomManager.get_rooms_by_team(gt_team.id)
+    for gt_room in gt_rooms:
+        await _load_room(
+            gt_team=gt_team,
+            gt_room=gt_room,
+            agent_ids=gt_room.agent_ids or [],
+        )
+
+    logger.info(f"Team '{gt_team.name}' 的内存房间已重建，共 {len(gt_rooms)} 个房间")
+
+
+async def load_all_rooms() -> None:
+    """从数据库读取所有房间配置，并创建对应的内存房间对象。"""
+    for gt_team in await gtTeamManager.get_all_teams():
+        for gt_room in await gtRoomManager.get_rooms_by_team(gt_team.id):
+            await _load_room(
+                gt_team=gt_team,
+                gt_room=gt_room,
+                agent_ids=gt_room.agent_ids or [],
+            )
+
+
+async def close_team_rooms(team_id: int) -> None:
+    """关闭并移除指定 Team 的内存房间对象。"""
+    to_close = [room_key for room_key, room in _rooms.items() if room.team_id == team_id]
+    for room_key in to_close:
+        room = _rooms.pop(room_key)
+        _rooms_by_id.pop(room.room_id, None)
+    logger.info(f"Team ID={team_id} 的 {len(to_close)} 个聊天室已关闭")
+
+
+async def _restore_room_runtime_state(room: ChatRoom) -> None:
+    """恢复单个房间的消息、已读指针和轮次进度。"""
     gt_room_messages = await gtRoomMessageManager.get_room_messages(room.room_id)
     agent_read_index, turn_pos = await gtRoomManager.get_room_state(room.room_id)
     recovered_from_db = bool(gt_room_messages)
     restored_messages: list[GtCoreRoomMessage] | None = None
+
+    logger.info(f"[恢复状态] room={room.name}, room_id={room.room_id}, msg_count={len(gt_room_messages)}, read_index={agent_read_index}, turn_pos={turn_pos}")
+    logger.info(f"[恢复状态-详细] room_id={room.room_id}, agent_read_index type={type(agent_read_index)}, turn_pos type={type(turn_pos)}")
 
     if gt_room_messages:
         restored_messages = []
@@ -603,18 +664,18 @@ async def _restore_room_state(room: ChatRoom) -> None:
     room.rebuild_state_from_history(persisted_turn_pos=turn_pos if recovered_from_db else None)
 
 
-async def restore_state() -> None:
-    """从数据库恢复所有房间的运行时状态。"""
-    for room in get_all_rooms():
-        await _restore_room_state(room)
-
-
-async def restore_state_for_team(team_id: int) -> None:
-    """从数据库恢复指定 Team 下房间的运行时状态。"""
+async def restore_team_rooms_runtime_state(team_id: int) -> None:
+    """恢复指定 Team 下所有内存房间的消息、已读指针和轮次进度。"""
     for room in get_all_rooms():
         if room.team_id != team_id:
             continue
-        await _restore_room_state(room)
+        await _restore_room_runtime_state(room)
+
+
+async def restore_all_rooms_runtime_state() -> None:
+    """恢复所有内存房间的消息、已读指针和轮次进度。"""
+    for room in get_all_rooms():
+        await _restore_room_runtime_state(room)
 
 
 def get_room_by_key(room_key: str) -> ChatRoom:
@@ -773,33 +834,6 @@ async def overwrite_team_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
         await gtRoomManager.save_room(room)
 
 
-async def _load_room(
-    gt_team: GtTeam,
-    gt_room: GtRoom,
-    agent_ids: List[int],
-) -> None:
-    """将数据库房间装载到运行态。"""
-    room_agents = await gtAgentManager.get_team_agents_by_ids(gt_team.id, agent_ids, include_special=True)
-
-    room = ChatRoom(team=gt_team, room=gt_room, agents=room_agents)
-    _rooms[room.key] = room
-    _rooms_by_id[room.room_id] = room
-
-    logger.info(f"创建并初始化聊天室: room_id={room.room_id}, type={room.room_type.name}, agents={[agent.name for agent in room_agents]}")
-    if gt_room.max_turns > 0:
-        logger.info(f"初始化轮次配置: room_id={room.room_id}, max_turns={gt_room.max_turns}")
-
-async def load_rooms_from_db() -> None:
-    """从数据库装载所有聊天室到运行态。"""
-    for gt_team in await gtTeamManager.get_all_teams():
-        for gt_room in await gtRoomManager.get_rooms_by_team(gt_team.id):
-            await _load_room(
-                gt_team=gt_team,
-                gt_room=gt_room,
-                agent_ids=gt_room.agent_ids or [],
-            )
-
-
 def get_agent_names(room_id: int) -> List[str]:
     """返回聊天室的参与者名列表。"""
     room = get_room(room_id)
@@ -821,39 +855,9 @@ def get_rooms_for_agent(team_id: int | None, agent_id: int) -> List[int]:
     return results
 
 
-async def refresh_rooms_for_team(team_id: int) -> None:
-    """根据数据库中的最新数据刷新指定 Team 的聊天室运行态。"""
-    gt_team = await gtTeamManager.get_team_by_id(team_id)
-    if gt_team is None:
-        logger.warning(f"无法刷新聊天室: Team ID '{team_id}' 不存在")
-        return
-
-    # 先关闭该 Team 的所有现有聊天室
-    await close_team_rooms(team_id)
-
-    gt_rooms = await gtRoomManager.get_rooms_by_team(gt_team.id)
-    for gt_room in gt_rooms:
-        await _load_room(
-            gt_team=gt_team,
-            gt_room=gt_room,
-            agent_ids=gt_room.agent_ids or [],
-        )
-
-    logger.info(f"Team '{gt_team.name}' 的聊天室已刷新，共 {len(gt_rooms)} 个房间")
-
-
 async def activate_rooms(team_name: str | None = None) -> None:
     """统一激活入口：对目标房间调用 activate_scheduling（可按 team 过滤）。"""
     for room in _rooms.values():
         if team_name is not None and room.team_name != team_name:
             continue
         await room.activate_scheduling()
-
-
-async def close_team_rooms(team_id: int) -> None:
-    """关闭指定 Team 的所有聊天室。"""
-    to_close = [room_key for room_key, room in _rooms.items() if room.team_id == team_id]
-    for room_key in to_close:
-        room = _rooms.pop(room_key)
-        _rooms_by_id.pop(room.room_id, None)
-    logger.info(f"Team ID={team_id} 的 {len(to_close)} 个聊天室已关闭")

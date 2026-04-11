@@ -1,11 +1,9 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from service.agentService import core
-from model.dbModel.gtAgent import GtAgent
-from constants import DriverType
 
 
 class _DummyAgent:
@@ -21,36 +19,27 @@ class _DummyAgent:
 
 
 @pytest.mark.asyncio
-async def test_reload_team_rebuilds_only_target_team(monkeypatch):
+async def test_unload_team_removes_only_target_team_runtime(monkeypatch):
     target = _DummyAgent(team_id=1)
     other = _DummyAgent(team_id=2)
     monkeypatch.setattr(core, "_agents", {11: target, 22: other})
 
-    mock_load_team = AsyncMock()
-    monkeypatch.setattr(core, "_load_team", mock_load_team)
-
-    await core.reload_team(1, workspace_root="/tmp/ws")
+    await core.unload_team(1)
 
     assert target.closed is True
     assert other.closed is False
     assert 11 not in core._agents
     assert 22 in core._agents
-    mock_load_team.assert_awaited_once_with(1, workspace_root="/tmp/ws")
 
 
 @pytest.mark.asyncio
-async def test_reload_team_no_target_only_closes_existing(monkeypatch):
-    old = _DummyAgent(team_id=1)
-    monkeypatch.setattr(core, "_agents", {11: old})
+async def test_load_team_agents_delegates_to_internal_loader(monkeypatch):
+    mock_load_team_agents = AsyncMock()
+    monkeypatch.setattr(core, "_load_team_agents", mock_load_team_agents)
 
-    mock_load_team = AsyncMock()
-    monkeypatch.setattr(core, "_load_team", mock_load_team)
+    await core.load_team_agents(1, workspace_root="/tmp/ws")
 
-    await core.reload_team(1)
-
-    assert old.closed is True
-    assert core._agents == {}
-    mock_load_team.assert_awaited_once_with(1, workspace_root=None)
+    mock_load_team_agents.assert_awaited_once_with(1, workspace_root="/tmp/ws")
 
 
 def test_resolve_team_workdir_prefers_explicit_working_directory():

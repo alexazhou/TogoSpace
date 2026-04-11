@@ -36,24 +36,7 @@ async def startup() -> None:
     _agents = {}
 
 
-async def restore_state() -> None:
-    """从数据库恢复所有 Agent 的历史消息，并将遗留 RUNNING 任务标记为 FAILED。"""
-    for agent in _agents.values():
-        # 加载历史消息
-        items = await persistenceService.load_agent_history_message(agent.gt_agent.id)
-        if items:
-            agent.inject_history_messages(items)
-
-        # 启动恢复时将上次中断的 RUNNING 任务标记为 FAILED
-        await persistenceService.fail_running_tasks(agent.gt_agent.id)
-
-        first_task = await gtAgentTaskManager.get_first_unfinish_task(agent.gt_agent.id)
-        agent.task_consumer.status = AgentStatus.FAILED if (
-            first_task is not None and first_task.status == AgentTaskStatus.FAILED
-        ) else AgentStatus.IDLE
-
-
-async def _load_team(team_id: int, workspace_root: str | None = None) -> None:
+async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> None:
     gt_team = await gtTeamManager.get_team_by_id(team_id)
     if gt_team is None:
         logger.warning(f"加载 Team Agent 失败: team_id={team_id} 不存在于配置中")
@@ -115,7 +98,18 @@ async def _load_team(team_id: int, workspace_root: str | None = None) -> None:
         await agent.startup()
 
 
-async def _unload_team(team_id: int) -> None:
+async def load_team_agents(team_id: int, workspace_root: str | None = None) -> None:
+    """从数据库读取指定 Team 的 Agent 配置，并创建对应的内存 Agent 实例。"""
+    await _load_team_agents(team_id, workspace_root=workspace_root)
+
+
+async def load_all_team_agents(workspace_root: str | None = None) -> None:
+    """从数据库读取所有 Team 的 Agent 配置，并创建对应的内存 Agent 实例。"""
+    for gt_team in await gtTeamManager.get_all_teams():
+        await load_team_agents(gt_team.id, workspace_root=workspace_root)
+
+
+async def _unload_team_agents(team_id: int) -> None:
     keys_to_remove = [agent_id for agent_id, agent in _agents.items() if agent.gt_agent.team_id == team_id]
     close_tasks: list[Any] = []
     for agent_id in keys_to_remove:
@@ -126,15 +120,51 @@ async def _unload_team(team_id: int) -> None:
         _agents.pop(agent_id, None)
 
 
-async def load_all_team(workspace_root: str | None = None) -> None:
-    for gt_team in await gtTeamManager.get_all_teams():
-        await _load_team(gt_team.id, workspace_root=workspace_root)
+async def unload_team(team_id: int) -> None:
+    """关闭并移除指定 Team 的内存 Agent 实例。"""
+    await _unload_team_agents(team_id)
 
 
-async def reload_team(team_id: int, workspace_root: str | None = None) -> None:
-    """按 Team 维度重建运行时 Agent 实例。"""
-    await _unload_team(team_id)
-    await _load_team(team_id, workspace_root=workspace_root)
+async def _restore_agent_runtime_state(
+    agent: Agent,
+    *,
+    running_task_error_message: str,
+) -> None:
+    """恢复单个 Agent 的 history，并将遗留 RUNNING task 标记为 FAILED。"""
+    items = await persistenceService.load_agent_history_message(agent.gt_agent.id)
+    agent.inject_history_messages(items)
+
+    await persistenceService.fail_running_tasks(
+        agent.gt_agent.id,
+        error_message=running_task_error_message,
+    )
+
+    first_task = await gtAgentTaskManager.get_first_unfinish_task(agent.gt_agent.id)
+    agent.task_consumer.status = AgentStatus.FAILED if (
+        first_task is not None and first_task.status == AgentTaskStatus.FAILED
+    ) else AgentStatus.IDLE
+
+
+async def restore_team_agents_runtime_state(
+    team_id: int,
+    *,
+    running_task_error_message: str = "task interrupted by team runtime restart",
+) -> None:
+    """恢复指定 Team 下所有内存 Agent 的 history 和 task 状态。"""
+    for agent in get_team_agents(team_id):
+        await _restore_agent_runtime_state(
+            agent,
+            running_task_error_message=running_task_error_message,
+        )
+
+
+async def restore_all_agents_runtime_state() -> None:
+    """恢复所有内存 Agent 的 history，并将遗留 RUNNING task 标记为 FAILED。"""
+    for agent in _agents.values():
+        await _restore_agent_runtime_state(
+            agent,
+            running_task_error_message="task interrupted by process restart",
+        )
 
 
 def get_agent(agent_id: int) -> "Agent":

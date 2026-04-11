@@ -85,7 +85,7 @@ def shutdown() -> None:
         agent.stop_consumer_task()
 
 
-def stop_team(team_id: int) -> None:
+def stop_scheduler_team(team_id: int) -> None:
     """停止指定 Team 的所有运行中消费 task。"""
     team_agents = agentService.get_team_agents(team_id)
     for agent in team_agents:

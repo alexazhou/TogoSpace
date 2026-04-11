@@ -14,6 +14,7 @@ from service import (
     schedulerService,
     agentService,
     roomService,
+    teamService,
     llmService,
     funcToolService,
     persistenceService,
@@ -23,6 +24,7 @@ from service import (
 import appPaths
 import route
 from version import __version__
+from dal.db import gtTeamManager
 
 
 def _setup_logger() -> None:
@@ -108,16 +110,17 @@ async def main(config_dir: str = None, port: int | None = None):
     logger.info("[启动] 阶段 2/4 完成")
 
     # ── 阶段 3：运行时构建 ────────────────────────────────────────────────────
-    logger.info("[启动] 阶段 3/4：构建运行时（成员 / 房间 / 调度器）")
-    await agentService.load_all_team(workspace_root=app_config.setting.workspace_root)
-    await roomService.load_rooms_from_db()
+    logger.info("[启动] 阶段 3/4：准备团队运行时恢复")
     logger.info("[启动] 阶段 3/4 完成")
 
     # ── 阶段 4：恢复状态 ──────────────────────────────────────────────────────
     logger.info("[启动] 阶段 4/4：恢复持久化状态")
-    await agentService.restore_state()
-    await roomService.restore_state()
-    await schedulerService.start_scheduling()
+    for team in await gtTeamManager.get_all_teams(enabled=True):
+        await teamService.restore_team(
+            team.id,
+            workspace_root=app_config.setting.workspace_root,
+            running_task_error_message="task interrupted by process restart",
+        )
     logger.info("[启动] 阶段 4/4 完成")
 
     web_server = tornado.httpserver.HTTPServer(route.application)

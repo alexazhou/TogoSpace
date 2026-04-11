@@ -342,14 +342,14 @@ class TestSchedulerRun(ServiceTestCase):
 
         assert mock_task_manager.create_task.call_count == 2
 
-    async def test_stop_team(self, monkeypatch):
+    async def test_stop_scheduler_team(self, monkeypatch):
         """验证停止特定团队的调度。"""
         alice = _make_mock_agent("alice")
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         await scheduler.startup()
 
         with patch("service.schedulerService.agentService.get_team_agents", return_value=[alice]):
-            scheduler.stop_team(1)
+            scheduler.stop_scheduler_team(1)
 
         alice.stop_consumer_task.assert_called_once_with()
 

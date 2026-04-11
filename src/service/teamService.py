@@ -18,6 +18,67 @@ async def startup() -> None:
     return None
 
 
+async def stop_team_runtime(team_id: int) -> None:
+    """停止指定 Team 的运行时（调度、Agent、Room）。"""
+    schedulerService.stop_scheduler_team(team_id)
+    await agentService.unload_team(team_id)
+    await roomService.close_team_rooms(team_id)
+
+
+async def restore_team(
+    team_id: int,
+    *,
+    workspace_root: str | None = None,
+    running_task_error_message: str = "task interrupted by team runtime restart",
+) -> None:
+    """从数据库恢复指定 Team 的运行时。"""
+    team = await gtTeamManager.get_team_by_id(team_id)
+    if team is None:
+        logger.warning(f"恢复 Team 运行时失败: Team ID '{team_id}' 不存在")
+        return
+    if not team.enabled:
+        logger.info("跳过恢复已停用 Team 的运行时: team=%s", team.name)
+        return
+
+    await agentService.load_team_agents(team.id, workspace_root=workspace_root)
+    await roomService.load_team_rooms(team.id)
+    await agentService.restore_team_agents_runtime_state(
+        team.id,
+        running_task_error_message=running_task_error_message,
+    )
+    await roomService.restore_team_rooms_runtime_state(team.id)
+    await schedulerService.start_scheduling(team.name)
+    logger.info("Team '%s' 运行时恢复完成", team.name)
+
+
+async def restart_team_runtime(
+    team_id: int,
+    *,
+    workspace_root: str | None = None,
+    running_task_error_message: str = "task interrupted by team runtime restart",
+) -> None:
+    """重启指定 Team 的运行时。"""
+    await stop_team_runtime(team_id)
+    await restore_team(
+        team_id,
+        workspace_root=workspace_root,
+        running_task_error_message=running_task_error_message,
+    )
+
+
+async def hot_reload_team(name: str) -> None:
+    """触发指定 Team 的热更新。"""
+    team = await gtTeamManager.get_team(name)
+    if team is None:
+        logger.warning(f"热更新失败: Team '{name}' 不存在")
+        return
+
+    await restart_team_runtime(team.id)
+    logger.info("Team '%s' 热更新后已触发调度启动", name)
+
+    logger.info(f"Team '{name}' 热更新完成")
+
+
 async def create_team(
     name: str,
     config: dict | None = None,
@@ -25,13 +86,11 @@ async def create_team(
     dept_tree: GtDept | None = None,
     preset_rooms: list[GtRoom] | None = None,
 ) -> int:
-    """创建新 Team（自动触发热更新）。"""
+    """创建新 Team，并恢复其运行时。"""
 
-    # 检查 Team 是否已存在
     if await gtTeamManager.team_exists(name):
         raise TeamAgentException(f"Team '{name}' already exists", error_code="TEAM_EXISTS")
 
-    # 创建 Team
     team = await gtTeamManager.save_team(GtTeam(
         name=name,
         config=config or {},
@@ -44,12 +103,10 @@ async def create_team(
     if dept_tree:
         await deptService.overwrite_dept_tree(team_id, dept_tree)
 
-    # 创建 Rooms（常规流程，不走”配置导入专用”接口）
     if preset_rooms:
         await roomService.overwrite_team_rooms(team_id, preset_rooms)
 
-    # 触发热更新
-    await hot_reload_team(name)
+    await restore_team(team_id)
 
     logger.info(f"Team '{name}' 已创建")
     return team_id
@@ -72,13 +129,11 @@ async def update_team_base_info(team_id: int, working_directory: str | None = No
 
 
 async def delete_team(name: str) -> None:
-    """删除 Team 配置并触发热更新。"""
+    """删除 Team 配置并停止对应运行时。"""
     team = await gtTeamManager.get_team(name)
     if team is not None:
-        await roomService.close_team_rooms(team.id)
-        schedulerService.stop_team(team.id)
+        await stop_team_runtime(team.id)
 
-    # 软删除 Team
     await gtTeamManager.delete_team(name)
 
     logger.info(f"Team '{name}' 已删除")
@@ -93,35 +148,11 @@ async def set_team_enabled(team_id: int, enabled: bool) -> None:
 
     team_name = team.name
     if enabled:
-        # 启用时触发热更新
-        await hot_reload_team(team_name)
+        await restore_team(team_id)
     else:
-        # 停用时停止调度
-        schedulerService.stop_team(team_id)
+        await stop_team_runtime(team_id)
 
     logger.info(f"Team '{team_name}' {'已启用' if enabled else '已停用'}")
-
-
-async def hot_reload_team(name: str) -> None:
-    """触发指定 Team 的热更新。"""
-    team = await gtTeamManager.get_team(name)
-    if team is None:
-        logger.warning(f"热更新失败: Team '{name}' 不存在")
-        return
-
-    # 先停掉该 team 的调度任务，避免旧实例在热更新过程中继续消费事件
-    schedulerService.stop_team(team.id)
-
-    # 刷新成员实例，保证新增/变更成员可被调度命中
-    await agentService.reload_team(team.id)
-
-    # 刷新聊天室配置
-    await roomService.refresh_rooms_for_team(team.id)
-    await roomService.restore_state_for_team(team.id)
-    await schedulerService.start_scheduling(name)
-    logger.info("Team '%s' 热更新后已触发调度启动", name)
-
-    logger.info(f"Team '{name}' 热更新完成")
 
 
 async def clear_team_data(team_id: int) -> dict[str, int]:
@@ -133,9 +164,7 @@ async def clear_team_data(team_id: int) -> dict[str, int]:
         删除统计 {"tasks": n, "histories": n, "messages": n}
     """
     # 1. 停止运行时
-    schedulerService.stop_team(team_id)
-    await roomService.close_team_rooms(team_id)
-    await agentService._unload_team(team_id)
+    await stop_team_runtime(team_id)
 
     # 2. 清空数据库（按依赖顺序）
     tasks_deleted = await gtAgentTaskManager.delete_tasks_by_team(team_id)
