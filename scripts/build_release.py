@@ -14,6 +14,8 @@ macOS Release 构建脚本：构建、签名、公证、打包 AgentTeam.app
   python scripts/build_release.py --skip-build       # 跳过构建，仅签名公证
   python scripts/build_release.py --skip-notarize    # 跳过公证，仅签名打包
   python scripts/build_release.py --arch arm64       # 构建 arm64 版本
+
+配置：scripts/build_config.json
 """
 
 import argparse
@@ -23,9 +25,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
-
-# ── 路径常量 ──────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT  = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
@@ -40,22 +39,14 @@ def run_command(command, check=True, capture_output=False, timeout=None, env=Non
     try:
         if capture_output:
             result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                check=check,
-                timeout=timeout,
-                env=env or os.environ
+                command, capture_output=True, text=True, check=check,
+                timeout=timeout, env=env or os.environ
             )
             return result.stdout.strip()
         else:
             process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                env=env or os.environ
+                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1, env=env or os.environ
             )
             try:
                 for line in iter(process.stdout.readline, ''):
@@ -84,7 +75,6 @@ def load_config():
     with open(CONFIG_FILE) as f:
         config = json.load(f)
 
-    # 验证必要字段
     required = ["apple_id", "app_specific_password", "team_id", "signing_identity_hash"]
     for field in required:
         if not config.get(field):
@@ -103,11 +93,6 @@ def read_version() -> str:
         print("❌ 无法从 src/version.py 读取版本号")
         sys.exit(1)
     return m.group(1)
-
-
-def get_arch_suffix(arch: str) -> str:
-    """根据架构返回 zip 文件后缀。"""
-    return f"macos-{arch}"
 
 
 def build_app(arch: str):
@@ -142,11 +127,9 @@ def notarize_app(app_path: str, config: dict):
     """提交公证并等待结果。"""
     print("\n--- 3. 公证 ---")
 
-    # 创建 zip 用于提交
     notarize_zip = os.path.join(DIST_PATH, "notarize_temp.zip")
     run_command(["ditto", "-c", "-k", "--keepParent", app_path, notarize_zip])
 
-    # 提交公证（--wait 会自动等待，可能需要几分钟）
     print("提交公证并等待结果（可能需要几分钟）...")
     run_command([
         "xcrun", "notarytool", "submit", notarize_zip,
@@ -154,9 +137,8 @@ def notarize_app(app_path: str, config: dict):
         "--password", config["app_specific_password"],
         "--team-id", config["team_id"],
         "--wait"
-    ], timeout=600)  # 10 分钟超时
+    ], timeout=600)
 
-    # 清理临时 zip
     os.remove(notarize_zip)
     print("✅ 公证完成")
 
@@ -171,29 +153,18 @@ def staple_app(app_path: str):
 def create_zip(app_path: str, arch: str, version: str) -> str:
     """创建 zip 安装包。"""
     print("\n--- 5. 创建 zip 安装包 ---")
-    zip_name = f"AgentTeam-{version}-{get_arch_suffix(arch)}.zip"
+    zip_name = f"AgentTeam-{version}-macos-{arch}.zip"
     zip_path = os.path.join(DIST_PATH, zip_name)
 
-    # 删除已存在的 zip
     if os.path.exists(zip_path):
         os.remove(zip_path)
 
     run_command(["ditto", "-c", "-k", "--keepParent", app_path, zip_path])
 
-    # 获取文件大小
     size_mb = os.path.getsize(zip_path) / (1024 * 1024)
     print(f"✅ 安装包: {zip_name} ({size_mb:.1f} MB)")
 
     return zip_path
-
-
-def clean_build():
-    """清理构建产物。"""
-    print("\n--- 清理构建产物 ---")
-    for path in [DIST_PATH, os.path.join(REPO_ROOT, "build")]:
-        if os.path.exists(path):
-            shutil.rmtree(path)
-            print(f"🗑️  已删除: {os.path.relpath(path, REPO_ROOT)}")
 
 
 def main():
@@ -205,11 +176,9 @@ def main():
     parser.add_argument("--clean", action="store_true", help="构建前清理 dist 和 build 目录")
     args = parser.parse_args()
 
-    # 加载配置
     config = load_config()
     version = read_version()
 
-    # 确定架构
     if args.arch:
         arch = args.arch
     else:
@@ -221,11 +190,13 @@ def main():
     print(f"ℹ️  架构: {arch}")
     print(f"ℹ️  签名身份: {config['signing_identity_hash']}")
 
-    # 构建或检查 app
     app_path = os.path.join(DIST_PATH, f"AgentTeam-{version}.app")
 
     if args.clean and not args.skip_build:
-        clean_build()
+        for path in [DIST_PATH, os.path.join(REPO_ROOT, "build")]:
+            if os.path.exists(path):
+                shutil.rmtree(path)
+                print(f"🗑️  已删除: {os.path.relpath(path, REPO_ROOT)}")
 
     if args.skip_build:
         if not os.path.exists(app_path):
@@ -239,18 +210,15 @@ def main():
         print(f"❌ 构建失败，app 不存在: {app_path}", file=sys.stderr)
         sys.exit(1)
 
-    # 签名
     sign_app(app_path, config["signing_identity_hash"])
     verify_signature(app_path)
 
-    # 公证（可选跳过）
     if args.skip_notarize:
         print("\n⚠️  跳过公证步骤")
     else:
         notarize_app(app_path, config)
         staple_app(app_path)
 
-    # 创建 zip
     zip_path = create_zip(app_path, arch, version)
 
     print("\n" + "=" * 50)
