@@ -4,14 +4,41 @@ from service import messageBus
 from service.messageBus import EventBusMessage
 from service import agentService, roomService as chat_room
 from dal.db import gtAgentTaskManager
-from constants import MessageBusTopic, AgentTaskType, SpecialAgent
+from constants import MessageBusTopic, AgentTaskType, SpecialAgent, ScheduleState
 from model.dbModel.gtAgent import GtAgent
+from util import configUtil
 
 logger = logging.getLogger(__name__)
 
+_schedule_state: ScheduleState = ScheduleState.STOPPED
+
+
+def get_schedule_state() -> ScheduleState:
+    return _schedule_state
+
+
 async def startup() -> None:
-    """初始化调度器。"""
+    """初始化调度器，订阅事件。需在 team 恢复完成后手动调用 start_schedule() 开启调度。"""
     messageBus.subscribe(MessageBusTopic.ROOM_STATUS_CHANGED, _on_room_status_changed)
+
+
+async def start_schedule() -> None:
+    """检查前置条件并尝试开启调度。成功切到 RUNNING 并激活所有 team，否则切到 BLOCKED。"""
+    global _schedule_state
+    if configUtil.is_initialized():
+        _schedule_state = ScheduleState.RUNNING
+        logger.info("调度闸门已开启: state=%s", _schedule_state.value)
+        await start_scheduling(team_name=None)
+    else:
+        _schedule_state = ScheduleState.BLOCKED
+        logger.info("调度闸门已阻塞（未配置 LLM）: state=%s", _schedule_state.value)
+
+
+def stop_schedule() -> None:
+    """显式停止调度。"""
+    global _schedule_state
+    _schedule_state = ScheduleState.STOPPED
+    logger.info("调度闸门已停止: state=%s", _schedule_state.value)
 
 
 def stop_agent_task(agent_id: int) -> None:
@@ -26,6 +53,9 @@ def stop_agent_task(agent_id: int) -> None:
 async def _on_room_status_changed(msg: EventBusMessage) -> None:
     """订阅 ROOM_STATUS_CHANGED：need_scheduling=True 时创建任务记录并在需要时启动消费协程。"""
     if not msg.payload["need_scheduling"]:
+        return
+
+    if _schedule_state != ScheduleState.RUNNING:
         return
 
     gt_agent: GtAgent = msg.payload["current_turn_agent"]
@@ -53,16 +83,21 @@ async def _on_room_status_changed(msg: EventBusMessage) -> None:
 
 
 async def start_scheduling(team_name: str | None = None) -> None:
-    """统一开始调度入口：激活/重放房间轮次事件。"""
+    """统一开始调度入口：激活/重放房间轮次事件。仅在 RUNNING 状态下执行。"""
+    if _schedule_state != ScheduleState.RUNNING:
+        logger.info("调度闸门未开启，跳过房间激活: state=%s, team=%s", _schedule_state.value, team_name or "ALL")
+        return
     await chat_room.activate_rooms(team_name)
     logger.info("开始调度完成: team=%s", team_name or "ALL")
 
 
 def shutdown() -> None:
     """清空调度状态。"""
+    global _schedule_state
     messageBus.unsubscribe(MessageBusTopic.ROOM_STATUS_CHANGED, _on_room_status_changed)
     for agent in agentService.get_all_agents():
         agent.stop_consumer_task()
+    _schedule_state = ScheduleState.STOPPED
     logger.info("Scheduler 已停止运行")
     for runtime_room in chat_room.get_all_rooms():
         logger.info(f"\n{runtime_room.format_log()}")

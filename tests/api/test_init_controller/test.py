@@ -60,13 +60,14 @@ class TestQuickInit(_ApiServiceCase):
     # ──────── tests ────────
 
     async def test_status_initialized_false_when_empty(self):
-        """空 llm_services 时系统状态应返回 initialized: false。"""
+        """空 llm_services 时系统状态应返回 initialized: false 和 schedule_state。"""
         async with aiohttp.ClientSession() as client:
             data = await self._status(client)
 
         assert data["initialized"] is False
         assert "message" in data
         assert data["message"] == "当前未配置大模型服务"
+        assert "schedule_state" in data
 
     async def test_quick_init_success(self):
         """快速初始化成功保存配置。"""
@@ -120,7 +121,7 @@ class TestQuickInit(_ApiServiceCase):
         assert list_data["default_llm_server"] == "default"
 
     async def test_quick_init_updates_initialized(self):
-        """快速初始化后系统状态变为 initialized: true。"""
+        """快速初始化后系统状态变为 initialized: true，调度状态变为 running。"""
         async with aiohttp.ClientSession() as client:
             # 执行初始化
             await self._quick_init(client, {
@@ -134,6 +135,7 @@ class TestQuickInit(_ApiServiceCase):
 
         assert after["initialized"] is True
         assert after["default_llm_server"] == "default"
+        assert after["schedule_state"] == "running"
 
     async def test_quick_init_invalid_url(self):
         """URL 格式错误返回 400。"""

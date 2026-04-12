@@ -149,6 +149,9 @@ async def main(config_dir: str = None, port: int | None = None):
         )
     logger.info("[启动] 阶段 4/4 完成")
 
+    # ── 调度闸门：根据 LLM 配置状态决定是否开启调度 ──
+    await schedulerService.start_schedule()
+
     web_server = tornado.httpserver.HTTPServer(route.application)
     web_server.listen(bind_port, bind_host)
 
