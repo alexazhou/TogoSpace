@@ -478,6 +478,8 @@ class AgentTurnRunner:
     def _resolve_compact_config(self) -> tuple[str, LlmServiceConfig, int, int]:
         """获取 compact 相关配置：(resolved_model, llm_config, trigger_tokens, hard_limit_tokens)。"""
         llm_config = configUtil.get_app_config().setting.current_llm_service
+        if llm_config is None:
+            raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
         resolved_model = self.gt_agent.model or llm_config.model
         trigger_tokens = compact.calc_compact_trigger_tokens(resolved_model, llm_config)
         hard_limit_tokens = compact.calc_hard_limit_tokens(resolved_model, llm_config)

@@ -137,18 +137,17 @@ class SettingConfig(BaseModel):
         return any(s.enable for s in self.llm_services)
 
     @property
-    def current_llm_service(self) -> LlmServiceConfig:
+    def current_llm_service(self) -> LlmServiceConfig | None:
         enabled_services = [s for s in self.llm_services if s.enable]
         if not enabled_services:
-            raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
+            return None
 
-        active_key = self.default_llm_server or enabled_services[0].name
-        services = {s.name: s for s in enabled_services}
+        if self.default_llm_server:
+            for service in enabled_services:
+                if service.name == self.default_llm_server:
+                    return service
 
-        if active_key not in services:
-            raise ValueError(f"默认 LLM 服务 '{active_key}' 未在 llm_services 中定义或已禁用")
-
-        return services[active_key]
+        return enabled_services[0]
 
     def get_default_team_workdir(self, team_name: str) -> str:
         return os.path.join(self.workspace_root, team_name)
