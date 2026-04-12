@@ -1,4 +1,3 @@
-import asyncio
 import logging
 
 from service import messageBus
@@ -10,12 +9,8 @@ from model.dbModel.gtAgent import GtAgent
 
 logger = logging.getLogger(__name__)
 
-_stop_event: asyncio.Event = asyncio.Event()
-
 async def startup() -> None:
-    """初始化调度器，须在 run() 前调用一次。"""
-    global _stop_event
-    _stop_event = asyncio.Event()
+    """初始化调度器。"""
     messageBus.subscribe(MessageBusTopic.ROOM_STATUS_CHANGED, _on_room_status_changed)
 
 
@@ -57,32 +52,20 @@ async def _on_room_status_changed(msg: EventBusMessage) -> None:
     agent.start_consumer_task()
 
 
-async def run() -> None:
-    """持续运行直到 stop() 被调用。"""
-    await _stop_event.wait()
-
-    logger.info("Scheduler 已停止运行")
-    for runtime_room in chat_room.get_all_rooms():
-        logger.info(f"\n{runtime_room.format_log()}")
-
-
 async def start_scheduling(team_name: str | None = None) -> None:
     """统一开始调度入口：激活/重放房间轮次事件。"""
     await chat_room.activate_rooms(team_name)
     logger.info("开始调度完成: team=%s", team_name or "ALL")
 
 
-def stop() -> None:
-    """通知 run() 退出循环。"""
-    _stop_event.set()
-
-
 def shutdown() -> None:
-    """清空调度状态，强制结束 run()。"""
+    """清空调度状态。"""
     messageBus.unsubscribe(MessageBusTopic.ROOM_STATUS_CHANGED, _on_room_status_changed)
-    stop()
     for agent in agentService.get_all_agents():
         agent.stop_consumer_task()
+    logger.info("Scheduler 已停止运行")
+    for runtime_room in chat_room.get_all_rooms():
+        logger.info(f"\n{runtime_room.format_log()}")
 
 
 def stop_scheduler_team(team_id: int) -> None:
