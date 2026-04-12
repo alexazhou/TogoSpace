@@ -83,7 +83,7 @@ class TestRunToolCall(ServiceTestCase):
 
     async def test_run_tool_call_invalid_json(self):
         """非法 JSON 不应抛异常，应返回可读错误文本。"""
-        result = await self._run("calculate", "not json")
+        result = await self._run("send_chat_msg", "not json")
         assert not result["success"]
 
     async def test_run_tool_call_unknown_function(self):

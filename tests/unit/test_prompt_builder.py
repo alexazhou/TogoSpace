@@ -1,0 +1,53 @@
+import pytest
+
+from service.agentService import promptBuilder
+
+
+@pytest.mark.asyncio
+async def test_build_agent_system_prompt_includes_team_awareness_guide(monkeypatch):
+    async def _build_dept_context(team_id: int, agent_name: str) -> str:
+        assert team_id == 1
+        assert agent_name == "alice"
+        return "---\n组织信息：\n- 所在部门：产品部\n---"
+
+    monkeypatch.setattr(promptBuilder, "_build_dept_context", _build_dept_context)
+
+    result = await promptBuilder.build_agent_system_prompt(
+        team_id=1,
+        agent_name="alice",
+        template_name="pm",
+        template_soul="负责推进项目",
+        base_prompt_tmpl="base prompt",
+        identity_prompt_tmpl="我是 {agent_name}，角色 {template_name}",
+    )
+
+    assert "组织信息" in result
+    assert "get_dept_info" in result
+    assert "get_room_info" in result
+    assert "get_agent_info" in result
+    assert "wake_up_agent" in result
+
+
+@pytest.mark.asyncio
+async def test_build_agent_system_prompt_skips_team_awareness_when_not_in_team(monkeypatch):
+    called = False
+
+    async def _build_dept_context(team_id: int, agent_name: str) -> str:
+        nonlocal called
+        called = True
+        return "should not be used"
+
+    monkeypatch.setattr(promptBuilder, "_build_dept_context", _build_dept_context)
+
+    result = await promptBuilder.build_agent_system_prompt(
+        team_id=0,
+        agent_name="solo",
+        template_name="helper",
+        template_soul="帮助用户完成任务",
+        base_prompt_tmpl="base prompt",
+        identity_prompt_tmpl="我是 {agent_name}，角色 {template_name}",
+    )
+
+    assert called is False
+    assert "get_dept_info" not in result
+    assert "wake_up_agent" not in result
