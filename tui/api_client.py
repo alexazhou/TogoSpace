@@ -14,6 +14,7 @@ class AgentInfo:
     name: str
     model: str
     team_name: str
+    agent_id: int = 0
     status: str = "idle"  # "active" | "idle" | "failed"
 
 
@@ -65,6 +66,12 @@ class ApiClient:
             self._session = aiohttp.ClientSession()
         return self._session
 
+    async def get_system_status(self) -> dict:
+        session = self._get_session()
+        async with session.get(f"{self._base_url}/system/status.json") as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
     async def get_agents(self, team_id: int | None = None) -> list[AgentInfo]:
         session = self._get_session()
         params: dict[str, str] | None = None
@@ -76,8 +83,9 @@ class ApiClient:
         return [
             AgentInfo(
                 name=a["name"],
-                model=a["model"],
+                model=a.get("model", ""),
                 team_name=a.get("team_name", ""),
+                agent_id=a.get("id", 0),
                 status=a.get("status", "idle"),
             )
             for a in data["agents"]
@@ -95,18 +103,25 @@ class ApiClient:
         async with session.get(f"{self._base_url}/rooms/list.json") as resp:
             resp.raise_for_status()
             data = await resp.json()
-        return [
-            RoomInfo(
-                room_id=r["room_id"],
-                room_key=r["room_key"],
-                room_name=r["room_name"],
+        result: list[RoomInfo] = []
+        for r in data["rooms"]:
+            gt = r.get("gt_room", {})
+            room_id = gt.get("id") or r.get("room_id")
+            room_name = gt.get("name") or r.get("room_name", "")
+            team_id = gt.get("team_id")
+            room_type = (gt.get("type") or r.get("room_type", "group") or "group").lower()
+            room_key = r.get("room_key") or f"{team_id}_{room_id}"
+            members = r.get("agents") or r.get("members", [])
+            result.append(RoomInfo(
+                room_id=room_id,
+                room_key=room_key,
+                room_name=room_name,
                 team_name=r.get("team_name", ""),
-                room_type=(r.get("room_type", "group") or "group").lower(),
-                state=r["state"],
-                members=r["members"],
-            )
-            for r in data["rooms"]
-        ]
+                room_type=room_type,
+                state=r.get("state", "IDLE"),
+                members=members,
+            ))
+        return result
 
     async def get_room_members(self, team_id: int, room_id: int) -> list[str]:
         session = self._get_session()
@@ -115,7 +130,7 @@ class ApiClient:
                 raise ValueError(f"Room members not found: team_id={team_id}, room_id={room_id}")
             resp.raise_for_status()
             data = await resp.json()
-        members = data.get("members", [])
+        members = data.get("members") or data.get("agent_ids", [])
         return [str(m) for m in members]
 
     async def get_room_messages(self, room_id: int) -> list[MessageInfo]:
