@@ -560,6 +560,7 @@ class ChatRoom:
             },
             "team_name": self.team_name,
             "state": self._state.name,
+            "need_scheduling": self._state == RoomState.SCHEDULING,
             "current_turn_agent": self._build_current_turn_agent_dict(),
             "agents": list(self.agents),
         }

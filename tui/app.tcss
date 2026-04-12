@@ -211,3 +211,9 @@ StatusBar {
     padding: 0 2;
     color: #7f91a4;
 }
+
+.working-indicator {
+    padding: 0 1;
+    color: #7f91a4;
+    height: 1;
+}
