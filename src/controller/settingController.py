@@ -152,7 +152,7 @@ class LlmServiceModifyHandler(BaseHandler):
         configUtil.update_setting(mutator)
 
         if not configUtil.is_initialized():
-            schedulerService.stop_schedule()
+            schedulerService.stop_schedule("无可用的大模型服务")
 
         self.return_json({"status": "ok"})
 
@@ -176,9 +176,9 @@ class LlmServiceDeleteHandler(BaseHandler):
 
         configUtil.update_setting(mutator)
 
-        # 删除服务后检查：若无可用 LLM 服务，停止调度
+        # 删除服务后检查：若无可用 LLM 服务，阻塞调度
         if not configUtil.is_initialized():
-            schedulerService.stop_schedule()
+            schedulerService.stop_schedule("无可用的大模型服务")
 
         self.return_json({"status": "ok", "deleted_name": service.name})
 

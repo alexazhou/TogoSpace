@@ -11,10 +11,25 @@ from util import configUtil
 logger = logging.getLogger(__name__)
 
 _schedule_state: ScheduleState = ScheduleState.STOPPED
+_schedule_not_running_reason: str = ""  # 调度未运行原因，仅在非 RUNNING 状态时可能有值
 
 
 def get_schedule_state() -> ScheduleState:
     return _schedule_state
+
+
+def get_schedule_not_running_reason() -> str:
+    """获取调度未运行原因，仅在非 RUNNING 状态时可能有值。"""
+    return _schedule_not_running_reason
+
+
+def _publish_state_change() -> None:
+    """发布调度状态变更事件。"""
+    messageBus.publish(
+        MessageBusTopic.SCHEDULE_STATE_CHANGED,
+        schedule_state=_schedule_state.value,
+        not_running_reason=_schedule_not_running_reason,
+    )
 
 
 async def startup() -> None:
@@ -24,21 +39,31 @@ async def startup() -> None:
 
 async def start_schedule() -> None:
     """检查前置条件并尝试开启调度。成功切到 RUNNING 并激活所有 team，否则切到 BLOCKED。"""
-    global _schedule_state
+    global _schedule_state, _schedule_not_running_reason
     if configUtil.is_initialized():
         _schedule_state = ScheduleState.RUNNING
+        _schedule_not_running_reason = ""
         logger.info("调度闸门已开启: state=%s", _schedule_state.value)
+        _publish_state_change()
         await start_scheduling(team_name=None)
     else:
         _schedule_state = ScheduleState.BLOCKED
-        logger.info("调度闸门已阻塞（未配置 LLM）: state=%s", _schedule_state.value)
+        _schedule_not_running_reason = "未配置大模型服务"
+        logger.info("调度闸门已阻塞: state=%s, reason=%s", _schedule_state.value, _schedule_not_running_reason)
+        _publish_state_change()
 
 
-def stop_schedule() -> None:
-    """显式停止调度。"""
-    global _schedule_state
-    _schedule_state = ScheduleState.STOPPED
-    logger.info("调度闸门已停止: state=%s", _schedule_state.value)
+def stop_schedule(reason: str = "") -> None:
+    """显式停止调度。
+
+    Args:
+        reason: 停止/阻塞原因，可选。
+    """
+    global _schedule_state, _schedule_not_running_reason
+    _schedule_state = ScheduleState.BLOCKED if reason else ScheduleState.STOPPED
+    _schedule_not_running_reason = reason
+    logger.info("调度闸门已停止/阻塞: state=%s, reason=%s", _schedule_state.value, _schedule_not_running_reason)
+    _publish_state_change()
 
 
 def stop_agent_task(agent_id: int) -> None:
@@ -93,11 +118,12 @@ async def start_scheduling(team_name: str | None = None) -> None:
 
 def shutdown() -> None:
     """清空调度状态。"""
-    global _schedule_state
+    global _schedule_state, _schedule_not_running_reason
     messageBus.unsubscribe(MessageBusTopic.ROOM_STATUS_CHANGED, _on_room_status_changed)
     for agent in agentService.get_all_agents():
         agent.stop_consumer_task()
     _schedule_state = ScheduleState.STOPPED
+    _schedule_not_running_reason = ""
     logger.info("Scheduler 已停止运行")
     for runtime_room in chat_room.get_all_rooms():
         logger.info(f"\n{runtime_room.format_log()}")
