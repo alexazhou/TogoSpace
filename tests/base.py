@@ -448,6 +448,9 @@ class ServiceTestCase:
         if cls._backend_config_dir:
             env["TEAMAGENT_PRESET_DIR"] = cls._backend_config_dir
 
+        if cls.requires_mock_llm:
+            env["TEAMAGENT_MOCK_LLM_PORT"] = str(_get_mock_llm_port())
+
         cmd = [sys.executable, os.path.join(_SRC_DIR, "backend_main.py"), "--port", str(port)]
         if cls._backend_config_dir:
             cmd += ["--config-dir", cls._backend_config_dir]
