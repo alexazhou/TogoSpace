@@ -12,6 +12,7 @@ _WS_TOPICS = [
     MessageBusTopic.ROOM_STATUS_CHANGED,
     MessageBusTopic.AGENT_STATUS_CHANGED,
     MessageBusTopic.AGENT_ACTIVITY_CHANGED,
+    MessageBusTopic.SCHEDULE_STATE_CHANGED,
 ]
 
 
@@ -37,6 +38,8 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
             payload["event"] = "agent_status"
         if msg.topic == MessageBusTopic.AGENT_ACTIVITY_CHANGED:
             payload["event"] = "agent_activity"
+        if msg.topic == MessageBusTopic.SCHEDULE_STATE_CHANGED:
+            payload["event"] = "schedule_state"
         logger.info(f"[ws] event: topic={msg.topic.name}, payload={payload}")
         asyncio.get_event_loop().create_task(self._send(jsonUtil.json_dump(payload)))
 

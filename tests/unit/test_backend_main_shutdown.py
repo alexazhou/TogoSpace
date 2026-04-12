@@ -67,6 +67,7 @@ async def test_main_waits_for_shutdown_event_and_runs_cleanup(monkeypatch):
     monkeypatch.setattr(backend_main, "_remove_pid", lambda: cleanup_calls.append("remove_pid"))
     monkeypatch.setattr(backend_main.llmApiUtil, "init", lambda: None)
     monkeypatch.setattr(backend_main.configUtil, "load", lambda config_dir=None: fake_app_config)
+    monkeypatch.setattr(backend_main.configUtil, "is_initialized", lambda: True)
     monkeypatch.setattr(backend_main.gtTeamManager, "get_all_teams", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         backend_main.tornado.httpserver,

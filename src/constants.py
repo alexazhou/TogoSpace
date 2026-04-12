@@ -71,6 +71,7 @@ class MessageBusTopic(EnhanceEnum):
     ROOM_STATUS_CHANGED = auto()       # 房间状态/发言人变更；payload: gt_room(GtRoom), state(RoomState), current_turn_agent(GtAgent|None), need_scheduling(bool)
     AGENT_STATUS_CHANGED = auto()      # Agent 忙闲状态变更；payload: gt_agent(GtAgent), status(AgentStatus)
     AGENT_ACTIVITY_CHANGED = auto()    # Agent 活动记录变更；payload: event, data
+    SCHEDULE_STATE_CHANGED = auto()    # 调度闸门状态变更；payload: schedule_state(str)
 
 
 class RoomType(EnhanceEnum):
