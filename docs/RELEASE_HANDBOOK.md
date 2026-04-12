@@ -76,6 +76,12 @@ CI 仅构建 arm64，x86_64 需本地构建并上传。
 }
 ```
 
+补充说明：
+
+- 如果在 Codex 中执行签名相关命令，需要申请提权运行。
+- 原因是沙盒环境下通常无法访问登录钥匙串中的 codesign identity，像 `security find-identity -v -p codesigning` 可能会错误显示 `0 valid identities found`。
+- 因此，`python scripts/build_release.py ...`、`codesign ...`、`security find-identity ...` 这类命令在 Codex 中都应优先按提权命令执行。
+
 ### 3.2 执行构建脚本
 
 ```bash
