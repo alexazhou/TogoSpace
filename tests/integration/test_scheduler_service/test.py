@@ -67,15 +67,19 @@ class TestSchedulerRun(ServiceTestCase):
         # 清理可能残留的 scheduler 状态，避免测试间污染
         scheduler.shutdown()
 
-    async def test_scheduler_run_terminates_on_stop(self, monkeypatch):
-        """调用 scheduler.shutdown() 后，scheduler.run() 应正常结束。"""
+    async def test_scheduler_shutdown_stops_all_agent_consumer_tasks(self, monkeypatch):
+        """调用 scheduler.shutdown() 后，应停止所有 Agent 的消费协程。"""
+        alice = _make_mock_agent("alice")
+        bob = _make_mock_agent("bob", agent_id=2)
         await roomService.startup()
         _patch_scheduler_teams(monkeypatch)
         await scheduler.startup()
-        run_task = asyncio.create_task(scheduler.run())
-        await asyncio.sleep(0.1)
-        scheduler.shutdown()
-        await asyncio.wait_for(run_task, timeout=2.0)
+
+        with patch("service.schedulerService.agentService.get_all_agents", return_value=[alice, bob]):
+            scheduler.shutdown()
+
+        alice.stop_consumer_task.assert_called_once_with()
+        bob.stop_consumer_task.assert_called_once_with()
 
     async def test_scheduler_runs_agent_on_turn_event(self, monkeypatch):
         """收到 need_scheduling=True 的事件后，scheduler 应触发 Agent 启动消费协程。"""
@@ -108,8 +112,6 @@ class TestSchedulerRun(ServiceTestCase):
                 task_data={"room_id": room.room_id},
             ))
             mock_task_manager.has_pending_room_task = AsyncMock(return_value=False)
-            run_task = asyncio.create_task(scheduler.run())
-
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_STATUS_CHANGED,
                 payload=_make_scheduling_payload(room, alice.gt_agent),
@@ -120,9 +122,6 @@ class TestSchedulerRun(ServiceTestCase):
             await asyncio.sleep(0.5)
 
             alice.start_consumer_task.assert_called_once_with()
-
-            scheduler.shutdown()
-            await asyncio.wait_for(run_task, timeout=2.0)
 
     async def test_agent_is_active_based_on_status_and_current_db_task(self):
         """验证 Agent 活跃状态：基于 status 或 current_db_task。"""

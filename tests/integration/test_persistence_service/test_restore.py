@@ -1,4 +1,3 @@
-import asyncio
 import os
 import sys
 
@@ -75,8 +74,6 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
             return self.normalize_to_mock({"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "hello"}}]})
 
         with self.patch_infer(handler=fake_infer):
-            run_task = asyncio.create_task(scheduler.run())
-            await asyncio.sleep(0)
             agent_messages = [m for m in room.messages if m.sender_id != room.SYSTEM_MEMBER_ID]
             assert len(agent_messages) == 0
 
@@ -86,8 +83,6 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
                 timeout=2.0,
                 message="房间激活后未在限时内收到 Agent 回复",
             )
-            scheduler.shutdown()
-            await asyncio.wait_for(run_task, timeout=2.0)
 
         agent_messages = [m for m in room.messages if m.sender_id != room.SYSTEM_MEMBER_ID]
         assert len(agent_messages) >= 1
@@ -108,7 +103,6 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
             return self.normalize_to_mock(res)
 
         with self.patch_infer(handler=fake_infer):
-            run_task = asyncio.create_task(scheduler.run())
             await room.activate_scheduling()
             await self.wait_until(
                 lambda: any(m.content == "from alice" for m in room.messages)
@@ -116,8 +110,6 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
                 timeout=2.0,
                 message="恢复前的对话未在限时内完成",
             )
-            scheduler.shutdown()
-            await asyncio.wait_for(run_task, timeout=2.0)
 
         assert any(m.content == "from alice" for m in room.messages)
         assert any(m.content == "from bob" for m in room.messages)
