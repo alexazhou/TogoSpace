@@ -58,7 +58,7 @@
 ### 七、TUI 兼容
 
 - **状态查询**：TUI 前端通过系统状态接口（`/system/status.json`）查询初始化状态。
-- **提示信息**：未初始化时，TUI 显示提示信息："当前未配置大模型服务，请手动编辑 `~/.team_agent/setting.json` 或通过 Web Console 完成配置"。
+- **提示信息**：未初始化时，TUI 显示提示信息："当前未配置大模型服务，请手动编辑 `~/.togo_agent/setting.json` 或通过 Web Console 完成配置"。
 - **不阻塞启动**：TUI 可正常启动和展示界面，但无法执行 Agent 推理任务。
 
 ---
@@ -167,7 +167,7 @@
 │ ⚠ 当前未配置大模型服务                       │
 │                                             │
 │ 请通过以下方式完成配置：                      │
-│ 1. 手动编辑 ~/.team_agent/setting.json      │
+│ 1. 手动编辑 ~/.togo_agent/setting.json      │
 │ 2. 通过 Web Console 完成配置                 │
 │                                             │
 │ Web Console 地址：http://127.0.0.1:8080     │

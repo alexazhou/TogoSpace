@@ -1,4 +1,4 @@
-# TeamAgent 国际化（i18n）设计方案
+# TogoAgent 国际化（i18n）设计方案
 
 > 文档版本：v1.0
 > 创建日期：2026-04-10
@@ -6,7 +6,7 @@
 
 ## 1. 背景与目标
 
-TeamAgent 项目需要添加国际化支持，主要目标：
+TogoAgent 项目需要添加国际化支持，主要目标：
 
 1. **初期支持英文**：为国际用户提供英文界面
 2. **保留扩展空间**：后续可支持日文、韩文等其他语言
@@ -429,7 +429,7 @@ function toggleLocale() {
 
 ### 6.1 后端验证
 
-1. 修改 `~/.team_agent/setting.json`：`{"locale": "en"}`
+1. 修改 `~/.togo_agent/setting.json`：`{"locale": "en"}`
 2. 启动后端：`./scripts/start_backend.sh`
 3. 调用 API 触发错误（如请求不存在的 team）
 4. 验证 `error_desc` 返回英文消息

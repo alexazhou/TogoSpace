@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-macOS 打包脚本：构建 AgentTeam.app
+macOS 打包脚本：构建 TogoAgent.app
 
 步骤：
   1. 读取后端版本号（src/version.py）
@@ -24,7 +24,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT  = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 DIST_PATH  = os.path.join(REPO_ROOT, "dist")
 BUILD_PATH = os.path.join(REPO_ROOT, "build")
-SPEC_FILE  = os.path.join(SCRIPT_DIR, "agent_team.spec")
+SPEC_FILE  = os.path.join(SCRIPT_DIR, "togo_agent.spec")
 
 
 # ── 版本读取 ──────────────────────────────────────────────────────────────────
@@ -101,11 +101,11 @@ def _run_pyinstaller():
 
 
 def _rename_app(version: str):
-    original = os.path.join(DIST_PATH, "AgentTeam.app")
-    final    = os.path.join(DIST_PATH, f"AgentTeam-{version}.app")
+    original = os.path.join(DIST_PATH, "TogoAgent.app")
+    final    = os.path.join(DIST_PATH, f"TogoAgent-{version}.app")
     if os.path.exists(original):
         os.rename(original, final)
-        print(f"✅ 产物：dist/AgentTeam-{version}.app")
+        print(f"✅ 产物：dist/TogoAgent-{version}.app")
     else:
         print(f"❌ 未找到 {original}")
         sys.exit(1)

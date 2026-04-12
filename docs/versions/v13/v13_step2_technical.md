@@ -260,7 +260,7 @@ TUI 启动时通过系统状态接口查询初始化状态：
 │ ⚠ 当前未配置大模型服务                       │
 │                                             │
 │ 请通过以下方式完成配置：                      │
-│ 1. 手动编辑 ~/.team_agent/setting.json      │
+│ 1. 手动编辑 ~/.togo_agent/setting.json      │
 │ 2. 通过 Web Console 完成配置                 │
 │                                             │
 │ Web Console 地址：http://127.0.0.1:8080     │

@@ -20,7 +20,7 @@ LLM 推理返回 tool_call
         │
         ├── get_dept_info()   ──> deptService.get_dept_tree() / gtDeptManager
         ├── get_room_info()   ──> roomService (内存 ChatRoom)
-        ├── get_agent_info()  ──> agentService.get_team_agents() + deptService
+        ├── get_agent_info()  ──> agentService.get.togo_agents() + deptService
         └── wake_up_agent()   ──> agentService.get_agent() + agent.resume_failed()
 ```
 
@@ -44,7 +44,7 @@ LLM 推理返回 tool_call
 |------|--------|---------|
 | `get_dept_info` | 部门树（DB） | `deptService.get_dept_tree(team_id)` |
 | `get_room_info` | 内存 ChatRoom | `roomService.get_team_rooms(team_id)` / `roomService.get_room(room_id)` |
-| `get_agent_info` | 内存 Agent + DB 部门 | `agentService.get_team_agents(team_id)` + `deptService.get_agent_dept()` |
+| `get_agent_info` | 内存 Agent + DB 部门 | `agentService.get.togo_agents(team_id)` + `deptService.get_agent_dept()` |
 | `wake_up_agent` | 内存 Agent | `agentService.get_agent(id)` → `agent.resume_failed()` |
 
 ### 2.2 get_dept_info
@@ -66,11 +66,11 @@ async def get_dept_info(dept_id: Optional[int] = None, _context: ToolCallContext
 4. 若 `dept_id` 非 None，递归查找目标节点；找不到时返回 `success: false`
 5. 部门节点序列化包含：`dept_id`、`dept_name`、`dept_responsibility`、`manager`（名称）、`members`（名称列表）、`member_count`、`children`
 
-Agent ID 到名称的映射：工具函数需要将 `dept.agent_ids` 和 `dept.manager_id` 转为 Agent 名称。通过 `agentService.get_team_agents(team_id)` 获取 Agent 列表，建立 `id -> name` 映射表。
+Agent ID 到名称的映射：工具函数需要将 `dept.agent_ids` 和 `dept.manager_id` 转为 Agent 名称。通过 `agentService.get.togo_agents(team_id)` 获取 Agent 列表，建立 `id -> name` 映射表。
 
 ```python
-team_agents = agentService.get_team_agents(team_id)
-id_to_name = {a.gt_agent.id: a.gt_agent.name for a in team_agents}
+team_agents = agentService.get.togo_agents(team_id)
+id_to_name = {a.gt_agent.id: a.gt_agent.name for a in.togo_agents}
 ```
 
 辅助函数 `_serialize_dept_node(node, id_to_name)` 递归序列化部门节点：
@@ -122,7 +122,7 @@ async def get_agent_info(agent_name: Optional[str] = None, _context: ToolCallCon
 
 实现要点：
 
-1. 通过 `agentService.get_team_agents(team_id)` 获取同 Team 所有内存 Agent
+1. 通过 `agentService.get.togo_agents(team_id)` 获取同 Team 所有内存 Agent
 2. **列表模式**：遍历所有 Agent，返回 `name`、`status`（`agent.status.name`）、`department`（部门名称）；`FAILED` 状态额外返回 `error_summary`
 3. **详情模式**：按名称匹配 Agent，额外返回 `role`（manager/member）、`rooms`（所在房间名称列表）；`FAILED` 时返回 `error_summary` 和 `can_wake_up: true`
 4. Agent 不存在时返回 `success: false`
@@ -148,13 +148,13 @@ async def wake_up_agent(agent_name: str, _context: ToolCallContext = None) -> di
 
 实现要点：
 
-1. 通过 `agentService.get_team_agents(team_id)` 按名称查找目标 Agent
+1. 通过 `agentService.get.togo_agents(team_id)` 按名称查找目标 Agent
 2. Agent 不存在：返回 `success: false`
 3. Agent 状态不是 `FAILED`：返回 `success: false`，附带当前状态说明
 4. 调用 `agent.resume_failed()`
 5. 成功后返回 `success: true`
 
-**异常处理**：`resume_failed()` 内部使用 `assertUtil` 断言，若断言失败会抛出 `TeamAgentException`。工具函数需 catch 该异常并转为 `success: false` 返回，避免异常传播到 `funcToolService.run_tool_call()` 的通用 catch 块（通用 catch 的错误信息格式不够友好）。
+**异常处理**：`resume_failed()` 内部使用 `assertUtil` 断言，若断言失败会抛出 `TogoAgentException`。工具函数需 catch 该异常并转为 `success: false` 返回，避免异常传播到 `funcToolService.run_tool_call()` 的通用 catch 块（通用 catch 的错误信息格式不够友好）。
 
 ```python
 try:
@@ -335,7 +335,7 @@ V14 工具为纯 service 层函数调用，使用**单元测试**（`tests/unit/
 ### 7.4 Mock 策略
 
 - Mock `deptService.get_dept_tree()` 返回预构建的 GtDept 树
-- Mock `agentService.get_team_agents()` 返回预构建的 Agent 列表
+- Mock `agentService.get.togo_agents()` 返回预构建的 Agent 列表
 - Mock `roomService` 相关函数返回预构建的 ChatRoom
 - Mock `gtAgentTaskManager.get_first_unfinish_task()` 返回含 error_message 的 task
 - Mock `agent.resume_failed()` 验证被调用

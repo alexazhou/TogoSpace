@@ -19,7 +19,7 @@ _cached_preset_dir: str | None = None
 
 
 def _resolve_config_dir(config_dir: str | None) -> str:
-    base = config_dir or os.path.expanduser("~/.team_agent")
+    base = config_dir or os.path.expanduser("~/.togo_agent")
     return os.path.abspath(base)
 
 

@@ -1,4 +1,4 @@
-# Agent Team
+# TogoAgent
 
 ## 项目概述
 
@@ -15,7 +15,7 @@
 ## 仓库结构（当前）
 
 ```text
-agent_team/
+TogoAgent/
 ├── src/                 # 后端
 ├── tui/                 # 终端前端（Textual）
 ├── frontend/            # Web 前端（Vue 3 + Vite + TypeScript，Git Submodule）
@@ -128,7 +128,7 @@ frontend/
 - `_check_compact(...)` 会在两处触发：
   - 推理请求发起前，基于估算 token 执行 `pre-check`
   - assistant 响应成功写入 history 之后，基于实际 `usage.prompt_tokens` 优先执行 `post-check`
-- `pre-check`、`post-check`、overflow retry 中的 compact 一旦失败，当前实现都会直接抛异常；不要再按“失败后继续推理”的旧语义修改代码或补测试。
+- `pre-check`、`post-check`、overflow retry 中的 compact 一旦失败，当前实现都会直接抛异常；不要再按"失败后继续推理"的旧语义修改代码或补测试。
 - `agent_histories.usage` 中用 `compact_stage` 记录本轮 compact 阶段，取值为 `none`、`pre`、`post`：
   - `none`：本轮未触发 compact
   - `pre`：请求发出前触发了 compact
@@ -155,10 +155,10 @@ frontend/
 
 ```bash
 # 前台运行
-.venv/bin/python3 tui/tui_main.py [--base-url http://127.0.0.1:8080] [--config ~/.team_agent/setting.json]
+.venv/bin/python3 tui/tui_main.py [--base-url http://127.0.0.1:8080] [--config ~/.togo_agent/setting.json]
 
 # 或使用脚本
-./scripts/start_tui.sh [--base-url http://127.0.0.1:8080] [--config ~/.team_agent/setting.json]
+./scripts/start_tui.sh [--base-url http://127.0.0.1:8080] [--config ~/.togo_agent/setting.json]
 
 # 停止
 ./scripts/stop_tui.sh
@@ -230,10 +230,10 @@ VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 | 类别 | 内容 | 路径 | 版本控制 |
 |------|------|------|----------|
 | **preset**（预置内容） | RoleTemplate / Team | `preset/role_templates/*.json`、`preset/teams/*.json` | 是，随源码提交 |
-| **config**（运行配置） | LLM 服务、API key、persistence 等 | `~/.team_agent/setting.json` | 否，用户私有 |
+| **config**（运行配置） | LLM 服务、API key、persistence 等 | `~/.togo_agent/setting.json` | 否，用户私有 |
 
 - `preset/` 固定由代码自动查找，不可通过参数指定。
-- 运行配置默认读取 `~/.team_agent/setting.json`；可用 `--config-dir <dir>` 指定其他目录（目录下需有 `setting.json`）。
+- 运行配置默认读取 `~/.togo_agent/setting.json`；可用 `--config-dir <dir>` 指定其他目录（目录下需有 `setting.json`）。
 
 ## 前端仓库说明（双前端）
 
