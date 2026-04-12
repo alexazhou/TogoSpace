@@ -6,7 +6,7 @@
   "llm_services": [
     {
       "name": "qwen",
-      "enable": true,
+      "enable": false,
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "api_key": "YOUR_API_KEY_HERE",
       "type": "openai-compatible",
