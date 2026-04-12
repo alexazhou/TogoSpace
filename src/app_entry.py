@@ -56,6 +56,11 @@ def _run_backend() -> None:
 # ── 图标 & 菜单 ───────────────────────────────────────────────────────────────
 
 def _make_icon() -> Image.Image:
+    import os
+    icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icons", "togo_status_32.png")
+    if os.path.exists(icon_path):
+        return Image.open(icon_path)
+    
     img = Image.new("RGBA", (22, 22), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     draw.rectangle((4, 6,  18, 8),  fill=(0, 0, 0, 255))
