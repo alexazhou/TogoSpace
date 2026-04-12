@@ -3,14 +3,13 @@
 macOS 打包脚本：构建 AgentTeam.app
 
 步骤：
-  1. 版本一致性检查（前端 package.json vs 后端 version.py）
+  1. 读取后端版本号（src/version.py）
   2. 前端构建（npm run build）
   3. 同步前端产物到 assets/frontend/
   4. PyInstaller 打包
   5. 重命名产物为带版本号的 .app
 """
 
-import json
 import os
 import re
 import shutil
@@ -40,17 +39,6 @@ def _read_backend_version() -> str:
     return m.group(1)
 
 
-def _read_frontend_version() -> str:
-    path = os.path.join(REPO_ROOT, "frontend", "package.json")
-    with open(path) as f:
-        data = json.load(f)
-    version = data.get("version", "")
-    if not version:
-        print("❌ 无法从 frontend/package.json 读取版本号")
-        sys.exit(1)
-    return version
-
-
 # ── 前端构建 ──────────────────────────────────────────────────────────────────
 
 def _build_frontend():
@@ -58,6 +46,23 @@ def _build_frontend():
     print("✳️  构建前端...")
     subprocess.run(["npm", "run", "build"], cwd=frontend_dir, check=True)
     print("✅ 前端构建完成")
+
+
+def _assert_frontend_submodule_clean():
+    frontend_dir = os.path.join(REPO_ROOT, "frontend")
+    result = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=frontend_dir,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    dirty_lines = [line for line in result.stdout.splitlines() if line.strip()]
+    if dirty_lines:
+        print("❌ 前端子模块存在已跟踪文件的未提交改动，请先提交或还原后再打包：", file=sys.stderr)
+        for line in dirty_lines:
+            print(f"   {line}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _sync_frontend():
@@ -109,18 +114,11 @@ def _rename_app(version: str):
 # ── 主流程 ────────────────────────────────────────────────────────────────────
 
 def main():
-    backend_ver  = _read_backend_version()
-    frontend_ver = _read_frontend_version()
+    backend_ver = _read_backend_version()
 
-    print(f"ℹ️  后端版本：{backend_ver}")
-    print(f"ℹ️  前端版本：{frontend_ver}")
+    print(f"ℹ️  版本：{backend_ver}")
 
-    if backend_ver != frontend_ver:
-        print(f"❌ 版本不一致：后端 {backend_ver} ≠ 前端 {frontend_ver}，请先对齐版本号")
-        sys.exit(1)
-
-    print(f"✅ 版本一致：v{backend_ver}")
-
+    _assert_frontend_submodule_clean()
     _build_frontend()
     _sync_frontend()
     _clean()

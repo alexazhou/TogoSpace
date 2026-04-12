@@ -1,47 +1,22 @@
 # AgentTeam 版本发布手册
 
-本文档描述发布新版本的完整流程。
+本文档描述发布新版本的最小流程。
 
 ## 1. 更新版本号
 
-需要同时更新两个位置的版本号：
-
-### 1.1 后端版本号
+只需要更新后端版本号。构建产物、桌面端展示和发布包名称均以该版本号为准。
 
 编辑 `src/version.py`：
+
 ```python
 __version__ = "0.1.7"  # 替换为新版本号
 ```
 
-### 1.2 前端版本号
-
-编辑 `frontend/package.json`：
-```json
-{
-  "name": "team-agent-frontend",
-  "version": "0.1.7",  // 替换为新版本号
-  ...
-}
-```
-
-### 1.3 提交版本号更新
+提交版本号更新：
 
 ```bash
-# 主仓库
 git add src/version.py
 git commit -m "chore: bump version to 0.1.7"
-
-# 前端子仓库
-cd frontend
-git add package.json
-git commit -m "chore: bump version to 0.1.7"
-git push
-cd ..
-
-# 更新主仓库的 submodule 引用
-git add frontend
-git commit -m "chore: update frontend submodule to v0.1.7"
-
 git push origin master
 ```
 
@@ -117,15 +92,8 @@ gh release view v0.1.7
 ```bash
 # 1. 更新版本号
 vim src/version.py                    # 改为 0.1.7
-vim frontend/package.json             # 改为 0.1.7
 
-cd frontend
-git add package.json
-git commit -m "chore: bump version to 0.1.7"
-git push
-cd ..
-
-git add src/version.py frontend
+git add src/version.py
 git commit -m "chore: bump version to 0.1.7"
 git push origin master
 
