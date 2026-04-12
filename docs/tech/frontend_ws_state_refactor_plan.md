@@ -40,7 +40,7 @@
 
 当前问题：
 
-- [frontend/src/pages/ConsolePage.vue](/Volumes/PDATA/GitDB/TeamAgent/frontend/src/pages/ConsolePage.vue) 体量过大
+- [frontend/src/pages/ConsolePage.vue](/Volumes/PDATA/GitDB/TogoAgent/frontend/src/pages/ConsolePage.vue) 体量过大
 - 页面里同时混合：
   - 路由逻辑
   - 房间/消息加载
@@ -59,7 +59,7 @@
 
 当前问题：
 
-- [frontend/src/components/AgentActivityDialog.vue](/Volumes/PDATA/GitDB/TeamAgent/frontend/src/components/AgentActivityDialog.vue) 已经是大型组件
+- [frontend/src/components/AgentActivityDialog.vue](/Volumes/PDATA/GitDB/TogoAgent/frontend/src/components/AgentActivityDialog.vue) 已经是大型组件
 - 同时承担：
   - 详情拉取
   - 活动列表拉取
@@ -78,7 +78,7 @@
 
 当前问题：
 
-- [frontend/src/pages/SettingsPage.vue](/Volumes/PDATA/GitDB/TeamAgent/frontend/src/pages/SettingsPage.vue) 体量过大
+- [frontend/src/pages/SettingsPage.vue](/Volumes/PDATA/GitDB/TogoAgent/frontend/src/pages/SettingsPage.vue) 体量过大
 - 团队概览、团队详情、目录信息、确认弹窗、路由切换都压在同一页里
 
 目标方向：
@@ -90,7 +90,7 @@
 
 当前问题：
 
-- [frontend/src/api.ts](/Volumes/PDATA/GitDB/TeamAgent/frontend/src/api.ts) 中直接调用全局 toast
+- [frontend/src/api.ts](/Volumes/PDATA/GitDB/TogoAgent/frontend/src/api.ts) 中直接调用全局 toast
 - API 层现在同时承担：
   - 请求发送
   - 错误解析
@@ -105,8 +105,8 @@
 
 当前问题：
 
-- [frontend/src/appUiState.ts](/Volumes/PDATA/GitDB/TeamAgent/frontend/src/appUiState.ts) 维护一部分全局状态
-- [frontend/src/teamStore.ts](/Volumes/PDATA/GitDB/TeamAgent/frontend/src/teamStore.ts) 维护另一部分全局状态
+- [frontend/src/appUiState.ts](/Volumes/PDATA/GitDB/TogoAgent/frontend/src/appUiState.ts) 维护一部分全局状态
+- [frontend/src/teamStore.ts](/Volumes/PDATA/GitDB/TogoAgent/frontend/src/teamStore.ts) 维护另一部分全局状态
 - 页面内部还有一些“事实状态”保存在局部
 - 状态来源分散，后续会越来越难追踪
 
@@ -132,7 +132,7 @@
 
 当前问题：
 
-- [frontend/package.json](/Volumes/PDATA/GitDB/TeamAgent/frontend/package.json) 目前只有 `dev/build/preview`
+- [frontend/package.json](/Volumes/PDATA/GitDB/TogoAgent/frontend/package.json) 目前只有 `dev/build/preview`
 - 没有 lint
 - 没有前端测试
 
