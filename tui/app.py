@@ -66,9 +66,28 @@ class WatcherApp(App):
 
     async def _on_mount(self) -> None:
         log.info("on_mount 触发")
+        await self._check_system_status()
         await self._refresh_full_ui(is_initial=True)
         log.info("on_mount 完成，启动 ws loop")
         self._start_ws_loop()
+
+    async def _check_system_status(self) -> None:
+        """检查系统初始化状态，未初始化时在消息区显示提示。"""
+        message_view = self.query_one(MessageView)
+        try:
+            status = await self._api.get_system_status()
+            if not status.get("initialized", True):
+                await message_view.append_message(
+                    "system",
+                    "⚠ 当前未配置大模型服务\n\n"
+                    "请通过以下方式完成配置：\n"
+                    "1. 手动编辑 ~/.team_agent/setting.json\n"
+                    "2. 通过 Web Console 完成配置\n\n"
+                    f"Web Console 地址：{self._api._base_url}",
+                    [],
+                )
+        except Exception:
+            log.debug("系统状态检查失败，跳过初始化提示")
 
     async def _fetch_all_previews(self, rooms: list[RoomInfo]) -> dict[str, str]:
         """并发拉取各房间最后一条消息作为预览。"""
@@ -110,14 +129,31 @@ class WatcherApp(App):
         )
         merged: list[AgentInfo] = []
         seen: set[tuple[str, str]] = set()
-        for team_agents in fetched:
+        for (team_name, _team_id), team_agents in zip(team_entries, fetched):
             for agent in team_agents:
+                if not agent.team_name:
+                    agent.team_name = team_name
                 key = (agent.team_name, agent.name)
                 if key in seen:
                     continue
                 seen.add(key)
                 merged.append(agent)
         return merged
+
+    def _resolve_member_names(self, members: list) -> list[str]:
+        """将成员列表中的 agent ID 解析为名称，已是名称的保持不变。"""
+        id_to_name = {a.agent_id: a.name for a in self._agents if a.agent_id}
+        result: list[str] = []
+        for m in members:
+            if isinstance(m, int):
+                result.append(id_to_name.get(m, str(m)))
+            else:
+                s = str(m)
+                if s.isdigit():
+                    result.append(id_to_name.get(int(s), s))
+                else:
+                    result.append(s)
+        return result
 
     async def _refresh_full_ui(self, is_initial: bool = False) -> None:
         """刷新房间列表、团队成员列表及 UI 状态。"""
@@ -135,7 +171,9 @@ class WatcherApp(App):
             self._agents = agents  # 更新本地缓存
             self._agent_order = [a.name for a in agents]
             self._rooms = rooms
-            self._room_members_by_key = {r.room_key: list(r.members) for r in rooms}
+            self._room_members_by_key = {
+                r.room_key: self._resolve_member_names(r.members) for r in rooms
+            }
 
             previews = await self._fetch_all_previews(rooms)
             await room_panel.load(rooms, agents, previews)
@@ -191,6 +229,7 @@ class WatcherApp(App):
                         room_key,
                         e,
                     )
+            room_members = self._resolve_member_names(room_members)
             self._room_members_by_key[room_key] = list(room_members)
             await room_panel.update_team_members(room_key, self._agents, room_members)
 
