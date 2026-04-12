@@ -300,6 +300,21 @@ class WatcherApp(App):
                 exclusive=True,
                 group="member-panel",
             )
+            # agent_status 变更也可能影响工作状态指示器
+            self._update_working_status(message_view)
+            return
+
+        if event.event == "room_status":
+            log.debug("ws: 收到房间状态变更 room_id=%s state=%s need_scheduling=%s turn_agent=%s",
+                       event.room_id, event.state, event.need_scheduling, event.current_turn_agent_name)
+            room = next((r for r in self._rooms if r.room_id == event.room_id), None)
+            if room is not None:
+                if event.state:
+                    room.state = event.state
+                room.need_scheduling = event.need_scheduling
+                room.current_turn_agent_name = event.current_turn_agent_name
+                if room.room_key == self._current_room_key:
+                    self._update_working_status(message_view)
             return
 
         preview = _make_preview(event.sender, event.content)
@@ -320,6 +335,25 @@ class WatcherApp(App):
         else:
             self._unread[room.room_key] = self._unread.get(room.room_key, 0) + 1
             self.call_later(room_panel.update_unread_count, room.room_key, self._unread[room.room_key])
+
+    def _update_working_status(self, message_view: MessageView) -> None:
+        """根据当前房间的 4 个条件判断是否展示工作状态指示器。"""
+        room = next((r for r in self._rooms if r.room_key == self._current_room_key), None)
+        if room is None:
+            self.run_worker(message_view.clear_working_status(), exclusive=True, group="working-status")
+            return
+
+        is_scheduling = room.state.upper() == "SCHEDULING"
+        agent_name = room.current_turn_agent_name
+        agent_active = False
+        if agent_name:
+            agent = next((a for a in self._agents if a.name == agent_name), None)
+            agent_active = agent is not None and (agent.status or "").lower() == "active"
+
+        if room.need_scheduling and is_scheduling and agent_name and agent_active:
+            self.run_worker(message_view.set_working_status(agent_name), exclusive=True, group="working-status")
+        else:
+            self.run_worker(message_view.clear_working_status(), exclusive=True, group="working-status")
 
     @on(ListView.Selected, "#room-list")
     async def on_room_selected(self, event: ListView.Selected) -> None:

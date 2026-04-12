@@ -33,6 +33,8 @@ class RoomInfo:
     room_type: str
     state: str
     members: list[str]
+    need_scheduling: bool = False
+    current_turn_agent_name: str | None = None
 
 
 @dataclass
@@ -54,6 +56,10 @@ class WsEvent:
     agent_id: int | None = None
     agent_name: str | None = None
     status: str | None = None
+    # room_status 事件字段
+    state: str | None = None
+    need_scheduling: bool = False
+    current_turn_agent_name: str | None = None
 
 
 class ApiClient:
@@ -112,6 +118,10 @@ class ApiClient:
             room_type = (gt.get("type") or r.get("room_type", "group") or "group").lower()
             room_key = r.get("room_key") or f"{team_id}_{room_id}"
             members = r.get("agents") or r.get("members", [])
+            turn_agent = r.get("current_turn_agent")
+            turn_agent_name = None
+            if isinstance(turn_agent, dict):
+                turn_agent_name = turn_agent.get("name")
             result.append(RoomInfo(
                 room_id=room_id,
                 room_key=room_key,
@@ -120,6 +130,8 @@ class ApiClient:
                 room_type=room_type,
                 state=r.get("state", "IDLE"),
                 members=members,
+                need_scheduling=bool(r.get("need_scheduling", False)),
+                current_turn_agent_name=turn_agent_name,
             ))
         return result
 
@@ -186,6 +198,21 @@ class ApiClient:
                                     agent_name=gt_agent["name"],
                                     team_id=gt_agent["team_id"],
                                     status=data["status"],
+                                )
+                            elif event_type == "room_status":
+                                gt_room = data.get("gt_room", {})
+                                turn_agent = data.get("current_turn_agent")
+                                turn_agent_name = None
+                                if isinstance(turn_agent, dict):
+                                    turn_agent_name = turn_agent.get("name")
+                                yield WsEvent(
+                                    event=event_type,
+                                    room_id=gt_room.get("id"),
+                                    room_name=gt_room.get("name"),
+                                    team_id=gt_room.get("team_id"),
+                                    state=data.get("state"),
+                                    need_scheduling=bool(data.get("need_scheduling", False)),
+                                    current_turn_agent_name=turn_agent_name,
                                 )
                             else:
                                 log.warning("ws: 收到未知事件类型: %s", event_type)

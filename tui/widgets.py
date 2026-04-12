@@ -107,7 +107,10 @@ class MessageBubble(Vertical):
             yield Label(self._display_content, classes="bubble", markup=False)
 
 class MessageView(ScrollableContainer):
+    _working_label: Label | None = None
+
     async def load_messages(self, messages: list[MessageInfo], agent_order: list[str]) -> None:
+        self._working_label = None
         await self.remove_children()
         bubbles = []
         for m in messages:
@@ -128,6 +131,24 @@ class MessageView(ScrollableContainer):
         # Only scroll to the new end if we were already at the bottom
         if is_at_bottom:
             self.scroll_end(animate=False)
+
+    async def set_working_status(self, agent_name: str) -> None:
+        """显示 '某某 处理中…' 工作状态指示器。"""
+        text = f"[bold #56d4b0]⟳[/] [#c4a55a]{agent_name}[/] [dim]处理中…[/]"
+        if self._working_label is not None:
+            self._working_label.update(text)
+        else:
+            label = Label(text, classes="working-indicator")
+            self._working_label = label
+            await self.mount(label)
+        if self.scroll_y >= self.max_scroll_y - 1:
+            self.scroll_end(animate=False)
+
+    async def clear_working_status(self) -> None:
+        """清除工作状态指示器。"""
+        if self._working_label is not None:
+            await self._working_label.remove()
+            self._working_label = None
 
 
 class RoomPanel(Vertical):
