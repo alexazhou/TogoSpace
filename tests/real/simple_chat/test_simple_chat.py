@@ -1,5 +1,4 @@
 """real tests — 端到端场景测试，使用 Mock LLM 控制行为剧本"""
-import asyncio
 import json
 import os
 import sys
@@ -110,8 +109,6 @@ class TestRealSimpleChat(ServiceTestCase):
             }]
         })
 
-        # 启动调度器
-        run_task = asyncio.create_task(scheduler.run())
         room = roomService.get_room_by_key(room_key)
         await room.activate_scheduling()
 
@@ -120,9 +117,6 @@ class TestRealSimpleChat(ServiceTestCase):
             timeout=2.0,
             message="房间未在限时内完成对话并进入 IDLE 状态",
         )
-
-        scheduler.shutdown()
-        await asyncio.wait_for(run_task, timeout=5.0)
 
         # 验证消息数量：1 条系统公告 + 2 条 agent 消息
         messages = room.messages
