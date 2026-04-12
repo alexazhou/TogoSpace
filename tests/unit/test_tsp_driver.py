@@ -153,6 +153,31 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host):
     
     with patch("service.funcToolService.get_tools_by_names", return_value=[
         llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
+            name="get_time",
+            description="",
+            parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
+        )),
+        llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
+            name="get_dept_info",
+            description="",
+            parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
+        )),
+        llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
+            name="get_room_info",
+            description="",
+            parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
+        )),
+        llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
+            name="get_agent_info",
+            description="",
+            parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
+        )),
+        llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
+            name="wake_up_agent",
+            description="",
+            parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
+        )),
+        llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
             name="send_chat_msg", 
             description="", 
             parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
@@ -191,7 +216,16 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host):
         assert setup.max_retries == 3
 
         exported_names = [tool.function.name for tool in mock_tsp_host.tool_registry.export_openai_tools()]
-        assert exported_names == ["send_chat_msg", "finish_chat_turn", "tsp_tool"]
+        assert exported_names == [
+            "get_time",
+            "get_dept_info",
+            "get_room_info",
+            "get_agent_info",
+            "wake_up_agent",
+            "send_chat_msg",
+            "finish_chat_turn",
+            "tsp_tool",
+        ]
 
         run_tool_call.assert_called_once()
         called_args, called_context = run_tool_call.call_args.args

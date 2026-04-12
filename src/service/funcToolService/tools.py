@@ -1,15 +1,14 @@
 from __future__ import annotations
-import ast
-from typing import Callable, Optional, List
+from typing import Any, Callable, Optional
 import datetime
 import logging
-import operator
 from zoneinfo import ZoneInfo
 
-from dal.db import gtRoomManager
+from constants import AgentStatus, RoomState, SpecialAgent
+from dal.db import gtAgentManager, gtRoomManager
+from model.dbModel.gtDept import GtDept
 from service.roomService import ToolCallContext
 import service.roomService as roomService
-from constants import SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -40,59 +39,224 @@ def get_time(timezone: Optional[str] = None) -> dict:
         return {"success": True, "message": f"当前本地时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"}
 
 
-_SAFE_OPS = {
-    ast.Add: operator.add,
-    ast.Sub: operator.sub,
-    ast.Mult: operator.mul,
-    ast.Div: operator.truediv,
-    ast.Pow: operator.pow,
-    ast.USub: operator.neg,
-}
+def _require_team_context(_context: ToolCallContext | None) -> tuple[bool, int]:
+    if _context is None or _context.team_id <= 0:
+        return False, 0
+    return True, _context.team_id
 
 
-def _safe_eval(node):
-    if isinstance(node, ast.Constant):
-        if not isinstance(node.value, (int, float)):
-            raise ValueError("只支持数值常量")
-        return node.value
-    if isinstance(node, ast.BinOp):
-        op_type = type(node.op)
-        if op_type not in _SAFE_OPS:
-            raise ValueError(f"不支持的运算符: {op_type.__name__}")
-        return _SAFE_OPS[op_type](_safe_eval(node.left), _safe_eval(node.right))
-    if isinstance(node, ast.UnaryOp):
-        op_type = type(node.op)
-        if op_type not in _SAFE_OPS:
-            raise ValueError(f"不支持的运算符: {op_type.__name__}")
-        return _SAFE_OPS[op_type](_safe_eval(node.operand))
-    raise ValueError(f"不支持的表达式类型: {type(node).__name__}")
+def _resolve_agent_name(agent_id: int, id_to_name: dict[int, str]) -> str:
+    if agent_id == int(SpecialAgent.SYSTEM.value):
+        return SpecialAgent.SYSTEM.name
+    if agent_id == int(SpecialAgent.OPERATOR.value):
+        return SpecialAgent.OPERATOR.name
+    return id_to_name.get(agent_id, f"unknown({agent_id})")
 
 
-def calculate(expression: str) -> dict:
-    """计算数学表达式
+def _find_dept_node(node: GtDept | None, dept_id: int) -> GtDept | None:
+    if node is None:
+        return None
+    if node.id == dept_id:
+        return node
+    for child in node.children:
+        found = _find_dept_node(child, dept_id)
+        if found is not None:
+            return found
+    return None
+
+
+def _serialize_dept_node(node: GtDept, id_to_name: dict[int, str]) -> dict[str, Any]:
+    members = [_resolve_agent_name(agent_id, id_to_name) for agent_id in node.agent_ids]
+    return {
+        "dept_id": node.id,
+        "dept_name": node.name,
+        "dept_responsibility": node.responsibility,
+        "manager": _resolve_agent_name(node.manager_id, id_to_name),
+        "members": members,
+        "member_count": len(members),
+        "children": [_serialize_dept_node(child, id_to_name) for child in node.children],
+    }
+
+
+async def _build_team_agent_name_map(team_id: int) -> dict[int, str]:
+    # 临时优先复用运行态 Agent，拿不到时再回退 DB，避免工具在测试/恢复场景下名称缺失。
+    try:
+        from service import agentService
+
+        team_agents = agentService.get_team_agents(team_id)
+        if team_agents:
+            return {agent.gt_agent.id: agent.gt_agent.name for agent in team_agents}
+    except Exception:
+        logger.debug("build team agent name map from runtime failed, fallback to db", exc_info=True)
+
+    gt_agents = await gtAgentManager.get_team_agents(team_id)
+    return {agent.id: agent.name for agent in gt_agents}
+
+
+def _truncate_error_message(message: str | None, limit: int = 100) -> str:
+    if not message:
+        return ""
+    if len(message) <= limit:
+        return message
+    return message[:limit].rstrip() + "..."
+
+
+async def get_dept_info(dept_id: Optional[int] = None, _context: ToolCallContext = None) -> dict:
+    """查询部门信息。不传 dept_id 时返回整个团队部门树，传入时返回指定部门及其子树。
 
     Args:
-        expression: 数学表达式字符串，如 "2 + 3 * 4"
+        dept_id: 部门 ID，省略时返回整个团队
     """
+    ok, team_id = _require_team_context(_context)
+    if not ok:
+        return {"success": False, "message": "当前没有可用的团队上下文。"}
+
+    from service import deptService
+
+    root = await deptService.get_dept_tree(team_id)
+    if root is None:
+        return {"success": False, "message": "当前团队还没有部门信息。"}
+
+    target = root if dept_id is None else _find_dept_node(root, dept_id)
+    if target is None:
+        return {"success": False, "message": f"未找到部门: dept_id={dept_id}"}
+
+    id_to_name = await _build_team_agent_name_map(team_id)
+    return {"success": True, "dept": _serialize_dept_node(target, id_to_name)}
+
+
+async def get_room_info(room_name: Optional[str] = None, _context: ToolCallContext = None) -> dict:
+    """查询房间信息。不传 room_name 时返回团队房间列表，传入时返回指定房间详情。
+
+    Args:
+        room_name: 房间名称，省略时返回所有房间
+    """
+    ok, team_id = _require_team_context(_context)
+    if not ok:
+        return {"success": False, "message": "当前没有可用的团队上下文。"}
+
+    id_to_name = await _build_team_agent_name_map(team_id)
+
+    if room_name is None:
+        room_configs = await gtRoomManager.get_rooms_by_team(team_id)
+        rooms: list[dict[str, Any]] = []
+        for room_config in room_configs:
+            runtime_room = roomService.get_room(room_config.id)
+            rooms.append({
+                "room_name": room_config.name,
+                "room_type": room_config.type.name,
+                "state": runtime_room.state.name if runtime_room is not None else RoomState.INIT.name,
+                "members": [
+                    _resolve_agent_name(agent_id, id_to_name)
+                    for agent_id in (room_config.agent_ids or [])
+                    if agent_id != int(SpecialAgent.SYSTEM.value)
+                ],
+                "member_count": len([
+                    agent_id
+                    for agent_id in (room_config.agent_ids or [])
+                    if agent_id != int(SpecialAgent.SYSTEM.value)
+                ]),
+            })
+        return {"success": True, "rooms": rooms}
+
+    room_config = await gtRoomManager.get_room_by_team_and_name(team_id, room_name)
+    if room_config is None:
+        return {"success": False, "message": f"未找到房间: {room_name}"}
+
+    runtime_room = roomService.get_room(room_config.id)
+    room_dict: dict[str, Any] = {
+        "room_name": room_config.name,
+        "room_type": room_config.type.name,
+        "state": runtime_room.state.name if runtime_room is not None else RoomState.INIT.name,
+        "members": [
+            _resolve_agent_name(agent_id, id_to_name)
+            for agent_id in (room_config.agent_ids or [])
+            if agent_id != int(SpecialAgent.SYSTEM.value)
+        ],
+        "member_count": len([
+            agent_id
+            for agent_id in (room_config.agent_ids or [])
+            if agent_id != int(SpecialAgent.SYSTEM.value)
+        ]),
+        "current_turn": runtime_room.get_current_turn_agent_name() if runtime_room is not None and runtime_room.state == RoomState.SCHEDULING else None,
+        "total_messages": len(runtime_room.messages) if runtime_room is not None else 0,
+    }
+    return {"success": True, "room": room_dict}
+
+
+async def get_agent_info(agent_name: Optional[str] = None, _context: ToolCallContext = None) -> dict:
+    """查询 Agent 信息。不传 agent_name 时返回团队成员列表，传入时返回指定成员详情。
+
+    Args:
+        agent_name: Agent 名称，省略时返回所有 Agent
+    """
+    ok, team_id = _require_team_context(_context)
+    if not ok:
+        return {"success": False, "message": "当前没有可用的团队上下文。"}
+
+    from service import agentService, deptService
+    from dal.db import gtAgentTaskManager
+
+    team_agents = agentService.get_team_agents(team_id)
+
+    async def _build_agent_dict(agent: Any, *, detail: bool) -> dict[str, Any]:
+        agent_id = agent.gt_agent.id
+        dept = await deptService.get_agent_dept(team_id, agent_id)
+        first_task = await gtAgentTaskManager.get_first_unfinish_task(agent_id) if agent.status == AgentStatus.FAILED else None
+        info: dict[str, Any] = {
+            "name": agent.gt_agent.name,
+            "status": agent.status.name,
+            "department": dept.name if dept is not None else "off_board",
+        }
+        if first_task is not None:
+            info["error_summary"] = _truncate_error_message(first_task.error_message)
+        if detail:
+            info["role"] = "manager" if dept is not None and dept.manager_id == agent_id else "member"
+            info["rooms"] = [
+                room.name
+                for room in roomService.get_all_rooms()
+                if room.team_id == team_id and agent_id in room.agents
+            ]
+            info["can_wake_up"] = agent.status == AgentStatus.FAILED
+        return info
+
+    if agent_name is None:
+        agents = [await _build_agent_dict(agent, detail=False) for agent in team_agents]
+        return {"success": True, "agents": agents}
+
+    target_agent = next((agent for agent in team_agents if agent.gt_agent.name == agent_name), None)
+    if target_agent is None:
+        return {"success": False, "message": f"未找到成员: {agent_name}"}
+
+    return {"success": True, "agent": await _build_agent_dict(target_agent, detail=True)}
+
+
+async def wake_up_agent(agent_name: str, _context: ToolCallContext = None) -> dict:
+    """唤醒处于 FAILED 状态的 Agent，使其重新进入调度循环。
+
+    Args:
+        agent_name: 要唤醒的 Agent 名称
+    """
+    ok, team_id = _require_team_context(_context)
+    if not ok:
+        return {"success": False, "message": "当前没有可用的团队上下文。"}
+
+    from service import agentService
+
+    team_agents = agentService.get_team_agents(team_id)
+    target_agent = next((agent for agent in team_agents if agent.gt_agent.name == agent_name), None)
+    if target_agent is None:
+        return {"success": False, "message": f"未找到成员: {agent_name}"}
+
+    if target_agent.status != AgentStatus.FAILED:
+        return {"success": False, "message": f"{agent_name} 当前状态为 {target_agent.status.name}，无需唤醒。"}
+
     try:
-        tree = ast.parse(expression, mode="eval")
-        result = _safe_eval(tree.body)
-        return {"success": True, "message": f"计算结果: {expression} = {result}"}
-    except Exception as e:
-        return {"success": False, "message": f"计算错误: {e}"}
+        await target_agent.resume_failed()
+    except Exception as exc:
+        return {"success": False, "message": f"唤醒 {agent_name} 失败: {exc}"}
 
-
-def get_agent_list(_context: ToolCallContext = None) -> dict:
-    """返回当前聊天室的 agent 列表（历史发言者，排除 system）"""
-    logger.info(f"获取 agent 列表")
-    if _context is None:
-        return {"success": True, "agents": []}
-    agents = list(dict.fromkeys(
-        _context.chat_room._get_agent_name(m.sender_id)
-        for m in _context.chat_room.messages
-        if m.sender_id != _context.chat_room.SYSTEM_MEMBER_ID
-    ))
-    return {"success": True, "agents": agents}
+    return {"success": True, "message": f"已成功唤醒 {agent_name}，该成员将重新进入调度循环。"}
 
 
 async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = None) -> dict:
@@ -173,8 +337,10 @@ async def finish_chat_turn(_context: ToolCallContext = None) -> dict:
 
 FUNCTION_REGISTRY: dict[str, Callable[..., dict] | Callable[..., object]] = {
     "get_time": get_time,
-    "calculate": calculate,
-    "get_agent_list": get_agent_list,
     "send_chat_msg": send_chat_msg,
     "finish_chat_turn": finish_chat_turn,
+    "get_dept_info": get_dept_info,
+    "get_room_info": get_room_info,
+    "get_agent_info": get_agent_info,
+    "wake_up_agent": wake_up_agent,
 }

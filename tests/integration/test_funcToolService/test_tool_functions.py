@@ -5,11 +5,14 @@ from typing import Optional
 
 import pytest
 
+import service.deptService as deptService
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
-from dal.db import gtTeamManager, gtAgentManager
+import service.agentService as agentService
+from dal.db import gtAgentTaskManager, gtTeamManager, gtAgentManager
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtDept import GtDept
 from model.dbModel.gtTeam import GtTeam
 from service.roomService import ToolCallContext
 from service.funcToolService.toolLoader import (
@@ -19,17 +22,39 @@ from service.funcToolService.toolLoader import (
 )
 from service.funcToolService.tools import (
     get_time,
-    calculate,
+    get_dept_info,
+    get_room_info,
+    get_agent_info,
+    wake_up_agent,
     send_chat_msg,
-    get_agent_list,
     finish_chat_turn,
 )
+from constants import AgentStatus, AgentTaskStatus, AgentTaskType
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+
+
+class _FakeRuntimeAgent:
+    def __init__(
+        self,
+        gt_agent: GtAgent,
+        status: AgentStatus,
+        *,
+        resume_error: Exception | None = None,
+    ) -> None:
+        self.gt_agent = gt_agent
+        self.status = status
+        self._resume_error = resume_error
+        self.resumed = False
+
+    async def resume_failed(self) -> None:
+        if self._resume_error is not None:
+            raise self._resume_error
+        self.resumed = True
 
 
 
@@ -85,9 +110,9 @@ class TestGetFunctionMetadata(ServiceTestCase):
 class TestBuildtools(ServiceTestCase):
     async def test_builds_tool_for_each_entry(self):
         """注册表中每个函数都应产出一个 OpenAITool 定义。"""
-        tools = build_tools({"get_time": get_time, "calculate": calculate})
+        tools = build_tools({"get_time": get_time, "get_dept_info": get_dept_info})
         assert len(tools) == 2
-        assert {t.function.name for t in tools} == {"get_time", "calculate"}
+        assert {t.function.name for t in tools} == {"get_time", "get_dept_info"}
 
     async def test_empty_registry(self):
         """空注册表返回空列表。"""
@@ -102,7 +127,7 @@ class TestBuildtools(ServiceTestCase):
 class TestToolFunctions(ServiceTestCase):
     @classmethod
     async def async_setup_class(cls):
-        # send_chat_msg/get_agent_list 依赖 roomService 上下文。
+        # 这组用例依赖 roomService / persistence 的真实上下文。
         db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
@@ -136,34 +161,147 @@ class TestToolFunctions(ServiceTestCase):
         result = get_time(timezone="Invalid/Zone")
         assert not result["success"] and "未知时区" in result["message"]
 
-    async def test_calculate_addition(self):
-        """基础算术表达式可执行。"""
-        assert "5" in calculate("2 + 3")["message"]
+    async def test_get_dept_info_returns_error_without_context(self):
+        """无团队上下文时，团队感知工具应返回明确错误。"""
+        result = await get_dept_info()
+        assert not result["success"]
 
-    async def test_calculate_complex(self):
-        """复杂表达式可执行。"""
-        assert "1024" in calculate("2 ** 10")["message"]
+    async def test_get_dept_info_returns_root_tree(self):
+        """不传 dept_id 时返回根部门及其子树。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
+        char = await gtAgentManager.get_agent(team.id, "char")
+        assert alice is not None and bob is not None and char is not None
 
-    async def test_calculate_invalid(self):
-        """非法表达式应被拒绝并返回错误信息。"""
-        result = calculate("import os")
-        assert not result["success"] and "计算错误" in result["message"]
+        await deptService.overwrite_dept_tree(
+            team.id,
+            GtDept(
+                name="company",
+                responsibility="overall",
+                manager_id=alice.id,
+                agent_ids=[alice.id, bob.id, char.id],
+                children=[
+                    GtDept(
+                        name="delivery",
+                        responsibility="ship product",
+                        manager_id=bob.id,
+                        agent_ids=[bob.id, char.id],
+                        children=[],
+                    )
+                ],
+            ),
+        )
 
-    async def test_get_agent_list_without_context(self):
-        """无上下文时 get_agent_list 返回空列表。"""
-        assert get_agent_list()["agents"] == []
+        ctx = ToolCallContext(agent_name="alice", team_id=team.id, chat_room=None)
+        result = await get_dept_info(_context=ctx)
 
-    async def test_get_agent_list_with_context(self):
-        """有上下文时返回当前房间中可见的发言者列表。"""
-        await self.create_room(TEAM, "r", ["alice", "bob"])
-        room = roomService.get_room_by_key(f"r@{TEAM}")
-        alice_id = room.get_agent_id_by_name("alice")
-        bob_id = room.get_agent_id_by_name("bob")
-        await room.add_message(alice_id, "hi")
-        await room.add_message(bob_id, "there")
-        ctx = ToolCallContext(agent_name="alice", team_id=room.team_id, chat_room=room)
-        result = get_agent_list(_context=ctx)
-        assert "alice" in result["agents"] and "bob" in result["agents"]
+        assert result["success"]
+        assert result["dept"]["dept_name"] == "company"
+        assert result["dept"]["manager"] == "alice"
+        assert result["dept"]["children"][0]["dept_name"] == "delivery"
+        assert result["dept"]["children"][0]["members"] == ["bob", "char"]
+
+    async def test_get_room_info_supports_list_and_detail(self):
+        """房间工具应支持列表和详情两种查询模式。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+        await self.create_room(TEAM, "general", ["alice", "bob"], max_turns=3)
+        await self.create_room(TEAM, "pair", ["alice"], max_turns=0)
+        general = roomService.get_room_by_key(f"general@{TEAM}")
+        await general.activate_scheduling()
+        await general.add_message(general.get_agent_id_by_name("alice"), "hello")
+
+        ctx = ToolCallContext(agent_name="alice", team_id=team.id, chat_room=general)
+        list_result = await get_room_info(_context=ctx)
+        detail_result = await get_room_info(room_name="general", _context=ctx)
+
+        assert list_result["success"]
+        assert {room["room_name"] for room in list_result["rooms"]} >= {"general", "pair"}
+        assert detail_result["success"]
+        assert detail_result["room"]["room_name"] == "general"
+        assert detail_result["room"]["members"] == ["alice", "bob"]
+        assert detail_result["room"]["state"] == "SCHEDULING"
+        assert detail_result["room"]["current_turn"] == "alice"
+        assert detail_result["room"]["total_messages"] >= 2
+
+    async def test_get_agent_info_and_wake_up_agent(self, monkeypatch):
+        """成员工具应能返回失败摘要，并在 FAILED 状态下唤醒成员。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
+        char = await gtAgentManager.get_agent(team.id, "char")
+        assert alice is not None and bob is not None and char is not None
+
+        await deptService.overwrite_dept_tree(
+            team.id,
+            GtDept(
+                name="ops",
+                responsibility="keep things running",
+                manager_id=alice.id,
+                agent_ids=[alice.id, bob.id, char.id],
+                children=[],
+            ),
+        )
+        await self.create_room(TEAM, "ops-room", ["alice", "bob", "char"])
+
+        task = await gtAgentTaskManager.create_task(
+            bob.id,
+            AgentTaskType.ROOM_MESSAGE,
+            {"room_id": 1},
+        )
+        await gtAgentTaskManager.update_task_status(
+            task.id,
+            AgentTaskStatus.FAILED,
+            error_message="llm provider unavailable during team restore",
+        )
+
+        alice_runtime = _FakeRuntimeAgent(alice, AgentStatus.IDLE)
+        bob_runtime = _FakeRuntimeAgent(bob, AgentStatus.FAILED)
+        char_runtime = _FakeRuntimeAgent(char, AgentStatus.ACTIVE)
+        monkeypatch.setattr(
+            agentService,
+            "get_team_agents",
+            lambda team_id: [alice_runtime, bob_runtime, char_runtime],
+        )
+
+        ctx = ToolCallContext(agent_name="alice", team_id=team.id, chat_room=None)
+        list_result = await get_agent_info(_context=ctx)
+        detail_result = await get_agent_info(agent_name="bob", _context=ctx)
+        wake_result = await wake_up_agent("bob", _context=ctx)
+
+        assert list_result["success"]
+        assert any(agent["name"] == "bob" and agent["status"] == "FAILED" for agent in list_result["agents"])
+        failed_entry = next(agent for agent in list_result["agents"] if agent["name"] == "bob")
+        assert "llm provider unavailable" in failed_entry["error_summary"]
+        assert detail_result["success"]
+        assert detail_result["agent"]["department"] == "ops"
+        assert detail_result["agent"]["role"] == "member"
+        assert "ops-room" in detail_result["agent"]["rooms"]
+        assert detail_result["agent"]["can_wake_up"] is True
+        assert wake_result["success"]
+        assert bob_runtime.resumed is True
+
+    async def test_wake_up_agent_rejects_non_failed_member(self, monkeypatch):
+        """非 FAILED 成员不能被唤醒。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert alice is not None
+
+        monkeypatch.setattr(
+            agentService,
+            "get_team_agents",
+            lambda team_id: [_FakeRuntimeAgent(alice, AgentStatus.IDLE)],
+        )
+
+        ctx = ToolCallContext(agent_name="alice", team_id=team.id, chat_room=None)
+        result = await wake_up_agent("alice", _context=ctx)
+
+        assert not result["success"]
+        assert "IDLE" in result["message"]
 
     async def test_send_chat_msg_returns_error_without_context(self):
         """无上下文时 send_chat_msg 应返回明确错误，不能伪装成功。"""

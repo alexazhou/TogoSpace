@@ -5,6 +5,13 @@ from dal.db import gtAgentManager, gtDeptManager
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 
 _TURN_CONTEXT_SUFFIX = "你现在可以调用工具行动。如果你已完成发言和所有工具调用，请务必调用 finish_chat_turn 结束本轮行动。"
+_TEAM_AWARENESS_TOOLS_GUIDE = """你可以使用以下工具来感知团队状态并协助同伴：
+- get_dept_info：了解团队或指定部门的概况与组织架构
+- get_room_info：了解房间列表或指定房间详情
+- get_agent_info：查看所有同伴状态或指定同伴详细信息
+- wake_up_agent：唤醒失败的同伴
+
+当你发现有同伴长时间无响应或对话异常中断时，建议先用 get_agent_info 查看其状态，若为 FAILED 可尝试用 wake_up_agent 唤醒。"""
 _COMPACT_PROMPT_TEMPLATE = """\
 因为上下文长度即将超出限制，请总结以上的工作内容，作为后续工作的起点。
 
@@ -110,4 +117,5 @@ async def build_agent_system_prompt(
     if team_id > 0:
         dept_context = await _build_dept_context(team_id, agent_name)
         full_prompt += "\n\n" + dept_context
+        full_prompt += "\n\n" + _TEAM_AWARENESS_TOOLS_GUIDE
     return full_prompt

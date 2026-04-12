@@ -19,7 +19,15 @@ from .base import AgentDriver, AgentTurnSetup
 
 logger = logging.getLogger(__name__)
 
-_LOCAL_CHAT_TOOL_NAMES = ["send_chat_msg", "finish_chat_turn"]
+_LOCAL_TOOL_NAMES = [
+    "get_time",
+    "get_dept_info",
+    "get_room_info",
+    "get_agent_info",
+    "wake_up_agent",
+    "send_chat_msg",
+    "finish_chat_turn",
+]
 _DEFAULT_PROTOCOL_VERSION = "0.3"
 _DEFAULT_REQUEST_TIMEOUT_SEC = 30
 _RUN_CHAT_TURN_MAX_RETRIES = 3
@@ -53,7 +61,7 @@ class TspAgentDriver(AgentDriver):
         super().__init__(host, config)
         self._client: Optional[TSPClient] = None
         self._tsp_tools: dict[str, llmApiUtil.OpenAITool] = {}
-        _local = funcToolService.get_tools_by_names(_LOCAL_CHAT_TOOL_NAMES)
+        _local = funcToolService.get_tools_by_names(_LOCAL_TOOL_NAMES)
         self._local_tools: dict[str, llmApiUtil.OpenAITool] = {t.function.name: t for t in _local}
 
     async def startup(self) -> None:
