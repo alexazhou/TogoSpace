@@ -5,6 +5,7 @@ import sys
 import aiohttp
 
 from ...base import ServiceTestCase
+from ...mock_llm_server import get_mock_llm_api_url
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
@@ -39,6 +40,10 @@ class TestLlmServiceController(_ApiServiceCase):
     requires_mock_llm = True
 
     # ──────── helpers ────────
+
+    def _mock_api_url(self) -> str:
+        assert self.mock_llm_server is not None
+        return get_mock_llm_api_url(port=self.mock_llm_server.port)
 
     async def _list(self, client: aiohttp.ClientSession) -> dict:
         async with client.get(f"{self.backend_base_url}/config/llm_services/list.json") as resp:
@@ -324,7 +329,7 @@ class TestLlmServiceController(_ApiServiceCase):
         async with aiohttp.ClientSession() as client:
             data = await self._test_connectivity(client, {
                 "mode": "temp",
-                "base_url": "http://127.0.0.1:19876/v1/chat/completions",
+                "base_url": self._mock_api_url(),
                 "api_key": "mock-api-key",
                 "type": "openai-compatible",
                 "model": "mock-model",
