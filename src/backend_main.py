@@ -3,7 +3,6 @@ import asyncio
 import logging
 import os
 import signal
-import sys
 
 import tornado.httpserver
 
@@ -33,6 +32,8 @@ def _setup_logger() -> None:
 
 _RUN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../run")
 _PID_FILE = os.path.join(_RUN_DIR, "backend.pid")
+_shutdown_event: asyncio.Event | None = None
+_main_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _check_single_instance() -> None:
@@ -70,11 +71,36 @@ def _remove_pid() -> None:
         pass
 
 
+def request_shutdown() -> None:
+    """请求后端主循环退出。"""
+    loop = _main_loop
+    shutdown_event = _shutdown_event
+    if loop is None or shutdown_event is None:
+        return
+    if loop.is_running():
+        loop.call_soon_threadsafe(shutdown_event.set)
+    else:
+        shutdown_event.set()
+
+
+def _handle_shutdown_signal(signum: int, _frame) -> None:
+    logger = logging.getLogger(__name__)
+    try:
+        signal_name = signal.Signals(signum).name
+    except ValueError:
+        signal_name = str(signum)
+    logger.info("[退出] 收到信号：%s", signal_name)
+    request_shutdown()
+
+
 async def main(config_dir: str = None, port: int | None = None):
+    global _main_loop, _shutdown_event
 
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     _setup_logger()
     logger = logging.getLogger(__name__)
+    _main_loop = asyncio.get_running_loop()
+    _shutdown_event = asyncio.Event()
 
     if config_dir is not None:
         config_dir = os.path.abspath(config_dir)
@@ -127,7 +153,7 @@ async def main(config_dir: str = None, port: int | None = None):
     web_server.listen(bind_port, bind_host)
 
     try:
-        await schedulerService.run()
+        await _shutdown_event.wait()
     finally:
         web_server.stop()
         schedulerService.shutdown()
@@ -139,12 +165,15 @@ async def main(config_dir: str = None, port: int | None = None):
         llmService.shutdown()
         await messageBus.shutdown()
         _remove_pid()
+        _shutdown_event = None
+        _main_loop = None
 
 
 if __name__ == "__main__":
     _check_single_instance()
     _write_pid()
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
+    signal.signal(signal.SIGINT, _handle_shutdown_signal)
     parser = argparse.ArgumentParser()
     parser.add_argument("--config-dir", default=None, dest="config_dir", help="config 目录路径")
     parser.add_argument("--port", type=int, default=None, help="HTTP 监听端口（覆盖配置文件）")
