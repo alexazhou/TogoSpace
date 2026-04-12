@@ -23,7 +23,7 @@ DATA_DIR: str      = os.path.abspath(os.path.join(_ROOT, "data"))
 LOGS_DIR: str      = os.path.abspath(os.path.join(_ROOT, "logs", "backend"))
 
 # Agent 工作目录根（可写）
-WORKSPACE_ROOT: str = os.path.abspath(_ROOT)
+WORKSPACE_ROOT: str = os.path.abspath(os.path.join(_ROOT, "workspace"))
 
 
 def get_gtsp_binary_path() -> str:

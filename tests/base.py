@@ -31,6 +31,7 @@ from mock_llm_server import (
     MockLLMServer,
     MOCK_LLM_HOST,
     get_mock_llm_api_url,
+    get_mock_llm_anthropic_url,
 )
 from constants import OpenaiApiRole, EmployStatus, RoomType, SpecialAgent
 
@@ -397,6 +398,13 @@ class ServiceTestCase:
             cfg = original_load(path or cls._backend_config_dir, preset_dir=preset_dir or cls._backend_config_dir, force_reload=force_reload)
             if cfg.setting.persistence:
                 cfg.setting.persistence.db_path = db_path
+            if cls.requires_mock_llm:
+                mock_port = _get_mock_llm_port()
+                for service in cfg.setting.llm_services:
+                    if service.type.name.lower() == "anthropic":
+                        service.base_url = get_mock_llm_anthropic_url(port=mock_port)
+                    else:
+                        service.base_url = get_mock_llm_api_url(port=mock_port)
             return cfg
 
         cls._config_patcher = mock.patch("util.configUtil.load", side_effect=patched_load)
