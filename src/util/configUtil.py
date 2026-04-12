@@ -72,6 +72,33 @@ def _copy_template_if_missing(src_name: str, dest_dir: str, dest_name: str | Non
     shutil.copy(src_path, dest_path)
 
 
+def _sync_file_if_changed(src_name: str, dest_dir: str, dest_name: str | None = None) -> None:
+    """同步文件到目标目录，不存在或内容不一致时更新。"""
+    resolved_dest_name = dest_name or src_name
+    src_path = os.path.join(appPaths.ASSETS_DIR, src_name)
+    dest_path = os.path.join(dest_dir, resolved_dest_name)
+
+    if not os.path.isfile(src_path):
+        raise FileNotFoundError(
+            f"模板文件不存在: {src_path}\n"
+            f"请检查程序安装是否完整。"
+        )
+
+    # 不存在则直接复制
+    if not os.path.isfile(dest_path):
+        shutil.copy(src_path, dest_path)
+        return
+
+    # 内容不一致则更新
+    with open(src_path, "r", encoding="utf-8") as f:
+        src_content = f.read()
+    with open(dest_path, "r", encoding="utf-8") as f:
+        dest_content = f.read()
+
+    if src_content != dest_content:
+        shutil.copy(src_path, dest_path)
+
+
 def _load_setting(config_dir: str) -> SettingConfig:
     path = os.path.join(config_dir, "setting.json")
 
@@ -79,9 +106,11 @@ def _load_setting(config_dir: str) -> SettingConfig:
     os.makedirs(config_dir, exist_ok=True)
 
     if not os.path.isfile(path):
-        # 从模板复制配置文件，并附带配置说明文档
+        # 从模板复制配置文件
         _copy_template_if_missing("config_template.json", config_dir, "setting.json")
-        _copy_template_if_missing("setting.README.md", config_dir)
+
+    # 每次启动同步 README 文档（不存在或内容不一致时更新）
+    _sync_file_if_changed("setting.README.md", config_dir)
 
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
