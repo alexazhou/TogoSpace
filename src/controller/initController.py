@@ -11,10 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 class QuickInitRequest(BaseModel):
-    """快速初始化请求体：仅需三个必要字段。"""
+    """快速初始化请求体：必填三字段 + 可选类型。"""
     base_url: str
     api_key: str
     model: str
+    type: LlmServiceType = LlmServiceType.OPENAI_COMPATIBLE
 
     @field_validator("base_url")
     @classmethod
@@ -60,7 +61,7 @@ class QuickInitHandler(BaseHandler):
             name="default",
             base_url=req.base_url,
             api_key=req.api_key,
-            type=LlmServiceType.OPENAI_COMPATIBLE,
+            type=req.type,
             model=req.model,
             enable=True,
         )
