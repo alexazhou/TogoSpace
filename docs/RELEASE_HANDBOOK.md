@@ -1,4 +1,4 @@
-# AgentTeam 版本发布手册
+# TogoAgent 版本发布手册
 
 本文档描述发布新版本的最小流程。
 
@@ -9,14 +9,14 @@
 编辑 `src/version.py`：
 
 ```python
-__version__ = "0.1.7"  # 替换为新版本号
+__version__ = "0.1.12"  # 替换为新版本号
 ```
 
 提交版本号更新：
 
 ```bash
 git add src/version.py
-git commit -m "chore: bump version to 0.1.7"
+git commit -m "chore: bump version to 0.1.12"
 git push origin master
 ```
 
@@ -24,10 +24,10 @@ git push origin master
 
 ```bash
 # 创建 tag
-git tag v0.1.7
+git tag v0.1.12
 
 # 推送 tag（触发 CI 构建 arm64 版本）
-git push origin v0.1.7
+git push origin v0.1.12
 ```
 
 推送 tag 后，GitHub Actions 会自动触发：
@@ -67,39 +67,39 @@ python scripts/build_release.py --arch x86_64
 python scripts/build_release.py --arch x86_64 --skip-notarize
 ```
 
-输出：`dist/AgentTeam-0.1.7-macos-x86_64.zip`
+输出：`dist/TogoAgent-0.1.12-macos-x86_64.zip`
 
 ## 4. 上传到 Release
 
 ```bash
 # 上传 x86_64 安装包到已有 Release
-gh release upload v0.1.7 dist/AgentTeam-0.1.7-macos-x86_64.zip
+gh release upload v0.1.12 dist/TogoAgent-0.1.12-macos-x86_64.zip
 ```
 
 ## 5. 验证 Release
 
 ```bash
 # 查看 Release 信息
-gh release view v0.1.7
+gh release view v0.1.12
 ```
 
 确认包含两个安装包：
-- `AgentTeam-0.1.7-macos-arm64.zip` (CI 构建)
-- `AgentTeam-0.1.7-macos-x86_64.zip` (本地构建)
+- `TogoAgent-0.1.12-macos-arm64.zip` (CI 构建)
+- `TogoAgent-0.1.12-macos-x86_64.zip` (本地构建)
 
 ## 6. 完整流程示例
 
 ```bash
 # 1. 更新版本号
-vim src/version.py                    # 改为 0.1.7
+vim src/version.py                    # 改为 0.1.12
 
 git add src/version.py
-git commit -m "chore: bump version to 0.1.7"
+git commit -m "chore: bump version to 0.1.12"
 git push origin master
 
 # 2. 创建并推送 tag
-git tag v0.1.7
-git push origin v0.1.7
+git tag v0.1.12
+git push origin v0.1.12
 
 # 3. 等待 CI 完成（约 5-10 分钟）
 # 在 GitHub Actions 页面查看进度
@@ -108,10 +108,10 @@ git push origin v0.1.7
 python scripts/build_release.py --arch x86_64
 
 # 5. 上传到 Release
-gh release upload v0.1.7 dist/AgentTeam-0.1.7-macos-x86_64.zip
+gh release upload v0.1.12 dist/TogoAgent-0.1.12-macos-x86_64.zip
 
 # 6. 验证
-gh release view v0.1.7
+gh release view v0.1.12
 ```
 
 ## 附录
@@ -135,8 +135,8 @@ gh run list --branch master
 gh release list
 
 # 删除本地 tag
-git tag -d v0.1.7
+git tag -d v0.1.12
 
 # 删除远程 tag
-git push origin --delete v0.1.7
+git push origin --delete v0.1.12
 ```
