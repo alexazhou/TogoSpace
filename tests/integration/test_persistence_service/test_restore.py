@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from constants import OpenaiApiRole, SpecialAgent
+from constants import OpenaiApiRole, SpecialAgent, ScheduleState
 from tests.base import ServiceTestCase
 from util import configUtil
 from service import (
@@ -62,6 +62,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await agentService.restore_all_agents_runtime_state()
         await roomService.restore_all_rooms_runtime_state()
         await scheduler.startup()
+        scheduler._schedule_state = ScheduleState.RUNNING
         return team_config
 
     async def test_room_requires_explicit_start_before_scheduler_runs(self):

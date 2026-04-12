@@ -45,13 +45,14 @@ class TestSystemStatus(_ApiServiceCase):
     # ──────── tests ────────
 
     async def test_status_initialized_true(self):
-        """有已启用服务时返回 initialized: true。"""
+        """有已启用服务时返回 initialized: true 和 schedule_state。"""
         async with aiohttp.ClientSession() as client:
             data = await self._status(client)
 
         assert data["initialized"] is True
         assert "default_llm_server" in data
         assert data["default_llm_server"] == "mock"
+        assert "schedule_state" in data
 
     async def test_status_returns_default_llm_server(self):
         """已初始化时返回 default_llm_server 字段。"""
@@ -70,3 +71,11 @@ class TestSystemStatus(_ApiServiceCase):
 
         assert data["initialized"] is True
         assert "message" not in data
+
+    async def test_status_has_schedule_state_field(self):
+        """状态响应必须包含 schedule_state 字段。"""
+        async with aiohttp.ClientSession() as client:
+            data = await self._status(client)
+
+        assert "schedule_state" in data
+        assert data["schedule_state"] in ("stopped", "blocked", "running")

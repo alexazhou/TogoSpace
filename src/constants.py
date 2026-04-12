@@ -164,3 +164,10 @@ class TurnStepResult(EnhanceEnum):
     TURN_DONE = "TURN_DONE"          # 当前 turn 已完成，通常表示 finish_chat_turn 已执行成功
     NO_ACTION = "NO_ACTION"          # 当前 step 未产出可执行动作，需要按失败行动逻辑处理
     CONTINUE = "CONTINUE"            # 当前 turn 仍需继续推进，进入下一个 step
+
+
+class ScheduleState(EnhanceEnum):
+    """调度闸门状态。"""
+    STOPPED = "STOPPED"    # 调度未开启或已显式停止
+    BLOCKED = "BLOCKED"    # 前置条件不满足（如未配置 LLM）
+    RUNNING = "RUNNING"    # 允许房间激活、创建 task、启动 consumer

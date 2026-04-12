@@ -4,6 +4,7 @@ from pydantic import BaseModel, ValidationError, field_validator
 
 from constants import LlmServiceType
 from controller.baseController import BaseHandler
+from service import schedulerService
 from util import configUtil
 from util.configTypes import LlmServiceConfig
 
@@ -73,6 +74,7 @@ class QuickInitHandler(BaseHandler):
             s.default_llm_server = "default"
 
         configUtil.update_setting(mutator)
+        await schedulerService.start_schedule()
 
         self.return_json({
             "status": "ok",

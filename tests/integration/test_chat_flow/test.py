@@ -18,7 +18,7 @@ from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
-from constants import AgentHistoryTag, AgentHistoryStatus, AgentStatus, AgentTaskType, OpenaiApiRole, RoomState
+from constants import AgentHistoryTag, AgentHistoryStatus, AgentStatus, AgentTaskType, OpenaiApiRole, RoomState, ScheduleState
 from service import messageBus
 from ...base import ServiceTestCase
 
@@ -47,6 +47,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await agentService.startup()
         await agentService.load_all_team_agents()
         await scheduler.startup()
+        scheduler._schedule_state = ScheduleState.RUNNING
 
     @classmethod
     async def async_teardown_class(cls):
@@ -162,6 +163,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         """max_turns 用尽后，通过观察 Room 状态并停止调度器。"""
         scheduler.shutdown()
         await scheduler.startup()
+        scheduler._schedule_state = ScheduleState.RUNNING
         room_key = f"general@{TEAM}"
         room = roomService.get_room_by_key(room_key)
         for agent_name in ["alice", "bob"]:

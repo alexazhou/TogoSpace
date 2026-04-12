@@ -6,6 +6,7 @@ from pydantic import BaseModel, ValidationError
 
 from constants import LlmServiceType, OpenaiApiRole
 from controller.baseController import BaseHandler
+from service import schedulerService
 from util import assertUtil, configUtil
 from util.configTypes import LlmServiceConfig
 from util.llmApiUtil.OpenAiModels import OpenAIRequest, OpenAIMessage
@@ -149,6 +150,10 @@ class LlmServiceModifyHandler(BaseHandler):
             s.llm_services[index] = new_service
 
         configUtil.update_setting(mutator)
+
+        if not configUtil.is_initialized():
+            schedulerService.stop_schedule()
+
         self.return_json({"status": "ok"})
 
 
@@ -170,6 +175,11 @@ class LlmServiceDeleteHandler(BaseHandler):
             s.llm_services.pop(index)
 
         configUtil.update_setting(mutator)
+
+        # 删除服务后检查：若无可用 LLM 服务，停止调度
+        if not configUtil.is_initialized():
+            schedulerService.stop_schedule()
+
         self.return_json({"status": "ok", "deleted_name": service.name})
 
 

@@ -16,7 +16,7 @@ from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
-from constants import MessageBusTopic, AgentStatus, AgentTaskType, AgentTaskStatus
+from constants import MessageBusTopic, AgentStatus, AgentTaskType, AgentTaskStatus, ScheduleState
 from util.configTypes import TeamConfig
 from ...base import ServiceTestCase
 
@@ -34,6 +34,11 @@ def _make_mock_agent(name: str, team_name: str = TEAM, agent_id: int = 1) -> Age
     agent.current_db_task = None
     agent.consume_task = AsyncMock()
     return agent
+
+
+def _force_schedule_running() -> None:
+    """强制将调度状态设为 RUNNING，供需要闸门打开的测试使用。"""
+    scheduler._schedule_state = ScheduleState.RUNNING
 
 
 def _make_team_config() -> TeamConfig:
@@ -102,6 +107,7 @@ class TestSchedulerRun(ServiceTestCase):
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
+        _force_schedule_running()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
              patch("service.schedulerService.gtAgentTaskManager") as mock_task_manager:
@@ -213,6 +219,7 @@ class TestSchedulerRun(ServiceTestCase):
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
+        _force_schedule_running()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
              patch("service.schedulerService.gtAgentTaskManager") as mock_task_manager:
@@ -264,6 +271,7 @@ class TestSchedulerRun(ServiceTestCase):
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
+        _force_schedule_running()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
              patch("service.schedulerService.gtAgentTaskManager") as mock_task_manager:
@@ -320,6 +328,7 @@ class TestSchedulerRun(ServiceTestCase):
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         _patch_scheduler_rooms(monkeypatch, r1, r2)
         await scheduler.startup()
+        _force_schedule_running()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
              patch("service.schedulerService.gtAgentTaskManager") as mock_task_manager:
@@ -371,6 +380,7 @@ class TestSchedulerRun(ServiceTestCase):
         )
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
+        _force_schedule_running()
         msg = EventBusMessage(
             topic=MessageBusTopic.ROOM_STATUS_CHANGED,
             payload=_make_scheduling_payload(room, GtAgent(id=1, team_id=1, name="non-existent", role_template_id=1)),
@@ -398,6 +408,7 @@ class TestSchedulerRun(ServiceTestCase):
         )
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
+        _force_schedule_running()
         msg = EventBusMessage(
             topic=MessageBusTopic.ROOM_STATUS_CHANGED,
             payload=_make_scheduling_payload(room, GtAgent(id=1, team_id=1, name="error-agent", role_template_id=1)),
@@ -417,3 +428,86 @@ class TestSchedulerRun(ServiceTestCase):
         with patch("service.schedulerService.agentService.get_agent", return_value=alice):
             scheduler.stop_agent_task(alice.gt_agent.id)
         alice.stop_consumer_task.assert_called_once_with()
+
+
+class TestScheduleGate(ServiceTestCase):
+    """调度闸门（ScheduleState）相关测试。"""
+
+    def setup_method(self):
+        scheduler.shutdown()
+
+    async def test_initial_state_is_stopped(self):
+        """scheduler 初始化后状态应为 STOPPED。"""
+        assert scheduler.get_schedule_state() == ScheduleState.STOPPED
+        assert scheduler.get_schedule_state() != ScheduleState.RUNNING
+
+    async def test_start_schedule_sets_running_when_initialized(self):
+        """LLM 已配置时，start_schedule 应切到 RUNNING。"""
+        await scheduler.startup()
+        with patch("service.schedulerService.configUtil.is_initialized", return_value=True), \
+             patch("service.schedulerService.chat_room.activate_rooms", new_callable=AsyncMock):
+            await scheduler.start_schedule()
+
+        assert scheduler.get_schedule_state() == ScheduleState.RUNNING
+        assert scheduler.get_schedule_state() == ScheduleState.RUNNING
+
+    async def test_start_schedule_sets_blocked_when_not_initialized(self):
+        """LLM 未配置时，start_schedule 应切到 BLOCKED。"""
+        await scheduler.startup()
+        with patch("service.schedulerService.configUtil.is_initialized", return_value=False):
+            await scheduler.start_schedule()
+
+        assert scheduler.get_schedule_state() == ScheduleState.BLOCKED
+        assert scheduler.get_schedule_state() != ScheduleState.RUNNING
+
+    async def test_start_schedule_activates_rooms(self):
+        """start_schedule 进入 RUNNING 后应调用 activate_rooms(None)。"""
+        await scheduler.startup()
+        with patch("service.schedulerService.configUtil.is_initialized", return_value=True), \
+             patch("service.schedulerService.chat_room.activate_rooms", new_callable=AsyncMock) as mock_activate:
+            await scheduler.start_schedule()
+
+        mock_activate.assert_awaited_once_with(None)
+
+    async def test_stop_schedule_resets_to_stopped(self):
+        """stop_schedule 应将状态重置为 STOPPED。"""
+        _force_schedule_running()
+        assert scheduler.get_schedule_state() == ScheduleState.RUNNING
+
+        scheduler.stop_schedule()
+
+        assert scheduler.get_schedule_state() == ScheduleState.STOPPED
+        assert scheduler.get_schedule_state() != ScheduleState.RUNNING
+
+    async def test_event_blocked_when_not_running(self, monkeypatch):
+        """调度未 RUNNING 时，need_scheduling=True 的事件不应创建任务。"""
+        await scheduler.startup()
+        # startup 后状态为 STOPPED
+        assert scheduler.get_schedule_state() == ScheduleState.STOPPED
+
+        with patch("service.schedulerService.gtAgentTaskManager") as mock_task_manager:
+            msg = EventBusMessage(
+                topic=MessageBusTopic.ROOM_STATUS_CHANGED,
+                payload={
+                    "need_scheduling": True,
+                    "gt_room": SimpleNamespace(id=1),
+                    "current_turn_agent": GtAgent(id=1, team_id=1, name="alice", role_template_id=1),
+                },
+            )
+            await scheduler._on_room_status_changed(msg)
+
+        mock_task_manager.create_task.assert_not_called()
+
+    async def test_start_scheduling_skips_when_not_running(self):
+        """start_scheduling 在非 RUNNING 状态下应跳过。"""
+        await scheduler.startup()
+        with patch("service.schedulerService.chat_room.activate_rooms", new_callable=AsyncMock) as mock_activate:
+            await scheduler.start_scheduling(team_name="some_team")
+
+        mock_activate.assert_not_called()
+
+    async def test_shutdown_resets_state(self):
+        """shutdown 应将状态重置为 STOPPED。"""
+        _force_schedule_running()
+        scheduler.shutdown()
+        assert scheduler.get_schedule_state() == ScheduleState.STOPPED
