@@ -1,5 +1,5 @@
 {
-  "_comment": "AgentTeam 配置文件，请根据实际 LLM 服务修改",
+  "_comment": "TeamAgent 配置文件，请根据实际 LLM 服务修改",
 
   "default_llm_server": "qwen",
 

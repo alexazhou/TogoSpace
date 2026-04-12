@@ -1,8 +1,8 @@
 # setting.json 说明
 
-`setting.json` 是 AgentTeam 的运行时配置文件，用于配置 LLM 服务、持久化路径和工作目录等参数。
+`setting.json` 是 TeamAgent 的运行时配置文件，用于配置 LLM 服务、持久化路径和工作目录等参数。
 
-**注意**：修改配置文件后，需要重启 AgentTeam 应用才能生效。
+**注意**：修改配置文件后，需要重启 TeamAgent 应用才能生效。
 
 默认位置：
 
