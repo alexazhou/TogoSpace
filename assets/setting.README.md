@@ -58,7 +58,7 @@
 - `context_window_tokens`：上下文窗口大小
 - `reserve_output_tokens`：预留输出 token，默认 `8192`
 - `compact_trigger_ratio`：触发 compact 的比例，默认 `0.85`
-- `compact_summary_max_tokens`：compact 摘要 token 上限，默认 `2048`
+- `compact_summary_max_tokens`：compact 摘要 token 上限，默认 `6144`
 - `extra_headers`：额外请求头
 
 ## 本地服务示例

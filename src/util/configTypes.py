@@ -95,7 +95,7 @@ class LlmServiceConfig(BaseModel):
     context_window_tokens: int = 131072
     reserve_output_tokens: int = 8192
     compact_trigger_ratio: float = Field(default=0.85, ge=0.0, le=1.0)
-    compact_summary_max_tokens: int = 2048
+    compact_summary_max_tokens: int = 6 * 1024
 
 
 class PersistenceConfig(BaseModel):
