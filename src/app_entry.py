@@ -57,9 +57,12 @@ def _run_backend() -> None:
 
 def _make_icon() -> Image.Image:
     import os
-    icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icons", "togo_status_32.png")
-    if os.path.exists(icon_path):
-        return Image.open(icon_path)
+    icons_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icons")
+    icon_candidates = ["togo_status_32.png", "togo_status_64.png", "togo_status_16.png"]
+    for icon_name in icon_candidates:
+        icon_path = os.path.join(icons_dir, icon_name)
+        if os.path.exists(icon_path):
+            return Image.open(icon_path)
     
     img = Image.new("RGBA", (22, 22), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -67,6 +70,31 @@ def _make_icon() -> Image.Image:
     draw.rectangle((4, 11, 18, 13), fill=(0, 0, 0, 255))
     draw.rectangle((4, 16, 18, 18), fill=(0, 0, 0, 255))
     return img
+
+
+def _apply_macos_status_symbol(icon: pystray.Icon) -> None:
+    import AppKit
+
+    button = icon._status_item.button()
+    if button is None:
+        return
+
+    symbol_factory = getattr(AppKit.NSImage, "imageWithSystemSymbolName_accessibilityDescription_", None)
+    if symbol_factory is None:
+        return
+
+    symbol = symbol_factory("pawprint.fill", None)
+    if symbol is None:
+        return
+
+    config_factory = getattr(AppKit.NSImageSymbolConfiguration, "configurationWithPointSize_weight_scale_", None)
+    if config_factory is not None:
+        symbol = symbol.imageWithSymbolConfiguration_(
+            config_factory(13, AppKit.NSFontWeightMedium, AppKit.NSImageSymbolScaleMedium)
+        )
+
+    symbol.setTemplate_(True)
+    button.setImage_(symbol)
 
 
 def _status_text(item) -> str:
@@ -132,7 +160,13 @@ def _setup(icon: pystray.Icon) -> None:
 
     icon.visible = True
     if sys.platform == "darwin":
-        icon._status_item.button().image().setTemplate_(True)
+        try:
+            _apply_macos_status_symbol(icon)
+        except Exception:
+            # Fall back to the packaged PNG icon if SF Symbols are unavailable.
+            button = icon._status_item.button()
+            if button is not None and button.image() is not None:
+                button.image().setTemplate_(True)
 
     threading.Thread(target=_run_backend, daemon=True).start()
 
