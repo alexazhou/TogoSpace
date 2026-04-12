@@ -32,6 +32,16 @@
 - `llm_services`：模型服务列表，至少要有一个 `enable=true`
 - `default_room_max_turns`：房间默认最大轮次，默认 `100`
 - `workspace_root`：团队默认工作目录根路径
+- `bind_host`：后端 HTTP 服务监听地址，默认 `0.0.0.0`
+- `bind_port`：后端 HTTP 服务监听端口，默认 `8080`
+
+## 本地监听地址与端口
+
+默认监听地址是 `0.0.0.0`，默认端口是 `8080`。
+
+如需手动指定端口，在 `setting.json` 顶层添加或修改 `bind_port`，例如：`"bind_port": 9000`。
+
+如需同时指定监听地址，可一并设置 `bind_host`，例如：`"bind_host": "127.0.0.1"`。
 
 ## `llm_services` 常用字段
 
