@@ -49,9 +49,19 @@ async def startup() -> None:
         logger.warning("当前未配置可用的 LLM 服务，Agent 推理功能不可用。请通过 Web Console 或手动编辑 setting.json 完成配置。")
 
 
-def get_default_model() -> str:
-    llm_config = configUtil.get_app_config().setting.current_llm_service
+def get_default_model_or_none() -> str | None:
+    setting = configUtil.get_app_config().setting
+    llm_config = setting.current_llm_service
+    if llm_config is None:
+        return None
     return llm_config.model
+
+
+def get_default_model() -> str:
+    model = get_default_model_or_none()
+    if model is None:
+        raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
+    return model
 
 
 def _usage_to_log_json(usage: llmApiUtil.OpenAIUsage | None) -> str:
@@ -67,6 +77,8 @@ async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> InferResult
     resolved_provider: str | None = None
     try:
         llm_config = configUtil.get_app_config().setting.current_llm_service
+        if llm_config is None:
+            raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
         resolved_model = model or llm_config.model
         resolved_provider = _TYPE_TO_PROVIDER.get(llm_config.type)
 
@@ -135,6 +147,8 @@ async def infer_stream(
     resolved_provider: str | None = None
     try:
         llm_config = configUtil.get_app_config().setting.current_llm_service
+        if llm_config is None:
+            raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
         resolved_model = model or llm_config.model
         resolved_provider = _TYPE_TO_PROVIDER.get(llm_config.type)
 

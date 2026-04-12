@@ -69,12 +69,10 @@ def test_runtime_configs_skip_disabled_llm_service(tmp_path):
         ],
     }), encoding="utf-8")
 
-    # V13: 配置加载不再因 default 指向已禁用服务而立刻失败
-    # 但访问 current_llm_service 时仍应抛出 ValueError
+    # V13: default 指向已禁用服务时，自动回退到首个可用服务。
     app_config = configUtil.load(str(tmp_path))
-    with pytest.raises(ValueError) as exc_info:
-        _ = app_config.setting.current_llm_service
-    assert "已禁用" in str(exc_info.value) or "未在 llm_services 中定义或已禁用" in str(exc_info.value)
+    assert app_config.setting.current_llm_service is not None
+    assert app_config.setting.current_llm_service.name == "mock"
 
 
 def test_runtime_configs_allow_llm_only_setting(tmp_path):
@@ -475,17 +473,15 @@ def test_empty_llm_services_config_loads_successfully(tmp_path):
     assert app_config.setting.is_llm_configured is False
 
 
-def test_empty_llm_services_current_llm_service_raises(tmp_path):
-    """V13: llm_services 为空时访问 current_llm_service 仍应抛出 ValueError。"""
+def test_empty_llm_services_current_llm_service_returns_none(tmp_path):
+    """V13: llm_services 为空时 current_llm_service 返回 None。"""
     (tmp_path / "setting.json").write_text(json.dumps({
         "llm_services": [],
         "default_llm_server": None,
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path), force_reload=True)
-    with pytest.raises(ValueError) as exc_info:
-        _ = app_config.setting.current_llm_service
-    assert "未配置可用的 LLM 服务" in str(exc_info.value)
+    assert app_config.setting.current_llm_service is None
 
 
 def test_all_disabled_llm_services_loads_successfully(tmp_path):
@@ -505,8 +501,7 @@ def test_all_disabled_llm_services_loads_successfully(tmp_path):
 
     app_config = configUtil.load(str(tmp_path), force_reload=True)
     assert app_config.setting.is_llm_configured is False
-    with pytest.raises(ValueError):
-        _ = app_config.setting.current_llm_service
+    assert app_config.setting.current_llm_service is None
 
 
 def test_is_llm_configured_true_with_enabled_service(tmp_path):

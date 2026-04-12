@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from service.agentService import core
+from util.configTypes import AppConfig, SettingConfig
+from constants import DriverType
 
 
 class _DummyAgent:
@@ -79,3 +81,58 @@ def test_agent_model_resolution_logic():
     template_model = ""
     result = agent_model or template_model or default_model
     assert result == "config-model"
+
+
+@pytest.mark.asyncio
+async def test_load_team_agents_allows_startup_without_available_llm(monkeypatch, tmp_path):
+    team = SimpleNamespace(id=1, name="demo", config={})
+    gt_agent = SimpleNamespace(id=11, team_id=1, name="alice", role_template_id=21, model="", driver=DriverType.NATIVE)
+    template = SimpleNamespace(id=21, name="alice", model=None, soul="mock soul", allowed_tools=None)
+    started: list[int] = []
+
+    class _FakeAgent:
+        def __init__(self, *, gt_agent, system_prompt, driver_config=None, agent_workdir="") -> None:
+            self.gt_agent = gt_agent
+            self.system_prompt = system_prompt
+            self.driver_config = driver_config
+            self.agent_workdir = agent_workdir
+
+        async def startup(self) -> None:
+            started.append(self.gt_agent.id)
+
+    async def _get_team_by_id(team_id: int):
+        assert team_id == 1
+        return team
+
+    async def _get_team_agents(team_id: int):
+        assert team_id == 1
+        return [gt_agent]
+
+    async def _get_role_templates_by_ids(role_template_ids: list[int]):
+        assert role_template_ids == [21]
+        return [template]
+
+    async def _build_agent_system_prompt(**kwargs):
+        return "prompt"
+
+    monkeypatch.setattr(core.gtTeamManager, "get_team_by_id", _get_team_by_id)
+    monkeypatch.setattr(core.gtAgentManager, "get_team_agents", _get_team_agents)
+    monkeypatch.setattr(core.gtRoleTemplateManager, "get_role_templates_by_ids", _get_role_templates_by_ids)
+    monkeypatch.setattr(core, "build_agent_system_prompt", _build_agent_system_prompt)
+    monkeypatch.setattr(core, "Agent", _FakeAgent)
+    monkeypatch.setattr(core, "_agents", {})
+    monkeypatch.setattr(
+        core.configUtil,
+        "get_app_config",
+        lambda: AppConfig(
+            setting=SettingConfig(llm_services=[], default_llm_server=None, workspace_root=str(tmp_path)),
+            group_chat_prompt="group",
+            agent_identity_prompt="identity",
+        ),
+    )
+
+    await core.load_team_agents(1, workspace_root=str(tmp_path))
+
+    assert started == [11]
+    assert 11 in core._agents
+    assert core._agents[11].agent_workdir == f"{tmp_path}/demo"

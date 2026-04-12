@@ -51,13 +51,20 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
     app_config = configUtil.get_app_config()
     base_prompt_tmpl = app_config.group_chat_prompt
     identity_prompt_tmpl = app_config.agent_identity_prompt
-    default_model = llmService.get_default_model()
+    default_model = llmService.get_default_model_or_none()
     resolved_workspace_root = workspace_root or app_config.setting.workspace_root
 
     team_name = gt_team.name
     team_workdir = _resolve_team_workdir(gt_team, resolved_workspace_root)
     os.makedirs(team_workdir, exist_ok=True)
     team_id = gt_team.id
+
+    if default_model is None:
+        logger.warning(
+            "当前未配置可用的 LLM 服务，Team 运行时仅恢复基础能力，推理任务需等待完成初始化配置: team=%s, team_id=%s",
+            team_name,
+            team_id,
+        )
 
     for gt_agent in gt_agents:
         assert gt_agent.role_template_id in templates_by_id, (
@@ -68,7 +75,7 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
         agent_name = gt_agent.name
         template_name = gt_role_template.name
         # model 用于日志记录，推理时如果 gt_agent.model 为空则使用配置中的 model
-        model_name = gt_agent.model or gt_role_template.model or default_model
+        model_name = gt_agent.model or gt_role_template.model or default_model or ""
         driver_config = normalize_driver_config(
             {
                 "driver": gt_agent.driver,
@@ -93,7 +100,11 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
         )
         _agents[gt_agent.id] = agent
         logger.info(
-            f"创建 Agent 实例: agent_id={gt_agent.id}, template={template_name}, model={model_name}, driver={driver_config.driver_type}"
+            "创建 Agent 实例: agent_id=%s, template=%s, model=%s, driver=%s",
+            gt_agent.id,
+            template_name,
+            model_name or "<unconfigured>",
+            driver_config.driver_type,
         )
         await agent.startup()
 
