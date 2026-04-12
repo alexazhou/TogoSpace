@@ -117,7 +117,7 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        name: "AgentTeam ${{ github.ref_name }}"
+        name: "TogoAgent ${{ github.ref_name }}"
         tag_name: ${{ github.ref_name }}
         draft: false
         prerelease: false
