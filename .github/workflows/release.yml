@@ -58,8 +58,7 @@ jobs:
     - name: Install frontend dependencies
       working-directory: frontend
       run: |
-        rm -f package-lock.json
-        npm install
+        npm ci
 
     - name: Import Apple certificate
       if: ${{ env.APPLE_CERTIFICATE_P12 != '' }}
