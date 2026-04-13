@@ -12,7 +12,7 @@ class SystemStatusHandler(BaseHandler):
 
     async def get(self):
         initialized = configUtil.is_initialized()
-        schedule_state = schedulerService.get_schedule_state().value.lower()
+        schedule_state = schedulerService.get_schedule_state()
         if initialized:
             setting = configUtil.get_app_config().setting
             self.return_json({
