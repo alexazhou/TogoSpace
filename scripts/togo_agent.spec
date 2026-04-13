@@ -24,7 +24,7 @@ if not APP_ICON:
 # ── Analysis ──────────────────────────────────────────────────────────────────
 
 a = Analysis(
-    [os.path.join(REPO_ROOT, "src", "app_entry.py")],
+    [os.path.join(REPO_ROOT, "src", "appEntry.py")],
     pathex=[
         os.path.join(REPO_ROOT, "src"),
     ],

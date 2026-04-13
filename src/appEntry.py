@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw
 
 import appPaths
 import backend_main
-from tray_menu import TrayMenu
+from trayMenu import TrayMenu
 from util import configUtil, i18nUtil
 from version import __version__
 
