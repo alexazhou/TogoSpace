@@ -138,6 +138,16 @@ def get_app_config() -> AppConfig:
     return _cached_app_config
 
 
+def get_language() -> str:
+    """获取当前语言设置。"""
+    return get_app_config().setting.language
+
+
+def set_language(lang: str) -> None:
+    """修改语言设置并持久化到 setting.json。"""
+    update_setting(lambda s: setattr(s, "language", lang))
+
+
 def is_initialized() -> bool:
     """判断系统是否已完成 LLM 服务初始化配置。
 
@@ -210,6 +220,7 @@ def _save_setting_to_file() -> None:
         s.model_dump(exclude_unset=True, mode="json") for s in setting.llm_services
     ]
     raw["default_llm_server"] = setting.default_llm_server
+    raw["language"] = setting.language
 
     # 原子写入
     tmp_path = path + ".tmp"

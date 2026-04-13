@@ -50,6 +50,7 @@ application = tornado.web.Application([
     (r"/config/llm_services/(\d+)/modify.json",      settingController.LlmServiceModifyHandler),
     (r"/config/llm_services/(\d+)/delete.json",      settingController.LlmServiceDeleteHandler),
     (r"/config/llm_services/(\d+)/set_default.json",  settingController.LlmServiceSetDefaultHandler),
+    (r"/config/language.json",                       settingController.LanguageHandler),
 
     # System Status & Quick Init (V13)
     (r"/system/status.json",                         systemController.SystemStatusHandler),

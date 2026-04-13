@@ -8,5 +8,11 @@
     "Bash",
     "Glob",
     "Grep"
-  ]
+  ],
+  "i18n": {
+    "display_name": {
+      "zh-CN": "软件工程师",
+      "en": "Software Engineer"
+    }
+  }
 }

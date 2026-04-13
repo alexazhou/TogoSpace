@@ -11,7 +11,7 @@ from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from model.dbModel.gtTeam import GtTeam
 from service import agentService, deptService, roleTemplateService, roomService
-from util import configUtil
+from util import configUtil, i18nUtil
 from util.configTypes import DeptNodeConfig, TeamConfig, TeamRoomConfig
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,7 @@ async def _import_role_templates_from_app_config() -> None:
             model=template.model,
             type=RoleTemplateType.SYSTEM,
             allowed_tools=template.allowed_tools,
+            i18n=template.i18n or {},
         ))
     db_templates = await gtRoleTemplateManager.get_all_role_templates()
     logger.info(f"加载角色模版: {[t.name for t in db_templates]}")
@@ -49,9 +50,16 @@ async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> GtDept:
             error_code="DEPT_AGENT_NOT_FOUND",
         )
 
+    lang = configUtil.get_language()
+    dept_name = i18nUtil.resolve_display_name(node.dept_name, node.i18n, field="dept_name", lang=lang)
+    responsibility = (
+        i18nUtil.resolve_i18n_text(node.i18n.get("responsibility") if node.i18n else None, lang)
+        if node.i18n else None
+    ) or node.responsibility
+
     return GtDept(
-        name=node.dept_name,
-        responsibility=node.responsibility,
+        name=dept_name,
+        responsibility=responsibility,
         manager_id=agent_id_map[node.manager],
         agent_ids=[agent_id_map[name] for name in node.agents],
         children=[await _to_dept_tree_node(team_id, child) for child in node.children],
@@ -74,16 +82,22 @@ async def _to_gt_room(team_id: int, room_config: TeamRoomConfig) -> GtRoom:
             include_special=True,
         )
     ]
+    # 使用稳定 name 作为 DB name；initial_topic 可从 i18n 按语言解析
+    initial_topic = room_config.initial_topic
+    if room_config.i18n and "initial_topic" in room_config.i18n:
+        lang = configUtil.get_language()
+        initial_topic = i18nUtil.resolve_i18n_text(room_config.i18n["initial_topic"], lang) or initial_topic
     return GtRoom(
         id=room_config.id,
         team_id=team_id,
-        name=room_config.name,
+        name=room_config.name,  # 存储稳定 ID；display_name 从 i18n 解析
         type=_infer_room_type(room_config.agents),
-        initial_topic=room_config.initial_topic,
+        initial_topic=initial_topic,
         max_turns=roomService.resolve_room_max_turns(room_config.max_turns),
         agent_ids=agent_ids,
         biz_id=room_config.biz_id,
         tags=list(room_config.tags),
+        i18n=room_config.i18n or {},
     )
 
 
@@ -99,26 +113,35 @@ async def _to_gt_agents(team_id: int, team_config: TeamConfig) -> list[GtAgent]:
             )
             continue
 
+        agent_name = agent.name  # 存储稳定 ID；display_name 从 i18n 解析
         agents.append(GtAgent(
             team_id=team_id,
-            name=agent.name,
+            name=agent_name,
             role_template_id=role_template.id,
             employ_status=EmployStatus.ON_BOARD,
             model=agent.model or "",
             driver=agent.driver,
+            i18n=agent.i18n or {},
         ))
     return agents
 
 
 async def _import_team_from_config(team_config: TeamConfig) -> GtTeam | None:
-    existing = await gtTeamManager.get_team(team_config.name)
+    # UUID 优先去重；无 UUID 时按 stable name 匹配（向后兼容旧格式）
+    existing: GtTeam | None = None
+    if team_config.uuid:
+        existing = await gtTeamManager.get_team_by_uuid(team_config.uuid)
+    if existing is None:
+        existing = await gtTeamManager.get_team(team_config.name)
     if existing is not None:
         logger.info("Team '%s' 已存在，跳过导入", team_config.name)
         return None
 
     team = await gtTeamManager.save_team(GtTeam(
-        name=team_config.name,
+        name=team_config.name,  # 存储稳定 ID；display_name 从 i18n 解析
+        uuid=team_config.uuid,
         config=team_config.config or {},
+        i18n=team_config.i18n or {},
         enabled=1,
         deleted=0,
     ))

@@ -5,10 +5,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from constants import LlmServiceType, DriverType
 import appPaths
 
+# 多语言字段类型
+I18nText = dict[str, str]   # e.g. {"zh-CN": "研究员", "en": "Researcher"}
+I18nData = dict[str, I18nText]  # e.g. {"display_name": {"zh-CN": "研究员", "en": "Researcher"}}
+
 
 class DeptNodeConfig(BaseModel):
     """递归的部门树节点，对应 config 中 dept_tree 的每个节点（配置文件用）。"""
-    dept_name: str
+    dept_name: str = ""
+    i18n: "I18nData | None" = None  # 含 dept_name, responsibility 等多语言字段
     responsibility: str = ""
     manager: str
     agents: List[str] = Field(default_factory=list)
@@ -46,6 +51,7 @@ def _default_llm_extra_headers() -> dict[str, str]:
 class AgentConfig(BaseModel):
     """Configuration for an agent in a team, referencing a role template."""
     name: str  # Nickname of the agent in the team
+    i18n: I18nData | None = None  # 多语言数据，含 display_name
     role_template: str  # Name of the RoleTemplate to use in config import/export
     model: Optional[str] = None  # 覆盖 RoleTemplate.model
     driver: DriverType = DriverType.TSP
@@ -54,9 +60,10 @@ class AgentConfig(BaseModel):
 class TeamRoomConfig(BaseModel):
     """Single room item in team config."""
     id: Optional[int] = None
-    name: str
+    name: str = ""
+    i18n: I18nData | None = None  # 含 display_name, initial_topic 等多语言字段
     agents: List[str]
-    initial_topic: str = ""
+    initial_topic: str = ""  # 保留旧格式兼容
     max_turns: int | None = None
     biz_id: str | None = None
     tags: List[str] = Field(default_factory=list)
@@ -64,7 +71,9 @@ class TeamRoomConfig(BaseModel):
 
 class TeamConfig(BaseModel):
     """Canonical team config shape loaded from JSON/DB."""
+    uuid: str | None = None  # 团队唯一标识，用于 UUID 去重
     name: str
+    i18n: I18nData | None = None  # 多语言数据，含 display_name
     config: dict[str, Any] = Field(default_factory=dict)
     agents: List[AgentConfig] = Field(default_factory=list)
     dept_tree: Optional[DeptNodeConfig] = None
@@ -74,6 +83,7 @@ class TeamConfig(BaseModel):
 class RoleTemplateConfig(BaseModel):
     """Role template definition loaded from config/role_templates/*.json."""
     name: str
+    i18n: I18nData | None = None  # 多语言数据，含 display_name
     soul: str = ""
     prompt_file: str = ""
     model: Optional[str] = None
@@ -117,6 +127,7 @@ class PersistenceConfig(BaseModel):
 class SettingConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    language: str = "zh-CN"  # 界面语言，默认中文
     default_llm_server: str | None = None
     llm_services: list[LlmServiceConfig] = Field(default_factory=list)
     default_room_max_turns: int = 100

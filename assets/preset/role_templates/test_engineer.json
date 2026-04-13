@@ -17,5 +17,11 @@
     "mcp__chrome__new_page",
     "mcp__chrome__list_pages",
     "mcp__chrome__wait_for"
-  ]
+  ],
+  "i18n": {
+    "display_name": {
+      "zh-CN": "测试工程师",
+      "en": "Test Engineer"
+    }
+  }
 }

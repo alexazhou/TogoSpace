@@ -19,10 +19,12 @@ class SystemStatusHandler(BaseHandler):
                 "initialized": True,
                 "default_llm_server": setting.default_llm_server,
                 "schedule_state": schedule_state,
+                "language": configUtil.get_language(),
             })
         else:
             self.return_json({
                 "initialized": False,
                 "message": "当前未配置大模型服务",
                 "schedule_state": schedule_state,
+                "language": configUtil.get_language(),
             })

@@ -1,30 +1,112 @@
 {
   "name": "默认团队",
+  "uuid": "preset-default-team-v18",
+  "i18n": {
+    "display_name": {
+      "zh-CN": "默认团队",
+      "en": "Default Team"
+    }
+  },
   "agents": [
-    { "name": "王老师", "role_template": "researcher" },
-    { "name": "小马哥", "role_template": "project_manager" },
-    { "name": "小A", "role_template": "software_engineer" },
-    { "name": "小B", "role_template": "test_engineer" },
-    { "name": "小刘", "role_template": "intern_tsp" }
+    {
+      "name": "王老师",
+      "role_template": "researcher",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "王老师",
+          "en": "Prof. Wang"
+        }
+      }
+    },
+    {
+      "name": "小马哥",
+      "role_template": "project_manager",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "小马哥",
+          "en": "Ma"
+        }
+      }
+    },
+    {
+      "name": "小A",
+      "role_template": "software_engineer",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "小A",
+          "en": "Engineer A"
+        }
+      }
+    },
+    {
+      "name": "小B",
+      "role_template": "test_engineer",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "小B",
+          "en": "QA B"
+        }
+      }
+    },
+    {
+      "name": "小刘",
+      "role_template": "intern_tsp",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "小刘",
+          "en": "Intern Liu"
+        }
+      }
+    }
   ],
   "preset_rooms": [
     {
       "name": "王老师",
       "agents": ["Operator", "王老师"],
       "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
-      "max_turns": 100
+      "max_turns": 100,
+      "i18n": {
+        "display_name": {
+          "zh-CN": "王老师",
+          "en": "Prof. Wang"
+        },
+        "initial_topic": {
+          "zh-CN": "你好，我是人类操作者。你可以根据我的指令执行任务。",
+          "en": "Hello, I am the human operator. You can execute tasks based on my instructions."
+        }
+      }
     },
     {
       "name": "小马哥",
       "agents": ["Operator", "小马哥"],
       "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
-      "max_turns": 100
+      "max_turns": 100,
+      "i18n": {
+        "display_name": {
+          "zh-CN": "小马哥",
+          "en": "Ma"
+        },
+        "initial_topic": {
+          "zh-CN": "你好，我是人类操作者。你可以根据我的指令执行任务。",
+          "en": "Hello, I am the human operator. You can execute tasks based on my instructions."
+        }
+      }
     },
     {
       "name": "小刘",
       "agents": ["Operator", "小刘"],
       "initial_topic": "你好，我是人类操作者。你主要协助做文件查找与信息检索。",
-      "max_turns": 100
+      "max_turns": 100,
+      "i18n": {
+        "display_name": {
+          "zh-CN": "小刘",
+          "en": "Intern Liu"
+        },
+        "initial_topic": {
+          "zh-CN": "你好，我是人类操作者。你主要协助做文件查找与信息检索。",
+          "en": "Hello, I am the human operator. Your main role is to assist with file search and information retrieval."
+        }
+      }
     }
   ],
   "dept_tree": {
@@ -32,6 +114,16 @@
     "responsibility": "负责整体运营与协作",
     "manager": "小马哥",
     "agents": ["小马哥", "王老师", "小A", "小B", "小刘"],
-    "children": []
+    "children": [],
+    "i18n": {
+      "dept_name": {
+        "zh-CN": "总部",
+        "en": "Headquarters"
+      },
+      "responsibility": {
+        "zh-CN": "负责整体运营与协作",
+        "en": "Responsible for overall operations and collaboration"
+      }
+    }
   }
 }
