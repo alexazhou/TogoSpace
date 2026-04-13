@@ -246,3 +246,24 @@ async def test_resolve_compact_config_uses_config_model_when_agent_model_empty(m
     resolved_model, llm_config, trigger_tokens, hard_limit_tokens = runner._resolve_compact_config()
 
     assert resolved_model == "configured-model"
+
+
+# ─── handle_cancel_turn 相关测试 ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_handle_cancel_turn_calls_driver_then_history(turn_runner):
+    """handle_cancel_turn 应依次调用 driver.cancel_turn 和 history.finalize_cancel_turn。"""
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.cancel_turn = AsyncMock()
+    turn_runner._history.finalize_cancel_turn = AsyncMock()
+
+    call_order = []
+    turn_runner.driver.cancel_turn.side_effect = lambda: call_order.append("driver")
+    turn_runner._history.finalize_cancel_turn.side_effect = lambda: call_order.append("history")
+
+    await turn_runner.handle_cancel_turn()
+
+    turn_runner.driver.cancel_turn.assert_awaited_once()
+    turn_runner._history.finalize_cancel_turn.assert_awaited_once()
+    assert call_order == ["driver", "history"]

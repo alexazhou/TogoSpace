@@ -430,3 +430,171 @@ async def test_append_history_message_uses_last_seq_after_compact_trim():
 
     assert appended.seq == 5
     assert [item.seq for item in history] == [1, 2, 3, 4, 5]
+
+
+# ─── finalize_cancel_turn 相关测试 ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_finalize_cancel_turn_no_active_turn_is_noop():
+    """无 active turn 时，finalize_cancel_turn 什么都不做。"""
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0, tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"), seq=1),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "done"), seq=2, tags=[AgentHistoryTag.ROOM_TURN_FINISH]),
+        ],
+    )
+    original_len = len(history)
+
+    await history.finalize_cancel_turn()
+
+    assert len(history) == original_len
+
+
+@pytest.mark.asyncio
+async def test_finalize_cancel_turn_marks_init_items_as_cancelled():
+    """场景 A：INIT 占位项应被标记为 CANCELLED。"""
+    init_assistant = GtAgentHistory.build_placeholder(role=OpenaiApiRole.ASSISTANT, status=AgentHistoryStatus.INIT)
+    init_assistant.agent_id = 1
+    init_assistant.seq = 2
+    init_assistant.id = 42  # 模拟已持久化
+
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0, tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"), seq=1, status=AgentHistoryStatus.SUCCESS),
+            init_assistant,
+        ],
+    )
+
+    with patch(
+        "service.agentService.agentHistoryStore.gtAgentHistoryManager.update_agent_history_by_id",
+        AsyncMock(),
+    ), patch(
+        "service.agentService.agentHistoryStore.gtAgentHistoryManager.append_agent_history_message",
+        AsyncMock(side_effect=lambda item: item),
+    ):
+        await history.finalize_cancel_turn()
+
+    # INIT 项应变为 CANCELLED
+    assert init_assistant.status == AgentHistoryStatus.CANCELLED
+    # 最后一条应是 ROOM_TURN_FINISH
+    last = history.last()
+    assert AgentHistoryTag.ROOM_TURN_FINISH in last.tags
+    assert history.has_active_turn() is False
+
+
+@pytest.mark.asyncio
+async def test_finalize_cancel_turn_supplements_missing_tool_results():
+    """场景 B-2：ASSISTANT 声明了 tool_call 但没有对应 TOOL 记录时，应补写 CANCELLED TOOL 记录。"""
+    assistant_item = _make_assistant_tool_call_item(
+        seq=1, tool_call_ids=["call_1", "call_2"], status=AgentHistoryStatus.SUCCESS,
+    )
+
+    # 只有 call_1 有 TOOL 结果，call_2 缺失
+    tool_result_item = _make_item(
+        llmApiUtil.OpenAIMessage.tool_result("call_1", '{"ok": true}'),
+        seq=2, status=AgentHistoryStatus.SUCCESS,
+    )
+
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0, tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+            assistant_item,
+            tool_result_item,
+        ],
+    )
+
+    appended_items = []
+    async def _track_append(item):
+        appended_items.append(item)
+        item.seq = len(history) + len(appended_items) - 1
+        return item
+
+    with patch(
+        "service.agentService.agentHistoryStore.gtAgentHistoryManager.append_agent_history_message",
+        AsyncMock(side_effect=_track_append),
+    ), patch(
+        "service.agentService.agentHistoryStore.gtAgentHistoryManager.update_agent_history_by_id",
+        AsyncMock(),
+    ):
+        await history.finalize_cancel_turn()
+
+    # 应该补写了 call_2 的 TOOL 记录 + ROOM_TURN_FINISH
+    tool_items = [item for item in history if item.role == OpenaiApiRole.TOOL]
+    assert len(tool_items) == 2  # call_1 原有 + call_2 补写
+    supplemented = [item for item in tool_items if item.tool_call_id == "call_2"]
+    assert len(supplemented) == 1
+    assert supplemented[0].status == AgentHistoryStatus.CANCELLED
+
+    # turn 应已关闭
+    assert history.has_active_turn() is False
+
+
+@pytest.mark.asyncio
+async def test_finalize_cancel_turn_with_init_assistant_having_tool_calls():
+    """场景 B-3：ASSISTANT INIT 占位项 + tool_calls，应同时标记 CANCELLED 并补写 TOOL。"""
+    # ASSISTANT 处于 INIT 但已有 tool_calls（推理完成但尚未 finalize 即被取消）
+    init_assistant = _make_assistant_tool_call_item(
+        seq=1, tool_call_ids=["call_x"], status=AgentHistoryStatus.INIT,
+    )
+    init_assistant.id = 99
+
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0, tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+            init_assistant,
+        ],
+    )
+
+    with patch(
+        "service.agentService.agentHistoryStore.gtAgentHistoryManager.update_agent_history_by_id",
+        AsyncMock(),
+    ), patch(
+        "service.agentService.agentHistoryStore.gtAgentHistoryManager.append_agent_history_message",
+        AsyncMock(side_effect=lambda item: item),
+    ):
+        await history.finalize_cancel_turn()
+
+    # INIT ASSISTANT 应被标记 CANCELLED
+    assert init_assistant.status == AgentHistoryStatus.CANCELLED
+    # INIT 项 has_message=False，所以不会走补写 TOOL 的逻辑（它的 tool_calls 不通过 openai_message 暴露）
+    # 最后一条应是 ROOM_TURN_FINISH
+    assert history.has_active_turn() is False
+
+
+@pytest.mark.asyncio
+async def test_finalize_cancel_turn_cancelled_items_excluded_from_infer_messages():
+    """CANCELLED 状态的项在 build_infer_messages 时应被跳过（has_message=False 的占位项）。"""
+    init_assistant = GtAgentHistory.build_placeholder(role=OpenaiApiRole.ASSISTANT, status=AgentHistoryStatus.INIT)
+    init_assistant.agent_id = 1
+    init_assistant.seq = 1
+    init_assistant.id = 10
+
+    history = AgentHistoryStore(
+        agent_id=1,
+        items=[
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0, tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+            init_assistant,
+        ],
+    )
+
+    with patch(
+        "service.agentService.agentHistoryStore.gtAgentHistoryManager.update_agent_history_by_id",
+        AsyncMock(),
+    ), patch(
+        "service.agentService.agentHistoryStore.gtAgentHistoryManager.append_agent_history_message",
+        AsyncMock(side_effect=lambda item: item),
+    ):
+        await history.finalize_cancel_turn()
+
+    msgs = history.build_infer_messages()
+    contents = [msg.content for msg in msgs]
+    # 应包含 u1 和 ROOM_TURN_FINISH 文本，但不包含 CANCELLED 占位
+    assert "u1" in contents
+    assert any("中断" in c for c in contents)  # ROOM_TURN_FINISH 文本
