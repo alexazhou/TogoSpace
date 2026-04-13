@@ -78,4 +78,4 @@ class TestSystemStatus(_ApiServiceCase):
             data = await self._status(client)
 
         assert "schedule_state" in data
-        assert data["schedule_state"] in ("stopped", "blocked", "running")
+        assert data["schedule_state"] in ("STOPPED", "BLOCKED", "RUNNING")

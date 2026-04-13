@@ -121,7 +121,7 @@ class TestQuickInit(_ApiServiceCase):
         assert list_data["default_llm_server"] == "default"
 
     async def test_quick_init_updates_initialized(self):
-        """快速初始化后系统状态变为 initialized: true，调度状态变为 running。"""
+        """快速初始化后系统状态变为 initialized: true，调度状态变为 RUNNING。"""
         async with aiohttp.ClientSession() as client:
             # 执行初始化
             await self._quick_init(client, {
@@ -135,7 +135,7 @@ class TestQuickInit(_ApiServiceCase):
 
         assert after["initialized"] is True
         assert after["default_llm_server"] == "default"
-        assert after["schedule_state"] == "running"
+        assert after["schedule_state"] == "RUNNING"
 
     async def test_quick_init_invalid_url(self):
         """URL 格式错误返回 400。"""
