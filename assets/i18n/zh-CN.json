@@ -1,0 +1,18 @@
+{
+  "status_starting": "启动中…",
+  "status_running": "运行中",
+  "status_stopped": "已停止",
+  "status_error": "启动失败: {e}",
+  "status_label": "状态: {s}",
+  "open_web": "打开 Web 界面",
+  "open_config_dir": "打开配置目录",
+  "reset_data": "重置数据",
+  "version": "版本: v{v}",
+  "quit": "退出",
+  "confirm_reset": "确定要重置所有数据吗？\n所有聊天室、成员、消息记录将被删除，此操作不可撤销。",
+  "reset_done_title": "重置成功",
+  "reset_done_body": "数据已清除，请重新启动程序。",
+  "language_menu": "语言 / Language",
+  "lang_zh": "简体中文",
+  "lang_en": "English"
+}

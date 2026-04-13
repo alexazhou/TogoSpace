@@ -50,7 +50,7 @@ class TrayMenu:
 
     def _cb_status(self, item) -> str:
         """状态栏显示回调。"""
-        return i18nUtil.tray_t("status_label", s=self._status)
+        return i18nUtil.t("status_label", s=self._status)
 
     def _cb_open_web(self, icon, item) -> None:
         """打开 Web 界面。"""
@@ -86,7 +86,7 @@ class TrayMenu:
         try:
             confirmed = messagebox.askyesno(
                 "TogoAgent",
-                i18nUtil.tray_t("confirm_reset"),
+                i18nUtil.t("confirm_reset"),
                 icon="warning",
                 parent=root,
             )
@@ -108,8 +108,8 @@ class TrayMenu:
         root.attributes("-topmost", True)
         try:
             messagebox.showinfo(
-                i18nUtil.tray_t("reset_done_title"),
-                i18nUtil.tray_t("reset_done_body"),
+                i18nUtil.t("reset_done_title"),
+                i18nUtil.t("reset_done_body"),
                 parent=root,
             )
         finally:
@@ -125,22 +125,22 @@ class TrayMenu:
 
         return pystray.Menu(
             pystray.MenuItem(self._cb_status, None, enabled=False),
-            pystray.MenuItem(i18nUtil.tray_t("open_web"), self._cb_open_web),
+            pystray.MenuItem(i18nUtil.t("open_web"), self._cb_open_web),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18nUtil.tray_t("open_config_dir"), self._cb_open_config_dir),
-            pystray.MenuItem(i18nUtil.tray_t("reset_data"), self._cb_reset_data),
+            pystray.MenuItem(i18nUtil.t("open_config_dir"), self._cb_open_config_dir),
+            pystray.MenuItem(i18nUtil.t("reset_data"), self._cb_reset_data),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
-                i18nUtil.tray_t("language_menu"),
+                i18nUtil.t("language_menu"),
                 pystray.Menu(
                     pystray.MenuItem(
-                        i18nUtil.tray_t("lang_zh"),
+                        i18nUtil.t("lang_zh"),
                         lambda icon, item: self._cb_set_language("zh-CN"),
                         checked=lambda item: current_lang == "zh-CN",
                         radio=True,
                     ),
                     pystray.MenuItem(
-                        i18nUtil.tray_t("lang_en"),
+                        i18nUtil.t("lang_en"),
                         lambda icon, item: self._cb_set_language("en"),
                         checked=lambda item: current_lang == "en",
                         radio=True,
@@ -148,6 +148,6 @@ class TrayMenu:
                 ),
             ),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(i18nUtil.tray_t("version", v=self._version), None, enabled=False),
-            pystray.MenuItem(i18nUtil.tray_t("quit"), self._cb_quit),
+            pystray.MenuItem(i18nUtil.t("version", v=self._version), None, enabled=False),
+            pystray.MenuItem(i18nUtil.t("quit"), self._cb_quit),
         )

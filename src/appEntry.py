@@ -45,11 +45,11 @@ def _run_backend() -> None:
         _tray_icon.update_menu()
 
     try:
-        _tray_menu.set_status(i18nUtil.tray_t("status_running"))
+        _tray_menu.set_status(i18nUtil.t("status_running"))
         loop.run_until_complete(backend_main.main(port=bind_port))
-        _tray_menu.set_status(i18nUtil.tray_t("status_stopped"))
+        _tray_menu.set_status(i18nUtil.t("status_stopped"))
     except Exception as e:
-        _tray_menu.set_status(i18nUtil.tray_t("status_error", e=e))
+        _tray_menu.set_status(i18nUtil.t("status_error", e=e))
     finally:
         loop.close()
 
@@ -90,7 +90,7 @@ def _on_tray_ready(icon: pystray.Icon) -> None:
     # 应用平台特定的托盘图标处理
     pal.apply_tray_icon(icon)
 
-    _tray_menu.set_status(i18nUtil.tray_t("status_starting"))
+    _tray_menu.set_status(i18nUtil.t("status_starting"))
     threading.Thread(target=_run_backend, daemon=True).start()
 
 
