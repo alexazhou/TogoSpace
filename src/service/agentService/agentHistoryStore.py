@@ -235,6 +235,53 @@ class AgentHistoryStore:
     def has_active_turn(self) -> bool:
         return self.get_current_turn_start_index() is not None
 
+    async def finalize_cancel_turn(self) -> None:
+        """取消当前 active turn：将 INIT 占位填充为 CANCELLED，补写缺失的 TOOL 记录，追加 ROOM_TURN_FINISH。
+
+        处理逻辑参见 V17 技术文档 §3.2。
+        """
+        start_idx = self.get_current_turn_start_index()
+        if start_idx is None:
+            logger.info("[cancel-turn] agent_id=%d, 无 active turn，跳过", self._agent_id)
+            return
+
+        cancel_reason = "cancelled by user"
+        turn_items = self._items[start_idx:]
+
+        # 1. 将所有 INIT 占位填充为 CANCELLED
+        for item in turn_items:
+            if item.status == AgentHistoryStatus.INIT:
+                await self.finalize_history_item(
+                    item.id,
+                    message=None,
+                    status=AgentHistoryStatus.CANCELLED,
+                    error_message=cancel_reason,
+                )
+
+        # 2. 补写缺失的 TOOL 记录（ASSISTANT 声明了 tool_call 但无对应 TOOL 记录的情况）
+        for item in turn_items:
+            if item.role != OpenaiApiRole.ASSISTANT or not item.has_message:
+                continue
+            tool_calls = item.tool_calls or []
+            for tc in tool_calls:
+                existing = self.find_tool_result_by_call_id(tc.id)
+                if existing is None:
+                    tool_message = llmApiUtil.OpenAIMessage.tool_result(tc.id, cancel_reason)
+                    await self.append_history_message(GtAgentHistory.build(
+                        tool_message,
+                        status=AgentHistoryStatus.CANCELLED,
+                        error_message=cancel_reason,
+                    ))
+
+        # 3. 追加 ROOM_TURN_FINISH 关闭 active turn
+        finish_text = "本轮任务已被操作者中断，请以下一条新消息为起点重新出发。"
+        await self.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, finish_text),
+            tags=[AgentHistoryTag.ROOM_TURN_FINISH],
+        ))
+
+        logger.info("[cancel-turn] agent_id=%d, turn 已关闭", self._agent_id)
+
     # ─── Compact 相关方法 ─────────────────────────────────────
 
     def build_infer_messages(self) -> list[llmApiUtil.OpenAIMessage]:

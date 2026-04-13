@@ -81,3 +81,7 @@ class AgentDriver:
 
     async def run_chat_turn(self, task: GtAgentTask, synced_count: int) -> None:
         raise NotImplementedError
+
+    async def cancel_turn(self) -> None:
+        """人工取消当前 turn 时调用。子类可覆写以执行 driver 特有的清理。"""
+        pass

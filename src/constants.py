@@ -122,15 +122,16 @@ class SystemConfigKey(EnhanceEnum):
 
 
 class AgentHistoryTag(EnhanceEnum):
-    ROOM_TURN_BEGIN = "ROOM_TURN_BEGIN"
-    ROOM_TURN_FINISH = "ROOM_TURN_FINISH"
-    COMPACT_SUMMARY = "COMPACT_SUMMARY"
+    ROOM_TURN_BEGIN = auto()
+    ROOM_TURN_FINISH = auto()
+    COMPACT_SUMMARY = auto()
 
 
 class AgentHistoryStatus(EnhanceEnum):
-    INIT = "INIT"
-    SUCCESS = "SUCCESS"
-    FAILED = "FAILED"
+    INIT = auto()
+    SUCCESS = auto()
+    FAILED = auto()
+    CANCELLED = auto()
 
 
 class AgentActivityType(EnhanceEnum):
@@ -149,26 +150,27 @@ class AgentActivityStatus(EnhanceEnum):
 
 class AgentTaskType(EnhanceEnum):
     """Agent 任务类型枚举。"""
-    ROOM_MESSAGE = "ROOM_MESSAGE"  # 聊天室消息处理任务
+    ROOM_MESSAGE = auto()
 
 
 class AgentTaskStatus(EnhanceEnum):
     """Agent 任务状态枚举。"""
-    PENDING = "PENDING"    # 待处理
-    RUNNING = "RUNNING"    # 正在处理
-    COMPLETED = "COMPLETED"  # 已完成
-    FAILED = "FAILED"      # 失败
+    PENDING = auto()      # 待处理
+    RUNNING = auto()      # 正在处理
+    COMPLETED = auto()    # 已完成
+    FAILED = auto()       # 失败
+    CANCELLED = auto()    # 被人工停止
 
 
 class TurnStepResult(EnhanceEnum):
     """Turn 内部单步推进结果枚举。"""
-    TURN_DONE = "TURN_DONE"          # 当前 turn 已完成，通常表示 finish_chat_turn 已执行成功
-    NO_ACTION = "NO_ACTION"          # 当前 step 未产出可执行动作，需要按失败行动逻辑处理
-    CONTINUE = "CONTINUE"            # 当前 turn 仍需继续推进，进入下一个 step
+    TURN_DONE = auto()    # 当前 turn 已完成，通常表示 finish_chat_turn 已执行成功
+    NO_ACTION = auto()    # 当前 step 未产出可执行动作，需要按失败行动逻辑处理
+    CONTINUE = auto()     # 当前 turn 仍需继续推进，进入下一个 step
 
 
 class ScheduleState(EnhanceEnum):
     """调度闸门状态。"""
-    STOPPED = "STOPPED"    # 调度未开启或已显式停止
-    BLOCKED = "BLOCKED"    # 前置条件不满足（如未配置 LLM）
-    RUNNING = "RUNNING"    # 允许房间激活、创建 task、启动 consumer
+    STOPPED = auto()    # 调度未开启或已显式停止
+    BLOCKED = auto()    # 前置条件不满足（如未配置 LLM）
+    RUNNING = auto()    # 允许房间激活、创建 task、启动 consumer
