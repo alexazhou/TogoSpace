@@ -2,7 +2,7 @@
 运行时路径模块。
 
 所有变量在开发模式下指向仓库内默认位置，打包模式下由
-app_entry.py 在后端启动前覆盖为用户目录（~/.togo_agent/）。
+appEntry.py 在后端启动前覆盖为用户目录（~/.togo_agent/）。
 """
 import os
 import platform

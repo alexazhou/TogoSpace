@@ -14,9 +14,9 @@
 | 入口 | 模式 | 说明 |
 |------|------|------|
 | `src/backend_main.py` | 纯后端，无 GUI | 现有行为完全不变，命令行直接运行 |
-| `src/app_entry.py` | 后端 + 托盘 GUI | PyInstaller 打包入口，启动托盘并在子线程内运行后端 |
+| `src/appEntry.py` | 后端 + 托盘 GUI | PyInstaller 打包入口，启动托盘并在子线程内运行后端 |
 
-`app_entry.py` 直接调用 `backend_main.main(config_dir, port)`，后端代码**零改动**。
+`appEntry.py` 直接调用 `backend_main.main(config_dir, port)`，后端代码**零改动**。
 
 ---
 
@@ -147,7 +147,7 @@ pyinstaller --windowed --onedir \
   --add-data "src/prompts:src/prompts" \
   --add-data "assets/frontend:assets/frontend" \
   --icon assets/icon.icns \
-  src/app_entry.py
+  src/appEntry.py
 ```
 
 ### 目录分工
@@ -165,7 +165,7 @@ pyinstaller --windowed --onedir \
 2. **`--windowed`**：不弹终端窗口（macOS/Windows）
 3. **图标格式**：macOS 需 `.icns`，Windows 需 `.ico`，pystray 运行时使用 `PIL.Image`
 4. **路径解析**：打包后 `__file__` 指向 bundle 内路径，`configUtil._resolve_preset_dir()` 依赖 `__file__` 相对路径，打包后需验证是否正确解析（可能需要改用 `sys._MEIPASS`）
-5. **macOS 必要初始化**（已在 `app_entry.py` 实现）：
+5. **macOS 必要初始化**（已在 `appEntry.py` 实现）：
    - `NSApplication.setActivationPolicy_(NSApplicationActivationPolicyAccessory)`：无 Dock 图标，仅菜单栏常驻
    - `image.setTemplate_(True)`：图标标记为 template image，自动适配深/浅色菜单栏
 
@@ -183,4 +183,4 @@ pyinstaller --windowed --onedir \
 - [x] 图标资源：临时生成占位图，存放于 `assets/`
 - [x] 版本号来源：`src/version.py` 中的 `__version__`
 - [x] Web 前端：由后端托管静态文件，构建产物放 `assets/frontend/`，打包时内嵌
-- [x] `app_entry.py` 位置：放在 `src/` 下
+- [x] `appEntry.py` 位置：放在 `src/` 下

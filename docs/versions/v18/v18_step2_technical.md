@@ -726,7 +726,7 @@ tui_i18n.set_language(resp["language"])
 macOS 托盘复用与 TUI 相同的翻译字典模式：
 
 ```python
-# src/app_i18n.py（或直接内嵌在 app_entry.py）
+# src/app_i18n.py（或直接内嵌在 appEntry.py）
 _TRAY_TRANSLATIONS = {
     "zh-CN": {
         "status": "状态",
@@ -827,7 +827,7 @@ def _set_language_and_rebuild(lang: str, icon: pystray.Icon):
 | `src/controller/systemController.py` | `SystemStatusHandler` 返回追加 `language` 字段 |
 | `src/controller/teamController.py` | 列表/详情 API 追加 `display_name` |
 | `src/route.py` | 注册 `/config/language.json` |
-| `src/app_entry.py` | 菜单项国际化 + 语言切换菜单 |
+| `src/appEntry.py` | 菜单项国际化 + 语言切换菜单 |
 | `assets/preset/role_templates/*.json` | 改为内嵌多语言格式 |
 | `assets/preset/teams/default.json` | 改为内嵌多语言格式 + UUID |
 | `assets/config_template.json` | 新增 `language` 默认值 |
