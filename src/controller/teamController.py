@@ -116,7 +116,7 @@ def _team_to_dict(team: GtTeam) -> dict[str, Any]:
     return {
         "id": team.id,
         "name": team.name,
-        "display_name": i18nUtil.resolve_display_name(team.name, team.i18n),
+        "display_name": i18nUtil.extract_i18n_str(team.i18n.get("display_name"), default=team.name),
         "working_directory": working_directory,
         "config": config,
         "enabled": team.enabled,
@@ -195,7 +195,7 @@ class TeamDetailHandler(BaseHandler):
             {
                 "id": team.id,
                 "name": team.name,
-                "display_name": i18nUtil.resolve_display_name(team.name, team.i18n),
+                "display_name": i18nUtil.extract_i18n_str(team.i18n.get("display_name"), default=team.name),
                 "working_directory": _split_team_config(team.config)[0],
                 "config": _split_team_config(team.config)[1],
                 "enabled": team.enabled,

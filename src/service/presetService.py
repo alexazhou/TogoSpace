@@ -51,11 +51,8 @@ async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> GtDept:
         )
 
     lang = configUtil.get_language()
-    dept_name = i18nUtil.resolve_display_name(node.dept_name, node.i18n, field="dept_name", lang=lang)
-    responsibility = (
-        i18nUtil.resolve_i18n_text(node.i18n.get("responsibility") if node.i18n else None, lang)
-        if node.i18n else None
-    ) or node.responsibility
+    dept_name = i18nUtil.extract_i18n_str(node.i18n.get("dept_name") if node.i18n else None, default=node.dept_name, lang=lang)
+    responsibility = i18nUtil.extract_i18n_str(node.i18n.get("responsibility") if node.i18n else None, default=node.responsibility, lang=lang)
 
     return GtDept(
         name=dept_name,
@@ -84,9 +81,10 @@ async def _to_gt_room(team_id: int, room_config: TeamRoomConfig) -> GtRoom:
     ]
     # 使用稳定 name 作为 DB name；initial_topic 可从 i18n 按语言解析
     initial_topic = room_config.initial_topic
+
     if room_config.i18n and "initial_topic" in room_config.i18n:
         lang = configUtil.get_language()
-        initial_topic = i18nUtil.resolve_i18n_text(room_config.i18n["initial_topic"], lang) or initial_topic
+        initial_topic = i18nUtil.extract_i18n_str(room_config.i18n.get("initial_topic"), default=initial_topic, lang=lang)
     return GtRoom(
         id=room_config.id,
         team_id=team_id,
