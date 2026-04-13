@@ -7,7 +7,9 @@ import os
 import shutil
 import subprocess
 import sys
+import tkinter as tk
 import webbrowser
+from tkinter import messagebox
 
 import pystray
 
@@ -78,9 +80,6 @@ class TrayMenu:
 
     def _cb_reset_data(self, icon, item) -> None:
         """重置所有数据。"""
-        import tkinter as tk
-        from tkinter import messagebox
-
         root = tk.Tk()
         root.withdraw()
         root.attributes("-topmost", True)
