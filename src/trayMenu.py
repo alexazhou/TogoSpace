@@ -31,14 +31,16 @@ class TrayMenu:
         self._icon = tray_icon
         self._web_url = web_url
         self._on_quit = on_quit
-        self._status: str = ""
+        self._status_key: str = ""
+        self._status_kwargs: dict[str, object] = {}
         self._version: str = ""
 
     # ── 状态管理 ─────────────────────────────────────────────────────────────
 
-    def set_status(self, status: str) -> None:
+    def set_status(self, status_key: str, **kwargs: object) -> None:
         """更新状态并刷新菜单显示。"""
-        self._status = status
+        self._status_key = status_key
+        self._status_kwargs = kwargs
         if self._icon is not None:
             self._icon.update_menu()
 
@@ -50,7 +52,8 @@ class TrayMenu:
 
     def _cb_status(self, item) -> str:
         """状态栏显示回调。"""
-        return i18nUtil.t("status_label", s=self._status)
+        status_text = i18nUtil.t(self._status_key, **self._status_kwargs) if self._status_key else ""
+        return i18nUtil.t("status_label", s=status_text)
 
     def _cb_open_web(self, icon, item) -> None:
         """打开 Web 界面。"""
@@ -74,9 +77,6 @@ class TrayMenu:
     def _cb_set_language(self, lang: str) -> None:
         """切换语言并重建菜单。"""
         configUtil.set_language(lang)
-        if self._icon is not None:
-            self._icon.menu = self.build()
-            self._icon.update_menu()
 
     def _cb_reset_data(self, icon, item) -> None:
         """重置所有数据。"""
