@@ -1,5 +1,6 @@
 """macOS 平台实现。"""
 
+import os
 import sys
 from typing import Any
 
@@ -8,6 +9,8 @@ if sys.platform != "darwin":
 
 import AppKit
 import pystray
+
+import appPaths
 
 
 def _setup_app() -> Any:
@@ -23,37 +26,19 @@ def _get_icon_kwargs() -> dict:
 
 
 def _apply_tray_icon(icon: pystray.Icon) -> bool:
-    """应用托盘图标，尝试 SF Symbols，失败则回退到模板模式。"""
+    """应用托盘图标，优先使用原生 NSImage，避免 pystray 先缩小位图。"""
     button = icon._status_item.button()
 
     if button is None:
         return False
 
-    # 检查 SF Symbols 支持
-    symbol_factory = getattr(AppKit.NSImage, "imageWithSystemSymbolName_accessibilityDescription_", None)
-
-    if symbol_factory is None:
-        _fallback_tray_icon(icon)
+    image = _load_native_template_image(icon)
+    if image is not None:
+        button.setImage_(image)
+        icon._native_icon_image = image
         return True
 
-    # 创建 pawprint 图标
-    symbol = symbol_factory("pawprint.fill", None)
-
-    if symbol is None:
-        _fallback_tray_icon(icon)
-        return True
-
-    # 配置大小和权重
-    config_factory = getattr(AppKit.NSImageSymbolConfiguration, "configurationWithPointSize_weight_scale_", None)
-
-    if config_factory is not None:
-        symbol = symbol.imageWithSymbolConfiguration_(
-            config_factory(13, AppKit.NSFontWeightMedium, AppKit.NSImageSymbolScaleMedium)
-        )
-
-    # 设置为模板图标（自动适配深色/浅色模式）
-    symbol.setTemplate_(True)
-    button.setImage_(symbol)
+    _fallback_tray_icon(icon)
     return True
 
 
@@ -63,3 +48,35 @@ def _fallback_tray_icon(icon: pystray.Icon) -> None:
 
     if button is not None and button.image() is not None:
         button.image().setTemplate_(True)
+
+
+def _load_native_template_image(icon: pystray.Icon) -> Any | None:
+    """直接加载高分辨率图标并交给 NSStatusBarButton 处理。"""
+    icons_dir = os.path.join(appPaths.ASSETS_DIR, "icons")
+    icon_candidates = ["togo_status_64.png", "togo_status_32.png", "togo_status_16.png"]
+
+    icon_path = next(
+        (
+            os.path.join(icons_dir, icon_name)
+            for icon_name in icon_candidates
+            if os.path.exists(os.path.join(icons_dir, icon_name))
+        ),
+        None,
+    )
+    if icon_path is None:
+        return None
+
+    image = AppKit.NSImage.alloc().initWithContentsOfFile_(icon_path)
+    if image is None:
+        return None
+
+    thickness = icon._status_bar.thickness()
+    image.setSize_((thickness, thickness))
+    image.setTemplate_(True)
+
+    button = icon._status_item.button()
+    scaling = getattr(AppKit, "NSImageScaleProportionallyUpOrDown", None)
+    if button is not None and scaling is not None:
+        button.setImageScaling_(scaling)
+
+    return image
