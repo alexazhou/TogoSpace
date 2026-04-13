@@ -23,6 +23,12 @@ class _SPAHandler(tornado.web.StaticFileHandler):
             else:
                 raise
 
+    def get_cache_time(self, path: str, modified: float | None, mime_type: str) -> int:
+        # index.html 不缓存，保证每次都拿到最新版本（避免 Safari 等激进缓存导致加载旧页面）
+        if path == "index.html":
+            return 0
+        return super().get_cache_time(path, modified, mime_type)
+
 
 tornado_settings = {
     'debug': False,
