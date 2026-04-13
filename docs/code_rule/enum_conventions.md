@@ -37,7 +37,9 @@
 2. 不依赖 `value` 的具体文本
 3. 不会写入需要长期稳定字符串的存储字段
 
-示例：`RoomType`、`RoomState`、`MemberStatus` 等内部状态枚举可以使用 `auto()`。
+示例：`RoomType`、`RoomState`、`AgentStatus`、`AgentHistoryTag`、`AgentHistoryStatus`、`AgentTaskType`、`AgentTaskStatus`、`TurnStepResult`、`ScheduleState` 等内部状态枚举可以使用 `auto()`。
+
+> **注意**：`EnumField` / `EnumListField` 持久化时存储的是枚举 **name**（如 `"CANCELLED"`），而非 `value`。因此即便枚举值从字符串改为 `auto()`，已有数据库记录仍可正常读取。
 
 
 ## 4. 何时必须保留字符串 `value`

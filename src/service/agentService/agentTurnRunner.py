@@ -80,6 +80,11 @@ class AgentTurnRunner:
 
     # ─── Turn 运行方法 ──────────────────────────────────────
 
+    async def handle_cancel_turn(self) -> None:
+        """人工取消当前 turn 的收尾逻辑：driver 清理 → history 清理。"""
+        await self.driver.cancel_turn()
+        await self._history.finalize_cancel_turn()
+
     async def run_chat_turn(self, task: GtAgentTask) -> None:
         """执行一个完整 chat turn：同步房间消息 → 推理 → 工具调用循环。
         若存在未完成 turn，则走续跑路径。"""

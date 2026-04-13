@@ -282,3 +282,21 @@ class AgentResumeHandler(BaseHandler):
         await agent.resume_failed()
 
         self.return_json({"status": "resumed", "agent_id": agent.gt_agent.id})
+
+
+class AgentStopHandler(BaseHandler):
+    """POST /agents/<agent_id>/stop.json - 人工停止 ACTIVE 状态的 Agent 当前 turn"""
+
+    async def post(self, agent_id_str: str) -> None:
+        agent_id = int(agent_id_str)
+        agent = None
+        try:
+            agent = agentService.get_agent(agent_id)
+        except KeyError:
+            pass
+        assertUtil.assertNotNull(agent, None, f"运行时 Agent ID '{agent_id}' 不存在", "agent_not_found")
+        assertUtil.assertTrue(agent.status == AgentStatus.ACTIVE, None, f"Agent ID={agent.gt_agent.id} 当前状态不是 ACTIVE（当前: {agent.status.name}）", "agent_not_active")
+
+        agent.cancel_current_turn()
+
+        self.return_json({"status": "stopped", "agent_id": agent.gt_agent.id})

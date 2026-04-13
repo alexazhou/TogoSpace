@@ -39,6 +39,7 @@ class AgentTaskConsumer:
         )
         self.status: AgentStatus = AgentStatus.IDLE
         self._aio_consumer_task: asyncio.Task | None = None
+        self._cancel_requested: bool = False
 
     async def _set_status(self, status: AgentStatus, error_message: str | None = None) -> None:
         """统一处理 Agent 状态切换：更新运行时状态、广播事件并记录活动。"""
@@ -68,9 +69,25 @@ class AgentTaskConsumer:
             logger.info(f"停止消费协程: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_done={task.done()}")
         asyncUtil.cancel_task_safely(task)
 
+    def cancel_current_turn(self) -> bool:
+        """人工停止当前 turn。返回 True 表示已发出取消信号，False 表示当前不可取消。"""
+        if self.status != AgentStatus.ACTIVE:
+            logger.info(f"取消请求被忽略（非 ACTIVE 状态）: {self.gt_agent.name}(agent_id={self.gt_agent.id}), status={self.status.name}")
+            return False
+        task = self._aio_consumer_task
+        if task is None or task.done():
+            logger.info(f"取消请求被忽略（消费协程不存在或已结束）: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
+            return False
+        self._cancel_requested = True
+        task.cancel()
+        logger.info(f"已发出取消信号: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
+        return True
+
     # ─── 消费循环 ─────────────────────────────────────────────
     async def consume(self) -> None:
         """从数据库获取并处理任务，直到没有待处理任务为止。"""
+        self._cancel_requested = False  # 防御性重置
+
         current_consumer = asyncio.current_task()
         if current_consumer is not None and self._aio_consumer_task not in (None, current_consumer):
             existing = self._aio_consumer_task
@@ -110,6 +127,18 @@ class AgentTaskConsumer:
 
             try:
                 await self._turn_runner.run_chat_turn(claimed_task)
+            except asyncio.CancelledError:
+                if not self._cancel_requested:
+                    raise  # 非人工停止（hot reload / 服务关闭），保持原有穿透行为
+                self._cancel_requested = False
+                logger.info(f"Agent 任务被人工停止: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}")
+                await self._turn_runner.handle_cancel_turn()
+                await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.CANCELLED, error_message="cancelled by user")
+                await agentActivityService.add_activity(
+                    gt_agent=self.gt_agent, activity_type=AgentActivityType.AGENT_STATE,
+                    status=AgentActivityStatus.CANCELLED, detail="Turn 被操作者停止",
+                )
+                break
             except Exception as e:
                 logger.error(f"Agent 任务执行失败: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}, error={e}")
                 await gtAgentTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.FAILED, error_message=str(e))

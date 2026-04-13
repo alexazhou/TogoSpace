@@ -75,3 +75,7 @@ class Agent:
 
     async def resume_failed(self) -> None:
         await self.task_consumer.resume_failed()
+
+    def cancel_current_turn(self) -> bool:
+        """人工停止当前 turn。返回 True 表示已发出取消信号。"""
+        return self.task_consumer.cancel_current_turn()
