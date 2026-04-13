@@ -17,6 +17,14 @@ async def get_team_by_id(team_id: int) -> GtTeam | None:
     return await GtTeam.aio_get_or_none(GtTeam.id == team_id)
 
 
+async def get_team_by_uuid(uuid: str) -> GtTeam | None:
+    """通过 UUID 获取指定 Team（未删除的）。"""
+    return await GtTeam.aio_get_or_none(
+        GtTeam.uuid == uuid,
+        GtTeam.deleted == 0,
+    )
+
+
 async def get_all_teams(enabled: bool | None = None) -> list[GtTeam]:
     """获取所有未删除的 Team。可通过 enabled 参数过滤。"""
     query = GtTeam.select().where(GtTeam.deleted == 0).order_by(GtTeam.name)
@@ -28,11 +36,14 @@ async def get_all_teams(enabled: bool | None = None) -> list[GtTeam]:
 async def save_team(team: GtTeam) -> GtTeam:
     """保存 Team 对象：无 id 时插入，有 id 时更新。"""
     config = team.config or {}
+    i18n = team.i18n or {}
 
     if team.id is None:
         team_id = await GtTeam.insert(
             name=team.name,
+            uuid=team.uuid,
             config=config,
+            i18n=i18n,
             enabled=team.enabled,
             deleted=team.deleted,
         ).aio_execute()
@@ -43,7 +54,9 @@ async def save_team(team: GtTeam) -> GtTeam:
     await (
         GtTeam.update(
             name=team.name,
+            uuid=team.uuid,
             config=config,
+            i18n=i18n,
             enabled=team.enabled,
             deleted=team.deleted,
         )

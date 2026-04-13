@@ -5,5 +5,11 @@
     "Read",
     "send_chat_msg",
     "finish_chat_turn"
-  ]
+  ],
+  "i18n": {
+    "display_name": {
+      "zh-CN": "项目经理",
+      "en": "Project Manager"
+    }
+  }
 }

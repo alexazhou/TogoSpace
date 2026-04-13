@@ -11,6 +11,7 @@ from textual.widget import Widget
 from textual.widgets import Label, ListItem, ListView, Static
 
 from api_client import MessageInfo, AgentInfo, RoomInfo
+from i18n import t
 
 
 def _char_width(ch: str) -> int:
@@ -134,7 +135,7 @@ class MessageView(ScrollableContainer):
 
     async def set_working_status(self, agent_name: str) -> None:
         """显示 '某某 处理中…' 工作状态指示器。"""
-        text = f"[bold #56d4b0]⟳[/] [#c4a55a]{agent_name}[/] [dim]处理中…[/]"
+        text = f"[bold #56d4b0]⟳[/] [#c4a55a]{agent_name}[/] [dim]{t('processing')}[/]"
         if self._working_label is not None:
             self._working_label.update(text)
         else:
@@ -153,9 +154,9 @@ class MessageView(ScrollableContainer):
 
 class RoomPanel(Vertical):
     def compose(self) -> ComposeResult:
-        yield Label("聊天室", classes="panel-title")
+        yield Label(t("chat_rooms"), classes="panel-title")
         yield ListView(id="room-list")
-        yield Label("团队成员", classes="panel-title")
+        yield Label(t("team_members"), classes="panel-title")
         yield ListView(id="member-list")
 
     def __init__(self, *args, **kwargs) -> None:
@@ -165,10 +166,10 @@ class RoomPanel(Vertical):
 
     def _get_agent_status_markup(self, status: str) -> str:
         if status.lower() == "active":
-            return "[bold #56d4b0]● 忙碌[/]"
+            return f"[bold #56d4b0]● {t('status_busy')}[/]"
         if status.lower() == "failed":
-            return "[bold #f85149]● 失败[/]"
-        return "[#7f91a4]○ 空闲[/]"
+            return f"[bold #f85149]● {t('status_failed')}[/]"
+        return f"[#7f91a4]○ {t('status_idle')}[/]"
 
     async def load(
         self,
@@ -194,12 +195,12 @@ class RoomPanel(Vertical):
         for team_name, team_rooms in teams.items():
             for room in team_rooms:
                 icon = "👤" if (room.room_type or "").lower() == "private" else "👥"
-                preview = last_previews.get(room.room_key, "暂无消息")
+                preview = last_previews.get(room.room_key, t("no_messages"))
                 card = Vertical(
                     Horizontal(
                         Label(f"{icon} ", classes="room-card-icon"),
                         Label("", classes="room-card-name"),
-                        Label(f"[dim]{len(room.members)}人[/dim]", classes="room-card-members"),
+                        Label(f"[dim]{t('n_members', n=len(room.members))}[/dim]", classes="room-card-members"),
                         classes="room-card-header",
                     ),
                     PreviewLabel(preview, classes="room-card-preview"),
@@ -214,7 +215,7 @@ class RoomPanel(Vertical):
         await member_list.append(
             ListItem(
                 Horizontal(
-                    Label("[dim]请选择一个房间[/dim]", classes="agent-name"),
+                    Label(f"[dim]{t('select_a_room')}[/dim]", classes="agent-name"),
                     Label("", classes="agent-status"),
                     classes="agent-card",
                 )
@@ -238,7 +239,7 @@ class RoomPanel(Vertical):
             name = room.room_name if room else room_key
             icon = "👤" if room and (room.room_type or "").lower() == "private" else "👥"
             if count > 0:
-                markup = f"{name} [bold #f85149][{count}][/bold #f85149][#7f91a4] 未读[/]"
+                markup = f"{name} [bold #f85149][{count}][/bold #f85149][#7f91a4] {t('unread_suffix')}[/]"
             else:
                 markup = f"{name} [#7f91a4][0][/]"
             item.query_one(".room-card-icon", Label).update(f"{icon} ")
@@ -267,7 +268,7 @@ class RoomPanel(Vertical):
             await member_list.append(
                 ListItem(
                     Horizontal(
-                        Label("[dim]暂无选中房间[/dim]", classes="agent-name"),
+                        Label(f"[dim]{t('no_room_selected')}[/dim]", classes="agent-name"),
                         Label("", classes="agent-status"),
                         classes="agent-card",
                     )
@@ -280,7 +281,7 @@ class RoomPanel(Vertical):
             await member_list.append(
                 ListItem(
                     Horizontal(
-                        Label("[dim]房间不存在[/dim]", classes="agent-name"),
+                        Label(f"[dim]{t('room_not_found')}[/dim]", classes="agent-name"),
                         Label("", classes="agent-status"),
                         classes="agent-card",
                     )
@@ -293,7 +294,7 @@ class RoomPanel(Vertical):
             await member_list.append(
                 ListItem(
                     Horizontal(
-                        Label("[dim]该房间暂无成员[/dim]", classes="agent-name"),
+                        Label(f"[dim]{t('no_members')}[/dim]", classes="agent-name"),
                         Label("", classes="agent-status"),
                         classes="agent-card",
                     )
@@ -341,23 +342,23 @@ class RoomPanel(Vertical):
 from textual.reactive import reactive
 
 class StatusBar(Static):
-    status_markup = reactive("[bold #f85149]○ 已断开[/]")
+    status_markup = reactive(f"[bold #f85149]○ {t('disconnected')}[/]")
     count = reactive(0)
 
     def render(self) -> str:
-        return f"{self.status_markup}  |  消息数: {self.count}"
+        return f"{self.status_markup}  |  {t('message_count', n=self.count)}"
 
     def set_connected(self) -> None:
-        self.status_markup = "[bold #56d4b0]● 已连接[/]"
+        self.status_markup = f"[bold #56d4b0]● {t('connected')}[/]"
 
     def set_reconnecting(self) -> None:
-        self.status_markup = "[bold #e3b341]◌ 重连中…[/]"
+        self.status_markup = f"[bold #e3b341]◌ {t('reconnecting')}[/]"
 
     def set_disconnected(self, countdown: int | None = None) -> None:
         if countdown:
-            self.status_markup = f"[bold #f85149]○ 已断开，{countdown}s 后重连[/]"
+            self.status_markup = f"[bold #f85149]○ {t('reconnect_countdown', n=countdown)}[/]"
         else:
-            self.status_markup = "[bold #f85149]○ 已断开[/]"
+            self.status_markup = f"[bold #f85149]○ {t('disconnected')}[/]"
 
     def update_count(self, n: int) -> None:
         self.count = n

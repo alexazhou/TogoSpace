@@ -9,6 +9,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Header, ListView, Input, Static
 
 from api_client import ApiClient, RoomInfo, AgentInfo, WsEvent
+from i18n import t, set_language
 from widgets import MessageView, RoomPanel, StatusBar
 
 log = logging.getLogger("tui.app")
@@ -25,12 +26,12 @@ class WatcherApp(App):
     CSS_PATH = "app.tcss"
 
     BINDINGS = [
-        ("ctrl+q", "quit", "退出"),
+        ("ctrl+q", "quit", t("keybind_quit")),
         ("ctrl+c", "hint_quit", ""),
-        ("up", "prev_room", "上一个房间"),
-        ("down", "next_room", "下一个房间"),
-        ("enter", "select_room", "切换到当前房间"),
-        ("i", "focus_input", "进入输入模式"),
+        ("up", "prev_room", t("keybind_prev_room")),
+        ("down", "next_room", t("keybind_next_room")),
+        ("enter", "select_room", t("keybind_select_room")),
+        ("i", "focus_input", t("keybind_focus_input")),
     ]
 
     def __init__(self, base_url: str) -> None:
@@ -54,8 +55,8 @@ class WatcherApp(App):
             with Vertical(id="right-panel"):
                 yield MessageView()
                 with Vertical(id="chat-input-container"):
-                    yield Input(placeholder="在此输入消息...", id="chat-input")
-                yield Static("当前为观察模式", id="chat-input-hint")
+                    yield Input(placeholder=t("input_placeholder"), id="chat-input")
+                yield Static(t("observer_mode"), id="chat-input-hint")
                 yield StatusBar()
 
     async def on_ready(self) -> None:
@@ -66,10 +67,21 @@ class WatcherApp(App):
 
     async def _on_mount(self) -> None:
         log.info("on_mount 触发")
+        await self._load_language()
         await self._check_system_status()
         await self._refresh_full_ui(is_initial=True)
         log.info("on_mount 完成，启动 ws loop")
         self._start_ws_loop()
+
+    async def _load_language(self) -> None:
+        """从后端 /system/status.json 读取语言设置并应用到 TUI。"""
+        try:
+            status = await self._api.get_system_status()
+            lang = status.get("language")
+            if lang:
+                set_language(lang)
+        except Exception:
+            log.debug("语言设置加载失败，使用默认语言")
 
     async def _check_system_status(self) -> None:
         """检查系统初始化状态，未初始化时在消息区显示提示。"""
@@ -79,11 +91,7 @@ class WatcherApp(App):
             if not status.get("initialized", True):
                 await message_view.append_message(
                     "system",
-                    "⚠ 当前未配置大模型服务\n\n"
-                    "请通过以下方式完成配置：\n"
-                    "1. 手动编辑 ~/.team_agent/setting.json\n"
-                    "2. 通过 Web Console 完成配置\n\n"
-                    f"Web Console 地址：{self._api._base_url}",
+                    t("backend_not_ready", url=self._api._base_url),
                     [],
                 )
         except Exception:
@@ -191,7 +199,7 @@ class WatcherApp(App):
             status_bar.set_disconnected()
             if is_initial:
                 await message_view.append_message(
-                    "system", "无法连接到后端服务，请检查服务是否已启动。", []
+                    "system", t("backend_unreachable"), []
                 )
 
     async def _select_room(self, room_key: str, force_reload: bool = False) -> None:
@@ -247,9 +255,9 @@ class WatcherApp(App):
                     self._room_cursor = i
                     break
         except ValueError:
-            await message_view.append_message("system", f"房间不存在: {room_key}", [])
+            await message_view.append_message("system", f"{t('room_not_found')}: {room_key}", [])
         except aiohttp.ClientError:
-            await message_view.append_message("system", "加载消息失败，请检查网络连接。", [])
+            await message_view.append_message("system", t("load_messages_failed"), [])
 
     @work(exclusive=True, group="ws")
     async def _start_ws_loop(self) -> None:
@@ -379,7 +387,7 @@ class WatcherApp(App):
         if success:
             self.query_one("#chat-input", Input).value = ""
         else:
-            self.notify("消息发送失败", severity="error")
+            self.notify(t("send_failed"), severity="error")
 
     def action_focus_input(self) -> None:
         current_room = next((r for r in self._rooms if r.room_key == self._current_room_key), None)
@@ -405,8 +413,8 @@ class WatcherApp(App):
 
     def action_hint_quit(self) -> None:
         self.notify(
-            "按 [bold]Ctrl+Q[/bold] 退出程序",
-            title="想退出吗？",
+            t("quit_confirm_body"),
+            title=t("quit_confirm_title"),
             severity="information",
             timeout=3,
         )

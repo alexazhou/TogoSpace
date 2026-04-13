@@ -75,6 +75,7 @@ async def save_room(room: GtRoom) -> GtRoom:
             agent_read_index=room.agent_read_index,
             biz_id=room.biz_id,
             tags=room.tags or [],
+            i18n=room.i18n or {},
         ).aio_execute()
         saved = await get_room_by_id(room_id)
         assert saved is not None, f"room insert failed: team_id={room.team_id}, name={room.name}"
@@ -91,6 +92,7 @@ async def save_room(room: GtRoom) -> GtRoom:
             agent_read_index=room.agent_read_index,
             biz_id=room.biz_id,
             tags=room.tags or [],
+            i18n=room.i18n or {},
         )
         .where(GtRoom.id == room.id)
         .aio_execute()

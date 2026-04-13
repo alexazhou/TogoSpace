@@ -3,7 +3,7 @@ from __future__ import annotations
 import peewee
 
 from constants import EmployStatus, DriverType
-from .base import DbModelBase, EnumField
+from .base import DbModelBase, EnumField, JsonField
 
 
 class GtAgent(DbModelBase):
@@ -14,6 +14,7 @@ class GtAgent(DbModelBase):
     model: str = peewee.CharField(default="")
     driver: DriverType = EnumField(DriverType, default=DriverType.NATIVE)
     employee_number: int = peewee.IntegerField(default=0)
+    i18n: dict = JsonField(default=dict)  # 多语言数据，含 display_name
 
     class Meta:
         table_name = "agents"

@@ -294,3 +294,21 @@ async def _test_llm_service(config: LlmServiceConfig) -> dict:
         "duration_ms": duration_ms,
         "usage": response.usage.model_dump() if response.usage else None,
     }
+
+
+_SUPPORTED_LANGUAGES = {"zh-CN", "en"}
+
+
+class LanguageHandler(BaseHandler):
+    """POST /config/language.json — 设置界面语言偏好。"""
+
+    async def post(self) -> None:
+        body = json.loads(self.request.body)
+        lang = body.get("language", "")
+        assertUtil.assertTrue(
+            lang in _SUPPORTED_LANGUAGES,
+            error_message=f"不支持的语言：{lang!r}，可选值：{sorted(_SUPPORTED_LANGUAGES)}",
+            error_code="unsupported_language",
+        )
+        configUtil.set_language(lang)
+        self.return_json({"status": "ok", "language": lang})

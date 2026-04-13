@@ -11,7 +11,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from service import roomService, teamService, agentService
-from util import assertUtil
+from util import assertUtil, i18nUtil
 from util.configTypes import TeamRoomConfig
 
 
@@ -116,6 +116,7 @@ def _team_to_dict(team: GtTeam) -> dict[str, Any]:
     return {
         "id": team.id,
         "name": team.name,
+        "display_name": i18nUtil.resolve_display_name(team.name, team.i18n),
         "working_directory": working_directory,
         "config": config,
         "enabled": team.enabled,
@@ -194,6 +195,7 @@ class TeamDetailHandler(BaseHandler):
             {
                 "id": team.id,
                 "name": team.name,
+                "display_name": i18nUtil.resolve_display_name(team.name, team.i18n),
                 "working_directory": _split_team_config(team.config)[0],
                 "config": _split_team_config(team.config)[1],
                 "enabled": team.enabled,
