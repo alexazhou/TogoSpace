@@ -10,6 +10,7 @@ import sys
 import tkinter as tk
 import webbrowser
 from tkinter import messagebox
+from typing import Callable
 
 import pystray
 
@@ -21,7 +22,7 @@ from util import configUtil, i18nUtil
 class TrayMenu:
     """托盘菜单管理，负责菜单构建、回调处理和状态显示。"""
 
-    def __init__(self, tray_icon: pystray.Icon | None, web_url: str, on_quit: callable):
+    def __init__(self, tray_icon: pystray.Icon | None, web_url: str, on_quit: Callable[[pystray.Icon], None]):
         """
         Args:
             tray_icon: pystray Icon 实例，用于更新菜单
