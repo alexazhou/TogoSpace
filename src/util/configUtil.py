@@ -148,12 +148,20 @@ def set_language(lang: str) -> None:
     update_setting(lambda s: setattr(s, "language", lang))
 
 
+def is_loaded() -> bool:
+    """判断配置是否已加载。"""
+    return _cached_app_config is not None
+
+
 def is_initialized() -> bool:
     """判断系统是否已完成 LLM 服务初始化配置。
 
     至少有一个已启用的服务时返回 True，否则返回 False。
+    若 AppConfig 未加载，返回 False。
     """
-    setting = get_app_config().setting
+    if _cached_app_config is None:
+        return False
+    setting = _cached_app_config.setting
     if not setting.llm_services:
         return False
     return any(service.enable for service in setting.llm_services)
