@@ -1,4 +1,5 @@
 """AgentTaskConsumer 单元测试：测试任务消费逻辑。"""
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -243,3 +244,133 @@ async def test_consume_auto_continues_when_pending_after_completion(consumer, mo
                 await consumer.consume()
 
                 mock_start.assert_called_once()
+
+
+# ─── cancel_current_turn 相关测试 ────────────────────────────
+
+
+def test_cancel_current_turn_returns_false_when_not_active(consumer):
+    """非 ACTIVE 状态时，cancel_current_turn 返回 False。"""
+    consumer.status = AgentStatus.IDLE
+    assert consumer.cancel_current_turn() is False
+
+    consumer.status = AgentStatus.FAILED
+    assert consumer.cancel_current_turn() is False
+
+
+def test_cancel_current_turn_returns_false_when_no_consumer_task(consumer):
+    """ACTIVE 但无消费协程时，cancel_current_turn 返回 False。"""
+    consumer.status = AgentStatus.ACTIVE
+    consumer._aio_consumer_task = None
+    assert consumer.cancel_current_turn() is False
+
+
+def test_cancel_current_turn_returns_false_when_task_already_done(consumer):
+    """ACTIVE 但协程已结束时，cancel_current_turn 返回 False。"""
+    consumer.status = AgentStatus.ACTIVE
+    done_task = MagicMock()
+    done_task.done.return_value = True
+    consumer._aio_consumer_task = done_task
+    assert consumer.cancel_current_turn() is False
+
+
+def test_cancel_current_turn_sets_flag_and_cancels_task(consumer):
+    """正常情况下，cancel_current_turn 设置 _cancel_requested 并取消 Task。"""
+    consumer.status = AgentStatus.ACTIVE
+    mock_task = MagicMock()
+    mock_task.done.return_value = False
+    consumer._aio_consumer_task = mock_task
+
+    result = consumer.cancel_current_turn()
+
+    assert result is True
+    assert consumer._cancel_requested is True
+    mock_task.cancel.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_consume_handles_cancel_request(consumer, mock_gt_agent, mock_turn_runner):
+    """人工取消：CancelledError + _cancel_requested=True → 执行 cancel 收尾逻辑。"""
+    pending_task = MagicMock(spec=GtAgentTask)
+    pending_task.id = 200
+    pending_task.status = AgentTaskStatus.PENDING
+
+    running_task = MagicMock(spec=GtAgentTask)
+    running_task.id = 200
+    running_task.status = AgentTaskStatus.RUNNING
+
+    # 模拟 cancel_current_turn() 的行为：先设置标志，再引发 CancelledError
+    def _simulate_cancel(*args, **kwargs):
+        consumer._cancel_requested = True
+        raise asyncio.CancelledError
+
+    mock_turn_runner.run_chat_turn = AsyncMock(side_effect=_simulate_cancel)
+    mock_turn_runner.handle_cancel_turn = AsyncMock()
+
+    with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_manager:
+        mock_manager.get_first_unfinish_task = AsyncMock(return_value=pending_task)
+        mock_manager.transition_task_status = AsyncMock(return_value=running_task)
+        mock_manager.update_task_status = AsyncMock()
+        mock_manager.has_consumable_task = AsyncMock(return_value=False)
+
+        await consumer.consume()
+
+    # handle_cancel_turn 应被调用
+    mock_turn_runner.handle_cancel_turn.assert_awaited_once()
+    # task 应被标记为 CANCELLED
+    mock_manager.update_task_status.assert_called_once_with(200, AgentTaskStatus.CANCELLED, error_message="cancelled by user")
+    # 活动记录应包含 CANCELLED
+    cancel_activity_calls = [
+        call for call in consumer._mock_activity_service.add_activity.await_args_list
+        if call.kwargs.get("status") == AgentActivityStatus.CANCELLED
+    ]
+    assert len(cancel_activity_calls) == 1
+    # 最终状态应是 IDLE（不是 FAILED）
+    assert consumer.status == AgentStatus.IDLE
+    # flag 应已重置
+    assert consumer._cancel_requested is False
+
+
+@pytest.mark.asyncio
+async def test_consume_reraises_cancelled_error_when_not_human_stop(consumer, mock_gt_agent, mock_turn_runner):
+    """非人工取消的 CancelledError（如 hot reload）应原样 re-raise。"""
+    pending_task = MagicMock(spec=GtAgentTask)
+    pending_task.id = 300
+    pending_task.status = AgentTaskStatus.PENDING
+
+    running_task = MagicMock(spec=GtAgentTask)
+    running_task.id = 300
+    running_task.status = AgentTaskStatus.RUNNING
+
+    mock_turn_runner.run_chat_turn = AsyncMock(side_effect=asyncio.CancelledError)
+    mock_turn_runner.handle_cancel_turn = AsyncMock()
+
+    with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_manager:
+        mock_manager.get_first_unfinish_task = AsyncMock(return_value=pending_task)
+        mock_manager.transition_task_status = AsyncMock(return_value=running_task)
+        mock_manager.update_task_status = AsyncMock()
+
+        # _cancel_requested 保持 False（默认）
+        consumer._cancel_requested = False
+
+        with pytest.raises(asyncio.CancelledError):
+            await consumer.consume()
+
+    # handle_cancel_turn 不应被调用
+    mock_turn_runner.handle_cancel_turn.assert_not_awaited()
+    # task 状态不应被更新（CancelledError 直接穿透）
+    mock_manager.update_task_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_consume_resets_cancel_flag_at_entry(consumer, mock_turn_runner):
+    """consume() 入口应防御性重置 _cancel_requested。"""
+    consumer._cancel_requested = True  # 残留的脏状态
+
+    with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_manager:
+        mock_manager.get_first_unfinish_task = AsyncMock(return_value=None)
+        mock_manager.has_consumable_task = AsyncMock(return_value=False)
+
+        await consumer.consume()
+
+    assert consumer._cancel_requested is False
