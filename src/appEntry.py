@@ -1,6 +1,7 @@
-"""macOS 托盘入口。
+"""托盘入口。
 
 负责托盘图标创建、后端线程启动、菜单管理。
+平台特定逻辑通过 PAL 模块封装，支持 macOS / Windows / Linux。
 """
 
 import asyncio
@@ -13,6 +14,7 @@ from PIL import Image, ImageDraw
 
 import appPaths
 import backend_main
+import pal
 from trayMenu import TrayMenu
 from util import configUtil, i18nUtil
 from version import __version__
@@ -69,32 +71,6 @@ def _make_icon() -> Image.Image:
     draw.rectangle((4, 16, 18, 18), fill=(0, 0, 0, 255))
     return img
 
-
-def _apply_macos_status_symbol(icon: pystray.Icon) -> None:
-    """在 macOS 上使用 SF Symbols 作为托盘图标。"""
-    import AppKit
-
-    button = icon._status_item.button()
-    if button is None:
-        return
-
-    symbol_factory = getattr(AppKit.NSImage, "imageWithSystemSymbolName_accessibilityDescription_", None)
-    if symbol_factory is None:
-        return
-
-    symbol = symbol_factory("pawprint.fill", None)
-    if symbol is None:
-        return
-
-    config_factory = getattr(AppKit.NSImageSymbolConfiguration, "configurationWithPointSize_weight_scale_", None)
-    if config_factory is not None:
-        symbol = symbol.imageWithSymbolConfiguration_(
-            config_factory(13, AppKit.NSFontWeightMedium, AppKit.NSImageSymbolScaleMedium)
-        )
-
-    symbol.setTemplate_(True)
-    button.setImage_(symbol)
-
 # ── 回调 ───────────────────────────────────────────────────────────────────
 
 def _on_quit(icon: pystray.Icon) -> None:
@@ -104,45 +80,33 @@ def _on_quit(icon: pystray.Icon) -> None:
 
 # ── 托盘生命周期 ───────────────────────────────────────────────────────────
 
-def _setup(icon: pystray.Icon) -> None:
+def _on_tray_ready(icon: pystray.Icon) -> None:
+    """托盘图标就绪后启动后端线程。"""
     global _tray_icon
 
     _tray_icon = icon
     icon.visible = True
 
-    if sys.platform == "darwin":
-        try:
-            _apply_macos_status_symbol(icon)
-        except Exception:
-            button = icon._status_item.button()
-            if button is not None and button.image() is not None:
-                button.image().setTemplate_(True)
+    # 应用平台特定的托盘图标处理
+    pal.apply_tray_icon(icon)
 
     _tray_menu.set_status(i18nUtil.tray_t("status_starting"))
     threading.Thread(target=_run_backend, daemon=True).start()
 
 
-def _build_icon() -> pystray.Icon:
+def build_tray_icon() -> pystray.Icon:
     global _tray_menu
 
     # 创建菜单管理器
     _tray_menu = TrayMenu(tray_icon=None, web_url=_web_url, on_quit=_on_quit)
     _tray_menu.set_version(__version__)
 
-    kwargs = {}
-    if sys.platform == "darwin":
-        import AppKit
-        app = AppKit.NSApplication.sharedApplication()
-        app.setActivationPolicy_(AppKit.NSApplicationActivationPolicyAccessory)
-        kwargs["nsapplication"] = app
-
     icon = pystray.Icon(
         name="TogoAgent",
         icon=_make_icon(),
         title="TogoAgent",
         menu=_tray_menu.build(),
-        **kwargs,
-    )
+        **pal.get_icon_kwargs())
     _tray_menu._icon = icon
     return icon
 
@@ -158,8 +122,8 @@ def main():
         appPaths.LOGS_DIR = os.path.join(_user_dir, "logs", "backend")
         appPaths.WORKSPACE_ROOT = os.path.join(_user_dir, "workspace")
 
-    icon = _build_icon()
-    icon.run(setup=_setup)
+    icon = build_tray_icon()
+    icon.run(setup=_on_tray_ready)
 
 
 if __name__ == "__main__":
