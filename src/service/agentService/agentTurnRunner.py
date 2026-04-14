@@ -34,6 +34,20 @@ from util.assertUtil import assertNotNull
 logger = logging.getLogger(__name__)
 
 
+def _detect_json_tool_call_in_content(content: str | None) -> bool:
+    """检测 LLM 是否将工具调用以 JSON 对象形式写入了 content 字段（而非 tool_calls）。"""
+    if not content:
+        return False
+    stripped = content.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return False
+    try:
+        data = json.loads(stripped)
+        return isinstance(data, dict)
+    except (json.JSONDecodeError, ValueError):
+        return False
+
+
 class AgentTurnRunner:
     """负责 Turn 内部逻辑：消息同步、host loop 执行、推理、工具调用编排。
 
@@ -160,6 +174,19 @@ class AgentTurnRunner:
                     f"达到失败行动重试上限仍未完成行动: agent_id={self.gt_agent.id}, "
                     f"kind={failure_kind}, failed_actions={failed_action_count}, max_retries={turn_setup.max_retries}"
                 )
+            if result == TurnStepResult.ERROR_ACTION:
+                failed_action_count += 1
+                hint = turn_setup.hint_prompt_error_action or turn_setup.hint_prompt
+                if len(hint) > 0 and failed_action_count <= turn_setup.max_retries:
+                    logger.warning(f"检测到 JSON 写入 content 异常，准备重试: agent_id={self.gt_agent.id}, retry={failed_action_count}/{turn_setup.max_retries}")
+                    await self._history.append_history_message(GtAgentHistory.build(
+                        llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, hint),
+                    ))
+                    continue
+                raise RuntimeError(
+                    f"达到 ERROR_ACTION 重试上限: agent_id={self.gt_agent.id}, "
+                    f"failed_actions={failed_action_count}, max_retries={turn_setup.max_retries}"
+                )
 
     async def _advance_step(self, room: ChatRoom, tools: list[llmApiUtil.OpenAITool]) -> TurnStepResult:
         """根据当前 history 状态推进一个 step。
@@ -168,6 +195,7 @@ class AgentTurnRunner:
             `TURN_DONE`：当前 step 执行后，turn 已结束（调用了 finish）
             `NO_ACTION`：当前 step 未产出可执行动作
             `CONTINUE`：当前 step 已完成，turn 继续推进到下一个 step
+            `ERROR_ACTION`：模型输出格式异常（如将 tool call 写入 content 字段）
         """
         last_item = self._history.last()
         if last_item is None:
@@ -175,55 +203,69 @@ class AgentTurnRunner:
 
         role, status = last_item.role, last_item.status
 
-        # TOOL 成功且有待处理工具 → 插入 INIT record，下一轮执行
-        if role == OpenaiApiRole.TOOL and status == AgentHistoryStatus.SUCCESS:
-            pending_tc = self._history.get_first_pending_tool_call()
-            if pending_tc is not None:
-                await self._history.append_history_init_item(
+        if role == OpenaiApiRole.ASSISTANT:
+            if status == AgentHistoryStatus.SUCCESS:
+                first_tc = (last_item.tool_calls or [None])[0]
+                if first_tc is None:
+                    return TurnStepResult.NO_ACTION
+                output_item = await self._history.append_history_init_item(
                     role=OpenaiApiRole.TOOL,
-                    tool_call_id=pending_tc.id,
+                    tool_call_id=first_tc.id,
                 )
-                return TurnStepResult.CONTINUE
+                return await self._run_tool_to_item(first_tc, output_item, room)
+            elif status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED):
+                return await self._infer_and_classify(last_item, tools)
+            else:
+                raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, role={role}, status={status}")
+
+        elif role == OpenaiApiRole.TOOL:
+            if status == AgentHistoryStatus.INIT:
+                tool_call = self._history.find_tool_call_by_id(last_item.tool_call_id)
+                if tool_call is None:
+                    raise RuntimeError(f"工具调用不存在: agent_id={self.gt_agent.id}, tool_call_id={last_item.tool_call_id}")
+                return await self._run_tool_to_item(tool_call, last_item, room)
+            elif status == AgentHistoryStatus.SUCCESS:
+                pending_tc = self._history.get_first_pending_tool_call()
+                if pending_tc is not None:
+                    await self._history.append_history_init_item(
+                        role=OpenaiApiRole.TOOL,
+                        tool_call_id=pending_tc.id,
+                    )
+                    return TurnStepResult.CONTINUE
+                output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
+                return await self._infer_and_classify(output_item, tools)
+            elif status == AgentHistoryStatus.FAILED:
+                output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
+                return await self._infer_and_classify(output_item, tools)
+            else:
+                raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, role={role}, status={status}")
+
+        elif role in (OpenaiApiRole.USER, OpenaiApiRole.SYSTEM):
             output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
-            assistant_message = await self._infer_to_item(output_item, tools)
-            tool_calls = assistant_message.tool_calls or []
-            return TurnStepResult.NO_ACTION if len(tool_calls) == 0 else TurnStepResult.CONTINUE
-        if role == OpenaiApiRole.TOOL and status == AgentHistoryStatus.FAILED:
-            output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
-            assistant_message = await self._infer_to_item(output_item, tools)
-            tool_calls = assistant_message.tool_calls or []
-            return TurnStepResult.NO_ACTION if len(tool_calls) == 0 else TurnStepResult.CONTINUE
+            return await self._infer_and_classify(output_item, tools)
 
-        # USER 或 SYSTEM → 推理
-        if role in (OpenaiApiRole.USER, OpenaiApiRole.SYSTEM):
-            output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
-            assistant_message = await self._infer_to_item(output_item, tools)
-            tool_calls = assistant_message.tool_calls or []
-            return TurnStepResult.NO_ACTION if len(tool_calls) == 0 else TurnStepResult.CONTINUE
-        if role == OpenaiApiRole.ASSISTANT and status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED):
-            assistant_message = await self._infer_to_item(last_item, tools)
-            tool_calls = assistant_message.tool_calls or []
-            return TurnStepResult.NO_ACTION if len(tool_calls) == 0 else TurnStepResult.CONTINUE
+        else:
+            raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, role={role}, status={status}")
 
-        # ASSISTANT 成功 → 执行工具
-        if role == OpenaiApiRole.ASSISTANT and status == AgentHistoryStatus.SUCCESS:
-            first_tc = (last_item.tool_calls or [None])[0]
-            if first_tc is None:
-                return TurnStepResult.NO_ACTION
-            output_item = await self._history.append_history_init_item(
-                role=OpenaiApiRole.TOOL,
-                tool_call_id=first_tc.id,
-            )
-            return await self._run_tool_to_item(first_tc, output_item, room)
-
-        # TOOL 待处理 → 恢复执行
-        if role == OpenaiApiRole.TOOL and status == AgentHistoryStatus.INIT:
-            tool_call = self._history.find_tool_call_by_id(last_item.tool_call_id)
-            if tool_call is None:
-                raise RuntimeError(f"工具调用不存在: agent_id={self.gt_agent.id}, tool_call_id={last_item.tool_call_id}")
-            return await self._run_tool_to_item(tool_call, last_item, room)
-
-        raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, role={role}, status={status}")
+    async def _infer_and_classify(
+        self,
+        output_item: GtAgentHistory,
+        tools: list[llmApiUtil.OpenAITool],
+    ) -> TurnStepResult:
+        """执行推理并按结果分类返回。"""
+        assistant_message = await self._infer_to_item(output_item, tools)
+        if _detect_json_tool_call_in_content(assistant_message.content):
+            for tc in (assistant_message.tool_calls or []):
+                await self._history.append_history_message(GtAgentHistory.build(
+                    llmApiUtil.OpenAIMessage.tool_result(tc.id, '{"success": false, "message": "工具调用被跳过：模型输出格式异常"}'),
+                    status=AgentHistoryStatus.FAILED,
+                    error_message="工具调用被跳过：模型输出格式异常",
+                ))
+            return TurnStepResult.ERROR_ACTION
+        elif assistant_message.tool_calls:
+            return TurnStepResult.CONTINUE
+        else:
+            return TurnStepResult.NO_ACTION
 
     async def _infer_to_item(
         self,

@@ -180,6 +180,81 @@ async def test_advance_step_continues_to_infer_when_tool_failed(turn_runner):
     turn_runner._history.get_first_pending_tool_call.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_infer_and_classify_returns_error_action_on_json_content(turn_runner):
+    """content 为 JSON 对象、无 tool_calls 时返回 ERROR_ACTION，不写任何 tool 记录。"""
+    output_item = GtAgentHistory.build_placeholder(role=OpenaiApiRole.ASSISTANT)
+    assistant_message = MagicMock()
+    assistant_message.content = '{"room_name": "test", "msg": "hello"}'
+    assistant_message.tool_calls = None
+    turn_runner._infer_to_item = AsyncMock(return_value=assistant_message)
+
+    result = await turn_runner._infer_and_classify(output_item, [])
+
+    assert result == TurnStepResult.ERROR_ACTION
+    turn_runner._history.append_history_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_infer_and_classify_writes_failed_tool_records_on_json_content_with_tool_calls(turn_runner):
+    """content 为 JSON 对象 + 有 tool_calls 时，为每个 tool_call 写 FAILED 记录，并返回 ERROR_ACTION。"""
+    output_item = GtAgentHistory.build_placeholder(role=OpenaiApiRole.ASSISTANT)
+    tc = MagicMock()
+    tc.id = "tc-123"
+    assistant_message = MagicMock()
+    assistant_message.content = '{"room_name": "test", "msg": "hello"}'
+    assistant_message.tool_calls = [tc]
+    turn_runner._infer_to_item = AsyncMock(return_value=assistant_message)
+
+    result = await turn_runner._infer_and_classify(output_item, [])
+
+    assert result == TurnStepResult.ERROR_ACTION
+    turn_runner._history.append_history_message.assert_awaited_once()
+    written_item = turn_runner._history.append_history_message.call_args.args[0]
+    assert written_item.role == OpenaiApiRole.TOOL
+    assert written_item.status == AgentHistoryStatus.FAILED
+    assert written_item.tool_call_id == "tc-123"
+
+
+@pytest.mark.asyncio
+async def test_run_turn_loop_retries_on_error_action_with_error_hint(turn_runner):
+    """ERROR_ACTION 时注入 hint_prompt_error_action 并重试，最终 TURN_DONE。"""
+    room = MagicMock(spec=ChatRoom)
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.turn_setup = SimpleNamespace(
+        max_retries=2, hint_prompt="generic hint", hint_prompt_error_action="error hint"
+    )
+    turn_runner._advance_step = AsyncMock(side_effect=[
+        TurnStepResult.ERROR_ACTION,
+        TurnStepResult.ERROR_ACTION,
+        TurnStepResult.TURN_DONE,
+    ])
+
+    await turn_runner._run_turn_loop(room)
+
+    assert turn_runner._history.append_history_message.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_turn_loop_raises_on_error_action_after_max_retries(turn_runner):
+    """ERROR_ACTION 超出 max_retries 后抛出 RuntimeError。"""
+    room = MagicMock(spec=ChatRoom)
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.turn_setup = SimpleNamespace(
+        max_retries=2, hint_prompt="generic hint", hint_prompt_error_action="error hint"
+    )
+    turn_runner._advance_step = AsyncMock(side_effect=[
+        TurnStepResult.ERROR_ACTION,
+        TurnStepResult.ERROR_ACTION,
+        TurnStepResult.ERROR_ACTION,
+    ])
+
+    with pytest.raises(RuntimeError, match="达到 ERROR_ACTION 重试上限"):
+        await turn_runner._run_turn_loop(room)
+
+    assert turn_runner._history.append_history_message.await_count == 2
+
+
 from util import configUtil
 from util.configTypes import AppConfig, SettingConfig
 

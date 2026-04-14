@@ -25,6 +25,9 @@ def init() -> None:
     # 确保详细模式被关闭
     litellm.set_verbose = False
 
+    # 自动丢弃模型不支持的参数（如 GPT-5 不支持 temperature != 1）
+    litellm.drop_params = True
+
 
 def _clean_base_url(url: str) -> str:
     """清理 base_url，移除末尾可能存在的 /chat/completions 路径，防止 litellm 重复拼接。"""
