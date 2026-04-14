@@ -71,7 +71,7 @@ a = Analysis(
     runtime_hooks=[
         os.path.join(SPECPATH, "rthook_tiktoken.py"),
     ],
-    excludes=["textual"],
+    excludes=["textual", "mypy"],
     noarchive=False,
 )
 
