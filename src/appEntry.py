@@ -6,13 +6,11 @@
 
 import asyncio
 import os
-import sys
 import threading
 
 import pystray
 from PIL import Image, ImageDraw
 
-import appPaths
 import backend_main
 import pal
 from trayMenu import TrayMenu
@@ -24,6 +22,7 @@ from version import __version__
 _tray_icon: pystray.Icon | None = None
 _web_url: str = "http://localhost:8080"
 _tray_menu: TrayMenu | None = None
+_backend_thread: threading.Thread | None = None
 
 # ── 后端线程 ───────────────────────────────────────────────────────────────
 
@@ -53,6 +52,21 @@ def _run_backend() -> None:
     finally:
         loop.close()
 
+def wait_backend_shutdown(timeout: float = 5.0) -> bool:
+    """等待后端线程关闭完成。
+
+    Args:
+        timeout: 最大等待时间（秒）
+
+    Returns:
+        True 如果后端已关闭，False 如果超时
+    """
+    global _backend_thread
+    if _backend_thread is None:
+        return True
+    _backend_thread.join(timeout=timeout)
+    return not _backend_thread.is_alive()
+
 # ── 图标 ───────────────────────────────────────────────────────────────────
 
 def _make_icon() -> Image.Image:
@@ -78,11 +92,16 @@ def _on_quit(icon: pystray.Icon) -> None:
     backend_main.request_shutdown()
     icon.stop()
 
+def _on_reset() -> bool:
+    """停止后端并等待关闭完成，用于重置数据前准备。"""
+    backend_main.request_shutdown()
+    return wait_backend_shutdown(timeout=5.0)
+
 # ── 托盘生命周期 ───────────────────────────────────────────────────────────
 
 def _on_tray_ready(icon: pystray.Icon) -> None:
     """托盘图标就绪后启动后端线程。"""
-    global _tray_icon
+    global _tray_icon, _backend_thread
 
     _tray_icon = icon
     icon.visible = True
@@ -91,14 +110,15 @@ def _on_tray_ready(icon: pystray.Icon) -> None:
     pal.apply_tray_icon(icon)
 
     _tray_menu.set_status("status_starting")
-    threading.Thread(target=_run_backend, daemon=True).start()
+    _backend_thread = threading.Thread(target=_run_backend, daemon=True)
+    _backend_thread.start()
 
 
 def build_tray_icon() -> pystray.Icon:
     global _tray_menu
 
     # 创建菜单管理器
-    _tray_menu = TrayMenu(tray_icon=None, web_url=_web_url, on_quit=_on_quit)
+    _tray_menu = TrayMenu(tray_icon=None, web_url=_web_url, on_quit=_on_quit, on_reset=_on_reset)
     _tray_menu.set_version(__version__)
 
     icon = pystray.Icon(
@@ -113,15 +133,6 @@ def build_tray_icon() -> pystray.Icon:
 # ── 入口 ───────────────────────────────────────────────────────────────────
 
 def main():
-    # 打包模式：静态资源指向 _MEIPASS/assets/，可写数据指向 ~/.togo_agent/
-    if getattr(sys, "frozen", False):
-        appPaths.ASSETS_DIR = os.path.join(sys._MEIPASS, "assets")
-        appPaths.PRESET_DIR = os.path.join(appPaths.ASSETS_DIR, "preset")
-        _user_dir = os.path.expanduser("~/.togo_agent")
-        appPaths.DATA_DIR = os.path.join(_user_dir, "data")
-        appPaths.LOGS_DIR = os.path.join(_user_dir, "logs", "backend")
-        appPaths.WORKSPACE_ROOT = os.path.join(_user_dir, "workspace")
-
     icon = build_tray_icon()
     icon.run(setup=_on_tray_ready)
 

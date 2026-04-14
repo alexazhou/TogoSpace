@@ -15,23 +15,30 @@ from typing import Callable
 import pystray
 
 import appPaths
-import backend_main
 from util import configUtil, i18nUtil
 
 
 class TrayMenu:
     """托盘菜单管理，负责菜单构建、回调处理和状态显示。"""
 
-    def __init__(self, tray_icon: pystray.Icon | None, web_url: str, on_quit: Callable[[pystray.Icon], None]):
+    def __init__(
+        self,
+        tray_icon: pystray.Icon | None,
+        web_url: str,
+        on_quit: Callable[[pystray.Icon], None],
+        on_reset: Callable[[], bool] | None = None,
+    ):
         """
         Args:
             tray_icon: pystray Icon 实例，用于更新菜单
             web_url: Web 界面地址
             on_quit: 退出回调，用于停止后端和托盘
+            on_reset: 重置数据回调，负责停止后端并等待关闭完成，返回 True 表示成功关闭
         """
         self._icon = tray_icon
         self._web_url = web_url
         self._on_quit = on_quit
+        self._on_reset = on_reset
         self._status_key: str = ""
         self._status_kwargs: dict[str, object] = {}
         self._version: str = ""
@@ -61,8 +68,8 @@ class TrayMenu:
         webbrowser.open(self._web_url, new=0)
 
     def _cb_open_config_dir(self, icon, item) -> None:
-        """打开配置目录 (~/.togo_agent)。"""
-        config_dir = os.path.expanduser("~/.togo_agent")
+        """打开配置目录。"""
+        config_dir = appPaths.CONFIG_DIR
         os.makedirs(config_dir, exist_ok=True)
         if sys.platform == "darwin":
             subprocess.Popen(["open", config_dir])
@@ -97,8 +104,11 @@ class TrayMenu:
         if not confirmed:
             return
 
-        backend_main.request_shutdown()
+        # 通过回调停止后端并等待关闭
+        if self._on_reset:
+            self._on_reset()
 
+        # 删除数据目录
         data_dir = appPaths.DATA_DIR
         if os.path.isdir(data_dir):
             shutil.rmtree(data_dir)
