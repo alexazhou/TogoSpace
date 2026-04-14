@@ -276,6 +276,7 @@ async def _test_llm_service(config: LlmServiceConfig) -> dict:
         max_tokens=16,
         tools=None,
         tool_choice=None,
+        reasoning_effort=None,
     )
 
     start_time = time.monotonic()

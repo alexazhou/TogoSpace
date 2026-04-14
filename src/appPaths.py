@@ -13,19 +13,12 @@ import sys
 
 _SRC = os.path.dirname(os.path.abspath(__file__))   # = repo/src/
 _ROOT = os.path.join(_SRC, "..")                     # = repo/
-
-if getattr(sys, "frozen", False):
-    # 打包模式：用户目录
-    STORAGE_ROOT: str = os.path.expanduser("~/.togo_agent")
-else:
-    # 开发模式：仓库目录下的 dev_storage_root
-    STORAGE_ROOT: str = os.path.abspath(os.path.join(_ROOT, "dev_storage_root"))
+_IS_FROZEN = bool(getattr(sys, "frozen", False))
+_MEIPASS = str(getattr(sys, "_MEIPASS", ""))
+STORAGE_ROOT: str = os.path.expanduser("~/.togo_agent") if _IS_FROZEN else os.path.abspath(os.path.join(_ROOT, "dev_storage_root"))
 
 # 静态资源（只读）- 打包时指向 _MEIPASS，开发时指向仓库 assets/
-if getattr(sys, "frozen", False):
-    ASSETS_DIR: str = os.path.join(sys._MEIPASS, "assets")
-else:
-    ASSETS_DIR: str = os.path.abspath(os.path.join(_ROOT, "assets"))
+ASSETS_DIR: str = os.path.join(_MEIPASS, "assets") if _IS_FROZEN else os.path.abspath(os.path.join(_ROOT, "assets"))
 
 # 所有可写路径统一基于 STORAGE_ROOT
 DATA_DIR: str       = os.path.join(STORAGE_ROOT, "data")
