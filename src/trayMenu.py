@@ -7,9 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
-import tkinter as tk
 import webbrowser
-from tkinter import messagebox
 from typing import Callable
 
 import pystray
@@ -88,45 +86,73 @@ class TrayMenu:
 
     def _cb_reset_data(self, icon, item) -> None:
         """重置所有数据。"""
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        try:
-            confirmed = messagebox.askyesno(
-                "TogoAgent",
-                i18nUtil.t("confirm_reset"),
-                icon="warning",
-                parent=root,
+        import subprocess
+
+        # 使用 macOS 原生对话框（避免 tkinter 与 AppKit 死锁）
+        if sys.platform == "darwin":
+            result = subprocess.run(
+                [
+                    "osascript", "-e",
+                    f'display dialog "{i18nUtil.t("confirm_reset")}" buttons {{\"取消\", \"确认\"}} default button \"取消\" with icon caution'
+                ],
+                capture_output=True, text=True
             )
-        finally:
-            root.destroy()
+            confirmed = "确认" in result.stdout
+        else:
+            # 其他平台使用 tkinter（在独立窗口中）
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                confirmed = messagebox.askyesno(
+                    "TogoAgent",
+                    i18nUtil.t("confirm_reset"),
+                    icon="warning",
+                )
+            finally:
+                root.destroy()
 
         if not confirmed:
             return
 
-        # 通过回调停止后端并等待关闭
+        # 先请求后端关闭
         if self._on_reset:
             self._on_reset()
+
+        # 等待一小段时间让后端有机会开始 shutdown
+        import time
+        time.sleep(0.5)
 
         # 删除数据目录
         data_dir = appPaths.DATA_DIR
         if os.path.isdir(data_dir):
             shutil.rmtree(data_dir)
 
-        # 显示完成提示
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        try:
-            messagebox.showinfo(
-                i18nUtil.t("reset_done_title"),
-                i18nUtil.t("reset_done_body"),
-                parent=root,
+        # 显示完成提示（macOS 原生对话框）
+        if sys.platform == "darwin":
+            subprocess.run(
+                [
+                    "osascript", "-e",
+                    f'display notification "{i18nUtil.t("reset_done_body")}" with title "{i18nUtil.t("reset_done_title")}"'
+                ],
+                capture_output=True
             )
-        finally:
-            root.destroy()
+        else:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            try:
+                messagebox.showinfo(
+                    i18nUtil.t("reset_done_title"),
+                    i18nUtil.t("reset_done_body"),
+                )
+            finally:
+                root.destroy()
 
-        icon.stop()
+        # 使用 os._exit 强制退出
+        os._exit(0)
 
     # ── 构建 ────────────────────────────────────────────────────────────────
 
