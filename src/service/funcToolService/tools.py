@@ -306,12 +306,12 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
     await target_room.add_message(sender_id, msg)
 
     if target_room is _context.chat_room:
-        return {"success": True, "message": f"消息已发送到 {_context.chat_room.name}。你可以继续调用工具，或者调用 finish_chat_turn 结束本轮行动。"}
+        return {"success": True, "message": f"【状态更新】发言已成功同步到房间。你当前的发言任务已视为完成。如果没有其他辅助工具（如查看信息）需要调用，请立即执行 finish_chat_turn 提交并结束本轮。"}
 
     assert _context.chat_room is not None, "send_chat_msg: 跨房间发言时 chat_room 不应为 None"
 
     return {"success": True, "message": (
-        f"消息已发送到 {target_room.name}。你还需要在 {_context.chat_room.name} 房间回复。你还可以继续调用工具，或者调用 finish_chat_turn 结束本轮行动。"
+        f"【状态更新】消息已发送达 {target_room.name}。你当前的发言任务已视为完成。如果没有其他业务逻辑，请立即执行 finish_chat_turn 结束本轮。"
     )}
 
 
@@ -333,7 +333,7 @@ async def finish_chat_turn(_context: ToolCallContext = None) -> dict:
         current_name = _context.chat_room.get_current_turn_agent_name()
         logger.warning(f"finish_turn 被房间拒绝（发言位不匹配），但仍视为行动结束: agent={_context.agent_name}, current_turn={current_name}, room={_context.chat_room.key}")
 
-    return {"success": True, "message": "已结束本轮行动。"}
+    return {"success": True, "message": "已结束了本轮行动."}
 
 FUNCTION_REGISTRY: dict[str, Callable[..., dict] | Callable[..., object]] = {
     "get_time": get_time,

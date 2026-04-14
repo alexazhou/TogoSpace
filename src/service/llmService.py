@@ -93,11 +93,13 @@ async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> InferResult
             tool_choice=ctx.tool_choice,
             prompt_cache=ctx.prompt_cache,
             max_tokens=llm_config.reserve_output_tokens,
+            temperature=llm_config.temperature,
+            reasoning_effort=llm_config.reasoning_effort,
         )
         logger.info(
-            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s",
+            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, reasoning_effort=%s",
             request_id, False, resolved_model, resolved_provider, len(messages), len(ctx.tools or []), ctx.tool_choice,
-            ctx.prompt_cache,
+            ctx.prompt_cache, llm_config.reasoning_effort,
         )
         response = await llmApiUtil.send_request_non_stream(
             request,
@@ -163,11 +165,13 @@ async def infer_stream(
             tool_choice=ctx.tool_choice,
             prompt_cache=ctx.prompt_cache,
             max_tokens=llm_config.reserve_output_tokens,
+            temperature=llm_config.temperature,
+            reasoning_effort=llm_config.reasoning_effort,
         )
         logger.info(
-            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s",
+            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, reasoning_effort=%s",
             request_id, True, resolved_model, resolved_provider, len(messages), len(ctx.tools or []), ctx.tool_choice,
-            ctx.prompt_cache,
+            ctx.prompt_cache, llm_config.reasoning_effort,
         )
 
         completion_tokens = 0

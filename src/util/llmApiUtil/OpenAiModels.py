@@ -46,11 +46,12 @@ class OpenAIRequest(BaseModel):
     model: str = Field(default="qwen-plus", description="模型名称")
     messages: List[OpenAIMessage] = Field(..., description="消息列表")
     max_tokens: Optional[int] = Field(default=8192, description="最大输出 tokens")
-    temperature: Optional[float] = Field(default=0.7, description="温度参数")
+    temperature: Optional[float] = Field(default=None, description="温度参数")
     stream: Optional[bool] = Field(default=False, description="是否流式输出")
     tools: Optional[List["OpenAITool"]] = Field(None, description="工具列表")
     tool_choice: Optional[str | dict[str, Any]] = Field(None, description="工具调用策略")
     prompt_cache: bool = Field(default=False, description="是否启用 prompt cache")
+    reasoning_effort: Optional[str] = Field(None, description="推理强度（如 'high'），触发 litellm 自动走 Responses API")
 
 
 class PromptCacheUsage(BaseModel):
