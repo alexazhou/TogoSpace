@@ -4,7 +4,12 @@ from constants import SpecialAgent
 from dal.db import gtAgentManager, gtDeptManager
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 
-_TURN_CONTEXT_SUFFIX = "\n\n-----系统提示:你现在可以调用工具行动。如果你已完成发言和所有工具调用，请务必调用 finish_chat_turn 结束本轮行动。"
+_TURN_CONTEXT_SUFFIX = (
+    "\n\n-----指令确认: "
+    "\n1. 你必须通过工具行动。你的发言必须使用 send_chat_msg 工具发送。"
+    "\n2. 一旦你完成了本轮的核心发言或行动，即视为当前阶段目标达成，请立即调用 finish_chat_turn 结束本轮，以便其他成员发言。"
+    "\n3. 严禁在同一回合内针对同一话题反复发送内容相似的消息。"
+)
 _TEAM_AWARENESS_TOOLS_GUIDE = """你可以使用以下工具来感知团队状态并协助同伴：
 - get_dept_info：了解团队或指定部门的概况与组织架构
 - get_room_info：了解房间列表或指定房间详情

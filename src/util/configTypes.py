@@ -101,6 +101,9 @@ class LlmServiceConfig(BaseModel):
     enable: bool = True
     extra_headers: dict[str, str] = Field(default_factory=_default_llm_extra_headers)
 
+    temperature: Optional[float] = None
+    reasoning_effort: Optional[str] = None  # 推理强度，如 "high"；传入 litellm 后自动触发 Responses API
+
     # Token 预算与自动压缩配置
     context_window_tokens: int = 131072
     reserve_output_tokens: int = 8192

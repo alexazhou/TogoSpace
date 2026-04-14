@@ -14,6 +14,92 @@ logger = logging.getLogger(__name__)
 _REDACTED_HEADER_KEYS = {"authorization", "api-key", "x-api-key", "proxy-authorization"}
 
 
+def _patch_responses_api_streaming() -> None:
+    """Monkey-patch litellm，修复 Responses API 流式 tool_calls 丢失的问题。
+
+    根因：部分代理的 /v1/responses SSE 只发一条 response.completed 事件
+    （包含完整 output），而非标准的逐条 response.output_item.added + delta 序列。
+    litellm 的 response.completed handler 只设 finish_reason="tool_calls"，不填
+    delta.tool_calls，导致 stream_chunk_builder 聚合后 tool_calls 为空。
+
+    修复策略：
+    - 抑制中间的 function_call 流式事件（output_item.added / arguments.delta /
+      output_item.done），避免 stream_chunk_builder 重复累加 arguments；
+    - 在 response.completed 里从 output[] 提取完整 tool_calls 注入 delta。
+
+    这样无论服务端只发 response.completed 还是发完整事件序列，结果均正确。
+    """
+    from litellm.completion_extras.litellm_responses_transformation.transformation import (
+        OpenAiResponsesToChatCompletionStreamIterator,
+    )
+    from litellm.types.llms.openai import ChatCompletionToolCallFunctionChunk
+    from litellm.types.utils import (
+        ChatCompletionToolCallChunk,
+        Delta,
+        ModelResponseStream,
+        StreamingChoices,
+    )
+
+    _orig = OpenAiResponsesToChatCompletionStreamIterator.translate_responses_chunk_to_openai_stream
+
+    def _patched(parsed_chunk):  # type: ignore[no-untyped-def]
+        from pydantic import BaseModel
+        if isinstance(parsed_chunk, BaseModel):
+            parsed_chunk = parsed_chunk.model_dump()
+
+        event_type = parsed_chunk.get("type", "") if isinstance(parsed_chunk, dict) else ""
+        if hasattr(event_type, "value"):
+            event_type = event_type.value
+
+        # 抑制中间的 function_call 流式事件；tool_calls 统一在 response.completed 注入，
+        # 防止 stream_chunk_builder 将 arguments 累加两次。
+        if event_type == "response.function_call_arguments.delta":
+            return ModelResponseStream(
+                choices=[StreamingChoices(index=0, delta=Delta(), finish_reason=None)]
+            )
+        if event_type in ("response.output_item.added", "response.output_item.done"):
+            item = parsed_chunk.get("item", {}) if isinstance(parsed_chunk, dict) else {}
+            if isinstance(item, dict) and item.get("type") == "function_call":
+                return ModelResponseStream(
+                    choices=[StreamingChoices(index=0, delta=Delta(), finish_reason=None)]
+                )
+
+        result = _orig(parsed_chunk)
+
+        # 在 response.completed 里从 output[] 提取完整 tool_calls 注入 delta
+        if (
+            event_type == "response.completed"
+            and result.choices
+            and result.choices[0].finish_reason == "tool_calls"
+            and not result.choices[0].delta.tool_calls
+        ):
+            response_data = parsed_chunk.get("response", {}) if isinstance(parsed_chunk, dict) else {}
+            output_items = response_data.get("output", []) if response_data else []
+            tool_calls = []
+            tool_call_index = 0
+            for item in output_items:
+                if not isinstance(item, dict) or item.get("type") != "function_call":
+                    continue
+                tool_calls.append(
+                    ChatCompletionToolCallChunk(
+                        id=item.get("call_id"),
+                        index=tool_call_index,
+                        type="function",
+                        function=ChatCompletionToolCallFunctionChunk(
+                            name=item.get("name"),
+                            arguments=item.get("arguments", "{}"),
+                        ),
+                    )
+                )
+                tool_call_index += 1
+            if tool_calls:
+                result.choices[0].delta.tool_calls = tool_calls  # type: ignore[assignment]
+
+        return result
+
+    OpenAiResponsesToChatCompletionStreamIterator.translate_responses_chunk_to_openai_stream = staticmethod(_patched)  # type: ignore[method-assign]
+
+
 def init() -> None:
     """初始化 llmApiUtil。使用 litellm 后，此方法主要用于设置全局配置。"""
 
@@ -27,6 +113,9 @@ def init() -> None:
 
     # 自动丢弃模型不支持的参数（如 GPT-5 不支持 temperature != 1）
     litellm.drop_params = True
+
+    # 修复 Responses API 流式 tool_calls 丢失问题
+    _patch_responses_api_streaming()
 
 
 def _clean_base_url(url: str) -> str:
@@ -94,8 +183,6 @@ _CACHE_INJECTION_POINTS = [
 ]
 
 
-
-
 async def send_request_stream(
     request: OpenAIRequest,
     url: str,
@@ -133,6 +220,7 @@ async def send_request_stream(
             stream=True,
             # prompt_cache=True 时注入缓存边界；LiteLLM 负责转换为各 provider 格式
             **({"cache_control_injection_points": _CACHE_INJECTION_POINTS} if request.prompt_cache else {}),
+            **({"reasoning_effort": request.reasoning_effort} if request.reasoning_effort else {}),
         )
         if not isinstance(stream_resp, CustomStreamWrapper):
             raise TypeError(f"期望流式响应类型 CustomStreamWrapper，实际为: {type(stream_resp).__name__}")
@@ -202,6 +290,7 @@ async def send_request_non_stream(
             stream=False,
             # prompt_cache=True 时注入缓存边界；LiteLLM 负责转换为各 provider 格式
             **({"cache_control_injection_points": _CACHE_INJECTION_POINTS} if request.prompt_cache else {}),
+            **({"reasoning_effort": request.reasoning_effort} if request.reasoning_effort else {}),
         )
         if not isinstance(response, ModelResponse):
             raise TypeError(f"期望非流式响应类型 ModelResponse，实际为: {type(response).__name__}")
