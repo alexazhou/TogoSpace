@@ -106,14 +106,16 @@ class TspAgentDriver(AgentDriver):
         if self._client is None:
             await super().shutdown()
             return
+        client = self._client
+        self._client = None
+
+        # 直接 disconnect 终止进程（不等待 shutdown request）
+        # 避免 wait_for 取消导致 disconnect 也被取消
         try:
-            await asyncio.wait_for(self._client.shutdown(), timeout=10)
-        except asyncio.TimeoutError:
-            logger.warning("TSP client shutdown 超时，强制终止: agent_id=%s", self.host.gt_agent.id)
+            await client.disconnect()
         except Exception as e:
-            logger.warning("TSP client shutdown 异常: agent_id=%s, error=%s", self.host.gt_agent.id, e)
-        finally:
-            self._client = None
+            logger.warning("TSP disconnect 异常: agent_id=%s, error=%s", self.host.gt_agent.id, e)
+
         await super().shutdown()
 
     @property

@@ -93,9 +93,11 @@ def _on_quit(icon: pystray.Icon) -> None:
     icon.stop()
 
 def _on_reset() -> bool:
-    """停止后端并等待关闭完成，用于重置数据前准备。"""
+    """请求后端关闭（不等待完成）。"""
     backend_main.request_shutdown()
-    return wait_backend_shutdown(timeout=5.0)
+    # 返回 True 表示已请求关闭，不等待后端线程完成
+    # daemon 线程会在进程退出时被强制终止
+    return True
 
 # ── 托盘生命周期 ───────────────────────────────────────────────────────────
 
