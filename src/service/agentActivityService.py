@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, fields
 from datetime import datetime
+from typing import Any
 
 from constants import AgentActivityStatus, AgentActivityType, MessageBusTopic
 from dal.db import gtAgentActivityManager
@@ -48,6 +49,7 @@ class AgentActivityMeta:
     error_kind: str | None = None
     # 工具调用
     tool_name: str | None = None
+    tool_arguments: Any = None
     tool_call_id: str | None = None
     command: str | None = None
 
