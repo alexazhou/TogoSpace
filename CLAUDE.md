@@ -123,6 +123,15 @@ frontend/
     - **可 fast-forward**：直接执行 `git submodule update --init --recursive` 拉取更新
     - **不可 fast-forward**：询问用户处理方式（如 stash 本地改动、强制覆盖等）
 
+### Git 冲突处理约定
+- **禁止擅自放弃本地改动**：当 `git stash pop` 或 `git merge` 产生冲突时，严禁使用 `git checkout --theirs .` 或 `git checkout --ours .` 直接放弃一方改动。
+- **必须询问用户**：冲突发生时，应向用户说明冲突内容（哪些文件、冲突类型），询问用户如何处理：
+    - 手动合并
+    - 保留本地改动
+    - 使用远程版本
+    - 其他处理方式
+- **谨慎处理 stash**：`git stash` 后若冲突无法自动合并，不要执行 `git stash drop`，应保留 stash 直到用户确认处理方式。
+
 ## Compact 约定（当前实现）
 
 - 相关实现位于 `src/service/agentService/agentTurnRunner.py`、`src/service/agentService/compact.py`、`src/service/agentService/agentHistoryStore.py`、`src/model/dbModel/historyUsage.py`、`src/service/persistenceService.py`。
