@@ -19,15 +19,16 @@ TogoAgent/
 ├── src/                 # 后端
 ├── tui/                 # 终端前端（Textual）
 ├── frontend/            # Web 前端（Vue 3 + Vite + TypeScript，Git Submodule）
-├── preset/              # 预置内容（role_templates/ teams/），随源码版本管理
+├── assets/              # 静态资源（preset、icons、execute、prompts）
 ├── docs/                # 设计与规范文档
-├── logs/                # 运行日志（自动生成）
-│   ├── backend/
-│   └── tui/
-├── run/                 # PID 文件（自动生成）
-├── scripts/             # 启停脚本
+├── scripts/             # 启停脚本、构建脚本
 ├── tests/               # 测试
-└── data/                # 运行数据（SQLite 等）
+├── run/                 # PID 文件（自动生成）
+└── dev_storage_root/    # 开发模式运行数据（自动生成，不提交）
+    ├── setting.json
+    ├── data/
+    ├── logs/
+    └── workspace/
 ```
 
 ## 后端目录结构（src/）
@@ -205,9 +206,9 @@ cd frontend
 VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 ```
 
-## 日志说明（已更新）
+## 日志说明
 
-后端日志已按模块拆分并保留全局日志：
+后端日志位于 `STORAGE_ROOT/logs/backend/`，已按模块拆分并保留全局日志：
 
 - 全局：`logs/backend/backend.log`
 - 全局告警：`logs/backend/backend_warning.log`
@@ -229,11 +230,34 @@ VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
 
 | 类别 | 内容 | 路径 | 版本控制 |
 |------|------|------|----------|
-| **preset**（预置内容） | RoleTemplate / Team | `preset/role_templates/*.json`、`preset/teams/*.json` | 是，随源码提交 |
-| **config**（运行配置） | LLM 服务、API key、persistence 等 | `~/.togo_agent/setting.json` | 否，用户私有 |
+| **preset**（预置内容） | RoleTemplate / Team | `assets/preset/role_templates/*.json`、`assets/preset/teams/*.json` | 是，随源码提交 |
+| **config**（运行配置） | LLM 服务、API key、persistence 等 | `setting.json`（位于 storage_root） | 否，用户私有 |
 
 - `preset/` 固定由代码自动查找，不可通过参数指定。
-- 运行配置默认读取 `~/.togo_agent/setting.json`；可用 `--config-dir <dir>` 指定其他目录（目录下需有 `setting.json`）。
+- 运行配置默认读取 `storage_root/setting.json`；可用 `--config-dir <dir>` 指定其他目录（目录下需有 `setting.json`）。
+
+## 目录路径约定
+
+所有可写目录统一由 `STORAGE_ROOT` 管理：
+
+| 运行模式 | STORAGE_ROOT | 说明 |
+|----------|--------------|------|
+| **打包模式**（PyInstaller frozen） | `~/.togo_agent/` | 用户私有数据目录 |
+| **开发模式**（直接运行代码） | `repo/dev_storage_root/` | 仓库本地开发目录 |
+
+目录结构（基于 STORAGE_ROOT）：
+
+```text
+STORAGE_ROOT/
+├── setting.json        # 运行配置
+├── data/               # SQLite 数据库
+├── logs/
+│   └── backend/        # 后端日志
+└── workspace/          # Agent 工作目录
+```
+
+- 开发模式下的 `dev_storage_root/` 已加入 `.gitignore`，不会提交到仓库。
+- 静态资源（`assets/`）不纳入 STORAGE_ROOT：打包时位于 `_MEIPASS`，开发时位于仓库 `assets/`。
 
 ## 前端仓库说明（双前端）
 

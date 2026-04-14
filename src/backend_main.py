@@ -109,9 +109,9 @@ async def main(config_dir: str = None, port: int | None = None):
     app_config: AppConfig = configUtil.load(config_dir)
     llmApiUtil.init()
 
-    _config_dir = config_dir or os.path.expanduser("~/.togo_agent")
+    _config_dir = config_dir or appPaths.CONFIG_DIR
     logger.info("[启动] 版本=v%s", __version__)
-    logger.info("[启动] config=%s | preset=%s | data=%s", _config_dir, appPaths.PRESET_DIR, appPaths.DATA_DIR)
+    logger.info("[启动] storage_root=%s | preset=%s", appPaths.STORAGE_ROOT, appPaths.PRESET_DIR)
 
     # 端口优先使用命令行参数，其次使用配置文件
     bind_host = app_config.setting.bind_host

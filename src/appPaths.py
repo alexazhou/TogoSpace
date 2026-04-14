@@ -1,29 +1,40 @@
 """
 运行时路径模块。
 
-所有变量在开发模式下指向仓库内默认位置，打包模式下由
-appEntry.py 在后端启动前覆盖为用户目录（~/.togo_agent/）。
+引入 STORAGE_ROOT 统一管理所有可写目录：
+- 打包模式：~/.togo_agent
+- 开发模式：仓库根目录下的 .togo_agent
+
+静态资源（只读）在打包时指向 _MEIPASS，开发时指向仓库 assets/。
 """
 import os
 import platform
+import sys
 
 _SRC = os.path.dirname(os.path.abspath(__file__))   # = repo/src/
 _ROOT = os.path.join(_SRC, "..")                     # = repo/
 
-# 静态资源（prompts / preset / migrate 等，只读）
-ASSETS_DIR: str    = os.path.abspath(os.path.join(_ROOT, "assets"))
+if getattr(sys, "frozen", False):
+    # 打包模式：用户目录
+    STORAGE_ROOT: str = os.path.expanduser("~/.togo_agent")
+else:
+    # 开发模式：仓库目录下的 dev_storage_root
+    STORAGE_ROOT: str = os.path.abspath(os.path.join(_ROOT, "dev_storage_root"))
+
+# 静态资源（只读）- 打包时指向 _MEIPASS，开发时指向仓库 assets/
+if getattr(sys, "frozen", False):
+    ASSETS_DIR: str = os.path.join(sys._MEIPASS, "assets")
+else:
+    ASSETS_DIR: str = os.path.abspath(os.path.join(_ROOT, "assets"))
+
+# 所有可写路径统一基于 STORAGE_ROOT
+DATA_DIR: str       = os.path.join(STORAGE_ROOT, "data")
+LOGS_DIR: str       = os.path.join(STORAGE_ROOT, "logs", "backend")
+WORKSPACE_ROOT: str = os.path.join(STORAGE_ROOT, "workspace")
+CONFIG_DIR: str     = STORAGE_ROOT  # 配置文件也在 storage_root
 
 # Preset 目录（role_templates / teams），可通过环境变量覆盖
-PRESET_DIR: str    = os.path.abspath(os.environ.get("TEAMAGENT_PRESET_DIR") or os.path.join(ASSETS_DIR, "preset"))
-
-# 运行数据（SQLite 等，可写）
-DATA_DIR: str      = os.path.abspath(os.path.join(_ROOT, "data"))
-
-# 后端日志（可写）
-LOGS_DIR: str      = os.path.abspath(os.path.join(_ROOT, "logs", "backend"))
-
-# Agent 工作目录根（可写）
-WORKSPACE_ROOT: str = os.path.abspath(os.path.join(_ROOT, "workspace"))
+PRESET_DIR: str = os.path.abspath(os.environ.get("TEAMAGENT_PRESET_DIR") or os.path.join(ASSETS_DIR, "preset"))
 
 
 def get_gtsp_binary_path() -> str:

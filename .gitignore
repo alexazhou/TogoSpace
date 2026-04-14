@@ -22,3 +22,6 @@ build/
 workspace_root/
 workspace/
 build_config.json
+
+# 开发模式下本地运行数据（统一目录）
+dev_storage_root/

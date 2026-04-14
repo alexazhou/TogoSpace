@@ -2,10 +2,7 @@ import os
 from constants import DriverType
 from controller.baseController import BaseHandler
 from util import configUtil
-
-
-# 基础目录
-_BASE_DIR = os.path.abspath(os.path.expanduser("~/.togo_agent"))
+import appPaths
 
 
 class ConfigHandler(BaseHandler):
@@ -43,10 +40,11 @@ class DirectoriesHandler(BaseHandler):
 
     async def get(self) -> None:
         self.return_json({
-            "config_dir": os.path.join(_BASE_DIR, "config"),
-            "workspace_dir": os.path.join(_BASE_DIR, "workspace"),
-            "data_dir": os.path.join(_BASE_DIR, "data"),
-            "log_dir": os.path.join(_BASE_DIR, "log"),
+            "storage_root": appPaths.STORAGE_ROOT,
+            "config_dir": appPaths.CONFIG_DIR,
+            "workspace_dir": appPaths.WORKSPACE_ROOT,
+            "data_dir": appPaths.DATA_DIR,
+            "log_dir": appPaths.LOGS_DIR,
         })
 
 

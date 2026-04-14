@@ -19,8 +19,9 @@ _cached_preset_dir: str | None = None
 
 
 def _resolve_config_dir(config_dir: str | None) -> str:
-    base = config_dir or os.path.expanduser("~/.togo_agent")
-    return os.path.abspath(base)
+    if config_dir is not None:
+        return os.path.abspath(config_dir)
+    return appPaths.CONFIG_DIR
 
 
 def _resolve_preset_dir() -> str:
