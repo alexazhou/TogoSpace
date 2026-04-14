@@ -28,6 +28,7 @@ class AgentTurnActionResult:
 class AgentTurnSetup:
     max_retries: int = 1
     hint_prompt: str = ""
+    hint_prompt_error_action: str = ""
 
 
 class AgentDriverHost(Protocol):

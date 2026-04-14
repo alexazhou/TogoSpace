@@ -35,6 +35,11 @@ _RUN_CHAT_TURN_HINT = (
     "你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，"
     "请务必调用 finish_chat_turn 结束本轮（即跳过）。"
 )
+_RUN_CHAT_TURN_ERROR_ACTION_HINT = (
+    "检测到你将工具调用以 JSON 格式写入了消息文本，但这不会被执行。"
+    "你必须通过 tool_calls 机制调用工具，而不是在消息内容中输出 JSON。"
+    "请重新行动，直接调用相应的工具。"
+)
 
 
 def build_gtsp_command(raw_command: Optional[list[str]], workdir: str) -> list[str]:
@@ -130,6 +135,7 @@ class TspAgentDriver(AgentDriver):
         return AgentTurnSetup(
             max_retries=_RUN_CHAT_TURN_MAX_RETRIES,
             hint_prompt=_RUN_CHAT_TURN_HINT,
+            hint_prompt_error_action=_RUN_CHAT_TURN_ERROR_ACTION_HINT,
         )
 
     async def run_chat_turn(self, task: GtAgentTask, synced_count: int) -> None:

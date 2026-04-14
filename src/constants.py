@@ -164,9 +164,10 @@ class AgentTaskStatus(EnhanceEnum):
 
 class TurnStepResult(EnhanceEnum):
     """Turn 内部单步推进结果枚举。"""
-    TURN_DONE = auto()    # 当前 turn 已完成，通常表示 finish_chat_turn 已执行成功
-    NO_ACTION = auto()    # 当前 step 未产出可执行动作，需要按失败行动逻辑处理
-    CONTINUE = auto()     # 当前 turn 仍需继续推进，进入下一个 step
+    TURN_DONE = auto()      # 当前 turn 已完成，通常表示 finish_chat_turn 已执行成功
+    NO_ACTION = auto()      # 当前 step 未产出可执行动作，需要按失败行动逻辑处理
+    CONTINUE = auto()       # 当前 turn 仍需继续推进，进入下一个 step
+    ERROR_ACTION = auto()   # 模型输出格式异常（如将 tool call 写入 content 字段）
 
 
 class ScheduleState(EnhanceEnum):
