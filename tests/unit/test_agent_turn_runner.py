@@ -175,7 +175,7 @@ async def test_advance_step_continues_to_infer_when_tool_failed(turn_runner):
 
     assert result == TurnStepResult.NO_ACTION
     turn_runner._history.append_history_init_item.assert_awaited_once_with(role=OpenaiApiRole.ASSISTANT)
-    turn_runner._infer_to_item.assert_awaited_once_with(assistant_output_item, [])
+    turn_runner._infer_to_item.assert_awaited_once_with(assistant_output_item, [], tool_choice=None)
     turn_runner._history.find_tool_call_by_id.assert_not_called()
     turn_runner._history.get_first_pending_tool_call.assert_not_called()
 

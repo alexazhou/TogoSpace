@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -36,8 +37,8 @@ _RUN_CHAT_TURN_HINT = (
     "请务必调用 finish_chat_turn 结束本轮（即跳过）。"
 )
 _RUN_CHAT_TURN_ERROR_ACTION_HINT = (
-    "检测到你将工具调用以 JSON 格式写入了消息文本，但这不会被执行。"
-    "你必须通过 tool_calls 机制调用工具，而不是在消息内容中输出 JSON。"
+    "系统提示: 检测到你将工具调用以 JSON 格式写入了消息文本，这将无法被送达用户。"
+    "你必须通过调用 send_chat_msg / finish_chat_turn 工具，而不是在消息内容中输出 JSON。"
     "请重新行动，直接调用相应的工具。"
 )
 
@@ -106,7 +107,11 @@ class TspAgentDriver(AgentDriver):
             await super().shutdown()
             return
         try:
-            await self._client.shutdown()
+            await asyncio.wait_for(self._client.shutdown(), timeout=10)
+        except asyncio.TimeoutError:
+            logger.warning("TSP client shutdown 超时，强制终止: agent_id=%s", self.host.gt_agent.id)
+        except Exception as e:
+            logger.warning("TSP client shutdown 异常: agent_id=%s, error=%s", self.host.gt_agent.id, e)
         finally:
             self._client = None
         await super().shutdown()

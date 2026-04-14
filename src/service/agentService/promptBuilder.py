@@ -4,7 +4,7 @@ from constants import SpecialAgent
 from dal.db import gtAgentManager, gtDeptManager
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 
-_TURN_CONTEXT_SUFFIX = "你现在可以调用工具行动。如果你已完成发言和所有工具调用，请务必调用 finish_chat_turn 结束本轮行动。"
+_TURN_CONTEXT_SUFFIX = "\n\n-----系统提示:你现在可以调用工具行动。如果你已完成发言和所有工具调用，请务必调用 finish_chat_turn 结束本轮行动。"
 _TEAM_AWARENESS_TOOLS_GUIDE = """你可以使用以下工具来感知团队状态并协助同伴：
 - get_dept_info：了解团队或指定部门的概况与组织架构
 - get_room_info：了解房间列表或指定房间详情
