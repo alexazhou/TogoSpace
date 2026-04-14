@@ -151,9 +151,11 @@ class AgentTurnRunner:
         tools = self.tool_registry.export_openai_tools()
         turn_setup: AgentTurnSetup = self.driver.turn_setup
         failed_action_count = 0
+        next_tool_choice: str | None = None
 
         while True:
-            result = await self._advance_step(room, tools)
+            result = await self._advance_step(room, tools, tool_choice=next_tool_choice)
+            next_tool_choice = None
 
             if result == TurnStepResult.TURN_DONE:
                 return
@@ -182,13 +184,14 @@ class AgentTurnRunner:
                     await self._history.append_history_message(GtAgentHistory.build(
                         llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, hint),
                     ))
+                    next_tool_choice = "required"
                     continue
                 raise RuntimeError(
                     f"达到 ERROR_ACTION 重试上限: agent_id={self.gt_agent.id}, "
                     f"failed_actions={failed_action_count}, max_retries={turn_setup.max_retries}"
                 )
 
-    async def _advance_step(self, room: ChatRoom, tools: list[llmApiUtil.OpenAITool]) -> TurnStepResult:
+    async def _advance_step(self, room: ChatRoom, tools: list[llmApiUtil.OpenAITool], tool_choice: str | None = None) -> TurnStepResult:
         """根据当前 history 状态推进一个 step。
 
         返回:
@@ -214,7 +217,7 @@ class AgentTurnRunner:
                 )
                 return await self._run_tool_to_item(first_tc, output_item, room)
             elif status in (AgentHistoryStatus.INIT, AgentHistoryStatus.FAILED):
-                return await self._infer_and_classify(last_item, tools)
+                return await self._infer_and_classify(last_item, tools, tool_choice=tool_choice)
             else:
                 raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, role={role}, status={status}")
 
@@ -233,16 +236,16 @@ class AgentTurnRunner:
                     )
                     return TurnStepResult.CONTINUE
                 output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
-                return await self._infer_and_classify(output_item, tools)
+                return await self._infer_and_classify(output_item, tools, tool_choice=tool_choice)
             elif status == AgentHistoryStatus.FAILED:
                 output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
-                return await self._infer_and_classify(output_item, tools)
+                return await self._infer_and_classify(output_item, tools, tool_choice=tool_choice)
             else:
                 raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, role={role}, status={status}")
 
         elif role in (OpenaiApiRole.USER, OpenaiApiRole.SYSTEM):
             output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
-            return await self._infer_and_classify(output_item, tools)
+            return await self._infer_and_classify(output_item, tools, tool_choice=tool_choice)
 
         else:
             raise RuntimeError(f"无法推进: agent_id={self.gt_agent.id}, role={role}, status={status}")
@@ -251,9 +254,10 @@ class AgentTurnRunner:
         self,
         output_item: GtAgentHistory,
         tools: list[llmApiUtil.OpenAITool],
+        tool_choice: str | None = None,
     ) -> TurnStepResult:
         """执行推理并按结果分类返回。"""
-        assistant_message = await self._infer_to_item(output_item, tools)
+        assistant_message = await self._infer_to_item(output_item, tools, tool_choice=tool_choice)
         if _detect_json_tool_call_in_content(assistant_message.content):
             for tc in (assistant_message.tool_calls or []):
                 await self._history.append_history_message(GtAgentHistory.build(
@@ -271,6 +275,7 @@ class AgentTurnRunner:
         self,
         output_item: GtAgentHistory,
         tools: list[llmApiUtil.OpenAITool],
+        tool_choice: str | None = None,
     ) -> llmApiUtil.OpenAIMessage:
         """执行推理，结果写入 output_item。"""
         history = self._history
@@ -307,7 +312,7 @@ class AgentTurnRunner:
             )
             activity_id = activity.id
 
-            ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools)
+            ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools, tool_choice=tool_choice)
 
             # 流式推理 + 节流更新
             last_progress_time = time.monotonic()
@@ -364,7 +369,7 @@ class AgentTurnRunner:
                     last_progress_time = time.monotonic()
                     chunk_count_since_update = 0
 
-                    ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools)
+                    ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools, tool_choice=tool_choice)
                     infer_result = await llmService.infer_stream(
                         self.gt_agent.model, ctx, on_progress=_on_progress,
                     )
