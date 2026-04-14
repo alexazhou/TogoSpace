@@ -15,19 +15,26 @@ _SRC = os.path.dirname(os.path.abspath(__file__))   # = repo/src/
 _ROOT = os.path.join(_SRC, "..")                     # = repo/
 _IS_FROZEN = bool(getattr(sys, "frozen", False))
 _MEIPASS = str(getattr(sys, "_MEIPASS", ""))
-STORAGE_ROOT: str = os.path.expanduser("~/.togo_agent") if _IS_FROZEN else os.path.abspath(os.path.join(_ROOT, "dev_storage_root"))
 
-# 静态资源（只读）- 打包时指向 _MEIPASS，开发时指向仓库 assets/
-ASSETS_DIR: str = os.path.join(_MEIPASS, "assets") if _IS_FROZEN else os.path.abspath(os.path.join(_ROOT, "assets"))
+STORAGE_ROOT: str
+ASSETS_DIR: str
+DATA_DIR: str
+LOGS_DIR: str
+WORKSPACE_ROOT: str
+CONFIG_DIR: str
+PRESET_DIR: str
 
-# 所有可写路径统一基于 STORAGE_ROOT
-DATA_DIR: str       = os.path.join(STORAGE_ROOT, "data")
-LOGS_DIR: str       = os.path.join(STORAGE_ROOT, "logs", "backend")
-WORKSPACE_ROOT: str = os.path.join(STORAGE_ROOT, "workspace")
-CONFIG_DIR: str     = STORAGE_ROOT  # 配置文件也在 storage_root
-
-# Preset 目录（role_templates / teams），可通过环境变量覆盖
-PRESET_DIR: str = os.path.abspath(os.environ.get("TEAMAGENT_PRESET_DIR") or os.path.join(ASSETS_DIR, "preset"))
+if _IS_FROZEN:
+    STORAGE_ROOT = os.path.expanduser("~/.togo_agent")
+    ASSETS_DIR = os.path.join(_MEIPASS, "assets")
+else:
+    STORAGE_ROOT = os.path.abspath(os.path.join(_ROOT, "dev_storage_root"))
+    ASSETS_DIR = os.path.abspath(os.path.join(_ROOT, "assets"))
+DATA_DIR = os.path.join(STORAGE_ROOT, "data")
+LOGS_DIR = os.path.join(STORAGE_ROOT, "logs", "backend")
+WORKSPACE_ROOT = os.path.join(STORAGE_ROOT, "workspace")
+CONFIG_DIR = STORAGE_ROOT
+PRESET_DIR = os.path.abspath(os.environ.get("TEAMAGENT_PRESET_DIR") or os.path.join(ASSETS_DIR, "preset"))
 
 
 def get_gtsp_binary_path() -> str:
