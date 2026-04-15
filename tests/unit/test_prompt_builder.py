@@ -17,12 +17,14 @@ async def test_build_agent_system_prompt_includes_team_awareness_guide(monkeypat
         agent_name="alice",
         template_name="pm",
         template_soul="负责推进项目",
+        workdir="/workspace/demo",
         base_prompt_tmpl="base prompt",
         identity_prompt_tmpl="我是 {agent_name}，角色 {template_name}\n\n{template_soul}",
     )
 
     assert "组织信息" in result
     assert "负责推进项目" in result
+    assert "/workspace/demo" in result
     assert "get_dept_info" in result
     assert "get_room_info" in result
     assert "get_agent_info" in result
@@ -45,11 +47,13 @@ async def test_build_agent_system_prompt_skips_team_awareness_when_not_in_team(m
         agent_name="solo",
         template_name="helper",
         template_soul="帮助用户完成任务",
+        workdir="/workspace/solo",
         base_prompt_tmpl="base prompt",
         identity_prompt_tmpl="我是 {agent_name}，角色 {template_name}\n\n{template_soul}",
     )
 
     assert called is False
     assert "帮助用户完成任务" in result
+    assert "/workspace/solo" in result
     assert "get_dept_info" not in result
     assert "wake_up_agent" not in result

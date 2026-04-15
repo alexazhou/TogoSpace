@@ -86,6 +86,7 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
             agent_name=agent_name,
             template_name=template_name,
             template_soul=gt_role_template.soul,
+            workdir=team_workdir,
             base_prompt_tmpl=BASE_PROMPT.strip(),
             identity_prompt_tmpl=AGENT_IDENTITY_PROMPT.strip(),
         )
