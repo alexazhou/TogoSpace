@@ -140,7 +140,7 @@ class TestAgentServiceSystemPrompt(_agentServiceCase):
         alice = agentService.get_agent(gt_alice.id)
 
         assert "你当前的名字：alice" in alice.system_prompt
-        assert "你是身份：alice" in alice.system_prompt
+        assert "你的身份：alice" in alice.system_prompt
 
 
 class TestagentServiceGetAllRooms(_agentServiceCase):
