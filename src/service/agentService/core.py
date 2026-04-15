@@ -3,6 +3,7 @@ import logging
 import os
 from typing import Any, List
 
+from service.agentService.prompts import BASE_PROMPT, AGENT_IDENTITY_PROMPT
 from util import configUtil
 from model.dbModel.gtAgent import GtAgent
 from service.agentService.agent import Agent
@@ -49,8 +50,6 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
     templates_by_id = {template.id: template for template in gt_role_templates}
 
     app_config = configUtil.get_app_config()
-    base_prompt_tmpl = app_config.group_chat_prompt
-    identity_prompt_tmpl = app_config.agent_identity_prompt
     default_model = llmService.get_default_model_or_none()
     resolved_workspace_root = workspace_root or app_config.setting.workspace_root
 
@@ -87,8 +86,8 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
             agent_name=agent_name,
             template_name=template_name,
             template_soul=gt_role_template.soul,
-            base_prompt_tmpl=base_prompt_tmpl,
-            identity_prompt_tmpl=identity_prompt_tmpl,
+            base_prompt_tmpl=BASE_PROMPT.strip(),
+            identity_prompt_tmpl=AGENT_IDENTITY_PROMPT.strip(),
         )
 
         assert gt_agent.id is not None and gt_agent.id > 0, f"invalid agent id: {gt_agent.id}"
