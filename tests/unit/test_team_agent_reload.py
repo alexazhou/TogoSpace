@@ -126,8 +126,6 @@ async def test_load_team_agents_allows_startup_without_available_llm(monkeypatch
         "get_app_config",
         lambda: AppConfig(
             setting=SettingConfig(llm_services=[], default_llm_server=None, workspace_root=str(tmp_path)),
-            group_chat_prompt="group",
-            agent_identity_prompt="identity",
         ),
     )
 

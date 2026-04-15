@@ -189,8 +189,6 @@ def load(config_dir: str = None, preset_dir: str = None, force_reload: bool = Fa
         role_templates=role_templates,
         teams=teams,
         setting=setting,
-        group_chat_prompt=_load_prompt("prompts/Base.md"),
-        agent_identity_prompt=_load_prompt("prompts/AgentIdentity.md"),
     )
     _cached_app_config = app_config
     _cached_config_dir = resolved_config_dir

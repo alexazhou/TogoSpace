@@ -144,7 +144,6 @@ PyInstaller 不支持交叉编译，需在对应平台上执行打包：
 ```bash
 pyinstaller --windowed --onedir \
   --add-data "preset:preset" \
-  --add-data "assets/prompts:assets/prompts" \
   --add-data "assets/frontend:assets/frontend" \
   --icon assets/icon.icns \
   src/appEntry.py
@@ -155,7 +154,7 @@ pyinstaller --windowed --onedir \
 | 目录 | 位置 | 说明 |
 |------|------|------|
 | `preset/` | 内嵌 bundle（只读） | role_templates / teams 预置内容，随版本发布 |
-| `assets/prompts/` | 内嵌 bundle（只读） | 系统 prompt 文件，随版本发布 |
+| `src/prompts.py` | 内嵌 bundle（只读） | 系统 prompt 定义，随版本发布 |
 | `assets/frontend/` | 内嵌 bundle（只读） | Web 前端构建产物，由后端托管；打包前需手动从 `frontend/dist` 复制 |
 | `~/.togo_agent/` | 用户主目录（可写） | `setting.json` 等用户配置，已在用户目录，无需处理 |
 
