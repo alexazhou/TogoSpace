@@ -117,8 +117,12 @@ async def build_agent_system_prompt(
     base_prompt_tmpl: str,
     identity_prompt_tmpl: str,
 ) -> str:
-    identity_prompt = identity_prompt_tmpl.format(agent_name=agent_name, template_name=template_name)
-    full_prompt = base_prompt_tmpl + "\n\n" + identity_prompt + "\n\n" + template_soul
+    identity_prompt = identity_prompt_tmpl.format(
+        agent_name=agent_name,
+        template_name=template_name,
+        template_soul=template_soul,
+    )
+    full_prompt = base_prompt_tmpl + "\n\n" + identity_prompt
     if team_id > 0:
         dept_context = await _build_dept_context(team_id, agent_name)
         full_prompt += "\n\n" + dept_context
