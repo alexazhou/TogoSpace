@@ -52,3 +52,10 @@ COMPACT_PROMPT_TEMPLATE = '''因为上下文长度即将超出限制，请总结
 COMPACT_RESUME_TEMPLATE = '''以下是之前对话的压缩摘要，请基于这些已知信息继续后续任务：
 
 {summary}'''
+
+WORKDIR_PROMPT = '''
+## 工作目录
+
+当前工作目录：{workdir}
+
+如无特别要求，则默认在此目录中写入文件。'''
