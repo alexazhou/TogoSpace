@@ -1,23 +1,13 @@
 {
-  "name": "默认团队",
+  "name": "软件研发团队",
   "uuid": "preset-default-team-v18",
   "i18n": {
     "display_name": {
-      "zh-CN": "默认团队",
-      "en": "Default Team"
+      "zh-CN": "软件研发团队",
+      "en": "Software R&D Team"
     }
   },
   "agents": [
-    {
-      "name": "王老师",
-      "role_template": "researcher",
-      "i18n": {
-        "display_name": {
-          "zh-CN": "王老师",
-          "en": "Prof. Wang"
-        }
-      }
-    },
     {
       "name": "小马哥",
       "role_template": "project_manager",
@@ -29,100 +19,58 @@
       }
     },
     {
-      "name": "小A",
+      "name": "阿张",
       "role_template": "software_engineer",
       "i18n": {
         "display_name": {
-          "zh-CN": "小A",
-          "en": "Engineer A"
+          "zh-CN": "阿张",
+          "en": "Azhang"
         }
       }
     },
     {
-      "name": "小B",
+      "name": "李哥",
       "role_template": "test_engineer",
       "i18n": {
         "display_name": {
-          "zh-CN": "小B",
-          "en": "QA B"
-        }
-      }
-    },
-    {
-      "name": "小刘",
-      "role_template": "intern_tsp",
-      "i18n": {
-        "display_name": {
-          "zh-CN": "小刘",
-          "en": "Intern Liu"
+          "zh-CN": "李哥",
+          "en": "Brother Li"
         }
       }
     }
   ],
   "preset_rooms": [
     {
-      "name": "王老师",
-      "agents": ["Operator", "王老师"],
-      "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
+      "name": "项目作战室",
+      "agents": ["Operator", "小马哥", "阿张", "李哥"],
+      "initial_topic": "你好，这是软件研发作战室。请开始下达你的研发任务。",
       "max_turns": 100,
       "i18n": {
         "display_name": {
-          "zh-CN": "王老师",
-          "en": "Prof. Wang"
+          "zh-CN": "项目作战室",
+          "en": "War Room"
         },
         "initial_topic": {
-          "zh-CN": "你好，我是人类操作者。你可以根据我的指令执行任务。",
-          "en": "Hello, I am the human operator. You can execute tasks based on my instructions."
-        }
-      }
-    },
-    {
-      "name": "小马哥",
-      "agents": ["Operator", "小马哥"],
-      "initial_topic": "你好，我是人类操作者。你可以根据我的指令执行任务。",
-      "max_turns": 100,
-      "i18n": {
-        "display_name": {
-          "zh-CN": "小马哥",
-          "en": "Ma"
-        },
-        "initial_topic": {
-          "zh-CN": "你好，我是人类操作者。你可以根据我的指令执行任务。",
-          "en": "Hello, I am the human operator. You can execute tasks based on my instructions."
-        }
-      }
-    },
-    {
-      "name": "小刘",
-      "agents": ["Operator", "小刘"],
-      "initial_topic": "你好，我是人类操作者。你主要协助做文件查找与信息检索。",
-      "max_turns": 100,
-      "i18n": {
-        "display_name": {
-          "zh-CN": "小刘",
-          "en": "Intern Liu"
-        },
-        "initial_topic": {
-          "zh-CN": "你好，我是人类操作者。你主要协助做文件查找与信息检索。",
-          "en": "Hello, I am the human operator. Your main role is to assist with file search and information retrieval."
+          "zh-CN": "你好，这是软件研发作战室。请开始下达你的研发任务。",
+          "en": "Hello, this is the R&D War Room. Please start giving your tasks."
         }
       }
     }
   ],
   "dept_tree": {
-    "dept_name": "总部",
-    "responsibility": "负责整体运营与协作",
+    "dept_name": "研发部",
+    "responsibility": "负责核心产品的开发与交付",
     "manager": "小马哥",
-    "agents": ["小马哥", "王老师", "小A", "小B", "小刘"],
+    "agents": ["小马哥", "阿张", "李哥"],
     "children": [],
     "i18n": {
       "dept_name": {
-        "zh-CN": "总部",
-        "en": "Headquarters"
+        "zh-CN": "研发部",
+        "en": "R&D Dept"
       },
       "responsibility": {
-        "zh-CN": "负责整体运营与协作",
-        "en": "Responsible for overall operations and collaboration"
+        "zh-CN": "负责核心产品的开发与交付",
+        "en": "Responsible for core product development and delivery"
       }
     }
   }

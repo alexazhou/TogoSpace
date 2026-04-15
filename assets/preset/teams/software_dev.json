@@ -1,0 +1,169 @@
+{
+  "name": "软件研发团队强化版",
+  "uuid": "preset-software-dev-pro-v1",
+  "i18n": {
+    "display_name": {
+      "zh-CN": "软件研发团队强化版",
+      "en": "Software R&D Team (Pro)"
+    }
+  },
+  "agents": [
+    {
+      "name": "小马哥",
+      "role_template": "project_manager",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "小马哥",
+          "en": "Ma (PM)"
+        }
+      }
+    },
+    {
+      "name": "架构师",
+      "role_template": "architect",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "架构师",
+          "en": "Architect"
+        }
+      }
+    },
+    {
+      "name": "产品经理",
+      "role_template": "product_manager",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "产品经理",
+          "en": "Product Manager"
+        }
+      }
+    },
+    {
+      "name": "UI设计师",
+      "role_template": "ui_designer",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "UI设计师",
+          "en": "UI Designer"
+        }
+      }
+    },
+    {
+      "name": "前端程序员",
+      "role_template": "frontend_engineer",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "前端程序员",
+          "en": "Frontend Engineer"
+        }
+      }
+    },
+    {
+      "name": "后端程序员",
+      "role_template": "software_engineer",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "后端程序员",
+          "en": "Backend Engineer"
+        }
+      }
+    },
+    {
+      "name": "代码审查员",
+      "role_template": "code_reviewer",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "代码审查员",
+          "en": "Code Reviewer"
+        }
+      }
+    },
+    {
+      "name": "测试工程师",
+      "role_template": "test_engineer",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "测试工程师",
+          "en": "Test Engineer"
+        }
+      }
+    },
+    {
+      "name": "实习生",
+      "role_template": "intern",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "实习生",
+          "en": "Intern"
+        }
+      }
+    }
+  ],
+  "preset_rooms": [
+    {
+      "name": "项目指挥部",
+      "agents": ["Operator", "小马哥", "架构师", "产品经理"],
+      "initial_topic": "欢迎来到项目指挥部。请开始规划我们的软件研发任务。",
+      "max_turns": 100,
+      "i18n": {
+        "display_name": {
+          "zh-CN": "项目指挥部",
+          "en": "Project Headquarters"
+        },
+        "initial_topic": {
+          "zh-CN": "欢迎来到项目指挥部。请开始规划我们的软件研发任务。",
+          "en": "Welcome to the Project Headquarters. Please start planning our software R&D tasks."
+        }
+      }
+    },
+    {
+      "name": "开发工作室",
+      "agents": ["Operator", "架构师", "前端程序员", "后端程序员", "代码审查员"],
+      "initial_topic": "这是开发工作室，负责具体的代码实现与审查。",
+      "max_turns": 100,
+      "i18n": {
+        "display_name": {
+          "zh-CN": "开发工作室",
+          "en": "Dev Studio"
+        },
+        "initial_topic": {
+          "zh-CN": "这是开发工作室，负责具体的代码实现与审查。",
+          "en": "This is the Dev Studio, responsible for code implementation and review."
+        }
+      }
+    },
+    {
+      "name": "设计与产品",
+      "agents": ["Operator", "产品经理", "UI设计师", "前端程序员"],
+      "initial_topic": "在此讨论产品需求与 UI 设计还原。",
+      "max_turns": 100,
+      "i18n": {
+        "display_name": {
+          "zh-CN": "设计与产品",
+          "en": "Design & Product"
+        },
+        "initial_topic": {
+          "zh-CN": "在此讨论产品需求与 UI 设计还原。",
+          "en": "Discuss product requirements and UI design implementation here."
+        }
+      }
+    }
+  ],
+  "dept_tree": {
+    "dept_name": "研发中心",
+    "responsibility": "负责软件全生命周期的研发工作",
+    "manager": "小马哥",
+    "agents": ["小马哥", "架构师", "产品经理", "UI设计师", "前端程序员", "后端程序员", "代码审查员", "测试工程师", "实习生"],
+    "children": [],
+    "i18n": {
+      "dept_name": {
+        "zh-CN": "研发中心",
+        "en": "R&D Center"
+      },
+      "responsibility": {
+        "zh-CN": "负责软件全生命周期的研发工作",
+        "en": "Responsible for the full lifecycle of software R&D"
+      }
+    }
+  }
+}
