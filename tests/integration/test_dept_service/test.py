@@ -618,7 +618,7 @@ class TestDeptService(ServiceTestCase):
         assert after_room is not None
         assert after_room.id == before_room.id
         assert after_room.name == "platform"
-        assert after_room.initial_topic == "平台部门"
+        assert after_room.initial_topic == f"这里是{renamed.name}部门的公共群聊，部门人员可在这里互相沟通。"
         assert "DEPT" in after_room.tags
 
     async def test_load_team_rooms_keeps_dept_room_tags(self):
