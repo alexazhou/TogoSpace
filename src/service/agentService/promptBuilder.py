@@ -3,33 +3,12 @@ from __future__ import annotations
 from constants import SpecialAgent
 from dal.db import gtAgentManager, gtDeptManager
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
-
-_TURN_CONTEXT_SUFFIX = (
-    "\n\n-----指令确认: "
-    "\n1. 你必须通过工具行动。你的发言必须使用 send_chat_msg 工具发送。"
-    "\n2. 一旦你完成了本轮的核心发言或行动，即视为当前阶段目标达成，请立即调用 finish_chat_turn 结束本轮，以便其他成员发言。"
-    "\n3. 严禁在同一回合内针对同一话题反复发送内容相似的消息。"
+from service.agentService.prompts import (
+    TURN_CONTEXT_SUFFIX,
+    TEAM_AWARENESS_TOOLS_GUIDE,
+    COMPACT_PROMPT_TEMPLATE,
+    COMPACT_RESUME_TEMPLATE,
 )
-_TEAM_AWARENESS_TOOLS_GUIDE = """你可以使用以下工具来感知团队状态并协助同伴：
-- get_dept_info：了解团队或指定部门的概况与组织架构
-- get_room_info：了解房间列表或指定房间详情
-- get_agent_info：查看所有同伴状态或指定同伴详细信息
-- wake_up_agent：唤醒失败的同伴
-
-当你发现有同伴长时间无响应或对话异常中断时，建议先用 get_agent_info 查看其状态，若为 FAILED 可尝试用 wake_up_agent 唤醒。"""
-_COMPACT_PROMPT_TEMPLATE = """\
-因为上下文长度即将超出限制，请总结以上的工作内容，作为后续工作的起点。
-
-要求：
-- 保留对当前任务仍然有用的事实、约束、决定、未完成事项
-- 保留与工具调用结果相关的关键信息
-- 删除寒暄、重复表达和已失效上下文
-- 不要使用任何工具，也不要输出任何 tool call / function call
-- 输出要简洁、结构化，便于后续继续推理
-- 摘要长度尽量简短，不超过 {max_tokens} tokens"""
-_COMPACT_RESUME_TEMPLATE = """以下是之前对话的压缩摘要，请基于这些已知信息继续后续任务：
-
-{summary}"""
 
 
 def format_room_message(room_name: str, sender_name: str, content: str) -> str:
@@ -42,7 +21,7 @@ def build_turn_begin_prompt(room_name: str, message_blocks: list[str]) -> str:
     return (
         f"当前轮到你行动，房间名:【{room_name}】,新消息如下:\n\n"
         f"{context}\n\n"
-        f"{_TURN_CONTEXT_SUFFIX}"
+        f"{TURN_CONTEXT_SUFFIX}"
     )
 
 
@@ -61,11 +40,11 @@ def build_turn_begin_prompt_from_messages(
 
 
 def build_compact_instruction(max_tokens: int) -> str:
-    return _COMPACT_PROMPT_TEMPLATE.format(max_tokens=max_tokens)
+    return COMPACT_PROMPT_TEMPLATE.format(max_tokens=max_tokens)
 
 
 def build_compact_resume_prompt(summary: str) -> str:
-    return _COMPACT_RESUME_TEMPLATE.format(summary=summary.strip())
+    return COMPACT_RESUME_TEMPLATE.format(summary=summary.strip())
 
 
 async def _build_dept_context(team_id: int, agent_name: str) -> str:
@@ -126,5 +105,5 @@ async def build_agent_system_prompt(
     if team_id > 0:
         dept_context = await _build_dept_context(team_id, agent_name)
         full_prompt += "\n\n" + dept_context
-        full_prompt += "\n\n" + _TEAM_AWARENESS_TOOLS_GUIDE
+        full_prompt += "\n\n" + TEAM_AWARENESS_TOOLS_GUIDE
     return full_prompt
