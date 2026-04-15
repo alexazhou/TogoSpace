@@ -69,7 +69,7 @@ class GtDept(DbModelBase):
         room_specs.append(DeptRoomSpec(
             biz_id=f"DEPT:{self.id}",
             name=self.name,
-            initial_topic=self.responsibility or f"{self.name} 部门群聊",
+            initial_topic=f"这里是{self.name}部门的公共群聊，部门人员可在这里互相沟通。",
             agent_ids=list(dict.fromkeys(self.agent_ids)),
         ))
         for child in self.children:
