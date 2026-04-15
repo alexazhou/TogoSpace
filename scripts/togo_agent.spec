@@ -3,6 +3,8 @@ import importlib.util
 import os
 import re
 
+from PyInstaller.building.datastruct import Tree
+
 # SPECPATH 是 PyInstaller 内置变量，指向本 spec 文件所在目录
 REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 
@@ -30,7 +32,12 @@ a = Analysis(
     ],
     binaries=[],
     datas=[
-        (os.path.join(REPO_ROOT, "assets"), "assets"),
+        # 使用 Tree 收集 assets 目录，排除 Linux 版本的 gtsp 可执行文件
+        Tree(
+            os.path.join(REPO_ROOT, "assets"),
+            prefix="assets",
+            excludes=["gtsp-linux-*"],
+        ),
         # litellm 含大量 json/yaml 数据文件，需整包打入
         (importlib.util.find_spec("litellm").submodule_search_locations[0], "litellm"),
     ],
