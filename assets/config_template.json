@@ -1,6 +1,9 @@
 {
   "_comment": "TeamAgent 配置文件，请根据实际 LLM 服务修改",
 
+  "bind_host": "0.0.0.0",
+  "bind_port": 8080,
+
   "default_llm_server": "qwen",
 
   "llm_services": [
