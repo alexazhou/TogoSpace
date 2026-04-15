@@ -39,24 +39,7 @@
       }
     }
   ],
-  "preset_rooms": [
-    {
-      "name": "项目作战室",
-      "agents": ["Operator", "小马哥", "阿张", "李哥"],
-      "initial_topic": "你好，这是软件研发作战室。请开始下达你的研发任务。",
-      "max_turns": 100,
-      "i18n": {
-        "display_name": {
-          "zh-CN": "项目作战室",
-          "en": "War Room"
-        },
-        "initial_topic": {
-          "zh-CN": "你好，这是软件研发作战室。请开始下达你的研发任务。",
-          "en": "Hello, this is the R&D War Room. Please start giving your tasks."
-        }
-      }
-    }
-  ],
+  "preset_rooms": [],
   "dept_tree": {
     "dept_name": "研发部",
     "responsibility": "负责核心产品的开发与交付",
