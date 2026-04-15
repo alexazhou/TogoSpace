@@ -39,7 +39,24 @@
       }
     }
   ],
-  "preset_rooms": [],
+  "preset_rooms": [
+    {
+      "name": "小马哥",
+      "agents": ["Operator", "小马哥"],
+      "initial_topic": "你好，小马哥。我们在这里进行私下沟通。",
+      "max_turns": 100,
+      "i18n": {
+        "display_name": {
+          "zh-CN": "小马哥",
+          "en": "Ma"
+        },
+        "initial_topic": {
+          "zh-CN": "你好，小马哥。我们在这里进行私下沟通。",
+          "en": "Hello Ma. We can communicate privately here."
+        }
+      }
+    }
+  ],
   "dept_tree": {
     "dept_name": "研发部",
     "responsibility": "负责核心产品的开发与交付",
