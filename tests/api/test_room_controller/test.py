@@ -26,12 +26,23 @@ class TestRoomController(_ApiServiceCase):
     requires_backend = True
     requires_mock_llm = True
 
-    async def _get_room_id(self, room_name: str, team_name: str) -> int:
+    async def _get_team_id(self, team_name: str) -> int:
+        """通过 team_name 获取 team_id。"""
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/rooms/list.json") as resp:
+            async with client.get(f"{self.backend_base_url}/teams/list.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
-        room = next(r for r in data["rooms"] if r["gt_room"]["name"] == room_name and r["team_name"] == team_name)
+        team = next(t for t in data["teams"] if t["name"] == team_name)
+        return team["id"]
+
+    async def _get_room_id(self, room_name: str, team_name: str) -> int:
+        """通过 room_name 和 team_name 获取 room_id。"""
+        team_id = await self._get_team_id(team_name)
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/rooms/list.json?team_id={team_id}") as resp:
+                assert resp.status == 200
+                data = await resp.json()
+        room = next(r for r in data["rooms"] if r["gt_room"]["name"] == room_name)
         return room["gt_room"]["id"]
 
     async def test_get_rooms(self):
@@ -44,7 +55,7 @@ class TestRoomController(_ApiServiceCase):
         assert len(data["rooms"]) > 0
         room = data["rooms"][0]
         assert "gt_room" in room
-        assert "team_name" in room
+        assert "team_id" in room["gt_room"]
         assert "state" in room
         assert "agents" in room
         assert "id" in room["gt_room"]
@@ -109,33 +120,45 @@ class TestRoomControllerPrivate(_ApiServiceCase):
     requires_mock_llm = True
     use_custom_config = True
 
-    async def _get_room_id(self, room_name: str, team_name: str) -> int:
+    async def _get_team_id(self, team_name: str) -> int:
+        """通过 team_name 获取 team_id。"""
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/rooms/list.json") as resp:
+            async with client.get(f"{self.backend_base_url}/teams/list.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
-        room = next(r for r in data["rooms"] if r["gt_room"]["name"] == room_name and r["team_name"] == team_name)
+        team = next(t for t in data["teams"] if t["name"] == team_name)
+        return team["id"]
+
+    async def _get_room_id(self, room_name: str, team_name: str) -> int:
+        """通过 room_name 和 team_name 获取 room_id。"""
+        team_id = await self._get_team_id(team_name)
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/rooms/list.json?team_id={team_id}") as resp:
+                assert resp.status == 200
+                data = await resp.json()
+        room = next(r for r in data["rooms"] if r["gt_room"]["name"] == room_name)
         return room["gt_room"]["id"]
 
     async def test_room_types_in_list(self):
-        """验证 GET /rooms 正确返回 room_type 和 team_name 字段。"""
+        """验证 GET /rooms 正确返回 room_type 字段。"""
+        team_id = await self._get_team_id(_V6_TEAM)
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/rooms/list.json") as resp:
+            async with client.get(f"{self.backend_base_url}/rooms/list.json?team_id={team_id}") as resp:
                 assert resp.status == 200
                 data = await resp.json()
 
-        rooms = [room for room in data["rooms"] if room["team_name"] == _V6_TEAM]
+        rooms = data["rooms"]
         # v6test 包含 3 个房间：alice_private（preset）、public_group（preset）、测试组（dept_tree 自动创建）
         assert len(rooms) == 3
 
         private_room = next(r for r in rooms if r["gt_room"]["name"] == "alice_private")
         assert RoomType.value_of(private_room["gt_room"]["type"]) == RoomType.PRIVATE
-        assert private_room["team_name"] == _V6_TEAM
+        assert private_room["gt_room"]["team_id"] == team_id
         assert any(agent_id == int(SpecialAgent.OPERATOR.value) for agent_id in private_room["gt_room"]["agent_ids"])
 
         group_room = next(r for r in rooms if r["gt_room"]["name"] == "public_group")
         assert RoomType.value_of(group_room["gt_room"]["type"]) == RoomType.GROUP
-        assert group_room["team_name"] == _V6_TEAM
+        assert group_room["gt_room"]["team_id"] == team_id
         assert not any(agent_id == int(SpecialAgent.OPERATOR.value) for agent_id in group_room["gt_room"]["agent_ids"])
 
 
