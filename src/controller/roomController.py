@@ -193,7 +193,7 @@ class RoomMessagesHandler(BaseHandler):
         gt_room = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
         assertUtil.assertNotNull(gt_room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
         gt_team = await gtTeamManager.get_team_by_id(gt_room.team_id)
-        assertUtil.assertTrue(gt_team is not None and gt_team.enabled, error_message="team is not active", error_code="team_not_active")
+        assertUtil.assertTrue(gt_team is not None and gt_team.enabled == 1, error_message="team is not active", error_code="team_not_active")
         room = roomService.get_room(room_id)
         assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
         assertUtil.assertTrue(
