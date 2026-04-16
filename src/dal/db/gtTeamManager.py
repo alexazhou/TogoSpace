@@ -17,12 +17,17 @@ async def get_team_by_id(team_id: int) -> GtTeam | None:
     return await GtTeam.aio_get_or_none(GtTeam.id == team_id)
 
 
-async def get_team_by_uuid(uuid: str) -> GtTeam | None:
-    """通过 UUID 获取指定 Team（未删除的）。"""
-    return await GtTeam.aio_get_or_none(
-        GtTeam.uuid == uuid,
-        GtTeam.deleted == 0,
-    )
+async def get_team_by_uuid(uuid: str, include_deleted: bool = False) -> GtTeam | None:
+    """通过 UUID 获取指定 Team。
+
+    Args:
+        uuid: 团队 UUID
+        include_deleted: 是否包含已删除的团队
+    """
+    conditions = [GtTeam.uuid == uuid]
+    if not include_deleted:
+        conditions.append(GtTeam.deleted == 0)
+    return await GtTeam.aio_get_or_none(*conditions)
 
 
 async def get_all_teams(enabled: bool | None = None) -> list[GtTeam]:
