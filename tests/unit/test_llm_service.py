@@ -33,7 +33,7 @@ def _build_response(content: str = "ok") -> llmApiUtil.OpenAIResponse:
 
 
 @pytest.mark.asyncio
-async def test_infer_passes_default_openclaw_headers(monkeypatch):
+async def test_infer_passes_default_opencode_headers(monkeypatch):
     captured: dict[str, object] = {}
 
     async def _fake_send_request_non_stream(request, url, api_key, custom_llm_provider=None, extra_headers=None, request_id=""):
@@ -71,7 +71,7 @@ async def test_infer_passes_default_openclaw_headers(monkeypatch):
     assert captured["url"] == "http://localhost/v1/chat/completions"
     assert captured["api_key"] == "key-123"
     assert captured["custom_llm_provider"] == "openai"
-    assert captured["extra_headers"] == {"User-Agent": "openclaw"}
+    assert captured["extra_headers"] == {"User-Agent": "opencode"}
     assert captured["request"].tool_choice == "none"
     assert captured["request"].prompt_cache is True
     assert isinstance(captured["request_id"], str)
