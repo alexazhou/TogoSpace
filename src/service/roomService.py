@@ -13,6 +13,7 @@ from exception import TeamAgentException
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 from model.dbModel.gtDept import DeptRoomSpec
 from model.dbModel.gtRoom import GtRoom
+from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
@@ -690,6 +691,11 @@ def get_room_by_key(room_key: str) -> ChatRoom:
 def get_room(room_id: int) -> ChatRoom | None:
     """通过数据库主键 room_id 返回聊天室实例，不存在时返回 None。"""
     return _rooms_by_id.get(room_id)
+
+
+async def get_room_messages_from_db(room_id: int) -> list[GtRoomMessage]:
+    """从数据库加载房间消息，固定走持久层。"""
+    return await gtRoomMessageManager.get_room_messages(room_id)
 
 
 def get_all_rooms() -> List[ChatRoom]:
