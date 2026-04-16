@@ -102,50 +102,18 @@
   ],
   "preset_rooms": [
     {
-      "name": "项目指挥部",
-      "agents": ["Operator", "小马哥", "架构师", "产品经理"],
-      "initial_topic": "欢迎来到项目指挥部。请开始规划我们的软件研发任务。",
+      "name": "小马哥",
+      "agents": ["Operator", "小马哥"],
+      "initial_topic": "和小马哥单独沟通项目事项。",
       "max_turns": 100,
       "i18n": {
         "display_name": {
-          "zh-CN": "项目指挥部",
-          "en": "Project Headquarters"
+          "zh-CN": "小马哥",
+          "en": "Ma"
         },
         "initial_topic": {
-          "zh-CN": "欢迎来到项目指挥部。请开始规划我们的软件研发任务。",
-          "en": "Welcome to the Project Headquarters. Please start planning our software R&D tasks."
-        }
-      }
-    },
-    {
-      "name": "开发工作室",
-      "agents": ["Operator", "架构师", "前端程序员", "后端程序员", "代码审查员"],
-      "initial_topic": "这是开发工作室，负责具体的代码实现与审查。",
-      "max_turns": 100,
-      "i18n": {
-        "display_name": {
-          "zh-CN": "开发工作室",
-          "en": "Dev Studio"
-        },
-        "initial_topic": {
-          "zh-CN": "这是开发工作室，负责具体的代码实现与审查。",
-          "en": "This is the Dev Studio, responsible for code implementation and review."
-        }
-      }
-    },
-    {
-      "name": "设计与产品",
-      "agents": ["Operator", "产品经理", "UI设计师", "前端程序员"],
-      "initial_topic": "在此讨论产品需求与 UI 设计还原。",
-      "max_turns": 100,
-      "i18n": {
-        "display_name": {
-          "zh-CN": "设计与产品",
-          "en": "Design & Product"
-        },
-        "initial_topic": {
-          "zh-CN": "在此讨论产品需求与 UI 设计还原。",
-          "en": "Discuss product requirements and UI design implementation here."
+          "zh-CN": "和小马哥单独沟通项目事项。",
+          "en": "Discuss project matters privately with Ma."
         }
       }
     }
@@ -154,8 +122,43 @@
     "dept_name": "研发中心",
     "responsibility": "负责软件全生命周期的研发工作",
     "manager": "小马哥",
-    "agents": ["小马哥", "架构师", "产品经理", "UI设计师", "前端程序员", "后端程序员", "代码审查员", "测试工程师", "实习生"],
-    "children": [],
+    "agents": ["小马哥", "测试工程师"],
+    "children": [
+      {
+        "dept_name": "产品组",
+        "responsibility": "负责产品规划、设计与需求管理",
+        "manager": "产品经理",
+        "agents": ["产品经理", "UI设计师", "实习生"],
+        "children": [],
+        "i18n": {
+          "dept_name": {
+            "zh-CN": "产品组",
+            "en": "Product Team"
+          },
+          "responsibility": {
+            "zh-CN": "负责产品规划、设计与需求管理",
+            "en": "Responsible for product planning, design and requirements management"
+          }
+        }
+      },
+      {
+        "dept_name": "技术组",
+        "responsibility": "负责技术架构与代码实现",
+        "manager": "架构师",
+        "agents": ["架构师", "前端程序员", "后端程序员", "代码审查员"],
+        "children": [],
+        "i18n": {
+          "dept_name": {
+            "zh-CN": "技术组",
+            "en": "Tech Team"
+          },
+          "responsibility": {
+            "zh-CN": "负责技术架构与代码实现",
+            "en": "Responsible for technical architecture and code implementation"
+          }
+        }
+      }
+    ],
     "i18n": {
       "dept_name": {
         "zh-CN": "研发中心",

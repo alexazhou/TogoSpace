@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import logging
 import os
 import threading
 
@@ -16,6 +17,8 @@ import pal
 from trayMenu import TrayMenu
 from util import configUtil, i18nUtil
 from version import __version__
+
+_logger = logging.getLogger(__name__)
 
 # ── 全局状态 ───────────────────────────────────────────────────────────────
 
@@ -48,6 +51,7 @@ def _run_backend() -> None:
         loop.run_until_complete(backend_main.main(port=bind_port))
         _tray_menu.set_status("status_stopped")
     except Exception as e:
+        _logger.error("后端启动失败: %s", e, exc_info=True)
         _tray_menu.set_status("status_error", e=e)
     finally:
         loop.close()

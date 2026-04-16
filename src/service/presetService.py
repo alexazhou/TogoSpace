@@ -125,14 +125,14 @@ async def _to_gt_agents(team_id: int, team_config: TeamConfig) -> list[GtAgent]:
 
 
 async def _import_team_from_config(team_config: TeamConfig) -> GtTeam | None:
-    # UUID 优先去重；无 UUID 时按 stable name 匹配（向后兼容旧格式）
+    # UUID 优先去重（含已删除）；无 UUID 时按 stable name 匹配（向后兼容旧格式）
     existing: GtTeam | None = None
     if team_config.uuid:
-        existing = await gtTeamManager.get_team_by_uuid(team_config.uuid)
+        existing = await gtTeamManager.get_team_by_uuid(team_config.uuid, include_deleted=True)
     if existing is None:
         existing = await gtTeamManager.get_team(team_config.name)
     if existing is not None:
-        logger.info("Team '%s' 已存在，跳过导入", team_config.name)
+        logger.info("Team '%s' 已存在（或已删除），跳过导入", team_config.name)
         return None
 
     team = await gtTeamManager.save_team(GtTeam(
