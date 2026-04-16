@@ -8,10 +8,6 @@ from pydantic import BaseModel, Field
 # 内部包
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtRoomManager, gtAgentManager
-from model.coreModel.gtCoreWebModel import (
-    GtCoreMessageInfo,
-    GtCoreRoomMessagesResponse,
-)
 from model.dbModel.gtRoom import GtRoom
 from service import roomService, teamService, agentService
 from service.roomService import ChatRoom
@@ -176,18 +172,19 @@ class RoomMessagesHandler(BaseHandler):
     """GET /rooms/{id}/messages/list.json; POST /rooms/{id}/messages/send.json"""
 
     async def get(self, room_id_str: str) -> None:
-        # 通过数据库 ID 获取内存中的 ChatRoom
         room_id = int(room_id_str)
-        room = roomService.get_room(room_id)
-        assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
-        messages = [
-            GtCoreMessageInfo(sender=room._get_agent_name(m.sender_id), content=m.content, time=m.send_time)
-            for m in room.messages
-        ]
-        resp = GtCoreRoomMessagesResponse(
-            room_id=room.room_id, room_key=room.key, room_name=room.name, team_name=room.team_name, messages=messages
-        )
-        self.return_json(resp)
+        gt_room = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
+        assertUtil.assertNotNull(gt_room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
+        gt_team = await gtTeamManager.get_team_by_id(gt_room.team_id)
+        team_name = gt_team.name if gt_team else ""
+
+        gt_messages = await roomService.get_room_messages_from_db(room_id)
+        self.return_json({
+            "room_id": gt_room.id,
+            "room_name": gt_room.name,
+            "team_name": team_name,
+            "messages": gt_messages,
+        })
 
     async def post(self, room_id_str: str) -> None:
         # 通过数据库 ID 获取内存中的 ChatRoom
