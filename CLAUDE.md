@@ -112,6 +112,7 @@ frontend/
 
 ### 提交约定
 - **代码提交**：开发完成后不要自动提交代码。统一等待用户明确要求「提交」或「commit」后再执行 git commit/push。
+- **commit message**：提交信息中不要加 `Co-Authored-By` 行，不要署名 AI Agent。
 - **前端子模块同步**：提交后端代码时，若发现前端子模块（`frontend/`）有新的 commit，需同步更新后端仓库中的子模块指针版本：
     ```bash
     cd frontend && git pull origin master
