@@ -14,6 +14,7 @@ from model.coreModel.gtCoreWebModel import (
 )
 from model.dbModel.gtRoom import GtRoom
 from service import roomService, teamService, agentService
+from service.roomService import ChatRoom
 from constants import SpecialAgent, RoomState, RoomType
 from util import assertUtil
 
@@ -39,6 +40,42 @@ class UpdateAgentsRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str | None = None
+
+
+class RoomApiResponse(BaseModel):
+    model_config = {"extra": "ignore"}
+
+    gt_room: dict
+    state: str
+    need_scheduling: bool
+    current_turn_agent: dict | None = None
+    agents: List[int] = Field(default_factory=list)
+
+    @classmethod
+    def from_gt_room(cls, gt_room: GtRoom, runtime_room: ChatRoom | None = None) -> "RoomApiResponse":
+        """构建 Room API 响应。
+        若传入 runtime_room，则优先使用其运行时状态；
+        否则以 IDLE 状态作为默认值（如 team 已禁用）。
+        """
+        if runtime_room is not None:
+            return cls.model_validate(runtime_room.to_dict())
+        return cls(
+            gt_room={
+                "id": gt_room.id,
+                "team_id": gt_room.team_id,
+                "name": gt_room.name,
+                "type": gt_room.type.name,
+                "initial_topic": gt_room.initial_topic,
+                "max_turns": gt_room.max_turns,
+                "agent_ids": list(gt_room.agent_ids or []),
+                "biz_id": gt_room.biz_id,
+                "tags": list(gt_room.tags or []),
+            },
+            state=RoomState.IDLE.name,
+            need_scheduling=False,
+            current_turn_agent=None,
+            agents=list(gt_room.agent_ids or []),
+        )
 
 
 def _infer_room_type_from_agent_ids(agent_ids: List[int]) -> RoomType:
@@ -109,15 +146,29 @@ async def _get_team_room_or_404(team_id: int, room_id: int) -> GtRoom:
 class RoomListHandler(BaseHandler):
     async def get(self) -> None:
         team_id_raw = self.get_query_argument("team_id", None)
-        team_name = self.get_query_argument("team_name", None)
+
         if team_id_raw:
-            team = await gtTeamManager.get_team_by_id(int(team_id_raw))
-            assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id_raw}' not found", error_code="team_not_found")
-            team_name = team.name
-        rooms: List[roomService.ChatRoom] = roomService.get_all_rooms()
-        if team_name:
-            rooms = [room for room in rooms if room.team_name == team_name]
-        data = [r.to_dict() for r in rooms]
+            team_id = int(team_id_raw)
+            assertUtil.assertNotNull(
+                await gtTeamManager.get_team_by_id(team_id),
+                error_message=f"Team ID '{team_id_raw}' not found",
+                error_code="team_not_found",
+            )
+            gt_rooms = await gtRoomManager.get_rooms_by_team(team_id)
+            data = [
+                RoomApiResponse.from_gt_room(gt_room, roomService.get_room(gt_room.id)).model_dump()
+                for gt_room in gt_rooms
+            ]
+        else:
+            all_teams = await gtTeamManager.get_all_teams()
+            data = []
+            for team in all_teams:
+                gt_rooms = await gtRoomManager.get_rooms_by_team(team.id)
+                data.extend(
+                    RoomApiResponse.from_gt_room(gt_room, roomService.get_room(gt_room.id)).model_dump()
+                    for gt_room in gt_rooms
+                )
+
         self.return_json({"rooms": data})
 
 
