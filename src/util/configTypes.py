@@ -78,6 +78,7 @@ class TeamConfig(BaseModel):
     agents: List[AgentConfig] = Field(default_factory=list)
     dept_tree: Optional[DeptNodeConfig] = None
     preset_rooms: List[TeamRoomConfig] = Field(default_factory=list)
+    auto_start: bool = True  # 导入后是否自动启动（enabled）；False 则以停用状态导入
 
 
 class RoleTemplateConfig(BaseModel):

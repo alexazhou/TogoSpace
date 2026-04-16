@@ -1,6 +1,7 @@
 {
   "name": "软件研发团队强化版",
   "uuid": "preset-software-dev-pro-v1",
+  "auto_start": false,
   "i18n": {
     "display_name": {
       "zh-CN": "软件研发团队强化版",
