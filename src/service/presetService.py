@@ -140,7 +140,7 @@ async def _import_team_from_config(team_config: TeamConfig) -> GtTeam | None:
         uuid=team_config.uuid,
         config=team_config.config or {},
         i18n=team_config.i18n or {},
-        enabled=1,
+        enabled=1 if team_config.auto_start else 0,
         deleted=0,
     ))
 
