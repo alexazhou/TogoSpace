@@ -118,6 +118,17 @@ def _load_setting(config_dir: str) -> SettingConfig:
 
     if not isinstance(cfg, dict):
         raise ValueError(f"setting.json 内容必须是对象: {path}")
+
+    # 测试环境下支持通过环境变量强制指定 Mock LLM 端口，解决并发测试时的端口冲突。
+    mock_port = os.environ.get("TEAMAGENT_MOCK_LLM_PORT")
+    if mock_port and os.environ.get("TEAMAGENT_ENV") == "test":
+        for svc in cfg.get("llm_services", []):
+            svc_type = str(svc.get("type", "")).lower()
+            if svc_type == "anthropic":
+                svc["base_url"] = f"http://127.0.0.1:{mock_port}/v1/messages"
+            else:
+                svc["base_url"] = f"http://127.0.0.1:{mock_port}/v1/chat/completions"
+
     return SettingConfig.model_validate(cfg)
 
 
