@@ -122,7 +122,7 @@
     "dept_name": "研发中心",
     "responsibility": "负责软件全生命周期的研发工作",
     "manager": "小马哥",
-    "agents": ["小马哥", "测试工程师"],
+    "agents": ["小马哥", "架构师", "产品经理", "测试工程师"],
     "children": [
       {
         "dept_name": "产品组",

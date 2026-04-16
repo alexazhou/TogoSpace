@@ -6,9 +6,11 @@ import pytest
 from tests.base import ServiceTestCase
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from model.dbModel.gtTeam import GtTeam
+from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service import ormService, presetService
-from util.configTypes import TeamConfig, AgentConfig
+from exception import TeamAgentException
+from util.configTypes import TeamConfig, AgentConfig, DeptNodeConfig
 
 
 if os.name == "posix" and sys.platform == "darwin":
@@ -150,3 +152,94 @@ class TestPresetTeamImport(ServiceTestCase):
         result = await gtTeamManager.get_team_by_id(existing.id)
         assert result is not None
         assert result.name == "name-match-team"
+
+
+class TestDeptTreeValidation(ServiceTestCase):
+    """测试 presetService._to_dept_tree_node 的子部门 manager 验证。"""
+
+    @classmethod
+    async def async_setup_class(cls):
+        await ormService.startup(cls._get_test_db_path())
+
+    @classmethod
+    async def async_teardown_class(cls):
+        await ormService.shutdown()
+
+    def setup_method(self):
+        self._run_on_class_loop(self._async_setup())
+
+    def teardown_method(self):
+        self._run_on_class_loop(self._async_teardown())
+
+    async def _async_setup(self):
+        await GtTeam.delete().aio_execute()
+        await GtAgent.delete().aio_execute()
+        await GtRoleTemplate.delete().aio_execute()
+        template = await gtRoleTemplateManager.save_role_template(
+            GtRoleTemplate(name="dummy", model="gpt-4o")
+        )
+        assert template is not None
+
+    async def _async_teardown(self):
+        await GtAgent.delete().aio_execute()
+        await GtTeam.delete().aio_execute()
+        await GtRoleTemplate.delete().aio_execute()
+
+    def _make_team_config_with_dept(
+        self,
+        uuid: str,
+        name: str,
+        dept_tree: DeptNodeConfig | None,
+    ) -> TeamConfig:
+        return TeamConfig(
+            uuid=uuid,
+            name=name,
+            agents=[
+                AgentConfig(name="manager1", role_template="dummy"),
+                AgentConfig(name="child_manager", role_template="dummy"),
+                AgentConfig(name="agent1", role_template="dummy"),
+            ],
+            dept_tree=dept_tree,
+            auto_start=True,
+        )
+
+    async def test_child_manager_not_in_parent_agents_raises(self):
+        """子部门 manager 不在父部门 agents 中时抛出异常。"""
+        dept_tree = DeptNodeConfig(
+            dept_name="parent_dept",
+            manager="manager1",
+            agents=["manager1", "agent1"],  # 不包含 child_manager
+            children=[
+                DeptNodeConfig(
+                    dept_name="child_dept",
+                    manager="child_manager",
+                    agents=["child_manager"],
+                    children=[],
+                ),
+            ],
+        )
+        config = self._make_team_config_with_dept("uuid-dept-001", "dept-team", dept_tree)
+        with pytest.raises(TeamAgentException) as exc_info:
+            await presetService._import_team_from_config(config)
+        assert exc_info.value.error_code == "CHILD_MANAGER_NOT_IN_PARENT_AGENTS"
+        assert "child_manager" in str(exc_info.value)
+        assert "parent_dept" in str(exc_info.value)
+
+    async def test_child_manager_in_parent_agents_success(self):
+        """子部门 manager 在父部门 agents 中时正常导入。"""
+        dept_tree = DeptNodeConfig(
+            dept_name="parent_dept",
+            manager="manager1",
+            agents=["manager1", "child_manager", "agent1"],  # 包含 child_manager
+            children=[
+                DeptNodeConfig(
+                    dept_name="child_dept",
+                    manager="child_manager",
+                    agents=["child_manager", "agent1"],  # 至少 2 人
+                    children=[],
+                ),
+            ],
+        )
+        config = self._make_team_config_with_dept("uuid-dept-002", "dept-team-ok", dept_tree)
+        team = await presetService._import_team_from_config(config)
+        assert team is not None

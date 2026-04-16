@@ -36,6 +36,14 @@ async def _import_role_templates_from_app_config() -> None:
 
 
 async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> GtDept:
+    # 验证：子部门的 manager 必须在父部门的 agents 列表中
+    for child in node.children:
+        if child.manager not in node.agents:
+            raise TeamAgentException(
+                f"部门 '{node.dept_name}' 的子部门 '{child.dept_name}' 的负责人 '{child.manager}' 不在父部门的 agents 列表中",
+                error_code="CHILD_MANAGER_NOT_IN_PARENT_AGENTS",
+            )
+
     lookup_names = list(dict.fromkeys([*node.agents, node.manager]))
     gt_agents = await gtAgentManager.get_team_agents_by_names(
         team_id,
