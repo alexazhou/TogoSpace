@@ -45,7 +45,7 @@ def _default_persistence_db_path() -> str:
 
 
 def _default_llm_extra_headers() -> dict[str, str]:
-    return {"User-Agent": "openclaw"}
+    return {"User-Agent": "opencode"}
 
 
 class AgentConfig(BaseModel):

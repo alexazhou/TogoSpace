@@ -146,7 +146,7 @@ def test_load_returns_appconfig_with_typed_fields(tmp_path):
     assert app_config.setting.workspace_root
 
 
-def test_llm_service_extra_headers_defaults_to_openclaw(tmp_path):
+def test_llm_service_extra_headers_defaults_to_opencode(tmp_path):
     (tmp_path / "setting.json").write_text(json.dumps({
         "default_llm_server": "svc",
         "llm_services": [
@@ -162,7 +162,7 @@ def test_llm_service_extra_headers_defaults_to_openclaw(tmp_path):
 
     app_config = configUtil.load(str(tmp_path), force_reload=True)
 
-    assert app_config.setting.current_llm_service.extra_headers == {"User-Agent": "openclaw"}
+    assert app_config.setting.current_llm_service.extra_headers == {"User-Agent": "opencode"}
 
 
 def test_llm_service_extra_headers_use_json_value_when_provided(tmp_path):
