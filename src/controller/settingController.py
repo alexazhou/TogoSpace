@@ -37,6 +37,18 @@ def _get_setting():
     return configUtil.get_app_config().setting
 
 
+def _serialize_llm_service(service: LlmServiceConfig) -> dict:
+    item = service.model_dump(exclude_unset=True, mode="json")
+    item.setdefault("provider_params", {})
+    item["has_api_key"] = bool(service.api_key)
+    demo_mode = configUtil.get_app_config().setting.demo_mode
+    if demo_mode.hide_sensitive:
+        item["api_key"] = ""
+        item["base_url"] = ""
+        item["extra_headers"] = {}
+    return item
+
+
 def _validate_index(index_str: str) -> int:
     """将路径参数转为合法的数组下标。"""
     index = int(index_str)
@@ -54,11 +66,7 @@ class LlmServiceListHandler(BaseHandler):
 
     async def get(self) -> None:
         setting = _get_setting()
-        services = []
-        for service in setting.llm_services:
-            item = service.model_dump(exclude_unset=True, mode="json")
-            item.setdefault("provider_params", {})
-            services.append(item)
+        services = [_serialize_llm_service(service) for service in setting.llm_services]
         self.return_json({
             "llm_services": services,
             "default_llm_server": setting.default_llm_server,

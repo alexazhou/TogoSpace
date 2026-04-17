@@ -1,0 +1,21 @@
+{
+  "demo_mode": {
+    "enabled": true,
+    "freeze_data": true,
+    "hide_sensitive_info": true
+  },
+  "llm_services": [
+    {
+      "name": "demo",
+      "enable": true,
+      "base_url": "http://127.0.0.1:19876/v1/chat/completions",
+      "api_key": "demo-api-key",
+      "type": "openai-compatible",
+      "model": "demo-model",
+      "extra_headers": {
+        "X-Test": "demo"
+      }
+    }
+  ],
+  "default_llm_server": "demo"
+}

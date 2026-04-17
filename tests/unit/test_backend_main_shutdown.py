@@ -49,6 +49,7 @@ async def test_main_waits_for_shutdown_event_and_runs_cleanup(monkeypatch):
         bind_port=8080,
         persistence=SimpleNamespace(db_path="/tmp/test.db"),
         workspace_root="/tmp/workspace",
+        demo_mode=SimpleNamespace(read_only=False),
     )
     fake_app_config = SimpleNamespace(setting=fake_setting)
 
@@ -67,6 +68,7 @@ async def test_main_waits_for_shutdown_event_and_runs_cleanup(monkeypatch):
     monkeypatch.setattr(backend_main, "_remove_pid", lambda: cleanup_calls.append("remove_pid"))
     monkeypatch.setattr(backend_main.llmApiUtil, "init", lambda: None)
     monkeypatch.setattr(backend_main.configUtil, "load", lambda config_dir=None: fake_app_config)
+    monkeypatch.setattr(backend_main.configUtil, "get_app_config", lambda: fake_app_config)
     monkeypatch.setattr(backend_main.configUtil, "is_initialized", lambda: True)
     monkeypatch.setattr(backend_main.gtTeamManager, "get_all_teams", AsyncMock(return_value=[]))
     monkeypatch.setattr(
@@ -166,3 +168,128 @@ async def test_main_waits_for_shutdown_event_and_runs_cleanup(monkeypatch):
     ]
     assert backend_main._main_loop is None
     assert backend_main._shutdown_event is None
+
+
+@pytest.mark.asyncio
+async def test_main_restores_team_and_blocks_schedule_in_demo_readonly(monkeypatch):
+    fake_setting = SimpleNamespace(
+        bind_host="127.0.0.1",
+        bind_port=8080,
+        persistence=SimpleNamespace(db_path="/tmp/test.db"),
+        workspace_root="/tmp/workspace",
+        demo_mode=SimpleNamespace(read_only=True),
+    )
+    fake_app_config = SimpleNamespace(setting=fake_setting)
+
+    fake_server = MagicMock()
+    startup_calls: list[str] = []
+    cleanup_calls: list[str] = []
+
+    async def _record_startup(name: str) -> None:
+        startup_calls.append(name)
+
+    async def _record_shutdown(name: str) -> None:
+        cleanup_calls.append(name)
+
+    monkeypatch.setattr(backend_main, "_setup_logger", lambda: None)
+    monkeypatch.setattr(backend_main, "_remove_pid", lambda: cleanup_calls.append("remove_pid"))
+    monkeypatch.setattr(backend_main.llmApiUtil, "init", lambda: None)
+    monkeypatch.setattr(backend_main.configUtil, "load", lambda config_dir=None: fake_app_config)
+    monkeypatch.setattr(backend_main.configUtil, "get_app_config", lambda: fake_app_config)
+    monkeypatch.setattr(backend_main.gtTeamManager, "get_all_teams", AsyncMock(return_value=[SimpleNamespace(id=1)]))
+    monkeypatch.setattr(
+        backend_main.tornado.httpserver,
+        "HTTPServer",
+        MagicMock(return_value=fake_server),
+    )
+
+    async def _message_bus_startup():
+        await _record_startup("messageBus")
+
+    async def _llm_service_startup():
+        await _record_startup("llmService")
+
+    async def _func_tool_service_startup():
+        await _record_startup("funcToolService")
+
+    async def _orm_service_startup(_db_path: str):
+        await _record_startup("ormService")
+
+    async def _persistence_service_startup():
+        await _record_startup("persistenceService")
+
+    async def _agent_service_startup():
+        await _record_startup("agentService")
+
+    async def _room_service_startup():
+        await _record_startup("roomService")
+
+    async def _scheduler_service_startup():
+        await _record_startup("schedulerService")
+
+    async def _preset_service_startup():
+        await _record_startup("presetService")
+
+    async def _agent_service_shutdown():
+        await _record_shutdown("agentService")
+
+    async def _persistence_service_shutdown():
+        await _record_shutdown("persistenceService")
+
+    async def _orm_service_shutdown():
+        await _record_shutdown("ormService")
+
+    async def _message_bus_shutdown():
+        await _record_shutdown("messageBus")
+
+    restore_team = AsyncMock()
+    start_schedule = AsyncMock()
+    stop_schedule = MagicMock(side_effect=lambda reason="": cleanup_calls.append(f"stop_schedule:{reason}"))
+
+    monkeypatch.setattr(backend_main.messageBus, "startup", _message_bus_startup)
+    monkeypatch.setattr(backend_main.llmService, "startup", _llm_service_startup)
+    monkeypatch.setattr(backend_main.funcToolService, "startup", _func_tool_service_startup)
+    monkeypatch.setattr(backend_main.ormService, "startup", _orm_service_startup)
+    monkeypatch.setattr(backend_main.persistenceService, "startup", _persistence_service_startup)
+    monkeypatch.setattr(backend_main.agentService, "startup", _agent_service_startup)
+    monkeypatch.setattr(backend_main.roomService, "startup", _room_service_startup)
+    monkeypatch.setattr(backend_main.schedulerService, "startup", _scheduler_service_startup)
+    monkeypatch.setattr(backend_main.presetService, "startup", _preset_service_startup)
+    monkeypatch.setattr(backend_main.presetService, "import_from_app_config", AsyncMock())
+    monkeypatch.setattr(backend_main.teamService, "restore_team", restore_team)
+    monkeypatch.setattr(backend_main.schedulerService, "start_schedule", start_schedule)
+    monkeypatch.setattr(backend_main.schedulerService, "stop_schedule", stop_schedule)
+
+    monkeypatch.setattr(backend_main.schedulerService, "shutdown", lambda: cleanup_calls.append("schedulerService"))
+    monkeypatch.setattr(backend_main.agentService, "shutdown", _agent_service_shutdown)
+    monkeypatch.setattr(backend_main.persistenceService, "shutdown", _persistence_service_shutdown)
+    monkeypatch.setattr(backend_main.ormService, "shutdown", _orm_service_shutdown)
+    monkeypatch.setattr(backend_main.funcToolService, "shutdown", lambda: cleanup_calls.append("funcToolService"))
+    monkeypatch.setattr(backend_main.roomService, "shutdown", lambda: cleanup_calls.append("roomService"))
+    monkeypatch.setattr(backend_main.llmService, "shutdown", lambda: cleanup_calls.append("llmService"))
+    monkeypatch.setattr(backend_main.messageBus, "shutdown", _message_bus_shutdown)
+
+    task = asyncio.create_task(backend_main.main(config_dir="/tmp/config", port=9090))
+    await asyncio.sleep(0)
+    backend_main.request_shutdown()
+    await task
+
+    restore_team.assert_awaited_once_with(
+        1,
+        workspace_root="/tmp/workspace",
+        running_task_error_message="task interrupted by process restart",
+    )
+    start_schedule.assert_not_awaited()
+    stop_schedule.assert_called_once_with("演示模式已冻结数据")
+    fake_server.listen.assert_called_once_with(9090, "127.0.0.1")
+    assert startup_calls == [
+        "messageBus",
+        "llmService",
+        "funcToolService",
+        "ormService",
+        "persistenceService",
+        "agentService",
+        "roomService",
+        "schedulerService",
+        "presetService",
+    ]

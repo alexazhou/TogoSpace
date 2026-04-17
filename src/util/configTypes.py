@@ -146,6 +146,20 @@ class LlmServiceConfig(BaseModel):
         return _validate_llm_provider_params(value)
 
 
+class DemoModeConfig(BaseModel):
+    enabled: bool = False
+    freeze_data: bool = True
+    hide_sensitive_info: bool = True
+
+    @property
+    def read_only(self) -> bool:
+        return self.enabled and self.freeze_data
+
+    @property
+    def hide_sensitive(self) -> bool:
+        return self.enabled and self.hide_sensitive_info
+
+
 class PersistenceConfig(BaseModel):
     enabled: bool = False
     db_path: str = Field(default_factory=_default_persistence_db_path)
@@ -166,6 +180,7 @@ class SettingConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     language: str = "zh-CN"  # 界面语言，默认中文
+    demo_mode: DemoModeConfig = Field(default_factory=DemoModeConfig)
     default_llm_server: str | None = None
     llm_services: list[LlmServiceConfig] = Field(default_factory=list)
     default_room_max_turns: int = 100

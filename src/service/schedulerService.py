@@ -40,6 +40,12 @@ async def startup() -> None:
 async def start_schedule() -> None:
     """检查前置条件并尝试开启调度。成功切到 RUNNING 并激活所有 team，否则切到 BLOCKED。"""
     global _schedule_state, _schedule_not_running_reason
+    if configUtil.get_app_config().setting.demo_mode.read_only:
+        _schedule_state = ScheduleState.BLOCKED
+        _schedule_not_running_reason = "演示模式已冻结数据"
+        logger.info("调度闸门已阻塞: state=%s, reason=%s", _schedule_state.value, _schedule_not_running_reason)
+        _publish_state_change()
+        return
     if configUtil.is_initialized():
         _schedule_state = ScheduleState.RUNNING
         _schedule_not_running_reason = ""

@@ -232,6 +232,35 @@ def test_llm_service_provider_params_reject_reserved_keys(tmp_path):
     assert "provider_params 包含保留字段" in str(exc_info.value)
 
 
+def test_demo_mode_flags_load_from_setting(tmp_path):
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "demo_mode": {
+            "enabled": True,
+            "freeze_data": True,
+            "hide_sensitive_info": False,
+        },
+        "default_llm_server": "svc",
+        "llm_services": [
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+            }
+        ],
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path), force_reload=True)
+
+    assert app_config.setting.demo_mode.enabled is True
+    assert app_config.setting.demo_mode.freeze_data is True
+    assert app_config.setting.demo_mode.hide_sensitive_info is False
+    assert configUtil.is_demo_mode() is True
+    assert app_config.setting.demo_mode.read_only is True
+    assert app_config.setting.demo_mode.hide_sensitive is False
+
+
 def test_workspace_root_defaults_to_repo_root_when_missing(tmp_path):
     (tmp_path / "setting.json").write_text(json.dumps({
         "default_llm_server": "svc",

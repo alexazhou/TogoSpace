@@ -53,6 +53,10 @@ class TestSystemStatus(_ApiServiceCase):
         assert "default_llm_server" in data
         assert data["default_llm_server"] == "mock"
         assert "schedule_state" in data
+        assert data["demo_mode"] is False
+        assert data["freeze_data"] is False
+        assert data["read_only"] is False
+        assert data["hide_sensitive_info"] is False
 
     async def test_status_returns_default_llm_server(self):
         """已初始化时返回 default_llm_server 字段。"""

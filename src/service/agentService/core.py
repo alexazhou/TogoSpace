@@ -145,10 +145,11 @@ async def _restore_agent_runtime_state(
     items = await persistenceService.load_agent_history_message(agent.gt_agent.id)
     agent.inject_history_messages(items)
 
-    await persistenceService.fail_running_tasks(
-        agent.gt_agent.id,
-        error_message=running_task_error_message,
-    )
+    if not configUtil.get_app_config().setting.demo_mode.read_only:
+        await persistenceService.fail_running_tasks(
+            agent.gt_agent.id,
+            error_message=running_task_error_message,
+        )
 
     first_task = await gtAgentTaskManager.get_first_unfinish_task(agent.gt_agent.id)
     agent.task_consumer.status = AgentStatus.FAILED if (

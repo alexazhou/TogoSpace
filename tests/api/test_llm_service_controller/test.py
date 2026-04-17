@@ -112,6 +112,8 @@ class TestLlmServiceController(_ApiServiceCase):
 
         mock_svc = data["llm_services"][0]
         assert mock_svc["name"] == "mock"
+        assert mock_svc["has_api_key"] is True
+        assert mock_svc["api_key"] == "mock-api-key"
 
     async def test_create_llm_service(self):
         """新增服务并验证列表更新"""

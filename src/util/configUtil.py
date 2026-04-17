@@ -179,6 +179,13 @@ def is_initialized() -> bool:
     return any(service.enable for service in setting.llm_services)
 
 
+def is_demo_mode() -> bool:
+    """当前是否启用演示模式。"""
+    if _cached_app_config is None:
+        return False
+    return bool(_cached_app_config.setting.demo_mode.enabled)
+
+
 def load(config_dir: str = None, preset_dir: str = None, force_reload: bool = False) -> AppConfig:
     """一次性加载所有配置，写入缓存并返回。
 

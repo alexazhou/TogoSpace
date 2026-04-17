@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from tornado.web import HTTPError
 
 from exception import TeamAgentException
-from util import jsonUtil
+from util import jsonUtil, configUtil
 
 
 logger = logging.getLogger(__name__)
@@ -17,9 +17,27 @@ T = TypeVar("T", bound=BaseModel)
 class BaseHandler(tornado.web.RequestHandler):
     """所有 HTTP controller 的基类，提供统一的 JSON 响应方法。"""
 
+    _READONLY_BLOCKED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.enhance = {}
+
+    def prepare(self) -> None:
+        """统一处理演示模式只读闸门。"""
+        if self.request.method.upper() not in self._READONLY_BLOCKED_METHODS:
+            return
+        demo_mode = configUtil.get_app_config().setting.demo_mode
+        if not demo_mode.read_only:
+            return
+        self.set_status(403)
+        self.return_json(
+            {
+                "error_code": "demo_mode_data_frozen",
+                "error_desc": "演示模式已冻结数据，当前操作不可用",
+            }
+        )
+        raise tornado.web.Finish()
 
     def parse_request(self, model_class: type[T]) -> T:
         """解析请求体为指定的 Pydantic 模型。"""

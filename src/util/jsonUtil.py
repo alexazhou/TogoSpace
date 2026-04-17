@@ -11,6 +11,8 @@ import inspect
 from inspect import FullArgSpec
 from typing import TypeVar, Generic, Dict, List, Union, Optional, Any, Type, cast
 
+from pydantic import BaseModel
+
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +121,8 @@ def json_dump(obj: object, config: Dict = None) -> str:
     def convert_to_builtin_type(obj):
         if hasattr(obj, 'to_json'):
             return obj.to_json()
+        if isinstance(obj, BaseModel):
+            return obj.model_dump(mode="json")
         if isinstance(obj, set):
             return list(obj)
         elif isinstance(obj, (dt.datetime, dt.time, dt.date)):

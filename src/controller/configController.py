@@ -32,6 +32,7 @@ class ConfigHandler(BaseHandler):
             "models": models,
             "driver_types": driver_types,
             "default_model": setting.default_llm_server,
+            "demo_mode": setting.demo_mode,
         })
 
 
@@ -39,12 +40,26 @@ class DirectoriesHandler(BaseHandler):
     """GET /config/directories.json - 获取系统目录配置"""
 
     async def get(self) -> None:
+        demo_mode = configUtil.get_app_config().setting.demo_mode
+        if demo_mode.hide_sensitive:
+            directories = {
+                "storage_root": "",
+                "config_dir": "",
+                "workspace_dir": "",
+                "data_dir": "",
+                "log_dir": "",
+            }
+        else:
+            directories = {
+                "storage_root": appPaths.STORAGE_ROOT,
+                "config_dir": appPaths.CONFIG_DIR,
+                "workspace_dir": appPaths.WORKSPACE_ROOT,
+                "data_dir": appPaths.DATA_DIR,
+                "log_dir": appPaths.LOGS_DIR,
+            }
         self.return_json({
-            "storage_root": appPaths.STORAGE_ROOT,
-            "config_dir": appPaths.CONFIG_DIR,
-            "workspace_dir": appPaths.WORKSPACE_ROOT,
-            "data_dir": appPaths.DATA_DIR,
-            "log_dir": appPaths.LOGS_DIR,
+            **directories,
+            "demo_mode": configUtil.get_app_config().setting.demo_mode,
         })
 
 

@@ -108,10 +108,13 @@ async def main(config_dir: str = None, port: int | None = None):
 
     app_config: AppConfig = configUtil.load(config_dir)
     llmApiUtil.init()
+    demo_mode = app_config.setting.demo_mode
 
     _config_dir = config_dir or appPaths.CONFIG_DIR
     logger.info("[启动] 版本=v%s", __version__)
     logger.info("[启动] storage_root=%s | preset=%s", appPaths.STORAGE_ROOT, appPaths.PRESET_DIR)
+    if demo_mode.read_only:
+        logger.info("[启动] 演示模式已启用：freeze_data=true，系统将以只读浏览态启动")
 
     # 端口优先使用命令行参数，其次使用配置文件
     bind_host = app_config.setting.bind_host
@@ -133,7 +136,10 @@ async def main(config_dir: str = None, port: int | None = None):
 
     # ── 阶段 2：导入配置 ──────────────────────────────────────────────────────
     logger.info("[启动] 阶段 2/4：导入 presets（RoleTemplate / Team / Dept / Room）")
-    await presetService.import_from_app_config()
+    if demo_mode.read_only:
+        logger.info("[启动] 演示模式已冻结数据，跳过 preset 导入")
+    else:
+        await presetService.import_from_app_config()
     logger.info("[启动] 阶段 2/4 完成")
 
     # ── 阶段 3：运行时构建 ────────────────────────────────────────────────────
@@ -151,7 +157,10 @@ async def main(config_dir: str = None, port: int | None = None):
     logger.info("[启动] 阶段 4/4 完成")
 
     # ── 调度闸门：根据 LLM 配置状态决定是否开启调度 ──
-    await schedulerService.start_schedule()
+    if demo_mode.read_only:
+        schedulerService.stop_schedule("演示模式已冻结数据")
+    else:
+        await schedulerService.start_schedule()
 
     web_server = tornado.httpserver.HTTPServer(route.application)
     web_server.listen(bind_port, bind_host)

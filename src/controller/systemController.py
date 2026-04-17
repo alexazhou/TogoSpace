@@ -13,13 +13,21 @@ class SystemStatusHandler(BaseHandler):
     async def get(self):
         initialized = configUtil.is_initialized()
         schedule_state = schedulerService.get_schedule_state()
+        setting = configUtil.get_app_config().setting
+        demo_mode = setting.demo_mode
+        demo_flags = {
+            "demo_mode": demo_mode.enabled,
+            "freeze_data": demo_mode.read_only,
+            "read_only": demo_mode.read_only,
+            "hide_sensitive_info": demo_mode.hide_sensitive,
+        }
         if initialized:
-            setting = configUtil.get_app_config().setting
             self.return_json({
                 "initialized": True,
                 "default_llm_server": setting.default_llm_server,
                 "schedule_state": schedule_state,
                 "language": configUtil.get_language(),
+                **demo_flags,
             })
         else:
             self.return_json({
@@ -27,4 +35,5 @@ class SystemStatusHandler(BaseHandler):
                 "message": "当前未配置大模型服务",
                 "schedule_state": schedule_state,
                 "language": configUtil.get_language(),
+                **demo_flags,
             })

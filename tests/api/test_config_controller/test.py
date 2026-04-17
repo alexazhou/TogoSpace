@@ -27,6 +27,11 @@ class TestConfigController(_ApiServiceCase):
         assert "models" in data
         assert "driver_types" in data
         assert "default_model" in data
+        assert data["demo_mode"] == {
+            "enabled": False,
+            "freeze_data": True,
+            "hide_sensitive_info": True,
+        }
 
         # 验证 driver_types 结构
         assert len(data["driver_types"]) >= 1

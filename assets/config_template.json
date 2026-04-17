@@ -4,6 +4,12 @@
   "bind_host": "0.0.0.0",
   "bind_port": 8080,
 
+  "demo_mode": {
+    "enabled": false,
+    "freeze_data": true,
+    "hide_sensitive_info": true
+  },
+
   "default_llm_server": "qwen",
 
   "llm_services": [
