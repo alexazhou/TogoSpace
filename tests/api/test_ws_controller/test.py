@@ -35,10 +35,17 @@ class TestWsController(_ApiServiceCase):
             ws_url = f"ws://127.0.0.1:{self.backend_port}/ws/events.json"
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(f"{self.backend_base_url}/rooms/list.json") as resp:
+                    # 先获取 team_id
+                    async with session.get(f"{self.backend_base_url}/teams/list.json") as resp:
+                        assert resp.status == 200
+                        teams = (await resp.json())["teams"]
+                    team = next(t for t in teams if t["name"] == _TEAM)
+                    team_id = team["id"]
+
+                    async with session.get(f"{self.backend_base_url}/rooms/list.json?team_id={team_id}") as resp:
                         assert resp.status == 200
                         rooms = (await resp.json())["rooms"]
-                    room_id = next(r["gt_room"]["id"] for r in rooms if r["gt_room"]["name"] == "general" and r["team_name"] == _TEAM)
+                    room_id = next(r["gt_room"]["id"] for r in rooms if r["gt_room"]["name"] == "general")
                     room_id_holder.append(room_id)
                     async with session.ws_connect(ws_url) as ws:
                         async with session.post(
@@ -95,10 +102,10 @@ class TestWsController(_ApiServiceCase):
             team = next(t for t in teams if t["name"] == _TEAM)
             team_id = team["id"]
 
-            async with session.get(f"{self.backend_base_url}/rooms/list.json") as resp:
+            async with session.get(f"{self.backend_base_url}/rooms/list.json?team_id={team_id}") as resp:
                 assert resp.status == 200
                 rooms = (await resp.json())["rooms"]
-            room_id = next(r["gt_room"]["id"] for r in rooms if r["gt_room"]["name"] == "general" and r["team_name"] == _TEAM)
+            room_id = next(r["gt_room"]["id"] for r in rooms if r["gt_room"]["name"] == "general")
 
             # 预置若干次 finish，确保调度链路能快速闭环，稳定产出 status 事件。
             finish_response = {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]}

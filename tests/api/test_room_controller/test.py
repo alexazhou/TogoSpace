@@ -170,7 +170,7 @@ class TestRoomControllerPrivate(_ApiServiceCase):
         # 先获取 alice 的 agent_id
         team_id = await self._get_team_id(_V6_TEAM)
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/teams/{team_id}/agents/list.json") as resp:
+            async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
                 assert resp.status == 200
                 agents_data = await resp.json()
         alice_agent = next(a for a in agents_data["agents"] if a["name"] == "alice")
@@ -209,5 +209,5 @@ class TestRoomControllerPrivate(_ApiServiceCase):
         else:
             pytest.fail("Agent Alice 未能在限时内回复 Operator")
 
-        alice_msg = next(m for m in messages if m["sender"] == "alice")
+        alice_msg = next(m for m in messages if m["agent_id"] == alice_id)
         assert len(alice_msg["content"]) > 0
