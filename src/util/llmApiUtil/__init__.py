@@ -12,6 +12,6 @@ from .OpenAiModels import (
     OpenAIChoice,
     OpenAIErrorResponse,
 )
-from .client import init, send_request_stream, send_request_non_stream
+from .client import build_agent_probe_request, init, send_request_stream, send_request_non_stream
 
 from litellm.types.utils import ModelResponseStream

@@ -1,9 +1,9 @@
-from typing import Any, List, Optional
 import os
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
-from constants import LlmServiceType, DriverType
 import appPaths
+from constants import DriverType, LlmServiceType
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # 多语言字段类型
 I18nText = dict[str, str]   # e.g. {"zh-CN": "研究员", "en": "Researcher"}
@@ -46,6 +46,32 @@ def _default_persistence_db_path() -> str:
 
 def _default_llm_extra_headers() -> dict[str, str]:
     return {"User-Agent": "opencode"}
+
+
+_LLM_PROVIDER_PARAM_RESERVED_KEYS = {
+    "api_key",
+    "base_url",
+    "cache_control_injection_points",
+    "custom_llm_provider",
+    "extra_headers",
+    "max_tokens",
+    "messages",
+    "model",
+    "stream",
+    "temperature",
+    "tool_choice",
+    "tools",
+}
+
+
+def _validate_llm_provider_params(value: dict[str, Any]) -> dict[str, Any]:
+    reserved_keys = sorted(_LLM_PROVIDER_PARAM_RESERVED_KEYS.intersection(value.keys()))
+    if reserved_keys:
+        raise ValueError(
+            "provider_params 包含保留字段，不能覆盖系统请求参数："
+            + ", ".join(reserved_keys)
+        )
+    return value
 
 
 class AgentConfig(BaseModel):
@@ -101,6 +127,7 @@ class LlmServiceConfig(BaseModel):
     model: str = "qwen-plus"
     enable: bool = True
     extra_headers: dict[str, str] = Field(default_factory=_default_llm_extra_headers)
+    provider_params: dict[str, Any] = Field(default_factory=dict)
 
     temperature: Optional[float] = None
     reasoning_effort: Optional[str] = None  # 推理强度，如 "high"；传入 litellm 后自动触发 Responses API
@@ -110,6 +137,13 @@ class LlmServiceConfig(BaseModel):
     reserve_output_tokens: int = 8192
     compact_trigger_ratio: float = Field(default=0.85, ge=0.0, le=1.0)
     compact_summary_max_tokens: int = 6 * 1024
+
+    @field_validator("provider_params")
+    @classmethod
+    def validate_provider_params(cls, value: dict[str, Any] | None) -> dict[str, Any]:
+        if value is None:
+            return {}
+        return _validate_llm_provider_params(value)
 
 
 class PersistenceConfig(BaseModel):

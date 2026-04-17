@@ -4,12 +4,11 @@ import time
 
 from pydantic import BaseModel, ValidationError
 
-from constants import LlmServiceType, OpenaiApiRole
+from constants import LlmServiceType
 from controller.baseController import BaseHandler
 from service import schedulerService
-from util import assertUtil, configUtil
+from util import assertUtil, configUtil, llmApiUtil
 from util.configTypes import LlmServiceConfig
-from util.llmApiUtil.OpenAiModels import OpenAIRequest, OpenAIMessage
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,7 @@ _TYPE_TO_PROVIDER = {
 
 
 class TestLlmServiceRequest(BaseModel):
-    """连通性测试请求，通过 mode 字段区分已保存服务和临时配置。"""
+    """可用性测试请求，通过 mode 字段区分已保存服务和临时配置。"""
     mode: str  # "saved" | "temp"
     index: int | None = None
     base_url: str | None = None
@@ -31,6 +30,7 @@ class TestLlmServiceRequest(BaseModel):
     type: str | None = None
     model: str | None = None
     extra_headers: dict[str, str] | None = None
+    provider_params: dict[str, object] | None = None
 
 
 def _get_setting():
@@ -54,10 +54,13 @@ class LlmServiceListHandler(BaseHandler):
 
     async def get(self) -> None:
         setting = _get_setting()
+        services = []
+        for service in setting.llm_services:
+            item = service.model_dump(exclude_unset=True, mode="json")
+            item.setdefault("provider_params", {})
+            services.append(item)
         self.return_json({
-            "llm_services": [
-                s.model_dump(exclude_unset=True, mode="json") for s in setting.llm_services
-            ],
+            "llm_services": services,
             "default_llm_server": setting.default_llm_server,
         })
 
@@ -242,9 +245,10 @@ class LlmServiceTestHandler(BaseHandler):
                 type=LlmServiceType(request.type),
                 model=request.model,
                 extra_headers=request.extra_headers or {},
+                provider_params=request.provider_params or {},
             )
 
-        # 执行连通性测试
+        # 执行可用性测试
         try:
             result = await _test_llm_service(config)
             self.return_json({
@@ -253,7 +257,7 @@ class LlmServiceTestHandler(BaseHandler):
                 "detail": result,
             })
         except Exception as e:
-            logger.warning(f"LLM 连通性测试失败: {e}")
+            logger.warning(f"LLM 可用性测试失败: {e}")
             self.return_json({
                 "status": "error",
                 "message": str(e),
@@ -265,22 +269,17 @@ class LlmServiceTestHandler(BaseHandler):
 
 
 async def _test_llm_service(config: LlmServiceConfig) -> dict:
-    """向目标 LLM 服务发送一个最小推理请求，验证连通性。"""
-    from util import llmApiUtil
-
+    """向目标 LLM 服务发送一个最小 Agent 风格请求，验证真实推理链路。"""
     provider = _TYPE_TO_PROVIDER.get(config.type)
 
-    request = OpenAIRequest(
+    request = llmApiUtil.build_agent_probe_request(
         model=config.model,
-        messages=[OpenAIMessage.text(OpenaiApiRole.USER, "hi")],
-        max_tokens=16,
-        tools=None,
-        tool_choice=None,
-        reasoning_effort=None,
+        reasoning_effort=config.reasoning_effort,
+        provider_params=config.provider_params,
     )
 
     start_time = time.monotonic()
-    response = await llmApiUtil.send_request_non_stream(
+    response = await llmApiUtil.send_request_stream(
         request,
         config.base_url,
         config.api_key,
@@ -294,6 +293,7 @@ async def _test_llm_service(config: LlmServiceConfig) -> dict:
         "response_text": response.choices[0].message.content if response.choices else "",
         "duration_ms": duration_ms,
         "usage": response.usage.model_dump() if response.usage else None,
+        "test_mode": "agent_probe_stream_with_tools",
     }
 
 

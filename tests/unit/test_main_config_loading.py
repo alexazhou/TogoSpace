@@ -187,6 +187,51 @@ def test_llm_service_extra_headers_use_json_value_when_provided(tmp_path):
     assert app_config.setting.current_llm_service.extra_headers == {"X-Client-Name": "openclaw"}
 
 
+def test_llm_service_provider_params_use_json_value_when_provided(tmp_path):
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "default_llm_server": "svc",
+        "llm_services": [
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+                "provider_params": {
+                    "reasoning_effort": "high",
+                },
+            }
+        ],
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path), force_reload=True)
+
+    assert app_config.setting.current_llm_service.provider_params == {"reasoning_effort": "high"}
+
+
+def test_llm_service_provider_params_reject_reserved_keys(tmp_path):
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "default_llm_server": "svc",
+        "llm_services": [
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+                "provider_params": {
+                    "model": "other-model",
+                },
+            }
+        ],
+    }), encoding="utf-8")
+
+    with pytest.raises(ValueError) as exc_info:
+        configUtil.load(str(tmp_path), force_reload=True)
+
+    assert "provider_params 包含保留字段" in str(exc_info.value)
+
+
 def test_workspace_root_defaults_to_repo_root_when_missing(tmp_path):
     (tmp_path / "setting.json").write_text(json.dumps({
         "default_llm_server": "svc",

@@ -7,7 +7,15 @@ from typing import Any
 import litellm
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 from litellm.types.utils import ModelResponse, ModelResponseStream, TextCompletionResponse
-from .OpenAiModels import OpenAIRequest, OpenAIResponse
+from constants import OpenaiApiRole
+from .OpenAiModels import (
+    OpenAIFunction,
+    OpenAIFunctionParameter,
+    OpenAIMessage,
+    OpenAIRequest,
+    OpenAIResponse,
+    OpenAITool,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -182,6 +190,76 @@ _CACHE_INJECTION_POINTS = [
     {"location": "message", "index": -1},        # 最后一条消息作为第二个缓存边界
 ]
 
+_AGENT_PROBE_TOOLS = [
+    OpenAITool(
+        function=OpenAIFunction(
+            name="send_chat_msg",
+            description="向聊天窗口发送消息",
+            parameters=OpenAIFunctionParameter(
+                type="object",
+                properties={
+                    "room_name": {"type": "string", "description": "要发送消息的窗口名称"},
+                    "msg": {"type": "string", "description": "要发送的消息"},
+                },
+                required=["room_name", "msg"],
+            ),
+        )
+    ),
+    OpenAITool(
+        function=OpenAIFunction(
+            name="finish_chat_turn",
+            description="结束本轮行动",
+            parameters=OpenAIFunctionParameter(
+                type="object",
+                properties={},
+                required=[],
+            ),
+        )
+    ),
+]
+
+
+def build_agent_probe_request(
+    *,
+    model: str,
+    reasoning_effort: str | None = None,
+    provider_params: dict[str, Any] | None = None,
+) -> OpenAIRequest:
+    """构造一个尽量贴近真实 Agent 推理路径的最小探测请求。"""
+    return OpenAIRequest(
+        model=model,
+        messages=[
+            OpenAIMessage.text(
+                OpenaiApiRole.SYSTEM,
+                "你是一个团队协作 Agent。你需要通过工具完成行动，并在结束时调用 finish_chat_turn。",
+            ),
+            OpenAIMessage.text(
+                OpenaiApiRole.USER,
+                "请做一次最小响应。如果你可以调用工具，请自行决定是否调用；完成后结束本轮。",
+            ),
+        ],
+        max_tokens=16,
+        stream=True,
+        tools=_AGENT_PROBE_TOOLS,
+        tool_choice=None,
+        prompt_cache=True,
+        reasoning_effort=reasoning_effort,
+        provider_params=provider_params or {},
+    )
+
+
+def _build_litellm_extra_params(request: OpenAIRequest) -> dict[str, Any]:
+    extra_params: dict[str, Any] = {}
+    if request.prompt_cache:
+        extra_params["cache_control_injection_points"] = _CACHE_INJECTION_POINTS
+
+    provider_params = dict(request.provider_params or {})
+    if request.reasoning_effort and "reasoning_effort" not in provider_params:
+        provider_params["reasoning_effort"] = request.reasoning_effort
+
+    extra_params.update(provider_params)
+    return extra_params
+
 
 async def send_request_stream(
     request: OpenAIRequest,
@@ -206,6 +284,7 @@ async def send_request_stream(
     )
 
     try:
+        extra_params = _build_litellm_extra_params(request)
         stream_resp: ModelResponse | CustomStreamWrapper = await litellm.acompletion(
             model=model_name,
             custom_llm_provider=custom_llm_provider,
@@ -218,9 +297,7 @@ async def send_request_stream(
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             stream=True,
-            # prompt_cache=True 时注入缓存边界；LiteLLM 负责转换为各 provider 格式
-            **({"cache_control_injection_points": _CACHE_INJECTION_POINTS} if request.prompt_cache else {}),
-            **({"reasoning_effort": request.reasoning_effort} if request.reasoning_effort else {}),
+            **extra_params,
         )
         if not isinstance(stream_resp, CustomStreamWrapper):
             raise TypeError(f"期望流式响应类型 CustomStreamWrapper，实际为: {type(stream_resp).__name__}")
@@ -276,6 +353,7 @@ async def send_request_non_stream(
     )
 
     try:
+        extra_params = _build_litellm_extra_params(request)
         response: ModelResponse | CustomStreamWrapper = await litellm.acompletion(
             model=model_name,
             custom_llm_provider=custom_llm_provider,
@@ -288,9 +366,7 @@ async def send_request_non_stream(
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             stream=False,
-            # prompt_cache=True 时注入缓存边界；LiteLLM 负责转换为各 provider 格式
-            **({"cache_control_injection_points": _CACHE_INJECTION_POINTS} if request.prompt_cache else {}),
-            **({"reasoning_effort": request.reasoning_effort} if request.reasoning_effort else {}),
+            **extra_params,
         )
         if not isinstance(response, ModelResponse):
             raise TypeError(f"期望非流式响应类型 ModelResponse，实际为: {type(response).__name__}")

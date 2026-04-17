@@ -134,6 +134,7 @@ class TestLlmServiceController(_ApiServiceCase):
             new_svc = after["llm_services"][-1]
             assert new_svc["name"] == "test-new"
             assert new_svc["model"] == "test-model"
+            assert new_svc["provider_params"] == {}
 
     async def test_create_duplicate_name(self):
         """重复名称创建返回 400"""
@@ -190,6 +191,50 @@ class TestLlmServiceController(_ApiServiceCase):
 
             after = await self._list(client)
             assert after["llm_services"][idx]["model"] == "new-model"
+
+    async def test_modify_provider_params(self):
+        """支持保存 provider_params JSON 透传字段"""
+        async with aiohttp.ClientSession() as client:
+            await self._create(client, {
+                "name": "with-provider-params",
+                "base_url": "http://127.0.0.1:19876/v1",
+                "api_key": "old-key",
+                "type": "openai-compatible",
+                "model": "old-model",
+            })
+
+            listing = await self._list(client)
+            idx = len(listing["llm_services"]) - 1
+
+            status, _ = await self._modify(client, idx, {
+                "provider_params": {
+                    "reasoning_effort": "high",
+                    "parallel_tool_calls": False,
+                }
+            })
+            assert status == 200
+
+            after = await self._list(client)
+            assert after["llm_services"][idx]["provider_params"] == {
+                "reasoning_effort": "high",
+                "parallel_tool_calls": False,
+            }
+
+    async def test_create_provider_params_rejects_reserved_keys(self):
+        """provider_params 不允许覆盖系统请求字段"""
+        async with aiohttp.ClientSession() as client:
+            status, data = await self._create(client, {
+                "name": "bad-provider-params",
+                "base_url": "http://127.0.0.1:19876/v1",
+                "api_key": "test-key",
+                "type": "openai-compatible",
+                "model": "test-model",
+                "provider_params": {
+                    "model": "override-model",
+                },
+            }, expect_ok=False)
+            assert status == 400
+            assert data.get("error_code") == "validation_error"
 
     async def test_modify_invalid_index(self):
         """序号越界返回 400"""
@@ -323,6 +368,7 @@ class TestLlmServiceController(_ApiServiceCase):
             assert data["status"] == "ok"
             assert "detail" in data
             assert "duration_ms" in data["detail"]
+            assert data["detail"]["test_mode"] == "agent_probe_stream_with_tools"
 
     async def test_connectivity_by_config(self):
         """按临时配置测试（使用 mock LLM）"""
@@ -336,6 +382,38 @@ class TestLlmServiceController(_ApiServiceCase):
             })
             assert data["status"] == "ok"
             assert "detail" in data
+            assert data["detail"]["test_mode"] == "agent_probe_stream_with_tools"
+
+    async def test_connectivity_by_config_with_provider_params(self):
+        """临时可用性测试支持 provider_params 透传"""
+        async with aiohttp.ClientSession() as client:
+            data = await self._test_connectivity(client, {
+                "mode": "temp",
+                "base_url": self._mock_api_url(),
+                "api_key": "mock-api-key",
+                "type": "openai-compatible",
+                "model": "mock-model",
+                "provider_params": {
+                    "parallel_tool_calls": False,
+                },
+            })
+            assert data["status"] == "ok"
+
+    async def test_connectivity_detects_responses_endpoint_mismatch(self):
+        """当 reasoning 触发 Responses API 且上游不支持时，测试接口应直接暴露失败"""
+        async with aiohttp.ClientSession() as client:
+            data = await self._test_connectivity(client, {
+                "mode": "temp",
+                "base_url": self._mock_api_url(),
+                "api_key": "mock-api-key",
+                "type": "openai-compatible",
+                "model": "azure_openai/gpt-5.4",
+                "provider_params": {
+                    "reasoning_effort": "high",
+                },
+            })
+            assert data["status"] == "error"
+            assert "404" in data["message"]
 
     async def test_connectivity_failure(self):
         """测试不可达服务返回错误详情"""

@@ -95,6 +95,7 @@ async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> InferResult
             max_tokens=llm_config.reserve_output_tokens,
             temperature=llm_config.temperature,
             reasoning_effort=llm_config.reasoning_effort,
+            provider_params=llm_config.provider_params,
         )
         logger.info(
             "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, reasoning_effort=%s",
@@ -167,6 +168,7 @@ async def infer_stream(
             max_tokens=llm_config.reserve_output_tokens,
             temperature=llm_config.temperature,
             reasoning_effort=llm_config.reasoning_effort,
+            provider_params=llm_config.provider_params,
         )
         logger.info(
             "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, reasoning_effort=%s",

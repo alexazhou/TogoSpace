@@ -279,3 +279,41 @@ async def test_infer_stream_uses_config_model_when_agent_model_is_none(monkeypat
     fake_send_request_stream.assert_awaited_once()
     request = fake_send_request_stream.await_args.args[0]
     assert request.model == "configured-model"
+
+
+@pytest.mark.asyncio
+async def test_infer_passes_provider_params(monkeypatch):
+    fake_send_request_non_stream = AsyncMock(return_value=_build_response())
+
+    monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
+        default_llm_server="svc",
+        llm_services=[
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1/chat/completions",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+                "provider_params": {
+                    "reasoning_effort": "high",
+                    "parallel_tool_calls": False,
+                },
+            }
+        ],
+    )))
+    monkeypatch.setattr(llmService.llmApiUtil, "send_request_non_stream", fake_send_request_non_stream)
+
+    ctx = GtCoreAgentDialogContext(
+        system_prompt="system prompt",
+        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+    )
+
+    result = await llmService.infer(None, ctx)
+
+    assert result.ok is True
+    fake_send_request_non_stream.assert_awaited_once()
+    request = fake_send_request_non_stream.await_args.args[0]
+    assert request.provider_params == {
+        "reasoning_effort": "high",
+        "parallel_tool_calls": False,
+    }
