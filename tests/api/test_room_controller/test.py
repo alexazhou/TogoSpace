@@ -76,9 +76,9 @@ class TestRoomController(_ApiServiceCase):
         assert "team_name" in data
         assert len(data["messages"]) > 0
         msg = data["messages"][0]
-        assert "sender" in msg
+        assert "agent_id" in msg
         assert "content" in msg
-        assert "time" in msg
+        assert "send_time" in msg
 
     async def test_room_not_found(self):
         """验证请求不存在的房间时返回 404。"""
@@ -108,7 +108,7 @@ class TestRoomController(_ApiServiceCase):
         messages = data["messages"]
         # Operator 的消息应被真正落库，而不仅仅返回 HTTP 成功。
         assert any(
-            SpecialAgent.value_of(m["sender"]) == SpecialAgent.OPERATOR and m["content"] == payload["content"]
+            m["agent_id"] == int(SpecialAgent.OPERATOR.value) and m["content"] == payload["content"]
             for m in messages
         )
 
@@ -167,6 +167,15 @@ class TestRoomControllerPrivate(_ApiServiceCase):
         room_id = await self._get_room_id("alice_private", _V6_TEAM)
         payload = {"content": "Hello Alice, I am the operator."}
 
+        # 先获取 alice 的 agent_id
+        team_id = await self._get_team_id(_V6_TEAM)
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/teams/{team_id}/agents/list.json") as resp:
+                assert resp.status == 200
+                agents_data = await resp.json()
+        alice_agent = next(a for a in agents_data["agents"] if a["name"] == "alice")
+        alice_id = alice_agent["id"]
+
         async with aiohttp.ClientSession() as client:
             async with client.post(
                 f"{self.backend_base_url}/rooms/{room_id}/messages/send.json", json=payload
@@ -180,7 +189,7 @@ class TestRoomControllerPrivate(_ApiServiceCase):
                 data = await resp.json()
                 messages = data["messages"]
                 assert messages[1]["content"] == payload["content"]
-                assert SpecialAgent.value_of(messages[1]["sender"]) == SpecialAgent.OPERATOR
+                assert messages[1]["agent_id"] == int(SpecialAgent.OPERATOR.value)
 
         max_wait = 15
         start_time = time.time()
@@ -194,7 +203,7 @@ class TestRoomControllerPrivate(_ApiServiceCase):
                     data = await resp.json()
                     messages = data["messages"]
                     # Agent 回复由调度异步触发，使用轮询等待可观测结果。
-                    if any(m["sender"] == "alice" for m in messages):
+                    if any(m["agent_id"] == alice_id for m in messages):
                         break
             await asyncio.sleep(0.1)
         else:
