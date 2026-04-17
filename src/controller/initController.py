@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from pydantic import BaseModel, ValidationError, field_validator
 
@@ -17,6 +18,7 @@ class QuickInitRequest(BaseModel):
     api_key: str
     model: str
     type: LlmServiceType = LlmServiceType.OPENAI_COMPATIBLE
+    provider_params: dict[str, Any] | None = None
 
     @field_validator("base_url")
     @classmethod
@@ -65,6 +67,7 @@ class QuickInitHandler(BaseHandler):
             type=req.type,
             model=req.model,
             enable=True,
+            provider_params=req.provider_params or {},
         )
 
         def mutator(s):
