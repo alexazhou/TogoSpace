@@ -30,6 +30,15 @@ class _SPAHandler(tornado.web.StaticFileHandler):
             return 0
         return super().get_cache_time(path, modified, mime_type)
 
+    def set_extra_headers(self, path: str) -> None:
+        if path == "index.html":
+            # 对 SPA 壳文件使用强 no-store，避免 Safari 等浏览器继续复用旧页面。
+            self.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.set_header("Pragma", "no-cache")
+            self.set_header("Expires", "0")
+            self.clear_header("Etag")
+            self.clear_header("Last-Modified")
+
 
 tornado_settings = {
     'debug': False,
