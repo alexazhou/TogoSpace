@@ -163,6 +163,7 @@ class SettingConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     language: str = "zh-CN"  # 界面语言，默认中文
+    development_mode: bool = False  # 前端开发模式开关，影响错误提示等交互行为
     demo_mode: DemoModeConfig = Field(default_factory=DemoModeConfig)
     default_llm_server: str | None = None
     llm_services: list[LlmServiceConfig] = Field(default_factory=list)

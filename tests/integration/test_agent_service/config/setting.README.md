@@ -29,6 +29,7 @@
 ## 顶层字段
 
 - `language`：界面语言，默认 `zh-CN`，可选值：`zh-CN`（中文）、`en`（英文）
+- `development_mode`：前端开发模式开关，默认 `false`。开启后前端会保留开发态交互，例如请求错误弹窗不自动消失
 - `default_llm_server`：默认使用的服务名，必须等于某个 `llm_services[].name`
 - `llm_services`：模型服务列表，至少要有一个 `enable=true`
 - `default_room_max_turns`：房间默认最大轮次，默认 `100`
@@ -45,6 +46,21 @@
 如需手动指定端口，在 `setting.json` 顶层添加或修改 `bind_port`，例如：`"bind_port": 9000`。
 
 如需同时指定监听地址，可一并设置 `bind_host`，例如：`"bind_host": "127.0.0.1"`。
+
+## `development_mode` 配置
+
+`development_mode` 用于控制前端是否启用开发态交互行为，由 `setting.json` 手动配置，不再根据运行环境自动推导。
+
+- `false`：按正式环境交互处理，例如请求错误弹窗会在约 5 秒后自动消失
+- `true`：启用开发态交互，例如请求错误弹窗需要手动关闭
+
+示例：
+
+```json
+{
+  "development_mode": true
+}
+```
 
 
 ## `llm_services` 常用字段

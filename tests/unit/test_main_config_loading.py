@@ -252,6 +252,26 @@ def test_demo_mode_flags_load_from_setting(tmp_path):
     assert app_config.setting.demo_mode.hide_sensitive is False
 
 
+def test_development_mode_loads_from_setting(tmp_path):
+    (tmp_path / "setting.json").write_text(json.dumps({
+        "development_mode": True,
+        "default_llm_server": "svc",
+        "llm_services": [
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+            }
+        ],
+    }), encoding="utf-8")
+
+    app_config = configUtil.load(str(tmp_path), force_reload=True)
+
+    assert app_config.setting.development_mode is True
+
+
 def test_workspace_root_defaults_to_repo_root_when_missing(tmp_path):
     (tmp_path / "setting.json").write_text(json.dumps({
         "default_llm_server": "svc",
@@ -459,11 +479,12 @@ def test_load_creates_setting_json_and_readme_when_missing(tmp_path):
 
     setting_data = json.loads(setting_file.read_text(encoding="utf-8"))
     assert setting_data["default_llm_server"] == "qwen"
+    assert setting_data["development_mode"] is False
     assert "llm_services" in setting_data
 
     readme_text = readme_file.read_text(encoding="utf-8")
     assert "setting.json 说明" in readme_text
-    assert "default_llm_server" in readme_text
+    assert "development_mode" in readme_text
 
 
 def test_load_setting_ignores_extra_keys(tmp_path):

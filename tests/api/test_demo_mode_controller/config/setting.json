@@ -1,4 +1,5 @@
 {
+  "development_mode": true,
   "demo_mode": {
     "enabled": true,
     "freeze_data": true,
