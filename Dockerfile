@@ -59,10 +59,14 @@ RUN mkdir -p ${TOGOAGENT_HOME} ${STORAGE_ROOT}
 
 WORKDIR ${TOGOAGENT_HOME}
 
-# 复制整个仓库（.dockerignore 会排除不需要的文件）
-COPY . ${TOGOAGENT_HOME}/
+# 复制后端源代码
+COPY src/ ${TOGOAGENT_HOME}/src/
 
-# 复制前端构建产物（覆盖 assets/frontend）
+# 复制资源文件
+COPY assets/ ${TOGOAGENT_HOME}/assets/
+COPY requirements.txt ${TOGOAGENT_HOME}/requirements.txt
+
+# 复制前端构建产物
 COPY --from=frontend-builder /build/frontend/dist ${TOGOAGENT_HOME}/assets/frontend
 
 # 创建 Python 虚拟环境并安装依赖

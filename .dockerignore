@@ -2,6 +2,8 @@
 .git
 .gitignore
 .gitmodules
+.claude
+.github
 
 # 开发环境
 .venv
