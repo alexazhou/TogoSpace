@@ -1,0 +1,36 @@
+# TogoAgent Docker Compose
+# 快速启动 TogoAgent 服务
+
+version: "3.8"
+
+services:
+  togoagent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: togoagent:0.1.20
+    container_name: togoagent
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # 持久化数据目录
+      - togoagent-data:/data
+      # 可选：挂载自定义配置文件
+      # - ./setting.json:/data/setting.json:ro
+    environment:
+      # 可选：覆盖监听端口
+      # - BIND_PORT=8080
+      # 可选：覆盖监听地址
+      # - BIND_HOST=0.0.0.0
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/system/status.json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  togoagent-data:
+    name: togoagent-data
