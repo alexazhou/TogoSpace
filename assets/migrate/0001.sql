@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS teams (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     name         TEXT    NOT NULL UNIQUE,
     uuid         TEXT    DEFAULT NULL,
-    enabled      INTEGER NOT NULL DEFAULT 1,
+    enabled      BOOLEAN NOT NULL DEFAULT 1,
     deleted      INTEGER NOT NULL DEFAULT 0,
     config       TEXT    NOT NULL DEFAULT '{}',
     i18n         TEXT    NOT NULL DEFAULT '{}',

@@ -34,7 +34,7 @@ async def get_all_teams(enabled: bool | None = None) -> list[GtTeam]:
     """获取所有未删除的 Team。可通过 enabled 参数过滤。"""
     query = GtTeam.select().where(GtTeam.deleted == 0).order_by(GtTeam.name)
     if enabled is not None:
-        query = query.where(GtTeam.enabled == 1 if enabled else GtTeam.enabled == 0)
+        query = query.where(GtTeam.enabled == enabled)
     return list(await query.aio_execute())
 
 
@@ -85,7 +85,7 @@ async def delete_team(name: str) -> None:
 async def set_team_enabled(team_id: int, enabled: bool) -> None:
     """设置 Team 的启用状态。"""
     await (
-        GtTeam.update(enabled=1 if enabled else 0)
+        GtTeam.update(enabled=enabled)
         .where(GtTeam.id == team_id)
         .aio_execute()
     )
@@ -96,6 +96,6 @@ async def team_exists(name: str) -> bool:
     row = await GtTeam.aio_get_or_none(
         GtTeam.name == name,
         GtTeam.deleted == 0,
-        GtTeam.enabled == 1,
+        GtTeam.enabled,
     )
     return row is not None

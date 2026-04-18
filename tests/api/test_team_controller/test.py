@@ -52,6 +52,7 @@ class TestTeamController(_ApiServiceCase):
         assert rooms_by_name["general"]["max_turns"] == 50
         assert len(rooms_by_name["测试组"]["agent_ids"]) == 2
         assert len(rooms_by_name["测试组"]["agents"]) == 2
+        assert isinstance(data["enabled"], bool)
 
     async def test_create_team_and_fetch_detail(self):
         payload = {
@@ -87,6 +88,16 @@ class TestTeamController(_ApiServiceCase):
             "rules": "先沟通后执行",
         }
         assert detail["rooms"] == []
+        assert isinstance(detail["enabled"], bool)
+
+    async def test_team_list_returns_boolean_enabled(self):
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/teams/list.json") as resp:
+                assert resp.status == 200
+                data = await resp.json()
+
+        assert data["teams"]
+        assert all(isinstance(team["enabled"], bool) for team in data["teams"])
 
     async def test_team_modify_agents_with_role_template_id(self):
         template_id = await self._get_role_template_id("alice")

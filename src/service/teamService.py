@@ -94,7 +94,7 @@ async def create_team(
     team = await gtTeamManager.save_team(GtTeam(
         name=name,
         config=config or {},
-        enabled=1,
+        enabled=True,
         deleted=0,
     ))
     team_id = team.id
