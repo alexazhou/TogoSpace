@@ -28,12 +28,15 @@
 
 ## 顶层字段
 
+- `language`：界面语言，默认 `zh-CN`
 - `default_llm_server`：默认使用的服务名，必须等于某个 `llm_services[].name`
 - `llm_services`：模型服务列表，至少要有一个 `enable=true`
 - `default_room_max_turns`：房间默认最大轮次，默认 `100`
+- `persistence`：持久化配置，详见下方说明
 - `workspace_root`：团队默认工作目录根路径
 - `bind_host`：后端 HTTP 服务监听地址，默认 `0.0.0.0`
 - `bind_port`：后端 HTTP 服务监听端口，默认 `8080`
+- `demo_mode`：演示模式配置，详见下方说明
 
 ## 本地监听地址与端口
 
@@ -42,6 +45,46 @@
 如需手动指定端口，在 `setting.json` 顶层添加或修改 `bind_port`，例如：`"bind_port": 9000`。
 
 如需同时指定监听地址，可一并设置 `bind_host`，例如：`"bind_host": "127.0.0.1"`。
+
+## `persistence` 配置
+
+持久化配置对象，控制数据存储行为：
+
+- `enabled`：是否启用持久化，默认 `false`
+- `db_path`：数据库文件路径，默认为 `STORAGE_ROOT/data/data.db`
+
+示例：
+
+```json
+{
+  "persistence": {
+    "enabled": true,
+    "db_path": "~/.togo_agent/data/data.db"
+  }
+}
+```
+
+## `demo_mode` 配置
+
+演示模式配置，用于展示环境：
+
+- `enabled`：是否启用演示模式，默认 `false`
+- `freeze_data`：是否冻结数据（禁止增删改），默认 `true`
+- `hide_sensitive_info`：是否隐藏敏感信息，默认 `true`
+
+启用演示模式且 `freeze_data=true` 时，后端进入只读状态，所有写操作返回 403。
+
+示例：
+
+```json
+{
+  "demo_mode": {
+    "enabled": true,
+    "freeze_data": true,
+    "hide_sensitive_info": true
+  }
+}
+```
 
 ## `llm_services` 常用字段
 
@@ -55,11 +98,41 @@
   - `google`：Google Gemini 格式
   - `deepseek`：DeepSeek 原生格式
 - `model`：模型名
-- `context_window_tokens`：上下文窗口大小
+- `temperature`：温度参数，可选
+- `context_window_tokens`：上下文窗口大小，默认 `131072`
 - `reserve_output_tokens`：预留输出 token，默认 `8192`
 - `compact_trigger_ratio`：触发 compact 的比例，默认 `0.85`
 - `compact_summary_max_tokens`：compact 摘要 token 上限，默认 `6144`
 - `extra_headers`：额外请求头
+- `provider_params`：透传给 litellm 的额外参数，详见下方说明
+
+## `provider_params` 配置
+
+`provider_params` 是一个 JSON 对象，会直接合并到 litellm 的请求参数中。可用于配置模型特定的参数，如 `reasoning_effort`、`top_p` 等。
+
+**禁止覆盖的系统字段**：
+
+以下字段由系统自动管理，不能在 `provider_params` 中设置：
+
+- `api_key`、`base_url`、`model`、`messages`
+- `temperature`、`max_tokens`、`stream`
+- `tools`、`tool_choice`
+- `extra_headers`、`custom_llm_provider`、`cache_control_injection_points`
+
+示例：
+
+```json
+{
+  "llm_services": [
+    {
+      "name": "deepseek",
+      "provider_params": {
+        "reasoning_effort": "high"
+      }
+    }
+  ]
+}
+```
 
 ## 本地服务示例
 

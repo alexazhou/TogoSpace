@@ -104,7 +104,35 @@
 - `compact_trigger_ratio`：触发 compact 的比例，默认 `0.85`
 - `compact_summary_max_tokens`：compact 摘要 token 上限，默认 `6144`
 - `extra_headers`：额外请求头
-- `provider_params`：透传给 litellm 的额外参数，不能覆盖系统请求参数（如 `model`、`messages`、`tools` 等）
+- `provider_params`：透传给 litellm 的额外参数，详见下方说明
+
+## `provider_params` 配置
+
+`provider_params` 是一个 JSON 对象，会直接合并到 litellm 的请求参数中。可用于配置模型特定的参数，如 `reasoning_effort`、`top_p` 等。
+
+**禁止覆盖的系统字段**：
+
+以下字段由系统自动管理，不能在 `provider_params` 中设置：
+
+- `api_key`、`base_url`、`model`、`messages`
+- `temperature`、`max_tokens`、`stream`
+- `tools`、`tool_choice`
+- `extra_headers`、`custom_llm_provider`、`cache_control_injection_points`
+
+示例：
+
+```json
+{
+  "llm_services": [
+    {
+      "name": "deepseek",
+      "provider_params": {
+        "reasoning_effort": "high"
+      }
+    }
+  ]
+}
+```
 
 ## 本地服务示例
 
