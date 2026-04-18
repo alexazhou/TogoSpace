@@ -282,7 +282,6 @@ async def _test_llm_service(config: LlmServiceConfig) -> dict:
 
     request = llmApiUtil.build_agent_probe_request(
         model=config.model,
-        reasoning_effort=config.reasoning_effort,
         provider_params=config.provider_params,
     )
 

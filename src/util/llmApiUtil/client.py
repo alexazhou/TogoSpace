@@ -222,7 +222,6 @@ _AGENT_PROBE_TOOLS = [
 def build_agent_probe_request(
     *,
     model: str,
-    reasoning_effort: str | None = None,
     provider_params: dict[str, Any] | None = None,
 ) -> OpenAIRequest:
     """构造一个尽量贴近真实 Agent 推理路径的最小探测请求。"""
@@ -243,7 +242,6 @@ def build_agent_probe_request(
         tools=_AGENT_PROBE_TOOLS,
         tool_choice=None,
         prompt_cache=True,
-        reasoning_effort=reasoning_effort,
         provider_params=provider_params or {},
     )
 
@@ -253,11 +251,7 @@ def _build_litellm_extra_params(request: OpenAIRequest) -> dict[str, Any]:
     if request.prompt_cache:
         extra_params["cache_control_injection_points"] = _CACHE_INJECTION_POINTS
 
-    provider_params = dict(request.provider_params or {})
-    if request.reasoning_effort and "reasoning_effort" not in provider_params:
-        provider_params["reasoning_effort"] = request.reasoning_effort
-
-    extra_params.update(provider_params)
+    extra_params.update(request.provider_params or {})
     return extra_params
 
 

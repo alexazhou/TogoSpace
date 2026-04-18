@@ -130,7 +130,6 @@ class LlmServiceConfig(BaseModel):
     provider_params: dict[str, Any] = Field(default_factory=dict)
 
     temperature: Optional[float] = None
-    reasoning_effort: Optional[str] = None  # 推理强度，如 "high"；传入 litellm 后自动触发 Responses API
 
     # Token 预算与自动压缩配置
     context_window_tokens: int = 131072
