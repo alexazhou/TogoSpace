@@ -41,6 +41,7 @@ class TestDemoModeController(_ApiServiceCase):
         assert data["hide_sensitive_info"] is True
         assert data["development_mode"] is True
         assert data["schedule_state"] == "BLOCKED"
+        assert data["not_running_reason"] == "演示模式已冻结数据"
 
     async def test_directories_hidden_when_sensitive_info_is_masked(self):
         async with aiohttp.ClientSession() as client:
@@ -74,7 +75,7 @@ class TestDemoModeController(_ApiServiceCase):
         assert service["extra_headers"] == {}
         assert service["has_api_key"] is True
 
-    async def test_write_endpoint_returns_403_in_demo_mode(self):
+    async def test_write_endpoint_returns_400_in_demo_mode(self):
         async with aiohttp.ClientSession() as client:
             async with client.post(
                 f"{self.backend_base_url}/config/llm_services/create.json",
@@ -86,7 +87,15 @@ class TestDemoModeController(_ApiServiceCase):
                     "model": "blocked-model",
                 },
             ) as resp:
-                assert resp.status == 403
+                assert resp.status == 400
+                data = await resp.json()
+
+        assert data["error_code"] == "demo_mode_data_frozen"
+
+    async def test_resume_schedule_returns_400_in_demo_mode(self):
+        async with aiohttp.ClientSession() as client:
+            async with client.post(f"{self.backend_base_url}/system/schedule/resume.json") as resp:
+                assert resp.status == 400
                 data = await resp.json()
 
         assert data["error_code"] == "demo_mode_data_frozen"

@@ -30,7 +30,7 @@ class BaseHandler(tornado.web.RequestHandler):
         demo_mode = configUtil.get_app_config().setting.demo_mode
         if not demo_mode.read_only:
             return
-        self.set_status(403)
+        self.set_status(400)
         self.return_json(
             {
                 "error_code": "demo_mode_data_frozen",

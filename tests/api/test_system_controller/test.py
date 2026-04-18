@@ -53,6 +53,7 @@ class TestSystemStatus(_ApiServiceCase):
         assert "default_llm_server" in data
         assert data["default_llm_server"] == "mock"
         assert "schedule_state" in data
+        assert "not_running_reason" in data
         assert data["demo_mode"] is False
         assert data["freeze_data"] is False
         assert data["read_only"] is False
@@ -84,3 +85,14 @@ class TestSystemStatus(_ApiServiceCase):
 
         assert "schedule_state" in data
         assert data["schedule_state"] in ("STOPPED", "BLOCKED", "RUNNING")
+        assert "not_running_reason" in data
+
+    async def test_resume_schedule_returns_current_schedule_state(self):
+        async with aiohttp.ClientSession() as client:
+            async with client.post(f"{self.backend_base_url}/system/schedule/resume.json") as resp:
+                assert resp.status == 200
+                data = await resp.json()
+
+        assert data["status"] == "ok"
+        assert data["schedule_state"] in ("STOPPED", "BLOCKED", "RUNNING")
+        assert "not_running_reason" in data

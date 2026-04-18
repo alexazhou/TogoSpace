@@ -54,7 +54,7 @@ async def start_schedule() -> None:
         await start_scheduling(team_name=None)
     else:
         _schedule_state = ScheduleState.BLOCKED
-        _schedule_not_running_reason = "未配置大模型服务"
+        _schedule_not_running_reason = "未配置大模型服务，请到后台配置大模型服务"
         logger.info("调度闸门已阻塞: state=%s, reason=%s", _schedule_state.value, _schedule_not_running_reason)
         _publish_state_change()
 

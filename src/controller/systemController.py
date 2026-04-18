@@ -14,6 +14,7 @@ class SystemStatusHandler(BaseHandler):
     async def get(self):
         initialized = configUtil.is_initialized()
         schedule_state = schedulerService.get_schedule_state()
+        not_running_reason = schedulerService.get_schedule_not_running_reason()
         setting = configUtil.get_app_config().setting
         demo_mode = setting.demo_mode
         demo_flags = {
@@ -28,6 +29,7 @@ class SystemStatusHandler(BaseHandler):
                 "initialized": True,
                 "default_llm_server": setting.default_llm_server,
                 "schedule_state": schedule_state,
+                "not_running_reason": not_running_reason,
                 "language": configUtil.get_language(),
                 **demo_flags,
             })
@@ -36,6 +38,18 @@ class SystemStatusHandler(BaseHandler):
                 "initialized": False,
                 "message": "当前未配置大模型服务",
                 "schedule_state": schedule_state,
+                "not_running_reason": not_running_reason,
                 "language": configUtil.get_language(),
                 **demo_flags,
             })
+
+
+class SystemScheduleResumeHandler(BaseHandler):
+    """POST /system/schedule/resume.json — 尝试恢复调度。"""
+
+    async def post(self):
+        await schedulerService.start_schedule()
+        self.return_success(
+            schedule_state=schedulerService.get_schedule_state(),
+            not_running_reason=schedulerService.get_schedule_not_running_reason(),
+        )
