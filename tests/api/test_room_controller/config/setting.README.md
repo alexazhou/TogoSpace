@@ -28,7 +28,7 @@
 
 ## 顶层字段
 
-- `language`：界面语言，默认 `zh-CN`
+- `language`：界面语言，默认 `zh-CN`，可选值：`zh-CN`（中文）、`en`（英文）
 - `default_llm_server`：默认使用的服务名，必须等于某个 `llm_services[].name`
 - `llm_services`：模型服务列表，至少要有一个 `enable=true`
 - `default_room_max_turns`：房间默认最大轮次，默认 `100`
@@ -46,27 +46,6 @@
 
 如需同时指定监听地址，可一并设置 `bind_host`，例如：`"bind_host": "127.0.0.1"`。
 
-## `demo_mode` 配置
-
-演示模式配置，用于展示环境：
-
-- `enabled`：是否启用演示模式，默认 `false`
-- `freeze_data`：是否冻结数据（禁止增删改），默认 `true`
-- `hide_sensitive_info`：是否隐藏敏感信息，默认 `true`
-
-启用演示模式且 `freeze_data=true` 时，后端进入只读状态，所有写操作返回 403。
-
-示例：
-
-```json
-{
-  "demo_mode": {
-    "enabled": true,
-    "freeze_data": true,
-    "hide_sensitive_info": true
-  }
-}
-```
 
 ## `llm_services` 常用字段
 
@@ -135,6 +114,24 @@
 }
 ```
 
-## 注意
+## `demo_mode` 配置
 
-- 删除 `setting.json` 后，下次启动会自动重新生成示例文件
+演示模式配置，用于展示环境：
+
+- `enabled`：是否启用演示模式，默认 `false`
+- `freeze_data`：是否冻结数据（禁止增删改），默认 `true`
+- `hide_sensitive_info`：是否隐藏敏感信息，默认 `true`
+
+启用演示模式且 `freeze_data=true` 时，后端进入只读状态，所有写操作返回 403。
+
+示例：
+
+```json
+{
+  "demo_mode": {
+    "enabled": true,
+    "freeze_data": true,
+    "hide_sensitive_info": true
+  }
+}
+```
