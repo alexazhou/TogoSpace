@@ -15,6 +15,7 @@ _SRC = os.path.dirname(os.path.abspath(__file__))   # = repo/src/
 _ROOT = os.path.join(_SRC, "..")                     # = repo/
 _IS_FROZEN = bool(getattr(sys, "frozen", False))
 _MEIPASS = str(getattr(sys, "_MEIPASS", ""))
+IS_DEV_MODE = not _IS_FROZEN
 
 STORAGE_ROOT: str
 ASSETS_DIR: str

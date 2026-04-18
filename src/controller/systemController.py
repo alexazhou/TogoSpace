@@ -1,5 +1,6 @@
 import logging
 
+import appPaths
 from controller.baseController import BaseHandler
 from service import schedulerService
 from util import configUtil
@@ -20,6 +21,7 @@ class SystemStatusHandler(BaseHandler):
             "freeze_data": demo_mode.read_only,
             "read_only": demo_mode.read_only,
             "hide_sensitive_info": demo_mode.hide_sensitive,
+            "development_mode": appPaths.IS_DEV_MODE,
         }
         if initialized:
             self.return_json({

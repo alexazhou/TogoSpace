@@ -39,6 +39,7 @@ class TestDemoModeController(_ApiServiceCase):
         assert data["freeze_data"] is True
         assert data["read_only"] is True
         assert data["hide_sensitive_info"] is True
+        assert data["development_mode"] is True
         assert data["schedule_state"] == "BLOCKED"
 
     async def test_directories_hidden_when_sensitive_info_is_masked(self):
