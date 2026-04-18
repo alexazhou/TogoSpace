@@ -32,7 +32,7 @@
 - `default_llm_server`：默认使用的服务名，必须等于某个 `llm_services[].name`
 - `llm_services`：模型服务列表，至少要有一个 `enable=true`
 - `default_room_max_turns`：房间默认最大轮次，默认 `100`
-- `persistence`：持久化配置，详见下方说明
+- `db_path`：数据库文件路径，默认为 `STORAGE_ROOT/data/data.db`
 - `workspace_root`：团队默认工作目录根路径
 - `bind_host`：后端 HTTP 服务监听地址，默认 `0.0.0.0`
 - `bind_port`：后端 HTTP 服务监听端口，默认 `8080`
@@ -45,24 +45,6 @@
 如需手动指定端口，在 `setting.json` 顶层添加或修改 `bind_port`，例如：`"bind_port": 9000`。
 
 如需同时指定监听地址，可一并设置 `bind_host`，例如：`"bind_host": "127.0.0.1"`。
-
-## `persistence` 配置
-
-持久化配置对象，控制数据存储行为：
-
-- `enabled`：是否启用持久化，默认 `false`
-- `db_path`：数据库文件路径，默认为 `STORAGE_ROOT/data/data.db`
-
-示例：
-
-```json
-{
-  "persistence": {
-    "enabled": true,
-    "db_path": "~/.togo_agent/data/data.db"
-  }
-}
-```
 
 ## `demo_mode` 配置
 

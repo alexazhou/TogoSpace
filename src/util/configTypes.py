@@ -35,7 +35,7 @@ def _is_test_env() -> bool:
     return False
 
 
-def _default_persistence_db_path() -> str:
+def _default_db_path() -> str:
     env_override = os.environ.get("TEAMAGENT_DB_PATH")
     if env_override and env_override.strip():
         return env_override.strip()
@@ -159,22 +159,6 @@ class DemoModeConfig(BaseModel):
         return self.enabled and self.hide_sensitive_info
 
 
-class PersistenceConfig(BaseModel):
-    enabled: bool = False
-    db_path: str = Field(default_factory=_default_persistence_db_path)
-
-    def model_post_init(self, __context: Any) -> None:
-        value = self.db_path
-        if value is None:
-            self.db_path = _default_persistence_db_path()
-            return
-        if isinstance(value, str):
-            stripped = value.strip()
-            self.db_path = stripped or _default_persistence_db_path()
-            return
-        raise ValueError("persistence.db_path 必须为字符串")
-
-
 class SettingConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -183,14 +167,14 @@ class SettingConfig(BaseModel):
     default_llm_server: str | None = None
     llm_services: list[LlmServiceConfig] = Field(default_factory=list)
     default_room_max_turns: int = 100
-    persistence: PersistenceConfig | None = Field(default_factory=PersistenceConfig)
+    db_path: str = Field(default_factory=_default_db_path)
     workspace_root: str | None = Field(default_factory=_default_workspace_root)
     bind_host: str = "0.0.0.0"  # HTTP 服务绑定地址
     bind_port: int = 8080       # HTTP 服务绑定端口
 
     def model_post_init(self, __context: Any) -> None:
-        if self.persistence is None:
-            raise ValueError("persistence 不允许为 null")
+        if not self.db_path.strip():
+            self.db_path = _default_db_path()
         if self.workspace_root is None:
             raise ValueError("workspace_root 不允许为 null")
 

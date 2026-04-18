@@ -9,7 +9,6 @@ from util.configTypes import (
     AppConfig,
     LlmServiceConfig,
     LlmServiceType,
-    PersistenceConfig,
     SettingConfig,
 )
 
@@ -30,10 +29,7 @@ def test_runtime_configs_load_from_config_dir(tmp_path):
                 "type": "openai-compatible",
             }
         ],
-        "persistence": {
-            "enabled": True,
-            "db_path": "./runtime/test.db",
-        },
+        "db_path": "./runtime/test.db",
         "workspace_root": "/tmp/workspaces",
     }), encoding="utf-8")
 
@@ -43,8 +39,7 @@ def test_runtime_configs_load_from_config_dir(tmp_path):
     assert isinstance(app_config, AppConfig)
     assert llm_cfg.name == "mock"
     assert llm_cfg.base_url == "http://127.0.0.1:9999/v1/chat/completions"
-    assert app_config.setting.persistence.enabled is True
-    assert app_config.setting.persistence.db_path == "./runtime/test.db"
+    assert app_config.setting.db_path == "./runtime/test.db"
     assert app_config.setting.workspace_root == "/tmp/workspaces"
 
 
@@ -95,8 +90,7 @@ def test_runtime_configs_allow_llm_only_setting(tmp_path):
 
     assert llm_cfg.name == "mock"
     assert llm_cfg.base_url == "http://127.0.0.1:7777/v1/chat/completions"
-    assert app_config.setting.persistence.enabled is False
-    assert app_config.setting.persistence.db_path == "../test_data/data.db"
+    assert app_config.setting.db_path == "../test_data/data.db"
 
 
 def test_default_db_path_in_non_test_env(monkeypatch):
@@ -125,10 +119,7 @@ def test_load_returns_appconfig_with_typed_fields(tmp_path):
                 "model": "gpt-4",
             }
         ],
-        "persistence": {
-            "enabled": False,
-            "db_path": "./data/db.sqlite",
-        },
+        "db_path": "./data/db.sqlite",
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
@@ -138,7 +129,7 @@ def test_load_returns_appconfig_with_typed_fields(tmp_path):
     assert isinstance(llm_cfg, LlmServiceConfig)
     assert llm_cfg.type == LlmServiceType.OPENAI_COMPATIBLE
     assert isinstance(app_config.setting, SettingConfig)
-    assert isinstance(app_config.setting.persistence, PersistenceConfig)
+    assert app_config.setting.db_path == "./data/db.sqlite"
     assert llm_cfg.model == "gpt-4"
     assert llm_cfg.api_key == "key-123"
     assert isinstance(app_config.role_templates, list)
@@ -318,27 +309,7 @@ def test_workspace_root_keeps_blank_when_provided(tmp_path):
     assert app_config.setting.workspace_root == "   "
 
 
-def test_persistence_defaults_when_null(tmp_path):
-    (tmp_path / "setting.json").write_text(json.dumps({
-        "default_llm_server": "svc",
-        "llm_services": [
-            {
-                "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1",
-                "api_key": "key-123",
-                "type": "openai-compatible",
-            }
-        ],
-        "persistence": None,
-    }), encoding="utf-8")
-
-    with pytest.raises(ValueError) as exc_info:
-        configUtil.load(str(tmp_path))
-    assert "persistence 不允许为 null" in str(exc_info.value)
-
-
-def test_persistence_db_path_defaults_when_blank(tmp_path):
+def test_db_path_defaults_when_blank(tmp_path):
     os.environ.pop("TEAMAGENT_DB_PATH", None)
     (tmp_path / "setting.json").write_text(json.dumps({
         "default_llm_server": "svc",
@@ -351,15 +322,11 @@ def test_persistence_db_path_defaults_when_blank(tmp_path):
                 "type": "openai-compatible",
             }
         ],
-        "persistence": {
-            "enabled": True,
-            "db_path": "   ",
-        },
+        "db_path": "   ",
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path))
-    assert app_config.setting.persistence.enabled is True
-    assert app_config.setting.persistence.db_path == configUtil.get_db_path()
+    assert app_config.setting.db_path == configUtil.get_db_path()
 
 
 def test_get_default_team_workdir_uses_workspace_root():
@@ -461,10 +428,7 @@ def test_load_reads_setting_json_once(tmp_path, monkeypatch):
                 "type": "openai-compatible",
             }
         ],
-        "persistence": {
-            "enabled": True,
-            "db_path": "./runtime/test.db",
-        },
+        "db_path": "./runtime/test.db",
         "workspace_root": "/tmp/workspaces",
     }), encoding="utf-8")
 

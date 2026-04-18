@@ -47,7 +47,7 @@ async def test_main_waits_for_shutdown_event_and_runs_cleanup(monkeypatch):
     fake_setting = SimpleNamespace(
         bind_host="127.0.0.1",
         bind_port=8080,
-        persistence=SimpleNamespace(db_path="/tmp/test.db"),
+        db_path="/tmp/test.db",
         workspace_root="/tmp/workspace",
         demo_mode=SimpleNamespace(read_only=False),
     )
@@ -175,7 +175,7 @@ async def test_main_restores_team_and_blocks_schedule_in_demo_readonly(monkeypat
     fake_setting = SimpleNamespace(
         bind_host="127.0.0.1",
         bind_port=8080,
-        persistence=SimpleNamespace(db_path="/tmp/test.db"),
+        db_path="/tmp/test.db",
         workspace_root="/tmp/workspace",
         demo_mode=SimpleNamespace(read_only=True),
     )

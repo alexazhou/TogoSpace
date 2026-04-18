@@ -126,7 +126,7 @@ async def main(config_dir: str = None, port: int | None = None):
     await messageBus.startup()
     await llmService.startup()
     await funcToolService.startup()
-    await ormService.startup(app_config.setting.persistence.db_path)
+    await ormService.startup(app_config.setting.db_path)
     await persistenceService.startup()
     await agentService.startup()
     await roomService.startup()

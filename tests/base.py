@@ -396,8 +396,7 @@ class ServiceTestCase:
 
         def patched_load(path=None, preset_dir=None, force_reload=False):
             cfg = original_load(path or cls._backend_config_dir, preset_dir=preset_dir or cls._backend_config_dir, force_reload=force_reload)
-            if cfg.setting.persistence:
-                cfg.setting.persistence.db_path = db_path
+            cfg.setting.db_path = db_path
             if cls.requires_mock_llm:
                 mock_port = _get_mock_llm_port()
                 for service in cfg.setting.llm_services:
@@ -415,7 +414,7 @@ class ServiceTestCase:
         """删除测试 DB 文件（含后端子进程使用的 DB）。"""
         paths = [cls._get_test_db_path()]
         setting = configUtil.load(cls._backend_config_dir).setting
-        path = setting.persistence.db_path
+        path = setting.db_path
         if path:
             paths.append(path if os.path.isabs(path) else os.path.abspath(os.path.join(_SRC_DIR, path)))
         for p in paths:
@@ -427,7 +426,7 @@ class ServiceTestCase:
         """为测试预创建数据库 schema，避免依赖 ormService 启动时自动建表。"""
         paths = [cls._get_test_db_path()]
         setting = configUtil.load(cls._backend_config_dir).setting
-        path = setting.persistence.db_path
+        path = setting.db_path
         if path:
             paths.append(path if os.path.isabs(path) else os.path.abspath(os.path.join(_SRC_DIR, path)))
 

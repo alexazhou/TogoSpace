@@ -8,7 +8,6 @@ import appPaths
 from util.configTypes import (
     RoleTemplateConfig,
     AppConfig,
-    PersistenceConfig,
     SettingConfig,
     TeamConfig,
 )
@@ -29,7 +28,7 @@ def _resolve_preset_dir() -> str:
 
 
 def get_db_path() -> str:
-    return PersistenceConfig().db_path
+    return SettingConfig().db_path
 
 
 def _load_prompt(file_path: str) -> str:
