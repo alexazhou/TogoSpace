@@ -2,6 +2,7 @@ import logging
 
 import appPaths
 from controller.baseController import BaseHandler
+from constants import ScheduleState
 from service import schedulerService
 from util import configUtil
 
@@ -49,7 +50,14 @@ class SystemScheduleResumeHandler(BaseHandler):
 
     async def post(self):
         await schedulerService.start_schedule()
+        schedule_state = schedulerService.get_schedule_state()
+        not_running_reason = schedulerService.get_schedule_not_running_reason()
+        if schedule_state != ScheduleState.RUNNING:
+            self.return_with_error(
+                error_code="schedule_not_running",
+                error_desc=not_running_reason or "调度未恢复",
+            )
         self.return_success(
-            schedule_state=schedulerService.get_schedule_state(),
-            not_running_reason=schedulerService.get_schedule_not_running_reason(),
+            schedule_state=schedule_state,
+            not_running_reason=not_running_reason,
         )

@@ -69,6 +69,15 @@ class TestQuickInit(_ApiServiceCase):
         assert data["message"] == "当前未配置大模型服务"
         assert "schedule_state" in data
 
+    async def test_resume_schedule_returns_400_when_llm_service_missing(self):
+        async with aiohttp.ClientSession() as client:
+            async with client.post(f"{self.backend_base_url}/system/schedule/resume.json") as resp:
+                assert resp.status == 400
+                data = await resp.json()
+
+        assert data["error_code"] == "schedule_not_running"
+        assert data["error_desc"] == "未配置大模型服务，请到后台配置大模型服务"
+
     async def test_quick_init_success(self):
         """快速初始化成功保存配置。"""
         async with aiohttp.ClientSession() as client:
