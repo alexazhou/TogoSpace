@@ -1,0 +1,63 @@
+name: Build Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (e.g., 0.1.20, latest)'
+        required: true
+        default: 'latest'
+        type: string
+      push:
+        description: 'Push image to registry'
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        lfs: true
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GitHub Container Registry
+      if: ${{ inputs.push }}
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: ${{ inputs.push }}
+        tags: ghcr.io/${{ github.repository_owner }}/togoagent:${{ inputs.tag }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Image summary
+      run: |
+        echo "### Docker Image Built" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Tag**: ${TAG}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Pushed**: ${PUSH}" >> $GITHUB_STEP_SUMMARY
+        if [ "${PUSH}" = "true" ]; then
+          echo "- **Registry**: ghcr.io/${OWNER}/togoagent:${TAG}" >> $GITHUB_STEP_SUMMARY
+        fi
+      env:
+        TAG: ${{ inputs.tag }}
+        PUSH: ${{ inputs.push }}
+        OWNER: ${{ github.repository_owner }}
