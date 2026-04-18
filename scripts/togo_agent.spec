@@ -1,5 +1,4 @@
 # -*- mode: python ; coding: utf-8 -*-
-import importlib.util
 import os
 import re
 
@@ -23,6 +22,11 @@ APP_ICON = _icon_path if os.path.exists(_icon_path) else None
 if not APP_ICON:
     print("⚠️  assets/icon.icns 不存在，将使用默认图标")
 
+# 获取 litellm 路径（使用更可靠的方式）
+import litellm
+LITELLM_PATH = os.path.dirname(litellm.__file__)
+print(f"ℹ️  litellm_path: {LITELLM_PATH}")
+
 # ── Analysis ──────────────────────────────────────────────────────────────────
 
 a = Analysis(
@@ -39,7 +43,7 @@ a = Analysis(
             excludes=["gtsp-linux-*"],
         ),
         # litellm 含大量 json/yaml 数据文件，需整包打入
-        (importlib.util.find_spec("litellm").submodule_search_locations[0], "litellm"),
+        (LITELLM_PATH, "litellm"),
     ],
     hiddenimports=[
         # tornado
