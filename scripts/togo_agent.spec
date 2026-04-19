@@ -2,8 +2,6 @@
 import os
 import re
 
-from PyInstaller.building.datastruct import Tree
-
 # SPECPATH 是 PyInstaller 内置变量，指向本 spec 文件所在目录
 REPO_ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 
@@ -27,6 +25,37 @@ import litellm
 LITELLM_PATH = os.path.dirname(litellm.__file__)
 print(f"ℹ️  litellm_path: {LITELLM_PATH}")
 
+
+def _collect_assets(assets_dir: str, prefix: str, excludes: list) -> list:
+    """手动收集 assets 目录文件，返回 (src, dest) tuples 列表。
+
+    PyInstaller 6.x 的 Tree 继承自 list，放在 datas 中会导致 unpack 错误。
+    """
+    import fnmatch
+    result = []
+    exclude_patterns = []
+    for name in excludes:
+        exclude_patterns.append(name)
+
+    for root, dirs, files in os.walk(assets_dir):
+        for filename in files:
+            # 使用 fnmatch 匹配 glob 模式
+            if any(fnmatch.fnmatch(filename, pattern) for pattern in exclude_patterns):
+                continue
+            src_path = os.path.join(root, filename)
+            rel_dir = os.path.relpath(root, assets_dir)
+            dest_dir = os.path.join(prefix, rel_dir) if rel_dir != '.' else prefix
+            result.append((src_path, dest_dir))
+    return result
+
+
+ASSETS_DATAS = _collect_assets(
+    os.path.join(REPO_ROOT, "assets"),
+    prefix="assets",
+    excludes=["gtsp-linux-*"],
+)
+print(f"ℹ️  assets files: {len(ASSETS_DATAS)}")
+
 # ── Analysis ──────────────────────────────────────────────────────────────────
 
 a = Analysis(
@@ -36,12 +65,8 @@ a = Analysis(
     ],
     binaries=[],
     datas=[
-        # 使用 Tree 收集 assets 目录，排除 Linux 版本的 gtsp 可执行文件
-        Tree(
-            os.path.join(REPO_ROOT, "assets"),
-            prefix="assets",
-            excludes=["gtsp-linux-*"],
-        ),
+        # assets 目录（排除 Linux 版本的 gtsp 可执行文件）
+        *ASSETS_DATAS,
         # litellm 含大量 json/yaml 数据文件，需整包打入
         (LITELLM_PATH, "litellm"),
     ],
