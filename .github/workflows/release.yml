@@ -12,8 +12,12 @@ jobs:
     permissions:
       contents: write
 
+    strategy:
+      matrix:
+        arch: [arm64, x86_64]
+
     env:
-      TARGET_ARCH: arm64
+      TARGET_ARCH: ${{ matrix.arch }}
       # Apple 证书（用于签名）
       APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -44,8 +48,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-release-${{ hashFiles('**/requirements.txt') }}
+        key: ${{ runner.os }}-pip-release-${{ matrix.arch }}-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
+          ${{ runner.os }}-pip-release-${{ matrix.arch }}-
           ${{ runner.os }}-pip-release-
           ${{ runner.os }}-pip-
 
@@ -104,9 +109,9 @@ jobs:
     - name: Build and release
       run: |
         if [ -f scripts/build_config.json ]; then
-          python scripts/build_release.py --arch arm64
+          python scripts/build_release.py --arch ${{ matrix.arch }}
         else
-          python scripts/build_mac.py
+          TARGET_ARCH=${{ matrix.arch }} python scripts/build_mac.py
         fi
 
     - name: Get zip path
