@@ -82,7 +82,7 @@
     "dept_name": "创新实验室",
     "responsibility": "负责探索前沿想法与可行性原型验证",
     "manager": "主持人",
-    "agents": ["主持人", "奇思", "冷面"],
+    "agents": ["主持人", "奇思", "冷面", "博闻", "实干家"],
     "children": [
       {
         "dept_name": "调研组",
