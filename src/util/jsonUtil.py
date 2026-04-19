@@ -180,10 +180,10 @@ def json_data_to_object(data: Union[Dict, List, str], cls: Type[T] = Dict, confi
         cls = annotation_to_type(cls_annotation)
         if issubclass(cls, (str, int, float)):
             return data
-        elif issubclass(cls, (List)):
-            if data is None or cls_annotation == List:
+        elif issubclass(cls, (list, List)):
+            if data is None or cls_annotation == List or cls_annotation == list:
                 return data
-            else:
+            elif hasattr(cls_annotation, '__args__'):
                 nest_type_annotation = cls_annotation.__args__[0]
                 # 尝试解析前向引用
                 if isinstance(nest_type_annotation, (ForwardRef, str)):
@@ -194,10 +194,12 @@ def json_data_to_object(data: Union[Dict, List, str], cls: Type[T] = Dict, confi
                 for nest_item_data in data:
                     ret_list.append(json_to_model(nest_item_data, nest_type_annotation, context_class))
                 return ret_list
-        elif issubclass(cls, (Dict)):
-            if data is None or cls_annotation == Dict:
-                return data
             else:
+                return data
+        elif issubclass(cls, (dict, Dict)):
+            if data is None or cls_annotation == Dict or cls_annotation == dict:
+                return data
+            elif hasattr(cls_annotation, '__args__'):
                 nest_type_annotation_k = cls_annotation.__args__[0]
                 nest_type_annotation_v = cls_annotation.__args__[1]
 
@@ -208,6 +210,8 @@ def json_data_to_object(data: Union[Dict, List, str], cls: Type[T] = Dict, confi
                     ret_dict[json_to_model(nest_item_data_k, nest_type_annotation_k, context_class)] = json_to_model(nest_item_data_v, nest_type_annotation_v, context_class)
 
                 return ret_dict
+            else:
+                return data
 
         elif issubclass(cls, Enum):
             assert type(data) == str

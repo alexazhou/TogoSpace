@@ -99,6 +99,43 @@ class DemoUnsupportedUnion:
         self.a = None
 
 
+class DemoBuiltinDict:
+    """使用内置 dict 类型（无泛型参数）的类"""
+    name: str
+    metadata: dict  # 内置 dict，无泛型参数
+
+    def __init__(self):
+        self.name = ""
+        self.metadata = {}
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.__dict__ == other.__dict__
+
+
+class DemoBuiltinList:
+    """使用内置 list 类型（无泛型参数）的类"""
+    name: str
+    items: list  # 内置 list，无泛型参数
+
+    def __init__(self):
+        self.name = ""
+        self.items = []
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.__dict__ == other.__dict__
+
+
+class DemoMixedBuiltinAndTyping:
+    """混合使用内置类型和 typing 类型"""
+    name: str
+    data: dict  # 内置 dict
+    tags: list[str]  # typing list with 泛型参数
+    mapping: dict[str, int]  # typing dict with 泛型参数
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.__dict__ == other.__dict__
+
+
 class DemoNoneLeft:
     a: None | str
     b: None | int
@@ -333,3 +370,83 @@ class TestJsonUtil:
     def test_unsupported_union_with_multiple_non_none_types(self):
         with pytest.raises(TypeError, match="Only Optional\\[T\\] / T \\| None is supported"):
             jsonUtil.json_data_to_object({"a": "x"}, DemoUnsupportedUnion)
+
+    def test_builtin_dict_no_generic_params(self):
+        """测试内置 dict 类型（无泛型参数）的反序列化"""
+        data = {"name": "test", "metadata": {"key1": "value1", "key2": 123}}
+        ret = jsonUtil.json_data_to_object(data, DemoBuiltinDict)
+        assert ret.name == "test"
+        assert ret.metadata == {"key1": "value1", "key2": 123}
+
+    def test_builtin_dict_serialization(self):
+        """测试内置 dict 类型的序列化"""
+        obj = DemoBuiltinDict()
+        obj.name = "test"
+        obj.metadata = {"a": 1, "b": 2}
+        ret = jsonUtil.object_to_json_data(obj)
+        assert ret == {"name": "test", "metadata": {"a": 1, "b": 2}}
+
+    def test_builtin_dict_round_trip(self):
+        """测试内置 dict 类型的序列化-反序列化往返"""
+        obj = DemoBuiltinDict()
+        obj.name = "roundtrip"
+        obj.metadata = {"nested": {"deep": True}, "list": [1, 2, 3]}
+        json_str = jsonUtil.json_dump(obj)
+        ret = jsonUtil.json_load(json_str, DemoBuiltinDict)
+        assert ret == obj
+
+    def test_builtin_list_no_generic_params(self):
+        """测试内置 list 类型（无泛型参数）的反序列化"""
+        data = {"name": "test", "items": ["a", "b", "c", 1, 2, 3]}
+        ret = jsonUtil.json_data_to_object(data, DemoBuiltinList)
+        assert ret.name == "test"
+        assert ret.items == ["a", "b", "c", 1, 2, 3]
+
+    def test_builtin_list_serialization(self):
+        """测试内置 list 类型的序列化"""
+        obj = DemoBuiltinList()
+        obj.name = "test"
+        obj.items = [1, 2, {"nested": True}]
+        ret = jsonUtil.object_to_json_data(obj)
+        assert ret == {"name": "test", "items": [1, 2, {"nested": True}]}
+
+    def test_builtin_list_round_trip(self):
+        """测试内置 list 类型的序列化-反序列化往返"""
+        obj = DemoBuiltinList()
+        obj.name = "roundtrip"
+        obj.items = ["x", "y", {"z": 1}, [1, 2]]
+        json_str = jsonUtil.json_dump(obj)
+        ret = jsonUtil.json_load(json_str, DemoBuiltinList)
+        assert ret == obj
+
+    def test_mixed_builtin_and_typing_types(self):
+        """测试混合使用内置类型和 typing 类型"""
+        data = {
+            "name": "mixed",
+            "data": {"raw_key": "raw_value"},  # 内置 dict
+            "tags": ["tag1", "tag2"],  # typing list[str]
+            "mapping": {"k1": 1, "k2": 2}  # typing dict[str, int]
+        }
+        ret = jsonUtil.json_data_to_object(data, DemoMixedBuiltinAndTyping)
+        assert ret.name == "mixed"
+        assert ret.data == {"raw_key": "raw_value"}
+        assert ret.tags == ["tag1", "tag2"]
+        assert ret.mapping == {"k1": 1, "k2": 2}
+
+    def test_empty_builtin_dict_and_list(self):
+        """测试空的内置 dict 和 list"""
+        data = {"name": "empty", "metadata": {}, "items": []}
+        ret = jsonUtil.json_data_to_object(data, DemoBuiltinDict)
+        assert ret.metadata == {}
+
+        ret2 = jsonUtil.json_data_to_object(data, DemoBuiltinList)
+        assert ret2.items == []
+
+    def test_none_builtin_dict_and_list(self):
+        """测试 None 值的内置 dict 和 list"""
+        data = {"name": "none_values", "metadata": None, "items": None}
+        ret = jsonUtil.json_data_to_object(data, DemoBuiltinDict)
+        assert ret.metadata is None
+
+        ret2 = jsonUtil.json_data_to_object(data, DemoBuiltinList)
+        assert ret2.items is None
