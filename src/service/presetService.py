@@ -35,15 +35,18 @@ async def _import_role_templates_from_app_config() -> None:
     logger.info(f"加载角色模版: {[t.name for t in db_templates]}")
 
 
-async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> GtDept:
-    # 验证：子部门的 manager 必须在父部门的 agents 列表中
+def _validate_dept_tree_config(node: DeptNodeConfig) -> None:
+    """在进入数据库事务前，对部门树配置进行纯逻辑校验。"""
     for child in node.children:
         if child.manager not in node.agents:
             raise TeamAgentException(
                 f"部门 '{node.dept_name}' 的子部门 '{child.dept_name}' 的负责人 '{child.manager}' 不在父部门的 agents 列表中",
                 error_code="CHILD_MANAGER_NOT_IN_PARENT_AGENTS",
             )
+        _validate_dept_tree_config(child)
 
+
+async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> GtDept:
     lookup_names = list(dict.fromkeys([*node.agents, node.manager]))
     gt_agents = await gtAgentManager.get_team_agents_by_names(
         team_id,
@@ -143,6 +146,11 @@ async def _import_team_from_config(team_config: TeamConfig) -> GtTeam | None:
         logger.info("Team '%s' 已存在（或已删除），跳过导入", team_config.name)
         return None
 
+    # 1. 预校验：在写入任何数据前确保配置逻辑正确
+    if team_config.dept_tree is not None:
+        _validate_dept_tree_config(team_config.dept_tree)
+
+    # 2. 保存团队主体
     team = await gtTeamManager.save_team(GtTeam(
         name=team_config.name,  # 存储稳定 ID；display_name 从 i18n 解析
         uuid=team_config.uuid,

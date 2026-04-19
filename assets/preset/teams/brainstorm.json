@@ -62,18 +62,18 @@
   ],
   "preset_rooms": [
     {
-      "name": "创意孵化室",
-      "agents": ["Operator", "主持人", "奇思", "冷面", "博闻", "实干家"],
-      "initial_topic": "欢迎来到创意孵化室！请提出您的初步想法，我们将一起完善它。",
-      "max_turns": 50,
+      "name": "主持人",
+      "agents": ["Operator", "主持人"],
+      "initial_topic": "和主持人单独沟通，讨论头脑风暴的策划与准备工作。",
+      "max_turns": 100,
       "i18n": {
         "display_name": {
-          "zh-CN": "创意孵化室",
-          "en": "Ideation Room"
+          "zh-CN": "主持人",
+          "en": "Host"
         },
         "initial_topic": {
-          "zh-CN": "欢迎来到创意孵化室！请提出您的初步想法，我们将一起完善它。",
-          "en": "Welcome to the Ideation Room! Please share your initial thoughts, and we will refine them together."
+          "zh-CN": "和主持人单独沟通，讨论头脑风暴的策划与准备工作。",
+          "en": "Discuss brainstorming planning and preparation privately with the Host."
         }
       }
     }
@@ -83,42 +83,7 @@
     "responsibility": "负责探索前沿想法与可行性原型验证",
     "manager": "主持人",
     "agents": ["主持人", "奇思", "冷面", "博闻", "实干家"],
-    "children": [
-      {
-        "dept_name": "调研组",
-        "responsibility": "提供数据支持与行业分析",
-        "manager": "博闻",
-        "agents": ["博闻"],
-        "children": [],
-        "i18n": {
-          "dept_name": {
-            "zh-CN": "调研组",
-            "en": "Research Group"
-          },
-          "responsibility": {
-            "zh-CN": "提供数据支持与行业分析",
-            "en": "Provide data support and industry analysis"
-          }
-        }
-      },
-      {
-        "dept_name": "工程组",
-        "responsibility": "验证技术可行性",
-        "manager": "实干家",
-        "agents": ["实干家"],
-        "children": [],
-        "i18n": {
-          "dept_name": {
-            "zh-CN": "工程组",
-            "en": "Engineering Group"
-          },
-          "responsibility": {
-            "zh-CN": "验证技术可行性",
-            "en": "Verify technical feasibility"
-          }
-        }
-      }
-    ],
+    "children": [],
     "i18n": {
       "dept_name": {
         "zh-CN": "创新实验室",
