@@ -1,0 +1,133 @@
+{
+  "name": "创意脑暴团队",
+  "uuid": "preset-brainstorm-team-v1",
+  "auto_start": false,
+  "i18n": {
+    "display_name": {
+      "zh-CN": "创意脑暴团队",
+      "en": "Creative Brainstorming Team"
+    }
+  },
+  "agents": [
+    {
+      "name": "主持人",
+      "role_template": "facilitator",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "主持人",
+          "en": "Host"
+        }
+      }
+    },
+    {
+      "name": "奇思",
+      "role_template": "visionary",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "奇思",
+          "en": "Spark"
+        }
+      }
+    },
+    {
+      "name": "冷面",
+      "role_template": "critic",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "冷面",
+          "en": "Frost"
+        }
+      }
+    },
+    {
+      "name": "博闻",
+      "role_template": "researcher",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "博闻",
+          "en": "Knowledge"
+        }
+      }
+    },
+    {
+      "name": "实干家",
+      "role_template": "software_engineer",
+      "i18n": {
+        "display_name": {
+          "zh-CN": "实干家",
+          "en": "Doer"
+        }
+      }
+    }
+  ],
+  "preset_rooms": [
+    {
+      "name": "创意孵化室",
+      "agents": ["Operator", "主持人", "奇思", "冷面", "博闻", "实干家"],
+      "initial_topic": "欢迎来到创意孵化室！请提出您的初步想法，我们将一起完善它。",
+      "max_turns": 50,
+      "i18n": {
+        "display_name": {
+          "zh-CN": "创意孵化室",
+          "en": "Ideation Room"
+        },
+        "initial_topic": {
+          "zh-CN": "欢迎来到创意孵化室！请提出您的初步想法，我们将一起完善它。",
+          "en": "Welcome to the Ideation Room! Please share your initial thoughts, and we will refine them together."
+        }
+      }
+    }
+  ],
+  "dept_tree": {
+    "dept_name": "创新实验室",
+    "responsibility": "负责探索前沿想法与可行性原型验证",
+    "manager": "主持人",
+    "agents": ["主持人", "奇思", "冷面"],
+    "children": [
+      {
+        "dept_name": "调研组",
+        "responsibility": "提供数据支持与行业分析",
+        "manager": "博闻",
+        "agents": ["博闻"],
+        "children": [],
+        "i18n": {
+          "dept_name": {
+            "zh-CN": "调研组",
+            "en": "Research Group"
+          },
+          "responsibility": {
+            "zh-CN": "提供数据支持与行业分析",
+            "en": "Provide data support and industry analysis"
+          }
+        }
+      },
+      {
+        "dept_name": "工程组",
+        "responsibility": "验证技术可行性",
+        "manager": "实干家",
+        "agents": ["实干家"],
+        "children": [],
+        "i18n": {
+          "dept_name": {
+            "zh-CN": "工程组",
+            "en": "Engineering Group"
+          },
+          "responsibility": {
+            "zh-CN": "验证技术可行性",
+            "en": "Verify technical feasibility"
+          }
+        }
+      }
+    ],
+    "i18n": {
+      "dept_name": {
+        "zh-CN": "创新实验室",
+        "en": "Innovation Lab"
+      },
+      "responsibility": {
+        "zh-CN": "负责探索前沿想法与可行性原型验证",
+        "en": "Responsible for exploring cutting-edge ideas and validating feasibility prototypes"
+      }
+    }
+  }
+}
