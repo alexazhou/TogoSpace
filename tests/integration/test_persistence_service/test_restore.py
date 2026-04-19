@@ -31,9 +31,10 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         funcToolService.shutdown()
         await messageBus.shutdown()
         await persistenceService.shutdown()
-        await ormService.shutdown()
+        # 先关闭 agentService，确保消费者任务停止后再关闭数据库连接
         await agentService.shutdown()
         roomService.shutdown()
+        await ormService.shutdown()
 
     @pytest.fixture(autouse=True)
     async def _reset_between_tests(self):
