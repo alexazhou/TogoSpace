@@ -115,8 +115,8 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown():
         )
         assert isinstance(list_result, dict)
         items = list_result.get("items", [])
-        names = {item.get("name") for item in items if isinstance(item, dict)}
-        assert "hello.txt" in names
+        paths = {item.get("path") for item in items if isinstance(item, dict)}
+        assert "hello.txt" in paths
 
         # 4) read 文件并校验内容一致
         read_ctx = ToolCallContext(agent_name="e2e", team_id=1, chat_room=MagicMock(), tool_name="read_file")
