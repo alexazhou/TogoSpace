@@ -9,7 +9,9 @@ from service.agentService.prompts import (
     COMPACT_PROMPT_TEMPLATE,
     COMPACT_RESUME_TEMPLATE,
     WORKDIR_PROMPT,
+    LANGUAGE_CONTEXT_PROMPT,
 )
+from util import configUtil
 
 
 def format_room_message(room_name: str, sender_name: str, content: str) -> str:
@@ -106,7 +108,16 @@ async def build_agent_system_prompt(
         template_soul=template_soul,
     )
     workdir_prompt = WORKDIR_PROMPT.format(workdir=workdir)
-    full_prompt = base_prompt_tmpl + "\n\n" + identity_prompt + "\n\n" + workdir_prompt
+    language_context_prompt = LANGUAGE_CONTEXT_PROMPT.format(language=configUtil.get_language())
+    full_prompt = (
+        base_prompt_tmpl
+        + "\n\n"
+        + language_context_prompt
+        + "\n\n"
+        + identity_prompt
+        + "\n\n"
+        + workdir_prompt
+    )
     if team_id > 0:
         dept_context = await _build_dept_context(team_id, agent_name)
         full_prompt += "\n\n" + dept_context

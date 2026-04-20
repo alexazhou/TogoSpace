@@ -11,6 +11,7 @@ async def test_build_agent_system_prompt_includes_team_awareness_guide(monkeypat
         return "---\n组织信息：\n- 所在部门：产品部\n---"
 
     monkeypatch.setattr(promptBuilder, "_build_dept_context", _build_dept_context)
+    monkeypatch.setattr(promptBuilder.configUtil, "get_language", lambda: "en")
 
     result = await promptBuilder.build_agent_system_prompt(
         team_id=1,
@@ -33,6 +34,9 @@ async def test_build_agent_system_prompt_includes_team_awareness_guide(monkeypat
     assert "wake_up_agent" in result
     assert "我是 Alice" in result
     assert "角色 PM" in result
+    assert "当前系统语言设置：en" in result
+    assert "上一条 Agent/Operator 消息的正文语言" in result
+    assert "系统通知不参与语言判断" in result
 
 
 @pytest.mark.asyncio
@@ -45,6 +49,7 @@ async def test_build_agent_system_prompt_skips_team_awareness_when_not_in_team(m
         return "should not be used"
 
     monkeypatch.setattr(promptBuilder, "_build_dept_context", _build_dept_context)
+    monkeypatch.setattr(promptBuilder.configUtil, "get_language", lambda: "zh-CN")
 
     result = await promptBuilder.build_agent_system_prompt(
         team_id=0,
@@ -65,3 +70,5 @@ async def test_build_agent_system_prompt_skips_team_awareness_when_not_in_team(m
     assert "wake_up_agent" not in result
     assert "我是 Solo" in result
     assert "角色 Helper" in result
+    assert "当前系统语言设置：zh-CN" in result
+    assert "如果上一条 Agent/Operator 消息不存在，则使用当前系统语言设置" in result
