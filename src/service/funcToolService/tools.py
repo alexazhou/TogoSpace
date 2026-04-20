@@ -9,6 +9,7 @@ from dal.db import gtAgentManager, gtRoomManager
 from model.dbModel.gtDept import GtDept
 from service.roomService import ToolCallContext
 import service.roomService as roomService
+from util import configUtil, i18nUtil
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +67,22 @@ def _find_dept_node(node: GtDept | None, dept_id: int) -> GtDept | None:
 
 
 def _serialize_dept_node(node: GtDept, id_to_name: dict[int, str]) -> dict[str, Any]:
+    lang = configUtil.get_language()
+    dept_name = i18nUtil.extract_i18n_str(
+        node.i18n.get("dept_name") if node.i18n else None,
+        default=node.name,
+        lang=lang,
+    ) or node.name
+    responsibility = i18nUtil.extract_i18n_str(
+        node.i18n.get("responsibility") if node.i18n else None,
+        default=node.responsibility,
+        lang=lang,
+    ) or node.responsibility
     members = [_resolve_agent_name(agent_id, id_to_name) for agent_id in node.agent_ids]
     return {
         "dept_id": node.id,
-        "dept_name": node.name,
-        "dept_responsibility": node.responsibility,
+        "dept_name": dept_name,
+        "dept_responsibility": responsibility,
         "manager": _resolve_agent_name(node.manager_id, id_to_name),
         "members": members,
         "member_count": len(members),

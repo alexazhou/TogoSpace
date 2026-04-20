@@ -61,15 +61,12 @@ async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> GtDept:
             error_code="DEPT_AGENT_NOT_FOUND",
         )
 
-    lang = configUtil.get_language()
-    dept_name = i18nUtil.extract_i18n_str(node.i18n.get("dept_name") if node.i18n else None, default=node.dept_name, lang=lang)
-    responsibility = i18nUtil.extract_i18n_str(node.i18n.get("responsibility") if node.i18n else None, default=node.responsibility, lang=lang)
-
     return GtDept(
-        name=dept_name,
-        responsibility=responsibility,
+        name=node.dept_name,  # 存储稳定标识；display_name 从 i18n 解析
+        responsibility=node.responsibility,  # 存储稳定标识；display responsibility 从 i18n 解析
         manager_id=agent_id_map[node.manager],
         agent_ids=[agent_id_map[name] for name in node.agents],
+        i18n=node.i18n or {},  # 传递原始 i18n 字典
         children=[await _to_dept_tree_node(team_id, child) for child in node.children],
     )
 
