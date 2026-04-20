@@ -1,5 +1,6 @@
 import re
 from enum import Enum, auto
+from typing import Any, Union, Optional
 
 
 class EnhanceEnum(Enum):
@@ -8,7 +9,7 @@ class EnhanceEnum(Enum):
         return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
 
     @classmethod
-    def value_of(cls, value: str):
+    def value_of(cls, value: Optional[Union[int, str]]):
         if value is None:
             return None
 
