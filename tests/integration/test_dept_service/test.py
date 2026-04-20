@@ -91,6 +91,7 @@ class TestDeptService(ServiceTestCase):
             responsibility=node.responsibility,
             manager_id=agent_id_map.get(node.manager, 0),
             agent_ids=[agent_id_map.get(name, 0) for name in node.agents],
+            i18n=node.i18n or {},
             children=[await self._to_dept_tree_node(team_id, child) for child in node.children],
         )
 
@@ -620,6 +621,35 @@ class TestDeptService(ServiceTestCase):
         assert after_room.name == "platform"
         assert after_room.initial_topic == f"这里是{renamed.name}部门的公共群聊，部门人员可在这里互相沟通。"
         assert "DEPT" in after_room.tags
+
+    async def test_overwrite_dept_tree_keeps_room_display_name_i18n(self):
+        """验证部门树 i18n 会写入 DEPT 房间 display_name。"""
+        await self._reset_tables()
+
+        team = await self._setup_team_with_agents("t_room_i18n", ["alice", "bob"])
+        alice_id = await self._get_agent_id(team.id, "alice")
+        bob_id = await self._get_agent_id(team.id, "bob")
+
+        root = GtDept(
+            name="engineering",
+            responsibility="开发部门",
+            manager_id=alice_id,
+            agent_ids=[alice_id, bob_id],
+            i18n={
+                "dept_name": {
+                    "zh-CN": "研发部",
+                    "en": "R&D Dept",
+                },
+            },
+        )
+        await deptService.overwrite_dept_tree(team.id, root)
+
+        dept = await gtDeptManager.get_dept_by_name(team.id, "engineering")
+        assert dept is not None
+        room = await gtRoomManager.get_room_by_biz_id(team.id, f"DEPT:{dept.id}")
+        assert room is not None
+        assert room.i18n["display_name"]["zh-CN"] == "研发部"
+        assert room.i18n["display_name"]["en"] == "R&D Dept"
 
     async def test_load_team_rooms_keeps_dept_room_tags(self):
         """验证重新加载 Team 房间内存对象时，部门房间标签不会丢失。"""

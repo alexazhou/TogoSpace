@@ -71,6 +71,7 @@ async def _overwrite_dept_subtree(
         manager_id=node.manager_id,
         agent_ids=agent_ids,
         dept_id=node.id,
+        i18n=node.i18n,
     )
 
     # 递归处理子部门
@@ -149,4 +150,5 @@ async def set_dept_manager(team_id: int, dept_name: str, manager_id: int) -> Non
         manager_id=manager_id,
         agent_ids=dept.agent_ids,
         dept_id=dept.id,
+        i18n=dept.i18n,
     )

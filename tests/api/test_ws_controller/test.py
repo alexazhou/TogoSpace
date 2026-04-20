@@ -88,6 +88,8 @@ class TestWsController(_ApiServiceCase):
         assert event["gt_room"]["id"] == room_id_holder[0]
         assert event["gt_room"]["team_id"] > 0
         assert event["gt_room"]["name"] == "general"
+        assert "display_name" not in event["gt_room"]
+        assert "i18n" in event["gt_room"]
         assert "sender_id" in event
         assert "content" in event
 
@@ -136,4 +138,6 @@ class TestWsController(_ApiServiceCase):
                 assert matched is not None, "未收到 alice/bob 的 agent_status 事件"
                 assert matched["gt_agent"]["team_id"] == team_id
                 assert matched["gt_agent"]["team_id"] > 0
+                assert "display_name" not in matched["gt_agent"]
+                assert "i18n" in matched["gt_agent"]
                 assert "team_name" not in matched

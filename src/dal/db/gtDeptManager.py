@@ -27,18 +27,22 @@ async def save_dept(
     manager_id: int,
     agent_ids: list[int],
     dept_id: int | None = None,
+    i18n: dict | None = None,
 ) -> GtDept:
     """创建或更新部门。如果提供 dept_id，则按 ID 更新现有部门；否则按 name 创建/更新。"""
     if dept_id is not None:
         # 按 ID 更新现有部门
+        update_data = {
+            GtDept.name: name,
+            GtDept.responsibility: responsibility,
+            GtDept.parent_id: parent_id,
+            GtDept.manager_id: manager_id,
+            GtDept.agent_ids: agent_ids,
+        }
+        if i18n is not None:
+            update_data[GtDept.i18n] = i18n
         await (
-            GtDept.update(
-                name=name,
-                responsibility=responsibility,
-                parent_id=parent_id,
-                manager_id=manager_id,
-                agent_ids=agent_ids,
-            )
+            GtDept.update(update_data)
             .where(GtDept.id == dept_id)
             .aio_execute()
         )
@@ -48,23 +52,28 @@ async def save_dept(
         return row
 
     # 按 name 创建/更新
+    insert_data = {
+        GtDept.team_id: team_id,
+        GtDept.name: name,
+        GtDept.responsibility: responsibility,
+        GtDept.parent_id: parent_id,
+        GtDept.manager_id: manager_id,
+        GtDept.agent_ids: agent_ids,
+        GtDept.i18n: i18n or {},
+    }
+    update_data = {
+        GtDept.responsibility: responsibility,
+        GtDept.parent_id: parent_id,
+        GtDept.manager_id: manager_id,
+        GtDept.agent_ids: agent_ids,
+    }
+    if i18n is not None:
+        update_data[GtDept.i18n] = i18n
     await (
-        GtDept.insert(
-            team_id=team_id,
-            name=name,
-            responsibility=responsibility,
-            parent_id=parent_id,
-            manager_id=manager_id,
-            agent_ids=agent_ids,
-        )
+        GtDept.insert(insert_data)
         .on_conflict(
             conflict_target=[GtDept.team_id, GtDept.name],
-            update={
-                GtDept.responsibility: responsibility,
-                GtDept.parent_id: parent_id,
-                GtDept.manager_id: manager_id,
-                GtDept.agent_ids: agent_ids,
-            },
+            update=update_data,
         )
         .aio_execute()
     )

@@ -60,6 +60,8 @@ class TestRoomController(_ApiServiceCase):
         assert "agents" in room
         assert "id" in room["gt_room"]
         assert "agent_ids" in room["gt_room"]
+        assert "display_name" not in room["gt_room"]
+        assert "i18n" in room["gt_room"]
         assert "SYSTEM" not in room["agents"]
 
     async def test_get_room_messages(self):
@@ -155,11 +157,19 @@ class TestRoomControllerPrivate(_ApiServiceCase):
         assert RoomType.value_of(private_room["gt_room"]["type"]) == RoomType.PRIVATE
         assert private_room["gt_room"]["team_id"] == team_id
         assert any(agent_id == int(SpecialAgent.OPERATOR.value) for agent_id in private_room["gt_room"]["agent_ids"])
+        assert "display_name" not in private_room["gt_room"]
+        assert "i18n" in private_room["gt_room"]
 
         group_room = next(r for r in rooms if r["gt_room"]["name"] == "public_group")
         assert RoomType.value_of(group_room["gt_room"]["type"]) == RoomType.GROUP
         assert group_room["gt_room"]["team_id"] == team_id
         assert not any(agent_id == int(SpecialAgent.OPERATOR.value) for agent_id in group_room["gt_room"]["agent_ids"])
+        assert "display_name" not in group_room["gt_room"]
+        assert "i18n" in group_room["gt_room"]
+
+        dept_room = next(r for r in rooms if r["gt_room"]["biz_id"])
+        assert dept_room["gt_room"]["i18n"]["display_name"]["en"] == "QA Team"
+        assert dept_room["gt_room"]["i18n"]["display_name"]["zh-CN"] == "测试组"
 
 
     async def test_post_message_to_private_room(self):

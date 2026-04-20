@@ -579,30 +579,22 @@ class ChatRoom:
             return None
         agent_id = self._get_current_turn_agent_id()
         agent = self._get_agent_by_id(agent_id)
-        display_name = self._get_agent_display_name(agent) if agent else self._get_agent_name(agent_id)
-        return {"id": agent_id, "name": display_name}
+        return {
+            "id": agent_id,
+            "name": agent.name if agent else self._get_agent_stable_name(agent_id),
+            "i18n": agent.i18n if agent is not None else {},
+        }
 
     def to_dict(self) -> dict:
         """返回用于 API 响应的字典表示，包含 gt_room 详情与运行时状态。"""
-        lang = configUtil.get_language()
-        room_display_name = i18nUtil.extract_i18n_str(
-            self.gt_room.i18n.get("display_name") if self.gt_room.i18n else None,
-            default=self.name,
-            lang=lang,
-        ) or self.name
-        room_initial_topic = i18nUtil.extract_i18n_str(
-            self.gt_room.i18n.get("initial_topic") if self.gt_room.i18n else None,
-            default=self.initial_topic,
-            lang=lang,
-        ) or self.initial_topic
         return {
             "gt_room": {
                 "id": self.gt_room.id,
                 "team_id": self.gt_room.team_id,
                 "name": self.gt_room.name,
-                "display_name": room_display_name,
+                "i18n": self.gt_room.i18n or {},
                 "type": self.gt_room.type.name,
-                "initial_topic": room_initial_topic,
+                "initial_topic": self.gt_room.initial_topic,
                 "max_turns": self.gt_room.max_turns,
                 "agent_ids": list(self.gt_room.agent_ids or []),
                 "biz_id": self.gt_room.biz_id,

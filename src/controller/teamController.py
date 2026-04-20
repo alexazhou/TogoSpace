@@ -11,7 +11,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from service import roomService, teamService, agentService
-from util import assertUtil, i18nUtil, configUtil
+from util import assertUtil
 from util.configTypes import TeamRoomConfig
 
 
@@ -111,17 +111,12 @@ class SetEnabledRequest(BaseModel):
     enabled: bool
 
 
-def _team_to_dict(team: GtTeam, lang: str | None = None) -> dict[str, Any]:
+def _team_to_dict(team: GtTeam) -> dict[str, Any]:
     working_directory, config = _split_team_config(team.config)
-    effective_lang = lang or configUtil.get_language()
     return {
         "id": team.id,
         "name": team.name,
-        "display_name": i18nUtil.extract_i18n_str(
-            team.i18n.get("display_name") if team.i18n else None,
-            default=team.name,
-            lang=effective_lang,
-        ) or team.name,
+        "i18n": team.i18n or {},
         "working_directory": working_directory,
         "config": config,
         "enabled": bool(team.enabled),
@@ -171,19 +166,14 @@ class TeamDetailHandler(BaseHandler):
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
-        lang = configUtil.get_language()
         rooms = await gtRoomManager.get_rooms_by_team(team_id)
         agents = await gtAgentManager.get_team_agents(team_id)
-        agent_id_to_i18n = {agent.id: agent.i18n for agent in agents}
         agent_id_to_name = {agent.id: agent.name for agent in agents}
         agents_data = [
             {
+                "id": agent.id,
                 "name": agent.name,
-                "display_name": i18nUtil.extract_i18n_str(
-                    agent.i18n.get("display_name") if agent.i18n else None,
-                    default=agent.name,
-                    lang=lang,
-                ) or agent.name,
+                "i18n": agent.i18n or {},
                 "role_template_id": agent.role_template_id,
             }
             for agent in agents
@@ -191,11 +181,6 @@ class TeamDetailHandler(BaseHandler):
         room_items = []
         for room in rooms:
             agent_ids = list(room.agent_ids or [])
-            room_display_name = i18nUtil.extract_i18n_str(
-                room.i18n.get("display_name") if room.i18n else None,
-                default=room.name,
-                lang=lang,
-            ) or room.name
             agent_names = []
             for agent_id in agent_ids:
                 special = SpecialAgent.value_of(agent_id)
@@ -209,13 +194,9 @@ class TeamDetailHandler(BaseHandler):
                 {
                     "id": room.id,
                     "name": room.name,
-                    "display_name": room_display_name,
+                    "i18n": room.i18n or {},
                     "type": room.type.name,
-                    "initial_topic": i18nUtil.extract_i18n_str(
-                        room.i18n.get("initial_topic") if room.i18n else None,
-                        default=room.initial_topic,
-                        lang=lang,
-                    ) or room.initial_topic,
+                    "initial_topic": room.initial_topic,
                     "max_turns": room.max_turns,
                     "agent_ids": agent_ids,
                     "agents": agent_names,
@@ -228,11 +209,7 @@ class TeamDetailHandler(BaseHandler):
             {
                 "id": team.id,
                 "name": team.name,
-                "display_name": i18nUtil.extract_i18n_str(
-                    team.i18n.get("display_name") if team.i18n else None,
-                    default=team.name,
-                    lang=lang,
-                ) or team.name,
+                "i18n": team.i18n or {},
                 "working_directory": _split_team_config(team.config)[0],
                 "config": _split_team_config(team.config)[1],
                 "enabled": bool(team.enabled),

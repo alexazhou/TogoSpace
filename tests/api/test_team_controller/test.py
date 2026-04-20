@@ -40,13 +40,19 @@ class TestTeamController(_ApiServiceCase):
                 data = await resp.json()
 
         assert data["name"] == "e2e"
+        assert "display_name" not in data
+        assert "i18n" in data
         assert data["config"] == {}
         assert len(data["agents"]) == 2
         agent_names = {a["name"] for a in data["agents"]}
         assert agent_names == {"alice", "bob"}
+        assert all("display_name" not in agent for agent in data["agents"])
+        assert all("i18n" in agent for agent in data["agents"])
         assert len(data["rooms"]) == 2
         rooms_by_name = {room["name"]: room for room in data["rooms"]}
         assert set(rooms_by_name.keys()) == {"general", "测试组"}
+        assert all("display_name" not in room for room in data["rooms"])
+        assert all("i18n" in room for room in data["rooms"])
         assert len(rooms_by_name["general"]["agent_ids"]) == 3
         assert len(rooms_by_name["general"]["agents"]) == 3
         assert rooms_by_name["general"]["max_turns"] == 50
@@ -87,6 +93,8 @@ class TestTeamController(_ApiServiceCase):
             "slogan": "使命必达",
             "rules": "先沟通后执行",
         }
+        assert "display_name" not in detail
+        assert detail["i18n"] == {}
         assert detail["rooms"] == []
         assert isinstance(detail["enabled"], bool)
 
@@ -98,6 +106,8 @@ class TestTeamController(_ApiServiceCase):
 
         assert data["teams"]
         assert all(isinstance(team["enabled"], bool) for team in data["teams"])
+        assert all("display_name" not in team for team in data["teams"])
+        assert all("i18n" in team for team in data["teams"])
 
     async def test_team_modify_agents_with_role_template_id(self):
         template_id = await self._get_role_template_id("alice")
@@ -140,6 +150,8 @@ class TestTeamController(_ApiServiceCase):
         assert tom["role_template_id"] == template_id
         assert tom["model"] == "gpt-4o"
         assert tom["driver"] == "native"
+        assert "display_name" not in tom
+        assert "i18n" in tom
 
     async def test_team_modify_agents_with_invalid_role_template_id(self):
         temp_team_name = f"team_modify_invalid_members_{int(time.time() * 1000)}"
@@ -187,6 +199,8 @@ class TestTeamController(_ApiServiceCase):
         assert names == {"alice", "bob"}
         agent = agents_data["agents"][0]
         assert isinstance(agent["role_template_id"], int)
+        assert "display_name" not in agent
+        assert "i18n" in agent
 
     async def test_agent_detail(self):
         """验证 GET /teams/<id>/agents/<name>.json 返回成员详情。"""
@@ -202,6 +216,8 @@ class TestTeamController(_ApiServiceCase):
         assert "employ_status" in data
         assert "model" in data
         assert "driver" in data
+        assert "display_name" not in data
+        assert "i18n" in data
 
     async def test_team_set_enabled(self):
         """验证 POST /teams/{id}/set_enabled.json 设置团队启用状态。"""

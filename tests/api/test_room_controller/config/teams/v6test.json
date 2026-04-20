@@ -9,7 +9,17 @@
     "responsibility": "负责房间测试",
     "manager": "alice",
     "agents": ["alice", "bob"],
-    "children": []
+    "children": [],
+    "i18n": {
+      "dept_name": {
+        "zh-CN": "测试组",
+        "en": "QA Team"
+      },
+      "responsibility": {
+        "zh-CN": "负责房间测试",
+        "en": "Responsible for room testing"
+      }
+    }
   },
   "preset_rooms": [
     {

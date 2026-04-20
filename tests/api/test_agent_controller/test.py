@@ -56,6 +56,8 @@ class TestAgentController(_ApiServiceCase):
         assert "employ_status" in agent
         assert "model" in agent
         assert "driver" in agent
+        assert "display_name" not in agent
+        assert "i18n" in agent
 
     async def test_get_agents_without_team_id(self):
         """验证 GET /agents/list.json 无 team_id 时返回空列表。"""
@@ -80,6 +82,8 @@ class TestAgentController(_ApiServiceCase):
         assert "employ_status" in data
         assert "model" in data
         assert "driver" in data
+        assert "display_name" not in data
+        assert "i18n" in data
 
 
 class TestAgentBatchUpdate(_ApiServiceCase):
@@ -142,6 +146,8 @@ class TestAgentBatchUpdate(_ApiServiceCase):
         agent = data["agents"][0]
         assert agent["model"] == "gpt-4"
         assert agent["driver"] == "native"
+        assert "display_name" not in agent
+        assert "i18n" in agent
 
     async def test_batch_update_with_invalid_id(self):
         """验证批量更新时使用不存在的 id 返回错误。"""
@@ -218,6 +224,8 @@ class TestAgentsSave(_ApiServiceCase):
                 data = await resp.json()
 
         assert data["status"] == "ok"
+        assert all("display_name" not in agent for agent in data["agents"])
+        assert all("i18n" in agent for agent in data["agents"])
         assert len(data["agents"]) == 2
         names = {a["name"] for a in data["agents"]}
         assert "alice" in names
