@@ -43,14 +43,14 @@
 
 ## 🚀 快速开始
 
-### 1. 快速体验 (推荐)
+### 方法 1：下载已构建的 App 包（推荐 macOS 用户）
 目前我们已提供 **macOS** 版本的 Release 包，下载即可快速体验。
 - **下载地址**：[点击前往 Releases 页面下载](https://github.com/your-repo/togo-agent/releases)
 - **使用说明**：下载并运行后，ToGo Agent 将常驻于你的系统状态栏。点击状态栏图标即可开启控制台、管理团队或执行任务。
 
 ![Status Bar Entry](image/cn/entry.png)
 
-### 2. 开发者安装 (源码运行)
+### 方法 2：源码运行
 ```bash
 # 克隆仓库
 git clone https://github.com/your-repo/togo-agent.git
@@ -58,17 +58,15 @@ cd togo-agent
 
 # 安装依赖
 pip install -r requirements.txt
+
+# 启动后端服务
+./scripts/start_backend.sh
+
+# 启动 Web 控制台（需进入 frontend 目录）
+cd frontend && npm install && npm run dev
 ```
 
-### 2. 初始化与配置
-```bash
-# 执行数据库迁移
-python src/db.py migrate
-
-# (可选) 参考 assets/config_template.json 完善你的 LLM API 配置
-```
-
-### 3. Docker 部署
+### 方法 3：Docker 部署
 ```bash
 # 从 Docker Hub 拉取镜像
 docker pull alexazhou/togoagent:latest
@@ -80,20 +78,7 @@ docker run -d \
   -v /path/to/your/data:/data \
   alexazhou/togoagent:latest
 
-# 访问 Web 控制台
-# 在浏览器打开 http://localhost:8080
-```
-
-### 4. 启动项目
-```bash
-# 1. 启动后端服务
-./scripts/start_backend.sh
-
-# 2. 启动 Web 控制台 (需进入 frontend 目录)
-cd frontend && npm install && npm run dev
-
-# 3. Coming Soon TUI 终端交互界面 (Coming Soon)
-# ./scripts/start_tui.sh
+# 在浏览器打开 http://localhost:8080 访问控制台
 ```
 
 ---

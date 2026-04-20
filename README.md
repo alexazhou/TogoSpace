@@ -43,14 +43,14 @@ Built with Python and modern frontend technologies, it perfectly supports macOS,
 
 ## 🚀 Quick Start
 
-### 1. Quick Experience (Recommended)
+### Method 1: Download Pre-built App Package (Recommended for macOS Users)
 We currently provide a **macOS** Release package for a quick start.
 - **Download**: [Go to the Releases page](https://github.com/your-repo/togo-agent/releases)
 - **Usage**: Once running, ToGo Agent stays in your system status bar. Click the icon to open the console, manage teams, or execute tasks.
 
 ![Status Bar Entry](image/en/entry.png)
 
-### 2. Developer Installation (Source Code)
+### Method 2: Run from Source
 ```bash
 # Clone the repository
 git clone https://github.com/your-repo/togo-agent.git
@@ -58,9 +58,15 @@ cd togo-agent
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Start backend service
+./scripts/start_backend.sh
+
+# Start Web console (requires entering frontend directory)
+cd frontend && npm install && npm run dev
 ```
 
-### 3. Docker Deployment
+### Method 3: Docker Deployment
 ```bash
 # Pull the image from Docker Hub
 docker pull alexazhou/togoagent:latest
@@ -72,20 +78,7 @@ docker run -d \
   -v /path/to/your/data:/data \
   alexazhou/togoagent:latest
 
-# Access the Web console
-# Open http://localhost:8080 in your browser
-```
-
-### 4. Start Project
-```bash
-# 1. Start backend service
-./scripts/start_backend.sh
-
-# 2. Start Web console (Requires entering frontend directory)
-cd frontend && npm install && npm run dev
-
-# 3. Coming Soon TUI Terminal Interface (Coming Soon)
-# ./scripts/start_tui.sh
+# Access the Web console at http://localhost:8080
 ```
 
 ---
