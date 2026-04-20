@@ -43,6 +43,9 @@ Built with Python and modern frontend technologies, it perfectly supports macOS,
 
 ## 🚀 Quick Start
 
+### Try the Demo
+- **English Demo**: [https://demo2.togoagent.org](https://demo2.togoagent.org)
+
 ### Method 1: Download Pre-built App Package (Recommended for macOS Users)
 We currently provide a **macOS** Release package for a quick start.
 - **Download**: [Go to the Releases page](https://github.com/your-repo/togo-agent/releases)
