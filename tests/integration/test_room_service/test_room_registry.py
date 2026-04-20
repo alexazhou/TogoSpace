@@ -1,5 +1,6 @@
 import os
 import sys
+import unittest.mock as mock
 
 import pytest
 
@@ -7,7 +8,7 @@ import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
 from constants import RoomType, SpecialAgent
-from dal.db import gtTeamManager, gtAgentManager, gtRoomMessageManager
+from dal.db import gtTeamManager, gtAgentManager, gtRoomManager, gtRoomMessageManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
@@ -115,6 +116,46 @@ class TestRoomRegistry(ServiceTestCase):
         assert len(room.messages) == 1
         assert room.messages[0].sender_id == room.SYSTEM_MEMBER_ID
         assert "boot topic" in room.messages[0].content
+
+    async def test_initial_system_message_uses_room_i18n_topic_for_current_language(self):
+        """首条系统消息应按当前后端语言读取 room.i18n.initial_topic，而不是直接使用落库字段。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+
+        agent_ids = [
+            agent.id
+            for agent in await gtAgentManager.get_team_agents_by_names(team.id, ["alice", "bob"], include_special=True)
+        ]
+        await gtRoomManager.save_room(GtRoom(
+            team_id=team.id,
+            name="boot_room_i18n",
+            type=RoomType.GROUP,
+            initial_topic="这里是中文初始话题",
+            max_turns=5,
+            agent_ids=agent_ids,
+            biz_id=None,
+            tags=[],
+            i18n={
+                "display_name": {
+                    "zh-CN": "启动房间",
+                    "en": "Boot Room",
+                },
+                "initial_topic": {
+                    "zh-CN": "这里是中文初始话题",
+                    "en": "This is the English initial topic.",
+                },
+            },
+        ))
+        await roomService.load_team_rooms(team.id)
+
+        room = roomService.get_room_by_key(f"boot_room_i18n@{TEAM}")
+        with mock.patch("util.configUtil.get_language", return_value="en"):
+            await room.activate_scheduling()
+
+        assert len(room.messages) == 1
+        assert "Initial topic: This is the English initial topic." in room.messages[0].content
+        assert "本房间初始话题" not in room.messages[0].content
+        assert "这里是中文初始话题" not in room.messages[0].content
 
     async def test_restore_team_rooms_runtime_state_prevents_duplicate_initial_messages_after_refresh(self):
         """刷新 Team 房间运行态后，恢复历史再激活，不应重复写初始消息。"""

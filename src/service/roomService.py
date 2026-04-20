@@ -549,6 +549,13 @@ class ChatRoom:
             default=agent.name,
         ) or agent.name
 
+    def _get_room_initial_topic_display_text(self) -> str:
+        """按当前后端语言解析首条系统消息里展示的 initial topic。"""
+        return i18nUtil.extract_i18n_str(
+            self.gt_room.i18n.get("initial_topic") if self.gt_room.i18n else None,
+            default=self.initial_topic,
+        ) or self.initial_topic
+
     def build_initial_system_message(self) -> str:
         # 获取房间显示名称
         room_display_name = i18nUtil.extract_i18n_str(
@@ -569,8 +576,9 @@ class ChatRoom:
 
         agent_list_str = separator.join(agent_display_names)
         msg = i18nUtil.t("room_created_msg", room_name=room_display_name, agent_list=agent_list_str)
-        if self.initial_topic:
-            msg += f"\n{i18nUtil.t('room_initial_topic', topic=self.initial_topic)}"
+        initial_topic_text = self._get_room_initial_topic_display_text()
+        if initial_topic_text:
+            msg += f"\n{i18nUtil.t('room_initial_topic', topic=initial_topic_text)}"
         return msg
 
     def _build_current_turn_agent_dict(self) -> dict | None:
