@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Sequence
 
 from dal.db import gtRoomManager, gtTeamManager, gtAgentManager, gtRoomMessageManager
 from service import messageBus
-from util import configUtil
+from util import configUtil, i18nUtil
 from util import assertUtil
 from exception import TeamAgentException
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
@@ -140,7 +140,18 @@ class ChatRoom:
         return None
 
     def _get_agent_name(self, agent_id: int) -> str:
-        """根据 agent_id 获取名称，用于显示。"""
+        """根据 agent_id 获取显示名称（从 i18n 解析）。"""
+        if agent_id == self.SYSTEM_MEMBER_ID:
+            return SpecialAgent.SYSTEM.name
+        if agent_id == self.OPERATOR_MEMBER_ID:
+            return SpecialAgent.OPERATOR.name
+        agent = self._get_agent_by_id(agent_id)
+        if agent is None:
+            return str(agent_id)
+        return self._get_agent_display_name(agent)
+
+    def _get_agent_stable_name(self, agent_id: int) -> str:
+        """根据 agent_id 获取稳定标识名（用于持久化和匹配）。"""
         if agent_id == self.SYSTEM_MEMBER_ID:
             return SpecialAgent.SYSTEM.name
         if agent_id == self.OPERATOR_MEMBER_ID:
@@ -494,9 +505,9 @@ class ChatRoom:
             self._turn_pos = turn_pos
 
     def export_agent_read_index(self) -> Dict[str, int]:
-        """导出消息读取进度，key 为 agent_name。"""
+        """导出消息读取进度，key 为 agent 稳定标识名（用于持久化）。"""
         return {
-            self._get_agent_name(aid): idx
+            self._get_agent_stable_name(aid): idx
             for aid, idx in self._agent_read_index.items()
         }
 
@@ -531,11 +542,35 @@ class ChatRoom:
             lines.append(f"[{msg.send_time.isoformat()}] {sender_name}: {msg.content}")
         return "\n".join(lines)
 
+    def _get_agent_display_name(self, agent: GtAgent) -> str:
+        """获取 Agent 的显示名称（从 i18n 解析）。"""
+        return i18nUtil.extract_i18n_str(
+            agent.i18n.get("display_name") if agent.i18n else None,
+            default=agent.name,
+        ) or agent.name
+
     def build_initial_system_message(self) -> str:
-        agent_list_str = "、".join(self.agent_names)
-        msg = f"系统提示: {self.name} 房间已经创建，当前房间成员：{agent_list_str}"
+        # 获取房间显示名称
+        room_display_name = i18nUtil.extract_i18n_str(
+            self.gt_room.i18n.get("display_name") if self.gt_room.i18n else None,
+            default=self.name,
+        ) or self.name
+
+        # 获取所有 Agent 的显示名称（排除系统成员）
+        agent_display_names = [
+            self._get_agent_display_name(agent)
+            for agent in self._agents
+            if agent.id != self.SYSTEM_MEMBER_ID
+        ]
+
+        # 根据语言选择分隔符：中文用顿号，英文用逗号
+        lang = configUtil.get_language()
+        separator = "、" if lang == "zh-CN" else ", "
+
+        agent_list_str = separator.join(agent_display_names)
+        msg = i18nUtil.t("room_created_msg", room_name=room_display_name, agent_list=agent_list_str)
         if self.initial_topic:
-            msg += f"\n本房间初始话题：{self.initial_topic}"
+            msg += f"\n{i18nUtil.t('room_initial_topic', topic=self.initial_topic)}"
         return msg
 
     def _build_current_turn_agent_dict(self) -> dict | None:
@@ -543,17 +578,31 @@ class ChatRoom:
         if self._state != RoomState.SCHEDULING or not self._agent_ids:
             return None
         agent_id = self._get_current_turn_agent_id()
-        return {"id": agent_id, "name": self._get_agent_name(agent_id)}
+        agent = self._get_agent_by_id(agent_id)
+        display_name = self._get_agent_display_name(agent) if agent else self._get_agent_name(agent_id)
+        return {"id": agent_id, "name": display_name}
 
     def to_dict(self) -> dict:
         """返回用于 API 响应的字典表示，包含 gt_room 详情与运行时状态。"""
+        lang = configUtil.get_language()
+        room_display_name = i18nUtil.extract_i18n_str(
+            self.gt_room.i18n.get("display_name") if self.gt_room.i18n else None,
+            default=self.name,
+            lang=lang,
+        ) or self.name
+        room_initial_topic = i18nUtil.extract_i18n_str(
+            self.gt_room.i18n.get("initial_topic") if self.gt_room.i18n else None,
+            default=self.initial_topic,
+            lang=lang,
+        ) or self.initial_topic
         return {
             "gt_room": {
                 "id": self.gt_room.id,
                 "team_id": self.gt_room.team_id,
                 "name": self.gt_room.name,
+                "display_name": room_display_name,
                 "type": self.gt_room.type.name,
-                "initial_topic": self.gt_room.initial_topic,
+                "initial_topic": room_initial_topic,
                 "max_turns": self.gt_room.max_turns,
                 "agent_ids": list(self.gt_room.agent_ids or []),
                 "biz_id": self.gt_room.biz_id,
@@ -745,10 +794,20 @@ async def overwrite_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> N
         room.team_id = team_id
         room.name = spec.name
         room.type = RoomType.GROUP
-        room.initial_topic = spec.initial_topic
+        # 从 i18n 解析 initial_topic，若无 i18n 则使用 spec.initial_topic
+        if spec.i18n and "initial_topic" in spec.i18n:
+            lang = configUtil.get_language()
+            room.initial_topic = i18nUtil.extract_i18n_str(
+                spec.i18n.get("initial_topic"),
+                default=spec.initial_topic,
+                lang=lang,
+            ) or spec.initial_topic
+        else:
+            room.initial_topic = spec.initial_topic
         room.max_turns = resolve_room_max_turns(spec.max_turns)
         room.biz_id = spec.biz_id
         room.tags = ["DEPT"]
+        room.i18n = spec.i18n or {}
 
         # 2) 保存房间元信息，再覆盖成员列表。
         saved_room = await gtRoomManager.save_room(room)

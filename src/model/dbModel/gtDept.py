@@ -16,6 +16,7 @@ class DeptRoomSpec:
     initial_topic: str
     agent_ids: list[int]
     max_turns: int | None = None
+    i18n: dict | None = None
 
 
 class GtDept(DbModelBase):
@@ -25,6 +26,7 @@ class GtDept(DbModelBase):
     parent_id:      int            = peewee.IntegerField(null=True)
     manager_id:     int            = peewee.IntegerField()
     agent_ids:      list[int]      = JsonField(default=list)
+    i18n:           dict           = JsonField(default=dict)  # 多语言数据，含 dept_name, responsibility
 
     # 非数据库字段，用于构建树结构
     children: List["GtDept"] = []
@@ -66,11 +68,32 @@ class GtDept(DbModelBase):
 
     def _append_room_specs(self, room_specs: list[DeptRoomSpec]) -> None:
         assert self.id is not None, "dept.id must be set before collecting room specs"
+
+        # 构建部门房间的 i18n 配置
+        dept_i18n = self.i18n or {}
+        dept_name_i18n = dept_i18n.get("dept_name") or {}
+
+        # 生成多语言的 initial_topic
+        initial_topic_i18n = {}
+        # 中文版本：使用中文部门名
+        zh_dept_name = dept_name_i18n.get("zh-CN") or self.name
+        initial_topic_i18n["zh-CN"] = f"这里是{zh_dept_name}部门的公共群聊，部门人员可在这里互相沟通。"
+        # 英文版本：使用英文部门名
+        en_dept_name = dept_name_i18n.get("en") or self.name
+        initial_topic_i18n["en"] = f"This is the public group chat for the {en_dept_name} department. Department members can communicate here."
+
+        # 房间 i18n：display_name 与 dept_name_i18n 相同，加上 initial_topic
+        room_i18n = {
+            "display_name": dept_name_i18n,
+            "initial_topic": initial_topic_i18n,
+        }
+
         room_specs.append(DeptRoomSpec(
             biz_id=f"DEPT:{self.id}",
             name=self.name,
-            initial_topic=f"这里是{self.name}部门的公共群聊，部门人员可在这里互相沟通。",
+            initial_topic=initial_topic_i18n.get("zh-CN") or f"这里是{self.name}部门的公共群聊，部门人员可在这里互相沟通。",
             agent_ids=list(dict.fromkeys(self.agent_ids)),
+            i18n=room_i18n,
         ))
         for child in self.children:
             child._append_room_specs(room_specs)

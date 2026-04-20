@@ -4,7 +4,7 @@ import os
 from typing import Any, List
 
 from service.agentService.prompts import BASE_PROMPT, AGENT_IDENTITY_PROMPT
-from util import configUtil
+from util import configUtil, i18nUtil
 from model.dbModel.gtAgent import GtAgent
 from service.agentService.agent import Agent
 from service.agentService.driver import normalize_driver_config
@@ -73,6 +73,22 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
 
         agent_name = gt_agent.name
         template_name = gt_role_template.name
+
+        # 解析 i18n display_name
+        lang = configUtil.get_language()
+        agent_i18n = getattr(gt_agent, "i18n", None)
+        template_i18n = getattr(gt_role_template, "i18n", None)
+        agent_display_name = i18nUtil.extract_i18n_str(
+            agent_i18n.get("display_name") if agent_i18n else None,
+            default=agent_name,
+            lang=lang,
+        ) or agent_name
+        template_display_name = i18nUtil.extract_i18n_str(
+            template_i18n.get("display_name") if template_i18n else None,
+            default=template_name,
+            lang=lang,
+        ) or template_name
+
         # model 用于日志记录，推理时如果 gt_agent.model 为空则使用配置中的 model
         model_name = gt_agent.model or gt_role_template.model or default_model or ""
         driver_config = normalize_driver_config(
@@ -84,7 +100,9 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
         full_prompt = await build_agent_system_prompt(
             team_id=team_id,
             agent_name=agent_name,
+            agent_display_name=agent_display_name,
             template_name=template_name,
+            template_display_name=template_display_name,
             template_soul=gt_role_template.soul,
             workdir=team_workdir,
             base_prompt_tmpl=BASE_PROMPT.strip(),
@@ -238,6 +256,7 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
             agent.model = data.model or ""
             agent.driver = data.driver or DriverType.NATIVE
             agent.employ_status = EmployStatus.ON_BOARD
+            agent.i18n = data.i18n or {}
         else:
             agent = GtAgent(
                 team_id=team_id,
@@ -246,6 +265,7 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
                 model=data.model or "",
                 driver=data.driver or DriverType.NATIVE,
                 employ_status=EmployStatus.ON_BOARD,
+                i18n=data.i18n or {},
             )
 
         agents_to_save.append(agent)

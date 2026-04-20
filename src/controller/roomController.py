@@ -12,7 +12,7 @@ from model.dbModel.gtRoom import GtRoom
 from service import roomService, teamService, agentService
 from service.roomService import ChatRoom
 from constants import SpecialAgent, RoomState, RoomType
-from util import assertUtil
+from util import assertUtil, configUtil, i18nUtil
 
 
 # Room Config Request Models
@@ -53,6 +53,12 @@ class RoomApiResponse(BaseModel):
         若传入 runtime_room，则优先使用其运行时状态；
         否则以 IDLE 状态作为默认值（如 team 已禁用）。
         """
+        lang = configUtil.get_language()
+        display_name = i18nUtil.extract_i18n_str(
+            gt_room.i18n.get("display_name") if gt_room.i18n else None,
+            default=gt_room.name,
+            lang=lang,
+        ) or gt_room.name
         if runtime_room is not None:
             return cls.model_validate(runtime_room.to_dict())
         return cls(
@@ -60,8 +66,13 @@ class RoomApiResponse(BaseModel):
                 "id": gt_room.id,
                 "team_id": gt_room.team_id,
                 "name": gt_room.name,
+                "display_name": display_name,
                 "type": gt_room.type.name,
-                "initial_topic": gt_room.initial_topic,
+                "initial_topic": i18nUtil.extract_i18n_str(
+                    gt_room.i18n.get("initial_topic") if gt_room.i18n else None,
+                    default=gt_room.initial_topic,
+                    lang=lang,
+                ) or gt_room.initial_topic,
                 "max_turns": gt_room.max_turns,
                 "agent_ids": list(gt_room.agent_ids or []),
                 "biz_id": gt_room.biz_id,
@@ -274,11 +285,24 @@ class TeamRoomDetailHandler(BaseHandler):
         )
         room = await _get_team_room_or_404(team_id, room_id)
 
+        lang = configUtil.get_language()
+        display_name = i18nUtil.extract_i18n_str(
+            room.i18n.get("display_name") if room.i18n else None,
+            default=room.name,
+            lang=lang,
+        ) or room.name
+        initial_topic = i18nUtil.extract_i18n_str(
+            room.i18n.get("initial_topic") if room.i18n else None,
+            default=room.initial_topic,
+            lang=lang,
+        ) or room.initial_topic
+
         data = {
             "id": room.id,
             "name": room.name,
+            "display_name": display_name,
             "type": room.type.name,
-            "initial_topic": room.initial_topic,
+            "initial_topic": initial_topic,
             "max_turns": room.max_turns,
             "agent_ids": room.agent_ids or [],
         }

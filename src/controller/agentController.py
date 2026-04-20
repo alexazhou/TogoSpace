@@ -7,7 +7,7 @@ from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtAgentTaskManager
 from model.dbModel.gtAgent import GtAgent
 from service import teamService, agentService, roomService
-from util import assertUtil
+from util import assertUtil, configUtil, i18nUtil
 
 
 class AgentSaveItem(BaseModel):
@@ -55,9 +55,18 @@ async def _build_agent_detail_payload(agent: GtAgent) -> dict:
     current_error_message = None
     if first_task is not None and first_task.status == AgentTaskStatus.FAILED:
         current_error_message = first_task.error_message
+
+    lang = configUtil.get_language()
+    display_name = i18nUtil.extract_i18n_str(
+        agent.i18n.get("display_name") if agent.i18n else None,
+        default=agent.name,
+        lang=lang,
+    ) or agent.name
+
     return {
         "id": agent.id,
         "name": agent.name,
+        "display_name": display_name,
         "agent_name": agent.name,
         "employee_number": agent.employee_number,
         "role_template_id": agent.role_template_id,
@@ -90,12 +99,19 @@ class AgentListHandler(BaseHandler):
         agents = await gtAgentManager.get_team_agents(team.id)
         runtime_status_map = agentService.get_team_runtime_status_map(team.id)
         include_special = include_special_raw.strip().lower() in {"1", "true", "yes", "on"}
+        lang = configUtil.get_language()
 
         items = []
         for agent in agents:
+            display_name = i18nUtil.extract_i18n_str(
+                agent.i18n.get("display_name") if agent.i18n else None,
+                default=agent.name,
+                lang=lang,
+            ) or agent.name
             items.append({
                 "id": agent.id,
                 "name": agent.name,
+                "display_name": display_name,
                 "employee_number": agent.employee_number,
                 "role_template_id": agent.role_template_id,
                 "team_id": agent.team_id,
@@ -111,6 +127,7 @@ class AgentListHandler(BaseHandler):
                 {
                     "id": int(SpecialAgent.OPERATOR.value),
                     "name": SpecialAgent.OPERATOR.name,
+                    "display_name": SpecialAgent.OPERATOR.name,
                     "employee_number": None,
                     "role_template_id": None,
                     "team_id": None,
@@ -123,6 +140,7 @@ class AgentListHandler(BaseHandler):
                 {
                     "id": int(SpecialAgent.SYSTEM.value),
                     "name": SpecialAgent.SYSTEM.name,
+                    "display_name": SpecialAgent.SYSTEM.name,
                     "employee_number": None,
                     "role_template_id": None,
                     "team_id": None,
@@ -184,12 +202,18 @@ class TeamAgentsSaveHandler(BaseHandler):
 
         await teamService.hot_reload_team(team.name)
 
+        lang = configUtil.get_language()
         self.return_json({
             "status": "ok",
             "agents": [
                 {
                     "id": agent.id,
                     "name": agent.name,
+                    "display_name": i18nUtil.extract_i18n_str(
+                        agent.i18n.get("display_name") if agent.i18n else None,
+                        default=agent.name,
+                        lang=lang,
+                    ) or agent.name,
                     "employee_number": agent.employee_number,
                     "role_template_id": agent.role_template_id,
                     "model": agent.model,

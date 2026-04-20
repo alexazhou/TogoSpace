@@ -15,7 +15,9 @@ async def test_build_agent_system_prompt_includes_team_awareness_guide(monkeypat
     result = await promptBuilder.build_agent_system_prompt(
         team_id=1,
         agent_name="alice",
+        agent_display_name="Alice",
         template_name="pm",
+        template_display_name="PM",
         template_soul="负责推进项目",
         workdir="/workspace/demo",
         base_prompt_tmpl="base prompt",
@@ -29,6 +31,8 @@ async def test_build_agent_system_prompt_includes_team_awareness_guide(monkeypat
     assert "get_room_info" in result
     assert "get_agent_info" in result
     assert "wake_up_agent" in result
+    assert "我是 Alice" in result
+    assert "角色 PM" in result
 
 
 @pytest.mark.asyncio
@@ -45,7 +49,9 @@ async def test_build_agent_system_prompt_skips_team_awareness_when_not_in_team(m
     result = await promptBuilder.build_agent_system_prompt(
         team_id=0,
         agent_name="solo",
+        agent_display_name="Solo",
         template_name="helper",
+        template_display_name="Helper",
         template_soul="帮助用户完成任务",
         workdir="/workspace/solo",
         base_prompt_tmpl="base prompt",
@@ -57,3 +63,5 @@ async def test_build_agent_system_prompt_skips_team_awareness_when_not_in_team(m
     assert "/workspace/solo" in result
     assert "get_dept_info" not in result
     assert "wake_up_agent" not in result
+    assert "我是 Solo" in result
+    assert "角色 Helper" in result

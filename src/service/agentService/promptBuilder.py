@@ -92,15 +92,17 @@ async def _build_dept_context(team_id: int, agent_name: str) -> str:
 async def build_agent_system_prompt(
     team_id: int,
     agent_name: str,
+    agent_display_name: str,
     template_name: str,
+    template_display_name: str,
     template_soul: str,
     workdir: str,
     base_prompt_tmpl: str,
     identity_prompt_tmpl: str,
 ) -> str:
     identity_prompt = identity_prompt_tmpl.format(
-        agent_name=agent_name,
-        template_name=template_name,
+        agent_name=agent_display_name,
+        template_name=template_display_name,
         template_soul=template_soul,
     )
     workdir_prompt = WORKDIR_PROMPT.format(workdir=workdir)

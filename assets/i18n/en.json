@@ -14,5 +14,7 @@
   "reset_done_body": "Data cleared. Please restart the application.",
   "language_menu": "Language / 语言",
   "lang_zh": "简体中文 (Chinese)",
-  "lang_en": "English"
+  "lang_en": "English",
+  "room_created_msg": "System notice: Room '{room_name}' has been created. Current members: {agent_list}",
+  "room_initial_topic": "Initial topic: {topic}"
 }
