@@ -247,6 +247,13 @@ class AgentTurnRunner:
                 output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
                 return await self._infer_and_classify(output_item, tools, tool_choice=tool_choice)
             elif status == AgentHistoryStatus.FAILED:
+                pending_tc = self._history.get_first_pending_tool_call()
+                if pending_tc is not None:
+                    await self._history.append_history_init_item(
+                        role=OpenaiApiRole.TOOL,
+                        tool_call_id=pending_tc.id,
+                    )
+                    return TurnStepResult.CONTINUE
                 output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
                 return await self._infer_and_classify(output_item, tools, tool_choice=tool_choice)
             else:

@@ -157,6 +157,7 @@ async def test_run_turn_loop_retries_failed_action_by_max_retries(turn_runner):
 
 @pytest.mark.asyncio
 async def test_advance_step_continues_to_infer_when_tool_failed(turn_runner):
+    """单 tool 失败且无剩余 pending tool 时，允许进入下一次 assistant 推理。"""
     room = MagicMock(spec=ChatRoom)
     failed_tool_item = GtAgentHistory.build(
         llmApiUtil.OpenAIMessage.tool_result("tool-call-1", '{"success":false,"message":"boom"}'),
@@ -169,15 +170,49 @@ async def test_advance_step_continues_to_infer_when_tool_failed(turn_runner):
     turn_runner._history.append_history_init_item = AsyncMock(return_value=assistant_output_item)
     turn_runner._infer_to_item = AsyncMock(return_value=assistant_message)
     turn_runner._history.find_tool_call_by_id = MagicMock()
-    turn_runner._history.get_first_pending_tool_call = MagicMock()
+    turn_runner._history.get_first_pending_tool_call = MagicMock(return_value=None)
 
     result = await turn_runner._advance_step(room, [])
 
     assert result == TurnStepResult.NO_ACTION
+    # 没有剩余 tool_call 时，FAILED tool 会被当作普通上下文继续交给模型处理。
     turn_runner._history.append_history_init_item.assert_awaited_once_with(role=OpenaiApiRole.ASSISTANT)
     turn_runner._infer_to_item.assert_awaited_once_with(assistant_output_item, [], tool_choice=None)
     turn_runner._history.find_tool_call_by_id.assert_not_called()
-    turn_runner._history.get_first_pending_tool_call.assert_not_called()
+    turn_runner._history.get_first_pending_tool_call.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_advance_step_continues_to_pending_tool_when_previous_tool_failed(turn_runner):
+    """多 tool 场景下，前一个 tool 失败后也必须先补跑剩余 tool_call，不能直接继续推理。"""
+    room = MagicMock(spec=ChatRoom)
+    failed_tool_item = GtAgentHistory.build(
+        llmApiUtil.OpenAIMessage.tool_result("tool-call-1", '{"success":false,"message":"boom"}'),
+        status=AgentHistoryStatus.FAILED,
+        error_message="boom",
+    )
+    pending_tool_call = llmApiUtil.OpenAIToolCall(
+        id="tool-call-2",
+        function={"name": "read_file", "arguments": '{"file_path": "/tmp/foo.txt"}'},
+    )
+    turn_runner._history.last = MagicMock(return_value=failed_tool_item)
+    turn_runner._history.append_history_init_item = AsyncMock()
+    turn_runner._infer_to_item = AsyncMock()
+    turn_runner._history.find_tool_call_by_id = MagicMock()
+    turn_runner._history.get_first_pending_tool_call = MagicMock(return_value=pending_tool_call)
+
+    result = await turn_runner._advance_step(room, [])
+
+    assert result == TurnStepResult.CONTINUE
+    # 这里的关键断言是：要为剩余 tool_call 追加 TOOL placeholder，
+    # 后续由下一轮 _advance_step 真正执行它，保证 tool_use / tool_result 链闭合。
+    turn_runner._history.append_history_init_item.assert_awaited_once_with(
+        role=OpenaiApiRole.TOOL,
+        tool_call_id="tool-call-2",
+    )
+    turn_runner._infer_to_item.assert_not_awaited()
+    turn_runner._history.find_tool_call_by_id.assert_not_called()
+    turn_runner._history.get_first_pending_tool_call.assert_called_once_with()
 
 
 @pytest.mark.asyncio
