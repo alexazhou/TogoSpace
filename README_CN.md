@@ -68,7 +68,23 @@ python src/db.py migrate
 # (可选) 参考 assets/config_template.json 完善你的 LLM API 配置
 ```
 
-### 3. 启动项目
+### 3. Docker 部署
+```bash
+# 从 Docker Hub 拉取镜像
+docker pull alexazhou/togoagent:latest
+
+# 运行容器，映射端口并挂载数据目录
+docker run -d \
+  --name togoagent \
+  -p 8080:8080 \
+  -v /path/to/your/data:/data \
+  alexazhou/togoagent:latest
+
+# 访问 Web 控制台
+# 在浏览器打开 http://localhost:8080
+```
+
+### 4. 启动项目
 ```bash
 # 1. 启动后端服务
 ./scripts/start_backend.sh

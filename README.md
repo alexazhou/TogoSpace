@@ -60,7 +60,23 @@ cd togo-agent
 pip install -r requirements.txt
 ```
 
-### 3. Start Project
+### 3. Docker Deployment
+```bash
+# Pull the image from Docker Hub
+docker pull alexazhou/togoagent:latest
+
+# Run with data persistence and port mapping
+docker run -d \
+  --name togoagent \
+  -p 8080:8080 \
+  -v /path/to/your/data:/data \
+  alexazhou/togoagent:latest
+
+# Access the Web console
+# Open http://localhost:8080 in your browser
+```
+
+### 4. Start Project
 ```bash
 # 1. Start backend service
 ./scripts/start_backend.sh
