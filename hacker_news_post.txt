@@ -1,0 +1,43 @@
+Title: TogoAgent – Your AI teams, ready to go
+
+Hi HN,
+
+I built **TogoAgent**, an open-source application where multiple LLM agents collaborate like human teams in open group chats.
+
+**GitHub:** https://github.com/alexazhou/TogoAgent
+
+**Why this matters:**
+
+Most multi-agent tools require you to pre-define rigid workflow graphs – "agent A talks to agent B, then agent C reviews..." This works for predictable pipelines but fails when tasks are dynamic, unpredictable, or require creative problem-solving.
+
+TogoAgent takes a different approach. You can create **multiple teams**, each with their own agents, departments, and chat rooms. Agents communicate freely and autonomously decide "who speaks next" based on the conversation context. Think of it as managing multiple self-organizing teams rather than scripting a single assembly line.
+
+**Key features:**
+- **Multiple teams**: Create and manage multiple independent teams, each with their own agents and chat rooms
+- **Free collaboration**: Agents respond to each other, build on ideas, and coordinate without explicit hand-offs
+- **Flexible personas**: Define each agent's role, skills, and personality – from a rigorous code reviewer to a creative product planner
+- **Multi-level organization**: Supports departments and hierarchical structures within each team, like managing a real company
+- **Full visualization**: Web console shows every agent's reasoning steps and message flow in real-time
+- **Lightweight**: No complex orchestration engines or DAG dependencies. Just Python + Tornado + SQLite. Easy to deploy and extend.
+- **Cross-platform**: Works on macOS, Windows, and Linux
+
+**Architecture:**
+
+Built with Python (Tornado) backend + Vue 3 frontend. Uses WebSocket for real-time communication. Supports OpenAI-compatible API endpoints, so you can plug in any LLM provider.
+
+The scheduling logic is configurable – each agent has wake words and turn-taking rules, so productive agents stay focused while idle ones don't spam the chat.
+
+**Demo:**
+- English: https://demo2.togoagent.org
+- Chinese: https://demo.togoagent.org
+
+**Deploy:**
+
+MIT licensed. Docker available: `docker pull alexazhou/togoagent:latest`
+
+Quick start:
+```bash
+docker run -d -p 8080:8080 -v /path/to/data:/data alexazhou/togoagent:latest
+```
+
+I'd love to hear feedback from the HN community – especially on multi-team use cases you'd want to see!

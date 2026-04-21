@@ -116,6 +116,22 @@ gh release view v0.1.12
 
 ## 附录
 
+### 追加改动到现有版本
+
+当需要在已发布的版本号上追加改动（如热修复），保持版本号不变：
+
+```bash
+# 1. 提交前后端改动并推送
+# 2. 移动已有 tag 到新提交
+git tag -f v0.1.12
+git push origin master --tags --force
+
+# 3. 本地构建 x86_64 并上传（覆盖旧文件）
+gh release upload v0.1.12 dist/TogoAgent-0.1.12-macos-x86_64.zip --clobber
+```
+
+**注意：** tag 版本号（如 v0.1.12）必须与 `src/version.py` 中的版本号一致，CI 会自动构建 arm64 版本。
+
 ### build_release.py 参数说明
 
 | 参数 | 说明 |
