@@ -110,7 +110,7 @@ def build_app(arch: str):
     if arch:
         env["TARGET_ARCH"] = arch
     print("\n--- 1. 构建 PyInstaller 应用 ---")
-    run_command(["python", os.path.join(SCRIPT_DIR, "build_mac.py")], env=env)
+    run_command([sys.executable, os.path.join(SCRIPT_DIR, "build_mac.py")], env=env)
 
 
 def sign_app(app_path: str, identity: str):
