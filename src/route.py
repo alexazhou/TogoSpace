@@ -15,6 +15,10 @@ else:
 class _SPAHandler(tornado.web.StaticFileHandler):
     """Vue SPA fallback：文件不存在时回退到 index.html。"""
 
+    @staticmethod
+    def _is_shell_path(path: str) -> bool:
+        return path in ("", "/", "index.html")
+
     async def get(self, path: str, include_body: bool = True) -> None:
         try:
             await super().get(path, include_body)
@@ -25,14 +29,14 @@ class _SPAHandler(tornado.web.StaticFileHandler):
                 raise
 
     def get_cache_time(self, path: str, modified: datetime.datetime | None, mime_type: str) -> int:
-        # index.html 不缓存，保证每次都拿到最新版本（避免 Safari 等激进缓存导致加载旧页面）
-        if path == "index.html":
+        # SPA 壳文件不缓存，保证每次都拿到最新页面（避免浏览器继续引用旧 bundle）
+        if self._is_shell_path(path):
             return 0
         return super().get_cache_time(path, modified, mime_type)
 
     def set_extra_headers(self, path: str) -> None:
-        if path == "index.html":
-            # 对 SPA 壳文件使用强 no-store，避免 Safari 等浏览器继续复用旧页面。
+        if self._is_shell_path(path):
+            # 对 SPA 壳文件使用强 no-store，避免浏览器继续复用旧页面。
             self.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
             self.set_header("Pragma", "no-cache")
             self.set_header("Expires", "0")
