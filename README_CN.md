@@ -48,7 +48,7 @@
 
 ### 方法 1：下载已构建的 App 包（推荐 macOS 用户）
 目前我们已提供 **macOS** 版本的 Release 包，下载即可快速体验。
-- **下载地址**：[点击前往 Releases 页面下载](https://github.com/your-repo/togo-agent/releases)
+- **下载地址**：[点击前往 Releases 页面下载](https://github.com/alexazhou/TogoAgent/releases)
 - **使用说明**：下载并运行后，ToGo Agent 将常驻于你的系统状态栏。点击状态栏图标即可开启控制台、管理团队或执行任务。
 
 ![Status Bar Entry](image/cn/entry.png)
@@ -56,7 +56,7 @@
 ### 方法 2：源码运行
 ```bash
 # 克隆仓库
-git clone https://github.com/your-repo/togo-agent.git
+git clone https://github.com/alexazhou/TogoAgent.git
 cd togo-agent
 
 # 安装依赖

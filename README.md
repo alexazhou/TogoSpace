@@ -48,7 +48,7 @@ Built with Python and modern frontend technologies, it perfectly supports macOS,
 
 ### Method 1: Download Pre-built App Package (Recommended for macOS Users)
 We currently provide a **macOS** Release package for a quick start.
-- **Download**: [Go to the Releases page](https://github.com/your-repo/togo-agent/releases)
+- **Download**: [Go to the Releases page](https://github.com/alexazhou/TogoAgent/releases)
 - **Usage**: Once running, ToGo Agent stays in your system status bar. Click the icon to open the console, manage teams, or execute tasks.
 
 ![Status Bar Entry](image/en/entry.png)
@@ -56,7 +56,7 @@ We currently provide a **macOS** Release package for a quick start.
 ### Method 2: Run from Source
 ```bash
 # Clone the repository
-git clone https://github.com/your-repo/togo-agent.git
+git clone https://github.com/alexazhou/TogoAgent.git
 cd togo-agent
 
 # Install dependencies
