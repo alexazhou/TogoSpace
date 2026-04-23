@@ -30,10 +30,12 @@ async def get_team_agents(team_id: int) -> list[GtAgent]:
     )
 
 
-async def get_agent(team_id: int, name: str) -> GtAgent | None:
+async def get_agent(team_id: int, name: str, status: EmployStatus = EmployStatus.ON_BOARD) -> GtAgent | None:
+    """按 team + name + employ_status 查询成员，默认只查在职。"""
     return await GtAgent.aio_get_or_none(
         GtAgent.team_id == team_id,
         GtAgent.name == name,
+        GtAgent.employ_status == status,
     )
 
 
