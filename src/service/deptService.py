@@ -4,17 +4,22 @@ import logging
 from typing import List
 
 from constants import EmployStatus
-from dal.db import gtDeptManager, gtAgentManager
+from dal.db import gtDeptManager, gtAgentManager, gtTeamManager
 from exception import TeamAgentException
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtAgent import GtAgent
 from service import roomService, agentService
+from util import assertUtil
 
 logger = logging.getLogger(__name__)
 
 
 async def overwrite_dept_tree(team_id: int, root: GtDept) -> None:
     """增量更新部门树，同步部门房间，更新 Agent employ_status。"""
+    team = await gtTeamManager.get_team_by_id(team_id)
+    assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+    assertUtil.assertFalse(team.enabled, error_message="团队必须处于停用状态才能编辑组织树", error_code="team_not_stopped")
+
     # 单次递归：校验整棵树 + 收集 Agent ID。
     try:
         all_agent_ids, _ = root.validate_and_collect_tree_ids()
