@@ -155,9 +155,17 @@ async def delete_team(name: str) -> None:
 
 
 async def set_team_enabled(team_id: int, enabled: bool) -> None:
-    """设置 Team 的启用状态。"""
+    """设置 Team 的启用状态。
+
+    如果状态未变化则跳过操作（避免重复加载/卸载）。
+    """
     team = await gtTeamManager.get_team_by_id(team_id)
     assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+
+    # 状态未变化时跳过
+    if team.enabled == enabled:
+        logger.info(f"Team '{team.name}' 已经处于 {'启用' if enabled else '停用'} 状态，跳过操作")
+        return
 
     await gtTeamManager.set_team_enabled(team_id, enabled)
 

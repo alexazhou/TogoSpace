@@ -104,7 +104,7 @@ async def test_load_team_agents_allows_startup_without_available_llm(monkeypatch
         assert team_id == 1
         return team
 
-    async def _get_team_agents(team_id: int):
+    async def _get_team_agents(team_id: int, status=None):
         assert team_id == 1
         return [gt_agent]
 

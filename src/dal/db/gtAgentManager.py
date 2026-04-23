@@ -21,13 +21,17 @@ async def get_max_employee_number(team_id: int) -> int:
     return result[0].employee_number or 0
 
 
-async def get_team_agents(team_id: int) -> list[GtAgent]:
-    return list(
-        await GtAgent.select()
-        .where(GtAgent.team_id == team_id)
-        .order_by(GtAgent.name)
-        .aio_execute()
-    )
+async def get_team_agents(team_id: int, status: EmployStatus | None = None) -> list[GtAgent]:
+    """按 team_id 查询成员，可选按 employ_status 过滤。
+
+    Args:
+        team_id: 团队 ID
+        status: 可选状态过滤，None 表示不过滤（返回所有状态）
+    """
+    query = GtAgent.select().where(GtAgent.team_id == team_id)
+    if status is not None:
+        query = query.where(GtAgent.employ_status == status)
+    return list(await query.order_by(GtAgent.name).aio_execute())
 
 
 async def get_agent(team_id: int, name: str, status: EmployStatus = EmployStatus.ON_BOARD) -> GtAgent | None:
@@ -36,19 +40,6 @@ async def get_agent(team_id: int, name: str, status: EmployStatus = EmployStatus
         GtAgent.team_id == team_id,
         GtAgent.name == name,
         GtAgent.employ_status == status,
-    )
-
-
-async def get_agents_by_employ_status(team_id: int, status: EmployStatus) -> list[GtAgent]:
-    """按 team + employ_status 查询成员。"""
-    return list(
-        await GtAgent.select()
-        .where(
-            GtAgent.team_id == team_id,
-            GtAgent.employ_status == status,
-        )
-        .order_by(GtAgent.name)
-        .aio_execute()
     )
 
 

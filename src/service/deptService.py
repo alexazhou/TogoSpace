@@ -113,7 +113,7 @@ async def get_dept_tree(team_id: int) -> GtDept | None:
 
 async def get_off_board_agents(team_id: int) -> list[GtAgent]:
     """返回所有 employ_status=off_board 的 Agent。"""
-    return await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.OFF_BOARD)
+    return await gtAgentManager.get_team_agents(team_id, EmployStatus.OFF_BOARD)
 
 
 async def get_agent_dept(team_id: int, agent_id: int) -> GtDept | None:

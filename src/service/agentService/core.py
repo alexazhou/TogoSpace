@@ -44,7 +44,7 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
         return
 
     # 只加载在职 agent
-    gt_agents = await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.ON_BOARD)
+    gt_agents = await gtAgentManager.get_team_agents(team_id, EmployStatus.ON_BOARD)
     gt_role_templates = await gtRoleTemplateManager.get_role_templates_by_ids(
         [agent.role_template_id for agent in gt_agents]
     )
@@ -284,7 +284,7 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
             error_code="MEMBER_SAVE_FAILED",
         ) from e
 
-    return await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.ON_BOARD)
+    return await gtAgentManager.get_team_agents(team_id, EmployStatus.ON_BOARD)
 
 
 async def overwrite_team_agent_employ_status(team_id: int, on_board_agent_ids: list[int] | set[int]) -> tuple[int, int]:

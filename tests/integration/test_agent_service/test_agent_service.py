@@ -212,7 +212,7 @@ class TestSaveTeamAgentsFullReplace(_agentServiceCase):
         # 编辑成员前必须停用团队
         await gtTeamManager.set_team_enabled(team.id, False)
 
-        before_agents = await gtAgentManager.get_agents_by_employ_status(
+        before_agents = await gtAgentManager.get_team_agents(
             team.id,
             EmployStatus.ON_BOARD,
         )
@@ -335,3 +335,98 @@ class TestAgentResumeFailed(_agentServiceCase):
         assert refreshed_task.id == failed_task.id
         assert refreshed_task.status == AgentTaskStatus.RUNNING
         restart_spy.assert_called_once()
+
+
+class TestGetAgentByStatus(_agentServiceCase):
+    """测试 get_agent 和 get_team_agents 的状态过滤功能。"""
+
+    async def test_get_agent_returns_on_board_agent_by_default(self):
+        """get_agent 默认只返回在职 agent，即使存在同名的离职 agent。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+
+        # 获取 alice 的在职记录
+        on_board_alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert on_board_alice is not None
+        assert on_board_alice.employ_status == EmployStatus.ON_BOARD
+
+        # 将 alice 设为离职状态
+        on_board_alice.employ_status = EmployStatus.OFF_BOARD
+        await on_board_alice.aio_save()
+
+        # 再创建一个同名在职 alice
+        new_alice = GtAgent(
+            team_id=team.id,
+            name="alice",
+            role_template_id=on_board_alice.role_template_id,
+            model="",
+            driver=DriverType.NATIVE,
+            employ_status=EmployStatus.ON_BOARD,
+        )
+        await new_alice.aio_save()
+
+        # get_agent 默认应该返回新创建的在职 alice
+        result = await gtAgentManager.get_agent(team.id, "alice")
+        assert result is not None
+        assert result.id == new_alice.id
+        assert result.employ_status == EmployStatus.ON_BOARD
+
+        # 可以指定 OFF_BOARD 状态获取离职的 alice
+        off_board_result = await gtAgentManager.get_agent(team.id, "alice", EmployStatus.OFF_BOARD)
+        assert off_board_result is not None
+        assert off_board_result.id == on_board_alice.id
+
+    async def test_get_team_agents_filters_by_status(self):
+        """get_team_agents 可以按 employ_status 过滤。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+
+        # 获取所有 agent
+        all_agents = await gtAgentManager.get_team_agents(team.id)
+        assert len(all_agents) >= 2
+
+        # 只获取在职 agent
+        on_board_agents = await gtAgentManager.get_team_agents(team.id, EmployStatus.ON_BOARD)
+        assert all(a.employ_status == EmployStatus.ON_BOARD for a in on_board_agents)
+
+        # 只获取离职 agent
+        off_board_agents = await gtAgentManager.get_team_agents(team.id, EmployStatus.OFF_BOARD)
+        assert all(a.employ_status == EmployStatus.OFF_BOARD for a in off_board_agents)
+
+        # 所有 = 在职 + 离职
+        assert len(all_agents) == len(on_board_agents) + len(off_board_agents)
+
+    async def test_set_team_enabled_skips_off_board_agents(self):
+        """启用团队时，_load_team_agents 应只加载在职 agent，不因离职 agent 构建 prompt 失败。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+
+        # 获取 alice 的在职记录，然后设为离职
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert alice is not None
+        alice.employ_status = EmployStatus.OFF_BOARD
+        await alice.aio_save()
+
+        # 确保有一个在职的 bob
+        bob = await gtAgentManager.get_agent(team.id, "bob")
+        assert bob is not None
+        assert bob.employ_status == EmployStatus.ON_BOARD
+
+        # 先禁用团队（会 unload 所有 agent）
+        await teamService.set_team_enabled(team.id, False)
+        runtime_agents = agentService.get_team_agents(team.id)
+        assert len(runtime_agents) == 0  # 团队禁用后运行时应该没有 agent
+
+        # 启用团队 - 应该只加载在职 agent，不会因离职的 alice 失败
+        await teamService.set_team_enabled(team.id, True)
+
+        # 验证只有在职 agent 被加载到运行时
+        runtime_agents = agentService.get_team_agents(team.id)
+        runtime_agent_ids = {a.gt_agent.id for a in runtime_agents}
+        on_board_agents = await gtAgentManager.get_team_agents(team.id, EmployStatus.ON_BOARD)
+        on_board_ids = {a.id for a in on_board_agents}
+
+        # 运行时 agent 应等于在职 agent
+        assert runtime_agent_ids == on_board_ids
+        # 离职的 alice 不应在运行时
+        assert alice.id not in runtime_agent_ids
