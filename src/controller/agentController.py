@@ -24,18 +24,6 @@ class AgentsSaveRequest(BaseModel):
     agents: list[AgentSaveItem]
 
 
-class AgentUpdateItem(BaseModel):
-    id: int
-    name: str
-    role_template_id: int
-    model: str = ""
-    driver: DriverType = DriverType.NATIVE
-
-
-class AgentBatchUpdateRequest(BaseModel):
-    agents: list[AgentUpdateItem]
-
-
 async def _assert_role_templates_exist(template_ids: list[int]) -> None:
     gt_role_templates = await gtRoleTemplateManager.get_role_templates_by_ids(list(set(template_ids)))
     existing_ids = {template.id for template in gt_role_templates}
@@ -204,39 +192,6 @@ class TeamAgentsSaveHandler(BaseHandler):
                 for agent in updated_agents
             ],
         })
-
-
-class AgentBatchUpdateHandler(BaseHandler):
-    """PUT /teams/<id>/agents/batch_update.json - 兼容旧批量更新接口"""
-
-    async def put(self, team_id_str: str) -> None:
-        team_id = int(team_id_str)
-        team = await gtTeamManager.get_team_by_id(team_id)
-        assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
-
-        request = self.parse_request(AgentBatchUpdateRequest)
-
-        agent_ids = [item.id for item in request.agents]
-        existing_agents = await gtAgentManager.get_agents_by_ids(agent_ids)
-        assertUtil.assertEqual(
-            len(existing_agents),
-            len(agent_ids),
-            error_message=f"input {len(agent_ids)} agent ids, but only found {len(existing_agents)} existed",
-            error_code="agent_not_found",
-        )
-        await _assert_role_templates_exist([item.role_template_id for item in request.agents])
-
-        existing_by_id = {agent.id: agent for agent in existing_agents}
-        for item in request.agents:
-            agent = existing_by_id[item.id]
-            agent.name = item.name
-            agent.role_template_id = item.role_template_id
-            agent.model = item.model
-            agent.driver = item.driver
-            await agent.aio_save()
-
-        await teamService.hot_reload_team(team.name)
-        self.return_success()
 
 
 class AgentDetailHandler(BaseHandler):
