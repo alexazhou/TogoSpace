@@ -12,6 +12,12 @@ if os.name == "posix" and sys.platform == "darwin":
 class _ApiServiceCase(ServiceTestCase):
     """API 测试基类"""
 
+    async def _disable_team(self, team_id: int) -> None:
+        """停用团队（修改 agents/dept_tree 前必须停用）。"""
+        async with aiohttp.ClientSession() as client:
+            async with client.post(f"{self.backend_base_url}/teams/{team_id}/set_enabled.json", json={"enabled": False}) as resp:
+                assert resp.status == 200
+
 
 class TestDeptController(_ApiServiceCase):
     requires_backend = True
@@ -53,6 +59,9 @@ class TestDeptController(_ApiServiceCase):
         team_id = await self._get_team_id("e2e")
         alice_id = await self._get_agent_id(team_id, "alice")
         bob_id = await self._get_agent_id(team_id, "bob")
+
+        # 修改 dept_tree 前必须停用团队
+        await self._disable_team(team_id)
 
         # 设置部门树（至少需要 2 个成员）
         dept_tree = {

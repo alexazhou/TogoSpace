@@ -13,6 +13,12 @@ if os.name == "posix" and sys.platform == "darwin":
 class _ApiServiceCase(ServiceTestCase):
     """API 测试基类：每个测试类在独立子进程中启动后端与 MockLLM。"""
 
+    async def _disable_team(self, team_id: int) -> None:
+        """停用团队（修改 agents/dept_tree 前必须停用）。"""
+        async with aiohttp.ClientSession() as client:
+            async with client.post(f"{self.backend_base_url}/teams/{team_id}/set_enabled.json", json={"enabled": False}) as resp:
+                assert resp.status == 200
+
 
 class TestAgentController(_ApiServiceCase):
     requires_backend = True
@@ -115,6 +121,8 @@ class TestAgentsSave(_ApiServiceCase):
     async def test_save_agents_create_new(self):
         """验证可以创建新 Agent。"""
         team_id = await self._get_team_id("e2e")
+        # 修改 agents 前必须停用团队
+        await self._disable_team(team_id)
         agents = await self._get_agents(team_id)
         alice_id = next(a["id"] for a in agents if a["name"] == "alice")
         template_id = await self._get_role_template_id("alice")
@@ -150,6 +158,8 @@ class TestAgentsSave(_ApiServiceCase):
     async def test_save_agents_update_existing(self):
         """验证可以更新现有 Agent。"""
         team_id = await self._get_team_id("e2e")
+        # 修改 agents 前必须停用团队
+        await self._disable_team(team_id)
         agents = await self._get_agents(team_id)
         alice_id = next(a["id"] for a in agents if a["name"] == "alice")
         template_id = await self._get_role_template_id("alice")
@@ -175,6 +185,8 @@ class TestAgentsSave(_ApiServiceCase):
     async def test_save_agents_offboard_missing(self):
         """验证不在列表中的 Agent 被设为离职状态。"""
         team_id = await self._get_team_id("e2e")
+        # 修改 agents 前必须停用团队
+        await self._disable_team(team_id)
         agents = await self._get_agents(team_id)
         alice_id = next(a["id"] for a in agents if a["name"] == "alice")
         template_id = await self._get_role_template_id("alice")
@@ -220,6 +232,8 @@ class TestAgentsSave(_ApiServiceCase):
     async def test_save_agents_reuse_offboard_name(self):
         """验证离职 Agent 的名字可以被新 Agent 复用。"""
         team_id = await self._get_team_id("e2e")
+        # 修改 agents 前必须停用团队
+        await self._disable_team(team_id)
         agents = await self._get_agents(team_id)
         alice_id = next(a["id"] for a in agents if a["name"] == "alice")
         template_id = await self._get_role_template_id("alice")

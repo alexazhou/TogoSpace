@@ -14,6 +14,12 @@ class _ApiServiceCase(ServiceTestCase):
     requires_backend = True
     requires_mock_llm = True
 
+    async def _disable_team(self, team_id: int) -> None:
+        """停用团队（修改 agents/dept_tree 前必须停用）。"""
+        async with aiohttp.ClientSession() as client:
+            async with client.post(f"{self.backend_base_url}/teams/{team_id}/set_enabled.json", json={"enabled": False}) as resp:
+                assert resp.status == 200
+
 
 class TestTeamController(_ApiServiceCase):
     async def _get_team_id(self, team_name: str) -> int:
@@ -122,6 +128,9 @@ class TestTeamController(_ApiServiceCase):
                 create_data = await resp.json()
                 team_id = create_data["id"]
 
+            # 修改 agents 前必须停用团队
+            await self._disable_team(team_id)
+
             async with client.post(
                 f"{self.backend_base_url}/teams/{team_id}/modify.json",
                 json={
@@ -164,6 +173,9 @@ class TestTeamController(_ApiServiceCase):
                 assert resp.status == 200
                 create_data = await resp.json()
                 team_id = create_data["id"]
+
+            # 修改 agents 前必须停用团队
+            await self._disable_team(team_id)
 
             async with client.post(
                 f"{self.backend_base_url}/teams/{team_id}/modify.json",

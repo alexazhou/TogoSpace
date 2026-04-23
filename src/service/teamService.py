@@ -85,19 +85,31 @@ async def create_team(
     agents: list[GtAgent] | None = None,
     dept_tree: GtDept | None = None,
     preset_rooms: list[GtRoom] | None = None,
+    auto_start: bool = True,
 ) -> int:
-    """创建新 Team，并恢复其运行时。"""
+    """创建新 Team，并恢复其运行时。
 
+    Args:
+        name: 团队名称
+        config: 团队配置
+        agents: Agent 列表
+        dept_tree: 部门树
+        preset_rooms: 预置房间
+        auto_start: 是否自动启动（默认 True）
+    """
     if await gtTeamManager.team_exists(name):
         raise TeamAgentException(f"Team '{name}' already exists", error_code="TEAM_EXISTS")
 
+    # 先创建 disabled 状态，初始化完成后再启用
     team = await gtTeamManager.save_team(GtTeam(
         name=name,
         config=config or {},
-        enabled=True,
+        enabled=False,
         deleted=0,
     ))
     team_id = team.id
+
+    # 初始化 agents 和 dept_tree（需要 team disabled 状态）
     await agentService.overwrite_team_agents(team_id, agents or [])
 
     if dept_tree:
@@ -106,7 +118,10 @@ async def create_team(
     if preset_rooms:
         await roomService.overwrite_team_rooms(team_id, preset_rooms)
 
-    await restore_team(team_id)
+    # 根据参数决定是否启用
+    if auto_start:
+        await gtTeamManager.set_team_enabled(team_id, True)
+        await restore_team(team_id)
 
     logger.info(f"Team '{name}' 已创建")
     return team_id

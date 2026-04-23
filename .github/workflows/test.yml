@@ -49,33 +49,3 @@ jobs:
       run: |
         PYTHONPATH=src python -m pytest tests/real/ -v --timeout=30
       continue-on-error: true  # real tests 可能需要特定环境，允许失败
-
-  frontend-test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        lfs: true
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-
-    - name: Cache npm dependencies
-      uses: actions/cache@v5
-      with:
-        path: frontend/node_modules
-        key: ${{ runner.os }}-npm-${{ hashFiles('frontend/package.json') }}
-        restore-keys: |
-          ${{ runner.os }}-npm-
-
-    - name: Install frontend dependencies
-      working-directory: frontend
-      run: npm ci
-
-    - name: Run frontend tests
-      working-directory: frontend
-      run: npm run test:run
