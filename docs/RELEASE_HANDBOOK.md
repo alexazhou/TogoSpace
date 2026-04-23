@@ -137,8 +137,8 @@ gh release upload v0.1.12 dist/TogoAgent-0.1.12-macos-x86_64.zip --clobber
 | 参数 | 说明 |
 |------|------|
 | `--arch arm64/x86_64` | 目标架构，默认自动检测 |
-| `--skip-build` | 跳过构建，仅签名公证已有 app |
-| `--skip-notarize` | 跳过公证，仅签名打包 |
+| `--action build,sign,notarize,zip` | 要执行的步骤（逗号分隔），默认全部流水线 |
+| `--action build,sign,zip` | 跳过公证，仅签名打包 |
 | `--clean` | 构建前清理 dist 和 build 目录 |
 
 ### 常用命令
