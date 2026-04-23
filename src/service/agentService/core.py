@@ -4,7 +4,7 @@ import os
 from typing import Any, List
 
 from service.agentService.prompts import BASE_PROMPT, AGENT_IDENTITY_PROMPT
-from util import configUtil, i18nUtil
+from util import configUtil, i18nUtil, assertUtil
 from model.dbModel.gtAgent import GtAgent
 from service.agentService.agent import Agent
 from service.agentService.driver import normalize_driver_config
@@ -228,6 +228,10 @@ def get_room_agents(room_id: int) -> List["Agent"]:
 
 async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> list[GtAgent]:
     """全量覆盖成员列表：有 id 更新，无 id 创建，不在列表的设为离职状态。返回在职成员列表。"""
+    team = await gtTeamManager.get_team_by_id(team_id)
+    assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+    assertUtil.assertFalse(team.enabled, error_message="团队必须处于停用状态才能编辑成员", error_code="team_not_stopped")
+
     existing_agents = await gtAgentManager.get_team_agents(team_id)
     existing_ids = {a.id for a in existing_agents}
     existing_by_id = {a.id: a for a in existing_agents}
