@@ -359,6 +359,7 @@ const nextDeptTree = buildDeptTreePayload();
 
 - 根节点总是导出为部门节点
 - 有直属下属的成员导出为部门节点
+- 带下属的直属成员，会同时计入父部门的 `agent_ids`
 - 叶子成员不会再单独导出成一个部门节点
 - 叶子成员会被并入上级部门的 `agent_ids` 列表
 
@@ -384,7 +385,7 @@ const nextDeptTree = buildDeptTreePayload();
   "name": "总部",
   "responsibility": "总部职责",
   "manager_id": 101,
-  "agent_ids": [101, 102, 103],
+  "agent_ids": [101, 102, 103, 104],
   "children": [
     {
       "id": 2,
