@@ -147,13 +147,13 @@ async def _import_team_from_config(team_config: TeamConfig) -> GtTeam | None:
     if team_config.dept_tree is not None:
         _validate_dept_tree_config(team_config.dept_tree)
 
-    # 2. 保存团队主体
+    # 2. 保存团队主体（先创建停用状态，导入完成后再启用）
     team = await gtTeamManager.save_team(GtTeam(
         name=team_config.name,  # 存储稳定 ID；display_name 从 i18n 解析
         uuid=team_config.uuid,
         config=team_config.config or {},
         i18n=team_config.i18n or {},
-        enabled=team_config.auto_start,
+        enabled=False,  # 导入期间必须停用
         deleted=0,
     ))
 
@@ -167,6 +167,11 @@ async def _import_team_from_config(team_config: TeamConfig) -> GtTeam | None:
     )
     if team_config.dept_tree is not None:
         await deptService.overwrite_dept_tree(team.id, await _to_dept_tree_node(team.id, team_config.dept_tree))
+
+    # 导入完成后，根据 auto_start 决定是否启用团队
+    if team_config.auto_start:
+        await gtTeamManager.set_team_enabled(team.id, True)
+
     logger.info("Team '%s' 已从配置导入数据库", team_config.name)
     return team
 

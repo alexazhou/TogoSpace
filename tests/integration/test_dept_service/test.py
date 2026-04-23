@@ -67,6 +67,10 @@ class TestDeptService(ServiceTestCase):
         await gtAgentManager.batch_save_agents(team.id, agents)
         return team
 
+    async def _disable_team(self, team_id: int) -> None:
+        """停用团队，用于编辑组织树或成员前的准备。"""
+        await gtTeamManager.set_team_enabled(team_id, False)
+
     async def _get_room_agent_names(self, room_id: int) -> list[str]:
         room = await gtRoomManager.get_room_by_id(room_id)
         assert room is not None
@@ -182,6 +186,7 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_import", ["alice", "bob"])
+        await self._disable_team(team.id)
 
         tree = DeptNodeConfig(dept_name="product",
             responsibility="owns the roadmap",
@@ -205,6 +210,7 @@ class TestDeptService(ServiceTestCase):
         team = await self._setup_team_with_agents(
             "t_hier", ["cto", "eng_lead", "dev_a", "dev_b"]
         )
+        await self._disable_team(team.id)
 
         tree = DeptNodeConfig(dept_name="company",
             responsibility="top level",
@@ -232,6 +238,7 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_overwrite", ["alice", "bob", "charlie"])
+        await self._disable_team(team.id)
 
         original = DeptNodeConfig(dept_name="dept_x",
             responsibility="original",
@@ -263,6 +270,7 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_err", ["alice", "bob"])
+        await self._disable_team(team.id)
 
         bad_tree = DeptNodeConfig(dept_name="broken",
             responsibility="",
@@ -277,6 +285,7 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_unknown", ["alice"])
+        await self._disable_team(team.id)
 
         bad_tree = DeptNodeConfig(dept_name="dept_y",
             responsibility="",
@@ -297,6 +306,7 @@ class TestDeptService(ServiceTestCase):
         team = await self._setup_team_with_agents(
             "t_round", ["cto", "dev_a", "dev_b"]
         )
+        await self._disable_team(team.id)
         original = DeptNodeConfig(dept_name="root",
             responsibility="root dept",
             manager="cto",
@@ -345,6 +355,7 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_setmgr", ["alice", "bob"])
+        await self._disable_team(team.id)
         tree = DeptNodeConfig(dept_name="the_dept",
             responsibility="",
             manager="alice",
@@ -364,6 +375,7 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_setmgr_err", ["alice", "bob", "charlie"])
+        await self._disable_team(team.id)
         tree = DeptNodeConfig(dept_name="small_dept",
             responsibility="",
             manager="alice",
@@ -395,6 +407,7 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_offboard", ["alice", "bob", "charlie"])
+        await self._disable_team(team.id)
         tree = DeptNodeConfig(dept_name="base",
             responsibility="",
             manager="alice",
@@ -486,6 +499,7 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_get_dept", ["alice", "bob", "charlie"])
+        await self._disable_team(team.id)
         tree = DeptNodeConfig(
             dept_name="found_dept",
             responsibility="",
@@ -516,6 +530,7 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_room_create", ["alice", "bob", "charlie"])
+        await self._disable_team(team.id)
         alice_id = await self._get_agent_id(team.id, "alice")
         bob_id = await self._get_agent_id(team.id, "bob")
         charlie_id = await self._get_agent_id(team.id, "charlie")
@@ -546,6 +561,7 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_room_update", ["alice", "bob", "charlie", "david"])
+        await self._disable_team(team.id)
         alice_id = await self._get_agent_id(team.id, "alice")
         bob_id = await self._get_agent_id(team.id, "bob")
         charlie_id = await self._get_agent_id(team.id, "charlie")
@@ -588,6 +604,7 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_room_rename", ["alice", "bob"])
+        await self._disable_team(team.id)
         alice_id = await self._get_agent_id(team.id, "alice")
         bob_id = await self._get_agent_id(team.id, "bob")
 
@@ -627,6 +644,7 @@ class TestDeptService(ServiceTestCase):
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_room_i18n", ["alice", "bob"])
+        await self._disable_team(team.id)
         alice_id = await self._get_agent_id(team.id, "alice")
         bob_id = await self._get_agent_id(team.id, "bob")
 
@@ -658,6 +676,7 @@ class TestDeptService(ServiceTestCase):
 
         try:
             team = await self._setup_team_with_agents("t_room_tags", ["alice", "bob"])
+            await self._disable_team(team.id)
             alice_id = await self._get_agent_id(team.id, "alice")
             bob_id = await self._get_agent_id(team.id, "bob")
 
@@ -690,6 +709,7 @@ class TestDeptService(ServiceTestCase):
         team = await self._setup_team_with_agents(
             "t_room_hier", ["cto", "ceo", "eng_mgr", "dev_a", "dev_b", "sales_mgr", "sales_a"]
         )
+        await self._disable_team(team.id)
         cto_id = await self._get_agent_id(team.id, "cto")
         ceo_id = await self._get_agent_id(team.id, "ceo")
         eng_mgr_id = await self._get_agent_id(team.id, "eng_mgr")
@@ -734,3 +754,30 @@ class TestDeptService(ServiceTestCase):
             assert room is not None
             room_agents = await self._get_room_agent_names(room.id)
             assert set(room_agents) == expected_agents
+
+    async def test_overwrite_dept_tree_requires_team_disabled(self):
+        """验证编辑团队组织树之前必须停用团队。"""
+        await self._reset_tables()
+
+        team = await self._setup_team_with_agents("t_disabled_check", ["alice", "bob"])
+        # 不停用团队，直接尝试编辑组织树
+        alice_id = await self._get_agent_id(team.id, "alice")
+        bob_id = await self._get_agent_id(team.id, "bob")
+
+        root = GtDept(
+            name="engineering",
+            responsibility="开发部门",
+            manager_id=alice_id,
+            agent_ids=[alice_id, bob_id],
+        )
+
+        with pytest.raises(TeamAgentException) as exc_info:
+            await deptService.overwrite_dept_tree(team.id, root)
+        assert exc_info.value.error_code == "team_not_stopped"
+        assert "团队必须处于停用状态才能编辑组织树" in str(exc_info.value)
+
+        # 停用后再编辑，应正常执行
+        await self._disable_team(team.id)
+        await deptService.overwrite_dept_tree(team.id, root)
+        dept = await gtDeptManager.get_dept_by_name(team.id, "engineering")
+        assert dept is not None

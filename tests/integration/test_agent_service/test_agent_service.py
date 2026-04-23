@@ -209,6 +209,9 @@ class TestSaveTeamAgentsFullReplace(_agentServiceCase):
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
 
+        # 编辑成员前必须停用团队
+        await gtTeamManager.set_team_enabled(team.id, False)
+
         before_agents = await gtAgentManager.get_agents_by_employ_status(
             team.id,
             EmployStatus.ON_BOARD,

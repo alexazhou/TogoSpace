@@ -124,6 +124,8 @@ class TestRestoreAgentHistory(ServiceTestCase):
         await presetService._import_role_templates_from_app_config()
         configUtil.load(os.path.join(os.path.dirname(__file__), "../../config"), force_reload=True)
         team = await gtTeamManager.save_team(GtTeam(name=TEAM))
+        # 编辑组织树前必须停用团队
+        await gtTeamManager.set_team_enabled(team.id, False)
         agents = await ServiceTestCase.convert_to_gt_agents(
             team.id,
             [

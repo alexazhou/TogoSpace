@@ -170,6 +170,8 @@ class TestToolFunctions(ServiceTestCase):
         """不传 dept_id 时返回根部门及其子树。"""
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
+        # 编辑组织树前必须停用团队
+        await gtTeamManager.set_team_enabled(team.id, False)
         alice = await gtAgentManager.get_agent(team.id, "alice")
         bob = await gtAgentManager.get_agent(team.id, "bob")
         char = await gtAgentManager.get_agent(team.id, "char")
@@ -230,6 +232,8 @@ class TestToolFunctions(ServiceTestCase):
         """成员工具应能返回失败摘要，并在 FAILED 状态下唤醒成员。"""
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
+        # 编辑组织树前必须停用团队
+        await gtTeamManager.set_team_enabled(team.id, False)
         alice = await gtAgentManager.get_agent(team.id, "alice")
         bob = await gtAgentManager.get_agent(team.id, "bob")
         char = await gtAgentManager.get_agent(team.id, "char")
