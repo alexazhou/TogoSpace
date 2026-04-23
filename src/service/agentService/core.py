@@ -43,7 +43,8 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
         logger.warning(f"加载 Team Agent 失败: team_id={team_id} 不存在于配置中")
         return
 
-    gt_agents = await gtAgentManager.get_team_agents(team_id)
+    # 只加载在职 agent
+    gt_agents = await gtAgentManager.get_agents_by_employ_status(team_id, EmployStatus.ON_BOARD)
     gt_role_templates = await gtRoleTemplateManager.get_role_templates_by_ids(
         [agent.role_template_id for agent in gt_agents]
     )
