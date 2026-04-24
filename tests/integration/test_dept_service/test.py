@@ -78,8 +78,8 @@ class TestDeptService(ServiceTestCase):
         by_id = {agent.id: agent.name for agent in agent_rows}
         return [by_id.get(agent_id, str(agent_id)) for agent_id in room.agent_ids or []]
 
-    async def _get_agent_id(self, team_id: int, agent_name: str) -> int:
-        agent = await gtAgentManager.get_agent(team_id, agent_name)
+    async def _get_agent_id(self, team_id: int, agent_name: str, status: EmployStatus | None = EmployStatus.ON_BOARD) -> int:
+        agent = await gtAgentManager.get_agent(team_id, agent_name, status=status)
         assert agent is not None
         return agent.id
 
@@ -383,8 +383,8 @@ class TestDeptService(ServiceTestCase):
         )
         await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
-        # charlie 不在 small_dept 中
-        charlie_id = await self._get_agent_id(team.id, "charlie")
+        # charlie 不在 small_dept 中（已被设置为 OFF_BOARD）
+        charlie_id = await self._get_agent_id(team.id, "charlie", status=None)
         with pytest.raises(TeamAgentException) as exc_info:
             await deptService.set_dept_manager(team.id, "small_dept", charlie_id)
         assert exc_info.value.error_code == "AGENT_NOT_IN_DEPT"
@@ -448,7 +448,7 @@ class TestDeptService(ServiceTestCase):
             .where(GtAgent.id == alice.id)
             .aio_execute()
         )
-        alice_after = await gtAgentManager.get_agent(team.id, "alice")
+        alice_after = await gtAgentManager.get_agent(team.id, "alice", status=None)
         assert alice_after is not None
         assert alice_after.employ_status == EmployStatus.OFF_BOARD
 
@@ -510,7 +510,8 @@ class TestDeptService(ServiceTestCase):
 
         alice = await gtAgentManager.get_agent(team.id, "alice")
         bob = await gtAgentManager.get_agent(team.id, "bob")
-        charlie = await gtAgentManager.get_agent(team.id, "charlie")
+        # charlie 不在树中，已被设置为 OFF_BOARD，需要不限状态查询
+        charlie = await gtAgentManager.get_agent(team.id, "charlie", status=None)
         assert alice is not None and bob is not None and charlie is not None
 
         alice_dept = await deptService.get_agent_dept(team.id, alice.id)

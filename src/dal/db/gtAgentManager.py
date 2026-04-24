@@ -34,13 +34,20 @@ async def get_team_agents(team_id: int, status: EmployStatus | None = None) -> l
     return list(await query.order_by(GtAgent.name).aio_execute())
 
 
-async def get_agent(team_id: int, name: str, status: EmployStatus = EmployStatus.ON_BOARD) -> GtAgent | None:
-    """按 team + name + employ_status 查询成员，默认只查在职。"""
-    return await GtAgent.aio_get_or_none(
-        GtAgent.team_id == team_id,
-        GtAgent.name == name,
-        GtAgent.employ_status == status,
-    )
+async def get_agent(
+    team_id: int, name: str, status: EmployStatus | None = EmployStatus.ON_BOARD
+) -> GtAgent | None:
+    """按 team + name + employ_status 查询成员。
+
+    Args:
+        team_id: 团队 ID
+        name: Agent 名称
+        status: 状态过滤，默认 ON_BOARD；传入 None 表示不限状态
+    """
+    conditions = [GtAgent.team_id == team_id, GtAgent.name == name]
+    if status is not None:
+        conditions.append(GtAgent.employ_status == status)
+    return await GtAgent.aio_get_or_none(*conditions)
 
 
 async def resolve_role_template_id_by_name(template_name: str) -> int:

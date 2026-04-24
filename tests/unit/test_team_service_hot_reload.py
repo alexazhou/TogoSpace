@@ -175,7 +175,7 @@ async def test_set_team_enabled_disables_runtime(monkeypatch):
     monkeypatch.setattr(
         teamService.gtTeamManager,
         "get_team_by_id",
-        AsyncMock(return_value=SimpleNamespace(id=1, name="default")),
+        AsyncMock(return_value=SimpleNamespace(id=1, name="default", enabled=True)),
     )
     monkeypatch.setattr(teamService.gtTeamManager, "set_team_enabled", AsyncMock())
     stop_team_runtime = AsyncMock()
@@ -191,7 +191,7 @@ async def test_set_team_enabled_restores_runtime(monkeypatch):
     monkeypatch.setattr(
         teamService.gtTeamManager,
         "get_team_by_id",
-        AsyncMock(return_value=SimpleNamespace(id=1, name="default")),
+        AsyncMock(return_value=SimpleNamespace(id=1, name="default", enabled=False)),
     )
     monkeypatch.setattr(teamService.gtTeamManager, "set_team_enabled", AsyncMock())
     restore_team = AsyncMock()
