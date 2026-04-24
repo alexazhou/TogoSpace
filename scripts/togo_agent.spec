@@ -77,17 +77,34 @@ a = Analysis(
     noarchive=False,
 )
 
-# ── 事后过滤：排除 Linux gtsp ────────────────────────────────────────────────
+# ── 事后过滤：排除不必要的文件 ────────────────────────────────────────────────
 
 filtered_datas = []
+EXCLUDE_PATTERNS = [
+    # litellm proxy 管理面板 UI (19M)
+    "litellm/proxy/_experimental/out",
+    # litellm 内容护栏 (3.6M)
+    "litellm/proxy/guardrails",
+    # litellm Swagger API 文档 (1.6M)
+    "litellm/proxy/swagger",
+    # litellm HuggingFace 适配器 (1.4M)
+    "litellm/llms/huggingface",
+    # Linux 版本的 gtsp 可执行文件
+    "gtsp-linux-*",
+]
+
 for item in a.datas:
     dest_path = item[0]
     src_path = item[1]
-    # 排除 Linux 版本的 gtsp 可执行文件
-    if fnmatch.fnmatch(os.path.basename(src_path), "gtsp-linux-*"):
-        print(f"🗑️ Excluding: {src_path}")
-        continue
-    filtered_datas.append(item)
+    excluded = False
+    for pattern in EXCLUDE_PATTERNS:
+        # 检查目标路径是否包含排除模式
+        if pattern in dest_path or fnmatch.fnmatch(os.path.basename(src_path), pattern):
+            print(f"🗑️ Excluding: {dest_path}")
+            excluded = True
+            break
+    if not excluded:
+        filtered_datas.append(item)
 
 a.datas = filtered_datas
 
