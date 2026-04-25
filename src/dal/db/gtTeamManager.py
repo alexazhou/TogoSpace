@@ -31,8 +31,11 @@ async def get_team_by_uuid(uuid: str, include_deleted: bool = False) -> GtTeam |
 
 
 async def get_all_teams(enabled: bool | None = None) -> list[GtTeam]:
-    """获取所有未删除的 Team。可通过 enabled 参数过滤。"""
-    query = GtTeam.select().where(GtTeam.deleted == 0).order_by(GtTeam.name)
+    """获取所有未删除的 Team。可通过 enabled 参数过滤。
+
+    按 id 升序排序：最先导入的团队排在前面（is_default 团队优先展示）。
+    """
+    query = GtTeam.select().where(GtTeam.deleted == 0).order_by(GtTeam.id)
     if enabled is not None:
         query = query.where(GtTeam.enabled == enabled)
     return list(await query.aio_execute())

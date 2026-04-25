@@ -105,6 +105,7 @@ class TeamConfig(BaseModel):
     dept_tree: Optional[DeptNodeConfig] = None
     preset_rooms: List[TeamRoomConfig] = Field(default_factory=list)
     auto_start: bool = True  # 导入后是否自动启动（enabled）；False 则以停用状态导入
+    is_default: bool = False  # 是否为默认团队（首次访问时优先展示）
 
 
 class RoleTemplateConfig(BaseModel):

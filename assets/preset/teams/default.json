@@ -1,6 +1,7 @@
 {
   "name": "软件研发团队",
   "uuid": "preset-default-team-v18",
+  "is_default": true,
   "auto_start": true,
   "i18n": {
     "display_name": {

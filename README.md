@@ -75,6 +75,7 @@ cd frontend && npm install && npm run dev
 docker pull alexazhou/togospace:latest
 
 # Run with storage persistence and port mapping
+# /path/to/your/storage is the directory where TogoSpace data will be stored
 docker run \
   --name togospace \
   -p 8080:8080 \

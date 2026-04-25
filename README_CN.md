@@ -75,6 +75,7 @@ cd frontend && npm install && npm run dev
 docker pull alexazhou/togospace:latest
 
 # 运行容器，映射端口并挂载存储目录
+# /path/to/your/storage 是你想要存放 TogoSpace 数据的目录
 docker run \
   --name togospace \
   -p 8080:8080 \
