@@ -72,14 +72,14 @@ cd frontend && npm install && npm run dev
 ### Method 3: Docker Deployment
 ```bash
 # Pull the image from Docker Hub
-docker pull alexazhou/togoagent:latest
+docker pull alexazhou/togospace:latest
 
 # Run with data persistence and port mapping
 docker run -d \
-  --name togoagent \
+  --name togospace \
   -p 8080:8080 \
   -v /path/to/your/data:/data \
-  alexazhou/togoagent:latest
+  alexazhou/togospace:latest
 
 # Access the Web console at http://localhost:8080
 ```

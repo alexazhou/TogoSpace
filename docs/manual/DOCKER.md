@@ -9,13 +9,13 @@
 git submodule update --init --recursive
 
 # 2. 启动服务
-docker-compose up -d
+docker compose up -d
 
 # 3. 查看日志
-docker-compose logs -f
+docker compose logs -f
 
 # 4. 停止服务
-docker-compose down
+docker compose down
 ```
 
 ### 使用 Docker 命令

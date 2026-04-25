@@ -72,14 +72,14 @@ cd frontend && npm install && npm run dev
 ### 方法 3：Docker 部署
 ```bash
 # 从 Docker Hub 拉取镜像
-docker pull alexazhou/togoagent:latest
+docker pull alexazhou/togospace:latest
 
 # 运行容器，映射端口并挂载数据目录
 docker run -d \
-  --name togoagent \
+  --name togospace \
   -p 8080:8080 \
   -v /path/to/your/data:/data \
-  alexazhou/togoagent:latest
+  alexazhou/togospace:latest
 
 # 在浏览器打开 http://localhost:8080 访问控制台
 ```

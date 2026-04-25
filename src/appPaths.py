@@ -31,6 +31,11 @@ if _IS_FROZEN:
 else:
     STORAGE_ROOT = os.path.abspath(os.path.join(_ROOT, "dev_storage_root"))
     ASSETS_DIR = os.path.abspath(os.path.join(_ROOT, "assets"))
+
+# 环境变量优先级最高（用于 Docker 等场景）
+_ENV_STORAGE_ROOT = os.environ.get("STORAGE_ROOT")
+if _ENV_STORAGE_ROOT:
+    STORAGE_ROOT = _ENV_STORAGE_ROOT
 DATA_DIR = os.path.join(STORAGE_ROOT, "data")
 LOGS_DIR = os.path.join(STORAGE_ROOT, "logs", "backend")
 WORKSPACE_ROOT = os.path.join(STORAGE_ROOT, "workspace")
