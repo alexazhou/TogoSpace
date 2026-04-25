@@ -123,11 +123,12 @@ frontend/
     ```
     常见用法：
     ```bash
+    python scripts/commit_and_push_frondbackend.py --action status --target all
     python scripts/commit_and_push_frondbackend.py --action commit --target all -m "fix: description"
     python scripts/commit_and_push_frondbackend.py --action push --target all
     python scripts/commit_and_push_frondbackend.py --action sync --target frontend
     ```
-    该脚本会按 `--action` 显式执行：前端切换 master 分支；`sync` 仅做 fast-forward 拉取；`commit` 只做 add/commit；`push` 只推送已有本地提交。
+    该脚本会按 `--action` 显式执行：前端切换 master 分支；`status` 查看前后端仓库状态；`sync` 仅做 fast-forward 拉取；`commit` 只做 add/commit；`push` 只推送已有本地提交。
 - **前端子模块提交**：在 `frontend/` 子模块内提交代码时，必须先切换到 master 分支，禁止在 detached HEAD（悬空版本）状态下提交，否则提交会丢失。
 - **前端子模块同步**：提交后端代码时，若发现前端子模块（`frontend/`）有新的 commit，需同步更新后端仓库中的子模块指针版本：
     ```bash

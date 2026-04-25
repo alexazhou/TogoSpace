@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""按显式 action 执行前后端提交/同步/推送。
+"""按显式 action 执行前后端状态查看、提交、同步、推送。
 
 背景:
     本项目包含前端 submodule (frontend/)，提交代码时需要分别处理：
@@ -8,6 +8,7 @@
     - sync / push 前需要确认和远端的 ahead / behind 状态，避免误操作
 
 用法:
+    python scripts/commit_and_push_frondbackend.py --action status
     python scripts/commit_and_push_frondbackend.py --action commit -m "fix: description"
     python scripts/commit_and_push_frondbackend.py --action push
     python scripts/commit_and_push_frondbackend.py --action sync,commit,push --target all -m "fix: description"
@@ -17,6 +18,7 @@
     - --target 默认 all，可选 frontend / backend / all
     - 包含 commit 时必须传 -m/--message
     - sync 仅做 fast-forward，不自动 merge
+    - status 为独立动作，不与其他 action 混用
 """
 
 from __future__ import annotations
@@ -29,8 +31,9 @@ from pathlib import Path
 
 REMOTE_NAME = "origin"
 TARGET_BRANCH = "master"
-VALID_ACTIONS = ("sync", "commit", "push")
+VALID_ACTIONS = ("status", "sync", "commit", "push")
 VALID_ACTION_SEQUENCES = {
+    ("status",),
     ("sync",),
     ("commit",),
     ("push",),
@@ -83,6 +86,15 @@ def fetch_origin_master(repo: Path, name: str) -> None:
         sys.exit(1)
 
 
+def try_fetch_origin_master(repo: Path) -> tuple[bool, str]:
+    """尽量获取远端状态；失败时返回错误信息，但不退出。"""
+    try:
+        run(["git", "fetch", REMOTE_NAME, TARGET_BRANCH], cwd=repo)
+        return True, ""
+    except subprocess.CalledProcessError as e:
+        return False, e.stderr.strip()
+
+
 def get_ahead_behind(repo: Path) -> tuple[int, int]:
     """返回 (behind, ahead)。"""
     result = run(
@@ -91,6 +103,11 @@ def get_ahead_behind(repo: Path) -> tuple[int, int]:
     )
     behind_raw, ahead_raw = result.stdout.strip().split()
     return int(behind_raw), int(ahead_raw)
+
+
+def get_latest_commit(repo: Path) -> str:
+    result = run(["git", "log", "-1", "--oneline"], cwd=repo)
+    return result.stdout.strip()
 
 
 def pull_ff_only(repo: Path, name: str) -> None:
@@ -169,6 +186,29 @@ def ensure_message_requirements(actions: list[str], message: str | None) -> None
     if "commit" not in actions and message:
         print("❌ 未执行 commit 时，不需要传 -m/--message", file=sys.stderr)
         sys.exit(1)
+
+
+def print_repo_status(repo: Path, name: str) -> None:
+    branch = get_current_branch(repo)
+    dirty = has_changes(repo)
+    latest_commit = get_latest_commit(repo)
+    fetched, fetch_error = try_fetch_origin_master(repo)
+
+    print(f"[{name}]")
+    print(f"  branch: {branch}")
+    print(f"  worktree: {'dirty' if dirty else 'clean'}")
+    print(f"  latest: {latest_commit}")
+
+    if fetched:
+        behind, ahead = get_ahead_behind(repo)
+        print(f"  remote: {REMOTE_NAME}/{TARGET_BRANCH}")
+        print(f"  behind: {behind}")
+        print(f"  ahead: {ahead}")
+    else:
+        print(f"  remote: {REMOTE_NAME}/{TARGET_BRANCH} (unavailable)")
+        print(f"  fetch_error: {fetch_error}")
+
+    print()
 
 
 def load_remote_state(repo: Path, name: str) -> tuple[int, int]:
@@ -273,6 +313,14 @@ def main() -> None:
 
     print(f"ℹ️  action: {','.join(actions)}")
     print(f"ℹ️  target: {args.target}")
+
+    if actions == ["status"]:
+        if args.target in ("frontend", "all"):
+            print_repo_status(frontend, "前端")
+        if args.target in ("backend", "all"):
+            print_repo_status(repo_root, "后端")
+        print("完成")
+        return
 
     if args.target in ("frontend", "all"):
         process_repo(frontend, "前端", actions, args.message, switch_master=True)
