@@ -1,32 +1,45 @@
 #!/usr/bin/env python3
-"""提交前后端代码并推送。
+"""按显式 action 执行前后端提交/同步/推送。
 
 背景:
     本项目包含前端 submodule (frontend/)，提交代码时需要分别处理：
     - 前端必须在 master 分支提交（避免 detached HEAD 状态下提交丢失）
     - 后端需要同步更新 frontend submodule 指针
-    - 提交前应先拉取远端代码，避免冲突
-
-    此脚本封装上述流程，简化提交操作。
+    - sync / push 前需要确认和远端的 ahead / behind 状态，避免误操作
 
 用法:
-    python scripts/commit_and_push_frondbackend.py "commit message"
+    python scripts/commit_and_push_frondbackend.py --action commit -m "fix: description"
+    python scripts/commit_and_push_frondbackend.py --action push
+    python scripts/commit_and_push_frondbackend.py --action sync,commit,push --target all -m "fix: description"
 
-示例:
-    python scripts/commit_and_push_frondbackend.py "fix: improve SPA cache strategy"
-
-流程:
-    1. 前端: 切换 master → pull → add/commit → push
-    2. 后端: pull → add/commit（含 submodule 指针）→ push
-
-注意:
-    - 前后端使用相同的 commit message
-    - 遇到冲突或切换失败时，脚本会提示手动处理方式
+说明:
+    - --action 必填，使用逗号分隔动作
+    - --target 默认 all，可选 frontend / backend / all
+    - 包含 commit 时必须传 -m/--message
+    - sync 仅做 fast-forward，不自动 merge
 """
 
+from __future__ import annotations
+
+import argparse
 import subprocess
 import sys
 from pathlib import Path
+
+
+REMOTE_NAME = "origin"
+TARGET_BRANCH = "master"
+VALID_ACTIONS = ("sync", "commit", "push")
+VALID_ACTION_SEQUENCES = {
+    ("sync",),
+    ("commit",),
+    ("push",),
+    ("sync", "commit"),
+    ("sync", "push"),
+    ("commit", "push"),
+    ("sync", "commit", "push"),
+}
+VALID_TARGETS = ("frontend", "backend", "all")
 
 
 def run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -46,78 +59,226 @@ def get_current_branch(repo: Path) -> str:
     return result.stdout.strip()
 
 
-def safe_checkout_master(frontend: Path) -> None:
+def safe_switch_master(frontend: Path) -> None:
     """安全切换到 master 分支，失败时提示用户手动处理。"""
     try:
-        run(["git", "checkout", "master"], cwd=frontend)
+        run(["git", "switch", TARGET_BRANCH], cwd=frontend)
     except subprocess.CalledProcessError as e:
-        print(f"前端切换 master 失败: {e.stderr.strip()}")
+        print(f"前端切换 {TARGET_BRANCH} 失败: {e.stderr.strip()}")
         print("请手动处理后再运行此脚本，例如:")
         print("  cd frontend && git stash  # 暂存改动")
-        print("  cd frontend && git checkout master")
+        print(f"  cd frontend && git switch {TARGET_BRANCH}")
         print("  cd frontend && git stash pop  # 恢复改动")
         sys.exit(1)
 
 
-def pull_origin_master(repo: Path, name: str) -> None:
-    """拉取远端代码，失败时提示用户处理冲突。"""
-    print(f"{name}: 拉取远端代码...")
+def fetch_origin_master(repo: Path, name: str) -> None:
+    """获取远端分支状态。"""
+    print(f"{name}: 获取远端状态...")
     try:
-        run(["git", "pull", "origin", "master"], cwd=repo)
+        run(["git", "fetch", REMOTE_NAME, TARGET_BRANCH], cwd=repo)
     except subprocess.CalledProcessError as e:
-        print(f"{name}: 拉取失败，可能存在冲突")
+        print(f"{name}: 获取远端状态失败")
         print(e.stderr.strip())
-        print("请手动处理冲突后再运行此脚本:")
-        print(f"  cd {repo.relative_to(Path.cwd()) if repo != Path.cwd() else repo}")
-        print("  git status  # 查看冲突文件")
-        print("  # 手动合并冲突")
-        print("  git add . && git commit")
         sys.exit(1)
+
+
+def get_ahead_behind(repo: Path) -> tuple[int, int]:
+    """返回 (behind, ahead)。"""
+    result = run(
+        ["git", "rev-list", "--left-right", "--count", f"{REMOTE_NAME}/{TARGET_BRANCH}...HEAD"],
+        cwd=repo,
+    )
+    behind_raw, ahead_raw = result.stdout.strip().split()
+    return int(behind_raw), int(ahead_raw)
+
+
+def pull_ff_only(repo: Path, name: str) -> None:
+    """仅在可 fast-forward 时拉取远端。"""
+    print(f"{name}: fast-forward 拉取远端代码...")
+    try:
+        run(["git", "pull", "--ff-only", REMOTE_NAME, TARGET_BRANCH], cwd=repo)
+    except subprocess.CalledProcessError as e:
+        print(f"{name}: 拉取失败，可能需要手动处理")
+        print(e.stderr.strip())
+        print("请手动处理后再运行此脚本:")
+        print(f"  cd {repo}")
+        print("  git status")
+        print(f"  git pull --ff-only {REMOTE_NAME} {TARGET_BRANCH}")
+        sys.exit(1)
+
+
+def push_origin_master(repo: Path, name: str) -> None:
+    """推送到远端 master。"""
+    print(f"{name}: 推送到远端...")
+    try:
+        run(["git", "push", REMOTE_NAME, TARGET_BRANCH], cwd=repo)
+    except subprocess.CalledProcessError as e:
+        print(f"{name}: 推送失败")
+        print(e.stderr.strip())
+        sys.exit(1)
+
+
+def commit_all(repo: Path, name: str, commit_msg: str) -> None:
+    """提交当前仓库的全部改动。"""
+    print(f"{name}: 提交本地改动...")
+    try:
+        run(["git", "add", "-A"], cwd=repo)
+        run(["git", "commit", "-m", commit_msg], cwd=repo)
+    except subprocess.CalledProcessError as e:
+        print(f"{name}: 提交失败")
+        print(e.stderr.strip())
+        sys.exit(1)
+
+
+def parse_actions(raw: str) -> list[str]:
+    """解析并校验 action 列表。"""
+    seen: set[str] = set()
+    actions: list[str] = []
+
+    for token in raw.split(","):
+        action = token.strip().lower()
+        if not action:
+            continue
+        if action not in VALID_ACTIONS:
+            print(f"❌ 未知 action: '{action}'（可选: {', '.join(VALID_ACTIONS)}）", file=sys.stderr)
+            sys.exit(1)
+        if action in seen:
+            print(f"❌ 重复 action: '{action}'", file=sys.stderr)
+            sys.exit(1)
+        seen.add(action)
+        actions.append(action)
+
+    if not actions:
+        print("❌ --action 不能为空", file=sys.stderr)
+        sys.exit(1)
+
+    if tuple(actions) not in VALID_ACTION_SEQUENCES:
+        valid_examples = ", ".join(",".join(seq) for seq in VALID_ACTION_SEQUENCES)
+        print(f"❌ 非法 action 顺序: '{raw}'", file=sys.stderr)
+        print(f"   仅支持: {valid_examples}", file=sys.stderr)
+        sys.exit(1)
+
+    return actions
+
+
+def ensure_message_requirements(actions: list[str], message: str | None) -> None:
+    if "commit" in actions and not message:
+        print("❌ action 包含 commit 时，必须传 -m/--message", file=sys.stderr)
+        sys.exit(1)
+    if "commit" not in actions and message:
+        print("❌ 未执行 commit 时，不需要传 -m/--message", file=sys.stderr)
+        sys.exit(1)
+
+
+def load_remote_state(repo: Path, name: str) -> tuple[int, int]:
+    fetch_origin_master(repo, name)
+    return get_ahead_behind(repo)
+
+
+def ensure_can_sync_or_push(repo: Path, name: str, dirty: bool, behind: int, ahead: int) -> None:
+    if dirty and behind > 0:
+        print(f"{name}: 存在未提交改动，且本地落后远端 {behind} 个提交，无法安全自动同步")
+        print("请先手动处理冲突/同步后再运行脚本")
+        print(f"  cd {repo}")
+        print("  git status")
+        sys.exit(1)
+
+    if behind > 0 and ahead > 0:
+        print(f"{name}: 本地与远端已分叉 (behind={behind}, ahead={ahead})，请手动处理")
+        print(f"  cd {repo}")
+        print("  git status")
+        print(f"  git log --oneline --left-right {REMOTE_NAME}/{TARGET_BRANCH}...HEAD")
+        sys.exit(1)
+
+
+def process_repo(
+    repo: Path,
+    name: str,
+    actions: list[str],
+    commit_msg: str | None,
+    *,
+    switch_master: bool = False,
+) -> None:
+    """按显式 actions 处理单个仓库。"""
+    if switch_master:
+        branch = get_current_branch(repo)
+        if branch != TARGET_BRANCH:
+            print(f"{name}: 当前不在 {TARGET_BRANCH} 分支 (当前: {branch})，准备切换")
+            safe_switch_master(repo)
+
+    dirty = has_changes(repo)
+    behind = 0
+    ahead = 0
+
+    if "sync" in actions or "push" in actions:
+        behind, ahead = load_remote_state(repo, name)
+        ensure_can_sync_or_push(repo, name, dirty, behind, ahead)
+
+    if "sync" in actions:
+        if behind > 0:
+            pull_ff_only(repo, name)
+            behind, ahead = load_remote_state(repo, name)
+        else:
+            print(f"{name}: 无需同步")
+
+    if "commit" in actions:
+        dirty = has_changes(repo)
+        if dirty:
+            commit_all(repo, name, commit_msg or "")
+        else:
+            print(f"{name}: 无未提交改动，跳过 commit")
+
+    if "push" in actions:
+        behind, ahead = load_remote_state(repo, name)
+        ensure_can_sync_or_push(repo, name, has_changes(repo), behind, ahead)
+        if ahead > 0:
+            push_origin_master(repo, name)
+        else:
+            print(f"{name}: 无需推送")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="TogoAgent 前后端提交/同步/推送脚本")
+    parser.add_argument(
+        "--action",
+        type=str,
+        required=True,
+        help="要执行的动作，使用逗号分隔，例如: sync,commit,push",
+    )
+    parser.add_argument(
+        "--target",
+        type=str,
+        default="all",
+        choices=VALID_TARGETS,
+        help="目标仓库：frontend / backend / all，默认 all",
+    )
+    parser.add_argument(
+        "-m",
+        "--message",
+        type=str,
+        default=None,
+        help="commit message；仅在 action 包含 commit 时必填",
+    )
+    return parser.parse_args()
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("用法: python scripts/commit_and_push_frondbackend.py \"commit message\"")
-        sys.exit(1)
+    args = parse_args()
+    actions = parse_actions(args.action)
+    ensure_message_requirements(actions, args.message)
 
-    commit_msg = sys.argv[1]
     repo_root = Path(__file__).resolve().parent.parent
     frontend = repo_root / "frontend"
 
-    # 前端 submodule
-    if frontend.exists():
-        branch = get_current_branch(frontend)
+    print(f"ℹ️  action: {','.join(actions)}")
+    print(f"ℹ️  target: {args.target}")
 
-        if branch != "master":
-            print(f"前端不在 master 分支 (当前: {branch})，切换到 master")
-            safe_checkout_master(frontend)
+    if args.target in ("frontend", "all"):
+        process_repo(frontend, "前端", actions, args.message, switch_master=True)
 
-        if has_changes(frontend):
-            pull_origin_master(frontend, "前端")
-            print("提交前端改动...")
-            try:
-                run(["git", "add", "-A"], cwd=frontend)
-                run(["git", "commit", "-m", commit_msg], cwd=frontend)
-                run(["git", "push", "origin", "master"], cwd=frontend)
-            except subprocess.CalledProcessError as e:
-                print(f"前端提交失败: {e.stderr.strip()}")
-                sys.exit(1)
-        else:
-            print("前端无改动")
-
-    # 后端仓库
-    if has_changes(repo_root):
-        pull_origin_master(repo_root, "后端")
-        print("提交后端改动...")
-        try:
-            run(["git", "add", "-A"], cwd=repo_root)
-            run(["git", "commit", "-m", commit_msg], cwd=repo_root)
-            run(["git", "push", "origin", "master"], cwd=repo_root)
-        except subprocess.CalledProcessError as e:
-            print(f"后端提交失败: {e.stderr.strip()}")
-            sys.exit(1)
-    else:
-        print("后端无改动")
+    if args.target in ("backend", "all"):
+        process_repo(repo_root, "后端", actions, args.message, switch_master=False)
 
     print("完成")
 
