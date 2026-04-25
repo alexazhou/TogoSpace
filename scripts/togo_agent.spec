@@ -79,7 +79,6 @@ a = Analysis(
 
 # ── 事后过滤：排除不必要的文件 ────────────────────────────────────────────────
 
-filtered_datas = []
 EXCLUDE_PATTERNS = [
     # litellm proxy 管理面板 UI (19M)
     "litellm/proxy/_experimental/out",
@@ -87,26 +86,47 @@ EXCLUDE_PATTERNS = [
     "litellm/proxy/guardrails",
     # litellm Swagger API 文档 (1.6M)
     "litellm/proxy/swagger",
+    # litellm 第三方服务集成 (3.6M)
+    "litellm/integrations",
     # litellm HuggingFace 适配器 (1.4M)
     "litellm/llms/huggingface",
+    # tcl/tk GUI 库 (macOS 使用原生对话框)
+    "_tcl_data",
+    "_tk_data",
+    "tcl8",
     # Linux 版本的 gtsp 可执行文件
     "gtsp-linux-*",
 ]
 
+# tcl/tk 动态库文件名
+TCLTK_BINARIES = ["libtcl8.6.dylib", "libtk8.6.dylib"]
+
+# 过滤 datas
+filtered_datas = []
 for item in a.datas:
     dest_path = item[0]
     src_path = item[1]
     excluded = False
     for pattern in EXCLUDE_PATTERNS:
-        # 检查目标路径是否包含排除模式
         if pattern in dest_path or fnmatch.fnmatch(os.path.basename(src_path), pattern):
             print(f"🗑️ Excluding: {dest_path}")
             excluded = True
             break
     if not excluded:
         filtered_datas.append(item)
-
 a.datas = filtered_datas
+
+# 过滤 binaries（排除 tcl/tk 动态库）
+filtered_binaries = []
+for item in a.binaries:
+    dest_path = item[0]
+    src_path = item[1]
+    binary_name = os.path.basename(src_path)
+    if binary_name in TCLTK_BINARIES:
+        print(f"🗑️ Excluding binary: {binary_name}")
+        continue
+    filtered_binaries.append(item)
+a.binaries = filtered_binaries
 
 # ── 后续构建步骤 ──────────────────────────────────────────────────────────────
 
