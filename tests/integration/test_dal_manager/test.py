@@ -159,7 +159,8 @@ class TestDalManagers(ServiceTestCase):
         await gtTeamManager.delete_team("team_b")
 
         teams = await gtTeamManager.get_all_teams()
-        assert [t.name for t in teams] == ["team_a", "team_c"]
+        # 按 id 排序：team_c (id=1), team_a (id=2)
+        assert [t.name for t in teams] == ["team_c", "team_a"]
 
     async def test_team_manager_persists_members_and_rooms(self):
         await self._reset_tables()
