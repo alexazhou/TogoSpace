@@ -5,7 +5,7 @@ import pytest
 
 from tests.base import ServiceTestCase
 from dal.db import gtDeptManager, gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtRoomManager
-from exception import TeamAgentException
+from exception import TogoException
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtRoom import GtRoom
@@ -277,7 +277,7 @@ class TestDeptService(ServiceTestCase):
             manager="charlie",  # charlie 不在 agents 中
             agents=["alice", "bob"],
         )
-        with pytest.raises(TeamAgentException) as exc_info:
+        with pytest.raises(TogoException) as exc_info:
             await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, bad_tree))
         assert exc_info.value.error_code == "DEPT_MANAGER_NOT_IN_AGENTS"
 
@@ -292,7 +292,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             agents=["alice", "ghost"],  # ghost 不在 team_agents 中
         )
-        with pytest.raises(TeamAgentException) as exc_info:
+        with pytest.raises(TogoException) as exc_info:
             await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, bad_tree))
         assert exc_info.value.error_code == "DEPT_AGENT_NOT_FOUND"
 
@@ -385,7 +385,7 @@ class TestDeptService(ServiceTestCase):
 
         # charlie 不在 small_dept 中（已被设置为 OFF_BOARD）
         charlie_id = await self._get_agent_id(team.id, "charlie", status=None)
-        with pytest.raises(TeamAgentException) as exc_info:
+        with pytest.raises(TogoException) as exc_info:
             await deptService.set_dept_manager(team.id, "small_dept", charlie_id)
         assert exc_info.value.error_code == "AGENT_NOT_IN_DEPT"
 
@@ -395,7 +395,7 @@ class TestDeptService(ServiceTestCase):
         team = await self._setup_team_with_agents("t_setmgr_nodept", ["alice"])
 
         alice_id = await self._get_agent_id(team.id, "alice")
-        with pytest.raises(TeamAgentException) as exc_info:
+        with pytest.raises(TogoException) as exc_info:
             await deptService.set_dept_manager(team.id, "ghost_dept", alice_id)
         assert exc_info.value.error_code == "DEPT_NOT_FOUND"
 
@@ -772,7 +772,7 @@ class TestDeptService(ServiceTestCase):
             agent_ids=[alice_id, bob_id],
         )
 
-        with pytest.raises(TeamAgentException) as exc_info:
+        with pytest.raises(TogoException) as exc_info:
             await deptService.overwrite_dept_tree(team.id, root)
         assert exc_info.value.error_code == "team_not_stopped"
         assert "团队必须处于停用状态才能编辑组织树" in str(exc_info.value)

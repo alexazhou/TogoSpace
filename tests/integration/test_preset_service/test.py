@@ -9,7 +9,7 @@ from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service import ormService, presetService
-from exception import TeamAgentException
+from exception import TogoException
 from util.configTypes import TeamConfig, AgentConfig, DeptNodeConfig
 
 
@@ -219,7 +219,7 @@ class TestDeptTreeValidation(ServiceTestCase):
             ],
         )
         config = self._make_team_config_with_dept("uuid-dept-001", "dept-team", dept_tree)
-        with pytest.raises(TeamAgentException) as exc_info:
+        with pytest.raises(TogoException) as exc_info:
             await presetService._import_team_from_config(config)
         assert exc_info.value.error_code == "CHILD_MANAGER_NOT_IN_PARENT_AGENTS"
         assert "child_manager" in str(exc_info.value)

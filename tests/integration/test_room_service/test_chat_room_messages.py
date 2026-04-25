@@ -9,7 +9,7 @@ import service.persistenceService as persistenceService
 import service.roomService as roomService
 from constants import MessageBusTopic
 from dal.db import gtTeamManager, gtRoomMessageManager, gtAgentManager
-from exception import TeamAgentException
+from exception import TogoException
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtTeam import GtTeam
 from ...base import ServiceTestCase
@@ -111,7 +111,7 @@ class TestChatRoomMessages(ServiceTestCase):
         room = roomService.get_room_by_key(f"restricted_room@{TEAM}")
         await room.activate_scheduling()
         # bob 不在房间中，使用一个不存在的 agent_id
-        with pytest.raises(TeamAgentException):
+        with pytest.raises(TogoException):
             await room.add_message(99999, "hello")
 
     async def test_format_log(self):

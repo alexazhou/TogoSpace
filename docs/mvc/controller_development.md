@@ -1,6 +1,6 @@
 # Controller 开发指南
 
-本文档总结了 TogoAgent 项目中 HTTP Controller 的开发规范和最佳实践。
+本文档总结了 TogoSpace 项目中 HTTP Controller 的开发规范和最佳实践。
 
 ## 目录
 
@@ -140,7 +140,7 @@ assertUtil.assertEqual(
 
 ### 断言失败行为
 
-断言失败时会抛出 `TogoAgentException`，`BaseHandler` 会自动捕获并返回：
+断言失败时会抛出 `TogoException`，`BaseHandler` 会自动捕获并返回：
 
 ```json
 {
@@ -185,7 +185,7 @@ for item in request.agents:
 for item in request.agents:
     agent = await gtAgentManager.get_agent_by_id(item.id)
     if agent is None:
-        raise TogoAgentException(...)  # 已更新的数据无法回滚
+        raise TogoException(...)  # 已更新的数据无法回滚
     await gtAgentManager.update_agent(...)
 ```
 
@@ -237,14 +237,14 @@ async def post(self, team_id_str: str) -> None:
 
 ### 自定义异常
 
-如果需要抛出自定义异常，使用 `TogoAgentException`：
+如果需要抛出自定义异常，使用 `TogoException`：
 
 ```python
-from exception import TogoAgentException
+from exception import TogoException
 
 async def post(self) -> None:
     if some_condition:
-        raise TogoAgentException("Invalid input", "invalid_request")
+        raise TogoException("Invalid input", "invalid_request")
 ```
 
 ---

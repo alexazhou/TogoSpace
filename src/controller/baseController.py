@@ -6,7 +6,7 @@ import tornado.web
 from pydantic import BaseModel
 from tornado.web import HTTPError
 
-from exception import TeamAgentException
+from exception import TogoException
 from util import jsonUtil, configUtil
 
 
@@ -75,7 +75,7 @@ class BaseHandler(tornado.web.RequestHandler):
 
     def log_exception(self, typ, value, tb) -> None:
         """处理异常日志"""
-        if isinstance(value, TeamAgentException):
+        if isinstance(value, TogoException):
             # 自定义业务异常，不记录堆栈
             logger.warning(f"Business exception: {value.error_message}")
         else:
@@ -87,9 +87,9 @@ class BaseHandler(tornado.web.RequestHandler):
         logger.debug(f"write_error: status_code={status_code}, kwargs={kwargs}")
 
         exc_info = kwargs.get('exc_info')
-        if exc_info and isinstance(exc_info[1], TeamAgentException):
+        if exc_info and isinstance(exc_info[1], TogoException):
             # 处理自定义异常
-            exception_item: TeamAgentException = exc_info[1]
+            exception_item: TogoException = exc_info[1]
             self.enhance['error_code'] = exception_item.error_code
             self.enhance['error_desc'] = exception_item.error_message
             status_code = 400

@@ -1,10 +1,10 @@
-# TogoAgent Dockerfile
+# TogoSpace Dockerfile
 # 基于 Ubuntu 24.04 LTS 构建
 #
 # 构建方式：
 #   1. 确保 frontend 子模块已初始化：git submodule update --init --recursive
-#   2. docker build -t togoagent:0.1.20 .
-#   3. docker run -d -p 8080:8080 -v togoagent-data:/data togoagent:0.1.20
+#   2. docker build -t togospace:0.1.20 .
+#   3. docker run -d -p 8080:8080 -v togospace-data:/data togospace:0.1.20
 
 # ============================================
 # Stage 1: 构建前端
@@ -33,8 +33,8 @@ RUN npm run build
 # ============================================
 FROM ubuntu:24.04
 
-LABEL maintainer="TogoAgent Team"
-LABEL description="TogoAgent - Multi-Agent Chat Room Framework"
+LABEL maintainer="TogoSpace Team"
+LABEL description="TogoSpace - Multi-Agent Chat Room Framework"
 LABEL version="0.1.20"
 
 # 设置环境变量
@@ -42,7 +42,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    TOGOAGENT_HOME=/opt/togoagent \
+    TOGOSPACE_HOME=/opt/togospace \
     STORAGE_ROOT=/data
 
 # 安装 Python 和运行依赖
@@ -55,19 +55,19 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建应用目录和数据目录
-RUN mkdir -p ${TOGOAGENT_HOME} ${STORAGE_ROOT}
+RUN mkdir -p ${TOGOSPACE_HOME} ${STORAGE_ROOT}
 
-WORKDIR ${TOGOAGENT_HOME}
+WORKDIR ${TOGOSPACE_HOME}
 
 # 复制后端源代码
-COPY src/ ${TOGOAGENT_HOME}/src/
+COPY src/ ${TOGOSPACE_HOME}/src/
 
 # 复制资源文件
-COPY assets/ ${TOGOAGENT_HOME}/assets/
-COPY requirements.txt ${TOGOAGENT_HOME}/requirements.txt
+COPY assets/ ${TOGOSPACE_HOME}/assets/
+COPY requirements.txt ${TOGOSPACE_HOME}/requirements.txt
 
 # 复制前端构建产物
-COPY --from=frontend-builder /build/frontend/dist ${TOGOAGENT_HOME}/assets/frontend
+COPY --from=frontend-builder /build/frontend/dist ${TOGOSPACE_HOME}/assets/frontend
 
 # 创建 Python 虚拟环境并安装依赖
 RUN python3 -m venv .venv \
@@ -77,7 +77,7 @@ RUN python3 -m venv .venv \
 # 创建默认配置文件
 RUN mkdir -p ${STORAGE_ROOT} \
     && if [ ! -f ${STORAGE_ROOT}/setting.json ]; then \
-        cp ${TOGOAGENT_HOME}/assets/config_template.json ${STORAGE_ROOT}/setting.json; \
+        cp ${TOGOSPACE_HOME}/assets/config_template.json ${STORAGE_ROOT}/setting.json; \
     fi
 
 # 暴露端口
@@ -88,5 +88,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/system/status.json || exit 1
 
 # 启动命令
-WORKDIR ${TOGOAGENT_HOME}/src
+WORKDIR ${TOGOSPACE_HOME}/src
 CMD ["../.venv/bin/python3", "backend_main.py", "--config-dir", "/data"]

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-macOS 打包脚本：构建 TogoAgent.app
+macOS 打包脚本：构建 TogoSpace.app
 
 步骤：
   1. 读取后端版本号（src/version.py）
@@ -101,11 +101,11 @@ def _run_pyinstaller():
 
 
 def _rename_app(version: str):
-    original = os.path.join(DIST_PATH, "TogoAgent.app")
-    final    = os.path.join(DIST_PATH, f"TogoAgent-{version}.app")
+    original = os.path.join(DIST_PATH, "TogoSpace.app")
+    final    = os.path.join(DIST_PATH, f"TogoSpace-{version}.app")
     if os.path.exists(original):
         os.rename(original, final)
-        print(f"✅ 产物：dist/TogoAgent-{version}.app")
+        print(f"✅ 产物：dist/TogoSpace-{version}.app")
     else:
         print(f"❌ 未找到 {original}")
         sys.exit(1)

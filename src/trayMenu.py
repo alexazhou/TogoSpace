@@ -106,7 +106,7 @@ class TrayMenu:
             root.withdraw()
             try:
                 confirmed = messagebox.askyesno(
-                    "TogoAgent",
+                    "TogoSpace",
                     i18nUtil.t("confirm_reset"),
                     icon="warning",
                 )

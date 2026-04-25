@@ -5,7 +5,7 @@ from typing import List
 
 from constants import EmployStatus
 from dal.db import gtDeptManager, gtAgentManager, gtTeamManager
-from exception import TeamAgentException
+from exception import TogoException
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtAgent import GtAgent
 from service import roomService, agentService
@@ -24,7 +24,7 @@ async def overwrite_dept_tree(team_id: int, root: GtDept) -> None:
     try:
         all_agent_ids, _ = root.validate_and_collect_tree_ids()
     except ValueError as exc:
-        raise TeamAgentException(str(exc), error_code="DEPT_MEMBERS_TOO_FEW") from exc
+        raise TogoException(str(exc), error_code="DEPT_MEMBERS_TOO_FEW") from exc
     input_dept_ids = root.collect_dept_ids()
 
     # 先删除不在传入 id 集合中的旧部门，再执行覆盖保存。
@@ -53,7 +53,7 @@ async def _overwrite_dept_subtree(
     """覆盖式保存部门子树：更新/创建当前节点，并递归处理子节点。"""
     # 校验：manager_id 必须出现在 agent_ids 中
     if node.manager_id not in node.agent_ids:
-        raise TeamAgentException(
+        raise TogoException(
             f"部门 '{node.name}' 的主管 ID '{node.manager_id}' 不在 Agent 名单中",
             error_code="DEPT_MANAGER_NOT_IN_AGENTS",
         )
@@ -63,7 +63,7 @@ async def _overwrite_dept_subtree(
     existing_agent_ids = {row.id for row in gt_agents}
     missing_agent_ids = sorted(set(agent_ids) - existing_agent_ids)
     if missing_agent_ids:
-        raise TeamAgentException(
+        raise TogoException(
             f"部门 '{node.name}' 的 Agent ID '{missing_agent_ids}' 在 team_agents 中不存在",
             error_code="DEPT_AGENT_NOT_FOUND",
         )
@@ -129,20 +129,20 @@ async def set_dept_manager(team_id: int, dept_name: str, manager_id: int) -> Non
     """变更部门主管，新主管必须已在该部门中。"""
     dept = await gtDeptManager.get_dept_by_name(team_id, dept_name)
     if dept is None:
-        raise TeamAgentException(
+        raise TogoException(
             f"部门 '{dept_name}' 不存在",
             error_code="DEPT_NOT_FOUND",
         )
 
     managers = await gtAgentManager.get_team_agents_by_ids(team_id, [manager_id], include_special=False)
     if len(managers) == 0:
-        raise TeamAgentException(
+        raise TogoException(
             f"Agent ID '{manager_id}' 不存在",
             error_code="AGENT_NOT_FOUND",
         )
 
     if manager_id not in dept.agent_ids:
-        raise TeamAgentException(
+        raise TogoException(
             f"Agent ID '{manager_id}' 不在部门 '{dept_name}' 的 Agent 名单中",
             error_code="AGENT_NOT_IN_DEPT",
         )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from dal.db import gtTeamManager, gtAgentManager, gtAgentTaskManager, gtAgentHistoryManager, gtRoomMessageManager, gtRoomManager
-from exception import TeamAgentException
+from exception import TogoException
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoom import GtRoom
@@ -98,7 +98,7 @@ async def create_team(
         auto_start: 是否自动启动（默认 True）
     """
     if await gtTeamManager.team_exists(name):
-        raise TeamAgentException(f"Team '{name}' already exists", error_code="TEAM_EXISTS")
+        raise TogoException(f"Team '{name}' already exists", error_code="TEAM_EXISTS")
 
     # 先创建 disabled 状态，初始化完成后再启用
     team = await gtTeamManager.save_team(GtTeam(

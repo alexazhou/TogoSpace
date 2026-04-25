@@ -128,9 +128,9 @@ def build_tray_icon() -> pystray.Icon:
     _tray_menu.set_version(__version__)
 
     icon = pystray.Icon(
-        name="TogoAgent",
+        name="TogoSpace",
         icon=_make_icon(),
-        title="TogoAgent",
+        title="TogoSpace",
         menu=_tray_menu.build(),
         **pal.get_icon_kwargs())
     _tray_menu._icon = icon

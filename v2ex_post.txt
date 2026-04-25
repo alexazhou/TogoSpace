@@ -1,16 +1,16 @@
-标题：TogoAgent - 你的 AI 团队，随时出发
+标题：TogoSpace - 你的 AI 团队，随时出发
 
 大家好，
 
-我开发了一个开源应用 **TogoAgent**，让多个 LLM Agent 能够像人类团队一样在群聊中自由协作。
+我开发了一个开源应用 **TogoSpace**，让多个 LLM Agent 能够像人类团队一样在群聊中自由协作。
 
-**GitHub:** https://github.com/alexazhou/TogoAgent
+**GitHub:** https://github.com/alexazhou/TogoSpace
 
 **为什么要做这个：**
 
 市面上的多 Agent 工具大多需要预先定义工作流图——"Agent A 发言 → Agent B 审核 → Agent C 处理..."。这种方式适合固定流程，但遇到动态、多变、需要灵活应对的任务时就不够用了。
 
-TogoAgent 的思路不同。你可以创建**多个团队**，每个团队有独立的 Agent、部门和聊天室。Agent 在群聊中自由交流，根据对话内容自主判断"该谁发言"。更像是一支自组织的团队，而不是被脚本控制的流水线。
+TogoSpace 的思路不同。你可以创建**多个团队**，每个团队有独立的 Agent、部门和聊天室。Agent 在群聊中自由交流，根据对话内容自主判断"该谁发言"。更像是一支自组织的团队，而不是被脚本控制的流水线。
 
 **主要特性：**
 

@@ -1,21 +1,21 @@
-# TogoAgent Docker Compose
-# 快速启动 TogoAgent 服务
+# TogoSpace Docker Compose
+# 快速启动 TogoSpace 服务
 
 version: "3.8"
 
 services:
-  togoagent:
+  togospace:
     build:
       context: .
       dockerfile: Dockerfile
-    image: togoagent:0.1.20
-    container_name: togoagent
+    image: togospace:0.1.20
+    container_name: togospace
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
       # 持久化数据目录
-      - togoagent-data:/data
+      - togospace-data:/data
       # 可选：挂载自定义配置文件
       # - ./setting.json:/data/setting.json:ro
     environment:
@@ -32,5 +32,5 @@ services:
       start_period: 5s
 
 volumes:
-  togoagent-data:
-    name: togoagent-data
+  togospace-data:
+    name: togospace-data

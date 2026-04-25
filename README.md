@@ -1,6 +1,6 @@
-![ToGo Agent](image/togo_agent_team.png)
+![TogoSpace](image/togo_agent_team.png)
 
-# ToGo Agent 🚀
+# TogoSpace 🚀
 
 [English](README.md) | [中文](README_CN.md)
 
@@ -9,7 +9,7 @@
 [![UI](https://img.shields.io/badge/UI-Textual%20%2B%20Vue3-green.svg)](https://textual.textualize.io/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#)
 
-**ToGo Agent** is an open-source multi-agent collaboration software designed for Large Language Models (LLM). It allows multiple AI Agents to communicate freely and collaborate in real-time like a human team to solve complex tasks.
+**TogoSpace** is an open-source multi-agent collaboration software designed for Large Language Models (LLM). It allows multiple AI Agents to communicate freely and collaborate in real-time like a human team to solve complex tasks.
 
 > **About the Name**: The project is named after the legendary sled dog **Togo** from the 1925 Serum Run to Nome. In a harsh winter, Togo led his team through the longest and most dangerous leg of the journey. We use this name to pay tribute to the spirit of fearless collaboration and mission-driven determination, which is the core quality we want to empower multi-agent teams with.
 
@@ -49,7 +49,7 @@ Built with Python and modern frontend technologies, it perfectly supports macOS,
 ### Method 1: Download Pre-built App Package (Recommended for macOS Users)
 We currently provide a **macOS** Release package for a quick start.
 - **Download**: [Go to the Releases page](https://github.com/alexazhou/TogoAgent/releases)
-- **Usage**: Once running, ToGo Agent stays in your system status bar. Click the icon to open the console, manage teams, or execute tasks.
+- **Usage**: Once running, TogoSpace stays in your system status bar. Click the icon to open the console, manage teams, or execute tasks.
 
 ![Status Bar Entry](image/en/entry.png)
 

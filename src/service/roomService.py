@@ -9,7 +9,7 @@ from dal.db import gtRoomManager, gtTeamManager, gtAgentManager, gtRoomMessageMa
 from service import messageBus
 from util import configUtil, i18nUtil
 from util import assertUtil
-from exception import TeamAgentException
+from exception import TogoException
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 from model.dbModel.gtDept import DeptRoomSpec
 from model.dbModel.gtRoom import GtRoom
@@ -834,13 +834,13 @@ async def batch_create_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
     seen_names: set[str] = set()
     for room in room_list:
         if room.id is not None:
-            raise TeamAgentException(
+            raise TogoException(
                 f"create-only 场景不允许传入 room.id: '{room.id}'",
                 error_code="ROOM_ID_NOT_ALLOWED_ON_CREATE",
             )
 
         if room.name in seen_names:
-            raise TeamAgentException(
+            raise TogoException(
                 f"房间名称重复: '{room.name}'",
                 error_code="ROOM_NAME_DUPLICATED",
             )
@@ -851,7 +851,7 @@ async def batch_create_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
         [room.name for room in room_list],
     )
     if existing_rooms:
-        raise TeamAgentException(
+        raise TogoException(
             f"房间名称已存在: '{existing_rooms[0].name}'",
             error_code="ROOM_ALREADY_EXISTS",
         )

@@ -2,13 +2,13 @@ import logging
 import traceback
 from typing import Any
 
-from exception import TeamAgentException
+from exception import TogoException
 
 
 logger = logging.getLogger(__name__)
 
 
-class MakeSureException(TeamAgentException):
+class MakeSureException(TogoException):
     """断言异常"""
 
     def __init__(self, error_message: str, error_code: Any = None):

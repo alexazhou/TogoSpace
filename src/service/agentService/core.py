@@ -12,7 +12,7 @@ from service.agentService.promptBuilder import build_agent_system_prompt
 from service import llmService, roomService, persistenceService
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtAgentTaskManager
 from peewee import IntegrityError
-from exception import TeamAgentException
+from exception import TogoException
 from constants import AgentStatus, AgentTaskStatus, DriverType, EmployStatus
 
 logger = logging.getLogger(__name__)
@@ -251,7 +251,7 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
         if agent_id is not None:
             existing = existing_by_id.get(agent_id)
             if existing is None:
-                raise TeamAgentException(
+                raise TogoException(
                     error_message=f"成员 ID 不存在于当前 team: {agent_id}",
                     error_code="agent_not_found",
                 )
@@ -279,7 +279,7 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
     try:
         await gtAgentManager.batch_save_agents(team_id, agents_to_save)
     except IntegrityError as e:
-        raise TeamAgentException(
+        raise TogoException(
             error_message="成员保存失败，名称可能已存在或工号重复",
             error_code="MEMBER_SAVE_FAILED",
         ) from e

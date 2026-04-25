@@ -154,7 +154,7 @@ async def wake_up_agent(agent_name: str, _context: ToolCallContext = None) -> di
 4. 调用 `agent.resume_failed()`
 5. 成功后返回 `success: true`
 
-**异常处理**：`resume_failed()` 内部使用 `assertUtil` 断言，若断言失败会抛出 `TogoAgentException`。工具函数需 catch 该异常并转为 `success: false` 返回，避免异常传播到 `funcToolService.run_tool_call()` 的通用 catch 块（通用 catch 的错误信息格式不够友好）。
+**异常处理**：`resume_failed()` 内部使用 `assertUtil` 断言，若断言失败会抛出 `TogoException`。工具函数需 catch 该异常并转为 `success: false` 返回，避免异常传播到 `funcToolService.run_tool_call()` 的通用 catch 块（通用 catch 的错误信息格式不够友好）。
 
 ```python
 try:

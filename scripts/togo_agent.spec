@@ -137,7 +137,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="TogoAgent",
+    name="TogoSpace",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -156,20 +156,20 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="TogoAgent",
+    name="TogoSpace",
 )
 
 # ── macOS App Bundle ──────────────────────────────────────────────────────────
 
 app = BUNDLE(
     coll,
-    name="TogoAgent.app",
+    name="TogoSpace.app",
     icon=APP_ICON,
-    bundle_identifier="com.togoagent.app",
+    bundle_identifier="com.togospace.app",
     info_plist={
-        "CFBundleName":               "TogoAgent",
-        "CFBundleDisplayName":        "TogoAgent",
-        "CFBundleIdentifier":         "com.togoagent.app",
+        "CFBundleName":               "TogoSpace",
+        "CFBundleDisplayName":        "TogoSpace",
+        "CFBundleIdentifier":         "com.togospace.app",
         "CFBundleVersion":            APP_VERSION,
         "CFBundleShortVersionString": APP_VERSION,
         "LSUIElement":                True,       # 无 Dock 图标，菜单栏常驻

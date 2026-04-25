@@ -45,7 +45,7 @@ jobs:
       with:
         context: .
         push: ${{ inputs.push }}
-        tags: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/togoagent:${{ inputs.tag }}
+        tags: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/togospace:${{ inputs.tag }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -56,7 +56,7 @@ jobs:
         echo "- **Tag**: ${TAG}" >> $GITHUB_STEP_SUMMARY
         echo "- **Pushed**: ${PUSH}" >> $GITHUB_STEP_SUMMARY
         if [ "${PUSH}" = "true" ]; then
-          echo "- **Registry**: docker.io/${USERNAME}/togoagent:${TAG}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry**: docker.io/${USERNAME}/togospace:${TAG}" >> $GITHUB_STEP_SUMMARY
         fi
       env:
         TAG: ${{ inputs.tag }}

@@ -1,6 +1,6 @@
-![ToGo Agent](image/togo_agent_team.png)
+![TogoSpace](image/togo_agent_team.png)
 
-# ToGo Agent 🚀
+# TogoSpace 🚀
 
 [English](README.md) | [中文](README_CN.md)
 
@@ -9,9 +9,9 @@
 [![UI](https://img.shields.io/badge/UI-Textual%20%2B%20Vue3-green.svg)](https://textual.textualize.io/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#)
 
-**ToGo Agent** 是一款专为大语言模型（LLM）设计的**多智能体协作开源软件**。让多个 AI Agent 能够像人类团队一样自由交流、实时协作，共同攻克复杂任务。
+**TogoSpace** 是一款专为大语言模型（LLM）设计的**多智能体协作开源软件**。让多个 AI Agent 能够像人类团队一样自由交流、实时协作，共同攻克复杂任务。
 
-> **关于名字的由来**：项目命名灵感源自 1925 年诺姆血清接力中的传奇雪橇犬 **Togo**。在那个极其恶劣的冬天，Togo 带领团队完成了整场接力中最长且最危险的一段航程。我们引用这个名字，旨在致敬那种无畏艰险、使命必达的协作精神，这也正是 ToGo Agent 想要赋予多智能体团队的核心特质。
+> **关于名字的由来**：项目命名灵感源自 1925 年诺姆血清接力中的传奇雪橇犬 **Togo**。在那个极其恶劣的冬天，Togo 带领团队完成了整场接力中最长且最危险的一段航程。我们引用这个名字，旨在致敬那种无畏艰险、使命必达的协作精神，这也正是 **TogoSpace** 想要赋予多智能体团队的核心特质。
 
 ---
 
@@ -49,7 +49,7 @@
 ### 方法 1：下载已构建的 App 包（推荐 macOS 用户）
 目前我们已提供 **macOS** 版本的 Release 包，下载即可快速体验。
 - **下载地址**：[点击前往 Releases 页面下载](https://github.com/alexazhou/TogoAgent/releases)
-- **使用说明**：下载并运行后，ToGo Agent 将常驻于你的系统状态栏。点击状态栏图标即可开启控制台、管理团队或执行任务。
+- **使用说明**：下载并运行后，TogoSpace 将常驻于你的系统状态栏。点击状态栏图标即可开启控制台、管理团队或执行任务。
 
 ![Status Bar Entry](image/cn/entry.png)
 

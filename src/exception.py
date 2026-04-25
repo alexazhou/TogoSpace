@@ -1,7 +1,7 @@
 from typing import Any
 
 
-class TeamAgentException(Exception):
+class TogoException(Exception):
     """自定义异常类，用于业务异常处理"""
 
     def __init__(self, error_message: str, error_code: Any = None):

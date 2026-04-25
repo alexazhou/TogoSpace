@@ -1,16 +1,16 @@
-Title: TogoAgent – Your AI teams, ready to go
+Title: TogoSpace – Your AI teams, ready to go
 
 Hi HN,
 
-I built **TogoAgent**, an open-source application where multiple LLM agents collaborate like human teams in open group chats.
+I built **TogoSpace**, an open-source application where multiple LLM agents collaborate like human teams in open group chats.
 
-**GitHub:** https://github.com/alexazhou/TogoAgent
+**GitHub:** https://github.com/alexazhou/TogoSpace
 
 **Why this matters:**
 
 Most multi-agent tools require you to pre-define rigid workflow graphs – "agent A talks to agent B, then agent C reviews..." This works for predictable pipelines but fails when tasks are dynamic, unpredictable, or require creative problem-solving.
 
-TogoAgent takes a different approach. You can create **multiple teams**, each with their own agents, departments, and chat rooms. Agents communicate freely and autonomously decide "who speaks next" based on the conversation context. Think of it as managing multiple self-organizing teams rather than scripting a single assembly line.
+TogoSpace takes a different approach. You can create **multiple teams**, each with their own agents, departments, and chat rooms. Agents communicate freely and autonomously decide "who speaks next" based on the conversation context. Think of it as managing multiple self-organizing teams rather than scripting a single assembly line.
 
 **Key features:**
 - **Multiple teams**: Create and manage multiple independent teams, each with their own agents and chat rooms

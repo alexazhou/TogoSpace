@@ -1,4 +1,4 @@
-# TogoAgent 版本发布手册
+# TogoSpace 版本发布手册
 
 本文档描述发布新版本的最小流程。
 
@@ -67,13 +67,13 @@ python scripts/build_release.py --arch x86_64
 python scripts/build_release.py --arch x86_64 --skip-notarize
 ```
 
-输出：`dist/TogoAgent-0.1.12-macos-x86_64.zip`
+输出：`dist/TogoSpace-0.1.12-macos-x86_64.zip`
 
 ## 4. 上传到 Release
 
 ```bash
 # 上传 x86_64 安装包到已有 Release
-gh release upload v0.1.12 dist/TogoAgent-0.1.12-macos-x86_64.zip
+gh release upload v0.1.12 dist/TogoSpace-0.1.12-macos-x86_64.zip
 ```
 
 ## 5. 验证 Release
@@ -84,8 +84,8 @@ gh release view v0.1.12
 ```
 
 确认包含两个安装包：
-- `TogoAgent-0.1.12-macos-arm64.zip` (CI 构建)
-- `TogoAgent-0.1.12-macos-x86_64.zip` (本地构建)
+- `TogoSpace-0.1.12-macos-arm64.zip` (CI 构建)
+- `TogoSpace-0.1.12-macos-x86_64.zip` (本地构建)
 
 ## 6. 完整流程示例
 
@@ -108,7 +108,7 @@ git push origin v0.1.12
 python scripts/build_release.py --arch x86_64
 
 # 5. 上传到 Release
-gh release upload v0.1.12 dist/TogoAgent-0.1.12-macos-x86_64.zip
+gh release upload v0.1.12 dist/TogoSpace-0.1.12-macos-x86_64.zip
 
 # 6. 验证
 gh release view v0.1.12
@@ -127,7 +127,7 @@ git tag -f v0.1.12
 git push origin master --tags --force
 
 # 3. 本地构建 x86_64 并上传（覆盖旧文件）
-gh release upload v0.1.12 dist/TogoAgent-0.1.12-macos-x86_64.zip --clobber
+gh release upload v0.1.12 dist/TogoSpace-0.1.12-macos-x86_64.zip --clobber
 ```
 
 **注意：** tag 版本号（如 v0.1.12）必须与 `src/version.py` 中的版本号一致，CI 会自动构建 arm64 版本。

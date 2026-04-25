@@ -1,9 +1,9 @@
-"""测试 TeamAgentException 和 IntegrityError 的错误处理。"""
+"""测试 TogoException 和 IntegrityError 的错误处理。"""
 import json
 import pytest
 from unittest import mock
 
-from exception import TeamAgentException
+from exception import TogoException
 from controller.baseController import BaseHandler
 
 
@@ -11,9 +11,9 @@ class TestErrorHandler:
     """测试错误处理逻辑。"""
 
     def test_team_agent_exception_to_json(self):
-        """验证 TeamAgentException 被正确转换为 JSON 错误响应。"""
+        """验证 TogoException 被正确转换为 JSON 错误响应。"""
         # 模拟异常信息
-        exc = TeamAgentException(
+        exc = TogoException(
             error_message='成员名称"小孩哥"已存在',
             error_code="MEMBER_NAME_EXISTS",
         )
@@ -23,13 +23,13 @@ class TestErrorHandler:
         assert exc.error_code == "MEMBER_NAME_EXISTS"
 
     def test_integrity_error_wrapped(self):
-        """验证 IntegrityError 可以被包装为 TeamAgentException。"""
+        """验证 IntegrityError 可以被包装为 TogoException。"""
         from peewee import IntegrityError
 
         try:
             raise IntegrityError("UNIQUE constraint failed: agents.team_id, agents.name")
         except IntegrityError as e:
-            wrapped = TeamAgentException(
+            wrapped = TogoException(
                 error_message=f'成员名称"测试"已存在',
                 error_code="MEMBER_NAME_EXISTS",
             )
@@ -41,7 +41,7 @@ class TestBaseHandlerWriteError:
     """测试 BaseHandler.write_error 方法。"""
 
     def test_write_error_with_team_agent_exception(self):
-        """验证 write_error 正确处理 TeamAgentException。"""
+        """验证 write_error 正确处理 TogoException。"""
         # 创建 mock handler
         handler = mock.MagicMock(spec=BaseHandler)
         handler.enhance = {}
@@ -50,11 +50,11 @@ class TestBaseHandlerWriteError:
         handler.set_status = mock.MagicMock()
 
         # 调用实际的 write_error 方法
-        exc = TeamAgentException(
+        exc = TogoException(
             error_message='成员名称"小孩哥"已存在',
             error_code="MEMBER_NAME_EXISTS",
         )
-        exc_info = (TeamAgentException, exc, None)
+        exc_info = (TogoException, exc, None)
 
         # 使用实际方法
         BaseHandler.write_error(handler, 500, exc_info=exc_info)

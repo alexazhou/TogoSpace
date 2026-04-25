@@ -4,7 +4,7 @@ import logging
 
 from constants import EmployStatus, RoleTemplateType, RoomType, SpecialAgent
 from dal.db import gtAgentManager, gtRoleTemplateManager, gtTeamManager
-from exception import TeamAgentException
+from exception import TogoException
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoom import GtRoom
@@ -39,7 +39,7 @@ def _validate_dept_tree_config(node: DeptNodeConfig) -> None:
     """在进入数据库事务前，对部门树配置进行纯逻辑校验。"""
     for child in node.children:
         if child.manager not in node.agents:
-            raise TeamAgentException(
+            raise TogoException(
                 f"部门 '{node.dept_name}' 的子部门 '{child.dept_name}' 的负责人 '{child.manager}' 不在父部门的 agents 列表中",
                 error_code="CHILD_MANAGER_NOT_IN_PARENT_AGENTS",
             )
@@ -56,7 +56,7 @@ async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> GtDept:
     agent_id_map = {agent.name: agent.id for agent in gt_agents}
     missing_names = [name for name in lookup_names if name not in agent_id_map]
     if missing_names:
-        raise TeamAgentException(
+        raise TogoException(
             f"部门 '{node.dept_name}' 的 Agent '{missing_names[0]}' 在 team_agents 中不存在",
             error_code="DEPT_AGENT_NOT_FOUND",
         )

@@ -2,8 +2,8 @@
 运行时路径模块。
 
 引入 STORAGE_ROOT 统一管理所有可写目录：
-- 打包模式：~/.togo_agent
-- 开发模式：仓库根目录下的 .togo_agent
+- 打包模式：~/.togospace
+- 开发模式：仓库根目录下的 dev_storage_root/
 
 静态资源（只读）在打包时指向 _MEIPASS，开发时指向仓库 assets/。
 """
@@ -26,7 +26,7 @@ CONFIG_DIR: str
 PRESET_DIR: str
 
 if _IS_FROZEN:
-    STORAGE_ROOT = os.path.expanduser("~/.togo_agent")
+    STORAGE_ROOT = os.path.expanduser("~/.togospace")
     ASSETS_DIR = os.path.join(_MEIPASS, "assets")
 else:
     STORAGE_ROOT = os.path.abspath(os.path.join(_ROOT, "dev_storage_root"))

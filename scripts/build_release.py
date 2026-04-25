@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-macOS Release 构建脚本：构建、签名、公证、打包 TogoAgent.app
+macOS Release 构建脚本：构建、签名、公证、打包 TogoSpace.app
 
 可用 action：
-  build     — PyInstaller 构建 TogoAgent.app
+  build     — PyInstaller 构建 TogoSpace.app
   sign      — 代码签名 + 验证（Developer ID Application）
   notarize  — 公证 + Staple
   zip       — 创建 zip 安装包
@@ -162,7 +162,7 @@ def staple_app(app_path: str):
 def create_zip(app_path: str, arch: str, version: str) -> str:
     """创建 zip 安装包。"""
     print("\n--- 5. 创建 zip 安装包 ---")
-    zip_name = f"TogoAgent-{version}-macos-{arch}.zip"
+    zip_name = f"TogoSpace-{version}-macos-{arch}.zip"
     zip_path = os.path.join(DIST_PATH, zip_name)
 
     if os.path.exists(zip_path):
@@ -271,7 +271,7 @@ def parse_actions(raw: str | None) -> list[str]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="TogoAgent Release 构建脚本")
+    parser = argparse.ArgumentParser(description="TogoSpace Release 构建脚本")
     parser.add_argument("--action", type=str, default=None,
                         help=f"要执行的步骤（逗号分隔，可选: {','.join(VALID_ACTIONS)}；默认全部流水线）")
     parser.add_argument("--arch", type=str, default=None, choices=["arm64", "x86_64"],
@@ -297,7 +297,7 @@ def main():
     if needs_sign_config:
         print(f"ℹ️  签名身份: {config['signing_identity_hash']}")
 
-    app_path = os.path.join(DIST_PATH, f"TogoAgent-{version}.app")
+    app_path = os.path.join(DIST_PATH, f"TogoSpace-{version}.app")
 
     # --- check（独立操作，直接返回）---
     if "check" in actions:
