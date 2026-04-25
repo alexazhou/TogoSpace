@@ -74,11 +74,11 @@ cd frontend && npm install && npm run dev
 # Pull the image from Docker Hub
 docker pull alexazhou/togospace:latest
 
-# Run with data persistence and port mapping
-docker run -d \
+# Run with storage persistence and port mapping
+docker run \
   --name togospace \
   -p 8080:8080 \
-  -v /path/to/your/data:/data \
+  -v /path/to/your/storage:/storage \
   alexazhou/togospace:latest
 
 # Access the Web console at http://localhost:8080

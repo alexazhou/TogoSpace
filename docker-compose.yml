@@ -15,9 +15,9 @@ services:
       - "8080:8080"
     volumes:
       # 持久化数据目录
-      - togospace-data:/data
+      - togospace-storage:/storage
       # 可选：挂载自定义配置文件
-      # - ./setting.json:/data/setting.json:ro
+      # - ./setting.json:/storage/setting.json:ro
     environment:
       # 可选：覆盖监听端口
       # - BIND_PORT=8080
@@ -32,5 +32,5 @@ services:
       start_period: 5s
 
 volumes:
-  togospace-data:
-    name: togospace-data
+  togospace-storage:
+    name: togospace-storage

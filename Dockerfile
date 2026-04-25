@@ -4,7 +4,7 @@
 # 构建方式：
 #   1. 确保 frontend 子模块已初始化：git submodule update --init --recursive
 #   2. docker build -t togospace:0.1.20 .
-#   3. docker run -d -p 8080:8080 -v togospace-data:/data togospace:0.1.20
+#   3. docker run -d -p 8080:8080 -v togospace-storage:/storage togospace:0.1.20
 
 # ============================================
 # Stage 1: 构建前端
@@ -43,7 +43,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     TOGOSPACE_HOME=/opt/togospace \
-    STORAGE_ROOT=/data
+    STORAGE_ROOT=/storage
 
 # 安装 Python 和运行依赖
 RUN apt-get update && apt-get install -y \
@@ -89,4 +89,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # 启动命令
 WORKDIR ${TOGOSPACE_HOME}/src
-CMD ["../.venv/bin/python3", "backend_main.py", "--config-dir", "/data"]
+CMD ["../.venv/bin/python3", "backend_main.py", "--config-dir", "/storage"]
