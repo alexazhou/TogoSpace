@@ -192,9 +192,7 @@ class ChatRoom:
     async def get_unread_messages(self, agent_id: int) -> List[GtCoreRoomMessage]:
         """返回 agent_id 尚未读取的新消息，并推进其读取位置。"""
         new_msgs = self._store.get_unread(agent_id)
-        if self._state != RoomState.INIT:
-            id_keyed = {str(k): v for k, v in self._store.get_read_index().items()}
-            await gtRoomManager.update_room_state(self.room_id, id_keyed, self._turn_pos)
+        await self._persist_room_state()
         return new_msgs
 
     async def add_message(self, sender_id: int, content: str, send_time: datetime | None = None) -> None:
@@ -305,7 +303,7 @@ class ChatRoom:
             return True
 
         self._go_next_turn()
-        await self._persist_turn_pos()
+        await self._persist_room_state()
         next_agent_id = self._resolve_next_dispatchable_agent()
         if next_agent_id is not None:
             self._publish_room_status(need_scheduling=True)
@@ -322,8 +320,10 @@ class ChatRoom:
         assert self._agent_ids, f"房间 {self.key} 没有任何参与者"
         return self._agent_ids[self._turn_pos]
 
-    async def _persist_turn_pos(self) -> None:
-        """将 _turn_pos 持久化到数据库（在 finish_turn 后调用）。"""
+    async def _persist_room_state(self) -> None:
+        """持久化当前 turn_pos 与各 Agent 已读进度。"""
+        if self._state == RoomState.INIT:
+            return
         id_keyed = {str(k): v for k, v in self._store.get_read_index().items()}
         await gtRoomManager.update_room_state(self.room_id, id_keyed, self._turn_pos)
 
