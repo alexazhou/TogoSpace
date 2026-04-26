@@ -92,20 +92,20 @@ class ChatRoom:
             if agent.id != self.SYSTEM_MEMBER_ID
         ]
 
-    def _get_agent_by_id(self, agent_id: int) -> GtAgent | None:
-        """根据 agent_id 获取 GtAgent 对象。"""
+    def get_gt_agent(self, agent_id: int) -> GtAgent | None:
+        """根据 agent_id 获取运行态房间中的 Agent 对象（包含 SpecialAgent）。"""
         for agent in self._agents:
             if agent.id == agent_id:
                 return agent
         return None
 
-    def _get_agent_name(self, agent_id: int) -> str:
+    def get_agent_name(self, agent_id: int) -> str:
         """根据 agent_id 获取显示名称（从 i18n 解析）。"""
         if agent_id == self.SYSTEM_MEMBER_ID:
             return SpecialAgent.SYSTEM.name
         if agent_id == self.OPERATOR_MEMBER_ID:
             return SpecialAgent.OPERATOR.name
-        agent = self._get_agent_by_id(agent_id)
+        agent = self.get_gt_agent(agent_id)
         if agent is None:
             return str(agent_id)
         return self._get_agent_display_name(agent)
@@ -116,7 +116,7 @@ class ChatRoom:
             return SpecialAgent.SYSTEM.name
         if agent_id == self.OPERATOR_MEMBER_ID:
             return SpecialAgent.OPERATOR.name
-        agent = self._get_agent_by_id(agent_id)
+        agent = self.get_gt_agent(agent_id)
         return agent.name if agent else str(agent_id)
 
     def get_agent_id_by_name(self, name: str) -> int | None:
@@ -128,10 +128,6 @@ class ChatRoom:
             if agent.name == name:
                 return agent.id
         return None
-
-    def get_gt_agent(self, agent_id: int) -> GtAgent | None:
-        """根据 agent_id 获取运行态房间中的 Agent 对象（包含 SpecialAgent）。"""
-        return self._get_agent_by_id(agent_id)
 
     def can_post_message(self, sender_id: int) -> bool:
         """返回 sender_id 是否允许向当前房间写消息。"""
@@ -170,7 +166,7 @@ class ChatRoom:
         )
         message = GtCoreRoomMessage(
             sender_id=sender_id,
-            sender_name=self._get_agent_name(sender_id),
+            sender_name=self.get_agent_name(sender_id),
             content=content,
             send_time=send_time or datetime.now()
         )
@@ -200,7 +196,7 @@ class ChatRoom:
         # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
         was_idle = (self._state == RoomState.IDLE)
         if was_idle:
-            logger.info(f"检测到房间 {self.key} 的活动 ({self._get_agent_name(sender_id)}(agent_id={sender_id}))，重置轮次计数器并唤醒房间")
+            logger.info(f"检测到房间 {self.key} 的活动 ({self.get_agent_name(sender_id)}(agent_id={sender_id}))，重置轮次计数器并唤醒房间")
             self._turn_count = 0
             self._round_skipped_set = set()
             self._current_turn_has_content = False
@@ -211,7 +207,7 @@ class ChatRoom:
         if sender_id == current_expected:
             self._current_turn_has_content = True
         else:
-            logger.info(f"房间 {self.key} 收到来自 {self._get_agent_name(sender_id)}(agent_id={sender_id}) 的插话，保持当前发言位 (当前应轮到 {self._get_agent_name(current_expected)}(agent_id={current_expected}))")
+            logger.info(f"房间 {self.key} 收到来自 {self.get_agent_name(sender_id)}(agent_id={sender_id}) 的插话，保持当前发言位 (当前应轮到 {self.get_agent_name(current_expected)}(agent_id={current_expected}))")
 
         # 3. 只要有真实消息（非系统消息），就清空跳过记录，让所有人重新有机会回应
         if sender_id != self.SYSTEM_MEMBER_ID and self._round_skipped_set:
@@ -240,12 +236,12 @@ class ChatRoom:
         current_expected = self._get_current_turn_agent_id()
 
         if agent_id != current_expected:
-            logger.warning(f"房间 {self.key} 拒绝结束轮次申请：{self._get_agent_name(agent_id)}(agent_id={agent_id}) 并非当前发言人 {self._get_agent_name(current_expected)}(agent_id={current_expected})")
+            logger.warning(f"房间 {self.key} 拒绝结束轮次申请：{self.get_agent_name(agent_id)}(agent_id={agent_id}) 并非当前发言人 {self.get_agent_name(current_expected)}(agent_id={current_expected})")
             return False
 
         logger.info(
             "房间 %s 由 %s(agent_id=%d) 结束本轮行动 (has_content=%s, turn_pos=%d/%d, turn_count=%d)",
-            self.key, self._get_agent_name(current_expected), current_expected,
+            self.key, self.get_agent_name(current_expected), current_expected,
             self._current_turn_has_content, self._turn_pos, len(self._agent_ids), self._turn_count,
         )
 
@@ -352,7 +348,7 @@ class ChatRoom:
             next_id = next_agent.id if next_agent else None
 
             if self._should_auto_skip_agent_turn():
-                logger.info(f"房间 {self.key} 自动跳过人类操作者回合: {self._get_agent_name(next_id)}(agent_id={next_id})")
+                logger.info(f"房间 {self.key} 自动跳过人类操作者回合: {self.get_agent_name(next_id)}(agent_id={next_id})")
                 if next_id is not None:
                     self._round_skipped_set.add(next_id)
                 self._current_turn_has_content = False
@@ -366,7 +362,7 @@ class ChatRoom:
                 logger.info(
                     "当前发言位为特殊成员，等待外部输入，不发布 ROOM_AGENT_TURN: room=%s, %s(agent_id=%s)",
                     self.key,
-                    self._get_agent_name(next_id),
+                    self.get_agent_name(next_id),
                     next_id,
                 )
                 return None
@@ -485,7 +481,7 @@ class ChatRoom:
     def format_log(self) -> str:
         lines = [f"=== {self.key} 聊天记录 ==="]
         for msg in self.messages:
-            sender_name = self._get_agent_name(msg.sender_id)
+            sender_name = self.get_agent_name(msg.sender_id)
             lines.append(f"[{msg.send_time.isoformat()}] {sender_name}: {msg.content}")
         return "\n".join(lines)
 
@@ -533,7 +529,7 @@ class ChatRoom:
         if self._state != RoomState.SCHEDULING or not self._agent_ids:
             return None
         agent_id = self._get_current_turn_agent_id()
-        agent = self._get_agent_by_id(agent_id)
+        agent = self.get_gt_agent(agent_id)
         return {
             "id": agent_id,
             "name": agent.name if agent else self._get_agent_stable_name(agent_id),

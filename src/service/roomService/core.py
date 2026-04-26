@@ -116,7 +116,7 @@ async def _restore_room_runtime_state(room: ChatRoom) -> None:
         for row in gt_room_messages:
             restored_messages.append(GtCoreRoomMessage(
                 sender_id=row.agent_id,
-                sender_name=room._get_agent_name(row.agent_id),
+                sender_name=room.get_agent_name(row.agent_id),
                 content=row.content,
                 send_time=datetime.fromisoformat(row.send_time),
             ))
