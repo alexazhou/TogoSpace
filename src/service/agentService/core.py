@@ -205,6 +205,10 @@ def get_agent(agent_id: int) -> "Agent":
     return agent
 
 
+def get_agent_or_none(agent_id: int) -> "Agent | None":
+    return _agents.get(agent_id)
+
+
 def get_all_agents() -> list["Agent"]:
     return list(_agents.values())
 

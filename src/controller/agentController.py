@@ -223,11 +223,7 @@ class AgentResumeHandler(BaseHandler):
 
     async def post(self, agent_id_str: str) -> None:
         agent_id = int(agent_id_str)
-        agent = None
-        try:
-            agent = agentService.get_agent(agent_id)
-        except KeyError:
-            pass
+        agent = agentService.get_agent_or_none(agent_id)
         assertUtil.assertNotNull(agent, None, f"运行时 Agent ID '{agent_id}' 不存在", "agent_not_found")
         assertUtil.assertTrue(agent.status == AgentStatus.FAILED, None, f"Agent ID={agent.gt_agent.id} 当前状态不是 FAILED（当前: {agent.status.name}）", "agent_not_failed")
 
@@ -241,11 +237,7 @@ class AgentStopHandler(BaseHandler):
 
     async def post(self, agent_id_str: str) -> None:
         agent_id = int(agent_id_str)
-        agent = None
-        try:
-            agent = agentService.get_agent(agent_id)
-        except KeyError:
-            pass
+        agent = agentService.get_agent_or_none(agent_id)
         assertUtil.assertNotNull(agent, None, f"运行时 Agent ID '{agent_id}' 不存在", "agent_not_found")
         assertUtil.assertTrue(agent.status == AgentStatus.ACTIVE, None, f"Agent ID={agent.gt_agent.id} 当前状态不是 ACTIVE（当前: {agent.status.name}）", "agent_not_active")
 
