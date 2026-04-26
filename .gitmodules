@@ -1,3 +1,3 @@
 [submodule "frontend"]
 	path = frontend
-	url = git@github.com:alexazhou/TogoAgentFrontend.git
+	url = git@github.com:alexazhou/TogoSpaceFrontend.git
