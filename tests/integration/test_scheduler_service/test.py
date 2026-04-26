@@ -58,12 +58,12 @@ def _patch_scheduler_rooms(monkeypatch, *rooms: roomService.ChatRoom) -> None:
     monkeypatch.setattr(scheduler.chat_room, "get_room", lambda room_id: room_map.get(room_id))
 
 
-def _make_scheduling_payload(room: roomService.ChatRoom, gt_agent) -> dict:
+def _make_scheduling_payload(room: roomService.ChatRoom, agent_id: int) -> dict:
     """构建 need_scheduling=True 的标准事件 payload。"""
     return {
         "gt_room": room.gt_room,
         "need_scheduling": True,
-        "current_turn_agent": gt_agent,
+        "current_turn_agent_id": agent_id,
     }
 
 
@@ -101,7 +101,7 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            agents=[GtAgent(id=1, team_id=1, name="alice", role_template_id=1)],
+            agent_ids=[1],
         )
 
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
@@ -120,7 +120,7 @@ class TestSchedulerRun(ServiceTestCase):
             mock_task_manager.has_pending_room_task = AsyncMock(return_value=False)
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_STATUS_CHANGED,
-                payload=_make_scheduling_payload(room, alice.gt_agent),
+                payload=_make_scheduling_payload(room, alice.gt_agent.id),
             )
             await scheduler._on_room_status_changed(msg)
 
@@ -214,7 +214,7 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            agents=[GtAgent(id=1, team_id=1, name="alice", role_template_id=1)],
+            agent_ids=[1],
         )
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         _patch_scheduler_rooms(monkeypatch, room)
@@ -232,7 +232,7 @@ class TestSchedulerRun(ServiceTestCase):
             mock_task_manager.has_pending_room_task = AsyncMock(return_value=False)
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_STATUS_CHANGED,
-                payload=_make_scheduling_payload(room, alice.gt_agent),
+                payload=_make_scheduling_payload(room, alice.gt_agent.id),
             )
             await scheduler._on_room_status_changed(msg)
 
@@ -266,7 +266,7 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            agents=[GtAgent(id=1, team_id=1, name="alice", role_template_id=1)],
+            agent_ids=[1],
         )
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         _patch_scheduler_rooms(monkeypatch, room)
@@ -284,7 +284,7 @@ class TestSchedulerRun(ServiceTestCase):
             mock_task_manager.has_pending_room_task = AsyncMock(return_value=True)
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_STATUS_CHANGED,
-                payload=_make_scheduling_payload(room, alice.gt_agent),
+                payload=_make_scheduling_payload(room, alice.gt_agent.id),
             )
             await scheduler._on_room_status_changed(msg)
 
@@ -309,7 +309,7 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            agents=[GtAgent(id=1, team_id=1, name="alice", role_template_id=1)],
+            agent_ids=[1],
         )
         r2 = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
@@ -323,7 +323,7 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            agents=[GtAgent(id=1, team_id=1, name="alice", role_template_id=1)],
+            agent_ids=[1],
         )
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         _patch_scheduler_rooms(monkeypatch, r1, r2)
@@ -339,11 +339,11 @@ class TestSchedulerRun(ServiceTestCase):
             mock_task_manager.has_pending_room_task = AsyncMock(side_effect=[False, False])
             msg_r1 = EventBusMessage(
                 topic=MessageBusTopic.ROOM_STATUS_CHANGED,
-                payload=_make_scheduling_payload(r1, alice.gt_agent),
+                payload=_make_scheduling_payload(r1, alice.gt_agent.id),
             )
             msg_r2 = EventBusMessage(
                 topic=MessageBusTopic.ROOM_STATUS_CHANGED,
-                payload=_make_scheduling_payload(r2, alice.gt_agent),
+                payload=_make_scheduling_payload(r2, alice.gt_agent.id),
             )
             await scheduler._on_room_status_changed(msg_r1)
             await scheduler._on_room_status_changed(msg_r2)
@@ -376,14 +376,14 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            agents=[GtAgent(id=1, team_id=1, name="non-existent", role_template_id=1)],
+            agent_ids=[1],
         )
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
         _force_schedule_running()
         msg = EventBusMessage(
             topic=MessageBusTopic.ROOM_STATUS_CHANGED,
-            payload=_make_scheduling_payload(room, GtAgent(id=1, team_id=1, name="non-existent", role_template_id=1)),
+            payload=_make_scheduling_payload(room, 1),
         )
         with patch("service.schedulerService.agentService.get_agent", side_effect=KeyError("not found")):
             with pytest.raises(KeyError, match="not found"):
@@ -404,14 +404,14 @@ class TestSchedulerRun(ServiceTestCase):
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
             ),
-            agents=[GtAgent(id=1, team_id=1, name="error-agent", role_template_id=1)],
+            agent_ids=[1],
         )
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
         _force_schedule_running()
         msg = EventBusMessage(
             topic=MessageBusTopic.ROOM_STATUS_CHANGED,
-            payload=_make_scheduling_payload(room, GtAgent(id=1, team_id=1, name="error-agent", role_template_id=1)),
+            payload=_make_scheduling_payload(room, 1),
         )
         with patch("service.schedulerService.agentService.get_agent", side_effect=RuntimeError("unexpected")):
             with pytest.raises(RuntimeError, match="unexpected"):

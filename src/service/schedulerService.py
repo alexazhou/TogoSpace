@@ -89,8 +89,7 @@ async def _on_room_status_changed(msg: EventBusMessage) -> None:
     if _schedule_state != ScheduleState.RUNNING:
         return
 
-    gt_agent: GtAgent = msg.payload["current_turn_agent"]
-    agent_id: int = gt_agent.id
+    agent_id: int = msg.payload["current_turn_agent_id"]
     room_id: int = msg.payload["gt_room"].id
 
     assert SpecialAgent.value_of(agent_id) is None, \

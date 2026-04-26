@@ -192,8 +192,10 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
 
         # 验证生成的 prompt 格式（使用消息中已保存的 display_name）
-        system_line = promptBuilder.format_room_message("general", "系统提醒", room.build_initial_system_message())
-        bob_display_name = room._get_gt_agent(bob_id).display_name
+        system_line = promptBuilder.format_room_message("general", "系统提醒", await room.build_initial_system_message())
+        bob_agent = await gtAgentManager.get_agent_by_id(bob_id)
+        assert bob_agent is not None
+        bob_display_name = bob_agent.display_name
         bob_line = promptBuilder.format_room_message("general", bob_display_name, "hello alice")
         expected_prompt = promptBuilder.build_turn_begin_prompt("general", [system_line, bob_line])
 

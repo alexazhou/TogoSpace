@@ -46,6 +46,7 @@ class TestDalManagers(ServiceTestCase):
         await ormService.shutdown()
 
     async def _reset_tables(self):
+        gtAgentManager.clear_agent_cache()  # 清空缓存，避免测试间数据污染
         await GtRoleTemplate.delete().aio_execute()
         await GtAgent.delete().aio_execute()
         await GtAgentTask.delete().aio_execute()

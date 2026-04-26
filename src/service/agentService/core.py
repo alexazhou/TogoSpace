@@ -40,6 +40,10 @@ async def startup() -> None:
 
 async def _ensure_special_agents_exist() -> None:
     """确保数据库中存在 SpecialAgent 记录（跨团队 Agent，team_id=-1）。"""
+    special_agent_i18n = {
+        SpecialAgent.SYSTEM: {"zh-CN": "系统提醒", "en": "SYSTEM"},
+        SpecialAgent.OPERATOR: {"zh-CN": "操作者", "en": "OPERATOR"},
+    }
     for special in SpecialAgent:
         agent_id = int(special.value)
         existing = await gtAgentManager.get_agents_by_ids([agent_id])
@@ -52,7 +56,7 @@ async def _ensure_special_agents_exist() -> None:
                     "role_template_id": 0,
                     "employ_status": EmployStatus.ON_BOARD,
                     "employee_number": agent_id,  # 使用负数避免与正常 agent 冲突
-                    "i18n": {"display_name": {"zh-CN": special.name, "en": special.name}},
+                    "i18n": {"display_name": special_agent_i18n[special]},
                 }
             ]).aio_execute()
             logger.info(f"创建 SpecialAgent 记录: id={agent_id}, name={special.name}")

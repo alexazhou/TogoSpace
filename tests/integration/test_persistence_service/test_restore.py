@@ -4,6 +4,7 @@ import sys
 import pytest
 
 from constants import OpenaiApiRole, SpecialAgent, ScheduleState
+from dal.db import gtAgentManager
 from tests.base import ServiceTestCase
 from util import configUtil
 from service import (
@@ -38,6 +39,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
     @pytest.fixture(autouse=True)
     async def _reset_between_tests(self):
+        gtAgentManager.clear_agent_cache()  # 清空缓存，避免测试间数据污染
         self.cleanup_sqlite_files()
         await self._reset_runtime_services()
         yield

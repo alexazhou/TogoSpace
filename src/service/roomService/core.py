@@ -50,13 +50,11 @@ async def _load_room(
     agent_ids: List[int],
 ) -> None:
     """将数据库房间装载到运行态。"""
-    room_agents = await gtAgentManager.get_team_agents_by_ids(gt_team.id, agent_ids)
-
-    room = ChatRoom(team=gt_team, room=gt_room, agents=room_agents)
+    room = ChatRoom(team=gt_team, room=gt_room, agent_ids=agent_ids)
     _rooms[room.key] = room
     _rooms_by_id[room.room_id] = room
 
-    logger.info(f"创建并初始化聊天室: room_id={room.room_id}, type={room.room_type.name}, agents={[agent.name for agent in room_agents]}")
+    logger.info(f"创建并初始化聊天室: room_id={room.room_id}, type={room.room_type.name}, agent_ids={agent_ids}")
     if gt_room.max_turns > 0:
         logger.info(f"初始化轮次配置: room_id={room.room_id}, max_turns={gt_room.max_turns}")
 
@@ -114,11 +112,10 @@ async def _restore_room_runtime_state(room: ChatRoom) -> None:
     if gt_room_messages:
         restored_messages = []
         for row in gt_room_messages:
-            # SYSTEM 使用固定名称，其他从房间成员获取 display_name
-            if row.agent_id == int(SpecialAgent.SYSTEM.value):
-                sender_display_name = "系统提醒"
-            else:
-                sender_display_name = room._get_gt_agent(row.agent_id).display_name
+            # 从数据库获取 display_name（SYSTEM agent 也有数据库记录）
+            agent = await gtAgentManager.get_agent_by_id(row.agent_id)
+            assert agent, f"agent_id '{row.agent_id}' not found"
+            sender_display_name = agent.display_name
             restored_messages.append(GtCoreRoomMessage(
                 sender_id=row.agent_id,
                 sender_display_name=sender_display_name,

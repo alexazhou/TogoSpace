@@ -1,4 +1,4 @@
-"""测试 ChatRoom._agents 是否包含 SpecialAgent。"""
+"""测试 ChatRoom._agent_ids 是否包含 SpecialAgent ID。"""
 import os
 import sys
 
@@ -41,8 +41,8 @@ class TestRoomContainsSpecialAgent(ServiceTestCase):
         await agentService.shutdown()
         await ormService.shutdown()
 
-    async def test_room_agents_contains_operator(self):
-        """ChatRoom._agents 应包含 OPERATOR SpecialAgent。"""
+    async def test_room_agent_ids_contains_operator(self):
+        """ChatRoom._agent_ids 应包含 OPERATOR SpecialAgent ID。"""
         alice = await gtAgentManager.get_agent(self.team_id, "alice")
         assert alice is not None
 
@@ -60,20 +60,20 @@ class TestRoomContainsSpecialAgent(ServiceTestCase):
 
         room = roomService.get_room_by_key(f"op_room@{TEAM}")
 
-        # 验证 _agents 包含 OPERATOR
-        agent_names = [a.name for a in room._agents]
-        assert "OPERATOR" in agent_names
-        assert "alice" in agent_names
+        # 验证 _agent_ids 包含 OPERATOR ID
+        assert int(SpecialAgent.OPERATOR.value) in room._agent_ids
+        assert alice.id in room._agent_ids
 
-        # 验证 OPERATOR 的属性
-        op_agent = next(a for a in room._agents if a.id == int(SpecialAgent.OPERATOR.value))
+        # 验证 OPERATOR 的属性（从数据库查询）
+        op_agent = await gtAgentManager.get_agent_by_id(int(SpecialAgent.OPERATOR.value))
+        assert op_agent is not None
         assert op_agent.id == -1
         assert op_agent.team_id == -1  # 跨团队概念
         assert op_agent.name == "OPERATOR"
-        assert op_agent.i18n == {"display_name": {"zh-CN": "OPERATOR", "en": "OPERATOR"}}
+        assert op_agent.i18n == {"display_name": {"zh-CN": "操作者", "en": "OPERATOR"}}
 
-    async def test_room_agents_contains_system(self):
-        """ChatRoom._agents 应包含 SYSTEM SpecialAgent（如果房间配置包含）。"""
+    async def test_room_agent_ids_contains_system(self):
+        """ChatRoom._agent_ids 应包含 SYSTEM SpecialAgent ID（如果房间配置包含）。"""
         alice = await gtAgentManager.get_agent(self.team_id, "alice")
         assert alice is not None
 
@@ -90,14 +90,17 @@ class TestRoomContainsSpecialAgent(ServiceTestCase):
 
         room = roomService.get_room_by_key(f"sys_room@{TEAM}")
 
-        agent_names = [a.name for a in room._agents]
-        assert "SYSTEM" in agent_names
+        # 验证 _agent_ids 包含 SYSTEM ID
+        assert int(SpecialAgent.SYSTEM.value) in room._agent_ids
+        assert alice.id in room._agent_ids
 
-        sys_agent = next(a for a in room._agents if a.id == int(SpecialAgent.SYSTEM.value))
+        # 验证 SYSTEM 的属性（从数据库查询）
+        sys_agent = await gtAgentManager.get_agent_by_id(int(SpecialAgent.SYSTEM.value))
+        assert sys_agent is not None
         assert sys_agent.id == -2
         assert sys_agent.team_id == -1  # 跨团队概念
         assert sys_agent.name == "SYSTEM"
-        assert sys_agent.i18n == {"display_name": {"zh-CN": "SYSTEM", "en": "SYSTEM"}}
+        assert sys_agent.i18n == {"display_name": {"zh-CN": "系统提醒", "en": "SYSTEM"}}
 
     async def test_get_agent_ids_filters_system_by_default(self):
         """get_agent_ids() 默认不包含 SYSTEM，get_all_agent_ids() 包含。"""

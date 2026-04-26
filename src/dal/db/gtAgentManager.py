@@ -7,6 +7,39 @@ from model.dbModel.gtAgent import GtAgent
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 缓存层
+# ─────────────────────────────────────────────────────────────────────────────
+
+_agent_cache: dict[int, GtAgent] = {}  # agent_id -> GtAgent
+
+
+def cache_agents(agents: GtAgent | list[GtAgent]) -> None:
+    """将 agent(s) 加入缓存。支持单个 GtAgent 或列表。"""
+    if isinstance(agents, GtAgent):
+        if agents.id is not None:
+            _agent_cache[agents.id] = agents
+    else:
+        for agent in agents:
+            if agent.id is not None:
+                _agent_cache[agent.id] = agent
+
+
+def get_cached_agent(agent_id: int) -> GtAgent | None:
+    """从缓存获取 agent（同步方法，无数据库查询）。"""
+    return _agent_cache.get(agent_id)
+
+
+def invalidate_agent_cache(agent_id: int) -> None:
+    """失效单个 agent 的缓存。"""
+    _agent_cache.pop(agent_id, None)
+
+
+def clear_agent_cache() -> None:
+    """清空全部 agent 缓存。"""
+    _agent_cache.clear()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 查询方法（按 team）
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -113,15 +146,102 @@ async def get_team_agents_by_names(team_id: int, names: list[str]) -> list[GtAge
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
-    """按 ID 列表查询 agents，不限制 team_id。"""
+def get_agent_by_id_sync(agent_id: int) -> GtAgent | None:
+    """按 ID 查询单个 agent（同步方法，优先从缓存获取）。
+
+    若缓存未命中则从数据库同步查询，并自动填充缓存。
+    """
+    cached = get_cached_agent(agent_id)
+    if cached is not None:
+        return cached
+    agent = GtAgent.get_or_none(GtAgent.id == agent_id)
+    if agent is not None:
+        cache_agents(agent)
+    return agent
+
+
+def get_agent_name(agent_id: int) -> str:
+    """获取 agent 名称（同步方法，用于日志输出）。
+
+    优先从缓存获取，若不存在返回 "unknown({agent_id})"。
+    """
+    agent = get_agent_by_id_sync(agent_id)
+    return agent.name if agent else f"unknown({agent_id})"
+
+
+def get_agents_by_ids_sync(agent_ids: list[int]) -> list[GtAgent]:
+    """按 ID 列表查询 agents（同步方法，优先从缓存获取）。
+
+    缓存未命中的 ID 会从数据库批量查询，并自动填充缓存。
+    """
     if not agent_ids:
         return []
-    return list(
-        await GtAgent.select()
-        .where(GtAgent.id.in_(agent_ids))  # type: ignore[attr-defined]
-        .aio_execute()
-    )
+    agents: list[GtAgent] = []
+    uncached_ids: list[int] = []
+    for agent_id in agent_ids:
+        cached = get_cached_agent(agent_id)
+        if cached is not None:
+            agents.append(cached)
+        else:
+            uncached_ids.append(agent_id)
+    if uncached_ids:
+        fetched = list(
+            GtAgent.select()
+            .where(GtAgent.id.in_(uncached_ids))  # type: ignore[attr-defined]
+            .execute()
+        )
+        cache_agents(fetched)
+        fetched_map = {agent.id: agent for agent in fetched}
+        for agent_id in agent_ids:
+            if agent_id not in [a.id for a in agents if a.id is not None]:
+                fetched_agent = fetched_map.get(agent_id)
+                if fetched_agent is not None:
+                    agents.append(fetched_agent)
+    # 保持原始顺序
+    agent_map = {a.id: a for a in agents if a.id is not None}
+    return [agent_map[aid] for aid in agent_ids if aid in agent_map]
+
+
+async def get_agent_by_id(agent_id: int) -> GtAgent | None:
+    """按 ID 查询单个 agent，不限制 team_id（包含跨团队 Agent）。
+
+    查询结果会自动填充缓存。
+    """
+    cached = get_cached_agent(agent_id)
+    if cached is not None:
+        return cached
+    agent = await GtAgent.aio_get_or_none(GtAgent.id == agent_id)
+    if agent is not None:
+        cache_agents(agent)
+    return agent
+
+
+async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
+    """按 ID 列表查询 agents，不限制 team_id。
+
+    查询结果会自动填充缓存。
+    """
+    if not agent_ids:
+        return []
+    agents: list[GtAgent] = []
+    uncached_ids: list[int] = []
+    for agent_id in agent_ids:
+        cached = get_cached_agent(agent_id)
+        if cached is not None:
+            agents.append(cached)
+        else:
+            uncached_ids.append(agent_id)
+    if uncached_ids:
+        fetched = list(
+            await GtAgent.select()
+            .where(GtAgent.id.in_(uncached_ids))  # type: ignore[attr-defined]
+            .aio_execute()
+        )
+        cache_agents(fetched)
+        agents.extend(fetched)
+    # 保持原始顺序
+    agent_map = {a.id: a for a in agents if a.id is not None}
+    return [agent_map[aid] for aid in agent_ids if aid in agent_map]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

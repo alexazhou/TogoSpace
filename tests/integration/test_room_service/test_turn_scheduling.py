@@ -71,7 +71,7 @@ class TestTurnScheduling(ServiceTestCase):
                 MessageBusTopic.ROOM_STATUS_CHANGED,
                 gt_room=room.gt_room,
                 state=RoomState.SCHEDULING,
-                current_turn_agent=room._get_gt_agent(alice_id),
+                current_turn_agent_id=alice_id,
                 need_scheduling=True,
             )
 
@@ -91,7 +91,7 @@ class TestTurnScheduling(ServiceTestCase):
                 MessageBusTopic.ROOM_STATUS_CHANGED,
                 gt_room=room.gt_room,
                 state=RoomState.SCHEDULING,
-                current_turn_agent=room._get_gt_agent(bob_id),
+                current_turn_agent_id=bob_id,
                 need_scheduling=True,
             )
 

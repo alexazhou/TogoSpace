@@ -130,7 +130,8 @@ class TestChatRoomMessages(ServiceTestCase):
         await room.activate_scheduling()
         log = room.format_log()
         assert f"=== test_room@{TEAM} 聊天记录 ===" in log
-        assert "SYSTEM" in log
+        # SYSTEM agent 的 display_name 根据语言可能是"系统提醒"或"SYSTEM"
+        assert ("系统提醒" in log or "SYSTEM" in log)
 
     async def test_activate_scheduling_persists_initial_message(self):
         """首次激活调度时生成的初始化消息应像普通消息一样落库。"""

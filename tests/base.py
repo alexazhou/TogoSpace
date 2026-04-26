@@ -411,7 +411,8 @@ class ServiceTestCase:
 
     @classmethod
     def cleanup_sqlite_files(cls) -> None:
-        """删除测试 DB 文件（含后端子进程使用的 DB）。"""
+        """删除测试 DB 文件（含后端子进程使用的 DB），并清空 agent 缓存。"""
+        gtAgentManager.clear_agent_cache()  # 避免缓存污染测试间数据
         paths = [cls._get_test_db_path()]
         setting = configUtil.load(cls._backend_config_dir).setting
         path = setting.db_path
@@ -676,8 +677,3 @@ class ServiceTestCase:
                 tags=list(getattr(cfg, "tags", [])),
             ))
         return rooms
-
-    @staticmethod
-    def room_current_turn_name(room) -> str:
-        """测试辅助：获取当前发言人的稳定名（stable name）。"""
-        return room._get_agent_stable_name(room._get_current_turn_agent_id())

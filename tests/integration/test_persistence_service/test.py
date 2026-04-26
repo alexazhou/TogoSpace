@@ -46,6 +46,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
 
     @classmethod
     async def async_setup_class(cls):
+        gtAgentManager.clear_agent_cache()  # 清空缓存，避免测试间数据污染
         cls.db_path = Path(cls._get_test_db_path())
         await persistenceService.shutdown()
         await ormService.shutdown()
@@ -104,8 +105,8 @@ class TestRestoreRoomHistory(ServiceTestCase):
         ]
 
     async def test_read_index_restored(self):
-        assert self.restored.export_agent_read_index()["alice"] == 3
-        assert self.restored.export_agent_read_index()["bob"] == 2
+        assert self.restored.export_agent_read_index()[self.alice_id] == 3
+        assert self.restored.export_agent_read_index()[self.bob_id] == 2
 
 
 
@@ -117,6 +118,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
 
     @classmethod
     async def async_setup_class(cls):
+        gtAgentManager.clear_agent_cache()  # 清空缓存，避免测试间数据污染
         cls.db_path = Path(cls._get_test_db_path())
         await persistenceService.shutdown()
         await ormService.shutdown()
