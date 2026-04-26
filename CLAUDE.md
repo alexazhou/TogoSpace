@@ -302,43 +302,39 @@ STORAGE_ROOT/
 
 ### 项目级
 
-- [docs/ROADMAP.md](docs/ROADMAP.md)：里程碑与阶段目标
-- [docs/文档规范.md](docs/文档规范.md)：文档书写规范
-- [docs/mvc/controller_development.md](docs/mvc/controller_development.md)：Controller 开发说明
-- [docs/go_simu_terminal.md](docs/go_simu_terminal.md)：终端模拟器使用说明
+- docs/ROADMAP.md：里程碑与阶段目标
+- docs/文档规范.md：文档书写规范
+- docs/go_simu_terminal.md：终端模拟器使用说明
 
 ### 代码规范
 
-- [docs/code_rule/common_coding_rule.md](docs/code_rule/common_coding_rule.md)
-- [docs/code_rule/enum_conventions.md](docs/code_rule/enum_conventions.md)
-- [docs/code_rule/logger_convention.md](docs/code_rule/logger_convention.md)
-- [docs/code_rule/import_convention.md](docs/code_rule/import_convention.md)
-- [docs/mvc/service_conventions.md](docs/mvc/service_conventions.md)
-- [docs/mvc/dal_conventions.md](docs/mvc/dal_conventions.md)
+- docs/code_rule/common_coding_rule.md
+- docs/code_rule/enum_conventions.md
+- docs/code_rule/logger_convention.md
+- docs/code_rule/import_convention.md
 
 ### 技术设计
 
-- [docs/tech/agent_driver_architecture.md](docs/tech/agent_driver_architecture.md)
-- [docs/tech/agent_driver_vs_subclass.md](docs/tech/agent_driver_vs_subclass.md)
-- [docs/tech/agent_scheduling_logic.md](docs/tech/agent_scheduling_logic.md)
-- [docs/tech/token_compaction.md](docs/tech/token_compaction.md)
-- [docs/tech/task_lifecycle.md](docs/tech/task_lifecycle.md)
-- [docs/tech/turn_runner_as_driver_host.md](docs/tech/turn_runner_as_driver_host.md)
-- [docs/tech/service_dependencies.md](docs/tech/service_dependencies.md)
-- [docs/tech/state_persistence.md](docs/tech/state_persistence.md)
-- [docs/tech/test_execution_architecture.md](docs/tech/test_execution_architecture.md)
-- [docs/tech/test_case_design_guide.md](docs/tech/test_case_design_guide.md)
-- [docs/tech/tui_layout.md](docs/tech/tui_layout.md)
+- docs/tech/01_architecture/：系统架构概述、服务依赖关系
+- docs/tech/02_mvc/：Controller / Service / DAL 开发规范
+- docs/tech/03_dal/：自动时间字段注入
+- docs/tech/04_agent/：Driver 架构、调度逻辑、任务生命周期、状态持久化、Token 压缩
+- docs/tech/05_llm/：LLM 配置指南、Prompt Cache
+- docs/tech/06_i18n/：国际化设计方案、Web 实体 i18n 方案
+- docs/tech/07_test/：测试执行架构、测试用例设计指南
+- docs/tech/08_debugging/：轮次与消息排查指南
+- docs/tech/09_tui/：TUI 布局方案
+- docs/tech/10_release/：桌面打包发布方案、演示模式只读方案、未初始化场景调度闸门
 
 ### 版本文档
 
-- `docs/versions/v*/`：按版本沉淀的产品、技术、任务文档（v1 ~ v10）
+- docs/versions/v*/：按版本沉淀的产品、技术、任务文档（v1 ~ v10）
 
 ### 版本发布
 
-- [docs/RELEASE_HANDBOOK.md](docs/RELEASE_HANDBOOK.md)：版本发布操作手册
+- docs/RELEASE_HANDBOOK.md：版本发布操作手册
 
 相关工具：
-- `scripts/build_mac.py`：构建 macOS app（开发调试用）
-- `scripts/build_release.py`：构建 + 签名 + 公证 + 打包（发布用）
-- `scripts/build_config.json`：本地发布配置（从 `build_config.json.example` 复制填写）
+- scripts/build_mac.py：构建 macOS app（开发调试用）
+- scripts/build_release.py：构建 + 签名 + 公证 + 打包（发布用）
+- scripts/build_config.json：本地发布配置（从 build_config.json.example 复制填写）
