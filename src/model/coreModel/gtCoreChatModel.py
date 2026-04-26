@@ -10,7 +10,7 @@ from util import llmApiUtil
 class GtCoreRoomMessage:
     """房间消息数据类"""
     sender_id: int  # 发送者 agent_id（SpecialAgent 使用固定负值 ID）
-    sender_name: str  # 发送者稳定标识名
+    sender_name: str  # 发送者显示名（i18n display_name，供 LLM prompt 和日志使用）
     content: str
     send_time: datetime
     sender_i18n: dict = field(default_factory=dict)  # 发送者多语言信息，含 display_name
