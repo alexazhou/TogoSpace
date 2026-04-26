@@ -53,6 +53,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await messageBus.startup()
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
+        await agentService.startup()
         await roomService.startup()
         team = await gtTeamManager.save_team(GtTeam(name=TEAM))
         await gtAgentManager.batch_save_agents(

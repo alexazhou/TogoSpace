@@ -84,28 +84,21 @@ class ChatRoom:
             return [agent.id for agent in self._agents]
         return [agent.id for agent in self._agents if agent.id != self.SYSTEM_MEMBER_ID]
 
-    def _get_gt_agent(self, agent_id: int) -> GtAgent | None:
-        """根据 agent_id 获取运行态房间中的 Agent 对象（包含 SpecialAgent）。"""
+    def _get_gt_agent(self, agent_id: int) -> GtAgent:
+        """根据 agent_id 获取运行态房间中的 Agent 对象。
+
+        Assert 确保 agent_id 必在房间成员中。
+        """
         for agent in self._agents:
             if agent.id == agent_id:
                 return agent
-        return None
-
-    def _get_agent_i18n(self, agent_id: int) -> dict:
-        """根据 agent_id 获取其 i18n 字典（含 display_name）。"""
-        agent = self._get_gt_agent(agent_id)
-        if agent is not None:
-            return agent.i18n or {}
-        return {}
+        assert False, f"agent_id '{agent_id}' not found in room '{self.key}'"
 
     def _get_agent_stable_name(self, agent_id: int) -> str:
         """根据 agent_id 获取稳定标识名（用于持久化和匹配）。"""
-        agent = self._get_gt_agent(agent_id)
-        if agent is not None:
-            return agent.name
-        # fallback: 尝试匹配 SpecialAgent
-        special = SpecialAgent.value_of(agent_id)
-        return special.name if special is not None else str(agent_id)
+        if agent_id == self.SYSTEM_MEMBER_ID:
+            return "SYSTEM"
+        return self._get_gt_agent(agent_id).name
 
     def can_post_message(self, sender_id: int) -> bool:
         """返回 sender_id 是否允许向当前房间写消息。"""
@@ -142,9 +135,15 @@ class ChatRoom:
             error_message=f"sender_id '{sender_id}' is not an agent of room '{self.key}'",
             error_code="sender_not_in_room",
         )
+        # SYSTEM 使用固定名称，其他从 _agents 获取 display_name
+        if sender_id == self.SYSTEM_MEMBER_ID:
+            sender_display_name = "系统提醒"
+        else:
+            sender_display_name = self._get_gt_agent(sender_id).display_name
+
         message = GtCoreRoomMessage(
             sender_id=sender_id,
-            sender_i18n=self._get_agent_i18n(sender_id),
+            sender_display_name=sender_display_name,
             content=content,
             send_time=send_time or datetime.now()
         )
@@ -503,7 +502,7 @@ class ChatRoom:
         agent = self._get_gt_agent(agent_id)
         return {
             "id": agent_id,
-            "i18n": agent.i18n if agent is not None else {},
+            "i18n": agent.i18n,
         }
 
     def to_dict(self) -> dict:

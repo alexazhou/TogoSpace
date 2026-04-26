@@ -310,9 +310,8 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client
 
-        lang = configUtil.get_language()
-        first = promptBuilder.format_room_message("lobby", int(SpecialAgent.SYSTEM.value), {}, "房间初始化", lang)
-        second = promptBuilder.format_room_message("lobby", 2, {"display_name": {"zh-CN": "bob"}}, "hello alice", lang)
+        first = promptBuilder.format_room_message("lobby", "系统提醒", "房间初始化")
+        second = promptBuilder.format_room_message("lobby", "bob", "hello alice")
         turn_prompt = f"【lobby】 房间轮到你行动，新消息如下：\n\n{first}\n\n{second}\n\n你现在可以调用工具行动。"
         item = GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt),

@@ -12,6 +12,7 @@ from dal.db import gtTeamManager, gtAgentManager, gtRoomManager, gtRoomMessageMa
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
+from service import agentService
 from service.roomService import ChatRoom
 from ...base import ServiceTestCase
 
@@ -28,6 +29,7 @@ class TestRoomRegistry(ServiceTestCase):
         db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
+        await agentService.startup()
         await roomService.startup()
 
         # 预创建 team，_create_room 不再自动创建

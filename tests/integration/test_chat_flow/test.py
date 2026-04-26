@@ -39,12 +39,12 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
+        await agentService.startup()
         await roomService.startup()
         await presetService._import_role_templates_from_app_config()
         await presetService._import_team_from_config(team_config)
         await roomService.load_all_rooms()
         await funcToolService.startup()
-        await agentService.startup()
         await agentService.load_all_team_agents()
         await scheduler.startup()
         scheduler._schedule_state = ScheduleState.RUNNING

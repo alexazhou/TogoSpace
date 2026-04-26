@@ -114,9 +114,14 @@ async def _restore_room_runtime_state(room: ChatRoom) -> None:
     if gt_room_messages:
         restored_messages = []
         for row in gt_room_messages:
+            # SYSTEM 使用固定名称，其他从房间成员获取 display_name
+            if row.agent_id == int(SpecialAgent.SYSTEM.value):
+                sender_display_name = "系统提醒"
+            else:
+                sender_display_name = room._get_gt_agent(row.agent_id).display_name
             restored_messages.append(GtCoreRoomMessage(
                 sender_id=row.agent_id,
-                sender_i18n=room._get_agent_i18n(row.agent_id),
+                sender_display_name=sender_display_name,
                 content=row.content,
                 send_time=datetime.fromisoformat(row.send_time),
             ))

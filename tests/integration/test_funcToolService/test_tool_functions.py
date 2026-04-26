@@ -131,6 +131,7 @@ class TestToolFunctions(ServiceTestCase):
         db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
+        await agentService.startup()
         await roomService.startup()
         team = await gtTeamManager.save_team(GtTeam(name=TEAM))
         await gtAgentManager.batch_save_agents(
