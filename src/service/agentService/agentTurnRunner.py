@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -150,6 +151,11 @@ class AgentTurnRunner:
             else:
                 synced_count = await self.pull_room_messages_to_history(room)
                 await self.driver.run_chat_turn(task, synced_count)
+        except asyncio.CancelledError:
+            # CancelledError 穿透前，先处理房间取消逻辑
+            # finally 块会执行 _current_room = None，导致 handle_cancel_turn 无法获取 room
+            room.cancel_current_turn()
+            raise  # 继续穿透，让 agentTaskConsumer 处理任务状态更新
         finally:
             self._current_room = None
 
