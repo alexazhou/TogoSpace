@@ -279,6 +279,16 @@ class ChatRoom:
             need_scheduling=need_scheduling,
         )
 
+    def cancel_current_turn(self) -> None:
+        """人工停止当前 turn 后，将房间切回 IDLE，等待后续新消息重新唤醒。"""
+        if self._state != RoomState.SCHEDULING:
+            return
+
+        self._current_turn_has_content = False
+        self._state = RoomState.IDLE
+        logger.info("房间 %s 当前 turn 被人工停止，切回 IDLE 等待新消息唤醒", self.key)
+        self._publish_room_status()
+
     def _resolve_next_dispatchable_agent(self) -> Optional[int]:
         """解析下一位可发布 ROOM_AGENT_TURN 的普通 Agent ID。
 

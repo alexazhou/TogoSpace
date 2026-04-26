@@ -367,15 +367,18 @@ async def test_handle_cancel_turn_calls_driver_then_history(turn_runner):
     turn_runner.driver = MagicMock()
     turn_runner.driver.cancel_turn = AsyncMock()
     turn_runner._history.finalize_cancel_turn = AsyncMock()
+    turn_runner._current_room = MagicMock(spec=ChatRoom)
 
     call_order = []
     turn_runner.driver.cancel_turn.side_effect = lambda: call_order.append("driver")
+    turn_runner._current_room.cancel_current_turn.side_effect = lambda: call_order.append("room")
     turn_runner._history.finalize_cancel_turn.side_effect = lambda: call_order.append("history")
 
     with patch("service.agentService.agentTurnRunner.agentActivityService.fail_started_activities", new=AsyncMock(side_effect=lambda *args, **kwargs: call_order.append("activity"))) as mock_fail:
         await turn_runner.handle_cancel_turn()
 
     turn_runner.driver.cancel_turn.assert_awaited_once()
+    turn_runner._current_room.cancel_current_turn.assert_called_once_with()
     turn_runner._history.finalize_cancel_turn.assert_awaited_once()
     mock_fail.assert_awaited_once_with(turn_runner.gt_agent.id, error_message="cancelled by user")
-    assert call_order == ["driver", "history", "activity"]
+    assert call_order == ["driver", "room", "history", "activity"]

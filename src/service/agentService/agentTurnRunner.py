@@ -120,6 +120,8 @@ class AgentTurnRunner:
     async def handle_cancel_turn(self) -> None:
         """人工取消当前 turn 的收尾逻辑：driver 清理 → history 清理。"""
         await self.driver.cancel_turn()
+        if self._current_room is not None:
+            self._current_room.cancel_current_turn()
         await self._history.finalize_cancel_turn()
         await agentActivityService.fail_started_activities(self.gt_agent.id, error_message="cancelled by user")
 

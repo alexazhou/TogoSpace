@@ -302,6 +302,45 @@ class TestRoomTurnLogic(ServiceTestCase):
             assert len(turn_calls) >= 1
             assert turn_calls[-1][1]["current_turn_agent_id"] == await self._get_agent_id("alice")
 
+    async def test_manual_stop_wakeup_by_operator(self):
+        """
+        测试点：人工停止当前 turn 后，房间应回到 IDLE，后续 Operator 消息能重新唤醒原发言人。
+        """
+        room_name = "manual_stop_wakeup"
+        agents = ["alice", "OPERATOR"]
+        room_key = f"{room_name}@{TEAM}"
+        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        room = roomService.get_room_by_key(room_key)
+        assert await room.activate_scheduling()
+
+        assert room.state == RoomState.SCHEDULING
+        assert gtAgentManager.get_agent_name(room._get_current_turn_agent_id()) == "alice"
+
+        with patch("service.messageBus.publish") as mock_publish:
+            room.cancel_current_turn()
+
+            assert room.state == RoomState.IDLE
+            idle_calls = [
+                c for c in mock_publish.call_args_list
+                if c[0][0] == MessageBusTopic.ROOM_STATUS_CHANGED
+                and c[1].get("need_scheduling") is False
+            ]
+            assert len(idle_calls) >= 1
+
+        with patch("service.messageBus.publish") as mock_publish:
+            await room.add_message(room.OPERATOR_MEMBER_ID, "continue")
+
+            assert room.state == RoomState.SCHEDULING
+            assert gtAgentManager.get_agent_name(room._get_current_turn_agent_id()) == "alice"
+
+            turn_calls = [
+                c for c in mock_publish.call_args_list
+                if c[0][0] == MessageBusTopic.ROOM_STATUS_CHANGED
+                and c[1].get("need_scheduling")
+            ]
+            assert len(turn_calls) >= 1
+            assert turn_calls[-1][1]["current_turn_agent_id"] == await self._get_agent_id("alice")
+
     async def test_partial_skip_does_not_stop(self):
         """
         测试点：只有部分 Agent 跳过时，调度不停止，房间继续推进。
