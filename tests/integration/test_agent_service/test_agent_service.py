@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic, AgentStatus, AgentTaskStatus, AgentTaskType
+from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic, AgentStatus, AgentTaskStatus, AgentTaskType, SpecialAgent
 from dal.db import gtAgentManager, gtTeamManager, gtAgentTaskManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -147,7 +147,7 @@ class TestagentServiceGetAllRooms(_agentServiceCase):
     async def test_get_all_rooms_for_agent(self):
         """roomService.get_rooms_for_agent 应返回某个 agent 所在的所有 room_id。"""
         room = roomService.get_room_by_key(f"general@{TEAM}")
-        alice_id = room.get_agent_id_by_name("alice")
+        alice_id = agentService.get_agent_id_by_stable_name(room.team_id, "alice")
         assert room.room_id in roomService.get_rooms_for_agent(room.team_id, alice_id)
 
 
@@ -157,10 +157,10 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         await self.create_room(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
-        bob_id = room.get_agent_id_by_name("bob")
+        bob_id = agentService.get_agent_id_by_stable_name(room.team_id, "bob")
         await room.add_message(bob_id, "hello alice")
 
-        alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
+        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
         synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
 
         # 初始公告 + bob 消息会聚合成一条“轮到发言”上下文消息
@@ -179,10 +179,10 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
         await self.create_room(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
-        bob_id = room.get_agent_id_by_name("bob")
+        bob_id = agentService.get_agent_id_by_stable_name(room.team_id, "bob")
         await room.add_message(bob_id, "hello alice")
 
-        alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
+        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
         existing = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "older context")
         item = GtAgentHistory.build(existing)
         item.agent_id = alice.gt_agent.id
@@ -191,8 +191,10 @@ class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
 
         synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
 
-        system_line = promptBuilder.format_room_message("general", "SYSTEM", room.build_initial_system_message())
-        bob_line = promptBuilder.format_room_message("general", "bob", "hello alice")
+        lang = configUtil.get_language()
+        system_line = promptBuilder.format_room_message("general", int(SpecialAgent.SYSTEM.value), {}, room.build_initial_system_message(), lang)
+        bob_i18n = room._get_agent_i18n(bob_id)
+        bob_line = promptBuilder.format_room_message("general", bob_id, bob_i18n, "hello alice", lang)
         expected_prompt = promptBuilder.build_turn_begin_prompt("general", [system_line, bob_line])
 
         assert synced_count == 1
@@ -254,8 +256,8 @@ class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
 
-        alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
-        alice_id = room.get_agent_id_by_name("alice")
+        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
+        alice_id = agentService.get_agent_id_by_stable_name(room.team_id, "alice")
         await room.add_message(alice_id, "i am talking")
 
         synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
@@ -272,10 +274,10 @@ class TestTeamRuntimeRestoreKeepsAgentHistory(_agentServiceCase):
         general_room = roomService.get_room_by_key(f"general@{TEAM}")
         await general_room.activate_scheduling()
 
-        bob_id = general_room.get_agent_id_by_name("bob")
+        bob_id = agentService.get_agent_id_by_stable_name(general_room.team_id, "bob")
         await general_room.add_message(bob_id, "hello alice")
 
-        alice_id = general_room.get_agent_id_by_name("alice")
+        alice_id = agentService.get_agent_id_by_stable_name(general_room.team_id, "alice")
         alice = agentService.get_agent(alice_id)
         synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(general_room)
         assert synced_count == 1
@@ -312,7 +314,7 @@ class TestAgentResumeFailed(_agentServiceCase):
         """FAILED 状态的 Agent 恢复时，应将最早失败任务转为 RUNNING 并重启统一执行流程。"""
         await self.create_room(TEAM, "resume_room", ["alice"])
         room = roomService.get_room_by_key(f"resume_room@{TEAM}")
-        alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
+        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
 
         failed_task = await gtAgentTaskManager.create_task(
             alice.gt_agent.id,

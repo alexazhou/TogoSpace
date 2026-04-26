@@ -7,6 +7,7 @@ import pytest
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
+from service import presetService
 from constants import MessageBusTopic
 from dal.db import gtTeamManager, gtRoomMessageManager, gtAgentManager
 from exception import TogoException
@@ -39,6 +40,7 @@ class TestChatRoomMessages(ServiceTestCase):
                 GtAgent(team_id=team.id, name="char", role_template_id=0),
             ],
         )
+        cls.team_id = team.id
 
     @classmethod
     async def async_teardown_class(cls):
@@ -46,12 +48,16 @@ class TestChatRoomMessages(ServiceTestCase):
         await persistenceService.shutdown()
         await ormService.shutdown()
 
+    async def _get_agent_id(self, name: str) -> int | None:
+        gt_agent = await gtAgentManager.get_agent(self.team_id, name)
+        return gt_agent.id if gt_agent else None
+
     async def test_add_message(self):
         """add_message 会追加消息并发布 ROOM_MSG_ADDED 事件。"""
         await self.create_room(TEAM, "test_room", ["alice"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
-        alice_id = room.get_agent_id_by_name("alice")
+        alice_id = await self._get_agent_id("alice")
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message(alice_id, "hello")
             assert len(room.messages) == 2
@@ -70,7 +76,7 @@ class TestChatRoomMessages(ServiceTestCase):
         await self.create_room(TEAM, "test_room", ["alice"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
-        alice_id = room.get_agent_id_by_name("alice")
+        alice_id = await self._get_agent_id("alice")
         msgs = await room.get_unread_messages(alice_id)
         assert len(msgs) == 1
         assert "房间已经创建" in msgs[0].content
@@ -80,8 +86,8 @@ class TestChatRoomMessages(ServiceTestCase):
         await self.create_room(TEAM, "test_room", ["alice", "bob"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
-        alice_id = room.get_agent_id_by_name("alice")
-        bob_id = room.get_agent_id_by_name("bob")
+        alice_id = await self._get_agent_id("alice")
+        bob_id = await self._get_agent_id("bob")
         await room.get_unread_messages(alice_id)
         await room.add_message(bob_id, "msg1")
         msgs = await room.get_unread_messages(alice_id)
@@ -96,9 +102,9 @@ class TestChatRoomMessages(ServiceTestCase):
         await self.create_room(TEAM, "test_room", ["alice", "bob", "char"])
         room = roomService.get_room_by_key(f"test_room@{TEAM}")
         await room.activate_scheduling()
-        alice_id = room.get_agent_id_by_name("alice")
-        bob_id = room.get_agent_id_by_name("bob")
-        char_id = room.get_agent_id_by_name("char")
+        alice_id = await self._get_agent_id("alice")
+        bob_id = await self._get_agent_id("bob")
+        char_id = await self._get_agent_id("char")
         await room.get_unread_messages(alice_id)
         await room.get_unread_messages(bob_id)
         await room.add_message(char_id, "hi")

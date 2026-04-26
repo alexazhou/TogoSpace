@@ -115,7 +115,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
 
         assert any(m.content == "from alice" for m in room.messages)
         assert any(m.content == "from bob" for m in room.messages)
-        assert agentService.get_agent(room.get_agent_id_by_name("alice")).task_consumer._turn_runner._history
+        assert agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice")).task_consumer._turn_runner._history
 
         # 手动清理服务以模拟重启
         scheduler.shutdown()
@@ -129,7 +129,7 @@ class TestPersistenceRestoreIntegration(ServiceTestCase):
         await self._bootstrap()
 
         restored_room = roomService.get_room_by_key(f"general@{TEAM}")
-        restored_alice = agentService.get_agent(restored_room.get_agent_id_by_name("alice"))
+        restored_alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(restored_room.team_id, "alice"))
 
         assert any(m.content == "from alice" for m in restored_room.messages)
         assert any(m.content == "from bob" for m in restored_room.messages)

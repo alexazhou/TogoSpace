@@ -125,10 +125,10 @@ class TestRealSimpleChat(ServiceTestCase):
         assert len(agent_messages) == 2, f"期望 2 条 agent 消息，实际 {len(agent_messages)} 条"
 
         # 验证消息内容
-        assert room.get_gt_agent(agent_messages[0].sender_id).display_name == "alice"
+        assert room._get_gt_agent(agent_messages[0].sender_id).display_name == "alice"
         assert agent_messages[0].content == "你好 Bob！"
 
-        assert room.get_gt_agent(agent_messages[1].sender_id).display_name == "bob"
+        assert room._get_gt_agent(agent_messages[1].sender_id).display_name == "bob"
         assert agent_messages[1].content == "你好 Alice！"
 
         # 验证房间状态为 idle

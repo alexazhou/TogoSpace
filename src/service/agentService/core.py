@@ -13,7 +13,7 @@ from service import llmService, roomService, persistenceService
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtAgentTaskManager
 from peewee import IntegrityError
 from exception import TogoException
-from constants import AgentStatus, AgentTaskStatus, DriverType, EmployStatus
+from constants import AgentStatus, AgentTaskStatus, DriverType, EmployStatus, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +215,49 @@ def get_all_agents() -> list["Agent"]:
 
 def get_team_agents(team_id: int) -> list["Agent"]:
     return [agent for agent in _agents.values() if agent.gt_agent.team_id == team_id]
+
+
+def get_gt_agent_by_id(agent_id: int) -> GtAgent | None:
+    """根据 agent_id 返回 GtAgent 数据对象；未加载时返回 None。"""
+    agent = _agents.get(agent_id)
+    return agent.gt_agent if agent is not None else None
+
+
+def get_agent_display_name(agent_id: int) -> str:
+    """返回 agent_id 对应的显示名（i18n display_name），未加载时 fallback 到稳定名。"""
+    agent = _agents.get(agent_id)
+    if agent is not None:
+        return agent.gt_agent.display_name
+    special = SpecialAgent.value_of(agent_id)
+    return special.name if special is not None else str(agent_id)
+
+
+def get_agent_stable_name(agent_id: int) -> str:
+    """返回 agent_id 对应的稳定标识名（name 字段）。未加载时 fallback 到 SpecialAgent 名或 str(id)。"""
+    agent = _agents.get(agent_id)
+    if agent is not None:
+        return agent.gt_agent.name
+    special = SpecialAgent.value_of(agent_id)
+    return special.name if special is not None else str(agent_id)
+
+
+def get_agent_id_by_stable_name(team_id: int, name: str) -> int | None:
+    """按 team_id + 稳定名查找 agent_id（仅在已加载 Agent 中查找）。"""
+    special = SpecialAgent.value_of(name)
+    if special is not None:
+        return int(special.value)
+    for agent in _agents.values():
+        if agent.gt_agent.team_id == team_id and agent.gt_agent.name == name:
+            return agent.gt_agent.id
+    return None
+
+
+def get_agent_i18n(agent_id: int) -> dict:
+    """返回 agent_id 对应的 i18n 字典。未加载时返回空字典。"""
+    agent = _agents.get(agent_id)
+    if agent is not None:
+        return agent.gt_agent.i18n or {}
+    return {}
 
 
 def get_team_runtime_status_map(team_id: int) -> dict[int, AgentStatus]:

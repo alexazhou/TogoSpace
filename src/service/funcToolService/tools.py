@@ -190,7 +190,7 @@ async def get_room_info(room_name: Optional[str] = None, _context: ToolCallConte
             for agent_id in (room_config.agent_ids or [])
             if agent_id != int(SpecialAgent.SYSTEM.value)
         ]),
-        "current_turn": runtime_room.get_current_turn_agent_name() if runtime_room is not None and runtime_room.state == RoomState.SCHEDULING else None,
+        "current_turn": runtime_room._get_agent_stable_name(runtime_room.get_current_turn_agent_id()) if runtime_room is not None and runtime_room.state == RoomState.SCHEDULING else None,
         "total_messages": len(runtime_room.messages) if runtime_room is not None else 0,
     }
     return {"success": True, "room": room_dict}
@@ -282,7 +282,7 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
         logger.warning("发送消息失败，聊天室上下文未设置")
         return {"success": False, "message": "当前没有可用的房间上下文。"}
 
-    logger.info(f"发送消息: sender={_context.agent_name}, room={room_name}, msg={msg}")
+    logger.info(f"发送消息: sender_id={_context.agent_id}, room={room_name}, msg={msg}")
 
     try:
         room_config = await gtRoomManager.get_room_by_team_and_name(_context.team_id, room_name)
@@ -300,21 +300,21 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
         return {"success": False, "message": f"目标房间不存在: {room_name} (team_id={_context.team_id})"}
 
     if _context.chat_room is not None and target_room.room_id != _context.chat_room.room_id:
-        sender_id = _context.chat_room.get_agent_id_by_name(_context.agent_name)
-        if sender_id is None or not target_room.can_post_message(sender_id):
+        sender_id = _context.agent_id
+        if not target_room.can_post_message(sender_id):
             logger.warning(
-                "send_chat_msg: 发言者不在目标房间 agents 中 sender=%s room=%s team_id=%s agents=%s",
-                _context.agent_name,
+                "send_chat_msg: 发言者不在目标房间 agents 中 sender_id=%s room=%s team_id=%s agents=%s",
+                _context.agent_id,
                 room_name,
                 _context.team_id,
                 target_room.get_agent_ids(),
             )
             return {"success": False, "message": f"你不在目标房间 {target_room.name} 中，发送失败。"}
 
-    sender_id = _context.chat_room.get_agent_id_by_name(_context.agent_name) if _context.chat_room else None
-    if sender_id is None:
-        logger.warning(f"send_chat_msg: 发言者不在当前房间中 sender={_context.agent_name}")
-        return {"success": False, "message": f"发言者 {_context.agent_name} 不在当前房间中"}
+    sender_id = _context.agent_id
+    if not (_context.chat_room and _context.chat_room.can_post_message(sender_id)):
+        logger.warning(f"send_chat_msg: 发言者不在当前房间中 sender_id={_context.agent_id}")
+        return {"success": False, "message": f"发言者（agent_id={_context.agent_id}）不在当前房间中"}
     await target_room.add_message(sender_id, msg)
 
     if target_room is _context.chat_room:
@@ -334,16 +334,12 @@ async def finish_chat_turn(_context: ToolCallContext = None) -> dict:
         logger.warning("结束行动失败，聊天室上下文未设置")
         return {"success": False, "message": "当前没有激活的房间上下文。"}
 
-    logger.info(f"Agent 结束行动: agent={_context.agent_name}")
-    agent_id = _context.chat_room.get_agent_id_by_name(_context.agent_name)
-    if agent_id is None:
-        logger.warning(f"finish_chat_turn: agent 不在房间中 agent={_context.agent_name}, room={_context.chat_room.key}")
-        return {"success": True, "message": "已结束本轮行动。"}
-    ok = await _context.chat_room.finish_turn(agent_id)
+    logger.info(f"Agent 结束行动: agent_id={_context.agent_id}")
+    ok = await _context.chat_room.finish_turn(_context.agent_id)
 
     if not ok:
-        current_name = _context.chat_room.get_current_turn_agent_name()
-        logger.warning(f"finish_turn 被房间拒绝（发言位不匹配），但仍视为行动结束: agent={_context.agent_name}, current_turn={current_name}, room={_context.chat_room.key}")
+        current_id = _context.chat_room.get_current_turn_agent_id()
+        logger.warning(f"finish_turn 被房间拒绝（发言位不匹配），但仍视为行动结束: agent_id={_context.agent_id}, current_turn_id={current_id}, room={_context.chat_room.key}")
 
     return {"success": True, "message": "已结束了本轮行动."}
 

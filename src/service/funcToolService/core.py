@@ -46,8 +46,8 @@ async def run_tool_call(
         logger.warning(f"工具参数 JSON 解析失败，已忽略参数: tool={function_name}, args={function_args!r}")
         args = {}
 
-    caller = context.agent_name if context is not None else "unknown"
-    logger.info(f"use_tool: caller={caller}, tool={function_name}, args={args}")
+    caller = context.agent_id if context is not None else "unknown"
+    logger.info(f"use_tool: caller_id={caller}, tool={function_name}, args={args}")
 
     try:
         func: Callable[..., Any] | None = FUNCTION_REGISTRY.get(function_name)

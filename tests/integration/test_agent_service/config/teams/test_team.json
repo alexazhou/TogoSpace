@@ -1,8 +1,8 @@
 {
   "name": "test_team",
   "agents": [
-    { "name": "alice", "role_template": "alice" },
-    { "name": "bob", "role_template": "bob" }
+    { "name": "alice", "role_template": "alice", "i18n": {"display_name": {"zh-CN": "alice"}} },
+    { "name": "bob", "role_template": "bob", "i18n": {"display_name": {"zh-CN": "bob"}} }
   ],
   "dept_tree": {
     "dept_name": "研发部",

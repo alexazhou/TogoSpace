@@ -65,10 +65,15 @@ class TestRoomRegistry(ServiceTestCase):
         assert len(roomService._rooms) == 0
 
     async def test_setup_agents(self):
-        """get_agent_names 返回创建时配置的参与者顺序。"""
+        """agents 按创建时配置的顺序排列。"""
         await self.create_room(TEAM, "r1", ["alice", "bob"])
         room = roomService.get_room_by_key(f"r1@{TEAM}")
-        assert roomService.get_agent_names(room.room_id) == ["alice", "bob"]
+        alice_id = self.agent_ids["alice"]
+        bob_id = self.agent_ids["bob"]
+        agent_ids = room.get_agent_ids()
+        assert alice_id in agent_ids
+        assert bob_id in agent_ids
+        assert agent_ids.index(alice_id) < agent_ids.index(bob_id)
 
     async def test_get_rooms_for_agent(self):
         """按 agent 过滤房间时，只返回该 agent 参与的 room_id 列表。"""
@@ -186,7 +191,8 @@ class TestRoomRegistry(ServiceTestCase):
         await self.create_room(TEAM, "special_room", ["Operator", "alice"])
         room = roomService.get_room_by_key(f"special_room@{TEAM}")
 
-        assert room.get_agent_id_by_name(SpecialAgent.SYSTEM.name) == ChatRoom.SYSTEM_MEMBER_ID
-        assert room.get_agent_id_by_name(SpecialAgent.OPERATOR.name) == ChatRoom.OPERATOR_MEMBER_ID
-        assert room.get_agent_id_by_name("alice") == self.agent_ids["alice"]
-        assert room.get_agent_id_by_name("unknown") is None
+        # SYSTEM 和 OPERATOR 是固定常量
+        assert ChatRoom.SYSTEM_MEMBER_ID == int(SpecialAgent.SYSTEM.value)
+        assert ChatRoom.OPERATOR_MEMBER_ID == int(SpecialAgent.OPERATOR.value)
+        # alice 的 agent_id 应与创建时一致
+        assert self.agent_ids["alice"] in room.get_agent_ids()

@@ -141,6 +141,9 @@ class TestToolFunctions(ServiceTestCase):
                 GtAgent(team_id=team.id, name="char", role_template_id=0),
             ],
         )
+        agents = await gtAgentManager.get_team_agents(team.id)
+        cls.agent_ids = {a.name: a.id for a in agents}
+        cls.team_id = team.id
 
     @classmethod
     async def async_teardown_class(cls):
@@ -196,7 +199,7 @@ class TestToolFunctions(ServiceTestCase):
             ),
         )
 
-        ctx = ToolCallContext(agent_name="alice", team_id=team.id, chat_room=None)
+        ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=team.id, chat_room=None)
         result = await get_dept_info(_context=ctx)
 
         assert result["success"]
@@ -213,9 +216,9 @@ class TestToolFunctions(ServiceTestCase):
         await self.create_room(TEAM, "pair", ["alice"], max_turns=0)
         general = roomService.get_room_by_key(f"general@{TEAM}")
         await general.activate_scheduling()
-        await general.add_message(general.get_agent_id_by_name("alice"), "hello")
+        await general.add_message(self.agent_ids["alice"], "hello")
 
-        ctx = ToolCallContext(agent_name="alice", team_id=team.id, chat_room=general)
+        ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=team.id, chat_room=general)
         list_result = await get_room_info(_context=ctx)
         detail_result = await get_room_info(room_name="general", _context=ctx)
 
@@ -271,7 +274,7 @@ class TestToolFunctions(ServiceTestCase):
             lambda team_id: [alice_runtime, bob_runtime, char_runtime],
         )
 
-        ctx = ToolCallContext(agent_name="alice", team_id=team.id, chat_room=None)
+        ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=team.id, chat_room=None)
         list_result = await get_agent_info(_context=ctx)
         detail_result = await get_agent_info(agent_name="bob", _context=ctx)
         wake_result = await wake_up_agent("bob", _context=ctx)
@@ -301,7 +304,7 @@ class TestToolFunctions(ServiceTestCase):
             lambda team_id: [_FakeRuntimeAgent(alice, AgentStatus.IDLE)],
         )
 
-        ctx = ToolCallContext(agent_name="alice", team_id=team.id, chat_room=None)
+        ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=team.id, chat_room=None)
         result = await wake_up_agent("alice", _context=ctx)
 
         assert not result["success"]
@@ -316,7 +319,7 @@ class TestToolFunctions(ServiceTestCase):
         await self.create_room(TEAM, "myroom", ["alice"])
         room = roomService.get_room_by_key(f"myroom@{TEAM}")
         await room.activate_scheduling()
-        ctx = ToolCallContext(agent_name="alice", team_id=room.team_id, chat_room=room)
+        ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=room.team_id, chat_room=room)
         assert (await send_chat_msg("myroom", "hello", _context=ctx))["success"]
         assert len(room.messages) == 2  # 1 (init公告) + 1 (new)
         assert room.messages[1].content == "hello"
@@ -325,7 +328,7 @@ class TestToolFunctions(ServiceTestCase):
         """目标房间不存在时应返回明确错误，避免吞掉失败。"""
         await self.create_room(TEAM, "existing", ["alice"])
         room = roomService.get_room_by_key(f"existing@{TEAM}")
-        ctx = ToolCallContext(agent_name="alice", team_id=room.team_id, chat_room=room)
+        ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=room.team_id, chat_room=room)
         result = await send_chat_msg("nonexistent", "hello", _context=ctx)
         assert not result["success"] and "nonexistent" in result["message"]
 
@@ -335,7 +338,7 @@ class TestToolFunctions(ServiceTestCase):
         await self.create_room(TEAM, "room_b", ["alice"])
         room_a = roomService.get_room_by_key(f"room_a@{TEAM}")
         room_b = roomService.get_room_by_key(f"room_b@{TEAM}")
-        ctx = ToolCallContext(agent_name="alice", team_id=room_a.team_id, chat_room=room_a)
+        ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=room_a.team_id, chat_room=room_a)
         result = await send_chat_msg("room_b", "hello from a to b", _context=ctx)
         assert result["success"]
         assert any(m.content == "hello from a to b" for m in room_b.messages)
@@ -348,7 +351,7 @@ class TestToolFunctions(ServiceTestCase):
         src = roomService.get_room_by_key(f"src@{TEAM}")
         dst = roomService.get_room_by_key(f"dst@{TEAM}")
         before_count = len(src.messages)
-        ctx = ToolCallContext(agent_name="bob", team_id=src.team_id, chat_room=src)
+        ctx = ToolCallContext(agent_id=self.agent_ids["bob"], team_id=src.team_id, chat_room=src)
         await send_chat_msg("dst", "cross-room msg", _context=ctx)
         assert len(src.messages) == before_count
 
@@ -359,7 +362,7 @@ class TestToolFunctions(ServiceTestCase):
         src = roomService.get_room_by_key(f"src_non_member@{TEAM}")
         dst = roomService.get_room_by_key(f"dst_non_member@{TEAM}")
         before_count = len(dst.messages)
-        ctx = ToolCallContext(agent_name="alice", team_id=src.team_id, chat_room=src)
+        ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=src.team_id, chat_room=src)
 
         result = await send_chat_msg("dst_non_member", "should fail", _context=ctx)
 
@@ -371,9 +374,9 @@ class TestToolFunctions(ServiceTestCase):
         """不是当前发言人时，finish_chat_turn 仍返回 success（agent 行动结束语义），但不推进轮次。"""
         await self.create_room(TEAM, "turn_room", ["alice", "bob"], max_turns=3)
         room = roomService.get_room_by_key(f"turn_room@{TEAM}")
-        ctx = ToolCallContext(agent_name="bob", team_id=room.team_id, chat_room=room)
+        ctx = ToolCallContext(agent_id=self.agent_ids["bob"], team_id=room.team_id, chat_room=room)
 
         result = await finish_chat_turn(_context=ctx)
 
         assert result["success"]
-        assert room.get_current_turn_agent_name() == "alice"
+        assert self.room_current_turn_name(room) == "alice"

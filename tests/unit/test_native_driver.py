@@ -48,7 +48,7 @@ async def test_native_driver_setup_registers_tools(driver, mock_host):
     ):
         await driver.startup()
         context = ToolCallContext(
-            agent_name="alice",
+            agent_id=1,
             team_id=1,
             chat_room=MagicMock(),
         )
@@ -71,7 +71,7 @@ async def test_native_driver_setup_registers_tools(driver, mock_host):
     run_tool_call.assert_called_once()
     called_args, called_context = run_tool_call.call_args.args
     assert called_args == "{}"
-    assert called_context.agent_name == "alice"
+    assert called_context.agent_id == 1
     assert called_context.team_id == 1
     assert called_context.tool_name == "finish_chat_turn"
     assert result.turn_finished is True

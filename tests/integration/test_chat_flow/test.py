@@ -93,7 +93,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room = roomService.get_room_by_key(f"manual_turn@{TEAM}")
         await room.activate_scheduling()
 
-        alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
+        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
         item = GtAgentHistory.build(
             OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset test turn state"),
         )
@@ -136,7 +136,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await self.create_room(TEAM, "turn_checker_room", ["alice", "bob"])
         room = roomService.get_room_by_key(f"turn_checker_room@{TEAM}")
 
-        alice = agentService.get_agent(room.get_agent_id_by_name("alice"))
+        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
         item = GtAgentHistory.build(
             OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset turn checker history"),
         )
@@ -167,7 +167,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room_key = f"general@{TEAM}"
         room = roomService.get_room_by_key(room_key)
         for agent_name in ["alice", "bob"]:
-            agent = agentService.get_agent(room.get_agent_id_by_name(agent_name))
+            agent = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, agent_name))
             agent.task_consumer.status = AgentStatus.IDLE
             agent.task_consumer.current_db_task = None
             agent.inject_history_messages([])

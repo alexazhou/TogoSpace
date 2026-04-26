@@ -11,11 +11,16 @@ from service.agentService.prompts import (
     WORKDIR_PROMPT,
     LANGUAGE_CONTEXT_PROMPT,
 )
-from util import configUtil
+from util import configUtil, i18nUtil
 
 
-def format_room_message(room_name: str, sender_name: str, content: str) -> str:
-    sender_label = "系统提醒" if SpecialAgent.value_of(sender_name) == SpecialAgent.SYSTEM else sender_name
+def format_room_message(room_name: str, sender_id: int, sender_i18n: dict, content: str, lang: str) -> str:
+    special = SpecialAgent.value_of(sender_id)
+    if special == SpecialAgent.SYSTEM:
+        sender_label = "系统提醒"
+    else:
+        sender_label = i18nUtil.extract_i18n_str(sender_i18n.get("display_name"), default=None)
+        assert sender_label, f"sender_i18n 缺少 display_name: sender_id={sender_id}"
     return f"【房间《{room_name}》】【{sender_label}】： {content}"
 
 
@@ -34,11 +39,12 @@ def build_turn_begin_prompt_from_messages(
     exclude_agent_id: int,
 ) -> str:
     """从消息列表构建 turn begin prompt，自动过滤自己的消息并格式化。"""
+    lang = configUtil.get_language()
     message_blocks: list[str] = []
     for msg in messages:
         if msg.sender_id == exclude_agent_id:
             continue
-        message_blocks.append(format_room_message(room_name, msg.sender_name, msg.content))
+        message_blocks.append(format_room_message(room_name, msg.sender_id, msg.sender_i18n, msg.content, lang))
     return build_turn_begin_prompt(room_name, message_blocks)
 
 

@@ -16,8 +16,8 @@ from service.agentService import promptBuilder
 from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
 from service.funcToolService.tools import FUNCTION_REGISTRY
-from constants import DriverType, RoleTemplateType, AgentTaskType
-from util import llmApiUtil
+from constants import DriverType, RoleTemplateType, AgentTaskType, SpecialAgent
+from util import llmApiUtil, configUtil
 from util.configTypes import TeamConfig, AgentConfig, DeptNodeConfig
 from ...base import ServiceTestCase
 
@@ -73,7 +73,7 @@ class TestSdkDoSend(ServiceTestCase):
         await room.activate_scheduling()
 
         # 2. 从 agentService 获取在内存中已注册好的 agent
-        agent = agentService.get_agent(room.get_agent_id_by_name(agent_name))
+        agent = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, agent_name))
 
         # 3. 模拟 schedulerService：进入该房间回合前注入运行时的 current_db_task
         task = GtAgentTask(
@@ -310,8 +310,9 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client
 
-        first = promptBuilder.format_room_message("lobby", "SYSTEM", "房间初始化")
-        second = promptBuilder.format_room_message("lobby", "bob", "hello alice")
+        lang = configUtil.get_language()
+        first = promptBuilder.format_room_message("lobby", int(SpecialAgent.SYSTEM.value), {}, "房间初始化", lang)
+        second = promptBuilder.format_room_message("lobby", 2, {"display_name": {"zh-CN": "bob"}}, "hello alice", lang)
         turn_prompt = f"【lobby】 房间轮到你行动，新消息如下：\n\n{first}\n\n{second}\n\n你现在可以调用工具行动。"
         item = GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt),

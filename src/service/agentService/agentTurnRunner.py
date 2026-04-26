@@ -502,7 +502,7 @@ class AgentTurnRunner:
         )
 
         context = ToolCallContext(
-            agent_name=self.gt_agent.name,
+            agent_id=self.gt_agent.id,
             team_id=room.team_id,
             chat_room=room,
         )

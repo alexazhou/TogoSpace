@@ -71,12 +71,13 @@ async def test_pull_room_messages_syncs_to_history(turn_runner):
 
     msg = MagicMock(spec=GtCoreRoomMessage)
     msg.sender_id = 2  # 非 agent 自身
-    msg.sender_name = "OtherAgent"
+    msg.sender_i18n = {"display_name": {"zh-CN": "OtherAgent"}}
     msg.content = "Hello"
 
     room.get_unread_messages = AsyncMock(return_value=[msg])
 
-    count = await turn_runner.pull_room_messages_to_history(room)
+    with patch("service.agentService.promptBuilder.configUtil.get_language", return_value="zh-CN"):
+        count = await turn_runner.pull_room_messages_to_history(room)
 
     assert count == 1
     turn_runner._history.append_history_message.assert_called_once()
@@ -94,12 +95,13 @@ async def test_pull_room_messages_skips_own_messages(turn_runner):
     # 自己发的消息，应跳过
     msg = MagicMock(spec=GtCoreRoomMessage)
     msg.sender_id = 1  # agent.gt_agent.id
-    msg.sender_name = "TestAgent"
+    msg.sender_i18n = {"display_name": {"zh-CN": "TestAgent"}}
     msg.content = "My message"
 
     room.get_unread_messages = AsyncMock(return_value=[msg])
 
-    count = await turn_runner.pull_room_messages_to_history(room)
+    with patch("service.agentService.promptBuilder.configUtil.get_language", return_value="zh-CN"):
+        count = await turn_runner.pull_room_messages_to_history(room)
 
     assert count == 0
     turn_runner._history.append_history_message.assert_not_called()

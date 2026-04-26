@@ -677,3 +677,8 @@ class ServiceTestCase:
                 tags=list(getattr(cfg, "tags", [])),
             ))
         return rooms
+
+    @staticmethod
+    def room_current_turn_name(room) -> str:
+        """测试辅助：获取当前发言人的稳定名（stable name）。"""
+        return room._get_agent_stable_name(room._get_current_turn_agent_id())

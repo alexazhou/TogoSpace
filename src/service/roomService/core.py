@@ -29,7 +29,7 @@ def resolve_room_max_turns(max_turns: int | None) -> int:
 @dataclass
 class ToolCallContext:
     """工具调用时注入的上下文，包含当前 Agent、工具名和聊天室信息。"""
-    agent_name: str
+    agent_id: int
     team_id: int
     chat_room: ChatRoom
     tool_name: str = ""
@@ -116,7 +116,7 @@ async def _restore_room_runtime_state(room: ChatRoom) -> None:
         for row in gt_room_messages:
             restored_messages.append(GtCoreRoomMessage(
                 sender_id=row.agent_id,
-                sender_name=room._display_name_of(row.agent_id),
+                sender_i18n=room._get_agent_i18n(row.agent_id),
                 content=row.content,
                 send_time=datetime.fromisoformat(row.send_time),
             ))
@@ -316,12 +316,6 @@ async def overwrite_team_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
         room.tags = list(room_input.tags or [])
         room.agent_ids = list(room_input.agent_ids or [])
         await gtRoomManager.save_room(room)
-
-
-def get_agent_names(room_id: int) -> List[str]:
-    """返回聊天室的参与者名列表。"""
-    room = get_room(room_id)
-    return [room._display_name_of(aid) for aid in room.get_agent_ids()] if room is not None else []
 
 
 def get_rooms_for_agent(team_id: int | None, agent_id: int) -> List[int]:

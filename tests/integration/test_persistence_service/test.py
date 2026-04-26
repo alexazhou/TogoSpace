@@ -6,6 +6,7 @@ import pytest
 
 from constants import AgentStatus, AgentTaskStatus, AgentTaskType
 from dal.db import gtTeamManager, gtAgentManager, gtAgentHistoryManager, gtAgentTaskManager
+from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtDept import GtDept
@@ -53,23 +54,27 @@ class TestRestoreRoomHistory(ServiceTestCase):
         await ormService.startup(str(cls.db_path))
         await persistenceService.startup()
         await roomService.startup()
-        await presetService._import_role_templates_from_app_config()
         team = await gtTeamManager.save_team(GtTeam(name=TEAM))
-        configs = [
-            AgentConfig(name="alice", role_template="alice"),
-            AgentConfig(name="bob", role_template="bob"),
-        ]
-        agents = await ServiceTestCase.convert_to_gt_agents(team.id, configs)
-        await gtAgentManager.batch_save_agents(team.id, agents)
+        await gtAgentManager.batch_save_agents(
+            team.id,
+            [
+                GtAgent(team_id=team.id, name="alice", role_template_id=0),
+                GtAgent(team_id=team.id, name="bob", role_template_id=0),
+            ],
+        )
+        cls.team_id = team.id
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
+        assert alice is not None and bob is not None
+        cls.alice_id = alice.id
+        cls.bob_id = bob.id
         await ServiceTestCase.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3)
         room = roomService.get_room_by_key(f"r1@{TEAM}")
         await room.activate_scheduling()
-        alice_id = room.get_agent_id_by_name("alice")
-        bob_id = room.get_agent_id_by_name("bob")
-        await room.add_message(alice_id, "hello")
-        await room.get_unread_messages(bob_id)
-        await room.add_message(bob_id, "world")
-        await room.get_unread_messages(alice_id)
+        await room.add_message(cls.alice_id, "hello")
+        await room.get_unread_messages(cls.bob_id)
+        await room.add_message(cls.bob_id, "world")
+        await room.get_unread_messages(cls.alice_id)
 
         # 模拟进程重启：关闭再重新打开同一 DB
         await persistenceService.shutdown()
@@ -86,7 +91,6 @@ class TestRestoreRoomHistory(ServiceTestCase):
     @classmethod
     async def async_teardown_class(cls):
         await messageBus.shutdown()
-        await presetService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
         roomService.shutdown()

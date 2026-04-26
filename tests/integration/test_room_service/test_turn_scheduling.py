@@ -7,6 +7,7 @@ import pytest
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
+from service import presetService
 from constants import MessageBusTopic, RoomState
 from dal.db import gtTeamManager, gtAgentManager
 from model.dbModel.gtAgent import GtAgent
@@ -38,12 +39,17 @@ class TestTurnScheduling(ServiceTestCase):
                 GtAgent(team_id=team.id, name="a", role_template_id=0),
             ],
         )
+        cls.team_id = team.id
 
     @classmethod
     async def async_teardown_class(cls):
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
+
+    async def _get_agent_id(self, name: str) -> int | None:
+        gt_agent = await gtAgentManager.get_agent(self.team_id, name)
+        return gt_agent.id if gt_agent else None
 
     async def test_create_room_does_not_publish_first_agent(self):
         """建房后不应立刻发布首个发言人的 TURN 事件（INIT 状态不广播状态变更）。"""
@@ -56,7 +62,7 @@ class TestTurnScheduling(ServiceTestCase):
         """显式启动调度后，才发布首个发言人的状态变更事件。"""
         await self.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
         room = roomService.get_room_by_key(f"r@{TEAM}")
-        alice_id = room.get_agent_id_by_name("alice")
+        alice_id = await self._get_agent_id("alice")
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.activate_scheduling()
@@ -64,7 +70,7 @@ class TestTurnScheduling(ServiceTestCase):
                 MessageBusTopic.ROOM_STATUS_CHANGED,
                 gt_room=room.gt_room,
                 state=RoomState.SCHEDULING,
-                current_turn_agent=room.get_gt_agent(alice_id),
+                current_turn_agent=room._get_gt_agent(alice_id),
                 need_scheduling=True,
             )
 
@@ -73,17 +79,18 @@ class TestTurnScheduling(ServiceTestCase):
         await self.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
         room = roomService.get_room_by_key(f"r@{TEAM}")
         await room.activate_scheduling()
-        bob_id = room.get_agent_id_by_name("bob")
+        alice_id = await self._get_agent_id("alice")
+        bob_id = await self._get_agent_id("bob")
 
         with patch("service.messageBus.publish") as mock_publish:
-            await room.add_message(room.get_agent_id_by_name("alice"), "hello")
+            await room.add_message(alice_id, "hello")
             # 消息不会自动推进轮次，需要显式调用 finish_turn
-            await room.finish_turn(room.get_agent_id_by_name("alice"))
+            await room.finish_turn(alice_id)
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_STATUS_CHANGED,
                 gt_room=room.gt_room,
                 state=RoomState.SCHEDULING,
-                current_turn_agent=room.get_gt_agent(bob_id),
+                current_turn_agent=room._get_gt_agent(bob_id),
                 need_scheduling=True,
             )
 
@@ -93,7 +100,7 @@ class TestTurnScheduling(ServiceTestCase):
         room = roomService.get_room_by_key(f"r@{TEAM}")
         assert room.state == RoomState.INIT
         await room.activate_scheduling()
-        a_id = room.get_agent_id_by_name("a")
+        a_id = await self._get_agent_id("a")
         await room.add_message(a_id, "msg")
         # 消息不会自动推进轮次，需要显式调用 finish_turn
         await room.finish_turn(a_id)
@@ -104,7 +111,7 @@ class TestTurnScheduling(ServiceTestCase):
         await self.create_room(TEAM, "r", ["a"], max_turns=1)
         room = roomService.get_room_by_key(f"r@{TEAM}")
         await room.activate_scheduling()
-        a_id = room.get_agent_id_by_name("a")
+        a_id = await self._get_agent_id("a")
         await room.add_message(a_id, "msg1")
 
         with patch("service.messageBus.publish") as mock_publish:
