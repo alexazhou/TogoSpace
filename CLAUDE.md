@@ -1,4 +1,4 @@
-# TogoAgent
+# TogoSpace
 
 ## 项目概述
 
@@ -10,89 +10,46 @@
 - tornado（异步 HTTP + WebSocket）
 - pydantic（模型校验）
 - textual（TUI）
-- 兼容 OpenAI API 形态的模型服务
+- litellm（兼容多种 LLM API 服务）
 
-## 仓库结构（当前）
-
-```text
-TogoAgent/
-├── src/                 # 后端
-├── tui/                 # 终端前端（Textual）
-├── frontend/            # Web 前端（Vue 3 + Vite + TypeScript，Git Submodule）
-├── assets/              # 静态资源（preset、icons、execute、prompts）
-├── docs/                # 设计与规范文档
-├── scripts/             # 启停脚本、构建脚本
-├── tests/               # 测试
-├── run/                 # PID 文件（自动生成）
-└── dev_storage_root/    # 开发模式运行数据（自动生成，不提交）
-    ├── setting.json
-    ├── data/
-    ├── logs/
-    └── workspace/
-```
-
-## 后端目录结构（src/）
+## 仓库结构
 
 ```text
-src/
-├── backend_main.py
-├── route.py
-├── constants.py
-├── controller/
-│   ├── baseController.py
-│   ├── roleTemplateController.py
-│   ├── agentController.py
-│   ├── roomController.py
-│   ├── teamController.py
-│   └── wsController.py
-├── service/
-│   ├── roomService.py
-│   ├── schedulerService.py
-│   ├── messageBus.py
-│   ├── llmService.py
-│   ├── ormService.py
-│   ├── persistenceService.py
-│   ├── teamService.py
-│   ├── roleTemplateService.py
-│   ├── agentService/
-│   │   ├── core.py
-│   │   ├── agent.py
-│   │   ├── agentTaskConsumer.py
-│   │   ├── agentTurnRunner.py
-│   │   ├── agentHistoryStore.py
-│   │   ├── promptBuilder.py
-│   │   ├── toolRegistry.py
-│   │   └── driver/
-│   └── funcToolService/
-│       ├── core.py
-│       ├── toolLoader.py
-│       └── tools.py
-├── model/
-├── dal/
-└── util/
-```
-
-## TUI 目录结构（tui/）
-
-```text
-tui/
-├── tui_main.py
-├── app.py
-├── app.tcss
-├── widgets.py
-└── api_client.py
-```
-
-## Web 前端目录结构（frontend/）
-
-```text
-frontend/
-├── src/
-├── public/
-├── scripts/
-├── package.json
-├── vite.config.ts
-└── README.md
+TogoSpace/
+├── src/                     # 后端
+│   ├── controller/          # HTTP / WebSocket 接口层
+│   ├── service/             # 业务逻辑层
+│   │   ├── agentService/    # Agent 核心逻辑（driver、调度、历史）
+│   │   ├── funcToolService/ # Function Calling 工具
+│   │   ├── roomService.py   # 房间管理
+│   │   ├── schedulerService.py  # 调度器
+│   │   ├── llmService.py    # LLM 调用
+│   │   └── ...              # 其他服务模块
+│   ├── dal/                 # 数据访问层
+│   ├── model/               # 数据定义
+│   │   ├── coreModel/       # 核心模型（AgentEvent、ChatModel、WebModel）
+│   │   ├── dbModel/         # 数据库模型（Agent、Room、Team 等）
+│   │   └── ...              # 其他模型文件
+│   ├── util/                # 通用工具
+│   ├── backend_main.py      # 后端入口
+│   ├── appEntry.py          # 托盘模式启动入口
+│   ├── appPaths.py          # 运行时路径配置
+│   ├── constants.py         # 常量定义
+│   ├── route.py             # 路由配置
+│   └── ...                  # 其他模块文件
+├── frontend/                # Web 前端（Git Submodule）
+│   ├── src/                 # Vue 3 + TypeScript 源码
+│   ├── public/              # 静态资源
+│   ├── scripts/             # 构建脚本
+│   ├── package.json         # 依赖配置
+│   └── vite.config.ts       # Vite 配置
+├── tui/                     # 终端前端（Textual）
+├── assets/                  # 静态资源（preset、icons、execute）
+├── docs/                    # 设计与规范文档
+├── scripts/                 # 启停脚本、构建脚本
+├── tests/                   # 测试（unit / integration / api）
+├── dev_storage_root/        # 开发模式运行数据（自动生成）
+└── ...                      # 其他根目录文件
 ```
 
 ## 四层架构规则
@@ -101,12 +58,13 @@ frontend/
 
 | 层 | 可 import | 说明 |
 |----|-----------|------|
-| `controller` | `service` + `model` + `util` + 标准库 + 第三方 | 接口层（HTTP / WebSocket），负责请求编排与响应 |
-| `service` | `model` + `util` + 标准库 + 第三方 | 有状态业务逻辑 |
+| `controller` | `service` + `dal` + `model` + `util` + 标准库 + 第三方 | 接口层（HTTP / WebSocket），负责请求编排与响应 |
+| `service` | `dal` + `model` + `util` + 标准库 + 第三方 | 有状态业务逻辑 |
+| `dal` | `model` + `util` + 标准库 + 第三方 | 数据访问层，封装数据库操作 |
 | `model` | `util` + 标准库 + 第三方 | 数据定义，不写业务流程 |
 | `util` | 标准库 + 第三方 | 通用工具，不依赖 `model/service` |
 
-同层可互相引用。禁止下层反向依赖上层：`controller -> service -> model -> util`。
+同层可互相引用。禁止下层反向依赖上层：`controller -> service -> dal -> model -> util`。
 
 ## 开发约定
 
@@ -114,55 +72,39 @@ frontend/
 - **后端接口返回的数据，应尽量复用已有的数据对象，并且复用自动序列化能力，不要手动把对象字段拿出来再拼 json。**
 - **后端接口不要为了前端方便，拼接一些兼容或不必要的字段，只要返回符合业务逻辑的数据即可，展示的问题由前端解决。**
 
-### 提交约定
-- **代码提交**：开发完成后不要自动提交代码。统一等待用户明确要求「提交」或「commit」后再执行 git commit/push。
-- **commit message**：提交信息中不要加 `Co-Authored-By` 行，不要署名 AI Agent。
-- **提交脚本**：使用 `scripts/commit_and_push_frondbackend.py` 统一提交前后端代码：
-    ```bash
-    python scripts/commit_and_push_frondbackend.py --action sync,commit,push --target all -m "fix: description"
-    ```
-    常见用法：
-    ```bash
-    python scripts/commit_and_push_frondbackend.py --action status --target all
-    python scripts/commit_and_push_frondbackend.py --action commit --target all -m "fix: description"
-    python scripts/commit_and_push_frondbackend.py --action push --target all
-    python scripts/commit_and_push_frondbackend.py --action sync --target frontend
-    ```
-    该脚本会按 `--action` 显式执行：前端切换 master 分支；`status` 查看前后端仓库状态；`sync` 仅做 fast-forward 拉取；`commit` 只做 add/commit；`push` 只推送已有本地提交。
-- **前端子模块提交**：在 `frontend/` 子模块内提交代码时，必须先切换到 master 分支，禁止在 detached HEAD（悬空版本）状态下提交，否则提交会丢失。
-- **前端子模块同步**：提交后端代码时，若发现前端子模块（`frontend/`）有新的 commit，需同步更新后端仓库中的子模块指针版本：
-    ```bash
-    cd frontend && git pull origin master
-    cd .. && git add frontend && git commit -m "chore: update frontend submodule"
-    ```
+### Git 约定
 
-### 拉取约定
-- **前端子模块同步**：拉取后端代码后，若前端子模块指针发生变化：
-    - **可 fast-forward**：直接执行 `git submodule update --init --recursive` 拉取更新
-    - **不可 fast-forward**：询问用户处理方式（如 stash 本地改动、强制覆盖等）
+**Git 工具约定**
+- 使用 `scripts/commit_and_push_frondbackend.py` 统一管理前后端 Git 操作
+- 该脚本会自动处理前端 submodule 切换分支、同步远端、提交、推送等操作
+- 示例用法：
+  ```bash
+  # 查看前后端状态
+  python scripts/commit_and_push_frondbackend.py --action status
 
-### Git 冲突处理约定
-- **禁止擅自放弃本地改动**：当 `git stash pop` 或 `git merge` 产生冲突时，严禁使用 `git checkout --theirs .` 或 `git checkout --ours .` 直接放弃一方改动。
-- **必须询问用户**：冲突发生时，应向用户说明冲突内容（哪些文件、冲突类型），询问用户如何处理：
-    - 手动合并
-    - 保留本地改动
-    - 使用远程版本
-    - 其他处理方式
-- **谨慎处理 stash**：`git stash` 后若冲突无法自动合并，不要执行 `git stash drop`，应保留 stash 直到用户确认处理方式。
+  # 提交前后端改动
+  python scripts/commit_and_push_frondbackend.py --action commit -m "fix: description"
 
-## Compact 约定（当前实现）
+  # 同步 + 提交 + 推送（常用流程）
+  python scripts/commit_and_push_frondbackend.py --action sync,commit,push -m "fix: description"
 
-- 相关实现位于 `src/service/agentService/agentTurnRunner.py`、`src/service/agentService/compact.py`、`src/service/agentService/agentHistoryStore.py`、`src/model/dbModel/historyUsage.py`、`src/service/persistenceService.py`。
-- `_check_compact(...)` 会在两处触发：
-  - 推理请求发起前，基于估算 token 执行 `pre-check`
-  - assistant 响应成功写入 history 之后，基于实际 `usage.prompt_tokens` 优先执行 `post-check`
-- `pre-check`、`post-check`、overflow retry 中的 compact 一旦失败，当前实现都会直接抛异常；不要再按"失败后继续推理"的旧语义修改代码或补测试。
-- `agent_histories.usage` 中用 `compact_stage` 记录本轮 compact 阶段，取值为 `none`、`pre`、`post`：
-  - `none`：本轮未触发 compact
-  - `pre`：请求发出前触发了 compact
-  - `post`：assistant 已成功写入 history，随后触发了 post-check compact
-- post-check 发生在 assistant 已提交之后，因此 post-check compact 失败时，history 中会保留本次 assistant 的 `SUCCESS` 记录，但调用栈仍会继续抛异常给上层。
-- runtime 内存窗口与启动恢复窗口都以最新 `COMPACT_SUMMARY` 为边界：只保留该摘要及其之后的消息。
+  # 仅处理前端或后端
+  python scripts/commit_and_push_frondbackend.py --action status --target frontend
+  python scripts/commit_and_push_frondbackend.py --action commit -m "fix: description" --target backend
+  ```
+
+**提交规范**
+- 开发完成后不要自动提交，等待用户明确要求「提交」或「commit」后再执行
+- commit message 不要加 `Co-Authored-By` 行，不要署名 AI Agent
+
+**前端子模块**
+- 在 `frontend/` 子模块内提交时，必须先切换到 master 分支，禁止在 detached HEAD 状态下提交
+- 提交后端时若前端有新 commit，需同步更新子模块指针：`git add frontend && git commit`
+
+**冲突处理**
+- 禁止擅自使用 `git checkout --theirs .` 或 `git checkout --ours .` 放弃改动
+- 冲突发生时必须询问用户处理方式（手动合并、保留本地、使用远程等）
+- `git stash` 后若冲突无法自动合并，不要执行 `git stash drop`，保留 stash 直到用户确认
 
 ## 启动与停止
 
@@ -292,18 +234,11 @@ STORAGE_ROOT/
 - `frontend/`：Web 前端子仓库（Git Submodule，见 `.gitmodules`），基于 Vue 3 + Vite + TypeScript，面向浏览器使用场景。
 - 两个前端都消费同一套后端 API（HTTP + WebSocket），功能目标保持一致，交互形态不同。
 
-## 工具函数扩展（当前实现）
-
-在 `src/service/funcToolService/tools.py` 新增函数，并注册到 `FUNCTION_REGISTRY`。
-
-若函数需要上下文注入（如当前房间、agent、team），使用 `_context` 参数（由工具层注入，不暴露给 LLM）。
-
 ## 文档索引（docs/）
 
 ### 项目级
 
 - docs/ROADMAP.md：里程碑与阶段目标
-- docs/文档规范.md：文档书写规范
 - docs/go_simu_terminal.md：终端模拟器使用说明
 
 ### 代码规范
@@ -317,7 +252,7 @@ STORAGE_ROOT/
 
 - docs/tech/01_architecture/：系统架构概述、服务依赖关系
 - docs/tech/02_mvc/：Controller / Service / DAL 开发规范
-- docs/tech/03_dal/：自动时间字段注入
+- docs/tech/03_dal/：DAL相关
 - docs/tech/04_agent/：Driver 架构、调度逻辑、任务生命周期、状态持久化、Token 压缩
 - docs/tech/05_llm/：LLM 配置指南、Prompt Cache
 - docs/tech/06_i18n/：国际化设计方案、Web 实体 i18n 方案
@@ -328,7 +263,8 @@ STORAGE_ROOT/
 
 ### 版本文档
 
-- docs/versions/v*/：按版本沉淀的产品、技术、任务文档（v1 ~ v10）
+- docs/versions/版本文档规范.md：版本管理、文档命名规范
+- docs/versions/v*/：按版本沉淀的产品、技术、任务文档
 
 ### 版本发布
 

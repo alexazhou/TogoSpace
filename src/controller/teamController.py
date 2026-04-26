@@ -52,17 +52,6 @@ async def _to_gt_room(team_id: int, room: TeamRoomConfig) -> GtRoom:
     )
 
 
-async def _assert_role_templates_exist(template_ids: list[int]) -> None:
-    gt_role_templates = await gtRoleTemplateManager.get_role_templates_by_ids(list(set(template_ids)))
-    existing_ids = {template.id for template in gt_role_templates}
-    missing_ids = sorted(set(template_ids) - existing_ids)
-    assertUtil.assertEqual(
-        len(missing_ids),
-        0,
-        error_message=f"角色模板不存在: {missing_ids}",
-        error_code="role_template_not_found",
-    )
-
 
 async def _get_room_agent_names(team_id: int, agent_ids: list[int]) -> list[str]:
     return [
@@ -242,7 +231,9 @@ class TeamModifyHandler(BaseHandler):
                 config_updates=request.config,
             )
         if request.agents is not None:
-            await _assert_role_templates_exist([agent.role_template_id for agent in request.agents])
+            _tpl_ids = list({agent.role_template_id for agent in request.agents})
+            _fetched = await gtRoleTemplateManager.get_role_templates_by_ids(_tpl_ids)
+            assertUtil.assertEqual(len(_fetched), len(_tpl_ids), error_message="部分角色模板不存在", error_code="role_template_not_found")
             await agentService.overwrite_team_agents(
                 team_id,
                 [_to_gt_agent(agent) for agent in request.agents],

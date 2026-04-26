@@ -24,17 +24,6 @@ class AgentsSaveRequest(BaseModel):
     agents: list[AgentSaveItem]
 
 
-async def _assert_role_templates_exist(template_ids: list[int]) -> None:
-    gt_role_templates = await gtRoleTemplateManager.get_role_templates_by_ids(list(set(template_ids)))
-    existing_ids = {template.id for template in gt_role_templates}
-    missing_ids = sorted(set(template_ids) - existing_ids)
-    assertUtil.assertEqual(
-        len(missing_ids),
-        0,
-            error_message=f"角色模板不存在: {missing_ids}",
-            error_code="role_template_not_found",
-        )
-
 
 async def _build_agent_detail_payload(agent: GtAgent) -> dict:
     team = await gtTeamManager.get_team_by_id(agent.team_id)
@@ -159,7 +148,9 @@ class TeamAgentsSaveHandler(BaseHandler):
             error_code="duplicate_agent_name",
         )
 
-        await _assert_role_templates_exist([a.role_template_id for a in request.agents])
+        _tpl_ids = list({a.role_template_id for a in request.agents})
+        _fetched = await gtRoleTemplateManager.get_role_templates_by_ids(_tpl_ids)
+        assertUtil.assertEqual(len(_fetched), len(_tpl_ids), error_message="部分角色模板不存在", error_code="role_template_not_found")
         updated_agents = await agentService.overwrite_team_agents(
             team_id,
             [
