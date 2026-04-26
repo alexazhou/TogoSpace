@@ -208,3 +208,79 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
         # 1 条公告 + 2轮×2人 = 5 条消息
         assert len(room.messages) == 5
+
+    async def test_cancelled_tool_result_is_skipped(self):
+        """CANCELLED 状态的 TOOL 记录应被跳过，而不是抛出 RuntimeError。
+
+        场景：agent 执行 tool_call_1 时被用户手动取消，TOOL 记录状态为 CANCELLED。
+        当恢复执行时，应跳过已取消的 tool，继续执行下一个 pending tool_call_2。
+        """
+        await self.create_room(TEAM, "cancelled_tool_room", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"cancelled_tool_room@{TEAM}")
+        await room.activate_scheduling()
+
+        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
+
+        # 构造历史：USER -> ASSISTANT(tool_call_1, tool_call_2) -> TOOL(call_1, CANCELLED)
+        # 模拟：call_1 执行中被取消，call_2 还未执行
+        tool_call_1 = OpenAIToolCall(id="call_cancelled", function={"name": "send_chat_msg", "arguments": '{"room_name": "cancelled_tool_room", "msg": "cancelled msg"}'})
+        tool_call_2 = OpenAIToolCall(id="call_pending", function={"name": "send_chat_msg", "arguments": '{"room_name": "cancelled_tool_room", "msg": "pending msg"}'})
+
+        assistant_msg = OpenAIMessage(
+            role=OpenaiApiRole.ASSISTANT,
+            content="",
+            tool_calls=[tool_call_1, tool_call_2],
+        )
+
+        # USER 消息
+        user_item = GtAgentHistory.build(
+            OpenAIMessage.text(OpenaiApiRole.USER, "请发送两条消息"),
+            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+        )
+        user_item.agent_id = alice.gt_agent.id
+        user_item.seq = 0
+
+        # ASSISTANT 消息（两个 tool_calls）
+        assistant_item = GtAgentHistory.build(
+            assistant_msg,
+            status=AgentHistoryStatus.SUCCESS,
+        )
+        assistant_item.agent_id = alice.gt_agent.id
+        assistant_item.seq = 1
+
+        # TOOL 记录（call_1 已取消）
+        tool_cancelled_item = GtAgentHistory.build(
+            OpenAIMessage.tool_result("call_cancelled", "cancelled by user"),
+            status=AgentHistoryStatus.CANCELLED,
+            error_message="cancelled by user",
+        )
+        tool_cancelled_item.agent_id = alice.gt_agent.id
+        tool_cancelled_item.seq = 2
+
+        alice.inject_history_messages([user_item, assistant_item, tool_cancelled_item])
+
+        # 验证：get_first_pending_tool_call 应返回 call_2
+        pending = alice.task_consumer._turn_runner._history.get_first_pending_tool_call()
+        assert pending is not None
+        assert pending.id == "call_pending"
+
+        # 后续推理：返回 finish_chat_turn 结束 turn
+        task = GtAgentTask(
+            id=3,
+            agent_id=alice.gt_agent.id,
+            task_type=AgentTaskType.ROOM_MESSAGE,
+            task_data={"room_id": room.room_id},
+        )
+
+        responses = [
+            {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "cancelled_tool_room", "msg": "pending msg"}}]},
+            {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+        ]
+
+        with self.patch_infer(responses=responses):
+            # 旧代码：CANCELLED 状态的 TOOL 会抛出 RuntimeError
+            # 新代码：CANCELLED 状态的 TOOL 会跳过并继续推进
+            await alice.task_consumer._turn_runner.run_chat_turn(task)
+
+        # 验证：turn 正常完成，没有抛出异常
+        assert any(AgentHistoryTag.ROOM_TURN_FINISH in msg.tags for msg in alice.task_consumer._turn_runner._history)
