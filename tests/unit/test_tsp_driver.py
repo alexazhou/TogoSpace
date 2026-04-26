@@ -266,19 +266,21 @@ async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host):
     config = AgentDriverConfig(driver_type="tsp", options={})
     driver = TspAgentDriver(mock_tsp_host, config)
     driver._client = MagicMock()
+    driver._client.process = MagicMock()
+    driver._client.process.returncode = None  # 模拟进程仍在运行
     driver._client.tool = AsyncMock()
-    
+
     # Case 1: JSON Decode Error
     ctx = ToolCallContext(agent_id=1, team_id=1, chat_room=MagicMock(), tool_name="tool")
     res = await driver._execute_tsp_tool("invalid json", ctx)
     assert "JSON 解析失败" in res["message"]
-    
+
     # Case 2: TSP Exception
     driver._client.tool.side_effect = TSPException("tsp/code", "tsp error")
     res = await driver._execute_tsp_tool("{}", ctx)
     assert res["code"] == "tsp/code"
     assert res["message"] == "tsp error"
-    
+
     # Case 3: General Exception
     driver._client.tool.side_effect = RuntimeError("network fail")
     res = await driver._execute_tsp_tool("{}", ctx)

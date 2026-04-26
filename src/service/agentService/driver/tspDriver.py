@@ -69,38 +69,85 @@ class TspAgentDriver(AgentDriver):
         self._tsp_tools: dict[str, llmApiUtil.OpenAITool] = {}
         _local = funcToolService.get_tools_by_names(_LOCAL_TOOL_NAMES)
         self._local_tools: dict[str, llmApiUtil.OpenAITool] = {t.function.name: t for t in _local}
+        self._connect_lock = asyncio.Lock()
+
+        # 构建连接参数（用于首次连接和后续按需重连）
+        options = config.options
+        work_dir = str(options.get("workdir") or host.agent_workdir)
+        command = build_gtsp_command(options.get("command"), work_dir)
+        timeout_sec = int(options.get("request_timeout_sec", _DEFAULT_REQUEST_TIMEOUT_SEC))
+        self._connect_params: dict[str, Any] = {
+            "command": command,
+            "timeout_sec": timeout_sec,
+            "include": options.get("tool_include") or None,
+            "exclude": options.get("tool_exclude") or None,
+        }
+
+    def _is_client_connected(self) -> bool:
+        """检查 TSP client 进程是否仍然存活。
+
+        gtsp 进程可能因异常退出或被终止而留下僵尸 client 对象，
+        此时 _client 非空但 process.returncode 已有值。后续 tool() 调用会
+        因写入已关闭的 stdin 而超时或抛异常，需提前检测避免无效等待。
+        """
+        if self._client is None:
+            return False
+        process = self._client.process
+        if process is None:
+            return False
+        # returncode 为 None 表示进程仍在运行，非 None 表示已退出
+        return process.returncode is None
+
+    async def _ensure_connected(self) -> bool:
+        """确保 TSP client 已连接，若断开则重新连接。
+
+        使用锁防止并发连接，连接成功后重新注册工具。
+        返回 True 表示连接成功（或已连接），False 表示失败。
+        """
+        async with self._connect_lock:
+            # 再次检查，防止其他协程已完成连接
+            if self._is_client_connected():
+                return True
+
+            logger.info("TSP 服务断开，尝试重新连接: agent_id=%s", self.host.gt_agent.id)
+
+            # 清理旧 client
+            if self._client is not None:
+                try:
+                    await self._client.disconnect()
+                except Exception:
+                    pass
+                self._client = None
+
+            try:
+                client = TSPClient(
+                    command=self._connect_params["command"],
+                    request_timeout_sec=self._connect_params["timeout_sec"],
+                )
+                await client.connect()
+                result: TSPInitializeResult = await client.initialize(
+                    client_info={"name": "agent_team.tsp_driver"},
+                    include=self._connect_params.get("include"),
+                    exclude=self._connect_params.get("exclude"),
+                )
+                self._load_tsp_tools(result)
+                self._client = client
+                self._register_host_tools()
+                logger.info("TSP 连接成功: agent_id=%s, tools=%s", self.host.gt_agent.id, len(self._tsp_tools))
+                return True
+            except Exception as e:
+                logger.error("TSP 连接失败: agent_id=%s, error=%s", self.host.gt_agent.id, e)
+                return False
 
     async def startup(self) -> None:
         await super().startup()
-        options = self.config.options
-        work_dir = str(options.get("workdir") or self.host.agent_workdir)
-        command = build_gtsp_command(options.get("command"), work_dir)
 
-        timeout_sec = int(options.get("request_timeout_sec", _DEFAULT_REQUEST_TIMEOUT_SEC))
-        include: Optional[list[str]] = options.get("tool_include") or None
-        exclude: Optional[list[str]] = options.get("tool_exclude") or None
+        # 使用 _ensure_connected 完成首次连接
+        connected = await self._ensure_connected()
+        if not connected:
+            raise RuntimeError(f"TSP 首次连接失败: agent_id={self.host.gt_agent.id}")
 
-        client = TSPClient(command=command, request_timeout_sec=timeout_sec)
-        await client.connect()
-        try:
-            result: TSPInitializeResult = await client.initialize(
-                client_info={"name": "agent_team.tsp_driver"},
-                include=include,
-                exclude=exclude,
-            )
-            self._load_tsp_tools(result)
-        except Exception:
-            await client.disconnect()
-            raise
-
-        self._client = client
-        self._register_host_tools()
-        logger.info(
-            "TSP driver initialized: agent=%s command=%s tools=%s",
-            self.host.gt_agent.id,
-            command,
-            len(self._tsp_tools),
-        )
+        logger.info(f"TSP driver initialized: agent={self.host.gt_agent.id} command={self._connect_params['command']} tools={len(self._tsp_tools)}")
 
     async def shutdown(self) -> None:
         if self._client is None:
@@ -154,7 +201,12 @@ class TspAgentDriver(AgentDriver):
         context: ToolCallContext | None = None,
     ) -> dict[str, Any]:
 
-        assert self._client is not None, "TSP client 尚未初始化"
+        # 确保连接，若断开则自动重连
+        if not self._is_client_connected():
+            connected = await self._ensure_connected()
+            if not connected:
+                return {"success": False, "message": "TSP 服务已断开且重连失败，请重启 Agent 或联系管理员"}
+
         function_name = context.tool_name if context is not None else ""
 
         if not function_name:
@@ -170,6 +222,8 @@ class TspAgentDriver(AgentDriver):
         except TSPException as e:
             return {"success": False, "code": e.code, "message": e.message}
         except Exception as e:
+            # 工具执行过程中可能因 gtsp 再次退出而失败，记录日志
+            logger.warning("TSP 工具执行异常: agent_id=%s, tool=%s, error=%s", self.host.gt_agent.id, function_name, e)
             return {"success": False, "message": f"TSP 工具调用失败: {e}"}
 
     def _load_tsp_tools(self, initialize_result: TSPInitializeResult) -> None:
