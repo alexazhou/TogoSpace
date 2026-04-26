@@ -87,7 +87,7 @@ class ChatRoom:
                 return agent
         return None
 
-    def get_agent_name(self, agent_id: int) -> str:
+    def _display_name_of(self, agent_id: int) -> str:
         """根据 agent_id 获取显示名称（i18n）。"""
         agent = self.get_gt_agent(agent_id)
         if agent is not None:
@@ -150,7 +150,7 @@ class ChatRoom:
         )
         message = GtCoreRoomMessage(
             sender_id=sender_id,
-            sender_name=self.get_agent_name(sender_id),
+            sender_name=self._display_name_of(sender_id),
             content=content,
             send_time=send_time or datetime.now()
         )
@@ -180,7 +180,7 @@ class ChatRoom:
         # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
         was_idle = (self._state == RoomState.IDLE)
         if was_idle:
-            logger.info(f"检测到房间 {self.key} 的活动 ({self.get_agent_name(sender_id)}(agent_id={sender_id}))，重置轮次计数器并唤醒房间")
+            logger.info(f"检测到房间 {self.key} 的活动 ({self._display_name_of(sender_id)}(agent_id={sender_id}))，重置轮次计数器并唤醒房间")
             self._turn_count = 0
             self._round_skipped_set = set()
             self._current_turn_has_content = False
@@ -191,7 +191,7 @@ class ChatRoom:
         if sender_id == current_expected:
             self._current_turn_has_content = True
         else:
-            logger.info(f"房间 {self.key} 收到来自 {self.get_agent_name(sender_id)}(agent_id={sender_id}) 的插话，保持当前发言位 (当前应轮到 {self.get_agent_name(current_expected)}(agent_id={current_expected}))")
+            logger.info(f"房间 {self.key} 收到来自 {self._display_name_of(sender_id)}(agent_id={sender_id}) 的插话，保持当前发言位 (当前应轮到 {self._display_name_of(current_expected)}(agent_id={current_expected}))")
 
         # 3. 只要有真实消息（非系统消息），就清空跳过记录，让所有人重新有机会回应
         if sender_id != self.SYSTEM_MEMBER_ID and self._round_skipped_set:
@@ -220,12 +220,12 @@ class ChatRoom:
         current_expected = self._get_current_turn_agent_id()
 
         if agent_id != current_expected:
-            logger.warning(f"房间 {self.key} 拒绝结束轮次申请：{self.get_agent_name(agent_id)}(agent_id={agent_id}) 并非当前发言人 {self.get_agent_name(current_expected)}(agent_id={current_expected})")
+            logger.warning(f"房间 {self.key} 拒绝结束轮次申请：{self._display_name_of(agent_id)}(agent_id={agent_id}) 并非当前发言人 {self._display_name_of(current_expected)}(agent_id={current_expected})")
             return False
 
         logger.info(
             "房间 %s 由 %s(agent_id=%d) 结束本轮行动 (has_content=%s, turn_pos=%d/%d, turn_count=%d)",
-            self.key, self.get_agent_name(current_expected), current_expected,
+            self.key, self._display_name_of(current_expected), current_expected,
             self._current_turn_has_content, self._turn_pos, len(self._agent_ids), self._turn_count,
         )
 
@@ -332,7 +332,7 @@ class ChatRoom:
             next_id = next_agent.id if next_agent else None
 
             if self._should_auto_skip_agent_turn():
-                logger.info(f"房间 {self.key} 自动跳过人类操作者回合: {self.get_agent_name(next_id)}(agent_id={next_id})")
+                logger.info(f"房间 {self.key} 自动跳过人类操作者回合: {self._display_name_of(next_id)}(agent_id={next_id})")
                 if next_id is not None:
                     self._round_skipped_set.add(next_id)
                 self._current_turn_has_content = False
@@ -346,7 +346,7 @@ class ChatRoom:
                 logger.info(
                     "当前发言位为特殊成员，等待外部输入，不发布 ROOM_AGENT_TURN: room=%s, %s(agent_id=%s)",
                     self.key,
-                    self.get_agent_name(next_id),
+                    self._display_name_of(next_id),
                     next_id,
                 )
                 return None
@@ -465,7 +465,7 @@ class ChatRoom:
     def format_log(self) -> str:
         lines = [f"=== {self.key} 聊天记录 ==="]
         for msg in self.messages:
-            sender_name = self.get_agent_name(msg.sender_id)
+            sender_name = self._display_name_of(msg.sender_id)
             lines.append(f"[{msg.send_time.isoformat()}] {sender_name}: {msg.content}")
         return "\n".join(lines)
 
