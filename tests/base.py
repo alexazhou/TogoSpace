@@ -559,15 +559,13 @@ class ServiceTestCase:
 
     @classmethod
     def _close_class_loop(cls):
-        """关闭类级别事件循环，确保 aiosqlite 等异步资源正确清理。"""
+        """关闭类级别事件循环。"""
         loop = cls._class_loop
         cls._class_loop = None
         if loop is not None and not loop.is_closed():
             try:
                 _cancel_all_tasks(loop)
                 loop.run_until_complete(loop.shutdown_asyncgens())
-                # 等待后台线程完成，避免 aiosqlite 线程在循环关闭后抛 RuntimeError
-                loop.run_until_complete(asyncio.sleep(0.1))
             finally:
                 loop.close()
 
