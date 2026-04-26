@@ -288,7 +288,7 @@ class TestTeamRuntimeRestoreKeepsAgentHistory(_agentServiceCase):
         await self.create_room(
             TEAM,
             "alice_private",
-            ["alice", "Operator"],
+            ["alice", "OPERATOR"],
             room_type=roomService.RoomType.PRIVATE,
         )
         private_room = roomService.get_room_by_key(f"alice_private@{TEAM}")

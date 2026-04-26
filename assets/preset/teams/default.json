@@ -44,7 +44,7 @@
   "preset_rooms": [
     {
       "name": "小马哥",
-      "agents": ["Operator", "小马哥"],
+      "agents": ["OPERATOR", "小马哥"],
       "initial_topic": "你好，小马哥。我们在这里进行私下沟通。",
       "max_turns": 100,
       "i18n": {

@@ -14,7 +14,7 @@
   "preset_rooms": [
     {
       "name": "general",
-      "agents": ["Operator", "alice", "bob"],
+      "agents": ["OPERATOR", "alice", "bob"],
       "initial_topic": "e2e 测试话题",
       "max_turns": 50
     }

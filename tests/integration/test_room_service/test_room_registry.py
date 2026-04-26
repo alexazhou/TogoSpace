@@ -190,7 +190,7 @@ class TestRoomRegistry(ServiceTestCase):
 
     async def test_special_agent_ids(self):
         """SYSTEM 和 OPERATOR 应有特殊的 agent_id。"""
-        await self.create_room(TEAM, "special_room", ["Operator", "alice"])
+        await self.create_room(TEAM, "special_room", ["OPERATOR", "alice"])
         room = roomService.get_room_by_key(f"special_room@{TEAM}")
 
         # SYSTEM 和 OPERATOR 是固定常量

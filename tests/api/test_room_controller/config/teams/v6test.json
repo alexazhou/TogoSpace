@@ -24,7 +24,7 @@
   "preset_rooms": [
     {
       "name": "alice_private",
-      "agents": ["Operator", "alice"],
+      "agents": ["OPERATOR", "alice"],
       "initial_topic": "v6 private test",
       "max_turns": 10
     },

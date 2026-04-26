@@ -63,7 +63,7 @@
   "preset_rooms": [
     {
       "name": "主持人",
-      "agents": ["Operator", "主持人"],
+      "agents": ["OPERATOR", "主持人"],
       "initial_topic": "和主持人单独沟通，讨论头脑风暴的策划与准备工作。",
       "max_turns": 100,
       "i18n": {

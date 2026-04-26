@@ -33,6 +33,7 @@ async def _build_agent_detail_payload(agent: GtAgent) -> dict:
         current_error_message = first_task.error_message
 
     result = agent.to_json()
+    result["driver"] = agent.driver.value
     result["status"] = runtime_status_map.get(agent.id, AgentStatus.IDLE).name
     result["error_message"] = current_error_message
     return result
@@ -59,6 +60,7 @@ class AgentListHandler(BaseHandler):
         items = []
         for agent in agents:
             result = agent.to_json()
+            result["driver"] = agent.driver.value
             result["status"] = runtime_status_map.get(agent.id, AgentStatus.IDLE).name
             if agent.team_id == -1:
                 special_agent = SpecialAgent.value_of(agent.id)

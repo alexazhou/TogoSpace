@@ -30,14 +30,24 @@ def _infer_room_type(agent_names: list[str]) -> RoomType:
     return RoomType.GROUP
 
 
+async def _resolve_room_agent_ids(team_id: int, agent_names: list[str]) -> list[int]:
+    normal_names = [agent_name for agent_name in agent_names if SpecialAgent.value_of(agent_name) is None]
+    normal_agents = await gtAgentManager.get_team_agents_by_names(team_id, normal_names)
+    normal_name_to_id = {agent.name: agent.id for agent in normal_agents}
+    agent_ids: list[int] = []
+    for agent_name in agent_names:
+        special = SpecialAgent.value_of(agent_name)
+        if special is not None:
+            agent_ids.append(int(special.value))
+            continue
+        agent_id = normal_name_to_id.get(agent_name)
+        if agent_id is not None:
+            agent_ids.append(agent_id)
+    return agent_ids
+
+
 async def _to_gt_room(team_id: int, room: TeamRoomConfig) -> GtRoom:
-    gt_agent_ids = [
-        agent.id
-        for agent in await gtAgentManager.get_team_agents_by_names(
-            team_id,
-            room.agents,
-        )
-    ]
+    gt_agent_ids = await _resolve_room_agent_ids(team_id, list(room.agents))
     return GtRoom(
         id=room.id,
         team_id=team_id,

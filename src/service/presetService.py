@@ -70,6 +70,22 @@ async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> GtDept:
     )
 
 
+async def _resolve_room_agent_ids(team_id: int, agent_names: list[str]) -> list[int]:
+    normal_names = [agent_name for agent_name in agent_names if SpecialAgent.value_of(agent_name) is None]
+    normal_agents = await gtAgentManager.get_team_agents_by_names(team_id, normal_names)
+    normal_name_to_id = {agent.name: agent.id for agent in normal_agents}
+    agent_ids: list[int] = []
+    for agent_name in agent_names:
+        special = SpecialAgent.value_of(agent_name)
+        if special is not None:
+            agent_ids.append(int(special.value))
+            continue
+        agent_id = normal_name_to_id.get(agent_name)
+        if agent_id is not None:
+            agent_ids.append(agent_id)
+    return agent_ids
+
+
 def _infer_room_type(agent_names: list[str]) -> RoomType:
     ai_count = len([agent_name for agent_name in agent_names if SpecialAgent.value_of(agent_name) != SpecialAgent.OPERATOR])
     if any(SpecialAgent.value_of(agent_name) == SpecialAgent.OPERATOR for agent_name in agent_names) and ai_count == 1:
@@ -78,13 +94,7 @@ def _infer_room_type(agent_names: list[str]) -> RoomType:
 
 
 async def _to_gt_room(team_id: int, room_config: TeamRoomConfig) -> GtRoom:
-    agent_ids = [
-        agent.id
-        for agent in await gtAgentManager.get_team_agents_by_names(
-            team_id,
-            room_config.agents,
-        )
-    ]
+    agent_ids = await _resolve_room_agent_ids(team_id, list(room_config.agents))
     # 使用稳定 name 作为 DB name；initial_topic 可从 i18n 按语言解析
     initial_topic = room_config.initial_topic
 

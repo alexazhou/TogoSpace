@@ -242,7 +242,7 @@ class TestDalManagers(ServiceTestCase):
         await presetService._import_team_from_config(TeamConfig(
             name="imported",
             agents=[AgentConfig(name="charlie", role_template="charlie")],
-            preset_rooms=[TeamRoomConfig(name="r2", agents=["Operator", "charlie"])],
+            preset_rooms=[TeamRoomConfig(name="r2", agents=["OPERATOR", "charlie"])],
         ))
         imported_after = await gtTeamManager.get_team("imported")
         assert imported_after is not None
@@ -314,7 +314,7 @@ class TestDalManagers(ServiceTestCase):
         team = await gtTeamManager.save_team(GtTeam(name="room_team"))
         await roomService.create_team_rooms(team.id, await ServiceTestCase.convert_to_gt_rooms(team.id, [
             TeamRoomConfig(name="z_room", max_turns=2, agents=["alice", "bob"]),
-            TeamRoomConfig(name="a_room", max_turns=3, agents=["Operator", "alice"]),
+            TeamRoomConfig(name="a_room", max_turns=3, agents=["OPERATOR", "alice"]),
         ]))
 
         rooms = await gtRoomManager.get_rooms_by_team(team.id)
