@@ -58,24 +58,13 @@ class AgentListHandler(BaseHandler):
 
         items = []
         for agent in agents:
-            special_type = None
+            result = agent.to_json()
+            result["status"] = runtime_status_map.get(agent.id, AgentStatus.IDLE).name
             if agent.team_id == -1:
                 special_agent = SpecialAgent.value_of(agent.id)
                 if special_agent is not None:
-                    special_type = special_agent.name.lower()
-            items.append({
-                "id": agent.id,
-                "name": agent.name,
-                "i18n": agent.i18n or {},
-                "employee_number": agent.employee_number,
-                "role_template_id": agent.role_template_id,
-                "team_id": agent.team_id,
-                "status": runtime_status_map.get(agent.id, AgentStatus.IDLE).name,
-                "employ_status": agent.employ_status.name if agent.employ_status else None,
-                "model": agent.model,
-                "driver": agent.driver.value if agent.driver else None,
-                "special": special_type,
-            })
+                    result["special"] = special_agent.name.lower()
+            items.append(result)
 
         self.return_json({"agents": items})
 
