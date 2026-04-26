@@ -4,24 +4,30 @@ from peewee import fn
 
 from constants import EmployStatus, DriverType
 from model.dbModel.gtAgent import GtAgent
+from util.cacheUtil import CacheStore
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 缓存层
 # ─────────────────────────────────────────────────────────────────────────────
 
-_agent_cache: dict[int, GtAgent] = {}  # agent_id -> GtAgent
+# Agent 缓存：key 为 agent_id，value 为 GtAgent 对象
+_agent_cache = CacheStore[int, GtAgent](key_extractor=lambda a: a.id)
 
 
 def cache_agents(agents: GtAgent | list[GtAgent]) -> None:
-    """将 agent(s) 加入缓存。支持单个 GtAgent 或列表。"""
+    """将 agent(s) 加入缓存。支持单个 GtAgent 或列表。
+
+    注意：id 为 None 的 agent（尚未插入数据库）不会被缓存。
+    """
     if isinstance(agents, GtAgent):
         if agents.id is not None:
-            _agent_cache[agents.id] = agents
+            _agent_cache.add(agents)
     else:
-        for agent in agents:
-            if agent.id is not None:
-                _agent_cache[agent.id] = agent
+        # 过滤掉 id 为 None 的 agent
+        valid_agents = [a for a in agents if a.id is not None]
+        if valid_agents:
+            _agent_cache.add_many(valid_agents)
 
 
 def get_cached_agent(agent_id: int) -> GtAgent | None:
@@ -31,7 +37,7 @@ def get_cached_agent(agent_id: int) -> GtAgent | None:
 
 def invalidate_agent_cache(agent_id: int) -> None:
     """失效单个 agent 的缓存。"""
-    _agent_cache.pop(agent_id, None)
+    _agent_cache.invalidate(agent_id)
 
 
 def clear_agent_cache() -> None:
