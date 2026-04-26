@@ -204,3 +204,141 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
 
         assert history.has_active_turn() is False
         assert history.get_current_turn_start_index() is None
+
+
+class TestFinalizeCancelTurn(ServiceTestCase):
+    """finalize_cancel_turn: 取消 active turn 的历史清理（使用真实数据库）。"""
+
+    @classmethod
+    async def async_setup_class(cls):
+        db_path = cls._get_test_db_path()
+        await ormService.startup(db_path)
+
+    @classmethod
+    async def async_teardown_class(cls):
+        await ormService.shutdown()
+
+    async def _reset_table(self):
+        await GtAgentHistory.delete().aio_execute()
+
+    async def test_no_active_turn_is_noop(self):
+        """无 active turn 时，finalize_cancel_turn 什么都不做。"""
+        await self._reset_table()
+        history = AgentHistoryStore(agent_id=100)
+
+        # 创建已完成的 turn
+        await history.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
+            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+        ))
+        await history.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"),
+            status=AgentHistoryStatus.SUCCESS,
+        ))
+        await history.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "done"),
+            tags=[AgentHistoryTag.ROOM_TURN_FINISH],
+        ))
+
+        original_len = len(history)
+        await history.finalize_cancel_turn()
+
+        assert len(history) == original_len
+        assert history.has_active_turn() is False
+
+    async def test_marks_init_items_as_cancelled(self):
+        """场景 A：INIT 占位项应被标记为 CANCELLED。"""
+        await self._reset_table()
+        history = AgentHistoryStore(agent_id=101)
+
+        # 创建 active turn
+        await history.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
+            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+        ))
+        await history.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"),
+            status=AgentHistoryStatus.SUCCESS,
+        ))
+        init_item = await history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
+
+        init_item_id = init_item.id
+        assert init_item_id is not None
+
+        await history.finalize_cancel_turn()
+
+        # reload_from_db 替换了内存对象列表，需要从 history 中重新获取
+        cancelled_item = next((item for item in history if item.id == init_item_id), None)
+        assert cancelled_item is not None
+        assert cancelled_item.status == AgentHistoryStatus.CANCELLED
+        last = history.last()
+        assert last is not None
+        assert AgentHistoryTag.ROOM_TURN_FINISH in last.tags
+        assert history.has_active_turn() is False
+
+    async def test_unpersisted_init_item_handled_gracefully(self):
+        """未持久化的 INIT 占位项（id=None）应被 reload 过滤掉，不导致异常。
+
+        这是修复本问题的核心测试场景：
+        - 模拟 CancelledError 中断持久化，内存中有 INIT 占位但数据库没有
+        - reload_from_db 会从数据库重新加载，内存中不再有该占位项
+        - finalize_cancel_turn 应正常完成，不抛出 RuntimeError
+        """
+        await self._reset_table()
+        history = AgentHistoryStore(agent_id=102)
+
+        # 创建 active turn，并持久化
+        await history.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
+            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+        ))
+
+        # 模拟：内存中有一个未持久化的 INIT 占位项（id=None）
+        unpersisted_init = GtAgentHistory.build_placeholder(
+            role=OpenaiApiRole.ASSISTANT,
+            status=AgentHistoryStatus.INIT,
+        )
+        unpersisted_init.agent_id = 102
+        unpersisted_init.seq = 1
+        # 不设置 id，模拟未持久化状态
+        history._items.append(unpersisted_init)
+
+        assert len(history) == 2
+        assert unpersisted_init.id is None
+
+        # finalize_cancel_turn 会先 reload，未持久化项被过滤
+        await history.finalize_cancel_turn()
+
+        # reload 后，内存只有数据库中的记录 + 新追加的 ROOM_TURN_FINISH
+        # 未持久化项被丢弃，不导致 RuntimeError
+        assert len(history) == 2  # u1 + ROOM_TURN_FINISH
+        assert history.has_active_turn() is False  # turn 被 ROOM_TURN_FINISH 关闭
+
+    async def test_cancelled_turn_can_receive_new_messages(self):
+        """取消 turn 后，新的消息应能正常处理。
+
+        验证修复后的行为：取消后 agent 不再卡死。
+        """
+        await self._reset_table()
+        history = AgentHistoryStore(agent_id=103)
+
+        # 创建 active turn
+        await history.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
+            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+        ))
+        init_item = await history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
+
+        # 取消 turn
+        await history.finalize_cancel_turn()
+
+        assert history.has_active_turn() is False
+
+        # 发送新消息，应能正常处理
+        await history.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "new message"),
+            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+        ))
+
+        assert len(history) >= 2  # u1 + ROOM_TURN_FINISH + new message
+        assert history.has_active_turn() is True  # 新 turn 开始

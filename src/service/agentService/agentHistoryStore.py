@@ -51,6 +51,15 @@ class AgentHistoryStore:
     def replace(self, items: Iterable[GtAgentHistory]) -> None:
         self._items = list(items)
 
+    async def reload_from_db(self) -> None:
+        """从数据库重新加载所有历史消息，覆盖内存状态。
+
+        用于在执行关键操作前同步内存与数据库，确保一致性。
+        """
+        items = await gtAgentHistoryManager.get_agent_history(self._agent_id)
+        self._items = list(items)
+        logger.info("[reload] agent_id=%d, loaded %d items from db", self._agent_id, len(self._items))
+
     def last(self) -> GtAgentHistory | None:
         if not self._items:
             return None
@@ -240,6 +249,10 @@ class AgentHistoryStore:
 
         处理逻辑参见 V17 技术文档 §3.2。
         """
+        # 先从数据库 reload，确保内存与数据库一致
+        # 避免 CancelledError 中断持久化导致的内存/数据库不一致问题
+        await self.reload_from_db()
+
         start_idx = self.get_current_turn_start_index()
         if start_idx is None:
             logger.info("[cancel-turn] agent_id=%d, 无 active turn，跳过", self._agent_id)
