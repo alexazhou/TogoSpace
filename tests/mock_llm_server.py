@@ -89,12 +89,15 @@ def _default_openai_response(room_name: str = "general", with_send: bool = True)
 def _has_operator_message(messages: list[Dict[str, Any]] | None) -> bool:
     """检查消息历史中是否包含来自 Operator 的消息（即人类操作员主动发言）。
 
-    sender_name 由 roomService._get_agent_name 生成，Operator 返回 "OPERATOR"（大写），
-    因此格式化后为 「【OPERATOR】」。
+    sender_name 由 gtAgentManager.get_agent_name 生成，OPERATOR 返回：
+    - 英文环境："OPERATOR"
+    - 中文环境："操作者"
+
+    因此格式化后可能为 「【OPERATOR】」 或 「【操作者】」。
     """
     for msg in (messages or []):
         content = msg.get("content") or ""
-        if "【OPERATOR】" in content:
+        if "【OPERATOR】" in content or "【操作者】" in content:
             return True
     return False
 
