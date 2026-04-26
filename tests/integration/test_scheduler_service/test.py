@@ -491,7 +491,7 @@ class TestScheduleGate(ServiceTestCase):
                 payload={
                     "need_scheduling": True,
                     "gt_room": SimpleNamespace(id=1),
-                    "current_turn_agent": GtAgent(id=1, team_id=1, name="alice", role_template_id=1),
+                    "current_turn_agent_id": 1,
                 },
             )
             await scheduler._on_room_status_changed(msg)

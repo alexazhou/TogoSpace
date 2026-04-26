@@ -465,11 +465,11 @@ class ChatRoom:
             msg += f"\n{i18nUtil.t('room_initial_topic', topic=initial_topic_text)}"
         return msg
 
-    def _build_current_turn_agent_dict(self) -> dict | None:
-        """构建当前发言人信息字典，供 API 响应复用。"""
+    def _build_current_turn_agent_id(self) -> int | None:
+        """构建当前发言人 ID，供 API 响应复用。"""
         if self._state != RoomState.SCHEDULING or not self._agent_ids:
             return None
-        return {"id": self._get_current_turn_agent_id()}
+        return self._get_current_turn_agent_id()
 
     def to_dict(self) -> dict:
         """返回用于 API 响应的字典表示，包含 gt_room 详情与运行时状态。"""
@@ -478,8 +478,6 @@ class ChatRoom:
             "team_name": self.team_name,
             "state": self._state.name,
             "need_scheduling": self._state == RoomState.SCHEDULING,
-            "current_turn_agent": self._build_current_turn_agent_dict(),
+            "current_turn_agent_id": self._build_current_turn_agent_id(),
             "agents": list(self.get_agent_ids()),
         }
-
-

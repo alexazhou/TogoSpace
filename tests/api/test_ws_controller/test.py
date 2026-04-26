@@ -141,3 +141,48 @@ class TestWsController(_ApiServiceCase):
                 assert "display_name" not in matched["gt_agent"]
                 assert "i18n" in matched["gt_agent"]
                 assert "team_name" not in matched
+
+    async def test_ws_room_status_contains_current_turn_agent_id(self):
+        """room_status 事件应携带 current_turn_agent_id，供前端自行匹配成员。"""
+        ws_url = f"ws://127.0.0.1:{self.backend_port}/ws/events.json"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{self.backend_base_url}/teams/list.json") as resp:
+                assert resp.status == 200
+                teams = (await resp.json())["teams"]
+            team = next(t for t in teams if t["name"] == _TEAM)
+            team_id = team["id"]
+
+            async with session.get(f"{self.backend_base_url}/rooms/list.json?team_id={team_id}") as resp:
+                assert resp.status == 200
+                rooms = (await resp.json())["rooms"]
+            room_id = next(r["gt_room"]["id"] for r in rooms if r["gt_room"]["name"] == "general")
+
+            finish_response = {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]}
+            for _ in range(4):
+                self.set_mock_response(finish_response)
+
+            async with session.ws_connect(ws_url) as ws:
+                async with session.post(
+                    f"{self.backend_base_url}/rooms/{room_id}/messages/send.json",
+                    json={"content": "trigger room status event"},
+                ) as resp:
+                    assert resp.status == 200
+
+                matched = None
+                async with asyncio.timeout(8):
+                    async for msg in ws:
+                        if msg.type != aiohttp.WSMsgType.TEXT:
+                            continue
+                        data = json.loads(msg.data)
+                        if data.get("event") != "room_status":
+                            continue
+                        current_turn_agent_id = data.get("current_turn_agent_id")
+                        if not isinstance(current_turn_agent_id, int) or current_turn_agent_id <= 0:
+                            continue
+                        matched = data
+                        break
+
+                assert matched is not None, "未收到包含 current_turn_agent_id 的 room_status 事件"
+                assert matched["gt_room"]["team_id"] == team_id
+                assert matched["current_turn_agent_id"] > 0

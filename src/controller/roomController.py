@@ -44,7 +44,7 @@ class RoomApiResponse(BaseModel):
     gt_room: dict
     state: str
     need_scheduling: bool
-    current_turn_agent: dict | None = None
+    current_turn_agent_id: int | None = None
     agents: List[int] = Field(default_factory=list)
 
     @classmethod
@@ -59,7 +59,7 @@ class RoomApiResponse(BaseModel):
             gt_room=gt_room.to_json(),
             state=RoomState.IDLE.name,
             need_scheduling=False,
-            current_turn_agent=None,
+            current_turn_agent_id=None,
             agents=list(gt_room.agent_ids or []),
         )
 
