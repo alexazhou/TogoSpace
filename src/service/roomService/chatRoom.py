@@ -88,24 +88,20 @@ class ChatRoom:
         return None
 
     def get_agent_name(self, agent_id: int) -> str:
-        """根据 agent_id 获取显示名称（从 i18n 解析）。"""
-        if agent_id == self.SYSTEM_MEMBER_ID:
-            return SpecialAgent.SYSTEM.name
-        if agent_id == self.OPERATOR_MEMBER_ID:
-            return SpecialAgent.OPERATOR.name
+        """根据 agent_id 获取显示名称（i18n）。"""
         agent = self.get_gt_agent(agent_id)
-        if agent is None:
-            return str(agent_id)
-        return self._get_agent_display_name(agent)
+        if agent is not None:
+            return agent.display_name
+        special = SpecialAgent.value_of(agent_id)
+        return special.name if special is not None else str(agent_id)
 
     def _get_agent_stable_name(self, agent_id: int) -> str:
         """根据 agent_id 获取稳定标识名（用于持久化和匹配）。"""
-        if agent_id == self.SYSTEM_MEMBER_ID:
-            return SpecialAgent.SYSTEM.name
-        if agent_id == self.OPERATOR_MEMBER_ID:
-            return SpecialAgent.OPERATOR.name
         agent = self.get_gt_agent(agent_id)
-        return agent.name if agent else str(agent_id)
+        if agent is not None:
+            return agent.name
+        special = SpecialAgent.value_of(agent_id)
+        return special.name if special is not None else str(agent_id)
 
     def get_agent_id_by_name(self, name: str) -> int | None:
         """根据 Agent 名称获取 agent_id。未找到时返回 None。"""
@@ -473,13 +469,6 @@ class ChatRoom:
             lines.append(f"[{msg.send_time.isoformat()}] {sender_name}: {msg.content}")
         return "\n".join(lines)
 
-    def _get_agent_display_name(self, agent: GtAgent) -> str:
-        """获取 Agent 的显示名称（从 i18n 解析）。"""
-        return i18nUtil.extract_i18n_str(
-            agent.i18n.get("display_name") if agent.i18n else None,
-            default=agent.name,
-        ) or agent.name
-
     def _get_room_initial_topic_display_text(self) -> str:
         """按当前后端语言解析首条系统消息里展示的 initial topic。"""
         return i18nUtil.extract_i18n_str(
@@ -496,7 +485,7 @@ class ChatRoom:
 
         # 获取所有 Agent 的显示名称（排除系统成员）
         agent_display_names = [
-            self._get_agent_display_name(agent)
+            agent.display_name
             for agent in self._agents
             if agent.id != self.SYSTEM_MEMBER_ID
         ]
