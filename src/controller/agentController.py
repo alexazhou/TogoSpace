@@ -26,30 +26,16 @@ class AgentsSaveRequest(BaseModel):
 
 
 async def _build_agent_detail_payload(agent: GtAgent) -> dict:
-    team = await gtTeamManager.get_team_by_id(agent.team_id)
     runtime_status_map = agentService.get_team_runtime_status_map(agent.team_id)
     first_task = await gtAgentTaskManager.get_first_unfinish_task(agent.id)
     current_error_message = None
     if first_task is not None and first_task.status == AgentTaskStatus.FAILED:
         current_error_message = first_task.error_message
 
-    return {
-        "id": agent.id,
-        "name": agent.name,
-        "i18n": agent.i18n or {},
-        "agent_name": agent.name,
-        "employee_number": agent.employee_number,
-        "role_template_id": agent.role_template_id,
-        "team_id": agent.team_id,
-        "team_name": team.name if team is not None else None,
-        "status": runtime_status_map.get(agent.id, AgentStatus.IDLE).name,
-        "employ_status": agent.employ_status.name if agent.employ_status else None,
-        "model": agent.model,
-        "driver": agent.driver.value if agent.driver else None,
-        "driver_type": agent.driver.value if agent.driver else None,
-        "prompt": "",
-        "error_message": current_error_message,
-    }
+    result = agent.to_json()
+    result["status"] = runtime_status_map.get(agent.id, AgentStatus.IDLE).name
+    result["error_message"] = current_error_message
+    return result
 
 
 class AgentListHandler(BaseHandler):
