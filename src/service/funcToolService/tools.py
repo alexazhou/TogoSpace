@@ -227,7 +227,7 @@ async def get_agent_info(agent_name: Optional[str] = None, _context: ToolCallCon
             info["rooms"] = [
                 room.name
                 for room in roomService.get_all_rooms()
-                if room.team_id == team_id and agent_id in room.agents
+                if room.team_id == team_id and agent_id in room.get_agent_ids()
             ]
             info["can_wake_up"] = agent.status == AgentStatus.FAILED
         return info
@@ -307,7 +307,7 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
                 _context.agent_name,
                 room_name,
                 _context.team_id,
-                target_room.agents,
+                target_room.get_agent_ids(),
             )
             return {"success": False, "message": f"你不在目标房间 {target_room.name} 中，发送失败。"}
 

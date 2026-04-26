@@ -321,7 +321,7 @@ async def overwrite_team_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
 def get_agent_names(room_id: int) -> List[str]:
     """返回聊天室的参与者名列表。"""
     room = get_room(room_id)
-    return room.agent_names if room is not None else []
+    return [room.get_agent_name(aid) for aid in room.get_agent_ids()] if room is not None else []
 
 
 def get_rooms_for_agent(team_id: int | None, agent_id: int) -> List[int]:

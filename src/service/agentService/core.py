@@ -228,7 +228,7 @@ def get_room_agents(room_id: int) -> List["Agent"]:
     room = roomService.get_room(room_id)
     if room is None:
         return []
-    return [_agents[aid] for aid in room.agents if aid in _agents]
+    return [_agents[aid] for aid in room.get_agent_ids() if aid in _agents]
 
 
 async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> list[GtAgent]:

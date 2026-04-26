@@ -74,23 +74,11 @@ class ChatRoom:
     def _max_turns(self) -> int:
         return self.gt_room.max_turns
 
-    @property
-    def agents(self) -> List[int]:
-        """返回 Agent ID 列表（排除系统成员，用于 API 响应）。"""
-        return [
-            agent.id
-            for agent in self._agents
-            if agent.id != self.SYSTEM_MEMBER_ID
-        ]
-
-    @property
-    def agent_names(self) -> List[str]:
-        """返回 Agent 名称列表（排除系统成员，用于展示）。"""
-        return [
-            agent.name
-            for agent in self._agents
-            if agent.id != self.SYSTEM_MEMBER_ID
-        ]
+    def get_agent_ids(self, include_special: bool = False) -> List[int]:
+        """返回 Agent ID 列表。include_special=True 时包含 SYSTEM 等系统成员。"""
+        if include_special:
+            return [agent.id for agent in self._agents]
+        return [agent.id for agent in self._agents if agent.id != self.SYSTEM_MEMBER_ID]
 
     def get_gt_agent(self, agent_id: int) -> GtAgent | None:
         """根据 agent_id 获取运行态房间中的 Agent 对象（包含 SpecialAgent）。"""
@@ -555,7 +543,7 @@ class ChatRoom:
             "state": self._state.name,
             "need_scheduling": self._state == RoomState.SCHEDULING,
             "current_turn_agent": self._build_current_turn_agent_dict(),
-            "agents": list(self.agents),
+            "agents": list(self.get_agent_ids()),
         }
 
 
