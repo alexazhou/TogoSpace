@@ -5,6 +5,7 @@ import pytest
 
 import service.ormService as ormService
 from constants import AgentHistoryStatus, AgentHistoryTag, OpenaiApiRole
+from dal.db import gtAgentHistoryManager
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from tests.base import ServiceTestCase
@@ -342,3 +343,118 @@ class TestFinalizeCancelTurn(ServiceTestCase):
 
         assert len(history) >= 2  # u1 + ROOM_TURN_FINISH + new message
         assert history.has_active_turn() is True  # 新 turn 开始
+
+
+class TestGetAgentHistoryAfterCompact(ServiceTestCase):
+    """测试 get_agent_history_after_compact：只加载 COMPACT_SUMMARY 之后的数据。"""
+
+    @classmethod
+    async def async_setup_class(cls):
+        db_path = cls._get_test_db_path()
+        await ormService.startup(db_path)
+
+    @classmethod
+    async def async_teardown_class(cls):
+        await ormService.shutdown()
+
+    async def _reset_table(self):
+        await GtAgentHistory.delete().aio_execute()
+
+    async def test_returns_all_when_no_compact(self):
+        """没有 COMPACT_SUMMARY 时，返回全部数据。"""
+        await self._reset_table()
+
+        # 创建 10 条历史记录，没有 compact
+        for i in range(10):
+            item = GtAgentHistory.build(
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"msg_{i}"),
+                status=AgentHistoryStatus.SUCCESS,
+                agent_id=200,
+                seq=i,
+            )
+            await gtAgentHistoryManager.append_agent_history_message(item)
+
+        items = await gtAgentHistoryManager.get_agent_history_after_compact(agent_id=200)
+
+        assert len(items) == 10
+        assert [item.seq for item in items] == list(range(10))
+
+    async def test_returns_only_after_compact_when_exists(self):
+        """有 COMPACT_SUMMARY 时，只返回 seq >= COMPACT_SUMMARY.seq 的数据。"""
+        await self._reset_table()
+
+        # 创建历史：seq 0-4 是旧数据，seq 5 是 COMPACT_SUMMARY，seq 6-8 是新数据
+        for i in range(5):
+            item = GtAgentHistory.build(
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"old_msg_{i}"),
+                status=AgentHistoryStatus.SUCCESS,
+                agent_id=201,
+                seq=i,
+            )
+            await gtAgentHistoryManager.append_agent_history_message(item)
+
+        # COMPACT_SUMMARY
+        compact_item = GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact summary"),
+            status=AgentHistoryStatus.SUCCESS,
+            tags=[AgentHistoryTag.COMPACT_SUMMARY],
+            agent_id=201,
+            seq=5,
+        )
+        await gtAgentHistoryManager.append_agent_history_message(compact_item)
+
+        # 新数据
+        for i in range(6, 9):
+            item = GtAgentHistory.build(
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"new_msg_{i}"),
+                status=AgentHistoryStatus.SUCCESS,
+                agent_id=201,
+                seq=i,
+            )
+            await gtAgentHistoryManager.append_agent_history_message(item)
+
+        items = await gtAgentHistoryManager.get_agent_history_after_compact(agent_id=201)
+
+        # 应只返回 seq >= 5 的数据（COMPACT_SUMMARY + 新数据）
+        assert len(items) == 4  # seq 5, 6, 7, 8
+        assert [item.seq for item in items] == [5, 6, 7, 8]
+
+        # 第一条应是 COMPACT_SUMMARY
+        assert AgentHistoryTag.COMPACT_SUMMARY in items[0].tags
+
+    async def test_reload_from_db_filters_old_data(self):
+        """reload_from_db 只加载 compact 之后的数据到内存。"""
+        await self._reset_table()
+        history = AgentHistoryStore(agent_id=202)
+
+        # 创建历史：seq 0-4 旧数据，seq 5 COMPACT_SUMMARY
+        for i in range(5):
+            await history.append_history_message(GtAgentHistory.build(
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"old_{i}"),
+                status=AgentHistoryStatus.SUCCESS,
+            ))
+
+        await history.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "summary"),
+            status=AgentHistoryStatus.SUCCESS,
+            tags=[AgentHistoryTag.COMPACT_SUMMARY],
+        ))
+
+        # 内存中应有 6 条（包含 COMPACT_SUMMARY）
+        assert len(history) == 6
+
+        # 模拟：内存中额外添加一条新消息（未持久化）
+        unpersisted = GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "unpersisted"),
+            status=AgentHistoryStatus.SUCCESS,
+            agent_id=202,
+            seq=6,
+        )
+        history._items.append(unpersisted)
+        assert len(history) == 7
+
+        # reload_from_db 应过滤掉未持久化的项，只加载数据库中 compact 之后的数据
+        await history.reload_from_db()
+
+        assert len(history) == 1  # 只有 COMPACT_SUMMARY (seq=5)
+        assert AgentHistoryTag.COMPACT_SUMMARY in history[0].tags

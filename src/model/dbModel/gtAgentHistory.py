@@ -37,16 +37,20 @@ class GtAgentHistory(DbModelBase):
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
         usage: HistoryUsage | None = None,
+        agent_id: int | None = None,
+        seq: int | None = None,
     ) -> "GtAgentHistory":
         """构建 GtAgentHistory 对象。
 
-        agent_id 和 seq 由 Store 层填充。
+        agent_id 和 seq 可选传入，若未指定则由 Store 层填充。
 
         自动推断规则：
         - status: 若未指定，默认 SUCCESS
         - tags: 若未指定，默认空列表
         """
         return cls(
+            agent_id=agent_id or 0,
+            seq=seq or 0,
             role=message.role,
             tool_call_id=message.tool_call_id,
             message=message,

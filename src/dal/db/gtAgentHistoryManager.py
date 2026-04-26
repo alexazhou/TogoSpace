@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from peewee import SQL
+
 from constants import AgentHistoryTag
 from constants import AgentHistoryStatus
 from constants import OpenaiApiRole
@@ -123,6 +125,44 @@ async def get_agent_history(agent_id: int) -> list[GtAgentHistory]:
         .select()
         .where(GtAgentHistory.agent_id == agent_id)
         .order_by(GtAgentHistory.seq.asc())  # type: ignore[attr-defined]
+        .aio_execute()
+    )
+
+
+async def get_agent_history_after_compact(agent_id: int) -> list[GtAgentHistory]:
+    """获取 COMPACT_SUMMARY 之后的历史数据。
+
+    若存在 COMPACT_SUMMARY，只返回 seq >= COMPACT_SUMMARY.seq 的数据；
+    否则返回全部历史数据。
+
+    这样可以避免加载已被 compact 压缩的旧数据到内存。
+    """
+    # SQLite 没有 json_contains，使用 json_each 展开数组查询
+    compact_summaries = await (
+        GtAgentHistory
+        .select()
+        .where(
+            GtAgentHistory.agent_id == agent_id,
+            SQL("EXISTS (SELECT 1 FROM json_each(tags) WHERE value = 'COMPACT_SUMMARY')"),
+        )
+        .order_by(GtAgentHistory.seq.asc())
+        .limit(1)
+        .aio_execute()
+    )
+
+    if not compact_summaries:
+        # 没有 compact，返回全部数据
+        return await get_agent_history(agent_id)
+
+    compact_seq = compact_summaries[0].seq
+    return await (
+        GtAgentHistory
+        .select()
+        .where(
+            GtAgentHistory.agent_id == agent_id,
+            GtAgentHistory.seq >= compact_seq,  # type: ignore[attr-defined]
+        )
+        .order_by(GtAgentHistory.seq.asc())
         .aio_execute()
     )
 

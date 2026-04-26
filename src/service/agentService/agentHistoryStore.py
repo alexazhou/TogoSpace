@@ -52,13 +52,14 @@ class AgentHistoryStore:
         self._items = list(items)
 
     async def reload_from_db(self) -> None:
-        """从数据库重新加载所有历史消息，覆盖内存状态。
+        """从数据库重新加载历史消息，覆盖内存状态。
 
+        只加载 COMPACT_SUMMARY 之后的数据，避免加载已被压缩的旧数据。
         用于在执行关键操作前同步内存与数据库，确保一致性。
         """
-        items = await gtAgentHistoryManager.get_agent_history(self._agent_id)
+        items = await gtAgentHistoryManager.get_agent_history_after_compact(self._agent_id)
         self._items = list(items)
-        logger.info("[reload] agent_id=%d, loaded %d items from db", self._agent_id, len(self._items))
+        logger.info("[reload] agent_id=%d, loaded %d items from db (after compact)", self._agent_id, len(self._items))
 
     def last(self) -> GtAgentHistory | None:
         if not self._items:
