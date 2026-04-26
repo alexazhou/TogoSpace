@@ -11,6 +11,7 @@ from util import assertUtil
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtRoom import GtRoom
 from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
 from .messageStore import RoomMessageStore
 
