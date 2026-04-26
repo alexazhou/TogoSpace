@@ -122,7 +122,7 @@ class TestRoomContainsSpecialAgent(ServiceTestCase):
         assert int(SpecialAgent.SYSTEM.value) not in default_ids
         assert alice.id in default_ids
 
-        # get_all_agent_ids() 包含 SYSTEM
-        all_ids = room.get_all_agent_ids()
+        # get_agent_ids(include_system=True) 包含 SYSTEM
+        all_ids = room.get_agent_ids(include_system=True)
         assert int(SpecialAgent.SYSTEM.value) in all_ids
         assert alice.id in all_ids

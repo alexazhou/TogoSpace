@@ -74,13 +74,15 @@ class ChatRoom:
     def _max_turns(self) -> int:
         return self.gt_room.max_turns
 
-    def get_agent_ids(self) -> List[int]:
-        """返回 Agent ID 列表（不包含 SYSTEM）。"""
-        return [agent.id for agent in self._agents if agent.id != self.SYSTEM_MEMBER_ID]
+    def get_agent_ids(self, include_system: bool = False) -> List[int]:
+        """返回 Agent ID 列表。
 
-    def get_all_agent_ids(self) -> List[int]:
-        """返回全部 Agent ID 列表（包含 SYSTEM）。"""
-        return [agent.id for agent in self._agents]
+        Args:
+            include_system: True 时包含 SYSTEM agent，默认 False。
+        """
+        if include_system:
+            return [agent.id for agent in self._agents]
+        return [agent.id for agent in self._agents if agent.id != self.SYSTEM_MEMBER_ID]
 
     def _get_gt_agent(self, agent_id: int) -> GtAgent | None:
         """根据 agent_id 获取运行态房间中的 Agent 对象（包含 SpecialAgent）。"""
