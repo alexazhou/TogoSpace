@@ -214,7 +214,7 @@ class TestSaveTeamAgentsFullReplace(_agentServiceCase):
         # 编辑成员前必须停用团队
         await gtTeamManager.set_team_enabled(team.id, False)
 
-        before_agents = await gtAgentManager.get_team_agents(
+        before_agents = await gtAgentManager.get_team_all_agents(
             team.id,
             EmployStatus.ON_BOARD,
         )
@@ -384,15 +384,15 @@ class TestGetAgentByStatus(_agentServiceCase):
         assert team is not None
 
         # 获取所有 agent
-        all_agents = await gtAgentManager.get_team_agents(team.id)
+        all_agents = await gtAgentManager.get_team_all_agents(team.id)
         assert len(all_agents) >= 2
 
         # 只获取在职 agent
-        on_board_agents = await gtAgentManager.get_team_agents(team.id, EmployStatus.ON_BOARD)
+        on_board_agents = await gtAgentManager.get_team_all_agents(team.id, EmployStatus.ON_BOARD)
         assert all(a.employ_status == EmployStatus.ON_BOARD for a in on_board_agents)
 
         # 只获取离职 agent
-        off_board_agents = await gtAgentManager.get_team_agents(team.id, EmployStatus.OFF_BOARD)
+        off_board_agents = await gtAgentManager.get_team_all_agents(team.id, EmployStatus.OFF_BOARD)
         assert all(a.employ_status == EmployStatus.OFF_BOARD for a in off_board_agents)
 
         # 所有 = 在职 + 离职
@@ -425,7 +425,7 @@ class TestGetAgentByStatus(_agentServiceCase):
         # 验证只有在职 agent 被加载到运行时
         runtime_agents = agentService.get_team_agents(team.id)
         runtime_agent_ids = {a.gt_agent.id for a in runtime_agents}
-        on_board_agents = await gtAgentManager.get_team_agents(team.id, EmployStatus.ON_BOARD)
+        on_board_agents = await gtAgentManager.get_team_all_agents(team.id, EmployStatus.ON_BOARD)
         on_board_ids = {a.id for a in on_board_agents}
 
         # 运行时 agent 应等于在职 agent

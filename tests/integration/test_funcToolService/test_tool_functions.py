@@ -141,7 +141,7 @@ class TestToolFunctions(ServiceTestCase):
                 GtAgent(team_id=team.id, name="char", role_template_id=0),
             ],
         )
-        agents = await gtAgentManager.get_team_agents(team.id)
+        agents = await gtAgentManager.get_team_all_agents(team.id)
         cls.agent_ids = {a.name: a.id for a in agents}
         cls.team_id = team.id
 

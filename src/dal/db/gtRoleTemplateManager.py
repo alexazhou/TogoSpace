@@ -78,3 +78,14 @@ async def delete_role_template(template_id: int) -> bool:
         .aio_execute()
     )
     return bool(deleted)
+
+
+async def resolve_role_template_id_by_name(template_name: str) -> int:
+    """按名称查找角色模板 ID，若不存在或名称为空则返回 0。"""
+    if not template_name:
+        return 0
+
+    template = await get_role_template_by_name(template_name)
+    if template is None:
+        return 0
+    return template.id

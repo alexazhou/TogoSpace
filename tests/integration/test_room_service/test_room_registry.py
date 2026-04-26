@@ -42,7 +42,7 @@ class TestRoomRegistry(ServiceTestCase):
         )
         cls.agent_ids = {
             agent.name: agent.id
-            for agent in await gtAgentManager.get_team_agents(team.id)
+            for agent in await gtAgentManager.get_team_all_agents(team.id)
         }
 
     @classmethod

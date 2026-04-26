@@ -154,7 +154,7 @@ class TeamDetailHandler(BaseHandler):
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
         rooms = await gtRoomManager.get_rooms_by_team(team_id)
-        agents = await gtAgentManager.get_team_agents(team_id)
+        agents = await gtAgentManager.get_team_all_agents(team_id)
         agent_id_to_name = {agent.id: agent.name for agent in agents}
         agents_data = [
             {

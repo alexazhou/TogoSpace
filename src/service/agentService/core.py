@@ -65,7 +65,7 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
         return
 
     # 只加载在职 agent
-    gt_agents = await gtAgentManager.get_team_agents(team_id, EmployStatus.ON_BOARD)
+    gt_agents = await gtAgentManager.get_team_all_agents(team_id, EmployStatus.ON_BOARD)
     gt_role_templates = await gtRoleTemplateManager.get_role_templates_by_ids(
         [agent.role_template_id for agent in gt_agents]
     )
@@ -301,7 +301,7 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
     assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
     assertUtil.assertFalse(team.enabled, error_message="团队必须处于停用状态才能编辑成员", error_code="team_not_stopped")
 
-    existing_agents = await gtAgentManager.get_team_agents(team_id)
+    existing_agents = await gtAgentManager.get_team_all_agents(team_id)
     existing_ids = {a.id for a in existing_agents}
     existing_by_id = {a.id: a for a in existing_agents}
     request_ids = {agent.id for agent in agents_data if agent.id is not None}
@@ -352,12 +352,12 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
             error_code="MEMBER_SAVE_FAILED",
         ) from e
 
-    return await gtAgentManager.get_team_agents(team_id, EmployStatus.ON_BOARD)
+    return await gtAgentManager.get_team_all_agents(team_id, EmployStatus.ON_BOARD)
 
 
 async def overwrite_team_agent_employ_status(team_id: int, on_board_agent_ids: list[int] | set[int]) -> tuple[int, int]:
     """按团队成员全集同步在岗/离岗状态，返回 (on_board_count, off_board_count)。"""
-    all_agents = await gtAgentManager.get_team_agents(team_id)
+    all_agents = await gtAgentManager.get_team_all_agents(team_id)
     on_board_set = set(on_board_agent_ids)
     on_board_ids = [agent.id for agent in all_agents if agent.id in on_board_set]
     off_board_ids = [agent.id for agent in all_agents if agent.id not in on_board_set]

@@ -71,7 +71,7 @@ async def _build_dept_context(team_id: int, agent_name: str) -> str:
     assert gt_dept is not None, f"agent has no department: team_id={team_id}, agent_name={agent_name}"
 
     dept_id_map = {d.id: d for d in gt_depts}
-    gt_agents = await gtAgentManager.get_team_agents(team_id)
+    gt_agents = await gtAgentManager.get_team_all_agents(team_id)
     agent_id_to_name: dict[int, str] = {m.id: m.name for m in gt_agents}
 
     manager_name = agent_id_to_name.get(gt_dept.manager_id, "")

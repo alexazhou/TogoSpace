@@ -44,7 +44,7 @@ class TestDeptService(ServiceTestCase):
     async def _convert_to_gt_agents(self, team_id: int, configs: list[AgentConfig]) -> list[GtAgent]:
         agents = []
         for cfg in configs:
-            rt_id = await gtAgentManager.resolve_role_template_id_by_name(cfg.role_template)
+            rt_id = await gtRoleTemplateManager.resolve_role_template_id_by_name(cfg.role_template)
             agents.append(GtAgent(
                 team_id=team_id,
                 name=cfg.name,
@@ -482,7 +482,7 @@ class TestDeptService(ServiceTestCase):
         agents = await self._convert_to_gt_agents(team.id, configs)
         await gtAgentManager.batch_save_agents(team.id, agents)
 
-        saved_agents = await gtAgentManager.get_team_agents(team.id)
+        saved_agents = await gtAgentManager.get_team_all_agents(team.id)
         agent_map = {agent.name: agent for agent in saved_agents}
 
         assert agent_map["alice"].model == "gpt-4o"

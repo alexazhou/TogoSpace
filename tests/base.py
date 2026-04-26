@@ -21,7 +21,7 @@ import service.schedulerService as scheduler
 import service.persistenceService as persistenceService
 import service.ormService as ormService
 import service.llmService as llmService
-from dal.db import gtAgentManager, gtTeamManager, gtRoomManager
+from dal.db import gtAgentManager, gtTeamManager, gtRoomManager, gtRoleTemplateManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
 from util.configTypes import AgentConfig
@@ -635,7 +635,7 @@ class ServiceTestCase:
         """测试辅助：将 AgentConfig 列表转换为 GtAgent 列表（包含角色模板解析）。"""
         agents = []
         for cfg in configs:
-            rt_id = await gtAgentManager.resolve_role_template_id_by_name(cfg.role_template)
+            rt_id = await gtRoleTemplateManager.resolve_role_template_id_by_name(cfg.role_template)
             agents.append(GtAgent(
                 team_id=team_id,
                 name=cfg.name,

@@ -116,7 +116,7 @@ async def test_load_team_agents_allows_startup_without_available_llm(monkeypatch
         return "prompt"
 
     monkeypatch.setattr(core.gtTeamManager, "get_team_by_id", _get_team_by_id)
-    monkeypatch.setattr(core.gtAgentManager, "get_team_agents", _get_team_agents)
+    monkeypatch.setattr(core.gtAgentManager, "get_team_all_agents", _get_team_agents)
     monkeypatch.setattr(core.gtRoleTemplateManager, "get_role_templates_by_ids", _get_role_templates_by_ids)
     monkeypatch.setattr(core, "build_agent_system_prompt", _build_agent_system_prompt)
     monkeypatch.setattr(core, "Agent", _FakeAgent)

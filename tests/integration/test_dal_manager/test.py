@@ -191,7 +191,7 @@ class TestDalManagers(ServiceTestCase):
         assert room is not None
         # Note: upsert_rooms now handles agents internally
 
-        team_a_agents = await gtAgentManager.get_team_agents(team_a.id)
+        team_a_agents = await gtAgentManager.get_team_all_agents(team_a.id)
         assert [(m.name, m.role_template_id) for m in team_a_agents] == [
             ("alice_1", team_a_agents[0].role_template_id),
             ("bob_1", team_a_agents[1].role_template_id),
@@ -281,7 +281,7 @@ class TestDalManagers(ServiceTestCase):
 
         await gtAgentManager.batch_save_agents(team.id, agents)
 
-        rows = await gtAgentManager.get_team_agents(team.id)
+        rows = await gtAgentManager.get_team_all_agents(team.id)
         assert [row.name for row in rows] == ["alice", "bob"]
         assert [row.employee_number for row in rows] == [1, 2]
 
@@ -291,7 +291,7 @@ class TestDalManagers(ServiceTestCase):
         await self._save_role_template("rt_a", "gpt-4o")
         team = await gtTeamManager.save_team(GtTeam(name="batch_save_team_id_check"))
 
-        role_template_id = await gtAgentManager.resolve_role_template_id_by_name("rt_a")
+        role_template_id = await gtRoleTemplateManager.resolve_role_template_id_by_name("rt_a")
         wrong_team_agent = GtAgent(
             team_id=team.id + 1,
             name="alice",
@@ -537,7 +537,7 @@ class TestDalManagers(ServiceTestCase):
             max_turns=5,
             agent_ids=[],
         ))
-        saved_agents = await gtAgentManager.get_team_agents(team.id)
+        saved_agents = await gtAgentManager.get_team_all_agents(team.id)
         agent_ids = {agent.name: agent.id for agent in saved_agents}
 
         assert await self._get_room_agent_names(room.id) == []

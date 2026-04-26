@@ -54,7 +54,7 @@ class TestRunToolCall(ServiceTestCase):
             team.id,
             [GtAgent(team_id=team.id, name="alice", role_template_id=0), GtAgent(team_id=team.id, name="bob", role_template_id=0)],
         )
-        agents = await gtAgentManager.get_team_agents(team.id)
+        agents = await gtAgentManager.get_team_all_agents(team.id)
         cls.agent_ids = {a.name: a.id for a in agents}
         cls.team_id = team.id
         await funcToolService.startup()

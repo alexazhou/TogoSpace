@@ -101,7 +101,7 @@ async def _build_team_agent_name_map(team_id: int) -> dict[int, str]:
     except Exception:
         logger.debug("build team agent name map from runtime failed, fallback to db", exc_info=True)
 
-    gt_agents = await gtAgentManager.get_team_agents(team_id)
+    gt_agents = await gtAgentManager.get_team_all_agents(team_id)
     return {agent.id: agent.name for agent in gt_agents}
 
 

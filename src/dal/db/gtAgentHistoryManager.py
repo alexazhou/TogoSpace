@@ -129,7 +129,7 @@ async def get_agent_history(agent_id: int) -> list[GtAgentHistory]:
 
 async def delete_history_by_team(team_id: int) -> int:
     """删除 Team 下所有 Agent 的历史记录，返回删除数量。"""
-    agents = await gtAgentManager.get_team_agents(team_id)
+    agents = await gtAgentManager.get_team_all_agents(team_id)
     agent_ids = [agent.id for agent in agents if agent.id is not None]
     if not agent_ids:
         return 0
