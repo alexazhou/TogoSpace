@@ -219,7 +219,10 @@ class AgentHistoryStore:
         return None
 
     def get_first_pending_tool_call(self) -> llmApiUtil.OpenAIToolCall | None:
-        """获取未完成 turn 中第一个未执行的 tool_call。"""
+        """获取未完成 turn 中第一个未执行的 tool_call。
+
+        已执行（SUCCESS）、执行失败（FAILED）或已取消（CANCELLED）的 tool_call 不再返回。
+        """
         start_idx = self.get_current_turn_start_index()
         if start_idx is None:
             return None
@@ -228,6 +231,9 @@ class AgentHistoryStore:
             return None
         for tc in last_assistant.tool_calls:
             result = self.find_tool_result_by_call_id(tc.id)
+            # None: 还没创建 TOOL 记录 -> 待执行
+            # INIT: TOOL 正在执行 -> 待执行
+            # SUCCESS/FAILED/CANCELLED: 已完成（不管结果如何） -> 跳过
             if result is None or result.status == AgentHistoryStatus.INIT:
                 return tc
         return None

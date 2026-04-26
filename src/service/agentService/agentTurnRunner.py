@@ -269,7 +269,8 @@ class AgentTurnRunner:
                     return TurnStepResult.CONTINUE
                 output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
                 return await self._infer_and_classify(output_item, tools, tool_choice=tool_choice)
-            elif status == AgentHistoryStatus.FAILED:
+            elif status in (AgentHistoryStatus.FAILED, AgentHistoryStatus.CANCELLED):
+                # FAILED/CANCELLED 的 tool 不重试，跳过并检查下一个 pending tool call
                 pending_tc = self._history.get_first_pending_tool_call()
                 if pending_tc is not None:
                     await self._history.append_history_init_item(

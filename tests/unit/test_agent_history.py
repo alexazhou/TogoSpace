@@ -235,6 +235,115 @@ class TestHistoryQuery:
         assert history.get_current_turn_start_index() == 3
 
 
+class TestGetFirstPendingToolCall:
+    """get_first_pending_tool_call 在不同 TOOL 状态下的行为。"""
+
+    def test_returns_none_when_no_active_turn(self):
+        """没有 active turn 时返回 None。"""
+        history = AgentHistoryStore(
+            agent_id=1,
+            items=[
+                _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0, tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+                _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"), seq=1),
+                _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "done"), seq=2, tags=[AgentHistoryTag.ROOM_TURN_FINISH]),
+            ],
+        )
+        assert history.get_first_pending_tool_call() is None
+
+    def test_returns_tool_call_when_no_tool_result(self):
+        """ASSISTANT 有 tool_call 但没有对应的 TOOL 记录时，返回该 tool_call。"""
+        history = AgentHistoryStore(
+            agent_id=1,
+            items=[
+                _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0, tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+                _make_assistant_tool_call_item(seq=1, tool_call_ids=["call_1"], status=AgentHistoryStatus.SUCCESS),
+            ],
+        )
+        pending = history.get_first_pending_tool_call()
+        assert pending is not None
+        assert pending.id == "call_1"
+
+    def test_returns_tool_call_when_tool_is_init(self):
+        """TOOL 记录是 INIT 状态时，返回该 tool_call（正在执行中）。"""
+        tool_result_init = _make_item(
+            llmApiUtil.OpenAIMessage.tool_result("call_1", ""),
+            seq=2,
+            status=AgentHistoryStatus.INIT,
+        )
+        history = AgentHistoryStore(
+            agent_id=1,
+            items=[
+                _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0, tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+                _make_assistant_tool_call_item(seq=1, tool_call_ids=["call_1"], status=AgentHistoryStatus.SUCCESS),
+                tool_result_init,
+            ],
+        )
+        pending = history.get_first_pending_tool_call()
+        assert pending is not None
+        assert pending.id == "call_1"
+
+    def test_skips_cancelled_tool_result(self):
+        """CANCELLED 状态的 TOOL 不被当作 pending，跳过并检查下一个。"""
+        history = AgentHistoryStore(
+            agent_id=1,
+            items=[
+                _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0, tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+                _make_assistant_tool_call_item(seq=1, tool_call_ids=["call_1", "call_2"], status=AgentHistoryStatus.SUCCESS),
+                _make_item(
+                    llmApiUtil.OpenAIMessage.tool_result("call_1", "cancelled"),
+                    seq=2,
+                    status=AgentHistoryStatus.CANCELLED,
+                ),
+            ],
+        )
+        # call_1 已 CANCELLED，应返回 call_2
+        pending = history.get_first_pending_tool_call()
+        assert pending is not None
+        assert pending.id == "call_2"
+
+    def test_skips_failed_tool_result(self):
+        """FAILED 状态的 TOOL 不被当作 pending，跳过并检查下一个。"""
+        history = AgentHistoryStore(
+            agent_id=1,
+            items=[
+                _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0, tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+                _make_assistant_tool_call_item(seq=1, tool_call_ids=["call_1", "call_2"], status=AgentHistoryStatus.SUCCESS),
+                _make_item(
+                    llmApiUtil.OpenAIMessage.tool_result("call_1", "failed"),
+                    seq=2,
+                    status=AgentHistoryStatus.FAILED,
+                ),
+            ],
+        )
+        # call_1 已 FAILED，应返回 call_2
+        pending = history.get_first_pending_tool_call()
+        assert pending is not None
+        assert pending.id == "call_2"
+
+    def test_returns_none_when_all_tool_calls_have_completed_results(self):
+        """所有 tool_call 都有 SUCCESS/FAILED/CANCELLED 的 TOOL 结果时返回 None。"""
+        history = AgentHistoryStore(
+            agent_id=1,
+            items=[
+                _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0, tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+                _make_assistant_tool_call_item(seq=1, tool_call_ids=["call_1", "call_2"], status=AgentHistoryStatus.SUCCESS),
+                _make_item(
+                    llmApiUtil.OpenAIMessage.tool_result("call_1", "done"),
+                    seq=2,
+                    status=AgentHistoryStatus.SUCCESS,
+                ),
+                _make_item(
+                    llmApiUtil.OpenAIMessage.tool_result("call_2", "cancelled"),
+                    seq=3,
+                    status=AgentHistoryStatus.CANCELLED,
+                ),
+            ],
+        )
+        # 所有 tool_call 都已有结果（不管状态），返回 None
+        pending = history.get_first_pending_tool_call()
+        assert pending is None
+
+
 # ─── build_infer_messages ───────────────────────────────────
 
 
