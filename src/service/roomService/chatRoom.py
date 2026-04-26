@@ -17,8 +17,9 @@ from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from constants import RoomState, MessageBusTopic, RoomType, SpecialAgent
+from .messageStore import RoomMessageStore
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("service.roomService")
 
 
 def resolve_room_max_turns(max_turns: int | None) -> int:
@@ -70,10 +71,9 @@ class ChatRoom:
     def __init__(self, team: GtTeam, room: GtRoom, agents: List[GtAgent] | None = None):
         self.gt_room: GtRoom = room
         self.gt_team: GtTeam = team
-        self.messages: List[GtCoreRoomMessage] = []  # 消息历史记录
         self._agents: List[GtAgent] = agents or []  # 房间参与者列表
         self._agent_ids: List[int] = [agent.id for agent in self._agents]  # agent_id 列表，调度逻辑频繁使用索引访问
-        self._agent_read_index: Dict[int, int] = {}  # 每个 Agent 的消息读取进度（agent_id 为 key）
+        self._store = RoomMessageStore(self._agent_ids)  # 消息历史与已读进度
         self._turn_count: int = 0  # 轮次计数器（完成一圈全员发言记为 1 轮）
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
         self._state: RoomState = RoomState.INIT  # 房间当前的调度状态
@@ -81,6 +81,10 @@ class ChatRoom:
         self._current_turn_has_content: bool = False  # 当前发言人是否已发送内容
 
     # ─── 从 gt_room / gt_team 派生的只读属性 ────────────────────
+
+    @property
+    def messages(self) -> List[GtCoreRoomMessage]:
+        return self._store.messages
 
     @property
     def room_id(self) -> int:
@@ -187,11 +191,9 @@ class ChatRoom:
 
     async def get_unread_messages(self, agent_id: int) -> List[GtCoreRoomMessage]:
         """返回 agent_id 尚未读取的新消息，并推进其读取位置。"""
-        read_idx = self._agent_read_index.get(agent_id, 0)
-        new_msgs = self.messages[read_idx:]
-        self._agent_read_index[agent_id] = len(self.messages)
+        new_msgs = self._store.get_unread(agent_id)
         if self._state != RoomState.INIT:
-            id_keyed = {str(k): v for k, v in self._agent_read_index.items()}
+            id_keyed = {str(k): v for k, v in self._store.get_read_index().items()}
             await gtRoomManager.update_room_state(self.room_id, id_keyed, self._turn_pos)
         return new_msgs
 
@@ -218,7 +220,7 @@ class ChatRoom:
             content=content,
             send_time=send_time or datetime.now()
         )
-        self.messages.append(message)
+        self._store.append(message)
 
         if self._state == RoomState.INIT:
             return
@@ -322,7 +324,7 @@ class ChatRoom:
 
     async def _persist_turn_pos(self) -> None:
         """将 _turn_pos 持久化到数据库（在 finish_turn 后调用）。"""
-        id_keyed = {str(k): v for k, v in self._agent_read_index.items()}
+        id_keyed = {str(k): v for k, v in self._store.get_read_index().items()}
         await gtRoomManager.update_room_state(self.room_id, id_keyed, self._turn_pos)
 
     def get_current_turn_agent(self) -> GtAgent:
@@ -490,17 +492,7 @@ class ChatRoom:
         agent_read_index: Dict[str, int] | None = None,
         turn_pos: int | None = None,
     ) -> None:
-        if messages is not None:
-            self.messages = list(messages)
-        if agent_read_index is not None:
-            converted: Dict[int, int] = {}
-            for k, v in agent_read_index.items():
-                try:
-                    agent_id = int(k)
-                    converted[agent_id] = v
-                except (ValueError, TypeError):
-                    pass  # 忽略无效的 key
-            self._agent_read_index = converted
+        self._store.inject(messages=messages, agent_read_index=agent_read_index)
         if turn_pos is not None:
             self._turn_pos = turn_pos
 
@@ -508,12 +500,11 @@ class ChatRoom:
         """导出消息读取进度，key 为 agent 稳定标识名（用于持久化）。"""
         return {
             self._get_agent_stable_name(aid): idx
-            for aid, idx in self._agent_read_index.items()
+            for aid, idx in self._store.get_read_index().items()
         }
 
     def mark_all_messages_read(self) -> None:
-        tail = len(self.messages)
-        self._agent_read_index = {agent_id: tail for agent_id in self._agent_ids}
+        self._store.mark_all_read()
 
     def rebuild_state_from_history(self, persisted_turn_pos: int | None = None) -> None:
         """从持久化数据重建房间调度数据（turn_pos 等），但不切换状态。
