@@ -101,12 +101,27 @@ class AgentTurnRunner:
         except Exception:
             return raw_args
 
+    async def _finish_activity(
+        self,
+        activity_id: int | None,
+        *,
+        status: AgentActivityStatus,
+        detail: str | None = None,
+        error_message: str | None = None,
+        metadata_patch: AgentActivityMeta | None = None,
+    ) -> None:
+        """更新 activity 终态。"""
+        if activity_id is None:
+            return
+        await agentActivityService.update_activity_progress(activity_id, status=status, detail=detail, error_message=error_message, metadata_patch=metadata_patch)
+
     # ─── Turn 运行方法 ──────────────────────────────────────
 
     async def handle_cancel_turn(self) -> None:
         """人工取消当前 turn 的收尾逻辑：driver 清理 → history 清理。"""
         await self.driver.cancel_turn()
         await self._history.finalize_cancel_turn()
+        await agentActivityService.fail_started_activities(self.gt_agent.id, error_message="cancelled by user")
 
     async def run_chat_turn(self, task: GtAgentTask) -> None:
         """执行一个完整 chat turn：同步房间消息 → 推理 → 工具调用循环。
@@ -363,7 +378,7 @@ class AgentTurnRunner:
                     overflow_retry = True
 
                     # 标记当前 infer 活动为 FAILED
-                    await agentActivityService.update_activity_progress(activity_id, status=AgentActivityStatus.FAILED, error_message=infer_result.error_message, metadata_patch=AgentActivityMeta(error_kind="context_overflow"))
+                    await self._finish_activity(activity_id, status=AgentActivityStatus.FAILED, error_message=infer_result.error_message, metadata_patch=AgentActivityMeta(error_kind="context_overflow"))
 
                     compact_ok = await self._execute_compact()
                     if not compact_ok:
@@ -423,7 +438,7 @@ class AgentTurnRunner:
             # 活动记录：LLM_INFER SUCCEEDED
             final_meta = AgentActivityMeta()
             final_meta.apply_usage(usage)
-            await agentActivityService.update_activity_progress(activity_id, status=AgentActivityStatus.SUCCEEDED, metadata_patch=final_meta)
+            await self._finish_activity(activity_id, status=AgentActivityStatus.SUCCEEDED, metadata_patch=final_meta)
 
             post_check_messages = history.build_infer_messages()
             _, _, post_check_triggered = await self._check_compact(
@@ -484,7 +499,7 @@ class AgentTurnRunner:
             )
             # 活动记录：LLM_INFER FAILED（pre-check compact 失败时 activity_id 为 None，无需更新）
             if activity_id is not None:
-                await agentActivityService.update_activity_progress(activity_id, status=AgentActivityStatus.FAILED, error_message=str(e))
+                await self._finish_activity(activity_id, status=AgentActivityStatus.FAILED, error_message=str(e))
             raise
 
     async def _run_tool_to_item(self, tool_call: llmApiUtil.OpenAIToolCall, output_item: GtAgentHistory, room: ChatRoom) -> TurnStepResult:
@@ -517,7 +532,7 @@ class AgentTurnRunner:
         )
 
         # 活动记录：TOOL_CALL SUCCEEDED / FAILED
-        await agentActivityService.update_activity_progress(tool_activity.id, status=AgentActivityStatus.SUCCEEDED if exec_result.status == AgentHistoryStatus.SUCCESS else AgentActivityStatus.FAILED, error_message=exec_result.error_message)
+        await self._finish_activity(tool_activity.id, status=AgentActivityStatus.SUCCEEDED if exec_result.status == AgentHistoryStatus.SUCCESS else AgentActivityStatus.FAILED, error_message=exec_result.error_message)
 
         turn_done = exec_result.turn_finished and (
             exec_result.status == AgentHistoryStatus.SUCCESS or room.state == RoomState.INIT
@@ -627,7 +642,7 @@ class AgentTurnRunner:
         compact_plan = self._history.build_compact_plan()
         if compact_plan is None:
             logger.warning("compact 跳过：无可压缩消息, agent_id=%d", self.gt_agent.id)
-            await agentActivityService.update_activity_progress(compact_activity.id, status=AgentActivityStatus.FAILED, error_message="无可压缩消息")
+            await self._finish_activity(compact_activity.id, status=AgentActivityStatus.FAILED, error_message="无可压缩消息")
             return False
 
         summary_text = await compact.compact_messages(
@@ -639,7 +654,7 @@ class AgentTurnRunner:
         )
         if summary_text is None:
             logger.warning("compact 失败：LLM 返回无效, agent_id=%d", self.gt_agent.id)
-            await agentActivityService.update_activity_progress(compact_activity.id, status=AgentActivityStatus.FAILED, error_message="LLM 返回无效")
+            await self._finish_activity(compact_activity.id, status=AgentActivityStatus.FAILED, error_message="LLM 返回无效")
             return False
 
         await self._history.insert_compact_summary(
@@ -648,5 +663,5 @@ class AgentTurnRunner:
         )
 
         # 活动记录：COMPACT SUCCEEDED
-        await agentActivityService.update_activity_progress(compact_activity.id, status=AgentActivityStatus.SUCCEEDED)
+        await self._finish_activity(compact_activity.id, status=AgentActivityStatus.SUCCEEDED)
         return True

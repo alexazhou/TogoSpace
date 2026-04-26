@@ -128,6 +128,7 @@ async def update_activity_progress(
     - 不传 status 时，仅做进度刷新（如流式 token 更新）
     - 传入结束态时，自动补 finished_at 与 duration_ms
     - metadata_patch 采用浅合并（读取 → merge → 写回）
+    - 调用约定：调用处统一写成单行，避免在业务代码里拆成多行
     """
     update_fields: dict = {}
     current: GtAgentActivity | None = None
@@ -162,3 +163,12 @@ async def update_activity_progress(
     activity = await gtAgentActivityManager.update_activity_by_id(activity_id, **update_fields)
     _broadcast(activity)
     return activity
+
+
+async def fail_started_activities(agent_id: int, error_message: str = "cancelled by user") -> list[GtAgentActivity]:
+    """将某个 Agent 当前仍处于 STARTED 的活动统一标记为 FAILED。"""
+    started_activities = await gtAgentActivityManager.list_agent_activities_by_status(agent_id, AgentActivityStatus.STARTED)
+    updated_activities: list[GtAgentActivity] = []
+    for activity in started_activities:
+        updated_activities.append(await update_activity_progress(activity.id, status=AgentActivityStatus.FAILED, error_message=error_message))
+    return updated_activities

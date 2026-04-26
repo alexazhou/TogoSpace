@@ -363,7 +363,7 @@ async def test_resolve_compact_config_uses_config_model_when_agent_model_empty(m
 
 @pytest.mark.asyncio
 async def test_handle_cancel_turn_calls_driver_then_history(turn_runner):
-    """handle_cancel_turn 应依次调用 driver.cancel_turn 和 history.finalize_cancel_turn。"""
+    """handle_cancel_turn 应依次调用 driver.cancel_turn、history.finalize_cancel_turn，再批量失败化 STARTED activity。"""
     turn_runner.driver = MagicMock()
     turn_runner.driver.cancel_turn = AsyncMock()
     turn_runner._history.finalize_cancel_turn = AsyncMock()
@@ -372,8 +372,10 @@ async def test_handle_cancel_turn_calls_driver_then_history(turn_runner):
     turn_runner.driver.cancel_turn.side_effect = lambda: call_order.append("driver")
     turn_runner._history.finalize_cancel_turn.side_effect = lambda: call_order.append("history")
 
-    await turn_runner.handle_cancel_turn()
+    with patch("service.agentService.agentTurnRunner.agentActivityService.fail_started_activities", new=AsyncMock(side_effect=lambda *args, **kwargs: call_order.append("activity"))) as mock_fail:
+        await turn_runner.handle_cancel_turn()
 
     turn_runner.driver.cancel_turn.assert_awaited_once()
     turn_runner._history.finalize_cancel_turn.assert_awaited_once()
-    assert call_order == ["driver", "history"]
+    mock_fail.assert_awaited_once_with(turn_runner.gt_agent.id, error_message="cancelled by user")
+    assert call_order == ["driver", "history", "activity"]

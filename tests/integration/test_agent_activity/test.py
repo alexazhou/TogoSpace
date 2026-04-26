@@ -229,9 +229,7 @@ class TestAgentActivityService(ServiceTestCase):
         activity = await agentActivityService.add_activity(
             gt_agent=_fake_agent(), activity_type=AgentActivityType.LLM_INFER,
         )
-        updated = await agentActivityService.update_activity_progress(
-            activity.id, detail="tokens: 50",
-        )
+        updated = await agentActivityService.update_activity_progress(activity.id, detail="tokens: 50")
         assert updated.detail == "tokens: 50"
 
     # ── update_activity_progress：结束态自动补 finished_at 和 duration_ms ──
@@ -242,9 +240,7 @@ class TestAgentActivityService(ServiceTestCase):
             gt_agent=_fake_agent(), activity_type=AgentActivityType.LLM_INFER,
         )
         await asyncio.sleep(0.01)
-        updated = await agentActivityService.update_activity_progress(
-            activity.id, status=AgentActivityStatus.SUCCEEDED,
-        )
+        updated = await agentActivityService.update_activity_progress(activity.id, status=AgentActivityStatus.SUCCEEDED)
         assert updated.finished_at is not None
         assert updated.duration_ms is not None
         assert updated.duration_ms >= 0
@@ -257,9 +253,7 @@ class TestAgentActivityService(ServiceTestCase):
             gt_agent=_fake_agent(), activity_type=AgentActivityType.LLM_INFER,
             metadata=AgentActivityMeta(room_id=5, model="test-model"),
         )
-        updated = await agentActivityService.update_activity_progress(
-            activity.id, metadata_patch=AgentActivityMeta(final_prompt_tokens=100, model="override"),
-        )
+        updated = await agentActivityService.update_activity_progress(activity.id, metadata_patch=AgentActivityMeta(final_prompt_tokens=100, model="override"))
         assert updated.metadata["room_id"] == 5
         assert updated.metadata["model"] == "override"
         assert updated.metadata["final_prompt_tokens"] == 100
@@ -280,11 +274,41 @@ class TestAgentActivityService(ServiceTestCase):
         activity = await agentActivityService.add_activity(
             gt_agent=_fake_agent(), activity_type=AgentActivityType.TOOL_CALL,
         )
-        updated = await agentActivityService.update_activity_progress(
-            activity.id,
-            status=AgentActivityStatus.FAILED,
-            error_message="tool execution failed",
-        )
+        updated = await agentActivityService.update_activity_progress(activity.id, status=AgentActivityStatus.FAILED, error_message="tool execution failed")
         assert updated.status == AgentActivityStatus.FAILED
         assert updated.error_message == "tool execution failed"
         assert updated.finished_at is not None
+
+    async def test_fail_started_activities_marks_only_started_rows_failed(self):
+        await self._reset()
+        started_1 = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(agent_id=7), activity_type=AgentActivityType.LLM_INFER,
+        )
+        started_2 = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(agent_id=7), activity_type=AgentActivityType.TOOL_CALL,
+        )
+        finished = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(agent_id=7),
+            activity_type=AgentActivityType.AGENT_STATE,
+            status=AgentActivityStatus.SUCCEEDED,
+        )
+        other_agent = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(agent_id=8), activity_type=AgentActivityType.LLM_INFER,
+        )
+
+        updated = await agentActivityService.fail_started_activities(7, error_message="cancelled by user")
+
+        assert {item.id for item in updated} == {started_1.id, started_2.id}
+        assert all(item.status == AgentActivityStatus.FAILED for item in updated)
+        assert all(item.error_message == "cancelled by user" for item in updated)
+        assert all(item.finished_at is not None for item in updated)
+
+        started_1_row = await GtAgentActivity.aio_get(GtAgentActivity.id == started_1.id)
+        started_2_row = await GtAgentActivity.aio_get(GtAgentActivity.id == started_2.id)
+        finished_row = await GtAgentActivity.aio_get(GtAgentActivity.id == finished.id)
+        other_agent_row = await GtAgentActivity.aio_get(GtAgentActivity.id == other_agent.id)
+
+        assert started_1_row.status == AgentActivityStatus.FAILED
+        assert started_2_row.status == AgentActivityStatus.FAILED
+        assert finished_row.status == AgentActivityStatus.SUCCEEDED
+        assert other_agent_row.status == AgentActivityStatus.STARTED

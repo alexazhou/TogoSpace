@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from constants import AgentActivityStatus
 from model.dbModel.gtAgentActivity import GtAgentActivity
 
 
@@ -37,6 +38,21 @@ async def list_agent_activities(agent_id: int, limit: int = 100) -> list[GtAgent
         GtAgentActivity
         .select()
         .where(GtAgentActivity.agent_id == agent_id)
+        .order_by(GtAgentActivity.id.desc())
+        .limit(limit)
+        .aio_execute()
+    )
+
+
+async def list_agent_activities_by_status(agent_id: int, status: AgentActivityStatus, limit: int = 100) -> list[GtAgentActivity]:
+    """查询某个 Agent 指定状态的活动记录，按 id desc 排序。"""
+    return await (
+        GtAgentActivity
+        .select()
+        .where(
+            (GtAgentActivity.agent_id == agent_id)
+            & (GtAgentActivity.status == status)
+        )
         .order_by(GtAgentActivity.id.desc())
         .limit(limit)
         .aio_execute()
