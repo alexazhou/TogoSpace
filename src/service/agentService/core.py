@@ -35,6 +35,27 @@ def _resolve_team_workdir(gt_team: Any, workspace_root: str | None) -> str:
 async def startup() -> None:
     global _agents
     _agents = {}
+    await _ensure_special_agents_exist()
+
+
+async def _ensure_special_agents_exist() -> None:
+    """确保数据库中存在 SpecialAgent 记录（跨团队 Agent，team_id=-1）。"""
+    for special in SpecialAgent:
+        agent_id = int(special.value)
+        existing = await gtAgentManager.get_agents_by_ids([agent_id])
+        if not existing:
+            await GtAgent.insert_many([
+                {
+                    "id": agent_id,
+                    "team_id": -1,
+                    "name": special.name,
+                    "role_template_id": 0,
+                    "employ_status": EmployStatus.ON_BOARD,
+                    "employee_number": agent_id,  # 使用负数避免与正常 agent 冲突
+                    "i18n": {"display_name": {"zh-CN": special.name, "en": special.name}},
+                }
+            ]).aio_execute()
+            logger.info(f"创建 SpecialAgent 记录: id={agent_id}, name={special.name}")
 
 
 async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> None:
@@ -224,7 +245,7 @@ def get_gt_agent_by_id(agent_id: int) -> GtAgent | None:
 
 
 def get_agent_display_name(agent_id: int) -> str:
-    """返回 agent_id 对应的显示名（i18n display_name），未加载时 fallback 到稳定名。"""
+    """返回 agent_id 对应的显示名（i18n display_name），未加载时 fallback 到 SpecialAgent 名或 str(id)。"""
     agent = _agents.get(agent_id)
     if agent is not None:
         return agent.gt_agent.display_name
@@ -242,7 +263,7 @@ def get_agent_stable_name(agent_id: int) -> str:
 
 
 def get_agent_id_by_stable_name(team_id: int, name: str) -> int | None:
-    """按 team_id + 稳定名查找 agent_id（仅在已加载 Agent 中查找）。"""
+    """按 team_id + 稳定名查找 agent_id（仅在已加载 Agent 中查找），SpecialAgent 名直接返回其 value。"""
     special = SpecialAgent.value_of(name)
     if special is not None:
         return int(special.value)

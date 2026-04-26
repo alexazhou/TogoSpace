@@ -36,7 +36,6 @@ async def _to_gt_room(team_id: int, room: TeamRoomConfig) -> GtRoom:
         for agent in await gtAgentManager.get_team_agents_by_names(
             team_id,
             room.agents,
-            include_special=True,
         )
     ]
     return GtRoom(
@@ -59,7 +58,6 @@ async def _get_room_agent_names(team_id: int, agent_ids: list[int]) -> list[str]
         for agent in await gtAgentManager.get_team_agents_by_ids(
             team_id,
             agent_ids,
-            include_special=True,
         )
     ]
 

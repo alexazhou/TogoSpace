@@ -66,12 +66,17 @@ class AgentListHandler(BaseHandler):
         team = await gtTeamManager.get_team_by_id(team_id)
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
-        agents = await gtAgentManager.get_team_agents(team.id)
-        runtime_status_map = agentService.get_team_runtime_status_map(team.id)
         include_special = include_special_raw.strip().lower() in {"1", "true", "yes", "on"}
+        agents = await gtAgentManager.get_team_agents(team.id, include_cross_team=include_special)
+        runtime_status_map = agentService.get_team_runtime_status_map(team.id)
 
         items = []
         for agent in agents:
+            special_type = None
+            if agent.team_id == -1:
+                special_agent = SpecialAgent.value_of(agent.id)
+                if special_agent is not None:
+                    special_type = special_agent.name.lower()
             items.append({
                 "id": agent.id,
                 "name": agent.name,
@@ -83,38 +88,8 @@ class AgentListHandler(BaseHandler):
                 "employ_status": agent.employ_status.name if agent.employ_status else None,
                 "model": agent.model,
                 "driver": agent.driver.value if agent.driver else None,
-                "special": None,
+                "special": special_type,
             })
-
-        if include_special:
-            items.extend([
-                {
-                    "id": int(SpecialAgent.OPERATOR.value),
-                    "name": SpecialAgent.OPERATOR.name,
-                    "i18n": {},
-                    "employee_number": None,
-                    "role_template_id": None,
-                    "team_id": None,
-                    "status": AgentStatus.IDLE.name,
-                    "employ_status": None,
-                    "model": "",
-                    "driver": None,
-                    "special": "operator",
-                },
-                {
-                    "id": int(SpecialAgent.SYSTEM.value),
-                    "name": SpecialAgent.SYSTEM.name,
-                    "i18n": {},
-                    "employee_number": None,
-                    "role_template_id": None,
-                    "team_id": None,
-                    "status": AgentStatus.IDLE.name,
-                    "employ_status": None,
-                    "model": "",
-                    "driver": None,
-                    "special": "system",
-                },
-            ])
 
         self.return_json({"agents": items})
 

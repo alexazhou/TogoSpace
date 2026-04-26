@@ -7,6 +7,7 @@ import pytest
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
+import service.agentService as agentService
 from service import presetService
 from constants import MessageBusTopic
 from dal.db import gtTeamManager, gtRoomMessageManager, gtAgentManager
@@ -28,6 +29,7 @@ class TestChatRoomMessages(ServiceTestCase):
         db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
+        await agentService.startup()  # 确保 SpecialAgent 记录存在
         await roomService.startup()
 
         # 预创建 team，_create_room 不再自动创建
@@ -45,6 +47,7 @@ class TestChatRoomMessages(ServiceTestCase):
     @classmethod
     async def async_teardown_class(cls):
         roomService.shutdown()
+        await agentService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
 

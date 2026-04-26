@@ -97,7 +97,7 @@ class TestRoomRegistry(ServiceTestCase):
         assert team is not None
         agent_ids = list(map(
             lambda agent: agent.id,
-            await gtAgentManager.get_team_agents_by_names(team.id, ["alice"], include_special=True),
+            await gtAgentManager.get_team_agents_by_names(team.id, ["alice"]),
         ))
         await roomService.overwrite_team_rooms(team.id, [
             GtRoom(
@@ -129,7 +129,7 @@ class TestRoomRegistry(ServiceTestCase):
 
         agent_ids = [
             agent.id
-            for agent in await gtAgentManager.get_team_agents_by_names(team.id, ["alice", "bob"], include_special=True)
+            for agent in await gtAgentManager.get_team_agents_by_names(team.id, ["alice", "bob"])
         ]
         await gtRoomManager.save_room(GtRoom(
             team_id=team.id,

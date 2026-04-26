@@ -4,7 +4,7 @@ from unittest.mock import patch, call
 
 import pytest
 
-from service import roomService
+from service import roomService, agentService
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 from constants import RoomType, RoomState, MessageBusTopic, SpecialAgent
@@ -29,6 +29,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         db_path = cls._get_test_db_path()
         await ormService.startup(db_path)
         await persistenceService.startup()
+        await agentService.startup()  # 确保 SpecialAgent 记录存在
         await roomService.startup()
 
         # 预创建 team，_create_room 不再自动创建
@@ -48,6 +49,7 @@ class TestRoomTurnLogic(ServiceTestCase):
     @classmethod
     async def async_teardown_class(cls):
         roomService.shutdown()
+        await agentService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
 
@@ -273,7 +275,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         测试点：全员跳过进入 IDLE 后，Operator 发一条消息能重新唤醒调度。
         """
         room_name = "skip_wakeup"
-        agents = [SpecialAgent.OPERATOR, "alice", "bob"]
+        agents = ["OPERATOR", "alice", "bob"]
         room_key = f"{room_name}@{TEAM}"
         await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(room_key)
@@ -379,7 +381,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         测试点：两人群里遇到 Operator 时，仍保持等待逻辑，但不再发布特殊成员 turn 事件。
         """
         room_name = "operator_wait_group"
-        agents = ["alice", SpecialAgent.OPERATOR]
+        agents = ["alice", "OPERATOR"]
         await self.create_room(TEAM, room_name, agents, room_type=RoomType.GROUP, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
@@ -409,11 +411,11 @@ class TestRoomTurnLogic(ServiceTestCase):
 
     async def test_operator_alias_matches_on_turn_checks(self):
         """
-        测试点：当前发言位是配置中的 "Operator" 时，运行态传入 "OPERATOR"
-        也应识别为同一 SpecialAgent，不应被判定为插话或非法结束轮次。
+        测试点：当前发言位是配置中的 "OPERATOR" 时，运行态传入 OPERATOR_MEMBER_ID
+        应识别为同一 SpecialAgent，不应被判定为插话或非法结束轮次。
         """
         room_name = "operator_alias"
-        agents = ["Operator", "alice"]
+        agents = ["OPERATOR", "alice"]
         await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
@@ -432,7 +434,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         房间应切换到 IDLE 状态并广播，前端可正确显示"空闲"。
         """
         room_name = "priv_idle"
-        agents = ["alice", SpecialAgent.OPERATOR]
+        agents = ["alice", "OPERATOR"]
         await self.create_room(TEAM, room_name, agents, max_turns=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         await room.activate_scheduling()

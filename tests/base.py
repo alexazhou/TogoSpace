@@ -608,7 +608,7 @@ class ServiceTestCase:
         """测试辅助：通过生产 API（gtRoomManager.save_room + load_all_rooms）创建或更新房间。"""
         gt_team = await gtTeamManager.get_team(team_name)
         assert gt_team is not None, f"Team '{team_name}' 不存在"
-        agents = await gtAgentManager.get_team_agents_by_names(gt_team.id, agent_names, include_special=True)
+        agents = await gtAgentManager.get_team_agents_by_names(gt_team.id, agent_names)
         agent_ids = [a.id for a in agents]
         gt_room = await gtRoomManager.get_room_by_team_and_name(gt_team.id, room_name)
         if gt_room is None:
@@ -662,7 +662,6 @@ class ServiceTestCase:
                 for agent in await gtAgentManager.get_team_agents_by_names(
                     team_id,
                     agent_names,
-                    include_special=True,
                 )
             ]
             rooms.append(GtRoom(

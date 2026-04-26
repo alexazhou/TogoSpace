@@ -59,7 +59,7 @@ async def _overwrite_dept_subtree(
         )
 
     agent_ids: list[int] = list(dict.fromkeys(node.agent_ids))
-    gt_agents = await gtAgentManager.get_team_agents_by_ids(team_id, agent_ids, include_special=False)
+    gt_agents = await gtAgentManager.get_team_agents_by_ids(team_id, agent_ids)
     existing_agent_ids = {row.id for row in gt_agents}
     missing_agent_ids = sorted(set(agent_ids) - existing_agent_ids)
     if missing_agent_ids:
@@ -134,7 +134,7 @@ async def set_dept_manager(team_id: int, dept_name: str, manager_id: int) -> Non
             error_code="DEPT_NOT_FOUND",
         )
 
-    managers = await gtAgentManager.get_team_agents_by_ids(team_id, [manager_id], include_special=False)
+    managers = await gtAgentManager.get_team_agents_by_ids(team_id, [manager_id])
     if len(managers) == 0:
         raise TogoException(
             f"Agent ID '{manager_id}' 不存在",

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from peewee import fn
-from typing import TypeVar
 
-from constants import EmployStatus, DriverType, SpecialAgent
+from constants import EmployStatus, DriverType
 from model.dbModel.gtAgent import GtAgent
 
 from . import gtRoleTemplateManager
@@ -21,30 +20,22 @@ async def get_max_employee_number(team_id: int) -> int:
     return result[0].employee_number or 0
 
 
-async def get_team_agents(team_id: int, status: EmployStatus | None = None) -> list[GtAgent]:
+async def get_team_agents(team_id: int, status: EmployStatus | None = None, include_cross_team: bool = False) -> list[GtAgent]:
     """按 team_id 查询成员，可选按 employ_status 过滤。
-
-    Args:
-        team_id: 团队 ID
-        status: 可选状态过滤，None 表示不过滤（返回所有状态）
     """
-    query = GtAgent.select().where(GtAgent.team_id == team_id)
+    if include_cross_team:
+        query = GtAgent.select().where((GtAgent.team_id == team_id) | (GtAgent.team_id == -1))
+    else:
+        query = GtAgent.select().where(GtAgent.team_id == team_id)
     if status is not None:
         query = query.where(GtAgent.employ_status == status)
     return list(await query.order_by(GtAgent.name).aio_execute())
 
 
-async def get_agent(
-    team_id: int, name: str, status: EmployStatus | None = EmployStatus.ON_BOARD
-) -> GtAgent | None:
-    """按 team + name + employ_status 查询成员。
-
-    Args:
-        team_id: 团队 ID
-        name: Agent 名称
-        status: 状态过滤，默认 ON_BOARD；传入 None 表示不限状态
+async def get_agent(team_id: int, name: str, status: EmployStatus | None = EmployStatus.ON_BOARD) -> GtAgent | None:
+    """按 team + name + employ_status 查询成员，支持跨团队 Agent。
     """
-    conditions = [GtAgent.team_id == team_id, GtAgent.name == name]
+    conditions = [(GtAgent.team_id == team_id) | (GtAgent.team_id == -1), GtAgent.name == name]
     if status is not None:
         conditions.append(GtAgent.employ_status == status)
     return await GtAgent.aio_get_or_none(*conditions)
@@ -107,7 +98,7 @@ async def batch_save_agents(team_id: int, agents: list[GtAgent]) -> None:
 
 
 async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
-    """按 ID 列表查询 agents。"""
+    """按 ID 列表查询 agents，不限制 team_id。"""
     if not agent_ids:
         return []
     return list(
@@ -117,66 +108,66 @@ async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
     )
 
 
-def _build_special_agent(special_agent: SpecialAgent) -> GtAgent:
-    return GtAgent(
-        id=int(special_agent.value),
-        team_id=0,
-        name=special_agent.name,
-        role_template_id=0,
-    )
+async def get_team_agents_by_ids(team_id: int, agent_ids: list[int]) -> list[GtAgent]:
+    """按 team_id + agent_ids 查询成员，保持原始顺序。
 
+    Args:
+        team_id: 团队 ID
+        agent_ids: Agent ID 列表
 
-KeyT = TypeVar("KeyT", int, str)
-
-
-def _build_team_agents_in_order(
-    keys: list[KeyT],
-    agent_map: dict[KeyT, GtAgent],
-    include_special: bool,
-) -> list[GtAgent]:
-    agents: list[GtAgent] = []
-    for key in keys:
-        special_agent = SpecialAgent.value_of(key)
-        if special_agent is not None:
-            if include_special:
-                agents.append(_build_special_agent(special_agent))
-            continue
-
-        agent = agent_map.get(key)
-        if agent is not None:
-            agents.append(agent)
-
-    return agents
-
-
-async def get_team_agents_by_ids(team_id: int, agent_ids: list[int], include_special: bool = False) -> list[GtAgent]:
+    Note: 同时查询 team_id 匹配和 team_id=-1（跨团队）的记录。
+    """
     if not agent_ids:
         return []
 
-    normal_agent_ids = [agent_id for agent_id in agent_ids if SpecialAgent.value_of(agent_id) is None]
-    gt_agents = await get_agents_by_ids(normal_agent_ids)
-    agent_map = {agent.id: agent for agent in gt_agents if agent.team_id == team_id}
-    return _build_team_agents_in_order(agent_ids, agent_map, include_special)
+    gt_agents = list(
+        await GtAgent.select()
+        .where(
+            GtAgent.id.in_(agent_ids),  # type: ignore[attr-defined]
+            (GtAgent.team_id == team_id) | (GtAgent.team_id == -1),
+        )
+        .aio_execute()
+    )
+    agent_map = {agent.id: agent for agent in gt_agents}
+
+    # 保持原始顺序
+    agents: list[GtAgent] = []
+    for agent_id in agent_ids:
+        agent = agent_map.get(agent_id)
+        if agent is not None:
+            agents.append(agent)
+    return agents
 
 
-async def get_team_agents_by_names(team_id: int, names: list[str], include_special: bool = False) -> list[GtAgent]:
+async def get_team_agents_by_names(team_id: int, names: list[str]) -> list[GtAgent]:
+    """按 team_id + names 查询成员，保持原始顺序。
+
+    Args:
+        team_id: 团队 ID
+        names: Agent 名称列表
+
+    Note: 同时查询 team_id 匹配和 team_id=-1（跨团队）的记录。
+    """
     if not names:
         return []
 
-    normal_names = [name for name in names if SpecialAgent.value_of(name) is None]
-    gt_agents = []
-    if normal_names:
-        gt_agents = list(
-            await GtAgent.select()
-            .where(
-                GtAgent.team_id == team_id,
-                GtAgent.name.in_(normal_names),  # type: ignore[attr-defined]
-            )
-            .order_by(GtAgent.name)
-            .aio_execute()
+    gt_agents = list(
+        await GtAgent.select()
+        .where(
+            GtAgent.name.in_(names),  # type: ignore[attr-defined]
+            (GtAgent.team_id == team_id) | (GtAgent.team_id == -1),
         )
-    agent_map = {agent.name: agent for agent in gt_agents}
-    return _build_team_agents_in_order(names, agent_map, include_special)
+        .aio_execute()
+    )
+    name_to_agent = {agent.name: agent for agent in gt_agents}
+
+    # 保持原始顺序
+    agents: list[GtAgent] = []
+    for name in names:
+        agent = name_to_agent.get(name)
+        if agent is not None:
+            agents.append(agent)
+    return agents
 
 
 async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) -> None:

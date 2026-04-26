@@ -50,7 +50,7 @@ async def _load_room(
     agent_ids: List[int],
 ) -> None:
     """将数据库房间装载到运行态。"""
-    room_agents = await gtAgentManager.get_team_agents_by_ids(gt_team.id, agent_ids, include_special=True)
+    room_agents = await gtAgentManager.get_team_agents_by_ids(gt_team.id, agent_ids)
 
     room = ChatRoom(team=gt_team, room=gt_room, agents=room_agents)
     _rooms[room.key] = room

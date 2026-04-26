@@ -51,7 +51,6 @@ async def _to_dept_tree_node(team_id: int, node: DeptNodeConfig) -> GtDept:
     gt_agents = await gtAgentManager.get_team_agents_by_names(
         team_id,
         lookup_names,
-        include_special=False,
     )
     agent_id_map = {agent.name: agent.id for agent in gt_agents}
     missing_names = [name for name in lookup_names if name not in agent_id_map]
@@ -84,7 +83,6 @@ async def _to_gt_room(team_id: int, room_config: TeamRoomConfig) -> GtRoom:
         for agent in await gtAgentManager.get_team_agents_by_names(
             team_id,
             room_config.agents,
-            include_special=True,
         )
     ]
     # 使用稳定 name 作为 DB name；initial_topic 可从 i18n 按语言解析

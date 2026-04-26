@@ -87,7 +87,6 @@ class TestDeptService(ServiceTestCase):
         agent_rows = await gtAgentManager.get_team_agents_by_names(
             team_id,
             list(dict.fromkeys([*node.agents, node.manager])),
-            include_special=False,
         )
         agent_id_map = {agent.name: agent.id for agent in agent_rows}
         return GtDept(
