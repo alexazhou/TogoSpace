@@ -56,18 +56,7 @@ class RoomApiResponse(BaseModel):
         if runtime_room is not None:
             return cls.model_validate(runtime_room.to_dict())
         return cls(
-            gt_room={
-                "id": gt_room.id,
-                "team_id": gt_room.team_id,
-                "name": gt_room.name,
-                "i18n": gt_room.i18n or {},
-                "type": gt_room.type.name,
-                "initial_topic": gt_room.initial_topic,
-                "max_turns": gt_room.max_turns,
-                "agent_ids": list(gt_room.agent_ids or []),
-                "biz_id": gt_room.biz_id,
-                "tags": list(gt_room.tags or []),
-            },
+            gt_room=gt_room.to_json(),
             state=RoomState.IDLE.name,
             need_scheduling=False,
             current_turn_agent=None,

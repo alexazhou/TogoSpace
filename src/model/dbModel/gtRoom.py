@@ -19,6 +19,9 @@ class GtRoom(DbModelBase):
     tags: list[str] = JsonField(default=list)  # 标签列表
     i18n: dict = JsonField(default=dict)  # 多语言数据，含 display_name/initial_topic
 
+    # API 响应时排除的字段（内部状态和时间戳）
+    JSON_EXCLUDE = ["created_at", "updated_at", "agent_read_index", "turn_pos"]
+
     class Meta:
         table_name = "rooms"
         indexes = (
