@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Iterable, Iterator
@@ -266,6 +267,7 @@ class AgentHistoryStore:
             return
 
         cancel_reason = "cancelled by user"
+        cancel_result_json = json.dumps({"success": False, "message": "因为对话被用户中断，所以工具调用自动被取消"}, ensure_ascii=False)
         turn_items = self._items[start_idx:]
 
         # 1. 将所有 INIT 占位填充为 CANCELLED
@@ -273,7 +275,7 @@ class AgentHistoryStore:
         for item in turn_items:
             if item.status == AgentHistoryStatus.INIT:
                 if item.role == OpenaiApiRole.TOOL and item.tool_call_id:
-                    cancel_msg = llmApiUtil.OpenAIMessage.tool_result(item.tool_call_id, cancel_reason)
+                    cancel_msg = llmApiUtil.OpenAIMessage.tool_result(item.tool_call_id, cancel_result_json)
                 else:
                     cancel_msg = None
                 await self.finalize_history_item(
@@ -291,7 +293,7 @@ class AgentHistoryStore:
             for tc in tool_calls:
                 existing = self.find_tool_result_by_call_id(tc.id)
                 if existing is None:
-                    tool_message = llmApiUtil.OpenAIMessage.tool_result(tc.id, cancel_reason)
+                    tool_message = llmApiUtil.OpenAIMessage.tool_result(tc.id, cancel_result_json)
                     await self.append_history_message(GtAgentHistory.build(
                         tool_message,
                         status=AgentHistoryStatus.CANCELLED,
