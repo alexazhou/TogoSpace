@@ -38,7 +38,6 @@
 - `bind_host`：后端 HTTP 服务监听地址，默认 `0.0.0.0`
 - `bind_port`：后端 HTTP 服务监听端口，默认 `8080`
 - `demo_mode`：演示模式配置，详见下方说明
-- `auth`：鉴权配置，详见下方说明
 
 ## 本地监听地址与端口
 
@@ -149,26 +148,6 @@
     "enabled": true,
     "freeze_data": true,
     "hide_sensitive_info": true
-  }
-}
-```
-
-## `auth` 配置
-
-API 鉴权配置，用于保护后端接口：
-
-- `enabled`：是否启用鉴权，默认 `false`
-- `token`：访问令牌，启用鉴权时必须设置
-
-启用鉴权后，所有 HTTP API 请求（除 `/system/status.json` 外）需携带 `Authorization: Bearer <token>` 请求头。WebSocket 连接后需发送 `{type: "auth", token: "<token>"}` 消息完成鉴权。
-
-示例：
-
-```json
-{
-  "auth": {
-    "enabled": true,
-    "token": "your-access-token"
   }
 }
 ```

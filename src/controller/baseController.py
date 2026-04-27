@@ -18,26 +18,58 @@ class BaseHandler(tornado.web.RequestHandler):
     """所有 HTTP controller 的基类，提供统一的 JSON 响应方法。"""
 
     _READONLY_BLOCKED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+    _AUTH_EXEMPT_PATHS = {
+        "/system/status.json",  # 系统状态接口需豁免，用于前端判断是否需要输入 token
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.enhance = {}
 
     def prepare(self) -> None:
-        """统一处理演示模式只读闸门。"""
-        if self.request.method.upper() not in self._READONLY_BLOCKED_METHODS:
+        """统一处理演示模式只读闸门和鉴权检查。"""
+        # 1. 演示模式检查
+        if self.request.method.upper() in self._READONLY_BLOCKED_METHODS:
+            demo_mode = configUtil.get_app_config().setting.demo_mode
+            if demo_mode.read_only:
+                self.set_status(400)
+                self.return_json(
+                    {
+                        "error_code": "demo_mode_data_frozen",
+                        "error_desc": "演示模式已冻结数据，当前操作不可用",
+                    }
+                )
+                raise tornado.web.Finish()
+
+        # 2. 鉴权检查
+        self._check_auth()
+
+    def _check_auth(self) -> None:
+        """检查请求是否携带正确 token。"""
+        auth_config = configUtil.get_app_config().setting.auth
+
+        # 鉴权未启用，跳过检查
+        if not auth_config.enabled:
             return
-        demo_mode = configUtil.get_app_config().setting.demo_mode
-        if not demo_mode.read_only:
+
+        # 豁免路径，跳过检查
+        if self.request.path in self._AUTH_EXEMPT_PATHS:
             return
-        self.set_status(400)
-        self.return_json(
-            {
-                "error_code": "demo_mode_data_frozen",
-                "error_desc": "演示模式已冻结数据，当前操作不可用",
-            }
-        )
-        raise tornado.web.Finish()
+
+        # 获取 token（仅支持 Authorization header）
+        auth_header = self.request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            self.set_status(401)
+            self.return_json({"error_code": "auth_required", "error_desc": "请输入访问 Token"})
+            raise tornado.web.Finish()
+
+        token = auth_header[7:]
+
+        # 验证 token
+        if token != auth_config.token:
+            self.set_status(401)
+            self.return_json({"error_code": "auth_invalid", "error_desc": "Token 无效"})
+            raise tornado.web.Finish()
 
     def parse_request(self, model_class: type[T]) -> T:
         """解析请求体为指定的 Pydantic 模型。"""

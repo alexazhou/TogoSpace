@@ -17,7 +17,13 @@ class SystemStatusHandler(BaseHandler):
         not_running_reason = schedulerService.get_schedule_not_running_reason()
         setting = configUtil.get_app_config().setting
         demo_mode = setting.demo_mode
-        demo_flags = {
+
+        response = {
+            "initialized": initialized,
+            "auth_enabled": setting.auth.enabled,
+            "schedule_state": schedule_state,
+            "not_running_reason": not_running_reason,
+            "language": configUtil.get_language(),
             "demo_mode": demo_mode.enabled,
             "freeze_data": demo_mode.read_only,
             "read_only": demo_mode.read_only,
@@ -25,23 +31,11 @@ class SystemStatusHandler(BaseHandler):
             "development_mode": setting.development_mode,
         }
         if initialized:
-            self.return_json({
-                "initialized": True,
-                "default_llm_server": setting.default_llm_server,
-                "schedule_state": schedule_state,
-                "not_running_reason": not_running_reason,
-                "language": configUtil.get_language(),
-                **demo_flags,
-            })
+            response["default_llm_server"] = setting.default_llm_server
         else:
-            self.return_json({
-                "initialized": False,
-                "message": "当前未配置大模型服务",
-                "schedule_state": schedule_state,
-                "not_running_reason": not_running_reason,
-                "language": configUtil.get_language(),
-                **demo_flags,
-            })
+            response["message"] = "当前未配置大模型服务"
+
+        self.return_json(response)
 
 
 class SystemScheduleResumeHandler(BaseHandler):

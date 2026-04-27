@@ -246,6 +246,7 @@ def _save_setting_to_file() -> None:
     raw["default_llm_server"] = setting.default_llm_server
     raw["language"] = setting.language
     raw["development_mode"] = setting.development_mode
+    raw["auth"] = setting.auth.model_dump(exclude_unset=True, mode="json")
 
     # 原子写入
     tmp_path = path + ".tmp"

@@ -1,0 +1,18 @@
+{
+  "development_mode": true,
+  "auth": {
+    "enabled": true,
+    "token": "test_access_token"
+  },
+  "llm_services": [
+    {
+      "name": "test",
+      "enable": true,
+      "base_url": "http://127.0.0.1:19876/v1/chat/completions",
+      "api_key": "test-api-key",
+      "type": "openai-compatible",
+      "model": "test-model"
+    }
+  ],
+  "default_llm_server": "test"
+}

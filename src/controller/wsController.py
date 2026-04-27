@@ -1,9 +1,10 @@
 import asyncio
+import json
 import logging
 import tornado.websocket
 import service.messageBus as messageBus
 from constants import MessageBusTopic
-from util import jsonUtil
+from util import jsonUtil, configUtil
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +19,50 @@ _WS_TOPICS = [
 
 class EventsWsHandler(tornado.websocket.WebSocketHandler):
     def open(self):
-        logger.info("[ws] WebSocket opened")
-        messageBus.subscribe_many(_WS_TOPICS, self._on_event)
+        logger.info("[ws] WebSocket opened, waiting for auth")
+        # 连接建立后不立即订阅，等待认证消息
 
     def on_close(self):
         logger.info("[ws] WebSocket closed")
         messageBus.unsubscribe_many(_WS_TOPICS, self._on_event)
 
     def on_message(self, message):
-        pass  # 只推不收，忽略客户端消息
+        """处理客户端消息（认证消息）。"""
+        auth_config = configUtil.get_app_config().setting.auth
+
+        # 鉴权未启用，直接订阅
+        if not auth_config.enabled:
+            self._subscribe_events()
+            return
+
+        # 解析消息
+        try:
+            data = json.loads(message)
+        except json.JSONDecodeError:
+            logger.warning("[ws] Invalid message format")
+            self.close(code=1008, reason="Invalid message")
+            return
+
+        # 检查是否为认证消息
+        if data.get("type") != "auth":
+            logger.warning("[ws] Expected auth message first")
+            self.close(code=1008, reason="Auth required")
+            return
+
+        # 验证 token
+        token = data.get("token", "")
+        if token != auth_config.token:
+            logger.warning("[ws] Auth failed: wrong token")
+            self.close(code=1008, reason="Invalid token")
+            return
+
+        # 认证成功，订阅事件
+        logger.info("[ws] Auth succeeded, subscribing events")
+        self._subscribe_events()
+
+    def _subscribe_events(self):
+        """订阅消息总线事件。"""
+        messageBus.subscribe_many(_WS_TOPICS, self._on_event)
 
     def _on_event(self, msg: messageBus.EventBusMessage) -> None:
         payload = dict(msg.payload)

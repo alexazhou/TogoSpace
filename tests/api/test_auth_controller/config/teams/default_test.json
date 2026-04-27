@@ -1,0 +1,22 @@
+{
+  "name": "e2e",
+  "agents": [
+    { "name": "alice", "role_template": "alice" },
+    { "name": "bob", "role_template": "bob" }
+  ],
+  "dept_tree": {
+    "dept_name": "测试组",
+    "responsibility": "负责 e2e 测试",
+    "manager": "alice",
+    "agents": ["alice", "bob"],
+    "children": []
+  },
+  "preset_rooms": [
+    {
+      "name": "general",
+      "agents": ["OPERATOR", "alice", "bob"],
+      "initial_topic": "e2e 测试话题",
+      "max_turns": 50
+    }
+  ]
+}

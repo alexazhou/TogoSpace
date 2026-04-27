@@ -160,12 +160,19 @@ class DemoModeConfig(BaseModel):
         return self.enabled and self.hide_sensitive_info
 
 
+class AuthConfig(BaseModel):
+    """鉴权配置。"""
+    enabled: bool = False
+    token: str = ""
+
+
 class SettingConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     language: str = "zh-CN"  # 界面语言，默认中文
     development_mode: bool = False  # 前端开发模式开关，影响错误提示等交互行为
     demo_mode: DemoModeConfig = Field(default_factory=DemoModeConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
     default_llm_server: str | None = None
     llm_services: list[LlmServiceConfig] = Field(default_factory=list)
     default_room_max_turns: int = 100
