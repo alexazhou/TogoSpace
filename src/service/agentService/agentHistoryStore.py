@@ -269,11 +269,16 @@ class AgentHistoryStore:
         turn_items = self._items[start_idx:]
 
         # 1. 将所有 INIT 占位填充为 CANCELLED
+        # TOOL 角色的 INIT 占位需补写占位 message，保证 tool_call 与 tool_result 的配对合规。
         for item in turn_items:
             if item.status == AgentHistoryStatus.INIT:
+                if item.role == OpenaiApiRole.TOOL and item.tool_call_id:
+                    cancel_msg = llmApiUtil.OpenAIMessage.tool_result(item.tool_call_id, cancel_reason)
+                else:
+                    cancel_msg = None
                 await self.finalize_history_item(
                     item.id,
-                    message=None,
+                    message=cancel_msg,
                     status=AgentHistoryStatus.CANCELLED,
                     error_message=cancel_reason,
                 )

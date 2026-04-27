@@ -10,6 +10,7 @@ from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from tests.base import ServiceTestCase
 from util import llmApiUtil
+from util.llmApiUtil import OpenAIToolCall
 
 
 class TestAgentHistoryStoreAsync(ServiceTestCase):
@@ -314,6 +315,60 @@ class TestFinalizeCancelTurn(ServiceTestCase):
         # 未持久化项被丢弃，不导致 RuntimeError
         assert len(history) == 2  # u1 + ROOM_TURN_FINISH
         assert history.has_active_turn() is False  # turn 被 ROOM_TURN_FINISH 关闭
+
+    async def test_cancelled_tool_init_has_non_null_message(self):
+        """B1 修复验证：取消时 TOOL INIT 占位的 message 不为 NULL。
+
+        场景：ASSISTANT 声明了 tool_call，execute_tool_call 执行中被 CancelledError 打断。
+        TOOL INIT 占位已写入 DB，但 finalize_history_item 未执行，message=NULL。
+        finalize_cancel_turn 应为该 TOOL 占位填充一个 cancel 占位 message，
+        保证 build_infer_messages 能包含此 TOOL 记录，维持 tool_call 配对合规。
+        """
+        await self._reset_table()
+        history = AgentHistoryStore(agent_id=110)
+
+        tool_call = OpenAIToolCall(id="call_abc123", function={"name": "some_tool", "arguments": "{}"})
+
+        # USER 消息（turn 开始）
+        await history.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "do something"),
+            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+        ))
+
+        # ASSISTANT 消息，声明了 tool_call（已成功入库）
+        assistant_msg = llmApiUtil.OpenAIMessage(
+            role=OpenaiApiRole.ASSISTANT,
+            content="",
+            tool_calls=[tool_call],
+        )
+        await history.append_history_message(GtAgentHistory.build(
+            assistant_msg,
+            status=AgentHistoryStatus.SUCCESS,
+        ))
+
+        # TOOL INIT 占位（模拟 CancelledError 在 execute_tool_call 期间打断，finalize 未执行）
+        await history.append_history_init_item(
+            role=OpenaiApiRole.TOOL,
+            tool_call_id="call_abc123",
+        )
+
+        # 执行取消
+        await history.finalize_cancel_turn()
+
+        # 找到 TOOL 记录
+        tool_items = [item for item in history if item.role == OpenaiApiRole.TOOL]
+        assert len(tool_items) == 1
+        tool_item = tool_items[0]
+        assert tool_item.status == AgentHistoryStatus.CANCELLED
+
+        # 核心断言：CANCELLED TOOL 记录的 message 不为 NULL
+        assert tool_item.message is not None, "CANCELLED TOOL 记录的 message 不应为 NULL（tool_call 配对不合规）"
+        assert tool_item.has_message is True
+
+        # build_infer_messages 应包含这条 TOOL 记录，确保 ASSISTANT ↔ TOOL 配对完整
+        infer_messages = history.build_infer_messages()
+        tool_messages = [m for m in infer_messages if m.role == OpenaiApiRole.TOOL]
+        assert len(tool_messages) == 1, "build_infer_messages 应包含 TOOL 记录，保证 tool_call 配对合规"
 
     async def test_cancelled_turn_can_receive_new_messages(self):
         """取消 turn 后，新的消息应能正常处理。
