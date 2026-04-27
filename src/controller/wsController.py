@@ -19,8 +19,13 @@ _WS_TOPICS = [
 
 class EventsWsHandler(tornado.websocket.WebSocketHandler):
     def open(self):
-        logger.info("[ws] WebSocket opened, waiting for auth")
-        # 连接建立后不立即订阅，等待认证消息
+        auth_config = configUtil.get_app_config().setting.auth
+        if auth_config.enabled:
+            logger.info("[ws] WebSocket opened, waiting for auth")
+            return
+
+        logger.info("[ws] WebSocket opened, auth disabled, subscribing events")
+        self._subscribe_events()
 
     def on_close(self):
         logger.info("[ws] WebSocket closed")
