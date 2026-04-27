@@ -755,6 +755,29 @@ class TestDeptService(ServiceTestCase):
             room_agents = await self._get_room_agent_names(room.id)
             assert set(room_agents) == expected_agents
 
+    async def test_overwrite_dept_tree_auto_offboards_agents_outside_tree(self):
+        """验证 overwrite_dept_tree 将不在树中的成员自动设为 OFF_BOARD。"""
+        await self._reset_tables()
+
+        team = await self._setup_team_with_agents("t_auto_offboard", ["alice", "bob", "charlie"])
+        await self._disable_team(team.id)
+
+        # 只把 alice 和 bob 放入部门树，charlie 不在树中
+        tree = DeptNodeConfig(dept_name="eng",
+            responsibility="",
+            manager="alice",
+            agents=["alice", "bob"],
+        )
+        await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
+
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
+        charlie = await gtAgentManager.get_agent(team.id, "charlie", EmployStatus.OFF_BOARD)
+
+        assert alice is not None and alice.employ_status == EmployStatus.ON_BOARD
+        assert bob is not None and bob.employ_status == EmployStatus.ON_BOARD
+        assert charlie is not None and charlie.employ_status == EmployStatus.OFF_BOARD
+
     async def test_overwrite_dept_tree_requires_team_disabled(self):
         """验证编辑团队组织树之前必须停用团队。"""
         await self._reset_tables()
