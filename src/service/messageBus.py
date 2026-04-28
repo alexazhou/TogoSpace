@@ -56,12 +56,14 @@ def publish(topic: MessageBusTopic, **payload: Any) -> None:
     """向指定主题的所有订阅者投递消息。
 
     回调统一在当前运行中的 asyncio 事件循环里异步调度，避免慢订阅者阻塞发布链路。
+    必须在事件循环线程内调用（即协程或由事件循环直接驱动的同步代码中）。
+    跨线程调用请使用 loop.call_soon_threadsafe。
     """
+    loop = asyncio.get_running_loop()  # 非事件循环线程调用时此处即抛 RuntimeError，call_soon 不是 thread-safe
     msg = EventBusMessage(topic=topic, payload=payload)
     msg.event_id = _next_event_id()
     logger.info(f"[messageBus] publish event_id={msg.event_id} topic={topic.name}, payload={payload}")
     callbacks = list(_subscribers.get(topic, []))
-    loop = asyncio.get_running_loop()
 
     for cb in callbacks:
         loop.call_soon(_invoke_callback, cb, msg)
