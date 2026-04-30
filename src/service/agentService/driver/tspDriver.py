@@ -218,12 +218,8 @@ class TspAgentDriver(AgentDriver):
         try:
             call = ToolCall(name=function_name, input=parsed_args)
             result: ToolResult = await self._client.call_tool(call)
-            # ToolResult.output 是 JSON 字符串，解析后返回
-            try:
-                output_dict = json.loads(result.output) if result.output else {}
-            except json.JSONDecodeError:
-                output_dict = {"success": False, "message": f"工具输出 JSON 解析失败: {result.output}"}
-            return output_dict
+            # ToolResult.output 是原始类型（dict / list / str）
+            return result.output
         except TSPException as e:
             return {"success": False, "code": e.code, "message": e.message}
         except Exception as e:
