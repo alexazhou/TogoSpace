@@ -75,8 +75,11 @@ cd frontend && npm install && npm run dev
 
 ### 方法 3：Docker 部署
 ```bash
-# 从 Docker Hub 拉取镜像
-docker pull alexazhou/togospace:latest
+# 从 GitHub Container Registry 拉取镜像（推荐）
+docker pull ghcr.io/alexazhou/togospace:latest
+
+# 或从 Docker Hub 拉取
+# docker pull alexazhou/togospace:latest
 
 # 运行容器，映射端口并挂载存储目录
 # /path/to/your/storage 是你想要存放 TogoSpace 数据的目录
@@ -84,7 +87,7 @@ docker run \
   --name togospace \
   -p 8080:8080 \
   -v /path/to/your/storage:/storage \
-  alexazhou/togospace:latest
+  ghcr.io/alexazhou/togospace:latest
 
 # 在浏览器打开 http://localhost:8080 访问控制台
 ```

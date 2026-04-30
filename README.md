@@ -75,8 +75,11 @@ cd frontend && npm install && npm run dev
 
 ### Method 3: Docker Deployment
 ```bash
-# Pull the image from Docker Hub
-docker pull alexazhou/togospace:latest
+# Pull the image from GitHub Container Registry (recommended)
+docker pull ghcr.io/alexazhou/togospace:latest
+
+# Or from Docker Hub
+# docker pull alexazhou/togospace:latest
 
 # Run with storage persistence and port mapping
 # /path/to/your/storage is the directory where TogoSpace data will be stored
@@ -84,7 +87,7 @@ docker run \
   --name togospace \
   -p 8080:8080 \
   -v /path/to/your/storage:/storage \
-  alexazhou/togospace:latest
+  ghcr.io/alexazhou/togospace:latest
 
 # Access the Web console at http://localhost:8080
 ```
