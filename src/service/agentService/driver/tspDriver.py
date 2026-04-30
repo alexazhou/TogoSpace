@@ -232,18 +232,11 @@ class TspAgentDriver(AgentDriver):
 
         for tool in tools:
             # tools 是 TSPTool 对象，直接访问属性
-            name = tool.name
-            input_schema = tool.input_schema
-
-            # JSON Schema 中 required 字段是可选的，OpenAI API 需要，默认为空列表
-            if "required" not in input_schema:
-                input_schema["required"] = []
-
-            resolved[name] = llmApiUtil.OpenAITool(
+            resolved[tool.name] = llmApiUtil.OpenAITool(
                 function=llmApiUtil.OpenAIFunction(
-                    name=name,
+                    name=tool.name,
                     description=tool.description,
-                    parameters=llmApiUtil.OpenAIFunctionParameter(**input_schema),
+                    parameters=llmApiUtil.OpenAIFunctionParameter(**tool.input_schema),
                 )
             )
 
