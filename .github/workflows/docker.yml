@@ -19,18 +19,11 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-latest
-          - arch: arm64
-            runner: ubuntu-24.04-arm64
 
     steps:
     - uses: actions/checkout@v4
@@ -39,35 +32,15 @@ jobs:
         submodules: recursive
         lfs: true
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Log in to Docker Hub
-      if: ${{ github.event_name == 'push' || inputs.push }}
-      uses: docker/login-action@v3
-      with:
-        registry: docker.io
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Log in to GitHub Container Registry
-      if: ${{ github.event_name == 'push' || inputs.push }}
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
     - name: Determine image tags
       id: tags
       run: |
         if [ "${{ github.event_name }}" = "push" ]; then
           VERSION="${GITHUB_REF#refs/tags/v}"
-          # Docker Hub and GitHub Registry
-          TAGS="docker.io/${DOCKER_USERNAME}/togospace:${VERSION}-${{ matrix.arch }},ghcr.io/${GH_REPO}/togospace:${VERSION}-${{ matrix.arch }}"
+          TAGS="docker.io/${DOCKER_USERNAME}/togospace:${VERSION},docker.io/${DOCKER_USERNAME}/togospace:latest,ghcr.io/${GH_REPO}/togospace:${VERSION},ghcr.io/${GH_REPO}/togospace:latest"
           PUSH="true"
         else
-          TAGS="docker.io/${DOCKER_USERNAME}/togospace:${{ inputs.tag }}-${{ matrix.arch }}"
+          TAGS="docker.io/${DOCKER_USERNAME}/togospace:${{ inputs.tag }}"
           PUSH="${{ inputs.push }}"
         fi
         echo "tags=${TAGS}" >> $GITHUB_OUTPUT
@@ -77,36 +50,14 @@ jobs:
         DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         GH_REPO: ${{ github.repository_owner }}
 
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v6
-      with:
-        context: .
-        push: ${{ steps.tags.outputs.push }}
-        tags: ${{ steps.tags.outputs.tags }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
 
-    - name: Image summary
-      run: |
-        echo "### Docker Image Built (${{ matrix.arch }})" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "- **Tags**: ${TAGS}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Pushed**: ${PUSH}" >> $GITHUB_STEP_SUMMARY
-      env:
-        TAGS: ${{ steps.tags.outputs.tags }}
-        PUSH: ${{ steps.tags.outputs.push }}
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
 
-  merge:
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      packages: write
-    if: ${{ github.event_name == 'push' || inputs.push }}
-
-    steps:
     - name: Log in to Docker Hub
+      if: ${{ steps.tags.outputs.push == 'true' }}
       uses: docker/login-action@v3
       with:
         registry: docker.io
@@ -114,67 +65,30 @@ jobs:
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
     - name: Log in to GitHub Container Registry
+      if: ${{ steps.tags.outputs.push == 'true' }}
       uses: docker/login-action@v3
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Determine version
-      id: version
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: ${{ steps.tags.outputs.push }}
+        tags: ${{ steps.tags.outputs.tags }}
+        platforms: linux/amd64,linux/arm64
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Image summary
       run: |
-        if [ "${{ github.event_name }}" = "push" ]; then
-          VERSION="${GITHUB_REF#refs/tags/v}"
-        else
-          VERSION="${{ inputs.tag }}"
-        fi
-        echo "version=${VERSION}" >> $GITHUB_OUTPUT
-      env:
-        GH_REPO: ${{ github.repository_owner }}
-
-    - name: Create and push manifest (Docker Hub)
-      run: |
-        VERSION="${{ steps.version.outputs.version }}"
-        DOCKER_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
-
-        # Create manifest for version tag
-        docker manifest create docker.io/${DOCKER_USERNAME}/togospace:${VERSION} \
-          docker.io/${DOCKER_USERNAME}/togospace:${VERSION}-amd64 \
-          docker.io/${DOCKER_USERNAME}/togospace:${VERSION}-arm64
-
-        # Create manifest for latest tag
-        docker manifest create docker.io/${DOCKER_USERNAME}/togospace:latest \
-          docker.io/${DOCKER_USERNAME}/togospace:${VERSION}-amd64 \
-          docker.io/${DOCKER_USERNAME}/togospace:${VERSION}-arm64
-
-        # Push manifests
-        docker manifest push docker.io/${DOCKER_USERNAME}/togospace:${VERSION}
-        docker manifest push docker.io/${DOCKER_USERNAME}/togospace:latest
-
-    - name: Create and push manifest (GitHub Registry)
-      run: |
-        VERSION="${{ steps.version.outputs.version }}"
-        GH_REPO="${{ github.repository_owner }}"
-
-        # Create manifest for version tag
-        docker manifest create ghcr.io/${GH_REPO}/togospace:${VERSION} \
-          ghcr.io/${GH_REPO}/togospace:${VERSION}-amd64 \
-          ghcr.io/${GH_REPO}/togospace:${VERSION}-arm64
-
-        # Create manifest for latest tag
-        docker manifest create ghcr.io/${GH_REPO}/togospace:latest \
-          ghcr.io/${GH_REPO}/togospace:${VERSION}-amd64 \
-          ghcr.io/${GH_REPO}/togospace:${VERSION}-arm64
-
-        # Push manifests
-        docker manifest push ghcr.io/${GH_REPO}/togospace:${VERSION}
-        docker manifest push ghcr.io/${GH_REPO}/togospace:latest
-
-    - name: Manifest summary
-      run: |
-        VERSION="${{ steps.version.outputs.version }}"
-        echo "### Docker Manifest Created" >> $GITHUB_STEP_SUMMARY
+        echo "### Docker Image Built" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "- **Version**: ${VERSION}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Registries**: Docker Hub, GitHub Container Registry" >> $GITHUB_STEP_SUMMARY
-        echo "- **Architectures**: amd64, arm64" >> $GITHUB_STEP_SUMMARY
+        echo "- **Tags**: ${TAGS}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Pushed**: ${PUSH}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Platforms**: linux/amd64, linux/arm64 (via QEMU)" >> $GITHUB_STEP_SUMMARY
+      env:
+        TAGS: ${{ steps.tags.outputs.tags }}
+        PUSH: ${{ steps.tags.outputs.push }}
