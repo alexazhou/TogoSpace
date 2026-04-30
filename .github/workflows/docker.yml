@@ -72,7 +72,7 @@ jobs:
         fi
         echo "tags=${TAGS}" >> $GITHUB_OUTPUT
         echo "push=${PUSH}" >> $GITHUB_OUTPUT
-        echo "version=${VERSION:-${{ inputs.tag }}" >> $GITHUB_OUTPUT
+        echo "version=${VERSION:-${{ inputs.tag }}}" >> $GITHUB_OUTPUT
       env:
         DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         GH_REPO: ${{ github.repository_owner }}
