@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import stat
 
 import PyInstaller.__main__
 
@@ -111,6 +112,55 @@ def _rename_app(version: str):
         sys.exit(1)
 
 
+# ── Quarantine 检查 ────────────────────────────────────────────────────────────
+
+def _check_quarantine_on_executables():
+    """检查 assets/execute 目录下的可执行文件是否有 quarantine 属性。
+
+    macOS Gatekeeper 会给从网络下载的文件添加 com.apple.quarantine 属性，
+    导致首次执行时被拦截。构建前需确保这些文件没有该属性。
+    """
+    if sys.platform != "darwin":
+        return  # 仅在 macOS 上检查
+
+    execute_dir = os.path.join(REPO_ROOT, "assets", "execute")
+    if not os.path.exists(execute_dir):
+        return
+
+    quarantine_attr = "com.apple.quarantine"
+    errors = []
+
+    for root, dirs, files in os.walk(execute_dir):
+        for filename in files:
+            filepath = os.path.join(root, filename)
+
+            # 检查是否为可执行文件
+            try:
+                file_stat = os.stat(filepath)
+                if not (file_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)):
+                    continue  # 不是可执行文件，跳过
+            except OSError:
+                continue
+
+            # 检查是否有 quarantine 属性
+            result = subprocess.run(
+                ["xattr", "-l", filepath],
+                capture_output=True,
+                text=True,
+            )
+            if quarantine_attr in result.stdout:
+                rel_path = os.path.relpath(filepath, REPO_ROOT)
+                errors.append(rel_path)
+
+    if errors:
+        print("❌ 以下可执行文件存在 quarantine 属性，请移除后再构建：", file=sys.stderr)
+        for path in errors:
+            print(f"   {path}", file=sys.stderr)
+        print(file=sys.stderr)
+        print("移除方法：xattr -d com.apple.quarantine <文件路径>", file=sys.stderr)
+        sys.exit(1)
+
+
 # ── 主流程 ────────────────────────────────────────────────────────────────────
 
 def main():
@@ -118,6 +168,7 @@ def main():
 
     print(f"ℹ️  版本：{backend_ver}")
 
+    _check_quarantine_on_executables()
     _assert_frontend_submodule_clean()
     _build_frontend()
     _sync_frontend()
