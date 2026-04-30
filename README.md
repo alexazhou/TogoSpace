@@ -13,6 +13,10 @@
 
 > **About the Name**: The project is named after the legendary sled dog **Togo** from the 1925 Serum Run to Nome. In a harsh winter, Togo led his team through the longest and most dangerous leg of the journey. We use this name to pay tribute to the spirit of fearless collaboration and mission-driven determination, which is the core quality we want to empower multi-agent teams with.
 
+### Powered by TSP
+
+TogoSpace's tool execution layer is powered by [TSP (Tool Service Protocol)](https://github.com/alexazhou/TSP) — a lightweight protocol for building LLM tool servers. With TSP, you can **build your own agent tools in 10 lines of code**.
+
 ---
 
 ## ✨ Key Features
