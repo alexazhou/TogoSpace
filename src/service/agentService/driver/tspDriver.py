@@ -6,7 +6,7 @@ import logging
 import os
 from typing import Any, Optional
 
-from pytspclient import TSPClient, TSPException, TSPInitializeResult, TSPToolResponse
+from pytspclient import TSPClient, TSPException, ToolResult, ToolCall
 
 import appPaths
 from service.agentService.driver.base import AgentDriverConfig
@@ -29,7 +29,6 @@ _LOCAL_TOOL_NAMES = [
     "send_chat_msg",
     "finish_chat_turn",
 ]
-_DEFAULT_PROTOCOL_VERSION = "0.3"
 _DEFAULT_REQUEST_TIMEOUT_SEC = 30
 _RUN_CHAT_TURN_MAX_RETRIES = 3
 _RUN_CHAT_TURN_HINT = (
@@ -74,10 +73,10 @@ class TspAgentDriver(AgentDriver):
         # 构建连接参数（用于首次连接和后续按需重连）
         options = config.options
         work_dir = str(options.get("workdir") or host.agent_workdir)
-        command = build_gtsp_command(options.get("command"), work_dir)
+        command_list = build_gtsp_command(options.get("command"), work_dir)
         timeout_sec = int(options.get("request_timeout_sec", _DEFAULT_REQUEST_TIMEOUT_SEC))
         self._connect_params: dict[str, Any] = {
-            "command": command,
+            "command": command_list,
             "timeout_sec": timeout_sec,
             "include": options.get("tool_include") or None,
             "exclude": options.get("tool_exclude") or None,
@@ -120,17 +119,17 @@ class TspAgentDriver(AgentDriver):
                 self._client = None
 
             try:
-                client = TSPClient(
-                    command=self._connect_params["command"],
-                    request_timeout_sec=self._connect_params["timeout_sec"],
-                )
-                await client.connect()
-                result: TSPInitializeResult = await client.initialize(
+                # 使用新的工厂方法创建 client
+                client = await TSPClient.from_stdio(
+                    self._connect_params["command"],
+                    self._connect_params["timeout_sec"],
+                ).start()
+                await client.initialize(
                     client_info={"name": "agent_team.tsp_driver"},
                     include=self._connect_params.get("include"),
                     exclude=self._connect_params.get("exclude"),
                 )
-                self._load_tsp_tools(result)
+                self._load_tsp_tools(client.tools)
                 self._client = client
                 self._register_host_tools()
                 logger.info("TSP 连接成功: agent_id=%s, tools=%s", self.host.gt_agent.id, len(self._tsp_tools))
@@ -217,8 +216,14 @@ class TspAgentDriver(AgentDriver):
             return {"success": False, "message": f"TSP 参数 JSON 解析失败: {e}"}
 
         try:
-            response: TSPToolResponse = await self._client.tool(function_name, parsed_args)
-            return response.to_dict()
+            call = ToolCall(name=function_name, input=parsed_args)
+            result: ToolResult = await self._client.call_tool(call)
+            # ToolResult.output 是 JSON 字符串，解析后返回
+            try:
+                output_dict = json.loads(result.output) if result.output else {}
+            except json.JSONDecodeError:
+                output_dict = {"success": False, "message": f"工具输出 JSON 解析失败: {result.output}"}
+            return output_dict
         except TSPException as e:
             return {"success": False, "code": e.code, "message": e.message}
         except Exception as e:
@@ -226,11 +231,11 @@ class TspAgentDriver(AgentDriver):
             logger.warning("TSP 工具执行异常: agent_id=%s, tool=%s, error=%s", self.host.gt_agent.id, function_name, e)
             return {"success": False, "message": f"TSP 工具调用失败: {e}"}
 
-    def _load_tsp_tools(self, initialize_result: TSPInitializeResult) -> None:
+    def _load_tsp_tools(self, tools: list[Any]) -> None:
         resolved: dict[str, llmApiUtil.OpenAITool] = {}
 
-        # 使用 pyTSPClient 暴露的 dataclass 结构
-        for tool in initialize_result.capabilities.tools:
+        for tool in tools:
+            # tools 是 TSPTool 对象，直接访问属性
             name = tool.name
             input_schema = tool.input_schema
 

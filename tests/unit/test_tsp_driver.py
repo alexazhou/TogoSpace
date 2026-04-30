@@ -268,7 +268,7 @@ async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host):
     driver._client = MagicMock()
     driver._client.process = MagicMock()
     driver._client.process.returncode = None  # 模拟进程仍在运行
-    driver._client.tool = AsyncMock()
+    driver._client.call_tool = AsyncMock()
 
     # Case 1: JSON Decode Error
     ctx = ToolCallContext(agent_id=1, team_id=1, chat_room=MagicMock(), tool_name="tool")
@@ -276,26 +276,26 @@ async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host):
     assert "JSON 解析失败" in res["message"]
 
     # Case 2: TSP Exception
-    driver._client.tool.side_effect = TSPException("tsp/code", "tsp error")
+    driver._client.call_tool.side_effect = TSPException("tsp/code", "tsp error")
     res = await driver._execute_tsp_tool("{}", ctx)
     assert res["code"] == "tsp/code"
     assert res["message"] == "tsp error"
 
     # Case 3: General Exception
-    driver._client.tool.side_effect = RuntimeError("network fail")
+    driver._client.call_tool.side_effect = RuntimeError("network fail")
     res = await driver._execute_tsp_tool("{}", ctx)
     assert "工具调用失败" in res["message"]
 
 @pytest.mark.asyncio
 async def test_tsp_client_fail_pending():
-    client = TSPClient(["mock"])
-    
+    client = TSPClient.from_stdio("mock")
+
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
     client.in_flight["req1"] = fut
-    
+
     client._fail_pending(RuntimeError("closed"))
-    
+
     with pytest.raises(RuntimeError, match="closed"):
         await fut
     assert len(client.in_flight) == 0
