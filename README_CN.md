@@ -114,6 +114,14 @@ docker run \
 
 ---
 
+## 💬 交流群
+
+欢迎加入微信交流群一起讨论：
+
+![WeChat QR Code](image/wechat.JPG)
+
+---
+
 ## 📄 开源协议
 
 本项目基于 [MIT License](LICENSE) 开源。
