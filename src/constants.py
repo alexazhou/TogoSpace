@@ -140,6 +140,8 @@ class AgentActivityType(EnhanceEnum):
     TOOL_CALL = auto()
     COMPACT = auto()
     AGENT_STATE = auto()
+    REASONING = auto()      # 思考内容（reasoning_content）
+    CHAT_REPLY = auto()     # 直接发言（有 content 但无 tool_calls）
 
 
 class AgentActivityStatus(EnhanceEnum):

@@ -449,6 +449,20 @@ class AgentTurnRunner:
             final_meta.apply_usage(usage)
             await self._finish_activity(activity_id, status=AgentActivityStatus.SUCCEEDED, metadata_patch=final_meta)
 
+            # 活动记录：思考内容和直接发言
+            if assistant_message.reasoning_content and assistant_message.reasoning_content.strip():
+                await agentActivityService.add_activity(
+                    gt_agent=self.gt_agent, activity_type=AgentActivityType.REASONING,
+                    status=AgentActivityStatus.SUCCEEDED, detail=assistant_message.reasoning_content,
+                    metadata=self._base_metadata(),
+                )
+            if assistant_message.content and assistant_message.content.strip():
+                await agentActivityService.add_activity(
+                    gt_agent=self.gt_agent, activity_type=AgentActivityType.CHAT_REPLY,
+                    status=AgentActivityStatus.SUCCEEDED, detail=assistant_message.content,
+                    metadata=self._base_metadata(),
+                )
+
             post_check_messages = history.build_infer_messages()
             _, _, post_check_triggered = await self._check_compact(
                 post_check_messages,

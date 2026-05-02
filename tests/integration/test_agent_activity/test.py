@@ -312,3 +312,77 @@ class TestAgentActivityService(ServiceTestCase):
         assert started_2_row.status == AgentActivityStatus.FAILED
         assert finished_row.status == AgentActivityStatus.SUCCEEDED
         assert other_agent_row.status == AgentActivityStatus.STARTED
+
+    # ── REASONING 和 CHAT_REPLY 活动类型 ──
+
+    async def test_add_reasoning_activity(self):
+        """验证 REASONING 活动类型可以正确创建。"""
+        await self._reset()
+        activity = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(),
+            activity_type=AgentActivityType.REASONING,
+            status=AgentActivityStatus.SUCCEEDED,
+            detail="这是思考过程的内容",
+        )
+        assert activity.id is not None
+        assert activity.activity_type == AgentActivityType.REASONING
+        assert activity.title == "思考"
+        assert activity.detail == "这是思考过程的内容"
+        assert activity.status == AgentActivityStatus.SUCCEEDED
+        assert activity.finished_at is not None
+
+    async def test_add_chat_reply_activity(self):
+        """验证 CHAT_REPLY 活动类型可以正确创建。"""
+        await self._reset()
+        activity = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(),
+            activity_type=AgentActivityType.CHAT_REPLY,
+            status=AgentActivityStatus.SUCCEEDED,
+            detail="这是直接发言内容",
+        )
+        assert activity.id is not None
+        assert activity.activity_type == AgentActivityType.CHAT_REPLY
+        assert activity.title == "发言"
+        assert activity.detail == "这是直接发言内容"
+        assert activity.status == AgentActivityStatus.SUCCEEDED
+        assert activity.finished_at is not None
+
+    async def test_reasoning_and_chat_reply_can_coexist(self):
+        """验证 REASONING 和 CHAT_REPLY 可以同时存在（一次推理产生两种活动）。"""
+        await self._reset()
+        reasoning = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(),
+            activity_type=AgentActivityType.REASONING,
+            status=AgentActivityStatus.SUCCEEDED,
+            detail="思考内容",
+        )
+        chat_reply = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(),
+            activity_type=AgentActivityType.CHAT_REPLY,
+            status=AgentActivityStatus.SUCCEEDED,
+            detail="发言内容",
+        )
+        assert reasoning.id != chat_reply.id
+        assert reasoning.activity_type == AgentActivityType.REASONING
+        assert chat_reply.activity_type == AgentActivityType.CHAT_REPLY
+
+    async def test_chat_reply_with_tool_calls_scenario(self):
+        """验证有 tool_calls 时仍可以创建 CHAT_REPLY（模拟执行工具前的说明）。"""
+        await self._reset()
+        # 模拟：推理返回 content + tool_calls，应创建 CHAT_REPLY
+        chat_reply = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(),
+            activity_type=AgentActivityType.CHAT_REPLY,
+            status=AgentActivityStatus.SUCCEEDED,
+            detail="执行工具前的说明",
+        )
+        # 同时可能有 TOOL_CALL 活动
+        tool_call = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(),
+            activity_type=AgentActivityType.TOOL_CALL,
+            detail="execute_bash",
+            status=AgentActivityStatus.STARTED,
+        )
+        assert chat_reply.id is not None
+        assert tool_call.id is not None
+        assert chat_reply.detail == "执行工具前的说明"

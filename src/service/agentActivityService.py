@@ -25,6 +25,8 @@ _DEFAULT_TITLES: dict[AgentActivityType, str] = {
     AgentActivityType.LLM_INFER: "推理",
     AgentActivityType.TOOL_CALL: "调用工具",
     AgentActivityType.COMPACT: "压缩上下文",
+    AgentActivityType.REASONING: "思考",
+    AgentActivityType.CHAT_REPLY: "发言",
 }
 
 

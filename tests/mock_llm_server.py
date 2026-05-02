@@ -179,6 +179,7 @@ class SetResponseHandler(tornado.web.RequestHandler):
         支持的简化格式：
         - {"tool_calls": [{"name": "xxx", "arguments": "..."}]}
         - {"content": "text"}
+        - {"reasoning_content": "思考内容"}
         """
         # 如果已经包含完整字段，直接返回
         if "id" in response and "choices" in response:
@@ -186,6 +187,7 @@ class SetResponseHandler(tornado.web.RequestHandler):
 
         tool_calls = response.get("tool_calls", [])
         content = response.get("content")
+        reasoning_content = response.get("reasoning_content")
 
         # 如果 tool_calls 是简化的格式（只包含 name 和 arguments），转换为完整格式
         if tool_calls:
@@ -202,6 +204,14 @@ class SetResponseHandler(tornado.web.RequestHandler):
             tool_calls = normalized_calls
 
         # 自动补全完整响应
+        message = {
+            "role": "assistant",
+            "content": content,
+            "tool_calls": tool_calls if tool_calls else None,
+        }
+        if reasoning_content:
+            message["reasoning_content"] = reasoning_content
+
         return {
             "id": f"msg_{int(time.time() * 1000)}",
             "object": "chat.completion",
@@ -209,11 +219,7 @@ class SetResponseHandler(tornado.web.RequestHandler):
             "model": "mock-model",
             "choices": [{
                 "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": content,
-                    "tool_calls": tool_calls if tool_calls else None,
-                },
+                "message": message,
                 "finish_reason": "tool_calls" if tool_calls else "stop"
             }],
             "usage": {
@@ -248,6 +254,7 @@ def _to_sse_chunks(response_data: Dict[str, Any]) -> list[str]:
     finish_reason = choice.get("finish_reason", "stop")
     tool_calls = message.get("tool_calls") or []
     content = message.get("content")
+    reasoning_content = message.get("reasoning_content")
 
     base = {"id": resp_id, "object": "chat.completion.chunk", "created": created, "model": model}
     chunks = []
@@ -255,6 +262,10 @@ def _to_sse_chunks(response_data: Dict[str, Any]) -> list[str]:
     # 首个 delta：角色
     first_delta: Dict[str, Any] = {"role": "assistant", "content": None}
     chunks.append({**base, "choices": [{"index": 0, "delta": first_delta, "finish_reason": None}]})
+
+    # reasoning_content chunk（如有）
+    if reasoning_content:
+        chunks.append({**base, "choices": [{"index": 0, "delta": {"reasoning_content": reasoning_content}, "finish_reason": None}]})
 
     if tool_calls:
         for tc in tool_calls:
