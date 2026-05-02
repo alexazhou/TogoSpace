@@ -13,16 +13,34 @@ from service.agentService.prompts import (
 from util import configUtil
 
 
-def format_room_message(room_name: str, sender_display_name: str, content: str) -> str:
-    """格式化房间消息。"""
-    return f"【房间《{room_name}》】【{sender_display_name}】： {content}"
+def _format_yaml_message_item(sender: str, content: str) -> str:
+    """格式化单条消息为 YAML 列表项。"""
+    # content 可能有多行，需要保持缩进
+    content_lines = content.split("\n")
+    if len(content_lines) == 1:
+        return f"  - sender: {sender}\n    content: {content}"
+    else:
+        indented_content = "\n      ".join(content_lines)
+        return f"  - sender: {sender}\n    content: {indented_content}"
 
 
-def build_turn_begin_prompt(room_name: str, message_blocks: list[str]) -> str:
-    context = "\n\n".join(message_blocks) if len(message_blocks) > 0 else "(无新消息)"
+def build_turn_begin_prompt(room_name: str, messages: list[tuple[str, str]]) -> str:
+    """构建 turn begin prompt，使用 YAML 格式。
+
+    Args:
+        room_name: 房间名称
+        messages: 消息列表，每项为 (sender, content) 元组
+    """
+    if len(messages) == 0:
+        messages_section = "messages: []"
+    else:
+        message_items = [_format_yaml_message_item(sender, content) for sender, content in messages]
+        messages_section = "messages:\n" + "\n".join(message_items)
+
     return (
-        f"当前轮到你行动，房间名:【{room_name}】,新消息如下:\n\n"
-        f"{context}\n\n"
+        f"当前轮到你行动，新消息如下:\n\n"
+        f"roomName: {room_name}\n"
+        f"{messages_section}\n\n"
         f"{TURN_CONTEXT_SUFFIX}"
     )
 
@@ -32,13 +50,13 @@ def build_turn_begin_prompt_from_messages(
     messages: list[GtCoreRoomMessage],
     exclude_agent_id: int,
 ) -> str:
-    """从消息列表构建 turn begin prompt，自动过滤自己的消息并格式化。"""
-    message_blocks: list[str] = []
+    """从消息列表构建 turn begin prompt，自动过滤自己的消息。"""
+    filtered_messages: list[tuple[str, str]] = []
     for msg in messages:
         if msg.sender_id == exclude_agent_id:
             continue
-        message_blocks.append(format_room_message(room_name, msg.sender_display_name, msg.content))
-    return build_turn_begin_prompt(room_name, message_blocks)
+        filtered_messages.append((msg.sender_display_name, msg.content))
+    return build_turn_begin_prompt(room_name, filtered_messages)
 
 
 def build_compact_instruction(max_tokens: int) -> str:
