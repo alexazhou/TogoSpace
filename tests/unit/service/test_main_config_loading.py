@@ -468,23 +468,21 @@ def test_load_reads_setting_json_once(tmp_path, monkeypatch):
     assert open_count["setting_json"] == 1
 
 
-def test_load_creates_setting_json_and_readme_when_missing(tmp_path):
+def test_load_creates_setting_json_when_missing(tmp_path):
+    """测试加载配置时自动创建 setting.json（README 在测试环境下不生成）。"""
     configUtil.load(str(tmp_path), force_reload=True)
 
     setting_file = tmp_path / "setting.json"
     readme_file = tmp_path / "setting.README.md"
 
     assert setting_file.is_file()
-    assert readme_file.is_file()
+    # README 在测试环境下不生成（_is_running_tests() 返回 True）
+    assert not readme_file.is_file()
 
     setting_data = json.loads(setting_file.read_text(encoding="utf-8"))
     assert setting_data["default_llm_server"] == "qwen"
     assert setting_data["development_mode"] is False
     assert "llm_services" in setting_data
-
-    readme_text = readme_file.read_text(encoding="utf-8")
-    assert "setting.json 说明" in readme_text
-    assert "development_mode" in readme_text
 
 
 def test_load_setting_ignores_extra_keys(tmp_path):

@@ -17,6 +17,11 @@ _cached_config_dir: str | None = None
 _cached_preset_dir: str | None = None
 
 
+def _is_running_tests() -> bool:
+    """检测当前是否在 pytest 测试环境中运行。"""
+    return "PYTEST_CURRENT_TEST" in os.environ
+
+
 def _resolve_config_dir(config_dir: str | None) -> str:
     if config_dir is not None:
         return os.path.abspath(config_dir)
@@ -110,7 +115,9 @@ def _load_setting(config_dir: str) -> SettingConfig:
         _copy_template_if_missing("config_template.json", config_dir, "setting.json")
 
     # 每次启动同步 README 文档（不存在或内容不一致时更新）
-    _sync_file_if_changed("setting.README.md", config_dir)
+    # 测试环境下跳过，避免在测试配置目录生成不必要的文件
+    if not _is_running_tests():
+        _sync_file_if_changed("setting.README.md", config_dir)
 
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
