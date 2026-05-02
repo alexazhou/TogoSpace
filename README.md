@@ -2,117 +2,126 @@
 
 # TogoSpace 🚀
 
-[English](README.md) | [中文](README_CN.md)
+[English](README_EN.md) | [中文](README.md)
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/framework-Tornado-orange.svg)](https://www.tornadoweb.org/)
 [![UI](https://img.shields.io/badge/UI-Textual%20%2B%20Vue3-green.svg)](https://textual.textualize.io/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#)
 
-**TogoSpace** is an open-source multi-agent collaboration software designed for Large Language Models (LLM). It allows multiple AI Agents to communicate freely and collaborate in real-time like a human team to solve complex tasks.
+**TogoSpace** 是一款专为大语言模型（LLM）设计的**多智能体协作开源软件**。让多个 AI Agent 能够像人类团队一样自由交流、实时协作，共同攻克复杂任务。
 
-> **About the Name**: The project is named after the legendary sled dog **Togo** from the 1925 Serum Run to Nome. In a harsh winter, Togo led his team through the longest and most dangerous leg of the journey. We use this name to pay tribute to the spirit of fearless collaboration and mission-driven determination, which is the core quality we want to empower multi-agent teams with.
+> **关于名字的由来**：项目命名灵感源自 1925 年诺姆血清接力中的传奇雪橇犬 **Togo**。在那个极其恶劣的冬天，Togo 带领团队完成了整场接力中最长且最危险的一段航程。我们引用这个名字，旨在致敬那种无畏艰险、使命必达的协作精神，这也正是 **TogoSpace** 想要赋予多智能体团队的核心特质。
 
-### Powered by TSP
+### 基于 TSP 构建
 
-TogoSpace's tool execution layer is powered by [TSP (Tool Service Protocol)](https://github.com/alexazhou/TSP) — a lightweight protocol for building LLM tool servers. With TSP, you can **build your own agent tools in 10 lines of code**.
-
----
-
-## ✨ Key Features
-
-### 1. True Team Collaboration
-Multiple agents communicate freely in a unified group chat, inspiring each other and collaborating to achieve a 1+1>2 effect, simulating a real human team communication model.
-
-![Chat Interface](image/en/chat.png)
-
-### 2. Freely Defined Agent Personas
-You can define each agent's role, professional skills, and personality. From a rigorous code reviewer to a creative product planner, you can build your exclusive AI dream team.
-
-### 3. No Tedious Workflow Orchestration
-No need to pre-plan rigid flowcharts. Thanks to powerful scheduling logic, agents can autonomously decide "who's next" based on the task progress, making it ideal for dynamic and complex scenarios.
-
-### 4. Powerful Multi-level Team Architecture
-Supports multi-department and multi-level organizational management. You can divide departments (Dept) like a real company to handle large-scale complex engineering tasks with many agents.
-
-![Team Editor](image/en/team_editor.png)
-
-### 5. Fully Visualized Experience
-No more "black box" operations. Equipped with a modern Web frontend, everything from team configuration to every step of an agent's reasoning and message flow is visualized in real-time.
-
-### 6. Ultimate Cross-platform Compatibility
-Built with Python and modern frontend technologies, it perfectly supports macOS, Windows, and Linux.
+TogoSpace 的工具执行层基于 [TSP (Tool Service Protocol)](https://github.com/alexazhou/TSP) 构建 —— 一个轻量级的 LLM 工具服务器协议。借助 TSP，你可以用 **10 行代码构建自己的 Agent 工具**。
 
 ---
 
-## 🚀 Quick Start
+## ✨ 核心特性
 
-### Try the Demo
-- **English Demo**: [https://demo2.togoagent.org](https://demo2.togoagent.org)
+### 1. 真正的团队协作
+多 Agent 在统一的群聊空间内自由发言、互相启发、补位配合，模拟真实人类团队的沟通模式，通过协作产生 1+1>2 的效果。
 
-### Method 1: Download Pre-built App Package (Recommended for macOS Users)
-We currently provide a **macOS** Release package for a quick start.
-- **Download**: [Go to the Releases page](https://github.com/alexazhou/TogoAgent/releases)
-- **Usage**: Once running, TogoSpace stays in your system status bar. Click the icon to open the console, manage teams, or execute tasks.
+![Chat Interface](image/cn/chat.png)
 
-![Status Bar Entry](image/en/entry.png)
+### 2. 自由定义的 Agent 人格
+你可以随心所欲地定义每个 Agent 的角色定位、专业技能与性格色彩。无论是严谨的代码审查专家，还是充满创意的产品策划，都能在你的定制下跃然纸上，打造专属的 AI 梦之队。
 
-### Method 2: Run from Source
+### 3. 告别繁琐的工作流编排
+无需事先规划死板的流程图。得益于强大的调度逻辑，Agent 们能根据当前任务进展自主决定“下一步该谁上”，广泛适用于各种突发、多变的复杂任务场景。
+
+### 4. 强大的多层级团队架构
+支持多部门、多层级的组织架构管理。你可以像管理真实公司一样划分部门（Dept），应对海量 Agent 参与的超大型复杂工程任务。
+
+![Team Editor](image/cn/team_editor.png)
+
+### 5. 全程可视化的友好体验
+告别冰冷的黑盒运行。配备现代化的 Web 前端，从团队角色配置到 Agent 的每一个思考步骤、每一条消息流向，全部实时可视化呈现，对人类用户极度友好。
+
+### 6. 极致的跨平台兼容性
+基于 Python 与 modern 前端技术构建，完美支持 macOS、Windows 与 Linux 操作系统，随时随地开启你的 AI 协作之旅。
+
+---
+
+## 🚀 快速开始
+
+### 体验演示站点
+- **中文演示站点**：[https://demo.togoagent.org](https://demo.togoagent.org)
+
+### 方法 1：下载已构建的 App 包（推荐 macOS 用户）
+目前我们已提供 **macOS** 版本的 Release 包，下载即可快速体验。
+- **下载地址**：[点击前往 Releases 页面下载](https://github.com/alexazhou/TogoAgent/releases)
+- **使用说明**：下载并运行后，TogoSpace 将常驻于你的系统状态栏。点击状态栏图标即可开启控制台、管理团队或执行任务。
+
+![Status Bar Entry](image/cn/entry.png)
+
+### 方法 2：源码运行
 ```bash
-# Clone the repository
+# 克隆仓库
 git clone https://github.com/alexazhou/TogoAgent.git
 cd togo-agent
 
-# Install dependencies
+# 安装依赖
 pip install -r requirements.txt
 
-# Start backend service
+# 启动后端服务
 ./scripts/start_backend.sh
 
-# Start Web console (requires entering frontend directory)
+# 启动 Web 控制台（需进入 frontend 目录）
 cd frontend && npm install && npm run dev
 ```
 
-### Method 3: Docker Deployment
+### 方法 3：Docker 部署
 ```bash
-# Pull the image from GitHub Container Registry (recommended)
+# 从 GitHub Container Registry 拉取镜像（推荐）
 docker pull ghcr.io/alexazhou/togospace:latest
 
-# Or from Docker Hub
+# 或从 Docker Hub 拉取
 # docker pull alexazhou/togospace:latest
 
-# Run with storage persistence and port mapping
-# /path/to/your/storage is the directory where TogoSpace data will be stored
+# 运行容器，映射端口并挂载存储目录
+# /path/to/your/storage 是你想要存放 TogoSpace 数据的目录
 docker run \
   --name togospace \
   -p 8080:8080 \
   -v /path/to/your/storage:/storage \
   ghcr.io/alexazhou/togospace:latest
 
-# Access the Web console at http://localhost:8080
+# 在浏览器打开 http://localhost:8080 访问控制台
 ```
 
 ---
 
-## 📂 Project Structure
+## 📂 项目结构
 
-- `src/`: Backend core logic, including agent scheduling, drivers, and persistence.
-- `frontend/`: Visualization console based on Vue 3 + TypeScript.
-- `tui/`: Coming Soon High-performance terminal interface based on Textual (Coming Soon).
-- `docs/`: In-depth documentation on architecture, scheduling logic, task lifecycle, etc.
-- `assets/`: Preset role templates, team configurations, and i18n support.
+- `src/`: 后端核心逻辑，包含 Agent 调度、驱动与持久化。
+- `frontend/`: 基于 Vue 3 + TypeScript 的可视化控制台。
+- `tui/`: Coming Soon 基于 Textual 的高性能终端交互界面 (Coming Soon)。
 
----
-
-## 🛠️ Troubleshooting
-
-1.  **Accessing Backend Settings**: The entry to the backend settings page is located at the **gear icon** in the top-left corner.
-2.  **Repetitive Model Responses**: If the model keeps repeating itself, it might be because "Thought/Reasoning" is not enabled. Try enabling the **Reasoning Mode** configuration in the **Advanced Settings**.
-3.  **Agent Execution Failures**: If an agent fails to call the LLM or stops running due to other errors, you can click on the **agent card** in the bottom-left corner and then click **Retry**.
-4.  **Data Corruption/Errors**: If you encounter data-related issues that prevent the system from running, you can use the **Clear Team Data** option in the backend settings to reset and fix the state.
+- `docs/`: 包含架构设计、调度逻辑、任务生命周期等深度文档。
+- `assets/`: 预设的角色模板、团队配置与多语言支持。
 
 ---
 
-## 📄 License
+## 🛠️ 故障排除 (Troubleshooting)
 
-This project is licensed under the [MIT License](LICENSE).
+1. **进入设置页面**：后台设置页面的入口位于页面左上角的**齿轮图标**。
+2. **模型重复发言**：如果出现模型重复发言的情况，可能是因为**思考模式 (Thought)** 未开启，请在**高级设置**中注入思考模式配置。
+3. **Agent 调用失败或中止**：如果 Agent 调用 LLM 失败或因其他错误停止运行，可以点击页面左下角的 **Agent 卡片**，然后点击**重试**按钮。
+4. **数据异常修复**：如果遇到数据异常导致无法运行，可以在后台设置页面点击**清除团队数据**来修复。
+
+---
+
+## 💬 交流群
+
+欢迎加入微信交流群一起讨论：
+
+![WeChat QR Code](image/wechat.JPG)
+
+---
+
+## 📄 开源协议
+
+本项目基于 [MIT License](LICENSE) 开源。
