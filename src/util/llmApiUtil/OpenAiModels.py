@@ -38,8 +38,11 @@ class OpenAIMessage(BaseModel):
         )
 
     def to_dict(self) -> dict:
-        """序列化为发送给 API 的 dict，排除 reasoning_content 和 None 字段。"""
-        return self.model_dump(mode="json", exclude_none=True, exclude={"reasoning_content"})
+        """序列化为发送给 API 的 dict，排除 None 字段。
+
+        注意：reasoning_content 现在也会被序列化，用于 DeepSeek/GLM 等 CoT 模型的思考链回传。
+        """
+        return self.model_dump(mode="json", exclude_none=True)
 
 
 class OpenAIRequest(BaseModel):
