@@ -310,9 +310,11 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client
 
-        first = promptBuilder.format_room_message("lobby", "系统提醒", "房间初始化")
-        second = promptBuilder.format_room_message("lobby", "bob", "hello alice")
-        turn_prompt = f"【lobby】 房间轮到你行动，新消息如下：\n\n{first}\n\n{second}\n\n你现在可以调用工具行动。"
+        # 使用 YAML 格式构建 turn prompt
+        turn_prompt = promptBuilder.build_turn_begin_prompt("lobby", [
+            ("系统提醒", "房间初始化"),
+            ("bob", "hello alice"),
+        ])
         item = GtAgentHistory.build(
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt),
         )
@@ -326,8 +328,10 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
 
         assert len(fake_client.queries) == 1
         first_prompt = fake_client.queries[0]
-        assert "【lobby】 房间轮到你行动，新消息如下：" in first_prompt
+        assert "当前轮到你行动" in first_prompt
+        assert "roomName: lobby" in first_prompt
+        assert "sender: 系统提醒" in first_prompt
+        assert "sender: bob" in first_prompt
+        assert "content: 房间初始化" in first_prompt
+        assert "content: hello alice" in first_prompt
         assert "你现在可以调用工具行动。" in first_prompt
-        assert first in first_prompt
-        assert second in first_prompt
-        assert f"{first}\n\n{second}" in first_prompt

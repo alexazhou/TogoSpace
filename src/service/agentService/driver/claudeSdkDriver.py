@@ -143,7 +143,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
             return
 
         self._turn_done = False
-        prompt_prefix = f"【{room.name}】 房间轮到你行动，新消息如下："
+        prompt_prefix = "当前轮到你行动，新消息如下:"
 
         if synced_count > 0:
             latest_history = self.host._history.last()

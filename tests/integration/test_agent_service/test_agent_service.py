@@ -23,7 +23,6 @@ if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 
-
 class _agentServiceCase(ServiceTestCase):
     """agentService 集成测试基类：统一加载测试专用 agent/team 配置。"""
 
@@ -49,7 +48,9 @@ class _agentServiceCase(ServiceTestCase):
         await ormService.shutdown()
 
 
-class TestagentServiceCreateTeamAgents(_agentServiceCase):
+class TestAgentCreateAndQuery(_agentServiceCase):
+    """Agent 创建、查询、全量替换相关测试。"""
+
     async def test_create_team_members(self):
         """create_team_members 后，team 维度的 agent 实例应全部可检索。"""
         team = await gtTeamManager.get_team(TEAM)
@@ -61,153 +62,17 @@ class TestagentServiceCreateTeamAgents(_agentServiceCase):
         assert agentService.get_agent(alice.id) is not None
         assert agentService.get_agent(bob.id) is not None
 
-
-class TestagentServiceGetAgentsInRoom(_agentServiceCase):
     async def test_get_agents_in_room(self):
         """get_agents 只返回房间成员，并保持成员集合正确。"""
         room = roomService.get_room_by_key(f"general@{TEAM}")
         assert {a.gt_agent.name for a in agentService.get_room_agents(room.room_id)} == {"alice", "bob"}
 
-
-class TestAgentServiceStatusMap(_agentServiceCase):
-    async def test_get_team_runtime_status_map(self):
-        """运行时状态查询应按 agent_id 返回 ACTIVE/IDLE/FAILED。"""
-        team = await gtTeamManager.get_team(TEAM)
-        assert team is not None
-        gt_alice = await gtAgentManager.get_agent(team.id, "alice")
-        assert gt_alice is not None
-        alice = agentService.get_agent(gt_alice.id)
-        status_map = agentService.get_team_runtime_status_map(team.id)
-        assert status_map[alice.gt_agent.id] == AgentStatus.IDLE
-
-        alice.task_consumer.status = AgentStatus.ACTIVE
-        status_map = agentService.get_team_runtime_status_map(team.id)
-        assert status_map[alice.gt_agent.id] == AgentStatus.ACTIVE
-
-        alice.task_consumer.status = AgentStatus.FAILED
-        status_map = agentService.get_team_runtime_status_map(team.id)
-        assert status_map[alice.gt_agent.id] == AgentStatus.FAILED
-
-        alice.task_consumer.status = AgentStatus.IDLE
-
-
-class TestAgentServiceAgentStatusEvent(_agentServiceCase):
-    async def test_agent_status_event_contains_real_team_id(self):
-        """订阅 AGENT_STATUS_CHANGED，验证事件中的 gt_agent.team_id 正确。"""
-        team = await gtTeamManager.get_team(TEAM)
-        assert team is not None
-        gt_alice = await gtAgentManager.get_agent(team.id, "alice")
-        assert gt_alice is not None
-        alice = agentService.get_agent(gt_alice.id)
-
-        received_payloads: list[dict] = []
-
-        def _on_agent_status(msg) -> None:
-            received_payloads.append(dict(msg.payload))
-
-        messageBus.subscribe(MessageBusTopic.AGENT_STATUS_CHANGED, _on_agent_status)
-        try:
-            # 无任务时也会经历 ACTIVE -> IDLE，并发布两次状态事件。
-            await alice.task_consumer.consume()
-            await asyncio.sleep(0)
-        finally:
-            messageBus.unsubscribe(MessageBusTopic.AGENT_STATUS_CHANGED, _on_agent_status)
-
-        alice_events = [p for p in received_payloads if getattr(p.get("gt_agent"), "name", None) == "alice"]
-        assert len(alice_events) >= 2
-
-        active_event = next((p for p in alice_events if p.get("status") == AgentStatus.ACTIVE), None)
-        idle_event = next((p for p in alice_events if p.get("status") == AgentStatus.IDLE), None)
-        assert active_event is not None
-        assert idle_event is not None
-
-        assert active_event["gt_agent"].id == alice.gt_agent.id
-        assert active_event["gt_agent"].team_id == team.id
-        assert active_event["gt_agent"].team_id > 0
-
-        assert idle_event["gt_agent"].id == alice.gt_agent.id
-        assert idle_event["gt_agent"].team_id == team.id
-        assert idle_event["gt_agent"].team_id > 0
-
-
-class TestAgentServiceSystemPrompt(_agentServiceCase):
-    async def test_system_prompt_contains_template_and_agent_name(self):
-        """system_prompt 应显式包含模板名称与 Agent 名称，便于模型识别身份。"""
-        team = await gtTeamManager.get_team(TEAM)
-        assert team is not None
-        gt_alice = await gtAgentManager.get_agent(team.id, "alice")
-        assert gt_alice is not None
-        alice = agentService.get_agent(gt_alice.id)
-
-        assert "你当前的名字：alice" in alice.system_prompt
-        assert "你的身份：alice" in alice.system_prompt
-
-
-class TestagentServiceGetAllRooms(_agentServiceCase):
     async def test_get_all_rooms_for_agent(self):
         """roomService.get_rooms_for_agent 应返回某个 agent 所在的所有 room_id。"""
         room = roomService.get_room_by_key(f"general@{TEAM}")
         alice_id = agentService.get_agent_id_by_stable_name(room.team_id, "alice")
         assert room.room_id in roomService.get_rooms_for_agent(room.team_id, alice_id)
 
-
-class TestagentServicePullRoomMessagesToHistory(_agentServiceCase):
-    async def test_pull_room_messages_to_history(self):
-        """pull_room_messages_to_history 会把房间中的新增消息拉取进 agent 历史。"""
-        await self.create_room(TEAM, "general", ["alice", "bob"])
-        room = roomService.get_room_by_key(f"general@{TEAM}")
-        await room.activate_scheduling()
-        bob_id = agentService.get_agent_id_by_stable_name(room.team_id, "bob")
-        await room.add_message(bob_id, "hello alice")
-
-        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
-        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
-
-        # 初始公告 + bob 消息会聚合成一条“轮到发言”上下文消息
-        assert synced_count == 1
-        assert len(alice.task_consumer._turn_runner._history) == 1
-        content = alice.task_consumer._turn_runner._history[0].content or ""
-        assert content.startswith("当前轮到你行动，房间名:【general】,新消息如下:")
-        assert "【房间《general》】【系统提醒】：" in content
-        assert "【房间《general》】【bob】：" in content
-        assert "： hello alice" in content
-        assert "你现在可以调用工具行动。" in content
-        assert alice.task_consumer._turn_runner._history[0].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
-
-    async def test_pull_room_messages_to_history_appends_complete_turn_prompt_as_last_history(self):
-        """pull_room_messages_to_history 追加到 history 的最后一条必须是完整 turn prompt。"""
-        await self.create_room(TEAM, "general", ["alice", "bob"])
-        room = roomService.get_room_by_key(f"general@{TEAM}")
-        await room.activate_scheduling()
-        bob_id = agentService.get_agent_id_by_stable_name(room.team_id, "bob")
-        await room.add_message(bob_id, "hello alice")
-
-        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
-        existing = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "older context")
-        item = GtAgentHistory.build(existing)
-        item.agent_id = alice.gt_agent.id
-        item.seq = 0
-        alice.inject_history_messages([item])
-
-        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
-
-        # 验证生成的 prompt 格式（使用消息中已保存的 display_name）
-        system_line = promptBuilder.format_room_message("general", "系统提醒", await room.build_initial_system_message())
-        bob_agent = await gtAgentManager.get_agent_by_id(bob_id)
-        assert bob_agent is not None
-        bob_display_name = bob_agent.display_name
-        bob_line = promptBuilder.format_room_message("general", bob_display_name, "hello alice")
-        expected_prompt = promptBuilder.build_turn_begin_prompt("general", [system_line, bob_line])
-
-        assert synced_count == 1
-        assert len(alice.task_consumer._turn_runner._history) == 2
-        assert alice.task_consumer._turn_runner._history[-1].content == expected_prompt
-        assert alice.task_consumer._turn_runner._history[-1].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
-        assert alice.task_consumer._turn_runner._history[0].content == "older context"
-        assert alice.task_consumer._turn_runner._history[0].tags == []
-
-
-class TestSaveTeamAgentsFullReplace(_agentServiceCase):
     async def test_preserves_employee_numbers_when_updating_multiple_existing_agents(self):
         """全量保存多个已有成员时，应保留原有工号，避免唯一约束冲突。"""
         team = await gtTeamManager.get_team(TEAM)
@@ -249,100 +114,6 @@ class TestSaveTeamAgentsFullReplace(_agentServiceCase):
         assert saved_by_name["bob"].employee_number == before_by_name["bob"].employee_number
         assert saved_by_name["alice"].model == "gpt-4o"
         assert saved_by_name["bob"].model == "gpt-4.1"
-
-
-class TestagentServiceSyncSkipsOwnMessages(_agentServiceCase):
-    async def test_sync_room_skips_own_messages(self):
-        """同步时应过滤 agent 自己发过的消息，避免历史自回灌。"""
-        await self.create_room(TEAM, "general", ["alice"])
-        room = roomService.get_room_by_key(f"general@{TEAM}")
-        await room.activate_scheduling()
-
-        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
-        alice_id = agentService.get_agent_id_by_stable_name(room.team_id, "alice")
-        await room.add_message(alice_id, "i am talking")
-
-        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
-        # 只应有初始公告，不应有自己的消息
-        assert synced_count == 1
-        assert len(alice.task_consumer._turn_runner._history) == 1
-        assert "talking" not in alice.task_consumer._turn_runner._history[0].content
-
-
-class TestTeamRuntimeRestoreKeepsAgentHistory(_agentServiceCase):
-    async def test_restart_team_runtime_preserves_cross_room_history(self):
-        """Team runtime 重启后，agent history 应保留，后续私聊可继续叠加到同一上下文。"""
-        await self.create_room(TEAM, "general", ["alice", "bob"])
-        general_room = roomService.get_room_by_key(f"general@{TEAM}")
-        await general_room.activate_scheduling()
-
-        bob_id = agentService.get_agent_id_by_stable_name(general_room.team_id, "bob")
-        await general_room.add_message(bob_id, "hello alice")
-
-        alice_id = agentService.get_agent_id_by_stable_name(general_room.team_id, "alice")
-        alice = agentService.get_agent(alice_id)
-        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(general_room)
-        assert synced_count == 1
-        assert any("房间名:【general】" in (item.content or "") for item in alice.task_consumer._turn_runner._history)
-
-        await self.create_room(
-            TEAM,
-            "alice_private",
-            ["alice", "OPERATOR"],
-            room_type=roomService.RoomType.PRIVATE,
-        )
-        private_room = roomService.get_room_by_key(f"alice_private@{TEAM}")
-        await private_room.activate_scheduling()
-
-        team = await gtTeamManager.get_team(TEAM)
-        assert team is not None
-        with patch("service.agentService.agent.Agent.startup", new=AsyncMock()), \
-             patch("service.agentService.agent.Agent.close", new=AsyncMock()), \
-             patch("service.teamService.schedulerService.start_scheduling", new=AsyncMock()):
-            await teamService.restart_team_runtime(team.id)
-
-        reloaded_alice = agentService.get_agent(alice_id)
-        private_room = roomService.get_room_by_key(f"alice_private@{TEAM}")
-        private_synced_count = await reloaded_alice.task_consumer._turn_runner.pull_room_messages_to_history(private_room)
-
-        assert private_synced_count == 1
-        history_contents = [item.content or "" for item in reloaded_alice.task_consumer._turn_runner._history]
-        assert any("房间名:【general】" in content for content in history_contents)
-        assert any("房间名:【alice_private】" in content for content in history_contents)
-
-
-class TestAgentResumeFailed(_agentServiceCase):
-    async def test_resume_failed_marks_task_running_and_restarts_consumer(self):
-        """FAILED 状态的 Agent 恢复时，应将最早失败任务转为 RUNNING 并重启统一执行流程。"""
-        await self.create_room(TEAM, "resume_room", ["alice"])
-        room = roomService.get_room_by_key(f"resume_room@{TEAM}")
-        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
-
-        failed_task = await gtAgentTaskManager.create_task(
-            alice.gt_agent.id,
-            AgentTaskType.ROOM_MESSAGE,
-            {"room_id": room.room_id},
-        )
-        await gtAgentTaskManager.update_task_status(
-            failed_task.id,
-            AgentTaskStatus.FAILED,
-            error_message="boom",
-        )
-        alice.task_consumer.status = AgentStatus.FAILED
-        restart_spy = MagicMock()
-        alice.task_consumer.start = restart_spy
-
-        await alice.resume_failed()
-        refreshed_task = await GtAgentTask.aio_get_or_none(GtAgentTask.id == failed_task.id)
-
-        assert refreshed_task is not None
-        assert refreshed_task.id == failed_task.id
-        assert refreshed_task.status == AgentTaskStatus.RUNNING
-        restart_spy.assert_called_once()
-
-
-class TestGetAgentByStatus(_agentServiceCase):
-    """测试 get_agent 和 get_team_agents 的状态过滤功能。"""
 
     async def test_get_agent_returns_on_board_agent_by_default(self):
         """get_agent 默认只返回在职 agent，即使存在同名的离职 agent。"""
@@ -400,6 +171,14 @@ class TestGetAgentByStatus(_agentServiceCase):
         # 所有 = 在职 + 离职
         assert len(all_agents) == len(on_board_agents) + len(off_board_agents)
 
+
+class TestSetTeamEnabledSkipsOffBoard(_agentServiceCase):
+    """单独测试类：验证启用团队时只加载在职 agent。
+
+    注意：此测试需要独立的测试类，避免 TestAgentCreateAndQuery 中其他测试对 alice employ_status
+    的修改（如 test_get_agent_returns_on_board_agent_by_default 创建同名在职 alice）污染运行时状态。
+    """
+
     async def test_set_team_enabled_skips_off_board_agents(self):
         """启用团队时，_load_team_agents 应只加载在职 agent，不因离职 agent 构建 prompt 失败。"""
         team = await gtTeamManager.get_team(TEAM)
@@ -434,3 +213,235 @@ class TestGetAgentByStatus(_agentServiceCase):
         assert runtime_agent_ids == on_board_ids
         # 离职的 alice 不应在运行时
         assert alice.id not in runtime_agent_ids
+
+
+class TestAgentStatus(_agentServiceCase):
+    """Agent 状态查询、事件、恢复失败相关测试。"""
+
+    async def test_get_team_runtime_status_map(self):
+        """运行时状态查询应按 agent_id 返回 ACTIVE/IDLE/FAILED。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+        gt_alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert gt_alice is not None
+        alice = agentService.get_agent(gt_alice.id)
+        status_map = agentService.get_team_runtime_status_map(team.id)
+        assert status_map[alice.gt_agent.id] == AgentStatus.IDLE
+
+        alice.task_consumer.status = AgentStatus.ACTIVE
+        status_map = agentService.get_team_runtime_status_map(team.id)
+        assert status_map[alice.gt_agent.id] == AgentStatus.ACTIVE
+
+        alice.task_consumer.status = AgentStatus.FAILED
+        status_map = agentService.get_team_runtime_status_map(team.id)
+        assert status_map[alice.gt_agent.id] == AgentStatus.FAILED
+
+        alice.task_consumer.status = AgentStatus.IDLE
+
+    async def test_agent_status_event_contains_real_team_id(self):
+        """订阅 AGENT_STATUS_CHANGED，验证事件中的 gt_agent.team_id 正确。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+        gt_alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert gt_alice is not None
+        alice = agentService.get_agent(gt_alice.id)
+
+        received_payloads: list[dict] = []
+
+        def _on_agent_status(msg) -> None:
+            received_payloads.append(dict(msg.payload))
+
+        messageBus.subscribe(MessageBusTopic.AGENT_STATUS_CHANGED, _on_agent_status)
+        try:
+            # 无任务时也会经历 ACTIVE -> IDLE，并发布两次状态事件。
+            await alice.task_consumer.consume()
+            await asyncio.sleep(0)
+        finally:
+            messageBus.unsubscribe(MessageBusTopic.AGENT_STATUS_CHANGED, _on_agent_status)
+
+        alice_events = [p for p in received_payloads if getattr(p.get("gt_agent"), "name", None) == "alice"]
+        assert len(alice_events) >= 2
+
+        active_event = next((p for p in alice_events if p.get("status") == AgentStatus.ACTIVE), None)
+        idle_event = next((p for p in alice_events if p.get("status") == AgentStatus.IDLE), None)
+        assert active_event is not None
+        assert idle_event is not None
+
+        assert active_event["gt_agent"].id == alice.gt_agent.id
+        assert active_event["gt_agent"].team_id == team.id
+        assert active_event["gt_agent"].team_id > 0
+
+        assert idle_event["gt_agent"].id == alice.gt_agent.id
+        assert idle_event["gt_agent"].team_id == team.id
+        assert idle_event["gt_agent"].team_id > 0
+
+    async def test_resume_failed_marks_task_running_and_restarts_consumer(self):
+        """FAILED 状态的 Agent 恢复时，应将最早失败任务转为 RUNNING 并重启统一执行流程。"""
+        await self.create_room(TEAM, "resume_room", ["alice"])
+        room = roomService.get_room_by_key(f"resume_room@{TEAM}")
+        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
+
+        failed_task = await gtAgentTaskManager.create_task(
+            alice.gt_agent.id,
+            AgentTaskType.ROOM_MESSAGE,
+            {"room_id": room.room_id},
+        )
+        await gtAgentTaskManager.update_task_status(
+            failed_task.id,
+            AgentTaskStatus.FAILED,
+            error_message="boom",
+        )
+        alice.task_consumer.status = AgentStatus.FAILED
+        restart_spy = MagicMock()
+        alice.task_consumer.start = restart_spy
+
+        await alice.resume_failed()
+        refreshed_task = await GtAgentTask.aio_get_or_none(GtAgentTask.id == failed_task.id)
+
+        assert refreshed_task is not None
+        assert refreshed_task.id == failed_task.id
+        assert refreshed_task.status == AgentTaskStatus.RUNNING
+        restart_spy.assert_called_once()
+
+
+class TestAgentHistorySync(_agentServiceCase):
+    """Agent 历史同步、消息拉取相关测试。"""
+
+    async def test_pull_room_messages_to_history(self):
+        """pull_room_messages_to_history 会把房间中的新增消息拉取进 agent 历史。"""
+        await self.create_room(TEAM, "general", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"general@{TEAM}")
+        await room.activate_scheduling()
+        bob_id = agentService.get_agent_id_by_stable_name(room.team_id, "bob")
+        await room.add_message(bob_id, "hello alice")
+
+        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
+        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
+
+        # 初始公告 + bob 消息会聚合成一条"轮到发言"上下文消息（YAML 格式）
+        assert synced_count == 1
+        assert len(alice.task_consumer._turn_runner._history) == 1
+        content = alice.task_consumer._turn_runner._history[0].content or ""
+        assert content.startswith("当前轮到你行动，新消息如下:")
+        assert "sender: 系统提醒" in content
+        assert "sender: bob" in content
+        assert "content: hello alice" in content
+        assert "你现在可以调用工具行动。" in content
+        assert alice.task_consumer._turn_runner._history[0].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
+
+    async def test_pull_room_messages_to_history_appends_complete_turn_prompt_as_last_history(self):
+        """pull_room_messages_to_history 追加到 history 的最后一条必须是完整 turn prompt。"""
+        await self.create_room(TEAM, "general", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"general@{TEAM}")
+        await room.activate_scheduling()
+        bob_id = agentService.get_agent_id_by_stable_name(room.team_id, "bob")
+        await room.add_message(bob_id, "hello alice")
+
+        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
+        existing = llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "older context")
+        item = GtAgentHistory.build(existing)
+        item.agent_id = alice.gt_agent.id
+        item.seq = 0
+        alice.inject_history_messages([item])
+
+        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
+
+        # 验证生成的 prompt 格式（YAML 格式）
+        system_msg = await room.build_initial_system_message()
+        bob_agent = await gtAgentManager.get_agent_by_id(bob_id)
+        assert bob_agent is not None
+        bob_display_name = bob_agent.display_name
+        expected_prompt = promptBuilder.build_turn_begin_prompt("general", [
+            ("系统提醒", system_msg),
+            (bob_display_name, "hello alice"),
+        ])
+
+        assert synced_count == 1
+        assert len(alice.task_consumer._turn_runner._history) == 2
+        assert alice.task_consumer._turn_runner._history[-1].content == expected_prompt
+        assert alice.task_consumer._turn_runner._history[-1].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
+        assert alice.task_consumer._turn_runner._history[0].content == "older context"
+        assert alice.task_consumer._turn_runner._history[0].tags == []
+
+
+class TestSyncRoomSkipsOwnMessages(_agentServiceCase):
+    """单独测试类：验证同步时过滤自己的消息。
+
+    注意：此测试需要独立的测试类，避免 TestAgentHistorySync 中其他测试（如
+    test_pull_room_messages_to_history）往 alice 的 history 里添加消息后污染历史状态。
+    """
+
+    async def test_sync_room_skips_own_messages(self):
+        """同步时应过滤 agent 自己发过的消息，避免历史自回灌。"""
+        await self.create_room(TEAM, "general", ["alice"])
+        room = roomService.get_room_by_key(f"general@{TEAM}")
+        await room.activate_scheduling()
+
+        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
+        alice_id = agentService.get_agent_id_by_stable_name(room.team_id, "alice")
+        await room.add_message(alice_id, "i am talking")
+
+        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
+        # 只应有初始公告，不应有自己的消息
+        assert synced_count == 1
+        assert len(alice.task_consumer._turn_runner._history) == 1
+        assert "talking" not in alice.task_consumer._turn_runner._history[0].content
+
+
+class TestAgentHistoryCrossRoom(_agentServiceCase):
+    """Team runtime 重启后 agent history 保留相关测试。"""
+
+    async def test_restart_team_runtime_preserves_cross_room_history(self):
+        """Team runtime 重启后，agent history 应保留，后续私聊可继续叠加到同一上下文。"""
+        await self.create_room(TEAM, "general", ["alice", "bob"])
+        general_room = roomService.get_room_by_key(f"general@{TEAM}")
+        await general_room.activate_scheduling()
+
+        bob_id = agentService.get_agent_id_by_stable_name(general_room.team_id, "bob")
+        await general_room.add_message(bob_id, "hello alice")
+
+        alice_id = agentService.get_agent_id_by_stable_name(general_room.team_id, "alice")
+        alice = agentService.get_agent(alice_id)
+        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(general_room)
+        assert synced_count == 1
+        assert any("roomName: general" in (item.content or "") for item in alice.task_consumer._turn_runner._history)
+
+        await self.create_room(
+            TEAM,
+            "alice_private",
+            ["alice", "OPERATOR"],
+            room_type=roomService.RoomType.PRIVATE,
+        )
+        private_room = roomService.get_room_by_key(f"alice_private@{TEAM}")
+        await private_room.activate_scheduling()
+
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+        with patch("service.agentService.agent.Agent.startup", new=AsyncMock()), \
+             patch("service.agentService.agent.Agent.close", new=AsyncMock()), \
+             patch("service.teamService.schedulerService.start_scheduling", new=AsyncMock()):
+            await teamService.restart_team_runtime(team.id)
+
+        reloaded_alice = agentService.get_agent(alice_id)
+        private_room = roomService.get_room_by_key(f"alice_private@{TEAM}")
+        private_synced_count = await reloaded_alice.task_consumer._turn_runner.pull_room_messages_to_history(private_room)
+
+        assert private_synced_count == 1
+        history_contents = [item.content or "" for item in reloaded_alice.task_consumer._turn_runner._history]
+        assert any("roomName: general" in content for content in history_contents)
+        assert any("roomName: alice_private" in content for content in history_contents)
+
+
+class TestAgentSystemPrompt(_agentServiceCase):
+    """Agent 系统提示词相关测试。"""
+
+    async def test_system_prompt_contains_template_and_agent_name(self):
+        """system_prompt 应显式包含模板名称与 Agent 名称，便于模型识别身份。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+        gt_alice = await gtAgentManager.get_agent(team.id, "alice")
+        assert gt_alice is not None
+        alice = agentService.get_agent(gt_alice.id)
+
+        assert "你当前的名字：alice" in alice.system_prompt
+        assert "你的身份：alice" in alice.system_prompt
