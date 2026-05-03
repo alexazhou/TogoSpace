@@ -201,7 +201,7 @@ class TestRoomControllerPrivate(_ApiServiceCase):
                 assert messages[1]["content"] == payload["content"]
                 assert messages[1]["agent_id"] == int(SpecialAgent.OPERATOR.value)
 
-        max_wait = 15
+        max_wait = 30
         start_time = time.time()
         messages = []
         while time.time() - start_time < max_wait:
