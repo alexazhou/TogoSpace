@@ -80,7 +80,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             await room.activate_scheduling()
             await self.wait_until(
                 lambda: len([m for m in room.messages if m.sender_id != room.SYSTEM_MEMBER_ID]) >= 2,
-                timeout=5.0,
+                timeout=2.0,
                 message="alice 和 bob 未在限时内完成一轮对话",
             )
 
