@@ -110,7 +110,7 @@ class TestWsController(_ApiServiceCase):
             room_id = next(r["gt_room"]["id"] for r in rooms if r["gt_room"]["name"] == "general")
 
             # 预置若干次 finish，确保调度链路能快速闭环，稳定产出 status 事件。
-            finish_response = {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]}
+            finish_response = {"tool_calls": [{"name": "finish_chat_turn", "arguments": {"confirm_no_need_talk": True}}]}
             for _ in range(4):
                 self.set_mock_response(finish_response)
 
@@ -158,7 +158,7 @@ class TestWsController(_ApiServiceCase):
                 rooms = (await resp.json())["rooms"]
             room_id = next(r["gt_room"]["id"] for r in rooms if r["gt_room"]["name"] == "general")
 
-            finish_response = {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]}
+            finish_response = {"tool_calls": [{"name": "finish_chat_turn", "arguments": {"confirm_no_need_talk": True}}]}
             for _ in range(4):
                 self.set_mock_response(finish_response)
 

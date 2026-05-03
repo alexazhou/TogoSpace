@@ -59,7 +59,7 @@ def _default_openai_response(room_name: str = "general", with_send: bool = True)
         "type": "function",
         "function": {
             "name": "finish_chat_turn",
-            "arguments": "{}",
+            "arguments": json.dumps({"confirm_no_need_talk": not with_send}),
         },
     })
     return {
