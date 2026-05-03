@@ -13,7 +13,7 @@ ToolHandler = Callable[[str, ToolCallContext], Awaitable[dict[str, Any]]]
 @dataclass
 class ToolExecutionResult:
     tool_call_id: str
-    result_json: str
+    result: dict[str, Any]
     success: bool = True
     error_message: str | None = None
 
@@ -65,7 +65,7 @@ class AgentToolRegistry:
             result = {"success": False, "message": f"未知工具: {function_name}"}
             return ToolExecutionResult(
                 tool_call_id=tool_call_id,
-                result_json=json.dumps(result, ensure_ascii=False),
+                result=result,
                 success=False,
                 error_message=str(result["message"]),
             )
@@ -82,10 +82,9 @@ class AgentToolRegistry:
         error_message = None
         if not tool_succeeded and result.get("message") is not None:
             error_message = str(result.get("message"))
-        result_json = json.dumps(result, ensure_ascii=False)
         return ToolExecutionResult(
             tool_call_id=tool_call_id,
-            result_json=result_json,
+            result=result,
             success=tool_succeeded,
             error_message=error_message,
         )

@@ -286,7 +286,7 @@ async def test_run_tool_to_item_persists_tool_result_into_activity_metadata(turn
 
     turn_runner.tool_registry.execute_tool_call = AsyncMock(return_value=ToolExecutionResult(
         tool_call_id="tool-call-1",
-        result_json='{"success": true, "content": "demo"}',
+        result={"success": True, "content": "demo"},
         success=True,
     ))
     turn_runner.tool_registry.get_registered_tool = MagicMock(return_value=SimpleNamespace(marks_turn_finish=False))

@@ -242,13 +242,13 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host):
         tsp_called_args, tsp_called_context = driver._execute_tsp_tool.call_args.args
         assert tsp_called_args == "{}"
         assert tsp_called_context.tool_name == "tsp_tool"
-        assert json.loads(tsp_result.result_json)["success"] is True
+        assert tsp_result.result["success"] is True
 
         unknown_result = await mock_tsp_host.tool_registry.execute_tool_call(
             llmApiUtil.OpenAIToolCall(id="c3", function={"name": "unknown", "arguments": "{}"}),
             context=context,
         )
-        assert "未知工具" in unknown_result.result_json
+        assert "未知工具" in str(unknown_result.result.get("message", ""))
 
 
 @pytest.mark.asyncio
