@@ -370,6 +370,57 @@ class TestFinalizeCancelTurn(ServiceTestCase):
         tool_messages = [m for m in infer_messages if m.role == OpenaiApiRole.TOOL]
         assert len(tool_messages) == 1, "build_infer_messages 应包含 TOOL 记录，保证 tool_call 配对合规"
 
+    async def test_cancelled_tool_with_null_message_fallback(self):
+        """Step 2 兜底验证：TOOL 记录存在但 message=NULL 时，finalize_cancel_turn 应补填 message。
+
+        场景：TOOL 记录已持久化（status=CANCELLED），但 message 字段为 NULL。
+        模拟历史遗留数据（fix 前产生的旧记录），Step 2 兜底分支应能正确 update。
+        """
+        await self._reset_table()
+        history = AgentHistoryStore(agent_id=111)
+
+        tool_call = OpenAIToolCall(id="call_fallback01", function={"name": "some_tool", "arguments": "{}"})
+
+        # USER 消息（turn 开始）
+        await history.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "do something"),
+            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+        ))
+
+        # ASSISTANT 消息，声明了 tool_call
+        assistant_msg = llmApiUtil.OpenAIMessage(
+            role=OpenaiApiRole.ASSISTANT,
+            content="",
+            tool_calls=[tool_call],
+        )
+        await history.append_history_message(GtAgentHistory.build(
+            assistant_msg,
+            status=AgentHistoryStatus.SUCCESS,
+        ))
+
+        # 直接写入一条 CANCELLED 但 message=NULL 的 TOOL 记录，模拟历史遗留数据
+        bad_tool_item = GtAgentHistory.build_placeholder(
+            role=OpenaiApiRole.TOOL,
+            tool_call_id="call_fallback01",
+            status=AgentHistoryStatus.CANCELLED,
+        )
+        await history.append_history_message(bad_tool_item)
+        assert bad_tool_item.has_message is False, "测试前置条件：TOOL 记录 message 应为 NULL"
+
+        # 执行取消（模拟新一轮中断，但历史里已有 NULL-message TOOL 记录）
+        await history.finalize_cancel_turn()
+
+        # Step 2 兜底分支应已将 NULL-message TOOL 记录补填
+        tool_items = [item for item in history if item.role == OpenaiApiRole.TOOL]
+        assert len(tool_items) == 1
+        tool_item = tool_items[0]
+        assert tool_item.has_message is True, "兜底分支应将 NULL-message TOOL 记录补填"
+
+        # build_infer_messages 应包含这条 TOOL 记录
+        infer_messages = history.build_infer_messages()
+        tool_messages = [m for m in infer_messages if m.role == OpenaiApiRole.TOOL]
+        assert len(tool_messages) == 1, "build_infer_messages 应包含 TOOL 记录"
+
     async def test_cancelled_turn_can_receive_new_messages(self):
         """取消 turn 后，新的消息应能正常处理。
 

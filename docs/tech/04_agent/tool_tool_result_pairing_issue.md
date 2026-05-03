@@ -99,8 +99,22 @@ def build_infer_messages(self) -> list[llmApiUtil.OpenAIMessage]:
 - `src/service/agentService/agentHistoryStore.py:307` - build_infer_messages
 - `src/service/agentService/agentHistoryStore.py:254` - finalize_cancel_turn
 
+## 已实施的修复
+
+### 代码修复（2026-04-27，commits 073e156 / f57ae83）
+
+`finalize_cancel_turn` 增加两步处理：
+
+- **Step 1**：将 INIT 状态的 TOOL 占位记录补填 cancel message（`message=NULL` → 有效 JSON）
+- **Step 2**：若 TOOL 记录完全缺失则新建；若存在但 `has_message is False` 则兜底 update（防御旧数据场景，2026-05-03 补充）
+
+### 数据修复（2026-05-03）
+
+小马哥（agent_id=6）历史中有 8 条遗留 `CANCELLED` TOOL 记录（`message=NULL`，
+产生于 2026-04-26 ～ 2026-04-27 代码修复前），已通过 SQL 直接补填 cancel message，
+agent 推理 API 报错已解除。
+
 ## 状态
 
 - **发现时间**：2026-04-27
-- **当前状态**：待解决
-- **紧急程度**：中（当前 GLM-5 可容忍，但未来可能切换模型）
+- **当前状态**：已修复（代码 + 数据）

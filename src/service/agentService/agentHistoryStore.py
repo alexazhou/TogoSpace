@@ -285,20 +285,28 @@ class AgentHistoryStore:
                     error_message=cancel_reason,
                 )
 
-        # 2. 补写缺失的 TOOL 记录（ASSISTANT 声明了 tool_call 但无对应 TOOL 记录的情况）
+        # 2. 补写缺失的 TOOL 记录（ASSISTANT 声明了 tool_call 但无对应 TOOL 记录，或记录 message=NULL 的情况）
         for item in turn_items:
             if item.role != OpenaiApiRole.ASSISTANT or not item.has_message:
                 continue
             tool_calls = item.tool_calls or []
             for tc in tool_calls:
                 existing = self.find_tool_result_by_call_id(tc.id)
+                tool_message = llmApiUtil.OpenAIMessage.tool_result(tc.id, cancel_result_json)
                 if existing is None:
-                    tool_message = llmApiUtil.OpenAIMessage.tool_result(tc.id, cancel_result_json)
                     await self.append_history_message(GtAgentHistory.build(
                         tool_message,
                         status=AgentHistoryStatus.CANCELLED,
                         error_message=cancel_reason,
                     ))
+                elif existing.has_message is False:
+                    # 记录存在但 message=NULL（Step 1 未能补写的兜底）
+                    await self.finalize_history_item(
+                        existing.id,
+                        message=tool_message,
+                        status=AgentHistoryStatus.CANCELLED,
+                        error_message=cancel_reason,
+                    )
 
         # 3. 追加 ROOM_TURN_FINISH 关闭 active turn
         finish_text = "本轮任务已被操作者中断，请以下一条新消息为起点重新出发。"
