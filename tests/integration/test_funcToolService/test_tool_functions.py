@@ -377,7 +377,7 @@ class TestToolFunctions(ServiceTestCase):
         room = roomService.get_room_by_key(f"turn_room@{TEAM}")
         ctx = ToolCallContext(agent_id=self.agent_ids["bob"], team_id=room.team_id, chat_room=room)
 
-        result = await finish_chat_turn(_context=ctx)
+        result = await finish_chat_turn(_context=ctx, confirm_no_need_talk=True)
 
         assert result["success"]
         assert gtAgentManager.get_agent_name(room._get_current_turn_agent_id()) == "alice"

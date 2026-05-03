@@ -108,7 +108,7 @@ class TestSdkDoSend(ServiceTestCase):
     async def test_finish_chat_turn_sets_done(self):
         """调用 finish_chat_turn 后，本轮应结束（_turn_done 置 True）。"""
         driver, agent, room = await self._make_driver_with_room("alice", "lobby")
-        await driver._build_claude_sdk_tool("finish_chat_turn").handler({})
+        await driver._build_claude_sdk_tool("finish_chat_turn").handler({"confirm_no_need_talk": True})
         assert driver._turn_done
 
     async def test_send_to_current_room_message_appears(self):

@@ -236,7 +236,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
                     raise RuntimeError(f"SDK 会话返回错误: agent_id={self.host.gt_agent.id}, error={error_text}")
 
                 if self._turn_done is True:
-                    if has_direct_text and room._current_turn_has_content is False:
+                    if has_direct_text and room.current_turn_has_content is False:
                         logger.warning(f"SDK Agent 输出了文字但未调用 send_chat_msg，强制提醒: agent_id={self.host.gt_agent.id}")
                         self._turn_done = False
                         failed_action_count += 1

@@ -327,12 +327,21 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
     )}
 
 
-async def finish_chat_turn(_context: ToolCallContext = None) -> dict:
+async def finish_chat_turn(_context: ToolCallContext = None, confirm_no_need_talk: bool = False) -> dict:
     """结束本轮行动。当你完成所有发言和工具调用后，必须调用此工具来把行动机会让给下一位成员。
-    如果你觉得当前话题不需要回复，或者没有话要说，请直接调用此工具来跳过本轮。"""
+    如果你确认本轮不需要发言，想直接结束，那么需要设置 confirm_no_need_talk=true 来显式确认跳过。"""
     if _context is None or _context.chat_room is None:
         logger.warning("结束行动失败，聊天室上下文未设置")
         return {"success": False, "message": "当前没有激活的房间上下文。"}
+
+    if not confirm_no_need_talk and not _context.chat_room.current_turn_has_content:
+        return {
+            "success": False,
+            "message": (
+                "你本轮未在任务房间发言。如果你需要发言，请先调用 send_chat_msg 发送消息。"
+                "如果你确认不需要发言，请设置 confirm_no_need_talk=true 重新调用 finish_chat_turn。"
+            ),
+        }
 
     logger.info(f"Agent 结束行动: agent_id={_context.agent_id}")
     ok = await _context.chat_room.finish_turn(_context.agent_id)

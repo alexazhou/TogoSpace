@@ -35,7 +35,7 @@ class ChatRoom:
         self._turn_pos: int = 0  # 当前轮次在参与者列表中的位置索引
         self._state: RoomState = RoomState.INIT  # 房间当前的调度状态
         self._round_skipped_set: set[int] = set()  # 当前轮次已跳过发言的 Agent ID 集合
-        self._current_turn_has_content: bool = False  # 当前发言人是否已发送内容
+        self.current_turn_has_content: bool = False  # 当前发言人是否已发送内容
 
     # ─── 从 gt_room / gt_team 派生的只读属性 ────────────────────
 
@@ -160,13 +160,13 @@ class ChatRoom:
             logger.info(f"检测到房间 {self.key} 的活动 (agent={gtAgentManager.get_agent_name(sender_id)})，重置轮次计数器并唤醒房间")
             self._turn_count = 0
             self._round_skipped_set = set()
-            self._current_turn_has_content = False
+            self.current_turn_has_content = False
             self._state = RoomState.SCHEDULING
 
         # 2. 只有当前顺序发言人说话，才标记本轮有内容。不再自动推进
         current_expected = self._get_current_turn_agent_id()
         if sender_id == current_expected:
-            self._current_turn_has_content = True
+            self.current_turn_has_content = True
         else:
             logger.info(f"房间 {self.key} 收到来自 agent={gtAgentManager.get_agent_name(sender_id)} 的插话，保持当前发言位 (当前应轮到 agent={gtAgentManager.get_agent_name(current_expected)})")
 
@@ -203,14 +203,14 @@ class ChatRoom:
         logger.info(
             "房间 %s 由 agent=%s 结束本轮行动 (has_content=%s, turn_pos=%d/%d, turn_count=%d)",
             self.key, gtAgentManager.get_agent_name(current_expected),
-            self._current_turn_has_content, self._turn_pos, len(self._agent_ids), self._turn_count,
+            self.current_turn_has_content, self._turn_pos, len(self._agent_ids), self._turn_count,
         )
 
         # 如果本轮没说话，记录为跳过
-        if not self._current_turn_has_content:
+        if not self.current_turn_has_content:
             self._round_skipped_set.add(current_expected)
 
-        self._current_turn_has_content = False
+        self.current_turn_has_content = False
 
         if not self._agent_ids:
             return True
@@ -285,7 +285,7 @@ class ChatRoom:
         if self._state != RoomState.SCHEDULING:
             return
 
-        self._current_turn_has_content = False
+        self.current_turn_has_content = False
         self._state = RoomState.IDLE
         logger.info("房间 %s 当前 turn 被人工停止，切回 IDLE 等待新消息唤醒", self.key)
         self._publish_room_status()
@@ -317,7 +317,7 @@ class ChatRoom:
                 logger.info(f"房间 {self.key} 自动跳过人类操作者回合: agent={gtAgentManager.get_agent_name(next_id)}")
                 if next_id is not None:
                     self._round_skipped_set.add(next_id)
-                self._current_turn_has_content = False
+                self.current_turn_has_content = False
 
                 self._go_next_turn()
                 if self._should_stop_scheduling():
@@ -438,7 +438,7 @@ class ChatRoom:
         else:
             self._turn_pos = 0
         self._round_skipped_set = set()
-        self._current_turn_has_content = False
+        self.current_turn_has_content = False
 
     def format_log(self) -> str:
         lines = [f"=== {self.key} 聊天记录 ==="]
