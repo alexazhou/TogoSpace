@@ -145,7 +145,7 @@ class TestSdkDoSend(ServiceTestCase):
         await self.create_room(TEAM, "group", ["alice"])
         result = await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "group", "msg": "hi"})
         text = result["content"][0]["text"]
-        assert "消息已发送达 group" in text
+        assert "消息已送达 group" in text
         assert "本轮发言结束" not in text
 
 

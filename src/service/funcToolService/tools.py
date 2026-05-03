@@ -318,12 +318,12 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
     await target_room.add_message(sender_id, msg)
 
     if target_room is _context.chat_room:
-        return {"success": True, "message": f"【状态更新】发言已成功同步到房间。你当前的发言任务已视为完成。如果没有其他辅助工具（如查看信息）需要调用，请立即执行 finish_chat_turn 提交并结束本轮。"}
+        return {"success": True, "message": "消息已送达房间。如果你还有其他工具需要调用，请继续；如果本轮操作已全部完成，请调用 finish_chat_turn 结束本轮。"}
 
     assert _context.chat_room is not None, "send_chat_msg: 跨房间发言时 chat_room 不应为 None"
 
     return {"success": True, "message": (
-        f"【状态更新】消息已发送达 {target_room.name}。你当前的发言任务已视为完成。如果没有其他业务逻辑，请立即执行 finish_chat_turn 结束本轮。"
+        f"消息已送达 {target_room.name}。如果你还有其他工具需要调用，请继续；如果本轮操作已全部完成，请调用 finish_chat_turn 结束本轮。"
     )}
 
 

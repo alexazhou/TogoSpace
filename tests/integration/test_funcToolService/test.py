@@ -104,7 +104,7 @@ class TestRunToolCall(ServiceTestCase):
         room = roomService.get_room_by_key(f"ctx_room@{TEAM}")
         ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=room.team_id, chat_room=room)
         result = await self._run("send_chat_msg", '{"room_name": "ctx_room", "msg": "test"}', context=ctx)
-        assert result["success"] and "发言已成功同步到房间" in result["message"]
+        assert result["success"] and "消息已送达" in result["message"]
 
     async def test_run_tool_call_with_missing_room_returns_error(self):
         """目标房间不存在时，应返回错误信息。"""
