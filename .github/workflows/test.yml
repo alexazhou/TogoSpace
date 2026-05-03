@@ -48,4 +48,3 @@ jobs:
     - name: Run real tests
       run: |
         PYTHONPATH=src python -m pytest tests/real/ -v --timeout=30
-      continue-on-error: true  # real tests 可能需要特定环境，允许失败

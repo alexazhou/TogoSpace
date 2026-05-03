@@ -4,7 +4,7 @@ import os
 import sys
 
 import pytest
-from constants import RoomState
+from constants import RoomState, ScheduleState
 import service.roomService as roomService
 import service.agentService as agentService
 import service.funcToolService as funcToolService
@@ -54,6 +54,7 @@ class TestRealSimpleChat(ServiceTestCase):
 
         # 启动调度器
         await scheduler.startup()
+        scheduler._schedule_state = ScheduleState.RUNNING
 
     @classmethod
     async def async_teardown_class(cls):
@@ -125,10 +126,10 @@ class TestRealSimpleChat(ServiceTestCase):
         assert len(agent_messages) == 2, f"期望 2 条 agent 消息，实际 {len(agent_messages)} 条"
 
         # 验证消息内容
-        assert room._get_gt_agent(agent_messages[0].sender_id).display_name == "alice"
+        assert agentService.core.get_agent_display_name(agent_messages[0].sender_id) == "alice"
         assert agent_messages[0].content == "你好 Bob！"
 
-        assert room._get_gt_agent(agent_messages[1].sender_id).display_name == "bob"
+        assert agentService.core.get_agent_display_name(agent_messages[1].sender_id) == "bob"
         assert agent_messages[1].content == "你好 Alice！"
 
         # 验证房间状态为 idle
