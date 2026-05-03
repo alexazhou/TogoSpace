@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable
 
-from constants import AgentHistoryTag
 from service.roomService import ToolCallContext
 from util import llmApiUtil
 
@@ -17,8 +16,6 @@ class ToolExecutionResult:
     result_json: str
     success: bool = True
     error_message: str | None = None
-    tags: list[AgentHistoryTag] | None = None
-    turn_finished: bool = False
 
 
 @dataclass
@@ -54,6 +51,9 @@ class AgentToolRegistry:
     def export_openai_tools(self) -> list[llmApiUtil.OpenAITool]:
         return [item.tool for item in self._tools_by_name.values()]
 
+    def get_registered_tool(self, tool_name: str) -> RegisteredTool | None:
+        return self._tools_by_name.get(tool_name)
+
     async def execute_tool_call(self, tool_call: llmApiUtil.OpenAIToolCall, context: ToolCallContext) -> ToolExecutionResult:
         tool_call.verify()
         function_name = tool_call.function_name
@@ -83,13 +83,9 @@ class AgentToolRegistry:
         if not tool_succeeded and result.get("message") is not None:
             error_message = str(result.get("message"))
         result_json = json.dumps(result, ensure_ascii=False)
-        turn_finished = registered.marks_turn_finish
-        tags = [AgentHistoryTag.ROOM_TURN_FINISH] if (turn_finished and tool_succeeded) else None
         return ToolExecutionResult(
             tool_call_id=tool_call_id,
             result_json=result_json,
             success=tool_succeeded,
             error_message=error_message,
-            tags=tags,
-            turn_finished=turn_finished,
         )

@@ -26,7 +26,7 @@ from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService import compact, promptBuilder
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
 from service.agentService.driver.factory import build_agent_driver
-from service.agentService.toolRegistry import AgentToolRegistry, ToolExecutionResult
+from service.agentService.toolRegistry import AgentToolRegistry, RegisteredTool, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
 from util import configUtil, llmApiUtil
 from util.configTypes import LlmServiceConfig
@@ -544,6 +544,8 @@ class AgentTurnRunner:
             gt_agent=self.gt_agent, activity_type=AgentActivityType.TOOL_CALL,
             detail=tool_name, metadata=tool_metadata,
         )
+        registered_tool: RegisteredTool | None = self.tool_registry.get_registered_tool(tool_name)
+        assert registered_tool is not None, f"tool not registered: {tool_name}"
 
         context = ToolCallContext(
             agent_id=self.gt_agent.id,
@@ -557,7 +559,7 @@ class AgentTurnRunner:
             message=final_message,
             status=AgentHistoryStatus.SUCCESS if exec_result.success else AgentHistoryStatus.FAILED,
             error_message=exec_result.error_message,
-            tags=exec_result.tags,
+            tags=[AgentHistoryTag.ROOM_TURN_FINISH] if (registered_tool.marks_turn_finish and exec_result.success) else None,
         )
 
         # 活动记录：TOOL_CALL SUCCEEDED / FAILED
@@ -568,7 +570,7 @@ class AgentTurnRunner:
             metadata_patch=AgentActivityMeta(tool_result=self._parse_tool_result(exec_result.result_json)),
         )
 
-        turn_done = exec_result.turn_finished and (
+        turn_done = registered_tool.marks_turn_finish and (
             exec_result.success or room.state == RoomState.INIT
         )
         return TurnStepResult.TURN_DONE if turn_done else TurnStepResult.CONTINUE

@@ -2,7 +2,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryTag
 from model.dbModel.gtAgentTask import GtAgentTask
 from service.agentService.driver.base import AgentDriverConfig
 from service.agentService.driver.nativeDriver import NativeAgentDriver
@@ -74,8 +73,7 @@ async def test_native_driver_setup_registers_tools(driver, mock_host):
     assert called_context.agent_id == 1
     assert called_context.team_id == 1
     assert called_context.tool_name == "finish_chat_turn"
-    assert result.turn_finished is True
-    assert result.tags == [AgentHistoryTag.ROOM_TURN_FINISH]
+    assert result.success is True
 
 
 @pytest.mark.asyncio

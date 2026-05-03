@@ -14,7 +14,6 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
 from util import llmApiUtil
-from constants import AgentHistoryTag
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService.driver.base import AgentDriverConfig
 from service.agentService.driver.tspDriver import build_gtsp_command, TspAgentDriver
@@ -233,8 +232,7 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host):
         assert called_context.agent_id == 1
         assert called_context.team_id == 1
         assert called_context.tool_name == "finish_chat_turn"
-        assert finish_result.turn_finished is True
-        assert finish_result.tags == [AgentHistoryTag.ROOM_TURN_FINISH]
+        assert finish_result.success is True
 
         tsp_result = await mock_tsp_host.tool_registry.execute_tool_call(
             llmApiUtil.OpenAIToolCall(id="c2", function={"name": "tsp_tool", "arguments": "{}"}),
