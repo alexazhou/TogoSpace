@@ -102,6 +102,12 @@ class AgentTurnRunner:
         except Exception:
             return raw_args
 
+    def _parse_tool_result(self, result_json: str):
+        try:
+            return json.loads(result_json)
+        except Exception:
+            return result_json
+
     async def _finish_activity(
         self,
         activity_id: int | None,
@@ -544,21 +550,26 @@ class AgentTurnRunner:
             team_id=room.team_id,
             chat_room=room,
         )
-        exec_result = await self.tool_registry.execute_tool_call(tool_call, context)
+        exec_result:ToolExecutionResult = await self.tool_registry.execute_tool_call(tool_call, context)
         final_message = llmApiUtil.OpenAIMessage.tool_result(exec_result.tool_call_id, exec_result.result_json)
         await self._history.finalize_history_item(
             history_id=output_item.id,
             message=final_message,
-            status=exec_result.status,
+            status=AgentHistoryStatus.SUCCESS if exec_result.success else AgentHistoryStatus.FAILED,
             error_message=exec_result.error_message,
             tags=exec_result.tags,
         )
 
         # 活动记录：TOOL_CALL SUCCEEDED / FAILED
-        await self._finish_activity(tool_activity.id, status=AgentActivityStatus.SUCCEEDED if exec_result.status == AgentHistoryStatus.SUCCESS else AgentActivityStatus.FAILED, error_message=exec_result.error_message)
+        await self._finish_activity(
+            tool_activity.id,
+            status=AgentActivityStatus.SUCCEEDED if exec_result.success else AgentActivityStatus.FAILED,
+            error_message=exec_result.error_message,
+            metadata_patch=AgentActivityMeta(tool_result=self._parse_tool_result(exec_result.result_json)),
+        )
 
         turn_done = exec_result.turn_finished and (
-            exec_result.status == AgentHistoryStatus.SUCCESS or room.state == RoomState.INIT
+            exec_result.success or room.state == RoomState.INIT
         )
         return TurnStepResult.TURN_DONE if turn_done else TurnStepResult.CONTINUE
 

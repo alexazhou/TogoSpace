@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable
 
-from constants import AgentHistoryTag, AgentHistoryStatus
+from constants import AgentHistoryTag
 from service.roomService import ToolCallContext
 from util import llmApiUtil
 
@@ -15,7 +15,7 @@ ToolHandler = Callable[[str, ToolCallContext], Awaitable[dict[str, Any]]]
 class ToolExecutionResult:
     tool_call_id: str
     result_json: str
-    status: AgentHistoryStatus = AgentHistoryStatus.SUCCESS
+    success: bool = True
     error_message: str | None = None
     tags: list[AgentHistoryTag] | None = None
     turn_finished: bool = False
@@ -66,7 +66,7 @@ class AgentToolRegistry:
             return ToolExecutionResult(
                 tool_call_id=tool_call_id,
                 result_json=json.dumps(result, ensure_ascii=False),
-                status=AgentHistoryStatus.FAILED,
+                success=False,
                 error_message=str(result["message"]),
             )
 
@@ -78,10 +78,9 @@ class AgentToolRegistry:
             result = {"success": False, "message": f"工具调用失败: {e}"}
 
         raw_success = result.get("success")
-        status = AgentHistoryStatus.FAILED if raw_success is False else AgentHistoryStatus.SUCCESS
-        tool_succeeded = status == AgentHistoryStatus.SUCCESS
+        tool_succeeded = raw_success is not False
         error_message = None
-        if status == AgentHistoryStatus.FAILED and result.get("message") is not None:
+        if not tool_succeeded and result.get("message") is not None:
             error_message = str(result.get("message"))
         result_json = json.dumps(result, ensure_ascii=False)
         turn_finished = registered.marks_turn_finish
@@ -89,7 +88,7 @@ class AgentToolRegistry:
         return ToolExecutionResult(
             tool_call_id=tool_call_id,
             result_json=result_json,
-            status=status,
+            success=tool_succeeded,
             error_message=error_message,
             tags=tags,
             turn_finished=turn_finished,

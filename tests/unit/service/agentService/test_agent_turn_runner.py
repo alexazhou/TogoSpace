@@ -4,12 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryStatus, AgentHistoryTag, DriverType, OpenaiApiRole, TurnStepResult
+from constants import AgentHistoryStatus, AgentHistoryTag, DriverType, OpenaiApiRole, RoomState, TurnStepResult
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 from service.agentService.agentTurnRunner import AgentTurnRunner
+from service.agentService.toolRegistry import ToolExecutionResult
 from service.agentService.driver.base import AgentDriverConfig
 from service.roomService import ChatRoom
 from util import llmApiUtil
@@ -27,6 +28,7 @@ def _make_turn_runner() -> AgentTurnRunner:
     mock_history = MagicMock()
     mock_history.has_active_turn = MagicMock(return_value=False)
     mock_history.append_history_message = AsyncMock()
+    mock_history.finalize_history_item = AsyncMock()
     mock_history.export_openai_tools = MagicMock(return_value=[])
     runner._history = mock_history
     return runner
@@ -268,6 +270,39 @@ async def test_run_turn_loop_retries_on_error_action_with_error_hint(turn_runner
     await turn_runner._run_turn_loop(room)
 
     assert turn_runner._history.append_history_message.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_tool_to_item_persists_tool_result_into_activity_metadata(turn_runner):
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    room.state = RoomState.IDLE
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 99
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tool-call-1",
+        function={"name": "read_file", "arguments": '{"file_path": "/tmp/demo.txt"}'},
+    )
+
+    turn_runner.tool_registry.execute_tool_call = AsyncMock(return_value=ToolExecutionResult(
+        tool_call_id="tool-call-1",
+        result_json='{"success": true, "content": "demo"}',
+        success=True,
+        turn_finished=False,
+    ))
+
+    with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock(return_value=MagicMock(id=7))) as mock_add_activity, patch(
+        "service.agentService.agentTurnRunner.agentActivityService.update_activity_progress",
+        new=AsyncMock(),
+    ) as mock_update_activity:
+        result = await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    assert result == TurnStepResult.CONTINUE
+    mock_add_activity.assert_awaited_once()
+    turn_runner._history.finalize_history_item.assert_awaited_once()
+    mock_update_activity.assert_awaited_once()
+    metadata_patch = mock_update_activity.await_args.kwargs["metadata_patch"]
+    assert metadata_patch.tool_result == {"success": True, "content": "demo"}
 
 
 @pytest.mark.asyncio

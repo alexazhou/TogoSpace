@@ -54,6 +54,7 @@ class AgentActivityMeta:
     tool_arguments: Any = None
     tool_call_id: str | None = None
     command: str | None = None
+    tool_result: Any = None
 
     def apply_progress(self, progress) -> None:
         """从 InferStreamProgress 更新流式进度字段。"""
