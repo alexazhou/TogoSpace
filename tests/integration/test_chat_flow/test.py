@@ -135,6 +135,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         """直接输出文字时 turn_checker 应注入 hint，迫使 agent 改用工具。"""
         await self.create_room(TEAM, "turn_checker_room", ["alice", "bob"])
         room = roomService.get_room_by_key(f"turn_checker_room@{TEAM}")
+        await room.activate_scheduling()
 
         alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
         item = GtAgentHistory.build(

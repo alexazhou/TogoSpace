@@ -134,6 +134,9 @@ class AgentTurnRunner:
 
         room = roomService.get_room(room_id)
         assertNotNull(room, error_message=f"room_id={room_id} 不存在, agent_id={self.gt_agent.id}")
+        assert room.state != RoomState.INIT, (
+            f"Agent 不应在 INIT 状态下收到任务: agent_id={self.gt_agent.id}, room={room.name}, state={room.state}"
+        )
 
         self._current_room = room
         try:
@@ -141,7 +144,7 @@ class AgentTurnRunner:
                 assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
                 if not self._history.has_active_turn():
                     synced_count = await self.pull_room_messages_to_history(room)
-                    if synced_count == 0 and room.state != RoomState.INIT:
+                    if synced_count == 0:
                         logger.info(f"无新消息，自动跳过本轮: {self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}")
                         await room.finish_turn(self.gt_agent.id)
                         return
@@ -567,9 +570,7 @@ class AgentTurnRunner:
             metadata_patch=AgentActivityMeta(tool_result=exec_result.result),
         )
 
-        turn_done = registered_tool.marks_turn_finish and (
-            exec_result.success or room.state == RoomState.INIT
-        )
+        turn_done = registered_tool.marks_turn_finish and exec_result.success
         return TurnStepResult.TURN_DONE if turn_done else TurnStepResult.CONTINUE
 
     # ─── AgentDriverHost 协议方法 ──────────────────────────
