@@ -51,6 +51,11 @@ class Agent:
         """检查 Agent 是否活跃。"""
         return self.task_consumer.status == AgentStatus.ACTIVE
 
+    @property
+    def host_managed_turn_loop(self) -> bool:
+        """是否使用 host-managed turn loop（支持运行中即时消息插入）。"""
+        return self.task_consumer._turn_runner.driver.host_managed_turn_loop
+
     async def startup(self) -> None:
         await self.task_consumer._turn_runner.driver.startup()
 

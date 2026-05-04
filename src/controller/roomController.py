@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtRoomManager, gtAgentManager
 from model.dbModel.gtRoom import GtRoom
-from service import roomService, teamService
+from service import roomService, teamService, agentService
 from service.roomService import ChatRoom
 from constants import SpecialAgent, RoomState, RoomType
 from util import assertUtil
@@ -36,6 +36,7 @@ class UpdateAgentsRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str | None = None
+    insert_immediately: bool = False
 
 
 class RoomApiResponse(BaseModel):
@@ -194,7 +195,23 @@ class RoomMessagesHandler(BaseHandler):
         content = request.content
         assertUtil.assertNotNull(content, error_message="content is required", error_code="invalid_request")
 
-        await room.add_message(room.OPERATOR_MEMBER_ID, content)
+        if request.insert_immediately:
+            assertUtil.assertTrue(
+                room.room_type == RoomType.PRIVATE,
+                error_message="insert_immediately is only supported in PRIVATE rooms",
+                error_code="room_immediate_insert_not_supported",
+            )
+            ai_agents = [
+                a for a in agentService.get_room_agents(room_id)
+                if a.gt_agent.id != room.OPERATOR_MEMBER_ID
+            ]
+            assertUtil.assertTrue(
+                len(ai_agents) > 0 and ai_agents[0].host_managed_turn_loop,
+                error_message="insert_immediately is not supported for this agent's driver",
+                error_code="immediate_insert_driver_not_supported",
+            )
+
+        await room.add_message(room.OPERATOR_MEMBER_ID, content, insert_immediately=request.insert_immediately)
         await room.finish_turn(room.OPERATOR_MEMBER_ID)
         self.return_success()
 

@@ -252,6 +252,30 @@ class AgentHistoryStore:
     def has_active_turn(self) -> bool:
         return self.get_current_turn_start_index() is not None
 
+    def is_safe_for_immediate_insert(self) -> bool:
+        """当前 history 状态是否处于安全边界，可以插入即时消息。
+
+        安全条件（当前批次已完成）：
+        - 末尾是 USER / SYSTEM 消息
+        - 末尾是 ASSISTANT(SUCCESS) 且无 tool_calls（直接回复，未发起工具调用）
+        - 末尾是 TOOL(SUCCESS/FAILED/CANCELLED) 且整批 tool_calls 均已收尾
+        """
+        last_item = self.last()
+        if last_item is None:
+            return False
+        role, status = last_item.role, last_item.status
+        if role in (OpenaiApiRole.USER, OpenaiApiRole.SYSTEM):
+            return True
+        if role == OpenaiApiRole.ASSISTANT and status == AgentHistoryStatus.SUCCESS:
+            return not last_item.tool_calls
+        if role == OpenaiApiRole.TOOL and status in (
+            AgentHistoryStatus.SUCCESS,
+            AgentHistoryStatus.FAILED,
+            AgentHistoryStatus.CANCELLED,
+        ):
+            return self.get_first_pending_tool_call() is None
+        return False
+
     async def finalize_cancel_turn(self) -> None:
         """取消当前 active turn：将 INIT 占位填充为 CANCELLED，补写缺失的 TOOL 记录，追加 ROOM_TURN_FINISH。
 

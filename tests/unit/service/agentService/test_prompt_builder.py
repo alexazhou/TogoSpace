@@ -1,6 +1,66 @@
 import pytest
 
+from datetime import datetime
+
+from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 from service.agentService import promptBuilder
+
+
+def _msg(sender_id: int, display_name: str, content: str, *, insert_immediately: bool = False) -> GtCoreRoomMessage:
+    return GtCoreRoomMessage(
+        sender_id=sender_id,
+        sender_display_name=display_name,
+        content=content,
+        send_time=datetime(2024, 1, 1),
+        insert_immediately=insert_immediately,
+    )
+
+
+# ─── build_turn_update_prompt ────────────────────────────────
+
+
+def test_build_turn_update_prompt_contains_intro_text():
+    result = promptBuilder.build_turn_update_prompt("testRoom", [_msg(2, "Alice", "hello")], exclude_agent_id=1)
+    assert "房间出现了新的补充信息" in result
+
+
+def test_build_turn_update_prompt_yaml_format():
+    result = promptBuilder.build_turn_update_prompt("testRoom", [_msg(2, "Alice", "hello")], exclude_agent_id=1)
+    assert "roomName: testRoom" in result
+    assert "sender: Alice" in result
+    assert "content: hello" in result
+
+
+def test_build_turn_update_prompt_filters_own_messages():
+    msgs = [_msg(1, "Self", "own msg"), _msg(2, "Alice", "their msg")]
+    result = promptBuilder.build_turn_update_prompt("testRoom", msgs, exclude_agent_id=1)
+    assert "own msg" not in result
+    assert "their msg" in result
+
+
+def test_build_turn_update_prompt_empty_messages_after_filter():
+    """只有自己的消息时，过滤后 messages 为空列表。"""
+    result = promptBuilder.build_turn_update_prompt("testRoom", [_msg(1, "Self", "x")], exclude_agent_id=1)
+    assert "messages: []" in result
+
+
+def test_build_turn_update_prompt_multiline_content_uses_block_style():
+    msgs = [_msg(2, "Bob", "line1\nline2\nline3")]
+    result = promptBuilder.build_turn_update_prompt("testRoom", msgs, exclude_agent_id=1)
+    assert "line1" in result
+    assert "line2" in result
+    assert "line3" in result
+    # 多行内容应使用 YAML 块样式，而非转义换行符
+    assert "\\n" not in result
+
+
+def test_build_turn_begin_prompt_yaml_format():
+    result = promptBuilder.build_turn_begin_prompt("myRoom", [("Charlie", "hi there")])
+    assert "roomName: myRoom" in result
+    assert "sender: Charlie" in result
+    assert "content: hi there" in result
+    assert "当前轮到你行动" in result
+
 
 
 @pytest.mark.asyncio

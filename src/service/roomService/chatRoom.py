@@ -103,9 +103,13 @@ class ChatRoom:
         await self._persist_room_state()
         return new_msgs
 
-    async def add_message(self, sender_id: int, content: str, send_time: datetime | None = None) -> None:
+    def has_pending_immediate_messages(self, agent_id: int) -> bool:
+        """检查是否存在 insert_immediately=True 且 agent 尚未读取的消息。"""
+        return self._store.has_pending_immediate_messages(agent_id)
+
+    async def add_message(self, sender_id: int, content: str, send_time: datetime | None = None, *, insert_immediately: bool = False) -> None:
         """添加消息到房间。"""
-        await self._append_message(sender_id, content, send_time=send_time)
+        await self._append_message(sender_id, content, send_time=send_time, insert_immediately=insert_immediately)
 
     async def _append_message(
         self,
@@ -114,6 +118,7 @@ class ChatRoom:
         send_time: datetime | None = None,
         *,
         update_turn_state: bool = True,
+        insert_immediately: bool = False,
     ) -> None:
         assertUtil.assertTrue(
             self.can_post_message(sender_id),
@@ -129,7 +134,8 @@ class ChatRoom:
             sender_id=sender_id,
             sender_display_name=sender_display_name,
             content=content,
-            send_time=send_time or datetime.now()
+            send_time=send_time or datetime.now(),
+            insert_immediately=insert_immediately,
         )
         self._store.append(message)
 
@@ -141,6 +147,7 @@ class ChatRoom:
             agent_id=sender_id,
             content=content,
             send_time=message.send_time.isoformat(),
+            insert_immediately=insert_immediately,
         )
 
         messageBus.publish(

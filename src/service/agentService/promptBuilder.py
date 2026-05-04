@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import yaml
 from dal.db import gtAgentManager, gtDeptManager
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 from service.agentService.prompts import (
@@ -13,15 +14,30 @@ from service.agentService.prompts import (
 from util import configUtil
 
 
-def _format_yaml_message_item(sender: str, content: str) -> str:
-    """格式化单条消息为 YAML 列表项。"""
-    # content 可能有多行，需要保持缩进
-    content_lines = content.split("\n")
-    if len(content_lines) == 1:
-        return f"  - sender: {sender}\n    content: {content}"
-    else:
-        indented_content = "\n      ".join(content_lines)
-        return f"  - sender: {sender}\n    content: {indented_content}"
+class _PromptYamlDumper(yaml.Dumper):
+    """YAML Dumper：多行字符串使用 literal block 样式（|），列表项保持缩进。"""
+
+    def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
+        return super().increase_indent(flow=flow, indentless=False)
+
+    def _str_representer(dumper: yaml.Dumper, data: str) -> yaml.ScalarNode:
+        if "\n" in data:
+            return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+    yaml_representers = {**yaml.Dumper.yaml_representers, str: _str_representer}
+
+
+def _build_yaml_room_block(room_name: str, messages: list[tuple[str, str]]) -> str:
+    """将房间名和消息列表序列化为 YAML 块。"""
+    msg_data = [{"sender": sender, "content": content} for sender, content in messages]
+    return yaml.dump(
+        {"roomName": room_name, "messages": msg_data},
+        Dumper=_PromptYamlDumper,
+        allow_unicode=True,
+        sort_keys=False,
+        default_flow_style=False,
+    ).strip()
 
 
 def build_turn_begin_prompt(room_name: str, messages: list[tuple[str, str]]) -> str:
@@ -31,16 +47,10 @@ def build_turn_begin_prompt(room_name: str, messages: list[tuple[str, str]]) -> 
         room_name: 房间名称
         messages: 消息列表，每项为 (sender, content) 元组
     """
-    if len(messages) == 0:
-        messages_section = "messages: []"
-    else:
-        message_items = [_format_yaml_message_item(sender, content) for sender, content in messages]
-        messages_section = "messages:\n" + "\n".join(message_items)
-
+    yaml_block = _build_yaml_room_block(room_name, messages)
     return (
         f"当前轮到你行动，新消息如下:\n\n"
-        f"roomName: {room_name}\n"
-        f"{messages_section}\n\n"
+        f"{yaml_block}\n\n"
         f"{TURN_CONTEXT_SUFFIX}"
     )
 
@@ -57,6 +67,30 @@ def build_turn_begin_prompt_from_messages(
             continue
         filtered_messages.append((msg.sender_display_name, msg.content))
     return build_turn_begin_prompt(room_name, filtered_messages)
+
+
+def build_turn_update_prompt(
+    room_name: str,
+    messages: list[GtCoreRoomMessage],
+    exclude_agent_id: int,
+) -> str:
+    """构建 turn update prompt（运行中补充消息），不含 ROOM_TURN_BEGIN 语义，自动过滤自己的消息。
+
+    Args:
+        room_name: 房间名称
+        messages: 消息列表
+        exclude_agent_id: 需要过滤掉的 agent_id（通常为当前 Agent 自己）
+    """
+    filtered: list[tuple[str, str]] = [
+        (msg.sender_display_name, msg.content)
+        for msg in messages
+        if msg.sender_id != exclude_agent_id
+    ]
+    yaml_block = _build_yaml_room_block(room_name, filtered)
+    return (
+        f"房间出现了新的补充信息，请在当前工作过程中参考：\n\n"
+        f"{yaml_block}"
+    )
 
 
 def build_compact_instruction(max_tokens: int) -> str:

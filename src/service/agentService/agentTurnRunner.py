@@ -181,6 +181,28 @@ class AgentTurnRunner:
         ))
         return 1
 
+    async def _inject_immediate_messages(self, room: ChatRoom) -> None:
+        """在安全边界拉取并注入待即时插入的私聊消息。"""
+        new_msgs: List[GtCoreRoomMessage] = await room.get_unread_messages(self.gt_agent.id)
+        others = [m for m in new_msgs if m.sender_id != self.gt_agent.id]
+        if not others:
+            logger.debug(
+                "即时插入检查：无新消息: agent=%s(agent_id=%d), room=%s",
+                self.gt_agent.name, self.gt_agent.id, room.name,
+            )
+            return
+
+        update_prompt = promptBuilder.build_turn_update_prompt(
+            room.name, new_msgs, self.gt_agent.id
+        )
+        await self._history.append_history_message(GtAgentHistory.build(
+            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, update_prompt),
+        ))
+        logger.info(
+            "即时插入新消息: agent=%s(agent_id=%d), room=%s, msgs=%d",
+            self.gt_agent.name, self.gt_agent.id, room.name, len(others),
+        )
+
     async def _run_turn_loop(self, room: ChatRoom) -> None:
         """基于 history 状态推进的统一循环。"""
         tools = self.tool_registry.export_openai_tools()
@@ -189,6 +211,13 @@ class AgentTurnRunner:
         next_tool_choice: str | None = None
 
         while True:
+            # 在安全边界检查是否有待即时插入的私聊消息
+            if (
+                self._history.is_safe_for_immediate_insert()
+                and room.has_pending_immediate_messages(self.gt_agent.id)
+            ):
+                await self._inject_immediate_messages(room)
+
             result = await self._advance_step(room, tools, tool_choice=next_tool_choice)
             next_tool_choice = None
 

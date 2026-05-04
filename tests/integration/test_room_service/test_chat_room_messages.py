@@ -146,3 +146,72 @@ class TestChatRoomMessages(ServiceTestCase):
         assert len(rows) == 1
         assert rows[0].agent_id == room.SYSTEM_MEMBER_ID
         assert "房间已经创建" in rows[0].content
+
+    async def test_add_message_insert_immediately_flag_in_memory(self):
+        """insert_immediately=True 的消息在内存中应正确设置标志。"""
+        await self.create_room(TEAM, "imm_flag_room", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"imm_flag_room@{TEAM}")
+        await room.activate_scheduling()
+        alice_id = await self._get_agent_id("alice")
+
+        await room.add_message(alice_id, "普通消息")
+        await room.add_message(alice_id, "即时消息", insert_immediately=True)
+
+        assert room.messages[-2].insert_immediately is False
+        assert room.messages[-1].insert_immediately is True
+
+    async def test_insert_immediately_persisted_to_db(self):
+        """insert_immediately=True 应持久化到数据库。"""
+        await self.create_room(TEAM, "imm_db_room", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"imm_db_room@{TEAM}")
+        await room.activate_scheduling()
+        alice_id = await self._get_agent_id("alice")
+
+        await room.add_message(alice_id, "普通消息")
+        await room.add_message(alice_id, "即时消息", insert_immediately=True)
+
+        rows = await gtRoomMessageManager.get_room_messages(room.room_id)
+        # rows[0] 是系统初始化消息，rows[1] 是普通消息，rows[2] 是即时消息
+        assert rows[1].insert_immediately is False
+        assert rows[2].insert_immediately is True
+
+    async def test_has_pending_immediate_messages_true_when_unread(self):
+        """有未读 insert_immediately=True 消息时应返回 True。"""
+        await self.create_room(TEAM, "imm_pending_room", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"imm_pending_room@{TEAM}")
+        await room.activate_scheduling()
+        alice_id = await self._get_agent_id("alice")
+        bob_id = await self._get_agent_id("bob")
+
+        # 消费初始化消息
+        await room.get_unread_messages(bob_id)
+
+        await room.add_message(alice_id, "即时消息", insert_immediately=True)
+        assert room.has_pending_immediate_messages(bob_id) is True
+
+    async def test_has_pending_immediate_messages_false_for_regular_message(self):
+        """普通消息不应触发 has_pending_immediate_messages。"""
+        await self.create_room(TEAM, "imm_regular_room", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"imm_regular_room@{TEAM}")
+        await room.activate_scheduling()
+        alice_id = await self._get_agent_id("alice")
+        bob_id = await self._get_agent_id("bob")
+
+        await room.get_unread_messages(bob_id)
+        await room.add_message(alice_id, "普通消息")
+        assert room.has_pending_immediate_messages(bob_id) is False
+
+    async def test_has_pending_immediate_messages_false_after_read(self):
+        """get_unread_messages 之后 has_pending_immediate_messages 应返回 False。"""
+        await self.create_room(TEAM, "imm_after_read_room", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"imm_after_read_room@{TEAM}")
+        await room.activate_scheduling()
+        alice_id = await self._get_agent_id("alice")
+        bob_id = await self._get_agent_id("bob")
+
+        await room.get_unread_messages(bob_id)
+        await room.add_message(alice_id, "即时消息", insert_immediately=True)
+        assert room.has_pending_immediate_messages(bob_id) is True
+
+        await room.get_unread_messages(bob_id)
+        assert room.has_pending_immediate_messages(bob_id) is False

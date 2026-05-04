@@ -47,6 +47,11 @@ class RoomMessageStore:
                     pass  # 忽略无效的 key
             self._agent_read_index = converted
 
+    def has_pending_immediate_messages(self, agent_id: int) -> bool:
+        """检查是否存在 insert_immediately=True 且该 agent 尚未读取的消息。"""
+        read_idx = self._agent_read_index.get(agent_id, 0)
+        return any(msg.insert_immediately for msg in self._messages[read_idx:])
+
     def get_read_index(self) -> Dict[int, int]:
         """返回当前读取进度字典（供持久化使用）。"""
         return self._agent_read_index

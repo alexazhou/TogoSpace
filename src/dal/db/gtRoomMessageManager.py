@@ -9,12 +9,14 @@ async def append_room_message(
     agent_id: int,
     content: str,
     send_time: str,
+    insert_immediately: bool = False,
 ) -> GtRoomMessage:
     return await GtRoomMessage.aio_create(
         room_id=room_id,
         agent_id=agent_id,
         content=content,
         send_time=send_time,
+        insert_immediately=insert_immediately,
     )
 
 

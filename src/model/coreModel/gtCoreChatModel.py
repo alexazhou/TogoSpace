@@ -13,6 +13,7 @@ class GtCoreRoomMessage:
     sender_display_name: str  # 发送者显示名称（创建时根据语言固定）
     content: str
     send_time: datetime
+    insert_immediately: bool = False  # V20: 运行中即时插入标志，持久化至 DB
 
 
 @dataclass

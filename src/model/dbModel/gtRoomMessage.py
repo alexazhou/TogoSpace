@@ -10,6 +10,7 @@ class GtRoomMessage(DbModelBase):
     agent_id: int = peewee.IntegerField(null=False, default=0)
     content: str = peewee.TextField(null=False)
     send_time: str = peewee.CharField(null=False)
+    insert_immediately: bool = peewee.BooleanField(null=False, default=False)
 
     class Meta:
         table_name = "room_messages"

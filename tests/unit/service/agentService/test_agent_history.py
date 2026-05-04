@@ -524,3 +524,84 @@ class TestCompact:
         assert [item.seq for item in history] == [1, 2, 3, 4, 5]
 
 
+# ─── is_safe_for_immediate_insert ─────────────────────────────
+
+
+class TestIsSafeForImmediateInsert:
+    """is_safe_for_immediate_insert 在各种 history 末尾状态下的行为。"""
+
+    def _history(self, *items: GtAgentHistory) -> AgentHistoryStore:
+        return AgentHistoryStore(agent_id=1, items=list(items))
+
+    def test_empty_history_returns_false(self):
+        assert self._history().is_safe_for_immediate_insert() is False
+
+    def test_user_message_returns_true(self):
+        h = self._history(
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "hi"), seq=0),
+        )
+        assert h.is_safe_for_immediate_insert() is True
+
+    def test_system_message_returns_true(self):
+        h = self._history(
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.SYSTEM, "sys"), seq=0),
+        )
+        assert h.is_safe_for_immediate_insert() is True
+
+    def test_assistant_success_no_tool_calls_returns_true(self):
+        h = self._history(
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u"), seq=0),
+            _make_item(
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "reply"),
+                seq=1,
+                status=AgentHistoryStatus.SUCCESS,
+            ),
+        )
+        assert h.is_safe_for_immediate_insert() is True
+
+    def test_assistant_success_with_tool_calls_returns_false(self):
+        h = self._history(
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u"), seq=0),
+            _make_assistant_tool_call_item(seq=1, tool_call_ids=["call_1"], status=AgentHistoryStatus.SUCCESS),
+        )
+        assert h.is_safe_for_immediate_insert() is False
+
+    def test_assistant_init_returns_false(self):
+        h = self._history(
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u"), seq=0),
+            _make_item(
+                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "..."),
+                seq=1,
+                status=AgentHistoryStatus.INIT,
+            ),
+        )
+        assert h.is_safe_for_immediate_insert() is False
+
+    def test_tool_success_all_completed_returns_true(self):
+        h = self._history(
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u"), seq=0,
+                       tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+            _make_assistant_tool_call_item(seq=1, tool_call_ids=["call_1"], status=AgentHistoryStatus.SUCCESS),
+            _make_item(
+                llmApiUtil.OpenAIMessage.tool_result("call_1", '{"success": true}'),
+                seq=2,
+                status=AgentHistoryStatus.SUCCESS,
+            ),
+        )
+        assert h.is_safe_for_immediate_insert() is True
+
+    def test_tool_with_sibling_still_pending_returns_false(self):
+        """同一批次的另一个 tool_call 尚未完成，不应判为安全边界。"""
+        h = self._history(
+            _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u"), seq=0,
+                       tags=[AgentHistoryTag.ROOM_TURN_BEGIN]),
+            _make_assistant_tool_call_item(seq=1, tool_call_ids=["call_1", "call_2"], status=AgentHistoryStatus.SUCCESS),
+            _make_item(
+                llmApiUtil.OpenAIMessage.tool_result("call_1", '{"success": true}'),
+                seq=2,
+                status=AgentHistoryStatus.SUCCESS,
+            ),
+        )
+        assert h.is_safe_for_immediate_insert() is False
+
+
