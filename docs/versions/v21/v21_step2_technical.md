@@ -13,19 +13,16 @@
 
 ### 控制房间（Control Room）
 
-与某 Agent 的普通私聊房间相同，类型为 `PRIVATE`，通过 `biz_id` 约定标识：
+操作者与某个 Agent 之间的私聊房间（`RoomType.PRIVATE`），作为下达追加指令的专用通道。
 
-```
-biz_id = "CTRL:{agent_id}"
-```
+控制房间**不使用特殊标记**，通过以下查询自然识别：team 下 `type=PRIVATE` 且 `agent_ids` 包含目标 `agent_id` 的房间即为该 Agent 的控制房间。
 
-例如 agent_id=7 的控制房间 biz_id 为 `"CTRL:7"`。
-
-此约定允许后端通过 `get_room_by_biz_id(team_id, f"CTRL:{agent_id}")` 快速查找，而不依赖 name 字符串匹配。
+- 若 preset 预定义了该私聊房间，V21 直接复用，不重复建房。
+- 若不存在，首次使用时自动创建。
 
 ### 指令发送语义
 
-通过活动视图发出的指令，语义等同于：在对应的私聊控制房间里，以 `insert_immediately=True` 发送一条 OPERATOR 消息。
+通过活动视图发出的指令，等同于：在对应的私聊控制房间里，以 `insert_immediately=True` 发送一条 OPERATOR 消息。
 
 ---
 
@@ -73,33 +70,21 @@ biz_id = "CTRL:{agent_id}"
 
 新增 `roomService.get_or_create_control_room(team_id, agent_id) -> tuple[ChatRoom, bool]`，返回控制房间实例和是否新建标志。
 
-逻辑（两步查找 + 按需创建）：
+逻辑：
 
-**第一步：按 biz_id 快速查找**
-
-```python
-gt_room = await gtRoomManager.get_room_by_biz_id(team_id, f"CTRL:{agent_id}")
-```
-
-找到则直接返回对应 ChatRoom（`created=False`）。
-
-**第二步（fallback）：扫描现有 PRIVATE 房间**
-
-若第一步未找到，扫描该 team 下所有 PRIVATE 房间：
+**第一步：查找现有 PRIVATE 房间**
 
 ```python
-rooms = await gtRoomManager.get_rooms_by_team_and_type(team_id, RoomType.PRIVATE)
-matched = next((r for r in rooms if agent_id in (r.agent_ids or [])), None)
+# DAL：拉取 team 下所有 PRIVATE 房间（数量极少，Python 侧 filter）
+gt_rooms = await gtRoomManager.get_rooms_by_team_and_type(team_id, RoomType.PRIVATE)
+matched = next((r for r in gt_rooms if agent_id in (r.agent_ids or [])), None)
 ```
 
-若找到匹配房间（preset 预定义了该私聊房间，但未设 biz_id）：
-1. 回填 `biz_id = f"CTRL:{agent_id}"` 并保存，方便后续快速查找
-2. 返回对应 ChatRoom（`created=False`）
+若 `matched` 不为 None，直接返回对应 ChatRoom（`created=False`）。
 
-**第三步（实际创建）：两步均无结果**
+**第二步（创建）：无匹配房间时**
 
-执行以下步骤创建新控制房间：
-1. 构造 `GtRoom`（`type=PRIVATE`, `name=f"{agent_name} 控制"`, `biz_id=f"CTRL:{agent_id}"`, `agent_ids=[agent_id]`, `max_turns=0`）
+1. 构造 `GtRoom`（`type=PRIVATE`, `name=f"{agent_name} 控制"`, `agent_ids=[agent_id]`, `max_turns=0`）
 2. `gtRoomManager.save_room(gt_room)` 写库
 3. `_load_room(gt_team, saved_room, [agent_id])` 注册内存 ChatRoom
 4. `room.activate_scheduling()` 激活房间
@@ -108,9 +93,8 @@ matched = next((r for r in rooms if agent_id in (r.agent_ids or [])), None)
 
 **注意事项：**
 
-- 若 preset 中同一 agent 有多个 PRIVATE 房间（少见场景），fallback 取第一个匹配，并回填 biz_id。其他房间不受影响。
-- 回填 biz_id 仅更新数据库记录，不影响运行中的 ChatRoom 内存状态。
-- 新增 DAL 方法 `get_rooms_by_team_and_type(team_id, room_type)` 支持 fallback 查询。
+- 不依赖 `biz_id` 标识控制房间，preset 预定义的私聊房间无需任何改动。
+- 若同一 agent 有多个 PRIVATE 房间（少见），取第一个匹配项。
 
 ### 4.2 新增 WS 事件：ROOM_ADDED
 
@@ -206,8 +190,8 @@ case 'room_added':
 | 文件 | 变更 |
 |------|------|
 | `src/constants.py` | 新增 `ROOM_ADDED` WS 事件 topic |
-| `src/dal/db/gtRoomManager.py` | 新增 `get_rooms_by_team_and_type()` 方法 |
-| `src/service/roomService/core.py` | 新增 `get_or_create_control_room()`，含两步 fallback 逻辑 |
+| `src/dal/db/gtRoomManager.py` | 新增 `get_rooms_by_team_and_type(team_id, room_type)` 方法 |
+| `src/service/roomService/core.py` | 新增 `get_or_create_control_room()` |
 | `src/controller/superviseController.py`（新文件） | `AgentSuperviseHandler` |
 | `src/route.py` | 注册 `/agents/{agent_id}/supervise.json` 路由 |
 | `src/controller/wsController.py` | 新增 `ROOM_ADDED` 事件映射 |
@@ -220,9 +204,8 @@ case 'room_added':
 
 ## 6. 测试要点
 
-- `get_or_create_control_room` 首次调用创建房间，第二次复用同一房间，biz_id 不冲突
-- preset 预定义了 PRIVATE 房间（无 biz_id）时，fallback 扫描正确复用并回填 biz_id，不重复建房
-- 同 agent 有多个 PRIVATE 房间时，fallback 取第一个，不报错
+- `get_or_create_control_room`：有 PRIVATE 房间时复用，无则创建，preset 预定义的房间不重复建
+- 同一 agent 有多个 PRIVATE 房间时，取第一个匹配，不报错
 - 控制房间创建后 `ROOM_ADDED` WS 事件正确发布，payload 包含 gt_room 和 team_id
 - `supervise.json` 接口：消息通过私聊房间以 `insert_immediately=True` 发送，行为与 V20 一致
 - Agent 不支持 `host_managed_turn_loop` 时返回 `immediate_insert_driver_not_supported` 错误
