@@ -87,7 +87,12 @@ class ChatRoom:
 
     def can_post_message(self, sender_id: int) -> bool:
         """返回 sender_id 是否允许向当前房间写消息。"""
-        return sender_id in self._agent_ids or sender_id == self.SYSTEM_MEMBER_ID
+        if sender_id == self.SYSTEM_MEMBER_ID:
+            return True
+        # PRIVATE 房间（控制房间）OPERATOR 始终可以发消息，兼容历史数据
+        if sender_id == self.OPERATOR_MEMBER_ID and self.room_type == RoomType.PRIVATE:
+            return True
+        return sender_id in self._agent_ids
 
     @property
     def key(self) -> str:
