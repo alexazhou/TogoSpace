@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import threading
+import traceback
 
 import aiohttp
 import pytest
@@ -26,10 +27,11 @@ class TestWsController(_ApiServiceCase):
     requires_mock_llm = True
 
     async def test_ws_receives_message(self):
-        """验证 POST 消息后 WebSocket 能收到 event=message 推送，且字段结构正确。"""
+        """验证 POST 消息后 WebSocket 能收到 event=message 推送，且使用 gt_message 结构。"""
         collected = []
         ws_done = threading.Event()
         room_id_holder = []
+        errors = []
 
         async def _collect():
             ws_url = f"ws://127.0.0.1:{self.backend_port}/ws/events.json"
@@ -67,7 +69,7 @@ class TestWsController(_ApiServiceCase):
                                 ):
                                     break
             except Exception:
-                pass
+                errors.append(traceback.format_exc())
             finally:
                 ws_done.set()
 
@@ -81,6 +83,7 @@ class TestWsController(_ApiServiceCase):
         threading.Thread(target=_thread, daemon=True).start()
         ws_done.wait(timeout=10)
 
+        assert not errors, errors[0]
         assert len(collected) > 0, "未收到任何 event=message 的 WebSocket 推送"
         event = collected[0]
         assert event.get("event") == "message"
@@ -90,8 +93,10 @@ class TestWsController(_ApiServiceCase):
         assert event["gt_room"]["name"] == "general"
         assert "display_name" not in event["gt_room"]
         assert "i18n" in event["gt_room"]
-        assert "sender_id" in event
-        assert "content" in event
+        assert "gt_message" in event
+        assert event["gt_message"]["sender_id"] == -1
+        assert event["gt_message"]["content"] == "Testing WebSocket"
+        assert event["gt_message"]["insert_immediately"] is False
 
     async def test_ws_agent_status_contains_real_team_id(self):
         """agent_status 事件中的 gt_agent.team_id 应为真实 Team ID（非 0）。"""
