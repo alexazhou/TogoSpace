@@ -154,7 +154,7 @@ class TestFlushQueued:
 
 
 class TestEscalateToImmediate:
-    """escalate_to_immediate：将主列表中未读消息升级为 pending immediately 消息。"""
+    """escalate_to_immediate：将主流未读或 pending queued 消息升级为 immediately。"""
 
     def _msg_with_db_id(self, db_id: int, content: str = "msg") -> GtCoreRoomMessage:
         m = _msg(content=content)
@@ -174,8 +174,8 @@ class TestEscalateToImmediate:
         assert len(store.messages) == 0
         assert len(store.pending_messages) == 1
 
-    def test_escalate_raises_if_db_id_not_in_main_list(self):
-        """db_id 不在主列表中（不存在或已在 pending）时抛出 ValueError。"""
+    def test_escalate_raises_if_db_id_not_found(self):
+        """db_id 不存在时抛出 ValueError。"""
         store = RoomMessageStore(agent_ids=[1])
         with pytest.raises(ValueError):
             store.escalate_to_immediate(db_id=999)
@@ -229,6 +229,33 @@ class TestEscalateToImmediate:
         unread = store.get_unread(agent_id=1)
         assert [m.db_id for m in unread] == [5, 15]
 
+    def test_escalate_pending_queued_message_succeeds(self):
+        """pending queued 消息可直接升级为 pending immediate，无需先进入主流。"""
+        store = RoomMessageStore(agent_ids=[1])
+        queued = self._msg_with_db_id(db_id=10, content="queued")
+        store.append_pending(queued)
+
+        result = store.escalate_to_immediate(db_id=10)
+
+        assert result.seq is None
+        assert result.insert_immediately is True
+        assert len(store.messages) == 0
+        assert len(store.pending_messages) == 1
+        assert store.pending_messages[0].db_id == 10
+
+    def test_escalate_pending_immediate_is_idempotent(self):
+        """已经是 pending immediate 的消息再次升级时应保持幂等。"""
+        store = RoomMessageStore(agent_ids=[1])
+        immediate = self._msg_with_db_id(db_id=10, content="immediate")
+        immediate.insert_immediately = True
+        store.append_pending(immediate)
+
+        result = store.escalate_to_immediate(db_id=10)
+
+        assert result.seq is None
+        assert result.insert_immediately is True
+        assert len(store.pending_messages) == 1
+
 
 class TestSort:
     """_sort()：pending 消息按 db_id 升序排，主流消息按 seq 升序在前。"""
@@ -281,4 +308,3 @@ class TestSort:
         store.escalate_to_immediate(db_id=20)
 
         assert [m.db_id for m in store.pending_messages] == [10, 20, 30]
-

@@ -122,19 +122,25 @@ class RoomMessageStore:
         return queued
 
     def escalate_to_immediate(self, db_id: int) -> GtCoreRoomMessage:
-        """将主流中尚未被任何 agent 读取的消息升级为 pending（seq=None）。
+        """将消息升级为 pending immediately。
 
-        升级后消息移至列表末尾，seq 清空，insert_immediately 标记为 True。
-        若消息不存在于主流中，抛出 ValueError。
-        若消息已被 agent 读取，抛出 RuntimeError。
+        支持两类消息：
+        1. 主流未读消息（seq!=None）：移出主流，seq 清空，标记为 immediately。
+        2. pending queued 消息（seq=None 且 insert_immediately=False）：原地改为 immediately。
+
+        若消息不存在，抛出 ValueError。
+        若主流消息已被 agent 读取，抛出 RuntimeError。
         """
-        msg = next((m for m in self._messages if m.db_id == db_id and m.seq is not None), None)
+        msg = next((m for m in self._messages if m.db_id == db_id), None)
         if msg is None:
-            raise ValueError(f"message db_id={db_id} not found in main stream")
-        for agent_id in self._agent_ids:
-            if self._agent_seq_read.get(agent_id, 0) > msg.seq:  # type: ignore[operator]
-                raise RuntimeError(f"message db_id={db_id} already read by agent_id={agent_id}")
-        msg.seq = None
+            raise ValueError(f"message db_id={db_id} not found")
+
+        if msg.seq is not None:
+            for agent_id in self._agent_ids:
+                if self._agent_seq_read.get(agent_id, 0) > msg.seq:  # type: ignore[operator]
+                    raise RuntimeError(f"message db_id={db_id} already read by agent_id={agent_id}")
+            msg.seq = None
+
         msg.insert_immediately = True
         self._sort()
         return msg
@@ -142,4 +148,3 @@ class RoomMessageStore:
     def get_read_index(self) -> Dict[int, int]:
         """返回当前读取进度字典（供持久化使用）。"""
         return self._agent_seq_read
-
