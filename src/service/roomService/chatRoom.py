@@ -125,6 +125,15 @@ class ChatRoom:
             error_message=f"sender_id '{sender_id}' is not an agent of room '{self.key}'",
             error_code="sender_not_in_room",
         )
+        # insert_immediately 仅限私聊房间
+        if insert_immediately and self.room_type != RoomType.PRIVATE:
+            logger.warning("房间 %s 非私聊房间，immediately 标志不支持，降级为普通消息", self.key)
+            insert_immediately = False
+        # 若房间当前不在调度中，immediately 标志无意义，降级为普通消息
+        if insert_immediately and self._state != RoomState.SCHEDULING:
+            logger.warning("房间 %s 非 SCHEDULING 状态，immediately 消息降级为普通消息", self.key)
+            insert_immediately = False
+
         # 从数据库获取 display_name（SYSTEM agent 也有数据库记录）
         agent = await gtAgentManager.get_agent_by_id(sender_id)
         assert agent, f"agent_id '{sender_id}' not found"
@@ -137,28 +146,64 @@ class ChatRoom:
             send_time=send_time or datetime.now(),
             insert_immediately=insert_immediately,
         )
-        self._store.append(message)
+
+        if insert_immediately:
+            # immediately 消息进入等待注入队列，seq 尚未分配，由注入时赋值
+            self._store.append_pending(message)
+        else:
+            self._store.append_and_assign_seq(message)
 
         if self._state == RoomState.INIT:
             return
 
-        await gtRoomMessageManager.append_room_message(
+        db_msg = await gtRoomMessageManager.append_room_message(
             room_id=self.room_id,
             agent_id=sender_id,
             content=content,
             send_time=message.send_time.isoformat(),
             insert_immediately=insert_immediately,
+            seq=message.seq,  # immediately 消息此时为 None
         )
+        message.db_id = db_msg.id
 
-        messageBus.publish(
-            MessageBusTopic.ROOM_MSG_ADDED,
-            gt_room=self.gt_room,
-            sender_id=sender_id,
-            content=content,
-            time=message.send_time.isoformat(),
+        if not insert_immediately:
+            # immediately 消息的 WS 广播推迟到注入时
+            messageBus.publish(
+                MessageBusTopic.ROOM_MSG_ADDED,
+                gt_room=self.gt_room,
+                sender_id=sender_id,
+                content=content,
+                time=message.send_time.isoformat(),
+                seq=message.seq,
+                insert_immediately=False,
+            )
+            if update_turn_state and self._agent_ids:
+                self._update_turn_state_on_message(sender_id)
+
+    async def flush_pending_immediate_messages(self) -> None:
+        """将待注入队列中的 immediately 消息移入主消息列表，分配 seq，更新 DB，广播 WS。
+
+        由 agentTurnRunner 在安全边界调用。
+        """
+        flushed = self._store.flush_pending_immediate()
+        if not flushed:
+            return
+        for msg in flushed:
+            if msg.db_id is not None:
+                await gtRoomMessageManager.update_room_message_seq(msg.db_id, msg.seq)  # type: ignore[arg-type]
+            messageBus.publish(
+                MessageBusTopic.ROOM_MSG_ADDED,
+                gt_room=self.gt_room,
+                sender_id=msg.sender_id,
+                content=msg.content,
+                time=msg.send_time.isoformat(),
+                seq=msg.seq,
+                insert_immediately=True,
+            )
+        logger.info(
+            "immediately 消息注入完成: room=%s, count=%d, seqs=%s",
+            self.key, len(flushed), [m.seq for m in flushed],
         )
-        if update_turn_state and self._agent_ids:
-            self._update_turn_state_on_message(sender_id)
 
     def _update_turn_state_on_message(self, sender_id: int) -> None:
         # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度

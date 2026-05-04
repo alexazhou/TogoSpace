@@ -121,6 +121,9 @@ async def _restore_room_runtime_state(room: ChatRoom) -> None:
                 sender_display_name=sender_display_name,
                 content=row.content,
                 send_time=datetime.fromisoformat(row.send_time),
+                insert_immediately=row.insert_immediately,
+                seq=row.seq,
+                db_id=row.id,
             ))
 
     if restored_messages is not None or agent_read_index is not None:

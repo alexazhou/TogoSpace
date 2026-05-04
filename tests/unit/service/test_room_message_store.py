@@ -18,7 +18,7 @@ def _msg(sender_id: int = 1, content: str = "msg", *, insert_immediately: bool =
 
 
 class TestHasPendingImmediateMessages:
-    """has_pending_immediate_messages 在不同消息状态下的行为。"""
+    """has_pending_immediate_messages：immediately 消息在 pending 队列中的检测行为。"""
 
     def test_returns_false_when_no_messages(self):
         store = RoomMessageStore(agent_ids=[1])
@@ -26,43 +26,58 @@ class TestHasPendingImmediateMessages:
 
     def test_returns_false_for_regular_unread_messages(self):
         store = RoomMessageStore(agent_ids=[1])
-        store.append(_msg(insert_immediately=False))
-        store.append(_msg(insert_immediately=False))
+        store.append_and_assign_seq(_msg(insert_immediately=False))
+        store.append_and_assign_seq(_msg(insert_immediately=False))
         assert store.has_pending_immediate_messages(agent_id=1) is False
 
-    def test_returns_true_for_unread_immediate_message(self):
+    def test_returns_true_for_pending_immediate_message(self):
         store = RoomMessageStore(agent_ids=[1])
-        store.append(_msg(insert_immediately=True))
+        store.append_pending(_msg(insert_immediately=True))
         assert store.has_pending_immediate_messages(agent_id=1) is True
 
-    def test_returns_false_after_messages_are_read(self):
+    def test_returns_false_after_flush(self):
         store = RoomMessageStore(agent_ids=[1])
-        store.append(_msg(insert_immediately=True))
-        store.get_unread(agent_id=1)  # 推进已读游标
+        store.append_pending(_msg(insert_immediately=True))
+        store.flush_pending_immediate()
         assert store.has_pending_immediate_messages(agent_id=1) is False
 
     def test_does_not_advance_read_index(self):
         """has_pending_immediate_messages 只检查，不推进游标。"""
         store = RoomMessageStore(agent_ids=[1])
-        store.append(_msg(insert_immediately=True))
+        store.append_pending(_msg(insert_immediately=True))
         store.has_pending_immediate_messages(agent_id=1)
         store.has_pending_immediate_messages(agent_id=1)
-        # 游标未推进，get_unread 仍能拿到该消息
+        # 还未 flush，get_unread 不含 pending 消息
+        unread = store.get_unread(agent_id=1)
+        assert len(unread) == 0
+
+    def test_flush_moves_to_main_list_and_assigns_seq(self):
+        """flush_pending_immediate 将消息移入主列表并分配 seq。"""
+        store = RoomMessageStore(agent_ids=[1])
+        store.append_and_assign_seq(_msg(content="before"))  # seq=0
+        msg = _msg(insert_immediately=True, content="immediate")
+        store.append_pending(msg)
+
+        flushed = store.flush_pending_immediate()
+        assert len(flushed) == 1
+        assert flushed[0].seq == 1  # 紧接在 seq=0 之后
+        assert len(store.messages) == 2
+        assert store.has_pending_immediate_messages(agent_id=1) is False
+
+    def test_flush_messages_appear_in_get_unread(self):
+        """flush 后 immediately 消息可通过 get_unread 读取。"""
+        store = RoomMessageStore(agent_ids=[1])
+        store.append_pending(_msg(insert_immediately=True))
+        store.flush_pending_immediate()
         unread = store.get_unread(agent_id=1)
         assert len(unread) == 1
+        assert unread[0].insert_immediately is True
 
-    def test_only_checks_unread_slice(self):
-        """已读消息的 insert_immediately 标志不影响检查结果。"""
-        store = RoomMessageStore(agent_ids=[1])
-        store.append(_msg(insert_immediately=True))
-        store.get_unread(agent_id=1)  # 推进游标，上面那条变已读
-        store.append(_msg(insert_immediately=False))
-        assert store.has_pending_immediate_messages(agent_id=1) is False
-
-    def test_independent_per_agent(self):
-        """不同 agent 的已读游标独立。"""
+    def test_global_queue_cleared_for_all_agents(self):
+        """pending 队列是房间级别的，flush 后所有 agent 都看不到 pending。"""
         store = RoomMessageStore(agent_ids=[1, 2])
-        store.append(_msg(insert_immediately=True))
-        store.get_unread(agent_id=1)  # agent 1 读过了
+        store.append_pending(_msg(insert_immediately=True))
+        store.flush_pending_immediate()
         assert store.has_pending_immediate_messages(agent_id=1) is False
-        assert store.has_pending_immediate_messages(agent_id=2) is True
+        assert store.has_pending_immediate_messages(agent_id=2) is False
+

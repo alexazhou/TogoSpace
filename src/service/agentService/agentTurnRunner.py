@@ -182,7 +182,9 @@ class AgentTurnRunner:
         return 1
 
     async def _inject_immediate_messages(self, room: ChatRoom) -> None:
-        """在安全边界拉取并注入待即时插入的私聊消息。"""
+        """在安全边界将待注入的 immediately 消息移入主消息列表，并通知 Agent。"""
+        await room.flush_pending_immediate_messages()
+
         new_msgs: List[GtCoreRoomMessage] = await room.get_unread_messages(self.gt_agent.id)
         others = [m for m in new_msgs if m.sender_id != self.gt_agent.id]
         if not others:
