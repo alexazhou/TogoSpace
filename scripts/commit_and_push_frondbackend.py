@@ -30,7 +30,7 @@ from pathlib import Path
 
 
 REMOTE_NAME = "origin"
-TARGET_BRANCH = "master"
+FRONTEND_TARGET_BRANCH = "master"
 VALID_ACTIONS = ("status", "sync", "commit", "push")
 VALID_ACTION_SEQUENCES = {
     ("status",),
@@ -65,40 +65,57 @@ def get_current_branch(repo: Path) -> str:
 def safe_switch_master(frontend: Path) -> None:
     """安全切换到 master 分支，失败时提示用户手动处理。"""
     try:
-        run(["git", "switch", TARGET_BRANCH], cwd=frontend)
+        run(["git", "switch", FRONTEND_TARGET_BRANCH], cwd=frontend)
     except subprocess.CalledProcessError as e:
-        print(f"前端切换 {TARGET_BRANCH} 失败: {e.stderr.strip()}")
+        print(f"前端切换 {FRONTEND_TARGET_BRANCH} 失败: {e.stderr.strip()}")
         print("请手动处理后再运行此脚本，例如:")
         print("  cd frontend && git stash  # 暂存改动")
-        print(f"  cd frontend && git switch {TARGET_BRANCH}")
+        print(f"  cd frontend && git switch {FRONTEND_TARGET_BRANCH}")
         print("  cd frontend && git stash pop  # 恢复改动")
         sys.exit(1)
 
 
-def fetch_origin_master(repo: Path, name: str) -> None:
+def get_tracking_target(repo: Path, fallback_branch: str | None = None) -> tuple[str, str]:
+    """返回当前仓库用于同步/推送的 (remote, branch)。
+
+    优先使用当前分支 upstream；若未设置 upstream，则回退到:
+    - fallback_branch（若显式传入，例如前端固定 master）
+    - 否则回退到当前分支同名远端分支
+    """
+    current_branch = get_current_branch(repo)
+    try:
+        result = run(["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cwd=repo)
+        upstream = result.stdout.strip()
+        remote, branch = upstream.split("/", 1)
+        return remote, branch
+    except subprocess.CalledProcessError:
+        return REMOTE_NAME, (fallback_branch or current_branch)
+
+
+def fetch_remote_branch(repo: Path, name: str, remote: str, branch: str) -> None:
     """获取远端分支状态。"""
     print(f"{name}: 获取远端状态...")
     try:
-        run(["git", "fetch", REMOTE_NAME, TARGET_BRANCH], cwd=repo)
+        run(["git", "fetch", remote, branch], cwd=repo)
     except subprocess.CalledProcessError as e:
         print(f"{name}: 获取远端状态失败")
         print(e.stderr.strip())
         sys.exit(1)
 
 
-def try_fetch_origin_master(repo: Path) -> tuple[bool, str]:
+def try_fetch_remote_branch(repo: Path, remote: str, branch: str) -> tuple[bool, str]:
     """尽量获取远端状态；失败时返回错误信息，但不退出。"""
     try:
-        run(["git", "fetch", REMOTE_NAME, TARGET_BRANCH], cwd=repo)
+        run(["git", "fetch", remote, branch], cwd=repo)
         return True, ""
     except subprocess.CalledProcessError as e:
         return False, e.stderr.strip()
 
 
-def get_ahead_behind(repo: Path) -> tuple[int, int]:
+def get_ahead_behind(repo: Path, remote: str, branch: str) -> tuple[int, int]:
     """返回 (behind, ahead)。"""
     result = run(
-        ["git", "rev-list", "--left-right", "--count", f"{REMOTE_NAME}/{TARGET_BRANCH}...HEAD"],
+        ["git", "rev-list", "--left-right", "--count", f"{remote}/{branch}...HEAD"],
         cwd=repo,
     )
     behind_raw, ahead_raw = result.stdout.strip().split()
@@ -110,26 +127,26 @@ def get_latest_commit(repo: Path) -> str:
     return result.stdout.strip()
 
 
-def pull_ff_only(repo: Path, name: str) -> None:
+def pull_ff_only(repo: Path, name: str, remote: str, branch: str) -> None:
     """仅在可 fast-forward 时拉取远端。"""
     print(f"{name}: fast-forward 拉取远端代码...")
     try:
-        run(["git", "pull", "--ff-only", REMOTE_NAME, TARGET_BRANCH], cwd=repo)
+        run(["git", "pull", "--ff-only", remote, branch], cwd=repo)
     except subprocess.CalledProcessError as e:
         print(f"{name}: 拉取失败，可能需要手动处理")
         print(e.stderr.strip())
         print("请手动处理后再运行此脚本:")
         print(f"  cd {repo}")
         print("  git status")
-        print(f"  git pull --ff-only {REMOTE_NAME} {TARGET_BRANCH}")
+        print(f"  git pull --ff-only {remote} {branch}")
         sys.exit(1)
 
 
-def push_origin_master(repo: Path, name: str) -> None:
-    """推送到远端 master。"""
+def push_remote_branch(repo: Path, name: str, remote: str, branch: str) -> None:
+    """推送到指定远端分支。"""
     print(f"{name}: 推送到远端...")
     try:
-        run(["git", "push", REMOTE_NAME, TARGET_BRANCH], cwd=repo)
+        run(["git", "push", remote, f"HEAD:{branch}"], cwd=repo)
     except subprocess.CalledProcessError as e:
         print(f"{name}: 推送失败")
         print(e.stderr.strip())
@@ -188,11 +205,12 @@ def ensure_message_requirements(actions: list[str], message: str | None) -> None
         sys.exit(1)
 
 
-def print_repo_status(repo: Path, name: str) -> None:
+def print_repo_status(repo: Path, name: str, *, fallback_branch: str | None = None) -> None:
     branch = get_current_branch(repo)
     dirty = has_changes(repo)
     latest_commit = get_latest_commit(repo)
-    fetched, fetch_error = try_fetch_origin_master(repo)
+    remote, remote_branch = get_tracking_target(repo, fallback_branch=fallback_branch)
+    fetched, fetch_error = try_fetch_remote_branch(repo, remote, remote_branch)
 
     print(f"[{name}]")
     print(f"  branch: {branch}")
@@ -200,23 +218,31 @@ def print_repo_status(repo: Path, name: str) -> None:
     print(f"  latest: {latest_commit}")
 
     if fetched:
-        behind, ahead = get_ahead_behind(repo)
-        print(f"  remote: {REMOTE_NAME}/{TARGET_BRANCH}")
+        behind, ahead = get_ahead_behind(repo, remote, remote_branch)
+        print(f"  remote: {remote}/{remote_branch}")
         print(f"  behind: {behind}")
         print(f"  ahead: {ahead}")
     else:
-        print(f"  remote: {REMOTE_NAME}/{TARGET_BRANCH} (unavailable)")
+        print(f"  remote: {remote}/{remote_branch} (unavailable)")
         print(f"  fetch_error: {fetch_error}")
 
     print()
 
 
-def load_remote_state(repo: Path, name: str) -> tuple[int, int]:
-    fetch_origin_master(repo, name)
-    return get_ahead_behind(repo)
+def load_remote_state(repo: Path, name: str, remote: str, branch: str) -> tuple[int, int]:
+    fetch_remote_branch(repo, name, remote, branch)
+    return get_ahead_behind(repo, remote, branch)
 
 
-def ensure_can_sync_or_push(repo: Path, name: str, dirty: bool, behind: int, ahead: int) -> None:
+def ensure_can_sync_or_push(
+    repo: Path,
+    name: str,
+    dirty: bool,
+    behind: int,
+    ahead: int,
+    remote: str,
+    branch: str,
+) -> None:
     if dirty and behind > 0:
         print(f"{name}: 存在未提交改动，且本地落后远端 {behind} 个提交，无法安全自动同步")
         print("请先手动处理冲突/同步后再运行脚本")
@@ -228,7 +254,7 @@ def ensure_can_sync_or_push(repo: Path, name: str, dirty: bool, behind: int, ahe
         print(f"{name}: 本地与远端已分叉 (behind={behind}, ahead={ahead})，请手动处理")
         print(f"  cd {repo}")
         print("  git status")
-        print(f"  git log --oneline --left-right {REMOTE_NAME}/{TARGET_BRANCH}...HEAD")
+        print(f"  git log --oneline --left-right {remote}/{branch}...HEAD")
         sys.exit(1)
 
 
@@ -243,22 +269,26 @@ def process_repo(
     """按显式 actions 处理单个仓库。"""
     if switch_master:
         branch = get_current_branch(repo)
-        if branch != TARGET_BRANCH:
-            print(f"{name}: 当前不在 {TARGET_BRANCH} 分支 (当前: {branch})，准备切换")
+        if branch != FRONTEND_TARGET_BRANCH:
+            print(f"{name}: 当前不在 {FRONTEND_TARGET_BRANCH} 分支 (当前: {branch})，准备切换")
             safe_switch_master(repo)
 
+    remote, remote_branch = get_tracking_target(
+        repo,
+        fallback_branch=FRONTEND_TARGET_BRANCH if switch_master else None,
+    )
     dirty = has_changes(repo)
     behind = 0
     ahead = 0
 
     if "sync" in actions or "push" in actions:
-        behind, ahead = load_remote_state(repo, name)
-        ensure_can_sync_or_push(repo, name, dirty, behind, ahead)
+        behind, ahead = load_remote_state(repo, name, remote, remote_branch)
+        ensure_can_sync_or_push(repo, name, dirty, behind, ahead, remote, remote_branch)
 
     if "sync" in actions:
         if behind > 0:
-            pull_ff_only(repo, name)
-            behind, ahead = load_remote_state(repo, name)
+            pull_ff_only(repo, name, remote, remote_branch)
+            behind, ahead = load_remote_state(repo, name, remote, remote_branch)
         else:
             print(f"{name}: 无需同步")
 
@@ -270,10 +300,10 @@ def process_repo(
             print(f"{name}: 无未提交改动，跳过 commit")
 
     if "push" in actions:
-        behind, ahead = load_remote_state(repo, name)
-        ensure_can_sync_or_push(repo, name, has_changes(repo), behind, ahead)
+        behind, ahead = load_remote_state(repo, name, remote, remote_branch)
+        ensure_can_sync_or_push(repo, name, has_changes(repo), behind, ahead, remote, remote_branch)
         if ahead > 0:
-            push_origin_master(repo, name)
+            push_remote_branch(repo, name, remote, remote_branch)
         else:
             print(f"{name}: 无需推送")
 
@@ -316,7 +346,7 @@ def main() -> None:
 
     if actions == ["status"]:
         if args.target in ("frontend", "all"):
-            print_repo_status(frontend, "前端")
+            print_repo_status(frontend, "前端", fallback_branch=FRONTEND_TARGET_BRANCH)
         if args.target in ("backend", "all"):
             print_repo_status(repo_root, "后端")
         print("完成")
