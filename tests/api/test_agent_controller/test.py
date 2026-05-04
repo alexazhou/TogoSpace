@@ -325,3 +325,91 @@ class TestAgentsSave(_ApiServiceCase):
                 json=payload,
             ) as resp:
                 assert resp.status != 200
+
+
+class TestAgentSupervise(_ApiServiceCase):
+    """测试 POST /agents/{id}/supervise.json 接口。"""
+
+    requires_backend = True
+    requires_mock_llm = True
+
+    async def _get_team_id(self, team_name: str) -> int:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/teams/list.json") as resp:
+                data = await resp.json()
+        team = next(t for t in data["teams"] if t["name"] == team_name)
+        return team["id"]
+
+    async def _get_agent_id(self, team_id: int, agent_name: str) -> int:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
+                data = await resp.json()
+        agent = next(a for a in data["agents"] if a["name"] == agent_name)
+        return agent["id"]
+
+    async def test_supervise_creates_control_room(self):
+        """首次调用应自动创建控制房间，返回 room_id 和 created=True。"""
+        team_id = await self._get_team_id("e2e")
+        alice_id = await self._get_agent_id(team_id, "alice")
+
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{self.backend_base_url}/agents/{alice_id}/supervise.json",
+                json={"content": "测试指令", "insert_immediately": False},
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+
+        assert "room_id" in data
+        assert isinstance(data["room_id"], int)
+        assert data["created"] is True
+
+    async def test_supervise_reuses_existing_room(self):
+        """第二次调用应复用控制房间，created=False。"""
+        team_id = await self._get_team_id("e2e")
+        alice_id = await self._get_agent_id(team_id, "alice")
+
+        async with aiohttp.ClientSession() as client:
+            # 第一次
+            async with client.post(
+                f"{self.backend_base_url}/agents/{alice_id}/supervise.json",
+                json={"content": "第一条指令", "insert_immediately": False},
+            ) as resp:
+                assert resp.status == 200
+                first = await resp.json()
+
+            # 第二次
+            async with client.post(
+                f"{self.backend_base_url}/agents/{alice_id}/supervise.json",
+                json={"content": "第二条指令", "insert_immediately": False},
+            ) as resp:
+                assert resp.status == 200
+                second = await resp.json()
+
+        assert first["room_id"] == second["room_id"]
+        assert second["created"] is False
+
+    async def test_supervise_agent_not_found(self):
+        """不存在的 agent_id 应返回错误。"""
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{self.backend_base_url}/agents/999999/supervise.json",
+                json={"content": "test", "insert_immediately": False},
+            ) as resp:
+                assert resp.status != 200
+                data = await resp.json()
+        assert data.get("error_code") == "agent_not_found"
+
+    async def test_supervise_empty_content(self):
+        """content 为空时应返回错误。"""
+        team_id = await self._get_team_id("e2e")
+        alice_id = await self._get_agent_id(team_id, "alice")
+
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{self.backend_base_url}/agents/{alice_id}/supervise.json",
+                json={"content": "", "insert_immediately": False},
+            ) as resp:
+                assert resp.status != 200
+                data = await resp.json()
+        assert data.get("error_code") == "invalid_request"

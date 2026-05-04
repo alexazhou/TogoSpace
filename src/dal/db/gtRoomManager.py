@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Sequence
 
+from peewee import SQL
+
+from constants import RoomType
 from model.dbModel.gtRoom import GtRoom
 
 async def get_rooms_by_team(team_id: int) -> list[GtRoom]:
@@ -12,6 +15,21 @@ async def get_rooms_by_team(team_id: int) -> list[GtRoom]:
         .order_by(GtRoom.name)
         .aio_execute()
     )
+
+
+async def get_private_room_by_agent(team_id: int, agent_id: int) -> GtRoom | None:
+    """查找 team 下包含指定 agent_id 的第一个 PRIVATE 房间（使用 json_each 精确匹配）。"""
+    rows = list(
+        await GtRoom.select()
+        .where(
+            GtRoom.team_id == team_id,
+            GtRoom.type == RoomType.PRIVATE,
+            SQL(f"EXISTS (SELECT 1 FROM json_each(agent_ids) WHERE value = {int(agent_id)})"),
+        )
+        .limit(1)
+        .aio_execute()
+    )
+    return rows[0] if rows else None
 
 
 async def get_room_by_biz_id(team_id: int, biz_id: str) -> GtRoom | None:

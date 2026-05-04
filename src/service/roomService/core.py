@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Dict, List, Sequence
 
 from dal.db import gtRoomManager, gtTeamManager, gtAgentManager, gtRoomMessageManager
+from service import messageBus
 from util import configUtil, assertUtil, i18nUtil
 from exception import TogoException
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
@@ -14,7 +15,7 @@ from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
-from constants import RoomState, RoomType, SpecialAgent
+from constants import MessageBusTopic, RoomState, RoomType, SpecialAgent
 from .chatRoom import ChatRoom
 
 logger = logging.getLogger("service.roomService")
@@ -173,6 +174,46 @@ async def get_room_messages_from_db(room_id: int) -> list[GtRoomMessage]:
 def get_all_rooms() -> List[ChatRoom]:
     """返回所有聊天室实例列表。"""
     return list(_rooms.values())
+
+
+async def get_or_create_control_room(team_id: int, agent_id: int) -> tuple[ChatRoom, bool]:
+    """获取或创建操作者与指定 Agent 的私聊控制房间。
+
+    先查找 team 下包含该 agent_id 的 PRIVATE 房间；若不存在则自动创建并激活。
+    返回 (ChatRoom, created)，created=True 表示本次新建。
+    """
+    gt_team = await gtTeamManager.get_team_by_id(team_id)
+    assert gt_team is not None, f"team_id={team_id} not found"
+
+    # 查找现有 PRIVATE 房间
+    gt_room = await gtRoomManager.get_private_room_by_agent(team_id, agent_id)
+    if gt_room is not None:
+        room = _rooms_by_id.get(gt_room.id)
+        if room is not None:
+            return room, False
+
+    # 不存在则创建新控制房间
+    gt_agent = await gtAgentManager.get_agent_by_id(agent_id)
+    agent_name = gt_agent.name if gt_agent else str(agent_id)
+
+    new_gt_room = GtRoom(
+        team_id=team_id,
+        name=f"{agent_name} 控制",
+        type=RoomType.PRIVATE,
+        initial_topic="",
+        max_turns=0,
+        agent_ids=[int(SpecialAgent.OPERATOR.value), agent_id],
+    )
+    saved_room = await gtRoomManager.save_room(new_gt_room)
+    await _load_room(gt_team=gt_team, gt_room=saved_room, agent_ids=[int(SpecialAgent.OPERATOR.value), agent_id])
+
+    room = _rooms_by_id[saved_room.id]
+    await room.activate_scheduling()
+
+    messageBus.publish(MessageBusTopic.ROOM_ADDED, gt_room=saved_room, team_id=team_id)
+    logger.info(f"自动创建控制房间: room_id={saved_room.id}, agent_id={agent_id}")
+
+    return room, True
 
 
 def shutdown() -> None:

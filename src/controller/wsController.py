@@ -12,6 +12,7 @@ _WS_TOPICS = [
     MessageBusTopic.ROOM_MSG_ADDED,
     MessageBusTopic.ROOM_MSG_CHANGED,
     MessageBusTopic.ROOM_STATUS_CHANGED,
+    MessageBusTopic.ROOM_ADDED,
     MessageBusTopic.AGENT_STATUS_CHANGED,
     MessageBusTopic.AGENT_ACTIVITY_CHANGED,
     MessageBusTopic.SCHEDULE_STATE_CHANGED,
@@ -78,6 +79,8 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
             payload["event"] = "message_changed"
         if msg.topic == MessageBusTopic.ROOM_STATUS_CHANGED:
             payload["event"] = "room_status"
+        if msg.topic == MessageBusTopic.ROOM_ADDED:
+            payload["event"] = "room_added"
         if msg.topic == MessageBusTopic.AGENT_STATUS_CHANGED:
             payload["event"] = "agent_status"
         if msg.topic == MessageBusTopic.AGENT_ACTIVITY_CHANGED:

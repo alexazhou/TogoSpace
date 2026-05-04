@@ -20,6 +20,7 @@ from .core import (
     overwrite_team_rooms,
     overwrite_dept_rooms,
     activate_rooms,
+    get_or_create_control_room,
     _rooms,
 )
 from constants import RoomType
@@ -47,5 +48,6 @@ __all__ = [
     "overwrite_team_rooms",
     "overwrite_dept_rooms",
     "activate_rooms",
+    "get_or_create_control_room",
     "_rooms",
 ]
