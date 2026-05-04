@@ -115,7 +115,7 @@ class TestRealSimpleChat(ServiceTestCase):
 
         await self.wait_until(
             lambda: room.state == RoomState.IDLE,
-            timeout=10.0,
+            timeout=5.0,
             message="房间未在限时内完成对话并进入 IDLE 状态",
         )
 
