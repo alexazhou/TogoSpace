@@ -216,6 +216,23 @@ class RoomMessagesHandler(BaseHandler):
         self.return_success()
 
 
+class EscalateMessageToImmediateHandler(BaseHandler):
+    """POST /rooms/{room_id}/messages/{msg_id}/escalate_to_immediate.json"""
+
+    async def post(self, room_id_str: str, msg_id_str: str) -> None:
+        room_id = int(room_id_str)
+        db_id = int(msg_id_str)
+        room = roomService.get_room(room_id)
+        assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
+        assertUtil.assertTrue(
+            room.room_type == RoomType.PRIVATE,
+            error_message="escalate_to_immediate is only supported in PRIVATE rooms",
+            error_code="room_immediate_insert_not_supported",
+        )
+        await room.escalate_message_to_immediate(db_id)
+        self.return_success()
+
+
 # Team Room Management Handlers
 class TeamRoomsHandler(BaseHandler):
     """GET /teams/{team_id}/rooms/list.json - 获取 Team 下的所有 Room"""

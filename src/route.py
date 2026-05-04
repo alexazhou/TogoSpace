@@ -90,6 +90,7 @@ application = tornado.web.Application([
     (r"/rooms/list.json",                           roomController.RoomListHandler),
     (r"/rooms/(\d+)/messages/list.json",            roomController.RoomMessagesHandler),
     (r"/rooms/(\d+)/messages/send.json",            roomController.RoomMessagesHandler),
+    (r"/rooms/(\d+)/messages/(\d+)/escalate_to_immediate.json", roomController.EscalateMessageToImmediateHandler),
 
     # WebSocket
     (r"/ws/events.json",                            wsController.EventsWsHandler),

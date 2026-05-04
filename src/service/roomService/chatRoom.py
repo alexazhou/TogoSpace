@@ -205,6 +205,16 @@ class ChatRoom:
             self.key, len(flushed), [m.seq for m in flushed],
         )
 
+    async def escalate_message_to_immediate(self, db_id: int) -> None:
+        """将主消息列表中尚未被 agent 读取的消息升级为 immediately 消息。
+
+        消息会从主列表移入 pending 队列，并更新 DB 中的 seq 和 insert_immediately 字段。
+        若消息不存在或已被 agent 读取，抛出异常。
+        """
+        self._store.escalate_to_immediate(db_id)
+        await gtRoomMessageManager.escalate_message_to_immediate(db_id)
+        logger.info("消息升级为 immediately: room=%s, db_id=%d", self.key, db_id)
+
     def _update_turn_state_on_message(self, sender_id: int) -> None:
         # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
         was_idle = (self._state == RoomState.IDLE)

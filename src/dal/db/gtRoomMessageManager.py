@@ -32,6 +32,16 @@ async def update_room_message_seq(message_id: int, seq: int) -> None:
     )
 
 
+async def escalate_message_to_immediate(message_id: int) -> None:
+    """将已发送的普通消息升级为 immediately 消息：重置 seq=NULL，标记 insert_immediately=True。"""
+    await (
+        GtRoomMessage
+        .update(seq=None, insert_immediately=True)
+        .where(GtRoomMessage.id == message_id)  # type: ignore[attr-defined]
+        .aio_execute()
+    )
+
+
 async def get_room_messages(room_id: int, after_id: int | None = None) -> list[GtRoomMessage]:
     query = GtRoomMessage.select().where(GtRoomMessage.room_id == room_id)
     if after_id is not None:
