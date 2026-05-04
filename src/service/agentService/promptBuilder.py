@@ -25,7 +25,8 @@ class _PromptYamlDumper(yaml.Dumper):
             return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
         return dumper.represent_scalar("tag:yaml.org,2002:str", data)
 
-    yaml_representers = {**yaml.Dumper.yaml_representers, str: _str_representer}
+
+_PromptYamlDumper.add_representer(str, _PromptYamlDumper._str_representer)
 
 
 def _build_yaml_room_block(room_name: str, messages: list[tuple[str, str]]) -> str:
