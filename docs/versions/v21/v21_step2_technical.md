@@ -72,15 +72,18 @@
 
 逻辑：
 
-**第一步：查找现有 PRIVATE 房间**
+**第一步：按 DB 查找现有 PRIVATE 房间**
 
-```python
-# DAL：拉取 team 下所有 PRIVATE 房间（数量极少，Python 侧 filter）
-gt_rooms = await gtRoomManager.get_rooms_by_team_and_type(team_id, RoomType.PRIVATE)
-matched = next((r for r in gt_rooms if agent_id in (r.agent_ids or [])), None)
+新增 DAL 方法 `get_private_room_by_agent(team_id, agent_id)`，使用 SQLite `json_each` 子查询精确匹配整数数组：
+
+```sql
+SELECT * FROM gtroom
+WHERE team_id = ? AND type = 'PRIVATE'
+  AND EXISTS (SELECT 1 FROM json_each(agent_ids) WHERE value = ?)
+LIMIT 1
 ```
 
-若 `matched` 不为 None，直接返回对应 ChatRoom（`created=False`）。
+若找到则直接返回对应 ChatRoom（`created=False`）。
 
 **第二步（创建）：无匹配房间时**
 
@@ -190,7 +193,7 @@ case 'room_added':
 | 文件 | 变更 |
 |------|------|
 | `src/constants.py` | 新增 `ROOM_ADDED` WS 事件 topic |
-| `src/dal/db/gtRoomManager.py` | 新增 `get_rooms_by_team_and_type(team_id, room_type)` 方法 |
+| `src/dal/db/gtRoomManager.py` | 新增 `get_private_room_by_agent(team_id, agent_id)` 方法（SQLite json_each 查询） |
 | `src/service/roomService/core.py` | 新增 `get_or_create_control_room()` |
 | `src/controller/superviseController.py`（新文件） | `AgentSuperviseHandler` |
 | `src/route.py` | 注册 `/agents/{agent_id}/supervise.json` 路由 |
