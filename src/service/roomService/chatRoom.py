@@ -134,6 +134,14 @@ class ChatRoom:
             logger.warning("房间 %s 非 SCHEDULING 状态，immediately 消息降级为普通消息", self.key)
             insert_immediately = False
 
+        # 私聊房间调度中时，OPERATOR 发送的普通消息延迟到本轮结束后注入（queued）
+        is_queued = (
+            not insert_immediately
+            and sender_id == self.OPERATOR_MEMBER_ID
+            and self.room_type == RoomType.PRIVATE
+            and self._state == RoomState.SCHEDULING
+        )
+
         # 从数据库获取 display_name（SYSTEM agent 也有数据库记录）
         agent = await gtAgentManager.get_agent_by_id(sender_id)
         assert agent, f"agent_id '{sender_id}' not found"
@@ -147,8 +155,8 @@ class ChatRoom:
             insert_immediately=insert_immediately,
         )
 
-        if insert_immediately:
-            # immediately 消息进入等待注入队列，seq 尚未分配，由注入时赋值
+        if insert_immediately or is_queued:
+            # immediately/queued 消息进入等待注入队列，seq 尚未分配，由注入时赋值
             self._store.append_pending(message)
         else:
             self._store.append_and_assign_seq(message)
@@ -162,12 +170,12 @@ class ChatRoom:
             content=content,
             send_time=message.send_time.isoformat(),
             insert_immediately=insert_immediately,
-            seq=message.seq,  # immediately 消息此时为 None
+            seq=message.seq,  # immediately/queued 消息此时为 None
         )
         message.db_id = db_msg.id
 
-        if not insert_immediately:
-            # immediately 消息的 WS 广播推迟到注入时
+        if not insert_immediately and not is_queued:
+            # immediately/queued 消息的 WS 广播推迟到注入时
             messageBus.publish(
                 MessageBusTopic.ROOM_MSG_ADDED,
                 gt_room=self.gt_room,
@@ -202,6 +210,36 @@ class ChatRoom:
             )
         logger.info(
             "immediately 消息注入完成: room=%s, count=%d, seqs=%s",
+            self.key, len(flushed), [m.seq for m in flushed],
+        )
+
+    async def flush_queued_messages(self) -> None:
+        """将 queued 消息（OPERATOR 在调度中发送的普通消息）分配 seq，更新 DB，广播 WS，并推进 OPERATOR 轮次。
+
+        queued 消息的 seq 在当前 Agent 轮次结束后才分配，因此在时间线上出现在 Agent 回复之后。
+        由 agentTurnRunner 在 Agent 轮次结束后（_run_turn_loop 返回后）调用。
+        若存在 queued 消息，flush 后以 OPERATOR 身份完成本轮，触发下一位 AI 调度。
+        """
+        flushed = self._store.flush_queued()
+        if not flushed:
+            return
+        for msg in flushed:
+            if msg.db_id is not None:
+                await gtRoomMessageManager.update_room_message_seq(msg.db_id, msg.seq)  # type: ignore[arg-type]
+            messageBus.publish(
+                MessageBusTopic.ROOM_MSG_ADDED,
+                gt_room=self.gt_room,
+                sender_id=msg.sender_id,
+                content=msg.content,
+                time=msg.send_time.isoformat(),
+                seq=msg.seq,
+                insert_immediately=False,
+            )
+            if self._agent_ids:
+                self._update_turn_state_on_message(msg.sender_id)
+        await self.finish_turn(self.OPERATOR_MEMBER_ID)
+        logger.info(
+            "queued 消息 flush 完成: room=%s, count=%d, seqs=%s",
             self.key, len(flushed), [m.seq for m in flushed],
         )
 

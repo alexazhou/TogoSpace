@@ -10,8 +10,11 @@ class RoomMessageStore:
 
     所有消息统一存储在 _messages 中：
     - seq 已赋值的消息排在前面（按 seq 升序），为主流消息，供 get_unread() 使用。
-    - seq=None 的消息（insert_immediately=True）排在末尾，为 pending 状态，
-      等待 agentTurnRunner 在安全边界调用 flush_pending_immediate() 后进入主流。
+    - seq=None 的消息排在末尾，为 pending 状态，分为两类：
+        1. insert_immediately=True：待注入消息，由 agentTurnRunner 在安全边界
+           调用 flush_pending_immediate() 注入（出现在当前轮次 Agent 回复之前）。
+        2. insert_immediately=False：queued 消息，由 agentTurnRunner 在轮次结束后
+           调用 flush_queued() 注入（出现在当前轮次 Agent 回复之后）。
     """
 
     def __init__(self, agent_ids: List[int]):
@@ -41,7 +44,12 @@ class RoomMessageStore:
         self._messages.insert(insert_pos, msg)
 
     def append_pending(self, msg: GtCoreRoomMessage) -> None:
-        """将 immediately 消息追加到列表末尾（seq 尚未分配）。"""
+        """将消息追加到 pending 队列末尾（seq 尚未分配）。
+
+        适用于两类 pending 消息：
+        - insert_immediately=True：待注入消息，等待在安全边界 flush_pending_immediate() 注入。
+        - insert_immediately=False：queued 消息，等待轮次结束后 flush_queued() 注入。
+        """
         assert msg.seq is None, f"append_pending 要求 seq 为 None，实际为 {msg.seq}"
         self._messages.append(msg)
 
@@ -90,18 +98,28 @@ class RoomMessageStore:
             self._agent_seq_read = converted
 
     def has_pending_immediate_messages(self, agent_id: int) -> bool:
-        """检查是否有 seq=None 的待处理消息。"""
-        return any(m.seq is None for m in self._messages)
+        """检查是否有 insert_immediately=True 且 seq=None 的待注入消息。"""
+        return any(m.seq is None and m.insert_immediately for m in self._messages)
 
     def flush_pending_immediate(self) -> List[GtCoreRoomMessage]:
-        """将 seq=None 的消息分配 seq，使其进入主流，返回已处理的消息列表。"""
-        pending = [m for m in self._messages if m.seq is None]
+        """将 insert_immediately=True 且 seq=None 的消息分配 seq，使其进入主流，返回已处理的消息列表。"""
+        pending = [m for m in self._messages if m.seq is None and m.insert_immediately]
         if not pending:
             return []
         for msg in pending:
             msg.seq = self._next_seq
             self._next_seq += 1
         return pending
+
+    def flush_queued(self) -> List[GtCoreRoomMessage]:
+        """将 insert_immediately=False 且 seq=None 的 queued 消息分配 seq，使其进入主流，返回已处理的消息列表。"""
+        queued = [m for m in self._messages if m.seq is None and not m.insert_immediately]
+        if not queued:
+            return []
+        for msg in queued:
+            msg.seq = self._next_seq
+            self._next_seq += 1
+        return queued
 
     def escalate_to_immediate(self, db_id: int) -> GtCoreRoomMessage:
         """将主流中尚未被任何 agent 读取的消息升级为 pending（seq=None）。

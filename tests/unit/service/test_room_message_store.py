@@ -42,6 +42,12 @@ class TestHasPendingImmediateMessages:
         store.flush_pending_immediate()
         assert store.has_pending_immediate_messages(agent_id=1) is False
 
+    def test_returns_false_for_pending_queued_message(self):
+        """queued 消息（insert_immediately=False）不影响 has_pending_immediate_messages。"""
+        store = RoomMessageStore(agent_ids=[1])
+        store.append_pending(_msg(insert_immediately=False))
+        assert store.has_pending_immediate_messages(agent_id=1) is False
+
     def test_does_not_advance_read_index(self):
         """has_pending_immediate_messages 只检查，不推进游标。"""
         store = RoomMessageStore(agent_ids=[1])
@@ -53,17 +59,20 @@ class TestHasPendingImmediateMessages:
         assert len(unread) == 0
 
     def test_flush_moves_to_main_list_and_assigns_seq(self):
-        """flush_pending_immediate 将消息移入主列表并分配 seq。"""
+        """flush_pending_immediate 只将 insert_immediately=True 的消息移入主列表并分配 seq。"""
         store = RoomMessageStore(agent_ids=[1])
         store.append_and_assign_seq(_msg(content="before"))  # seq=0
         msg = _msg(insert_immediately=True, content="immediate")
         store.append_pending(msg)
+        queued = _msg(insert_immediately=False, content="queued")
+        store.append_pending(queued)
 
         flushed = store.flush_pending_immediate()
         assert len(flushed) == 1
         assert flushed[0].seq == 1  # 紧接在 seq=0 之后
-        assert len(store.messages) == 2
+        assert len(store.messages) == 2  # before + immediate
         assert store.has_pending_immediate_messages(agent_id=1) is False
+        assert len(store.pending_messages) == 1  # queued 仍在 pending
 
     def test_flush_messages_appear_in_get_unread(self):
         """flush 后 immediately 消息可通过 get_unread 读取。"""
@@ -75,12 +84,73 @@ class TestHasPendingImmediateMessages:
         assert unread[0].insert_immediately is True
 
     def test_global_queue_cleared_for_all_agents(self):
-        """pending 队列是房间级别的，flush 后所有 agent 都看不到 pending。"""
+        """pending 队列是房间级别的，flush 后所有 agent 都看不到 pending immediate 消息。"""
         store = RoomMessageStore(agent_ids=[1, 2])
         store.append_pending(_msg(insert_immediately=True))
         store.flush_pending_immediate()
         assert store.has_pending_immediate_messages(agent_id=1) is False
         assert store.has_pending_immediate_messages(agent_id=2) is False
+
+
+class TestFlushQueued:
+    """flush_queued()：只处理 insert_immediately=False 的 pending 消息。"""
+
+    def test_flush_queued_assigns_seq_to_queued_only(self):
+        """flush_queued 只对 insert_immediately=False 的 pending 消息分配 seq。"""
+        store = RoomMessageStore(agent_ids=[1])
+        store.append_and_assign_seq(_msg(content="before"))  # seq=0
+        queued = _msg(insert_immediately=False, content="queued")
+        immediate = _msg(insert_immediately=True, content="immediate")
+        store.append_pending(queued)
+        store.append_pending(immediate)
+
+        flushed = store.flush_queued()
+        assert len(flushed) == 1
+        assert flushed[0].content == "queued"
+        assert flushed[0].seq == 1
+        # immediate 消息仍在 pending
+        assert store.has_pending_immediate_messages(agent_id=1) is True
+        assert len(store.pending_messages) == 1
+
+    def test_flush_queued_returns_empty_when_none(self):
+        """无 queued 消息时返回空列表。"""
+        store = RoomMessageStore(agent_ids=[1])
+        store.append_pending(_msg(insert_immediately=True))
+        result = store.flush_queued()
+        assert result == []
+
+    def test_flush_queued_seq_continues_from_main_list(self):
+        """queued 消息的 seq 紧接在已有主流消息之后。"""
+        store = RoomMessageStore(agent_ids=[1])
+        store.append_and_assign_seq(_msg(content="a"))  # seq=0
+        store.append_and_assign_seq(_msg(content="b"))  # seq=1
+        queued = _msg(insert_immediately=False, content="queued")
+        store.append_pending(queued)
+
+        flushed = store.flush_queued()
+        assert flushed[0].seq == 2
+
+    def test_flush_queued_multiple_messages(self):
+        """多条 queued 消息按追加顺序分配 seq。"""
+        store = RoomMessageStore(agent_ids=[1])
+        d1 = _msg(insert_immediately=False, content="d1")
+        d2 = _msg(insert_immediately=False, content="d2")
+        store.append_pending(d1)
+        store.append_pending(d2)
+
+        flushed = store.flush_queued()
+        assert len(flushed) == 2
+        assert flushed[0].seq == 0
+        assert flushed[1].seq == 1
+
+    def test_flush_queued_messages_appear_in_get_unread(self):
+        """flush 后 queued 消息可通过 get_unread 读取。"""
+        store = RoomMessageStore(agent_ids=[1])
+        store.append_pending(_msg(insert_immediately=False))
+        store.flush_queued()
+        unread = store.get_unread(agent_id=1)
+        assert len(unread) == 1
+        assert unread[0].insert_immediately is False
 
 
 class TestEscalateToImmediate:
