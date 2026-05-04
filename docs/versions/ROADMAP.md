@@ -378,3 +378,4 @@
 
 ### V21
 - [产品文档](./versions/v21/v21_step1_product.md)
+- [技术文档](./versions/v21/v21_step2_technical.md)
