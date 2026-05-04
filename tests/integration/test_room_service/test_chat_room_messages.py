@@ -69,11 +69,7 @@ class TestChatRoomMessages(ServiceTestCase):
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_MSG_ADDED,
                 gt_room=room.gt_room,
-                sender_id=alice_id,
-                content="hello",
-                time=room.messages[1].send_time.isoformat(),
-                seq=room.messages[1].seq,
-                insert_immediately=False,
+                gt_message=room.messages[1],
             )
 
     async def test_get_unread_messages_initial(self):

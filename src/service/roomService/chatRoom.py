@@ -174,17 +174,13 @@ class ChatRoom:
         )
         message.db_id = db_msg.id
 
+        messageBus.publish(
+            MessageBusTopic.ROOM_MSG_ADDED,
+            gt_room=self.gt_room,
+            gt_message=message,
+        )
+
         if not insert_immediately and not is_queued:
-            # immediately/queued 消息的 WS 广播推迟到注入时
-            messageBus.publish(
-                MessageBusTopic.ROOM_MSG_ADDED,
-                gt_room=self.gt_room,
-                sender_id=sender_id,
-                content=content,
-                time=message.send_time.isoformat(),
-                seq=message.seq,
-                insert_immediately=False,
-            )
             if update_turn_state and self._agent_ids:
                 self._update_turn_state_on_message(sender_id)
 
@@ -200,13 +196,9 @@ class ChatRoom:
             if msg.db_id is not None:
                 await gtRoomMessageManager.update_room_message_seq(msg.db_id, msg.seq)  # type: ignore[arg-type]
             messageBus.publish(
-                MessageBusTopic.ROOM_MSG_ADDED,
+                MessageBusTopic.ROOM_MSG_CHANGED,
                 gt_room=self.gt_room,
-                sender_id=msg.sender_id,
-                content=msg.content,
-                time=msg.send_time.isoformat(),
-                seq=msg.seq,
-                insert_immediately=True,
+                gt_message=msg,
             )
         logger.info(
             "immediately 消息注入完成: room=%s, count=%d, seqs=%s",
@@ -227,13 +219,9 @@ class ChatRoom:
             if msg.db_id is not None:
                 await gtRoomMessageManager.update_room_message_seq(msg.db_id, msg.seq)  # type: ignore[arg-type]
             messageBus.publish(
-                MessageBusTopic.ROOM_MSG_ADDED,
+                MessageBusTopic.ROOM_MSG_CHANGED,
                 gt_room=self.gt_room,
-                sender_id=msg.sender_id,
-                content=msg.content,
-                time=msg.send_time.isoformat(),
-                seq=msg.seq,
-                insert_immediately=False,
+                gt_message=msg,
             )
             if self._agent_ids:
                 self._update_turn_state_on_message(msg.sender_id)
@@ -249,8 +237,13 @@ class ChatRoom:
         消息会从主列表移入 pending 队列，并更新 DB 中的 seq 和 insert_immediately 字段。
         若消息不存在或已被 agent 读取，抛出异常。
         """
-        self._store.escalate_to_immediate(db_id)
+        msg = self._store.escalate_to_immediate(db_id)
         await gtRoomMessageManager.escalate_message_to_immediate(db_id)
+        messageBus.publish(
+            MessageBusTopic.ROOM_MSG_CHANGED,
+            gt_room=self.gt_room,
+            gt_message=msg,
+        )
         logger.info("消息升级为 immediately: room=%s, db_id=%d", self.key, db_id)
 
     def _update_turn_state_on_message(self, sender_id: int) -> None:
