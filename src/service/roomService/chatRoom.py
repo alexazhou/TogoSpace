@@ -267,13 +267,15 @@ class ChatRoom:
         if sender_id != self.SYSTEM_MEMBER_ID and self._round_skipped_set:
             self._round_skipped_set = set()
 
-        # 4. 如果刚才从 IDLE 唤醒，我们需要手动重发当前轮次事件以重启循环
+        # 4. 如果刚才从 IDLE 唤醒，重新发布调度事件
         if was_idle:
-            next_agent_id = self._step_to_next_dispatchable_agent()
+            if self._is_stop_condition_met():
+                self._transition_to_idle_on_stop()
+                return
+            next_agent_id = self._advance_to_next_dispatchable()
             if next_agent_id is not None:
                 self._publish_room_status(need_scheduling=True)
             else:
-                # 无可调度 Agent（如等待 OPERATOR 输入），仍需广播状态变更
                 self._publish_room_status()
 
     async def finish_turn(self, agent_id: int) -> bool:
@@ -310,15 +312,15 @@ class ChatRoom:
 
         self._go_next_turn()
         await self._persist_room_state()
-        next_agent_id = self._step_to_next_dispatchable_agent()
+        if self._is_stop_condition_met():
+            self._transition_to_idle_on_stop()
+            return True
+        next_agent_id = self._advance_to_next_dispatchable()
         if next_agent_id is not None:
             self._publish_room_status(need_scheduling=True)
-        else:
-            # 停止条件已由 _step_to_next_dispatchable_agent 处理（切 IDLE + 发布）；
-            # 若状态仍为 SCHEDULING，说明是 OPERATOR 等待情形，切换到 IDLE
-            if self._state == RoomState.SCHEDULING:
-                self._state = RoomState.IDLE
-                self._publish_room_status()
+        elif self._state == RoomState.SCHEDULING:
+            self._state = RoomState.IDLE
+            self._publish_room_status()
         return True
 
     def _get_current_turn_agent_id(self) -> int:
@@ -383,48 +385,33 @@ class ChatRoom:
         logger.info("房间 %s 当前 turn 被人工停止，切回 IDLE 等待新消息唤醒", self.key)
         self._publish_room_status()
 
-    def _step_to_next_dispatchable_agent(self) -> Optional[int]:
-        """推进到下一个可调度的普通 Agent 并返回其 ID。
+    def _silently_skip(self, agent_id: int) -> None:
+        """跳过当前发言人：标记跳过、清除内容、推进发言位。"""
+        self._round_skipped_set.add(agent_id)
+        self.current_turn_has_content = False
+        self._go_next_turn()
 
-        在 GROUP 房间中，若当前发言位是 OPERATOR（成员数 > 2），会自动推进发言位并记录跳过，
-        直到找到一个普通 Agent 或触发停止条件为止。
-
-        返回 None 表示当前不应发布调度事件，原因可能是：
-        - 无成员
-        - 满足停止条件（已切换到 IDLE 并广播）
-        - 当前发言位是需等待外部输入的 SpecialAgent（如 PRIVATE 房间的 OPERATOR）
-        """
+    def _advance_to_next_dispatchable(self) -> Optional[int]:
+        """从当前发言位出发，向前推进直到遇到可调度的 AI Agent。
+        GROUP 中自动跳过 OPERATOR（成员数 > 2）；遇到 SpecialAgent 等待输入。
+        返回 None 表示当前不应发布调度事件。"""
         if not self._agent_ids:
             return None
 
-        if self._is_stop_condition_met():
-            self._transition_to_idle_on_stop()
-            return None
-
         while True:
-            next_id = self.get_current_turn_agent_id()
+            agent_id = self._get_current_turn_agent_id()
 
             if self._should_auto_skip_agent_turn():
-                logger.info(f"房间 {self.key} 自动跳过人类操作者回合: agent={gtAgentManager.get_agent_name(next_id)}")
-                if next_id is not None:
-                    self._round_skipped_set.add(next_id)
-                self.current_turn_has_content = False
-
-                self._go_next_turn()
+                self._silently_skip(agent_id)
                 if self._is_stop_condition_met():
                     self._transition_to_idle_on_stop()
                     return None
                 continue
 
-            if self._is_special_agent(next_id):
-                logger.info(
-                    "当前发言位为特殊成员，等待外部输入，不发布 ROOM_AGENT_TURN: room=%s, agent=%s",
-                    self.key,
-                    gtAgentManager.get_agent_name(next_id),
-                )
+            if self._is_special_agent(agent_id):
                 return None
 
-            return next_id
+            return agent_id
 
     def _is_stop_condition_met(self) -> bool:
         """判断是否满足停止调度的条件（纯查询，无副作用）。
@@ -476,7 +463,7 @@ class ChatRoom:
         if not self.messages:
             await self._append_message(self.SYSTEM_MEMBER_ID, await self.build_initial_system_message(), update_turn_state=False)
 
-        next_agent_id = self._step_to_next_dispatchable_agent()
+        next_agent_id = self._advance_to_next_dispatchable()
 
         if next_agent_id is not None:
             self._state = RoomState.SCHEDULING
