@@ -269,7 +269,7 @@ class ChatRoom:
 
         # 4. 如果刚才从 IDLE 唤醒，我们需要手动重发当前轮次事件以重启循环
         if was_idle:
-            next_agent_id = self._resolve_next_dispatchable_agent()
+            next_agent_id = self._step_to_next_dispatchable_agent()
             if next_agent_id is not None:
                 self._publish_room_status(need_scheduling=True)
             else:
@@ -310,11 +310,11 @@ class ChatRoom:
 
         self._go_next_turn()
         await self._persist_room_state()
-        next_agent_id = self._resolve_next_dispatchable_agent()
+        next_agent_id = self._step_to_next_dispatchable_agent()
         if next_agent_id is not None:
             self._publish_room_status(need_scheduling=True)
         else:
-            # 停止条件已由 _should_stop_scheduling() 处理（切 IDLE + 发布）；
+            # 停止条件已由 _step_to_next_dispatchable_agent 处理（切 IDLE + 发布）；
             # 若状态仍为 SCHEDULING，说明是 OPERATOR 等待情形，切换到 IDLE
             if self._state == RoomState.SCHEDULING:
                 self._state = RoomState.IDLE
@@ -383,26 +383,22 @@ class ChatRoom:
         logger.info("房间 %s 当前 turn 被人工停止，切回 IDLE 等待新消息唤醒", self.key)
         self._publish_room_status()
 
-    def _resolve_next_dispatchable_agent(self) -> Optional[int]:
-        """解析下一位可发布 ROOM_AGENT_TURN 的普通 Agent ID。
+    def _step_to_next_dispatchable_agent(self) -> Optional[int]:
+        """推进到下一个可调度的普通 Agent 并返回其 ID。
 
-        处理流程：
-        1. 先检查早退条件（无成员 / max_turns=0），不触发 _should_stop_scheduling 的副作用
-        2. 再检查停止条件，若满足则返回 None
-        3. 循环遍历当前发言位：
-           - 若命中 _should_auto_skip_agent_turn()，自动跳过并推进到下一位
-           - 若当前发言位是 SpecialAgent（非自动跳过场景），返回 None 等待外部输入
-           - 若是普通 Agent，返回其 ID 供上层发布事件
+        在 GROUP 房间中，若当前发言位是 OPERATOR（成员数 > 2），会自动推进发言位并记录跳过，
+        直到找到一个普通 Agent 或触发停止条件为止。
 
         返回 None 表示当前不应发布调度事件，原因可能是：
         - 无成员 或 max_turns=0（禁止自动调度）
-        - 房间已命中停止条件（_should_stop_scheduling 返回 True）
-        - 当前发言位是需要等待外部输入的 SpecialAgent（如 PRIVATE 房间的 OPERATOR）
+        - 满足停止条件（已切换到 IDLE 并广播）
+        - 当前发言位是需等待外部输入的 SpecialAgent（如 PRIVATE 房间的 OPERATOR）
         """
         if not self._agent_ids or self._max_turns == 0:
             return None
 
-        if self._should_stop_scheduling():
+        if self._is_stop_condition_met():
+            self._transition_to_idle_on_stop()
             return None
 
         while True:
@@ -415,7 +411,8 @@ class ChatRoom:
                 self.current_turn_has_content = False
 
                 self._go_next_turn()
-                if self._should_stop_scheduling():
+                if self._is_stop_condition_met():
+                    self._transition_to_idle_on_stop()
                     return None
                 continue
 
@@ -429,25 +426,28 @@ class ChatRoom:
 
             return next_id
 
-    def _should_stop_scheduling(self) -> bool:
-        """集中判断并应用停止条件；满足任一条件则切到 IDLE 并返回 True。"""
-        # max_turns >= 0 时按轮次判断（0 = 立即停止；-1 = 不限轮次）
-        if self._max_turns >= 0 and self._turn_count >= self._max_turns:
-            if self._state != RoomState.IDLE:
-                self._state = RoomState.IDLE
-                logger.info(f"房间 {self.key} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
-                self._publish_room_status()
-            return True
+    def _is_stop_condition_met(self) -> bool:
+        """判断是否满足停止调度的条件（纯查询，无副作用）。
 
-        # 获取所有非 OPERATOR 的 AI agent ID
-        ai_agent_ids = {aid for aid in self._agent_ids if aid != self.OPERATOR_MEMBER_ID}
-        if ai_agent_ids and ai_agent_ids.issubset(self._round_skipped_set):
-            if self._state != RoomState.IDLE:
-                self._state = RoomState.IDLE
-                logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
-                self._publish_room_status()
+        满足以下任一条件则返回 True：
+        - max_turns >= 0 且 turn_count >= max_turns（已达到最大轮次；-1 = 不限轮次）
+        - 所有 AI 成员均在本轮中跳过发言
+        """
+        if self._max_turns >= 0 and self._turn_count >= self._max_turns:
             return True
-        return False
+        ai_agent_ids = {aid for aid in self._agent_ids if aid != self.OPERATOR_MEMBER_ID}
+        return bool(ai_agent_ids) and ai_agent_ids.issubset(self._round_skipped_set)
+
+    def _transition_to_idle_on_stop(self) -> None:
+        """在满足停止条件后将房间切换到 IDLE 状态并广播（应在 _is_stop_condition_met 返回 True 后调用）。"""
+        if self._state == RoomState.IDLE:
+            return
+        self._state = RoomState.IDLE
+        if self._max_turns >= 0 and self._turn_count >= self._max_turns:
+            logger.info(f"房间 {self.key} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
+        else:
+            logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
+        self._publish_room_status()
 
     def _go_next_turn(self) -> None:
         """推进到下一发言位。"""
@@ -476,7 +476,7 @@ class ChatRoom:
         if not self.messages:
             await self._append_message(self.SYSTEM_MEMBER_ID, await self.build_initial_system_message(), update_turn_state=False)
 
-        next_agent_id = self._resolve_next_dispatchable_agent()
+        next_agent_id = self._step_to_next_dispatchable_agent()
 
         if next_agent_id is not None:
             self._state = RoomState.SCHEDULING
