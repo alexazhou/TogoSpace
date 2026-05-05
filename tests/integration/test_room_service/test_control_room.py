@@ -137,3 +137,42 @@ class TestGetOrCreateControlRoom(ServiceTestCase):
         alice_id = await self._get_agent_id("alice")
         room, _ = await roomService.get_or_create_control_room(self.team_id, alice_id)
         assert room.state != RoomState.INIT
+
+    async def test_supervise_schedules_ai_agent(self):
+        """supervise 流程：OPERATOR 发消息 + finish_turn 后应调度 AI agent（need_scheduling=True）。
+
+        回归测试：旧代码对 max_turns=-1 用 <= 0 判断，导致控制房间 finish_turn(OPERATOR)
+        后进入 IDLE 而不是调度 AI agent。
+        """
+        bob_id = await self._get_agent_id("bob")
+        room, _ = await roomService.get_or_create_control_room(self.team_id, bob_id)
+
+        # 确保房间在 IDLE 状态（控制房间激活后等待 OPERATOR 输入）
+        assert room.state == RoomState.IDLE
+
+        published_events: list = []
+        import service.messageBus as _mb
+        original_publish = _mb.publish
+
+        def capture_publish(topic, **kwargs):
+            published_events.append((topic, kwargs))
+            return original_publish(topic, **kwargs)
+
+        with patch.object(_mb, "publish", side_effect=capture_publish):
+            await room.add_message(room.OPERATOR_MEMBER_ID, "hello")
+            await room.finish_turn(room.OPERATOR_MEMBER_ID)
+
+        # 最后一个 ROOM_STATUS_CHANGED 事件应为 SCHEDULING + need_scheduling=True
+        status_events = [
+            kwargs for topic, kwargs in published_events
+            if topic == MessageBusTopic.ROOM_STATUS_CHANGED
+        ]
+        assert status_events, "应至少有一个 ROOM_STATUS_CHANGED 事件"
+        last_status = status_events[-1]
+        assert last_status["state"] == RoomState.SCHEDULING, (
+            f"期望 SCHEDULING，实际 {last_status['state']}（旧 bug：max_turns=-1 被误判为不调度）"
+        )
+        assert last_status["need_scheduling"] is True, "最后状态事件应携带 need_scheduling=True"
+        assert last_status["current_turn_agent_id"] == bob_id, (
+            f"期望 bob({bob_id})，实际 {last_status['current_turn_agent_id']}"
+        )
