@@ -33,7 +33,6 @@ class ChatRoom:
         self.gt_team: GtTeam = team
         self._store = RoomMessageStore(gt_room=room)
         self._scheduler = RoomScheduler(
-            agent_ids=room.agent_ids,
             room_key=self.key,
             gt_room=room,
             get_read_index=self._store.get_read_index,
@@ -68,9 +67,6 @@ class ChatRoom:
     @current_turn_has_content.setter
     def current_turn_has_content(self, value: bool) -> None:
         self._scheduler.current_turn_has_content = value
-
-    def _get_current_turn_agent_id(self) -> int:
-        return self._scheduler.get_current_turn_agent_id()
 
     @property
     def messages(self) -> List[GtCoreRoomMessage]:
@@ -226,34 +222,18 @@ class ChatRoom:
             messageBus.publish(MessageBusTopic.ROOM_MSG_ADDED, gt_room=self.gt_room, gt_message=message)
 
         if not insert_immediately and not is_queued and update_turn_state and self._agent_ids:
-            self._on_regular_message(sender_id)
-
-    def _on_regular_message(self, sender_id: int) -> None:
-        """常规消息（非 queued/not-immediate）触发调度状态更新。"""
-        # 1. 唤醒
-        wake_result = self._scheduler.wake_up(sender_id)
-
-        # 2. 标记内容
-        self._scheduler.mark_turn_content(sender_id)
-
-        # 3. 清除跳过记录
-        self._scheduler.clear_skip_on_real_message(sender_id)
-
-        # 4. 唤醒后发布调度事件（非唤醒路径不发布）
-        if wake_result is not None:
-            if self._scheduler.should_stay_idle_after_wake():
-                self._scheduler.publish_status()
-            else:
-                self._scheduler.publish_status(wake_result, need_scheduling=True)
+            wake_result = self._scheduler.on_message(sender_id)
+            if wake_result is not None:
+                if self._scheduler.is_idle():
+                    self._scheduler.publish_status()
+                else:
+                    self._scheduler.publish_status(wake_result, need_scheduling=True)
 
     async def flush_pending_immediate_messages(self) -> None:
         await self._store.flush_pending_immediate()
 
     async def flush_queued_messages(self) -> None:
         flushed = await self._store.flush_queued()
-        for msg in flushed:
-            if self._agent_ids:
-                self._scheduler.mark_turn_content(msg.sender_id)
         if flushed:
             await self.finish_turn(self.OPERATOR_MEMBER_ID)
 

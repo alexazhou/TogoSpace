@@ -380,4 +380,4 @@ class TestToolFunctions(ServiceTestCase):
         result = await finish_chat_turn(_context=ctx, confirm_no_need_talk=True)
 
         assert result["success"]
-        assert gtAgentManager.get_agent_name(room._get_current_turn_agent_id()) == "alice"
+        assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "alice"
