@@ -54,10 +54,6 @@ class RoomScheduler:
         """当前发言位索引（供持久化等外部使用）。"""
         return self._turn_pos
 
-    def _set_state(self, state: RoomState) -> None:
-        """直接设置状态（仅 ChatRoom 在 activate/rebuild 等边界场景使用）。"""
-        self._state = state
-
     def set_turn_pos(self, turn_pos: int | None = None) -> None:
         """从持久化数据恢复发言位，重置跳过窗口。"""
         self._turn_count = 0
@@ -109,8 +105,9 @@ class RoomScheduler:
             self.publish_status()
         return True
 
-    def complete_activation(self) -> None:
-        """激活收尾：找下一位可调度 Agent → 决定 SCHEDULING/IDLE → 发布。"""
+    def activate(self) -> None:
+        """激活：退出 INIT → 找下一位可调度 Agent → 决定状态 → 发布。"""
+        self._state = RoomState.IDLE
         next_id = self._advance_to_next_dispatchable()
         if next_id is not None:
             self._state = RoomState.SCHEDULING

@@ -35,15 +35,25 @@ class RoomMessageStore:
         """返回尚未注入的 pending 消息列表（seq=None）。"""
         return [m for m in self._messages if m.seq is None]
 
-    def append_and_assign_seq(self, msg: GtCoreRoomMessage) -> None:
-        """追加到主消息列表，并自动分配 seq。
+    async def append_and_assign_seq(self, msg: GtCoreRoomMessage, *,
+                                     publish: bool = False) -> None:
+        """追加到主消息列表并自动分配 seq。
 
-        维持不变量：seq 已赋值的消息排在所有 seq=None 消息之前。
+        - publish=False（默认）：纯内存操作
+        - publish=True：同时完成 DB 持久化 + WS 广播
         """
         msg.seq = self._next_seq
         self._next_seq += 1
         insert_pos = next((i for i, m in enumerate(self._messages) if m.seq is None), len(self._messages))
         self._messages.insert(insert_pos, msg)
+        if publish:
+            db_msg = await gtRoomMessageManager.append_room_message(
+                room_id=self._gt_room.id, agent_id=msg.sender_id, content=msg.content,
+                send_time=msg.send_time.isoformat(),
+                insert_immediately=False, seq=msg.seq,
+            )
+            msg.db_id = db_msg.id
+            messageBus.publish(MessageBusTopic.ROOM_MSG_ADDED, gt_room=self._gt_room, gt_message=msg)
 
     def append_pending(self, msg: GtCoreRoomMessage) -> None:
         """将消息追加到 pending 队列末尾（seq 尚未分配）。

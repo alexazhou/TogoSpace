@@ -31,10 +31,10 @@ class TestHasPendingImmediateMessages:
         store = RoomMessageStore(gt_room=mock_room)
         assert store.has_pending_immediate_messages(agent_id=1) is False
 
-    def test_returns_false_for_regular_unread_messages(self, mock_room):
+    async def test_returns_false_for_regular_unread_messages(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        store.append_and_assign_seq(_msg(insert_immediately=False))
-        store.append_and_assign_seq(_msg(insert_immediately=False))
+        await store.append_and_assign_seq(_msg(insert_immediately=False))
+        await store.append_and_assign_seq(_msg(insert_immediately=False))
         assert store.has_pending_immediate_messages(agent_id=1) is False
 
     def test_returns_true_for_pending_immediate_message(self, mock_room):
@@ -67,7 +67,7 @@ class TestHasPendingImmediateMessages:
     async def test_flush_moves_to_main_list_and_assigns_seq(self, mock_room):
         """flush_pending_immediate 只将 insert_immediately=True 的消息移入主列表并分配 seq。"""
         store = RoomMessageStore(gt_room=mock_room)
-        store.append_and_assign_seq(_msg(content="before"))  # seq=0
+        await store.append_and_assign_seq(_msg(content="before"))  # seq=0
         msg = _msg(insert_immediately=True, content="immediate")
         store.append_pending(msg)
         queued = _msg(insert_immediately=False, content="queued")
@@ -105,7 +105,7 @@ class TestFlushQueued:
     async def test_flush_queued_assigns_seq_to_queued_only(self, mock_room):
         """flush_queued 只对 insert_immediately=False 的 pending 消息分配 seq。"""
         store = RoomMessageStore(gt_room=mock_room)
-        store.append_and_assign_seq(_msg(content="before"))  # seq=0
+        await store.append_and_assign_seq(_msg(content="before"))  # seq=0
         queued = _msg(insert_immediately=False, content="queued")
         immediate = _msg(insert_immediately=True, content="immediate")
         store.append_pending(queued)
@@ -129,8 +129,8 @@ class TestFlushQueued:
     async def test_flush_queued_seq_continues_from_main_list(self, mock_room):
         """queued 消息的 seq 紧接在已有主流消息之后。"""
         store = RoomMessageStore(gt_room=mock_room)
-        store.append_and_assign_seq(_msg(content="a"))  # seq=0
-        store.append_and_assign_seq(_msg(content="b"))  # seq=1
+        await store.append_and_assign_seq(_msg(content="a"))  # seq=0
+        await store.append_and_assign_seq(_msg(content="b"))  # seq=1
         queued = _msg(insert_immediately=False, content="queued")
         store.append_pending(queued)
 
@@ -168,11 +168,11 @@ class TestEscalateToImmediate:
         m.db_id = db_id
         return m
 
-    def test_escalate_unread_message_succeeds(self, mock_room):
+    async def test_escalate_unread_message_succeeds(self, mock_room):
         """未被任何 agent 读取的消息可以升级。"""
         store = RoomMessageStore(gt_room=mock_room)
         m = self._msg_with_db_id(db_id=10)
-        store.append_and_assign_seq(m)
+        await store.append_and_assign_seq(m)
 
         result = store.escalate_to_immediate(db_id=10)
 
@@ -187,11 +187,11 @@ class TestEscalateToImmediate:
         with pytest.raises(ValueError):
             store.escalate_to_immediate(db_id=999)
 
-    def test_escalate_raises_if_agent_already_read(self, mock_room):
+    async def test_escalate_raises_if_agent_already_read(self, mock_room):
         """agent 已读取过该消息后，升级应抛出 RuntimeError。"""
         store = RoomMessageStore(gt_room=mock_room)
         m = self._msg_with_db_id(db_id=10)
-        store.append_and_assign_seq(m)
+        await store.append_and_assign_seq(m)
         store.get_unread(agent_id=1)  # agent reads it
 
         with pytest.raises(RuntimeError):
@@ -199,36 +199,36 @@ class TestEscalateToImmediate:
 
         assert len(store.messages) == 1  # unchanged
 
-    def test_escalate_unread_message_among_multiple_agents(self, mock_room):
+    async def test_escalate_unread_message_among_multiple_agents(self, mock_room):
         """多 agent 场景：所有 agent 都未读时可升级。"""
         mock_room.agent_ids = [1, 2]
         store = RoomMessageStore(gt_room=mock_room)
         m = self._msg_with_db_id(db_id=10)
-        store.append_and_assign_seq(m)
+        await store.append_and_assign_seq(m)
 
         result = store.escalate_to_immediate(db_id=10)
         assert result.seq is None
 
-    def test_escalate_raises_if_any_agent_already_read(self, mock_room):
+    async def test_escalate_raises_if_any_agent_already_read(self, mock_room):
         """只要有一个 agent 已读，升级就应抛出 RuntimeError。"""
         mock_room.agent_ids = [1, 2]
         store = RoomMessageStore(gt_room=mock_room)
         m = self._msg_with_db_id(db_id=10)
-        store.append_and_assign_seq(m)
+        await store.append_and_assign_seq(m)
         store.get_unread(agent_id=1)  # agent 1 reads it, agent 2 has not
 
         with pytest.raises(RuntimeError):
             store.escalate_to_immediate(db_id=10)
 
-    def test_escalate_preserves_other_messages_and_read_index(self, mock_room):
+    async def test_escalate_preserves_other_messages_and_read_index(self, mock_room):
         """升级一条消息后，其他消息顺序与 agent 读取进度不受影响。"""
         store = RoomMessageStore(gt_room=mock_room)
         m0 = self._msg_with_db_id(db_id=5, content="before")
         m1 = self._msg_with_db_id(db_id=10, content="target")
         m2 = self._msg_with_db_id(db_id=15, content="after")
-        store.append_and_assign_seq(m0)
-        store.append_and_assign_seq(m1)
-        store.append_and_assign_seq(m2)
+        await store.append_and_assign_seq(m0)
+        await store.append_and_assign_seq(m1)
+        await store.append_and_assign_seq(m2)
 
         store.escalate_to_immediate(db_id=10)
 
@@ -305,7 +305,7 @@ class TestSort:
         assert store._messages[0].seq == 0  # noqa: SLF001
         assert store._messages[1].seq is None  # noqa: SLF001
 
-    def test_escalate_multiple_pending_sorted_by_db_id(self, mock_room):
+    async def test_escalate_multiple_pending_sorted_by_db_id(self, mock_room):
         """连续 escalate 后 pending 列表按 db_id 排序。"""
         mock_room.agent_ids = []
         store = RoomMessageStore(gt_room=mock_room)
@@ -313,7 +313,7 @@ class TestSort:
         m2 = self._msg_with_db_id(db_id=10)
         m3 = self._msg_with_db_id(db_id=20)
         for m in (m1, m2, m3):
-            store.append_and_assign_seq(m)
+            await store.append_and_assign_seq(m)
 
         store.escalate_to_immediate(db_id=30)
         store.escalate_to_immediate(db_id=10)

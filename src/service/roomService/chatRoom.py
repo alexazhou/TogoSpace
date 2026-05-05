@@ -140,13 +140,17 @@ class ChatRoom:
         if self._scheduler.state != RoomState.INIT:
             return False
 
-        # 先离开 INIT，否则 _append_message 的 DB 写入会被跳过
-        self._scheduler._set_state(RoomState.IDLE)
-
         if not self.messages:
-            await self._append_message(self.SYSTEM_MEMBER_ID, await self.build_initial_system_message(), update_turn_state=False)
+            content = await self.build_initial_system_message()
+            agent = await gtAgentManager.get_agent_by_id(self.SYSTEM_MEMBER_ID)
+            await self._store.append_and_assign_seq(GtCoreRoomMessage(
+                sender_id=self.SYSTEM_MEMBER_ID,
+                sender_display_name=agent.display_name,
+                content=content,
+                send_time=datetime.now(),
+            ), publish=True)
 
-        self._scheduler.complete_activation()
+        self._scheduler.activate()
         logger.info("[%s] 房间激活: INIT -> %s (agents=%d, max_turns=%d)",
                      self.key, self._scheduler.state.name, len(self._agent_ids), self.gt_room.max_turns)
         return True
@@ -207,19 +211,19 @@ class ChatRoom:
         if insert_immediately or is_queued:
             self._store.append_pending(message)
         else:
-            self._store.append_and_assign_seq(message)
+            await self._store.append_and_assign_seq(message, publish=True)
 
         if state == RoomState.INIT:
             return
 
-        db_msg = await gtRoomMessageManager.append_room_message(
-            room_id=self.room_id, agent_id=sender_id, content=content,
-            send_time=message.send_time.isoformat(),
-            insert_immediately=insert_immediately, seq=message.seq,
-        )
-        message.db_id = db_msg.id
-
-        messageBus.publish(MessageBusTopic.ROOM_MSG_ADDED, gt_room=self.gt_room, gt_message=message)
+        if insert_immediately or is_queued:
+            db_msg = await gtRoomMessageManager.append_room_message(
+                room_id=self.room_id, agent_id=sender_id, content=content,
+                send_time=message.send_time.isoformat(),
+                insert_immediately=insert_immediately, seq=message.seq,
+            )
+            message.db_id = db_msg.id
+            messageBus.publish(MessageBusTopic.ROOM_MSG_ADDED, gt_room=self.gt_room, gt_message=message)
 
         if not insert_immediately and not is_queued and update_turn_state and self._agent_ids:
             self._on_regular_message(sender_id)
