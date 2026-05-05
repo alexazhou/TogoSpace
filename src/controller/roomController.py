@@ -212,7 +212,8 @@ class RoomMessagesHandler(BaseHandler):
             )
 
         await room.add_message(room.OPERATOR_MEMBER_ID, content, insert_immediately=request.insert_immediately)
-        await room.finish_turn(room.OPERATOR_MEMBER_ID)
+        if room.get_current_turn_agent_id() == room.OPERATOR_MEMBER_ID:
+            await room.finish_turn(room.OPERATOR_MEMBER_ID)
         self.return_success()
 
 

@@ -55,6 +55,9 @@ class AgentSuperviseHandler(BaseHandler):
             error_code="invalid_request",
         )
         await room.add_message(room.OPERATOR_MEMBER_ID, request.content, insert_immediately=request.insert_immediately)
-        await room.finish_turn(room.OPERATOR_MEMBER_ID)
+        # 仅当 OPERATOR 是当前应发言人时才推进轮次；
+        # 若 AI Agent 已是当前发言人（turn_pos 指向 AI），add_message 内部已完成调度唤醒，无需再推进
+        if room.get_current_turn_agent_id() == room.OPERATOR_MEMBER_ID:
+            await room.finish_turn(room.OPERATOR_MEMBER_ID)
 
         self.return_json({"room_id": room.room_id, "created": created})
