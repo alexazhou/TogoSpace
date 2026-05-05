@@ -344,7 +344,7 @@ async def finish_chat_turn(_context: ToolCallContext = None, confirm_no_need_tal
         }
 
     logger.info(f"Agent 结束行动: agent_id={_context.agent_id}")
-    ok = await _context.chat_room.finish_turn(_context.agent_id)
+    ok = await _context.chat_room.handle_finish_request(_context.agent_id)
 
     if not ok:
         current_id = _context.chat_room.get_current_turn_agent_id()

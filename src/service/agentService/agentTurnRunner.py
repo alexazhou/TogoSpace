@@ -146,7 +146,7 @@ class AgentTurnRunner:
                     synced_count = await self.pull_room_messages_to_history(room)
                     if synced_count == 0:
                         logger.info(f"无新消息，自动跳过本轮: {self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}")
-                        await room.finish_turn(self.gt_agent.id)
+                        await room.handle_finish_request(self.gt_agent.id)
                         await room.flush_queued_messages()
                         return
 

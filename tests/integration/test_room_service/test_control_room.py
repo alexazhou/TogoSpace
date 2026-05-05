@@ -160,7 +160,7 @@ class TestGetOrCreateControlRoom(ServiceTestCase):
 
         with patch.object(_mb, "publish", side_effect=capture_publish):
             await room.add_message(room.OPERATOR_MEMBER_ID, "hello")
-            await room.finish_turn(room.OPERATOR_MEMBER_ID)
+            await room.handle_finish_request(room.OPERATOR_MEMBER_ID)
 
         # 最后一个 ROOM_STATUS_CHANGED 事件应为 SCHEDULING + need_scheduling=True
         status_events = [

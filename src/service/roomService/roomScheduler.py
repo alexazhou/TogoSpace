@@ -64,25 +64,27 @@ class RoomScheduler:
 
     # ─── turn 生命周期 ──────────────────────────────────────
 
-    async def finish_turn(self, agent_id: int) -> bool:
-        """结束当前发言人：校验 → 记录跳过 → 推进 → 持久化 + 发布。"""
+    async def handle_finish_request(self, caller_agent_id: int) -> bool:
+        """处理 Agent 的结束发言请求：校验 → 记录跳过 → 推进 → 持久化 + 发布。"""
         if self._state == RoomState.INIT:
             logger.warning("房间 %s 仍处于 INIT，拒绝结束轮次", self._key)
             return False
-        if agent_id != self.get_current_turn_agent_id():
+
+        current_id = self.get_current_turn_agent_id()
+        current_name = gtAgentManager.get_agent_name(current_id)
+        if caller_agent_id != current_id:
             logger.warning("房间 %s 拒绝结束轮次申请：agent=%s 并非当前发言人 agent=%s",
-                           self._key, gtAgentManager.get_agent_name(agent_id),
-                           gtAgentManager.get_agent_name(self.get_current_turn_agent_id()))
+                           self._key, gtAgentManager.get_agent_name(caller_agent_id), current_name)
             return False
 
         logger.info(
             "房间 %s 由 agent=%s 结束本轮行动 (has_content=%s, turn_pos=%d/%d, turn_count=%d)",
-            self._key, gtAgentManager.get_agent_name(self.get_current_turn_agent_id()),
+            self._key, current_name,
             self.current_turn_has_content, self._turn_pos, len(self._gt_room.agent_ids), self._turn_count,
         )
 
         if not self.current_turn_has_content:
-            self._round_skipped_set.add(self.get_current_turn_agent_id())
+            self._round_skipped_set.add(current_id)
         self.current_turn_has_content = False
 
         self._go_next_turn()

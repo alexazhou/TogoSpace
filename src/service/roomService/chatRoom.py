@@ -125,9 +125,9 @@ class ChatRoom:
     def get_current_turn_agent_id(self) -> int:
         return self._scheduler.get_current_turn_agent_id()
 
-    async def finish_turn(self, agent_id: int) -> bool:
-        assertUtil.assertNotNull(agent_id, error_message=f"agent_id 不能为空, room={self.key}")
-        return await self._scheduler.finish_turn(agent_id)
+    async def handle_finish_request(self, caller_agent_id: int) -> bool:
+        assertUtil.assertNotNull(caller_agent_id, error_message=f"agent_id 不能为空, room={self.key}")
+        return await self._scheduler.handle_finish_request(caller_agent_id)
 
     def cancel_current_turn(self) -> None:
         self._scheduler.cancel_current_turn()
@@ -235,7 +235,7 @@ class ChatRoom:
     async def flush_queued_messages(self) -> None:
         flushed = await self._store.flush_queued()
         if flushed:
-            await self.finish_turn(self.OPERATOR_MEMBER_ID)
+            await self.handle_finish_request(self.OPERATOR_MEMBER_ID)
 
     async def escalate_message_to_immediate(self, db_id: int) -> None:
         msg = self._store.escalate_to_immediate(db_id)
