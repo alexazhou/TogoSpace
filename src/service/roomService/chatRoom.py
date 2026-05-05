@@ -32,7 +32,7 @@ class ChatRoom:
         self.gt_room: GtRoom = room
         self.gt_team: GtTeam = team
         self._agent_ids: List[int] = agent_ids or []
-        self._store = RoomMessageStore(self._agent_ids)
+        self._store = RoomMessageStore(self._agent_ids, gt_room=room)
         self._scheduler = RoomScheduler(
             agent_ids=self._agent_ids,
             room_key=self.key,
@@ -240,29 +240,15 @@ class ChatRoom:
                 self._scheduler.publish_status(wake_result, need_scheduling=True)
 
     async def flush_pending_immediate_messages(self) -> None:
-        flushed = self._store.flush_pending_immediate()
-        if not flushed:
-            return
-        for msg in flushed:
-            if msg.db_id is not None:
-                await gtRoomMessageManager.update_room_message_seq(msg.db_id, msg.seq)  # type: ignore[arg-type]
-            messageBus.publish(MessageBusTopic.ROOM_MSG_CHANGED, gt_room=self.gt_room, gt_message=msg)
-        logger.info("immediately 消息注入完成: room=%s, count=%d, seqs=%s",
-                     self.key, len(flushed), [m.seq for m in flushed])
+        await self._store.flush_pending_immediate()
 
     async def flush_queued_messages(self) -> None:
-        flushed = self._store.flush_queued()
-        if not flushed:
-            return
+        flushed = await self._store.flush_queued()
         for msg in flushed:
-            if msg.db_id is not None:
-                await gtRoomMessageManager.update_room_message_seq(msg.db_id, msg.seq)  # type: ignore[arg-type]
-            messageBus.publish(MessageBusTopic.ROOM_MSG_CHANGED, gt_room=self.gt_room, gt_message=msg)
             if self._agent_ids:
                 self._scheduler.mark_turn_content(msg.sender_id)
-        await self.finish_turn(self.OPERATOR_MEMBER_ID)
-        logger.info("queued 消息 flush 完成: room=%s, count=%d, seqs=%s",
-                     self.key, len(flushed), [m.seq for m in flushed])
+        if flushed:
+            await self.finish_turn(self.OPERATOR_MEMBER_ID)
 
     async def escalate_message_to_immediate(self, db_id: int) -> None:
         msg = self._store.escalate_to_immediate(db_id)
@@ -291,7 +277,7 @@ class ChatRoom:
     def rebuild_state_from_history(self, persisted_turn_pos: int | None = None) -> None:
         if not self._agent_ids:
             return
-        self._scheduler.rebuild(persisted_turn_pos)
+        self._scheduler.set_turn_pos(persisted_turn_pos)
 
     # ─── 辅助 ─────────────────────────────────────────────────
 

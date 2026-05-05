@@ -54,24 +54,12 @@ class RoomScheduler:
         """当前发言位索引（供持久化等外部使用）。"""
         return self._turn_pos
 
-    @property
-    def agent_ids(self) -> List[int]:
-        return self._agent_ids
-
-    def replace_agent_ids(self, agent_ids: List[int]) -> None:
-        """替换成员列表（Team 热更新时使用），重置调度状态。"""
-        self._agent_ids = agent_ids
-        self._turn_pos = 0
-        self._turn_count = 0
-        self._round_skipped_set = set()
-        self.current_turn_has_content = False
-
     def _set_state(self, state: RoomState) -> None:
         """直接设置状态（仅 ChatRoom 在 activate/rebuild 等边界场景使用）。"""
         self._state = state
 
-    def rebuild(self, turn_pos: int | None = None) -> None:
-        """从持久化数据重置 turn 状态（不清除 INIT 状态）。"""
+    def set_turn_pos(self, turn_pos: int | None = None) -> None:
+        """从持久化数据恢复发言位，重置跳过窗口。"""
         self._turn_count = 0
         if turn_pos is not None and 0 <= turn_pos < len(self._agent_ids):
             self._turn_pos = turn_pos
