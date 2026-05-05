@@ -167,11 +167,11 @@ def get_agent_by_id_sync(agent_id: int) -> GtAgent | None:
 
 
 def get_agent_name(agent_id: int) -> str:
-    """获取 agent 名称（同步方法，用于日志输出）。
+    """获取 agent 名称（同步方法，仅用于日志输出）。
 
-    优先从缓存获取，若不存在返回 "unknown({agent_id})"。
+    仅从缓存查找；若不存在返回 "unknown({agent_id})"，不执行数据库查询。
     """
-    agent = get_agent_by_id_sync(agent_id)
+    agent = get_cached_agent(agent_id)
     return agent.name if agent else f"unknown({agent_id})"
 
 

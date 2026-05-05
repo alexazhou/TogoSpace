@@ -387,17 +387,19 @@ class ChatRoom:
         """解析下一位可发布 ROOM_AGENT_TURN 的普通 Agent ID。
 
         处理流程：
-        1. 先检查停止条件，若满足则返回 None
-        2. 循环遍历当前发言位：
+        1. 先检查早退条件（无成员 / max_turns=0），不触发 _should_stop_scheduling 的副作用
+        2. 再检查停止条件，若满足则返回 None
+        3. 循环遍历当前发言位：
            - 若命中 _should_auto_skip_agent_turn()，自动跳过并推进到下一位
            - 若当前发言位是 SpecialAgent（非自动跳过场景），返回 None 等待外部输入
            - 若是普通 Agent，返回其 ID 供上层发布事件
 
         返回 None 表示当前不应发布调度事件，原因可能是：
+        - 无成员 或 max_turns=0（禁止自动调度）
         - 房间已命中停止条件（_should_stop_scheduling 返回 True）
         - 当前发言位是需要等待外部输入的 SpecialAgent（如 PRIVATE 房间的 OPERATOR）
         """
-        if not self._agent_ids:
+        if not self._agent_ids or self._max_turns == 0:
             return None
 
         if self._should_stop_scheduling():
@@ -457,45 +459,33 @@ class ChatRoom:
             self._turn_count += 1
 
     async def activate_scheduling(self) -> bool:
-        """激活/重发调度。
+        """将房间从 INIT 状态激活。
 
-        - INIT: 根据当前条件决定目标状态（SCHEDULING 或 IDLE），发送初始消息
-        - SCHEDULING: 直接重发当前轮次
-        - IDLE: 不做任何操作
+        - 插入初始系统消息（若无消息）
+        - 若有可立即调度的 agent，进入 SCHEDULING 并触发首次调度
+        - 否则进入 IDLE，等待后续消息唤醒
 
         返回是否发生了 INIT -> 非 INIT 的状态切换。
         """
-        changed = False
-        if self._state == RoomState.INIT:
-            self._state = (
-                RoomState.SCHEDULING
-                if self._agent_ids and self._max_turns != 0
-                else RoomState.IDLE
-            )
-            changed = True
-            logger.info(
-                "[%s] 房间激活: INIT -> %s (agents=%d, max_turns=%d)",
-                self.key, self._state.name, len(self._agent_ids), self._max_turns,
-            )
-            if not self.messages:
-                await self._append_message(
-                    self.SYSTEM_MEMBER_ID,
-                    await self.build_initial_system_message(),
-                    update_turn_state=False,
-                )
+        if self._state != RoomState.INIT:
+            return False
 
-        if self._state == RoomState.SCHEDULING:
-            next_agent_id = self._resolve_next_dispatchable_agent()
-            if next_agent_id is not None:
-                self._publish_room_status(need_scheduling=True)
-            else:
-                # 停止条件已由 _should_stop_scheduling() 处理（切 IDLE + 发布）；
-                # 若状态仍为 SCHEDULING，说明是 OPERATOR 等待情形，切换到 IDLE
-                if self._state == RoomState.SCHEDULING:
-                    self._state = RoomState.IDLE
-                    self._publish_room_status()
+        # 先离开 INIT，否则 _append_message 的 DB 写入会被跳过
+        self._state = RoomState.IDLE
 
-        return changed
+        if not self.messages:
+            await self._append_message(self.SYSTEM_MEMBER_ID, await self.build_initial_system_message(), update_turn_state=False)
+
+        next_agent_id = self._resolve_next_dispatchable_agent()
+
+        if next_agent_id is not None:
+            self._state = RoomState.SCHEDULING
+            self._publish_room_status(need_scheduling=True)
+        else:
+            self._publish_room_status()
+
+        logger.info(f"[{self.key}] 房间激活: INIT -> {self._state.name} (agents={len(self._agent_ids)}, max_turns={self._max_turns})")
+        return True
 
     def inject_runtime_state(
         self,
