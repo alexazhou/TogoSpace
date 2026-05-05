@@ -56,7 +56,7 @@ class AgentSuperviseHandler(BaseHandler):
         )
         await room.add_message(room.OPERATOR_MEMBER_ID, request.content, insert_immediately=request.insert_immediately)
         # 仅当 OPERATOR 是当前应发言人时才推进轮次；
-        # 若 AI Agent 已是当前发言人（turn_pos 指向 AI），add_message 内部已完成调度唤醒，无需再推进
+        # 若 AI Agent 已是当前发言人（speaker_index 指向 AI），add_message 内部已完成调度唤醒，无需再推进
         if room.get_current_turn_agent_id() == room.OPERATOR_MEMBER_ID:
             await room.handle_finish_request(room.OPERATOR_MEMBER_ID)
 

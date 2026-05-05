@@ -88,7 +88,7 @@ async def save_room(room: GtRoom) -> GtRoom:
             name=room.name,
             type=room.type,
             initial_topic=room.initial_topic,
-            max_turns=room.max_turns,
+            max_rounds=room.max_rounds,
             agent_ids=room.agent_ids or [],
             agent_read_index=room.agent_read_index,
             biz_id=room.biz_id,
@@ -105,7 +105,7 @@ async def save_room(room: GtRoom) -> GtRoom:
             name=room.name,
             type=room.type,
             initial_topic=room.initial_topic,
-            max_turns=room.max_turns,
+            max_rounds=room.max_rounds,
             agent_ids=room.agent_ids or [],
             agent_read_index=room.agent_read_index,
             biz_id=room.biz_id,
@@ -137,12 +137,12 @@ async def delete_room(room_id: int) -> None:
 
 
 # Room State CRUD (persistence)
-async def update_room_state(room_id: int, agent_read_index: dict[str, int], turn_pos: int = 0) -> None:
-    """保存房间运行时状态（agent_read_index + turn_pos）。"""
+async def update_room_state(room_id: int, agent_read_index: dict[str, int], speaker_index: int = 0) -> None:
+    """保存房间运行时状态（agent_read_index + speaker_index）。"""
     await (
         GtRoom.update(
             agent_read_index=agent_read_index,
-            turn_pos=turn_pos,
+            speaker_index=speaker_index,
         )
         .where(GtRoom.id == room_id)
         .aio_execute()
@@ -150,11 +150,11 @@ async def update_room_state(room_id: int, agent_read_index: dict[str, int], turn
 
 
 async def get_room_state(room_id: int) -> tuple[dict[str, int] | None, int]:
-    """获取房间运行时状态（agent_read_index, turn_pos）。"""
+    """获取房间运行时状态（agent_read_index, speaker_index）。"""
     room = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
     if room is None:
         return None, 0
-    return room.agent_read_index, room.turn_pos
+    return room.agent_read_index, room.speaker_index
 
 
 async def delete_rooms_by_biz_ids_not_in(team_id: int, biz_ids: list[str]) -> None:

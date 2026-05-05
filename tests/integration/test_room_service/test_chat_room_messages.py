@@ -147,7 +147,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
     async def test_add_message_insert_immediately_goes_to_pending_queue(self):
         """insert_immediately=True 的消息应进入 pending inject 队列，不进主消息列表。"""
-        await self.create_room(TEAM, "imm_flag_room", ["alice", "bob"], max_turns=10, room_type=RoomType.PRIVATE)
+        await self.create_room(TEAM, "imm_flag_room", ["alice", "bob"], max_rounds=10, room_type=RoomType.PRIVATE)
         room = roomService.get_room_by_key(f"imm_flag_room@{TEAM}")
         await room.activate_scheduling()
         alice_id = await self._get_agent_id("alice")
@@ -163,7 +163,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
     async def test_insert_immediately_persisted_to_db_with_null_seq(self):
         """insert_immediately=True 应持久化到 DB，seq 初始为 NULL（等待注入时赋值）。"""
-        await self.create_room(TEAM, "imm_db_room", ["alice", "bob"], max_turns=10, room_type=RoomType.PRIVATE)
+        await self.create_room(TEAM, "imm_db_room", ["alice", "bob"], max_rounds=10, room_type=RoomType.PRIVATE)
         room = roomService.get_room_by_key(f"imm_db_room@{TEAM}")
         await room.activate_scheduling()
         alice_id = await self._get_agent_id("alice")
@@ -180,7 +180,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
     async def test_has_pending_immediate_messages_true_when_in_queue(self):
         """immediately 消息进入 pending 队列时 has_pending_immediate_messages 应返回 True。"""
-        await self.create_room(TEAM, "imm_pending_room", ["alice", "bob"], max_turns=10, room_type=RoomType.PRIVATE)
+        await self.create_room(TEAM, "imm_pending_room", ["alice", "bob"], max_rounds=10, room_type=RoomType.PRIVATE)
         room = roomService.get_room_by_key(f"imm_pending_room@{TEAM}")
         await room.activate_scheduling()
         alice_id = await self._get_agent_id("alice")
@@ -202,7 +202,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
     async def test_flush_pending_assigns_seq_and_appears_in_stream(self):
         """flush_pending_immediate_messages 后消息进入主流，seq 被赋值，DB 更新。"""
-        await self.create_room(TEAM, "imm_flush_room", ["alice", "bob"], max_turns=10, room_type=RoomType.PRIVATE)
+        await self.create_room(TEAM, "imm_flush_room", ["alice", "bob"], max_rounds=10, room_type=RoomType.PRIVATE)
         room = roomService.get_room_by_key(f"imm_flush_room@{TEAM}")
         await room.activate_scheduling()
         alice_id = await self._get_agent_id("alice")

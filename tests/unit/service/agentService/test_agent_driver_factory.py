@@ -36,12 +36,12 @@ def test_normalize_driver_config_prefers_explicit_driver_block():
             "driver": {
                 "type": "claude_sdk",
                 "allowed_tools": ["Read"],
-                "max_turns": 50,
+                "max_rounds": 50,
             },
         }
     )
     assert cfg.driver_type == DriverType.CLAUDE_SDK
-    assert cfg.options == {"allowed_tools": ["Read"], "max_turns": 50}
+    assert cfg.options == {"allowed_tools": ["Read"], "max_rounds": 50}
 
 
 def test_normalize_driver_config_supports_legacy_runtime_block():
@@ -52,12 +52,12 @@ def test_normalize_driver_config_supports_legacy_runtime_block():
             "runtime": {
                 "type": "claude_sdk",
                 "allowed_tools": ["Read"],
-                "max_turns": 80,
+                "max_rounds": 80,
             },
         }
     )
     assert cfg.driver_type == DriverType.CLAUDE_SDK
-    assert cfg.options == {"allowed_tools": ["Read"], "max_turns": 80}
+    assert cfg.options == {"allowed_tools": ["Read"], "max_rounds": 80}
 
 
 def test_normalize_driver_config_supports_tsp_driver_block():

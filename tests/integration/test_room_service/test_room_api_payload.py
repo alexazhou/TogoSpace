@@ -43,7 +43,7 @@ class TestRoomApiPayload(ServiceTestCase):
         await ormService.shutdown()
 
     async def test_to_dict_includes_current_turn_agent_id(self):
-        await self.create_room(TEAM, "r", ["alice", "bob"], max_turns=5)
+        await self.create_room(TEAM, "r", ["alice", "bob"], max_rounds=5)
         room = roomService.get_room_by_key(f"r@{TEAM}")
 
         assert await room.activate_scheduling()

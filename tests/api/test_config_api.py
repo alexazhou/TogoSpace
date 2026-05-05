@@ -90,7 +90,7 @@ class TestConfigApi(ServiceTestCase):
             "name": room_name,
             "type": "GROUP",
             "initial_topic": "testing",
-            "max_turns": 20,
+            "max_rounds": 20,
             "agent_ids": [alice["id"], bob["id"]],
         }
         async with aiohttp.ClientSession() as client:
@@ -118,7 +118,7 @@ class TestConfigApi(ServiceTestCase):
         modify_payload = {
             "type": "PRIVATE",
             "initial_topic": "updated topic",
-            "max_turns": 30
+            "max_rounds": 30
         }
         async with aiohttp.ClientSession() as client:
             async with client.post(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}/modify.json", json=modify_payload) as resp:
@@ -128,7 +128,7 @@ class TestConfigApi(ServiceTestCase):
             async with client.get(f"{self.backend_base_url}/teams/{team_id}/rooms/{new_room_id}.json") as resp:
                 detail = await resp.json()
                 assert detail["initial_topic"] == "updated topic"
-                assert detail["max_turns"] == 30
+                assert detail["max_rounds"] == 30
 
         # 5. Room Agents Management
         # List Agents
@@ -169,7 +169,7 @@ class TestConfigApi(ServiceTestCase):
             "name": room_name,
             "type": "GROUP",
             "initial_topic": "room created by agent ids",
-            "max_turns": 12,
+            "max_rounds": 12,
             "agent_ids": [alice["id"], bob["id"]],
         }
         async with aiohttp.ClientSession() as client:
@@ -202,7 +202,7 @@ class TestConfigApi(ServiceTestCase):
             "name": room_name,
             "type": "GROUP",
             "initial_topic": "private room",
-            "max_turns": 12,
+            "max_rounds": 12,
             "agent_ids": [alice["id"], int(SpecialAgent.OPERATOR.value)],
         }
         async with aiohttp.ClientSession() as client:
@@ -232,7 +232,7 @@ class TestConfigApi(ServiceTestCase):
             "name": "room_with_invalid_agent_ids",
             "type": "GROUP",
             "initial_topic": "invalid agent ids",
-            "max_turns": 12,
+            "max_rounds": 12,
             "agent_ids": [99999999],
         }
         async with aiohttp.ClientSession() as client:

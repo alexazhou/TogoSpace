@@ -63,12 +63,12 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "test_room"
         agents = ["alice", "bob", "charlie"]
         room_key = f"{room_name}@{TEAM}"
-        await self.create_room(TEAM, room_name, agents, room_type=RoomType.GROUP, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, room_type=RoomType.GROUP, max_rounds=10)
         room = roomService.get_room_by_key(room_key)
         assert await room.activate_scheduling()
 
         assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "alice"
-        assert room._turn_pos == 0
+        assert room._current_speaker_index == 0
 
         alice_id = await self._get_agent_id("alice")
         bob_id = await self._get_agent_id("bob")
@@ -79,7 +79,7 @@ class TestRoomTurnLogic(ServiceTestCase):
             # 消息不再自动推进，手动结束回合
             await room.handle_finish_request(alice_id)
             assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "bob"
-            assert room._turn_pos == 1
+            assert room._current_speaker_index == 1
             mock_publish.assert_any_call(
                 MessageBusTopic.ROOM_STATUS_CHANGED,
                 gt_room=room.gt_room,
@@ -92,7 +92,7 @@ class TestRoomTurnLogic(ServiceTestCase):
             await room.add_message(charlie_id, "I am interrupting")
             # 插话不影响当前发言位，且即便插话也不会推进回合
             assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "bob"
-            assert room._turn_pos == 1
+            assert room._current_speaker_index == 1
             topics = [call[0][0] for call in mock_publish.call_args_list]
             assert MessageBusTopic.ROOM_MSG_ADDED in topics
             scheduling_calls = [
@@ -104,7 +104,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         await room.add_message(bob_id, "responding to alice")
         await room.handle_finish_request(bob_id)
         assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "charlie"
-        assert room._turn_pos == 2
+        assert room._current_speaker_index == 2
 
     async def test_finish_turn_validation(self):
         """
@@ -112,7 +112,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "test_skip"
         agents = ["alice", "bob"]
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
@@ -132,7 +132,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "test_idle"
         agents = ["alice", "bob"]
         room_key = f"{room_name}@{TEAM}"
-        await self.create_room(TEAM, room_name, agents, max_turns=1)
+        await self.create_room(TEAM, room_name, agents, max_rounds=1)
         room = roomService.get_room_by_key(room_key)
         assert await room.activate_scheduling()
 
@@ -145,14 +145,14 @@ class TestRoomTurnLogic(ServiceTestCase):
         await room.handle_finish_request(bob_id)
 
         assert room.state == RoomState.IDLE
-        assert room._turn_count == 1
-        assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "alice"
+        assert room._round_count == 0
+        assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "bob"
 
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message(bob_id, "wait, one more thing")
 
             assert room.state == RoomState.SCHEDULING
-            assert room._turn_count == 0
+            assert room._round_count == 0
             assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "alice"
 
             mock_publish.assert_any_call(
@@ -169,23 +169,23 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "test_loop"
         agents = ["a", "b"]
-        await self.create_room(TEAM, room_name, agents, max_turns=5)
+        await self.create_room(TEAM, room_name, agents, max_rounds=5)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
         a_id = await self._get_agent_id("a")
         b_id = await self._get_agent_id("b")
 
-        assert room._turn_count == 0
+        assert room._round_count == 0
 
         await room.add_message(a_id, "1")
         await room.handle_finish_request(a_id)
-        assert room._turn_count == 0
+        assert room._round_count == 0
 
         await room.add_message(b_id, "2")
         await room.handle_finish_request(b_id)
-        assert room._turn_count == 1
-        assert room._turn_pos == 0
+        assert room._round_count == 1
+        assert room._current_speaker_index == 0
         assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "a"
 
     # ------------------------------------------------------------------
@@ -198,7 +198,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "skip_all"
         agents = ["alice", "bob"]
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
         assert room.state == RoomState.SCHEDULING
@@ -220,7 +220,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "skip_no_event"
         agents = ["alice", "bob"]
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
@@ -240,15 +240,15 @@ class TestRoomTurnLogic(ServiceTestCase):
             agent_ids_notified = [c[1]["current_turn_agent_id"] for c in turn_calls]
             assert agent_ids_notified == [bob_id]
 
-    async def test_all_skip_wakeup_based_on_state_not_turn_count(self):
+    async def test_all_skip_wakeup_based_on_state_not_round_count(self):
         """
-        测试点：全员跳过进入 IDLE 时，_turn_count 不会被人为抬高到 _max_turns；
-        唤醒逻辑只依赖房间状态（IDLE），与 _turn_count 无关。
+        测试点：全员跳过进入 IDLE 时，_round_count 不会被人为抬高到 _max_rounds；
+        唤醒逻辑只依赖房间状态（IDLE），与 _round_count 无关。
         """
         room_name = "skip_idx"
         agents = ["alice", "bob"]
         room_key = f"{room_name}@{TEAM}"
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(room_key)
         assert await room.activate_scheduling()
 
@@ -257,17 +257,17 @@ class TestRoomTurnLogic(ServiceTestCase):
             await room.handle_finish_request(await self._get_agent_id("bob"))
 
         assert room.state == RoomState.IDLE
-        # _turn_count 应为自然推进值（1），不被强制拉到 _max_turns
-        assert room._turn_count == 1
-        assert room._turn_count < room._max_turns
+        # 全员跳过，未发生回到首位，_round_count 停留在 0
+        assert room._round_count == 0
+        assert room._round_count < room._max_rounds
 
-        # 即便 _turn_count 远小于 _max_turns，发消息依然能唤醒房间
+        # 即便 _round_count 远小于 _max_rounds，发消息依然能唤醒房间
         alice_id = await self._get_agent_id("alice")
         with patch("service.messageBus.publish"):
             await room.add_message(alice_id, "back")
 
         assert room.state == RoomState.SCHEDULING
-        assert room._turn_count == 0
+        assert room._round_count == 0
 
     async def test_all_skip_wakeup_by_operator(self):
         """
@@ -276,7 +276,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "skip_wakeup"
         agents = ["OPERATOR", "alice", "bob"]
         room_key = f"{room_name}@{TEAM}"
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(room_key)
         assert await room.activate_scheduling()
 
@@ -291,7 +291,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         with patch("service.messageBus.publish") as mock_publish:
             await room.add_message(room.OPERATOR_MEMBER_ID, "wake up")
             assert room.state == RoomState.SCHEDULING
-            assert room._turn_count == 0
+            assert room._round_count == 0
             assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "alice"
 
             turn_calls = [
@@ -309,7 +309,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         room_name = "manual_stop_wakeup"
         agents = ["alice", "OPERATOR"]
         room_key = f"{room_name}@{TEAM}"
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(room_key)
         assert await room.activate_scheduling()
 
@@ -347,7 +347,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "skip_partial"
         agents = ["alice", "bob", "charlie"]
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
@@ -360,7 +360,7 @@ class TestRoomTurnLogic(ServiceTestCase):
 
         # 本轮 bob 发了言，不是全员跳过 -> 轮次正常推进，房间仍在调度
         assert room.state == RoomState.SCHEDULING
-        assert room._turn_count == 1
+        assert room._round_count == 1
 
     async def test_operator_auto_skip_keeps_all_skip_stop_logic(self):
         """
@@ -368,7 +368,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "skip_op"
         agents = ["alice", SpecialAgent.OPERATOR, "bob"]
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
@@ -394,7 +394,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "operator_auto_skip"
         agents = ["alice", SpecialAgent.OPERATOR, "bob"]
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
         assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "alice"
@@ -420,7 +420,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "operator_wait_group"
         agents = ["alice", "OPERATOR"]
-        await self.create_room(TEAM, room_name, agents, room_type=RoomType.GROUP, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, room_type=RoomType.GROUP, max_rounds=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
         assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "alice"
@@ -454,7 +454,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "operator_alias"
         agents = ["OPERATOR", "alice"]
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
         assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == SpecialAgent.OPERATOR.name
@@ -473,7 +473,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "priv_idle"
         agents = ["alice", "OPERATOR"]
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         await room.activate_scheduling()
         assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "alice"
@@ -500,7 +500,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "skip_reset"
         agents = ["alice", "bob"]
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
@@ -533,7 +533,7 @@ class TestRoomTurnLogic(ServiceTestCase):
         """
         room_name = "test_sliding"
         agents = ["alice", "bob", "charlie"]
-        await self.create_room(TEAM, room_name, agents, max_turns=10)
+        await self.create_room(TEAM, room_name, agents, max_rounds=10)
         room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
         assert await room.activate_scheduling()
 
@@ -558,5 +558,5 @@ class TestRoomTurnLogic(ServiceTestCase):
             await room.handle_finish_request(alice_id) # pos -> 1 (bob), index -> 1, skipped={bob, charlie, alice}
 
         assert room.state == RoomState.IDLE
-        assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "bob"
-        assert room._turn_count == 1
+        assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "alice"
+        assert room._round_count == 1

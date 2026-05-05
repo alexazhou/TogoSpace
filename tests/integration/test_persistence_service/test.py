@@ -31,7 +31,7 @@ TEAMS_CONFIG = [TeamConfig(
         manager="alice",
         agents=["alice", "bob"],
     ),
-    preset_rooms=[TeamRoomConfig(name="r1", agents=["alice", "bob"], max_turns=3)],
+    preset_rooms=[TeamRoomConfig(name="r1", agents=["alice", "bob"], max_rounds=3)],
 )]
 
 if os.name == "posix" and sys.platform == "darwin":
@@ -70,7 +70,7 @@ class TestRestoreRoomHistory(ServiceTestCase):
         assert alice is not None and bob is not None
         cls.alice_id = alice.id
         cls.bob_id = bob.id
-        await ServiceTestCase.create_room(TEAM, "r1", ["alice", "bob"], max_turns=3)
+        await ServiceTestCase.create_room(TEAM, "r1", ["alice", "bob"], max_rounds=3)
         room = roomService.get_room_by_key(f"r1@{TEAM}")
         await room.activate_scheduling()
         await room.add_message(cls.alice_id, "hello")

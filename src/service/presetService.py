@@ -107,7 +107,7 @@ async def _to_gt_room(team_id: int, room_config: TeamRoomConfig) -> GtRoom:
         name=room_config.name,  # 存储稳定 ID；display_name 从 i18n 解析
         type=_infer_room_type(room_config.agents),
         initial_topic=initial_topic,
-        max_turns=roomService.resolve_room_max_turns(room_config.max_turns),
+        max_rounds=roomService.resolve_room_max_rounds(room_config.max_rounds),
         agent_ids=agent_ids,
         biz_id=room_config.biz_id,
         tags=list(room_config.tags),

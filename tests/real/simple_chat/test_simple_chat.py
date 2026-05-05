@@ -74,7 +74,7 @@ class TestRealSimpleChat(ServiceTestCase):
 
         room_key = "general@default"
 
-        # 剧本：Alice 先说话，然后 Bob 回复（max_turns=1）
+        # 剧本：Alice 先说话，然后 Bob 回复（max_rounds=1）
 
         # Alice 的第 1 轮：发送 "你好 Bob！" 然后结束轮次
         self.set_mock_response({

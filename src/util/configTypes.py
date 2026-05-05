@@ -90,7 +90,7 @@ class TeamRoomConfig(BaseModel):
     i18n: I18nData | None = None  # 含 display_name, initial_topic 等多语言字段
     agents: List[str]
     initial_topic: str = ""  # 保留旧格式兼容
-    max_turns: int | None = None
+    max_rounds: int | None = None
     biz_id: str | None = None
     tags: List[str] = Field(default_factory=list)
 
@@ -175,7 +175,7 @@ class SettingConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     default_llm_server: str | None = None
     llm_services: list[LlmServiceConfig] = Field(default_factory=list)
-    default_room_max_turns: int = 100
+    default_room_max_rounds: int = 100
     db_path: str = Field(default_factory=_default_db_path)
     workspace_root: str | None = Field(default_factory=_default_workspace_root)
     bind_host: str = "0.0.0.0"  # HTTP 服务绑定地址

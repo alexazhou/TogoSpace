@@ -1,7 +1,7 @@
 from .chatRoom import ChatRoom
 from .core import (
     ToolCallContext,
-    resolve_room_max_turns,
+    resolve_room_max_rounds,
     startup,
     shutdown,
     load_team_rooms,
@@ -29,7 +29,7 @@ __all__ = [
     "ChatRoom",
     "ToolCallContext",
     "RoomType",
-    "resolve_room_max_turns",
+    "resolve_room_max_rounds",
     "startup",
     "shutdown",
     "load_team_rooms",

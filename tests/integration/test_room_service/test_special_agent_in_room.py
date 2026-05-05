@@ -53,7 +53,7 @@ class TestRoomContainsSpecialAgent(ServiceTestCase):
             name="op_room",
             type=RoomType.GROUP,
             agent_ids=agent_ids,
-            max_turns=1,
+            max_rounds=1,
         )
         await gtRoomManager.save_room(gt_room)
         await roomService.load_team_rooms(self.team_id)
@@ -83,7 +83,7 @@ class TestRoomContainsSpecialAgent(ServiceTestCase):
             name="sys_room",
             type=RoomType.GROUP,
             agent_ids=agent_ids,
-            max_turns=1,
+            max_rounds=1,
         )
         await gtRoomManager.save_room(gt_room)
         await roomService.load_team_rooms(self.team_id)
@@ -113,7 +113,7 @@ class TestRoomContainsSpecialAgent(ServiceTestCase):
             name="filter_room",
             type=RoomType.GROUP,
             agent_ids=agent_ids,
-            max_turns=1,
+            max_rounds=1,
         )
         await gtRoomManager.save_room(gt_room)
         await roomService.load_team_rooms(self.team_id)

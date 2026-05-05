@@ -20,14 +20,14 @@ class CreateRoomRequest(BaseModel):
     name: str
     type: RoomType = RoomType.GROUP
     initial_topic: str | None = None
-    max_turns: int = 100
+    max_rounds: int = 100
     agent_ids: List[int] = Field(default_factory=list)
 
 
 class UpdateRoomRequest(BaseModel):
     type: str
     initial_topic: str | None = None
-    max_turns: int | None = None
+    max_rounds: int | None = None
 
 
 class UpdateAgentsRequest(BaseModel):
@@ -278,7 +278,7 @@ class TeamRoomCreateHandler(BaseHandler):
             name=request.name,
             type=room_type,
             initial_topic=request.initial_topic or "",
-            max_turns=request.max_turns,
+            max_rounds=request.max_rounds,
             agent_ids=list(request.agent_ids),
         ))
         await teamService.hot_reload_team(team_name)
@@ -305,7 +305,7 @@ class TeamRoomDetailHandler(BaseHandler):
             "i18n": room.i18n or {},
             "type": room.type.name,
             "initial_topic": room.initial_topic,
-            "max_turns": room.max_turns,
+            "max_rounds": room.max_rounds,
             "agent_ids": room.agent_ids or [],
         }
         self.return_json(data)
@@ -329,8 +329,8 @@ class TeamRoomModifyHandler(BaseHandler):
         room.type = RoomType(request.type)
         if request.initial_topic is not None:
             room.initial_topic = request.initial_topic
-        if request.max_turns is not None:
-            room.max_turns = request.max_turns
+        if request.max_rounds is not None:
+            room.max_rounds = request.max_rounds
 
         await gtRoomManager.save_room(room)
         await teamService.hot_reload_team(team_name)

@@ -141,7 +141,7 @@ class TestGetOrCreateControlRoom(ServiceTestCase):
     async def test_supervise_schedules_ai_agent(self):
         """supervise 流程：OPERATOR 发消息 + finish_turn 后应调度 AI agent（need_scheduling=True）。
 
-        回归测试：旧代码对 max_turns=-1 用 <= 0 判断，导致控制房间 finish_turn(OPERATOR)
+        回归测试：旧代码对 max_rounds=-1 用 <= 0 判断，导致控制房间 finish_turn(OPERATOR)
         后进入 IDLE 而不是调度 AI agent。
         """
         bob_id = await self._get_agent_id("bob")
@@ -170,7 +170,7 @@ class TestGetOrCreateControlRoom(ServiceTestCase):
         assert status_events, "应至少有一个 ROOM_STATUS_CHANGED 事件"
         last_status = status_events[-1]
         assert last_status["state"] == RoomState.SCHEDULING, (
-            f"期望 SCHEDULING，实际 {last_status['state']}（旧 bug：max_turns=-1 被误判为不调度）"
+            f"期望 SCHEDULING，实际 {last_status['state']}（旧 bug：max_rounds=-1 被误判为不调度）"
         )
         assert last_status["need_scheduling"] is True, "最后状态事件应携带 need_scheduling=True"
         assert last_status["current_turn_agent_id"] == bob_id, (

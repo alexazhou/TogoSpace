@@ -604,7 +604,7 @@ class ServiceTestCase:
         agent_names: list[str],
         initial_topic: str = "",
         room_type: RoomType = RoomType.GROUP,
-        max_turns: int = -1,
+        max_rounds: int = -1,
     ) -> None:
         """测试辅助：通过生产 API（gtRoomManager.save_room + load_all_rooms）创建或更新房间。"""
         gt_team = await gtTeamManager.get_team(team_name)
@@ -618,7 +618,7 @@ class ServiceTestCase:
                 name=room_name,
                 type=room_type,
                 initial_topic=initial_topic,
-                max_turns=max_turns,
+                max_rounds=max_rounds,
                 agent_ids=agent_ids,
                 biz_id=None,
                 tags=[],
@@ -626,7 +626,7 @@ class ServiceTestCase:
         else:
             gt_room.type = room_type
             gt_room.initial_topic = initial_topic
-            gt_room.max_turns = max_turns
+            gt_room.max_rounds = max_rounds
             gt_room.agent_ids = agent_ids
         await gtRoomManager.save_room(gt_room)
         await roomService.load_all_rooms()
@@ -671,7 +671,7 @@ class ServiceTestCase:
                 name=cfg.name,
                 type=infer_room_type(agent_names),
                 initial_topic=cfg.initial_topic,
-                max_turns=roomService.resolve_room_max_turns(cfg.max_turns),
+                max_rounds=roomService.resolve_room_max_rounds(cfg.max_rounds),
                 agent_ids=agent_ids,
                 biz_id=getattr(cfg, "biz_id", None),
                 tags=list(getattr(cfg, "tags", [])),

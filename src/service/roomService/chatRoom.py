@@ -49,12 +49,12 @@ class ChatRoom:
         return self._scheduler.state
 
     @property
-    def _turn_pos(self) -> int:
-        return self._scheduler.turn_pos
+    def _current_speaker_index(self) -> int:
+        return self._scheduler.current_speaker_index
 
     @property
-    def _turn_count(self) -> int:
-        return self._scheduler._turn_count
+    def _round_count(self) -> int:
+        return self._scheduler._round_count
 
     @property
     def _round_skipped_set(self) -> set[int]:
@@ -93,8 +93,8 @@ class ChatRoom:
         return self.gt_room.type
 
     @property
-    def _max_turns(self) -> int:
-        return self.gt_room.max_turns
+    def _max_rounds(self) -> int:
+        return self.gt_room.max_rounds
 
     @property
     def initial_topic(self) -> str:
@@ -147,8 +147,8 @@ class ChatRoom:
             ), publish=True)
 
         self._scheduler.activate()
-        logger.info("[%s] 房间激活: INIT -> %s (agents=%d, max_turns=%d)",
-                     self.key, self._scheduler.state.name, len(self._agent_ids), self.gt_room.max_turns)
+        logger.info("[%s] 房间激活: INIT -> %s (agents=%d, max_rounds=%d)",
+                     self.key, self._scheduler.state.name, len(self._agent_ids), self.gt_room.max_rounds)
         return True
 
     # ─── 消息 ─────────────────────────────────────────────────
@@ -249,11 +249,11 @@ class ChatRoom:
         self,
         messages: List[GtCoreRoomMessage] | None = None,
         agent_read_index: Dict[str, int] | None = None,
-        turn_pos: int | None = None,
+        speaker_index: int | None = None,
     ) -> None:
         self._store.inject(messages=messages, agent_read_index=agent_read_index)
-        if turn_pos is not None:
-            self._scheduler._turn_pos = turn_pos
+        if speaker_index is not None:
+            self._scheduler._current_speaker_index = speaker_index
 
     def export_agent_read_index(self) -> Dict[int, int]:
         return dict(self._store.get_read_index().items())
@@ -261,10 +261,10 @@ class ChatRoom:
     def mark_all_messages_read(self) -> None:
         self._store.mark_all_read()
 
-    def rebuild_state_from_history(self, persisted_turn_pos: int | None = None) -> None:
+    def rebuild_state_from_history(self, persisted_speaker_index: int | None = None) -> None:
         if not self._agent_ids:
             return
-        self._scheduler.set_turn_pos(persisted_turn_pos)
+        self._scheduler.set_current_speaker_index(persisted_speaker_index)
 
     # ─── 辅助 ─────────────────────────────────────────────────
 

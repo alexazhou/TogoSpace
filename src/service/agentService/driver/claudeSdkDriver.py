@@ -102,7 +102,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
             "system_prompt": self.host.system_prompt,
             "mcp_servers": {"chat": server},
             "permission_mode": "bypassPermissions",
-            "max_turns": self.config.options.get("max_turns", 100),
+            "max_rounds": self.config.options.get("max_rounds", 100),
             "cwd": self.host.agent_workdir,
             "add_dirs": [self.host.agent_workdir],
         }

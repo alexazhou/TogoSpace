@@ -15,7 +15,7 @@ class DeptRoomSpec:
     name: str
     initial_topic: str
     agent_ids: list[int]
-    max_turns: int | None = None
+    max_rounds: int | None = None
     i18n: dict | None = None
 
 

@@ -185,7 +185,7 @@ class TestDalManagers(ServiceTestCase):
         await roomService.create_team_rooms(team_a.id, await ServiceTestCase.convert_to_gt_rooms(team_a.id, [TeamRoomConfig(
             name="general",
             initial_topic="hello",
-            max_turns=6,
+            max_rounds=6,
             agents=["alice_1", "bob_1"],
         )]))
         room = next((item for item in await gtRoomManager.get_rooms_by_team(team_a.id) if item.name == "general"), None)
@@ -200,7 +200,7 @@ class TestDalManagers(ServiceTestCase):
         assert team_a.config == {"slogan": "ship fast"}
         assert room.name == "general"
         assert room.initial_topic == "hello"
-        assert room.max_turns == 6
+        assert room.max_rounds == 6
         assert await self._get_room_agent_names(room.id) == ["alice_1", "bob_1"]
 
         teams = await gtTeamManager.get_all_teams()
@@ -225,7 +225,7 @@ class TestDalManagers(ServiceTestCase):
             preset_rooms=[TeamRoomConfig(
                 name="r1",
                 initial_topic="topic 1",
-                max_turns=8,
+                max_rounds=8,
                 agents=["alice_1", "bob_1"],
             )],
         )
@@ -235,7 +235,7 @@ class TestDalManagers(ServiceTestCase):
         assert imported is not None
         room = next((item for item in await gtRoomManager.get_rooms_by_team(imported.id) if item.name == "r1"), None)
         assert room is not None
-        assert room.max_turns == 8
+        assert room.max_rounds == 8
         assert await self._get_room_agent_names(room.id) == ["alice_1", "bob_1"]
 
         # 已存在时应跳过导入，不覆盖已有记录
@@ -313,8 +313,8 @@ class TestDalManagers(ServiceTestCase):
 
         team = await gtTeamManager.save_team(GtTeam(name="room_team"))
         await roomService.create_team_rooms(team.id, await ServiceTestCase.convert_to_gt_rooms(team.id, [
-            TeamRoomConfig(name="z_room", max_turns=2, agents=["alice", "bob"]),
-            TeamRoomConfig(name="a_room", max_turns=3, agents=["OPERATOR", "alice"]),
+            TeamRoomConfig(name="z_room", max_rounds=2, agents=["alice", "bob"]),
+            TeamRoomConfig(name="a_room", max_rounds=3, agents=["OPERATOR", "alice"]),
         ]))
 
         rooms = await gtRoomManager.get_rooms_by_team(team.id)
@@ -350,7 +350,7 @@ class TestDalManagers(ServiceTestCase):
             name="stable",
             type=RoomType.GROUP,
             initial_topic="t1",
-            max_turns=4,
+            max_rounds=4,
             agent_ids=[],
             biz_id=None,
             tags=[],
@@ -358,13 +358,13 @@ class TestDalManagers(ServiceTestCase):
 
         first.type = RoomType.PRIVATE
         first.initial_topic = "t2"
-        first.max_turns = 9
+        first.max_rounds = 9
         second = await gtRoomManager.save_room(first)
 
         assert second.id == first.id
         assert second.type == RoomType.PRIVATE
         assert second.initial_topic == "t2"
-        assert second.max_turns == 9
+        assert second.max_rounds == 9
 
     async def test_room_manager_batch_save_rooms_create_and_update(self):
         await self._reset_tables()
@@ -376,21 +376,21 @@ class TestDalManagers(ServiceTestCase):
             name="existing_room",
             type=RoomType.GROUP,
             initial_topic="old_topic",
-            max_turns=3,
+            max_rounds=3,
             agent_ids=[],
             biz_id=None,
             tags=[],
         ))
 
         existing.initial_topic = "updated_topic"
-        existing.max_turns = 8
+        existing.max_rounds = 8
 
         new_room = GtRoom(
             team_id=team.id,
             name="new_room",
             type=RoomType.PRIVATE,
             initial_topic="new_topic",
-            max_turns=5,
+            max_rounds=5,
             agent_ids=[],
             biz_id=None,
             tags=["tagA"],
@@ -403,12 +403,12 @@ class TestDalManagers(ServiceTestCase):
 
         existing_after = next(room for room in rooms if room.name == "existing_room")
         assert existing_after.initial_topic == "updated_topic"
-        assert existing_after.max_turns == 8
+        assert existing_after.max_rounds == 8
 
         new_after = next(room for room in rooms if room.name == "new_room")
         assert new_after.type == RoomType.PRIVATE
         assert new_after.initial_topic == "new_topic"
-        assert new_after.max_turns == 5
+        assert new_after.max_rounds == 5
         assert new_after.tags == ["tagA"]
 
     async def test_room_manager_upsert_rooms_delete_replace_and_defaults(self):
@@ -416,7 +416,7 @@ class TestDalManagers(ServiceTestCase):
 
         team = await gtTeamManager.save_team(GtTeam(name="upsert_team"))
         await roomService.create_team_rooms(team.id, await ServiceTestCase.convert_to_gt_rooms(team.id, [
-            TeamRoomConfig(name="old_room", max_turns=2, agents=["alice"]),
+            TeamRoomConfig(name="old_room", max_rounds=2, agents=["alice"]),
         ]))
         await roomService.overwrite_team_rooms(team.id, [
             GtRoom(
@@ -424,7 +424,7 @@ class TestDalManagers(ServiceTestCase):
                 name="new_room_1",
                 type=RoomType.GROUP,
                 initial_topic="",
-                max_turns=10,
+                max_rounds=10,
                 agent_ids=[],
                 biz_id=None,
                 tags=[],
@@ -434,7 +434,7 @@ class TestDalManagers(ServiceTestCase):
                 name="new_room_2",
                 type=RoomType.GROUP,
                 initial_topic="x",
-                max_turns=10,
+                max_rounds=10,
                 agent_ids=[],
                 biz_id=None,
                 tags=[],
@@ -444,7 +444,7 @@ class TestDalManagers(ServiceTestCase):
         rooms = await gtRoomManager.get_rooms_by_team(team.id)
         assert [r.name for r in rooms] == ["new_room_1", "new_room_2"]
         assert all(r.type == RoomType.GROUP for r in rooms)
-        assert all(r.max_turns == 10 for r in rooms)
+        assert all(r.max_rounds == 10 for r in rooms)
 
     async def test_room_manager_delete_room_and_delete_rooms_by_team(self):
         await self._reset_tables()
@@ -474,7 +474,7 @@ class TestDalManagers(ServiceTestCase):
             name="non_dept_null",
             type=RoomType.GROUP,
             initial_topic="",
-            max_turns=5,
+            max_rounds=5,
             agent_ids=[],
             biz_id=None,
             tags=[],
@@ -493,23 +493,23 @@ class TestDalManagers(ServiceTestCase):
             name="state_room",
             type=RoomType.GROUP,
             initial_topic="",
-            max_turns=5,
+            max_rounds=5,
             agent_ids=[],
         ))
 
-        read_index, turn_pos = await gtRoomManager.get_room_state(room.id)
+        read_index, speaker_index = await gtRoomManager.get_room_state(room.id)
         assert read_index is None
-        assert turn_pos == 0
+        assert speaker_index == 0
 
         state = {"alice": 1, "bob": 3}
-        await gtRoomManager.update_room_state(room.id, state, turn_pos=2)
-        read_index, turn_pos = await gtRoomManager.get_room_state(room.id)
+        await gtRoomManager.update_room_state(room.id, state, speaker_index=2)
+        read_index, speaker_index = await gtRoomManager.get_room_state(room.id)
         assert read_index == state
-        assert turn_pos == 2
+        assert speaker_index == 2
 
-        read_index_missing, turn_pos_missing = await gtRoomManager.get_room_state(999999)
+        read_index_missing, speaker_index_missing = await gtRoomManager.get_room_state(999999)
         assert read_index_missing is None
-        assert turn_pos_missing == 0
+        assert speaker_index_missing == 0
 
     # ------------------------------------------------------------------
     # gtRoomManager Member Management
@@ -535,7 +535,7 @@ class TestDalManagers(ServiceTestCase):
             name="agent_room",
             type=RoomType.GROUP,
             initial_topic="",
-            max_turns=5,
+            max_rounds=5,
             agent_ids=[],
         ))
         saved_agents = await gtAgentManager.get_team_all_agents(team.id)
@@ -576,7 +576,7 @@ class TestDalManagers(ServiceTestCase):
             name="msg_room",
             type=RoomType.GROUP,
             initial_topic="",
-            max_turns=5,
+            max_rounds=5,
             agent_ids=[],
         ))
 

@@ -61,7 +61,7 @@ class TestTeamController(_ApiServiceCase):
         assert all("i18n" in room for room in data["rooms"])
         assert len(rooms_by_name["general"]["agent_ids"]) == 3
         assert len(rooms_by_name["general"]["agents"]) == 3
-        assert rooms_by_name["general"]["max_turns"] == 50
+        assert rooms_by_name["general"]["max_rounds"] == 50
         assert len(rooms_by_name["测试组"]["agent_ids"]) == 2
         assert len(rooms_by_name["测试组"]["agents"]) == 2
         assert isinstance(data["enabled"], bool)

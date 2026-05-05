@@ -213,8 +213,8 @@ class TestToolFunctions(ServiceTestCase):
         """房间工具应支持列表和详情两种查询模式。"""
         team = await gtTeamManager.get_team(TEAM)
         assert team is not None
-        await self.create_room(TEAM, "general", ["alice", "bob"], max_turns=3)
-        await self.create_room(TEAM, "pair", ["alice"], max_turns=0)
+        await self.create_room(TEAM, "general", ["alice", "bob"], max_rounds=3)
+        await self.create_room(TEAM, "pair", ["alice"], max_rounds=0)
         general = roomService.get_room_by_key(f"general@{TEAM}")
         await general.activate_scheduling()
         await general.add_message(self.agent_ids["alice"], "hello")
@@ -373,7 +373,7 @@ class TestToolFunctions(ServiceTestCase):
 
     async def test_finish_chat_turn_rejects_non_current_agent(self):
         """不是当前发言人时，finish_chat_turn 仍返回 success（agent 行动结束语义），但不推进轮次。"""
-        await self.create_room(TEAM, "turn_room", ["alice", "bob"], max_turns=3)
+        await self.create_room(TEAM, "turn_room", ["alice", "bob"], max_rounds=3)
         room = roomService.get_room_by_key(f"turn_room@{TEAM}")
         ctx = ToolCallContext(agent_id=self.agent_ids["bob"], team_id=room.team_id, chat_room=room)
 

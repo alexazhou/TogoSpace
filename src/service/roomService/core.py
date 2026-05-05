@@ -21,10 +21,10 @@ from .chatRoom import ChatRoom
 logger = logging.getLogger("service.roomService")
 
 
-def resolve_room_max_turns(max_turns: int | None) -> int:
-    if max_turns is not None:
-        return max_turns
-    return configUtil.get_app_config().setting.default_room_max_turns
+def resolve_room_max_rounds(max_rounds: int | None) -> int:
+    if max_rounds is not None:
+        return max_rounds
+    return configUtil.get_app_config().setting.default_room_max_rounds
 
 
 @dataclass
@@ -52,8 +52,8 @@ async def _load_room(gt_team: GtTeam, gt_room: GtRoom) -> None:
     _rooms_by_id[room.room_id] = room
 
     logger.info(f"创建并初始化聊天室: room_id={room.room_id}, type={room.room_type.name}, agent_ids={gt_room.agent_ids}")
-    if gt_room.max_turns > 0:
-        logger.info(f"初始化轮次配置: room_id={room.room_id}, max_turns={gt_room.max_turns}")
+    if gt_room.max_rounds > 0:
+        logger.info(f"初始化轮次配置: room_id={room.room_id}, max_rounds={gt_room.max_rounds}")
 
 
 async def load_team_rooms(team_id: int) -> None:
@@ -91,12 +91,12 @@ async def close_team_rooms(team_id: int) -> None:
 async def _restore_room_runtime_state(room: ChatRoom) -> None:
     """恢复单个房间的消息、已读指针和轮次进度。"""
     gt_room_messages = await gtRoomMessageManager.get_room_messages(room.room_id)
-    agent_read_index, turn_pos = await gtRoomManager.get_room_state(room.room_id)
+    agent_read_index, speaker_index = await gtRoomManager.get_room_state(room.room_id)
     recovered_from_db = bool(gt_room_messages)
     restored_messages: list[GtCoreRoomMessage] | None = None
 
-    logger.info(f"[恢复状态] room={room.name}, room_id={room.room_id}, msg_count={len(gt_room_messages)}, read_index={agent_read_index}, turn_pos={turn_pos}")
-    logger.info(f"[恢复状态-详细] room_id={room.room_id}, agent_read_index type={type(agent_read_index)}, turn_pos type={type(turn_pos)}")
+    logger.info(f"[恢复状态] room={room.name}, room_id={room.room_id}, msg_count={len(gt_room_messages)}, read_index={agent_read_index}, speaker_index={speaker_index}")
+    logger.info(f"[恢复状态-详细] room_id={room.room_id}, agent_read_index type={type(agent_read_index)}, speaker_index type={type(speaker_index)}")
 
     if gt_room_messages:
         restored_messages = []
@@ -119,12 +119,12 @@ async def _restore_room_runtime_state(room: ChatRoom) -> None:
         room.inject_runtime_state(
             messages=restored_messages,
             agent_read_index=agent_read_index,
-            turn_pos=turn_pos,
+            speaker_index=speaker_index,
         )
     elif recovered_from_db and room.messages:
         room.mark_all_messages_read()
 
-    room.rebuild_state_from_history(persisted_turn_pos=turn_pos if recovered_from_db else None)
+    room.rebuild_state_from_history(persisted_speaker_index=speaker_index if recovered_from_db else None)
 
 
 async def restore_team_rooms_runtime_state(team_id: int) -> None:
@@ -192,7 +192,7 @@ async def get_or_create_control_room(team_id: int, agent_id: int) -> tuple[ChatR
         name=agent_name,
         type=RoomType.PRIVATE,
         initial_topic="",
-        max_turns=-1,
+        max_rounds=-1,
         agent_ids=[int(SpecialAgent.OPERATOR.value), agent_id],
     )
     saved_room = await gtRoomManager.save_room(new_gt_room)
@@ -247,7 +247,7 @@ async def overwrite_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> N
             name="",
             type=RoomType.GROUP,
             initial_topic="",
-            max_turns=10,
+            max_rounds=10,
             agent_ids=[],
             biz_id=spec.biz_id,
             tags=["DEPT"],
@@ -266,7 +266,7 @@ async def overwrite_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> N
             ) or spec.initial_topic
         else:
             room.initial_topic = spec.initial_topic
-        room.max_turns = resolve_room_max_turns(spec.max_turns)
+        room.max_rounds = resolve_room_max_rounds(spec.max_rounds)
         room.biz_id = spec.biz_id
         room.tags = ["DEPT"]
         room.i18n = spec.i18n or {}
@@ -345,7 +345,7 @@ async def overwrite_team_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
                 name="",
                 type=RoomType.GROUP,
                 initial_topic="",
-                max_turns=10,
+                max_rounds=10,
                 agent_ids=[],
                 biz_id=None,
                 tags=[],
@@ -355,7 +355,7 @@ async def overwrite_team_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
         room.name = room_input.name
         room.type = room_input.type
         room.initial_topic = room_input.initial_topic
-        room.max_turns = room_input.max_turns
+        room.max_rounds = room_input.max_rounds
         room.biz_id = room_input.biz_id
         room.tags = list(room_input.tags or [])
         room.agent_ids = list(room_input.agent_ids or [])

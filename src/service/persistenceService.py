@@ -24,13 +24,13 @@ async def load_room_runtime(room_id: int) -> tuple[list[GtRoomMessage], dict[str
     """加载房间的聊天记录、成员读取进度和发言位索引。
 
     Returns:
-        (room_messages, agent_read_index, turn_pos)
+        (room_messages, agent_read_index, speaker_index)
     """
-    gt_room_messages, (agent_read_index, turn_pos) = await asyncio.gather(
+    gt_room_messages, (agent_read_index, speaker_index) = await asyncio.gather(
         gtRoomMessageManager.get_room_messages(room_id),
         gtRoomManager.get_room_state(room_id),
     )
-    return gt_room_messages, agent_read_index, turn_pos
+    return gt_room_messages, agent_read_index, speaker_index
 
 
 async def load_agent_history_message(agent_id: int) -> list[GtAgentHistory]:
