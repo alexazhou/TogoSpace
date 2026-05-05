@@ -91,74 +91,84 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         """验证 tool_call 结果被正确追加到 agent history。"""
         await self.create_room(TEAM, "manual_turn", ["alice", "bob"])
         room = roomService.get_room_by_key(f"manual_turn@{TEAM}")
-        await room.activate_scheduling()
+        # 暂停调度器，本测试走手动任务流程，不依赖自动调度
+        scheduler._schedule_state = ScheduleState.STOPPED
+        try:
+            await room.activate_scheduling()
 
-        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
-        item = GtAgentHistory.build(
-            OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset test turn state"),
-        )
-        item.agent_id = alice.gt_agent.id
-        item.seq = 0
-        alice.inject_history_messages([item])
-        call_seq = {
-            "alice": [
-                {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "manual_turn", "msg": "hello"}}]},
-                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
-            ],
-            "bob": [],
-        }
+            alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
+            item = GtAgentHistory.build(
+                OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset test turn state"),
+            )
+            item.agent_id = alice.gt_agent.id
+            item.seq = 0
+            alice.inject_history_messages([item])
+            call_seq = {
+                "alice": [
+                    {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "manual_turn", "msg": "hello"}}]},
+                    {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+                ],
+                "bob": [],
+            }
 
-        async def fake_infer(model, ctx):
-            name = "alice" if "你当前的名字：alice" in ctx.system_prompt else "bob"
-            if call_seq[name]:
-                return self.normalize_to_mock(call_seq[name].pop(0))
-            # 兜底返回 finish，避免并发调度时 side_effect 耗尽导致 StopIteration。
-            return self.normalize_to_mock({"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]})
+            async def fake_infer(model, ctx):
+                name = "alice" if "你当前的名字：alice" in ctx.system_prompt else "bob"
+                if call_seq[name]:
+                    return self.normalize_to_mock(call_seq[name].pop(0))
+                # 兜底返回 finish，避免并发调度时 side_effect 耗尽导致 StopIteration。
+                return self.normalize_to_mock({"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]})
 
-        task = GtAgentTask(
-            id=1,
-            agent_id=alice.gt_agent.id,
-            task_type=AgentTaskType.ROOM_MESSAGE,
-            task_data={"room_id": room.room_id},
-        )
-        with self.patch_infer(handler=fake_infer):
-            await alice.task_consumer._turn_runner.run_chat_turn(task)
+            task = GtAgentTask(
+                id=1,
+                agent_id=alice.gt_agent.id,
+                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_data={"room_id": room.room_id},
+            )
+            with self.patch_infer(handler=fake_infer):
+                await alice.task_consumer._turn_runner.run_chat_turn(task)
 
-        tool_results = [m for m in alice.task_consumer._turn_runner._history if m.role == OpenaiApiRole.TOOL]
-        assert len(tool_results) >= 1
-        assert json.loads(tool_results[0].content)["success"]
-        assert tool_results[0].status == AgentHistoryStatus.SUCCESS
-        assert tool_results[0].error_message is None
-        assert any(AgentHistoryTag.ROOM_TURN_FINISH in msg.tags for msg in tool_results)
+            tool_results = [m for m in alice.task_consumer._turn_runner._history if m.role == OpenaiApiRole.TOOL]
+            assert len(tool_results) >= 1
+            assert json.loads(tool_results[0].content)["success"]
+            assert tool_results[0].status == AgentHistoryStatus.SUCCESS
+            assert tool_results[0].error_message is None
+            assert any(AgentHistoryTag.ROOM_TURN_FINISH in msg.tags for msg in tool_results)
+        finally:
+            scheduler._schedule_state = ScheduleState.RUNNING
 
     async def test_turn_checker_forces_send_chat_msg(self):
         """直接输出文字时 turn_checker 应注入 hint，迫使 agent 改用工具。"""
         await self.create_room(TEAM, "turn_checker_room", ["alice", "bob"])
         room = roomService.get_room_by_key(f"turn_checker_room@{TEAM}")
-        await room.activate_scheduling()
+        # 暂停调度器，本测试走手动任务流程，不依赖自动调度
+        scheduler._schedule_state = ScheduleState.STOPPED
+        try:
+            await room.activate_scheduling()
 
-        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
-        item = GtAgentHistory.build(
-            OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset turn checker history"),
-        )
-        item.agent_id = alice.gt_agent.id
-        item.seq = 0
-        alice.inject_history_messages([item])
-        resps = [
-            {"content": "我直接回复"},
-            {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "turn_checker_room", "msg": "最终消息"}}]},
-            {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
-        ]
-        task = GtAgentTask(
-            id=2,
-            agent_id=alice.gt_agent.id,
-            task_type=AgentTaskType.ROOM_MESSAGE,
-            task_data={"room_id": room.room_id},
-        )
-        with self.patch_infer(responses=resps):
-            await alice.task_consumer._turn_runner.run_chat_turn(task)
+            alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
+            item = GtAgentHistory.build(
+                OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset turn checker history"),
+            )
+            item.agent_id = alice.gt_agent.id
+            item.seq = 0
+            alice.inject_history_messages([item])
+            resps = [
+                {"content": "我直接回复"},
+                {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "turn_checker_room", "msg": "最终消息"}}]},
+                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+            ]
+            task = GtAgentTask(
+                id=2,
+                agent_id=alice.gt_agent.id,
+                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_data={"room_id": room.room_id},
+            )
+            with self.patch_infer(responses=resps):
+                await alice.task_consumer._turn_runner.run_chat_turn(task)
 
-        assert any(m.content == "最终消息" for m in room.messages)
+            assert any(m.content == "最终消息" for m in room.messages)
+        finally:
+            scheduler._schedule_state = ScheduleState.RUNNING
 
     async def test_scheduler_terminates_after_max_turns(self):
         """max_turns 用尽后，通过观察 Room 状态并停止调度器。"""
@@ -218,70 +228,75 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         """
         await self.create_room(TEAM, "cancelled_tool_room", ["alice", "bob"])
         room = roomService.get_room_by_key(f"cancelled_tool_room@{TEAM}")
-        await room.activate_scheduling()
+        # 暂停调度器，本测试走手动任务流程，不依赖自动调度
+        scheduler._schedule_state = ScheduleState.STOPPED
+        try:
+            await room.activate_scheduling()
 
-        alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
+            alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
 
-        # 构造历史：USER -> ASSISTANT(tool_call_1, tool_call_2) -> TOOL(call_1, CANCELLED)
-        # 模拟：call_1 执行中被取消，call_2 还未执行
-        tool_call_1 = OpenAIToolCall(id="call_cancelled", function={"name": "send_chat_msg", "arguments": '{"room_name": "cancelled_tool_room", "msg": "cancelled msg"}'})
-        tool_call_2 = OpenAIToolCall(id="call_pending", function={"name": "send_chat_msg", "arguments": '{"room_name": "cancelled_tool_room", "msg": "pending msg"}'})
+            # 构造历史：USER -> ASSISTANT(tool_call_1, tool_call_2) -> TOOL(call_1, CANCELLED)
+            # 模拟：call_1 执行中被取消，call_2 还未执行
+            tool_call_1 = OpenAIToolCall(id="call_cancelled", function={"name": "send_chat_msg", "arguments": '{"room_name": "cancelled_tool_room", "msg": "cancelled msg"}'})
+            tool_call_2 = OpenAIToolCall(id="call_pending", function={"name": "send_chat_msg", "arguments": '{"room_name": "cancelled_tool_room", "msg": "pending msg"}'})
 
-        assistant_msg = OpenAIMessage(
-            role=OpenaiApiRole.ASSISTANT,
-            content="",
-            tool_calls=[tool_call_1, tool_call_2],
-        )
+            assistant_msg = OpenAIMessage(
+                role=OpenaiApiRole.ASSISTANT,
+                content="",
+                tool_calls=[tool_call_1, tool_call_2],
+            )
 
-        # USER 消息
-        user_item = GtAgentHistory.build(
-            OpenAIMessage.text(OpenaiApiRole.USER, "请发送两条消息"),
-            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
-        )
-        user_item.agent_id = alice.gt_agent.id
-        user_item.seq = 0
+            # USER 消息
+            user_item = GtAgentHistory.build(
+                OpenAIMessage.text(OpenaiApiRole.USER, "请发送两条消息"),
+                tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+            )
+            user_item.agent_id = alice.gt_agent.id
+            user_item.seq = 0
 
-        # ASSISTANT 消息（两个 tool_calls）
-        assistant_item = GtAgentHistory.build(
-            assistant_msg,
-            status=AgentHistoryStatus.SUCCESS,
-        )
-        assistant_item.agent_id = alice.gt_agent.id
-        assistant_item.seq = 1
+            # ASSISTANT 消息（两个 tool_calls）
+            assistant_item = GtAgentHistory.build(
+                assistant_msg,
+                status=AgentHistoryStatus.SUCCESS,
+            )
+            assistant_item.agent_id = alice.gt_agent.id
+            assistant_item.seq = 1
 
-        # TOOL 记录（call_1 已取消）
-        tool_cancelled_item = GtAgentHistory.build(
-            OpenAIMessage.tool_result("call_cancelled", "cancelled by user"),
-            status=AgentHistoryStatus.CANCELLED,
-            error_message="cancelled by user",
-        )
-        tool_cancelled_item.agent_id = alice.gt_agent.id
-        tool_cancelled_item.seq = 2
+            # TOOL 记录（call_1 已取消）
+            tool_cancelled_item = GtAgentHistory.build(
+                OpenAIMessage.tool_result("call_cancelled", "cancelled by user"),
+                status=AgentHistoryStatus.CANCELLED,
+                error_message="cancelled by user",
+            )
+            tool_cancelled_item.agent_id = alice.gt_agent.id
+            tool_cancelled_item.seq = 2
 
-        alice.inject_history_messages([user_item, assistant_item, tool_cancelled_item])
+            alice.inject_history_messages([user_item, assistant_item, tool_cancelled_item])
 
-        # 验证：get_first_pending_tool_call 应返回 call_2
-        pending = alice.task_consumer._turn_runner._history.get_first_pending_tool_call()
-        assert pending is not None
-        assert pending.id == "call_pending"
+            # 验证：get_first_pending_tool_call 应返回 call_2
+            pending = alice.task_consumer._turn_runner._history.get_first_pending_tool_call()
+            assert pending is not None
+            assert pending.id == "call_pending"
 
-        # 后续推理：返回 finish_chat_turn 结束 turn
-        task = GtAgentTask(
-            id=3,
-            agent_id=alice.gt_agent.id,
-            task_type=AgentTaskType.ROOM_MESSAGE,
-            task_data={"room_id": room.room_id},
-        )
+            # 后续推理：返回 finish_chat_turn 结束 turn
+            task = GtAgentTask(
+                id=3,
+                agent_id=alice.gt_agent.id,
+                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_data={"room_id": room.room_id},
+            )
 
-        responses = [
-            {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "cancelled_tool_room", "msg": "pending msg"}}]},
-            {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
-        ]
+            responses = [
+                {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "cancelled_tool_room", "msg": "pending msg"}}]},
+                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+            ]
 
-        with self.patch_infer(responses=responses):
-            # 旧代码：CANCELLED 状态的 TOOL 会抛出 RuntimeError
-            # 新代码：CANCELLED 状态的 TOOL 会跳过并继续推进
-            await alice.task_consumer._turn_runner.run_chat_turn(task)
+            with self.patch_infer(responses=responses):
+                # 旧代码：CANCELLED 状态的 TOOL 会抛出 RuntimeError
+                # 新代码：CANCELLED 状态的 TOOL 会跳过并继续推进
+                await alice.task_consumer._turn_runner.run_chat_turn(task)
 
-        # 验证：turn 正常完成，没有抛出异常
-        assert any(AgentHistoryTag.ROOM_TURN_FINISH in msg.tags for msg in alice.task_consumer._turn_runner._history)
+            # 验证：turn 正常完成，没有抛出异常
+            assert any(AgentHistoryTag.ROOM_TURN_FINISH in msg.tags for msg in alice.task_consumer._turn_runner._history)
+        finally:
+            scheduler._schedule_state = ScheduleState.RUNNING

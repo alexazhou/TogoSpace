@@ -188,19 +188,11 @@ async def get_or_create_control_room(team_id: int, agent_id: int) -> tuple[ChatR
     # 查找现有 PRIVATE 房间
     gt_room = await gtRoomManager.get_private_room_by_agent(team_id, agent_id)
     if gt_room is not None:
-        # 旧版本创建的控制房间 max_turns 可能为 0（当时的默认值），需迁移到 -1（无限轮次）
-        if gt_room.max_turns != -1:
-            logger.info(f"迁移控制房间 max_turns: room_id={gt_room.id}, {gt_room.max_turns} -> -1")
-            gt_room.max_turns = -1
-            await gtRoomManager.save_room(gt_room)
         room = _rooms_by_id.get(gt_room.id)
         if room is None:
             # DB 有记录但内存里没有（如重启后），重新装载
             await _load_room(gt_team=gt_team, gt_room=gt_room, agent_ids=gt_room.agent_ids or [])
             room = _rooms_by_id[gt_room.id]
-        else:
-            # 内存房间已存在，同步 max_turns（修复重启前就在内存里的旧数据）
-            room.gt_room.max_turns = -1
         return room, False
 
     # 不存在则创建新控制房间

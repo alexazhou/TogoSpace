@@ -390,11 +390,11 @@ class ChatRoom:
         直到找到一个普通 Agent 或触发停止条件为止。
 
         返回 None 表示当前不应发布调度事件，原因可能是：
-        - 无成员 或 max_turns=0（禁止自动调度）
+        - 无成员
         - 满足停止条件（已切换到 IDLE 并广播）
         - 当前发言位是需等待外部输入的 SpecialAgent（如 PRIVATE 房间的 OPERATOR）
         """
-        if not self._agent_ids or self._max_turns == 0:
+        if not self._agent_ids:
             return None
 
         if self._is_stop_condition_met():
@@ -430,10 +430,10 @@ class ChatRoom:
         """判断是否满足停止调度的条件（纯查询，无副作用）。
 
         满足以下任一条件则返回 True：
-        - max_turns >= 0 且 turn_count >= max_turns（已达到最大轮次；-1 = 不限轮次）
+        - max_turns > 0 且 turn_count >= max_turns（已达到最大轮次；<=0 = 不限轮次）
         - 所有 AI 成员均在本轮中跳过发言
         """
-        if self._max_turns >= 0 and self._turn_count >= self._max_turns:
+        if self._max_turns > 0 and self._turn_count >= self._max_turns:
             return True
         ai_agent_ids = {aid for aid in self._agent_ids if aid != self.OPERATOR_MEMBER_ID}
         return bool(ai_agent_ids) and ai_agent_ids.issubset(self._round_skipped_set)
@@ -443,7 +443,7 @@ class ChatRoom:
         if self._state == RoomState.IDLE:
             return
         self._state = RoomState.IDLE
-        if self._max_turns >= 0 and self._turn_count >= self._max_turns:
+        if self._max_turns > 0 and self._turn_count >= self._max_turns:
             logger.info(f"房间 {self.key} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
         else:
             logger.info(f"房间 {self.key} 所有 AI 成员均已跳过发言（自上次消息以来），停止调度")
@@ -513,7 +513,7 @@ class ChatRoom:
         Args:
             persisted_turn_pos: 从数据库恢复的发言位索引。
         """
-        if not self._agent_ids or self._max_turns == 0:
+        if not self._agent_ids:
             return
 
         self._turn_count = 0

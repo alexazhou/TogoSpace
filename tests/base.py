@@ -604,7 +604,7 @@ class ServiceTestCase:
         agent_names: list[str],
         initial_topic: str = "",
         room_type: RoomType = RoomType.GROUP,
-        max_turns: int = 0,
+        max_turns: int = -1,
     ) -> None:
         """测试辅助：通过生产 API（gtRoomManager.save_room + load_all_rooms）创建或更新房间。"""
         gt_team = await gtTeamManager.get_team(team_name)

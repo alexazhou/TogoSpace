@@ -11,7 +11,7 @@ class GtRoom(DbModelBase):
     name: str = peewee.CharField()
     type: RoomType = EnumField(RoomType, null=False)
     initial_topic: str = peewee.CharField(null=True)
-    max_turns: int = peewee.IntegerField(default=100)  # 最大轮次；-1 表示不限轮次；>=0 表示最多进行 N 轮（0 = 从不调度）
+    max_turns: int = peewee.IntegerField(default=100)  # 最大轮次；<=0 表示不限轮次；>0 表示最多进行 N 轮
     agent_ids: list[int] = JsonField(default=list)
     agent_read_index: dict[str, int] = JsonField(null=True)
     turn_pos: int = peewee.IntegerField(default=0)  # 当前发言位索引，重启后恢复
