@@ -163,7 +163,7 @@ class RoomScheduler:
         while True:
             agent_id = self.get_current_turn_agent_id()
 
-            if self._skip_operator_if():
+            if self._skip_operator_if_needed():
                 if self._stop_if_done():
                     return None
                 continue
@@ -177,7 +177,7 @@ class RoomScheduler:
 
             return agent_id
 
-    def _skip_operator_if(self) -> bool:
+    def _skip_operator_if_needed(self) -> bool:
         """GROUP 房间（>2人）中自动跳过 OPERATOR，返回是否跳过了。"""
         agent_id = self.get_current_turn_agent_id()
         if agent_id == self.OPERATOR_MEMBER_ID and self._gt_room.type == RoomType.GROUP and len(self._gt_room.agent_ids) > 2:
