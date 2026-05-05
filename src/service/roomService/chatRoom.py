@@ -28,13 +28,12 @@ class ChatRoom:
     SYSTEM_MEMBER_ID = int(SpecialAgent.SYSTEM.value)
     OPERATOR_MEMBER_ID = int(SpecialAgent.OPERATOR.value)
 
-    def __init__(self, team: GtTeam, room: GtRoom, agent_ids: List[int] | None = None):
+    def __init__(self, team: GtTeam, room: GtRoom):
         self.gt_room: GtRoom = room
         self.gt_team: GtTeam = team
-        self._agent_ids: List[int] = agent_ids or []
-        self._store = RoomMessageStore(self._agent_ids, gt_room=room)
+        self._store = RoomMessageStore(room.agent_ids, gt_room=room)
         self._scheduler = RoomScheduler(
-            agent_ids=self._agent_ids,
+            agent_ids=room.agent_ids,
             room_key=self.key,
             gt_room=room,
             get_read_index=self._store.get_read_index,
@@ -112,6 +111,10 @@ class ChatRoom:
     @property
     def key(self) -> str:
         return f"{self.name}@{self.team_name}"
+
+    @property
+    def _agent_ids(self) -> List[int]:
+        return self.gt_room.agent_ids
 
     def get_agent_ids(self, include_system: bool = False) -> List[int]:
         if include_system:

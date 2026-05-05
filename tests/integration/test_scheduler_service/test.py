@@ -100,9 +100,9 @@ class TestSchedulerRun(ServiceTestCase):
                 max_turns=0,
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
-            ),
-            agent_ids=[1],
-        )
+                            agent_ids=[1],
+),
+            )
 
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         _patch_scheduler_rooms(monkeypatch, room)
@@ -213,9 +213,9 @@ class TestSchedulerRun(ServiceTestCase):
                 max_turns=0,
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
-            ),
-            agent_ids=[1],
-        )
+                            agent_ids=[1],
+),
+            )
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
@@ -265,9 +265,9 @@ class TestSchedulerRun(ServiceTestCase):
                 max_turns=0,
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
-            ),
-            agent_ids=[1],
-        )
+                            agent_ids=[1],
+),
+            )
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
@@ -308,9 +308,9 @@ class TestSchedulerRun(ServiceTestCase):
                 max_turns=0,
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
-            ),
-            agent_ids=[1],
-        )
+                            agent_ids=[1],
+),
+            )
         r2 = roomService.ChatRoom(
             team=GtTeam(id=1, name=TEAM),
             room=GtRoom(
@@ -322,9 +322,9 @@ class TestSchedulerRun(ServiceTestCase):
                 max_turns=0,
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
-            ),
-            agent_ids=[1],
-        )
+                            agent_ids=[1],
+),
+            )
         _patch_scheduler_teams(monkeypatch, [SimpleNamespace(name=TEAM, max_function_calls=5)])
         _patch_scheduler_rooms(monkeypatch, r1, r2)
         await scheduler.startup()
@@ -375,9 +375,9 @@ class TestSchedulerRun(ServiceTestCase):
                 max_turns=0,
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
-            ),
-            agent_ids=[1],
-        )
+                            agent_ids=[1],
+),
+            )
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
         _force_schedule_running()
@@ -403,9 +403,9 @@ class TestSchedulerRun(ServiceTestCase):
                 max_turns=0,
                 agent_read_index=None,
                 updated_at=GtRoom._now(),
-            ),
-            agent_ids=[1],
-        )
+                            agent_ids=[1],
+),
+            )
         _patch_scheduler_rooms(monkeypatch, room)
         await scheduler.startup()
         _force_schedule_running()

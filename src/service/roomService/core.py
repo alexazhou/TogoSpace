@@ -45,17 +45,13 @@ async def startup() -> None:
     _rooms_by_id.clear()
 
 
-async def _load_room(
-    gt_team: GtTeam,
-    gt_room: GtRoom,
-    agent_ids: List[int],
-) -> None:
+async def _load_room(gt_team: GtTeam, gt_room: GtRoom) -> None:
     """将数据库房间装载到运行态。"""
-    room = ChatRoom(team=gt_team, room=gt_room, agent_ids=agent_ids)
+    room = ChatRoom(team=gt_team, room=gt_room)
     _rooms[room.key] = room
     _rooms_by_id[room.room_id] = room
 
-    logger.info(f"创建并初始化聊天室: room_id={room.room_id}, type={room.room_type.name}, agent_ids={agent_ids}")
+    logger.info(f"创建并初始化聊天室: room_id={room.room_id}, type={room.room_type.name}, agent_ids={gt_room.agent_ids}")
     if gt_room.max_turns > 0:
         logger.info(f"初始化轮次配置: room_id={room.room_id}, max_turns={gt_room.max_turns}")
 
@@ -71,11 +67,7 @@ async def load_team_rooms(team_id: int) -> None:
 
     gt_rooms = await gtRoomManager.get_rooms_by_team(gt_team.id)
     for gt_room in gt_rooms:
-        await _load_room(
-            gt_team=gt_team,
-            gt_room=gt_room,
-            agent_ids=gt_room.agent_ids or [],
-        )
+        await _load_room(gt_team=gt_team, gt_room=gt_room)
 
     logger.info(f"Team '{gt_team.name}' 的内存房间已重建，共 {len(gt_rooms)} 个房间")
 
@@ -84,11 +76,7 @@ async def load_all_rooms() -> None:
     """从数据库读取所有房间配置，并创建对应的内存房间对象。"""
     for gt_team in await gtTeamManager.get_all_teams():
         for gt_room in await gtRoomManager.get_rooms_by_team(gt_team.id):
-            await _load_room(
-                gt_team=gt_team,
-                gt_room=gt_room,
-                agent_ids=gt_room.agent_ids or [],
-            )
+            await _load_room(gt_team=gt_team, gt_room=gt_room)
 
 
 async def close_team_rooms(team_id: int) -> None:
@@ -191,7 +179,7 @@ async def get_or_create_control_room(team_id: int, agent_id: int) -> tuple[ChatR
         room = _rooms_by_id.get(gt_room.id)
         if room is None:
             # DB 有记录但内存里没有（如重启后），重新装载
-            await _load_room(gt_team=gt_team, gt_room=gt_room, agent_ids=gt_room.agent_ids or [])
+            await _load_room(gt_team=gt_team, gt_room=gt_room)
             room = _rooms_by_id[gt_room.id]
         return room, False
 
@@ -208,7 +196,7 @@ async def get_or_create_control_room(team_id: int, agent_id: int) -> tuple[ChatR
         agent_ids=[int(SpecialAgent.OPERATOR.value), agent_id],
     )
     saved_room = await gtRoomManager.save_room(new_gt_room)
-    await _load_room(gt_team=gt_team, gt_room=saved_room, agent_ids=[int(SpecialAgent.OPERATOR.value), agent_id])
+    await _load_room(gt_team=gt_team, gt_room=saved_room)
 
     room = _rooms_by_id[saved_room.id]
     await room.activate_scheduling()
