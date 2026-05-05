@@ -543,15 +543,21 @@ class TestDalManagers(ServiceTestCase):
 
         assert await self._get_room_agent_names(room.id) == []
 
+        # 服务层要求 >= 2 成员
         await roomService.update_room_agents(room.id, [agent_ids["charlie"], agent_ids["alice"]])
         assert await self._get_room_agent_names(room.id) == ["charlie", "alice"]
 
-        # upsert 会覆盖旧成员
-        await roomService.update_room_agents(room.id, [agent_ids["bob"]])
-        assert await self._get_room_agent_names(room.id) == ["bob"]
+        # update_room_agents 拒绝不足 2 人
+        from exception import TogoException
+        with pytest.raises(TogoException):
+            await roomService.update_room_agents(room.id, [agent_ids["bob"]])
 
-        # clear agents
-        await roomService.update_room_agents(room.id, [])
+        with pytest.raises(TogoException):
+            await roomService.update_room_agents(room.id, [])
+
+        # DAL 层可直接清空（无业务校验）
+        room.agent_ids = []
+        await gtRoomManager.save_room(room)
         assert await self._get_room_agent_names(room.id) == []
 
     # ------------------------------------------------------------------

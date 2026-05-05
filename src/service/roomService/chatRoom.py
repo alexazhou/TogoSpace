@@ -87,12 +87,7 @@ class ChatRoom:
 
     def can_post_message(self, sender_id: int) -> bool:
         """返回 sender_id 是否允许向当前房间写消息。"""
-        if sender_id == self.SYSTEM_MEMBER_ID:
-            return True
-        # PRIVATE 房间（控制房间）OPERATOR 始终可以发消息，兼容历史数据
-        if sender_id == self.OPERATOR_MEMBER_ID and self.room_type == RoomType.PRIVATE:
-            return True
-        return sender_id in self._agent_ids
+        return sender_id in self._agent_ids or sender_id == self.SYSTEM_MEMBER_ID
 
     @property
     def key(self) -> str:
@@ -252,8 +247,8 @@ class ChatRoom:
         logger.info("消息升级为 immediately: room=%s, db_id=%d", self.key, db_id)
 
     def _update_turn_state_on_message(self, sender_id: int) -> None:
-        # 1. 唤醒检查：如果房间已停止（无论原因），任何新消息都将重置轮次并恢复调度
-        was_idle = (self._state == RoomState.IDLE)
+        # 1. 唤醒检查：IDLE 或 INIT 状态下收到消息，自动进入调度
+        was_idle = self._state in (RoomState.IDLE, RoomState.INIT)
         if was_idle:
             logger.info(f"检测到房间 {self.key} 的活动 (agent={gtAgentManager.get_agent_name(sender_id)})，重置轮次计数器并唤醒房间")
             self._turn_count = 0
@@ -434,7 +429,8 @@ class ChatRoom:
 
     def _should_stop_scheduling(self) -> bool:
         """集中判断并应用停止条件；满足任一条件则切到 IDLE 并返回 True。"""
-        if self._turn_count >= self._max_turns:
+        # max_turns >= 0 时按轮次判断（0 = 立即停止；-1 = 不限轮次）
+        if self._max_turns >= 0 and self._turn_count >= self._max_turns:
             if self._state != RoomState.IDLE:
                 self._state = RoomState.IDLE
                 logger.info(f"房间 {self.key} 已达到最大轮次 {self._max_turns}，进入 IDLE 状态")
@@ -473,7 +469,7 @@ class ChatRoom:
         if self._state == RoomState.INIT:
             self._state = (
                 RoomState.SCHEDULING
-                if self._agent_ids and self._max_turns > 0
+                if self._agent_ids and self._max_turns != 0
                 else RoomState.IDLE
             )
             changed = True
@@ -527,7 +523,7 @@ class ChatRoom:
         Args:
             persisted_turn_pos: 从数据库恢复的发言位索引。
         """
-        if not self._agent_ids or self._max_turns <= 0:
+        if not self._agent_ids or self._max_turns == 0:
             return
 
         self._turn_count = 0

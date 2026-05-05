@@ -115,6 +115,64 @@ class TestRoomController(_ApiServiceCase):
         )
 
 
+class TestRoomCreateValidation(_ApiServiceCase):
+    """验证房间创建接口的参数校验。"""
+
+    requires_backend = True
+    requires_mock_llm = True
+
+    async def _get_team_id(self, team_name: str) -> int:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/teams/list.json") as resp:
+                assert resp.status == 200
+                data = await resp.json()
+        team = next(t for t in data["teams"] if t["name"] == team_name)
+        return team["id"]
+
+    async def _get_agent_id(self, team_id: int, agent_name: str) -> int:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
+                assert resp.status == 200
+                data = await resp.json()
+        agent = next(a for a in data["agents"] if a["name"] == agent_name)
+        return agent["id"]
+
+    async def test_create_room_with_one_agent_is_rejected(self):
+        """创建只有一个成员的房间应返回 400 room_agents_too_few。"""
+        team_id = await self._get_team_id(_TEAM)
+        alice_id = await self._get_agent_id(team_id, "alice")
+
+        payload = {
+            "name": "single_member_room",
+            "agent_ids": [alice_id],
+        }
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{self.backend_base_url}/teams/{team_id}/rooms/create.json", json=payload
+            ) as resp:
+                assert resp.status == 400
+                data = await resp.json()
+                assert data.get("error_code") == "room_agents_too_few"
+
+    async def test_create_room_with_two_agents_succeeds(self):
+        """创建包含两个成员的房间应成功。"""
+        team_id = await self._get_team_id(_TEAM)
+        alice_id = await self._get_agent_id(team_id, "alice")
+        bob_id = await self._get_agent_id(team_id, "bob")
+
+        payload = {
+            "name": "two_member_room",
+            "agent_ids": [alice_id, bob_id],
+        }
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{self.backend_base_url}/teams/{team_id}/rooms/create.json", json=payload
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert data.get("status") == "created"
+
+
 class TestRoomControllerPrivate(_ApiServiceCase):
     """测试 v6 新增的 room_type 字段及私有房间行为，使用自定义配置。"""
 

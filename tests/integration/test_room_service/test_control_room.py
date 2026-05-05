@@ -115,11 +115,22 @@ class TestGetOrCreateControlRoom(ServiceTestCase):
         assert gt_room is not None
         assert int(SpecialAgent.OPERATOR.value) in gt_room.agent_ids
         assert alice_id in gt_room.agent_ids
-        """自动创建的控制房间名称应包含 agent 名称。"""
+
+    async def test_control_room_has_exactly_two_members(self):
+        """自动创建的控制房间应恰好包含 2 个成员：OPERATOR + agent。"""
         alice_id = await self._get_agent_id("alice")
         gt_room = await gtRoomManager.get_private_room_by_agent(self.team_id, alice_id)
         assert gt_room is not None
-        assert "alice" in gt_room.name
+        assert len(gt_room.agent_ids) == 2, (
+            f"期望恰好 2 名成员，实际 {len(gt_room.agent_ids)}: {gt_room.agent_ids}"
+        )
+
+    async def test_room_name_equals_agent_name(self):
+        """自动创建的控制房间名称应等于 agent 名称。"""
+        alice_id = await self._get_agent_id("alice")
+        gt_room = await gtRoomManager.get_private_room_by_agent(self.team_id, alice_id)
+        assert gt_room is not None
+        assert gt_room.name == "alice"
 
     async def test_control_room_is_activated_after_create(self):
         """新建控制房间后应立即激活（state != INIT）。"""

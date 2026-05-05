@@ -189,8 +189,11 @@ async def get_or_create_control_room(team_id: int, agent_id: int) -> tuple[ChatR
     gt_room = await gtRoomManager.get_private_room_by_agent(team_id, agent_id)
     if gt_room is not None:
         room = _rooms_by_id.get(gt_room.id)
-        if room is not None:
-            return room, False
+        if room is None:
+            # DB 有记录但内存里没有（如重启后），重新装载
+            await _load_room(gt_team=gt_team, gt_room=gt_room, agent_ids=gt_room.agent_ids or [])
+            room = _rooms_by_id[gt_room.id]
+        return room, False
 
     # 不存在则创建新控制房间
     gt_agent = await gtAgentManager.get_agent_by_id(agent_id)
@@ -198,10 +201,10 @@ async def get_or_create_control_room(team_id: int, agent_id: int) -> tuple[ChatR
 
     new_gt_room = GtRoom(
         team_id=team_id,
-        name=f"{agent_name} 控制",
+        name=agent_name,
         type=RoomType.PRIVATE,
         initial_topic="",
-        max_turns=0,
+        max_turns=-1,
         agent_ids=[int(SpecialAgent.OPERATOR.value), agent_id],
     )
     saved_room = await gtRoomManager.save_room(new_gt_room)
@@ -225,6 +228,13 @@ def shutdown() -> None:
 async def update_room_agents(room_id: int, agent_ids: list[int]) -> None:
     room = await gtRoomManager.get_room_by_id(room_id)
     assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
+
+    agent_count = len(agent_ids or [])
+    if agent_count < 2:
+        raise TogoException(
+            f"房间成员不足 2 人（当前 {agent_count} 人）",
+            error_code="ROOM_AGENTS_TOO_FEW",
+        )
 
     room.agent_ids = agent_ids
     await gtRoomManager.save_room(room)
