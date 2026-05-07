@@ -2,11 +2,19 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime
 
 from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 from service.roomService.messageStore import RoomMessageStore
+
+
+@pytest.fixture(autouse=True)
+def mock_db_manager():
+    with patch("service.roomService.messageStore.gtRoomMessageManager") as mock:
+        mock.append_room_message = AsyncMock(return_value=MagicMock(id=999))
+        mock.update_room_message_seq = AsyncMock()
+        yield mock
 
 
 @pytest.fixture

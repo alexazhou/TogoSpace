@@ -39,20 +39,25 @@ class RoomMessageStore:
                                      publish: bool = False) -> None:
         """追加到主消息列表并自动分配 seq。
 
-        - publish=False（默认）：纯内存操作
-        - publish=True：同时完成 DB 持久化 + WS 广播
+        - 无论 publish 为何值，只要 db_id 为空，都会尝试完成 DB 持久化。
+        - publish=True：同时完成 WS 广播（通过 messageBus）。
         """
         msg.seq = self._next_seq
         self._next_seq += 1
-        insert_pos = next((i for i, m in enumerate(self._messages) if m.seq is None), len(self._messages))
-        self._messages.insert(insert_pos, msg)
-        if publish:
+
+        # 确保持久化
+        if msg.db_id is None:
             db_msg = await gtRoomMessageManager.append_room_message(
                 room_id=self._gt_room.id, agent_id=msg.sender_id, content=msg.content,
                 send_time=msg.send_time.isoformat(),
                 insert_immediately=False, seq=msg.seq,
             )
             msg.db_id = db_msg.id
+
+        insert_pos = next((i for i, m in enumerate(self._messages) if m.seq is None), len(self._messages))
+        self._messages.insert(insert_pos, msg)
+
+        if publish:
             messageBus.publish(MessageBusTopic.ROOM_MSG_ADDED, gt_room=self._gt_room, gt_message=msg)
 
     def append_pending(self, msg: GtCoreRoomMessage) -> None:
