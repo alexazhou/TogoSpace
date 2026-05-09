@@ -6,7 +6,8 @@ import logging
 import os
 from typing import Any, Optional
 
-from pytspclient import TSPClient, TSPException, ToolResult, ToolCall\nfrom pytspclient.types import TSP_ERROR_STDOUT_CLOSED, TSP_ERROR_CONNECTION_CLOSED
+from pytspclient import TSPClient, TSPException, ToolResult, ToolCall
+from pytspclient.types import TSP_ERROR_STDOUT_CLOSED, TSP_ERROR_CONNECTION_CLOSED
 
 import appPaths
 from service.agentService.driver.base import AgentDriverConfig
