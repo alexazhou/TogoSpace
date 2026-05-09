@@ -6,7 +6,7 @@ import logging
 import os
 from typing import Any, Optional
 
-from pytspclient import TSPClient, TSPException, ToolResult, ToolCall
+from pytspclient import TSPClient, TSPException, ToolResult, ToolCall\nfrom pytspclient.types import TSP_ERROR_STDOUT_CLOSED, TSP_ERROR_CONNECTION_CLOSED
 
 import appPaths
 from service.agentService.driver.base import AgentDriverConfig
@@ -221,12 +221,14 @@ class TspAgentDriver(AgentDriver):
             # ToolResult.output 是原始类型（dict / list / str）
             return result.output
         except TSPException as e:
+            # 连接断开类错误：清空 client 以便下次调用触发重连
+            if e.code in (TSP_ERROR_STDOUT_CLOSED, TSP_ERROR_CONNECTION_CLOSED):
+                logger.warning("TSP 连接断开: agent_id=%s, code=%s, message=%s", self.host.gt_agent.id, e.code, e.message)
+                self._client = None
             return {"success": False, "code": e.code, "message": e.message}
         except Exception as e:
-            # 工具执行过程中可能因 gtsp 再次退出而失败，记录日志
             logger.warning("TSP 工具执行异常: agent_id=%s, tool=%s, error=%s", self.host.gt_agent.id, function_name, e)
-            # 精确识别连接断开类错误：stdout 关闭或请求超时，主动清空 client 以便下次调用触发重连
-            # 业务类异常（TSPException 等）不应断开连接
+            # 兼容旧版 pytspclient 仍抛出 RuntimeError 的情况
             err_str = str(e)
             if isinstance(e, (RuntimeError, TimeoutError)) and (
                 "TSP stdout closed" in err_str or "TSP request timeout" in err_str
