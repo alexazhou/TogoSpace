@@ -381,3 +381,14 @@ class TestToolFunctions(ServiceTestCase):
 
         assert result["success"]
         assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "alice"
+
+    async def test_finish_chat_turn_missing_room_message_includes_room_name(self):
+        """未在任务房间发言时，错误提示应带上当前任务房间名称。"""
+        await self.create_room(TEAM, "turn_room", ["alice", "bob"], max_rounds=3)
+        room = roomService.get_room_by_key(f"turn_room@{TEAM}")
+        ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=room.team_id, chat_room=room)
+
+        result = await finish_chat_turn(_context=ctx)
+
+        assert not result["success"]
+        assert "任务房间【turn_room】" in result["message"]
