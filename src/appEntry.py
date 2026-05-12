@@ -56,7 +56,7 @@ def _run_backend() -> None:
         loop.run_until_complete(backend_main.main(port=bind_port))
         _tray_menu.set_status("status_stopped")
     except Exception as e:
-        _logger.error("后端启动失败: %s", e, exc_info=True)
+        _logger.error("后端异常退出: %s", e, exc_info=True)
         _tray_menu.set_status("status_error", e=e)
     finally:
         loop.close()

@@ -266,7 +266,7 @@ class ChatRoom:
     def format_log(self) -> str:
         lines = [f"=== {self.key} 聊天记录 ==="]
         for msg in self.messages:
-            lines.append(f"[{msg.send_time.isoformat()}] {msg.sender_display_name}: {msg.content}")
+            lines.append(f"[{msg.send_time}] {msg.sender_display_name}: {msg.content}")
         return "\n".join(lines)
 
     async def build_initial_system_message(self) -> str:
