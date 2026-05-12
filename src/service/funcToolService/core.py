@@ -155,22 +155,6 @@ def filter_external_allowed_tools(allowed_tools: list[str] | None) -> list[str] 
     return filtered
 
 
-def resolve_local_tool_names(
-    allowed_tools: list[str] | None,
-    *,
-    is_root_leader: bool,
-) -> list[str]:
-    """根据 allowed_tools 规格和角色解析出实际启用的本地工具名列表。"""
-    effective_specs = build_effective_tool_allow_specs(
-        allowed_tools,
-        is_root_leader=is_root_leader,
-        default_enable_all=True,
-    )
-    return resolve_enabled_tool_names(
-        _func_tools,
-        effective_specs,
-    )
-
 
 async def run_tool_call(
     function_args: str,

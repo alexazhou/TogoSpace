@@ -17,7 +17,8 @@ from service.funcToolService.core import (
     get_tools,
     build_tools,
     filter_external_allowed_tools,
-    resolve_local_tool_names,
+    build_effective_tool_allow_specs,
+    resolve_enabled_tool_names,
 )
 from service.funcToolService.funcToolType import FuncTool
 from service.funcToolService.funcToolType import get_function_metadata, python_type_to_json_schema
@@ -111,8 +112,23 @@ class TestRoleTemplateToolMetadata(ServiceTestCase):
         assert ToolCategory.from_spec("category:admin") == ToolCategory.ADMIN
         assert filter_external_allowed_tools(["Read", "Category:Read", "get_time"]) == ["Read"]
 
-        normal_tools = resolve_local_tool_names(["Category:Read", "Category:Admin", "save_role_template"], is_root_leader=False)
-        root_tools = resolve_local_tool_names(["Category:Read"], is_root_leader=True)
+        tool_names = [t.function.name for t in get_tools()]
+        normal_tools = resolve_enabled_tool_names(
+            tool_names,
+            build_effective_tool_allow_specs(
+                ["Category:Read", "Category:Admin", "save_role_template"],
+                is_root_leader=False,
+                default_enable_all=True,
+            ),
+        )
+        root_tools = resolve_enabled_tool_names(
+            tool_names,
+            build_effective_tool_allow_specs(
+                ["Category:Read"],
+                is_root_leader=True,
+                default_enable_all=True,
+            ),
+        )
 
         assert "get_time" in normal_tools
         assert "save_role_template" not in normal_tools
