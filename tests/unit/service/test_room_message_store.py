@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime
 
-from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
+from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.roomService.messageStore import RoomMessageStore
 
 
@@ -22,14 +22,11 @@ def mock_room():
     return MagicMock(id=1, name="test_room", agent_ids=[1])
 
 
-def _msg(sender_id: int = 1, content: str = "msg", *, insert_immediately: bool = False) -> GtCoreRoomMessage:
-    return GtCoreRoomMessage(
-        sender_id=sender_id,
-        sender_display_name="Sender",
-        content=content,
-        send_time=datetime(2024, 1, 1),
-        insert_immediately=insert_immediately,
-    )
+def _msg(agent_id: int = 1, content: str = "msg", *, insert_immediately: bool = False) -> GtRoomMessage:
+    m = GtRoomMessage(room_id=1, sender_id=agent_id, content=content,
+                      send_time=datetime(2024, 1, 1), insert_immediately=insert_immediately)
+    m.sender_display_name = "Sender"
+    return m
 
 
 class TestHasPendingImmediateMessages:
@@ -171,9 +168,9 @@ class TestFlushQueued:
 class TestEscalateToImmediate:
     """escalate_to_immediate：将主流未读或 pending queued 消息升级为 immediately。"""
 
-    def _msg_with_db_id(self, db_id: int, content: str = "msg") -> GtCoreRoomMessage:
+    def _msg_with_db_id(self, db_id: int, content: str = "msg") -> GtRoomMessage:
         m = _msg(content=content)
-        m.db_id = db_id
+        m.id = db_id
         return m
 
     async def test_escalate_unread_message_succeeds(self, mock_room):
@@ -241,10 +238,10 @@ class TestEscalateToImmediate:
         store.escalate_to_immediate(db_id=10)
 
         assert len(store.messages) == 2
-        assert store.messages[0].db_id == 5
-        assert store.messages[1].db_id == 15
+        assert store.messages[0].id == 5
+        assert store.messages[1].id == 15
         unread = store.get_unread(agent_id=1)
-        assert [m.db_id for m in unread] == [5, 15]
+        assert [m.id for m in unread] == [5, 15]
 
     def test_escalate_pending_queued_message_succeeds(self, mock_room):
         """pending queued 消息可直接升级为 pending immediate，无需先进入主流。"""
@@ -258,7 +255,7 @@ class TestEscalateToImmediate:
         assert result.insert_immediately is True
         assert len(store.messages) == 0
         assert len(store.pending_messages) == 1
-        assert store.pending_messages[0].db_id == 10
+        assert store.pending_messages[0].id == 10
 
     def test_escalate_pending_immediate_is_idempotent(self, mock_room):
         """已经是 pending immediate 的消息再次升级时应保持幂等。"""
@@ -277,9 +274,9 @@ class TestEscalateToImmediate:
 class TestSort:
     """_sort()：pending 消息按 db_id 升序排，主流消息按 seq 升序在前。"""
 
-    def _msg_with_db_id(self, db_id: int) -> GtCoreRoomMessage:
+    def _msg_with_db_id(self, db_id: int) -> GtRoomMessage:
         m = _msg()
-        m.db_id = db_id
+        m.id = db_id
         return m
 
     def test_pending_messages_sorted_by_db_id(self, mock_room):
@@ -296,7 +293,7 @@ class TestSort:
         # 触发一次排序（escalate 或 inject 都会触发；这里直接调用私有方法验证）
         store._sort()  # noqa: SLF001
 
-        assert [m.db_id for m in store.pending_messages] == [5, 10, 20]
+        assert [m.id for m in store.pending_messages] == [5, 10, 20]
 
     def test_seq_messages_come_before_pending(self, mock_room):
         """seq 已赋值的消息整体排在 pending 消息前面。"""
@@ -327,4 +324,4 @@ class TestSort:
         store.escalate_to_immediate(db_id=10)
         store.escalate_to_immediate(db_id=20)
 
-        assert [m.db_id for m in store.pending_messages] == [10, 20, 30]
+        assert [m.id for m in store.pending_messages] == [10, 20, 30]

@@ -6,8 +6,8 @@ from typing import Dict, List
 from dal.db import gtRoomMessageManager
 
 logger = logging.getLogger("service.roomService")
-from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 from model.dbModel.gtRoom import GtRoom
+from model.dbModel.gtRoomMessage import GtRoomMessage
 from service import messageBus
 from constants import MessageBusTopic
 
@@ -16,7 +16,7 @@ class RoomMessageStore:
     """管理房间内存消息列表、各 Agent 已读进度、DB 持久化与 WS 事件广播。"""
 
     def __init__(self, *, gt_room: GtRoom):
-        self._messages: List[GtCoreRoomMessage] = []
+        self._messages: List[GtRoomMessage] = []
         self._agent_seq_read: Dict[int, int] = {}  # agent_id -> 下一个待读的 seq（不含）
         self._next_seq: int = 0
         self._gt_room: GtRoom = gt_room
@@ -26,16 +26,16 @@ class RoomMessageStore:
         return self._gt_room.agent_ids
 
     @property
-    def messages(self) -> List[GtCoreRoomMessage]:
+    def messages(self) -> List[GtRoomMessage]:
         """返回已分配 seq 的主流消息列表。"""
         return [m for m in self._messages if m.seq is not None]
 
     @property
-    def pending_messages(self) -> List[GtCoreRoomMessage]:
+    def pending_messages(self) -> List[GtRoomMessage]:
         """返回尚未注入的 pending 消息列表（seq=None）。"""
         return [m for m in self._messages if m.seq is None]
 
-    async def append_and_assign_seq(self, msg: GtCoreRoomMessage, *,
+    async def append_and_assign_seq(self, msg: GtRoomMessage, *,
                                      publish: bool = False) -> None:
         """追加到主消息列表并自动分配 seq。
 
@@ -46,13 +46,13 @@ class RoomMessageStore:
         self._next_seq += 1
 
         # 确保持久化
-        if msg.db_id is None:
+        if msg.id is None:
             db_msg = await gtRoomMessageManager.append_room_message(
-                room_id=self._gt_room.id, agent_id=msg.sender_id, content=msg.content,
-                send_time=msg.send_time.isoformat(),
+                room_id=self._gt_room.id, sender_id=msg.sender_id, content=msg.content,
+                send_time=msg.send_time,
                 insert_immediately=False, seq=msg.seq,
             )
-            msg.db_id = db_msg.id
+            msg.id = db_msg.id
 
         insert_pos = next((i for i, m in enumerate(self._messages) if m.seq is None), len(self._messages))
         self._messages.insert(insert_pos, msg)
@@ -60,7 +60,7 @@ class RoomMessageStore:
         if publish:
             messageBus.publish(MessageBusTopic.ROOM_MSG_ADDED, gt_room=self._gt_room, gt_message=msg)
 
-    def append_pending(self, msg: GtCoreRoomMessage) -> None:
+    def append_pending(self, msg: GtRoomMessage) -> None:
         """将消息追加到 pending 队列末尾（seq 尚未分配）。
 
         适用于两类 pending 消息：
@@ -70,7 +70,7 @@ class RoomMessageStore:
         assert msg.seq is None, f"append_pending 要求 seq 为 None，实际为 {msg.seq}"
         self._messages.append(msg)
 
-    def get_unread(self, agent_id: int) -> List[GtCoreRoomMessage]:
+    def get_unread(self, agent_id: int) -> List[GtRoomMessage]:
         """返回 agent_id 尚未读取的主流消息，并推进其读取进度。"""
         next_seq = self._agent_seq_read.get(agent_id, 0)
         new_msgs = [m for m in self._messages if m.seq is not None and m.seq >= next_seq]
@@ -92,12 +92,12 @@ class RoomMessageStore:
         self._messages.sort(key=lambda m: (
             m.seq is None,
             m.seq if m.seq is not None else 0,
-            m.db_id if m.seq is None and m.db_id is not None else 0,
+            m.id if m.seq is None and m.id is not None else 0,
         ))
 
     def inject(
         self,
-        messages: List[GtCoreRoomMessage] | None = None,
+        messages: List[GtRoomMessage] | None = None,
         agent_read_index: Dict[str, int] | None = None,
     ) -> None:
         if messages is not None:
@@ -118,15 +118,15 @@ class RoomMessageStore:
         """检查是否有 insert_immediately=True 且 seq=None 的待注入消息。"""
         return any(m.seq is None and m.insert_immediately for m in self._messages)
 
-    async def flush_pending_immediate(self) -> List[GtCoreRoomMessage]:
+    async def flush_pending_immediate(self) -> List[GtRoomMessage]:
         """将 insert_immediately=True 的 pending 消息分配 seq 并更新 DB，返回已处理列表。"""
         return await self._flush(immediate_only=True)
 
-    async def flush_queued(self) -> List[GtCoreRoomMessage]:
+    async def flush_queued(self) -> List[GtRoomMessage]:
         """将 insert_immediately=False 的 pending 消息分配 seq 并更新 DB，返回已处理列表。"""
         return await self._flush(immediate_only=False)
 
-    async def _flush(self, *, immediate_only: bool) -> List[GtCoreRoomMessage]:
+    async def _flush(self, *, immediate_only: bool) -> List[GtRoomMessage]:
         kind = "immediately" if immediate_only else "queued"
         pending = [m for m in self._messages if m.seq is None and m.insert_immediately == immediate_only]
         if not pending:
@@ -134,14 +134,14 @@ class RoomMessageStore:
         for msg in pending:
             msg.seq = self._next_seq
             self._next_seq += 1
-            if msg.db_id is not None:
-                await gtRoomMessageManager.update_room_message_seq(msg.db_id, msg.seq)  # type: ignore[arg-type]
+            if msg.id is not None:
+                await gtRoomMessageManager.update_room_message_seq(msg.id, msg.seq)  # type: ignore[arg-type]
             messageBus.publish(MessageBusTopic.ROOM_MSG_CHANGED, gt_room=self._gt_room, gt_message=msg)
         logger.info("%s 消息注入完成: room=%s, count=%d, seqs=%s",
                      kind, self._gt_room.name, len(pending), [m.seq for m in pending])
         return pending
 
-    def escalate_to_immediate(self, db_id: int) -> GtCoreRoomMessage:
+    def escalate_to_immediate(self, db_id: int) -> GtRoomMessage:
         """将消息升级为 pending immediately。
 
         支持两类消息：
@@ -151,7 +151,7 @@ class RoomMessageStore:
         若消息不存在，抛出 ValueError。
         若主流消息已被 agent 读取，抛出 RuntimeError。
         """
-        msg = next((m for m in self._messages if m.db_id == db_id), None)
+        msg = next((m for m in self._messages if m.id == db_id), None)
         if msg is None:
             raise ValueError(f"message db_id={db_id} not found")
 

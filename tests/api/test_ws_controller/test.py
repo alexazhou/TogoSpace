@@ -94,7 +94,7 @@ class TestWsController(_ApiServiceCase):
         assert "display_name" not in event["gt_room"]
         assert "i18n" in event["gt_room"]
         assert "gt_message" in event
-        assert event["gt_message"]["sender_id"] == -1
+        assert event["gt_message"]["agent_id"] == -1
         assert event["gt_message"]["content"] == "Testing WebSocket"
         assert event["gt_message"]["insert_immediately"] is False
 

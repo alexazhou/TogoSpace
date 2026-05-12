@@ -9,7 +9,6 @@ from dal.db import gtRoomManager, gtTeamManager, gtAgentManager, gtRoomMessageMa
 from service import messageBus
 from util import configUtil, assertUtil, i18nUtil
 from exception import TogoException
-from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
 from model.dbModel.gtDept import DeptRoomSpec
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoomMessage import GtRoomMessage
@@ -93,7 +92,7 @@ async def _restore_room_runtime_state(room: ChatRoom) -> None:
     gt_room_messages = await gtRoomMessageManager.get_room_messages(room.room_id)
     agent_read_index, speaker_index = await gtRoomManager.get_room_state(room.room_id)
     recovered_from_db = bool(gt_room_messages)
-    restored_messages: list[GtCoreRoomMessage] | None = None
+    restored_messages: list[GtRoomMessage] | None = None
 
     logger.info(f"[恢复状态] room={room.name}, room_id={room.room_id}, msg_count={len(gt_room_messages)}, read_index={agent_read_index}, speaker_index={speaker_index}")
     logger.info(f"[恢复状态-详细] room_id={room.room_id}, agent_read_index type={type(agent_read_index)}, speaker_index type={type(speaker_index)}")
@@ -102,18 +101,10 @@ async def _restore_room_runtime_state(room: ChatRoom) -> None:
         restored_messages = []
         for row in gt_room_messages:
             # 从数据库获取 display_name（SYSTEM agent 也有数据库记录）
-            agent = await gtAgentManager.get_agent_by_id(row.agent_id)
-            assert agent, f"agent_id '{row.agent_id}' not found"
-            sender_display_name = agent.display_name
-            restored_messages.append(GtCoreRoomMessage(
-                sender_id=row.agent_id,
-                sender_display_name=sender_display_name,
-                content=row.content,
-                send_time=datetime.fromisoformat(row.send_time),
-                insert_immediately=row.insert_immediately,
-                seq=row.seq,
-                db_id=row.id,
-            ))
+            agent = await gtAgentManager.get_agent_by_id(row.sender_id)
+            assert agent, f"sender_id '{row.sender_id}' not found"
+            row.sender_display_name = agent.display_name
+            restored_messages.append(row)
 
     if restored_messages is not None or agent_read_index is not None:
         room.inject_runtime_state(

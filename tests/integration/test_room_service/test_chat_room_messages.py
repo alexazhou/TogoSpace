@@ -142,7 +142,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
         rows = await gtRoomMessageManager.get_room_messages(room.room_id)
         assert len(rows) == 1
-        assert rows[0].agent_id == room.SYSTEM_MEMBER_ID
+        assert rows[0].sender_id == room.SYSTEM_MEMBER_ID
         assert "房间已经创建" in rows[0].content
 
     async def test_add_message_insert_immediately_goes_to_pending_queue(self):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import yaml
 from dal.db import gtAgentManager, gtDeptManager
-from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
+from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService.prompts import (
     TURN_CONTEXT_SUFFIX,
     TEAM_AWARENESS_TOOLS_GUIDE,
@@ -58,7 +58,7 @@ def build_turn_begin_prompt(room_name: str, messages: list[tuple[str, str]]) -> 
 
 def build_turn_begin_prompt_from_messages(
     room_name: str,
-    messages: list[GtCoreRoomMessage],
+    messages: list[GtRoomMessage],
     exclude_agent_id: int,
 ) -> str:
     """从消息列表构建 turn begin prompt，自动过滤自己的消息。"""
@@ -72,7 +72,7 @@ def build_turn_begin_prompt_from_messages(
 
 def build_turn_update_prompt(
     room_name: str,
-    messages: list[GtCoreRoomMessage],
+    messages: list[GtRoomMessage],
     exclude_agent_id: int,
 ) -> str:
     """构建 turn update prompt（运行中补充消息），不含 ROOM_TURN_BEGIN 语义，自动过滤自己的消息。

@@ -8,7 +8,7 @@ from constants import AgentHistoryStatus, AgentHistoryTag, DriverType, OpenaiApi
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
-from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
+from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.toolRegistry import ToolExecutionResult
 from service.agentService.driver.base import AgentDriverConfig
@@ -71,7 +71,7 @@ async def test_pull_room_messages_syncs_to_history(turn_runner):
     room.name = "test_room"
     room.team_id = 1
 
-    msg = MagicMock(spec=GtCoreRoomMessage)
+    msg = MagicMock(spec=GtRoomMessage)
     msg.sender_id = 2  # 非 agent 自身
     msg.sender_display_name = "OtherAgent"
     msg.content = "Hello"
@@ -95,7 +95,7 @@ async def test_pull_room_messages_skips_own_messages(turn_runner):
     room.name = "test_room"
 
     # 自己发的消息，应跳过
-    msg = MagicMock(spec=GtCoreRoomMessage)
+    msg = MagicMock(spec=GtRoomMessage)
     msg.sender_id = 1  # agent.gt_agent.id
     msg.sender_display_name = "TestAgent"
     msg.content = "My message"

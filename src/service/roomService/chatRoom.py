@@ -8,7 +8,7 @@ from dal.db import gtRoomManager, gtRoomMessageManager, gtAgentManager
 from service import messageBus
 from util import configUtil, i18nUtil
 from util import assertUtil
-from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
+from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
@@ -69,7 +69,7 @@ class ChatRoom:
         self._scheduler.current_turn_has_content = value
 
     @property
-    def messages(self) -> List[GtCoreRoomMessage]:
+    def messages(self) -> List[GtRoomMessage]:
         return self._store.messages
 
     @property
@@ -139,12 +139,10 @@ class ChatRoom:
         if not self.messages:
             content = await self.build_initial_system_message()
             agent = await gtAgentManager.get_agent_by_id(self.SYSTEM_MEMBER_ID)
-            await self._store.append_and_assign_seq(GtCoreRoomMessage(
-                sender_id=self.SYSTEM_MEMBER_ID,
-                sender_display_name=agent.display_name,
-                content=content,
-                send_time=datetime.now(),
-            ), publish=True)
+            msg = GtRoomMessage(room_id=self.room_id, sender_id=self.SYSTEM_MEMBER_ID,
+                                content=content, send_time=datetime.now())
+            msg.sender_display_name = agent.display_name
+            await self._store.append_and_assign_seq(msg, publish=True)
 
         self._scheduler.activate()
         logger.info("[%s] 房间激活: INIT -> %s (agents=%d, max_rounds=%d)",
@@ -153,7 +151,7 @@ class ChatRoom:
 
     # ─── 消息 ─────────────────────────────────────────────────
 
-    async def get_unread_messages(self, agent_id: int) -> List[GtCoreRoomMessage]:
+    async def get_unread_messages(self, agent_id: int) -> List[GtRoomMessage]:
         new_msgs = self._store.get_unread(agent_id)
         if self._scheduler.state != RoomState.INIT:
             await self._scheduler.persist_state()
@@ -196,13 +194,10 @@ class ChatRoom:
         agent = await gtAgentManager.get_agent_by_id(sender_id)
         assert agent, f"agent_id '{sender_id}' not found"
 
-        message = GtCoreRoomMessage(
-            sender_id=sender_id,
-            sender_display_name=agent.display_name,
-            content=content,
-            send_time=send_time or datetime.now(),
-            insert_immediately=insert_immediately,
-        )
+        message = GtRoomMessage(room_id=self.room_id, sender_id=sender_id,
+                                content=content, send_time=send_time or datetime.now(),
+                                insert_immediately=insert_immediately)
+        message.sender_display_name = agent.display_name
 
         if insert_immediately or is_queued:
             self._store.append_pending(message)
@@ -214,11 +209,11 @@ class ChatRoom:
 
         if insert_immediately or is_queued:
             db_msg = await gtRoomMessageManager.append_room_message(
-                room_id=self.room_id, agent_id=sender_id, content=content,
-                send_time=message.send_time.isoformat(),
+                room_id=self.room_id, sender_id=sender_id, content=content,
+                send_time=message.send_time,
                 insert_immediately=insert_immediately, seq=message.seq,
             )
-            message.db_id = db_msg.id
+            message.id = db_msg.id
             messageBus.publish(MessageBusTopic.ROOM_MSG_ADDED, gt_room=self.gt_room, gt_message=message)
 
         if not insert_immediately and not is_queued and update_turn_state and self._agent_ids:
@@ -247,7 +242,7 @@ class ChatRoom:
 
     def inject_runtime_state(
         self,
-        messages: List[GtCoreRoomMessage] | None = None,
+        messages: List[GtRoomMessage] | None = None,
         agent_read_index: Dict[str, int] | None = None,
         speaker_index: int | None = None,
     ) -> None:

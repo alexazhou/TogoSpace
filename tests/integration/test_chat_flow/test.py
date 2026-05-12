@@ -100,7 +100,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             item = GtAgentHistory.build(
                 OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset test turn state"),
             )
-            item.agent_id = alice.gt_agent.id
+            item.sender_id = alice.gt_agent.id
             item.seq = 0
             alice.inject_history_messages([item])
             call_seq = {
@@ -149,7 +149,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             item = GtAgentHistory.build(
                 OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset turn checker history"),
             )
-            item.agent_id = alice.gt_agent.id
+            item.sender_id = alice.gt_agent.id
             item.seq = 0
             alice.inject_history_messages([item])
             resps = [
@@ -251,7 +251,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
                 OpenAIMessage.text(OpenaiApiRole.USER, "请发送两条消息"),
                 tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
             )
-            user_item.agent_id = alice.gt_agent.id
+            user_item.sender_id = alice.gt_agent.id
             user_item.seq = 0
 
             # ASSISTANT 消息（两个 tool_calls）
@@ -259,7 +259,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
                 assistant_msg,
                 status=AgentHistoryStatus.SUCCESS,
             )
-            assistant_item.agent_id = alice.gt_agent.id
+            assistant_item.sender_id = alice.gt_agent.id
             assistant_item.seq = 1
 
             # TOOL 记录（call_1 已取消）
@@ -268,7 +268,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
                 status=AgentHistoryStatus.CANCELLED,
                 error_message="cancelled by user",
             )
-            tool_cancelled_item.agent_id = alice.gt_agent.id
+            tool_cancelled_item.sender_id = alice.gt_agent.id
             tool_cancelled_item.seq = 2
 
             alice.inject_history_messages([user_item, assistant_item, tool_cancelled_item])

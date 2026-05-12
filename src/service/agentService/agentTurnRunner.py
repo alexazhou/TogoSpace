@@ -15,7 +15,8 @@ from constants import (
     AgentHistoryStatus, AgentHistoryTag,
     DriverType, OpenaiApiRole, RoomState, TurnStepResult,
 )
-from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext, GtCoreRoomMessage
+from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
+from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgentTask import GtAgentTask
@@ -166,7 +167,7 @@ class AgentTurnRunner:
 
     async def pull_room_messages_to_history(self, room: ChatRoom) -> int:
         """从房间拉取未读消息并追加到 history。返回追加的消息条目数（0 或 1）。"""
-        new_msgs: List[GtCoreRoomMessage] = await room.get_unread_messages(self.gt_agent.id)
+        new_msgs: List[GtRoomMessage] = await room.get_unread_messages(self.gt_agent.id)
 
         own_count = sum(1 for msg in new_msgs if msg.sender_id == self.gt_agent.id)
         logger.info(f"同步房间消息: agent={self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}, raw={len(new_msgs)}, own={own_count}, others={len(new_msgs) - own_count}")
@@ -195,7 +196,7 @@ class AgentTurnRunner:
         """在安全边界将待注入的 immediately 消息移入主消息列表，并通知 Agent。"""
         await room.flush_pending_immediate_messages()
 
-        new_msgs: List[GtCoreRoomMessage] = await room.get_unread_messages(self.gt_agent.id)
+        new_msgs: List[GtRoomMessage] = await room.get_unread_messages(self.gt_agent.id)
         others = [m for m in new_msgs if m.sender_id != self.gt_agent.id]
         if not others:
             logger.debug(

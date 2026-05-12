@@ -2,18 +2,15 @@ import pytest
 
 from datetime import datetime
 
-from model.coreModel.gtCoreChatModel import GtCoreRoomMessage
+from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService import promptBuilder
 
 
-def _msg(sender_id: int, display_name: str, content: str, *, insert_immediately: bool = False) -> GtCoreRoomMessage:
-    return GtCoreRoomMessage(
-        sender_id=sender_id,
-        sender_display_name=display_name,
-        content=content,
-        send_time=datetime(2024, 1, 1),
-        insert_immediately=insert_immediately,
-    )
+def _msg(agent_id: int, display_name: str, content: str, *, insert_immediately: bool = False) -> GtRoomMessage:
+    m = GtRoomMessage(room_id=1, sender_id=agent_id, content=content,
+                      send_time=datetime(2024, 1, 1), insert_immediately=insert_immediately)
+    m.sender_display_name = display_name
+    return m
 
 
 # ─── build_turn_update_prompt ────────────────────────────────

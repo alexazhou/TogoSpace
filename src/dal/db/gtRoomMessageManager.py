@@ -1,20 +1,22 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from . import gtRoomManager
 
 
 async def append_room_message(
     room_id: int,
-    agent_id: int,
+    sender_id: int,
     content: str,
-    send_time: str,
+    send_time: datetime,
     insert_immediately: bool = False,
     seq: int | None = None,
 ) -> GtRoomMessage:
     return await GtRoomMessage.aio_create(
         room_id=room_id,
-        agent_id=agent_id,
+        sender_id=sender_id,
         content=content,
         send_time=send_time,
         insert_immediately=insert_immediately,
