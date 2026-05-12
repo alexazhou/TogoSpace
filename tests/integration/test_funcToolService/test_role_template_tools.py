@@ -188,6 +188,66 @@ class TestRoleTemplateTools(ServiceTestCase):
         assert detail_result["role_template"]["soul"] == "plan carefully"
         assert detail_result["role_template"]["type"] == "USER"
 
+    async def test_list_role_templates_with_search(self) -> None:
+        """list_role_templates 应支持关键词搜索 (OR 逻辑，支持 i18n)。"""
+        # 1. 准备测试数据
+        await save_role_template(
+            name="search_writer",
+            type="USER",
+            soul="draft documentation",
+            allowed_tools=[],
+            i18n={"display_name": {"zh-CN": "专业写手", "en": "Pro Writer"}}
+        )
+        await save_role_template(
+            name="search_coder",
+            type="USER",
+            soul="write python code",
+            allowed_tools=[],
+        )
+
+        # 2. 搜索名称
+        res = await list_role_templates(keywords=["coder"])
+        names = [t["name"] for t in res["role_templates"]]
+        assert "search_coder" in names
+        assert "search_writer" not in names
+
+        # 3. 搜索 soul
+        res = await list_role_templates(keywords=["documentation"])
+        names = [t["name"] for t in res["role_templates"]]
+        assert "search_writer" in names
+
+        # 4. 搜索 i18n (display_name)
+        res = await list_role_templates(keywords=["专业写手"])
+        names = [t["name"] for t in res["role_templates"]]
+        assert "search_writer" in names
+
+        # 5. 多个词 OR 逻辑 (命中任何一个即可)
+        res = await list_role_templates(keywords=["python", "Pro"])
+        names = [t["name"] for t in res["role_templates"]]
+        assert "search_coder" in names   # 命中 python
+        assert "search_writer" in names  # 命中 Pro
+
+        # 6. 大小写不敏感测试
+        res = await list_role_templates(keywords=["CODER", "PRO"])
+        names = [t["name"] for t in res["role_templates"]]
+        assert "search_coder" in names
+        assert "search_writer" in names
+
+        # 7. 子串匹配测试
+        res = await list_role_templates(keywords=["write"])
+        names = [t["name"] for t in res["role_templates"]]
+        # search_writer 的名称包含 writer，search_coder 的 soul 包含 write
+        assert "search_writer" in names
+        assert "search_coder" in names
+
+        # 8. 空关键词列表 (应返回全部)
+        res = await list_role_templates(keywords=[])
+        assert len(res["role_templates"]) >= 2
+
+        # 9. 不存在的词
+        res = await list_role_templates(keywords=["none_existing_word"])
+        assert len(res["role_templates"]) == 0
+
     async def test_save_role_template_creates_and_updates(self) -> None:
         """save_role_template 应按名称执行全字段 upsert。"""
         create_result = await save_role_template(

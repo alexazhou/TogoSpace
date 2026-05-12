@@ -272,14 +272,22 @@ async def wake_up_agent(agent_name: str, _context: ToolCallContext = None) -> di
 
     return {"success": True, "message": f"已成功唤醒 {agent_name}，该成员将重新进入调度循环。"}
 
-
-async def list_role_templates(_context: ToolCallContext = None) -> dict:
+async def list_role_templates(keywords: list[str] | None = None, _context: ToolCallContext = None) -> dict:
     """查询全部角色模板列表。
 
     返回精简字段，不包含 soul；display_name 从 i18n.display_name 解析。
+
+    Args:
+        keywords: 可选，关键词搜索列表。若提供，则仅返回名称或 soul 中包含这些词的模板。
     """
-    templates = await gtRoleTemplateManager.get_all_role_templates()
+    if keywords:
+        templates = await gtRoleTemplateManager.search_role_templates(keywords)
+    else:
+        templates = await gtRoleTemplateManager.get_all_role_templates()
+
+    # 转换为 JSON 字典并剔除 soul 以节省 Token
     role_templates = []
+
     for t in templates:
         data = t.to_json()
         data.pop("soul", None)

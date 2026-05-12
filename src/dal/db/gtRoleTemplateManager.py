@@ -1,5 +1,5 @@
-from __future__ import annotations
-
+import operator
+from functools import reduce
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 
 
@@ -28,6 +28,44 @@ async def get_all_role_templates() -> list[GtRoleTemplate]:
     """获取所有 role templates。"""
     query = GtRoleTemplate.select().order_by(GtRoleTemplate.name)
     return list(await query.aio_execute())
+
+
+async def search_role_templates(keywords: list[str]) -> list[GtRoleTemplate]:
+    """按关键词搜索 role templates（匹配 name、soul 或 i18n）。
+    多个关键词之间使用 OR 逻辑：命中任何一个词即可。
+    在内存中进行过滤以保证 i18n 匹配的一致性。
+    """
+    templates = await get_all_role_templates()
+    if not keywords:
+        return templates
+
+    keywords = [k.lower() for k in keywords]
+    result = []
+    
+    for t in templates:
+        # 待搜索的文本池
+        search_texts = [t.name.lower(), t.soul.lower()]
+        # 加入所有多语言数据中的文本值
+        if t.i18n:
+            def collect_values(d):
+                for v in d.values():
+                    if isinstance(v, dict):
+                        collect_values(v)
+                    elif isinstance(v, str):
+                        search_texts.append(v.lower())
+            collect_values(t.i18n)
+        
+        # 命中逻辑：任意一个关键词在任意一个搜索文本中出现
+        matched = False
+        for kw in keywords:
+            if any(kw in text for text in search_texts):
+                matched = True
+                break
+        
+        if matched:
+            result.append(t)
+            
+    return result
 
 
 async def save_role_template(template: GtRoleTemplate) -> GtRoleTemplate:
