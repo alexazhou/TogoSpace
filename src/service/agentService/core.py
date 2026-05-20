@@ -10,7 +10,7 @@ from model.dbModel.gtAgent import GtAgent
 from service.agentService.agent import Agent
 from service.agentService.driver import normalize_driver_config
 from service.agentService.promptBuilder import build_agent_system_prompt
-from service import llmService, roomService, persistenceService, deptService
+from service import llmService, roomService, persistenceService, deptService, agentActivityService
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtAgentTaskManager
 from peewee import IntegrityError
 from exception import TogoException
@@ -198,6 +198,10 @@ async def _restore_agent_runtime_state(
 
     if not configUtil.get_app_config().setting.demo_mode.read_only:
         await persistenceService.fail_running_tasks(
+            agent.gt_agent.id,
+            error_message=running_task_error_message,
+        )
+        await agentActivityService.fail_started_activities(
             agent.gt_agent.id,
             error_message=running_task_error_message,
         )

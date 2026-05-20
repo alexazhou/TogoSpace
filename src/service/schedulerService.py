@@ -139,4 +139,4 @@ def stop_scheduler_team(team_id: int) -> None:
     team_agents = agentService.get_team_agents(team_id)
     for agent in team_agents:
         agent.stop_consumer_task()
-    logger.info(f"Team ID={team_id} 的 {len(team_agents)} 个消费 task 已停止")
+    logger.info(f"Team ID={team_id} 的 {len(team_agents)} 个 Agent 已停止")
