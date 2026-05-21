@@ -186,7 +186,7 @@ class AgentResumeHandler(BaseHandler):
         assertUtil.assertNotNull(agent, None, f"运行时 Agent ID '{agent_id}' 不存在", "agent_not_found")
         assertUtil.assertTrue(agent.status == AgentStatus.FAILED, None, f"Agent ID={agent.gt_agent.id} 当前状态不是 FAILED（当前: {agent.status.name}）", "agent_not_failed")
 
-        await agent.resume_failed()
+        agent.start_consumer_task()
 
         self.return_json({"status": "resumed", "agent_id": agent.gt_agent.id})
 

@@ -8,8 +8,6 @@ from constants import AgentActivityStatus, AgentActivityType, AgentStatus, Agent
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentTask import GtAgentTask
 from service.agentService.agentTaskConsumer import AgentTaskConsumer
-from util.assertUtil import MakeSureException
-
 
 @pytest.fixture
 def mock_gt_agent():
@@ -132,89 +130,60 @@ async def test_consume_running_task_retries_and_keeps_failed_status_on_error(con
         }
 
 
-@pytest.mark.asyncio
-async def test_resume_failed_raises_when_no_failed_task(consumer):
-    with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_manager:
-        mock_manager.get_first_unfinish_task = AsyncMock(return_value=None)
-
-        with pytest.raises(MakeSureException, match="no failed task to resume"):
-            await consumer.resume_failed()
-
 
 @pytest.mark.asyncio
-async def test_resume_failed_starts_consumer_with_resumed_task(consumer):
-    failed_task = MagicMock(spec=GtAgentTask)
-    failed_task.id = 100
-    failed_task.status = AgentTaskStatus.FAILED
-    failed_task.task_data = {"room_id": 42}
-
-    resumed_task = MagicMock(spec=GtAgentTask)
-    resumed_task.id = 100
-    resumed_task.status = AgentTaskStatus.RUNNING
-    resumed_task.task_data = {"room_id": 42}
-
-    with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_manager:
-        mock_manager.get_first_unfinish_task = AsyncMock(return_value=failed_task)
-        mock_manager.transition_task_status = AsyncMock(return_value=resumed_task)
-
-        with patch.object(consumer, "start") as mock_start:
-            await consumer.resume_failed()
-
-            mock_manager.transition_task_status.assert_called_once_with(100, AgentTaskStatus.FAILED, AgentTaskStatus.RUNNING)
-            mock_start.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_consume_marks_failed_when_first_task_is_failed(consumer, mock_gt_agent, mock_turn_runner):
+async def test_consume_retries_failed_task(consumer, mock_gt_agent, mock_turn_runner):
+    """FAILED 任务应被自动重跑，而不是停止消费。"""
     failed_task = MagicMock(spec=GtAgentTask)
     failed_task.id = 100
     failed_task.status = AgentTaskStatus.FAILED
     failed_task.task_data = {"room_id": 1}
-    failed_task.error_message = "blocked by failed task"
+    failed_task.error_message = "previous error"
+
+    running_task = MagicMock(spec=GtAgentTask)
+    running_task.id = 100
+    running_task.status = AgentTaskStatus.RUNNING
+    running_task.task_data = {"room_id": 1}
 
     with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_manager:
-        mock_manager.get_first_unfinish_task = AsyncMock(return_value=failed_task)
+        mock_manager.get_first_unfinish_task = AsyncMock(side_effect=[failed_task, None])
+        mock_manager.transition_task_status = AsyncMock(return_value=running_task)
+        mock_manager.update_task_status = AsyncMock()
+        mock_manager.has_consumable_task = AsyncMock(return_value=False)
 
         await consumer.consume()
 
-        mock_turn_runner.run_chat_turn.assert_not_called()
-        assert consumer.status == AgentStatus.FAILED
-        assert consumer._mock_activity_service.add_activity.await_args_list[0].kwargs == {
-            "gt_agent": mock_gt_agent,
-            "activity_type": AgentActivityType.AGENT_STATE,
-            "status": AgentActivityStatus.SUCCEEDED,
-            "detail": AgentStatus.ACTIVE.name,
-            "error_message": None,
-        }
-        assert consumer._mock_activity_service.add_activity.await_args_list[-1].kwargs == {
-            "gt_agent": mock_gt_agent,
-            "activity_type": AgentActivityType.AGENT_STATE,
-            "status": AgentActivityStatus.SUCCEEDED,
-            "detail": AgentStatus.FAILED.name,
-            "error_message": "blocked by failed task",
-        }
+        mock_manager.transition_task_status.assert_called_once_with(100, AgentTaskStatus.FAILED, AgentTaskStatus.RUNNING)
+        mock_turn_runner.run_chat_turn.assert_called_once()
+        assert consumer.status == AgentStatus.IDLE
 
 
 @pytest.mark.asyncio
-async def test_consume_keeps_failed_when_already_failed_and_first_task_is_failed(consumer, mock_turn_runner):
+async def test_consume_retries_failed_task_regardless_of_current_status(consumer, mock_turn_runner):
+    """无论 consumer 当前状态如何，FAILED 任务都应被重跑。"""
     failed_task = MagicMock(spec=GtAgentTask)
     failed_task.id = 100
     failed_task.status = AgentTaskStatus.FAILED
     failed_task.task_data = {"room_id": 1}
-    failed_task.error_message = "blocked by failed task"
+    failed_task.error_message = "previous error"
     consumer.status = AgentStatus.FAILED
 
+    running_task = MagicMock(spec=GtAgentTask)
+    running_task.id = 100
+    running_task.status = AgentTaskStatus.RUNNING
+    running_task.task_data = {"room_id": 1}
+
     with patch("service.agentService.agentTaskConsumer.gtAgentTaskManager") as mock_manager:
-        mock_manager.get_first_unfinish_task = AsyncMock(return_value=failed_task)
+        mock_manager.get_first_unfinish_task = AsyncMock(side_effect=[failed_task, None])
+        mock_manager.transition_task_status = AsyncMock(return_value=running_task)
+        mock_manager.update_task_status = AsyncMock()
+        mock_manager.has_consumable_task = AsyncMock(return_value=False)
 
         await consumer.consume()
 
-        mock_turn_runner.run_chat_turn.assert_not_called()
-        assert consumer.status == AgentStatus.FAILED
-        assert [call.kwargs["detail"] for call in consumer._mock_activity_service.add_activity.await_args_list] == [
-            AgentStatus.ACTIVE.name,
-            AgentStatus.FAILED.name,
-        ]
+        mock_manager.transition_task_status.assert_called_once_with(100, AgentTaskStatus.FAILED, AgentTaskStatus.RUNNING)
+        mock_turn_runner.run_chat_turn.assert_called_once()
+        assert consumer.status == AgentStatus.IDLE
 
 
 @pytest.mark.asyncio

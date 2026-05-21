@@ -21,14 +21,26 @@ async def create_task(
     return task
 
 
-async def has_pending_room_task(agent_id: int, room_id: int) -> bool:
-    """检查 Agent 是否已存在同房间的 PENDING 任务。"""
+async def has_pending_room_task(
+    agent_id: int,
+    room_id: int,
+    *,
+    include_failed: bool = False,
+) -> bool:
+    """检查 Agent 是否已存在同房间的 PENDING 任务。
+
+    Args:
+        include_failed: 为 True 时，也将 FAILED 任务计入检查范围（用于防止重复创建任务）。
+    """
+    statuses = [AgentTaskStatus.PENDING]
+    if include_failed:
+        statuses.append(AgentTaskStatus.FAILED)
     tasks = await (
         GtAgentTask
         .select()
         .where(
             GtAgentTask.agent_id == agent_id,
-            GtAgentTask.status == AgentTaskStatus.PENDING,
+            GtAgentTask.status.in_(statuses),
         )
         .order_by(GtAgentTask.id.asc())
         .aio_execute()

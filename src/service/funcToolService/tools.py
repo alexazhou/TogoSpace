@@ -267,11 +267,7 @@ async def wake_up_agent(agent_name: str, _context: ToolCallContext = None) -> di
     if target_agent.status != AgentStatus.FAILED:
         return {"success": False, "message": f"{agent_name} 当前状态为 {target_agent.status.name}，无需唤醒。"}
 
-    try:
-        await target_agent.resume_failed()
-    except Exception as exc:
-        return {"success": False, "message": f"唤醒 {agent_name} 失败: {exc}"}
-
+    target_agent.start_consumer_task()
     return {"success": True, "message": f"已成功唤醒 {agent_name}，该成员将重新进入调度循环。"}
 
 

@@ -97,9 +97,10 @@ async def _on_room_status_changed(msg: EventBusMessage) -> None:
 
     agent = agentService.get_agent(agent_id)
 
-    # 去重：检查数据库中是否已有该房间的 PENDING 任务
-    if await gtAgentTaskManager.has_pending_room_task(agent_id, room_id):
+    # 去重：检查数据库中是否已有该房间的 PENDING/FAILED 任务
+    if await gtAgentTaskManager.has_pending_room_task(agent_id, room_id, include_failed=True):
         logger.debug(f"跳过重复任务创建: agent_id={agent_id}, room_id={room_id}")
+        agent.start_consumer_task()
         return
 
     # 创建任务记录

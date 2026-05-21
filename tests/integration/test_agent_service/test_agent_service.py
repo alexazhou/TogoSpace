@@ -294,8 +294,8 @@ class TestAgentStatus(_agentServiceCase):
         assert idle_event["gt_agent"].team_id == team.id
         assert idle_event["gt_agent"].team_id > 0
 
-    async def test_resume_failed_marks_task_running_and_restarts_consumer(self):
-        """FAILED 状态的 Agent 恢复时，应将最早失败任务转为 RUNNING 并重启统一执行流程。"""
+    async def test_start_consumer_task_triggers_consume_on_failed_agent(self):
+        """FAILED 状态的 Agent 调用 start_consumer_task() 后，消费协程应启动并将 FAILED 任务转为 RUNNING。"""
         await self.create_room(TEAM, "resume_room", ["alice"])
         room = roomService.get_room_by_key(f"resume_room@{TEAM}")
         alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
@@ -311,16 +311,12 @@ class TestAgentStatus(_agentServiceCase):
             error_message="boom",
         )
         alice.task_consumer.status = AgentStatus.FAILED
-        restart_spy = MagicMock()
-        alice.task_consumer.start = restart_spy
+        start_spy = MagicMock()
+        alice.task_consumer.start = start_spy
 
-        await alice.resume_failed()
-        refreshed_task = await GtAgentTask.aio_get_or_none(GtAgentTask.id == failed_task.id)
+        alice.start_consumer_task()
 
-        assert refreshed_task is not None
-        assert refreshed_task.id == failed_task.id
-        assert refreshed_task.status == AgentTaskStatus.RUNNING
-        restart_spy.assert_called_once()
+        start_spy.assert_called_once()
 
 
 class TestAgentHistorySync(_agentServiceCase):

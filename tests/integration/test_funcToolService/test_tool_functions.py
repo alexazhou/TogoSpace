@@ -44,17 +44,12 @@ class _FakeRuntimeAgent:
         self,
         gt_agent: GtAgent,
         status: AgentStatus,
-        *,
-        resume_error: Exception | None = None,
     ) -> None:
         self.gt_agent = gt_agent
         self.status = status
-        self._resume_error = resume_error
         self.resumed = False
 
-    async def resume_failed(self) -> None:
-        if self._resume_error is not None:
-            raise self._resume_error
+    def start_consumer_task(self) -> None:
         self.resumed = True
 
 

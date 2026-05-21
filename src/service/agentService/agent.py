@@ -16,7 +16,7 @@ class Agent:
     Agent 本身只负责：
     - 生命周期管理（startup / close）
     - 组件装配（task_consumer）
-    - 对外 API 入口（start_consumer_task, resume_failed 等）的一层转发
+    - 对外 API 入口（start_consumer_task 等）的一层转发
 
     Turn 级资源（driver, tool_registry, history）在 AgentTurnRunner 中，
     任务运行时状态与消费逻辑在 AgentTaskConsumer 中。
@@ -79,9 +79,6 @@ class Agent:
     def stop_consumer_task(self) -> None:
         """停止当前 Agent 的消费协程。"""
         self.task_consumer.stop()
-
-    async def resume_failed(self) -> None:
-        await self.task_consumer.resume_failed()
 
     def cancel_current_turn(self) -> bool:
         """人工停止当前 turn。返回 True 表示已发出取消信号。"""
