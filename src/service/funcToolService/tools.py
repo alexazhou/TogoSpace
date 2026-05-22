@@ -295,6 +295,7 @@ async def get_agent_info(agent_name: Optional[str] = None, _context: ToolCallCon
         dept = await deptService.get_agent_dept(team_id, agent_id)
         first_task = await gtAgentTaskManager.get_first_unfinish_task(agent_id) if agent.status == AgentStatus.FAILED else None
         info: dict[str, Any] = {
+            "id": agent_id,
             "name": agent.gt_agent.name,
             "status": agent.status.name,
             "department": dept.name if dept is not None else "off_board",
