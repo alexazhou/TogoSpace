@@ -51,8 +51,6 @@ async def _load_room(gt_team: GtTeam, gt_room: GtRoom) -> None:
     _rooms_by_id[room.room_id] = room
 
     logger.info(f"创建并初始化聊天室: room_id={room.room_id}, type={room.room_type.name}, agent_ids={gt_room.agent_ids}")
-    if gt_room.max_rounds > 0:
-        logger.info(f"初始化轮次配置: room_id={room.room_id}, max_rounds={gt_room.max_rounds}")
 
 
 async def load_team_rooms(team_id: int) -> None:
@@ -241,7 +239,7 @@ async def overwrite_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> N
             name="",
             type=RoomType.GROUP,
             initial_topic="",
-            max_rounds=10,
+            max_rounds=None,
             agent_ids=[],
             biz_id=spec.biz_id,
             tags=["DEPT"],
@@ -260,7 +258,7 @@ async def overwrite_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> N
             ) or spec.initial_topic
         else:
             room.initial_topic = spec.initial_topic
-        room.max_rounds = resolve_room_max_rounds(spec.max_rounds)
+        room.max_rounds = spec.max_rounds
         room.biz_id = spec.biz_id
         room.tags = ["DEPT"]
         room.i18n = spec.i18n or {}
@@ -339,7 +337,7 @@ async def overwrite_team_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
                 name="",
                 type=RoomType.GROUP,
                 initial_topic="",
-                max_rounds=10,
+                max_rounds=None,
                 agent_ids=[],
                 biz_id=None,
                 tags=[],
@@ -399,8 +397,6 @@ async def upsert_room(
     - 不操作 DEPT 房间（有 'DEPT' tag 的房间由部门树管理）。
     """
     room_type = RoomType.PRIVATE if len(agent_ids) == 2 else RoomType.GROUP
-    resolved_max_rounds = resolve_room_max_rounds(max_rounds)
-
     # 不允许创建与已有房间成员集合完全相同的房间（排除当前正在更新的房间本身）
     member_set = set(agent_ids)
     existing_rooms = await gtRoomManager.get_rooms_by_team(team_id)
@@ -422,7 +418,7 @@ async def upsert_room(
         existing.name = name
         existing.type = room_type
         existing.initial_topic = initial_topic
-        existing.max_rounds = resolved_max_rounds
+        existing.max_rounds = max_rounds
         existing.agent_ids = agent_ids
         return await gtRoomManager.save_room(existing)
 
@@ -431,7 +427,7 @@ async def upsert_room(
         name=name,
         type=room_type,
         initial_topic=initial_topic,
-        max_rounds=resolved_max_rounds,
+        max_rounds=max_rounds,
         agent_ids=agent_ids,
         biz_id=None,
         tags=[],

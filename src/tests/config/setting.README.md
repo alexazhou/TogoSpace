@@ -32,7 +32,7 @@
 - `development_mode`：前端开发模式开关，默认 `false`。开启后前端会保留开发态交互，例如请求错误弹窗不自动消失
 - `default_llm_server`：默认使用的服务名，必须等于某个 `llm_services[].name`
 - `llm_services`：模型服务列表，至少要有一个 `enable=true`
-- `default_room_max_turns`：房间默认最大轮次，默认 `100`
+- `default_room_max_rounds`：房间默认最大轮次，默认 `100`。`100` 表示群聊默认最多进行 100 轮后自动停止；`<= 0` 表示不限轮次
 - `db_path`：数据库文件路径，默认为 `STORAGE_ROOT/data/data.db`
 - `workspace_root`：团队默认工作目录根路径
 - `bind_host`：后端 HTTP 服务监听地址，默认 `0.0.0.0`

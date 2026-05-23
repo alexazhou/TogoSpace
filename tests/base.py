@@ -671,7 +671,7 @@ class ServiceTestCase:
                 name=cfg.name,
                 type=infer_room_type(agent_names),
                 initial_topic=cfg.initial_topic,
-                max_rounds=roomService.resolve_room_max_rounds(cfg.max_rounds),
+                max_rounds=cfg.max_rounds,
                 agent_ids=agent_ids,
                 biz_id=getattr(cfg, "biz_id", None),
                 tags=list(getattr(cfg, "tags", [])),

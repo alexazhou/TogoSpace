@@ -20,7 +20,7 @@ class CreateRoomRequest(BaseModel):
     name: str
     type: RoomType = RoomType.GROUP
     initial_topic: str | None = None
-    max_rounds: int = 100
+    max_rounds: int | None = None
     agent_ids: List[int] = Field(default_factory=list)
 
 

@@ -10,6 +10,7 @@ from dal.db import gtAgentManager, gtRoomManager
 from model.dbModel.gtRoom import GtRoom
 from service import messageBus
 from constants import MessageBusTopic
+from util import configUtil
 
 logger = logging.getLogger("service.roomService")
 
@@ -62,6 +63,11 @@ class RoomScheduler:
         self._current_round_skipped_set = set()
         self.current_turn_has_content = False
         self._last_speaker_id = None
+
+    def _effective_max_rounds(self) -> int:
+        if self._gt_room.max_rounds is not None:
+            return self._gt_room.max_rounds
+        return configUtil.get_app_config().setting.default_room_max_rounds
 
     # ─── turn 生命周期 ──────────────────────────────────────
 
@@ -188,7 +194,8 @@ class RoomScheduler:
             return False
         if self._gt_room.type == RoomType.GROUP:
             # 群聊停止条件 1：已完成最大轮次（_go_next_agent 末位绕回时 round_count 自增至 max_rounds）
-            if self._gt_room.max_rounds > 0 and self._round_count >= self._gt_room.max_rounds:
+            max_rounds = self._effective_max_rounds()
+            if max_rounds > 0 and self._round_count >= max_rounds:
                 return True
             # 群聊停止条件 2：所有 AI 成员均已跳过发言
             return all_skipped

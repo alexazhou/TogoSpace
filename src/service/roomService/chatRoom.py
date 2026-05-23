@@ -94,7 +94,9 @@ class ChatRoom:
 
     @property
     def _max_rounds(self) -> int:
-        return self.gt_room.max_rounds
+        if self.gt_room.max_rounds is not None:
+            return self.gt_room.max_rounds
+        return configUtil.get_app_config().setting.default_room_max_rounds
 
     @property
     def initial_topic(self) -> str:
@@ -146,7 +148,7 @@ class ChatRoom:
 
         self._scheduler.activate()
         logger.info("[%s] 房间激活: INIT -> %s (agents=%d, max_rounds=%d)",
-                     self.key, self._scheduler.state.name, len(self._agent_ids), self.gt_room.max_rounds)
+                     self.key, self._scheduler.state.name, len(self._agent_ids), self._max_rounds)
         return True
 
     # ─── 消息 ─────────────────────────────────────────────────

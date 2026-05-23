@@ -54,7 +54,7 @@ async def _to_gt_room(team_id: int, room: TeamRoomConfig) -> GtRoom:
         name=room.name,
         type=_infer_room_type(room.agents),
         initial_topic=room.initial_topic,
-        max_rounds=roomService.resolve_room_max_rounds(room.max_rounds),
+        max_rounds=room.max_rounds,
         agent_ids=gt_agent_ids,
         biz_id=room.biz_id,
         tags=list(room.tags),

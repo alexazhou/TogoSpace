@@ -90,6 +90,20 @@ class TestUpsertRoom(ServiceTestCase):
 
         assert saved.type == RoomType.GROUP
 
+    async def test_upsert_room_without_max_rounds_keeps_null(self):
+        """未显式传 max_rounds 时，房间记录应保留为空，而不是自动写入默认值。"""
+        await self._reset_tables()
+        team = await self._setup_team_with_agents("t_room_null_rounds", ["alice", "bob", "charlie"])
+        alice_id = await self._get_agent_id(team.id, "alice")
+        bob_id = await self._get_agent_id(team.id, "bob")
+        charlie_id = await self._get_agent_id(team.id, "charlie")
+
+        saved = await roomService.upsert_room(
+            team_id=team.id, name="group_chat", agent_ids=[alice_id, bob_id, charlie_id],
+        )
+
+        assert saved.max_rounds is None
+
     # ------------------------------------------------------------------
     # upsert_room — 重复成员校验 (ROOM_DUPLICATE)
     # ------------------------------------------------------------------

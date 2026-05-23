@@ -53,3 +53,10 @@ class TestRoomApiPayload(ServiceTestCase):
 
         assert current_turn_agent_id is not None
         assert current_turn_agent_id > 0
+
+    async def test_room_without_max_rounds_uses_runtime_default(self):
+        await self.create_room(TEAM, "default_rounds_room", ["alice", "bob"], max_rounds=None)
+        room = roomService.get_room_by_key(f"default_rounds_room@{TEAM}")
+
+        assert room.gt_room.max_rounds is None
+        assert room._max_rounds == 100
