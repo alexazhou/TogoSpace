@@ -960,7 +960,7 @@ async def finish_chat_turn(_context: ToolCallContext = None, confirm_no_need_tal
     """结束本轮行动。当你完成所有发言和工具调用后（或者无需行动时），必须调用此工具来把行动机会让给下一位成员。
 
     参数：
-    - confirm_no_need_talk (bool)：设为 true 表示确认本轮无需发言即可结束，默认 false。注意：请确保没有以直接输出的方式回复消息，直接输出的文字用户看不到。"""
+    - confirm_no_need_talk (bool)：在未发言时，需手动设置此参数为 true 来确认。注意：请确保没有以直接输出的方式回复消息，直接输出的文字用户看不到。"""
     if _context is None or _context.chat_room is None:
         logger.warning("结束行动失败，聊天室上下文未设置")
         return {"success": False, "message": "当前没有激活的房间上下文。"}
