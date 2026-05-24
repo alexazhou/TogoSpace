@@ -7,7 +7,7 @@ _RUN_CHAT_TURN_HINT = (
     "你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，"
     "请务必调用 finish_action 结束行动（即跳过）。"
 )
-_RUN_CHAT_TURN_MAX_RETRIES = 5
+_RUN_CHAT_TURN_MAX_RETRIES = 3
 
 
 class NativeAgentDriver(AgentDriver):
