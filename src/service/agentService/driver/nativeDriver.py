@@ -5,7 +5,7 @@ from .base import AgentDriver, AgentTurnSetup
 
 _RUN_CHAT_TURN_HINT = (
     "你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，"
-    "请务必调用 finish_chat_turn 结束本轮（即跳过）。"
+    "请务必调用 finish_action 结束行动（即跳过）。"
 )
 _RUN_CHAT_TURN_MAX_RETRIES = 3
 
@@ -24,7 +24,7 @@ class NativeAgentDriver(AgentDriver):
             self.host.tool_registry.register(
                 tool,
                 funcToolService.run_tool_call,
-                marks_turn_finish=function_name == "finish_chat_turn",
+                marks_turn_finish=function_name == "finish_action",
                 self_interrupt=function_name == "reload_team",
             )
         self.host.tool_registry.apply_tool_allow_specs(["Category:Basic"])

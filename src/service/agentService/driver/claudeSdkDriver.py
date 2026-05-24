@@ -36,10 +36,10 @@ def _filter_category(allowed_tools: list[str] | None) -> list[str] | None:
     return filtered
 
 _HINT_PROMPT = (
-    "你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，请务必调用 finish_chat_turn 结束本轮（即跳过）。直接输出的文字不会出现在聊天室里。"
+    "你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，请务必调用 finish_action 结束行动（即跳过）。直接输出的文字不会出现在聊天室里。"
 )
 _REMINDER_PROMPT = (
-    "【提醒】检测到你直接输出了文字。这些文字不会出现在聊天室中！你必须使用 `send_chat_msg` 工具来发言。如果你已经说完，请调用 `finish_chat_turn`。"
+    "【提醒】检测到你直接输出了文字。这些文字不会出现在聊天室中！你必须使用 `send_chat_msg` 工具来发言。如果你已经说完，请调用 `finish_action`。"
 )
 _RUN_CHAT_TURN_MAX_RETRIES = 3
 
@@ -95,7 +95,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
             self.host.tool_registry.register(
                 t,
                 funcToolService.run_tool_call,
-                marks_turn_finish=fn_name == "finish_chat_turn",
+                marks_turn_finish=fn_name == "finish_action",
                 self_interrupt=fn_name == "reload_team",
             )
         configured_names = self.config.options.get("local_tool_names")
@@ -225,7 +225,7 @@ class ClaudeSdkAgentDriver(AgentDriver):
             is_error = result_data.get("success", True) is not True
 
             if is_error is False:
-                if tool_name == "finish_chat_turn":
+                if tool_name == "finish_action":
                     self._turn_done = True
 
             return {"content": [{"type": "text", "text": result}], "isError": is_error}

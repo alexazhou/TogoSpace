@@ -36,7 +36,7 @@ from service.funcToolService.tools import (
     save_role_template,
     wake_up_agent,
     send_chat_msg,
-    finish_chat_turn,
+    finish_action,
 )
 from service.roomService import ToolCallContext
 from ...base import ServiceTestCase
@@ -107,7 +107,7 @@ class TestRoleTemplateToolMetadata(ServiceTestCase):
         """基础行动工具应归类到 BASIC。"""
         assert CATEGORY_CONFIG["wake_up_agent"] == ToolCategory.BASIC
         assert CATEGORY_CONFIG["send_chat_msg"] == ToolCategory.BASIC
-        assert CATEGORY_CONFIG["finish_chat_turn"] == ToolCategory.BASIC
+        assert CATEGORY_CONFIG["finish_action"] == ToolCategory.BASIC
 
     async def test_tsp_tools_define_categories(self) -> None:
         """gtsp 导出的 TSP 工具也应补齐分类。"""

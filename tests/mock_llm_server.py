@@ -38,8 +38,8 @@ def get_mock_llm_anthropic_url(port: int | None = None) -> str:
 def _default_openai_response(room_name: str = "general", with_send: bool = True) -> Dict[str, Any]:
     """返回 OpenAI 格式的默认响应。
 
-    with_send=True：send_chat_msg + finish_chat_turn（有 Operator 消息时）
-    with_send=False：finish_chat_turn only（仅 SYSTEM 初始化消息时，避免污染房间历史）
+    with_send=True：send_chat_msg + finish_action（有 Operator 消息时）
+    with_send=False：finish_action only（仅 SYSTEM 初始化消息时，避免污染房间历史）
     """
     tool_calls: list[Dict[str, Any]] = []
     if with_send:
@@ -58,7 +58,7 @@ def _default_openai_response(room_name: str = "general", with_send: bool = True)
         "id": "call_mock_002",
         "type": "function",
         "function": {
-            "name": "finish_chat_turn",
+            "name": "finish_action",
             "arguments": json.dumps({"confirm_no_need_talk": not with_send}),
         },
     })

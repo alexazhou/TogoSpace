@@ -97,12 +97,12 @@ class TestSdkDoSend(ServiceTestCase):
         # 5. 驱动绑定（不调 startup，手动注册 tool_registry）
         driver = ClaudeSdkAgentDriver(agent.task_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))
         agent.task_consumer._turn_runner.tool_registry.clear()
-        for t in funcToolService.get_tools_by_names(["send_chat_msg", "finish_chat_turn"]):
+        for t in funcToolService.get_tools_by_names(["send_chat_msg", "finish_action"]):
             fn_name = t.function.name
             agent.task_consumer._turn_runner.tool_registry.register(
                 t,
                 funcToolService.run_tool_call,
-                marks_turn_finish=fn_name == "finish_chat_turn",
+                marks_turn_finish=fn_name == "finish_action",
             )
         return driver, agent, room
 
@@ -112,10 +112,10 @@ class TestSdkDoSend(ServiceTestCase):
         await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "lobby", "msg": "hi everyone"})
         assert not driver._turn_done
 
-    async def test_finish_chat_turn_sets_done(self) -> None:
-        """调用 finish_chat_turn 后，本轮应结束（_turn_done 置 True）。"""
+    async def test_finish_action_sets_done(self) -> None:
+        """调用 finish_action 后，本轮应结束（_turn_done 置 True）。"""
         driver, agent, room = await self._make_driver_with_room("alice", "lobby")
-        await driver._build_claude_sdk_tool("finish_chat_turn").handler({"confirm_no_need_talk": True})
+        await driver._build_claude_sdk_tool("finish_action").handler({"confirm_no_need_talk": True})
         assert driver._turn_done
 
     async def test_send_to_current_room_message_appears(self) -> None:
@@ -125,10 +125,10 @@ class TestSdkDoSend(ServiceTestCase):
         assert any(m.content == "hi everyone" for m in room.messages)
 
     async def test_send_to_current_room_result_prompts_to_finish(self) -> None:
-        """发到当前房间时，返回结果应提示可以继续或调用 finish_chat_turn。"""
+        """发到当前房间时，返回结果应提示可以继续或调用 finish_action。"""
         driver, agent, room = await self._make_driver_with_room("alice", "lobby")
         result = await driver._build_claude_sdk_tool("send_chat_msg").handler({"room_name": "lobby", "msg": "hi"})
-        assert "finish_chat_turn" in result["content"][0]["text"]
+        assert "finish_action" in result["content"][0]["text"]
 
     async def test_send_cross_room_does_not_set_done(self) -> None:
         """发到其他房间时，不应结束当前轮次。"""
@@ -287,7 +287,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         )
         driver = ClaudeSdkAgentDriver(
             agent.task_consumer._turn_runner,
-            AgentDriverConfig(driver_type="claude_sdk", options={"local_tool_names": ["send_chat_msg", "finish_chat_turn"]}),
+            AgentDriverConfig(driver_type="claude_sdk", options={"local_tool_names": ["send_chat_msg", "finish_action"]}),
         )
 
         captured_options = {}
@@ -308,7 +308,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             await driver.startup()
 
         exported_names = [tool.function.name for tool in agent.task_consumer._turn_runner.tool_registry.export_openai_tools()]
-        assert exported_names == ["send_chat_msg", "finish_chat_turn"]
+        assert exported_names == ["send_chat_msg", "finish_action"]
         assert "allowed_tools" not in captured_options
 
     async def test_run_chat_turn_uses_max_retries_as_failed_action_retry_limit(self) -> None:
@@ -379,4 +379,4 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         assert "sender: bob" in first_prompt
         assert "content: 房间初始化" in first_prompt
         assert "content: hello alice" in first_prompt
-        assert "你现在可以开始发言（send_chat_msg）或调用工具。在全部完成后，请务必调用 finish_chat_turn 结束本轮行动。" in first_prompt
+        assert "你现在可以开始发言（send_chat_msg）或调用工具。在全部完成后，请务必调用 finish_action 结束行动。" in first_prompt

@@ -947,17 +947,17 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
     await target_room.add_message(sender_id, msg)
 
     if target_room is _context.chat_room:
-        return {"success": True, "message": "消息已送达房间。如果你还有其他工具需要调用，请继续；如果本轮操作已全部完成，请调用 finish_chat_turn 结束本轮。"}
+        return {"success": True, "message": "消息已送达房间。如果你还有其他工具需要调用，请继续；如果本轮操作已全部完成，请调用 finish_action 结束行动。"}
 
     assert _context.chat_room is not None, "send_chat_msg: 跨房间发言时 chat_room 不应为 None"
 
     return {"success": True, "message": (
-        f"消息已送达 {target_room.name}。如果你还有其他工具需要调用，请继续；如果本轮操作已全部完成，请调用 finish_chat_turn 结束本轮。"
+        f"消息已送达 {target_room.name}。如果你还有其他工具需要调用，请继续；如果本轮操作已全部完成，请调用 finish_action 结束行动。"
     )}
 
 
-async def finish_chat_turn(_context: ToolCallContext = None, confirm_no_need_talk: bool = False) -> dict:
-    """结束本轮行动。当你完成所有发言和工具调用后（或者无需行动时），必须调用此工具来把行动机会让给下一位成员。
+async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: bool = False) -> dict:
+    """结束行动。当你完成所有发言和工具调用后（或者无需行动时），必须调用此工具来把行动机会让给下一位成员。
 
     参数：
     - confirm_no_need_talk (bool)：在未发言时，需手动设置此参数为 true 来确认。注意：请确保没有以直接输出的方式回复消息，直接输出的文字用户看不到。"""
@@ -968,7 +968,7 @@ async def finish_chat_turn(_context: ToolCallContext = None, confirm_no_need_tal
     if confirm_no_need_talk and _context.chat_room.current_turn_has_content:
         return {
             "success": False,
-            "message": "你本轮已经在房间发言了，不需要设置 confirm_no_need_talk=true。请直接调用 finish_chat_turn（不带参数）结束本轮。",
+            "message": "你本轮已经在房间发言了，不需要设置 confirm_no_need_talk=true。请直接调用 finish_action（不带参数）结束行动。",
         }
 
     if not confirm_no_need_talk and not _context.chat_room.current_turn_has_content:
@@ -978,7 +978,7 @@ async def finish_chat_turn(_context: ToolCallContext = None, confirm_no_need_tal
             "message": (
                 f"finish 失败，你本次行动中，未在收到消息的房间【{room_name}】发言。\n\n"
                 "1. 如果你忘记发言（或者是不小心用直接输出替代了向房间发言），那么请调用 send_chat_msg 发送消息。\n"
-                "2. 如果你确认不需要发言，请设置 confirm_no_need_talk=true 重新调用 finish_chat_turn。"
+                "2. 如果你确认不需要发言，请设置 confirm_no_need_talk=true 重新调用 finish_action。"
             ),
         }
 

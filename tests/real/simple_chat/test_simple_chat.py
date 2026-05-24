@@ -76,7 +76,7 @@ class TestRealSimpleChat(ServiceTestCase):
 
         # 剧本：Alice 先说话，然后 Bob 回复（max_rounds=1）
 
-        # Alice 的第 1 轮：发送 "你好 Bob！" 然后结束轮次
+        # Alice 的第 1 轮：发送 "你好 Bob！" 然后结束行动
         self.set_mock_response({
             "tool_calls": [{
                 "name": "send_chat_msg",
@@ -88,12 +88,12 @@ class TestRealSimpleChat(ServiceTestCase):
         })
         self.set_mock_response({
             "tool_calls": [{
-                "name": "finish_chat_turn",
+                "name": "finish_action",
                 "arguments": json.dumps({})
             }]
         })
 
-        # Bob 的第 1 轮：回复 "你好 Alice！" 然后结束轮次
+        # Bob 的第 1 轮：回复 "你好 Alice！" 然后结束行动
         self.set_mock_response({
             "tool_calls": [{
                 "name": "send_chat_msg",
@@ -105,7 +105,7 @@ class TestRealSimpleChat(ServiceTestCase):
         })
         self.set_mock_response({
             "tool_calls": [{
-                "name": "finish_chat_turn",
+                "name": "finish_action",
                 "arguments": json.dumps({})
             }]
         })

@@ -210,7 +210,7 @@ factory 位于 `driver/factory.py`。
 - 使用 host 的 `tool_registry` 获取可用工具
 - 调用 `host._infer(tools)` 执行模型推理
 - 收到 tool_calls 后返回给 TurnRunner 的 `_dispatch_tool_calls()` 处理
-- 检查当前 turn 是否通过 `send_chat_msg` 或 `finish_chat_turn` 完成
+- 检查当前 turn 是否通过 `send_chat_msg` 或 `finish_action` 完成
 - 若某个 step 未产出可执行动作，则按 `turn_setup.max_retries` 注入 reminder 并重试
 
 适合场景：
@@ -225,7 +225,7 @@ factory 位于 `driver/factory.py`。
 主要逻辑：
 
 - 在 `startup()` 中建立持久 Claude SDK 会话
-- 通过 MCP tool 暴露 `send_chat_msg` 和 `finish_chat_turn`
+- 通过 MCP tool 暴露 `send_chat_msg` 和 `finish_action`
 - 每轮把房间增量消息拼成 prompt 发给 SDK
 - 直接调用 `host._execute_tool()` 执行工具
 - 监听 SDK 流式消息
@@ -241,12 +241,12 @@ factory 位于 `driver/factory.py`。
 不管是哪种 driver，系统认可的核心动作目前只有两种：
 
 - `send_chat_msg`
-- `finish_chat_turn`
+- `finish_action`
 
 它们最终都由 `funcToolService/tools.py` 处理并落到统一后端语义：
 
 - `send_chat_msg` → `ChatRoom.add_message(...)`
-- `finish_chat_turn` → `ChatRoom.finish_turn(...)`
+- `finish_action` → `ChatRoom.finish_turn(...)`
 
 ## 配置建议
 

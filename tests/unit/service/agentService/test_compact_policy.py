@@ -138,8 +138,8 @@ def _make_tool() -> llmApiUtil.OpenAITool:
     return llmApiUtil.OpenAITool.model_validate({
         "type": "function",
         "function": {
-            "name": "finish_chat_turn",
-            "description": "结束本轮行动",
+            "name": "finish_action",
+            "description": "结束行动",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -206,7 +206,7 @@ async def test_compact_messages_tool_calls_in_response_treated_as_failure():
         llmApiUtil.OpenAIToolCall.model_validate({
             "id": "call_1",
             "type": "function",
-            "function": {"name": "finish_chat_turn", "arguments": "{}"},
+            "function": {"name": "finish_action", "arguments": "{}"},
         })
     ]
 

@@ -183,7 +183,7 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host: Mag
             parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
         )),
         llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
-            name="finish_chat_turn",
+            name="finish_action",
             description="",
             parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
         ))
@@ -208,7 +208,7 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host: Mag
                 chat_room=MagicMock(),
             )
             finish_result = await mock_tsp_host.tool_registry.execute_tool_call(
-                llmApiUtil.OpenAIToolCall(id="c1", function={"name": "finish_chat_turn", "arguments": "{}"}),
+                llmApiUtil.OpenAIToolCall(id="c1", function={"name": "finish_action", "arguments": "{}"}),
                 context=context,
             )
 
@@ -223,7 +223,7 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host: Mag
             "get_agent_info",
             "wake_up_agent",
             "send_chat_msg",
-            "finish_chat_turn",
+            "finish_action",
             "list_dir",
         ]
         get_tools.assert_called_once()
@@ -233,7 +233,7 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host: Mag
         assert called_args == "{}"
         assert called_context.agent_id == 1
         assert called_context.team_id == 1
-        assert called_context.tool_name == "finish_chat_turn"
+        assert called_context.tool_name == "finish_action"
         assert finish_result.success is True
 
         tsp_result = await mock_tsp_host.tool_registry.execute_tool_call(
@@ -255,7 +255,7 @@ async def test_tsp_driver_setup_registers_local_and_tsp_tools(mock_tsp_host: Mag
 
 @pytest.mark.asyncio
 async def test_tsp_driver_respects_local_tool_names(mock_tsp_host: MagicMock) -> None:
-    config = AgentDriverConfig(driver_type="tsp", options={"local_tool_names": ["send_chat_msg", "finish_chat_turn"]})
+    config = AgentDriverConfig(driver_type="tsp", options={"local_tool_names": ["send_chat_msg", "finish_action"]})
 
     with patch("service.funcToolService.get_tools", return_value=[
         llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
@@ -269,7 +269,7 @@ async def test_tsp_driver_respects_local_tool_names(mock_tsp_host: MagicMock) ->
             parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
         )),
         llmApiUtil.OpenAITool(function=llmApiUtil.OpenAIFunction(
-            name="finish_chat_turn",
+            name="finish_action",
             description="",
             parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
         )),
@@ -277,13 +277,13 @@ async def test_tsp_driver_respects_local_tool_names(mock_tsp_host: MagicMock) ->
         driver = TspAgentDriver(mock_tsp_host, config)
 
     get_tools.assert_called_once()
-    assert [t.function.name for t in driver._local_tools] == ["get_time", "send_chat_msg", "finish_chat_turn"]
+    assert [t.function.name for t in driver._local_tools] == ["get_time", "send_chat_msg", "finish_action"]
 
     driver._client = MagicMock()
     driver._tsp_tools = {}
     driver._register_host_tools()
     exported_names = [tool.function.name for tool in mock_tsp_host.tool_registry.export_openai_tools()]
-    assert exported_names == ["send_chat_msg", "finish_chat_turn"]
+    assert exported_names == ["send_chat_msg", "finish_action"]
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,7 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     "wake_up_agent": ToolCategory.BASIC,
     "start_chat": ToolCategory.BASIC,
     "send_chat_msg": ToolCategory.BASIC,
-    "finish_chat_turn": ToolCategory.BASIC,
+    "finish_action": ToolCategory.BASIC,
     "create_task": ToolCategory.BASIC,
     "update_task": ToolCategory.BASIC,
     "get_task": ToolCategory.BASIC,

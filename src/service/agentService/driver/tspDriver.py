@@ -24,11 +24,11 @@ _DEFAULT_REQUEST_TIMEOUT_SEC = 65
 _RUN_CHAT_TURN_MAX_RETRIES = 3
 _RUN_CHAT_TURN_HINT = (
     "你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，"
-    "请务必调用 finish_chat_turn 结束本轮（即跳过）。"
+    "请务必调用 finish_action 结束行动（即跳过）。"
 )
 _RUN_CHAT_TURN_ERROR_ACTION_HINT = (
     "系统提示: 检测到你将工具调用以 JSON 格式写入了消息文本，这将无法被送达用户。"
-    "你必须通过调用 send_chat_msg / finish_chat_turn 工具，而不是在消息内容中输出 JSON。"
+    "你必须通过调用 send_chat_msg / finish_action 工具，而不是在消息内容中输出 JSON。"
     "请重新行动，直接调用相应的工具。"
 )
 
@@ -168,7 +168,7 @@ class TspAgentDriver(AgentDriver):
             self.host.tool_registry.register(
                 tool,
                 funcToolService.run_tool_call,
-                marks_turn_finish=function_name == "finish_chat_turn",
+                marks_turn_finish=function_name == "finish_action",
                 self_interrupt=function_name == "reload_team",
             )
 
