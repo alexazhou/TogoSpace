@@ -506,3 +506,37 @@ class TestUpsertDept(ServiceTestCase):
         refreshed_parent = await gtDeptManager.get_dept_by_name(team.id, "company")
         assert refreshed_parent is not None
         assert eng_lead_id in refreshed_parent.agent_ids
+
+    async def test_upsert_dept_update_parent_with_child_manager_no_conflict(self):
+        """更新父部门（如改名）时，子部门主管仍在成员列表中，不应触发 DEPT_MANAGER_CONFLICT。"""
+        await self._reset_tables()
+
+        team = await self._setup_team_with_agents(
+            "t_upsert_update_parent", ["cto", "eng_lead", "dev_a"]
+        )
+        cto_id = await self._get_agent_id(team.id, "cto")
+        eng_lead_id = await self._get_agent_id(team.id, "eng_lead")
+        dev_a_id = await self._get_agent_id(team.id, "dev_a")
+
+        # 1. 创建父部门，eng_lead 是普通成员
+        parent = await deptService.upsert_dept(
+            team_id=team.id, name="old_parent", responsibility="v1",
+            manager_id=cto_id, agent_ids=[cto_id, eng_lead_id], parent_id=None,
+        )
+
+        # 2. 创建子部门，eng_lead 是其 manager
+        await deptService.upsert_dept(
+            team_id=team.id, name="child_dept", responsibility="",
+            manager_id=eng_lead_id, agent_ids=[eng_lead_id, dev_a_id], parent_id=parent.id,
+        )
+
+        # 3. 更新父部门（模拟改名），eng_lead 仍在成员列表中 → 不应报错
+        updated = await deptService.upsert_dept(
+            team_id=team.id, name="new_parent", responsibility="v2",
+            manager_id=cto_id, agent_ids=[cto_id, eng_lead_id],
+            parent_id=None, dept_id=parent.id,
+        )
+
+        assert updated.name == "new_parent"
+        assert updated.responsibility == "v2"
+        assert eng_lead_id in updated.agent_ids

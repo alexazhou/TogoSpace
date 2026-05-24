@@ -127,7 +127,9 @@ async def upsert_dept(
                 error_code="DEPT_MANAGER_ALREADY_LEADS",
             )
 
-    # 计算需要更新的其他部门，并检测被移走的成员是否是原部门 leader
+    # ── 成员冲突检测 ──
+    # 约束：一个成员只能属于一个部门（子部门主管可同时属于父部门）。
+    # 遍历所有部门（= 原部门），检查新部门成员是否还在原部门中：
     depts_to_update: dict[int, list[int]] = {}
     for dept in all_depts:
         if dept.id == dept_id:
@@ -135,20 +137,31 @@ async def upsert_dept(
         new_ids: list[int] = []
         changed = False
         for aid in dept.agent_ids:
-            if aid in members_set:
-                # 负责人可以保留在父部门，其余一律移除
-                if aid == manager_id and dept.id == parent_id:
-                    new_ids.append(aid)
-                else:
-                    # 被移走的成员若是该部门 leader，阻止操作
-                    if aid == dept.manager_id:
-                        raise TogoException(
+            # 成员不在新部门名单 → 留在原部门
+            if aid not in members_set:
+                new_ids.append(aid)
+            else:
+                # 成员在新部门名单中，判断是否从原部门移除
+
+                # 分支一：该成员是新部门的 manager
+                if aid == manager_id:
+                    if dept.id == parent_id:
+                        new_ids.append(aid)             # 放行：新部门 manager 可留在父部门（原部门）
+                    else:
+                        changed = True                   # 移除：新部门 manager 不能留在其他原部门
+
+                # 分支二：该成员是新部门的普通员工
+                elif aid == dept.manager_id:
+                    if dept_id is not None and dept.parent_id == dept_id:
+                        new_ids.append(aid)             # 放行：原部门主管（子部门）可留在新部门（父部门）
+                    else:
+                        raise TogoException(             # 阻止：不能将其他部门主管移入新部门
                             f"成员 ID '{aid}' 是部门 '{dept.name}' 的负责人，无法将其移入新部门，请先更换 '{dept.name}' 的负责人",
                             error_code="DEPT_MANAGER_CONFLICT",
                         )
-                    changed = True
-            else:
-                new_ids.append(aid)
+                else:
+                    changed = True                       # 移除：普通员工归属新部门，从原部门移除
+
         if changed:
             depts_to_update[dept.id] = new_ids
 
