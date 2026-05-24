@@ -133,12 +133,12 @@ async def test_run_turn_loop_does_not_stop_on_long_tool_chain(turn_runner):
     turn_runner.driver = MagicMock()
     turn_runner.driver.turn_setup = SimpleNamespace(max_retries=3, hint_prompt="hint")
     turn_runner._advance_step = AsyncMock(side_effect=[
-        TurnStepResult.CONTINUE,
-        TurnStepResult.CONTINUE,
-        TurnStepResult.CONTINUE,
-        TurnStepResult.CONTINUE,
-        TurnStepResult.CONTINUE,
-        TurnStepResult.CONTINUE,
+        TurnStepResult.TOOL_EXECUTE_SUCCESS,
+        TurnStepResult.TOOL_EXECUTE_SUCCESS,
+        TurnStepResult.TOOL_EXECUTE_SUCCESS,
+        TurnStepResult.TOOL_EXECUTE_SUCCESS,
+        TurnStepResult.TOOL_EXECUTE_SUCCESS,
+        TurnStepResult.TOOL_EXECUTE_SUCCESS,
         TurnStepResult.TURN_DONE,
     ])
 
@@ -153,9 +153,9 @@ async def test_run_turn_loop_retries_failed_action_by_max_retries(turn_runner):
     turn_runner.driver = MagicMock()
     turn_runner.driver.turn_setup = SimpleNamespace(max_retries=2, hint_prompt="retry hint")
     turn_runner._advance_step = AsyncMock(side_effect=[
-        TurnStepResult.NO_ACTION,
-        TurnStepResult.NO_ACTION,
-        TurnStepResult.NO_ACTION,
+        TurnStepResult.LLM_OUTPUT_NO_ACTION,
+        TurnStepResult.LLM_OUTPUT_NO_ACTION,
+        TurnStepResult.LLM_OUTPUT_NO_ACTION,
     ])
     turn_runner._history.get_last_assistant_message = MagicMock(return_value=llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.ASSISTANT, "plain text"))
 
@@ -184,7 +184,7 @@ async def test_advance_step_continues_to_infer_when_tool_failed(turn_runner):
 
     result = await turn_runner._advance_step(room, [])
 
-    assert result == TurnStepResult.NO_ACTION
+    assert result == TurnStepResult.LLM_OUTPUT_NO_ACTION
     # 没有剩余 tool_call 时，FAILED tool 会被当作普通上下文继续交给模型处理。
     turn_runner._history.append_history_init_item.assert_awaited_once_with(role=OpenaiApiRole.ASSISTANT)
     turn_runner._infer_to_item.assert_awaited_once_with(assistant_output_item, [], tool_choice=None)
@@ -213,7 +213,7 @@ async def test_advance_step_continues_to_pending_tool_when_previous_tool_failed(
 
     result = await turn_runner._advance_step(room, [])
 
-    assert result == TurnStepResult.CONTINUE
+    assert result == TurnStepResult.TOOL_EXECUTE_SUCCESS
     # 这里的关键断言是：要为剩余 tool_call 追加 TOOL placeholder，
     # 后续由下一轮 _advance_step 真正执行它，保证 tool_use / tool_result 链闭合。
     turn_runner._history.append_history_init_item.assert_awaited_once_with(
@@ -227,7 +227,7 @@ async def test_advance_step_continues_to_pending_tool_when_previous_tool_failed(
 
 @pytest.mark.asyncio
 async def test_infer_and_classify_returns_error_action_on_json_content(turn_runner):
-    """content 为 JSON 对象、无 tool_calls 时返回 ERROR_ACTION，不写任何 tool 记录。"""
+    """content 为 JSON 对象、无 tool_calls 时返回 LLM_OUTPUT_ERROR，不写任何 tool 记录。"""
     output_item = GtAgentHistory.build_placeholder(role=OpenaiApiRole.ASSISTANT)
     assistant_message = MagicMock()
     assistant_message.content = '{"room_name": "test", "msg": "hello"}'
@@ -236,13 +236,13 @@ async def test_infer_and_classify_returns_error_action_on_json_content(turn_runn
 
     result = await turn_runner._infer_and_classify(output_item, [])
 
-    assert result == TurnStepResult.ERROR_ACTION
+    assert result == TurnStepResult.LLM_OUTPUT_ERROR
     turn_runner._history.append_history_message.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_infer_and_classify_writes_failed_tool_records_on_json_content_with_tool_calls(turn_runner):
-    """content 为 JSON 对象 + 有 tool_calls 时，为每个 tool_call 写 FAILED 记录，并返回 ERROR_ACTION。"""
+    """content 为 JSON 对象 + 有 tool_calls 时，为每个 tool_call 写 FAILED 记录，并返回 LLM_OUTPUT_ERROR。"""
     output_item = GtAgentHistory.build_placeholder(role=OpenaiApiRole.ASSISTANT)
     tc = MagicMock()
     tc.id = "tc-123"
@@ -253,7 +253,7 @@ async def test_infer_and_classify_writes_failed_tool_records_on_json_content_wit
 
     result = await turn_runner._infer_and_classify(output_item, [])
 
-    assert result == TurnStepResult.ERROR_ACTION
+    assert result == TurnStepResult.LLM_OUTPUT_ERROR
     turn_runner._history.append_history_message.assert_awaited_once()
     written_item = turn_runner._history.append_history_message.call_args.args[0]
     assert written_item.role == OpenaiApiRole.TOOL
@@ -263,15 +263,15 @@ async def test_infer_and_classify_writes_failed_tool_records_on_json_content_wit
 
 @pytest.mark.asyncio
 async def test_run_turn_loop_retries_on_error_action_with_error_hint(turn_runner):
-    """ERROR_ACTION 时注入 hint_prompt_error_action 并重试，最终 TURN_DONE。"""
+    """LLM_OUTPUT_ERROR 时注入 hint_prompt_error_action 并重试，最终 TURN_DONE。"""
     room = MagicMock(spec=ChatRoom)
     turn_runner.driver = MagicMock()
     turn_runner.driver.turn_setup = SimpleNamespace(
         max_retries=2, hint_prompt="generic hint", hint_prompt_error_action="error hint"
     )
     turn_runner._advance_step = AsyncMock(side_effect=[
-        TurnStepResult.ERROR_ACTION,
-        TurnStepResult.ERROR_ACTION,
+        TurnStepResult.LLM_OUTPUT_ERROR,
+        TurnStepResult.LLM_OUTPUT_ERROR,
         TurnStepResult.TURN_DONE,
     ])
 
@@ -305,7 +305,7 @@ async def test_run_tool_to_item_persists_tool_result_into_activity_metadata(turn
     ) as mock_update_activity:
         result = await turn_runner._run_tool_to_item(tool_call, output_item, room)
 
-    assert result == TurnStepResult.CONTINUE
+    assert result == TurnStepResult.TOOL_EXECUTE_SUCCESS
     mock_add_activity.assert_awaited_once()
     turn_runner._history.finalize_history_item.assert_awaited_once()
     mock_update_activity.assert_awaited_once()
@@ -315,16 +315,16 @@ async def test_run_tool_to_item_persists_tool_result_into_activity_metadata(turn
 
 @pytest.mark.asyncio
 async def test_run_turn_loop_raises_on_error_action_after_max_retries(turn_runner):
-    """ERROR_ACTION 超出 max_retries 后抛出 RuntimeError。"""
+    """LLM_OUTPUT_ERROR 超出 max_retries 后抛出 RuntimeError。"""
     room = MagicMock(spec=ChatRoom)
     turn_runner.driver = MagicMock()
     turn_runner.driver.turn_setup = SimpleNamespace(
         max_retries=2, hint_prompt="generic hint", hint_prompt_error_action="error hint"
     )
     turn_runner._advance_step = AsyncMock(side_effect=[
-        TurnStepResult.ERROR_ACTION,
-        TurnStepResult.ERROR_ACTION,
-        TurnStepResult.ERROR_ACTION,
+        TurnStepResult.LLM_OUTPUT_ERROR,
+        TurnStepResult.LLM_OUTPUT_ERROR,
+        TurnStepResult.LLM_OUTPUT_ERROR,
     ])
 
     with pytest.raises(RuntimeError, match="达到 ERROR_ACTION 重试上限"):
@@ -530,7 +530,7 @@ async def test_run_tool_to_item_returns_turn_done_when_finish_tool_succeeds(turn
 
 @pytest.mark.asyncio
 async def test_run_tool_to_item_returns_error_action_when_finish_tool_fails(turn_runner):
-    """marks_turn_finish=True 且执行失败时，应返回 ERROR_ACTION（触发 failed_action_count）。"""
+    """marks_turn_finish=True 且执行失败时，应返回 TOOL_EXECUTE_FAILED_FINISH（触发 failed_action_count）。"""
     room = MagicMock(spec=ChatRoom)
     room.team_id = 1
     output_item = MagicMock(spec=GtAgentHistory)
@@ -551,12 +551,13 @@ async def test_run_tool_to_item_returns_error_action_when_finish_tool_fails(turn
          patch("service.agentService.agentTurnRunner.agentActivityService.update_activity_progress", new=AsyncMock()):
         result = await turn_runner._run_tool_to_item(tool_call, output_item, room)
 
-    assert result == TurnStepResult.ERROR_ACTION
+    assert result == TurnStepResult.TOOL_EXECUTE_FAILED_FINISH
 
 
 @pytest.mark.asyncio
 async def test_run_turn_loop_raises_after_repeated_finish_failures(turn_runner):
-    """finish 类工具反复失败时，_run_turn_loop 应在超出 max_retries 后抛出 RuntimeError（防死循环）。"""
+    """finish 类工具反复失败时，_run_turn_loop 应在超出 max_retries 后抛出 RuntimeError（防死循环）。
+    TOOL_EXECUTE_FAILED_FINISH 不注入 hint prompt（tool_result 已包含具体错误信息）。"""
     room = MagicMock(spec=ChatRoom)
     turn_runner.driver = MagicMock()
     turn_runner.driver.turn_setup = SimpleNamespace(
@@ -564,31 +565,31 @@ async def test_run_turn_loop_raises_after_repeated_finish_failures(turn_runner):
     )
     # 模拟 LLM 一直调用 finish_action 但一直失败
     turn_runner._advance_step = AsyncMock(side_effect=[
-        TurnStepResult.ERROR_ACTION,  # finish 失败 1
-        TurnStepResult.ERROR_ACTION,  # finish 失败 2
-        TurnStepResult.ERROR_ACTION,  # finish 失败 3 → 超限
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,  # finish 失败 1
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,  # finish 失败 2
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,  # finish 失败 3 → 超限
     ])
 
-    with pytest.raises(RuntimeError, match="达到 ERROR_ACTION 重试上限"):
+    with pytest.raises(RuntimeError, match="达到 finish 失败重试上限"):
         await turn_runner._run_turn_loop(room)
 
-    # 注入了 2 次提示（第 1、2 次失败后），第 3 次直接报错
-    assert turn_runner._history.append_history_message.await_count == 2
+    # finish 失败不注入 hint prompt，只通过 tool_result 提供反馈
+    assert turn_runner._history.append_history_message.await_count == 0
 
 
 @pytest.mark.asyncio
 async def test_run_turn_loop_does_not_count_normal_tool_failures(turn_runner):
-    """普通工具（marks_turn_finish=False）失败后返回 CONTINUE，不应计入 failed_action_count。"""
+    """普通工具（marks_turn_finish=False）失败后返回 TOOL_EXECUTE_SUCCESS，不应计入 failed_action_count。"""
     room = MagicMock(spec=ChatRoom)
     turn_runner.driver = MagicMock()
     turn_runner.driver.turn_setup = SimpleNamespace(
         max_retries=1, hint_prompt="hint", hint_prompt_error_action="error hint"
     )
-    # 普通工具失败返回 CONTINUE，不会触发计数；最终调用 finish 成功
+    # 普通工具失败返回 TOOL_EXECUTE_SUCCESS，不会触发计数；最终调用 finish 成功
     turn_runner._advance_step = AsyncMock(side_effect=[
-        TurnStepResult.CONTINUE,   # 普通工具失败，但仍是 CONTINUE
-        TurnStepResult.CONTINUE,
-        TurnStepResult.CONTINUE,
+        TurnStepResult.TOOL_EXECUTE_SUCCESS,   # 普通工具失败，但仍是 TOOL_EXECUTE_SUCCESS
+        TurnStepResult.TOOL_EXECUTE_SUCCESS,
+        TurnStepResult.TOOL_EXECUTE_SUCCESS,
         TurnStepResult.TURN_DONE,  # finish 成功
     ])
 
@@ -596,5 +597,84 @@ async def test_run_turn_loop_does_not_count_normal_tool_failures(turn_runner):
 
     assert turn_runner._advance_step.await_count == 4
     turn_runner._history.append_history_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_turn_loop_finish_failure_reset_by_tool_success(turn_runner):
+    """finish 失败后被 TOOL_EXECUTE_SUCCESS（如 LLM 调用了 send_chat_msg）清零计数器，不会误触发 RuntimeError。
+    模拟真实场景：LLM 在 finish_action 失败后做了一次正常发言，然后再次 finish_action 失败。
+    TOOL_EXECUTE_FAILED_FINISH 不注入 hint prompt（tool_result 已含具体错误）。
+    """
+    room = MagicMock(spec=ChatRoom)
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.turn_setup = SimpleNamespace(
+        max_retries=2, hint_prompt="hint", hint_prompt_error_action="请正确调用 finish_action"
+    )
+    # finish失败 → 发消息成功(清零) → finish失败 → finish失败 → finish失败(超限)
+    turn_runner._advance_step = AsyncMock(side_effect=[
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,   # finish 失败 1 (count=1)
+        TurnStepResult.TOOL_EXECUTE_SUCCESS,          # 正常工具成功，清零 (count=0)
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,   # finish 失败 (count=1)
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,   # finish 失败 (count=2)
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,   # finish 失败 (count=3 → 超限 max=2)
+    ])
+
+    with pytest.raises(RuntimeError, match="达到 finish 失败重试上限"):
+        await turn_runner._run_turn_loop(room)
+
+    # finish 失败不注入 hint prompt，计数器重置仍然正常工作
+    assert turn_runner._history.append_history_message.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_run_turn_loop_llm_output_tool_calls_does_not_reset_counter(turn_runner):
+    """LLM_OUTPUT_TOOL_CALLS 不应重置 failed_action_count。
+    模拟：finish失败 → LLM生成tool_calls(不重置) → finish失败 → 继续重试。
+    TOOL_EXECUTE_FAILED_FINISH 不注入 hint prompt（tool_result 已含具体错误）。
+    """
+    room = MagicMock(spec=ChatRoom)
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.turn_setup = SimpleNamespace(
+        max_retries=2, hint_prompt="hint", hint_prompt_error_action="请正确调用 finish_action"
+    )
+    turn_runner._advance_step = AsyncMock(side_effect=[
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,   # count=1
+        TurnStepResult.LLM_OUTPUT_TOOL_CALLS,         # 不变，count 仍为 1
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,   # count=2
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,   # count=3 → 超限
+    ])
+
+    with pytest.raises(RuntimeError, match="达到 finish 失败重试上限"):
+        await turn_runner._run_turn_loop(room)
+
+    # finish 失败不注入 hint prompt
+    assert turn_runner._history.append_history_message.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_run_turn_loop_consecutive_finish_failures_with_max_retries_5(turn_runner):
+    """max_retries=5 时，连续 finish 失败 6 次后抛出 RuntimeError。
+    TOOL_EXECUTE_FAILED_FINISH 不注入 hint prompt（tool_result 已含具体错误）。
+    """
+    room = MagicMock(spec=ChatRoom)
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.turn_setup = SimpleNamespace(
+        max_retries=5, hint_prompt="hint", hint_prompt_error_action="请重试 finish_action"
+    )
+    # 连续 6 次 finish 失败（第 6 次超出 max_retries=5）
+    turn_runner._advance_step = AsyncMock(side_effect=[
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,  # count=1
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,  # count=2
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,  # count=3
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,  # count=4
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,  # count=5
+        TurnStepResult.TOOL_EXECUTE_FAILED_FINISH,  # count=6 → 超限
+    ])
+
+    with pytest.raises(RuntimeError, match="达到 finish 失败重试上限"):
+        await turn_runner._run_turn_loop(room)
+
+    # finish 失败不注入 hint prompt
+    assert turn_runner._history.append_history_message.await_count == 0
 
 

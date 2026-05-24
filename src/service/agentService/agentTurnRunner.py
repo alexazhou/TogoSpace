@@ -273,13 +273,18 @@ class AgentTurnRunner:
 
             if result == TurnStepResult.TURN_DONE:
                 return
-            if result == TurnStepResult.CONTINUE:
+
+            if result == TurnStepResult.TOOL_EXECUTE_SUCCESS:
                 failed_action_count = 0
                 continue
-            if result == TurnStepResult.NO_ACTION:
+
+            if result == TurnStepResult.LLM_OUTPUT_TOOL_CALLS:
+                # 推理成功生成了 tool_calls，但尚未执行，不重置计数器
+                continue
+
+            if result == TurnStepResult.LLM_OUTPUT_NO_ACTION:
                 failed_action_count += 1
-                assistant_message = self._history.get_last_assistant_message()
-                failure_kind = "direct_text" if assistant_message is not None and len((assistant_message.content or "").strip()) > 0 else "no_action"
+                failure_kind = "no_action"
                 if len(turn_setup.hint_prompt) > 0 and failed_action_count <= turn_setup.max_retries:
                     logger.warning(f"检测到失败行动，准备重试: agent_id={self.gt_agent.id}, kind={failure_kind}, retry={failed_action_count}/{turn_setup.max_retries}")
                     await self._history.append_history_message(GtAgentHistory.build(
@@ -290,7 +295,8 @@ class AgentTurnRunner:
                     f"达到失败行动重试上限仍未完成行动: agent_id={self.gt_agent.id}, "
                     f"kind={failure_kind}, failed_actions={failed_action_count}, max_retries={turn_setup.max_retries}"
                 )
-            if result == TurnStepResult.ERROR_ACTION:
+
+            if result == TurnStepResult.LLM_OUTPUT_ERROR:
                 failed_action_count += 1
                 hint = turn_setup.hint_prompt_error_action or turn_setup.hint_prompt
                 if len(hint) > 0 and failed_action_count <= turn_setup.max_retries:
@@ -305,14 +311,28 @@ class AgentTurnRunner:
                     f"failed_actions={failed_action_count}, max_retries={turn_setup.max_retries}"
                 )
 
+            if result == TurnStepResult.TOOL_EXECUTE_FAILED_FINISH:
+                failed_action_count += 1
+                if failed_action_count <= turn_setup.max_retries:
+                    logger.warning(f"finish 类工具执行失败，准备重试: agent_id={self.gt_agent.id}, retry={failed_action_count}/{turn_setup.max_retries}")
+                    # 不注入 hint：tool_result 已包含具体失败原因，LLM 可直接据此调整行为
+                    next_tool_choice = "required"
+                    continue
+                raise RuntimeError(
+                    f"达到 finish 失败重试上限: agent_id={self.gt_agent.id}, "
+                    f"failed_actions={failed_action_count}, max_retries={turn_setup.max_retries}"
+                )
+
     async def _advance_step(self, room: ChatRoom | None, tools: list[llmApiUtil.OpenAITool], tool_choice: str | None = None) -> TurnStepResult:
         """根据当前 history 状态推进一个 step。
 
         返回:
-            `TURN_DONE`：当前 step 执行后，turn 已结束（调用了 finish）
-            `NO_ACTION`：当前 step 未产出可执行动作
-            `CONTINUE`：当前 step 已完成，turn 继续推进到下一个 step
-            `ERROR_ACTION`：模型输出格式异常（如将 tool call 写入 content 字段）
+            `TURN_DONE`：finish 类工具执行成功，turn 已结束
+            `TOOL_EXECUTE_SUCCESS`：非 finish 工具执行成功，turn 继续推进
+            `TOOL_EXECUTE_FAILED_FINISH`：finish 类工具执行失败
+            `LLM_OUTPUT_NO_ACTION`：模型输出纯文本，无工具调用
+            `LLM_OUTPUT_ERROR`：模型输出格式异常（如将 tool call 写入 content 字段）
+            `LLM_OUTPUT_TOOL_CALLS`：模型生成了 tool_calls，待执行
         """
         last_item = self._history.last()
         if last_item is None:
@@ -324,7 +344,7 @@ class AgentTurnRunner:
             if status == AgentHistoryStatus.SUCCESS:
                 first_tc = (last_item.tool_calls or [None])[0]
                 if first_tc is None:
-                    return TurnStepResult.NO_ACTION
+                    return TurnStepResult.LLM_OUTPUT_NO_ACTION
                 output_item = await self._history.append_history_init_item(
                     role=OpenaiApiRole.TOOL,
                     tool_call_id=first_tc.id,
@@ -348,7 +368,7 @@ class AgentTurnRunner:
                         role=OpenaiApiRole.TOOL,
                         tool_call_id=pending_tc.id,
                     )
-                    return TurnStepResult.CONTINUE
+                    return TurnStepResult.TOOL_EXECUTE_SUCCESS
                 output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
                 return await self._infer_and_classify(output_item, tools, tool_choice=tool_choice)
             elif status in (AgentHistoryStatus.FAILED, AgentHistoryStatus.CANCELLED):
@@ -359,7 +379,7 @@ class AgentTurnRunner:
                         role=OpenaiApiRole.TOOL,
                         tool_call_id=pending_tc.id,
                     )
-                    return TurnStepResult.CONTINUE
+                    return TurnStepResult.TOOL_EXECUTE_SUCCESS
                 output_item = await self._history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
                 return await self._infer_and_classify(output_item, tools, tool_choice=tool_choice)
             else:
@@ -387,11 +407,11 @@ class AgentTurnRunner:
                     status=AgentHistoryStatus.FAILED,
                     error_message="工具调用被跳过：模型输出格式异常",
                 ))
-            return TurnStepResult.ERROR_ACTION
+            return TurnStepResult.LLM_OUTPUT_ERROR
         elif assistant_message.tool_calls:
-            return TurnStepResult.CONTINUE
+            return TurnStepResult.LLM_OUTPUT_TOOL_CALLS
         else:
-            return TurnStepResult.NO_ACTION
+            return TurnStepResult.LLM_OUTPUT_NO_ACTION
 
     async def _infer_to_item(
         self,
@@ -651,7 +671,7 @@ class AgentTurnRunner:
                     status=AgentActivityStatus.SUCCEEDED,
                     metadata_patch=AgentActivityMeta(tool_result=auto_result),
                 )
-                return TurnStepResult.CONTINUE
+                return TurnStepResult.TOOL_EXECUTE_SUCCESS
             else:
                 # 第一次执行：写入 tag 后继续执行 handler。
                 # handler 会触发 agent 中断（CancelledError），item 以 INIT+tag 留在 DB。
@@ -689,8 +709,8 @@ class AgentTurnRunner:
             if exec_result.success:
                 return TurnStepResult.TURN_DONE
             # finish 类工具失败：触发 failed_action_count，防止 LLM 反复重试导致死循环
-            return TurnStepResult.ERROR_ACTION
-        return TurnStepResult.CONTINUE
+            return TurnStepResult.TOOL_EXECUTE_FAILED_FINISH
+        return TurnStepResult.TOOL_EXECUTE_SUCCESS
 
     # ─── AgentDriverHost 协议方法 ──────────────────────────
 
