@@ -187,10 +187,6 @@ class RoomScheduler:
             # 私聊停止条件 1：所有 AI 成员均已跳过发言
             if all_skipped:
                 return True
-            # 私聊停止条件 2：轮到同一个 agent，且上次也是该 agent 发言（Operator 未介入）
-            if (self._last_speaker_id is not None
-                    and self._last_speaker_id == self.get_current_turn_agent_id()):
-                return True
             return False
         if self._gt_room.type == RoomType.GROUP:
             # 群聊停止条件 1：已完成最大轮次（_go_next_agent 末位绕回时 round_count 自增至 max_rounds）

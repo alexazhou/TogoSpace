@@ -719,3 +719,37 @@ class TestRoomTurnLogic(ServiceTestCase):
         assert room.state == RoomState.IDLE
         assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "alice"
         assert room._round_count == 1
+
+    async def test_private_room_wakeup_by_index_0(self):
+        """
+        测试点：私聊房间从 IDLE 唤醒时，如果发消息的人刚好是 index=0，
+        不应该被旧的 _should_stop 逻辑错误拦截，而是应该通过 _should_skip 顺延给另一个人。
+        """
+        room_name = "test_private_wakeup"
+        # alice 会是 index 0, bob 会是 index 1
+        agents = ["alice", "bob"]
+        await self.create_room(TEAM, room_name, agents, room_type=RoomType.PRIVATE)
+        room = roomService.get_room_by_key(f"{room_name}@{TEAM}")
+        
+        # 强制将房间置于 IDLE 状态
+        room._scheduler._state = RoomState.IDLE
+        
+        alice_id = await self._get_agent_id("alice")
+        bob_id = await self._get_agent_id("bob")
+        
+        with patch("service.messageBus.publish") as mock_publish:
+            # alice (index 0) 发送消息唤醒房间
+            await room.add_message(alice_id, "hello bob")
+            
+            # 预期：房间应该被唤醒，且下一个轮到的是 bob
+            assert room.state == RoomState.SCHEDULING
+            assert room.get_current_turn_agent_id() == bob_id
+            
+            # 确认发布了正确的状态
+            scheduling_calls = [
+                c for c in mock_publish.call_args_list
+                if c[0][0] == MessageBusTopic.ROOM_STATUS_CHANGED
+                and c[1].get("need_scheduling")
+            ]
+            assert len(scheduling_calls) == 1
+            assert scheduling_calls[0][1]["current_turn_agent_id"] == bob_id
