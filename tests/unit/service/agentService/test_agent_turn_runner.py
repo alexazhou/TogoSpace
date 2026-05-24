@@ -487,3 +487,114 @@ async def test_run_turn_loop_skips_room_checks_when_no_room(turn_runner):
 
     turn_runner._advance_step.assert_awaited_once()
 
+
+# ─── finish 类工具失败防死循环测试 ──────────────────────────────
+
+
+def _make_finish_tool_exec_result(success: bool) -> ToolExecutionResult:
+    if success:
+        return ToolExecutionResult(tool_call_id="tc-finish", result={"success": True}, success=True)
+    return ToolExecutionResult(
+        tool_call_id="tc-finish",
+        result={"success": False, "message": "未在收到消息的房间发言"},
+        success=False,
+        error_message="未在收到消息的房间发言",
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_tool_to_item_returns_turn_done_when_finish_tool_succeeds(turn_runner):
+    """marks_turn_finish=True 且执行成功时，应返回 TURN_DONE。"""
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 10
+    output_item.tags = []
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tc-finish", function={"name": "finish_action", "arguments": "{}"}
+    )
+
+    turn_runner.tool_registry.execute_tool_call = AsyncMock(
+        return_value=_make_finish_tool_exec_result(success=True)
+    )
+    turn_runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=SimpleNamespace(marks_turn_finish=True, self_interrupt=False)
+    )
+
+    with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock(return_value=MagicMock(id=1))), \
+         patch("service.agentService.agentTurnRunner.agentActivityService.update_activity_progress", new=AsyncMock()):
+        result = await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    assert result == TurnStepResult.TURN_DONE
+
+
+@pytest.mark.asyncio
+async def test_run_tool_to_item_returns_error_action_when_finish_tool_fails(turn_runner):
+    """marks_turn_finish=True 且执行失败时，应返回 ERROR_ACTION（触发 failed_action_count）。"""
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 11
+    output_item.tags = []
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tc-finish", function={"name": "finish_action", "arguments": "{}"}
+    )
+
+    turn_runner.tool_registry.execute_tool_call = AsyncMock(
+        return_value=_make_finish_tool_exec_result(success=False)
+    )
+    turn_runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=SimpleNamespace(marks_turn_finish=True, self_interrupt=False)
+    )
+
+    with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock(return_value=MagicMock(id=2))), \
+         patch("service.agentService.agentTurnRunner.agentActivityService.update_activity_progress", new=AsyncMock()):
+        result = await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    assert result == TurnStepResult.ERROR_ACTION
+
+
+@pytest.mark.asyncio
+async def test_run_turn_loop_raises_after_repeated_finish_failures(turn_runner):
+    """finish 类工具反复失败时，_run_turn_loop 应在超出 max_retries 后抛出 RuntimeError（防死循环）。"""
+    room = MagicMock(spec=ChatRoom)
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.turn_setup = SimpleNamespace(
+        max_retries=2, hint_prompt="hint", hint_prompt_error_action="请正确调用 finish_action"
+    )
+    # 模拟 LLM 一直调用 finish_action 但一直失败
+    turn_runner._advance_step = AsyncMock(side_effect=[
+        TurnStepResult.ERROR_ACTION,  # finish 失败 1
+        TurnStepResult.ERROR_ACTION,  # finish 失败 2
+        TurnStepResult.ERROR_ACTION,  # finish 失败 3 → 超限
+    ])
+
+    with pytest.raises(RuntimeError, match="达到 ERROR_ACTION 重试上限"):
+        await turn_runner._run_turn_loop(room)
+
+    # 注入了 2 次提示（第 1、2 次失败后），第 3 次直接报错
+    assert turn_runner._history.append_history_message.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_turn_loop_does_not_count_normal_tool_failures(turn_runner):
+    """普通工具（marks_turn_finish=False）失败后返回 CONTINUE，不应计入 failed_action_count。"""
+    room = MagicMock(spec=ChatRoom)
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.turn_setup = SimpleNamespace(
+        max_retries=1, hint_prompt="hint", hint_prompt_error_action="error hint"
+    )
+    # 普通工具失败返回 CONTINUE，不会触发计数；最终调用 finish 成功
+    turn_runner._advance_step = AsyncMock(side_effect=[
+        TurnStepResult.CONTINUE,   # 普通工具失败，但仍是 CONTINUE
+        TurnStepResult.CONTINUE,
+        TurnStepResult.CONTINUE,
+        TurnStepResult.TURN_DONE,  # finish 成功
+    ])
+
+    await turn_runner._run_turn_loop(room)  # 不应抛异常
+
+    assert turn_runner._advance_step.await_count == 4
+    turn_runner._history.append_history_message.assert_not_awaited()
+
+

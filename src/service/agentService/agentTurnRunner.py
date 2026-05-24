@@ -608,7 +608,13 @@ class AgentTurnRunner:
             raise
 
     async def _run_tool_to_item(self, tool_call: llmApiUtil.OpenAIToolCall, output_item: GtAgentHistory, room: ChatRoom | None) -> TurnStepResult:
-        """执行单个工具调用，结果写入 output_item。返回 `TURN_DONE` 或 `CONTINUE`。"""
+        """执行单个工具调用，结果写入 output_item。
+
+        返回：
+            `TURN_DONE`：turn 结束类工具（marks_turn_finish）执行成功。
+            `ERROR_ACTION`：turn 结束类工具执行失败，触发 failed_action_count 计数（防止死循环）。
+            `CONTINUE`：普通工具执行完毕，继续下一步。
+        """
         tool_name = tool_call.function_name
         tool_metadata = self._base_metadata(
             tool_name=tool_name,
@@ -679,8 +685,12 @@ class AgentTurnRunner:
             metadata_patch=AgentActivityMeta(tool_result=exec_result.result),
         )
 
-        turn_done = registered_tool.marks_turn_finish and exec_result.success
-        return TurnStepResult.TURN_DONE if turn_done else TurnStepResult.CONTINUE
+        if registered_tool.marks_turn_finish:
+            if exec_result.success:
+                return TurnStepResult.TURN_DONE
+            # finish 类工具失败：触发 failed_action_count，防止 LLM 反复重试导致死循环
+            return TurnStepResult.ERROR_ACTION
+        return TurnStepResult.CONTINUE
 
     # ─── AgentDriverHost 协议方法 ──────────────────────────
 
