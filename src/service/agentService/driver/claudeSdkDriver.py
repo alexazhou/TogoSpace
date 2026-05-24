@@ -41,7 +41,7 @@ _HINT_PROMPT = (
 _REMINDER_PROMPT = (
     "【提醒】检测到你直接输出了文字。这些文字不会出现在聊天室中！你必须使用 `send_chat_msg` 工具来发言。如果你已经说完，请调用 `finish_action`。"
 )
-_RUN_CHAT_TURN_MAX_RETRIES = 5
+_RUN_CHAT_TURN_MAX_RETRIES = 3
 
 
 def _format_sdk_blocks(blocks: Any) -> list[str]:
