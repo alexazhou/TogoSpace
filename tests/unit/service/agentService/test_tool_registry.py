@@ -20,7 +20,7 @@ def _register_tools(registry: AgentToolRegistry, *names: str) -> AsyncMock:
                 parameters=llmApiUtil.OpenAIFunctionParameter(type="object", properties={}, required=[])
             )
         )
-        registry.register(tool, handler, marks_turn_finish=name == "finish_chat_turn")
+        registry.register(tool, handler, marks_turn_finish=name == "finish_action")
     return handler
 
 def test_validate_tool_allow_specs() -> None:

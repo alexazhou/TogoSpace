@@ -341,7 +341,7 @@ class TestAgentHistorySync(_agentServiceCase):
         assert "sender: 系统提醒" in content
         assert "sender: bob" in content
         assert "content: hello alice" in content
-        assert "你现在可以开始发言（send_chat_msg）或调用工具。在全部完成后，请务必调用 finish_chat_turn 结束本轮行动。" in content
+        assert "你现在可以开始发言（send_chat_msg）或调用工具。在全部完成后，请务必调用 finish_action 结束行动。" in content
         assert alice.task_consumer._turn_runner._history[0].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
     async def test_pull_room_messages_to_history_appends_complete_turn_prompt_as_last_history(self):

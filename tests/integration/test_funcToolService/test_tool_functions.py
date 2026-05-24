@@ -29,7 +29,7 @@ from service.funcToolService.tools import (
     start_chat,
     wake_up_agent,
     send_chat_msg,
-    finish_chat_turn,
+    finish_action,
 )
 from constants import AgentStatus, AgentTaskStatus, AgentTaskType
 from ...base import ServiceTestCase
@@ -405,24 +405,24 @@ class TestToolFunctions(ServiceTestCase):
         assert "发送失败" in result["message"]
         assert len(dst.messages) == before_count
 
-    async def test_finish_chat_turn_rejects_non_current_agent(self):
-        """不是当前发言人时，finish_chat_turn 仍返回 success（agent 行动结束语义），但不推进轮次。"""
+    async def test_finish_action_rejects_non_current_agent(self):
+        """不是当前发言人时，finish_action 仍返回 success（agent 行动结束语义），但不推进轮次。"""
         await self.create_room(TEAM, "turn_room", ["alice", "bob"], max_rounds=3)
         room = roomService.get_room_by_key(f"turn_room@{TEAM}")
         ctx = ToolCallContext(agent_id=self.agent_ids["bob"], team_id=room.team_id, chat_room=room)
 
-        result = await finish_chat_turn(_context=ctx, confirm_no_need_talk=True)
+        result = await finish_action(_context=ctx, confirm_no_need_talk=True)
 
         assert result["success"]
         assert gtAgentManager.get_agent_name(room.get_current_turn_agent_id()) == "alice"
 
-    async def test_finish_chat_turn_missing_room_message_includes_room_name(self):
+    async def test_finish_action_missing_room_message_includes_room_name(self):
         """未在任务房间发言时，错误提示应带上当前任务房间名称。"""
         await self.create_room(TEAM, "turn_room", ["alice", "bob"], max_rounds=3)
         room = roomService.get_room_by_key(f"turn_room@{TEAM}")
         ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=room.team_id, chat_room=room)
 
-        result = await finish_chat_turn(_context=ctx)
+        result = await finish_action(_context=ctx)
 
         assert not result["success"]
-        assert "任务房间【turn_room】" in result["message"]
+        assert "收到消息的房间【turn_room】" in result["message"]

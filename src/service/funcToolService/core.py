@@ -12,7 +12,7 @@ from .tools import (
     delete_dept,
     delete_role_template,
     delete_room,
-    finish_chat_turn,
+    finish_action,
     get_agent_info,
     get_dept_info,
     get_role_template,
@@ -48,7 +48,7 @@ def load_func_tools() -> dict[str, FuncTool]:
     _registry: dict[str, Any] = {
         "get_time": get_time,
         "send_chat_msg": send_chat_msg,
-        "finish_chat_turn": finish_chat_turn,
+        "finish_action": finish_action,
         "get_dept_info": get_dept_info,
         "get_room_info": get_room_info,
         "get_agent_info": get_agent_info,

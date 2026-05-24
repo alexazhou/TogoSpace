@@ -41,7 +41,7 @@ async def test_native_driver_setup_registers_tools(
     mock_host: MagicMock,
 ) -> None:
     send_tool = _make_tool("send_chat_msg")
-    finish_tool = _make_tool("finish_chat_turn")
+    finish_tool = _make_tool("finish_action")
     wake_tool = _make_tool("wake_up_agent")
     read_tool = _make_tool("get_time")
 
@@ -59,7 +59,7 @@ async def test_native_driver_setup_registers_tools(
         result = await mock_host.tool_registry.execute_tool_call(
             llmApiUtil.OpenAIToolCall(
                 id="tool_1",
-                function={"name": "finish_chat_turn", "arguments": "{}"},
+                function={"name": "finish_action", "arguments": "{}"},
             ),
             context=context,
         )
@@ -67,10 +67,10 @@ async def test_native_driver_setup_registers_tools(
     setup = driver.turn_setup
 
     assert setup.max_retries == 3
-    assert "finish_chat_turn" in setup.hint_prompt
+    assert "finish_action" in setup.hint_prompt
 
     exported_names = [t.function.name for t in mock_host.tool_registry.export_openai_tools()]
-    assert exported_names == ["send_chat_msg", "finish_chat_turn", "wake_up_agent", "get_time"]
+    assert exported_names == ["send_chat_msg", "finish_action", "wake_up_agent", "get_time"]
     get_tools.assert_called_once()
 
     run_tool_call.assert_called_once()
@@ -78,7 +78,7 @@ async def test_native_driver_setup_registers_tools(
     assert called_args == "{}"
     assert called_context.agent_id == 1
     assert called_context.team_id == 1
-    assert called_context.tool_name == "finish_chat_turn"
+    assert called_context.tool_name == "finish_action"
     assert result.success is True
 
 
@@ -92,7 +92,7 @@ async def test_native_driver_run_chat_turn_is_disabled(driver: NativeAgentDriver
 @pytest.mark.asyncio
 async def test_native_driver_ignores_local_tool_names_and_uses_basic_category(mock_host: MagicMock) -> None:
     send_tool = _make_tool("send_chat_msg")
-    finish_tool = _make_tool("finish_chat_turn")
+    finish_tool = _make_tool("finish_action")
     wake_tool = _make_tool("wake_up_agent")
     read_tool = _make_tool("get_time")
     run_tool_call = AsyncMock(return_value={"success": True})
@@ -110,4 +110,4 @@ async def test_native_driver_ignores_local_tool_names_and_uses_basic_category(mo
 
     get_tools.assert_called_once()
     exported_names = [t.function.name for t in mock_host.tool_registry.export_openai_tools()]
-    assert exported_names == ["send_chat_msg", "finish_chat_turn", "wake_up_agent", "get_time"]
+    assert exported_names == ["send_chat_msg", "finish_action", "wake_up_agent", "get_time"]

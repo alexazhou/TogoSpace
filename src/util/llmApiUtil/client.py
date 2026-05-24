@@ -207,8 +207,8 @@ _AGENT_PROBE_TOOLS = [
     ),
     OpenAITool(
         function=OpenAIFunction(
-            name="finish_chat_turn",
-            description="结束本轮行动",
+            name="finish_action",
+            description="结束行动",
             parameters=OpenAIFunctionParameter(
                 type="object",
                 properties={},
@@ -230,11 +230,11 @@ def build_agent_probe_request(
         messages=[
             OpenAIMessage.text(
                 OpenaiApiRole.SYSTEM,
-                "你是一个团队协作 Agent。你需要通过工具完成行动，并在结束时调用 finish_chat_turn。",
+                "你是一个团队协作 Agent。你需要通过工具完成行动，并在结束时调用 finish_action。",
             ),
             OpenAIMessage.text(
                 OpenaiApiRole.USER,
-                "请做一次最小响应。如果你可以调用工具，请自行决定是否调用；完成后结束本轮。",
+                "请做一次最小响应。如果你可以调用工具，请自行决定是否调用；完成后结束行动。",
             ),
         ],
         max_tokens=16,

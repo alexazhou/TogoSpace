@@ -55,9 +55,9 @@ INIT ──activate──► SCHEDULING ──max_turns/all_skipped──► IDL
 
 | LLM 工具调用 | 含义 | has_content |
 |---|---|---|
-| `send_chat_msg` + `finish_chat_turn` | 发消息并结束行动 | True |
-| 仅 `finish_chat_turn` | 选择不发言 | False |
-| `send_chat_msg`（多条）+ `finish_chat_turn` | 发多条消息 | True |
+| `send_chat_msg` + `finish_action` | 发消息并结束行动 | True |
+| 仅 `finish_action` | 选择不发言 | False |
+| `send_chat_msg`（多条）+ `finish_action` | 发多条消息 | True |
 
 **`has_content=False` 不是 Bug** — LLM 认为当前无需发言是正常行为。
 
@@ -68,7 +68,7 @@ INIT ──activate──► SCHEDULING ──max_turns/all_skipped──► IDL
 
 排查日志时建议按这个层级理解：
 
-- 看房间是否推进，要看 turn 是否完成（通常由 `finish_chat_turn` 触发）
+- 看房间是否推进，要看 turn 是否完成（通常由 `finish_action` 触发）
 - 看为什么 turn 卡住，要看某个 step 是否一直落在 `NO_ACTION`
 
 ---
@@ -95,10 +95,10 @@ logs/backend/service/agentService.log   — 消息同步与工具调用
 
 #### 2.1 确认 Agent 是否发言
 
-搜索 `结束本轮行动`：
+搜索 `结束行动`：
 
 ```
-房间 team1/general 由 小马哥(agent_id=3) 结束本轮行动 (has_content=True, turn_pos=2/4, turn_count=1)
+房间 team1/general 由 小马哥(agent_id=3) 结束行动 (has_content=True, turn_pos=2/4, turn_count=1)
 ```
 
 - `has_content=True`：Agent 发送了消息
@@ -135,12 +135,12 @@ logs/backend/service/agentService.log   — 消息同步与工具调用
 搜索 `检测到工具调用`：
 
 ```
-检测到工具调用: 小马哥(agent_id=3), tools=['send_chat_msg', 'finish_chat_turn']
+检测到工具调用: 小马哥(agent_id=3), tools=['send_chat_msg', 'finish_action']
 ```
 
-- `['finish_chat_turn']`：仅结束行动，没有发送消息
-- `['send_chat_msg', 'finish_chat_turn']`：发送了一条消息后结束
-- `['send_chat_msg', 'send_chat_msg', 'finish_chat_turn']`：发送了两条消息后结束
+- `['finish_action']`：仅结束行动，没有发送消息
+- `['send_chat_msg', 'finish_action']`：发送了一条消息后结束
+- `['send_chat_msg', 'send_chat_msg', 'finish_action']`：发送了两条消息后结束
 
 #### 2.5 确认调度停止原因
 
@@ -160,9 +160,9 @@ logs/backend/service/agentService.log   — 消息同步与工具调用
 
 **排查**：
 
-1. 搜索 `结束本轮行动`，找到该 Agent 对应的日志
+1. 搜索 `结束行动`，找到该 Agent 对应的日志
 2. 如果 `has_content=False`，说明 LLM 主动选择不发言
-3. 确认 `检测到工具调用` 日志 — 应该只有 `['finish_chat_turn']`
+3. 确认 `检测到工具调用` 日志 — 应该只有 `['finish_action']`
 
 **结论**：这是 LLM 行为，不是调度 Bug。
 
@@ -224,13 +224,13 @@ logs/backend/service/agentService.log   — 消息同步与工具调用
 | 关键词 | 文件 | 含义 |
 |---|---|---|
 | `同步房间消息` | agentService.log | Agent 拉取房间未读消息 |
-| `无新消息，自动跳过本轮` | agentService.log | synced_count=0 时自动结束轮次 |
+| `无新消息，自动跳过本轮` | agentService.log | synced_count=0 时自动结束行动 |
 | `检测到工具调用` | agentService.log | LLM 返回的工具调用列表 |
-| `结束本轮行动` | roomService.log | Agent 完成行动，含 has_content 标记 |
+| `结束行动` | roomService.log | Agent 完成行动，含 has_content 标记 |
 | `已达到最大轮次` | roomService.log | 房间达到 max_turns 停止 |
 | `所有 AI 成员均已跳过发言` | roomService.log | 一整轮无人发言，停止 |
 | `进入 IDLE 状态` | roomService.log | 房间停止调度 |
-| `拒绝结束轮次申请` | roomService.log | 非当前发言人尝试结束轮次 |
+| `拒绝结束行动申请` | roomService.log | 非当前发言人尝试结束行动 |
 | `自动跳过人类操作者回合` | roomService.log | OPERATOR 类型成员被自动跳过 |
 | `Agent 任务执行失败` | agentService.log | Consumer 捕获到任务异常 |
 

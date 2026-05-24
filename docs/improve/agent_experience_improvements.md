@@ -264,13 +264,13 @@ type WebSearchParams struct {
 
 ---
 
-### 6.3 新增 `send_chat_msg` / `finish_chat_turn` 工具的沙箱感知
+### 6.3 新增 `send_chat_msg` / `finish_action` 工具的沙箱感知
 
 #### 改造动机
-`send_chat_msg` 和 `finish_chat_turn` 是 Agent 与平台交互的核心工具，目前由 agent_team 后端直接注入，不经过 gTSP。但在 TSP 驱动模式（`tspDriver`）下，所有工具调用都经过 gTSP 路由，需要确保这两个平台级工具能正确穿透 gTSP 的工具过滤逻辑，不被沙箱误拦截。
+`send_chat_msg` 和 `finish_action` 是 Agent 与平台交互的核心工具，目前由 agent_team 后端直接注入，不经过 gTSP。但在 TSP 驱动模式（`tspDriver`）下，所有工具调用都经过 gTSP 路由，需要确保这两个平台级工具能正确穿透 gTSP 的工具过滤逻辑，不被沙箱误拦截。
 
 #### 实现要点
-- 在 gTSP 的 `initialize` 响应中，将平台注入的工具（`send_chat_msg`、`finish_chat_turn` 等）标记为 `platform_native: true`，表示由上层平台实现，gTSP 不负责执行
+- 在 gTSP 的 `initialize` 响应中，将平台注入的工具（`send_chat_msg`、`finish_action` 等）标记为 `platform_native: true`，表示由上层平台实现，gTSP 不负责执行
 - 当 `tool` 请求的工具名为平台原生工具时，gTSP 直接透传请求给上层，不进行本地路由
 - 或者：维持现有架构（平台工具不经过 gTSP），但在 `initialize` 的工具列表中明确区分"gTSP 工具"和"平台工具"，避免 Agent 混淆
 

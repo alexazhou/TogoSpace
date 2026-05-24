@@ -74,7 +74,7 @@ class RoomScheduler:
     async def handle_finish_request(self, caller_agent_id: int) -> bool:
         """处理 Agent 的结束发言请求：校验 → 记录跳过 → 推进 → 持久化 + 发布。"""
         if self._state == RoomState.INIT:
-            logger.warning("房间 %s 仍处于 INIT，收到结束轮次请求", self._key)
+            logger.warning("房间 %s 仍处于 INIT，收到结束行动请求", self._key)
 
         # IDLE 唤醒：重置轮次状态后直接调度
         if self._state == RoomState.IDLE:
@@ -93,12 +93,12 @@ class RoomScheduler:
         current_id = self.get_current_turn_agent_id()
         current_name = gtAgentManager.get_agent_name(current_id)
         if caller_agent_id != current_id:
-            logger.warning("房间 %s 拒绝结束轮次申请：agent=%s 并非当前发言人 agent=%s",
+            logger.warning("房间 %s 拒绝结束行动申请：agent=%s 并非当前发言人 agent=%s",
                            self._key, gtAgentManager.get_agent_name(caller_agent_id), current_name)
             return False
 
         logger.info(
-            "房间 %s 由 agent=%s 结束本轮行动 (has_content=%s, speaker_index=%s/%d, turn_count=%d)",
+            "房间 %s 由 agent=%s 结束行动 (has_content=%s, speaker_index=%s/%d, turn_count=%d)",
             self._key, current_name,
             self.current_turn_has_content, self._current_speaker_index, len(self._gt_room.agent_ids), self._round_count,
         )

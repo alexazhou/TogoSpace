@@ -64,8 +64,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         room_key = f"general@{TEAM}"
 
         call_seq = {
-            "alice": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "你好，bob！"}}]}, {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]}],
-            "bob":   [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "你好，alice！"}}]}, {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]}],
+            "alice": [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "你好，bob！"}}]}, {"tool_calls": [{"name": "finish_action", "arguments": {}}]}],
+            "bob":   [{"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "你好，alice！"}}]}, {"tool_calls": [{"name": "finish_action", "arguments": {}}]}],
         }
 
         async def fake_infer(model, ctx):
@@ -106,7 +106,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             call_seq = {
                 "alice": [
                     {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "manual_turn", "msg": "hello"}}]},
-                    {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+                    {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
                 ],
                 "bob": [],
             }
@@ -116,7 +116,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
                 if call_seq[name]:
                     return self.normalize_to_mock(call_seq[name].pop(0))
                 # 兜底返回 finish，避免并发调度时 side_effect 耗尽导致 StopIteration。
-                return self.normalize_to_mock({"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]})
+                return self.normalize_to_mock({"tool_calls": [{"name": "finish_action", "arguments": {}}]})
 
             task = GtScheculeTask(
                 id=1,
@@ -155,7 +155,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             resps = [
                 {"content": "我直接回复"},
                 {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "turn_checker_room", "msg": "最终消息"}}]},
-                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+                {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
             ]
             task = GtScheculeTask(
                 id=2,
@@ -187,15 +187,15 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         call_seq = {
             "alice": [
                 {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "a message"}}]},
-                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+                {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
                 {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "a message"}}]},
-                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+                {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
             ],
             "bob": [
                 {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "a message"}}]},
-                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+                {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
                 {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "general", "msg": "a message"}}]},
-                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+                {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
             ],
         }
 
@@ -204,7 +204,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             if call_seq[name]:
                 res = call_seq[name].pop(0)
             else:
-                res = {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]}
+                res = {"tool_calls": [{"name": "finish_action", "arguments": {}}]}
             return self.normalize_to_mock(res)
 
         with self.patch_infer(handler=fake_infer):
@@ -278,7 +278,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             assert pending is not None
             assert pending.id == "call_pending"
 
-            # 后续推理：返回 finish_chat_turn 结束 turn
+            # 后续推理：返回 finish_action 结束 turn
             task = GtScheculeTask(
                 id=3,
                 agent_id=alice.gt_agent.id,
@@ -288,7 +288,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
             responses = [
                 {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "cancelled_tool_room", "msg": "pending msg"}}]},
-                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},
+                {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
             ]
 
             with self.patch_infer(responses=responses):
