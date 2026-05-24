@@ -150,15 +150,15 @@ class ClaudeSdkAgentDriver(AgentDriver):
             self._sdk_client = None
         await super().shutdown()
 
-    async def run_chat_turn(self, task: GtScheculeTask, synced_count: int) -> None:
+    async def run_task_turn(self, task: GtScheculeTask, synced_count: int) -> None:
         room_id = task.task_data.get("room_id")
         if room_id is None:
-            logger.warning(f"run_chat_turn 跳过：task 缺少 room_id, agent_id={self.host.gt_agent.id}, task_id={task.id}")
+            logger.warning(f"run_task_turn 跳过：task 缺少 room_id, agent_id={self.host.gt_agent.id}, task_id={task.id}")
             return
 
         room = roomService.get_room(room_id)
         if room is None:
-            logger.warning(f"run_chat_turn 跳过：room_id={room_id} 不存在, agent_id={self.host.gt_agent.id}")
+            logger.warning(f"run_task_turn 跳过：room_id={room_id} 不存在, agent_id={self.host.gt_agent.id}")
             return
 
         self._turn_done = False

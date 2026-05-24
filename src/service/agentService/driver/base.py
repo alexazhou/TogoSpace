@@ -80,7 +80,7 @@ class AgentDriver:
     def turn_setup(self) -> AgentTurnSetup:
         return AgentTurnSetup()
 
-    async def run_chat_turn(self, task: GtScheculeTask, synced_count: int) -> None:
+    async def run_task_turn(self, task: GtScheculeTask, synced_count: int) -> None:
         raise NotImplementedError
 
     async def cancel_turn(self) -> None:

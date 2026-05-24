@@ -192,6 +192,7 @@ class TaskPriority(EnhanceEnum):
 class AgentTaskType(EnhanceEnum):
     """Agent 任务类型枚举。"""
     ROOM_MESSAGE = auto()
+    TODO_TASK = auto()  # 协作任务驱动（Agent 间结构化任务）
 
 
 class AgentTaskStatus(EnhanceEnum):

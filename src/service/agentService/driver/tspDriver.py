@@ -197,8 +197,8 @@ class TspAgentDriver(AgentDriver):
             hint_prompt_error_action=_RUN_CHAT_TURN_ERROR_ACTION_HINT,
         )
 
-    async def run_chat_turn(self, task: GtScheculeTask, synced_count: int) -> None:
-        raise RuntimeError("TspAgentDriver 不再直接执行 run_chat_turn，请使用 Agent.run_chat_turn")
+    async def run_task_turn(self, task: GtScheculeTask, synced_count: int) -> None:
+        raise RuntimeError("TspAgentDriver 不再直接执行 run_task_turn，请使用 Agent.run_task_turn")
 
     async def _execute_tsp_tool(
         self,

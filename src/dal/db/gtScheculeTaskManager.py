@@ -49,10 +49,11 @@ async def has_pending_room_task(
 
 
 async def get_first_unfinish_task(agent_id: int) -> GtScheculeTask | None:
-    """获取 Agent 最早的未完成任务。
+    """获取 Agent 最早的未完成任务，按优先级排序。
 
     未完成任务当前定义为 PENDING / RUNNING / FAILED。
-    这样失败任务会按顺序阻断后续任务，而恢复中的 RUNNING 任务也能继续被消费。
+    排序规则：task_type ASC（ROOM_MESSAGE 优先于 TODO_TASK），再按 id ASC。
+    这样只要有消息任务待处理，Agent 会优先回消息；消息处理完后才会处理协作任务。
     """
     return await (
         GtScheculeTask
@@ -61,7 +62,7 @@ async def get_first_unfinish_task(agent_id: int) -> GtScheculeTask | None:
             GtScheculeTask.agent_id == agent_id,
             GtScheculeTask.status.in_([AgentTaskStatus.PENDING, AgentTaskStatus.RUNNING, AgentTaskStatus.FAILED]),  # type: ignore[attr-defined]
         )
-        .order_by(GtScheculeTask.id.asc())  # type: ignore[attr-defined]
+        .order_by(GtScheculeTask.task_type.asc(), GtScheculeTask.id.asc())  # type: ignore[attr-defined]
         .aio_first()
     )
 
@@ -75,6 +76,21 @@ async def has_consumable_task(agent_id: int) -> bool:
     """
     first_task = await get_first_unfinish_task(agent_id)
     return first_task is not None and first_task.status == AgentTaskStatus.PENDING
+
+
+async def has_pending_collaboration_task(agent_id: int, agent_task_id: int) -> bool:
+    """检查是否已存在对应 agent_task_id 的 PENDING TODO_TASK 调度记录（幂等检查）。"""
+    tasks = await (
+        GtScheculeTask
+        .select()
+        .where(
+            GtScheculeTask.agent_id == agent_id,
+            GtScheculeTask.task_type == AgentTaskType.TODO_TASK,
+            GtScheculeTask.status == AgentTaskStatus.PENDING,
+        )
+        .aio_execute()
+    )
+    return any(task.task_data.get("agent_task_id") == agent_task_id for task in tasks)
 
 
 async def transition_task_status(
@@ -152,3 +168,8 @@ async def delete_tasks_by_team(team_id: int) -> int:
         .where(GtScheculeTask.agent_id.in_(agent_ids_query))  # type: ignore[attr-defined]
         .aio_execute()
     )
+
+
+async def get_task(task_id: int) -> GtScheculeTask | None:
+    """按主键查询调度任务。"""
+    return await GtScheculeTask.aio_get_or_none(GtScheculeTask.id == task_id)

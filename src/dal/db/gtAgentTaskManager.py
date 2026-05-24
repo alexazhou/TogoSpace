@@ -50,6 +50,20 @@ async def get_tasks_by_ids(task_ids: list[int]) -> list[GtAgentTask]:
     )
 
 
+async def get_first_active_task(agent_id: int) -> GtAgentTask | None:
+    """获取 Agent 最早的 TODO 或 IN_PROGRESS 任务（按 ID 升序）。"""
+    return await (
+        GtAgentTask
+        .select()
+        .where(
+            GtAgentTask.assignee_id == agent_id,
+            GtAgentTask.status.in_([TaskStatus.TODO, TaskStatus.IN_PROGRESS]),  # type: ignore[attr-defined]
+        )
+        .order_by(GtAgentTask.id.asc())  # type: ignore[attr-defined]
+        .aio_first()
+    )
+
+
 async def update_task(task: GtAgentTask, fields: list) -> GtAgentTask:
     """更新指定字段，同时刷新 updated_at。"""
     task.updated_at = datetime.datetime.now()

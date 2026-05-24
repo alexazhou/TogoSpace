@@ -104,6 +104,22 @@ def build_compact_resume_prompt(summary: str) -> str:
     return COMPACT_RESUME_TEMPLATE.format(summary=summary.strip())
 
 
+def build_todo_task_turn_prompt(title: str, description: str, status_value: str) -> str:
+    """构建协作任务（TODO_TASK）turn 的用户提示文本。"""
+    return (
+        f"【任务通知】\n"
+        f"你当前被唤醒以处理以下任务：\n"
+        f"- 标题: {title}\n"
+        f"- 描述: {description}\n"
+        f"- 状态: {status_value}\n\n"
+        f"请直接开始工作。\n"
+        f"- 若完成，请调用 `update_task` 将状态改为 DONE 并填写结果。\n"
+        f"- 若需暂缓（本轮无法完成），请调用 `update_task` 将状态改为 ON_HOLD。\n"
+        f"- 若需取消，请调用 `update_task` 将状态改为 CANCELLED。\n"
+        f"- 无论成败，完成后必须调用 `finish_action`。"
+    )
+
+
 async def _build_dept_context(team_id: int, agent_name: str) -> str:
     gt_agent = await gtAgentManager.get_agent(team_id, agent_name)
     assert gt_agent is not None, f"agent not found: team_id={team_id}, agent_name={agent_name}"

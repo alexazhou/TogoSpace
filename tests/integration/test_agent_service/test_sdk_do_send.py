@@ -91,7 +91,7 @@ class TestSdkDoSend(ServiceTestCase):
         )
         agent.task_consumer.current_db_task = task
 
-        # 4. 模拟 TurnRunner.run_chat_turn 中设置的 _current_room 上下文
+        # 4. 模拟 TurnRunner.run_task_turn 中设置的 _current_room 上下文
         agent.task_consumer._turn_runner._current_room = room
 
         # 5. 驱动绑定（不调 startup，手动注册 tool_registry）
@@ -191,7 +191,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         await persistenceService.shutdown()
         await ormService.shutdown()
 
-    async def test_run_chat_turn_requires_started_client(self) -> None:
+    async def test_run_task_turn_requires_started_client(self) -> None:
         await self.create_room(TEAM, "lobby", ["alice"])
         room = roomService.get_room_by_key(f"lobby@{TEAM}")
         agent = Agent(
@@ -208,7 +208,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         )
 
         try:
-            await driver.run_chat_turn(task, synced_count=0)
+            await driver.run_task_turn(task, synced_count=0)
             assert False, "expected RuntimeError"
         except RuntimeError as exc:
             assert "尚未初始化" in str(exc)
@@ -311,7 +311,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         assert exported_names == ["send_chat_msg", "finish_action"]
         assert "allowed_tools" not in captured_options
 
-    async def test_run_chat_turn_uses_max_retries_as_failed_action_retry_limit(self) -> None:
+    async def test_run_task_turn_uses_max_retries_as_failed_action_retry_limit(self) -> None:
         await self.create_room(TEAM, "lobby", ["alice"])
         room = roomService.get_room_by_key(f"lobby@{TEAM}")
         agent = Agent(
@@ -333,11 +333,11 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
 
         with patch("service.agentService.driver.claudeSdkDriver._RUN_CHAT_TURN_MAX_RETRIES", 1):
             with pytest.raises(RuntimeError, match="SDK 达到失败行动重试上限仍未完成行动"):
-                await driver.run_chat_turn(task, synced_count=0)
+                await driver.run_task_turn(task, synced_count=0)
 
         assert len(fake_client.queries) == 2
 
-    async def test_run_chat_turn_prompt_has_context_wrappers_and_blank_lines(self) -> None:
+    async def test_run_task_turn_prompt_has_context_wrappers_and_blank_lines(self) -> None:
         await self.create_room(TEAM, "lobby", ["alice", "bob"])
         room = roomService.get_room_by_key(f"lobby@{TEAM}")
         agent = Agent(
@@ -369,7 +369,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
 
         with patch("service.agentService.driver.claudeSdkDriver._RUN_CHAT_TURN_MAX_RETRIES", 0):
             with pytest.raises(RuntimeError, match="SDK 达到失败行动重试上限仍未完成行动"):
-                await driver.run_chat_turn(task, synced_count=1)
+                await driver.run_task_turn(task, synced_count=1)
 
         assert len(fake_client.queries) == 1
         first_prompt = fake_client.queries[0]

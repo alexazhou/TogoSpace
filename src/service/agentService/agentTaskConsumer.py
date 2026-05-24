@@ -4,10 +4,10 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from constants import AgentTaskStatus, AgentStatus, AgentActivityType, AgentActivityStatus, MessageBusTopic
+from constants import AgentTaskStatus, AgentStatus, AgentActivityType, AgentActivityStatus, MessageBusTopic, AgentTaskType
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtScheculeTask import GtScheculeTask
-from dal.db import gtScheculeTaskManager
+from dal.db import gtAgentTaskManager, gtScheculeTaskManager
 from service import messageBus, agentActivityService
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver import AgentDriverConfig
@@ -83,6 +83,26 @@ class AgentTaskConsumer:
         logger.info(f"已发出取消信号: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
         return True
 
+    async def _check_and_schedule_collaboration_tasks(self) -> None:
+        """扫描协作任务表，若有 TODO/IN_PROGRESS 任务且无对应 PENDING 调度记录，则自动创建。"""
+        agent_task = await gtAgentTaskManager.get_first_active_task(self.gt_agent.id)
+        if agent_task is None:
+            return
+
+        already_scheduled = await gtScheculeTaskManager.has_pending_collaboration_task(
+            self.gt_agent.id, agent_task.id
+        )
+        if already_scheduled:
+            logger.debug(f"协作任务已有 PENDING 调度记录，跳过: {self.gt_agent.name}(agent_id={self.gt_agent.id}), agent_task_id={agent_task.id}")
+            return
+
+        logger.info(f"自动创建协作任务调度: {self.gt_agent.name}(agent_id={self.gt_agent.id}), agent_task_id={agent_task.id}, title={agent_task.title!r}")
+        await gtScheculeTaskManager.create_task(
+            self.gt_agent.id,
+            AgentTaskType.TODO_TASK,
+            {"agent_task_id": agent_task.id},
+        )
+
     # ─── 消费循环 ─────────────────────────────────────────────
     async def consume(self) -> None:
         """从数据库获取并处理任务，直到没有待处理任务为止。"""
@@ -123,7 +143,7 @@ class AgentTaskConsumer:
             logger.info(f"开始执行任务: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}")
 
             try:
-                await self._turn_runner.run_chat_turn(claimed_task)
+                await self._turn_runner.run_task_turn(claimed_task)
             except asyncio.CancelledError:
                 if not self._cancel_requested:
                     raise  # 非人工停止（hot reload / 服务关闭），保持原有穿透行为
@@ -144,6 +164,7 @@ class AgentTaskConsumer:
 
             logger.info(f"任务执行完成: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}")
             await gtScheculeTaskManager.update_task_status(claimed_task.id, AgentTaskStatus.COMPLETED)
+            await self._check_and_schedule_collaboration_tasks()
 
         # 清理逻辑
         if self.status != AgentStatus.FAILED:

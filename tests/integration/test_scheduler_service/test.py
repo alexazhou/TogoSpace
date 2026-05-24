@@ -163,7 +163,7 @@ class TestSchedulerRun(ServiceTestCase):
             ))
             mock_task_manager.update_task_status = AsyncMock()
 
-            with patch.object(real_agent.task_consumer._turn_runner, "run_chat_turn", side_effect=RuntimeError("boom")):
+            with patch.object(real_agent.task_consumer._turn_runner, "run_task_turn", side_effect=RuntimeError("boom")):
                 await real_agent.task_consumer.consume()
 
         assert real_agent.status == AgentStatus.FAILED
@@ -191,7 +191,7 @@ class TestSchedulerRun(ServiceTestCase):
             mock_task_manager.update_task_status = AsyncMock()
             mock_task_manager.has_consumable_task = AsyncMock(return_value=True)
 
-            with patch.object(real_agent.task_consumer._turn_runner, "run_chat_turn", side_effect=RuntimeError("boom")):
+            with patch.object(real_agent.task_consumer._turn_runner, "run_task_turn", side_effect=RuntimeError("boom")):
                 restart_spy = MagicMock()
                 real_agent.task_consumer.start = restart_spy
                 await real_agent.task_consumer.consume()

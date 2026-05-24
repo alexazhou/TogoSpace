@@ -287,12 +287,12 @@ async def test_tsp_driver_respects_local_tool_names(mock_tsp_host: MagicMock) ->
 
 
 @pytest.mark.asyncio
-async def test_tsp_driver_run_chat_turn_is_disabled(mock_tsp_host: MagicMock) -> None:
+async def test_tsp_driver_run_task_turn_is_disabled(mock_tsp_host: MagicMock) -> None:
     config = AgentDriverConfig(driver_type="tsp", options={})
     driver = TspAgentDriver(mock_tsp_host, config)
     task = MagicMock(spec=GtScheculeTask)
-    with pytest.raises(RuntimeError, match="不再直接执行 run_chat_turn"):
-        await driver.run_chat_turn(task=task, synced_count=0)
+    with pytest.raises(RuntimeError, match="不再直接执行 run_task_turn"):
+        await driver.run_task_turn(task=task, synced_count=0)
 
 @pytest.mark.asyncio
 async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host: MagicMock) -> None:

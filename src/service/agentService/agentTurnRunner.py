@@ -13,7 +13,7 @@ from typing import List
 from constants import (
     AgentActivityStatus, AgentActivityType,
     AgentHistoryStatus, AgentHistoryTag,
-    DriverType, OpenaiApiRole, RoomState, TurnStepResult,
+    AgentTaskType, DriverType, OpenaiApiRole, RoomState, TurnStepResult,
 )
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from model.dbModel.gtRoomMessage import GtRoomMessage
@@ -32,6 +32,7 @@ from service.roomService import ChatRoom, ToolCallContext
 from util import configUtil, llmApiUtil
 from util.configTypes import LlmServiceConfig
 from util.assertUtil import assertNotNull
+from dal.db import gtAgentTaskManager
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ class AgentTurnRunner:
         self.tool_registry: AgentToolRegistry = AgentToolRegistry()
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
         self._current_room: ChatRoom | None = None
+        self._current_task: GtScheculeTask | None = None
 
     def _base_metadata(self, **extra) -> AgentActivityMeta:
         """构建活动记录 metadata，自动附加 task_room_id（本次 turn 所在的任务房间）。"""
@@ -127,43 +129,72 @@ class AgentTurnRunner:
         await self._history.finalize_cancel_turn()
         await agentActivityService.fail_started_activities(self.gt_agent.id, error_message="cancelled by user")
 
-    async def run_chat_turn(self, task: GtScheculeTask) -> None:
-        """执行一个完整 chat turn：同步房间消息 → 推理 → 工具调用循环。
-        若存在未完成 turn，则走续跑路径。"""
-        room_id = task.task_data.get("room_id")
-        assertNotNull(room_id, error_message=f"task 缺少 room_id, agent_id={self.gt_agent.id}, task_id={task.id}")
+    async def run_task_turn(self, task: GtScheculeTask) -> None:
+        """执行一个完整 chat turn：同步消息 → 推理 → 工具调用循环。
 
-        room = roomService.get_room(room_id)
-        assertNotNull(room, error_message=f"room_id={room_id} 不存在, agent_id={self.gt_agent.id}")
-        assert room.state != RoomState.INIT, (
-            f"Agent 不应在 INIT 状态下收到任务: agent_id={self.gt_agent.id}, room={room.name}, state={room.state}"
-        )
+        支持两种模式：
+        - ROOM_MESSAGE：从房间同步消息后运行 turn loop，完成后刷新房间消息队列。
+        - TODO_TASK：向 history 注入任务通知 prompt 后运行 turn loop，无房间依赖。
+        若存在未完成 turn，则走续跑路径。
+        """
+        is_todo_task = task.task_type == AgentTaskType.TODO_TASK
+
+        if is_todo_task:
+            agent_task_id = task.task_data.get("agent_task_id")
+            assertNotNull(agent_task_id, error_message=f"task 缺少 agent_task_id, agent_id={self.gt_agent.id}, task_id={task.id}")
+            agent_task = await gtAgentTaskManager.get_task(agent_task_id)
+            assertNotNull(agent_task, error_message=f"agent_task_id={agent_task_id} 不存在, agent_id={self.gt_agent.id}")
+            logger.info(f"协作任务 turn 开始: {self.gt_agent.name}(agent_id={self.gt_agent.id}), agent_task_id={agent_task_id}, title={agent_task.title!r}")
+            room = None
+        else:
+            room_id = task.task_data.get("room_id")
+            assertNotNull(room_id, error_message=f"task 缺少 room_id, agent_id={self.gt_agent.id}, task_id={task.id}")
+            room = roomService.get_room(room_id)
+            assertNotNull(room, error_message=f"room_id={room_id} 不存在, agent_id={self.gt_agent.id}")
+            assert room.state != RoomState.INIT, (
+                f"Agent 不应在 INIT 状态下收到任务: agent_id={self.gt_agent.id}, room={room.name}, state={room.state}"
+            )
 
         self._current_room = room
+        self._current_task = task
         try:
             if self.driver.host_managed_turn_loop:
                 assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
+
                 if not self._history.has_active_turn():
-                    synced_count = await self.pull_room_messages_to_history(room)
-                    if synced_count == 0:
-                        logger.info(f"无新消息，自动跳过本轮: {self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}")
-                        await room.handle_finish_request(self.gt_agent.id)
-                        await room.flush_queued_messages()
-                        return
+                    if is_todo_task:
+                        task_prompt = promptBuilder.build_todo_task_turn_prompt(
+                            title=agent_task.title,
+                            description=agent_task.description,
+                            status_value=agent_task.status.value,
+                        )
+                        await self._history.append_history_message(GtAgentHistory.build(
+                            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, task_prompt),
+                            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+                        ))
+                    else:
+                        synced_count = await self.pull_room_messages_to_history(room)
+                        if synced_count == 0:
+                            logger.info(f"无新消息，自动跳过本轮: {self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}")
+                            await room.handle_finish_request(self.gt_agent.id)
+                            await room.flush_queued_messages()
+                            return
 
                 await self._run_turn_loop(room)
-                await room.flush_queued_messages()
+                if room is not None:
+                    await room.flush_queued_messages()
 
             else:
-                synced_count = await self.pull_room_messages_to_history(room)
-                await self.driver.run_chat_turn(task, synced_count)
+                synced_count = 1 if is_todo_task else await self.pull_room_messages_to_history(room)
+                await self.driver.run_task_turn(task, synced_count)
+
         except asyncio.CancelledError:
-            # CancelledError 穿透前，先处理房间取消逻辑
-            # finally 块会执行 _current_room = None，导致 handle_cancel_turn 无法获取 room
-            room.cancel_current_turn()
-            raise  # 继续穿透，让 agentTaskConsumer 处理任务状态更新
+            if not is_todo_task and room is not None:
+                room.cancel_current_turn()
+            raise
         finally:
             self._current_room = None
+            self._current_task = None
 
     async def pull_room_messages_to_history(self, room: ChatRoom) -> int:
         """从房间拉取未读消息并追加到 history。返回追加的消息条目数（0 或 1）。"""
@@ -223,20 +254,19 @@ class AgentTurnRunner:
             metadata=meta,
         )
 
-    async def _run_turn_loop(self, room: ChatRoom) -> None:
-        """基于 history 状态推进的统一循环。"""
+    async def _run_turn_loop(self, room: ChatRoom | None) -> None:
+        """基于 history 状态推进的统一循环。room 为 None 时跳过房间相关操作（协作任务模式）。"""
         tools = self.tool_registry.export_openai_tools()
         turn_setup: AgentTurnSetup = self.driver.turn_setup
         failed_action_count = 0
         next_tool_choice: str | None = None
 
         while True:
-            # 在安全边界检查是否有待即时插入的私聊消息
-            if (
-                self._history.is_safe_for_immediate_insert()
-                and room.has_pending_immediate_messages(self.gt_agent.id)
-            ):
-                await self._inject_immediate_messages(room)
+            # 检查 operator 私聊控制房间是否有待即时插入的消息
+            if self._history.is_safe_for_immediate_insert():
+                ctrl_room = await roomService.get_control_room_for_agent(self.gt_agent.team_id, self.gt_agent.id)
+                if ctrl_room is not None and ctrl_room.has_pending_immediate_messages(self.gt_agent.id):
+                    await self._inject_immediate_messages(ctrl_room)
 
             result = await self._advance_step(room, tools, tool_choice=next_tool_choice)
             next_tool_choice = None
@@ -275,7 +305,7 @@ class AgentTurnRunner:
                     f"failed_actions={failed_action_count}, max_retries={turn_setup.max_retries}"
                 )
 
-    async def _advance_step(self, room: ChatRoom, tools: list[llmApiUtil.OpenAITool], tool_choice: str | None = None) -> TurnStepResult:
+    async def _advance_step(self, room: ChatRoom | None, tools: list[llmApiUtil.OpenAITool], tool_choice: str | None = None) -> TurnStepResult:
         """根据当前 history 状态推进一个 step。
 
         返回:
@@ -577,7 +607,7 @@ class AgentTurnRunner:
                 await self._finish_activity(activity_id, status=AgentActivityStatus.FAILED, error_message=str(e))
             raise
 
-    async def _run_tool_to_item(self, tool_call: llmApiUtil.OpenAIToolCall, output_item: GtAgentHistory, room: ChatRoom) -> TurnStepResult:
+    async def _run_tool_to_item(self, tool_call: llmApiUtil.OpenAIToolCall, output_item: GtAgentHistory, room: ChatRoom | None) -> TurnStepResult:
         """执行单个工具调用，结果写入 output_item。返回 `TURN_DONE` 或 `CONTINUE`。"""
         tool_name = tool_call.function_name
         tool_metadata = self._base_metadata(
@@ -621,10 +651,12 @@ class AgentTurnRunner:
                 # handler 会触发 agent 中断（CancelledError），item 以 INIT+tag 留在 DB。
                 await self._history.mark_self_interrupt_tag(output_item.id)
 
+        team_id = room.team_id if room is not None else self.gt_agent.team_id
         context = ToolCallContext(
             agent_id=self.gt_agent.id,
-            team_id=room.team_id,
+            team_id=team_id,
             chat_room=room,
+            schedule_task=self._current_task,
         )
         exec_result:ToolExecutionResult = await self.tool_registry.execute_tool_call(tool_call, context)
         final_message = llmApiUtil.OpenAIMessage.tool_result(
@@ -656,10 +688,9 @@ class AgentTurnRunner:
         """执行最后一条 assistant 消息中的所有 tool calls。
 
         AgentDriverHost 协议方法，通过 _current_room 获取房间上下文，
-        由 run_chat_turn 在调用前设置。
+        由 run_task_turn 在调用前设置。协作任务模式下 _current_room 为 None。
         """
-        room = self._current_room
-        assert room is not None, "no current room context while executing tool"
+        room = self._current_room  # may be None for TODO_TASK
 
         last_msg: llmApiUtil.OpenAIMessage | None = self._history.get_last_assistant_message()
         if last_msg is None or last_msg.tool_calls is None or len(last_msg.tool_calls) == 0:

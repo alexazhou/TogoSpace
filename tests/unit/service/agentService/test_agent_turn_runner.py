@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryStatus, AgentHistoryTag, DriverType, OpenaiApiRole, RoomState, TurnStepResult
+from constants import AgentHistoryStatus, AgentHistoryTag, AgentTaskType, DriverType, OpenaiApiRole, RoomState, TurnStepResult
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtScheculeTask import GtScheculeTask
@@ -39,21 +39,28 @@ def turn_runner():
     return _make_turn_runner()
 
 
+@pytest.fixture(autouse=True)
+def mock_get_control_room(monkeypatch):
+    """单元测试不初始化 DB，mock 掉 get_control_room_for_agent 避免 peewee 报错。"""
+    import service.roomService as rs
+    monkeypatch.setattr(rs, "get_control_room_for_agent", AsyncMock(return_value=None))
+
+
 from util.assertUtil import MakeSureException
 
 
 @pytest.mark.asyncio
-async def test_run_chat_turn_raises_when_room_id_missing(turn_runner):
+async def test_run_task_turn_raises_when_room_id_missing(turn_runner):
     task = MagicMock(spec=GtScheculeTask)
     task.id = 100
     task.task_data = {}  # 无 room_id
 
     with pytest.raises(MakeSureException, match="缺少 room_id"):
-        await turn_runner.run_chat_turn(task)
+        await turn_runner.run_task_turn(task)
 
 
 @pytest.mark.asyncio
-async def test_run_chat_turn_raises_when_room_not_found(turn_runner):
+async def test_run_task_turn_raises_when_room_not_found(turn_runner):
     task = MagicMock(spec=GtScheculeTask)
     task.id = 100
     task.task_data = {"room_id": 999}
@@ -62,7 +69,7 @@ async def test_run_chat_turn_raises_when_room_not_found(turn_runner):
         mock_room_service.get_room = MagicMock(return_value=None)
 
         with pytest.raises(MakeSureException, match="不存在"):
-            await turn_runner.run_chat_turn(task)
+            await turn_runner.run_task_turn(task)
 
 
 @pytest.mark.asyncio
@@ -418,3 +425,65 @@ async def test_handle_cancel_turn_calls_driver_then_history(turn_runner):
     turn_runner._history.finalize_cancel_turn.assert_awaited_once()
     mock_fail.assert_awaited_once_with(turn_runner.gt_agent.id, error_message="cancelled by user")
     assert call_order == ["driver", "room", "history", "activity"]
+
+
+# ─── 任务驱动型唤醒（TODO_TASK）相关测试 ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_task_turn_room_message_still_checks_room_id(turn_runner):
+    """ROOM_MESSAGE 类型仍走原有路径，缺少 room_id 时报错。"""
+    from constants import AgentTaskType
+    task = MagicMock(spec=GtScheculeTask)
+    task.id = 100
+    task.task_type = AgentTaskType.ROOM_MESSAGE
+    task.task_data = {}
+
+    from util.assertUtil import MakeSureException
+    with pytest.raises(MakeSureException, match="缺少 room_id"):
+        await turn_runner.run_task_turn(task)
+
+
+
+@pytest.mark.asyncio
+async def test_run_task_turn_todo_task_raises_when_agent_task_id_missing(turn_runner):
+    """TODO_TASK 模式缺少 agent_task_id 时应报错。"""
+    from constants import AgentTaskType
+    task = MagicMock(spec=GtScheculeTask)
+    task.id = 200
+    task.task_type = AgentTaskType.TODO_TASK
+    task.task_data = {}  # 无 agent_task_id
+
+    from util.assertUtil import MakeSureException
+    with pytest.raises(MakeSureException, match="缺少 agent_task_id"):
+        await turn_runner.run_task_turn(task)
+
+
+@pytest.mark.asyncio
+async def test_run_task_turn_todo_task_raises_when_agent_task_not_found(turn_runner):
+    """TODO_TASK 模式 agent_task_id 对应记录不存在时应报错。"""
+    from constants import AgentTaskType
+    task = MagicMock(spec=GtScheculeTask)
+    task.id = 200
+    task.task_type = AgentTaskType.TODO_TASK
+    task.task_data = {"agent_task_id": 999}
+
+    from util.assertUtil import MakeSureException
+    with patch("dal.db.gtAgentTaskManager.get_task", new=AsyncMock(return_value=None)):
+        with pytest.raises(MakeSureException, match="不存在"):
+            await turn_runner.run_task_turn(task)
+
+
+
+@pytest.mark.asyncio
+async def test_run_turn_loop_skips_room_checks_when_no_room(turn_runner):
+    """room=None 时，_run_turn_loop 不应尝试检查即时消息（不 crash）。"""
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.turn_setup = SimpleNamespace(max_retries=1, hint_prompt="hint")
+    turn_runner._advance_step = AsyncMock(return_value=TurnStepResult.TURN_DONE)
+
+    # 不传 room（None）→ 不应抛出任何异常
+    await turn_runner._run_turn_loop(room=None)
+
+    turn_runner._advance_step.assert_awaited_once()
+

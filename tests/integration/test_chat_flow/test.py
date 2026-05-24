@@ -125,7 +125,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
                 task_data={"room_id": room.room_id},
             )
             with self.patch_infer(handler=fake_infer):
-                await alice.task_consumer._turn_runner.run_chat_turn(task)
+                await alice.task_consumer._turn_runner.run_task_turn(task)
 
             tool_results = [m for m in alice.task_consumer._turn_runner._history if m.role == OpenaiApiRole.TOOL]
             assert len(tool_results) >= 1
@@ -164,7 +164,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
                 task_data={"room_id": room.room_id},
             )
             with self.patch_infer(responses=resps):
-                await alice.task_consumer._turn_runner.run_chat_turn(task)
+                await alice.task_consumer._turn_runner.run_task_turn(task)
 
             assert any(m.content == "最终消息" for m in room.messages)
         finally:
@@ -294,7 +294,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             with self.patch_infer(responses=responses):
                 # 旧代码：CANCELLED 状态的 TOOL 会抛出 RuntimeError
                 # 新代码：CANCELLED 状态的 TOOL 会跳过并继续推进
-                await alice.task_consumer._turn_runner.run_chat_turn(task)
+                await alice.task_consumer._turn_runner.run_task_turn(task)
 
             # 验证：turn 正常完成，没有抛出异常
             assert any(AgentHistoryTag.ROOM_TURN_FINISH in msg.tags for msg in alice.task_consumer._turn_runner._history)
