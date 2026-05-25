@@ -111,6 +111,12 @@ async def create_team(
     if await gtTeamManager.team_exists(name):
         raise TogoException(f"Team '{name}' already exists", error_code="TEAM_EXISTS")
 
+    # 校验工作目录路径格式
+    if config and config.get("working_directory"):
+        workdir = config["working_directory"]
+        fileUtil.validate_absolute_path(workdir)
+        fileUtil.ensure_dir(workdir)
+
     # 先创建 disabled 状态，初始化完成后再启用
     team = await gtTeamManager.save_team(GtTeam(
         name=name,
@@ -147,6 +153,7 @@ async def update_team_base_info(team_id: int, working_directory: str | None = No
         config.update(config_updates)
     if working_directory is not None:
         if working_directory:
+            fileUtil.validate_absolute_path(working_directory)
             fileUtil.ensure_dir(working_directory)
             config["working_directory"] = working_directory
         else:

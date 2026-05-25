@@ -63,3 +63,33 @@ class TestEnsureDir:
                 ensure_dir(target)
 
         assert target in exc_info.value.error_message
+
+
+class TestValidateAbsolutePath:
+    """测试 validate_absolute_path 函数。"""
+
+    def test_absolute_path_passes(self):
+        """绝对路径应校验通过。"""
+        from util.fileUtil import validate_absolute_path
+        # Unix 风格
+        validate_absolute_path("/tmp/test") 
+        # Windows 风格（在 Unix 下 isabs 会返回 False，所以我们这里仅在对应系统下测试，或者通过 Mock）
+        with mock.patch("os.path.isabs", return_value=True):
+            validate_absolute_path("C:\\Users\\Desktop")
+
+    def test_home_relative_path_passes(self):
+        """以 ~ 开头的路径应校验通过。"""
+        from util.fileUtil import validate_absolute_path
+        validate_absolute_path("~/workspace/test")  # 不抛异常即为通过
+
+    def test_relative_path_fails(self):
+        """不满足绝对路径条件的路径应抛出 TogoException。"""
+        from exception import TogoException
+        from util.fileUtil import validate_absolute_path
+
+        with pytest.raises(TogoException) as exc_info:
+            validate_absolute_path("2222")
+
+        assert exc_info.value.error_code == "invalid_path_format"
+        assert "不支持相对路径" in exc_info.value.error_message
+        assert "2222" in exc_info.value.error_message
