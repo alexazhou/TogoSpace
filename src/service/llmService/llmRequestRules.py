@@ -29,8 +29,44 @@ class StripRequiredToolChoiceForReasoningRule(LlmRequestRule):
         return request.model_copy(update={"tool_choice": None})
 
 
+def _is_thinking_enabled(request: llmApiUtil.OpenAIRequest) -> bool:
+    """判断当前请求是否开启了思考模式（thinking.type == "enabled"）。"""
+    thinking = (request.provider_params or {}).get("thinking") or {}
+    return isinstance(thinking, dict) and thinking.get("type") == "enabled"
+
+
+class FillMissingReasoningContentRule(LlmRequestRule):
+    """开启思考模式时，历史中由非思考模型生成的 assistant tool_call 消息缺少
+    reasoning_content 字段，DeepSeek 等模型会报 400 错误。
+    对这类消息补填空字符串，使其满足 API 要求。
+    """
+
+    def check_match(self, request: llmApiUtil.OpenAIRequest) -> bool:
+        if not _is_thinking_enabled(request):
+            return False
+        return any(
+            msg.role == llmApiUtil.OpenaiApiRole.ASSISTANT
+            and msg.tool_calls is not None and len(msg.tool_calls) > 0
+            and msg.reasoning_content is None
+            for msg in request.messages
+        )
+
+    def apply(self, request: llmApiUtil.OpenAIRequest) -> llmApiUtil.OpenAIRequest:
+        new_messages = []
+        for msg in request.messages:
+            if (
+                msg.role == llmApiUtil.OpenaiApiRole.ASSISTANT
+                and msg.tool_calls is not None and len(msg.tool_calls) > 0
+                and msg.reasoning_content is None
+            ):
+                msg = msg.model_copy(update={"reasoning_content": ""})
+            new_messages.append(msg)
+        return request.model_copy(update={"messages": new_messages})
+
+
 _RULES: tuple[LlmRequestRule, ...] = (
     StripRequiredToolChoiceForReasoningRule(),
+    FillMissingReasoningContentRule(),
 )
 
 
