@@ -106,6 +106,14 @@ async def _restore_room_runtime_state(room: ChatRoom) -> None:
             row.sender_display_name = agent.display_name
             restored_messages.append(row)
 
+        # 填充引用消息摘要（quote_sender_name / quote_content_preview）
+        msg_by_id = {m.id: m for m in restored_messages if m.id is not None}
+        for row in restored_messages:
+            if row.quote_id is not None and row.quote_id in msg_by_id:
+                quoted = msg_by_id[row.quote_id]
+                row.quote_sender_name = quoted.sender_display_name
+                row.quote_content_preview = (quoted.content or "")[:100]
+
     if restored_messages is not None or agent_read_index is not None:
         room.inject_runtime_state(
             messages=restored_messages,
@@ -146,8 +154,20 @@ def get_room(room_id: int) -> ChatRoom | None:
 
 
 async def get_room_messages_from_db(room_id: int) -> list[GtRoomMessage]:
-    """从数据库加载房间消息，固定走持久层。"""
-    return await gtRoomMessageManager.get_room_messages(room_id)
+    """从数据库加载房间消息，固定走持久层。同时填充 sender_display_name 和引用摘要。"""
+    gt_messages = await gtRoomMessageManager.get_room_messages(room_id)
+    # 填充 sender_display_name
+    for msg in gt_messages:
+        agent = await gtAgentManager.get_agent_by_id(msg.sender_id)
+        msg.sender_display_name = agent.display_name if agent else str(msg.sender_id)
+    # 填充引用消息摘要
+    msg_by_id = {m.id: m for m in gt_messages if m.id is not None}
+    for msg in gt_messages:
+        if msg.quote_id is not None and msg.quote_id in msg_by_id:
+            quoted = msg_by_id[msg.quote_id]
+            msg.quote_sender_name = quoted.sender_display_name
+            msg.quote_content_preview = (quoted.content or "")[:100]
+    return gt_messages
 
 
 def get_all_rooms() -> List[ChatRoom]:

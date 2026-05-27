@@ -3,7 +3,7 @@ import os
 
 import tornado.web
 
-from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController, settingController, systemController, initController, superviseController
+from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController, settingController, systemController, initController, superviseController, workspaceController
 
 import sys as _sys
 if getattr(_sys, "frozen", False):
@@ -123,6 +123,10 @@ application = tornado.web.Application([
     (r"/activities.json",                            activityController.ActivitiesHandler),
     (r"/agents/(\d+)/activities.json",               activityController.AgentActivitiesHandler),
     (r"/teams/(\d+)/activities.json",                activityController.TeamActivitiesHandler),
+
+    # Workspace 文件访问
+    (r"/workspace/files/list.json",                  workspaceController.WorkspaceListHandler),
+    (r"/workspace/files/(.*)",                       workspaceController.WorkspaceFileHandler),
 
     # 前端静态文件（必须放最后，SPA fallback）
     (r"/(.*)", _SPAHandler, {"path": _FRONTEND_DIST, "default_filename": "index.html"}),

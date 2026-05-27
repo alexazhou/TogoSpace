@@ -51,6 +51,7 @@ class RoomMessageStore:
                 room_id=self._gt_room.id, sender_id=msg.sender_id, content=msg.content,
                 send_time=msg.send_time,
                 insert_immediately=False, seq=msg.seq,
+                quote_id=msg.quote_id,
             )
             msg.id = db_msg.id
 
@@ -168,3 +169,7 @@ class RoomMessageStore:
     def get_read_index(self) -> Dict[int, int]:
         """返回当前读取进度字典（供持久化使用）。"""
         return self._agent_seq_read
+
+    def get_message_by_id(self, db_id: int) -> GtRoomMessage | None:
+        """根据 db_id 查找内存中的消息，未找到返回 None。"""
+        return next((m for m in self._messages if m.id == db_id), None)

@@ -163,14 +163,15 @@ class ChatRoom:
         return self._store.has_pending_immediate_messages(agent_id)
 
     async def add_message(self, sender_id: int, content: str, send_time: datetime | None = None, *,
-                          insert_immediately: bool = False) -> None:
-        await self._append_message(sender_id, content, send_time=send_time, insert_immediately=insert_immediately)
+                          insert_immediately: bool = False, quote_id: int | None = None) -> None:
+        await self._append_message(sender_id, content, send_time=send_time, insert_immediately=insert_immediately, quote_id=quote_id)
 
     async def _append_message(
         self, sender_id: int, content: str,
         send_time: datetime | None = None, *,
         update_turn_state: bool = True,
         insert_immediately: bool = False,
+        quote_id: int | None = None,
     ) -> None:
         assertUtil.assertTrue(
             self.can_post_message(sender_id),
@@ -198,8 +199,15 @@ class ChatRoom:
 
         message = GtRoomMessage(room_id=self.room_id, sender_id=sender_id,
                                 content=content, send_time=send_time or datetime.now(),
-                                insert_immediately=insert_immediately)
+                                insert_immediately=insert_immediately, quote_id=quote_id)
         message.sender_display_name = agent.display_name
+
+        # 填充引用消息摘要（非持久化字段，用于 WS 推送）
+        if quote_id is not None:
+            quote_msg = self._store.get_message_by_id(quote_id)
+            if quote_msg is not None:
+                message.quote_sender_name = quote_msg.sender_display_name
+                message.quote_content_preview = (quote_msg.content or "")[:100]
 
         if insert_immediately or is_queued:
             self._store.append_pending(message)
@@ -214,6 +222,7 @@ class ChatRoom:
                 room_id=self.room_id, sender_id=sender_id, content=content,
                 send_time=message.send_time,
                 insert_immediately=insert_immediately, seq=message.seq,
+                quote_id=quote_id,
             )
             message.id = db_msg.id
             messageBus.publish(MessageBusTopic.ROOM_MSG_ADDED, gt_room=self.gt_room, gt_message=message)
