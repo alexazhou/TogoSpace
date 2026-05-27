@@ -244,7 +244,7 @@ AppConfig
 | GET | `/teams/{id}/rooms/list.json` | 团队房间列表 |
 | GET/PUT | `/teams/{id}/dept_tree.json` | 部门树查询/更新 |
 | GET | `/activities.json` | 全局活动记录 |
-| GET | `/agents/{id}/activities.json` | Agent 活动记录 |
+| GET | `/agents/{id}/activities.json?exclude=TYPE` | Agent 活动记录，支持重复 `exclude` 参数排除指定类型（如 `?exclude=AGENT_STATE`） |
 
 ---
 

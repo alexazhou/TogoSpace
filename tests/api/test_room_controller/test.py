@@ -279,3 +279,44 @@ class TestRoomControllerPrivate(_ApiServiceCase):
 
         alice_msg = next(m for m in messages if m["sender_id"] == alice_id)
         assert len(alice_msg["content"]) > 0
+
+    async def test_get_room_messages_supports_history_pagination(self):
+        """验证消息列表支持 limit + before_id 的向前分页。"""
+        room_id = await self._get_room_id("alice_private", _V6_TEAM)
+
+        async with aiohttp.ClientSession() as client:
+            for idx in range(3):
+                async with client.post(
+                    f"{self.backend_base_url}/rooms/{room_id}/messages/send.json",
+                    json={"content": f"pagination-{idx}"},
+                ) as resp:
+                    assert resp.status == 200
+
+            max_wait = 15
+            start_time = time.time()
+            latest_messages = []
+            while time.time() - start_time < max_wait:
+                async with client.get(
+                    f"{self.backend_base_url}/rooms/{room_id}/messages/list.json?limit=2"
+                ) as resp:
+                    assert resp.status == 200
+                    first_page = await resp.json()
+                latest_messages = first_page["messages"]
+                if len(latest_messages) == 2 and first_page["pagination"]["has_more"]:
+                    break
+                await asyncio.sleep(0.1)
+            else:
+                pytest.fail("未能在限时内得到可分页的房间消息")
+
+            first_page = first_page
+            oldest_loaded_id = first_page["messages"][0]["id"]
+            async with client.get(
+                f"{self.backend_base_url}/rooms/{room_id}/messages/list.json?limit=2&before_id={oldest_loaded_id}"
+            ) as resp:
+                assert resp.status == 200
+                second_page = await resp.json()
+
+        assert len(first_page["messages"]) == 2
+        assert first_page["pagination"]["has_more"] is True
+        assert len(second_page["messages"]) >= 1
+        assert all(message["id"] < oldest_loaded_id for message in second_page["messages"])

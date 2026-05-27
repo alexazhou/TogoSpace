@@ -46,11 +46,31 @@ async def escalate_message_to_immediate(message_id: int) -> None:
     )
 
 
-async def get_room_messages(room_id: int, after_id: int | None = None) -> list[GtRoomMessage]:
+async def get_room_messages(
+    room_id: int,
+    before_id: int | None = None,
+    limit: int | None = None,
+) -> tuple[list[GtRoomMessage], bool]:
     query = GtRoomMessage.select().where(GtRoomMessage.room_id == room_id)
-    if after_id is not None:
-        query = query.where(GtRoomMessage.id > after_id)
-    return await query.order_by(GtRoomMessage.seq.asc(nulls='last'), GtRoomMessage.id.asc()).aio_execute()
+    if before_id is not None:
+        query = query.where(GtRoomMessage.id < before_id)
+
+    has_more = False
+    if limit is not None:
+        rows = await (
+            query
+            .order_by(GtRoomMessage.seq.desc(nulls='first'), GtRoomMessage.id.desc())
+            .limit(limit + 1)
+            .aio_execute()
+        )
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]
+        rows.reverse()
+        return rows, has_more
+
+    rows = await query.order_by(GtRoomMessage.seq.asc(nulls='last'), GtRoomMessage.id.asc()).aio_execute()
+    return rows, False
 
 
 async def delete_messages_by_team(team_id: int) -> int:
@@ -65,4 +85,3 @@ async def delete_messages_by_team(team_id: int) -> int:
         .where(GtRoomMessage.room_id.in_(room_ids))  # type: ignore[attr-defined]
         .aio_execute()
     )
-

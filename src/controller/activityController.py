@@ -1,6 +1,7 @@
 """活动记录查询接口。"""
 import logging
 
+from constants import AgentActivityType
 from controller.baseController import BaseHandler
 from dal.db import gtAgentActivityManager
 
@@ -8,10 +9,15 @@ logger = logging.getLogger(__name__)
 
 
 class AgentActivitiesHandler(BaseHandler):
-    """GET /agents/{agent_id}/activities.json"""
+    """GET /agents/{agent_id}/activities.json?exclude=AGENT_STATE"""
 
     async def get(self, agent_id: str) -> None:
-        activities = await gtAgentActivityManager.list_agent_activities(int(agent_id))
+        exclude_raw = self.get_arguments("exclude")
+        exclude_types = [AgentActivityType[name.upper()] for name in exclude_raw]
+        activities = await gtAgentActivityManager.list_agent_activities(
+            int(agent_id),
+            exclude_types=exclude_types or None,
+        )
         self.return_json({"activities": activities})
 
 

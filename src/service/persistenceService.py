@@ -26,7 +26,7 @@ async def load_room_runtime(room_id: int) -> tuple[list[GtRoomMessage], dict[str
     Returns:
         (room_messages, agent_read_index, speaker_index)
     """
-    gt_room_messages, (agent_read_index, speaker_index) = await asyncio.gather(
+    (gt_room_messages, _), (agent_read_index, speaker_index) = await asyncio.gather(
         gtRoomMessageManager.get_room_messages(room_id),
         gtRoomManager.get_room_state(room_id),
     )

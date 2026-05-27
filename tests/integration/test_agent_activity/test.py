@@ -100,6 +100,66 @@ class TestAgentActivityDAL(ServiceTestCase):
         assert len(rows) == 2
         assert all(r.agent_id == 10 for r in rows)
 
+    async def test_list_agent_activities_exclude_types_filters_out_matching(self):
+        """exclude_types 过滤后不返回指定类型的记录。"""
+        await self._reset()
+        for t in (AgentActivityType.AGENT_STATE, AgentActivityType.LLM_INFER, AgentActivityType.AGENT_STATE):
+            await gtAgentActivityManager.create_activity(GtAgentActivity(
+                agent_id=1, team_id=1, activity_type=t,
+                status=AgentActivityStatus.SUCCEEDED,
+                title="x", started_at=datetime.now(), metadata={},
+            ))
+        rows = await gtAgentActivityManager.list_agent_activities(
+            1, exclude_types=[AgentActivityType.AGENT_STATE]
+        )
+        assert len(rows) == 1
+        assert rows[0].activity_type == AgentActivityType.LLM_INFER
+
+    async def test_list_agent_activities_exclude_multiple_types(self):
+        """同时排除多个类型时，返回结果不含这些类型。"""
+        await self._reset()
+        for t in (AgentActivityType.AGENT_STATE, AgentActivityType.LLM_INFER,
+                  AgentActivityType.TOOL_CALL, AgentActivityType.CHAT_REPLY):
+            await gtAgentActivityManager.create_activity(GtAgentActivity(
+                agent_id=1, team_id=1, activity_type=t,
+                status=AgentActivityStatus.SUCCEEDED,
+                title="x", started_at=datetime.now(), metadata={},
+            ))
+        rows = await gtAgentActivityManager.list_agent_activities(
+            1, exclude_types=[AgentActivityType.AGENT_STATE, AgentActivityType.LLM_INFER]
+        )
+        returned_types = {r.activity_type for r in rows}
+        assert AgentActivityType.AGENT_STATE not in returned_types
+        assert AgentActivityType.LLM_INFER not in returned_types
+        assert len(rows) == 2
+
+    async def test_list_agent_activities_exclude_none_returns_all(self):
+        """exclude_types=None 时不过滤，与默认行为一致。"""
+        await self._reset()
+        for t in (AgentActivityType.AGENT_STATE, AgentActivityType.LLM_INFER):
+            await gtAgentActivityManager.create_activity(GtAgentActivity(
+                agent_id=1, team_id=1, activity_type=t,
+                status=AgentActivityStatus.SUCCEEDED,
+                title="x", started_at=datetime.now(), metadata={},
+            ))
+        rows = await gtAgentActivityManager.list_agent_activities(1, exclude_types=None)
+        assert len(rows) == 2
+
+    async def test_list_agent_activities_all_excluded_returns_empty(self):
+        """所有记录都被排除时返回空列表。"""
+        await self._reset()
+        for _ in range(3):
+            await gtAgentActivityManager.create_activity(GtAgentActivity(
+                agent_id=1, team_id=1,
+                activity_type=AgentActivityType.AGENT_STATE,
+                status=AgentActivityStatus.SUCCEEDED,
+                title="x", started_at=datetime.now(), metadata={},
+            ))
+        rows = await gtAgentActivityManager.list_agent_activities(
+            1, exclude_types=[AgentActivityType.AGENT_STATE]
+        )
+        assert rows == []
+
     # ── list_team_activities ──
 
     async def test_list_team_activities_returns_correct_team(self):

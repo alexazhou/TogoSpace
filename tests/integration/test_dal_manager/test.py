@@ -588,11 +588,19 @@ class TestDalManagers(ServiceTestCase):
         m3 = await gtRoomMessageManager.append_room_message(room.id, alice.id, "again", "2026-03-23T10:02:00")
 
         assert m1.id < m2.id < m3.id
-        all_msgs = await gtRoomMessageManager.get_room_messages(room.id)
+        all_msgs, _ = await gtRoomMessageManager.get_room_messages(room.id)
         assert [m.content for m in all_msgs] == ["hello", "world", "again"]
 
-        after_m1 = await gtRoomMessageManager.get_room_messages(room.id, after_id=m1.id)
-        assert [m.content for m in after_m1] == ["world", "again"]
+        before_m3, _ = await gtRoomMessageManager.get_room_messages(room.id, before_id=m3.id)
+        assert [m.content for m in before_m3] == ["hello", "world"]
+
+        paged, has_more = await gtRoomMessageManager.get_room_messages(room.id, limit=2)
+        assert [m.content for m in paged] == ["world", "again"]
+        assert has_more is True
+
+        all_paged, has_more_all = await gtRoomMessageManager.get_room_messages(room.id, limit=10)
+        assert [m.content for m in all_paged] == ["hello", "world", "again"]
+        assert has_more_all is False
 
     # ------------------------------------------------------------------
     # gtAgentHistoryManager

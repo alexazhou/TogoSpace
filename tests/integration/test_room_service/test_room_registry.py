@@ -173,7 +173,7 @@ class TestRoomRegistry(ServiceTestCase):
         room = roomService.get_room_by_key(f"restore_safe_room@{TEAM}")
 
         await room.activate_scheduling()
-        rows = await gtRoomMessageManager.get_room_messages(room.room_id)
+        rows, _ = await gtRoomMessageManager.get_room_messages(room.room_id)
         assert len(rows) == 1
         assert "房间已经创建" in rows[0].content
 
@@ -184,7 +184,7 @@ class TestRoomRegistry(ServiceTestCase):
         reloaded_room = roomService.get_room_by_key(f"restore_safe_room@{TEAM}")
         assert len(reloaded_room.messages) == 1
 
-        rows = await gtRoomMessageManager.get_room_messages(reloaded_room.room_id)
+        rows, _ = await gtRoomMessageManager.get_room_messages(reloaded_room.room_id)
         assert len(rows) == 1
         assert "房间已经创建" in rows[0].content
 

@@ -196,11 +196,14 @@ _restore_agent_runtime_state(agent, ...)
 
 ```text
 _restore_room_runtime_state(room)
-  ├── gtRoomMessageManager.get_room_messages(room_id)
+  ├── gtRoomMessageManager.get_room_messages(room_id)   # 无 limit，加载全部消息
   ├── gtRoomManager.get_room_state(room_id)
   ├── room.inject_runtime_state(messages=..., agent_read_index=..., turn_pos=...)
   └── room.rebuild_state_from_history(persisted_turn_pos=...)
 ```
+
+> `get_room_messages` 当前签名：`(room_id, before_id=None, limit=None) -> (messages, has_more)`。
+> Restore 路径不传 `limit`，一次性加载房间全部历史消息。
 
 当前恢复的核心状态是：
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from constants import AgentActivityStatus
+from constants import AgentActivityStatus, AgentActivityType
 from model.dbModel.gtAgentActivity import GtAgentActivity
 
 
@@ -32,16 +32,20 @@ async def update_activity_by_id(activity_id: int, **fields) -> GtAgentActivity:
     return row
 
 
-async def list_agent_activities(agent_id: int, limit: int = 100) -> list[GtAgentActivity]:
-    """查询某个 Agent 的活动记录，按 id desc 排序。"""
-    return await (
-        GtAgentActivity
-        .select()
-        .where(GtAgentActivity.agent_id == agent_id)
-        .order_by(GtAgentActivity.id.desc())
-        .limit(limit)
-        .aio_execute()
-    )
+async def list_agent_activities(
+    agent_id: int,
+    limit: int = 100,
+    exclude_types: list[AgentActivityType] | None = None,
+) -> list[GtAgentActivity]:
+    """查询某个 Agent 的活动记录，按 id desc 排序。
+
+    Args:
+        exclude_types: 排除的活动类型列表，为 None 时不排除任何类型。
+    """
+    query = GtAgentActivity.select().where(GtAgentActivity.agent_id == agent_id)
+    if exclude_types:
+        query = query.where(GtAgentActivity.activity_type.not_in(exclude_types))
+    return await query.order_by(GtAgentActivity.id.desc()).limit(limit).aio_execute()
 
 
 async def list_agent_activities_by_status(agent_id: int, status: AgentActivityStatus, limit: int = 100) -> list[GtAgentActivity]:

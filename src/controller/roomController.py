@@ -166,17 +166,34 @@ class RoomMessagesHandler(BaseHandler):
 
     async def get(self, room_id_str: str) -> None:
         room_id = int(room_id_str)
+        limit_raw = self.get_query_argument("limit", None)
+        before_id_raw = self.get_query_argument("before_id", None)
         gt_room = await GtRoom.aio_get_or_none(GtRoom.id == room_id)
         assertUtil.assertNotNull(gt_room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
         gt_team = await gtTeamManager.get_team_by_id(gt_room.team_id)
         team_name = gt_team.name if gt_team else ""
 
-        gt_messages = await roomService.get_room_messages_from_db(room_id)
+        limit = None
+        if limit_raw is not None:
+            limit = max(1, min(int(limit_raw), 100))
+
+        before_id = int(before_id_raw) if before_id_raw is not None else None
+
+        gt_messages, has_more = await roomService.get_room_messages_from_db(
+            room_id,
+            before_id=before_id,
+            limit=limit,
+        )
         self.return_json({
             "room_id": gt_room.id,
             "room_name": gt_room.name,
             "team_name": team_name,
             "messages": gt_messages,
+            "pagination": {
+                "has_more": has_more,
+                "before_id": before_id,
+                "limit": limit,
+            },
         })
 
     async def post(self, room_id_str: str) -> None:

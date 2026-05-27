@@ -140,7 +140,7 @@ class TestChatRoomMessages(ServiceTestCase):
 
         await room.activate_scheduling()
 
-        rows = await gtRoomMessageManager.get_room_messages(room.room_id)
+        rows, _ = await gtRoomMessageManager.get_room_messages(room.room_id)
         assert len(rows) == 1
         assert rows[0].sender_id == room.SYSTEM_MEMBER_ID
         assert "房间已经创建" in rows[0].content
@@ -171,7 +171,7 @@ class TestChatRoomMessages(ServiceTestCase):
         await room.add_message(alice_id, "普通消息")
         await room.add_message(alice_id, "即时消息", insert_immediately=True)
 
-        rows = await gtRoomMessageManager.get_room_messages(room.room_id)
+        rows, _ = await gtRoomMessageManager.get_room_messages(room.room_id)
         # rows[-1] 是即时消息（seq=NULL，排在最后）
         imm_row = next((r for r in rows if r.insert_immediately), None)
         assert imm_row is not None
@@ -227,8 +227,7 @@ class TestChatRoomMessages(ServiceTestCase):
         assert imm_msg.seq is not None  # seq 已赋值
 
         # DB 中 seq 也已更新
-        rows = await gtRoomMessageManager.get_room_messages(room.room_id)
+        rows, _ = await gtRoomMessageManager.get_room_messages(room.room_id)
         imm_row = next((r for r in rows if r.insert_immediately), None)
         assert imm_row is not None
         assert imm_row.seq == imm_msg.seq
-
