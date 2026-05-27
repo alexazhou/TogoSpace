@@ -148,7 +148,7 @@ def _build_request_payload(request: OpenAIRequest) -> tuple[str, list[dict[str, 
     # assistant 消息，则所有 assistant 消息都必须包含 reasoning_content 字段（即使为空字符串）。
     # 否则 API 会报错 "The reasoning_content in the thinking mode must be passed back to the API."
     has_any_reasoning = any(
-        m.role == llmApiUtil.OpenaiApiRole.ASSISTANT and m.reasoning_content is not None
+        m.role == OpenaiApiRole.ASSISTANT and m.reasoning_content is not None
         for m in request.messages
     )
     if has_any_reasoning:
