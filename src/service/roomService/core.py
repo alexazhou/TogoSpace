@@ -216,6 +216,14 @@ def shutdown() -> None:
     _rooms_by_id.clear()
 
 
+def _resolve_join_read_index(messages: list[GtRoomMessage]) -> int:
+    next_seq = 0
+    for message in messages:
+        if message.seq is not None:
+            next_seq = max(next_seq, message.seq + 1)
+    return next_seq
+
+
 async def update_room_agents(room_id: int, agent_ids: list[int]) -> None:
     room = await gtRoomManager.get_room_by_id(room_id)
     assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
@@ -227,8 +235,20 @@ async def update_room_agents(room_id: int, agent_ids: list[int]) -> None:
             error_code="ROOM_AGENTS_TOO_FEW",
         )
 
+    persisted_read_index, speaker_index = await gtRoomManager.get_room_state(room_id)
+    room_messages, _ = await gtRoomMessageManager.get_room_messages(room_id)
+    join_read_index = _resolve_join_read_index(room_messages)
+
     room.agent_ids = agent_ids
     await gtRoomManager.save_room(room)
+    await gtRoomManager.update_room_state(
+        room.id,
+        {
+            str(agent_id): (persisted_read_index or {}).get(str(agent_id), join_read_index) # 如果不存在 index，则用最新的替换（新加入成员只能看到加入之后的消息）
+            for agent_id in agent_ids
+        },
+        speaker_index,
+    )
 
 
 async def overwrite_dept_rooms(team_id: int, rooms: Sequence[DeptRoomSpec]) -> None:

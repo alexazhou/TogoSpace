@@ -224,3 +224,28 @@ async def clear_team_data(team_id: int) -> dict[str, int]:
 
     logger.info(f"Team ID={team_id} 数据已清空: {result}")
     return result
+
+
+async def clear_agent_data(agent_id: int) -> dict[str, int]:
+    """清除指定 Agent 的历史记录。
+
+    清除后触发 Agent 所在 Team 的热更新，重建运行态。
+
+    Returns:
+        删除统计 {"histories": n}
+    """
+    agent = await gtAgentManager.get_agent_by_id(agent_id)
+    if agent is None:
+        raise TogoException(f"Agent ID '{agent_id}' not found", "agent_not_found")
+
+    team = await gtTeamManager.get_team_by_id(agent.team_id)
+    if team is None:
+        raise TogoException(f"Team ID '{agent.team_id}' not found for agent", "team_not_found")
+
+    histories_deleted = await gtAgentHistoryManager.delete_history_by_agent(agent_id)
+
+    result = {"histories": histories_deleted}
+    logger.info("Agent ID=%d 历史数据已清除: %s", agent_id, result)
+
+    await hot_reload_team(team.name)
+    return result

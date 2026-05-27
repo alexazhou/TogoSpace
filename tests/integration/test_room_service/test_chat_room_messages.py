@@ -112,6 +112,33 @@ class TestChatRoomMessages(ServiceTestCase):
         assert len(await room.get_unread_messages(alice_id)) == 1
         assert len(await room.get_unread_messages(bob_id)) == 1
 
+    async def test_new_member_only_receives_messages_after_join(self):
+        """新加入房间的成员只应收到加入后的消息，不应回灌历史消息。"""
+        await self.create_room(TEAM, "join_room", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"join_room@{TEAM}")
+        await room.activate_scheduling()
+
+        alice_id = await self._get_agent_id("alice")
+        bob_id = await self._get_agent_id("bob")
+        char_id = await self._get_agent_id("char")
+
+        await room.get_unread_messages(alice_id)
+        await room.get_unread_messages(bob_id)
+        await room.add_message(bob_id, "before join")
+
+        await roomService.update_room_agents(room.room_id, [alice_id, bob_id, char_id])
+        await roomService.close_team_rooms(self.team_id)
+        await roomService.load_team_rooms(self.team_id)
+        await roomService.restore_team_rooms_runtime_state(self.team_id)
+
+        reloaded_room = roomService.get_room_by_key(f"join_room@{TEAM}")
+        assert await reloaded_room.get_unread_messages(char_id) == []
+
+        await reloaded_room.add_message(alice_id, "after join")
+        char_unread = await reloaded_room.get_unread_messages(char_id)
+
+        assert [message.content for message in char_unread] == ["after join"]
+
     async def test_add_message_rejects_non_member(self):
         """非房间成员写消息时应被拒绝。"""
         await self.create_room(TEAM, "restricted_room", ["alice"])

@@ -179,3 +179,13 @@ async def delete_history_by_team(team_id: int) -> int:
         .where(GtAgentHistory.agent_id.in_(agent_ids))  # type: ignore[attr-defined]
         .aio_execute()
     )
+
+
+async def delete_history_by_agent(agent_id: int) -> int:
+    """删除指定 Agent 的所有历史记录，返回删除数量。"""
+    return await (
+        GtAgentHistory
+        .delete()
+        .where(GtAgentHistory.agent_id == agent_id)
+        .aio_execute()
+    )

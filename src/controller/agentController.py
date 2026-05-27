@@ -219,6 +219,23 @@ class AgentResumeHandler(BaseHandler):
         self.return_json({"status": "resumed", "agent_id": agent.gt_agent.id})
 
 
+class AgentClearDataHandler(BaseHandler):
+    """POST /agents/{id}/clear_data.json - 清除指定 Agent 的历史记录"""
+
+    async def post(self, agent_id_str: str) -> None:
+        agent_id = int(agent_id_str)
+        agent = await gtAgentManager.get_agent_by_id(agent_id)
+        assertUtil.assertNotNull(agent, error_message=f"Agent ID '{agent_id}' not found", error_code="agent_not_found")
+
+        result = await teamService.clear_agent_data(agent_id)
+
+        self.return_json({
+            "status": "cleared",
+            "agent_id": agent_id,
+            "deleted": result,
+        })
+
+
 class AgentStopHandler(BaseHandler):
     """POST /agents/<agent_id>/stop.json - 人工停止 ACTIVE 状态的 Agent 当前 turn"""
 
