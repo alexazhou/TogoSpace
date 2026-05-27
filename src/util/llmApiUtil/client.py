@@ -143,6 +143,19 @@ def _clean_base_url(url: str) -> str:
 def _build_request_payload(request: OpenAIRequest) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]] | None]:
     model_name = request.model
     messages = [m.to_dict() for m in request.messages]
+
+    # DeepSeek/GLM 等 thinking mode 模型要求：如果对话中存在任何带 reasoning_content 的
+    # assistant 消息，则所有 assistant 消息都必须包含 reasoning_content 字段（即使为空字符串）。
+    # 否则 API 会报错 "The reasoning_content in the thinking mode must be passed back to the API."
+    has_any_reasoning = any(
+        m.role == llmApiUtil.OpenaiApiRole.ASSISTANT and m.reasoning_content is not None
+        for m in request.messages
+    )
+    if has_any_reasoning:
+        for msg_dict in messages:
+            if msg_dict.get("role") == "assistant" and "reasoning_content" not in msg_dict:
+                msg_dict["reasoning_content"] = ""
+
     tools: list[dict[str, Any]] | None = None
     if request.tools:
         tools = [t.model_dump(exclude_none=True) for t in request.tools]
