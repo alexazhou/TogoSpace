@@ -1025,7 +1025,7 @@ async def create_task(
     manager_id: Optional[int] = None,
     priority: str = 'NORMAL',
     parent_id: Optional[int] = None,
-    depends_on: Optional[list] = None,
+    depends_on: Optional[list[int]] = None,
     room_id: Optional[int] = None,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
