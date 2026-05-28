@@ -140,18 +140,38 @@ def _clean_base_url(url: str) -> str:
     return base_url.rstrip("/")
 
 
+# DeepSeek R1/V4 等 thinking mode 模型要求：所有 assistant 消息都必须包含 reasoning_content 字段。
+# 即使历史消息中没有 reasoning_content（如 compact 前的消息或切换模型前的消息），
+# 也必须补上空字符串，否则 API 报错 "The reasoning_content in the thinking mode must be passed back to the API."
+_THINKING_MODE_MODEL_PREFIXES = (
+    "deepseek-r1",
+    "deepseek-reasoner",
+    "deepseek-v4",
+    "deepseek-pro",
+    "glm-4",
+    "glm-z1",
+)
+
+
+def _is_thinking_mode_model(model: str) -> bool:
+    """判断模型是否为 thinking mode 模型（需要 reasoning_content 字段）。"""
+    model_lower = model.lower()
+    return any(model_lower.startswith(prefix) for prefix in _THINKING_MODE_MODEL_PREFIXES)
+
+
 def _build_request_payload(request: OpenAIRequest) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]] | None]:
     model_name = request.model
     messages = [m.to_dict() for m in request.messages]
 
-    # DeepSeek/GLM 等 thinking mode 模型要求：如果对话中存在任何带 reasoning_content 的
-    # assistant 消息，则所有 assistant 消息都必须包含 reasoning_content 字段（即使为空字符串）。
-    # 否则 API 会报错 "The reasoning_content in the thinking mode must be passed back to the API."
-    has_any_reasoning = any(
+    # Thinking mode 模型要求所有 assistant 消息包含 reasoning_content 字段。
+    # 两种情况需要补全：
+    # 1. 模型本身是 thinking mode 模型（如 deepseek-v4-pro）
+    # 2. 对话中已存在带 reasoning_content 的 assistant 消息（可能是从 thinking 模型切换过来的）
+    needs_padding = _is_thinking_mode_model(model_name) or any(
         m.role == OpenaiApiRole.ASSISTANT and m.reasoning_content is not None
         for m in request.messages
     )
-    if has_any_reasoning:
+    if needs_padding:
         for msg_dict in messages:
             if msg_dict.get("role") == "assistant" and "reasoning_content" not in msg_dict:
                 msg_dict["reasoning_content"] = ""
