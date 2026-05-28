@@ -8,9 +8,10 @@ from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
-from service import ormService, presetService
+from service import ormService, presetService, exportService
 from exception import TogoException
-from util.configTypes import TeamPreset, AgentPreset, DeptNodePreset
+from constants import DriverType
+from util.configTypes import TeamPreset, AgentPreset, DeptNodePreset, TeamRoomPreset
 
 
 if os.name == "posix" and sys.platform == "darwin":
@@ -152,6 +153,78 @@ class TestPresetTeamImport(ServiceTestCase):
         result = await gtTeamManager.get_team_by_id(existing.id)
         assert result is not None
         assert result.name == "name-match-team"
+
+    async def test_export_team_preset_matches_runtime_structure(self):
+        await gtRoleTemplateManager.save_role_template(GtRoleTemplate(name="dummy", model="gpt-4o"))
+
+        team_config = TeamPreset(
+            uuid="uuid-export-001",
+            name="export-team",
+            i18n={"display_name": {"zh-CN": "导出团队"}},
+            config={"working_directory": "/tmp/export-team", "slogan": "先沟通后执行", "rules": "先评审再执行"},
+            agents=[
+                AgentPreset(
+                    name="manager1",
+                    role_template="dummy",
+                    i18n={"display_name": {"zh-CN": "经理1"}},
+                    model="gpt-4o-mini",
+                    driver=DriverType.NATIVE,
+                    allow_tools=["send_chat_msg"],
+                ),
+                AgentPreset(
+                    name="agent1",
+                    role_template="dummy",
+                    i18n={"display_name": {"zh-CN": "成员1"}},
+                ),
+            ],
+            dept_tree=DeptNodePreset(
+                dept_name="研发部",
+                responsibility="负责研发",
+                manager="manager1",
+                agents=["manager1", "agent1"],
+                children=[],
+                i18n={"dept_name": {"zh-CN": "研发部"}},
+            ),
+            preset_rooms=[
+                TeamRoomPreset(
+                    name="manager1",
+                    agents=["OPERATOR", "manager1"],
+                    initial_topic="私聊沟通",
+                    max_rounds=20,
+                    tags=["private"],
+                    i18n={"display_name": {"zh-CN": "经理私聊"}},
+                )
+            ],
+            auto_start=True,
+        )
+
+        team = await presetService._import_team_from_config(team_config)
+        assert team is not None
+
+        exported = await exportService.export_team_preset(team.id)
+
+        assert exported["uuid"] == "uuid-export-001"
+        assert exported["name"] == "export-team"
+        assert exported["i18n"] == {"display_name": {"zh-CN": "导出团队"}}
+        assert exported["config"] == {"working_directory": "/tmp/export-team", "slogan": "先沟通后执行", "rules": "先评审再执行"}
+        assert len(exported["rule_templates"]) == 1
+        assert exported["rule_templates"][0]["name"] == "dummy"
+        assert exported["rule_templates"][0]["model"] == "gpt-4o"
+        assert exported["rule_templates"][0]["soul"] == ""
+        assert exported["auto_start"] is True
+        assert [agent["name"] for agent in exported["agents"]] == ["agent1", "manager1"]
+        assert {agent["role_template"] for agent in exported["agents"]} == {"dummy"}
+        exported_manager = next(agent for agent in exported["agents"] if agent["name"] == "manager1")
+        assert exported_manager["driver"] == DriverType.NATIVE.value
+        assert exported_manager["model"] == "gpt-4o-mini"
+        assert exported_manager["allow_tools"] == ["send_chat_msg"]
+        assert exported["dept_tree"] is not None
+        assert exported["dept_tree"]["manager"] == "manager1"
+        assert exported["dept_tree"]["agents"] == ["manager1", "agent1"]
+        assert len(exported["preset_rooms"]) == 1
+        assert exported["preset_rooms"][0]["name"] == "manager1"
+        assert exported["preset_rooms"][0]["agents"] == ["OPERATOR", "manager1"]
+        assert exported["preset_rooms"][0]["initial_topic"] == "私聊沟通"
 
 
 class TestDeptTreeValidation(ServiceTestCase):

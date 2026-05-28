@@ -10,7 +10,7 @@ from dal.db import gtRoomManager, gtTeamManager, gtAgentManager, gtRoleTemplateM
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
-from service import roomService, teamService, agentService
+from service import roomService, teamService, agentService, exportService
 from util import assertUtil
 from util.configTypes import TeamRoomPreset
 
@@ -219,6 +219,13 @@ class TeamDetailHandler(BaseHandler):
                 "rooms": room_items,
             }
         )
+
+
+class TeamPresetExportHandler(BaseHandler):
+    """GET /teams/{id}/export_preset.json - 导出单个 Team 为 preset JSON。"""
+
+    async def get(self, team_id_str: str) -> None:
+        self.return_json(await exportService.export_team_preset(int(team_id_str)))
 
 
 class TeamModifyHandler(BaseHandler):

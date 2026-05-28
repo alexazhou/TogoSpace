@@ -66,6 +66,26 @@ class TestTeamController(_ApiServiceCase):
         assert len(rooms_by_name["测试组"]["agents"]) == 2
         assert isinstance(data["enabled"], bool)
 
+    async def test_team_export_preset_returns_team_preset_json(self):
+        team_id = await self._get_team_id("e2e")
+
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/teams/{team_id}/export_preset.json") as resp:
+                assert resp.status == 200
+                data = await resp.json()
+
+        assert data["name"] == "e2e"
+        assert "config" in data
+        assert isinstance(data["agents"], list)
+        assert len(data["agents"]) == 2
+        assert {agent["name"] for agent in data["agents"]} == {"alice", "bob"}
+        assert all("role_template" in agent for agent in data["agents"])
+        assert isinstance(data["rule_templates"], list)
+        assert {rule["name"] for rule in data["rule_templates"]} == {"alice", "bob"}
+        assert "preset_rooms" in data
+        assert isinstance(data["preset_rooms"], list)
+        assert isinstance(data["auto_start"], bool)
+
     async def test_create_team_and_fetch_detail(self):
         payload = {
             "name": "new_team",

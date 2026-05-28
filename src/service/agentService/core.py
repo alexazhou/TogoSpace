@@ -346,6 +346,7 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
             agent.driver = data.driver or DriverType.NATIVE
             agent.employ_status = EmployStatus.ON_BOARD
             agent.i18n = data.i18n or {}
+            agent.allow_tools = data.allow_tools
         else:
             agent = GtAgent(
                 team_id=team_id,
@@ -355,6 +356,7 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
                 driver=data.driver or DriverType.NATIVE,
                 employ_status=EmployStatus.ON_BOARD,
                 i18n=data.i18n or {},
+                allow_tools=data.allow_tools,
             )
 
         agents_to_save.append(agent)
