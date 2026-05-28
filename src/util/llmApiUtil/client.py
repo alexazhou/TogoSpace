@@ -148,8 +148,6 @@ _THINKING_MODE_MODEL_PREFIXES = (
     "deepseek-reasoner",
     "deepseek-v4",
     "deepseek-pro",
-    "glm-4",
-    "glm-z1",
 )
 
 
