@@ -38,6 +38,7 @@ class UpdateAgentsRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     content: str | None = None
     insert_immediately: bool = False
+    quote_id: int | None = None
 
 
 class RoomApiResponse(BaseModel):
@@ -229,7 +230,7 @@ class RoomMessagesHandler(BaseHandler):
                 error_code="immediate_insert_driver_not_supported",
             )
 
-        await room.add_message(room.OPERATOR_MEMBER_ID, content, insert_immediately=request.insert_immediately)
+        await room.add_message(room.OPERATOR_MEMBER_ID, content, insert_immediately=request.insert_immediately, quote_id=request.quote_id)
         if room.get_current_turn_agent_id() == room.OPERATOR_MEMBER_ID:
             await room.handle_finish_request(room.OPERATOR_MEMBER_ID)
         self.return_success()
