@@ -151,6 +151,43 @@ async def test_infer_stream_passes_request_id(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_infer_stream_strips_required_tool_choice_when_reasoning_effort_enabled(monkeypatch):
+    fake_send_request_stream = AsyncMock(return_value=_build_response("stream-ok"))
+
+    monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
+        default_llm_server="svc",
+        llm_services=[
+            {
+                "name": "svc",
+                "enable": True,
+                "base_url": "http://localhost/v1/chat/completions",
+                "api_key": "key-123",
+                "type": "openai-compatible",
+                "model": "deepseek-v4-pro",
+                "provider_params": {
+                    "reasoning_effort": "high",
+                },
+            }
+        ],
+    )))
+    monkeypatch.setattr(llmService.llmApiUtil, "send_request_stream", fake_send_request_stream)
+
+    ctx = GtCoreAgentDialogContext(
+        system_prompt="system prompt",
+        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        tool_choice="required",
+    )
+
+    result = await llmService.infer_stream(None, ctx)
+
+    assert result.ok is True
+    fake_send_request_stream.assert_awaited_once()
+    request = fake_send_request_stream.await_args.args[0]
+    assert request.tool_choice is None
+    assert request.provider_params["reasoning_effort"] == "high"
+
+
+@pytest.mark.asyncio
 async def test_infer_uses_context_prompt_cache_policy_when_provided(monkeypatch):
     fake_send_request_non_stream = AsyncMock(return_value=_build_response())
 

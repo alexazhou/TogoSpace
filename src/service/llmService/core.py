@@ -7,6 +7,7 @@ from typing import Optional
 
 from constants import LlmServiceType
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
+from service.llmService.llmRequestRules import apply_llm_request_rules
 from util import configUtil, llmApiUtil
 
 # LiteLLM custom_llm_provider 映射表
@@ -70,6 +71,29 @@ def _usage_to_log_json(usage: llmApiUtil.OpenAIUsage | None) -> str:
     return json.dumps(usage.model_dump(mode="json", exclude_none=False), ensure_ascii=False, default=str)
 
 
+def _build_request(
+    *,
+    model: str,
+    ctx: GtCoreAgentDialogContext,
+    llm_config,
+) -> tuple[llmApiUtil.OpenAIRequest, tuple[str, ...]]:
+    messages: list[llmApiUtil.OpenAIMessage] = [
+        llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.SYSTEM, ctx.system_prompt),
+        *ctx.messages,
+    ]
+    request = llmApiUtil.OpenAIRequest(
+        model=model,
+        messages=messages,
+        tools=ctx.tools,
+        tool_choice=ctx.tool_choice,
+        prompt_cache=ctx.prompt_cache,
+        max_tokens=llm_config.reserve_output_tokens,
+        temperature=llm_config.temperature,
+        provider_params=llm_config.provider_params,
+    )
+    return apply_llm_request_rules(request)
+
+
 async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> InferResult:
     """根据 GtCoreAgentDialogContext 组装请求并调用 LLM 推理接口，统一返回成功/失败结果。"""
     request_id = uuid.uuid4().hex
@@ -81,25 +105,15 @@ async def infer(model: str | None, ctx: GtCoreAgentDialogContext) -> InferResult
             raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
         resolved_model = model or llm_config.model
         resolved_provider = _TYPE_TO_PROVIDER.get(llm_config.type)
-
-        messages: list[llmApiUtil.OpenAIMessage] = [
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.SYSTEM, ctx.system_prompt),
-            *ctx.messages,
-        ]
-        request = llmApiUtil.OpenAIRequest(
+        request, applied_rules = _build_request(
             model=resolved_model,
-            messages=messages,
-            tools=ctx.tools,
-            tool_choice=ctx.tool_choice,
-            prompt_cache=ctx.prompt_cache,
-            max_tokens=llm_config.reserve_output_tokens,
-            temperature=llm_config.temperature,
-            provider_params=llm_config.provider_params,
+            ctx=ctx,
+            llm_config=llm_config,
         )
         logger.info(
-            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s",
-            request_id, False, resolved_model, resolved_provider, len(messages), len(ctx.tools or []), ctx.tool_choice,
-            ctx.prompt_cache,
+            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
+            request_id, False, resolved_model, resolved_provider, len(request.messages), len(ctx.tools or []), request.tool_choice,
+            ctx.prompt_cache, list(applied_rules),
         )
         response = await llmApiUtil.send_request_non_stream(
             request,
@@ -153,25 +167,15 @@ async def infer_stream(
             raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
         resolved_model = model or llm_config.model
         resolved_provider = _TYPE_TO_PROVIDER.get(llm_config.type)
-
-        messages: list[llmApiUtil.OpenAIMessage] = [
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.SYSTEM, ctx.system_prompt),
-            *ctx.messages,
-        ]
-        request = llmApiUtil.OpenAIRequest(
+        request, applied_rules = _build_request(
             model=resolved_model,
-            messages=messages,
-            tools=ctx.tools,
-            tool_choice=ctx.tool_choice,
-            prompt_cache=ctx.prompt_cache,
-            max_tokens=llm_config.reserve_output_tokens,
-            temperature=llm_config.temperature,
-            provider_params=llm_config.provider_params,
+            ctx=ctx,
+            llm_config=llm_config,
         )
         logger.info(
-            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s",
-            request_id, True, resolved_model, resolved_provider, len(messages), len(ctx.tools or []), ctx.tool_choice,
-            ctx.prompt_cache,
+            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
+            request_id, True, resolved_model, resolved_provider, len(request.messages), len(ctx.tools or []), request.tool_choice,
+            ctx.prompt_cache, list(applied_rules),
         )
 
         completion_tokens = 0
@@ -188,13 +192,11 @@ async def infer_stream(
                 if delta:
                     delta_text = getattr(delta, "content", None) or ""
 
-            # token 统计：优先使用 chunk 自带 usage
             chunk_usage = getattr(chunk, "usage", None)
             if chunk_usage and getattr(chunk_usage, "completion_tokens", None) is not None:
                 current_ct = chunk_usage.completion_tokens
                 current_total = getattr(chunk_usage, "total_tokens", None)
             else:
-                # 本地估算：每个非空 delta 算 1 token
                 if delta_text:
                     completion_tokens += 1
                 current_ct = completion_tokens

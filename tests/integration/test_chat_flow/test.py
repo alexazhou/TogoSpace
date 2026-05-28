@@ -18,7 +18,7 @@ from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtScheculeTask import GtScheculeTask
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
-from constants import AgentHistoryTag, AgentHistoryStatus, AgentStatus, AgentTaskType, OpenaiApiRole, RoomState, ScheduleState
+from constants import AgentActivityStatus, AgentHistoryTag, AgentHistoryStatus, AgentStatus, AgentTaskType, OpenaiApiRole, RoomState, ScheduleState
 from service import messageBus
 from ...base import ServiceTestCase
 
@@ -298,5 +298,55 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
             # 验证：turn 正常完成，没有抛出异常
             assert any(AgentHistoryTag.ROOM_TURN_FINISH in msg.tags for msg in alice.task_consumer._turn_runner._history)
+        finally:
+            scheduler._schedule_state = ScheduleState.RUNNING
+
+    async def test_unregistered_tool_fails_gracefully_and_recovers(self):
+        """LLM 幻觉出不存在的工具名时，应优雅失败并允许重试恢复。
+
+        场景：LLM 调用了不存在的工具 finish_chat_turn（应为 finish_action）。
+        预期：
+        1. turn 不会陷入无限循环；
+        2. 对应历史 TOOL 条目状态为 FAILED（不是 INIT，避免重启后重放循环）；
+        3. LLM 能在下一轮被提示后改用正确工具，turn 正常完成。
+        """
+        await self.create_room(TEAM, "unregistered_tool_room", ["alice", "bob"])
+        room = roomService.get_room_by_key(f"unregistered_tool_room@{TEAM}")
+        scheduler._schedule_state = ScheduleState.STOPPED
+        try:
+            await room.activate_scheduling()
+
+            alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
+            reset_item = GtAgentHistory.build(
+                OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset unregistered tool test"),
+            )
+            reset_item.sender_id = alice.gt_agent.id
+            reset_item.seq = 0
+            alice.inject_history_messages([reset_item])
+
+            # LLM 先幻觉调用不存在的工具，再改用正确工具
+            responses = [
+                {"tool_calls": [{"name": "finish_chat_turn", "arguments": {}}]},                              # 幻觉工具
+                {"tool_calls": [{"name": "finish_action", "arguments": {"confirm_no_need_talk": True}}]},     # 正确工具（本轮无发言）
+            ]
+
+            task = GtScheculeTask(
+                id=10,
+                agent_id=alice.gt_agent.id,
+                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_data={"room_id": room.room_id},
+            )
+            with self.patch_infer(responses=responses):
+                await alice.task_consumer._turn_runner.run_task_turn(task)
+
+            history = list(alice.task_consumer._turn_runner._history)
+
+            # 幻觉工具的 TOOL 历史条目应为 FAILED，不是 INIT（防止重启循环）
+            tool_items = [m for m in history if m.role == OpenaiApiRole.TOOL]
+            failed_items = [m for m in tool_items if m.status == AgentHistoryStatus.FAILED]
+            assert len(failed_items) >= 1, "幻觉工具调用应在历史中留下 FAILED 的 TOOL 条目"
+
+            # turn 应正常完成
+            assert any(AgentHistoryTag.ROOM_TURN_FINISH in msg.tags for msg in history), "turn 未正常完成"
         finally:
             scheduler._schedule_state = ScheduleState.RUNNING

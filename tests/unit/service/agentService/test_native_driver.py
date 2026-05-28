@@ -111,3 +111,43 @@ async def test_native_driver_ignores_local_tool_names_and_uses_basic_category(mo
     get_tools.assert_called_once()
     exported_names = [t.function.name for t in mock_host.tool_registry.export_openai_tools()]
     assert exported_names == ["send_chat_msg", "finish_action", "wake_up_agent", "get_time"]
+
+
+@pytest.mark.asyncio
+async def test_native_driver_root_leader_gets_admin_tools(mock_host: MagicMock) -> None:
+    """is_root_leader=True 的 native agent 应获得 ADMIN 类工具。"""
+    send_tool = _make_tool("send_chat_msg")
+    finish_tool = _make_tool("finish_action")
+    admin_tool = _make_tool("save_agent")   # ADMIN 类
+
+    driver = NativeAgentDriver(
+        mock_host,
+        AgentDriverConfig(driver_type="native", options={"is_root_leader": True}),
+    )
+
+    with patch("service.funcToolService.get_tools", return_value=[send_tool, finish_tool, admin_tool]):
+        await driver.startup()
+
+    exported_names = [t.function.name for t in mock_host.tool_registry.export_openai_tools()]
+    assert "save_agent" in exported_names
+    assert "send_chat_msg" in exported_names
+
+
+@pytest.mark.asyncio
+async def test_native_driver_non_root_leader_no_admin_tools(mock_host: MagicMock) -> None:
+    """is_root_leader=False（默认）的 native agent 不应获得 ADMIN 类工具。"""
+    send_tool = _make_tool("send_chat_msg")
+    finish_tool = _make_tool("finish_action")
+    admin_tool = _make_tool("save_agent")   # ADMIN 类
+
+    driver = NativeAgentDriver(
+        mock_host,
+        AgentDriverConfig(driver_type="native", options={}),
+    )
+
+    with patch("service.funcToolService.get_tools", return_value=[send_tool, finish_tool, admin_tool]):
+        await driver.startup()
+
+    exported_names = [t.function.name for t in mock_host.tool_registry.export_openai_tools()]
+    assert "save_agent" not in exported_names
+    assert "send_chat_msg" in exported_names

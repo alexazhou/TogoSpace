@@ -1,4 +1,5 @@
 from service import funcToolService
+from service.agentService import toolRegistry
 from model.dbModel.gtScheculeTask import GtScheculeTask
 
 from .base import AgentDriver, AgentTurnSetup
@@ -27,7 +28,11 @@ class NativeAgentDriver(AgentDriver):
                 marks_turn_finish=function_name == "finish_action",
                 self_interrupt=function_name == "reload_team",
             )
-        self.host.tool_registry.apply_tool_allow_specs(["Category:Basic"])
+        effective_specs = toolRegistry.build_runtime_allow_specs(
+            self.config.options.get("tool_allow_specs"),
+            is_root_leader=bool(self.config.options.get("is_root_leader")),
+        )
+        self.host.tool_registry.apply_tool_allow_specs(effective_specs)
 
     @property
     def turn_setup(self) -> AgentTurnSetup:
