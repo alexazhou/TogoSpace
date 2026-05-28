@@ -18,7 +18,7 @@
       "name": "qwen",
       "enable": true,
       "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "api_key": "sk-7352a75cf5ab4d13acd1d30ba7b05dac",
+      "api_key": "YOUR_API_KEY_HERE",
       "type": "openai-compatible",
       "model": "qwen-plus"
     }
