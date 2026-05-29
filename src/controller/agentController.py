@@ -205,6 +205,32 @@ class AgentTasksHandler(BaseHandler):
         )
 
 
+class TeamTasksHandler(BaseHandler):
+    """GET /teams/<id>/tasks.json - 获取指定 Team 的协作任务列表"""
+
+    async def get(self, team_id_str: str) -> None:
+        team_id = int(team_id_str)
+        limit_raw = self.get_query_argument("limit", "500")
+        include_closed_raw = self.get_query_argument("include_closed", "false")
+        limit = max(1, min(int(limit_raw), 1000))
+        include_closed = include_closed_raw.strip().lower() in {"1", "true", "yes", "on"}
+
+        team = await gtTeamManager.get_team_by_id(team_id)
+        assertUtil.assertNotNull(
+            team,
+            error_message=f"Team ID '{team_id}' not found",
+            error_code="team_not_found",
+        )
+
+        self.return_json(
+            await taskService.list_tasks(
+                team_id=team.id,
+                open_only=not include_closed,
+                limit=limit,
+            )
+        )
+
+
 class AgentResumeHandler(BaseHandler):
     """POST /agents/<agent_id>/resume.json - 对 FAILED 状态的 Agent 触发续跑"""
 

@@ -103,6 +103,7 @@ application = tornado.web.Application([
     (r"/teams/list.json",                           teamController.TeamListHandler),
     (r"/teams/create.json",                         teamController.TeamCreateHandler),
     (r"/teams/(\d+).json",                          teamController.TeamDetailHandler),
+    (r"/teams/(\d+)/tasks.json",                    agentController.TeamTasksHandler),
     (r"/teams/(\d+)/export_preset.json",            teamController.TeamPresetExportHandler),
     (r"/teams/(\d+)/modify.json",                   teamController.TeamModifyHandler),
     (r"/teams/(\d+)/delete.json",                   teamController.TeamDeleteHandler),
