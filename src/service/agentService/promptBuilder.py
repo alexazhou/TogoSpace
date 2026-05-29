@@ -127,41 +127,53 @@ async def _build_dept_context(team_id: int, agent_name: str) -> str:
     gt_depts = await gtDeptManager.get_all_depts(team_id)
     assert len(gt_depts) > 0, f"team has no departments: team_id={team_id}, agent_name={agent_name}"
 
-    gt_dept = None
-    for item in gt_depts:
-        if gt_agent.id in item.agent_ids:
-            gt_dept = item
-            break
-    assert gt_dept is not None, f"agent has no department: team_id={team_id}, agent_name={agent_name}"
+    my_depts = [d for d in gt_depts if gt_agent.id in d.agent_ids]
+    assert my_depts, f"agent has no department: team_id={team_id}, agent_name={agent_name}"
 
     dept_id_map = {d.id: d for d in gt_depts}
     gt_agents = await gtAgentManager.get_team_all_agents(team_id)
     agent_id_to_name: dict[int, str] = {m.id: m.name for m in gt_agents}
 
-    manager_name = agent_id_to_name.get(gt_dept.manager_id, "")
-    other_agents = [
-        agent_id_to_name[mid]
-        for mid in gt_dept.agent_ids
-        if mid in agent_id_to_name and agent_id_to_name[mid] != agent_name
-    ]
+    def _dept_full_path(dept_id: int) -> str:
+        parts = []
+        cur_id: int | None = dept_id
+        while cur_id is not None:
+            d = dept_id_map.get(cur_id)
+            if d is None:
+                break
+            parts.append(d.name)
+            cur_id = d.parent_id
+        return " / ".join(reversed(parts))
 
-    ctx = "---\n组织信息：\n"
-    ctx += f"- 所在部门：{gt_dept.name}\n"
-    if gt_dept.responsibility:
-        ctx += f"- 部门职责：{gt_dept.responsibility}\n"
-    if gt_dept.parent_id is not None:
-        parent = dept_id_map.get(gt_dept.parent_id)
-        if parent is not None:
-            parent_manager = agent_id_to_name.get(parent.manager_id, "")
-            ctx += f"- 上级部门：{parent.name}（主管：{parent_manager}，ID：{parent.manager_id}）\n"
-    if manager_name == agent_name:
-        ctx += f"- 你是本部门主管\n"
-    elif manager_name:
-        ctx += f"- 本部门主管：{manager_name}（ID：{gt_dept.manager_id}）\n"
-    if other_agents:
-        ctx += f"- 本部门其他成员：{', '.join(other_agents)}\n"
-    ctx += "---"
-    return ctx
+    dept_entries = []
+    for dept in my_depts:
+        is_manager = dept.manager_id == gt_agent.id
+        entry: dict = {
+            "部门": _dept_full_path(dept.id),
+            "你在部门中的角色": "主管" if is_manager else "成员",
+        }
+        if dept.responsibility:
+            entry["部门职责"] = dept.responsibility
+        if not is_manager:
+            manager_name = agent_id_to_name.get(dept.manager_id, "")
+            if manager_name:
+                entry["本部门主管"] = f"{manager_name}（ID：{dept.manager_id}）"
+        other_agents = [
+            agent_id_to_name[mid]
+            for mid in dept.agent_ids
+            if mid in agent_id_to_name and agent_id_to_name[mid] != agent_name
+        ]
+        if other_agents:
+            entry["部门中其他成员"] = other_agents
+        dept_entries.append(entry)
+
+    body = yaml.dump(
+        {"你在组织中的位置": dept_entries},
+        allow_unicode=True,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+    return f"---\n{body}---"
 
 
 async def build_agent_system_prompt(
