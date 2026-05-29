@@ -439,7 +439,7 @@ async def create_room(
     team_agent_ids = {a.id for a in team_agents}
     missing = [aid for aid in agent_ids if aid not in team_agent_ids and SpecialAgent.value_of(aid) is None]
     if missing:
-        raise TogoException(f"agent IDs not in team: {missing}", error_code="agent_not_in_team")
+        raise TogoException(f"agent IDs not found: {missing}", error_code="agent_not_found")
 
     if len(agent_ids) < 2:
         raise TogoException("room must have at least 2 agents", error_code="room_agents_too_few")

@@ -112,7 +112,9 @@ class TestConfigApi(ServiceTestCase):
                 assert resp.status == 200
                 detail = await resp.json()
                 assert detail["name"] == room_name
-                assert detail["initial_topic"] == "testing"
+                # 2人房间为 PRIVATE 类型，initial_topic 由系统按统一模板生成
+                expected_topic = f"这个房间供{alice['name']}和{bob['name']}单独交流"
+                assert detail["initial_topic"] == expected_topic
 
         # 4. Modify Room
         modify_payload = {
