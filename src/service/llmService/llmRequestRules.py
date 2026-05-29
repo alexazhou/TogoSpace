@@ -15,24 +15,53 @@ class LlmRequestRule:
         raise NotImplementedError
 
 
+# 与 client.py 中的 _THINKING_MODE_MODEL_PREFIXES 保持同步
+_THINKING_MODE_MODEL_PREFIXES = (
+    "deepseek-r1",
+    "deepseek-reasoner",
+    "deepseek-v4",
+    "deepseek-pro",
+)
+
+
+def _is_thinking_mode_model(model: str) -> bool:
+    """判断模型是否为 thinking mode 模型（需要 reasoning_content 字段）。"""
+    model_lower = model.lower()
+    return any(model_lower.startswith(prefix) for prefix in _THINKING_MODE_MODEL_PREFIXES)
+
+
+def _is_thinking_enabled(request: llmApiUtil.OpenAIRequest) -> bool:
+    """判断当前请求是否开启了思考模式。
+
+    触发方式（优先级从高到低）：
+    1. provider_params 中 thinking.type == "enabled" → 开启
+    2. provider_params 中 thinking.type == "disabled" → 显式关闭，不触发
+    3. provider_params 中设置了 reasoning_effort → 开启
+    4. 模型名称隐式启用（如 deepseek-v4-pro）→ 开启
+    """
+    thinking = (request.provider_params or {}).get("thinking") or {}
+    if isinstance(thinking, dict):
+        thinking_type = thinking.get("type")
+        if thinking_type == "enabled":
+            return True
+        if thinking_type == "disabled":
+            return False
+    reasoning_effort = (request.provider_params or {}).get("reasoning_effort")
+    if reasoning_effort not in (None, ""):
+        return True
+    if _is_thinking_mode_model(request.model):
+        return True
+    return False
+
+
 class StripRequiredToolChoiceForReasoningRule(LlmRequestRule):
     """开启思考模式时，不能强制使用工具，否则 deepseek-v4-pro 等模型会报错。"""
 
     def check_match(self, request: llmApiUtil.OpenAIRequest) -> bool:
-        reasoning_effort = (request.provider_params or {}).get("reasoning_effort")
-        return (
-            request.tool_choice == "required"
-            and reasoning_effort not in (None, "")
-        )
+        return request.tool_choice == "required" and _is_thinking_enabled(request)
 
     def apply(self, request: llmApiUtil.OpenAIRequest) -> llmApiUtil.OpenAIRequest:
         return request.model_copy(update={"tool_choice": None})
-
-
-def _is_thinking_enabled(request: llmApiUtil.OpenAIRequest) -> bool:
-    """判断当前请求是否开启了思考模式（thinking.type == "enabled"）。"""
-    thinking = (request.provider_params or {}).get("thinking") or {}
-    return isinstance(thinking, dict) and thinking.get("type") == "enabled"
 
 
 class FillMissingReasoningContentRule(LlmRequestRule):
