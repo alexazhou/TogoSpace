@@ -17,11 +17,14 @@ async def test_clear_team_data_deletes_all_runtime_data(monkeypatch):
     monkeypatch.setattr(teamService.gtAgentActivityManager, "delete_activities_by_team", AsyncMock(return_value=8))
     monkeypatch.setattr(teamService.gtRoomManager, "get_rooms_by_team", AsyncMock(return_value=[]))
     monkeypatch.setattr(teamService.gtRoomManager, "delete_rooms_by_ids", AsyncMock(return_value=0))
+    reset_mock = AsyncMock()
+    monkeypatch.setattr(teamService.gtRoomManager, "reset_room_runtime_state", reset_mock)
 
     result = await teamService.clear_team_data(1)
 
     assert result == {"tasks": 5, "histories": 5, "messages": 10, "rooms": 0, "activities": 8}
     teamService.gtRoomManager.delete_rooms_by_ids.assert_not_called()
+    reset_mock.assert_awaited_once_with(1)
 
 
 @pytest.mark.asyncio
@@ -44,6 +47,8 @@ async def test_clear_team_data_deletes_non_dept_rooms(monkeypatch):
     monkeypatch.setattr(teamService.gtRoomManager, "get_rooms_by_team", AsyncMock(return_value=rooms))
     delete_mock = AsyncMock(return_value=3)
     monkeypatch.setattr(teamService.gtRoomManager, "delete_rooms_by_ids", delete_mock)
+    reset_mock = AsyncMock()
+    monkeypatch.setattr(teamService.gtRoomManager, "reset_room_runtime_state", reset_mock)
 
     result = await teamService.clear_team_data(1)
 
@@ -53,3 +58,4 @@ async def test_clear_team_data_deletes_non_dept_rooms(monkeypatch):
     delete_mock.assert_awaited_once()
     deleted_ids = delete_mock.await_args.args[0]
     assert set(deleted_ids) == {2, 3, 5}
+    reset_mock.assert_awaited_once_with(1)

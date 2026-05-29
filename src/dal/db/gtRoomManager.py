@@ -185,10 +185,13 @@ async def delete_rooms_by_biz_ids_not_in(team_id: int, biz_ids: list[str]) -> No
     ).aio_execute()
 
 
-async def reset_room_read_index(team_id: int) -> None:
-    """重置 Team 下所有房间的 agent_read_index。"""
+async def reset_room_runtime_state(team_id: int) -> None:
+    """重置 Team 下所有房间的运行时状态（agent_read_index 和 speaker_index）。
+
+    在清空消息数据后调用，确保房间重新激活时 agent 从 seq=0 读取初始消息。
+    """
     await (
-        GtRoom.update(agent_read_index=None)
+        GtRoom.update(agent_read_index=None, speaker_index=None)
         .where(GtRoom.team_id == team_id)
         .aio_execute()
     )

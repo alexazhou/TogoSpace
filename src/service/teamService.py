@@ -223,6 +223,11 @@ async def clear_team_data(team_id: int) -> dict[str, int]:
     non_dept_ids = [r.id for r in all_rooms if r.id is not None and "DEPT" not in (r.tags or [])]
     rooms_deleted = await gtRoomManager.delete_rooms_by_ids(non_dept_ids) if non_dept_ids else 0
 
+    # 4. 重置存留 DEPT 房间的运行时状态（agent_read_index / speaker_index）
+    #    消息删除后 seq 从 0 重新分配，若不重置读取位置，agent 的 read_index 仍指向旧
+    #    位置（如 {7: 1, 8: 2}），导致初始系统消息（seq=0）被跳过，房间激活后无任何调度。
+    await gtRoomManager.reset_room_runtime_state(team_id)
+
     result = {
         "tasks": tasks_deleted + agent_tasks_deleted,
         "histories": histories_deleted,
