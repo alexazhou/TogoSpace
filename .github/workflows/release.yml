@@ -54,11 +54,16 @@ jobs:
         echo "Python: $PYTHON_BIN"
         lipo -info "$PYTHON_BIN"
 
+        # 设置 _PYTHON_HOST_PLATFORM 强制 pip 识别为 x86_64 平台
+        # 否则 setup-python 安装的 arm64 路径下的 Python 会让 pip 下载 arm64 wheels
+        export _PYTHON_HOST_PLATFORM="macosx-11.0-x86_64"
+        echo "_PYTHON_HOST_PLATFORM=$_PYTHON_HOST_PLATFORM" >> $GITHUB_ENV
+
         # 用 arch -x86_64 创建 x86_64 虚拟环境
         arch -x86_64 python3 -m venv "$RUNNER_TEMP/x86_64-venv"
         VENV="$RUNNER_TEMP/x86_64-venv"
 
-        # 在 x86_64 环境中安装依赖（pip 会自动下载 x86_64 wheels）
+        # 在 x86_64 环境中安装依赖（现在 pip 会下载 x86_64 wheels）
         "$VENV/bin/python" -m pip install --upgrade pip
         "$VENV/bin/pip" install -r requirements.txt
         "$VENV/bin/pip" install pyinstaller
@@ -67,6 +72,8 @@ jobs:
         echo "=== Architecture verification ==="
         "$VENV/bin/python" --version
         "$VENV/bin/python" -c "import platform; print(f'Arch: {platform.machine()}')"
+        "$VENV/bin/python" -c "import sysconfig; print(f'Platform: {sysconfig.get_platform()}')"
+        "$VENV/bin/pip" show pillow 2>/dev/null | head -3 || true
 
         # 将 x86_64 venv 加入 PATH（后续步骤自动使用）
         echo "$VENV/bin" >> $GITHUB_PATH
@@ -146,6 +153,7 @@ jobs:
         which python
         python --version
         python -c "import platform; print(f'Arch: {platform.machine()}')"
+        python -c "import sysconfig; print(f'Platform: {sysconfig.get_platform()}')"
         echo "========================="
 
         if [ -f scripts/build_config.json ]; then
