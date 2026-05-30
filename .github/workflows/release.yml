@@ -61,15 +61,18 @@ jobs:
 
         # 将 venv 中的 universal Python 替换为纯 x86_64 binary
         # 这样 sys.executable 和所有子进程都会以 x86_64 模式运行
-        PYTHON_REAL=$(readlink -f "$VENV/bin/python3")
-        cp "$PYTHON_REAL" "$VENV/bin/python3_universal"
-        lipo -thin x86_64 "$VENV/bin/python3_universal" -output "$VENV/bin/python3_x86_64"
-        rm "$VENV/bin/python3"
-        mv "$VENV/bin/python3_x86_64" "$VENV/bin/python3"
-        chmod +x "$VENV/bin/python3"
-        rm "$VENV/bin/python3_universal"
-        echo "Python3 binary (x86_64-only):"
+        # cp 跟随 symlink，直接复制 universal binary
+        echo "Before lipo:"
         lipo -info "$VENV/bin/python3"
+        cp "$VENV/bin/python3" /tmp/python3_universal
+        lipo -thin x86_64 /tmp/python3_universal -output /tmp/python3_x86_64
+        rm "$VENV/bin/python3"
+        mv /tmp/python3_x86_64 "$VENV/bin/python3"
+        chmod +x "$VENV/bin/python3"
+        echo "After lipo (x86_64-only):"
+        lipo -info "$VENV/bin/python3"
+        # 验证架构
+        "$VENV/bin/python3" -c "import platform; print(f'Venv Python Arch: {platform.machine()}')"
 
         # 安装 uv（快速包管理器，原生支持 --python-platform 跨平台安装）
         curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -183,16 +186,22 @@ jobs:
     - name: Build and release
       run: |
         echo "=== Python environment ==="
-        which python
-        python --version
-        python -c "import platform; print(f'Arch: {platform.machine()}')"
-        python -c "import sysconfig; print(f'Platform: {sysconfig.get_platform()}')"
+        # x86_64 构建必须使用 venv 中的 x86_64 python
+        if [ "${{ matrix.arch }}" = "x86_64" ]; then
+          PYTHON="$RUNNER_TEMP/x86_64-venv/bin/python"
+        else
+          PYTHON="$(which python)"
+        fi
+        echo "Using: $PYTHON"
+        $PYTHON --version
+        $PYTHON -c "import platform; print(f'Arch: {platform.machine()}')"
+        $PYTHON -c "import sysconfig; print(f'Platform: {sysconfig.get_platform()}')"
         echo "========================="
 
         if [ -f scripts/build_config.json ]; then
-          python scripts/build_release.py --arch ${{ matrix.arch }}
+          $PYTHON scripts/build_release.py --arch ${{ matrix.arch }}
         else
-          TARGET_ARCH=${{ matrix.arch }} python scripts/build_mac.py
+          TARGET_ARCH=${{ matrix.arch }} $PYTHON scripts/build_mac.py
         fi
 
     - name: Get zip path
