@@ -89,9 +89,10 @@ jobs:
           --target "$SITE_PACKAGES" \
           pyinstaller
 
-        # Step 2: 安装缺失的依赖（无 x86_64 wheel 的纯 Python 包 → 源码安装）
-        "$VENV/bin/pip" install -r requirements.txt
-        "$VENV/bin/pip" install pyinstaller
+        # Step 2: 安装缺失的依赖（--no-binary :all: 强制源码构建，确保 x86_64）
+        # 已安装的 x86_64 包会被跳过（already satisfied）
+        "$VENV/bin/pip" install --no-binary :all: -r requirements.txt
+        "$VENV/bin/pip" install --no-binary :all: pyinstaller
 
         # 验证架构
         echo "=== Architecture verification ==="
