@@ -71,11 +71,12 @@ jobs:
         # Step 2: 普通安装填充剩余包（源码构建，跨平台通用）
         
         # Step 1: 下载有 x86_64 wheel 的包（--no-deps 跳过依赖解析）
+        # 注意：不使用 --only-binary :all:，否则 pip 无法为仅有 py3-none-any
+        # wheel 的包（如 claude-agent-sdk）找到匹配
         "$VENV/bin/pip" install \
           --platform macosx_10_15_x86_64 \
           --python-version 3.11 \
           --abi cp311 \
-          --only-binary :all: \
           --no-deps \
           --target "$SITE_PACKAGES" \
           -r requirements.txt
@@ -84,7 +85,6 @@ jobs:
           --platform macosx_10_15_x86_64 \
           --python-version 3.11 \
           --abi cp311 \
-          --only-binary :all: \
           --no-deps \
           --target "$SITE_PACKAGES" \
           pyinstaller
