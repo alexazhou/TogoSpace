@@ -44,6 +44,7 @@ jobs:
       with:
         python-version: '3.11'
 
+    # ── x86_64: 通过 Rosetta 2 + pip --platform 强制下载 x86_64 wheels ──
     - name: Set up x86_64 venv via Rosetta 2
       if: matrix.arch == 'x86_64'
       run: |
@@ -54,26 +55,54 @@ jobs:
         echo "Python: $PYTHON_BIN"
         lipo -info "$PYTHON_BIN"
 
-        # 设置 _PYTHON_HOST_PLATFORM 强制 pip 识别为 x86_64 平台
-        # 否则 setup-python 安装的 arm64 路径下的 Python 会让 pip 下载 arm64 wheels
-        export _PYTHON_HOST_PLATFORM="macosx-11.0-x86_64"
-        echo "_PYTHON_HOST_PLATFORM=$_PYTHON_HOST_PLATFORM" >> $GITHUB_ENV
-
         # 用 arch -x86_64 创建 x86_64 虚拟环境
         arch -x86_64 python3 -m venv "$RUNNER_TEMP/x86_64-venv"
         VENV="$RUNNER_TEMP/x86_64-venv"
 
-        # 在 x86_64 环境中安装依赖（现在 pip 会下载 x86_64 wheels）
+        # 升级 pip（纯 Python，不受平台影响）
         "$VENV/bin/python" -m pip install --upgrade pip
-        "$VENV/bin/pip" install -r requirements.txt
-        "$VENV/bin/pip" install pyinstaller
+
+        # 获取 site-packages 路径
+        SITE_PACKAGES=$("$VENV/bin/python" -c "import site; print(site.getsitepackages()[0])")
+        echo "site-packages: $SITE_PACKAGES"
+
+        # 使用 --platform 强制 pip 下载 x86_64 wheels
+        # --platform: 指定目标平台
+        # --python-version: 指定 Python 版本
+        # --abi: 指定 ABI
+        # --only-binary :all:: 只使用预编译 wheel，不从源码编译
+        # --target: 安装到指定目录（--platform 的必要参数）
+        "$VENV/bin/pip" install \
+          --platform macosx_10_15_x86_64 \
+          --python-version 3.11 \
+          --abi cp311 \
+          --only-binary :all: \
+          --target "$SITE_PACKAGES" \
+          -r requirements.txt
+
+        "$VENV/bin/pip" install \
+          --platform macosx_10_15_x86_64 \
+          --python-version 3.11 \
+          --abi cp311 \
+          --only-binary :all: \
+          --target "$SITE_PACKAGES" \
+          pyinstaller
 
         # 验证架构
         echo "=== Architecture verification ==="
         "$VENV/bin/python" --version
         "$VENV/bin/python" -c "import platform; print(f'Arch: {platform.machine()}')"
-        "$VENV/bin/python" -c "import sysconfig; print(f'Platform: {sysconfig.get_platform()}')"
-        "$VENV/bin/pip" show pillow 2>/dev/null | head -3 || true
+        # 验证 Pillow 是否为 x86_64
+        "$VENV/bin/python" -c "
+        from PIL import features
+        print(f'Pillow features: {features.check(\"avif\")}')
+        " 2>&1 || true
+        # 直接检查 .so 文件架构
+        PIL_SO=$(find "$SITE_PACKAGES" -name "_avif*.so" -o -name "_imaging*.so" 2>/dev/null | head -1)
+        if [ -n "$PIL_SO" ]; then
+          echo "PIL .so: $PIL_SO"
+          lipo -info "$PIL_SO" || true
+        fi
 
         # 将 x86_64 venv 加入 PATH（后续步骤自动使用）
         echo "$VENV/bin" >> $GITHUB_PATH
