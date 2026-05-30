@@ -92,6 +92,7 @@ application = tornado.web.Application([
 
     # Room (运行时)
     (r"/rooms/list.json",                           roomController.RoomListHandler),
+    (r"/rooms/last_messages.json",                  roomController.RoomLastMessagesHandler),
     (r"/rooms/(\d+)/messages/list.json",            roomController.RoomMessagesHandler),
     (r"/rooms/(\d+)/messages/send.json",            roomController.RoomMessagesHandler),
     (r"/rooms/(\d+)/messages/(\d+)/escalate_to_immediate.json", roomController.EscalateMessageToImmediateHandler),

@@ -641,6 +641,47 @@ class TestDalManagers(ServiceTestCase):
         assert [m.content for m in all_paged] == ["hello", "world", "again"]
         assert has_more_all is False
 
+    async def test_room_message_manager_get_last_messages_by_room_ids(self):
+        await self._reset_tables()
+
+        team = await gtTeamManager.save_team(GtTeam(name="last_msg_team"))
+        room_a = await gtRoomManager.save_room(GtRoom(
+            team_id=team.id,
+            name="room_a",
+            type=RoomType.GROUP,
+            initial_topic="",
+            max_rounds=5,
+            agent_ids=[],
+        ))
+        room_b = await gtRoomManager.save_room(GtRoom(
+            team_id=team.id,
+            name="room_b",
+            type=RoomType.GROUP,
+            initial_topic="",
+            max_rounds=5,
+            agent_ids=[],
+        ))
+        room_c = await gtRoomManager.save_room(GtRoom(
+            team_id=team.id,
+            name="room_c",
+            type=RoomType.GROUP,
+            initial_topic="",
+            max_rounds=5,
+            agent_ids=[],
+        ))
+
+        await gtRoomMessageManager.append_room_message(room_a.id, 1, "a-1", "2026-03-23T10:00:00")
+        await gtRoomMessageManager.append_room_message(room_b.id, 1, "b-1", "2026-03-23T10:01:00")
+        await gtRoomMessageManager.append_room_message(room_a.id, 1, "a-2", "2026-03-23T10:02:00")
+        await gtRoomMessageManager.append_room_message(room_b.id, 1, "b-2", "2026-03-23T10:03:00")
+        await gtRoomMessageManager.append_room_message(room_a.id, 1, "a-immediate", "2026-03-23T10:04:00", insert_immediately=True)
+
+        rows = await gtRoomMessageManager.get_last_messages_by_room_ids([room_b.id, room_c.id, room_a.id])
+
+        assert [row.room_id for row in rows] == [room_b.id, room_a.id]
+        assert [row.content for row in rows] == ["b-2", "a-immediate"]
+        assert rows[1].seq is None
+
     # ------------------------------------------------------------------
     # gtAgentHistoryManager
     # ------------------------------------------------------------------

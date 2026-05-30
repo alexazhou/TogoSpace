@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 # 内部包
 from controller.baseController import BaseHandler
-from dal.db import gtTeamManager, gtRoomManager, gtAgentManager
+from dal.db import gtTeamManager, gtRoomManager, gtRoomMessageManager
 from model.dbModel.gtRoom import GtRoom
 from service import roomService, teamService, agentService
 from service.roomService import ChatRoom
@@ -38,6 +38,10 @@ class UpdateAgentsRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     content: str | None = None
     insert_immediately: bool = False
+
+
+class RoomLastMessagesRequest(BaseModel):
+    room_ids: List[int] = Field(default_factory=list)
 
 
 class RoomApiResponse(BaseModel):
@@ -148,6 +152,20 @@ class RoomListHandler(BaseHandler):
                 )
 
         self.return_json({"rooms": data})
+
+
+class RoomLastMessagesHandler(BaseHandler):
+    """POST /rooms/last_messages.json - 按 room_ids 批量获取每个房间最后一条消息"""
+
+    async def post(self) -> None:
+        request = self.parse_request(RoomLastMessagesRequest)
+        room_ids = [room_id for room_id in request.room_ids if room_id > 0]
+        if not room_ids:
+            self.return_json({"messages": []})
+            return
+
+        last_messages = await gtRoomMessageManager.get_last_messages_by_room_ids(room_ids)
+        self.return_json({"messages": last_messages})
 
 
 class RoomMessagesHandler(BaseHandler):

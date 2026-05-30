@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+import peewee
+from peewee import fn
 
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from . import gtRoomManager
@@ -69,6 +71,42 @@ async def get_room_messages(
 
     rows = await query.order_by(GtRoomMessage.seq.asc(nulls='last'), GtRoomMessage.id.asc()).aio_execute()
     return rows, False
+
+
+async def get_last_messages_by_room_ids(room_ids: list[int]) -> list[GtRoomMessage]:
+    """批量获取多个房间的最后一条消息，保持 room_ids 原始顺序。"""
+    if not room_ids:
+        return []
+
+    room_message_fields = tuple(GtRoomMessage._meta.sorted_fields)
+    window = peewee.Window(
+        partition_by=[GtRoomMessage.room_id],
+        order_by=[
+            GtRoomMessage.seq.desc(nulls='first'),
+            GtRoomMessage.id.desc(),
+        ],
+    ).alias("last_message_window")
+    ranked_messages = (
+        GtRoomMessage
+        .select(
+            *room_message_fields,
+            fn.ROW_NUMBER().over(window).alias("rn"),
+        )
+        .where(GtRoomMessage.room_id.in_(room_ids))  # type: ignore[attr-defined]
+        .window(window)
+        .alias("ranked_messages")
+    )
+    rows = list(await (
+        GtRoomMessage
+        .select(
+            *[getattr(ranked_messages.c, field.name) for field in room_message_fields],
+        )
+        .from_(ranked_messages)
+        .where(ranked_messages.c.rn == 1)
+        .aio_execute()
+    ))
+    row_map = {row.room_id: row for row in rows}
+    return [row_map[room_id] for room_id in room_ids if room_id in row_map]
 
 
 async def delete_messages_by_team(team_id: int) -> int:
