@@ -66,17 +66,13 @@ jobs:
         SITE_PACKAGES=$("$VENV/bin/python" -c "import site; print(site.getsitepackages()[0])")
         echo "site-packages: $SITE_PACKAGES"
 
-        # 使用 --platform 强制 pip 下载 x86_64 wheels
-        # --platform: 指定目标平台
-        # --python-version: 指定 Python 版本
-        # --abi: 指定 ABI
-        # --only-binary :all:: 只使用预编译 wheel，不从源码编译
-        # --target: 安装到指定目录（--platform 的必要参数）
+        # 使用 --platform 强制 pip 优先下载 x86_64 wheels
+        # 不使用 --only-binary :all:，允许对没有 x86_64 wheel 的纯 Python 包
+        # 回退到源码安装（源码包跨平台通用，构建时使用 x86_64 Python）
         "$VENV/bin/pip" install \
           --platform macosx_10_15_x86_64 \
           --python-version 3.11 \
           --abi cp311 \
-          --only-binary :all: \
           --target "$SITE_PACKAGES" \
           -r requirements.txt
 
@@ -84,7 +80,6 @@ jobs:
           --platform macosx_10_15_x86_64 \
           --python-version 3.11 \
           --abi cp311 \
-          --only-binary :all: \
           --target "$SITE_PACKAGES" \
           pyinstaller
 
