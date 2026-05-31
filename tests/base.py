@@ -219,6 +219,7 @@ class ServiceTestCase:
         elif handler is not None:
             async def _wrapped_handler(*args, **kwargs):
                 kwargs.pop("on_progress", None)
+                kwargs.pop("on_status_event", None)
                 try:
                     value = await handler(*args, **kwargs)
                 except Exception as e:
