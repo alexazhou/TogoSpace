@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 # 内部包
 from controller.baseController import BaseHandler
-from dal.db import gtTeamManager, gtRoomManager, gtRoomMessageManager
+from dal.db import gtTeamManager, gtRoomManager, gtRoomMessageManager, gtAgentManager
 from model.dbModel.gtRoom import GtRoom
 from service import roomService, teamService, agentService
 from service.roomService import ChatRoom

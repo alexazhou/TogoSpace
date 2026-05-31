@@ -504,9 +504,9 @@ class AgentTurnRunner:
                 patch = AgentActivityMeta(
                     request_state="",
                     retry_delay_seconds=0,
-                    retry_attempt=request_retry_state["attempt"],
-                    retry_max_attempts=request_retry_state["max_attempts"],
-                    last_retry_error=request_retry_state["last_retry_error"],
+                    retry_attempt=int(request_retry_state["attempt"]) if request_retry_state["attempt"] is not None else 0,
+                    retry_max_attempts=int(request_retry_state["max_attempts"]) if request_retry_state["max_attempts"] is not None else 0,
+                    last_retry_error=str(request_retry_state["last_retry_error"]) if request_retry_state["last_retry_error"] is not None else "",
                 )
                 return patch
 
