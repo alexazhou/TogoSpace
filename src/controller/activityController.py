@@ -9,16 +9,29 @@ logger = logging.getLogger(__name__)
 
 
 class AgentActivitiesHandler(BaseHandler):
-    """GET /agents/{agent_id}/activities.json?exclude=AGENT_STATE"""
+    """GET /agents/{agent_id}/activities.json?exclude=AGENT_STATE&limit=50&before_id=123"""
 
     async def get(self, agent_id: str) -> None:
         exclude_raw = self.get_arguments("exclude")
         exclude_types = [AgentActivityType[name.upper()] for name in exclude_raw]
-        activities = await gtAgentActivityManager.list_agent_activities(
+        limit_raw = self.get_query_argument("limit", "100")
+        before_id_raw = self.get_query_argument("before_id", None)
+        limit = max(1, min(int(limit_raw), 100))
+        before_id = int(before_id_raw) if before_id_raw is not None else None
+        activities, has_more = await gtAgentActivityManager.list_agent_activities_page(
             int(agent_id),
+            limit=limit,
+            before_id=before_id,
             exclude_types=exclude_types or None,
         )
-        self.return_json({"activities": activities})
+        self.return_json({
+            "activities": activities,
+            "pagination": {
+                "has_more": has_more,
+                "before_id": before_id,
+                "limit": limit,
+            },
+        })
 
 
 class TeamActivitiesHandler(BaseHandler):

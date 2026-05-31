@@ -57,6 +57,26 @@ async def list_agent_activities(
     return await query.order_by(GtAgentActivity.id.desc()).limit(limit).aio_execute()
 
 
+async def list_agent_activities_page(
+    agent_id: int,
+    limit: int = 100,
+    before_id: int | None = None,
+    exclude_types: list[AgentActivityType] | None = None,
+) -> tuple[list[GtAgentActivity], bool]:
+    """分页查询某个 Agent 的活动记录，按 id desc 排序。"""
+    query = GtAgentActivity.select().where(GtAgentActivity.agent_id == agent_id)
+    if exclude_types:
+        query = query.where(GtAgentActivity.activity_type.not_in(exclude_types))
+    if before_id is not None:
+        query = query.where(GtAgentActivity.id < before_id)
+
+    rows = await query.order_by(GtAgentActivity.id.desc()).limit(limit + 1).aio_execute()
+    has_more = len(rows) > limit
+    if has_more:
+        rows = rows[:limit]
+    return rows, has_more
+
+
 async def list_agent_activities_by_status(agent_id: int, status: AgentActivityStatus, limit: int = 100) -> list[GtAgentActivity]:
     """查询某个 Agent 指定状态的活动记录，按 id desc 排序。"""
     return await (
