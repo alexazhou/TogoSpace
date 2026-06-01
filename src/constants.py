@@ -1,11 +1,7 @@
-from __future__ import annotations
-
 import re
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any, Optional, Union
-
-if TYPE_CHECKING:
-    from typing import Self
+from typing import Any, Optional, Union
+from typing_extensions import Self
 
 
 class EnhanceEnum(Enum):
