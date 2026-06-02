@@ -6,8 +6,7 @@ from util import jsonUtil, llmApiUtil
 
 logger = logging.getLogger(__name__)
 
-# 这些模型默认会输出 reasoning_content 字段，需要自动开启 thinking 模式，
-# 否则历史消息中缺少 reasoning_content 会导致 API 报错。
+# 这些模型的服务商在默认缺省参数下会自动开启 thinking 模式
 _AUTO_ENABLE_THINKING_MODELS: tuple[str, ...] = (
     "deepseek-r1",
     "deepseek-reasoner",
