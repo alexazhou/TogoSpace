@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-import json
 import logging
 
-from util import llmApiUtil
+from util import jsonUtil, llmApiUtil
 
 logger = logging.getLogger(__name__)
+
+_THINKING_MODELS: tuple[str, ...] = (
+    "deepseek-r1",
+    "deepseek-reasoner",
+    "deepseek-v4",
+    "deepseek-pro",
+    "mimo-v2.5",
+    "momo-v2.5-pro",
+)
 
 
 class LlmRequestRule:
@@ -16,29 +24,23 @@ class LlmRequestRule:
         raise NotImplementedError
 
 
-# 与 client.py 中的 _THINKING_MODE_MODEL_PREFIXES 保持同步
-_THINKING_MODE_MODEL_PREFIXES = (
-    "deepseek-r1",
-    "deepseek-reasoner",
-    "deepseek-v4",
-    "deepseek-pro",
-)
-
-
-def _is_thinking_mode_model(model: str) -> bool:
-    """判断模型是否为 thinking mode 模型（需要 reasoning_content 字段）。"""
+def _model_in_list(model: str, prefixes: tuple[str, ...]) -> bool:
+    """判断 model 名称是否匹配前缀列表中的任意一个（大小写不敏感）。"""
     model_lower = model.lower()
-    return any(model_lower.startswith(prefix) for prefix in _THINKING_MODE_MODEL_PREFIXES)
+    return any(name in model_lower for name in prefixes)
 
 
-def _is_thinking_enabled(request: llmApiUtil.OpenAIRequest) -> bool:
+def _is_thinking_enabled(
+    request: llmApiUtil.OpenAIRequest,
+    model_prefixes: tuple[str, ...],
+) -> bool:
     """判断当前请求是否开启了思考模式。
 
     触发方式（优先级从高到低）：
     1. provider_params 中 thinking.type == "enabled" → 开启
     2. provider_params 中 thinking.type == "disabled" → 显式关闭，不触发
     3. provider_params 中设置了 reasoning_effort → 开启
-    4. 模型名称隐式启用（如 deepseek-v4-pro）→ 开启
+    4. 模型名称匹配 model_prefixes → 开启
     """
     thinking = (request.provider_params or {}).get("thinking") or {}
     if isinstance(thinking, dict):
@@ -50,7 +52,7 @@ def _is_thinking_enabled(request: llmApiUtil.OpenAIRequest) -> bool:
     reasoning_effort = (request.provider_params or {}).get("reasoning_effort")
     if reasoning_effort not in (None, ""):
         return True
-    if _is_thinking_mode_model(request.model):
+    if _model_in_list(request.model, model_prefixes):
         return True
     return False
 
@@ -59,7 +61,9 @@ class StripRequiredToolChoiceForReasoningRule(LlmRequestRule):
     """开启思考模式时，不能强制使用工具，否则 deepseek-v4-pro 等模型会报错。"""
 
     def check_match(self, request: llmApiUtil.OpenAIRequest) -> bool:
-        return request.tool_choice == "required" and _is_thinking_enabled(request)
+        return request.tool_choice == "required" and _is_thinking_enabled(
+            request, _THINKING_MODELS,
+        )
 
     def apply(self, request: llmApiUtil.OpenAIRequest) -> llmApiUtil.OpenAIRequest:
         return request.model_copy(update={"tool_choice": None})
@@ -72,7 +76,7 @@ class FillMissingReasoningContentRule(LlmRequestRule):
     """
 
     def check_match(self, request: llmApiUtil.OpenAIRequest) -> bool:
-        if not _is_thinking_enabled(request):
+        if not _is_thinking_enabled(request, _THINKING_MODELS):
             return False
         return any(
             msg.role == llmApiUtil.OpenaiApiRole.ASSISTANT
@@ -94,7 +98,7 @@ class FillMissingReasoningContentRule(LlmRequestRule):
         return request.model_copy(update={"messages": new_messages})
 
 
-class SanitizeToolCallArgumentsRule(LlmRequestRule):
+class RepairToolArgumentsRule(LlmRequestRule):
     """修复历史消息中 tool_call 的无效 JSON arguments。
 
     LLM 返回的 tool_calls 中 arguments 可能包含无效 JSON，
@@ -105,7 +109,7 @@ class SanitizeToolCallArgumentsRule(LlmRequestRule):
         return any(
             msg.tool_calls is not None
             and any(
-                not self._is_valid_json(tc.function.get("arguments", "{}"))
+                not jsonUtil.is_valid_json(tc.function.get("arguments", "{}"))
                 for tc in msg.tool_calls
             )
             for msg in request.messages
@@ -120,7 +124,7 @@ class SanitizeToolCallArgumentsRule(LlmRequestRule):
             new_tool_calls = []
             for tc in msg.tool_calls:
                 args = tc.function.get("arguments", "{}")
-                if not self._is_valid_json(args):
+                if not jsonUtil.is_valid_json(args):
                     logger.warning(
                         "sanitizing invalid tool_call arguments: tool_call_id=%s, function=%s",
                         tc.id, tc.function.get("name"),
@@ -132,21 +136,11 @@ class SanitizeToolCallArgumentsRule(LlmRequestRule):
             new_messages.append(msg.model_copy(update={"tool_calls": new_tool_calls}))
         return request.model_copy(update={"messages": new_messages})
 
-    @staticmethod
-    def _is_valid_json(value: str) -> bool:
-        if not value:
-            return True
-        try:
-            json.loads(value)
-            return True
-        except (json.JSONDecodeError, ValueError):
-            return False
-
 
 _RULES: tuple[LlmRequestRule, ...] = (
     StripRequiredToolChoiceForReasoningRule(),
     FillMissingReasoningContentRule(),
-    SanitizeToolCallArgumentsRule(),
+    RepairToolArgumentsRule(),
 )
 
 

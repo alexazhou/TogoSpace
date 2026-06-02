@@ -301,3 +301,14 @@ def annotation_to_type(annotation_type) -> type:
         return list
 
     return annotation_type
+
+
+def is_valid_json(value: str) -> bool:
+    """判断字符串是否为合法 JSON。"""
+    if not value:
+        return True
+    try:
+        json.loads(value)
+        return True
+    except (json.JSONDecodeError, ValueError):
+        return False
