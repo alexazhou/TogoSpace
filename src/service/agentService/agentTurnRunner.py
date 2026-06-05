@@ -909,4 +909,3 @@ class AgentTurnRunner:
 
         # 活动记录：COMPACT SUCCEEDED
         await self._finish_activity(compact_activity.id, status=AgentActivityStatus.SUCCEEDED)
-        return True
