@@ -393,3 +393,7 @@
 ### V22
 - [产品文档](./versions/v22/v22_step1_product.md)
 - [技术文档](./versions/v22/v22_step2_technical.md)
+
+### V23
+- [产品文档](./versions/v23/v23_step1_product.md)
+- [技术文档](./versions/v23/v23_step2_technical.md)
