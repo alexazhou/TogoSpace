@@ -293,18 +293,23 @@ async def get_agent_info(agent_name: Optional[str] = None, _context: ToolCallCon
 
     async def _build_agent_dict(agent: Any, *, detail: bool) -> dict[str, Any]:
         agent_id = agent.gt_agent.id
-        dept = await deptService.get_agent_dept(team_id, agent_id)
+        depts_with_paths: list[tuple[GtDept, str]] = await deptService.get_agent_depts(team_id, agent_id)
         first_task = await gtScheculeTaskManager.get_first_unfinish_task(agent_id) if agent.status == AgentStatus.FAILED else None
         info: dict[str, Any] = {
             "id": agent_id,
             "name": agent.gt_agent.name,
             "status": agent.status.name,
-            "department": dept.name if dept is not None else "off_board",
+            "departments": [
+                {
+                    "name": path,
+                    "position": "manager" if dept.manager_id == agent_id else "member"
+                }
+                for dept, path in depts_with_paths
+            ] if depts_with_paths else None,
         }
         if first_task is not None:
             info["error_summary"] = _truncate_error_message(first_task.error_message)
         if detail:
-            info["position"] = "manager" if dept is not None and dept.manager_id == agent_id else "member"
             info["rooms"] = [
                 room.name
                 for room in roomService.get_all_rooms()

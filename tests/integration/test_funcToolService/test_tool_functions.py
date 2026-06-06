@@ -329,12 +329,76 @@ class TestToolFunctions(ServiceTestCase):
         failed_entry = next(agent for agent in list_result["agents"] if agent["name"] == "bob")
         assert "llm provider unavailable" in failed_entry["error_summary"]
         assert detail_result["success"]
-        assert detail_result["agent"]["department"] == "ops"
-        assert detail_result["agent"]["position"] == "member"
+        assert detail_result["agent"]["departments"] == [{"name": "ops", "position": "member"}]
         assert "ops-room" in detail_result["agent"]["rooms"]
         assert detail_result["agent"]["can_wake_up"] is True
         assert wake_result["success"]
         assert bob_runtime.resumed is True
+
+    async def test_get_agent_info_departments_coverage(self, monkeypatch):
+        """测试获取 Agent 信息时，单个部门、多个部门、无部门的返回情况。"""
+        team = await gtTeamManager.get_team(TEAM)
+        assert team is not None
+        await gtTeamManager.set_team_enabled(team.id, False)
+        
+        alice = await gtAgentManager.get_agent(team.id, "alice")
+        bob = await gtAgentManager.get_agent(team.id, "bob")
+        char = await gtAgentManager.get_agent(team.id, "char", status=None)
+        assert alice is not None and bob is not None and char is not None
+        
+        # char 不在树中
+        await deptService.overwrite_dept_tree(
+            team.id,
+            GtDept(
+                name="parent_dept",
+                responsibility="parent",
+                manager_id=alice.id,
+                agent_ids=[alice.id, bob.id],
+                children=[
+                    GtDept(
+                        name="child_dept",
+                        responsibility="child",
+                        manager_id=bob.id,
+                        agent_ids=[alice.id, bob.id],
+                        children=[]
+                    )
+                ],
+            ),
+        )
+        
+        alice_runtime = _FakeRuntimeAgent(alice, AgentStatus.IDLE)
+        bob_runtime = _FakeRuntimeAgent(bob, AgentStatus.IDLE)
+        char_runtime = _FakeRuntimeAgent(char, AgentStatus.IDLE)
+        monkeypatch.setattr(
+            agentService,
+            "get_team_agents",
+            lambda team_id: [alice_runtime, bob_runtime, char_runtime],
+        )
+
+        ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=team.id, chat_room=None)
+        
+        alice_detail = await get_agent_info(agent_name="alice", _context=ctx)
+        bob_detail = await get_agent_info(agent_name="bob", _context=ctx)
+        char_detail = await get_agent_info(agent_name="char", _context=ctx)
+
+        assert alice_detail["success"]
+        alice_depts = alice_detail["agent"]["departments"]
+        assert len(alice_depts) == 2
+        assert sorted(alice_depts, key=lambda x: x["name"]) == [
+            {"name": "parent_dept", "position": "manager"},
+            {"name": "parent_dept / child_dept", "position": "member"}
+        ]
+        
+        assert bob_detail["success"]
+        bob_depts = bob_detail["agent"]["departments"]
+        assert len(bob_depts) == 2
+        assert sorted(bob_depts, key=lambda x: x["name"]) == [
+            {"name": "parent_dept", "position": "member"},
+            {"name": "parent_dept / child_dept", "position": "manager"}
+        ]
+        
+        assert char_detail["success"]
+        assert char_detail["agent"]["departments"] is None
 
     async def test_wake_up_agent_rejects_non_failed_member(self, monkeypatch):
         """非 FAILED 成员不能被唤醒。"""

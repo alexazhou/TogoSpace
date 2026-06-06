@@ -242,13 +242,27 @@ async def get_off_board_agents(team_id: int) -> list[GtAgent]:
     return await gtAgentManager.get_team_all_agents(team_id, EmployStatus.OFF_BOARD)
 
 
-async def get_agent_dept(team_id: int, agent_id: int) -> GtDept | None:
-    """查询 Agent 所在部门；不在任何部门时返回 None。"""
+async def get_agent_depts(team_id: int, agent_id: int) -> list[tuple[GtDept, str]]:
+    """查询 Agent 所在的所有部门及其完整路径；不在任何部门时返回空列表。"""
     all_depts = await gtDeptManager.get_all_depts(team_id)
+    
+    dept_map = {d.id: d for d in all_depts if d.id is not None}
+    
+    def _build_path(d: GtDept) -> str:
+        parts = []
+        curr: GtDept | None = d
+        while curr is not None:
+            parts.append(curr.name)
+            curr = dept_map.get(curr.parent_id) if curr.parent_id is not None else None
+        return " / ".join(reversed(parts))
+
+    results: list[tuple[GtDept, str]] = []
     for dept in all_depts:
         if agent_id in dept.agent_ids:
-            return dept
-    return None
+            path = _build_path(dept)
+            results.append((dept, path))
+            
+    return results
 
 
 async def delete_dept(team_id: int, dept_id: int, recursive: bool = False) -> None:

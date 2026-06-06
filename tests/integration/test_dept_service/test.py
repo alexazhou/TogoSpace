@@ -513,13 +513,13 @@ class TestDeptService(ServiceTestCase):
         charlie = await gtAgentManager.get_agent(team.id, "charlie", status=None)
         assert alice is not None and bob is not None and charlie is not None
 
-        alice_dept = await deptService.get_agent_dept(team.id, alice.id)
-        assert alice_dept is not None
-        assert alice_dept.name == "found_dept"
+        alice_depts = await deptService.get_agent_depts(team.id, alice.id)
+        assert len(alice_depts) == 1
+        assert alice_depts[0][0].name == "found_dept"
 
         # charlie 不在任何部门
-        charlie_dept = await deptService.get_agent_dept(team.id, charlie.id)
-        assert charlie_dept is None
+        charlie_depts = await deptService.get_agent_depts(team.id, charlie.id)
+        assert charlie_depts == []
 
     # ------------------------------------------------------------------
     # overwrite_dept_tree 部门房间 agents
