@@ -334,3 +334,23 @@ class SkillListHandler(BaseHandler):
                 for s in skills
             ],
         })
+
+
+class ToolListHandler(BaseHandler):
+    """GET /config/tools/list.json — 返回系统可用的 Tool 列表。"""
+
+    async def get(self) -> None:
+        from service.agentService.toolRegistry import CATEGORY_CONFIG
+        tools = []
+        for name, category in CATEGORY_CONFIG.items():
+            if category.name not in ("ADMIN", "BASIC"):
+                tools.append({"name": name, "category": category.name})
+        
+        # Add predefined categories
+        tools.extend([
+            {"name": "Category:Read", "category": "CATEGORY"},
+            {"name": "Category:Write", "category": "CATEGORY"},
+            {"name": "Category:Execute", "category": "CATEGORY"},
+        ])
+        
+        self.return_json({"tools": tools})

@@ -66,6 +66,7 @@ application = tornado.web.Application([
     (r"/config/llm_services/(\d+)/set_default.json",  settingController.LlmServiceSetDefaultHandler),
     (r"/config/language.json",                       settingController.LanguageHandler),
     (r"/config/skills/list.json",                   settingController.SkillListHandler),
+    (r"/config/tools/list.json",                    settingController.ToolListHandler),
 
     # System Status & Quick Init (V13)
     (r"/system/status.json",                         systemController.SystemStatusHandler),
@@ -87,6 +88,7 @@ application = tornado.web.Application([
     (r"/agents/(\d+)/resume.json",                  agentController.AgentResumeHandler),
     (r"/agents/(\d+)/stop.json",                    agentController.AgentStopHandler),
     (r"/agents/(\d+)/clear_data.json",              agentController.AgentClearDataHandler),
+    (r"/agents/(\d+)/modify_properties.json",       agentController.AgentModifyPropertiesHandler),
     (r"/agents/(\d+)/supervise.json",               superviseController.AgentSuperviseHandler),
     (r"/teams/(\d+)/agents/save.json",              agentController.TeamAgentsSaveHandler),
     (r"/teams/(\d+)/agents/([^/]+).json",           agentController.AgentDetailHandler),

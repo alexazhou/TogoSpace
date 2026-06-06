@@ -39,6 +39,8 @@ async def _build_agent_detail_payload(agent: GtAgent) -> dict:
     result["driver"] = agent.driver.value
     result["status"] = runtime_status_map.get(agent.id, AgentStatus.IDLE).name
     result["error_message"] = current_error_message
+    result["allow_tools"] = agent.allow_tools
+    result["allow_skills"] = agent.allow_skills
     return result
 
 
@@ -277,3 +279,33 @@ class AgentStopHandler(BaseHandler):
         agent.cancel_current_turn()
 
         self.return_json({"status": "stopped", "agent_id": agent.gt_agent.id})
+
+
+class AgentModifyPropertiesRequest(BaseModel):
+    allow_tools: list[str] | None = None
+    allow_skills: list[str] | None = None
+
+
+class AgentModifyPropertiesHandler(BaseHandler):
+    """POST /agents/<agent_id>/modify_properties.json - 修改 Agent 的运行时属性 (allow_tools, allow_skills)"""
+
+    async def post(self, agent_id_str: str) -> None:
+        agent_id = int(agent_id_str)
+        agent = await gtAgentManager.get_agent_by_id(agent_id)
+        assertUtil.assertNotNull(agent, error_message=f"Agent ID '{agent_id}' not found", error_code="agent_not_found")
+
+        request = self.parse_request(AgentModifyPropertiesRequest)
+
+        if request.allow_tools is not None:
+            error_msg = validate_tool_allow_specs(request.allow_tools)
+            assertUtil.assertEqual(error_msg, None, error_message=error_msg or "", error_code="invalid_tool_allow_specs")
+            agent.allow_tools = request.allow_tools
+        
+        if request.allow_skills is not None:
+            agent.allow_skills = request.allow_skills
+
+        await agent.aio_save()
+        gtAgentManager.cache_agents(agent)
+
+        self.return_json(await _build_agent_detail_payload(agent))
+
