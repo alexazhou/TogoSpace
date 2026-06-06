@@ -26,57 +26,16 @@ git push origin master
 # 创建 tag
 git tag v0.1.12
 
-# 推送 tag（触发 CI 构建 arm64 版本）
+# 推送 tag（触发 CI 构建）
 git push origin v0.1.12
 ```
 
 推送 tag 后，GitHub Actions 会自动触发：
-- 构建 arm64 版本
-- 签名 + 公证
-- 创建 Release 并上传安装包
+- 自动构建 arm64 和 x86_64 两个平台的版本
+- 执行应用签名与苹果公证
+- 自动创建 Draft Release 并上传安装包
 
-## 3. 本地构建（x86_64 版本）
-
-CI 仅构建 arm64，x86_64 需本地构建并上传。
-
-### 3.1 准备配置文件
-
-确保 `scripts/build_config.json` 存在并配置正确：
-```json
-{
-  "apple_id": "your-apple-id@example.com",
-  "app_specific_password": "xxxx-xxxx-xxxx-xxxx",
-  "team_id": "YOUR_TEAM_ID",
-  "signing_identity_hash": "YOUR_SIGNING_IDENTITY_HASH"
-}
-```
-
-补充说明：
-
-- 如果在 Codex 中执行签名相关命令，需要申请提权运行。
-- 原因是沙盒环境下通常无法访问登录钥匙串中的 codesign identity，像 `security find-identity -v -p codesigning` 可能会错误显示 `0 valid identities found`。
-- 因此，`python scripts/build_release.py ...`、`codesign ...`、`security find-identity ...` 这类命令在 Codex 中都应优先按提权命令执行。
-
-### 3.2 执行构建脚本
-
-```bash
-# 构建带签名和公证的 x86_64 版本
-python scripts/build_release.py --arch x86_64
-
-# 或跳过公证（仅签名打包，用于快速测试）
-python scripts/build_release.py --arch x86_64 --skip-notarize
-```
-
-输出：`dist/TogoSpace-0.1.12-macos-x86_64.zip`
-
-## 4. 上传到 Release
-
-```bash
-# 上传 x86_64 安装包到已有 Release
-gh release upload v0.1.12 dist/TogoSpace-0.1.12-macos-x86_64.zip
-```
-
-## 5. 验证 Release
+## 3. 验证 Release
 
 ```bash
 # 查看 Release 信息
@@ -85,9 +44,9 @@ gh release view v0.1.12
 
 确认包含两个安装包：
 - `TogoSpace-0.1.12-macos-arm64.zip` (CI 构建)
-- `TogoSpace-0.1.12-macos-x86_64.zip` (本地构建)
+- `TogoSpace-0.1.12-macos-x86_64.zip` (CI 构建)
 
-## 6. 补充 Release Note
+## 4. 补充 Release Note
 
 Release 创建并确认产物齐全后，应补充 GitHub Release Note。
 
@@ -131,7 +90,7 @@ Release Note 注意事项：
 - 如果某项工作流失败但后来重跑成功，应以最终发布结果为准，不要把中间失败过程写进 Release Note。
 - 如需补写旧版本 Release Note，也应按对应版本区间对比，例如 `v0.1.11...v0.1.12`。
 
-## 7. 完整流程示例
+## 5. 完整流程示例
 
 ```bash
 # 1. 更新版本号
@@ -148,16 +107,10 @@ git push origin v0.1.12
 # 3. 等待 CI 完成（约 5-10 分钟）
 # 在 GitHub Actions 页面查看进度
 
-# 4. 本地构建 x86_64
-python scripts/build_release.py --arch x86_64
-
-# 5. 上传到 Release
-gh release upload v0.1.12 dist/TogoSpace-0.1.12-macos-x86_64.zip
-
-# 6. 验证
+# 4. 验证
 gh release view v0.1.12
 
-# 7. 补充 Release Note
+# 5. 补充 Release Note
 gh release edit v0.1.12 --notes-file /tmp/v0.1.12-release-notes.md
 ```
 
@@ -173,13 +126,14 @@ gh release edit v0.1.12 --notes-file /tmp/v0.1.12-release-notes.md
 git tag -f v0.1.12
 git push origin master --tags --force
 
-# 3. 本地构建 x86_64 并上传（覆盖旧文件）
-gh release upload v0.1.12 dist/TogoSpace-0.1.12-macos-x86_64.zip --clobber
+# 3. CI 会自动重新执行构建并覆盖原有 Release 下的文件
 ```
 
-**注意：** tag 版本号（如 v0.1.12）必须与 `src/version.py` 中的版本号一致，CI 会自动构建 arm64 版本。
+**注意：** tag 版本号（如 v0.1.12）必须与 `src/version.py` 中的版本号一致，CI 才能正确打包并关联对应文件。
 
-### build_release.py 参数说明
+### build_release.py 参数说明 (供本地测试构建参考)
+
+虽然正式发布已交由 CI 完成，但若需在本地调试构建流程，可使用 `scripts/build_release.py`：
 
 | 参数 | 说明 |
 |------|------|
@@ -187,6 +141,17 @@ gh release upload v0.1.12 dist/TogoSpace-0.1.12-macos-x86_64.zip --clobber
 | `--action build,sign,notarize,zip` | 要执行的步骤（逗号分隔），默认全部流水线 |
 | `--action build,sign,zip` | 跳过公证，仅签名打包 |
 | `--clean` | 构建前清理 dist 和 build 目录 |
+
+如果执行本地构建与签名，需准备 `scripts/build_config.json`：
+```json
+{
+  "apple_id": "your-apple-id@example.com",
+  "app_specific_password": "xxxx-xxxx-xxxx-xxxx",
+  "team_id": "YOUR_TEAM_ID",
+  "signing_identity_hash": "YOUR_SIGNING_IDENTITY_HASH"
+}
+```
+*注意：在 Codex 等沙盒环境中测试签名需提权运行，否则无法访问钥匙串证书。*
 
 ### 常用命令
 
