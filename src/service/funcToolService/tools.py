@@ -12,6 +12,7 @@ from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service.roomService import ToolCallContext
 import service.roomService as roomService
+import service.skillService as skillService
 from service.agentService.toolRegistry import validate_tool_allow_specs
 from util import configUtil, i18nUtil
 
@@ -482,6 +483,7 @@ async def save_agent(
     model: str | None = None,
     driver: str = DriverType.TSP.value,
     allow_tools: list[str] | None = None,
+    allow_skills: list[str] | None = None,
     i18n: dict | None = None,
     overwrite_existing: bool = False,
     agent_id: int | None = None,
@@ -496,6 +498,7 @@ async def save_agent(
         driver: 驱动类型。可选值为 native、claude_sdk、tsp。无特别需要（如操作者明确指定）时建议省略，默认使用 tsp。
         allow_tools: 可见工具列表。支持具体工具名（如 "read_file"）或类别语法（如 "Category:Read"）。系统会自动合并类别和具体工具名。基础协作工具（Basic 类别）默认总是开启，无需显式包含。通常情况下此列表留空即可，系统会自动授予 Admin 以外的所有常规类别权限。
                      可用类别：Read, Write, Execute, Admin。注意：Admin 类别属于团队管理功能，严禁分配给除团队根主管以外的普通成员。
+        allow_skills: 可见技能列表。指定该成员可以加载的技能名称列表，如 ["frontend-design"]。调用 load_skill 工具时仅允许加载已授权的技能。留空表示不授权任何技能。
         i18n: 可选多语言数据。示例：{"display_name": {"zh-CN": "Alice", "en": "Alice"}}
         overwrite_existing: 是否允许覆盖当前团队中已存在的同名成员。默认 false；为 true 时，若同名成员已存在则执行更新。当传入 agent_id 时，此参数不生效。
         agent_id: 可选成员 ID。传入后按 ID 精确定位成员（忽略 overwrite_existing），此时 name 可用于重命名。
@@ -553,6 +556,7 @@ async def save_agent(
     agent.model = model or ""
     agent.driver = driver_type
     agent.allow_tools = allow_tools
+    agent.allow_skills = allow_skills
     agent.i18n = i18n or {}
 
     await gtAgentManager.batch_save_agents(team_id, [agent])
@@ -1150,3 +1154,46 @@ async def list_tasks(
         status=status,
         limit=limit,
     )
+
+
+async def load_skill(
+    skill_name: str,
+    _context: Optional[ToolCallContext] = None,
+) -> dict:
+    """加载指定技能的完整信息，包含详细操作指引和文件清单。
+
+    Args:
+        skill_name: 要加载的技能名称。仅能加载当前 Agent 已授权的技能，未授权的技能会被拒绝。
+    """
+    if not _context or not _context.agent_id:
+        return {"success": False, "message": "无法获取当前 Agent 上下文"}
+
+    agent = await gtAgentManager.get_agent_by_id(_context.agent_id)
+    if agent is None:
+        return {"success": False, "message": f"未找到 Agent（ID: {_context.agent_id}）"}
+
+    allow_skills = agent.allow_skills or []
+
+    if skill_name not in allow_skills:
+        return {"success": False, "message": f"技能 {skill_name} 未对当前 Agent 开放"}
+
+    skill_info = skillService.get_skill(skill_name)
+    if skill_info is None:
+        return {"success": False, "message": f"技能 {skill_name} 不存在"}
+
+    content = skillService.load_skill_content(skill_name)
+    if content is None:
+        return {"success": False, "message": f"读取技能 {skill_name} 内容失败"}
+
+    files = skillService.load_skill_files(skill_name)
+    if files is None:
+        files = []
+
+    return {
+        "success": True,
+        "skill_name": skill_info.name,
+        "skill_dir": skill_info.skill_dir,
+        "description": skill_info.description,
+        "content": content,
+        "files": files,
+    }

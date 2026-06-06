@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import yaml
+import service.skillService as skillService
 from dal.db import gtAgentManager, gtDeptManager
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService.prompts import (
@@ -180,6 +181,7 @@ async def build_agent_system_prompt(
     base_prompt_tmpl: str,
     identity_prompt_tmpl: str,
     is_root_leader: bool = False,
+    allow_skills: list[str] | None = None,
 ) -> str:
     dept_context = ""
     if team_id > 0:
@@ -208,4 +210,20 @@ async def build_agent_system_prompt(
         full_prompt += "\n\n" + TASK_COLLABORATION_GUIDE
         if is_root_leader:
             full_prompt += "\n\n" + ROOT_LEADER_GUIDE
+
+    # 注入已授权 Skill 概要
+    if allow_skills:
+        skill_lines = []
+        for skill_name in allow_skills:
+            skill_info = skillService.get_skill(skill_name)
+            if skill_info is not None:
+                skill_lines.append(f"- {skill_info.name}: {skill_info.description}")
+        if skill_lines:
+            skill_prompt = (
+                "\n\n## 可用技能\n\n"
+                "你拥有以下技能，可以调用 load_skill 工具加载详细指引：\n\n"
+                + "\n".join(skill_lines)
+            )
+            full_prompt += skill_prompt
+
     return full_prompt

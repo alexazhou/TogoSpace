@@ -149,3 +149,132 @@ async def test_build_agent_system_prompt_skips_team_awareness_when_not_in_team(m
     assert "角色 Helper" in result
     assert "当前系统语言设置：zh-CN" in result
     assert "如果上一条 Agent/Operator 消息不存在，则使用当前系统语言设置" in result
+
+
+# ─── Skill 概要注入 tests ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_build_agent_system_prompt_includes_skill_summary(monkeypatch):
+    """allow_skills 非空时，system prompt 末尾包含 Skill 概要。"""
+
+    async def _build_dept_context(team_id: int, agent_name: str) -> str:
+        return "---\n组织信息：\n- 所在部门：测试部\n---"
+
+    monkeypatch.setattr(promptBuilder, "_build_dept_context", _build_dept_context)
+    monkeypatch.setattr(promptBuilder.configUtil, "get_language", lambda: "zh-CN")
+
+    # Mock skillService.get_skill
+    mock_skill_info = type("SkillInfo", (), {
+        "name": "code_review",
+        "description": "代码审查技能包",
+    })()
+    monkeypatch.setattr(
+        promptBuilder.skillService,
+        "get_skill",
+        lambda name: mock_skill_info if name == "code_review" else None,
+    )
+
+    result = await promptBuilder.build_agent_system_prompt(
+        team_id=1,
+        agent_id=1,
+        agent_name="alice",
+        agent_display_name="Alice",
+        template_name="pm",
+        template_display_name="PM",
+        template_soul="负责推进项目",
+        workdir="/workspace/demo",
+        base_prompt_tmpl="base prompt",
+        identity_prompt_tmpl="我是 {agent_name}，角色 {template_name}\n\n{dept_context}\n\n{template_soul}",
+        allow_skills=["code_review"],
+    )
+
+    assert "可用技能" in result
+    assert "load_skill" in result
+    assert "code_review" in result
+    assert "代码审查技能包" in result
+
+
+@pytest.mark.asyncio
+async def test_build_agent_system_prompt_no_skill_when_allow_skills_none(monkeypatch):
+    """allow_skills 为 None 时，不注入 Skill 概要。"""
+
+    async def _build_dept_context(team_id: int, agent_name: str) -> str:
+        return "---\n组织信息：\n- 所在部门：测试部\n---"
+
+    monkeypatch.setattr(promptBuilder, "_build_dept_context", _build_dept_context)
+    monkeypatch.setattr(promptBuilder.configUtil, "get_language", lambda: "zh-CN")
+
+    result = await promptBuilder.build_agent_system_prompt(
+        team_id=1,
+        agent_id=1,
+        agent_name="alice",
+        agent_display_name="Alice",
+        template_name="pm",
+        template_display_name="PM",
+        template_soul="负责推进项目",
+        workdir="/workspace/demo",
+        base_prompt_tmpl="base prompt",
+        identity_prompt_tmpl="我是 {agent_name}，角色 {template_name}\n\n{dept_context}\n\n{template_soul}",
+        allow_skills=None,
+    )
+
+    assert "可用技能" not in result
+
+
+@pytest.mark.asyncio
+async def test_build_agent_system_prompt_no_skill_when_allow_skills_empty(monkeypatch):
+    """allow_skills 为空列表时，不注入 Skill 概要。"""
+
+    async def _build_dept_context(team_id: int, agent_name: str) -> str:
+        return "---\n组织信息：\n- 所在部门：测试部\n---"
+
+    monkeypatch.setattr(promptBuilder, "_build_dept_context", _build_dept_context)
+    monkeypatch.setattr(promptBuilder.configUtil, "get_language", lambda: "zh-CN")
+
+    result = await promptBuilder.build_agent_system_prompt(
+        team_id=1,
+        agent_id=1,
+        agent_name="alice",
+        agent_display_name="Alice",
+        template_name="pm",
+        template_display_name="PM",
+        template_soul="负责推进项目",
+        workdir="/workspace/demo",
+        base_prompt_tmpl="base prompt",
+        identity_prompt_tmpl="我是 {agent_name}，角色 {template_name}\n\n{dept_context}\n\n{template_soul}",
+        allow_skills=[],
+    )
+
+    assert "可用技能" not in result
+
+
+@pytest.mark.asyncio
+async def test_build_agent_system_prompt_skill_not_found_in_registry(monkeypatch):
+    """allow_skills 中的某个 Skill 在注册表中不存在时，跳过该 Skill。"""
+
+    async def _build_dept_context(team_id: int, agent_name: str) -> str:
+        return "---\n组织信息：\n- 所在部门：测试部\n---"
+
+    monkeypatch.setattr(promptBuilder, "_build_dept_context", _build_dept_context)
+    monkeypatch.setattr(promptBuilder.configUtil, "get_language", lambda: "zh-CN")
+
+    # get_skill 总返回 None → 所有 Skill 名都不在注册表中
+    monkeypatch.setattr(promptBuilder.skillService, "get_skill", lambda name: None)
+
+    result = await promptBuilder.build_agent_system_prompt(
+        team_id=1,
+        agent_id=1,
+        agent_name="alice",
+        agent_display_name="Alice",
+        template_name="pm",
+        template_display_name="PM",
+        template_soul="负责推进项目",
+        workdir="/workspace/demo",
+        base_prompt_tmpl="base prompt",
+        identity_prompt_tmpl="我是 {agent_name}，角色 {template_name}\n\n{dept_context}\n\n{template_soul}",
+        allow_skills=["nonexistent_skill"],
+    )
+
+    # 全部 Skill 都找不到，不注入概要
+    assert "可用技能" not in result

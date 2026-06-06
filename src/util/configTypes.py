@@ -84,6 +84,7 @@ class AgentPreset(BaseModel):
     model: Optional[str] = None  # 覆盖 RoleTemplate.model
     driver: DriverType = DriverType.TSP
     allow_tools: List[str] | None = None
+    allow_skills: List[str] | None = None
 
 
 class TeamRoomPreset(BaseModel):

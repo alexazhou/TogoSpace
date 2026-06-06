@@ -19,6 +19,7 @@ class AgentSaveItem(BaseModel):
     model: str = ""
     driver: DriverType = DriverType.NATIVE
     allow_tools: list[str] | None = None
+    allow_skills: list[str] | None = None
 
 
 class AgentsSaveRequest(BaseModel):
@@ -120,6 +121,7 @@ class TeamAgentsSaveHandler(BaseHandler):
                     model=item.model,
                     driver=item.driver,
                     allow_tools=item.allow_tools,
+                    allow_skills=item.allow_skills,
                 )
                 for item in request.agents
             ],
@@ -138,6 +140,7 @@ class TeamAgentsSaveHandler(BaseHandler):
                     "role_template_id": agent.role_template_id,
                     "model": agent.model,
                     "driver": agent.driver.value,
+                    "allow_skills": agent.allow_skills,
                 }
                 for agent in updated_agents
             ],

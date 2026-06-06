@@ -21,6 +21,7 @@ from .tools import (
     get_time,
     list_role_templates,
     list_tasks,
+    load_skill,
     reload_team,
     save_agent,
     save_dept,
@@ -68,6 +69,7 @@ def load_func_tools() -> dict[str, FuncTool]:
         "update_task": update_task,
         "get_task": get_task,
         "list_tasks": list_tasks,
+        "load_skill": load_skill,
     }
     _func_tools = {}
     for name, func in _registry.items():

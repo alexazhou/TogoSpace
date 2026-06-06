@@ -21,6 +21,7 @@ from service import (
     ormService,
     presetService,
 )
+import service.skillService as skillService
 import appPaths
 import route
 from version import __version__
@@ -142,6 +143,7 @@ async def main(config_dir: str = None, port: int | None = None):
     await roomService.startup()
     await schedulerService.startup()
     await presetService.startup()
+    skillService.startup()
     logger.info("[启动] 阶段 1/4 完成")
 
     # ── 阶段 2：导入配置 ──────────────────────────────────────────────────────

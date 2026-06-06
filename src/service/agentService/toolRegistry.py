@@ -24,6 +24,7 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     "update_task": ToolCategory.BASIC,
     "get_task": ToolCategory.BASIC,
     "list_tasks": ToolCategory.BASIC,
+    "load_skill": ToolCategory.BASIC,
     "reload_team": ToolCategory.ADMIN,
     "list_role_templates": ToolCategory.ADMIN,
     "get_role_template": ToolCategory.ADMIN,

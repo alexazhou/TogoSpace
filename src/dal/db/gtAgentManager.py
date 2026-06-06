@@ -292,6 +292,7 @@ async def batch_save_agents(team_id: int, agents: list[GtAgent]) -> None:
                 "employee_number": agent.employee_number,
                 "i18n": agent.i18n or {},
                 "allow_tools": agent.allow_tools,
+                "allow_skills": agent.allow_skills,
             }
             for agent in to_create
         ]).aio_execute()

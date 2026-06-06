@@ -136,6 +136,7 @@ async def _to_gt_agents(team_id: int, team_config: TeamPreset) -> list[GtAgent]:
             driver=agent.driver,
             i18n=agent.i18n or {},
             allow_tools=agent.allow_tools,
+            allow_skills=agent.allow_skills,
         ))
     return agents
 

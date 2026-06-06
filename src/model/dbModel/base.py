@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import logging
-from typing import Any, Generic, List, TypeVar, cast
+from typing import Any, Generic, List, TypeVar, cast, get_origin
 
 import peewee
 import peewee_async
@@ -69,16 +69,18 @@ class JsonFieldWithClass(peewee.TextField, Generic[TClassJson]):
     def python_value(self, value) -> TClassJson | None:
         if value is None:
             return None
-        if isinstance(value, self.json_cls):
+        check_type = get_origin(self.json_cls) or self.json_cls
+        if isinstance(value, check_type):
             return value
-        try:
-            if isinstance(value, str):
-                return cast(TClassJson, jsonUtil.json_load(value, self.json_cls, config=self.json_config))
-            return cast(TClassJson, jsonUtil.json_data_to_object(value, self.json_cls, config=self.json_config))
-        except Exception as exc:
-            field_name = getattr(self, "name", None) or "<unknown>"
-            logger.warning("JsonFieldWithClass parse failed for field '%s', returning None: value=%r, error=%s", field_name, value, exc)
-            return None
+        else:
+            try:
+                if isinstance(value, str):
+                    return cast(TClassJson, jsonUtil.json_load(value, self.json_cls, config=self.json_config))
+                return cast(TClassJson, jsonUtil.json_data_to_object(value, self.json_cls, config=self.json_config))
+            except Exception as exc:
+                field_name = getattr(self, "name", None) or "<unknown>"
+                logger.warning("JsonFieldWithClass parse failed for field '%s', returning None: value=%r, error=%s", field_name, value, exc)
+                return None
 
 
 class PydanticJsonField(peewee.TextField, Generic[TPydanticModel]):

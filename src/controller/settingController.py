@@ -320,3 +320,17 @@ class LanguageHandler(BaseHandler):
         )
         configUtil.set_language(lang)
         self.return_json({"status": "ok", "language": lang})
+
+
+class SkillListHandler(BaseHandler):
+    """GET /config/skills/list.json — 返回系统可用的 Skill 列表。"""
+
+    async def get(self) -> None:
+        import service.skillService as skillService
+        skills = skillService.get_all_skills()
+        self.return_json({
+            "skills": [
+                {"name": s.name, "description": s.description}
+                for s in skills
+            ],
+        })

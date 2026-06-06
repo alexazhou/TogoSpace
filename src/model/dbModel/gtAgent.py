@@ -4,7 +4,7 @@ import peewee
 
 from constants import EmployStatus, DriverType
 from util import i18nUtil
-from .base import DbModelBase, EnumField, JsonField
+from .base import DbModelBase, EnumField, JsonField, JsonFieldWithClass
 
 
 class GtAgent(DbModelBase):
@@ -17,6 +17,7 @@ class GtAgent(DbModelBase):
     employee_number: int = peewee.IntegerField(default=0)
     i18n: dict = JsonField(default=dict)  # 多语言数据，含 display_name
     allow_tools: list[str] | None = JsonField(null=True)
+    allow_skills: list[str] | None = JsonFieldWithClass(list[str], null=True)
 
     @property
     def display_name(self) -> str:

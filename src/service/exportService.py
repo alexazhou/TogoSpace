@@ -67,6 +67,7 @@ async def export_team_preset(team_id: int) -> dict[str, object]:
             model=agent.model or None,
             driver=agent.driver,
             allow_tools=agent.allow_tools,
+            allow_skills=agent.allow_skills,
         ))
 
     rooms = await gtRoomManager.get_rooms_by_team(team_id)
