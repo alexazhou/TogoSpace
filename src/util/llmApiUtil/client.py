@@ -239,7 +239,7 @@ def _log_raw_response(error: Exception, request_id: str, stream: bool) -> None:
             if raw_body is not None:
                 break
 
-            current = current.__cause__ or getattr(current, "__context__", None)
+            current = current.__cause__ or current.__context__  # type: ignore[assignment]
 
         if raw_body is not None or status_code is not None:
             # 截断过长的响应体，避免日志膨胀
