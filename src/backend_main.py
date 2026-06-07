@@ -124,11 +124,6 @@ async def main(config_dir: str = None, port: int | None = None):
     run_env = _detect_run_env()
     logger.info("[启动] 版本=v%s | 运行环境=%s", __version__, run_env)
     logger.info("[启动] storage_root=%s | preset=%s", appPaths.STORAGE_ROOT, appPaths.PRESET_DIR)
-    os.makedirs(appPaths.USER_SKILLS_DIR, exist_ok=True)
-    readme_path = os.path.join(appPaths.USER_SKILLS_DIR, "readme.txt")
-    if not os.path.exists(readme_path):
-        with open(readme_path, "w", encoding="utf-8") as f:
-            f.write("此目录用于存放用户自定义的 Skill。\n\n你可以将包含 SKILL.md 的技能文件夹放置于此，重新启动后，系统将自动加载并供 Agent 选用。\n")
     if demo_mode.read_only:
         logger.info("[启动] 演示模式已启用：freeze_data=true，系统将以只读浏览态启动")
 

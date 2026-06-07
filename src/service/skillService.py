@@ -51,6 +51,14 @@ def startup() -> None:
     global _registry
     _registry = {}
 
+    try:
+        os.makedirs(appPaths.USER_SKILLS_DIR, exist_ok=True)
+        if "PYTEST_CURRENT_TEST" not in os.environ:
+            from util.configUtil import sync_file_if_changed
+            sync_file_if_changed("docs/skills.README.md", appPaths.USER_SKILLS_DIR, "README.md")
+    except OSError as e:
+        logger.warning("无法创建 USER_SKILLS_DIR: %s", e)
+
     _scan_skills_in_dir(appPaths.BUILTIN_SKILLS_DIR, is_builtin=True)
     _scan_skills_in_dir(appPaths.USER_SKILLS_DIR, is_builtin=False)
 

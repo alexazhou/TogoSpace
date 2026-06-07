@@ -77,7 +77,7 @@ def _copy_template_if_missing(src_name: str, dest_dir: str, dest_name: str | Non
     shutil.copy(src_path, dest_path)
 
 
-def _sync_file_if_changed(src_name: str, dest_dir: str, dest_name: str | None = None) -> None:
+def sync_file_if_changed(src_name: str, dest_dir: str, dest_name: str | None = None) -> None:
     """同步文件到目标目录，不存在或内容不一致时更新。"""
     resolved_dest_name = dest_name or src_name
     src_path = os.path.join(appPaths.ASSETS_DIR, src_name)
@@ -117,7 +117,7 @@ def _load_setting(config_dir: str) -> SettingConfig:
     # 每次启动同步 README 文档（不存在或内容不一致时更新）
     # 测试环境下跳过，避免在测试配置目录生成不必要的文件
     if not _is_running_tests():
-        _sync_file_if_changed("setting.README.md", config_dir)
+        sync_file_if_changed("docs/setting.README.md", config_dir, "setting.README.md")
 
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
