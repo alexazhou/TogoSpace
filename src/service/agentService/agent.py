@@ -62,6 +62,7 @@ class Agent:
         await self.task_consumer._turn_runner.driver.startup()
 
     async def close(self) -> None:
+        self.task_consumer.status = AgentStatus.CLOSED
         self.stop_consumer_task()
         await self.task_consumer._turn_runner.driver.shutdown()
         self.task_consumer._turn_runner.tool_registry.clear()
@@ -74,6 +75,9 @@ class Agent:
 
     def start_consumer_task(self) -> None:
         """如果没有消费协程在运行，则启动一个。"""
+        if self.status == AgentStatus.CLOSED:
+            logger.info(f"Agent {self.gt_agent.name}(agent_id={self.gt_agent.id}) 已经被关闭，忽略调度唤醒")
+            return
         self.task_consumer.start()
 
     def stop_consumer_task(self) -> None:

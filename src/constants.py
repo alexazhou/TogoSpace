@@ -101,6 +101,7 @@ class AgentStatus(EnhanceEnum):
     ACTIVE = auto()
     IDLE   = auto()
     FAILED = auto()  # 任务执行失败
+    CLOSED = auto()  # 实例被回收（重载或卸载）
 
 
 class EmployStatus(EnhanceEnum):

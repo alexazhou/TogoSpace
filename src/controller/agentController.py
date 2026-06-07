@@ -307,5 +307,7 @@ class AgentModifyPropertiesHandler(BaseHandler):
         await agent.aio_save()
         gtAgentManager.cache_agents(agent)
 
+        await agentService.hot_reload_agent(agent_id)
+
         self.return_json(await _build_agent_detail_payload(agent))
 

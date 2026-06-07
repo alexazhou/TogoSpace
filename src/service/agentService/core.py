@@ -63,6 +63,67 @@ async def _ensure_special_agents_exist() -> None:
             logger.info(f"创建 SpecialAgent 记录: id={agent_id}, name={special.name}")
 
 
+async def _init_and_start_agent(
+    gt_agent: GtAgent,
+    gt_role_template: Any,
+    team_id: int,
+    team_name: str,
+    team_workdir: str,
+    default_model: str | None,
+    is_root_leader: bool
+) -> Agent:
+    agent_name = gt_agent.name
+    template_name = gt_role_template.name
+
+    agent_display_name = gt_agent.display_name
+    template_display_name = gt_role_template.display_name
+
+    # model 用于日志记录，推理时如果 gt_agent.model 为空则使用配置中的 model
+    model_name = gt_agent.model or gt_role_template.model or default_model or ""
+    driver_config = normalize_driver_config(
+        {
+            "driver": gt_agent.driver,
+        }
+    )
+    driver_config.options["tool_allow_specs"] = gt_agent.allow_tools
+    driver_config.options["is_root_leader"] = is_root_leader
+    full_prompt = await build_agent_system_prompt(
+        team_id=team_id,
+        agent_id=gt_agent.id,
+        agent_name=agent_name,
+        agent_display_name=agent_display_name,
+        template_name=template_name,
+        template_display_name=template_display_name,
+        template_soul=gt_role_template.soul,
+        workdir=team_workdir,
+        base_prompt_tmpl=BASE_PROMPT.strip(),
+        identity_prompt_tmpl=AGENT_IDENTITY_PROMPT.strip(),
+        is_root_leader=is_root_leader,
+        allow_skills=gt_agent.allow_skills,
+    )
+
+    assert gt_agent.id is not None and gt_agent.id > 0, f"invalid agent id: {gt_agent.id}"
+    agent = Agent(
+        gt_agent=gt_agent,
+        system_prompt=full_prompt,
+        driver_config=driver_config,
+        agent_workdir=team_workdir,
+        is_root_leader=is_root_leader,
+    )
+    
+    logger.info(
+        "创建 Agent 实例: agent_id=%s, name=%s, template=%s, model=%s, driver=%s, is_root_leader=%s",
+        gt_agent.id,
+        gt_agent.name,
+        template_name,
+        model_name or "<unconfigured>",
+        driver_config.driver_type,
+        is_root_leader,
+    )
+    await agent.startup()
+    return agent
+
+
 async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> None:
     gt_team = await gtTeamManager.get_team_by_id(team_id)
     if gt_team is None:
@@ -99,69 +160,18 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
             f"角色模版不存在: agent={gt_agent.name}, role_template_id={gt_agent.role_template_id}"
         )
         gt_role_template = templates_by_id[gt_agent.role_template_id]
-
-        agent_name = gt_agent.name
-        template_name = gt_role_template.name
-
-        # 解析 i18n display_name
-        lang = configUtil.get_language()
-        agent_i18n = getattr(gt_agent, "i18n", None)
-        template_i18n = getattr(gt_role_template, "i18n", None)
-        agent_display_name = i18nUtil.extract_i18n_str(
-            agent_i18n.get("display_name") if agent_i18n else None,
-            default=agent_name,
-            lang=lang,
-        ) or agent_name
-        template_display_name = i18nUtil.extract_i18n_str(
-            template_i18n.get("display_name") if template_i18n else None,
-            default=template_name,
-            lang=lang,
-        ) or template_name
-
-        # model 用于日志记录，推理时如果 gt_agent.model 为空则使用配置中的 model
-        model_name = gt_agent.model or gt_role_template.model or default_model or ""
         is_root_leader = top_manager_id is not None and gt_agent.id == top_manager_id
-        driver_config = normalize_driver_config(
-            {
-                "driver": gt_agent.driver,
-            }
-        )
-        driver_config.options["tool_allow_specs"] = gt_agent.allow_tools
-        driver_config.options["is_root_leader"] = is_root_leader
-        full_prompt = await build_agent_system_prompt(
-            team_id=team_id,
-            agent_id=gt_agent.id,
-            agent_name=agent_name,
-            agent_display_name=agent_display_name,
-            template_name=template_name,
-            template_display_name=template_display_name,
-            template_soul=gt_role_template.soul,
-            workdir=team_workdir,
-            base_prompt_tmpl=BASE_PROMPT.strip(),
-            identity_prompt_tmpl=AGENT_IDENTITY_PROMPT.strip(),
-            is_root_leader=is_root_leader,
-            allow_skills=gt_agent.allow_skills,
-        )
 
-        assert gt_agent.id is not None and gt_agent.id > 0, f"invalid agent id: {gt_agent.id}"
-        agent = Agent(
+        agent = await _init_and_start_agent(
             gt_agent=gt_agent,
-            system_prompt=full_prompt,
-            driver_config=driver_config,
-            agent_workdir=team_workdir,
+            gt_role_template=gt_role_template,
+            team_id=team_id,
+            team_name=team_name,
+            team_workdir=team_workdir,
+            default_model=default_model,
             is_root_leader=is_root_leader,
         )
         _agents[gt_agent.id] = agent
-        logger.info(
-            "创建 Agent 实例: agent_id=%s, name=%s, template=%s, model=%s, driver=%s, is_root_leader=%s",
-            gt_agent.id,
-            gt_agent.name,
-            template_name,
-            model_name or "<unconfigured>",
-            driver_config.driver_type,
-            is_root_leader,
-        )
-        await agent.startup()
 
 
 async def load_team_agents(team_id: int, workspace_root: str | None = None) -> None:
@@ -189,6 +199,61 @@ async def _unload_team_agents(team_id: int) -> None:
 async def unload_team(team_id: int) -> None:
     """关闭并移除指定 Team 的内存 Agent 实例。"""
     await _unload_team_agents(team_id)
+
+
+async def hot_reload_agent(agent_id: int) -> None:
+    """无缝热更新单体 Agent"""
+    gt_agent = await gtAgentManager.get_agent_by_id(agent_id)
+    if not gt_agent or gt_agent.employ_status != EmployStatus.ON_BOARD:
+        return
+
+    team_id = gt_agent.team_id
+    gt_team = await gtTeamManager.get_team_by_id(team_id)
+    if not gt_team:
+        return
+
+    # 获取依赖的模版、部门树等上下文
+    gt_role_template = await gtRoleTemplateManager.get_role_template_by_id(gt_agent.role_template_id)
+    assertUtil.assertNotNull(
+        gt_role_template,
+        error_message=f"角色模版不存在: role_template_id={gt_agent.role_template_id}",
+        error_code="template_not_found"
+    )
+
+    dept_root = await deptService.get_dept_tree(team_id)
+    top_manager_id = dept_root.manager_id if dept_root is not None else None
+    is_root_leader = top_manager_id is not None and gt_agent.id == top_manager_id
+
+    app_config = configUtil.get_app_config()
+    default_model = llmService.get_default_model_or_none()
+    team_workdir = _resolve_team_workdir(gt_team, app_config.setting.workspace_root)
+    os.makedirs(team_workdir, exist_ok=True)
+
+    # 1. 构建新 Agent（不影响旧的运行）
+    new_agent = await _init_and_start_agent(
+        gt_agent=gt_agent,
+        gt_role_template=gt_role_template,
+        team_id=team_id,
+        team_name=gt_team.name,
+        team_workdir=team_workdir,
+        default_model=default_model,
+        is_root_leader=is_root_leader,
+    )
+
+    # 2. 拿到旧 Agent 并优先停止（防止它继续向 DB 写入脏状态）
+    old_agent = _agents.get(agent_id)
+    if old_agent:
+        old_agent.stop_consumer_task()
+        await old_agent.close()
+
+    # 3. 在完全干净的状态下恢复新 Agent 的上下文
+    await _restore_agent_runtime_state(new_agent, running_task_error_message="Agent attributes reloaded")
+
+    # 4. 最后暴露新 Agent 并启动消费循环（原子操作）
+    _agents[agent_id] = new_agent
+    new_agent.start_consumer_task()
+    
+    logger.info("单体 Agent '%s' (%d) 热更新完成", gt_agent.name, agent_id)
 
 
 async def _restore_agent_runtime_state(
