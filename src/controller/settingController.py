@@ -330,7 +330,12 @@ class SkillListHandler(BaseHandler):
         skills = skillService.get_all_skills()
         self.return_json({
             "skills": [
-                {"name": s.name, "description": s.description, "is_builtin": s.is_builtin}
+                {
+                    "name": s.name,
+                    "description": s.description,
+                    "is_builtin": s.is_builtin,
+                    "files": s.files
+                }
                 for s in skills
             ],
         })
