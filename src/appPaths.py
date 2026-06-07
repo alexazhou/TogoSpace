@@ -39,6 +39,7 @@ if _ENV_STORAGE_ROOT:
 DATA_DIR = os.path.join(STORAGE_ROOT, "data")
 LOGS_DIR = os.path.join(STORAGE_ROOT, "logs", "backend")
 WORKSPACE_ROOT = os.path.join(STORAGE_ROOT, "workspace")
+SKILLS_DIR = os.path.join(STORAGE_ROOT, "skills")
 CONFIG_DIR = STORAGE_ROOT
 PRESET_DIR = os.path.abspath(os.environ.get("TEAMAGENT_PRESET_DIR") or os.path.join(ASSETS_DIR, "preset"))
 

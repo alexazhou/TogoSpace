@@ -124,6 +124,7 @@ async def main(config_dir: str = None, port: int | None = None):
     run_env = _detect_run_env()
     logger.info("[启动] 版本=v%s | 运行环境=%s", __version__, run_env)
     logger.info("[启动] storage_root=%s | preset=%s", appPaths.STORAGE_ROOT, appPaths.PRESET_DIR)
+    os.makedirs(appPaths.SKILLS_DIR, exist_ok=True)
     if demo_mode.read_only:
         logger.info("[启动] 演示模式已启用：freeze_data=true，系统将以只读浏览态启动")
 
