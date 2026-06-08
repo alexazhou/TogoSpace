@@ -100,7 +100,6 @@ async def export_team_preset(team_id: int) -> dict[str, object]:
             name=role_template.name,
             i18n=role_template.i18n or None,
             soul=role_template.soul,
-            model=role_template.model,
         ).model_dump(mode="json", exclude_none=True)
         for role_template in role_templates
     ]

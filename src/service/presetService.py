@@ -26,7 +26,6 @@ async def _import_role_templates_from_app_config() -> None:
         await roleTemplateService.save_role_template(GtRoleTemplate(
             name=template.name,
             soul=template.soul,
-            model=template.model,
             type=RoleTemplateType.SYSTEM,
             i18n=template.i18n or {},
         ))
