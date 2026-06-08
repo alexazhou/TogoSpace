@@ -31,7 +31,6 @@ class TestRoleTemplateController(_ApiServiceCase):
         template = data["role_templates"][0]
         assert "id" in template
         assert "name" in template
-        assert "model" in template
         assert "type" in template
         assert "driver" not in template
         assert isinstance(template["created_at"], str)
@@ -54,7 +53,6 @@ class TestRoleTemplateController(_ApiServiceCase):
 
         assert detail["id"] == template_id
         assert detail["name"] == template["name"]
-        assert "model" in detail
         assert "soul" in detail
         assert "type" in detail
         assert "driver" not in detail
@@ -66,7 +64,6 @@ class TestRoleTemplateController(_ApiServiceCase):
         payload = {
             "name": unique_name,
             "soul": "你是一个用户创建的模板",
-            "model": "gpt-4o-mini",
         }
 
         async with aiohttp.ClientSession() as client:
@@ -90,12 +87,10 @@ class TestRoleTemplateController(_ApiServiceCase):
         create_payload = {
             "name": source_name,
             "soul": "初始 Soul",
-            "model": "gpt-4o-mini",
         }
         modify_payload = {
             "name": target_name,
             "soul": "更新后的 Soul",
-            "model": "gpt-4.1-mini",
         }
 
         async with aiohttp.ClientSession() as client:
@@ -117,7 +112,5 @@ class TestRoleTemplateController(_ApiServiceCase):
         assert updated["id"] == created["id"]
         assert updated["name"] == target_name
         assert updated["soul"] == "更新后的 Soul"
-        assert updated["model"] == "gpt-4.1-mini"
         assert detail["name"] == target_name
         assert detail["soul"] == "更新后的 Soul"
-        assert detail["model"] == "gpt-4.1-mini"
