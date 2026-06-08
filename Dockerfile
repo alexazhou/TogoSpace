@@ -46,14 +46,30 @@ ENV PYTHONUNBUFFERED=1 \
     STORAGE_ROOT=/storage \
     TOGOSPACE_RUN_ENV=docker
 
-# 安装 Python 和运行依赖
+# 安装 Python、常用开发工具和运行依赖
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
     curl \
+    wget \
     ca-certificates \
+    git \
+    openssh-client \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-chi-sim \
+    tesseract-ocr-chi-tra \
+    file \
+    imagemagick \
+    vim \
+    nano \
     && rm -rf /var/lib/apt/lists/*
+
+# 安装 Python 工具包（markitdown 全格式支持：PDF、Word、PPT、Excel、音频、YouTube 等）
+RUN pip3 install --break-system-packages \
+    markitdown[all] \
+    && rm -rf /root/.cache/pip
 
 # 创建应用目录和数据目录
 RUN mkdir -p ${TOGOSPACE_HOME} ${STORAGE_ROOT}
