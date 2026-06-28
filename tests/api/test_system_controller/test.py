@@ -114,3 +114,99 @@ class TestSystemStatus(_ApiServiceCase):
         finally:
             with contextlib.suppress(FileNotFoundError):
                 os.remove(backup_path)
+
+    async def test_status_returns_auto_check_update_field(self):
+        """系统状态接口应返回 auto_check_update 字段。"""
+        async with aiohttp.ClientSession() as client:
+            data = await self._status(client)
+
+        assert "auto_check_update" in data
+        assert isinstance(data["auto_check_update"], bool)
+
+    # ──────── check_update API ────────
+
+    async def test_check_update_returns_expected_fields(self):
+        """GET /system/check_update.json 返回所有必要字段。"""
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/system/check_update.json?force=true") as resp:
+                assert resp.status == 200
+                data = await resp.json()
+
+        assert "has_update" in data
+        assert "current_version" in data
+        assert "latest_version" in data
+        assert "release_url" in data
+        assert "release_notes" in data
+        assert isinstance(data["has_update"], bool)
+
+    async def test_check_update_current_version_matches(self):
+        """check_update 返回的 current_version 应与 version.py 一致。"""
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/system/check_update.json?force=true") as resp:
+                data = await resp.json()
+
+        # current_version 应为 0.x.y 格式
+        assert re.fullmatch(r"\d+\.\d+\.\d+", data["current_version"])
+
+    async def test_check_update_without_force_uses_cache(self):
+        """不带 force 参数时第二次请求应使用缓存。"""
+        async with aiohttp.ClientSession() as client:
+            # 第一次请求（可能命中缓存也可能不命中）
+            async with client.get(f"{self.backend_base_url}/system/check_update.json") as resp:
+                assert resp.status == 200
+                data1 = await resp.json()
+
+            # 第二次请求，应该命中缓存
+            async with client.get(f"{self.backend_base_url}/system/check_update.json") as resp:
+                assert resp.status == 200
+                data2 = await resp.json()
+
+        # 两次结果应一致
+        assert data1["latest_version"] == data2["latest_version"]
+
+    # ──────── update_config API ────────
+
+    async def test_update_config_toggle_auto_check(self):
+        """POST /system/update_config.json 可以切换 auto_check_update。"""
+        import json
+        async with aiohttp.ClientSession() as client:
+            # 获取当前值
+            async with client.get(f"{self.backend_base_url}/system/status.json") as resp:
+                status = await resp.json()
+            original = status["auto_check_update"]
+
+            # 切换值
+            new_value = not original
+            async with client.post(
+                f"{self.backend_base_url}/system/update_config.json",
+                json={"auto_check_update": new_value},
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+
+            assert data["status"] == "ok"
+            assert data["auto_check_update"] == new_value
+
+            # 验证生效
+            async with client.get(f"{self.backend_base_url}/system/status.json") as resp:
+                status2 = await resp.json()
+            assert status2["auto_check_update"] == new_value
+
+            # 恢复原值
+            async with client.post(
+                f"{self.backend_base_url}/system/update_config.json",
+                json={"auto_check_update": original},
+            ) as resp:
+                assert resp.status == 200
+
+    async def test_update_config_empty_body_succeeds(self):
+        """POST /system/update_config.json 空 body 不报错。"""
+        import json
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{self.backend_base_url}/system/update_config.json",
+                json={},
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+            assert data["status"] == "ok"
