@@ -1,5 +1,6 @@
 """compact 单元测试。"""
 from __future__ import annotations
+from unittest.mock import patch, MagicMock
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,46 +20,69 @@ from service.agentService.promptBuilder import (
     build_compact_resume_prompt,
 )
 from util import llmApiUtil
-from util.configTypes import LlmServiceConfig
+from util.configTypes import LlmModelConfig, LlmContextConfig
 
 
-def _make_llm_config(**overrides) -> LlmServiceConfig:
-    defaults = {
-        "name": "test",
-        "base_url": "http://localhost",
-        "api_key": "key",
-        "type": "openai-compatible",
+def _make_llm_config(**overrides) -> LlmModelConfig:
+    ctx_defaults = {
         "context_window_tokens": 32000,
         "reserve_output_tokens": 4096,
         "compact_trigger_ratio": 0.85,
         "compact_summary_max_tokens": 2048,
     }
-    defaults.update(overrides)
-    return LlmServiceConfig(**defaults)
+    for k in list(overrides.keys()):
+        if k in ctx_defaults:
+            ctx_defaults[k] = overrides.pop(k)
+    
+    return LlmModelConfig(
+        name=overrides.get("name", "test"),
+        protocol="openai",
+        context_config=LlmContextConfig(**ctx_defaults)
+    )
 
 
 # ─── calc_hard_limit_tokens ──────────────────────────────
 
-def test_calc_hard_limit_tokens_uses_builtin_default():
+@patch("service.agentService.compact.configUtil.get_app_config")
+def test_calc_hard_limit_tokens_uses_builtin_default(mock_get_app_config):
+
+    mock_app_config = MagicMock()
+    mock_app_config.setting.context_config = LlmContextConfig()
+    mock_get_app_config.return_value = mock_app_config
     cfg = _make_llm_config(context_window_tokens=32000, reserve_output_tokens=4096)
     assert calc_hard_limit_tokens("gpt-4o", cfg) == 123904
 
 
-def test_calc_hard_limit_tokens_falls_back_to_config():
+@patch("service.agentService.compact.configUtil.get_app_config")
+def test_calc_hard_limit_tokens_falls_back_to_config(mock_get_app_config):
+
+    mock_app_config = MagicMock()
+    mock_app_config.setting.context_config = LlmContextConfig()
+    mock_get_app_config.return_value = mock_app_config
     cfg = _make_llm_config(context_window_tokens=50000, reserve_output_tokens=2000)
     assert calc_hard_limit_tokens("unknown-model-xyz", cfg) == 48000
 
 
 # ─── calc_compact_trigger_tokens ─────────────────────────
 
-def test_calc_compact_trigger_tokens_default():
+@patch("service.agentService.compact.configUtil.get_app_config")
+def test_calc_compact_trigger_tokens_default(mock_get_app_config):
+
+    mock_app_config = MagicMock()
+    mock_app_config.setting.context_config = LlmContextConfig()
+    mock_get_app_config.return_value = mock_app_config
     cfg = _make_llm_config(context_window_tokens=32000, reserve_output_tokens=4096, compact_trigger_ratio=0.85)
     # (32000 - 4096) * 0.85 = 23718.4 → floor = 23718
     result = calc_compact_trigger_tokens("unknown-model", cfg)
     assert result == 23718
 
 
-def test_calc_compact_trigger_tokens_known_model():
+@patch("service.agentService.compact.configUtil.get_app_config")
+def test_calc_compact_trigger_tokens_known_model(mock_get_app_config):
+
+    mock_app_config = MagicMock()
+    mock_app_config.setting.context_config = LlmContextConfig()
+    mock_get_app_config.return_value = mock_app_config
     cfg = _make_llm_config(context_window_tokens=32000, reserve_output_tokens=4096, compact_trigger_ratio=0.85)
     # gpt-4o: (128000 - 4096) * 0.85 = 105318.4 → floor = 105318
     result = calc_compact_trigger_tokens("gpt-4o", cfg)

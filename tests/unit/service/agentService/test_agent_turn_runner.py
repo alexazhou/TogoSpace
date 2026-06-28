@@ -340,7 +340,7 @@ from util.configTypes import AppConfig, SettingConfig
 @pytest.mark.asyncio
 async def test_resolve_compact_config_uses_agent_model_when_set(monkeypatch):
     """Agent model 有值时，_resolve_compact_config 返回 Agent 的 model。"""
-    gt_agent = GtAgent(id=1, team_id=1, name="TestAgent", role_template_id=1, model="agent-model")
+    gt_agent = GtAgent(id=1, team_id=1, name="TestAgent", role_template_id=1, model="configured-model@svc")
     runner = AgentTurnRunner(
         gt_agent=gt_agent,
         system_prompt="You are a test agent.",
@@ -348,25 +348,32 @@ async def test_resolve_compact_config_uses_agent_model_when_set(monkeypatch):
     )
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
-            {
-                "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
-                "api_key": "key-123",
-                "type": "openai-compatible",
-                "model": "configured-model",
-                "context_window_tokens": 128000,
-                "reserve_output_tokens": 8192,
-                "compact_trigger_ratio": 0.85,
-            }
-        ],
+        default_models={"primary": "configured-model@svc", "lightweight": "", "vision": ""},
+            llm_providers=[
+                {
+                    "name": "svc",
+                    "enable": True,
+                    "urls": {"openai": "http://localhost/v1/chat/completions"},
+                    "api_key": "key-123",
+                    "type": "openai",
+                    "models": [
+                        {
+                            "name": "configured-model",
+                            "protocol": "openai",
+                            "context_config": {
+                                "context_window_tokens": 128000,
+                                "reserve_output_tokens": 8192,
+                                "compact_trigger_ratio": 0.85
+                            }
+                        }
+                    ]
+                }
+            ],
     )))
 
     resolved_model, llm_config, trigger_tokens, hard_limit_tokens = runner._resolve_compact_config()
 
-    assert resolved_model == "agent-model"
+    assert resolved_model == "configured-model@svc"
 
 
 @pytest.mark.asyncio
@@ -380,25 +387,32 @@ async def test_resolve_compact_config_uses_config_model_when_agent_model_empty(m
     )
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
-            {
-                "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
-                "api_key": "key-123",
-                "type": "openai-compatible",
-                "model": "configured-model",
-                "context_window_tokens": 128000,
-                "reserve_output_tokens": 8192,
-                "compact_trigger_ratio": 0.85,
-            }
-        ],
+        default_models={"primary": "configured-model@svc", "lightweight": "", "vision": ""},
+            llm_providers=[
+                {
+                    "name": "svc",
+                    "enable": True,
+                    "urls": {"openai": "http://localhost/v1/chat/completions"},
+                    "api_key": "key-123",
+                    "type": "openai",
+                    "models": [
+                        {
+                            "name": "configured-model",
+                            "protocol": "openai",
+                            "context_config": {
+                                "context_window_tokens": 128000,
+                                "reserve_output_tokens": 8192,
+                                "compact_trigger_ratio": 0.85
+                            }
+                        }
+                    ]
+                }
+            ],
     )))
 
     resolved_model, llm_config, trigger_tokens, hard_limit_tokens = runner._resolve_compact_config()
 
-    assert resolved_model == "configured-model"
+    assert resolved_model == "configured-model@svc"
 
 
 # ─── handle_cancel_turn 相关测试 ─────────────────────────────

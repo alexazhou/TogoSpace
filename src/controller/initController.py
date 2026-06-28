@@ -7,7 +7,7 @@ from constants import LlmServiceType
 from controller.baseController import BaseHandler
 from service import schedulerService
 from util import configUtil
-from util.configTypes import LlmServiceConfig
+from util.configTypes import LlmProviderConfig, LlmModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -60,21 +60,28 @@ class QuickInitHandler(BaseHandler):
             )
             return
 
-        new_service = LlmServiceConfig(
+        new_provider = LlmProviderConfig(
             name="default",
-            base_url=req.base_url,
+            urls={"openai": req.base_url},
             api_key=req.api_key,
             type=req.type,
-            model=req.model,
-            enable=True,
             provider_params=req.provider_params or {},
+            models=[
+                LlmModelConfig(
+                    name=req.model,
+                    protocol="openai",
+                )
+            ]
         )
 
         def mutator(s):
-            # 若已存在名为 "default" 的服务，先移除
-            s.llm_services = [svc for svc in s.llm_services if svc.name != "default"]
-            s.llm_services.append(new_service)
-            s.default_llm_server = "default"
+            # 若已存在名为 "default" 的 provider，先移除
+            s.llm_providers = [p for p in s.llm_providers if p.name != "default"]
+            s.llm_providers.append(new_provider)
+            # 快速初始化时，将所有默认模型槽位指向这个新配置的模型
+            s.default_models.primary = f"{req.model}@default"
+            s.default_models.lightweight = f"{req.model}@default"
+            s.default_models.vision = f"{req.model}@default"
 
         configUtil.update_setting(mutator)
         await schedulerService.start_schedule()

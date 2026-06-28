@@ -45,7 +45,7 @@ def _make_history_item(item_id=1):
 
 
 def _make_runner_and_history():
-    gt_agent = GtAgent(id=1, team_id=1, name="TestBot", role_template_id=1, model="mock-model")
+    gt_agent = GtAgent(id=1, team_id=1, name="TestBot", role_template_id=1, model="mock-model@svc")
     runner = AgentTurnRunner(
         gt_agent=gt_agent,
         system_prompt="You are a test agent.",
@@ -70,16 +70,34 @@ def _make_runner_and_history():
 
 
 def _mock_config():
-    llm_cfg = MagicMock()
-    llm_cfg.context_window_tokens = 32000
-    llm_cfg.reserve_output_tokens = 4096
-    llm_cfg.compact_trigger_ratio = 0.85
-    llm_cfg.compact_summary_max_tokens = 2048
-    llm_cfg.model = "mock-model"
-    setting = MagicMock()
-    setting.current_llm_service = llm_cfg
+    from util.configTypes import SettingConfig, LlmProviderConfig, LlmModelConfig, LlmContextConfig
     app_config = MagicMock()
-    app_config.setting = setting
+    app_config.setting = SettingConfig(
+        version="v2",
+        language="zh-CN",
+        workspace_root="/tmp/test_workspace",
+        default_models={"primary": "mock-model@svc", "lightweight": "mock-model@svc", "vision": "mock-model@svc"},
+        llm_providers=[
+            LlmProviderConfig(
+                name="svc",
+                enable=True,
+                type="openai",
+                api_key="test-key",
+                urls={"openai": "http://127.0.0.1:9999/v1/chat/completions"},
+                models=[
+                    LlmModelConfig(
+                        name="mock-model",
+                        protocol="openai",
+                        context_config=LlmContextConfig(
+                            compact_trigger_ratio=0.85, 
+                            reserve_output_tokens=4096, 
+                            context_window_tokens=32000
+                        )
+                    )
+                ]
+            )
+        ]
+    )
     return app_config
 
 

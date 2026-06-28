@@ -12,6 +12,8 @@ from util.configTypes import (
     TeamPreset,
 )
 
+from .migrations import migrate_setting
+
 _cached_app_config: AppConfig | None = None
 _cached_config_dir: str | None = None
 _cached_preset_dir: str | None = None
@@ -125,20 +127,17 @@ def _load_setting(config_dir: str) -> SettingConfig:
     if not isinstance(cfg, dict):
         raise ValueError(f"setting.json 内容必须是对象: {path}")
 
+    migrate_setting(cfg)
+
     # 测试环境下支持通过环境变量强制指定 Mock LLM 端口，解决并发测试时的端口冲突。
     mock_port = os.environ.get("TEAMAGENT_MOCK_LLM_PORT")
     if mock_port and os.environ.get("TEAMAGENT_ENV") == "test":
-        for svc in cfg.get("llm_services", []):
-            svc_type = str(svc.get("type", "")).lower()
-            if svc_type == "anthropic":
-                svc["base_url"] = f"http://127.0.0.1:{mock_port}/v1/messages"
+        for p in cfg.get("llm_providers", []):
+            p_type = str(p.get("type", "")).lower()
+            if p_type == "anthropic":
+                p.setdefault("urls", {})["anthropic"] = f"http://127.0.0.1:{mock_port}/v1/messages"
             else:
-                svc["base_url"] = f"http://127.0.0.1:{mock_port}/v1/chat/completions"
-
-    # 迁移：将旧版默认的 reserve_output_tokens=8192 升级为 16384
-    for svc in cfg.get("llm_services", []):
-        if svc.get("reserve_output_tokens") == 8192:
-            svc["reserve_output_tokens"] = 16384
+                p.setdefault("urls", {})[p_type] = f"http://127.0.0.1:{mock_port}/v1/chat/completions"
 
     return SettingConfig.model_validate(cfg)
 
@@ -185,9 +184,9 @@ def is_initialized() -> bool:
     if _cached_app_config is None:
         return False
     setting = _cached_app_config.setting
-    if not setting.llm_services:
+    if not setting.llm_providers:
         return False
-    return any(service.enable for service in setting.llm_services)
+    return setting.is_llm_configured
 
 
 def is_demo_mode() -> bool:
@@ -252,10 +251,14 @@ def _save_setting_to_file() -> None:
         raw = json.load(f)
 
     setting = _cached_app_config.setting
-    raw["llm_services"] = [
-        s.model_dump(exclude_unset=True, mode="json") for s in setting.llm_services
+    
+    raw["version"] = setting.version
+    raw["llm_providers"] = [
+        p.model_dump(exclude_unset=True, mode="json") for p in setting.llm_providers
     ]
-    raw["default_llm_server"] = setting.default_llm_server
+    raw["default_models"] = setting.default_models.model_dump(exclude_unset=True, mode="json")
+    raw["context_config"] = setting.context_config.model_dump(exclude_unset=True, mode="json")
+    
     raw["language"] = setting.language
     raw["development_mode"] = setting.development_mode
     raw["auth"] = setting.auth.model_dump(exclude_unset=True, mode="json")

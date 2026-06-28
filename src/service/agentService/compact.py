@@ -10,8 +10,8 @@ import litellm
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from service import llmService
 from service.agentService import promptBuilder
-from util import llmApiUtil
-from util.configTypes import LlmServiceConfig
+from util import llmApiUtil, configUtil
+from util.configTypes import LlmModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -44,15 +44,19 @@ _OVERFLOW_KEYWORDS = (
 
 # ─── 阈值计算 ────────────────────────────────────────────
 
-def calc_hard_limit_tokens(model: str, llm_config: LlmServiceConfig) -> int:
+def calc_hard_limit_tokens(model: str, model_config: LlmModelConfig) -> int:
     """计算模型当前请求允许使用的最大 prompt token。"""
-    context_window = DEFAULT_MODEL_CONTEXT_WINDOWS.get(model, llm_config.context_window_tokens)
-    return context_window - llm_config.reserve_output_tokens
+    setting = configUtil.get_app_config().setting
+    context_cfg = model_config.context_config if model_config.context_config else setting.context_config
+    context_window = DEFAULT_MODEL_CONTEXT_WINDOWS.get(model, context_cfg.context_window_tokens)
+    return context_window - context_cfg.reserve_output_tokens
 
 
-def calc_compact_trigger_tokens(model: str, llm_config: LlmServiceConfig) -> int:
+def calc_compact_trigger_tokens(model: str, model_config: LlmModelConfig) -> int:
     """计算 compact 触发阈值（token 数）。"""
-    return math.floor(calc_hard_limit_tokens(model, llm_config) * llm_config.compact_trigger_ratio)
+    setting = configUtil.get_app_config().setting
+    context_cfg = model_config.context_config if model_config.context_config else setting.context_config
+    return math.floor(calc_hard_limit_tokens(model, model_config) * context_cfg.compact_trigger_ratio)
 
 
 # ─── token 估算 ──────────────────────────────────────────

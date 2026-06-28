@@ -30,7 +30,7 @@ from service.agentService.driver.factory import build_agent_driver
 from service.agentService.toolRegistry import AgentToolRegistry, RegisteredTool, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
 from util import configUtil, llmApiUtil
-from util.configTypes import LlmServiceConfig
+from util.configTypes import LlmModelConfig
 from util.assertUtil import assertNotNull
 from dal.db import gtAgentTaskManager
 
@@ -510,11 +510,13 @@ class AgentTurnRunner:
                 )
                 return patch
 
+            print('DEBUG: BEFORE INFER_STREAM')
             infer_result: llmService.InferResult = await llmService.infer_stream(
                 self.gt_agent.model, ctx, on_progress=_on_progress, on_status_event=_on_status_event,
             )
 
             # overflow retry
+            print('DEBUG: AFTER INFER_STREAM')
             if infer_result.ok is False or infer_result.response is None:
                 error = infer_result.error
                 if (
@@ -565,7 +567,8 @@ class AgentTurnRunner:
                         self.gt_agent.model, ctx, on_progress=_on_progress, on_status_event=_on_status_event,
                     )
 
-                if infer_result.ok is False or infer_result.response is None:
+                print('DEBUG: AFTER INFER_STREAM')
+            if infer_result.ok is False or infer_result.response is None:
                     error_message = infer_result.error_message or "unknown inference error"
                     raise RuntimeError(error_message) from infer_result.error
 
@@ -806,15 +809,17 @@ class AgentTurnRunner:
 
     # ─── 内部辅助方法 ─────────────────────────────
 
-    def _resolve_compact_config(self) -> tuple[str, LlmServiceConfig, int, int]:
-        """获取 compact 相关配置：(resolved_model, llm_config, trigger_tokens, hard_limit_tokens)。"""
-        llm_config = configUtil.get_app_config().setting.current_llm_service
-        if llm_config is None:
-            raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
-        resolved_model = self.gt_agent.model or llm_config.model
-        trigger_tokens = compact.calc_compact_trigger_tokens(resolved_model, llm_config)
-        hard_limit_tokens = compact.calc_hard_limit_tokens(resolved_model, llm_config)
-        return resolved_model, llm_config, trigger_tokens, hard_limit_tokens
+    def _resolve_compact_config(self) -> tuple[str, "LlmModelConfig", int, int]:
+        """获取 compact 相关配置：(resolved_model, model_config, trigger_tokens, hard_limit_tokens)。"""
+        from service.llmService.core import resolve_model
+        try:
+            _, model_config, _, resolved_model = resolve_model(self.gt_agent.model)
+        except ValueError as e:
+            raise ValueError(f"无法解析代理所使用的模型配置: {e}")
+            
+        trigger_tokens = compact.calc_compact_trigger_tokens(resolved_model, model_config)
+        hard_limit_tokens = compact.calc_hard_limit_tokens(resolved_model, model_config)
+        return resolved_model, model_config, trigger_tokens, hard_limit_tokens
 
     @staticmethod
     def _build_usage(
@@ -887,7 +892,7 @@ class AgentTurnRunner:
             raise RuntimeError("compact 跳过：无可压缩消息")
 
         # 摘要 token 上限动态设为上下文长度的 10%，随模型配置自动伸缩
-        compact_max_tokens = max(1, int(llm_config.context_window_tokens * 0.1))
+        compact_max_tokens = max(1, int(llm_config.context_config.context_window_tokens * 0.1))
         try:
             summary_text = await compact.compact_messages(
                 messages=compact_plan.source_messages,

@@ -31,7 +31,7 @@ class ConfigHandler(BaseHandler):
         self.return_json({
             "models": models,
             "driver_types": driver_types,
-            "default_model": setting.default_llm_server,
+            "default_model": setting.default_models.primary,
             "demo_mode": setting.demo_mode,
         })
 

@@ -120,25 +120,24 @@ class RoleTemplatePreset(BaseModel):
     prompt_file: str = ""
 
 
-class LlmServiceConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    name: str
-    base_url: str
-    api_key: str
-    type: LlmServiceType
-    model: str = "qwen-plus"
-    enable: bool = True
-    extra_headers: dict[str, str] = Field(default_factory=_default_llm_extra_headers)
-    provider_params: dict[str, Any] = Field(default_factory=dict)
-
-    temperature: Optional[float] = None
-
-    # Token 预算与自动压缩配置
-    context_window_tokens: int = 131072
-    reserve_output_tokens: int = 16384
+class LlmContextConfig(BaseModel):
+    """上下文与压缩策略配置"""
+    context_window_tokens: int = 128000
+    reserve_output_tokens: int = 4096
     compact_trigger_ratio: float = Field(default=0.85, ge=0.0, le=1.0)
-    compact_summary_max_tokens: int = 6 * 1024
+    compact_summary_max_tokens: int = 6144
+
+
+class LlmModelConfig(BaseModel):
+    """单个模型的配置 — 归属于某个提供商。"""
+    name: str
+    enabled: bool = True
+    support_vision: bool = False
+    temperature: Optional[float] = None
+    provider_params: dict[str, Any] = Field(default_factory=dict)
+    extra_headers: dict[str, str] = Field(default_factory=dict)
+    context_config: Optional[LlmContextConfig] = None
+    protocol: Optional[str] = None
 
     @field_validator("provider_params")
     @classmethod
@@ -146,6 +145,32 @@ class LlmServiceConfig(BaseModel):
         if value is None:
             return {}
         return _validate_llm_provider_params(value)
+
+
+class LlmProviderConfig(BaseModel):
+    """LLM 提供商配置 — 对应一个 API 服务提供商。"""
+    name: str
+    type: str
+    api_key: str
+    enable: bool = True
+    urls: dict[str, str] = Field(default_factory=dict)
+    extra_headers: dict[str, str] = Field(default_factory=_default_llm_extra_headers)
+    provider_params: dict[str, Any] = Field(default_factory=dict)
+    models: List[LlmModelConfig] = Field(default_factory=list)
+
+    @field_validator("provider_params")
+    @classmethod
+    def validate_provider_params(cls, value: dict[str, Any] | None) -> dict[str, Any]:
+        if value is None:
+            return {}
+        return _validate_llm_provider_params(value)
+
+
+class DefaultModelSlots(BaseModel):
+    """全局默认模型槽位。"""
+    primary: str = ""
+    lightweight: str = ""
+    vision: str = ""
 
 
 class DemoModeConfig(BaseModel):
@@ -178,12 +203,14 @@ class DevConfig(BaseModel):
 class SettingConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    version: str = "v2"
     language: str = "zh-CN"  # 界面语言，默认中文
     development_mode: bool = False  # 前端开发模式开关，影响错误提示等交互行为
     demo_mode: DemoModeConfig = Field(default_factory=DemoModeConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
-    default_llm_server: str | None = None
-    llm_services: list[LlmServiceConfig] = Field(default_factory=list)
+    llm_providers: List[LlmProviderConfig] = Field(default_factory=list)
+    default_models: DefaultModelSlots = Field(default_factory=DefaultModelSlots)
+    context_config: LlmContextConfig = Field(default_factory=LlmContextConfig)
     default_room_max_rounds: int = 100
     db_path: str = Field(default_factory=_default_db_path)
     workspace_root: str | None = Field(default_factory=_default_workspace_root)
@@ -200,21 +227,11 @@ class SettingConfig(BaseModel):
 
     @property
     def is_llm_configured(self) -> bool:
-        """是否已配置可用的 LLM 服务（至少一个已启用）。"""
-        return any(s.enable for s in self.llm_services)
-
-    @property
-    def current_llm_service(self) -> LlmServiceConfig | None:
-        enabled_services = [s for s in self.llm_services if s.enable]
-        if not enabled_services:
-            return None
-
-        if self.default_llm_server:
-            for service in enabled_services:
-                if service.name == self.default_llm_server:
-                    return service
-
-        return enabled_services[0]
+        """是否已配置可用的 LLM 服务（至少有一个启用且有模型的提供商）。"""
+        for provider in self.llm_providers:
+            if provider.enable and any(m.enabled for m in provider.models):
+                return True
+        return False
 
     def get_default_team_workdir(self, team_name: str) -> str:
         return os.path.join(self.workspace_root, team_name)

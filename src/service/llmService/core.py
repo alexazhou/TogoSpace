@@ -12,13 +12,9 @@ from service.llmService.llmErrorClassifier import classify_llm_error, RETRYABLE_
 from service.llmService.llmRequestRules import apply_llm_request_rules
 from util import configUtil, llmApiUtil
 
-# LiteLLM custom_llm_provider 映射表
-_TYPE_TO_PROVIDER = {
-    LlmServiceType.OPENAI_COMPATIBLE: "openai",
-    LlmServiceType.ANTHROPIC: "anthropic",
-    LlmServiceType.GOOGLE: "gemini",
-    LlmServiceType.DEEPSEEK: "deepseek",
-}
+from util.configTypes import LlmModelConfig, LlmProviderConfig, LlmContextConfig
+import appPaths
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -68,24 +64,72 @@ class InferRequestStatusEvent:
 InferRequestStatusEventHandler = Callable[[InferRequestStatusEvent], Awaitable[None]]
 
 
+def get_provider_url(provider: LlmProviderConfig, protocol: str) -> str:
+    if protocol in provider.urls and provider.urls[protocol]:
+        return provider.urls[protocol]
+        
+    preset_path = os.path.join(appPaths.ASSETS_DIR, "preset", "providerDefaultUrls.json")
+    if os.path.isfile(preset_path):
+        with open(preset_path, "r", encoding="utf-8") as f:
+            presets = json.load(f)
+        if provider.type in presets:
+            preset_urls = presets[provider.type]
+            if protocol in preset_urls:
+                return preset_urls[protocol]
+    return ""
+
+def resolve_model(agent_model: str | None) -> tuple[LlmProviderConfig, LlmModelConfig, str, str]:
+    setting = configUtil.get_app_config().setting
+    
+    if not agent_model:
+        agent_model = "primary"
+        
+    if agent_model == "primary":
+        agent_model = setting.default_models.primary
+    elif agent_model == "lightweight":
+        agent_model = setting.default_models.lightweight
+    elif agent_model == "vision":
+        agent_model = setting.default_models.vision
+        
+    if not agent_model:
+        raise ValueError("未配置有效的默认模型槽位")
+        
+    if "@" not in agent_model:
+        raise ValueError(f"模型标识格式错误（应为 model@provider）：{agent_model}")
+        
+    model_name, provider_name = agent_model.rsplit("@", 1)
+    
+    provider_config = next((p for p in setting.llm_providers if p.name == provider_name and p.enable), None)
+    if not provider_config:
+        raise ValueError(f"找不到启用的提供商：{provider_name}")
+        
+    model_config = next((m for m in provider_config.models if m.name == model_name and m.enabled), None)
+    if not model_config:
+        raise ValueError(f"在提供商 {provider_name} 中找不到启用的模型：{model_name}")
+        
+    protocol = model_config.protocol
+    if not protocol:
+        protocol = provider_config.type
+        if provider_config.urls and protocol not in provider_config.urls:
+            protocol = next(iter(provider_config.urls.keys()))
+            
+    return provider_config, model_config, protocol, agent_model
+
 async def startup() -> None:
     setting = configUtil.get_app_config().setting
     if not setting.is_llm_configured:
         logger.warning("当前未配置可用的 LLM 服务，Agent 推理功能不可用。请通过 Web Console 或手动编辑 setting.json 完成配置。")
 
-
 def get_default_model_or_none() -> str | None:
     setting = configUtil.get_app_config().setting
-    llm_config = setting.current_llm_service
-    if llm_config is None:
+    if not setting.is_llm_configured:
         return None
-    return llm_config.model
-
+    return setting.default_models.primary
 
 def get_default_model() -> str:
     model = get_default_model_or_none()
-    if model is None:
-        raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
+    if not model:
+        raise ValueError("未配置可用的 LLM 服务（提供商全部被禁用或未设置默认模型槽位）")
     return model
 
 
@@ -99,21 +143,31 @@ def _build_request(
     *,
     model: str,
     ctx: GtCoreAgentDialogContext,
-    llm_config,
+    model_config: LlmModelConfig,
+    provider_config: LlmProviderConfig,
 ) -> tuple[llmApiUtil.OpenAIRequest, tuple[str, ...]]:
     messages: list[llmApiUtil.OpenAIMessage] = [
         llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.SYSTEM, ctx.system_prompt),
         *ctx.messages,
     ]
+    
+    # 获取上下文配置 (优先使用模型独立配置)
+    setting = configUtil.get_app_config().setting
+    context_cfg = model_config.context_config if model_config.context_config else setting.context_config
+    
+    # 合并 provider 参数
+    merged_provider_params = provider_config.provider_params.copy()
+    merged_provider_params.update(model_config.provider_params)
+    
     request = llmApiUtil.OpenAIRequest(
-        model=model,
+        model=model_config.name,
         messages=messages,
         tools=ctx.tools,
         tool_choice=ctx.tool_choice,
         prompt_cache=ctx.prompt_cache,
-        max_tokens=llm_config.reserve_output_tokens,
-        temperature=llm_config.temperature,
-        provider_params=llm_config.provider_params,
+        max_tokens=context_cfg.reserve_output_tokens,
+        temperature=model_config.temperature,
+        provider_params=merged_provider_params,
     )
     return apply_llm_request_rules(request)
 
@@ -193,30 +247,30 @@ async def infer(
     resolved_model = model
     resolved_provider: str | None = None
     try:
-        llm_config = configUtil.get_app_config().setting.current_llm_service
-        if llm_config is None:
-            raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
-        resolved_model = model or llm_config.model
-        resolved_provider = _TYPE_TO_PROVIDER.get(llm_config.type)
+        provider_config, model_config, protocol, resolved_model = resolve_model(model)
+        resolved_provider = provider_config.name
+        
         request, applied_rules = _build_request(
-            model=resolved_model,
+            model=model_config.name,
             ctx=ctx,
-            llm_config=llm_config,
+            model_config=model_config,
+            provider_config=provider_config,
         )
         logger.info(
-            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
-            request_id, False, resolved_model, resolved_provider, len(request.messages), len(ctx.tools or []), request.tool_choice,
+            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, protocol=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
+            request_id, False, model_config.name, provider_config.name, protocol, len(request.messages), len(ctx.tools or []), request.tool_choice,
             ctx.prompt_cache, list(applied_rules),
         )
+        url = get_provider_url(provider_config, protocol)
         response = await _send_with_retry(
             send_request=llmApiUtil.send_request_non_stream,
             args=(),
             kwargs={
                 "request": request,
-                "url": llm_config.base_url,
-                "api_key": llm_config.api_key,
-                "custom_llm_provider": resolved_provider,
-                "extra_headers": llm_config.extra_headers,
+                "url": url,
+                "api_key": provider_config.api_key,
+                "custom_llm_provider": protocol,
+                "extra_headers": provider_config.extra_headers,
                 "request_id": request_id,
             },
             on_status_event=on_status_event,
@@ -228,8 +282,8 @@ async def infer(
         return InferResult.success(response, request_id=request_id)
     except Exception as e:
         logger.exception(
-            "LLM infer failed: request_id=%s, stream=%s, model=%s, provider=%s",
-            request_id, False, resolved_model, resolved_provider,
+            "LLM infer failed: request_id=%s, stream=%s, model=%s",
+            request_id, False, model,
         )
         return InferResult.failure(e, request_id=request_id)
 
@@ -261,19 +315,18 @@ async def infer_stream(
     resolved_model = model
     resolved_provider: str | None = None
     try:
-        llm_config = configUtil.get_app_config().setting.current_llm_service
-        if llm_config is None:
-            raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
-        resolved_model = model or llm_config.model
-        resolved_provider = _TYPE_TO_PROVIDER.get(llm_config.type)
+        provider_config, model_config, protocol, resolved_model = resolve_model(model)
+        resolved_provider = provider_config.name
+        
         request, applied_rules = _build_request(
-            model=resolved_model,
+            model=model_config.name,
             ctx=ctx,
-            llm_config=llm_config,
+            model_config=model_config,
+            provider_config=provider_config,
         )
         logger.info(
-            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
-            request_id, True, resolved_model, resolved_provider, len(request.messages), len(ctx.tools or []), request.tool_choice,
+            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, protocol=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
+            request_id, True, model_config.name, provider_config.name, protocol, len(request.messages), len(ctx.tools or []), request.tool_choice,
             ctx.prompt_cache, list(applied_rules),
         )
 
@@ -312,15 +365,16 @@ async def infer_stream(
                 if inspect.isawaitable(result):
                     await result
 
+        url = get_provider_url(provider_config, protocol)
         response = await _send_with_retry(
             send_request=llmApiUtil.send_request_stream,
             args=(),
             kwargs={
                 "request": request,
-                "url": llm_config.base_url,
-                "api_key": llm_config.api_key,
-                "custom_llm_provider": resolved_provider,
-                "extra_headers": llm_config.extra_headers,
+                "url": url,
+                "api_key": provider_config.api_key,
+                "custom_llm_provider": protocol,
+                "extra_headers": provider_config.extra_headers,
                 "on_chunk": _on_chunk,
                 "request_id": request_id,
             },
@@ -333,7 +387,7 @@ async def infer_stream(
         return InferResult.success(response, request_id=request_id)
     except Exception as e:
         logger.exception(
-            "LLM infer failed: request_id=%s, stream=%s, model=%s, provider=%s",
-            request_id, True, resolved_model, resolved_provider,
+            "LLM infer failed: request_id=%s, stream=%s, model=%s",
+            request_id, True, model,
         )
         return InferResult.failure(e, request_id=request_id)

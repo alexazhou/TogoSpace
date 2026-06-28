@@ -24,7 +24,7 @@ from util import llmApiUtil
 # ── Mock 配置：故意把阈值设小，方便触发 compact ──
 
 _CONFIG_PATCH = "service.agentService.agentTurnRunner.configUtil.get_app_config"
-_INFER_PATCH = "service.agentService.agentTurnRunner.llmService.infer"
+_INFER_PATCH = "service.agentService.compact.llmService.infer"
 _INFER_STREAM_PATCH = "service.agentService.agentTurnRunner.llmService.infer_stream"
 _ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
 _ACTIVITY_PATCH = "service.agentService.agentTurnRunner.agentActivityService"
@@ -46,21 +46,39 @@ _TRIGGER = 340
 
 
 def _mock_config():
-    llm_cfg = MagicMock()
-    llm_cfg.context_window_tokens = _CONTEXT_WINDOW
-    llm_cfg.reserve_output_tokens = _RESERVE_OUTPUT
-    llm_cfg.compact_trigger_ratio = 0.85
-    llm_cfg.compact_summary_max_tokens = 200
-    llm_cfg.model = "mock-model"
-    setting = MagicMock()
-    setting.current_llm_service = llm_cfg
+    from util.configTypes import SettingConfig, LlmProviderConfig, LlmModelConfig, LlmContextConfig
     app_config = MagicMock()
-    app_config.setting = setting
+    app_config.setting = SettingConfig(
+        version="v2",
+        language="zh-CN",
+        workspace_root="/tmp/test_workspace",
+        default_models={"primary": "mock-model@svc", "lightweight": "mock-model@svc", "vision": "mock-model@svc"},
+        llm_providers=[
+            LlmProviderConfig(
+                name="svc",
+                enable=True,
+                type="openai",
+                api_key="test-key",
+                urls={"openai": "http://127.0.0.1:9999/v1/chat/completions"},
+                models=[
+                    LlmModelConfig(
+                        name="mock-model",
+                        protocol="openai",
+                        context_config=LlmContextConfig(
+                            compact_trigger_ratio=0.85, 
+                            reserve_output_tokens=0, 
+                            context_window_tokens=400
+                        )
+                    )
+                ]
+            )
+        ]
+    )
     return app_config
 
 
 def _make_runner(history: AgentHistoryStore) -> AgentTurnRunner:
-    gt_agent = GtAgent(id=99, team_id=1, name="CompactBot", role_template_id=1, model="mock-model")
+    gt_agent = GtAgent(id=99, team_id=1, name="CompactBot", role_template_id=1, model="mock-model@svc")
     runner = AgentTurnRunner(
         gt_agent=gt_agent,
         system_prompt="You are a helpful assistant.",
