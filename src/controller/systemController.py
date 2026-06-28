@@ -5,6 +5,7 @@ from controller.baseController import BaseHandler
 from constants import ScheduleState
 from service import ormService, schedulerService
 from util import configUtil
+from version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class SystemStatusHandler(BaseHandler):
             "read_only": demo_mode.read_only,
             "hide_sensitive_info": demo_mode.hide_sensitive,
             "development_mode": setting.development_mode,
+            "version": __version__,
         }
         if initialized:
             response["default_llm_server"] = setting.default_llm_server
