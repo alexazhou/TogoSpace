@@ -7,6 +7,7 @@ from typing import Any
 
 import tornado.httpclient
 
+from util import configUtil
 from version import __version__
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,19 @@ async def check_for_update(force: bool = False) -> dict[str, Any]:
         }
     """
     global _cached_result, _cached_at
+
+    # dev.latest_release 优先：手动指定版本号，跳过 GitHub API，方便测试更新 UI
+    current = __version__
+    setting = configUtil.get_app_config().setting
+    dev_release = setting.dev.get("latest_release")
+    if dev_release:
+        return {
+            "has_update": is_newer_version(str(dev_release), current),
+            "current_version": current,
+            "latest_version": str(dev_release).lstrip("v"),
+            "release_url": "",
+            "release_notes": "",
+        }
 
     now = time.time()
     if not force and _cached_result is not None and (now - _cached_at) < _CACHE_TTL_SECONDS:
