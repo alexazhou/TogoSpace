@@ -59,6 +59,26 @@ def calc_compact_trigger_tokens(model: str, model_config: LlmModelConfig) -> int
     return math.floor(calc_hard_limit_tokens(model, model_config) * context_cfg.compact_trigger_ratio)
 
 
+def resolve_compact_config(agent_model: str | None) -> tuple[str, LlmModelConfig, int, int]:
+    """获取 compact 相关配置：(resolved_model, model_config, trigger_tokens, hard_limit_tokens)。
+
+    Args:
+        agent_model: 代理模型标识，支持 primary/lightweight/vision 别名或 model@provider 格式。
+
+    Returns:
+        (resolved_model, model_config, trigger_tokens, hard_limit_tokens)
+    """
+    from service.llmService.core import resolve_model
+    try:
+        _, model_config, _, resolved_model = resolve_model(agent_model)
+    except ValueError as e:
+        raise ValueError(f"无法解析代理所使用的模型配置: {e}")
+
+    trigger_tokens = calc_compact_trigger_tokens(resolved_model, model_config)
+    hard_limit_tokens = calc_hard_limit_tokens(resolved_model, model_config)
+    return resolved_model, model_config, trigger_tokens, hard_limit_tokens
+
+
 # ─── token 估算 ──────────────────────────────────────────
 
 def estimate_tokens(
