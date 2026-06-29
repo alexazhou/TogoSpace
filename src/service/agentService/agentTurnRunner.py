@@ -28,6 +28,7 @@ from service.agentService import compact, promptBuilder
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
 from service.agentService.driver.factory import build_agent_driver
 from service.agentService.toolRegistry import AgentToolRegistry, RegisteredTool, ToolExecutionResult
+from service.llmService.core import resolve_compact_config
 from service.roomService import ChatRoom, ToolCallContext
 from util import configUtil, llmApiUtil
 from util.configTypes import LlmModelConfig
@@ -436,7 +437,7 @@ class AgentTurnRunner:
             f"末尾角色: {history._last_role() or 'empty'}"
         )
 
-        resolved_model, _, trigger_tokens, hard_limit_tokens = self._resolve_compact_config()
+        resolved_model, _, trigger_tokens, hard_limit_tokens = resolve_compact_config(self.gt_agent.model)
         estimated_tokens = 0
         compact_stage: CompactStage = "none"
         overflow_retry = False
@@ -809,18 +810,6 @@ class AgentTurnRunner:
 
     # ─── 内部辅助方法 ─────────────────────────────
 
-    def _resolve_compact_config(self) -> tuple[str, "LlmModelConfig", int, int]:
-        """获取 compact 相关配置：(resolved_model, model_config, trigger_tokens, hard_limit_tokens)。"""
-        from service.llmService.core import resolve_model
-        try:
-            _, model_config, _, resolved_model = resolve_model(self.gt_agent.model)
-        except ValueError as e:
-            raise ValueError(f"无法解析代理所使用的模型配置: {e}")
-            
-        trigger_tokens = compact.calc_compact_trigger_tokens(resolved_model, model_config)
-        hard_limit_tokens = compact.calc_hard_limit_tokens(resolved_model, model_config)
-        return resolved_model, model_config, trigger_tokens, hard_limit_tokens
-
     @staticmethod
     def _build_usage(
         *,
@@ -852,7 +841,7 @@ class AgentTurnRunner:
 
         Returns: (messages, estimated_tokens, compact_triggered)
         """
-        resolved_model, _, trigger_tokens, hard_limit_tokens = self._resolve_compact_config()
+        resolved_model, _, trigger_tokens, hard_limit_tokens = resolve_compact_config(self.gt_agent.model)
         if trigger_prompt_tokens < trigger_tokens:
             return messages, estimated_tokens, False
 
@@ -879,7 +868,7 @@ class AgentTurnRunner:
 
     async def _execute_compact(self) -> None:
         """执行一次 compact：生成摘要 → 插入 COMPACT_SUMMARY → 内存裁剪。失败时 raise。"""
-        resolved_model, llm_config, _, _ = self._resolve_compact_config()
+        resolved_model, llm_config, _, _ = resolve_compact_config(self.gt_agent.model)
 
         compact_activity = await agentActivityService.add_activity(
             gt_agent=self.gt_agent, activity_type=AgentActivityType.COMPACT, metadata=self._base_metadata(),
