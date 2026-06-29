@@ -131,13 +131,13 @@ class LlmContextConfig(BaseModel):
 class LlmModelConfig(BaseModel):
     """单个模型的配置 — 归属于某个提供商。"""
     name: str
+    protocol: LlmProtocol
     enabled: bool = True
     support_vision: bool = False
     temperature: Optional[float] = None
     provider_params: dict[str, Any] = Field(default_factory=dict)
     extra_headers: dict[str, str] = Field(default_factory=dict)
     context_config: Optional[LlmContextConfig] = None
-    protocol: Optional[LlmProtocol] = None
 
     @field_validator("provider_params")
     @classmethod

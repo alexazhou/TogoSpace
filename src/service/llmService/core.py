@@ -124,9 +124,6 @@ def resolve_model(model_name: str | None) -> tuple[LlmProviderConfig, LlmModelCo
     if not model_config:
         raise ValueError(f"在提供商 {provider_name} 中找不到启用的模型：{model_part}")
 
-    if not model_config.protocol:
-        raise ValueError(f"模型 {model_part} 未配置 protocol")
-
     # 合并 provider 级别的配置到 model_config
     merged_provider_params = provider_config.provider_params.copy()
     merged_provider_params.update(model_config.provider_params)

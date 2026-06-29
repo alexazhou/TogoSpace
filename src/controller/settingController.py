@@ -99,16 +99,7 @@ class LlmTestHandler(BaseHandler):
             self.return_with_error(error_code="validation_error", error_desc=str(e))
             return
 
-        protocol = req.protocol or (model_config.protocol.value if model_config.protocol else None)
-        if not protocol:
-            self.return_with_error(error_code="validation_error", error_desc="模型未配置 protocol")
-            return
-        # 验证 protocol 是否有效
-        try:
-            LlmProtocol(protocol)
-        except ValueError:
-            self.return_with_error(error_code="validation_error", error_desc=f"不支持的 protocol: {protocol}")
-            return
+        protocol = req.protocol or model_config.protocol.value
             
         try:
             result = await _test_llm_service(provider_config, model_config, protocol)

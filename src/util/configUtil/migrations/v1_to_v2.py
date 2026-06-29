@@ -32,6 +32,7 @@ def migrate_v1_to_v2(cfg: dict) -> None:
                 
             model_config = {
                 "name": svc.get("model", "default-model"),
+                "protocol": provider_type if provider_type in ("openai", "anthropic") else "openai",
                 "enabled": svc.get("enable", True),
                 "temperature": svc.get("temperature"),
                 "provider_params": svc.get("provider_params", {}),
