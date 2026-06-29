@@ -338,8 +338,8 @@ from util.configTypes import AppConfig, SettingConfig
 
 
 @pytest.mark.asyncio
-async def test_resolve_compact_config_uses_agent_model_when_set(monkeypatch):
-    """Agent model 有值时，resolve_compact_config 返回 Agent 的 model。"""
+async def test_resolve_model_returns_configured_model(monkeypatch):
+    """resolve_model 应返回配置的模型。"""
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
         default_models={"primary": "configured-model@svc", "lightweight": "", "vision": ""},
             llm_providers=[
@@ -364,15 +364,16 @@ async def test_resolve_compact_config_uses_agent_model_when_set(monkeypatch):
             ],
     )))
 
-    from service.agentService.compact import resolve_compact_config
-    resolved_model, llm_config, trigger_tokens, hard_limit_tokens = resolve_compact_config("configured-model@svc")
+    from service.llmService.core import resolve_model
+    provider_config, llm_config = resolve_model("configured-model@svc")
 
-    assert resolved_model == "configured-model@svc"
+    assert provider_config.name == "svc"
+    assert llm_config.name == "configured-model"
 
 
 @pytest.mark.asyncio
-async def test_resolve_compact_config_uses_config_model_when_agent_model_empty(monkeypatch):
-    """Agent model 为空时，resolve_compact_config 返回配置中的 model。"""
+async def test_resolve_model_uses_default_when_empty(monkeypatch):
+    """model 为空时，resolve_model 使用 default_models.primary。"""
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
         default_models={"primary": "configured-model@svc", "lightweight": "", "vision": ""},
             llm_providers=[
@@ -397,10 +398,11 @@ async def test_resolve_compact_config_uses_config_model_when_agent_model_empty(m
             ],
     )))
 
-    from service.agentService.compact import resolve_compact_config
-    resolved_model, llm_config, trigger_tokens, hard_limit_tokens = resolve_compact_config(None)
+    from service.llmService.core import resolve_model
+    provider_config, llm_config = resolve_model(None)
 
-    assert resolved_model == "configured-model@svc"
+    assert provider_config.name == "svc"
+    assert llm_config.name == "configured-model"
 
 
 # ─── handle_cancel_turn 相关测试 ─────────────────────────────

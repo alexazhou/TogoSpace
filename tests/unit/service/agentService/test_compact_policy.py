@@ -49,8 +49,8 @@ def test_calc_hard_limit_tokens_uses_builtin_default(mock_get_app_config):
     mock_app_config = MagicMock()
     mock_app_config.setting.context_config = LlmContextConfig()
     mock_get_app_config.return_value = mock_app_config
-    cfg = _make_llm_config(context_window_tokens=32000, reserve_output_tokens=4096)
-    assert calc_hard_limit_tokens("gpt-4o", cfg) == 123904
+    cfg = _make_llm_config(name="gpt-4o", context_window_tokens=32000, reserve_output_tokens=4096)
+    assert calc_hard_limit_tokens(cfg) == 123904
 
 
 @patch("service.agentService.compact.configUtil.get_app_config")
@@ -59,8 +59,8 @@ def test_calc_hard_limit_tokens_falls_back_to_config(mock_get_app_config):
     mock_app_config = MagicMock()
     mock_app_config.setting.context_config = LlmContextConfig()
     mock_get_app_config.return_value = mock_app_config
-    cfg = _make_llm_config(context_window_tokens=50000, reserve_output_tokens=2000)
-    assert calc_hard_limit_tokens("unknown-model-xyz", cfg) == 48000
+    cfg = _make_llm_config(name="unknown-model-xyz", context_window_tokens=50000, reserve_output_tokens=2000)
+    assert calc_hard_limit_tokens(cfg) == 48000
 
 
 # ─── calc_compact_trigger_tokens ─────────────────────────
@@ -71,9 +71,9 @@ def test_calc_compact_trigger_tokens_default(mock_get_app_config):
     mock_app_config = MagicMock()
     mock_app_config.setting.context_config = LlmContextConfig()
     mock_get_app_config.return_value = mock_app_config
-    cfg = _make_llm_config(context_window_tokens=32000, reserve_output_tokens=4096, compact_trigger_ratio=0.85)
+    cfg = _make_llm_config(name="unknown-model", context_window_tokens=32000, reserve_output_tokens=4096, compact_trigger_ratio=0.85)
     # (32000 - 4096) * 0.85 = 23718.4 → floor = 23718
-    result = calc_compact_trigger_tokens("unknown-model", cfg)
+    result = calc_compact_trigger_tokens(cfg)
     assert result == 23718
 
 
@@ -83,9 +83,9 @@ def test_calc_compact_trigger_tokens_known_model(mock_get_app_config):
     mock_app_config = MagicMock()
     mock_app_config.setting.context_config = LlmContextConfig()
     mock_get_app_config.return_value = mock_app_config
-    cfg = _make_llm_config(context_window_tokens=32000, reserve_output_tokens=4096, compact_trigger_ratio=0.85)
+    cfg = _make_llm_config(name="gpt-4o", context_window_tokens=32000, reserve_output_tokens=4096, compact_trigger_ratio=0.85)
     # gpt-4o: (128000 - 4096) * 0.85 = 105318.4 → floor = 105318
-    result = calc_compact_trigger_tokens("gpt-4o", cfg)
+    result = calc_compact_trigger_tokens(cfg)
     assert result == 105318
 
 

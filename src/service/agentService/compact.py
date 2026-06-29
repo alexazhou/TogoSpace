@@ -44,40 +44,21 @@ _OVERFLOW_KEYWORDS = (
 
 # ─── 阈值计算 ────────────────────────────────────────────
 
-def calc_hard_limit_tokens(model: str, model_config: LlmModelConfig) -> int:
+def calc_hard_limit_tokens(model_config: LlmModelConfig) -> int:
     """计算模型当前请求允许使用的最大 prompt token。"""
     setting = configUtil.get_app_config().setting
     context_cfg = model_config.context_config if model_config.context_config else setting.context_config
-    context_window = DEFAULT_MODEL_CONTEXT_WINDOWS.get(model, context_cfg.context_window_tokens)
+    context_window = DEFAULT_MODEL_CONTEXT_WINDOWS.get(model_config.name, context_cfg.context_window_tokens)
     return context_window - context_cfg.reserve_output_tokens
 
 
-def calc_compact_trigger_tokens(model: str, model_config: LlmModelConfig) -> int:
+def calc_compact_trigger_tokens(model_config: LlmModelConfig) -> int:
     """计算 compact 触发阈值（token 数）。"""
     setting = configUtil.get_app_config().setting
     context_cfg = model_config.context_config if model_config.context_config else setting.context_config
-    return math.floor(calc_hard_limit_tokens(model, model_config) * context_cfg.compact_trigger_ratio)
+    return math.floor(calc_hard_limit_tokens(model_config) * context_cfg.compact_trigger_ratio)
 
 
-def resolve_compact_config(model_name: str | None) -> tuple[str, LlmModelConfig, int, int]:
-    """获取 compact 相关配置：(resolved_model, model_config, trigger_tokens, hard_limit_tokens)。
-
-    Args:
-        model_name: 代理模型标识，支持 primary/lightweight/vision 别名或 model@provider 格式。
-
-    Returns:
-        (resolved_model, model_config, trigger_tokens, hard_limit_tokens)
-    """
-    from service.llmService.core import resolve_model
-    try:
-        provider_config, model_config = resolve_model(model_name)
-    except ValueError as e:
-        raise ValueError(f"无法解析代理所使用的模型配置: {e}")
-
-    resolved_model = f"{model_config.name}@{provider_config.name}"
-    trigger_tokens = calc_compact_trigger_tokens(resolved_model, model_config)
-    hard_limit_tokens = calc_hard_limit_tokens(resolved_model, model_config)
-    return resolved_model, model_config, trigger_tokens, hard_limit_tokens
 
 
 # ─── token 估算 ──────────────────────────────────────────
