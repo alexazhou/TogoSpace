@@ -78,26 +78,26 @@ def get_provider_url(provider: LlmProviderConfig, protocol: str) -> str:
                 return preset_urls[protocol]
     return ""
 
-def resolve_model(agent_model: str | None) -> tuple[LlmProviderConfig, LlmModelConfig, str, str]:
+def resolve_model(model_name: str | None) -> tuple[LlmProviderConfig, LlmModelConfig, str, str]:
     setting = configUtil.get_app_config().setting
-    
-    if not agent_model:
-        agent_model = "primary"
-        
-    if agent_model == "primary":
-        agent_model = setting.default_models.primary
-    elif agent_model == "lightweight":
-        agent_model = setting.default_models.lightweight
-    elif agent_model == "vision":
-        agent_model = setting.default_models.vision
-        
-    if not agent_model:
+
+    if not model_name:
+        model_name = "primary"
+
+    if model_name == "primary":
+        model_name = setting.default_models.primary
+    elif model_name == "lightweight":
+        model_name = setting.default_models.lightweight
+    elif model_name == "vision":
+        model_name = setting.default_models.vision
+
+    if not model_name:
         raise ValueError("未配置有效的默认模型槽位")
-        
-    if "@" not in agent_model:
-        raise ValueError(f"模型标识格式错误（应为 model@provider）：{agent_model}")
-        
-    model_name, provider_name = agent_model.rsplit("@", 1)
+
+    if "@" not in model_name:
+        raise ValueError(f"模型标识格式错误（应为 model@provider）：{model_name}")
+
+    model_name, provider_name = model_name.rsplit("@", 1)
     
     provider_config = next((p for p in setting.llm_providers if p.name == provider_name and p.enable), None)
     if not provider_config:
