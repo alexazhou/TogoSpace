@@ -12,15 +12,17 @@ class ConfigHandler(BaseHandler):
         app_config = configUtil.get_app_config()
         setting = app_config.setting
 
-        # 提取可用模型列表
-        models = [
-            {
-                "name": s.name,
-                "model": s.model,
-                "enabled": s.enable,
-            }
-            for s in setting.llm_services
-        ]
+        # 提取可用模型列表（从 llm_providers 扁平化）
+        models = []
+        for provider in setting.llm_providers:
+            if not provider.enable:
+                continue
+            for m in provider.models:
+                models.append({
+                    "name": provider.name,
+                    "model": m.name,
+                    "enabled": True,
+                })
 
         # 提取 driver 类型列表
         driver_types = [

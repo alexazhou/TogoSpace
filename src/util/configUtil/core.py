@@ -253,6 +253,8 @@ def _save_setting_to_file() -> None:
     setting = _cached_app_config.setting
     
     raw["version"] = setting.version
+    raw.pop("llm_services", None)
+    raw.pop("default_llm_server", None)
     raw["llm_providers"] = [
         p.model_dump(exclude_unset=True, mode="json") for p in setting.llm_providers
     ]
