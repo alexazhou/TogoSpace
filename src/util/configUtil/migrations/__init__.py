@@ -1,4 +1,4 @@
-from .v1_to_v2 import migrate_v1_to_v2
+from .v1_to_v2 import LlmServiceType, migrate_v1_to_v2
 
 def migrate_setting(cfg: dict) -> None:
     """自动执行所有配置迁移"""

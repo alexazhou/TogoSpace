@@ -5,7 +5,7 @@ import time
 
 from pydantic import BaseModel, ValidationError
 
-from constants import LlmServiceType
+from constants import LlmProtocol
 from controller.baseController import BaseHandler
 from service import schedulerService
 from util import assertUtil, configUtil, llmApiUtil
@@ -84,7 +84,7 @@ class ProviderTypesHandler(BaseHandler):
 class LlmTestRequest(BaseModel):
     provider: dict
     model: dict
-    protocol: str | None = None
+    protocol: str | None = None  # 接受字符串，内部转换为 LlmProtocol
 
 
 class LlmTestHandler(BaseHandler):
@@ -98,8 +98,17 @@ class LlmTestHandler(BaseHandler):
         except ValidationError as e:
             self.return_with_error(error_code="validation_error", error_desc=str(e))
             return
-            
-        protocol = req.protocol or model_config.protocol or provider_config.type
+
+        protocol = req.protocol or (model_config.protocol.value if model_config.protocol else None)
+        if not protocol:
+            self.return_with_error(error_code="validation_error", error_desc="模型未配置 protocol")
+            return
+        # 验证 protocol 是否有效
+        try:
+            LlmProtocol(protocol)
+        except ValueError:
+            self.return_with_error(error_code="validation_error", error_desc=f"不支持的 protocol: {protocol}")
+            return
             
         try:
             result = await _test_llm_service(provider_config, model_config, protocol)

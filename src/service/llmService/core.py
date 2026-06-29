@@ -6,7 +6,7 @@ import logging
 import uuid
 from typing import Optional
 
-from constants import InferRequestStateType, LlmErrorCategory, LlmServiceType
+from constants import InferRequestStateType, LlmErrorCategory, LlmProtocol, LlmProviderType
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from service.llmService.llmErrorClassifier import classify_llm_error, RETRYABLE_CATEGORIES
 from service.llmService.llmRequestRules import apply_llm_request_rules
@@ -64,21 +64,38 @@ class InferRequestStatusEvent:
 InferRequestStatusEventHandler = Callable[[InferRequestStatusEvent], Awaitable[None]]
 
 
-def get_provider_url(provider: LlmProviderConfig, protocol: str) -> str:
-    if protocol in provider.urls and provider.urls[protocol]:
-        return provider.urls[protocol]
-        
+def get_provider_url(provider: LlmProviderConfig, protocol: LlmProtocol) -> str:
+    proto = protocol.value if isinstance(protocol, LlmProtocol) else protocol
+    if proto in provider.urls and provider.urls[proto]:
+        return provider.urls[proto]
+
+    provider_type = provider.type.value if isinstance(provider.type, LlmProviderType) else provider.type
     preset_path = os.path.join(appPaths.ASSETS_DIR, "preset", "providerDefaultUrls.json")
     if os.path.isfile(preset_path):
         with open(preset_path, "r", encoding="utf-8") as f:
             presets = json.load(f)
-        if provider.type in presets:
-            preset_urls = presets[provider.type]
-            if protocol in preset_urls:
-                return preset_urls[protocol]
+        if provider_type in presets:
+            preset_urls = presets[provider_type]
+            if proto in preset_urls:
+                return preset_urls[proto]
     return ""
 
-def resolve_model(model_name: str | None) -> tuple[LlmProviderConfig, LlmModelConfig, str, str]:
+def resolve_model(model_name: str | None) -> tuple[LlmProviderConfig, LlmModelConfig]:
+    """
+    解析模型字符串为 provider 配置和合并后的模型配置。
+
+    Args:
+        model_name: 可选的模型标识字符串，格式为 "model@provider" 或 "primary"/"lightweight"/"vision"。
+                    若为 None 或空字符串，则使用 default_models.primary。
+
+    Returns:
+        (provider_config, merged_model_config)
+        其中 merged_model_config 已合并 provider 级别的 provider_params 和 extra_headers，
+        protocol 可从 model_config.protocol 获取。
+
+    Raises:
+        ValueError: 配置缺失或模型/Provider 未找到。
+    """
     setting = configUtil.get_app_config().setting
 
     if not model_name:
@@ -97,23 +114,32 @@ def resolve_model(model_name: str | None) -> tuple[LlmProviderConfig, LlmModelCo
     if "@" not in model_name:
         raise ValueError(f"模型标识格式错误（应为 model@provider）：{model_name}")
 
-    model_name, provider_name = model_name.rsplit("@", 1)
-    
+    model_part, provider_name = model_name.rsplit("@", 1)
+
     provider_config = next((p for p in setting.llm_providers if p.name == provider_name and p.enable), None)
     if not provider_config:
         raise ValueError(f"找不到启用的提供商：{provider_name}")
-        
-    model_config = next((m for m in provider_config.models if m.name == model_name and m.enabled), None)
+
+    model_config = next((m for m in provider_config.models if m.name == model_part and m.enabled), None)
     if not model_config:
-        raise ValueError(f"在提供商 {provider_name} 中找不到启用的模型：{model_name}")
-        
-    protocol = model_config.protocol
-    if not protocol:
-        protocol = provider_config.type
-        if provider_config.urls and protocol not in provider_config.urls:
-            protocol = next(iter(provider_config.urls.keys()))
-            
-    return provider_config, model_config, protocol, agent_model
+        raise ValueError(f"在提供商 {provider_name} 中找不到启用的模型：{model_part}")
+
+    if not model_config.protocol:
+        raise ValueError(f"模型 {model_part} 未配置 protocol")
+
+    # 合并 provider 级别的配置到 model_config
+    merged_provider_params = provider_config.provider_params.copy()
+    merged_provider_params.update(model_config.provider_params)
+
+    merged_extra_headers = provider_config.extra_headers.copy()
+    merged_extra_headers.update(model_config.extra_headers)
+
+    merged_model = model_config.model_copy(update={
+        "provider_params": merged_provider_params,
+        "extra_headers": merged_extra_headers,
+    })
+
+    return provider_config, merged_model
 
 async def startup() -> None:
     setting = configUtil.get_app_config().setting
@@ -154,11 +180,8 @@ def _build_request(
     # 获取上下文配置 (优先使用模型独立配置)
     setting = configUtil.get_app_config().setting
     context_cfg = model_config.context_config if model_config.context_config else setting.context_config
-    
-    # 合并 provider 参数
-    merged_provider_params = provider_config.provider_params.copy()
-    merged_provider_params.update(model_config.provider_params)
-    
+
+    # model_config.provider_params 已经是合并好的（resolve_model 中合并）
     request = llmApiUtil.OpenAIRequest(
         model=model_config.name,
         messages=messages,
@@ -167,7 +190,7 @@ def _build_request(
         prompt_cache=ctx.prompt_cache,
         max_tokens=context_cfg.reserve_output_tokens,
         temperature=model_config.temperature,
-        provider_params=merged_provider_params,
+        provider_params=model_config.provider_params,
     )
     return apply_llm_request_rules(request)
 
@@ -244,12 +267,13 @@ async def infer(
 ) -> InferResult:
     """根据 GtCoreAgentDialogContext 组装请求并调用 LLM 推理接口，统一返回成功/失败结果。"""
     request_id = uuid.uuid4().hex
-    resolved_model = model
+    resolved_model_name = model
     resolved_provider: str | None = None
     try:
-        provider_config, model_config, protocol, resolved_model = resolve_model(model)
+        provider_config, model_config = resolve_model(model)
         resolved_provider = provider_config.name
-        
+        resolved_model_name = f"{model_config.name}@{provider_config.name}"
+
         request, applied_rules = _build_request(
             model=model_config.name,
             ctx=ctx,
@@ -258,10 +282,10 @@ async def infer(
         )
         logger.info(
             "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, protocol=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
-            request_id, False, model_config.name, provider_config.name, protocol, len(request.messages), len(ctx.tools or []), request.tool_choice,
+            request_id, False, model_config.name, provider_config.name, model_config.protocol, len(request.messages), len(ctx.tools or []), request.tool_choice,
             ctx.prompt_cache, list(applied_rules),
         )
-        url = get_provider_url(provider_config, protocol)
+        url = get_provider_url(provider_config, model_config.protocol)
         response = await _send_with_retry(
             send_request=llmApiUtil.send_request_non_stream,
             args=(),
@@ -269,8 +293,8 @@ async def infer(
                 "request": request,
                 "url": url,
                 "api_key": provider_config.api_key,
-                "custom_llm_provider": protocol,
-                "extra_headers": provider_config.extra_headers,
+                "custom_llm_provider": model_config.protocol.value,
+                "extra_headers": model_config.extra_headers,
                 "request_id": request_id,
             },
             on_status_event=on_status_event,
@@ -312,12 +336,13 @@ async def infer_stream(
 ) -> InferResult:
     """流式推理：边迭代 chunk 边回调 on_progress，完成后返回与 infer() 一致的 InferResult。"""
     request_id = uuid.uuid4().hex
-    resolved_model = model
+    resolved_model_name = model
     resolved_provider: str | None = None
     try:
-        provider_config, model_config, protocol, resolved_model = resolve_model(model)
+        provider_config, model_config = resolve_model(model)
         resolved_provider = provider_config.name
-        
+        resolved_model_name = f"{model_config.name}@{provider_config.name}"
+
         request, applied_rules = _build_request(
             model=model_config.name,
             ctx=ctx,
@@ -326,7 +351,7 @@ async def infer_stream(
         )
         logger.info(
             "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, protocol=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
-            request_id, True, model_config.name, provider_config.name, protocol, len(request.messages), len(ctx.tools or []), request.tool_choice,
+            request_id, True, model_config.name, provider_config.name, model_config.protocol, len(request.messages), len(ctx.tools or []), request.tool_choice,
             ctx.prompt_cache, list(applied_rules),
         )
 
@@ -365,7 +390,7 @@ async def infer_stream(
                 if inspect.isawaitable(result):
                     await result
 
-        url = get_provider_url(provider_config, protocol)
+        url = get_provider_url(provider_config, model_config.protocol)
         response = await _send_with_retry(
             send_request=llmApiUtil.send_request_stream,
             args=(),
@@ -373,8 +398,8 @@ async def infer_stream(
                 "request": request,
                 "url": url,
                 "api_key": provider_config.api_key,
-                "custom_llm_provider": protocol,
-                "extra_headers": provider_config.extra_headers,
+                "custom_llm_provider": model_config.protocol.value,
+                "extra_headers": model_config.extra_headers,
                 "on_chunk": _on_chunk,
                 "request_id": request_id,
             },

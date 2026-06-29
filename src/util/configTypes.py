@@ -2,7 +2,7 @@ import os
 from typing import Any, List, Optional
 
 import appPaths
-from constants import DriverType, LlmServiceType
+from constants import DriverType, LlmProtocol, LlmProviderType
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # 多语言字段类型
@@ -137,7 +137,7 @@ class LlmModelConfig(BaseModel):
     provider_params: dict[str, Any] = Field(default_factory=dict)
     extra_headers: dict[str, str] = Field(default_factory=dict)
     context_config: Optional[LlmContextConfig] = None
-    protocol: Optional[str] = None
+    protocol: Optional[LlmProtocol] = None
 
     @field_validator("provider_params")
     @classmethod
@@ -150,7 +150,7 @@ class LlmModelConfig(BaseModel):
 class LlmProviderConfig(BaseModel):
     """LLM 提供商配置 — 对应一个 API 服务提供商。"""
     name: str
-    type: str
+    type: LlmProviderType
     api_key: str
     enable: bool = True
     urls: dict[str, str] = Field(default_factory=dict)

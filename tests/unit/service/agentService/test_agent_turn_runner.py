@@ -339,14 +339,7 @@ from util.configTypes import AppConfig, SettingConfig
 
 @pytest.mark.asyncio
 async def test_resolve_compact_config_uses_agent_model_when_set(monkeypatch):
-    """Agent model 有值时，_resolve_compact_config 返回 Agent 的 model。"""
-    gt_agent = GtAgent(id=1, team_id=1, name="TestAgent", role_template_id=1, model="configured-model@svc")
-    runner = AgentTurnRunner(
-        gt_agent=gt_agent,
-        system_prompt="You are a test agent.",
-        driver_config=AgentDriverConfig(driver_type=DriverType.NATIVE),
-    )
-
+    """Agent model 有值时，resolve_compact_config 返回 Agent 的 model。"""
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
         default_models={"primary": "configured-model@svc", "lightweight": "", "vision": ""},
             llm_providers=[
@@ -371,21 +364,15 @@ async def test_resolve_compact_config_uses_agent_model_when_set(monkeypatch):
             ],
     )))
 
-    resolved_model, llm_config, trigger_tokens, hard_limit_tokens = runner._resolve_compact_config()
+    from service.agentService.compact import resolve_compact_config
+    resolved_model, llm_config, trigger_tokens, hard_limit_tokens = resolve_compact_config("configured-model@svc")
 
     assert resolved_model == "configured-model@svc"
 
 
 @pytest.mark.asyncio
 async def test_resolve_compact_config_uses_config_model_when_agent_model_empty(monkeypatch):
-    """Agent model 为空时，_resolve_compact_config 返回配置中的 model。"""
-    gt_agent = GtAgent(id=1, team_id=1, name="TestAgent", role_template_id=1, model="")  # model 为空
-    runner = AgentTurnRunner(
-        gt_agent=gt_agent,
-        system_prompt="You are a test agent.",
-        driver_config=AgentDriverConfig(driver_type=DriverType.NATIVE),
-    )
-
+    """Agent model 为空时，resolve_compact_config 返回配置中的 model。"""
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
         default_models={"primary": "configured-model@svc", "lightweight": "", "vision": ""},
             llm_providers=[
@@ -410,7 +397,8 @@ async def test_resolve_compact_config_uses_config_model_when_agent_model_empty(m
             ],
     )))
 
-    resolved_model, llm_config, trigger_tokens, hard_limit_tokens = runner._resolve_compact_config()
+    from service.agentService.compact import resolve_compact_config
+    resolved_model, llm_config, trigger_tokens, hard_limit_tokens = resolve_compact_config(None)
 
     assert resolved_model == "configured-model@svc"
 

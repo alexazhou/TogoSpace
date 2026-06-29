@@ -3,7 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError, field_validator
 
-from constants import LlmServiceType
+from constants import LlmProtocol, LlmProviderType
 from controller.baseController import BaseHandler
 from service import schedulerService
 from util import configUtil
@@ -17,7 +17,7 @@ class QuickInitRequest(BaseModel):
     base_url: str
     api_key: str
     model: str
-    type: LlmServiceType = LlmServiceType.OPENAI_COMPATIBLE
+    type: LlmProviderType = LlmProviderType.OPENAI
     provider_params: dict[str, Any] | None = None
 
     @field_validator("base_url")
@@ -69,7 +69,7 @@ class QuickInitHandler(BaseHandler):
             models=[
                 LlmModelConfig(
                     name=req.model,
-                    protocol="openai",
+                    protocol=LlmProtocol.OPENAI,
                 )
             ]
         )

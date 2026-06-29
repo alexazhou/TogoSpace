@@ -70,10 +70,11 @@ def resolve_compact_config(model_name: str | None) -> tuple[str, LlmModelConfig,
     """
     from service.llmService.core import resolve_model
     try:
-        _, model_config, _, resolved_model = resolve_model(model_name)
+        provider_config, model_config = resolve_model(model_name)
     except ValueError as e:
         raise ValueError(f"无法解析代理所使用的模型配置: {e}")
 
+    resolved_model = f"{model_config.name}@{provider_config.name}"
     trigger_tokens = calc_compact_trigger_tokens(resolved_model, model_config)
     hard_limit_tokens = calc_hard_limit_tokens(resolved_model, model_config)
     return resolved_model, model_config, trigger_tokens, hard_limit_tokens

@@ -2,6 +2,7 @@ import json
 import os
 from unittest import mock
 import pytest
+from constants import LlmProviderType
 from util.configTypes import SettingConfig
 
 def test_v1_to_v2_migration(tmp_path):
@@ -52,7 +53,7 @@ def test_v1_to_v2_migration(tmp_path):
         
         p1 = setting.llm_providers[0]
         assert p1.name == "TestOpenAI"
-        assert p1.type == "openai"
+        assert p1.type == LlmProviderType.OPENAI
         assert p1.urls["openai"] == "https://api.openai.com/v1"
         assert len(p1.models) == 1
         m1 = p1.models[0]
@@ -62,7 +63,7 @@ def test_v1_to_v2_migration(tmp_path):
         
         p2 = setting.llm_providers[1]
         assert p2.name == "TestOllama"
-        assert p2.type == "openai" # converted from openai-compatible
+        assert p2.type == LlmProviderType.OPENAI # converted from openai-compatible
         assert p2.urls["openai"] == "http://localhost:11434/v1"
         assert len(p2.models) == 1
         m2 = p2.models[0]

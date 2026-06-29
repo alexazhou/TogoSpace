@@ -19,6 +19,12 @@ from service.updateService import (
     _CACHE_TTL_SECONDS,
 )
 
+def _mock_get_app_config():
+    """返回一个 mock AppConfig，dev.latest_release 为空。"""
+    from util.configTypes import AppConfig, SettingConfig, DevConfig
+    app_config = AppConfig(setting=SettingConfig(version="v2"))
+    return app_config
+
 
 # ───────────────────── _parse_version ─────────────────────
 
@@ -115,12 +121,13 @@ class TestCheckForUpdateCache:
             "body": "release notes",
         }).encode()
 
-        with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
-            mock_client = mock.MagicMock()
-            mock_client.fetch = mock.AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
+        with mock.patch("util.configUtil.get_app_config", side_effect=_mock_get_app_config):
+            with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
+                mock_client = mock.MagicMock()
+                mock_client.fetch = mock.AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
 
-            result = await check_for_update(force=False)
+                result = await check_for_update(force=False)
 
         assert result["has_update"] is True
         assert result["current_version"] == "0.3.8"
@@ -142,12 +149,13 @@ class TestCheckForUpdateCache:
         }
         updateService._cached_at = time.time()
 
-        with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
-            mock_client = mock.MagicMock()
-            mock_client.fetch = mock.AsyncMock()
-            mock_client_cls.return_value = mock_client
+        with mock.patch("util.configUtil.get_app_config", side_effect=_mock_get_app_config):
+            with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
+                mock_client = mock.MagicMock()
+                mock_client.fetch = mock.AsyncMock()
+                mock_client_cls.return_value = mock_client
 
-            result = await check_for_update(force=False)
+                result = await check_for_update(force=False)
 
         assert result["latest_version"] == "99.0.0"
         mock_client.fetch.assert_not_called()
@@ -172,12 +180,13 @@ class TestCheckForUpdateCache:
             "body": "notes",
         }).encode()
 
-        with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
-            mock_client = mock.MagicMock()
-            mock_client.fetch = mock.AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
+        with mock.patch("util.configUtil.get_app_config", side_effect=_mock_get_app_config):
+            with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
+                mock_client = mock.MagicMock()
+                mock_client.fetch = mock.AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
 
-            result = await check_for_update(force=True)
+                result = await check_for_update(force=True)
 
         assert result["has_update"] is True
         assert result["latest_version"] == "99.0.0"
@@ -204,12 +213,13 @@ class TestCheckForUpdateCache:
             "body": "",
         }).encode()
 
-        with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
-            mock_client = mock.MagicMock()
-            mock_client.fetch = mock.AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
+        with mock.patch("util.configUtil.get_app_config", side_effect=_mock_get_app_config):
+            with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
+                mock_client = mock.MagicMock()
+                mock_client.fetch = mock.AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
 
-            result = await check_for_update(force=False)
+                result = await check_for_update(force=False)
 
         assert result["latest_version"] == "99.0.0"
         mock_client.fetch.assert_called_once()
@@ -234,12 +244,13 @@ class TestFetchGithubRelease:
         mock_response = mock.MagicMock()
         mock_response.code = 403
 
-        with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
-            mock_client = mock.MagicMock()
-            mock_client.fetch = mock.AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
+        with mock.patch("util.configUtil.get_app_config", side_effect=_mock_get_app_config):
+            with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
+                mock_client = mock.MagicMock()
+                mock_client.fetch = mock.AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
 
-            result = await check_for_update(force=True)
+                result = await check_for_update(force=True)
 
         assert result["has_update"] is False
         assert result["current_version"] == result["latest_version"]
@@ -247,12 +258,13 @@ class TestFetchGithubRelease:
     @pytest.mark.asyncio
     async def test_network_error_returns_fallback(self):
         """网络异常时返回 fallback，不抛出。"""
-        with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
-            mock_client = mock.MagicMock()
-            mock_client.fetch = mock.AsyncMock(side_effect=Exception("timeout"))
-            mock_client_cls.return_value = mock_client
+        with mock.patch("util.configUtil.get_app_config", side_effect=_mock_get_app_config):
+            with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
+                mock_client = mock.MagicMock()
+                mock_client.fetch = mock.AsyncMock(side_effect=Exception("timeout"))
+                mock_client_cls.return_value = mock_client
 
-            result = await check_for_update(force=True)
+                result = await check_for_update(force=True)
 
         assert result["has_update"] is False
 
@@ -268,12 +280,13 @@ class TestFetchGithubRelease:
             "body": long_body,
         }).encode()
 
-        with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
-            mock_client = mock.MagicMock()
-            mock_client.fetch = mock.AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
+        with mock.patch("util.configUtil.get_app_config", side_effect=_mock_get_app_config):
+            with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
+                mock_client = mock.MagicMock()
+                mock_client.fetch = mock.AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
 
-            result = await check_for_update(force=True)
+                result = await check_for_update(force=True)
 
         assert len(result["release_notes"]) == 2000
 
@@ -288,12 +301,13 @@ class TestFetchGithubRelease:
             "body": "",
         }).encode()
 
-        with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
-            mock_client = mock.MagicMock()
-            mock_client.fetch = mock.AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
+        with mock.patch("util.configUtil.get_app_config", side_effect=_mock_get_app_config):
+            with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
+                mock_client = mock.MagicMock()
+                mock_client.fetch = mock.AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
 
-            result = await check_for_update(force=True)
+                result = await check_for_update(force=True)
 
         assert result["has_update"] is False
         assert result["latest_version"] == "0.3.8"
@@ -309,11 +323,12 @@ class TestFetchGithubRelease:
             "body": None,
         }).encode()
 
-        with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
-            mock_client = mock.MagicMock()
-            mock_client.fetch = mock.AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
+        with mock.patch("util.configUtil.get_app_config", side_effect=_mock_get_app_config):
+            with mock.patch("tornado.httpclient.AsyncHTTPClient") as mock_client_cls:
+                mock_client = mock.MagicMock()
+                mock_client.fetch = mock.AsyncMock(return_value=mock_response)
+                mock_client_cls.return_value = mock_client
 
-            result = await check_for_update(force=True)
+                result = await check_for_update(force=True)
 
         assert result["release_notes"] == ""

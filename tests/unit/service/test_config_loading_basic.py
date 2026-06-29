@@ -4,8 +4,8 @@ import sys
 import builtins
 
 import pytest
+from constants import LlmProviderType
 from util import configUtil
-from constants import LlmServiceType
 from util.configTypes import (
     AppConfig,
     LlmProviderConfig,
@@ -66,7 +66,7 @@ def test_load_returns_appconfig_with_typed_fields(tmp_path):
 
     assert isinstance(app_config, AppConfig)
     assert isinstance(llm_cfg, LlmProviderConfig)
-    assert llm_cfg.type == "openai"
+    assert llm_cfg.type == LlmProviderType.OPENAI
     assert isinstance(app_config.setting, SettingConfig)
     assert app_config.setting.db_path == "./data/db.sqlite"
     assert llm_cfg.models[0].name == "gpt-4"

@@ -5,7 +5,7 @@ import builtins
 
 import pytest
 from util import configUtil
-from constants import LlmServiceType
+from util.configUtil.migrations import LlmServiceType
 from util.configTypes import (
     AppConfig,
     LlmProviderConfig,

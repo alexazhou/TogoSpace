@@ -1,3 +1,14 @@
+from enum import Enum
+
+
+class LlmServiceType(str, Enum):
+    """V1 配置中的 LLM 服务类型（兼容保留）。"""
+    OPENAI_COMPATIBLE = "openai-compatible"
+    ANTHROPIC = "anthropic"
+    GOOGLE = "google"
+    DEEPSEEK = "deepseek"
+
+
 def migrate_v1_to_v2(cfg: dict) -> None:
     """向后兼容自动迁移 (V1 -> V2)"""
     version = cfg.get("version", "v1")
