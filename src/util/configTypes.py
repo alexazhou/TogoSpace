@@ -3,7 +3,7 @@ from typing import Any, List, Optional
 
 import appPaths
 from constants import DriverType, LlmProtocol, LlmProviderType
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 # 多语言字段类型
 I18nText = dict[str, str]   # e.g. {"zh-CN": "研究员", "en": "Researcher"}
@@ -122,8 +122,8 @@ class RoleTemplatePreset(BaseModel):
 
 class LlmContextConfig(BaseModel):
     """上下文与压缩策略配置"""
-    context_window_tokens: int = 128000
-    reserve_output_tokens: int = 4096
+    context_window_tokens: int = 131072
+    reserve_output_tokens: int = 16384
     compact_trigger_ratio: float = Field(default=0.85, ge=0.0, le=1.0)
     compact_summary_max_tokens: int = 6144
 
@@ -138,6 +138,13 @@ class LlmModelConfig(BaseModel):
     provider_params: dict[str, Any] = Field(default_factory=dict)
     extra_headers: dict[str, str] = Field(default_factory=dict)
     context_config: Optional[LlmContextConfig] = None
+
+    @field_serializer("context_config")
+    def _serialize_context_config(self, value: LlmContextConfig | None) -> LlmContextConfig | None:
+        """全默认值的 context_config 序列化为 None，配合 exclude_defaults 自动省略。"""
+        if value is not None and value == LlmContextConfig():
+            return None
+        return value
 
     @field_validator("provider_params")
     @classmethod

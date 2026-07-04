@@ -242,7 +242,7 @@ def _save_setting_to_file() -> None:
     写入策略：先写临时文件再 os.replace，确保原子性。
     采用 JSON 合并写回：读取原文件 → 更新 llm_services / default_llm_server → 写回，
     保留原文件中的 _comment 等非模型字段。
-    使用 exclude_unset=True 仅写入显式设置过的字段，保持配置文件精简。
+    使用 exclude_defaults=True 排除与默认值相同的字段，保持配置文件精简。
     """
     path = os.path.join(_cached_config_dir, "setting.json")
 
@@ -256,14 +256,14 @@ def _save_setting_to_file() -> None:
     raw.pop("llm_services", None)
     raw.pop("default_llm_server", None)
     raw["llm_providers"] = [
-        p.model_dump(exclude_unset=True, mode="json") for p in setting.llm_providers
+        p.model_dump(exclude_defaults=True, mode="json") for p in setting.llm_providers
     ]
-    raw["default_models"] = setting.default_models.model_dump(exclude_unset=True, mode="json")
-    raw["context_config"] = setting.context_config.model_dump(exclude_unset=True, mode="json")
-    
+    raw["default_models"] = setting.default_models.model_dump(exclude_defaults=True, mode="json")
+    raw["context_config"] = setting.context_config.model_dump(exclude_defaults=True, mode="json")
+
     raw["language"] = setting.language
     raw["development_mode"] = setting.development_mode
-    raw["auth"] = setting.auth.model_dump(exclude_unset=True, mode="json")
+    raw["auth"] = setting.auth.model_dump(exclude_defaults=True, mode="json")
 
     # 原子写入
     tmp_path = path + ".tmp"
