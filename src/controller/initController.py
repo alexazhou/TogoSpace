@@ -82,6 +82,7 @@ class QuickInitHandler(BaseHandler):
             s.default_models.primary = f"{req.model}@default"
             s.default_models.lightweight = f"{req.model}@default"
             s.default_models.vision = f"{req.model}@default"
+            s.default_models.advanced = f"{req.model}@default"
 
         configUtil.update_setting(mutator)
         await schedulerService.start_schedule()

@@ -178,6 +178,7 @@ class DefaultModelSlots(BaseModel):
     primary: str = ""
     lightweight: str = ""
     vision: str = ""
+    advanced: str = ""
 
 
 class DemoModeConfig(BaseModel):

@@ -107,6 +107,8 @@ def resolve_model(model_name: str | None) -> tuple[LlmProviderConfig, LlmModelCo
         model_name = setting.default_models.lightweight
     elif model_name == "vision":
         model_name = setting.default_models.vision
+    elif model_name == "advanced":
+        model_name = setting.default_models.advanced
 
     if not model_name:
         raise ValueError("未配置有效的默认模型槽位")
