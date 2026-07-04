@@ -3,7 +3,7 @@ from typing import Any, List, Optional
 
 import appPaths
 from constants import DriverType, LlmProtocol, LlmProviderType
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 # 多语言字段类型
 I18nText = dict[str, str]   # e.g. {"zh-CN": "研究员", "en": "Researcher"}
@@ -138,6 +138,14 @@ class LlmModelConfig(BaseModel):
     provider_params: dict[str, Any] = Field(default_factory=dict)
     extra_headers: dict[str, str] = Field(default_factory=dict)
     context_config: Optional[LlmContextConfig] = None
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: Any) -> dict[str, Any]:
+        data = handler(self)
+        cc = data.get("context_config")
+        if cc is None or cc == {}:
+            data.pop("context_config", None)
+        return data
 
     @field_validator("provider_params")
     @classmethod
