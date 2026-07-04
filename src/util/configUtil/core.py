@@ -265,7 +265,9 @@ def _save_setting_to_file() -> None:
     raw["development_mode"] = setting.development_mode
     raw["auth"] = setting.auth.model_dump(exclude_defaults=True, mode="json")
 
-    # 原子写入
+    # 清理 null 值后原子写入
+    from util.jsonUtil import _clean_null_values
+    raw = _clean_null_values(raw)
     tmp_path = path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(raw, f, indent=2, ensure_ascii=False)
