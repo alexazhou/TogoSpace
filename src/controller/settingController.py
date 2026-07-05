@@ -8,6 +8,7 @@ from pydantic import BaseModel, ValidationError
 from constants import LlmProtocol
 from controller.baseController import BaseHandler
 from service import schedulerService
+from util import jsonUtil
 from util import assertUtil, configUtil, llmApiUtil
 from util.configTypes import LlmProviderConfig, LlmModelConfig, LlmContextConfig, DefaultModelSlots
 from service.llmService.core import get_provider_url
@@ -45,6 +46,8 @@ class LlmConfigHandler(BaseHandler):
         context_config_data = body.get("context_config", {})
         
         try:
+            # 过滤 provider/model 级别 context_config 中的 null 值
+            providers_data = [jsonUtil.clean_null_values(p) for p in providers_data]
             providers = [LlmProviderConfig(**p) for p in providers_data]
             default_models = DefaultModelSlots(**default_models_data)
             # 过滤 null 值，让 LlmContextConfig 使用默认值

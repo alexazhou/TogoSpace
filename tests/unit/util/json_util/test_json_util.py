@@ -453,46 +453,46 @@ class TestJsonUtil:
 
 
 class TestCleanNullValues:
-    """_clean_null_values 测试"""
+    """clean_null_values 测试"""
 
     def test_remove_null_from_dict(self):
         data = {"a": 1, "b": None, "c": "hello"}
-        assert jsonUtil._clean_null_values(data) == {"a": 1, "c": "hello"}
+        assert jsonUtil.clean_null_values(data) == {"a": 1, "c": "hello"}
 
     def test_keep_null_in_list(self):
         data = [1, None, 3]
-        assert jsonUtil._clean_null_values(data) == [1, None, 3]
+        assert jsonUtil.clean_null_values(data) == [1, None, 3]
 
     def test_nested_dict(self):
         data = {"a": {"b": None, "c": 1}, "d": None}
-        assert jsonUtil._clean_null_values(data) == {"a": {"c": 1}}
+        assert jsonUtil.clean_null_values(data) == {"a": {"c": 1}}
 
     def test_nested_list_of_dicts(self):
         data = [{"a": 1, "b": None}, {"c": None, "d": 2}]
-        assert jsonUtil._clean_null_values(data) == [{"a": 1}, {"d": 2}]
+        assert jsonUtil.clean_null_values(data) == [{"a": 1}, {"d": 2}]
 
     def test_empty_dict(self):
-        assert jsonUtil._clean_null_values({}) == {}
+        assert jsonUtil.clean_null_values({}) == {}
 
     def test_empty_list(self):
-        assert jsonUtil._clean_null_values([]) == []
+        assert jsonUtil.clean_null_values([]) == []
 
     def test_no_nulls(self):
         data = {"a": 1, "b": "x", "c": [1, 2]}
-        assert jsonUtil._clean_null_values(data) == data
+        assert jsonUtil.clean_null_values(data) == data
 
     def test_all_nulls(self):
         data = {"a": None, "b": None}
-        assert jsonUtil._clean_null_values(data) == {}
+        assert jsonUtil.clean_null_values(data) == {}
 
     def test_deeply_nested(self):
         data = {"l1": {"l2": {"l3": None, "keep": 1}}}
-        assert jsonUtil._clean_null_values(data) == {"l1": {"l2": {"keep": 1}}}
+        assert jsonUtil.clean_null_values(data) == {"l1": {"l2": {"keep": 1}}}
 
     def test_primitives_unchanged(self):
-        assert jsonUtil._clean_null_values(42) == 42
-        assert jsonUtil._clean_null_values("str") == "str"
-        assert jsonUtil._clean_null_values(True) is True
+        assert jsonUtil.clean_null_values(42) == 42
+        assert jsonUtil.clean_null_values("str") == "str"
+        assert jsonUtil.clean_null_values(True) is True
 
     def test_json_dump_remove_null(self):
         data = {"a": 1, "b": None, "c": "hello"}
