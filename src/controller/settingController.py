@@ -161,7 +161,7 @@ async def _test_llm_service(provider: LlmProviderConfig, model: LlmModelConfig, 
     url = get_provider_url(provider, protocol)
     request = llmApiUtil.build_agent_probe_request(
         model=model.name,
-        provider_params=model.provider_params,
+        extra_params=model.extra_params,
     )
 
     start_time = time.monotonic()

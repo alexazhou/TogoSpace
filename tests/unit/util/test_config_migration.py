@@ -106,7 +106,7 @@ def test_v1_to_v2_migration(tmp_path):
 
 
 def test_v1_migration_temperature_and_params():
-    """迁移时 temperature、provider_params、extra_headers 正确传递。"""
+    """迁移时 temperature、extra_params、extra_headers 正确传递。"""
 
     cfg = {
         "llm_services": [
@@ -128,7 +128,7 @@ def test_v1_migration_temperature_and_params():
     p = cfg["llm_providers"][0]
     m = p["models"][0]
     assert m["temperature"] == 0.7
-    assert m["provider_params"] == {"max_retries": 3}
+    assert m["extra_params"] == {"max_retries": 3}
     assert m["extra_headers"] == {"X-Custom": "val"}
 
 

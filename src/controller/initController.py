@@ -18,7 +18,7 @@ class QuickInitRequest(BaseModel):
     api_key: str
     model: str
     type: LlmProviderType = LlmProviderType.OPENAI
-    provider_params: dict[str, Any] | None = None
+    extra_params: dict[str, Any] | None = None
 
     @field_validator("base_url")
     @classmethod

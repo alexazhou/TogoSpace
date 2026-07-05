@@ -38,19 +38,19 @@ def _is_thinking_enabled(
     """判断当前请求是否开启了思考模式。
 
     触发方式（优先级从高到低）：
-    1. provider_params 中 thinking.type == "enabled" → 开启
-    2. provider_params 中 thinking.type == "disabled" → 显式关闭，不触发
-    3. provider_params 中设置了 reasoning_effort → 开启
+    1. extra_params 中 thinking.type == "enabled" → 开启
+    2. extra_params 中 thinking.type == "disabled" → 显式关闭，不触发
+    3. extra_params 中设置了 reasoning_effort → 开启
     4. 模型名称匹配 model_prefixes → 开启
     """
-    thinking = (request.provider_params or {}).get("thinking") or {}
+    thinking = (request.extra_params or {}).get("thinking") or {}
     if isinstance(thinking, dict):
         thinking_type = thinking.get("type")
         if thinking_type in ("enabled", "adaptive"):
             return True
         if thinking_type == "disabled":
             return False
-    reasoning_effort = (request.provider_params or {}).get("reasoning_effort")
+    reasoning_effort = (request.extra_params or {}).get("reasoning_effort")
     if reasoning_effort not in (None, ""):
         return True
     if _model_in_list(request.model, model_prefixes):
@@ -155,11 +155,11 @@ def apply_llm_request_rules(
         if not rule.check_match(current_request):
             continue
         logger.info(
-            "llm request rule matched: rule=%s, model=%s, tool_choice=%s, provider_params=%s",
+            "llm request rule matched: rule=%s, model=%s, tool_choice=%s, extra_params=%s",
             rule.__class__.__name__,
             current_request.model,
             current_request.tool_choice,
-            current_request.provider_params,
+            current_request.extra_params,
         )
         current_request = rule.apply(current_request)
         applied_rules.append(rule.__class__.__name__)

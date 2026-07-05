@@ -88,7 +88,7 @@ def test_llm_model_extra_headers_use_json_value_when_provided(tmp_path):
 
 
 
-def test_llm_model_provider_params_use_json_value_when_provided(tmp_path):
+def test_llm_model_extra_params_use_json_value_when_provided(tmp_path):
     (tmp_path / "setting.json").write_text(json.dumps({
             "version": "v2",
         "default_models": {"primary": "mock-model@svc"},
@@ -101,7 +101,7 @@ def test_llm_model_provider_params_use_json_value_when_provided(tmp_path):
                 "models": [{
                     "name": "mock-model",
                     "protocol": "openai",
-                    "provider_params": {"reasoning_effort": "high"},
+                    "extra_params": {"reasoning_effort": "high"},
                 }]
             }
         ],
@@ -109,11 +109,11 @@ def test_llm_model_provider_params_use_json_value_when_provided(tmp_path):
 
     app_config = configUtil.load(str(tmp_path), force_reload=True)
 
-    assert app_config.setting.llm_providers[0].models[0].provider_params == {"reasoning_effort": "high"}
+    assert app_config.setting.llm_providers[0].models[0].extra_params == {"reasoning_effort": "high"}
 
 
 
-def test_llm_model_provider_params_reject_reserved_keys(tmp_path):
+def test_llm_model_extra_params_reject_reserved_keys(tmp_path):
     (tmp_path / "setting.json").write_text(json.dumps({
             "version": "v2",
         "default_models": {"primary": "mock-model@svc"},
@@ -126,7 +126,7 @@ def test_llm_model_provider_params_reject_reserved_keys(tmp_path):
                 "models": [{
                     "name": "mock-model",
                     "protocol": "openai",
-                    "provider_params": {"model": "other-model"},
+                    "extra_params": {"model": "other-model"},
                 }]
             }
         ],
@@ -135,7 +135,7 @@ def test_llm_model_provider_params_reject_reserved_keys(tmp_path):
     with pytest.raises(ValueError) as exc_info:
         configUtil.load(str(tmp_path), force_reload=True)
 
-    assert "provider_params 包含保留字段" in str(exc_info.value)
+    assert "extra_params 包含保留字段" in str(exc_info.value)
 
 
 

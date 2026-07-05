@@ -116,14 +116,14 @@ class TestQuickInit(_ApiServiceCase):
         assert default_svc["type"] == "openai-compatible"
         assert default_svc["enable"] is True
 
-    async def test_quick_init_accepts_provider_params(self):
-        """快速初始化支持保存 provider_params。"""
+    async def test_quick_init_accepts_extra_params(self):
+        """快速初始化支持保存 extra_params。"""
         async with aiohttp.ClientSession() as client:
             await self._quick_init(client, {
                 "base_url": "https://api.example.com/v1",
                 "api_key": "sk-test-key-provider",
                 "model": "test-model-provider",
-                "provider_params": {
+                "extra_params": {
                     "reasoning_effort": "high",
                 },
             })
@@ -131,7 +131,7 @@ class TestQuickInit(_ApiServiceCase):
             list_data = await self._list_services(client)
 
         default_svc = next(s for s in list_data["llm_services"] if s["name"] == "default")
-        assert default_svc["provider_params"] == {
+        assert default_svc["extra_params"] == {
             "reasoning_effort": "high",
         }
 

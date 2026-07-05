@@ -64,7 +64,7 @@ def test_resolve_model():
 
 
 def test_resolve_model_preserves_model_params():
-    """resolve_model 应保留 model 级别的 provider_params 和 extra_headers。"""
+    """resolve_model 应保留 model 级别的 extra_params 和 extra_headers。"""
     mock_app_config = AppConfig(
         setting=SettingConfig(
             version="v2",
@@ -79,7 +79,7 @@ def test_resolve_model_preserves_model_params():
                         LlmModelConfig(
                             name="gpt-4o",
                             protocol="openai",
-                            provider_params={"top_p": 0.8, "reasoning_effort": "high"},
+                            extra_params={"top_p": 0.8, "reasoning_effort": "high"},
                             extra_headers={"X-Model": "model-value"},
                         )
                     ]
@@ -93,5 +93,5 @@ def test_resolve_model_preserves_model_params():
 
         _, model = resolve_model("gpt-4o@openai")
 
-        assert model.provider_params == {"top_p": 0.8, "reasoning_effort": "high"}
+        assert model.extra_params == {"top_p": 0.8, "reasoning_effort": "high"}
         assert model.extra_headers == {"X-Model": "model-value"}

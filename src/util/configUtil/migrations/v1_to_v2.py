@@ -70,7 +70,7 @@ def migrate_v1_to_v2(cfg: dict) -> None:
                 "protocol": provider_type if provider_type in ("openai", "anthropic") else "openai",
                 "enabled": svc.get("enable", True),
                 "temperature": svc.get("temperature"),
-                "provider_params": svc.get("provider_params", {}),
+                "extra_params": svc.get("provider_params", {}),
                 "extra_headers": svc.get("extra_headers", {}),
                 "context_config": {
                     "context_window_tokens": svc.get("context_window_tokens", 131072),

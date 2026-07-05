@@ -91,7 +91,7 @@ def resolve_model(model_name: str | None) -> tuple[LlmProviderConfig, LlmModelCo
 
     Returns:
         (provider_config, merged_model_config)
-        其中 merged_model_config 已合并 provider 级别的 provider_params 和 extra_headers，
+        其中 merged_model_config 已合并 extra_headers，
         protocol 可从 model_config.protocol 获取。
 
     Raises:
@@ -174,7 +174,7 @@ def _build_request(
     setting = configUtil.get_app_config().setting
     context_cfg = model_config.context_config if model_config.context_config else setting.context_config
 
-    # model_config.provider_params 已经是合并好的（resolve_model 中合并）
+    # model_config.extra_params 已经是合并好的（resolve_model 中合并）
     request = llmApiUtil.OpenAIRequest(
         model=model_config.name,
         messages=messages,
@@ -183,7 +183,7 @@ def _build_request(
         prompt_cache=ctx.prompt_cache,
         max_tokens=context_cfg.reserve_output_tokens,
         temperature=model_config.temperature,
-        provider_params=model_config.provider_params,
+        extra_params=model_config.extra_params,
     )
     return apply_llm_request_rules(request)
 

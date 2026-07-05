@@ -166,7 +166,7 @@ async def test_infer_stream_strips_required_tool_choice_when_reasoning_effort_en
                     "models": [{
                         "name": "deepseek-v4-pro",
                         "protocol": "openai",
-                        "provider_params": {"reasoning_effort": "high"},
+                        "extra_params": {"reasoning_effort": "high"},
                     }]
                 }
             ],
@@ -185,7 +185,7 @@ async def test_infer_stream_strips_required_tool_choice_when_reasoning_effort_en
     fake_send_request_stream.assert_awaited_once()
     request = fake_send_request_stream.await_args.kwargs["request"]
     assert request.tool_choice is None
-    assert request.provider_params["reasoning_effort"] == "high"
+    assert request.extra_params["reasoning_effort"] == "high"
 
 
 @pytest.mark.asyncio
@@ -317,7 +317,7 @@ async def test_infer_stream_uses_config_model_when_agent_model_is_none(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_infer_passes_provider_params(monkeypatch):
+async def test_infer_passes_extra_params(monkeypatch):
     fake_send_request_non_stream = AsyncMock(return_value=_build_response())
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
@@ -331,7 +331,7 @@ async def test_infer_passes_provider_params(monkeypatch):
                     "models": [{
                         "name": "mock-model",
                         "protocol": "openai",
-                        "provider_params": {
+                        "extra_params": {
                             "reasoning_effort": "high",
                             "parallel_tool_calls": False,
                         },
@@ -351,7 +351,7 @@ async def test_infer_passes_provider_params(monkeypatch):
     assert result.ok is True
     fake_send_request_non_stream.assert_awaited_once()
     request = fake_send_request_non_stream.await_args.kwargs["request"]
-    assert request.provider_params == {
+    assert request.extra_params == {
         "reasoning_effort": "high",
         "parallel_tool_calls": False,
     }

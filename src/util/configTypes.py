@@ -66,11 +66,11 @@ _LLM_PROVIDER_PARAM_RESERVED_KEYS = {
 }
 
 
-def _validate_llm_provider_params(value: dict[str, Any]) -> dict[str, Any]:
+def _validate_llm_extra_params(value: dict[str, Any]) -> dict[str, Any]:
     reserved_keys = sorted(_LLM_PROVIDER_PARAM_RESERVED_KEYS.intersection(value.keys()))
     if reserved_keys:
         raise ValueError(
-            "provider_params 包含保留字段，不能覆盖系统请求参数："
+            "extra_params 包含保留字段，不能覆盖系统请求参数："
             + ", ".join(reserved_keys)
         )
     return value
@@ -135,7 +135,7 @@ class LlmModelConfig(BaseModel):
     enabled: bool = True
     support_vision: bool = False
     temperature: Optional[float] = None
-    provider_params: dict[str, Any] = Field(default_factory=dict)
+    extra_params: dict[str, Any] = Field(default_factory=dict)
     extra_headers: dict[str, str] = Field(default_factory=dict)
     context_config: Optional[LlmContextConfig] = None
 
@@ -147,12 +147,12 @@ class LlmModelConfig(BaseModel):
             data.pop("context_config", None)
         return data
 
-    @field_validator("provider_params")
+    @field_validator("extra_params")
     @classmethod
-    def validate_provider_params(cls, value: dict[str, Any] | None) -> dict[str, Any]:
+    def validate_extra_params(cls, value: dict[str, Any] | None) -> dict[str, Any]:
         if value is None:
             return {}
-        return _validate_llm_provider_params(value)
+        return _validate_llm_extra_params(value)
 
 
 class LlmProviderConfig(BaseModel):

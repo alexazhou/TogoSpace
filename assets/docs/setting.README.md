@@ -67,8 +67,6 @@
   "urls": {
     "openai": "https://api.deepseek.com/v1/chat/completions"
   },
-  "extra_headers": {},
-  "provider_params": {},
   "models": [
     {
       "name": "deepseek-chat",
@@ -88,8 +86,6 @@
 | `api_key` | string | 是 | API Key |
 | `enable` | bool | 否 | 是否启用，默认 `true` |
 | `urls` | object | 否 | 协议对应的 URL，key 为协议类型 |
-| `extra_headers` | object | 否 | 额外请求头 |
-| `provider_params` | object | 否 | 透传给 litellm 的额外参数 |
 | `models` | list | 是 | 该服务商下的模型列表 |
 
 ### `type` 服务商类型枚举
@@ -117,7 +113,8 @@
 | `enabled` | bool | 否 | 是否启用，默认 `true` |
 | `support_vision` | bool | 否 | 是否支持视觉，默认 `false` |
 | `temperature` | float | 否 | 温度参数 |
-| `provider_params` | object | 否 | 模型级别的 litellm 参数 |
+| `extra_params` | object | 否 | 模型级别的 litellm 参数 |
+| `extra_headers` | object | 否 | 额外请求头 |
 | `context_config` | object | 否 | 模型级别的上下文配置（覆盖全局） |
 
 ## `default_models` 默认模型槽位
@@ -164,24 +161,24 @@
 | `compact_trigger_ratio` | float | `0.85` | 触发 compact 的比例（0.0~1.0） |
 | `compact_summary_max_tokens` | int | `6144` | compact 摘要 token 上限 |
 
-## `provider_params` 配置
+## `extra_params` 配置
 
-`provider_params` 是一个 JSON 对象，会直接合并到 litellm 的请求参数中。可用于配置模型特定的参数，如 `reasoning_effort`、`top_p` 等。
+`extra_params` 是一个 JSON 对象，会直接合并到 litellm 的请求参数中。可用于配置模型特定的参数，如 `reasoning_effort`、`top_p` 等。
 
 **禁止覆盖的系统字段**：
 
-以下字段由系统自动管理，不能在 `provider_params` 中设置：
+以下字段由系统自动管理，不能在 `extra_params` 中设置：
 
 - `api_key`、`base_url`、`model`、`messages`
 - `temperature`、`max_tokens`、`stream`
 - `tools`、`tool_choice`
-- `extra_headers`、`custom_llm_provider`、`cache_control_injection_points`
+- `custom_llm_provider`、`cache_control_injection_points`
 
 示例：
 
 ```json
 {
-  "provider_params": {
+  "extra_params": {
     "reasoning_effort": "high"
   }
 }
@@ -308,8 +305,6 @@ Each provider contains connection info and a model list.
   "urls": {
     "openai": "https://api.deepseek.com/v1/chat/completions"
   },
-  "extra_headers": {},
-  "provider_params": {},
   "models": [
     {
       "name": "deepseek-chat",
@@ -329,8 +324,6 @@ Each provider contains connection info and a model list.
 | `api_key` | string | Yes | API Key. |
 | `enable` | bool | No | Whether enabled, default `true`. |
 | `urls` | object | No | Protocol-to-URL mapping. |
-| `extra_headers` | object | No | Extra request headers. |
-| `provider_params` | object | No | litellm passthrough parameters. |
 | `models` | list | Yes | Model list for this provider. |
 
 ### `type` Provider Type Enum
@@ -358,7 +351,8 @@ Each provider contains connection info and a model list.
 | `enabled` | bool | No | Whether enabled, default `true`. |
 | `support_vision` | bool | No | Vision support, default `false`. |
 | `temperature` | float | No | Temperature parameter. |
-| `provider_params` | object | No | Model-level litellm params. |
+| `extra_params` | object | No | Model-level litellm params. |
+| `extra_headers` | object | No | Extra request headers. |
 | `context_config` | object | No | Model-level context config (overrides global). |
 
 ## `default_models` Default Model Slots
@@ -405,24 +399,24 @@ Set global defaults for context window and compaction strategy. Individual model
 | `compact_trigger_ratio` | float | `0.85` | Compaction trigger ratio (0.0~1.0). |
 | `compact_summary_max_tokens` | int | `6144` | Max tokens for compaction summary. |
 
-## `provider_params` Configuration
+## `extra_params` Configuration
 
-`provider_params` is a JSON object that merges directly into litellm request parameters. Use it for model-specific settings like `reasoning_effort`, `top_p`, etc.
+`extra_params` is a JSON object that merges directly into litellm request parameters. Use it for model-specific settings like `reasoning_effort`, `top_p`, etc.
 
 **Prohibited System Fields**:
 
-The following fields are managed by the system and cannot be set in `provider_params`:
+The following fields are managed by the system and cannot be set in `extra_params`:
 
 - `api_key`, `base_url`, `model`, `messages`
 - `temperature`, `max_tokens`, `stream`
 - `tools`, `tool_choice`
-- `extra_headers`, `custom_llm_provider`, `cache_control_injection_points`
+- `custom_llm_provider`, `cache_control_injection_points`
 
 Example:
 
 ```json
 {
-  "provider_params": {
+  "extra_params": {
     "reasoning_effort": "high"
   }
 }
