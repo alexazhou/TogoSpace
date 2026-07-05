@@ -16,6 +16,32 @@ import appPaths
 
 logger = logging.getLogger(__name__)
 
+SLOT_LABELS = {"primary": "主模型", "lite": "轻量模型", "advanced": "高级模型", "vision": "视觉模型"}
+
+
+def validate_model_slot_refs(
+    providers: list[LlmProviderConfig],
+    default_models: DefaultModelSlots,
+) -> dict | None:
+    """校验 default_models 各槽位引用的模型是否存在于 providers 中。
+
+    返回 None 表示校验通过，否则返回 return_with_error 的参数字典。
+    """
+    valid_refs: set[str] = set()
+    for p in providers:
+        for m in p.models:
+            valid_refs.add(f"{m.name}@{p.name}")
+
+    for slot_key, slot_label in SLOT_LABELS.items():
+        ref = getattr(default_models, slot_key, "")
+        if ref and ref not in valid_refs:
+            return {
+                "error_code": "invalid_model_ref",
+                "error_desc": f"{slot_label}引用的模型「{ref}」不存在，请检查服务商和模型配置",
+            }
+    return None
+
+
 class LlmConfigHandler(BaseHandler):
     """GET/POST /config/llm.json"""
 
@@ -58,6 +84,12 @@ class LlmConfigHandler(BaseHandler):
                 error_code="validation_error",
                 error_desc=str(e),
             )
+            return
+
+        # 校验 default_models 槽位引用的模型是否存在
+        error = validate_model_slot_refs(providers, default_models)
+        if error:
+            self.return_with_error(**error)
             return
 
         def mutator(s):

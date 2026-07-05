@@ -78,11 +78,11 @@ class QuickInitHandler(BaseHandler):
             # 若已存在名为 "default" 的 provider，先移除
             s.llm_providers = [p for p in s.llm_providers if p.name != "default"]
             s.llm_providers.append(new_provider)
-            # 快速初始化时，将所有默认模型槽位指向这个新配置的模型
+            # 快速初始化时，只设置主模型，其他槽位留空
             s.default_models.primary = f"{req.model}@default"
-            s.default_models.lite = f"{req.model}@default"
-            s.default_models.vision = f"{req.model}@default"
-            s.default_models.advanced = f"{req.model}@default"
+            s.default_models.lite = ""
+            s.default_models.vision = ""
+            s.default_models.advanced = ""
 
         configUtil.update_setting(mutator)
         await schedulerService.start_schedule()
