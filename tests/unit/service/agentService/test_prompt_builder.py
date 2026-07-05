@@ -196,14 +196,24 @@ async def test_build_agent_system_prompt_includes_skill_summary(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_build_agent_system_prompt_no_skill_when_allow_skills_none(monkeypatch):
-    """allow_skills 为 None 时，不注入 Skill 概要。"""
+async def test_build_agent_system_prompt_all_skills_when_allow_skills_none(monkeypatch):
+    """allow_skills 为 None 时，自动注入所有技能。"""
 
     async def _build_dept_context(team_id: int, agent_name: str) -> str:
         return "---\n组织信息：\n- 所在部门：测试部\n---"
 
     monkeypatch.setattr(promptBuilder, "_build_dept_context", _build_dept_context)
     monkeypatch.setattr(promptBuilder.configUtil, "get_language", lambda: "zh-CN")
+
+    mock_skill_info = type("SkillInfo", (), {
+        "name": "any_skill",
+        "description": "任意技能",
+    })()
+    monkeypatch.setattr(
+        promptBuilder.skillService,
+        "get_all_skills",
+        lambda: [mock_skill_info],
+    )
 
     result = await promptBuilder.build_agent_system_prompt(
         team_id=1,
@@ -219,7 +229,7 @@ async def test_build_agent_system_prompt_no_skill_when_allow_skills_none(monkeyp
         allow_skills=None,
     )
 
-    assert "可用技能" not in result
+    assert "可用技能" in result
 
 
 @pytest.mark.asyncio

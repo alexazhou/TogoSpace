@@ -88,9 +88,11 @@ class TestInferToActivity(ServiceTestCase):
         app_config.setting = setting
 
         with (
-            patch("service.agentService.agentTurnRunner.configUtil.get_app_config", return_value=app_config),
+            patch("util.configUtil.get_app_config", return_value=app_config),
             patch("service.agentService.agentTurnRunner.llmService.infer_stream", AsyncMock(return_value=llmService.InferResult.success(resp))),
             patch("service.agentService.agentTurnRunner.compact.estimate_tokens", return_value=1000),
+            patch("service.agentService.agentTurnRunner.compact.calc_compact_trigger_tokens", return_value=25000),
+            patch("service.agentService.agentTurnRunner.compact.calc_hard_limit_tokens", return_value=30000),
         ):
             result = await runner._infer_to_item(MagicMock(id=1), tools=[])
 
@@ -168,9 +170,11 @@ class TestInferToActivity(ServiceTestCase):
         app_config.setting = setting
 
         with (
-            patch("service.agentService.agentTurnRunner.configUtil.get_app_config", return_value=app_config),
+            patch("util.configUtil.get_app_config", return_value=app_config),
             patch("service.agentService.agentTurnRunner.llmService.infer_stream", AsyncMock(return_value=llmService.InferResult.success(resp))),
             patch("service.agentService.agentTurnRunner.compact.estimate_tokens", return_value=1000),
+            patch("service.agentService.agentTurnRunner.compact.calc_compact_trigger_tokens", return_value=25000),
+            patch("service.agentService.agentTurnRunner.compact.calc_hard_limit_tokens", return_value=30000),
         ):
             await runner._infer_to_item(MagicMock(id=1), tools=[])
 

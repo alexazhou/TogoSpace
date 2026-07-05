@@ -25,6 +25,10 @@ def _mock_get_app_config():
     app_config = AppConfig(setting=SettingConfig(version="v2"))
     return app_config
 
+@pytest.fixture(autouse=True)
+def mock_version(monkeypatch):
+    monkeypatch.setattr(updateService, "__version__", "0.3.8")
+
 
 # ───────────────────── _parse_version ─────────────────────
 
