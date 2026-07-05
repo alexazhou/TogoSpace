@@ -4,6 +4,7 @@ from unittest import mock
 import pytest
 from constants import LlmProviderType
 from util.configTypes import SettingConfig
+from util.configUtil.migrations.v1_to_v2 import migrate_v1_to_v2
 
 
 def _setup_preset_file(tmp_path):
@@ -102,3 +103,158 @@ def test_v1_to_v2_migration(tmp_path):
 
         # Default model: 通过 default_llm_server name 匹配 -> "gpt-4o@TestOpenAI"
         assert setting.default_models.primary == "gpt-4o@TestOpenAI"
+
+
+def test_v1_migration_temperature_and_params():
+    """迁移时 temperature、provider_params、extra_headers 正确传递。"""
+
+    cfg = {
+        "llm_services": [
+            {
+                "name": "SvcA",
+                "base_url": "https://api.openai.com/v1/chat/completions",
+                "api_key": "sk-a",
+                "type": "openai",
+                "model": "gpt-4o",
+                "enable": True,
+                "temperature": 0.7,
+                "provider_params": {"max_retries": 3},
+                "extra_headers": {"X-Custom": "val"},
+            }
+        ]
+    }
+    migrate_v1_to_v2(cfg)
+
+    p = cfg["llm_providers"][0]
+    m = p["models"][0]
+    assert m["temperature"] == 0.7
+    assert m["provider_params"] == {"max_retries": 3}
+    assert p["extra_headers"] == {"X-Custom": "val"}
+
+
+def test_v1_migration_context_config_defaults():
+    """context_config 各字段使用 V1 顶级值或默认值。"""
+
+    cfg = {
+        "llm_services": [
+            {
+                "name": "Svc",
+                "base_url": "https://api.deepseek.com/v1/chat/completions",
+                "api_key": "sk-ds",
+                "type": "deepseek",
+                "model": "deepseek-chat",
+                "enable": True,
+                "compact_trigger_ratio": 0.9,
+                "compact_summary_max_tokens": 8192,
+            }
+        ]
+    }
+    migrate_v1_to_v2(cfg)
+
+    m = cfg["llm_providers"][0]["models"][0]
+    cc = m["context_config"]
+    assert cc["compact_trigger_ratio"] == 0.9
+    assert cc["compact_summary_max_tokens"] == 8192
+    assert cc["context_window_tokens"] == 131072
+    assert cc["reserve_output_tokens"] == 16384
+
+
+def test_v1_migration_openai_compatible_type():
+    """openai-compatible 类型转为 openai。"""
+
+    cfg = {
+        "llm_services": [
+            {
+                "name": "Ollama",
+                "base_url": "http://localhost:11434/v1",
+                "api_key": "",
+                "type": "openai-compatible",
+                "model": "llama3",
+                "enable": True,
+            }
+        ]
+    }
+    migrate_v1_to_v2(cfg)
+
+    p = cfg["llm_providers"][0]
+    m = p["models"][0]
+    assert m["protocol"] == "openai"
+    assert p["type"] == "other"  # URL 不匹配预设
+
+
+def test_v1_migration_empty_services():
+    """空 llm_services 迁移后得到空 providers 列表。"""
+
+    cfg = {"llm_services": []}
+    migrate_v1_to_v2(cfg)
+
+    assert cfg["llm_providers"] == []
+    assert cfg["version"] == "v2"
+    assert "llm_services" not in cfg
+
+
+def test_v1_migration_default_server_no_match():
+    """default_llm_server 名称无法匹配任何 provider 时，default_models 不设置。"""
+
+    cfg = {
+        "default_llm_server": "NonExistent",
+        "llm_services": [
+            {
+                "name": "RealProvider",
+                "base_url": "https://api.openai.com/v1/chat/completions",
+                "api_key": "sk-x",
+                "type": "openai",
+                "model": "gpt-4o",
+                "enable": True,
+            }
+        ]
+    }
+    migrate_v1_to_v2(cfg)
+
+    assert "default_models" not in cfg
+
+
+def test_v1_migration_disabled_model():
+    """enable=False 的 provider 和 model 正确迁移。"""
+
+    cfg = {
+        "llm_services": [
+            {
+                "name": "Disabled",
+                "base_url": "https://api.openai.com/v1/chat/completions",
+                "api_key": "sk-x",
+                "type": "openai",
+                "model": "gpt-4o",
+                "enable": False,
+            }
+        ]
+    }
+    migrate_v1_to_v2(cfg)
+
+    p = cfg["llm_providers"][0]
+    assert p["enable"] is False
+    m = p["models"][0]
+    assert m["enabled"] is False
+
+
+def test_v1_migration_url_in_urls_dict():
+    """base_url 存入 urls 字典，key 为 provider type。"""
+
+    cfg = {
+        "llm_services": [
+            {
+                "name": "Aliyun",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "api_key": "sk-ali",
+                "type": "openai",
+                "model": "qwen-plus",
+                "enable": True,
+            }
+        ]
+    }
+    migrate_v1_to_v2(cfg)
+
+    p = cfg["llm_providers"][0]
+    assert p["type"] == "aliyun"  # 匹配预设
+    assert "openai" in p["urls"]
+    assert p["urls"]["openai"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
