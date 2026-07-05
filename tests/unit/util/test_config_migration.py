@@ -129,7 +129,7 @@ def test_v1_migration_temperature_and_params():
     m = p["models"][0]
     assert m["temperature"] == 0.7
     assert m["provider_params"] == {"max_retries": 3}
-    assert p["extra_headers"] == {"X-Custom": "val"}
+    assert m["extra_headers"] == {"X-Custom": "val"}
 
 
 def test_v1_migration_context_config_defaults():

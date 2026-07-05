@@ -63,8 +63,8 @@ def test_resolve_model():
             resolve_model("gpt-4o@unknown")
 
 
-def test_resolve_model_merges_provider_params():
-    """resolve_model 应合并 provider 和 model 级别的 provider_params 和 extra_headers。"""
+def test_resolve_model_preserves_model_params():
+    """resolve_model 应保留 model 级别的 provider_params 和 extra_headers。"""
     mock_app_config = AppConfig(
         setting=SettingConfig(
             version="v2",
@@ -75,13 +75,11 @@ def test_resolve_model_merges_provider_params():
                     type="openai",
                     api_key="sk-xxx",
                     urls={"openai": "https://api.openai.com/v1"},
-                    provider_params={"top_p": 0.9, "frequency_penalty": 0.5},
-                    extra_headers={"X-Custom": "provider-value"},
                     models=[
                         LlmModelConfig(
                             name="gpt-4o",
                             protocol="openai",
-                            provider_params={"top_p": 0.8},  # 应覆盖 provider 级
+                            provider_params={"top_p": 0.8, "reasoning_effort": "high"},
                             extra_headers={"X-Model": "model-value"},
                         )
                     ]
@@ -95,8 +93,5 @@ def test_resolve_model_merges_provider_params():
 
         _, model = resolve_model("gpt-4o@openai")
 
-        # provider_params: model 级 top_p 覆盖 provider 级，frequency_penalty 来自 provider
-        assert model.provider_params == {"top_p": 0.8, "frequency_penalty": 0.5}
-
-        # extra_headers: 合并两者
-        assert model.extra_headers == {"X-Custom": "provider-value", "X-Model": "model-value"}
+        assert model.provider_params == {"top_p": 0.8, "reasoning_effort": "high"}
+        assert model.extra_headers == {"X-Model": "model-value"}

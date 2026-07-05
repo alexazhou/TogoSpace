@@ -63,7 +63,7 @@ def test_runtime_configs_allow_llm_only_setting(tmp_path):
 
 
 
-def test_llm_service_extra_headers_defaults_to_opencode(tmp_path):
+def test_llm_model_extra_headers_use_json_value_when_provided(tmp_path):
     (tmp_path / "setting.json").write_text(json.dumps({
             "version": "v2",
         "default_models": {"primary": "mock-model@svc"},
@@ -73,18 +73,22 @@ def test_llm_service_extra_headers_defaults_to_opencode(tmp_path):
                 "urls": {"openai": "http://localhost/v1"},
                 "api_key": "key-123",
                 "type": "openai",
-                "models": [{"name": "mock-model", "protocol": "openai"}]
+                "models": [{
+                    "name": "mock-model",
+                    "protocol": "openai",
+                    "extra_headers": {"X-Client-Name": "openclaw"},
+                }]
             }
         ],
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path), force_reload=True)
 
-    assert app_config.setting.llm_providers[0].extra_headers == {"User-Agent": "opencode"}
+    assert app_config.setting.llm_providers[0].models[0].extra_headers == {"X-Client-Name": "openclaw"}
 
 
 
-def test_llm_service_extra_headers_use_json_value_when_provided(tmp_path):
+def test_llm_model_provider_params_use_json_value_when_provided(tmp_path):
     (tmp_path / "setting.json").write_text(json.dumps({
             "version": "v2",
         "default_models": {"primary": "mock-model@svc"},
@@ -94,21 +98,22 @@ def test_llm_service_extra_headers_use_json_value_when_provided(tmp_path):
                 "urls": {"openai": "http://localhost/v1"},
                 "api_key": "key-123",
                 "type": "openai",
-                "extra_headers": {
-                    "X-Client-Name": "openclaw",
-                },
-                "models": [{"name": "mock-model", "protocol": "openai"}]
+                "models": [{
+                    "name": "mock-model",
+                    "protocol": "openai",
+                    "provider_params": {"reasoning_effort": "high"},
+                }]
             }
         ],
     }), encoding="utf-8")
 
     app_config = configUtil.load(str(tmp_path), force_reload=True)
 
-    assert app_config.setting.llm_providers[0].extra_headers == {"X-Client-Name": "openclaw"}
+    assert app_config.setting.llm_providers[0].models[0].provider_params == {"reasoning_effort": "high"}
 
 
 
-def test_llm_service_provider_params_use_json_value_when_provided(tmp_path):
+def test_llm_model_provider_params_reject_reserved_keys(tmp_path):
     (tmp_path / "setting.json").write_text(json.dumps({
             "version": "v2",
         "default_models": {"primary": "mock-model@svc"},
@@ -118,34 +123,11 @@ def test_llm_service_provider_params_use_json_value_when_provided(tmp_path):
                 "urls": {"openai": "http://localhost/v1"},
                 "api_key": "key-123",
                 "type": "openai",
-                "provider_params": {
-                    "reasoning_effort": "high",
-                },
-                "models": [{"name": "mock-model", "protocol": "openai"}]
-            }
-        ],
-    }), encoding="utf-8")
-
-    app_config = configUtil.load(str(tmp_path), force_reload=True)
-
-    assert app_config.setting.llm_providers[0].provider_params == {"reasoning_effort": "high"}
-
-
-
-def test_llm_service_provider_params_reject_reserved_keys(tmp_path):
-    (tmp_path / "setting.json").write_text(json.dumps({
-            "version": "v2",
-        "default_models": {"primary": "mock-model@svc"},
-        "llm_providers": [
-            {
-                "name": "svc",
-                "urls": {"openai": "http://localhost/v1"},
-                "api_key": "key-123",
-                "type": "openai",
-                "provider_params": {
-                    "model": "other-model",
-                },
-                "models": [{"name": "mock-model", "protocol": "openai"}]
+                "models": [{
+                    "name": "mock-model",
+                    "protocol": "openai",
+                    "provider_params": {"model": "other-model"},
+                }]
             }
         ],
     }), encoding="utf-8")

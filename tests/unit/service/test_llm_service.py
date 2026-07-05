@@ -72,7 +72,7 @@ async def test_infer_passes_default_opencode_headers(monkeypatch):
     assert captured["url"] == "http://localhost/v1/chat/completions"
     assert captured["api_key"] == "key-123"
     assert captured["custom_llm_provider"] == "openai"
-    assert captured["extra_headers"] == {"User-Agent": "opencode"}
+    assert captured["extra_headers"] is None or captured["extra_headers"] == {}
     assert captured["request"].tool_choice == "none"
     assert captured["request"].prompt_cache is True
     assert isinstance(captured["request_id"], str)
@@ -92,10 +92,10 @@ async def test_infer_passes_configured_headers_without_default_merge(monkeypatch
                 "type": "openai",
                 "urls": {"openai": "http://localhost/v1/chat/completions"},
                 "api_key": "key-123",
-                "extra_headers": {
-                    "X-Client-Name": "openclaw",
-                },
-                "models": [{"name": "mock-model", "protocol": "openai"}, {"name": "configured-model", "protocol": "openai"}]
+                "models": [
+                    {"name": "mock-model", "protocol": "openai"},
+                    {"name": "configured-model", "protocol": "openai", "extra_headers": {"X-Client-Name": "openclaw"}},
+                ]
             }
         ],
     )))
@@ -163,10 +163,11 @@ async def test_infer_stream_strips_required_tool_choice_when_reasoning_effort_en
                     "type": "openai",
                     "urls": {"openai": "http://localhost/v1/chat/completions"},
                     "api_key": "key-123",
-                    "provider_params": {
-                        "reasoning_effort": "high",
-                    },
-                    "models": [{"name": "deepseek-v4-pro", "protocol": "openai"}]
+                    "models": [{
+                        "name": "deepseek-v4-pro",
+                        "protocol": "openai",
+                        "provider_params": {"reasoning_effort": "high"},
+                    }]
                 }
             ],
     )))
@@ -327,11 +328,14 @@ async def test_infer_passes_provider_params(monkeypatch):
                     "type": "openai",
                     "urls": {"openai": "http://localhost/v1/chat/completions"},
                     "api_key": "key-123",
-                    "provider_params": {
-                        "reasoning_effort": "high",
-                        "parallel_tool_calls": False,
-                    },
-                    "models": [{"name": "mock-model", "protocol": "openai"}]
+                    "models": [{
+                        "name": "mock-model",
+                        "protocol": "openai",
+                        "provider_params": {
+                            "reasoning_effort": "high",
+                            "parallel_tool_calls": False,
+                        },
+                    }]
                 }
             ],
     )))

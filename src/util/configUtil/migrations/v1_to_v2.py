@@ -71,6 +71,7 @@ def migrate_v1_to_v2(cfg: dict) -> None:
                 "enabled": svc.get("enable", True),
                 "temperature": svc.get("temperature"),
                 "provider_params": svc.get("provider_params", {}),
+                "extra_headers": svc.get("extra_headers", {}),
                 "context_config": {
                     "context_window_tokens": svc.get("context_window_tokens", 131072),
                     "reserve_output_tokens": reserve_tokens,
@@ -85,8 +86,6 @@ def migrate_v1_to_v2(cfg: dict) -> None:
                 "api_key": svc.get("api_key", ""),
                 "enable": svc.get("enable", True),
                 "urls": urls,
-                "extra_headers": svc.get("extra_headers", {"User-Agent": "opencode"}),
-                "provider_params": {},
                 "models": [model_config]
             }
             new_providers.append(provider_config)

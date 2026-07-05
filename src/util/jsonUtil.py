@@ -117,11 +117,26 @@ _T = TypeVar('_T', dict, list)
 def clean_null_values(obj: _T) -> _T:
     """递归移除 dict/list 中的 null 值，返回类型与输入一致。"""
     if isinstance(obj, dict):
-        return {k: clean_null_values(v) if isinstance(v, (dict, list)) else v
-                for k, v in obj.items() if v is not None}
-    # list
-    return [clean_null_values(item) if isinstance(item, (dict, list)) else item
-            for item in obj]
+        result = {}
+        for key, value in obj.items():
+            if value is None:
+                continue
+            if isinstance(value, (dict, list)):
+                result[key] = clean_null_values(value)
+            else:
+                result[key] = value
+        return result
+
+    if isinstance(obj, list):
+        result = []
+        for item in obj:
+            if isinstance(item, (dict, list)):
+                result.append(clean_null_values(item))
+            else:
+                result.append(item)
+        return result
+
+    return obj
 
 
 def json_dump(obj: object, config: Dict = None, remove_null: bool = False) -> str:

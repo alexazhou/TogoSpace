@@ -65,7 +65,6 @@ class QuickInitHandler(BaseHandler):
             urls={"openai": req.base_url},
             api_key=req.api_key,
             type=req.type,
-            provider_params=req.provider_params or {},
             models=[
                 LlmModelConfig(
                     name=req.model,

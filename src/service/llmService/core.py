@@ -128,16 +128,8 @@ def resolve_model(model_name: str | None) -> tuple[LlmProviderConfig, LlmModelCo
     if not model_config:
         raise ValueError(f"在提供商 {provider_name} 中找不到启用的模型：{model_part}")
 
-    # 合并 provider 级别的配置到 model_config
-    merged_provider_params = provider_config.provider_params.copy()
-    merged_provider_params.update(model_config.provider_params)
-
-    merged_extra_headers = provider_config.extra_headers.copy()
-    merged_extra_headers.update(model_config.extra_headers)
-
     merged_model = model_config.model_copy(update={
-        "provider_params": merged_provider_params,
-        "extra_headers": merged_extra_headers,
+        "context_config": model_config.context_config or setting.context_config,
     })
 
     return provider_config, merged_model

@@ -162,16 +162,7 @@ class LlmProviderConfig(BaseModel):
     api_key: str
     enable: bool = True
     urls: dict[str, str] = Field(default_factory=dict)
-    extra_headers: dict[str, str] = Field(default_factory=_default_llm_extra_headers)
-    provider_params: dict[str, Any] = Field(default_factory=dict)
     models: List[LlmModelConfig] = Field(default_factory=list)
-
-    @field_validator("provider_params")
-    @classmethod
-    def validate_provider_params(cls, value: dict[str, Any] | None) -> dict[str, Any]:
-        if value is None:
-            return {}
-        return _validate_llm_provider_params(value)
 
 
 class DefaultModelSlots(BaseModel):
