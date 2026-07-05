@@ -127,6 +127,21 @@ class LlmContextConfig(BaseModel):
     compact_trigger_ratio: float = Field(default=0.85, ge=0.0, le=1.0)
     compact_summary_max_tokens: int = 6144
 
+    def resolve_with_global(self, global_config: "LlmContextConfig") -> "LlmContextConfig":
+        """逐字段合并：self（模型级） > global_config（全局） > 默认值。
+
+        判断逻辑：如果 self 的某字段值与默认值不同，说明模型显式设置了该字段，优先使用；
+        否则使用全局配置的值。
+        """
+        default = LlmContextConfig()
+        merged = {}
+        for field_name in LlmContextConfig.model_fields:
+            self_val = getattr(self, field_name)
+            global_val = getattr(global_config, field_name)
+            default_val = getattr(default, field_name)
+            merged[field_name] = self_val if self_val != default_val else global_val
+        return LlmContextConfig(**merged)
+
 
 class LlmModelConfig(BaseModel):
     """单个模型的配置 — 归属于某个提供商。"""
@@ -163,6 +178,10 @@ class LlmProviderConfig(BaseModel):
     enable: bool = True
     urls: dict[str, str] = Field(default_factory=dict)
     models: List[LlmModelConfig] = Field(default_factory=list)
+
+    def find_model(self, model_name: str) -> LlmModelConfig | None:
+        """按名称查找模型，未找到返回 None。"""
+        return next((m for m in self.models if m.name == model_name), None)
 
 
 class DefaultModelSlots(BaseModel):
@@ -232,6 +251,24 @@ class SettingConfig(BaseModel):
             if provider.enable and any(m.enabled for m in provider.models):
                 return True
         return False
+
+    def find_provider(self, provider_name: str) -> LlmProviderConfig | None:
+        """按名称查找服务商，未找到返回 None。"""
+        return next((p for p in self.llm_providers if p.name == provider_name), None)
+
+    def get_slot_model_name(self, slot_name: str) -> str:
+        """按槽位名获取对应的 model@provider 字符串。
+
+        Returns:
+            model@provider 格式的字符串，槽位未配置则返回空字符串。
+        """
+        slot_map = {
+            "primary": self.default_models.primary,
+            "lite": self.default_models.lite,
+            "vision": self.default_models.vision,
+            "advanced": self.default_models.advanced,
+        }
+        return slot_map.get(slot_name, "")
 
     def get_default_team_workdir(self, team_name: str) -> str:
         return os.path.join(self.workspace_root, team_name)

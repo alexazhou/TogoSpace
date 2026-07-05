@@ -91,45 +91,48 @@ def resolve_model(model_name: str | None) -> tuple[LlmProviderConfig, LlmModelCo
 
     Returns:
         (provider_config, merged_model_config)
-        其中 merged_model_config 已合并 extra_headers，
+        其中 merged_model_config 已合并 context_config，
         protocol 可从 model_config.protocol 获取。
 
     Raises:
-        ValueError: 配置缺失或模型/Provider 未找到。
+        ValueError: 配置缺失、格式错误或模型/Provider 未启用。
     """
     setting = configUtil.get_app_config().setting
 
-    if not model_name:
+    if model_name is None or model_name == "":
         model_name = "primary@system"
 
-    # 解析系统槽位：slot@system → 查 default_models 获取实际 model@provider
-    if model_name.endswith("@system"):
-        slot_name = model_name[:-7]  # 去掉 "@system"
-        slot_map = {
-            "primary": setting.default_models.primary,
-            "lite": setting.default_models.lite,
-            "vision": setting.default_models.vision,
-            "advanced": setting.default_models.advanced,
-        }
-        model_name = slot_map.get(slot_name, "")
-        if not model_name:
-            raise ValueError(f"未配置有效的系统槽位：{slot_name}")
-
+    # 格式校验
     if "@" not in model_name:
         raise ValueError(f"模型标识格式错误（应为 model@provider）：{model_name}")
 
     model_part, provider_name = model_name.rsplit("@", 1)
 
-    provider_config = next((p for p in setting.llm_providers if p.name == provider_name and p.enable), None)
-    if not provider_config:
-        raise ValueError(f"找不到启用的提供商：{provider_name}")
+    # 解析系统槽位：xxx@system → 查 default_models 获取实际 model@provider
+    if provider_name == "system":
+        slot_model = setting.get_slot_model_name(model_part)
+        if slot_model == "":
+            raise ValueError(f"未配置有效的系统槽位：{model_part}")
+        model_part, provider_name = slot_model.rsplit("@", 1)
+    else:
+        pass  # model_part, provider_name 已就绪
 
-    model_config = next((m for m in provider_config.models if m.name == model_part and m.enabled), None)
-    if not model_config:
-        raise ValueError(f"在提供商 {provider_name} 中找不到启用的模型：{model_part}")
+    # 查找 provider
+    provider_config = setting.find_provider(provider_name)
+    if provider_config is None:
+        raise ValueError(f"找不到提供商：{provider_name}")
+    if provider_config.enable is False:
+        raise ValueError(f"提供商 {provider_name} 已禁用")
+
+    # 查找 model
+    model_config = provider_config.find_model(model_part)
+    if model_config is None:
+        raise ValueError(f"在提供商 {provider_name} 中找不到模型：{model_part}")
+    if model_config.enabled is False:
+        raise ValueError(f"模型 {model_part} 在提供商 {provider_name} 中已禁用")
 
     merged_model = model_config.model_copy(update={
-        "context_config": model_config.context_config or setting.context_config,
+        "context_config": (model_config.context_config or LlmContextConfig()).resolve_with_global(setting.context_config),
     })
 
     return provider_config, merged_model
