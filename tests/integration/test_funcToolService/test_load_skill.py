@@ -98,12 +98,11 @@ class TestLoadSkillTool(ServiceTestCase):
         assert "未找到 Agent" in result["message"]
 
     async def test_load_skill_unauthorized_none(self):
-        """allow_skills 为 None 时返回权限错误。"""
+        """allow_skills 为 None 时允许所有技能（自动模式）。"""
         agent_id = self.agent_ids["noskill_agent"]
         ctx = ToolCallContext(agent_id=agent_id, team_id=self.team_id, chat_room=MagicMock())
-        result = await load_skill(skill_name="code_review", _context=ctx)
-        assert result["success"] is False
-        assert "未对当前 Agent 开放" in result["message"]
+        result = await load_skill(skill_name="frontend-design", _context=ctx)
+        assert result["success"] is True
 
     async def test_load_skill_unauthorized_empty(self):
         """allow_skills 为空列表时返回权限错误。"""

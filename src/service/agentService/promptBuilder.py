@@ -212,18 +212,22 @@ async def build_agent_system_prompt(
             full_prompt += "\n\n" + ROOT_LEADER_GUIDE
 
     # 注入已授权 Skill 概要
-    if allow_skills:
-        skill_lines = []
-        for skill_name in allow_skills:
-            skill_info = skillService.get_skill(skill_name)
-            if skill_info is not None:
-                skill_lines.append(f"- {skill_info.name}: {skill_info.description}")
-        if skill_lines:
-            skill_prompt = (
-                "\n\n## 可用技能\n\n"
-                "你拥有以下技能，可以调用 load_skill 工具加载详细指引：\n\n"
-                + "\n".join(skill_lines)
-            )
-            full_prompt += skill_prompt
+    # allow_skills 为 None 表示自动（所有技能），为空列表表示不授权
+    if allow_skills is None:
+        skills_to_show = skillService.get_all_skills()
+    elif allow_skills:
+        skills_to_show = [skillService.get_skill(name) for name in allow_skills]
+        skills_to_show = [s for s in skills_to_show if s is not None]
+    else:
+        skills_to_show = []
+
+    if skills_to_show:
+        skill_lines = [f"- {s.name}: {s.description}" for s in skills_to_show]
+        skill_prompt = (
+            "\n\n## 可用技能\n\n"
+            "你拥有以下技能，可以调用 load_skill 工具加载详细指引：\n\n"
+            + "\n".join(skill_lines)
+        )
+        full_prompt += skill_prompt
 
     return full_prompt
