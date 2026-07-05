@@ -122,7 +122,7 @@ def clean_null_values(obj: _T) -> _T:
             if value is None:
                 continue
             if isinstance(value, (dict, list)):
-                result[key] = clean_null_values(value)
+                result[key] = clean_null_values(value)  # type: ignore
             else:
                 result[key] = value
         return result
@@ -131,7 +131,7 @@ def clean_null_values(obj: _T) -> _T:
         result = []
         for item in obj:
             if isinstance(item, (dict, list)):
-                result.append(clean_null_values(item))
+                result.append(clean_null_values(item))  # type: ignore
             else:
                 result.append(item)
         return result
@@ -146,7 +146,7 @@ def json_dump(obj: object, config: Dict = None, remove_null: bool = False) -> st
         final_config.update(config)
 
     if remove_null:
-        obj = clean_null_values(obj)
+        obj = clean_null_values(obj)  # type: ignore
 
     def convert_to_builtin_type(obj):
         if hasattr(obj, 'to_json'):

@@ -158,7 +158,7 @@ class LlmTestHandler(BaseHandler):
 
 
 async def _test_llm_service(provider: LlmProviderConfig, model: LlmModelConfig, protocol: str) -> dict:
-    url = get_provider_url(provider, protocol)
+    url = get_provider_url(provider, LlmProtocol(protocol))
     request = llmApiUtil.build_agent_probe_request(
         model=model.name,
         extra_params=model.extra_params,
