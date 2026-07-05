@@ -282,6 +282,7 @@ class AgentStopHandler(BaseHandler):
 
 
 class AgentModifyPropertiesRequest(BaseModel):
+    model: str | None = None
     allow_tools: list[str] | None = None
     allow_skills: list[str] | None = None
 
@@ -295,6 +296,9 @@ class AgentModifyPropertiesHandler(BaseHandler):
         assertUtil.assertNotNull(agent, error_message=f"Agent ID '{agent_id}' not found", error_code="agent_not_found")
 
         request = self.parse_request(AgentModifyPropertiesRequest)
+
+        if "model" in request.model_fields_set:
+            agent.model = request.model or ""
 
         if "allow_tools" in request.model_fields_set:
             if request.allow_tools is not None:
