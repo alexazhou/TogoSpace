@@ -38,9 +38,8 @@ _shutdown_event: asyncio.Event | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
 
 
-def _check_single_instance() -> None:
-    # 测试环境允许多实例并行运行（不同端口）
-    if os.environ.get("TEAMAGENT_ENV") == "test":
+def _check_single_instance(ignore_pid: bool = False) -> None:
+    if ignore_pid or os.environ.get("TEAMAGENT_ENV") == "test":
         return
     os.makedirs(_RUN_DIR, exist_ok=True)
     # 读取已有 PID，检查进程是否存活
@@ -54,9 +53,8 @@ def _check_single_instance() -> None:
         pass  # 文件不存在、内容非法、进程不存在，均视为可启动
 
 
-def _write_pid() -> None:
-    # 测试环境不写 PID 文件
-    if os.environ.get("TEAMAGENT_ENV") == "test":
+def _write_pid(ignore_pid: bool = False) -> None:
+    if ignore_pid or os.environ.get("TEAMAGENT_ENV") == "test":
         return
     os.makedirs(_RUN_DIR, exist_ok=True)
     with open(_PID_FILE, "w") as f:
@@ -195,12 +193,16 @@ async def main(config_dir: str = None, port: int | None = None):
 
 
 if __name__ == "__main__":
-    _check_single_instance()
-    _write_pid()
-    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
-    signal.signal(signal.SIGINT, _handle_shutdown_signal)
     parser = argparse.ArgumentParser()
     parser.add_argument("--config-dir", default=None, dest="config_dir", help="config 目录路径")
     parser.add_argument("--port", type=int, default=None, help="HTTP 监听端口（覆盖配置文件）")
+    parser.add_argument("--ignore-pid", action="store_true", help="忽略 PID 文件检查，允许多实例运行")
     args = parser.parse_args()
+
+    _check_single_instance(ignore_pid=args.ignore_pid)
+    _write_pid(ignore_pid=args.ignore_pid)
+    
+    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
+    signal.signal(signal.SIGINT, _handle_shutdown_signal)
+    
     asyncio.run(main(config_dir=args.config_dir, port=args.port))

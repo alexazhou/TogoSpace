@@ -83,6 +83,7 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
     iputils-ping \
     vim \
     nano \
+    tini \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 Python 工具包（markitdown 全格式支持：PDF、Word、PPT、Excel、音频、YouTube 等）
@@ -126,4 +127,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # 启动命令（可通过 TOGO_PORT 环境变量覆盖端口）
 ENV TOGO_PORT=8180
 WORKDIR ${TOGOSPACE_HOME}/src
-CMD rm -f ../run/backend.pid && ../.venv/bin/python3 backend_main.py --config-dir /storage --port ${TOGO_PORT}
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/bin/sh", "-c", "exec ../.venv/bin/python3 backend_main.py --config-dir /storage --port ${TOGO_PORT} --ignore-pid"]
