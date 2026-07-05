@@ -2,24 +2,6 @@
 
 ## 快速启动
 
-### 使用 Docker Compose（推荐）
-
-```bash
-# 1. 初始化前端子模块
-git submodule update --init --recursive
-
-# 2. 启动服务
-docker compose up -d
-
-# 3. 查看日志
-docker compose logs -f
-
-# 4. 停止服务
-docker compose down
-```
-
-### 使用 Docker 命令
-
 ```bash
 # 1. 初始化前端子模块
 git submodule update --init --recursive
@@ -30,8 +12,8 @@ docker build -t togospace:0.3.8 .
 # 3. 启动容器
 docker run -d \
   --name togospace \
-  -p 8180:8180 \
-  -v togospace-data:/data \
+  -p 7180:7180 \
+  -v togospace-storage:/storage \
   togospace:0.3.8
 
 # 4. 查看日志
@@ -46,62 +28,41 @@ docker stop togospace && docker rm togospace
 ### 挂载自定义配置文件
 
 ```bash
-# 创建配置文件
-mkdir -p /path/to/config
-cat > /path/to/config/setting.json << 'EOF'
-{
-  "language": "zh-CN",
-  "default_llm_server": "qwen",
-  "llm_services": [
-    {
-      "name": "qwen",
-      "enable": true,
-      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "api_key": "YOUR_API_KEY_HERE",
-      "type": "openai-compatible",
-      "model": "qwen-plus"
-    }
-  ]
-}
-EOF
-
-# 使用自定义配置启动
 docker run -d \
   --name togospace \
-  -p 8180:8180 \
-  -v /path/to/config:/data \
+  -p 7180:7180 \
+  -v /path/to/config:/storage \
   togospace:0.3.8
 ```
+
+配置文件格式参考 `assets/docs/setting.README.md`。
 
 ### 环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
+| `TOGO_PORT` | 监听端口 | `7180` |
 | `TZ` | 时区 | `Asia/Shanghai` |
-| `STORAGE_ROOT` | 数据存储目录 | `/data` |
 
 ## 数据持久化
 
-Docker 镜像使用 `/data` 作为数据存储目录，运行时会自动创建：
+容器使用 `/storage` 作为数据存储目录，运行时会自动创建：
 
-- `/data/setting.json` - 运行配置
-- `/data/data/` - SQLite 数据库
-- `/data/logs/` - 日志文件
-- `/data/workspace/` - Agent 工作目录
+- `/storage/setting.json` - 运行配置
+- `/storage/data/` - SQLite 数据库
+- `/storage/logs/` - 日志文件
+- `/storage/workspace/` - Agent 工作目录
 
 建议使用 Docker Volume 持久化：
 
 ```bash
-docker volume create togospace-data
-docker run -d -p 8180:8180 -v togospace-data:/data togospace:0.3.8
+docker volume create togospace-storage
+docker run -d -p 7180:7180 -v togospace-storage:/storage togospace:0.3.8
 ```
 
 ## 访问服务
 
-启动后访问：http://localhost:8180
-
-- Web Console: http://localhost:8180/
-- API 文档: 参考 `assets/setting.README.md`
+启动后访问：http://localhost:7180
 
 ## 健康检查
 
