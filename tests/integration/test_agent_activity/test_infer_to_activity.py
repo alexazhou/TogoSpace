@@ -82,7 +82,7 @@ class TestInferToActivity(ServiceTestCase):
         llm_cfg.compact_trigger_ratio = 0.85
         llm_cfg.model = "mock-model"
         setting = MagicMock()
-        setting.default_models = MagicMock(primary="mock-model@svc", lightweight="mock-model@svc", vision="mock-model@svc")
+        setting.default_models = MagicMock(primary="mock-model@svc", lite="mock-model@svc", vision="mock-model@svc")
         setting.llm_providers = [LlmProviderConfig(name="svc", enable=True, type="openai", api_key="", urls={"openai": ""}, models=[LlmModelConfig(name="mock-model", protocol="openai", context_config=LlmContextConfig(compact_trigger_ratio=0.85, reserve_output_tokens=4096, context_window_tokens=32000))])]
         app_config = MagicMock()
         app_config.setting = setting
@@ -162,7 +162,7 @@ class TestInferToActivity(ServiceTestCase):
         llm_cfg.compact_trigger_ratio = 0.85
         llm_cfg.model = "mock-model"
         setting = MagicMock()
-        setting.default_models = MagicMock(primary="mock-model@svc", lightweight="mock-model@svc", vision="mock-model@svc")
+        setting.default_models = MagicMock(primary="mock-model@svc", lite="mock-model@svc", vision="mock-model@svc")
         setting.llm_providers = [LlmProviderConfig(name="svc", enable=True, type="openai", api_key="", urls={"openai": ""}, models=[LlmModelConfig(name="mock-model", protocol="openai", context_config=LlmContextConfig(compact_trigger_ratio=0.85, reserve_output_tokens=4096, context_window_tokens=32000))])]
         app_config = MagicMock()
         app_config.setting = setting

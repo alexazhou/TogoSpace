@@ -103,7 +103,7 @@ def migrate_v1_to_v2(cfg: dict) -> None:
             if primary_model:
                 cfg["default_models"] = {
                     "primary": primary_model,
-                    "lightweight": "",
+                    "lite": "",
                     "vision": ""
                 }
 

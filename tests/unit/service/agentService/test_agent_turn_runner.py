@@ -341,7 +341,7 @@ from util.configTypes import AppConfig, SettingConfig
 async def test_resolve_model_returns_configured_model(monkeypatch):
     """resolve_model 应返回配置的模型。"""
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_models={"primary": "configured-model@svc", "lightweight": "", "vision": ""},
+        default_models={"primary": "configured-model@svc", "lite": "", "vision": ""},
             llm_providers=[
                 {
                     "name": "svc",
@@ -375,7 +375,7 @@ async def test_resolve_model_returns_configured_model(monkeypatch):
 async def test_resolve_model_uses_default_when_empty(monkeypatch):
     """model 为空时，resolve_model 使用 default_models.primary。"""
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_models={"primary": "configured-model@svc", "lightweight": "", "vision": ""},
+        default_models={"primary": "configured-model@svc", "lite": "", "vision": ""},
             llm_providers=[
                 {
                     "name": "svc",

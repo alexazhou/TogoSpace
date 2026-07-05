@@ -177,7 +177,7 @@ class LlmProviderConfig(BaseModel):
 class DefaultModelSlots(BaseModel):
     """全局默认模型槽位。"""
     primary: str = ""
-    lightweight: str = ""
+    lite: str = ""
     vision: str = ""
     advanced: str = ""
 

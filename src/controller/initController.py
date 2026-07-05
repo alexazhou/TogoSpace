@@ -80,7 +80,7 @@ class QuickInitHandler(BaseHandler):
             s.llm_providers.append(new_provider)
             # 快速初始化时，将所有默认模型槽位指向这个新配置的模型
             s.default_models.primary = f"{req.model}@default"
-            s.default_models.lightweight = f"{req.model}@default"
+            s.default_models.lite = f"{req.model}@default"
             s.default_models.vision = f"{req.model}@default"
             s.default_models.advanced = f"{req.model}@default"
 

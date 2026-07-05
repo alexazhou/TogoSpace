@@ -85,7 +85,8 @@ def resolve_model(model_name: str | None) -> tuple[LlmProviderConfig, LlmModelCo
     解析模型字符串为 provider 配置和合并后的模型配置。
 
     Args:
-        model_name: 可选的模型标识字符串，格式为 "model@provider" 或 "primary"/"lightweight"/"vision"。
+        model_name: 可选的模型标识字符串，格式为 "model@provider"。
+                    系统槽位格式为 "slot@system"，如 "primary@system"。
                     若为 None 或空字符串，则使用 default_models.primary。
 
     Returns:
@@ -99,19 +100,20 @@ def resolve_model(model_name: str | None) -> tuple[LlmProviderConfig, LlmModelCo
     setting = configUtil.get_app_config().setting
 
     if not model_name:
-        model_name = "primary"
+        model_name = "primary@system"
 
-    if model_name == "primary":
-        model_name = setting.default_models.primary
-    elif model_name == "lightweight":
-        model_name = setting.default_models.lightweight
-    elif model_name == "vision":
-        model_name = setting.default_models.vision
-    elif model_name == "advanced":
-        model_name = setting.default_models.advanced
-
-    if not model_name:
-        raise ValueError("未配置有效的默认模型槽位")
+    # 解析系统槽位：slot@system → 查 default_models 获取实际 model@provider
+    if model_name.endswith("@system"):
+        slot_name = model_name[:-7]  # 去掉 "@system"
+        slot_map = {
+            "primary": setting.default_models.primary,
+            "lite": setting.default_models.lite,
+            "vision": setting.default_models.vision,
+            "advanced": setting.default_models.advanced,
+        }
+        model_name = slot_map.get(slot_name, "")
+        if not model_name:
+            raise ValueError(f"未配置有效的系统槽位：{slot_name}")
 
     if "@" not in model_name:
         raise ValueError(f"模型标识格式错误（应为 model@provider）：{model_name}")

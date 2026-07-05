@@ -30,10 +30,20 @@ class ConfigHandler(BaseHandler):
             for dt in DriverType
         ]
 
+        # 构建模型槽位选项
+        dm = setting.default_models
+        model_slots = [
+            {"key": "primary", "value": dm.primary},
+            {"key": "lite", "value": dm.lite},
+            {"key": "advanced", "value": dm.advanced},
+            {"key": "vision", "value": dm.vision},
+        ]
+
         self.return_json({
             "models": models,
             "driver_types": driver_types,
             "default_model": setting.default_models.primary,
+            "model_slots": model_slots,
             "demo_mode": setting.demo_mode,
         })
 

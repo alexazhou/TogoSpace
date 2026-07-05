@@ -76,7 +76,7 @@ def _mock_config():
         version="v2",
         language="zh-CN",
         workspace_root="/tmp/test_workspace",
-        default_models={"primary": "mock-model@svc", "lightweight": "mock-model@svc", "vision": "mock-model@svc"},
+        default_models={"primary": "mock-model@svc", "lite": "mock-model@svc", "vision": "mock-model@svc"},
         llm_providers=[
             LlmProviderConfig(
                 name="svc",
