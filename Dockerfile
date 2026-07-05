@@ -35,7 +35,6 @@ FROM ubuntu:24.04
 
 LABEL maintainer="TogoSpace Team"
 LABEL description="TogoSpace - Multi-Agent Chat Room Framework"
-LABEL version="0.3.8"
 
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1 \
