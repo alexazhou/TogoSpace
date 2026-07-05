@@ -143,7 +143,7 @@ class LlmModelConfig(BaseModel):
     def _serialize(self, handler: Any) -> dict[str, Any]:
         data = handler(self)
         cc = data.get("context_config")
-        if cc is None or cc == {}:
+        if cc is None or cc == {} or cc == LlmContextConfig().model_dump(mode="json"):
             data.pop("context_config", None)
         return data
 

@@ -35,7 +35,7 @@ class LlmConfigHandler(BaseHandler):
         self.return_json({
             "llm_providers": providers,
             "default_models": setting.default_models.model_dump(mode="json"),
-            "context_config": setting.context_config.model_dump(mode="json"),
+            "context_config": setting.context_config.model_dump(exclude_defaults=True, mode="json"),
         })
         
     async def post(self) -> None:
@@ -98,8 +98,8 @@ class LlmTestHandler(BaseHandler):
     async def post(self) -> None:
         try:
             req = self.parse_request(LlmTestRequest)
-            provider_config = LlmProviderConfig(**req.provider)
-            model_config = LlmModelConfig(**req.model)
+            provider_config = LlmProviderConfig(**jsonUtil.clean_null_values(req.provider))
+            model_config = LlmModelConfig(**jsonUtil.clean_null_values(req.model))
         except ValidationError as e:
             self.return_with_error(error_code="validation_error", error_desc=str(e))
             return
@@ -142,9 +142,21 @@ async def _test_llm_service(provider: LlmProviderConfig, model: LlmModelConfig, 
     )
     duration_ms = int((time.monotonic() - start_time) * 1000)
 
+    message = response.choices[0].message if response.choices else None
+    response_text = ""
+    if message:
+        response_text = message.content or ""
+        # 有些模型把内容放在 reasoning_content 里
+        if not response_text and message.reasoning_content:
+            response_text = message.reasoning_content
+        # 如果 content 为空但有 tool_calls，显示 tool_calls 信息
+        if not response_text and message.tool_calls:
+            tool_names = [tc.function_name for tc in message.tool_calls]
+            response_text = f"[tool_calls] {', '.join(tool_names)}"
+
     return {
         "model": model.name,
-        "response_text": response.choices[0].message.content if response.choices else "",
+        "response_text": response_text,
         "duration_ms": duration_ms,
         "usage": response.usage.model_dump() if response.usage else None,
         "test_mode": "agent_probe_stream_with_tools",
