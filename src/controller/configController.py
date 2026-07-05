@@ -27,9 +27,14 @@ class ConfigHandler(BaseHandler):
             {"key": "vision", "value": dm.vision},
         ]
 
+        # 上下文配置默认值（未设置时使用的值）
+        from util.configTypes import LlmContextConfig
+        context_config_defaults = LlmContextConfig().model_dump(mode="json")
+
         self.return_json({
             "driver_types": driver_types,
             "model_slots": model_slots,
+            "context_config_defaults": context_config_defaults,
             "demo_mode": setting.demo_mode,
         })
 

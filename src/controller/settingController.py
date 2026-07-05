@@ -24,7 +24,7 @@ class LlmConfigHandler(BaseHandler):
         # Hide sensitive keys if demo mode
         providers = []
         for p in setting.llm_providers:
-            item = p.model_dump(exclude_unset=True, mode="json")
+            item = p.model_dump(mode="json")
             item["has_api_key"] = bool(p.api_key)
             if setting.demo_mode.hide_sensitive:
                 item["api_key"] = ""
@@ -47,7 +47,9 @@ class LlmConfigHandler(BaseHandler):
         try:
             providers = [LlmProviderConfig(**p) for p in providers_data]
             default_models = DefaultModelSlots(**default_models_data)
-            context_config = LlmContextConfig(**context_config_data)
+            # 过滤 null 值，让 LlmContextConfig 使用默认值
+            context_config_filtered = {k: v for k, v in context_config_data.items() if v is not None}
+            context_config = LlmContextConfig(**context_config_filtered)
         except ValidationError as e:
             self.return_with_error(
                 error_code="validation_error",
