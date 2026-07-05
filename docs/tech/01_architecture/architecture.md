@@ -146,7 +146,7 @@ src/
   schedulerService.start_scheduling()  # 开始调度
 ```
 
-启动完成后，Tornado HTTP Server 在 `0.0.0.0:{port}`（默认 8080）监听。
+启动完成后，Tornado HTTP Server 在 `0.0.0.0:{port}`（默认 8180）监听。
 
 ---
 

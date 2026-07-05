@@ -243,7 +243,7 @@ logs/backend/service/agentService.log   — 消息同步与工具调用
 通过 API 获取房间实时状态：
 
 ```bash
-curl http://127.0.0.1:8080/rooms/{team_name}/{room_key}.json | python3 -m json.tool
+curl http://127.0.0.1:8180/rooms/{team_name}/{room_key}.json | python3 -m json.tool
 ```
 
 关注字段：
@@ -255,7 +255,7 @@ curl http://127.0.0.1:8080/rooms/{team_name}/{room_key}.json | python3 -m json.t
 ### 查看 Agent 运行状态
 
 ```bash
-curl http://127.0.0.1:8080/agents.json | python3 -m json.tool
+curl http://127.0.0.1:8180/agents.json | python3 -m json.tool
 ```
 
 关注字段：

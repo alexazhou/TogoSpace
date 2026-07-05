@@ -57,10 +57,10 @@ def _load_base_url(config_path: str) -> str:
             cfg = json.load(f)
         srv = cfg.get("web_server") or cfg.get("server", {})
         host = srv.get("host", "127.0.0.1")
-        port = srv.get("port", 8080)
+        port = srv.get("port", 8180)
         return f"http://{host}:{port}"
     except (FileNotFoundError, KeyError, ValueError):
-        return "http://127.0.0.1:8080"
+        return "http://127.0.0.1:8180"
 
 
 def main() -> None:

@@ -112,7 +112,7 @@ TogoSpace/
 
 ```bash
 # 前台运行（开发）
-.venv/bin/python3 src/backend_main.py [--config-dir config] [--port 8080]
+.venv/bin/python3 src/backend_main.py [--config-dir config] [--port 8180]
 
 # 后台运行
 ./scripts/start_backend.sh [--config-dir ...] [--port ...]
@@ -125,10 +125,10 @@ TogoSpace/
 
 ```bash
 # 前台运行
-.venv/bin/python3 tui/tui_main.py [--base-url http://127.0.0.1:8080] [--config ~/.togo_agent/setting.json]
+.venv/bin/python3 tui/tui_main.py [--base-url http://127.0.0.1:8180] [--config ~/.togo_agent/setting.json]
 
 # 或使用脚本
-./scripts/start_tui.sh [--base-url http://127.0.0.1:8080] [--config ~/.togo_agent/setting.json]
+./scripts/start_tui.sh [--base-url http://127.0.0.1:8180] [--config ~/.togo_agent/setting.json]
 
 # 停止
 ./scripts/stop_tui.sh
@@ -168,11 +168,11 @@ npm install
 npm run dev
 ```
 
-默认通过 Vite 代理连接 `http://127.0.0.1:8080`。如需指定后端地址，可用：
+默认通过 Vite 代理连接 `http://127.0.0.1:8180`。如需指定后端地址，可用：
 
 ```bash
 cd frontend
-VITE_API_BASE_URL=http://127.0.0.1:8080 npm run dev
+VITE_API_BASE_URL=http://127.0.0.1:8180 npm run dev
 ```
 
 ## 日志说明
