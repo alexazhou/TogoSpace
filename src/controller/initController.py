@@ -18,6 +18,7 @@ class QuickInitRequest(BaseModel):
     api_key: str
     model: str
     type: LlmProviderType = LlmProviderType.OPENAI
+    protocol: LlmProtocol = LlmProtocol.OPENAI
     extra_params: dict[str, Any] | None = None
 
     @field_validator("base_url")
@@ -62,14 +63,14 @@ class QuickInitHandler(BaseHandler):
 
         model_kwargs = {
             "name": req.model,
-            "protocol": LlmProtocol.OPENAI,
+            "protocol": req.protocol,
         }
         if req.extra_params is not None:
             model_kwargs["extra_params"] = req.extra_params
 
         new_provider = LlmProviderConfig(
             name="default",
-            urls={"openai": req.base_url},
+            urls={req.protocol.value: req.base_url},
             api_key=req.api_key,
             type=req.type,
             models=[
