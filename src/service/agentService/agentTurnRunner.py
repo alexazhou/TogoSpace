@@ -25,12 +25,13 @@ from service import agentActivityService, llmService, roomService
 from service.agentActivityService import AgentActivityMeta
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService import compact, promptBuilder
+from service.llmService.core import resolve_model
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
 from service.agentService.driver.factory import build_agent_driver
 from service.agentService.toolRegistry import AgentToolRegistry, RegisteredTool, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
 from util import configUtil, llmApiUtil
-from util.configTypes import LlmServiceConfig
+from util.configTypes import LlmModelConfig
 from util.assertUtil import assertNotNull
 from dal.db import gtAgentTaskManager
 
@@ -436,7 +437,9 @@ class AgentTurnRunner:
             f"末尾角色: {history._last_role() or 'empty'}"
         )
 
-        resolved_model, _, trigger_tokens, hard_limit_tokens = self._resolve_compact_config()
+        provider_config, merged_llm_config = resolve_model(self.gt_agent.model)
+        trigger_tokens = compact.calc_compact_trigger_tokens(merged_llm_config)
+        hard_limit_tokens = compact.calc_hard_limit_tokens(merged_llm_config)
         estimated_tokens = 0
         compact_stage: CompactStage = "none"
         overflow_retry = False
@@ -450,9 +453,11 @@ class AgentTurnRunner:
             "last_retry_error": None,
         }
 
+        model_display = f"{merged_llm_config.name}@{provider_config.name}"
+
         try:
             messages = history.build_infer_messages()
-            estimated_tokens = compact.estimate_tokens(resolved_model, messages, self.system_prompt)
+            estimated_tokens = compact.estimate_tokens(merged_llm_config.name, messages, self.system_prompt)
 
             messages, estimated_tokens, pre_compact_triggered = await self._check_compact(
                 messages,
@@ -466,7 +471,7 @@ class AgentTurnRunner:
             # 活动记录：LLM_INFER STARTED（pre-check compact 已完成，不会与 COMPACT 并行）
             activity = await agentActivityService.add_activity(
                 gt_agent=self.gt_agent, activity_type=AgentActivityType.LLM_INFER,
-                metadata=self._base_metadata(model=resolved_model, estimated_prompt_tokens=estimated_tokens),
+                metadata=self._base_metadata(model=model_display, estimated_prompt_tokens=estimated_tokens),
             )
             activity_id = activity.id
 
@@ -510,11 +515,13 @@ class AgentTurnRunner:
                 )
                 return patch
 
+            print('DEBUG: BEFORE INFER_STREAM')
             infer_result: llmService.InferResult = await llmService.infer_stream(
                 self.gt_agent.model, ctx, on_progress=_on_progress, on_status_event=_on_status_event,
             )
 
             # overflow retry
+            print('DEBUG: AFTER INFER_STREAM')
             if infer_result.ok is False or infer_result.response is None:
                 error = infer_result.error
                 if (
@@ -538,13 +545,13 @@ class AgentTurnRunner:
 
                     await self._execute_compact()
                     messages = history.build_infer_messages()
-                    estimated_tokens = compact.estimate_tokens(resolved_model, messages, self.system_prompt)
+                    estimated_tokens = compact.estimate_tokens(merged_llm_config.name, messages, self.system_prompt)
                     if estimated_tokens >= hard_limit_tokens:
                         raise RuntimeError(f"overflow compact 后仍超限: agent_id={self.gt_agent.id}") from error
 
                     # 新建 infer 活动记录
                     retry_metadata = self._base_metadata(
-                        model=resolved_model, estimated_prompt_tokens=estimated_tokens, overflow_retry=True,
+                        model=model_display, estimated_prompt_tokens=estimated_tokens, overflow_retry=True,
                     )
                     activity = await agentActivityService.add_activity(
                         gt_agent=self.gt_agent, activity_type=AgentActivityType.LLM_INFER,
@@ -565,7 +572,8 @@ class AgentTurnRunner:
                         self.gt_agent.model, ctx, on_progress=_on_progress, on_status_event=_on_status_event,
                     )
 
-                if infer_result.ok is False or infer_result.response is None:
+                print('DEBUG: AFTER INFER_STREAM')
+            if infer_result.ok is False or infer_result.response is None:
                     error_message = infer_result.error_message or "unknown inference error"
                     raise RuntimeError(error_message) from infer_result.error
 
@@ -806,16 +814,6 @@ class AgentTurnRunner:
 
     # ─── 内部辅助方法 ─────────────────────────────
 
-    def _resolve_compact_config(self) -> tuple[str, LlmServiceConfig, int, int]:
-        """获取 compact 相关配置：(resolved_model, llm_config, trigger_tokens, hard_limit_tokens)。"""
-        llm_config = configUtil.get_app_config().setting.current_llm_service
-        if llm_config is None:
-            raise ValueError("未配置可用的 LLM 服务（llm_services 全部被禁用或为空）")
-        resolved_model = self.gt_agent.model or llm_config.model
-        trigger_tokens = compact.calc_compact_trigger_tokens(resolved_model, llm_config)
-        hard_limit_tokens = compact.calc_hard_limit_tokens(resolved_model, llm_config)
-        return resolved_model, llm_config, trigger_tokens, hard_limit_tokens
-
     @staticmethod
     def _build_usage(
         *,
@@ -847,7 +845,9 @@ class AgentTurnRunner:
 
         Returns: (messages, estimated_tokens, compact_triggered)
         """
-        resolved_model, _, trigger_tokens, hard_limit_tokens = self._resolve_compact_config()
+        provider_config, merged_llm_config = resolve_model(self.gt_agent.model)
+        trigger_tokens = compact.calc_compact_trigger_tokens(merged_llm_config)
+        hard_limit_tokens = compact.calc_hard_limit_tokens(merged_llm_config)
         if trigger_prompt_tokens < trigger_tokens:
             return messages, estimated_tokens, False
 
@@ -863,7 +863,7 @@ class AgentTurnRunner:
             "[compact-recheck] agent_id=%d, message_count=%d, messages=[%s]",
             self.gt_agent.id, len(messages), msg_summary,
         )
-        estimated_tokens = compact.estimate_tokens(resolved_model, messages, self.system_prompt)
+        estimated_tokens = compact.estimate_tokens(merged_llm_config.name, messages, self.system_prompt)
         if estimated_tokens >= hard_limit_tokens:
             raise RuntimeError(
                 f"{check_stage} compact 后仍超限: agent_id={self.gt_agent.id}, "
@@ -874,7 +874,7 @@ class AgentTurnRunner:
 
     async def _execute_compact(self) -> None:
         """执行一次 compact：生成摘要 → 插入 COMPACT_SUMMARY → 内存裁剪。失败时 raise。"""
-        resolved_model, llm_config, _, _ = self._resolve_compact_config()
+        _, merged_llm_config = resolve_model(self.gt_agent.model)
 
         compact_activity = await agentActivityService.add_activity(
             gt_agent=self.gt_agent, activity_type=AgentActivityType.COMPACT, metadata=self._base_metadata(),
@@ -887,12 +887,12 @@ class AgentTurnRunner:
             raise RuntimeError("compact 跳过：无可压缩消息")
 
         # 摘要 token 上限动态设为上下文长度的 10%，随模型配置自动伸缩
-        compact_max_tokens = max(1, int(llm_config.context_window_tokens * 0.1))
+        compact_max_tokens = max(1, int(merged_llm_config.context_config.context_window_tokens * 0.1))
         try:
             summary_text = await compact.compact_messages(
                 messages=compact_plan.source_messages,
                 system_prompt=self.system_prompt,
-                model=resolved_model,
+                model=self.gt_agent.model,
                 tools=self.tool_registry.export_openai_tools(),
                 max_tokens=compact_max_tokens,
             )

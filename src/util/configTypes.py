@@ -2,8 +2,8 @@ import os
 from typing import Any, List, Optional
 
 import appPaths
-from constants import DriverType, LlmServiceType
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from constants import DriverType, LlmProtocol, LlmProviderType
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 # 多语言字段类型
 I18nText = dict[str, str]   # e.g. {"zh-CN": "研究员", "en": "Researcher"}
@@ -66,11 +66,11 @@ _LLM_PROVIDER_PARAM_RESERVED_KEYS = {
 }
 
 
-def _validate_llm_provider_params(value: dict[str, Any]) -> dict[str, Any]:
+def _validate_llm_extra_params(value: dict[str, Any]) -> dict[str, Any]:
     reserved_keys = sorted(_LLM_PROVIDER_PARAM_RESERVED_KEYS.intersection(value.keys()))
     if reserved_keys:
         raise ValueError(
-            "provider_params 包含保留字段，不能覆盖系统请求参数："
+            "extra_params 包含保留字段，不能覆盖系统请求参数："
             + ", ".join(reserved_keys)
         )
     return value
@@ -120,32 +120,76 @@ class RoleTemplatePreset(BaseModel):
     prompt_file: str = ""
 
 
-class LlmServiceConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    name: str
-    base_url: str
-    api_key: str
-    type: LlmServiceType
-    model: str = "qwen-plus"
-    enable: bool = True
-    extra_headers: dict[str, str] = Field(default_factory=_default_llm_extra_headers)
-    provider_params: dict[str, Any] = Field(default_factory=dict)
-
-    temperature: Optional[float] = None
-
-    # Token 预算与自动压缩配置
+class LlmContextConfig(BaseModel):
+    """上下文与压缩策略配置"""
     context_window_tokens: int = 131072
     reserve_output_tokens: int = 16384
     compact_trigger_ratio: float = Field(default=0.85, ge=0.0, le=1.0)
-    compact_summary_max_tokens: int = 6 * 1024
+    compact_summary_max_tokens: int = 6144
 
-    @field_validator("provider_params")
+    def resolve_with_global(self, global_config: "LlmContextConfig") -> "LlmContextConfig":
+        """逐字段合并：self（模型级） > global_config（全局） > 默认值。
+
+        判断逻辑：如果 self 的某字段值与默认值不同，说明模型显式设置了该字段，优先使用；
+        否则使用全局配置的值。
+        """
+        default = LlmContextConfig()
+        merged = {}
+        for field_name in LlmContextConfig.model_fields:
+            self_val = getattr(self, field_name)
+            global_val = getattr(global_config, field_name)
+            default_val = getattr(default, field_name)
+            merged[field_name] = self_val if self_val != default_val else global_val
+        return LlmContextConfig(**merged)
+
+
+class LlmModelConfig(BaseModel):
+    """单个模型的配置 — 归属于某个提供商。"""
+    name: str
+    protocol: LlmProtocol
+    enabled: bool = True
+    support_vision: bool = False
+    temperature: Optional[float] = None
+    extra_params: dict[str, Any] = Field(default_factory=dict)
+    extra_headers: dict[str, str] = Field(default_factory=dict)
+    context_config: Optional[LlmContextConfig] = None
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: Any) -> dict[str, Any]:
+        data = handler(self)
+        cc = data.get("context_config")
+        if cc is None or cc == {} or cc == LlmContextConfig().model_dump(mode="json"):
+            data.pop("context_config", None)
+        return data
+
+    @field_validator("extra_params")
     @classmethod
-    def validate_provider_params(cls, value: dict[str, Any] | None) -> dict[str, Any]:
+    def validate_extra_params(cls, value: dict[str, Any] | None) -> dict[str, Any]:
         if value is None:
             return {}
-        return _validate_llm_provider_params(value)
+        return _validate_llm_extra_params(value)
+
+
+class LlmProviderConfig(BaseModel):
+    """LLM 提供商配置 — 对应一个 API 服务提供商。"""
+    name: str
+    type: LlmProviderType
+    api_key: str
+    enable: bool = True
+    urls: dict[str, str] = Field(default_factory=dict)
+    models: List[LlmModelConfig] = Field(default_factory=list)
+
+    def find_model(self, model_name: str) -> LlmModelConfig | None:
+        """按名称查找模型，未找到返回 None。"""
+        return next((m for m in self.models if m.name == model_name), None)
+
+
+class DefaultModelSlots(BaseModel):
+    """全局默认模型槽位。"""
+    primary: str = ""
+    lite: str = ""
+    vision: str = ""
+    advanced: str = ""
 
 
 class DemoModeConfig(BaseModel):
@@ -178,12 +222,14 @@ class DevConfig(BaseModel):
 class SettingConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    version: str = "v2"
     language: str = "zh-CN"  # 界面语言，默认中文
     development_mode: bool = False  # 前端开发模式开关，影响错误提示等交互行为
     demo_mode: DemoModeConfig = Field(default_factory=DemoModeConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
-    default_llm_server: str | None = None
-    llm_services: list[LlmServiceConfig] = Field(default_factory=list)
+    llm_providers: List[LlmProviderConfig] = Field(default_factory=list)
+    default_models: DefaultModelSlots = Field(default_factory=DefaultModelSlots)
+    context_config: LlmContextConfig = Field(default_factory=LlmContextConfig)
     default_room_max_rounds: int = 100
     db_path: str = Field(default_factory=_default_db_path)
     workspace_root: str | None = Field(default_factory=_default_workspace_root)
@@ -200,21 +246,29 @@ class SettingConfig(BaseModel):
 
     @property
     def is_llm_configured(self) -> bool:
-        """是否已配置可用的 LLM 服务（至少一个已启用）。"""
-        return any(s.enable for s in self.llm_services)
+        """是否已配置可用的 LLM 服务（至少有一个启用且有模型的提供商）。"""
+        for provider in self.llm_providers:
+            if provider.enable and any(m.enabled for m in provider.models):
+                return True
+        return False
 
-    @property
-    def current_llm_service(self) -> LlmServiceConfig | None:
-        enabled_services = [s for s in self.llm_services if s.enable]
-        if not enabled_services:
-            return None
+    def find_provider(self, provider_name: str) -> LlmProviderConfig | None:
+        """按名称查找服务商，未找到返回 None。"""
+        return next((p for p in self.llm_providers if p.name == provider_name), None)
 
-        if self.default_llm_server:
-            for service in enabled_services:
-                if service.name == self.default_llm_server:
-                    return service
+    def get_slot_model_name(self, slot_name: str) -> str:
+        """按槽位名获取对应的 model@provider 字符串。
 
-        return enabled_services[0]
+        Returns:
+            model@provider 格式的字符串，槽位未配置则返回空字符串。
+        """
+        slot_map = {
+            "primary": self.default_models.primary,
+            "lite": self.default_models.lite,
+            "vision": self.default_models.vision,
+            "advanced": self.default_models.advanced,
+        }
+        return slot_map.get(slot_name, "")
 
     def get_default_team_workdir(self, team_name: str) -> str:
         return os.path.join(self.workspace_root, team_name)

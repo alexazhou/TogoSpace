@@ -35,7 +35,7 @@ def _get_web_url() -> str:
         return f"http://localhost:{app_config.setting.bind_port}"
     except Exception:
         _logger.error("读取 Web 地址配置失败，回退到默认地址", exc_info=True)
-        return "http://localhost:8080"
+        return "http://localhost:8180"
 
 # ── 后端线程 ───────────────────────────────────────────────────────────────
 

@@ -48,7 +48,7 @@ def test_build_gtsp_command_respects_explicit_command_and_no_duplicate_flags() -
 
 @dataclass
 class _DummyHost:
-    gt_agent: GtAgent = field(default_factory=lambda: GtAgent(id=1, team_id=1, name="实习生", role_template_id=1, model="mock-model"))
+    gt_agent: GtAgent = field(default_factory=lambda: GtAgent(id=1, team_id=1, name="实习生", role_template_id=1, model="mock-model@svc"))
     name: str = "实习生"
     team_name: str = "default"
     system_prompt: str = ""

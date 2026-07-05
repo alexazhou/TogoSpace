@@ -35,7 +35,7 @@ class SystemStatusHandler(BaseHandler):
             "auto_check_update": setting.auto_check_update,
         }
         if initialized:
-            response["default_llm_server"] = setting.default_llm_server
+            response["default_llm_server"] = setting.default_models.primary
         else:
             response["message"] = "当前未配置大模型服务"
 

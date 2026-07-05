@@ -47,14 +47,14 @@ async def test_infer_passes_default_opencode_headers(monkeypatch):
         return _build_response()
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
+        default_models={"primary": "configured-model@svc"},
+        llm_providers=[
             {
                 "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
+                "type": "openai",
+                "urls": {"openai": "http://localhost/v1/chat/completions"},
                 "api_key": "key-123",
-                "type": "openai-compatible",
+                "models": [{"name": "mock-model", "protocol": "openai"}, {"name": "configured-model", "protocol": "openai"}]
             }
         ],
     )))
@@ -72,7 +72,7 @@ async def test_infer_passes_default_opencode_headers(monkeypatch):
     assert captured["url"] == "http://localhost/v1/chat/completions"
     assert captured["api_key"] == "key-123"
     assert captured["custom_llm_provider"] == "openai"
-    assert captured["extra_headers"] == {"User-Agent": "opencode"}
+    assert captured["extra_headers"] is None or captured["extra_headers"] == {}
     assert captured["request"].tool_choice == "none"
     assert captured["request"].prompt_cache is True
     assert isinstance(captured["request_id"], str)
@@ -85,17 +85,17 @@ async def test_infer_passes_configured_headers_without_default_merge(monkeypatch
     fake_send_request_non_stream = AsyncMock(return_value=_build_response())
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
+        default_models={"primary": "configured-model@svc"},
+        llm_providers=[
             {
                 "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
+                "type": "openai",
+                "urls": {"openai": "http://localhost/v1/chat/completions"},
                 "api_key": "key-123",
-                "type": "openai-compatible",
-                "extra_headers": {
-                    "X-Client-Name": "openclaw",
-                },
+                "models": [
+                    {"name": "mock-model", "protocol": "openai"},
+                    {"name": "configured-model", "protocol": "openai", "extra_headers": {"X-Client-Name": "openclaw"}},
+                ]
             }
         ],
     )))
@@ -121,14 +121,14 @@ async def test_infer_stream_passes_request_id(monkeypatch):
     fake_send_request_stream = AsyncMock(return_value=_build_response("stream-ok"))
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
+        default_models={"primary": "configured-model@svc"},
+        llm_providers=[
             {
                 "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
+                "type": "openai",
+                "urls": {"openai": "http://localhost/v1/chat/completions"},
                 "api_key": "key-123",
-                "type": "openai-compatible",
+                "models": [{"name": "mock-model", "protocol": "openai"}, {"name": "configured-model", "protocol": "openai"}]
             }
         ],
     )))
@@ -156,20 +156,20 @@ async def test_infer_stream_strips_required_tool_choice_when_reasoning_effort_en
     fake_send_request_stream = AsyncMock(return_value=_build_response("stream-ok"))
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
-            {
-                "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
-                "api_key": "key-123",
-                "type": "openai-compatible",
-                "model": "deepseek-v4-pro",
-                "provider_params": {
-                    "reasoning_effort": "high",
-                },
-            }
-        ],
+        default_models={"primary": "deepseek-v4-pro@svc"},
+            llm_providers=[
+                {
+                    "name": "svc",
+                    "type": "openai",
+                    "urls": {"openai": "http://localhost/v1/chat/completions"},
+                    "api_key": "key-123",
+                    "models": [{
+                        "name": "deepseek-v4-pro",
+                        "protocol": "openai",
+                        "extra_params": {"reasoning_effort": "high"},
+                    }]
+                }
+            ],
     )))
     monkeypatch.setattr(llmService.llmApiUtil, "send_request_stream", fake_send_request_stream)
 
@@ -185,7 +185,7 @@ async def test_infer_stream_strips_required_tool_choice_when_reasoning_effort_en
     fake_send_request_stream.assert_awaited_once()
     request = fake_send_request_stream.await_args.kwargs["request"]
     assert request.tool_choice is None
-    assert request.provider_params["reasoning_effort"] == "high"
+    assert request.extra_params["reasoning_effort"] == "high"
 
 
 @pytest.mark.asyncio
@@ -193,14 +193,14 @@ async def test_infer_uses_context_prompt_cache_policy_when_provided(monkeypatch)
     fake_send_request_non_stream = AsyncMock(return_value=_build_response())
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
+        default_models={"primary": "configured-model@svc"},
+        llm_providers=[
             {
                 "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
+                "type": "openai",
+                "urls": {"openai": "http://localhost/v1/chat/completions"},
                 "api_key": "key-123",
-                "type": "openai-compatible",
+                "models": [{"name": "mock-model", "protocol": "openai"}, {"name": "configured-model", "protocol": "openai"}]
             }
         ],
     )))
@@ -226,15 +226,14 @@ async def test_infer_uses_config_model_when_agent_model_is_none(monkeypatch):
     fake_send_request_non_stream = AsyncMock(return_value=_build_response())
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
+        default_models={"primary": "configured-model@svc"},
+        llm_providers=[
             {
                 "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
+                "type": "openai",
+                "urls": {"openai": "http://localhost/v1/chat/completions"},
                 "api_key": "key-123",
-                "type": "openai-compatible",
-                "model": "configured-model",
+                "models": [{"name": "configured-model", "protocol": "openai"}, {"name": "mock-model", "protocol": "openai"}, {"name": "agent-specific-model", "protocol": "openai"}]
             }
         ],
     )))
@@ -259,15 +258,14 @@ async def test_infer_uses_agent_model_when_provided(monkeypatch):
     fake_send_request_non_stream = AsyncMock(return_value=_build_response())
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
+        default_models={"primary": "configured-model@svc"},
+        llm_providers=[
             {
                 "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
+                "type": "openai",
+                "urls": {"openai": "http://localhost/v1/chat/completions"},
                 "api_key": "key-123",
-                "type": "openai-compatible",
-                "model": "configured-model",
+                "models": [{"name": "configured-model", "protocol": "openai"}, {"name": "mock-model", "protocol": "openai"}, {"name": "agent-specific-model", "protocol": "openai"}]
             }
         ],
     )))
@@ -278,7 +276,7 @@ async def test_infer_uses_agent_model_when_provided(monkeypatch):
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
     )
 
-    result = await llmService.infer("agent-specific-model", ctx)  # model 参数有值
+    result = await llmService.infer("agent-specific-model@svc", ctx)  # model 参数有值
 
     assert result.ok is True
     fake_send_request_non_stream.assert_awaited_once()
@@ -292,15 +290,14 @@ async def test_infer_stream_uses_config_model_when_agent_model_is_none(monkeypat
     fake_send_request_stream = AsyncMock(return_value=_build_response("stream-ok"))
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
+        default_models={"primary": "configured-model@svc"},
+        llm_providers=[
             {
                 "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
+                "type": "openai",
+                "urls": {"openai": "http://localhost/v1/chat/completions"},
                 "api_key": "key-123",
-                "type": "openai-compatible",
-                "model": "configured-model",
+                "models": [{"name": "configured-model", "protocol": "openai"}, {"name": "mock-model", "protocol": "openai"}, {"name": "agent-specific-model", "protocol": "openai"}]
             }
         ],
     )))
@@ -320,24 +317,27 @@ async def test_infer_stream_uses_config_model_when_agent_model_is_none(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_infer_passes_provider_params(monkeypatch):
+async def test_infer_passes_extra_params(monkeypatch):
     fake_send_request_non_stream = AsyncMock(return_value=_build_response())
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
-            {
-                "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
-                "api_key": "key-123",
-                "type": "openai-compatible",
-                "provider_params": {
-                    "reasoning_effort": "high",
-                    "parallel_tool_calls": False,
-                },
-            }
-        ],
+        default_models={"primary": "mock-model@svc"},
+            llm_providers=[
+                {
+                    "name": "svc",
+                    "type": "openai",
+                    "urls": {"openai": "http://localhost/v1/chat/completions"},
+                    "api_key": "key-123",
+                    "models": [{
+                        "name": "mock-model",
+                        "protocol": "openai",
+                        "extra_params": {
+                            "reasoning_effort": "high",
+                            "parallel_tool_calls": False,
+                        },
+                    }]
+                }
+            ],
     )))
     monkeypatch.setattr(llmService.llmApiUtil, "send_request_non_stream", fake_send_request_non_stream)
 
@@ -351,7 +351,7 @@ async def test_infer_passes_provider_params(monkeypatch):
     assert result.ok is True
     fake_send_request_non_stream.assert_awaited_once()
     request = fake_send_request_non_stream.await_args.kwargs["request"]
-    assert request.provider_params == {
+    assert request.extra_params == {
         "reasoning_effort": "high",
         "parallel_tool_calls": False,
     }
@@ -370,14 +370,14 @@ async def test_infer_retries_with_exponential_backoff_until_success(monkeypatch)
         return _build_response("retry-ok")
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
+        default_models={"primary": "configured-model@svc"},
+        llm_providers=[
             {
                 "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
+                "type": "openai",
+                "urls": {"openai": "http://localhost/v1/chat/completions"},
                 "api_key": "key-123",
-                "type": "openai-compatible",
+                "models": [{"name": "mock-model", "protocol": "openai"}, {"name": "configured-model", "protocol": "openai"}]
             }
         ],
     )))
@@ -416,14 +416,14 @@ async def test_infer_stream_retries_up_to_limit_then_returns_failure(monkeypatch
     fake_send_request_stream = AsyncMock(side_effect=RuntimeError("stream temporary failure"))
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
+        default_models={"primary": "configured-model@svc"},
+        llm_providers=[
             {
                 "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
+                "type": "openai",
+                "urls": {"openai": "http://localhost/v1/chat/completions"},
                 "api_key": "key-123",
-                "type": "openai-compatible",
+                "models": [{"name": "mock-model", "protocol": "openai"}, {"name": "configured-model", "protocol": "openai"}]
             }
         ],
     )))
@@ -562,14 +562,14 @@ async def test_infer_no_retry_on_non_retryable_error(monkeypatch):
         raise RuntimeError("Input too long: 217074 input tokens, limit is 202752 for this model")
 
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
+        default_models={"primary": "configured-model@svc"},
+        llm_providers=[
             {
                 "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
+                "type": "openai",
+                "urls": {"openai": "http://localhost/v1/chat/completions"},
                 "api_key": "key-123",
-                "type": "openai-compatible",
+                "models": [{"name": "mock-model", "protocol": "openai"}, {"name": "configured-model", "protocol": "openai"}]
             }
         ],
     )))

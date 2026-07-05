@@ -1169,9 +1169,10 @@ async def load_skill(
     if agent is None:
         return {"success": False, "message": f"未找到 Agent（ID: {_context.agent_id}）"}
 
-    allow_skills = agent.allow_skills or []
+    allow_skills = agent.allow_skills
 
-    if skill_name not in allow_skills:
+    # None 表示自动（允许所有技能），空列表表示不允许任何技能
+    if allow_skills is not None and skill_name not in allow_skills:
         return {"success": False, "message": f"技能 {skill_name} 未对当前 Agent 开放"}
 
     skill_info = skillService.get_skill(skill_name)

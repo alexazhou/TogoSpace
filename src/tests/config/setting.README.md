@@ -36,13 +36,13 @@
 - `db_path`：数据库文件路径，默认为 `STORAGE_ROOT/data/data.db`
 - `workspace_root`：团队默认工作目录根路径
 - `bind_host`：后端 HTTP 服务监听地址，默认 `0.0.0.0`
-- `bind_port`：后端 HTTP 服务监听端口，默认 `8080`
+- `bind_port`：后端 HTTP 服务监听端口，默认 `8180`
 - `demo_mode`：演示模式配置，详见下方说明
 - `auth`：鉴权配置，详见下方说明
 
 ## 本地监听地址与端口
 
-默认监听地址是 `0.0.0.0`，默认端口是 `8080`。
+默认监听地址是 `0.0.0.0`，默认端口是 `8180`。
 
 如需手动指定端口，在 `setting.json` 顶层添加或修改 `bind_port`，例如：`"bind_port": 9000`。
 

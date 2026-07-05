@@ -1,0 +1,51 @@
+{
+    "aliyun": {
+        "label": "Aliyun（阿里云/通义千问）",
+        "openai": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "anthropic": "https://dashscope.aliyuncs.com/apps/anthropic"
+    },
+    "aliyun_coding": {
+        "label": "Aliyun（阿里云） Coding Plan",
+        "openai": "https://coding.dashscope.aliyuncs.com/v1",
+        "anthropic": "https://coding.dashscope.aliyuncs.com/apps/anthropic"
+    },
+    "volcengine_coding": {
+        "label": "volcengine(字节火山引擎) Coding Plan",
+        "openai": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "anthropic": "https://ark.cn-beijing.volces.com/api/coding"
+    },
+    "openai": {
+        "label": "OpenAI",
+        "openai": "https://api.openai.com/v1/chat/completions"
+    },
+    "deepseek": {
+        "label": "DeepSeek（深度求索）",
+        "openai": "https://api.deepseek.com/v1/chat/completions",
+        "anthropic": "https://api.deepseek.com/anthropic"
+    },
+    "mimo": {
+        "label": "Mimo（小米）",
+        "openai": "https://api.xiaomimimo.com/v1",
+        "anthropic": "https://api.xiaomimimo.com/anthropic"
+    },
+    "mimo_token_plan": {
+        "label": "Mimo（小米）Token Plan",
+        "openai": "https://token-plan-cn.xiaomimimo.com/v1",
+        "anthropic": "https://token-plan-cn.xiaomimimo.com/anthropic"
+    },
+    "opencode_go": {
+        "label": "OpenCode Go",
+        "openai": "https://opencode.ai/zen/go/v1"
+    },
+    "anthropic": {
+        "label": "Anthropic（Claude）官方",
+        "anthropic": "https://api.anthropic.com"
+    },
+    "google": {
+        "label": "google（谷歌）官方",
+        "openai": "https://generativelanguage.googleapis.com/v1beta/openai"
+    },
+    "other": {
+        "label": "Other（自定义模型选这个）"
+    }
+}

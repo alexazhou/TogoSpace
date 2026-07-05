@@ -55,7 +55,7 @@ class OpenAIRequest(BaseModel):
     tools: Optional[List["OpenAITool"]] = Field(None, description="工具列表")
     tool_choice: Optional[str | dict[str, Any]] = Field(None, description="工具调用策略")
     prompt_cache: bool = Field(default=False, description="是否启用 prompt cache")
-    provider_params: dict[str, Any] = Field(default_factory=dict, description="额外透传给 LiteLLM 的 provider 参数")
+    extra_params: dict[str, Any] = Field(default_factory=dict, description="额外透传给 LiteLLM 的参数")
 
 
 class PromptCacheUsage(BaseModel):

@@ -4,7 +4,7 @@
 # 构建方式：
 #   1. 确保 frontend 子模块已初始化：git submodule update --init --recursive
 #   2. docker build -t togospace:0.3.8 .
-#   3. docker run -d -p 8080:8080 -v togospace-storage:/storage togospace:0.3.8
+#   3. docker run -d -p 8180:8180 -v togospace-storage:/storage togospace:0.3.8
 
 # ============================================
 # Stage 1: 构建前端
@@ -117,12 +117,13 @@ RUN mkdir -p ${STORAGE_ROOT} \
     fi
 
 # 暴露端口
-EXPOSE 8080
+EXPOSE 8180
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/system/status.json || exit 1
+    CMD curl -f http://localhost:8180/system/status.json || exit 1
 
-# 启动命令
+# 启动命令（可通过 TOGO_PORT 环境变量覆盖端口）
+ENV TOGO_PORT=8180
 WORKDIR ${TOGOSPACE_HOME}/src
-CMD ["../.venv/bin/python3", "backend_main.py", "--config-dir", "/storage"]
+CMD ../.venv/bin/python3 backend_main.py --config-dir /storage --port ${TOGO_PORT}

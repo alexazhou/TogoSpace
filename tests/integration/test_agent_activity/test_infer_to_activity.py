@@ -1,3 +1,4 @@
+from util.configTypes import LlmProviderConfig, LlmModelConfig, LlmContextConfig
 """集成测试：验证 AgentTurnRunner._infer_to_item() 推理后触发活动记录插入数据库。"""
 import os
 import sys
@@ -39,7 +40,7 @@ class TestInferToActivity(ServiceTestCase):
         await self._reset()
 
         # 构造 runner 和 history mock
-        gt_agent = GtAgent(id=1, team_id=1, name="TestBot", role_template_id=1, model="mock-model")
+        gt_agent = GtAgent(id=1, team_id=1, name="TestBot", role_template_id=1, model="mock-model@svc")
         runner = AgentTurnRunner(
             gt_agent=gt_agent,
             system_prompt="You are a test agent.",
@@ -81,7 +82,8 @@ class TestInferToActivity(ServiceTestCase):
         llm_cfg.compact_trigger_ratio = 0.85
         llm_cfg.model = "mock-model"
         setting = MagicMock()
-        setting.current_llm_service = llm_cfg
+        setting.default_models = MagicMock(primary="mock-model@svc", lite="mock-model@svc", vision="mock-model@svc")
+        setting.llm_providers = [LlmProviderConfig(name="svc", enable=True, type="openai", api_key="", urls={"openai": ""}, models=[LlmModelConfig(name="mock-model", protocol="openai", context_config=LlmContextConfig(compact_trigger_ratio=0.85, reserve_output_tokens=4096, context_window_tokens=32000))])]
         app_config = MagicMock()
         app_config.setting = setting
 
@@ -119,7 +121,7 @@ class TestInferToActivity(ServiceTestCase):
         """推理返回空 reasoning_content 或空 content 时，数据库中不应有对应活动记录。"""
         await self._reset()
 
-        gt_agent = GtAgent(id=2, team_id=1, name="TestBot2", role_template_id=1, model="mock-model")
+        gt_agent = GtAgent(id=2, team_id=1, name="TestBot2", role_template_id=1, model="mock-model@svc")
         runner = AgentTurnRunner(
             gt_agent=gt_agent,
             system_prompt="You are a test agent.",
@@ -160,7 +162,8 @@ class TestInferToActivity(ServiceTestCase):
         llm_cfg.compact_trigger_ratio = 0.85
         llm_cfg.model = "mock-model"
         setting = MagicMock()
-        setting.current_llm_service = llm_cfg
+        setting.default_models = MagicMock(primary="mock-model@svc", lite="mock-model@svc", vision="mock-model@svc")
+        setting.llm_providers = [LlmProviderConfig(name="svc", enable=True, type="openai", api_key="", urls={"openai": ""}, models=[LlmModelConfig(name="mock-model", protocol="openai", context_config=LlmContextConfig(compact_trigger_ratio=0.85, reserve_output_tokens=4096, context_window_tokens=32000))])]
         app_config = MagicMock()
         app_config.setting = setting
 

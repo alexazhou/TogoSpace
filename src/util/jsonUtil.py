@@ -112,11 +112,41 @@ def _unwrap_optional_union(annotation_type):
     return non_none_args[0]
 
 
-def json_dump(obj: object, config: Dict = None) -> str:
+_T = TypeVar('_T', dict, list)
+
+def clean_null_values(obj: _T) -> _T:
+    """递归移除 dict/list 中的 null 值，返回类型与输入一致。"""
+    if isinstance(obj, dict):
+        result = {}
+        for key, value in obj.items():
+            if value is None:
+                continue
+            if isinstance(value, (dict, list)):
+                result[key] = clean_null_values(value)
+            else:
+                result[key] = value
+        return result
+
+    if isinstance(obj, list):
+        result = []
+        for item in obj:
+            if isinstance(item, (dict, list)):
+                result.append(clean_null_values(item))
+            else:
+                result.append(item)
+        return result
+
+    return obj
+
+
+def json_dump(obj: object, config: Dict = None, remove_null: bool = False) -> str:
 
     final_config = default_json_config.copy()
     if config is not None:
         final_config.update(config)
+
+    if remove_null:
+        obj = clean_null_values(obj)
 
     def convert_to_builtin_type(obj):
         if hasattr(obj, 'to_json'):
@@ -312,3 +342,5 @@ def is_valid_json(value: str) -> bool:
         return True
     except (json.JSONDecodeError, ValueError):
         return False
+
+

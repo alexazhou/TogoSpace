@@ -136,7 +136,7 @@ class TestLlmServiceController(_ApiServiceCase):
             new_svc = after["llm_services"][-1]
             assert new_svc["name"] == "test-new"
             assert new_svc["model"] == "test-model"
-            assert new_svc["provider_params"] == {}
+            assert new_svc["extra_params"] == {}
 
     async def test_create_duplicate_name(self):
         """重复名称创建返回 400"""
@@ -194,8 +194,8 @@ class TestLlmServiceController(_ApiServiceCase):
             after = await self._list(client)
             assert after["llm_services"][idx]["model"] == "new-model"
 
-    async def test_modify_provider_params(self):
-        """支持保存 provider_params JSON 透传字段"""
+    async def test_modify_extra_params(self):
+        """支持保存 extra_params JSON 透传字段"""
         async with aiohttp.ClientSession() as client:
             await self._create(client, {
                 "name": "with-provider-params",
@@ -209,7 +209,7 @@ class TestLlmServiceController(_ApiServiceCase):
             idx = len(listing["llm_services"]) - 1
 
             status, _ = await self._modify(client, idx, {
-                "provider_params": {
+                "extra_params": {
                     "reasoning_effort": "high",
                     "parallel_tool_calls": False,
                 }
@@ -217,13 +217,13 @@ class TestLlmServiceController(_ApiServiceCase):
             assert status == 200
 
             after = await self._list(client)
-            assert after["llm_services"][idx]["provider_params"] == {
+            assert after["llm_services"][idx]["extra_params"] == {
                 "reasoning_effort": "high",
                 "parallel_tool_calls": False,
             }
 
-    async def test_create_provider_params_rejects_reserved_keys(self):
-        """provider_params 不允许覆盖系统请求字段"""
+    async def test_create_extra_params_rejects_reserved_keys(self):
+        """extra_params 不允许覆盖系统请求字段"""
         async with aiohttp.ClientSession() as client:
             status, data = await self._create(client, {
                 "name": "bad-provider-params",
@@ -231,7 +231,7 @@ class TestLlmServiceController(_ApiServiceCase):
                 "api_key": "test-key",
                 "type": "openai-compatible",
                 "model": "test-model",
-                "provider_params": {
+                "extra_params": {
                     "model": "override-model",
                 },
             }, expect_ok=False)
@@ -386,8 +386,8 @@ class TestLlmServiceController(_ApiServiceCase):
             assert "detail" in data
             assert data["detail"]["test_mode"] == "agent_probe_stream_with_tools"
 
-    async def test_connectivity_by_config_with_provider_params(self):
-        """临时可用性测试支持 provider_params 透传"""
+    async def test_connectivity_by_config_with_extra_params(self):
+        """临时可用性测试支持 extra_params 透传"""
         async with aiohttp.ClientSession() as client:
             data = await self._test_connectivity(client, {
                 "mode": "temp",
@@ -395,7 +395,7 @@ class TestLlmServiceController(_ApiServiceCase):
                 "api_key": "mock-api-key",
                 "type": "openai-compatible",
                 "model": "mock-model",
-                "provider_params": {
+                "extra_params": {
                     "parallel_tool_calls": False,
                 },
             })
@@ -410,7 +410,7 @@ class TestLlmServiceController(_ApiServiceCase):
                 "api_key": "mock-api-key",
                 "type": "openai-compatible",
                 "model": "azure_openai/gpt-5.4",
-                "provider_params": {
+                "extra_params": {
                     "reasoning_effort": "high",
                 },
             })

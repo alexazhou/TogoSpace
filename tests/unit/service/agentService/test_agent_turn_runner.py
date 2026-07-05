@@ -338,67 +338,71 @@ from util.configTypes import AppConfig, SettingConfig
 
 
 @pytest.mark.asyncio
-async def test_resolve_compact_config_uses_agent_model_when_set(monkeypatch):
-    """Agent model 有值时，_resolve_compact_config 返回 Agent 的 model。"""
-    gt_agent = GtAgent(id=1, team_id=1, name="TestAgent", role_template_id=1, model="agent-model")
-    runner = AgentTurnRunner(
-        gt_agent=gt_agent,
-        system_prompt="You are a test agent.",
-        driver_config=AgentDriverConfig(driver_type=DriverType.NATIVE),
-    )
-
+async def test_resolve_model_returns_configured_model(monkeypatch):
+    """resolve_model 应返回配置的模型。"""
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
-            {
-                "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
-                "api_key": "key-123",
-                "type": "openai-compatible",
-                "model": "configured-model",
-                "context_window_tokens": 128000,
-                "reserve_output_tokens": 8192,
-                "compact_trigger_ratio": 0.85,
-            }
-        ],
+        default_models={"primary": "configured-model@svc", "lite": "", "vision": ""},
+            llm_providers=[
+                {
+                    "name": "svc",
+                    "enable": True,
+                    "urls": {"openai": "http://localhost/v1/chat/completions"},
+                    "api_key": "key-123",
+                    "type": "openai",
+                    "models": [
+                        {
+                            "name": "configured-model",
+                            "protocol": "openai",
+                            "context_config": {
+                                "context_window_tokens": 128000,
+                                "reserve_output_tokens": 8192,
+                                "compact_trigger_ratio": 0.85
+                            }
+                        }
+                    ]
+                }
+            ],
     )))
 
-    resolved_model, llm_config, trigger_tokens, hard_limit_tokens = runner._resolve_compact_config()
+    from service.llmService.core import resolve_model
+    provider_config, llm_config = resolve_model("configured-model@svc")
 
-    assert resolved_model == "agent-model"
+    assert provider_config.name == "svc"
+    assert llm_config.name == "configured-model"
 
 
 @pytest.mark.asyncio
-async def test_resolve_compact_config_uses_config_model_when_agent_model_empty(monkeypatch):
-    """Agent model 为空时，_resolve_compact_config 返回配置中的 model。"""
-    gt_agent = GtAgent(id=1, team_id=1, name="TestAgent", role_template_id=1, model="")  # model 为空
-    runner = AgentTurnRunner(
-        gt_agent=gt_agent,
-        system_prompt="You are a test agent.",
-        driver_config=AgentDriverConfig(driver_type=DriverType.NATIVE),
-    )
-
+async def test_resolve_model_uses_default_when_empty(monkeypatch):
+    """model 为空时，resolve_model 使用 default_models.primary。"""
     monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
-        default_llm_server="svc",
-        llm_services=[
-            {
-                "name": "svc",
-                "enable": True,
-                "base_url": "http://localhost/v1/chat/completions",
-                "api_key": "key-123",
-                "type": "openai-compatible",
-                "model": "configured-model",
-                "context_window_tokens": 128000,
-                "reserve_output_tokens": 8192,
-                "compact_trigger_ratio": 0.85,
-            }
-        ],
+        default_models={"primary": "configured-model@svc", "lite": "", "vision": ""},
+            llm_providers=[
+                {
+                    "name": "svc",
+                    "enable": True,
+                    "urls": {"openai": "http://localhost/v1/chat/completions"},
+                    "api_key": "key-123",
+                    "type": "openai",
+                    "models": [
+                        {
+                            "name": "configured-model",
+                            "protocol": "openai",
+                            "context_config": {
+                                "context_window_tokens": 128000,
+                                "reserve_output_tokens": 8192,
+                                "compact_trigger_ratio": 0.85
+                            }
+                        }
+                    ]
+                }
+            ],
     )))
 
-    resolved_model, llm_config, trigger_tokens, hard_limit_tokens = runner._resolve_compact_config()
+    from service.llmService.core import resolve_model
+    provider_config, llm_config = resolve_model(None)
 
-    assert resolved_model == "configured-model"
+    assert provider_config.name == "svc"
+    assert llm_config.name == "configured-model"
 
 
 # ─── handle_cancel_turn 相关测试 ─────────────────────────────

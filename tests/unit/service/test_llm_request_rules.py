@@ -63,7 +63,7 @@ def test_is_thinking_enabled_by_thinking_type_enabled():
     request = llmApiUtil.OpenAIRequest(
         model="gpt-4o",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hi")],
-        provider_params={"thinking": {"type": "enabled"}},
+        extra_params={"thinking": {"type": "enabled"}},
     )
     assert _is_thinking_enabled(request, _AUTO_ENABLE_THINKING_MODELS) is True
 
@@ -72,7 +72,7 @@ def test_is_thinking_enabled_by_thinking_type_disabled():
     request = llmApiUtil.OpenAIRequest(
         model="deepseek-v4-pro",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hi")],
-        provider_params={"thinking": {"type": "disabled"}},
+        extra_params={"thinking": {"type": "disabled"}},
     )
     assert _is_thinking_enabled(request, _AUTO_ENABLE_THINKING_MODELS) is False
 
@@ -81,7 +81,7 @@ def test_is_thinking_enabled_by_reasoning_effort():
     request = llmApiUtil.OpenAIRequest(
         model="gpt-4o",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hi")],
-        provider_params={"reasoning_effort": "high"},
+        extra_params={"reasoning_effort": "high"},
     )
     assert _is_thinking_enabled(request, _AUTO_ENABLE_THINKING_MODELS) is True
 
@@ -90,7 +90,7 @@ def test_is_thinking_enabled_by_model_name():
     request = llmApiUtil.OpenAIRequest(
         model="deepseek-v4-pro",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hi")],
-        provider_params={},
+        extra_params={},
     )
     assert _is_thinking_enabled(request, _AUTO_ENABLE_THINKING_MODELS) is True
 
@@ -100,7 +100,7 @@ def test_is_thinking_enabled_disabled_overrides_model_name():
     request = llmApiUtil.OpenAIRequest(
         model="deepseek-v4-pro",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hi")],
-        provider_params={"thinking": {"type": "disabled"}},
+        extra_params={"thinking": {"type": "disabled"}},
     )
     assert _is_thinking_enabled(request, _AUTO_ENABLE_THINKING_MODELS) is False
 
@@ -110,7 +110,7 @@ def test_is_thinking_enabled_thinking_type_overrides_reasoning_effort():
     request = llmApiUtil.OpenAIRequest(
         model="gpt-4o",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hi")],
-        provider_params={"thinking": {"type": "enabled"}, "reasoning_effort": "high"},
+        extra_params={"thinking": {"type": "enabled"}, "reasoning_effort": "high"},
     )
     assert _is_thinking_enabled(request, _AUTO_ENABLE_THINKING_MODELS) is True
 
@@ -119,16 +119,16 @@ def test_is_thinking_enabled_no_params_no_thinking_model():
     request = llmApiUtil.OpenAIRequest(
         model="gpt-4o",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hi")],
-        provider_params={},
+        extra_params={},
     )
     assert _is_thinking_enabled(request, _AUTO_ENABLE_THINKING_MODELS) is False
 
 
-def test_is_thinking_enabled_with_empty_provider_params():
+def test_is_thinking_enabled_with_empty_extra_params():
     request = llmApiUtil.OpenAIRequest(
         model="gpt-4o",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hi")],
-        provider_params={},
+        extra_params={},
     )
     assert _is_thinking_enabled(request, _AUTO_ENABLE_THINKING_MODELS) is False
 
@@ -141,7 +141,7 @@ def test_apply_llm_request_rules_strips_required_tool_choice_for_reasoning():
         model="deepseek-v4-pro",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
         tool_choice="required",
-        provider_params={"reasoning_effort": "high"},
+        extra_params={"reasoning_effort": "high"},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -156,7 +156,7 @@ def test_apply_llm_request_rules_strips_required_tool_choice_by_model_name():
         model="deepseek-r1",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
         tool_choice="required",
-        provider_params={},
+        extra_params={},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -171,7 +171,7 @@ def test_apply_llm_request_rules_strips_required_tool_choice_by_thinking_enabled
         model="gpt-4o",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
         tool_choice="required",
-        provider_params={"thinking": {"type": "enabled"}},
+        extra_params={"thinking": {"type": "enabled"}},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -186,7 +186,7 @@ def test_apply_llm_request_rules_keeps_required_tool_choice_when_thinking_disabl
         model="deepseek-v4-pro",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
         tool_choice="required",
-        provider_params={"thinking": {"type": "disabled"}},
+        extra_params={"thinking": {"type": "disabled"}},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -200,7 +200,7 @@ def test_apply_llm_request_rules_keeps_non_required_tool_choice():
         model="deepseek-v4-pro",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
         tool_choice="none",
-        provider_params={"reasoning_effort": "high"},
+        extra_params={"reasoning_effort": "high"},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -222,7 +222,7 @@ def test_fill_missing_reasoning_content_fills_empty_string_when_thinking_enabled
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello"),
             msg_no_rc,
         ],
-        provider_params=THINKING_PARAMS,
+        extra_params=THINKING_PARAMS,
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -242,7 +242,7 @@ def test_fill_missing_reasoning_content_triggered_by_model_name():
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello"),
             msg_no_rc,
         ],
-        provider_params={},
+        extra_params={},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -261,7 +261,7 @@ def test_fill_missing_reasoning_content_not_triggered_when_thinking_disabled():
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello"),
             msg_no_rc,
         ],
-        provider_params={"thinking": {"type": "disabled"}},
+        extra_params={"thinking": {"type": "disabled"}},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -280,7 +280,7 @@ def test_fill_missing_reasoning_content_preserves_existing_reasoning_content():
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello"),
             msg_with_rc,
         ],
-        provider_params=THINKING_PARAMS,
+        extra_params=THINKING_PARAMS,
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -299,7 +299,7 @@ def test_fill_missing_reasoning_content_not_triggered_without_thinking():
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello"),
             msg_no_rc,
         ],
-        provider_params={},
+        extra_params={},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -322,7 +322,7 @@ def test_fill_missing_reasoning_content_mixed_messages():
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "second"),
             msg_no_rc,
         ],
-        provider_params=THINKING_PARAMS,
+        extra_params=THINKING_PARAMS,
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -347,7 +347,7 @@ def test_fill_missing_reasoning_content_not_triggered_for_plain_assistant_messag
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello"),
             plain_assistant_msg,
         ],
-        provider_params=THINKING_PARAMS,
+        extra_params=THINKING_PARAMS,
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -357,8 +357,8 @@ def test_fill_missing_reasoning_content_not_triggered_for_plain_assistant_messag
     assert assistant_msgs[0].reasoning_content is None
 
 
-def test_fill_missing_reasoning_content_not_triggered_when_provider_params_empty():
-    """provider_params 为空字典时不触发 FillMissingReasoningContentRule。"""
+def test_fill_missing_reasoning_content_not_triggered_when_extra_params_empty():
+    """extra_params 为空字典时不触发 FillMissingReasoningContentRule。"""
     msg_no_rc = _make_assistant_tool_call_msg(reasoning_content=None)
     request = llmApiUtil.OpenAIRequest(
         model="gpt-4o",
@@ -366,7 +366,7 @@ def test_fill_missing_reasoning_content_not_triggered_when_provider_params_empty
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello"),
             msg_no_rc,
         ],
-        provider_params={},
+        extra_params={},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -383,7 +383,7 @@ def test_fill_missing_reasoning_content_not_triggered_when_thinking_is_string():
             llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello"),
             msg_no_rc,
         ],
-        provider_params={"thinking": "enabled"},
+        extra_params={"thinking": "enabled"},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -400,7 +400,7 @@ def test_strip_tool_choice_not_triggered_when_reasoning_effort_empty_string():
         model="gpt-4o",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
         tool_choice="required",
-        provider_params={"reasoning_effort": ""},
+        extra_params={"reasoning_effort": ""},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -415,7 +415,7 @@ def test_strip_tool_choice_not_triggered_when_tool_choice_is_none():
         model="deepseek-v4-pro",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
         tool_choice=None,
-        provider_params={"reasoning_effort": "high"},
+        extra_params={"reasoning_effort": "high"},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -424,13 +424,13 @@ def test_strip_tool_choice_not_triggered_when_tool_choice_is_none():
     assert applied_rules == ()
 
 
-def test_strip_tool_choice_not_triggered_when_provider_params_empty():
-    """provider_params 为空字典且模型非 thinking mode 时不触发。"""
+def test_strip_tool_choice_not_triggered_when_extra_params_empty():
+    """extra_params 为空字典且模型非 thinking mode 时不触发。"""
     request = llmApiUtil.OpenAIRequest(
         model="gpt-4o",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
         tool_choice="required",
-        provider_params={},
+        extra_params={},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -453,7 +453,7 @@ def test_both_rules_triggered_simultaneously():
             msg_no_rc,
         ],
         tool_choice="required",
-        provider_params={
+        extra_params={
             "reasoning_effort": "high",
             "thinking": {"type": "enabled"},
         },
@@ -479,7 +479,7 @@ def test_both_rules_triggered_by_model_name():
             msg_no_rc,
         ],
         tool_choice="required",
-        provider_params={},
+        extra_params={},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)
@@ -495,7 +495,7 @@ def test_no_rules_triggered_when_no_conditions_match():
         model="gpt-4o",
         messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
         tool_choice="auto",
-        provider_params={},
+        extra_params={},
     )
 
     next_request, applied_rules = apply_llm_request_rules(request)

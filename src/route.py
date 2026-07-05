@@ -57,13 +57,10 @@ application = tornado.web.Application([
     (r"/config/frontend.json",                       configController.ConfigHandler),
     (r"/config/directories.json",                    configController.DirectoriesHandler),
 
-    # LLM Service Config (V12)
-    (r"/config/llm_services/list.json",              settingController.LlmServiceListHandler),
-    (r"/config/llm_services/create.json",            settingController.LlmServiceCreateHandler),
-    (r"/config/llm_services/test.json",              settingController.LlmServiceTestHandler),
-    (r"/config/llm_services/(\d+)/modify.json",      settingController.LlmServiceModifyHandler),
-    (r"/config/llm_services/(\d+)/delete.json",      settingController.LlmServiceDeleteHandler),
-    (r"/config/llm_services/(\d+)/set_default.json",  settingController.LlmServiceSetDefaultHandler),
+    # LLM Config (V24)
+    (r"/config/llm.json",                            settingController.LlmConfigHandler),
+    (r"/config/provider_types.json",                 settingController.ProviderTypesHandler),
+    (r"/config/llm_test.json",                       settingController.LlmTestHandler),
     (r"/config/language.json",                       settingController.LanguageHandler),
     (r"/config/skills/list.json",                   settingController.SkillListHandler),
     (r"/config/tools/list.json",                    settingController.ToolListHandler),

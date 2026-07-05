@@ -12,26 +12,29 @@ class ConfigHandler(BaseHandler):
         app_config = configUtil.get_app_config()
         setting = app_config.setting
 
-        # 提取可用模型列表
-        models = [
-            {
-                "name": s.name,
-                "model": s.model,
-                "enabled": s.enable,
-            }
-            for s in setting.llm_services
-        ]
-
         # 提取 driver 类型列表
         driver_types = [
             {"name": dt.name, "description": _get_driver_description(dt)}
             for dt in DriverType
         ]
 
+        # 构建模型槽位选项
+        dm = setting.default_models
+        model_slots = [
+            {"key": "primary", "value": dm.primary},
+            {"key": "lite", "value": dm.lite},
+            {"key": "advanced", "value": dm.advanced},
+            {"key": "vision", "value": dm.vision},
+        ]
+
+        # 上下文配置默认值（未设置时使用的值）
+        from util.configTypes import LlmContextConfig
+        context_config_defaults = LlmContextConfig().model_dump(mode="json")
+
         self.return_json({
-            "models": models,
             "driver_types": driver_types,
-            "default_model": setting.default_llm_server,
+            "model_slots": model_slots,
+            "context_config_defaults": context_config_defaults,
             "demo_mode": setting.demo_mode,
         })
 

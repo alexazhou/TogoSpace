@@ -60,12 +60,25 @@ class OpenaiApiRole(EnhanceEnum):
     TOOL = "tool"
 
 
-class LlmServiceType(EnhanceEnum):
-    # 配置文件中的 type 使用固定字符串（含连字符），不使用 auto()。
-    OPENAI_COMPATIBLE = "openai-compatible"
+class LlmProtocol(EnhanceEnum):
+    """LLM 协议类型 — value 用于 URL 查找等字符串场景，不使用 auto()。"""
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+
+
+class LlmProviderType(EnhanceEnum):
+    """LLM 提供商类型（公司/服务名） — value 用于 preset URL 查找，不使用 auto()。"""
+    ALIYUN = "aliyun"
+    ALIYUN_CODING = "aliyun_coding"
+    VOLCENGINE_CODING = "volcengine_coding"
+    OPENAI = "openai"
+    DEEPSEEK = "deepseek"
+    MIMO = "mimo"
+    MIMO_TOKEN_PLAN = "mimo_token_plan"
+    OPENCODE_GO = "opencode_go"
     ANTHROPIC = "anthropic"
     GOOGLE = "google"
-    DEEPSEEK = "deepseek"
+    OTHER = "other"
 
 
 class MessageBusTopic(EnhanceEnum):
