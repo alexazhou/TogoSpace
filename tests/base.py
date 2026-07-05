@@ -400,11 +400,12 @@ class ServiceTestCase:
             cfg.setting.db_path = db_path
             if cls.requires_mock_llm:
                 mock_port = _get_mock_llm_port()
-                for service in cfg.setting.llm_services:
-                    if service.type.name.lower() == "anthropic":
-                        service.base_url = get_mock_llm_anthropic_url(port=mock_port)
-                    else:
-                        service.base_url = get_mock_llm_api_url(port=mock_port)
+                for provider in cfg.setting.llm_providers:
+                    for protocol in ["openai", "anthropic"]:
+                        if protocol == "anthropic":
+                            provider.urls[protocol] = get_mock_llm_anthropic_url(port=mock_port)
+                        else:
+                            provider.urls[protocol] = get_mock_llm_api_url(port=mock_port)
             return cfg
 
         cls._config_patcher = mock.patch("util.configUtil.load", side_effect=patched_load)

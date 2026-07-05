@@ -52,8 +52,8 @@ class TestQuickInit(_ApiServiceCase):
                 assert resp.status == 200, f"quick_init failed: {data}"
             return resp.status, data
 
-    async def _list_services(self, client: aiohttp.ClientSession) -> dict:
-        async with client.get(f"{self.backend_base_url}/config/llm_services/list.json") as resp:
+    async def _list_providers(self, client: aiohttp.ClientSession) -> dict:
+        async with client.get(f"{self.backend_base_url}/config/llm.json") as resp:
             assert resp.status == 200
             return await resp.json()
 
@@ -94,7 +94,7 @@ class TestQuickInit(_ApiServiceCase):
         assert data["detail"]["model"] == "test-model"
 
     async def test_quick_init_adds_service(self):
-        """快速初始化后 llm_services 包含新服务。"""
+        """快速初始化后 llm_providers 包含新服务。"""
         async with aiohttp.ClientSession() as client:
             # 执行初始化
             await self._quick_init(client, {
@@ -104,17 +104,18 @@ class TestQuickInit(_ApiServiceCase):
             })
 
             # 验证服务列表
-            list_data = await self._list_services(client)
+            list_data = await self._list_providers(client)
 
-        services = list_data["llm_services"]
-        names = [s["name"] for s in services]
+        providers = list_data["llm_providers"]
+        names = [p["name"] for p in providers]
         assert "default" in names
 
-        default_svc = next(s for s in services if s["name"] == "default")
-        assert default_svc["base_url"] == "https://api.example.com/v1"
-        assert default_svc["model"] == "test-model-2"
-        assert default_svc["type"] == "openai-compatible"
-        assert default_svc["enable"] is True
+        default_p = next(p for p in providers if p["name"] == "default")
+        assert default_p["urls"]["openai"] == "https://api.example.com/v1"
+        assert len(default_p["models"]) == 1
+        assert default_p["models"][0]["name"] == "test-model-2"
+        assert default_p["type"] == "openai"
+        assert default_p["enable"] is True
 
     async def test_quick_init_accepts_extra_params(self):
         """快速初始化支持保存 extra_params。"""
@@ -128,15 +129,15 @@ class TestQuickInit(_ApiServiceCase):
                 },
             })
 
-            list_data = await self._list_services(client)
+            list_data = await self._list_providers(client)
 
-        default_svc = next(s for s in list_data["llm_services"] if s["name"] == "default")
-        assert default_svc["extra_params"] == {
+        default_p = next(p for p in list_data["llm_providers"] if p["name"] == "default")
+        assert default_p["models"][0]["extra_params"] == {
             "reasoning_effort": "high",
         }
 
     async def test_quick_init_sets_default(self):
-        """快速初始化后 default_llm_server 设为 'default'。"""
+        """快速初始化后 default_models 设为正确的值。"""
         async with aiohttp.ClientSession() as client:
             await self._quick_init(client, {
                 "base_url": "https://api.example.com/v1",
@@ -144,9 +145,9 @@ class TestQuickInit(_ApiServiceCase):
                 "model": "test-model-3",
             })
 
-            list_data = await self._list_services(client)
+            list_data = await self._list_providers(client)
 
-        assert list_data["default_llm_server"] == "default"
+        assert list_data["default_models"]["primary"] == "test-model-3@default"
 
     async def test_quick_init_updates_initialized(self):
         """快速初始化后系统状态变为 initialized: true，调度状态变为 RUNNING。"""
@@ -162,7 +163,7 @@ class TestQuickInit(_ApiServiceCase):
             after = await self._status(client)
 
         assert after["initialized"] is True
-        assert after["default_llm_server"] == "default"
+        assert after["default_llm_server"] == "init-model@default"
         assert after["schedule_state"] == "RUNNING"
 
     async def test_quick_init_invalid_url(self):
@@ -242,10 +243,10 @@ class TestQuickInit(_ApiServiceCase):
                 "model": "second-model",
             })
 
-            list_data = await self._list_services(client)
+            list_data = await self._list_providers(client)
 
         # 应只有一个 default 服务
-        defaults = [s for s in list_data["llm_services"] if s["name"] == "default"]
+        defaults = [p for p in list_data["llm_providers"] if p["name"] == "default"]
         assert len(defaults) == 1
-        assert defaults[0]["base_url"] == "https://api.second.com/v1"
-        assert defaults[0]["model"] == "second-model"
+        assert defaults[0]["urls"]["openai"] == "https://api.second.com/v1"
+        assert defaults[0]["models"][0]["name"] == "second-model"

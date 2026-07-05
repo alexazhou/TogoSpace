@@ -24,9 +24,9 @@ class TestConfigController(_ApiServiceCase):
                 assert resp.status == 200
                 data = await resp.json()
 
-        assert "models" in data
+        assert "model_slots" in data
         assert "driver_types" in data
-        assert "default_model" in data
+        assert "context_config_defaults" in data
         assert data["demo_mode"] == {
             "enabled": False,
             "freeze_data": True,
@@ -39,9 +39,8 @@ class TestConfigController(_ApiServiceCase):
         assert "name" in driver
         assert "description" in driver
 
-        # 验证 models 结构
-        assert len(data["models"]) >= 1
-        model = data["models"][0]
-        assert "name" in model
-        assert "model" in model
-        assert "enabled" in model
+        # 验证 model_slots 结构
+        assert len(data["model_slots"]) >= 1
+        slot = data["model_slots"][0]
+        assert "key" in slot
+        assert "value" in slot

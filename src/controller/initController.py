@@ -60,16 +60,20 @@ class QuickInitHandler(BaseHandler):
             )
             return
 
+        model_kwargs = {
+            "name": req.model,
+            "protocol": LlmProtocol.OPENAI,
+        }
+        if req.extra_params is not None:
+            model_kwargs["extra_params"] = req.extra_params
+
         new_provider = LlmProviderConfig(
             name="default",
             urls={"openai": req.base_url},
             api_key=req.api_key,
             type=req.type,
             models=[
-                LlmModelConfig(
-                    name=req.model,
-                    protocol=LlmProtocol.OPENAI,
-                )
+                LlmModelConfig(**model_kwargs)
             ]
         )
 

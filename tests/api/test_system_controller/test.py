@@ -53,7 +53,7 @@ class TestSystemStatus(_ApiServiceCase):
 
         assert data["initialized"] is True
         assert "default_llm_server" in data
-        assert data["default_llm_server"] == "mock"
+        assert data["default_llm_server"] == "mock-model@mock"
         assert "schedule_state" in data
         assert "not_running_reason" in data
         assert data["demo_mode"] is False
@@ -68,7 +68,7 @@ class TestSystemStatus(_ApiServiceCase):
             data = await self._status(client)
 
         assert data["initialized"] is True
-        assert data["default_llm_server"] == "mock"
+        assert data["default_llm_server"] == "mock-model@mock"
         # 未初始化时的 message 字段不应出现
         assert "message" not in data
 

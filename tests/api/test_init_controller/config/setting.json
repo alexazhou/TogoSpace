@@ -1,4 +1,10 @@
 {
-  "llm_services": [],
-  "default_llm_server": null
+  "llm_providers": [],
+  "default_models": {
+    "primary": "",
+    "lite": "",
+    "vision": "",
+    "advanced": ""
+  },
+  "version": "v2"
 }

@@ -62,29 +62,25 @@ class TestDemoModeController(_ApiServiceCase):
 
     async def test_llm_service_list_masks_sensitive_fields(self):
         async with aiohttp.ClientSession() as client:
-            async with client.get(f"{self.backend_base_url}/config/llm_services/list.json") as resp:
+            async with client.get(f"{self.backend_base_url}/config/llm.json") as resp:
                 assert resp.status == 200
                 data = await resp.json()
 
-        assert data["default_llm_server"] == "demo"
-        assert len(data["llm_services"]) == 1
-        service = data["llm_services"][0]
-        assert service["name"] == "demo"
-        assert service["api_key"] == ""
-        assert service["base_url"] == ""
-        assert service["extra_headers"] == {}
-        assert service["has_api_key"] is True
+        assert len(data["llm_providers"]) == 1
+        provider = data["llm_providers"][0]
+        assert provider["name"] == "demo"
+        assert provider["api_key"] == ""
+        assert provider["extra_headers"] == {}
+        assert provider["has_api_key"] is True
 
     async def test_write_endpoint_returns_400_in_demo_mode(self):
         async with aiohttp.ClientSession() as client:
             async with client.post(
-                f"{self.backend_base_url}/config/llm_services/create.json",
+                f"{self.backend_base_url}/config/llm.json",
                 json={
-                    "name": "blocked",
-                    "base_url": "http://127.0.0.1:9999/v1",
-                    "api_key": "key",
-                    "type": "openai-compatible",
-                    "model": "blocked-model",
+                    "llm_providers": [],
+                    "default_models": {},
+                    "context_config": {}
                 },
             ) as resp:
                 assert resp.status == 400

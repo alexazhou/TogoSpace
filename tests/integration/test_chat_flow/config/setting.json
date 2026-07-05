@@ -1,13 +1,26 @@
 {
-  "llm_services": [
+  "llm_providers": [
     {
       "name": "mock",
-      "enable": true,
-      "base_url": "http://127.0.0.1:19876/v1/chat/completions",
+      "type": "openai",
       "api_key": "mock-api-key",
-      "type": "openai-compatible",
-      "model": "mock-model"
+      "enable": true,
+      "urls": {
+        "openai": "http://127.0.0.1:19876/v1/chat/completions"
+      },
+      "models": [
+        {
+          "name": "mock-model",
+          "protocol": "openai"
+        }
+      ]
     }
   ],
-  "default_llm_server": "mock"
+  "default_models": {
+    "primary": "mock-model@mock",
+    "lite": "mock-model@mock",
+    "vision": "",
+    "advanced": ""
+  },
+  "version": "v2"
 }

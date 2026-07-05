@@ -5,18 +5,31 @@
     "freeze_data": true,
     "hide_sensitive_info": true
   },
-  "llm_services": [
+  "llm_providers": [
     {
       "name": "demo",
-      "enable": true,
-      "base_url": "http://127.0.0.1:19876/v1/chat/completions",
+      "type": "openai",
       "api_key": "demo-api-key",
-      "type": "openai-compatible",
-      "model": "demo-model",
+      "enable": true,
+      "urls": {
+        "openai": "http://127.0.0.1:19876/v1/chat/completions"
+      },
+      "models": [
+        {
+          "name": "demo-model",
+          "protocol": "openai"
+        }
+      ],
       "extra_headers": {
         "X-Test": "demo"
       }
     }
   ],
-  "default_llm_server": "demo"
+  "default_models": {
+    "primary": "demo-model@demo",
+    "lite": "demo-model@demo",
+    "vision": "",
+    "advanced": ""
+  },
+  "version": "v2"
 }
