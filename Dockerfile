@@ -126,4 +126,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # 启动命令（可通过 TOGO_PORT 环境变量覆盖端口）
 ENV TOGO_PORT=8180
 WORKDIR ${TOGOSPACE_HOME}/src
-CMD ../.venv/bin/python3 backend_main.py --config-dir /storage --port ${TOGO_PORT}
+CMD rm -f ../run/backend.pid && ../.venv/bin/python3 backend_main.py --config-dir /storage --port ${TOGO_PORT}
