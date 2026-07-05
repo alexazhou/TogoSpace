@@ -12,18 +12,6 @@ class ConfigHandler(BaseHandler):
         app_config = configUtil.get_app_config()
         setting = app_config.setting
 
-        # 提取可用模型列表（从 llm_providers 扁平化）
-        models = []
-        for provider in setting.llm_providers:
-            if not provider.enable:
-                continue
-            for m in provider.models:
-                models.append({
-                    "name": provider.name,
-                    "model": m.name,
-                    "enabled": True,
-                })
-
         # 提取 driver 类型列表
         driver_types = [
             {"name": dt.name, "description": _get_driver_description(dt)}
@@ -40,9 +28,7 @@ class ConfigHandler(BaseHandler):
         ]
 
         self.return_json({
-            "models": models,
             "driver_types": driver_types,
-            "default_model": setting.default_models.primary,
             "model_slots": model_slots,
             "demo_mode": setting.demo_mode,
         })
