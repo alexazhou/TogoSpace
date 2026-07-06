@@ -85,12 +85,14 @@ docker pull ghcr.io/alexazhou/togospace:latest
 # /path/to/your/storage is the directory where TogoSpace data will be stored
 docker run \
   --name togospace \
-  -p 8180:8180 \
+  -p 7180:7180 \
   -v /path/to/your/storage:/storage \
   ghcr.io/alexazhou/togospace:latest
 
-# Access the Web console at http://localhost:8180
+# Access the Web console at http://localhost:7180
 ```
+
+> 📖 For more Docker configuration (custom config, environment variables, health checks, etc.), see the [Docker Deployment Guide](docs/manual/DOCKER.md).
 
 ---
 

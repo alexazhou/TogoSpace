@@ -85,12 +85,14 @@ docker pull ghcr.io/alexazhou/togospace:latest
 # /path/to/your/storage 是你想要存放 TogoSpace 数据的目录
 docker run \
   --name togospace \
-  -p 8180:8180 \
+  -p 7180:7180 \
   -v /path/to/your/storage:/storage \
   ghcr.io/alexazhou/togospace:latest
 
-# 在浏览器打开 http://localhost:8180 访问控制台
+# 在浏览器打开 http://localhost:7180 访问控制台
 ```
+
+> 📖 更多 Docker 配置（自定义配置、环境变量、健康检查等）请参考 [Docker 部署指南](docs/manual/DOCKER.md)。
 
 ---
 
