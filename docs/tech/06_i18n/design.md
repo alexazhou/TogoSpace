@@ -320,6 +320,25 @@ const activeTeamName = computed(() => (
 </template>
 ```
 
+#### Web 前端不需要 i18n 的内容
+
+i18n 只处理面向用户的自然语言文案。以下内容应保持原始值，不写入 locale 文件，也不要通过 `t()` 渲染：
+
+| 类型 | 示例 | 说明 |
+|------|------|------|
+| 模型、协议、厂商等稳定名称 | `GPT-5.4`、`gpt-5.4-mini`、`OpenAI`、`Anthropic`、`DashScope` | 这是产品名、协议名或用户配置的模型标识，应原样展示，方便和 API 文档、日志、配置文件对应 |
+| API enum / 配置枚举值 | `minimal`、`low`、`medium`、`high`、`xhigh`、`none` | 这些值会写入请求参数，展示时也应保持 API 原始值 |
+| JSON key / path / header 名称 | `reasoning.effort`、`extra_body`、`X-Custom-Header`、`Authorization` | 这是配置结构或协议字段，不属于自然语言文案 |
+| 用户或外部系统输入 | 用户填写的 Agent 名称、Room 名称、自定义模型名、自定义请求头 | 除非该数据本身提供了 `i18n` 字段，否则前端不主动翻译 |
+| 稳定业务标识 | `name`、`id`、`provider`、`protocol` | 用于引用、调试、持久化或接口联动，不随语言切换变化 |
+
+实现约定：
+
+1. 只对按钮、标题、提示、说明、错误消息等自然语言界面文案使用 `t()`。
+2. 对模型名、API enum、JSON 字段、Header 名称等原始值，使用 `displayName`、`modelName`、`value` 等字段名直接渲染。
+3. 下拉选项如果写入的是 API enum，展示 label 默认也使用原始 enum 值，不额外增加翻译 key。
+4. 配置编辑器中的可视化配置只翻译周边说明，例如“启用思考”“思考强度”；实际写入 JSON 的 key 和 value 保持原样。
+
 ### 3.5 语言切换机制
 
 #### 后端（配置级别）
