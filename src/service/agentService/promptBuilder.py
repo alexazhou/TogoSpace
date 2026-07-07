@@ -56,7 +56,7 @@ def build_turn_begin_prompt(room_name: str, messages: list[tuple[str, str]]) -> 
     yaml_block = _build_yaml_room_block(room_name, messages)
     return (
         f"当前轮到你行动，新消息如下:\n\n"
-        f"{yaml_block}\n\n"
+        f"```yaml\n{yaml_block}\n```\n\n"
         f"{TURN_CONTEXT_SUFFIX}"
     )
 
@@ -95,7 +95,7 @@ def build_turn_update_prompt(
     yaml_block = _build_yaml_room_block(room_name, filtered)
     return (
         f"房间出现了新的补充信息，请在当前工作过程中参考：\n\n"
-        f"{yaml_block}"
+        f"```yaml\n{yaml_block}\n```"
     )
 
 
