@@ -7,7 +7,7 @@ from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtScheculeTaskManager
 from service.agentService.toolRegistry import validate_tool_allow_specs
 from model.dbModel.gtAgent import GtAgent
-from service import teamService, agentService, taskService
+from service import teamService, agentService, taskService, roomService
 from util import assertUtil
 
 
@@ -315,4 +315,20 @@ class AgentModifyPropertiesHandler(BaseHandler):
         await agentService.hot_reload_agent(agent_id)
 
         self.return_json(await _build_agent_detail_payload(agent))
+
+
+class AgentControlRoomHandler(BaseHandler):
+    """GET /agents/<agent_id>/control_room.json - 获取（或创建）指定 Agent 的私聊控制房间"""
+
+    async def get(self, agent_id_str: str) -> None:
+        agent_id = int(agent_id_str)
+        agent = await gtAgentManager.get_agent_by_id(agent_id)
+        assertUtil.assertNotNull(agent, error_message=f"Agent ID '{agent_id}' not found", error_code="agent_not_found")
+        
+        room, created = await roomService.get_or_create_control_room(agent.team_id, agent_id)
+        
+        self.return_json({
+            "room_id": room.room_id,
+            "created": created,
+        })
 

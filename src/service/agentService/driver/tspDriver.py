@@ -20,7 +20,7 @@ from util import llmApiUtil
 from .base import AgentDriver, AgentTurnSetup
 
 logger = logging.getLogger(__name__)
-_DEFAULT_REQUEST_TIMEOUT_SEC = 65
+_DEFAULT_REQUEST_TIMEOUT_SEC = 190
 _RUN_CHAT_TURN_MAX_RETRIES = 3
 _RUN_CHAT_TURN_HINT = (
     "你必须通过调用工具来行动。如果你不需要发言，或者已经完成了所有行动，"

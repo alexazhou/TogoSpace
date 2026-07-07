@@ -88,6 +88,7 @@ application = tornado.web.Application([
     (r"/agents/(\d+)/stop.json",                    agentController.AgentStopHandler),
     (r"/agents/(\d+)/clear_data.json",              agentController.AgentClearDataHandler),
     (r"/agents/(\d+)/modify_properties.json",       agentController.AgentModifyPropertiesHandler),
+    (r"/agents/(\d+)/control_room.json",            agentController.AgentControlRoomHandler),
     (r"/agents/(\d+)/supervise.json",               superviseController.AgentSuperviseHandler),
     (r"/teams/(\d+)/agents/save.json",              agentController.TeamAgentsSaveHandler),
     (r"/teams/(\d+)/agents/([^/]+).json",           agentController.AgentDetailHandler),

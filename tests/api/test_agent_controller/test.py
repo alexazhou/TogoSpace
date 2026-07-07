@@ -413,3 +413,50 @@ class TestAgentSupervise(_ApiServiceCase):
                 assert resp.status != 200
                 data = await resp.json()
         assert data.get("error_code") == "invalid_request"
+
+
+class TestAgentControlRoom(_ApiServiceCase):
+    """测试 GET /agents/<id>/control_room.json 接口。"""
+
+    requires_backend = True
+    requires_mock_llm = True
+
+    async def _get_team_id(self, team_name: str) -> int:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/teams/list.json") as resp:
+                data = await resp.json()
+        team = next(t for t in data["teams"] if t["name"] == team_name)
+        return team["id"]
+
+    async def _get_agent_id(self, team_id: int, agent_name: str) -> int:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
+                data = await resp.json()
+        agent = next(a for a in data["agents"] if a["name"] == agent_name)
+        return agent["id"]
+
+    async def test_get_control_room_creates(self):
+        """调用接口应返回控制房间，如果不存在则自动创建。"""
+        team_id = await self._get_team_id("e2e")
+        alice_id = await self._get_agent_id(team_id, "alice")
+
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/agents/{alice_id}/control_room.json") as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    print(f"Error {resp.status}: {text}")
+                assert resp.status == 200
+                data = await resp.json()
+
+        assert "room_id" in data
+        assert isinstance(data["room_id"], int)
+        assert "created" in data
+
+    async def test_get_control_room_agent_not_found(self):
+        """不存在的 agent_id 应返回错误。"""
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/agents/999999/control_room.json") as resp:
+                assert resp.status != 200
+                data = await resp.json()
+        assert data.get("error_code") == "agent_not_found"
+
