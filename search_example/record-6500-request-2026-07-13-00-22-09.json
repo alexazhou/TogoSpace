@@ -1,0 +1,47 @@
+{
+  "model": "deepseek-v4-flash",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Perform a web search for the query: 小米 今天 新闻"
+        }
+      ]
+    }
+  ],
+  "system": [
+    {
+      "type": "text",
+      "text": "x-anthropic-billing-header: cc_version=2.1.181.275; cc_entrypoint=cli;"
+    },
+    {
+      "type": "text",
+      "text": "You are Claude Code, Anthropic's official CLI for Claude."
+    },
+    {
+      "type": "text",
+      "text": "You are an assistant for performing a web search tool use"
+    }
+  ],
+  "tools": [
+    {
+      "type": "web_search_20250305",
+      "name": "web_search",
+      "max_uses": 8
+    }
+  ],
+  "tool_choice": {
+    "type": "tool",
+    "name": "web_search"
+  },
+  "metadata": {
+    "user_id": "{\"device_id\":\"13ef25db48c2e9f606eb003288a83575a910b66ac89ff753777b3b3b075e7b25\",\"account_uuid\":\"\",\"session_id\":\"a9f831ef-b409-4c88-a2f1-66805a6ed5a9\"}"
+  },
+  "max_tokens": 32000,
+  "output_config": {
+    "effort": "high"
+  },
+  "stream": true
+}

@@ -3,7 +3,7 @@ import os
 
 import tornado.web
 
-from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController, settingController, systemController, initController, superviseController
+from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController, settingController, systemController, initController, superviseController, thirdPartyController
 
 import sys as _sys
 if getattr(_sys, "frozen", False):
@@ -64,6 +64,8 @@ application = tornado.web.Application([
     (r"/config/language.json",                       settingController.LanguageHandler),
     (r"/config/skills/list.json",                   settingController.SkillListHandler),
     (r"/config/tools/list.json",                    settingController.ToolListHandler),
+    (r"/config/third_party_services.json",           thirdPartyController.ThirdPartyServicesConfigHandler),
+    (r"/config/third_party_services/deepseek/test.json", thirdPartyController.DeepSeekSearchTestHandler),
 
     # System Status & Quick Init (V13)
     (r"/system/status.json",                         systemController.SystemStatusHandler),

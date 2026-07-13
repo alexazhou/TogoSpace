@@ -31,6 +31,7 @@ from .tools import (
     send_chat_msg,
     update_task,
     wake_up_agent,
+    web_search,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ def load_func_tools() -> dict[str, FuncTool]:
     global _func_tools
     _registry: dict[str, Any] = {
         "get_time": get_time,
+        "web_search": web_search,
         "send_chat_msg": send_chat_msg,
         "finish_action": finish_action,
         "get_dept_info": get_dept_info,

@@ -212,6 +212,17 @@ class AuthConfig(BaseModel):
     token: str = ""
 
 
+class DeepSeekThirdPartyServiceConfig(BaseModel):
+    """DeepSeek 三方服务配置。"""
+    enabled: bool = False
+    api_key: str = ""
+
+
+class ThirdPartyServicesConfig(BaseModel):
+    """三方服务集成配置。"""
+    deepseek: DeepSeekThirdPartyServiceConfig = Field(default_factory=DeepSeekThirdPartyServiceConfig)
+
+
 class DevConfig(BaseModel):
     """开发配置，用于调试和测试。"""
     model_config = ConfigDict(extra="ignore")
@@ -227,6 +238,7 @@ class SettingConfig(BaseModel):
     development_mode: bool = False  # 前端开发模式开关，影响错误提示等交互行为
     demo_mode: DemoModeConfig = Field(default_factory=DemoModeConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    third_party_services: ThirdPartyServicesConfig = Field(default_factory=ThirdPartyServicesConfig)
     llm_providers: List[LlmProviderConfig] = Field(default_factory=list)
     default_models: DefaultModelSlots = Field(default_factory=DefaultModelSlots)
     context_config: LlmContextConfig = Field(default_factory=LlmContextConfig)

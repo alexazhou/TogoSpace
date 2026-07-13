@@ -13,6 +13,7 @@ ToolHandler = Callable[[str, ToolCallContext], Awaitable[dict[str, Any]]]
 CATEGORY_CONFIG: dict[str, ToolCategory] = {
     # Local tools
     "get_time": ToolCategory.BASIC,
+    "web_search": ToolCategory.READ,
     "get_dept_info": ToolCategory.BASIC,
     "get_room_info": ToolCategory.BASIC,
     "get_agent_info": ToolCategory.BASIC,

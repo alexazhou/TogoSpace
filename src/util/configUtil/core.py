@@ -264,6 +264,7 @@ def _save_setting_to_file() -> None:
     raw["language"] = setting.language
     raw["development_mode"] = setting.development_mode
     raw["auth"] = setting.auth.model_dump(exclude_defaults=True, mode="json")
+    raw["third_party_services"] = setting.third_party_services.model_dump(exclude_defaults=True, mode="json")
 
     # 清理 null 值后原子写入
     from util import jsonUtil
