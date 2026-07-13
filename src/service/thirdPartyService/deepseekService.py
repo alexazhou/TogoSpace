@@ -8,8 +8,9 @@ import aiohttp
 import certifi
 
 from util import configUtil
+from . import ThirdPartyService
 
-DEEPSEEK_SERVICE_NAME = "deepseek"
+DEEPSEEK_SERVICE_NAME = ThirdPartyService.DEEPSEEK
 DEEPSEEK_SEARCH_URL = "https://api.deepseek.com/anthropic/v1/messages"
 DEEPSEEK_SEARCH_MODEL = "deepseek-v4-flash"
 DEEPSEEK_WEB_SEARCH_TOOL_TYPE = "web_search_20250305"

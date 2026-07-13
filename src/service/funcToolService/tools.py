@@ -14,6 +14,7 @@ from service.roomService import ToolCallContext
 import service.roomService as roomService
 import service.skillService as skillService
 import service.thirdPartyService as thirdPartyService
+from service.thirdPartyService import ThirdPartyService
 from service.agentService.toolRegistry import validate_tool_allow_specs
 from util import configUtil, i18nUtil
 
@@ -52,7 +53,7 @@ async def web_search(query: str, _context: ToolCallContext = None) -> dict:
     Args:
         query: 要搜索的关键词或问题。
     """
-    return await thirdPartyService.search("deepseek", query)
+    return await thirdPartyService.search(ThirdPartyService.DEEPSEEK, query)
 
 
 def _require_team_context(_context: ToolCallContext | None) -> tuple[bool, int]:
