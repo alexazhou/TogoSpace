@@ -115,7 +115,7 @@ async def test_third_party_search_dispatches_deepseek(monkeypatch) -> None:
     search_mock = AsyncMock(return_value={"success": True, "service": "deepseek"})
     monkeypatch.setattr(deepseekService, "search", search_mock)
 
-    result = await thirdPartyService.search("deepseek", "小米 今天 新闻")
+    result = await thirdPartyService.search(ThirdPartyServiceName.DEEPSEEK, "小米 今天 新闻")
 
     assert result["success"] is True
     search_mock.assert_awaited_once_with("小米 今天 新闻")

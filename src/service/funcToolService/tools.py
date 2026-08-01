@@ -15,6 +15,7 @@ import service.roomService as roomService
 import service.skillService as skillService
 import service.thirdPartyService as thirdPartyService
 from service.agentService.toolRegistry import validate_tool_allow_specs
+from service.thirdPartyService.result import ThirdPartySearchResult
 from util import configUtil, i18nUtil
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ def get_time(timezone: Optional[str] = None) -> dict:
         return {"success": True, "message": f"当前本地时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"}
 
 
-async def web_search(query: str, _context: ToolCallContext = None) -> dict:
+async def web_search(query: str, _context: ToolCallContext = None) -> ThirdPartySearchResult:
     """通过已配置的三方服务执行网页搜索，并根据 API 返回结果自动提取来源链接。
 
     Args:

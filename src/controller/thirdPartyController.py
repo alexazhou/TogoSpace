@@ -50,11 +50,12 @@ class ThirdPartyServicesConfigHandler(BaseHandler):
             self.return_with_error(error_code="validation_error", error_desc=str(e))
             return
 
-        for service_name, service_config in (
-            ("DeepSeek", services.deepseek),
-            ("Xiaomi MiMo", services.xiaomi_mimo),
+        for service_name, enabled, api_key in (
+            ("DeepSeek", services.deepseek.enabled, services.deepseek.api_key),
+            ("Xiaomi MiMo", services.xiaomi_mimo.enabled, services.xiaomi_mimo.api_key),
         ):
-            if service_config.enabled and not service_config.api_key.strip():
+
+            if enabled and not api_key.strip():
                 self.return_with_error(
                     error_code="validation_error",
                     error_desc=f"启用 {service_name} 搜索服务时必须配置 API Key",
