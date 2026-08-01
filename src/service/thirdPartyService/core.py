@@ -13,11 +13,26 @@ def get_default_search_service() -> ThirdPartyServiceName:
 
 
 async def search(service_name: ThirdPartyServiceName, query: str) -> ThirdPartySearchResult:
-
     if service_name == ThirdPartyServiceName.DEEPSEEK:
+        services = configUtil.get_app_config().setting.third_party_services
+
+        if not services.deepseek.enabled:
+            return ThirdPartySearchResult.failure(
+                ThirdPartyServiceName.DEEPSEEK.value,
+                "DeepSeek 搜索服务未启用，请在后台配置三方服务后重试",
+            )
+
         return await deepseekService.search(query)
 
     if service_name == ThirdPartyServiceName.XIAOMI_MIMO:
+        services = configUtil.get_app_config().setting.third_party_services
+
+        if not services.xiaomi_mimo.enabled:
+            return ThirdPartySearchResult.failure(
+                ThirdPartyServiceName.XIAOMI_MIMO.value,
+                "Xiaomi MiMo 搜索服务未启用，请在后台配置三方服务后重试",
+            )
+
         return await xiaomiMimoService.search(query)
 
     return ThirdPartySearchResult.failure(

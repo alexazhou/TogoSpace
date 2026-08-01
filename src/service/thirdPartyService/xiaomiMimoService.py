@@ -139,12 +139,8 @@ async def _search_with_api_key(api_key: str, query: str) -> ThirdPartySearchResu
 
 
 async def search(query: str) -> ThirdPartySearchResult:
-    config = configUtil.get_app_config().setting.third_party_services.xiaomi_mimo
-
-    if not config.enabled:
-        return ThirdPartySearchResult.failure(MIMO_SERVICE_NAME, "Xiaomi MiMo 搜索服务未启用")
-
-    return await _search_with_api_key(config.api_key, query)
+    api_key = configUtil.get_app_config().setting.third_party_services.xiaomi_mimo.api_key
+    return await _search_with_api_key(api_key, query)
 
 
 async def test_search(api_key: str, query: str) -> ThirdPartySearchResult:

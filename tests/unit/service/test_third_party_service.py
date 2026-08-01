@@ -114,6 +114,14 @@ def test_mimo_extracts_content_and_annotations_as_sources() -> None:
 async def test_third_party_search_dispatches_deepseek(monkeypatch) -> None:
     search_mock = AsyncMock(return_value={"success": True, "service": "deepseek"})
     monkeypatch.setattr(deepseekService, "search", search_mock)
+    app_config = SimpleNamespace(
+        setting=SimpleNamespace(
+            third_party_services=ThirdPartyServicesConfig(
+                deepseek=DeepSeekThirdPartyServiceConfig(enabled=True, api_key="sk-test"),
+            ),
+        ),
+    )
+    monkeypatch.setattr(configUtil, "get_app_config", lambda: app_config)
 
     result = await thirdPartyService.search(ThirdPartyServiceName.DEEPSEEK, "小米 今天 新闻")
 
@@ -125,6 +133,14 @@ async def test_third_party_search_dispatches_deepseek(monkeypatch) -> None:
 async def test_third_party_search_dispatches_mimo(monkeypatch) -> None:
     search_mock = AsyncMock(return_value={"success": True, "service": "xiaomi_mimo"})
     monkeypatch.setattr(xiaomiMimoService, "search", search_mock)
+    app_config = SimpleNamespace(
+        setting=SimpleNamespace(
+            third_party_services=ThirdPartyServicesConfig(
+                xiaomi_mimo=XiaomiMiMoThirdPartyServiceConfig(enabled=True, api_key="sk-test"),
+            ),
+        ),
+    )
+    monkeypatch.setattr(configUtil, "get_app_config", lambda: app_config)
 
     result = await thirdPartyService.search(ThirdPartyServiceName.XIAOMI_MIMO, "小米 今天 新闻")
 
@@ -157,10 +173,10 @@ async def test_deepseek_search_requires_enabled_service(monkeypatch) -> None:
     )
     monkeypatch.setattr(configUtil, "get_app_config", lambda: app_config)
 
-    result = await deepseekService.search("query")
+    result = await thirdPartyService.search(ThirdPartyServiceName.DEEPSEEK, "query")
 
     assert result.success is False
-    assert result.error_message == "DeepSeek 搜索服务未启用"
+    assert result.error_message == "DeepSeek 搜索服务未启用，请在后台配置三方服务后重试"
     assert "query" not in result.model_dump(mode="json")
 
 
@@ -175,10 +191,10 @@ async def test_mimo_search_requires_enabled_service(monkeypatch) -> None:
     )
     monkeypatch.setattr(configUtil, "get_app_config", lambda: app_config)
 
-    result = await xiaomiMimoService.search("query")
+    result = await thirdPartyService.search(ThirdPartyServiceName.XIAOMI_MIMO, "query")
 
     assert result.success is False
-    assert result.error_message == "Xiaomi MiMo 搜索服务未启用"
+    assert result.error_message == "Xiaomi MiMo 搜索服务未启用，请在后台配置三方服务后重试"
     assert "query" not in result.model_dump(mode="json")
 
 
