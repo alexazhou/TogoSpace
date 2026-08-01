@@ -1,5 +1,6 @@
 litellm==1.83.0
 aiohttp~=3.13.3
+jsonpath-ng~=1.7.0
 async-timeout~=5.0.1
 aiosqlite==0.20.0
 certifi~=2026.2.25

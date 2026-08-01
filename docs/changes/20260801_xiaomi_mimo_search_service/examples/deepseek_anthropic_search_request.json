@@ -1,0 +1,36 @@
+{
+  "model": "deepseek-v4-flash",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Perform a web search for the query: 今天2026年8月1日，天气预报"
+        }
+      ]
+    }
+  ],
+  "system": [
+    {
+      "type": "text",
+      "text": "You are an assistant for performing a web search tool use"
+    }
+  ],
+  "tools": [
+    {
+      "type": "web_search_20250305",
+      "name": "web_search",
+      "max_uses": 8
+    }
+  ],
+  "tool_choice": {
+    "type": "tool",
+    "name": "web_search"
+  },
+  "max_tokens": 32000,
+  "output_config": {
+    "effort": "high"
+  },
+  "stream": false
+}

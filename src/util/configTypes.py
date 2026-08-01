@@ -2,7 +2,7 @@ import os
 from typing import Any, List, Optional
 
 import appPaths
-from constants import DriverType, LlmProtocol, LlmProviderType
+from constants import DriverType, LlmProtocol, LlmProviderType, ThirdPartyServiceName
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 # 多语言字段类型
@@ -212,6 +212,30 @@ class AuthConfig(BaseModel):
     token: str = ""
 
 
+class DeepSeekThirdPartyServiceConfig(BaseModel):
+    """DeepSeek 三方服务配置。"""
+    enabled: bool = False
+    api_key: str = ""
+
+
+class XiaomiMiMoThirdPartyServiceConfig(BaseModel):
+    """Xiaomi MiMo 三方服务配置。"""
+    enabled: bool = False
+    api_key: str = ""
+
+
+class DefaultServiceConfig(BaseModel):
+    """各能力的默认三方服务配置。"""
+    search: ThirdPartyServiceName = ThirdPartyServiceName.DEEPSEEK
+
+
+class ThirdPartyServicesConfig(BaseModel):
+    """三方服务集成配置。"""
+    default_service: DefaultServiceConfig = Field(default_factory=DefaultServiceConfig)
+    deepseek: DeepSeekThirdPartyServiceConfig = Field(default_factory=DeepSeekThirdPartyServiceConfig)
+    xiaomi_mimo: XiaomiMiMoThirdPartyServiceConfig = Field(default_factory=XiaomiMiMoThirdPartyServiceConfig)
+
+
 class DevConfig(BaseModel):
     """开发配置，用于调试和测试。"""
     model_config = ConfigDict(extra="ignore")
@@ -227,6 +251,7 @@ class SettingConfig(BaseModel):
     development_mode: bool = False  # 前端开发模式开关，影响错误提示等交互行为
     demo_mode: DemoModeConfig = Field(default_factory=DemoModeConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    third_party_services: ThirdPartyServicesConfig = Field(default_factory=ThirdPartyServicesConfig)
     llm_providers: List[LlmProviderConfig] = Field(default_factory=list)
     default_models: DefaultModelSlots = Field(default_factory=DefaultModelSlots)
     context_config: LlmContextConfig = Field(default_factory=LlmContextConfig)

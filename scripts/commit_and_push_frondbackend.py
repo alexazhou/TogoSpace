@@ -191,11 +191,12 @@ def report_sync_state(repo_root: Path, frontend: Path) -> None:
 
     # 3. 后端主仓库是否有未推送到远端的提交
     try:
-        origin_recorded = get_submodule_recorded_sha(repo_root, "origin/master", "frontend")
+        backend_remote, backend_branch = get_tracking_target(repo_root)
+        origin_recorded = get_submodule_recorded_sha(repo_root, f"{backend_remote}/{backend_branch}", "frontend")
         recorded = backend_recorded or get_submodule_recorded_sha(repo_root, "HEAD", "frontend")
         if recorded != origin_recorded:
             issues.append(
-                f"后端主仓库有未推送的指针提交（本地: {recorded[:12]}，远端: {origin_recorded[:12]}）"
+                f"后端主仓库有未推送的指针提交（本地: {recorded[:12]}，远端: {backend_remote}/{backend_branch}: {origin_recorded[:12]}）"
             )
     except Exception:
         pass

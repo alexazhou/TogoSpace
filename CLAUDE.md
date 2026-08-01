@@ -96,9 +96,10 @@ TogoSpace/
 **提交规范**
 - 开发完成后不要自动提交，等待用户明确要求「提交」或「commit」后再执行
 - commit message 不要加 `Co-Authored-By` 行，不要署名 AI Agent
+- commit message 统一使用英文
 
 **前端子模块**
-- 在 `frontend/` 子模块内提交时，必须先切换到 master 分支，禁止在 detached HEAD 状态下提交
+- 在 `frontend/` 子模块内提交时，必须先切换到有效分支，禁止在 detached HEAD 状态下提交
 - 提交后端时若前端有新 commit，需同步更新子模块指针：`git add frontend && git commit`
 
 **冲突处理**

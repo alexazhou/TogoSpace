@@ -3,6 +3,8 @@ import json
 import logging
 from typing import Any, Iterable, Optional
 
+from pydantic import BaseModel
+
 from constants import ToolCategory
 from util import llmApiUtil
 from service.roomService import ToolCallContext
@@ -31,6 +33,7 @@ from .tools import (
     send_chat_msg,
     update_task,
     wake_up_agent,
+    web_search,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,6 +51,7 @@ def load_func_tools() -> dict[str, FuncTool]:
     global _func_tools
     _registry: dict[str, Any] = {
         "get_time": get_time,
+        "web_search": web_search,
         "send_chat_msg": send_chat_msg,
         "finish_action": finish_action,
         "get_dept_info": get_dept_info,
@@ -140,7 +144,9 @@ async def run_tool_call(
         if inspect.isawaitable(result):
             result = await result
 
-        if not isinstance(result, dict):
+        if isinstance(result, BaseModel):
+            result = result.model_dump(mode="json")
+        elif not isinstance(result, dict):
             result = {"success": True, "result": result}
 
         logger.info(f"函数执行结果: {result}")
