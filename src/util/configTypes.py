@@ -2,7 +2,7 @@ import os
 from typing import Any, List, Optional
 
 import appPaths
-from constants import DriverType, LlmProtocol, LlmProviderType
+from constants import DriverType, LlmProtocol, LlmProviderType, ThirdPartyServiceName
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 # 多语言字段类型
@@ -218,9 +218,22 @@ class DeepSeekThirdPartyServiceConfig(BaseModel):
     api_key: str = ""
 
 
+class XiaomiMiMoThirdPartyServiceConfig(BaseModel):
+    """Xiaomi MiMo 三方服务配置。"""
+    enabled: bool = False
+    api_key: str = ""
+
+
+class DefaultServiceConfig(BaseModel):
+    """各能力的默认三方服务配置。"""
+    search: ThirdPartyServiceName = ThirdPartyServiceName.DEEPSEEK
+
+
 class ThirdPartyServicesConfig(BaseModel):
     """三方服务集成配置。"""
+    default_service: DefaultServiceConfig = Field(default_factory=DefaultServiceConfig)
     deepseek: DeepSeekThirdPartyServiceConfig = Field(default_factory=DeepSeekThirdPartyServiceConfig)
+    xiaomi_mimo: XiaomiMiMoThirdPartyServiceConfig = Field(default_factory=XiaomiMiMoThirdPartyServiceConfig)
 
 
 class DevConfig(BaseModel):

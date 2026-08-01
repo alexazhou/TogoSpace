@@ -152,9 +152,10 @@ class ToolCategory(EnhanceEnum):
         return cls.value_of(category_name)
 
 
-class ThirdPartyService(EnhanceEnum):
+class ThirdPartyServiceName(EnhanceEnum):
     """三方搜索服务名称枚举。"""
     DEEPSEEK = "deepseek"
+    XIAOMI_MIMO = "xiaomi_mimo"
 
 
 class SystemConfigKey(EnhanceEnum):

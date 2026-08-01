@@ -6,7 +6,14 @@
   "bind_host": "0.0.0.0",
   "bind_port": 8180,
   "third_party_services": {
+    "default_service": {
+      "search": "deepseek"
+    },
     "deepseek": {
+      "enabled": false,
+      "api_key": ""
+    },
+    "xiaomi_mimo": {
       "enabled": false,
       "api_key": ""
     }

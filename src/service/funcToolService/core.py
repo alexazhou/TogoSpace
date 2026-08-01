@@ -3,6 +3,8 @@ import json
 import logging
 from typing import Any, Iterable, Optional
 
+from pydantic import BaseModel
+
 from constants import ToolCategory
 from util import llmApiUtil
 from service.roomService import ToolCallContext
@@ -142,7 +144,9 @@ async def run_tool_call(
         if inspect.isawaitable(result):
             result = await result
 
-        if not isinstance(result, dict):
+        if isinstance(result, BaseModel):
+            result = result.model_dump(mode="json")
+        elif not isinstance(result, dict):
             result = {"success": True, "result": result}
 
         logger.info(f"函数执行结果: {result}")

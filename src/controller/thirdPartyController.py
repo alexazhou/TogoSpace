@@ -4,9 +4,9 @@ import logging
 from pydantic import BaseModel, ValidationError
 
 from controller.baseController import BaseHandler
-from service.thirdPartyService import deepseekService
+from service.thirdPartyService import deepseekService, xiaomiMimoService
 from util import configUtil, jsonUtil
-from util.configTypes import DeepSeekThirdPartyServiceConfig, ThirdPartyServicesConfig
+from util.configTypes import ThirdPartyServicesConfig
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,13 @@ class ThirdPartyServicesPayload(BaseModel):
 class DeepSeekSearchTestRequest(BaseModel):
     enabled: bool = True
     api_key: str = ""
-    query: str = deepseekService.DEFAULT_SEARCH_QUERY
+    query: str
+
+
+class XiaomiMiMoSearchTestRequest(BaseModel):
+    enabled: bool = True
+    api_key: str = ""
+    query: str
 
 
 class ThirdPartyServicesConfigHandler(BaseHandler):
@@ -27,10 +33,9 @@ class ThirdPartyServicesConfigHandler(BaseHandler):
     async def get(self) -> None:
         setting = configUtil.get_app_config().setting
         services = setting.third_party_services.model_dump(mode="json")
-        deepseek = services.setdefault("deepseek", {})
-        deepseek["has_api_key"] = bool(setting.third_party_services.deepseek.api_key)
         if setting.demo_mode.hide_sensitive:
-            deepseek["api_key"] = ""
+            services["deepseek"]["api_key"] = ""
+            services["xiaomi_mimo"]["api_key"] = ""
 
         self.return_json({
             "third_party_services": services,
@@ -45,6 +50,17 @@ class ThirdPartyServicesConfigHandler(BaseHandler):
             self.return_with_error(error_code="validation_error", error_desc=str(e))
             return
 
+        for service_name, service_config in (
+            ("DeepSeek", services.deepseek),
+            ("Xiaomi MiMo", services.xiaomi_mimo),
+        ):
+            if service_config.enabled and not service_config.api_key.strip():
+                self.return_with_error(
+                    error_code="validation_error",
+                    error_desc=f"启用 {service_name} 搜索服务时必须配置 API Key",
+                )
+                return
+
         def mutator(setting):
             setting.third_party_services = services
 
@@ -58,15 +74,31 @@ class DeepSeekSearchTestHandler(BaseHandler):
     async def post(self) -> None:
         try:
             req = self.parse_request(DeepSeekSearchTestRequest)
-            service_config = DeepSeekThirdPartyServiceConfig(
-                enabled=req.enabled,
-                api_key=req.api_key,
-            )
         except ValidationError as e:
             self.return_with_error(error_code="validation_error", error_desc=str(e))
             return
 
-        result = await deepseekService.test_search(service_config.api_key, req.query)
-        if not result.get("success"):
-            logger.warning("DeepSeek search service test failed: %s", result.get("message", ""))
+        result = await deepseekService.test_search(req.api_key, req.query)
+
+        if not result.success:
+            logger.warning("DeepSeek search service test failed: %s", result.error_message or "")
+
+        self.return_json(result)
+
+
+class XiaomiMiMoSearchTestHandler(BaseHandler):
+    """POST /config/third_party_services/xiaomi_mimo/test.json"""
+
+    async def post(self) -> None:
+        try:
+            req = self.parse_request(XiaomiMiMoSearchTestRequest)
+        except ValidationError as e:
+            self.return_with_error(error_code="validation_error", error_desc=str(e))
+            return
+
+        result = await xiaomiMimoService.test_search(req.api_key, req.query)
+
+        if not result.success:
+            logger.warning("Xiaomi MiMo search service test failed: %s", result.error_message or "")
+
         self.return_json(result)

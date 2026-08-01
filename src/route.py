@@ -66,6 +66,7 @@ application = tornado.web.Application([
     (r"/config/tools/list.json",                    settingController.ToolListHandler),
     (r"/config/third_party_services.json",           thirdPartyController.ThirdPartyServicesConfigHandler),
     (r"/config/third_party_services/deepseek/test.json", thirdPartyController.DeepSeekSearchTestHandler),
+    (r"/config/third_party_services/xiaomi_mimo/test.json", thirdPartyController.XiaomiMiMoSearchTestHandler),
 
     # System Status & Quick Init (V13)
     (r"/system/status.json",                         systemController.SystemStatusHandler),

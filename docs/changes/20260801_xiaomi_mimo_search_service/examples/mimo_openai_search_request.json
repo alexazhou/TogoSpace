@@ -1,0 +1,23 @@
+{
+  "model": "mimo-v2.5",
+  "messages": [
+    {
+      "role": "user",
+      "content": "今天260801天气怎么样"
+    }
+  ],
+  "tools": [
+    {
+      "type": "web_search",
+      "max_keyword": 3,
+      "force_search": true,
+      "limit": 5
+    }
+  ],
+  "tool_choice": "auto",
+  "max_completion_tokens": 1024,
+  "stream": false,
+  "thinking": {
+    "type": "disabled"
+  }
+}

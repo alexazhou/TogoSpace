@@ -14,7 +14,6 @@ from service.roomService import ToolCallContext
 import service.roomService as roomService
 import service.skillService as skillService
 import service.thirdPartyService as thirdPartyService
-from service.thirdPartyService import ThirdPartyService
 from service.agentService.toolRegistry import validate_tool_allow_specs
 from util import configUtil, i18nUtil
 
@@ -48,12 +47,13 @@ def get_time(timezone: Optional[str] = None) -> dict:
 
 
 async def web_search(query: str, _context: ToolCallContext = None) -> dict:
-    """通过已配置的三方服务执行网页搜索。
+    """通过已配置的三方服务执行网页搜索，并根据 API 返回结果自动提取来源链接。
 
     Args:
-        query: 要搜索的关键词或问题。
+        query: 要搜索的 query，不需要额外添加来源链接提示。
     """
-    return await thirdPartyService.search(ThirdPartyService.DEEPSEEK, query)
+    service_name = thirdPartyService.get_default_search_service()
+    return await thirdPartyService.search(service_name, query)
 
 
 def _require_team_context(_context: ToolCallContext | None) -> tuple[bool, int]:
