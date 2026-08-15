@@ -78,6 +78,7 @@ class LlmProviderType(EnhanceEnum):
     OPENCODE_GO = "opencode_go"
     ANTHROPIC = "anthropic"
     GOOGLE = "google"
+    GT_AI_GATEWAY = "gt_ai_gateway"
     OTHER = "other"
 
 

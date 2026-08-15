@@ -45,6 +45,11 @@
         "label": "google（谷歌）官方",
         "openai": "https://generativelanguage.googleapis.com/v1beta/openai"
     },
+    "gt_ai_gateway": {
+        "label": "GT-AI-Gateway",
+        "openai": "http://127.0.0.1:6722/llm/v1/chat/completions",
+        "anthropic": "http://127.0.0.1:6722/llm/v1/messages"
+    },
     "other": {
         "label": "Other（自定义模型选这个）"
     }
