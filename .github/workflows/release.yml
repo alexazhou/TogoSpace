@@ -217,6 +217,7 @@ jobs:
         echo "ZIP_PATH=$ZIP_PATH" >> $GITHUB_ENV
 
     - name: Create GitHub Release
+      if: ${{ !contains(github.ref_name, 'beta') }}
       uses: softprops/action-gh-release@v3
       with:
         name: "TogoSpace ${{ github.ref_name }}"
