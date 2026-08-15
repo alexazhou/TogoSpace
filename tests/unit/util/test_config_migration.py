@@ -3,7 +3,7 @@ import os
 from unittest import mock
 import pytest
 from constants import LlmProviderType
-from util.configTypes import SettingConfig
+from util.configUtil.configTypes import SettingConfig
 from util.configUtil.migrations.v1_to_v2 import migrate_v1_to_v2
 
 

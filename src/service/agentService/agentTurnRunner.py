@@ -31,7 +31,7 @@ from service.agentService.driver.factory import build_agent_driver
 from service.agentService.toolRegistry import AgentToolRegistry, RegisteredTool, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
 from util import configUtil, llmApiUtil
-from util.configTypes import LlmModelConfig
+from util.configUtil.configTypes import LlmModelConfig
 from util.assertUtil import assertNotNull
 from dal.db import gtAgentTaskManager
 

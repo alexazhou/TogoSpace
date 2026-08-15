@@ -12,7 +12,7 @@ from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from model.dbModel.gtTeam import GtTeam
 from service import agentService, deptService, roleTemplateService, roomService
 from util import configUtil, i18nUtil
-from util.configTypes import DeptNodePreset, TeamPreset, TeamRoomPreset
+from util.configUtil.configTypes import DeptNodePreset, TeamPreset, TeamRoomPreset
 
 logger = logging.getLogger(__name__)
 

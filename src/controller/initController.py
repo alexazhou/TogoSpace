@@ -7,7 +7,7 @@ from constants import LlmProtocol, LlmProviderType
 from controller.baseController import BaseHandler
 from service import schedulerService
 from util import configUtil
-from util.configTypes import LlmProviderConfig, LlmModelConfig
+from util.configUtil.configTypes import LlmProviderConfig, LlmModelConfig
 
 logger = logging.getLogger(__name__)
 

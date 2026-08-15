@@ -21,7 +21,7 @@ from service.updateService import (
 
 def _mock_get_app_config():
     """返回一个 mock AppConfig，dev.latest_release 为空。"""
-    from util.configTypes import AppConfig, SettingConfig, DevConfig
+    from util.configUtil.configTypes import AppConfig, SettingConfig, DevConfig
     app_config = AppConfig(setting=SettingConfig(version="v2"))
     return app_config
 

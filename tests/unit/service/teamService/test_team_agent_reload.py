@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from service.agentService import core
-from util.configTypes import AppConfig, SettingConfig
+from util.configUtil.configTypes import AppConfig, SettingConfig
 from constants import DriverType
 
 

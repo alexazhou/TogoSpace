@@ -334,7 +334,7 @@ async def test_run_turn_loop_raises_on_error_action_after_max_retries(turn_runne
 
 
 from util import configUtil
-from util.configTypes import AppConfig, SettingConfig
+from util.configUtil.configTypes import AppConfig, SettingConfig
 
 
 @pytest.mark.asyncio

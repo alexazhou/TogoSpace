@@ -1,7 +1,7 @@
 """Phase 1 基础设施单元测试：配置字段、usage 解析、DB 字段。"""
 import pytest
 
-from util.configTypes import LlmContextConfig
+from util.configUtil.configTypes import LlmContextConfig
 from util.llmApiUtil import OpenAIResponse, OpenAIUsage, OpenAIChoice, OpenAIMessage
 from constants import OpenaiApiRole
 from model.dbModel.gtAgentHistory import GtAgentHistory

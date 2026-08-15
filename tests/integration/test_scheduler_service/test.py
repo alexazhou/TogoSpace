@@ -17,7 +17,7 @@ from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from constants import MessageBusTopic, AgentStatus, AgentTaskType, AgentTaskStatus, ScheduleState
-from util.configTypes import TeamPreset
+from util.configUtil.configTypes import TeamPreset
 from ...base import ServiceTestCase
 
 TEAM = "test_team"

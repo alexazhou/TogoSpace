@@ -8,7 +8,7 @@ import sys
 import tornado.httpserver
 
 from util import llmApiUtil, configUtil, logUtil
-from util.configTypes import AppConfig
+from util.configUtil.configTypes import AppConfig
 from service import (
     messageBus,
     schedulerService,

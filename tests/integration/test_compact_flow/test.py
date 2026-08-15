@@ -46,7 +46,7 @@ _TRIGGER = 340
 
 
 def _mock_config():
-    from util.configTypes import SettingConfig, LlmProviderConfig, LlmModelConfig, LlmContextConfig
+    from util.configUtil.configTypes import SettingConfig, LlmProviderConfig, LlmModelConfig, LlmContextConfig
     app_config = MagicMock()
     app_config.setting = SettingConfig(
         version="v2",

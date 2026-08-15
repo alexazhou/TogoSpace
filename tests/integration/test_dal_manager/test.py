@@ -26,7 +26,7 @@ from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from util import llmApiUtil
-from util.configTypes import TeamPreset, AgentPreset, TeamRoomPreset
+from util.configUtil.configTypes import TeamPreset, AgentPreset, TeamRoomPreset
 from tests.base import ServiceTestCase
 
 

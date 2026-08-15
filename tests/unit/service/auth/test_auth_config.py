@@ -1,7 +1,7 @@
 """单元测试：鉴权配置和 BaseHandler 鉴权检查逻辑。"""
 import unittest.mock as mock
 
-from util.configTypes import AuthConfig, SettingConfig
+from util.configUtil.configTypes import AuthConfig, SettingConfig
 from util import configUtil
 
 

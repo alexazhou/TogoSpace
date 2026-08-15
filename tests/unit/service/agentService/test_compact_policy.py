@@ -20,7 +20,7 @@ from service.agentService.promptBuilder import (
     build_compact_resume_prompt,
 )
 from util import llmApiUtil
-from util.configTypes import LlmModelConfig, LlmContextConfig
+from util.configUtil.configTypes import LlmModelConfig, LlmContextConfig
 
 
 def _make_llm_config(**overrides) -> LlmModelConfig:

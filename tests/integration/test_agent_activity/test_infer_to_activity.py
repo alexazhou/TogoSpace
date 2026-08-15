@@ -1,4 +1,4 @@
-from util.configTypes import LlmProviderConfig, LlmModelConfig, LlmContextConfig
+from util.configUtil.configTypes import LlmProviderConfig, LlmModelConfig, LlmContextConfig
 """集成测试：验证 AgentTurnRunner._infer_to_item() 推理后触发活动记录插入数据库。"""
 import os
 import sys

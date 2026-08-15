@@ -1,6 +1,6 @@
 import pytest
 from controller.settingController import validate_model_slot_refs
-from util.configTypes import LlmProviderConfig, LlmModelConfig, DefaultModelSlots, LlmProtocol
+from util.configUtil.configTypes import LlmProviderConfig, LlmModelConfig, DefaultModelSlots, LlmProtocol
 
 
 def _make_provider(name: str, models: list[str]) -> LlmProviderConfig:

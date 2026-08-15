@@ -1,5 +1,5 @@
 """tests for SettingConfig / LlmProviderConfig helper methods."""
-from util.configTypes import (
+from util.configUtil.configTypes import (
     SettingConfig,
     LlmProviderConfig,
     LlmModelConfig,

@@ -15,7 +15,7 @@ from service import presetService, agentService, ormService, persistenceService,
 from service.agentService import Agent
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenaiApiRole
-from util.configTypes import TeamPreset, AgentPreset, TeamRoomPreset, DeptNodePreset
+from util.configUtil.configTypes import TeamPreset, AgentPreset, TeamRoomPreset, DeptNodePreset
 from ...base import ServiceTestCase
 
 TEAM = "test_team"

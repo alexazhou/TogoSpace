@@ -21,7 +21,7 @@ from service.funcToolService.core import get_tools
 from service.agentService.toolRegistry import CATEGORY_CONFIG
 from constants import DriverType, RoleTemplateType, AgentTaskType, SpecialAgent, ToolCategory
 from util import llmApiUtil, configUtil
-from util.configTypes import TeamPreset, AgentPreset, DeptNodePreset
+from util.configUtil.configTypes import TeamPreset, AgentPreset, DeptNodePreset
 from ...base import ServiceTestCase
 
 TEAM = "test_team"

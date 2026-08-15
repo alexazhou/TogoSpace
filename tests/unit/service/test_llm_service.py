@@ -6,7 +6,7 @@ from constants import InferRequestStateType
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from service import llmService
 from util import configUtil, llmApiUtil
-from util.configTypes import AppConfig, SettingConfig
+from util.configUtil.configTypes import AppConfig, SettingConfig
 
 
 def _build_response(content: str = "ok") -> llmApiUtil.OpenAIResponse:

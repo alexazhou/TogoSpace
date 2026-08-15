@@ -8,7 +8,7 @@ from constants import ThirdPartyServiceName
 from service import thirdPartyService
 from service.thirdPartyService import deepseekService, xiaomiMimoService
 from util import configUtil
-from util.configTypes import (
+from util.configUtil.configTypes import (
     DeepSeekThirdPartyServiceConfig,
     DefaultServiceConfig,
     ThirdPartyServicesConfig,

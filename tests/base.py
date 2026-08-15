@@ -24,7 +24,7 @@ import service.llmService as llmService
 from dal.db import gtAgentManager, gtTeamManager, gtRoomManager, gtRoleTemplateManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
-from util.configTypes import AgentPreset
+from util.configUtil.configTypes import AgentPreset
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
 from mock_llm_server import (

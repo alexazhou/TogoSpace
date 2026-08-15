@@ -11,7 +11,7 @@ from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from service import llmService
 from service.agentService import promptBuilder
 from util import llmApiUtil, configUtil
-from util.configTypes import LlmModelConfig
+from util.configUtil.configTypes import LlmModelConfig
 
 logger = logging.getLogger(__name__)
 

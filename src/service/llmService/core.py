@@ -12,7 +12,7 @@ from service.llmService.llmErrorClassifier import classify_llm_error, RETRYABLE_
 from service.llmService.llmRequestRules import apply_llm_request_rules
 from util import configUtil, llmApiUtil
 
-from util.configTypes import LlmModelConfig, LlmProviderConfig, LlmContextConfig
+from util.configUtil.configTypes import LlmModelConfig, LlmProviderConfig, LlmContextConfig
 import appPaths
 import os
 

@@ -11,7 +11,7 @@ from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service import ormService, presetService, exportService
 from exception import TogoException
 from constants import DriverType
-from util.configTypes import TeamPreset, AgentPreset, DeptNodePreset, TeamRoomPreset
+from util.configUtil.configTypes import TeamPreset, AgentPreset, DeptNodePreset, TeamRoomPreset
 
 
 if os.name == "posix" and sys.platform == "darwin":

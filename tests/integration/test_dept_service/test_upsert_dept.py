@@ -14,7 +14,7 @@ from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service import deptService, ormService
-from util.configTypes import AgentPreset
+from util.configUtil.configTypes import AgentPreset
 from constants import EmployStatus
 
 

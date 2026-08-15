@@ -5,7 +5,7 @@ import shutil
 from typing import Any, Callable, List
 
 import appPaths
-from util.configTypes import (
+from util.configUtil.configTypes import (
     RoleTemplatePreset,
     AppConfig,
     SettingConfig,

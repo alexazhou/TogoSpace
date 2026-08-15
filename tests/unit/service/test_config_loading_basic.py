@@ -6,7 +6,7 @@ import builtins
 import pytest
 from constants import LlmProviderType
 from util import configUtil
-from util.configTypes import (
+from util.configUtil.configTypes import (
     AppConfig,
     LlmProviderConfig,
     SettingConfig,

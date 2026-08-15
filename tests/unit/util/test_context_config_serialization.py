@@ -1,7 +1,7 @@
 """测试 context_config 序列化：默认值应被排除，自定义值应保留。"""
 import pytest
 from constants import LlmProtocol
-from util.configTypes import LlmModelConfig, LlmContextConfig
+from util.configUtil.configTypes import LlmModelConfig, LlmContextConfig
 
 
 class TestLlmModelConfigContextConfigSerialization:

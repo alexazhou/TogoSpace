@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from service import presetService
-from util.configTypes import TeamPreset
+from util.configUtil.configTypes import TeamPreset
 
 
 @pytest.mark.asyncio

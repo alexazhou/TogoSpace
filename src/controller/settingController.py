@@ -10,7 +10,7 @@ from controller.baseController import BaseHandler
 from service import schedulerService
 from util import jsonUtil
 from util import assertUtil, configUtil, llmApiUtil
-from util.configTypes import LlmProviderConfig, LlmModelConfig, LlmContextConfig, DefaultModelSlots
+from util.configUtil.configTypes import LlmProviderConfig, LlmModelConfig, LlmContextConfig, DefaultModelSlots
 from service.llmService.core import get_provider_url
 import appPaths
 

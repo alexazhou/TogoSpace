@@ -28,7 +28,7 @@ class ConfigHandler(BaseHandler):
         ]
 
         # 上下文配置默认值（未设置时使用的值）
-        from util.configTypes import LlmContextConfig
+        from util.configUtil.configTypes import LlmContextConfig
         context_config_defaults = LlmContextConfig().model_dump(mode="json")
 
         self.return_json({

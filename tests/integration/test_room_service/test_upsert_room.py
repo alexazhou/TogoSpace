@@ -14,7 +14,7 @@ from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service import ormService
 import service.roomService as roomService
 from constants import RoomType, EmployStatus
-from util.configTypes import AgentPreset
+from util.configUtil.configTypes import AgentPreset
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ValidationError
 from controller.baseController import BaseHandler
 from service.thirdPartyService import deepseekService, xiaomiMimoService
 from util import configUtil, jsonUtil
-from util.configTypes import ThirdPartyServicesConfig
+from util.configUtil.configTypes import ThirdPartyServicesConfig
 
 logger = logging.getLogger(__name__)
 

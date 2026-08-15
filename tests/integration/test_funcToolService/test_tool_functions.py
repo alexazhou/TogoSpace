@@ -17,7 +17,7 @@ from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtTeam import GtTeam
-from util.configTypes import AgentPreset
+from util.configUtil.configTypes import AgentPreset
 from service.roomService import ToolCallContext
 from service.funcToolService.funcToolType import FuncTool
 from service.funcToolService.funcToolType import (

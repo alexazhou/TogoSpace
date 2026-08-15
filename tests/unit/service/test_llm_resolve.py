@@ -2,7 +2,7 @@
 import pytest
 from unittest import mock
 from constants import LlmProtocol
-from util.configTypes import (
+from util.configUtil.configTypes import (
     AppConfig, SettingConfig, LlmProviderConfig, LlmModelConfig,
     LlmContextConfig, DefaultModelSlots,
 )

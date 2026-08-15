@@ -12,7 +12,7 @@ from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from service import roomService, teamService, agentService, exportService
 from util import assertUtil
-from util.configTypes import TeamRoomPreset
+from util.configUtil.configTypes import TeamRoomPreset
 
 
 def _split_team_config(config: dict | None) -> tuple[str, dict]:

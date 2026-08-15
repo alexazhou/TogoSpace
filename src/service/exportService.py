@@ -7,7 +7,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
 from service import deptService
 from util import assertUtil
-from util.configTypes import AgentPreset, DeptNodePreset, RoleTemplatePreset, TeamPreset, TeamRoomPreset
+from util.configUtil.configTypes import AgentPreset, DeptNodePreset, RoleTemplatePreset, TeamPreset, TeamRoomPreset
 
 
 def _resolve_agent_name(agent_id: int, agents_by_id: dict[int, GtAgent]) -> str:
