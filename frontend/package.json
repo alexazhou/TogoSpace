@@ -1,0 +1,31 @@
+{
+  "name": "team-agent-frontend",
+  "version": "0.3.9",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.2.0",
+    "highlight.js": "^11.11.1",
+    "markdown-it": "^14.1.1",
+    "markdown-it-task-lists": "^2.1.1",
+    "vue": "^3.5.13",
+    "vue-i18n": "^9.14.5",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.4.0",
+    "happy-dom": "^17.0.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.5",
+    "vitest": "^3.0.0",
+    "vue-tsc": "^2.2.0"
+  }
+}
