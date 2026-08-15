@@ -37,7 +37,7 @@ TogoSpace/
 │   ├── constants.py         # 常量定义
 │   ├── route.py             # 路由配置
 │   └── ...                  # 其他模块文件
-├── frontend/                # Web 前端（Git Submodule）
+├── frontend/                # Web 前端（Vue 3，仓库内普通目录）
 │   ├── src/                 # Vue 3 + TypeScript 源码
 │   ├── public/              # 静态资源
 │   ├── scripts/             # 构建脚本
@@ -74,33 +74,13 @@ TogoSpace/
 
 ### Git 约定
 
-**Git 工具约定**
-- 使用 `scripts/commit_and_push_frondbackend.py` 统一管理前后端 Git 操作
-- 该脚本会自动处理前端 submodule 切换分支、同步远端、提交、推送等操作
-- 示例用法：
-  ```bash
-  # 查看前后端状态
-  python scripts/commit_and_push_frondbackend.py --action status
-
-  # 提交前后端改动
-  python scripts/commit_and_push_frondbackend.py --action commit -m "fix: description"
-
-  # 同步 + 提交 + 推送（常用流程）
-  python scripts/commit_and_push_frondbackend.py --action sync,commit,push -m "fix: description"
-
-  # 仅处理前端或后端
-  python scripts/commit_and_push_frondbackend.py --action status --target frontend
-  python scripts/commit_and_push_frondbackend.py --action commit -m "fix: description" --target backend
-  ```
-
 **提交规范**
 - 开发完成后不要自动提交，等待用户明确要求「提交」或「commit」后再执行
 - commit message 不要加 `Co-Authored-By` 行，不要署名 AI Agent
 - commit message 统一使用英文
 
-**前端子模块**
-- 在 `frontend/` 子模块内提交时，必须先切换到有效分支，禁止在 detached HEAD 状态下提交
-- 提交后端时若前端有新 commit，需同步更新子模块指针：`git add frontend && git commit`
+**仓库结构**
+- 前端与后端同仓库维护，`frontend/` 为仓库内普通目录，前后端改动可一起提交
 
 **冲突处理**
 - 禁止擅自使用 `git checkout --theirs .` 或 `git checkout --ours .` 放弃改动
@@ -232,7 +212,7 @@ STORAGE_ROOT/
 ## 前端仓库说明（双前端）
 
 - `tui/`：仓库内原生终端前端，适合本地排障、终端观察和自动化终端操作。
-- `frontend/`：Web 前端子仓库（Git Submodule，见 `.gitmodules`），基于 Vue 3 + Vite + TypeScript，面向浏览器使用场景。
+- `frontend/`：仓库内 Web 前端，基于 Vue 3 + Vite + TypeScript，面向浏览器使用场景，源码与后端同仓库维护。
 - 两个前端都消费同一套后端 API（HTTP + WebSocket），功能目标保持一致，交互形态不同。
 
 ## 文档索引（docs/）

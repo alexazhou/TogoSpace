@@ -2,9 +2,8 @@
 # 基于 Ubuntu 24.04 LTS 构建
 #
 # 构建方式：
-#   1. 确保 frontend 子模块已初始化：git submodule update --init --recursive
-#   2. docker build -t togospace:0.3.8 .
-#   3. docker run -d -p 7180:7180 -v togospace-storage:/storage togospace:0.3.8
+#   1. docker build -t togospace:0.3.8 .
+#   2. docker run -d -p 7180:7180 -v togospace-storage:/storage togospace:0.3.8
 
 # ============================================
 # Stage 1: 构建前端
@@ -21,7 +20,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /build/frontend
 
-# 复制前端代码（需要在构建前执行 git submodule update --init --recursive）
+# 复制前端代码（前端源码已并入主仓库）
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
 

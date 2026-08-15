@@ -40,7 +40,6 @@ jobs:
     - uses: actions/checkout@v6
       with:
         token: ${{ secrets.GH_PAT }}
-        submodules: recursive
         lfs: true
 
     - name: Determine version

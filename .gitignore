@@ -20,6 +20,8 @@ assets/icon.icns
 .pyinstaller/
 dist/
 build/
+node_modules/
+.DS_Store
 workspace_root/
 workspace/
 build_config.json

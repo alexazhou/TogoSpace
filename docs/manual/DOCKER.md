@@ -83,13 +83,10 @@ docker run -d \
 如果需要从源码构建镜像：
 
 ```bash
-# 1. 初始化前端子模块
-git submodule update --init --recursive
-
-# 2. 构建镜像
+# 1. 构建镜像
 docker build -t togospace:latest .
 
-# 3. 启动容器
+# 2. 启动容器
 docker run -d \
   --name togospace \
   -p 7180:7180 \
