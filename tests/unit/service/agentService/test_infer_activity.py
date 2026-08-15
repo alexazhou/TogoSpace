@@ -111,7 +111,7 @@ def _mock_activity_service():
     return mock_svc
 
 
-_CONFIG_PATCH = "service.agentService.agentTurnRunner.configUtil.get_app_config"
+_CONFIG_PATCH = "util.configUtil.get_app_config"
 _INFER_STREAM_PATCH = "service.agentService.agentTurnRunner.llmService.infer_stream"
 _ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
 _ACTIVITY_PATCH = "service.agentService.agentTurnRunner.agentActivityService"

@@ -163,10 +163,8 @@ def _usage_to_log_json(usage: llmApiUtil.OpenAIUsage | None) -> str:
 
 def _build_request(
     *,
-    model: str,
     ctx: GtCoreAgentDialogContext,
     model_config: LlmModelConfig,
-    provider_config: LlmProviderConfig,
 ) -> tuple[llmApiUtil.OpenAIRequest, tuple[str, ...]]:
     messages: list[llmApiUtil.OpenAIMessage] = [
         llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.SYSTEM, ctx.system_prompt),
@@ -271,10 +269,8 @@ async def infer(
         resolved_model_name = f"{model_config.name}@{provider_config.name}"
 
         request, applied_rules = _build_request(
-            model=model_config.name,
             ctx=ctx,
             model_config=model_config,
-            provider_config=provider_config,
         )
         logger.info(
             "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, protocol=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
@@ -340,10 +336,8 @@ async def infer_stream(
         resolved_model_name = f"{model_config.name}@{provider_config.name}"
 
         request, applied_rules = _build_request(
-            model=model_config.name,
             ctx=ctx,
             model_config=model_config,
-            provider_config=provider_config,
         )
         logger.info(
             "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, protocol=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",

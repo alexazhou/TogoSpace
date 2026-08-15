@@ -30,8 +30,7 @@ from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
 from service.agentService.driver.factory import build_agent_driver
 from service.agentService.toolRegistry import AgentToolRegistry, RegisteredTool, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
-from util import configUtil, llmApiUtil
-from util.configUtil.configTypes import LlmModelConfig
+from util import llmApiUtil
 from util.assertUtil import assertNotNull
 from dal.db import gtAgentTaskManager
 

@@ -47,7 +47,7 @@ def _make_history_item(item_id=1):
 TRIGGER_TOKENS = 23718
 HARD_LIMIT_TOKENS = 27904
 
-_CONFIG_PATCH = "service.agentService.agentTurnRunner.configUtil.get_app_config"
+_CONFIG_PATCH = "util.configUtil.get_app_config"
 _INFER_PATCH = "service.agentService.compact.llmService.infer"
 _INFER_STREAM_PATCH = "service.agentService.agentTurnRunner.llmService.infer_stream"
 _ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
