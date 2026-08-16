@@ -41,7 +41,10 @@ const { t } = useI18n();
         </thead>
         <tbody>
           <tr v-for="(model, mIndex) in models" :key="mIndex">
-            <td><strong>{{ model.name }}</strong></td>
+            <td>
+              <strong>{{ model.name }}</strong>
+              <span v-if="model.input?.includes('image')" class="model-vision-badge">{{ t('settings.models.visionBadge', 'Vision') }}</span>
+            </td>
             <td><span class="models-cell-type">{{ model.protocol }}</span></td>
             <td class="models-cell-actions">
               <div class="models-cell-actions-inner">
@@ -101,6 +104,7 @@ const { t } = useI18n();
 .settings-table td:nth-child(2) { min-width: 140px; white-space: nowrap; }
 
 .models-cell-type { color: var(--muted); }
+.model-vision-badge { margin-left: 8px; padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; color: var(--accent); border: 1px solid var(--accent); }
 .settings-table th.actions-th { min-width: 180px; text-align: right; }
 .settings-table td.models-cell-actions {
   min-width: 180px;

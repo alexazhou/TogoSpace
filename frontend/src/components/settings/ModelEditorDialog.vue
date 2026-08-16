@@ -17,9 +17,17 @@ const { t } = useI18n();
 const visible = ref(false);
 const mode = ref<EditorMode>('create');
 
+const INPUT_OPTIONS = [
+  { value: 'text', label: 'Text' },
+  { value: 'image', label: 'Image' },
+  { value: 'audio', label: 'Audio' },
+  { value: 'video', label: 'Video' },
+] as const;
+
 const form = ref({
   name: '',
   protocol: 'openai',
+  input: ['text'] as string[],
   context_window_tokens: null as number | null,
   reserve_output_tokens: null as number | null,
   compact_trigger_ratio: null as number | null,
@@ -27,6 +35,17 @@ const form = ref({
   extra_headers: {} as Record<string, string>,
   extra_params: '',
 });
+
+function toggleInput(type: string): void {
+  // text 是基线能力，不可取消
+  if (type === 'text') return;
+  const idx = form.value.input.indexOf(type);
+  if (idx >= 0) {
+    form.value.input.splice(idx, 1);
+  } else {
+    form.value.input.push(type);
+  }
+}
 
 const isCreating = computed(() => mode.value === 'create');
 const dialogTitle = computed(() => (
@@ -70,6 +89,7 @@ function openCreate(): void {
   form.value = {
     name: '',
     protocol: 'openai',
+    input: ['text'],
     context_window_tokens: null,
     reserve_output_tokens: null,
     compact_trigger_ratio: null,
@@ -86,6 +106,7 @@ function openEdit(model: LlmModelConfig): void {
   form.value = {
     name: model.name,
     protocol: model.protocol || 'openai',
+    input: model.input && model.input.length > 0 ? [...model.input] : ['text'],
     context_window_tokens: model.context_config?.context_window_tokens ?? null,
     reserve_output_tokens: model.context_config?.reserve_output_tokens ?? null,
     compact_trigger_ratio: model.context_config?.compact_trigger_ratio ?? null,
@@ -127,6 +148,7 @@ function handleSave(): void {
     const model: LlmModelConfig = {
       name: form.value.name.trim(),
       protocol: form.value.protocol.trim(),
+      input: Array.from(new Set([...form.value.input, 'text'])),
       context_config: {
         context_window_tokens: form.value.context_window_tokens,
         reserve_output_tokens: form.value.reserve_output_tokens,
@@ -185,6 +207,27 @@ defineExpose({ openCreate, openEdit });
               <option value="anthropic">Anthropic</option>
             </select>
           </label>
+        </div>
+
+        <div class="svc-field svc-field--wide">
+          <span>{{ t('settings.models.inputLabel', 'Supported Input Types') }}</span>
+          <div class="input-types">
+            <label
+              v-for="opt in INPUT_OPTIONS"
+              :key="opt.value"
+              class="input-type-chip"
+              :class="{ checked: form.input.includes(opt.value), disabled: opt.value === 'text' }"
+            >
+              <input
+                type="checkbox"
+                :checked="form.input.includes(opt.value)"
+                :disabled="opt.value === 'text'"
+                @change="toggleInput(opt.value)"
+              />
+              <span>{{ t(`settings.models.inputTypes.${opt.value}`, opt.label) }}</span>
+            </label>
+          </div>
+          <p class="svc-hint">{{ t('settings.models.inputHint', 'Text is always enabled. Models declaring Image can receive image messages.') }}</p>
         </div>
 
         <section class="advanced-card">
@@ -247,6 +290,12 @@ defineExpose({ openCreate, openEdit });
 .svc-field--wide { grid-column: 1 / -1; }
 .svc-field > span { color: var(--muted); font-size: 0.76rem; }
 .svc-input, .svc-select { height: 40px; width: 100%; border: 1px solid var(--panel-border); border-radius: 12px; background: var(--panel-bg); color: var(--text-strong); padding: 0 12px; font: inherit; font-size: 0.88rem; box-sizing: border-box; }
+.svc-hint { margin: 0; color: var(--muted); font-size: 0.74rem; }
+.input-types { display: flex; flex-wrap: wrap; gap: 8px; }
+.input-type-chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid var(--panel-border); border-radius: 999px; background: var(--panel-bg); color: var(--muted); font-size: 0.84rem; cursor: pointer; user-select: none; }
+.input-type-chip.checked { color: var(--text-strong); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.input-type-chip.disabled { opacity: 0.7; cursor: not-allowed; }
+.input-type-chip input { accent-color: var(--accent); }
 .advanced-card { border: 1px solid var(--panel-border); border-radius: 12px; padding: 12px; }
 .advanced-toggle { display: flex; width: 100%; justify-content: space-between; align-items: center; background: transparent; border: none; padding: 0; cursor: pointer; text-align: left; }
 .advanced-toggle strong { color: var(--text-strong); font-size: 0.9rem; }

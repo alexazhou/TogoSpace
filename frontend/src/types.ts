@@ -346,6 +346,8 @@ export interface LlmContextConfig {
 export interface LlmModelConfig {
   name: string;
   protocol: string;
+  /** 支持的输入类型，如 ['text', 'image']。缺省为纯文本 ['text']。 */
+  input?: string[] | null;
   context_config: LlmContextConfig | null;
   extra_headers: Record<string, string> | null;
   extra_params: Record<string, unknown> | null;
