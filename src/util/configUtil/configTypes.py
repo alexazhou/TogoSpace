@@ -2,7 +2,7 @@ import os
 from typing import Any, List, Optional
 
 import appPaths
-from constants import DriverType, LlmProtocol, LlmProviderType, ThirdPartyServiceName
+from constants import DriverType, LlmProtocol, LlmProviderType, ModelInput, ThirdPartyServiceName
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 # 多语言字段类型
@@ -148,7 +148,7 @@ class LlmModelConfig(BaseModel):
     name: str
     protocol: LlmProtocol
     enabled: bool = True
-    support_vision: bool = False
+    input: list[ModelInput] = [ModelInput.TEXT]   # 支持的输入类型（缺省即纯文本）
     temperature: Optional[float] = None
     extra_params: dict[str, Any] = Field(default_factory=dict)
     extra_headers: dict[str, str] = Field(default_factory=dict)
@@ -157,6 +157,9 @@ class LlmModelConfig(BaseModel):
     @model_serializer(mode="wrap")
     def _serialize(self, handler: Any) -> dict[str, Any]:
         data = handler(self)
+        # 纯文本模型（input == 默认 ["text"]）不落盘 input key
+        if data.get("input") in (None, [ModelInput.TEXT.value]):
+            data.pop("input", None)
         cc = data.get("context_config")
         if cc is None or cc == {} or cc == LlmContextConfig().model_dump(mode="json"):
             data.pop("context_config", None)
@@ -246,7 +249,7 @@ class DevConfig(BaseModel):
 class SettingConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    version: str = "v2"
+    version: str = "v3"
     language: str = "zh-CN"  # 界面语言，默认中文
     development_mode: bool = False  # 前端开发模式开关，影响错误提示等交互行为
     demo_mode: DemoModeConfig = Field(default_factory=DemoModeConfig)

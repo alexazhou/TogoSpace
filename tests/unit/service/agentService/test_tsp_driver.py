@@ -125,7 +125,8 @@ async def test_tsp_driver_e2e_initialize_tool_shutdown() -> None:
             read_ctx,
         )
         assert isinstance(read_result, dict)
-        assert read_result.get("content") == expected_content
+        # v0.4.17 起 read_file 每行带行号前缀（如 "   1│..."）
+        assert read_result.get("content") == "   1│hello from tsp e2e\n   2│line2\n"
     finally:
         # shutdown 阶段：应能优雅断连
         await driver.shutdown()

@@ -66,6 +66,14 @@ class LlmProtocol(EnhanceEnum):
     ANTHROPIC = "anthropic"
 
 
+class ModelInput(EnhanceEnum):
+    """模型支持的输入类型（多模态能力）— 配置字段，不使用 auto()。"""
+    TEXT = "text"     # 文本（基线能力，所有模型默认支持）
+    IMAGE = "image"   # 图片/视觉（可读图）
+    AUDIO = "audio"   # 音频
+    VIDEO = "video"   # 视频（预留）
+
+
 class LlmProviderType(EnhanceEnum):
     """LLM 提供商类型（公司/服务名） — value 用于 preset URL 查找，不使用 auto()。"""
     ALIYUN = "aliyun"

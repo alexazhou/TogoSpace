@@ -124,9 +124,10 @@ def test_load_creates_setting_json_when_missing(tmp_path):
     assert not readme_file.is_file()
 
     setting_data = json.loads(setting_file.read_text(encoding="utf-8"))
-    assert setting_data["default_llm_server"] == "qwen"
+    assert setting_data["version"] == "v3"
     assert setting_data["development_mode"] is False
-    assert "llm_services" in setting_data
+    assert setting_data["llm_providers"][0]["name"] == "qwen"
+    assert setting_data["default_models"]["primary"] == "qwen-plus@qwen"
 
 
 

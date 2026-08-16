@@ -1,10 +1,48 @@
 {
-  "_comment": "TeamAgent 配置文件，请根据实际 LLM 服务修改",
+  "_comment": "TeamAgent 配置文件（v3 格式）。请根据实际 LLM 服务修改。模型 input 字段声明支持的输入类型，缺省即纯文本 ['text']；支持读图的模型配 ['text', 'image']",
 
   "language": "zh-CN",
   "development_mode": false,
   "bind_host": "0.0.0.0",
   "bind_port": 8180,
+  "version": "v3",
+
+  "llm_providers": [
+    {
+      "name": "qwen",
+      "type": "aliyun",
+      "api_key": "YOUR_API_KEY_HERE",
+      "enable": false,
+      "urls": {
+        "openai": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      },
+      "models": [
+        {
+          "name": "qwen-plus",
+          "protocol": "openai",
+          "enabled": true
+        },
+        {
+          "name": "qwen-vl-plus",
+          "protocol": "openai",
+          "enabled": false,
+          "input": ["text", "image"]
+        }
+      ]
+    }
+  ],
+
+  "default_models": {
+    "primary": "qwen-plus@qwen",
+    "lite": "",
+    "vision": "qwen-vl-plus@qwen",
+    "advanced": ""
+  },
+
+  "context_config": {
+    "context_window_tokens": 131072
+  },
+
   "third_party_services": {
     "default_service": {
       "search": "deepseek"
@@ -17,16 +55,5 @@
       "enabled": false,
       "api_key": ""
     }
-  },
-  "default_llm_server": "qwen",
-  "llm_services": [
-    {
-      "name": "qwen",
-      "enable": false,
-      "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      "api_key": "YOUR_API_KEY_HERE",
-      "type": "openai-compatible",
-      "model": "qwen-plus"
-    }
-  ]
+  }
 }

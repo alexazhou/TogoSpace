@@ -170,6 +170,8 @@ def _split_tool_result_messages(messages: list[AgentMessage]) -> list[llmApiUtil
     2. 调整顺序：工具结果段（连续的 TOOL / USER）内稳定分区，TOOL 在前、USER（含图片）在后，
        避免多 tool_call 时图片 USER 消息插在工具结果中间（OpenAI 规范：tool 消息紧随
        assistant(tool_calls)，image_url 仅允许在 user 角色）。
+
+    注：模型能力门控（非视觉模型不发图片）暂未启用，后续按模型 input 能力接入。
     """
     # 1) 直接转换
     converted: list[llmApiUtil.OpenAIMessage] = []

@@ -73,8 +73,8 @@ def test_v1_to_v2_migration(tmp_path):
         from util import configUtil
         setting: SettingConfig = configUtil._load_setting(str(config_dir))
 
-        # Verify migration
-        assert setting.version == "v2"
+        # Verify migration（v1→v2→v3 全链路跑完，最终版本为 v3）
+        assert setting.version == "v3"
         assert not hasattr(setting, "llm_services")
         assert not hasattr(setting, "default_llm_server")
 
@@ -258,3 +258,74 @@ def test_v1_migration_url_in_urls_dict():
     assert p["type"] == "aliyun"  # 匹配预设
     assert "openai" in p["urls"]
     assert p["urls"]["openai"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+
+# ─── V2 → V3：support_vision → input ─────────────────────
+
+def test_v2_to_v3_migration_support_vision_true():
+    """support_vision: true → input=["text","image"]，version 升 v3。"""
+    from util.configUtil.migrations.v2_to_v3 import migrate_v2_to_v3
+
+    cfg = {"version": "v2", "llm_providers": [{"models": [{"name": "m", "support_vision": True}]}]}
+    migrate_v2_to_v3(cfg)
+
+    assert cfg["version"] == "v3"
+    m = cfg["llm_providers"][0]["models"][0]
+    assert m["input"] == ["text", "image"]
+    assert "support_vision" not in m
+
+
+def test_v2_to_v3_migration_text_only_no_input_key():
+    """纯文本模型（无 support_vision）不写 input key。"""
+    from util.configUtil.migrations.v2_to_v3 import migrate_v2_to_v3
+
+    cfg = {"version": "v2", "llm_providers": [{"models": [{"name": "m"}]}]}
+    migrate_v2_to_v3(cfg)
+
+    m = cfg["llm_providers"][0]["models"][0]
+    assert "input" not in m
+    assert "support_vision" not in m
+
+
+def test_v2_to_v3_migration_skips_existing_input():
+    """已存在 input 的模型跳过迁移，但 support_vision 仍移除。"""
+    from util.configUtil.migrations.v2_to_v3 import migrate_v2_to_v3
+
+    cfg = {"version": "v2", "llm_providers": [{"models": [{"name": "m", "input": ["text", "audio"], "support_vision": True}]}]}
+    migrate_v2_to_v3(cfg)
+
+    m = cfg["llm_providers"][0]["models"][0]
+    assert m["input"] == ["text", "audio"]
+    assert "support_vision" not in m
+
+
+def test_v2_to_v3_migration_wrong_version_unchanged():
+    """非 v2 配置不迁移。"""
+    from util.configUtil.migrations.v2_to_v3 import migrate_v2_to_v3
+
+    cfg = {"version": "v3", "llm_providers": [{"models": [{"name": "m", "support_vision": True}]}]}
+    migrate_v2_to_v3(cfg)
+
+    assert cfg["version"] == "v3"
+    assert "support_vision" in cfg["llm_providers"][0]["models"][0]
+
+
+# ─── LlmModelConfig input 序列化 ──────────────────────────
+
+def test_llm_model_config_text_only_input_not_serialized():
+    """纯文本模型（input 默认）序列化不落盘 input key。"""
+    from util.configUtil.configTypes import LlmModelConfig
+
+    m = LlmModelConfig(name="gpt-4o", protocol="openai")
+    data = m.model_dump(mode="json", exclude_none=True)
+    assert "input" not in data
+
+
+def test_llm_model_config_vision_input_serialized():
+    """视觉模型序列化时 input=["text","image"] 落盘。"""
+    from constants import ModelInput
+    from util.configUtil.configTypes import LlmModelConfig
+
+    m = LlmModelConfig(name="gpt-4o", protocol="openai", input=[ModelInput.TEXT, ModelInput.IMAGE])
+    data = m.model_dump(mode="json", exclude_none=True)
+    assert data["input"] == ["text", "image"]
