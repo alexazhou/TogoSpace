@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from constants import AgentHistoryStatus, AgentHistoryTag, AgentTaskType, DriverType, OpenaiApiRole, RoomState, TurnStepResult
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtScheculeTask import GtScheculeTask
@@ -170,7 +171,7 @@ async def test_advance_step_continues_to_infer_when_tool_failed(turn_runner):
     """单 tool 失败且无剩余 pending tool 时，允许进入下一次 assistant 推理。"""
     room = MagicMock(spec=ChatRoom)
     failed_tool_item = GtAgentHistory.build(
-        llmApiUtil.OpenAIMessage.tool_result("tool-call-1", '{"success":false,"message":"boom"}'),
+        AgentMessage.from_openai(llmApiUtil.OpenAIMessage.tool_result("tool-call-1", '{"success":false,"message":"boom"}')),
         status=AgentHistoryStatus.FAILED,
         error_message="boom",
     )
@@ -197,7 +198,7 @@ async def test_advance_step_continues_to_pending_tool_when_previous_tool_failed(
     """多 tool 场景下，前一个 tool 失败后也必须先补跑剩余 tool_call，不能直接继续推理。"""
     room = MagicMock(spec=ChatRoom)
     failed_tool_item = GtAgentHistory.build(
-        llmApiUtil.OpenAIMessage.tool_result("tool-call-1", '{"success":false,"message":"boom"}'),
+        AgentMessage.from_openai(llmApiUtil.OpenAIMessage.tool_result("tool-call-1", '{"success":false,"message":"boom"}')),
         status=AgentHistoryStatus.FAILED,
         error_message="boom",
     )
@@ -231,6 +232,7 @@ async def test_infer_and_classify_returns_error_action_on_json_content(turn_runn
     output_item = GtAgentHistory.build_placeholder(role=OpenaiApiRole.ASSISTANT)
     assistant_message = MagicMock()
     assistant_message.content = '{"room_name": "test", "msg": "hello"}'
+    assistant_message.text_content.return_value = '{"room_name": "test", "msg": "hello"}'
     assistant_message.tool_calls = None
     turn_runner._infer_to_item = AsyncMock(return_value=assistant_message)
 
@@ -248,6 +250,7 @@ async def test_infer_and_classify_writes_failed_tool_records_on_json_content_wit
     tc.id = "tc-123"
     assistant_message = MagicMock()
     assistant_message.content = '{"room_name": "test", "msg": "hello"}'
+    assistant_message.text_content.return_value = '{"room_name": "test", "msg": "hello"}'
     assistant_message.tool_calls = [tc]
     turn_runner._infer_to_item = AsyncMock(return_value=assistant_message)
 
@@ -682,3 +685,103 @@ async def test_run_turn_loop_consecutive_finish_failures_with_max_retries_5(turn
     assert turn_runner._history.append_history_message.await_count == 0
 
 
+
+# ─── read_image 图片结果拆分 ─────────────────────────────
+
+def _make_run_tool_fixture(turn_runner, room, result, *, tool_name="read_image", success=True):
+    """构造 _run_tool_to_item 的执行环境并返回 tool_call / output_item。"""
+    room.team_id = 1
+    room.state = RoomState.IDLE
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 99
+    output_item.tool_call_id = "tool-call-img"
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tool-call-img",
+        function={"name": tool_name, "arguments": '{"file_path": "/tmp/foo.png"}'},
+    )
+    turn_runner.tool_registry.execute_tool_call = AsyncMock(return_value=ToolExecutionResult(
+        tool_call_id="tool-call-img",
+        result=result,
+        success=success,
+    ))
+    turn_runner.tool_registry.get_registered_tool = MagicMock(return_value=SimpleNamespace(
+        marks_turn_finish=False, self_interrupt=False,
+    ))
+    return tool_call, output_item
+
+
+@pytest.mark.asyncio
+async def test_run_tool_to_item_image_attached_to_tool_message(turn_runner):
+    """read_image 返回 mime_type + base64 → 单条 TOOL 消息，content 剥 base64，图片挂附件。
+
+    拆分（TOOL 文本 + USER 图片）由 llmService 发送时处理，turn runner 不拆。
+    """
+    room = MagicMock(spec=ChatRoom)
+    result = {
+        "file_path": "/tmp/foo.png",
+        "mime_type": "image/png",
+        "format": "png",
+        "width": 100,
+        "height": 50,
+        "size_bytes": 1234,
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+    }
+    tool_call, output_item = _make_run_tool_fixture(turn_runner, room, result)
+
+    with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock(return_value=MagicMock(id=7))), patch(
+        "service.agentService.agentTurnRunner.agentActivityService.update_activity_progress",
+        new=AsyncMock(),
+    ):
+        ret = await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    assert ret == TurnStepResult.TOOL_EXECUTE_SUCCESS
+    # 只写一条 TOOL 消息：剥离 base64，图片挂附件，不追加 USER 消息
+    finalize_call = turn_runner._history.finalize_history_item.await_args
+    tool_msg = finalize_call.kwargs["message"]
+    assert tool_msg.role == OpenaiApiRole.TOOL
+    assert "base64" not in tool_msg.content
+    assert tool_msg.tool_call_id == "tool-call-img"
+    assert tool_msg.attachments is not None
+    assert tool_msg.attachments[0].kind == "image"
+    assert tool_msg.attachments[0].mime_type == "image/png"
+    assert tool_msg.attachments[0].data == "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
+    turn_runner._history.append_history_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_tool_to_item_keeps_text_result_unchanged(turn_runner):
+    """普通工具结果（无 mime_type+base64）行为不变，只写 TOOL 消息。"""
+    room = MagicMock(spec=ChatRoom)
+    result = {"success": True, "content": "demo"}
+    tool_call, output_item = _make_run_tool_fixture(turn_runner, room, result, tool_name="read_file")
+
+    with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock(return_value=MagicMock(id=7))), patch(
+        "service.agentService.agentTurnRunner.agentActivityService.update_activity_progress",
+        new=AsyncMock(),
+    ):
+        ret = await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    assert ret == TurnStepResult.TOOL_EXECUTE_SUCCESS
+    finalize_call = turn_runner._history.finalize_history_item.await_args
+    tool_msg = finalize_call.kwargs["message"]
+    assert tool_msg.role == OpenaiApiRole.TOOL
+    assert '"base64"' not in tool_msg.content
+    # 不追加 USER 图片消息
+    turn_runner._history.append_history_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_tool_to_item_ignores_failed_image_result(turn_runner):
+    """read_image 失败时不拆分图片消息。"""
+    room = MagicMock(spec=ChatRoom)
+    result = {"success": False, "message": "unsupported image format: /tmp/x.gif"}
+    tool_call, output_item = _make_run_tool_fixture(turn_runner, room, result, success=False)
+
+    with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock(return_value=MagicMock(id=7))), patch(
+        "service.agentService.agentTurnRunner.agentActivityService.update_activity_progress",
+        new=AsyncMock(),
+    ):
+        ret = await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    assert ret == TurnStepResult.TOOL_EXECUTE_SUCCESS
+    turn_runner._history.append_history_message.assert_not_called()

@@ -7,6 +7,7 @@ from util import llmApiUtil
 
 from constants import AgentHistoryTag, AgentHistoryStatus, OpenaiApiRole
 
+from .agentMessage import AgentMessage
 from .base import DbModelBase, EnumField, EnumListField, JsonFieldWithClass, PydanticJsonField
 from .historyUsage import HistoryUsage
 
@@ -16,7 +17,7 @@ class GtAgentHistory(DbModelBase):
     seq: int = peewee.IntegerField(null=False)
     role: OpenaiApiRole = EnumField(OpenaiApiRole, null=False)
     tool_call_id: str | None = peewee.TextField(null=True)
-    message: llmApiUtil.OpenAIMessage | None = PydanticJsonField(llmApiUtil.OpenAIMessage, null=True)
+    message: AgentMessage | None = PydanticJsonField(AgentMessage, null=True)
     status: AgentHistoryStatus = EnumField(AgentHistoryStatus, null=False, default=AgentHistoryStatus.INIT)
     error_message: str | None = peewee.TextField(null=True)
     tags: list[AgentHistoryTag] = EnumListField(AgentHistoryTag, default=list)
@@ -31,7 +32,7 @@ class GtAgentHistory(DbModelBase):
     @classmethod
     def build(
         cls,
-        message: llmApiUtil.OpenAIMessage,
+        message: AgentMessage,
         *,
         status: AgentHistoryStatus | None = None,
         error_message: str | None = None,
@@ -43,6 +44,7 @@ class GtAgentHistory(DbModelBase):
         """构建 GtAgentHistory 对象。
 
         agent_id 和 seq 可选传入，若未指定则由 Store 层填充。
+        message 只接受 AgentMessage；OpenAIMessage 需先经 `AgentMessage.from_openai()` 转换。
 
         自动推断规则：
         - status: 若未指定，默认 SUCCESS
@@ -93,7 +95,9 @@ class GtAgentHistory(DbModelBase):
 
     @property
     def openai_message_or_none(self) -> llmApiUtil.OpenAIMessage | None:
-        return self.message
+        if self.message is None:
+            return None
+        return self.message.to_openai_message()
 
     @property
     def openai_message(self) -> llmApiUtil.OpenAIMessage:
@@ -104,17 +108,15 @@ class GtAgentHistory(DbModelBase):
 
     @property
     def content(self):
-        message = self.openai_message_or_none
-        if message is None:
+        if self.message is None:
             return None
-        return message.content
+        return self.message.content
 
     @property
     def tool_calls(self):
-        message = self.openai_message_or_none
-        if message is None:
+        if self.message is None:
             return None
-        return message.tool_calls
+        return self.message.tool_calls
 
     @staticmethod
     def is_tool_call_succeeded(result_json: str | None) -> bool:

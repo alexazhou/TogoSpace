@@ -1,12 +1,14 @@
 from constants import AgentHistoryTag, OpenaiApiRole
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service import persistenceService
 from util import llmApiUtil
 
 
-def _make_item(message: llmApiUtil.OpenAIMessage, *, seq: int = 0, tags=None) -> GtAgentHistory:
-    """测试辅助函数。"""
-    item = GtAgentHistory.build(message, tags=tags)
+def _make_item(message, *, seq: int = 0, tags=None) -> GtAgentHistory:
+    """测试辅助函数。OpenAIMessage 先经 AgentMessage.from_openai() 转换再构建。"""
+    agent_msg = message if isinstance(message, AgentMessage) else AgentMessage.from_openai(message)
+    item = GtAgentHistory.build(agent_msg, tags=tags)
     item.agent_id = 1
     item.seq = seq
     return item

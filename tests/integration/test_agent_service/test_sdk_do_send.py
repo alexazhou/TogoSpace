@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from dal.db import gtTeamManager
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtScheculeTask import GtScheculeTask
@@ -361,7 +362,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             ("bob", "hello alice"),
         ])
         item = GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt)),
         )
         item.agent_id = agent.gt_agent.id
         item.seq = 0

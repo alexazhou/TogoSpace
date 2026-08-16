@@ -14,6 +14,7 @@ import pytest
 
 from constants import AgentHistoryTag, AgentStatus, OpenaiApiRole, TurnStepResult
 from dal.db import gtAgentManager, gtTeamManager
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service import agentService, ormService, persistenceService, presetService, roomService
 from service.roomService import ChatRoom
@@ -80,7 +81,7 @@ class TestCtrlRoomMessageInjectionDuringGroupTurn(ServiceTestCase):
 
         # 设置 turn_runner history 末尾为 USER 消息，使 is_safe_for_immediate_insert() 返回 True
         await turn_runner._history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "群聊消息"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "群聊消息")),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
 

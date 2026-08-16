@@ -292,6 +292,15 @@
 - **多模态标记**：每个模型可标记是否支持多模态（读图），vision 槽位只能配置多模态模型
 - **向后兼容**：旧格式配置自动迁移为新格式，用户无感升级
 
+### V25: Agent 历史消息类型与多模态扩展
+
+重构 Agent 历史消息的存储与发送格式，为工具结果（如图片）等结构化信息提供存放位置：
+
+- **自定义消息类型**：`GtAgentHistory.message` 从 `OpenAIMessage` 改为独立的自定义类型 `AgentMessage`（不继承），承载 openai 语义字段 + `attachments`（附件/图片），存储侧 `content` 恒为纯文本
+- **多模态发送**：`OpenAIMessage.content` 支持多模态 content block（text / image_url），图片附件仅在 `user` 角色消息中转换为视觉块（OpenAI 规范限制）
+- **统一转换边界**：模型层 `build()` 与 Store 层只接受 `AgentMessage`，`OpenAIMessage` 由调用方先经 `AgentMessage.from_openai()` 转换；读取侧 `openai_message` 统一转换回 `OpenAIMessage`，中间业务逻辑零改动
+- **向后兼容**：DB 列不变，旧 `OpenAIMessage` JSON 可直接读回，无迁移
+
 ---
 
 ## 技术栈
@@ -422,3 +431,9 @@
 
 ### V24
 - [产品文档](./versions/v24/v24_step1_product.md)
+- [技术文档](./versions/v24/v24_step2_technical.md)
+
+### V25
+- [产品文档](./versions/v25/v25_step1_product.md)
+- [技术文档](./versions/v25/v25_step2_technical.md)
+- [开发任务表](./versions/v25/v25_step3_tasks.md)

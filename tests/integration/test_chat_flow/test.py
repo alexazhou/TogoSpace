@@ -14,6 +14,7 @@ import service.schedulerService as scheduler
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.presetService as presetService
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtScheculeTask import GtScheculeTask
 from util import configUtil
@@ -98,7 +99,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
             alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
             item = GtAgentHistory.build(
-                OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset test turn state"),
+                AgentMessage.from_openai(OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset test turn state")),
             )
             item.sender_id = alice.gt_agent.id
             item.seq = 0
@@ -147,7 +148,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
             alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
             item = GtAgentHistory.build(
-                OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset turn checker history"),
+                AgentMessage.from_openai(OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset turn checker history")),
             )
             item.sender_id = alice.gt_agent.id
             item.seq = 0
@@ -240,15 +241,15 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             tool_call_1 = OpenAIToolCall(id="call_cancelled", function={"name": "send_chat_msg", "arguments": '{"room_name": "cancelled_tool_room", "msg": "cancelled msg"}'})
             tool_call_2 = OpenAIToolCall(id="call_pending", function={"name": "send_chat_msg", "arguments": '{"room_name": "cancelled_tool_room", "msg": "pending msg"}'})
 
-            assistant_msg = OpenAIMessage(
+            assistant_msg = AgentMessage.from_openai(OpenAIMessage(
                 role=OpenaiApiRole.ASSISTANT,
                 content="",
                 tool_calls=[tool_call_1, tool_call_2],
-            )
+            ))
 
             # USER 消息
             user_item = GtAgentHistory.build(
-                OpenAIMessage.text(OpenaiApiRole.USER, "请发送两条消息"),
+                AgentMessage.from_openai(OpenAIMessage.text(OpenaiApiRole.USER, "请发送两条消息")),
                 tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
             )
             user_item.sender_id = alice.gt_agent.id
@@ -264,7 +265,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
             # TOOL 记录（call_1 已取消）
             tool_cancelled_item = GtAgentHistory.build(
-                OpenAIMessage.tool_result("call_cancelled", "cancelled by user"),
+                AgentMessage.from_openai(OpenAIMessage.tool_result("call_cancelled", "cancelled by user")),
                 status=AgentHistoryStatus.CANCELLED,
                 error_message="cancelled by user",
             )
@@ -318,7 +319,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
 
             alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
             reset_item = GtAgentHistory.build(
-                OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset unregistered tool test"),
+                AgentMessage.from_openai(OpenAIMessage.text(OpenaiApiRole.SYSTEM, "reset unregistered tool test")),
             )
             reset_item.sender_id = alice.gt_agent.id
             reset_item.seq = 0

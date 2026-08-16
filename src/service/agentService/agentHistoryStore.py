@@ -7,6 +7,7 @@ from typing import Iterable, Iterator
 
 from constants import AgentHistoryTag, AgentHistoryStatus, OpenaiApiRole
 from dal.db import gtAgentHistoryManager
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.historyUsage import HistoryUsage
 from util import llmApiUtil
@@ -23,7 +24,7 @@ class CompactPlan:
     """
 
     #: 需要送给 compact 模型进行总结的历史消息。
-    source_messages: list[llmApiUtil.OpenAIMessage]
+    source_messages: list[AgentMessage]
     #: `COMPACT_SUMMARY` 需要插入的目标 `seq`；`None` 表示当前没有可执行的 compact 计划。
     insert_seq: int | None
 
@@ -164,7 +165,7 @@ class AgentHistoryStore:
     async def finalize_history_item(
         self,
         history_id: int,
-        message: llmApiUtil.OpenAIMessage | None,
+        message: AgentMessage | None,
         status: AgentHistoryStatus,
         error_message: str | None = None,
         tags: list[AgentHistoryTag] | None = None,
@@ -172,15 +173,20 @@ class AgentHistoryStore:
     ) -> None:
         """完成 history item：更新内存对象并持久化到数据库。
 
+        message 只接受 AgentMessage；OpenAIMessage 需由调用方先经
+        `AgentMessage.from_openai()` 转换（转换边界在调用方，不在此层）。
+
         tags 参数：若不为 None，写入数据库；若为 None，不更新 tags 字段。
         """
+        agent_msg: AgentMessage | None = message
+
         # 更新内存对象
         for item in self._items:
             if item.id == history_id:
-                if message is not None:
-                    item.role = message.role
-                    item.tool_call_id = message.tool_call_id
-                    item.message = message
+                if agent_msg is not None:
+                    item.role = agent_msg.role
+                    item.tool_call_id = agent_msg.tool_call_id
+                    item.message = agent_msg
                 item.status = status
                 item.error_message = error_message
                 if tags is not None:
@@ -198,10 +204,10 @@ class AgentHistoryStore:
         }
         if tags is not None:
             update_kwargs["tags"] = list(tags)
-        if message is not None:
-            update_kwargs["role"] = message.role
-            update_kwargs["tool_call_id"] = message.tool_call_id
-            update_kwargs["message"] = message
+        if agent_msg is not None:
+            update_kwargs["role"] = agent_msg.role
+            update_kwargs["tool_call_id"] = agent_msg.tool_call_id
+            update_kwargs["message"] = agent_msg
         await gtAgentHistoryManager.update_agent_history_by_id(**update_kwargs)
 
     def get_last_assistant_message(self, start_idx: int = 0) -> llmApiUtil.OpenAIMessage | None:
@@ -319,7 +325,7 @@ class AgentHistoryStore:
         for item in turn_items:
             if item.status == AgentHistoryStatus.INIT:
                 if item.role == OpenaiApiRole.TOOL and item.tool_call_id:
-                    cancel_msg = llmApiUtil.OpenAIMessage.tool_result(item.tool_call_id, cancel_result_json)
+                    cancel_msg = AgentMessage.tool_result(item.tool_call_id, cancel_result_json)
                 else:
                     cancel_msg = None
                 await self.finalize_history_item(
@@ -336,7 +342,7 @@ class AgentHistoryStore:
             tool_calls = item.tool_calls or []
             for tc in tool_calls:
                 existing = self.find_tool_result_by_call_id(tc.id)
-                tool_message = llmApiUtil.OpenAIMessage.tool_result(tc.id, cancel_result_json)
+                tool_message = AgentMessage.tool_result(tc.id, cancel_result_json)
                 if existing is None:
                     await self.append_history_message(GtAgentHistory.build(
                         tool_message,
@@ -355,7 +361,7 @@ class AgentHistoryStore:
         # 3. 追加 ROOM_TURN_FINISH 关闭 active turn
         finish_text = "本轮任务已被操作者中断，请以下一条新消息为起点重新出发。"
         await self.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, finish_text),
+            AgentMessage(role=OpenaiApiRole.USER, content=finish_text),
             tags=[AgentHistoryTag.ROOM_TURN_FINISH],
         ))
 
@@ -363,12 +369,12 @@ class AgentHistoryStore:
 
     # ─── Compact 相关方法 ─────────────────────────────────────
 
-    def build_infer_messages(self) -> list[llmApiUtil.OpenAIMessage]:
-        """构造本次 _infer() 真正发给模型的消息列表。"""
+    def build_infer_messages(self) -> list[AgentMessage]:
+        """构造本次 _infer() 要发的消息列表（AgentMessage，转换由 llmService 统一完成）。"""
         items = list(self._items)
         if self.get_pending_infer_item() is not None:
             items = items[:-1]
-        return [item.openai_message for item in items if item.has_message]
+        return [msg for item in items if (msg := item.message) is not None]
 
     def build_compact_plan(self) -> CompactPlan | None:
         """计算本次 compact 的压缩源与 COMPACT_SUMMARY 插入点。
@@ -415,7 +421,7 @@ class AgentHistoryStore:
                 self._agent_id, len(items), preserve_start_idx, insert_seq, len(items),
             )
             return CompactPlan(
-                source_messages=[item.openai_message for item in items],
+                source_messages=[msg for item in items if (msg := item.message) is not None],
                 insert_seq=insert_seq,
             )
 
@@ -427,7 +433,7 @@ class AgentHistoryStore:
             preserve_start_idx, len(items) - preserve_start_idx,
         )
         return CompactPlan(
-            source_messages=[item.openai_message for item in items[:preserve_start_idx]],
+            source_messages=[msg for item in items[:preserve_start_idx] if (msg := item.message) is not None],
             insert_seq=insert_seq,
         )
 
@@ -494,7 +500,7 @@ class AgentHistoryStore:
 
     async def insert_compact_summary(
         self,
-        message: llmApiUtil.OpenAIMessage,
+        message: AgentMessage,
         seq: int,
     ) -> GtAgentHistory:
         """插入 COMPACT_SUMMARY 消息并立即裁剪旧消息（原子操作）。

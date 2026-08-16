@@ -177,7 +177,7 @@ async def _test_llm_service(provider: LlmProviderConfig, model: LlmModelConfig, 
     message = response.choices[0].message if response.choices else None
     response_text = ""
     if message:
-        response_text = message.content or ""
+        response_text = message.text_content() or ""
         # 有些模型把内容放在 reasoning_content 里
         if not response_text and message.reasoning_content:
             response_text = message.reasoning_content

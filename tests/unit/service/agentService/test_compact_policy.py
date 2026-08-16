@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from constants import OpenaiApiRole
+from model.dbModel.agentMessage import AgentMessage
 from service import llmService
 from service.agentService.compact import (
     calc_compact_trigger_tokens,
@@ -128,7 +129,7 @@ def test_build_compact_resume_prompt_wraps_summary():
 # ─── estimate_tokens ─────────────────────────────────────
 
 def test_estimate_tokens_returns_positive_int():
-    msgs = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "Hello world")]
+    msgs = [AgentMessage(role=OpenaiApiRole.USER, content="Hello world")]
     result = estimate_tokens("gpt-4o", msgs, system_prompt="You are helpful.")
     assert isinstance(result, int)
     assert result > 0
@@ -176,7 +177,7 @@ def _make_tool() -> llmApiUtil.OpenAITool:
 @pytest.mark.asyncio
 async def test_compact_messages_success():
     """成功压缩，返回包含引导语的摘要。"""
-    messages = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "历史消息")]
+    messages = [AgentMessage(role=OpenaiApiRole.USER, content="历史消息")]
     mock_resp = _make_mock_response("这是摘要内容")
     tools = [_make_tool()]
     captured: dict[str, object] = {}
@@ -201,7 +202,7 @@ async def test_compact_messages_success():
 @pytest.mark.asyncio
 async def test_compact_messages_infer_failed():
     """LLM 推理失败，抛出 RuntimeError。"""
-    messages = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "历史消息")]
+    messages = [AgentMessage(role=OpenaiApiRole.USER, content="历史消息")]
 
     with patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.failure(Exception("API error")))):
         with pytest.raises(RuntimeError):
@@ -211,7 +212,7 @@ async def test_compact_messages_infer_failed():
 @pytest.mark.asyncio
 async def test_compact_messages_empty_content():
     """LLM 返回空内容，仍返回带引导语的空摘要。"""
-    messages = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "历史消息")]
+    messages = [AgentMessage(role=OpenaiApiRole.USER, content="历史消息")]
     mock_resp = _make_mock_response("")
 
     with patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(mock_resp))):
@@ -223,7 +224,7 @@ async def test_compact_messages_empty_content():
 
 @pytest.mark.asyncio
 async def test_compact_messages_tool_calls_in_response_treated_as_failure():
-    messages = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "历史消息")]
+    messages = [AgentMessage(role=OpenaiApiRole.USER, content="历史消息")]
     tool_call_response = _make_mock_response("")
     tool_call_response.choices[0].message.tool_calls = [
         llmApiUtil.OpenAIToolCall.model_validate({
@@ -241,7 +242,7 @@ async def test_compact_messages_tool_calls_in_response_treated_as_failure():
 @pytest.mark.asyncio
 async def test_compact_messages_exception():
     """LLM 调用抛出异常，异常向上传播（不再被吞咽）。"""
-    messages = [llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "历史消息")]
+    messages = [AgentMessage(role=OpenaiApiRole.USER, content="历史消息")]
 
     with patch(_INFER_PATCH, AsyncMock(side_effect=Exception("network error"))):
         with pytest.raises(Exception, match="network error"):

@@ -2,19 +2,21 @@
 from __future__ import annotations
 
 from constants import AgentHistoryStatus, OpenaiApiRole
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from util import llmApiUtil
 
 
 def _make_item(
-    message: llmApiUtil.OpenAIMessage,
+    message,
     *,
     agent_id: int = 1,
     seq: int = 0,
     status: AgentHistoryStatus | None = None,
 ) -> GtAgentHistory:
-    item = GtAgentHistory.build(message, status=status)
+    agent_msg = message if isinstance(message, AgentMessage) else AgentMessage.from_openai(message)
+    item = GtAgentHistory.build(agent_msg, status=status)
     item.agent_id = agent_id
     item.seq = seq
     return item

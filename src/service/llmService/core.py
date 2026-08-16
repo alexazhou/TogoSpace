@@ -8,6 +8,7 @@ from typing import Optional
 
 from constants import InferRequestStateType, LlmErrorCategory, LlmProtocol, LlmProviderType
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
+from model.dbModel.agentMessage import AgentMessage
 from service.llmService.llmErrorClassifier import classify_llm_error, RETRYABLE_CATEGORIES
 from service.llmService.llmRequestRules import apply_llm_request_rules
 from util import configUtil, llmApiUtil
@@ -161,14 +162,59 @@ def _usage_to_log_json(usage: llmApiUtil.OpenAIUsage | None) -> str:
     return json.dumps(usage.model_dump(mode="json", exclude_none=False), ensure_ascii=False, default=str)
 
 
+def _split_tool_result_messages(messages: list[AgentMessage]) -> list[llmApiUtil.OpenAIMessage]:
+    """把 AgentMessage 列表转成发送用 OpenAIMessage 列表。
+
+    两步：
+    1. 直接转换：每条消息转 OpenAIMessage；带图片附件的 TOOL 消息拆出 USER 图片消息（紧跟其后）。
+    2. 调整顺序：工具结果段（连续的 TOOL / USER）内稳定分区，TOOL 在前、USER（含图片）在后，
+       避免多 tool_call 时图片 USER 消息插在工具结果中间（OpenAI 规范：tool 消息紧随
+       assistant(tool_calls)，image_url 仅允许在 user 角色）。
+    """
+    # 1) 直接转换
+    converted: list[llmApiUtil.OpenAIMessage] = []
+    for msg in messages:
+        converted.append(msg.to_openai_message())
+        for att in (msg.attachments or []):
+            if att.kind == "image":
+                blocks: list[llmApiUtil.OpenAIContentBlock] = []
+                if att.caption:
+                    blocks.append(llmApiUtil.OpenAITextContentBlock(text=att.caption))
+                url = att.url or f"data:{att.mime_type or 'image/png'};base64,{att.data}"
+                blocks.append(llmApiUtil.OpenAIImageUrlContentBlock(image_url={"url": url}))
+                converted.append(llmApiUtil.OpenAIMessage(
+                    role=llmApiUtil.OpenaiApiRole.USER,
+                    content=blocks,
+                ))
+
+    # 2) 调整顺序：一次遍历，检测「图片 USER 紧挨在 TOOL 之前」的逆序相邻对并交换。
+    #    交换后回退一步，让图片继续往后冒泡，直到所有 TOOL 都排在图片之前。
+    def _is_image_user(m: llmApiUtil.OpenAIMessage) -> bool:
+        return (
+            m.role == llmApiUtil.OpenaiApiRole.USER
+            and isinstance(m.content, list)
+            and any(isinstance(b, llmApiUtil.OpenAIImageUrlContentBlock) for b in m.content)
+        )
+
+    i = 0
+    while i < len(converted):
+        if converted[i].role == llmApiUtil.OpenaiApiRole.TOOL and i > 0 and _is_image_user(converted[i - 1]):
+            converted[i - 1], converted[i] = converted[i], converted[i - 1]
+            i -= 1  # 图片后移了一位，可能还要继续往后冒泡，回退重新检查
+        else:
+            i += 1
+    return converted
+
+
 def _build_request(
     *,
     ctx: GtCoreAgentDialogContext,
     model_config: LlmModelConfig,
 ) -> tuple[llmApiUtil.OpenAIRequest, tuple[str, ...]]:
+    # ctx.messages 为 AgentMessage（存储域类型），这里统一转换回 OpenAIMessage（发送格式）
     messages: list[llmApiUtil.OpenAIMessage] = [
         llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.SYSTEM, ctx.system_prompt),
-        *ctx.messages,
+        *_split_tool_result_messages(ctx.messages),
     ]
     
     # 获取上下文配置 (优先使用模型独立配置)

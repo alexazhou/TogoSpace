@@ -7,7 +7,9 @@ from typing import Any
 
 import litellm
 
+from constants import OpenaiApiRole
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
+from model.dbModel.agentMessage import AgentMessage
 from service import llmService
 from service.agentService import promptBuilder
 from util import llmApiUtil, configUtil
@@ -65,23 +67,27 @@ def calc_compact_trigger_tokens(model_config: LlmModelConfig) -> int:
 
 def estimate_tokens(
     model: str,
-    messages: list[llmApiUtil.OpenAIMessage],
+    messages: list[AgentMessage],
     system_prompt: str | None = None,
 ) -> int:
-    """估算消息列表的 token 数量，使用 litellm.token_counter。"""
+    """估算消息列表的 token 数量，使用 litellm.token_counter。
+
+    内部把 AgentMessage 转回 OpenAIMessage（含多模态 content）再估算，
+    保证与实际发送形态一致。
+    """
     try:
         msg_dicts: list[dict[str, Any]] = []
         if system_prompt:
             msg_dicts.append({"role": "system", "content": system_prompt})
         for msg in messages:
-            msg_dicts.append(msg.to_dict())
+            msg_dicts.append(msg.to_openai_message().to_dict())
         return litellm.token_counter(model=model, messages=msg_dicts)
     except Exception as e:
         logger.warning("token 估算失败，回退到字符估算: error=%s", e)
         return estimate_token_by_char(messages, system_prompt)
 
 
-def estimate_token_by_char(messages: list[llmApiUtil.OpenAIMessage], system_prompt: str | None = None) -> int:
+def estimate_token_by_char(messages: list[AgentMessage], system_prompt: str | None = None) -> int:
     """字符数 / 4 的粗略估算，作为 litellm 失败时的兜底。"""
     total_chars = len(system_prompt or "")
     for msg in messages:
@@ -101,7 +107,7 @@ def is_context_overflow_error(error: Exception) -> bool:
 # ─── compact 执行 ─────────────────────────────────────────
 
 async def compact_messages(
-    messages: list[llmApiUtil.OpenAIMessage],
+    messages: list[AgentMessage],
     system_prompt: str,
     model: str,
     tools: list[llmApiUtil.OpenAITool] | None = None,
@@ -125,7 +131,7 @@ async def compact_messages(
     instruction = promptBuilder.build_compact_instruction(max_tokens)
     ctx = GtCoreAgentDialogContext(
         system_prompt=system_prompt,
-        messages=messages + [llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, instruction)],
+        messages=messages + [AgentMessage(role=OpenaiApiRole.USER, content=instruction)],
         tools=tools,
         tool_choice="none",
     )
@@ -140,5 +146,5 @@ async def compact_messages(
 
     if response_message.tool_calls:
         raise RuntimeError("Model returned tool_calls instead of summary during compact")
-    summary = response_message.content or ""
+    summary = response_message.text_content() or ""
     return promptBuilder.build_compact_resume_prompt(summary)

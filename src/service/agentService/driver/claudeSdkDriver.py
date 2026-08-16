@@ -15,6 +15,7 @@ from service.funcToolService.funcToolType import get_function_metadata
 from service.agentService.toolRegistry import build_runtime_allow_specs
 from service import funcToolService, roomService
 from model.dbModel.gtScheculeTask import GtScheculeTask
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from constants import AgentHistoryStatus, OpenaiApiRole, ToolCategory
 from util import llmApiUtil
@@ -198,10 +199,8 @@ class ClaudeSdkAgentDriver(AgentDriver):
             # 写入 tool_use 消息到 history
             tool_call_id = self._next_tool_call_id()
             await self.host._history.append_history_message(GtAgentHistory.build(
-                llmApiUtil.OpenAIMessage(
+                AgentMessage(
                     role=OpenaiApiRole.ASSISTANT,
-                    content=None,
-                    reasoning_content=None,
                     tool_calls=[
                         llmApiUtil.OpenAIToolCall(
                             id=tool_call_id,
@@ -209,7 +208,6 @@ class ClaudeSdkAgentDriver(AgentDriver):
                             function={"name": tool_name, "arguments": json.dumps(args, ensure_ascii=False)},
                         )
                     ],
-                    tool_call_id=None,
                 ),
                 status=AgentHistoryStatus.SUCCESS,
             ))

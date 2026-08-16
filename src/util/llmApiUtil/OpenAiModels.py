@@ -1,9 +1,29 @@
 import json
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional, Annotated, Union
 from pydantic import BaseModel, Field, model_validator
 
 from constants import OpenaiApiRole, ToolCategory
 from util.commonUtil import first_not_none
+
+
+# ========== 多模态 content block ==========
+
+class OpenAITextContentBlock(BaseModel):
+    """OpenAI 多模态 content 的文本块。"""
+    type: Literal["text"] = "text"
+    text: str
+
+
+class OpenAIImageUrlContentBlock(BaseModel):
+    """OpenAI 多模态 content 的图片块（image_url 仅允许出现在 user 角色）。"""
+    type: Literal["image_url"] = "image_url"
+    image_url: dict[str, str]          # {"url": "data:image/png;base64,..."}
+
+
+OpenAIContentBlock = Annotated[
+    Union[OpenAITextContentBlock, OpenAIImageUrlContentBlock],
+    Field(discriminator="type"),
+]
 
 
 # ========== 主要类 ==========
@@ -11,10 +31,19 @@ from util.commonUtil import first_not_none
 class OpenAIMessage(BaseModel):
     # 对应 openai 格式
     role: OpenaiApiRole = Field(..., description="消息角色")
-    content: Optional[str] = Field(None, description="消息内容")
+    content: Optional[str | list[OpenAIContentBlock]] = Field(None, description="消息内容（文本或多模态块数组）")
     reasoning_content: Optional[str] = Field(None, description="推理内容（如 CoT 模型），仅响应侧使用")
     tool_calls: Optional[List["OpenAIToolCall"]] = Field(None, description="工具调用列表")
     tool_call_id: Optional[str] = Field(None, description="工具调用 ID（tool 角色专用）")
+
+    def text_content(self) -> str | None:
+        """提取纯文本部分：content 为 str 时原样返回；为 content blocks 时拼接 text 块。"""
+        if isinstance(self.content, str):
+            return self.content
+        if isinstance(self.content, list):
+            parts = [b.text for b in self.content if isinstance(b, OpenAITextContentBlock)]
+            return "".join(parts) or None
+        return None
 
     @classmethod
     def text(cls, role: OpenaiApiRole, content: str) -> "OpenAIMessage":

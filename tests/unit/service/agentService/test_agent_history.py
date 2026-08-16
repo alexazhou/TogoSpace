@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from constants import AgentHistoryTag, AgentHistoryStatus, OpenaiApiRole
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from util import llmApiUtil
@@ -15,15 +16,19 @@ from util import llmApiUtil
 
 
 def _make_item(
-    message: llmApiUtil.OpenAIMessage,
+    message,
     *,
     agent_id: int = 1,
     seq: int = 0,
     status: AgentHistoryStatus | None = None,
     tags: list[AgentHistoryTag] | None = None,
 ) -> GtAgentHistory:
-    """测试辅助函数：创建 GtAgentHistory 并填充 agent_id 和 seq。"""
-    item = GtAgentHistory.build(message, status=status, tags=tags)
+    """测试辅助函数：创建 GtAgentHistory 并填充 agent_id 和 seq。
+
+    OpenAIMessage 先经 AgentMessage.from_openai() 转换再构建。
+    """
+    agent_msg = message if isinstance(message, AgentMessage) else AgentMessage.from_openai(message)
+    item = GtAgentHistory.build(agent_msg, status=status, tags=tags)
     item.agent_id = agent_id
     item.seq = seq
     return item
@@ -494,7 +499,7 @@ class TestCompact:
 
         with patch(_MOCK_INSERT_AT_SEQ, AsyncMock(side_effect=lambda item: item)):
             await history.insert_compact_summary(
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact summary"),
+                AgentMessage(role=OpenaiApiRole.USER, content="compact summary"),
                 seq=2,
             )
 
@@ -514,7 +519,7 @@ class TestCompact:
         mock_insert = AsyncMock(side_effect=lambda item: item)
         with patch(_MOCK_INSERT_AT_SEQ, mock_insert):
             await history.insert_compact_summary(
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "summary1"),
+                AgentMessage(role=OpenaiApiRole.USER, content="summary1"),
                 seq=2,
             )
 
@@ -527,7 +532,7 @@ class TestCompact:
 
         with patch(_MOCK_INSERT_AT_SEQ, mock_insert):
             await history.insert_compact_summary(
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "summary2"),
+                AgentMessage(role=OpenaiApiRole.USER, content="summary2"),
                 seq=4,
             )
 
@@ -546,7 +551,7 @@ class TestCompact:
 
         with patch(_MOCK_INSERT_AT_SEQ, AsyncMock(side_effect=lambda item: item)):
             inserted = await history.append_history_message(
-                GtAgentHistory.build(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "mid")),
+                GtAgentHistory.build(AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "mid"))),
                 seq=1,
             )
 
@@ -568,7 +573,7 @@ class TestCompact:
 
         with patch(_MOCK_APPEND, AsyncMock(side_effect=lambda item: item)):
             appended = await history.append_history_message(
-                GtAgentHistory.build(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "next")),
+                GtAgentHistory.build(AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "next"))),
             )
 
         assert appended.seq == 5

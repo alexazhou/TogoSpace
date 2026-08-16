@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from constants import ToolCategory
 from service.agentService.toolRegistry import (
-    AgentToolRegistry, 
-    validate_tool_allow_specs, 
-    build_runtime_allow_specs
+    AgentToolRegistry,
+    validate_tool_allow_specs,
+    build_runtime_allow_specs,
 )
 from service.roomService import ToolCallContext
 from util import llmApiUtil

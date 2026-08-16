@@ -18,6 +18,7 @@ from dal.db import (
     gtTeamManager,
     gtAgentManager,
 )
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtScheculeTask import GtScheculeTask
@@ -696,31 +697,31 @@ class TestDalManagers(ServiceTestCase):
         alice = await gtAgentManager.get_agent(team.id, "alice")
         assert alice is not None
 
-        first = GtAgentHistory(
+        first = GtAgentHistory.build(
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v1")),
             agent_id=alice.id,
             seq=1,
-            role=OpenaiApiRole.USER,
-            message=llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v1"),
+            status=AgentHistoryStatus.INIT,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         )
         saved_1 = await gtAgentHistoryManager.append_agent_history_message(first)
         assert saved_1.agent_id == alice.id
         assert saved_1.seq == 1
-        assert saved_1.message == llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v1")
+        assert saved_1.message == AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v1"))
         assert saved_1.status == AgentHistoryStatus.INIT
         assert saved_1.error_message is None
         assert saved_1.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
-        duplicate = GtAgentHistory(
+        duplicate = GtAgentHistory.build(
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v2")),
             agent_id=alice.id,
             seq=1,
-            role=OpenaiApiRole.USER,
-            message=llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v2"),
+            status=AgentHistoryStatus.INIT,
             tags=[AgentHistoryTag.COMPACT_SUMMARY],
         )
         saved_2 = await gtAgentHistoryManager.append_agent_history_message(duplicate)
         assert saved_2.id == saved_1.id
-        assert saved_2.message == llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v1")
+        assert saved_2.message == AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v1"))
         assert saved_2.tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
     async def test_agent_history_manager_append_and_get_sorted(self):
@@ -742,25 +743,25 @@ class TestDalManagers(ServiceTestCase):
         assert alice is not None and bob is not None
 
         items = [
-            GtAgentHistory(
+            GtAgentHistory.build(
+                AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "2")),
                 agent_id=alice.id,
                 seq=2,
-                role=OpenaiApiRole.USER,
-                message=llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "2"),
+                status=AgentHistoryStatus.INIT,
                 tags=[AgentHistoryTag.COMPACT_SUMMARY],
             ),
-            GtAgentHistory(
+            GtAgentHistory.build(
+                AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "1")),
                 agent_id=alice.id,
                 seq=1,
-                role=OpenaiApiRole.USER,
-                message=llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "1"),
+                status=AgentHistoryStatus.INIT,
                 tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
             ),
-            GtAgentHistory(
+            GtAgentHistory.build(
+                AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "b1")),
                 agent_id=bob.id,
                 seq=1,
-                role=OpenaiApiRole.USER,
-                message=llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "b1"),
+                status=AgentHistoryStatus.INIT,
                 tags=[],
             ),
         ]
@@ -770,8 +771,8 @@ class TestDalManagers(ServiceTestCase):
         alice_history = await gtAgentHistoryManager.get_agent_history(alice.id)
         assert [h.seq for h in alice_history] == [1, 2]
         assert [h.message for h in alice_history] == [
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "1"),
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "2"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "1")),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "2")),
         ]
         assert [h.tags for h in alice_history] == [
             [AgentHistoryTag.ROOM_TURN_BEGIN],
@@ -795,11 +796,11 @@ class TestDalManagers(ServiceTestCase):
         assert alice is not None
 
         saved = await gtAgentHistoryManager.append_agent_history_message(
-            GtAgentHistory(
+            GtAgentHistory.build(
+                AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v1")),
                 agent_id=alice.id,
                 seq=1,
-                role=OpenaiApiRole.USER,
-                message=llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "v1"),
+                status=AgentHistoryStatus.INIT,
                 tags=[],
             )
         )
@@ -810,7 +811,7 @@ class TestDalManagers(ServiceTestCase):
             history_id=saved.id,
             role=OpenaiApiRole.TOOL,
             tool_call_id="call_1",
-            message=llmApiUtil.OpenAIMessage.tool_result("call_1", '{"success": true}'),
+            message=AgentMessage(role=OpenaiApiRole.TOOL, content='{"success": true}', tool_call_id="call_1"),
             status=AgentHistoryStatus.FAILED,
             error_message="tool failed",
             tags=[AgentHistoryTag.ROOM_TURN_FINISH],
@@ -818,7 +819,7 @@ class TestDalManagers(ServiceTestCase):
         assert updated.id == saved.id
         assert updated.role == OpenaiApiRole.TOOL
         assert updated.tool_call_id == "call_1"
-        assert updated.message == llmApiUtil.OpenAIMessage.tool_result("call_1", '{"success": true}')
+        assert updated.message == AgentMessage.from_openai(llmApiUtil.OpenAIMessage.tool_result("call_1", '{"success": true}'))
         assert updated.status == AgentHistoryStatus.FAILED
         assert updated.error_message == "tool failed"
         assert updated.tags == [AgentHistoryTag.ROOM_TURN_FINISH]

@@ -13,6 +13,7 @@ from constants import (
     AgentHistoryStatus, AgentHistoryTag,
     DriverType, OpenaiApiRole,
 )
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistoryStore import AgentHistoryStore
@@ -115,17 +116,17 @@ class TestCompactFlow(ServiceTestCase):
         history = AgentHistoryStore(agent_id=agent_id)
 
         for i in range(turns):
-            user_msg = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"用户消息 {i}")
+            user_msg = AgentMessage(role=OpenaiApiRole.USER, content=f"用户消息 {i}")
             await history.append_history_message(GtAgentHistory.build(
                 user_msg, status=AgentHistoryStatus.SUCCESS,
             ))
-            assistant_msg = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, f"助手回复 {i}")
+            assistant_msg = AgentMessage(role=OpenaiApiRole.ASSISTANT, content=f"助手回复 {i}")
             await history.append_history_message(GtAgentHistory.build(
                 assistant_msg, status=AgentHistoryStatus.SUCCESS,
             ))
 
         # 追加一条新的 user 消息，使 history 处于 infer-ready 状态
-        final_user = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "最新的用户输入")
+        final_user = AgentMessage(role=OpenaiApiRole.USER, content="最新的用户输入")
         await history.append_history_message(GtAgentHistory.build(
             final_user, status=AgentHistoryStatus.SUCCESS,
         ))

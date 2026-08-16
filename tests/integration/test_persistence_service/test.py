@@ -6,6 +6,7 @@ import pytest
 
 from constants import AgentStatus, AgentTaskStatus, AgentTaskType
 from dal.db import gtTeamManager, gtAgentManager, gtAgentHistoryManager, gtScheculeTaskManager
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtScheculeTask import GtScheculeTask
@@ -155,19 +156,17 @@ class TestRestoreAgentHistory(ServiceTestCase):
             ),
         )
         await gtAgentHistoryManager.append_agent_history_message(
-            GtAgentHistory(
+            GtAgentHistory.build(
+                AgentMessage.from_openai(OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
                 agent_id=gt_alice.id,
                 seq=0,
-                role=OpenaiApiRole.USER,
-                message=OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
             )
         )
         await gtAgentHistoryManager.append_agent_history_message(
-            GtAgentHistory(
+            GtAgentHistory.build(
+                AgentMessage.from_openai(OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
                 agent_id=gt_alice.id,
                 seq=1,
-                role=OpenaiApiRole.ASSISTANT,
-                message=OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"),
             )
         )
         running_task = await gtScheculeTaskManager.create_task(

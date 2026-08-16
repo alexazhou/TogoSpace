@@ -4,6 +4,7 @@ import pytest
 from util.configUtil.configTypes import LlmContextConfig
 from util.llmApiUtil import OpenAIResponse, OpenAIUsage, OpenAIChoice, OpenAIMessage
 from constants import OpenaiApiRole
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.historyUsage import HistoryUsage
 
@@ -100,13 +101,13 @@ def test_openai_response_usage_from_dict():
 # ─── GtAgentHistory usage 字段 ───────────────────────────
 
 def test_gt_agent_history_usage_default_none():
-    msg = OpenAIMessage.text(OpenaiApiRole.USER, "hello")
+    msg = AgentMessage.from_openai(OpenAIMessage.text(OpenaiApiRole.USER, "hello"))
     item = GtAgentHistory.build(msg)
     assert item.usage is None
 
 
 def test_gt_agent_history_usage_settable():
-    msg = OpenAIMessage.text(OpenaiApiRole.USER, "hello")
+    msg = AgentMessage.from_openai(OpenAIMessage.text(OpenaiApiRole.USER, "hello"))
     item = GtAgentHistory.build(msg)
     item.usage = HistoryUsage(estimated_prompt_tokens=100)
     assert item.usage == HistoryUsage(estimated_prompt_tokens=100)

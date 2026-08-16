@@ -6,6 +6,7 @@ import pytest
 import service.ormService as ormService
 from constants import AgentHistoryStatus, AgentHistoryTag, OpenaiApiRole
 from dal.db import gtAgentHistoryManager
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from tests.base import ServiceTestCase
@@ -31,7 +32,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         history = AgentHistoryStore(agent_id=1)
 
         item = await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "hello db"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "hello db")),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
 
@@ -64,7 +65,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         assert init_item.status == AgentHistoryStatus.INIT
         assert init_item.id is not None
 
-        final_msg = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "response text")
+        final_msg = AgentMessage(role=OpenaiApiRole.ASSISTANT, content="response text")
         await history.finalize_history_item(
             history_id=init_item.id,
             message=final_msg,
@@ -86,7 +87,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         assert init_item.id is not None
         await history.finalize_history_item(
             history_id=init_item.id,
-            message=llmApiUtil.OpenAIMessage.tool_result("call_1", '{"error": "failed"}'),
+            message=AgentMessage.tool_result("call_1", '{"error": "failed"}'),
             status=AgentHistoryStatus.FAILED,
             error_message="tool execution error",
         )
@@ -100,7 +101,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         history = AgentHistoryStore(agent_id=5)
 
         # 1. 用户输入
-        user_msg = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "user input")
+        user_msg = AgentMessage(role=OpenaiApiRole.USER, content="user input")
         await history.append_history_message(GtAgentHistory.build(
             user_msg,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
@@ -109,7 +110,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         # 2. 推理
         infer_item = await history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
         assert infer_item.id is not None
-        assistant_msg = llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "assistant response")
+        assistant_msg = AgentMessage(role=OpenaiApiRole.ASSISTANT, content="assistant response")
         await history.finalize_history_item(infer_item.id, assistant_msg, AgentHistoryStatus.SUCCESS)
 
         assert len(history) == 2
@@ -123,7 +124,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         history = AgentHistoryStore(agent_id=7)
 
         item = await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "hello"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "hello")),
             status=AgentHistoryStatus.SUCCESS,
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
@@ -150,9 +151,9 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         for index, role in enumerate(allowed_roles):
             await GtAgentHistory.delete().aio_execute()
             history = AgentHistoryStore(agent_id=10 + index)
-            message = llmApiUtil.OpenAIMessage.text(role, f"msg-{index}")
+            message = AgentMessage(role=role, content=f"msg-{index}")
             if role == OpenaiApiRole.TOOL:
-                message = llmApiUtil.OpenAIMessage.tool_result("tool_1", '{"success": true}')
+                message = AgentMessage.tool_result("tool_1", '{"success": true}')
 
             await history.append_history_message(GtAgentHistory.build(message))
             assert history.is_infer_ready() is True
@@ -162,7 +163,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         history = AgentHistoryStore(agent_id=20)
 
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "hi"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "hi")),
             status=AgentHistoryStatus.SUCCESS,
         ))
 
@@ -172,7 +173,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         await GtAgentHistory.delete().aio_execute()
         history_failed = AgentHistoryStore(agent_id=21)
         await history_failed.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, ""),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "")),
             status=AgentHistoryStatus.FAILED,
             error_message="mock error",
         ))
@@ -188,11 +189,11 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         history = AgentHistoryStore(agent_id=30)
 
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
             status=AgentHistoryStatus.SUCCESS,
         ))
 
@@ -200,7 +201,7 @@ class TestAgentHistoryStoreAsync(ServiceTestCase):
         assert history.get_current_turn_start_index() == 0
 
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "done"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "done")),
             tags=[AgentHistoryTag.ROOM_TURN_FINISH],
         ))
 
@@ -230,15 +231,15 @@ class TestFinalizeCancelTurn(ServiceTestCase):
 
         # 创建已完成的 turn
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
             status=AgentHistoryStatus.SUCCESS,
         ))
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "done"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "done")),
             tags=[AgentHistoryTag.ROOM_TURN_FINISH],
         ))
 
@@ -255,11 +256,11 @@ class TestFinalizeCancelTurn(ServiceTestCase):
 
         # 创建 active turn
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1")),
             status=AgentHistoryStatus.SUCCESS,
         ))
         init_item = await history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
@@ -291,7 +292,7 @@ class TestFinalizeCancelTurn(ServiceTestCase):
 
         # 创建 active turn，并持久化
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
 
@@ -331,16 +332,16 @@ class TestFinalizeCancelTurn(ServiceTestCase):
 
         # USER 消息（turn 开始）
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "do something"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "do something")),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
 
         # ASSISTANT 消息，声明了 tool_call（已成功入库）
-        assistant_msg = llmApiUtil.OpenAIMessage(
+        assistant_msg = AgentMessage.from_openai(llmApiUtil.OpenAIMessage(
             role=OpenaiApiRole.ASSISTANT,
             content="",
             tool_calls=[tool_call],
-        )
+        ))
         await history.append_history_message(GtAgentHistory.build(
             assistant_msg,
             status=AgentHistoryStatus.SUCCESS,
@@ -383,16 +384,16 @@ class TestFinalizeCancelTurn(ServiceTestCase):
 
         # USER 消息（turn 开始）
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "do something"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "do something")),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
 
         # ASSISTANT 消息，声明了 tool_call
-        assistant_msg = llmApiUtil.OpenAIMessage(
+        assistant_msg = AgentMessage.from_openai(llmApiUtil.OpenAIMessage(
             role=OpenaiApiRole.ASSISTANT,
             content="",
             tool_calls=[tool_call],
-        )
+        ))
         await history.append_history_message(GtAgentHistory.build(
             assistant_msg,
             status=AgentHistoryStatus.SUCCESS,
@@ -431,7 +432,7 @@ class TestFinalizeCancelTurn(ServiceTestCase):
 
         # 创建 active turn
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1")),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
         init_item = await history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)
@@ -443,7 +444,7 @@ class TestFinalizeCancelTurn(ServiceTestCase):
 
         # 发送新消息，应能正常处理
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "new message"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "new message")),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
 
@@ -473,7 +474,7 @@ class TestGetAgentHistoryAfterCompact(ServiceTestCase):
         # 创建 10 条历史记录，没有 compact
         for i in range(10):
             item = GtAgentHistory.build(
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"msg_{i}"),
+                AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"msg_{i}")),
                 status=AgentHistoryStatus.SUCCESS,
                 agent_id=200,
                 seq=i,
@@ -492,7 +493,7 @@ class TestGetAgentHistoryAfterCompact(ServiceTestCase):
         # 创建历史：seq 0-4 是旧数据，seq 5 是 COMPACT_SUMMARY，seq 6-8 是新数据
         for i in range(5):
             item = GtAgentHistory.build(
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"old_msg_{i}"),
+                AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"old_msg_{i}")),
                 status=AgentHistoryStatus.SUCCESS,
                 agent_id=201,
                 seq=i,
@@ -501,7 +502,7 @@ class TestGetAgentHistoryAfterCompact(ServiceTestCase):
 
         # COMPACT_SUMMARY
         compact_item = GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact summary"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "compact summary")),
             status=AgentHistoryStatus.SUCCESS,
             tags=[AgentHistoryTag.COMPACT_SUMMARY],
             agent_id=201,
@@ -512,7 +513,7 @@ class TestGetAgentHistoryAfterCompact(ServiceTestCase):
         # 新数据
         for i in range(6, 9):
             item = GtAgentHistory.build(
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"new_msg_{i}"),
+                AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"new_msg_{i}")),
                 status=AgentHistoryStatus.SUCCESS,
                 agent_id=201,
                 seq=i,
@@ -536,12 +537,12 @@ class TestGetAgentHistoryAfterCompact(ServiceTestCase):
         # 创建历史：seq 0-4 旧数据，seq 5 COMPACT_SUMMARY
         for i in range(5):
             await history.append_history_message(GtAgentHistory.build(
-                llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"old_{i}"),
+                AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"old_{i}")),
                 status=AgentHistoryStatus.SUCCESS,
             ))
 
         await history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "summary"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "summary")),
             status=AgentHistoryStatus.SUCCESS,
             tags=[AgentHistoryTag.COMPACT_SUMMARY],
         ))
@@ -551,7 +552,7 @@ class TestGetAgentHistoryAfterCompact(ServiceTestCase):
 
         # 模拟：内存中额外添加一条新消息（未持久化）
         unpersisted = GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "unpersisted"),
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "unpersisted")),
             status=AgentHistoryStatus.SUCCESS,
             agent_id=202,
             seq=6,

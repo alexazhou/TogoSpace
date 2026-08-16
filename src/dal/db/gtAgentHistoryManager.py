@@ -5,9 +5,9 @@ from peewee import SQL
 from constants import AgentHistoryTag
 from constants import AgentHistoryStatus
 from constants import OpenaiApiRole
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.historyUsage import HistoryUsage
-from util import llmApiUtil
 from . import gtAgentManager
 
 _UNSET = object()
@@ -79,7 +79,7 @@ async def update_agent_history_by_id(
     *,
     role: OpenaiApiRole | object = _UNSET,
     tool_call_id: str | None | object = _UNSET,
-    message: llmApiUtil.OpenAIMessage | None | object = _UNSET,
+    message: AgentMessage | None | object = _UNSET,
     status: AgentHistoryStatus | object = _UNSET,
     error_message: str | None | object = _UNSET,
     tags: list[AgentHistoryTag] | None | object = _UNSET,

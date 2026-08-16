@@ -11,6 +11,9 @@ from .OpenAiModels import (
     OpenAITool,
     OpenAIChoice,
     OpenAIErrorResponse,
+    OpenAIContentBlock,
+    OpenAITextContentBlock,
+    OpenAIImageUrlContentBlock,
 )
 from .client import build_agent_probe_request, init, send_request_stream, send_request_non_stream
 

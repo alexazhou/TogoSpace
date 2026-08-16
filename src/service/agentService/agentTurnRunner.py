@@ -19,6 +19,7 @@ from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtScheculeTask import GtScheculeTask
 from model.dbModel.historyUsage import CompactStage, HistoryUsage
 from service import agentActivityService, llmService, roomService
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 def _detect_json_tool_call_in_content(content: str | None) -> bool:
     """检测 LLM 是否将工具调用以 JSON 对象形式写入了 content 字段（而非 tool_calls）。"""
-    if not content:
+    if not content or not isinstance(content, str):
         return False
     stripped = content.strip()
     if not (stripped.startswith("{") and stripped.endswith("}")):
@@ -169,7 +170,7 @@ class AgentTurnRunner:
                             status_value=agent_task.status.value,
                         )
                         await self._history.append_history_message(GtAgentHistory.build(
-                            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, task_prompt),
+                            AgentMessage(role=OpenaiApiRole.USER, content=task_prompt),
                             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
                         ))
                         await agentActivityService.add_activity(
@@ -217,7 +218,7 @@ class AgentTurnRunner:
             room.name, new_msgs, self.gt_agent.id
         )
         await self._history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt),
+            AgentMessage(role=OpenaiApiRole.USER, content=turn_prompt),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
         other_msgs = [m for m in new_msgs if m.sender_id != self.gt_agent.id]
@@ -247,7 +248,7 @@ class AgentTurnRunner:
             room.name, new_msgs, self.gt_agent.id
         )
         await self._history.append_history_message(GtAgentHistory.build(
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, update_prompt),
+            AgentMessage(role=OpenaiApiRole.USER, content=update_prompt),
         ))
         logger.info(
             "即时插入新消息: agent=%s(agent_id=%d), room=%s, msgs=%d",
@@ -298,7 +299,7 @@ class AgentTurnRunner:
                 if len(turn_setup.hint_prompt) > 0 and failed_action_count <= turn_setup.max_retries:
                     logger.warning(f"检测到失败行动，准备重试: agent_id={self.gt_agent.id}, kind={failure_kind}, retry={failed_action_count}/{turn_setup.max_retries}")
                     await self._history.append_history_message(GtAgentHistory.build(
-                        llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_setup.hint_prompt),
+                        AgentMessage(role=OpenaiApiRole.USER, content=turn_setup.hint_prompt),
                     ))
                     continue
                 raise RuntimeError(
@@ -312,7 +313,7 @@ class AgentTurnRunner:
                 if len(hint) > 0 and failed_action_count <= turn_setup.max_retries:
                     logger.warning(f"检测到 JSON 写入 content 异常，准备重试: agent_id={self.gt_agent.id}, retry={failed_action_count}/{turn_setup.max_retries}")
                     await self._history.append_history_message(GtAgentHistory.build(
-                        llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, hint),
+                        AgentMessage(role=OpenaiApiRole.USER, content=hint),
                     ))
                     next_tool_choice = "required"
                     continue
@@ -410,10 +411,10 @@ class AgentTurnRunner:
     ) -> TurnStepResult:
         """执行推理并按结果分类返回。"""
         assistant_message = await self._infer_to_item(output_item, tools, tool_choice=tool_choice)
-        if _detect_json_tool_call_in_content(assistant_message.content):
+        if _detect_json_tool_call_in_content(assistant_message.text_content()):
             for tc in (assistant_message.tool_calls or []):
                 await self._history.append_history_message(GtAgentHistory.build(
-                    llmApiUtil.OpenAIMessage.tool_result(tc.id, '{"success": false, "message": "工具调用被跳过：模型输出格式异常"}'),
+                    AgentMessage.tool_result(tc.id, '{"success": false, "message": "工具调用被跳过：模型输出格式异常"}'),
                     status=AgentHistoryStatus.FAILED,
                     error_message="工具调用被跳过：模型输出格式异常",
                 ))
@@ -594,7 +595,7 @@ class AgentTurnRunner:
             )
             await history.finalize_history_item(
                 history_id=output_item.id,
-                message=assistant_message,
+                message=AgentMessage.from_openai(assistant_message),
                 status=AgentHistoryStatus.SUCCESS,
                 usage=usage_data,
             )
@@ -619,10 +620,11 @@ class AgentTurnRunner:
                     status=AgentActivityStatus.SUCCEEDED, detail=assistant_message.reasoning_content,
                     metadata=self._base_metadata(),
                 )
-            if assistant_message.content and assistant_message.content.strip():
+            assistant_text = assistant_message.text_content()
+            if assistant_text and assistant_text.strip():
                 await agentActivityService.add_activity(
                     gt_agent=self.gt_agent, activity_type=AgentActivityType.CHAT_REPLY,
-                    status=AgentActivityStatus.SUCCEEDED, detail=assistant_message.content,
+                    status=AgentActivityStatus.SUCCEEDED, detail=assistant_text,
                     metadata=self._base_metadata(),
                 )
 
@@ -717,8 +719,9 @@ class AgentTurnRunner:
             error_msg = f"工具 '{tool_name}' 未找到，请使用已有工具完成行动。"
             logger.warning("tool not registered: agent_id=%d, tool=%s", self.gt_agent.id, tool_name)
 
-            final_message = llmApiUtil.OpenAIMessage.tool_result(
-                output_item.tool_call_id, json.dumps({"success": False, "message": error_msg}, ensure_ascii=False)
+            final_message = AgentMessage.tool_result(
+                output_item.tool_call_id,
+                json.dumps({"success": False, "message": error_msg}, ensure_ascii=False),
             )
 
             await self._history.finalize_history_item(
@@ -735,7 +738,7 @@ class AgentTurnRunner:
                     self.gt_agent.id, tool_name,
                 )
                 auto_result = {"success": True, "message": f"已完成重启，并恢复原历史任务运行"}
-                final_message = llmApiUtil.OpenAIMessage.tool_result(
+                final_message = AgentMessage.tool_result(
                     output_item.tool_call_id,
                     json.dumps(auto_result, ensure_ascii=False),
                 )
@@ -763,10 +766,11 @@ class AgentTurnRunner:
             schedule_task=self._current_task,
         )
         exec_result:ToolExecutionResult = await self.tool_registry.execute_tool_call(tool_call, context)
-        final_message = llmApiUtil.OpenAIMessage.tool_result(
-            exec_result.tool_call_id,
-            json.dumps(exec_result.result, ensure_ascii=False),
-        )
+
+        # ── 工具结果写入历史（read_image 图片挂附件，拆分/排序由 llmService 发送时处理）──
+        # AgentMessage.from_tool_result() 把结果转成一条 TOOL 消息；图片结果把图片挂到
+        # attachments 上（content 剥离 base64）。turn runner 只负责写入，不做拆分。
+        final_message = AgentMessage.from_tool_result(exec_result.tool_call_id, exec_result.result)
         await self._history.finalize_history_item(
             history_id=output_item.id,
             message=final_message,
@@ -774,6 +778,11 @@ class AgentTurnRunner:
             error_message=exec_result.error_message,
             tags=[AgentHistoryTag.ROOM_TURN_FINISH] if (registered_tool.marks_turn_finish and exec_result.success) else None,
         )
+        if final_message.attachments:
+            logger.info(
+                "read_image 图片结果已记录: agent_id=%d, tool=%s, mime=%s, file=%s",
+                self.gt_agent.id, tool_name, final_message.attachments[0].mime_type, exec_result.result.get("file_path"),
+            )
 
         # 活动记录：TOOL_CALL SUCCEEDED / FAILED
         await self._finish_activity(
@@ -834,12 +843,12 @@ class AgentTurnRunner:
 
     async def _check_compact(
         self,
-        messages: list[llmApiUtil.OpenAIMessage],
+        messages: list[AgentMessage],
         *,
         trigger_prompt_tokens: int,
         estimated_tokens: int,
         check_stage: str,
-    ) -> tuple[list[llmApiUtil.OpenAIMessage], int, bool]:
+    ) -> tuple[list[AgentMessage], int, bool]:
         """在指定检查阶段检测 prompt token，必要时执行 compact。
 
         Returns: (messages, estimated_tokens, compact_triggered)
@@ -902,7 +911,7 @@ class AgentTurnRunner:
             raise
 
         await self._history.insert_compact_summary(
-            llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, summary_text),
+            AgentMessage(role=OpenaiApiRole.USER, content=summary_text),
             seq=compact_plan.insert_seq,
         )
 

@@ -8,6 +8,7 @@ import pytest
 
 from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic, AgentStatus, AgentTaskStatus, AgentTaskType, SpecialAgent
 from dal.db import gtAgentManager, gtTeamManager, gtScheculeTaskManager
+from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtScheculeTask import GtScheculeTask
@@ -460,10 +461,10 @@ class TestClearAgentData(_agentServiceCase):
         bob = agentService.get_agent(bob_id)
 
         alice_item = await alice.task_consumer._turn_runner._history.append_history_message(
-            GtAgentHistory.build(llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "alice-before-clear"))
+            GtAgentHistory.build(AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "alice-before-clear")))
         )
         bob_item = await bob.task_consumer._turn_runner._history.append_history_message(
-            GtAgentHistory.build(llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "bob-keep"))
+            GtAgentHistory.build(AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "bob-keep")))
         )
         assert alice_item.id is not None
         assert bob_item.id is not None

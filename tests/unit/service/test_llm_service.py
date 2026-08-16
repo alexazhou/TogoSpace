@@ -4,6 +4,7 @@ import pytest
 
 from constants import InferRequestStateType
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
+from model.dbModel.agentMessage import AgentMessage, MessageAttachment
 from service import llmService
 from util import configUtil, llmApiUtil
 from util.configUtil.configTypes import AppConfig, SettingConfig
@@ -62,7 +63,7 @@ async def test_infer_passes_default_opencode_headers(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
         tool_choice="none",
     )
 
@@ -103,7 +104,7 @@ async def test_infer_passes_configured_headers_without_default_merge(monkeypatch
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
     result = await llmService.infer(None, ctx)
@@ -136,7 +137,7 @@ async def test_infer_stream_passes_request_id(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
         tool_choice="none",
     )
 
@@ -175,7 +176,7 @@ async def test_infer_stream_strips_required_tool_choice_when_reasoning_effort_en
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
         tool_choice="required",
     )
 
@@ -208,7 +209,7 @@ async def test_infer_uses_context_prompt_cache_policy_when_provided(monkeypatch)
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
         prompt_cache=False,
     )
 
@@ -241,7 +242,7 @@ async def test_infer_uses_config_model_when_agent_model_is_none(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
     result = await llmService.infer(None, ctx)  # model 参数为 None
@@ -273,7 +274,7 @@ async def test_infer_uses_agent_model_when_provided(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
     result = await llmService.infer("agent-specific-model@svc", ctx)  # model 参数有值
@@ -305,7 +306,7 @@ async def test_infer_stream_uses_config_model_when_agent_model_is_none(monkeypat
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
     result = await llmService.infer_stream(None, ctx)  # model 参数为 None
@@ -343,7 +344,7 @@ async def test_infer_passes_extra_params(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
     result = await llmService.infer(None, ctx)
@@ -386,7 +387,7 @@ async def test_infer_retries_with_exponential_backoff_until_success(monkeypatch)
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
     async def _on_status_event(event: llmService.InferRequestStatusEvent) -> None:
@@ -432,7 +433,7 @@ async def test_infer_stream_retries_up_to_limit_then_returns_failure(monkeypatch
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
     async def _on_status_event(event: llmService.InferRequestStatusEvent) -> None:
@@ -577,10 +578,259 @@ async def test_infer_no_retry_on_non_retryable_error(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
-        messages=[llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "hello")],
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
     result = await llmService.infer(None, ctx)
 
     assert result.ok is False
     assert attempts["count"] == 1, f"非可重试错误不应重试，但实际尝试了 {attempts['count']} 次"
+
+
+# ─── _split_tool_result_messages：图片拆分与排序 ──────────
+
+def _make_assistant_with_tool_calls(*call_ids: str) -> AgentMessage:
+    """构造带多个 tool_call 的 assistant 消息。"""
+    return AgentMessage(
+        role=llmApiUtil.OpenaiApiRole.ASSISTANT,
+        tool_calls=[
+            llmApiUtil.OpenAIToolCall(id=tc, function={"name": "some_tool", "arguments": "{}"})
+            for tc in call_ids
+        ],
+    )
+
+
+def test_split_image_after_tool_results_when_not_last():
+    """多 tool_call 中带图片的 tool 不是最后一个时，USER 图片消息排在所有 TOOL 结果之后。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    messages = [
+        _make_assistant_with_tool_calls("A", "B"),
+        AgentMessage.from_tool_result("A", {"mime_type": "image/png", "base64": "QQ==", "file_path": "/tmp/a.png"}),
+        AgentMessage.tool_result("B", '{"success": true, "content": "text"}'),
+    ]
+    sent = _split_tool_result_messages(messages)
+
+    assert [m.role for m in sent] == [
+        llmApiUtil.OpenaiApiRole.ASSISTANT,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    # TOOL 结果保持原顺序，图片 USER 消息排在最后（不插在 TOOL 中间）
+    assert sent[1].tool_call_id == "A" and "base64" not in sent[1].content
+    assert sent[2].tool_call_id == "B"
+    assert sent[3].role == llmApiUtil.OpenaiApiRole.USER
+    image_blocks = [b for b in sent[3].content if isinstance(b, llmApiUtil.OpenAIImageUrlContentBlock)]
+    assert len(image_blocks) == 1
+    assert image_blocks[0].image_url["url"] == "data:image/png;base64,QQ=="
+
+
+def test_split_single_image_tool_message():
+    """单个图片 tool：TOOL 文本 + USER 图片两条。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    sent = _split_tool_result_messages([
+        _make_assistant_with_tool_calls("A"),
+        AgentMessage.from_tool_result("A", {"mime_type": "image/jpeg", "base64": "JJ=="}),
+    ])
+    assert [m.role for m in sent] == [
+        llmApiUtil.OpenaiApiRole.ASSISTANT,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    assert sent[2].content[1].image_url["url"] == "data:image/jpeg;base64,JJ=="
+
+
+def test_split_plain_messages_unchanged():
+    """无图片附件时，拆分函数原样透传，顺序不变。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    messages = [
+        AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hi"),
+        AgentMessage.tool_result("B", '{"success": true}'),
+        AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="next"),
+    ]
+    sent = _split_tool_result_messages(messages)
+    assert [m.role for m in sent] == [
+        llmApiUtil.OpenaiApiRole.USER,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    assert sent[0].content == "hi"
+    assert sent[1].content == '{"success": true}'
+    assert sent[2].content == "next"
+
+
+def test_split_two_images_then_text_tool():
+    """连续两个图片 tool + 末尾文本 tool：所有 TOOL 在前，图片统一在后（冒泡正确性）。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    messages = [
+        _make_assistant_with_tool_calls("A", "B", "C"),
+        AgentMessage.from_tool_result("A", {"mime_type": "image/png", "base64": "QQ=="}),
+        AgentMessage.from_tool_result("B", {"mime_type": "image/jpeg", "base64": "JJ=="}),
+        AgentMessage.tool_result("C", '{"success": true, "content": "text"}'),
+    ]
+    sent = _split_tool_result_messages(messages)
+
+    roles = [m.role for m in sent]
+    assert roles == [
+        llmApiUtil.OpenaiApiRole.ASSISTANT,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    # TOOL 保持 A/B/C 顺序
+    assert [m.tool_call_id for m in sent if m.role == llmApiUtil.OpenaiApiRole.TOOL] == ["A", "B", "C"]
+    # 图片 USER 依次为 A、B 的图片
+    image_urls = [
+        b.image_url["url"]
+        for m in sent if m.role == llmApiUtil.OpenaiApiRole.USER
+        for b in m.content if isinstance(b, llmApiUtil.OpenAIImageUrlContentBlock)
+    ]
+    assert image_urls == ["data:image/png;base64,QQ==", "data:image/jpeg;base64,JJ=="]
+
+
+def _image_url(m: llmApiUtil.OpenAIMessage) -> str:
+    """取消息中第一个 image_url 块的 url。"""
+    return next(
+        b.image_url["url"]
+        for b in m.content
+        if isinstance(b, llmApiUtil.OpenAIImageUrlContentBlock)
+    )
+
+
+def test_split_image_tool_last_in_batch():
+    """图片 tool 在 batch 末尾：顺序保持，图片排最后。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    messages = [
+        _make_assistant_with_tool_calls("A", "B"),
+        AgentMessage.tool_result("A", '{"success": true, "content": "text"}'),
+        AgentMessage.from_tool_result("B", {"mime_type": "image/png", "base64": "QQ=="}),
+    ]
+    sent = _split_tool_result_messages(messages)
+
+    assert [m.role for m in sent] == [
+        llmApiUtil.OpenaiApiRole.ASSISTANT,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    assert [m.tool_call_id for m in sent if m.role == llmApiUtil.OpenaiApiRole.TOOL] == ["A", "B"]
+    assert _image_url(sent[3]) == "data:image/png;base64,QQ=="
+
+
+def test_split_image_tool_in_middle_of_batch():
+    """图片 tool 在 batch 中间：图片排到其后所有 TOOL 之后。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    messages = [
+        _make_assistant_with_tool_calls("A", "B", "C"),
+        AgentMessage.tool_result("A", '{"success": true, "content": "text"}'),
+        AgentMessage.from_tool_result("B", {"mime_type": "image/png", "base64": "QQ=="}),
+        AgentMessage.tool_result("C", '{"success": true, "content": "text"}'),
+    ]
+    sent = _split_tool_result_messages(messages)
+
+    assert [m.role for m in sent] == [
+        llmApiUtil.OpenaiApiRole.ASSISTANT,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    assert [m.tool_call_id for m in sent if m.role == llmApiUtil.OpenaiApiRole.TOOL] == ["A", "B", "C"]
+    assert _image_url(sent[4]) == "data:image/png;base64,QQ=="
+
+
+def test_split_images_across_multiple_tool_batches():
+    """跨多个 tool batch：每个 batch 的图片只排在自己 batch 工具结果之后，不串位。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    messages = [
+        _make_assistant_with_tool_calls("A"),
+        AgentMessage.from_tool_result("A", {"mime_type": "image/png", "base64": "QQ=="}),
+        AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="next turn"),
+        _make_assistant_with_tool_calls("B"),
+        AgentMessage.from_tool_result("B", {"mime_type": "image/jpeg", "base64": "JJ=="}),
+    ]
+    sent = _split_tool_result_messages(messages)
+
+    roles = [m.role for m in sent]
+    assert roles == [
+        llmApiUtil.OpenaiApiRole.ASSISTANT,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+        llmApiUtil.OpenaiApiRole.USER,
+        llmApiUtil.OpenaiApiRole.ASSISTANT,
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    # 第一个 batch：TOOL_A 后紧跟 img_A；第二个 batch：TOOL_B 后紧跟 img_B
+    assert sent[1].tool_call_id == "A"
+    assert _image_url(sent[2]) == "data:image/png;base64,QQ=="
+    assert sent[5].tool_call_id == "B"
+    assert _image_url(sent[6]) == "data:image/jpeg;base64,JJ=="
+
+
+def test_split_image_message_includes_caption_text_block():
+    """图片 USER 消息含 caption 描述文本块 + image_url 块。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    messages = [
+        _make_assistant_with_tool_calls("A"),
+        AgentMessage.from_tool_result("A", {"mime_type": "image/png", "base64": "QQ==", "file_path": "/tmp/x.png"}),
+    ]
+    sent = _split_tool_result_messages(messages)
+
+    user = sent[2]
+    assert user.content[0].type == "text"
+    assert user.content[0].text == "以下是工具执行结果的图片（/tmp/x.png）："
+    assert user.content[1].type == "image_url"
+
+
+def test_split_image_with_url_reference():
+    """图片用 url 引用（无内联 base64）：直接透传 url。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    tool_msg = AgentMessage(
+        role=llmApiUtil.OpenaiApiRole.TOOL,
+        content='{"success": true}',
+        tool_call_id="A",
+        attachments=[MessageAttachment(kind="image", mime_type="image/png", url="https://example.com/a.png")],
+    )
+    sent = _split_tool_result_messages([tool_msg])
+
+    assert [m.role for m in sent] == [
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    assert _image_url(sent[1]) == "https://example.com/a.png"
+
+
+def test_split_multiple_image_attachments_one_message():
+    """一条 TOOL 消息挂多个图片附件：拆出多条 USER 图片消息。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    tool_msg = AgentMessage(
+        role=llmApiUtil.OpenaiApiRole.TOOL,
+        content='{"success": true}',
+        tool_call_id="A",
+        attachments=[
+            MessageAttachment(kind="image", mime_type="image/png", data="QQ=="),
+            MessageAttachment(kind="image", mime_type="image/jpeg", data="JJ=="),
+        ],
+    )
+    sent = _split_tool_result_messages([tool_msg])
+
+    assert [m.role for m in sent] == [
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    assert _image_url(sent[1]) == "data:image/png;base64,QQ=="
+    assert _image_url(sent[2]) == "data:image/jpeg;base64,JJ=="
