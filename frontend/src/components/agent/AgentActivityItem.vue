@@ -18,6 +18,10 @@ function readTrimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function safeTrimEnd(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/\s+$/, '') : '';
+}
+
 function formatActivityTime(value: string | null | undefined): string {
   if (!value) {
     return '';
@@ -291,7 +295,7 @@ function getExecuteBashStdout(activity: AgentActivity): string {
   if (!toolResult || typeof toolResult !== 'object') {
     return '';
   }
-  return stripAnsi(readTrimmedString((toolResult as { stdout?: unknown }).stdout));
+  return stripAnsi(safeTrimEnd((toolResult as { stdout?: unknown }).stdout));
 }
 
 function getExecuteBashStderr(activity: AgentActivity): string {
@@ -299,7 +303,7 @@ function getExecuteBashStderr(activity: AgentActivity): string {
   if (!toolResult || typeof toolResult !== 'object') {
     return '';
   }
-  return stripAnsi(readTrimmedString((toolResult as { stderr?: unknown }).stderr));
+  return stripAnsi(safeTrimEnd((toolResult as { stderr?: unknown }).stderr));
 }
 
 function getExecuteBashExitCode(activity: AgentActivity): string {
@@ -321,7 +325,7 @@ function getActivityToolResult(activity: AgentActivity): string {
     if (toolArguments && typeof toolArguments === 'object') {
       const candidate = toolArguments as { content?: unknown; text?: unknown };
       const writeContent = [candidate.content, candidate.text]
-        .map((item) => stripAnsi(readTrimmedString(item)))
+        .map((item) => stripAnsi(safeTrimEnd(item)))
         .find(Boolean);
       if (writeContent) {
         return writeContent;
@@ -334,7 +338,7 @@ function getActivityToolResult(activity: AgentActivity): string {
     return '';
   }
   if (typeof toolResult === 'string') {
-    return stripAnsi(toolResult.trim());
+    return stripAnsi(toolResult.replace(/\s+$/, ''));
   }
   if (typeof toolResult === 'number' || typeof toolResult === 'boolean') {
     return String(toolResult);
@@ -342,7 +346,7 @@ function getActivityToolResult(activity: AgentActivity): string {
   if (typeof toolResult === 'object') {
     const candidate = toolResult as { message?: unknown; content?: unknown; text?: unknown };
     const preferredText = [candidate.message, candidate.content, candidate.text]
-      .map((item) => stripAnsi(readTrimmedString(item)))
+      .map((item) => stripAnsi(safeTrimEnd(item)))
       .find(Boolean);
     if (preferredText) {
       return preferredText;

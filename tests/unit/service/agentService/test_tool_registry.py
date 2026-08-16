@@ -81,6 +81,13 @@ def test_apply_tool_allow_specs() -> None:
     registry.apply_tool_allow_specs(["Category:Read", "save_role_template"])
     assert set(registry.list_enabled_tool_names()) == {"list_dir", "save_role_template"}
 
+def test_read_image_categorized_and_enabled_under_read() -> None:
+    """read_image 应归入 READ 类别，Category:Read 策略下被启用（防止漏配 CATEGORY_CONFIG）。"""
+    registry = AgentToolRegistry()
+    _register_tools(registry, "read_image", "read_file")
+    registry.apply_tool_allow_specs(["Category:Read"])
+    assert "read_image" in registry.list_enabled_tool_names()
+
 @pytest.mark.asyncio
 async def test_execute_tool_call_success() -> None:
     registry = AgentToolRegistry()

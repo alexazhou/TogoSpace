@@ -39,6 +39,7 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     # TSP tools
     "list_dir": ToolCategory.READ,
     "read_file": ToolCategory.READ,
+    "read_image": ToolCategory.READ,
     "write_file": ToolCategory.WRITE,
     "edit": ToolCategory.WRITE,
     "grep_search": ToolCategory.READ,
