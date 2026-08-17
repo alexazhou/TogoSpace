@@ -537,6 +537,7 @@
       "deleteConfirmBtn": "删除",
       "table": {
         "providerName": "服务商名称",
+        "inputType": "输入类型",
         "type": "类型",
         "modelCount": "模型",
         "modelsBtn": "模型",

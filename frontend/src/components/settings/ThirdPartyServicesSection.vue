@@ -269,7 +269,7 @@ onMounted(() => {
         </label>
         <button
           type="button"
-          class="primary-button"
+          class="primary-button btn-sm"
           :disabled="isSaving || !isDirty"
           @click="showSaveConfirm = true"
         >
@@ -292,7 +292,7 @@ onMounted(() => {
               :label="serviceForms[service].enabled ? t('settings.thirdParty.enabled') : t('settings.thirdParty.disabled')"
               @toggle="handleToggle(service, $event)"
             />
-            <button type="button" class="secondary-button" @click="openService(service)">
+            <button type="button" class="secondary-button btn-sm" @click="openService(service)">
               {{ t('settings.thirdParty.configure') }}
             </button>
           </div>
@@ -723,7 +723,7 @@ onMounted(() => {
 
 .btn-sm {
   min-width: 56px;
-  height: 34px;
+  height: 28px;
   padding: 0 10px;
   font-size: 0.78rem;
 }

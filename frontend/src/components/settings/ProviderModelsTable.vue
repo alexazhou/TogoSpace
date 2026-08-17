@@ -35,6 +35,7 @@ const { t } = useI18n();
         <thead>
           <tr>
             <th>{{ t('settings.models.modelNameLabel', 'Model') }}</th>
+            <th>{{ t('settings.models.table.inputType', 'Input Type') }}</th>
             <th>{{ t('settings.models.protocolLabel', 'Protocol') }}</th>
             <th class="actions-th">{{ t('settings.models.table.actions') }}</th>
           </tr>
@@ -44,6 +45,13 @@ const { t } = useI18n();
             <td>
               <strong>{{ model.name }}</strong>
               <span v-if="model.input?.includes('image')" class="model-vision-badge">{{ t('settings.models.visionBadge', 'Vision') }}</span>
+            </td>
+            <td>
+              <div class="models-cell-tags-inner">
+                <span v-for="type in (model.input || ['text'])" :key="type" class="model-tag">
+                  {{ t(`settings.models.inputTypes.${type}`, type) }}
+                </span>
+              </div>
             </td>
             <td><span class="models-cell-type">{{ model.protocol }}</span></td>
             <td class="models-cell-actions">
@@ -57,7 +65,7 @@ const { t } = useI18n();
             </td>
           </tr>
           <tr v-if="models.length === 0">
-            <td colspan="3" class="models-empty">{{ t('settings.models.table.emptyModels', 'No models configured for this provider.') }}</td>
+            <td colspan="4" class="models-empty">{{ t('settings.models.table.emptyModels', 'No models configured for this provider.') }}</td>
           </tr>
         </tbody>
       </table>
@@ -119,4 +127,21 @@ const { t } = useI18n();
   gap: 6px;
 }
 .models-empty { color: var(--muted); font-size: 0.86rem; }
+
+.models-cell-tags-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.model-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text-strong);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
 </style>

@@ -537,6 +537,7 @@
       "deleteConfirmBtn": "Delete",
       "table": {
         "providerName": "Provider Name",
+        "inputType": "Input Type",
         "type": "Type",
         "modelCount": "Models",
         "modelsBtn": "Models",
