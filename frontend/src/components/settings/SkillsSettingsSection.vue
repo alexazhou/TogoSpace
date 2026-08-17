@@ -6,6 +6,7 @@ import type { SkillInfo } from '../../types';
 import SettingsBreadcrumb from './SettingsBreadcrumb.vue';
 import SkillDetailDialog from './SkillDetailDialog.vue';
 import type { SettingsBreadcrumbItem } from './types';
+import UiTag from '../ui/UiTag.vue';
 
 defineProps<{
   breadcrumbItems: SettingsBreadcrumbItem[];
@@ -88,12 +89,9 @@ onMounted(() => {
                 <strong>{{ skill.name }}</strong>
               </td>
               <td class="skills-cell-type">
-                <span
-                  class="role-chip"
-                  :class="skill.is_builtin ? 'role-chip--system' : 'role-chip--user'"
-                >
+                <UiTag :tone="skill.is_builtin ? 'info' : 'success'">
                   {{ skill.is_builtin ? t('settings.skills.builtin') : t('settings.skills.userCustom') }}
-                </span>
+                </UiTag>
               </td>
               <td class="skills-cell-desc" :title="skill.description">{{ truncateDesc(skill.description) }}</td>
               <td class="skills-cell-actions">
@@ -264,32 +262,6 @@ onMounted(() => {
 
 .skills-cell-actions .ghost-button {
   white-space: nowrap;
-}
-
-.role-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid var(--panel-border);
-  background: var(--panel-bg);
-  color: var(--muted);
-  font-size: 0.74rem;
-  white-space: nowrap;
-}
-
-.role-chip--system {
-  border-color: color-mix(in srgb, var(--focus-border) 26%, var(--panel-border) 74%);
-  background: var(--backend-selected-strong, color-mix(in srgb, var(--selected) 72%, var(--panel-bg) 28%));
-  color: color-mix(in srgb, var(--text-strong) 82%, var(--accent) 18%);
-}
-
-.role-chip--user {
-  border-color: color-mix(in srgb, var(--state-success) 30%, var(--panel-border) 70%);
-  background: color-mix(in srgb, var(--state-success) 12%, var(--panel-bg) 88%);
-  color: color-mix(in srgb, var(--state-success) 90%, var(--text-strong) 10%);
 }
 
 @media (max-width: 780px) {

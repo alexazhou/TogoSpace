@@ -7,6 +7,7 @@ import { displayName } from '../../utils';
 import RoleTemplateEditorDialog from './RoleTemplateEditorDialog.vue';
 import SettingsBreadcrumb from './SettingsBreadcrumb.vue';
 import type { SettingsBreadcrumbItem } from './types';
+import UiTag from '../ui/UiTag.vue';
 
 defineProps<{
   breadcrumbItems: SettingsBreadcrumbItem[];
@@ -122,12 +123,9 @@ onMounted(() => {
                 <strong>{{ displayName(template) }}</strong>
               </td>
               <td>
-                <span
-                  class="role-chip"
-                  :class="isSystemType(template.type) ? 'role-chip--system' : 'role-chip--user'"
-                >
+                <UiTag :tone="isSystemType(template.type) ? 'info' : 'success'">
                   {{ isSystemType(template.type) ? t('settings.roles.systemTemplate') : t('settings.roles.userTemplate') }}
-                </span>
+                </UiTag>
               </td>
               <td class="roles-cell-actions">
                 <button type="button" class="ghost-button" @click.stop="openEdit(template.id)">
@@ -274,7 +272,8 @@ onMounted(() => {
 
 .roles-cell-name strong {
   color: var(--text-strong);
-  font-size: 0.96rem;
+  font-size: 0.84rem;
+  font-weight: 600;
 }
 
 
@@ -287,31 +286,6 @@ onMounted(() => {
 
 .roles-cell-actions :deep(.ghost-button) {
   white-space: nowrap;
-}
-
-.role-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid var(--panel-border);
-  background: var(--panel-bg);
-  color: var(--muted);
-  font-size: 0.74rem;
-}
-
-.role-chip--system {
-  border-color: color-mix(in srgb, var(--focus-border) 26%, var(--panel-border) 74%);
-  background: var(--backend-selected-strong, color-mix(in srgb, var(--selected) 72%, var(--panel-bg) 28%));
-  color: color-mix(in srgb, var(--text-strong) 82%, var(--accent) 18%);
-}
-
-.role-chip--user {
-  border-color: color-mix(in srgb, var(--state-success) 30%, var(--panel-border) 70%);
-  background: color-mix(in srgb, var(--state-success) 12%, var(--panel-bg) 88%);
-  color: color-mix(in srgb, var(--state-success) 90%, var(--text-strong) 10%);
 }
 
 @media (max-width: 780px) {

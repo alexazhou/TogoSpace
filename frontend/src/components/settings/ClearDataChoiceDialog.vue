@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { displayName, findDepartmentPath, isDepartmentLeader } from '../../utils';
+import UiTag from '../ui/UiTag.vue';
 import type { TeamMember, DeptTreeNode } from '../../types';
 
 const props = defineProps<{
@@ -139,7 +140,7 @@ function close() {
                 <div class="member-info">
                   <div class="member-name-row">
                     <span class="member-name">{{ displayName(member) }}</span>
-                    <span v-if="getIsLeader(member.id)" class="leader-badge">{{ t('agent.departmentLeader') }}</span>
+                    <UiTag v-if="getIsLeader(member.id)" tone="success" size="xs" shape="rounded">{{ t('agent.departmentLeader') }}</UiTag>
                   </div>
                   <span class="member-dept">{{ getMemberDeptPath(member.id) }}</span>
                 </div>
@@ -190,7 +191,7 @@ function close() {
               <div class="target-member-content">
                 <div class="target-name-row">
                   <strong>{{ selectedAgentName }}</strong>
-                  <span v-if="selectedAgentId !== null && getIsLeader(selectedAgentId)" class="leader-badge">{{ t('agent.departmentLeader') }}</span>
+                  <UiTag v-if="selectedAgentId !== null && getIsLeader(selectedAgentId)" tone="success" size="xs" shape="rounded">{{ t('agent.departmentLeader') }}</UiTag>
                 </div>
                 <div class="target-meta">
                   <span class="member-id">#{{ selectedAgentEmpNo }}</span>
@@ -494,19 +495,6 @@ function close() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.leader-badge {
-  display: inline-flex;
-  align-items: center;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--state-success) 24%, var(--border-default) 76%);
-  background: color-mix(in srgb, var(--state-success) 12%, var(--surface-panel) 88%);
-  color: color-mix(in srgb, var(--state-success) 84%, var(--text-primary) 16%);
-  font-size: 0.64rem;
-  line-height: 1;
 }
 
 .confirm-actions, .clear-data-footer {

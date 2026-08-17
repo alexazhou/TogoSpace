@@ -11,6 +11,7 @@ import { showGlobalSuccessToast } from '../../appUiState';
 import type { RoleTemplateDetail } from '../../types';
 import { displayName } from '../../utils';
 import ConfirmDialog from '../ui/ConfirmDialog.vue';
+import UiTag from '../ui/UiTag.vue';
 
 type EditorMode = 'create' | 'edit';
 
@@ -273,12 +274,9 @@ defineExpose({
         </header>
 
         <div class="role-editor-meta">
-          <span
-            class="role-chip"
-            :class="isCreating ? 'role-chip--draft' : (isSystemTemplate ? 'role-chip--system' : 'role-chip--user')"
-          >
+          <UiTag :tone="isCreating ? 'muted' : (isSystemTemplate ? 'info' : 'success')">
             {{ isCreating ? t('settings.roles.unsaved') : currentTypeLabel }}
-          </span>
+          </UiTag>
         </div>
 
         <div v-if="editorLoading" class="dialog-empty">
@@ -439,37 +437,6 @@ defineExpose({
   border-radius: 12px;
   border: 1px solid var(--panel-border);
   background: color-mix(in srgb, var(--surface-soft) 82%, var(--panel-bg) 18%);
-}
-
-.role-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid var(--panel-border);
-  background: var(--panel-bg);
-  color: var(--muted);
-  font-size: 0.74rem;
-}
-
-.role-chip--system {
-  border-color: color-mix(in srgb, var(--focus-border) 26%, var(--panel-border) 74%);
-  background: var(--backend-selected-strong, color-mix(in srgb, var(--selected) 72%, var(--panel-bg) 28%));
-  color: color-mix(in srgb, var(--text-strong) 82%, var(--accent) 18%);
-}
-
-.role-chip--user {
-  border-color: color-mix(in srgb, var(--state-success) 30%, var(--panel-border) 70%);
-  background: color-mix(in srgb, var(--state-success) 12%, var(--panel-bg) 88%);
-  color: color-mix(in srgb, var(--state-success) 90%, var(--text-strong) 10%);
-}
-
-.role-chip--draft {
-  border-color: color-mix(in srgb, var(--panel-border) 88%, var(--focus-border) 12%);
-  background: color-mix(in srgb, var(--surface-soft) 82%, var(--panel-bg) 18%);
-  color: var(--muted);
 }
 
 .role-form-grid,

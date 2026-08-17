@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n';
 import type { LlmModelConfig } from '../../types';
+import UiTag from '../ui/UiTag.vue';
 
 const props = defineProps<{
   providerName: string;
@@ -44,13 +45,15 @@ const { t } = useI18n();
           <tr v-for="(model, mIndex) in models" :key="mIndex">
             <td>
               <strong>{{ model.name }}</strong>
-              <span v-if="model.input?.includes('image')" class="model-vision-badge">{{ t('settings.models.visionBadge', 'Vision') }}</span>
+              <UiTag v-if="model.input?.includes('image')" tone="info" size="sm" class="model-vision-badge">
+                {{ t('settings.models.visionBadge', 'Vision') }}
+              </UiTag>
             </td>
             <td>
               <div class="models-cell-tags-inner">
-                <span v-for="type in (model.input || ['text'])" :key="type" class="model-tag">
+                <UiTag v-for="type in (model.input || ['text'])" :key="type" shape="rounded" size="sm">
                   {{ t(`settings.models.inputTypes.${type}`, type) }}
-                </span>
+                </UiTag>
               </div>
             </td>
             <td><span class="models-cell-type">{{ model.protocol }}</span></td>
@@ -112,7 +115,7 @@ const { t } = useI18n();
 .settings-table td:nth-child(2) { min-width: 140px; white-space: nowrap; }
 
 .models-cell-type { color: var(--muted); }
-.model-vision-badge { margin-left: 8px; padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; color: var(--accent); border: 1px solid var(--accent); }
+.model-vision-badge { margin-left: 8px; }
 .settings-table th.actions-th { min-width: 180px; text-align: right; }
 .settings-table td.models-cell-actions {
   min-width: 180px;
@@ -132,16 +135,5 @@ const { t } = useI18n();
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-}
-.model-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  color: var(--text-strong);
-  font-size: 0.78rem;
-  white-space: nowrap;
 }
 </style>

@@ -12,6 +12,7 @@ import SettingsBreadcrumb from './SettingsBreadcrumb.vue';
 import ConfirmDialog from '../ui/ConfirmDialog.vue';
 import ProviderModelsTable from './ProviderModelsTable.vue';
 import type { SettingsBreadcrumbItem } from './types';
+import UiTag from '../ui/UiTag.vue';
 import { showGlobalSuccessToast } from '../../appUiState';
 
 const props = defineProps<{
@@ -253,14 +254,15 @@ onMounted(() => {
                 <td><span class="models-cell-type">{{ provider.type }}</span></td>
                 <td class="models-cell-tags">
                   <div class="models-cell-tags-inner">
-                    <span v-for="(model, mIndex) in provider.models" :key="mIndex" class="model-tag">
+                    <UiTag v-for="(model, mIndex) in provider.models" :key="mIndex" shape="rounded" size="sm">
                       {{ model.name }}
-                    </span>
+                    </UiTag>
                   </div>
                 </td>
                 <td>
-                  <span v-if="provider.enable" class="svc-chip svc-chip--enabled">{{ t('settings.models.enabled', 'Enabled') }}</span>
-                  <span v-else class="svc-chip svc-chip--disabled">{{ t('settings.models.disabled', 'Disabled') }}</span>
+                  <UiTag :tone="provider.enable ? 'success' : 'muted'" size="sm">
+                    {{ t(provider.enable ? 'settings.models.enabled' : 'settings.models.disabled', provider.enable ? 'Enabled' : 'Disabled') }}
+                  </UiTag>
                 </td>
                 <td class="models-cell-actions">
                   <div class="models-cell-actions-inner">
@@ -376,24 +378,6 @@ onMounted(() => {
 .provider-actions { display: flex; gap: 8px; }
 .text-danger { color: #e5484d; }
 
-.svc-chip {
-  display: inline-flex; align-items: center; min-height: 20px; padding: 0 8px;
-  border-radius: 999px; border: 1px solid var(--panel-border); background: var(--panel-bg);
-  color: var(--muted); font-size: 0.68rem; white-space: nowrap;
-}
-.svc-chip--enabled {
-  border-color: color-mix(in srgb, var(--good) 38%, var(--panel-border) 62%);
-  background: color-mix(in srgb, var(--good) 12%, var(--panel-bg) 88%);
-  color: var(--good);
-}
-.svc-chip--disabled {
-  border-color: color-mix(in srgb, var(--muted) 28%, var(--panel-border) 72%);
-  background: color-mix(in srgb, var(--muted) 8%, var(--panel-bg) 92%);
-  color: var(--muted);
-}
-
-
-
 .models-table-wrap {
   border-radius: 12px;
   background: var(--panel-bg);
@@ -434,17 +418,6 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-}
-.model-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: var(--panel-bg);
-  border: 1px solid var(--panel-border);
-  color: var(--text-strong);
-  font-size: 0.78rem;
-  white-space: nowrap;
 }
 .settings-table th.status-th,
 .settings-table td:nth-child(4) { min-width: 76px; white-space: nowrap; }

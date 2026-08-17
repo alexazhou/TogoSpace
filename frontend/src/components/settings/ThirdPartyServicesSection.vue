@@ -15,6 +15,7 @@ import type {
 } from '../../types';
 import ToggleSwitch from '../ui/ToggleSwitch.vue';
 import ConfirmDialog from '../ui/ConfirmDialog.vue';
+import UiTag from '../ui/UiTag.vue';
 import SettingsBreadcrumb from './SettingsBreadcrumb.vue';
 import type { SettingsBreadcrumbItem } from './types';
 
@@ -283,7 +284,7 @@ onMounted(() => {
             <strong>{{ serviceLabel(service) }}</strong>
             <span>{{ serviceSubtitle(service) }}</span>
             <div class="service-capabilities">
-              <span class="service-capability-tag">{{ t('settings.thirdParty.searchCapability') }}</span>
+              <UiTag size="sm" shape="rounded">{{ t('settings.thirdParty.searchCapability') }}</UiTag>
             </div>
           </div>
           <div class="service-row-meta">
@@ -316,8 +317,8 @@ onMounted(() => {
         <section class="capabilities-section">
           <h4>{{ t('settings.thirdParty.capabilitiesTitle') }}</h4>
           <div class="capability-row" style="justify-content: flex-start;">
-            <span class="service-capability-tag">{{ t('settings.thirdParty.searchCapability') }}</span>
-            <span v-if="detailService === 'xiaomi_mimo'" class="svc-chip">mimo-v2.5</span>
+            <UiTag size="sm" shape="rounded">{{ t('settings.thirdParty.searchCapability') }}</UiTag>
+            <UiTag v-if="detailService === 'xiaomi_mimo'" size="sm">mimo-v2.5</UiTag>
           </div>
         </section>
 
@@ -531,49 +532,11 @@ onMounted(() => {
   line-height: 1.35;
 }
 
-.service-capability-tag {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0 9px;
-  border-radius: 6px;
-  border: 1px solid var(--panel-border);
-  background: color-mix(in srgb, var(--surface-soft) 82%, transparent);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1;
-}
-
 .service-row-meta {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: 0 0 auto;
-}
-
-.svc-chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid var(--panel-border);
-  color: var(--muted);
-  font-size: 0.7rem;
-  white-space: nowrap;
-}
-
-.svc-chip--enabled {
-  border-color: color-mix(in srgb, var(--good) 38%, var(--panel-border) 62%);
-  background: color-mix(in srgb, var(--good) 12%, var(--panel-bg) 88%);
-  color: var(--good);
-}
-
-.svc-chip--disabled {
-  border-color: color-mix(in srgb, var(--muted) 28%, var(--panel-border) 72%);
-  background: color-mix(in srgb, var(--muted) 8%, var(--panel-bg) 92%);
-  color: var(--muted);
 }
 
 .third-party-head {

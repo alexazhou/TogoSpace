@@ -5,6 +5,7 @@ import TeamInfoCard from '../team/TeamInfoCard.vue';
 import TeamTreeEditor from '../team/TeamTreeEditor.vue';
 import SettingsBreadcrumb from './SettingsBreadcrumb.vue';
 import ToggleSwitch from '../ui/ToggleSwitch.vue';
+import UiTag from '../ui/UiTag.vue';
 import { displayName } from '../../utils';
 import type { SettingsBreadcrumbItem } from './types';
 import type { TeamDetail, TeamSummary } from '../../types';
@@ -156,16 +157,18 @@ const disabledTeams = computed(() => props.teams.filter((team) => !team.enabled)
             </div>
             <div class="team-card-summary">
               <div class="team-summary-row">
-                <span class="team-summary-chip">{{ t('settings.teams.memberCount', { count: teamSummaries[team.id]?.activeMemberCount ?? 0 }) }}</span>
-                <span class="team-summary-chip">{{ t('settings.teams.deptCount', { count: teamSummaries[team.id]?.deptCount ?? 0 }) }}</span>
-                <span class="team-summary-chip">{{ t('settings.teams.roomCount', { count: teamSummaries[team.id]?.roomCount ?? 0 }) }}</span>
-                <span class="team-summary-chip">{{ t('settings.teams.hierarchyCount', { count: teamSummaries[team.id]?.hierarchyLevelCount ?? 0 }) }}</span>
-                <span
+                <UiTag size="sm" :tone="team.enabled ? 'default' : 'muted'" class="team-summary-ui">{{ t('settings.teams.memberCount', { count: teamSummaries[team.id]?.activeMemberCount ?? 0 }) }}</UiTag>
+                <UiTag size="sm" :tone="team.enabled ? 'default' : 'muted'" class="team-summary-ui">{{ t('settings.teams.deptCount', { count: teamSummaries[team.id]?.deptCount ?? 0 }) }}</UiTag>
+                <UiTag size="sm" :tone="team.enabled ? 'default' : 'muted'" class="team-summary-ui">{{ t('settings.teams.roomCount', { count: teamSummaries[team.id]?.roomCount ?? 0 }) }}</UiTag>
+                <UiTag size="sm" :tone="team.enabled ? 'default' : 'muted'" class="team-summary-ui">{{ t('settings.teams.hierarchyCount', { count: teamSummaries[team.id]?.hierarchyLevelCount ?? 0 }) }}</UiTag>
+                <UiTag
                   v-if="(teamSummaries[team.id]?.offBoardMemberCount ?? 0) > 0"
-                  class="team-summary-chip"
+                  size="sm"
+                  :tone="team.enabled ? 'default' : 'muted'"
+                  class="team-summary-ui"
                 >
                   {{ t('settings.teams.offboardCount', { count: teamSummaries[team.id]?.offBoardMemberCount ?? 0 }) }}
-                </span>
+                </UiTag>
               </div>
             </div>
             <div class="team-card-footer">
@@ -199,16 +202,18 @@ const disabledTeams = computed(() => props.teams.filter((team) => !team.enabled)
             </div>
             <div class="team-card-summary">
               <div class="team-summary-row">
-                <span class="team-summary-chip">{{ t('settings.teams.memberCount', { count: teamSummaries[team.id]?.activeMemberCount ?? 0 }) }}</span>
-                <span class="team-summary-chip">{{ t('settings.teams.deptCount', { count: teamSummaries[team.id]?.deptCount ?? 0 }) }}</span>
-                <span class="team-summary-chip">{{ t('settings.teams.roomCount', { count: teamSummaries[team.id]?.roomCount ?? 0 }) }}</span>
-                <span class="team-summary-chip">{{ t('settings.teams.hierarchyCount', { count: teamSummaries[team.id]?.hierarchyLevelCount ?? 0 }) }}</span>
-                <span
+                <UiTag size="sm" :tone="team.enabled ? 'default' : 'muted'" class="team-summary-ui">{{ t('settings.teams.memberCount', { count: teamSummaries[team.id]?.activeMemberCount ?? 0 }) }}</UiTag>
+                <UiTag size="sm" :tone="team.enabled ? 'default' : 'muted'" class="team-summary-ui">{{ t('settings.teams.deptCount', { count: teamSummaries[team.id]?.deptCount ?? 0 }) }}</UiTag>
+                <UiTag size="sm" :tone="team.enabled ? 'default' : 'muted'" class="team-summary-ui">{{ t('settings.teams.roomCount', { count: teamSummaries[team.id]?.roomCount ?? 0 }) }}</UiTag>
+                <UiTag size="sm" :tone="team.enabled ? 'default' : 'muted'" class="team-summary-ui">{{ t('settings.teams.hierarchyCount', { count: teamSummaries[team.id]?.hierarchyLevelCount ?? 0 }) }}</UiTag>
+                <UiTag
                   v-if="(teamSummaries[team.id]?.offBoardMemberCount ?? 0) > 0"
-                  class="team-summary-chip"
+                  size="sm"
+                  :tone="team.enabled ? 'default' : 'muted'"
+                  class="team-summary-ui"
                 >
                   {{ t('settings.teams.offboardCount', { count: teamSummaries[team.id]?.offBoardMemberCount ?? 0 }) }}
-                </span>
+                </UiTag>
               </div>
             </div>
             <div class="team-card-footer">
@@ -392,12 +397,6 @@ const disabledTeams = computed(() => props.teams.filter((team) => !team.enabled)
   color: color-mix(in srgb, var(--hint-text) 78%, var(--muted) 22%);
 }
 
-.team-card--disabled .team-summary-chip {
-  border-color: color-mix(in srgb, var(--panel-border) 82%, transparent 18%);
-  background: color-mix(in srgb, var(--panel-bg) 92%, var(--surface-soft) 8%);
-  color: color-mix(in srgb, var(--muted) 86%, var(--text-strong) 14%);
-}
-
 .team-card--disabled .ghost-button {
   border-color: color-mix(in srgb, var(--panel-border) 88%, transparent 12%);
   color: color-mix(in srgb, var(--muted) 82%, var(--text-strong) 18%);
@@ -451,17 +450,9 @@ const disabledTeams = computed(() => props.teams.filter((team) => !team.enabled)
   min-width: 0;
 }
 
-.team-summary-chip {
+.team-summary-ui {
   min-width: 0;
   max-width: 100%;
-  padding: 4px 7px;
-  border: 1px solid color-mix(in srgb, var(--focus-border) 22%, var(--panel-border) 78%);
-  border-radius: 999px;
-  background: var(--panel-bg);
-  color: var(--settings-card-muted-text);
-  font-size: 0.68rem;
-  line-height: 1.2;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }

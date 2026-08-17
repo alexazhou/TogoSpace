@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
+import UiTag from '../ui/UiTag.vue';
 
 interface UrlItem {
   type: string;
@@ -79,7 +80,7 @@ function getProtocolLabel(type: string): string {
           <div v-for="item in mergedUrls" :key="item.key" class="url-view-item">
             <span class="url-key">{{ getProtocolLabel(item.key) }}:</span>
             <span class="url-value">{{ item.url }}</span>
-            <span v-if="item.isCustom" class="custom-tag">自定义</span>
+            <UiTag v-if="item.isCustom" tone="info" size="xs" shape="rounded">自定义</UiTag>
           </div>
           <div v-if="!mergedUrls.length" class="urls-empty">No URLs configured</div>
         </div>
@@ -155,17 +156,6 @@ function getProtocolLabel(type: string): string {
   white-space: nowrap;
 }
 
-.custom-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 0 6px;
-  height: 18px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--state-info) 12%, transparent);
-  color: var(--state-info);
-  font-size: 0.68rem;
-  flex-shrink: 0;
-}
 
 .urls-empty {
   color: var(--muted);

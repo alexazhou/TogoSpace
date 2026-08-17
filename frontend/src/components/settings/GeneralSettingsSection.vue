@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import SettingsBreadcrumb from './SettingsBreadcrumb.vue';
 import type { SettingsBreadcrumbItem } from './types';
+import UiTag from '../ui/UiTag.vue';
 
 type DriverState = {
   key: string;
@@ -81,9 +82,9 @@ const emit = defineEmits<{
             <strong>{{ driver.label }}</strong>
             <span>{{ driver.note }}</span>
           </div>
-          <span class="driver-badge" :class="{ online: driver.available }">
+          <UiTag :tone="driver.available ? 'success' : 'danger'" size="sm" class="driver-badge-min">
             {{ driver.available ? '可用' : '不可用' }}
-          </span>
+          </UiTag>
         </div>
       </div>
     </section>
@@ -202,22 +203,8 @@ const emit = defineEmits<{
   font-size: 0.74rem;
 }
 
-.driver-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.driver-badge-min {
   min-width: 64px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(248, 81, 73, 0.12);
-  color: var(--danger);
-  font-size: 0.74rem;
-  font-weight: 600;
-}
-
-.driver-badge.online {
-  background: rgba(86, 212, 176, 0.14);
-  color: var(--good);
 }
 
 @media (max-width: 780px) {
