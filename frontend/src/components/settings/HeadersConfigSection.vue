@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import ModalDialog from '../ui/ModalDialog.vue';
 
 interface HeaderRow {
   id: number;
@@ -122,20 +123,14 @@ function formatHeaderValue(key: string, value: string): string {
       </template>
     </div>
 
-    <Teleport to="body">
-      <div v-if="visible" class="editor-overlay" @click.self="closeDialog">
-        <section class="editor-dialog panel scrollbar-thin">
-          <header class="editor-head">
-            <div class="editor-head-copy">
-              <p class="editor-eyebrow">{{ t('settings.headersConfig.eyebrow') }}</p>
-              <h3>{{ t('settings.headersConfig.title') }}</h3>
-            </div>
-            <div class="editor-head-actions">
-              <button type="button" class="ghost-button editor-close" @click="closeDialog">×</button>
-            </div>
-          </header>
-
-          <div class="headers-editor">
+    <ModalDialog
+      :open="visible"
+      :title="t('settings.headersConfig.title')"
+      :eyebrow="t('settings.headersConfig.eyebrow')"
+      :width="620"
+      @close="closeDialog"
+    >
+      <div class="headers-editor">
             <div v-if="rows.length > 0" class="headers-editor-head">
               <span>{{ t('settings.headersConfig.keyLabel') }}</span>
               <span>{{ t('settings.headersConfig.valueLabel') }}</span>
@@ -173,20 +168,16 @@ function formatHeaderValue(key: string, value: string): string {
             </button>
           </div>
 
-          <footer class="editor-actions">
-            <div class="editor-actions-leading">
-              <button type="button" class="ghost-button" @click="clearRows">
-                {{ t('common.reset') }}
-              </button>
-            </div>
-            <div class="editor-actions-trailing">
-              <button type="button" class="secondary-button" @click="closeDialog">{{ t('common.cancel') }}</button>
-              <button type="button" class="secondary-button" @click="handleSave">{{ t('common.confirm') }}</button>
-            </div>
-          </footer>
-        </section>
-      </div>
-    </Teleport>
+          <template #footer-leading>
+        <button type="button" class="ghost-button" @click="clearRows">
+          {{ t('common.reset') }}
+        </button>
+      </template>
+      <template #footer-trailing>
+        <button type="button" class="secondary-button" @click="closeDialog">{{ t('common.cancel') }}</button>
+        <button type="button" class="secondary-button" @click="handleSave">{{ t('common.confirm') }}</button>
+      </template>
+    </ModalDialog>
   </section>
 </template>
 
@@ -251,60 +242,6 @@ function formatHeaderValue(key: string, value: string): string {
   white-space: nowrap;
 }
 
-.editor-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgba(6, 10, 16, 0.56);
-  backdrop-filter: blur(10px);
-}
-
-.editor-dialog {
-  width: min(620px, calc(100vw - 40px));
-  max-height: calc(100vh - 40px);
-  padding: 18px;
-  display: grid;
-  gap: 14px;
-  overflow: auto;
-  background: var(--panel-bg);
-  border-radius: 12px;
-}
-
-.editor-head,
-.editor-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.editor-head-copy {
-  min-width: 0;
-}
-
-.editor-close {
-  min-width: 32px;
-  height: 32px;
-  padding: 0;
-  font-size: 1rem;
-}
-
-.editor-eyebrow {
-  margin: 0;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-size: 0.68rem;
-}
-
-.editor-head h3 {
-  margin: 0;
-  color: var(--text-strong);
-}
-
 .headers-editor {
   display: grid;
   gap: 10px;
@@ -357,13 +294,6 @@ function formatHeaderValue(key: string, value: string): string {
   border-style: dashed;
 }
 
-.editor-actions-leading,
-.editor-actions-trailing {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
 @media (max-width: 640px) {
   .headers-editor-head {
     display: none;
@@ -378,11 +308,6 @@ function formatHeaderValue(key: string, value: string): string {
 
   .row-remove {
     width: 100%;
-  }
-
-  .editor-actions {
-    align-items: stretch;
-    flex-direction: column;
   }
 }
 </style>

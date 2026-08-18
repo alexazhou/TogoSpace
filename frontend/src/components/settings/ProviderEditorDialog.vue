@@ -5,6 +5,7 @@ import type { LlmProviderConfig } from '../../types';
 import { getProviderPresets } from '../../api';
 import ToggleSwitch from '../ui/ToggleSwitch.vue';
 import CustomSelect from '../ui/CustomSelect.vue';
+import ModalDialog from '../ui/ModalDialog.vue';
 import BaseUrlSection from './BaseUrlSection.vue';
 
 type EditorMode = 'create' | 'edit';
@@ -138,23 +139,18 @@ defineExpose({ openCreate, openEdit });
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="visible" class="editor-overlay" @click.self="closeDialog">
-      <section class="editor-dialog panel scrollbar-thin">
-        <header class="editor-head">
-          <div class="editor-head-copy" style="display: flex; align-items: center; gap: 16px;">
-            <div>
-              <p class="editor-eyebrow">{{ dialogEyebrow }}</p>
-              <h3>{{ dialogTitle }}</h3>
-            </div>
-            <div style="margin-top: 14px;">
-              <ToggleSwitch variant="inline" :checked="form.enable" :label="form.enable ? t('settings.models.enabled') : t('settings.models.disabled')" @toggle="form.enable = $event" />
-            </div>
-          </div>
-          <div class="editor-head-actions">
-            <button type="button" class="ghost-button editor-close" @click="closeDialog">×</button>
-          </div>
-        </header>
+  <ModalDialog
+    :open="visible"
+    :title="dialogTitle"
+    :eyebrow="dialogEyebrow"
+    :width="760"
+    @close="closeDialog"
+  >
+    <template #head-extra>
+      <div style="margin-top: 14px;">
+        <ToggleSwitch variant="inline" :checked="form.enable" :label="form.enable ? t('settings.models.enabled') : t('settings.models.disabled')" @toggle="form.enable = $event" />
+      </div>
+    </template>
 
         <div class="svc-form-grid">
           <label class="svc-field">
@@ -194,27 +190,15 @@ defineExpose({ openCreate, openEdit });
           </label>
         </div>
 
-        <footer class="editor-actions">
-          <div class="editor-actions-leading"></div>
-          <div class="editor-actions-trailing">
-            <button type="button" class="secondary-button" @click="closeDialog">{{ t('common.cancel') }}</button>
-            <button type="button" class="secondary-button" :disabled="!canSave" @click="handleSave">{{ t('common.confirm') }}</button>
-          </div>
-        </footer>
-      </section>
-    </div>
-  </Teleport>
+        <template #footer-trailing>
+      <button type="button" class="secondary-button" @click="closeDialog">{{ t('common.cancel') }}</button>
+      <button type="button" class="secondary-button" :disabled="!canSave" @click="handleSave">{{ t('common.confirm') }}</button>
+    </template>
+  </ModalDialog>
 </template>
 
 <style scoped>
 /* Inherit from existing styles */
-.editor-overlay { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: rgba(6, 10, 16, 0.56); backdrop-filter: blur(10px); }
-.editor-dialog { width: min(760px, calc(100vw - 40px)); max-height: calc(100vh - 40px); padding: 18px; display: grid; gap: 14px; overflow: auto; background: var(--panel-bg); border-radius: 12px; }
-.editor-head, .editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.editor-head-copy { min-width: 0; }
-.editor-close { min-width: 32px; height: 32px; padding: 0; font-size: 1rem; }
-.editor-eyebrow { margin: 0; color: var(--accent); text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.68rem; }
-.editor-head h3 { margin: 0; color: var(--text-strong); }
 .svc-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .svc-field { display: grid; gap: 6px; }
 .svc-field--wide { grid-column: 1 / -1; }
@@ -234,5 +218,4 @@ defineExpose({ openCreate, openEdit });
 }
 .eye-icon-btn:hover { background: color-mix(in srgb, var(--text-strong) 8%, transparent); color: var(--text-strong); }
 .svc-input--flex { flex: 1; min-width: 0; }
-.editor-actions-trailing { display: flex; gap: 8px; justify-content: flex-end; }
 </style>

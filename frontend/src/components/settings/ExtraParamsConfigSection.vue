@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import ToggleSwitch from '../ui/ToggleSwitch.vue';
 import CustomSelect from '../ui/CustomSelect.vue';
+import ModalDialog from '../ui/ModalDialog.vue';
 import {
   extraParamsConfigTemplates,
   findExtraParamsConfigTemplateById,
@@ -223,20 +224,15 @@ function handleSave(): void {
 
     <pre class="extra-params-preview" :class="{ 'is-empty': isDisplayEmpty }">{{ displayText }}</pre>
 
-    <Teleport to="body">
-      <div v-if="visible" class="editor-overlay" @click.self="closeDialog">
-        <section class="editor-dialog panel scrollbar-thin">
-          <header class="editor-head">
-            <div class="editor-head-copy">
-              <p class="editor-eyebrow">{{ t('settings.extraParamsConfig.eyebrow') }}</p>
-              <h3>{{ t('settings.extraParamsConfig.title') }}</h3>
-            </div>
-            <div class="editor-head-actions">
-              <button type="button" class="ghost-button editor-close" @click="closeDialog">×</button>
-            </div>
-          </header>
-
-          <div class="extra-params-editor">
+    <ModalDialog
+      :open="visible"
+      :title="t('settings.extraParamsConfig.title')"
+      :eyebrow="t('settings.extraParamsConfig.eyebrow')"
+      :width="640"
+      :z-index="90"
+      @close="closeDialog"
+    >
+      <div class="extra-params-editor">
             <section class="editor-block">
               <div class="config-row">
                 <span class="row-label">{{ t('settings.extraParamsConfig.modelTemplate') }}</span>
@@ -329,18 +325,13 @@ function handleSave(): void {
             </section>
           </div>
 
-          <footer class="editor-actions">
-            <div class="editor-actions-leading"></div>
-            <div class="editor-actions-trailing">
-              <button type="button" class="secondary-button" @click="closeDialog">{{ t('common.cancel') }}</button>
-              <button type="button" class="secondary-button" :disabled="!!jsonError" @click="handleSave">
-                {{ t('common.confirm') }}
-              </button>
-            </div>
-          </footer>
-        </section>
-      </div>
-    </Teleport>
+          <template #footer-trailing>
+        <button type="button" class="secondary-button" @click="closeDialog">{{ t('common.cancel') }}</button>
+        <button type="button" class="secondary-button" :disabled="!!jsonError" @click="handleSave">
+          {{ t('common.confirm') }}
+        </button>
+      </template>
+    </ModalDialog>
   </section>
 </template>
 
@@ -386,59 +377,6 @@ function handleSave(): void {
   color: var(--muted);
 }
 
-.editor-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgba(6, 10, 16, 0.62);
-  backdrop-filter: blur(8px);
-}
-
-.editor-dialog {
-  width: min(640px, calc(100vw - 40px));
-  max-height: calc(100vh - 40px);
-  padding: 18px;
-  display: grid;
-  gap: 14px;
-  overflow: auto;
-  background: var(--panel-bg);
-  border-radius: 12px;
-}
-
-.editor-head,
-.editor-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.editor-head-copy {
-  min-width: 0;
-}
-
-.editor-close {
-  min-width: 32px;
-  height: 32px;
-  padding: 0;
-  font-size: 1rem;
-}
-
-.editor-eyebrow {
-  margin: 0;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-size: 0.68rem;
-}
-
-.editor-head h3 {
-  margin: 0;
-  color: var(--text-strong);
-}
 
 .extra-params-editor {
   display: grid;
@@ -557,17 +495,4 @@ function handleSave(): void {
   padding: 0 10px;
 }
 
-.editor-actions-leading,
-.editor-actions-trailing {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-@media (max-width: 640px) {
-  .editor-actions {
-    align-items: stretch;
-    flex-direction: column;
-  }
-}
 </style>

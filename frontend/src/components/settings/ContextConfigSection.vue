@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { LlmContextConfig } from '../../types';
 import InfoTooltip from '../ui/InfoTooltip.vue';
+import ModalDialog from '../ui/ModalDialog.vue';
 
 const props = withDefaults(defineProps<{
   config: LlmContextConfig;
@@ -106,20 +107,14 @@ function formatRatio(n: number | null | undefined): string {
     </div>
 
     <!-- Edit Dialog -->
-    <Teleport to="body">
-      <div v-if="visible" class="editor-overlay" @click.self="closeDialog">
-        <section class="editor-dialog panel scrollbar-thin">
-          <header class="editor-head">
-            <div class="editor-head-copy">
-              <p class="editor-eyebrow">Context Config</p>
-              <h3>{{ t('settings.models.contextConfigTitle', 'Context Config') }}</h3>
-            </div>
-            <div class="editor-head-actions">
-              <button type="button" class="ghost-button editor-close" @click="closeDialog">×</button>
-            </div>
-          </header>
-
-          <div class="editor-form">
+    <ModalDialog
+      :open="visible"
+      :title="t('settings.models.contextConfigTitle', 'Context Config')"
+      eyebrow="Context Config"
+      :width="480"
+      @close="closeDialog"
+    >
+      <div class="editor-form">
             <label class="svc-field">
               <span>
                 {{ t('settings.models.contextWindowTokens', 'Context Window Tokens') }}
@@ -165,16 +160,11 @@ function formatRatio(n: number | null | undefined): string {
             </label>
           </div>
 
-          <footer class="editor-actions">
-            <div class="editor-actions-leading"></div>
-            <div class="editor-actions-trailing">
-              <button type="button" class="secondary-button" @click="closeDialog">{{ t('common.cancel') }}</button>
-              <button type="button" class="secondary-button" @click="handleSave">{{ t('common.confirm') }}</button>
-            </div>
-          </footer>
-        </section>
-      </div>
-    </Teleport>
+          <template #footer-trailing>
+        <button type="button" class="secondary-button" @click="closeDialog">{{ t('common.cancel') }}</button>
+        <button type="button" class="secondary-button" @click="handleSave">{{ t('common.confirm') }}</button>
+      </template>
+    </ModalDialog>
   </section>
 </template>
 
@@ -222,14 +212,7 @@ function formatRatio(n: number | null | undefined): string {
   font-weight: 600;
 }
 
-/* Dialog styles */
-.editor-overlay { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: rgba(6, 10, 16, 0.56); backdrop-filter: blur(10px); }
-.editor-dialog { width: min(480px, calc(100vw - 40px)); max-height: calc(100vh - 40px); padding: 18px; display: grid; gap: 14px; overflow: auto; background: var(--panel-bg); border-radius: 12px; }
-.editor-head, .editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.editor-head-copy { min-width: 0; }
-.editor-close { min-width: 32px; height: 32px; padding: 0; font-size: 1rem; }
-.editor-eyebrow { margin: 0; color: var(--accent); text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.68rem; }
-.editor-head h3 { margin: 0; color: var(--text-strong); }
+/* Dialog body */
 .editor-form { display: grid; gap: 12px; }
 .svc-field { display: grid; gap: 6px; }
 .svc-field > span { color: var(--muted); font-size: 0.76rem; }
@@ -265,5 +248,4 @@ function formatRatio(n: number | null | undefined): string {
 .svc-input[type="number"] { -moz-appearance: textfield; }
 .svc-input[type="number"]::-webkit-outer-spin-button,
 .svc-input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.editor-actions-trailing { display: flex; gap: 8px; justify-content: flex-end; }
 </style>

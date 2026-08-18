@@ -5,6 +5,7 @@ import type { LlmModelConfig, LlmContextConfig } from '../../types';
 import ContextConfigSection from './ContextConfigSection.vue';
 import ExtraParamsConfigSection from './ExtraParamsConfigSection.vue';
 import HeadersConfigSection from './HeadersConfigSection.vue';
+import ModalDialog from '../ui/ModalDialog.vue';
 
 type EditorMode = 'create' | 'edit';
 
@@ -169,20 +170,14 @@ defineExpose({ openCreate, openEdit });
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="visible" class="editor-overlay" @click.self="closeDialog">
-      <section class="editor-dialog panel scrollbar-thin">
-        <header class="editor-head">
-          <div class="editor-head-copy">
-            <p class="editor-eyebrow">{{ dialogEyebrow }}</p>
-            <h3>{{ dialogTitle }}</h3>
-          </div>
-          <div class="editor-head-actions">
-            <button type="button" class="ghost-button editor-close" @click="closeDialog">×</button>
-          </div>
-        </header>
-
-        <div class="svc-form-grid">
+  <ModalDialog
+    :open="visible"
+    :title="dialogTitle"
+    :eyebrow="dialogEyebrow"
+    :width="600"
+    @close="closeDialog"
+  >
+    <div class="svc-form-grid">
           <label class="svc-field">
             <span>{{ t('settings.models.modelNameLabel', 'Model Name') }}</span>
             <input
@@ -233,7 +228,7 @@ defineExpose({ openCreate, openEdit });
         <section class="advanced-card">
           <button type="button" class="advanced-toggle" :aria-expanded="advancedOpen" @click="advancedOpen = !advancedOpen">
             <div>
-              <p class="editor-eyebrow">Advanced</p>
+              <p class="advanced-eyebrow">Advanced</p>
               <strong>{{ t('settings.models.advanced') }}</strong>
             </div>
             <span class="advanced-toggle__state">{{ advancedOpen ? t('common.collapse') : t('common.expand') }}</span>
@@ -265,26 +260,15 @@ defineExpose({ openCreate, openEdit });
           </div>
         </section>
 
-        <footer class="editor-actions">
-          <div class="editor-actions-leading"></div>
-          <div class="editor-actions-trailing">
-            <button type="button" class="secondary-button" @click="closeDialog">{{ t('common.cancel') }}</button>
-            <button type="button" class="secondary-button" :disabled="!canSave" @click="handleSave">{{ t('common.confirm') }}</button>
-          </div>
-        </footer>
-      </section>
-    </div>
-  </Teleport>
+        <template #footer-trailing>
+      <button type="button" class="secondary-button" @click="closeDialog">{{ t('common.cancel') }}</button>
+      <button type="button" class="secondary-button" :disabled="!canSave" @click="handleSave">{{ t('common.confirm') }}</button>
+    </template>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.editor-overlay { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: rgba(6, 10, 16, 0.56); backdrop-filter: blur(10px); }
-.editor-dialog { width: min(600px, calc(100vw - 40px)); max-height: calc(100vh - 40px); padding: 18px; display: grid; gap: 14px; overflow: auto; background: var(--panel-bg); border-radius: 12px; }
-.editor-head, .editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.editor-head-copy { min-width: 0; }
-.editor-close { min-width: 32px; height: 32px; padding: 0; font-size: 1rem; }
-.editor-eyebrow { margin: 0; color: var(--accent); text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.68rem; }
-.editor-head h3 { margin: 0; color: var(--text-strong); }
+.advanced-eyebrow { margin: 0; color: var(--accent); text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.68rem; }
 .svc-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .svc-field { display: grid; gap: 6px; }
 .svc-field--wide { grid-column: 1 / -1; }
@@ -303,7 +287,6 @@ defineExpose({ openCreate, openEdit });
 .advanced-toggle strong { color: var(--text-strong); font-size: 0.9rem; }
 .advanced-toggle__state { color: var(--muted); font-size: 0.8rem; }
 .advanced-grid { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--panel-border); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.editor-actions-trailing { display: flex; gap: 8px; justify-content: flex-end; }
 @media (max-width: 640px) {
   .svc-form-grid, .advanced-grid { grid-template-columns: 1fr; }
 }

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { testLlmProvider } from '../../api';
 import type { LlmProviderConfig, LlmModelConfig, LlmTestResult } from '../../types';
 import CustomSelect from '../ui/CustomSelect.vue';
+import ModalDialog from '../ui/ModalDialog.vue';
 
 const { t } = useI18n();
 
@@ -90,19 +91,14 @@ defineExpose({ openFromModel, openFromProvider });
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="visible" class="editor-overlay" @click.self="close">
-      <section class="editor-dialog panel">
-        <header class="editor-head">
-          <div class="editor-head-copy">
-            <h3>{{ t('settings.models.testDialog.title', '模型可用性测试') }}</h3>
-          </div>
-          <div class="editor-head-actions">
-            <button type="button" class="ghost-button editor-close" @click="close">×</button>
-          </div>
-        </header>
-
-        <div class="config-mode-row">
+  <ModalDialog
+    :open="visible"
+    :title="t('settings.models.testDialog.title', '模型可用性测试')"
+    :width="500"
+    :scrollbar="false"
+    @close="close"
+  >
+    <div class="config-mode-row">
           <span class="row-label">供应商</span>
           <div class="select-wrap">
             <CustomSelect
@@ -162,24 +158,13 @@ defineExpose({ openFromModel, openFromProvider });
           </div>
         </div>
 
-        <footer class="editor-actions">
-          <div class="editor-actions-leading"></div>
-          <div class="editor-actions-trailing">
-            <button type="button" class="secondary-button" @click="close">{{ t('common.close', '关闭') }}</button>
-          </div>
-        </footer>
-      </section>
-    </div>
-  </Teleport>
+        <template #footer-trailing>
+      <button type="button" class="secondary-button" @click="close">{{ t('common.close', '关闭') }}</button>
+    </template>
+  </ModalDialog>
 </template>
 
 <style scoped>
-.editor-overlay { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: rgba(6, 10, 16, 0.56); backdrop-filter: blur(10px); }
-.editor-dialog { width: min(500px, calc(100vw - 40px)); max-height: calc(100vh - 40px); padding: 18px; display: grid; gap: 14px; overflow: auto; background: var(--panel-bg); border-radius: 12px; }
-.editor-head, .editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.editor-head-copy { min-width: 0; }
-.editor-close { min-width: 32px; height: 32px; padding: 0; font-size: 1rem; }
-.editor-head h3 { margin: 0; color: var(--text-strong); }
 
 .config-mode-row { display: flex; align-items: center; gap: 12px; }
 .row-label { font-size: 13px; color: var(--text-strong); width: 56px; flex-shrink: 0; }

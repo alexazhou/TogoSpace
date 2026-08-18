@@ -12,6 +12,7 @@ import type { RoleTemplateDetail } from '../../types';
 import { displayName } from '../../utils';
 import ConfirmDialog from '../ui/ConfirmDialog.vue';
 import UiTag from '../ui/UiTag.vue';
+import ModalDialog from '../ui/ModalDialog.vue';
 
 type EditorMode = 'create' | 'edit';
 
@@ -260,20 +261,15 @@ defineExpose({
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="visible" class="editor-overlay" @click.self="requestClose">
-      <section class="editor-dialog panel scrollbar-thin">
-        <header class="editor-head">
-          <div class="editor-head-copy">
-            <p class="editor-eyebrow">{{ dialogEyebrow }}</p>
-            <h3>{{ dialogTitle }}</h3>
-          </div>
-          <button type="button" class="ghost-button editor-close" :aria-label="t('common.close')" @click="requestClose">
-            ×
-          </button>
-        </header>
-
-        <div class="role-editor-meta">
+  <ModalDialog
+    :open="visible"
+    :title="dialogTitle"
+    :eyebrow="dialogEyebrow"
+    :width="760"
+    :close-label="t('common.close')"
+    @close="requestClose"
+  >
+    <div class="role-editor-meta">
           <UiTag :tone="isCreating ? 'muted' : (isSystemTemplate ? 'info' : 'success')">
             {{ isCreating ? t('settings.roles.unsaved') : currentTypeLabel }}
           </UiTag>
@@ -315,26 +311,26 @@ defineExpose({
 
         <p v-if="statusText" class="editor-status">{{ statusText }}</p>
 
-        <footer class="editor-actions">
-          <button
-            v-if="canDelete"
-            type="button"
-            class="secondary-button secondary-button--danger"
-            :disabled="isDeleting"
-            @click="requestDelete"
-          >
-            {{ isDeleting ? t('settings.roles.deleting') : t('settings.roles.deleteBtn') }}
-          </button>
-          <button type="button" class="secondary-button" @click="requestClose">
-            {{ t('common.cancel') }}
-          </button>
-          <button type="button" class="secondary-button" :disabled="!canSave" @click="requestSave">
-            {{ isSaving ? t('settings.roles.saving') : (isCreating ? t('settings.roles.createBtn') : t('settings.roles.saveBtn')) }}
-          </button>
-        </footer>
-      </section>
+        <template #footer-trailing>
+      <button
+        v-if="canDelete"
+        type="button"
+        class="secondary-button secondary-button--danger"
+        :disabled="isDeleting"
+        @click="requestDelete"
+      >
+        {{ isDeleting ? t('settings.roles.deleting') : t('settings.roles.deleteBtn') }}
+      </button>
+      <button type="button" class="secondary-button" @click="requestClose">
+        {{ t('common.cancel') }}
+      </button>
+      <button type="button" class="secondary-button" :disabled="!canSave" @click="requestSave">
+        {{ isSaving ? t('settings.roles.saving') : (isCreating ? t('settings.roles.createBtn') : t('settings.roles.saveBtn')) }}
+      </button>
+    </template>
+  </ModalDialog>
 
-      <ConfirmDialog
+    <ConfirmDialog
         :open="deleteConfirmOpen"
         :title="t('settings.roles.deleteConfirmTitle')"
         :message="t('settings.roles.deleteConfirmMsg', { name: currentDetail?.name || '' })"
@@ -362,66 +358,13 @@ defineExpose({
         @close="cancelConfirmOpen = false"
         @confirm="confirmCancel"
       />
-    </div>
-  </Teleport>
 </template>
 
 <style scoped>
-.editor-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgba(6, 10, 16, 0.56);
-  backdrop-filter: blur(10px);
-}
-
-.editor-dialog {
-  width: min(760px, calc(100vw - 40px));
-  max-height: calc(100vh - 40px);
-  padding: 18px;
-  display: grid;
-  gap: 14px;
-  overflow: auto;
-}
-
-.editor-head,
-.editor-actions,
 .role-editor-meta {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.editor-head,
-.editor-actions {
-  justify-content: space-between;
-}
-
-.editor-head-copy {
-  min-width: 0;
-}
-
-.editor-close {
-  min-width: 32px;
-  height: 32px;
-  padding: 0;
-  font-size: 1rem;
-}
-
-.editor-eyebrow {
-  margin: 0;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-size: 0.68rem;
-}
-
-.editor-head h3 {
-  margin: 0;
-  color: var(--text-strong);
 }
 
 .dialog-empty,
@@ -517,11 +460,6 @@ defineExpose({
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.editor-actions {
-  justify-content: flex-end;
-  flex-wrap: wrap;
-}
-
 .secondary-button--danger {
   border-color: color-mix(in srgb, var(--state-danger) 38%, var(--panel-border) 62%);
   background: color-mix(in srgb, var(--state-danger) 10%, var(--panel-bg) 90%);
@@ -536,16 +474,6 @@ defineExpose({
 }
 
 @media (max-width: 780px) {
-  .editor-overlay {
-    padding: 12px;
-  }
-
-  .editor-dialog {
-    width: min(100%, calc(100vw - 24px));
-    max-height: calc(100vh - 24px);
-    padding: 14px;
-  }
-
   .advanced-grid {
     grid-template-columns: 1fr;
   }

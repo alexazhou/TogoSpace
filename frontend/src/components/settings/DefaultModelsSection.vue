@@ -5,6 +5,7 @@ import type { DefaultModelSlots, LlmProviderConfig } from '../../types';
 import HoverTooltip from '../ui/HoverTooltip.vue';
 import InfoTooltip from '../ui/InfoTooltip.vue';
 import ModelSlotItem from './ModelSlotItem.vue';
+import ModalDialog from '../ui/ModalDialog.vue';
 
 const props = defineProps<{
   defaultModels: DefaultModelSlots;
@@ -88,20 +89,14 @@ function resolveProviderName(value: string | null): string {
     </div>
 
     <!-- Edit Dialog -->
-    <Teleport to="body">
-      <div v-if="visible" class="editor-overlay" @click.self="closeDialog">
-        <section class="editor-dialog panel scrollbar-thin">
-          <header class="editor-head">
-            <div class="editor-head-copy">
-              <p class="editor-eyebrow">Model Config</p>
-              <h3>{{ t('settings.models.defaultModelsTitle', 'Model Config') }}</h3>
-            </div>
-            <div class="editor-head-actions">
-              <button type="button" class="ghost-button editor-close" @click="closeDialog">×</button>
-            </div>
-          </header>
-
-          <div class="editor-form">
+    <ModalDialog
+      :open="visible"
+      :title="t('settings.models.defaultModelsTitle', 'Model Config')"
+      eyebrow="Model Config"
+      :width="560"
+      @close="closeDialog"
+    >
+      <div class="editor-form">
             <ModelSlotItem
               v-for="slot in modelSlots"
               :key="slot.key"
@@ -113,16 +108,11 @@ function resolveProviderName(value: string | null): string {
             />
           </div>
 
-          <footer class="editor-actions">
-            <div class="editor-actions-leading"></div>
-            <div class="editor-actions-trailing">
-              <button type="button" class="secondary-button" @click="closeDialog">{{ t('common.cancel') }}</button>
-              <button type="button" class="secondary-button" @click="handleSave">{{ t('common.confirm') }}</button>
-            </div>
-          </footer>
-        </section>
-      </div>
-    </Teleport>
+          <template #footer-trailing>
+        <button type="button" class="secondary-button" @click="closeDialog">{{ t('common.cancel') }}</button>
+        <button type="button" class="secondary-button" @click="handleSave">{{ t('common.confirm') }}</button>
+      </template>
+    </ModalDialog>
   </section>
 </template>
 
@@ -185,13 +175,5 @@ function resolveProviderName(value: string | null): string {
 }
 
 /* Dialog styles */
-.editor-overlay { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: rgba(6, 10, 16, 0.56); backdrop-filter: blur(10px); }
-.editor-dialog { width: min(560px, calc(100vw - 40px)); max-height: calc(100vh - 40px); padding: 18px; display: grid; gap: 14px; overflow: auto; background: var(--panel-bg); border-radius: 12px; }
-.editor-head, .editor-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.editor-head-copy { min-width: 0; }
-.editor-close { min-width: 32px; height: 32px; padding: 0; font-size: 1rem; }
-.editor-eyebrow { margin: 0; color: var(--accent); text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.68rem; }
-.editor-head h3 { margin: 0; color: var(--text-strong); }
 .editor-form { display: grid; gap: 14px; }
-.editor-actions-trailing { display: flex; gap: 8px; justify-content: flex-end; }
 </style>
