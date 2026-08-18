@@ -395,29 +395,6 @@ function handleSave(): void {
   font-weight: 400;
 }
 
-.svc-field {
-  display: grid;
-  gap: 6px;
-}
-
-.svc-field > span {
-  color: var(--muted);
-  font-size: 0.76rem;
-}
-
-.svc-input {
-  height: 40px;
-  width: 100%;
-  border: 1px solid var(--panel-border);
-  border-radius: 12px;
-  background: var(--panel-bg);
-  color: var(--text-strong);
-  padding: 0 12px;
-  font: inherit;
-  font-size: 0.88rem;
-  box-sizing: border-box;
-}
-
 .compact-input {
   height: 32px;
   width: 100%;

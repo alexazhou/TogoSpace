@@ -187,10 +187,4 @@ function getProtocolLabel(type: string): string {
   margin-top: 8px;
 }
 
-.svc-input {
-  height: 40px; width: 100%; border: 1px solid var(--panel-border); border-radius: 12px;
-  background: var(--panel-bg); color: var(--text-strong); padding: 0 12px;
-  font: inherit; font-size: 0.88rem; box-sizing: border-box;
-}
-.svc-input--flex { flex: 1; min-width: 0; }
 </style>

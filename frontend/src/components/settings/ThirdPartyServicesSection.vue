@@ -16,6 +16,7 @@ import type {
 import ToggleSwitch from '../ui/ToggleSwitch.vue';
 import ConfirmDialog from '../ui/ConfirmDialog.vue';
 import UiTag from '../ui/UiTag.vue';
+import FormField from '../ui/FormField.vue';
 import SettingsBreadcrumb from './SettingsBreadcrumb.vue';
 import type { SettingsBreadcrumbItem } from './types';
 
@@ -261,13 +262,12 @@ onMounted(() => {
       </header>
 
       <div class="default-search-service-row">
-        <label class="svc-field">
-          <span>{{ t('settings.thirdParty.defaultSearchService') }}</span>
+        <FormField :label="t('settings.thirdParty.defaultSearchService')">
           <select v-model="defaultSearchService" class="default-search-service-select">
             <option value="deepseek">{{ serviceLabel('deepseek') }}</option>
             <option value="xiaomi_mimo">{{ serviceLabel('xiaomi_mimo') }}</option>
           </select>
-        </label>
+        </FormField>
         <button
           type="button"
           class="primary-button btn-sm"
@@ -324,21 +324,19 @@ onMounted(() => {
 
         <section class="api-key-section">
           <h4>{{ t('settings.thirdParty.serviceConfigTitle') }}</h4>
-          <label class="svc-field">
-            <div class="capability-row" style="padding: 8px 14px;">
-              <span style="font-size: 0.86rem; color: var(--text-strong); font-weight: 500; min-width: 60px;">{{ t('settings.thirdParty.apiKey') }}</span>
-              <input
-                v-model="serviceForms[detailService].api_key"
-                class="api-key-input"
-                :type="showApiKey ? 'text' : 'password'"
-                autocomplete="off"
-                :placeholder="apiKeyPlaceholder(detailService)"
-              />
-              <button type="button" class="secondary-button btn-sm" @click="showApiKey = !showApiKey">
-                {{ showApiKey ? t('settings.thirdParty.hideKey') : t('settings.thirdParty.showKey') }}
-              </button>
-            </div>
-          </label>
+          <div class="capability-row" style="padding: 8px 14px;">
+            <span style="font-size: 0.86rem; color: var(--text-strong); font-weight: 500; min-width: 60px;">{{ t('settings.thirdParty.apiKey') }}</span>
+            <input
+              v-model="serviceForms[detailService].api_key"
+              class="api-key-input"
+              :type="showApiKey ? 'text' : 'password'"
+              autocomplete="off"
+              :placeholder="apiKeyPlaceholder(detailService)"
+            />
+            <button type="button" class="secondary-button btn-sm" @click="showApiKey = !showApiKey">
+              {{ showApiKey ? t('settings.thirdParty.hideKey') : t('settings.thirdParty.showKey') }}
+            </button>
+          </div>
         </section>
 
         <div class="third-party-actions" style="justify-content: space-between;">
@@ -374,14 +372,13 @@ onMounted(() => {
           </div>
           
           <div class="test-tab-panel" style="padding-top: 16px;">
-            <label class="svc-field">
-              <span class="svc-field-label" style="display: block; margin-bottom: 8px;">Query</span>
-              <input 
-                v-model="testQuery" 
-                class="test-query-input" 
+            <FormField label="Query">
+              <input
+                v-model="testQuery"
+                class="test-query-input"
                 :placeholder="t('settings.thirdParty.testQueryPlaceholder')"
               />
-            </label>
+            </FormField>
             
             <div class="test-dialog-actions" style="justify-content: flex-end;">
               <button type="button" class="primary-button" :disabled="isTesting" @click="runTest">
@@ -568,16 +565,6 @@ onMounted(() => {
 .third-party-form {
   display: grid;
   gap: 18px;
-}
-
-.svc-field {
-  display: grid;
-  gap: 6px;
-}
-
-.svc-field > span {
-  color: var(--muted);
-  font-size: 0.76rem;
 }
 
 .api-key-input {

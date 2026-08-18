@@ -270,19 +270,6 @@ function formatHeaderValue(key: string, value: string): string {
   font-size: 0.82rem;
 }
 
-.svc-input {
-  height: 40px;
-  width: 100%;
-  border: 1px solid var(--panel-border);
-  border-radius: 12px;
-  background: var(--panel-bg);
-  color: var(--text-strong);
-  padding: 0 12px;
-  font: inherit;
-  font-size: 0.88rem;
-  box-sizing: border-box;
-}
-
 .row-remove {
   height: 34px;
   padding: 0 10px;

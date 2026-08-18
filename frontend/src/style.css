@@ -254,3 +254,39 @@ textarea {
   border: 1px solid var(--room-card-border-stroke);
   pointer-events: none;
 }
+
+/* ==== 表单控件外观（svc-*，跨 settings 复用） ==== */
+.svc-input,
+.svc-select {
+  height: 40px;
+  width: 100%;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: var(--panel-bg);
+  color: var(--text-strong);
+  padding: 0 12px;
+  font: inherit;
+  font-size: 0.88rem;
+  box-sizing: border-box;
+}
+
+.svc-input--flex {
+  flex: 1;
+  min-width: 0;
+}
+
+.svc-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.svc-field--wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+  .svc-form-grid {
+    grid-template-columns: 1fr;
+  }
+}

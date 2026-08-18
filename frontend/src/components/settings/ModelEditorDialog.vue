@@ -6,6 +6,7 @@ import ContextConfigSection from './ContextConfigSection.vue';
 import ExtraParamsConfigSection from './ExtraParamsConfigSection.vue';
 import HeadersConfigSection from './HeadersConfigSection.vue';
 import ModalDialog from '../ui/ModalDialog.vue';
+import FormField from '../ui/FormField.vue';
 
 type EditorMode = 'create' | 'edit';
 
@@ -178,8 +179,7 @@ defineExpose({ openCreate, openEdit });
     @close="closeDialog"
   >
     <div class="svc-form-grid">
-          <label class="svc-field">
-            <span>{{ t('settings.models.modelNameLabel', 'Model Name') }}</span>
+          <FormField :label="t('settings.models.modelNameLabel', 'Model Name')">
             <input
               id="model-editor-name"
               v-model="form.name"
@@ -188,10 +188,9 @@ defineExpose({ openCreate, openEdit });
               class="svc-input"
               placeholder="e.g. gpt-4o"
             />
-          </label>
+          </FormField>
 
-          <label class="svc-field">
-            <span>{{ t('settings.models.protocolLabel', 'Protocol') }}</span>
+          <FormField :label="t('settings.models.protocolLabel', 'Protocol')">
             <select
               id="model-editor-protocol"
               v-model="form.protocol"
@@ -201,11 +200,14 @@ defineExpose({ openCreate, openEdit });
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic</option>
             </select>
-          </label>
+          </FormField>
         </div>
 
-        <div class="svc-field svc-field--wide">
-          <span>{{ t('settings.models.inputLabel', 'Supported Input Types') }}</span>
+        <FormField
+          :label="t('settings.models.inputLabel', 'Supported Input Types')"
+          :hint="t('settings.models.inputHint', 'Text is always enabled. Models declaring Image can receive image messages.')"
+          wide
+        >
           <div class="input-types">
             <label
               v-for="opt in INPUT_OPTIONS"
@@ -222,8 +224,7 @@ defineExpose({ openCreate, openEdit });
               <span>{{ t(`settings.models.inputTypes.${opt.value}`, opt.label) }}</span>
             </label>
           </div>
-          <p class="svc-hint">{{ t('settings.models.inputHint', 'Text is always enabled. Models declaring Image can receive image messages.') }}</p>
-        </div>
+        </FormField>
 
         <section class="advanced-card">
           <button type="button" class="advanced-toggle" :aria-expanded="advancedOpen" @click="advancedOpen = !advancedOpen">
@@ -269,12 +270,6 @@ defineExpose({ openCreate, openEdit });
 
 <style scoped>
 .advanced-eyebrow { margin: 0; color: var(--accent); text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.68rem; }
-.svc-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.svc-field { display: grid; gap: 6px; }
-.svc-field--wide { grid-column: 1 / -1; }
-.svc-field > span { color: var(--muted); font-size: 0.76rem; }
-.svc-input, .svc-select { height: 40px; width: 100%; border: 1px solid var(--panel-border); border-radius: 12px; background: var(--panel-bg); color: var(--text-strong); padding: 0 12px; font: inherit; font-size: 0.88rem; box-sizing: border-box; }
-.svc-hint { margin: 0; color: var(--muted); font-size: 0.74rem; }
 .input-types { display: flex; flex-wrap: wrap; gap: 16px; }
 .input-type-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; color: var(--muted); font-size: 0.88rem; cursor: pointer; user-select: none; transition: color 0.2s; }
 .input-type-chip:hover:not(.disabled) { color: var(--text-strong); }
@@ -288,6 +283,6 @@ defineExpose({ openCreate, openEdit });
 .advanced-toggle__state { color: var(--muted); font-size: 0.8rem; }
 .advanced-grid { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--panel-border); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 @media (max-width: 640px) {
-  .svc-form-grid, .advanced-grid { grid-template-columns: 1fr; }
+  .advanced-grid { grid-template-columns: 1fr; }
 }
 </style>

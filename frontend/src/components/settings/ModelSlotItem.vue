@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n';
 import type { LlmProviderConfig } from '../../types';
 import InfoTooltip from '../ui/InfoTooltip.vue';
 import ModelSelect from '../ui/ModelSelect.vue';
+import FormField from '../ui/FormField.vue';
 
 defineProps<{
   label: string;
@@ -19,21 +20,16 @@ const { t } = useI18n();
 </script>
 
 <template>
-  <div class="svc-field">
-    <span>
+  <FormField>
+    <template #label>
       {{ label }}
       <InfoTooltip :text="description" />
-    </span>
+    </template>
     <ModelSelect
       :model-value="modelValue"
       :providers="providers"
       :placeholder="t('common.notConfigured', '未配置')"
       @update:model-value="emit('update:modelValue', $event)"
     />
-  </div>
+  </FormField>
 </template>
-
-<style scoped>
-.svc-field { display: grid; gap: 6px; }
-.svc-field > span { color: var(--muted); font-size: 0.76rem; }
-</style>
