@@ -241,6 +241,7 @@ STORAGE_ROOT/
 - docs/tech/08_debugging/：轮次与消息排查指南
 - docs/tech/09_tui/：TUI 布局方案
 - docs/tech/10_release/：桌面打包发布方案、演示模式只读方案、未初始化场景调度闸门
+- docs/tech/11_refactor/：前端基础组件重复清单（去重待办）
 
 ### 版本文档
 
