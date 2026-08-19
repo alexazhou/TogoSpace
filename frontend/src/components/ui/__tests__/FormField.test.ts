@@ -8,7 +8,7 @@ describe('FormField', () => {
       props: { label: 'Model Name' },
       slots: { default: '<input />' },
     });
-    expect(wrapper.find('.ui-field__label').text()).toBe('Model Name');
+    expect(wrapper.find('.form-field__label').text()).toBe('Model Name');
     expect(wrapper.find('input').exists()).toBe(true);
   });
 
@@ -17,17 +17,17 @@ describe('FormField', () => {
       props: { label: 'L', hint: 'Hint text' },
       slots: { default: '<input />' },
     });
-    expect(wrapper.find('.ui-field__hint').text()).toBe('Hint text');
+    expect(wrapper.find('.form-field__hint').text()).toBe('Hint text');
   });
 
   it('applies wide modifier class', () => {
     const wrapper = mount(FormField, { props: { wide: true }, slots: { default: '<input />' } });
-    expect(wrapper.find('.ui-field').classes()).toContain('ui-field--wide');
+    expect(wrapper.find('.form-field').classes()).toContain('form-field--wide');
   });
 
   it('omits wide class by default', () => {
     const wrapper = mount(FormField, { slots: { default: '<input />' } });
-    expect(wrapper.find('.ui-field').classes()).not.toContain('ui-field--wide');
+    expect(wrapper.find('.form-field').classes()).not.toContain('form-field--wide');
   });
 
   it('renders #label slot over label prop', () => {
@@ -35,7 +35,7 @@ describe('FormField', () => {
       props: { label: 'Fallback' },
       slots: { label: 'Custom <b>Label</b>', default: '<input />' },
     });
-    expect(wrapper.find('.ui-field__label').html()).toContain('Custom');
-    expect(wrapper.find('.ui-field__label').text()).not.toBe('Fallback');
+    expect(wrapper.find('.form-field__label').html()).toContain('Custom');
+    expect(wrapper.find('.form-field__label').text()).not.toBe('Fallback');
   });
 });

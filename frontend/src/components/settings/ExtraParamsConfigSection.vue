@@ -298,7 +298,7 @@ function handleSave(): void {
                   <div class="input-wrap">
                     <input
                       type="number"
-                      class="svc-input compact-input"
+                      class="gu-input compact-input"
                       :value="getNumberFieldValue(field.key)"
                       :min="getNumberMin(field)"
                       :max="getNumberMax(field)"
@@ -316,7 +316,7 @@ function handleSave(): void {
                 id="extra-params-json"
                 v-model="jsonText"
                 name="extra_params_json"
-                class="svc-textarea svc-textarea--code"
+                class="gu-textarea gu-textarea--code"
                 rows="8"
                 spellcheck="false"
                 @input="handleJsonInput"
@@ -402,25 +402,6 @@ function handleSave(): void {
   font-size: 13px;
   padding: 4px 10px;
   text-align: right;
-}
-
-.svc-textarea {
-  width: 100%;
-  border: 1px solid var(--panel-border);
-  border-radius: 12px;
-  background: var(--panel-bg);
-  color: var(--text-strong);
-  padding: 10px 12px;
-  font: inherit;
-  font-size: 0.88rem;
-  box-sizing: border-box;
-  resize: vertical;
-}
-
-.svc-textarea--code {
-  font-family: monospace;
-  font-size: 0.8rem;
-  line-height: 1.5;
 }
 
 .editor-note {

@@ -153,18 +153,18 @@ defineExpose({ openCreate, openEdit });
       </div>
     </template>
 
-        <div class="svc-form-grid">
+        <div class="gu-form-grid">
           <FormField :label="t('settings.models.typeLabel')">
             <CustomSelect
               v-model="form.type"
               :options="SERVICE_TYPES"
-              class="svc-custom-select"
+              class="select-skin"
               @update:model-value="handleTypeChange"
             />
           </FormField>
 
           <FormField :label="t('settings.models.nameLabel')">
-            <input v-model="form.name" type="text" class="svc-input" :readonly="!isCreating" :class="{ 'svc-input--readonly': !isCreating }" placeholder="e.g. OpenAI" />
+            <input v-model="form.name" type="text" class="gu-input" :readonly="!isCreating" placeholder="e.g. OpenAI" />
           </FormField>
 
           <FormField label="Base URLs" wide>
@@ -177,8 +177,8 @@ defineExpose({ openCreate, openEdit });
           </FormField>
 
           <FormField label="API Key" wide>
-            <div class="svc-input-wrapper">
-              <input v-model="form.api_key" :type="apiKeyVisible ? 'text' : 'password'" class="svc-input svc-input--flex" placeholder="sk-..." />
+            <div class="input-wrapper">
+              <input v-model="form.api_key" :type="apiKeyVisible ? 'text' : 'password'" class="gu-input gu-input--flex" placeholder="sk-..." />
               <button type="button" class="eye-icon-btn" @click="apiKeyVisible = !apiKeyVisible">
                 <svg v-if="!apiKeyVisible" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                 <svg v-else xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
@@ -196,11 +196,11 @@ defineExpose({ openCreate, openEdit });
 
 <style scoped>
 /* Inherit from existing styles */
-:deep(.svc-custom-select .custom-select__button) { min-height: 40px; height: 40px; padding: 0 12px; border-radius: 12px; font-size: 0.88rem; border-color: var(--panel-border); background: var(--panel-bg); }
-:deep(.svc-custom-select .custom-select__button:hover), :deep(.svc-custom-select.is-open .custom-select__button) { border-color: var(--focus-border); }
-:deep(.svc-custom-select .custom-select__option) { min-height: 38px; padding: 0 12px; font-size: 0.88rem; border-radius: 8px; }
-.svc-input-wrapper { position: relative; display: flex; align-items: center; }
-.svc-input-wrapper .svc-input { padding-right: 40px; }
+:deep(.select-skin .custom-select__button) { min-height: 40px; height: 40px; padding: 0 12px; border-radius: 12px; font-size: 0.88rem; border-color: var(--panel-border); background: var(--panel-bg); }
+:deep(.select-skin .custom-select__button:hover), :deep(.select-skin.is-open .custom-select__button) { border-color: var(--focus-border); }
+:deep(.select-skin .custom-select__option) { min-height: 38px; padding: 0 12px; font-size: 0.88rem; border-radius: 8px; }
+.input-wrapper { position: relative; display: flex; align-items: center; }
+.input-wrapper .gu-input { padding-right: 40px; }
 .eye-icon-btn {
   position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
   display: flex; align-items: center; justify-content: center;

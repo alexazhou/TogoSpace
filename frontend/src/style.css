@@ -255,9 +255,9 @@ textarea {
   pointer-events: none;
 }
 
-/* ==== 表单控件外观（svc-*，跨 settings 复用） ==== */
-.svc-input,
-.svc-select {
+/* ==== 表单控件外观（gu-*，全局公共类，跨 settings 复用） ==== */
+.gu-input,
+.gu-select {
   height: 40px;
   width: 100%;
   border: 1px solid var(--panel-border);
@@ -270,23 +270,38 @@ textarea {
   box-sizing: border-box;
 }
 
-.svc-input--flex {
+.gu-input--flex {
   flex: 1;
   min-width: 0;
 }
 
-.svc-form-grid {
+.gu-textarea {
+  width: 100%;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: var(--panel-bg);
+  color: var(--text-strong);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 0.88rem;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.gu-textarea--code {
+  font-family: monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.gu-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.svc-field--wide {
-  grid-column: 1 / -1;
-}
-
 @media (max-width: 640px) {
-  .svc-form-grid {
+  .gu-form-grid {
     grid-template-columns: 1fr;
   }
 }

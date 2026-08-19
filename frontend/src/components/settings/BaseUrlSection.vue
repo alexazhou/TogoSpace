@@ -94,12 +94,12 @@ function getProtocolLabel(type: string): string {
     <template v-else>
       <div class="urls-edit">
         <div v-for="(item, index) in editForm" :key="index" class="url-edit-item">
-          <select v-model="item.type" class="svc-input svc-select" style="width: 140px; flex-shrink: 0;">
+          <select v-model="item.type" class="gu-input gu-select" style="width: 140px; flex-shrink: 0;">
             <option v-for="pt in protocolTypes" :key="pt.value" :value="pt.value" :disabled="editForm.some((u, i) => u.type === pt.value && i !== index)">
               {{ pt.label }}
             </option>
           </select>
-          <input v-model="item.url" type="text" class="svc-input svc-input--flex" placeholder="https://..." />
+          <input v-model="item.url" type="text" class="gu-input gu-input--flex" placeholder="https://..." />
           <button type="button" class="ghost-button" @click="removeUrl(index)" style="padding: 0 8px; color: var(--error);">
             ×
           </button>

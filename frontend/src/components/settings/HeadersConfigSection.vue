@@ -149,13 +149,13 @@ function formatHeaderValue(key: string, value: string): string {
               <input
                 v-model="row.key"
                 type="text"
-                class="svc-input"
+                class="gu-input"
                 :placeholder="t('settings.headersConfig.keyPlaceholder')"
               />
               <input
                 v-model="row.value"
                 type="text"
-                class="svc-input"
+                class="gu-input"
                 :placeholder="t('settings.headersConfig.valuePlaceholder')"
               />
               <button type="button" class="ghost-button row-remove" @click="removeRow(row.id)">

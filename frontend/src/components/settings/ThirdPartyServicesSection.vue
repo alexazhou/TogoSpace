@@ -602,12 +602,6 @@ onMounted(() => {
   box-shadow: 0 0 0 2px var(--focus-glow);
 }
 
-.svc-textarea {
-  resize: vertical;
-  min-height: 86px;
-  line-height: 1.5;
-}
-
 .capabilities-section {
   display: grid;
   gap: 10px;

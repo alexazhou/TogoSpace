@@ -178,14 +178,14 @@ defineExpose({ openCreate, openEdit });
     :width="600"
     @close="closeDialog"
   >
-    <div class="svc-form-grid">
+    <div class="gu-form-grid">
           <FormField :label="t('settings.models.modelNameLabel', 'Model Name')">
             <input
               id="model-editor-name"
               v-model="form.name"
               name="model_name"
               type="text"
-              class="svc-input"
+              class="gu-input"
               placeholder="e.g. gpt-4o"
             />
           </FormField>
@@ -195,7 +195,7 @@ defineExpose({ openCreate, openEdit });
               id="model-editor-protocol"
               v-model="form.protocol"
               name="protocol"
-              class="svc-input svc-select"
+              class="gu-input gu-select"
             >
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic</option>
@@ -236,28 +236,22 @@ defineExpose({ openCreate, openEdit });
           </button>
 
           <div v-if="advancedOpen" class="advanced-grid">
-            <div class="svc-field--wide">
-              <ContextConfigSection
-                :config="contextConfigForComponent"
-                @save="handleContextConfigSave"
-              />
-            </div>
+            <ContextConfigSection
+              :config="contextConfigForComponent"
+              @save="handleContextConfigSave"
+            />
 
-            <div class="svc-field--wide">
-              <HeadersConfigSection
-                :headers="form.extra_headers"
-                @save="handleHeadersConfigSave"
-              />
-            </div>
+            <HeadersConfigSection
+              :headers="form.extra_headers"
+              @save="handleHeadersConfigSave"
+            />
 
-            <div class="svc-field--wide">
-              <ExtraParamsConfigSection
-                :model-name="form.name"
-                :protocol="form.protocol"
-                :params-text="form.extra_params"
-                @save="handleExtraParamsSave"
-              />
-            </div>
+            <ExtraParamsConfigSection
+              :model-name="form.name"
+              :protocol="form.protocol"
+              :params-text="form.extra_params"
+              @save="handleExtraParamsSave"
+            />
           </div>
         </section>
 
@@ -281,8 +275,5 @@ defineExpose({ openCreate, openEdit });
 .advanced-toggle { display: flex; width: 100%; justify-content: space-between; align-items: center; background: transparent; border: none; padding: 0; cursor: pointer; text-align: left; }
 .advanced-toggle strong { color: var(--text-strong); font-size: 0.9rem; }
 .advanced-toggle__state { color: var(--muted); font-size: 0.8rem; }
-.advanced-grid { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--panel-border); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-@media (max-width: 640px) {
-  .advanced-grid { grid-template-columns: 1fr; }
-}
+.advanced-grid { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--panel-border); display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 </style>

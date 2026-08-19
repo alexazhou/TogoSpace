@@ -122,7 +122,7 @@ function formatRatio(n: number | null | undefined): string {
                 <InfoTooltip position="right" :text="t('settings.models.contextWindowTokensDesc', 'Maximum context window size in tokens')" />
               </template>
               <div class="input-with-clear">
-                <input v-model.number="form.context_window_tokens" type="number" class="svc-input" min="0" step="1024" :placeholder="`自动 (${defaults.context_window_tokens ?? 131072})`" />
+                <input v-model.number="form.context_window_tokens" type="number" class="gu-input number-input" min="0" step="1024" :placeholder="`自动 (${defaults.context_window_tokens ?? 131072})`" />
                 <button v-if="form.context_window_tokens != null" type="button" class="clear-btn" @click="clearField('context_window_tokens')">⟳</button>
               </div>
             </FormField>
@@ -133,7 +133,7 @@ function formatRatio(n: number | null | undefined): string {
                 <InfoTooltip position="right" :text="t('settings.models.reserveOutputTokensDesc', 'Reserved tokens for model output')" />
               </template>
               <div class="input-with-clear">
-                <input v-model.number="form.reserve_output_tokens" type="number" class="svc-input" min="0" step="256" :placeholder="`自动 (${defaults.reserve_output_tokens ?? 16384})`" />
+                <input v-model.number="form.reserve_output_tokens" type="number" class="gu-input number-input" min="0" step="256" :placeholder="`自动 (${defaults.reserve_output_tokens ?? 16384})`" />
                 <button v-if="form.reserve_output_tokens != null" type="button" class="clear-btn" @click="clearField('reserve_output_tokens')">⟳</button>
               </div>
             </FormField>
@@ -144,7 +144,7 @@ function formatRatio(n: number | null | undefined): string {
                 <InfoTooltip position="right" :text="t('settings.models.compactTriggerRatioDesc', 'Ratio of context usage to trigger compaction (0-1)')" />
               </template>
               <div class="input-with-clear">
-                <input v-model.number="form.compact_trigger_ratio" type="number" class="svc-input" min="0" max="1" step="0.05" :placeholder="`自动 (${defaults.compact_trigger_ratio ?? 0.85})`" />
+                <input v-model.number="form.compact_trigger_ratio" type="number" class="gu-input number-input" min="0" max="1" step="0.05" :placeholder="`自动 (${defaults.compact_trigger_ratio ?? 0.85})`" />
                 <button v-if="form.compact_trigger_ratio != null" type="button" class="clear-btn" @click="clearField('compact_trigger_ratio')">⟳</button>
               </div>
             </FormField>
@@ -155,7 +155,7 @@ function formatRatio(n: number | null | undefined): string {
                 <InfoTooltip position="right" :text="t('settings.models.compactSummaryMaxTokensDesc', 'Maximum tokens for compaction summary')" />
               </template>
               <div class="input-with-clear">
-                <input v-model.number="form.compact_summary_max_tokens" type="number" class="svc-input" min="0" step="256" :placeholder="`自动 (${defaults.compact_summary_max_tokens ?? 6144})`" />
+                <input v-model.number="form.compact_summary_max_tokens" type="number" class="gu-input number-input" min="0" step="256" :placeholder="`自动 (${defaults.compact_summary_max_tokens ?? 6144})`" />
                 <button v-if="form.compact_summary_max_tokens != null" type="button" class="clear-btn" @click="clearField('compact_summary_max_tokens')">⟳</button>
               </div>
             </FormField>
@@ -215,16 +215,15 @@ function formatRatio(n: number | null | undefined): string {
 
 /* Dialog body */
 .editor-form { display: grid; gap: 12px; }
-.svc-input {
+/* 数字输入框局部修饰：叠加在全局 gu-input 之上 */
+.number-input {
   height: auto;
-  width: 100%; border: 1px solid var(--panel-border); border-radius: 12px;
-  background: var(--panel-bg); color: var(--text-strong); padding: 8px 12px;
-  font: inherit; font-size: 0.88rem; box-sizing: border-box;
+  padding: 8px 12px;
 }
 .input-with-clear {
   position: relative;
 }
-.input-with-clear .svc-input {
+.input-with-clear .number-input {
   padding-right: 32px;
 }
 .clear-btn {
@@ -245,7 +244,7 @@ function formatRatio(n: number | null | undefined): string {
 .clear-btn:hover {
   color: var(--text-strong);
 }
-.svc-input[type="number"] { -moz-appearance: textfield; }
-.svc-input[type="number"]::-webkit-outer-spin-button,
-.svc-input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.number-input[type="number"] { -moz-appearance: textfield; }
+.number-input[type="number"]::-webkit-outer-spin-button,
+.number-input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 </style>
