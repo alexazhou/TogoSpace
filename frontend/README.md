@@ -29,3 +29,7 @@ VITE_API_BASE_URL=http://127.0.0.1:8180 npm run dev
 ```bash
 npm run build
 ```
+
+## 开发约定
+
+开发规范（通用 UI 组件复用、`gu-*` 全局 CSS 规范）见 [docs/development.md](docs/development.md)。
