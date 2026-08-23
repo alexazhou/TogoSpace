@@ -48,9 +48,13 @@ async def recognize(att: MessageAttachment) -> str:
         messages=[recog_msg],
     )
     result = await llmService.infer("vision@system", ctx)
+
     if not result.ok or result.response is None:
         raise RuntimeError(result.error_message or "vision recognize failed")
+
     text = (result.response.choices[0].message.content or "").strip()
+
     if not text:
         raise RuntimeError("vision recognize returned empty text")
+
     return _truncate_caption(text)

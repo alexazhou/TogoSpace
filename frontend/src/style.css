@@ -305,3 +305,60 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==== 通用表格外观（.ui-table 全局基础样式） ==== */
+.ui-table-wrap {
+  margin-top: 10px;
+  overflow-x: auto;
+  border-radius: 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+}
+
+.ui-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
+}
+
+.ui-table th,
+.ui-table td {
+  padding: 10px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.ui-table th:first-child,
+.ui-table td:first-child {
+  padding-left: 14px;
+}
+
+.ui-table th:last-child,
+.ui-table td:last-child {
+  padding-right: 14px;
+}
+
+.ui-table thead th {
+  border-bottom: 1px solid color-mix(in srgb, var(--divider) 86%, transparent);
+  color: var(--text-strong);
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--settings-table-head-bg);
+}
+
+.ui-table tbody td {
+  border-bottom: 1px solid color-mix(in srgb, var(--divider) 76%, transparent);
+  color: var(--text-strong);
+  font-size: 0.84rem;
+}
+
+.ui-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ui-table tbody tr:hover td {
+  background: var(--settings-table-row-hover);
+}
+

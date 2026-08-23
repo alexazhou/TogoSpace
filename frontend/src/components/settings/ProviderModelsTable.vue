@@ -31,8 +31,8 @@ const { t } = useI18n();
       </button>
     </div>
 
-    <div class="models-table-wrap">
-      <table class="settings-table models-table">
+    <div class="ui-table-wrap">
+      <table class="ui-table models-table">
         <thead>
           <tr>
             <th>{{ t('settings.models.modelNameLabel', 'Model') }}</th>
@@ -81,39 +81,14 @@ const { t } = useI18n();
 
 .text-danger { color: #e5484d; }
 
-.models-table-wrap {
-  border-radius: 12px;
-  background: var(--panel-bg);
-  padding: 0;
-  overflow-x: auto;
-  border: 1px solid var(--panel-border);
-}
-.settings-table {
-  width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto;
-}
-.settings-table th, .settings-table td {
-  padding: 10px 14px; text-align: left; vertical-align: middle;
-}
-.settings-table thead th {
-  border-bottom: 1px solid color-mix(in srgb, var(--divider) 86%, transparent);
-  color: var(--text-strong); font-size: 0.8rem; font-weight: 700; white-space: nowrap;
-  background: var(--settings-table-head-bg);
-}
-.settings-table tbody td {
-  border-bottom: 1px solid color-mix(in srgb, var(--divider) 76%, transparent);
-  color: var(--text-strong); font-size: 0.84rem;
-}
-.settings-table tbody tr:last-child td { border-bottom: none; }
-.settings-table tbody tr:hover td { background: var(--settings-table-row-hover); }
-
-.settings-table th:nth-child(1),
-.settings-table td:nth-child(1) { min-width: 220px; white-space: nowrap; }
-.settings-table th:nth-child(2),
-.settings-table td:nth-child(2) { min-width: 140px; white-space: nowrap; }
+.ui-table th:nth-child(1),
+.ui-table td:nth-child(1) { min-width: 220px; white-space: nowrap; }
+.ui-table th:nth-child(2),
+.ui-table td:nth-child(2) { min-width: 140px; white-space: nowrap; }
 
 .models-cell-type { color: var(--muted); }
-.settings-table th.actions-th { min-width: 180px; text-align: right; }
-.settings-table td.models-cell-actions {
+.ui-table th.actions-th { min-width: 180px; text-align: right; }
+.ui-table td.models-cell-actions {
   min-width: 180px;
   text-align: right;
   white-space: nowrap;

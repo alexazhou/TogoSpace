@@ -259,8 +259,8 @@ onMounted(() => {
           </button>
         </div>
 
-        <div class="models-table-wrap">
-          <table class="settings-table models-table">
+        <div class="ui-table-wrap">
+          <table class="ui-table models-table">
             <thead>
               <tr>
                 <th>{{ t('settings.models.table.providerName', 'Provider Name') }}</th>
@@ -415,41 +415,17 @@ onMounted(() => {
 .provider-actions { display: flex; gap: 8px; }
 .text-danger { color: #e5484d; }
 
-.models-table-wrap {
-  border-radius: 12px;
-  background: var(--panel-bg);
-  padding: 0;
-  overflow-x: auto;
-  border: 1px solid var(--panel-border);
-}
-.settings-table {
-  width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto;
-}
-.settings-table th, .settings-table td {
-  padding: 10px 14px; text-align: left; vertical-align: middle;
-}
-.settings-table thead th {
-  border-bottom: 1px solid color-mix(in srgb, var(--divider) 86%, transparent);
-  color: var(--text-strong); font-size: 0.8rem; font-weight: 700; white-space: nowrap;
-  background: var(--settings-table-head-bg);
-}
-.settings-table tbody td {
-  border-bottom: 1px solid color-mix(in srgb, var(--divider) 76%, transparent);
-  color: var(--text-strong); font-size: 0.84rem;
-}
-.settings-table tbody tr:last-child td { border-bottom: none; }
-.settings-table tbody tr:hover td { background: var(--settings-table-row-hover); }
-
-.settings-table th:nth-child(1),
-.settings-table td:nth-child(1) { min-width: 120px; white-space: nowrap; }
-.settings-table th:nth-child(2),
-.settings-table td:nth-child(2) { min-width: 96px; white-space: nowrap; }
-.settings-table th:nth-child(3),
-.settings-table td:nth-child(3) { min-width: 140px; }
+.ui-table th:nth-child(1),
+.ui-table td:nth-child(1) { min-width: 100px; white-space: nowrap; }
+.ui-table th:nth-child(2),
+.ui-table td:nth-child(2) { min-width: 80px; white-space: nowrap; }
+.ui-table th:nth-child(3),
+.ui-table td:nth-child(3) { min-width: 120px; max-width: 320px; }
 
 .models-cell-type { color: var(--muted); }
 .models-cell-tags {
-  min-width: 140px;
+  min-width: 120px;
+  max-width: 320px;
 }
 .models-cell-tags-inner {
   display: flex;
@@ -460,6 +436,12 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
+}
+.provider-model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .provider-model-modalities {
   display: inline-flex;
@@ -500,14 +482,14 @@ onMounted(() => {
   background: color-mix(in srgb, #e11d48 14%, var(--panel-bg) 86%);
   border-color: color-mix(in srgb, #e11d48 34%, transparent);
 }
-.settings-table th.status-th,
-.settings-table td:nth-child(4) { min-width: 76px; white-space: nowrap; }
-.settings-table th.actions-th { min-width: 220px; text-align: right; }
-.settings-table td.models-cell-actions {
-  min-width: 220px;
+.ui-table th.status-th,
+.ui-table td:nth-child(4) { min-width: 64px; white-space: nowrap; }
+.ui-table th.actions-th { min-width: 200px; text-align: right; }
+.ui-table td.models-cell-actions {
+  min-width: 200px;
   text-align: right;
   white-space: nowrap;
-  padding-right: 18px;
+  padding-right: 14px;
 }
 .models-cell-actions-inner {
   display: inline-flex;

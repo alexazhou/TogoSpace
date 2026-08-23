@@ -101,8 +101,8 @@ onMounted(() => {
     <section class="roles-table-section">
       <p v-if="isLoading" class="roles-empty">{{ t('settings.roles.loading') }}</p>
 
-      <div v-else-if="templates.length" class="settings-table-wrap">
-        <table class="settings-table roles-table">
+      <div v-else-if="templates.length" class="ui-table-wrap">
+        <table class="ui-table roles-table">
           <thead>
             <tr>
               <th>{{ t('settings.roles.table.id') }}</th>
@@ -180,7 +180,7 @@ onMounted(() => {
   padding: 0 10px;
 }
 
-.settings-table-wrap {
+.ui-table-wrap {
   margin-top: 10px;
   overflow-x: auto;
   padding: 10px 12px 12px;
@@ -193,7 +193,7 @@ onMounted(() => {
   font-size: 0.86rem;
 }
 
-.settings-table {
+.ui-table {
   width: 100%;
   min-width: 0;
   border-collapse: separate;
@@ -201,14 +201,14 @@ onMounted(() => {
   table-layout: fixed;
 }
 
-.settings-table th,
-.settings-table td {
+.ui-table th,
+.ui-table td {
   padding: 12px 14px;
   text-align: left;
   vertical-align: top;
 }
 
-.settings-table thead th {
+.ui-table thead th {
   position: relative;
   padding-top: 16px;
   padding-bottom: 16px;
@@ -221,7 +221,7 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.settings-table thead th:not(:last-child)::after {
+.ui-table thead th:not(:last-child)::after {
   content: '';
   position: absolute;
   top: 14px;
@@ -231,7 +231,7 @@ onMounted(() => {
   background: color-mix(in srgb, var(--divider) 88%, transparent);
 }
 
-.settings-table tbody td {
+.ui-table tbody td {
   border-bottom: 1px solid color-mix(in srgb, var(--divider) 76%, transparent);
   color: var(--text-strong);
   font-size: 0.84rem;
@@ -240,21 +240,21 @@ onMounted(() => {
     box-shadow 140ms ease;
 }
 
-.settings-table tbody tr:hover td,
-.settings-table tbody tr.active td {
+.ui-table tbody tr:hover td,
+.ui-table tbody tr.active td {
   background: var(--settings-table-row-hover);
 }
 
-.settings-table tbody tr.active td {
+.ui-table tbody tr.active td {
   background: var(--settings-table-row-active);
   box-shadow: none;
 }
 
-.settings-table tbody tr:last-child td {
+.ui-table tbody tr:last-child td {
   border-bottom: none;
 }
 
-.settings-table tbody tr:first-child td {
+.ui-table tbody tr:first-child td {
   padding-top: 18px;
 }
 
@@ -299,7 +299,7 @@ onMounted(() => {
     width: 100%;
   }
 
-  .settings-table {
+  .ui-table {
     min-width: 720px;
   }
 }
