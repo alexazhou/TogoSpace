@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { ref, type CSSProperties } from 'vue';
 
 const props = defineProps<{
   text: string;
@@ -8,12 +8,13 @@ const props = defineProps<{
 
 const triggerRef = ref<HTMLElement | null>(null);
 const show = ref(false);
+const tooltipStyle = ref<CSSProperties>({});
 
-const tooltipStyle = computed(() => {
-  if (!triggerRef.value) return {};
+function updatePosition(): void {
+  if (!triggerRef.value) return;
   const rect = triggerRef.value.getBoundingClientRect();
   const pos = props.position ?? 'top';
-  return {
+  tooltipStyle.value = {
     position: 'fixed',
     ...(pos === 'top'
       ? { bottom: `${window.innerHeight - rect.top + 6}px` }
@@ -21,9 +22,10 @@ const tooltipStyle = computed(() => {
     left: `${rect.left + rect.width / 2}px`,
     transform: 'translateX(-50%)',
   };
-});
+}
 
 function onEnter(): void {
+  updatePosition();
   show.value = true;
 }
 

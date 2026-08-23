@@ -177,97 +177,12 @@ onMounted(() => {
 
 .roles-table-section {
   margin-top: 10px;
-  padding: 0 10px;
-}
-
-.ui-table-wrap {
-  margin-top: 10px;
-  overflow-x: auto;
-  padding: 10px 12px 12px;
-  border-radius: 16px;
-  background: var(--settings-table-surface);
-}
-
-.roles-empty {
-  margin-top: 10px;
-  font-size: 0.86rem;
-}
-
-.ui-table {
-  width: 100%;
-  min-width: 0;
-  border-collapse: separate;
-  border-spacing: 0;
-  table-layout: fixed;
-}
-
-.ui-table th,
-.ui-table td {
-  padding: 12px 14px;
-  text-align: left;
-  vertical-align: top;
-}
-
-.ui-table thead th {
-  position: relative;
-  padding-top: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid color-mix(in srgb, var(--divider) 86%, transparent);
-  background: var(--settings-table-head-bg);
-  color: var(--text-strong);
-  font-size: 0.84rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-
-.ui-table thead th:not(:last-child)::after {
-  content: '';
-  position: absolute;
-  top: 14px;
-  right: 0;
-  width: 1px;
-  height: calc(100% - 28px);
-  background: color-mix(in srgb, var(--divider) 88%, transparent);
-}
-
-.ui-table tbody td {
-  border-bottom: 1px solid color-mix(in srgb, var(--divider) 76%, transparent);
-  color: var(--text-strong);
-  font-size: 0.84rem;
-  transition:
-    background 140ms ease,
-    box-shadow 140ms ease;
-}
-
-.ui-table tbody tr:hover td,
-.ui-table tbody tr.active td {
-  background: var(--settings-table-row-hover);
-}
-
-.ui-table tbody tr.active td {
-  background: var(--settings-table-row-active);
-  box-shadow: none;
-}
-
-.ui-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.ui-table tbody tr:first-child td {
-  padding-top: 18px;
-}
-
-.roles-cell-id {
-  color: var(--muted);
-}
-
-.roles-cell-id {
-  white-space: nowrap;
 }
 
 .roles-cell-id {
   width: 72px;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .roles-cell-name strong {
@@ -275,8 +190,6 @@ onMounted(() => {
   font-size: 0.84rem;
   font-weight: 600;
 }
-
-
 
 .roles-cell-actions,
 .roles-table-actions-head {
@@ -286,6 +199,11 @@ onMounted(() => {
 
 .roles-cell-actions :deep(.ghost-button) {
   white-space: nowrap;
+}
+
+.ui-table tbody tr.active td {
+  background: var(--settings-table-row-active);
+  box-shadow: none;
 }
 
 @media (max-width: 780px) {
