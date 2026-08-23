@@ -102,6 +102,11 @@ function closeMenu(): void {
   open.value = false;
 }
 
+function clearSelection(): void {
+  emit('update:modelValue', '');
+  closeMenu();
+}
+
 function selectModel(modelName: string): void {
   emit('update:modelValue', `${modelName}@${displayProvider.value}`);
   closeMenu();
@@ -155,9 +160,23 @@ onBeforeUnmount(() => {
         </template>
         <template v-else>{{ placeholder || t('common.notConfigured', '未配置') }}</template>
       </span>
-      <svg class="model-select__icon" viewBox="0 0 16 16" aria-hidden="true">
-        <path d="m4 6 4 4 4-4" />
-      </svg>
+      <div class="model-select__controls">
+        <button
+          v-if="modelValue && !disabled"
+          type="button"
+          class="model-select__clear-btn"
+          :title="t('common.clear', '清空')"
+          aria-label="Clear selection"
+          @click.stop="clearSelection"
+        >
+          <svg viewBox="0 0 16 16" class="model-select__clear-icon" aria-hidden="true">
+            <path d="m4 4 8 8m0-8-8 8" />
+          </svg>
+        </button>
+        <svg class="model-select__icon" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="m4 6 4 4 4-4" />
+        </svg>
+      </div>
     </button>
 
     <Teleport to="body">
@@ -184,6 +203,18 @@ onBeforeUnmount(() => {
         <!-- 右侧：模型 -->
         <div class="model-select__panel model-select__panel--models">
           <div class="model-select__panel-header">{{ t('settings.models.modelLabel', 'Model') }}</div>
+          <!-- 清空/未配置选项 -->
+          <button
+            type="button"
+            class="model-select__option model-select__option--unconfigured"
+            :class="{ 'is-selected': !modelValue }"
+            @click="clearSelection"
+          >
+            <span class="model-select__option-name-wrap">
+              <span class="model-select__unconfigured-text">{{ placeholder || t('common.notConfigured', '未配置') }}</span>
+            </span>
+            <span v-if="!modelValue" class="model-select__check">✓</span>
+          </button>
           <template v-if="modelsForDisplayProvider.length">
             <button
               v-for="m in modelsForDisplayProvider"
@@ -435,6 +466,55 @@ onBeforeUnmount(() => {
   color: #e11d48;
   background: color-mix(in srgb, #e11d48 14%, var(--panel-bg) 86%);
   border-color: color-mix(in srgb, #e11d48 34%, transparent);
+}
+
+.model-select__controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.model-select__clear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-strong) 10%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.model-select__clear-btn:hover {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+  transform: scale(1.08);
+}
+
+.model-select__clear-icon {
+  width: 10px;
+  height: 10px;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  fill: none;
+}
+
+.model-select__option--unconfigured {
+  color: var(--muted);
+  font-style: italic;
+  border-bottom: 1px dashed color-mix(in srgb, var(--panel-border) 80%, transparent);
+  margin-bottom: 3px;
+}
+
+.model-select__option--unconfigured.is-selected {
+  color: var(--text-strong);
+  font-style: normal;
 }
 
 .model-select__empty {
