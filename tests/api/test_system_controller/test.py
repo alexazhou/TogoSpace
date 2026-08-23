@@ -145,8 +145,8 @@ class TestSystemStatus(_ApiServiceCase):
             async with client.get(f"{self.backend_base_url}/system/check_update.json?force=true") as resp:
                 data = await resp.json()
 
-        # current_version 应为 0.x.y 格式
-        assert re.fullmatch(r"\d+\.\d+\.\d+", data["current_version"])
+        # current_version 应为 0.x.y 格式（允许 -betaN 等预发布后缀）
+        assert re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?", data["current_version"])
 
     async def test_check_update_without_force_uses_cache(self):
         """不带 force 参数时第二次请求应使用缓存。"""
