@@ -13,6 +13,7 @@ import ConfirmDialog from '../ui/ConfirmDialog.vue';
 import ProviderModelsTable from './ProviderModelsTable.vue';
 import type { SettingsBreadcrumbItem } from './types';
 import UiTag from '../ui/UiTag.vue';
+import HoverTooltip from '../ui/HoverTooltip.vue';
 import { showGlobalSuccessToast } from '../../appUiState';
 
 const props = defineProps<{
@@ -27,6 +28,27 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+
+const MODALITY_MAP: Record<string, string> = {
+  text: 'T',
+  image: 'I',
+  audio: 'A',
+  video: 'V',
+};
+
+function getModalityLetter(type: string): string {
+  return MODALITY_MAP[type] ?? type.charAt(0).toUpperCase();
+}
+
+function getModalityFullName(type: string): string {
+  const nameMap: Record<string, string> = {
+    text: t('settings.models.modalities.text', '文本'),
+    image: t('settings.models.modalities.image', '图片'),
+    audio: t('settings.models.modalities.audio', '声音'),
+    video: t('settings.models.modalities.video', '视频'),
+  };
+  return nameMap[type] ?? type;
+}
 
 function onSettingsReload(): void {
   void loadData();
@@ -254,8 +276,23 @@ onMounted(() => {
                 <td><span class="models-cell-type">{{ provider.type }}</span></td>
                 <td class="models-cell-tags">
                   <div class="models-cell-tags-inner">
-                    <UiTag v-for="(model, mIndex) in provider.models" :key="mIndex" shape="rounded" size="sm">
-                      {{ model.name }}
+                    <UiTag v-for="(model, mIndex) in provider.models" :key="mIndex" shape="rounded" size="sm" class="provider-model-tag">
+                      <span class="provider-model-name">{{ model.name }}</span>
+                      <span class="provider-model-modalities">
+                        <HoverTooltip
+                          v-for="type in (model.input || ['text'])"
+                          :key="type"
+                          :text="getModalityFullName(type)"
+                          position="top"
+                        >
+                          <span
+                            class="modality-mini-badge"
+                            :class="`modality-mini-badge--${type}`"
+                          >
+                            {{ getModalityLetter(type) }}
+                          </span>
+                        </HoverTooltip>
+                      </span>
                     </UiTag>
                   </div>
                 </td>
@@ -418,6 +455,50 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+.provider-model-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.provider-model-modalities {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.modality-mini-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid transparent;
+  cursor: default;
+}
+.modality-mini-badge--text {
+  color: #6366f1;
+  background: color-mix(in srgb, #6366f1 14%, var(--panel-bg) 86%);
+  border-color: color-mix(in srgb, #6366f1 34%, transparent);
+}
+.modality-mini-badge--image {
+  color: #0284c7;
+  background: color-mix(in srgb, #0284c7 14%, var(--panel-bg) 86%);
+  border-color: color-mix(in srgb, #0284c7 34%, transparent);
+}
+.modality-mini-badge--audio {
+  color: #059669;
+  background: color-mix(in srgb, #059669 14%, var(--panel-bg) 86%);
+  border-color: color-mix(in srgb, #059669 34%, transparent);
+}
+.modality-mini-badge--video {
+  color: #e11d48;
+  background: color-mix(in srgb, #e11d48 14%, var(--panel-bg) 86%);
+  border-color: color-mix(in srgb, #e11d48 34%, transparent);
 }
 .settings-table th.status-th,
 .settings-table td:nth-child(4) { min-width: 76px; white-space: nowrap; }

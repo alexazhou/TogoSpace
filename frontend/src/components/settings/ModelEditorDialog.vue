@@ -20,10 +20,10 @@ const visible = ref(false);
 const mode = ref<EditorMode>('create');
 
 const INPUT_OPTIONS = [
-  { value: 'text', label: 'Text' },
-  { value: 'image', label: 'Image' },
-  { value: 'audio', label: 'Audio' },
-  { value: 'video', label: 'Video' },
+  { value: 'text', label: 'Text (T)' },
+  { value: 'image', label: 'Image (I)' },
+  { value: 'audio', label: 'Audio (A)' },
+  { value: 'video', label: 'Video (V)' },
 ] as const;
 
 const form = ref({

@@ -45,9 +45,6 @@ const { t } = useI18n();
           <tr v-for="(model, mIndex) in models" :key="mIndex">
             <td>
               <strong>{{ model.name }}</strong>
-              <UiTag v-if="model.input?.includes('image')" tone="info" size="sm" class="model-vision-badge">
-                {{ t('settings.models.visionBadge', 'Vision') }}
-              </UiTag>
             </td>
             <td>
               <div class="models-cell-tags-inner">
@@ -115,7 +112,6 @@ const { t } = useI18n();
 .settings-table td:nth-child(2) { min-width: 140px; white-space: nowrap; }
 
 .models-cell-type { color: var(--muted); }
-.model-vision-badge { margin-left: 8px; }
 .settings-table th.actions-th { min-width: 180px; text-align: right; }
 .settings-table td.models-cell-actions {
   min-width: 180px;

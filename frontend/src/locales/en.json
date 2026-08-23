@@ -550,12 +550,18 @@
         "status": "Status",
         "actions": "Actions"
       },
-      "inputLabel": "Supported Input Types",
-      "inputTypes": {
+      "modalities": {
         "text": "Text",
         "image": "Image",
         "audio": "Audio",
         "video": "Video"
+      },
+      "inputLabel": "Supported Input Types",
+      "inputTypes": {
+        "text": "Text (T)",
+        "image": "Image (I)",
+        "audio": "Audio (A)",
+        "video": "Video (V)"
       },
       "inputHint": "Text is always enabled. Models declaring Image can receive image messages.",
       "visionBadge": "Vision"

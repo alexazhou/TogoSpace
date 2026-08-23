@@ -550,12 +550,18 @@
         "status": "状态",
         "actions": "操作"
       },
-      "inputLabel": "支持的输入类型",
-      "inputTypes": {
+      "modalities": {
         "text": "文本",
         "image": "图片",
-        "audio": "音频",
+        "audio": "声音",
         "video": "视频"
+      },
+      "inputLabel": "支持的输入类型",
+      "inputTypes": {
+        "text": "文本 (T)",
+        "image": "图片 (I)",
+        "audio": "声音 (A)",
+        "video": "视频 (V)"
       },
       "inputHint": "文本始终启用。声明\"图片\"的模型可接收图片消息。",
       "visionBadge": "视觉"

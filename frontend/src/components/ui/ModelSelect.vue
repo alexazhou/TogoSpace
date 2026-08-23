@@ -54,8 +54,29 @@ const enabledProviders = computed(() =>
 
 const modelsForDisplayProvider = computed(() => {
   const provider = enabledProviders.value.find(p => p.name === displayProvider.value);
-  return provider?.models.map(m => m.name) ?? [];
+  return provider?.models ?? [];
 });
+
+const MODALITY_MAP: Record<string, string> = {
+  text: 'T',
+  image: 'I',
+  audio: 'A',
+  video: 'V',
+};
+
+function getModalityLetter(type: string): string {
+  return MODALITY_MAP[type] ?? type.charAt(0).toUpperCase();
+}
+
+function getModalityFullName(type: string): string {
+  const nameMap: Record<string, string> = {
+    text: t('settings.models.modalities.text', '文本'),
+    image: t('settings.models.modalities.image', '图片'),
+    audio: t('settings.models.modalities.audio', '声音'),
+    video: t('settings.models.modalities.video', '视频'),
+  };
+  return nameMap[type] ?? type;
+}
 
 const displayModel = computed(() => {
   if (!props.modelValue) return '';
@@ -160,25 +181,42 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <!-- 右侧：模型 -->
-      <div class="model-select__panel model-select__panel--models">
-        <div class="model-select__panel-header">{{ t('settings.models.modelLabel', 'Model') }}</div>
-        <template v-if="modelsForDisplayProvider.length">
-          <button
-            v-for="m in modelsForDisplayProvider"
-            :key="m"
-            type="button"
-            class="model-select__option"
-            :class="{ 'is-selected': `${m}@${displayProvider}` === modelValue }"
-            @click="selectModel(m)"
-          >
-            <span>{{ m }}</span>
-            <span v-if="`${m}@${displayProvider}` === modelValue" class="model-select__check">✓</span>
-          </button>
-        </template>
-        <p v-else class="model-select__empty">{{ t('common.notConfigured', '未配置') }}</p>
+        <!-- 右侧：模型 -->
+        <div class="model-select__panel model-select__panel--models">
+          <div class="model-select__panel-header">{{ t('settings.models.modelLabel', 'Model') }}</div>
+          <template v-if="modelsForDisplayProvider.length">
+            <button
+              v-for="m in modelsForDisplayProvider"
+              :key="m.name"
+              type="button"
+              class="model-select__option"
+              :class="{ 'is-selected': `${m.name}@${displayProvider}` === modelValue }"
+              @click="selectModel(m.name)"
+            >
+              <span class="model-select__option-name-wrap">
+                <span>{{ m.name }}</span>
+                <span class="model-select__badges">
+                  <HoverTooltip
+                    v-for="type in (m.input || ['text'])"
+                    :key="type"
+                    :text="getModalityFullName(type)"
+                    position="top"
+                  >
+                    <span
+                      class="model-select__badge"
+                      :class="`model-select__badge--${type}`"
+                    >
+                      {{ getModalityLetter(type) }}
+                    </span>
+                  </HoverTooltip>
+                </span>
+              </span>
+              <span v-if="`${m.name}@${displayProvider}` === modelValue" class="model-select__check">✓</span>
+            </button>
+          </template>
+          <p v-else class="model-select__empty">{{ t('common.notConfigured', '未配置') }}</p>
+        </div>
       </div>
-    </div>
     </Teleport>
   </div>
 </template>
@@ -346,6 +384,57 @@ onBeforeUnmount(() => {
 .model-select__arrow {
   color: var(--muted);
   font-size: 1rem;
+}
+
+.model-select__option-name-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-select__badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.model-select__badge {
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 3px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  cursor: default;
+}
+
+.model-select__badge--text {
+  color: #6366f1;
+  background: color-mix(in srgb, #6366f1 14%, var(--panel-bg) 86%);
+  border-color: color-mix(in srgb, #6366f1 34%, transparent);
+}
+
+.model-select__badge--image {
+  color: #0284c7;
+  background: color-mix(in srgb, #0284c7 14%, var(--panel-bg) 86%);
+  border-color: color-mix(in srgb, #0284c7 34%, transparent);
+}
+
+.model-select__badge--audio {
+  color: #059669;
+  background: color-mix(in srgb, #059669 14%, var(--panel-bg) 86%);
+  border-color: color-mix(in srgb, #059669 34%, transparent);
+}
+
+.model-select__badge--video {
+  color: #e11d48;
+  background: color-mix(in srgb, #e11d48 14%, var(--panel-bg) 86%);
+  border-color: color-mix(in srgb, #e11d48 34%, transparent);
 }
 
 .model-select__empty {
