@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, type CSSProperties } from 'vue';
 
 type CustomSelectOption = {
   value: string;
@@ -19,6 +19,8 @@ const emit = defineEmits<{
 }>();
 
 const rootRef = ref<HTMLElement | null>(null);
+const buttonRef = ref<HTMLElement | null>(null);
+const menuRef = ref<HTMLElement | null>(null);
 const open = ref(false);
 
 const selectedOption = computed(() =>
@@ -26,6 +28,21 @@ const selectedOption = computed(() =>
 );
 
 const buttonLabel = computed(() => selectedOption.value?.label || props.placeholder || '请选择');
+
+const menuStyle = computed<CSSProperties>(() => {
+  const btn = buttonRef.value;
+  if (!btn) return {};
+  const rect = btn.getBoundingClientRect();
+  const computedBtnStyle = typeof window !== 'undefined' ? window.getComputedStyle(btn) : null;
+  return {
+    position: 'fixed',
+    top: `${rect.bottom + 6}px`,
+    left: `${rect.left}px`,
+    width: `${rect.width}px`,
+    fontSize: computedBtnStyle ? computedBtnStyle.fontSize : undefined,
+    fontFamily: computedBtnStyle ? computedBtnStyle.fontFamily : undefined,
+  };
+});
 
 function closeMenu(): void {
   open.value = false;
@@ -44,10 +61,11 @@ function selectOption(value: string): void {
 // 点击外部关闭（包括点击另一个 CustomSelect 的按钮）
 function handleDocumentPointerDown(event: PointerEvent): void {
   if (!open.value) return;
-  const root = rootRef.value;
-  if (!root) return;
   const target = event.target;
-  if (target instanceof Node && !root.contains(target)) {
+  if (!(target instanceof Node)) return;
+  const inRoot = rootRef.value?.contains(target);
+  const inMenu = menuRef.value?.contains(target);
+  if (!inRoot && !inMenu) {
     closeMenu();
   }
 }
@@ -76,6 +94,7 @@ onBeforeUnmount(() => {
     :class="{ 'is-open': open, 'is-disabled': disabled, 'is-compact': compact }"
   >
     <button
+      ref="buttonRef"
       type="button"
       class="custom-select__button"
       :disabled="disabled"
@@ -89,21 +108,30 @@ onBeforeUnmount(() => {
       </svg>
     </button>
 
-    <div v-if="open" class="custom-select__menu" role="listbox">
-      <button
-        v-for="option in options"
-        :key="option.value"
-        type="button"
-        class="custom-select__option"
-        :class="{ 'is-selected': option.value === modelValue }"
-        role="option"
-        :aria-selected="option.value === modelValue"
-        @click="selectOption(option.value)"
+    <Teleport to="body">
+      <div
+        v-if="open"
+        ref="menuRef"
+        class="custom-select__menu"
+        :class="{ 'is-compact': compact }"
+        role="listbox"
+        :style="menuStyle"
       >
-        <span>{{ option.label }}</span>
-        <span v-if="option.value === modelValue" class="custom-select__check">✓</span>
-      </button>
-    </div>
+        <button
+          v-for="option in options"
+          :key="option.value"
+          type="button"
+          class="custom-select__option"
+          :class="{ 'is-selected': option.value === modelValue }"
+          role="option"
+          :aria-selected="option.value === modelValue"
+          @click="selectOption(option.value)"
+        >
+          <span>{{ option.label }}</span>
+          <span v-if="option.value === modelValue" class="custom-select__check">✓</span>
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -126,6 +154,7 @@ onBeforeUnmount(() => {
   color: var(--text-strong);
   cursor: pointer;
   font: inherit;
+  font-size: 0.88rem;
   text-align: left;
 }
 
@@ -148,16 +177,21 @@ onBeforeUnmount(() => {
 }
 
 .is-compact .custom-select__button {
-  padding: 4px 10px;
-  min-height: 32px;
+  padding: 2px 8px;
+  min-height: 28px;
   border-radius: 6px;
   font-size: 13px;
 }
 
-.is-compact .custom-select__option {
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 6px;
+.custom-select__menu.is-compact {
+  padding: 3px;
+  gap: 1px;
+}
+
+.custom-select__menu.is-compact .custom-select__option {
+  min-height: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
   font-size: 13px;
 }
 
@@ -180,20 +214,18 @@ onBeforeUnmount(() => {
 }
 
 .custom-select__menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  z-index: 24;
+  position: fixed;
+  z-index: 9999;
   max-height: 240px;
   overflow: auto;
-  padding: 6px;
+  padding: 4px;
   display: grid;
-  gap: 4px;
+  gap: 2px;
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--panel-bg) 96%, var(--surface-soft) 4%);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+  font-size: 0.88rem;
 }
 
 :root[data-theme='light'] .custom-select__menu {
@@ -202,18 +234,20 @@ onBeforeUnmount(() => {
 
 .custom-select__option {
   width: 100%;
-  min-height: 38px;
-  padding: 0 12px;
+  min-height: 28px;
+  padding: 0 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-strong);
   cursor: pointer;
   font: inherit;
+  font-size: inherit;
+  line-height: 1.35;
   text-align: left;
   overflow: hidden;
 }
@@ -234,6 +268,6 @@ onBeforeUnmount(() => {
 
 .custom-select__check {
   color: var(--accent);
-  font-size: 0.9rem;
+  font-size: 0.9em;
 }
 </style>
