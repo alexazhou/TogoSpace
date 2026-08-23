@@ -243,10 +243,11 @@ STORAGE_ROOT/
 - docs/tech/10_release/：桌面打包发布方案、演示模式只读方案、未初始化场景调度闸门
 - docs/tech/11_refactor/：前端基础组件重复清单（去重待办）
 
-### 版本文档
+### 设计文档
 
-- docs/versions/版本文档规范.md：版本管理、文档命名规范
-- docs/versions/v*/：按版本沉淀的产品、技术、任务文档
+- docs/design/设计文档规范.md：设计与文档命名规范（{date}-{feature} 结构）
+- docs/design/ROADMAP.md：实施路线图、版本演进与设计文档索引
+- docs/design/{date}-{feature}/：按里程碑沉淀的产品、技术、任务与专项设计文档
 
 ### 版本发布
 

@@ -9,7 +9,7 @@
 
 相关现状参考：
 
-- [docs/versions/v13/v13_step1_product.md](../versions/v13/v13_step1_product.md)
+- [docs/design/2026-04-12-quick-init-modal/step1_product.md](../../design/2026-04-12-quick-init-modal/step1_product.md)
 - `src/backend_main.py`
 - `src/service/teamService.py`
 - `src/service/schedulerService.py`
