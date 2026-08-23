@@ -565,3 +565,59 @@ class TestGetAgentHistoryAfterCompact(ServiceTestCase):
 
         assert len(history) == 1  # 只有 COMPACT_SUMMARY (seq=5)
         assert AgentHistoryTag.COMPACT_SUMMARY in history[0].tags
+
+    async def test_returns_after_latest_compact_when_multiple_compacts_exist(self):
+        """当存在多个 COMPACT_SUMMARY 时，应取最新的 COMPACT_SUMMARY 并返回其之后的数据。"""
+        await self._reset_table()
+
+        # 第一次对话周期：seq 0-4 旧数据，seq 5 第 1 个 COMPACT_SUMMARY
+        for i in range(5):
+            await gtAgentHistoryManager.append_agent_history_message(GtAgentHistory.build(
+                AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"old_1_{i}")),
+                status=AgentHistoryStatus.SUCCESS,
+                agent_id=203,
+                seq=i,
+            ))
+        await gtAgentHistoryManager.append_agent_history_message(GtAgentHistory.build(
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "first compact summary")),
+            status=AgentHistoryStatus.SUCCESS,
+            tags=[AgentHistoryTag.COMPACT_SUMMARY],
+            agent_id=203,
+            seq=5,
+        ))
+
+        # 第二次对话周期：seq 6-9 中间数据，seq 10 第 2 个 COMPACT_SUMMARY
+        for i in range(6, 10):
+            await gtAgentHistoryManager.append_agent_history_message(GtAgentHistory.build(
+                AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"mid_2_{i}")),
+                status=AgentHistoryStatus.SUCCESS,
+                agent_id=203,
+                seq=i,
+            ))
+        await gtAgentHistoryManager.append_agent_history_message(GtAgentHistory.build(
+            AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "second compact summary")),
+            status=AgentHistoryStatus.SUCCESS,
+            tags=[AgentHistoryTag.COMPACT_SUMMARY],
+            agent_id=203,
+            seq=10,
+        ))
+
+        # 后续最新数据：seq 11-12
+        for i in range(11, 13):
+            await gtAgentHistoryManager.append_agent_history_message(GtAgentHistory.build(
+                AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, f"latest_{i}")),
+                status=AgentHistoryStatus.SUCCESS,
+                agent_id=203,
+                seq=i,
+            ))
+
+        items = await gtAgentHistoryManager.get_agent_history_after_compact(agent_id=203)
+
+        # 应该只返回最新的 COMPACT_SUMMARY (seq=10) 及之后的数据 (seq 10, 11, 12)，共 3 条
+        # 若错误使用了 seq.asc()，会返回 seq=5 及之后的所有数据（共 8 条）
+        assert len(items) == 3
+        assert [item.seq for item in items] == [10, 11, 12]
+        assert items[0].seq == 10
+        assert AgentHistoryTag.COMPACT_SUMMARY in items[0].tags
+        assert items[0].content == "second compact summary"
+

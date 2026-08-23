@@ -145,7 +145,7 @@ async def get_agent_history_after_compact(agent_id: int) -> list[GtAgentHistory]
             GtAgentHistory.agent_id == agent_id,
             SQL("EXISTS (SELECT 1 FROM json_each(tags) WHERE value = 'COMPACT_SUMMARY')"),
         )
-        .order_by(GtAgentHistory.seq.asc())
+        .order_by(GtAgentHistory.seq.desc())
         .limit(1)
         .aio_execute()
     )

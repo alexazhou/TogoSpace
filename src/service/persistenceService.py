@@ -38,8 +38,7 @@ async def load_agent_history_message(agent_id: int) -> list[GtAgentHistory]:
 
     若存在 compact 记录，只返回恢复当前 compact 视图所需的最小消息窗口。
     """
-    items = await gtAgentHistoryManager.get_agent_history(agent_id)
-    return _trim_to_latest_compact(items)
+    return await gtAgentHistoryManager.get_agent_history_after_compact(agent_id)
 
 
 async def fail_running_tasks(
@@ -63,3 +62,4 @@ def _trim_to_latest_compact(items: list[GtAgentHistory]) -> list[GtAgentHistory]
         if AgentHistoryTag.COMPACT_SUMMARY in items[idx].tags:
             return items[idx:]
     return items
+
