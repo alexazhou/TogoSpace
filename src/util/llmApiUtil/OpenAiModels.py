@@ -31,10 +31,10 @@ OpenAIContentBlock = Annotated[
 class OpenAIMessage(BaseModel):
     # 对应 openai 格式
     role: OpenaiApiRole = Field(..., description="消息角色")
-    content: Optional[str | list[OpenAIContentBlock]] = Field(None, description="消息内容（文本或多模态块数组）")
-    reasoning_content: Optional[str] = Field(None, description="推理内容（如 CoT 模型），仅响应侧使用")
-    tool_calls: Optional[List["OpenAIToolCall"]] = Field(None, description="工具调用列表")
-    tool_call_id: Optional[str] = Field(None, description="工具调用 ID（tool 角色专用）")
+    content: Optional[str | list[OpenAIContentBlock]] = Field(default=None, description="消息内容（文本或多模态块数组）")
+    reasoning_content: Optional[str] = Field(default=None, description="推理内容（如 CoT 模型），仅响应侧使用")
+    tool_calls: Optional[List["OpenAIToolCall"]] = Field(default=None, description="工具调用列表")
+    tool_call_id: Optional[str] = Field(default=None, description="工具调用 ID（tool 角色专用）")
 
     def text_content(self) -> str | None:
         """提取纯文本部分：content 为 str 时原样返回；为 content blocks 时拼接 text 块。"""
@@ -81,8 +81,8 @@ class OpenAIRequest(BaseModel):
     max_tokens: Optional[int] = Field(default=16384, description="最大输出 tokens")
     temperature: Optional[float] = Field(default=None, description="温度参数")
     stream: Optional[bool] = Field(default=False, description="是否流式输出")
-    tools: Optional[List["OpenAITool"]] = Field(None, description="工具列表")
-    tool_choice: Optional[str | dict[str, Any]] = Field(None, description="工具调用策略")
+    tools: Optional[List["OpenAITool"]] = Field(default=None, description="工具列表")
+    tool_choice: Optional[str | dict[str, Any]] = Field(default=None, description="工具调用策略")
     prompt_cache: bool = Field(default=False, description="是否启用 prompt cache")
     extra_params: dict[str, Any] = Field(default_factory=dict, description="额外透传给 LiteLLM 的参数")
 
