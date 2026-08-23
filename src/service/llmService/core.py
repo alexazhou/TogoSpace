@@ -6,7 +6,7 @@ import logging
 import uuid
 from typing import Optional
 
-from constants import InferRequestStateType, LlmErrorCategory, LlmProtocol, LlmProviderType
+from constants import InferRequestStateType, LlmErrorCategory, LlmProtocol, LlmProviderType, ModelInput
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from model.dbModel.agentMessage import AgentMessage
 from service.llmService.llmErrorClassifier import classify_llm_error, RETRYABLE_CATEGORIES
@@ -20,6 +20,9 @@ import os
 logger = logging.getLogger(__name__)
 
 _INFER_RETRY_DELAYS_SECONDS = (2, 4, 8, 16, 32, 32, 32)
+
+# 主模型不支持视觉且图片无 caption 时插入的说明文案（每张图一条）
+VISION_UNAVAILABLE_PROMPT = "你收到了一条图片消息，但当前配置的模型不支持视觉（图片识别），因此无法读取图片内容。请忽略该图片，并告知操作者当前模型无法处理图片，或建议配置视觉模型后再重试。"
 
 
 @dataclass
@@ -162,7 +165,10 @@ def _usage_to_log_json(usage: llmApiUtil.OpenAIUsage | None) -> str:
     return json.dumps(usage.model_dump(mode="json", exclude_none=False), ensure_ascii=False, default=str)
 
 
-def _split_tool_result_messages(messages: list[AgentMessage]) -> list[llmApiUtil.OpenAIMessage]:
+def _split_tool_result_messages(
+    messages: list[AgentMessage],
+    supports_vision: bool = True,
+) -> list[llmApiUtil.OpenAIMessage]:
     """把 AgentMessage 列表转成发送用 OpenAIMessage 列表。
 
     两步：
@@ -171,7 +177,12 @@ def _split_tool_result_messages(messages: list[AgentMessage]) -> list[llmApiUtil
        避免多 tool_call 时图片 USER 消息插在工具结果中间（OpenAI 规范：tool 消息紧随
        assistant(tool_calls)，image_url 仅允许在 user 角色）。
 
-    注：模型能力门控（非视觉模型不发图片）暂未启用，后续按模型 input 能力接入。
+    supports_vision 模型能力门控：
+    - True  → 原样生成 image_url block（V25 多模态流程）。
+    - False → 不生成 image_url（图片不进请求体）：
+        * 附件有 recognition（视觉识别结果）→ 插入 recognition 文本 block；
+        * 附件无 recognition → 插入 VISION_UNAVAILABLE_PROMPT 说明文本 block。
+        （caption 引导语不视为可读内容；图片内容以 recognition 为准）
     """
     # 1) 直接转换
     converted: list[llmApiUtil.OpenAIMessage] = []
@@ -180,14 +191,25 @@ def _split_tool_result_messages(messages: list[AgentMessage]) -> list[llmApiUtil
         for att in (msg.attachments or []):
             if att.kind == "image":
                 blocks: list[llmApiUtil.OpenAIContentBlock] = []
-                if att.caption:
-                    blocks.append(llmApiUtil.OpenAITextContentBlock(text=att.caption))
-                url = att.url or f"data:{att.mime_type or 'image/png'};base64,{att.data}"
-                blocks.append(llmApiUtil.OpenAIImageUrlContentBlock(image_url={"url": url}))
-                converted.append(llmApiUtil.OpenAIMessage(
-                    role=llmApiUtil.OpenaiApiRole.USER,
-                    content=blocks,
-                ))
+                if supports_vision:
+                    if att.caption:
+                        blocks.append(llmApiUtil.OpenAITextContentBlock(text=att.caption))
+                    url = att.url or f"data:{att.mime_type or 'image/png'};base64,{att.data}"
+                    blocks.append(llmApiUtil.OpenAIImageUrlContentBlock(image_url={"url": url}))
+                    converted.append(llmApiUtil.OpenAIMessage(
+                        role=llmApiUtil.OpenaiApiRole.USER,
+                        content=blocks,
+                    ))
+                else:
+                    # 模型不支持视觉：图片不进请求体，按识别结果插入纯文本
+                    if att.recognition and att.recognition.strip():
+                        text = att.recognition
+                    else:
+                        text = VISION_UNAVAILABLE_PROMPT
+                    converted.append(llmApiUtil.OpenAIMessage(
+                        role=llmApiUtil.OpenaiApiRole.USER,
+                        content=[llmApiUtil.OpenAITextContentBlock(text=text)],
+                    ))
 
     # 2) 调整顺序：一次遍历，检测「图片 USER 紧挨在 TOOL 之前」的逆序相邻对并交换。
     #    交换后回退一步，让图片继续往后冒泡，直到所有 TOOL 都排在图片之前。
@@ -214,9 +236,10 @@ def _build_request(
     model_config: LlmModelConfig,
 ) -> tuple[llmApiUtil.OpenAIRequest, tuple[str, ...]]:
     # ctx.messages 为 AgentMessage（存储域类型），这里统一转换回 OpenAIMessage（发送格式）
+    supports_vision = ModelInput.IMAGE in (model_config.input or [])
     messages: list[llmApiUtil.OpenAIMessage] = [
         llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.SYSTEM, ctx.system_prompt),
-        *_split_tool_result_messages(ctx.messages),
+        *_split_tool_result_messages(ctx.messages, supports_vision=supports_vision),
     ]
     
     # 获取上下文配置 (优先使用模型独立配置)

@@ -51,6 +51,7 @@
 | `bind_host` | string | `"0.0.0.0"` | HTTP 服务监听地址 |
 | `bind_port` | int | `8180` | HTTP 服务监听端口 |
 | `auto_check_update` | bool | `true` | 启动时自动检查更新 |
+| `auto_vision_fallback` | bool | `true` | 主模型不支持视觉时自动调用视觉模型识别图片（视觉模型兜底） |
 | `demo_mode` | object | 见下方 | 演示模式配置 |
 | `auth` | object | 见下方 | 鉴权配置 |
 
@@ -289,6 +290,7 @@ Default Location:
 | `bind_host` | string | `"0.0.0.0"` | HTTP service bind host. |
 | `bind_port` | int | `8180` | HTTP service bind port. |
 | `auto_check_update` | bool | `true` | Auto-check updates on startup. |
+| `auto_vision_fallback` | bool | `true` | Auto vision-model fallback when the main model lacks vision capability. |
 | `demo_mode` | object | see below | Demo mode configuration. |
 | `auth` | object | see below | Authentication configuration. |
 

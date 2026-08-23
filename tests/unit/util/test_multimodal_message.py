@@ -248,12 +248,13 @@ def test_from_tool_result_image_attached_to_tool_message():
     assert "base64" not in tool_msg.content
     assert '"format"' not in tool_msg.content
     assert "image/png" in tool_msg.content
-    # 图片挂附件，含 caption（供 llmService 拆出 USER 图片描述）
+    # 图片挂附件，caption 为引导语（识别结果写入 recognition，与 caption 区分）
     assert tool_msg.attachments is not None
     assert tool_msg.attachments[0].kind == "image"
     assert tool_msg.attachments[0].mime_type == "image/png"
     assert tool_msg.attachments[0].data == "QQ=="
     assert "以下是工具执行结果的图片（/tmp/x.png）" in tool_msg.attachments[0].caption
+    assert tool_msg.attachments[0].recognition is None
     # TOOL 角色 to_openai_message() 忽略附件，只出文本（图片拆分由 llmService 负责）
     om = tool_msg.to_openai_message()
     assert om.role == OpenaiApiRole.TOOL

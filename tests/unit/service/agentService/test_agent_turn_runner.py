@@ -785,3 +785,212 @@ async def test_run_tool_to_item_ignores_failed_image_result(turn_runner):
 
     assert ret == TurnStepResult.TOOL_EXECUTE_SUCCESS
     turn_runner._history.append_history_message.assert_not_called()
+
+
+# ─── V26 视觉 Fallback：_infer_to_item 三场景集成 ──────────
+
+def _build_infer_assistant_response(content: str = "ok") -> llmApiUtil.OpenAIResponse:
+    return llmApiUtil.OpenAIResponse.model_validate({
+        "id": "resp_123",
+        "object": "chat.completion",
+        "created": 1710000000,
+        "model": "test-model",
+        "choices": [
+            {"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    })
+
+
+def _patch_infer_env(turn_runner, *, supports_vision, vision_configured, auto_vision_fallback, messages, history_items=None):
+    """patch _infer_to_item 的外部依赖，返回 (stack, infer_mock, recognize_mock, update_history_mock)。
+
+    history_items: 可选，作为 history 遍历项（含 id/message），用于验证 _vision_fallback_recognize 持久化。
+    """
+    from contextlib import ExitStack
+
+    from constants import ModelInput
+    from model.dbModel.agentMessage import MessageAttachment  # noqa: F401  (保持 import 可用)
+    from service.llmService.core import InferResult
+    import service.agentService.agentTurnRunner as m
+
+    stack = ExitStack()
+
+    provider_cfg = MagicMock(name="provider")
+    model_cfg = MagicMock(name="model")
+    model_cfg.name = "test-model"
+    model_cfg.input = [ModelInput.IMAGE] if supports_vision else [ModelInput.TEXT]
+    model_cfg.context_config = None
+    model_cfg.temperature = 0.7
+    model_cfg.extra_params = {}
+    model_cfg.protocol = "openai"
+    stack.enter_context(patch.object(m, "resolve_model", return_value=(provider_cfg, model_cfg)))
+
+    setting = MagicMock()
+    setting.auto_vision_fallback = auto_vision_fallback
+    setting.default_models.vision = "vision-model@svc" if vision_configured else ""
+    app_cfg = MagicMock()
+    app_cfg.setting = setting
+    stack.enter_context(patch.object(m.configUtil, "get_app_config", return_value=app_cfg))
+
+    history = turn_runner._history
+    history.is_infer_ready = MagicMock(return_value=True)
+    history.build_infer_messages = MagicMock(return_value=messages)
+    history.finalize_history_item = AsyncMock()
+    history.get_messages_since_compact = MagicMock(return_value=history_items or [])
+
+    stack.enter_context(patch.object(m.compact, "calc_compact_trigger_tokens", return_value=100000))
+    stack.enter_context(patch.object(m.compact, "calc_hard_limit_tokens", return_value=200000))
+    stack.enter_context(patch.object(m.compact, "estimate_tokens", return_value=100))
+    stack.enter_context(patch.object(m.compact, "is_context_overflow_error", return_value=False))
+
+    stack.enter_context(patch.object(m.agentActivityService, "add_activity", new=AsyncMock(return_value=MagicMock(id=1))))
+    stack.enter_context(patch.object(m.agentActivityService, "update_activity_progress", new=AsyncMock()))
+
+    infer_mock = AsyncMock(return_value=InferResult.success(_build_infer_assistant_response()))
+    stack.enter_context(patch.object(m.llmService, "infer_stream", infer_mock))
+
+    recognize_mock = AsyncMock(return_value="视觉模型识别出的图片描述")
+    stack.enter_context(patch.object(m.visionFallback, "recognize", recognize_mock))
+
+    update_history_mock = AsyncMock()
+    stack.enter_context(patch.object(m.gtAgentHistoryManager, "update_agent_history_by_id", update_history_mock))
+
+    stack.enter_context(patch.object(turn_runner, "_check_compact", new=AsyncMock(return_value=(messages, 100, False))))
+    stack.enter_context(patch.object(turn_runner, "_finish_activity", new=AsyncMock()))
+    stack.enter_context(patch.object(turn_runner, "_build_usage", MagicMock(return_value=None)))
+
+    return stack, infer_mock, recognize_mock, update_history_mock
+
+
+def _image_user_message() -> AgentMessage:
+    from model.dbModel.agentMessage import MessageAttachment
+
+    return AgentMessage(
+        role=OpenaiApiRole.USER,
+        content="看图",
+        attachments=[MessageAttachment(kind="image", mime_type="image/png", data="QQ==")],
+    )
+
+
+@pytest.mark.asyncio
+async def test_infer_to_item_scene_a_support_vision_no_recognize(turn_runner):
+    """场景 A：主模型支持视觉 → 不触发识别，图片正常走 V25 链路。"""
+    from model.dbModel.gtAgentHistory import GtAgentHistory
+
+    img_msg = _image_user_message()
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 99
+
+    stack, infer_mock, recognize_mock, update_history_mock = _patch_infer_env(
+        turn_runner, supports_vision=True, vision_configured=True, auto_vision_fallback=True,
+        messages=[img_msg],
+    )
+    with stack:
+        result = await turn_runner._infer_to_item(output_item, [])
+
+    assert result is not None
+    recognize_mock.assert_not_called()
+    update_history_mock.assert_not_called()
+    infer_mock.assert_awaited_once()
+    ctx = infer_mock.await_args.args[1]
+    assert ctx.messages == [img_msg]  # 图片消息原样传入（supports_vision=True）
+
+
+@pytest.mark.asyncio
+async def test_infer_to_item_scene_b_fallback_recognize(turn_runner):
+    """场景 B：主模型不支持视觉 + vision 已配 + 开关开 → 逐图识别写 caption 并持久化。"""
+    from model.dbModel.gtAgentHistory import GtAgentHistory
+
+    img_msg = _image_user_message()
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 99
+
+    stack, infer_mock, recognize_mock, update_history_mock = _patch_infer_env(
+        turn_runner, supports_vision=False, vision_configured=True, auto_vision_fallback=True,
+        messages=[img_msg], history_items=[(42, img_msg)],
+    )
+    with stack:
+        result = await turn_runner._infer_to_item(output_item, [])
+
+    assert result is not None
+    # 逐图调用 recognize（单图→文本）
+    recognize_mock.assert_awaited_once()
+    assert recognize_mock.await_args.args[0] is img_msg.attachments[0]
+    # 识别文本写入 recognition（caption 保留原样）
+    assert img_msg.attachments[0].recognition == "视觉模型识别出的图片描述"
+    assert img_msg.attachments[0].caption is None
+    # 显式持久化（history item id）
+    update_history_mock.assert_awaited_once_with(42, message=img_msg)
+    infer_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_infer_to_item_scene_c_no_vision_configured(turn_runner):
+    """场景 C：主模型不支持视觉 + 未配置 vision → 不识别，转换层插入说明。"""
+    from model.dbModel.gtAgentHistory import GtAgentHistory
+
+    img_msg = _image_user_message()
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 99
+
+    stack, infer_mock, recognize_mock, update_history_mock = _patch_infer_env(
+        turn_runner, supports_vision=False, vision_configured=False, auto_vision_fallback=True,
+        messages=[img_msg],
+    )
+    with stack:
+        result = await turn_runner._infer_to_item(output_item, [])
+
+    assert result is not None
+    recognize_mock.assert_not_called()
+    update_history_mock.assert_not_called()
+    infer_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_infer_to_item_scene_b_recognizes_tool_result_image_with_caption(turn_runner):
+    """场景 B + 工具结果图：带引导语 caption 但无 recognition 的图片仍会触发识别。"""
+    from model.dbModel.gtAgentHistory import GtAgentHistory
+
+    tool_msg = AgentMessage.from_tool_result("A", {"mime_type": "image/png", "base64": "QQ==", "file_path": "/tmp/x.png"})
+    assert tool_msg.attachments[0].caption  # 引导语 caption 保留
+    assert tool_msg.attachments[0].recognition is None
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 99
+
+    stack, infer_mock, recognize_mock, update_history_mock = _patch_infer_env(
+        turn_runner, supports_vision=False, vision_configured=True, auto_vision_fallback=True,
+        messages=[tool_msg], history_items=[(42, tool_msg)],
+    )
+    with stack:
+        result = await turn_runner._infer_to_item(output_item, [])
+
+    assert result is not None
+    # 引导语 caption 不阻止识别（recognition 空即识别）
+    recognize_mock.assert_awaited_once()
+    assert tool_msg.attachments[0].recognition == "视觉模型识别出的图片描述"
+    assert tool_msg.attachments[0].caption  # caption 引导语保留
+    update_history_mock.assert_awaited_once_with(42, message=tool_msg)
+    infer_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_infer_to_item_switch_off_disables_recognize(turn_runner):
+    """开关 auto_vision_fallback=false → 场景 B 不触发识别（按场景 C 处理）。"""
+    from model.dbModel.gtAgentHistory import GtAgentHistory
+
+    img_msg = _image_user_message()
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 99
+
+    stack, infer_mock, recognize_mock, update_history_mock = _patch_infer_env(
+        turn_runner, supports_vision=False, vision_configured=True, auto_vision_fallback=False,
+        messages=[img_msg],
+    )
+    with stack:
+        result = await turn_runner._infer_to_item(output_item, [])
+
+    assert result is not None
+    recognize_mock.assert_not_called()
+    update_history_mock.assert_not_called()
+    infer_mock.assert_awaited_once()

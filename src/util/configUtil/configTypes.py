@@ -264,6 +264,7 @@ class SettingConfig(BaseModel):
     bind_host: str = "0.0.0.0"  # HTTP 服务绑定地址
     bind_port: int = 8180       # HTTP 服务绑定端口
     auto_check_update: bool = True  # 启动时自动检查更新
+    auto_vision_fallback: bool = True  # 主模型不支持视觉时，自动调用视觉模型识别图片（默认开启）
     dev: DevConfig = Field(default_factory=DevConfig)
 
     def model_post_init(self, __context: Any) -> None:

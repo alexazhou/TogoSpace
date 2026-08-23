@@ -121,6 +121,8 @@ LANGUAGE_CONTEXT_PROMPT = '''
 - 系统通知不参与语言判断
 - 如果上一条 Agent/Operator 消息不存在，则使用当前系统语言设置'''
 
+VISION_RECOGNIZE_PROMPT = '''请描述这张图片的内容，包括文字、图表、界面元素等关键信息，供 agent 后续决策使用。'''
+
 TODO_TASK_TURN_PROMPT_TEMPLATE = '''【任务通知】
 你当前被唤醒以处理以下任务：
 - 标题: {title}

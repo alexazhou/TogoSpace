@@ -778,7 +778,7 @@ def test_split_images_across_multiple_tool_batches():
 
 
 def test_split_image_message_includes_caption_text_block():
-    """图片 USER 消息含 caption 描述文本块 + image_url 块。"""
+    """图片 USER 消息含 caption 引导语文本块 + image_url 块（V25 行为）。"""
     from service.llmService.core import _split_tool_result_messages
 
     messages = [
@@ -834,3 +834,103 @@ def test_split_multiple_image_attachments_one_message():
     ]
     assert _image_url(sent[1]) == "data:image/png;base64,QQ=="
     assert _image_url(sent[2]) == "data:image/jpeg;base64,JJ=="
+
+
+# ─── _split_tool_result_messages：supports_vision 三分支（V26 视觉 Fallback） ──────────
+
+def test_split_vision_support_image_normal():
+    """supports_vision=True：图片原样生成 image_url（V25 回归）。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    sent = _split_tool_result_messages(
+        [AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="看图", attachments=[
+            MessageAttachment(kind="image", mime_type="image/png", data="QQ=="),
+        ])],
+        supports_vision=True,
+    )
+    assert [m.role for m in sent] == [
+        llmApiUtil.OpenaiApiRole.USER,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    assert _image_url(sent[1]) == "data:image/png;base64,QQ=="
+
+
+def test_split_vision_not_support_with_recognition():
+    """supports_vision=False + 附件有 recognition：插入 recognition 文本，无 image_url。"""
+    from service.llmService.core import _split_tool_result_messages
+
+    tool_msg = AgentMessage.from_tool_result("A", {"mime_type": "image/png", "base64": "QQ==", "file_path": "/tmp/x.png"})
+    assert tool_msg.attachments[0].caption  # from_tool_result 自带引导语 caption（保留）
+    tool_msg.attachments[0].recognition = "图中是一只猫"
+    sent = _split_tool_result_messages([tool_msg], supports_vision=False)
+
+    assert [m.role for m in sent] == [
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    user = sent[1]
+    assert user.content[0].type == "text"
+    assert user.content[0].text == "图中是一只猫"
+    image_blocks = [b for b in user.content if isinstance(b, llmApiUtil.OpenAIImageUrlContentBlock)]
+    assert len(image_blocks) == 0, "不支持视觉时不应生成 image_url block"
+
+
+def test_split_vision_not_support_no_recognition():
+    """supports_vision=False + 无 recognition：插入 VISION_UNAVAILABLE_PROMPT 说明文本。"""
+    from service.llmService.core import VISION_UNAVAILABLE_PROMPT, _split_tool_result_messages
+
+    user_msg = AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="看图", attachments=[
+        MessageAttachment(kind="image", mime_type="image/png", data="QQ=="),
+    ])
+    sent = _split_tool_result_messages([user_msg], supports_vision=False)
+
+    assert [m.role for m in sent] == [
+        llmApiUtil.OpenaiApiRole.USER,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    user = sent[1]
+    assert user.content[0].type == "text"
+    assert user.content[0].text == VISION_UNAVAILABLE_PROMPT
+    image_blocks = [b for b in user.content if isinstance(b, llmApiUtil.OpenAIImageUrlContentBlock)]
+    assert len(image_blocks) == 0, "不支持视觉时不应生成 image_url block"
+
+
+def test_split_vision_not_support_tool_caption_without_recognition():
+    """supports_vision=False + 仅有引导语 caption（无 recognition）→ 仍插入 VISION_UNAVAILABLE_PROMPT。"""
+    from service.llmService.core import VISION_UNAVAILABLE_PROMPT, _split_tool_result_messages
+
+    tool_msg = AgentMessage.from_tool_result("A", {"mime_type": "image/png", "base64": "QQ==", "file_path": "/tmp/x.png"})
+    assert tool_msg.attachments[0].caption  # 引导语 caption 保留
+    assert tool_msg.attachments[0].recognition is None  # 未识别
+    sent = _split_tool_result_messages([tool_msg], supports_vision=False)
+
+    user = sent[1]
+    assert user.content[0].text == VISION_UNAVAILABLE_PROMPT
+
+
+def test_split_vision_not_support_multi_images():
+    """supports_vision=False + 多张图片：逐张插入（有 recognition 插识别文本，无则插说明）。"""
+    from service.llmService.core import VISION_UNAVAILABLE_PROMPT, _split_tool_result_messages
+
+    tool_msg = AgentMessage(
+        role=llmApiUtil.OpenaiApiRole.TOOL,
+        content='{"success": true}',
+        tool_call_id="A",
+        attachments=[
+            MessageAttachment(kind="image", mime_type="image/png", data="QQ==", recognition="图1内容"),
+            MessageAttachment(kind="image", mime_type="image/jpeg", data="JJ=="),
+        ],
+    )
+    sent = _split_tool_result_messages([tool_msg], supports_vision=False)
+
+    roles = [m.role for m in sent]
+    assert roles == [
+        llmApiUtil.OpenaiApiRole.TOOL,
+        llmApiUtil.OpenaiApiRole.USER,
+        llmApiUtil.OpenaiApiRole.USER,
+    ]
+    assert sent[1].content[0].text == "图1内容"
+    assert sent[2].content[0].text == VISION_UNAVAILABLE_PROMPT
+    for m in sent:
+        image_blocks = [b for b in m.content if isinstance(b, llmApiUtil.OpenAIImageUrlContentBlock)]
+        assert len(image_blocks) == 0, "不支持视觉时不应生成 image_url block"

@@ -13,7 +13,7 @@ from typing import List
 from constants import (
     AgentActivityStatus, AgentActivityType,
     AgentHistoryStatus, AgentHistoryTag,
-    AgentTaskType, DriverType, OpenaiApiRole, RoomState, TurnStepResult,
+    AgentTaskType, DriverType, ModelInput, OpenaiApiRole, RoomState, TurnStepResult,
 )
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from model.dbModel.gtRoomMessage import GtRoomMessage
@@ -25,15 +25,15 @@ from model.dbModel.historyUsage import CompactStage, HistoryUsage
 from service import agentActivityService, llmService, roomService
 from service.agentActivityService import AgentActivityMeta
 from service.agentService.agentHistoryStore import AgentHistoryStore
-from service.agentService import compact, promptBuilder
+from service.agentService import compact, promptBuilder, visionFallback
 from service.llmService.core import resolve_model
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
 from service.agentService.driver.factory import build_agent_driver
 from service.agentService.toolRegistry import AgentToolRegistry, RegisteredTool, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
-from util import llmApiUtil
+from util import configUtil, llmApiUtil
 from util.assertUtil import assertNotNull
-from dal.db import gtAgentTaskManager
+from dal.db import gtAgentHistoryManager, gtAgentTaskManager
 
 logger = logging.getLogger(__name__)
 
@@ -424,6 +424,44 @@ class AgentTurnRunner:
         else:
             return TurnStepResult.LLM_OUTPUT_NO_ACTION
 
+    async def _vision_fallback_recognize(
+        self,
+        history: AgentHistoryStore,
+        *,
+        supports_vision: bool,
+    ) -> None:
+        """视觉兜底：主模型不支持视觉时，为无 caption 的图片附件识别并写 caption（含持久化）。
+
+        场景 B 才触发：主模型不支持视觉 + vision 槽位已配 + auto_vision_fallback 开启。
+        已有 caption 的图片跳过（去重）；识别失败降级（caption 保持为空），不阻塞主流程。
+        """
+        if supports_vision:
+            return
+        setting = configUtil.get_app_config().setting
+        if not setting.auto_vision_fallback:
+            return
+        if not setting.default_models.vision:
+            return
+        for history_id, msg in history.get_messages_since_compact():
+            for att in (getattr(msg, "attachments", None) or []):
+                if att.kind != "image":
+                    continue
+                if att.recognition and att.recognition.strip():
+                    continue  # 已有识别结果（之前识别过），跳过；caption 引导语不影响识别
+                try:
+                    att.recognition = await visionFallback.recognize(att)
+                except Exception:
+                    # 降级：recognition 保持为空，由 llmService 转换层插入"无法读取图片"说明
+                    logger.exception("vision fallback recognize failed, 保持 recognition 为空（降级处理）")
+                    continue
+                if history_id is not None:
+                    # message 为 PydanticJsonField，整条序列化落库（含 recognition）
+                    await gtAgentHistoryManager.update_agent_history_by_id(history_id, message=msg)
+                logger.info(
+                    "vision fallback recognize ok: history_id=%s, mime_type=%s, recognition_len=%d",
+                    history_id, att.mime_type, len(att.recognition or ""),
+                )
+
     async def _infer_to_item(
         self,
         output_item: GtAgentHistory,
@@ -454,6 +492,7 @@ class AgentTurnRunner:
         }
 
         model_display = f"{merged_llm_config.name}@{provider_config.name}"
+        supports_vision = ModelInput.IMAGE in (merged_llm_config.input or [])
 
         try:
             messages = history.build_infer_messages()
@@ -467,6 +506,9 @@ class AgentTurnRunner:
             )
             if pre_compact_triggered:
                 compact_stage = "pre"
+
+            # 场景 B：主模型不支持视觉时，先识别无 caption 的图片写 caption（含显式持久化）
+            await self._vision_fallback_recognize(history, supports_vision=supports_vision)
 
             # 活动记录：LLM_INFER STARTED（pre-check compact 已完成，不会与 COMPACT 并行）
             activity = await agentActivityService.add_activity(

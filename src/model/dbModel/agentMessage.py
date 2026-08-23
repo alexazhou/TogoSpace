@@ -24,7 +24,8 @@ class MessageAttachment(BaseModel):
     mime_type: str | None = None     # image/png
     data: str | None = None          # base64 内联数据
     url: str | None = None           # 或引用路径 / URL（大图推荐，避免撑爆 DB）
-    caption: str | None = None       # 说明文字，发送时可转成文本块
+    caption: str | None = None       # 说明文字（如工具结果引导语），发送时可转成文本块
+    recognition: str | None = None   # 视觉模型识别出的图片内容描述（与 caption 区分，v26 新增）
 
     @classmethod
     def from_tool_result(cls, result_data: dict | None) -> "MessageAttachment | None":
@@ -70,7 +71,9 @@ class AgentMessage(BaseModel):
 
         结果为图片（shape 判断见 `MessageAttachment.from_tool_result`）时：
         - content 剥离 base64 只留元数据
-        - 图片挂在 `attachments` 上（含 caption），发送时由 llmService 拆成
+        - 图片挂在 `attachments` 上（caption 为引导语；图片内容由视觉 fallback 识别后写入
+          `recognition` 字段，与 caption 区分），发送时由 llmService 拆成
+          「TOOL 文本 + USER 图片」两条 OpenAIMessage（OpenAI 规范：image_url 仅允许在 user 角色）
           「TOOL 文本 + USER 图片」两条 OpenAIMessage（OpenAI 规范：image_url 仅允许在 user 角色）
         非图片结果：普通 TOOL 消息，无附件。
         """

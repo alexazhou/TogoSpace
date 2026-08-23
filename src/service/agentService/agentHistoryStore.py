@@ -68,6 +68,14 @@ class AgentHistoryStore:
             return None
         return self._items[-1]
 
+    def get_messages_since_compact(self) -> list[tuple[int, AgentMessage]]:
+        """返回最后一次压缩至今的所有 (history_id, message) 条目。
+
+        供视觉兜底等场景遍历消息对象并持久化（更新时需 history_id）。
+        不含 message 为 None 的占位条目。
+        """
+        return [(item.id, item.message) for item in self._items if item.message is not None]
+
     def _last_role(self) -> OpenaiApiRole | None:
         last_item = self.last()
         if last_item is None:
