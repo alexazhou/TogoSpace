@@ -1,6 +1,18 @@
 name: Build Docker Image
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (e.g., 0.1.20, latest)'
+        required: true
+        default: 'latest'
+        type: string
+      push:
+        description: 'Push image to registry'
+        required: true
+        default: false
+        type: boolean
   push:
     tags:
       - 'v*'
@@ -60,13 +72,14 @@ jobs:
           type=semver,pattern={{version}}
           type=semver,pattern={{major}}.{{minor}}
           type=sha,prefix=
-          type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-beta') }}
+          type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+          type=raw,value=latest,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-beta') }}
 
     - name: Build and push Docker image (platform-specific)
       uses: docker/build-push-action@v7
       with:
         context: .
-        push: true
+        push: ${{ github.event_name == 'push' || inputs.push }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
@@ -82,6 +95,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+    if: ${{ github.event_name == 'push' || inputs.push }}
 
     steps:
     - name: Log in to Docker Hub
@@ -114,7 +128,8 @@ jobs:
           type=semver,pattern={{version}}
           type=semver,pattern={{major}}.{{minor}}
           type=sha,prefix=
-          type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-beta') }}
+          type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+          type=raw,value=latest,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-beta') }}
 
     - name: Create and push manifest list
       run: |
@@ -126,7 +141,7 @@ jobs:
             "$main_tag-amd64" \
             "$main_tag-arm64"
 
-        # 其余别名 tag（0.3 / sha / latest）同样生成
+        # 其余别名 tag（0.3 / sha / latest / 手动 tag）同样生成
         for tag in $tags; do
             if [ "$tag" != "$main_tag" ]; then
                 docker buildx imagetools create -t "$tag" \
