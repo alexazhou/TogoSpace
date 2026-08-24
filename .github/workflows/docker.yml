@@ -1,18 +1,6 @@
 name: Build Docker Image
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Image tag (e.g., 0.1.20, latest)'
-        required: true
-        default: 'latest'
-        type: string
-      push:
-        description: 'Push image to registry'
-        required: true
-        default: false
-        type: boolean
   push:
     tags:
       - 'v*'
@@ -30,11 +18,10 @@ jobs:
         include:
           - platform: linux/amd64
             runs-on: ubuntu-latest
+            suffix: amd64
           - platform: linux/arm64
             runs-on: ubuntu-24.04-arm
-
-    outputs:
-      version: ${{ steps.version.outputs.version }}
+            suffix: arm64
 
     steps:
     - uses: actions/checkout@v6
@@ -42,21 +29,10 @@ jobs:
         token: ${{ secrets.GH_PAT }}
         lfs: true
 
-    - name: Determine version
-      id: version
-      run: |
-        if [ "${{ github.event_name }}" = "push" ]; then
-          VERSION="${GITHUB_REF#refs/tags/v}"
-        else
-          VERSION="${{ inputs.tag }}"
-        fi
-        echo "version=${VERSION}" >> $GITHUB_OUTPUT
-
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
 
     - name: Log in to Docker Hub
-      if: ${{ github.event_name == 'push' || inputs.push }}
       uses: docker/login-action@v4
       with:
         registry: docker.io
@@ -64,34 +40,48 @@ jobs:
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
     - name: Log in to GitHub Container Registry
-      if: ${{ github.event_name == 'push' || inputs.push }}
       uses: docker/login-action@v4
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Build and push Docker image
+    - name: Extract metadata for Docker
+      id: meta
+      uses: docker/metadata-action@v6
+      with:
+        images: |
+          ${{ secrets.DOCKERHUB_USERNAME }}/togospace
+          ghcr.io/${{ github.repository_owner }}/togospace
+        flavor: |
+          latest=false
+          suffix=-${{ matrix.suffix }}
+        tags: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix=
+          type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-beta') }}
+
+    - name: Build and push Docker image (platform-specific)
       uses: docker/build-push-action@v7
       with:
         context: .
-        push: ${{ github.event_name == 'push' || inputs.push }}
-        tags: |
-          docker.io/${{ secrets.DOCKERHUB_USERNAME }}/togospace:${{ steps.version.outputs.version }}-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
-          ghcr.io/${{ github.repository_owner }}/togospace:${{ steps.version.outputs.version }}-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
-        platforms: ${{ matrix.platform }}
-        provenance: false
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        platforms: ${{ matrix.platform }}
+        provenance: false
 
   merge:
-    needs: build
+    name: Merge and Push Manifest
     runs-on: ubuntu-latest
+    needs: build
     timeout-minutes: 5
     permissions:
       contents: read
       packages: write
-    if: ${{ github.event_name == 'push' || inputs.push }}
 
     steps:
     - name: Log in to Docker Hub
@@ -108,53 +98,64 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Create and push version manifest (Docker Hub)
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Extract metadata for Docker
+      id: meta
+      uses: docker/metadata-action@v6
+      with:
+        images: |
+          ${{ secrets.DOCKERHUB_USERNAME }}/togospace
+          ghcr.io/${{ github.repository_owner }}/togospace
+        flavor: |
+          latest=false
+        tags: |
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=sha,prefix=
+          type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-beta') }}
+
+    - name: Create and push manifest list
       run: |
-        VERSION="${{ needs.build.outputs.version }}"
-        DOCKER_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
+        tags='${{ steps.meta.outputs.tags }}'
+        main_tag=$(echo "$tags" | head -1)
 
-        docker manifest create docker.io/${DOCKER_USERNAME}/togospace:${VERSION} \
-          docker.io/${DOCKER_USERNAME}/togospace:${VERSION}-amd64 \
-          docker.io/${DOCKER_USERNAME}/togospace:${VERSION}-arm64
-        docker manifest push docker.io/${DOCKER_USERNAME}/togospace:${VERSION}
+        # 用 buildx imagetools 创建 multi-arch manifest（基于两个平台的远程镜像）
+        docker buildx imagetools create -t "$main_tag" \
+            "$main_tag-amd64" \
+            "$main_tag-arm64"
 
-    - name: Create and push latest manifest (Docker Hub)
-      if: ${{ github.event_name != 'push' || !contains(github.ref_name, 'beta') }}
+        # 其余别名 tag（0.3 / sha / latest）同样生成
+        for tag in $tags; do
+            if [ "$tag" != "$main_tag" ]; then
+                docker buildx imagetools create -t "$tag" \
+                    "$tag-amd64" \
+                    "$tag-arm64"
+            fi
+        done
+
+        # 汇总到 step summary
+        echo "### Docker Multi-arch Manifests" >> $GITHUB_STEP_SUMMARY
+        for tag in $tags; do
+            echo "- \`$tag\`" >> $GITHUB_STEP_SUMMARY
+        done
+
+    - name: Delete platform-specific tags (Docker Hub)
       run: |
-        VERSION="${{ needs.build.outputs.version }}"
-        DOCKER_USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
+        tags='${{ steps.meta.outputs.tags }}'
+        username="${{ secrets.DOCKERHUB_USERNAME }}"
+        token="${{ secrets.DOCKERHUB_TOKEN }}"
 
-        docker manifest create docker.io/${DOCKER_USERNAME}/togospace:latest \
-          docker.io/${DOCKER_USERNAME}/togospace:${VERSION}-amd64 \
-          docker.io/${DOCKER_USERNAME}/togospace:${VERSION}-arm64
-        docker manifest push docker.io/${DOCKER_USERNAME}/togospace:latest
-
-    - name: Create and push version manifest (GitHub Registry)
-      run: |
-        VERSION="${{ needs.build.outputs.version }}"
-        GH_REPO="${{ github.repository_owner }}"
-
-        docker manifest create ghcr.io/${GH_REPO}/togospace:${VERSION} \
-          ghcr.io/${GH_REPO}/togospace:${VERSION}-amd64 \
-          ghcr.io/${GH_REPO}/togospace:${VERSION}-arm64
-        docker manifest push ghcr.io/${GH_REPO}/togospace:${VERSION}
-
-    - name: Create and push latest manifest (GitHub Registry)
-      if: ${{ github.event_name != 'push' || !contains(github.ref_name, 'beta') }}
-      run: |
-        VERSION="${{ needs.build.outputs.version }}"
-        GH_REPO="${{ github.repository_owner }}"
-
-        docker manifest create ghcr.io/${GH_REPO}/togospace:latest \
-          ghcr.io/${GH_REPO}/togospace:${VERSION}-amd64 \
-          ghcr.io/${GH_REPO}/togospace:${VERSION}-arm64
-        docker manifest push ghcr.io/${GH_REPO}/togospace:latest
-
-    - name: Summary
-      run: |
-        VERSION="${{ needs.build.outputs.version }}"
-        echo "### Docker Multi-arch Manifest Created" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "- **Version**: ${VERSION}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Registries**: Docker Hub, GitHub Container Registry" >> $GITHUB_STEP_SUMMARY
-        echo "- **Architectures**: amd64 (ubuntu-latest), arm64 (ubuntu-24.04-arm)" >> $GITHUB_STEP_SUMMARY
+        for tag in $tags; do
+            if [[ "$tag" == *"ghcr.io"* ]]; then
+                continue
+            fi
+            # 删除 amd64/arm64 后缀 tag，只保留 multi-arch manifest
+            curl -s -X DELETE \
+                -H "Authorization: Basic $(echo -n "$username:$token" | base64)" \
+                "https://hub.docker.com/v2/repositories/${username}/togospace/tags/${tag#*:}-amd64/" || true
+            curl -s -X DELETE \
+                -H "Authorization: Basic $(echo -n "$username:$token" | base64)" \
+                "https://hub.docker.com/v2/repositories/${username}/togospace/tags/${tag#*:}-arm64/" || true
+        done
