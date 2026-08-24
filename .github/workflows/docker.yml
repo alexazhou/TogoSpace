@@ -162,15 +162,27 @@ jobs:
         username="${{ secrets.DOCKERHUB_USERNAME }}"
         token="${{ secrets.DOCKERHUB_TOKEN }}"
 
+        # Docker Hub 删除接口不接受 Basic auth（一律 401），须先登录换取 JWT
+        jwt=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"${username}\",\"password\":\"${token}\"}" \
+            "https://hub.docker.com/v2/users/login/" \
+            | python3 -c "import json,sys;print(json.load(sys.stdin).get('token',''))")
+
+        if [ -z "$jwt" ]; then
+            echo "::warning::Failed to obtain Docker Hub JWT, skip platform tag cleanup"
+            exit 0
+        fi
+
         for tag in $tags; do
             if [[ "$tag" == *"ghcr.io"* ]]; then
                 continue
             fi
             # 删除 amd64/arm64 后缀 tag，只保留 multi-arch manifest
-            curl -s -X DELETE \
-                -H "Authorization: Basic $(echo -n "$username:$token" | base64)" \
+            curl -s -o /dev/null -X DELETE \
+                -H "Authorization: JWT ${jwt}" \
                 "https://hub.docker.com/v2/repositories/${username}/togospace/tags/${tag#*:}-amd64/" || true
-            curl -s -X DELETE \
-                -H "Authorization: Basic $(echo -n "$username:$token" | base64)" \
+            curl -s -o /dev/null -X DELETE \
+                -H "Authorization: JWT ${jwt}" \
                 "https://hub.docker.com/v2/repositories/${username}/togospace/tags/${tag#*:}-arm64/" || true
         done
