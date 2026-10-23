@@ -1,4 +1,4 @@
-name: Release macOS App
+name: Build macOS App
 
 on:
   push:
