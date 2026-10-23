@@ -216,8 +216,18 @@ jobs:
         ZIP_PATH=$(ls dist/*.zip | head -1)
         echo "ZIP_PATH=$ZIP_PATH" >> $GITHUB_ENV
 
+    # 安装包统一上传为 workflow artifact（所有触发方式都有产物，便于下载排查）。
+    # archive: false 直接上传已打好的 zip，避免二次压缩。
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v7
+      with:
+        path: ${{ env.ZIP_PATH }}
+        archive: false
+        if-no-files-found: error
+        retention-days: 30
+
     - name: Create GitHub Release
-      if: ${{ !contains(github.ref_name, 'beta') }}
+      if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-beta') }}
       uses: softprops/action-gh-release@v3
       with:
         name: "TogoSpace ${{ github.ref_name }}"
