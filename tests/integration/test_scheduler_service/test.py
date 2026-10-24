@@ -72,6 +72,10 @@ class TestSchedulerRun(ServiceTestCase):
         # 清理可能残留的 scheduler 状态，避免测试间污染
         scheduler.shutdown()
 
+    def teardown_method(self):
+        # 用例内会启动 roomService，用例结束负责关闭，避免房间注册表残留
+        roomService.shutdown()
+
     async def test_scheduler_shutdown_stops_all_agent_consumer_tasks(self, monkeypatch):
         """调用 scheduler.shutdown() 后，应停止所有 Agent 的消费协程。"""
         alice = _make_mock_agent("alice")

@@ -173,6 +173,7 @@ class TestRoleTemplateTools(ServiceTestCase):
 
     @classmethod
     async def async_teardown_class(cls) -> None:
+        await agentService.shutdown()
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()

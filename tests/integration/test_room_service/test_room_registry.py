@@ -49,6 +49,7 @@ class TestRoomRegistry(ServiceTestCase):
 
     @classmethod
     async def async_teardown_class(cls):
+        await agentService.shutdown()
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()

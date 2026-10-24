@@ -49,6 +49,7 @@ class _CollabTaskCase(ServiceTestCase):
     @classmethod
     async def async_teardown_class(cls):
         await agentService.shutdown()
+        funcToolService.shutdown()
         roomService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
