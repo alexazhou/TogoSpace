@@ -63,6 +63,16 @@ class AgentHistoryStore:
         self._items = list(items)
         logger.info("[reload] agent_id=%d, loaded %d items from db (after compact)", self._agent_id, len(self._items))
 
+    @property
+    def current_session_first_message_id(self) -> int | None:
+        """当前 session 首条消息的历史行 id（用于生成 LLM session id）。
+
+        `_items[0]` 要么是对话首条消息，要么是 compact 后最新的 COMPACT_SUMMARY；
+        插入新摘要即开启新 session，所以首行 id 就是 session 的起点。
+        返回 None 表示 history 为空或该行尚未落库。
+        """
+        return self._items[0].id if self._items else None
+
     def last(self) -> GtAgentHistory | None:
         if not self._items:
             return None

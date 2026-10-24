@@ -6,7 +6,7 @@ import logging
 import uuid
 from typing import Optional
 
-from constants import InferRequestStateType, LlmErrorCategory, LlmProtocol, LlmProviderType, ModelInput
+from constants import InferRequestStateType, LLM_SESSION_HEADER, LlmErrorCategory, LlmProtocol, LlmProviderType, ModelInput
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from model.dbModel.agentMessage import AgentMessage
 from service.llmService.llmErrorClassifier import classify_llm_error, RETRYABLE_CATEGORIES
@@ -260,6 +260,20 @@ def _build_request(
     return apply_llm_request_rules(request)
 
 
+def _build_extra_headers(
+    model_config: LlmModelConfig,
+    ctx: GtCoreAgentDialogContext,
+) -> dict[str, str]:
+    """合并模型配置的 extra_headers 与系统会话头。
+
+    session 头由系统写入，优先级高于用户配置（用户手写的同名头会被覆盖）：
+    agent 的会话身份是系统级事实，不是可调参数。
+    """
+    headers = dict(model_config.extra_headers or {})
+    headers[LLM_SESSION_HEADER] = ctx.session_id
+    return headers
+
+
 async def _safe_call_handler(
     on_status_event: InferRequestStatusEventHandler | None,
     event: InferRequestStatusEvent,
@@ -344,8 +358,8 @@ async def infer(
             model_config=model_config,
         )
         logger.info(
-            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, protocol=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
-            request_id, False, model_config.name, provider_config.name, model_config.protocol, len(request.messages), len(ctx.tools or []), request.tool_choice,
+            "LLM infer start: request_id=%s, stream=%s, session_id=%s, model=%s, provider=%s, protocol=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
+            request_id, False, ctx.session_id, model_config.name, provider_config.name, model_config.protocol, len(request.messages), len(ctx.tools or []), request.tool_choice,
             ctx.prompt_cache, list(applied_rules),
         )
         url = get_provider_url(provider_config, model_config.protocol)
@@ -357,7 +371,7 @@ async def infer(
                 "url": url,
                 "api_key": provider_config.api_key,
                 "custom_llm_provider": model_config.protocol.value,
-                "extra_headers": model_config.extra_headers,
+                "extra_headers": _build_extra_headers(model_config, ctx),
                 "request_id": request_id,
             },
             on_status_event=on_status_event,
@@ -411,8 +425,8 @@ async def infer_stream(
             model_config=model_config,
         )
         logger.info(
-            "LLM infer start: request_id=%s, stream=%s, model=%s, provider=%s, protocol=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
-            request_id, True, model_config.name, provider_config.name, model_config.protocol, len(request.messages), len(ctx.tools or []), request.tool_choice,
+            "LLM infer start: request_id=%s, stream=%s, session_id=%s, model=%s, provider=%s, protocol=%s, message_count=%d, tool_count=%d, tool_choice=%s, prompt_cache=%s, applied_rules=%s",
+            request_id, True, ctx.session_id, model_config.name, provider_config.name, model_config.protocol, len(request.messages), len(ctx.tools or []), request.tool_choice,
             ctx.prompt_cache, list(applied_rules),
         )
 
@@ -460,7 +474,7 @@ async def infer_stream(
                 "url": url,
                 "api_key": provider_config.api_key,
                 "custom_llm_provider": model_config.protocol.value,
-                "extra_headers": model_config.extra_headers,
+                "extra_headers": _build_extra_headers(model_config, ctx),
                 "on_chunk": _on_chunk,
                 "request_id": request_id,
             },

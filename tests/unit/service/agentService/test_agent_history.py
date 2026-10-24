@@ -580,6 +580,68 @@ class TestCompact:
         assert [item.seq for item in history] == [1, 2, 3, 4, 5]
 
 
+# ─── 当前 session 首条消息（session id 来源）────────────────────────────
+
+
+class TestCurrentSegmentAnchor:
+    """current_session_first_message_id：未 compact 时取首行，compact 后取最新摘要行。"""
+
+    def test_empty_history_returns_none(self):
+        assert AgentHistoryStore(agent_id=1).current_session_first_message_id is None
+
+    def test_genesis_uses_first_row(self):
+        first = _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0)
+        first.id = 10
+        second = _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"), seq=1)
+        second.id = 11
+
+        history = AgentHistoryStore(agent_id=1, items=[first, second])
+
+        assert history.current_session_first_message_id == 10
+
+    def test_after_compact_uses_summary_row(self):
+        summary = _make_item(
+            llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "summary"), seq=0,
+            tags=[AgentHistoryTag.COMPACT_SUMMARY],
+        )
+        summary.id = 20
+        keep = _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "keep"), seq=1)
+        keep.id = 21
+
+        history = AgentHistoryStore(agent_id=1, items=[summary, keep])
+
+        assert history.current_session_first_message_id == 20
+
+    @pytest.mark.asyncio
+    async def test_compact_switches_anchor(self):
+        """compact 插入的新摘要行成为新 session 的首条消息，与旧 session 不同。"""
+        first = _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0)
+        first.id = 10
+        second = _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.ASSISTANT, "a1"), seq=1)
+        second.id = 11
+        history = AgentHistoryStore(agent_id=1, items=[first, second])
+
+        assert history.current_session_first_message_id == 10
+
+        def _fake_insert(item):
+            item.id = 99  # 模拟 DAL 返回带主键的行
+            return item
+
+        with patch(_MOCK_INSERT_AT_SEQ, AsyncMock(side_effect=_fake_insert)):
+            await history.insert_compact_summary(
+                AgentMessage(role=OpenaiApiRole.USER, content="summary"),
+                seq=2,
+            )
+
+        assert history.current_session_first_message_id == 99
+        assert history.current_session_first_message_id != 10
+
+    def test_unpersisted_anchor_returns_none(self):
+        item = _make_item(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "u1"), seq=0)
+
+        assert AgentHistoryStore(agent_id=1, items=[item]).current_session_first_message_id is None
+
+
 # ─── is_safe_for_immediate_insert ─────────────────────────────
 
 

@@ -188,7 +188,7 @@ async def test_compact_messages_success():
         return llmService.InferResult.success(mock_resp)
 
     with patch(_INFER_PATCH, AsyncMock(side_effect=_fake_infer)):
-        result = await compact_messages(messages, "system_prompt", "gpt-4o", tools=tools)
+        result = await compact_messages(messages, "system_prompt", "gpt-4o", session_id="session-test", tools=tools)
 
     assert result is not None
     assert "以下是之前对话的压缩摘要" in result
@@ -206,7 +206,7 @@ async def test_compact_messages_infer_failed():
 
     with patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.failure(Exception("API error")))):
         with pytest.raises(RuntimeError):
-            await compact_messages(messages, "system_prompt", "gpt-4o")
+            await compact_messages(messages, "system_prompt", "gpt-4o", session_id="session-test")
 
 
 @pytest.mark.asyncio
@@ -216,7 +216,7 @@ async def test_compact_messages_empty_content():
     mock_resp = _make_mock_response("")
 
     with patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(mock_resp))):
-        result = await compact_messages(messages, "system_prompt", "gpt-4o")
+        result = await compact_messages(messages, "system_prompt", "gpt-4o", session_id="session-test")
 
     assert result is not None
     assert "以下是之前对话的压缩摘要" in result
@@ -236,7 +236,7 @@ async def test_compact_messages_tool_calls_in_response_treated_as_failure():
 
     with patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(tool_call_response))):
         with pytest.raises(RuntimeError, match="tool_calls"):
-            await compact_messages(messages, "system_prompt", "gpt-4o", tools=[_make_tool()])
+            await compact_messages(messages, "system_prompt", "gpt-4o", session_id="session-test", tools=[_make_tool()])
 
 
 @pytest.mark.asyncio
@@ -246,4 +246,4 @@ async def test_compact_messages_exception():
 
     with patch(_INFER_PATCH, AsyncMock(side_effect=Exception("network error"))):
         with pytest.raises(Exception, match="network error"):
-            await compact_messages(messages, "system_prompt", "gpt-4o")
+            await compact_messages(messages, "system_prompt", "gpt-4o", session_id="session-test")

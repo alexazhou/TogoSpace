@@ -35,7 +35,7 @@ def _build_response(content: str = "ok") -> llmApiUtil.OpenAIResponse:
 
 
 @pytest.mark.asyncio
-async def test_infer_passes_default_opencode_headers(monkeypatch):
+async def test_infer_sends_only_session_header_when_no_headers_configured(monkeypatch):
     captured: dict[str, object] = {}
 
     async def _fake_send_request_non_stream(request, url, api_key, custom_llm_provider=None, extra_headers=None, request_id=""):
@@ -63,6 +63,7 @@ async def test_infer_passes_default_opencode_headers(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
+        session_id="session-test",
         messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
         tool_choice="none",
     )
@@ -73,7 +74,7 @@ async def test_infer_passes_default_opencode_headers(monkeypatch):
     assert captured["url"] == "http://localhost/v1/chat/completions"
     assert captured["api_key"] == "key-123"
     assert captured["custom_llm_provider"] == "openai"
-    assert captured["extra_headers"] is None or captured["extra_headers"] == {}
+    assert captured["extra_headers"] == {"X-Session-Id": "session-test"}
     assert captured["request"].tool_choice == "none"
     assert captured["request"].prompt_cache is True
     assert isinstance(captured["request_id"], str)
@@ -104,6 +105,7 @@ async def test_infer_passes_configured_headers_without_default_merge(monkeypatch
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
+        session_id="session-test",
         messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
@@ -111,10 +113,78 @@ async def test_infer_passes_configured_headers_without_default_merge(monkeypatch
 
     assert result.ok is True
     fake_send_request_non_stream.assert_awaited_once()
-    assert fake_send_request_non_stream.await_args.kwargs["extra_headers"] == {"X-Client-Name": "openclaw"}
+    assert fake_send_request_non_stream.await_args.kwargs["extra_headers"] == {
+        "X-Client-Name": "openclaw",
+        "X-Session-Id": "session-test",
+    }
     assert isinstance(fake_send_request_non_stream.await_args.kwargs["request_id"], str)
     assert len(fake_send_request_non_stream.await_args.kwargs["request_id"]) == 32
     assert result.request_id == fake_send_request_non_stream.await_args.kwargs["request_id"]
+
+
+@pytest.mark.asyncio
+async def test_infer_injects_session_header_and_keeps_configured_headers(monkeypatch):
+    fake_send_request_non_stream = AsyncMock(return_value=_build_response())
+
+    monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
+        default_models={"primary": "configured-model@svc"},
+        llm_providers=[
+            {
+                "name": "svc",
+                "type": "openai",
+                "urls": {"openai": "http://localhost/v1/chat/completions"},
+                "api_key": "key-123",
+                "models": [
+                    {"name": "configured-model", "protocol": "openai", "extra_headers": {"X-Client-Name": "openclaw"}},
+                ]
+            }
+        ],
+    )))
+    monkeypatch.setattr(llmService.llmApiUtil, "send_request_non_stream", fake_send_request_non_stream)
+
+    ctx = GtCoreAgentDialogContext(
+        system_prompt="system prompt",
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
+        session_id="session-abc",
+    )
+
+    await llmService.infer(None, ctx)
+
+    assert fake_send_request_non_stream.await_args.kwargs["extra_headers"] == {
+        "X-Client-Name": "openclaw",
+        "X-Session-Id": "session-abc",
+    }
+
+
+@pytest.mark.asyncio
+async def test_infer_stream_session_header_overrides_configured_value(monkeypatch):
+    fake_send_request_stream = AsyncMock(return_value=_build_response("stream-ok"))
+
+    monkeypatch.setattr(configUtil, "get_app_config", lambda: AppConfig(setting=SettingConfig(
+        default_models={"primary": "configured-model@svc"},
+        llm_providers=[
+            {
+                "name": "svc",
+                "type": "openai",
+                "urls": {"openai": "http://localhost/v1/chat/completions"},
+                "api_key": "key-123",
+                "models": [
+                    {"name": "configured-model", "protocol": "openai", "extra_headers": {"X-Session-Id": "user-value"}},
+                ]
+            }
+        ],
+    )))
+    monkeypatch.setattr(llmService.llmApiUtil, "send_request_stream", fake_send_request_stream)
+
+    ctx = GtCoreAgentDialogContext(
+        system_prompt="system prompt",
+        messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
+        session_id="session-abc",
+    )
+
+    await llmService.infer_stream(None, ctx)
+
+    assert fake_send_request_stream.await_args.kwargs["extra_headers"] == {"X-Session-Id": "session-abc"}
 
 
 @pytest.mark.asyncio
@@ -137,6 +207,7 @@ async def test_infer_stream_passes_request_id(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
+        session_id="session-test",
         messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
         tool_choice="none",
     )
@@ -176,6 +247,7 @@ async def test_infer_stream_strips_required_tool_choice_when_reasoning_effort_en
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
+        session_id="session-test",
         messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
         tool_choice="required",
     )
@@ -209,6 +281,7 @@ async def test_infer_uses_context_prompt_cache_policy_when_provided(monkeypatch)
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
+        session_id="session-test",
         messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
         prompt_cache=False,
     )
@@ -242,6 +315,7 @@ async def test_infer_uses_config_model_when_agent_model_is_none(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
+        session_id="session-test",
         messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
@@ -274,6 +348,7 @@ async def test_infer_uses_agent_model_when_provided(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
+        session_id="session-test",
         messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
@@ -306,6 +381,7 @@ async def test_infer_stream_uses_config_model_when_agent_model_is_none(monkeypat
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
+        session_id="session-test",
         messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
@@ -344,6 +420,7 @@ async def test_infer_passes_extra_params(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
+        session_id="session-test",
         messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
@@ -387,6 +464,7 @@ async def test_infer_retries_with_exponential_backoff_until_success(monkeypatch)
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
+        session_id="session-test",
         messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
@@ -433,6 +511,7 @@ async def test_infer_stream_retries_up_to_limit_then_returns_failure(monkeypatch
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
+        session_id="session-test",
         messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 
@@ -578,6 +657,7 @@ async def test_infer_no_retry_on_non_retryable_error(monkeypatch):
 
     ctx = GtCoreAgentDialogContext(
         system_prompt="system prompt",
+        session_id="session-test",
         messages=[AgentMessage(role=llmApiUtil.OpenaiApiRole.USER, content="hello")],
     )
 

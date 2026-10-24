@@ -110,6 +110,8 @@ async def compact_messages(
     messages: list[AgentMessage],
     system_prompt: str,
     model: str,
+    *,
+    session_id: str,
     tools: list[llmApiUtil.OpenAITool] | None = None,
     max_tokens: int = 13107,  # 默认约为 131072 上下文长度的 10%，建议由调用方按实际 context_window_tokens 动态计算
 ) -> str:
@@ -119,6 +121,7 @@ async def compact_messages(
         messages: 待压缩的消息列表
         system_prompt: 系统提示（用于正确理解上下文）
         model: 模型名称
+        session_id: 被压缩的旧 session id（摘要请求算在旧 session 上）
         tools: 透传当前工具列表，以保持请求形态稳定
         max_tokens: 摘要最大 token 数，建议为 context_window_tokens 的 10%
 
@@ -134,6 +137,7 @@ async def compact_messages(
         messages=messages + [AgentMessage(role=OpenaiApiRole.USER, content=instruction)],
         tools=tools,
         tool_choice="none",
+        session_id=session_id,
     )
     infer_result = await llmService.infer(model, ctx)
 

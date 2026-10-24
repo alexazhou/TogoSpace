@@ -13,6 +13,9 @@ class GtCoreAgentDialogContext:
     """
     system_prompt: str
     messages: List[AgentMessage]
+    # 本次请求所属 session 的 id，作为 LLM_SESSION_HEADER 透传给上游。
+    # 任何一次真实推理都必然属于某个 session（见 util/sessionUtil.py）。
+    session_id: str
     tools: Optional[list] = field(default=None)
     tool_choice: Optional[str | dict[str, Any]] = field(default=None)
     prompt_cache: bool = field(default=True)

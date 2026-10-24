@@ -60,6 +60,10 @@ class OpenaiApiRole(EnhanceEnum):
     TOOL = "tool"
 
 
+# LLM 上游请求头：标识本次请求所属的 agent session（生成规则见 util/sessionUtil.py）。
+LLM_SESSION_HEADER = "X-Session-Id"
+
+
 class LlmProtocol(EnhanceEnum):
     """LLM 协议类型 — value 用于 URL 查找等字符串场景，不使用 auto()。"""
     OPENAI = "openai"

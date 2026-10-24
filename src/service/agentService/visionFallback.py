@@ -33,8 +33,11 @@ def _truncate_caption(text: str) -> str:
     return text[:_VISION_CAPTION_MAX_CHARS].rstrip() + "...(已截断)"
 
 
-async def recognize(att: MessageAttachment) -> str:
-    """用视觉模型识别单张图片，返回纯文本描述。失败抛异常由调用方捕获降级。"""
+async def recognize(att: MessageAttachment, *, session_id: str) -> str:
+    """用视觉模型识别单张图片，返回纯文本描述。失败抛异常由调用方捕获降级。
+
+    session_id 取发起识别的 agent 当前 session，识别请求算在该 agent 的会话上。
+    """
     # resolve_model("vision@system") 未配置时抛 ValueError，由调用方捕获降级
     resolve_model("vision@system")
 
@@ -46,6 +49,7 @@ async def recognize(att: MessageAttachment) -> str:
     ctx = GtCoreAgentDialogContext(
         system_prompt=_VISION_SYSTEM_PROMPT,
         messages=[recog_msg],
+        session_id=session_id,
     )
     result = await llmService.infer("vision@system", ctx)
 

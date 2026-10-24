@@ -31,7 +31,7 @@ from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
 from service.agentService.driver.factory import build_agent_driver
 from service.agentService.toolRegistry import AgentToolRegistry, RegisteredTool, ToolExecutionResult
 from service.roomService import ChatRoom, ToolCallContext
-from util import configUtil, llmApiUtil
+from util import configUtil, llmApiUtil, sessionUtil
 from util.assertUtil import assertNotNull
 from dal.db import gtAgentHistoryManager, gtAgentTaskManager
 
@@ -75,6 +75,19 @@ class AgentTurnRunner:
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
         self._current_room: ChatRoom | None = None
         self._current_task: GtScheculeTask | None = None
+
+    @property
+    def _session_id(self) -> str:
+        """当前 session 的 id；compact 成功后自动切换到新 session。
+
+        每次请求前现算，避免在 compact 前后持有过期值。
+        推理前 history 非空且已落库（见 _infer_to_item 的 is_infer_ready 断言），
+        agent 也必定已落库，因此 session 起点必然存在。
+        """
+        first_message_id = self._history.current_session_first_message_id
+        assert self.gt_agent.id is not None, "生成 session id 时 agent 尚未落库"
+        assert first_message_id is not None, "生成 session id 时 history 为空或首条消息未落库"
+        return sessionUtil.build_agent_session_id(self.gt_agent.id, first_message_id)
 
     def _base_metadata(self, **extra) -> AgentActivityMeta:
         """构建活动记录 metadata，自动附加 task_room_id（本次 turn 所在的任务房间）。"""
@@ -449,7 +462,7 @@ class AgentTurnRunner:
                 if att.recognition and att.recognition.strip():
                     continue  # 已有识别结果（之前识别过），跳过；caption 引导语不影响识别
                 try:
-                    att.recognition = await visionFallback.recognize(att)
+                    att.recognition = await visionFallback.recognize(att, session_id=self._session_id)
                 except Exception:
                     # 降级：recognition 保持为空，由 llmService 转换层插入"无法读取图片"说明
                     logger.exception("vision fallback recognize failed, 保持 recognition 为空（降级处理）")
@@ -532,7 +545,10 @@ class AgentTurnRunner:
             )
             activity_id = activity.id
 
-            ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools, tool_choice=tool_choice)
+            ctx = GtCoreAgentDialogContext(
+                system_prompt=self.system_prompt, messages=messages, tools=tools, tool_choice=tool_choice,
+                session_id=self._session_id,
+            )
 
             # 流式推理 + 节流更新
             last_progress_time = time.monotonic()
@@ -612,7 +628,11 @@ class AgentTurnRunner:
                     last_progress_time = time.monotonic()
                     chunk_count_since_update = 0
 
-                    ctx = GtCoreAgentDialogContext(system_prompt=self.system_prompt, messages=messages, tools=tools, tool_choice=tool_choice)
+                    # compact 已成功，session 已切换：此处现算即为新 session 的 id
+                    ctx = GtCoreAgentDialogContext(
+                        system_prompt=self.system_prompt, messages=messages, tools=tools, tool_choice=tool_choice,
+                        session_id=self._session_id,
+                    )
                     infer_result = await llmService.infer_stream(
                         self.gt_agent.model, ctx, on_progress=_on_progress, on_status_event=_on_status_event,
                     )
@@ -942,12 +962,14 @@ class AgentTurnRunner:
         # 摘要 token 上限动态设为上下文长度的 10%，随模型配置自动伸缩
         compact_max_tokens = max(1, int(merged_llm_config.context_config.context_window_tokens * 0.1))
         try:
+            # 摘要请求属于被压缩的旧 session：此处 _session_id 仍指向旧 session 的首条消息
             summary_text = await compact.compact_messages(
                 messages=compact_plan.source_messages,
                 system_prompt=self.system_prompt,
                 model=self.gt_agent.model,
                 tools=self.tool_registry.export_openai_tools(),
                 max_tokens=compact_max_tokens,
+                session_id=self._session_id,
             )
         except Exception as e:
             error_detail = str(e)

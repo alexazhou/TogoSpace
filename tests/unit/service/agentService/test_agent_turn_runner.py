@@ -32,6 +32,7 @@ def _make_turn_runner() -> AgentTurnRunner:
     mock_history.append_history_message = AsyncMock()
     mock_history.finalize_history_item = AsyncMock()
     mock_history.export_openai_tools = MagicMock(return_value=[])
+    mock_history.current_session_first_message_id = 42
     runner._history = mock_history
     return runner
 

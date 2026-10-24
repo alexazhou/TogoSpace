@@ -34,7 +34,7 @@ async def test_recognize_returns_text_description():
         patch.object(visionFallback, "resolve_model", return_value=(MagicMock(), MagicMock())) as mock_resolve,
         patch.object(visionFallback.llmService, "infer", AsyncMock(return_value=InferResult.success(_build_response("图中是一只猫")))),
     ):
-        text = await visionFallback.recognize(att)
+        text = await visionFallback.recognize(att, session_id="session-test")
 
     assert text == "图中是一只猫"
     mock_resolve.assert_called_once_with("vision@system")
@@ -50,7 +50,7 @@ async def test_recognize_raises_when_vision_slot_unconfigured():
         patch.object(visionFallback.llmService, "infer", AsyncMock()),
     ):
         with pytest.raises(ValueError):
-            await visionFallback.recognize(att)
+            await visionFallback.recognize(att, session_id="session-test")
 
 
 @pytest.mark.asyncio
@@ -63,7 +63,7 @@ async def test_recognize_raises_when_infer_failed():
         patch.object(visionFallback.llmService, "infer", AsyncMock(return_value=InferResult.failure(RuntimeError("timeout")))),
     ):
         with pytest.raises(RuntimeError, match="timeout"):
-            await visionFallback.recognize(att)
+            await visionFallback.recognize(att, session_id="session-test")
 
 
 @pytest.mark.asyncio
@@ -76,7 +76,7 @@ async def test_recognize_raises_when_empty_text():
         patch.object(visionFallback.llmService, "infer", AsyncMock(return_value=InferResult.success(_build_response("   ")))),
     ):
         with pytest.raises(RuntimeError, match="empty text"):
-            await visionFallback.recognize(att)
+            await visionFallback.recognize(att, session_id="session-test")
 
 
 @pytest.mark.asyncio
@@ -89,7 +89,7 @@ async def test_recognize_truncates_long_text():
         patch.object(visionFallback, "resolve_model", return_value=(MagicMock(), MagicMock())),
         patch.object(visionFallback.llmService, "infer", AsyncMock(return_value=InferResult.success(_build_response(long_text)))),
     ):
-        text = await visionFallback.recognize(att)
+        text = await visionFallback.recognize(att, session_id="session-test")
 
     assert len(text) <= visionFallback._VISION_CAPTION_MAX_CHARS + len("...(已截断)")
     assert text.endswith("...(已截断)")
