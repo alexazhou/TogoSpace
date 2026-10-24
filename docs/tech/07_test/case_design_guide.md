@@ -73,3 +73,14 @@
 2. **CI 流程**: 使用 `./scripts/run_tests.sh --cov` 以确保代码质量并收集合并覆盖率。
 3. **断点调试**: 如果需要在测试中使用 `breakpoint()` 或 `pdb`，必须加上 `--serial` 参数，因为并行模式下标准输入会被重定向，无法交互。
 4. **数据库查看**: 如果某个 Worker 的测试失败，可以在 `/tmp/` 目录下找到对应的 `.db` 文件进行排查。
+5. **单元测试不碰全局**: 纯单元测试不得启动 Service、连数据库或改写模块级全局；需要服务生命周期的测试请放到 `tests/integration/` 并继承 `ServiceTestCase`。判据与全局状态清单见 [unit_integration_boundary.md](./unit_integration_boundary.md)。
+6. **偶发失败先排除并发干扰**: 同时运行多个 pytest 会争抢同一个 Worker 专属 DB，日志还可能交错写入同一文件，产生自相矛盾的汇总行。排查前先用 `pgrep -fl "python.*-m pytest"` 确认没有残留进程。
+
+## 5. 同 Worker 内的状态边界
+
+- **数据库**: 按测试类隔离，类内多个用例共享同一个 DB。
+- **内存全局**: 无隔离。模块级变量（Agent 注册表、房间注册表、工具表、Skill 索引、配置缓存）会跨用例、跨测试类持续存在。
+- **必须成对**: `async_setup_class` 中 `startup()` 的每个服务，都要在 `async_teardown_class` 中 `shutdown()`。
+- **谁污染谁清理**: 用例失败时应如实失败，不要在后续用例里做补救性清理。
+
+完整说明见 [unit_integration_boundary.md](./unit_integration_boundary.md)。

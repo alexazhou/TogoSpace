@@ -12,7 +12,10 @@
 - **目录**: `tests/unit/`
 - **目标**: 验证纯逻辑函数、工具函数、算法逻辑。
 - **特点**: 不依赖外部服务，不启动后台进程，运行速度极快。
+- **边界**: 不得调用 `xxxService.startup()`、不得建立真实数据库连接、不得改写模块级可变全局。
 - **示例**: 配置归一化逻辑、时间格式化、计算器工具函数。
+
+> 需要真实 Service / 数据库 / 全局状态的测试属于集成测试。具体判据、全局状态清单与常见污染模式见 [unit_integration_boundary.md](./unit_integration_boundary.md)。
 
 ### 1.2 集成测试 (Integration Tests)
 - **目录**: `tests/integration/`
@@ -102,7 +105,9 @@
 
 ### 5.2 状态重置
 - **类级重置**: 在 `ServiceTestCase.setup_class` 中清空数据库、重建 Schema、启动外部依赖。
-- **Service 级重置**: 集成测试通常在 `async_setup_class` 中显式调用 `service.startup()`，并在 `async_teardown_class` 中调用 `shutdown()`，清空内存中的单例状态。
+- **Service 级重置**: 集成测试必须在 `async_setup_class` 中显式调用 `service.startup()`，并在 `async_teardown_class` 中调用对应的 `shutdown()`（成对，不可省略）。
+- **类内用例共享数据库**: 同一测试类的多个用例读写同一个 DB，用例需自行清理自己写入的数据，不能删除其他用例依赖的数据。
+- **内存全局无隔离**: 模块级变量（Agent 注册表、房间注册表、工具表、配置缓存等）在整个 Worker 生命周期内持续存在，只能靠类级 start/shutdown 兜住，详见 [unit_integration_boundary.md](./unit_integration_boundary.md)。
 
 ### 5.3 端口隔离
 - **自动偏移**: 基于 Worker ID 计算端口偏移量，避免多进程抢占。
