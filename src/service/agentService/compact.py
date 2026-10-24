@@ -13,11 +13,12 @@ from model.dbModel.agentMessage import AgentMessage
 from service import llmService
 from service.agentService import promptBuilder
 from util import llmApiUtil, configUtil
-from util.configUtil.configTypes import LlmModelConfig
+from util.configUtil.configTypes import LlmContextConfig, LlmModelConfig
 
 logger = logging.getLogger(__name__)
 
-# 系统内置模型上下文长度默认表（仅用于配置未显式覆盖时的兜底）
+# 系统内置模型上下文长度表：仅在用户未显式调整 context_window_tokens 时作为兜底。
+# 按模型名精确匹配，因此只有名称与下表完全一致的模型才会命中。
 DEFAULT_MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "glm-4.7": 128000,
     "qwen-plus": 131072,
@@ -47,10 +48,20 @@ _OVERFLOW_KEYWORDS = (
 # ─── 阈值计算 ────────────────────────────────────────────
 
 def calc_hard_limit_tokens(model_config: LlmModelConfig) -> int:
-    """计算模型当前请求允许使用的最大 prompt token。"""
+    """计算模型当前请求允许使用的最大 prompt token。
+
+    context_window 取值优先级：用户配置（模型级 > 全局）> 内置模型表 > 代码默认值。
+    内置表只在用户未调整 context_window_tokens（仍为代码默认值）时生效。
+    """
     setting = configUtil.get_app_config().setting
     context_cfg = model_config.context_config if model_config.context_config else setting.context_config
-    context_window = DEFAULT_MODEL_CONTEXT_WINDOWS.get(model_config.name, context_cfg.context_window_tokens)
+
+    # context_cfg 已按「模型级 > 全局 > 默认值」合并过，这里即用户最终生效的配置。
+    context_window = context_cfg.context_window_tokens
+    if context_window == LlmContextConfig().context_window_tokens:
+        # 用户没改过 → 用内置表兜底；表里没有该模型则保持代码默认值。
+        context_window = DEFAULT_MODEL_CONTEXT_WINDOWS.get(model_config.name, context_window)
+
     return context_window - context_cfg.reserve_output_tokens
 
 

@@ -175,6 +175,46 @@ class TestContextConfigMerge:
             assert model.context_config.compact_summary_max_tokens == 6144
 
 
+# ===== 端到端：resolve_model + calc_hard_limit_tokens =====
+
+
+class TestContextWindowResolution:
+    """用户配置的 context_window 经 resolve_model 合并后，在阈值计算中真正生效。
+
+    回归用例：内置模型表曾覆盖用户配置（issue #26）。
+    """
+
+    def _hard_limit(self, cfg, model_name: str = "gpt-4o@openai") -> int:
+        from service.agentService.compact import calc_hard_limit_tokens
+        from service.llmService.core import resolve_model
+        with mock.patch("util.configUtil.get_app_config", return_value=cfg):
+            _, model = resolve_model(model_name)
+            return calc_hard_limit_tokens(model)
+
+    def test_model_level_window_wins_over_builtin_table(self):
+        """gpt-4o 在内置表里是 128000，用户配 200000 应生效。"""
+        cfg = _make_app_config(
+            model_ctx=LlmContextConfig(context_window_tokens=200000, reserve_output_tokens=16384),
+        )
+        assert self._hard_limit(cfg) == 183616
+
+    def test_global_level_window_wins_over_builtin_table(self):
+        """全局配 200000，模型未配，命中内置表也应使用全局值。"""
+        cfg = _make_app_config(
+            global_ctx=LlmContextConfig(context_window_tokens=200000, reserve_output_tokens=16384),
+            model_ctx=None,
+        )
+        assert self._hard_limit(cfg) == 183616
+
+    def test_builtin_table_used_when_user_left_default(self):
+        """用户未改 context_window（仍为默认值）时，命中内置表的模型用表里的值。"""
+        cfg = _make_app_config(
+            global_ctx=LlmContextConfig(reserve_output_tokens=16384),
+            model_ctx=None,
+        )
+        assert self._hard_limit(cfg) == 111616  # 128000 - 16384
+
+
 # ===== extra_params / extra_headers 保留 =====
 
 

@@ -45,18 +45,56 @@ def _make_llm_config(**overrides) -> LlmModelConfig:
 # ─── calc_hard_limit_tokens ──────────────────────────────
 
 @patch("service.agentService.compact.configUtil.get_app_config")
-def test_calc_hard_limit_tokens_uses_builtin_default(mock_get_app_config):
+def test_calc_hard_limit_tokens_uses_builtin_table_when_unconfigured(mock_get_app_config):
+    """用户未调整 context_window（仍为默认值）时，命中内置表的模型用表里的值。"""
+    mock_app_config = MagicMock()
+    mock_app_config.setting.context_config = LlmContextConfig()
+    mock_get_app_config.return_value = mock_app_config
+    cfg = _make_llm_config(
+        name="gpt-4o",
+        context_window_tokens=LlmContextConfig().context_window_tokens,
+        reserve_output_tokens=4096,
+    )
+    assert calc_hard_limit_tokens(cfg) == 123904  # 128000 - 4096
 
+
+@patch("service.agentService.compact.configUtil.get_app_config")
+def test_calc_hard_limit_tokens_prefers_user_config_over_builtin(mock_get_app_config):
+    """用户配置优先：即使模型名命中内置表，也使用用户设置的值。"""
     mock_app_config = MagicMock()
     mock_app_config.setting.context_config = LlmContextConfig()
     mock_get_app_config.return_value = mock_app_config
     cfg = _make_llm_config(name="gpt-4o", context_window_tokens=32000, reserve_output_tokens=4096)
-    assert calc_hard_limit_tokens(cfg) == 123904
+    assert calc_hard_limit_tokens(cfg) == 27904  # 32000 - 4096
+
+
+@patch("service.agentService.compact.configUtil.get_app_config")
+def test_calc_hard_limit_tokens_user_config_larger_than_builtin(mock_get_app_config):
+    """内置表值是 128000，用户配 200000 时按 200000 计算。"""
+    mock_app_config = MagicMock()
+    mock_app_config.setting.context_config = LlmContextConfig()
+    mock_get_app_config.return_value = mock_app_config
+    cfg = _make_llm_config(name="gpt-4o", context_window_tokens=200000, reserve_output_tokens=16384)
+    assert calc_hard_limit_tokens(cfg) == 183616
+
+
+@patch("service.agentService.compact.configUtil.get_app_config")
+def test_calc_hard_limit_tokens_unconfigured_model_not_in_table(mock_get_app_config):
+    """未配置且模型不在内置表里时，回落到代码默认值 131072。"""
+    mock_app_config = MagicMock()
+    mock_app_config.setting.context_config = LlmContextConfig()
+    mock_get_app_config.return_value = mock_app_config
+    cfg = _make_llm_config(
+        name="unknown-model-xyz",
+        context_window_tokens=LlmContextConfig().context_window_tokens,
+        reserve_output_tokens=4096,
+    )
+    assert calc_hard_limit_tokens(cfg) == 126976  # 131072 - 4096
 
 
 @patch("service.agentService.compact.configUtil.get_app_config")
 def test_calc_hard_limit_tokens_falls_back_to_config(mock_get_app_config):
-
+    """用户配置（模型不在内置表里）直接生效。"""
     mock_app_config = MagicMock()
     mock_app_config.setting.context_config = LlmContextConfig()
     mock_get_app_config.return_value = mock_app_config
@@ -79,15 +117,32 @@ def test_calc_compact_trigger_tokens_default(mock_get_app_config):
 
 
 @patch("service.agentService.compact.configUtil.get_app_config")
-def test_calc_compact_trigger_tokens_known_model(mock_get_app_config):
+def test_calc_compact_trigger_tokens_known_model_unconfigured(mock_get_app_config):
+    """未配置时命中内置表：gpt-4o 按 128000 计算。"""
+    mock_app_config = MagicMock()
+    mock_app_config.setting.context_config = LlmContextConfig()
+    mock_get_app_config.return_value = mock_app_config
+    cfg = _make_llm_config(
+        name="gpt-4o",
+        context_window_tokens=LlmContextConfig().context_window_tokens,
+        reserve_output_tokens=4096,
+        compact_trigger_ratio=0.85,
+    )
+    # (128000 - 4096) * 0.85 = 105318.4 → floor = 105318
+    result = calc_compact_trigger_tokens(cfg)
+    assert result == 105318
 
+
+@patch("service.agentService.compact.configUtil.get_app_config")
+def test_calc_compact_trigger_tokens_known_model_with_user_config(mock_get_app_config):
+    """命中内置表的模型也遵循用户配置：gpt-4o 配 32000 时按 32000 计算。"""
     mock_app_config = MagicMock()
     mock_app_config.setting.context_config = LlmContextConfig()
     mock_get_app_config.return_value = mock_app_config
     cfg = _make_llm_config(name="gpt-4o", context_window_tokens=32000, reserve_output_tokens=4096, compact_trigger_ratio=0.85)
-    # gpt-4o: (128000 - 4096) * 0.85 = 105318.4 → floor = 105318
+    # (32000 - 4096) * 0.85 = 23718.4 → floor = 23718
     result = calc_compact_trigger_tokens(cfg)
-    assert result == 105318
+    assert result == 23718
 
 
 # ─── is_context_overflow_error ───────────────────────────
