@@ -491,6 +491,21 @@ class AgentTurnRunner:
             "last_retry_error": None,
         }
 
+        def _build_request_retry_meta_for_terminal() -> AgentActivityMeta | None:
+            """把请求重试状态转成终态 metadata；从未发生重试时返回 None。
+
+            定义在 try 之外：异常处理路径也需要它，避免局部函数未定义时掩盖原始异常。
+            """
+            if request_retry_state["seen"] is not True:
+                return None
+            return AgentActivityMeta(
+                request_state="",
+                retry_delay_seconds=0,
+                retry_attempt=int(request_retry_state["attempt"]) if request_retry_state["attempt"] is not None else 0,
+                retry_max_attempts=int(request_retry_state["max_attempts"]) if request_retry_state["max_attempts"] is not None else 0,
+                last_retry_error=str(request_retry_state["last_retry_error"]) if request_retry_state["last_retry_error"] is not None else "",
+            )
+
         model_display = f"{merged_llm_config.name}@{provider_config.name}"
         supports_vision = ModelInput.IMAGE in (merged_llm_config.input or [])
 
@@ -544,18 +559,6 @@ class AgentTurnRunner:
                 patch = AgentActivityMeta()
                 patch.apply_request_status_event(event)
                 await agentActivityService.update_activity_progress(activity_id, metadata_patch=patch)
-
-            def _build_request_retry_meta_for_terminal() -> AgentActivityMeta | None:
-                if request_retry_state["seen"] is not True:
-                    return None
-                patch = AgentActivityMeta(
-                    request_state="",
-                    retry_delay_seconds=0,
-                    retry_attempt=int(request_retry_state["attempt"]) if request_retry_state["attempt"] is not None else 0,
-                    retry_max_attempts=int(request_retry_state["max_attempts"]) if request_retry_state["max_attempts"] is not None else 0,
-                    last_retry_error=str(request_retry_state["last_retry_error"]) if request_retry_state["last_retry_error"] is not None else "",
-                )
-                return patch
 
             print('DEBUG: BEFORE INFER_STREAM')
             infer_result: llmService.InferResult = await llmService.infer_stream(
