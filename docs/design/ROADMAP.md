@@ -301,6 +301,16 @@
 - **统一转换边界**：模型层 `build()` 与 Store 层只接受 `AgentMessage`，`OpenAIMessage` 由调用方先经 `AgentMessage.from_openai()` 转换；读取侧 `openai_message` 统一转换回 `OpenAIMessage`，中间业务逻辑零改动
 - **向后兼容**：DB 列不变，旧 `OpenAIMessage` JSON 可直接读回，无迁移
 
+### V26: Service 生命周期注解化
+
+统一进程级 Service 的启动/停止语义，用一对生命周期注解（装饰器）接管状态管理与异常/回滚：
+
+- **契约统一**：`startup` 只允许 `{Idle, Stopped}` 启动，其余态抛 `SERVICE_ALREADY_STARTED`；`shutdown` 幂等，仅 `Idle`/`Stopped` no-op + warning
+- **失败必回滚**：启动中途失败先回滚已申请资源、置 `Error`、原样向上抛（fail loud），无半启动残留
+- **清理失败留痕**：`shutdown` body 抛错不 rethrow、仍回 `Stopped`，但记录 `fine/error`
+- **接入范围**：12 个进程级服务统一接入注解；`ormService` 删除静默早退守卫并补 `unbind_database()` 消除悬空绑定；`schedulerService` 幂等订阅
+- **可观测**：每服务挂 `s_status` 状态对象，并新增架构守卫测试（AST 结构 + 6 态契约矩阵）
+
 ---
 
 ## 技术栈
@@ -441,6 +451,11 @@
 - [技术文档](./2026-08-16-agent-multimodal-support/step2_technical.md)
 - [开发任务表](./2026-08-16-agent-multimodal-support/step3_tasks.md)
 - [模型能力设计](./2026-08-16-agent-multimodal-support/model_capabilities_design.md)
+
+### V26
+- [产品文档](./2026-10-25-service-lifecycle-annotation/step1_product.md)
+- [技术文档](./2026-10-25-service-lifecycle-annotation/step2_technical.md)
+- [开发任务表](./2026-10-25-service-lifecycle-annotation/step3_tasks.md)
 
 ---
 
