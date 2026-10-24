@@ -8,7 +8,9 @@ from typing import Optional
 
 from constants import InferRequestStateType, LLM_SESSION_HEADER, LlmErrorCategory, LlmProtocol, LlmProviderType, ModelInput
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
+from model.coreModel.serviceStatus import ServiceStatusInfo
 from model.dbModel.agentMessage import AgentMessage
+from service import serviceUtil
 from service.llmService.llmErrorClassifier import classify_llm_error, RETRYABLE_CATEGORIES
 from service.llmService.llmRequestRules import apply_llm_request_rules
 from util import configUtil, llmApiUtil
@@ -18,6 +20,8 @@ import appPaths
 import os
 
 logger = logging.getLogger(__name__)
+
+s_status = ServiceStatusInfo(name="llmService")
 
 _INFER_RETRY_DELAYS_SECONDS = (2, 4, 8, 16, 32, 32, 32)
 
@@ -141,6 +145,7 @@ def resolve_model(model_name: str | None) -> tuple[LlmProviderConfig, LlmModelCo
 
     return provider_config, merged_model
 
+@serviceUtil.service_start_wrapper(s_status)
 async def startup() -> None:
     setting = configUtil.get_app_config().setting
     if not setting.is_llm_configured:
@@ -389,6 +394,7 @@ async def infer(
         return InferResult.failure(e, request_id=request_id)
 
 
+@serviceUtil.service_stop_wrapper(s_status)
 def shutdown() -> None:
     pass
 

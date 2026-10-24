@@ -53,6 +53,7 @@ class TestmessageBus(ServiceTestCase):
     async def test_stop_clears_subscribers(self):
         """shutdown 后已注册订阅者应全部清空。"""
         received = []
+        await messageBus.startup()
         messageBus.subscribe(MessageBusTopic.ROOM_MSG_ADDED, lambda m: received.append(m))
         await messageBus.shutdown()
         messageBus.publish(MessageBusTopic.ROOM_MSG_ADDED, gt_agent=SimpleNamespace(id=1, name="alice"), room_id=1)

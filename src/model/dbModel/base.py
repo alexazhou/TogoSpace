@@ -26,6 +26,15 @@ def bind_database(database: peewee.Database) -> None:
     _database_proxy.initialize(database)
 
 
+def unbind_database() -> None:
+    """解除 peewee DatabaseProxy 的绑定（peewee 未提供官方 unbind）。
+
+    用于服务停机 / 启动失败回滚，避免 proxy 残留指向已 close 的库（「悬空绑定」）。
+    仅解除绑定，不销毁传入的 database 对象。
+    """
+    _database_proxy.initialize(None)
+
+
 class JsonField(peewee.TextField, Generic[TJson]):
     """将 JSON 值（dict/list 等）与 TEXT(JSON) 自动互转。"""
 

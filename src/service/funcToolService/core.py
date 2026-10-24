@@ -6,6 +6,8 @@ from typing import Any, Iterable, Optional
 from pydantic import BaseModel
 
 from constants import ToolCategory
+from model.coreModel.serviceStatus import ServiceStatusInfo
+from service import serviceUtil
 from util import llmApiUtil
 from service.roomService import ToolCallContext
 from .funcToolType import FuncTool
@@ -37,6 +39,8 @@ from .tools import (
 )
 
 logger = logging.getLogger(__name__)
+
+s_status = ServiceStatusInfo(name="funcToolService")
 
 
 def build_tools(func_tools: Iterable[FuncTool]) -> list[llmApiUtil.OpenAITool]:
@@ -85,6 +89,12 @@ def get_func_tool(name: str) -> FuncTool | None:
     return _func_tools.get(name)
 
 
+def _reset() -> None:
+    """纯资源清理：正常 shutdown 与启动失败回滚共用；幂等。"""
+    _func_tools.clear()
+
+
+@serviceUtil.service_start_wrapper(s_status, on_error=_reset)
 async def startup() -> None:
     """加载启用的函数列表，须在首次调用 get_tools 前调用一次。"""
     load_func_tools()
@@ -162,7 +172,7 @@ async def run_tool_call(
         return {"success": False, "message": f"函数执行失败: {error}"}
 
 
+@serviceUtil.service_stop_wrapper(s_status)
 def shutdown() -> None:
     """清空工具列表，程序退出前调用。"""
-    global _func_tools
-    _func_tools = {}
+    _reset()

@@ -8,13 +8,22 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
-from service import deptService, roomService, schedulerService, agentService
+from service import deptService, roomService, schedulerService, agentService, serviceUtil
+from model.coreModel.serviceStatus import ServiceStatusInfo
 from util import assertUtil, fileUtil
 
 logger = logging.getLogger(__name__)
 
+s_status = ServiceStatusInfo(name="teamService")
 
+
+@serviceUtil.service_start_wrapper(s_status)
 async def startup() -> None:
+    return None
+
+
+@serviceUtil.service_stop_wrapper(s_status)
+async def shutdown() -> None:
     return None
 
 

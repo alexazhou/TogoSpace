@@ -7,15 +7,21 @@ from __future__ import annotations
 import asyncio
 
 from dal.db import gtAgentHistoryManager, gtScheculeTaskManager, gtRoomMessageManager, gtRoomManager
+from model.coreModel.serviceStatus import ServiceStatusInfo
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from constants import AgentHistoryTag, AgentTaskStatus
+from service import serviceUtil
+
+s_status = ServiceStatusInfo(name="persistenceService")
 
 
+@serviceUtil.service_start_wrapper(s_status)
 async def startup() -> None:
     pass
 
 
+@serviceUtil.service_stop_wrapper(s_status)
 async def shutdown() -> None:
     pass
 

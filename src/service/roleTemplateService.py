@@ -1,11 +1,16 @@
 import logging
 
 from dal.db import gtRoleTemplateManager
+from model.coreModel.serviceStatus import ServiceStatusInfo
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
+from service import serviceUtil
 
 logger = logging.getLogger(__name__)
 
+s_status = ServiceStatusInfo(name="roleTemplateService")
 
+
+@serviceUtil.service_start_wrapper(s_status)
 async def startup() -> None:
     return None
 
@@ -17,5 +22,6 @@ async def save_role_template(role_template: GtRoleTemplate) -> GtRoleTemplate:
     return saved
 
 
+@serviceUtil.service_stop_wrapper(s_status)
 async def shutdown() -> None:
     return None

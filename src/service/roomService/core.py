@@ -6,7 +6,8 @@ from datetime import datetime
 from typing import Dict, List, Sequence
 
 from dal.db import gtRoomManager, gtTeamManager, gtAgentManager, gtRoomMessageManager
-from service import messageBus
+from model.coreModel.serviceStatus import ServiceStatusInfo
+from service import messageBus, serviceUtil
 from util import configUtil, assertUtil, i18nUtil
 from exception import TogoException
 from model.dbModel.gtDept import DeptRoomSpec
@@ -39,11 +40,22 @@ class ToolCallContext:
 _rooms: Dict[str, ChatRoom] = {}  # room_key -> ChatRoom
 _rooms_by_id: Dict[int, ChatRoom] = {}
 
+s_status = ServiceStatusInfo(name="roomService")
 
-async def startup() -> None:
-    """初始化房间服务，清空所有房间。"""
+
+def _reset() -> None:
+    """纯资源清理：正常 shutdown 与启动失败回滚共用；幂等。
+
+    原地 ``clear()`` 而非重新赋值，保持容器对象身份稳定（``roomService._rooms`` 被外部引用）。
+    """
     _rooms.clear()
     _rooms_by_id.clear()
+
+
+@serviceUtil.service_start_wrapper(s_status, on_error=_reset)
+async def startup() -> None:
+    """初始化房间服务，清空所有房间。"""
+    _reset()
 
 
 async def _load_room(gt_team: GtTeam, gt_room: GtRoom) -> None:
@@ -206,10 +218,10 @@ async def get_or_create_control_room(team_id: int, agent_id: int) -> tuple[ChatR
     return room, True
 
 
+@serviceUtil.service_stop_wrapper(s_status)
 def shutdown() -> None:
     """移除所有聊天室，程序退出前调用。"""
-    _rooms.clear()
-    _rooms_by_id.clear()
+    _reset()
 
 
 def _resolve_join_read_index(messages: list[GtRoomMessage]) -> int:

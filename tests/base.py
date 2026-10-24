@@ -21,6 +21,10 @@ import service.schedulerService as scheduler
 import service.persistenceService as persistenceService
 import service.ormService as ormService
 import service.llmService as llmService
+import service.skillService as skillService
+import service.presetService as presetService
+import service.teamService as teamService
+import service.roleTemplateService as roleTemplateService
 from dal.db import gtAgentManager, gtTeamManager, gtRoomManager, gtRoleTemplateManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
@@ -287,6 +291,9 @@ class ServiceTestCase:
                 cls._start_backend()
             cls._run_on_class_loop(cls.async_setup_class())
         except Exception:
+            # 兜底重置进程内 service 全局：async_setup_class 半途失败时也可能已启动了部分服务。
+            with contextlib.suppress(Exception):
+                cls._run_on_class_loop(cls._reset_in_process_services())
             cls._safe_cleanup_external_dependencies()
             cls._close_class_loop()
             raise
@@ -300,6 +307,11 @@ class ServiceTestCase:
         except Exception as exc:
             teardown_error = exc
         finally:
+            # 兜底重置进程内 service 全局：service 的清理此前完全依赖子类自觉 shutdown，
+            # 漏一个（尤其 ormService）就会把状态污染给同 worker 的后续测试类。这里做一次
+            # 防御性停机，把「漏 shutdown」从跨类静默污染降级为可自愈。
+            with contextlib.suppress(Exception):
+                cls._run_on_class_loop(cls._reset_in_process_services())
             if hasattr(cls, "_config_patcher"):
                 cls._config_patcher.stop()
             cls._safe_cleanup_external_dependencies()
@@ -314,6 +326,53 @@ class ServiceTestCase:
     @classmethod
     async def async_teardown_class(cls):
         """子类可按需重写：类级别异步清理。"""
+
+    # 停机顺序参照 backend_main 的 shutdown 顺序：先停上层再停底层，保证依赖关系正确。
+    _IN_PROCESS_SHUTDOWN_ORDER = (
+        "scheduler",
+        "agentService",
+        "persistenceService",
+        "ormService",
+        "funcToolService",
+        "skillService",
+        "roomService",
+        "llmService",
+        "messageBus",
+        "presetService",
+        "teamService",
+        "roleTemplateService",
+    )
+
+    @classmethod
+    async def _reset_in_process_services(cls):
+        """防御性停机：把进程内 service 的全局状态复位到 Stopped。
+
+        service 的全局状态在同一 worker 内是共享的，只要某个测试类漏了 shutdown，后续
+        测试类的 startup 就会撞上 SERVICE_ALREADY_STARTED。这里按 backend_main 的顺序
+        逐个 shutdown，并对每个服务单独吞掉异常，保证某个服务清理失败不会影响其余服务复位。
+        """
+        modules = {
+            "scheduler": scheduler,
+            "agentService": agentService,
+            "persistenceService": persistenceService,
+            "ormService": ormService,
+            "funcToolService": funcToolService,
+            "skillService": skillService,
+            "roomService": roomService,
+            "llmService": llmService,
+            "messageBus": messageBus,
+            "presetService": presetService,
+            "teamService": teamService,
+            "roleTemplateService": roleTemplateService,
+        }
+        for name in cls._IN_PROCESS_SHUTDOWN_ORDER:
+            try:
+                result = modules[name].shutdown()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                # 兜底清理不应掩盖真正的测试失败原因，逐个吞掉异常继续。
+                continue
 
     @classmethod
     def _start_mock_llm(cls):

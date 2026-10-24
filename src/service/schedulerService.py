@@ -2,9 +2,10 @@ import logging
 
 from service import messageBus
 from service.messageBus import EventBusMessage
-from service import agentService, roomService as chat_room
+from service import agentService, roomService as chat_room, serviceUtil
 from dal.db import gtScheculeTaskManager
 from constants import MessageBusTopic, AgentTaskType, SpecialAgent, ScheduleState
+from model.coreModel.serviceStatus import ServiceStatusInfo
 from model.dbModel.gtAgent import GtAgent
 from util import configUtil
 
@@ -12,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 _schedule_state: ScheduleState = ScheduleState.STOPPED
 _schedule_not_running_reason: str = ""  # 调度未运行原因，仅在非 RUNNING 状态时可能有值
+
+s_status = ServiceStatusInfo(name="schedulerService")
 
 
 def get_schedule_state() -> ScheduleState:
@@ -32,8 +35,36 @@ def _publish_state_change() -> None:
     )
 
 
+def _reset() -> None:
+    """纯资源清理：``shutdown()`` 的清理体；幂等。
+
+    退订事件、停止所有 Agent 消费协程并复位调度状态。
+    """
+    global _schedule_state, _schedule_not_running_reason
+    messageBus.unsubscribe(MessageBusTopic.ROOM_STATUS_CHANGED, _on_room_status_changed)
+    for agent in agentService.get_all_agents():
+        agent.stop_consumer_task()
+    _schedule_state = ScheduleState.STOPPED
+    _schedule_not_running_reason = ""
+    logger.info("Scheduler 已停止运行")
+    for runtime_room in chat_room.get_all_rooms():
+        logger.info(f"\n{runtime_room.format_log()}")
+
+
+def _unsubscribe() -> None:
+    """收窄的启动回滚：``startup()`` 只申请「订阅」这一项资源，失败时只退订。
+
+    回滚动作刻意不越出 ``startup`` 的申请范围（不退订之外的停 consumer/遍历房间属 ``shutdown`` 职责），
+    保持 on_error 与「启动失败必回滚自身已申请资源」一一对应；幂等。
+    """
+    messageBus.unsubscribe(MessageBusTopic.ROOM_STATUS_CHANGED, _on_room_status_changed)
+
+
+@serviceUtil.service_start_wrapper(s_status, on_error=_unsubscribe)
 async def startup() -> None:
     """初始化调度器，订阅事件。需在 team 恢复完成后手动调用 start_schedule() 开启调度。"""
+    # 幂等订阅：先退订再订阅，确保 ROOM_STATUS_CHANGED 回调只注册一次。
+    messageBus.unsubscribe(MessageBusTopic.ROOM_STATUS_CHANGED, _on_room_status_changed)
     messageBus.subscribe(MessageBusTopic.ROOM_STATUS_CHANGED, _on_room_status_changed)
 
 
@@ -122,17 +153,10 @@ async def start_scheduling(team_name: str | None = None) -> None:
     logger.info("开始调度完成: team=%s", team_name or "ALL")
 
 
+@serviceUtil.service_stop_wrapper(s_status)
 def shutdown() -> None:
     """清空调度状态。"""
-    global _schedule_state, _schedule_not_running_reason
-    messageBus.unsubscribe(MessageBusTopic.ROOM_STATUS_CHANGED, _on_room_status_changed)
-    for agent in agentService.get_all_agents():
-        agent.stop_consumer_task()
-    _schedule_state = ScheduleState.STOPPED
-    _schedule_not_running_reason = ""
-    logger.info("Scheduler 已停止运行")
-    for runtime_room in chat_room.get_all_rooms():
-        logger.info(f"\n{runtime_room.format_log()}")
+    _reset()
 
 
 def stop_scheduler_team(team_id: int) -> None:

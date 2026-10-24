@@ -4,13 +4,14 @@ import os
 from typing import Any, List
 
 from model.dbModel.gtDept import GtDept
+from model.coreModel.serviceStatus import ServiceStatusInfo
 from service.agentService.prompts import BASE_PROMPT, AGENT_IDENTITY_PROMPT
 from util import configUtil, i18nUtil, assertUtil
 from model.dbModel.gtAgent import GtAgent
 from service.agentService.agent import Agent
 from service.agentService.driver import normalize_driver_config
 from service.agentService.promptBuilder import build_agent_system_prompt
-from service import llmService, roomService, persistenceService, deptService, agentActivityService
+from service import llmService, roomService, persistenceService, deptService, agentActivityService, serviceUtil
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtScheculeTaskManager
 from peewee import IntegrityError
 from exception import TogoException
@@ -19,6 +20,8 @@ from constants import AgentStatus, AgentTaskStatus, DriverType, EmployStatus, Sp
 logger = logging.getLogger(__name__)
 
 _agents: dict[int, "Agent"] = {}
+
+s_status = ServiceStatusInfo(name="agentService")
 
 
 def _resolve_team_workdir(gt_team: Any, workspace_root: str | None) -> str:
@@ -33,6 +36,16 @@ def _resolve_team_workdir(gt_team: Any, workspace_root: str | None) -> str:
     assert workspace_root is not None, "workspace_root 未配置"
     return os.path.join(workspace_root, gt_team.name)
 
+async def _reset() -> None:
+    """纯资源清理：正常 shutdown 与启动失败回滚共用；幂等。"""
+    global _agents
+    close_tasks: List[Any] = [a.close() for a in _agents.values()]
+    if close_tasks:
+        await asyncio.gather(*close_tasks, return_exceptions=True)
+    _agents.clear()
+
+
+@serviceUtil.service_start_wrapper(s_status, on_error=_reset)
 async def startup() -> None:
     global _agents
     _agents = {}
@@ -454,9 +467,6 @@ async def overwrite_team_agent_employ_status(team_id: int, on_board_agent_ids: l
     return len(on_board_ids), len(off_board_ids)
 
 
+@serviceUtil.service_stop_wrapper(s_status)
 async def shutdown() -> None:
-    global _agents
-    close_tasks: List[Any] = [a.close() for a in _agents.values()]
-    if close_tasks:
-        await asyncio.gather(*close_tasks, return_exceptions=True)
-    _agents = {}
+    await _reset()

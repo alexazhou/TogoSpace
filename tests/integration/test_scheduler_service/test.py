@@ -512,6 +512,7 @@ class TestScheduleGate(ServiceTestCase):
 
     async def test_shutdown_resets_state(self):
         """shutdown 应将状态重置为 STOPPED。"""
+        await scheduler.startup()
         _force_schedule_running()
         scheduler.shutdown()
         assert scheduler.get_schedule_state() == ScheduleState.STOPPED

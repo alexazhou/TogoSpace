@@ -10,13 +10,17 @@ from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from model.dbModel.gtTeam import GtTeam
-from service import agentService, deptService, roleTemplateService, roomService
+from service import agentService, deptService, roleTemplateService, roomService, serviceUtil
+from model.coreModel.serviceStatus import ServiceStatusInfo
 from util import configUtil, i18nUtil
 from util.configUtil.configTypes import DeptNodePreset, TeamPreset, TeamRoomPreset
 
 logger = logging.getLogger(__name__)
 
+s_status = ServiceStatusInfo(name="presetService")
 
+
+@serviceUtil.service_start_wrapper(s_status)
 async def startup() -> None:
     return None
 
@@ -202,5 +206,6 @@ async def import_from_app_config() -> None:
     await _import_teams_from_app_config()
 
 
+@serviceUtil.service_stop_wrapper(s_status)
 async def shutdown() -> None:
     return None

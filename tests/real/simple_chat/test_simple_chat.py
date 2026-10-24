@@ -61,6 +61,9 @@ class TestRealSimpleChat(ServiceTestCase):
         """清理服务"""
         scheduler.shutdown()
         await agentService.shutdown()
+        # presetService 在 async_setup_class 中启动（:47），必须成对停机；
+        # 否则严格口径下同 worker 后续再 startup 会撞 SERVICE_ALREADY_STARTED。
+        await presetService.shutdown()
         funcToolService.shutdown()
         roomService.shutdown()
         await persistenceService.shutdown()

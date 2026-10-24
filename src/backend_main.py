@@ -185,6 +185,7 @@ async def main(config_dir: str = None, port: int | None = None):
         funcToolService.shutdown()
         skillService.shutdown()
         roomService.shutdown()
+        await presetService.shutdown()
         llmService.shutdown()
         await messageBus.shutdown()
         _remove_pid()

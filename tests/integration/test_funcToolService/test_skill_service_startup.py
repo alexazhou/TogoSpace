@@ -30,7 +30,12 @@ class TestSkillServiceStartup(ServiceTestCase):
     @classmethod
     async def async_teardown_class(cls):
         # startup() 写入模块级索引，清空避免污染同 worker 的后续测试
-        skillService._registry.clear()
+        skillService.shutdown()
+
+    def teardown_method(self):
+        # startup() 会重建模块级索引，且 Running 态二次 startup 会抛 SERVICE_ALREADY_STARTED，
+        # 因此每个用例结束后必须停机，保证下一个用例可以重新 startup。
+        skillService.shutdown()
 
     def test_startup_with_empty_dir(self):
         """skills 目录为空时索引也为空。"""

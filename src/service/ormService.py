@@ -15,9 +15,13 @@ from peewee_async.utils import ConnectionProtocol
 
 import appPaths
 from db import check_database_initialized, migrate_database, resolve_db_path
-from model.dbModel.base import bind_database
+from model.coreModel.serviceStatus import ServiceStatusInfo
+from model.dbModel.base import bind_database, unbind_database
+from service import serviceUtil
 
 logger = logging.getLogger(__name__)
+
+s_status = ServiceStatusInfo(name="ormService")
 
 # aiosqlite.Connection 继承 Thread 且默认 daemon=False，
 # 若连接因 asyncio 任务取消等原因未被正常 close()，其工作线程会阻塞进程退出。
@@ -92,10 +96,21 @@ def _needs_migration(db_path: str) -> bool:
     return not os.path.exists(db_path)
 
 
-async def startup(db_path: str) -> None:
+async def _reset() -> None:
+    """纯资源清理：正常 shutdown 与启动失败回滚共用；幂等，可安全重复调用。"""
     global _db, _db_path
     if _db is not None:
-        return
+        await _db.aio_close()
+    _db = None
+    _db_path = None
+    unbind_database()  # 解除 DatabaseProxy 绑定，防「悬空绑定」
+
+
+@serviceUtil.service_start_wrapper(s_status, on_error=_reset)
+async def startup(db_path: str) -> None:
+    global _db, _db_path
+    # 方案 A：删除原「if _db is not None: return」静默早退；二次启动已被注解统一拦截。
+    assert _db is None, "ormService.startup 时 _db 应为空（未 shutdown 的重复启动已被注解拦截）"
 
     _db_path = db_path
     abs_path = os.path.abspath(db_path)
@@ -138,12 +153,9 @@ async def startup(db_path: str) -> None:
     logger.info("ORM service started: db=%s", abs_path)
 
 
+@serviceUtil.service_stop_wrapper(s_status)
 async def shutdown() -> None:
-    global _db, _db_path
-    if _db is not None:
-        await _db.aio_close()
-    _db = None
-    _db_path = None
+    await _reset()
 
 
 def get_db() -> AioSqliteDatabase:

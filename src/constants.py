@@ -130,6 +130,16 @@ class AgentStatus(EnhanceEnum):
     CLOSED = auto()  # 实例被回收（重载或卸载）
 
 
+class ServiceStatus(EnhanceEnum):
+    """服务（进程级）生命周期状态，由 serviceUtil 注解统一维护。"""
+    Idle = auto()      # 未启动
+    Starting = auto()  # 启动中
+    Running = auto()   # 已启动
+    Stopping = auto()  # 停止中
+    Stopped = auto()   # 已停止（曾启动后停止）
+    Error = auto()     # 启动失败
+
+
 class EmployStatus(EnhanceEnum):
     ON_BOARD = auto()   # 在职，挂载在某部门
     OFF_BOARD = auto()  # 休闲，已从部门移除

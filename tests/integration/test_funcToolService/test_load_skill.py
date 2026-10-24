@@ -75,6 +75,7 @@ class TestLoadSkillTool(ServiceTestCase):
     async def async_teardown_class(cls):
         await agentService.shutdown()
         roomService.shutdown()
+        skillService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()
 

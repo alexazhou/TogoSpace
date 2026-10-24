@@ -8,8 +8,12 @@ from typing import Optional
 
 import yaml
 import appPaths
+from model.coreModel.serviceStatus import ServiceStatusInfo
+from service import serviceUtil
 
 logger = logging.getLogger(__name__)
+
+s_status = ServiceStatusInfo(name="skillService")
 
 _SKILL_MD = "SKILL.md"
 
@@ -46,6 +50,12 @@ def _scan_skills_in_dir(scan_dir: str, is_builtin: bool) -> None:
             _registry[skill_info.name] = skill_info
             logger.info("已加载 Skill: %s (%s) [builtin=%s]", skill_info.name, skill_info.description[:50], is_builtin)
 
+def _reset() -> None:
+    """纯资源清理：正常 shutdown 与启动失败回滚共用；幂等。"""
+    _registry.clear()
+
+
+@serviceUtil.service_start_wrapper(s_status, on_error=_reset)
 def startup() -> None:
     """扫描 assets/skills/ 目录以及 storage_root 的 skills 目录，构建全局 Skill 索引。"""
     global _registry
@@ -103,10 +113,10 @@ def load_skill_from_disk(skill_dir: str, is_builtin: bool = True) -> Optional[Sk
         files=files,
     )
 
+@serviceUtil.service_stop_wrapper(s_status)
 def shutdown() -> None:
     """清理 Skill 索引。"""
-    global _registry
-    _registry.clear()
+    _reset()
     logger.info("Skill 服务已关闭")
 
 

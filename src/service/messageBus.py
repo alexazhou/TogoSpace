@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
 
 from constants import MessageBusTopic
+from model.coreModel.serviceStatus import ServiceStatusInfo
+from service import serviceUtil
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,8 @@ class EventBusMessage:
 
 _subscribers: Dict[MessageBusTopic, List[Callable[[EventBusMessage], None]]] = {}
 _event_id_counter: int = 0
+
+s_status = ServiceStatusInfo(name="messageBus")
 
 
 def _next_event_id() -> int:
@@ -79,13 +83,22 @@ def _invoke_callback(callback: Callable[[EventBusMessage], None], msg: EventBusM
         logger.error(f"[messageBus] event_id={msg.event_id} topic={msg.topic} callback={callback_name} 异常: {e}")
 
 
+def _reset() -> None:
+    """纯资源清理：正常 shutdown 与启动失败回滚共用；幂等。"""
+    global _event_id_counter
+    _subscribers.clear()
+    _event_id_counter = 0
+
+
+@serviceUtil.service_start_wrapper(s_status, on_error=_reset)
 async def startup() -> None:
     """初始化消息总线，须在各模块 subscribe 前调用。"""
-    global _event_id_counter
+    global _subscribers, _event_id_counter
+    _subscribers = {}
     _event_id_counter = 0
-    _subscribers.clear()
 
 
+@serviceUtil.service_stop_wrapper(s_status)
 async def shutdown() -> None:
     """清空所有订阅，程序退出前调用。"""
-    _subscribers.clear()
+    _reset()
