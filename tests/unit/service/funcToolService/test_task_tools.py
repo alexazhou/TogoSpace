@@ -277,3 +277,34 @@ async def test_get_task_event_without_team_context_returns_failure():
 
     assert res["success"] is False
     assert "团队上下文" in res["message"]
+
+
+def test_get_task_detail_docstring_states_truncation_and_points_to_full_read():
+    """#65：docstring 须说明「>100 字符截断」并指向 get_task_event 取完整原文。
+
+    且该散文化说明放在 Args 段之外，不得破坏 schema 解析（参数照常暴露）。
+    """
+    doc = tools.get_task_detail.__doc__ or ""
+    assert "100 字符" in doc
+    assert "get_task_event" in doc
+    assert "截断" in doc
+    # 参数段照常解析（说明须在 Args 段之外的散文里）
+    meta = get_function_metadata("get_task_detail", tools.get_task_detail)
+    props = meta["parameters"]["properties"]
+    assert set(props) == {"task_id", "event_limit"}
+    assert props["event_limit"].get("description")
+    assert meta["parameters"]["required"] == ["task_id"]
+
+
+def test_list_task_events_docstring_states_truncation_and_points_to_full_read():
+    """#65：list_task_events docstring 同样补截断说明，schema 解析不受影响。"""
+    doc = tools.list_task_events.__doc__ or ""
+    assert "100 字符" in doc
+    assert "get_task_event" in doc
+
+    meta = get_function_metadata("list_task_events", tools.list_task_events)
+    props = meta["parameters"]["properties"]
+    assert set(props) == {"task_id", "limit", "before_id"}
+    assert props["limit"].get("description")
+    assert props["before_id"].get("description")
+    assert meta["parameters"]["required"] == ["task_id"]

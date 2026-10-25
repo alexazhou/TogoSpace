@@ -1138,7 +1138,8 @@ async def get_task_detail(
 
     事件时间线默认只返回最近 3 条；回执中的 `events_total` 是该任务事件总数，
     若大于 events 条数说明还有更早事件，可调大 event_limit 或用 list_task_events
-    按游标向前翻页。
+    按游标向前翻页。事件内容（含派生的 last_note / current_block_reason）超过
+    100 字符会截断，需要完整原文请用 get_task_event。
 
     Args:
         task_id: 任务 ID
@@ -1204,6 +1205,7 @@ async def list_task_events(
 
     返回 `events`（本页，按 id 降序）、`count`（本页条数）、`total`（该任务事件**总数**，跨页）。
     向前翻页：取上一页最后一条的 `id` 作为下一次的 `before_id`。
+    事件内容超过 100 字符会截断，需要完整原文请用 `get_task_event`（按事件 id 取单条）。
 
     Args:
         task_id: 任务 ID

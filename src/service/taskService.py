@@ -8,7 +8,13 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from constants import SpecialAgent, TaskPriority, TaskStatus
+from constants import (
+    EVENT_CONTENT_MAX_CHARS,
+    EVENT_TRUNCATED_SUFFIX,
+    SpecialAgent,
+    TaskPriority,
+    TaskStatus,
+)
 from dal.db import gtAgentManager, gtAgentTaskManager, gtAgentTaskEventManager
 from model.dbModel.gtAgentTask import GtAgentTask
 
@@ -43,35 +49,61 @@ def is_task_reviewer(task: GtAgentTask, caller_id: int) -> bool:
 EVENT_TIMELINE_LIMIT = 20
 
 
-def last_note(events: list) -> str:
+def _truncate_event_content(content):
+    """按共享口径截断**单条**事件内容（`EVENT_CONTENT_MAX_CHARS` + `EVENT_TRUNCATED_SUFFIX`）。
+
+    所有「面向 Agent 展示事件内容」的路径（`get_task` / `list_task_events`，
+    以及由事件派生的 `last_note` / `current_block_reason`）统一走这里；
+    唯一例外是 `get_task_event`（按事件 id 取单条，返回完整原文）。
+    非字符串 / 缺省内容原样返回，便于兼容 `model_to_dict` 缺 `content` 键的场景。
+    """
+    if not isinstance(content, str):
+        return content
+    if len(content) <= EVENT_CONTENT_MAX_CHARS:
+        return content
+    return content[:EVENT_CONTENT_MAX_CHARS] + EVENT_TRUNCATED_SUFFIX
+
+
+def last_note(events: list, *, truncate_content: bool = True) -> str:
     """「最近一次说明」= 最后一条 `to_status` 非空且 `content` 非空的流转/快照事件的 content。
 
     `events` 为按 id 降序（最新在前）的事件列表；评论事件（`to_status=NULL`）不计入。
     含 0016 历史快照。无则返回空串。
+    `truncate_content=True`（默认）时按共享口径截断，口径与事件列表一致。
     """
     for event in events:
         if event.to_status is not None and (event.content or '') != '':
-            return event.content
+            return _truncate_event_content(event.content) if truncate_content else event.content
     return ''
 
 
-def current_block_reason(task: GtAgentTask, events: list) -> Optional[str]:
+def current_block_reason(
+    task: GtAgentTask, events: list, *, truncate_content: bool = True
+) -> Optional[str]:
     """「当前搁置原因」（PIN-4）= 仅当任务状态 ∈ ON_HOLD 时，
     取最后一条 `to_status=ON_HOLD` 流转事件的 content；否则为 None。
+    `truncate_content=True`（默认）时按共享口径截断，口径与事件列表一致。
     """
     if task.status != TaskStatus.ON_HOLD:
         return None
     for event in events:
         if event.to_status == TaskStatus.ON_HOLD:
-            return event.content
+            return _truncate_event_content(event.content) if truncate_content else event.content
     return None
 
 
-def _serialize_event(event) -> dict:
-    """把事件对象转为 JSON 友好的 dict（状态枚举 → 字符串）。"""
+def _serialize_event(event, *, truncate_content: bool = True) -> dict:
+    """把事件对象转为 JSON 友好的 dict（状态枚举 → 字符串）。
+
+    `truncate_content=True`（默认）时按共享口径截断 `content`
+    （面向 Agent 展示的摘要口径）；`get_task_event` 是唯一例外，
+    显式传 `truncate_content=False` 以返回完整原文。
+    """
     from playhouse.shortcuts import model_to_dict
 
     data = model_to_dict(event, recurse=False)
+    if truncate_content and isinstance(data.get("content"), str):
+        data["content"] = _truncate_event_content(data["content"])
     from_status = getattr(event, "from_status", None)
     to_status = getattr(event, "to_status", None)
     data["from_status"] = from_status.value if isinstance(from_status, TaskStatus) else from_status
@@ -377,6 +409,8 @@ async def get_task(team_id: int, task_id: int, event_limit: int = EVENT_TIMELINE
     `event_limit` 控制事件时间线返回条数（默认 `EVENT_TIMELINE_LIMIT`）；
     回执中的 `events_total`（该任务事件**总数**，跨 `event_limit`）用于判断
     是否还有更早事件——有则可继续用 `list_task_events` 按游标翻页。
+    事件内容（含派生的 `last_note` / `current_block_reason`）超过
+    `EVENT_CONTENT_MAX_CHARS` 一律截断并加省略标记，需要完整原文请用 `get_task_event`。
     """
     from playhouse.shortcuts import model_to_dict
 
@@ -439,7 +473,7 @@ async def get_task_event(team_id: int, event_id: int) -> dict:
     if task.team_id != team_id:
         return {"success": False, "message": "事件不属于当前团队"}
 
-    event_dict = _serialize_event(event)
+    event_dict = _serialize_event(event, truncate_content=False)
     event_dict["actor_name"] = await _resolve_actor_name(event.actor_id)
     return {"success": True, "event": event_dict}
 
@@ -451,6 +485,9 @@ async def list_task_events(
     before_id: Optional[int] = None,
 ) -> dict:
     """读取任务事件流（按 id 游标分页，最新在前；不使用 offset）。
+
+    事件内容超过 `EVENT_CONTENT_MAX_CHARS` 会截断并加省略标记，
+    需要完整原文请用 `get_task_event`（按事件 id 取单条）。
 
     Returns:
         dict: success / events（本页，按 id 降序）/ count（本页条数）/

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import SpecialAgent, TaskPriority, TaskStatus
+from constants import EVENT_CONTENT_MAX_CHARS, EVENT_TRUNCATED_SUFFIX, SpecialAgent, TaskPriority, TaskStatus
 from model.dbModel.gtAgentTask import GtAgentTask
 from service import taskService
 
@@ -1133,3 +1133,129 @@ async def test_claim_task_skips_when_not_todo_or_not_assignee(task_manager_mock)
 
     task_manager_mock.update_task_status_with_event.assert_not_awaited()
 
+
+
+# ---------------------------------------------------------------------------
+# #65 返工：事件内容截断口径（面向 Agent 展示一律截断；get_task_event 例外）
+# ---------------------------------------------------------------------------
+
+# 远超 EVENT_CONTENT_MAX_CHARS(100) 的内容，用于截断断言。
+_LONG_CONTENT = "打回原因：" + "很长的说明" * 30
+
+# 截断后的期望值：前 N 字符 + 共享省略标记（全仓单一口径）。
+_EXPECTED_TRUNCATED = _LONG_CONTENT[:EVENT_CONTENT_MAX_CHARS] + EVENT_TRUNCATED_SUFFIX
+
+
+def _model_to_dict_with_content(obj, recurse=False):
+    """model_to_dict 替身：保留 `content` 键（真实 DAL 行含 content，便于断言截断）。
+
+    默认 autouse fixture 的替身不含 content 键，无法验证截断，故此处显式覆盖。
+    """
+    return {
+        "id": getattr(obj, "id", None),
+        "task_id": getattr(obj, "task_id", None),
+        "actor_id": getattr(obj, "actor_id", None),
+        "content": getattr(obj, "content", None),
+        "from_status": getattr(obj, "from_status", None),
+        "to_status": getattr(obj, "to_status", None),
+    }
+
+
+def test_serialize_event_truncates_by_default_and_flag_returns_full():
+    """`_serialize_event` 默认截断 content；`truncate_content=False` 返回完整原文。"""
+    event = _build_event(id=5, task_id=1, content=_LONG_CONTENT)
+
+    with patch("playhouse.shortcuts.model_to_dict", side_effect=_model_to_dict_with_content):
+        truncated = taskService._serialize_event(event)
+        full = taskService._serialize_event(event, truncate_content=False)
+
+    assert len(_LONG_CONTENT) > EVENT_CONTENT_MAX_CHARS
+    assert truncated["content"] == _EXPECTED_TRUNCATED
+    assert truncated["content"] != _LONG_CONTENT
+    assert full["content"] == _LONG_CONTENT
+
+
+@pytest.mark.asyncio
+async def test_get_task_truncates_long_event_content(task_manager_mock, event_manager_mock):
+    """面向 Agent 的 get_task（=get_task_detail 路径）单条事件内容超过 100 字符 ⇒ 截断。
+
+    旧实现（直接回传完整 content）在本用例下必红。
+    """
+    task = _build_task(id=1, team_id=1)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+    event_manager_mock.list_events = AsyncMock(return_value=[
+        SimpleNamespace(
+            id=5, task_id=1, actor_id=8,
+            from_status=TaskStatus.IN_PROGRESS, to_status=TaskStatus.IN_PROGRESS,
+            content=_LONG_CONTENT,
+        ),
+    ])
+
+    with patch("playhouse.shortcuts.model_to_dict", side_effect=_model_to_dict_with_content):
+        result = await taskService.get_task(team_id=1, task_id=1)
+
+    assert result["success"] is True
+    assert result["task"]["events"][0]["content"] == _EXPECTED_TRUNCATED
+
+
+@pytest.mark.asyncio
+async def test_get_task_truncates_last_note_and_current_block_reason(
+    task_manager_mock, event_manager_mock
+):
+    """派生字段 last_note / current_block_reason 同口径截断（它们也是事件 content）。"""
+    task = _build_task(id=1, team_id=1, status=TaskStatus.ON_HOLD)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+    event_manager_mock.list_events = AsyncMock(return_value=[
+        SimpleNamespace(
+            id=5, task_id=1, actor_id=8,
+            from_status=TaskStatus.IN_PROGRESS, to_status=TaskStatus.ON_HOLD,
+            content=_LONG_CONTENT,
+        ),
+    ])
+
+    with patch("playhouse.shortcuts.model_to_dict", side_effect=_model_to_dict_with_content):
+        result = await taskService.get_task(team_id=1, task_id=1)
+
+    assert result["task"]["last_note"] == _EXPECTED_TRUNCATED
+    assert result["task"]["current_block_reason"] == _EXPECTED_TRUNCATED
+
+
+@pytest.mark.asyncio
+async def test_list_task_events_truncates_long_event_content(
+    task_manager_mock, event_manager_mock
+):
+    """list_task_events 与 get_task 共用同一截断口径（不各写一套）。"""
+    task = _build_task(id=1, team_id=1)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+    event_manager_mock.list_events = AsyncMock(return_value=[
+        SimpleNamespace(
+            id=5, task_id=1, actor_id=8,
+            from_status=None, to_status=None,
+            content=_LONG_CONTENT,
+        ),
+    ])
+    event_manager_mock.count_events = AsyncMock(return_value=1)
+
+    with patch("playhouse.shortcuts.model_to_dict", side_effect=_model_to_dict_with_content):
+        result = await taskService.list_task_events(team_id=1, task_id=1)
+
+    assert result["events"][0]["content"] == _EXPECTED_TRUNCATED
+
+
+@pytest.mark.asyncio
+async def test_get_task_event_keeps_full_content_as_counterpart(
+    task_manager_mock, event_manager_mock
+):
+    """守卫 #66：同一条超长事件，get_task_event 必须返回**完整原文**（唯一不截断入口）。"""
+    event_manager_mock.get_event = AsyncMock(
+        return_value=_build_event(id=5, task_id=1, actor_id=7, content=_LONG_CONTENT)
+    )
+    task_manager_mock.get_task = AsyncMock(return_value=_build_task(id=1, team_id=1))
+
+    with patch("playhouse.shortcuts.model_to_dict", side_effect=_model_to_dict_with_content):
+        with patch("service.taskService.gtAgentManager") as mock_agents:
+            mock_agents.get_agent_by_id = AsyncMock(return_value=SimpleNamespace(display_name="阿张"))
+            result = await taskService.get_task_event(team_id=1, event_id=5)
+
+    assert result["event"]["content"] == _LONG_CONTENT
+    assert result["event"]["content"] != _EXPECTED_TRUNCATED

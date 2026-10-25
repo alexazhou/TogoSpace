@@ -14,7 +14,13 @@ import sys
 import pytest
 
 import service.ormService as ormService
-from constants import SpecialAgent, TaskPriority, TaskStatus
+from constants import (
+    EVENT_CONTENT_MAX_CHARS,
+    EVENT_TRUNCATED_SUFFIX,
+    SpecialAgent,
+    TaskPriority,
+    TaskStatus,
+)
 from dal.db import gtAgentTaskEventManager, gtAgentTaskManager
 from model.dbModel.gtAgentTask import GtAgentTask
 from service.funcToolService import core as funcCore
@@ -382,3 +388,52 @@ class TestTaskTools(ServiceTestCase):
 
         assert count == len(rows) == 2  # 同一过滤口径
         assert count_all == 3  # 不带过滤时含已完结
+
+    async def test_event_content_truncation_detail_vs_full_event(self):
+        """#65：同一条 >100 字事件，get_task_detail 截断、get_task_event 返回完整原文（互为对照）。
+
+        旧实现（get_task_detail 回传完整 content）在本用例下必红；
+        本用例同时守卫 #66（get_task_event 是唯一不截断的原文入口）。
+        """
+        task = await self._make_task()
+        long_note = "打回原因：" + "很长的说明" * 30
+        assert len(long_note) > EVENT_CONTENT_MAX_CHARS
+        await tools.update_task(task_id=task.id, note=long_note, _context=self._ctx())
+        latest = (await gtAgentTaskEventManager.list_events(task.id, limit=1))[0]
+
+        detail = await tools.get_task_detail(task_id=task.id, _context=self._ctx())
+        single = await tools.get_task_event(event_id=latest.id, _context=self._ctx())
+
+        expected = long_note[:EVENT_CONTENT_MAX_CHARS] + EVENT_TRUNCATED_SUFFIX
+        detail_content = detail["task"]["events"][0]["content"]
+        assert detail_content == expected
+        assert detail_content != long_note
+        # 同一条事件的完整原文必须由 get_task_event 取回
+        assert single["event"]["id"] == latest.id
+        assert single["event"]["content"] == long_note
+
+    async def test_list_task_events_truncates_long_content(self):
+        """#65：list_task_events 与 get_task_detail 共用同一截断口径。"""
+        task = await self._make_task()
+        long_note = "很长的说明" * 30
+        await tools.update_task(task_id=task.id, note=long_note, _context=self._ctx())
+
+        res = await tools.list_task_events(task_id=task.id, _context=self._ctx())
+
+        expected = long_note[:EVENT_CONTENT_MAX_CHARS] + EVENT_TRUNCATED_SUFFIX
+        assert res["events"][0]["content"] == expected
+
+    async def test_get_task_detail_truncates_last_note_and_block_reason(self):
+        """#65：派生字段 last_note / current_block_reason 同样按 100 字符截断。"""
+        task = await self._make_task()
+        long_note = "等待外部依赖：" + "很长的说明" * 30
+        res_t = await tools.update_task(
+            task_id=task.id, new_status="ON_HOLD", note=long_note, _context=self._ctx()
+        )
+        assert res_t["success"] is True
+
+        res = await tools.get_task_detail(task_id=task.id, _context=self._ctx())
+
+        expected = long_note[:EVENT_CONTENT_MAX_CHARS] + EVENT_TRUNCATED_SUFFIX
+        assert res["task"]["last_note"] == expected
+        assert res["task"]["current_block_reason"] == expected
