@@ -311,6 +311,20 @@
 - **接入范围**：12 个进程级服务统一接入注解；`ormService` 删除静默早退守卫并补 `unbind_database()` 消除悬空绑定；`schedulerService` 幂等订阅
 - **可观测**：每服务挂 `s_status` 状态对象，并新增架构守卫测试（AST 结构 + 6 态契约矩阵）
 
+### V27: Agent 任务系统 v2（进行中）
+
+把任务系统收敛为「**状态机 + 评论流**」的纯工单模型，修复 V22 遗留的三类结构性问题：
+
+- **权限统一**：任务权限的判定只保留一处（在 `taskService` 中定义），去掉原来「没填验收人就把创建者当验收人」的隐式兜底；没填验收人的任务不再卡死；堵死「跳过验收直接完成（`TODO → DONE`）」的旁路
+- **工单模型（状态机 + 评论流）**：新增一张只追加、不修改的统一事件表 `agent_task_events`（迁移 0014），评论和状态流转写进同一张表，时间线自然合在一起；任务表删掉 `result`、`block_reason` 两列，只保留状态和元数据
+- **统一 `update_task` 与工具更名**：传了 `new_status` 就是流转，省略 `new_status` 或传当前状态就是评论（评论权限对所有团队成员开放，终态也可评论）；去掉 `result`、`block_reason` 入参；不新增 `append_task_note`；`get_task` 更名为 `get_task_detail`
+- **依赖满足自动推进**：前置任务完成后，`PENDING` 自动变为 `TODO`（新增一条流转边）；只改状态，不唤醒任何人
+- **查询与可开工任务排序**：`list_tasks` 的参数为 `assignee`、`reviewer`、`status`、`open_only`（默认 `True`）。其中 `assignee` 和 `reviewer` 至少要传一个，两个都不传会报错；传 `open_only=False` 才会返回已完成 / 已取消的任务；`limit` 不对外暴露（走内部默认）。这条限制只加在工具层（`tools.py`）里，服务层 `taskService.list_tasks` 仍保持参数可选。可开工任务按 `priority` 排序。
+- **定向唤醒 / 唤醒通知（本次非目标）**：`TASK_ASSIGNED` 定向唤醒本轮不做，也不改动任何唤醒 / 通知逻辑；现有唤醒链路（调度表 + consumer 轮询）保持原样，留到后续里程碑再议
+- **任务域命名统一**：任务相关字段 `manager_id` 改名为 `reviewer_id`（迁移 0015，`RENAME COLUMN`），变量 `is_manager` 改名为 `is_reviewer`；注意部门域的 `manager_id`（`GtDept`、部门与团队树、`deptService`）不在本次范围内，保持不动
+
+> 状态：进行中（只出设计文档，暂不改代码）。所有待定项 D1~D5 均已定稿：D1=(a)、D2=(b)、D3=(a)、D5=(a)（保留 `IN_PROGRESS`，由系统在「认领时刻」自动置位）、D4 暂缓（唤醒 / 通知为非目标）。`result` 已确认删列；终态规则已确认；工具面已合并（评论并入 `update_task`，参数名为 `new_status`；`get_task` 更名为 `get_task_detail`）；任务域命名统一为 `reviewer`（部门域不动）；`list_tasks` 参数已收敛（`assignee` / `reviewer` 至少传一个，`open_only` 默认 `True`）。
+
 ---
 
 ## 技术栈
@@ -456,6 +470,11 @@
 - [产品文档](./2026-10-25-service-lifecycle-annotation/step1_product.md)
 - [技术文档](./2026-10-25-service-lifecycle-annotation/step2_technical.md)
 - [开发任务表](./2026-10-25-service-lifecycle-annotation/step3_tasks.md)
+
+### V27
+- [产品文档](./2026-10-25-agent-task-system-v2/step1_product.md)
+- [技术文档](./2026-10-25-agent-task-system-v2/step2_technical.md)
+- [开发任务表](./2026-10-25-agent-task-system-v2/step3_tasks.md)
 
 ---
 
