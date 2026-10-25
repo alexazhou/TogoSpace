@@ -15,14 +15,12 @@ class GtAgentTask(DbModelBase):
     description:  str            = peewee.TextField(default='')
     assignee_id:  int            = peewee.IntegerField()
     creator_id:   int            = peewee.IntegerField()
-    manager_id:   int | None     = peewee.IntegerField(null=True)
+    reviewer_id:  int | None     = peewee.IntegerField(null=True)
     status:       TaskStatus     = EnumField(TaskStatus, default=TaskStatus.TODO)
     priority:     TaskPriority   = EnumField(TaskPriority, default=TaskPriority.NORMAL)
     parent_id:    int | None     = peewee.IntegerField(null=True)
     depends_on:   list[int]      = JsonField(default=list)   # 依赖的 task_id 列表
     room_id:      int | None     = peewee.IntegerField(null=True)
-    result:       str            = peewee.TextField(default='')
-    block_reason: str            = peewee.TextField(default='')
 
     class Meta:
         table_name = "agent_tasks"

@@ -975,11 +975,13 @@ async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: 
     task_type = _context.schedule_task.task_type if _context.schedule_task is not None else AgentTaskType.ROOM_MESSAGE
 
     if task_type == AgentTaskType.TODO_TASK:
+        import service.taskService as taskService
+
         agent_task_id = _context.schedule_task.task_data.get("agent_task_id")
         agent_task = await gtAgentTaskManager.get_task(agent_task_id) if agent_task_id else None
         if agent_task is not None:
             is_assignee = agent_task.assignee_id == _context.agent_id
-            is_manager  = agent_task.manager_id == _context.agent_id
+            is_reviewer = taskService.is_task_reviewer(agent_task, _context.agent_id)
 
             if is_assignee and agent_task.status in (TaskStatus.TODO, TaskStatus.IN_PROGRESS):
                 logger.warning(f"finish_action 被拒绝，协作任务仍为 {agent_task.status.value}: agent_id={_context.agent_id}, agent_task_id={agent_task_id}")
@@ -994,7 +996,7 @@ finish 失败，你负责执行的任务【{agent_task.title}】状态仍为 {ag
 - 若需取消，请调用 `update_task` 将状态改为 CANCELLED。
 完成后再调用 finish_action。""",
                 }
-            elif is_manager and agent_task.status == TaskStatus.REVIEWING:
+            elif is_reviewer and agent_task.status == TaskStatus.REVIEWING:
                 logger.warning(f"finish_action 被拒绝，协作任务待验收: agent_id={_context.agent_id}, agent_task_id={agent_task_id}")
                 return {
                     "success": False,
@@ -1050,7 +1052,7 @@ async def create_task(
     title: str,
     assignee_id: int,
     description: str = '',
-    manager_id: Optional[int] = None,
+    reviewer_id: Optional[int] = None,
     priority: str = 'NORMAL',
     parent_id: Optional[int] = None,
     depends_on: Optional[list[int]] = None,
@@ -1063,7 +1065,7 @@ async def create_task(
         title: 任务标题
         assignee_id: 执行人 Agent ID
         description: 任务描述，含上下文、约束和交付标准
-        manager_id: 完成时若需要他人验收，则设置验收人 Agent ID，不填则无需验收流程；不能与 assignee_id 相同（同一人无需设置验收）
+        reviewer_id: 完成时若需要他人验收，则设置验收人 Agent ID，不填则无需验收流程；不能与 assignee_id 相同（同一人无需设置验收）
         priority: 优先级，HIGH / NORMAL / LOW，默认 NORMAL
         parent_id: 父任务 ID，用于子任务拆解
         depends_on: 依赖的任务 ID 列表，全部完成后才允许开始
@@ -1081,7 +1083,7 @@ async def create_task(
         title=title,
         assignee_id=assignee_id,
         description=description,
-        manager_id=manager_id,
+        reviewer_id=reviewer_id,
         priority=priority,
         parent_id=parent_id,
         depends_on=[int(x) for x in (depends_on or [])],
@@ -1091,18 +1093,16 @@ async def create_task(
 
 async def update_task(
     task_id: int,
-    status: str,
-    result: str = '',
-    block_reason: str = '',
+    new_status: Optional[str] = None,
+    note: str = '',
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """更新协作任务状态或附加信息。
+    """更新协作任务：流转状态，或追加评论。
 
     Args:
         task_id: 任务 ID
-        status: 新状态（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）
-        result: 完成/提交摘要，在 status=REVIEWING 或 DONE 时填写
-        block_reason: 搁置原因，在 status=ON_HOLD 时填写
+        new_status: 新状态（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）。省略（或等于当前状态）表示追加评论。
+        note: 本次流转的说明；追加评论时必填（评论正文）
     """
     import service.taskService as taskService
 
@@ -1114,14 +1114,13 @@ async def update_task(
         team_id=team_id,
         caller_id=_context.agent_id,  # type: ignore[union-attr]
         task_id=task_id,
-        status=status,
-        result=result,
-        block_reason=block_reason,
+        new_status=new_status,
+        note=note,
     )
 
 
-async def get_task(task_id: int, _context: Optional[ToolCallContext] = None) -> dict:
-    """查询单个协作任务详情，包含依赖任务状态摘要。
+async def get_task_detail(task_id: int, _context: Optional[ToolCallContext] = None) -> dict:
+    """查询单个协作任务详情，包含依赖任务状态摘要与事件时间线摘要。
 
     Args:
         task_id: 任务 ID
@@ -1135,9 +1134,53 @@ async def get_task(task_id: int, _context: Optional[ToolCallContext] = None) -> 
     return await taskService.get_task(team_id=team_id, task_id=task_id)
 
 
+async def get_task(task_id: int, _context: Optional[ToolCallContext] = None) -> dict:
+    """【已废弃】查询单个协作任务详情；请改用 `get_task_detail`。
+
+    保留仅为平滑迁移：行为与 `get_task_detail` 一致，并在回执中附带废弃提示。
+
+    Args:
+        task_id: 任务 ID
+    """
+    result = await get_task_detail(task_id=task_id, _context=_context)
+    if isinstance(result, dict):
+        result = {**result, "deprecated": "`get_task` 已更名，请改用 `get_task_detail`"}
+    return result
+
+
+async def list_task_events(
+    task_id: int,
+    limit: int = 50,
+    before_id: Optional[int] = None,
+    _context: Optional[ToolCallContext] = None,
+) -> dict:
+    """读取任务事件时间线（按 id 游标分页，最新在前）。
+
+    返回 `events`（本页，按 id 降序）、`count`（本页条数）、`total`（该任务事件**总数**，跨页）。
+    向前翻页：取上一页最后一条的 `id` 作为下一次的 `before_id`。
+
+    Args:
+        task_id: 任务 ID
+        limit: 最多返回条数，默认 50
+        before_id: 游标：只返回 id 小于该值的更早事件（向前翻页），省略则取最新一页
+    """
+    import service.taskService as taskService
+
+    ok, team_id = _require_team_context(_context)
+    if not ok:
+        return {"success": False, "message": "无法获取团队上下文"}
+
+    return await taskService.list_task_events(
+        team_id=team_id,
+        task_id=task_id,
+        limit=limit,
+        before_id=before_id,
+    )
+
+
 async def list_tasks(
-    assignee_id: Optional[int] = None,
-    manager_id: Optional[int] = None,
+    assignee: Optional[int] = None,
+    reviewer: Optional[int] = None,
     status: Optional[str] = None,
     limit: int = 20,
     _context: Optional[ToolCallContext] = None,
@@ -1145,8 +1188,8 @@ async def list_tasks(
     """查询协作任务列表。
 
     Args:
-        assignee_id: 按执行人 Agent ID 过滤
-        manager_id: 按验收人 Agent ID 过滤
+        assignee: 按执行人 Agent ID 过滤
+        reviewer: 按验收人 Agent ID 过滤
         status: 按状态过滤（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）
         limit: 最多返回条数，默认 20
     """
@@ -1158,8 +1201,8 @@ async def list_tasks(
 
     return await taskService.list_tasks(
         team_id=team_id,
-        assignee_id=assignee_id,
-        manager_id=manager_id,
+        assignee_id=assignee,
+        reviewer_id=reviewer,
         status=status,
         limit=limit,
     )

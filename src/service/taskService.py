@@ -7,10 +7,9 @@ from __future__ import annotations
 
 import logging
 from typing import Optional
-from typing import Any
 
 from constants import TaskPriority, TaskStatus
-from dal.db import gtAgentTaskManager
+from dal.db import gtAgentTaskManager, gtAgentTaskEventManager
 from model.dbModel.gtAgentTask import GtAgentTask
 
 logger = logging.getLogger(__name__)
@@ -22,13 +21,62 @@ logger = logging.getLogger(__name__)
 
 _VALID_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
     TaskStatus.TODO:        {TaskStatus.IN_PROGRESS, TaskStatus.PENDING, TaskStatus.ON_HOLD, TaskStatus.DONE, TaskStatus.CANCELLED},
-    TaskStatus.PENDING:     {TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED},
+    TaskStatus.PENDING:     {TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.ON_HOLD, TaskStatus.CANCELLED},
     TaskStatus.IN_PROGRESS: {TaskStatus.REVIEWING, TaskStatus.DONE, TaskStatus.ON_HOLD, TaskStatus.CANCELLED},
-    TaskStatus.REVIEWING:   {TaskStatus.DONE, TaskStatus.IN_PROGRESS},
+    TaskStatus.REVIEWING:   {TaskStatus.DONE, TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED},
     TaskStatus.ON_HOLD:     {TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED},
     TaskStatus.DONE:        set(),
     TaskStatus.CANCELLED:   set(),
 }
+
+
+def is_task_reviewer(task: GtAgentTask, caller_id: int) -> bool:
+    """单一口径判定：caller 是否为该任务的验收人。
+
+    定义 = `reviewer_id` 非空 且 `caller == reviewer_id`。
+    **不再有「creator 隐式接管验收人」的兜底**。
+    """
+    return task.reviewer_id is not None and caller_id == task.reviewer_id
+
+
+# 事件时间线摘要默认条数
+EVENT_TIMELINE_LIMIT = 20
+
+
+def last_note(events: list) -> str:
+    """「最近一次说明」= 最后一条 `to_status` 非空且 `content` 非空的流转/快照事件的 content。
+
+    `events` 为按 id 降序（最新在前）的事件列表；评论事件（`to_status=NULL`）不计入。
+    含 0016 历史快照。无则返回空串。
+    """
+    for event in events:
+        if event.to_status is not None and (event.content or '') != '':
+            return event.content
+    return ''
+
+
+def current_block_reason(task: GtAgentTask, events: list) -> Optional[str]:
+    """「当前搁置原因」（PIN-4）= 仅当任务状态 ∈ ON_HOLD 时，
+    取最后一条 `to_status=ON_HOLD` 流转事件的 content；否则为 None。
+    """
+    if task.status != TaskStatus.ON_HOLD:
+        return None
+    for event in events:
+        if event.to_status == TaskStatus.ON_HOLD:
+            return event.content
+    return None
+
+
+def _serialize_event(event) -> dict:
+    """把事件对象转为 JSON 友好的 dict（状态枚举 → 字符串）。"""
+    from playhouse.shortcuts import model_to_dict
+
+    data = model_to_dict(event, recurse=False)
+    from_status = getattr(event, "from_status", None)
+    to_status = getattr(event, "to_status", None)
+    data["from_status"] = from_status.value if isinstance(from_status, TaskStatus) else from_status
+    data["to_status"] = to_status.value if isinstance(to_status, TaskStatus) else to_status
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +89,7 @@ async def create_task(
     title: str,
     assignee_id: int,
     description: str = '',
-    manager_id: Optional[int] = None,
+    reviewer_id: Optional[int] = None,
     priority: str = 'NORMAL',
     parent_id: Optional[int] = None,
     depends_on: Optional[list[int]] = None,
@@ -56,9 +104,9 @@ async def create_task(
     if priority_enum is None:
         return {"success": False, "message": f"无效的优先级：{priority}，有效值为 HIGH / NORMAL / LOW"}
 
-    # assignee 与 manager 不能是同一人
-    if manager_id is not None and assignee_id == manager_id:
-        return {"success": False, "message": "manager 与 assignee 是同一人时，无需设置 manager，请去掉 manager_id 参数", "error_code": "invalid_manager"}
+    # 执行人与验收人不能是同一人
+    if reviewer_id is not None and assignee_id == reviewer_id:
+        return {"success": False, "message": "验收人与执行人是同一人时无需设置验收人，请去掉 reviewer_id 参数", "error_code": "invalid_reviewer"}
 
     # 验证 assignee 权限
     if assignee_id != creator_id:
@@ -92,14 +140,12 @@ async def create_task(
         description=description,
         assignee_id=assignee_id,
         creator_id=creator_id,
-        manager_id=manager_id,
+        reviewer_id=reviewer_id,
         status=initial_status,
         priority=priority_enum,
         parent_id=parent_id,
         depends_on=dep_ids,
         room_id=room_id,
-        result='',
-        block_reason='',
     )
     saved = await gtAgentTaskManager.create_task(task)
     logger.info(f"任务创建：task_id={saved.id}, title={title!r}, assignee={assignee_id}, status={initial_status.value}")
@@ -116,18 +162,25 @@ async def update_task(
     team_id: int,
     caller_id: int,
     task_id: int,
-    status: str,
-    result: str = '',
-    block_reason: str = '',
+    new_status: Optional[str] = None,
+    note: str = '',
 ) -> dict:
-    """更新协作任务状态。
+    """更新协作任务：流转状态（`new_status`）或追加评论（省略 `new_status`）。
+
+    - `new_status` 省略、或等于当前状态 ⇒ **评论事件**（`from_status`/`to_status` 均 NULL，PIN-1）；
+    - `new_status` 给定且 ≠ 当前状态 ⇒ 权限校验 + **流转事件**（`from≠to`、`content=note`）；
+    - **评论权限 = 团队内成员皆可**（不限 assignee / reviewer / creator）；
+    - **终态（`DONE`/`CANCELLED`）不可流转；仅允许追加评论**。
 
     Returns:
-        dict with keys: success, task (on success) or message (on failure)
+        dict: success / action（`transitioned` | `commented`）/ task；失败时 message（+ error_code）。
     """
-    new_status = TaskStatus.value_of(status.upper())
-    if new_status is None:
-        return {"success": False, "message": f"无效的状态：{status}"}
+    # 先校验状态字符串（非法状态不应触达 DB）
+    target: Optional[TaskStatus] = None
+    if new_status is not None:
+        target = TaskStatus.value_of(str(new_status).upper())
+        if target is None:
+            return {"success": False, "message": f"无效的状态：{new_status}"}
 
     task = await gtAgentTaskManager.get_task(task_id)
     if task is None:
@@ -136,37 +189,85 @@ async def update_task(
         return {"success": False, "message": "任务不属于当前团队"}
 
     old_status = task.status
+
+    # ---- 评论分支：省略 new_status，或 new_status == 当前状态（自环归评论，不建自环边）----
+    if target is None or target == old_status:
+        if not (note or '').strip():
+            return {
+                "success": False,
+                "message": "追加评论时必须填写 note（评论内容不能为空）",
+                "error_code": "empty_note",
+            }
+        event = await gtAgentTaskEventManager.append_event(
+            task_id,
+            caller_id,
+            from_status=None,
+            to_status=None,
+            content=note,
+        )
+        logger.info(f"任务评论：task_id={task_id}, caller={caller_id}")
+
+        from playhouse.shortcuts import model_to_dict
+        return {
+            "success": True,
+            "action": "commented",
+            "task": model_to_dict(task, recurse=False),
+            "comment": _serialize_event(event),
+            "message": "已追加评论（任务状态未变更）",
+        }
+
+    # ---- 流转分支：target 非空且 ≠ 当前状态 ----
+    # 终态（DONE/CANCELLED）不可流转（评论分支已在上方处理）
+    if old_status in (TaskStatus.DONE, TaskStatus.CANCELLED):
+        return {
+            "success": False,
+            "message": f"任务已处于终态（{old_status.value}），不可再变更状态（仅可追加评论）",
+            "error_code": "invalid_transition",
+        }
+
     is_assignee = (caller_id == task.assignee_id)
-    is_manager  = (task.manager_id is not None and caller_id == task.manager_id) or (task.manager_id is None and caller_id == task.creator_id)
+    is_reviewer = is_task_reviewer(task, caller_id)
     is_creator  = (caller_id == task.creator_id)
 
-    # 权限校验
-    if new_status == TaskStatus.REVIEWING:
+    # 权限校验（按顺序命中、先匹配先裁定）
+    if target == TaskStatus.REVIEWING:
         if not is_assignee:
             return {"success": False, "message": "只有执行人（assignee）才能提交验收", "error_code": "permission_denied"}
-    elif new_status == TaskStatus.DONE and old_status == TaskStatus.REVIEWING:
-        if not is_manager:
-            return {"success": False, "message": "只有验收人（manager）才能通过验收", "error_code": "permission_denied"}
-    elif new_status == TaskStatus.IN_PROGRESS and old_status == TaskStatus.REVIEWING:
-        if not is_manager:
-            return {"success": False, "message": "只有验收人（manager）才能打回任务", "error_code": "permission_denied"}
-    elif new_status == TaskStatus.CANCELLED:
-        if not is_manager and not is_creator:
+    elif target == TaskStatus.DONE and old_status == TaskStatus.REVIEWING:
+        if not is_reviewer:
+            return {"success": False, "message": "只有验收人（reviewer）才能通过验收", "error_code": "permission_denied"}
+    elif target == TaskStatus.IN_PROGRESS and old_status == TaskStatus.REVIEWING:
+        if not is_reviewer:
+            return {"success": False, "message": "只有验收人（reviewer）才能打回任务", "error_code": "permission_denied"}
+    elif target == TaskStatus.CANCELLED:
+        if not is_reviewer and not is_creator:
             return {"success": False, "message": "只有验收人或创建人才能取消任务", "error_code": "permission_denied"}
     else:
         if not is_assignee:
             return {"success": False, "message": "只有执行人（assignee）才能更新任务状态", "error_code": "permission_denied"}
 
-    # 状态流转合法性
-    if new_status not in _VALID_TRANSITIONS.get(old_status, set()):
+    # 状态流转合法性（终态 DONE/CANCELLED 出边为空 ⇒ 任何流转在此被拒）
+    if target not in _VALID_TRANSITIONS.get(old_status, set()):
         return {
             "success": False,
-            "message": f"不允许的状态流转：{old_status.value} → {new_status.value}",
+            "message": f"不允许的状态流转：{old_status.value} → {target.value}",
             "error_code": "invalid_transition",
         }
 
+    # 收紧：IN_PROGRESS → REVIEWING 仅在设有验收人时允许
+    if (
+        target == TaskStatus.REVIEWING
+        and old_status == TaskStatus.IN_PROGRESS
+        and task.reviewer_id is None
+    ):
+        return {
+            "success": False,
+            "message": "该任务未设验收人，无需提交验收，请直接完成（status=DONE）",
+            "error_code": "no_reviewer",
+        }
+
     # 依赖检查
-    if old_status == TaskStatus.PENDING and new_status == TaskStatus.IN_PROGRESS:
+    if old_status == TaskStatus.PENDING and target == TaskStatus.IN_PROGRESS:
         if task.depends_on:
             dep_tasks = await gtAgentTaskManager.get_tasks_by_ids(task.depends_on)
             unfinished = [t.id for t in dep_tasks if t.status != TaskStatus.DONE]
@@ -177,26 +278,28 @@ async def update_task(
                     "error_code": "dependency_not_met",
                 }
 
-    # 有 manager 时，IN_PROGRESS 不能直接 → DONE
-    if new_status == TaskStatus.DONE and old_status == TaskStatus.IN_PROGRESS and task.manager_id is not None:
+    # 设有验收人时，禁止绕过验收直接 → DONE（仅允许 REVIEWING → DONE）
+    if (
+        target == TaskStatus.DONE
+        and old_status != TaskStatus.REVIEWING
+        and task.reviewer_id is not None
+    ):
         return {
             "success": False,
             "message": "该任务设有验收人，请先提交验收（status=REVIEWING），由验收人审核后完成",
             "error_code": "review_required",
         }
 
-    # 执行更新
-    fields: list[Any] = [GtAgentTask.status]
-    task.status = new_status
-    if result:
-        task.result = result
-        fields.append(GtAgentTask.result)
-    if block_reason:
-        task.block_reason = block_reason
-        fields.append(GtAgentTask.block_reason)
-
-    updated = await gtAgentTaskManager.update_task(task, fields)
-    logger.info(f"任务状态变更：task_id={task_id}, {old_status.value} → {new_status.value}, caller={caller_id}")
+    # 执行更新：同一事务内更新主表状态 + 追加一条流转事件（content=note）
+    task.status = target  # 同步内存态，保证返回体与落库一致
+    updated = await gtAgentTaskManager.update_task_status_with_event(
+        task,
+        actor_id=caller_id,
+        from_status=old_status,
+        to_status=target,
+        content=note,
+    )
+    logger.info(f"任务状态变更：task_id={task_id}, {old_status.value} → {target.value}, caller={caller_id}")
 
     # 广播任务状态变更事件
     from service import messageBus as _mb
@@ -204,7 +307,12 @@ async def update_task(
     _mb.publish(_MBT.TASK_CHANGED, task=updated, old_status=old_status.value)
 
     from playhouse.shortcuts import model_to_dict
-    return {"success": True, "task": model_to_dict(updated, recurse=False), "message": f"任务状态已更新：{old_status.value} → {new_status.value}"}
+    return {
+        "success": True,
+        "action": "transitioned",
+        "task": model_to_dict(updated, recurse=False),
+        "message": f"任务状态已更新：{old_status.value} → {target.value}",
+    }
 
 
 async def get_task(team_id: int, task_id: int) -> dict:
@@ -231,13 +339,47 @@ async def get_task(team_id: int, task_id: int) -> dict:
                 depends_on_details.append({"task_id": dep_id, "title": "(已删除)", "status": "UNKNOWN"})
     task_dict["depends_on_details"] = depends_on_details
 
+    # 挂载事件时间线摘要（按 id 降序）与两个派生属性。
+    events = await gtAgentTaskEventManager.list_events(task_id, limit=EVENT_TIMELINE_LIMIT)
+    task_dict["events"] = [_serialize_event(e) for e in events]
+    task_dict["last_note"] = last_note(events)
+    task_dict["current_block_reason"] = current_block_reason(task, events)
+
     return {"success": True, "task": task_dict}
+
+
+async def list_task_events(
+    team_id: int,
+    task_id: int,
+    limit: int = 50,
+    before_id: Optional[int] = None,
+) -> dict:
+    """读取任务事件流（按 id 游标分页，最新在前；不使用 offset）。
+
+    Returns:
+        dict: success / events（本页，按 id 降序）/ count（本页条数）/
+              total（该任务事件**总数**，跨页）/ ；失败时 message。
+    """
+    task = await gtAgentTaskManager.get_task(task_id)
+    if task is None:
+        return {"success": False, "message": f"任务不存在：task_id={task_id}"}
+    if task.team_id != team_id:
+        return {"success": False, "message": "任务不属于当前团队"}
+
+    events = await gtAgentTaskEventManager.list_events(task_id, limit=limit, before_id=before_id)
+    total = await gtAgentTaskEventManager.count_events(task_id)
+    return {
+        "success": True,
+        "events": [_serialize_event(e) for e in events],
+        "count": len(events),
+        "total": total,
+    }
 
 
 async def list_tasks(
     team_id: int,
     assignee_id: Optional[int] = None,
-    manager_id: Optional[int] = None,
+    reviewer_id: Optional[int] = None,
     status: Optional[str] = None,
     open_only: bool = False,
     limit: int = 20,
@@ -257,7 +399,7 @@ async def list_tasks(
     tasks = await gtAgentTaskManager.list_tasks(
         team_id=team_id,
         assignee_id=assignee_id,
-        manager_id=manager_id,
+        reviewer_id=reviewer_id,
         status=status_enum,
         exclude_statuses=exclude_statuses,
         limit=limit,

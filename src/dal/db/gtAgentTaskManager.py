@@ -7,8 +7,52 @@ from model.dbModel.gtAgentTask import GtAgentTask
 
 
 async def create_task(task: GtAgentTask) -> GtAgentTask:
-    """保存新任务，返回含主键的实例。"""
-    await task.aio_save(force_insert=True)
+    """保存新任务，返回含主键的实例。
+
+    与「创建事件」（from=NULL、to=初始状态、actor=creator）在**同一事务**内写入，
+    保证同生共死（E1）。
+    """
+    from dal.db import gtAgentTaskEventManager
+
+    database = GtAgentTask._meta.database
+    async with database.aio_atomic():
+        await task.aio_save(force_insert=True)
+        await gtAgentTaskEventManager.append_event(
+            task.id,
+            task.creator_id,
+            from_status=None,
+            to_status=task.status,
+            content='',
+        )
+    return task
+
+
+async def update_task_status_with_event(
+    task: GtAgentTask,
+    *,
+    actor_id: int,
+    from_status: TaskStatus,
+    to_status: TaskStatus,
+    content: str = '',
+) -> GtAgentTask:
+    """在**同一事务**内更新主表状态 + 追加一条流转事件（from≠to、actor=caller）。
+
+    任一写入失败即整体回滚，保证「每次成功流转必且仅有一条流转事件」（E1）。
+    """
+    from dal.db import gtAgentTaskEventManager
+
+    database = GtAgentTask._meta.database
+    async with database.aio_atomic():
+        task.status = to_status
+        task.updated_at = datetime.datetime.now()
+        await task.aio_save(only=[GtAgentTask.status, GtAgentTask.updated_at])
+        await gtAgentTaskEventManager.append_event(
+            task.id,
+            actor_id,
+            from_status=from_status,
+            to_status=to_status,
+            content=content,
+        )
     return task
 
 
@@ -20,7 +64,7 @@ async def get_task(task_id: int) -> GtAgentTask | None:
 async def list_tasks(
     team_id: int,
     assignee_id: int | None = None,
-    manager_id: int | None = None,
+    reviewer_id: int | None = None,
     status: TaskStatus | None = None,
     exclude_statuses: list[TaskStatus] | None = None,
     limit: int = 20,
@@ -29,8 +73,8 @@ async def list_tasks(
     query = GtAgentTask.select().where(GtAgentTask.team_id == team_id)
     if assignee_id is not None:
         query = query.where(GtAgentTask.assignee_id == assignee_id)
-    if manager_id is not None:
-        query = query.where(GtAgentTask.manager_id == manager_id)
+    if reviewer_id is not None:
+        query = query.where(GtAgentTask.reviewer_id == reviewer_id)
     if status is not None:
         query = query.where(GtAgentTask.status == status)
     if exclude_statuses:
@@ -66,7 +110,7 @@ async def get_first_active_task(agent_id: int) -> GtAgentTask | None:
                 (GtAgentTask.status.in_([TaskStatus.TODO, TaskStatus.IN_PROGRESS]))  # type: ignore[attr-defined]
             ) |
             (
-                (GtAgentTask.manager_id == agent_id) &
+                (GtAgentTask.reviewer_id == agent_id) &
                 (GtAgentTask.status == TaskStatus.REVIEWING)
             ),
         )

@@ -139,7 +139,7 @@ class TestAutoSchedule(_CollabTaskCase):
         # 响应顺序：1) ROOM_MESSAGE turn 结束（无发言）; 2-3) 自动触发的 TODO_TASK turn 完成任务
         with self.patch_infer(responses=[
             {"tool_calls": [{"name": "finish_action", "arguments": {"confirm_no_need_talk": True}}]},
-            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "status": "DONE", "result": "已完成"}}]},
+            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "已完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
             await alice.task_consumer.consume()
@@ -172,7 +172,7 @@ class TestAutoSchedule(_CollabTaskCase):
             description="Bob 已提交验收",
             assignee_id=bob_db.id,
             creator_id=bob_db.id,
-            manager_id=alice_db.id,
+            reviewer_id=alice_db.id,
             status=TaskStatus.REVIEWING,
         )
         review_task = await gtAgentTaskManager.create_task(review_task)
@@ -187,7 +187,7 @@ class TestAutoSchedule(_CollabTaskCase):
 
         with self.patch_infer(responses=[
             {"tool_calls": [{"name": "finish_action", "arguments": {"confirm_no_need_talk": True}}]},
-            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": review_task.id, "status": "DONE", "result": "验收通过"}}]},
+            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": review_task.id, "new_status": "DONE", "note": "验收通过"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
             await alice.task_consumer.consume()
@@ -249,7 +249,7 @@ class TestAutoSchedule(_CollabTaskCase):
             description="不应被 Alice 自动处理",
             assignee_id=bob_db.id,
             creator_id=bob_db.id,
-            manager_id=bob_db.id,
+            reviewer_id=bob_db.id,
             status=TaskStatus.REVIEWING,
         )
         review_task = await gtAgentTaskManager.create_task(review_task)
@@ -326,7 +326,7 @@ class TestCollaborationTaskTurnExecution(_CollabTaskCase):
         )
 
         with self.patch_infer(responses=[
-            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "status": "DONE", "result": "已完成"}}]},
+            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "已完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
             await alice.task_consumer.consume()
@@ -360,7 +360,7 @@ class TestCollaborationTaskTurnExecution(_CollabTaskCase):
         completed = False
 
         with self.patch_infer(responses=[
-            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "status": "DONE", "result": "已完成"}}]},
+            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "已完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
             await alice.task_consumer.consume()
@@ -391,7 +391,7 @@ class TestCollaborationTaskTurnExecution(_CollabTaskCase):
         # 第二轮（自动创建的重唤醒调度）：更新任务为 DONE 后再 finish_action → 循环正常结束
         with self.patch_infer(responses=[
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
-            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "status": "DONE", "result": "完成"}}]},
+            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
             await alice.task_consumer.consume()
@@ -441,7 +441,7 @@ class TestTaskDrivenToolUsage(_CollabTaskCase):
                 "tool_calls": [
                     {
                         "name": "update_task",
-                        "arguments": {"task_id": agent_task.id, "status": "DONE", "result": "已汇报"}
+                        "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "已汇报"}
                     }
                 ]
             },
@@ -478,7 +478,7 @@ class TestConsumeRetryBehavior(_CollabTaskCase):
         await gtScheculeTaskManager.update_task_status(sched.id, AgentTaskStatus.FAILED)
 
         with self.patch_infer(responses=[
-            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "status": "DONE", "result": "完成"}}]},
+            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
             await alice.task_consumer.consume()
@@ -505,7 +505,7 @@ class TestConsumeRetryBehavior(_CollabTaskCase):
         alice.task_consumer.status = AgentStatus.FAILED
 
         with self.patch_infer(responses=[
-            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "status": "DONE", "result": "完成"}}]},
+            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
             await alice.task_consumer.consume()
@@ -532,9 +532,9 @@ class TestConsumeRetryBehavior(_CollabTaskCase):
         )
 
         with self.patch_infer(responses=[
-            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task1.id, "status": "DONE", "result": "完成"}}]},
+            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task1.id, "new_status": "DONE", "note": "完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
-            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task2.id, "status": "DONE", "result": "完成"}}]},
+            {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task2.id, "new_status": "DONE", "note": "完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
             await alice.task_consumer.consume()

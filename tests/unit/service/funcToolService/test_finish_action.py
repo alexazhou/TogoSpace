@@ -18,7 +18,7 @@ def _make_collab_context(
     agent_task_status: TaskStatus = TaskStatus.DONE,
     agent_id: int = 1,
     assignee_id: int = 1,
-    manager_id: int | None = None,
+    reviewer_id: int | None = None,
 ) -> tuple[ToolCallContext, MagicMock]:
     """构造协作任务模式的 ToolCallContext（含 schedule_task 和 mock agent_task）。"""
     schedule_task = MagicMock()
@@ -28,7 +28,7 @@ def _make_collab_context(
     agent_task.title = "测试任务"
     agent_task.status = agent_task_status
     agent_task.assignee_id = assignee_id
-    agent_task.manager_id = manager_id
+    agent_task.reviewer_id = reviewer_id
     return ToolCallContext(agent_id=agent_id, team_id=1, chat_room=None, schedule_task=schedule_task), agent_task
 
 
@@ -113,8 +113,8 @@ async def test_finish_collaboration_task_still_in_progress() -> None:
 
 @pytest.mark.asyncio
 async def test_finish_collaboration_task_manager_reviewing_blocked() -> None:
-    """协作任务模式：manager 任务为 REVIEWING 未处理 → finish 失败，提示完成验收。"""
-    ctx, mock_task = _make_collab_context(TaskStatus.REVIEWING, agent_id=2, assignee_id=1, manager_id=2)
+    """协作任务模式：reviewer 任务为 REVIEWING 未处理 → finish 失败，提示完成验收。"""
+    ctx, mock_task = _make_collab_context(TaskStatus.REVIEWING, agent_id=2, assignee_id=1, reviewer_id=2)
     with patch("service.funcToolService.tools.gtAgentTaskManager.get_task", AsyncMock(return_value=mock_task)):
         result = await finish_action(_context=ctx)
     assert result["success"] is False
@@ -124,8 +124,8 @@ async def test_finish_collaboration_task_manager_reviewing_blocked() -> None:
 
 @pytest.mark.asyncio
 async def test_finish_collaboration_task_assignee_reviewing_passes() -> None:
-    """协作任务模式：assignee 已提交 REVIEWING → finish 成功（等待 manager 验收）。"""
-    ctx, mock_task = _make_collab_context(TaskStatus.REVIEWING, agent_id=1, assignee_id=1, manager_id=2)
+    """协作任务模式：assignee 已提交 REVIEWING → finish 成功（等待 reviewer 验收）。"""
+    ctx, mock_task = _make_collab_context(TaskStatus.REVIEWING, agent_id=1, assignee_id=1, reviewer_id=2)
     with patch("service.funcToolService.tools.gtAgentTaskManager.get_task", AsyncMock(return_value=mock_task)):
         result = await finish_action(_context=ctx)
     assert result["success"] is True
