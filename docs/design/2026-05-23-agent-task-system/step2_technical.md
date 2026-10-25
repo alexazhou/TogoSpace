@@ -1,5 +1,15 @@
 # V22: Agent Task 系统 - 技术文档
 
+> [!WARNING]
+> **本文档为 v1（V22）设计，口径已被 v2 取代**（见 `docs/design/2026-10-25-agent-task-system-v2/`）。差异要点：
+> - `manager_id` → **`reviewer_id`**（任务域；部门域 `manager_id` 不受影响）
+> - `update_task(status, result, block_reason)` → **`update_task(task_id, new_status=None, note='')`**（省略 `new_status` 即追加评论）
+> - `get_task` → **`get_task_detail`**；新增 **`list_task_events`** 与事件时间线（`agent_task_events`）
+> - 新增状态 `PENDING`（依赖未满足）与 `CANCELLED`；系统自动推进 `PENDING→TODO`、认领置位 `TODO→IN_PROGRESS`
+>
+> 本文档仅作历史参考，**请勿据此实现**。最后同步：2026-10-26。
+
+
 ## 1. 目标
 
 为 Agent 协作引入结构化任务管理能力：新增 `agent_tasks` 数据表、`GtAgentTask` 数据模型、DAL 层 CRUD、以及 4 个注册到 funcToolService 的 Agent 工具（`create_task` / `update_task` / `get_task` / `list_tasks`）。

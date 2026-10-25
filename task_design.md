@@ -1,5 +1,12 @@
 # Agent Task 系统设计文档
 
+> [!WARNING]
+> **本文档为早期草稿（v0.8，2026-05-22），口径已全部过时，请勿据此实现。** 正式口径见
+> [V22 设计](./docs/design/2026-05-23-agent-task-system/)（已被取代）与
+> [V27 / Agent 任务系统 v2](./docs/design/2026-10-25-agent-task-system-v2/)（现行）。
+> 主要差异：`manager_id` → `reviewer_id`（任务域）；`update_task(status, result, block_reason)` → `update_task(task_id, new_status=None, note='')`；
+> `get_task` → `get_task_detail`；新增 `list_task_events` 与事件时间线 `agent_task_events`；新增 `PENDING` / `CANCELLED` 状态与系统自动推进 / 认领置位。
+
 > 版本：v0.8（草稿）
 > 作者：小马哥
 > 最后更新：2026-05-22

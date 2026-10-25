@@ -1,5 +1,15 @@
 # V22: Agent Task 系统 - 产品文档
 
+> [!WARNING]
+> **本文档为 v1（V22）设计，口径已被 v2 取代**（见 `docs/design/2026-10-25-agent-task-system-v2/`）。差异要点：
+> - `manager_id` → **`reviewer_id`**（任务域；部门域 `manager_id` 不受影响）
+> - `update_task(status, result, block_reason)` → **`update_task(task_id, new_status=None, note='')`**（省略 `new_status` 即追加评论）
+> - `get_task` → **`get_task_detail`**；新增 **`list_task_events`** 与事件时间线（`agent_task_events`）
+> - 新增状态 `PENDING`（依赖未满足）与 `CANCELLED`；系统自动推进 `PENDING→TODO`、认领置位 `TODO→IN_PROGRESS`
+>
+> 本文档仅作历史参考，**请勿据此实现**。最后同步：2026-10-26。
+
+
 ## 目标
 
 为 Agent 团队提供一套轻量级的结构化任务管理能力，使 Agent 间的任务协作从"消息流中约定"升级为"可追踪、可验收的正式任务"。
