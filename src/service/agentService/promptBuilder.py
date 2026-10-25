@@ -5,7 +5,7 @@ from datetime import datetime
 
 import yaml
 import service.skillService as skillService
-from constants import EVENT_CONTENT_MAX_CHARS, TaskStatus
+from constants import EVENT_CONTENT_MAX_CHARS, EVENT_TRUNCATED_SUFFIX, TaskStatus
 from dal.db import gtAgentManager, gtDeptManager
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService.prompts import (
@@ -114,15 +114,12 @@ def build_compact_resume_prompt(summary: str) -> str:
     return COMPACT_RESUME_TEMPLATE.format(summary=summary.strip())
 
 
-_EVENT_TRUNCATED_SUFFIX = "…(已截断)"
-
-
 def format_task_event_content(content: str, max_chars: int = EVENT_CONTENT_MAX_CHARS) -> str:
     """把事件内容压成单行并按共享上限截断（超出部分丢弃并加省略标记）。"""
     text = re.sub(r"\s+", " ", content or "").strip()
     if len(text) <= max_chars:
         return text
-    return text[:max_chars] + _EVENT_TRUNCATED_SUFFIX
+    return text[:max_chars] + EVENT_TRUNCATED_SUFFIX
 
 
 def _status_text(status: TaskStatus | str | None) -> str | None:

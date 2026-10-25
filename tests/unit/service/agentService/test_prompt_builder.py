@@ -2,7 +2,7 @@ import pytest
 
 from datetime import datetime, timezone
 
-from constants import EVENT_CONTENT_MAX_CHARS, TaskStatus
+from constants import EVENT_CONTENT_MAX_CHARS, EVENT_TRUNCATED_SUFFIX, TaskStatus
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService import promptBuilder
 
@@ -209,13 +209,13 @@ def test_build_task_event_line_truncates_long_content():
         created_at=datetime(2026, 10, 26, 4, 0),
     )
     assert line.startswith("- 2026-10-26 04:00 IN_PROGRESS→REVIEWING（李哥）：")
-    assert line.endswith(promptBuilder._EVENT_TRUNCATED_SUFFIX)
+    assert line.endswith(EVENT_TRUNCATED_SUFFIX)
     body = line.split("：", 1)[1]
-    assert body == "长" * EVENT_CONTENT_MAX_CHARS + promptBuilder._EVENT_TRUNCATED_SUFFIX
+    assert body == "长" * EVENT_CONTENT_MAX_CHARS + EVENT_TRUNCATED_SUFFIX
     # 边界：恰好等于上限时不截断
     exact = promptBuilder.format_task_event_content("字" * EVENT_CONTENT_MAX_CHARS)
     assert exact == "字" * EVENT_CONTENT_MAX_CHARS
-    assert promptBuilder._EVENT_TRUNCATED_SUFFIX not in exact
+    assert EVENT_TRUNCATED_SUFFIX not in exact
 
 
 def test_build_task_event_line_time_uses_local_timezone():
