@@ -684,6 +684,47 @@ async def test_get_task_derived_props_ignore_comment_and_non_hold(task_manager_m
 
 
 @pytest.mark.asyncio
+async def test_get_task_default_event_limit_keeps_twenty(task_manager_mock, event_manager_mock):
+    """服务层默认仍为 EVENT_TIMELINE_LIMIT(20)——控制器/接口依赖，不可改。"""
+    task = _build_task(id=1, team_id=1)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+
+    result = await taskService.get_task(team_id=1, task_id=1)
+
+    assert taskService.EVENT_TIMELINE_LIMIT == 20
+    assert result["success"] is True
+    event_manager_mock.list_events.assert_awaited_once_with(1, limit=20)
+
+
+@pytest.mark.asyncio
+async def test_get_task_parameterizes_event_limit(task_manager_mock, event_manager_mock):
+    """传入 event_limit 时按该值取事件（工具层默认 3 由工具层负责）。"""
+    task = _build_task(id=1, team_id=1)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+
+    await taskService.get_task(team_id=1, task_id=1, event_limit=1)
+
+    event_manager_mock.list_events.assert_awaited_once_with(1, limit=1)
+
+
+@pytest.mark.asyncio
+async def test_get_task_reports_events_total(task_manager_mock, event_manager_mock):
+    """响应携带 events_total（事件总数，跨 event_limit），用于判断是否还有更早事件。"""
+    task = _build_task(id=1, team_id=1)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+    event_manager_mock.list_events = AsyncMock(return_value=[
+        SimpleNamespace(id=3, task_id=1, actor_id=8, from_status=None, to_status=None, content="纯评论"),
+    ])
+    event_manager_mock.count_events = AsyncMock(return_value=9)
+
+    result = await taskService.get_task(team_id=1, task_id=1, event_limit=1)
+
+    assert result["task"]["events_total"] == 9
+    assert len(result["task"]["events"]) == 1
+    event_manager_mock.count_events.assert_awaited_once_with(1)
+
+
+@pytest.mark.asyncio
 async def test_update_task_creator_cannot_approve_when_not_reviewer(task_manager_mock):
     """creator（≠reviewer）不能验收：REVIEWING→DONE 只认 is_reviewer，钉住「去 creator 兜底」。"""
     task = _build_task(status=TaskStatus.REVIEWING, assignee_id=11, creator_id=11, reviewer_id=20)

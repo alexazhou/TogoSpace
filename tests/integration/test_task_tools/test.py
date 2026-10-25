@@ -119,6 +119,33 @@ class TestTaskTools(ServiceTestCase):
         assert old["success"] is True
         assert "deprecated" in old
 
+    async def test_get_task_detail_event_limit_returns_latest_and_reports_total(self):
+        """event_limit 只返回最新 N 条；events_total 为事件总数（跨 limit）。"""
+        task = await self._make_task()  # 创建事件 1 条
+        for i in range(3):
+            await tools.update_task(task_id=task.id, note=f"备注{i}", _context=self._ctx())
+        # 事件总数 = 1（创建）+ 3（评论）= 4
+
+        res = await tools.get_task_detail(task_id=task.id, event_limit=1, _context=self._ctx())
+
+        assert res["success"] is True
+        events = res["task"]["events"]
+        assert len(events) == 1
+        assert events[0]["content"] == "备注2"  # 最新一条在前
+        assert res["task"]["events_total"] == 4
+
+    async def test_get_task_detail_default_event_limit_is_three(self):
+        """不传 event_limit 时默认取最近 3 条（工具层默认 3）。"""
+        task = await self._make_task()  # 1 条
+        for i in range(4):
+            await tools.update_task(task_id=task.id, note=f"备注{i}", _context=self._ctx())
+        # 共 5 条事件
+
+        res = await tools.get_task_detail(task_id=task.id, _context=self._ctx())
+
+        assert len(res["task"]["events"]) == 3
+        assert res["task"]["events_total"] == 5
+
     async def test_list_task_events_tool(self):
         """工具层 list_task_events 返回时间线（创建事件 + 评论）。"""
         task = await self._make_task()

@@ -371,8 +371,13 @@ async def update_task(
     }
 
 
-async def get_task(team_id: int, task_id: int) -> dict:
-    """查询单个任务详情，含依赖任务状态摘要。"""
+async def get_task(team_id: int, task_id: int, event_limit: int = EVENT_TIMELINE_LIMIT) -> dict:
+    """查询单个任务详情，含依赖任务状态摘要与事件时间线摘要。
+
+    `event_limit` 控制事件时间线返回条数（默认 `EVENT_TIMELINE_LIMIT`）；
+    回执中的 `events_total`（该任务事件**总数**，跨 `event_limit`）用于判断
+    是否还有更早事件——有则可继续用 `list_task_events` 按游标翻页。
+    """
     from playhouse.shortcuts import model_to_dict
 
     task = await gtAgentTaskManager.get_task(task_id)
@@ -395,9 +400,10 @@ async def get_task(team_id: int, task_id: int) -> dict:
                 depends_on_details.append({"task_id": dep_id, "title": "(已删除)", "status": "UNKNOWN"})
     task_dict["depends_on_details"] = depends_on_details
 
-    # 挂载事件时间线摘要（按 id 降序）与两个派生属性。
-    events = await gtAgentTaskEventManager.list_events(task_id, limit=EVENT_TIMELINE_LIMIT)
+    # 挂载事件时间线摘要（按 id 降序）、事件总数与两个派生属性。
+    events = await gtAgentTaskEventManager.list_events(task_id, limit=event_limit)
     task_dict["events"] = [_serialize_event(e) for e in events]
+    task_dict["events_total"] = await gtAgentTaskEventManager.count_events(task_id)
     task_dict["last_note"] = last_note(events)
     task_dict["current_block_reason"] = current_block_reason(task, events)
 

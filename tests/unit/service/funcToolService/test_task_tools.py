@@ -104,6 +104,74 @@ def test_get_task_detail_and_deprecated_get_task_exist():
     assert callable(tools.get_task)
 
 
+def test_get_task_detail_event_limit_default_is_three():
+    """工具层 event_limit 默认 3，用独立常量 DEFAULT_EVENT_LIMIT 承载。"""
+    assert tools.DEFAULT_EVENT_LIMIT == 3
+    sig = inspect.signature(tools.get_task_detail)
+    assert sig.parameters["event_limit"].default == 3
+    assert list(sig.parameters) == ["task_id", "event_limit", "_context"]
+
+
+def test_get_task_detail_metadata_exposes_event_limit():
+    """schema 暴露 event_limit（含说明）；task_id 必填，event_limit 非必填。"""
+    meta = get_function_metadata("get_task_detail", tools.get_task_detail)
+    props = meta["parameters"]["properties"]
+    assert set(props) == {"task_id", "event_limit"}
+    assert props["event_limit"]["type"] == "integer"
+    assert props["event_limit"].get("description")
+    assert meta["parameters"]["required"] == ["task_id"]
+
+
+def test_deprecated_get_task_exposes_event_limit():
+    """废弃别名 get_task 同样接受并透传 event_limit。"""
+    sig = inspect.signature(tools.get_task)
+    assert list(sig.parameters) == ["task_id", "event_limit", "_context"]
+    assert sig.parameters["event_limit"].default == 3
+
+
+@pytest.mark.asyncio
+async def test_get_task_detail_forwards_event_limit(monkeypatch):
+    """工具层把 event_limit 透传给服务层。"""
+    from service.roomService.core import ToolCallContext
+    import service.taskService as taskService
+
+    captured: dict = {}
+
+    async def _fake(**kwargs):
+        captured.update(kwargs)
+        return {"success": True, "task": {"id": 1}}
+
+    monkeypatch.setattr(taskService, "get_task", _fake)
+    ctx = ToolCallContext(agent_id=8, team_id=1, tool_name="get_task_detail")
+
+    await tools.get_task_detail(task_id=1, _context=ctx)
+    assert captured["event_limit"] == tools.DEFAULT_EVENT_LIMIT
+
+    await tools.get_task_detail(task_id=1, event_limit=7, _context=ctx)
+    assert captured["event_limit"] == 7
+
+
+@pytest.mark.asyncio
+async def test_deprecated_get_task_forwards_event_limit(monkeypatch):
+    """废弃别名把 event_limit 一并透传，并附加 deprecated 提示。"""
+    from service.roomService.core import ToolCallContext
+    import service.taskService as taskService
+
+    captured: dict = {}
+
+    async def _fake(**kwargs):
+        captured.update(kwargs)
+        return {"success": True, "task": {"id": 1}}
+
+    monkeypatch.setattr(taskService, "get_task", _fake)
+    ctx = ToolCallContext(agent_id=8, team_id=1, tool_name="get_task")
+
+    res = await tools.get_task(task_id=1, event_limit=5, _context=ctx)
+
+    assert captured["event_limit"] == 5
+    assert "deprecated" in res
+
+
 def test_list_task_events_signature():
     params = list(inspect.signature(tools.list_task_events).parameters)
     assert params == ["task_id", "limit", "before_id", "_context"]

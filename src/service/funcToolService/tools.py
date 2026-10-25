@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 # 服务层 taskService.list_tasks 仍保留 limit 可选，供控制器/前端接口使用。
 LIST_TASKS_DEFAULT_LIMIT = 20
 
+# get_task_detail 事件时间线的默认条数（Agent 侧只看最近几条，更早的用 list_task_events 翻页）。
+DEFAULT_EVENT_LIMIT = 3
+
 # Tool 返回值规范
 # 所有 tool 函数统一返回 dict，由 funcToolService.run_tool_call 序列化为 JSON 字符串后交给 LLM。
 # 必填字段：
@@ -1126,11 +1129,20 @@ async def update_task(
     )
 
 
-async def get_task_detail(task_id: int, _context: Optional[ToolCallContext] = None) -> dict:
+async def get_task_detail(
+    task_id: int,
+    event_limit: int = DEFAULT_EVENT_LIMIT,
+    _context: Optional[ToolCallContext] = None,
+) -> dict:
     """查询单个协作任务详情，包含依赖任务状态摘要与事件时间线摘要。
+
+    事件时间线默认只返回最近 3 条；回执中的 `events_total` 是该任务事件总数，
+    若大于 events 条数说明还有更早事件，可调大 event_limit 或用 list_task_events
+    按游标向前翻页。
 
     Args:
         task_id: 任务 ID
+        event_limit: 事件时间线返回的条数上限（默认 3）
     """
     import service.taskService as taskService
 
@@ -1138,18 +1150,23 @@ async def get_task_detail(task_id: int, _context: Optional[ToolCallContext] = No
     if not ok:
         return {"success": False, "message": "无法获取团队上下文"}
 
-    return await taskService.get_task(team_id=team_id, task_id=task_id)
+    return await taskService.get_task(team_id=team_id, task_id=task_id, event_limit=event_limit)
 
 
-async def get_task(task_id: int, _context: Optional[ToolCallContext] = None) -> dict:
+async def get_task(
+    task_id: int,
+    event_limit: int = DEFAULT_EVENT_LIMIT,
+    _context: Optional[ToolCallContext] = None,
+) -> dict:
     """【已废弃】查询单个协作任务详情；请改用 `get_task_detail`。
 
     保留仅为平滑迁移：行为与 `get_task_detail` 一致，并在回执中附带废弃提示。
 
     Args:
         task_id: 任务 ID
+        event_limit: 事件时间线返回的条数上限（默认 3）
     """
-    result = await get_task_detail(task_id=task_id, _context=_context)
+    result = await get_task_detail(task_id=task_id, event_limit=event_limit, _context=_context)
     if isinstance(result, dict):
         result = {**result, "deprecated": "`get_task` 已更名，请改用 `get_task_detail`"}
     return result
