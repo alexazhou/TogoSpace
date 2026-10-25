@@ -216,6 +216,16 @@ def test_get_task_event_metadata_only_exposes_required_event_id():
     assert "按事件 id 查询单条任务事件" in meta["description"]
 
 
+def test_get_task_event_docstring_states_full_content_semantics():
+    """docstring 须写明「返回完整原文、不受摘要截断限制」（仅本工具不截断）。"""
+    doc = tools.get_task_event.__doc__ or ""
+    assert "完整原文" in doc
+    assert "截断" in doc
+
+    meta = get_function_metadata("get_task_event", tools.get_task_event)
+    assert "完整原文" in meta["description"]
+
+
 def test_get_task_event_registered_in_core():
     """core 注册表含 get_task_event。"""
     from service.funcToolService import core

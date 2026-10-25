@@ -1176,10 +1176,11 @@ async def get_task_event(
     event_id: int,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """按事件 id 查询单条任务事件（含 actor 展示名，只读）。
+    """按事件 id 查询单条任务事件（返回完整原文，含 actor 展示名，只读）。
 
-    事件时间线上的事件若内容被截断，可用本工具按 id 取回单条完整事件；
-    不属于当前团队的事件会被拒绝。
+    当 `get_task_detail` / `list_task_events` 给出的事件摘要被截断（按 100 字符）
+    不够用时，用本工具按事件 id 取回该事件的**完整原文** `content`——本工具是
+    唯一不受摘要截断限制的读取入口。不属于当前团队的事件会被拒绝。
 
     Args:
         event_id: 事件 ID
