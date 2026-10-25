@@ -240,11 +240,13 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             await driver.startup()
 
         exported_names = [tool.function.name for tool in agent.task_consumer._turn_runner.tool_registry.export_openai_tools()]
+        # expected 口径 = 「已归入 Category 且非 ADMIN」的本地工具；未归类的废弃别名（get_task，F5）不会被带出
         expected_names = {
             t.function.name for t in get_tools()
-            if CATEGORY_CONFIG.get(t.function.name) != ToolCategory.ADMIN
+            if CATEGORY_CONFIG.get(t.function.name) not in (None, ToolCategory.ADMIN)
         }
         assert set(exported_names) == expected_names
+        assert "get_task" not in exported_names
         assert "allowed_tools" not in captured_options
 
     async def test_startup_with_tool_allow_specs_keeps_basic_tools_and_passes_sdk_allowlist(self) -> None:
