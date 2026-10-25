@@ -83,6 +83,17 @@ async def list_tasks(
     return list(await query.aio_execute())
 
 
+async def list_pending_dependents(team_id: int, dep_task_id: int) -> list[GtAgentTask]:
+    """返回 team 内 `status=PENDING` 且 `depends_on` 含 `dep_task_id` 的任务（下游依赖）。"""
+    rows = await (
+        GtAgentTask
+        .select()
+        .where((GtAgentTask.team_id == team_id) & (GtAgentTask.status == TaskStatus.PENDING))
+        .aio_execute()
+    )
+    return [t for t in rows if dep_task_id in (t.depends_on or [])]
+
+
 async def get_tasks_by_ids(task_ids: list[int]) -> list[GtAgentTask]:
     """批量查询任务（用于依赖状态检查）。"""
     if not task_ids:

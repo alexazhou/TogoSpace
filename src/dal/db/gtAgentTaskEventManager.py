@@ -16,9 +16,14 @@ async def append_event(
 
     NULL 组合四格（E4）：(NULL,NULL)=评论、(NULL,非NULL)=创建/快照、
     (非NULL,非NULL)=流转、**(非NULL,NULL) 非法**——落库前拒绝。
+
+    另守 PIN-1（defense-in-depth）：流转事件必须 `from != to`（自环应记为评论、
+    `from`/`to` 均空），故 `(非NULL, 非NULL) 且 from == to` 亦为非法——落库前拒绝。
     """
     if from_status is not None and to_status is None:
         raise ValueError("非法的状态组合：from_status 非空而 to_status 为空（禁止「非NULL→NULL」）")
+    if from_status is not None and from_status == to_status:
+        raise ValueError("非法的状态组合：from_status == to_status（自环不得记为流转事件；应以评论 from/to 均空记录）")
     event = GtAgentTaskEvent(
         task_id=task_id,
         actor_id=actor_id,

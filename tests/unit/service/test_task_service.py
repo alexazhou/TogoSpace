@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import TaskPriority, TaskStatus
+from constants import SpecialAgent, TaskPriority, TaskStatus
 from model.dbModel.gtAgentTask import GtAgentTask
 from service import taskService
 
@@ -16,6 +16,7 @@ from service import taskService
 def task_manager_mock():
     """统一 mock 任务 DAL，避免访问真实数据库。"""
     with patch("service.taskService.gtAgentTaskManager") as mock_manager:
+        mock_manager.list_pending_dependents = AsyncMock(return_value=[])
         yield mock_manager
 
 
@@ -804,4 +805,102 @@ async def test_update_task_comment_allowed_for_any_team_member(task_manager_mock
 
     assert result["success"] is True
     assert result["action"] == "commented"
+
+
+# ---------------------------------------------------------------------------
+# #68：系统自动推进（依赖满足）+ 认领置位（D5=(a)）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_task_done_triggers_dependency_auto_progress(task_manager_mock, event_manager_mock):
+    """流转到 DONE 后应触发依赖自动推进（以 SYSTEM 身份，对下游 PENDING 置 TODO）。"""
+    task = _build_task(status=TaskStatus.IN_PROGRESS, assignee_id=11, creator_id=11, reviewer_id=None)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
+
+    with patch("service.taskService.auto_progress_dependents", new=AsyncMock(return_value=[7])) as mock_prog:
+        result = await taskService.update_task(team_id=1, caller_id=11, task_id=1, new_status="DONE")
+
+    assert result["action"] == "transitioned"
+    mock_prog.assert_awaited_once_with(1, 1)
+
+
+@pytest.mark.asyncio
+async def test_update_task_non_done_does_not_trigger_auto_progress(task_manager_mock, event_manager_mock):
+    """非 DONE 流转（如 IN_PROGRESS）不触发依赖推进。"""
+    task = _build_task(status=TaskStatus.TODO, assignee_id=11, creator_id=11, reviewer_id=None)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
+
+    with patch("service.taskService.auto_progress_dependents", new=AsyncMock(return_value=[])) as mock_prog:
+        result = await taskService.update_task(team_id=1, caller_id=11, task_id=1, new_status="IN_PROGRESS")
+
+    assert result["action"] == "transitioned"
+    mock_prog.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_auto_progress_dependents_sets_todo_with_system_actor(task_manager_mock):
+    """依赖全部 DONE 的 PENDING 下游 ⇒ 以 SYSTEM 身份置 TODO 并写系统事件。"""
+    dep = _build_task(id=7, status=TaskStatus.PENDING, depends_on=[1])
+    upstream = [_build_task(id=1, status=TaskStatus.DONE)]
+    task_manager_mock.list_pending_dependents = AsyncMock(return_value=[dep])
+    task_manager_mock.get_tasks_by_ids = AsyncMock(return_value=upstream)
+    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=dep)
+
+    progressed = await taskService.auto_progress_dependents(1, 1)
+
+    assert progressed == [7]
+    kwargs = task_manager_mock.update_task_status_with_event.await_args.kwargs
+    assert kwargs["actor_id"] == SpecialAgent.SYSTEM.value
+    assert kwargs["from_status"] == TaskStatus.PENDING
+    assert kwargs["to_status"] == TaskStatus.TODO
+
+
+@pytest.mark.asyncio
+async def test_auto_progress_dependents_holds_when_upstream_unfinished(task_manager_mock):
+    """上游仍有未 DONE ⇒ 不下推。"""
+    dep = _build_task(id=7, status=TaskStatus.PENDING, depends_on=[1, 2])
+    upstream = [_build_task(id=1, status=TaskStatus.DONE), _build_task(id=2, status=TaskStatus.TODO)]
+    task_manager_mock.list_pending_dependents = AsyncMock(return_value=[dep])
+    task_manager_mock.get_tasks_by_ids = AsyncMock(return_value=upstream)
+    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=dep)
+
+    progressed = await taskService.auto_progress_dependents(1, 1)
+
+    assert progressed == []
+    task_manager_mock.update_task_status_with_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_claim_task_sets_in_progress_with_system_actor(task_manager_mock):
+    """认领置位：TODO 的 assignee 认领 ⇒ TODO→IN_PROGRESS（SYSTEM 身份）。"""
+    task = _build_task(status=TaskStatus.TODO, assignee_id=11, creator_id=11, reviewer_id=None)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
+
+    res = await taskService.claim_task(11, 1)
+
+    assert res == {"success": True, "action": "claimed"}
+    kwargs = task_manager_mock.update_task_status_with_event.await_args.kwargs
+    assert kwargs["actor_id"] == SpecialAgent.SYSTEM.value
+    assert kwargs["from_status"] == TaskStatus.TODO
+    assert kwargs["to_status"] == TaskStatus.IN_PROGRESS
+
+
+@pytest.mark.asyncio
+async def test_claim_task_skips_when_not_todo_or_not_assignee(task_manager_mock):
+    """幂等 / 越权：非 TODO 或非 assignee ⇒ 跳过，不写事件。"""
+    task_manager_mock.update_task_status_with_event = AsyncMock()
+
+    # 已 IN_PROGRESS
+    task_manager_mock.get_task = AsyncMock(return_value=_build_task(status=TaskStatus.IN_PROGRESS, assignee_id=11))
+    assert (await taskService.claim_task(11, 1))["action"] == "skipped"
+
+    # 非 assignee
+    task_manager_mock.get_task = AsyncMock(return_value=_build_task(status=TaskStatus.TODO, assignee_id=11))
+    assert (await taskService.claim_task(99, 1))["action"] == "skipped"
+
+    task_manager_mock.update_task_status_with_event.assert_not_awaited()
 

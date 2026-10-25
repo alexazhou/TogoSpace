@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from constants import TaskPriority, TaskStatus
+from constants import SpecialAgent, TaskPriority, TaskStatus
 from dal.db import gtAgentTaskManager, gtAgentTaskEventManager
 from model.dbModel.gtAgentTask import GtAgentTask
 
@@ -77,6 +77,55 @@ def _serialize_event(event) -> dict:
     data["from_status"] = from_status.value if isinstance(from_status, TaskStatus) else from_status
     data["to_status"] = to_status.value if isinstance(to_status, TaskStatus) else to_status
     return data
+
+
+async def auto_progress_dependents(team_id: int, completed_task_id: int) -> list[int]:
+    """依赖满足自动推进：把「所有前置依赖均已 DONE」的 `PENDING` 下游任务置为 `TODO`。
+
+    - 系统操作：对每个候选写一条流转事件（`actor_id = SpecialAgent.SYSTEM`，**代码引用常量、勿硬写 -2**），
+      `from_status = PENDING`、`to_status = TODO`，`content` 记说明文本；
+    - **严守边界**：仅更新状态并记事件，**不触发任何唤醒 / 通知**（不 publish `TASK_CHANGED`）；
+    - 返回被推进的任务 id 列表（无候选则空）。
+    """
+    dependents = await gtAgentTaskManager.list_pending_dependents(team_id, completed_task_id)
+    progressed: list[int] = []
+    for dep in dependents:
+        upstream = await gtAgentTaskManager.get_tasks_by_ids(dep.depends_on or [])
+        if all(t.status == TaskStatus.DONE for t in upstream):
+            dep.status = TaskStatus.TODO  # 同步内存态
+            await gtAgentTaskManager.update_task_status_with_event(
+                dep,
+                actor_id=SpecialAgent.SYSTEM.value,
+                from_status=TaskStatus.PENDING,
+                to_status=TaskStatus.TODO,
+                content="前置依赖已全部完成，系统自动推进为 TODO",
+            )
+            progressed.append(dep.id)
+            logger.info(f"依赖满足自动推进：task_id={dep.id} PENDING → TODO（trigger={completed_task_id}）")
+    return progressed
+
+
+async def claim_task(caller_id: int, task_id: int) -> dict:
+    """认领置位（D5=(a)）：执行人开启执行回合时，系统**在同一事务**内把 `TODO → IN_PROGRESS`。
+
+    - 仅当 `status == TODO` 且 `caller_id == assignee_id` 时置位；否则幂等跳过（返回 `action="skipped"`）；
+    - 写一条系统流转事件（`actor_id = SpecialAgent.SYSTEM`），`from_status = TODO`、`to_status = IN_PROGRESS`；
+    - **不触发唤醒 / 通知**。
+    """
+    task = await gtAgentTaskManager.get_task(task_id)
+    if task is None or task.status != TaskStatus.TODO or task.assignee_id != caller_id:
+        return {"success": True, "action": "skipped"}
+
+    task.status = TaskStatus.IN_PROGRESS  # 同步内存态
+    await gtAgentTaskManager.update_task_status_with_event(
+        task,
+        actor_id=SpecialAgent.SYSTEM.value,
+        from_status=TaskStatus.TODO,
+        to_status=TaskStatus.IN_PROGRESS,
+        content="执行人认领，系统自动置为 IN_PROGRESS",
+    )
+    logger.info(f"认领置位：task_id={task_id} TODO → IN_PROGRESS（assignee={caller_id}）")
+    return {"success": True, "action": "claimed"}
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +354,13 @@ async def update_task(
     from service import messageBus as _mb
     from constants import MessageBusTopic as _MBT
     _mb.publish(_MBT.TASK_CHANGED, task=updated, old_status=old_status.value)
+
+    # 依赖满足自动推进（事务后触发；系统操作，不唤醒 / 不通知）
+    if target == TaskStatus.DONE:
+        try:
+            await auto_progress_dependents(team_id, task_id)
+        except Exception:
+            logger.exception(f"依赖满足自动推进失败（不影响本次流转）：task_id={task_id}")
 
     from playhouse.shortcuts import model_to_dict
     return {

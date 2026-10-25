@@ -154,6 +154,18 @@ class TestTaskEvents(ServiceTestCase):
 
         assert await gtAgentTaskEventManager.list_events(999) == []
 
+    async def test_append_event_rejects_self_loop(self):
+        """PIN-1（F-b）：`from == to`（自环）应在落库前拒绝，不得记为流转事件。
+
+        可红性：若移除 DAL 的 `from == to` 守卫，本用例不再抛 `ValueError` ⇒ 转红。
+        """
+        with pytest.raises(ValueError):
+            await gtAgentTaskEventManager.append_event(
+                998, 8, from_status=TaskStatus.ON_HOLD, to_status=TaskStatus.ON_HOLD
+            )
+
+        assert await gtAgentTaskEventManager.list_events(998) == []
+
     async def test_append_event_allows_legal_null_combinations(self):
         """其余三格合法：评论(NULL,NULL)、创建(NULL,非NULL)、流转(非NULL,非NULL)。"""
         task = await self._make_task(title="ev-null-combos")

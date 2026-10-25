@@ -313,3 +313,56 @@ async def test_consume_triggers_collaboration_task_check_after_completion(consum
         with patch.object(consumer, "_check_and_schedule_collaboration_tasks", new=AsyncMock()) as mock_check:
             await consumer.consume()
             mock_check.assert_awaited_once()
+
+
+# ─── 认领置位（D5=(a)，#68）相关测试 ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_claim_collaboration_task_delegates_to_service(consumer):
+    """认领置位应委托 `taskService.claim_task(assignee_id, agent_task_id)`。"""
+    with patch("service.taskService.claim_task", new=AsyncMock()) as mock_claim:
+        await consumer._claim_collaboration_task(42)
+
+    mock_claim.assert_awaited_once_with(consumer.gt_agent.id, 42)
+
+
+@pytest.mark.asyncio
+async def test_claim_collaboration_task_swallows_errors(consumer):
+    """认领置位失败不应抛出（不阻断任务执行）。"""
+    with patch("service.taskService.claim_task", new=AsyncMock(side_effect=RuntimeError("boom"))):
+        await consumer._claim_collaboration_task(42)  # 不应抛出
+
+
+@pytest.mark.asyncio
+async def test_consume_continues_when_claim_task_raises(consumer, mock_gt_agent, mock_turn_runner):
+    """fail-safe 可红（#68）：认领置位抛异常 ⇒ consume 不中断、任务照常执行完成。
+
+    判据 = 「不改唤醒链路」：认领置位（`claim_task`）异常绝不能中断 consume 循环。
+    负对照：若去掉 `_claim_collaboration_task` 的 try/except（异常上抛）⇒ 本用例转红。
+    """
+    pending_task = MagicMock(spec=GtScheculeTask)
+    pending_task.id = 100
+    pending_task.status = AgentTaskStatus.PENDING
+    pending_task.task_type = AgentTaskType.TODO_TASK
+    pending_task.task_data = {"room_id": 1, "agent_task_id": 42}
+
+    running_task = MagicMock(spec=GtScheculeTask)
+    running_task.id = 100
+    running_task.status = AgentTaskStatus.RUNNING
+    running_task.task_type = AgentTaskType.TODO_TASK
+    running_task.task_data = {"room_id": 1, "agent_task_id": 42}
+
+    with patch("service.agentService.agentTaskConsumer.gtScheculeTaskManager") as mock_manager:
+        mock_manager.get_first_unfinish_task = AsyncMock(side_effect=[pending_task, None])
+        mock_manager.transition_task_status = AsyncMock(return_value=running_task)
+        mock_manager.update_task_status = AsyncMock()
+        mock_manager.has_consumable_task = AsyncMock(return_value=False)
+
+        with patch.object(consumer, "_check_and_schedule_collaboration_tasks", new=AsyncMock()):
+            with patch("service.taskService.claim_task", new=AsyncMock(side_effect=RuntimeError("claim boom"))):
+                await consumer.consume()  # 不应抛出
+
+    # 任务照常执行完成（不因认领失败被中断）
+    mock_turn_runner.run_task_turn.assert_awaited_once_with(running_task)
+    mock_manager.update_task_status.assert_any_await(100, AgentTaskStatus.COMPLETED)

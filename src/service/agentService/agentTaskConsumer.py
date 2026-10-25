@@ -103,6 +103,20 @@ class AgentTaskConsumer:
             {"agent_task_id": agent_task.id},
         )
 
+    async def _claim_collaboration_task(self, agent_task_id: int) -> None:
+        """认领置位（D5=(a)）：把 assignee 名下 `TODO` 的协作任务置为 `IN_PROGRESS`。
+
+        系统操作、幂等、不唤醒 / 不通知；异常只记录、不阻断任务执行。
+        """
+        import service.taskService as taskService
+
+        try:
+            await taskService.claim_task(self.gt_agent.id, agent_task_id)
+        except Exception:
+            logger.exception(
+                f"认领置位失败（不影响任务执行）: agent_id={self.gt_agent.id}, agent_task_id={agent_task_id}"
+            )
+
     # ─── 消费循环 ─────────────────────────────────────────────
     async def consume(self) -> None:
         """从数据库获取并处理任务，直到没有待处理任务为止。"""
@@ -139,6 +153,12 @@ class AgentTaskConsumer:
                     logger.info(f"重跑 FAILED 任务: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={task.id}")
             else:
                 claimed_task = task  # 已经是 RUNNING，直接使用
+
+            # 认领置位（D5=(a)）：执行人认领协作任务时，系统把 TODO → IN_PROGRESS（同事务写系统事件，不唤醒）
+            if claimed_task.task_type == AgentTaskType.TODO_TASK:
+                agent_task_id = (claimed_task.task_data or {}).get("agent_task_id")
+                if agent_task_id:
+                    await self._claim_collaboration_task(agent_task_id)
 
             logger.info(f"开始执行任务: {self.gt_agent.name}(agent_id={self.gt_agent.id}), task_id={claimed_task.id}")
 

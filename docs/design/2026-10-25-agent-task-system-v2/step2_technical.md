@@ -398,6 +398,10 @@ sequenceDiagram
    - **残余边界（显式登记、不静默）**：`creator_id` 为 `NULL` 的行**不订正**（防御性条件）；`0009` 建表脚本中 `creator_id INTEGER NOT NULL` ⇒ 该情形**结构上不可能出现**。**另注（阿张 #69 复核 info，非回归）**：若 `creator_id == assignee_id` 且验收人为空，订正后 `reviewer_id` 即 `assignee` 自己 ⇒ 该单进入「自审」；与旧「`creator` 兜底」语义一致，**不加** `assignee_id <> creator_id` 过滤（否则该行退回卡死态）。
    - **专测**：`tests/unit/migrate/test_migration_0015_fix_reviewing.py`（`up_to` 分段造存量 → 断言订正 / 其余不变 / 幂等 0 增量；**负对照**：摘掉 `reviewer_id IS NULL` 条件 ⇒ 误改已验收任务 ⇒ 断言转红）。
    - **说明**：本条仅描述**规则**，**不贴完整 SQL**（SQL 随 `assets/migrate/0015_backfill_events_and_fix_reviewing_tasks.sql` 的订正段落地）。
+8. **系统自动推进 / 认领置位的「静默性」边界（#68 · 显式登记、不静默）**：
+   - 系统在**依赖满足自动推进（`PENDING → TODO`）**与**认领置位（`TODO → IN_PROGRESS`）**时，**仅更新任务状态并写入一条系统流转事件**（`actor_id = -2` / `SpecialAgent.SYSTEM`，**代码引用常量**），**不 publish `TASK_CHANGED`、不触发任何唤醒 / 通知**（唤醒链路行为不变）。
+   - **由此产生的可见性边界**：上述两类**系统状态变更不触发前端实时刷新**，前端需**下次拉取**方可见；「实时刷新」能力归后续里程碑 **D4（通知）**，**本期明确不实现**（显式登记、不得静默）。
+   - **可红判据**：① 幂等 —— 非 `TODO` 或 `caller ≠ assignee` 的认领 ⇒ `skipped` 且**不写事件**；② fail-safe —— 注入认领置位异常 ⇒ **consume 不中断、任务照常执行完成**（「不改唤醒链路」的判据）；③ 置位与事件**同事务**（`update_task_status_with_event`）。
 
 ---
 
