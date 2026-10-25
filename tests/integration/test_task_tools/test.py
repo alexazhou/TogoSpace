@@ -14,7 +14,7 @@ import sys
 import pytest
 
 import service.ormService as ormService
-from constants import TaskStatus
+from constants import TaskPriority, TaskStatus
 from dal.db import gtAgentTaskEventManager, gtAgentTaskManager
 from model.dbModel.gtAgentTask import GtAgentTask
 from service.funcToolService import core as funcCore
@@ -48,6 +48,24 @@ class TestTaskTools(ServiceTestCase):
             creator_id=8,
             reviewer_id=reviewer_id,
             status=status,
+        )
+        return await gtAgentTaskManager.create_task(task)
+
+    async def _make_task_for(
+        self,
+        assignee_id: int,
+        *,
+        status: TaskStatus = TaskStatus.TODO,
+        priority: TaskPriority = TaskPriority.NORMAL,
+    ) -> GtAgentTask:
+        """按指定 assignee / 状态 / 优先级建任务（用于隔离的排序与过滤用例）。"""
+        task = GtAgentTask(
+            team_id=1,
+            title="tool task",
+            assignee_id=assignee_id,
+            creator_id=8,
+            status=status,
+            priority=priority,
         )
         return await gtAgentTaskManager.create_task(task)
 
@@ -139,3 +157,83 @@ class TestTaskTools(ServiceTestCase):
 
         assert res["success"] is True
         assert any(t["id"] == task.id for t in res["tasks"])
+
+    async def test_list_tasks_default_open_only_excludes_finished(self):
+        """默认 open_only=True：只返回未完结任务（排除 DONE / CANCELLED）。"""
+        assignee = 71  # 独立 assignee，避免与其他用例的任务串扰
+        open_task = await self._make_task_for(assignee, status=TaskStatus.IN_PROGRESS)
+        done_task = await self._make_task_for(assignee, status=TaskStatus.DONE)
+        cancelled_task = await self._make_task_for(assignee, status=TaskStatus.CANCELLED)
+
+        res = await tools.list_tasks(assignee=assignee, _context=self._ctx())
+
+        ids = [t["id"] for t in res["tasks"]]
+        assert open_task.id in ids
+        assert done_task.id not in ids
+        assert cancelled_task.id not in ids
+
+    async def test_list_tasks_status_done_returns_finished(self):
+        """显式 status="DONE" 时能查到已完结任务（open_only 不生效）。"""
+        assignee = 72
+        await self._make_task_for(assignee, status=TaskStatus.IN_PROGRESS)
+        done_task = await self._make_task_for(assignee, status=TaskStatus.DONE)
+
+        res = await tools.list_tasks(assignee=assignee, status="DONE", _context=self._ctx())
+
+        ids = [t["id"] for t in res["tasks"]]
+        assert done_task.id in ids
+        assert all(t["status"] == TaskStatus.DONE for t in res["tasks"])
+
+    async def test_list_tasks_open_only_false_returns_finished(self):
+        """open_only=False 时返回全部（含已完结）。"""
+        assignee = 73
+        open_task = await self._make_task_for(assignee, status=TaskStatus.TODO)
+        done_task = await self._make_task_for(assignee, status=TaskStatus.DONE)
+
+        res = await tools.list_tasks(assignee=assignee, open_only=False, _context=self._ctx())
+
+        ids = [t["id"] for t in res["tasks"]]
+        assert open_task.id in ids
+        assert done_task.id in ids
+
+    async def test_list_tasks_requires_assignee_or_reviewer(self):
+        """assignee / reviewer 都不传 ⇒ missing_target 参数错误。"""
+        res = await tools.list_tasks(_context=self._ctx())
+
+        assert res["success"] is False
+        assert res["error_code"] == "missing_target"
+
+    async def test_list_tasks_sorted_by_priority_then_id(self):
+        """排序契约：priority DESC（HIGH → NORMAL → LOW），同级按 id 升序。
+
+        构造 id 与优先级相反的序列（先建 HIGH，再 NORMAL / LOW），使旧的
+        `id.desc()` 行为必然排错（旧实现会得到 LOW → NORMAL → HIGH）。
+        """
+        assignee = 74
+        high1 = await self._make_task_for(assignee, priority=TaskPriority.HIGH)
+        normal = await self._make_task_for(assignee, priority=TaskPriority.NORMAL)
+        low = await self._make_task_for(assignee, priority=TaskPriority.LOW)
+        high2 = await self._make_task_for(assignee, priority=TaskPriority.HIGH)
+
+        res = await tools.list_tasks(assignee=assignee, _context=self._ctx())
+
+        assert res["success"] is True
+        assert [t["priority"] for t in res["tasks"]] == [
+            TaskPriority.HIGH,
+            TaskPriority.HIGH,
+            TaskPriority.NORMAL,
+            TaskPriority.LOW,
+        ]
+        # 同级 HIGH 按 id 升序：high1（较小 id）在 high2 之前
+        assert [t["id"] for t in res["tasks"]] == [high1.id, high2.id, normal.id, low.id]
+
+    async def test_dal_list_tasks_sorted_by_priority_then_id(self):
+        """DAL 层直接校验排序（不经过工具层）。"""
+        assignee = 75
+        high = await self._make_task_for(assignee, priority=TaskPriority.HIGH)
+        normal = await self._make_task_for(assignee, priority=TaskPriority.NORMAL)
+        low = await self._make_task_for(assignee, priority=TaskPriority.LOW)
+
+        rows = await gtAgentTaskManager.list_tasks(team_id=1, assignee_id=assignee)
+
+        assert [t.id for t in rows] == [high.id, normal.id, low.id]

@@ -36,6 +36,35 @@ def test_list_tasks_signature_uses_assignee_and_reviewer():
     assert "assignee_id" not in params and "reviewer_id" not in params
 
 
+def test_list_tasks_signature_has_open_only_default_true():
+    """工具层 list_tasks 新增 open_only，默认 True（Agent 默认不看已完结）。"""
+    sig = inspect.signature(tools.list_tasks)
+    assert "open_only" in sig.parameters
+    assert sig.parameters["open_only"].default is True
+
+
+def test_list_tasks_metadata_exposes_open_only():
+    """工具 schema 由 docstring 解析：properties 含 open_only（含说明），非必填。"""
+    meta = get_function_metadata("list_tasks", tools.list_tasks)
+    props = meta["parameters"]["properties"]
+    assert "open_only" in props
+    assert props["open_only"]["type"] == "boolean"
+    assert props["open_only"].get("description")
+    assert meta["parameters"]["required"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_rejects_when_no_assignee_or_reviewer():
+    """assignee / reviewer 都不传 ⇒ 参数错误（missing_target），不抛异常。"""
+    from service.roomService.core import ToolCallContext
+
+    ctx = ToolCallContext(agent_id=8, team_id=1, tool_name="list_tasks")
+    res = await tools.list_tasks(_context=ctx)
+
+    assert res["success"] is False
+    assert res["error_code"] == "missing_target"
+
+
 def test_get_task_detail_and_deprecated_get_task_exist():
     assert callable(tools.get_task_detail)
     assert callable(tools.get_task)

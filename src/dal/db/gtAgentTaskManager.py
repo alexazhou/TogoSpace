@@ -2,8 +2,22 @@ from __future__ import annotations
 
 import datetime
 
-from constants import TaskStatus
+import peewee
+
+from constants import TaskPriority, TaskStatus
 from model.dbModel.gtAgentTask import GtAgentTask
+
+# `priority` 以字符串（'HIGH'/'NORMAL'/'LOW'）落库，直接对字段排序会退化成字典序
+# （NORMAL > LOW > HIGH，HIGH 反而排最后）。用权重 Case 显式定义优先级顺序。
+_PRIORITY_WEIGHT = peewee.Case(
+    None,
+    (
+        (GtAgentTask.priority == TaskPriority.HIGH, 3),
+        (GtAgentTask.priority == TaskPriority.NORMAL, 2),
+        (GtAgentTask.priority == TaskPriority.LOW, 1),
+    ),
+    default=0,
+)
 
 
 async def create_task(task: GtAgentTask) -> GtAgentTask:
@@ -69,7 +83,7 @@ async def list_tasks(
     exclude_statuses: list[TaskStatus] | None = None,
     limit: int = 20,
 ) -> list[GtAgentTask]:
-    """按条件查询任务列表，按创建时间降序。"""
+    """按条件查询任务列表，高优先级优先（HIGH → NORMAL → LOW），同级按 id 升序。"""
     query = GtAgentTask.select().where(GtAgentTask.team_id == team_id)
     if assignee_id is not None:
         query = query.where(GtAgentTask.assignee_id == assignee_id)
@@ -79,7 +93,7 @@ async def list_tasks(
         query = query.where(GtAgentTask.status == status)
     if exclude_statuses:
         query = query.where(GtAgentTask.status.not_in(exclude_statuses))
-    query = query.order_by(GtAgentTask.id.desc()).limit(limit)
+    query = query.order_by(_PRIORITY_WEIGHT.desc(), GtAgentTask.id.asc()).limit(limit)
     return list(await query.aio_execute())
 
 
