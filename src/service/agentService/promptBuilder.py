@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import re
+from datetime import datetime
+
 import yaml
 import service.skillService as skillService
+from constants import EVENT_CONTENT_MAX_CHARS, TaskStatus
 from dal.db import gtAgentManager, gtDeptManager
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService.prompts import (
@@ -109,20 +113,96 @@ def build_compact_resume_prompt(summary: str) -> str:
     return COMPACT_RESUME_TEMPLATE.format(summary=summary.strip())
 
 
+_EVENT_TRUNCATED_SUFFIX = "…(已截断)"
+
+
+def format_task_event_content(content: str, max_chars: int = EVENT_CONTENT_MAX_CHARS) -> str:
+    """把事件内容压成单行并按共享上限截断（超出部分丢弃并加省略标记）。"""
+    text = re.sub(r"\s+", " ", content or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + _EVENT_TRUNCATED_SUFFIX
+
+
+def _status_text(status: TaskStatus | str | None) -> str | None:
+    """状态枚举 / 字符串 → 展示用字符串（None 原样返回）。"""
+    if status is None:
+        return None
+    return status.value if isinstance(status, TaskStatus) else str(status)
+
+
+def _format_event_time(created_at: datetime | None) -> str:
+    """事件时间（应用本地时区）格式化为 YYYY-MM-DD HH:MM。"""
+    if created_at is None:
+        return ""
+    if created_at.tzinfo is not None:
+        created_at = created_at.astimezone()
+    return created_at.strftime("%Y-%m-%d %H:%M")
+
+
+def build_task_event_line(
+    *,
+    actor_name: str,
+    from_status: TaskStatus | str | None,
+    to_status: TaskStatus | str | None,
+    content: str,
+    created_at: datetime | None = None,
+) -> str:
+    """把一条任务事件渲染成注入通知的单行文本。
+
+    - 流转事件：``- 2026-10-26 02:41 REVIEWING→IN_PROGRESS（李哥）：打回原因``
+    - 评论事件：``- 2026-10-26 02:41 评论（李哥）：备注内容``
+    - 创建事件：``- 2026-10-26 02:44 创建为 TODO（系统）``
+
+    内容先压成单行（换行 / 连续空白折叠为一个空格），再按 ``EVENT_CONTENT_MAX_CHARS``
+    截断；内容为空时不追加冒号与正文。
+    """
+    from_text = _status_text(from_status)
+    to_text = _status_text(to_status)
+    if to_text is None:
+        action = "评论"
+    elif from_text is None:
+        action = f"创建为 {to_text}"
+    else:
+        action = f"{from_text}→{to_text}"
+
+    time_text = _format_event_time(created_at)
+    prefix = f"- {time_text} " if time_text else "- "
+    line = f"{prefix}{action}（{actor_name}）"
+    body = format_task_event_content(content)
+    return f"{line}：{body}" if body else line
+
+
+def _build_latest_event_block(latest_event: str | None) -> str:
+    """把渲染好的最新事件包成通知里的「最近事件」段落；无事件时返回空串（整段不出现）。"""
+    if latest_event is None or not latest_event.strip():
+        return ""
+    return f"\n最近事件：\n{latest_event.strip()}\n"
+
+
 def build_todo_task_turn_prompt(
     title: str,
     description: str,
     status_value: str,
     has_reviewer: bool = False,
+    latest_event: str | None = None,
 ) -> str:
     """构建协作任务（TODO_TASK）turn 的用户提示文本。
 
     status_value == "REVIEWING" 时为验收通知；否则为执行通知，并按是否设有验收人
     给出互斥的完成方式（有验收人须先 REVIEWING，无验收人直接 DONE）。
+
+    Args:
+        latest_event: 由 build_task_event_line 渲染好的「最新一条事件」单行文本（不含标题）；
+            为 None / 空串时通知里整段不出现「最近事件」。
     """
+    latest_event_block = _build_latest_event_block(latest_event)
     if status_value == "REVIEWING":
         return REVIEW_TASK_TURN_PROMPT_TEMPLATE.format(
-            title=title, description=description, status_value=status_value
+            title=title,
+            description=description,
+            status_value=status_value,
+            latest_event_block=latest_event_block,
         )
     complete_instruction = TODO_TASK_REVIEW_INSTRUCTION if has_reviewer else TODO_TASK_DONE_INSTRUCTION
     return TODO_TASK_TURN_PROMPT_TEMPLATE.format(
@@ -130,6 +210,7 @@ def build_todo_task_turn_prompt(
         description=description,
         status_value=status_value,
         complete_instruction=complete_instruction,
+        latest_event_block=latest_event_block,
     )
 
 

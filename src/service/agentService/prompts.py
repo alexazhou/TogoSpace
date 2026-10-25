@@ -82,6 +82,7 @@ TASK_COLLABORATION_GUIDE = '''当需要跨轮次协作、分配复杂任务或�
 - `update_task`：流转任务状态，或追加评论。给 `new_status` = 流转状态；省略 `new_status` = 追加评论（此时 `note` 必填）
 - `get_task_detail` / `list_tasks`：查询任务详情（含事件时间线摘要）或列表
 - `list_task_events`：按游标读取任务的时间线（流转 + 评论）
+- `get_task_event`：按事件 id 查询单条事件（返回完整原文；事件 id 见 `get_task_detail` / `list_task_events` 的时间线）
 
 在群聊中通过 `send_chat_msg` 交代重要任务后，建议同时使用 `create_task` 创建一个正式的任务单，以确保工作可被跟踪且不被遗漏。'''
 
@@ -136,7 +137,7 @@ TODO_TASK_TURN_PROMPT_TEMPLATE = '''【任务通知】
 - 标题: {title}
 - 描述: {description}
 - 状态: {status_value}
-
+{latest_event_block}
 请直接开始工作。
 {complete_instruction}
 - 若需暂缓（本轮无法完成），请调用 `update_task` 将状态改为 ON_HOLD。
@@ -148,7 +149,7 @@ REVIEW_TASK_TURN_PROMPT_TEMPLATE = '''【任务通知】
 - 标题: {title}
 - 描述: {description}
 - 状态: {status_value}
-
+{latest_event_block}
 请直接开始验收。
 - 若验收通过，请调用 `update_task` 将状态改为 DONE，并在 `note` 中写明结果。
 - 若验收不通过，请调用 `update_task` 将状态改回 IN_PROGRESS，并在 `note` 中写明打回原因。

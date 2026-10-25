@@ -1,7 +1,8 @@
 import pytest
 
-from datetime import datetime
+from datetime import datetime, timezone
 
+from constants import EVENT_CONTENT_MAX_CHARS, TaskStatus
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService import promptBuilder
 
@@ -98,6 +99,144 @@ def test_build_todo_task_turn_prompt_for_review_task():
     assert "result" not in result
     # 验收通知不受 has_reviewer 影响（验收人必然存在）
     assert result == promptBuilder.build_todo_task_turn_prompt("验收功能", "检查交付结果", "REVIEWING", has_reviewer=True)
+    # 未注入事件时不应出现「最近事件」段
+    assert "最近事件" not in result
+
+
+# ─── 任务通知注入「最近事件」 ─────────────────────────────────
+
+
+_EVENT_LINE = "- 2026-10-26 02:41 REVIEWING→IN_PROGRESS（李哥）：加密逻辑未覆盖空口令用例"
+
+
+def test_task_turn_prompt_without_latest_event_has_no_event_section():
+    """三种通知在未传 latest_event 时都不出现「最近事件」段（向后兼容）。"""
+    without_reviewer = promptBuilder.build_todo_task_turn_prompt("写周报", "整理进展", "IN_PROGRESS")
+    with_reviewer = promptBuilder.build_todo_task_turn_prompt("写周报", "整理进展", "IN_PROGRESS", has_reviewer=True)
+    review = promptBuilder.build_todo_task_turn_prompt("验收功能", "检查交付结果", "REVIEWING")
+
+    for result in (without_reviewer, with_reviewer, review):
+        assert "最近事件" not in result
+
+
+def test_task_turn_prompt_with_latest_event_in_all_variants():
+    """三种通知都带上「最近事件」段与事件原文。"""
+    without_reviewer = promptBuilder.build_todo_task_turn_prompt(
+        "写周报", "整理进展", "IN_PROGRESS", latest_event=_EVENT_LINE)
+    with_reviewer = promptBuilder.build_todo_task_turn_prompt(
+        "写周报", "整理进展", "IN_PROGRESS", has_reviewer=True, latest_event=_EVENT_LINE)
+    review = promptBuilder.build_todo_task_turn_prompt(
+        "验收功能", "检查交付结果", "REVIEWING", latest_event=_EVENT_LINE)
+
+    for result in (without_reviewer, with_reviewer, review):
+        assert "最近事件：" in result
+        assert _EVENT_LINE in result
+        # 段落位置：在状态行之后、行动指引之前
+        assert result.index("最近事件：") > result.index("- 状态: ")
+        assert result.index("最近事件：") < result.index("无论成败")
+
+
+def test_task_turn_prompt_blank_latest_event_hides_section():
+    """latest_event 为空串 / 空白串时整段不出现（不留空标题）。"""
+    for blank in ("", "   ", "\n"):
+        result = promptBuilder.build_todo_task_turn_prompt("写周报", "整理进展", "IN_PROGRESS", latest_event=blank)
+        assert "最近事件" not in result
+        assert result == promptBuilder.build_todo_task_turn_prompt("写周报", "整理进展", "IN_PROGRESS")
+
+
+def test_build_task_event_line_transition_format():
+    """流转事件：`- YYYY-MM-DD HH:MM FROM→TO（actor）：content`。"""
+    line = promptBuilder.build_task_event_line(
+        actor_name="李哥",
+        from_status=TaskStatus.REVIEWING,
+        to_status=TaskStatus.IN_PROGRESS,
+        content="加密逻辑未覆盖空口令用例",
+        created_at=datetime(2026, 10, 26, 2, 41),
+    )
+    assert line == _EVENT_LINE
+
+
+def test_build_task_event_line_comment_format():
+    """评论事件（to_status 为空）：`- YYYY-MM-DD HH:MM 评论（actor）：content`。"""
+    line = promptBuilder.build_task_event_line(
+        actor_name="小马哥",
+        from_status=None,
+        to_status=None,
+        content="补充：注意兼容旧数据",
+        created_at=datetime(2026, 10, 26, 3, 5),
+    )
+    assert line == "- 2026-10-26 03:05 评论（小马哥）：补充：注意兼容旧数据"
+
+
+def test_build_task_event_line_creation_event_without_content():
+    """创建事件 content 为空时不出现裸冒号。"""
+    line = promptBuilder.build_task_event_line(
+        actor_name="系统",
+        from_status=None,
+        to_status=TaskStatus.TODO,
+        content="",
+        created_at=datetime(2026, 10, 26, 2, 44),
+    )
+    assert line == "- 2026-10-26 02:44 创建为 TODO（系统）"
+    assert "：" not in line
+
+
+def test_build_task_event_line_collapses_multiline_content():
+    """多行 note 折叠成单行（保证注入文本真是一行）。"""
+    line = promptBuilder.build_task_event_line(
+        actor_name="李哥",
+        from_status="IN_PROGRESS",
+        to_status="REVIEWING",
+        content="F4 完成，请验收。\n\n【改动清单】\n1.\tsrc/dal/db/gtAgentTaskManager.py  ",
+        created_at=datetime(2026, 10, 26, 2, 35),
+    )
+    assert line == "- 2026-10-26 02:35 IN_PROGRESS→REVIEWING（李哥）：F4 完成，请验收。 【改动清单】 1. src/dal/db/gtAgentTaskManager.py"
+    assert "\n" not in line
+
+
+def test_build_task_event_line_truncates_long_content():
+    """单条 content 超过共享上限即截断并加省略标记。"""
+    long_content = "长" * (EVENT_CONTENT_MAX_CHARS + 50)
+    line = promptBuilder.build_task_event_line(
+        actor_name="李哥",
+        from_status="IN_PROGRESS",
+        to_status="REVIEWING",
+        content=long_content,
+        created_at=datetime(2026, 10, 26, 4, 0),
+    )
+    assert line.startswith("- 2026-10-26 04:00 IN_PROGRESS→REVIEWING（李哥）：")
+    assert line.endswith(promptBuilder._EVENT_TRUNCATED_SUFFIX)
+    body = line.split("：", 1)[1]
+    assert body == "长" * EVENT_CONTENT_MAX_CHARS + promptBuilder._EVENT_TRUNCATED_SUFFIX
+    # 边界：恰好等于上限时不截断
+    exact = promptBuilder.format_task_event_content("字" * EVENT_CONTENT_MAX_CHARS)
+    assert exact == "字" * EVENT_CONTENT_MAX_CHARS
+    assert promptBuilder._EVENT_TRUNCATED_SUFFIX not in exact
+
+
+def test_build_task_event_line_time_uses_local_timezone():
+    """带时区的时间按应用本地时区展示。"""
+    aware = datetime(2026, 10, 26, 2, 41, tzinfo=timezone.utc)
+    line = promptBuilder.build_task_event_line(
+        actor_name="李哥",
+        from_status="TODO",
+        to_status="IN_PROGRESS",
+        content="开工",
+        created_at=aware,
+    )
+    expected_time = aware.astimezone().strftime("%Y-%m-%d %H:%M")
+    assert line == f"- {expected_time} TODO→IN_PROGRESS（李哥）：开工"
+    # 无时间时不留多余空格
+    assert promptBuilder.build_task_event_line(
+        actor_name="李哥", from_status="TODO", to_status="IN_PROGRESS", content="开工", created_at=None
+    ) == "- TODO→IN_PROGRESS（李哥）：开工"
+
+
+def test_task_collaboration_guide_lists_get_task_event():
+    """协作指南需包含按事件 id 查单条事件的工具 get_task_event。"""
+    from service.agentService.prompts import TASK_COLLABORATION_GUIDE
+
+    assert "`get_task_event`" in TASK_COLLABORATION_GUIDE
 
 
 

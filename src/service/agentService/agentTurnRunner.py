@@ -13,7 +13,8 @@ from typing import List
 from constants import (
     AgentActivityStatus, AgentActivityType,
     AgentHistoryStatus, AgentHistoryTag,
-    AgentTaskType, DriverType, ModelInput, OpenaiApiRole, RoomState, TurnStepResult,
+    AgentTaskType, DriverType, ModelInput, OpenaiApiRole, RoomState, SpecialAgent,
+    TurnStepResult,
 )
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from model.dbModel.gtRoomMessage import GtRoomMessage
@@ -33,7 +34,7 @@ from service.agentService.toolRegistry import AgentToolRegistry, RegisteredTool,
 from service.roomService import ChatRoom, ToolCallContext
 from util import configUtil, llmApiUtil, sessionUtil
 from util.assertUtil import assertNotNull
-from dal.db import gtAgentHistoryManager, gtAgentTaskManager
+from dal.db import gtAgentHistoryManager, gtAgentManager, gtAgentTaskEventManager, gtAgentTaskManager
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,32 @@ class AgentTurnRunner:
         await self._history.finalize_cancel_turn()
         await agentActivityService.fail_started_activities(self.gt_agent.id, error_message="cancelled by user")
 
+    async def _resolve_event_actor_name(self, actor_id: int) -> str:
+        """事件 actor 的展示名：系统 / Operator / agent 的 display_name。"""
+        if actor_id == SpecialAgent.SYSTEM.value:
+            return "系统"
+        if actor_id == SpecialAgent.OPERATOR.value:
+            return "Operator"
+        agent = await gtAgentManager.get_agent_by_id(actor_id)
+        return agent.display_name if agent is not None else f"Agent#{actor_id}"
+
+    async def _build_latest_task_event_line(self, agent_task_id: int) -> str | None:
+        """取该任务的最后一条事件，渲染为通知里「最近事件」的单行文本（无事件返回 None）。
+
+        只读：仅查事件与 actor 展示名，不改状态、不触发唤醒/通知。
+        """
+        events = await gtAgentTaskEventManager.list_events(agent_task_id, limit=1)
+        if not events:
+            return None
+        event = events[0]
+        return promptBuilder.build_task_event_line(
+            actor_name=await self._resolve_event_actor_name(event.actor_id),
+            from_status=event.from_status,
+            to_status=event.to_status,
+            content=event.content,
+            created_at=event.created_at,
+        )
+
     async def run_task_turn(self, task: GtScheculeTask) -> None:
         """执行一个完整 chat turn：同步消息 → 推理 → 工具调用循环。
 
@@ -182,6 +209,7 @@ class AgentTurnRunner:
                             description=agent_task.description,
                             status_value=agent_task.status.value,
                             has_reviewer=agent_task.reviewer_id is not None,
+                            latest_event=await self._build_latest_task_event_line(agent_task.id),
                         )
                         await self._history.append_history_message(GtAgentHistory.build(
                             AgentMessage(role=OpenaiApiRole.USER, content=task_prompt),
