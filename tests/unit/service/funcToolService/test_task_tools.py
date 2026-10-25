@@ -36,6 +36,17 @@ def test_list_tasks_signature_uses_assignee_and_reviewer():
     assert "assignee_id" not in params and "reviewer_id" not in params
 
 
+def test_list_tasks_does_not_expose_limit():
+    """工具层不对外暴露 limit（走内部默认值）；服务层仍保留 limit 可选。"""
+    params = list(inspect.signature(tools.list_tasks).parameters)
+    assert params == ["assignee", "reviewer", "status", "open_only", "_context"]
+    assert "limit" not in params
+
+    import service.taskService as taskService
+
+    assert "limit" in inspect.signature(taskService.list_tasks).parameters
+
+
 def test_list_tasks_signature_has_open_only_default_true():
     """工具层 list_tasks 新增 open_only，默认 True（Agent 默认不看已完结）。"""
     sig = inspect.signature(tools.list_tasks)
@@ -44,12 +55,13 @@ def test_list_tasks_signature_has_open_only_default_true():
 
 
 def test_list_tasks_metadata_exposes_open_only():
-    """工具 schema 由 docstring 解析：properties 含 open_only（含说明），非必填。"""
+    """工具 schema 由 docstring 解析：properties 含 open_only（含说明），非必填，且不含 limit。"""
     meta = get_function_metadata("list_tasks", tools.list_tasks)
     props = meta["parameters"]["properties"]
-    assert "open_only" in props
+    assert set(props) == {"assignee", "reviewer", "status", "open_only"}
     assert props["open_only"]["type"] == "boolean"
     assert props["open_only"].get("description")
+    assert "limit" not in props
     assert meta["parameters"]["required"] == []
 
 
@@ -63,6 +75,28 @@ async def test_list_tasks_rejects_when_no_assignee_or_reviewer():
 
     assert res["success"] is False
     assert res["error_code"] == "missing_target"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_forwards_internal_default_limit(monkeypatch):
+    """工具层固定透传内部默认 limit（不对外开放），open_only 默认 True。"""
+    from service.roomService.core import ToolCallContext
+    import service.taskService as taskService
+
+    captured: dict = {}
+
+    async def _fake(**kwargs):
+        captured.update(kwargs)
+        return {"success": True, "tasks": [], "total": 0}
+
+    monkeypatch.setattr(taskService, "list_tasks", _fake)
+    ctx = ToolCallContext(agent_id=8, team_id=1, tool_name="list_tasks")
+    res = await tools.list_tasks(assignee=8, _context=ctx)
+
+    assert res["success"] is True
+    assert captured["assignee_id"] == 8
+    assert captured["open_only"] is True
+    assert captured["limit"] == tools.LIST_TASKS_DEFAULT_LIMIT
 
 
 def test_get_task_detail_and_deprecated_get_task_exist():

@@ -20,6 +20,10 @@ from util import configUtil, i18nUtil
 
 logger = logging.getLogger(__name__)
 
+# list_tasks 工具层不对外暴露 limit（Agent 无需控制页大小），固定走内部默认值；
+# 服务层 taskService.list_tasks 仍保留 limit 可选，供控制器/前端接口使用。
+LIST_TASKS_DEFAULT_LIMIT = 20
+
 # Tool 返回值规范
 # 所有 tool 函数统一返回 dict，由 funcToolService.run_tool_call 序列化为 JSON 字符串后交给 LLM。
 # 必填字段：
@@ -1186,7 +1190,6 @@ async def list_tasks(
     reviewer: Optional[int] = None,
     status: Optional[str] = None,
     open_only: bool = True,
-    limit: int = 20,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
     """查询协作任务列表。
@@ -1194,13 +1197,13 @@ async def list_tasks(
     默认只返回未完结任务（`open_only=True`，排除 DONE / CANCELLED），便于聚焦进行中的工作。
     需要查看已完结任务时显式传 `open_only=False`，或用 `status` 指定具体状态。
     必须按执行人（`assignee`）或验收人（`reviewer`）之一过滤，两者都不传会被拒绝。
+    返回条数由内部默认值决定，不对调用方开放。
 
     Args:
         assignee: 按执行人 Agent ID 过滤
         reviewer: 按验收人 Agent ID 过滤
         status: 按状态过滤（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）；显式指定时 open_only 不生效
         open_only: 是否只返回未完结任务（排除 DONE / CANCELLED），默认 True
-        limit: 最多返回条数，默认 20
     """
     import service.taskService as taskService
 
@@ -1221,7 +1224,7 @@ async def list_tasks(
         reviewer_id=reviewer,
         status=status,
         open_only=open_only,
-        limit=limit,
+        limit=LIST_TASKS_DEFAULT_LIMIT,
     )
 
 
