@@ -20,6 +20,7 @@ from service.agentService.prompts import (
     TODO_TASK_TURN_PROMPT_TEMPLATE,
     TODO_TASK_DONE_INSTRUCTION,
     TODO_TASK_REVIEW_INSTRUCTION,
+    LATEST_EVENT_TRUNCATION_HINT_TEMPLATE,
     REVIEW_TASK_TURN_PROMPT_TEMPLATE,
 )
 from util import configUtil
@@ -174,10 +175,14 @@ def build_task_event_line(
 
 
 def _build_latest_event_block(latest_event: str | None) -> str:
-    """把渲染好的最新事件包成通知里的「最近事件」段落；无事件时返回空串（整段不出现）。"""
+    """把渲染好的最新事件包成通知里的「最近事件」段落；无事件时返回空串（整段不出现）。
+
+    段落内附一句截断口径提示（截断长度直接取共享常量，避免两处口径漂移）。
+    """
     if latest_event is None or not latest_event.strip():
         return ""
-    return f"\n最近事件：\n{latest_event.strip()}\n"
+    hint = LATEST_EVENT_TRUNCATION_HINT_TEMPLATE.format(max_chars=EVENT_CONTENT_MAX_CHARS)
+    return f"\n最近事件：\n{latest_event.strip()}\n{hint}\n"
 
 
 def build_todo_task_turn_prompt(

@@ -131,6 +131,9 @@ def test_task_turn_prompt_with_latest_event_in_all_variants():
     for result in (without_reviewer, with_reviewer, review):
         assert "最近事件：" in result
         assert _EVENT_LINE in result
+        # 截断口径提示（含共享上限值 + 指向 get_task_event）
+        assert f"事件内容超过 {EVENT_CONTENT_MAX_CHARS} 字会被截断" in result
+        assert "`get_task_event`" in result
         # 段落位置：在状态行之后、行动指引之前
         assert result.index("最近事件：") > result.index("- 状态: ")
         assert result.index("最近事件：") < result.index("无论成败")
@@ -141,6 +144,7 @@ def test_task_turn_prompt_blank_latest_event_hides_section():
     for blank in ("", "   ", "\n"):
         result = promptBuilder.build_todo_task_turn_prompt("写周报", "整理进展", "IN_PROGRESS", latest_event=blank)
         assert "最近事件" not in result
+        assert "get_task_event" not in result
         assert result == promptBuilder.build_todo_task_turn_prompt("写周报", "整理进展", "IN_PROGRESS")
 
 

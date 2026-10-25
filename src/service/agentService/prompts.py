@@ -132,6 +132,10 @@ TODO_TASK_REVIEW_INSTRUCTION = (
     '并在 `note` 中写明结果；验收人审核通过后由验收人改为 DONE。'
 )
 
+LATEST_EVENT_TRUNCATION_HINT_TEMPLATE = (
+    '（事件内容超过 {max_chars} 字会被截断，需要完整原文可调 `get_task_event`）'
+)
+
 TODO_TASK_TURN_PROMPT_TEMPLATE = '''【任务通知】
 你当前被唤醒以处理以下任务：
 - 标题: {title}
