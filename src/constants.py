@@ -253,6 +253,14 @@ class TaskPriority(EnhanceEnum):
     LOW    = "LOW"
 
 
+# 面向 Agent 呈现任务事件时的**单条内容**截断长度（Operator 2026-10-26 定调）：
+# 所有「注入 / 展示」事件内容的路径（任务通知注入、get_task_detail、list_task_events，
+# 以及由事件派生的 last_note / current_block_reason）都按此长度截断，超出部分丢弃并加省略标记；
+# 唯一例外是 get_task_event（按事件 id 取单条），返回完整原文。
+EVENT_CONTENT_MAX_CHARS = 100
+
+
+
 class AgentTaskType(EnhanceEnum):
     """Agent 任务类型枚举。"""
     ROOM_MESSAGE = auto()
