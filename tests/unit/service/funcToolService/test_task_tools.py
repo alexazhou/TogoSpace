@@ -196,3 +196,74 @@ def test_registry_contains_new_and_deprecated_tool_names():
     assert "get_task_detail" in registry
     assert "list_task_events" in registry
     assert "get_task" in registry  # 废弃别名（平滑迁移）
+
+
+def test_get_task_event_signature_exposes_only_event_id():
+    """get_task_event 入参 = event_id / _context（无 limit / task_id 等）。"""
+    params = list(inspect.signature(tools.get_task_event).parameters)
+    assert params == ["event_id", "_context"]
+
+
+def test_get_task_event_metadata_only_exposes_required_event_id():
+    """工具 schema 由 docstring 解析：properties 只有 event_id，且必填、含说明。"""
+    meta = get_function_metadata("get_task_event", tools.get_task_event)
+    props = meta["parameters"]["properties"]
+    assert set(props) == {"event_id"}
+    assert props["event_id"]["type"] == "integer"
+    assert props["event_id"].get("description")
+    assert meta["parameters"]["required"] == ["event_id"]
+    # description 只取 docstring 首行
+    assert "按事件 id 查询单条任务事件" in meta["description"]
+
+
+def test_get_task_event_registered_in_core():
+    """core 注册表含 get_task_event。"""
+    from service.funcToolService import core
+
+    assert "get_task_event" in core.load_func_tools()
+
+
+def test_get_task_event_categorized_basic_and_resolvable():
+    """归入 BASIC 类别，Category:Basic 策略下可解析到（防止漏配 CATEGORY_CONFIG）。"""
+    from service.agentService.toolRegistry import CATEGORY_CONFIG, AgentToolRegistry
+    from service.funcToolService import core
+    from constants import ToolCategory
+
+    assert CATEGORY_CONFIG["get_task_event"] == ToolCategory.BASIC
+
+    core.load_func_tools()
+    registry = AgentToolRegistry()
+    for tool in core.get_tools():
+        registry.register(tool, lambda args_str, ctx: None)
+
+    assert "get_task_event" in registry.resolve_enabled_tool_names(["Category:Basic"])
+
+
+@pytest.mark.asyncio
+async def test_get_task_event_forwards_event_id_and_team(monkeypatch):
+    """工具层把 team_id（来自上下文）与 event_id 透传给服务层。"""
+    from service.roomService.core import ToolCallContext
+    import service.taskService as taskService
+
+    captured: dict = {}
+
+    async def _fake(**kwargs):
+        captured.update(kwargs)
+        return {"success": True, "event": {"id": 5}}
+
+    monkeypatch.setattr(taskService, "get_task_event", _fake)
+    ctx = ToolCallContext(agent_id=8, team_id=1, tool_name="get_task_event")
+
+    res = await tools.get_task_event(event_id=5, _context=ctx)
+
+    assert res["success"] is True
+    assert captured == {"team_id": 1, "event_id": 5}
+
+
+@pytest.mark.asyncio
+async def test_get_task_event_without_team_context_returns_failure():
+    """无团队上下文 ⇒ 失败，不抛异常。"""
+    res = await tools.get_task_event(event_id=5)
+
+    assert res["success"] is False
+    assert "团队上下文" in res["message"]

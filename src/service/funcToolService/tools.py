@@ -1172,6 +1172,27 @@ async def get_task(
     return result
 
 
+async def get_task_event(
+    event_id: int,
+    _context: Optional[ToolCallContext] = None,
+) -> dict:
+    """按事件 id 查询单条任务事件（含 actor 展示名，只读）。
+
+    事件时间线上的事件若内容被截断，可用本工具按 id 取回单条完整事件；
+    不属于当前团队的事件会被拒绝。
+
+    Args:
+        event_id: 事件 ID
+    """
+    import service.taskService as taskService
+
+    ok, team_id = _require_team_context(_context)
+    if not ok:
+        return {"success": False, "message": "无法获取团队上下文"}
+
+    return await taskService.get_task_event(team_id=team_id, event_id=event_id)
+
+
 async def list_task_events(
     task_id: int,
     limit: int = 50,

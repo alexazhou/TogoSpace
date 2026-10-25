@@ -27,6 +27,7 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     # "get_task"（已废弃别名）刻意不归入任何 Category：保留 tools.get_task 与 core 注册以平滑迁移，
     # 但不再被 Category:Basic 等授权自动带出，仅显式指名（allow_specs 里写 "get_task"）时才可启用。
     "list_task_events": ToolCategory.BASIC,
+    "get_task_event": ToolCategory.BASIC,
     "list_tasks": ToolCategory.BASIC,
     "load_skill": ToolCategory.BASIC,
     "reload_team": ToolCategory.ADMIN,

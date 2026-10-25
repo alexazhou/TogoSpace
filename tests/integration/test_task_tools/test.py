@@ -14,7 +14,7 @@ import sys
 import pytest
 
 import service.ormService as ormService
-from constants import TaskPriority, TaskStatus
+from constants import SpecialAgent, TaskPriority, TaskStatus
 from dal.db import gtAgentTaskEventManager, gtAgentTaskManager
 from model.dbModel.gtAgentTask import GtAgentTask
 from service.funcToolService import core as funcCore
@@ -175,6 +175,75 @@ class TestTaskTools(ServiceTestCase):
         )
         assert page2["total"] == 4
         assert page2["count"] == 2
+
+    async def test_get_task_event_returns_full_single_event_with_actor_name(self):
+        """按事件 id 取单条事件：字段完整、状态转字符串、actor_name 为展示名。
+
+        内容超过 EVENT_CONTENT_MAX_CHARS 时仍返回**完整原文**（本工具不截断）。
+        """
+        task = await self._make_task()
+        long_note = "打回原因：" + "很长的说明" * 30  # 远超 100 字符
+        await gtAgentTaskManager.update_task_status_with_event(
+            task,
+            actor_id=SpecialAgent.SYSTEM.value,
+            from_status=TaskStatus.TODO,
+            to_status=TaskStatus.IN_PROGRESS,
+            content=long_note,
+        )
+        latest = (await gtAgentTaskEventManager.list_events(task.id, limit=1))[0]
+
+        res = await tools.get_task_event(event_id=latest.id, _context=self._ctx())
+
+        assert res["success"] is True
+        event = res["event"]
+        assert event["id"] == latest.id
+        assert event["task_id"] == task.id
+        assert event["actor_id"] == SpecialAgent.SYSTEM.value
+        assert event["from_status"] == "TODO"
+        assert event["to_status"] == "IN_PROGRESS"
+        assert event["content"] == long_note  # 完整原文，不截断
+        assert event["actor_name"] == "系统"
+
+    async def test_get_task_event_comment_event_has_null_statuses(self):
+        """评论事件（from/to 均 NULL）取回后 actor_name 走 agent 展示名分支。"""
+        task = await self._make_task()
+        await tools.update_task(task_id=task.id, note="纯评论", _context=self._ctx())
+        latest = (await gtAgentTaskEventManager.list_events(task.id, limit=1))[0]
+
+        res = await tools.get_task_event(event_id=latest.id, _context=self._ctx())
+
+        assert res["success"] is True
+        assert res["event"]["from_status"] is None
+        assert res["event"]["to_status"] is None
+        assert res["event"]["content"] == "纯评论"
+        # actor_id=8 在测试库中通常无对应 Agent ⇒ 回退占位名，但字段必须存在且非空
+        assert isinstance(res["event"]["actor_name"], str) and res["event"]["actor_name"]
+
+    async def test_get_task_event_not_found_returns_failure(self):
+        """event_id 不存在 ⇒ 失败（success=False + message），不抛异常。"""
+        res = await tools.get_task_event(event_id=10 ** 9, _context=self._ctx())
+
+        assert res["success"] is False
+        assert "事件不存在" in res["message"]
+        assert "event" not in res
+
+    async def test_get_task_event_cross_team_is_rejected(self):
+        """跨团队事件 ⇒ 拒绝，且不泄露事件内容。"""
+        other = GtAgentTask(
+            team_id=2,
+            title="other team task",
+            assignee_id=8,
+            creator_id=8,
+            status=TaskStatus.TODO,
+        )
+        other = await gtAgentTaskManager.create_task(other)
+        latest = (await gtAgentTaskEventManager.list_events(other.id, limit=1))[0]
+
+        res = await tools.get_task_event(event_id=latest.id, _context=self._ctx())  # 上下文 team_id=1
+
+        assert res["success"] is False
+        assert "事件不属于当前团队" in res["message"]
+        assert "event" not in res
 
     async def test_list_tasks_tool_named_params(self):
         """工具层 list_tasks 用 assignee/reviewer 参数。"""

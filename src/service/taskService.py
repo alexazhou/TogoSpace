@@ -9,7 +9,7 @@ import logging
 from typing import Optional
 
 from constants import SpecialAgent, TaskPriority, TaskStatus
-from dal.db import gtAgentTaskManager, gtAgentTaskEventManager
+from dal.db import gtAgentManager, gtAgentTaskManager, gtAgentTaskEventManager
 from model.dbModel.gtAgentTask import GtAgentTask
 
 logger = logging.getLogger(__name__)
@@ -408,6 +408,40 @@ async def get_task(team_id: int, task_id: int, event_limit: int = EVENT_TIMELINE
     task_dict["current_block_reason"] = current_block_reason(task, events)
 
     return {"success": True, "task": task_dict}
+
+
+async def _resolve_actor_name(actor_id: int) -> str:
+    """事件 actor 的展示名：系统（`SpecialAgent.SYSTEM`）→「系统」，
+    Operator（`SpecialAgent.OPERATOR`）→「Operator」，其余取该 Agent 的 `display_name`。
+    """
+    if actor_id == SpecialAgent.SYSTEM.value:
+        return "系统"
+    if actor_id == SpecialAgent.OPERATOR.value:
+        return "Operator"
+    agent = await gtAgentManager.get_agent_by_id(actor_id)
+    return agent.display_name if agent is not None else f"Agent#{actor_id}"
+
+
+async def get_task_event(team_id: int, event_id: int) -> dict:
+    """按事件 id 查询单条任务事件（只读）。
+
+    - 事件不存在 ⇒ 失败；
+    - 事件所属任务不属于当前团队 ⇒ 一律拒绝（不泄露事件内容）；
+    - 成功 ⇒ `event`：`_serialize_event` 全字段 + `actor_name`（actor 展示名）。
+    """
+    event = await gtAgentTaskEventManager.get_event(event_id)
+    if event is None:
+        return {"success": False, "message": f"事件不存在：event_id={event_id}"}
+
+    task = await gtAgentTaskManager.get_task(event.task_id)
+    if task is None:
+        return {"success": False, "message": f"事件不存在：event_id={event_id}"}
+    if task.team_id != team_id:
+        return {"success": False, "message": "事件不属于当前团队"}
+
+    event_dict = _serialize_event(event)
+    event_dict["actor_name"] = await _resolve_actor_name(event.actor_id)
+    return {"success": True, "event": event_dict}
 
 
 async def list_task_events(

@@ -23,6 +23,7 @@ from .tools import (
     get_room_info,
     get_task,
     get_task_detail,
+    get_task_event,
     get_time,
     list_role_templates,
     list_task_events,
@@ -80,6 +81,7 @@ def load_func_tools() -> dict[str, FuncTool]:
         "get_task_detail": get_task_detail,
         "get_task": get_task,
         "list_task_events": list_task_events,
+        "get_task_event": get_task_event,
         "list_tasks": list_tasks,
         "load_skill": load_skill,
     }

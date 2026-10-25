@@ -53,6 +53,11 @@ async def list_events(
     return list(await query.aio_execute())
 
 
+async def get_event(event_id: int) -> GtAgentTaskEvent | None:
+    """按主键查询单条事件（append-only 表，只读）。"""
+    return await GtAgentTaskEvent.aio_get_or_none(GtAgentTaskEvent.id == event_id)
+
+
 async def count_events(task_id: int) -> int:
     """统计某任务的事件**总数**（跨页；不受 `limit` / `before_id` 影响）。"""
     return await (

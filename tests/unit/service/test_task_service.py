@@ -914,6 +914,122 @@ async def test_auto_progress_dependents_holds_when_upstream_unfinished(task_mana
     task_manager_mock.update_task_status_with_event.assert_not_awaited()
 
 
+# ---------------------------------------------------------------------------
+# #66：get_task_event（按事件 id 查单条事件）
+# ---------------------------------------------------------------------------
+
+
+def _build_event(**overrides):
+    """构造事件 mock（SimpleNamespace，贴近 DAL 返回的行对象）。"""
+    return SimpleNamespace(
+        id=overrides.get("id", 5),
+        task_id=overrides.get("task_id", 1),
+        actor_id=overrides.get("actor_id", 11),
+        from_status=overrides.get("from_status", TaskStatus.TODO),
+        to_status=overrides.get("to_status", TaskStatus.IN_PROGRESS),
+        content=overrides.get("content", "开工"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_task_event_not_found(task_manager_mock, event_manager_mock):
+    """事件不存在 ⇒ 失败，且不查任务 / 不解析 actor。"""
+    event_manager_mock.get_event = AsyncMock(return_value=None)
+
+    result = await taskService.get_task_event(team_id=1, event_id=999)
+
+    assert result["success"] is False
+    assert "事件不存在" in result["message"]
+    event_manager_mock.get_event.assert_awaited_once_with(999)
+    task_manager_mock.get_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_task_event_wrong_team_is_rejected(task_manager_mock, event_manager_mock):
+    """跨团队事件 ⇒ 一律拒绝，且不泄露事件内容。"""
+    event_manager_mock.get_event = AsyncMock(return_value=_build_event(task_id=1, content="机密"))
+    task_manager_mock.get_task = AsyncMock(return_value=_build_task(id=1, team_id=2))
+
+    result = await taskService.get_task_event(team_id=1, event_id=5)
+
+    assert result["success"] is False
+    assert "事件不属于当前团队" in result["message"]
+    assert "event" not in result
+    assert "机密" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_get_task_event_success_serializes_and_resolves_display_name(task_manager_mock, event_manager_mock):
+    """正常返回：复用 _serialize_event 字段（状态转字符串）+ actor_name（display_name）。"""
+    event_manager_mock.get_event = AsyncMock(return_value=_build_event(id=5, task_id=1, actor_id=7))
+    task_manager_mock.get_task = AsyncMock(return_value=_build_task(id=1, team_id=1))
+
+    def _fake_model_to_dict(obj, recurse=False):
+        return {
+            "id": obj.id,
+            "task_id": obj.task_id,
+            "actor_id": obj.actor_id,
+            "content": obj.content,
+        }
+
+    with patch("playhouse.shortcuts.model_to_dict", side_effect=_fake_model_to_dict):
+        with patch("service.taskService.gtAgentManager") as mock_agents:
+            mock_agents.get_agent_by_id = AsyncMock(return_value=SimpleNamespace(display_name="阿张"))
+            result = await taskService.get_task_event(team_id=1, event_id=5)
+
+    assert result["success"] is True
+    event = result["event"]
+    assert event["id"] == 5
+    assert event["task_id"] == 1
+    assert event["actor_id"] == 7
+    assert event["from_status"] == "TODO"
+    assert event["to_status"] == "IN_PROGRESS"
+    assert event["content"] == "开工"
+    assert event["actor_name"] == "阿张"
+    mock_agents.get_agent_by_id.assert_awaited_once_with(7)
+
+
+@pytest.mark.asyncio
+async def test_get_task_event_system_actor_name_is_system(task_manager_mock, event_manager_mock):
+    """系统 actor（SpecialAgent.SYSTEM）⇒「系统」，且不去查 Agent 表。"""
+    event_manager_mock.get_event = AsyncMock(
+        return_value=_build_event(actor_id=SpecialAgent.SYSTEM.value, content="系统自动推进")
+    )
+    task_manager_mock.get_task = AsyncMock(return_value=_build_task(id=1, team_id=1))
+
+    with patch("service.taskService.gtAgentManager") as mock_agents:
+        result = await taskService.get_task_event(team_id=1, event_id=5)
+
+    assert result["event"]["actor_name"] == "系统"
+    mock_agents.get_agent_by_id.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_task_event_operator_actor_name_is_operator(task_manager_mock, event_manager_mock):
+    """人类 Operator（SpecialAgent.OPERATOR）⇒「Operator」。"""
+    event_manager_mock.get_event = AsyncMock(return_value=_build_event(actor_id=SpecialAgent.OPERATOR.value))
+    task_manager_mock.get_task = AsyncMock(return_value=_build_task(id=1, team_id=1))
+
+    with patch("service.taskService.gtAgentManager") as mock_agents:
+        result = await taskService.get_task_event(team_id=1, event_id=5)
+
+    assert result["event"]["actor_name"] == "Operator"
+    mock_agents.get_agent_by_id.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_task_event_unknown_actor_falls_back_to_id(task_manager_mock, event_manager_mock):
+    """Agent 不存在（已删除）⇒ 回退占位名「Agent#<id>」，不抛异常。"""
+    event_manager_mock.get_event = AsyncMock(return_value=_build_event(actor_id=99))
+    task_manager_mock.get_task = AsyncMock(return_value=_build_task(id=1, team_id=1))
+
+    with patch("service.taskService.gtAgentManager") as mock_agents:
+        mock_agents.get_agent_by_id = AsyncMock(return_value=None)
+        result = await taskService.get_task_event(team_id=1, event_id=5)
+
+    assert result["event"]["actor_name"] == "Agent#99"
+
+
 @pytest.mark.asyncio
 async def test_claim_task_sets_in_progress_with_system_actor(task_manager_mock):
     """认领置位：TODO 的 assignee 认领 ⇒ TODO→IN_PROGRESS（SYSTEM 身份）。"""
