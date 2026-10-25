@@ -1097,11 +1097,14 @@ async def update_task(
     note: str = '',
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """更新协作任务：流转状态，或追加评论。
+    """更新协作任务：流转状态，或追加评论（流转受状态机与权限约束，见 new_status 说明）。
+
+    注：工具 schema 只透出 docstring 首行与参数段说明（见 funcToolType.get_function_metadata），
+    故状态机 / 权限约束随 new_status 的参数说明一并给出以保证模型可见。
 
     Args:
         task_id: 任务 ID
-        new_status: 新状态（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）。省略（或等于当前状态）表示追加评论。
+        new_status: 新状态（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）。省略（或等于当前状态）表示追加评论。约束与 taskService 状态机/权限一致，违反会被拒并返回 error_code——① 终态：DONE / CANCELLED 不可再流转，仅可追加评论（invalid_transition）；② 提交验收：→ REVIEWING 仅执行人（assignee）可发起，且仅当该任务设有验收人（未设时 no_reviewer）；③ 验收动作：REVIEWING → DONE（通过）与 REVIEWING → IN_PROGRESS（打回）仅验收人（reviewer）；④ 取消：→ CANCELLED 仅验收人或创建人（creator）；⑤ 其余流转（→ IN_PROGRESS / ON_HOLD 等）仅执行人（assignee）；⑥ 设有验收人的任务不能绕过验收直接 → DONE（review_required）；⑦ 依赖：PENDING → IN_PROGRESS 需 depends_on 全部 DONE（dependency_not_met）。
         note: 本次流转的说明；追加评论时必填（评论正文）
     """
     import service.taskService as taskService
@@ -1182,15 +1185,21 @@ async def list_tasks(
     assignee: Optional[int] = None,
     reviewer: Optional[int] = None,
     status: Optional[str] = None,
+    open_only: bool = True,
     limit: int = 20,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
     """查询协作任务列表。
 
+    默认只返回未完结任务（`open_only=True`，排除 DONE / CANCELLED），便于聚焦进行中的工作。
+    需要查看已完结任务时显式传 `open_only=False`，或用 `status` 指定具体状态。
+    必须按执行人（`assignee`）或验收人（`reviewer`）之一过滤，两者都不传会被拒绝。
+
     Args:
         assignee: 按执行人 Agent ID 过滤
         reviewer: 按验收人 Agent ID 过滤
-        status: 按状态过滤（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）
+        status: 按状态过滤（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）；显式指定时 open_only 不生效
+        open_only: 是否只返回未完结任务（排除 DONE / CANCELLED），默认 True
         limit: 最多返回条数，默认 20
     """
     import service.taskService as taskService
@@ -1199,11 +1208,19 @@ async def list_tasks(
     if not ok:
         return {"success": False, "message": "无法获取团队上下文"}
 
+    if assignee is None and reviewer is None:
+        return {
+            "success": False,
+            "message": "请通过 assignee 或 reviewer 指定过滤目标（至少提供一个）",
+            "error_code": "missing_target",
+        }
+
     return await taskService.list_tasks(
         team_id=team_id,
         assignee_id=assignee,
         reviewer_id=reviewer,
         status=status,
+        open_only=open_only,
         limit=limit,
     )
 
