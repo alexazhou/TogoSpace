@@ -8,13 +8,21 @@ from constants import TaskPriority, TaskStatus
 from model.dbModel.gtAgentTask import GtAgentTask
 
 # `priority` 以字符串（'HIGH'/'NORMAL'/'LOW'）落库，直接对字段排序会退化成字典序
-# （NORMAL > LOW > HIGH，HIGH 反而排最后）。用权重 Case 显式定义优先级顺序。
+# （NORMAL > LOW > HIGH，HIGH 反而排最后）。用**显式权重映射**定义优先级顺序，
+# 并由映射生成 Case 表达式：新增 `TaskPriority` 枚举值却忘记配权重时，
+# 守卫测试（`tests/unit/dal/test_gt_agent_task_manager.py`）会直接转红，
+# 而不是让新值静默落到 `default=0`、被排到所有已登记优先级之后。
+_PRIORITY_WEIGHT_MAP: dict[TaskPriority, int] = {
+    TaskPriority.HIGH: 3,
+    TaskPriority.NORMAL: 2,
+    TaskPriority.LOW: 1,
+}
+
 _PRIORITY_WEIGHT = peewee.Case(
     None,
-    (
-        (GtAgentTask.priority == TaskPriority.HIGH, 3),
-        (GtAgentTask.priority == TaskPriority.NORMAL, 2),
-        (GtAgentTask.priority == TaskPriority.LOW, 1),
+    tuple(
+        (GtAgentTask.priority == priority, weight)
+        for priority, weight in _PRIORITY_WEIGHT_MAP.items()
     ),
     default=0,
 )
@@ -75,15 +83,17 @@ async def get_task(task_id: int) -> GtAgentTask | None:
     return await GtAgentTask.aio_get_or_none(GtAgentTask.id == task_id)
 
 
-async def list_tasks(
+def _filtered_task_query(
     team_id: int,
     assignee_id: int | None = None,
     reviewer_id: int | None = None,
     status: TaskStatus | None = None,
     exclude_statuses: list[TaskStatus] | None = None,
-    limit: int = 20,
-) -> list[GtAgentTask]:
-    """按条件查询任务列表，高优先级优先（HIGH → NORMAL → LOW），同级按 id 升序。"""
+):
+    """构造任务过滤条件（`list_tasks` 与 `count_tasks` **共用同一 where 构造**，
+
+    保证「本页列表」与「跨页总数」永远按同一口径筛选，不会两处走偏）。
+    """
     query = GtAgentTask.select().where(GtAgentTask.team_id == team_id)
     if assignee_id is not None:
         query = query.where(GtAgentTask.assignee_id == assignee_id)
@@ -93,8 +103,37 @@ async def list_tasks(
         query = query.where(GtAgentTask.status == status)
     if exclude_statuses:
         query = query.where(GtAgentTask.status.not_in(exclude_statuses))
-    query = query.order_by(_PRIORITY_WEIGHT.desc(), GtAgentTask.id.asc()).limit(limit)
+    return query
+
+
+async def list_tasks(
+    team_id: int,
+    assignee_id: int | None = None,
+    reviewer_id: int | None = None,
+    status: TaskStatus | None = None,
+    exclude_statuses: list[TaskStatus] | None = None,
+    limit: int = 20,
+) -> list[GtAgentTask]:
+    """按条件查询任务列表，高优先级优先（HIGH → NORMAL → LOW），同级按 id 升序。"""
+    query = (
+        _filtered_task_query(team_id, assignee_id, reviewer_id, status, exclude_statuses)
+        .order_by(_PRIORITY_WEIGHT.desc(), GtAgentTask.id.asc())
+        .limit(limit)
+    )
     return list(await query.aio_execute())
+
+
+async def count_tasks(
+    team_id: int,
+    assignee_id: int | None = None,
+    reviewer_id: int | None = None,
+    status: TaskStatus | None = None,
+    exclude_statuses: list[TaskStatus] | None = None,
+) -> int:
+    """统计符合条件的任务**总数**（跨页；不受 `limit` 影响，与 `list_tasks` 同一过滤口径）。"""
+    return await _filtered_task_query(
+        team_id, assignee_id, reviewer_id, status, exclude_statuses
+    ).aio_count()
 
 
 async def list_pending_dependents(team_id: int, dep_task_id: int) -> list[GtAgentTask]:

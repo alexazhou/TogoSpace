@@ -391,11 +391,13 @@ async def test_list_tasks_basic_call_returns_tasks(task_manager_mock):
         _build_task(id=2, title="task 2", status=TaskStatus.DONE),
     ]
     task_manager_mock.list_tasks = AsyncMock(return_value=tasks)
+    task_manager_mock.count_tasks = AsyncMock(return_value=2)
 
     result = await taskService.list_tasks(team_id=1)
 
     assert result["success"] is True
-    assert result["total"] == 2
+    assert result["count"] == 2  # 本页条数
+    assert result["total"] == 2  # 符合条件的总数
     assert [task["id"] for task in result["tasks"]] == [1, 2]
     task_manager_mock.list_tasks.assert_awaited_once_with(
         team_id=1,
@@ -405,6 +407,74 @@ async def test_list_tasks_basic_call_returns_tasks(task_manager_mock):
         exclude_statuses=None,
         limit=20,
     )
+    task_manager_mock.count_tasks.assert_awaited_once_with(
+        team_id=1,
+        assignee_id=None,
+        reviewer_id=None,
+        status=None,
+        exclude_statuses=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_total_is_real_total_not_page_len(task_manager_mock):
+    """#67 回归：`total` = **真实总数**（跨页），`count` = 本页条数。
+
+    旧实现把 `total` 写成 `len(tasks)` ⇒ 本用例在其下必红（total 会是 20）。
+    """
+    page = [_build_task(id=i) for i in range(1, 21)]  # 本页满 20 条
+    task_manager_mock.list_tasks = AsyncMock(return_value=page)
+    task_manager_mock.count_tasks = AsyncMock(return_value=37)  # 实际共 37 条
+
+    result = await taskService.list_tasks(team_id=1, assignee_id=11, limit=20)
+
+    assert result["count"] == 20
+    assert result["total"] == 37  # 被 limit 截断可被察觉（total > count）
+    task_manager_mock.count_tasks.assert_awaited_once_with(
+        team_id=1,
+        assignee_id=11,
+        reviewer_id=None,
+        status=None,
+        exclude_statuses=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_counts_with_same_filters(task_manager_mock):
+    """总数与列表必须走**同一过滤口径**（status / exclude_statuses 一并透传）。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    await taskService.list_tasks(team_id=1, assignee_id=11, open_only=True, limit=10)
+
+    expected = dict(
+        team_id=1,
+        assignee_id=11,
+        reviewer_id=None,
+        status=None,
+        exclude_statuses=[TaskStatus.DONE, TaskStatus.CANCELLED],
+    )
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=10, **expected)
+    task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_explicit_status_is_passed_to_both_queries(task_manager_mock):
+    """显式 status 时 `open_only` 不生效，且过滤条件同样透传给总数查询。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    await taskService.list_tasks(team_id=1, assignee_id=11, status="done", open_only=True)
+
+    expected = dict(
+        team_id=1,
+        assignee_id=11,
+        reviewer_id=None,
+        status=TaskStatus.DONE,
+        exclude_statuses=None,
+    )
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
 
 
 @pytest.mark.asyncio
@@ -476,10 +546,12 @@ async def test_update_task_does_not_publish_on_failure(task_manager_mock):
 @pytest.mark.asyncio
 async def test_list_tasks_open_only_excludes_done_and_cancelled(task_manager_mock):
     task_manager_mock.list_tasks = AsyncMock(return_value=[_build_task(id=3, status=TaskStatus.IN_PROGRESS)])
+    task_manager_mock.count_tasks = AsyncMock(return_value=1)
 
     result = await taskService.list_tasks(team_id=1, assignee_id=11, open_only=True, limit=10)
 
     assert result["success"] is True
+    assert result["count"] == 1
     assert result["total"] == 1
     task_manager_mock.list_tasks.assert_awaited_once_with(
         team_id=1,

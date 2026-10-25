@@ -480,7 +480,12 @@ async def list_tasks(
     open_only: bool = False,
     limit: int = 20,
 ) -> dict:
-    """查询协作任务列表。"""
+    """查询协作任务列表。
+
+    返回 `tasks`（本页，高优先级优先）、`count`（本页条数）、
+    `total`（**符合条件的任务总数**，跨页、不受 `limit` 影响）——
+    `total > count` 即说明还有更多任务被 `limit` 截断。
+    """
     from playhouse.shortcuts import model_to_dict
 
     status_enum: Optional[TaskStatus] = None
@@ -500,4 +505,16 @@ async def list_tasks(
         exclude_statuses=exclude_statuses,
         limit=limit,
     )
-    return {"success": True, "tasks": [model_to_dict(t, recurse=False) for t in tasks], "total": len(tasks)}
+    total = await gtAgentTaskManager.count_tasks(
+        team_id=team_id,
+        assignee_id=assignee_id,
+        reviewer_id=reviewer_id,
+        status=status_enum,
+        exclude_statuses=exclude_statuses,
+    )
+    return {
+        "success": True,
+        "tasks": [model_to_dict(t, recurse=False) for t in tasks],
+        "count": len(tasks),
+        "total": total,
+    }

@@ -333,3 +333,52 @@ class TestTaskTools(ServiceTestCase):
         rows = await gtAgentTaskManager.list_tasks(team_id=1, assignee_id=assignee)
 
         assert [t.id for t in rows] == [high.id, normal.id, low.id]
+
+    async def test_list_tasks_total_is_real_total_not_page_len(self):
+        """#67：`total` = 真实总数（跨页），`count` = 本页条数（被内部 limit=20 截断）。
+
+        建 21 条未完结任务 ⇒ 工具层不暴露 limit（内部固定 20），故 count=20、total=21，
+        Agent 可据此察觉「还有更多任务」；旧实现 total=len(tasks)=20，本用例在其下必红。
+        """
+        assignee = 76
+        for _ in range(21):
+            await self._make_task_for(assignee, status=TaskStatus.TODO)
+
+        res = await tools.list_tasks(assignee=assignee, _context=self._ctx())
+
+        assert res["success"] is True
+        assert res["count"] == 20
+        assert res["total"] == 21
+        assert len(res["tasks"]) == 20
+
+    async def test_list_tasks_total_respects_open_only_filter(self):
+        """总数与列表同一过滤口径：open_only 默认排除 DONE/CANCELLED，`total` 也不含它们。"""
+        assignee = 78
+        await self._make_task_for(assignee, status=TaskStatus.TODO)
+        await self._make_task_for(assignee, status=TaskStatus.IN_PROGRESS)
+        await self._make_task_for(assignee, status=TaskStatus.DONE)
+
+        open_res = await tools.list_tasks(assignee=assignee, _context=self._ctx())
+        all_res = await tools.list_tasks(assignee=assignee, open_only=False, _context=self._ctx())
+
+        assert (open_res["count"], open_res["total"]) == (2, 2)
+        assert (all_res["count"], all_res["total"]) == (3, 3)
+
+    async def test_dal_count_tasks_shares_filters_with_list_tasks(self):
+        """DAL：`count_tasks` 与 `list_tasks` 共用同一 where 构造 ⇒ 同参数下总数==列表条数。"""
+        assignee = 79
+        await self._make_task_for(assignee, status=TaskStatus.TODO)
+        await self._make_task_for(assignee, status=TaskStatus.IN_PROGRESS)
+        await self._make_task_for(assignee, status=TaskStatus.DONE)
+        closed = [TaskStatus.DONE, TaskStatus.CANCELLED]
+
+        rows = await gtAgentTaskManager.list_tasks(
+            team_id=1, assignee_id=assignee, exclude_statuses=closed, limit=20
+        )
+        count = await gtAgentTaskManager.count_tasks(
+            team_id=1, assignee_id=assignee, exclude_statuses=closed
+        )
+        count_all = await gtAgentTaskManager.count_tasks(team_id=1, assignee_id=assignee)
+
+        assert count == len(rows) == 2  # 同一过滤口径
+        assert count_all == 3  # 不带过滤时含已完结
