@@ -259,6 +259,9 @@ class TaskPriority(EnhanceEnum):
 # 唯一例外是 get_task_event（按事件 id 取单条），返回完整原文。
 EVENT_CONTENT_MAX_CHARS = 100
 
+# 事件内容被截断时统一追加的省略标记（全仓单一口径，勿各写一套）。
+EVENT_TRUNCATED_SUFFIX = "…(已截断)"
+
 
 
 class AgentTaskType(EnhanceEnum):
