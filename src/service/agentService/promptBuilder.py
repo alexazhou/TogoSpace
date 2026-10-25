@@ -14,6 +14,8 @@ from service.agentService.prompts import (
     WORKDIR_PROMPT,
     LANGUAGE_CONTEXT_PROMPT,
     TODO_TASK_TURN_PROMPT_TEMPLATE,
+    TODO_TASK_DONE_INSTRUCTION,
+    TODO_TASK_REVIEW_INSTRUCTION,
     REVIEW_TASK_TURN_PROMPT_TEMPLATE,
 )
 from util import configUtil
@@ -107,10 +109,28 @@ def build_compact_resume_prompt(summary: str) -> str:
     return COMPACT_RESUME_TEMPLATE.format(summary=summary.strip())
 
 
-def build_todo_task_turn_prompt(title: str, description: str, status_value: str) -> str:
-    """构建协作任务（TODO_TASK）turn 的用户提示文本。"""
-    template = REVIEW_TASK_TURN_PROMPT_TEMPLATE if status_value == "REVIEWING" else TODO_TASK_TURN_PROMPT_TEMPLATE
-    return template.format(title=title, description=description, status_value=status_value)
+def build_todo_task_turn_prompt(
+    title: str,
+    description: str,
+    status_value: str,
+    has_reviewer: bool = False,
+) -> str:
+    """构建协作任务（TODO_TASK）turn 的用户提示文本。
+
+    status_value == "REVIEWING" 时为验收通知；否则为执行通知，并按是否设有验收人
+    给出互斥的完成方式（有验收人须先 REVIEWING，无验收人直接 DONE）。
+    """
+    if status_value == "REVIEWING":
+        return REVIEW_TASK_TURN_PROMPT_TEMPLATE.format(
+            title=title, description=description, status_value=status_value
+        )
+    complete_instruction = TODO_TASK_REVIEW_INSTRUCTION if has_reviewer else TODO_TASK_DONE_INSTRUCTION
+    return TODO_TASK_TURN_PROMPT_TEMPLATE.format(
+        title=title,
+        description=description,
+        status_value=status_value,
+        complete_instruction=complete_instruction,
+    )
 
 
 async def _build_dept_context(team_id: int, agent_name: str) -> str:

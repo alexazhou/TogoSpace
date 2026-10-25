@@ -181,6 +181,7 @@ class AgentTurnRunner:
                             title=agent_task.title,
                             description=agent_task.description,
                             status_value=agent_task.status.value,
+                            has_reviewer=agent_task.reviewer_id is not None,
                         )
                         await self._history.append_history_message(GtAgentHistory.build(
                             AgentMessage(role=OpenaiApiRole.USER, content=task_prompt),

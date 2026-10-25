@@ -991,7 +991,7 @@ async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: 
 finish 失败，你负责执行的任务【{agent_task.title}】状态仍为 {agent_task.status.value}，尚未处理完毕。
 
 请先完成任务处理：
-- 若已完成，请调用 `update_task` 将状态改为 REVIEWING（有验收人时）或 DONE 并填写结果。
+- 若已完成，请调用 `update_task` 将状态改为 REVIEWING（有验收人时）或 DONE，并在 `note` 中写明结果。
 - 若需暂缓（本轮无法完成），请调用 `update_task` 将状态改为 ON_HOLD。
 - 若需取消，请调用 `update_task` 将状态改为 CANCELLED。
 完成后再调用 finish_action。""",

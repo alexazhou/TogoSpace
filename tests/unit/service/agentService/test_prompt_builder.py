@@ -60,12 +60,30 @@ def test_build_turn_begin_prompt_yaml_format():
 
 
 def test_build_todo_task_turn_prompt_for_normal_task():
+    """无验收人：完成路径直接 DONE，不出现 REVIEWING。"""
     result = promptBuilder.build_todo_task_turn_prompt("写周报", "整理本周进展", "IN_PROGRESS")
     assert "你当前被唤醒以处理以下任务" in result
     assert "请直接开始工作" in result
     assert "验收不通过" not in result
     assert "ON_HOLD" in result
     assert "CANCELLED" in result
+    assert "改为 DONE，并在 `note` 中写明结果" in result
+    assert "REVIEWING" not in result
+    # 旧签名 result 参数不得再出现在文案中
+    assert "result" not in result
+
+
+def test_build_todo_task_turn_prompt_with_reviewer_requires_reviewing():
+    """有验收人：完成路径须先 REVIEWING，与无验收人文案互斥。"""
+    result = promptBuilder.build_todo_task_turn_prompt("写周报", "整理本周进展", "IN_PROGRESS", has_reviewer=True)
+    assert "你当前被唤醒以处理以下任务" in result
+    assert "请直接开始工作" in result
+    assert "改为 REVIEWING 提交验收" in result
+    # 不得出现「执行人直接 DONE」的无验收人文案
+    assert "将状态改为 DONE，并在 `note` 中写明结果" not in result
+    assert "ON_HOLD" in result
+    assert "CANCELLED" in result
+    assert "result" not in result
 
 
 def test_build_todo_task_turn_prompt_for_review_task():
@@ -75,6 +93,11 @@ def test_build_todo_task_turn_prompt_for_review_task():
     assert "验收不通过" in result
     assert "IN_PROGRESS" in result
     assert "其他少见情况" in result
+    assert "改为 DONE，并在 `note` 中写明结果" in result
+    assert "并在 `note` 中写明打回原因" in result
+    assert "result" not in result
+    # 验收通知不受 has_reviewer 影响（验收人必然存在）
+    assert result == promptBuilder.build_todo_task_turn_prompt("验收功能", "检查交付结果", "REVIEWING", has_reviewer=True)
 
 
 
