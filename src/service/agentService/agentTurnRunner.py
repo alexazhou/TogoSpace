@@ -14,7 +14,7 @@ from constants import (
     AgentActivityStatus, AgentActivityType,
     AgentHistoryStatus, AgentHistoryTag,
     AgentTaskType, DriverType, ModelInput, OpenaiApiRole, RoomState, SpecialAgent,
-    TurnStepResult,
+    TaskStatus, TurnStepResult,
 )
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from model.dbModel.gtRoomMessage import GtRoomMessage
@@ -22,6 +22,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtScheculeTask import GtScheculeTask
+from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.historyUsage import CompactStage, HistoryUsage
 from service import agentActivityService, llmService, roomService
 from service.agentActivityService import AgentActivityMeta
@@ -170,6 +171,21 @@ class AgentTurnRunner:
             created_at=event.created_at,
         )
 
+    def _needs_task_attention(self, agent_task: GtAgentTask) -> bool:
+        """复核门：当前 agent 此刻是否仍需处理该任务。
+
+        - 执行人（assignee）且任务处于 `TODO` / `IN_PROGRESS` → 需要（执行通知）；
+        - 验收人（reviewer）且任务处于 `REVIEWING` → 需要（验收通知）；
+        - 其余情况（终态 / 暂缓 / 已改派 / 已是无关人员）→ 不需要，跳过本回合以免空转唤醒。
+
+        验收人判定复用 `taskService.is_task_reviewer`（全仓单一口径，不另写一套）。
+        """
+        if agent_task.assignee_id == self.gt_agent.id and agent_task.status in (TaskStatus.TODO, TaskStatus.IN_PROGRESS):
+            return True
+        import service.taskService as taskService  # 局部导入：避免 agentService ↔ taskService 的模块级导入环
+
+        return taskService.is_task_reviewer(agent_task, self.gt_agent.id) and agent_task.status == TaskStatus.REVIEWING
+
     async def run_task_turn(self, task: GtScheculeTask) -> None:
         """执行一个完整 chat turn：同步消息 → 推理 → 工具调用循环。
 
@@ -185,6 +201,15 @@ class AgentTurnRunner:
             assertNotNull(agent_task_id, error_message=f"task 缺少 agent_task_id, agent_id={self.gt_agent.id}, task_id={task.id}")
             agent_task = await gtAgentTaskManager.get_task(agent_task_id)
             assertNotNull(agent_task, error_message=f"agent_task_id={agent_task_id} 不存在, agent_id={self.gt_agent.id}")
+            if not self._needs_task_attention(agent_task):
+                # 复核门：调度记录不随任务状态失效，任务已终态 / 已流转 / 已改派时直接结束本回合，
+                # 不注入通知、不调用 LLM（调用方会把调度记录正常置为 COMPLETED）。
+                logger.info(
+                    f"协作任务无需处理，跳过本回合: {self.gt_agent.name}(agent_id={self.gt_agent.id}), "
+                    f"agent_task_id={agent_task_id}, status={agent_task.status.value}, "
+                    f"assignee_id={agent_task.assignee_id}, reviewer_id={agent_task.reviewer_id}"
+                )
+                return
             logger.info(f"协作任务 turn 开始: {self.gt_agent.name}(agent_id={self.gt_agent.id}), agent_task_id={agent_task_id}, title={agent_task.title!r}")
             room = None
         else:

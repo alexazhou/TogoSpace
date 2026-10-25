@@ -4,10 +4,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryStatus, AgentHistoryTag, AgentTaskType, DriverType, OpenaiApiRole, RoomState, TurnStepResult
+from constants import AgentHistoryStatus, AgentHistoryTag, AgentTaskType, DriverType, OpenaiApiRole, RoomState, TaskStatus, TurnStepResult
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtScheculeTask import GtScheculeTask
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService.agentTurnRunner import AgentTurnRunner
@@ -481,6 +482,125 @@ async def test_run_task_turn_todo_task_raises_when_agent_task_not_found(turn_run
         with pytest.raises(MakeSureException, match="不存在"):
             await turn_runner.run_task_turn(task)
 
+
+
+# ─── F8：TODO_TASK「空转回合」复核门 ──────────────────────────
+
+
+def _make_agent_task(*, assignee_id: int = 1, reviewer_id: int | None = None, status: TaskStatus) -> GtAgentTask:
+    return GtAgentTask(
+        id=210,
+        team_id=1,
+        title="协作任务",
+        description="任务描述",
+        creator_id=9,
+        assignee_id=assignee_id,
+        reviewer_id=reviewer_id,
+        status=status,
+    )
+
+
+def _make_todo_schedule_task(agent_task_id: int = 210) -> MagicMock:
+    task = MagicMock(spec=GtScheculeTask)
+    task.id = 200
+    task.task_type = AgentTaskType.TODO_TASK
+    task.task_data = {"agent_task_id": agent_task_id}
+    return task
+
+
+def _use_host_managed_driver(runner: AgentTurnRunner) -> MagicMock:
+    """切到 host-managed driver：通知注入与 turn loop 都在 runner 内，便于断言「是否跑过 turn」。"""
+    driver = MagicMock()
+    driver.host_managed_turn_loop = True
+    driver.started = True
+    runner.driver = driver
+    runner._run_turn_loop = AsyncMock()
+    return driver
+
+
+async def _run_todo_turn(runner: AgentTurnRunner, agent_task: GtAgentTask) -> None:
+    with patch("dal.db.gtAgentTaskManager.get_task", new=AsyncMock(return_value=agent_task)), \
+         patch("dal.db.gtAgentTaskEventManager.list_events", new=AsyncMock(return_value=[])), \
+         patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock()):
+        await runner.run_task_turn(_make_todo_schedule_task(agent_task.id))
+
+
+@pytest.mark.asyncio
+async def test_run_task_turn_todo_task_skips_when_reviewer_task_already_done(turn_runner):
+    """F8 复核门：reviewer 被唤醒但任务已 DONE ⇒ 不注入通知、不跑 turn（无 LLM 调用）。"""
+    _use_host_managed_driver(turn_runner)
+    agent_task = _make_agent_task(assignee_id=9, reviewer_id=1, status=TaskStatus.DONE)
+
+    await _run_todo_turn(turn_runner, agent_task)
+
+    turn_runner._history.append_history_message.assert_not_awaited()
+    turn_runner._run_turn_loop.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_task_turn_todo_task_skips_when_agent_is_not_related(turn_runner):
+    """复核门：既不是 assignee 也不是 reviewer（已改派）⇒ 跳过。"""
+    _use_host_managed_driver(turn_runner)
+    agent_task = _make_agent_task(assignee_id=9, reviewer_id=8, status=TaskStatus.IN_PROGRESS)
+
+    await _run_todo_turn(turn_runner, agent_task)
+
+    turn_runner._history.append_history_message.assert_not_awaited()
+    turn_runner._run_turn_loop.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [TaskStatus.ON_HOLD, TaskStatus.CANCELLED, TaskStatus.PENDING])
+async def test_run_task_turn_todo_task_skips_for_assignee_inactive_statuses(turn_runner, status):
+    """复核门：assignee 但任务非 TODO/IN_PROGRESS（暂缓/取消/待依赖）⇒ 跳过。"""
+    _use_host_managed_driver(turn_runner)
+    agent_task = _make_agent_task(assignee_id=1, status=status)
+
+    await _run_todo_turn(turn_runner, agent_task)
+
+    turn_runner._history.append_history_message.assert_not_awaited()
+    turn_runner._run_turn_loop.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_task_turn_todo_task_injects_exec_notice_for_assignee_in_progress(turn_runner):
+    """assignee + IN_PROGRESS ⇒ 注入执行通知并跑 turn。"""
+    _use_host_managed_driver(turn_runner)
+    agent_task = _make_agent_task(assignee_id=1, status=TaskStatus.IN_PROGRESS)
+
+    await _run_todo_turn(turn_runner, agent_task)
+
+    turn_runner._history.append_history_message.assert_awaited_once()
+    content = turn_runner._history.append_history_message.await_args.args[0].message.content
+    assert "你当前被唤醒以处理以下任务" in content
+    turn_runner._run_turn_loop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_task_turn_todo_task_injects_review_notice_for_reviewer_reviewing(turn_runner):
+    """reviewer + REVIEWING ⇒ 注入验收通知并跑 turn。"""
+    _use_host_managed_driver(turn_runner)
+    agent_task = _make_agent_task(assignee_id=9, reviewer_id=1, status=TaskStatus.REVIEWING)
+
+    await _run_todo_turn(turn_runner, agent_task)
+
+    turn_runner._history.append_history_message.assert_awaited_once()
+    content = turn_runner._history.append_history_message.await_args.args[0].message.content
+    assert "你当前被唤醒以处理以下验收任务" in content
+    turn_runner._run_turn_loop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_task_turn_todo_task_skips_before_native_driver_run(turn_runner):
+    """非 host-managed driver 路径同样受复核门保护（不调用 driver.run_task_turn）。"""
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.host_managed_turn_loop = False
+    turn_runner.driver.run_task_turn = AsyncMock()
+    agent_task = _make_agent_task(assignee_id=9, reviewer_id=1, status=TaskStatus.DONE)
+
+    await _run_todo_turn(turn_runner, agent_task)
+
+    turn_runner.driver.run_task_turn.assert_not_awaited()
 
 
 @pytest.mark.asyncio
