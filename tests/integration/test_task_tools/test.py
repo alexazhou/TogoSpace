@@ -4,7 +4,7 @@
   - 省略 `new_status` ⇒ 评论事件（from/to 均 NULL）、状态不变、action=commented；
   - 给定 `new_status` ⇒ 流转、action=transitioned；
   - 未知参数（旧字段 `result`）经 `run_tool_call` 直接报错（无兼容别名）；
-  - `get_task_detail` 正常返回；`get_task` 保留为废弃别名；
+  - `get_task_detail` 正常返回（`get_task` 废弃别名已在 #71 删除）；
   - `list_tasks` / `list_task_events` 工具签名与返回。
 """
 import json
@@ -113,17 +113,13 @@ class TestTaskTools(ServiceTestCase):
         assert res["success"] is False
         assert "result" in res["message"]
 
-    async def test_get_task_detail_and_deprecated_alias(self):
+    async def test_get_task_detail_returns_task(self):
         task = await self._make_task()
 
         res = await tools.get_task_detail(task_id=task.id, _context=self._ctx())
         assert res["success"] is True
         assert res["task"]["id"] == task.id
         assert "events" in res["task"]
-
-        old = await tools.get_task(task_id=task.id, _context=self._ctx())
-        assert old["success"] is True
-        assert "deprecated" in old
 
     async def test_get_task_detail_event_limit_returns_latest_and_reports_total(self):
         """event_limit 只返回最新 N 条；events_total 为事件总数（跨 limit）。"""

@@ -1154,25 +1154,6 @@ async def get_task_detail(
     return await taskService.get_task(team_id=team_id, task_id=task_id, event_limit=event_limit)
 
 
-async def get_task(
-    task_id: int,
-    event_limit: int = DEFAULT_EVENT_LIMIT,
-    _context: Optional[ToolCallContext] = None,
-) -> dict:
-    """【已废弃】查询单个协作任务详情；请改用 `get_task_detail`。
-
-    保留仅为平滑迁移：行为与 `get_task_detail` 一致，并在回执中附带废弃提示。
-
-    Args:
-        task_id: 任务 ID
-        event_limit: 事件时间线返回的条数上限（默认 3）
-    """
-    result = await get_task_detail(task_id=task_id, event_limit=event_limit, _context=_context)
-    if isinstance(result, dict):
-        result = {**result, "deprecated": "`get_task` 已更名，请改用 `get_task_detail`"}
-    return result
-
-
 async def get_task_event(
     event_id: int,
     _context: Optional[ToolCallContext] = None,

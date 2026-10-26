@@ -89,8 +89,8 @@ def test_read_image_categorized_and_enabled_under_read() -> None:
     assert "read_image" in registry.list_enabled_tool_names()
 
 
-def test_basic_category_excludes_deprecated_get_task() -> None:
-    """F5：废弃别名 get_task 不再归入 BASIC，Category:Basic 解析结果不含它，正式工具仍在。"""
+def test_basic_category_has_no_get_task() -> None:
+    """#71：废弃别名 get_task 已删除，Category:Basic 与注册表都不再出现它，正式工具仍在。"""
     from service.funcToolService import core
 
     core.load_func_tools()
@@ -103,10 +103,9 @@ def test_basic_category_excludes_deprecated_get_task() -> None:
     assert "get_task" not in basic_names
     assert "get_task_detail" in basic_names
     assert "list_task_events" in basic_names
-    # 函数与 core 注册保留（平滑迁移）：显式指名时仍可启用
-    assert "get_task" in registry.list_registered_tool_names()
-    assert "get_task" in registry.resolve_enabled_tool_names(["get_task"])
-    # 归入 BASIC 之外：Category:Read 等其它类别同样不会带出它
+    # 别名已彻底移除：不再可被注册表解析，也不在任何类别里
+    assert "get_task" not in registry.list_registered_tool_names()
+    assert "get_task" not in registry.resolve_enabled_tool_names(["get_task"])
     assert "get_task" not in registry.resolve_enabled_tool_names(["Category:Read"])
 
 

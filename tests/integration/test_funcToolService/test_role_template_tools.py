@@ -99,9 +99,9 @@ class TestRoleTemplateToolMetadata(ServiceTestCase):
         assert save_tool.category == ToolCategory.ADMIN
 
     async def test_all_local_tools_define_category(self) -> None:
-        """每个本地工具都应声明 category（F5：废弃别名 get_task 除外，保留注册但刻意不归入任何 Category）。"""
+        """每个本地工具都应声明 category（get_task 废弃别名已在 #71 删除，无例外）。"""
         load_func_tools()
-        assert {t.function.name for t in get_tools()} <= set(CATEGORY_CONFIG) | {"get_task"}
+        assert {t.function.name for t in get_tools()} <= set(CATEGORY_CONFIG)
 
     async def test_basic_chat_tools_use_basic_category(self) -> None:
         """基础行动工具应归类到 BASIC。"""

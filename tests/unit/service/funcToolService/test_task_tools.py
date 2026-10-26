@@ -99,9 +99,8 @@ async def test_list_tasks_forwards_internal_default_limit(monkeypatch):
     assert captured["limit"] == tools.LIST_TASKS_DEFAULT_LIMIT
 
 
-def test_get_task_detail_and_deprecated_get_task_exist():
+def test_get_task_detail_exists():
     assert callable(tools.get_task_detail)
-    assert callable(tools.get_task)
 
 
 def test_get_task_detail_event_limit_default_is_three():
@@ -120,13 +119,6 @@ def test_get_task_detail_metadata_exposes_event_limit():
     assert props["event_limit"]["type"] == "integer"
     assert props["event_limit"].get("description")
     assert meta["parameters"]["required"] == ["task_id"]
-
-
-def test_deprecated_get_task_exposes_event_limit():
-    """废弃别名 get_task 同样接受并透传 event_limit。"""
-    sig = inspect.signature(tools.get_task)
-    assert list(sig.parameters) == ["task_id", "event_limit", "_context"]
-    assert sig.parameters["event_limit"].default == 3
 
 
 @pytest.mark.asyncio
@@ -151,27 +143,6 @@ async def test_get_task_detail_forwards_event_limit(monkeypatch):
     assert captured["event_limit"] == 7
 
 
-@pytest.mark.asyncio
-async def test_deprecated_get_task_forwards_event_limit(monkeypatch):
-    """废弃别名把 event_limit 一并透传，并附加 deprecated 提示。"""
-    from service.roomService.core import ToolCallContext
-    import service.taskService as taskService
-
-    captured: dict = {}
-
-    async def _fake(**kwargs):
-        captured.update(kwargs)
-        return {"success": True, "task": {"id": 1}}
-
-    monkeypatch.setattr(taskService, "get_task", _fake)
-    ctx = ToolCallContext(agent_id=8, team_id=1, tool_name="get_task")
-
-    res = await tools.get_task(task_id=1, event_limit=5, _context=ctx)
-
-    assert captured["event_limit"] == 5
-    assert "deprecated" in res
-
-
 def test_list_task_events_signature():
     params = list(inspect.signature(tools.list_task_events).parameters)
     assert params == ["task_id", "limit", "before_id", "_context"]
@@ -188,14 +159,14 @@ def test_tool_metadata_exposes_new_status_only():
     assert meta["parameters"]["required"] == ["task_id"]
 
 
-def test_registry_contains_new_and_deprecated_tool_names():
-    """core 注册表含 get_task_detail / list_task_events，并保留废弃的 get_task。"""
+def test_registry_contains_expected_task_tool_names():
+    """core 注册表含 get_task_detail / list_task_events，且不含已删除的 get_task 别名。"""
     from service.funcToolService import core
 
     registry = core.load_func_tools()
     assert "get_task_detail" in registry
     assert "list_task_events" in registry
-    assert "get_task" in registry  # 废弃别名（平滑迁移）
+    assert "get_task" not in registry  # 废弃别名已删除（#71）
 
 
 def test_get_task_event_signature_exposes_only_event_id():
