@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from constants import ToolCategory
 from service.agentService.toolRegistry import (
+    CATEGORY_CONFIG,
     AgentToolRegistry,
     validate_tool_allow_specs,
     build_runtime_allow_specs,
@@ -178,3 +179,68 @@ async def test_execute_tool_call_exception() -> None:
     )
     assert result.success is False
     assert "工具调用失败" in result.result["message"]
+
+
+# ---------------------------------------------------------------------------
+# #75：CATEGORY_CONFIG 分类归属的字面量契约
+# ---------------------------------------------------------------------------
+
+# 分类表（37 条 = tools.py 本地 26 + TSP 11），**刻意写死字面量**：
+# 分类归属决定 `Category:*` 展开出哪些工具（见 `build_runtime_allow_specs`），
+# 把 `update_task` 挪出 BASIC 等于悄悄收走 Agent 的核心协作能力（`Category:Basic`
+# 下模型就看不到任务工具了），而 tool schema 快照对此完全沉默。故这里把归属
+# 变成显式契约，让「归错 / 漏登记 / 多残留」都以代码 diff 的形式出现在 review 里。
+#
+# 分布（按 `ToolCategory.name` 统计，**不要按 `.value` 反推** ——
+# 枚举声明序是 ADMIN=1 / BASIC=2 / READ=3 / WRITE=4 / EXECUTE=5）：
+#   BASIC 15 / ADMIN 10 / READ 6 / EXECUTE 4 / WRITE 2
+EXPECTED_TOOL_CATEGORIES = {
+    "create_task": ToolCategory.BASIC,
+    "delete_dept": ToolCategory.ADMIN,
+    "delete_role_template": ToolCategory.ADMIN,
+    "delete_room": ToolCategory.ADMIN,
+    "edit": ToolCategory.WRITE,
+    "execute_bash": ToolCategory.EXECUTE,
+    "finish_action": ToolCategory.BASIC,
+    "get_agent_info": ToolCategory.BASIC,
+    "get_dept_info": ToolCategory.BASIC,
+    "get_role_template": ToolCategory.ADMIN,
+    "get_room_info": ToolCategory.BASIC,
+    "get_task_detail": ToolCategory.BASIC,
+    "get_task_event": ToolCategory.BASIC,
+    "get_time": ToolCategory.BASIC,
+    "glob": ToolCategory.READ,
+    "grep_search": ToolCategory.READ,
+    "list_dir": ToolCategory.READ,
+    "list_role_templates": ToolCategory.ADMIN,
+    "list_task_events": ToolCategory.BASIC,
+    "list_tasks": ToolCategory.BASIC,
+    "load_skill": ToolCategory.BASIC,
+    "process_list": ToolCategory.EXECUTE,
+    "process_output": ToolCategory.EXECUTE,
+    "process_stop": ToolCategory.EXECUTE,
+    "read_file": ToolCategory.READ,
+    "read_image": ToolCategory.READ,
+    "reload_team": ToolCategory.ADMIN,
+    "save_agent": ToolCategory.ADMIN,
+    "save_dept": ToolCategory.ADMIN,
+    "save_role_template": ToolCategory.ADMIN,
+    "save_room": ToolCategory.ADMIN,
+    "send_chat_msg": ToolCategory.BASIC,
+    "start_chat": ToolCategory.BASIC,
+    "update_task": ToolCategory.BASIC,
+    "wake_up_agent": ToolCategory.BASIC,
+    "web_search": ToolCategory.READ,
+    "write_file": ToolCategory.WRITE,
+}
+
+
+def test_category_config_matches_expected_contract() -> None:
+    """`CATEGORY_CONFIG` 必须与字面量契约**双向相等**。
+
+    用 dict 相等而不是逐个 lookup：单向查表会放过「新增工具漏登记」（期望表里没有
+    就不会被检查），而漏登记正是最容易悄悄发生的漂移。dict 相等把「漏登记」
+    「多残留」「类别改错」三种情况一次拦住，26/37 条的规模下 diff 依然可读。
+    """
+    assert dict(CATEGORY_CONFIG) == EXPECTED_TOOL_CATEGORIES
+    assert set(CATEGORY_CONFIG) == set(EXPECTED_TOOL_CATEGORIES)
