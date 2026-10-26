@@ -37,7 +37,7 @@ DEFAULT_EVENT_LIMIT = 3
 
 
 def get_time(timezone: Optional[str] = None) -> dict:
-    """获取当前时间
+    """获取当前时间（默认本地时区，可传 IANA 时区名如 Asia/Shanghai）。
 
     Args:
         timezone: 可选的时区名称，如 "Asia/Shanghai"，默认使用本地时区
@@ -402,7 +402,6 @@ async def reload_team(_context: ToolCallContext = None) -> dict:
 
 async def list_role_templates(keywords: list[str] | None = None, _context: ToolCallContext = None) -> dict:
     """查询全部角色模板列表。
-
     返回精简字段，不包含 soul；display_name 为当前语言下的名称。
 
     Args:
@@ -922,11 +921,11 @@ async def delete_role_template(role_name: str, _context: ToolCallContext = None)
 
 
 async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = None) -> dict:
-    """向聊天窗口发送消息
+    """向聊天窗口发送消息（消息对房间内所有成员可见；房间名必须已存在）。
 
     Args:
-        room_name: 要发送消息的窗口名称
-        msg: 要发送的消息
+        room_name: 目标房间名，必须是本团队**已存在**的房间名（否则发送失败）
+        msg: 要发送的消息正文（房间内所有成员可见）
     """
     if _context is None:
         logger.warning("发送消息失败，聊天室上下文未设置")
@@ -970,11 +969,12 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
 async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: bool = False) -> dict:
     """结束行动。当你完成所有发言和工具调用后（或者无需行动时），必须调用此工具来把行动机会让给下一位成员。
 
-    参数：
-    - confirm_no_need_talk (bool)：确认本轮无需在收到消息通知的房间发言。
-      - 本轮未在对应房间发言时：若确认不需要发言，须设置为 true 才能结束行动。
-      - 本轮已在对应房间发言时：不得设置此参数，直接调用 finish_action 即可。
-      ⚠️ 注意：直接输出（非 send_chat_msg）的文字用户看不到，不算发言。"""
+    Args:
+        confirm_no_need_talk: 确认本轮无需在收到消息通知的房间发言（默认 false，不发言时通常要设 true）。
+            - 本轮未在对应房间发言时：若确认不需要发言，须设置为 true 才能结束行动。
+            - 本轮已在对应房间发言时：不得设置此参数，直接调用 finish_action 即可。
+            - ⚠️ 注意：直接输出（非 send_chat_msg）的文字用户看不到，不算发言。
+    """
     if _context is None:
         logger.warning("结束行动失败，上下文未设置")
         return {"success": False, "message": "当前没有激活的上下文。"}
@@ -1066,16 +1066,16 @@ async def create_task(
     room_id: Optional[int] = None,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """创建协作任务。
+    """创建协作任务（**不会唤醒执行人**，需另发 send_chat_msg 通知对方）。
 
     Args:
         title: 任务标题
-        assignee_id: 执行人 Agent ID
+        assignee_id: 执行人 Agent ID（只能是自己或自己的直接/间接下属）
         description: 任务描述，含上下文、约束和交付标准
         reviewer_id: 完成时若需要他人验收，则设置验收人 Agent ID，不填则无需验收流程；不能与 assignee_id 相同（同一人无需设置验收）
         priority: 优先级，HIGH / NORMAL / LOW，默认 NORMAL
         parent_id: 父任务 ID，用于子任务拆解
-        depends_on: 依赖的任务 ID 列表，全部完成后才允许开始
+        depends_on: 依赖的任务 ID 列表。非空且其中任一尚未 DONE 时，新任务初始状态为 PENDING（依赖全部 DONE 后自动转 TODO）；为空则初始状态为 TODO
         room_id: 关联房间 ID，便于溯源
     """
     import service.taskService as taskService
@@ -1106,9 +1106,6 @@ async def update_task(
 ) -> dict:
     """更新协作任务：流转状态，或追加评论（流转受状态机与权限约束，见 new_status 说明）。
 
-    注：工具 schema 只透出 docstring 首行与参数段说明（见 funcToolType.get_function_metadata），
-    故状态机 / 权限约束随 new_status 的参数说明一并给出以保证模型可见。
-
     Args:
         task_id: 任务 ID
         new_status: 新状态（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）。省略（或等于当前状态）表示追加评论。约束与 taskService 状态机/权限一致，违反会被拒并返回 error_code——① 终态：DONE / CANCELLED 不可再流转，仅可追加评论（invalid_transition）；② 提交验收：→ REVIEWING 仅执行人（assignee）可发起，且仅当该任务设有验收人（未设时 no_reviewer）；③ 验收动作：REVIEWING → DONE（通过）与 REVIEWING → IN_PROGRESS（打回）仅验收人（reviewer）；④ 取消：→ CANCELLED 仅验收人或创建人（creator）；⑤ 其余流转（→ IN_PROGRESS / ON_HOLD 等）仅执行人（assignee）；⑥ 设有验收人的任务不能绕过验收直接 → DONE（review_required）；⑦ 依赖：PENDING → IN_PROGRESS 需 depends_on 全部 DONE（dependency_not_met）。
@@ -1135,7 +1132,6 @@ async def get_task_detail(
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
     """查询单个协作任务详情，包含依赖任务状态摘要与事件时间线摘要。
-
     事件时间线默认只返回最近 3 条；回执中的 `events_total` 是该任务事件总数，
     若大于 events 条数说明还有更早事件，可调大 event_limit 或用 list_task_events
     按游标向前翻页。事件内容（含派生的 last_note / current_block_reason）超过
@@ -1143,7 +1139,7 @@ async def get_task_detail(
 
     Args:
         task_id: 任务 ID
-        event_limit: 事件时间线返回的条数上限（默认 3）
+        event_limit: 事件时间线返回的条数上限（默认 3）；回执中 events_total 为事件总数，大于本页条数说明还有更早事件，可调大本参数或用 list_task_events 按游标向前翻页
     """
     import service.taskService as taskService
 
@@ -1159,7 +1155,6 @@ async def get_task_event(
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
     """按事件 id 查询单条任务事件（返回完整原文，含 actor 展示名，只读）。
-
     当 `get_task_detail` / `list_task_events` 给出的事件摘要被截断（按 100 字符）
     不够用时，用本工具按事件 id 取回该事件的**完整原文** `content`——本工具是
     唯一不受摘要截断限制的读取入口。不属于当前团队的事件会被拒绝。
@@ -1183,7 +1178,6 @@ async def list_task_events(
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
     """读取任务事件时间线（按 id 游标分页，最新在前）。
-
     返回 `events`（本页，按 id 降序）、`count`（本页条数）、`total`（该任务事件**总数**，跨页）。
     向前翻页：取上一页最后一条的 `id` 作为下一次的 `before_id`。
     事件内容超过 100 字符会截断，需要完整原文请用 `get_task_event`（按事件 id 取单条）。
@@ -1191,7 +1185,7 @@ async def list_task_events(
     Args:
         task_id: 任务 ID
         limit: 最多返回条数，默认 50
-        before_id: 游标：只返回 id 小于该值的更早事件（向前翻页），省略则取最新一页
+        before_id: 游标：只返回 id 小于该值的更早事件（向前翻页，取上一页最后一条的 id），省略则取最新一页
     """
     import service.taskService as taskService
 
@@ -1215,17 +1209,16 @@ async def list_tasks(
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
     """查询协作任务列表。
-
     默认只返回未完结任务（`open_only=True`，排除 DONE / CANCELLED），便于聚焦进行中的工作。
     需要查看已完结任务时显式传 `open_only=False`，或用 `status` 指定具体状态。
     必须按执行人（`assignee`）或验收人（`reviewer`）之一过滤，两者都不传会被拒绝。
     返回条数由内部默认值决定，不对调用方开放。
 
     Args:
-        assignee: 按执行人 Agent ID 过滤
-        reviewer: 按验收人 Agent ID 过滤
+        assignee: 按执行人 Agent ID 过滤（与 reviewer 至少提供一个，否则被拒绝）
+        reviewer: 按验收人 Agent ID 过滤（与 assignee 至少提供一个，否则被拒绝）
         status: 按状态过滤（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）；显式指定时 open_only 不生效
-        open_only: 是否只返回未完结任务（排除 DONE / CANCELLED），默认 True
+        open_only: 是否只返回未完结任务（排除 DONE / CANCELLED），默认 True；查看已完结任务时传 False
     """
     import service.taskService as taskService
 

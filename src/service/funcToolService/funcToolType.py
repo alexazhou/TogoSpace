@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import re
 from dataclasses import dataclass
 from types import UnionType
 from typing import Any, Callable, Dict, Literal, Union, get_args, get_origin, get_type_hints
@@ -9,6 +10,113 @@ from typing import Any, Callable, Dict, Literal, Union, get_args, get_origin, ge
 from util import llmApiUtil
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# docstring → schema 解析（Args 段状态机）
+# ---------------------------------------------------------------------------
+# 说明：旧实现用 `docstring.split("Args:")` + 「段内首个空行截断」，导致 5 类写法失效：
+#   ① 用「参数：」当段标题；② 正文提到 `Args:` 字面串；③ 段内出现空行；
+#   ④ 用 `Arguments:` / `Parameters:`；⑤ 全角冒号。
+# 现改为状态机：整行匹配段标题 + 段内空行不终止 + 续行拼接。
+
+# 参数段标题（小写归一化后比对；半角 / 全角冒号都认）。
+_ARGS_SECTION_TITLES = frozenset({
+    "args",
+    "arguments",
+    "parameters",
+    "参数",
+    "参数说明",
+    "参数列表",
+})
+
+# 「整行仅标题 + 冒号」才算段标题（Returns: / Raises: / Notes: / Examples: / Yields: /
+# Attributes: / 参数： 等）；这样正文里提到 `Args:` 不会劫持参数段。
+_SECTION_TITLE_PATTERN = re.compile(
+    r"^(?P<title>[A-Za-z][A-Za-z0-9 _\-/]{0,23}|[\u4e00-\u9fff]{1,10})\s*[:：]\s*$"
+)
+
+# 参数行：`name: 说明` / `name (类型): 说明` / 全角括号 + 全角冒号 / 允许前导 `- `。
+_PARAM_LINE_PATTERN = re.compile(
+    r"^(?P<name>[A-Za-z_]\w*)\s*(?:\([^)]*\)|（[^）]*）)?\s*[:：]\s*(?P<desc>.*)$"
+)
+
+
+def _line_indent(raw_line: str) -> int:
+    return len(raw_line) - len(raw_line.lstrip())
+
+
+def _strip_bullet(line: str) -> str:
+    """去掉列表符号（`- `/`* `/`• `）与前导空白。"""
+    return line.lstrip("-*• \t").strip()
+
+
+def _match_section_title(raw_line: str) -> str | None:
+    """整行匹配段标题并返回归一化标题（小写）；非标题返回 None。"""
+    matched = _SECTION_TITLE_PATTERN.match(raw_line.strip())
+    return matched.group("title").strip().lower() if matched else None
+
+
+def _extract_description(docstring: str) -> str:
+    """取 docstring 首段并拼成一行（首段多行时用空格连接），不再只取首行。"""
+    parts: list[str] = []
+    for raw_line in docstring.split("\n"):
+        stripped = raw_line.strip()
+        if not stripped:
+            if parts:
+                break
+            continue
+        if _match_section_title(raw_line) is not None:
+            break
+        parts.append(stripped)
+    return " ".join(parts).strip()
+
+
+def _parse_param_descriptions(docstring: str) -> dict[str, str]:
+    """解析「参数段」→ {参数名: 说明}。
+
+    规则：
+    1. 段标题**整行**匹配（Args/Arguments/Parameters/参数/参数说明/参数列表，半角全角冒号）；
+    2. 段内**空行不终止**；
+    3. 参数行按 `_PARAM_LINE_PATTERN` 解析，允许前导 `- `、类型括号、全角冒号；
+    4. 不匹配参数行的段内内容视为**续行**，用空格拼接到上一个参数的说明；
+    5. 遇到下一个段标题（整行标题）或缩进回退到段标题同级/更浅的非空行 ⇒ 参数段结束。
+    """
+    descriptions: dict[str, str] = {}
+    in_args_section = False
+    args_indent = 0
+    current_param: str | None = None
+
+    for raw_line in docstring.split("\n"):
+        stripped = raw_line.strip()
+
+        if not in_args_section:
+            title = _match_section_title(raw_line)
+            if title is not None and title in _ARGS_SECTION_TITLES:
+                in_args_section = True
+                args_indent = _line_indent(raw_line)
+                current_param = None
+            continue
+
+        # ---- 已在参数段内 ----
+        if not stripped:  # 段内空行不终止
+            continue
+
+        matched = _PARAM_LINE_PATTERN.match(_strip_bullet(stripped))
+        if matched:
+            current_param = matched.group("name")
+            descriptions[current_param] = matched.group("desc").strip()
+            continue
+
+        if _line_indent(raw_line) <= args_indent:
+            # 下一个段标题，或缩进回退到同级/更浅 ⇒ 参数段结束
+            break
+
+        if current_param:  # 续行：拼接到上一个参数
+            extra = _strip_bullet(stripped)
+            descriptions[current_param] = f"{descriptions[current_param]} {extra}".strip()
+
+    return descriptions
 
 
 def python_type_to_json_schema(python_type: Any) -> Dict[str, Any]:
@@ -60,18 +168,8 @@ def get_function_metadata(func_name: str, func: Callable[..., Any]) -> Dict[str,
         type_hints = {}
 
     docstring = inspect.getdoc(func) or ""
-    description = docstring.split("\n")[0].strip()
-
-    param_descriptions = {}
-    if "Args:" in docstring:
-        args_section = docstring.split("Args:")[1].split("\n\n")[0]
-        for line in args_section.strip().split("\n"):
-            line = line.strip()
-            if line.startswith("-") or ":" in line:
-                parts = line.split(":", 1)
-                if len(parts) == 2:
-                    param_name = parts[0].lstrip("- ").strip().split()[0]
-                    param_descriptions[param_name] = parts[1].strip()
+    description = _extract_description(docstring)
+    param_descriptions = _parse_param_descriptions(docstring)
 
     properties = {}
     required = []
