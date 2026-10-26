@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-工具 schema 快照护栏：把 `tools.py` 里所有本地工具的 description 与参数说明固化成
+工具 schema 快照护栏：把 `tools.py` 里所有本地工具的 description、参数说明、参数
+JSON Schema（type/enum/array…）与工具级 required 固化成
 `tests/fixtures/tool_schema_snapshot.json`，供
 `tests/unit/service/funcToolService/test_tool_schema_snapshot.py` 逐字段对比。
 
@@ -23,6 +24,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import sys
@@ -39,12 +41,27 @@ def _ensure_src_on_path() -> None:
         sys.path.insert(0, SRC_DIR)
 
 
+def _param_schema_without_description(param_schema: dict) -> dict:
+    """参数 JSON Schema 本体（去掉 description 后的原样副本）。
+
+    **不要自己拼**：`Literal[...]` 产出 `{"enum": [...]}`、`list[T]` 产出
+    `{"type": "array", "items": {...}}`，单值 `type` 装不下，故统一 deepcopy + pop。
+    """
+    schema = copy.deepcopy(param_schema)
+    schema.pop("description", None)
+    return schema
+
+
 def build_snapshot() -> dict:
-    """计算当前快照：`{工具名: {"description": str, "parameters": {参数名: 说明}}}`。
+    """计算当前快照。
+
+    结构：`{工具名: {"description": str, "required": [参数名...],
+    "parameters": {参数名: {"description": str, "schema": {...}}}}}`。
 
     口径（必须确定性，任何人任何机器跑都一样）：
     - 只算 `CATEGORY_CONFIG` 中**确实存在于 tools.py** 的工具（TSP 等外部工具一律跳过）；
-    - 工具名排序；每个工具记 description 与其全部 properties 的 `{参数名: description}`；
+    - 工具名排序；每个工具记 description、**工具级 required**（顺序原样保留，不排序——
+      顺序变化本身也是信号）与每个参数的说明 + 参数 JSON Schema（去掉 description）；
     - **不写入**时间戳、绝对路径、commit、Python/依赖版本等易变信息。
     """
     _ensure_src_on_path()
@@ -59,11 +76,16 @@ def build_snapshot() -> dict:
         if func is None:  # 非 tools.py 内的本地工具（如 TSP）
             continue
         metadata = get_function_metadata(tool_name, func)
+        parameters = metadata["parameters"]
         snapshot[tool_name] = {
             "description": metadata["description"],
+            "required": list(parameters.get("required") or []),
             "parameters": {
-                param_name: (param_schema.get("description") or "")
-                for param_name, param_schema in metadata["parameters"]["properties"].items()
+                param_name: {
+                    "description": param_schema.get("description") or "",
+                    "schema": _param_schema_without_description(param_schema),
+                }
+                for param_name, param_schema in parameters["properties"].items()
             },
         }
     return snapshot
@@ -82,6 +104,17 @@ def load_snapshot(path: str = SNAPSHOT_PATH) -> dict:
         )
     with open(path, encoding="utf-8") as file:
         return json.load(file)
+
+
+def _split_param_entry(entry) -> tuple[str, dict]:
+    """把快照里的参数条目拆成 `(说明, 参数 schema)`；兼容旧版扁平字符串格式。"""
+    if isinstance(entry, dict):
+        return (entry.get("description") or "", entry.get("schema") or {})
+    return (str(entry or ""), {})
+
+
+def _dump_schema(schema: dict) -> str:
+    return json.dumps(schema, ensure_ascii=False, sort_keys=True)
 
 
 def diff_snapshots(expected: dict, actual: dict) -> list[str]:
@@ -105,20 +138,43 @@ def diff_snapshots(expected: dict, actual: dict) -> list[str]:
             lines.append(f"  - 旧: {old_desc!r}")
             lines.append(f"  + 新: {new_desc!r}")
 
+        old_required = list(old_tool.get("required") or [])
+        new_required = list(new_tool.get("required") or [])
+        if old_required != new_required:
+            lines.append(f"[{tool_name}] required 变化：")
+            lines.append(f"  - 旧: {old_required!r}")
+            lines.append(f"  + 新: {new_required!r}")
+
         old_params = old_tool.get("parameters") or {}
         new_params = new_tool.get("parameters") or {}
 
         for param_name in sorted(set(old_params) - set(new_params)):
-            lines.append(f"[{tool_name}.{param_name}] 参数已移除（旧说明: {old_params[param_name]!r}）")
+            old_param_desc, old_param_schema = _split_param_entry(old_params[param_name])
+            lines.append(
+                f"[{tool_name}.{param_name}] 参数已移除"
+                f"（旧说明: {old_param_desc!r}；旧 schema: {_dump_schema(old_param_schema)}）"
+            )
 
         for param_name in sorted(set(new_params) - set(old_params)):
-            lines.append(f"[{tool_name}.{param_name}] 参数已新增（说明: {new_params[param_name]!r}）")
+            new_param_desc, new_param_schema = _split_param_entry(new_params[param_name])
+            lines.append(
+                f"[{tool_name}.{param_name}] 参数已新增"
+                f"（说明: {new_param_desc!r}；schema: {_dump_schema(new_param_schema)}）"
+            )
 
         for param_name in sorted(set(old_params) & set(new_params)):
-            if old_params[param_name] != new_params[param_name]:
+            old_param_desc, old_param_schema = _split_param_entry(old_params[param_name])
+            new_param_desc, new_param_schema = _split_param_entry(new_params[param_name])
+
+            if old_param_desc != new_param_desc:
                 lines.append(f"[{tool_name}.{param_name}] 参数说明变化：")
-                lines.append(f"  - 旧: {old_params[param_name]!r}")
-                lines.append(f"  + 新: {new_params[param_name]!r}")
+                lines.append(f"  - 旧: {old_param_desc!r}")
+                lines.append(f"  + 新: {new_param_desc!r}")
+
+            if old_param_schema != new_param_schema:
+                lines.append(f"[{tool_name}.{param_name}] 参数 schema 变化：")
+                lines.append(f"  - 旧: {_dump_schema(old_param_schema)}")
+                lines.append(f"  + 新: {_dump_schema(new_param_schema)}")
 
     return lines
 

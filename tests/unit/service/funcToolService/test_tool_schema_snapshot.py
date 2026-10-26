@@ -1,8 +1,10 @@
-"""#73：工具 schema 快照护栏（替代不可复现的哈希指纹）。
+"""#73 / #75：工具 schema 快照护栏（替代不可复现的哈希指纹）。
 
-把 `tools.py` 里每个本地工具的 description 与参数说明，与已提交的
+把 `tools.py` 里每个本地工具的 **description、参数说明、参数 JSON Schema
+（type / enum / array…）与工具级 required**，与已提交的
 `tests/fixtures/tool_schema_snapshot.json` 逐字段对比。任何变化都会让本测试变红，
-且失败信息是**结构化 diff**（哪个工具的哪句话变了，改前→改后），**禁止只给哈希**。
+且失败信息是**结构化 diff**（哪个工具的哪句话 / 哪个参数的 schema / required 变了，
+改前→改后），**禁止只给哈希**。
 
 如为有意变更：运行
 
