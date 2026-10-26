@@ -99,6 +99,10 @@ jobs:
     if: ${{ github.event_name == 'push' || inputs.push }}
 
     steps:
+    # merge 任务只做 manifest 合并与平台 tag 清理，必须先把仓库 checkout 下来，
+    # 否则 scripts/docker_hub_delete_platform_tags.sh 在 runner 上不存在（exit 127）。
+    - uses: actions/checkout@v6
+
     - name: Log in to Docker Hub
       uses: docker/login-action@v4
       with:
