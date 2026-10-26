@@ -186,18 +186,15 @@
     "taskCreatedAt": "Created {time}",
     "taskCreator": "Creator {id}",
     "taskAssignee": "Assignee {id}",
-    "taskManager": "Review: {id}",
     "taskDependsOn": "{count} dependencies",
     "taskRoom": "Room {id}",
     "taskId": "Task ID",
     "taskCreatedAtLabel": "Created At",
     "taskCreatorLabel": "Creator",
     "taskAssigneeLabel": "Assignee",
-    "taskManagerLabel": "Manager",
     "taskRoomLabel": "Room",
     "taskDependsOnLabel": "Dependencies",
     "taskDescriptionLabel": "Description",
-    "taskResultLabel": "Result",
     "taskBlockReasonLabel": "Block Reason",
     "taskStatus": {
       "TODO": "Todo",
@@ -228,7 +225,27 @@
       "placeholder": "Enter instruction… (Ctrl+Enter to send)",
       "send": "Send",
       "sending": "Sending…"
-    }
+    },
+    "taskReviewerLabel": "Reviewer",
+    "taskReviewer": "Reviewer: {id}",
+    "taskEventsLabel": "Timeline",
+    "taskEventsTotal": "{count} total",
+    "taskEventsEmpty": "No events yet.",
+    "taskEventsLoadFailed": "Failed to load events.",
+    "taskEventsLoadMore": "Load earlier events",
+    "taskEventsLoadingMore": "Loading…",
+    "taskEventsRetry": "Retry",
+    "taskDetailLoadFailed": "Failed to load task detail; showing list data.",
+    "taskDependencyItem": "{title} ({status})",
+    "taskDependencyDeleted": "{title} (deleted)",
+    "taskEventKind": {
+      "create": "Created",
+      "snapshot": "Migrated snapshot",
+      "transition": "Status change",
+      "comment": "Comment"
+    },
+    "taskEventActorSystem": "System",
+    "taskEventActorOperator": "Operator"
   },
   "room": {
     "chatRooms": "Chat Rooms",

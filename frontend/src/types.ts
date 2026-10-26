@@ -65,6 +65,40 @@ export type AgentTaskStatus =
 
 export type AgentTaskPriority = 'HIGH' | 'NORMAL' | 'LOW';
 
+/**
+ * 任务事件的性质，由 from_status / to_status 的空值组合天然决定（后端不落类型字段）。
+ *
+ * - `create`     (null, 非null) 正常创建
+ * - `snapshot`   (null, 非null) 且 content 以 MIGRATION_CONTENT_PREFIX 开头：存量迁移快照
+ * - `transition` (非null, 非null) 状态流转
+ * - `comment`    (null, null) 工单评论
+ *
+ * 非法组合 (非null, null) 服务端入库前已拒绝，前端不处理。
+ */
+export type AgentTaskEventKind = 'create' | 'snapshot' | 'transition' | 'comment';
+
+/** 存量迁移快照事件的固定内容前缀（0015 结转段写入，后端暂不剥离）。 */
+export const MIGRATION_CONTENT_PREFIX = '【系统迁移自动生成】';
+
+export interface AgentTaskEvent {
+  id: number;
+  task_id: number;
+  /** 操作人 Agent ID；`-2` = 系统（SpecialAgent.SYSTEM），`-1` = 操作者（SpecialAgent.OPERATOR）。 */
+  actor_id: number;
+  from_status: AgentTaskStatus | null;
+  to_status: AgentTaskStatus | null;
+  content: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/** 任务详情中的依赖摘要（`get_task_detail` 返回；任务已删除时 status 为 'UNKNOWN'）。 */
+export interface AgentTaskDependencySummary {
+  task_id: number;
+  title: string;
+  status: AgentTaskStatus | 'UNKNOWN';
+}
+
 export interface AgentTask {
   id: number;
   team_id: number;
@@ -72,16 +106,21 @@ export interface AgentTask {
   description: string;
   assignee_id: number;
   creator_id: number;
-  manager_id: number | null;
+  /** 验收人（原 `manager_id`；注意部门域 `DeptTreeNode.manager_id` 与此无关）。 */
+  reviewer_id: number | null;
   status: AgentTaskStatus;
   priority: AgentTaskPriority;
   parent_id: number | null;
   depends_on: number[];
   room_id: number | null;
-  result: string;
-  block_reason: string;
   created_at: string | null;
   updated_at: string | null;
+  /** 以下字段仅详情接口返回，列表接口不带，故可选。 */
+  events?: AgentTaskEvent[];
+  events_total?: number;
+  last_note?: string;
+  current_block_reason?: string | null;
+  depends_on_details?: AgentTaskDependencySummary[];
 }
 
 export interface RoomInfo {

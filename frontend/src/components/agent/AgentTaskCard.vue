@@ -6,11 +6,11 @@ import type { AgentTask, AgentTaskPriority } from '../../types';
 const props = withDefaults(defineProps<{
   task: AgentTask;
   assigneeLabel: string;
-  managerLabel?: string | null;
+  reviewerLabel?: string | null;
   clickable?: boolean;
   variant?: 'list' | 'tree';
 }>(), {
-  managerLabel: null,
+  reviewerLabel: null,
   clickable: false,
   variant: 'list',
 });
@@ -75,7 +75,7 @@ const isCancelled = computed(() => props.task.status === 'CANCELLED');
       <div class="agent-task-card__meta">
         <span>#{{ task.id }}</span>
         <span>{{ t('agent.taskAssignee', { id: assigneeLabel }) }}</span>
-        <span v-if="managerLabel" class="agent-task-card__manager">{{ t('agent.taskManager', { id: managerLabel }) }}</span>
+        <span v-if="reviewerLabel" class="agent-task-card__reviewer">{{ t('agent.taskReviewer', { id: reviewerLabel }) }}</span>
       </div>
       <div class="agent-task-card__status-badges">
         <span class="agent-task-card__badge" :data-status="task.status">
@@ -222,7 +222,7 @@ const isCancelled = computed(() => props.task.status === 'CANCELLED');
   line-height: 1.15;
 }
 
-.agent-task-card__manager {
+.agent-task-card__reviewer {
   margin-left: 4px;
 }
 

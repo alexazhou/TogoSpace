@@ -186,18 +186,15 @@
     "taskCreatedAt": "创建于 {time}",
     "taskCreator": "创建人：{id}",
     "taskAssignee": "处理人：{id}",
-    "taskManager": "验收: {id}",
     "taskDependsOn": "依赖 {count} 项",
     "taskRoom": "房间 {id}",
     "taskId": "任务 ID",
     "taskCreatedAtLabel": "创建时间",
     "taskCreatorLabel": "创建人",
     "taskAssigneeLabel": "处理人",
-    "taskManagerLabel": "管理员",
     "taskRoomLabel": "房间",
     "taskDependsOnLabel": "依赖任务",
     "taskDescriptionLabel": "任务说明",
-    "taskResultLabel": "处理结果",
     "taskBlockReasonLabel": "阻塞原因",
     "taskStatus": {
       "TODO": "待开始",
@@ -228,7 +225,27 @@
       "placeholder": "输入指令内容…（Ctrl+Enter 发送）",
       "send": "发送",
       "sending": "发送中…"
-    }
+    },
+    "taskReviewerLabel": "验收人",
+    "taskReviewer": "验收：{id}",
+    "taskEventsLabel": "事件时间线",
+    "taskEventsTotal": "共 {count} 条",
+    "taskEventsEmpty": "暂无事件记录。",
+    "taskEventsLoadFailed": "事件加载失败。",
+    "taskEventsLoadMore": "加载更早的事件",
+    "taskEventsLoadingMore": "正在加载…",
+    "taskEventsRetry": "重试",
+    "taskDetailLoadFailed": "任务详情加载失败，已回退到列表数据。",
+    "taskDependencyItem": "{title}（{status}）",
+    "taskDependencyDeleted": "{title}（已删除）",
+    "taskEventKind": {
+      "create": "创建",
+      "snapshot": "历史迁移快照",
+      "transition": "状态流转",
+      "comment": "评论"
+    },
+    "taskEventActorSystem": "系统",
+    "taskEventActorOperator": "操作者"
   },
   "room": {
     "chatRooms": "聊天室",

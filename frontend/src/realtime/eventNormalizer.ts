@@ -4,9 +4,12 @@ import type {
   AgentActivityType,
   AgentStatus,
   AgentTask,
+  AgentTaskEvent,
   MessageInfo,
   RoomState,
 } from '../types';
+import { normalizeAgentTaskEvent } from '../api';
+import type { RawAgentTaskEvent } from '../api';
 
 export type FrontendRealtimeEvent =
   | {
@@ -67,6 +70,13 @@ export type FrontendRealtimeEvent =
     teamId: number;
     task: AgentTask;
     oldStatus?: string;
+  }
+  | {
+    /** 方案 B：任务事件追加（创建 / 流转 / 评论 / 系统推进都会推）。 */
+    type: 'task_event_appended';
+    teamId: number;
+    task: AgentTask;
+    event: AgentTaskEvent;
   };
 
 type RawRecord = Record<string, unknown>;
@@ -135,9 +145,9 @@ function normalizeAgentTask(value: unknown): AgentTask | null {
     description: typeof raw.description === 'string' ? raw.description : '',
     assignee_id: Number(raw.assignee_id ?? 0),
     creator_id: Number(raw.creator_id ?? 0),
-    manager_id: typeof raw.manager_id === 'number' ? raw.manager_id : null,
-    status: (String(raw.status ?? '').trim().toUpperCase() || 'TODO') as any,
-    priority: (String(raw.priority ?? '').trim().toUpperCase() || 'NORMAL') as any,
+    reviewer_id: typeof raw.reviewer_id === 'number' ? raw.reviewer_id : null,
+    status: (String(raw.status ?? '').trim().toUpperCase() || 'TODO') as AgentTask['status'],
+    priority: (String(raw.priority ?? '').trim().toUpperCase() || 'NORMAL') as AgentTask['priority'],
     parent_id: typeof raw.parent_id === 'number' ? raw.parent_id : null,
     depends_on: Array.isArray(raw.depends_on)
       ? raw.depends_on
@@ -145,8 +155,6 @@ function normalizeAgentTask(value: unknown): AgentTask | null {
         .filter((item) => Number.isFinite(item) && item > 0)
       : [],
     room_id: typeof raw.room_id === 'number' ? raw.room_id : null,
-    result: typeof raw.result === 'string' ? raw.result : '',
-    block_reason: typeof raw.block_reason === 'string' ? raw.block_reason : '',
     created_at: typeof raw.created_at === 'string' ? raw.created_at : null,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : null,
   };
@@ -311,6 +319,23 @@ export function normalizeWsEventPayload(payload: unknown): FrontendRealtimeEvent
       teamId: task.team_id,
       task,
       oldStatus: typeof raw.old_status === 'string' ? raw.old_status : undefined,
+    };
+  }
+
+  // 方案 B：事件级推送。业务事件在 wire 上叫 `task_event`——`event` 已被
+  // wsController 占用为「消息类型」，两者必须错开（见设计文档 §2.3）。
+  if (eventType === 'task_event_appended') {
+    const task = normalizeAgentTask(raw.task);
+    const event = normalizeAgentTaskEvent((raw.task_event ?? {}) as RawAgentTaskEvent);
+    if (!task || !event) {
+      return null;
+    }
+
+    return {
+      type: 'task_event_appended',
+      teamId: task.team_id,
+      task,
+      event,
     };
   }
 

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getAgentTasks, getAgentsByTeamId } from '../../api';
-import type { AgentInfo, AgentTask, AgentTaskPriority, AgentTaskStatus } from '../../types';
-import { displayName, formatTime } from '../../utils';
+import type { AgentInfo, AgentTask } from '../../types';
+import { displayName } from '../../utils';
+import { subscribeRealtimeEvents } from '../../realtime/wsClient';
 import AgentTaskCard from './AgentTaskCard.vue';
 import AgentTaskDetailModal from './AgentTaskDetailModal.vue';
 
@@ -24,7 +25,13 @@ const tasksErrorMessage = ref('');
 const tasks = ref<AgentTask[]>([]);
 const teamAgents = ref<AgentInfo[]>([]);
 const taskFilter = ref<'all' | 'done' | 'undone'>('undone');
-const selectedTask = ref<AgentTask | null>(null);
+const selectedTaskId = ref<number | null>(null);
+// 用 computed 从列表派生，任务被推送更新时弹窗内容会跟着变（不再是打开瞬间的快照）。
+const selectedTask = computed(() => (
+  selectedTaskId.value === null
+    ? null
+    : tasks.value.find((task) => task.id === selectedTaskId.value) ?? null
+));
 let tasksRequestToken = 0;
 let teamAgentsRequestToken = 0;
 
@@ -46,25 +53,6 @@ watch(
   },
   { immediate: true },
 );
-
-function formatTaskDateTime(value: string | null): string {
-  if (!value) {
-    return '';
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-  return `${date.toLocaleDateString()} ${formatTime(value)}`.trim();
-}
-
-function taskStatusLabel(status: AgentTaskStatus): string {
-  return t(`agent.taskStatus.${status}`);
-}
-
-function taskPriorityLabel(priority: AgentTaskPriority): string {
-  return t(`agent.taskPriority.${priority}`);
-}
 
 function taskActorLabel(id: number | null): string {
   if (typeof id !== 'number' || id <= 0) {
@@ -90,11 +78,11 @@ function taskRoomDetailLabel(id: number | null): string {
 }
 
 function openTaskDetail(task: AgentTask): void {
-  selectedTask.value = task;
+  selectedTaskId.value = task.id;
 }
 
 function closeTaskDetail(): void {
-  selectedTask.value = null;
+  selectedTaskId.value = null;
 }
 
 async function loadTasks(): Promise<void> {
@@ -155,7 +143,7 @@ watch(
   () => [props.open, props.agentId] as const,
   () => {
     taskFilter.value = 'undone';
-    selectedTask.value = null;
+    selectedTaskId.value = null;
     loadTasks().catch(console.error);
   },
   { immediate: true },
@@ -168,6 +156,42 @@ watch(
   },
   { immediate: true },
 );
+
+// 跟随推送更新本地列表：任务卡片与已打开的弹窗都要能看到最新状态。
+// （本面板走独立请求，不读 runtimeStore，因此需要自己订阅一次。）
+let unsubscribe: (() => void) | null = null;
+watch(
+  () => [props.open, props.agentId] as const,
+  ([open, agentId]) => {
+    unsubscribe?.();
+    unsubscribe = null;
+    if (!open || agentId === null) {
+      return;
+    }
+    unsubscribe = subscribeRealtimeEvents((event) => {
+      if (event.type !== 'task_event_appended') {
+        return;
+      }
+      const nextTask = event.task;
+      if (nextTask.assignee_id !== agentId && nextTask.reviewer_id !== agentId) {
+        return;
+      }
+      const idx = tasks.value.findIndex((task) => task.id === nextTask.id);
+      if (idx < 0) {
+        return;
+      }
+      const updated = [...tasks.value];
+      updated[idx] = { ...updated[idx], ...nextTask };
+      tasks.value = updated;
+    });
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  unsubscribe?.();
+  unsubscribe = null;
+});
 </script>
 
 <template>
@@ -204,21 +228,20 @@ watch(
         :key="task.id"
         :task="task"
         :assignee-label="taskActorLabel(task.assignee_id)"
-        :manager-label="task.manager_id !== null ? taskActorDetailLabel(task.manager_id) : null"
+        :reviewer-label="task.reviewer_id !== null ? taskActorDetailLabel(task.reviewer_id) : null"
         clickable
         @select="openTaskDetail"
       />
     </div>
 
     <AgentTaskDetailModal
+      :task-id="selectedTaskId"
       :task="selectedTask"
-      :created-at-label="selectedTask ? (formatTaskDateTime(selectedTask.created_at) || t('common.notSet')) : ''"
       :creator-label="selectedTask ? taskActorLabel(selectedTask.creator_id) : ''"
       :assignee-label="selectedTask ? taskActorLabel(selectedTask.assignee_id) : ''"
-      :manager-label="selectedTask ? taskActorDetailLabel(selectedTask.manager_id) : ''"
+      :reviewer-label="selectedTask ? taskActorDetailLabel(selectedTask.reviewer_id) : ''"
       :room-label="selectedTask ? taskRoomDetailLabel(selectedTask.room_id) : ''"
-      :priority-label="selectedTask ? taskPriorityLabel(selectedTask.priority) : ''"
-      :status-label="selectedTask ? taskStatusLabel(selectedTask.status) : ''"
+      :actor-label="taskActorDetailLabel"
       @close="closeTaskDetail"
     />
   </div>

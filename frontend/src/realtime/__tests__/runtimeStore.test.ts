@@ -1,18 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { scheduleNotRunningReason, scheduleState, totalMessageCount } from '../../appUiState';
-import type { AgentActivity, AgentInfo, MessageInfo, RoomState } from '../../types';
+import type { AgentActivity, AgentInfo, AgentTask, AgentTaskEvent, MessageInfo, RoomState } from '../../types';
 import {
+  appendTaskEvent,
   applyRealtimeEvent,
   clearRuntimeStore,
   getAgentActivities,
   getAgentStatus,
   getRoomMessageHistoryState,
   getRoomMessages,
+  getTaskEvents,
+  getTaskEventsTotal,
   getTeamRooms,
+  getTeamTasks,
+  mergeTaskEvents,
+  prependTaskEvents,
   seedRoomMessages,
   seedTeamAgents,
   seedTeamRooms,
   setActiveRealtimeContext,
+  setTaskEvents,
 } from '../runtimeStore';
 
 function createAgent(overrides: Partial<AgentInfo>): AgentInfo {
@@ -299,4 +306,77 @@ describe('runtimeStore message history state', () => {
     expect(getRoomMessageHistoryState(5).hasMoreHistory).toBe(true);
     expect(getRoomMessages(5)).toHaveLength(2);
   });
+
+  it('merges task events by id and keeps ascending order', () => {
+    const merged = mergeTaskEvents(
+      [taskEvent(2), taskEvent(1)],
+      [taskEvent(3), taskEvent(2, '覆盖')],
+    );
+
+    expect(merged.map((event) => event.id)).toEqual([1, 2, 3]);
+    expect(merged[1]?.content).toBe('覆盖');
+  });
+
+  it('appends realtime task event idempotently and tracks total', () => {
+    setTaskEvents(21, [taskEvent(1), taskEvent(2)], 2);
+
+    appendTaskEvent(21, taskEvent(3));
+    appendTaskEvent(21, taskEvent(3)); // 重复投递（同时保留旧主题双发场景）
+
+    expect(getTaskEvents(21).map((event) => event.id)).toEqual([1, 2, 3]);
+    expect(getTaskEventsTotal(21)).toBe(3);
+  });
+
+  it('prepends earlier page without losing pushed events', () => {
+    setTaskEvents(21, [taskEvent(5), taskEvent(6)], 6);
+
+    prependTaskEvents(21, [taskEvent(3), taskEvent(4)], 6);
+
+    expect(getTaskEvents(21).map((event) => event.id)).toEqual([3, 4, 5, 6]);
+    expect(getTaskEventsTotal(21)).toBe(6);
+  });
+
+  it('applyRealtimeEvent stores task_event_appended in both task list and timeline', () => {
+    applyRealtimeEvent({
+      type: 'task_event_appended',
+      teamId: 1,
+      task: createTask({ id: 21, status: 'IN_PROGRESS' }),
+      event: taskEvent(9),
+    });
+
+    expect(getTeamTasks(1).map((task) => task.id)).toContain(21);
+    expect(getTaskEvents(21).map((event) => event.id)).toEqual([9]);
+  });
 });
+
+function taskEvent(id: number, content = '内容'): AgentTaskEvent {
+  return {
+    id,
+    task_id: 21,
+    actor_id: 3,
+    from_status: null,
+    to_status: null,
+    content,
+    created_at: '2026-10-27 10:00:00.000000',
+    updated_at: '2026-10-27 10:00:00.000000',
+  };
+}
+
+function createTask(overrides: Partial<AgentTask> & Pick<AgentTask, 'id'>): AgentTask {
+  return {
+    id: overrides.id,
+    team_id: overrides.team_id ?? 1,
+    title: overrides.title ?? '任务',
+    description: overrides.description ?? '',
+    assignee_id: overrides.assignee_id ?? 3,
+    creator_id: overrides.creator_id ?? 1,
+    reviewer_id: overrides.reviewer_id ?? null,
+    status: overrides.status ?? 'TODO',
+    priority: overrides.priority ?? 'NORMAL',
+    parent_id: null,
+    depends_on: [],
+    room_id: null,
+    created_at: null,
+    updated_at: null,
+  };
+}

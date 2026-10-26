@@ -57,6 +57,7 @@ export default defineConfig({
       '/agents/list.json': createApiProxy(backendTarget),
       '/agents/': createApiProxy(backendTarget),
       '/members/list.json': createApiProxy(backendTarget),
+      '/tasks/': createApiProxy(backendTarget),
       '/rooms/list.json': createApiProxy(backendTarget),
       '/rooms/': createApiProxy(backendTarget),
       '/teams/list.json': createApiProxy(backendTarget),

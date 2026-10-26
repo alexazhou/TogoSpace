@@ -9,6 +9,8 @@ import {
   getAgentActivities,
   getAgentActivitiesPage,
   getSystemStatus,
+  getTaskDetail,
+  getTaskEventsPage,
   getTeamPresetExport,
   getTeamTasks,
   getTeams,
@@ -246,14 +248,12 @@ describe('getTeamTasks', () => {
           description: 'Build the tree view',
           assignee_id: 3,
           creator_id: 1,
-          manager_id: 2,
+          reviewer_id: 2,
           status: 'IN_PROGRESS',
           priority: 'HIGH',
           parent_id: 5,
           depends_on: [4, 'x', null],
           room_id: 12,
-          result: '',
-          block_reason: '',
           created_at: '2026-05-29T12:00:00',
           updated_at: '2026-05-29T12:30:00',
         },
@@ -271,6 +271,79 @@ describe('getTeamTasks', () => {
     expect(result[0]?.depends_on).toEqual([4]);
     expect(result[0]?.status).toBe('IN_PROGRESS');
     expect(result[0]?.priority).toBe('HIGH');
+    expect(result[0]?.reviewer_id).toBe(2);
+  });
+
+  it('normalizes task events and detail-only fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      task: {
+        id: 8,
+        team_id: 2,
+        title: 'Ship task view',
+        description: '',
+        assignee_id: 3,
+        creator_id: 1,
+        reviewer_id: 2,
+        status: 'REVIEWING',
+        priority: 'NORMAL',
+        parent_id: null,
+        depends_on: [4],
+        room_id: null,
+        created_at: '2026-05-29T12:00:00.123456',
+        updated_at: '2026-05-29T12:30:00.654321',
+        events_total: 2,
+        last_note: '已就绪',
+        current_block_reason: null,
+        depends_on_details: [{ task_id: 4, title: '接口设计', status: 'DONE' }],
+        events: [
+          { id: 2, task_id: 8, actor_id: 3, from_status: 'IN_PROGRESS', to_status: 'REVIEWING', content: '已就绪', created_at: '2026-05-29T12:30:00' },
+          { id: 1, task_id: 8, actor_id: 1, from_status: null, to_status: 'TODO', content: '', created_at: '2026-05-29T12:00:00' },
+        ],
+      },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const task = await getTaskDetail(8);
+
+    expect(task.reviewer_id).toBe(2);
+    expect(task.events_total).toBe(2);
+    expect(task.last_note).toBe('已就绪');
+    expect(task.current_block_reason).toBeNull();
+    expect(task.depends_on_details).toEqual([
+      { task_id: 4, title: '接口设计', status: 'DONE' },
+    ]);
+    // 事件按 id 升序，便于直接渲染
+    expect(task.events?.map((event) => event.id)).toEqual([1, 2]);
+    expect(task.events?.[0]?.to_status).toBe('TODO');
+  });
+
+  it('normalizes task event pages with cursor and total', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      events: [
+        { id: 5, task_id: 8, actor_id: -2, from_status: null, to_status: null, content: '系统推进', created_at: '2026-05-29T13:00:00' },
+        { id: 4, task_id: 8, actor_id: 3, from_status: null, to_status: null, content: '评论', created_at: '2026-05-29T12:50:00' },
+        { id: 'bad', task_id: 8, actor_id: 3 },
+      ],
+      count: 3,
+      total: 12,
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const page = await getTaskEventsPage(8, { limit: 20, beforeId: 99 });
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/tasks/8/events.json');
+    expect(url).toContain('limit=20');
+    expect(url).toContain('before_id=99');
+    expect(page.total).toBe(12);
+    // 非法 id 的事件被丢弃
+    expect(page.events.map((event) => event.id)).toEqual([4, 5]);
   });
 });
 

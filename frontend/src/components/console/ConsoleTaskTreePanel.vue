@@ -3,8 +3,8 @@ import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getTeamTasks } from '../../api';
 import { getTeamTasks as getGlobalTeamTasks, setTeamTasks as setGlobalTeamTasks } from '../../realtime/runtimeStore';
-import type { AgentInfo, AgentTask, AgentTaskPriority, AgentTaskStatus } from '../../types';
-import { displayName, formatTime } from '../../utils';
+import type { AgentInfo, AgentTask } from '../../types';
+import { displayName } from '../../utils';
 import AgentTaskDetailModal from '../agent/AgentTaskDetailModal.vue';
 import { buildTaskForest } from '../../utils/taskTree';
 import ConsoleTaskTreeNode from './ConsoleTaskTreeNode.vue';
@@ -23,7 +23,13 @@ const loading = ref(false);
 const errorMessage = ref('');
 const hasLoaded = ref(false);
 const taskFilter = ref<'all' | 'done' | 'undone' | 'cancelled'>('undone');
-const selectedTask = ref<AgentTask | null>(null);
+const selectedTaskId = ref<number | null>(null);
+// 从 runtimeStore 派生的列表里取，WS 推送更新后弹窗内容自动跟随。
+const selectedTask = computed(() => (
+  selectedTaskId.value === null
+    ? null
+    : tasks.value.find((task) => task.id === selectedTaskId.value) ?? null
+));
 
 const FINISHED_STATUSES = new Set(['DONE', 'CANCELLED']);
 
@@ -47,25 +53,6 @@ const agentLabels = computed(() => new Map(
     .map((agent) => [agent.id as number, displayName(agent)]),
 ));
 
-function formatTaskDateTime(value: string | null): string {
-  if (!value) {
-    return '';
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-  return `${date.toLocaleDateString()} ${formatTime(value)}`.trim();
-}
-
-function taskStatusLabel(status: AgentTaskStatus): string {
-  return t(`agent.taskStatus.${status}`);
-}
-
-function taskPriorityLabel(priority: AgentTaskPriority): string {
-  return t(`agent.taskPriority.${priority}`);
-}
-
 function taskActorLabel(id: number | null): string {
   if (typeof id !== 'number' || id <= 0) {
     return t('common.notSet');
@@ -88,11 +75,11 @@ function taskRoomDetailLabel(id: number | null): string {
 }
 
 function openTaskDetail(taskId: number): void {
-  selectedTask.value = tasks.value.find((task) => task.id === taskId) ?? null;
+  selectedTaskId.value = taskId;
 }
 
 function closeTaskDetail(): void {
-  selectedTask.value = null;
+  selectedTaskId.value = null;
 }
 
 async function loadTasks(force = false): Promise<void> {
@@ -205,14 +192,13 @@ watch(
       </div>
     </template>
     <AgentTaskDetailModal
+      :task-id="selectedTaskId"
       :task="selectedTask"
-      :created-at-label="selectedTask ? (formatTaskDateTime(selectedTask.created_at) || t('common.notSet')) : ''"
       :creator-label="selectedTask ? taskActorLabel(selectedTask.creator_id) : ''"
       :assignee-label="selectedTask ? taskActorLabel(selectedTask.assignee_id) : ''"
-      :manager-label="selectedTask ? taskActorDetailLabel(selectedTask.manager_id) : ''"
+      :reviewer-label="selectedTask ? taskActorDetailLabel(selectedTask.reviewer_id) : ''"
       :room-label="selectedTask ? taskRoomDetailLabel(selectedTask.room_id) : ''"
-      :priority-label="selectedTask ? taskPriorityLabel(selectedTask.priority) : ''"
-      :status-label="selectedTask ? taskStatusLabel(selectedTask.status) : ''"
+      :actor-label="taskActorDetailLabel"
       @close="closeTaskDetail"
     />
   </section>

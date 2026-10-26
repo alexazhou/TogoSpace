@@ -17,6 +17,7 @@ import type {
   AgentInfo,
   AgentStatus,
   AgentTask,
+  AgentTaskEvent,
   DeptTreeNode,
   MessageInfo,
   RoleTemplateSummary,
@@ -489,6 +490,81 @@ export function setTeamTasks(teamId: number, tasks: AgentTask[]): void {
   };
 }
 
+// ─── 任务事件时间线缓存（方案 B） ───────────────────────────────
+// 按 taskId 索引，同一任务可能在 Agent 侧栏与 Console 任务树同时打开，
+// 共享一份数据可避免重复请求与两套合并逻辑。
+
+const taskEventsState = ref<Record<number, AgentTaskEvent[]>>({});
+const taskEventsTotalState = ref<Record<number, number>>({});
+const MAX_TASK_EVENT_ITEMS = 100;
+
+/**
+ * 按 id 合并事件集合并返回升序结果。
+ *
+ * WS 推送与首屏 HTTP 请求存在竞态（推送可能先到），所以合并一律按 id 去重，
+ * **禁止**直接 `events = incoming`。同 id 以新到的为准（事件内容不可变，等价）。
+ */
+export function mergeTaskEvents(
+  existing: AgentTaskEvent[],
+  incoming: AgentTaskEvent[],
+): AgentTaskEvent[] {
+  const byId = new Map<number, AgentTaskEvent>();
+  for (const event of existing) {
+    byId.set(event.id, event);
+  }
+  for (const event of incoming) {
+    byId.set(event.id, event);
+  }
+  return [...byId.values()].sort((left, right) => left.id - right.id);
+}
+
+/** 读取某任务已缓存的**升序**事件列表。 */
+export function getTaskEvents(taskId: number | null): AgentTaskEvent[] {
+  if (taskId === null) {
+    return [];
+  }
+  return taskEventsState.value[taskId] ?? [];
+}
+
+/** 读取某任务事件总数（跨页；未加载过则为 0）。 */
+export function getTaskEventsTotal(taskId: number | null): number {
+  if (taskId === null) {
+    return 0;
+  }
+  return taskEventsTotalState.value[taskId] ?? 0;
+}
+
+/** 首屏 / 补拉：整份替换并记录总数（调用方已按接口拿到完整一页）。 */
+export function setTaskEvents(taskId: number, events: AgentTaskEvent[], total?: number): void {
+  const merged = mergeTaskEvents([], events).slice(-MAX_TASK_EVENT_ITEMS);
+  taskEventsState.value = { ...taskEventsState.value, [taskId]: merged };
+  if (typeof total === 'number') {
+    taskEventsTotalState.value = { ...taskEventsTotalState.value, [taskId]: total };
+  }
+}
+
+/** 向前翻页：把更早的一页合并进缓存。 */
+export function prependTaskEvents(taskId: number, earlier: AgentTaskEvent[], total?: number): void {
+  const merged = mergeTaskEvents(earlier, taskEventsState.value[taskId] ?? [])
+    .slice(-MAX_TASK_EVENT_ITEMS);
+  taskEventsState.value = { ...taskEventsState.value, [taskId]: merged };
+  if (typeof total === 'number') {
+    taskEventsTotalState.value = { ...taskEventsTotalState.value, [taskId]: total };
+  }
+}
+
+/** 实时推送：追加一条事件（幂等，按 id 去重），并把总数 +1（同 id 重复投递不重复计数）。 */
+export function appendTaskEvent(taskId: number, event: AgentTaskEvent): void {
+  const current = taskEventsState.value[taskId] ?? [];
+  const merged = mergeTaskEvents(current, [event]).slice(-MAX_TASK_EVENT_ITEMS);
+  taskEventsState.value = { ...taskEventsState.value, [taskId]: merged };
+
+  if (!current.some((item) => item.id === event.id)) {
+    const total = (taskEventsTotalState.value[taskId] ?? current.length) + 1;
+    taskEventsTotalState.value = { ...taskEventsTotalState.value, [taskId]: total };
+  }
+}
+
 export function applyRealtimeEvent(event: FrontendRealtimeEvent): void {
   if (event.type === 'message') {
     const nextMessage: MessageInfo = event.message;
@@ -607,6 +683,12 @@ export function applyRealtimeEvent(event: FrontendRealtimeEvent): void {
     return;
   }
 
+  if (event.type === 'task_event_appended') {
+    upsertAgentTask(event.teamId, event.task);
+    appendTaskEvent(event.task.id, event.event);
+    return;
+  }
+
   if (event.type === 'room_added') {
     updateTeamRooms(event.teamId, (rooms) => {
       const idx = rooms.findIndex((r) => r.room_id === event.room.room_id);
@@ -636,6 +718,8 @@ export function clearRuntimeStore(): void {
   agentStatusState.value = {};
   teamDeptTreeState.value = {};
   teamTasksState.value = {};
+  taskEventsState.value = {};
+  taskEventsTotalState.value = {};
   roleTemplatesState.value = [];
   activeTeamId.value = null;
   activeRoomId.value = null;

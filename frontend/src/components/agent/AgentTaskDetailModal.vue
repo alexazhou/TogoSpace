@@ -1,16 +1,32 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { AgentTask } from '../../types';
+import { getTaskDetail, getTaskEventsPage } from '../../api';
+import {
+  appendTaskEvent,
+  getTaskEvents,
+  getTaskEventsTotal,
+  prependTaskEvents,
+  setTaskEvents,
+} from '../../realtime/runtimeStore';
+import { subscribeRealtimeEvents } from '../../realtime/wsClient';
+import { connectionState } from '../../appUiState';
+import type { AgentTask, AgentTaskDependencySummary, AgentTaskStatus } from '../../types';
+import { formatBackendDateTime } from '../../utils';
+import AgentTaskEventTimeline from './AgentTaskEventTimeline.vue';
+import MarkdownContent from '../ui/MarkdownContent.vue';
 
 const props = defineProps<{
+  /** 选中任务 id；null 表示关闭。 */
+  taskId: number | null;
+  /** 列表里已有的任务快照（详情接口返回前先展示，避免弹窗空白）。 */
   task: AgentTask | null;
-  createdAtLabel: string;
   creatorLabel: string;
   assigneeLabel: string;
-  managerLabel: string;
+  reviewerLabel: string;
   roomLabel: string;
-  priorityLabel: string;
-  statusLabel: string;
+  /** 时间线 actor 的展示名解析。 */
+  actorLabel: (id: number) => string;
 }>();
 
 const emit = defineEmits<{
@@ -18,6 +34,180 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+
+const TIMELINE_PAGE_SIZE = 20;
+
+const detail = ref<AgentTask | null>(null);
+const detailLoading = ref(false);
+const detailError = ref('');
+const eventsLoading = ref(false);
+const eventsLoadingMore = ref(false);
+const eventsError = ref('');
+let requestToken = 0;
+
+/** 详情优先，回落到列表快照。 */
+const view = computed<AgentTask | null>(() => detail.value ?? props.task);
+const events = computed(() => getTaskEvents(props.taskId));
+const eventsTotal = computed(() => getTaskEventsTotal(props.taskId));
+const hasMoreEvents = computed(() => events.value.length < eventsTotal.value);
+
+const priorityLabel = computed(() => (view.value ? t(`agent.taskPriority.${view.value.priority}`) : ''));
+const statusLabel = computed(() => (view.value ? t(`agent.taskStatus.${view.value.status}`) : ''));
+const createdAtLabel = computed(() => formatBackendDateTime(view.value?.created_at) || t('common.notSet'));
+const roomDetailLabel = computed(() => {
+  const roomId = view.value?.room_id;
+  return typeof roomId === 'number' && roomId > 0 ? `#${roomId}` : t('common.none');
+});
+const dependencies = computed<AgentTaskDependencySummary[]>(() => view.value?.depends_on_details ?? []);
+
+function dependencyLabel(dep: AgentTaskDependencySummary): string {
+  const title = dep.title || `#${dep.task_id}`;
+  if (dep.status === 'UNKNOWN') {
+    return t('agent.taskDependencyDeleted', { title });
+  }
+  return t('agent.taskDependencyItem', {
+    title,
+    status: t(`agent.taskStatus.${dep.status}`),
+  });
+}
+
+async function loadAll(id: number): Promise<void> {
+  const token = ++requestToken;
+  detailError.value = '';
+  eventsError.value = '';
+  detail.value = null;
+  // 命中缓存则先渲染，避免每次打开都空白一下
+  if (getTaskEvents(id).length > 0) {
+    detailLoading.value = false;
+    eventsLoading.value = false;
+  } else {
+    detailLoading.value = true;
+    eventsLoading.value = true;
+  }
+
+  const [detailResult, eventsResult] = await Promise.allSettled([
+    getTaskDetail(id),
+    getTaskEventsPage(id, { limit: TIMELINE_PAGE_SIZE }),
+  ]);
+  if (token !== requestToken) {
+    return;
+  }
+
+  if (detailResult.status === 'fulfilled') {
+    detail.value = detailResult.value;
+    // 详情接口自带时间线首屏，直接落缓存（比单独请求少一次往返的场景）
+    if (Array.isArray(detailResult.value.events) && detailResult.value.events.length > 0) {
+      setTaskEvents(id, detailResult.value.events, detailResult.value.events_total);
+    }
+  } else {
+    detailError.value = t('agent.taskDetailLoadFailed');
+    console.error(detailResult.reason);
+  }
+
+  if (eventsResult.status === 'fulfilled') {
+    const page = eventsResult.value;
+    // 首屏整份替换，但保留已由推送提前到达的事件（按 id 合并）
+    setTaskEvents(id, page.events, page.total);
+  } else {
+    eventsError.value = t('agent.taskEventsLoadFailed');
+    console.error(eventsResult.reason);
+  }
+
+  detailLoading.value = false;
+  eventsLoading.value = false;
+}
+
+async function loadEarlierEvents(): Promise<void> {
+  const id = props.taskId;
+  if (id === null || eventsLoadingMore.value || !hasMoreEvents.value) {
+    return;
+  }
+  const earliest = events.value[0];
+  if (!earliest) {
+    return;
+  }
+
+  eventsLoadingMore.value = true;
+  try {
+    const page = await getTaskEventsPage(id, {
+      limit: TIMELINE_PAGE_SIZE,
+      beforeId: earliest.id,
+    });
+    prependTaskEvents(id, page.events, page.total);
+  } catch (error) {
+    eventsError.value = t('agent.taskEventsLoadFailed');
+    console.error(error);
+  } finally {
+    eventsLoadingMore.value = false;
+  }
+}
+
+watch(
+  () => props.taskId,
+  (id) => {
+    if (id === null) {
+      requestToken += 1;
+      detail.value = null;
+      detailError.value = '';
+      eventsError.value = '';
+      return;
+    }
+    loadAll(id).catch(console.error);
+  },
+  { immediate: true },
+);
+
+// 方案 B：推送直达，无需再请求接口。
+let unsubscribe: (() => void) | null = null;
+watch(
+  () => props.taskId,
+  (id) => {
+    unsubscribe?.();
+    unsubscribe = null;
+    if (id === null) {
+      return;
+    }
+    unsubscribe = subscribeRealtimeEvents((event) => {
+      if (event.type !== 'task_event_appended') {
+        return;
+      }
+      if (event.task.id !== id) {
+        return;
+      }
+      appendTaskEvent(id, event.event);
+      // 推送带来的最新快照与当前详情不同步时，以推送为准更新状态等字段
+      if (detail.value && event.task.updated_at !== detail.value.updated_at) {
+        detail.value = { ...detail.value, ...event.task };
+      }
+    });
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  unsubscribe?.();
+  unsubscribe = null;
+});
+
+onBeforeUnmount(() => {
+  unsubscribe?.();
+  unsubscribe = null;
+});
+
+// 断线重连补偿：断开期间的推送不会补发，重连后重拉首屏并按 id 合并。
+watch(
+  () => connectionState.value,
+  (state, previous) => {
+    if (state !== 'connected' || previous === undefined || props.taskId === null) {
+      return;
+    }
+    const id = props.taskId;
+    const loaded = Math.max(events.value.length, TIMELINE_PAGE_SIZE);
+    getTaskEventsPage(id, { limit: loaded })
+      .then((page) => setTaskEvents(id, page.events, page.total))
+      .catch((error) => console.error(error));
+  },
+);
 
 function requestClose(): void {
   emit('close');
@@ -27,7 +217,7 @@ function requestClose(): void {
 <template>
   <Teleport to="body">
     <div
-      v-if="task"
+      v-if="taskId !== null && view"
       class="task-detail-overlay"
       @click.self="requestClose"
     >
@@ -35,7 +225,7 @@ function requestClose(): void {
         <div class="task-detail-modal__head">
           <div class="task-detail-modal__title-wrap">
             <p class="task-detail-modal__eyebrow">{{ t('agent.taskDetail') }}</p>
-            <h4>{{ task.title || t('common.unknown') }}</h4>
+            <h4>{{ view.title || t('common.unknown') }}</h4>
           </div>
           <button
             type="button"
@@ -48,10 +238,10 @@ function requestClose(): void {
         </div>
 
         <div class="task-detail-modal__badges">
-          <span class="task-detail-modal__badge" :data-priority="task.priority">
+          <span class="task-detail-modal__badge" :data-priority="view.priority">
             {{ priorityLabel }}
           </span>
-          <span class="task-detail-modal__badge" :data-status="task.status">
+          <span class="task-detail-modal__badge" :data-status="view.status">
             {{ statusLabel }}
           </span>
         </div>
@@ -59,11 +249,11 @@ function requestClose(): void {
         <dl class="task-detail-modal__grid">
           <div>
             <dt>{{ t('agent.taskId') }}</dt>
-            <dd>#{{ task.id }}</dd>
+            <dd>#{{ view.id }}</dd>
           </div>
           <div>
             <dt>{{ t('agent.taskCreatedAtLabel') }}</dt>
-            <dd>{{ createdAtLabel || t('common.notSet') }}</dd>
+            <dd>{{ createdAtLabel }}</dd>
           </div>
           <div>
             <dt>{{ t('agent.taskCreatorLabel') }}</dt>
@@ -74,27 +264,44 @@ function requestClose(): void {
             <dd>{{ assigneeLabel }}</dd>
           </div>
           <div>
-            <dt>{{ t('agent.taskManagerLabel') }}</dt>
-            <dd>{{ managerLabel }}</dd>
+            <dt>{{ t('agent.taskReviewerLabel') }}</dt>
+            <dd>{{ reviewerLabel }}</dd>
           </div>
           <div>
             <dt>{{ t('agent.taskRoomLabel') }}</dt>
-            <dd>{{ roomLabel }}</dd>
+            <dd>{{ roomDetailLabel }}</dd>
           </div>
         </dl>
 
+        <div v-if="view.current_block_reason" class="task-detail-modal__section task-detail-modal__section--warn">
+          <p class="task-detail-modal__section-title">{{ t('agent.taskBlockReasonLabel') }}</p>
+          <p class="task-detail-modal__section-body">{{ view.current_block_reason }}</p>
+        </div>
+
         <div class="task-detail-modal__section">
           <p class="task-detail-modal__section-title">{{ t('agent.taskDescriptionLabel') }}</p>
-          <p class="task-detail-modal__section-body">
-            {{ task.description || t('agent.noTaskDescription') }}
-          </p>
+          <div class="task-detail-modal__section-body task-detail-modal__section-body--scroll">
+            <MarkdownContent
+              v-if="view.description"
+              class="task-detail-modal__markdown"
+              :content="view.description"
+            />
+            <template v-else>{{ t('agent.noTaskDescription') }}</template>
+          </div>
         </div>
 
         <div class="task-detail-modal__section">
           <p class="task-detail-modal__section-title">{{ t('agent.taskDependsOnLabel') }}</p>
           <p class="task-detail-modal__section-body">
-            <template v-if="task.depends_on.length">
-              {{ task.depends_on.map((id) => `#${id}`).join(', ') }}
+            <template v-if="dependencies.length">
+              <span
+                v-for="dep in dependencies"
+                :key="dep.task_id"
+                class="task-detail-modal__dep"
+              >{{ dependencyLabel(dep) }}</span>
+            </template>
+            <template v-else-if="view.depends_on.length">
+              {{ view.depends_on.map((id) => `#${id}`).join(', ') }}
             </template>
             <template v-else>
               {{ t('common.none') }}
@@ -102,15 +309,19 @@ function requestClose(): void {
           </p>
         </div>
 
-        <div v-if="task.result" class="task-detail-modal__section">
-          <p class="task-detail-modal__section-title">{{ t('agent.taskResultLabel') }}</p>
-          <p class="task-detail-modal__section-body">{{ task.result }}</p>
-        </div>
+        <div v-if="detailError" class="task-detail-modal__hint">{{ detailError }}</div>
 
-        <div v-if="task.block_reason" class="task-detail-modal__section">
-          <p class="task-detail-modal__section-title">{{ t('agent.taskBlockReasonLabel') }}</p>
-          <p class="task-detail-modal__section-body">{{ task.block_reason }}</p>
-        </div>
+        <AgentTaskEventTimeline
+          :events="events"
+          :total="eventsTotal"
+          :loading="eventsLoading || detailLoading"
+          :loading-more="eventsLoadingMore"
+          :has-more="hasMoreEvents"
+          :error="eventsError"
+          :actor-label="actorLabel"
+          @load-more="loadEarlierEvents().catch(console.error)"
+          @retry="taskId !== null && loadAll(taskId).catch(console.error)"
+        />
       </section>
     </div>
   </Teleport>
@@ -297,6 +508,11 @@ function requestClose(): void {
   margin-top: 14px;
 }
 
+.task-detail-modal__section--warn .task-detail-modal__section-body {
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface-soft) 88%);
+  color: var(--warn);
+}
+
 .task-detail-modal__section-title {
   margin: 0 0 6px;
   color: var(--text-strong);
@@ -314,6 +530,64 @@ function requestClose(): void {
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* 任务说明可能很长：限制高度，超出内部滚动，避免把弹窗撑得过高 */
+.task-detail-modal__section-body--scroll {
+  max-height: 180px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* markdown 渲染后由标签自己控制换行，父级的 pre-wrap 会凭空多出空行 */
+.task-detail-modal__markdown {
+  white-space: normal;
+}
+
+/* 任务说明里的 markdown 段间距收紧（默认 0.7em 在弹窗里偏大） */
+.task-detail-modal__markdown :deep(* + p),
+.task-detail-modal__markdown :deep(* + blockquote),
+.task-detail-modal__markdown :deep(* + ul),
+.task-detail-modal__markdown :deep(* + ol),
+.task-detail-modal__markdown :deep(* + .markdown-code-block),
+.task-detail-modal__markdown :deep(* + table) {
+  margin-top: 0.35em;
+}
+
+.task-detail-modal__markdown :deep(h1),
+.task-detail-modal__markdown :deep(h2),
+.task-detail-modal__markdown :deep(h3),
+.task-detail-modal__markdown :deep(h4),
+.task-detail-modal__markdown :deep(h5),
+.task-detail-modal__markdown :deep(h6) {
+  margin-top: 0.5em;
+}
+
+.task-detail-modal__markdown :deep(li + li) {
+  margin-top: 0.15em;
+}
+
+.task-detail-modal__section-body--scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.task-detail-modal__section-body--scroll::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.task-detail-modal__dep {
+  display: inline-block;
+  margin-right: 8px;
+}
+
+.task-detail-modal__hint {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
 @media (max-width: 720px) {

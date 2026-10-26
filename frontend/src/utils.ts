@@ -69,6 +69,39 @@ export function formatTime(time: string): string {
   }).format(date);
 }
 
+/**
+ * 解析后端 datetime 字符串。
+ *
+ * 后端 `jsonUtil` 的格式是 `%Y-%m-%d %H:%M:%S.%f`（空格分隔、6 位微秒、本地时区），
+ * 直接交给 `new Date()` 时 Safari / 部分 WebView 会得到 Invalid Date。
+ * 这里统一归一化为 ISO 形式并裁掉多余的微秒位。解析失败返回 null。
+ */
+export function parseBackendDateTime(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim().replace(' ', 'T').replace(/(\.\d{3})\d+$/, '$1');
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * 后端 datetime → 「YYYY/M/D HH:mm:ss」本地时间（**24 小时制**）；解析失败返回空串。
+ *
+ * 不用 `toLocaleTimeString()` 的默认值：它会跟随 locale 输出 AM/PM，
+ * 而这里的时间线 / 任务详情一律用 24 小时制。
+ */
+export function formatBackendDateTime(value: string | null | undefined): string {
+  const date = parseBackendDateTime(value);
+  if (!date) {
+    return '';
+  }
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const day = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return `${day} ${time}`;
+}
+
 export function bubbleSide(senderId: number): BubbleSide {
   if (senderId === -2) {
     return 'center';

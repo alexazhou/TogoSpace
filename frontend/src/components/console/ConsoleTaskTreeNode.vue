@@ -22,12 +22,12 @@ const assigneeLabel = computed(() => {
   return props.agentLabels.get(assigneeId) || `#${assigneeId}`;
 });
 
-const managerLabel = computed(() => {
-  const managerId = props.node.task.manager_id;
-  if (typeof managerId !== 'number' || managerId <= 0) {
+const reviewerLabel = computed(() => {
+  const reviewerId = props.node.task.reviewer_id;
+  if (typeof reviewerId !== 'number' || reviewerId <= 0) {
     return null;
   }
-  return props.agentLabels.get(managerId) || `#${managerId}`;
+  return props.agentLabels.get(reviewerId) || `#${reviewerId}`;
 });
 
 function handleSelect(): void {
@@ -47,7 +47,7 @@ function handleSelect(): void {
       class="task-card"
       :task="node.task"
       :assignee-label="assigneeLabel"
-      :manager-label="managerLabel"
+      :reviewer-label="reviewerLabel"
       clickable
       variant="tree"
       @select="handleSelect"

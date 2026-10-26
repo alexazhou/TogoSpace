@@ -3,6 +3,8 @@ import type {
   AgentActivityStatus,
   AgentActivityType,
   AgentTask,
+  AgentTaskDependencySummary,
+  AgentTaskEvent,
   AgentTaskPriority,
   AgentTaskStatus,
   AgentStatus,
@@ -99,14 +101,28 @@ type RawAgentTask = Partial<AgentTask> & {
   description?: unknown;
   assignee_id?: unknown;
   creator_id?: unknown;
-  manager_id?: unknown;
+  reviewer_id?: unknown;
   status?: unknown;
   priority?: unknown;
   parent_id?: unknown;
   depends_on?: unknown;
   room_id?: unknown;
-  result?: unknown;
-  block_reason?: unknown;
+  created_at?: unknown;
+  updated_at?: unknown;
+  events?: unknown;
+  events_total?: unknown;
+  last_note?: unknown;
+  current_block_reason?: unknown;
+  depends_on_details?: unknown;
+};
+
+export type RawAgentTaskEvent = {
+  id?: unknown;
+  task_id?: unknown;
+  actor_id?: unknown;
+  from_status?: unknown;
+  to_status?: unknown;
+  content?: unknown;
   created_at?: unknown;
   updated_at?: unknown;
 };
@@ -511,15 +527,75 @@ function normalizeAgentTaskPriority(value?: unknown): AgentTaskPriority {
   return 'NORMAL';
 }
 
-function normalizeAgentTask(task: RawAgentTask): AgentTask {
+/** 事件状态字段：非枚举值一律降级为 null，避免后端新增状态导致整条事件被丢弃。 */
+function normalizeEventStatus(value: unknown): AgentTaskStatus | null {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (
+    normalized === 'TODO'
+    || normalized === 'PENDING'
+    || normalized === 'IN_PROGRESS'
+    || normalized === 'REVIEWING'
+    || normalized === 'ON_HOLD'
+    || normalized === 'DONE'
+    || normalized === 'CANCELLED'
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+export function normalizeAgentTaskEvent(raw: RawAgentTaskEvent): AgentTaskEvent | null {
+  const id = Number(raw.id ?? 0);
+  if (!Number.isFinite(id) || id <= 0) {
+    return null;
+  }
   return {
+    id,
+    task_id: Number(raw.task_id ?? 0),
+    actor_id: Number(raw.actor_id ?? 0),
+    from_status: normalizeEventStatus(raw.from_status),
+    to_status: normalizeEventStatus(raw.to_status),
+    content: typeof raw.content === 'string' ? raw.content : '',
+    created_at: typeof raw.created_at === 'string' ? raw.created_at : null,
+    updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : null,
+  };
+}
+
+function normalizeTaskEventList(value: unknown): AgentTaskEvent[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => normalizeAgentTaskEvent((item ?? {}) as RawAgentTaskEvent))
+    .filter((event): event is AgentTaskEvent => event !== null)
+    .sort((left, right) => left.id - right.id);
+}
+
+function normalizeDependencySummaries(value: unknown): AgentTaskDependencySummary[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => {
+    const raw = (item ?? {}) as Record<string, unknown>;
+    const status = String(raw.status ?? '').trim().toUpperCase();
+    return {
+      task_id: Number(raw.task_id ?? 0),
+      title: typeof raw.title === 'string' ? raw.title : '',
+      status: (status === 'UNKNOWN' ? 'UNKNOWN' : normalizeAgentTaskStatus(status)) as
+        AgentTaskDependencySummary['status'],
+    };
+  });
+}
+
+function normalizeAgentTask(task: RawAgentTask): AgentTask {
+  const normalized: AgentTask = {
     id: Number(task.id ?? 0),
     team_id: Number(task.team_id ?? 0),
     title: String(task.title ?? ''),
     description: typeof task.description === 'string' ? task.description : '',
     assignee_id: Number(task.assignee_id ?? 0),
     creator_id: Number(task.creator_id ?? 0),
-    manager_id: typeof task.manager_id === 'number' ? task.manager_id : null,
+    reviewer_id: typeof task.reviewer_id === 'number' ? task.reviewer_id : null,
     status: normalizeAgentTaskStatus(task.status),
     priority: normalizeAgentTaskPriority(task.priority),
     parent_id: typeof task.parent_id === 'number' ? task.parent_id : null,
@@ -529,11 +605,29 @@ function normalizeAgentTask(task: RawAgentTask): AgentTask {
         .filter((item) => Number.isFinite(item) && item > 0)
       : [],
     room_id: typeof task.room_id === 'number' ? task.room_id : null,
-    result: typeof task.result === 'string' ? task.result : '',
-    block_reason: typeof task.block_reason === 'string' ? task.block_reason : '',
     created_at: typeof task.created_at === 'string' ? task.created_at : null,
     updated_at: typeof task.updated_at === 'string' ? task.updated_at : null,
   };
+
+  // 列表接口不带这些字段，详情接口才带——缺省时保持 undefined，不要塞空数组冒充「没有事件」。
+  if (Array.isArray(task.events)) {
+    normalized.events = normalizeTaskEventList(task.events);
+  }
+  if (typeof task.events_total === 'number') {
+    normalized.events_total = task.events_total;
+  }
+  if (typeof task.last_note === 'string') {
+    normalized.last_note = task.last_note;
+  }
+  if (typeof task.current_block_reason === 'string' || task.current_block_reason === null) {
+    normalized.current_block_reason =
+      typeof task.current_block_reason === 'string' ? task.current_block_reason : null;
+  }
+  if (Array.isArray(task.depends_on_details)) {
+    normalized.depends_on_details = normalizeDependencySummaries(task.depends_on_details);
+  }
+
+  return normalized;
 }
 
 function normalizeTeamSummary(team: RawTeamSummary): TeamSummary {
@@ -887,6 +981,36 @@ export async function getTeamTasks(teamId: number, includeClosed = true, limit =
     withSearch(`/teams/${teamId}/tasks.json`, { include_closed: includeClosed ? 1 : 0, limit }),
   );
   return (data.tasks ?? []).map(normalizeAgentTask);
+}
+
+/** 获取单个任务详情（含依赖摘要、时间线首屏与派生字段）。 */
+export async function getTaskDetail(taskId: number): Promise<AgentTask> {
+  const data = await requestJson<{ task: RawAgentTask }>(`/tasks/${taskId}.json`);
+  return normalizeAgentTask(data.task ?? {});
+}
+
+export interface AgentTaskEventsPage {
+  /** 本页事件，按 id **升序**（最新在末尾），便于直接渲染时间线。 */
+  events: AgentTaskEvent[];
+  /** 该任务事件**总数**（跨页），用于判断是否还有更早事件。 */
+  total: number;
+}
+
+/** 按游标分页读取任务时间线；`beforeId` 省略时取最新一页。 */
+export async function getTaskEventsPage(
+  taskId: number,
+  options?: { limit?: number; beforeId?: number },
+): Promise<AgentTaskEventsPage> {
+  const data = await requestJson<{ events?: RawAgentTaskEvent[]; total?: number }>(
+    withSearch(`/tasks/${taskId}/events.json`, {
+      limit: options?.limit,
+      before_id: options?.beforeId,
+    }),
+  );
+  return {
+    events: normalizeTaskEventList(data.events),
+    total: typeof data.total === 'number' ? data.total : 0,
+  };
 }
 
 export async function resumeAgent(agentId: number): Promise<{ status: string; agent_id: number; room_id: number }> {
