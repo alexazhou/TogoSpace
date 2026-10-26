@@ -39,7 +39,7 @@ def test_list_tasks_signature_uses_assignee_and_reviewer():
 def test_list_tasks_does_not_expose_limit():
     """工具层不对外暴露 limit（走内部默认值）；服务层仍保留 limit 可选。"""
     params = list(inspect.signature(tools.list_tasks).parameters)
-    assert params == ["assignee", "reviewer", "status", "open_only", "scope", "_context"]
+    assert params == ["assignee", "reviewer", "scope", "status", "open_only", "_context"]
     assert "limit" not in params
 
     import service.taskService as taskService
@@ -65,13 +65,15 @@ def test_list_tasks_metadata_exposes_open_only():
     assert meta["parameters"]["required"] == []
 
 
-def test_list_tasks_scope_is_literal_enum_default_self():
-    """`scope` 用 `Literal` 而不是 `str`：schema 出 enum，模型不容易传错。
+def test_list_tasks_scope_is_literal_enum_without_default():
+    """`scope` 是**过滤条件**之一：`Optional[Literal[...]]` 且**无默认值**。
 
+    有默认值会让「传 scope」失去意义（不传也能跑）；现在三者都不传才报
+    `missing_target`，并在首段把规则一次说清。schema 出 enum，模型不容易传错。
     这也是 #75 快照里 `schema` 字段的第一个真实 enum 用例（此前 26 个工具无 Literal）。
     """
     sig = inspect.signature(tools.list_tasks)
-    assert sig.parameters["scope"].default == "self"
+    assert sig.parameters["scope"].default is None
 
     meta = get_function_metadata("list_tasks", tools.list_tasks)
     scope_schema = meta["parameters"]["properties"]["scope"]
@@ -104,10 +106,10 @@ async def test_list_tasks_scope_team_without_filters_is_forwarded(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_rejects_when_no_assignee_or_reviewer():
-    """#62 回归：`scope="self"`（默认）且 assignee / reviewer 都不传 ⇒ `missing_target`，不抛异常。
+async def test_list_tasks_rejects_when_no_filter_at_all():
+    """#62 回归 + #76 新口径：assignee / reviewer / **scope** 三者都不传 ⇒ `missing_target`。
 
-    这是防滥用契约，新增 `scope="team"` 后**不许放松**：想拿全团队视角必须显式传 `scope`。
+    这是防滥用契约，不许放松：想拿范围视角必须显式传 `scope`。
     """
     from service.roomService.core import ToolCallContext
 
@@ -116,6 +118,29 @@ async def test_list_tasks_rejects_when_no_assignee_or_reviewer():
 
     assert res["success"] is False
     assert res["error_code"] == "missing_target"
+    assert "assignee" in res["message"] and "scope" in res["message"]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_scope_self_alone_is_accepted(monkeypatch):
+    """只传 `scope="self"` 即可：不再要求 assignee/reviewer，`caller_id` 由上下文给。"""
+    from service.roomService.core import ToolCallContext
+    import service.taskService as taskService
+
+    captured: dict = {}
+
+    async def _fake(**kwargs):
+        captured.update(kwargs)
+        return {"success": True, "tasks": [], "total": 0}
+
+    monkeypatch.setattr(taskService, "list_tasks", _fake)
+    ctx = ToolCallContext(agent_id=8, team_id=1, tool_name="list_tasks")
+    res = await tools.list_tasks(scope="self", _context=ctx)
+
+    assert res["success"] is True
+    assert captured["scope"] == "self"
+    assert captured["caller_id"] == 8
+    assert captured["assignee_id"] is None and captured["reviewer_id"] is None
 
 
 @pytest.mark.asyncio

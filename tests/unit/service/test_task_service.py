@@ -664,6 +664,28 @@ async def test_resolve_visible_agent_ids_without_dept_tree_falls_back_to_self():
 
 
 @pytest.mark.asyncio
+async def test_resolve_visible_scope_flags_degradation_when_dept_tree_missing():
+    """降级必须**显式标记**：既降级又沉默 ⇒ 调用方会以为「全团就这些任务」。"""
+    tree_patch, subs_patch = _patch_dept_tree(manager_id=None, subordinates=set())
+    with tree_patch, subs_patch:
+        scope = await taskService.resolve_visible_scope(team_id=1, caller_id=8)
+
+    assert scope.agent_ids == [8]
+    assert scope.degraded is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_visible_scope_no_degradation_with_normal_tree():
+    """正常部门树不置降级标记（否则「降级」会变成噪声，失去警示作用）。"""
+    tree_patch, subs_patch = _patch_dept_tree(manager_id=6, subordinates={8})
+    with tree_patch, subs_patch:
+        scope = await taskService.resolve_visible_scope(team_id=1, caller_id=7)
+
+    assert scope.agent_ids == [7, 8]
+    assert scope.degraded is False
+
+
+@pytest.mark.asyncio
 async def test_resolve_visible_agent_ids_without_caller_has_no_scope():
     """拿不到调用者身份 ⇒ `[]`（宁可不给，也不当成 Root Leader 放开全团队）。"""
     assert await taskService.resolve_visible_agent_ids(team_id=1, caller_id=None) == []
@@ -755,8 +777,8 @@ async def test_list_tasks_scope_team_member_with_filter_ignores_scope(task_manag
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_scope_self_without_filters_keeps_web_behavior(task_manager_mock):
-    """`scope="self"`（默认）且无过滤器 ⇒ 保持历史行为（不加范围限制，前端列表接口依赖）。"""
+async def test_list_tasks_scope_none_keeps_web_behavior(task_manager_mock):
+    """`scope=None`（默认）+ 无过滤器 ⇒ 保持历史行为（不加范围限制，Web 列表接口依赖）。"""
     task_manager_mock.list_tasks = AsyncMock(return_value=[])
     task_manager_mock.count_tasks = AsyncMock(return_value=0)
 
@@ -773,6 +795,83 @@ async def test_list_tasks_scope_self_without_filters_keeps_web_behavior(task_man
     )
     task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_scope_self_returns_self_related_only(task_manager_mock):
+    """`scope="self"` = 与我相关（我执行 **OR** 我验收）⇒ `agent_ids=[caller]`，无需过滤器。"""
+    task_manager_mock.list_tasks = AsyncMock(
+        return_value=[_build_task(id=1, assignee_id=7), _build_task(id=2, assignee_id=9, reviewer_id=7)]
+    )
+    task_manager_mock.count_tasks = AsyncMock(return_value=2)
+
+    result = await taskService.list_tasks(team_id=1, scope="self", caller_id=7)
+
+    assert result["success"] is True
+    expected = dict(
+        team_id=1,
+        assignee_id=None,
+        reviewer_id=None,
+        status=None,
+        exclude_statuses=None,
+        agent_ids=[7],
+    )
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_scope_self_stacks_with_explicit_filters(task_manager_mock):
+    """scope 与精确过滤器同传 ⇒ 「范围内且满足过滤器」（AND），不报错。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    await taskService.list_tasks(team_id=1, scope="self", caller_id=7, assignee_id=7)
+
+    expected = dict(
+        team_id=1,
+        assignee_id=7,
+        reviewer_id=None,
+        status=None,
+        exclude_statuses=None,
+        agent_ids=[7],
+    )
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_scope_self_without_caller_is_rejected(task_manager_mock):
+    """拿不到调用者身份时 `scope="self"` 无法算范围 ⇒ `missing_target`（不猜、不放全量）。"""
+    result = await taskService.list_tasks(team_id=1, scope="self", caller_id=None)
+
+    assert result["success"] is False
+    assert result["error_code"] == "missing_target"
+    task_manager_mock.list_tasks.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_scope_team_degraded_is_flagged(task_manager_mock):
+    """部门树缺失 ⇒ 降级为只看自己，但**必须**带 `scope_degraded` + message 告知调用方。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[_build_task(id=1, assignee_id=8)])
+    task_manager_mock.count_tasks = AsyncMock(return_value=1)
+
+    tree_patch, subs_patch = _patch_dept_tree(manager_id=None, subordinates=set())
+    with tree_patch, subs_patch:
+        result = await taskService.list_tasks(team_id=1, scope="team", caller_id=8)
+
+    assert result["success"] is True
+    assert result["scope_degraded"] is True
+    assert "降级" in result["message"]
+    task_manager_mock.list_tasks.assert_awaited_once_with(
+        team_id=1,
+        assignee_id=None,
+        reviewer_id=None,
+        status=None,
+        exclude_statuses=None,
+        agent_ids=[8],
+        limit=20,
+    )
 
 
 @pytest.mark.asyncio

@@ -135,6 +135,23 @@ def test_agent_ids_scopes_by_team(task_db):
     assert _ids(gtAgentTaskManager._filtered_task_query(1, agent_ids=[1])) == [1]
 
 
+def test_self_scope_equals_assignee_or_reviewer_union(task_db):
+    """`scope="self"`（`agent_ids=[caller]`）必须等于「我执行 ∪ 我验收」，防两种查法口径分叉。
+
+    注意：它**不等于** `assignee_id=caller` —— 我只当验收人的任务也要算进来，
+    这正是不能只按 assignee 过滤的原因。
+    """
+    _seed_tasks([(1, None), (2, 1), (3, 3)])  # t1 我执行 / t2 我验收 / t3 与我无关
+
+    self_scope = set(_ids(gtAgentTaskManager._filtered_task_query(1, agent_ids=[1])))
+    assignee_side = set(_ids(gtAgentTaskManager._filtered_task_query(1, assignee_id=1)))
+    reviewer_side = set(_ids(gtAgentTaskManager._filtered_task_query(1, reviewer_id=1)))
+
+    assert self_scope == assignee_side | reviewer_side == {1, 2}
+    # 明确记录「超集」关系：只按 assignee 查会漏掉 t2
+    assert assignee_side == {1}
+
+
 def test_count_and_list_share_agent_ids_scope(task_db):
     """`count_tasks` 与 `list_tasks` 必须同口径（否则 `total` 与列表对不上）。"""
     _seed_tasks([(1, None), (2, 1), (3, 3)])
