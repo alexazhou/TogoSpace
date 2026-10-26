@@ -481,6 +481,7 @@
 - [产品文档](./2026-10-25-agent-task-system-v2/step1_product.md)
 - [技术文档](./2026-10-25-agent-task-system-v2/step2_technical.md)
 - [开发任务表](./2026-10-25-agent-task-system-v2/step3_tasks.md)
+- [前端事件时间线专项设计](./2026-10-25-agent-task-system-v2/frontend_task_timeline_design.md)
 
 ---
 

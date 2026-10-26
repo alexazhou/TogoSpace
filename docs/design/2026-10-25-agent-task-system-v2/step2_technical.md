@@ -399,9 +399,15 @@ sequenceDiagram
    - **专测**：`tests/unit/migrate/test_migration_0015_fix_reviewing.py`（`up_to` 分段造存量 → 断言订正 / 其余不变 / 幂等 0 增量；**负对照**：摘掉 `reviewer_id IS NULL` 条件 ⇒ 误改已验收任务 ⇒ 断言转红）。
    - **说明**：本条仅描述**规则**，**不贴完整 SQL**（SQL 随 `assets/migrate/0015_backfill_events_and_fix_reviewing_tasks.sql` 的订正段落地）。
 8. **系统自动推进 / 认领置位的「静默性」边界（#68 · 显式登记、不静默）**：
-   - 系统在**依赖满足自动推进（`PENDING → TODO`）**与**认领置位（`TODO → IN_PROGRESS`）**时，**仅更新任务状态并写入一条系统流转事件**（`actor_id = -2` / `SpecialAgent.SYSTEM`，**代码引用常量**），**不 publish `TASK_CHANGED`、不触发任何唤醒 / 通知**（唤醒链路行为不变）。
+   - 系统在**依赖满足自动推进（`PENDING → TODO`）**与**认领置位（`TODO → IN_PROGRESS`）**时，**仅更新任务状态并写入一条系统流转事件**（`actor_id = -2` / `SpecialAgent.SYSTEM`，**代码引用常量**），**不触发任何唤醒 / 通知**（唤醒链路行为不变）。
    - **由此产生的可见性边界**：上述两类**系统状态变更不触发前端实时刷新**，前端需**下次拉取**方可见；「实时刷新」能力归后续里程碑 **D4（通知）**，**本期明确不实现**（显式登记、不得静默）。
    - **可红判据**：① 幂等 —— 非 `TODO` 或 `caller ≠ assignee` 的认领 ⇒ `skipped` 且**不写事件**；② fail-safe —— 注入认领置位异常 ⇒ **consume 不中断、任务照常执行完成**（「不改唤醒链路」的判据）；③ 置位与事件**同事务**（`update_task_status_with_event`）。
+   - **⚠️ 修订（Operator 2026-10-27 · 方案 B 定稿）**：本条原「**不 publish `TASK_CHANGED`**」需拆成两件独立的事——
+     - **唤醒 / 通知**：仍然不发，唤醒链路零改动（原约束**不变**）；
+     - **事件可见性**：改为**新增 `TASK_EVENT_APPENDED` 主题**，**只要往 `agent_task_events` 写了事件就推送一条**（含上述两类系统推进、以及**评论分支**）。该主题**不进调度表、不唤醒任何 Agent**，仅用于前端时间线实时刷新。
+     - 因此原「上述两类系统状态变更不触发前端实时刷新，需下次拉取方可见」的边界**作废**。设计详见 [前端事件时间线专项设计 §2.3](./frontend_task_timeline_design.md)。
+     - 落地要点：五个写入点（创建 / 流转 / 评论 / 自动推进 / 认领置位）全部推送；payload = `team_id` + `task` + 完整事件（`truncate_content=False`）；推送置于事务提交之后；`wsController` 中业务事件字段须与消息类型名 `payload["event"]` 错开（建议命名 `task_event`）。
+     - **分层约束（Operator 2026-10-27）**：**`dal` 既不 publish，也不决定「记什么事件」**。`create_task` / `update_task_status_with_event` 把 actor / from / to / 系统文案写死在 DAL，属业务判断越层，应改为 DAL 只提供「保存原语 + 事务边界」（`atomic()` + `save_task()`），**事件的构造与 publish 全部由 `taskService` 负责**。`gtAgentTaskEventManager.append_event` 保持不变（纯插入、不含事务），正好对应 §8.3 要求的唯一写入点。
 
 ---
 
