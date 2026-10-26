@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,11 +13,38 @@ from model.dbModel.gtAgentTask import GtAgentTask
 from service import taskService
 
 
+@asynccontextmanager
+async def _passthrough_atomic():
+    """公共事务边界 `model.dbModel.base.atomic()` 的测试替身：不加锁直接放行。"""
+    yield
+
+
+def _save_task_side_effect(task, *, force_insert: bool = False, only=None):
+    """`save_task` 的测试替身：插入时回填主键（贴近 peewee 的真实行为）。"""
+    if force_insert and getattr(task, "id", None) is None:
+        task.id = 42
+    return task
+
+
+def _save_task_side_effect(task, *, force_insert: bool = False, only=None):
+    """`save_task` 的测试替身：插入时回填主键（贴近 peewee 的真实行为）。"""
+    if force_insert and getattr(task, "id", None) is None:
+        task.id = 42
+    return task
+
+
 @pytest.fixture
 def task_manager_mock():
-    """统一 mock 任务 DAL，避免访问真实数据库。"""
-    with patch("service.taskService.gtAgentTaskManager") as mock_manager:
+    """统一 mock 任务 DAL，避免访问真实数据库。
+
+    DAL 已瘦身为「保存原语」（`save_task()`）；事务边界是公共的
+    `model.dbModel.base.atomic()`，事件的构造与推送由 service 负责
+    （见 `taskService._transition_with_event`）。
+    """
+    with patch("service.taskService.gtAgentTaskManager") as mock_manager, \
+            patch("service.taskService.atomic", new=_passthrough_atomic):
         mock_manager.list_pending_dependents = AsyncMock(return_value=[])
+        mock_manager.save_task = AsyncMock(side_effect=_save_task_side_effect)
         yield mock_manager
 
 
@@ -26,7 +54,17 @@ def event_manager_mock():
     with patch("service.taskService.gtAgentTaskEventManager") as mock_events:
         mock_events.list_events = AsyncMock(return_value=[])
         mock_events.count_events = AsyncMock(return_value=0)
+        mock_events.append_event = AsyncMock(return_value=SimpleNamespace(
+            id=1, task_id=1, actor_id=0, from_status=None, to_status=None, content='',
+        ))
         yield mock_events
+
+
+@pytest.fixture(autouse=True)
+def publish_mock():
+    """统一 mock 消息总线，避免推送链路在单元测试里真实调度回调。"""
+    with patch("service.messageBus.publish") as mock_publish:
+        yield mock_publish
 
 
 @pytest.fixture(autouse=True)
@@ -90,13 +128,13 @@ async def test_create_task_same_assignee_and_reviewer_returns_failure(task_manag
     assert result["success"] is False
     assert result["error_code"] == "invalid_reviewer"
     assert "reviewer" in result["message"]
-    task_manager_mock.create_task.assert_not_called()
+    task_manager_mock.save_task.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_create_task_success_self_assign(task_manager_mock, saved_task):
     """创建人给自己派单时应成功创建任务。"""
-    task_manager_mock.create_task = AsyncMock(return_value=saved_task)
+    
 
     result = await taskService.create_task(
         team_id=1,
@@ -107,8 +145,8 @@ async def test_create_task_success_self_assign(task_manager_mock, saved_task):
     )
 
     assert result == {"success": True, "task_id": 42, "message": "任务已创建，task_id=42，状态=TODO"}
-    task_manager_mock.create_task.assert_awaited_once()
-    created_task = task_manager_mock.create_task.await_args.args[0]
+    task_manager_mock.save_task.assert_awaited_once()
+    created_task = task_manager_mock.save_task.await_args.args[0]
     assert isinstance(created_task, GtAgentTask)
     assert created_task.team_id == 1
     assert created_task.creator_id == 11
@@ -122,7 +160,7 @@ async def test_create_task_success_self_assign(task_manager_mock, saved_task):
 @pytest.mark.asyncio
 async def test_create_task_success_manager_assigns_subordinate(task_manager_mock, saved_task):
     """部门主管可以给下属派发任务。"""
-    task_manager_mock.create_task = AsyncMock(return_value=saved_task)
+    
 
     with patch("service.deptService.get_sub_agent_ids", new=AsyncMock(return_value={21, 22})):
         result = await taskService.create_task(
@@ -135,7 +173,7 @@ async def test_create_task_success_manager_assigns_subordinate(task_manager_mock
 
     assert result["success"] is True
     assert result["task_id"] == 42
-    created_task = task_manager_mock.create_task.await_args.args[0]
+    created_task = task_manager_mock.save_task.await_args.args[0]
     assert created_task.assignee_id == 21
     assert created_task.reviewer_id == 20
 
@@ -153,7 +191,7 @@ async def test_create_task_permission_denied_when_assigning_non_subordinate(task
 
     assert result["success"] is False
     assert result["error_code"] == "assignee_not_allowed"
-    task_manager_mock.create_task.assert_not_called()
+    task_manager_mock.save_task.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -168,7 +206,7 @@ async def test_create_task_invalid_priority_returns_failure(task_manager_mock):
 
     assert result["success"] is False
     assert "无效的优先级" in result["message"]
-    task_manager_mock.create_task.assert_not_called()
+    task_manager_mock.save_task.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -186,7 +224,7 @@ async def test_create_task_depends_on_non_existent_tasks_returns_failure(task_ma
 
     assert result["success"] is False
     assert "依赖任务不存在" in result["message"]
-    task_manager_mock.create_task.assert_not_called()
+    task_manager_mock.save_task.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -194,7 +232,7 @@ async def test_create_task_with_valid_depends_on_sets_pending_status(task_manage
     """依赖存在但未完成时，初始状态应为 PENDING。"""
     dep_task = _build_task(id=7, team_id=1, status=TaskStatus.IN_PROGRESS)
     task_manager_mock.get_tasks_by_ids = AsyncMock(return_value=[dep_task])
-    task_manager_mock.create_task = AsyncMock(return_value=saved_task)
+    
 
     result = await taskService.create_task(
         team_id=1,
@@ -205,31 +243,29 @@ async def test_create_task_with_valid_depends_on_sets_pending_status(task_manage
     )
 
     assert result["success"] is True
-    created_task = task_manager_mock.create_task.await_args.args[0]
+    created_task = task_manager_mock.save_task.await_args.args[0]
     assert created_task.depends_on == [7]
     assert created_task.status == TaskStatus.PENDING
 
 
 @pytest.mark.asyncio
-async def test_update_task_assignee_submits_for_review(task_manager_mock):
+async def test_update_task_assignee_submits_for_review(task_manager_mock, event_manager_mock):
     """执行人可将进行中的任务提交为 REVIEWING。"""
     task = _build_task(status=TaskStatus.IN_PROGRESS, assignee_id=11, creator_id=11, reviewer_id=20)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
-
+    
     result = await taskService.update_task(team_id=1, caller_id=11, task_id=1, new_status="REVIEWING")
 
     assert result["success"] is True
     assert result["task"]["status"] == "REVIEWING"
-    task_manager_mock.update_task_status_with_event.assert_awaited_once()
+    event_manager_mock.append_event.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_update_task_manager_approves_review(task_manager_mock):
     task = _build_task(status=TaskStatus.REVIEWING, assignee_id=11, creator_id=11, reviewer_id=20)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
-
+    
     result = await taskService.update_task(team_id=1, caller_id=20, task_id=1, new_status="DONE")
 
     assert result["success"] is True
@@ -240,8 +276,7 @@ async def test_update_task_manager_approves_review(task_manager_mock):
 async def test_update_task_manager_rejects_review(task_manager_mock):
     task = _build_task(status=TaskStatus.REVIEWING, assignee_id=11, creator_id=11, reviewer_id=20)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
-
+    
     result = await taskService.update_task(team_id=1, caller_id=20, task_id=1, new_status="IN_PROGRESS")
 
     assert result["success"] is True
@@ -289,8 +324,7 @@ async def test_update_task_pending_to_in_progress_allowed_when_dependency_done(t
     dep_task = _build_task(id=7, status=TaskStatus.DONE)
     task_manager_mock.get_task = AsyncMock(return_value=task)
     task_manager_mock.get_tasks_by_ids = AsyncMock(return_value=[dep_task])
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
-
+    
     result = await taskService.update_task(team_id=1, caller_id=11, task_id=1, new_status="IN_PROGRESS")
 
     assert result["success"] is True
@@ -342,8 +376,7 @@ async def test_update_task_assignee_cannot_cancel(task_manager_mock):
 async def test_update_task_manager_can_cancel(task_manager_mock):
     task = _build_task(status=TaskStatus.TODO, assignee_id=11, creator_id=30, reviewer_id=20)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
-
+    
     result = await taskService.update_task(team_id=1, caller_id=20, task_id=1, new_status="CANCELLED")
 
     assert result["success"] is True
@@ -478,69 +511,79 @@ async def test_list_tasks_explicit_status_is_passed_to_both_queries(task_manager
 
 
 @pytest.mark.asyncio
-async def test_create_task_publishes_task_created_event(task_manager_mock, saved_task):
-    """创建任务成功时应发布 TASK_CREATED 事件。"""
-    task_manager_mock.create_task = AsyncMock(return_value=saved_task)
-
-    with patch("service.messageBus.publish") as mock_publish:
-        result = await taskService.create_task(
-            team_id=1,
-            creator_id=11,
-            title="broadcast test",
-            assignee_id=11,
-        )
+async def test_create_task_publishes_task_created_and_event_appended(task_manager_mock, publish_mock):
+    """创建任务成功时：TASK_CREATED（列表刷新）+ TASK_EVENT_APPENDED（时间线实时）各一次。"""
+    result = await taskService.create_task(
+        team_id=1,
+        creator_id=11,
+        title="broadcast test",
+        assignee_id=11,
+    )
 
     assert result["success"] is True
-    mock_publish.assert_called_once()
-    topic = mock_publish.call_args.args[0]
-    assert topic.name == "TASK_CREATED"
-    assert mock_publish.call_args.kwargs["task"] is saved_task
+    topics = [call.args[0].name for call in publish_mock.call_args_list]
+    assert topics == ["TASK_CREATED", "TASK_EVENT_APPENDED"]
+
+    created_call = publish_mock.call_args_list[0]
+    assert created_call.kwargs["task"].title == "broadcast test"
+
+    appended_call = publish_mock.call_args_list[1]
+    assert appended_call.kwargs["team_id"] == 1
+    # 创建事件：from=NULL、to=初始状态、actor=creator
+    assert appended_call.kwargs["task_event"]["from_status"] is None
+    assert appended_call.kwargs["task"] is not None
 
 
 @pytest.mark.asyncio
-async def test_update_task_publishes_task_changed_event(task_manager_mock):
-    """更新任务状态成功时应发布 TASK_CHANGED 事件并携带 old_status。"""
+async def test_update_task_publishes_event_then_task_changed(task_manager_mock, publish_mock):
+    """流转成功时：先 TASK_EVENT_APPENDED（事务后），再 TASK_CHANGED（列表刷新）。"""
     task = _build_task(status=TaskStatus.IN_PROGRESS, assignee_id=11, creator_id=11, reviewer_id=20)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
 
-    with patch("service.messageBus.publish") as mock_publish:
-        result = await taskService.update_task(team_id=1, caller_id=11, task_id=1, new_status="REVIEWING")
+    result = await taskService.update_task(team_id=1, caller_id=11, task_id=1, new_status="REVIEWING")
 
     assert result["success"] is True
-    mock_publish.assert_called_once()
-    topic = mock_publish.call_args.args[0]
-    assert topic.name == "TASK_CHANGED"
-    assert mock_publish.call_args.kwargs["task"] is task
-    assert mock_publish.call_args.kwargs["old_status"] == "IN_PROGRESS"
+    topics = [call.args[0].name for call in publish_mock.call_args_list]
+    assert topics == ["TASK_EVENT_APPENDED", "TASK_CHANGED"]
+    assert publish_mock.call_args_list[1].kwargs["old_status"] == "IN_PROGRESS"
 
 
 @pytest.mark.asyncio
-async def test_create_task_does_not_publish_on_failure(task_manager_mock):
+async def test_update_task_comment_publishes_event_appended(task_manager_mock, publish_mock):
+    """评论不改主表，但仍要推送事件让时间线实时可见。"""
+    task = _build_task(status=TaskStatus.IN_PROGRESS, assignee_id=11, creator_id=11, reviewer_id=20)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+
+    await taskService.update_task(team_id=1, caller_id=99, task_id=1, note="路过留言")
+
+    topics = [call.args[0].name for call in publish_mock.call_args_list]
+    assert topics == ["TASK_EVENT_APPENDED"]
+
+
+@pytest.mark.asyncio
+async def test_create_task_does_not_publish_on_failure(task_manager_mock, publish_mock):
     """创建任务失败时不应发布任何事件。"""
-    with patch("service.messageBus.publish") as mock_publish:
-        result = await taskService.create_task(
-            team_id=1,
-            creator_id=11,
-            title="bad priority",
-            assignee_id=11,
-            priority="urgent",
-        )
+    result = await taskService.create_task(
+        team_id=1,
+        creator_id=11,
+        title="bad priority",
+        assignee_id=11,
+        priority="urgent",
+    )
 
     assert result["success"] is False
-    mock_publish.assert_not_called()
+    publish_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_update_task_does_not_publish_on_failure(task_manager_mock):
+async def test_update_task_does_not_publish_on_failure(task_manager_mock, publish_mock):
     """更新任务失败时不应发布任何事件。"""
     task_manager_mock.get_task = AsyncMock(return_value=None)
 
-    with patch("service.messageBus.publish") as mock_publish:
-        result = await taskService.update_task(team_id=1, caller_id=11, task_id=999, new_status="IN_PROGRESS")
+    result = await taskService.update_task(team_id=1, caller_id=11, task_id=999, new_status="IN_PROGRESS")
 
     assert result["success"] is False
-    mock_publish.assert_not_called()
+    publish_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -569,7 +612,7 @@ async def test_list_tasks_open_only_excludes_done_and_cancelled(task_manager_moc
 
 
 @pytest.mark.asyncio
-async def test_update_task_no_reviewer_rejects_reviewing(task_manager_mock):
+async def test_update_task_no_reviewer_rejects_reviewing(task_manager_mock, event_manager_mock):
     """未设验收人时，IN_PROGRESS → REVIEWING 必须被拒绝（no_reviewer）。"""
     task = _build_task(status=TaskStatus.IN_PROGRESS, assignee_id=11, creator_id=11, reviewer_id=None)
     task_manager_mock.get_task = AsyncMock(return_value=task)
@@ -578,11 +621,11 @@ async def test_update_task_no_reviewer_rejects_reviewing(task_manager_mock):
 
     assert result["success"] is False
     assert result["error_code"] == "no_reviewer"
-    task_manager_mock.update_task_status_with_event.assert_not_called()
+    event_manager_mock.append_event.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_update_task_review_required_blocks_direct_done_from_in_progress(task_manager_mock):
+async def test_update_task_review_required_blocks_direct_done_from_in_progress(task_manager_mock, event_manager_mock):
     """设验收人时，执行人不能从 IN_PROGRESS 直接 DONE（review_required）。"""
     task = _build_task(status=TaskStatus.IN_PROGRESS, assignee_id=11, creator_id=11, reviewer_id=20)
     task_manager_mock.get_task = AsyncMock(return_value=task)
@@ -591,7 +634,7 @@ async def test_update_task_review_required_blocks_direct_done_from_in_progress(t
 
     assert result["success"] is False
     assert result["error_code"] == "review_required"
-    task_manager_mock.update_task_status_with_event.assert_not_called()
+    event_manager_mock.append_event.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -611,8 +654,7 @@ async def test_update_task_pending_to_todo_allowed(task_manager_mock):
     """依赖已满足时，可将 PENDING 推进为 TODO（系统推进边合法）。"""
     task = _build_task(status=TaskStatus.PENDING, assignee_id=11, creator_id=11, reviewer_id=None)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
-
+    
     result = await taskService.update_task(team_id=1, caller_id=11, task_id=1, new_status="TODO")
 
     assert result["success"] is True
@@ -624,8 +666,7 @@ async def test_update_task_pending_to_on_hold_allowed(task_manager_mock):
     """PENDING → ON_HOLD 合法。"""
     task = _build_task(status=TaskStatus.PENDING, assignee_id=11, creator_id=11, reviewer_id=None)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
-
+    
     result = await taskService.update_task(team_id=1, caller_id=11, task_id=1, new_status="ON_HOLD")
 
     assert result["success"] is True
@@ -637,8 +678,7 @@ async def test_update_task_reviewing_to_cancelled_by_reviewer(task_manager_mock)
     """验收人可取消 REVIEWING 任务（REVIEWING → CANCELLED）。"""
     task = _build_task(status=TaskStatus.REVIEWING, assignee_id=11, creator_id=30, reviewer_id=20)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
-
+    
     result = await taskService.update_task(team_id=1, caller_id=20, task_id=1, new_status="CANCELLED")
 
     assert result["success"] is True
@@ -797,7 +837,7 @@ async def test_get_task_reports_events_total(task_manager_mock, event_manager_mo
 
 
 @pytest.mark.asyncio
-async def test_update_task_creator_cannot_approve_when_not_reviewer(task_manager_mock):
+async def test_update_task_creator_cannot_approve_when_not_reviewer(task_manager_mock, event_manager_mock):
     """creator（≠reviewer）不能验收：REVIEWING→DONE 只认 is_reviewer，钉住「去 creator 兜底」。"""
     task = _build_task(status=TaskStatus.REVIEWING, assignee_id=11, creator_id=11, reviewer_id=20)
     task_manager_mock.get_task = AsyncMock(return_value=task)
@@ -806,7 +846,7 @@ async def test_update_task_creator_cannot_approve_when_not_reviewer(task_manager
 
     assert result["success"] is False
     assert result["error_code"] == "permission_denied"
-    task_manager_mock.update_task_status_with_event.assert_not_called()
+    event_manager_mock.append_event.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -828,7 +868,7 @@ async def test_update_task_omit_new_status_creates_comment(task_manager_mock, ev
     assert result["success"] is True
     assert result["action"] == "commented"
     assert result["task"]["status"] == "IN_PROGRESS"
-    task_manager_mock.update_task_status_with_event.assert_not_called()
+    task_manager_mock.save_task.assert_not_called()
     event_manager_mock.append_event.assert_awaited_once_with(
         1, 99, from_status=None, to_status=None, content="外部补充",
     )
@@ -847,7 +887,7 @@ async def test_update_task_new_status_equal_current_is_comment(task_manager_mock
 
     assert result["success"] is True
     assert result["action"] == "commented"
-    task_manager_mock.update_task_status_with_event.assert_not_called()
+    task_manager_mock.save_task.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -868,8 +908,7 @@ async def test_update_task_comment_requires_non_empty_note(task_manager_mock, ev
 async def test_update_task_transition_returns_action_transitioned(task_manager_mock):
     task = _build_task(status=TaskStatus.IN_PROGRESS, assignee_id=11, creator_id=11, reviewer_id=20)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
-
+    
     result = await taskService.update_task(team_id=1, caller_id=11, task_id=1, new_status="REVIEWING", note="提交")
 
     assert result["success"] is True
@@ -877,7 +916,7 @@ async def test_update_task_transition_returns_action_transitioned(task_manager_m
 
 
 @pytest.mark.asyncio
-async def test_update_task_terminal_rejects_transition(task_manager_mock):
+async def test_update_task_terminal_rejects_transition(task_manager_mock, event_manager_mock):
     """终态 DONE 传新状态 ⇒ 拒绝流转（invalid_transition）。"""
     task = _build_task(status=TaskStatus.DONE, assignee_id=11, creator_id=11, reviewer_id=20)
     task_manager_mock.get_task = AsyncMock(return_value=task)
@@ -886,7 +925,7 @@ async def test_update_task_terminal_rejects_transition(task_manager_mock):
 
     assert result["success"] is False
     assert result["error_code"] == "invalid_transition"
-    task_manager_mock.update_task_status_with_event.assert_not_called()
+    event_manager_mock.append_event.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -902,7 +941,7 @@ async def test_update_task_terminal_allows_comment(task_manager_mock, event_mana
 
     assert result["success"] is True
     assert result["action"] == "commented"
-    task_manager_mock.update_task_status_with_event.assert_not_called()
+    task_manager_mock.save_task.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -930,8 +969,7 @@ async def test_update_task_done_triggers_dependency_auto_progress(task_manager_m
     """流转到 DONE 后应触发依赖自动推进（以 SYSTEM 身份，对下游 PENDING 置 TODO）。"""
     task = _build_task(status=TaskStatus.IN_PROGRESS, assignee_id=11, creator_id=11, reviewer_id=None)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
-
+    
     with patch("service.taskService.auto_progress_dependents", new=AsyncMock(return_value=[7])) as mock_prog:
         result = await taskService.update_task(team_id=1, caller_id=11, task_id=1, new_status="DONE")
 
@@ -944,8 +982,7 @@ async def test_update_task_non_done_does_not_trigger_auto_progress(task_manager_
     """非 DONE 流转（如 IN_PROGRESS）不触发依赖推进。"""
     task = _build_task(status=TaskStatus.TODO, assignee_id=11, creator_id=11, reviewer_id=None)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
-
+    
     with patch("service.taskService.auto_progress_dependents", new=AsyncMock(return_value=[])) as mock_prog:
         result = await taskService.update_task(team_id=1, caller_id=11, task_id=1, new_status="IN_PROGRESS")
 
@@ -954,36 +991,34 @@ async def test_update_task_non_done_does_not_trigger_auto_progress(task_manager_
 
 
 @pytest.mark.asyncio
-async def test_auto_progress_dependents_sets_todo_with_system_actor(task_manager_mock):
+async def test_auto_progress_dependents_sets_todo_with_system_actor(task_manager_mock, event_manager_mock):
     """依赖全部 DONE 的 PENDING 下游 ⇒ 以 SYSTEM 身份置 TODO 并写系统事件。"""
     dep = _build_task(id=7, status=TaskStatus.PENDING, depends_on=[1])
     upstream = [_build_task(id=1, status=TaskStatus.DONE)]
     task_manager_mock.list_pending_dependents = AsyncMock(return_value=[dep])
     task_manager_mock.get_tasks_by_ids = AsyncMock(return_value=upstream)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=dep)
-
+    
     progressed = await taskService.auto_progress_dependents(1, 1)
 
     assert progressed == [7]
-    kwargs = task_manager_mock.update_task_status_with_event.await_args.kwargs
-    assert kwargs["actor_id"] == SpecialAgent.SYSTEM.value
+    args, kwargs = event_manager_mock.append_event.await_args
+    assert args[1] == SpecialAgent.SYSTEM.value  # actor_id 为位置参数
     assert kwargs["from_status"] == TaskStatus.PENDING
     assert kwargs["to_status"] == TaskStatus.TODO
 
 
 @pytest.mark.asyncio
-async def test_auto_progress_dependents_holds_when_upstream_unfinished(task_manager_mock):
+async def test_auto_progress_dependents_holds_when_upstream_unfinished(task_manager_mock, event_manager_mock):
     """上游仍有未 DONE ⇒ 不下推。"""
     dep = _build_task(id=7, status=TaskStatus.PENDING, depends_on=[1, 2])
     upstream = [_build_task(id=1, status=TaskStatus.DONE), _build_task(id=2, status=TaskStatus.TODO)]
     task_manager_mock.list_pending_dependents = AsyncMock(return_value=[dep])
     task_manager_mock.get_tasks_by_ids = AsyncMock(return_value=upstream)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=dep)
-
+    
     progressed = await taskService.auto_progress_dependents(1, 1)
 
     assert progressed == []
-    task_manager_mock.update_task_status_with_event.assert_not_awaited()
+    event_manager_mock.append_event.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -1103,26 +1138,24 @@ async def test_get_task_event_unknown_actor_falls_back_to_id(task_manager_mock, 
 
 
 @pytest.mark.asyncio
-async def test_claim_task_sets_in_progress_with_system_actor(task_manager_mock):
+async def test_claim_task_sets_in_progress_with_system_actor(task_manager_mock, event_manager_mock):
     """认领置位：TODO 的 assignee 认领 ⇒ TODO→IN_PROGRESS（SYSTEM 身份）。"""
     task = _build_task(status=TaskStatus.TODO, assignee_id=11, creator_id=11, reviewer_id=None)
     task_manager_mock.get_task = AsyncMock(return_value=task)
-    task_manager_mock.update_task_status_with_event = AsyncMock(return_value=task)
-
+    
     res = await taskService.claim_task(11, 1)
 
     assert res == {"success": True, "action": "claimed"}
-    kwargs = task_manager_mock.update_task_status_with_event.await_args.kwargs
-    assert kwargs["actor_id"] == SpecialAgent.SYSTEM.value
+    args, kwargs = event_manager_mock.append_event.await_args
+    assert args[1] == SpecialAgent.SYSTEM.value  # actor_id 为位置参数
     assert kwargs["from_status"] == TaskStatus.TODO
     assert kwargs["to_status"] == TaskStatus.IN_PROGRESS
 
 
 @pytest.mark.asyncio
-async def test_claim_task_skips_when_not_todo_or_not_assignee(task_manager_mock):
+async def test_claim_task_skips_when_not_todo_or_not_assignee(task_manager_mock, event_manager_mock):
     """幂等 / 越权：非 TODO 或非 assignee ⇒ 跳过，不写事件。"""
-    task_manager_mock.update_task_status_with_event = AsyncMock()
-
+    
     # 已 IN_PROGRESS
     task_manager_mock.get_task = AsyncMock(return_value=_build_task(status=TaskStatus.IN_PROGRESS, assignee_id=11))
     assert (await taskService.claim_task(11, 1))["action"] == "skipped"
@@ -1131,7 +1164,7 @@ async def test_claim_task_skips_when_not_todo_or_not_assignee(task_manager_mock)
     task_manager_mock.get_task = AsyncMock(return_value=_build_task(status=TaskStatus.TODO, assignee_id=11))
     assert (await taskService.claim_task(99, 1))["action"] == "skipped"
 
-    task_manager_mock.update_task_status_with_event.assert_not_awaited()
+    event_manager_mock.append_event.assert_not_awaited()
 
 
 

@@ -19,6 +19,9 @@ async def append_event(
 
     另守 PIN-1（defense-in-depth）：流转事件必须 `from != to`（自环应记为评论、
     `from`/`to` 均空），故 `(非NULL, 非NULL) 且 from == to` 亦为非法——落库前拒绝。
+
+    **不自带事务**：需要与任务主表同生共死时，由调用方用
+    `model.dbModel.base.atomic()` 包住，本函数只做裸插入（会跟随外层事务）。
     """
     if from_status is not None and to_status is None:
         raise ValueError("非法的状态组合：from_status 非空而 to_status 为空（禁止「非NULL→NULL」）")

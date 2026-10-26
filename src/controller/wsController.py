@@ -19,6 +19,7 @@ _WS_TOPICS = [
     MessageBusTopic.TEAM_RELOADED,
     MessageBusTopic.TASK_CREATED,
     MessageBusTopic.TASK_CHANGED,
+    MessageBusTopic.TASK_EVENT_APPENDED,
 ]
 
 
@@ -96,6 +97,10 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
             payload["event"] = "task_created"
         if msg.topic == MessageBusTopic.TASK_CHANGED:
             payload["event"] = "task_changed"
+        if msg.topic == MessageBusTopic.TASK_EVENT_APPENDED:
+            # 业务事件在 payload 里叫 `task_event`（publish 时已这样命名），
+            # 与这里的「消息类型」`event` 错开，避免互相覆盖。
+            payload["event"] = "task_event_appended"
         logger.info(f"[ws] event: topic={msg.topic.name}, payload={payload}")
         asyncio.get_event_loop().create_task(self._send(jsonUtil.json_dump(payload)))
 

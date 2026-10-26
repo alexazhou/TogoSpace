@@ -27,6 +27,7 @@ from service.funcToolService import core as funcCore
 from service.funcToolService import tools
 from service.roomService.core import ToolCallContext
 from tests.base import ServiceTestCase
+from tests.integration.task_helpers import create_task_with_event, transition_task
 
 
 if os.name == "posix" and sys.platform == "darwin":
@@ -55,7 +56,7 @@ class TestTaskTools(ServiceTestCase):
             reviewer_id=reviewer_id,
             status=status,
         )
-        return await gtAgentTaskManager.create_task(task)
+        return await create_task_with_event(task)
 
     async def _make_task_for(
         self,
@@ -73,7 +74,7 @@ class TestTaskTools(ServiceTestCase):
             status=status,
             priority=priority,
         )
-        return await gtAgentTaskManager.create_task(task)
+        return await create_task_with_event(task)
 
     async def test_update_task_comment_via_tool(self):
         """省略 new_status ⇒ 追加评论事件、状态不变、action=commented。"""
@@ -185,7 +186,7 @@ class TestTaskTools(ServiceTestCase):
         """
         task = await self._make_task()
         long_note = "打回原因：" + "很长的说明" * 30  # 远超 100 字符
-        await gtAgentTaskManager.update_task_status_with_event(
+        await transition_task(
             task,
             actor_id=SpecialAgent.SYSTEM.value,
             from_status=TaskStatus.TODO,
@@ -238,7 +239,7 @@ class TestTaskTools(ServiceTestCase):
             creator_id=8,
             status=TaskStatus.TODO,
         )
-        other = await gtAgentTaskManager.create_task(other)
+        other = await create_task_with_event(other)
         latest = (await gtAgentTaskEventManager.list_events(other.id, limit=1))[0]
 
         res = await tools.get_task_event(event_id=latest.id, _context=self._ctx())  # 上下文 team_id=1

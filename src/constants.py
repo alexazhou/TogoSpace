@@ -105,6 +105,7 @@ class MessageBusTopic(EnhanceEnum):
     TEAM_RELOADED = auto()             # Team 热更新完成；payload: team_id(int)
     TASK_CREATED = auto()              # 协作任务创建；payload: task(GtAgentTask)
     TASK_CHANGED = auto()              # 协作任务状态变更；payload: task(GtAgentTask), old_status(str)
+    TASK_EVENT_APPENDED = auto()       # 任务事件追加（创建/流转/评论/系统推进）；payload: team_id(int), task(GtAgentTask), task_event(dict)
 
 
 class RoomType(EnhanceEnum):

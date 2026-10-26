@@ -16,6 +16,7 @@ from constants import (
     TaskStatus,
 )
 from dal.db import gtAgentManager, gtAgentTaskManager, gtAgentTaskEventManager
+from model.dbModel.base import atomic
 from model.dbModel.gtAgentTask import GtAgentTask
 
 logger = logging.getLogger(__name__)
@@ -111,12 +112,61 @@ def _serialize_event(event, *, truncate_content: bool = True) -> dict:
     return data
 
 
+def _publish_event_appended(team_id: int, task: GtAgentTask, event) -> None:
+    """任务事件写入后统一推送（**service 层唯一出口**；dal 不碰 messageBus）。
+
+    必须在 `atomic()` 事务块**之外**调用：回滚时任务与事件一起消失，
+    不能出现「回滚了还推了一条」。
+
+    `content` 不截断——100 字符是面向 Agent 的摘要口径，UI 时间线需要完整原文。
+    """
+    from service import messageBus as _mb
+    from constants import MessageBusTopic as _MBT
+
+    _mb.publish(
+        _MBT.TASK_EVENT_APPENDED,
+        team_id=team_id,
+        task=task,
+        task_event=_serialize_event(event, truncate_content=False),
+    )
+
+
+async def _transition_with_event(
+    team_id: int,
+    task: GtAgentTask,
+    *,
+    actor_id: int,
+    from_status: TaskStatus,
+    to_status: TaskStatus,
+    content: str = '',
+) -> GtAgentTask:
+    """流转任务的唯一写入口：**同一事务**内更新主表状态 + 追加一条流转事件，事务后再推送。
+
+    - 事件由 service 构造（actor / from / to / content 都是业务判断），DAL 只负责保存；
+    - 任一写入失败即整体回滚，保证「每次成功流转必且仅有一条流转事件」（E1）；
+    - 推送放在事务块外，回滚时不会出现「推了但没落库」。
+    """
+    async with atomic():
+        task.status = to_status  # 同步内存态，保证返回体与落库一致
+        await gtAgentTaskManager.save_task(task, only=[GtAgentTask.status])
+        event = await gtAgentTaskEventManager.append_event(
+            task.id,
+            actor_id,
+            from_status=from_status,
+            to_status=to_status,
+            content=content,
+        )
+    _publish_event_appended(team_id, task, event)
+    return task
+
+
 async def auto_progress_dependents(team_id: int, completed_task_id: int) -> list[int]:
     """依赖满足自动推进：把「所有前置依赖均已 DONE」的 `PENDING` 下游任务置为 `TODO`。
 
     - 系统操作：对每个候选写一条流转事件（`actor_id = SpecialAgent.SYSTEM`，**代码引用常量、勿硬写 -2**），
       `from_status = PENDING`、`to_status = TODO`，`content` 记说明文本；
-    - **严守边界**：仅更新状态并记事件，**不触发任何唤醒 / 通知**（不 publish `TASK_CHANGED`）；
+    - **不触发任何唤醒 / 通知**（不进调度表、不唤醒 Agent）；仅推送 `TASK_EVENT_APPENDED`
+      让前端时间线实时可见；
     - 返回被推进的任务 id 列表（无候选则空）。
     """
     dependents = await gtAgentTaskManager.list_pending_dependents(team_id, completed_task_id)
@@ -124,8 +174,8 @@ async def auto_progress_dependents(team_id: int, completed_task_id: int) -> list
     for dep in dependents:
         upstream = await gtAgentTaskManager.get_tasks_by_ids(dep.depends_on or [])
         if all(t.status == TaskStatus.DONE for t in upstream):
-            dep.status = TaskStatus.TODO  # 同步内存态
-            await gtAgentTaskManager.update_task_status_with_event(
+            await _transition_with_event(
+                team_id,
                 dep,
                 actor_id=SpecialAgent.SYSTEM.value,
                 from_status=TaskStatus.PENDING,
@@ -142,14 +192,14 @@ async def claim_task(caller_id: int, task_id: int) -> dict:
 
     - 仅当 `status == TODO` 且 `caller_id == assignee_id` 时置位；否则幂等跳过（返回 `action="skipped"`）；
     - 写一条系统流转事件（`actor_id = SpecialAgent.SYSTEM`），`from_status = TODO`、`to_status = IN_PROGRESS`；
-    - **不触发唤醒 / 通知**。
+    - **不触发唤醒 / 通知**；仅推送 `TASK_EVENT_APPENDED`。
     """
     task = await gtAgentTaskManager.get_task(task_id)
     if task is None or task.status != TaskStatus.TODO or task.assignee_id != caller_id:
         return {"success": True, "action": "skipped"}
 
-    task.status = TaskStatus.IN_PROGRESS  # 同步内存态
-    await gtAgentTaskManager.update_task_status_with_event(
+    await _transition_with_event(
+        task.team_id,
         task,
         actor_id=SpecialAgent.SYSTEM.value,
         from_status=TaskStatus.TODO,
@@ -228,15 +278,24 @@ async def create_task(
         depends_on=dep_ids,
         room_id=room_id,
     )
-    saved = await gtAgentTaskManager.create_task(task)
-    logger.info(f"任务创建：task_id={saved.id}, title={title!r}, assignee={assignee_id}, status={initial_status.value}")
+    async with atomic():
+        await gtAgentTaskManager.save_task(task, force_insert=True)
+        event = await gtAgentTaskEventManager.append_event(
+            task.id,
+            creator_id,
+            from_status=None,
+            to_status=initial_status,
+            content='',
+        )
+    logger.info(f"任务创建：task_id={task.id}, title={title!r}, assignee={assignee_id}, status={initial_status.value}")
 
-    # 广播任务创建事件
+    # 广播任务创建事件（列表刷新）+ 事件追加（时间线实时）
     from service import messageBus as _mb
     from constants import MessageBusTopic as _MBT
-    _mb.publish(_MBT.TASK_CREATED, task=saved)
+    _mb.publish(_MBT.TASK_CREATED, task=task)
+    _publish_event_appended(team_id, task, event)
 
-    return {"success": True, "task_id": saved.id, "message": f"任务已创建，task_id={saved.id}，状态={initial_status.value}"}
+    return {"success": True, "task_id": task.id, "message": f"任务已创建，task_id={task.id}，状态={initial_status.value}"}
 
 
 async def update_task(
@@ -287,6 +346,8 @@ async def update_task(
             content=note,
         )
         logger.info(f"任务评论：task_id={task_id}, caller={caller_id}")
+        # 评论不改主表，但要推送让已打开的时间线即时可见
+        _publish_event_appended(team_id, task, event)
 
         from playhouse.shortcuts import model_to_dict
         return {
@@ -371,9 +432,9 @@ async def update_task(
             "error_code": "review_required",
         }
 
-    # 执行更新：同一事务内更新主表状态 + 追加一条流转事件（content=note）
-    task.status = target  # 同步内存态，保证返回体与落库一致
-    updated = await gtAgentTaskManager.update_task_status_with_event(
+    # 执行更新：同一事务内更新主表状态 + 追加一条流转事件（content=note），事务后推送
+    updated = await _transition_with_event(
+        team_id,
         task,
         actor_id=caller_id,
         from_status=old_status,
@@ -382,7 +443,7 @@ async def update_task(
     )
     logger.info(f"任务状态变更：task_id={task_id}, {old_status.value} → {target.value}, caller={caller_id}")
 
-    # 广播任务状态变更事件
+    # 广播任务状态变更事件（列表刷新；时间线由 TASK_EVENT_APPENDED 推送）
     from service import messageBus as _mb
     from constants import MessageBusTopic as _MBT
     _mb.publish(_MBT.TASK_CHANGED, task=updated, old_status=old_status.value)
@@ -403,14 +464,22 @@ async def update_task(
     }
 
 
-async def get_task(team_id: int, task_id: int, event_limit: int = EVENT_TIMELINE_LIMIT) -> dict:
+async def get_task(
+    team_id: int,
+    task_id: int,
+    event_limit: int = EVENT_TIMELINE_LIMIT,
+    *,
+    truncate_content: bool = True,
+) -> dict:
     """查询单个任务详情，含依赖任务状态摘要与事件时间线摘要。
 
     `event_limit` 控制事件时间线返回条数（默认 `EVENT_TIMELINE_LIMIT`）；
     回执中的 `events_total`（该任务事件**总数**，跨 `event_limit`）用于判断
     是否还有更早事件——有则可继续用 `list_task_events` 按游标翻页。
-    事件内容（含派生的 `last_note` / `current_block_reason`）超过
-    `EVENT_CONTENT_MAX_CHARS` 一律截断并加省略标记，需要完整原文请用 `get_task_event`。
+
+    `truncate_content` 默认 True = **面向 Agent 的摘要口径**（超过
+    `EVENT_CONTENT_MAX_CHARS` 截断并加省略标记，需要完整原文请用 `get_task_event`）。
+    Web 接口应传 False：UI 时间线要完整原文，且与 `TASK_EVENT_APPENDED` 推送内容一致。
     """
     from playhouse.shortcuts import model_to_dict
 
@@ -436,10 +505,14 @@ async def get_task(team_id: int, task_id: int, event_limit: int = EVENT_TIMELINE
 
     # 挂载事件时间线摘要（按 id 降序）、事件总数与两个派生属性。
     events = await gtAgentTaskEventManager.list_events(task_id, limit=event_limit)
-    task_dict["events"] = [_serialize_event(e) for e in events]
+    task_dict["events"] = [
+        _serialize_event(e, truncate_content=truncate_content) for e in events
+    ]
     task_dict["events_total"] = await gtAgentTaskEventManager.count_events(task_id)
-    task_dict["last_note"] = last_note(events)
-    task_dict["current_block_reason"] = current_block_reason(task, events)
+    task_dict["last_note"] = last_note(events, truncate_content=truncate_content)
+    task_dict["current_block_reason"] = current_block_reason(
+        task, events, truncate_content=truncate_content
+    )
 
     return {"success": True, "task": task_dict}
 
@@ -483,11 +556,13 @@ async def list_task_events(
     task_id: int,
     limit: int = 50,
     before_id: Optional[int] = None,
+    *,
+    truncate_content: bool = True,
 ) -> dict:
     """读取任务事件流（按 id 游标分页，最新在前；不使用 offset）。
 
-    事件内容超过 `EVENT_CONTENT_MAX_CHARS` 会截断并加省略标记，
-    需要完整原文请用 `get_task_event`（按事件 id 取单条）。
+    `truncate_content` 默认 True = 面向 Agent 的摘要口径（超长截断，
+    需要完整原文请用 `get_task_event`）；Web 接口应传 False。
 
     Returns:
         dict: success / events（本页，按 id 降序）/ count（本页条数）/
@@ -503,7 +578,9 @@ async def list_task_events(
     total = await gtAgentTaskEventManager.count_events(task_id)
     return {
         "success": True,
-        "events": [_serialize_event(e) for e in events],
+        "events": [
+            _serialize_event(e, truncate_content=truncate_content) for e in events
+        ],
         "count": len(events),
         "total": total,
     }

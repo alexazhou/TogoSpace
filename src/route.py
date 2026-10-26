@@ -3,7 +3,7 @@ import os
 
 import tornado.web
 
-from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController, settingController, systemController, initController, superviseController, thirdPartyController
+from controller import roleTemplateController, agentController, roomController, wsController, teamController, deptController, configController, activityController, settingController, systemController, initController, superviseController, thirdPartyController, taskController
 
 import sys as _sys
 if getattr(_sys, "frozen", False):
@@ -87,6 +87,8 @@ application = tornado.web.Application([
     (r"/agents/list.json",                          agentController.AgentListHandler),
     (r"/agents/(\d+).json",                         agentController.AgentDetailByIdHandler),
     (r"/agents/(\d+)/tasks.json",                   agentController.AgentTasksHandler),
+    (r"/tasks/(\d+).json",                          taskController.TaskDetailHandler),
+    (r"/tasks/(\d+)/events.json",                   taskController.TaskEventsHandler),
     (r"/agents/(\d+)/resume.json",                  agentController.AgentResumeHandler),
     (r"/agents/(\d+)/stop.json",                    agentController.AgentStopHandler),
     (r"/agents/(\d+)/clear_data.json",              agentController.AgentClearDataHandler),

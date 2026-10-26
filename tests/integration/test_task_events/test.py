@@ -14,10 +14,11 @@ import pytest
 
 import service.ormService as ormService
 import service.taskService as taskService
-from constants import TaskStatus
+from constants import EVENT_TRUNCATED_SUFFIX, TaskStatus
 from dal.db import gtAgentTaskEventManager, gtAgentTaskManager
 from model.dbModel.gtAgentTask import GtAgentTask
 from tests.base import ServiceTestCase
+from tests.integration.task_helpers import create_task_with_event, transition_task
 
 
 if os.name == "posix" and sys.platform == "darwin":
@@ -42,7 +43,7 @@ class TestTaskEvents(ServiceTestCase):
             creator_id=8,
             status=status,
         )
-        return await gtAgentTaskManager.create_task(task)
+        return await create_task_with_event(task)
 
     async def _events(self, task_id: int):
         return await gtAgentTaskEventManager.list_events(task_id, limit=100)
@@ -64,7 +65,7 @@ class TestTaskEvents(ServiceTestCase):
         """一次成功流转应更新主表状态 + 仅一条流转事件（from≠to、actor=caller、content=note）。"""
         task = await self._make_task(title="ev-transition")
 
-        await gtAgentTaskManager.update_task_status_with_event(
+        await transition_task(
             task,
             actor_id=8,
             from_status=TaskStatus.TODO,
@@ -91,7 +92,7 @@ class TestTaskEvents(ServiceTestCase):
 
         task = GtAgentTask(team_id=1, title="ev-atomic-create", assignee_id=8, creator_id=8, status=TaskStatus.TODO)
         with pytest.raises(RuntimeError):
-            await gtAgentTaskManager.create_task(task)
+            await create_task_with_event(task)
 
         rows = list(await GtAgentTask.select().where(GtAgentTask.title == "ev-atomic-create").aio_execute())
         assert rows == [], "事件写入失败时主表不应留下任务行"
@@ -106,7 +107,7 @@ class TestTaskEvents(ServiceTestCase):
         monkeypatch.setattr(gtAgentTaskEventManager, "append_event", boom)
 
         with pytest.raises(RuntimeError):
-            await gtAgentTaskManager.update_task_status_with_event(
+            await transition_task(
                 task,
                 actor_id=8,
                 from_status=TaskStatus.TODO,
@@ -128,7 +129,7 @@ class TestTaskEvents(ServiceTestCase):
             (TaskStatus.ON_HOLD, TaskStatus.IN_PROGRESS, "resume"),
         ]
         for f, t, c in seq:
-            await gtAgentTaskManager.update_task_status_with_event(
+            await transition_task(
                 task, actor_id=8, from_status=f, to_status=t, content=c
             )
 
@@ -201,10 +202,10 @@ class TestTaskEvents(ServiceTestCase):
     async def test_service_get_task_derived_props(self):
         """get_task 挂载时间线摘要 + 「最近一次说明」+「当前搁置原因」(PIN-4)。"""
         task = await self._make_task(title="ev-derived")
-        await gtAgentTaskManager.update_task_status_with_event(
+        await transition_task(
             task, actor_id=8, from_status=TaskStatus.TODO, to_status=TaskStatus.IN_PROGRESS, content="开工"
         )
-        await gtAgentTaskManager.update_task_status_with_event(
+        await transition_task(
             task, actor_id=8, from_status=TaskStatus.IN_PROGRESS, to_status=TaskStatus.ON_HOLD, content="等接口"
         )
 
@@ -214,7 +215,7 @@ class TestTaskEvents(ServiceTestCase):
         assert res["task"]["current_block_reason"] == "等接口"
 
         # 恢复后：不再是 ON_HOLD → 当前搁置原因 None；最近一次说明 = 恢复注释
-        await gtAgentTaskManager.update_task_status_with_event(
+        await transition_task(
             task, actor_id=8, from_status=TaskStatus.ON_HOLD, to_status=TaskStatus.IN_PROGRESS, content="恢复"
         )
         res2 = await taskService.get_task(team_id=1, task_id=task.id)
@@ -224,7 +225,7 @@ class TestTaskEvents(ServiceTestCase):
     async def test_service_list_task_events(self):
         """服务层事件读取：游标透传 + 降序返回。"""
         task = await self._make_task(title="ev-list")
-        await gtAgentTaskManager.update_task_status_with_event(
+        await transition_task(
             task, actor_id=8, from_status=TaskStatus.TODO, to_status=TaskStatus.IN_PROGRESS, content="go"
         )
 
@@ -234,3 +235,55 @@ class TestTaskEvents(ServiceTestCase):
         assert res["count"] == 1
         assert res["total"] == 2
         assert res["events"][0]["to_status"] == "IN_PROGRESS"
+
+
+# ---------------------------------------------------------------------------
+# Web 接口口径：时间线要完整原文（不截断），与 TASK_EVENT_APPENDED 推送一致
+# ---------------------------------------------------------------------------
+
+
+class TestTaskEventFullContent(ServiceTestCase):
+    """`truncate_content=False`：Web 接口读到的 content 必须是完整原文。"""
+
+    @classmethod
+    async def async_setup_class(cls):
+        await ormService.startup(cls._get_test_db_path())
+
+    @classmethod
+    async def async_teardown_class(cls):
+        await ormService.shutdown()
+
+    async def _make_task(self, *, title: str) -> GtAgentTask:
+        task = GtAgentTask(team_id=1, title=title, assignee_id=8, creator_id=8, status=TaskStatus.TODO)
+        return await create_task_with_event(task)
+
+    async def test_get_task_without_truncation_returns_full_content(self):
+        """默认（面向 Agent）截断；`truncate_content=False`（Web）返回完整原文。"""
+        task = await self._make_task(title="full-content")
+        long_note = "打回原因：" + "很长的说明" * 30
+        await transition_task(
+            task, actor_id=8, from_status=TaskStatus.TODO,
+            to_status=TaskStatus.IN_PROGRESS, content=long_note,
+        )
+
+        agent_view = await taskService.get_task(team_id=1, task_id=task.id)
+        assert agent_view["task"]["last_note"].endswith(EVENT_TRUNCATED_SUFFIX)
+
+        web_view = await taskService.get_task(team_id=1, task_id=task.id, truncate_content=False)
+        assert web_view["task"]["last_note"] == long_note
+        contents = [e["content"] for e in web_view["task"]["events"]]
+        assert long_note in contents
+
+    async def test_list_task_events_without_truncation_returns_full_content(self):
+        task = await self._make_task(title="full-content-list")
+        long_note = "补充说明：" + "细节" * 80
+        await transition_task(
+            task, actor_id=8, from_status=TaskStatus.TODO,
+            to_status=TaskStatus.IN_PROGRESS, content=long_note,
+        )
+
+        agent_view = await taskService.list_task_events(team_id=1, task_id=task.id)
+        assert agent_view["events"][0]["content"].endswith(EVENT_TRUNCATED_SUFFIX)
+
+        web_view = await taskService.list_task_events(team_id=1, task_id=task.id, truncate_content=False)
+        assert web_view["events"][0]["content"] == long_note

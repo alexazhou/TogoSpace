@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime
 import json
 import logging
-from typing import Any, Generic, List, TypeVar, cast, get_origin
+from typing import Any, AsyncIterator, Generic, List, TypeVar, cast, get_origin
 
 import peewee
 import peewee_async
@@ -33,6 +34,22 @@ def unbind_database() -> None:
     仅解除绑定，不销毁传入的 database 对象。
     """
     _database_proxy.initialize(None)
+
+
+@asynccontextmanager
+async def atomic() -> AsyncIterator[None]:
+    """跨表写操作的公共事务边界（所有模型共用同一个 `_database_proxy`）。
+
+    把需要在同一事务内提交的多条写入包进来：
+
+        async with atomic():
+            await task.aio_save(only=[GtAgentTask.status])
+            await event.aio_save(force_insert=True)
+
+    事务**提交后**再做副作用（如 publish 消息总线事件）——回滚时副作用不应发生。
+    """
+    async with _database_proxy.aio_atomic():
+        yield
 
 
 class JsonField(peewee.TextField, Generic[TJson]):

@@ -20,6 +20,7 @@ from model.dbModel.gtScheculeTask import GtScheculeTask
 from service import presetService, agentService, roomService, ormService, persistenceService, funcToolService
 from util import configUtil
 from ...base import ServiceTestCase
+from tests.integration.task_helpers import create_task_with_event, transition_task
 
 TEAM = "test_team"
 _CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")
@@ -69,7 +70,7 @@ class _CollabTaskCase(ServiceTestCase):
             creator_id=agent_id,  # 补全非空字段
             status=initial_status,
         )
-        return await gtAgentTaskManager.create_task(task)
+        return await create_task_with_event(task)
 
 
 class TestTaskPriority(_CollabTaskCase):
@@ -175,7 +176,7 @@ class TestAutoSchedule(_CollabTaskCase):
             reviewer_id=alice_db.id,
             status=TaskStatus.REVIEWING,
         )
-        review_task = await gtAgentTaskManager.create_task(review_task)
+        review_task = await create_task_with_event(review_task)
 
         room_sched = await gtScheculeTaskManager.create_task(
             alice_db.id,
@@ -252,7 +253,7 @@ class TestAutoSchedule(_CollabTaskCase):
             reviewer_id=bob_db.id,
             status=TaskStatus.REVIEWING,
         )
-        review_task = await gtAgentTaskManager.create_task(review_task)
+        review_task = await create_task_with_event(review_task)
 
         before_scheds = list(
             await GtScheculeTask.select()

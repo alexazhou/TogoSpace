@@ -28,53 +28,28 @@ _PRIORITY_WEIGHT = peewee.Case(
 )
 
 
-async def create_task(task: GtAgentTask) -> GtAgentTask:
-    """保存新任务，返回含主键的实例。
-
-    与「创建事件」（from=NULL、to=初始状态、actor=creator）在**同一事务**内写入，
-    保证同生共死（E1）。
-    """
-    from dal.db import gtAgentTaskEventManager
-
-    database = GtAgentTask._meta.database
-    async with database.aio_atomic():
-        await task.aio_save(force_insert=True)
-        await gtAgentTaskEventManager.append_event(
-            task.id,
-            task.creator_id,
-            from_status=None,
-            to_status=task.status,
-            content='',
-        )
-    return task
-
-
-async def update_task_status_with_event(
+async def save_task(
     task: GtAgentTask,
     *,
-    actor_id: int,
-    from_status: TaskStatus,
-    to_status: TaskStatus,
-    content: str = '',
+    force_insert: bool = False,
+    only: list | None = None,
 ) -> GtAgentTask:
-    """在**同一事务**内更新主表状态 + 追加一条流转事件（from≠to、actor=caller）。
+    """保存任务（全量插入 / 按字段局部更新）。
 
-    任一写入失败即整体回滚，保证「每次成功流转必且仅有一条流转事件」（E1）。
+    **不自带事务**，需要与事件同生共死时由调用方用
+    `model.dbModel.base.atomic()` 包住（跨表公共事务边界）。
+    `only` 非空时会自动刷新 `updated_at`。
     """
-    from dal.db import gtAgentTaskEventManager
-
-    database = GtAgentTask._meta.database
-    async with database.aio_atomic():
-        task.status = to_status
+    if force_insert:
+        await task.aio_save(force_insert=True)
+        return task
+    if only:
         task.updated_at = datetime.datetime.now()
-        await task.aio_save(only=[GtAgentTask.status, GtAgentTask.updated_at])
-        await gtAgentTaskEventManager.append_event(
-            task.id,
-            actor_id,
-            from_status=from_status,
-            to_status=to_status,
-            content=content,
-        )
+        if GtAgentTask.updated_at not in only:
+            only = list(only) + [GtAgentTask.updated_at]
+        await task.aio_save(only=only)
+        return task
+    await task.aio_save()
     return task
 
 
