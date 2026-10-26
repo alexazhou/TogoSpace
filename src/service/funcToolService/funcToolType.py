@@ -58,7 +58,13 @@ def _match_section_title(raw_line: str) -> str | None:
 
 
 def _extract_description(docstring: str) -> str:
-    """取 docstring 首段并拼成一行（首段多行时用空格连接），不再只取首行。"""
+    """取 docstring **首段原文**（保留段内换行，不拼接），不再只取首行。
+
+    口径（Operator 2026-10-26 拍板）：description = 首段，多行原样保留换行
+    （JSON 里 `\\n` 合法，OpenAI / Anthropic 的 function description 都吃多行）；
+    **不得**把 `Args:` 之后的段（Returns / Notes 等）也塞进来——细节契约放各参数的
+    description，重要但不属于某个参数的散文并进首段。
+    """
     parts: list[str] = []
     for raw_line in docstring.split("\n"):
         stripped = raw_line.strip()
@@ -69,7 +75,7 @@ def _extract_description(docstring: str) -> str:
         if _match_section_title(raw_line) is not None:
             break
         parts.append(stripped)
-    return " ".join(parts).strip()
+    return "\n".join(parts).strip()
 
 
 def _parse_param_descriptions(docstring: str) -> dict[str, str]:

@@ -171,7 +171,7 @@ def test_continuation_lines_are_joined_into_previous_param():
 
 
 def test_description_uses_whole_first_paragraph():
-    """description 取首段（多行用空格拼成一行），不再只取首行。"""
+    """description 取首段**原文**（保留段内换行，不拼接），不再只取首行。"""
 
     def fake(a: str) -> dict:
         """首段第一句说明。
@@ -183,7 +183,31 @@ def test_description_uses_whole_first_paragraph():
         return {}
 
     meta = get_function_metadata("fake", fake)
-    assert meta["description"] == "首段第一句说明。 首段第二句说明。"
+    assert meta["description"] == "首段第一句说明。\n首段第二句说明。"
+
+
+def test_description_excludes_sections_after_args():
+    """description 只取首段：`Args:` 之后的 Returns / Notes 一律不得混进来。
+
+    边界（Operator 拍板）：description 只放首段，避免把 docstring 全文塞进 schema
+    （实测 26 个工具会从 ~800 字符膨胀到 ~6000 字符，每次请求都要跟着发）。
+    """
+
+    def fake(a: str) -> dict:
+        """首段说明（只这一句）。
+
+        Args:
+            a: 参数说明
+
+        Returns:
+            这里的内容不该出现在 description 里
+        """
+        return {}
+
+    meta = get_function_metadata("fake", fake)
+    assert meta["description"] == "首段说明（只这一句）。"
+    assert "不该出现" not in meta["description"]
+    assert "参数说明" not in meta["description"]
 
 
 def test_section_ends_at_next_section_title():
