@@ -173,7 +173,7 @@ flowchart TD
   - `src/service/agentService/prompts.py`（更新工具使用提示词）
 - **子任务**：
   - [x] 调整 `update_task` 签名为 `(task_id: int, new_status: str | None = None, note: str = "")`，参数改用 `new_status` 消除歧义；
-  - [x] 将 `get_task` 工具重命名为 `get_task_detail`，旧名称保留废弃提示并平滑引导；
+  - [x] 将 `get_task` 工具重命名为 `get_task_detail`；旧别名先保留废弃提示平滑引导，**2026-10-26 决定彻底移除**（`toolRegistry` 早已不暴露 + 无调用方，死代码清理，task #71）；
   - [x] 新增 `list_task_events` 工具并在 `core.py` 中注册导出，支持游标分页读取任务时间线；
   - [x] 移除 `result` 与 `block_reason` 参数，无兼容别名，传入未知参数直接报错；
   - [x] 分支处理：当未传 `new_status` 或传入状态等于当前状态时，走向评论逻辑，校验 `note` 非空后记录评论事件（`from=NULL, to=NULL`）；

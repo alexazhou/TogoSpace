@@ -209,7 +209,7 @@ stateDiagram-v2
   - 团队内任意成员均可使用 `update_task(task_id, note=...)` 追加评论，状态保持不变；
   - 任务处于 `DONE` 或 `CANCELLED` 时，尝试传入 `new_status` 变更必须被拒绝；只传 `note` 评论必须成功。
 - [ ] **工具更名自解释性**：
-  - `get_task_detail` 工具正常返回任务完整详情；旧名 `get_task` 提示已废弃并指引新名称；
+  - `get_task_detail` 工具正常返回任务完整详情；旧名 `get_task` 提示已废弃并指引新名称，**2026-10-26 决定彻底移除**（不再保留别名/注册，task #71）；
   - `update_task` 使用 `new_status` 参数承载目标状态。
 - [ ] **依赖推进可靠性**：
   - 前置任务未全部完成时，任务保持 `PENDING`；所有前置 `DONE` 后，自动流转为 `TODO`，并生成系统操作记录。
