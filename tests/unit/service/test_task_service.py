@@ -438,6 +438,7 @@ async def test_list_tasks_basic_call_returns_tasks(task_manager_mock):
         reviewer_id=None,
         status=None,
         exclude_statuses=None,
+        agent_ids=None,
         limit=20,
     )
     task_manager_mock.count_tasks.assert_awaited_once_with(
@@ -446,6 +447,7 @@ async def test_list_tasks_basic_call_returns_tasks(task_manager_mock):
         reviewer_id=None,
         status=None,
         exclude_statuses=None,
+        agent_ids=None,
     )
 
 
@@ -469,6 +471,7 @@ async def test_list_tasks_total_is_real_total_not_page_len(task_manager_mock):
         reviewer_id=None,
         status=None,
         exclude_statuses=None,
+        agent_ids=None,
     )
 
 
@@ -486,6 +489,7 @@ async def test_list_tasks_counts_with_same_filters(task_manager_mock):
         reviewer_id=None,
         status=None,
         exclude_statuses=[TaskStatus.DONE, TaskStatus.CANCELLED],
+        agent_ids=None,
     )
     task_manager_mock.list_tasks.assert_awaited_once_with(limit=10, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
@@ -505,6 +509,7 @@ async def test_list_tasks_explicit_status_is_passed_to_both_queries(task_manager
         reviewer_id=None,
         status=TaskStatus.DONE,
         exclude_statuses=None,
+        agent_ids=None,
     )
     task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
@@ -602,8 +607,182 @@ async def test_list_tasks_open_only_excludes_done_and_cancelled(task_manager_moc
         reviewer_id=None,
         status=None,
         exclude_statuses=[TaskStatus.DONE, TaskStatus.CANCELLED],
+        agent_ids=None,
         limit=10,
     )
+
+
+# ---------------------------------------------------------------------------
+# #76：`list_tasks` 的 scope（self / team）与可见范围解析
+# ---------------------------------------------------------------------------
+
+
+def _patch_dept_tree(manager_id: int | None, subordinates: set[int] | None):
+    """patch 部门树两个入口：根主管 ID + 下属集合（None ⇒ 没有部门树）。"""
+    tree = None if manager_id is None else SimpleNamespace(manager_id=manager_id)
+    return (
+        patch("service.deptService.get_dept_tree", new=AsyncMock(return_value=tree)),
+        patch(
+            "service.deptService.get_sub_agent_ids",
+            new=AsyncMock(return_value=set(subordinates or ())),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_visible_agent_ids_root_leader_is_unbounded():
+    """Root Leader（根部门主管）⇒ `None`：不限范围，可见全团队。"""
+    tree_patch, subs_patch = _patch_dept_tree(manager_id=6, subordinates={7, 8})
+    with tree_patch, subs_patch:
+        assert await taskService.resolve_visible_agent_ids(team_id=1, caller_id=6) is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_visible_agent_ids_dept_manager_sees_self_and_subtree():
+    """部门主管 ⇒ 自己 + 子孙部门成员（排序确定，便于断言与日志复现）。"""
+    tree_patch, subs_patch = _patch_dept_tree(manager_id=6, subordinates={9, 8})
+    with tree_patch, subs_patch:
+        visible = await taskService.resolve_visible_agent_ids(team_id=1, caller_id=7)
+
+    assert visible == [7, 8, 9]
+
+
+@pytest.mark.asyncio
+async def test_resolve_visible_agent_ids_plain_member_has_no_team_scope():
+    """普通成员（非任何部门主管）⇒ `[]`：没有管理视角。"""
+    tree_patch, subs_patch = _patch_dept_tree(manager_id=6, subordinates=set())
+    with tree_patch, subs_patch:
+        assert await taskService.resolve_visible_agent_ids(team_id=1, caller_id=8) == []
+
+
+@pytest.mark.asyncio
+async def test_resolve_visible_agent_ids_without_dept_tree_falls_back_to_self():
+    """团队还没部门树 ⇒ 退化为「只看自己」：不放开全团队，也不误报无权限。"""
+    tree_patch, subs_patch = _patch_dept_tree(manager_id=None, subordinates=set())
+    with tree_patch, subs_patch:
+        assert await taskService.resolve_visible_agent_ids(team_id=1, caller_id=8) == [8]
+
+
+@pytest.mark.asyncio
+async def test_resolve_visible_agent_ids_without_caller_has_no_scope():
+    """拿不到调用者身份 ⇒ `[]`（宁可不给，也不当成 Root Leader 放开全团队）。"""
+    assert await taskService.resolve_visible_agent_ids(team_id=1, caller_id=None) == []
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_scope_team_root_leader_queries_without_range(task_manager_mock):
+    """Root Leader + `scope="team"` ⇒ 不加 agent_ids 限制，能拿到他人的任务。"""
+    task_manager_mock.list_tasks = AsyncMock(
+        return_value=[_build_task(id=1, assignee_id=11), _build_task(id=2, assignee_id=99)]
+    )
+    task_manager_mock.count_tasks = AsyncMock(return_value=2)
+
+    tree_patch, subs_patch = _patch_dept_tree(manager_id=6, subordinates={7, 8})
+    with tree_patch, subs_patch:
+        result = await taskService.list_tasks(team_id=1, scope="team", caller_id=6)
+
+    assert result["success"] is True
+    assert result["total"] == 2
+    expected = dict(
+        team_id=1,
+        assignee_id=None,
+        reviewer_id=None,
+        status=None,
+        exclude_statuses=None,
+        agent_ids=None,
+    )
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_scope_team_dept_manager_passes_visible_ids_to_both_queries(task_manager_mock):
+    """部门主管 + `scope="team"` ⇒ agent_ids = 自己 + 子孙；`total` 与列表同一口径。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[_build_task(id=5, assignee_id=8)])
+    task_manager_mock.count_tasks = AsyncMock(return_value=1)
+
+    tree_patch, subs_patch = _patch_dept_tree(manager_id=6, subordinates={8})
+    with tree_patch, subs_patch:
+        result = await taskService.list_tasks(team_id=1, scope="team", caller_id=7)
+
+    assert result["success"] is True
+    expected = dict(
+        team_id=1,
+        assignee_id=None,
+        reviewer_id=None,
+        status=None,
+        exclude_statuses=None,
+        agent_ids=[7, 8],
+    )
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_scope_team_plain_member_is_rejected_not_downgraded(task_manager_mock):
+    """普通成员 + `scope="team"` 且无过滤器 ⇒ `scope_not_permitted`，**不静默降级为自己**。"""
+    tree_patch, subs_patch = _patch_dept_tree(manager_id=6, subordinates=set())
+    with tree_patch, subs_patch:
+        result = await taskService.list_tasks(team_id=1, scope="team", caller_id=8)
+
+    assert result["success"] is False
+    assert result["error_code"] == "scope_not_permitted"
+    task_manager_mock.list_tasks.assert_not_called()
+    task_manager_mock.count_tasks.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_scope_team_member_with_filter_ignores_scope(task_manager_mock):
+    """普通成员带了 assignee ⇒ 忽略 scope、按过滤器查（常见路径不浪费一个回合）。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[_build_task(id=5, assignee_id=8)])
+    task_manager_mock.count_tasks = AsyncMock(return_value=1)
+
+    tree_patch, subs_patch = _patch_dept_tree(manager_id=6, subordinates=set())
+    with tree_patch, subs_patch:
+        result = await taskService.list_tasks(team_id=1, scope="team", caller_id=8, assignee_id=8)
+
+    assert result["success"] is True
+    expected = dict(
+        team_id=1,
+        assignee_id=8,
+        reviewer_id=None,
+        status=None,
+        exclude_statuses=None,
+        agent_ids=None,
+    )
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_scope_self_without_filters_keeps_web_behavior(task_manager_mock):
+    """`scope="self"`（默认）且无过滤器 ⇒ 保持历史行为（不加范围限制，前端列表接口依赖）。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    result = await taskService.list_tasks(team_id=1, caller_id=8)
+
+    assert result["success"] is True
+    expected = dict(
+        team_id=1,
+        assignee_id=None,
+        reviewer_id=None,
+        status=None,
+        exclude_statuses=None,
+        agent_ids=None,
+    )
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_invalid_scope_is_rejected(task_manager_mock):
+    """非法 scope（Literal 之外的入口，如 Web 接口）⇒ `invalid_scope`，不落到全量查询。"""
+    result = await taskService.list_tasks(team_id=1, scope="all", caller_id=8)
+
+    assert result["success"] is False
+    assert result["error_code"] == "invalid_scope"
+    task_manager_mock.list_tasks.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

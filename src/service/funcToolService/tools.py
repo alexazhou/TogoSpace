@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 import asyncio
 import datetime
 import logging
@@ -1206,19 +1206,22 @@ async def list_tasks(
     reviewer: Optional[int] = None,
     status: Optional[str] = None,
     open_only: bool = True,
+    scope: Literal["self", "team"] = "self",
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
     """查询协作任务列表。
     默认只返回未完结任务（`open_only=True`，排除 DONE / CANCELLED），便于聚焦进行中的工作。
     需要查看已完结任务时显式传 `open_only=False`，或用 `status` 指定具体状态。
-    必须按执行人（`assignee`）或验收人（`reviewer`）之一过滤，两者都不传会被拒绝。
-    返回条数由内部默认值决定，不对调用方开放。
+    默认（`scope="self"`）只查与自己相关的工作，必须按执行人（`assignee`）或验收人（`reviewer`）之一过滤，两者都不传会被拒绝。
+    `scope="team"` 是管理视角：可省略过滤器一次看到自己管理范围内的全部任务，范围取决于调用者的汇报层级（Root Leader 见全团队，部门主管见自己与所有子孙部门），普通成员用它且不给过滤器会被拒绝（`scope_not_permitted`）；给了过滤器则忽略 scope、按过滤器查。
+    返回条数由内部默认值决定，查看是否被截断请比较 `total` 与 `count`（`total > count` 说明还有更多）。
 
     Args:
-        assignee: 按执行人 Agent ID 过滤（与 reviewer 至少提供一个，否则被拒绝）
-        reviewer: 按验收人 Agent ID 过滤（与 assignee 至少提供一个，否则被拒绝）
+        assignee: 按执行人 Agent ID 过滤（与 reviewer 至少提供一个，除非 scope="team"）
+        reviewer: 按验收人 Agent ID 过滤（与 assignee 至少提供一个，除非 scope="team"）
         status: 按状态过滤（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）；显式指定时 open_only 不生效
         open_only: 是否只返回未完结任务（排除 DONE / CANCELLED），默认 True；查看已完结任务时传 False
+        scope: 查询范围。`self`（默认）= 只查自己相关，必须给 assignee 或 reviewer；`team` = 管理视角，按调用者的汇报层级收窄（Root Leader 全团队 / 部门主管 自己+子孙部门 / 普通成员无过滤器时返回 scope_not_permitted）。传了 assignee 或 reviewer 时该参数被忽略
     """
     import service.taskService as taskService
 
@@ -1226,10 +1229,10 @@ async def list_tasks(
     if not ok:
         return {"success": False, "message": "无法获取团队上下文"}
 
-    if assignee is None and reviewer is None:
+    if assignee is None and reviewer is None and scope != "team":
         return {
             "success": False,
-            "message": "请通过 assignee 或 reviewer 指定过滤目标（至少提供一个）",
+            "message": "请通过 assignee 或 reviewer 指定过滤目标（至少提供一个）；若要看自己管理范围内的全部任务，请传 scope=\"team\"",
             "error_code": "missing_target",
         }
 
@@ -1240,6 +1243,8 @@ async def list_tasks(
         status=status,
         open_only=open_only,
         limit=LIST_TASKS_DEFAULT_LIMIT,
+        scope=scope,
+        caller_id=_context.agent_id if _context is not None else None,
     )
 
 

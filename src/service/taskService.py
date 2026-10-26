@@ -586,6 +586,35 @@ async def list_task_events(
     }
 
 
+async def resolve_visible_agent_ids(team_id: int, caller_id: Optional[int]) -> Optional[list[int]]:
+    """算出 `caller_id` 在「管理视角」下可见的 Agent 集合（**唯一权限入口**）。
+
+    返回值语义（三态，调用方必须区分）：
+    - `None`：不限范围（Root Leader = 根部门主管，可见全团队）
+    - `list[int]` 且非空：可见范围 = 自己 + 所有直接/间接下属（部门主管）
+    - `[]`：无管理视角（普通成员，或取不到调用者身份）
+
+    层级信息全部来自 `deptService` 的部门树（不新增配置）：
+    - 根部门（`parent_id is None`）的主管是 Root Leader；
+    - 其余主管的可查集合 = `{self} ∪ get_sub_agent_ids(...)`（含子孙部门成员）；
+    - 团队还没有部门树时退化为「只看自己」——不放开全团队，避免无组织数据时
+      意外泄露，也不会误报无权限。
+    """
+    if caller_id is None:
+        return []
+
+    from service import deptService
+
+    tree = await deptService.get_dept_tree(team_id)
+    if tree is not None and tree.manager_id == caller_id:
+        return None
+
+    subordinates = await deptService.get_sub_agent_ids(team_id, caller_id)
+    if not subordinates:
+        return [caller_id] if tree is None else []
+    return [caller_id, *sorted(subordinates)]
+
+
 async def list_tasks(
     team_id: int,
     assignee_id: Optional[int] = None,
@@ -593,14 +622,31 @@ async def list_tasks(
     status: Optional[str] = None,
     open_only: bool = False,
     limit: int = 20,
+    scope: str = 'self',
+    caller_id: Optional[int] = None,
 ) -> dict:
     """查询协作任务列表。
 
     返回 `tasks`（本页，高优先级优先）、`count`（本页条数）、
     `total`（**符合条件的任务总数**，跨页、不受 `limit` 影响）——
     `total > count` 即说明还有更多任务被 `limit` 截断。
+
+    `scope` 只在**既没给 assignee 也没给 reviewer** 时才起作用：
+    - `"self"`（默认）：不加范围过滤（保持工具层 `missing_target` 之前的历史行为，
+      前端列表接口依赖它拿全团队数据）；
+    - `"team"`：走 `resolve_visible_agent_ids()` 按汇报层级收窄，无管理视角时
+      返回 `error_code="scope_not_permitted"`（**不静默降级为自己**，否则调用方
+      会误以为拿到了全团队数据）；可见集合用 `assignee ∈ 集合 OR reviewer ∈ 集合`。
+    已经传了 assignee/reviewer 时忽略 `scope`，按精确过滤查（常见路径不多绕一回合）。
     """
     from playhouse.shortcuts import model_to_dict
+
+    if scope not in ('self', 'team'):
+        return {
+            "success": False,
+            "message": f"无效的 scope：{scope}，有效值为 self / team",
+            "error_code": "invalid_scope",
+        }
 
     status_enum: Optional[TaskStatus] = None
     exclude_statuses: list[TaskStatus] | None = None
@@ -611,21 +657,27 @@ async def list_tasks(
     elif open_only:
         exclude_statuses = [TaskStatus.DONE, TaskStatus.CANCELLED]
 
-    tasks = await gtAgentTaskManager.list_tasks(
+    visible_agent_ids: Optional[list[int]] = None
+    if assignee_id is None and reviewer_id is None and scope == 'team':
+        visible_agent_ids = await resolve_visible_agent_ids(team_id, caller_id)
+        if visible_agent_ids is not None and not visible_agent_ids:
+            return {
+                "success": False,
+                "message": "当前身份没有管理视角，无法用 scope=\"team\" 查看全团队任务；请改为指定 assignee 或 reviewer",
+                "error_code": "scope_not_permitted",
+            }
+
+    # `list` 与 `count` 必须共用同一份过滤条件（`total` 与列表口径一致）
+    filters: dict = dict(
         team_id=team_id,
         assignee_id=assignee_id,
         reviewer_id=reviewer_id,
         status=status_enum,
         exclude_statuses=exclude_statuses,
-        limit=limit,
+        agent_ids=visible_agent_ids,
     )
-    total = await gtAgentTaskManager.count_tasks(
-        team_id=team_id,
-        assignee_id=assignee_id,
-        reviewer_id=reviewer_id,
-        status=status_enum,
-        exclude_statuses=exclude_statuses,
-    )
+    tasks = await gtAgentTaskManager.list_tasks(**filters, limit=limit)
+    total = await gtAgentTaskManager.count_tasks(**filters)
     return {
         "success": True,
         "tasks": [model_to_dict(t, recurse=False) for t in tasks],

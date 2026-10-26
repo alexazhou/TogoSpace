@@ -1,9 +1,18 @@
-"""#67：任务 DAL 的 priority 权重表守卫（显式映射 + 枚举全覆盖）。"""
+"""任务 DAL 守卫测试。
+
+- #67：`priority` 权重表守卫（显式映射 + 枚举全覆盖）。
+- #76：`agent_ids` 过滤（`assignee ∈ 集合` **OR** `reviewer ∈ 集合`）的真实 SQL 语义。
+"""
 
 from __future__ import annotations
 
-from constants import TaskPriority
+import peewee
+import pytest
+
+from constants import TaskPriority, TaskStatus
 from dal.db import gtAgentTaskManager
+from model.dbModel.base import bind_database, unbind_database
+from model.dbModel.gtAgentTask import GtAgentTask
 
 
 def test_priority_weight_map_covers_every_enum_member():
@@ -36,3 +45,99 @@ def test_priority_weight_case_is_built_from_the_map():
     assert sorted(weight for _, weight in case.expression_tuples) == sorted(
         gtAgentTaskManager._PRIORITY_WEIGHT_MAP.values()
     )
+
+
+# ---------------------------------------------------------------------------
+# #76：`agent_ids` 过滤 —— 用真实 SQLite 内存库验 OR 语义（不是表达式文本断言）
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def task_db():
+    """把模型代理临时绑到内存 SQLite 上，直接跑真实 SQL（结束后一定解绑）。
+
+    `_filtered_task_query` 的语义（尤其 `assignee OR reviewer`）只有真正执行才
+    能证伪：「只过滤 assignee」在纯表达式断言下很容易被写成看起来对的形状。
+    """
+    db = peewee.SqliteDatabase(":memory:")
+    bind_database(db)
+    db.connect(reuse_if_open=True)
+    db.create_tables([GtAgentTask])
+    try:
+        yield db
+    finally:
+        unbind_database()
+        if not db.is_closed():
+            db.close()
+
+
+def _seed_tasks(rows: list[tuple[int, int | None]]) -> None:
+    """按 (assignee_id, reviewer_id) 造任务；id 从 1 递增，team_id 固定 1。"""
+    for index, (assignee_id, reviewer_id) in enumerate(rows, start=1):
+        GtAgentTask.create(
+            id=index,
+            team_id=1,
+            title=f"t{index}",
+            assignee_id=assignee_id,
+            creator_id=assignee_id,
+            reviewer_id=reviewer_id,
+            status=TaskStatus.TODO,
+        )
+
+
+def _ids(query) -> list[int]:
+    return sorted(task.id for task in query.execute())
+
+
+def test_agent_ids_includes_tasks_where_caller_is_reviewer(task_db):
+    """**OR 语义**：`agent_id=1` 作为验收人的任务必须出现（只过滤 assignee 会漏）。"""
+    _seed_tasks([(1, None), (2, 1), (3, 3)])
+
+    assert _ids(gtAgentTaskManager._filtered_task_query(1, agent_ids=[1])) == [1, 2]
+
+
+def test_agent_ids_does_not_leak_tasks_outside_the_set(task_db):
+    """集合外的任务不许出现（防「宁多勿少」式放宽）。"""
+    _seed_tasks([(1, None), (2, 1), (3, 3)])
+
+    assert _ids(gtAgentTaskManager._filtered_task_query(1, agent_ids=[2])) == [2]
+    assert _ids(gtAgentTaskManager._filtered_task_query(1, agent_ids=[1, 2])) == [1, 2]
+
+
+def test_agent_ids_none_keeps_unfiltered_behavior(task_db):
+    """`agent_ids=None` 时行为与新增参数前完全一致：只有 team_id 过滤。"""
+    _seed_tasks([(1, None), (2, 1), (3, 3)])
+
+    assert _ids(gtAgentTaskManager._filtered_task_query(1)) == [1, 2, 3]
+
+
+def test_agent_ids_combines_with_explicit_assignee_as_and(task_db):
+    """精确过滤与 `agent_ids` 是 **AND**：(assignee=2) AND (assignee/reviewer ∈ {1,2}) ⇒ 只剩 t2。"""
+    _seed_tasks([(1, None), (2, 1), (3, 3)])
+
+    assert _ids(gtAgentTaskManager._filtered_task_query(1, assignee_id=2, agent_ids=[1, 2])) == [2]
+    assert _ids(gtAgentTaskManager._filtered_task_query(1, assignee_id=3, agent_ids=[1, 2])) == []
+
+
+def test_agent_ids_scopes_by_team(task_db):
+    """跨团队不串数据：agent_ids 只在 team 内生效。"""
+    _seed_tasks([(1, None)])
+    GtAgentTask.create(
+        id=99,
+        team_id=2,
+        title="other team",
+        assignee_id=1,
+        creator_id=1,
+        reviewer_id=None,
+        status=TaskStatus.TODO,
+    )
+
+    assert _ids(gtAgentTaskManager._filtered_task_query(1, agent_ids=[1])) == [1]
+
+
+def test_count_and_list_share_agent_ids_scope(task_db):
+    """`count_tasks` 与 `list_tasks` 必须同口径（否则 `total` 与列表对不上）。"""
+    _seed_tasks([(1, None), (2, 1), (3, 3)])
+
+    query = gtAgentTaskManager._filtered_task_query(1, agent_ids=[1])
+    assert query.count() == len(_ids(query)) == 2

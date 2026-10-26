@@ -64,16 +64,28 @@ def _filtered_task_query(
     reviewer_id: int | None = None,
     status: TaskStatus | None = None,
     exclude_statuses: list[TaskStatus] | None = None,
+    agent_ids: list[int] | None = None,
 ):
     """构造任务过滤条件（`list_tasks` 与 `count_tasks` **共用同一 where 构造**，
 
     保证「本页列表」与「跨页总数」永远按同一口径筛选，不会两处走偏）。
+
+    `agent_ids` 是「可见 Agent 集合」过滤：命中集内**任一**身份即可，
+    即 `assignee_id ∈ agent_ids` **OR** `reviewer_id ∈ agent_ids` ——
+    主管必须能看到「自己作为验收人」的任务，只按 assignee 过滤会漏。
+    与 `assignee_id` / `reviewer_id` 的精确过滤是 **AND** 关系（两者只会在
+    「调用方已给出明确过滤目标」以外的场景出现，同时传属于收紧而非放宽）。
     """
     query = GtAgentTask.select().where(GtAgentTask.team_id == team_id)
     if assignee_id is not None:
         query = query.where(GtAgentTask.assignee_id == assignee_id)
     if reviewer_id is not None:
         query = query.where(GtAgentTask.reviewer_id == reviewer_id)
+    if agent_ids is not None:
+        query = query.where(
+            (GtAgentTask.assignee_id.in_(agent_ids))
+            | (GtAgentTask.reviewer_id.in_(agent_ids))
+        )
     if status is not None:
         query = query.where(GtAgentTask.status == status)
     if exclude_statuses:
@@ -88,10 +100,15 @@ async def list_tasks(
     status: TaskStatus | None = None,
     exclude_statuses: list[TaskStatus] | None = None,
     limit: int = 20,
+    agent_ids: list[int] | None = None,
 ) -> list[GtAgentTask]:
-    """按条件查询任务列表，高优先级优先（HIGH → NORMAL → LOW），同级按 id 升序。"""
+    """按条件查询任务列表，高优先级优先（HIGH → NORMAL → LOW），同级按 id 升序。
+
+    `agent_ids` 非空时只返回「assignee 或 reviewer 落在集合内」的任务；
+    `None` 表示不加该过滤（行为与新增该参数前完全一致）。
+    """
     query = (
-        _filtered_task_query(team_id, assignee_id, reviewer_id, status, exclude_statuses)
+        _filtered_task_query(team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids)
         .order_by(_PRIORITY_WEIGHT.desc(), GtAgentTask.id.asc())
         .limit(limit)
     )
@@ -104,10 +121,11 @@ async def count_tasks(
     reviewer_id: int | None = None,
     status: TaskStatus | None = None,
     exclude_statuses: list[TaskStatus] | None = None,
+    agent_ids: list[int] | None = None,
 ) -> int:
     """统计符合条件的任务**总数**（跨页；不受 `limit` 影响，与 `list_tasks` 同一过滤口径）。"""
     return await _filtered_task_query(
-        team_id, assignee_id, reviewer_id, status, exclude_statuses
+        team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids
     ).aio_count()
 
 
