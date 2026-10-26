@@ -13,7 +13,14 @@ import inspect
 import pytest
 
 from service.funcToolService import tools
-from service.funcToolService.funcToolType import get_function_metadata
+from service.funcToolService.funcToolType import (
+    _ARGS_SECTION_TITLES,
+    _PARAM_LINE_PATTERN,
+    _match_section_title,
+    _parse_param_descriptions,
+    _strip_bullet,
+    get_function_metadata,
+)
 from service.agentService.toolRegistry import CATEGORY_CONFIG
 
 
@@ -263,6 +270,80 @@ def test_bullet_prefixed_param_line_is_parsed():
 
 
 # ---------------------------------------------------------------------------
+# 类 6：冒名参数行（`NOTE:` / `TODO:` 等英文标识符 + 冒号，但不是签名参数）
+# ---------------------------------------------------------------------------
+
+
+def _valid_param_names(func) -> set[str]:
+    """与 `get_function_metadata` 同口径的「合法参数名」集合。"""
+    return {
+        name for name in inspect.signature(func).parameters
+        if name != "self" and not name.startswith("_")
+    }
+
+
+def test_misnamed_param_like_line_is_continuation_not_ghost_key():
+    """`NOTE:` 不是签名参数 ⇒ 当续行拼给上一个参数，且它自己的正文不得被丢掉。
+
+    旧行为：`NOTE` 被当成参数名顶替 `current_param`，于是
+    ① 上一参数的后续续行被它抢走；② `NOTE` 正文存进幽灵键后被签名过滤 ⇒ 静默消失。
+    """
+
+    def fake(a: str, b: str = "") -> dict:
+        """示例工具说明。
+
+        Args:
+            a: 甲参数说明
+                NOTE: 甲的重要补充
+            b: 乙参数说明
+        """
+        return {}
+
+    props = _props(fake)
+    assert props["a"]["description"] == "甲参数说明 NOTE: 甲的重要补充"
+    assert props["b"]["description"] == "乙参数说明"
+
+
+def test_orphan_continuation_at_section_start_does_not_crash():
+    """段首就是无主续行（没有当前参数）⇒ 忽略、不抛错，后续参数照常解析。"""
+
+    def fake(a: str) -> dict:
+        """示例工具说明。
+
+        Args:
+            段首孤立的一行（不属于任何参数）
+            a: 甲参数说明
+        """
+        return {}
+
+    props = _props(fake)
+    assert props["a"]["description"] == "甲参数说明"
+    assert "段首孤立的一行" not in props["a"]["description"]
+
+
+def test_parsed_param_keys_never_exceed_signature_params():
+    """防幽灵键回潮：解析结果的 key 必须全部 ⊆ 签名里的合法参数名。"""
+
+    def fake(a: str, b: str = "") -> dict:
+        """示例工具说明。
+
+        Args:
+            a: 甲参数说明
+                NOTE: 补充说明
+                TODO: 待办说明
+            b: 乙参数说明
+        """
+        return {}
+
+    valid = _valid_param_names(fake)
+    parsed = _parse_param_descriptions(inspect.getdoc(fake) or "", valid)
+
+    assert set(parsed) <= valid
+    assert "NOTE" not in parsed
+    assert "TODO" not in parsed
+
+
+# ---------------------------------------------------------------------------
 # 全量 lint：所有已注册工具都必须有「参数说明」+「有意义的首行」
 # ---------------------------------------------------------------------------
 
@@ -308,3 +389,63 @@ def test_finish_action_confirm_no_need_talk_description_is_visible():
     assert desc
     assert "true" in desc
     assert "send_chat_msg" in desc  # ⚠️ 提示必须可见
+
+
+# ---------------------------------------------------------------------------
+# 反向 lint：`Args:` 段里「形如参数行但名字不在函数签名里」（拼错 / 幽灵参数）
+# ---------------------------------------------------------------------------
+
+# 允许出现在 `Args:` 段里、但不是参数的标签行（大小写不敏感）。
+_ALLOWED_LABEL_NAMES = frozenset({"note", "notes", "todo", "example", "examples", "warning", "tip"})
+
+
+def _iter_args_param_like_lines(func):
+    """产出 `Args:` 段内所有「形如参数行」的 `(参数名, 原始行)`（不看是否在签名里）。"""
+    docstring = inspect.getdoc(func) or ""
+    in_args_section = False
+    args_indent = 0
+
+    for raw_line in docstring.split("\n"):
+        stripped = raw_line.strip()
+
+        if not in_args_section:
+            if _match_section_title(raw_line) in _ARGS_SECTION_TITLES:
+                in_args_section = True
+                args_indent = len(raw_line) - len(raw_line.lstrip())
+            continue
+
+        if not stripped:
+            continue
+
+        matched = _PARAM_LINE_PATTERN.match(_strip_bullet(stripped))
+        if matched:
+            yield matched.group("name"), stripped
+            continue
+
+        if len(raw_line) - len(raw_line.lstrip()) <= args_indent:
+            break  # 参数段结束（下一个段标题 / 缩进回退）
+
+
+def test_no_misnamed_param_lines_in_tools_docstrings():
+    """反向 lint：`Args:` 段里形如参数行、但名字不在签名里的行必须报出来。
+
+    这类行（例如把 `task_id` 拼成 `taks_id`）会被解析器当成**续行**静默并进上一个
+    参数，既不报错也不进 schema —— 拼错就永远发现不了。白名单放行
+    `NOTE` / `TODO` / `Note` / `Example(s)` 等标签行（大小写不敏感）。
+    """
+    problems: list[str] = []
+    scanned = 0
+
+    for tool_name, func in _iter_local_tools():
+        valid_names = _valid_param_names(func)
+        for name, raw_line in _iter_args_param_like_lines(func):
+            scanned += 1
+            if name in valid_names or name.lower() in _ALLOWED_LABEL_NAMES:
+                continue
+            problems.append(f"{tool_name}: {raw_line!r} —— 签名里没有参数 {name!r}")
+
+    # 防止用例空转：必须真的扫到了参数行
+    assert scanned > 0, "反向 lint 没扫到任何参数行，用例可能空转"
+    assert not problems, (
+        "以下 `Args:` 段参数行不在函数签名里（疑似拼错或幽灵参数）：\n" + "\n".join(problems)
+    )

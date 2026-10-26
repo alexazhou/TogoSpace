@@ -78,15 +78,21 @@ def _extract_description(docstring: str) -> str:
     return "\n".join(parts).strip()
 
 
-def _parse_param_descriptions(docstring: str) -> dict[str, str]:
-    """解析「参数段」→ {参数名: 说明}。
+def _parse_param_descriptions(docstring: str, valid_names: set[str]) -> dict[str, str]:
+    """解析「参数段」→ {参数名: 说明}，只认签名内的参数名。
 
     规则：
     1. 段标题**整行**匹配（Args/Arguments/Parameters/参数/参数说明/参数列表，半角全角冒号）；
     2. 段内**空行不终止**；
     3. 参数行按 `_PARAM_LINE_PATTERN` 解析，允许前导 `- `、类型括号、全角冒号；
-    4. 不匹配参数行的段内内容视为**续行**，用空格拼接到上一个参数的说明；
-    5. 遇到下一个段标题（整行标题）或缩进回退到段标题同级/更浅的非空行 ⇒ 参数段结束。
+       但**只有 `name ∈ valid_names`（函数签名里的非私有参数）才算参数行**——
+       否则 `NOTE: xxx` / `TODO: xxx` 这类英文标识符行会顶替「当前参数」，
+       把后续续行抢走、并让该行自身的正文变成幽灵键后被丢弃；
+    4. 不匹配「合法参数行」的段内内容视为**续行**，用空格拼接到上一个参数的说明
+       （保留 `NOTE:` 等前缀原文，不抹掉）；
+    5. 段首/无当前参数时的续行直接忽略（不抛错、不产生幽灵键）；
+    6. 遇下一个段标题（整行标题）或缩进回退到段标题同级/更浅的非空行 ⇒ 参数段结束
+       （因此一个 docstring 只解析**第一个**参数段）。
     """
     descriptions: dict[str, str] = {}
     in_args_section = False
@@ -109,7 +115,7 @@ def _parse_param_descriptions(docstring: str) -> dict[str, str]:
             continue
 
         matched = _PARAM_LINE_PATTERN.match(_strip_bullet(stripped))
-        if matched:
+        if matched and matched.group("name") in valid_names:
             current_param = matched.group("name")
             descriptions[current_param] = matched.group("desc").strip()
             continue
@@ -118,9 +124,12 @@ def _parse_param_descriptions(docstring: str) -> dict[str, str]:
             # 下一个段标题，或缩进回退到同级/更浅 ⇒ 参数段结束
             break
 
-        if current_param:  # 续行：拼接到上一个参数
+        if current_param:  # 续行：拼接到上一个参数（含 `NOTE:` 等冒名行的原文）
             extra = _strip_bullet(stripped)
             descriptions[current_param] = f"{descriptions[current_param]} {extra}".strip()
+        else:
+            # 段首就是无主续行：忽略，不制造幽灵键
+            logger.debug(f"参数段内出现无主续行，已忽略: {stripped[:40]}")
 
     return descriptions
 
@@ -175,7 +184,11 @@ def get_function_metadata(func_name: str, func: Callable[..., Any]) -> Dict[str,
 
     docstring = inspect.getdoc(func) or ""
     description = _extract_description(docstring)
-    param_descriptions = _parse_param_descriptions(docstring)
+    # 只有签名里的非私有参数名才算「参数行」，避免 `NOTE:` 之类的冒名行顶替当前参数。
+    valid_param_names = {
+        name for name in sig.parameters if name != "self" and not name.startswith("_")
+    }
+    param_descriptions = _parse_param_descriptions(docstring, valid_param_names)
 
     properties = {}
     required = []
