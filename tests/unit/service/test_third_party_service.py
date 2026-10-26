@@ -45,7 +45,7 @@ def test_deepseek_search_payload_matches_server_search_shape() -> None:
 def test_mimo_search_payload_matches_server_search_shape() -> None:
     payload = xiaomiMimoService._build_search_payload("小米 今天 新闻")
 
-    assert payload["model"] == "mimo-v2.5"
+    assert payload["model"] == "mimo-v2.6-flash"
     assert payload["messages"] == [{"role": "user", "content": "小米 今天 新闻"}]
     assert payload["tools"] == [{
         "type": "web_search",

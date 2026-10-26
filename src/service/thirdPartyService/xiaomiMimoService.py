@@ -16,7 +16,7 @@ from .result import ThirdPartySearchResult
 
 MIMO_SERVICE_NAME = ThirdPartyServiceName.XIAOMI_MIMO.value
 MIMO_SEARCH_URL = "https://api.xiaomimimo.com/v1/chat/completions"
-MIMO_SEARCH_MODEL = "mimo-v2.5"
+MIMO_SEARCH_MODEL = "mimo-v2.6-flash"
 MIMO_MAX_KEYWORD = 3
 MIMO_SEARCH_LIMIT = 5
 
