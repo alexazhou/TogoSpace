@@ -1,0 +1,199 @@
+{
+  "create_task": {
+    "description": "创建协作任务（**不会唤醒执行人**，需另发 send_chat_msg 通知对方）。",
+    "parameters": {
+      "assignee_id": "执行人 Agent ID（只能是自己或自己的直接/间接下属）",
+      "depends_on": "依赖的任务 ID 列表。非空且其中任一尚未 DONE 时，新任务初始状态为 PENDING（依赖全部 DONE 后自动转 TODO）；为空则初始状态为 TODO",
+      "description": "任务描述，含上下文、约束和交付标准",
+      "parent_id": "父任务 ID，用于子任务拆解",
+      "priority": "优先级，HIGH / NORMAL / LOW，默认 NORMAL",
+      "reviewer_id": "完成时若需要他人验收，则设置验收人 Agent ID，不填则无需验收流程；不能与 assignee_id 相同（同一人无需设置验收）",
+      "room_id": "关联房间 ID，便于溯源",
+      "title": "任务标题"
+    }
+  },
+  "delete_dept": {
+    "description": "删除当前团队中的指定组织（部门）。",
+    "parameters": {
+      "dept_id": "可选组织 ID。传入后按 ID 精确定位组织，此时 name 仅用于确认提示。",
+      "name": "要删除的组织名称。",
+      "recursive": "是否递归删除子组织。默认 false；为 true 时会一并删除所有子孙组织。"
+    }
+  },
+  "delete_role_template": {
+    "description": "删除指定的角色模板。注意：仅能删除由用户创建（USER 类型）且当前未被任何成员使用的模板。",
+    "parameters": {
+      "role_name": "要删除的角色模板名称"
+    }
+  },
+  "delete_room": {
+    "description": "删除当前团队中的指定房间。DEPT 房间不允许删除；运行中的房间不允许删除。",
+    "parameters": {
+      "name": "要删除的房间名称。",
+      "room_id": "可选房间 ID。传入后按 ID 精确定位，此时 name 仅用于确认提示。"
+    }
+  },
+  "finish_action": {
+    "description": "结束行动。当你完成所有发言和工具调用后（或者无需行动时），必须调用此工具来把行动机会让给下一位成员。",
+    "parameters": {
+      "confirm_no_need_talk": "确认本轮无需在收到消息通知的房间发言（默认 false，不发言时通常要设 true）。 本轮未在对应房间发言时：若确认不需要发言，须设置为 true 才能结束行动。 本轮已在对应房间发言时：不得设置此参数，直接调用 finish_action 即可。 ⚠️ 注意：直接输出（非 send_chat_msg）的文字用户看不到，不算发言。"
+    }
+  },
+  "get_agent_info": {
+    "description": "查询 Agent 信息。不传 agent_name 时返回团队成员列表，传入时返回指定成员详情。",
+    "parameters": {
+      "agent_name": "Agent 名称（内部标识符，即 name 字段，非 display_name），省略时返回所有 Agent"
+    }
+  },
+  "get_dept_info": {
+    "description": "查询部门信息。不传 dept_id 时返回整个团队部门树，传入时返回指定部门及其子树。",
+    "parameters": {
+      "dept_id": "部门 ID，省略时返回整个团队"
+    }
+  },
+  "get_role_template": {
+    "description": "按名称查询单个角色模板详情。",
+    "parameters": {
+      "role_name": "角色模板名称"
+    }
+  },
+  "get_room_info": {
+    "description": "查询房间信息。不传 room_name 时返回团队房间列表，传入时返回指定房间详情。",
+    "parameters": {
+      "room_name": "房间名称，省略时返回所有房间"
+    }
+  },
+  "get_task_detail": {
+    "description": "查询单个协作任务详情，包含依赖任务状态摘要与事件时间线摘要。\n事件时间线默认只返回最近 3 条；回执中的 `events_total` 是该任务事件总数，\n若大于 events 条数说明还有更早事件，可调大 event_limit 或用 list_task_events\n按游标向前翻页。事件内容（含派生的 last_note / current_block_reason）超过\n100 字符会截断，需要完整原文请用 get_task_event。",
+    "parameters": {
+      "event_limit": "事件时间线返回的条数上限（默认 3）；回执中 events_total 为事件总数，大于本页条数说明还有更早事件，可调大本参数或用 list_task_events 按游标向前翻页",
+      "task_id": "任务 ID"
+    }
+  },
+  "get_task_event": {
+    "description": "按事件 id 查询单条任务事件（返回完整原文，含 actor 展示名，只读）。\n当 `get_task_detail` / `list_task_events` 给出的事件摘要被截断（按 100 字符）\n不够用时，用本工具按事件 id 取回该事件的**完整原文** `content`——本工具是\n唯一不受摘要截断限制的读取入口。不属于当前团队的事件会被拒绝。",
+    "parameters": {
+      "event_id": "事件 ID"
+    }
+  },
+  "get_time": {
+    "description": "获取当前时间（默认本地时区，可传 IANA 时区名如 Asia/Shanghai）。",
+    "parameters": {
+      "timezone": "可选的时区名称，如 \"Asia/Shanghai\"，默认使用本地时区"
+    }
+  },
+  "list_role_templates": {
+    "description": "查询全部角色模板列表。\n返回精简字段，不包含 soul；display_name 为当前语言下的名称。",
+    "parameters": {
+      "keywords": "可选，关键词搜索列表。若提供，则仅返回名称或 soul 中包含这些词的模板。"
+    }
+  },
+  "list_task_events": {
+    "description": "读取任务事件时间线（按 id 游标分页，最新在前）。\n返回 `events`（本页，按 id 降序）、`count`（本页条数）、`total`（该任务事件**总数**，跨页）。\n向前翻页：取上一页最后一条的 `id` 作为下一次的 `before_id`。\n事件内容超过 100 字符会截断，需要完整原文请用 `get_task_event`（按事件 id 取单条）。",
+    "parameters": {
+      "before_id": "游标：只返回 id 小于该值的更早事件（向前翻页，取上一页最后一条的 id），省略则取最新一页",
+      "limit": "最多返回条数，默认 50",
+      "task_id": "任务 ID"
+    }
+  },
+  "list_tasks": {
+    "description": "查询协作任务列表。\n默认只返回未完结任务（`open_only=True`，排除 DONE / CANCELLED），便于聚焦进行中的工作。\n需要查看已完结任务时显式传 `open_only=False`，或用 `status` 指定具体状态。\n必须按执行人（`assignee`）或验收人（`reviewer`）之一过滤，两者都不传会被拒绝。\n返回条数由内部默认值决定，不对调用方开放。",
+    "parameters": {
+      "assignee": "按执行人 Agent ID 过滤（与 reviewer 至少提供一个，否则被拒绝）",
+      "open_only": "是否只返回未完结任务（排除 DONE / CANCELLED），默认 True；查看已完结任务时传 False",
+      "reviewer": "按验收人 Agent ID 过滤（与 assignee 至少提供一个，否则被拒绝）",
+      "status": "按状态过滤（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）；显式指定时 open_only 不生效"
+    }
+  },
+  "load_skill": {
+    "description": "加载指定技能的完整信息，包含详细操作指引和文件清单。",
+    "parameters": {
+      "skill_name": "要加载的技能名称。仅能加载当前 Agent 已授权的技能，未授权的技能会被拒绝。"
+    }
+  },
+  "reload_team": {
+    "description": "重载当前团队的运行时。",
+    "parameters": {}
+  },
+  "save_agent": {
+    "description": "在当前团队中创建或更新成员。",
+    "parameters": {
+      "agent_id": "可选成员 ID。传入后按 ID 精确定位成员（忽略 overwrite_existing），此时 name 可用于重命名。",
+      "allow_skills": "可见技能列表。指定该成员可以加载的技能名称列表，如 [\"frontend-design\"]。调用 load_skill 工具时仅允许加载已授权的技能。留空表示不授权任何技能。",
+      "allow_tools": "可见工具列表。支持具体工具名（如 \"read_file\"）或类别语法（如 \"Category:Read\"）。系统会自动合并类别和具体工具名。基础协作工具（Basic 类别）默认总是开启，无需显式包含。通常情况下此列表留空即可，系统会自动授予 Admin 以外的所有常规类别权限。 可用类别：Read, Write, Execute, Admin。注意：Admin 类别属于团队管理功能，严禁分配给除团队根主管以外的普通成员。",
+      "driver": "驱动类型。可选值为 native、claude_sdk、tsp。无特别需要（如操作者明确指定）时建议省略，默认使用 tsp。",
+      "i18n": "可选多语言数据。示例：{\"display_name\": {\"zh-CN\": \"Alice\", \"en\": \"Alice\"}}",
+      "model": "可选模型覆盖。留空（None）表示不覆盖模板/系统默认模型。",
+      "name": "成员名称。作为当前团队内的稳定标识符，建议使用英文小写字母和下划线。",
+      "overwrite_existing": "是否允许覆盖当前团队中已存在的同名成员。默认 false；为 true 时，若同名成员已存在则执行更新。当传入 agent_id 时，此参数不生效。",
+      "role_template_name": "要绑定的角色模板名称。工具会按名称解析为 role_template_id。"
+    }
+  },
+  "save_dept": {
+    "description": "在当前团队中创建或更新组织（部门）。全量覆盖模式：每次调用会完整替换成员列表。",
+    "parameters": {
+      "dept_id": "可选组织 ID。传入后按 ID 精确定位组织（忽略 overwrite_existing），此时 name 可用于重命名。",
+      "i18n": "可选多语言数据。示例：{\"dept_name\": {\"zh-CN\": \"研发部\", \"en\": \"R&D\"}, \"responsibility\": {\"zh-CN\": \"...\"}}",
+      "manager_name": "负责人成员名。负责人若不在 member_names 中，将自动加入。",
+      "member_names": "成员名称列表。全量覆盖，每次调用将完整替换现有成员列表。",
+      "name": "组织名称。作为当前团队内的稳定标识符，建议使用英文小写字母和下划线。",
+      "overwrite_existing": "是否允许覆盖已存在的同名组织。默认 false；为 true 时执行更新。当传入 dept_id 时，此参数不生效。",
+      "parent_name": "父组织名称。新建组织时必须指定；不能设置为自身或自身的子组织。更新已有根组织时可省略或传 null 以保持其根节点状态。",
+      "responsibility": "组织职责描述。"
+    }
+  },
+  "save_role_template": {
+    "description": "创建或更新角色模板。若指定的 name 不存在则新建（必须设为 USER 类型），若已存在则更新该模板（注意：SYSTEM 类型的内置模板不可通过此工具修改）。",
+    "parameters": {
+      "i18n": "可选多语言数据。示例：{\"display_name\": {\"zh-CN\": \"高级写手\", \"en\": \"Senior Writer\"}}",
+      "name": "角色模板名称。作为系统唯一标识符，建议使用英文小写字母和下划线。对应的多语言显示名称请通过 i18n 参数设置。",
+      "overwrite_existing": "是否允许覆盖同名模板。默认 false；为 true 时，若同名模板已存在则执行更新。",
+      "soul": "角色模板的核心提示词。应包含角色的身份定位、职责边界和行为准则，是 Agent 运行的\"灵魂\"。该内容会作为核心指令注入到对应角色的 System Prompt 中。",
+      "type": "角色模板类型。SYSTEM 代表系统内置模版（随系统发布，只读）；USER 代表用户自定义模版（可增删改）。通过此工具操作时，请统一指定为 USER。"
+    }
+  },
+  "save_room": {
+    "description": "在当前团队中创建或更新房间。房间类型按成员数量自动判断：2人为单聊，3人及以上为群聊。",
+    "parameters": {
+      "initial_topic": "房间初始话题，可选。",
+      "max_rounds": "最大轮次。不传则使用系统默认值；<=0 表示不限轮次。",
+      "member_names": "成员名称列表，至少 2 人。全量覆盖，每次调用将完整替换现有成员列表。",
+      "name": "房间名称。团队内唯一标识，建议使用英文小写字母和下划线。",
+      "overwrite_existing": "同名房间已存在时是否允许覆盖。默认 false；为 true 时执行更新。当传入 room_id 时此参数不生效。",
+      "room_id": "可选房间 ID。传入后按 ID 精确定位房间（忽略 overwrite_existing），此时 name 可用于重命名。"
+    }
+  },
+  "send_chat_msg": {
+    "description": "向聊天窗口发送消息（消息对房间内所有成员可见；房间名必须已存在）。",
+    "parameters": {
+      "msg": "要发送的消息正文（房间内所有成员可见）",
+      "room_name": "目标房间名，必须是本团队**已存在**的房间名（否则发送失败）"
+    }
+  },
+  "start_chat": {
+    "description": "与指定 Agent 发起单聊（私聊）。若两人之间已有房间则直接返回，不重复创建。",
+    "parameters": {
+      "agent_name": "要发起对话的目标 Agent 名称（内部标识符，即 name 字段，非 display_name）。"
+    }
+  },
+  "update_task": {
+    "description": "更新协作任务：流转状态，或追加评论（流转受状态机与权限约束，见 new_status 说明）。",
+    "parameters": {
+      "new_status": "新状态（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）。省略（或等于当前状态）表示追加评论。约束与 taskService 状态机/权限一致，违反会被拒并返回 error_code——① 终态：DONE / CANCELLED 不可再流转，仅可追加评论（invalid_transition）；② 提交验收：→ REVIEWING 仅执行人（assignee）可发起，且仅当该任务设有验收人（未设时 no_reviewer）；③ 验收动作：REVIEWING → DONE（通过）与 REVIEWING → IN_PROGRESS（打回）仅验收人（reviewer）；④ 取消：→ CANCELLED 仅验收人或创建人（creator）；⑤ 其余流转（→ IN_PROGRESS / ON_HOLD 等）仅执行人（assignee）；⑥ 设有验收人的任务不能绕过验收直接 → DONE（review_required）；⑦ 依赖：PENDING → IN_PROGRESS 需 depends_on 全部 DONE（dependency_not_met）。",
+      "note": "本次流转的说明；追加评论时必填（评论正文）",
+      "task_id": "任务 ID"
+    }
+  },
+  "wake_up_agent": {
+    "description": "唤醒处于 FAILED 状态的 Agent，使其重新进入调度循环。",
+    "parameters": {
+      "agent_name": "要唤醒的 Agent 名称（内部标识符，即 name 字段，非 display_name）"
+    }
+  },
+  "web_search": {
+    "description": "通过已配置的三方服务执行网页搜索，并根据 API 返回结果自动提取来源链接。",
+    "parameters": {
+      "query": "要搜索的 query，不需要额外添加来源链接提示。"
+    }
+  }
+}
