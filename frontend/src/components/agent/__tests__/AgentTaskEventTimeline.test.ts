@@ -132,3 +132,32 @@ describe('AgentTaskEventTimeline', () => {
     expect(wrapper.text()).toContain('暂无事件记录。');
   });
 });
+
+describe('AgentTaskEventTimeline tooltip', () => {
+  it('keeps line breaks in the hover title but collapses blank lines', () => {
+    const wrapper = mountTimeline([
+      event({ id: 1, content: '第一行\n第二行\n\n\n第三行' }),
+    ]);
+
+    const title = wrapper.find('.task-timeline__summary').attributes('title');
+    expect(title).toBe('第一行\n第二行\n\n第三行');
+  });
+
+  it('collapses the summary excerpt to a single line', () => {
+    const wrapper = mountTimeline([
+      event({ id: 1, content: '第一行\n第二行' }),
+    ]);
+
+    const excerpt = wrapper.find('.task-timeline__excerpt').text();
+    expect(excerpt).toBe('第一行 第二行');
+  });
+
+  it('strips markdown markers from both the tooltip and the excerpt', () => {
+    const wrapper = mountTimeline([
+      event({ id: 1, content: '**加粗** 与 `code`' }),
+    ]);
+
+    expect(wrapper.find('.task-timeline__summary').attributes('title')).toBe('加粗 与 code');
+    expect(wrapper.find('.task-timeline__excerpt').text()).toBe('加粗 与 code');
+  });
+});
