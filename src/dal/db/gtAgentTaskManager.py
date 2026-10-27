@@ -7,6 +7,12 @@ import peewee
 from constants import TaskPriority, TaskStatus
 from model.dbModel.gtAgentTask import GtAgentTask
 
+# `list_tasks` 的排序口径（值即标识符，便于日志与测试直接比对）。
+# 默认值必须是「优先级优先」——这是 Web 列表接口（`agentController.py`）依赖的既有顺序，
+# 倒序只能显式要求，见 `list_tasks` 的 docstring。
+ORDER_PRIORITY_FIRST = "priority_first"
+ORDER_ID_DESC = "id_desc"
+
 # `priority` 以字符串（'HIGH'/'NORMAL'/'LOW'）落库，直接对字段排序会退化成字典序
 # （NORMAL > LOW > HIGH，HIGH 反而排最后）。用**显式权重映射**定义优先级顺序，
 # 并由映射生成 Case 表达式：新增 `TaskPriority` 枚举值却忘记配权重时，
@@ -99,6 +105,22 @@ def _filtered_task_query(
     return query
 
 
+def _task_ordering(order: str) -> tuple:
+    """把排序标识符翻译成 peewee 排序表达式。
+
+    - `ORDER_PRIORITY_FIRST`（默认）：`priority desc, id asc` —— **与新增 `order` 参数前一致**；
+    - `ORDER_ID_DESC`：`id desc`（最新在前）。
+    非法值抛 `ValueError`：排序写错不该静默兜底成一个「看起来正常」的顺序。
+    """
+    if order == ORDER_PRIORITY_FIRST:
+        return (_PRIORITY_WEIGHT.desc(), GtAgentTask.id.asc())
+    if order == ORDER_ID_DESC:
+        return (GtAgentTask.id.desc(),)
+    raise ValueError(
+        f"不支持的排序方式：{order}，有效值为 {ORDER_PRIORITY_FIRST} / {ORDER_ID_DESC}"
+    )
+
+
 async def list_tasks(
     team_id: int,
     assignee_id: int | None = None,
@@ -107,8 +129,16 @@ async def list_tasks(
     exclude_statuses: list[TaskStatus] | None = None,
     limit: int = 20,
     agent_ids: list[int] | None = None,
+    order: str = ORDER_PRIORITY_FIRST,
 ) -> list[GtAgentTask]:
-    """按条件查询任务列表，高优先级优先（HIGH → NORMAL → LOW），同级按 id 升序。
+    """按条件查询任务列表。
+
+    `order` 决定排序，**默认值与新增该参数前完全一致**——`taskService.list_tasks`
+    同时被 Web 列表接口（`agentController.py` 的 Agent / Team 任务列表）使用，
+    改默认值会静默翻掉前端顺序，所以倒序只能由调用方显式要求：
+    - `ORDER_PRIORITY_FIRST`（默认）：`priority desc, id asc`（HIGH → NORMAL → LOW）；
+    - `ORDER_ID_DESC`：`id desc`（最新在前，Agent 侧要看刚发生的事）。
+    传其他值一律 `ValueError`，不做静默兜底（写错排序不该看起来正常）。
 
     `agent_ids` 非空时只返回「assignee 或 reviewer 落在集合内」的任务；
     `None` 表示不加该过滤（行为与新增该参数前完全一致）。
@@ -116,7 +146,7 @@ async def list_tasks(
     """
     query = (
         _filtered_task_query(team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids)
-        .order_by(_PRIORITY_WEIGHT.desc(), GtAgentTask.id.asc())
+        .order_by(*_task_ordering(order))
         .limit(limit)
     )
     return list(await query.aio_execute())

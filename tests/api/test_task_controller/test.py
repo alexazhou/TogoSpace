@@ -40,13 +40,17 @@ class TestTaskController(ServiceTestCase):
             detail = await resp.json()
         return team_id, detail["agents"][0]["id"]
 
-    def _seed_task(self, *, team_id: int, agent_id: int, title: str) -> int:
+    def _seed_task(
+        self, *, team_id: int, agent_id: int, title: str, priority: str = "NORMAL",
+        reviewer_id: int | None = None,
+    ) -> int:
         """直接写一行任务 + 两条事件，返回 task_id。"""
         with sqlite3.connect(self._get_test_db_path()) as conn:
             cursor = conn.execute(
                 "INSERT INTO agent_tasks (team_id, title, description, assignee_id, creator_id,"
-                " status, priority, depends_on) VALUES (?, ?, '', ?, ?, 'TODO', 'NORMAL', '[]')",
-                (team_id, title, agent_id, agent_id),
+                " reviewer_id, status, priority, depends_on)"
+                " VALUES (?, ?, '', ?, ?, ?, 'TODO', ?, '[]')",
+                (team_id, title, agent_id, agent_id, reviewer_id, priority),
             )
             task_id = cursor.lastrowid
             conn.execute(
@@ -134,3 +138,58 @@ class TestTaskController(ServiceTestCase):
         assert page2["count"] == 1
         assert page2["total"] == 2
         assert page2["events"][0]["id"] < page1["events"][0]["id"]
+
+    # -----------------------------------------------------------------
+    # #83：Web 列表接口（`agentController.py` 的两个 tasks.json）回归
+    # 这条链路与 Agent 侧共用 `taskService.list_tasks`，改动必须**已验证**不破坏它。
+    # -----------------------------------------------------------------
+
+    async def test_agent_tasks_endpoint_keeps_priority_order_and_adds_names(self):
+        """`GET /agents/<id>/tasks.json`：仍是优先级优先（HIGH→NORMAL→LOW），并新增 name 字段。
+
+        `#83` 把「最新在前」只放进了工具层（`order="id_desc"`），DAL 默认值没动；
+        本用例在 **HTTP 层**验证这一点，而不是靠「默认参数没改」推演。
+        """
+        async with aiohttp.ClientSession() as session:
+            team_id, agent_id = await self._resolve_ids(session)
+            low = self._seed_task(team_id=team_id, agent_id=agent_id, title="web low", priority="LOW")
+            high = self._seed_task(team_id=team_id, agent_id=agent_id, title="web high", priority="HIGH")
+            normal = self._seed_task(
+                team_id=team_id, agent_id=agent_id, title="web normal", priority="NORMAL"
+            )
+
+            async with session.get(f"{self.backend_base_url}/agents/{agent_id}/tasks.json") as resp:
+                assert resp.status == 200
+                body = await resp.json()
+
+        assert body["success"] is True
+        # 同一 DB 里还有别的用例 seed 的任务，只看本用例这三条的相对顺序。
+        # 优先级优先（不是 id 倒序）：low 最后建却排在最后。
+        ids = [t["id"] for t in body["tasks"]]
+        picked = [task_id for task_id in ids if task_id in {high, normal, low}]
+        assert picked == [high, normal, low]
+        # 新增字段是**追加**的，不替换任何既有字段
+        task = next(t for t in body["tasks"] if t["id"] == high)
+        assert task["assignee_id"] == agent_id
+        assert isinstance(task["assignee_name"], str) and task["assignee_name"]
+        assert task["reviewer_id"] is None and task["reviewer_name"] is None
+        # 既有字段与分页字段都在
+        for key in ("id", "title", "status", "priority", "count", "total", "limit"):
+            assert key in (task if key in task else body)
+        assert body["limit"] >= 1
+
+    async def test_team_tasks_endpoint_keeps_priority_order(self):
+        """`GET /teams/<id>/tasks.json`：同一链路，排序同样保持优先级优先。"""
+        async with aiohttp.ClientSession() as session:
+            team_id, agent_id = await self._resolve_ids(session)
+            normal = self._seed_task(team_id=team_id, agent_id=agent_id, title="team normal")
+            high = self._seed_task(
+                team_id=team_id, agent_id=agent_id, title="team high", priority="HIGH"
+            )
+
+            async with session.get(f"{self.backend_base_url}/teams/{team_id}/tasks.json") as resp:
+                assert resp.status == 200
+                body = await resp.json()
+
+        ids = [t["id"] for t in body["tasks"]]
+        assert ids.index(high) < ids.index(normal)

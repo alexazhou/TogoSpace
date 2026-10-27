@@ -233,6 +233,79 @@ def test_count_and_list_share_status_list_scope(task_db):
     assert query.count() == len(_ids(query)) == 2
 
 
+# ---------------------------------------------------------------------------
+# #83：排序 —— `order` 默认值必须与新增参数前完全一致（Web 列表接口共用这条链路）
+# ---------------------------------------------------------------------------
+
+
+def _seed_tasks_with_priorities(rows: list[tuple[int, TaskPriority]]) -> None:
+    """按 (id, priority) 造任务；team_id 固定 1，assignee 固定 1，状态 TODO。"""
+    for task_id, priority in rows:
+        GtAgentTask.create(
+            id=task_id,
+            team_id=1,
+            title=f"t{task_id}",
+            assignee_id=1,
+            creator_id=1,
+            reviewer_id=None,
+            status=TaskStatus.TODO,
+            priority=priority,
+        )
+
+
+def _ordered_ids(task_db, order: str) -> list[int]:
+    """按指定排序执行查询，返回 id 列表。
+
+    这里不走 `list_tasks`（它是 `aio_execute`，内存 SQLite 夹具不支持 async），
+    而是用同一个 `_task_ordering` 构造排序后同步执行——测的是**排序口径本身**。
+    """
+    query = (
+        gtAgentTaskManager._filtered_task_query(1)
+        .order_by(*gtAgentTaskManager._task_ordering(order))
+    )
+    return [task.id for task in query.execute()]
+
+
+def test_default_order_is_priority_first_then_id_asc(task_db):
+    """**默认行为零变化**：优先 HIGH → NORMAL → LOW，同级按 id 升序。"""
+    _seed_tasks_with_priorities([
+        (1, TaskPriority.LOW),
+        (2, TaskPriority.HIGH),
+        (3, TaskPriority.NORMAL),
+        (4, TaskPriority.HIGH),
+    ])
+
+    assert _ordered_ids(task_db, gtAgentTaskManager.ORDER_PRIORITY_FIRST) == [2, 4, 3, 1]
+
+
+def test_id_desc_order_is_latest_first(task_db):
+    """`ORDER_ID_DESC` ⇒ 纯 id 倒序（最新在前），与优先级无关。"""
+    _seed_tasks_with_priorities([
+        (1, TaskPriority.HIGH),
+        (2, TaskPriority.LOW),
+        (3, TaskPriority.NORMAL),
+    ])
+
+    assert _ordered_ids(task_db, gtAgentTaskManager.ORDER_ID_DESC) == [3, 2, 1]
+
+
+def test_list_tasks_order_param_default_is_priority_first():
+    """`list_tasks` 的 `order` 默认值必须是 `ORDER_PRIORITY_FIRST`（Web 列表接口共用）。
+
+    改默认值会静默翻掉前端任务列表顺序，所以这里直接钉住签名默认值。
+    """
+    import inspect
+
+    sig = inspect.signature(gtAgentTaskManager.list_tasks)
+    assert sig.parameters["order"].default == gtAgentTaskManager.ORDER_PRIORITY_FIRST
+
+
+def test_unknown_order_raises_instead_of_silently_succeeding():
+    """非法排序值 ⇒ `ValueError`（不做静默兜底：写错排序不该看起来正常）。"""
+    with pytest.raises(ValueError, match="不支持的排序方式"):
+        gtAgentTaskManager._task_ordering("random")
+
+
 def test_count_and_list_share_agent_ids_scope(task_db):
     """`count_tasks` 与 `list_tasks` 必须同口径（否则 `total` 与列表对不上）。"""
     _seed_tasks([(1, None), (2, 1), (3, 3)])

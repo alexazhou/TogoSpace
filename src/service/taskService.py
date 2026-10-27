@@ -632,6 +632,49 @@ async def resolve_visible_agent_ids(team_id: int, caller_id: Optional[int]) -> O
     return (await resolve_visible_scope(team_id, caller_id)).agent_ids
 
 
+async def _resolve_agent_ids_by_name_keyword(team_id: int, keyword: str) -> list[int]:
+    """按人名关键字（大小写不敏感子串）解析出候选 Agent ID 列表。
+
+    **必须同时匹配 `GtAgent.name`（内部标识符，如 `gateway_dev`）和
+    `GtAgent.display_name`（i18n 解析结果，如 `网关开发`）**：
+    `display_name` 是 `gtAgent.py` 的 property，值来自 `i18n.display_name` 的 JSON 字段，
+    **SQL 层查不到**——只按 `name` 走 SQL 会让「搜『网关』找不到 gateway_dev」。
+    所以这里取团队全员到内存里逐条比对，不做 SQL LIKE（连带好处：`%` / `_` 通配符
+    无需转义）。
+
+    匹配不到任何人 ⇒ 返回 `[]`（**不是 `None`**）：调用方据此把 `agent_ids` 收成空集合，
+    `in_([])` 天然返回空结果。**绝不能退化成「不过滤」**，否则模型会以为搜到了全团队。
+    """
+    normalized = keyword.strip().lower()
+    if not normalized:
+        return []
+    agents = await gtAgentManager.get_team_all_agents(team_id)
+    matched: list[int] = []
+    for agent in agents:
+        if normalized in (agent.name or "").lower() or normalized in (agent.display_name or "").lower():
+            matched.append(agent.id)
+    return matched
+
+
+def _intersect_agent_ids(
+    visible_agent_ids: Optional[list[int]], keyword_agent_ids: Optional[list[int]]
+) -> Optional[list[int]]:
+    """把「可见范围」与「关键字命中集」**取交集**（AND，不是覆盖）。
+
+    两路都可能是 `None`（表示该维度不限制）：
+    - 都为 `None` ⇒ `None`（不限制）；
+    - 只有一个 `None` ⇒ 取另一个；
+    - 都非 `None` ⇒ 交集（保序、按 `visible_agent_ids` 的既有顺序）。
+    交集为空 ⇒ `[]`，语义是「范围内没有名字匹配的人」⇒ 查不到任务（不是不过滤）。
+    """
+    if visible_agent_ids is None:
+        return keyword_agent_ids
+    if keyword_agent_ids is None:
+        return visible_agent_ids
+    keyword_set = set(keyword_agent_ids)
+    return [agent_id for agent_id in visible_agent_ids if agent_id in keyword_set]
+
+
 async def _resolve_task_agent_names(tasks: list[GtAgentTask]) -> dict[int, str]:
     """批量解析任务列表里出现的 Agent 展示名：`{agent_id: display_name}`。
 
@@ -683,6 +726,8 @@ async def list_tasks(
     limit: int = 20,
     scope: Optional[str] = None,
     caller_id: Optional[int] = None,
+    name_keyword: Optional[str] = None,
+    order: str = gtAgentTaskManager.ORDER_PRIORITY_FIRST,
 ) -> dict:
     """查询协作任务列表。
 
@@ -694,6 +739,16 @@ async def list_tasks(
     `status` 接受**单值或列表**（单值 `"TODO"` / 列表 `["TODO","DONE"]`），
     大小写不敏感。列表里只要有非法值就**整体报错**并把非法项全列出来——
     不静默丢弃后返回一个看起来正常的子集（静默降级正是这里要避免的）。
+
+    `name_keyword` 按**人名**过滤任务（不是任务标题）：同时匹配 `GtAgent.name`
+    与 `display_name`，大小写不敏感子串匹配，语义是「执行人 **或** 验收人命中」。
+    与 `scope` 的可见范围**取交集**（AND）；匹配不到任何人 ⇒ 返回空列表，
+    **不退化成不过滤**。
+
+    `order` 是排序口径，**默认 `ORDER_PRIORITY_FIRST` 与新增该参数前完全一致**
+    （Web 列表接口依赖它）：`ORDER_PRIORITY_FIRST` = 优先级优先、同级 id 升序；
+    `ORDER_ID_DESC` = 最新在前（Agent 侧用）。非法值由 DAL 抛 `ValueError`。
+
     `scope` 是**过滤条件**（与 assignee / reviewer 并列，三者至少给一个，工具层守卫）：
     - `None`（默认）：不加范围过滤——保持历史行为，Web 列表接口依赖它拿全团队数据；
     - `"self"`：与我相关 = 我执行 **OR** 我验收，等价 `agent_ids=[caller_id]`；
@@ -761,7 +816,7 @@ async def list_tasks(
         visible_agent_ids = visible_scope.agent_ids
         scope_degraded = visible_scope.degraded
         if visible_agent_ids is not None and not visible_agent_ids:
-            if assignee_id is None and reviewer_id is None:
+            if assignee_id is None and reviewer_id is None and not name_keyword:
                 return {
                     "success": False,
                     "message": "当前身份没有管理视角，无法用 scope=\"team\" 查看全团队任务；请改为指定 assignee 或 reviewer",
@@ -770,6 +825,13 @@ async def list_tasks(
             # 有精确过滤器：忽略 scope，按过滤器查（不报错）
             visible_agent_ids = None
 
+    # 人名关键字 → 候选 Agent 集合，与可见范围**取交集**（AND，不覆盖）。
+    # 匹配不到人 ⇒ `[]`：`in_([])` 天然返回空，绝不退化成「不过滤」。
+    keyword_agent_ids: Optional[list[int]] = None
+    if name_keyword is not None:
+        keyword_agent_ids = await _resolve_agent_ids_by_name_keyword(team_id, name_keyword)
+    scoped_agent_ids = _intersect_agent_ids(visible_agent_ids, keyword_agent_ids)
+
     # `list` 与 `count` 必须共用同一份过滤条件（`total` 与列表口径一致）
     filters: dict = dict(
         team_id=team_id,
@@ -777,9 +839,9 @@ async def list_tasks(
         reviewer_id=reviewer_id,
         status=status_enum_list if status_enum_list is not None else status_enum,
         exclude_statuses=exclude_statuses,
-        agent_ids=visible_agent_ids,
+        agent_ids=scoped_agent_ids,
     )
-    tasks = await gtAgentTaskManager.list_tasks(**filters, limit=limit)
+    tasks = await gtAgentTaskManager.list_tasks(**filters, limit=limit, order=order)
     total = await gtAgentTaskManager.count_tasks(**filters)
     agent_names = await _resolve_task_agent_names(tasks)
     result = {

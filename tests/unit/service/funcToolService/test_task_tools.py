@@ -44,7 +44,8 @@ def test_list_tasks_exposes_limit_with_none_default():
     """
     params = list(inspect.signature(tools.list_tasks).parameters)
     assert params == [
-        "assignee", "reviewer", "scope", "status", "open_only", "limit", "_context",
+        "assignee", "reviewer", "scope", "status", "name_keyword",
+        "open_only", "limit", "_context",
     ]
     assert inspect.signature(tools.list_tasks).parameters["limit"].default is None
 
@@ -64,11 +65,15 @@ def test_list_tasks_metadata_exposes_open_only_and_limit():
     """工具 schema 由 docstring 解析：properties 含 open_only / limit（均带说明），且全部非必填。"""
     meta = get_function_metadata("list_tasks", tools.list_tasks)
     props = meta["parameters"]["properties"]
-    assert set(props) == {"assignee", "reviewer", "status", "open_only", "scope", "limit"}
+    assert set(props) == {
+        "assignee", "reviewer", "status", "name_keyword", "open_only", "scope", "limit",
+    }
     assert props["open_only"]["type"] == "boolean"
     assert props["open_only"].get("description")
     assert props["limit"]["type"] == "integer"
     assert props["limit"].get("description")
+    assert props["name_keyword"]["type"] == "string"
+    assert props["name_keyword"].get("description")
     assert meta["parameters"]["required"] == []
 
 
@@ -193,9 +198,9 @@ async def test_list_tasks_forwards_explicit_limit(monkeypatch):
     [
         (0, tools.LIST_TASKS_MIN_LIMIT),        # 下界收敛：0 → 1
         (-5, tools.LIST_TASKS_MIN_LIMIT),       # 负数同下界
-        (10000, tools.LIST_TASKS_MAX_LIMIT),    # 上界收敛：10000 → 200
-        (201, tools.LIST_TASKS_MAX_LIMIT),      # 刚超一点也收敛
-        (200, tools.LIST_TASKS_MAX_LIMIT),      # 边界值不动
+        (10000, tools.LIST_TASKS_MAX_LIMIT),    # 上界收敛：10000 → 50
+        (51, tools.LIST_TASKS_MAX_LIMIT),       # 刚超一点也收敛
+        (50, tools.LIST_TASKS_MAX_LIMIT),       # 边界值不动
         (1, tools.LIST_TASKS_MIN_LIMIT),        # 下边界值不动
     ],
 )
@@ -206,14 +211,23 @@ async def test_list_tasks_clamps_out_of_range_limit(monkeypatch, requested, effe
     assert captured["limit"] == effective
 
 
+def test_list_tasks_limit_description_says_50_not_200():
+    """上限是 **50**（Operator 中途从 200 改的），描述里不得再出现 200。"""
+    meta = get_function_metadata("list_tasks", tools.list_tasks)
+    desc = meta["parameters"]["properties"]["limit"]["description"]
+
+    assert "1-50" in desc
+    assert "200" not in desc
+
+
 def test_list_tasks_clamp_helper_is_the_single_entry():
     """收敛逻辑只在一处：`_clamp_list_tasks_limit`（常量与工具层都指向它）。"""
     assert tools._clamp_list_tasks_limit(None) == 20
     assert tools._clamp_list_tasks_limit(0) == 1
-    assert tools._clamp_list_tasks_limit(10000) == 200
+    assert tools._clamp_list_tasks_limit(10000) == 50
     assert tools.LIST_TASKS_DEFAULT_LIMIT == 20
     assert tools.LIST_TASKS_MIN_LIMIT == 1
-    assert tools.LIST_TASKS_MAX_LIMIT == 200
+    assert tools.LIST_TASKS_MAX_LIMIT == 50
 
 
 @pytest.mark.asyncio
@@ -229,7 +243,7 @@ async def test_list_tasks_echoes_effective_limit_in_result(monkeypatch):
     ctx = ToolCallContext(agent_id=8, team_id=1, tool_name="list_tasks")
     res = await tools.list_tasks(assignee=8, limit=10000, _context=ctx)
 
-    assert res["limit"] == 200
+    assert res["limit"] == 50
 
 
 def test_list_tasks_status_schema_is_any_of_single_or_array():
@@ -291,6 +305,50 @@ async def test_list_tasks_forwards_status_as_is(monkeypatch):
 
     array = await _call_tool_list_tasks(monkeypatch, status=["todo", "REVIEWING"])
     assert array["status"] == ["todo", "REVIEWING"]
+
+
+def test_list_tasks_order_is_id_desc_for_agent_side():
+    """工具层显式要求 `id_desc`（最新在前）；DAL 默认值必须仍是优先级优先。
+
+    这里断言的是**工具层传什么**，不是 DAL 的默认值——后者由
+    `test_list_tasks_default_order_is_unchanged` 单独钉住（Web 列表接口依赖它）。
+    """
+    import inspect as _inspect
+
+    from dal.db import gtAgentTaskManager
+
+    # DAL 默认值 = 优先级优先（Web 列表接口零影响）
+    order_param = _inspect.signature(gtAgentTaskManager.list_tasks).parameters["order"]
+    assert order_param.default == gtAgentTaskManager.ORDER_PRIORITY_FIRST
+    assert gtAgentTaskManager.ORDER_PRIORITY_FIRST == "priority_first"
+    assert gtAgentTaskManager.ORDER_ID_DESC == "id_desc"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_forwards_id_desc_order(monkeypatch):
+    """工具层调服务层时显式传 `order="id_desc"`。"""
+    from dal.db import gtAgentTaskManager
+
+    captured = await _call_tool_list_tasks(monkeypatch)
+
+    assert captured["order"] == gtAgentTaskManager.ORDER_ID_DESC
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_forwards_name_keyword(monkeypatch):
+    """`name_keyword` 原样透传给服务层（匹配逻辑在服务层，工具层不解析）。"""
+    captured = await _call_tool_list_tasks(monkeypatch, name_keyword="网关")
+
+    assert captured["name_keyword"] == "网关"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_name_keyword_alone_is_a_valid_target(monkeypatch):
+    """只传 `name_keyword` 也应被接受（不再强制 assignee/reviewer/scope）。"""
+    captured = await _call_tool_list_tasks(monkeypatch, assignee=None, name_keyword="网关")
+
+    assert captured["name_keyword"] == "网关"
+    assert captured["assignee_id"] is None
 
 
 def test_get_task_detail_exists():

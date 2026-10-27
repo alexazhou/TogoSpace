@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from constants import EVENT_CONTENT_MAX_CHARS, EVENT_TRUNCATED_SUFFIX, SpecialAgent, TaskPriority, TaskStatus
+from dal.db import gtAgentTaskManager
 from model.dbModel.gtAgentTask import GtAgentTask
 from service import taskService
 
@@ -450,6 +451,7 @@ async def test_list_tasks_basic_call_returns_tasks(task_manager_mock):
         exclude_statuses=None,
         agent_ids=None,
         limit=20,
+        order=gtAgentTaskManager.ORDER_PRIORITY_FIRST,
     )
     task_manager_mock.count_tasks.assert_awaited_once_with(
         team_id=1,
@@ -501,7 +503,7 @@ async def test_list_tasks_counts_with_same_filters(task_manager_mock):
         exclude_statuses=[TaskStatus.DONE, TaskStatus.CANCELLED],
         agent_ids=None,
     )
-    task_manager_mock.list_tasks.assert_awaited_once_with(limit=10, **expected)
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=10, order=gtAgentTaskManager.ORDER_PRIORITY_FIRST, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
 
 
@@ -521,7 +523,7 @@ async def test_list_tasks_explicit_status_is_passed_to_both_queries(task_manager
         exclude_statuses=None,
         agent_ids=None,
     )
-    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, order=gtAgentTaskManager.ORDER_PRIORITY_FIRST, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
 
 
@@ -541,7 +543,7 @@ async def test_list_tasks_status_array_is_passed_as_list_to_both_queries(task_ma
         exclude_statuses=None,
         agent_ids=None,
     )
-    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, order=gtAgentTaskManager.ORDER_PRIORITY_FIRST, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
 
 
@@ -694,6 +696,158 @@ async def test_list_tasks_echoes_limit(task_manager_mock):
     assert result["limit"] == 5
 
 
+# ---------------------------------------------------------------------------
+# #83 追加：`name_keyword`（人名搜索）与 `order`（倒序隔离）
+# ---------------------------------------------------------------------------
+
+
+def _agent(agent_id: int, name: str, display_name: str):
+    """构造 Agent 替身：`name` 是内部标识符，`display_name` 是 i18n 解析结果。"""
+    return SimpleNamespace(id=agent_id, name=name, display_name=display_name)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_name_keyword_matches_internal_name(
+    task_manager_mock, agent_manager_mock
+):
+    """命中 `GtAgent.name`（内部标识符，如 `gateway_dev`）。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+    agent_manager_mock.get_team_all_agents = AsyncMock(return_value=[
+        _agent(7, "gateway_dev", "网关开发"),
+        _agent(8, "togo_dev", "阿张"),
+    ])
+
+    await taskService.list_tasks(team_id=1, name_keyword="gateway")
+
+    assert task_manager_mock.list_tasks.await_args.kwargs["agent_ids"] == [7]
+    assert task_manager_mock.count_tasks.await_args.kwargs["agent_ids"] == [7]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_name_keyword_matches_display_name(
+    task_manager_mock, agent_manager_mock
+):
+    """**必须也命中 `display_name`（i18n property，SQL 查不到）**：搜「网关」要能找到 gateway_dev。
+
+    只按 `name` 走 SQL 的实现下本用例必红——这是「最容易只做一半」的那一半。
+    """
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+    agent_manager_mock.get_team_all_agents = AsyncMock(return_value=[
+        _agent(7, "gateway_dev", "网关开发"),
+        _agent(8, "togo_dev", "阿张"),
+    ])
+
+    await taskService.list_tasks(team_id=1, name_keyword="网关")
+
+    assert task_manager_mock.list_tasks.await_args.kwargs["agent_ids"] == [7]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_name_keyword_is_case_insensitive(
+    task_manager_mock, agent_manager_mock
+):
+    """大小写不敏感（`GATEWAY` 命中 `gateway_dev`）。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+    agent_manager_mock.get_team_all_agents = AsyncMock(return_value=[
+        _agent(7, "Gateway_Dev", "网关开发"),
+    ])
+
+    await taskService.list_tasks(team_id=1, name_keyword="gAtEwAy")
+
+    assert task_manager_mock.list_tasks.await_args.kwargs["agent_ids"] == [7]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_name_keyword_no_match_returns_empty_not_unfiltered(
+    task_manager_mock, agent_manager_mock
+):
+    """**匹配不到任何人 ⇒ `agent_ids=[]`（查不到任务），绝不退化成不过滤**。
+
+    退化实现下本用例会拿到 `agent_ids=None` —— 那等于「全团队任务」，
+    模型会以为自己搜到了结果。这是纪律「不能静默降级」的直接应用。
+    """
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+    agent_manager_mock.get_team_all_agents = AsyncMock(return_value=[
+        _agent(7, "gateway_dev", "网关开发"),
+    ])
+
+    result = await taskService.list_tasks(team_id=1, name_keyword="查无此人")
+
+    assert task_manager_mock.list_tasks.await_args.kwargs["agent_ids"] == []
+    assert task_manager_mock.count_tasks.await_args.kwargs["agent_ids"] == []
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_name_keyword_intersects_with_scope(
+    task_manager_mock, agent_manager_mock
+):
+    """与 `scope` 的可见范围**取交集（AND）**，不是覆盖。
+
+    可见范围 `{8, 9}`、关键字命中 `{7, 9}` ⇒ 只剩 `9`。
+    """
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+    agent_manager_mock.get_team_all_agents = AsyncMock(return_value=[
+        _agent(7, "gateway_dev", "网关开发"),
+        _agent(9, "qa_dev", "网关测试"),
+    ])
+
+    tree_patch, subs_patch = _patch_dept_tree(manager_id=6, subordinates={8, 9})
+    with tree_patch, subs_patch:
+        # caller=7 是部门主管 ⇒ visible = [7] + 下属 {8, 9} = [7, 8, 9]
+        await taskService.list_tasks(
+            team_id=1, scope="team", caller_id=7, name_keyword="网关"
+        )
+
+    # 可见 [7,8,9] ∩ 命中 [7,9] = [7,9]（保序）
+    assert task_manager_mock.list_tasks.await_args.kwargs["agent_ids"] == [7, 9]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_name_keyword_empty_or_blank_returns_empty(
+    task_manager_mock, agent_manager_mock
+):
+    """空串 / 纯空白关键字 ⇒ 空集合（不当作「不过滤」）。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    await taskService.list_tasks(team_id=1, name_keyword="   ")
+
+    assert task_manager_mock.list_tasks.await_args.kwargs["agent_ids"] == []
+    agent_manager_mock.get_team_all_agents.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_default_order_is_unchanged(task_manager_mock):
+    """**防回退关键断言**：不传 `order` 时透传 `ORDER_PRIORITY_FIRST`（DAL 默认值）。
+
+    `taskService.list_tasks` 同时被 Web 列表接口（`agentController.py`）调用，
+    排序默认值一变就会静默翻掉前端任务列表顺序。
+    """
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    await taskService.list_tasks(team_id=1)
+
+    assert task_manager_mock.list_tasks.await_args.kwargs["order"] == gtAgentTaskManager.ORDER_PRIORITY_FIRST
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_forwards_explicit_order(task_manager_mock):
+    """显式传 `order` 时原样透传（工具层就是靠这个把倒序限制在 Agent 侧）。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    await taskService.list_tasks(team_id=1, order=gtAgentTaskManager.ORDER_ID_DESC)
+
+    assert task_manager_mock.list_tasks.await_args.kwargs["order"] == gtAgentTaskManager.ORDER_ID_DESC
+
+
 @pytest.mark.asyncio
 async def test_create_task_publishes_task_created_and_event_appended(task_manager_mock, publish_mock):
     """创建任务成功时：TASK_CREATED（列表刷新）+ TASK_EVENT_APPENDED（时间线实时）各一次。"""
@@ -788,6 +942,7 @@ async def test_list_tasks_open_only_excludes_done_and_cancelled(task_manager_moc
         exclude_statuses=[TaskStatus.DONE, TaskStatus.CANCELLED],
         agent_ids=None,
         limit=10,
+        order=gtAgentTaskManager.ORDER_PRIORITY_FIRST,
     )
 
 
@@ -892,7 +1047,7 @@ async def test_list_tasks_scope_team_root_leader_queries_without_range(task_mana
         exclude_statuses=None,
         agent_ids=None,
     )
-    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, order=gtAgentTaskManager.ORDER_PRIORITY_FIRST, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
 
 
@@ -915,7 +1070,7 @@ async def test_list_tasks_scope_team_dept_manager_passes_visible_ids_to_both_que
         exclude_statuses=None,
         agent_ids=[7, 8],
     )
-    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, order=gtAgentTaskManager.ORDER_PRIORITY_FIRST, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
 
 
@@ -951,7 +1106,7 @@ async def test_list_tasks_scope_team_member_with_filter_ignores_scope(task_manag
         exclude_statuses=None,
         agent_ids=None,
     )
-    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, order=gtAgentTaskManager.ORDER_PRIORITY_FIRST, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
 
 
@@ -972,7 +1127,7 @@ async def test_list_tasks_scope_none_keeps_web_behavior(task_manager_mock):
         exclude_statuses=None,
         agent_ids=None,
     )
-    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, order=gtAgentTaskManager.ORDER_PRIORITY_FIRST, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
 
 
@@ -995,7 +1150,7 @@ async def test_list_tasks_scope_self_returns_self_related_only(task_manager_mock
         exclude_statuses=None,
         agent_ids=[7],
     )
-    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, order=gtAgentTaskManager.ORDER_PRIORITY_FIRST, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
 
 
@@ -1015,7 +1170,7 @@ async def test_list_tasks_scope_self_stacks_with_explicit_filters(task_manager_m
         exclude_statuses=None,
         agent_ids=[7],
     )
-    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, order=gtAgentTaskManager.ORDER_PRIORITY_FIRST, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
 
 
@@ -1050,6 +1205,7 @@ async def test_list_tasks_scope_team_degraded_is_flagged(task_manager_mock):
         exclude_statuses=None,
         agent_ids=[8],
         limit=20,
+        order=gtAgentTaskManager.ORDER_PRIORITY_FIRST,
     )
 
 

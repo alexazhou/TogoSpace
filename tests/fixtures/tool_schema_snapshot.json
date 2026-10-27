@@ -269,7 +269,7 @@
     ]
   },
   "list_tasks": {
-    "description": "查询协作任务列表。assignee / reviewer / scope 三者必须传其一；total > count 表示结果被截断。\n每个任务含 assignee_name / reviewer_name，无需再查 Agent 名字。",
+    "description": "查询协作任务列表。assignee / reviewer / scope / name_keyword 至少传其一；返回按最新在前，total > count 表示被截断。\n每个任务含 assignee_name / reviewer_name，无需再查 Agent 名字。",
     "parameters": {
       "assignee": {
         "description": "按执行人 Agent ID 过滤",
@@ -278,9 +278,15 @@
         }
       },
       "limit": {
-        "description": "本次返回条数，默认 20，取值 1-200，超出范围按边界收敛（实际生效值在返回体 limit 字段回显）",
+        "description": "本次返回条数，默认 20，取值 1-50，超出范围按边界收敛（实际生效值在返回体 limit 字段回显）",
         "schema": {
           "type": "integer"
+        }
+      },
+      "name_keyword": {
+        "description": "按人名搜任务（不是任务标题）：匹配执行人或验收人的名字，如 \"网关\" 能命中 display_name 为「网关开发」的人；中文名/英文标识符都行，大小写不敏感，匹配不到任何人时返回空列表",
+        "schema": {
+          "type": "string"
         }
       },
       "open_only": {

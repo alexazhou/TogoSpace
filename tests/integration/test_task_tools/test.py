@@ -14,6 +14,7 @@ import sys
 import pytest
 
 import service.ormService as ormService
+import service.taskService as taskService
 from constants import (
     EVENT_CONTENT_MAX_CHARS,
     EVENT_TRUNCATED_SUFFIX,
@@ -302,11 +303,12 @@ class TestTaskTools(ServiceTestCase):
         assert res["success"] is False
         assert res["error_code"] == "missing_target"
 
-    async def test_list_tasks_sorted_by_priority_then_id(self):
-        """排序契约：priority DESC（HIGH → NORMAL → LOW），同级按 id 升序。
+    async def test_list_tasks_sorted_latest_first(self):
+        """工具层排序契约（#83 改动）：**id 倒序 = 最新在前**，与优先级无关。
 
-        构造 id 与优先级相反的序列（先建 HIGH，再 NORMAL / LOW），使旧的
-        `id.desc()` 行为必然排错（旧实现会得到 LOW → NORMAL → HIGH）。
+        为什么工具层要倒序：Agent 关注「刚发生的事」；Web 列表接口仍走
+        `taskService.list_tasks` 的默认优先级排序，两路互不影响（见下一个用例）。
+        构造 id 与优先级交错的序列，使「按优先级排」的实现必然排错。
         """
         assignee = 74
         high1 = await self._make_task_for(assignee, priority=TaskPriority.HIGH)
@@ -317,13 +319,29 @@ class TestTaskTools(ServiceTestCase):
         res = await tools.list_tasks(assignee=assignee, _context=self._ctx())
 
         assert res["success"] is True
+        # id 倒序：最后创建的排最前（high2 > low > normal > high1）
+        assert [t["id"] for t in res["tasks"]] == [high2.id, low.id, normal.id, high1.id]
+        # 顺手钉住「这不是优先级排序」：优先级序列不应是 HIGH→HIGH→NORMAL→LOW
         assert [t["priority"] for t in res["tasks"]] == [
             TaskPriority.HIGH,
-            TaskPriority.HIGH,
-            TaskPriority.NORMAL,
             TaskPriority.LOW,
+            TaskPriority.NORMAL,
+            TaskPriority.HIGH,
         ]
-        # 同级 HIGH 按 id 升序：high1（较小 id）在 high2 之前
+
+    async def test_service_list_tasks_keeps_priority_order_for_web(self):
+        """**Web 路径默认排序零变化**：`taskService.list_tasks` 不传 order ⇒ 优先级优先。
+
+        `agentController.py` 的两处列表接口走的就是这条链路；改默认值会静默翻掉前端顺序。
+        """
+        assignee = 80  # 独立 assignee，避免与相邻用例串扰
+        high1 = await self._make_task_for(assignee, priority=TaskPriority.HIGH)
+        normal = await self._make_task_for(assignee, priority=TaskPriority.NORMAL)
+        low = await self._make_task_for(assignee, priority=TaskPriority.LOW)
+        high2 = await self._make_task_for(assignee, priority=TaskPriority.HIGH)
+
+        res = await taskService.list_tasks(team_id=1, assignee_id=assignee)
+
         assert [t["id"] for t in res["tasks"]] == [high1.id, high2.id, normal.id, low.id]
 
     async def test_dal_list_tasks_sorted_by_priority_then_id(self):
@@ -338,9 +356,9 @@ class TestTaskTools(ServiceTestCase):
         assert [t.id for t in rows] == [high.id, normal.id, low.id]
 
     async def test_list_tasks_total_is_real_total_not_page_len(self):
-        """#67：`total` = 真实总数（跨页），`count` = 本页条数（被内部 limit=20 截断）。
+        """#67：`total` = 真实总数（跨页），`count` = 本页条数（被默认 limit=20 截断）。
 
-        建 21 条未完结任务 ⇒ 工具层不暴露 limit（内部固定 20），故 count=20、total=21，
+        建 21 条未完结任务 ⇒ 不传 limit 时默认 20，故 count=20、total=21，
         Agent 可据此察觉「还有更多任务」；旧实现 total=len(tasks)=20，本用例在其下必红。
         """
         assignee = 76
