@@ -330,13 +330,13 @@
     "description": "在当前团队中创建或更新成员。",
     "parameters": {
       "agent_id": {
-        "description": "可选成员 ID。传入后按 ID 精确定位成员（忽略 overwrite_existing），此时 name 可用于重命名。",
+        "description": "成员 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。",
         "schema": {
           "type": "integer"
         }
       },
       "allow_skills": {
-        "description": "可见技能名称列表，如 [\"frontend-design\"]；load_skill 只能加载已授权的技能。省略（None）= 允许全部技能；空列表 [] = 不授权任何技能。更新已有成员时省略该参数会重置为上述默认。",
+        "description": "可见技能名称列表，如 [\"frontend-design\"]；load_skill 只能加载已授权的技能。省略（None）= 全部技能；[] = 不授权任何技能；更新已有成员时省略会重置为该默认。",
         "schema": {
           "items": {
             "type": "string"
@@ -345,7 +345,7 @@
         }
       },
       "allow_tools": {
-        "description": "可见工具列表，元素为工具名（如 \"read_file\"）或类别语法（如 \"Category:Read\"），类别与工具名会自动合并。可分配类别只有 Read、Write、Execute；Basic 总是自动开启，无需传；Admin 由根主管自动获得，显式分配会被拒绝。省略（None）= 默认授予 Basic、Read、Write、Execute。更新已有成员时省略该参数会重置为上述默认。",
+        "description": "可见工具列表，元素为工具名（如 \"read_file\"）或类别语法（如 \"Category:Read\"），类别与工具名自动合并。可分配类别只 Read、Write、Execute 三类（Basic 自动开启、Admin 拒绝显式分配，根主管自动获得 Admin）。省略（None）= 默认授予 Basic、Read、Write、Execute；更新已有成员时省略会重置为该默认。",
         "schema": {
           "items": {
             "type": "string"
@@ -354,37 +354,37 @@
         }
       },
       "driver": {
-        "description": "驱动类型。可选值为 native、claude_sdk、tsp。无特别需要（如操作者明确指定）时建议省略，默认使用 tsp。",
+        "description": "驱动类型，可选 native、claude_sdk、tsp，默认 tsp。",
         "schema": {
           "type": "string"
         }
       },
       "i18n": {
-        "description": "可选多语言数据。示例：{\"display_name\": {\"zh-CN\": \"Alice\", \"en\": \"Alice\"}}",
+        "description": "多语言名称，如 {\"display_name\": {\"zh-CN\": \"Alice\", \"en\": \"Alice\"}}。",
         "schema": {
           "type": "object"
         }
       },
       "model": {
-        "description": "可选模型覆盖。留空（None）表示不覆盖模板/系统默认模型。",
+        "description": "可选模型覆盖；省略表示不覆盖模板或系统默认模型。",
         "schema": {
           "type": "string"
         }
       },
       "name": {
-        "description": "成员名称。作为当前团队内的稳定标识符，建议使用英文小写字母和下划线。",
+        "description": "成员名称，团队内唯一标识，建议使用小写字母和下划线。",
         "schema": {
           "type": "string"
         }
       },
       "overwrite_existing": {
-        "description": "是否允许覆盖当前团队中已存在的同名成员。默认 false；为 true 时，若同名成员已存在则执行更新。当传入 agent_id 时，此参数不生效。",
+        "description": "同名成员已存在时需设为 true 才会覆盖更新，默认 false；传入 agent_id 时本参数不生效。",
         "schema": {
           "type": "boolean"
         }
       },
       "role_template_name": {
-        "description": "要绑定的角色模板名称。工具会按名称解析为 role_template_id。",
+        "description": "要绑定的角色模板名称。",
         "schema": {
           "type": "string"
         }
@@ -396,28 +396,28 @@
     ]
   },
   "save_dept": {
-    "description": "在当前团队中创建或更新组织（部门）。全量覆盖模式：每次调用会完整替换成员列表。",
+    "description": "创建或更新组织（部门）。",
     "parameters": {
       "dept_id": {
-        "description": "可选组织 ID。传入后按 ID 精确定位组织（忽略 overwrite_existing），此时 name 可用于重命名。",
+        "description": "组织 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。",
         "schema": {
           "type": "integer"
         }
       },
       "i18n": {
-        "description": "可选多语言数据。示例：{\"dept_name\": {\"zh-CN\": \"研发部\", \"en\": \"R&D\"}, \"responsibility\": {\"zh-CN\": \"...\"}}",
+        "description": "多语言数据，如 {\"dept_name\": {\"zh-CN\": \"研发部\", \"en\": \"R&D\"}, \"responsibility\": {\"zh-CN\": \"负责研发\"}}。",
         "schema": {
           "type": "object"
         }
       },
       "manager_name": {
-        "description": "负责人成员名。负责人若不在 member_names 中，将自动加入。",
+        "description": "负责人成员名；不在 member_names 中会自动加入。",
         "schema": {
           "type": "string"
         }
       },
       "member_names": {
-        "description": "成员名称列表。全量覆盖，每次调用将完整替换现有成员列表。",
+        "description": "成员名称列表，全量替换而非追加。",
         "schema": {
           "items": {
             "type": "string"
@@ -426,19 +426,19 @@
         }
       },
       "name": {
-        "description": "组织名称。作为当前团队内的稳定标识符，建议使用英文小写字母和下划线。",
+        "description": "组织名称，团队内唯一标识，建议使用小写字母和下划线。",
         "schema": {
           "type": "string"
         }
       },
       "overwrite_existing": {
-        "description": "是否允许覆盖已存在的同名组织。默认 false；为 true 时执行更新。当传入 dept_id 时，此参数不生效。",
+        "description": "同名组织已存在时需设为 true 才会覆盖更新，默认 false；传入 dept_id 时本参数不生效。",
         "schema": {
           "type": "boolean"
         }
       },
       "parent_name": {
-        "description": "父组织名称。新建组织时必须指定；不能设置为自身或自身的子组织。更新已有根组织时可省略或传 null 以保持其根节点状态。",
+        "description": "父组织名称，新建时必须指定；不能是自身或自身子组织；更新根组织时可省略或传 null 以保持根节点。",
         "schema": {
           "type": "string"
         }
@@ -458,34 +458,34 @@
     ]
   },
   "save_role_template": {
-    "description": "创建或更新角色模板。若指定的 name 不存在则新建（必须设为 USER 类型），若已存在则更新该模板（注意：SYSTEM 类型的内置模板不可通过此工具修改）。",
+    "description": "创建或更新角色模板；只能操作 USER 类型，SYSTEM 内置模板只读不可改。",
     "parameters": {
       "i18n": {
-        "description": "可选多语言数据。示例：{\"display_name\": {\"zh-CN\": \"高级写手\", \"en\": \"Senior Writer\"}}",
+        "description": "多语言名称，如 {\"display_name\": {\"zh-CN\": \"高级写手\", \"en\": \"Senior Writer\"}}。",
         "schema": {
           "type": "object"
         }
       },
       "name": {
-        "description": "角色模板名称。作为系统唯一标识符，建议使用英文小写字母和下划线。对应的多语言显示名称请通过 i18n 参数设置。",
+        "description": "角色模板名称，唯一标识，建议使用小写字母和下划线。",
         "schema": {
           "type": "string"
         }
       },
       "overwrite_existing": {
-        "description": "是否允许覆盖同名模板。默认 false；为 true 时，若同名模板已存在则执行更新。",
+        "description": "同名模板已存在时需设为 true 才会覆盖更新，默认 false。",
         "schema": {
           "type": "boolean"
         }
       },
       "soul": {
-        "description": "角色模板的核心提示词。应包含角色的身份定位、职责边界和行为准则，是 Agent 运行的\"灵魂\"。该内容会作为核心指令注入到对应角色的 System Prompt 中。",
+        "description": "核心提示词，应包含身份定位、职责边界与行为准则；会作为核心指令注入该角色的 System Prompt。",
         "schema": {
           "type": "string"
         }
       },
       "type": {
-        "description": "角色模板类型。SYSTEM 代表系统内置模版（随系统发布，只读）；USER 代表用户自定义模版（可增删改）。通过此工具操作时，请统一指定为 USER。",
+        "description": "角色模板类型，可选 SYSTEM、USER；本工具只能传 USER（SYSTEM 只读）。",
         "schema": {
           "type": "string"
         }
@@ -498,7 +498,7 @@
     ]
   },
   "save_room": {
-    "description": "在当前团队中创建或更新房间。房间类型按成员数量自动判断：2人为单聊，3人及以上为群聊。",
+    "description": "创建或更新房间；成员 2 人为单聊，3 人及以上为群聊。",
     "parameters": {
       "initial_topic": {
         "description": "房间初始话题，可选。",
@@ -507,13 +507,13 @@
         }
       },
       "max_rounds": {
-        "description": "最大轮次。不传则使用系统默认值；<=0 表示不限轮次。",
+        "description": "最大轮次，省略用系统默认；<=0 表示不限轮次。",
         "schema": {
           "type": "integer"
         }
       },
       "member_names": {
-        "description": "成员名称列表，至少 2 人。全量覆盖，每次调用将完整替换现有成员列表。",
+        "description": "成员名称列表，至少 2 人，全量替换。",
         "schema": {
           "items": {
             "type": "string"
@@ -522,19 +522,19 @@
         }
       },
       "name": {
-        "description": "房间名称。团队内唯一标识，建议使用英文小写字母和下划线。",
+        "description": "房间名称，团队内唯一标识，建议使用小写字母和下划线。",
         "schema": {
           "type": "string"
         }
       },
       "overwrite_existing": {
-        "description": "同名房间已存在时是否允许覆盖。默认 false；为 true 时执行更新。当传入 room_id 时此参数不生效。",
+        "description": "同名房间已存在时需设为 true 才会覆盖更新，默认 false；传入 room_id 时本参数不生效。",
         "schema": {
           "type": "boolean"
         }
       },
       "room_id": {
-        "description": "可选房间 ID。传入后按 ID 精确定位房间（忽略 overwrite_existing），此时 name 可用于重命名。",
+        "description": "房间 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。",
         "schema": {
           "type": "integer"
         }

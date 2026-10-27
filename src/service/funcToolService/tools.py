@@ -445,14 +445,14 @@ async def save_role_template(
     overwrite_existing: bool = False,
     _context: ToolCallContext = None,
 ) -> dict:
-    """创建或更新角色模板。若指定的 name 不存在则新建（必须设为 USER 类型），若已存在则更新该模板（注意：SYSTEM 类型的内置模板不可通过此工具修改）。
+    """创建或更新角色模板；只能操作 USER 类型，SYSTEM 内置模板只读不可改。
 
     Args:
-        name: 角色模板名称。作为系统唯一标识符，建议使用英文小写字母和下划线。对应的多语言显示名称请通过 i18n 参数设置。
-        type: 角色模板类型。SYSTEM 代表系统内置模版（随系统发布，只读）；USER 代表用户自定义模版（可增删改）。通过此工具操作时，请统一指定为 USER。
-        soul: 角色模板的核心提示词。应包含角色的身份定位、职责边界和行为准则，是 Agent 运行的"灵魂"。该内容会作为核心指令注入到对应角色的 System Prompt 中。
-        i18n: 可选多语言数据。示例：{"display_name": {"zh-CN": "高级写手", "en": "Senior Writer"}}
-        overwrite_existing: 是否允许覆盖同名模板。默认 false；为 true 时，若同名模板已存在则执行更新。
+        name: 角色模板名称，唯一标识，建议使用小写字母和下划线。
+        type: 角色模板类型，可选 SYSTEM、USER；本工具只能传 USER（SYSTEM 只读）。
+        soul: 核心提示词，应包含身份定位、职责边界与行为准则；会作为核心指令注入该角色的 System Prompt。
+        i18n: 多语言名称，如 {"display_name": {"zh-CN": "高级写手", "en": "Senior Writer"}}。
+        overwrite_existing: 同名模板已存在时需设为 true 才会覆盖更新，默认 false。
     """
     from service import roleTemplateService
 
@@ -506,15 +506,15 @@ async def save_agent(
     """在当前团队中创建或更新成员。
 
     Args:
-        name: 成员名称。作为当前团队内的稳定标识符，建议使用英文小写字母和下划线。
-        role_template_name: 要绑定的角色模板名称。工具会按名称解析为 role_template_id。
-        model: 可选模型覆盖。留空（None）表示不覆盖模板/系统默认模型。
-        driver: 驱动类型。可选值为 native、claude_sdk、tsp。无特别需要（如操作者明确指定）时建议省略，默认使用 tsp。
-        allow_tools: 可见工具列表，元素为工具名（如 "read_file"）或类别语法（如 "Category:Read"），类别与工具名会自动合并。可分配类别只有 Read、Write、Execute；Basic 总是自动开启，无需传；Admin 由根主管自动获得，显式分配会被拒绝。省略（None）= 默认授予 Basic、Read、Write、Execute。更新已有成员时省略该参数会重置为上述默认。
-        allow_skills: 可见技能名称列表，如 ["frontend-design"]；load_skill 只能加载已授权的技能。省略（None）= 允许全部技能；空列表 [] = 不授权任何技能。更新已有成员时省略该参数会重置为上述默认。
-        i18n: 可选多语言数据。示例：{"display_name": {"zh-CN": "Alice", "en": "Alice"}}
-        overwrite_existing: 是否允许覆盖当前团队中已存在的同名成员。默认 false；为 true 时，若同名成员已存在则执行更新。当传入 agent_id 时，此参数不生效。
-        agent_id: 可选成员 ID。传入后按 ID 精确定位成员（忽略 overwrite_existing），此时 name 可用于重命名。
+        name: 成员名称，团队内唯一标识，建议使用小写字母和下划线。
+        role_template_name: 要绑定的角色模板名称。
+        model: 可选模型覆盖；省略表示不覆盖模板或系统默认模型。
+        driver: 驱动类型，可选 native、claude_sdk、tsp，默认 tsp。
+        allow_tools: 可见工具列表，元素为工具名（如 "read_file"）或类别语法（如 "Category:Read"），类别与工具名自动合并。可分配类别只 Read、Write、Execute 三类（Basic 自动开启、Admin 拒绝显式分配，根主管自动获得 Admin）。省略（None）= 默认授予 Basic、Read、Write、Execute；更新已有成员时省略会重置为该默认。
+        allow_skills: 可见技能名称列表，如 ["frontend-design"]；load_skill 只能加载已授权的技能。省略（None）= 全部技能；[] = 不授权任何技能；更新已有成员时省略会重置为该默认。
+        i18n: 多语言名称，如 {"display_name": {"zh-CN": "Alice", "en": "Alice"}}。
+        overwrite_existing: 同名成员已存在时需设为 true 才会覆盖更新，默认 false；传入 agent_id 时本参数不生效。
+        agent_id: 成员 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
@@ -610,17 +610,17 @@ async def save_dept(
     dept_id: int | None = None,
     _context: ToolCallContext = None,
 ) -> dict:
-    """在当前团队中创建或更新组织（部门）。全量覆盖模式：每次调用会完整替换成员列表。
+    """创建或更新组织（部门）。
 
     Args:
-        name: 组织名称。作为当前团队内的稳定标识符，建议使用英文小写字母和下划线。
+        name: 组织名称，团队内唯一标识，建议使用小写字母和下划线。
         responsibility: 组织职责描述。
-        manager_name: 负责人成员名。负责人若不在 member_names 中，将自动加入。
-        member_names: 成员名称列表。全量覆盖，每次调用将完整替换现有成员列表。
-        parent_name: 父组织名称。新建组织时必须指定；不能设置为自身或自身的子组织。更新已有根组织时可省略或传 null 以保持其根节点状态。
-        i18n: 可选多语言数据。示例：{"dept_name": {"zh-CN": "研发部", "en": "R&D"}, "responsibility": {"zh-CN": "..."}}
-        overwrite_existing: 是否允许覆盖已存在的同名组织。默认 false；为 true 时执行更新。当传入 dept_id 时，此参数不生效。
-        dept_id: 可选组织 ID。传入后按 ID 精确定位组织（忽略 overwrite_existing），此时 name 可用于重命名。
+        manager_name: 负责人成员名；不在 member_names 中会自动加入。
+        member_names: 成员名称列表，全量替换而非追加。
+        parent_name: 父组织名称，新建时必须指定；不能是自身或自身子组织；更新根组织时可省略或传 null 以保持根节点。
+        i18n: 多语言数据，如 {"dept_name": {"zh-CN": "研发部", "en": "R&D"}, "responsibility": {"zh-CN": "负责研发"}}。
+        overwrite_existing: 同名组织已存在时需设为 true 才会覆盖更新，默认 false；传入 dept_id 时本参数不生效。
+        dept_id: 组织 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
@@ -726,15 +726,15 @@ async def save_room(
     room_id: int | None = None,
     _context: ToolCallContext = None,
 ) -> dict:
-    """在当前团队中创建或更新房间。房间类型按成员数量自动判断：2人为单聊，3人及以上为群聊。
+    """创建或更新房间；成员 2 人为单聊，3 人及以上为群聊。
 
     Args:
-        name: 房间名称。团队内唯一标识，建议使用英文小写字母和下划线。
-        member_names: 成员名称列表，至少 2 人。全量覆盖，每次调用将完整替换现有成员列表。
+        name: 房间名称，团队内唯一标识，建议使用小写字母和下划线。
+        member_names: 成员名称列表，至少 2 人，全量替换。
         initial_topic: 房间初始话题，可选。
-        max_rounds: 最大轮次。不传则使用系统默认值；<=0 表示不限轮次。
-        overwrite_existing: 同名房间已存在时是否允许覆盖。默认 false；为 true 时执行更新。当传入 room_id 时此参数不生效。
-        room_id: 可选房间 ID。传入后按 ID 精确定位房间（忽略 overwrite_existing），此时 name 可用于重命名。
+        max_rounds: 最大轮次，省略用系统默认；<=0 表示不限轮次。
+        overwrite_existing: 同名房间已存在时需设为 true 才会覆盖更新，默认 false；传入 room_id 时本参数不生效。
+        room_id: 房间 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
