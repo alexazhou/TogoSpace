@@ -1,20 +1,21 @@
-"""#85：`save_room` 工具层的成员去重（Layer 1）。
+"""#85：`save_room` 工具层的成员重复拒绝（Layer 1）。
 
 缺陷：`save_room` 用 `len(member_names) < 2` 判人数，而 `["alice","alice"]` 的
 len 是 2 直接通过 → `resolved_ids=[7,7]` → 房间被 `upsert_room` 判成 PRIVATE（len==2）
 并生成「alice 和 alice」话题；之后调度器把「同一人连续发言」判为跳过，房间永久 IDLE。
 
-修复口径（#85 裁定）：
-  · **按 ID** 去重（不是按名字数量），去重后不足 2 人才报错；
-  · `["alice","alice","bob"]` **静默去重后继续** → 落地 `[alice, bob]`、2 人 PRIVATE、
-    话题是「alice 和 bob」——调用方语义是「这批成员」，重复只是写法冗余；
-  · 报错文案要能区分「名称重复导致实际只有 N 人」与「本来就少于 2 人」。
+修复口径：**重复成员一律报错，不静默去重**——与 `roomService._assert_room_agents_valid`
+及 REST 入口同口径。去重会悄悄改掉成员数与房间类型（`["alice","alice","bob"]` 会从
+「3 人群聊」变成「2 人单聊」），比直接报错更难排查；是否去掉重复由调用方决定。
+
+  · `["alice","alice"]` → `duplicate_agent_ids`（不是「不足 2 人」）；
+  · `["alice","alice","bob"]` → 同样报错，不落地任何房间；
+  · `["alice"]` 仍走原来的「不足 2 人」分支，文案不变；
+  · 名字不存在时仍先报「未找到成员」，判重不得抢先改文案。
 """
 
 import os
 import sys
-
-import pytest
 
 from constants import EmployStatus, RoomType
 from dal.db import gtAgentManager, gtRoleTemplateManager, gtRoomManager, gtTeamManager
@@ -83,35 +84,78 @@ class TestSaveRoomMemberDedup(ServiceTestCase):
         return await gtRoomManager.get_rooms_by_team(self.team_id)
 
     # ------------------------------------------------------------------ #
-    # 去重后不足 2 人：必须明确失败
+    # 重复成员：一律报错，不去重
     # ------------------------------------------------------------------ #
 
-    async def test_duplicate_only_members_rejected_with_reason(self):
-        """`["alice","alice"]` 去重后只有 1 人 → 失败，且文案说明是重复导致。"""
+    async def test_duplicate_only_members_rejected(self):
+        """`["alice","alice"]` → 报 duplicate_agent_ids，且不落库。"""
         result = await self._save("dup_only", ["alice", "alice"])
 
         assert result["success"] is False
-        assert "去重后不足 2 人" in result["message"]
+        assert result["error_code"] == "duplicate_agent_ids"
+        assert "重复" in result["message"]
         assert "alice" in result["message"]
-        # 与「本来就只给了一个人」的文案要能区分开
-        assert "房间成员不足 2 人" not in result["message"]
         assert await self._rooms() == []
 
+    async def test_duplicate_plus_valid_member_rejected(self):
+        """`["alice","alice","bob"]` 同样报错 —— 不许静默去重成 2 人 PRIVATE。"""
+        result = await self._save("dup_plus_bob", ["alice", "alice", "bob"])
+
+        assert result["success"] is False
+        assert result["error_code"] == "duplicate_agent_ids"
+        assert "alice" in result["message"]
+        # 去重会把它变成 2 人单聊，语义被悄悄改掉；必须拦住而不是"顺手修正"
+        assert await self._rooms() == []
+
+    async def test_duplicate_reported_before_room_lookup(self):
+        """判重要在"房间已存在"之前：否则 repeats 会被误导成去改 overwrite_existing。"""
+        await self._prepare()
+        first = await tools.save_room(
+            name="same_name", member_names=["alice", "bob"], _context=self.ctx
+        )
+        assert first["success"] is True
+
+        result = await tools.save_room(
+            name="same_name", member_names=["alice", "alice"], overwrite_existing=True, _context=self.ctx
+        )
+
+        assert result["success"] is False
+        assert result["error_code"] == "duplicate_agent_ids"
+
+    async def test_duplicate_names_with_whitespace_detected(self):
+        """名称两侧空白先被 strip，再判重复：`["alice"," alice "]` 是同一人。"""
+        result = await self._save("ws_dup", ["alice", " alice "])
+
+        assert result["success"] is False
+        assert result["error_code"] == "duplicate_agent_ids"
+        assert await self._rooms() == []
+
+    # ------------------------------------------------------------------ #
+    # 非重复的失败分支不得被改文案
+    # ------------------------------------------------------------------ #
+
     async def test_single_member_message_unchanged(self):
-        """`["alice"]` 仍走原来的「不足 2 人」分支，文案不得被去重逻辑改写。"""
+        """`["alice"]` 仍走「不足 2 人」分支，与重复是两回事。"""
         result = await self._save("solo", ["alice"])
 
         assert result["success"] is False
         assert result["message"] == "房间成员不足 2 人（当前 1 人）。"
         assert await self._rooms() == []
 
+    async def test_unknown_member_still_reported_first(self):
+        """名字不存在时仍报「未找到成员」，判重逻辑不得抢先改文案。"""
+        result = await self._save("ghost", ["alice", "ghost"])
+
+        assert result["success"] is False
+        assert "未找到成员: ghost" in result["message"]
+
     # ------------------------------------------------------------------ #
-    # 去重后仍有 2 人：静默去重后继续
+    # 合法入参的回归护栏
     # ------------------------------------------------------------------ #
 
-    async def test_duplicate_plus_one_member_succeeds_after_dedup(self):
-        """`["alice","alice","bob"]` → 成功，成员落地为 `[alice, bob]`（2 人 PRIVATE）。"""
-        result = await self._save("dup_plus_bob", ["alice", "alice", "bob"])
+    async def test_two_distinct_members_creates_private(self):
+        """合法 2 人 → PRIVATE，话题是两个人的名字。"""
+        result = await self._save("private_room", ["alice", "bob"])
 
         assert result["success"] is True
         assert result["room"]["type"] == "单聊"
@@ -122,26 +166,11 @@ class TestSaveRoomMemberDedup(ServiceTestCase):
         saved = rooms[0]
         assert saved.type == RoomType.PRIVATE
         assert saved.agent_ids == [self.agent_ids["alice"], self.agent_ids["bob"]]
-
-    async def test_deduped_private_topic_uses_two_distinct_names(self):
-        """核心断言：话题必须是「alice 和 bob」，不能是「alice 和 alice」。"""
-        await self._save("dup_topic", ["alice", "alice", "bob"])
-
-        saved = (await self._rooms())[0]
-        assert "alice" in saved.initial_topic
-        assert "bob" in saved.initial_topic
-        assert "alice和alice" not in saved.initial_topic
         assert saved.initial_topic.count("alice") == 1
-
-    async def test_order_preserved_after_dedup(self):
-        """去重保留**首次出现**的顺序，不要把 [bob, bob, alice] 变成 [alice, bob]。"""
-        await self._save("order_room", ["bob", "bob", "alice"])
-
-        saved = (await self._rooms())[0]
-        assert saved.agent_ids == [self.agent_ids["bob"], self.agent_ids["alice"]]
+        assert "bob" in saved.initial_topic
 
     async def test_three_distinct_members_still_group(self):
-        """回归护栏：3 个互不相同的成员仍应是群聊，成员不去重也不丢。"""
+        """回归护栏：3 个互不相同的成员仍应是群聊，成员顺序保持入参顺序。"""
         result = await self._save("group_room", ["alice", "bob", "charlie"])
 
         assert result["success"] is True
@@ -149,17 +178,3 @@ class TestSaveRoomMemberDedup(ServiceTestCase):
         assert result["room"]["members"] == ["alice", "bob", "charlie"]
         saved = (await self._rooms())[0]
         assert saved.type == RoomType.GROUP
-
-    async def test_unknown_member_still_reported_first(self):
-        """名字不存在时仍报「未找到成员」，去重逻辑不得抢先改文案。"""
-        result = await self._save("ghost", ["alice", "ghost"])
-
-        assert result["success"] is False
-        assert "未找到成员: ghost" in result["message"]
-
-    async def test_duplicate_names_with_whitespace_are_deduped(self):
-        """名称两侧空白先被 strip，再判重复：`["alice"," alice "]` 是同一人。"""
-        result = await self._save("ws_dup", ["alice", " alice "])
-
-        assert result["success"] is False
-        assert "去重后不足 2 人" in result["message"]
