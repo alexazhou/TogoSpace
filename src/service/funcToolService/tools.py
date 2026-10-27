@@ -37,10 +37,10 @@ DEFAULT_EVENT_LIMIT = 3
 
 
 def get_time(timezone: Optional[str] = None) -> dict:
-    """获取当前时间（默认本地时区，可传 IANA 时区名如 Asia/Shanghai）。
+    """获取当前时间，返回格式化时间字符串。
 
     Args:
-        timezone: 可选的时区名称，如 "Asia/Shanghai"，默认使用本地时区
+        timezone: IANA 时区名，如 "Asia/Shanghai"；省略时使用本地时区
     """
     if timezone:
         try:
@@ -138,10 +138,10 @@ def _truncate_error_message(message: str | None, limit: int = 100) -> str:
 
 
 async def get_dept_info(dept_id: Optional[int] = None, _context: ToolCallContext = None) -> dict:
-    """查询部门信息。不传 dept_id 时返回整个团队部门树，传入时返回指定部门及其子树。
+    """查询部门，返回部门 ID、名称、职责、负责人、成员列表与子部门树。
 
     Args:
-        dept_id: 部门 ID，省略时返回整个团队
+        dept_id: 部门 ID；省略时返回整个团队部门树
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
@@ -162,10 +162,10 @@ async def get_dept_info(dept_id: Optional[int] = None, _context: ToolCallContext
 
 
 async def get_room_info(room_name: Optional[str] = None, _context: ToolCallContext = None) -> dict:
-    """查询房间信息。不传 room_name 时返回团队房间列表，传入时返回指定房间详情。
+    """查询房间，返回房间名、类型、状态、成员与标签；详情另含当前轮次与消息数。
 
     Args:
-        room_name: 房间名称，省略时返回所有房间
+        room_name: 房间名称；省略时返回团队全部房间的列表
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
@@ -297,10 +297,10 @@ async def start_chat(
 
 
 async def get_agent_info(agent_name: Optional[str] = None, _context: ToolCallContext = None) -> dict:
-    """查询 Agent 信息。不传 agent_name 时返回团队成员列表，传入时返回指定成员详情。
+    """查询成员，返回 ID、name、display_name、状态与所在部门；详情另含房间与可唤醒状态。
 
     Args:
-        agent_name: Agent 名称（内部标识符，即 name 字段，非 display_name），省略时返回所有 Agent
+        agent_name: Agent 名称（内部标识符 name，非 display_name）；省略时返回团队成员列表
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
@@ -919,11 +919,11 @@ async def delete_role_template(role_name: str, _context: ToolCallContext = None)
 
 
 async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = None) -> dict:
-    """向聊天窗口发送消息（消息对房间内所有成员可见；房间名必须已存在）。
+    """向房间发送消息，消息对房间内所有成员可见。
 
     Args:
-        room_name: 目标房间名，必须是本团队**已存在**的房间名（否则发送失败）
-        msg: 要发送的消息正文（房间内所有成员可见）
+        room_name: 目标房间名，必须是本团队已存在的房间名
+        msg: 要发送的消息正文
     """
     if _context is None:
         logger.warning("发送消息失败，聊天室上下文未设置")
@@ -1196,12 +1196,12 @@ async def list_tasks(
     open_only: bool = True,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """查询协作任务列表。assignee / reviewer / scope 三个过滤条件必须传其一；默认只返回未完结任务，total > count 表示被 limit 截断。
+    """查询协作任务列表。assignee / reviewer / scope 三者必须传其一；total > count 表示结果被截断。
 
     Args:
-        assignee: 过滤条件：按执行人 Agent ID
-        reviewer: 过滤条件：按验收人 Agent ID
-        scope: 过滤条件：self=与我相关的任务；team=我可见范围内的任务
+        assignee: 按执行人 Agent ID 过滤
+        reviewer: 按验收人 Agent ID 过滤
+        scope: self=与我相关的任务；team=我可见范围内的任务
         status: 按状态过滤（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）；指定时 open_only 不生效
         open_only: 只返回未完结任务（排除 DONE / CANCELLED），默认 True
     """
