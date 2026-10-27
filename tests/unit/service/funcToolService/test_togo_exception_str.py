@@ -275,3 +275,88 @@ async def test_overwrite_dept_tree_wraps_value_error(monkeypatch):
     assert exc_info.value.error_code == "DEPT_MEMBERS_TOO_FEW"
     # 包装后的 str() 只有文本，没有元组字面量
     assert str(exc_info.value) == "部门 'x' 成员不足 2 人，无法创建房间"
+
+
+# --------------------------------------------------------------------------- #
+# 5. __str__ 的健壮性：消息不是 str 时不得抛 TypeError
+# --------------------------------------------------------------------------- #
+
+
+def test_non_string_error_message_is_rejected_at_construction():
+    """构造点就拦住：`error_message` 不是 str 直接 assert，堆栈指向写错的那一处。
+
+    否则 `__str__` 会抛 `TypeError: __str__ returned non-string (type NoneType)`，
+    把真正的业务错误盖成一个更难查的解释器错误。
+    """
+    with pytest.raises(AssertionError, match="必须是 str"):
+        TogoException(None)  # type: ignore[arg-type]
+
+    with pytest.raises(AssertionError, match="必须是 str"):
+        TogoException(123, error_code="X")  # type: ignore[arg-type]
+
+
+def test_str_never_raises_even_if_field_is_corrupted():
+    """兜底：即使 `_error_message` 被绕过 __init__ 写成非 str，`str(exc)` 也不抛。"""
+    exc = TogoException("正常消息")
+    exc._error_message = None  # type: ignore[assignment]
+
+    assert str(exc) == "None"
+
+
+def test_str_survives_python_optimized_mode():
+    """`python -O` 会剥离 assert；此时 `__str__` 里的 isinstance 兜底仍然生效。"""
+    exc = TogoException("正常消息")
+    exc._error_message = 42  # type: ignore[assignment]
+
+    assert str(exc) == "42"
+
+
+# --------------------------------------------------------------------------- #
+# 6. 日志侧保留 error_code（`str(exc)` 变干净后的反向副作用）
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_run_tool_call_logs_error_code_via_repr(monkeypatch):
+    """兜底分支的日志必须带 error_code：`{e!r}` 走 args，`{e}` 只剩干净文本。
+
+    `__str__` 改成只吐 error_message 之后，`logger.error(f"...: {e}")` 会**丢掉**错误码，
+    排查时无法按码 grep；这里钉住日志侧改用 `!r`。
+
+    用**替身 logger** 抓消息，不用 `caplog`：`caplog` 改的是 root logger 的 level 与
+    handler 链（`logUtil.init_backend_logger` 会对 `root_logger.handlers` 做 `clear()`），
+    在共享进程里属于全局副作用；替身只替换 `core.logger` 这一个属性，结束即还原。
+    """
+    import service.funcToolService as funcToolService
+    from service.funcToolService.funcToolType import FuncTool
+
+    class _RecordingLogger:
+        def __init__(self) -> None:
+            self.errors: list[str] = []
+
+        def error(self, msg, *args, **kwargs):
+            self.errors.append(msg)
+
+        def warning(self, msg, *args, **kwargs):
+            pass
+
+        def info(self, msg, *args, **kwargs):
+            pass
+
+    async def _boom(**kwargs):
+        raise TogoException("业务失败", error_code="SOME_CODE")
+
+    recorder = _RecordingLogger()
+    monkeypatch.setattr(funcToolService.core, "logger", recorder)
+    monkeypatch.setattr(
+        funcToolService.core,
+        "get_func_tool",
+        lambda name: FuncTool(name=name, callable=_boom),
+    )
+
+    ctx = ToolCallContext(agent_id=1, team_id=1, tool_name="save_room")
+    await funcToolService.run_tool_call("{}", context=ctx)
+
+    assert len(recorder.errors) == 1
+    assert "SOME_CODE" in recorder.errors[0]
+    assert "业务失败" in recorder.errors[0]

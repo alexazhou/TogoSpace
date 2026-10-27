@@ -173,7 +173,9 @@ async def run_tool_call(
             # `TogoException.__str__` 只吐 error_message（不带 error_code 的元组 repr）。
             error = str(e)
 
-        logger.error(f"函数执行失败: {e}")
+        # 日志用 `!r`：`str(e)` 现在是干净的业务消息，error_code 只留在 `args` /
+        # `repr` 里；用 `{e}` 记日志会把错误码一起丢掉，排查时无法按码 grep。
+        logger.error(f"函数执行失败: {e!r}")
         failure: dict[str, Any] = {"success": False, "message": f"函数执行失败: {error}"}
         # 结构化带上错误码，模型可据此自纠；非 TogoException 的异常没有该属性，跳过。
         error_code = getattr(e, "error_code", None)
