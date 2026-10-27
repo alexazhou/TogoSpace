@@ -375,9 +375,8 @@ async def wake_up_agent(agent_name: str, _context: ToolCallContext = None) -> di
 
 
 async def reload_team(_context: ToolCallContext = None) -> dict:
-    """重载当前团队的运行时。
-
-    注意：该操作会重启当前团队的运行时，可能中断团队内正在执行的任务。
+    """重载当前团队的运行时，可能中断团队内正在执行的任务。
+    成员、组织或房间的配置变更需重载后才生效。
     """
     ok, team_id = _require_team_context(_context)
     if not ok:
@@ -511,9 +510,8 @@ async def save_agent(
         role_template_name: 要绑定的角色模板名称。工具会按名称解析为 role_template_id。
         model: 可选模型覆盖。留空（None）表示不覆盖模板/系统默认模型。
         driver: 驱动类型。可选值为 native、claude_sdk、tsp。无特别需要（如操作者明确指定）时建议省略，默认使用 tsp。
-        allow_tools: 可见工具列表。支持具体工具名（如 "read_file"）或类别语法（如 "Category:Read"）。系统会自动合并类别和具体工具名。基础协作工具（Basic 类别）默认总是开启，无需显式包含。通常情况下此列表留空即可，系统会自动授予 Admin 以外的所有常规类别权限。
-                     可用类别：Read, Write, Execute, Admin。注意：Admin 类别属于团队管理功能，严禁分配给除团队根主管以外的普通成员。
-        allow_skills: 可见技能列表。指定该成员可以加载的技能名称列表，如 ["frontend-design"]。调用 load_skill 工具时仅允许加载已授权的技能。留空表示不授权任何技能。
+        allow_tools: 可见工具列表，元素为工具名（如 "read_file"）或类别语法（如 "Category:Read"），类别与工具名会自动合并。可分配类别只有 Read、Write、Execute；Basic 总是自动开启，无需传；Admin 由根主管自动获得，显式分配会被拒绝。省略（None）= 默认授予 Basic、Read、Write、Execute。更新已有成员时省略该参数会重置为上述默认。
+        allow_skills: 可见技能名称列表，如 ["frontend-design"]；load_skill 只能加载已授权的技能。省略（None）= 允许全部技能；空列表 [] = 不授权任何技能。更新已有成员时省略该参数会重置为上述默认。
         i18n: 可选多语言数据。示例：{"display_name": {"zh-CN": "Alice", "en": "Alice"}}
         overwrite_existing: 是否允许覆盖当前团队中已存在的同名成员。默认 false；为 true 时，若同名成员已存在则执行更新。当传入 agent_id 时，此参数不生效。
         agent_id: 可选成员 ID。传入后按 ID 精确定位成员（忽略 overwrite_existing），此时 name 可用于重命名。
