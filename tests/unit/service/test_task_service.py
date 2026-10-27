@@ -578,6 +578,33 @@ async def test_list_tasks_bare_status_string_is_not_iterated_per_character(task_
 
 
 @pytest.mark.asyncio
+async def test_list_tasks_status_normalized_to_list_before_iteration(task_manager_mock):
+    """裸字符串在解析**之前**就已归一成列表（`assert not isinstance(status, str)` 守）。
+
+    这条钉住「归一发生在迭代前」：若有人把 `status = [status]` 挪到解析之后，
+    `for raw in "TODO"` 会逐字符跑一遍，上面那条用例会报「非法状态 T」。
+    这里直接观察解析结果，不依赖报错文案。
+    """
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    await taskService.list_tasks(team_id=1, status="IN_PROGRESS")
+
+    assert task_manager_mock.list_tasks.await_args.kwargs["status"] == TaskStatus.IN_PROGRESS
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_non_string_status_element_is_reported_invalid(task_manager_mock):
+    """列表元素不是字符串（如整数）⇒ 归入非法项，而不是先 `.upper()` 炸 AttributeError。"""
+    result = await taskService.list_tasks(team_id=1, status=[1, "TODO"])
+
+    assert result["success"] is False
+    assert result["error_code"] == "invalid_status"
+    assert "1" in result["message"]
+    task_manager_mock.list_tasks.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_list_tasks_status_array_is_deduplicated_in_order(task_manager_mock):
     """重复值去重但保持首次出现顺序（避免 `IN (TODO, TODO)` 这类无意义 SQL）。"""
     task_manager_mock.list_tasks = AsyncMock(return_value=[])

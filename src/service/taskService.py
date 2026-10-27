@@ -723,10 +723,15 @@ async def list_tasks(
         }
 
     # `status` 兼容裸字符串：native / tsp 驱动不做 schema 校验，模型可能按老习惯传
-    # 单值；直接 `for s in "TODO"` 会逐字符迭代成 T/O/D/O，报出一个假的「非法状态 T」。
+    # 单值。先归一成列表再解析，否则 `for s in "TODO"` 会逐字符迭代成 T/O/D/O，
+    # 报出一个假的「非法状态 T」。
     single_value = isinstance(status, str)
     if isinstance(status, str):
         status = [status]
+    # 归一后不该再是 str，下面直接迭代 `status`。用 assert 钉住这条不变量，
+    # 而不是再写一个 `if not isinstance(status, str)` 的恒真分支（那曾是不可达死代码，
+    # 且分支里的失败返回漏了 error_code）。
+    assert not isinstance(status, str), "status 归一后不应仍是 str"
 
     status_enum: Optional[TaskStatus] = None
     status_enum_list: list[TaskStatus] | None = None
