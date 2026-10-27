@@ -1,13 +1,20 @@
 # 本地环境自查清单
 
-本文档收录 **TogoSpace 本地开发/测试环境里会导致「假红」（看起来是代码坏了，其实是环境问题）的 5 类陷阱**。
+本文档收录 **TogoSpace 本地开发/测试环境里容易让人误判的 5 类陷阱**。其中 4 类会表现为「假红」（看起来是代码坏了，其实是环境问题）；**第 3 类不是假红，而是「不留神就误提交」的脏数据陷阱——危害其实更大，因为它静默发生、不报错**。
 
 每一条都按同一结构写：**症状 → 为什么容易误判 → 正确做法 → 一行自查命令**。
 目标：新人 **30 秒内**能判断「我现在遇到的是不是这个坑」。
 
+> 与同目录其他文档的分工：
+> - [execution_architecture.md](./execution_architecture.md)：测试体系架构、Mock 逻辑、配置加载机制（**讲"是什么"**）；
+> - [unit_integration_boundary.md](./unit_integration_boundary.md)：单元/集成测试边界与全局状态污染（**讲"该放哪"**）；
+> - 本文档：**讲"跑起来为什么红了、明明绿了为什么不算"**（环境层，全部是实操命令）。
+
+> **本文档的证据分级**：每条结论都标注 **【已验证】**（本机跑过并附输出）或 **【代码推演】**（只读代码得出，未实跑）。第 3 条尤其注意：**全量套件下的行为未逐用例验证**。
+
 ---
 
-## 0. 读本文档前，先记住两条纪律
+## 0. 读本文档前，先记住三条纪律
 
 ### 纪律 1：环境相关结论必须标注「哪个环境」
 
@@ -30,6 +37,16 @@
 未经实测的操作建议不得写入——本轮就发生过「凭印象建议用 `gtimeout`」，导致团队成员各自记错一次口径的事故（详见第 2 条）。
 
 **如果你要往本文档加条目，请把命令跑一遍，连同输出一起贴进来。**
+
+### 纪律 3：凡「会 / 不会影响 X」的断言，必须标注【已验证】或【代码推演】
+
+这是纪律 1 的加强版，也是本轮踩得最疼的一课：
+
+- 有人写「测试会改写配置，**之后跑 room/ws 必假红**」→ 实跑 12 passed，**断言不成立**（原话写进了任务单，见第 3 条）；
+- 有人建议「用 `gtimeout` 代替」→ 实测同为 x86_64，**建议不成立**；
+- 有人说「改了全局排序，**前端观感会变差**」→ 只到推演级别，接口返回顺序变了是已验证的，观感变差没人验。
+
+**规矩**：写「不会影响 X」和写「会影响 X」一样要证据。做不到实跑就老老实实标【代码推演】，并写清推演到哪一步为止。
 
 ---
 
@@ -247,13 +264,16 @@ perl -e 'alarm 10; exec @ARGV' .venv/bin/python3 -c "import platform;print(platf
 
 ---
 
-## 3. `tests/config/setting.json` 会被改写：脏数据风险
+## 3. `tests/config/setting.json` 被改写：脏数据 + 误提交
 
-> ⚠️ **本条与我拿到的初始描述有出入，以本节的实测结论为准**：改写**确实会发生**，但「之后同 worktree 跑 room/ws 用例**必假红**」这一因果，**我未能复现**。下面把「确认成立的」和「未成立的」分开写，避免下一个人照着一条错误的因果去排查。
+> **本文档的立论边界（先读这段）**：
+> - 要防的是「**脏数据被误提交**」，**不是**「跑测试会假红」。
+> - 早期曾有一条断言「测试改写 `setting.json` 后，再跑 room/ws 用例**必假红**」——**该断言已被实测推翻，本节不再采用**（复现见下表）。
+> - **全量套件下的行为未逐用例验证**：我只跑了 room / ws / chat_flow 以及 6 个带独立配置目录的 api 子目录，结论是「这些组合下不脏」。**不能据此推断「全量一定不脏」。**
 
 ### 症状
 
-跑完测试后 `git status` 出现：
+跑完测试或脚本后 `git status` 出现：
 
 ```
  M tests/config/setting.json
@@ -272,9 +292,15 @@ perl -e 'alarm 10; exec @ARGV' .venv/bin/python3 -c "import platform;print(platf
 
 ### 为什么容易误判
 
-**① 真危害不是「红」，是「脏」。** 这个 `M tests/config/setting.json` 极易被顺手 `git add -A` 带进提交——把本地环境的迁移结果提交上去，才是这个坑真正咬人的地方。
+**① 真危害不是「红」，是「脏」→「误提交」。** 这个 `M tests/config/setting.json` 极易被顺手 `git add -A` 带进提交——把本地环境的迁移结果提交上去，才是这个坑真正咬人的地方。**防线的重心因此是「提交前看清暂存区」，不是「排查假红」。**
 
-**② 改写链路是无条件的**（`src/util/configUtil/core.py`）：
+**② diff 形态有欺骗性：看着像「清理冗余」，实际是配置被换成另一套形状。** `_save_setting_to_file()` 用 `model_dump(exclude_defaults=True)` + `os.replace()`，所以：
+
+- 与默认值相同的字段（`enable: true`、`vision: ""`、`advanced: ""`）在 key 层面**整体消失**，看起来像"精简"；
+- `migrate_setting()` 把 `version: v2` 提到 `v3`，并补上 `context_config` / `language` / `auth` / `third_party_services`；
+- **inode 与 mtime 一定会变**（`os.replace` 换文件），**即使内容最终与原文件逐字节相同**——所以**别用 mtime 判断"有没有被写过"**（我实测过：inode 变、`sha256` 不变）。
+
+**③ 改写链路是无条件的**（`src/util/configUtil/core.py:227-236` → `:239`）：
 
 ```python
 def update_setting(mutator: Callable[[SettingConfig], None]) -> None:
@@ -282,37 +308,45 @@ def update_setting(mutator: Callable[[SettingConfig], None]) -> None:
     _save_setting_to_file()          # ← 无条件写回
 ```
 
-`_save_setting_to_file()` 用 `model_dump(exclude_defaults=True)` 重序列化 + `os.replace()` 原子替换，所以：
-
-- 与默认值相同的字段（`enable: true`、`vision: ""`、`advanced: ""`）会在 key 层面**消失**；
-- `migrate_setting()` 会把 `version` 从 `v2` 提到 `v3` 并补 `context_config/language/...`；
-- **inode 与 mtime 一定会变**（`os.replace` 换文件），**即使内容最终与原文件逐字节相同**——所以别用 mtime 判断"有没有被写过"。
-
-**③ `?? setting.README.md` 的触发条件很窄，容易背锅到别处。** `_load_setting()` 里：
+**④ `?? setting.README.md` 只在「非 pytest 环境」产生，容易背锅到别处。** `_load_setting()`（`core.py:22-24` / `:121-122`）：
 
 ```python
-if not _is_running_tests():                      # _is_running_tests() 只检查 PYTEST_CURRENT_TEST
+def _is_running_tests() -> bool:
+    return "PYTEST_CURRENT_TEST" in os.environ     # ← 只查这一个变量
+...
+if not _is_running_tests():
     sync_file_if_changed("docs/setting.README.md", config_dir, "setting.README.md")
 ```
 
-也就是说：**在 pytest 里跑不会产生它；用普通 Python 脚本/REPL 调 `configUtil.load(<config_dir>)` 就会产生它**。同一份代码，pytest 内与 pytest 外行为不同。
+也就是说：**在 pytest 里不会产生它；用脚本/REPL 调 `configUtil.load(<config_dir>)` 就会产生它**。很多人是开 REPL 调配置的，一调就脏：
 
-### 我实测到的边界（重要）
+```bash
+$ PYTHONPATH=src .venv/bin/python -c "from util import configUtil; configUtil.load('tests/config')"
+$ git status --short
+?? tests/config/setting.README.md      ← 凭空多出（实测复现）
+```
 
-| 实验 | 结果 |
-|---|---|
-| 直接调 `configUtil.load('tests/config')` + `update_setting(...)`（非 pytest 环境） | ✅ 文件被改写（v2→v3，丢 `enable/vision/advanced`）+ 多出 `?? setting.README.md` |
-| 改用 `PYTEST_CURRENT_TEST=dummy::test` 模拟 pytest 环境 | ✅ 文件仍被改写，但**不再**产生 `setting.README.md` |
-| 正常跑 `pytest tests/integration/test_room_service`、`tests/api/test_ws_controller` 等 | ❌ **没有**出现假红（12 passed），`git status` 也**没有** `M setting.json` |
-| 正常跑 6 个带 `use_custom_config = True` 的 API 测试目录（system / init / llm_service / auth / demo_mode / room） | ❌ 均未弄脏工作区 |
-| 跑完后检查 `tests/api/test_system_controller/config/setting.json` 的 inode | ⚠️ 确实变了（说明**被写过**），但内容被 `teardown_class` 原样写回，`sha256` 不变 |
+> 注：`tests/api/test_system_controller/config/setting.README.md` 等若干目录下的同名文件是**入库文件**（`git ls-files` 可查），所以"生成 README"本身不是 bug；问题在于 `tests/config/` 下这个位置**没被跟踪**，于是变成脏文件。
 
-原因：带独立配置目录的测试类会在 `setup_class` 里把整份 `setting.json` 读进内存、`teardown_class` 里原样写回。两种等价写法都存在：
+### 实测边界（重要：这里区分「已验证」与「未验证」）
+
+| 实验 | 结果 | 性质 |
+|---|---|---|
+| 直接调 `configUtil.load('tests/config')` + `update_setting(...)`（非 pytest 环境） | ✅ 文件被改写（v2→v3，丢 `enable/vision/advanced`）+ 多出 `?? setting.README.md` | 【已验证】 |
+| 仅调 `configUtil.load('tests/config')`，不调 `update_setting`（非 pytest 环境） | ✅ 仍会多出 `?? setting.README.md`（只读也会脏） | 【已验证】 |
+| 设 `PYTEST_CURRENT_TEST=dummy::test` 模拟 pytest 环境 | ✅ 文件仍被改写，但**不再**产生 `setting.README.md` | 【已验证】 |
+| 跑 `pytest tests/integration/test_room_service/test_upsert_room.py` | 9 ~ 12 passed，`md5` 前后不变，`git status` 干净 | 【已验证】 |
+| 跑 `pytest tests/api/test_ws_controller` | 3 passed，工作区干净 | 【已验证】 |
+| 逐个跑 6 个带独立配置目录的 api 子目录（system / init / llm_service / auth / demo_mode / room） | 全部 passed，每次 `git status --short tests/` 为空 | 【已验证】 |
+| 跑完后检查 `tests/api/test_system_controller/config/setting.json` 的 inode | ⚠️ inode 变了（说明**被写过**），但被 `teardown_class` 原样写回，`sha256` 不变 | 【已验证】 |
+| **全量套件（`tests/unit tests/api tests/integration`）下是否一定不脏** | **未逐用例验证，请勿假设** | 【未验证】 |
+
+**为什么默认路径下通常干净**：带独立配置目录的测试类会在 `setup_class` 里把整份 `setting.json` 读进内存、`teardown_class` 里原样写回。两种等价写法都存在：
 
 - `use_custom_config = True`（全仓 **7 处**，`tests/base.py` 据此推导 `<测试文件目录>/config`）；
 - 直接显式传目录 `configUtil.load(_CONFIG_DIR, preset_dir=_CONFIG_DIR, force_reload=True)`（`tests/integration/test_agent_service`、`test_chat_flow`、`test_collaboration_task_flow` 等都是这种）。
 
-示例（`tests/api/test_system_controller/test.py`）：
+示例（`tests/api/test_system_controller/test.py:22-32`）：
 
 ```python
 @classmethod
@@ -329,23 +363,37 @@ def teardown_class(cls) -> None:
             f.write(cls._original_setting)
 ```
 
-**结论：改写必然发生，但多数测试类自带「读-存-写回」兜底，所以通常表现为「脏」而非「红」。** 缺少兜底的场景（新增测试类没写 setup/teardown、跑测试时被 Ctrl-C 打断导致 teardown 没执行、或手工脚本调用了 `update_setting`）才会留下脏文件。
+**结论：改写必然发生，但自带兜底的测试类会把内容写回，所以现象通常是「脏」而不是「红」。** 会留下脏文件的场景：新增测试类没写 setup/teardown、跑测试时 Ctrl-C 打断导致 teardown 未执行、或用脚本/REPL 直接调了 `configUtil.load` / `update_setting`。
 
 ### 正确做法
+
+**重点是把「看清暂存区」当成提交前的固定动作，而不是去排查假红。**
 
 ```bash
 # ① 跑测试前后都过一遍（成本极低，习惯成自然）
 git status --short
 
-# ② 发现脏了就还原（注意：-u 的 README 也要清）
+# ② 发现脏了就还原（注意：未跟踪的 README 也要清）
 git checkout -- tests/config/setting.json
 rm -f tests/config/setting.README.md
 
-# ③ 提交前务必确认暂存区没有它
+# ③ 提交前务必确认暂存区没有它（这条是真正的防线）
 git diff --cached --stat | grep -E 'tests/.*config/setting' && echo "危险：配置被带进提交了" || echo "OK"
 ```
 
 新增带后端、且会用到独立配置目录的测试类时，**照抄上面 `setup_class`/`teardown_class` 的读-存-写回模式**（`use_custom_config = True` 或显式 `configUtil.load(_CONFIG_DIR, ...)` 都算）。
+
+用 REPL / 一次性脚本调试配置相关逻辑时，**别指向 `tests/config/`**——用 `tmp_path` 或临时目录，否则会留下未跟踪的 `setting.README.md`：
+
+```bash
+# ✅ 指向临时目录
+PYTHONPATH=src .venv/bin/python -c "
+import tempfile, os
+d = tempfile.mkdtemp()
+from util import configUtil; configUtil.load(d)
+print('ok', d)
+"
+```
 
 ### 一行自查命令
 
@@ -457,7 +505,7 @@ git worktree list | grep -E '/tmp|/private/tmp' && echo "有临时 worktree 残�
 |---|---|---|
 | 1 | worker 命名 | `echo "$PYTEST_XDIST_WORKER" \| grep -Eq '^gw[0-9]+$' \|\| echo 危险` |
 | 2 | `timeout`/`gtimeout` 均 x86_64 | `file -b $(which -a timeout gtimeout)` 出现 `x86_64` 就别用 |
-| 3 | `setting.json` 被改写 | `git status --short tests/ \| grep config/setting` |
+| 3 | `setting.json` 被改写（**脏数据/误提交**，非假红） | `git diff --cached --stat \| grep 'config/setting'` |
 | 4 | mypy 红导致测试被 skip | `bash scripts/run_mypy.sh && ...` |
 | 5 | worktree 残留 | `git worktree list \| grep /tmp` |
 
@@ -473,3 +521,4 @@ git worktree list | grep -E '/tmp|/private/tmp' && echo "有临时 worktree 残�
 1. **`_get_worker_offset()` 的静默回退**：非 `gw<N>` 命名时建议打印一次 warning（至少 `-W` 或 `-s` 下可见），而不是无声回退到 0。
 2. **`_is_running_tests()` 判据过窄**：只认 `PYTEST_CURRENT_TEST`，导致「pytest 内 vs 外」行为不一致（同一个 `configUtil.load` 一个会写 `setting.README.md`、一个不会）。可考虑改为同时接受 `PYTEST_XDIST_WORKER`、或显式 `TEAMAGENT_ENV=test`。
 3. **`tests/config/setting.json` 的 `version: v2` 与代码 `migrate_setting()` 目标 `v3` 长期不一致**：每次加载都要跑一遍迁移，靠各测试类的 `teardown_class` 兜底写回。建议统一把仓库内测试配置升到 v3，消除「必然被写」这一前提。
+4. **`_is_running_tests()` 顺带影响「写快照」类脚本**：既然它只认 `PYTEST_CURRENT_TEST`，那么任何在 pytest 之外跑的写配置/写快照脚本都会走"非测试"分支。若后续引入 CI 侧的护栏自检（如把 `--selftest` 挂进流水线），需注意这类脚本在 CI 里是"非 pytest 环境"，行为与本地 pytest 内不一致。
