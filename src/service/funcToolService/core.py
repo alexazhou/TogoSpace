@@ -170,10 +170,16 @@ async def run_tool_call(
         if isinstance(e, TypeError):
             error = f"Invalid arguments for function {function_name}: {e}"
         else:
+            # `TogoException.__str__` 只吐 error_message（不带 error_code 的元组 repr）。
             error = str(e)
 
         logger.error(f"函数执行失败: {e}")
-        return {"success": False, "message": f"函数执行失败: {error}"}
+        failure: dict[str, Any] = {"success": False, "message": f"函数执行失败: {error}"}
+        # 结构化带上错误码，模型可据此自纠；非 TogoException 的异常没有该属性，跳过。
+        error_code = getattr(e, "error_code", None)
+        if error_code is not None:
+            failure["error_code"] = error_code
+        return failure
 
 
 @serviceUtil.service_stop_wrapper(s_status)

@@ -23,6 +23,10 @@ async def overwrite_dept_tree(team_id: int, root: GtDept) -> None:
     # 单次递归：校验整棵树。
     try:
         root.validate_tree()
+    except TogoException:
+        # 已经是业务异常：直接透传，避免 `TogoException(str(exc), ...)` 把内层消息再包一层
+        # （内层若是 TogoException，旧写法会把内层 error_code 丢掉、只留文本）。
+        raise
     except ValueError as exc:
         raise TogoException(str(exc), error_code="DEPT_MEMBERS_TOO_FEW") from exc
     all_agent_ids, input_dept_ids = root.collect_dept_and_agent_ids()

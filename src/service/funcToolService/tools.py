@@ -106,6 +106,21 @@ def _find_dept_node(node: GtDept | None, dept_id: int) -> GtDept | None:
     return None
 
 
+def _tool_error_result(exc: BaseException) -> dict[str, Any]:
+    """把异常转成工具层的结构化失败返回体。
+
+    为什么不在 `run_tool_call` 一处兜底就完事：工具层自己 `except` 后 return 的分支
+    （`save_room` / `delete_room` / `delete_dept`）根本不会经过 `run_tool_call` 的
+    兜底 `except`，所以必须在这三处各自转换。两处口径保持一致（都用本函数）。
+    """
+    message = getattr(exc, "error_message", None) or str(exc)
+    result: dict[str, Any] = {"success": False, "message": message}
+    error_code = getattr(exc, "error_code", None)
+    if error_code is not None:
+        result["error_code"] = error_code
+    return result
+
+
 def _serialize_dept_node(node: GtDept, id_to_name: dict[int, str]) -> dict[str, Any]:
     lang = configUtil.get_language()
     dept_name = i18nUtil.extract_i18n_str(
@@ -797,7 +812,7 @@ async def save_room(
             room_id=existing.id if existing is not None else None,
         )
     except Exception as exc:
-        return {"success": False, "message": str(exc)}
+        return _tool_error_result(exc)
 
     id_to_name = {a.id: a.name for a in all_agents}
     action = "更新" if existing is not None else "创建"
@@ -846,7 +861,7 @@ async def delete_room(
     try:
         await roomService.delete_managed_room(team_id, target.id)
     except Exception as exc:
-        return {"success": False, "message": str(exc)}
+        return _tool_error_result(exc)
 
     return {
         "success": True,
@@ -889,7 +904,7 @@ async def delete_dept(
     try:
         await deptService.delete_dept(team_id, target.id, recursive=recursive)
     except Exception as exc:
-        return {"success": False, "message": str(exc)}
+        return _tool_error_result(exc)
 
     return {
         "success": True,
