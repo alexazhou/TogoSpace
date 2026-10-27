@@ -2,6 +2,7 @@
 
 - #67：`priority` 权重表守卫（显式映射 + 枚举全覆盖）。
 - #76：`agent_ids` 过滤（`assignee ∈ 集合` **OR** `reviewer ∈ 集合`）的真实 SQL 语义。
+- #81：`status` 单值（`==`）/ 列表（`IN`）两种过滤的真实 SQL 语义。
 """
 
 from __future__ import annotations
@@ -150,6 +151,86 @@ def test_self_scope_equals_assignee_or_reviewer_union(task_db):
     assert self_scope == assignee_side | reviewer_side == {1, 2}
     # 明确记录「超集」关系：只按 assignee 查会漏掉 t2
     assert assignee_side == {1}
+
+
+# ---------------------------------------------------------------------------
+# #81：`status` 单值 vs 列表 —— 单值仍走 `==`（既有 SQL 不动），列表走 `IN`
+# ---------------------------------------------------------------------------
+
+
+def _seed_tasks_with_statuses(statuses: list[TaskStatus]) -> None:
+    """按状态造任务；id 从 1 递增，team_id 固定 1，assignee 固定 1。"""
+    for index, status in enumerate(statuses, start=1):
+        GtAgentTask.create(
+            id=index,
+            team_id=1,
+            title=f"t{index}",
+            assignee_id=1,
+            creator_id=1,
+            reviewer_id=None,
+            status=status,
+        )
+
+
+def test_status_single_value_filters_with_equality(task_db):
+    """单值：只命中该状态（保持既有 `==` 语义，不擅自改成单元素 `IN`）。"""
+    _seed_tasks_with_statuses([TaskStatus.TODO, TaskStatus.DONE, TaskStatus.DONE])
+
+    assert _ids(gtAgentTaskManager._filtered_task_query(1, status=TaskStatus.DONE)) == [2, 3]
+
+
+def test_status_list_filters_with_in(task_db):
+    """列表：任一命中即返回（`IN` 语义）。"""
+    _seed_tasks_with_statuses([TaskStatus.TODO, TaskStatus.DONE, TaskStatus.CANCELLED])
+
+    assert _ids(
+        gtAgentTaskManager._filtered_task_query(1, status=[TaskStatus.TODO, TaskStatus.DONE])
+    ) == [1, 2]
+
+
+def test_status_list_is_deduplicated_by_dal_agnostic(task_db):
+    """列表里重复值不影响结果（去重由 service 层做，DAL 只保证语义正确）。"""
+    _seed_tasks_with_statuses([TaskStatus.TODO, TaskStatus.DONE])
+
+    assert _ids(
+        gtAgentTaskManager._filtered_task_query(
+            1, status=[TaskStatus.TODO, TaskStatus.TODO, TaskStatus.DONE]
+        )
+    ) == [1, 2]
+
+
+def test_status_empty_list_matches_nothing(task_db):
+    """空列表**不生成 WHERE**（peewee 的 `IN ()` 是恒假/未定义行为），与「不过滤」一致。
+
+    空列表的拒绝由 service 层负责（`invalid_status`）；DAL 这层只保证不会写出坏 SQL。
+    """
+    _seed_tasks_with_statuses([TaskStatus.TODO, TaskStatus.DONE])
+
+    assert _ids(gtAgentTaskManager._filtered_task_query(1, status=[])) == [1, 2]
+
+
+def test_status_list_combines_with_agent_ids_as_and(task_db):
+    """`status` 列表与 `agent_ids` 是 AND：可见范围收窄后仍只返回命中状态的任务。"""
+    _seed_tasks_with_statuses([TaskStatus.TODO, TaskStatus.DONE])
+    GtAgentTask.create(
+        id=9, team_id=1, title="t9", assignee_id=2, creator_id=2, reviewer_id=None,
+        status=TaskStatus.DONE,
+    )
+
+    query = gtAgentTaskManager._filtered_task_query(
+        1, status=[TaskStatus.DONE], agent_ids=[1]
+    )
+    assert _ids(query) == [2]
+
+
+def test_count_and_list_share_status_list_scope(task_db):
+    """`count_tasks` 与 `list_tasks` 对 `status` 列表同口径（否则 `total` 与列表对不上）。"""
+    _seed_tasks_with_statuses([TaskStatus.TODO, TaskStatus.DONE, TaskStatus.CANCELLED])
+
+    query = gtAgentTaskManager._filtered_task_query(
+        1, status=[TaskStatus.TODO, TaskStatus.CANCELLED]
+    )
+    assert query.count() == len(_ids(query)) == 2
 
 
 def test_count_and_list_share_agent_ids_scope(task_db):

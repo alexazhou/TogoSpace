@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Union
 
 from constants import (
     EVENT_CONTENT_MAX_CHARS,
@@ -632,11 +632,53 @@ async def resolve_visible_agent_ids(team_id: int, caller_id: Optional[int]) -> O
     return (await resolve_visible_scope(team_id, caller_id)).agent_ids
 
 
+async def _resolve_task_agent_names(tasks: list[GtAgentTask]) -> dict[int, str]:
+    """批量解析任务列表里出现的 Agent 展示名：`{agent_id: display_name}`。
+
+    **一次** `get_agents_by_ids` 查完所有 `assignee_id` / `reviewer_id`（带缓存的批量
+    接口），不做逐条查询——列表接口按条查 Agent 是典型 N+1，20 条任务会多打 40 次库。
+    查不到（Agent 已删除）的 ID 不在返回值里，由 `_task_to_dict_with_actor_names`
+    统一回退 `Agent#<id>`（与 `agentTurnRunner._resolve_event_actor_name` 同口径）。
+    """
+    agent_ids: list[int] = []
+    seen: set[int] = set()
+    for task in tasks:
+        for agent_id in (task.assignee_id, task.reviewer_id):
+            if agent_id is not None and agent_id not in seen:
+                seen.add(agent_id)
+                agent_ids.append(agent_id)
+    if not agent_ids:
+        return {}
+    agents = await gtAgentManager.get_agents_by_ids(agent_ids)
+    return {agent.id: agent.display_name for agent in agents}
+
+
+def _task_to_dict_with_actor_names(
+    task: GtAgentTask, agent_names: dict[int, str]
+) -> dict:
+    """任务 ORM 对象 → dict，并补 `assignee_name` / `reviewer_name`（展示名）。
+
+    只**追加**字段，已有字段的名字与语义原样保留（Web 列表接口也走这条链路）。
+    `assignee_id` / `reviewer_id` 为 `None` 时对应 name 给 `None`——不给 `Agent#None`；
+    Agent 已被删除时回退 `Agent#<id>`（见 `_resolve_task_agent_names`）。
+    """
+    from playhouse.shortcuts import model_to_dict
+
+    data = model_to_dict(task, recurse=False)
+    for role in ("assignee", "reviewer"):
+        agent_id = getattr(task, f"{role}_id", None)
+        if agent_id is None:
+            data[f"{role}_name"] = None
+        else:
+            data[f"{role}_name"] = agent_names.get(agent_id, f"Agent#{agent_id}")
+    return data
+
+
 async def list_tasks(
     team_id: int,
     assignee_id: Optional[int] = None,
     reviewer_id: Optional[int] = None,
-    status: Optional[str] = None,
+    status: Optional[Union[str, list[str]]] = None,
     open_only: bool = False,
     limit: int = 20,
     scope: Optional[str] = None,
@@ -646,8 +688,12 @@ async def list_tasks(
 
     返回 `tasks`（本页，高优先级优先）、`count`（本页条数）、
     `total`（**符合条件的任务总数**，跨页、不受 `limit` 影响）——
-    `total > count` 即说明还有更多任务被 `limit` 截断。
+    `total > count` 即说明还有更多任务被 `limit` 截断。`limit` 会原样回显
+    （工具层已收敛过范围，这里回显的是**实际生效值**）。
 
+    `status` 接受**单值或列表**（单值 `"TODO"` / 列表 `["TODO","DONE"]`），
+    大小写不敏感。列表里只要有非法值就**整体报错**并把非法项全列出来——
+    不静默丢弃后返回一个看起来正常的子集（静默降级正是这里要避免的）。
     `scope` 是**过滤条件**（与 assignee / reviewer 并列，三者至少给一个，工具层守卫）：
     - `None`（默认）：不加范围过滤——保持历史行为，Web 列表接口依赖它拿全团队数据；
     - `"self"`：与我相关 = 我执行 **OR** 我验收，等价 `agent_ids=[caller_id]`；
@@ -659,8 +705,6 @@ async def list_tasks(
     按过滤器查（「成员查自己的任务」不该无条件报错）。
     部门树缺失时 `scope="team"` 退化为只看自己，并显式返回 `scope_degraded=True`。
     """
-    from playhouse.shortcuts import model_to_dict
-
     if scope not in (None, 'self', 'team'):
         return {
             "success": False,
@@ -669,11 +713,36 @@ async def list_tasks(
         }
 
     status_enum: Optional[TaskStatus] = None
+    status_enum_list: list[TaskStatus] | None = None
     exclude_statuses: list[TaskStatus] | None = None
     if status is not None:
-        status_enum = TaskStatus.value_of(status.upper())
-        if status_enum is None:
-            return {"success": False, "message": f"无效的状态：{status}"}
+        if isinstance(status, (list, tuple)):
+            parsed: list[TaskStatus] = []
+            invalid: list[str] = []
+            for raw in status:
+                enum_value = TaskStatus.value_of(str(raw).upper()) if isinstance(raw, str) else None
+                if enum_value is None:
+                    invalid.append(str(raw))
+                elif enum_value not in parsed:
+                    parsed.append(enum_value)
+            if invalid:
+                return {
+                    "success": False,
+                    "message": f"无效的状态：{'、'.join(invalid)}；有效值为 "
+                               f"{' / '.join(s.name for s in TaskStatus)}",
+                    "error_code": "invalid_status",
+                }
+            if not parsed:
+                return {
+                    "success": False,
+                    "message": "status 列表为空；如需不按状态过滤请省略该参数",
+                    "error_code": "invalid_status",
+                }
+            status_enum_list = parsed
+        else:
+            status_enum = TaskStatus.value_of(status.upper())
+            if status_enum is None:
+                return {"success": False, "message": f"无效的状态：{status}"}
     elif open_only:
         exclude_statuses = [TaskStatus.DONE, TaskStatus.CANCELLED]
 
@@ -706,17 +775,21 @@ async def list_tasks(
         team_id=team_id,
         assignee_id=assignee_id,
         reviewer_id=reviewer_id,
-        status=status_enum,
+        status=status_enum_list if status_enum_list is not None else status_enum,
         exclude_statuses=exclude_statuses,
         agent_ids=visible_agent_ids,
     )
     tasks = await gtAgentTaskManager.list_tasks(**filters, limit=limit)
     total = await gtAgentTaskManager.count_tasks(**filters)
+    agent_names = await _resolve_task_agent_names(tasks)
     result = {
         "success": True,
-        "tasks": [model_to_dict(t, recurse=False) for t in tasks],
+        "tasks": [
+            _task_to_dict_with_actor_names(task, agent_names) for task in tasks
+        ],
         "count": len(tasks),
         "total": total,
+        "limit": limit,
     }
     if scope_degraded:
         result["scope_degraded"] = True

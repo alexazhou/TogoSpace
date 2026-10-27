@@ -1,7 +1,7 @@
 """integration tests for funcToolType utilities and service-backed tool functions"""
 import os
 import sys
-from typing import Optional
+from typing import Literal, Optional, Union
 
 import pytest
 
@@ -109,6 +109,52 @@ class TestPythonTypeToJsonSchema(ServiceTestCase):
     async def test_optional_list_int(self):
         """Optional[list[int]] 应映射为 array with integer items。"""
         assert python_type_to_json_schema(Optional[list[int]]) == {"type": "array", "items": {"type": "integer"}}
+
+    async def test_union_multi_branch_becomes_any_of(self):
+        """多分支 Union ⇒ `{"anyOf": [各分支]}（`list_tasks.status` 单值或数组就靠它）。
+
+        旧实现到这里直接返回 `{"type": "object"}`，模型完全不知道能传什么。
+        """
+        assert python_type_to_json_schema(Union[str, list[str]]) == {
+            "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]
+        }
+
+    async def test_union_with_none_keeps_branch_expansion(self):
+        """`Optional[Union[A, B]]`：剥掉 NoneType 后仍要展开成 anyOf（不能退化成 object）。"""
+        assert python_type_to_json_schema(Optional[Union[str, list[str]]]) == {
+            "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]
+        }
+
+    async def test_union_of_literal_and_list_of_literal(self):
+        """`Union[Literal[...], list[Literal[...]]]` ⇒ 单值 enum + 数组 items.enum。"""
+        schema = python_type_to_json_schema(Union[Literal["A", "B"], list[Literal["A", "B"]]])
+        assert schema == {
+            "anyOf": [
+                {"enum": ["A", "B"]},
+                {"type": "array", "items": {"enum": ["A", "B"]}},
+            ]
+        }
+
+    async def test_union_single_branch_after_removing_none_is_flattened(self):
+        """`Optional[T]` 语义不变：剥掉 NoneType 只剩一个分支 ⇒ 直接返回该分支 schema。
+
+        这是 69 个参数里的主流写法，必须与 #81 之前**逐字节一致**（否则快照会集体变形）。
+        """
+        assert python_type_to_json_schema(Optional[list[int]]) == {
+            "type": "array", "items": {"type": "integer"}
+        }
+        assert python_type_to_json_schema(Union[int, None]) == {"type": "integer"}
+
+    async def test_pep604_union_becomes_any_of(self):
+        """`A | B` 写法（PEP 604）与 `Union[A, B]` 同口径。"""
+        assert python_type_to_json_schema(str | list[str]) == {
+            "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]
+        }
+
+    async def test_union_only_none_raises(self):
+        """`Union[None]` 退化不出任何分支 ⇒ 显式报错（不静默产出空 anyOf）。"""
+        with pytest.raises(TypeError):
+            python_type_to_json_schema(Union[type(None)])
 
     async def test_unknown_type_raises(self):
         """未知类型应报错，不静默兜底。"""

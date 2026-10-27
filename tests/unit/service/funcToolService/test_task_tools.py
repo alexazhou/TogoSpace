@@ -36,11 +36,17 @@ def test_list_tasks_signature_uses_assignee_and_reviewer():
     assert "assignee_id" not in params and "reviewer_id" not in params
 
 
-def test_list_tasks_does_not_expose_limit():
-    """工具层不对外暴露 limit（走内部默认值）；服务层仍保留 limit 可选。"""
+def test_list_tasks_exposes_limit_with_none_default():
+    """工具层对 Agent 开放 limit：签名为 `Optional[int] = None`（不传 ⇒ 内部默认 20）。
+
+    #62 时故意不开放（Agent 无需控制页大小），Operator 现在要求开放；但**不传时的行为
+    必须零变化**，所以默认值是 None 而不是 20 —— 由工具层收敛函数补内部默认值。
+    """
     params = list(inspect.signature(tools.list_tasks).parameters)
-    assert params == ["assignee", "reviewer", "scope", "status", "open_only", "_context"]
-    assert "limit" not in params
+    assert params == [
+        "assignee", "reviewer", "scope", "status", "open_only", "limit", "_context",
+    ]
+    assert inspect.signature(tools.list_tasks).parameters["limit"].default is None
 
     import service.taskService as taskService
 
@@ -54,14 +60,15 @@ def test_list_tasks_signature_has_open_only_default_true():
     assert sig.parameters["open_only"].default is True
 
 
-def test_list_tasks_metadata_exposes_open_only():
-    """工具 schema 由 docstring 解析：properties 含 open_only（含说明），非必填，且不含 limit。"""
+def test_list_tasks_metadata_exposes_open_only_and_limit():
+    """工具 schema 由 docstring 解析：properties 含 open_only / limit（均带说明），且全部非必填。"""
     meta = get_function_metadata("list_tasks", tools.list_tasks)
     props = meta["parameters"]["properties"]
-    assert set(props) == {"assignee", "reviewer", "status", "open_only", "scope"}
+    assert set(props) == {"assignee", "reviewer", "status", "open_only", "scope", "limit"}
     assert props["open_only"]["type"] == "boolean"
     assert props["open_only"].get("description")
-    assert "limit" not in props
+    assert props["limit"]["type"] == "integer"
+    assert props["limit"].get("description")
     assert meta["parameters"]["required"] == []
 
 
@@ -143,26 +150,147 @@ async def test_list_tasks_scope_self_alone_is_accepted(monkeypatch):
     assert captured["assignee_id"] is None and captured["reviewer_id"] is None
 
 
-@pytest.mark.asyncio
-async def test_list_tasks_forwards_internal_default_limit(monkeypatch):
-    """工具层固定透传内部默认 limit（不对外开放），open_only 默认 True。"""
+async def _call_tool_list_tasks(monkeypatch, **kwargs) -> dict:
+    """调工具层 `list_tasks` 并返回服务层收到的 kwargs（服务层用假实现截获）。"""
     from service.roomService.core import ToolCallContext
     import service.taskService as taskService
 
     captured: dict = {}
 
-    async def _fake(**kwargs):
-        captured.update(kwargs)
-        return {"success": True, "tasks": [], "total": 0}
+    async def _fake(**service_kwargs):
+        captured.update(service_kwargs)
+        return {"success": True, "tasks": [], "count": 0, "total": 0, "limit": service_kwargs["limit"]}
 
     monkeypatch.setattr(taskService, "list_tasks", _fake)
     ctx = ToolCallContext(agent_id=8, team_id=1, tool_name="list_tasks")
-    res = await tools.list_tasks(assignee=8, _context=ctx)
-
+    kwargs.setdefault("assignee", 8)
+    res = await tools.list_tasks(_context=ctx, **kwargs)
     assert res["success"] is True
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_forwards_internal_default_limit(monkeypatch):
+    """不传 limit ⇒ 仍透传内部默认 20（#62 的兼容口径不变），open_only 默认 True。"""
+    captured = await _call_tool_list_tasks(monkeypatch)
+
     assert captured["assignee_id"] == 8
     assert captured["open_only"] is True
-    assert captured["limit"] == tools.LIST_TASKS_DEFAULT_LIMIT
+    assert captured["limit"] == tools.LIST_TASKS_DEFAULT_LIMIT == 20
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_forwards_explicit_limit(monkeypatch):
+    """传 limit=5 ⇒ 原样透传 5（区间内不收敛）。"""
+    captured = await _call_tool_list_tasks(monkeypatch, limit=5)
+
+    assert captured["limit"] == 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requested", "effective"),
+    [
+        (0, tools.LIST_TASKS_MIN_LIMIT),        # 下界收敛：0 → 1
+        (-5, tools.LIST_TASKS_MIN_LIMIT),       # 负数同下界
+        (10000, tools.LIST_TASKS_MAX_LIMIT),    # 上界收敛：10000 → 200
+        (201, tools.LIST_TASKS_MAX_LIMIT),      # 刚超一点也收敛
+        (200, tools.LIST_TASKS_MAX_LIMIT),      # 边界值不动
+        (1, tools.LIST_TASKS_MIN_LIMIT),        # 下边界值不动
+    ],
+)
+async def test_list_tasks_clamps_out_of_range_limit(monkeypatch, requested, effective):
+    """超界收敛到边界（不是报错）：模型传 10000 不该让查询失败，但也不能真查 10000 条。"""
+    captured = await _call_tool_list_tasks(monkeypatch, limit=requested)
+
+    assert captured["limit"] == effective
+
+
+def test_list_tasks_clamp_helper_is_the_single_entry():
+    """收敛逻辑只在一处：`_clamp_list_tasks_limit`（常量与工具层都指向它）。"""
+    assert tools._clamp_list_tasks_limit(None) == 20
+    assert tools._clamp_list_tasks_limit(0) == 1
+    assert tools._clamp_list_tasks_limit(10000) == 200
+    assert tools.LIST_TASKS_DEFAULT_LIMIT == 20
+    assert tools.LIST_TASKS_MIN_LIMIT == 1
+    assert tools.LIST_TASKS_MAX_LIMIT == 200
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_echoes_effective_limit_in_result(monkeypatch):
+    """返回体回显**生效值**（不是入参值）：模型才看得出超界被收敛了。"""
+    from service.roomService.core import ToolCallContext
+    import service.taskService as taskService
+
+    async def _fake(**kwargs):
+        return {"success": True, "tasks": [], "count": 0, "total": 0, "limit": kwargs["limit"]}
+
+    monkeypatch.setattr(taskService, "list_tasks", _fake)
+    ctx = ToolCallContext(agent_id=8, team_id=1, tool_name="list_tasks")
+    res = await tools.list_tasks(assignee=8, limit=10000, _context=ctx)
+
+    assert res["limit"] == 200
+
+
+def test_list_tasks_status_schema_is_any_of_single_or_array():
+    """`status` schema 必须同时描述「单值」与「数组」：`anyOf[{string}, {array of string}]`。
+
+    只写 `list[str]` / `list[Literal[...]]` 的话，MCP 层（`mcp/server/lowlevel/server.py`
+    默认 `validate_input=True`，用 `jsonschema.validate` 校验入参）会以
+    `'TODO' is not of type 'array'` 把现有单值用法在**进入实现前**就拒掉——实现层兼容也没用。
+    这正是 #81 选 A 方案（给 `python_type_to_json_schema` 补 Union 多分支 → anyOf）的直接依据。
+    """
+    meta = get_function_metadata("list_tasks", tools.list_tasks)
+    status_schema = meta["parameters"]["properties"]["status"]
+
+    assert status_schema["anyOf"] == [
+        {"type": "string"},
+        {"type": "array", "items": {"type": "string"}},
+    ]
+    assert "status" not in meta["parameters"]["required"]
+
+
+def test_list_tasks_status_schema_documents_every_state_and_case_insensitivity():
+    """七个合法值 + 大小写不敏感必须写在**描述**里。
+
+    为什么不在 schema 里放 `enum`：`enum` 只能是纯大写七个值，而实现接受小写
+    （`TaskStatus.value_of(..., upper())`）——MCP 的 jsonschema 校验会把 `"todo"`
+    直接判成 `'todo' is not one of [...]` 拒掉，等于用 schema 把一个合法调用判死。
+    「描述写清 + service 层逐值校验」既能约束又不会误杀，见下面的 jsonschema 用例。
+    """
+    meta = get_function_metadata("list_tasks", tools.list_tasks)
+    desc = meta["parameters"]["properties"]["status"]["description"]
+
+    for state in ("TODO", "PENDING", "IN_PROGRESS", "ON_HOLD", "REVIEWING", "DONE", "CANCELLED"):
+        assert state in desc
+    assert "数组" in desc
+    assert "大小写" in desc and "todo" in desc      # 明确举例小写等价
+    assert "整单报错" in desc                        # 不静默丢弃非法项
+    assert "open_only" in desc                      # 与 open_only 的互斥关系不变
+
+
+def test_list_tasks_status_schema_accepts_single_value_and_array():
+    """用 jsonschema 按 MCP 层同一口径真校验：单值 / 数组 / 小写都放行，仅类型错误被拒。"""
+    import jsonschema
+
+    meta = get_function_metadata("list_tasks", tools.list_tasks)
+    pure_schema = {"anyOf": meta["parameters"]["properties"]["status"]["anyOf"]}
+
+    jsonschema.validate("TODO", pure_schema)          # 单值（现状用法，不能回归）
+    jsonschema.validate("todo", pure_schema)          # 小写：MCP 层不会拒（若用 enum 就会拒）
+    jsonschema.validate(["done", "REVIEWING"], pure_schema)  # 数组
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(123, pure_schema)         # 类型错误仍被拒
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_forwards_status_as_is(monkeypatch):
+    """工具层不解析 status：单值/数组都原样透传，解析与报错统一由服务层负责。"""
+    single = await _call_tool_list_tasks(monkeypatch, status="TODO")
+    assert single["status"] == "TODO"
+
+    array = await _call_tool_list_tasks(monkeypatch, status=["todo", "REVIEWING"])
+    assert array["status"] == ["todo", "REVIEWING"]
 
 
 def test_get_task_detail_exists():

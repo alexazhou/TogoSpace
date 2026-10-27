@@ -269,10 +269,16 @@
     ]
   },
   "list_tasks": {
-    "description": "查询协作任务列表。assignee / reviewer / scope 三者必须传其一；total > count 表示结果被截断。",
+    "description": "查询协作任务列表。assignee / reviewer / scope 三者必须传其一；total > count 表示结果被截断。\n每个任务含 assignee_name / reviewer_name，无需再查 Agent 名字。",
     "parameters": {
       "assignee": {
         "description": "按执行人 Agent ID 过滤",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "limit": {
+        "description": "本次返回条数，默认 20，取值 1-200，超出范围按边界收敛（实际生效值在返回体 limit 字段回显）",
         "schema": {
           "type": "integer"
         }
@@ -299,9 +305,19 @@
         }
       },
       "status": {
-        "description": "按状态过滤（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）；指定时 open_only 不生效",
+        "description": "按状态过滤，可传单个状态或状态数组（如 \"TODO\" 或 [\"TODO\",\"DONE\"]）。有效值 TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED，不区分大小写（\"todo\" 等价 \"TODO\"）；含非法值时整单报错并列出非法项（不静默丢弃）；指定时 open_only 不生效",
         "schema": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          ]
         }
       }
     },

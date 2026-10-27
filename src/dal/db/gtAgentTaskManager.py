@@ -62,7 +62,7 @@ def _filtered_task_query(
     team_id: int,
     assignee_id: int | None = None,
     reviewer_id: int | None = None,
-    status: TaskStatus | None = None,
+    status: TaskStatus | list[TaskStatus] | None = None,
     exclude_statuses: list[TaskStatus] | None = None,
     agent_ids: list[int] | None = None,
 ):
@@ -75,6 +75,9 @@ def _filtered_task_query(
     主管必须能看到「自己作为验收人」的任务，只按 assignee 过滤会漏。
     与 `assignee_id` / `reviewer_id` 的精确过滤是 **AND** 关系（两者只会在
     「调用方已给出明确过滤目标」以外的场景出现，同时传属于收紧而非放宽）。
+
+    `status` 接受**单值或列表**：列表走 `IN`（任一命中），单值仍走 `==`。
+    单值路径刻意不合并成单元素列表，避免既有 SQL 与断言口径被无谓改动。
     """
     query = GtAgentTask.select().where(GtAgentTask.team_id == team_id)
     if assignee_id is not None:
@@ -86,7 +89,10 @@ def _filtered_task_query(
             (GtAgentTask.assignee_id.in_(agent_ids))
             | (GtAgentTask.reviewer_id.in_(agent_ids))
         )
-    if status is not None:
+    if isinstance(status, list):
+        if status:  # 空列表不能进 IN（peewee 会生成恒假条件，语义上也应由调用方拦掉）
+            query = query.where(GtAgentTask.status.in_(status))
+    elif status is not None:
         query = query.where(GtAgentTask.status == status)
     if exclude_statuses:
         query = query.where(GtAgentTask.status.not_in(exclude_statuses))
@@ -97,7 +103,7 @@ async def list_tasks(
     team_id: int,
     assignee_id: int | None = None,
     reviewer_id: int | None = None,
-    status: TaskStatus | None = None,
+    status: TaskStatus | list[TaskStatus] | None = None,
     exclude_statuses: list[TaskStatus] | None = None,
     limit: int = 20,
     agent_ids: list[int] | None = None,
@@ -106,6 +112,7 @@ async def list_tasks(
 
     `agent_ids` 非空时只返回「assignee 或 reviewer 落在集合内」的任务；
     `None` 表示不加该过滤（行为与新增该参数前完全一致）。
+    `status` 可传单值或列表（列表 = 任一命中）。
     """
     query = (
         _filtered_task_query(team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids)
@@ -119,7 +126,7 @@ async def count_tasks(
     team_id: int,
     assignee_id: int | None = None,
     reviewer_id: int | None = None,
-    status: TaskStatus | None = None,
+    status: TaskStatus | list[TaskStatus] | None = None,
     exclude_statuses: list[TaskStatus] | None = None,
     agent_ids: list[int] | None = None,
 ) -> int:

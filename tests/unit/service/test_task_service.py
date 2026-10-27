@@ -91,6 +91,16 @@ def mock_model_to_dict():
         yield
 
 
+@pytest.fixture(autouse=True)
+def agent_manager_mock():
+    """统一 mock Agent DAL：`list_tasks` 会给每个任务补 `assignee_name` / `reviewer_name`，
+    走的是一次批量 `get_agents_by_ids`。默认返回空列表（等价于「Agent 都查不到」），
+    这样没有单独 patch 的用例也不会去访问真实数据库；需要具体名字的用例自己 patch 本 fixture。"""
+    with patch("service.taskService.gtAgentManager") as mock_agents:
+        mock_agents.get_agents_by_ids = AsyncMock(return_value=[])
+        yield mock_agents
+
+
 @pytest.fixture
 def saved_task():
     task = MagicMock(spec=GtAgentTask)
@@ -513,6 +523,175 @@ async def test_list_tasks_explicit_status_is_passed_to_both_queries(task_manager
     )
     task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
     task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_status_array_is_passed_as_list_to_both_queries(task_manager_mock):
+    """`status` 传数组 ⇒ DAL 收到 `list[TaskStatus]`（走 IN），单值/总数查询同口径。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    await taskService.list_tasks(team_id=1, assignee_id=11, status=["TODO", "done"])
+
+    expected = dict(
+        team_id=1,
+        assignee_id=11,
+        reviewer_id=None,
+        status=[TaskStatus.TODO, TaskStatus.DONE],  # 大小写混合已归一
+        exclude_statuses=None,
+        agent_ids=None,
+    )
+    task_manager_mock.list_tasks.assert_awaited_once_with(limit=20, **expected)
+    task_manager_mock.count_tasks.assert_awaited_once_with(**expected)
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_status_array_is_deduplicated_in_order(task_manager_mock):
+    """重复值去重但保持首次出现顺序（避免 `IN (TODO, TODO)` 这类无意义 SQL）。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    await taskService.list_tasks(team_id=1, status=["done", "TODO", "DONE"])
+
+    assert task_manager_mock.list_tasks.await_args.kwargs["status"] == [TaskStatus.DONE, TaskStatus.TODO]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_status_array_rejects_whole_request_on_invalid_value(task_manager_mock):
+    """数组里有非法值 ⇒ **整体报错**并列出非法项，不静默丢弃后返回一个看似正常的子集。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    result = await taskService.list_tasks(team_id=1, status=["TODO", "xxx"])
+
+    assert result["success"] is False
+    assert result["error_code"] == "invalid_status"
+    assert "xxx" in result["message"]
+    assert "TODO" in result["message"]  # 有效值清单也给出来
+    task_manager_mock.list_tasks.assert_not_called()
+    task_manager_mock.count_tasks.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_status_array_empty_is_rejected(task_manager_mock):
+    """空数组不能当成「不过滤」静默放行（那会返回全量，语义上与调用意图相反）。"""
+    result = await taskService.list_tasks(team_id=1, status=[])
+
+    assert result["success"] is False
+    assert result["error_code"] == "invalid_status"
+    assert "为空" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_status_array_ignores_open_only(task_manager_mock):
+    """显式传 status（含数组）时 `open_only` 不生效：不得再叠加排除条件。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    await taskService.list_tasks(team_id=1, status=["DONE"], open_only=True)
+
+    kwargs = task_manager_mock.list_tasks.await_args.kwargs
+    assert kwargs["status"] == [TaskStatus.DONE]
+    assert kwargs["exclude_statuses"] is None
+
+
+# ---------------------------------------------------------------------------
+# #81：返回体补 assignee_name / reviewer_name（一次批量查，禁止 N+1）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_adds_assignee_and_reviewer_display_names(
+    task_manager_mock, agent_manager_mock
+):
+    """每个任务补 `assignee_name` / `reviewer_name`（display_name 口径）。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[
+        _build_task(id=1, assignee_id=11, reviewer_id=20),
+    ])
+    task_manager_mock.count_tasks = AsyncMock(return_value=1)
+    agent_manager_mock.get_agents_by_ids = AsyncMock(return_value=[
+        SimpleNamespace(id=11, display_name="李哥"),
+        SimpleNamespace(id=20, display_name="小马哥"),
+    ])
+
+    result = await taskService.list_tasks(team_id=1, scope="self", caller_id=11)
+
+    task = result["tasks"][0]
+    assert task["assignee_id"] == 11 and task["assignee_name"] == "李哥"
+    assert task["reviewer_id"] == 20 and task["reviewer_name"] == "小马哥"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_resolves_agent_names_with_one_batched_query(
+    task_manager_mock, agent_manager_mock
+):
+    """**防 N+1 回归**：多个任务、多个不同 Agent，只允许一次 `get_agents_by_ids`。
+
+    改成逐条 `get_agent_by_id` 会让 20 条任务的列表多打几十次库，本用例直接计数拦下。
+    """
+    task_manager_mock.list_tasks = AsyncMock(return_value=[
+        _build_task(id=1, assignee_id=11, reviewer_id=20),
+        _build_task(id=2, assignee_id=12, reviewer_id=20),
+        _build_task(id=3, assignee_id=11, reviewer_id=None),
+    ])
+    task_manager_mock.count_tasks = AsyncMock(return_value=3)
+    get_agents_by_ids = AsyncMock(return_value=[
+        SimpleNamespace(id=11, display_name="李哥"),
+        SimpleNamespace(id=12, display_name="阿张"),
+        SimpleNamespace(id=20, display_name="小马哥"),
+    ])
+    agent_manager_mock.get_agents_by_ids = get_agents_by_ids
+
+    result = await taskService.list_tasks(team_id=1, scope="self", caller_id=6)
+
+    assert result["count"] == 3
+    get_agents_by_ids.assert_awaited_once()
+    # 去重后一次查完：{11, 20, 12}（按首次出现顺序），不是 3 条任务 × 2 个字段
+    assert sorted(get_agents_by_ids.await_args.args[0]) == [11, 12, 20]
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_unknown_agent_falls_back_to_agent_id_placeholder(
+    task_manager_mock, agent_manager_mock
+):
+    """Agent 已删除 ⇒ 占位名 `Agent#<id>`（与 `agentTurnRunner` 同口径），不抛异常。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[
+        _build_task(id=1, assignee_id=99, reviewer_id=None),
+    ])
+    task_manager_mock.count_tasks = AsyncMock(return_value=1)
+    agent_manager_mock.get_agents_by_ids = AsyncMock(return_value=[])  # 查不到
+
+    result = await taskService.list_tasks(team_id=1, scope="self", caller_id=99)
+
+    task = result["tasks"][0]
+    assert task["assignee_name"] == "Agent#99"
+    assert task["reviewer_name"] is None  # reviewer_id=None ⇒ None，不是 "Agent#None"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_no_agents_skips_agent_query(task_manager_mock, agent_manager_mock):
+    """所有任务都没有 assignee/reviewer（或列表为空）⇒ 不去打 Agent 表。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[
+        _build_task(id=1, assignee_id=None, reviewer_id=None),
+    ])
+    task_manager_mock.count_tasks = AsyncMock(return_value=1)
+
+    result = await taskService.list_tasks(team_id=1)
+
+    assert result["tasks"][0]["assignee_name"] is None
+    assert result["tasks"][0]["reviewer_name"] is None
+    agent_manager_mock.get_agents_by_ids.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_echoes_limit(task_manager_mock):
+    """返回体回显**实际生效**的 limit（工具层已收敛过），便于模型判断是否被截断。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    result = await taskService.list_tasks(team_id=1, limit=5)
+
+    assert result["limit"] == 5
 
 
 @pytest.mark.asyncio

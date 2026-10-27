@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Union
 import asyncio
 import datetime
 import logging
@@ -20,9 +20,25 @@ from util import configUtil, i18nUtil
 
 logger = logging.getLogger(__name__)
 
-# list_tasks 工具层不对外暴露 limit（Agent 无需控制页大小），固定走内部默认值；
-# 服务层 taskService.list_tasks 仍保留 limit 可选，供控制器/前端接口使用。
+# list_tasks 工具层 limit 的默认值：不传时照旧走这个内部默认值（#62 的兼容口径不变），
+# 传了则透传并在工具层收敛到 [LIST_TASKS_MIN_LIMIT, LIST_TASKS_MAX_LIMIT]。
+# 收敛只发生在工具层——服务层 taskService.list_tasks 必须接受任意 limit，
+# 因为 Web 列表接口（agentController.py）按 500 / 1000 取数，收敛会截断页面数据。
 LIST_TASKS_DEFAULT_LIMIT = 20
+LIST_TASKS_MIN_LIMIT = 1
+LIST_TASKS_MAX_LIMIT = 200
+
+
+def _clamp_list_tasks_limit(limit: Optional[int]) -> int:
+    """把工具入参 `limit` 收敛成**实际生效值**（不传 / 超界都落到合法区间内）。
+
+    收敛而不是报错：模型传 10000 不该让整个查询失败，但也不能真去查 10000 条撑爆
+    上下文；边界收敛后由返回体的 `limit` 字段回显生效值，模型自己就能看出被收了。
+    `total` 不受这里影响（服务层 `count_tasks` 与 `limit` 无关），`total > count` 即被截断。
+    """
+    if limit is None:
+        return LIST_TASKS_DEFAULT_LIMIT
+    return max(LIST_TASKS_MIN_LIMIT, min(LIST_TASKS_MAX_LIMIT, limit))
 
 # get_task_detail 事件时间线的默认条数（Agent 侧只看最近几条，更早的用 list_task_events 翻页）。
 DEFAULT_EVENT_LIMIT = 3
@@ -1192,18 +1208,21 @@ async def list_tasks(
     assignee: Optional[int] = None,
     reviewer: Optional[int] = None,
     scope: Optional[Literal["self", "team"]] = None,
-    status: Optional[str] = None,
+    status: Optional[Union[str, list[str]]] = None,
     open_only: bool = True,
+    limit: Optional[int] = None,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
     """查询协作任务列表。assignee / reviewer / scope 三者必须传其一；total > count 表示结果被截断。
+    每个任务含 assignee_name / reviewer_name，无需再查 Agent 名字。
 
     Args:
         assignee: 按执行人 Agent ID 过滤
         reviewer: 按验收人 Agent ID 过滤
         scope: self=与我相关的任务；team=我可见范围内的任务
-        status: 按状态过滤（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）；指定时 open_only 不生效
+        status: 按状态过滤，可传单个状态或状态数组（如 "TODO" 或 ["TODO","DONE"]）。有效值 TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED，不区分大小写（"todo" 等价 "TODO"）；含非法值时整单报错并列出非法项（不静默丢弃）；指定时 open_only 不生效
         open_only: 只返回未完结任务（排除 DONE / CANCELLED），默认 True
+        limit: 本次返回条数，默认 20，取值 1-200，超出范围按边界收敛（实际生效值在返回体 limit 字段回显）
     """
     import service.taskService as taskService
 
@@ -1224,7 +1243,7 @@ async def list_tasks(
         reviewer_id=reviewer,
         status=status,
         open_only=open_only,
-        limit=LIST_TASKS_DEFAULT_LIMIT,
+        limit=_clamp_list_tasks_limit(limit),
         scope=scope,
         caller_id=_context.agent_id if _context is not None else None,
     )
