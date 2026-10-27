@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import inspect
+from typing import Optional, Union
 
 import pytest
 
@@ -20,6 +21,7 @@ from service.funcToolService.funcToolType import (
     _parse_param_descriptions,
     _strip_bullet,
     get_function_metadata,
+    python_type_to_json_schema,
 )
 from service.agentService.toolRegistry import CATEGORY_CONFIG
 
@@ -448,4 +450,82 @@ def test_no_misnamed_param_lines_in_tools_docstrings():
     assert scanned > 0, "反向 lint 没扫到任何参数行，用例可能空转"
     assert not problems, (
         "以下 `Args:` 段参数行不在函数签名里（疑似拼错或幽灵参数）：\n" + "\n".join(problems)
+    )
+
+
+# ---------------------------------------------------------------------------
+# 多分支 Union：全局生成器**不**展开成 anyOf，而是回退成 {"type": "object"}
+# ---------------------------------------------------------------------------
+
+def test_multi_branch_union_falls_back_to_object_not_any_of():
+    """全局生成器维持 b33a7318 行为：多分支 Union 不展开成 anyOf（Operator 裁定不动生成器）。
+
+    背景：`Union[A, B]` 这类多分支联合，生成器给模型的是一个**裸** `{"type": "object"}`
+    ——既没说能传什么，也没有 enum。`65908bd9` 曾把它改成逐分支 `anyOf` 展开，后来
+    Operator 裁定回退（改生成器会牵动全部工具参数形态），于是又有 `53cc4cee` 的回退。
+
+    坑在于：**回退之后这条分支零覆盖**——`list_tasks.status` 用的是
+    `Optional[list[Literal[...]]]`，走的是「`Union[T, None]` 剥掉 None」那条路，
+    多分支这段根本不执行；全仓 26 个工具也没有任何多分支 Union 参数。所以那时候
+    把生成器换回 anyOf 版跑全量是**一行都不红**（实测 1466 passed），只能靠人工
+    `git diff` 发现。本用例就是把这个「回退」钉住：一旦有人再把分支展开成 anyOf，
+    这里必然变成 `{"anyOf": [{"type": "string"}, {"type": "array", ...}]}` 而失败。
+
+    同时钉住「`Optional[...]` 包裹**不改变**结论」：`Optional[Union[str, list[str]]]`
+    是三分支（含 `NoneType`），不能被误判成「`Union[T, None]` 剥 None」那条更早的
+    分支——否则它会退化成 `{"anyOf": [...]}`，与本用例断言相反。
+    """
+    assert python_type_to_json_schema(Optional[Union[str, list[str]]]) == {"type": "object"}
+
+    # 裸多分支 Union（无 NoneType）同样是回退，不是展开。
+    assert python_type_to_json_schema(Union[str, list[str]]) == {"type": "object"}
+    # `A | B` 语法与 `typing.Union` 是同一件事，必须给同一个结果。
+    assert python_type_to_json_schema(str | list[str]) == {"type": "object"}
+
+    # 反向对照：这两条是「会走别的分支」的形态，不能被上面的断言顺带盖过去。
+    # `Union[T, None]` 剥掉 None 退化到 T 的 schema（不是 object、也不是 anyOf）。
+    assert python_type_to_json_schema(Optional[str]) == {"type": "string"}
+    # 多分支 Union 里出现 NoneType 时，NoneType 分支不参与「是否只剥 None」的判断。
+    assert python_type_to_json_schema(Optional[Union[str, int, list[str]]]) == {"type": "object"}
+
+
+def _multi_branch_union_params() -> list[str]:
+    """扫描所有本地工具，找出参数类型是「多分支 Union」的那些（正常应为空）。"""
+    from typing import get_args, get_origin, get_type_hints
+    from types import UnionType
+
+    hits: list[str] = []
+    for tool_name, func in _iter_local_tools():
+        try:
+            hints = get_type_hints(func)
+        except Exception:  # noqa: BLE001 - 取不到类型提示就跳过，本用例只做守卫
+            continue
+        for param_name, param_type in hints.items():
+            if param_name.startswith("_"):
+                continue
+            if get_origin(param_type) not in (Union, UnionType):
+                continue
+            args = get_args(param_type)
+            if len(args) == 2 and type(None) in args:
+                continue  # `Optional[T]`：走剥 None 分支，不是多分支 Union
+            hits.append(f"{tool_name}.{param_name}: {param_type}")
+    return hits
+
+
+def test_no_local_tool_uses_multi_branch_union_param():
+    """全仓本地工具当前**没有**任何多分支 Union 参数 —— 这是上一条护栏的「为什么」。
+
+    `python_type_to_json_schema` 的多分支 Union 分支现在只有上面那条用例覆盖，
+    没有任何真实工具会走到它。所以这里立一个信号灯：**谁第一个给工具参数写了
+    多分支 Union，这条就红**，提示他去看一眼生成器给出的到底是 `{"type": "object"}`
+    够不够用（很可能不够：模型拿不到任何类型信息，单值/数组二选一这种语义表达不出来）。
+
+    红的时候不要直接把参数改掉绕过去，也不要顺手改生成器 —— 生成器形态归 Operator 裁定
+    （见 `docs/` 与 #83 记录），先按上一条用例的结论确认自己要的行为，再决定。
+    """
+    hits = _multi_branch_union_params()
+    assert not hits, (
+        "出现了首个多分支 Union 工具参数，生成器对它只回退成 {\"type\": \"object\"}：\n"
+        + "\n".join(hits)
+        + "\n请确认这是你要的 schema；若需要别的形态，先跟 Operator 确认再动生成器。"
     )
