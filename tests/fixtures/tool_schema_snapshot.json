@@ -311,19 +311,20 @@
         }
       },
       "status": {
-        "description": "按状态过滤，可传单个状态或状态数组（如 \"TODO\" 或 [\"TODO\",\"DONE\"]）。有效值 TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED，不区分大小写（\"todo\" 等价 \"TODO\"）；含非法值时整单报错并列出非法项（不静默丢弃）；指定时 open_only 不生效",
+        "description": "按状态过滤，传状态数组（如 [\"TODO\",\"DONE\"]）。有效值（大写）TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED；数组含非法值时整单报错并列出非法项（不静默丢弃）；指定时 open_only 不生效",
         "schema": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            }
-          ]
+          "items": {
+            "enum": [
+              "TODO",
+              "PENDING",
+              "IN_PROGRESS",
+              "ON_HOLD",
+              "REVIEWING",
+              "DONE",
+              "CANCELLED"
+            ]
+          },
+          "type": "array"
         }
       }
     },
