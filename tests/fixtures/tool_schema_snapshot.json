@@ -123,7 +123,7 @@
     "description": "结束行动，把行动机会让给下一位成员；完成所有发言和工具调用后，或确认无需行动时调用。",
     "parameters": {
       "confirm_no_need_talk": {
-        "description": "本轮未在收到消息通知的房间发言、且确认无需发言时设 true；已在对应房间发言时不要设，直接调用即可。直接输出的文字不算房间发言（须用 send_chat_msg），用户看不到。",
+        "description": "本轮未在收到消息通知的房间发言、且确认无需发言时设 true；已在对应房间发言时不得设置（直接调用即可）。直接输出的文字不算房间发言（须用 send_chat_msg），用户看不到。",
         "schema": {
           "type": "boolean"
         }

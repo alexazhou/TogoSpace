@@ -968,7 +968,7 @@ async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: 
     """结束行动，把行动机会让给下一位成员；完成所有发言和工具调用后，或确认无需行动时调用。
 
     Args:
-        confirm_no_need_talk: 本轮未在收到消息通知的房间发言、且确认无需发言时设 true；已在对应房间发言时不要设，直接调用即可。直接输出的文字不算房间发言（须用 send_chat_msg），用户看不到。
+        confirm_no_need_talk: 本轮未在收到消息通知的房间发言、且确认无需发言时设 true；已在对应房间发言时不得设置（直接调用即可）。直接输出的文字不算房间发言（须用 send_chat_msg），用户看不到。
     """
     if _context is None:
         logger.warning("结束行动失败，上下文未设置")
