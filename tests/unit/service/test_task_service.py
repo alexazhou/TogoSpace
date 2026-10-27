@@ -548,6 +548,36 @@ async def test_list_tasks_status_array_is_passed_as_list_to_both_queries(task_ma
 
 
 @pytest.mark.asyncio
+async def test_list_tasks_bare_status_string_is_not_iterated_per_character(task_manager_mock):
+    """**裸字符串陷阱回归测试**：`status="TODO"` 必须等同于 `status=["TODO"]`。
+
+    `run_tool_call` 不做类型校验，模型可能仍按老习惯传裸字符串。若实现对列表
+    直接 `for s in status`，字符串会被**逐字符迭代**成 `T` / `O` / `D` / `O`，
+    报「非法状态 T」——一个看起来像用户输错、实际是代码 bug 的报错。
+    本用例同时钉住「单值走 ==、列表走 IN 单元素」两条路径产出等价的 DAL 参数。
+    """
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
+
+    await taskService.list_tasks(team_id=1, status="TODO")
+    single_kwargs = dict(task_manager_mock.list_tasks.await_args.kwargs)
+
+    task_manager_mock.list_tasks.reset_mock()
+    task_manager_mock.count_tasks.reset_mock()
+    await taskService.list_tasks(team_id=1, status=["TODO"])
+    bare_kwargs = dict(task_manager_mock.list_tasks.await_args.kwargs)
+
+    # 单值 ⇒ TaskStatus.TODO（走 ==）；单元素列表 ⇒ [TaskStatus.TODO]（走 IN）
+    assert single_kwargs["status"] == TaskStatus.TODO
+    assert bare_kwargs["status"] == [TaskStatus.TODO]
+    # 其余过滤条件必须完全一致（只有 status 的表达形式不同）
+    for key in ("team_id", "assignee_id", "reviewer_id", "exclude_statuses", "agent_ids", "limit", "order"):
+        assert single_kwargs[key] == bare_kwargs[key], key
+    # 绝不出现「逐字符迭代」的痕迹
+    assert "T" not in bare_kwargs["status"]
+
+
+@pytest.mark.asyncio
 async def test_list_tasks_status_array_is_deduplicated_in_order(task_manager_mock):
     """重复值去重但保持首次出现顺序（避免 `IN (TODO, TODO)` 这类无意义 SQL）。"""
     task_manager_mock.list_tasks = AsyncMock(return_value=[])

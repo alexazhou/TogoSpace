@@ -253,6 +253,20 @@ def _seed_tasks_with_priorities(rows: list[tuple[int, TaskPriority]]) -> None:
         )
 
 
+def test_status_bare_string_and_single_item_list_match_identical_rows(task_db):
+    """**裸字符串 = 单元素列表**：`status=TaskStatus.TODO` 与 `status=[TaskStatus.TODO]` 结果相同。
+
+    这两条路径在 SQL 上分别是 `==` 与 `IN (...)`，语义必须等价——服务层同时接受
+    「单值」和「数组」，若两条路径查出不同结果，就是口径分叉。
+    """
+    _seed_tasks_with_statuses([TaskStatus.TODO, TaskStatus.DONE, TaskStatus.TODO])
+
+    single = _ids(gtAgentTaskManager._filtered_task_query(1, status=TaskStatus.TODO))
+    listed = _ids(gtAgentTaskManager._filtered_task_query(1, status=[TaskStatus.TODO]))
+
+    assert single == listed == [1, 3]
+
+
 def _ordered_ids(task_db, order: str) -> list[int]:
     """按指定排序执行查询，返回 id 列表。
 
