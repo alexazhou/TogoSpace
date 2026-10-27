@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from typing import Optional
 
 import pytest
 
@@ -246,55 +247,103 @@ async def test_list_tasks_echoes_effective_limit_in_result(monkeypatch):
     assert res["limit"] == 50
 
 
-def test_list_tasks_status_schema_is_any_of_single_or_array():
-    """`status` schema 必须同时描述「单值」与「数组」：`anyOf[{string}, {array of string}]`。
+_ALL_STATES = ["TODO", "PENDING", "IN_PROGRESS", "ON_HOLD", "REVIEWING", "DONE", "CANCELLED"]
 
-    只写 `list[str]` / `list[Literal[...]]` 的话，MCP 层（`mcp/server/lowlevel/server.py`
-    默认 `validate_input=True`，用 `jsonschema.validate` 校验入参）会以
-    `'TODO' is not of type 'array'` 把现有单值用法在**进入实现前**就拒掉——实现层兼容也没用。
-    这正是 #81 选 A 方案（给 `python_type_to_json_schema` 补 Union 多分支 → anyOf）的直接依据。
+
+def test_list_tasks_status_schema_is_array_with_seven_item_enum():
+    """`status` 导出 schema **必须带 enum**：`{"type":"array","items":{"enum":[7 项]}}`。
+
+    Operator 已裁定 B（`Optional[list[Literal[...]]]`）：宁可
+    `claude_sdk` 路径只支持列表，也不动全局 schema 生成器。
+    只断言 `type == array` 是不够的——`list[str]` 也能过，那样模型拿到的是
+    「任意字符串数组」，7 个合法值一个都没告诉它，等于本单要根治的问题没治。
+    所以这里**逐项断言 enum 的内容与顺序**。
     """
     meta = get_function_metadata("list_tasks", tools.list_tasks)
     status_schema = meta["parameters"]["properties"]["status"]
 
-    assert status_schema["anyOf"] == [
-        {"type": "string"},
-        {"type": "array", "items": {"type": "string"}},
-    ]
+    assert status_schema["type"] == "array"
+    assert status_schema["items"]["enum"] == _ALL_STATES
+    assert "anyOf" not in status_schema          # A 方案（anyOf）已作废，不得回潮
     assert "status" not in meta["parameters"]["required"]
 
 
-def test_list_tasks_status_schema_documents_every_state_and_case_insensitivity():
-    """七个合法值 + 大小写不敏感必须写在**描述**里。
+def test_list_tasks_status_enum_guard_can_turn_red():
+    """护栏能红：注解退化成 `list[str]` 时，enum 消失 ⇒ 上面那条断言必然失败。
 
-    为什么不在 schema 里放 `enum`：`enum` 只能是纯大写七个值，而实现接受小写
-    （`TaskStatus.value_of(..., upper())`）——MCP 的 jsonschema 校验会把 `"todo"`
-    直接判成 `'todo' is not one of [...]` 拒掉，等于用 schema 把一个合法调用判死。
-    「描述写清 + service 层逐值校验」既能约束又不会误杀，见下面的 jsonschema 用例。
+    「永远不会红」的断言等于没有。这里用一个临时函数造出退化形态，证明差异确实可见：
+    `list[str]` ⇒ `items == {"type": "string"}`（没有 enum）。
+    """
+    def degenerate_tool(status: Optional[list[str]] = None) -> dict:
+        """退化成 list[str] 的反面样例（仅用于验证护栏能红）。
+
+        Args:
+            status: 退化后的状态参数
+        """
+        return {}
+
+    meta = get_function_metadata("degenerate_tool", degenerate_tool)
+    degenerate = meta["parameters"]["properties"]["status"]
+
+    assert degenerate["type"] == "array"
+    assert "enum" not in degenerate["items"]                    # 退化形态：没有 enum
+    assert degenerate["items"] != {"enum": _ALL_STATES}         # ⇒ 正常形态的断言会红
+
+
+def test_list_tasks_status_description_does_not_promise_single_string():
+    """描述**不得**承诺「可传单个状态」：`claude_sdk` 路径下做不到（Operator 明示取舍）。
+
+    native / tsp 驱动无 JSON Schema 校验，实现层 `isinstance(status, str)` 仍兼容裸字符串；
+    但那是**安全垫，不进描述**——写进去就是对 claude_sdk 模型承诺一个会被 MCP 层拒掉的用法。
     """
     meta = get_function_metadata("list_tasks", tools.list_tasks)
     desc = meta["parameters"]["properties"]["status"]["description"]
 
-    for state in ("TODO", "PENDING", "IN_PROGRESS", "ON_HOLD", "REVIEWING", "DONE", "CANCELLED"):
-        assert state in desc
     assert "数组" in desc
-    assert "大小写" in desc and "todo" in desc      # 明确举例小写等价
+    assert "单个状态" not in desc and "可传单个" not in desc
+    for state in _ALL_STATES:
+        assert state in desc
     assert "整单报错" in desc                        # 不静默丢弃非法项
     assert "open_only" in desc                      # 与 open_only 的互斥关系不变
 
 
-def test_list_tasks_status_schema_accepts_single_value_and_array():
-    """用 jsonschema 按 MCP 层同一口径真校验：单值 / 数组 / 小写都放行，仅类型错误被拒。"""
+def test_list_tasks_status_description_does_not_promise_case_insensitive():
+    """描述**不得**写「不区分大小写」：`enum` 只有 7 个纯大写值，claude_sdk 会把 `"todo"` 拒掉。
+
+    这处是本轮新发现的「描述与 claude_sdk 实际行为不一致」：实现层 `TaskStatus.value_of(
+    status.upper())` 接受小写（native 路径可用），但导出的 `enum` 是纯大写，
+    MCP 层 `jsonschema.validate` 在进实现之前就拒了 `"todo"`。
+    所以描述里已把「不区分大小写 / \"todo\" 等价 \"TODO\"」删掉，改为明确标注大写；
+    下面同时钉住「不得回潮」与「必须写明大写」两侧。
+    """
+    meta = get_function_metadata("list_tasks", tools.list_tasks)
+    desc = meta["parameters"]["properties"]["status"]["description"]
+
+    assert "不区分大小写" not in desc
+    assert '"todo"' not in desc and "todo" not in desc   # 不得给模型小写示例
+    assert "大写" in desc                                # 必须明确只收大写，避免模型试小写
+
+
+def test_list_tasks_status_schema_behavior_under_mcp_validation():
+    """按 MCP 层同一口径（`jsonschema.validate`）实测导出 schema 的实际后果，留档。
+
+    Operator 裁定 B 时明确接受「`claude_sdk` 下只支持传列表」。这里把后果钉死：
+    - 数组（大写）⇒ 通过；
+    - **裸字符串 ⇒ 被拒**（`'TODO' is not of type 'array'`）；
+    - **数组里的小写 ⇒ 也被拒**（enum 只有大写）。
+    第三条是本轮新发现的**描述与 claude_sdk 实际行为的不一致**（描述写了
+    「不区分大小写」，但 enum 会把 `"todo"` 拒掉），已在回报里单独提出待 Operator 定夺。
+    本用例只记录事实，不代表我们认可这处不一致。
+    """
     import jsonschema
 
-    meta = get_function_metadata("list_tasks", tools.list_tasks)
-    pure_schema = {"anyOf": meta["parameters"]["properties"]["status"]["anyOf"]}
+    schema = get_function_metadata("list_tasks", tools.list_tasks)["parameters"]["properties"]["status"]
 
-    jsonschema.validate("TODO", pure_schema)          # 单值（现状用法，不能回归）
-    jsonschema.validate("todo", pure_schema)          # 小写：MCP 层不会拒（若用 enum 就会拒）
-    jsonschema.validate(["done", "REVIEWING"], pure_schema)  # 数组
+    jsonschema.validate(["TODO", "DONE"], schema)                     # 正常用法
     with pytest.raises(jsonschema.ValidationError):
-        jsonschema.validate(123, pure_schema)         # 类型错误仍被拒
+        jsonschema.validate("TODO", schema)                           # 裸字符串被拒（Operator 接受）
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(["done"], schema)                         # 小写被 enum 拒（待定夺）
 
 
 @pytest.mark.asyncio

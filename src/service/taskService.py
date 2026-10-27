@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from typing import NamedTuple, Optional, Union
+from typing import NamedTuple, Optional, Sequence, Union
 
 from constants import (
     EVENT_CONTENT_MAX_CHARS,
@@ -721,7 +721,7 @@ async def list_tasks(
     team_id: int,
     assignee_id: Optional[int] = None,
     reviewer_id: Optional[int] = None,
-    status: Optional[Union[str, list[str]]] = None,
+    status: Optional[Union[str, Sequence[str]]] = None,
     open_only: bool = False,
     limit: int = 20,
     scope: Optional[str] = None,
@@ -767,11 +767,19 @@ async def list_tasks(
             "error_code": "invalid_scope",
         }
 
+    # 裸字符串统一先归一成列表：`for s in "TODO"` 会逐字符迭代成 T/O/D/O，
+    # 报出「非法状态 T」——一个看起来像用户输错、实际是实现 bug 的报错。
+    # native / tsp 驱动不校验入参类型，模型仍可能按老习惯传裸字符串，所以这层必须在。
+    # `single_value=True` 只用于最后**保留单值走 `==` 的既有 SQL**（见下方分支）。
+    single_value = isinstance(status, str)
+    if isinstance(status, str):
+        status = [status]
+
     status_enum: Optional[TaskStatus] = None
     status_enum_list: list[TaskStatus] | None = None
     exclude_statuses: list[TaskStatus] | None = None
     if status is not None:
-        if isinstance(status, (list, tuple)):
+        if not isinstance(status, str):  # 已归一成列表（含 tuple / Sequence）
             parsed: list[TaskStatus] = []
             invalid: list[str] = []
             for raw in status:
@@ -793,9 +801,14 @@ async def list_tasks(
                     "message": "status 列表为空；如需不按状态过滤请省略该参数",
                     "error_code": "invalid_status",
                 }
-            status_enum_list = parsed
+            if single_value:
+                # 单值仍走 `==`（DAL 的 `status_enum` 分支）：既有 SQL 与
+                # `assert_awaited_once_with(status=TaskStatus.X, ...)` 断言口径不变。
+                status_enum = parsed[0]
+            else:
+                status_enum_list = parsed
         else:
-            status_enum = TaskStatus.value_of(status.upper())
+            status_enum = TaskStatus.value_of(str(status).upper())
             if status_enum is None:
                 return {"success": False, "message": f"无效的状态：{status}"}
     elif open_only:

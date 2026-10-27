@@ -135,36 +135,14 @@ def _parse_param_descriptions(docstring: str, valid_names: set[str]) -> dict[str
 
 
 def python_type_to_json_schema(python_type: Any) -> Dict[str, Any]:
-    """将 Python 类型转换为 JSON Schema 类型定义。
-
-    `Union[A, B, ...]` / `A | B` 领域内一律产出 `{"anyOf": [各分支 schema...]}`。
-
-    这里有个必须守住的坑：旧实现对「多分支 Union」直接返回 `{"type": "object"}`，
-    模型收到一个既没有 `type` 含义、也没有 `enum` 的 object 参数，**完全不知道能传什么**
-    （比不声明还糟）。现在改为按分支展开，且 `Optional[T]`（`Union[T, None]`）仍按
-    「剥掉 NoneType、退化到 T 的 schema」处理——那是可选参数的主流写法，产出必须保持
-    向后兼容（`{"type": "string"}` 而不是 `{"anyOf": [...]}`），否则 69 个参数的 schema 会集体变形。
-
-    为什么不用「把联合类型改写成更窄的单一写法」绕开：`list_tasks.status` 需要同时接受
-    单值 `"TODO"` 与数组 `["TODO","DONE"]`。若只申明为 `list[Literal[...]]`，MCP 层
-    （`mcp/server/lowlevel/server.py` 默认 `validate_input=True`）会用 jsonschema 校验入参，
-    单值会以 `'TODO' is not of type 'array'` **在进入实现前就被拒绝**，实现层再做兼容也没用。
-    """
+    """将 Python 类型转换为 JSON Schema 类型定义"""
     # 处理 Optional[T] 或 Union[T, None]
     if get_origin(python_type) in (Union, UnionType):
         args: tuple[Any, ...] = get_args(python_type)
         if len(args) == 2 and type(None) in args:
             non_none_type = args[0] if args[1] is type(None) else args[1]
             return python_type_to_json_schema(non_none_type)
-        # 多分支联合：逐分支展开成 anyOf（`NoneType` 分支在这个位置没有合法映射，直接跳过）。
-        branches = [
-            python_type_to_json_schema(arg) for arg in args if arg is not type(None)
-        ]
-        if not branches:
-            raise TypeError(f"Union 只含 NoneType，无法生成 schema: {python_type}")
-        if len(branches) == 1:
-            return branches[0]
-        return {"anyOf": branches}
+        return {"type": "object"}
 
     # 处理 Literal["a", "b", ...]
     if get_origin(python_type) is Literal:

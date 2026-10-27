@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional
 import asyncio
 import datetime
 import logging
@@ -1223,7 +1223,9 @@ async def list_tasks(
     assignee: Optional[int] = None,
     reviewer: Optional[int] = None,
     scope: Optional[Literal["self", "team"]] = None,
-    status: Optional[Union[str, list[str]]] = None,
+    status: Optional[
+        list[Literal["TODO", "PENDING", "IN_PROGRESS", "ON_HOLD", "REVIEWING", "DONE", "CANCELLED"]]
+    ] = None,
     name_keyword: Optional[str] = None,
     open_only: bool = True,
     limit: Optional[int] = None,
@@ -1237,7 +1239,7 @@ async def list_tasks(
         reviewer: 按验收人 Agent ID 过滤
         scope: self=与我相关的任务；team=我可见范围内的任务
         name_keyword: 按人名搜任务（不是任务标题）：匹配执行人或验收人的名字，如 "网关" 能命中 display_name 为「网关开发」的人；中文名/英文标识符都行，大小写不敏感，匹配不到任何人时返回空列表
-        status: 按状态过滤，可传单个状态或状态数组（如 "TODO" 或 ["TODO","DONE"]）。有效值 TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED，不区分大小写（"todo" 等价 "TODO"）；含非法值时整单报错并列出非法项（不静默丢弃）；指定时 open_only 不生效
+        status: 按状态过滤，传状态数组（如 ["TODO","DONE"]）。有效值（大写）TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED；数组含非法值时整单报错并列出非法项（不静默丢弃）；指定时 open_only 不生效
         open_only: 只返回未完结任务（排除 DONE / CANCELLED），默认 True
         limit: 本次返回条数，默认 20，取值 1-50，超出范围按边界收敛（实际生效值在返回体 limit 字段回显）
     """
