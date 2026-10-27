@@ -32,9 +32,9 @@
 > ✅ 「**本机** arm64 + `/usr/local` 为 x86_64 brew 前缀的环境下，`timeout`/`gtimeout` 不可用；CI（ubuntu）不受影响。」
 > ❌ 「`timeout` 不能用。」
 
-#### 机制化入口：一行环境横幅（贴进 issue / 报告 / 群消息开头）
+#### 机制化入口：一行环境横幅
 
-口头要求靠自觉，贴一行元数据靠机制。**任何涉及环境结论的汇报，开头先贴这行**：
+口头要求靠自觉，贴一行元数据靠机制。**任何涉及环境结论的汇报，开头先贴这行**（贴进 issue / 报告 / 群消息开头，别只在心里过一遍）：
 
 ```bash
 printf "arch=%s | timeout=%s | gtimeout=%s | pytest-timeout=%s\n" \
@@ -276,10 +276,18 @@ print(r.returncode, r.stdout.strip())
 
 这是第二条「假红」的来源：**脚本里写 `if rc != 0: fail`，会把超时误判成业务失败。**
 
-| 方式 | 超时时发生了什么 | 怎么判断「这是超时」 |
-|---|---|---|
-| `perl -e 'alarm N; exec @ARGV'` | `alarm` 发 **SIGALRM(14)**，进程被默认动作杀掉 → **exit code = 142（128+14）** | `rc == 142` 即超时；shell 还会打印 `Alarm clock: 14` |
-| Python `subprocess.run(..., timeout=N)` | **抛 `subprocess.TimeoutExpired` 异常**，不是返回码 | `try/except TimeoutExpired`；⚠️ **`TimeoutExpired` 没有 `.returncode` 属性**，别照抄 `e.returncode` |
+| 方式 | 超时时发生了什么 | 退出码 | 怎么判断「这是超时」 |
+|---|---|---|---|
+| `perl -e 'alarm N; exec @ARGV'` | `alarm` 发 **SIGALRM(14)**，进程被默认动作杀掉 | **142 = 128 + 14** | `rc == 142`；shell 还会打印 `Alarm clock: 14` |
+| GNU `timeout N cmd` | 向命令发 SIGTERM，`timeout` **自己**以 124 退出 | **124** | `rc == 124` |
+| Python `subprocess.run(..., timeout=N)` | **抛 `subprocess.TimeoutExpired` 异常** | 无返回码（异常） | `try/except TimeoutExpired`；⚠️ **`TimeoutExpired` 没有 `.returncode` 属性**，别照抄 `e.returncode` |
+
+**为什么 perl 这条是 142？** 这是 POSIX shell 的**信号终止编码约定**，不是 perl 自定义的魔术数：
+
+> 子进程被**信号 N 杀死**时（没有正常 `exit()`），shell 记成 **`128 + N`**。
+
+`SIGALRM` 在 Linux/macOS 上都是 **14**，所以 `128 + 14 = 142`。同理：`SIGKILL(9) → 137`、`SIGTERM(15) → 143`、`SIGSEGV(11) → 139`、`SIGINT(2) → 130`。
+**看到 128~255 区间的退出码，第一反应应该是「它被信号杀了」，而不是「业务逻辑返回了这个数」。**
 
 实测：
 
@@ -289,17 +297,22 @@ Alarm clock: 14
 $ echo $?
 142                                        # 128 + 14(SIGALRM)
 
+$ /usr/local/bin/timeout 1 sleep 5
+$ echo $?
+124                                        # GNU timeout 自己的退出码，不是信号
+
 $ .venv/bin/python3 -c "
 import subprocess
 try:
     subprocess.run(['sleep','10'], timeout=2)
 except subprocess.TimeoutExpired as e:
-    print('timeout, returncode attr =', hasattr(e, 'returncode'))   # → False
+    print('timeout, has returncode attr =', hasattr(e, 'returncode'))   # → False
 "
-timeout, returncode attr = False
+timeout, has returncode attr = False
 ```
 
-**结论**：判断「超时」要看**信号/异常类型**，不要只看「非 0 即失败」。
+**结论**：判断「超时」要看**退出码语义/异常类型**，不要只看「非 0 即失败」。
+反过来说——**同一个「超时」在三种驱动方式下给出 142 / 124 / 异常三种形态**，所以任何脚本里写 `if rc != 0: fail` 都无法区分「超时」和「测试真的挂了」。
 
 ### 一行自查命令
 
@@ -494,6 +507,12 @@ real 3.28s
 
 **140 个源文件只要 3.3 秒**，比全量测试快两个数量级。
 
+> **跑出来的结论别直接当「现状」引用**：多人共用同一工作区时，`mypy` 的结果会随别人在途的编辑**逐分钟变化**——同一天里已经出现过「一个人报红、另一个人跑是绿」的情况（红的那次抓到的是同伴编辑到一半的中间态）。
+> 所以：
+> - **要看基线，就开隔离 worktree 在某个已提交的 commit 上跑**（见本文第 5 条），别在主工作区下结论；
+> - **要报现状，就当场重跑**，不要引用上一轮的结论；
+> - 拿不准时，把这一行一起贴出来，让读的人自己判断：`git rev-parse --short HEAD; git status --short`。
+
 ### 正确做法
 
 提交前固定顺序：
@@ -551,10 +570,80 @@ git worktree prune -n
 - **不要习惯性 `prune`**；确实需要时先 `prune -n` 看它打算删什么；
 - 用完立刻清理，别留到"下次一起清"——这正是僵尸条目的来源。
 
+### 提交范围纪律：`git add -A` 禁用，`commit -o` 也不清理暂存区
+
+隔离 worktree 的目的是「不污染别人的工作区」，同理，**提交也要保证「不夹带别人的改动」**——否则等于把污染带进了历史。
+
+#### 铁律一：不用 `git add -A` / `git add .`，一律 `git add <具体路径>`
+
+多人共用同一工作区时，暂存区里随时可能躺着同伴的在途改动。**真实案例**：本仓曾有两人同时改 `src/service/funcToolService/tools.py`，另有一人在提交文档时 `git add <文档路径>` 后，发现暂存区里还有同伴的 `funcToolType.py` / `test_tool_functions.py`——靠人工发现后 `git restore --staged` 退掉。**换成 `git add -A` 就直接提交上去了。**
+
+#### 铁律二：`git commit -o <path>` **只约束本次提交范围，不清理暂存区**
+
+`-o` / `--only` 的语义不是「清空暂存区、只提交这个文件」，而是「**本次提交只取这些路径的当前工作区内容**，其余暂存项**原样留在暂存区**」。两个 case 都实测过（git 2.54.0）：
+
+```bash
+# Case A：两个文件都已 add，commit -o 只提其中一个
+$ echo "// A" >> CLAUDE.md && echo "// B" >> README.md
+$ git add CLAUDE.md README.md
+$ git diff --cached --name-only
+CLAUDE.md
+README.md
+
+$ git commit -o CLAUDE.md -m "demo: only CLAUDE"
+$ git show --name-only --format="%h %s" HEAD
+a5f5aab1 demo: only CLAUDE
+
+CLAUDE.md                                  ← 提交只含这一个 ✅
+
+$ git diff --cached --name-only
+README.md                                  ← ⚠️ 仍躺在暂存区，没被清掉
+
+# Case B：两个都没 add，commit -o 照样能提交
+$ git reset && echo "// C" >> CLAUDE.md
+$ git status --short
+ M CLAUDE.md
+ M README.md
+
+$ git commit -o CLAUDE.md -m "demo: only CLAUDE unstaged"
+$ git show --stat --format="%h %s" HEAD
+c8ce0afa demo: only CLAUDE unstaged
+
+ CLAUDE.md | 1 +
+ 1 file changed, 1 insertion(+)
+
+$ git diff --cached --name-only
+                                           ← 空
+```
+
+**读法**：Case A 说明 `-o` **救不了「暂存区里已经有别人的文件」这个持续风险**——本次提交是干净的，但那个 `README.md` 还在暂存区，**下一次手滑敲裸 `git commit` 就会把它带进去**。
+
+#### 铁律三（硬门禁）：提交后 `git diff --cached --name-only` 必须为空
+
+前两条都是「减少出错概率」，这一条是**结果校验**，不依赖任何记忆和自觉：
+
+```bash
+git commit -m "..." <path>          # 或 git commit -o <path>
+git show --name-only --format="%h %s" HEAD   # ① 断言：本次提交只含我的路径
+git diff --cached --name-only                # ② 断言：输出为空
+```
+
+只要 ② 非空，就说明**还有东西挂在暂存区等着被下一次提交带走**，当场 `git restore --staged <别人的路径>` 清掉，不要留到「下次一起弄」。
+
+> 这三条的关系：铁律一防「主动加错」，铁律二破「以为 `-o` 能兜底」的错觉，铁律三做**提交后的结果断言**。只有铁律三是机制，前两条靠纪律——所以铁律三不能省。
+
 ### 一行自查命令
+
+worktree 残留：
 
 ```bash
 git worktree list | grep -E '/tmp|/private/tmp' && echo "有临时 worktree 残留，确认是自己创建的后 git worktree remove --force <路径>" || echo "OK"
+```
+
+暂存区残留（提交前后各跑一次）：
+
+```bash
+git diff --cached --name-only | grep -q . && { echo "⚠️ 暂存区非空，确认这些是不是自己的："; git diff --cached --stat; } || echo "OK：暂存区为空"
 ```
 
 ---
@@ -567,7 +656,7 @@ git worktree list | grep -E '/tmp|/private/tmp' && echo "有临时 worktree 残�
 | 2 | `timeout`/`gtimeout` 均 x86_64 | `file -b $(which -a timeout gtimeout)` 出现 `x86_64` 就别用 |
 | 3 | `setting.json` 被改写（**脏数据/误提交**，非假红） | `git diff --cached --stat \| grep 'config/setting'` |
 | 4 | mypy 红导致测试被 skip | `bash scripts/run_mypy.sh && ...` |
-| 5 | worktree 残留 | `git worktree list \| grep /tmp` |
+| 5 | worktree 残留 / 提交夹带别人改动 | `git worktree list \| grep /tmp`；提交后 `git diff --cached --name-only` **必须为空** |
 
 **共通规律**：这 5 条都是「**环境把真红和假红混在一起**」。判断顺序建议固定为：
 **先确认 worker 命名 → 再确认命令没被 x86_64 二进制包住 → 再看工作区是否脏 → 再看 mypy → 最后才怀疑代码。**
