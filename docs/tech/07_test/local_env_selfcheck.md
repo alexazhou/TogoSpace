@@ -32,6 +32,28 @@
 > ✅ 「**本机** arm64 + `/usr/local` 为 x86_64 brew 前缀的环境下，`timeout`/`gtimeout` 不可用；CI（ubuntu）不受影响。」
 > ❌ 「`timeout` 不能用。」
 
+#### 机制化入口：一行环境横幅（贴进 issue / 报告 / 群消息开头）
+
+口头要求靠自觉，贴一行元数据靠机制。**任何涉及环境结论的汇报，开头先贴这行**：
+
+```bash
+printf "arch=%s | timeout=%s | gtimeout=%s | pytest-timeout=%s\n" \
+  "$(uname -m)" \
+  "$(file -b "$(which timeout)" 2>/dev/null | grep -o 'x86_64\|arm64' || echo none)" \
+  "$(file -b "$(which gtimeout)" 2>/dev/null | grep -o 'x86_64\|arm64' || echo none)" \
+  "$(.venv/bin/pip list 2>/dev/null | grep -qi '^pytest-timeout' && echo installed || echo missing)"
+```
+
+本机实测输出：
+
+```
+arch=arm64 | timeout=x86_64 | gtimeout=x86_64 | pytest-timeout=missing
+```
+
+一眼就能看出「这个结论是在什么环境下得出的」，从机制上堵住「本地无 / CI 有」这类混说。
+
+> **若要贴 CI 侧结果，请实际在 CI 里跑这一行再贴**，不要凭推演写 CI 的输出——那正好违反纪律 3。（本机这一行是【已验证】，CI 侧本机无法实跑，标【未验证】。）
+
 ### 纪律 2：本文档里每条命令都必须是**本机实测跑通**的
 
 未经实测的操作建议不得写入——本轮就发生过「凭印象建议用 `gtimeout`」，导致团队成员各自记错一次口径的事故（详见第 2 条）。
@@ -250,6 +272,35 @@ print(r.returncode, r.stdout.strip())
 0 arm64
 ```
 
+### ⚠️ 超时 ≠ 业务失败：两种超时方式的返回语义不同
+
+这是第二条「假红」的来源：**脚本里写 `if rc != 0: fail`，会把超时误判成业务失败。**
+
+| 方式 | 超时时发生了什么 | 怎么判断「这是超时」 |
+|---|---|---|
+| `perl -e 'alarm N; exec @ARGV'` | `alarm` 发 **SIGALRM(14)**，进程被默认动作杀掉 → **exit code = 142（128+14）** | `rc == 142` 即超时；shell 还会打印 `Alarm clock: 14` |
+| Python `subprocess.run(..., timeout=N)` | **抛 `subprocess.TimeoutExpired` 异常**，不是返回码 | `try/except TimeoutExpired`；⚠️ **`TimeoutExpired` 没有 `.returncode` 属性**，别照抄 `e.returncode` |
+
+实测：
+
+```bash
+$ perl -e 'alarm 2; exec @ARGV' .venv/bin/python3 -c "import time; time.sleep(10)"
+Alarm clock: 14
+$ echo $?
+142                                        # 128 + 14(SIGALRM)
+
+$ .venv/bin/python3 -c "
+import subprocess
+try:
+    subprocess.run(['sleep','10'], timeout=2)
+except subprocess.TimeoutExpired as e:
+    print('timeout, returncode attr =', hasattr(e, 'returncode'))   # → False
+"
+timeout, returncode attr = False
+```
+
+**结论**：判断「超时」要看**信号/异常类型**，不要只看「非 0 即失败」。
+
 ### 一行自查命令
 
 ```bash
@@ -343,7 +394,16 @@ $ git status --short
 
 **为什么默认路径下通常干净**：带独立配置目录的测试类会在 `setup_class` 里把整份 `setting.json` 读进内存、`teardown_class` 里原样写回。两种等价写法都存在：
 
-- `use_custom_config = True`（全仓 **7 处**，`tests/base.py` 据此推导 `<测试文件目录>/config`）；
+- `use_custom_config = True`（`tests/base.py` 据此推导 `<测试文件目录>/config`）。**这里有三个数，含义不同，别混用**（均为实测）：
+
+  | 数 | 含义 | 复现命令 |
+  |---|---|---|
+  | **8** | `tests/` 下出现过该属性的 `.py` 文件数（含 `tests/base.py` 的定义/说明处，即 7 个真实测试文件 + 1 个基类文件） | `grep -rl use_custom_config tests/ --include=*.py \| wc -l` |
+  | **7** | 其中真实测试文件数（= 真实赋值语句行数）。⚠️ 直接 `grep -rn "use_custom_config = True"` 会得到 **9 行**：7 行真实赋值 + `tests/base.py:158`、`:437` 两处**注释/文档字符串**里的字样，**必须排除 `tests/base.py` 再数** | `grep -rn "use_custom_config = True" tests/ --include=*.py \| grep -v "tests/base.py:" \| wc -l` |
+  | **16** | `grep -rl` **不加** `--include` 时命中数——多出的 8 个是 `__pycache__/*.pyc`，**纯噪声**，别拿它当"文件数" | `grep -rl use_custom_config tests/ \| wc -l` |
+
+  这 7 个测试文件里，**6 个**所在目录带独立 `config/setting.json`（system / auth / demo_mode / init / room / llm_service，均在 `tests/api/` 下）；第 7 个是 `tests/real/simple_chat`，它虽有 `config/` 但走 `tests/real/` 单独一轮。
+  **结论：本条适用范围应表述为「6 个带独立配置目录的 api 测试目录」，不要简写成「6 个目录用 use_custom_config」。**
 - 直接显式传目录 `configUtil.load(_CONFIG_DIR, preset_dir=_CONFIG_DIR, force_reload=True)`（`tests/integration/test_agent_service`、`test_chat_flow`、`test_collaboration_task_flow` 等都是这种）。
 
 示例（`tests/api/test_system_controller/test.py:22-32`）：
