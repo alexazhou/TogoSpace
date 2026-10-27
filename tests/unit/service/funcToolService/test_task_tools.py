@@ -249,8 +249,10 @@ def test_get_task_event_metadata_only_exposes_required_event_id():
     assert props["event_id"]["type"] == "integer"
     assert props["event_id"].get("description")
     assert meta["parameters"]["required"] == ["event_id"]
-    # description 只取 docstring 首行
-    assert "按事件 id 查询单条任务事件" in meta["description"]
+    # description 只取 docstring 首段
+    assert "读取当前团队的一条任务事件" in meta["description"]
+    # 事件 ID 与任务 ID 的区别必须写给模型看（#78 明确补强）
+    assert "不是任务 ID" in props["event_id"]["description"]
 
 
 def test_get_task_event_docstring_states_full_content_semantics():

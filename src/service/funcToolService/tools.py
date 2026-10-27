@@ -965,13 +965,10 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
 
 
 async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: bool = False) -> dict:
-    """结束行动。当你完成所有发言和工具调用后（或者无需行动时），必须调用此工具来把行动机会让给下一位成员。
+    """结束行动，把行动机会让给下一位成员；完成所有发言和工具调用后，或确认无需行动时调用。
 
     Args:
-        confirm_no_need_talk: 确认本轮无需在收到消息通知的房间发言（默认 false，不发言时通常要设 true）。
-            - 本轮未在对应房间发言时：若确认不需要发言，须设置为 true 才能结束行动。
-            - 本轮已在对应房间发言时：不得设置此参数，直接调用 finish_action 即可。
-            - ⚠️ 注意：直接输出（非 send_chat_msg）的文字用户看不到，不算发言。
+        confirm_no_need_talk: 本轮未在收到消息通知的房间发言、且确认无需发言时设 true；已在对应房间发言时不要设，直接调用即可。直接输出的文字不算房间发言（须用 send_chat_msg），用户看不到。
     """
     if _context is None:
         logger.warning("结束行动失败，上下文未设置")
@@ -1102,12 +1099,12 @@ async def update_task(
     note: str = '',
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """更新协作任务：流转状态，或追加评论（流转受状态机与权限约束，见 new_status 说明）。
+    """更新协作任务：流转状态或追加评论（任何团队成员都可以追加评论）。
 
     Args:
         task_id: 任务 ID
-        new_status: 新状态（TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED）。省略（或等于当前状态）表示追加评论。约束与 taskService 状态机/权限一致，违反会被拒并返回 error_code——① 终态：DONE / CANCELLED 不可再流转，仅可追加评论（invalid_transition）；② 提交验收：→ REVIEWING 仅执行人（assignee）可发起，且仅当该任务设有验收人（未设时 no_reviewer）；③ 验收动作：REVIEWING → DONE（通过）与 REVIEWING → IN_PROGRESS（打回）仅验收人（reviewer）；④ 取消：→ CANCELLED 仅验收人或创建人（creator）；⑤ 其余流转（→ IN_PROGRESS / ON_HOLD 等）仅执行人（assignee）；⑥ 设有验收人的任务不能绕过验收直接 → DONE（review_required）；⑦ 依赖：PENDING → IN_PROGRESS 需 depends_on 全部 DONE（dependency_not_met）。
-        note: 本次流转的说明；追加评论时必填（评论正文）
+        new_status: 目标状态，可选 TODO、PENDING、IN_PROGRESS、ON_HOLD、REVIEWING、DONE、CANCELLED；省略或等于当前状态表示追加评论。权限：提交验收（→REVIEWING）只能由执行人发起，且任务须设有验收人；通过或打回验收（REVIEWING→DONE、REVIEWING→IN_PROGRESS）只能由验收人操作；取消（→CANCELLED）只能由验收人或创建人操作；其余流转只能由执行人操作。终态 DONE、CANCELLED 不可流转，只能追加评论；设有验收人的任务不能绕过验收直接到 DONE；依赖任务未全部 DONE 时 PENDING 不能转为 IN_PROGRESS。
+        note: 本次流转的说明；追加评论时必填，作为评论正文
     """
     import service.taskService as taskService
 
@@ -1130,14 +1127,12 @@ async def get_task_detail(
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
     """查询单个协作任务详情，包含依赖任务状态摘要与事件时间线摘要。
-    事件时间线默认只返回最近 3 条；回执中的 `events_total` 是该任务事件总数，
-    若大于 events 条数说明还有更早事件，可调大 event_limit 或用 list_task_events
-    按游标向前翻页。事件内容（含派生的 last_note / current_block_reason）超过
-    100 字符会截断，需要完整原文请用 get_task_event。
+    默认返回最近 3 条事件；events_total 是事件总数（跨 limit），大于本页条数说明还有更早事件，可调大 event_limit 或改用 list_task_events 翻页。
+    事件内容及派生的 last_note / current_block_reason 超过 100 字符会截断，完整原文用 get_task_event。
 
     Args:
         task_id: 任务 ID
-        event_limit: 事件时间线返回的条数上限（默认 3）；回执中 events_total 为事件总数，大于本页条数说明还有更早事件，可调大本参数或用 list_task_events 按游标向前翻页
+        event_limit: 返回的最近事件条数上限，默认 3
     """
     import service.taskService as taskService
 
@@ -1152,13 +1147,10 @@ async def get_task_event(
     event_id: int,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """按事件 id 查询单条任务事件（返回完整原文，含 actor 展示名，只读）。
-    当 `get_task_detail` / `list_task_events` 给出的事件摘要被截断（按 100 字符）
-    不够用时，用本工具按事件 id 取回该事件的**完整原文** `content`——本工具是
-    唯一不受摘要截断限制的读取入口。不属于当前团队的事件会被拒绝。
+    """读取当前团队的一条任务事件，返回完整原文 content 与 actor 展示名；用于获取 get_task_detail / list_task_events 中被截断的事件内容，本工具不受摘要截断限制。
 
     Args:
-        event_id: 事件 ID
+        event_id: 事件 ID，不是任务 ID
     """
     import service.taskService as taskService
 
@@ -1175,15 +1167,12 @@ async def list_task_events(
     before_id: Optional[int] = None,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """读取任务事件时间线（按 id 游标分页，最新在前）。
-    返回 `events`（本页，按 id 降序）、`count`（本页条数）、`total`（该任务事件**总数**，跨页）。
-    向前翻页：取上一页最后一条的 `id` 作为下一次的 `before_id`。
-    事件内容超过 100 字符会截断，需要完整原文请用 `get_task_event`（按事件 id 取单条）。
+    """读取任务事件时间线，最新在前。返回 events（本页，按 id 降序）、count（本页条数）、total（事件总数，跨页）；事件内容超过 100 字符会截断，完整原文用 get_task_event。
 
     Args:
         task_id: 任务 ID
-        limit: 最多返回条数，默认 50
-        before_id: 游标：只返回 id 小于该值的更早事件（向前翻页，取上一页最后一条的 id），省略则取最新一页
+        limit: 本页最多返回条数，默认 50
+        before_id: 只返回 id 小于该值的事件；翻页时传上一页最后一条的 id，省略则取最新页
     """
     import service.taskService as taskService
 
