@@ -243,6 +243,100 @@ def test_task_collaboration_guide_lists_get_task_event():
     assert "`get_task_event`" in TASK_COLLABORATION_GUIDE
 
 
+def test_task_collaboration_guide_does_not_promise_single_status_value():
+    """系统提示**不得**再写「可按状态或状态数组」——`claude_sdk` 侧单值会被 schema 拒掉。
+
+    #83（53cc4cee）只清了**工具 description** 里的「可传单个状态」，提示词区这句
+    `TASK_COLLABORATION_GUIDE` 还留着同一句承诺。而这段提示词对三种驱动都可见
+    （`promptBuilder.py:313` 在 `team_id > 0` 时无条件拼接，`claudeSdkDriver` 用的就是
+    `host.system_prompt`），于是模型会照着一句做不到的话去传参。
+
+    实测（同一份导出的 schema，`jsonschema.validate`，与 MCP 层同口径）：
+      `{"status": "TODO"}`   → REJECT: 'TODO' is not of type 'array'
+      `{"status": ["TODO"]}` → ACCEPT
+    """
+    from service.agentService.prompts import TASK_COLLABORATION_GUIDE
+
+    assert "状态或状态数组" not in TASK_COLLABORATION_GUIDE
+    assert "可按状态、" not in TASK_COLLABORATION_GUIDE
+    # 必须仍然明确「按状态数组」，否则模型不知道该传列表
+    assert "状态数组" in TASK_COLLABORATION_GUIDE
+
+
+def test_task_collaboration_guide_does_not_promise_case_insensitive_status():
+    """系统提示不得写「大小写不敏感」：`enum` 只有 7 个纯大写值。"""
+    from service.agentService.prompts import TASK_COLLABORATION_GUIDE
+
+    assert "大小写不敏感" not in TASK_COLLABORATION_GUIDE
+    assert "不区分大小写" not in TASK_COLLABORATION_GUIDE
+    # 与工具 description 同口径：必须点明大写
+    assert "大写" in TASK_COLLABORATION_GUIDE
+
+
+def test_task_collaboration_guide_task_filters_match_real_schema():
+    """提示词里承诺的 `list_tasks` 过滤参数必须与真实签名/schema 一致。
+
+    `assignee` / `reviewer` 在 schema 里是 `integer`（Agent ID），提示词旧文写「名字」，
+    对 claude_sdk 同样是兑现不了的承诺（实测 `{"assignee": "网关开发"}` → REJECT:
+    '网关开发' is not of type 'integer'）。按名字搜要走 `name_keyword`。
+    """
+    import json
+
+    from service.agentService.prompts import TASK_COLLABORATION_GUIDE
+    from service.funcToolService import tools
+    from service.funcToolService.funcToolType import get_function_metadata
+
+    schema = get_function_metadata("list_tasks", tools.list_tasks)["parameters"]
+    props = schema["properties"]
+
+    line = next(l for l in TASK_COLLABORATION_GUIDE.splitlines() if "list_tasks" in l)
+
+    # 提示词提到的每个过滤参数都必须真实存在
+    for param in ("assignee", "reviewer", "name_keyword", "status"):
+        assert f"`{param}`" in line
+        assert param in props
+
+    assert props["assignee"]["type"] == "integer"
+    assert props["reviewer"]["type"] == "integer"
+    assert props["name_keyword"]["type"] == "string"
+    assert props["status"]["type"] == "array"
+
+    # 不得再写「执行人/验收人名字」这种对 integer 参数的承诺
+    assert "执行人/验收人名字" not in line
+    # 名字过滤只能挂在 name_keyword 上
+    assert "关键字" in line or "name_keyword" in line
+    # 状态必须是数组项（与 schema 一致），且提示词不得暗示可以传裸值
+    assert json.dumps(props["status"]["items"]["enum"], ensure_ascii=False).count("TODO") == 1
+
+
+def test_task_collaboration_guide_referenced_tools_all_exist():
+    """提示词里所有反引号工具名都必须在工具注册表里（防改名后提示词悄悄失效）。
+
+    正则必须含数字：工具名可能带版本后缀（`query_tasks_v2`），只用 `[a-z_]+` 会把
+    `_v2` 截断成 `query_tasks`，改坏时测试照样绿（本护栏第一版就踩过这个坑）。
+    """
+    import re
+
+    from service.agentService.prompts import TASK_COLLABORATION_GUIDE, TEAM_AWARENESS_TOOLS_GUIDE
+    from service.funcToolService.core import load_func_tools
+
+    registry = set(load_func_tools().keys())
+    # 反引号里也会出现**参数**名（不是工具），逐个列白名单而不是放宽容错
+    param_names = {"new_status", "note", "status", "assignee", "reviewer", "name_keyword"}
+
+    text = TEAM_AWARENESS_TOOLS_GUIDE + "\n" + TASK_COLLABORATION_GUIDE
+    referenced = {
+        n for n in re.findall(r"`([a-z][a-z0-9_]*)`", text)
+        if n not in param_names
+    }
+
+    assert referenced, "至少应解析出若干工具名，否则护栏本身失效"
+    assert referenced <= registry, f"提示词引用了不存在的工具: {sorted(referenced - registry)}"
+    # 护栏有效性自检：带数字的工具名必须能被正则抓到
+    assert "list_tasks" in referenced
+
+
+
 
 @pytest.mark.asyncio
 async def test_build_agent_system_prompt_includes_team_awareness_guide(monkeypatch):

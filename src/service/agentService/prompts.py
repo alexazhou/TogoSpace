@@ -80,7 +80,7 @@ TEAM_AWARENESS_TOOLS_GUIDE = '''你可以使用以下工具来感知团队状态
 TASK_COLLABORATION_GUIDE = '''当需要跨轮次协作、分配复杂任务或跟踪进度时，应使用任务系统：
 - `create_task`：创建协作任务。必须提供执行人 ID（可通过 `get_agent_info` 获取）
 - `update_task`：流转任务状态，或追加评论。给 `new_status` = 流转状态；省略 `new_status` = 追加评论（此时 `note` 必填）
-- `get_task_detail` / `list_tasks`：查询任务详情（含事件时间线摘要）或列表（可按状态或状态数组、执行人/验收人名字过滤，可指定返回条数）
+- `get_task_detail` / `list_tasks`：查询任务详情（含事件时间线摘要）或任务列表。`list_tasks` 的过滤参数：`status` 传状态数组（如 `["TODO","DONE"]`，值须大写）、`assignee` / `reviewer` 传 Agent ID、`name_keyword` 按人名搜（不是任务标题）；可指定返回条数
 - `list_task_events`：按游标读取任务的时间线（流转 + 评论）
 - `get_task_event`：按事件 id 查询单条事件（返回完整原文；事件 id 见 `get_task_detail` / `list_task_events` 的时间线）
 
