@@ -45,7 +45,7 @@ def test_list_tasks_exposes_limit_with_none_default():
     """
     params = list(inspect.signature(tools.list_tasks).parameters)
     assert params == [
-        "assignee", "reviewer", "scope", "status", "name_keyword",
+        "assignee", "reviewer", "scope", "status", "title_keyword",
         "open_only", "limit", "_context",
     ]
     assert inspect.signature(tools.list_tasks).parameters["limit"].default is None
@@ -67,14 +67,14 @@ def test_list_tasks_metadata_exposes_open_only_and_limit():
     meta = get_function_metadata("list_tasks", tools.list_tasks)
     props = meta["parameters"]["properties"]
     assert set(props) == {
-        "assignee", "reviewer", "status", "name_keyword", "open_only", "scope", "limit",
+        "assignee", "reviewer", "status", "title_keyword", "open_only", "scope", "limit",
     }
     assert props["open_only"]["type"] == "boolean"
     assert props["open_only"].get("description")
     assert props["limit"]["type"] == "integer"
     assert props["limit"].get("description")
-    assert props["name_keyword"]["type"] == "string"
-    assert props["name_keyword"].get("description")
+    assert props["title_keyword"]["type"] == "string"
+    assert props["title_keyword"].get("description")
     assert meta["parameters"]["required"] == []
 
 
@@ -384,20 +384,55 @@ async def test_list_tasks_forwards_id_desc_order(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_forwards_name_keyword(monkeypatch):
-    """`name_keyword` 原样透传给服务层（匹配逻辑在服务层，工具层不解析）。"""
-    captured = await _call_tool_list_tasks(monkeypatch, name_keyword="网关")
+async def test_list_tasks_forwards_title_keyword(monkeypatch):
+    """`title_keyword` 原样透传给服务层（匹配逻辑在服务层，工具层不解析）。"""
+    captured = await _call_tool_list_tasks(monkeypatch, title_keyword="登录")
 
-    assert captured["name_keyword"] == "网关"
+    assert captured["title_keyword"] == "登录"
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_name_keyword_alone_is_a_valid_target(monkeypatch):
-    """只传 `name_keyword` 也应被接受（不再强制 assignee/reviewer/scope）。"""
-    captured = await _call_tool_list_tasks(monkeypatch, assignee=None, name_keyword="网关")
+async def test_list_tasks_title_keyword_alone_is_a_valid_target(monkeypatch):
+    """只传 `title_keyword` 也应被接受（不再强制 assignee/reviewer/scope）。"""
+    captured = await _call_tool_list_tasks(monkeypatch, assignee=None, title_keyword="登录")
 
-    assert captured["name_keyword"] == "网关"
+    assert captured["title_keyword"] == "登录"
     assert captured["assignee_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_blank_title_keyword_is_missing_target(monkeypatch):
+    """纯空白关键字不算过滤条件：返回 missing_target，而不是去查全部任务。
+
+    `LIKE '%%'` 会匹配全部任务，把它当成过滤条件等于静默取消过滤 —— 这正是要避免的
+    「看起来查到了结果」。工具层先 strip 再判空，与传给服务层的值保持同一口径。
+    """
+    from service.roomService.core import ToolCallContext
+    import service.taskService as taskService
+
+    called = False
+
+    async def _fake(**service_kwargs):
+        nonlocal called
+        called = True
+        return {"success": True, "tasks": [], "count": 0, "total": 0}
+
+    monkeypatch.setattr(taskService, "list_tasks", _fake)
+    ctx = ToolCallContext(agent_id=8, team_id=1, tool_name="list_tasks")
+
+    res = await tools.list_tasks(assignee=None, scope=None, title_keyword="   ", _context=ctx)
+
+    assert res["success"] is False
+    assert res["error_code"] == "missing_target"
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_strips_title_keyword_before_forwarding(monkeypatch):
+    """两侧空白先 strip 再透传，避免 `" 登录 "` 因首尾空格匹配不到。"""
+    captured = await _call_tool_list_tasks(monkeypatch, title_keyword=" 登录 ")
+
+    assert captured["title_keyword"] == "登录"
 
 
 def test_get_task_detail_exists():

@@ -463,23 +463,16 @@ class TestTaskTools(ServiceTestCase):
         assert res["task"]["current_block_reason"] == expected
 
 
-class TestListTasksNameKeywordRealDb(ServiceTestCase):
-    """C-5：`name_keyword` 的 **真实库 + 真实 `GtAgent.display_name`** 链路（此前零覆盖）。
+class TestListTasksTitleKeywordRealDb(ServiceTestCase):
+    """`title_keyword` 的**真实库**链路：标题子串匹配进 SQL、`total` 同口径。
 
-    为什么单列一类：原有 6 条 `name_keyword` 用例全在
-    `tests/unit/service/test_task_service.py`，Agent 一律用 `SimpleNamespace`
-    替身喂给 `gtAgentManager.get_team_all_agents` 的 mock。那套用例能证明
-    「比对逻辑用了 display_name 字段」，但**证明不了**下面这条真实链路：
-
-        GtAgent 行（i18n JSON 落库）→ `display_name` property → `i18nUtil.extract_i18n_str`
-        → `get_team_all_agents` 真查询 → 关键字比对 → `agent_ids` 进 SQL
-
-    这条链上任何一环坏掉（i18n 字段名写错、property 回退到 `name`、查询漏 team 过滤、
-    `in_([])` 被写成「不过滤」），替身用例都发现不了 —— 因为替身的 `display_name`
-    是**直接给死的字符串**。所以必须真库跑一遍。
+    单列一类的理由：单元用例用 `AsyncMock` 截获 DAL kwargs，只能证明「参数透传对了」，
+    证明不了 `LIKE` 真的按标题、真的按 team 收敛、真的和 `count` 同一口径。
+    真实库上任何一环坏掉（漏 team 过滤、`count` 忘了带 title_keyword、
+    `%` / `_` 没转义成通配符），mock 用例都发现不了。
     """
 
-    TEAM = "name_keyword_real_team"
+    TEAM = "title_keyword_real_team"
 
     @classmethod
     async def async_setup_class(cls):
@@ -489,49 +482,45 @@ class TestListTasksNameKeywordRealDb(ServiceTestCase):
         team = await gtTeamManager.save_team(GtTeam(name=cls.TEAM))
         cls.team_id = team.id
         template = await gtRoleTemplateManager.save_role_template(
-            GtRoleTemplate(name="name_keyword_real_role", soul="soul")
+            GtRoleTemplate(name="title_keyword_real_role", soul="soul")
         )
         cls.role_template_id = template.id
 
         await gtAgentManager.batch_save_agents(
             team.id,
             [
-                # 中文 display_name —— 「搜中文名」是这条用例的主目标
-                GtAgent(
-                    team_id=team.id,
-                    name="gateway_dev",
-                    role_template_id=template.id,
-                    i18n={"display_name": {"zh-CN": "网关开发", "en": "Gateway Dev"}},
-                ),
-                GtAgent(
-                    team_id=team.id,
-                    name="togo_dev",
-                    role_template_id=template.id,
-                    i18n={"display_name": {"zh-CN": "阿张", "en": "Zhang"}},
-                ),
-                # 没有 i18n 的成员：display_name 必须回退成 name，否则搜英文标识符会漏
-                GtAgent(team_id=team.id, name="plain_bot", role_template_id=template.id),
+                GtAgent(team_id=team.id, name="gateway_dev", role_template_id=template.id),
+                GtAgent(team_id=team.id, name="togo_dev", role_template_id=template.id),
             ],
         )
         agents = await gtAgentManager.get_team_all_agents(team.id)
-        cls.agent_ids = {a.name: a.id for a in agents}
+        cls.agent_ids = {a.name: a for a in agents}
 
-        # 两个任务：分别挂在两个中文名成员名下，用来验证「搜谁只出谁」
-        cls.task_gateway = await create_task_with_event(
+        # 三个任务：两个标题含「登录」，一个不含；其中两个执行人不同
+        cls.task_login_a = await create_task_with_event(
             GtAgentTask(
                 team_id=team.id,
-                title="网关侧任务",
-                assignee_id=cls.agent_ids["gateway_dev"],
-                creator_id=cls.agent_ids["gateway_dev"],
+                title="登录模块联调",
+                assignee_id=cls.agent_ids["gateway_dev"].id,
+                creator_id=cls.agent_ids["gateway_dev"].id,
                 status=TaskStatus.TODO,
             )
         )
-        cls.task_togo = await create_task_with_event(
+        cls.task_login_b = await create_task_with_event(
             GtAgentTask(
                 team_id=team.id,
-                title="Togo 侧任务",
-                assignee_id=cls.agent_ids["togo_dev"],
-                creator_id=cls.agent_ids["togo_dev"],
+                title="登录页样式调整",
+                assignee_id=cls.agent_ids["togo_dev"].id,
+                creator_id=cls.agent_ids["togo_dev"].id,
+                status=TaskStatus.TODO,
+            )
+        )
+        cls.task_pay = await create_task_with_event(
+            GtAgentTask(
+                team_id=team.id,
+                title="支付对账",
+                assignee_id=cls.agent_ids["gateway_dev"].id,
+                creator_id=cls.agent_ids["gateway_dev"].id,
                 status=TaskStatus.TODO,
             )
         )
@@ -542,90 +531,114 @@ class TestListTasksNameKeywordRealDb(ServiceTestCase):
 
     def _ctx(self, *, tool_name: str = "list_tasks") -> ToolCallContext:
         return ToolCallContext(
-            agent_id=self.agent_ids["gateway_dev"], team_id=self.team_id, tool_name=tool_name
+            agent_id=self.agent_ids["gateway_dev"].id, team_id=self.team_id, tool_name=tool_name
         )
 
-    async def test_display_name_property_reads_i18n_from_real_row(self):
-        """前提校验：真库读回的 `display_name` 必须是 i18n 中文名，而不是回退成 `name`。
-
-        没有这条，下面的用例可能「因为两边都回退到 name 而碰巧通过」——那就成了假绿。
-        """
-        agents = await gtAgentManager.get_team_all_agents(self.team_id)
-        by_name = {a.name: a for a in agents}
-
-        assert by_name["gateway_dev"].display_name == "网关开发"
-        assert by_name["togo_dev"].display_name == "阿张"
-        # 无 i18n 的行必须回退到 name（这是 display_name 的官方口径）
-        assert by_name["plain_bot"].display_name == "plain_bot"
-
-    async def test_name_keyword_matches_chinese_display_name(self):
-        """搜中文 display_name「网关」⇒ 只命中 gateway_dev 的任务。
-
-        `display_name` 是 `GtAgent` 上的 Python property，**SQL 层查不到**；
-        实现若图省事写成 `name LIKE '%网关%'`，真实库里一条都匹配不到 —— 本用例必红。
-        """
-        res = await tools.list_tasks(name_keyword="网关", _context=self._ctx())
+    async def test_title_keyword_matches_title_substring(self):
+        """搜「登录」⇒ 只命中两个标题含「登录」的任务，标题不含的排除在外。"""
+        res = await tools.list_tasks(title_keyword="登录", _context=self._ctx())
 
         assert res["success"] is True
-        ids = [t["id"] for t in res["tasks"]]
-        assert self.task_gateway.id in ids
-        assert self.task_togo.id not in ids
-        # 返回体里的执行人名也要能解析成中文（同一个 i18n 链路的另一处消费点）
-        assert any(t["assignee_name"] == "网关开发" for t in res["tasks"])
+        ids = {t["id"] for t in res["tasks"]}
+        assert ids == {self.task_login_a.id, self.task_login_b.id}
+        assert self.task_pay.id not in ids
+        assert res["total"] == 2
 
-    async def test_name_keyword_no_match_returns_empty_not_whole_team(self):
-        """搜不存在的人名 ⇒ **空列表**，绝不退化成「不过滤」。
+    async def test_title_keyword_is_not_agent_name_search(self):
+        """关键字只对**标题**生效，不匹配执行人名字。
 
-        退化实现（`agent_ids=None`）下这里会拿到团队全部任务，模型会以为自己搜到了结果。
-        这是「不能静默降级」在真实库上的验证：空集合走 `in_([])` 天然查不到东西，
-        而不是把过滤条件整个丢掉。
+        搜成员名 `gateway_dev` 不命中任何任务标题 ⇒ 空列表。
+        若实现退化成人名搜索，这里会命中 gateway_dev 的执行任务而变红。
         """
-        res = await tools.list_tasks(name_keyword="查无此人确实不存在", _context=self._ctx())
+        res = await tools.list_tasks(title_keyword="gateway_dev", _context=self._ctx())
+
+        assert res["success"] is True
+        assert res["tasks"] == []
+        assert res["total"] == 0
+
+    async def test_title_keyword_no_match_returns_empty_not_whole_team(self):
+        """搜不存在的标题片段 ⇒ **空列表**，不退化成一页全部任务。"""
+        res = await tools.list_tasks(title_keyword="查无此任务确实不存在", _context=self._ctx())
 
         assert res["success"] is True
         assert res["tasks"] == []
         assert res["count"] == 0
         assert res["total"] == 0
 
-    async def test_name_keyword_matches_english_display_name_case_insensitively(self):
-        """英文 display_name 也要命中，且**大小写不敏感**（真库 + 真 property）。
+    async def test_title_keyword_ascii_case_insensitive(self):
+        """ASCII 大小写不敏感（SQLite 的 LIKE 对 ASCII 不区分大小写）。
 
-        `GATEWAY` → `Gateway Dev`：去掉 `keyword.lower()` 归一后本用例必红。
+        用英文标题验证一次，避免中文字符串掩盖「小写归一漏了」这类问题。
         """
-        res_en = await tools.list_tasks(name_keyword="GATEWAY", _context=self._ctx())
+        task_en = await create_task_with_event(
+            GtAgentTask(
+                team_id=self.team_id,
+                title="Fix Login Redirect",
+                assignee_id=self.agent_ids["togo_dev"].id,
+                creator_id=self.agent_ids["togo_dev"].id,
+                status=TaskStatus.TODO,
+            )
+        )
+        try:
+            res = await tools.list_tasks(title_keyword="login", _context=self._ctx())
+            assert [t["id"] for t in res["tasks"]] == [task_en.id]
+        finally:
+            await GtAgentTask.delete().where(GtAgentTask.id == task_en.id).aio_execute()
 
-        assert [t["id"] for t in res_en["tasks"]] == [self.task_gateway.id]
+    async def test_title_keyword_percent_is_literal_not_wildcard(self):
+        """`%` 按字面匹配，不当通配符 —— 否则搜 `%` 会返回全部任务。"""
+        task_pct = await create_task_with_event(
+            GtAgentTask(
+                team_id=self.team_id,
+                title="覆盖率提升到 80% 以上",
+                assignee_id=self.agent_ids["togo_dev"].id,
+                creator_id=self.agent_ids["togo_dev"].id,
+                status=TaskStatus.TODO,
+            )
+        )
+        try:
+            res = await tools.list_tasks(title_keyword="80%", _context=self._ctx())
+            assert [t["id"] for t in res["tasks"]] == [task_pct.id]
 
-    async def test_name_keyword_matches_agent_without_i18n_by_name_fallback(self):
-        """无 i18n 的成员靠 `display_name` 回退到 `name` 才能被搜到。
+            # 单个 `%` 若被当成通配符，会匹配全部任务（含不含 `%` 的引流任务）
+            res_pct = await tools.list_tasks(title_keyword="%", _context=self._ctx())
+            assert [t["id"] for t in res_pct["tasks"]] == [task_pct.id]
+        finally:
+            await GtAgentTask.delete().where(GtAgentTask.id == task_pct.id).aio_execute()
 
-        `plain_bot` 名下没有任务，所以这里直接查解析结果（`_resolve_agent_ids_by_name_keyword`）
-        而不是走 `tools.list_tasks` —— 否则「查不到任务」会被误读成「匹配不到人」，
-        用例就失去了区分力。
-        """
-        keyword_ids = await taskService._resolve_agent_ids_by_name_keyword(self.team_id, "PLAIN")
-
-        assert keyword_ids == [self.agent_ids["plain_bot"]]
-
-    async def test_name_keyword_does_not_leak_across_teams(self):
-        """关键字匹配只在**本团队**范围内 —— 别的团队同名成员不能被搜出来。
-
-        实现若漏了 `team_id` 过滤（比如改成全表扫描），这里会把外团队的 Agent 也带进来。
-        """
-        other = await gtTeamManager.save_team(GtTeam(name="name_keyword_other_team"))
+    async def test_title_keyword_does_not_leak_across_teams(self):
+        """标题匹配只在**本团队**范围内 —— 外团队标题含「登录」的任务不能出现。"""
+        other = await gtTeamManager.save_team(GtTeam(name="title_keyword_other_team"))
         await gtAgentManager.batch_save_agents(
             other.id,
-            [
-                GtAgent(
-                    team_id=other.id,
-                    name="gateway_dev_other",
-                    role_template_id=self.role_template_id,
-                    i18n={"display_name": {"zh-CN": "网关开发二分部"}},
-                )
-            ],
+            [GtAgent(team_id=other.id, name="other_dev", role_template_id=self.role_template_id)],
         )
+        other_agents = await gtAgentManager.get_team_all_agents(other.id)
+        other_agent_id = other_agents[0].id
+        other_task = await create_task_with_event(
+            GtAgentTask(
+                team_id=other.id,
+                title="登录模块联调（外团队）",
+                assignee_id=other_agent_id,
+                creator_id=other_agent_id,
+                status=TaskStatus.TODO,
+            )
+        )
+        try:
+            res = await tools.list_tasks(title_keyword="登录", _context=self._ctx())
 
-        keyword_ids = await taskService._resolve_agent_ids_by_name_keyword(self.team_id, "网关")
+            ids = {t["id"] for t in res["tasks"]}
+            assert other_task.id not in ids
+            assert ids == {self.task_login_a.id, self.task_login_b.id}
+        finally:
+            await GtAgentTask.delete().where(GtAgentTask.id == other_task.id).aio_execute()
 
-        assert keyword_ids == [self.agent_ids["gateway_dev"]]
+    async def test_title_keyword_total_matches_count(self):
+        """`total`（跨页总数）与 `count`（本页条数）走同一过滤口径：都是 2。"""
+        res = await tools.list_tasks(title_keyword="登录", limit=1, _context=self._ctx())
+
+        assert res["count"] == 1
+        assert res["total"] == 2
+        assert res["limit"] == 1
+
 

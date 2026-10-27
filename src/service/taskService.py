@@ -632,49 +632,6 @@ async def resolve_visible_agent_ids(team_id: int, caller_id: Optional[int]) -> O
     return (await resolve_visible_scope(team_id, caller_id)).agent_ids
 
 
-async def _resolve_agent_ids_by_name_keyword(team_id: int, keyword: str) -> list[int]:
-    """按人名关键字（大小写不敏感子串）解析出候选 Agent ID 列表。
-
-    **必须同时匹配 `GtAgent.name`（内部标识符，如 `gateway_dev`）和
-    `GtAgent.display_name`（i18n 解析结果，如 `网关开发`）**：
-    `display_name` 是 `gtAgent.py` 的 property，值来自 `i18n.display_name` 的 JSON 字段，
-    **SQL 层查不到**——只按 `name` 走 SQL 会让「搜『网关』找不到 gateway_dev」。
-    所以这里取团队全员到内存里逐条比对，不做 SQL LIKE（连带好处：`%` / `_` 通配符
-    无需转义）。
-
-    匹配不到任何人 ⇒ 返回 `[]`（**不是 `None`**）：调用方据此把 `agent_ids` 收成空集合，
-    `in_([])` 天然返回空结果。**绝不能退化成「不过滤」**，否则模型会以为搜到了全团队。
-    """
-    normalized = keyword.strip().lower()
-    if not normalized:
-        return []
-    agents = await gtAgentManager.get_team_all_agents(team_id)
-    matched: list[int] = []
-    for agent in agents:
-        if normalized in (agent.name or "").lower() or normalized in (agent.display_name or "").lower():
-            matched.append(agent.id)
-    return matched
-
-
-def _intersect_agent_ids(
-    visible_agent_ids: Optional[list[int]], keyword_agent_ids: Optional[list[int]]
-) -> Optional[list[int]]:
-    """把「可见范围」与「关键字命中集」**取交集**（AND，不是覆盖）。
-
-    两路都可能是 `None`（表示该维度不限制）：
-    - 都为 `None` ⇒ `None`（不限制）；
-    - 只有一个 `None` ⇒ 取另一个；
-    - 都非 `None` ⇒ 交集（保序、按 `visible_agent_ids` 的既有顺序）。
-    交集为空 ⇒ `[]`，语义是「范围内没有名字匹配的人」⇒ 查不到任务（不是不过滤）。
-    """
-    if visible_agent_ids is None:
-        return keyword_agent_ids
-    if keyword_agent_ids is None:
-        return visible_agent_ids
-    keyword_set = set(keyword_agent_ids)
-    return [agent_id for agent_id in visible_agent_ids if agent_id in keyword_set]
-
-
 async def _resolve_task_agent_names(tasks: list[GtAgentTask]) -> dict[int, str]:
     """批量解析任务列表里出现的 Agent 展示名：`{agent_id: display_name}`。
 
@@ -726,7 +683,7 @@ async def list_tasks(
     limit: int = 20,
     scope: Optional[str] = None,
     caller_id: Optional[int] = None,
-    name_keyword: Optional[str] = None,
+    title_keyword: Optional[str] = None,
     order: str = gtAgentTaskManager.ORDER_PRIORITY_FIRST,
 ) -> dict:
     """查询协作任务列表。
@@ -740,10 +697,8 @@ async def list_tasks(
     大小写不敏感。列表里只要有非法值就**整体报错**并把非法项全列出来——
     不静默丢弃后返回一个看起来正常的子集（静默降级正是这里要避免的）。
 
-    `name_keyword` 按**人名**过滤任务（不是任务标题）：同时匹配 `GtAgent.name`
-    与 `display_name`，大小写不敏感子串匹配，语义是「执行人 **或** 验收人命中」。
-    与 `scope` 的可见范围**取交集**（AND）；匹配不到任何人 ⇒ 返回空列表，
-    **不退化成不过滤**。
+    `title_keyword` 按**任务标题**过滤：大小写不敏感子串匹配，`None` 表示不按标题
+    过滤；空串/纯空白由工具层拦掉（`LIKE '%%'` 会匹配全部，等于静默取消过滤）。
 
     `order` 是排序口径，**默认 `ORDER_PRIORITY_FIRST` 与新增该参数前完全一致**
     （Web 列表接口依赖它）：`ORDER_PRIORITY_FIRST` = 优先级优先、同级 id 升序；
@@ -767,10 +722,8 @@ async def list_tasks(
             "error_code": "invalid_scope",
         }
 
-    # 裸字符串统一先归一成列表：`for s in "TODO"` 会逐字符迭代成 T/O/D/O，
-    # 报出「非法状态 T」——一个看起来像用户输错、实际是实现 bug 的报错。
-    # native / tsp 驱动不校验入参类型，模型仍可能按老习惯传裸字符串，所以这层必须在。
-    # `single_value=True` 只用于最后**保留单值走 `==` 的既有 SQL**（见下方分支）。
+    # `status` 兼容裸字符串：native / tsp 驱动不做 schema 校验，模型可能按老习惯传
+    # 单值；直接 `for s in "TODO"` 会逐字符迭代成 T/O/D/O，报出一个假的「非法状态 T」。
     single_value = isinstance(status, str)
     if isinstance(status, str):
         status = [status]
@@ -779,40 +732,39 @@ async def list_tasks(
     status_enum_list: list[TaskStatus] | None = None
     exclude_statuses: list[TaskStatus] | None = None
     if status is not None:
-        if not isinstance(status, str):  # 已归一成列表（含 tuple / Sequence）
-            parsed: list[TaskStatus] = []
-            invalid: list[str] = []
-            for raw in status:
-                enum_value = TaskStatus.value_of(str(raw).upper()) if isinstance(raw, str) else None
-                if enum_value is None:
-                    invalid.append(str(raw))
-                elif enum_value not in parsed:
-                    parsed.append(enum_value)
-            if invalid:
-                return {
-                    "success": False,
-                    "message": f"无效的状态：{'、'.join(invalid)}；有效值为 "
-                               f"{' / '.join(s.name for s in TaskStatus)}",
-                    "error_code": "invalid_status",
-                }
-            if not parsed:
-                return {
-                    "success": False,
-                    "message": "status 列表为空；如需不按状态过滤请省略该参数",
-                    "error_code": "invalid_status",
-                }
-            if single_value:
-                # 单值仍走 `==`（DAL 的 `status_enum` 分支）：既有 SQL 与
-                # `assert_awaited_once_with(status=TaskStatus.X, ...)` 断言口径不变。
-                status_enum = parsed[0]
-            else:
-                status_enum_list = parsed
+        parsed: list[TaskStatus] = []
+        invalid: list[str] = []
+        for raw in status:
+            enum_value = TaskStatus.value_of(str(raw).upper()) if isinstance(raw, str) else None
+            if enum_value is None:
+                invalid.append(str(raw))
+            elif enum_value not in parsed:
+                parsed.append(enum_value)
+        if invalid:
+            return {
+                "success": False,
+                "message": f"无效的状态：{'、'.join(invalid)}；有效值为 "
+                           f"{' / '.join(s.name for s in TaskStatus)}",
+                "error_code": "invalid_status",
+            }
+        if not parsed:
+            return {
+                "success": False,
+                "message": "status 列表为空；如需不按状态过滤请省略该参数",
+                "error_code": "invalid_status",
+            }
+        if single_value:
+            # 单值仍走 `==`（DAL 的 `status_enum` 分支）：既有 SQL 与
+            # `assert_awaited_once_with(status=TaskStatus.X, ...)` 断言口径不变。
+            status_enum = parsed[0]
         else:
-            status_enum = TaskStatus.value_of(str(status).upper())
-            if status_enum is None:
-                return {"success": False, "message": f"无效的状态：{status}"}
+            status_enum_list = parsed
     elif open_only:
         exclude_statuses = [TaskStatus.DONE, TaskStatus.CANCELLED]
+
+    # 标题关键字走 SQL 子串匹配；空串归一成 None（`LIKE '%%'` 会匹配全部，
+    # 当成过滤条件等于静默取消过滤）。
+    title_keyword = (title_keyword or "").strip() or None
 
     visible_agent_ids: Optional[list[int]] = None
     scope_degraded = False
@@ -829,7 +781,7 @@ async def list_tasks(
         visible_agent_ids = visible_scope.agent_ids
         scope_degraded = visible_scope.degraded
         if visible_agent_ids is not None and not visible_agent_ids:
-            if assignee_id is None and reviewer_id is None and not name_keyword:
+            if assignee_id is None and reviewer_id is None and title_keyword is None:
                 return {
                     "success": False,
                     "message": "当前身份没有管理视角，无法用 scope=\"team\" 查看全团队任务；请改为指定 assignee 或 reviewer",
@@ -838,13 +790,6 @@ async def list_tasks(
             # 有精确过滤器：忽略 scope，按过滤器查（不报错）
             visible_agent_ids = None
 
-    # 人名关键字 → 候选 Agent 集合，与可见范围**取交集**（AND，不覆盖）。
-    # 匹配不到人 ⇒ `[]`：`in_([])` 天然返回空，绝不退化成「不过滤」。
-    keyword_agent_ids: Optional[list[int]] = None
-    if name_keyword is not None:
-        keyword_agent_ids = await _resolve_agent_ids_by_name_keyword(team_id, name_keyword)
-    scoped_agent_ids = _intersect_agent_ids(visible_agent_ids, keyword_agent_ids)
-
     # `list` 与 `count` 必须共用同一份过滤条件（`total` 与列表口径一致）
     filters: dict = dict(
         team_id=team_id,
@@ -852,8 +797,10 @@ async def list_tasks(
         reviewer_id=reviewer_id,
         status=status_enum_list if status_enum_list is not None else status_enum,
         exclude_statuses=exclude_statuses,
-        agent_ids=scoped_agent_ids,
+        agent_ids=visible_agent_ids,
     )
+    if title_keyword is not None:
+        filters["title_keyword"] = title_keyword
     tasks = await gtAgentTaskManager.list_tasks(**filters, limit=limit, order=order)
     total = await gtAgentTaskManager.count_tasks(**filters)
     agent_names = await _resolve_task_agent_names(tasks)

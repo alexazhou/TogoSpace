@@ -71,6 +71,7 @@ def _filtered_task_query(
     status: TaskStatus | list[TaskStatus] | None = None,
     exclude_statuses: list[TaskStatus] | None = None,
     agent_ids: list[int] | None = None,
+    title_keyword: str | None = None,
 ):
     """构造任务过滤条件（`list_tasks` 与 `count_tasks` **共用同一 where 构造**，
 
@@ -84,6 +85,10 @@ def _filtered_task_query(
 
     `status` 接受**单值或列表**：列表走 `IN`（任一命中），单值仍走 `==`。
     单值路径刻意不合并成单元素列表，避免既有 SQL 与断言口径被无谓改动。
+
+    `title_keyword` 按**任务标题**做子串匹配（`LIKE '%kw%'`，SQLite 下 ASCII 大小写
+    不敏感）。空串由调用方拦掉：`LIKE '%%'` 会匹配全部任务，等于静默取消过滤。
+    peewee 的 `contains` 会自动转义 `%` / `_` / `\\`，关键字按字面匹配。
     """
     query = GtAgentTask.select().where(GtAgentTask.team_id == team_id)
     if assignee_id is not None:
@@ -102,6 +107,8 @@ def _filtered_task_query(
         query = query.where(GtAgentTask.status == status)
     if exclude_statuses:
         query = query.where(GtAgentTask.status.not_in(exclude_statuses))
+    if title_keyword is not None:
+        query = query.where(GtAgentTask.title.contains(title_keyword))
     return query
 
 
@@ -129,6 +136,7 @@ async def list_tasks(
     exclude_statuses: list[TaskStatus] | None = None,
     limit: int = 20,
     agent_ids: list[int] | None = None,
+    title_keyword: str | None = None,
     order: str = ORDER_PRIORITY_FIRST,
 ) -> list[GtAgentTask]:
     """按条件查询任务列表。
@@ -143,9 +151,12 @@ async def list_tasks(
     `agent_ids` 非空时只返回「assignee 或 reviewer 落在集合内」的任务；
     `None` 表示不加该过滤（行为与新增该参数前完全一致）。
     `status` 可传单值或列表（列表 = 任一命中）。
+    `title_keyword` 按任务标题子串匹配，`None` 表示不按标题过滤。
     """
     query = (
-        _filtered_task_query(team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids)
+        _filtered_task_query(
+            team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids, title_keyword
+        )
         .order_by(*_task_ordering(order))
         .limit(limit)
     )
@@ -159,10 +170,11 @@ async def count_tasks(
     status: TaskStatus | list[TaskStatus] | None = None,
     exclude_statuses: list[TaskStatus] | None = None,
     agent_ids: list[int] | None = None,
+    title_keyword: str | None = None,
 ) -> int:
     """统计符合条件的任务**总数**（跨页；不受 `limit` 影响，与 `list_tasks` 同一过滤口径）。"""
     return await _filtered_task_query(
-        team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids
+        team_id, assignee_id, reviewer_id, status, exclude_statuses, agent_ids, title_keyword
     ).aio_count()
 
 

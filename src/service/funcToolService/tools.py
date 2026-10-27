@@ -1246,19 +1246,19 @@ async def list_tasks(
     status: Optional[
         list[Literal["TODO", "PENDING", "IN_PROGRESS", "ON_HOLD", "REVIEWING", "DONE", "CANCELLED"]]
     ] = None,
-    name_keyword: Optional[str] = None,
+    title_keyword: Optional[str] = None,
     open_only: bool = True,
     limit: Optional[int] = None,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """查询协作任务列表。assignee / reviewer / scope / name_keyword 至少传其一；返回按最新在前，total > count 表示被截断。
+    """查询协作任务列表。assignee / reviewer / scope / title_keyword 至少传其一；返回按最新在前，total > count 表示被截断。
     每个任务含 assignee_name / reviewer_name，无需再查 Agent 名字。
 
     Args:
         assignee: 按执行人 Agent ID 过滤
         reviewer: 按验收人 Agent ID 过滤
         scope: self=与我相关的任务；team=我可见范围内的任务
-        name_keyword: 按人名搜任务（不是任务标题）：匹配执行人或验收人的名字，如 "网关" 能命中 display_name 为「网关开发」的人；中文名/英文标识符都行，大小写不敏感，匹配不到任何人时返回空列表
+        title_keyword: 按任务标题搜（子串匹配）：如 "登录" 能命中标题含「登录」的任务；大小写不敏感，匹配不到时返回空列表
         status: 按状态过滤，传状态数组（如 ["TODO","DONE"]）。有效值（大写）TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED；数组含非法值时整单报错并列出非法项（不静默丢弃）；指定时 open_only 不生效
         open_only: 只返回未完结任务（排除 DONE / CANCELLED），默认 True
         limit: 本次返回条数，默认 20，取值 1-50，超出范围按边界收敛（实际生效值在返回体 limit 字段回显）
@@ -1269,10 +1269,13 @@ async def list_tasks(
     if not ok:
         return {"success": False, "message": "无法获取团队上下文"}
 
-    if assignee is None and reviewer is None and scope is None and not name_keyword:
+    # 纯空白关键字不算过滤条件：`LIKE '%%'` 会匹配全部任务，等于静默取消过滤。
+    title_keyword = (title_keyword or "").strip() or None
+
+    if assignee is None and reviewer is None and scope is None and title_keyword is None:
         return {
             "success": False,
-            "message": "请通过 assignee / reviewer / scope / name_keyword 指定过滤条件（至少提供一个）",
+            "message": "请通过 assignee / reviewer / scope / title_keyword 指定过滤条件（至少提供一个）",
             "error_code": "missing_target",
         }
 
@@ -1281,7 +1284,7 @@ async def list_tasks(
         assignee_id=assignee,
         reviewer_id=reviewer,
         status=status,
-        name_keyword=name_keyword,
+        title_keyword=title_keyword,
         # Agent 侧要「最新在前」，与 Web 列表的优先级排序区分开（DAL 默认值不变）。
         order=gtAgentTaskManager.ORDER_ID_DESC,
         open_only=open_only,

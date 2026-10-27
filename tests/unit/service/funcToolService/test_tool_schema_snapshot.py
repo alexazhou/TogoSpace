@@ -86,7 +86,7 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     "get_time": ["timezone"],
     "list_role_templates": ["keywords"],
     "list_task_events": ["task_id", "limit", "before_id"],
-    "list_tasks": ["assignee", "reviewer", "scope", "status", "name_keyword", "open_only", "limit"],
+    "list_tasks": ["assignee", "reviewer", "scope", "status", "title_keyword", "open_only", "limit"],
     "load_skill": ["skill_name"],
     "reload_team": [],
     "save_agent": ["name", "role_template_name", "model", "driver", "allow_tools", "allow_skills", "i18n", "overwrite_existing", "agent_id"],

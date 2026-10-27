@@ -727,129 +727,83 @@ async def test_list_tasks_echoes_limit(task_manager_mock):
 
 
 # ---------------------------------------------------------------------------
-# #83 追加：`name_keyword`（人名搜索）与 `order`（倒序隔离）
+# `title_keyword`（按任务标题搜索）与 `order`（倒序隔离）
 # ---------------------------------------------------------------------------
 
 
-def _agent(agent_id: int, name: str, display_name: str):
-    """构造 Agent 替身：`name` 是内部标识符，`display_name` 是 i18n 解析结果。"""
-    return SimpleNamespace(id=agent_id, name=name, display_name=display_name)
-
-
 @pytest.mark.asyncio
-async def test_list_tasks_name_keyword_matches_internal_name(
+async def test_list_tasks_title_keyword_is_forwarded_to_dal(
     task_manager_mock, agent_manager_mock
 ):
-    """命中 `GtAgent.name`（内部标识符，如 `gateway_dev`）。"""
+    """`title_keyword` 原样传给 DAL（列表与统计同口径）。"""
     task_manager_mock.list_tasks = AsyncMock(return_value=[])
     task_manager_mock.count_tasks = AsyncMock(return_value=0)
-    agent_manager_mock.get_team_all_agents = AsyncMock(return_value=[
-        _agent(7, "gateway_dev", "网关开发"),
-        _agent(8, "togo_dev", "阿张"),
-    ])
 
-    await taskService.list_tasks(team_id=1, name_keyword="gateway")
+    await taskService.list_tasks(team_id=1, title_keyword="登录")
 
-    assert task_manager_mock.list_tasks.await_args.kwargs["agent_ids"] == [7]
-    assert task_manager_mock.count_tasks.await_args.kwargs["agent_ids"] == [7]
+    assert task_manager_mock.list_tasks.await_args.kwargs["title_keyword"] == "登录"
+    assert task_manager_mock.count_tasks.await_args.kwargs["title_keyword"] == "登录"
+    # 标题搜索不碰 Agent 表：它不是人名搜索
+    agent_manager_mock.get_team_all_agents.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_name_keyword_matches_display_name(
+async def test_list_tasks_title_keyword_strips_whitespace(
     task_manager_mock, agent_manager_mock
 ):
-    """**必须也命中 `display_name`（i18n property，SQL 查不到）**：搜「网关」要能找到 gateway_dev。
+    """两侧空白先 strip，避免 `" 登录 "` 因首尾空格匹配不到。"""
+    task_manager_mock.list_tasks = AsyncMock(return_value=[])
+    task_manager_mock.count_tasks = AsyncMock(return_value=0)
 
-    只按 `name` 走 SQL 的实现下本用例必红——这是「最容易只做一半」的那一半。
+    await taskService.list_tasks(team_id=1, title_keyword="  登录  ")
+
+    assert task_manager_mock.list_tasks.await_args.kwargs["title_keyword"] == "登录"
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_blank_title_keyword_is_no_filter(
+    task_manager_mock, agent_manager_mock
+):
+    """空串 / 纯空白 ⇒ 不加标题过滤（关键字不传给 DAL）。
+
+    `LIKE '%%'` 会匹配全部任务，把它当成过滤条件等于静默取消过滤，所以这里必须归一成 None。
     """
     task_manager_mock.list_tasks = AsyncMock(return_value=[])
     task_manager_mock.count_tasks = AsyncMock(return_value=0)
-    agent_manager_mock.get_team_all_agents = AsyncMock(return_value=[
-        _agent(7, "gateway_dev", "网关开发"),
-        _agent(8, "togo_dev", "阿张"),
-    ])
 
-    await taskService.list_tasks(team_id=1, name_keyword="网关")
+    await taskService.list_tasks(team_id=1, title_keyword="   ")
 
-    assert task_manager_mock.list_tasks.await_args.kwargs["agent_ids"] == [7]
+    assert task_manager_mock.list_tasks.await_args.kwargs.get("title_keyword") is None
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_name_keyword_is_case_insensitive(
+async def test_list_tasks_title_keyword_keeps_scope_agent_filter(
     task_manager_mock, agent_manager_mock
 ):
-    """大小写不敏感（`GATEWAY` 命中 `gateway_dev`）。"""
+    """标题关键字与 `scope` 是 AND：`agent_ids` 仍按可见范围收窄，不被关键字覆盖。"""
     task_manager_mock.list_tasks = AsyncMock(return_value=[])
     task_manager_mock.count_tasks = AsyncMock(return_value=0)
-    agent_manager_mock.get_team_all_agents = AsyncMock(return_value=[
-        _agent(7, "Gateway_Dev", "网关开发"),
-    ])
-
-    await taskService.list_tasks(team_id=1, name_keyword="gAtEwAy")
-
-    assert task_manager_mock.list_tasks.await_args.kwargs["agent_ids"] == [7]
-
-
-@pytest.mark.asyncio
-async def test_list_tasks_name_keyword_no_match_returns_empty_not_unfiltered(
-    task_manager_mock, agent_manager_mock
-):
-    """**匹配不到任何人 ⇒ `agent_ids=[]`（查不到任务），绝不退化成不过滤**。
-
-    退化实现下本用例会拿到 `agent_ids=None` —— 那等于「全团队任务」，
-    模型会以为自己搜到了结果。这是纪律「不能静默降级」的直接应用。
-    """
-    task_manager_mock.list_tasks = AsyncMock(return_value=[])
-    task_manager_mock.count_tasks = AsyncMock(return_value=0)
-    agent_manager_mock.get_team_all_agents = AsyncMock(return_value=[
-        _agent(7, "gateway_dev", "网关开发"),
-    ])
-
-    result = await taskService.list_tasks(team_id=1, name_keyword="查无此人")
-
-    assert task_manager_mock.list_tasks.await_args.kwargs["agent_ids"] == []
-    assert task_manager_mock.count_tasks.await_args.kwargs["agent_ids"] == []
-    assert result["success"] is True
-
-
-@pytest.mark.asyncio
-async def test_list_tasks_name_keyword_intersects_with_scope(
-    task_manager_mock, agent_manager_mock
-):
-    """与 `scope` 的可见范围**取交集（AND）**，不是覆盖。
-
-    可见范围 `{8, 9}`、关键字命中 `{7, 9}` ⇒ 只剩 `9`。
-    """
-    task_manager_mock.list_tasks = AsyncMock(return_value=[])
-    task_manager_mock.count_tasks = AsyncMock(return_value=0)
-    agent_manager_mock.get_team_all_agents = AsyncMock(return_value=[
-        _agent(7, "gateway_dev", "网关开发"),
-        _agent(9, "qa_dev", "网关测试"),
-    ])
 
     tree_patch, subs_patch = _patch_dept_tree(manager_id=6, subordinates={8, 9})
     with tree_patch, subs_patch:
-        # caller=7 是部门主管 ⇒ visible = [7] + 下属 {8, 9} = [7, 8, 9]
         await taskService.list_tasks(
-            team_id=1, scope="team", caller_id=7, name_keyword="网关"
+            team_id=1, scope="team", caller_id=7, title_keyword="登录"
         )
 
-    # 可见 [7,8,9] ∩ 命中 [7,9] = [7,9]（保序）
-    assert task_manager_mock.list_tasks.await_args.kwargs["agent_ids"] == [7, 9]
+    kwargs = task_manager_mock.list_tasks.await_args.kwargs
+    assert kwargs["agent_ids"] == [7, 8, 9]
+    assert kwargs["title_keyword"] == "登录"
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_name_keyword_empty_or_blank_returns_empty(
-    task_manager_mock, agent_manager_mock
-):
-    """空串 / 纯空白关键字 ⇒ 空集合（不当作「不过滤」）。"""
+async def test_list_tasks_without_keyword_passes_no_title_keyword(task_manager_mock):
+    """不传 `title_keyword` 时不给 DAL 该参数（与新增该参数前一致，不加过滤）。"""
     task_manager_mock.list_tasks = AsyncMock(return_value=[])
     task_manager_mock.count_tasks = AsyncMock(return_value=0)
 
-    await taskService.list_tasks(team_id=1, name_keyword="   ")
+    await taskService.list_tasks(team_id=1)
 
-    assert task_manager_mock.list_tasks.await_args.kwargs["agent_ids"] == []
-    agent_manager_mock.get_team_all_agents.assert_not_called()
+    assert task_manager_mock.list_tasks.await_args.kwargs.get("title_keyword") is None
 
 
 @pytest.mark.asyncio
