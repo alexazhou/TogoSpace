@@ -172,6 +172,53 @@ class TestRoomCreateValidation(_ApiServiceCase):
                 data = await resp.json()
                 assert data.get("status") == "created"
 
+    async def test_create_room_with_duplicate_agents_is_rejected(self):
+        """`agent_ids=[alice, alice]` 应返回 400 duplicate_agent_ids，且房间不落库。
+
+        修复前这条路能建出 PRIVATE 房间：`create_room` 的 `len(agent_ids) < 2` 在
+        `[alice, alice]` 下 len==2 直接放行，类型判成 PRIVATE、话题写成「alice 和 alice」，
+        调度器随后把「同一人连续发言」判为跳过，房间永久 IDLE。
+        """
+        team_id = await self._get_team_id(_TEAM)
+        alice_id = await self._get_agent_id(team_id, "alice")
+
+        payload = {
+            "name": "duplicate_member_room",
+            "agent_ids": [alice_id, alice_id],
+        }
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{self.backend_base_url}/teams/{team_id}/rooms/create.json", json=payload
+            ) as resp:
+                assert resp.status == 400
+                data = await resp.json()
+                assert data.get("error_code") == "duplicate_agent_ids"
+
+            async with client.get(
+                f"{self.backend_base_url}/rooms/list.json?team_id={team_id}"
+            ) as resp:
+                assert resp.status == 200
+                rooms = (await resp.json())["rooms"]
+        assert not any(r["gt_room"]["name"] == "duplicate_member_room" for r in rooms)
+
+    async def test_create_room_with_duplicate_after_valid_member_is_rejected(self):
+        """`agent_ids=[alice, bob, bob]` 同样 400 —— 不许静默去重成 2 人 PRIVATE。"""
+        team_id = await self._get_team_id(_TEAM)
+        alice_id = await self._get_agent_id(team_id, "alice")
+        bob_id = await self._get_agent_id(team_id, "bob")
+
+        payload = {
+            "name": "duplicate_tail_room",
+            "agent_ids": [alice_id, bob_id, bob_id],
+        }
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{self.backend_base_url}/teams/{team_id}/rooms/create.json", json=payload
+            ) as resp:
+                assert resp.status == 400
+                data = await resp.json()
+                assert data.get("error_code") == "duplicate_agent_ids"
+
 
 class TestRoomControllerPrivate(_ApiServiceCase):
     """测试 v6 新增的 room_type 字段及私有房间行为，使用自定义配置。"""

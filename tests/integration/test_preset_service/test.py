@@ -315,3 +315,102 @@ class TestDeptTreeValidation(ServiceTestCase):
         config = self._make_team_config_with_dept("uuid-dept-002", "dept-team-ok", dept_tree)
         team = await presetService._import_team_from_config(config)
         assert team is not None
+
+class TestPresetRoomMembers(ServiceTestCase):
+    """#85：`preset_rooms` 含重复成员时必须在导入阶段就拒绝。
+
+    preset 两条路（`presetService._import_team_from_config` → `create_team_rooms`，
+    `teamController` 保存团队 → `overwrite_team_rooms`）此前对房间成员**零校验**，
+    逐个透传给 DAL `save_room`，于是配置里写 `agents: ["alice", "alice"]` 就能建出
+    「1 个真实成员、类型却是 PRIVATE、话题写成『alice 和 alice』」的房间。
+    """
+
+    @classmethod
+    async def async_setup_class(cls):
+        await ormService.startup(cls._get_test_db_path())
+
+    @classmethod
+    async def async_teardown_class(cls):
+        await ormService.shutdown()
+
+    def setup_method(self):
+        self._run_on_class_loop(self._async_setup())
+
+    def teardown_method(self):
+        self._run_on_class_loop(self._async_teardown())
+
+    async def _async_setup(self):
+        from model.dbModel.gtRoom import GtRoom
+
+        await GtRoom.delete().aio_execute()
+        await GtAgent.delete().aio_execute()
+        await GtTeam.delete().aio_execute()
+        await GtRoleTemplate.delete().aio_execute()
+        gtAgentManager.clear_agent_cache()
+        await gtRoleTemplateManager.save_role_template(GtRoleTemplate(name="dummy"))
+
+    async def _async_teardown(self):
+        from model.dbModel.gtRoom import GtRoom
+        from model.dbModel.gtRoomMessage import GtRoomMessage
+
+        await GtRoomMessage.delete().aio_execute()
+        await GtRoom.delete().aio_execute()
+        await GtAgent.delete().aio_execute()
+        await GtTeam.delete().aio_execute()
+        await GtRoleTemplate.delete().aio_execute()
+
+    def _make_config(self, uuid: str, name: str, rooms: list[TeamRoomPreset]) -> TeamPreset:
+        return TeamPreset(
+            uuid=uuid,
+            name=name,
+            agents=[
+                AgentPreset(name="alice", role_template="dummy"),
+                AgentPreset(name="bob", role_template="dummy"),
+            ],
+            preset_rooms=rooms,
+            auto_start=False,
+        )
+
+    async def test_preset_room_with_duplicate_members_is_rejected(self):
+        """`agents: ["alice", "alice"]` → 导入报 duplicate_agent_ids，房间不落库。"""
+        from dal.db import gtRoomManager
+
+        config = self._make_config("uuid-room-dup", "preset-room-dup", [
+            TeamRoomPreset(name="dup_room", agents=["alice", "alice"]),
+        ])
+
+        with pytest.raises(TogoException) as exc_info:
+            await presetService._import_team_from_config(config)
+
+        assert exc_info.value.error_code == "duplicate_agent_ids"
+        team = await gtTeamManager.get_team("preset-room-dup")
+        assert team is not None
+        assert await gtRoomManager.get_rooms_by_team(team.id) == []
+
+    async def test_preset_room_with_distinct_members_still_imported(self):
+        """回归护栏：互不相同的成员照常导入（PRIVATE，两人的名字都在话题里）。"""
+        from dal.db import gtRoomManager
+
+        config = self._make_config("uuid-room-ok", "preset-room-ok", [
+            TeamRoomPreset(name="pair_room", agents=["alice", "bob"]),
+        ])
+
+        team = await presetService._import_team_from_config(config)
+        assert team is not None
+
+        rooms = await gtRoomManager.get_rooms_by_team(team.id)
+        assert [r.name for r in rooms] == ["pair_room"]
+        assert "alice和alice" not in (rooms[0].initial_topic or "")
+
+    async def test_preset_room_single_member_still_allowed(self):
+        """preset 路径**不**拒绝单成员房：生产预设有 2 人，但本仓既有夹具刻意建 1 人房。"""
+        from dal.db import gtRoomManager
+
+        config = self._make_config("uuid-room-single", "preset-room-single", [
+            TeamRoomPreset(name="solo_room", agents=["alice"]),
+        ])
+
+        team = await presetService._import_team_from_config(config)
+        assert team is not None
+        rooms = await gtRoomManager.get_rooms_by_team(team.id)
+        assert [r.name for r in rooms] == ["solo_room"]

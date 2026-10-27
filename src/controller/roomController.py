@@ -283,6 +283,12 @@ class TeamRoomCreateHandler(BaseHandler):
         request = self.parse_request(CreateRoomRequest)
         team_id = int(team_id_str)
 
+        # 复用 agents/modify 那条链已有的校验器（system Agent / 存在性 / 跨团队 / 重复）。
+        # 此前建房这条路一次都没调它，于是 `agent_ids=[7,7]` 能建出 PRIVATE 房间：
+        # `create_room` 的 `len(agent_ids) < 2`（core.py）在 `[7,7]` 下 len==2 直接放行，
+        # 类型判成 PRIVATE、话题生成「alice 和 alice」，调度器随即永久停在 IDLE。
+        await _assert_agent_ids_in_team(team_id, list(request.agent_ids))
+
         await roomService.create_room(
             team_id=team_id,
             name=request.name,

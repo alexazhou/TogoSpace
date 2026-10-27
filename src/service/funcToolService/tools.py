@@ -761,7 +761,7 @@ async def save_room(
 
     Args:
         name: 房间名称，团队内唯一标识，建议使用小写字母和下划线。
-        member_names: 成员名称列表，至少 2 人，全量替换。
+        member_names: 成员名称列表，至少 2 人（重复名称按一人计），全量替换。
         initial_topic: 房间初始话题，可选。
         max_rounds: 最大轮次，省略用系统默认；<=0 表示不限轮次。
         overwrite_existing: 同名房间已存在时需设为 true 才会覆盖更新，默认 false；传入 room_id 时本参数不生效。
@@ -788,6 +788,25 @@ async def save_room(
         if agent is None:
             return {"success": False, "message": f"未找到成员: {mname}"}
         resolved_ids.append(agent.id)
+
+    # 按 **ID** 去重（不是按名字数量）：`["alice","alice"]` 的 `len(member_names)` 是 2，
+    # 上面那道 `<2` 拦不住，而解析出的 `resolved_ids` 是 `[7,7]`。这种房间会被
+    # `upsert_room` 判成 PRIVATE（len==2）并生成「alice 和 alice」的话题，之后调度器把
+    # 「同一人连续发言」判为跳过，房间说完一句就永久 IDLE。
+    # 这里**静默去重后继续**而不是直接报错：调用方语义是「这批成员」，重复只是写法冗余；
+    # 去重后不足 2 人才报错，且要能说清「是因为重复而不是本来就没给够」。
+    deduped_ids: list[int] = list(dict.fromkeys(resolved_ids))
+    if len(deduped_ids) < 2:
+        stripped = [n.strip() for n in member_names]
+        duplicate_names = sorted({n for n in stripped if stripped.count(n) > 1})
+        return {
+            "success": False,
+            "message": (
+                f"房间成员去重后不足 2 人（给了 {len(member_names)} 个名称，"
+                f"去重后只有 {len(deduped_ids)} 人；重复的成员: {duplicate_names or '无'}）。"
+            ),
+        }
+    resolved_ids = deduped_ids
 
     # 按 ID 或名称定位已有房间
     if room_id is not None:

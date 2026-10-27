@@ -536,7 +536,7 @@
         }
       },
       "member_names": {
-        "description": "成员名称列表，至少 2 人，全量替换。",
+        "description": "成员名称列表，至少 2 人（重复名称按一人计），全量替换。",
         "schema": {
           "items": {
             "type": "string"

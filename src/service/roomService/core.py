@@ -232,9 +232,53 @@ def _resolve_join_read_index(messages: list[GtRoomMessage]) -> int:
     return next_seq
 
 
+def _assert_room_agents_valid(agent_ids: Sequence[int] | None) -> None:
+    """房间成员列表的通用不变量：**不得含系统 Agent、不得有重复成员**。
+
+    为什么要收口成一个函数：这两条规则原本只散落在 REST 控制器
+    （`roomController._assert_agent_ids_in_team`）一处，而服务层四个建房入口
+    （`create_room` / `upsert_room` / `batch_create_rooms` / `overwrite_team_rooms`）
+    各自为零校验或只校验了半条，于是 `agent_ids=[7,7]` 能一路建出
+    「只有 1 个真实成员、类型却是 PRIVATE、话题写成『alice 和 alice』」的房间，
+    且该房间因调度器把「同一人连说」判定为跳过，第一句话之后就永久 IDLE。
+    重复成员在任何入口都不可能是合法意图（它只能来自上游没去重），所以四处一律拒绝。
+
+    **不含 `<2` 判定**：「房间至少 2 人」在本仓并不是全局不变量 ——
+    `create_room`/`update_room_agents` 拒绝，而采集/预设路径（`batch_create_rooms`、
+    `overwrite_team_rooms`）与 DAL `save_room` 一直允许单成员房（多个既有用例
+    刻意建单成员房）。`<2` 由各入口按自己的语义决定，本函数只保证「成员互不相同、
+    无系统 Agent」这两条谁都不该违反的底线。
+
+    Raises:
+        TogoException: `error_code="system_agent_not_allowed"` / `"duplicate_agent_ids"`。
+    """
+    ids = list(agent_ids or [])
+
+    system_ids = sorted({aid for aid in ids if SpecialAgent.value_of(aid) == SpecialAgent.SYSTEM})
+    if system_ids:
+        raise TogoException(
+            f"system agent is not allowed in room agents: {system_ids}",
+            error_code="system_agent_not_allowed",
+        )
+
+    duplicates: list[int] = []
+    seen: set[int] = set()
+    for aid in ids:
+        if aid in seen and aid not in duplicates:
+            duplicates.append(aid)
+        seen.add(aid)
+    if duplicates:
+        raise TogoException(
+            f"agent_ids duplicated: {sorted(duplicates)}",
+            error_code="duplicate_agent_ids",
+        )
+
+
 async def update_room_agents(room_id: int, agent_ids: list[int]) -> None:
     room = await gtRoomManager.get_room_by_id(room_id)
     assertUtil.assertNotNull(room, error_message=f"room_id '{room_id}' not found", error_code="room_not_found")
+
+    _assert_room_agents_valid(agent_ids)
 
     agent_count = len(agent_ids or [])
     if agent_count < 2:
@@ -325,7 +369,13 @@ async def create_team_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
 
 
 async def batch_create_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
-    """批量创建房间（create-only）。若房间已存在则报错。"""
+    """批量创建房间（create-only）。若房间已存在则报错。
+
+    Raises:
+        TogoException: 传入 room.id（`ROOM_ID_NOT_ALLOWED_ON_CREATE`）、房间名重复
+            （`ROOM_NAME_DUPLICATED`）、房间名已存在（`ROOM_ALREADY_EXISTS`）、
+            成员重复（`duplicate_agent_ids`）、含系统 Agent（`system_agent_not_allowed`）。
+    """
     room_list = list(rooms)
     seen_names: set[str] = set()
     for room in room_list:
@@ -341,6 +391,10 @@ async def batch_create_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
                 error_code="ROOM_NAME_DUPLICATED",
             )
         seen_names.add(room.name)
+
+        # 本函数此前对成员零校验（逐个透传给 DAL `save_room`），是「重复成员房间」
+        # 的第三个入口（preset 导入）。`<2` 不在此校验，见 `_assert_room_agents_valid`。
+        _assert_room_agents_valid(room.agent_ids)
 
     existing_rooms = await gtRoomManager.get_rooms_by_team_and_names(
         team_id,
@@ -358,10 +412,22 @@ async def batch_create_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
 
 
 async def overwrite_team_rooms(team_id: int, rooms: Sequence[GtRoom]) -> None:
-    """常规更新流程：按目标房间集创建/更新房间，并清理已移除房间。"""
+    """常规更新流程：按目标房间集创建/更新房间，并清理已移除房间。
+
+    Raises:
+        TogoException: 成员重复（`duplicate_agent_ids`）、含系统 Agent
+            （`system_agent_not_allowed`）。`<2` 不在本层拒绝，见
+            `_assert_room_agents_valid` 的说明。
+    """
     current_rooms = await gtRoomManager.get_rooms_by_team(team_id)
     next_names = {room.name for room in rooms}
     next_ids = {room.id for room in rooms if room.id is not None}
+
+    # 先整体校验、再动数据库：本函数开头就会 `delete_room` 清理不在目标集中的房间，
+    # 若把成员校验放在循环里，一个非法房间会让前面的删除已经生效、后面的房间没写进去，
+    # 团队房间集停在「删了一半」的中间态。校验提到删除之前，失败时零副作用。
+    for room_input in rooms:
+        _assert_room_agents_valid(room_input.agent_ids)
 
     obsolete_room_ids = [
         room.id
@@ -447,6 +513,11 @@ async def create_room(
     if SpecialAgent.SYSTEM.value in agent_ids:
         raise TogoException("system agent is not allowed in room agents", error_code="system_agent_not_allowed")
 
+    # 重复成员必须在「按成员数推断房间类型」之前拒绝：`[7,7]` 的 len 是 2，
+    # 会被判成 PRIVATE 并生成「alice 和 alice」的话题，随后调度器认定
+    # 「同一人连续发言」把房间永久停在 IDLE。详见 `_assert_room_agents_valid` 的说明。
+    _assert_room_agents_valid(agent_ids)
+
     team_agents = await gtAgentManager.get_team_all_agents(team_id)
     team_agent_ids = {a.id for a in team_agents}
     missing = [aid for aid in agent_ids if aid not in team_agent_ids and SpecialAgent.value_of(aid) is None]
@@ -493,7 +564,28 @@ async def upsert_room(
 
     - room_id 传入时按 ID 更新（支持重命名）；否则按 name 新建。
     - 不操作 DEPT 房间（有 'DEPT' tag 的房间由部门树管理）。
+
+    Raises:
+        TogoException: 成员不足 2 人（`ROOM_AGENTS_TOO_FEW`）、成员重复
+            （`duplicate_agent_ids`）、含系统 Agent（`system_agent_not_allowed`）、
+            与已有房间成员集合相同（`ROOM_DUPLICATE`）、操作 DEPT 房间
+            （`ROOM_DEPT_PROTECTED`）。
+
+    **不静默去重**：`[7,7]` 若被静默去重成 1 人房、`[7,7,8]` 去重成 2 人 PRIVATE，
+    都是在用户不知情的情况下改了房间语义（成员数与类型都变），比直接报错更难排查。
+    故一律抛错，由调用方决定是否去重后重试。
     """
+    # 成员不变量先于类型推断：`[7,7]` 的 len==2 会被误判成 PRIVATE 并生成
+    # 「alice 和 alice」话题。这条与本函数此前唯一缺口相对应（无任何校验）。
+    _assert_room_agents_valid(agent_ids)
+
+    agent_count = len(agent_ids or [])
+    if agent_count < 2:
+        raise TogoException(
+            f"房间成员不足 2 人（当前 {agent_count} 人）",
+            error_code="ROOM_AGENTS_TOO_FEW",
+        )
+
     room_type = RoomType.PRIVATE if len(agent_ids) == 2 else RoomType.GROUP
 
     # 私聊房间自动生成话题
