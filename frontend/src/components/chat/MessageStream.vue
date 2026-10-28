@@ -522,6 +522,8 @@ onBeforeUnmount(() => {
 
 .time {
   color: var(--text-tertiary);
+  /* 日期+时钟整体不换行：「2026/10/28 02:07:41」被拆成两行会很难读 */
+  white-space: nowrap;
 }
 
 .badge-immediate,

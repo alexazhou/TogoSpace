@@ -54,21 +54,6 @@ export function formatPreview(senderDisplayName: string, content: string): strin
   return `${senderDisplayName}: ${content.replace(/\n/g, ' ')}`;
 }
 
-export function formatTime(time: string): string {
-  const date = new Date(time);
-
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-
-  return new Intl.DateTimeFormat('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(date);
-}
-
 /**
  * 解析后端 datetime 字符串。
  *
@@ -100,6 +85,17 @@ export function formatBackendDateTime(value: string | null | undefined): string 
   const day = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
   const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
   return `${day} ${time}`;
+}
+
+/**
+ * 对话窗口消息时间 → 「YYYY/M/D HH:mm:ss」（**24 小时制**）；解析失败返回空串。
+ *
+ * 带年月日是为了让跨天消息 / 翻历史时不必靠上下文猜是哪一天。
+ * 解析与格式化和 `formatBackendDateTime` 完全相同，直接复用同一实现，
+ * 避免两处各写一份 `pad()` 后各自漂移。
+ */
+export function formatTime(time: string): string {
+  return formatBackendDateTime(time);
 }
 
 export function bubbleSide(senderId: number): BubbleSide {
