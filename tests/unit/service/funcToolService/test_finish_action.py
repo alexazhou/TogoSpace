@@ -19,6 +19,7 @@ def _make_collab_context(
     agent_id: int = 1,
     assignee_id: int = 1,
     reviewer_id: int | None = None,
+    creator_id: int = 2,
 ) -> tuple[ToolCallContext, MagicMock]:
     """构造协作任务模式的 ToolCallContext（含 schedule_task 和 mock agent_task）。"""
     schedule_task = MagicMock()
@@ -29,6 +30,7 @@ def _make_collab_context(
     agent_task.status = agent_task_status
     agent_task.assignee_id = assignee_id
     agent_task.reviewer_id = reviewer_id
+    agent_task.creator_id = creator_id
     return ToolCallContext(agent_id=agent_id, team_id=1, chat_room=None, schedule_task=schedule_task), agent_task
 
 
@@ -129,3 +131,40 @@ async def test_finish_collaboration_task_assignee_reviewing_passes() -> None:
     with patch("service.funcToolService.tools.gtAgentTaskManager.get_task", AsyncMock(return_value=mock_task)):
         result = await finish_action(_context=ctx)
     assert result["success"] is True
+
+
+# ─── 取消权限：回执不得教无权者去调用必然被拒的 CANCELLED ───────────────────
+# 取消权限 = 验收人或创建人（`taskService.update_task` 的 `→CANCELLED` 分支，
+# 实测无权时报 `permission_denied`）。执行人通常两者都不是，照旧文案去调用会拿到
+# permission_denied → finish_action 再被拒 → agentTurnRunner 重试耗尽 → Agent FAILED。
+
+
+@pytest.mark.asyncio
+async def test_finish_receipt_omits_cancel_command_when_no_permission() -> None:
+    """无权取消（任务不是自己建的、也没有验收身份）⇒ 回执不得出现 CANCELLED。"""
+    # 收件人 agent_id=1 是 assignee，创建人是 2，未设验收人 ⇒ 既非创建人也非验收人
+    ctx, mock_task = _make_collab_context(
+        TaskStatus.IN_PROGRESS, agent_id=1, assignee_id=1, reviewer_id=None, creator_id=2,
+    )
+    with patch("service.funcToolService.tools.gtAgentTaskManager.get_task", AsyncMock(return_value=mock_task)):
+        result = await finish_action(_context=ctx)
+
+    assert result["success"] is False
+    assert "CANCELLED" not in result["message"]
+    assert "你无权自行取消任务" in result["message"]
+    # 退路必须真能通过 finish_action：任务仍为 IN_PROGRESS 时只有 ON_HOLD 能放行
+    assert "将状态改为 ON_HOLD" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_finish_receipt_offers_cancel_command_when_creator() -> None:
+    """有权取消（任务是自己建的）⇒ 回执必须给出 CANCELLED 指令（防止「一律删掉」蒙过上面那条）。"""
+    ctx, mock_task = _make_collab_context(
+        TaskStatus.IN_PROGRESS, agent_id=1, assignee_id=1, reviewer_id=None, creator_id=1,
+    )
+    with patch("service.funcToolService.tools.gtAgentTaskManager.get_task", AsyncMock(return_value=mock_task)):
+        result = await finish_action(_context=ctx)
+
+    assert result["success"] is False
+    assert "请调用 `update_task` 将状态改为 CANCELLED" in result["message"]
+    assert "你无权自行取消任务" not in result["message"]

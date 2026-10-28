@@ -15,6 +15,10 @@ import service.roomService as roomService
 import service.skillService as skillService
 import service.thirdPartyService as thirdPartyService
 from service.agentService.toolRegistry import validate_tool_allow_specs
+from service.agentService.prompts import (
+    TODO_TASK_CANCEL_INSTRUCTION,
+    TODO_TASK_NO_CANCEL_INSTRUCTION,
+)
 from service.thirdPartyService.result import ThirdPartySearchResult
 from util import configUtil, i18nUtil
 
@@ -1038,6 +1042,14 @@ async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: 
 
             if is_assignee and agent_task.status in (TaskStatus.TODO, TaskStatus.IN_PROGRESS):
                 logger.warning(f"finish_action 被拒绝，协作任务仍为 {agent_task.status.value}: agent_id={_context.agent_id}, agent_task_id={agent_task_id}")
+                # 取消权限 = 创建人或验收人（`taskService.update_task` 的 `→CANCELLED` 分支）。
+                # 执行人通常两者都不是，给它「改为 CANCELLED」只会换来 permission_denied；
+                # 随后 finish_action 再被拒 → 重试耗尽 → Agent FAILED。
+                # 两句文案复用 `prompts.py` 的常量，**不在这里另抄一份**——多处拷贝分叉正是本次缺陷的成因。
+                cancel_instruction = (
+                    TODO_TASK_CANCEL_INSTRUCTION if ((agent_task.creator_id == _context.agent_id) or is_reviewer)
+                    else TODO_TASK_NO_CANCEL_INSTRUCTION
+                )
                 return {
                     "success": False,
                     "message": f"""\
@@ -1046,7 +1058,7 @@ finish 失败，你负责执行的任务【{agent_task.title}】状态仍为 {ag
 请先完成任务处理：
 - 若已完成，请调用 `update_task` 将状态改为 REVIEWING（有验收人时）或 DONE，并在 `note` 中写明结果。
 - 若需暂缓（本轮无法完成），请调用 `update_task` 将状态改为 ON_HOLD。
-- 若需取消，请调用 `update_task` 将状态改为 CANCELLED。
+{cancel_instruction}
 完成后再调用 finish_action。""",
                 }
             elif is_reviewer and agent_task.status == TaskStatus.REVIEWING:
