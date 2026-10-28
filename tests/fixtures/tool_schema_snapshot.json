@@ -24,7 +24,7 @@
         }
       },
       "parent_id": {
-        "description": "父任务 ID，用于子任务拆解",
+        "description": "父任务 ID，用于任务树拆解。除了 Operator 直接下达的任务，其他任务应按拆解关系设置父任务 ID，使所有任务能形成以 Operator 任务为根的任务树",
         "schema": {
           "type": "integer"
         }
