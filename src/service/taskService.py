@@ -46,6 +46,15 @@ def is_task_reviewer(task: GtAgentTask, caller_id: int) -> bool:
     return task.reviewer_id is not None and caller_id == task.reviewer_id
 
 
+def can_cancel(task: GtAgentTask, caller_id: int) -> bool:
+    """单一口径判定：caller 是否有权取消该任务（`update_task` 的 `→CANCELLED` 分支）。
+
+    取消权限 = 创建人或验收人。供唤醒通知 / `finish_action` 提示按权限给出互斥文案，
+    避免各调用点自己重写一遍「creator or reviewer」公式（曾因此产生过两处分叉）。
+    """
+    return caller_id == task.creator_id or is_task_reviewer(task, caller_id)
+
+
 # 事件时间线摘要默认条数
 EVENT_TIMELINE_LIMIT = 20
 

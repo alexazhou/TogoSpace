@@ -197,6 +197,8 @@ class AgentTurnRunner:
         - TODO_TASK：向 history 注入任务通知 prompt 后运行 turn loop，无房间依赖。
         若存在未完成 turn，则走续跑路径。
         """
+        import service.taskService as taskService  # 局部导入：避免 agentService ↔ taskService 的模块级导入环
+
         is_todo_task = task.task_type == AgentTaskType.TODO_TASK
 
         if is_todo_task:
@@ -238,9 +240,8 @@ class AgentTurnRunner:
                             description=agent_task.description,
                             status_value=agent_task.status.value,
                             has_reviewer=agent_task.reviewer_id is not None,
-                            # 取消权限 = 创建人或验收人；执行通知的收件人是执行人，
-                            # 只有「自己建给自己的任务」才需要给出取消指令。
-                            can_cancel=agent_task.creator_id == self.gt_agent.id,
+                            # 取消权限单一口径见 `taskService.can_cancel`（创建人或验收人）。
+                            can_cancel=taskService.can_cancel(agent_task, self.gt_agent.id),
                             latest_event=await self._build_latest_task_event_line(agent_task.id),
                         )
                         await self._history.append_history_message(GtAgentHistory.build(

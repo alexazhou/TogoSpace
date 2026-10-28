@@ -1042,12 +1042,12 @@ async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: 
 
             if is_assignee and agent_task.status in (TaskStatus.TODO, TaskStatus.IN_PROGRESS):
                 logger.warning(f"finish_action 被拒绝，协作任务仍为 {agent_task.status.value}: agent_id={_context.agent_id}, agent_task_id={agent_task_id}")
-                # 取消权限 = 创建人或验收人（`taskService.update_task` 的 `→CANCELLED` 分支）。
+                # 取消权限单一口径见 `taskService.can_cancel`（创建人或验收人）。
                 # 执行人通常两者都不是，给它「改为 CANCELLED」只会换来 permission_denied；
                 # 随后 finish_action 再被拒 → 重试耗尽 → Agent FAILED。
                 # 两句文案复用 `prompts.py` 的常量，**不在这里另抄一份**——多处拷贝分叉正是本次缺陷的成因。
                 cancel_instruction = (
-                    TODO_TASK_CANCEL_INSTRUCTION if ((agent_task.creator_id == _context.agent_id) or is_reviewer)
+                    TODO_TASK_CANCEL_INSTRUCTION if taskService.can_cancel(agent_task, _context.agent_id)
                     else TODO_TASK_NO_CANCEL_INSTRUCTION
                 )
                 return {
