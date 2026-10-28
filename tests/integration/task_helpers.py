@@ -12,7 +12,6 @@ from __future__ import annotations
 from constants import TaskStatus
 from dal.db import gtAgentTaskEventManager, gtAgentTaskManager
 from model.dbModel.base import atomic
-from model.dbModel.base import atomic
 from model.dbModel.gtAgentTask import GtAgentTask
 
 

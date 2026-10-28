@@ -7,6 +7,10 @@ from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService import promptBuilder
 
 
+# 任务通知里的任务 ID（断言用固定值，避免测试与真实 ID 耦合）
+_TASK_ID = 7
+
+
 def _msg(agent_id: int, display_name: str, content: str, *, insert_immediately: bool = False) -> GtRoomMessage:
     m = GtRoomMessage(room_id=1, sender_id=agent_id, content=content,
                       send_time=datetime(2024, 1, 1), insert_immediately=insert_immediately)
@@ -62,12 +66,13 @@ def test_build_turn_begin_prompt_yaml_format():
 
 def test_build_todo_task_turn_prompt_for_normal_task():
     """无验收人：完成路径直接 DONE，不出现 REVIEWING。"""
-    result = promptBuilder.build_todo_task_turn_prompt("写周报", "整理本周进展", "IN_PROGRESS")
+    result = promptBuilder.build_todo_task_turn_prompt(_TASK_ID, "写周报", "整理本周进展", "IN_PROGRESS")
     assert "你当前被唤醒以处理以下任务" in result
+    # 任务 ID 必须注入，Agent 才能直接 update_task / get_task_detail，不必先反查
+    assert f"- 任务 ID: {_TASK_ID}" in result
     assert "请直接开始工作" in result
     assert "验收不通过" not in result
     assert "ON_HOLD" in result
-    assert "CANCELLED" in result
     assert "改为 DONE，并在 `note` 中写明结果" in result
     assert "REVIEWING" not in result
     # 旧签名 result 参数不得再出现在文案中
@@ -76,20 +81,63 @@ def test_build_todo_task_turn_prompt_for_normal_task():
 
 def test_build_todo_task_turn_prompt_with_reviewer_requires_reviewing():
     """有验收人：完成路径须先 REVIEWING，与无验收人文案互斥。"""
-    result = promptBuilder.build_todo_task_turn_prompt("写周报", "整理本周进展", "IN_PROGRESS", has_reviewer=True)
+    result = promptBuilder.build_todo_task_turn_prompt(_TASK_ID, "写周报", "整理本周进展", "IN_PROGRESS", has_reviewer=True)
     assert "你当前被唤醒以处理以下任务" in result
     assert "请直接开始工作" in result
     assert "改为 REVIEWING 提交验收" in result
     # 不得出现「执行人直接 DONE」的无验收人文案
     assert "将状态改为 DONE，并在 `note` 中写明结果" not in result
     assert "ON_HOLD" in result
-    assert "CANCELLED" in result
     assert "result" not in result
 
 
+# ─── 取消权限：只有创建人/验收人能取消（执行人通常两者都不是）─────────────
+
+
+def test_task_turn_prompt_without_cancel_permission_has_no_cancel_command():
+    """默认（无取消权限）不得给出「请调用 update_task 改为 CANCELLED」这种必然被拒的指令。
+
+    执行通知的收件人是执行人，而取消权限属于创建人与验收人
+    （`taskService.update_task` 的 `→CANCELLED` 分支）。照旧文案去调用会拿到
+    `permission_denied`，随后 `finish_action` 又被拒（任务仍非终态），
+    重试耗尽后 Agent 直接被打成 FAILED——所以这条指令必须按权限分支。
+    """
+    result = promptBuilder.build_todo_task_turn_prompt(_TASK_ID, "写周报", "整理进展", "IN_PROGRESS")
+
+    assert "CANCELLED" not in result
+    assert "你无权自行取消任务" in result
+    # 给出可执行的退路：说明原因只是外部动作，必须落到 ON_HOLD 才能通过 finish_action
+    # （任务仍为 TODO/IN_PROGRESS 时 finish_action 会被拒），否则模型会卡在重试里。
+    assert "将状态改为 ON_HOLD" in result
+    assert "请创建人或验收人取消" in result
+
+
+def test_task_turn_prompt_with_cancel_permission_offers_cancel_command():
+    """自己创建的任务（creator == assignee）才给出取消指令。"""
+    result = promptBuilder.build_todo_task_turn_prompt(
+        _TASK_ID, "写周报", "整理进展", "IN_PROGRESS", can_cancel=True)
+
+    assert "请调用 `update_task` 将状态改为 CANCELLED" in result
+    assert "你无权自行取消任务" not in result
+
+
+def test_task_turn_prompt_cancel_instruction_is_mutually_exclusive():
+    """两种文案互斥：任何组合下都不会同时出现「可取消」与「无权取消」。"""
+    for has_reviewer in (False, True):
+        for can_cancel in (False, True):
+            result = promptBuilder.build_todo_task_turn_prompt(
+                _TASK_ID, "写周报", "整理进展", "IN_PROGRESS",
+                has_reviewer=has_reviewer, can_cancel=can_cancel)
+            has_command = "请调用 `update_task` 将状态改为 CANCELLED" in result
+            has_denial = "你无权自行取消任务" in result
+            assert has_command is can_cancel
+            assert has_denial is (not can_cancel)
+
+
 def test_build_todo_task_turn_prompt_for_review_task():
-    result = promptBuilder.build_todo_task_turn_prompt("验收功能", "检查交付结果", "REVIEWING")
+    result = promptBuilder.build_todo_task_turn_prompt(_TASK_ID, "验收功能", "检查交付结果", "REVIEWING")
     assert "你当前被唤醒以处理以下验收任务" in result
+    assert f"- 任务 ID: {_TASK_ID}" in result
     assert "请直接开始验收" in result
     assert "验收不通过" in result
     assert "IN_PROGRESS" in result
@@ -97,8 +145,14 @@ def test_build_todo_task_turn_prompt_for_review_task():
     assert "改为 DONE，并在 `note` 中写明结果" in result
     assert "并在 `note` 中写明打回原因" in result
     assert "result" not in result
+    # REVIEWING 的出边只有 DONE / IN_PROGRESS / CANCELLED，不能转 ON_HOLD
+    # （`taskService._VALID_TRANSITIONS`），给出这条指令只会换来 invalid_transition
+    assert "ON_HOLD" not in result
+    assert "CANCELLED" in result
+    # 验收人必然有权取消，故不受 can_cancel 影响
+    assert "你无权自行取消任务" not in result
     # 验收通知不受 has_reviewer 影响（验收人必然存在）
-    assert result == promptBuilder.build_todo_task_turn_prompt("验收功能", "检查交付结果", "REVIEWING", has_reviewer=True)
+    assert result == promptBuilder.build_todo_task_turn_prompt(_TASK_ID, "验收功能", "检查交付结果", "REVIEWING", has_reviewer=True)
     # 未注入事件时不应出现「最近事件」段
     assert "最近事件" not in result
 
@@ -111,9 +165,9 @@ _EVENT_LINE = "- 2026-10-26 02:41 REVIEWING→IN_PROGRESS（李哥）：加密�
 
 def test_task_turn_prompt_without_latest_event_has_no_event_section():
     """三种通知在未传 latest_event 时都不出现「最近事件」段（向后兼容）。"""
-    without_reviewer = promptBuilder.build_todo_task_turn_prompt("写周报", "整理进展", "IN_PROGRESS")
-    with_reviewer = promptBuilder.build_todo_task_turn_prompt("写周报", "整理进展", "IN_PROGRESS", has_reviewer=True)
-    review = promptBuilder.build_todo_task_turn_prompt("验收功能", "检查交付结果", "REVIEWING")
+    without_reviewer = promptBuilder.build_todo_task_turn_prompt(_TASK_ID, "写周报", "整理进展", "IN_PROGRESS")
+    with_reviewer = promptBuilder.build_todo_task_turn_prompt(_TASK_ID, "写周报", "整理进展", "IN_PROGRESS", has_reviewer=True)
+    review = promptBuilder.build_todo_task_turn_prompt(_TASK_ID, "验收功能", "检查交付结果", "REVIEWING")
 
     for result in (without_reviewer, with_reviewer, review):
         assert "最近事件" not in result
@@ -122,11 +176,11 @@ def test_task_turn_prompt_without_latest_event_has_no_event_section():
 def test_task_turn_prompt_with_latest_event_in_all_variants():
     """三种通知都带上「最近事件」段与事件原文。"""
     without_reviewer = promptBuilder.build_todo_task_turn_prompt(
-        "写周报", "整理进展", "IN_PROGRESS", latest_event=_EVENT_LINE)
+        _TASK_ID, "写周报", "整理进展", "IN_PROGRESS", latest_event=_EVENT_LINE)
     with_reviewer = promptBuilder.build_todo_task_turn_prompt(
-        "写周报", "整理进展", "IN_PROGRESS", has_reviewer=True, latest_event=_EVENT_LINE)
+        _TASK_ID, "写周报", "整理进展", "IN_PROGRESS", has_reviewer=True, latest_event=_EVENT_LINE)
     review = promptBuilder.build_todo_task_turn_prompt(
-        "验收功能", "检查交付结果", "REVIEWING", latest_event=_EVENT_LINE)
+        _TASK_ID, "验收功能", "检查交付结果", "REVIEWING", latest_event=_EVENT_LINE)
 
     for result in (without_reviewer, with_reviewer, review):
         assert "最近事件：" in result
@@ -142,10 +196,10 @@ def test_task_turn_prompt_with_latest_event_in_all_variants():
 def test_task_turn_prompt_blank_latest_event_hides_section():
     """latest_event 为空串 / 空白串时整段不出现（不留空标题）。"""
     for blank in ("", "   ", "\n"):
-        result = promptBuilder.build_todo_task_turn_prompt("写周报", "整理进展", "IN_PROGRESS", latest_event=blank)
+        result = promptBuilder.build_todo_task_turn_prompt(_TASK_ID, "写周报", "整理进展", "IN_PROGRESS", latest_event=blank)
         assert "最近事件" not in result
         assert "get_task_event" not in result
-        assert result == promptBuilder.build_todo_task_turn_prompt("写周报", "整理进展", "IN_PROGRESS")
+        assert result == promptBuilder.build_todo_task_turn_prompt(_TASK_ID, "写周报", "整理进展", "IN_PROGRESS")
 
 
 def test_build_task_event_line_transition_format():

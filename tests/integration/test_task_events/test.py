@@ -14,7 +14,7 @@ import pytest
 
 import service.ormService as ormService
 import service.taskService as taskService
-from constants import EVENT_TRUNCATED_SUFFIX, TaskStatus
+from constants import EVENT_TRUNCATED_SUFFIX, SpecialAgent, TaskStatus
 from dal.db import gtAgentTaskEventManager, gtAgentTaskManager
 from model.dbModel.gtAgentTask import GtAgentTask
 from tests.base import ServiceTestCase
@@ -235,6 +235,91 @@ class TestTaskEvents(ServiceTestCase):
         assert res["count"] == 1
         assert res["total"] == 2
         assert res["events"][0]["to_status"] == "IN_PROGRESS"
+
+    # ------------------------------------------------------- 排除认领事件 ----
+    async def _make_task_with_claim_and_comment(self, title: str):
+        """造出「创建 → 评论 → 认领 → 打回」四种事件，返回任务。
+
+        认领事件 = 系统在 TODO→IN_PROGRESS 上的自动置位（`taskService.claim_task` 的写法）。
+        """
+        task = await self._make_task(title=title)
+        await gtAgentTaskEventManager.append_event(
+            task.id, 6, from_status=None, to_status=None, content="创建人补充：先做 #85"
+        )
+        await gtAgentTaskEventManager.append_event(
+            task.id, SpecialAgent.SYSTEM.value,
+            from_status=TaskStatus.TODO, to_status=TaskStatus.IN_PROGRESS,
+            content="执行人认领，系统自动置为 IN_PROGRESS",
+        )
+        await gtAgentTaskEventManager.append_event(
+            task.id, 6,
+            from_status=TaskStatus.REVIEWING, to_status=TaskStatus.IN_PROGRESS,
+            content="打回：空口令用例没覆盖",
+        )
+        return task
+
+    async def test_exclude_claim_keeps_full_timeline_by_default(self):
+        """默认不过滤：Web 时间线 / list_task_events 仍要看到认领事件。"""
+        task = await self._make_task_with_claim_and_comment(title="ev-claim-default")
+
+        contents = [e.content for e in await self._events(task.id)]
+
+        assert "执行人认领，系统自动置为 IN_PROGRESS" in contents
+        assert len(contents) == 4
+
+    async def test_exclude_claim_drops_only_the_claim_event(self):
+        """排除认领事件，但评论（from/to 均 NULL）与打回（REVIEWING→IN_PROGRESS）必须保留。
+
+        这是三值逻辑的守卫：`to_status` 为 NULL 的评论事件在 `NOT IN` / `!=` 下
+        会被静默过滤掉；`REVIEWING→IN_PROGRESS` 则是执行人最需要看到的打回原因。
+        """
+        task = await self._make_task_with_claim_and_comment(title="ev-claim-filter")
+
+        events = await gtAgentTaskEventManager.list_events(task.id, limit=50, exclude_claim=True)
+
+        assert [e.content for e in events] == ["打回：空口令用例没覆盖", "创建人补充：先做 #85", ""]
+
+    async def test_exclude_claim_limit_one_returns_latest_human_event(self):
+        """limit=1 时拿到人写的最新事件，正是任务通知要注入的那条。"""
+        task = await self._make_task_with_claim_and_comment(title="ev-claim-latest")
+
+        events = await gtAgentTaskEventManager.list_events(task.id, limit=1, exclude_claim=True)
+
+        assert len(events) == 1
+        assert events[0].actor_id == 6
+        assert events[0].content == "打回：空口令用例没覆盖"
+
+    async def test_exclude_claim_keeps_system_snapshot_with_null_from_status(self):
+        """系统身份 + `from_status=NULL` + `to_status=IN_PROGRESS` 的迁移快照不能被误删。
+
+        0015 结转的基线快照就是「actor=SYSTEM、from=NULL、to=任务当时状态」的形态；
+        若按 `~(actor==SYSTEM & from==TODO & to==IN_PROGRESS)` 过滤，这条在 SQL 里
+        整体求值为 NULL、`NOT NULL` 仍为 NULL → 被静默丢弃。
+        """
+        task = await self._make_task(title="ev-claim-snapshot")
+        await gtAgentTaskEventManager.append_event(
+            task.id, SpecialAgent.SYSTEM.value,
+            from_status=None, to_status=TaskStatus.IN_PROGRESS,
+            content="【系统迁移自动生成】历史结果",
+        )
+
+        events = await gtAgentTaskEventManager.list_events(task.id, limit=10, exclude_claim=True)
+
+        assert [e.content for e in events][0] == "【系统迁移自动生成】历史结果"
+
+    async def test_exclude_claim_does_not_leak_other_tasks(self):
+        """过滤只作用于指定任务。"""
+        target = await self._make_task_with_claim_and_comment(title="ev-claim-scope-a")
+        other = await self._make_task(title="ev-claim-scope-b")
+        await gtAgentTaskEventManager.append_event(
+            other.id, SpecialAgent.SYSTEM.value,
+            from_status=TaskStatus.TODO, to_status=TaskStatus.IN_PROGRESS,
+            content="执行人认领，系统自动置为 IN_PROGRESS",
+        )
+
+        # 目标任务排除认领后仍有 3 条；另一任务排除认领后只剩它的创建事件
+        assert len(await gtAgentTaskEventManager.list_events(target.id, limit=50, exclude_claim=True)) == 3
+        assert len(await gtAgentTaskEventManager.list_events(other.id, limit=50, exclude_claim=True)) == 1
 
 
 # ---------------------------------------------------------------------------

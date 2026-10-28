@@ -155,11 +155,14 @@ class AgentTurnRunner:
         return agent.display_name if agent is not None else f"Agent#{actor_id}"
 
     async def _build_latest_task_event_line(self, agent_task_id: int) -> str | None:
-        """取该任务的最后一条事件，渲染为通知里「最近事件」的单行文本（无事件返回 None）。
+        """取该任务最后一条**非认领**事件，渲染为通知里「最近事件」的单行文本（无则返回 None）。
 
         只读：仅查事件与 actor 展示名，不改状态、不触发唤醒/通知。
         """
-        events = await gtAgentTaskEventManager.list_events(agent_task_id, limit=1)
+        # exclude_claim：跳过「执行人认领」这条系统噪声。认领由 consumer 在 turn 开始前
+        # 写入（`taskService.claim_task`），必然是本任务最新一条，会把创建人刚写的
+        # 说明挤出通知——#64 / #83 / #86 都实际发生过这种遮盖。
+        events = await gtAgentTaskEventManager.list_events(agent_task_id, limit=1, exclude_claim=True)
         if not events:
             return None
         event = events[0]
@@ -230,10 +233,14 @@ class AgentTurnRunner:
                 if not self._history.has_active_turn():
                     if is_todo_task:
                         task_prompt = promptBuilder.build_todo_task_turn_prompt(
+                            task_id=agent_task.id,
                             title=agent_task.title,
                             description=agent_task.description,
                             status_value=agent_task.status.value,
                             has_reviewer=agent_task.reviewer_id is not None,
+                            # 取消权限 = 创建人或验收人；执行通知的收件人是执行人，
+                            # 只有「自己建给自己的任务」才需要给出取消指令。
+                            can_cancel=agent_task.creator_id == self.gt_agent.id,
                             latest_event=await self._build_latest_task_event_line(agent_task.id),
                         )
                         await self._history.append_history_message(GtAgentHistory.build(

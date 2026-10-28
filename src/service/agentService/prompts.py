@@ -137,8 +137,20 @@ LATEST_EVENT_TRUNCATION_HINT_TEMPLATE = (
     '（事件内容超过 {max_chars} 字会被截断，需要完整原文可调 `get_task_event`）'
 )
 
+# 取消权限属于验收人与创建人（见 step1_product.md「取消权限」），执行人通常两者都不是。
+# 按权限给出互斥的两句：无权时不要写「请调用 update_task 改为 CANCELLED」——
+# 那是一句必然被 permission_denied 拒绝的指令，模型会因此卡在
+# 「取消失败 → finish_action 被拒 → 重试耗尽 → Agent FAILED」的循环里。
+TODO_TASK_CANCEL_INSTRUCTION = '- 若需取消，请调用 `update_task` 将状态改为 CANCELLED。'
+
+TODO_TASK_NO_CANCEL_INSTRUCTION = (
+    '- 你无权自行取消任务：若确实无法继续，请先调用 `update_task` 将状态改为 ON_HOLD 暂缓，'
+    '并在房间说明原因，请创建人或验收人取消。'
+)
+
 TODO_TASK_TURN_PROMPT_TEMPLATE = '''【任务通知】
 你当前被唤醒以处理以下任务：
+- 任务 ID: {task_id}
 - 标题: {title}
 - 描述: {description}
 - 状态: {status_value}
@@ -146,11 +158,12 @@ TODO_TASK_TURN_PROMPT_TEMPLATE = '''【任务通知】
 请直接开始工作。
 {complete_instruction}
 - 若需暂缓（本轮无法完成），请调用 `update_task` 将状态改为 ON_HOLD。
-- 若需取消，请调用 `update_task` 将状态改为 CANCELLED。
+{cancel_instruction}
 - 无论成败，完成后必须调用 `finish_action`。'''
 
 REVIEW_TASK_TURN_PROMPT_TEMPLATE = '''【任务通知】
 你当前被唤醒以处理以下验收任务：
+- 任务 ID: {task_id}
 - 标题: {title}
 - 描述: {description}
 - 状态: {status_value}
@@ -158,5 +171,5 @@ REVIEW_TASK_TURN_PROMPT_TEMPLATE = '''【任务通知】
 请直接开始验收。
 - 若验收通过，请调用 `update_task` 将状态改为 DONE，并在 `note` 中写明结果。
 - 若验收不通过，请调用 `update_task` 将状态改回 IN_PROGRESS，并在 `note` 中写明打回原因。
-- 其他少见情况：必要时也可改为 ON_HOLD 或 CANCELLED。
+- 其他少见情况：必要时也可改为 CANCELLED。
 - 无论成败，完成后必须调用 `finish_action`。'''

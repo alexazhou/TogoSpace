@@ -20,6 +20,8 @@ from service.agentService.prompts import (
     TODO_TASK_TURN_PROMPT_TEMPLATE,
     TODO_TASK_DONE_INSTRUCTION,
     TODO_TASK_REVIEW_INSTRUCTION,
+    TODO_TASK_CANCEL_INSTRUCTION,
+    TODO_TASK_NO_CANCEL_INSTRUCTION,
     LATEST_EVENT_TRUNCATION_HINT_TEMPLATE,
     REVIEW_TASK_TURN_PROMPT_TEMPLATE,
 )
@@ -183,10 +185,12 @@ def _build_latest_event_block(latest_event: str | None) -> str:
 
 
 def build_todo_task_turn_prompt(
+    task_id: int,
     title: str,
     description: str,
     status_value: str,
     has_reviewer: bool = False,
+    can_cancel: bool = False,
     latest_event: str | None = None,
 ) -> str:
     """构建协作任务（TODO_TASK）turn 的用户提示文本。
@@ -195,23 +199,33 @@ def build_todo_task_turn_prompt(
     给出互斥的完成方式（有验收人须先 REVIEWING，无验收人直接 DONE）。
 
     Args:
+        task_id: 协作任务 ID。注入通知是为了让 Agent 直接调用 `update_task` /
+            `get_task_detail`，不必先 `list_tasks` 反查自己的任务。
+        can_cancel: 收件人是否有权取消该任务。取消权限属于创建人与验收人
+            （`taskService.update_task`），而执行通知的收件人通常两者都不是，
+            故默认 False——不给必然被 `permission_denied` 拒绝的指令。
         latest_event: 由 build_task_event_line 渲染好的「最新一条事件」单行文本（不含标题）；
             为 None / 空串时通知里整段不出现「最近事件」。
     """
     latest_event_block = _build_latest_event_block(latest_event)
     if status_value == "REVIEWING":
+        # 验收人必然有权取消（取消权限含验收人），故不需要分支
         return REVIEW_TASK_TURN_PROMPT_TEMPLATE.format(
+            task_id=task_id,
             title=title,
             description=description,
             status_value=status_value,
             latest_event_block=latest_event_block,
         )
     complete_instruction = TODO_TASK_REVIEW_INSTRUCTION if has_reviewer else TODO_TASK_DONE_INSTRUCTION
+    cancel_instruction = TODO_TASK_CANCEL_INSTRUCTION if can_cancel else TODO_TASK_NO_CANCEL_INSTRUCTION
     return TODO_TASK_TURN_PROMPT_TEMPLATE.format(
+        task_id=task_id,
         title=title,
         description=description,
         status_value=status_value,
         complete_instruction=complete_instruction,
+        cancel_instruction=cancel_instruction,
         latest_event_block=latest_event_block,
     )
 

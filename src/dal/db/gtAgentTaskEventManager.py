@@ -1,7 +1,21 @@
 from __future__ import annotations
 
-from constants import TaskStatus
+from peewee import fn
+
+from constants import SpecialAgent, TaskStatus
 from model.dbModel.gtAgentTaskEvent import GtAgentTaskEvent
+
+# 「不是认领事件」：认领 = 系统在 `TODO → IN_PROGRESS` 上写的自动置位说明
+# （唯一写点：`taskService.claim_task`）。它内容固定、没有信息量，却总是任务的
+# 最新一条，会把真正的人写说明挤出「最近事件」槽位，因此取事件时按本条件排除。
+#
+# 用 COALESCE 把 NULL 折成空串：直接判 `from_status != 'TODO'` 遇 NULL 仍得 NULL，
+# 整个 `~(…)` 会跟着变成 NULL 而误删（0015 结转的系统快照正是 `from=NULL, to=IN_PROGRESS`）。
+_NOT_CLAIM_EVENT = ~(
+    (GtAgentTaskEvent.actor_id == SpecialAgent.SYSTEM.value)
+    & (fn.COALESCE(GtAgentTaskEvent.from_status, "") == TaskStatus.TODO.name)
+    & (fn.COALESCE(GtAgentTaskEvent.to_status, "") == TaskStatus.IN_PROGRESS.name)
+)
 
 
 async def append_event(
@@ -43,15 +57,21 @@ async def list_events(
     *,
     limit: int = 50,
     before_id: int | None = None,
+    exclude_claim: bool = False,
 ) -> list[GtAgentTaskEvent]:
     """按自增 id 游标分页读取任务事件（时间线）。
 
     - 按 id 降序返回（最新在前）；
-    - before_id 不为空时只取 id < before_id 的更早事件（向前翻页），不使用 offset。
+    - before_id 不为空时只取 id < before_id 的更早事件（向前翻页），不使用 offset；
+    - exclude_claim 为 True 时跳过认领事件（见 `_NOT_CLAIM_EVENT`）。默认 False，
+      时间线（Web / `list_task_events`）要看全量，只有「注入 Agent 通知」这类
+      取最新一条的场景才需要排除噪声。
     """
     query = GtAgentTaskEvent.select().where(GtAgentTaskEvent.task_id == task_id)
     if before_id is not None:
         query = query.where(GtAgentTaskEvent.id < before_id)
+    if exclude_claim:
+        query = query.where(_NOT_CLAIM_EVENT)
     query = query.order_by(GtAgentTaskEvent.id.desc()).limit(limit)
     return list(await query.aio_execute())
 
