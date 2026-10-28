@@ -6,6 +6,8 @@ name: Tauri Build
 on:
   workflow_dispatch:
   push:
+    branches:
+      - tauri_dev          # 开发分支推送即构建，便于验证 CI 链路
     tags:
       - 'v*'
 
