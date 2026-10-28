@@ -395,6 +395,10 @@ class TestTaskEvents(ServiceTestCase):
         page2 = await gtAgentTaskEventManager.list_events(
             task.id, limit=2, before_id=page1[-1].id, exclude_claim=True
         )
+        # 末位的 "" 不是脏数据：它是 `_make_task` → `create_task_with_event` 写入的
+        # 「创建为 TODO」事件，该事件 content 按设计为空串（创建不写说明，见
+        # `task_helpers.create_task_with_event` 的 `content=''`）。断言它在这里
+        # 出现，恰好证明第二页翻到了时间线的尽头（全部 4 条非认领事件已取完）。
         assert [e.content for e in page2] == ["留言1", ""]
 
 
