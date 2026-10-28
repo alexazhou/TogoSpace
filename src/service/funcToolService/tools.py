@@ -1120,7 +1120,7 @@ async def create_task(
         description: 任务描述，含上下文、约束和交付标准
         reviewer_id: 完成时若需要他人验收，则设置验收人 Agent ID，不填则无需验收流程；不能与 assignee_id 相同（同一人无需设置验收）
         priority: 优先级，HIGH / NORMAL / LOW，默认 NORMAL
-        parent_id: 父任务 ID，用于子任务拆解
+        parent_id: 父任务 ID，用于任务树拆解。除了 Operator 直接下达的任务，其他任务应按拆解关系设置父任务 ID，使所有任务能形成以 Operator 任务为根的任务树
         depends_on: 依赖的任务 ID 列表。非空且其中任一尚未 DONE 时，新任务初始状态为 PENDING（依赖全部 DONE 后自动转 TODO）；为空则初始状态为 TODO
         room_id: 关联房间 ID，便于溯源
     """
