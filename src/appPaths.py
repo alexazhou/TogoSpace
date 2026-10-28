@@ -16,6 +16,30 @@ _ROOT = os.path.join(_SRC, "..")                     # = repo/
 _IS_FROZEN = bool(getattr(sys, "frozen", False))
 _MEIPASS = str(getattr(sys, "_MEIPASS", ""))
 IS_DEV_MODE = not _IS_FROZEN
+# 由 Tauri 外壳拉起的后端进程：强制只监听 127.0.0.1 并开启 token 鉴权。
+IS_DESKTOP_MODE = os.environ.get("TOGOSPACE_DESKTOP") == "1"
+
+
+def _resolve_assets_dir() -> str:
+    """定位静态资源目录。
+
+    PyInstaller 6 onedir 下 ``_MEIPASS`` 指向 ``_internal``，datas 声明的 ``assets/``
+    会落在 ``_internal/assets``；部分打包形态会把资源放在可执行文件同级。这里按优先级
+    依次探测，避免打包结构差异导致后端启动即找不到 preset / migrate。
+    """
+    if not _IS_FROZEN:
+        return os.path.abspath(os.path.join(_ROOT, "assets"))
+
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    candidates = [
+        os.path.join(_MEIPASS, "assets"),
+        os.path.join(exe_dir, "assets"),
+        os.path.join(exe_dir, "_internal", "assets"),
+    ]
+    for candidate in candidates:
+        if os.path.isdir(candidate):
+            return candidate
+    return candidates[0]
 
 STORAGE_ROOT: str
 ASSETS_DIR: str
@@ -27,10 +51,9 @@ PRESET_DIR: str
 
 if _IS_FROZEN:
     STORAGE_ROOT = os.path.expanduser("~/.togospace")
-    ASSETS_DIR = os.path.join(_MEIPASS, "assets")
 else:
     STORAGE_ROOT = os.path.abspath(os.path.join(_ROOT, "dev_storage_root"))
-    ASSETS_DIR = os.path.abspath(os.path.join(_ROOT, "assets"))
+ASSETS_DIR = _resolve_assets_dir()
 
 # 环境变量优先级最高（用于 Docker 等场景）
 _ENV_STORAGE_ROOT = os.environ.get("STORAGE_ROOT")

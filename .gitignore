@@ -28,3 +28,12 @@ build_config.json
 
 # 开发模式下本地运行数据（统一目录）
 dev_storage_root/
+
+# Tauri 构建产物（保留后端资源占位，保证 cargo check 可在未打包时通过）
+tauri/build/*
+!tauri/build/backend/
+tauri/build/backend/*
+!tauri/build/backend/.gitkeep
+
+# Tauri 构建时自动生成的 capability schema
+tauri/src-tauri/gen/schemas/

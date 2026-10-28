@@ -4,6 +4,8 @@ import logging
 import os
 import signal
 import sys
+from dataclasses import dataclass
+from typing import Callable
 
 import tornado.httpserver
 
@@ -38,8 +40,19 @@ _shutdown_event: asyncio.Event | None = None
 _main_loop: asyncio.AbstractEventLoop | None = None
 
 
+@dataclass(frozen=True)
+class StartupCallbacks:
+    """启动过程中的可选回调，供桌面外壳等外层入口观察启动阶段。
+
+    默认全部为 None 时行为与原有启动流程完全一致。
+    """
+    on_migration_start: Callable[[], None] | None = None
+    on_migration_end: Callable[[], None] | None = None
+    on_ready: Callable[[str, int], None] | None = None
+
+
 def _check_single_instance(ignore_pid: bool = False) -> None:
-    if ignore_pid or os.environ.get("TEAMAGENT_ENV") == "test":
+    if ignore_pid or appPaths.IS_DESKTOP_MODE or os.environ.get("TEAMAGENT_ENV") == "test":
         return
     os.makedirs(_RUN_DIR, exist_ok=True)
     # 读取已有 PID，检查进程是否存活
@@ -54,7 +67,7 @@ def _check_single_instance(ignore_pid: bool = False) -> None:
 
 
 def _write_pid(ignore_pid: bool = False) -> None:
-    if ignore_pid or os.environ.get("TEAMAGENT_ENV") == "test":
+    if ignore_pid or appPaths.IS_DESKTOP_MODE or os.environ.get("TEAMAGENT_ENV") == "test":
         return
     os.makedirs(_RUN_DIR, exist_ok=True)
     with open(_PID_FILE, "w") as f:
@@ -62,8 +75,8 @@ def _write_pid(ignore_pid: bool = False) -> None:
 
 
 def _remove_pid() -> None:
-    # 测试环境不处理 PID 文件
-    if os.environ.get("TEAMAGENT_ENV") == "test":
+    # 测试环境与桌面模式均不处理 PID 文件（桌面单实例由 Tauri 保证，且 Resources 目录只读）
+    if appPaths.IS_DESKTOP_MODE or os.environ.get("TEAMAGENT_ENV") == "test":
         return
     try:
         os.remove(_PID_FILE)
@@ -94,7 +107,9 @@ def _handle_shutdown_signal(signum: int, _frame) -> None:
 
 
 def _detect_run_env() -> str:
-    """检测当前运行环境：docker / mac_app / source。"""
+    """检测当前运行环境：docker / desktop / mac_app / source。"""
+    if appPaths.IS_DESKTOP_MODE:
+        return "desktop"
     if os.environ.get("TOGOSPACE_RUN_ENV") == "docker":
         return "docker"
     if getattr(sys, "frozen", False):
@@ -102,7 +117,11 @@ def _detect_run_env() -> str:
     return "source"
 
 
-async def main(config_dir: str = None, port: int | None = None):
+async def main(
+    config_dir: str = None,
+    port: int | None = None,
+    callbacks: StartupCallbacks | None = None,
+):
     global _main_loop, _shutdown_event
 
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -135,7 +154,13 @@ async def main(config_dir: str = None, port: int | None = None):
     await messageBus.startup()
     await llmService.startup()
     await funcToolService.startup()
-    await ormService.startup(app_config.setting.db_path)
+    migration_callbacks = {}
+    if callbacks is not None:
+        migration_callbacks = {
+            "on_migration_start": callbacks.on_migration_start,
+            "on_migration_end": callbacks.on_migration_end,
+        }
+    await ormService.startup(app_config.setting.db_path, **migration_callbacks)
     await persistenceService.startup()
     await agentService.startup()
     await roomService.startup()
@@ -175,6 +200,8 @@ async def main(config_dir: str = None, port: int | None = None):
     web_server = tornado.httpserver.HTTPServer(route.application)
     try:
         web_server.listen(bind_port, bind_host)
+        if callbacks is not None and callbacks.on_ready is not None:
+            callbacks.on_ready(bind_host, bind_port)
         await _shutdown_event.wait()
     finally:
         web_server.stop()

@@ -1,0 +1,32 @@
+[package]
+name = "togospace"
+version = "0.3.12"
+description = "TogoSpace Desktop"
+authors = []
+edition = "2021"
+
+[lib]
+name = "togospace_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "TogoSpace"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+open = "5"
+uuid = { version = "1", features = ["v4"] }
+tokio = { version = "1", features = ["sync"] }

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TogoSpace</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background: #16181d;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .splash-card {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(160deg, #1d2028 0%, #14161b 100%);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 10px;
+    }
+    .logo {
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #6d8cff, #a855f7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .title {
+      font-size: 30px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.55);
+      margin-bottom: 44px;
+    }
+    .loading-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .spinner {
+      width: 34px;
+      height: 34px;
+      border: 3px solid rgba(255, 255, 255, 0.12);
+      border-top-color: #8fa8ff;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      margin-bottom: 16px;
+    }
+    .loading-text {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.7);
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .error-state {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      max-width: 80%;
+      text-align: center;
+      animation: fadeIn 0.3s ease;
+    }
+    .error-title {
+      color: #ff6b6b;
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .error-desc {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.8);
+      line-height: 1.6;
+      margin-bottom: 22px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .btn-exit {
+      background: #e5484d;
+      color: #fff;
+      border: none;
+      padding: 9px 26px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-exit:hover {
+      background: #f2555a;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="splash-card" data-tauri-drag-region>
+    <div class="brand" data-tauri-drag-region>
+      <div class="logo">T</div>
+      <div class="title">TogoSpace</div>
+    </div>
+    <div class="subtitle">Multi-Agent Workspace</div>
+
+    <div class="loading-state" id="loadingState">
+      <div class="spinner"></div>
+      <div class="loading-text" id="loadingText">正在启动中…</div>
+    </div>
+
+    <div class="error-state" id="errorState">
+      <div class="error-title">启动失败</div>
+      <div class="error-desc" id="errorText"></div>
+      <button class="btn-exit" id="btnExit" type="button">确认退出</button>
+    </div>
+  </div>
+  <script type="module" src="/src/splash.ts"></script>
+</body>
+</html>

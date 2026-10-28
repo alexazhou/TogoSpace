@@ -183,10 +183,19 @@ type RawFrontendConfig = {
   context_config_defaults?: { context_window_tokens?: number; reserve_output_tokens?: number; compact_trigger_ratio?: number; compact_summary_max_tokens?: number };
 };
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+// 运行时可写：桌面模式挂载前由 Tauri 注入后端地址，浏览器模式沿用编译期配置
+let runtimeBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
+export function setApiBaseUrl(url: string): void {
+  runtimeBaseUrl = (url || '').replace(/\/$/, '');
+}
+
+export function getApiBaseUrl(): string {
+  return runtimeBaseUrl;
+}
 
 function makeUrl(path: string): string {
-  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+  return runtimeBaseUrl ? `${runtimeBaseUrl}${path}` : path;
 }
 
 function makeDisplayUrl(path: string): string {
@@ -212,8 +221,8 @@ function withSearch(path: string, params: Record<string, string | number | undef
 }
 
 function makeWsUrl(path: string): string {
-  if (API_BASE_URL) {
-    const url = new URL(API_BASE_URL);
+  if (runtimeBaseUrl) {
+    const url = new URL(runtimeBaseUrl);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     url.pathname = path;
     return url.toString();
@@ -1106,6 +1115,7 @@ export interface SystemStatus {
   message?: string;
   schedule_state?: 'STOPPED' | 'BLOCKED' | 'RUNNING' | 'stopped' | 'blocked' | 'running';
   not_running_reason?: string;
+  language?: string;
   development_mode?: boolean;
   version?: string;
   auto_check_update?: boolean;

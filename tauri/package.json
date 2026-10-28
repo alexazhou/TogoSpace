@@ -1,0 +1,14 @@
+{
+  "name": "togospace-tauri",
+  "private": true,
+  "version": "0.3.12",
+  "scripts": {
+    "dev": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri dev",
+    "build": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build",
+    "tauri": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri",
+    "icon": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri icon"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

@@ -44,6 +44,10 @@ TogoSpace/
 │   ├── package.json         # 依赖配置
 │   └── vite.config.ts       # Vite 配置
 ├── tui/                     # 终端前端（Textual）
+├── tauri/                   # 桌面外壳（Tauri v2 + PyInstaller 后端）
+│   ├── src-tauri/           # Rust 外壳（窗口、托盘、子进程、日志）
+│   ├── scripts/             # 后端打包 / 桌面构建 / 签名公证脚本
+│   └── README.md            # 开发与构建说明
 ├── assets/                  # 静态资源（preset、icons、execute）
 ├── docs/                    # 设计与规范文档
 ├── scripts/                 # 启停脚本、构建脚本
@@ -156,6 +160,23 @@ cd frontend
 VITE_API_BASE_URL=http://127.0.0.1:8180 npm run dev
 ```
 
+### 桌面应用（Tauri）
+
+```bash
+# 开发（Vite + Tauri 窗口 + Python 后端，debug 构建直接运行 src/desktopEntry.py）
+cd tauri
+npm install
+npm run dev
+
+# 构建安装包（前端 → 后端 → .app → 签名 → DMG → 公证）
+python3 tauri/scripts/build_desktop.py [--arch arm64|x86_64] [--action ...]
+```
+
+- 桌面后端由环境变量 `TOGOSPACE_DESKTOP=1` 标识：强制监听 `127.0.0.1`、强制开启 token 鉴权。
+- Rust 与 Python 的职责边界：Rust 管理 `~/.togospace/desktop.json`，Python 管理 `setting.json`。
+- 桌面日志汇聚在 `~/.togospace/logs/desktop/desktop.log`。
+- 详细说明见 `tauri/README.md`。
+
 ## 日志说明
 
 后端日志位于 `STORAGE_ROOT/logs/backend/`，已按模块拆分并保留全局日志：
@@ -192,17 +213,19 @@ VITE_API_BASE_URL=http://127.0.0.1:8180 npm run dev
 
 | 运行模式 | STORAGE_ROOT | 说明 |
 |----------|--------------|------|
-| **打包模式**（PyInstaller frozen） | `~/.togo_agent/` | 用户私有数据目录 |
+| **打包模式**（PyInstaller frozen / Tauri 桌面） | `~/.togospace/` | 用户私有数据目录 |
 | **开发模式**（直接运行代码） | `repo/dev_storage_root/` | 仓库本地开发目录 |
 
 目录结构（基于 STORAGE_ROOT）：
 
 ```text
 STORAGE_ROOT/
-├── setting.json        # 运行配置
+├── setting.json        # 运行配置（Python 拥有）
+├── desktop.json        # 桌面端口 + token（Rust 拥有，仅桌面形态）
 ├── data/               # SQLite 数据库
 ├── logs/
-│   └── backend/        # 后端日志
+│   ├── backend/        # 后端日志
+│   └── desktop/        # 桌面外壳日志（仅桌面形态）
 └── workspace/          # Agent 工作目录
 ```
 

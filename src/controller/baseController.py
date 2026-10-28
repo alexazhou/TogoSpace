@@ -6,12 +6,29 @@ import tornado.web
 from pydantic import BaseModel
 from tornado.web import HTTPError
 
+from constants import DESKTOP_ALLOWED_ORIGINS, DEVELOPMENT_ALLOWED_ORIGINS
 from exception import TogoException
 from util import jsonUtil, configUtil
 
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
+
+
+def allowed_web_origins() -> set[str]:
+    """返回允许跨源访问后端的 Origin 白名单。
+
+    桌面形态的页面源是 `tauri://localhost` / `http://tauri.localhost`；
+    开发模式下额外放行 Vite devUrl（`tauri dev` 窗口与后端不同源）。
+    """
+    origins = set(DESKTOP_ALLOWED_ORIGINS)
+    try:
+        if configUtil.get_app_config().setting.development_mode:
+            origins.update(DEVELOPMENT_ALLOWED_ORIGINS)
+    except Exception:
+        # 配置尚未加载时仅保留桌面白名单，避免影响启动早期请求
+        pass
+    return origins
 
 
 class BaseHandler(tornado.web.RequestHandler):
@@ -26,8 +43,29 @@ class BaseHandler(tornado.web.RequestHandler):
         super().__init__(*args, **kwargs)
         self.enhance = {}
 
+    def set_default_headers(self) -> None:
+        """按白名单回填 CORS 响应头。
+
+        只回显命中白名单的 Origin，不使用 `*`；浏览器形态同源请求不受影响。
+        """
+        origin = self.request.headers.get("Origin")
+        if origin and origin in allowed_web_origins():
+            self.set_header("Access-Control-Allow-Origin", origin)
+            self.set_header("Vary", "Origin")
+            self.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            self.set_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+
+    def options(self, *args, **kwargs) -> None:
+        """CORS 预检统一返回 204（响应头由 set_default_headers 回填）。"""
+        self.set_status(204)
+        self.finish()
+
     def prepare(self) -> None:
         """统一处理演示模式只读闸门和鉴权检查。"""
+        # 预检请求不涉及业务操作，直接放行
+        if self.request.method.upper() == "OPTIONS":
+            return
+
         # 1. 演示模式检查
         if self.request.method.upper() in self._READONLY_BLOCKED_METHODS:
             demo_mode = configUtil.get_app_config().setting.demo_mode

@@ -5,6 +5,7 @@ import { checkUpdate, updateSystemConfig } from '../../api';
 import { autoCheckUpdate, hasUpdate, latestVersion, releaseUrl, appVersion } from '../../appUiState';
 import ToggleSwitch from '../ui/ToggleSwitch.vue';
 import SettingsBreadcrumb from './SettingsBreadcrumb.vue';
+import { openExternal } from '../../utils/platform';
 import type { SettingsBreadcrumbItem } from './types';
 import type { UpdateCheckResult } from '../../api';
 
@@ -72,6 +73,7 @@ async function handleManualCheck(): Promise<void> {
                   target="_blank"
                   rel="noopener"
                   class="update-link"
+                  @click.prevent="openExternal(releaseUrl)"
                 >{{ t('settings.advanced.goToDownload') }}</a>
               </template>
               <template v-else-if="lastCheckResult">

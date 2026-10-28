@@ -4,6 +4,7 @@ import logging
 import tornado.websocket
 import service.messageBus as messageBus
 from constants import MessageBusTopic
+from controller.baseController import allowed_web_origins
 from util import jsonUtil, configUtil
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,16 @@ _WS_TOPICS = [
 
 
 class EventsWsHandler(tornado.websocket.WebSocketHandler):
+    def check_origin(self, origin: str) -> bool:
+        """放行桌面外壳与开发模式的页面源，其余沿用 Tornado 默认的同源判定。
+
+        Tornado 默认拒绝跨源 WS；桌面窗口的 `tauri://localhost` 与后端
+        `http://127.0.0.1:<port>` 必然跨源，必须显式加入白名单。
+        """
+        if origin in allowed_web_origins():
+            return True
+        return super().check_origin(origin)
+
     def open(self):
         auth_config = configUtil.get_app_config().setting.auth
         if auth_config.enabled:

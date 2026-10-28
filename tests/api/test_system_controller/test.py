@@ -210,3 +210,46 @@ class TestSystemStatus(_ApiServiceCase):
                 assert resp.status == 200
                 data = await resp.json()
             assert data["status"] == "ok"
+
+
+class TestCors(_ApiServiceCase):
+    """CORS 白名单测试：桌面外壳 Origin 放行，未知 Origin 不回显。"""
+
+    requires_backend = True
+
+    async def test_preflight_allows_tauri_origin(self):
+        async with aiohttp.ClientSession() as client:
+            async with client.options(
+                f"{self.backend_base_url}/system/status.json",
+                headers={
+                    "Origin": "tauri://localhost",
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            ) as resp:
+                assert resp.status == 204
+                assert resp.headers.get("Access-Control-Allow-Origin") == "tauri://localhost"
+                assert "Origin" in resp.headers.get("Vary", "")
+                assert "Authorization" in resp.headers.get("Access-Control-Allow-Headers", "")
+                assert "OPTIONS" in resp.headers.get("Access-Control-Allow-Methods", "")
+
+    async def test_preflight_rejects_unknown_origin(self):
+        async with aiohttp.ClientSession() as client:
+            async with client.options(
+                f"{self.backend_base_url}/system/status.json",
+                headers={
+                    "Origin": "https://evil.example",
+                    "Access-Control-Request-Method": "GET",
+                },
+            ) as resp:
+                assert resp.status == 204
+                assert "Access-Control-Allow-Origin" not in resp.headers
+
+    async def test_get_does_not_reflect_unknown_origin(self):
+        async with aiohttp.ClientSession() as client:
+            async with client.get(
+                f"{self.backend_base_url}/system/status.json",
+                headers={"Origin": "https://evil.example"},
+            ) as resp:
+                assert resp.status == 200
+                assert "Access-Control-Allow-Origin" not in resp.headers

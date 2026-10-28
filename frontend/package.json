@@ -6,12 +6,14 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "build:tauri": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.2.0",
+    "@tauri-apps/api": "^2.12.4",
     "highlight.js": "^11.11.1",
     "markdown-it": "^14.1.1",
     "markdown-it-task-lists": "^2.1.1",

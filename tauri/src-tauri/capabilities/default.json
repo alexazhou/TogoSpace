@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for TogoSpace desktop shell",
+  "windows": ["main", "splashscreen"],
+  "permissions": [
+    "core:default",
+    "core:tray:default",
+    "dialog:allow-save",
+    "fs:allow-write-text-file",
+    "shell:allow-open"
+  ]
+}

@@ -64,6 +64,20 @@ class OpenaiApiRole(EnhanceEnum):
 LLM_SESSION_HEADER = "X-Session-Id"
 
 
+# Tauri 桌面外壳的页面源（跨源访问后端时需要显式放行）。浏览器形态同源，不受影响。
+DESKTOP_ALLOWED_ORIGINS = (
+    "tauri://localhost",          # macOS / Linux Tauri v2 自定义协议
+    "http://tauri.localhost",     # Windows Tauri v2
+    "https://tauri.localhost",
+)
+
+# 仅 development_mode 下放行：`tauri dev` 窗口加载 Vite devUrl，与后端端口不同源。
+DEVELOPMENT_ALLOWED_ORIGINS = (
+    "http://localhost:8181",
+    "http://127.0.0.1:8181",
+)
+
+
 class LlmProtocol(EnhanceEnum):
     """LLM 协议类型 — value 用于 URL 查找等字符串场景，不使用 auto()。"""
     OPENAI = "openai"

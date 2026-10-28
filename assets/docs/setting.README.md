@@ -235,6 +235,10 @@ API 鉴权配置，用于保护后端接口：
 
 如需同时指定监听地址，可一并设置 `bind_host`，例如：`"bind_host": "127.0.0.1"`。
 
+> **桌面应用模式**：由 TogoSpace 桌面外壳拉起时（`TOGOSPACE_DESKTOP=1`），运行时会强制
+> `bind_host=127.0.0.1`、`auth.enabled=true`，并使用外壳生成的访问 token。`bind_host` / `bind_port`
+> 只在本次进程内生效，`auth` 会写回 `setting.json`；修改本文件无法关闭桌面模式下的这两项限制。
+
 ---
 
 # setting.json Description

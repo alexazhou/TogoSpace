@@ -1,9 +1,10 @@
-import { createRouter, createWebHistory } from 'vue-router';
+import { createRouter, createWebHashHistory } from 'vue-router';
 import ConsolePage from './pages/ConsolePage.vue';
 import SettingsPage from './pages/SettingsPage.vue';
 
 const router = createRouter({
-  history: createWebHistory(),
+  // Tauri 自定义协议下非入口路径刷新不可靠，统一使用 hash 路由
+  history: createWebHashHistory(),
   routes: [
     {
       path: '/',

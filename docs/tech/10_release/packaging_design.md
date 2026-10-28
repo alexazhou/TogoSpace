@@ -1,5 +1,9 @@
 # 桌面打包发布方案设计
 
+> **2026-10 更新**：安装包形态已切换为 **Tauri v2 外壳 + PyInstaller 后端 sidecar**，
+> 见 `docs/design/2026-10-29-tauri-desktop-shell/` 与 `tauri/README.md`。
+> 本文档描述的 `appEntry.py` 托盘形态仍保留用于本地调试，但不再是发布安装包入口。
+
 ## 目标
 
 通过 PyInstaller 将后端服务打包为桌面应用，启动后在系统托盘（菜单栏）常驻，提供：
@@ -173,6 +177,23 @@ pyinstaller --windowed --onedir \
 如需自动化发布，可用 GitHub Actions 在三个平台的 runner 上分别打包，产物上传到 Release。
 
 ---
+
+## Tauri 桌面外壳（2026-10，当前发布形态）
+
+| 项 | 说明 |
+|----|------|
+| 外壳 | Tauri v2（Rust）：窗口、启动画面、托盘、单实例、子进程管理 |
+| 后端 | PyInstaller **onedir**，`Resources/backend/`，`console=True` |
+| 前端 | 打进 Tauri（`tauri://localhost`），运行时注入后端 URL + token |
+| 启动观测 | 后端 stdout marker（`READY` / `MIGRATION_START` / `MIGRATION_END` / `ERROR`） |
+| 生命周期 | Rust 持有 stdin；EOF 触发后端优雅停机，父进程被强杀也不会留下孤儿 |
+| 数据目录 | `~/.togospace`（`desktop.json` 由 Rust 管理，`setting.json` 由 Python 管理） |
+| 日志 | `~/.togospace/logs/desktop/desktop.log` 汇聚外壳 / 后端 stdio / 前端 console |
+| 安全 | 桌面模式强制 `127.0.0.1` + token 鉴权；CORS / WS origin 白名单 |
+| 构建 | `python3 tauri/scripts/build_desktop.py`（前端/后端/app/签名/DMG/公证） |
+| 产物 | `dist/TogoSpace_<version>_<arch>.dmg` |
+
+详细流程见 `tauri/README.md`。
 
 ## 待讨论问题
 

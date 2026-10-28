@@ -8,6 +8,7 @@ import {
   testXiaomiMimoSearchService,
 } from '../../api';
 import { showGlobalSuccessToast, showGlobalRequestError } from '../../appUiState';
+import { openExternal } from '../../utils/platform';
 import type {
   ThirdPartySearchResult,
   ThirdPartySearchService,
@@ -395,7 +396,7 @@ onMounted(() => {
               <pre v-if="testResult.content" class="result-content">{{ testResult.content }}</pre>
               <ul v-if="testResult.success && testResult.sources?.length" class="search-sources">
                 <li v-for="(source, index) in testResult.sources" :key="`${source.url}-${index}`">
-                  <a class="source-card" :href="source.url" target="_blank" rel="noreferrer">
+                  <a class="source-card" :href="source.url" target="_blank" rel="noreferrer" @click.prevent="openExternal(source.url)">
                     <span class="source-card-index">{{ index + 1 }}</span>
                     <span class="source-card-body">
                       <span class="source-card-title">{{ source.title || source.url }}</span>

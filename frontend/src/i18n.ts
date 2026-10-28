@@ -1,5 +1,6 @@
 import { createI18n } from 'vue-i18n';
 import { setGlobalRequestErrorAutoDismiss } from './appUiState';
+import { getSystemStatus } from './api';
 import zhCN from './locales/zh-CN.json';
 import en from './locales/en.json';
 
@@ -26,14 +27,12 @@ export function t(key: string, params?: Record<string, string | number>): string
 
 export async function syncLanguageFromBackend(): Promise<void> {
   try {
-    const resp = await fetch('/system/status.json');
-    if (resp.ok) {
-      const data = await resp.json() as { language?: string; development_mode?: boolean };
-      if (data.language && isAppLocale(data.language)) {
-        i18n.global.locale.value = data.language;
-      }
-      setGlobalRequestErrorAutoDismiss(data.development_mode ? null : 5000);
+    // 走 api 层：桌面模式下相对路径会打到 tauri://localhost
+    const data = await getSystemStatus();
+    if (data.language && isAppLocale(data.language)) {
+      i18n.global.locale.value = data.language;
     }
+    setGlobalRequestErrorAutoDismiss(data.development_mode ? null : 5000);
   } catch {
     // silently fall back to default language
   }

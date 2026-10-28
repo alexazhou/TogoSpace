@@ -192,3 +192,24 @@ class TestWsController(_ApiServiceCase):
                 assert matched is not None, "未收到包含 current_turn_agent_id 的 room_status 事件"
                 assert matched["gt_room"]["team_id"] == team_id
                 assert matched["current_turn_agent_id"] > 0
+
+
+class TestWsOriginWhitelist(_ApiServiceCase):
+    """WebSocket Origin 白名单：仅桌面外壳与同源地址可建立连接。"""
+
+    requires_backend = True
+
+    async def test_ws_accepts_tauri_origin(self):
+        ws_url = f"ws://127.0.0.1:{self.backend_port}/ws/events.json"
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(
+                ws_url, headers={"Origin": "tauri://localhost"}
+            ) as ws:
+                assert not ws.closed
+
+    async def test_ws_rejects_unknown_origin(self):
+        ws_url = f"ws://127.0.0.1:{self.backend_port}/ws/events.json"
+        async with aiohttp.ClientSession() as session:
+            with pytest.raises(aiohttp.WSServerHandshakeError) as excinfo:
+                await session.ws_connect(ws_url, headers={"Origin": "https://evil.example"})
+        assert excinfo.value.status == 403

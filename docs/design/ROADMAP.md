@@ -331,6 +331,21 @@
 > - ⏳ 未开工：任务 8（前端任务域 `manager_id`→`reviewer_id`、详情弹窗事件时间线、v1 文档口径）、任务 9（Agent 上下文注入事件流可见性）
 > - ⏸ 非目标：任务 6（`TASK_ASSIGNED` 定向唤醒通知）
 
+### V28: Tauri 桌面外壳（已完成）
+
+> 状态（最后更新 2026-10-29）：**已实现**。构建入口 `tauri/scripts/build_desktop.py`，
+> 开发/构建说明见 `tauri/README.md`；macOS 为发布门槛，Windows / Linux 预留。
+
+把桌面发布形态从「PyInstaller + 系统托盘 + 外部浏览器」换成「Rust Tauri 主程序 + Python sidecar」：
+
+- **进程隔离**：Tauri（Rust）负责窗口、托盘、启动画面、子进程管理与日志汇聚；Python 后端只提供 HTTP + WebSocket，无 GUI
+- **打包形态**：PyInstaller **onedir** 产物作为 bundle resources（`Resources/backend/`），不用 Tauri `externalBin`（避免 onefile 启动解压与签名问题）
+- **启动状态机**：后端 stdout 行协议（`READY` / `MIGRATION_START` / `MIGRATION_END` / `ERROR`）驱动 splash → main 的窗口门控，15s 超时兜底
+- **生命周期**：父进程持有子进程 stdin，父进程退出或被强杀时后端读 EOF 自行优雅停机，无孤儿进程
+- **前端加载**：前端打进 Tauri，窗口走 `tauri://localhost`；运行时经 `invoke` 注入后端 URL 与 token
+- **数据目录**：沿用 `~/.togospace`，老用户零迁移；`desktop.json`（Rust 拥有）与 `setting.json`（Python 拥有）职责分离
+- **安全边界**：桌面模式强制 `bind_host=127.0.0.1` + 强制 token 鉴权；后端新增 CORS 与 WebSocket origin 白名单（`tauri://localhost`）
+
 ---
 
 ## 技术栈
@@ -482,6 +497,11 @@
 - [技术文档](./2026-10-25-agent-task-system-v2/step2_technical.md)
 - [开发任务表](./2026-10-25-agent-task-system-v2/step3_tasks.md)
 - [前端事件时间线专项设计](./2026-10-25-agent-task-system-v2/frontend_task_timeline_design.md)
+
+### V28
+- [产品文档](./2026-10-29-tauri-desktop-shell/step1_product.md)
+- [技术文档](./2026-10-29-tauri-desktop-shell/step2_technical.md)
+- [开发任务表](./2026-10-29-tauri-desktop-shell/step3_tasks.md)
 
 ---
 

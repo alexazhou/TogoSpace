@@ -12,6 +12,7 @@ import ConfirmDialog from '../ui/ConfirmDialog.vue';
 import type { TeamSummary } from '../../types';
 import type { ConnectionState } from '../../utils';
 import { displayName } from '../../utils';
+import { openExternal } from '../../utils/platform';
 import type { AppLocale } from '../../i18n';
 
 const { t } = useI18n();
@@ -496,6 +497,7 @@ function closeLogoutConfirm(): void {
         target="_blank"
         rel="noopener"
         class="update-pill"
+        @click.prevent="openExternal(releaseUrl || 'https://github.com/alexazhou/TogoSpace/releases')"
       >
         <span class="update-pill__dot"></span>
         {{ t('topbar.updateAvailable', { version: latestVersion }) }}

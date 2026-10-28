@@ -23,6 +23,7 @@ import { useSettingsTeamDetailState } from '../composables/useSettingsTeamDetail
 import { useSettingsTeamMutations } from '../composables/useSettingsTeamMutations';
 import { useTeamSummaries } from '../composables/useTeamSummaries';
 import { loadTeams, teams, teamsLoadFailed } from '../teamStore';
+import { openExternal, saveTextFile } from '../utils/platform';
 import type { AgentInfo, TeamDetail } from '../types';
 
 const route = useRoute();
@@ -251,18 +252,15 @@ function buildTeamPresetFileName(teamName: string): string {
   return `${baseName}.json`;
 }
 
-function downloadJsonFile(fileName: string, payload: unknown): void {
-  const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
-    type: 'application/json;charset=utf-8',
-  });
-  const objectUrl = window.URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = objectUrl;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.URL.revokeObjectURL(objectUrl);
+async function saveJsonFile(fileName: string, payload: unknown): Promise<boolean> {
+  const content = `${JSON.stringify(payload, null, 2)}\n`;
+  try {
+    const saved = await saveTextFile(fileName, content);
+    return saved !== null;
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
 }
 
 async function handleExportTeamPreset(): Promise<void> {
@@ -281,7 +279,9 @@ async function handleExportTeamPreset(): Promise<void> {
     teamPresetExportDialogOpen.value = false;
     const teamPreset = await getTeamPresetExport(targetTeamId);
     const fileName = buildTeamPresetFileName(teamPreset.name || targetTeam.name);
-    downloadJsonFile(fileName, teamPreset);
+    if (!(await saveJsonFile(fileName, teamPreset))) {
+      return;
+    }
     showGlobalSuccessToast(t('settings.maintenance.exportSuccess', { file: fileName }));
   } catch (error) {
     console.error(error);
@@ -348,6 +348,7 @@ watch(
               rel="noopener"
               class="settings-version-badge settings-version-badge--has-update"
               :data-tooltip="t('settings.advanced.updateAvailable', { version: latestVersion })"
+              @click.prevent="openExternal('https://github.com/alexazhou/TogoSpace/releases')"
             >v{{ appVersion }}*</a>
             <span v-else-if="appVersion" class="settings-version-badge">v{{ appVersion }}</span>
             <p class="settings-eyebrow">Admin Console</p>
