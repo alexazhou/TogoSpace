@@ -81,6 +81,38 @@ async def get_event(event_id: int) -> GtAgentTaskEvent | None:
     return await GtAgentTaskEvent.aio_get_or_none(GtAgentTaskEvent.id == event_id)
 
 
+async def get_latest_event_with_content_by_to_status(
+    task_id: int, to_status: TaskStatus
+) -> GtAgentTaskEvent | None:
+    """取「最近一条**流转到** `to_status` 且 `content` 非空」的事件；没有则 None。
+
+    与 `list_events` 的区别：**不受调用方给的 `limit` 窗口限制**，直接按
+    `task_id + to_status + content 非空` 在库里取 id 最大的一条。
+
+    B4 的存在理由：`current_block_reason`（PIN-4「当前搁置原因」）原本从
+    「本次查询返回的事件窗口」里找最后一条 `to_status=ON_HOLD`，而工具
+    `get_task_detail` 默认 `event_limit=3`。搁置后再产生 3 条以上事件，原因就被
+    挤出窗口 ⇒ 读成 `None`，与「从未搁置」不可区分，Agent 会据此以为可以推进。
+    窗口大小是「展示口径」，不该决定「当前搁置原因」这种**状态派生值**——故改成独立查询。
+
+    `content` 非空的条件与 `last_note` 口径一致（都是「跳过没写说明的流转事件」）。
+    **已知边界**：「恢复 → 再次搁置但没写原因」会回溯到上一次搁置的原因（登记，不用例覆盖
+    「猜原因」，因为空 content 本身无法区分「忘了写」与「就是旧原因」）。
+    """
+    return await (
+        GtAgentTaskEvent
+        .select()
+        .where(
+            (GtAgentTaskEvent.task_id == task_id)
+            & (GtAgentTaskEvent.to_status == to_status)
+            & (fn.COALESCE(GtAgentTaskEvent.content, "") != "")
+        )
+        .order_by(GtAgentTaskEvent.id.desc())
+        .limit(1)
+        .aio_first()
+    )
+
+
 async def count_events(task_id: int) -> int:
     """统计某任务的事件**总数**（跨页；不受 `limit` / `before_id` 影响）。"""
     return await (

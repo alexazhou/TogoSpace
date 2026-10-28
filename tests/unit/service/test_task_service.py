@@ -55,6 +55,8 @@ def event_manager_mock():
     with patch("service.taskService.gtAgentTaskEventManager") as mock_events:
         mock_events.list_events = AsyncMock(return_value=[])
         mock_events.count_events = AsyncMock(return_value=0)
+        # B4：current_block_reason 改为独立查库（不受事件窗口 limit 影响），默认「查不到」。
+        mock_events.get_latest_event_with_content_by_to_status = AsyncMock(return_value=None)
         mock_events.append_event = AsyncMock(return_value=SimpleNamespace(
             id=1, task_id=1, actor_id=0, from_status=None, to_status=None, content='',
         ))
@@ -1393,6 +1395,10 @@ async def test_get_task_attaches_events_and_derived_props(task_manager_mock, eve
         SimpleNamespace(id=5, task_id=1, actor_id=8, from_status=TaskStatus.IN_PROGRESS, to_status=TaskStatus.ON_HOLD, content="等接口"),
         SimpleNamespace(id=1, task_id=1, actor_id=8, from_status=None, to_status=TaskStatus.TODO, content=""),
     ])
+    # B4：搁置原因改为独立查库（不受事件窗口 limit 影响），mock 掉这条独立查询
+    event_manager_mock.get_latest_event_with_content_by_to_status = AsyncMock(return_value=SimpleNamespace(
+        id=5, task_id=1, actor_id=8, from_status=TaskStatus.IN_PROGRESS, to_status=TaskStatus.ON_HOLD, content="等接口",
+    ))
 
     result = await taskService.get_task(team_id=1, task_id=1)
 
@@ -1417,6 +1423,74 @@ async def test_get_task_derived_props_ignore_comment_and_non_hold(task_manager_m
 
     assert result["task"]["last_note"] == "开工"
     assert result["task"]["current_block_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_current_block_reason_survives_event_window_of_three(task_manager_mock, event_manager_mock):
+    """B4：搁置原因在事件窗口（工具层默认 event_limit=3）之外也必须读得出。
+
+    `get_task_detail` 默认只取 3 条事件；搁置后再产生 3 条以上评论，若仍从窗口里
+    找 ON_HOLD，原因就丢成 None，与「从未搁置」不可区分。这里让 `list_events` 只回
+    3 条评论（窗口里没有任何 ON_HOLD），独立查询仍给出搁置原因。
+    """
+    task = _build_task(id=1, team_id=1, status=TaskStatus.ON_HOLD)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+    event_manager_mock.list_events = AsyncMock(return_value=[
+        SimpleNamespace(id=9, task_id=1, actor_id=8, from_status=None, to_status=None, content="评论3"),
+        SimpleNamespace(id=8, task_id=1, actor_id=8, from_status=None, to_status=None, content="评论2"),
+        SimpleNamespace(id=7, task_id=1, actor_id=8, from_status=None, to_status=None, content="评论1"),
+    ])
+    event_manager_mock.get_latest_event_with_content_by_to_status = AsyncMock(return_value=SimpleNamespace(
+        id=2, task_id=1, actor_id=8,
+        from_status=TaskStatus.IN_PROGRESS, to_status=TaskStatus.ON_HOLD,
+        content="缺少测试账号",
+    ))
+
+    result = await taskService.get_task(team_id=1, task_id=1, event_limit=3)
+
+    assert len(result["task"]["events"]) == 3
+    assert all(e["to_status"] is None for e in result["task"]["events"])
+    assert result["task"]["current_block_reason"] == "缺少测试账号"
+    # 独立查询只看「任务 id + ON_HOLD」，与展示窗口的 limit 无关
+    event_manager_mock.get_latest_event_with_content_by_to_status.assert_awaited_once_with(1, TaskStatus.ON_HOLD)
+    event_manager_mock.list_events.assert_awaited_once_with(1, limit=3)
+
+
+@pytest.mark.asyncio
+async def test_current_block_reason_skips_empty_content_on_hold(task_manager_mock, event_manager_mock):
+    """裸 `ON_HOLD(content='')` 不能把已有原因清空：独立查询口径是「最近一条**有内容**的 ON_HOLD」。
+
+    与 `last_note` 同口径（都跳过没写说明的流转事件）；语义由 DAL 的
+    `content != ''` 条件保证，这里钉住 service 直接采信该结果、不回退到事件窗口。
+    """
+    task = _build_task(id=1, team_id=1, status=TaskStatus.ON_HOLD)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+    # 窗口里最新那条是裸 ON_HOLD('')，若按旧逻辑（窗口内第一条 ON_HOLD）会返回 ''
+    event_manager_mock.list_events = AsyncMock(return_value=[
+        SimpleNamespace(id=6, task_id=1, actor_id=8, from_status=TaskStatus.ON_HOLD, to_status=TaskStatus.ON_HOLD, content=""),
+        SimpleNamespace(id=4, task_id=1, actor_id=8, from_status=TaskStatus.IN_PROGRESS, to_status=TaskStatus.ON_HOLD, content="缺少测试账号"),
+    ])
+    event_manager_mock.get_latest_event_with_content_by_to_status = AsyncMock(return_value=SimpleNamespace(
+        id=4, task_id=1, actor_id=8,
+        from_status=TaskStatus.IN_PROGRESS, to_status=TaskStatus.ON_HOLD,
+        content="缺少测试账号",
+    ))
+
+    result = await taskService.get_task(team_id=1, task_id=1)
+
+    assert result["task"]["current_block_reason"] == "缺少测试账号"
+
+
+@pytest.mark.asyncio
+async def test_current_block_reason_not_on_hold_skips_db(task_manager_mock, event_manager_mock):
+    """非 ON_HOLD 时「当前搁置原因」为 None，且不该白查一次库。"""
+    task = _build_task(id=1, team_id=1, status=TaskStatus.IN_PROGRESS)
+    task_manager_mock.get_task = AsyncMock(return_value=task)
+
+    result = await taskService.get_task(team_id=1, task_id=1)
+
+    assert result["task"]["current_block_reason"] is None
+    event_manager_mock.get_latest_event_with_content_by_to_status.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1869,6 +1943,12 @@ async def test_get_task_truncates_last_note_and_current_block_reason(
             content=_LONG_CONTENT,
         ),
     ])
+    # B4：搁置原因改为独立查库，这条独立查询同样走截断口径
+    event_manager_mock.get_latest_event_with_content_by_to_status = AsyncMock(return_value=SimpleNamespace(
+        id=5, task_id=1, actor_id=8,
+        from_status=TaskStatus.IN_PROGRESS, to_status=TaskStatus.ON_HOLD,
+        content=_LONG_CONTENT,
+    ))
 
     with patch("playhouse.shortcuts.model_to_dict", side_effect=_model_to_dict_with_content):
         result = await taskService.get_task(team_id=1, task_id=1)

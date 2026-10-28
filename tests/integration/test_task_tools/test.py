@@ -462,6 +462,57 @@ class TestTaskTools(ServiceTestCase):
         assert res["task"]["last_note"] == expected
         assert res["task"]["current_block_reason"] == expected
 
+    # ------------------------------------------------------- B4：搁置原因出窗口 ----
+    async def test_block_reason_survives_default_event_limit_of_three(self):
+        """B4：搁置原因被挤出 `get_task_detail` 默认 3 条事件窗口后仍要读得出。
+
+        工具层默认 `event_limit=3` 是展示口径；「当前搁置原因」是状态派生值，
+        不该由窗口大小决定。搁置后再产生 3 条评论，窗口里一条 ON_HOLD 都没有。
+        """
+        task = await self._make_task()
+        await transition_task(
+            task, actor_id=8, from_status=TaskStatus.TODO,
+            to_status=TaskStatus.ON_HOLD, content="缺少测试账号",
+        )
+        for i in range(3):
+            await tools.update_task(task_id=task.id, note=f"评论{i}", _context=self._ctx())
+
+        res = await tools.get_task_detail(task_id=task.id, _context=self._ctx())
+
+        assert res["task"]["events_total"] == 5
+        # 窗口里确实已经没有 ON_HOLD 事件了（否则这个用例证明不了 B4）
+        assert len(res["task"]["events"]) == 3
+        assert all(e["to_status"] is None for e in res["task"]["events"])
+        assert res["task"]["current_block_reason"] == "缺少测试账号"
+
+    async def test_block_reason_ignores_bare_on_hold_without_note(self):
+        """B4 另一形态：没写原因的搁置不能把已有原因清空成 `''`。
+
+        PIN-1 禁止自环（同状态不得记为流转），故「裸 ON_HOLD('')」只能经
+        「恢复 → 再搁置但没写原因」产生：`ON_HOLD('缺少测试账号')` → `IN_PROGRESS('恢复')`
+        → `ON_HOLD('')`。旧逻辑取窗口内最新那条 ON_HOLD 的 content ⇒ 返回 `''`，
+        与「从未搁置」同形；新口径跳过空 content，回溯到最近一条有内容的原因。
+        """
+        task = await self._make_task()
+        await transition_task(
+            task, actor_id=8, from_status=TaskStatus.TODO,
+            to_status=TaskStatus.ON_HOLD, content="缺少测试账号",
+        )
+        await transition_task(
+            task, actor_id=8, from_status=TaskStatus.ON_HOLD,
+            to_status=TaskStatus.IN_PROGRESS, content="恢复",
+        )
+        await transition_task(
+            task, actor_id=8, from_status=TaskStatus.IN_PROGRESS,
+            to_status=TaskStatus.ON_HOLD, content="",
+        )
+
+        res = await tools.get_task_detail(task_id=task.id, _context=self._ctx())
+
+        assert res["task"]["events"][0]["content"] == ""
+        assert res["task"]["events"][0]["to_status"] == "ON_HOLD"
+        assert res["task"]["current_block_reason"] == "缺少测试账号"
+
 
 class TestListTasksTitleKeywordRealDb(ServiceTestCase):
     """`title_keyword` 的**真实库**链路：标题子串匹配进 SQL、`total` 同口径。

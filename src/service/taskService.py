@@ -78,19 +78,30 @@ def last_note(events: list, *, truncate_content: bool = True) -> str:
     return ''
 
 
-def current_block_reason(
-    task: GtAgentTask, events: list, *, truncate_content: bool = True
+async def current_block_reason(
+    task: GtAgentTask, *, truncate_content: bool = True
 ) -> Optional[str]:
     """「当前搁置原因」（PIN-4）= 仅当任务状态 ∈ ON_HOLD 时，
-    取最后一条 `to_status=ON_HOLD` 流转事件的 content；否则为 None。
-    `truncate_content=True`（默认）时按共享口径截断，口径与事件列表一致。
+    取**最近一条 `to_status=ON_HOLD` 且 content 非空**的流转事件的 content；否则为 None。
+
+    **不复用本次查询返回的 `events` 窗口**（B4）：窗口大小是展示口径，工具层
+    `get_task_detail` 默认 `event_limit=3`，搁置后再产生 3 条以上事件就会把原因挤出
+    窗口 ⇒ 读成 None，与「从未搁置」不可区分。故这里独立查库（见
+    `gtAgentTaskEventManager.get_latest_event_with_content_by_to_status`），
+    「当前搁置原因」作为状态派生值不受 limit 影响。
+
+    `content` 非空与 `last_note` 同口径：跳过「没写说明的搁置」（裸 `ON_HOLD('')`
+    不能把已有原因清空）。`truncate_content=True`（默认）时按共享口径截断。
     """
     if task.status != TaskStatus.ON_HOLD:
         return None
-    for event in events:
-        if event.to_status == TaskStatus.ON_HOLD:
-            return _truncate_event_content(event.content) if truncate_content else event.content
-    return None
+    event = await gtAgentTaskEventManager.get_latest_event_with_content_by_to_status(
+        task.id, TaskStatus.ON_HOLD
+    )
+    if event is None:
+        return None
+    content = event.content
+    return _truncate_event_content(content) if truncate_content else content
 
 
 def _serialize_event(event, *, truncate_content: bool = True) -> dict:
@@ -510,8 +521,8 @@ async def get_task(
     ]
     task_dict["events_total"] = await gtAgentTaskEventManager.count_events(task_id)
     task_dict["last_note"] = last_note(events, truncate_content=truncate_content)
-    task_dict["current_block_reason"] = current_block_reason(
-        task, events, truncate_content=truncate_content
+    task_dict["current_block_reason"] = await current_block_reason(
+        task, truncate_content=truncate_content
     )
 
     return {"success": True, "task": task_dict}
