@@ -577,6 +577,52 @@ async def test_run_task_turn_todo_task_injects_exec_notice_for_assignee_in_progr
 
 
 @pytest.mark.asyncio
+async def test_exec_notice_for_task_from_others_has_no_cancel_command(turn_runner):
+    """上级派给本 agent 的任务（creator=9 ≠ agent.id=1）⇒ 执行通知不得给出取消指令。
+
+    取消权限属于创建人与验收人（`taskService.update_task` 的 `→CANCELLED` 分支），
+    执行通知的收件人是执行人，照旧文案去调用只会拿到 `permission_denied`，
+    随后 `finish_action` 因任务仍非终态被拒，重试耗尽后 Agent 被打成 FAILED。
+    故 `agentTurnRunner` 传给 `build_todo_task_turn_prompt` 的 `can_cancel` 必须是
+    「creator == 收件人」，而不是「assignee == 收件人」（恒真，等于没判）。
+    """
+    _use_host_managed_driver(turn_runner)
+    # _make_agent_task 默认 creator_id=9（上级），assignee_id=1 == turn_runner 的 gt_agent.id
+    agent_task = _make_agent_task(assignee_id=1, status=TaskStatus.IN_PROGRESS)
+    assert agent_task.creator_id != turn_runner.gt_agent.id, "本用例前提：任务非本 agent 创建"
+
+    await _run_todo_turn(turn_runner, agent_task)
+
+    turn_runner._history.append_history_message.assert_awaited_once()
+    content = turn_runner._history.append_history_message.await_args.args[0].message.content
+    assert "你当前被唤醒以处理以下任务" in content
+    assert "你无权自行取消任务" in content
+    assert "请调用 `update_task` 将状态改为 CANCELLED" not in content
+    assert "CANCELLED" not in content
+    turn_runner._run_turn_loop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_exec_notice_for_self_created_task_has_cancel_command(turn_runner):
+    """本 agent 自建自派的任务（creator=1 == agent.id）⇒ 执行通知应给出取消指令。
+
+    反向守卫：避免用「一律不给取消指令」的空实现糊过上面那条用例。
+    """
+    _use_host_managed_driver(turn_runner)
+    agent_task = _make_agent_task(assignee_id=1, status=TaskStatus.IN_PROGRESS)
+    agent_task.creator_id = turn_runner.gt_agent.id  # 自建自派
+
+    await _run_todo_turn(turn_runner, agent_task)
+
+    turn_runner._history.append_history_message.assert_awaited_once()
+    content = turn_runner._history.append_history_message.await_args.args[0].message.content
+    assert "你当前被唤醒以处理以下任务" in content
+    assert "请调用 `update_task` 将状态改为 CANCELLED" in content
+    assert "你无权自行取消任务" not in content
+    turn_runner._run_turn_loop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_run_task_turn_todo_task_injects_review_notice_for_reviewer_reviewing(turn_runner):
     """reviewer + REVIEWING ⇒ 注入验收通知并跑 turn。"""
     _use_host_managed_driver(turn_runner)
