@@ -321,6 +321,82 @@ class TestTaskEvents(ServiceTestCase):
         assert len(await gtAgentTaskEventManager.list_events(target.id, limit=50, exclude_claim=True)) == 3
         assert len(await gtAgentTaskEventManager.list_events(other.id, limit=50, exclude_claim=True)) == 1
 
+    @pytest.mark.parametrize(
+        "from_status,to_status",
+        [
+            (TaskStatus.TODO, TaskStatus.ON_HOLD),
+            (TaskStatus.TODO, TaskStatus.DONE),
+            (TaskStatus.TODO, TaskStatus.CANCELLED),
+            (TaskStatus.TODO, TaskStatus.PENDING),
+            (TaskStatus.IN_PROGRESS, TaskStatus.REVIEWING),
+            (TaskStatus.IN_PROGRESS, TaskStatus.ON_HOLD),
+            (None, TaskStatus.IN_PROGRESS),
+            (None, TaskStatus.TODO),
+        ],
+    )
+    async def test_exclude_claim_keeps_system_events_other_than_claim(self, from_status, to_status):
+        """认领的判据是「SYSTEM + TODO→IN_PROGRESS」三元组，缺一不可。
+
+        参数化守 `_NOT_CLAIM_EVENT` 的**精确性**：若把条件退化成「SYSTEM 且 from=TODO」
+        （漏掉 `to_status == IN_PROGRESS` 这一项），TODO→ON_HOLD / DONE / CANCELLED
+        这些合法的系统流转会被一并杀掉；漏掉 COALESCE 则会连带误删 `from=NULL` 的
+        迁移快照。这些事件都是时间线上的真实信息，不能因为「系统写的」就被当成噪声。
+        """
+        task = await self._make_task(title="ev-claim-triple")
+        await gtAgentTaskEventManager.append_event(
+            task.id, SpecialAgent.SYSTEM.value,
+            from_status=from_status, to_status=to_status, content="probe",
+        )
+
+        events = await gtAgentTaskEventManager.list_events(task.id, limit=50, exclude_claim=True)
+
+        assert "probe" in [e.content for e in events]
+
+    async def test_exclude_claim_keeps_human_todo_to_in_progress(self):
+        """非系统身份写的 TODO→IN_PROGRESS 是人的真实动作，不是认领，必须保留。
+
+        认领只由系统写（`taskService.claim_task`）；漏掉 `actor_id == SYSTEM` 这一项，
+        执行人手写的「开工了，从 TODO 置为 IN_PROGRESS」就会被误当作噪声吞掉。
+        """
+        task = await self._make_task(title="ev-claim-human-todo-inprogress")
+        await gtAgentTaskEventManager.append_event(
+            task.id, 8,
+            from_status=TaskStatus.TODO, to_status=TaskStatus.IN_PROGRESS,
+            content="开工了",
+        )
+
+        events = await gtAgentTaskEventManager.list_events(task.id, limit=50, exclude_claim=True)
+
+        assert "开工了" in [e.content for e in events]
+
+    async def test_exclude_claim_applies_with_before_id_cursor(self):
+        """`before_id` 翻页与 `exclude_claim=True` 叠加：必须「先过滤、再取 limit」。
+
+        若实现成「先按 limit 取一页再在内存里过滤」，limit=2 时会先捞到
+        `[human3, claim2]`，过滤后只剩 1 条——第二页的偏移也会跟着错位，
+        翻页时认领噪声会重新漏进 Agent 通知。
+        """
+        task = await self._make_task(title="ev-claim-paging")
+        for content in ("留言1", None, "留言2", None, "留言3"):
+            if content is None:
+                await gtAgentTaskEventManager.append_event(
+                    task.id, SpecialAgent.SYSTEM.value,
+                    from_status=TaskStatus.TODO, to_status=TaskStatus.IN_PROGRESS,
+                    content="执行人认领，系统自动置为 IN_PROGRESS",
+                )
+            else:
+                await gtAgentTaskEventManager.append_event(
+                    task.id, 8, from_status=None, to_status=None, content=content
+                )
+
+        page1 = await gtAgentTaskEventManager.list_events(task.id, limit=2, exclude_claim=True)
+        assert [e.content for e in page1] == ["留言3", "留言2"]
+
+        page2 = await gtAgentTaskEventManager.list_events(
+            task.id, limit=2, before_id=page1[-1].id, exclude_claim=True
+        )
+        assert [e.content for e in page2] == ["留言1", ""]
+
 
 # ---------------------------------------------------------------------------
 # Web 接口口径：时间线要完整原文（不截断），与 TASK_EVENT_APPENDED 推送一致

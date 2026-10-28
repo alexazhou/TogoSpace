@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryStatus, AgentHistoryTag, AgentTaskType, DriverType, OpenaiApiRole, RoomState, TaskStatus, TurnStepResult
+from constants import AgentHistoryStatus, AgentHistoryTag, AgentTaskType, DriverType, OpenaiApiRole, RoomState, SpecialAgent, TaskStatus, TurnStepResult
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgent import GtAgent
@@ -518,11 +518,17 @@ def _use_host_managed_driver(runner: AgentTurnRunner) -> MagicMock:
     return driver
 
 
-async def _run_todo_turn(runner: AgentTurnRunner, agent_task: GtAgentTask) -> None:
+async def _run_todo_turn(runner: AgentTurnRunner, agent_task: GtAgentTask, *, events=None) -> AsyncMock:
+    """跑一次 TODO_TASK turn，返回 `list_events` 的 mock（便于断言 runner 传了什么参数）。
+
+    `events` 为 None 时按空列表返回（通知里「最近事件」段不出现），与原有行为一致。
+    """
+    list_events_mock = AsyncMock(return_value=[] if events is None else events)
     with patch("dal.db.gtAgentTaskManager.get_task", new=AsyncMock(return_value=agent_task)), \
-         patch("dal.db.gtAgentTaskEventManager.list_events", new=AsyncMock(return_value=[])), \
+         patch("dal.db.gtAgentTaskEventManager.list_events", new=list_events_mock), \
          patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock()):
         await runner.run_task_turn(_make_todo_schedule_task(agent_task.id))
+    return list_events_mock
 
 
 @pytest.mark.asyncio
@@ -620,6 +626,38 @@ async def test_exec_notice_for_self_created_task_has_cancel_command(turn_runner)
     assert "请调用 `update_task` 将状态改为 CANCELLED" in content
     assert "你无权自行取消任务" not in content
     turn_runner._run_turn_loop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_exec_notice_injects_latest_human_event_not_claim(turn_runner):
+    """执行通知取「最近事件」时必须传 `exclude_claim=True`，跳过认领噪声。
+
+    认领事件由 consumer 在 turn 开始前写入（`taskService.claim_task`），必然是该任务
+    最新一条；不排除它，创建人刚写的说明就会被挤出通知（#64 / #83 / #86 都实际发生过）。
+    DAL 层已有用例守「`exclude_claim=True` 时过滤对不对」，但**没有任何一条守 runner
+    到底有没有传 True**——这里断言的是**调用参数**而不是返回内容，故与 mock 的返回值无关。
+    """
+    _use_host_managed_driver(turn_runner)
+    agent_task = _make_agent_task(assignee_id=1, status=TaskStatus.IN_PROGRESS)
+    # actor=OPERATOR(-1) 走 `_resolve_event_actor_name` 的常量分支，不触库
+    human_event = SimpleNamespace(
+        actor_id=SpecialAgent.OPERATOR.value,
+        from_status=None,
+        to_status=None,
+        content="创建人补充：先做 #98",
+        created_at=None,
+    )
+
+    list_events = await _run_todo_turn(turn_runner, agent_task, events=[human_event])
+
+    # 核心守卫：参数本身
+    assert list_events.await_args.kwargs["exclude_claim"] is True
+    assert list_events.await_args.kwargs["limit"] == 1
+    # 端到端可见性：最近事件确实渲染进了通知
+    content = turn_runner._history.append_history_message.await_args.args[0].message.content
+    assert "最近事件" in content
+    assert "创建人补充：先做 #98" in content
+    assert "（Operator）" in content
 
 
 @pytest.mark.asyncio
