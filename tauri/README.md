@@ -65,6 +65,16 @@ python3 tauri/scripts/build_desktop.py --arch x86_64
   `team_id` / `signing_identity_hash`）。
 - 产物：`dist/TogoSpace_<version>_<arch>.dmg`。
 
+### CI
+
+`.github/workflows/tauri.yml` 在 `v*` tag 和手动触发时构建 macOS 双架构 DMG：
+
+- 产物上传为 workflow artifact（`macOS-dmg-arm64` / `macOS-dmg-x86_64`），不创建 Release；
+  GitHub Release 仍由 `release.yml` 负责。
+- 配置了 Apple secrets 时执行签名 + 公证；未配置时只构建未签名 DMG，用于验证构建链路。
+- x86_64 在 Apple Silicon runner 上通过 Rosetta 2 + uv 安装 x86_64 Python 依赖
+  （PyInstaller 不支持交叉编译）。
+
 ## 运行时
 
 | 路径 | 内容 |
