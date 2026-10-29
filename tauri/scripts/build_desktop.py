@@ -52,7 +52,8 @@ ENTITLEMENTS = os.path.join(SCRIPT_DIR, "entitlements.mac.plist")
 BUILD_CONFIG = os.path.join(REPO_ROOT, "scripts", "build_config.json")
 
 TARGET_ROOT = os.path.join(TAURI_DIR, "build", "target")
-ARTIFACT_DIR = os.path.join(REPO_ROOT, "dist")
+# 本地构建产物统一放根目录 build/（PyInstaller 与 DMG）
+ARTIFACT_DIR = os.path.join(REPO_ROOT, "build")
 BACKEND_DIR = os.path.join(TAURI_DIR, "build", "backend")
 
 ALL_ACTIONS = ["frontend", "backend", "app", "sign", "zip", "notarize", "check"]

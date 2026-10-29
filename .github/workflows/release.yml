@@ -43,11 +43,11 @@ jobs:
     - uses: actions/download-artifact@v7
       with:
         pattern: macOS-dmg-*
-        path: dist
+        path: build
         merge-multiple: true
 
     - name: Show artifacts
-      run: ls -lh dist/*.dmg
+      run: ls -lh build/*.dmg
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v3
@@ -56,6 +56,6 @@ jobs:
         tag_name: ${{ github.ref_name }}
         draft: false
         prerelease: false
-        files: dist/*.dmg
+        files: build/*.dmg
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

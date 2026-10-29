@@ -2,7 +2,7 @@
 """构建桌面形态的 Python 后端并放入 Tauri 资源目录。
 
 流程：
-1. PyInstaller onedir 打包 `scripts/togo_desktop.spec` → `dist/TogoSpace-backend/`
+1. PyInstaller onedir 打包 `scripts/togo_desktop.spec` → `build/TogoSpace-backend/`
 2. 整棵目录树复制到 `tauri/build/backend/`，供 tauri.conf.json 的 bundle.resources 引用
 
 用法：
@@ -25,7 +25,9 @@ TAURI_DIR = os.path.dirname(SCRIPT_DIR)
 REPO_ROOT = os.path.dirname(TAURI_DIR)
 
 SPEC_FILE = os.path.join(REPO_ROOT, "scripts", "togo_desktop.spec")
-DIST_BACKEND = os.path.join(REPO_ROOT, "dist", "TogoSpace-backend")
+# 本地构建产物统一放根目录 build/（PyInstaller 中间文件与 onedir 产物同处）
+BUILD_DIR = os.path.join(REPO_ROOT, "build")
+DIST_BACKEND = os.path.join(BUILD_DIR, "TogoSpace-backend")
 TARGET_DIR = os.path.join(TAURI_DIR, "build", "backend")
 
 
@@ -59,7 +61,10 @@ def build_backend(python: str, arch: str) -> None:
     env = dict(os.environ)
     env["TARGET_ARCH"] = arch
 
-    _run([python, "-m", "PyInstaller", "--noconfirm", "--clean", SPEC_FILE], env)
+    _run([
+        python, "-m", "PyInstaller", "--noconfirm", "--clean",
+        "--workpath", BUILD_DIR, "--distpath", BUILD_DIR, SPEC_FILE,
+    ], env)
 
     if not os.path.isdir(DIST_BACKEND):
         raise SystemExit(f"❌ PyInstaller 产物不存在: {DIST_BACKEND}")

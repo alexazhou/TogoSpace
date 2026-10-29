@@ -64,7 +64,7 @@ python3 tauri/scripts/build_desktop.py --arch x86_64
 - 签名/公证配置按字段优先读环境变量 `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` /
   `APPLE_SIGNING_IDENTITY`，缺失时回退到 `scripts/build_config.json`
   （`apple_id` / `app_specific_password` / `team_id` / `signing_identity_hash`）。
-- 产物：`dist/TogoSpace_<version>_<arch>.dmg`。
+- 产物：`build/TogoSpace_<version>_<arch>.dmg`（根目录 `build/` 统一存放 PyInstaller 与 DMG 产物）。
 
 ### CI
 

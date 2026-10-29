@@ -171,14 +171,14 @@ jobs:
           --action frontend,backend,app,zip
 
     - name: Show artifact
-      run: ls -lh dist/*.dmg
+      run: ls -lh build/*.dmg
 
     # 安装包统一上传为 workflow artifact；Release 发布由 release.yml 处理
     - name: Upload DMG artifact
       uses: actions/upload-artifact@v7
       with:
         name: macOS-dmg-${{ inputs.arch }}
-        path: dist/*.dmg
+        path: build/*.dmg
         archive: false
         if-no-files-found: error
         retention-days: 30

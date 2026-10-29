@@ -195,7 +195,7 @@ pyinstaller --windowed --onedir \
 | 安全 | 桌面模式强制 `127.0.0.1` + token 鉴权；CORS / WS origin 白名单 |
 | 构建 | `python3 tauri/scripts/build_desktop.py`（前端/后端/app/签名/DMG/公证） |
 | CI | `.github/workflows/tauri.yml`：`v*` tag / 手动触发，双架构构建 DMG 并上传 artifact（不创建 Release） |
-| 产物 | `dist/TogoSpace_<version>_<arch>.dmg` |
+| 产物 | `build/TogoSpace_<version>_<arch>.dmg` |
 
 详细流程见 `tauri/README.md`。
 
