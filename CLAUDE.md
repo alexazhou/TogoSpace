@@ -32,7 +32,7 @@ TogoSpace/
 │   │   └── ...              # 其他模型文件
 │   ├── util/                # 通用工具
 │   ├── backend_main.py      # 后端入口
-│   ├── appEntry.py          # 托盘模式启动入口
+│   ├── desktopEntry.py      # Tauri 桌面 sidecar 入口
 │   ├── appPaths.py          # 运行时路径配置
 │   ├── constants.py         # 常量定义
 │   ├── route.py             # 路由配置
@@ -277,6 +277,6 @@ STORAGE_ROOT/
 - docs/RELEASE_HANDBOOK.md：版本发布操作手册
 
 相关工具：
-- scripts/build_mac.py：构建 macOS app（开发调试用）
-- scripts/build_release.py：构建 + 签名 + 公证 + 打包（发布用）
-- scripts/build_config.json：本地发布配置回退（优先读 APPLE_* 环境变量；从 build_config.json.example 复制填写）
+- tauri/scripts/build_desktop.py：桌面应用构建（前端 → 后端 → app → 签名 → DMG → 公证）
+- tauri/scripts/build_backend.py：PyInstaller 打包后端 sidecar
+- scripts/build_config.json：本地签名/公证配置回退（优先读 APPLE_* 环境变量；从 build_config.json.example 复制填写）

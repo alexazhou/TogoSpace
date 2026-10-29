@@ -1,15 +1,13 @@
 name: Tauri Build
 
-# 构建 macOS Tauri 桌面安装包（.dmg），参考 serverless_ai_gateway/.github/workflows/tauri.yml。
-# 产物只上传为 workflow artifact；GitHub Release 仍由 release.yml 负责创建与发布。
+# 分支 CI：构建 macOS Tauri 桌面安装包（.dmg），产物只上传为 workflow artifact。
+# tag 发版见 release.yml；两者共用 build-desktop.yml 的构建流程。
 
 on:
   workflow_dispatch:
   push:
     branches:
       - tauri_dev          # 开发分支推送即构建，便于验证 CI 链路
-    tags:
-      - 'v*'
 
 concurrency:
   group: tauri-build-${{ github.ref }}
@@ -18,8 +16,6 @@ concurrency:
 jobs:
   build-mac:
     name: Build macOS App (${{ matrix.arch }})
-    runs-on: macos-14          # Apple Silicon runner，x86_64 通过 Rosetta 2 构建
-    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -28,165 +24,8 @@ jobs:
             target: aarch64-apple-darwin
           - arch: x86_64
             target: x86_64-apple-darwin
-
-    env:
-      TARGET_ARCH: ${{ matrix.arch }}
-      # Apple 证书（用于签名）
-      APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      # Apple 公证凭证
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-
-    steps:
-    - uses: actions/checkout@v6
-      with:
-        token: ${{ secrets.GH_PAT }}
-        lfs: true
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v6
-      with:
-        node-version: '20'
-        cache: 'npm'
-        cache-dependency-path: |
-          frontend/package-lock.json
-          tauri/package-lock.json
-
-    # Rust 目标由 matrix 指定；x86_64 在 arm64 runner 上交叉编译
-    - name: Set up Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: ${{ matrix.target }}
-
-    # .cargo/config.toml 将 target-dir 指向 tauri/build/target
-    - name: Rust Cache
-      uses: swatinem/rust-cache@v2
-      with:
-        workspaces: './tauri/src-tauri -> ../build/target'
-        key: ${{ matrix.target }}
-        cache-on-failure: true
-
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.11'
-
-    # 仓库根目录的 .venv 同时供 PyInstaller 与 tauri.conf.json 的 beforeBuildCommand 使用
-    - name: Set up Python environment (arm64)
-      if: matrix.arch == 'arm64'
-      run: |
-        python3 -m venv .venv
-        .venv/bin/python -m pip install --upgrade pip
-        .venv/bin/python -m pip install -r requirements.txt pyinstaller
-        .venv/bin/python -c "import platform; print(f'Venv Python arch: {platform.machine()}')"
-
-    # ── x86_64: 通过 Rosetta 2 + uv 跨平台安装 x86_64 依赖（PyInstaller 不支持交叉编译） ──
-    - name: Set up x86_64 Python environment via Rosetta 2
-      if: matrix.arch == 'x86_64'
-      run: |
-        echo "🔧 Setting up x86_64 Python via Rosetta 2 + uv..."
-
-        # 用 arch -x86_64 创建 x86_64 虚拟环境
-        arch -x86_64 python3 -m venv .venv
-        VENV="$GITHUB_WORKSPACE/.venv"
-
-        # 将 venv 中的 universal Python 替换为纯 x86_64 binary，
-        # 这样 sys.executable 和所有子进程都会以 x86_64 模式运行
-        cp "$VENV/bin/python3" /tmp/python3_universal
-        lipo -thin x86_64 /tmp/python3_universal -output /tmp/python3_x86_64
-        rm "$VENV/bin/python3"
-        mv /tmp/python3_x86_64 "$VENV/bin/python3"
-        chmod +x "$VENV/bin/python3"
-
-        if [ -L "$VENV/bin/python" ] || [ -f "$VENV/bin/python" ]; then
-          rm "$VENV/bin/python"
-          cp "$VENV/bin/python3" "$VENV/bin/python"
-          chmod +x "$VENV/bin/python"
-        fi
-        lipo -info "$VENV/bin/python3"
-        lipo -info "$VENV/bin/python"
-        "$VENV/bin/python3" -c "import platform; print(f'Venv Python arch: {platform.machine()}')"
-
-        # 用 uv 一次性安装 x86_64 wheel（无 wheel 时从源码编译）
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-        UV="$HOME/.local/bin/uv"
-        "$UV" pip install \
-          --python "$VENV/bin/python3" \
-          --python-version 3.11 \
-          --python-platform x86_64-apple-darwin \
-          -r requirements.txt
-        "$UV" pip install \
-          --python "$VENV/bin/python3" \
-          --python-version 3.11 \
-          --python-platform x86_64-apple-darwin \
-          pyinstaller
-
-        "$VENV/bin/python" --version
-        "$VENV/bin/python" -c "import platform; print(f'Venv Python arch: {platform.machine()}')"
-
-    - name: Install frontend dependencies
-      working-directory: frontend
-      run: npm ci
-
-    - name: Install Tauri CLI dependencies
-      working-directory: tauri
-      run: npm ci
-
-    - name: Import Apple certificate
-      if: ${{ env.APPLE_CERTIFICATE_P12 != '' }}
-      env:
-        KEYCHAIN_PATH: ${{ runner.temp }}/app-signing.keychain-db
-      run: |
-        # 创建临时 keychain
-        security create-keychain -p tempkey "$KEYCHAIN_PATH"
-        security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-        security unlock-keychain -p tempkey "$KEYCHAIN_PATH"
-
-        # 导入证书
-        CERT_PATH="$RUNNER_TEMP/cert.p12"
-        printf '%s' "$APPLE_CERTIFICATE_P12" | base64 -D > "$CERT_PATH"
-
-        if [ ! -s "$CERT_PATH" ]; then
-          echo "❌ Certificate file is empty or decode failed"
-          exit 1
-        fi
-
-        security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k tempkey "$KEYCHAIN_PATH"
-
-        # 设为默认 keychain（codesign 无需 --keychain 参数）
-        security list-keychains -d user -s "$KEYCHAIN_PATH"
-        security default-keychain -s "$KEYCHAIN_PATH"
-
-        rm "$CERT_PATH"
-        echo "✅ Certificate imported"
-
-    # 有证书时：前端 → 后端 → app → 签名 → DMG → 公证（build_desktop.py 默认全流程）
-    - name: Build Tauri app (signed + notarized)
-      if: ${{ env.APPLE_CERTIFICATE_P12 != '' }}
-      run: |
-        .venv/bin/python tauri/scripts/build_desktop.py --arch ${{ matrix.arch }}
-
-    # 无证书时（fork / 未配置 secrets）：构建未签名 DMG，仅用于验证构建链路
-    - name: Build Tauri app (unsigned)
-      if: ${{ env.APPLE_CERTIFICATE_P12 == '' }}
-      run: |
-        .venv/bin/python tauri/scripts/build_desktop.py \
-          --arch ${{ matrix.arch }} \
-          --action frontend,backend,app,zip
-
-    - name: Show artifact
-      run: ls -lh dist/*.dmg
-
-    # 安装包统一上传为 workflow artifact；Release 发布仍由 release.yml 处理
-    - name: Upload DMG artifact
-      uses: actions/upload-artifact@v7
-      with:
-        name: macOS-dmg-${{ matrix.arch }}
-        path: dist/*.dmg
-        archive: false
-        if-no-files-found: error
-        retention-days: 30
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      arch: ${{ matrix.arch }}
+      target: ${{ matrix.target }}
+    secrets: inherit

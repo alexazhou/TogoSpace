@@ -1,7 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """Tauri 桌面形态的 Python 后端打包（PyInstaller onedir）。
 
-与 legacy 托盘形态（togo_agent.spec）的差异：
 - 入口是 src/desktopEntry.py（纯后端，无托盘、无 GUI）
 - onedir，但不产 BUNDLE：.app 由 Tauri 产出，后端整棵目录树作为 Resources/backend
 - console=True：stdout 是 Rust 启动状态机的通道

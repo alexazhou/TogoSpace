@@ -1,4 +1,7 @@
-name: Build macOS App
+name: Release Desktop
+
+# tag 发版：构建 arm64 / x86_64 的签名 + 公证 DMG，并创建 GitHub Release。
+# 构建步骤与分支 CI 共用 build-desktop.yml；tag 形如 v0.3.12，-beta tag 只构建不发布。
 
 on:
   push:
@@ -6,222 +9,53 @@ on:
       - 'v*'
   workflow_dispatch:
 
-jobs:
-  build-macos:
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    permissions:
-      contents: write
+permissions:
+  contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-mac:
+    name: Build macOS App (${{ matrix.arch }})
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: arm64
-            runner: macos-latest
+            target: aarch64-apple-darwin
           - arch: x86_64
-            runner: macos-latest
+            target: x86_64-apple-darwin
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      arch: ${{ matrix.arch }}
+      target: ${{ matrix.target }}
+    secrets: inherit
 
-    env:
-      TARGET_ARCH: ${{ matrix.arch }}
-      # Apple 证书（用于签名）
-      APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      # Apple 公证凭证
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-
+  release:
+    name: Publish GitHub Release
+    needs: build-mac
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-beta') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/download-artifact@v7
       with:
-        token: ${{ secrets.GH_PAT }}
-        lfs: true
+        pattern: macOS-dmg-*
+        path: dist
+        merge-multiple: true
 
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.11'
-
-    # ── x86_64: 通过 Rosetta 2 + uv 跨平台安装 x86_64 依赖 ──
-    - name: Set up x86_64 venv via Rosetta 2
-      if: matrix.arch == 'x86_64'
-      run: |
-        echo "🔧 Setting up x86_64 Python via Rosetta 2 + uv..."
-
-        # 验证 setup-python 安装的 Python 是 universal binary
-        PYTHON_BIN=$(which python3)
-        echo "Python: $PYTHON_BIN"
-        lipo -info "$PYTHON_BIN"
-
-        # 用 arch -x86_64 创建 x86_64 虚拟环境
-        arch -x86_64 python3 -m venv "$RUNNER_TEMP/x86_64-venv"
-        VENV="$RUNNER_TEMP/x86_64-venv"
-
-        # 将 venv 中的 universal Python 替换为纯 x86_64 binary
-        # 这样 sys.executable 和所有子进程都会以 x86_64 模式运行
-        # cp 跟随 symlink，直接复制 universal binary
-        echo "Before lipo:"
-        lipo -info "$VENV/bin/python3"
-        cp "$VENV/bin/python3" /tmp/python3_universal
-        lipo -thin x86_64 /tmp/python3_universal -output /tmp/python3_x86_64
-        rm "$VENV/bin/python3"
-        mv /tmp/python3_x86_64 "$VENV/bin/python3"
-        chmod +x "$VENV/bin/python3"
-        # 同时替换 python（无后缀），确保所有调用路径都是 x86_64
-        if [ -L "$VENV/bin/python" ] || [ -f "$VENV/bin/python" ]; then
-          rm "$VENV/bin/python"
-          cp "$VENV/bin/python3" "$VENV/bin/python"
-          chmod +x "$VENV/bin/python"
-        fi
-        echo "After lipo (x86_64-only):"
-        lipo -info "$VENV/bin/python3"
-        lipo -info "$VENV/bin/python"
-        # 验证架构
-        "$VENV/bin/python3" -c "import platform; print(f'Venv Python3 Arch: {platform.machine()}')"
-        "$VENV/bin/python" -c "import platform; print(f'Venv Python Arch: {platform.machine()}')"
-
-        # 安装 uv（快速包管理器，原生支持 --python-platform 跨平台安装）
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-        UV="$HOME/.local/bin/uv"
-
-        # 使用 uv 一键安装所有依赖（自动处理 wheel/sdist 回退）
-        # --python-platform x86_64-apple-darwin：下载 x86_64 wheel，无则从源码编译
-        # --python-version 3.11：指定目标 Python 版本
-        # --python：指定目标 Python 解释器（x86_64 venv）
-        "$UV" pip install \
-          --python "$VENV/bin/python3" \
-          --python-version 3.11 \
-          --python-platform x86_64-apple-darwin \
-          -r requirements.txt
-
-        "$UV" pip install \
-          --python "$VENV/bin/python3" \
-          --python-version 3.11 \
-          --python-platform x86_64-apple-darwin \
-          pyinstaller
-
-        # 验证架构
-        echo "=== Architecture verification ==="
-        "$VENV/bin/python" --version
-        "$VENV/bin/python" -c "import platform; print(f'Arch: {platform.machine()}')"
-        SITE_PACKAGES=$("$VENV/bin/python" -c "import site; print(site.getsitepackages()[0])")
-        # 验证 Pillow 是否为 x86_64
-        "$VENV/bin/python" -c "
-        from PIL import features
-        print(f'Pillow features: {features.check(\"avif\")}')
-        " 2>&1 || true
-        # 直接检查 .so 文件架构
-        PIL_SO=$(find "$SITE_PACKAGES" -name "_avif*.so" -o -name "_imaging*.so" 2>/dev/null | head -1)
-        if [ -n "$PIL_SO" ]; then
-          echo "PIL .so: $PIL_SO"
-          lipo -info "$PIL_SO" || true
-        fi
-
-        # 将 x86_64 venv 加入 PATH（后续步骤自动使用）
-        echo "$VENV/bin" >> $GITHUB_PATH
-        echo "✅ x86_64 Python environment ready"
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v6
-      with:
-        node-version: '20'
-
-    - name: Cache pip dependencies
-      if: matrix.arch == 'arm64'
-      uses: actions/cache@v5
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-release-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-release-
-          ${{ runner.os }}-pip-
-
-    - name: Install Python dependencies (arm64)
-      if: matrix.arch == 'arm64'
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
-
-    - name: Install frontend dependencies
-      working-directory: frontend
-      run: |
-        npm ci
-
-    - name: Import Apple certificate
-      if: ${{ env.APPLE_CERTIFICATE_P12 != '' }}
-      env:
-        KEYCHAIN_PATH: ${{ runner.temp }}/app-signing.keychain-db
-      run: |
-        # 创建临时 keychain
-        security create-keychain -p tempkey "$KEYCHAIN_PATH"
-        security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-        security unlock-keychain -p tempkey "$KEYCHAIN_PATH"
-
-        # 导入证书
-        CERT_PATH="$RUNNER_TEMP/cert.p12"
-        printf '%s' "$APPLE_CERTIFICATE_P12" | base64 -D > "$CERT_PATH"
-
-        if [ ! -s "$CERT_PATH" ]; then
-          echo "❌ Certificate file is empty or decode failed"
-          exit 1
-        fi
-
-        security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k tempkey "$KEYCHAIN_PATH"
-
-        # 设为默认 keychain（codesign 无需 --keychain 参数）
-        security list-keychains -d user -s "$KEYCHAIN_PATH"
-        security default-keychain -s "$KEYCHAIN_PATH"
-
-        rm "$CERT_PATH"
-        echo "✅ Certificate imported"
-
-    - name: Build and release
-      run: |
-        echo "=== Python environment ==="
-        # x86_64 构建必须使用 venv 中的 x86_64 python
-        if [ "${{ matrix.arch }}" = "x86_64" ]; then
-          PYTHON="$RUNNER_TEMP/x86_64-venv/bin/python"
-        else
-          PYTHON="$(which python)"
-        fi
-        echo "Using: $PYTHON"
-        $PYTHON --version
-        $PYTHON -c "import platform; print(f'Arch: {platform.machine()}')"
-        $PYTHON -c "import sysconfig; print(f'Platform: {sysconfig.get_platform()}')"
-        echo "========================="
-
-        if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
-          $PYTHON scripts/build_release.py --arch ${{ matrix.arch }}
-        else
-          TARGET_ARCH=${{ matrix.arch }} $PYTHON scripts/build_mac.py
-        fi
-
-    - name: Get zip path
-      run: |
-        ZIP_PATH=$(ls dist/*.zip | head -1)
-        echo "ZIP_PATH=$ZIP_PATH" >> $GITHUB_ENV
-
-    # 安装包统一上传为 workflow artifact（所有触发方式都有产物，便于下载排查）。
-    # archive: false 直接上传已打好的 zip，避免二次压缩。
-    - name: Upload build artifact
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ env.ZIP_PATH }}
-        archive: false
-        if-no-files-found: error
-        retention-days: 30
+    - name: Show artifacts
+      run: ls -lh dist/*.dmg
 
     - name: Create GitHub Release
-      if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-beta') }}
       uses: softprops/action-gh-release@v3
       with:
         name: "TogoSpace ${{ github.ref_name }}"
         tag_name: ${{ github.ref_name }}
         draft: false
         prerelease: false
-        files: ${{ env.ZIP_PATH }}
+        files: dist/*.dmg
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

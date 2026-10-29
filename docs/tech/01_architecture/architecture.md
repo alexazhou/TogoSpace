@@ -43,7 +43,7 @@ agent_team/
 ```
 src/
 ├── backend_main.py         # 启动入口（4 阶段启动流程）
-├── appEntry.py            # 命令行入口
+├── desktopEntry.py         # Tauri 桌面 sidecar 入口
 ├── route.py                # Tornado 路由注册
 ├── constants.py            # 全局枚举定义
 ├── db.py                   # 数据库连接管理

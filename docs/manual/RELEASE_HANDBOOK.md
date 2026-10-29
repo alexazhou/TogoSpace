@@ -32,8 +32,8 @@ git push origin v0.1.12
 
 推送 tag 后，GitHub Actions 会自动触发：
 - 自动构建 arm64 和 x86_64 两个平台的版本
-- 执行应用签名与苹果公证
-- 自动创建 Draft Release 并上传安装包
+- 执行应用签名与苹果公证（`tauri/scripts/build_desktop.py`）
+- 自动创建 GitHub Release 并上传 DMG 安装包（`release.yml`，构建流程复用 `build-desktop.yml`）
 
 ## 3. 验证 Release
 
@@ -43,8 +43,8 @@ gh release view v0.1.12
 ```
 
 确认包含两个安装包：
-- `TogoSpace-0.1.12-macos-arm64.zip` (CI 构建)
-- `TogoSpace-0.1.12-macos-x86_64.zip` (CI 构建)
+- `TogoSpace_0.1.12_arm64.dmg` (CI 构建)
+- `TogoSpace_0.1.12_x86_64.dmg` (CI 构建)
 
 ## 4. 补充 Release Note
 
@@ -131,16 +131,17 @@ git push origin master --tags --force
 
 **注意：** tag 版本号（如 v0.1.12）必须与 `src/version.py` 中的版本号一致，CI 才能正确打包并关联对应文件。
 
-### build_release.py 参数说明 (供本地测试构建参考)
+### build_desktop.py 参数说明 (供本地测试构建参考)
 
-虽然正式发布已交由 CI 完成，但若需在本地调试构建流程，可使用 `scripts/build_release.py`：
+虽然正式发布已交由 CI 完成，但若需在本地调试构建流程，可使用 `tauri/scripts/build_desktop.py`：
 
 | 参数 | 说明 |
 |------|------|
-| `--arch arm64/x86_64` | 目标架构，默认自动检测 |
-| `--action build,sign,notarize,zip` | 要执行的步骤（逗号分隔），默认全部流水线 |
-| `--action build,sign,zip` | 跳过公证，仅签名打包 |
-| `--clean` | 构建前清理 dist 和 build 目录 |
+| `--arch arm64/x86_64` | 目标架构，默认按本机架构 |
+| `--action frontend,backend,app,sign,zip,notarize` | 要执行的步骤（逗号分隔），macOS 默认全部流水线 |
+| `--action frontend,backend,app` | 只构建可运行的 .app，不签名不打包 |
+| `--action sign,zip,notarize` | 复用已有 .app，只签名、打 DMG、公证 |
+| `--action check` | 检查产物签名与公证状态（独立操作） |
 
 本地签名/公证凭证按字段优先读环境变量，缺失时回退到 `scripts/build_config.json`：
 

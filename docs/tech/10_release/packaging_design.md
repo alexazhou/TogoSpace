@@ -2,7 +2,10 @@
 
 > **2026-10 更新**：安装包形态已切换为 **Tauri v2 外壳 + PyInstaller 后端 sidecar**，
 > 见 `docs/design/2026-10-29-tauri-desktop-shell/` 与 `tauri/README.md`。
-> 本文档描述的 `appEntry.py` 托盘形态仍保留用于本地调试，但不再是发布安装包入口。
+>
+> **2026-10-30 补充**：`appEntry.py` 托盘形态及 `togo_agent.spec` / `build_mac.py` /
+> `build_release.py` 已移除，桌面构建与发版统一走 `tauri/scripts/build_desktop.py`。
+> 本文档仅作历史参考。
 
 ## 目标
 
