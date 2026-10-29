@@ -279,4 +279,4 @@ STORAGE_ROOT/
 相关工具：
 - scripts/build_mac.py：构建 macOS app（开发调试用）
 - scripts/build_release.py：构建 + 签名 + 公证 + 打包（发布用）
-- scripts/build_config.json：本地发布配置（从 build_config.json.example 复制填写）
+- scripts/build_config.json：本地发布配置回退（优先读 APPLE_* 环境变量；从 build_config.json.example 复制填写）

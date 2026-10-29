@@ -18,8 +18,10 @@
   python3 tauri/scripts/build_desktop.py --action frontend,app
   python3 tauri/scripts/build_desktop.py --action sign,zip
 
-签名/公证配置复用 scripts/build_config.json：
-  apple_id / app_specific_password / team_id / signing_identity_hash
+签名/公证配置按字段取第一个可用来源：
+  1. 环境变量 APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID / APPLE_SIGNING_IDENTITY
+  2. scripts/build_config.json：apple_id / app_specific_password / team_id / signing_identity_hash
+两处都不完整时跳过签名与公证，产物仍会生成。
 """
 
 from __future__ import annotations
@@ -81,18 +83,35 @@ def read_version() -> str:
     return match.group(1)
 
 
-def load_signing_config() -> dict:
-    if not os.path.exists(BUILD_CONFIG):
-        raise SystemExit(
-            f"❌ 签名配置不存在: {BUILD_CONFIG}\n"
-            "   请复制 scripts/build_config.json.example 为 scripts/build_config.json 并填写"
-        )
-    with open(BUILD_CONFIG, encoding="utf-8") as file:
-        config = json.load(file)
-    required = ["apple_id", "app_specific_password", "team_id", "signing_identity_hash"]
-    missing = [field for field in required if not config.get(field)]
+SIGN_CONFIG_FIELDS = {
+    "apple_id": "APPLE_ID",
+    "app_specific_password": "APPLE_PASSWORD",
+    "team_id": "APPLE_TEAM_ID",
+    "signing_identity_hash": "APPLE_SIGNING_IDENTITY",
+}
+
+
+def resolve_signing_config() -> dict | None:
+    """签名/公证配置：环境变量优先，build_config.json 按字段回退。
+
+    返回 None 表示凭证不完整，调用方应跳过签名/公证。
+    """
+    file_config: dict = {}
+    if os.path.exists(BUILD_CONFIG):
+        with open(BUILD_CONFIG, encoding="utf-8") as file:
+            file_config = json.load(file)
+
+    config = {}
+    for field, env_name in SIGN_CONFIG_FIELDS.items():
+        value = os.environ.get(env_name) or file_config.get(field)
+        if value:
+            config[field] = value
+
+    missing = [field for field in SIGN_CONFIG_FIELDS if field not in config]
     if missing:
-        raise SystemExit(f"❌ 签名配置缺少字段: {', '.join(missing)}")
+        details = ", ".join(f"{field}(env {SIGN_CONFIG_FIELDS[field]})" for field in missing)
+        print(f"⚠️  缺少签名/公证凭证: {details}")
+        return None
     return config
 
 
@@ -257,7 +276,10 @@ def sign_app(arch: str) -> None:
     print("\n--- sign: 代码签名 ---")
     if sys.platform != "darwin":
         raise SystemExit("❌ 签名仅支持 macOS")
-    config = load_signing_config()
+    config = resolve_signing_config()
+    if config is None:
+        print("⚠️  跳过签名")
+        return
     identity = config["signing_identity_hash"]
     app_path = app_bundle_path(arch)
     if not os.path.isdir(app_path):
@@ -316,12 +338,12 @@ def build_dmg(arch: str) -> None:
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
-    if os.path.exists(BUILD_CONFIG):
-        config = load_signing_config()
+    config = resolve_signing_config()
+    if config:
         run_command([
             "codesign", "--force", "--sign", config["signing_identity_hash"], target])
     else:
-        print("⚠️  未找到 build_config.json，跳过 DMG 签名")
+        print("⚠️  跳过 DMG 签名")
 
     size_mb = os.path.getsize(target) / (1024 * 1024)
     print(f"✅ DMG: {target} ({size_mb:.1f} MB)")
@@ -334,7 +356,10 @@ def notarize_dmg(arch: str) -> None:
     print("\n--- notarize: 公证 + staple ---")
     if sys.platform != "darwin":
         raise SystemExit("❌ 公证仅支持 macOS")
-    config = load_signing_config()
+    config = resolve_signing_config()
+    if config is None:
+        print("⚠️  跳过公证与 staple")
+        return
     target = dmg_path(arch)
     if not os.path.isfile(target):
         raise SystemExit(f"❌ DMG 不存在: {target}（请先执行 --action zip）")

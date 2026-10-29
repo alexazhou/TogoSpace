@@ -19,7 +19,10 @@ macOS Release 构建脚本：构建、签名、公证、打包 TogoSpace.app
   python scripts/build_release.py --action check           # 查看签名与公证状态
   python scripts/build_release.py --arch arm64             # 指定架构
 
-配置：scripts/build_config.json
+配置（按字段取第一个可用来源）：
+  1. 环境变量 APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID / APPLE_SIGNING_IDENTITY
+  2. scripts/build_config.json 中的 apple_id / app_specific_password / team_id / signing_identity_hash
+缺失时跳过 sign / notarize。
 """
 
 import argparse
@@ -35,6 +38,13 @@ REPO_ROOT  = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 DIST_PATH  = os.path.join(REPO_ROOT, "dist")
 CONFIG_FILE = os.path.join(SCRIPT_DIR, "build_config.json")
 ENTITLEMENTS_FILE = os.path.join(SCRIPT_DIR, "check", "entitlements.plist")
+
+SIGN_CONFIG_FIELDS = {
+    "apple_id": "APPLE_ID",
+    "app_specific_password": "APPLE_PASSWORD",
+    "team_id": "APPLE_TEAM_ID",
+    "signing_identity_hash": "APPLE_SIGNING_IDENTITY",
+}
 
 ALL_ACTIONS = ["build", "sign", "notarize", "zip"]
 PIPELINE_ACTIONS = ALL_ACTIONS
@@ -74,22 +84,27 @@ def run_command(command, check=True, capture_output=False, timeout=None, env=Non
         sys.exit(1)
 
 
-def load_config():
-    """加载 build_config.json 配置文件。"""
-    if not os.path.exists(CONFIG_FILE):
-        print(f"❌ 配置文件不存在: {CONFIG_FILE}")
-        print(f"   请复制 build_config.json.example 为 build_config.json 并填写配置")
-        sys.exit(1)
+def load_signing_config():
+    """签名/公证配置：环境变量优先，build_config.json 按字段回退。
 
-    with open(CONFIG_FILE) as f:
-        config = json.load(f)
+    返回 None 表示凭证不完整，调用方应跳过 sign / notarize。
+    """
+    file_config = {}
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            file_config = json.load(f)
 
-    required = ["apple_id", "app_specific_password", "team_id", "signing_identity_hash"]
-    for field in required:
-        if not config.get(field):
-            print(f"❌ 配置字段 '{field}' 未填写或为空", file=sys.stderr)
-            sys.exit(1)
+    config = {}
+    for field, env_name in SIGN_CONFIG_FIELDS.items():
+        value = os.environ.get(env_name) or file_config.get(field)
+        if value:
+            config[field] = value
 
+    missing = [field for field in SIGN_CONFIG_FIELDS if field not in config]
+    if missing:
+        details = ", ".join(f"{field}(env {SIGN_CONFIG_FIELDS[field]})" for field in missing)
+        print(f"⚠️  缺少签名/公证凭证: {details}")
+        return None
     return config
 
 
@@ -281,7 +296,7 @@ def main():
 
     actions = parse_actions(args.action)
     needs_sign_config = bool({"sign", "notarize"} & set(actions))
-    config = load_config() if needs_sign_config else {}
+    config = load_signing_config() if needs_sign_config else None
     version = read_version()
 
     if args.arch:
@@ -294,7 +309,7 @@ def main():
     print(f"ℹ️  版本: {version}")
     print(f"ℹ️  架构: {arch}")
     print(f"ℹ️  执行步骤: {' → '.join(actions)}")
-    if needs_sign_config:
+    if config:
         print(f"ℹ️  签名身份: {config['signing_identity_hash']}")
 
     app_path = os.path.join(DIST_PATH, f"TogoSpace-{version}.app")
@@ -323,13 +338,19 @@ def main():
 
     # --- sign ---
     if "sign" in actions:
-        sign_app(app_path, config["signing_identity_hash"])
-        verify_signature(app_path)
+        if config:
+            sign_app(app_path, config["signing_identity_hash"])
+            verify_signature(app_path)
+        else:
+            print("⚠️  无完整签名凭证，跳过签名")
 
     # --- notarize ---
     if "notarize" in actions:
-        notarize_app(app_path, config)
-        staple_app(app_path)
+        if config:
+            notarize_app(app_path, config)
+            staple_app(app_path)
+        else:
+            print("⚠️  无完整公证凭证，跳过公证")
 
     # --- zip ---
     zip_path = None

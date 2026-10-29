@@ -61,8 +61,9 @@ python3 tauri/scripts/build_desktop.py --arch x86_64
 
 - 前端只构建一次：`frontend/dist` 给 Tauri，`assets/frontend` 给后端浏览器形态，脚本做哈希一致性校验。
 - 版本号唯一来源：`src/version.py`，脚本同步 `tauri.conf.json` / `Cargo.toml` / `tauri/package.json`。
-- 签名/公证配置复用 `scripts/build_config.json`（`apple_id` / `app_specific_password` /
-  `team_id` / `signing_identity_hash`）。
+- 签名/公证配置按字段优先读环境变量 `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` /
+  `APPLE_SIGNING_IDENTITY`，缺失时回退到 `scripts/build_config.json`
+  （`apple_id` / `app_specific_password` / `team_id` / `signing_identity_hash`）。
 - 产物：`dist/TogoSpace_<version>_<arch>.dmg`。
 
 ### CI

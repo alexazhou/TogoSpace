@@ -142,7 +142,17 @@ git push origin master --tags --force
 | `--action build,sign,zip` | 跳过公证，仅签名打包 |
 | `--clean` | 构建前清理 dist 和 build 目录 |
 
-如果执行本地构建与签名，需准备 `scripts/build_config.json`：
+本地签名/公证凭证按字段优先读环境变量，缺失时回退到 `scripts/build_config.json`：
+
+```bash
+export APPLE_ID=your-apple-id@example.com
+export APPLE_PASSWORD=xxxx-xxxx-xxxx-xxxx
+export APPLE_TEAM_ID=YOUR_TEAM_ID
+export APPLE_SIGNING_IDENTITY=YOUR_SIGNING_IDENTITY_HASH
+```
+
+文件回退格式：
+
 ```json
 {
   "apple_id": "your-apple-id@example.com",
