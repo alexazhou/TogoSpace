@@ -110,10 +110,10 @@ function syncActivityFollowState(reason: string = 'unknown'): void {
   
   if (wasFollowing && !isNearBottom) {
     const listEl = activityListRef.value;
-    console.log(`[AgentActivityPanel] Detaching from bottom! Reason: ${reason}`);
-    console.log(`[AgentActivityPanel] scrollHeight: ${listEl?.scrollHeight}, scrollTop: ${listEl?.scrollTop}, clientHeight: ${listEl?.clientHeight}, distanceToBottom: ${listEl ? (listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight) : 'N/A'}`);
+    console.debug(`[AgentActivityPanel] Detaching from bottom! Reason: ${reason}`);
+    console.debug(`[AgentActivityPanel] scrollHeight: ${listEl?.scrollHeight}, scrollTop: ${listEl?.scrollTop}, clientHeight: ${listEl?.clientHeight}, distanceToBottom: ${listEl ? (listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight) : 'N/A'}`);
   } else if (!wasFollowing && isNearBottom) {
-    console.log(`[AgentActivityPanel] Re-attaching to bottom! Reason: ${reason}`);
+    console.debug(`[AgentActivityPanel] Re-attaching to bottom! Reason: ${reason}`);
   }
   
   shouldFollowActivities.value = isNearBottom;

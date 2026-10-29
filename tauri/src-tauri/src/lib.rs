@@ -95,6 +95,18 @@ pub(crate) fn on_backend_ready(app: &tauri::AppHandle) {
     tray::refresh(app);
 }
 
+/// 前端调试日志开关：启动时带 `TOGOSPACE_FRONTEND_DEBUG=1` 即在页面脚本执行前注入标记。
+const FRONTEND_DEBUG_ENV: &str = "TOGOSPACE_FRONTEND_DEBUG";
+
+fn frontend_debug_enabled() -> bool {
+    std::env::var(FRONTEND_DEBUG_ENV)
+        .map(|value| {
+            let value = value.trim();
+            value == "1" || value.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(false)
+}
+
 pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     logger::log("shell", "show_main_window");
     sys::platform::set_dock_visibility(app, true);
@@ -105,7 +117,7 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
         return;
     }
 
-    let result = tauri::WebviewWindowBuilder::new(
+    let mut builder = tauri::WebviewWindowBuilder::new(
         app,
         "main",
         tauri::WebviewUrl::App("index.html".into()),
@@ -113,8 +125,20 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
     .title("TogoSpace")
     .inner_size(1280.0, 800.0)
     .min_inner_size(960.0, 600.0)
-    .resizable(true)
-    .build();
+    .resizable(true);
+
+    // 用 initialization_script 在页面脚本前注入，事后 eval 会晚于前端启动逻辑。
+    // 统一挂在 window.tgconfig 下，便于后续扩展其他运行时配置。
+    let debug_enabled = frontend_debug_enabled();
+    if debug_enabled {
+        logger::log("shell", "frontend debug logging enabled");
+    }
+    builder = builder.initialization_script(format!(
+        "window.tgconfig = Object.assign(window.tgconfig || {{}}, {{ frontendDebug: {} }});",
+        debug_enabled
+    ));
+
+    let result = builder.build();
 
     match result {
         Ok(_) => logger::log("shell", "main window created"),
