@@ -340,6 +340,7 @@ def build_dmg(arch: str) -> None:
             "-volname", "TogoSpace",
             "-srcfolder", staging,
             "-ov", "-format", "UDZO",
+            "-nospotlight",
             target,
         ])
     finally:
