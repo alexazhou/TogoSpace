@@ -228,6 +228,12 @@ def build_app(arch: str) -> None:
     sync_version(read_version())
 
     env = dict(os.environ)
+    # Tauri CLI 会读取 APPLE_* 变量并在 tauri build 阶段自动签名/公证；
+    # 此时嵌套二进制尚未签名，公证必然失败。签名与公证统一由本脚本后续步骤处理。
+    for key in ("APPLE_CERTIFICATE", "APPLE_CERTIFICATE_PASSWORD", "APPLE_SIGNING_IDENTITY",
+                "APPLE_ID", "APPLE_PASSWORD", "APPLE_TEAM_ID",
+                "APPLE_API_KEY", "APPLE_API_ISSUER", "APPLE_API_KEY_PATH"):
+        env.pop(key, None)
     backend_executable = os.path.join(
         BACKEND_DIR, "TogoSpace-backend.exe" if os.name == "nt" else "TogoSpace-backend")
     if os.path.isfile(backend_executable):
