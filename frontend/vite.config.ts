@@ -55,6 +55,12 @@ function createApiProxy(target: string): ProxyOptions {
 
 export default defineConfig({
   plugins: [removeCrossoriginPlugin(), vue()],
+  define: {
+    // 开启 vue-i18n 的 JIT 消息编译：用 AST 解释执行替代运行时 new Function，
+    // 避免被 Tauri 的 CSP（script-src 'self'，无 unsafe-eval）拦截导致页面空白。
+    __INTLIFY_JIT_COMPILATION__: 'true',
+    __INTLIFY_DROP_MESSAGE_COMPILER__: 'false',
+  },
   build: {
     rollupOptions: {
       input: {
