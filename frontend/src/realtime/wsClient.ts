@@ -1,3 +1,4 @@
+import { watch } from 'vue';
 import { connectionState, reconnectProgress, authEnabled, showTokenDialog } from '../appUiState';
 import { createEventsSocket } from '../api';
 import { getToken, clearToken } from '../authStore';
@@ -17,6 +18,8 @@ let connectTimeoutTimer: number | null = null;
 let reconnectAttempt = 0;
 let activeSocketToken = 0;
 let started = false;
+let socketOpen = false;
+let authSent = false;
 
 function clearReconnectCountdown(): void {
   reconnectProgress.value = 0;
@@ -71,6 +74,26 @@ function scheduleReconnect(): void {
   }, reconnectDelayMs);
 }
 
+function sendAuthMessage(socket: WebSocket): void {
+  if (authSent) {
+    return;
+  }
+
+  const token = getToken();
+  if (!token) {
+    // 无 token，关闭连接并触发输入
+    socket.close();
+    ws = null;
+    socketOpen = false;
+    showTokenDialog.value = true;
+    return;
+  }
+
+  authSent = true;
+  socket.send(JSON.stringify({ type: 'auth', token }));
+  // 认证已发送，连接状态保持 'connecting'，等待后端推送首条消息
+}
+
 function connectRealtimeSocket(): void {
   if (!started) {
     return;
@@ -92,6 +115,8 @@ function connectRealtimeSocket(): void {
 
   const socket = createEventsSocket();
   ws = socket;
+  socketOpen = false;
+  authSent = false;
 
   connectTimeoutTimer = window.setTimeout(() => {
     if (socketToken !== activeSocketToken || connectionState.value !== 'reconnecting') {
@@ -111,18 +136,13 @@ function connectRealtimeSocket(): void {
     }
 
     clearConnectTimeout();
+    socketOpen = true;
 
-    // 鉴权启用时，发送认证消息
     if (authEnabled.value) {
-      const token = getToken();
-      if (token) {
-        socket.send(JSON.stringify({ type: 'auth', token }));
-        // 连接状态暂时保持 'connecting'，等待后端确认
-      } else {
-        // 无 token，关闭连接并触发输入
-        socket.close();
-        ws = null;
-        showTokenDialog.value = true;
+      // 鉴权启用时，发送认证消息
+      sendAuthMessage(socket);
+      if (!authSent) {
+        // 无 token，连接已关闭并弹出输入框
         return;
       }
     } else {
@@ -166,6 +186,7 @@ function connectRealtimeSocket(): void {
     }
 
     ws = null;
+    socketOpen = false;
     if (isReconnectAttempt && connectTimeoutTimer !== null && connectionState.value === 'reconnecting') {
       return;
     }
@@ -180,6 +201,7 @@ function connectRealtimeSocket(): void {
       return;
     }
 
+    socketOpen = false;
     if (isReconnectAttempt && connectTimeoutTimer !== null && connectionState.value === 'reconnecting') {
       return;
     }
@@ -188,6 +210,18 @@ function connectRealtimeSocket(): void {
     connectionState.value = 'disconnected';
   });
 }
+
+// 系统状态接口可能晚于 WebSocket 打开返回，连接会先按「无鉴权」处理。
+// 鉴权随后开启时必须补发认证消息，否则后端一直等待认证、不订阅事件，
+// 前端表现为连接正常但收不到任何实时推送。
+watch(authEnabled, (enabled) => {
+  if (!enabled || !socketOpen || !ws || authSent) {
+    return;
+  }
+
+  connectionState.value = 'connecting';
+  sendAuthMessage(ws);
+});
 
 export function startRealtimeClient(): void {
   if (started) {
@@ -214,6 +248,8 @@ export function stopRealtimeClient(): void {
     ws = null;
   }
 
+  socketOpen = false;
+  authSent = false;
   reconnectAttempt = 0;
   connectionState.value = 'disconnected';
 }
@@ -247,6 +283,8 @@ export function __resetWsClientForTests(): void {
   }
 
   listeners.clear();
+  socketOpen = false;
+  authSent = false;
   reconnectAttempt = 0;
   reconnectProgress.value = 0;
   connectionState.value = 'disconnected';

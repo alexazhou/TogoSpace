@@ -1,3 +1,4 @@
+import { nextTick } from 'vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authEnabled, connectionState, showTokenDialog } from '../../appUiState';
 
@@ -132,6 +133,30 @@ describe('wsClient', () => {
     expect(listener).toHaveBeenCalledWith(normalizedEvent);
 
     unsubscribe();
+  });
+
+  it('authenticates when auth becomes enabled after the socket has opened', async () => {
+    getTokenMock.mockReturnValue('secret-token');
+
+    startRealtimeClient();
+    sockets[0]?.emit('open');
+
+    // 打开时鉴权状态未知，按无鉴权处理，不能发送认证消息
+    expect(connectionState.value).toBe('connected');
+    expect(sockets[0]?.sentMessages).toEqual([]);
+
+    authEnabled.value = true;
+    await nextTick();
+
+    // 已知启用了鉴权，补发认证消息，等待后端首条消息确认
+    expect(connectionState.value).toBe('connecting');
+    expect(sockets[0]?.sentMessages).toEqual([
+      JSON.stringify({ type: 'auth', token: 'secret-token' }),
+    ]);
+
+    sockets[0]?.emit('message', JSON.stringify({ event: 'schedule_state' }));
+
+    expect(connectionState.value).toBe('connected');
   });
 
   it('shows token dialog when auth is enabled but no token is available', () => {

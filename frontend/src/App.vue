@@ -301,8 +301,11 @@ watch(
 onMounted(async () => {
   removeViewportRootClasses = installViewportRootClasses();
   applyTheme(themeMode.value);
+  // 实时连接打开时需要知道是否开启鉴权，先取系统状态再建立连接；
+  // 否则 authEnabled 还是初始 false，连接不会发送认证消息，后端不订阅事件。
+  await checkSystemStatus();
   startRealtimeClient();
-  await Promise.all([loadTeams(), checkSystemStatus()]);
+  await loadTeams();
 
   // Auto-check for updates on startup if enabled
   if (autoCheckUpdate.value) {
