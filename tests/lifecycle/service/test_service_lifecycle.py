@@ -237,6 +237,7 @@ def test_ormservice_has_no_silent_early_return():
 
 @pytest.mark.parametrize("initial", [ServiceStatus.Idle, ServiceStatus.Stopped])
 async def test_startup_allowed_from_idle_and_stopped(initial):
+    """从「空闲」或「已停止」这两种未启动状态启动，服务应正常进入运行态，启动逻辑也会真正执行。"""
     status = ServiceStatusInfo(name="stub")
     status.status = initial
     entered: list[str] = []
@@ -275,6 +276,7 @@ async def test_startup_rejected_from_any_other_state(blocked):
 
 
 async def test_startup_failure_sets_error_and_reraises_original():
+    """启动过程抛异常时，原始异常要原样往上抛，同时服务进入错误态并记下错误信息。"""
     status = ServiceStatusInfo(name="stub")
     boom = RuntimeError("db down")
 
@@ -299,6 +301,7 @@ async def test_startup_failure_sets_error_and_reraises_original():
     ],
 )
 async def test_shutdown_is_noop_with_warning_on_idle_and_stopped(initial, fragment, caplog):
+    """对「空闲」或「已停止」的服务执行停机，什么都不做、状态不变，但要打一条告警提示调用方。"""
     status = ServiceStatusInfo(name="stub")
     status.status = initial
     entered: list[str] = []
@@ -341,6 +344,7 @@ async def test_shutdown_cleans_from_active_states(active, caplog):
 
 
 async def test_shutdown_swallows_body_exception_but_still_reaches_stopped(caplog):
+    """停机清理本身失败时：不把异常抛出去、状态仍回到已停止，但要留痕（告警 + 错误信息），不能悄无声息。"""
     status = ServiceStatusInfo(name="stub")
     status.status = ServiceStatus.Running
 
@@ -368,6 +372,7 @@ async def test_shutdown_swallows_body_exception_but_still_reaches_stopped(caplog
 # ----------------------------------------------------------------------
 
 async def test_startup_failure_invokes_on_error_rollback():
+    """启动失败时，要先执行配置好的回滚清理，再往上抛原始异常，最后把服务置为错误态。"""
     status = ServiceStatusInfo(name="stub")
     rollback: list[str] = []
     boom = RuntimeError("bind 之后失败")
@@ -388,6 +393,7 @@ async def test_startup_failure_invokes_on_error_rollback():
 
 
 async def test_on_error_failure_does_not_mask_original(caplog):
+    """回滚自己再失败时，仍以原始启动异常为准往上抛，回滚失败只记一条告警，不能盖住真正的错误。"""
     status = ServiceStatusInfo(name="stub")
     boom = RuntimeError("原始启动异常")
 
@@ -417,6 +423,7 @@ async def test_on_error_failure_does_not_mask_original(caplog):
 
 @pytest.mark.parametrize("initial", [ServiceStatus.Idle, ServiceStatus.Stopped])
 def test_sync_startup_allowed_from_idle_and_stopped(initial):
+    """同步版的启动：从「空闲/已停止」状态启动应直接返回结果（不变成协程），并进入运行态。"""
     status = ServiceStatusInfo(name="stub-sync")
     status.status = initial
     entered: list[str] = []
@@ -433,6 +440,7 @@ def test_sync_startup_allowed_from_idle_and_stopped(initial):
 
 @pytest.mark.parametrize("blocked", _ACTIVE_STATES)
 def test_sync_startup_rejected_from_any_other_state(blocked):
+    """同步版的启动：从运行中/错误等其他状态启动会被拒绝，报 SERVICE_ALREADY_STARTED 且不执行启动逻辑。"""
     status = ServiceStatusInfo(name="stub-sync")
     status.status = blocked
     entered: list[str] = []
@@ -450,6 +458,7 @@ def test_sync_startup_rejected_from_any_other_state(blocked):
 
 
 def test_sync_startup_failure_uses_sync_rollback():
+    """同步版启动失败时，要执行同步的回滚清理，再往上抛原始异常并进入错误态。"""
     status = ServiceStatusInfo(name="stub-sync")
     rollback: list[str] = []
     boom = RuntimeError("sync boom")
@@ -470,6 +479,7 @@ def test_sync_startup_failure_uses_sync_rollback():
 
 
 def test_sync_startup_failure_without_on_error_still_marks_error():
+    """同步版启动失败且没配回滚时，也要把服务置为错误态（不能因为没回滚就不记状态）。"""
     status = ServiceStatusInfo(name="stub-sync")
 
     @serviceUtil.service_start_wrapper(status)
@@ -553,6 +563,7 @@ async def test_sync_startup_skips_async_on_error_inside_running_loop(caplog):
     ],
 )
 def test_sync_shutdown_is_noop_with_warning_on_idle_and_stopped(initial, fragment, caplog):
+    """同步版的停机：对「空闲/已停止」服务什么都不做、状态不变，但打一条告警。"""
     status = ServiceStatusInfo(name="stub-sync")
     status.status = initial
     entered: list[str] = []
@@ -572,6 +583,7 @@ def test_sync_shutdown_is_noop_with_warning_on_idle_and_stopped(initial, fragmen
 
 @pytest.mark.parametrize("active", _ACTIVE_STATES)
 def test_sync_shutdown_cleans_from_active_states(active, caplog):
+    """同步版的停机：从运行中/错误等状态停机要真正执行清理并回到已停止，且不打告警。"""
     status = ServiceStatusInfo(name="stub-sync")
     status.status = active
     entered: list[str] = []
@@ -590,6 +602,7 @@ def test_sync_shutdown_cleans_from_active_states(active, caplog):
 
 
 def test_sync_shutdown_swallows_body_exception_and_leaves_trace(caplog):
+    """同步版停机清理失败时：不抛异常、状态回到已停止，但要留痕（告警 + 错误信息）。"""
     status = ServiceStatusInfo(name="stub-sync")
     status.status = ServiceStatus.Running
 

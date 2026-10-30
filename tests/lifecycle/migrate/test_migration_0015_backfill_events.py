@@ -111,6 +111,7 @@ def _strip_dedup_guard(sql: str) -> str:
 
 
 def test_0015_backfill_backfills_snapshot_and_content_by_status(tmp_path: Path) -> None:
+    """跑完 0015 后，按任务状态给每种老任务补出正确的历史记录：正文取"结果"或"卡住原因"中合适的那个，两者都空则不补。"""
     db_path = tmp_path / "test.db"
     _setup_before_0015(db_path)
     _insert_legacy_tasks(db_path)

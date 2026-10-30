@@ -70,6 +70,7 @@ def _strip_null_condition(sql: str) -> str:
 
 
 def test_0015_fix_fixes_reviewing_without_reviewer(tmp_path: Path) -> None:
+    """跑完 0015 后，只把"待验收且验收人为空"的老任务补成创建人当验收人，其余（已有验收人/非待验收/已结束）一律不动。"""
     db_path = tmp_path / "test.db"
     _setup_before_0015(db_path)
     _insert_legacy_tasks(db_path)

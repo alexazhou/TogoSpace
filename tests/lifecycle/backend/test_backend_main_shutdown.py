@@ -9,25 +9,30 @@ import backend_main
 
 class TestDetectRunEnv:
     def test_source_by_default(self, monkeypatch):
+        """没设任何环境变量时，运行环境默认按"源码方式"识别。"""
         monkeypatch.delenv("TOGOSPACE_RUN_ENV", raising=False)
         assert backend_main._detect_run_env() == "source"
 
     def test_docker_when_env_var_set(self, monkeypatch):
+        """设了 TOGOSPACE_RUN_ENV=docker 时，运行环境识别为 docker。"""
         monkeypatch.setenv("TOGOSPACE_RUN_ENV", "docker")
         assert backend_main._detect_run_env() == "docker"
 
     def test_mac_app_when_frozen(self, monkeypatch):
+        """打包后的程序（sys.frozen=True）且没设环境变量时，运行环境识别为 mac 应用。"""
         monkeypatch.delenv("TOGOSPACE_RUN_ENV", raising=False)
         monkeypatch.setattr(backend_main.sys, "frozen", True, raising=False)
         assert backend_main._detect_run_env() == "mac_app"
 
     def test_docker_priority_over_frozen(self, monkeypatch):
+        """环境变量和打包标记同时存在时，环境变量优先——识别为 docker 而不是 mac 应用。"""
         monkeypatch.setenv("TOGOSPACE_RUN_ENV", "docker")
         monkeypatch.setattr(backend_main.sys, "frozen", True, raising=False)
         assert backend_main._detect_run_env() == "docker"
 
 
 def test_request_shutdown_noop_when_main_loop_not_initialized(monkeypatch):
+    """主循环还没初始化时请求停机，什么都不做也不报错（保证启动早期调它不会崩）。"""
     monkeypatch.setattr(backend_main, "_main_loop", None)
     monkeypatch.setattr(backend_main, "_shutdown_event", None)
 
@@ -35,6 +40,7 @@ def test_request_shutdown_noop_when_main_loop_not_initialized(monkeypatch):
 
 
 def test_request_shutdown_uses_threadsafe_signal_when_loop_is_running(monkeypatch):
+    """事件循环正在运行时，停机请求要走线程安全的 call_soon_threadsafe 去置位，而不是直接调 set。"""
     fake_loop = MagicMock()
     fake_loop.is_running.return_value = True
     fake_event = MagicMock()
@@ -49,6 +55,7 @@ def test_request_shutdown_uses_threadsafe_signal_when_loop_is_running(monkeypatc
 
 
 def test_request_shutdown_sets_event_directly_when_loop_not_running(monkeypatch):
+    """事件循环没在运行时，直接置位停机事件即可（此时没有线程安全问题）。"""
     fake_loop = MagicMock()
     fake_loop.is_running.return_value = False
     fake_event = MagicMock()
@@ -64,6 +71,7 @@ def test_request_shutdown_sets_event_directly_when_loop_not_running(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_main_waits_for_shutdown_event_and_runs_cleanup(monkeypatch):
+    """完整跑一遍启动与停机：服务按固定顺序启动并监听端口，收到停机请求后按相反顺序清理并移除 pid 文件。"""
     fake_setting = SimpleNamespace(
         bind_host="127.0.0.1",
         bind_port=8080,
@@ -192,6 +200,7 @@ async def test_main_waits_for_shutdown_event_and_runs_cleanup(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_main_restores_team_and_blocks_schedule_in_demo_readonly(monkeypatch):
+    """演示只读模式下：启动时恢复已有团队，并在调度闸门处直接 stop_schedule("演示模式已冻结数据") 阻止定时任务（全程不调 start_schedule）；停机只做常规 shutdown()。"""
     fake_setting = SimpleNamespace(
         bind_host="127.0.0.1",
         bind_port=8080,

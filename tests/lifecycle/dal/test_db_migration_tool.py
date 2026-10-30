@@ -7,11 +7,13 @@ import db
 
 
 def _columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    """读出某张表的全部列名，方便断言"该有的列在、不该有的列不在"。"""
     rows = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
     return {str(row[1]) for row in rows}
 
 
 def test_migrate_database_applies_all_pending_and_is_idempotent(tmp_path: Path) -> None:
+    """迁移工具要把所有待执行的迁移一次跑完、再跑一遍什么都不做，顺带抽查几张表的结构是否符合最新版本。"""
     db_path = tmp_path / "data.db"
 
     first_applied = db.migrate_database(db_path)
@@ -46,6 +48,7 @@ def test_migrate_database_applies_all_pending_and_is_idempotent(tmp_path: Path) 
 
 
 def test_migrate_database_up_to_normalizes_unpadded_number(tmp_path: Path) -> None:
+    """up_to 传 "11" 和 "0011" 必须得到完全相同的结果（迁移编号允许带前导零，要先归一化再比较）。"""
     db_path = tmp_path / "data.db"
     # "11" and "0011" should produce identical results
     applied_short = db.migrate_database(tmp_path / "a.db", up_to="11")
