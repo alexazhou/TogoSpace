@@ -9,36 +9,38 @@ import db
 MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "assets/migrate"
 MIGRATION_0015 = "0015_backfill_events_and_fix_reviewing_tasks.sql"
 
-# ⚠️ 专用用例说明：tests/base.py 每次 `cleanup_sqlite_files()`（删库）+ `prepare_sqlite_schema()`
-# （空库全量迁移）⇒ 通用测试链路里 agent_tasks 无存量数据、迁移 0015（数据订正部分）恒 0 行、验不了订正。
-# 因此必须用本文件这种「up_to 分段：先跑到 0014 造存量 → 再触发 0015（数据订正部分）」的独立用例。
+# 为什么这些用例不能放进通用测试基类里跑：
+# 通用基类（tests/base.py）每次都会删库、再建一个空库并全量迁移，所以任务表里不会有"改造前的老任务"，
+# 0015 的"修状态错乱的老任务"这一步永远没有数据可修，等于没测到。
+# 所以这里改成独立用例：先迁移到 0014，手动塞几条老任务，再触发 0015，才能真正验证"修好那些验收人为空的任务"。
 
-# 存量任务造数（title, status, reviewer_id, creator_id）
-#   creator_id 恒非空（0009 schema：creator_id INTEGER NOT NULL）。
+# 造的老任务，字段依次是：标题、状态、验收人、创建人。
+# 创建人一定非空（表结构要求），所以每行都给它填 8。
 LEGACY_ROWS = [
-    # 应被订正：REVIEWING 且 reviewer 为空 ⇒ reviewer_id := creator_id
+    # 应该被修：状态是"待验收"、但验收人是空的，把创建人填成验收人
     ("t_reviewing_no_reviewer", "REVIEWING", None, 8),
-    # 不应动：REVIEWING 已有 reviewer（即便 creator 不同）
+    # 不该动：待验收且已经有验收人了（哪怕验收人和创建人不是同一个人）
     ("t_reviewing_has_reviewer", "REVIEWING", 6, 8),
-    # 不应动：非 REVIEWING
+    # 不该动：状态不是"待验收"
     ("t_todo_no_reviewer", "TODO", None, 8),
     ("t_on_hold_no_reviewer", "ON_HOLD", None, 8),
-    # 不应动：终态
+    # 不该动：已经结束的状态（完成 / 取消）
     ("t_done_no_reviewer", "DONE", None, 8),
     ("t_cancelled_no_reviewer", "CANCELLED", None, 8),
 ]
-# 期望订正后的 reviewer_id（应按 title 取值）
+# 期望修好之后，验收人应该变成谁（按标题取）
 EXPECTED_FIXED = {
     "t_reviewing_no_reviewer": 8,
 }
 
 
 def _setup_before_0015(db_path: Path) -> None:
-    """跑到 0014（合并：建 agent_task_events + 改名 manager_id→reviewer_id），再触发 0015（数据订正部分）。"""
+    """先把数据库迁移到 0014 的状态（已有事件表、已有 reviewer_id 字段），但还没跑 0015。"""
     db.migrate_database(db_path, migrations_dir=MIGRATIONS_DIR, up_to="15")
 
 
 def _run_0015(db_path: Path) -> None:
+    """跑 0015 这一步迁移（修验收人为空的老任务）。"""
     db.migrate_database(db_path, migrations_dir=MIGRATIONS_DIR, up_to="16")
 
 
@@ -60,10 +62,10 @@ def _reviewer_by_title(db_path: Path) -> dict[str, int | None]:
 
 
 def _strip_null_condition(sql: str) -> str:
-    """摘掉 0015（数据订正部分）的 `AND reviewer_id IS NULL` 条件，用于负对照。"""
+    """把 0015 里"只在验收人为空时处理"的条件（AND reviewer_id IS NULL）删掉，用来做反向验证。"""
     pattern = re.compile(r"\n\s+AND\s+reviewer_id\s+IS\s+NULL", re.IGNORECASE)
     mutated, hits = pattern.subn("", sql)
-    assert hits == 1, f"负对照自身失效：未能唯一命中 reviewer_id IS NULL 条件（命中 {hits} 次）"
+    assert hits == 1, f"反向验证自身失效：未能唯一命中 reviewer_id IS NULL 条件（命中 {hits} 次）"
     return mutated
 
 
@@ -76,14 +78,14 @@ def test_0015_fix_fixes_reviewing_without_reviewer(tmp_path: Path) -> None:
 
     reviewers = _reviewer_by_title(db_path)
 
-    # ① 应订正：REVIEWING 且 reviewer 为空 ⇒ reviewer_id 置为 creator_id
+    # ① 应该被修：待验收且验收人为空，把创建人填成验收人
     for title, expected in EXPECTED_FIXED.items():
         assert reviewers[title] == expected, f"{title} 应订正为 reviewer_id={expected}，实际 {reviewers[title]}"
 
-    # ② 不应动：REVIEWING 已有 reviewer 保持原值
-    assert reviewers["t_reviewing_has_reviewer"] == 6, "已验收的老任务不得被覆盖"
+    # ② 不该动：待验收但已经有验收人的，保持原样
+    assert reviewers["t_reviewing_has_reviewer"] == 6, "已经待验收且已有验收人的任务，不得被覆盖"
 
-    # ③ 不应动：非 REVIEWING / 终态
+    # ③ 不该动：状态不是"待验收"的（含已完成/取消），验收人保持为空
     assert reviewers["t_todo_no_reviewer"] is None
     assert reviewers["t_on_hold_no_reviewer"] is None
     assert reviewers["t_done_no_reviewer"] is None
@@ -91,7 +93,7 @@ def test_0015_fix_fixes_reviewing_without_reviewer(tmp_path: Path) -> None:
 
 
 def test_0015_fix_is_idempotent(tmp_path: Path) -> None:
-    """直跑 0015 SQL 两次（绕开 runner 记账），验证 SQL 自身幂等。"""
+    """直接手动把 0015 的 SQL 再跑一遍，验证它自己不会再改任何行（幂等）。"""
     db_path = tmp_path / "test.db"
     _setup_before_0015(db_path)
     _insert_legacy_tasks(db_path)
@@ -110,7 +112,7 @@ def test_0015_fix_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_0015_fix_rerun_after_migration_record_lost(tmp_path: Path) -> None:
-    """真验幂等：删掉 `_migrations` 里 0015 行后重跑，0 增量、结果稳定。"""
+    """验证幂等：删掉"0015 已经跑过"的记账再重跑一遍，结果应该完全不变。"""
     db_path = tmp_path / "test.db"
     _setup_before_0015(db_path)
     _insert_legacy_tasks(db_path)
@@ -122,14 +124,14 @@ def test_0015_fix_rerun_after_migration_record_lost(tmp_path: Path) -> None:
         conn.execute("DELETE FROM _migrations WHERE name = ?", (MIGRATION_0015,))
         conn.commit()
 
-    # 记账已丢 ⇒ 0015 重新成为 pending、会被真正再次执行
+    # 记账删掉后，0015 又变成"待执行"，这次才会真的再跑一遍
     db.migrate_database(db_path, migrations_dir=MIGRATIONS_DIR, up_to="16")
 
     assert _reviewer_by_title(db_path) == before, "重跑 0015 应 0 增量（SQL 自身幂等）"
 
 
 def test_0015_fix_null_guard_negative_control(tmp_path: Path) -> None:
-    """负对照：摘掉 `reviewer_id IS NULL` 条件 ⇒ 会误改已验收任务 ⇒ 证明订正范围断言能红。"""
+    """反向验证：删掉"只在验收人为空时处理"的条件，就会连"已经有验收人的任务"一起改错，证明前面的范围断言不是摆设。"""
     db_path = tmp_path / "test.db"
     _setup_before_0015(db_path)
     _insert_legacy_tasks(db_path)
@@ -142,9 +144,9 @@ def test_0015_fix_null_guard_negative_control(tmp_path: Path) -> None:
 
     reviewers = _reviewer_by_title(db_path)
 
-    # 变异后：已验收任务（reviewer=6、creator=8）被错误覆盖成 creator=8
+    # 删掉条件后：那条"待验收但已有验收人"的任务，被错误地改成了创建人 8
     assert reviewers["t_reviewing_has_reviewer"] == 8, (
-        "摘掉 NULL 守卫后应误改已验收任务（否则负对照自身失效）"
+        "删掉「只在验收人为空时处理」的条件后，应该会误改已有验收人的任务（否则反向验证本身没意义）"
     )
-    # 正对照仍成立：原本该订正的行仍被订正
+    # 正向仍然成立：原本就该修的那条，还是被修对了
     assert reviewers["t_reviewing_no_reviewer"] == 8
