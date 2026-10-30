@@ -118,6 +118,7 @@ async def startup(
     db_path: str,
     on_migration_start: Callable[[], None] | None = None,
     on_migration_end: Callable[[], None] | None = None,
+    workspace_root: str = "",
 ) -> None:
     global _db, _db_path
     # 方案 A：删除原「if _db is not None: return」静默早退；二次启动已被注解统一拦截。
@@ -137,7 +138,7 @@ async def startup(
     if has_pending and on_migration_start is not None:
         on_migration_start()
 
-    applied = migrate_database(abs_path)
+    applied = migrate_database(abs_path, workspace_root=workspace_root)
 
     if has_pending and on_migration_end is not None:
         on_migration_end()

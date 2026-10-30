@@ -297,6 +297,7 @@ async def build_agent_system_prompt(
     workdir: str,
     base_prompt_tmpl: str,
     identity_prompt_tmpl: str,
+    shared_workdir: str | None = None,
     is_root_leader: bool = False,
     allow_skills: list[str] | None = None,
 ) -> str:
@@ -311,7 +312,15 @@ async def build_agent_system_prompt(
         dept_context=dept_context,
         template_soul=template_soul,
     )
-    workdir_prompt = WORKDIR_PROMPT.format(workdir=workdir)
+    shared_workdir_line = f"\n团队共享目录：{shared_workdir}" if shared_workdir else ""
+    shared_workdir_guide = (
+        "需要与其他成员共享的文件请写入团队共享目录。" if shared_workdir else ""
+    )
+    workdir_prompt = WORKDIR_PROMPT.format(
+        workdir=workdir,
+        shared_workdir_line=shared_workdir_line,
+        shared_workdir_guide=shared_workdir_guide,
+    )
     language_context_prompt = LANGUAGE_CONTEXT_PROMPT.format(language=configUtil.get_language())
     full_prompt = (
         base_prompt_tmpl

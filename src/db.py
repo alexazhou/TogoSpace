@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import re
 import sqlite3
@@ -12,7 +13,7 @@ import appPaths
 from util import configUtil
 
 MIGRATIONS_TABLE = "_migrations"
-MIGRATION_NAME_PATTERN = re.compile(r"^\d{4}.*\.sql$")
+MIGRATION_NAME_PATTERN = re.compile(r"^\d{4}.*\.(sql|py)$")
 
 
 @dataclass(frozen=True)
@@ -86,12 +87,48 @@ def _is_ignorable_migration_error(exc: sqlite3.OperationalError) -> bool:
     return "duplicate column name" in msg or "already exists" in msg
 
 
+def _run_python_migration(
+    migration_file: Path,
+    workspace_root: str,
+    verbose: bool,
+) -> None:
+    """执行 Python 迁移脚本。
+
+    脚本必须提供 migrate(workspace_root) 函数，且不访问数据库（迁移跑在 ORM 绑定之前）。
+    文件系统操作不在 SQL 事务内，脚本需自行保证幂等；失败时整次迁移中止、不记账。
+    """
+    module_name = f"_togospace_migration_{migration_file.stem}"
+    spec = importlib.util.spec_from_file_location(module_name, str(migration_file))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法加载迁移脚本: {migration_file}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    migrate_func = getattr(module, "migrate", None)
+    if not callable(migrate_func):
+        raise AttributeError(f"迁移脚本缺少 migrate(workspace_root) 函数: {migration_file}")
+
+    if verbose:
+        print(f"Running python migration: {migration_file.name}")
+    migrate_func(workspace_root)
+
+
 def apply_migration(
     conn: sqlite3.Connection,
     migration_file: Path,
     *,
+    workspace_root: str = "",
     verbose: bool = False,
 ) -> None:
+    if migration_file.suffix == ".py":
+        _run_python_migration(migration_file, workspace_root, verbose)
+        with conn:
+            conn.execute(
+                f"INSERT INTO {MIGRATIONS_TABLE} (name) VALUES (?)",
+                (migration_file.name,),
+            )
+        return
+
     sql = migration_file.read_text(encoding="utf-8")
     try:
         with conn:
@@ -122,7 +159,9 @@ def migrate_database(
     migrations_dir: str | os.PathLike[str] | None = None,
     up_to: str | None = None,
     verbose: bool = False,
+    workspace_root: str = "",
 ) -> list[str]:
+    """按文件名顺序执行待迁移文件：.sql 直接执行，.py 调用脚本内的 migrate(workspace_root)。"""
     resolved_db_path = resolve_db_path(str(db_path))
     resolved_migrations_dir = resolve_migrations_dir(
         str(migrations_dir) if migrations_dir is not None else None
@@ -141,7 +180,12 @@ def migrate_database(
         for migration_file in pending:
             if verbose:
                 print(f"Applying migration: {migration_file.name}")
-            apply_migration(conn, migration_file, verbose=verbose)
+            apply_migration(
+                conn,
+                migration_file,
+                workspace_root=workspace_root,
+                verbose=verbose,
+            )
             applied_now.append(migration_file.name)
     return applied_now
 
@@ -218,6 +262,11 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PREFIX",
         help="only apply migrations whose filename is less than PREFIX (e.g. 0011)",
     )
+    migrate_parser.add_argument(
+        "--workspace-root",
+        default=None,
+        help="workspace root passed to python migrations (default: setting.json / appPaths.WORKSPACE_ROOT)",
+    )
     subparsers.add_parser("status", parents=[common], help="show migration status")
     subparsers.add_parser("init", parents=[common], help="alias of migrate")
     subparsers.add_parser("check", parents=[common], help="check if database is initialized")
@@ -242,6 +291,15 @@ def _resolve_cli_db_path(args: argparse.Namespace) -> str:
     return load_db_path_from_config(args.config_dir)
 
 
+def _resolve_cli_workspace_root(args: argparse.Namespace) -> str:
+    """workspace_root 来自 setting.json（不是数据库），与 db_path 的解析来源保持一致。"""
+    if args.workspace_root:
+        return str(args.workspace_root)
+    if args.config_dir is not None or args.db_path is None:
+        return str(configUtil.load(args.config_dir).setting.workspace_root)
+    return appPaths.WORKSPACE_ROOT
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     db_path = _resolve_cli_db_path(args)
@@ -252,6 +310,7 @@ def main(argv: list[str] | None = None) -> int:
             migrations_dir=args.migrations_dir,
             up_to=args.up_to,
             verbose=True,
+            workspace_root=_resolve_cli_workspace_root(args),
         )
         if applied_now:
             print(f"Applied {len(applied_now)} migration(s).")

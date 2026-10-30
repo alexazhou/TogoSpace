@@ -110,9 +110,9 @@ COMPACT_RESUME_TEMPLATE = '''以下是之前对话的压缩摘要，请基于这
 WORKDIR_PROMPT = '''
 ## 工作目录
 
-当前工作目录：{workdir}
+当前工作目录：{workdir}{shared_workdir_line}
 
-如无特别要求，则默认在此目录中写入文件。'''
+如无特别要求，则默认在此目录中写入文件。{shared_workdir_guide}'''
 
 LANGUAGE_CONTEXT_PROMPT = '''
 ## 当前语言设置

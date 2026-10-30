@@ -24,17 +24,34 @@ _agents: dict[int, "Agent"] = {}
 s_status = ServiceStatusInfo(name="agentService")
 
 
-def _resolve_team_workdir(gt_team: Any, workspace_root: str | None) -> str:
+def _get_custom_workdir(gt_team: Any) -> str:
     team_config = gt_team.config or {}
-    configured_workdir = ""
-    if isinstance(team_config, dict):
-        configured_workdir = str(team_config.get("working_directory") or "").strip()
+    if not isinstance(team_config, dict):
+        return ""
+    return str(team_config.get("working_directory") or "").strip()
 
+
+def _resolve_team_workdir(gt_team: Any, workspace_root: str | None) -> str:
+    configured_workdir = _get_custom_workdir(gt_team)
     if configured_workdir:
         return configured_workdir
 
     assert workspace_root is not None, "workspace_root 未配置"
     return os.path.join(workspace_root, gt_team.name)
+
+
+def _resolve_shared_workdir(gt_team: Any, team_workdir: str) -> str | None:
+    """团队共享目录；自定义 working_directory 的团队保持旧行为，返回 None。"""
+    if _get_custom_workdir(gt_team):
+        return None
+    return os.path.join(team_workdir, "shared")
+
+
+def _resolve_agent_workdir(gt_team: Any, team_workdir: str, gt_agent: GtAgent) -> str:
+    """Agent 私有目录为 <team>/agent/<employee_number>；自定义 working_directory 时沿用团队目录。"""
+    if _get_custom_workdir(gt_team):
+        return team_workdir
+    return os.path.join(team_workdir, "agent", str(gt_agent.employee_number))
 
 async def _reset() -> None:
     """纯资源清理：正常 shutdown 与启动失败回滚共用；幂等。"""
@@ -81,7 +98,8 @@ async def _init_and_start_agent(
     gt_role_template: Any,
     team_id: int,
     team_name: str,
-    team_workdir: str,
+    agent_workdir: str,
+    shared_workdir: str | None,
     default_model: str | None,
     is_root_leader: bool
 ) -> Agent:
@@ -100,6 +118,7 @@ async def _init_and_start_agent(
     )
     driver_config.options["tool_allow_specs"] = gt_agent.allow_tools
     driver_config.options["is_root_leader"] = is_root_leader
+    os.makedirs(agent_workdir, exist_ok=True)
     full_prompt = await build_agent_system_prompt(
         team_id=team_id,
         agent_id=gt_agent.id,
@@ -108,7 +127,8 @@ async def _init_and_start_agent(
         template_name=template_name,
         template_display_name=template_display_name,
         template_soul=gt_role_template.soul,
-        workdir=team_workdir,
+        workdir=agent_workdir,
+        shared_workdir=shared_workdir,
         base_prompt_tmpl=BASE_PROMPT.strip(),
         identity_prompt_tmpl=AGENT_IDENTITY_PROMPT.strip(),
         is_root_leader=is_root_leader,
@@ -120,7 +140,7 @@ async def _init_and_start_agent(
         gt_agent=gt_agent,
         system_prompt=full_prompt,
         driver_config=driver_config,
-        agent_workdir=team_workdir,
+        agent_workdir=agent_workdir,
         is_root_leader=is_root_leader,
     )
     
@@ -159,6 +179,9 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
     team_name = gt_team.name
     team_workdir = _resolve_team_workdir(gt_team, resolved_workspace_root)
     os.makedirs(team_workdir, exist_ok=True)
+    shared_workdir = _resolve_shared_workdir(gt_team, team_workdir)
+    if shared_workdir is not None:
+        os.makedirs(shared_workdir, exist_ok=True)
     team_id = gt_team.id
 
     if default_model is None:
@@ -180,7 +203,8 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
             gt_role_template=gt_role_template,
             team_id=team_id,
             team_name=team_name,
-            team_workdir=team_workdir,
+            agent_workdir=_resolve_agent_workdir(gt_team, team_workdir, gt_agent),
+            shared_workdir=shared_workdir,
             default_model=default_model,
             is_root_leader=is_root_leader,
         )
@@ -241,6 +265,9 @@ async def hot_reload_agent(agent_id: int) -> None:
     default_model = llmService.get_default_model_or_none()
     team_workdir = _resolve_team_workdir(gt_team, app_config.setting.workspace_root)
     os.makedirs(team_workdir, exist_ok=True)
+    shared_workdir = _resolve_shared_workdir(gt_team, team_workdir)
+    if shared_workdir is not None:
+        os.makedirs(shared_workdir, exist_ok=True)
 
     # 1. 构建新 Agent（不影响旧的运行）
     new_agent = await _init_and_start_agent(
@@ -248,7 +275,8 @@ async def hot_reload_agent(agent_id: int) -> None:
         gt_role_template=gt_role_template,
         team_id=team_id,
         team_name=gt_team.name,
-        team_workdir=team_workdir,
+        agent_workdir=_resolve_agent_workdir(gt_team, team_workdir, gt_agent),
+        shared_workdir=shared_workdir,
         default_model=default_model,
         is_root_leader=is_root_leader,
     )

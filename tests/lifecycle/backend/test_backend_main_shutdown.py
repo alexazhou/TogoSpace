@@ -114,7 +114,7 @@ async def test_main_waits_for_shutdown_event_and_runs_cleanup(monkeypatch):
     async def _func_tool_service_startup():
         await _record_startup("funcToolService")
 
-    async def _orm_service_startup(_db_path: str):
+    async def _orm_service_startup(_db_path: str, **_kwargs):
         await _record_startup("ormService")
 
     async def _persistence_service_startup():
@@ -241,7 +241,7 @@ async def test_main_restores_team_and_blocks_schedule_in_demo_readonly(monkeypat
     async def _func_tool_service_startup():
         await _record_startup("funcToolService")
 
-    async def _orm_service_startup(_db_path: str):
+    async def _orm_service_startup(_db_path: str, **_kwargs):
         await _record_startup("ormService")
 
     async def _persistence_service_startup():

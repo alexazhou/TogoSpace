@@ -160,7 +160,11 @@ async def main(
             "on_migration_start": callbacks.on_migration_start,
             "on_migration_end": callbacks.on_migration_end,
         }
-    await ormService.startup(app_config.setting.db_path, **migration_callbacks)
+    await ormService.startup(
+        app_config.setting.db_path,
+        workspace_root=app_config.setting.workspace_root,
+        **migration_callbacks,
+    )
     await persistenceService.startup()
     await agentService.startup()
     await roomService.startup()
