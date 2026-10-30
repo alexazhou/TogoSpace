@@ -335,14 +335,30 @@ def build_dmg(arch: str) -> None:
     try:
         shutil.copytree(app_path, os.path.join(staging, "TogoSpace.app"), symlinks=True)
         os.symlink("/Applications", os.path.join(staging, "Applications"))
-        run_command([
+        # GitHub macOS runner 上 hdiutil 偶发 Resource busy（刚落盘的文件仍被系统占用），
+        # 先 sync 等写入完成，失败后清理残留并退避重试。
+        run_command(["sync"])
+        create_command = [
             "hdiutil", "create",
             "-volname", "TogoSpace",
             "-srcfolder", staging,
             "-ov", "-format", "UDZO",
             "-nospotlight",
             target,
-        ])
+        ]
+        for attempt in range(1, 4):
+            try:
+                run_command(create_command)
+                break
+            except subprocess.CalledProcessError:
+                if attempt == 3:
+                    raise
+                print(f"⚠️  hdiutil 第 {attempt} 次失败，5 秒后重试")
+                time.sleep(5)
+                try:
+                    os.remove(target)
+                except OSError:
+                    pass
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
