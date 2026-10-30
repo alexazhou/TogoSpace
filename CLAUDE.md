@@ -122,7 +122,7 @@ TogoSpace/
 ### 测试
 
 ```bash
-# 快速跑默认测试（默认并行，无覆盖率，仅 unit + integration）
+# 快速跑默认测试（默认并行，无覆盖率，仅 unit + integration + lifecycle）
 ./scripts/run_tests.sh
 
 # 跑覆盖率测试
@@ -139,7 +139,8 @@ TogoSpace/
 ./scripts/run_tests.sh tests/api
 ```
 
-- 默认测试范围：`tests/unit` + `tests/integration`，不含 `tests/api`。
+- 默认测试范围：`tests/unit` + `tests/integration` + `tests/lifecycle`，不含 `tests/api`。
+- `tests/lifecycle` 是应用生命周期测试（数据库迁移、服务启停、应用级进程资源装配（数据库连接、Service 实例）），判据见 `docs/tech/07_test/execution_architecture.md` §1.2。
 - API 测试会启动真实后端子进程和 Mock LLM 服务，执行时间较长，需手动指定运行。
 - 全量测试执行时间约 15-20 秒，超时时间设置 30 秒即可。
 - 若在沙盒环境中运行 `tests/api/` 下的 API 测试，通常需要先申请提权。

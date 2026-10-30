@@ -15,7 +15,7 @@
 - 不改写模块级可变全局（直接赋值或 `.clear()` 都算）
 - 用 `monkeypatch` / `unittest.mock.patch` 的，天然满足上一条（框架负责回滚）
 
-任一条件不满足，移到 `tests/integration/` 并继承 `ServiceTestCase`。
+任一条件不满足，移到 `tests/integration/` 并继承 `ServiceTestCase`；**唯一例外是生命周期行为**（数据库迁移的存量搬迁、Service 启停、`backend_main` 启停）——它们归 `tests/lifecycle/`，不适用本节判据（其判据见 [execution_architecture.md](./execution_architecture.md) §1.2）。
 
 ---
 

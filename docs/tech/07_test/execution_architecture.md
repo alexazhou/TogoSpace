@@ -6,7 +6,7 @@
 
 ## 1. 测试分层设计
 
-项目采用分层测试策略，根据测试粒度和依赖范围，将测试分为四个核心类别：
+项目采用分层测试策略，根据测试粒度和依赖范围，将测试分为五个核心类别：
 
 ### 1.1 单元测试 (Unit Tests)
 - **目录**: `tests/unit/`
@@ -17,7 +17,21 @@
 
 > 需要真实 Service / 数据库 / 全局状态的测试属于集成测试。具体判据、全局状态清单与常见污染模式见 [unit_integration_boundary.md](./unit_integration_boundary.md)。
 
-### 1.2 集成测试 (Integration Tests)
+### 1.2 生命周期测试 (Lifecycle Tests)
+- **目录**: `tests/lifecycle/`
+- **目标**: 验证**应用生命周期行为本身**——数据库迁移的存量数据搬迁、Service 的启动/关闭契约、`backend_main` 的启停与运行环境探测。
+- **特点**:
+    - 需要真实建库并`migrate_database(up_to=...)`（构造"停在某个版本"的存量库），或起/停真实 Service，或装配应用级进程资源（数据库连接、Service 实例）。
+    - **不能用** `ServiceTestCase`：它每次删库重建、只跑到"最新"，表达不出"停在 `0015` 造存量 → 再上 `0016`"这类场景。这正是它们此前被迫落在 `tests/unit/` 的结构性原因。
+- **判据**: 需要真实建库 / 起真实服务 / 装配应用级进程资源（数据库连接、Service 实例），但验证对象是**生命周期行为**，不属于"多服务协同业务"（那是集成测试）、也不是纯逻辑（那是单元测试）。
+- **现状文件**:
+    - `tests/lifecycle/migrate/`：`0011` nullable 迁移、`0015` 历史结转、`0015` 数据订正
+    - `tests/lifecycle/dal/test_db_migration_tool.py`：迁移 runner 本身（按序应用 / 幂等 / `up_to` 归一）
+    - `tests/lifecycle/service/test_service_lifecycle.py`：Service 生命周期注解守卫（结构 + 6 态契约 + 回滚）
+    - `tests/lifecycle/backend/test_backend_main_shutdown.py`：`backend_main` 启停与 `_detect_run_env`
+- **运行**: 已纳入默认测试门（`scripts/run_tests.sh` 默认范围 = `tests/unit tests/integration tests/lifecycle`）。
+
+### 1.3 集成测试 (Integration Tests)
 - **目录**: `tests/integration/`
 - **目标**: 验证 Service 层之间的协同工作、状态机流转和消息总线行为。
 - **特点**: 
@@ -26,7 +40,7 @@
     - 频繁使用 `patch_infer` 注入剧本式 Mock 响应。
 - **示例**: 多 Agent 对话轮次推进、持久化状态恢复、Tool Call 执行链路。
 
-### 1.3 API 测试 (API Tests)
+### 1.4 API 测试 (API Tests)
 - **目录**: `tests/api/`
 - **目标**: 验证 HTTP/WebSocket 接口的协议正确性、序列化与反序列化逻辑。
 - **特点**: 
@@ -35,7 +49,7 @@
     - 使用 `aiohttp` 作为真实客户端发起请求。
 - **示例**: `GET /rooms` 返回值结构、WebSocket 实时推送、POST 消息入库验证。
 
-### 1.4 场景测试 (Real/E2E Tests)
+### 1.5 场景测试 (Real/E2E Tests)
 - **目录**: `tests/real/`
 - **目标**: 验证完整的端到端业务剧本。
 - **特点**: 通常基于真实的 service 组合，使用 Mock LLM 控制对话内容，模拟用户真实使用场景。

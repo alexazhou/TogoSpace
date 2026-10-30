@@ -34,9 +34,9 @@ for arg in "$@"; do
   esac
 done
 
-# If no specific files/dirs are provided, default to unit and integration tests
+# If no specific files/dirs are provided, default to unit, integration and lifecycle tests
 if [ ${#PASSTHROUGH[@]} -eq 0 ]; then
-  PASSTHROUGH=("tests/unit" "tests/integration")
+  PASSTHROUGH=("tests/unit" "tests/integration" "tests/lifecycle")
 fi
 
 echo "🚀 Running tests with: ${PYTEST_BIN} ${OPTS[*]} ${COV_OPTS[*]} ${PASSTHROUGH[*]}"
