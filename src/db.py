@@ -120,6 +120,8 @@ def apply_migration(
     workspace_root: str = "",
     verbose: bool = False,
 ) -> None:
+    # Python 迁移只做文件系统操作、不接触数据库；执行成功后才写入账本，
+    # 中途失败不会记账，下次启动会重跑（脚本需自行保证幂等）
     if migration_file.suffix == ".py":
         _run_python_migration(migration_file, workspace_root, verbose)
         with conn:
