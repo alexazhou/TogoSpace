@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from service.agentService import core
+from util import workspaceUtil
 from util.configUtil.configTypes import AppConfig, SettingConfig
 from constants import DriverType
 
@@ -49,7 +50,7 @@ async def test_load_team_agents_delegates_to_internal_loader(monkeypatch: Any) -
 def test_resolve_team_workdir_prefers_explicit_working_directory() -> None:
     team = SimpleNamespace(name="default", config={"working_directory": "/tmp/custom-team-dir"})
 
-    resolved = core._resolve_team_workdir(team, "/tmp/workspaces")
+    resolved = workspaceUtil.resolve_team_workdir(team.name, team.config, "/tmp/workspaces")
 
     assert resolved == "/tmp/custom-team-dir"
 
@@ -57,7 +58,7 @@ def test_resolve_team_workdir_prefers_explicit_working_directory() -> None:
 def test_resolve_team_workdir_falls_back_to_workspace_root() -> None:
     team = SimpleNamespace(name="default", config={})
 
-    resolved = core._resolve_team_workdir(team, "/tmp/workspaces")
+    resolved = workspaceUtil.resolve_team_workdir(team.name, team.config, "/tmp/workspaces")
 
     assert resolved == "/tmp/workspaces/default"
 
@@ -149,6 +150,56 @@ async def test_load_team_agents_allows_startup_without_available_llm(
     assert started == [11]
     assert 11 in core._agents
     assert core._agents[11].agent_workdir == f"{tmp_path}/demo/agent/alice"
+
+
+@pytest.mark.asyncio
+async def test_load_team_agents_custom_working_directory_keeps_inner_layout(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    """自定义 working_directory 只改变团队目录位置，shared / agent/<name> 布局保持一致。"""
+    custom_dir = tmp_path / "custom"
+    team = SimpleNamespace(id=1, name="demo", config={"working_directory": str(custom_dir)})
+    gt_agent = SimpleNamespace(id=11, team_id=1, name="alice", display_name="alice", employee_number=1, role_template_id=21, model="", driver=DriverType.NATIVE, allow_tools=None, allow_skills=[])
+    template = SimpleNamespace(id=21, name="alice", display_name="alice", model=None, soul="mock soul")
+
+    class _FakeAgent:
+        def __init__(
+            self,
+            *,
+            gt_agent: Any,
+            system_prompt: str,
+            driver_config: Any = None,
+            agent_workdir: str = "",
+            is_root_leader: bool = False,
+        ) -> None:
+            self.gt_agent = gt_agent
+            self.agent_workdir = agent_workdir
+
+        async def startup(self) -> None:
+            pass
+
+    monkeypatch.setattr(core.gtTeamManager, "get_team_by_id", AsyncMock(return_value=team))
+    monkeypatch.setattr(core.gtAgentManager, "get_team_all_agents", AsyncMock(return_value=[gt_agent]))
+    monkeypatch.setattr(core.gtRoleTemplateManager, "get_role_templates_by_ids", AsyncMock(return_value=[template]))
+    monkeypatch.setattr(core.deptService, "get_dept_tree", AsyncMock(return_value=None))
+    monkeypatch.setattr(core, "build_agent_system_prompt", AsyncMock(return_value="prompt"))
+    monkeypatch.setattr(core, "Agent", _FakeAgent)
+    monkeypatch.setattr(core, "_agents", {})
+    monkeypatch.setattr(
+        core.configUtil,
+        "get_app_config",
+        lambda: AppConfig(
+            setting=SettingConfig(llm_services=[], default_llm_server=None, workspace_root=str(tmp_path)),
+        ),
+    )
+
+    await core.load_team_agents(1, workspace_root=str(tmp_path))
+
+    assert core._agents[11].agent_workdir == str(custom_dir / "agent" / "alice")
+    assert (custom_dir / "shared").is_dir()
+    assert (custom_dir / "agent" / "alice").is_dir()
+    assert not (tmp_path / "demo").exists()
 
 
 @pytest.mark.asyncio

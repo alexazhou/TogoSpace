@@ -7,7 +7,7 @@ from model.dbModel.base import atomic
 from model.dbModel.gtDept import GtDept
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from service.agentService.prompts import BASE_PROMPT, AGENT_IDENTITY_PROMPT
-from util import configUtil, i18nUtil, assertUtil
+from util import configUtil, i18nUtil, assertUtil, workspaceUtil
 from model.dbModel.gtAgent import GtAgent
 from service.agentService.agent import Agent
 from service.agentService.driver import normalize_driver_config
@@ -25,114 +25,6 @@ _agents: dict[int, "Agent"] = {}
 s_status = ServiceStatusInfo(name="agentService")
 
 
-def _get_custom_workdir(gt_team: Any) -> str:
-    team_config = gt_team.config or {}
-    if not isinstance(team_config, dict):
-        return ""
-    return str(team_config.get("working_directory") or "").strip()
-
-
-def _resolve_team_workdir(gt_team: Any, workspace_root: str | None) -> str:
-    configured_workdir = _get_custom_workdir(gt_team)
-    if configured_workdir:
-        return configured_workdir
-
-    assert workspace_root is not None, "workspace_root 未配置"
-    return os.path.join(workspace_root, gt_team.name)
-
-
-def _resolve_shared_workdir(gt_team: Any, team_workdir: str) -> str | None:
-    """团队共享目录；自定义 working_directory 的团队保持旧行为，返回 None。"""
-    if _get_custom_workdir(gt_team):
-        return None
-    return os.path.join(team_workdir, "shared")
-
-
-def _resolve_agent_workdir(gt_team: Any, team_workdir: str, gt_agent: GtAgent) -> str:
-    """Agent 私有目录为 <team>/agent/<name>；自定义 working_directory 时沿用团队目录。"""
-    if _get_custom_workdir(gt_team):
-        return team_workdir
-    return os.path.join(team_workdir, "agent", str(gt_agent.name))
-
-
-def _resolve_workspace_root(workspace_root: str | None) -> str:
-    return workspace_root or configUtil.get_app_config().setting.workspace_root
-
-
-def _rename_workdir(old_dir: str, new_dir: str, *, label: str) -> tuple[str, str] | None:
-    """重命名单个目录：源不存在时跳过，目标已存在时报冲突（不覆盖）。"""
-    if old_dir == new_dir or not os.path.isdir(old_dir):
-        return None
-    if os.path.lexists(new_dir):
-        raise TogoException(
-            error_message=f"{label}目录重命名失败，目标目录已存在: {new_dir}",
-            error_code="workdir_rename_conflict",
-        )
-    os.rename(old_dir, new_dir)
-    return old_dir, new_dir
-
-
-def _rollback_workdir_moves(moves: list[tuple[str, str]], *, label: str) -> None:
-    """按相反顺序撤销已完成的目录改名；撤销失败只记日志，避免掩盖原始异常。"""
-    for old_dir, new_dir in reversed(moves):
-        try:
-            os.rename(new_dir, old_dir)
-        except Exception:
-            logger.exception("%s目录重命名回滚失败，请手动检查: %s -> %s", label, new_dir, old_dir)
-
-
-def rename_team_workdir(gt_team: Any, old_name: str, new_name: str) -> list[tuple[str, str]]:
-    """Team 改名后同步重命名托管工作目录，返回实际执行的移动。
-
-    自定义 working_directory 的团队目录由用户自己管理，这里不处理。
-    """
-    if _get_custom_workdir(gt_team):
-        return []
-    workspace_root = _resolve_workspace_root(None)
-    moved = _rename_workdir(
-        os.path.join(workspace_root, old_name),
-        os.path.join(workspace_root, new_name),
-        label=f"Team '{old_name}'",
-    )
-    return [moved] if moved else []
-
-
-def rename_agent_workdirs(
-    gt_team: Any,
-    renames: list[tuple[str, str]],
-    workspace_root: str | None = None,
-) -> list[tuple[str, str]]:
-    """Agent 改名后同步重命名各自的私有目录，返回实际执行的移动。
-
-    每个 Agent 的改名都是一次独立的目录重命名；中途失败时回滚已完成的移动。
-    """
-    if _get_custom_workdir(gt_team) or not renames:
-        return []
-    root = _resolve_workspace_root(workspace_root)
-    agent_root = os.path.join(root, gt_team.name, "agent")
-    label = f"Agent in team '{gt_team.name}'"
-    moved: list[tuple[str, str]] = []
-    try:
-        for old_name, new_name in renames:
-            completed = _rename_workdir(
-                os.path.join(agent_root, old_name),
-                os.path.join(agent_root, new_name),
-                label=label,
-            )
-            if completed:
-                moved.append(completed)
-    except Exception:
-        _rollback_workdir_moves(moved, label=label)
-        raise
-    return moved
-
-
-def rollback_agent_workdirs(gt_team: Any, moves: list[tuple[str, str]]) -> None:
-    """撤销 rename_agent_workdirs 已执行的移动（写库失败时调用）。"""
-    if moves:
-        _rollback_workdir_moves(moves, label=f"Agent in team '{gt_team.name}'")
-
-
 async def rename_agent_workdir(team_id: int, old_name: str, new_name: str) -> list[tuple[str, str]]:
     """按 team_id 重命名单个 Agent 的私有目录，返回实际执行的移动。"""
     if old_name == new_name:
@@ -140,7 +32,7 @@ async def rename_agent_workdir(team_id: int, old_name: str, new_name: str) -> li
     gt_team = await gtTeamManager.get_team_by_id(team_id)
     if gt_team is None:
         return []
-    return rename_agent_workdirs(gt_team, [(old_name, new_name)])
+    return workspaceUtil.rename_agent_workdirs(gt_team.name, gt_team.config, [(old_name, new_name)])
 
 
 async def _reset() -> None:
@@ -189,7 +81,7 @@ async def _init_and_start_agent(
     team_id: int,
     team_name: str,
     agent_workdir: str,
-    shared_workdir: str | None,
+    shared_workdir: str,
     default_model: str | None,
     is_root_leader: bool
 ) -> Agent:
@@ -267,11 +159,10 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
     resolved_workspace_root = workspace_root or app_config.setting.workspace_root
 
     team_name = gt_team.name
-    team_workdir = _resolve_team_workdir(gt_team, resolved_workspace_root)
+    team_workdir = workspaceUtil.resolve_team_workdir(gt_team.name, gt_team.config, resolved_workspace_root)
     os.makedirs(team_workdir, exist_ok=True)
-    shared_workdir = _resolve_shared_workdir(gt_team, team_workdir)
-    if shared_workdir is not None:
-        os.makedirs(shared_workdir, exist_ok=True)
+    shared_workdir = workspaceUtil.resolve_shared_workdir(team_workdir)
+    os.makedirs(shared_workdir, exist_ok=True)
     team_id = gt_team.id
 
     if default_model is None:
@@ -293,7 +184,7 @@ async def _load_team_agents(team_id: int, workspace_root: str | None = None) -> 
             gt_role_template=gt_role_template,
             team_id=team_id,
             team_name=team_name,
-            agent_workdir=_resolve_agent_workdir(gt_team, team_workdir, gt_agent),
+            agent_workdir=workspaceUtil.resolve_agent_workdir(team_workdir, gt_agent.name),
             shared_workdir=shared_workdir,
             default_model=default_model,
             is_root_leader=is_root_leader,
@@ -353,11 +244,10 @@ async def hot_reload_agent(agent_id: int) -> None:
 
     app_config = configUtil.get_app_config()
     default_model = llmService.get_default_model_or_none()
-    team_workdir = _resolve_team_workdir(gt_team, app_config.setting.workspace_root)
+    team_workdir = workspaceUtil.resolve_team_workdir(gt_team.name, gt_team.config, app_config.setting.workspace_root)
     os.makedirs(team_workdir, exist_ok=True)
-    shared_workdir = _resolve_shared_workdir(gt_team, team_workdir)
-    if shared_workdir is not None:
-        os.makedirs(shared_workdir, exist_ok=True)
+    shared_workdir = workspaceUtil.resolve_shared_workdir(team_workdir)
+    os.makedirs(shared_workdir, exist_ok=True)
 
     # 1. 构建新 Agent（不影响旧的运行）
     new_agent = await _init_and_start_agent(
@@ -365,7 +255,7 @@ async def hot_reload_agent(agent_id: int) -> None:
         gt_role_template=gt_role_template,
         team_id=team_id,
         team_name=gt_team.name,
-        agent_workdir=_resolve_agent_workdir(gt_team, team_workdir, gt_agent),
+        agent_workdir=workspaceUtil.resolve_agent_workdir(team_workdir, gt_agent.name),
         shared_workdir=shared_workdir,
         default_model=default_model,
         is_root_leader=is_root_leader,
@@ -568,7 +458,7 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
         agents_to_save.append(agent)
 
     # 2. 先同步 Agent 私有目录；目录冲突会在写库前报错，不会产生数据库变更
-    moved_dirs = rename_agent_workdirs(team, agent_renames)
+    moved_dirs = workspaceUtil.rename_agent_workdirs(team.name, team.config, agent_renames)
 
     # 3. 离职处理 + 批量保存放在同一事务里，任一步失败都整体回滚；
     #    写库失败时再把目录改回去，保证库和目录都回到请求前的状态
@@ -579,14 +469,22 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
                 await gtAgentManager.batch_update_agent_status(list(ids_to_offboard), EmployStatus.OFF_BOARD)
             await gtAgentManager.batch_save_agents(team_id, agents_to_save)
     except IntegrityError as e:
-        rollback_agent_workdirs(team, moved_dirs)
+        workspaceUtil.rollback_agent_workdirs(team.name, moved_dirs)
         raise TogoException(
             error_message="成员保存失败，名称可能已存在或工号重复",
             error_code="MEMBER_SAVE_FAILED",
         ) from e
     except Exception:
-        rollback_agent_workdirs(team, moved_dirs)
+        workspaceUtil.rollback_agent_workdirs(team.name, moved_dirs)
         raise
+
+    # 4. 写库成功后再删离职成员的个人目录；名字仍被在岗成员使用时保留
+    workspaceUtil.remove_agent_workdirs(
+        team.name,
+        team.config,
+        [existing_by_id[agent_id].name for agent_id in ids_to_offboard],
+        [agent.name for agent in agents_to_save],
+    )
 
     return await gtAgentManager.get_team_all_agents(team_id, EmployStatus.ON_BOARD)
 

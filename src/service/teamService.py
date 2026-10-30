@@ -10,7 +10,7 @@ from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from service import deptService, roomService, schedulerService, agentService, serviceUtil
 from model.coreModel.serviceStatus import ServiceStatusInfo
-from util import assertUtil, fileUtil
+from util import assertUtil, fileUtil, workspaceUtil
 
 logger = logging.getLogger(__name__)
 
@@ -190,13 +190,13 @@ async def rename_team(team_id: int, new_name: str) -> GtTeam:
 
     old_name = team.name
     # 先迁移目录再写库；写库失败时把目录改回去，避免两边不一致
-    moved_dirs = agentService.rename_team_workdir(team, old_name, new_name)
+    moved_dirs = workspaceUtil.rename_team_workdir(team.config, old_name, new_name)
     team.name = new_name
     try:
         return await gtTeamManager.save_team(team)
     except Exception:
         if moved_dirs:
-            agentService.rename_team_workdir(team, new_name, old_name)
+            workspaceUtil.rename_team_workdir(team.config, new_name, old_name)
         raise
 
 

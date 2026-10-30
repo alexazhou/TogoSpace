@@ -7,7 +7,7 @@ import pytest
 
 from exception import TogoException
 from service import teamService
-from service.agentService import core
+from util import workspaceUtil
 from util.configUtil.configTypes import AppConfig, SettingConfig
 
 
@@ -25,7 +25,7 @@ def _mock_managers(monkeypatch, team, save_team, workspace_root):
     monkeypatch.setattr(teamService.gtTeamManager, "get_team_by_id", AsyncMock(return_value=team))
     monkeypatch.setattr(teamService.gtTeamManager, "get_team", AsyncMock(return_value=None))
     monkeypatch.setattr(teamService.gtTeamManager, "save_team", save_team)
-    monkeypatch.setattr(core.configUtil, "get_app_config", lambda: _app_config(workspace_root))
+    monkeypatch.setattr(workspaceUtil.configUtil, "get_app_config", lambda: _app_config(workspace_root))
 
 
 @pytest.mark.asyncio
