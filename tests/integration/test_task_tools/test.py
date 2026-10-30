@@ -417,7 +417,7 @@ class TestTaskTools(ServiceTestCase):
         """#65：同一条 >100 字事件，get_task_detail 截断、get_task_event 返回完整原文（互为对照）。
 
         旧实现（get_task_detail 回传完整 content）在本用例下必红；
-        本用例同时守卫 #66（get_task_event 是唯一不截断的原文入口）。
+        本用例同时防 #66 回归（get_task_event 是唯一不截断的原文入口）。
         """
         task = await self._make_task()
         long_note = "打回原因：" + "很长的说明" * 30

@@ -612,7 +612,7 @@ async def test_exec_notice_for_task_from_others_has_no_cancel_command(turn_runne
 async def test_exec_notice_for_self_created_task_has_cancel_command(turn_runner):
     """本 agent 自建自派的任务（creator=1 == agent.id）⇒ 执行通知应给出取消指令。
 
-    反向守卫：避免用「一律不给取消指令」的空实现糊过上面那条用例。
+    反向检查：避免用「一律不给取消指令」的空实现糊过上面那条用例。
     """
     _use_host_managed_driver(turn_runner)
     agent_task = _make_agent_task(assignee_id=1, status=TaskStatus.IN_PROGRESS)
@@ -650,7 +650,7 @@ async def test_exec_notice_injects_latest_human_event_not_claim(turn_runner):
 
     list_events = await _run_todo_turn(turn_runner, agent_task, events=[human_event])
 
-    # 核心守卫：参数本身
+    # 核心检查：参数本身
     assert list_events.await_args.kwargs["exclude_claim"] is True
     assert list_events.await_args.kwargs["limit"] == 1
     # 端到端可见性：最近事件确实渲染进了通知

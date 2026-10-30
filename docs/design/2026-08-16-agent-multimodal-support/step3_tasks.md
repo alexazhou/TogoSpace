@@ -118,9 +118,9 @@ V25 的目标是把 `GtAgentHistory.message` 从 `OpenAIMessage` 改为独立的
 
 ---
 
-### 任务 5: 改造 `AgentTurnRunner`（守卫 + 工具图片流）
+### 任务 5: 改造 `AgentTurnRunner`（检查 + 工具图片流）
 
-**描述**: 适配 `content` union 类型的守卫点，工具结果图片挂 TOOL 消息附件（不拆分），拆分/排序由 llmService 发送时完成。
+**描述**: 适配 `content` union 类型的检查点，工具结果图片挂 TOOL 消息附件（不拆分），拆分/排序由 llmService 发送时完成。
 
 **依赖**: 任务 1、任务 3、任务 4
 
@@ -144,7 +144,7 @@ V25 的目标是把 `GtAgentHistory.message` 从 `OpenAIMessage` 改为独立的
 
 ---
 
-### 任务 6: 其余守卫与类型注解
+### 任务 6: 其余检查与类型注解
 
 **描述**: 同步 `content` union 影响到的其余读取点，并更新 DAL 层类型注解。
 
@@ -208,10 +208,10 @@ V25 的目标是把 `GtAgentHistory.message` 从 `OpenAIMessage` 改为独立的
                     └─ 任务 4 (AgentHistoryStore)
 
 任务 1 ──┐
-任务 3 ──┼─ 任务 5 (AgentTurnRunner 守卫 + 工具图片流)
+任务 3 ──┼─ 任务 5 (AgentTurnRunner 检查 + 工具图片流)
 任务 4 ──┘
 
-任务 1 ── 任务 6 (其余守卫与类型注解)
+任务 1 ── 任务 6 (其余检查与类型注解)
 
 任务 1 ─┐
 任务 2 ─┤
@@ -228,7 +228,7 @@ V25 的目标是把 `GtAgentHistory.message` 从 `OpenAIMessage` 改为独立的
 **推荐顺序**: 任务 1 → 任务 2 → 任务 3 → 任务 4 → 任务 5 → 任务 6 → 任务 7
 
 **并行开发机会**:
-- 任务 5 与任务 6 可并行（分别聚焦 `agentTurnRunner` 与其余守卫点）。
+- 任务 5 与任务 6 可并行（分别聚焦 `agentTurnRunner` 与其余检查点）。
 - 任务 7 的单元测试可在任务 2 完成后先行编写，集成测试待任务 5 稳定后补齐。
 
 ---

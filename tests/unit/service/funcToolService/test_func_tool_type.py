@@ -498,7 +498,7 @@ def _multi_branch_union_params() -> list[str]:
     for tool_name, func in _iter_local_tools():
         try:
             hints = get_type_hints(func)
-        except Exception:  # noqa: BLE001 - 取不到类型提示就跳过，本用例只做守卫
+        except Exception:  # noqa: BLE001 - 取不到类型提示就跳过，本用例只做检查
             continue
         for param_name, param_type in hints.items():
             if param_name.startswith("_"):

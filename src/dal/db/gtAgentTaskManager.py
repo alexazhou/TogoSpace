@@ -16,7 +16,7 @@ ORDER_ID_DESC = "id_desc"
 # `priority` 以字符串（'HIGH'/'NORMAL'/'LOW'）落库，直接对字段排序会退化成字典序
 # （NORMAL > LOW > HIGH，HIGH 反而排最后）。用**显式权重映射**定义优先级顺序，
 # 并由映射生成 Case 表达式：新增 `TaskPriority` 枚举值却忘记配权重时，
-# 守卫测试（`tests/unit/dal/test_gt_agent_task_manager.py`）会直接转红，
+# 回归测试（`tests/unit/dal/test_gt_agent_task_manager.py`）会直接转红，
 # 而不是让新值静默落到 `default=0`、被排到所有已登记优先级之后。
 _PRIORITY_WEIGHT_MAP: dict[TaskPriority, int] = {
     TaskPriority.HIGH: 3,

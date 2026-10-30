@@ -308,8 +308,8 @@
 - **契约统一**：`startup` 只允许 `{Idle, Stopped}` 启动，其余态抛 `SERVICE_ALREADY_STARTED`；`shutdown` 幂等，仅 `Idle`/`Stopped` no-op + warning
 - **失败必回滚**：启动中途失败先回滚已申请资源、置 `Error`、原样向上抛（fail loud），无半启动残留
 - **清理失败留痕**：`shutdown` body 抛错不 rethrow、仍回 `Stopped`，但记录 `fine/error`
-- **接入范围**：12 个进程级服务统一接入注解；`ormService` 删除静默早退守卫并补 `unbind_database()` 消除悬空绑定；`schedulerService` 幂等订阅
-- **可观测**：每服务挂 `s_status` 状态对象，并新增架构守卫测试（AST 结构 + 6 态契约矩阵）
+- **接入范围**：12 个进程级服务统一接入注解；`ormService` 删除静默早退检查并补 `unbind_database()` 消除悬空绑定；`schedulerService` 幂等订阅
+- **可观测**：每服务挂 `s_status` 状态对象，并新增架构回归测试（AST 结构 + 6 态契约矩阵）
 
 ### V27: Agent 任务系统 v2（P0 已交付；P1 收尾中）
 

@@ -724,7 +724,7 @@ async def list_tasks(
     （Web 列表接口依赖它）：`ORDER_PRIORITY_FIRST` = 优先级优先、同级 id 升序；
     `ORDER_ID_DESC` = 最新在前（Agent 侧用）。非法值由 DAL 抛 `ValueError`。
 
-    `scope` 是**过滤条件**（与 assignee / reviewer 并列，三者至少给一个，工具层守卫）：
+    `scope` 是**过滤条件**（与 assignee / reviewer 并列，三者至少给一个，工具层入口检查）：
     - `None`（默认）：不加范围过滤——保持历史行为，Web 列表接口依赖它拿全团队数据；
     - `"self"`：与我相关 = 我执行 **OR** 我验收，等价 `agent_ids=[caller_id]`；
     - `"team"`：我可见范围（Root Leader 全团队 / 部门主管 自己+子孙部门），

@@ -1,6 +1,6 @@
-"""Service 生命周期注解化 —— 架构守卫测试。
+"""Service 生命周期注解化 —— 架构回归测试。
 
-设计依据：《Service生命周期注解化管理-设计文档.md》v1.5（任务 #39 实现 / #41 守卫）。
+设计依据：《Service生命周期注解化管理-设计文档.md》v1.5（任务 #39 实现 / #41 回归测试）。
 契约要点（v1.4 决策 #10 + v1.5 决策 #11）：
 
 - ``startup`` 允许态 = ``{Idle, Stopped}``；``Starting`` / ``Running`` / ``Stopping`` / ``Error``
@@ -10,11 +10,11 @@
 - ``shutdown`` body 抛错 → 不 re-raise、仍回 ``Stopped``，但必须留痕（``fine=False`` + ``error`` 非空），
   不得被 ``reset_to_status(Stopped)`` 静默抹平（v1.6 决策 #12）。
 
-三层守卫：
+三层回归检查：
 
-1. 结构守卫（AST）：12 个服务模块都声明 ``s_status``，且 ``startup`` / ``shutdown`` 均挂了对应注解。
-2. 契约守卫（6 态迁移矩阵）：用 stub 协程直接驱动注解，不启任何真实服务与数据库，结果确定。
-3. 回滚守卫：失败回滚、原始异常不被掩盖、回滚逻辑与 shutdown 复用。
+1. 结构回归检查（AST）：12 个服务模块都声明 ``s_status``，且 ``startup`` / ``shutdown`` 均挂了对应注解。
+2. 契约回归检查（6 态迁移矩阵）：用 stub 协程直接驱动注解，不启任何真实服务与数据库，结果确定。
+3. 回滚回归检查：失败回滚、原始异常不被掩盖、回滚逻辑与 shutdown 复用。
 
 确定性优先：契约层只看注解语义，不依赖 DB / 网络 / 全局状态。
 """
@@ -119,7 +119,7 @@ def _decorator_name(node: ast.expr) -> str | None:
 
 
 def _returns_when_db_already_bound(fn: ast.AST) -> bool:
-    """检测 ``if _db is not None: return`` 这类静默早退守卫。"""
+    """检测 ``if _db is not None: return`` 这类静默早退检查。"""
     for node in ast.walk(fn):
         if not isinstance(node, ast.If):
             continue
@@ -141,7 +141,7 @@ def _warning_messages(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 # ----------------------------------------------------------------------
-# 1. 结构守卫（AST）
+# 1. 结构回归检查（AST）
 # ----------------------------------------------------------------------
 
 def test_all_services_declare_s_status():
@@ -232,7 +232,7 @@ def test_ormservice_has_no_silent_early_return():
 
 
 # ----------------------------------------------------------------------
-# 2. 契约守卫（6 态迁移矩阵）
+# 2. 契约回归检查（6 态迁移矩阵）
 # ----------------------------------------------------------------------
 
 @pytest.mark.parametrize("initial", [ServiceStatus.Idle, ServiceStatus.Stopped])
@@ -368,7 +368,7 @@ async def test_shutdown_swallows_body_exception_but_still_reaches_stopped(caplog
 
 
 # ----------------------------------------------------------------------
-# 3. 回滚守卫（v1.5 on_error 钩子）
+# 3. 回滚回归检查（v1.5 on_error 钩子）
 # ----------------------------------------------------------------------
 
 async def test_startup_failure_invokes_on_error_rollback():
@@ -416,7 +416,7 @@ async def test_on_error_failure_does_not_mask_original(caplog):
 
 
 # ----------------------------------------------------------------------
-# 4. 同步分支守卫
+# 4. 同步分支回归检查
 #    仓库存在同步实现（skillService.startup / schedulerService.shutdown 等），
 #    注解必须保留同步/异步特性，同步分支的契约与异步分支完全一致。
 # ----------------------------------------------------------------------

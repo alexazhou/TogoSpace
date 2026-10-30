@@ -5,7 +5,7 @@
 
 ## 任务概览
 
-按依赖排序：先落基础设施（枚举 / 状态对象 / 注解 / `unbind_database`），再做 12 个服务接入，随后修测试并对齐编排，新增架构守卫测试，最后回归与落库。
+按依赖排序：先落基础设施（枚举 / 状态对象 / 注解 / `unbind_database`），再做 12 个服务接入，随后修测试并对齐编排，新增架构回归测试，最后回归与落库。
 
 ---
 
@@ -31,11 +31,11 @@
 - [x] 注解保留被装饰函数同步/异步形态（`inspect.iscoroutinefunction` 分流）
 - [x] `dbModel/base.py::unbind_database()`（`_database_proxy.initialize(None)`）
 
-**验收标准**: 契约守卫（6 态矩阵）通过；`unbind_database()` 解绑后 model 访问 fail loud。
+**验收标准**: 契约回归检查（6 态矩阵）通过；`unbind_database()` 解绑后 model 访问 fail loud。
 
 ### 任务 2: 12 个服务接入
 
-**描述**: 每个服务加 `s_status` + 两注解，删除手写守卫；有资源者提供 `_reset()` 并挂 `on_error`。
+**描述**: 每个服务加 `s_status` + 两注解，删除手写检查；有资源者提供 `_reset()` 并挂 `on_error`。
 
 **依赖**: 任务 1
 
@@ -84,23 +84,23 @@
 
 **验收标准**: 全量并行 + 串行均通过。
 
-### 任务 5: 架构守卫测试（#41）
+### 任务 5: 架构回归测试（#41）
 
-**描述**: 新增生命周期守卫测试，防止未来回归。
+**描述**: 新增生命周期回归测试，防止未来回归。
 
 **依赖**: 任务 2
 
 **核心文件**: `tests/unit/architecture/test_service_lifecycle.py`
 
 **子任务**:
-- [x] AST 结构守卫：12 服务声明 `s_status` / `startup` / `shutdown` 注解齐备
-- [x] 契约守卫：6 态迁移矩阵（放行 `{Idle,Stopped}`；拒绝 `Starting/Running/Stopping/Error`）
-- [x] 回滚守卫：失败调用 `on_error`、回滚失败不掩盖原始异常、`Error→shutdown→startup` 可恢复
-- [x] 留痕守卫：`shutdown` body 抛错时 `fine=False` + `error` 非空
+- [x] AST 结构回归检查：12 服务声明 `s_status` / `startup` / `shutdown` 注解齐备
+- [x] 契约回归检查：6 态迁移矩阵（放行 `{Idle,Stopped}`；拒绝 `Starting/Running/Stopping/Error`）
+- [x] 回滚回归检查：失败调用 `on_error`、回滚失败不掩盖原始异常、`Error→shutdown→startup` 可恢复
+- [x] 留痕回归检查：`shutdown` body 抛错时 `fine=False` + `error` 非空
 - [x] R4：7 个资源型服务必须挂 `on_error`；`_reset` 未被装饰 + `shutdown` 必须复用它
 - [x] 同步分支契约用例
 
-**验收标准**: 守卫测试 40 passed；对「漏加注解 / 漏传 on_error / 口径跑偏」能报红。
+**验收标准**: 回归测试 40 passed；对「漏加注解 / 漏传 on_error / 口径跑偏」能报红。
 
 ### 任务 6: 设计与规范落库（#42）
 

@@ -1983,7 +1983,7 @@ async def test_list_task_events_truncates_long_event_content(
 async def test_get_task_event_keeps_full_content_as_counterpart(
     task_manager_mock, event_manager_mock
 ):
-    """守卫 #66：同一条超长事件，get_task_event 必须返回**完整原文**（唯一不截断入口）。"""
+    """防 #66 回归：同一条超长事件，get_task_event 必须返回**完整原文**（唯一不截断入口）。"""
     event_manager_mock.get_event = AsyncMock(
         return_value=_build_event(id=5, task_id=1, actor_id=7, content=_LONG_CONTENT)
     )

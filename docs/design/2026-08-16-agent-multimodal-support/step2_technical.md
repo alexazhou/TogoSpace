@@ -79,7 +79,7 @@ class OpenAIMessage(BaseModel):
 `to_dict()` 无需改动——`model_dump(mode="json", exclude_none=True)` 天然输出块数组，
 `litellm.token_counter` 亦原生支持多模态 content。
 
-### 4.1 既有调用点守卫
+### 4.1 既有调用点检查
 
 `content` 类型变成 union 后，以下把 `content` 当字符串使用的位置需改用 `text_content()`：
 
@@ -243,10 +243,10 @@ await self._history.finalize_history_item(output_item.id, message=final_message,
 | `src/model/dbModel/agentMessage.py` | 新增独立类型 `AgentMessage` / `MessageAttachment` |
 | `src/model/dbModel/gtAgentHistory.py` | `message` 字段类型、`build()` 包装、`content` / `openai_message*` 属性 |
 | `src/service/agentService/agentHistoryStore.py` | 接受并包装两种类型 |
-| `src/service/agentService/agentTurnRunner.py` | `text_content()` 守卫 + 工具结果图构造 `AgentMessage` |
+| `src/service/agentService/agentTurnRunner.py` | `text_content()` 检查 + 工具结果图构造 `AgentMessage` |
 | `src/dal/db/gtAgentHistoryManager.py` | 类型注解更新（逻辑不变） |
-| `src/service/agentService/compact.py` | `text_content()` 守卫 |
-| `src/controller/settingController.py` | `text_content()` 守卫 |
+| `src/service/agentService/compact.py` | `text_content()` 检查 |
+| `src/controller/settingController.py` | `text_content()` 检查 |
 
 ## 9. 已确认决策 / 后续事项
 

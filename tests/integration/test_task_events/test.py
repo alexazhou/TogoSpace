@@ -158,7 +158,7 @@ class TestTaskEvents(ServiceTestCase):
     async def test_append_event_rejects_self_loop(self):
         """PIN-1（F-b）：`from == to`（自环）应在落库前拒绝，不得记为流转事件。
 
-        可红性：若移除 DAL 的 `from == to` 守卫，本用例不再抛 `ValueError` ⇒ 转红。
+        可红性：若移除 DAL 的 `from == to` 检查，本用例不再抛 `ValueError` ⇒ 转红。
         """
         with pytest.raises(ValueError):
             await gtAgentTaskEventManager.append_event(
@@ -270,7 +270,7 @@ class TestTaskEvents(ServiceTestCase):
     async def test_exclude_claim_drops_only_the_claim_event(self):
         """排除认领事件，但评论（from/to 均 NULL）与打回（REVIEWING→IN_PROGRESS）必须保留。
 
-        这是三值逻辑的守卫：`to_status` 为 NULL 的评论事件在 `NOT IN` / `!=` 下
+        这是三值逻辑的检查：`to_status` 为 NULL 的评论事件在 `NOT IN` / `!=` 下
         会被静默过滤掉；`REVIEWING→IN_PROGRESS` 则是执行人最需要看到的打回原因。
         """
         task = await self._make_task_with_claim_and_comment(title="ev-claim-filter")

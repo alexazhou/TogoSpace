@@ -27,7 +27,7 @@
 - **现状文件**:
     - `tests/lifecycle/migrate/`：`0011` nullable 迁移、`0015` 历史结转、`0015` 数据订正
     - `tests/lifecycle/dal/test_db_migration_tool.py`：迁移 runner 本身（按序应用 / 幂等 / `up_to` 归一）
-    - `tests/lifecycle/service/test_service_lifecycle.py`：Service 生命周期注解守卫（结构 + 6 态契约 + 回滚）
+    - `tests/lifecycle/service/test_service_lifecycle.py`：Service 生命周期注解回归检查（结构 + 6 态契约 + 回滚）
     - `tests/lifecycle/backend/test_backend_main_shutdown.py`：`backend_main` 启停与 `_detect_run_env`
 - **运行**: 已纳入默认测试门（`scripts/run_tests.sh` 默认范围 = `tests/unit tests/integration tests/lifecycle`）。
 

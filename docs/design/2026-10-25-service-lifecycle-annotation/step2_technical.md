@@ -17,7 +17,7 @@
 | 1 | messageBus | 计数器归零 + `_subscribers.clear()` | 重置型 |
 | 2 | llmService | 无副作用 | no-op |
 | 3 | funcToolService | 重建工具表 | 重置型 |
-| 4 | ormService | `if _db is not None: return`，**不校验 db_path** | 有守卫（危险） |
+| 4 | ormService | `if _db is not None: return`，**不校验 db_path** | 有检查（危险） |
 | 5 | persistenceService | `pass` | no-op |
 | 6 | agentService | `_agents = {}` 重建 | 重置型 |
 | 7 | roomService | `_rooms.clear()` | 重置型 |
@@ -30,7 +30,7 @@
 三个病灶：
 
 1. **静默早退**：`ormService.startup()` 已启动就直接返回、不看新 `db_path` → 漏 shutdown 时**静默复用旧库**、删库重建失效。
-2. **重复订阅**：`schedulerService.startup()` 无守卫 → `messageBus.subscribe` 不去重（`messageBus.py:33`）→ 事件回调重复执行。
+2. **重复订阅**：`schedulerService.startup()` 无检查 → `messageBus.subscribe` 不去重（`messageBus.py:33`）→ 事件回调重复执行。
 3. **语义混淆**：重置型服务把「清空重建」塞进 `startup()`，读代码必须逐个数行为才能判断「重复启动会发生什么」。
 
 ---
@@ -138,7 +138,7 @@ class ServiceStatusInfo:
 
 - **删除** `if _db is not None: return` 静默早退；二次启动由注解统一拦截（不做 `db_path` 比对），保留 `assert _db is None` 作二重防御。
 - **悬空绑定**：`bind_database()` 用 peewee `DatabaseProxy.initialize(database)` 绑定全局 proxy，而 peewee **无官方 unbind**。新增 `src/model/dbModel/base.py::unbind_database()`（`_database_proxy.initialize(None)`），在 `_reset()` 末尾调用——覆盖「`bind_database` 之后、`_db = database` 之前」失败（`check_database_initialized` / `aio_connect`）的路径，避免残留**指向已 close 库的 proxy 绑定**。
-- 验证：peewee 3.19.0 的 `Proxy.initialize()` 无「已初始化」守卫、可重复调用；`initialize(None)` 解绑后任何 model 访问抛 `AttributeError('Cannot use uninitialized Proxy.')`（fail loud）。
+- 验证：peewee 3.19.0 的 `Proxy.initialize()` 无「已初始化」检查、可重复调用；`initialize(None)` 解绑后任何 model 访问抛 `AttributeError('Cannot use uninitialized Proxy.')`（fail loud）。
 
 ### 4.5 12 个服务接入
 
@@ -159,7 +159,7 @@ class ServiceStatusInfo:
 | teamService | `service/teamService.py` | `async startup()` | async | —（占位，**本次补 shutdown**） |
 | roleTemplateService | `service/roleTemplateService.py` | `async startup()` | async | —（占位） |
 
-> 资源型服务集合（守卫测试 R4 强制要求挂 `on_error`）：`messageBus` / `funcToolService` / `ormService` / `agentService` / `roomService` / `schedulerService` / `skillService`。
+> 资源型服务集合（回归测试 R4 强制要求挂 `on_error`）：`messageBus` / `funcToolService` / `ormService` / `agentService` / `roomService` / `schedulerService` / `skillService`。
 
 ### 4.6 启动编排（`src/backend_main.py`）
 
@@ -191,7 +191,7 @@ class ServiceStatusInfo:
 | `src/model/coreModel/serviceStatus.py` | 新增 `ServiceStatusInfo` |
 | `src/service/serviceUtil.py` | 新增 `service_start_wrapper` / `service_stop_wrapper` |
 | `src/model/dbModel/base.py` | 新增 `unbind_database()` |
-| 12 个服务模块 | 各加 `s_status` + 两注解；删除手写守卫；有资源者提供 `_reset()` 并挂 `on_error` |
+| 12 个服务模块 | 各加 `s_status` + 两注解；删除手写检查；有资源者提供 `_reset()` 并挂 `on_error` |
 | `src/service/ormService.py` | 删静默早退（方案 A）；保留 `assert _db is None`；清理收敛进 `_reset()`（含 `unbind_database()`） |
 | `src/service/teamService.py` | 补 `shutdown()` |
 | `src/backend_main.py` | 顺序不变 |
@@ -200,7 +200,7 @@ class ServiceStatusInfo:
 
 | 文件 | 改动 |
 |------|------|
-| `tests/unit/architecture/test_service_lifecycle.py` | **新增**：架构守卫（AST 结构 + 6 态契约矩阵 + 回滚/留痕/R4） |
+| `tests/unit/architecture/test_service_lifecycle.py` | **新增**：架构回归检查（AST 结构 + 6 态契约矩阵 + 回滚/留痕/R4） |
 | `tests/integration/test_funcToolService/test_skill_service_startup.py` | 补 `skillService.shutdown()` 配对 |
 | `tests/integration/test_funcToolService/test_load_skill.py` | 补 `skillService.shutdown()` 配对 |
 | `tests/integration/test_message_bus/test.py` | 用例内补 `await messageBus.startup()`（严格口径下 shutdown 需先启动） |
@@ -208,7 +208,7 @@ class ServiceStatusInfo:
 | `tests/real/simple_chat/test_simple_chat.py` | 补 `presetService.shutdown()` 配对 |
 | `tests/base.py` | 新增 `_reset_in_process_services()` 兜底停机 |
 
-> 测试侧本次共改动 6 个文件（5 个用例文件 + `tests/base.py`），另新增守卫测试目录 `tests/unit/architecture/`。以 `git diff` 为准。
+> 测试侧本次共改动 6 个文件（5 个用例文件 + `tests/base.py`），另新增回归测试目录 `tests/unit/architecture/`。以 `git diff` 为准。
 
 - AgentDriver / Agent 实例**不受影响**（不带入本次范围）。
 
@@ -247,7 +247,7 @@ class ServiceStatusInfo:
 - `schedulerService`：重复 `startup()` 不产生重复订阅；
 - 资源管理：`startup` 创建、`shutdown` 清空，无 `= {}` 混用；
 - 12 个服务均挂注解与 `s_status`；
-- 全量 `./scripts/run_tests.sh` 通过；新增生命周期架构守卫测试通过。
+- 全量 `./scripts/run_tests.sh` 通过；新增生命周期架构回归测试通过。
 
 ---
 

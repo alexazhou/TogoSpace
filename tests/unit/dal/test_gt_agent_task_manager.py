@@ -1,6 +1,6 @@
-"""任务 DAL 守卫测试。
+"""任务 DAL 回归测试。
 
-- #67：`priority` 权重表守卫（显式映射 + 枚举全覆盖）。
+- #67：`priority` 权重表回归检查（显式映射 + 枚举全覆盖）。
 - #76：`agent_ids` 过滤（`assignee ∈ 集合` **OR** `reviewer ∈ 集合`）的真实 SQL 语义。
 - #81：`status` 单值（`==`）/ 列表（`IN`）两种过滤的真实 SQL 语义。
 """
@@ -17,7 +17,7 @@ from model.dbModel.gtAgentTask import GtAgentTask
 
 
 def test_priority_weight_map_covers_every_enum_member():
-    """守卫（漏配即转红）：`TaskPriority` 的每个成员都必须出现在显式权重表里。
+    """回归检查（漏配即转红）：`TaskPriority` 的每个成员都必须出现在显式权重表里。
 
     旧实现用「字面量 Case + default=0」：将来给 `TaskPriority` 新增枚举值却忘记
     配权重时不会有任何测试报警，新值会静默落到 default=0、被排到 LOW 之后。

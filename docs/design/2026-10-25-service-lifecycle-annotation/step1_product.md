@@ -58,7 +58,7 @@
 2. `startup` 挂 `@service_start_wrapper(s_status[, on_error=_reset])`，`shutdown` 挂 `@service_stop_wrapper(s_status)`；
 3. 资源管理遵循「**startup 创建（`_x = {}`）、shutdown 清空（`_x.clear()`）**」，禁止在 shutdown 内 `_x = {}`；标量重置为初值；
 4. 持有资源/有副作用的服务，提供**未被注解装饰**的纯清理函数 `_reset()`（幂等），既作 `on_error` 又供 `shutdown` body 复用；
-5. 不要手写「重复启动守卫」，契约由注解统一承担；测试里的 `startup`/`shutdown` 必须**成对**（setup 启动、teardown 关闭）。
+5. 不要手写「重复启动检查」，契约由注解统一承担；测试里的 `startup`/`shutdown` 必须**成对**（setup 启动、teardown 关闭）。
 
 ## 验收标准摘要
 
@@ -66,6 +66,6 @@
 - 停止幂等、不抛错；清理失败留痕（`fine=False` + `error`）；
 - 启动失败先回滚、无残留、异常向上抛，可 `shutdown()→startup()` 恢复；
 - 12 个服务均挂注解与 `s_status`；
-- 全量 `./scripts/run_tests.sh` 通过，架构守卫测试通过。
+- 全量 `./scripts/run_tests.sh` 通过，架构回归测试通过。
 
 完整验收项见 [step2_technical.md §7](./step2_technical.md)。
