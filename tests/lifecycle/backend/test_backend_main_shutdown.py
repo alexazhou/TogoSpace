@@ -105,6 +105,15 @@ async def test_main_waits_for_shutdown_event_and_runs_cleanup(monkeypatch):
         MagicMock(return_value=fake_server),
     )
 
+    migrate_calls: list[tuple[str, dict]] = []
+
+    def _fake_migrate_database(db_path: str, **kwargs) -> None:
+        migrate_calls.append((db_path, kwargs))
+        startup_calls.append("migrateDatabase")
+
+    monkeypatch.setattr(backend_main, "has_pending_migrations", lambda _path: False)
+    monkeypatch.setattr(backend_main, "migrate_database", _fake_migrate_database)
+
     async def _message_bus_startup():
         await _record_startup("messageBus")
 
@@ -172,7 +181,11 @@ async def test_main_waits_for_shutdown_event_and_runs_cleanup(monkeypatch):
 
     fake_server.listen.assert_called_once_with(9090, "127.0.0.1")
     fake_server.stop.assert_called_once_with()
+    assert migrate_calls == [
+        ("/tmp/test.db", {"workspace_root": "/tmp/workspace", "verbose": True}),
+    ]
     assert startup_calls == [
+        "migrateDatabase",
         "messageBus",
         "llmService",
         "funcToolService",
@@ -231,6 +244,8 @@ async def test_main_restores_team_and_blocks_schedule_in_demo_readonly(monkeypat
         "HTTPServer",
         MagicMock(return_value=fake_server),
     )
+    monkeypatch.setattr(backend_main, "has_pending_migrations", lambda _path: False)
+    monkeypatch.setattr(backend_main, "migrate_database", MagicMock())
 
     async def _message_bus_startup():
         await _record_startup("messageBus")

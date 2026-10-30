@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import logging
 import os
 import re
 import sqlite3
@@ -11,6 +12,8 @@ from pathlib import Path
 
 import appPaths
 from util import configUtil
+
+logger = logging.getLogger(__name__)
 
 MIGRATIONS_TABLE = "_migrations"
 MIGRATION_NAME_PATTERN = re.compile(r"^\d{4}.*\.(sql|py)$")
@@ -90,7 +93,6 @@ def _is_ignorable_migration_error(exc: sqlite3.OperationalError) -> bool:
 def _run_python_migration(
     migration_file: Path,
     workspace_root: str,
-    verbose: bool,
 ) -> None:
     """执行 Python 迁移脚本。
 
@@ -108,8 +110,6 @@ def _run_python_migration(
     if not callable(migrate_func):
         raise AttributeError(f"迁移脚本缺少 migrate(workspace_root) 函数: {migration_file}")
 
-    if verbose:
-        print(f"Running python migration: {migration_file.name}")
     migrate_func(workspace_root)
 
 
@@ -123,7 +123,7 @@ def apply_migration(
     # Python 迁移只做文件系统操作、不接触数据库；执行成功后才写入账本，
     # 中途失败不会记账，下次启动会重跑（脚本需自行保证幂等）
     if migration_file.suffix == ".py":
-        _run_python_migration(migration_file, workspace_root, verbose)
+        _run_python_migration(migration_file, workspace_root)
         with conn:
             conn.execute(
                 f"INSERT INTO {MIGRATIONS_TABLE} (name) VALUES (?)",
@@ -144,7 +144,7 @@ def apply_migration(
         if not _is_ignorable_migration_error(exc):
             raise
         if verbose:
-            print(
+            logger.info(
                 "Ignore migration error and mark as applied: "
                 f"{migration_file.name}: {exc}"
             )
@@ -179,9 +179,15 @@ def migrate_database(
             threshold = int(up_to)
             pending = [p for p in pending if int(p.name[:4]) < threshold]
         applied_now: list[str] = []
+        if verbose:
+            applied_sorted = sorted(applied_names)
+            current_version = applied_sorted[-1] if applied_sorted else "无"
+            logger.info(
+                f"数据库迁移检查: 已执行={len(applied_names)}/{len(migration_files)}, 当前版本={current_version}, 待执行={len(pending)}"
+            )
         for migration_file in pending:
             if verbose:
-                print(f"Applying migration: {migration_file.name}")
+                logger.info(f"Applying migration: {migration_file.name}")
             apply_migration(
                 conn,
                 migration_file,
@@ -189,6 +195,8 @@ def migrate_database(
                 verbose=verbose,
             )
             applied_now.append(migration_file.name)
+        if verbose and applied_now:
+            logger.info(f"数据库迁移完成: 本次执行={len(applied_now)}, 当前版本={applied_now[-1]}")
     return applied_now
 
 
@@ -207,6 +215,17 @@ def migration_status(
         applied = fetch_applied_migrations(conn)
         files = [p.name for p in list_migration_files(resolved_migrations_dir)]
     return applied, files
+
+
+def has_pending_migrations(
+    db_path: str | os.PathLike[str],
+    *,
+    migrations_dir: str | os.PathLike[str] | None = None,
+) -> bool:
+    """判断数据库是否落后于迁移目录（存在尚未记账的迁移文件）。"""
+    applied, files = migration_status(db_path, migrations_dir=migrations_dir)
+    applied_names = {migration.name for migration in applied}
+    return any(name not in applied_names for name in files)
 
 
 def clear_database(db_path: str | os.PathLike[str]) -> list[str]:
@@ -303,6 +322,8 @@ def _resolve_cli_workspace_root(args: argparse.Namespace) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # CLI 独立进程：后端日志系统未初始化，这里补一个最简配置，保证迁移进度可见
+    logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
     args = _build_parser().parse_args(argv)
     db_path = _resolve_cli_db_path(args)
 
@@ -376,6 +397,7 @@ __all__ = [
     "Migration",
     "check_database_initialized",
     "clear_database",
+    "has_pending_migrations",
     "main",
     "migrate_database",
     "migration_status",

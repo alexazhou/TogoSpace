@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -45,6 +46,63 @@ def test_migrate_database_applies_all_pending_and_is_idempotent(tmp_path: Path) 
         assert "success" not in history_columns
     finally:
         conn.close()
+
+
+def test_migrate_database_verbose_logs_one_line_per_migration(tmp_path: Path, caplog) -> None:
+    """verbose=True 时每个待执行迁移输出一行；默认（库调用）保持安静。"""
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    (migrations_dir / "0001_create_demo.sql").write_text("CREATE TABLE demo (id INTEGER);", encoding="utf-8")
+    (migrations_dir / "0002_add_demo_name.sql").write_text(
+        "ALTER TABLE demo ADD COLUMN name TEXT;", encoding="utf-8"
+    )
+
+    with caplog.at_level(logging.INFO, logger="db"):
+        applied = db.migrate_database(tmp_path / "data.db", migrations_dir=migrations_dir, verbose=True)
+        quiet_applied = db.migrate_database(tmp_path / "quiet.db", migrations_dir=migrations_dir)
+
+    assert applied == ["0001_create_demo.sql", "0002_add_demo_name.sql"]
+    assert quiet_applied == applied
+    migration_logs = [record.message for record in caplog.records if record.name == "db"]
+    assert migration_logs == [
+        "数据库迁移检查: 已执行=0/2, 当前版本=无, 待执行=2",
+        "Applying migration: 0001_create_demo.sql",
+        "Applying migration: 0002_add_demo_name.sql",
+        "数据库迁移完成: 本次执行=2, 当前版本=0002_add_demo_name.sql",
+    ]
+
+
+def test_migrate_database_verbose_logs_summary_when_nothing_pending(tmp_path: Path, caplog) -> None:
+    """没有待执行迁移时也要输出一行当前状态，启动日志才能看出迁移检查过。"""
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    (migrations_dir / "0001_create_demo.sql").write_text("CREATE TABLE demo (id INTEGER);", encoding="utf-8")
+    database_path = tmp_path / "data.db"
+    db.migrate_database(database_path, migrations_dir=migrations_dir)
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="db"):
+        applied = db.migrate_database(database_path, migrations_dir=migrations_dir, verbose=True)
+
+    assert applied == []
+    migration_logs = [record.message for record in caplog.records if record.name == "db"]
+    assert migration_logs == [
+        "数据库迁移检查: 已执行=1/1, 当前版本=0001_create_demo.sql, 待执行=0",
+    ]
+
+
+def test_has_pending_migrations_reflects_ledger(tmp_path: Path) -> None:
+    """待执行判断跟随迁移账本：未执行过为 True，执行完为 False。"""
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    (migrations_dir / "0001_create_demo.sql").write_text("CREATE TABLE demo (id INTEGER);", encoding="utf-8")
+    database_path = tmp_path / "data.db"
+
+    assert db.has_pending_migrations(database_path, migrations_dir=migrations_dir) is True
+
+    db.migrate_database(database_path, migrations_dir=migrations_dir)
+
+    assert db.has_pending_migrations(database_path, migrations_dir=migrations_dir) is False
 
 
 def test_migrate_database_up_to_normalizes_unpadded_number(tmp_path: Path) -> None:

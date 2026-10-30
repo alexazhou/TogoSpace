@@ -80,6 +80,8 @@ s_status = ServiceStatusInfo(name="xxx")
 
 ```python
 # 启动（依赖顺序）—— backend_main.py 阶段 1
+# schema 迁移先于所有 service，由入口调用 db 模块完成
+_run_database_migrations(app_config.setting.db_path, app_config.setting.workspace_root, callbacks)
 await messageBus.startup()
 await llmService.startup()
 await funcToolService.startup()

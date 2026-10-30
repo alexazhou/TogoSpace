@@ -26,6 +26,7 @@ from service import (
 import service.skillService as skillService
 import appPaths
 import route
+from db import has_pending_migrations, migrate_database
 from version import __version__
 from dal.db import gtTeamManager
 
@@ -49,6 +50,29 @@ class StartupCallbacks:
     on_migration_start: Callable[[], None] | None = None
     on_migration_end: Callable[[], None] | None = None
     on_ready: Callable[[str, int], None] | None = None
+
+
+def _run_database_migrations(
+    db_path: str,
+    workspace_root: str,
+    callbacks: StartupCallbacks | None,
+) -> None:
+    """在 ORM 绑定数据库前执行迁移。
+
+    迁移本身由 db 模块负责；入口只做编排：确保目录存在，并在确有
+    待执行迁移时触发桌面外壳的迁移开始/结束回调。
+    """
+    abs_db_path = os.path.abspath(db_path)
+    os.makedirs(os.path.dirname(abs_db_path), exist_ok=True)
+
+    has_pending = has_pending_migrations(abs_db_path)
+    if has_pending and callbacks is not None and callbacks.on_migration_start is not None:
+        callbacks.on_migration_start()
+
+    migrate_database(abs_db_path, workspace_root=workspace_root, verbose=True)
+
+    if has_pending and callbacks is not None and callbacks.on_migration_end is not None:
+        callbacks.on_migration_end()
 
 
 def _check_single_instance(ignore_pid: bool = False) -> None:
@@ -149,22 +173,19 @@ async def main(
     bind_port = port if port is not None else app_config.setting.bind_port
     logger.info("[启动] 监听地址：%s:%d", bind_host, bind_port)
 
+    # ── 数据库迁移：先于所有 service 执行 ────────────────────────────────────
+    _run_database_migrations(
+        app_config.setting.db_path,
+        app_config.setting.workspace_root,
+        callbacks,
+    )
+
     # ── 阶段 1：基础启动 ──────────────────────────────────────────────────────
     logger.info("[启动] 阶段 1/4：基础 service 启动")
     await messageBus.startup()
     await llmService.startup()
     await funcToolService.startup()
-    migration_callbacks = {}
-    if callbacks is not None:
-        migration_callbacks = {
-            "on_migration_start": callbacks.on_migration_start,
-            "on_migration_end": callbacks.on_migration_end,
-        }
-    await ormService.startup(
-        app_config.setting.db_path,
-        workspace_root=app_config.setting.workspace_root,
-        **migration_callbacks,
-    )
+    await ormService.startup(app_config.setting.db_path)
     await persistenceService.startup()
     await agentService.startup()
     await roomService.startup()

@@ -4,7 +4,7 @@ import logging
 import os
 import sqlite3
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Optional
 
 import aiosqlite
 import aiosqlite.core as _aiosqlite_core
@@ -14,7 +14,7 @@ from peewee_async.pool import PoolBackend
 from peewee_async.utils import ConnectionProtocol
 
 import appPaths
-from db import check_database_initialized, migrate_database, migration_status, resolve_db_path
+from db import check_database_initialized, resolve_db_path
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from model.dbModel.base import bind_database, unbind_database
 from service import serviceUtil
@@ -91,18 +91,6 @@ _db: Optional[AioSqliteDatabase] = None
 _db_path: Optional[str] = None
 
 
-def _needs_migration(db_path: str) -> bool:
-    """检查是否需要执行迁移：数据库文件不存在。"""
-    return not os.path.exists(db_path)
-
-
-def _has_pending_migrations(db_path: str) -> bool:
-    """检查是否存在待执行的迁移脚本（数据库已存在但落后于 assets/migrate）。"""
-    applied, files = migration_status(db_path)
-    applied_names = {migration.name for migration in applied}
-    return any(name not in applied_names for name in files)
-
-
 async def _reset() -> None:
     """纯资源清理：正常 shutdown 与启动失败回滚共用；幂等，可安全重复调用。"""
     global _db, _db_path
@@ -114,39 +102,15 @@ async def _reset() -> None:
 
 
 @serviceUtil.service_start_wrapper(s_status, on_error=_reset)
-async def startup(
-    db_path: str,
-    on_migration_start: Callable[[], None] | None = None,
-    on_migration_end: Callable[[], None] | None = None,
-    workspace_root: str = "",
-) -> None:
+async def startup(db_path: str) -> None:
     global _db, _db_path
     # 方案 A：删除原「if _db is not None: return」静默早退；二次启动已被注解统一拦截。
     assert _db is None, "ormService.startup 时 _db 应为空（未 shutdown 的重复启动已被注解拦截）"
 
+    # schema 迁移由 backend_main 在绑定前执行，这里只负责连接与绑定
     _db_path = db_path
     abs_path = os.path.abspath(db_path)
     os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-
-    # 启动时始终检查并执行待处理迁移，保证已有库也能升级到最新 schema。
-    if _needs_migration(abs_path):
-        logger.info("Database not initialized, running migrations...")
-    else:
-        logger.info("Checking pending migrations for existing database...")
-
-    has_pending = _has_pending_migrations(abs_path)
-    if has_pending and on_migration_start is not None:
-        on_migration_start()
-
-    applied = migrate_database(abs_path, workspace_root=workspace_root)
-
-    if has_pending and on_migration_end is not None:
-        on_migration_end()
-
-    if applied:
-        logger.info("Applied %d migration(s): %s", len(applied), applied)
-    else:
-        logger.info("Database schema is up to date")
 
     database = AioSqliteDatabase(
         abs_path,

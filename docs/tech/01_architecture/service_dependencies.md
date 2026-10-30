@@ -71,4 +71,4 @@ graph TD
 | `llmService` | 封装大模型 API 调用（OpenAI 兼容协议） | 无 |
 | `funcToolService` | 提供工具注册、加载与执行环境 | 工具执行时动态依赖 agentService / deptService / teamService / taskService 等 |
 | `messageBus` | 轻量级异步事件总线，负责组件间解耦通信；在事件循环中 `publish` 采用异步调度，避免慢订阅者阻塞发布链路 | 无 |
-| `ormService` | SQLite 数据库连接管理，提供异步 ORM 初始化与 schema 迁移 | 无 |
+| `ormService` | SQLite 数据库连接管理，提供异步 ORM 初始化与绑定；schema 迁移由 `backend_main` 在绑定前调用 `db` 模块执行 | 无 |
