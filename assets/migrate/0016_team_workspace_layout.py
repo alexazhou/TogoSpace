@@ -2,7 +2,7 @@
 
 迁移后的布局：
     workspace/<team>/shared/         # 原团队目录下的全部内容
-    workspace/<team>/agent/<工号>/   # Agent 私有目录，由运行时按需创建
+    workspace/<team>/agent/<name>/   # Agent 私有目录，由运行时按需创建
 
 Python 迁移不访问数据库，只接收 workspace_root：
 - 迁移前先做冲突预检，shared/ 下已存在同名条目则整体中止，不移动任何文件；

@@ -73,7 +73,7 @@ def test_0016_is_idempotent(tmp_path: Path) -> None:
     # 直接构造「迁移完成后」的布局：只有 shared/ 和 agent/，没有待搬条目
     (team_dir / "shared").mkdir(parents=True)
     (team_dir / "shared" / "todo.txt").write_text("todo", encoding="utf-8")
-    (team_dir / "agent" / "1").mkdir(parents=True)
+    (team_dir / "agent" / "alice").mkdir(parents=True)
 
     first_db = tmp_path / "first.db"
     _migrate_to_0015(first_db)

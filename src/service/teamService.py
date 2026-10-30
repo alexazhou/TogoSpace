@@ -174,6 +174,32 @@ async def update_team_base_info(team_id: int, working_directory: str | None = No
     return await gtTeamManager.save_team(team)
 
 
+async def rename_team(team_id: int, new_name: str) -> GtTeam:
+    """修改 Team 名称，并同步重命名其托管工作目录。"""
+    team = await gtTeamManager.get_team_by_id(team_id)
+    assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
+
+    new_name = new_name.strip()
+    assertUtil.assertTrue(bool(new_name), error_message="Team name must not be empty", error_code="team_name_empty")
+    existing = await gtTeamManager.get_team(new_name)
+    assertUtil.assertTrue(
+        existing is None or existing.id == team.id,
+        error_message=f"Team '{new_name}' already exists",
+        error_code="team_name_exists",
+    )
+
+    old_name = team.name
+    # 先迁移目录再写库；写库失败时把目录改回去，避免两边不一致
+    moved_dirs = agentService.rename_team_workdir(team, old_name, new_name)
+    team.name = new_name
+    try:
+        return await gtTeamManager.save_team(team)
+    except Exception:
+        if moved_dirs:
+            agentService.rename_team_workdir(team, new_name, old_name)
+        raise
+
+
 async def delete_team(name: str) -> None:
     """删除 Team 配置并停止对应运行时。"""
     team = await gtTeamManager.get_team(name)

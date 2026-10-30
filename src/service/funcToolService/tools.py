@@ -594,6 +594,7 @@ async def save_agent(
     if existing is not None and existing.team_id == -1:
         return {"success": False, "message": f"保留成员 {existing.name} 不允许通过工具创建或修改。"}
 
+    old_name = existing.name if existing is not None else ""
     agent = existing or GtAgent(
         team_id=team_id,
         name=normalized_name,
@@ -607,7 +608,17 @@ async def save_agent(
     agent.allow_skills = allow_skills
     agent.i18n = i18n or {}
 
-    await gtAgentManager.batch_save_agents(team_id, [agent])
+    # 改名时同步迁移私有目录；写库失败则把目录改回去
+    from service.agentService.core import rename_agent_workdir
+    moved_dirs: list[tuple[str, str]] = []
+    if existing is not None and old_name != normalized_name:
+        moved_dirs = await rename_agent_workdir(team_id, old_name, normalized_name)
+    try:
+        await gtAgentManager.batch_save_agents(team_id, [agent])
+    except Exception:
+        if moved_dirs:
+            await rename_agent_workdir(team_id, normalized_name, old_name)
+        raise
     saved = await gtAgentManager.get_agent_by_id(agent.id) if agent.id else await gtAgentManager.get_agent(team_id, normalized_name, status=None)
     if saved is None:
         return {"success": False, "message": f"成员保存失败: {normalized_name}"}

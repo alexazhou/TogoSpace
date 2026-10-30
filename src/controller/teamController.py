@@ -240,19 +240,13 @@ class TeamModifyHandler(BaseHandler):
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
         team_name = team.name
+        renamed = False
 
         if request.name is not None:
-            new_name = request.name.strip()
-            assertUtil.assertTrue(bool(new_name), error_message="Team name must not be empty", error_code="team_name_empty")
-            existing = await gtTeamManager.get_team(new_name)
-            assertUtil.assertTrue(
-                existing is None or existing.id == team.id,
-                error_message=f"Team '{new_name}' already exists",
-                error_code="team_name_exists",
-            )
-            team.name = new_name
-            await gtTeamManager.save_team(team)
-            team_name = new_name
+            old_name = team.name
+            team = await teamService.rename_team(team_id, request.name)
+            team_name = team.name
+            renamed = team_name != old_name
 
         if request.working_directory is not None or request.config is not None:
             await teamService.update_team_base_info(
@@ -274,7 +268,8 @@ class TeamModifyHandler(BaseHandler):
                 [await _to_gt_room(team_id, room) for room in request.preset_rooms],
             )
         has_depts = len(await gtDeptManager.get_all_depts(team_id)) > 0
-        if has_depts:
+        # 改名会改变工作目录和调度 key，运行中的团队需要重载到新路径
+        if has_depts or (renamed and team.enabled):
             await teamService.hot_reload_team(team_name)
 
         self.return_json({"status": "updated", "name": team_name})

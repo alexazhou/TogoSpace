@@ -148,7 +148,7 @@ async def test_load_team_agents_allows_startup_without_available_llm(
 
     assert started == [11]
     assert 11 in core._agents
-    assert core._agents[11].agent_workdir == f"{tmp_path}/demo/agent/1"
+    assert core._agents[11].agent_workdir == f"{tmp_path}/demo/agent/alice"
 
 
 @pytest.mark.asyncio
