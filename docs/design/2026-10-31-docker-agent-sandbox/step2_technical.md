@@ -31,6 +31,7 @@ Agent turn
   - **`--init` 不会阻碍容器自动退出**：tini 的默认行为是将主子进程（`gtsp`）的生命周期等同于容器生命周期。当驱动端关闭 stdio 时，`gtsp` 收到 EOF 退出；tini 捕获到主子进程退出事件后，**会立即以 `gtsp` 的退出码自身退出**，绝不会因容器内残留后台进程而挂起等待；
   - **Linux PID 1 内核机制保障**：在 Linux PID 命名空间中，一旦 PID 1（tini）退出，内核会立即向该命名空间内的所有其他存活进程广播 `SIGKILL` 并销毁命名空间。因此即便 Agent 在容器内后台启动了其他任务（如 `nohup`、编译守护进程等），只要 `gtsp` 退出，容器也必定在 0.1~0.2s 内自然停止转为 `exited` 状态。
 - **外部容器简化**：外部容器进入前必须处于 `running`；其他任何状态（`created` / `exited` / `paused` / `dead` / `restarting` / `unknown` 等）一律拒绝，不做逐状态分支，报错中带实际状态，由 Agent 自行启动 / 恢复后再重试。退出时仅关闭 exec 的 stdio，不影响容器主进程，同样不涉及 `docker stop`。
+- **自建容器进入状态**：只有 `created` / `exited` 允许拉起；`running` 返回 `container_already_running`；`paused` / `dead` / `restarting` / `removing` 等其他异常状态统一按失败处理，返回 `container_enter_failed`，message 带实际状态与 Docker 原始错误，不自动 unpause / restart。
 
 ### 1.3 关键决策
 
@@ -70,7 +71,8 @@ Agent turn
 - **软删除设计**：`delete_container` 执行 `docker rm -f` 后，不物理删除 DB 行，而是更新 `deleted = 1`；配额统计与容器列表都统计 `deleted == 0` 的活跃记录（含创建中的预记录）。
 - **统一使用 12 位短 ID**：`docker create` 输出完整 ID 后截取前 12 位作为 `docker_id`；DB、对外 `container_id`、Docker CLI 参数统一使用该值，不再保存完整 ID，也不做短 ID → 全 ID 解析。
 - **先落预记录再回填 ID**：创建时先在 DB 插入一条 `docker_id = NULL` 的预记录（同时占用配额与容器名），`docker create` 成功后回填 12 位短 ID；配额校验与预记录插入在同一互斥区内完成（按 agent 加锁），创建中记录计入配额并出现在 `list_containers`，避免并发创建绕过上限。
-- **预记录可见性**：`list_containers` 返回全部 `deleted == 0` 的记录；`docker_id IS NULL` 的预记录 `container_id` 为 null，使用 `container_name` 执行 `docker inspect` 获取状态（容器不存在时为 `missing`），便于 Agent 自行排查与清理。
+- **预记录可见性**：`list_containers` 返回全部 `deleted == 0` 的记录；`docker_id IS NULL` 的预记录 `container_id` 为 null，使用 `container_name` 执行 `docker inspect` 获取状态，并校验 `com.togospace.container_record_id` label；容器不存在或 label 不匹配时为 `missing`，不把外部同名容器当作自己的。
+- **按名清理的归属校验**：预记录清理前按 `container_name` inspect 并校验 label；label 不匹配时只处理 DB 记录，绝不 `docker rm -f` 外部同名容器。
 - **短 ID 唯一性**：`docker_id` 保留唯一索引（NULL 不冲突）；回填时若与已有记录（含软删除）冲突（概率极低），删除本次新建容器、物理删除预记录并返回 `container_create_failed`。宿主上存在同前缀其他容器时，Docker CLI 会报 `multiple IDs with prefix`，直接透传该错误。
 - **失败清理**：`docker create` / `docker cp` / 回填任一步失败，均删除本次新建容器（若已创建）并物理删除预记录，不留下残留数据。
 - **`record_id` 对外标识**：表主键 `id` 通过 `list_containers` 以 `record_id` 暴露；预记录没有 Docker ID 时，Agent 用 `record_id` 删除。
@@ -100,7 +102,7 @@ Agent turn
 #### 二进制规格与分发
 - **预置路径**：存放于静态资源目录 `assets/execute/gtsp/`（`gtsp-linux-amd64`、`gtsp-linux-arm64`），桌面打包时由 `scripts/togo_desktop.spec` 打入安装包。
 - **静态编译**：通过 `CGO_ENABLED=0 go build -ldflags="-s -w"` 编译，无动态链接库依赖，兼容所有 Linux 发行版（含 Alpine 等 musl libc 镜像）。
-- **架构匹配**：运行时通过 `docker inspect` 获取容器/镜像的架构（`Architecture`），按 `amd64` / `arm64` 选择匹配的二进制。
+- **架构匹配**：镜像用 `docker image inspect <image> --format '{{.Architecture}}'`；已存在容器先 `docker inspect <container> --format '{{.Image}}'` 取 image ID，再 `docker image inspect <imageID> --format '{{.Architecture}}'`。容器 inspect 的 `.Platform` 只有 OS（如 `linux`），不提供架构。按 `amd64` / `arm64` 选择匹配的二进制。
 
 #### 统一注入流程（`docker cp`）
 容器内固定使用 `/tmp/gtsp` 作为二进制路径，日志输出至 `/tmp/togospace/logs`。统一通过 `docker cp` 注入：
@@ -125,20 +127,21 @@ Agent turn
 | 接口 | 说明 |
 |---|---|
 | `create_container(agent_id, image=None) -> ContainerInfo` | 校验配额（≤3）、生成命名与 label、先插入 `docker_id=NULL` 的预记录、执行 `docker create` 挂载目录、截取 12 位短 ID 并回填、`docker cp` 注入 gtsp、失败补偿清理 |
-| `delete_container(agent_id, container_id: str \| None = None, record_id: int \| None = None) -> bool` | `container_id` / `record_id` 二选一；按 `agent_id + docker_id / id(deleted=0)` 精确校验为当前 Agent 的活跃记录，且不是当前使用中容器；有 `docker_id` 时执行 `docker rm -f <docker_id>`，预记录按 `container_name` best-effort 清理；标记 DB 软删除 (`deleted=1`) |
-| `delete_agent_containers(agent_id: int) -> int` | Agent 离职/改名时，批量强制删除该 Agent 的所有自建容器并标记软删除；`docker_id IS NULL` 的预记录直接物理删除 |
-| `delete_team_containers(team_id: int) -> int` | Team 删除/改名/工作目录迁移时，批量强制删除该 Team 下所有自建容器并标记软删除；`docker_id IS NULL` 的预记录直接物理删除 |
+| `delete_container(agent_id, container_id: str \| None = None, record_id: int \| None = None) -> bool` | `container_id` / `record_id` 二选一；按 `agent_id + docker_id / id(deleted=0)` 精确校验为当前 Agent 的活跃记录，且不是当前使用中容器；有 `docker_id` 时执行 `docker rm -f <docker_id>`，预记录按 `container_name` + label 校验后 best-effort 清理；标记 DB 软删除 (`deleted=1`) |
+| `delete_agent_containers(agent_id: int) -> int` | Agent 离职/改名时，批量强制删除该 Agent 的所有自建容器并标记软删除；`docker_id IS NULL` 的预记录按 `container_name` + label 校验后清理，label 不匹配仅处理 DB 记录 |
+| `delete_team_containers(team_id: int) -> int` | Team 删除/改名/工作目录迁移时，批量强制删除该 Team 下所有自建容器并标记软删除；`docker_id IS NULL` 的预记录按 `container_name` + label 校验后清理，label 不匹配仅处理 DB 记录 |
 | `list_agent_containers(agent_id) -> list[ContainerInfo]` | 查询该 Agent 全部未删除的自建容器（含 `docker_id IS NULL` 的预记录）；返回 `record_id`；已回填 ID 的按 `docker_id` inspect，预记录按 `container_name` inspect，并行获取实时状态 |
-| `get_container_target(agent_id, container_id: str) -> ContainerTarget` | 校验 `container_id` 为 12 位十六进制短 ID；按 `agent_id + docker_id(deleted=0)` 精确查 DB，命中即自建容器（`is_managed=True`）；未命中则 `docker inspect <container_id>`，按外部容器处理（`is_managed=False`）并取 arch / 原始状态；组装 ContainerTarget |
+| `get_container_target(agent_id, container_id: str) -> ContainerTarget` | 校验 `container_id` 为 12 位十六进制短 ID；按 `agent_id + docker_id(deleted=0)` 精确查 DB，命中即自建容器（`is_managed=True`）；未命中则 `docker inspect <container_id>` 取原始状态，并按容器 `.Image` → `docker image inspect` 取 arch，按外部容器处理（`is_managed=False`）；组装 ContainerTarget |
 | `prepare_container_gtsp(container: ContainerTarget)` | 执行 `docker cp` 将 Linux gtsp 注入到 `/tmp/gtsp`（权限由源文件 `0755` 保留，不做容器内 `chmod`；自建容器在 create 时注入，外部容器在 enter 前注入） |
 
 ### 3.5 容器创建与命名规范
 
 - **命名**：`agent-<name>-<index>`（`index` 取 1..3 中未占用的最小编号），Agent 名非法字符（中文、空格等）回退为 `agent-<agent_id>-<index>`。
-- **Label 标识**：打上 `com.togospace.agent_id`，便于运维通过 Docker CLI 追溯容器所属 Agent。
+- **Label 标识**：只打 `com.togospace.container_record_id=<record_id>`，用于按容器名清理预记录时校验归属，避免误删外部同名容器。
 - **创建参数**：
   ```text
   docker create --name agent-<name>-<index>
+    --label com.togospace.container_record_id=<record_id>
     -i --init --entrypoint /tmp/gtsp
     --mount type=bind,src=<agent_workdir>,dst=/workspace/self
     --mount type=bind,src=<shared_workdir>,dst=/workspace/team_shared,readonly
@@ -179,7 +182,7 @@ Agent turn
 
 - `ExecEnv`：`host` / `container`。
 - `ContainerState`：直接使用 Docker inspect 的 `State.Status` 原值（`created` / `running` / `exited` / `paused` / `restarting` / `removing` / `dead` 等），不做归一化；容器不存在记 `missing`，inspect 失败记 `unknown`。
-- **外部容器进入判定**：只认 `running`；其他状态一律拒绝，返回 `container_stopped` 并在 message 中带原始状态；inspect 失败返回 `container_enter_failed`，不视为 `missing`，不触发软删除。自建容器进入判定见 §1.2（`created` / `exited` 拉起，`running` 报 `container_already_running`）。
+- **外部容器进入判定**：只认 `running`；其他状态一律拒绝，返回 `container_stopped` 并在 message 中带原始状态；inspect 失败返回 `container_enter_failed`，不视为 `missing`，不触发软删除。自建容器进入判定见 §1.2：`created` / `exited` 拉起，`running` 报 `container_already_running`，其余异常状态统一返回 `container_enter_failed`（message 带实际状态与 Docker 原始错误，不自动恢复）。
 - **核心不变量**：自建容器稳态仅为 `created` / `exited`；空闲时 `running` 视为异常。外部容器 `running` 属正常。
 
 ### 4.2 连接目标 `ContainerTarget`
@@ -323,7 +326,7 @@ sequenceDiagram
 3. **记录校验**：按 `agent_id + docker_id(deleted=0)` 或 `agent_id + id(deleted=0)` 精确查记录，未命中返回 `container_not_found`；若记录是当前正在使用的容器，返回 `container_in_use`（提示必须先 `exit_to_host`）；
 4. **执行删除**：
    - 记录有 `docker_id`：执行 `docker rm -f <docker_id>`；Docker 报容器不存在时视为已删除，其他失败返回 `container_delete_failed`，不改 DB；
-   - 记录是预记录（`docker_id IS NULL`）：按 `container_name` 执行 `docker rm -f <container_name>` best-effort（容器可能尚未创建），失败只记 warning，不阻塞删除；
+   - 记录是预记录（`docker_id IS NULL`）：先 `docker inspect <container_name>` 并校验 `com.togospace.container_record_id` label；匹配才执行 `docker rm -f`（best-effort，失败记 warning），容器不存在或 label 不匹配则跳过，绝不删除外部同名容器；
 5. **标记软删除**：更新 `agent_containers` 对应行的 `deleted = 1`；
 6. **返回结果**：返回 `deleted_record_id` 与 `deleted_container_id`（预记录为 null）。
 
@@ -499,7 +502,7 @@ sequenceDiagram
 
 | 层 | 范围 |
 |---|---|
-| 单元 `tests/unit/service/containerService/` | CLI 路径解析；错误分类；创建 argv（`-i` 存在、`--entrypoint` 下标 < image 下标、无 `-t` / `--workdir` / `--read-only`、含 `--log-path` 与 `--init`）；中文名回退且长名不截断；image 参数（空值走默认、自定义值原样、非 linux / 架构不支持 / 缺失均不落库）；并发创建不超过 3；创建时先插入 `docker_id=NULL` 预记录、成功后回填 12 位短 ID，并计入配额 / 名称占用；`list_agent_containers` 包含 `docker_id IS NULL` 预记录（返回 `record_id`，`container_id=null`，按 `container_name` inspect）；回填冲突或注入失败时删除新容器并物理删除预记录；`get_container_target`（12 位十六进制短 ID 格式校验、镜像名拒绝、按 `agent_id + docker_id` 精确命中自建容器、未命中走外部 `docker inspect`）；形态 A / B 命令构造；容器无 `/tmp` 时注入失败返回 `container_not_executable`、删除容器并清理预记录 / 不做兜底；二进制可执行权限（资源文件模式 `0o755`、`docker cp` 后仍可执行）；工作目录继承；`delete_container` 的 `container_id` / `record_id` 二选一校验、非本人记录拒绝、预记录按 `container_name` best-effort 清理；删除时 `container_in_use`；目录变更清理 |
+| 单元 `tests/unit/service/containerService/` | CLI 路径解析；错误分类；创建 argv（`-i` 存在、`--entrypoint` 下标 < image 下标、无 `-t` / `--workdir` / `--read-only`、含 `--log-path` 与 `--init`）；中文名回退且长名不截断；image 参数（空值走默认、自定义值原样、非 linux / 架构不支持 / 缺失均不落库）；并发创建不超过 3；创建时先插入 `docker_id=NULL` 预记录、成功后回填 12 位短 ID，并计入配额 / 名称占用；`list_agent_containers` 包含 `docker_id IS NULL` 预记录（返回 `record_id`，`container_id=null`，按 `container_name` + label 校验；外部同名容器不显示为本记录）；回填冲突或注入失败时删除新容器并物理删除预记录；`get_container_target`（12 位十六进制短 ID 格式校验、镜像名拒绝、按 `agent_id + docker_id` 精确命中自建容器、未命中走外部 `docker inspect`）；arch 按容器 `.Image` → `docker image inspect` 获取（容器 inspect 无 `Architecture`）；形态 A / B 命令构造；容器无 `/tmp` 时注入失败返回 `container_not_executable`、删除容器并清理预记录 / 不做兜底；二进制可执行权限（资源文件模式 `0o755`、`docker cp` 后仍可执行）；工作目录继承；`delete_container` 的 `container_id` / `record_id` 二选一校验、非本人记录拒绝、预记录按 `container_name` + label 校验后 best-effort 清理、外部同名容器不误删；删除时 `container_in_use`；目录变更清理 |
 | 单元 `test_tsp_driver_container.py` | 自建 created / exited 进入；自建 running 报错且不调用 stop / start；外部 running 进入与退出；外部非 running（exited / paused 等）报错拒绝且 message 含实际状态；同容器幂等；A → B 切换；握手失败重连宿主；超时；关 stdin 容器自动退出；退出必回宿主；enter 时容器不存在返回错误且不改 DB；inspect 失败按 `container_enter_failed` 且不软删除；运行中重连丢失且为自建容器时标记软删除；Docker 不可用保留记录；单 client 切换；Cancelled 清理；启动不恢复；只读 / 无 bash 提示（仅一次） |
 | 集成 | fake `docker` 脚本（JSON 状态），`start -a -i` / `exec -i` 挂真实宿主 gtsp 子进程，走 `run_tool_call` 跑完整链路 |
 | 生命周期 | 迁移 0017 幂等；`backend_main` 启停顺序 |
