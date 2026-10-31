@@ -41,6 +41,11 @@ export interface ContainerInfo {
   state: string;
   /** 该容器是否为该 Agent 当前所处的执行环境。 */
   is_entered: boolean;
+  /**
+   * 记录创建时间，ISO 8601 字符串（`model_dump(mode="json")` 把 `datetime` 序列化的结果），
+   * 未创建完成或后端未给时为 null。**不是**文档 §2.1 写的 int 时间戳。
+   */
+  created_at: string | null;
 }
 
 export interface AgentInfo {

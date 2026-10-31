@@ -8,6 +8,7 @@ import { clearToken, setToken } from '../authStore';
 import {
   getAgentActivities,
   getAgentActivitiesPage,
+  getAgentDetail,
   getSystemStatus,
   getTaskDetail,
   getTaskEventsPage,
@@ -459,5 +460,74 @@ describe('third-party service API', () => {
       query: '小米 今天 新闻',
     });
     expect(result.sources).toEqual([{ url: 'https://example.com' }]);
+  });
+});
+
+describe('getAgentDetail containers', () => {
+  beforeEach(() => {
+    clearGlobalRequestError();
+    clearToken();
+    vi.restoreAllMocks();
+  });
+
+  it('keeps container created_at ISO string and nulls it out when absent or not a string', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 3,
+      name: 'coder',
+      team_id: 2,
+      created_at: '2026-10-31T08:15:00.123456',
+      containers: [
+        {
+          record_id: 11,
+          agent_id: 3,
+          docker_id: 'sha256:abc',
+          container_name: 'togo-agent-3',
+          image: 'togo-sandbox:latest',
+          state: 'running',
+          is_entered: true,
+          // 后端 model_dump(mode="json") 把 datetime 序列化成 ISO 8601 字符串
+          created_at: '2026-10-31T08:15:00.123456',
+        },
+        {
+          // 预记录：容器尚未创建完成，docker_id 与 created_at 都可能为空
+          record_id: 12,
+          agent_id: 3,
+          docker_id: null,
+          container_name: '',
+          image: 'togo-sandbox:latest',
+          state: 'missing',
+          is_entered: false,
+          created_at: null,
+        },
+        {
+          // 后端漏字段或给出非字符串时不能把非字符串透给 UI
+          record_id: 13,
+          agent_id: 3,
+          docker_id: 'sha256:def',
+          container_name: 'togo-agent-3-b',
+          image: 'togo-sandbox:latest',
+          state: 'exited',
+          is_entered: false,
+          created_at: 1730000000,
+        },
+      ],
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const detail = await getAgentDetail(3);
+    const containers = detail.containers ?? [];
+
+    expect(containers.map((item) => item.record_id)).toEqual([11, 12, 13]);
+    expect(containers[0].created_at).toBe('2026-10-31T08:15:00.123456');
+    expect(containers[1].created_at).toBeNull();
+    // 文档 §2.1 写的是 int 时间戳，后端实际给 ISO 字符串；非字符串一律收敛为 null，不猜。
+    expect(containers[2].created_at).toBeNull();
+    // state 直接透传 Docker 原值，不做翻译
+    expect(containers.map((item) => item.state)).toEqual(['running', 'missing', 'exited']);
+    // docker_id 为 null 的预记录不能丢（record_id 是删除入口）
+    expect(containers[1].docker_id).toBeNull();
   });
 });

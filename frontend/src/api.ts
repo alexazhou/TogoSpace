@@ -506,6 +506,7 @@ function normalizeContainerInfo(raw: unknown): ContainerInfo | null {
     image: String(item.image ?? ''),
     state: String(item.state ?? 'unknown'),
     is_entered: item.is_entered === true,
+    created_at: typeof item.created_at === 'string' && item.created_at ? item.created_at : null,
   };
 }
 
