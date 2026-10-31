@@ -74,6 +74,24 @@ async def test_rename_team_keeps_custom_working_directory(monkeypatch, tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_rename_team_rejects_invalid_name(monkeypatch, tmp_path):
+    """新名称含路径分隔符等特殊字符时应直接拒绝，不改目录也不写库。"""
+    team = SimpleNamespace(id=1, name="old", config={}, enabled=True)
+    save_team = AsyncMock(side_effect=lambda saved: saved)
+    _mock_managers(monkeypatch, team, save_team, tmp_path)
+
+    old_dir = tmp_path / "old"
+    old_dir.mkdir()
+
+    with pytest.raises(TogoException, match="不能包含非法字符"):
+        await teamService.rename_team(1, "../evil")
+
+    save_team.assert_not_awaited()
+    assert old_dir.exists()
+    assert not (tmp_path / "evil").exists()
+
+
+@pytest.mark.asyncio
 async def test_rename_team_aborts_on_workdir_conflict(monkeypatch, tmp_path):
     """目标目录已存在时应中止，且不写库。"""
     team = SimpleNamespace(id=1, name="old", config={}, enabled=True)

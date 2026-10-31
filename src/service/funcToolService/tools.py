@@ -20,7 +20,7 @@ from service.agentService.prompts import (
     TODO_TASK_NO_CANCEL_INSTRUCTION,
 )
 from service.thirdPartyService.result import ThirdPartySearchResult
-from util import configUtil, i18nUtil
+from util import configUtil, i18nUtil, workspaceUtil
 
 logger = logging.getLogger(__name__)
 
@@ -541,7 +541,7 @@ async def save_agent(
     """在当前团队中创建或更新成员。
 
     Args:
-        name: 成员名称，团队内唯一标识，建议使用小写字母和下划线。
+        name: 成员名称，团队内唯一标识，不能使用系统保留名称，也不能包含路径分隔符、Windows 非法字符或控制字符。
         role_template_name: 要绑定的角色模板名称。
         model: 可选模型覆盖；省略表示不覆盖模板或系统默认模型。
         driver: 驱动类型，可选 native、claude_sdk、tsp，默认 tsp。
@@ -558,6 +558,10 @@ async def save_agent(
     normalized_name = name.strip()
     if not normalized_name:
         return {"success": False, "message": "成员名称不能为空。"}
+
+    name_error = workspaceUtil.validate_dir_name(normalized_name)
+    if name_error is not None:
+        return {"success": False, "message": name_error}
 
     special_agent = SpecialAgent.value_of(normalized_name)
     if special_agent is not None:

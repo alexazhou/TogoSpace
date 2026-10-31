@@ -11,6 +11,7 @@
 import logging
 import os
 import shutil
+import unicodedata
 from typing import Any
 
 from exception import TogoException
@@ -20,6 +21,49 @@ logger = logging.getLogger(__name__)
 
 _SHARED_DIR_NAME = "shared"
 _AGENT_DIR_NAME = "agent"
+
+# 名称会直接作为目录名：黑名单方式，只禁止会影响跨平台路径安全的字符
+# （路径分隔符、Windows 非法字符、控制字符），其余（含 emoji、任意 Unicode）一律放行
+_NAME_INVALID_CHARS = frozenset("/\\:*?\"<>|")
+_WINDOWS_RESERVED_NAMES = frozenset(
+    ["CON", "PRN", "AUX", "NUL"]
+    + [f"COM{i}" for i in range(1, 10)]
+    + [f"LPT{i}" for i in range(1, 10)]
+)
+
+
+def _is_control_char(char: str) -> bool:
+    """控制字符（Unicode Cc：含 NUL、换行、Tab、DEL 等），不可见或会引发崩溃。"""
+    return unicodedata.category(char) == "Cc"
+
+
+def validate_dir_name(name: str) -> str | None:
+    """校验 Team / Agent 名称可直接作为跨平台目录名。
+
+    纯校验函数：不抛异常，错误统一通过返回值表达，由调用方决定如何处理。
+
+    Returns:
+        合法返回 None；否则返回给调用方展示的错误信息。
+    """
+    if not isinstance(name, str):
+        return "必须是字符串"
+    if not name:
+        return "不能为空"
+    if name != name.strip():
+        return "不能以空白开头或结尾"
+    if name in {".", ".."}:
+        return f"不能为 {name}"
+    stem = name.split(".", 1)[0]
+    if stem.upper() in _WINDOWS_RESERVED_NAMES:
+        return f"不能使用系统保留名称: {name}"
+    invalid_chars = sorted({
+        char for char in name
+        if char in _NAME_INVALID_CHARS or _is_control_char(char)
+    })
+    if invalid_chars:
+        invalid_display = ", ".join(repr(char) for char in invalid_chars)
+        return f"不能包含非法字符: {invalid_display}"
+    return None
 
 
 def get_custom_workdir(team_config: dict[str, Any] | None) -> str:

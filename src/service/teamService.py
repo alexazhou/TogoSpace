@@ -120,6 +120,14 @@ async def create_team(
         preset_rooms: 预置房间
         auto_start: 是否自动启动（默认 True）
     """
+    name_error = workspaceUtil.validate_dir_name(name)
+    if name_error is not None:
+        raise TogoException(name_error, error_code="invalid_team_name")
+    for agent in agents or []:
+        name_error = workspaceUtil.validate_dir_name(agent.name)
+        if name_error is not None:
+            raise TogoException(name_error, error_code="invalid_agent_name")
+
     if await gtTeamManager.team_exists(name):
         raise TogoException(f"Team '{name}' already exists", error_code="TEAM_EXISTS")
 
@@ -181,6 +189,9 @@ async def rename_team(team_id: int, new_name: str) -> GtTeam:
 
     new_name = new_name.strip()
     assertUtil.assertTrue(bool(new_name), error_message="Team name must not be empty", error_code="team_name_empty")
+    name_error = workspaceUtil.validate_dir_name(new_name)
+    if name_error is not None:
+        raise TogoException(name_error, error_code="invalid_team_name")
     existing = await gtTeamManager.get_team(new_name)
     assertUtil.assertTrue(
         existing is None or existing.id == team.id,

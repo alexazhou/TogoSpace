@@ -83,6 +83,24 @@ async def test_overwrite_team_agents_renames_agent_private_dir(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
+async def test_overwrite_team_agents_rejects_invalid_name(monkeypatch, tmp_path):
+    """成员名称会作为私有目录名：含路径分隔符等特殊字符时不写库。"""
+    team = SimpleNamespace(id=1, name="demo", config={}, enabled=False)
+    alice = _make_agent(11, "alice")
+    save_agents = AsyncMock()
+
+    _mock_managers(monkeypatch, team, [alice], save_agents)
+
+    payload = [GtAgent(id=11, team_id=1, name="../bob", role_template_id=21, model="", driver=DriverType.NATIVE)]
+    with pytest.raises(TogoException) as excinfo:
+        await core.overwrite_team_agents(1, payload)
+
+    assert excinfo.value.error_code == "invalid_agent_name"
+    save_agents.assert_not_awaited()
+    assert alice.name == "alice"
+
+
+@pytest.mark.asyncio
 async def test_overwrite_team_agents_aborts_on_swapping_names(monkeypatch, tmp_path):
     """互换名字时目标目录已被占用，单次保存直接报冲突，不写库。"""
     team = SimpleNamespace(id=1, name="demo", config={}, enabled=False)

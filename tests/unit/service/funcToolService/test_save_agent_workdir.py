@@ -81,6 +81,25 @@ async def test_save_agent_renames_private_dir(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_save_agent_rejects_invalid_name(monkeypatch, tmp_path) -> None:
+    """名称含路径分隔符等特殊字符时返回失败，不写库也不碰目录。"""
+    agent = _make_existing("alice")
+    batch_save_agents = AsyncMock()
+    _mock_dependencies(monkeypatch, tmp_path, agent, batch_save_agents)
+
+    result = await tools.save_agent(
+        name="../bob",
+        role_template_name="writer",
+        _context=_context(),
+    )
+
+    assert not result["success"]
+    assert "不能包含" in result["message"]
+    batch_save_agents.assert_not_awaited()
+    assert agent.name == "alice"
+
+
+@pytest.mark.asyncio
 async def test_save_agent_rolls_back_dir_when_save_fails(monkeypatch, tmp_path) -> None:
     """目录已改名但写库失败时，应把目录改回原名并抛出异常。"""
     agent = _make_existing("alice")

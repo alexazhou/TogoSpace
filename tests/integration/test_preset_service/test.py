@@ -38,7 +38,7 @@ class TestGetTeamByUuid(ServiceTestCase):
     async def test_default_not_include_deleted(self):
         """默认不返回已删除的团队。"""
         team = await gtTeamManager.save_team(GtTeam(
-            name="team-001",
+            name="team_001",
             uuid="uuid-001",
             deleted=0,
         ))
@@ -49,7 +49,7 @@ class TestGetTeamByUuid(ServiceTestCase):
     async def test_deleted_team_not_found_by_default(self):
         """已删除团队默认查不到。"""
         await gtTeamManager.save_team(GtTeam(
-            name="team-002",
+            name="team_002",
             uuid="uuid-002",
             deleted=1,
         ))
@@ -59,7 +59,7 @@ class TestGetTeamByUuid(ServiceTestCase):
     async def test_include_deleted_returns_deleted_team(self):
         """include_deleted=True 返回已删除团队。"""
         team = await gtTeamManager.save_team(GtTeam(
-            name="team-003",
+            name="team_003",
             uuid="uuid-003",
             deleted=1,
         ))
@@ -100,35 +100,35 @@ class TestPresetTeamImport(ServiceTestCase):
 
     async def test_import_new_team_success(self):
         """UUID 不存在时正常导入。"""
-        config = self._make_team_config("uuid-new", "new-team")
+        config = self._make_team_config("uuid-new", "new_team")
         team = await presetService._import_team_from_config(config)
         assert team is not None
         assert team.uuid == "uuid-new"
-        assert team.name == "new-team"
+        assert team.name == "new_team"
 
     async def test_import_existing_team_skipped(self):
         """UUID 存在（deleted=0）时跳过导入。"""
         existing = await gtTeamManager.save_team(GtTeam(
-            name="existing-team",
+            name="existing_team",
             uuid="uuid-existing",
             deleted=0,
         ))
-        config = self._make_team_config("uuid-existing", "existing-team")
+        config = self._make_team_config("uuid-existing", "existing_team")
         team = await presetService._import_team_from_config(config)
         assert team is None
         # 验证原团队未被修改
         result = await gtTeamManager.get_team_by_id(existing.id)
         assert result is not None
-        assert result.name == "existing-team"
+        assert result.name == "existing_team"
 
     async def test_import_deleted_team_skipped(self):
         """UUID 存在（deleted=1）时跳过导入，不复活。"""
         await gtTeamManager.save_team(GtTeam(
-            name="deleted-team",
+            name="deleted_team",
             uuid="uuid-deleted",
             deleted=1,
         ))
-        config = self._make_team_config("uuid-deleted", "deleted-team")
+        config = self._make_team_config("uuid-deleted", "deleted_team")
         team = await presetService._import_team_from_config(config)
         assert team is None
         # 验证团队仍处于删除状态
@@ -139,11 +139,11 @@ class TestPresetTeamImport(ServiceTestCase):
     async def test_import_without_uuid_by_name(self):
         """无 UUID 时按 name 匹配已存在的团队。"""
         existing = await gtTeamManager.save_team(GtTeam(
-            name="name-match-team",
+            name="name_match_team",
             deleted=0,
         ))
         config = TeamPreset(
-            name="name-match-team",
+            name="name_match_team",
             agents=[AgentPreset(name="agent1", role_template="dummy")],
             auto_start=True,
         )
@@ -152,16 +152,16 @@ class TestPresetTeamImport(ServiceTestCase):
         # 验证原团队未被修改
         result = await gtTeamManager.get_team_by_id(existing.id)
         assert result is not None
-        assert result.name == "name-match-team"
+        assert result.name == "name_match_team"
 
     async def test_export_team_preset_matches_runtime_structure(self):
         await gtRoleTemplateManager.save_role_template(GtRoleTemplate(name="dummy"))
 
         team_config = TeamPreset(
             uuid="uuid-export-001",
-            name="export-team",
+            name="export_team",
             i18n={"display_name": {"zh-CN": "导出团队"}},
-            config={"working_directory": "/tmp/export-team", "slogan": "先沟通后执行", "rules": "先评审再执行"},
+            config={"working_directory": "/tmp/export_team", "slogan": "先沟通后执行", "rules": "先评审再执行"},
             agents=[
                 AgentPreset(
                     name="manager1",
@@ -204,9 +204,9 @@ class TestPresetTeamImport(ServiceTestCase):
         exported = await exportService.export_team_preset(team.id)
 
         assert exported["uuid"] == "uuid-export-001"
-        assert exported["name"] == "export-team"
+        assert exported["name"] == "export_team"
         assert exported["i18n"] == {"display_name": {"zh-CN": "导出团队"}}
-        assert exported["config"] == {"working_directory": "/tmp/export-team", "slogan": "先沟通后执行", "rules": "先评审再执行"}
+        assert exported["config"] == {"working_directory": "/tmp/export_team", "slogan": "先沟通后执行", "rules": "先评审再执行"}
         assert len(exported["rule_templates"]) == 1
         assert exported["rule_templates"][0]["name"] == "dummy"
         assert exported["rule_templates"][0]["soul"] == ""
@@ -290,7 +290,7 @@ class TestDeptTreeValidation(ServiceTestCase):
                 ),
             ],
         )
-        config = self._make_team_config_with_dept("uuid-dept-001", "dept-team", dept_tree)
+        config = self._make_team_config_with_dept("uuid-dept-001", "dept_team", dept_tree)
         with pytest.raises(TogoException) as exc_info:
             await presetService._import_team_from_config(config)
         assert exc_info.value.error_code == "CHILD_MANAGER_NOT_IN_PARENT_AGENTS"
@@ -312,7 +312,7 @@ class TestDeptTreeValidation(ServiceTestCase):
                 ),
             ],
         )
-        config = self._make_team_config_with_dept("uuid-dept-002", "dept-team-ok", dept_tree)
+        config = self._make_team_config_with_dept("uuid-dept-002", "dept_team_ok", dept_tree)
         team = await presetService._import_team_from_config(config)
         assert team is not None
 
@@ -375,7 +375,7 @@ class TestPresetRoomMembers(ServiceTestCase):
         """`agents: ["alice", "alice"]` → 导入报 duplicate_agent_ids，房间不落库。"""
         from dal.db import gtRoomManager
 
-        config = self._make_config("uuid-room-dup", "preset-room-dup", [
+        config = self._make_config("uuid-room-dup", "preset_room_dup", [
             TeamRoomPreset(name="dup_room", agents=["alice", "alice"]),
         ])
 
@@ -383,7 +383,7 @@ class TestPresetRoomMembers(ServiceTestCase):
             await presetService._import_team_from_config(config)
 
         assert exc_info.value.error_code == "duplicate_agent_ids"
-        team = await gtTeamManager.get_team("preset-room-dup")
+        team = await gtTeamManager.get_team("preset_room_dup")
         assert team is not None
         assert await gtRoomManager.get_rooms_by_team(team.id) == []
 
@@ -391,7 +391,7 @@ class TestPresetRoomMembers(ServiceTestCase):
         """回归护栏：互不相同的成员照常导入（PRIVATE，两人的名字都在话题里）。"""
         from dal.db import gtRoomManager
 
-        config = self._make_config("uuid-room-ok", "preset-room-ok", [
+        config = self._make_config("uuid-room-ok", "preset_room_ok", [
             TeamRoomPreset(name="pair_room", agents=["alice", "bob"]),
         ])
 
@@ -406,7 +406,7 @@ class TestPresetRoomMembers(ServiceTestCase):
         """preset 路径**不**拒绝单成员房：生产预设有 2 人，但本仓既有夹具刻意建 1 人房。"""
         from dal.db import gtRoomManager
 
-        config = self._make_config("uuid-room-single", "preset-room-single", [
+        config = self._make_config("uuid-room-single", "preset_room_single", [
             TeamRoomPreset(name="solo_room", agents=["alice"]),
         ])
 

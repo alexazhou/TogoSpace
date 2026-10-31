@@ -12,7 +12,7 @@ from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from model.dbModel.gtTeam import GtTeam
 from service import agentService, deptService, roleTemplateService, roomService, serviceUtil
 from model.coreModel.serviceStatus import ServiceStatusInfo
-from util import configUtil, i18nUtil
+from util import configUtil, i18nUtil, workspaceUtil
 from util.configUtil.configTypes import DeptNodePreset, TeamPreset, TeamRoomPreset
 
 logger = logging.getLogger(__name__)
@@ -130,6 +130,11 @@ async def _to_gt_agents(team_id: int, team_config: TeamPreset) -> list[GtAgent]:
             continue
 
         agent_name = agent.name  # 存储稳定 ID；display_name 从 i18n 解析
+        name_error = workspaceUtil.validate_dir_name(agent_name)
+        if name_error is not None:
+            logger.warning("跳过 Agent '%s'：%s", agent_name, name_error)
+            continue
+
         agents.append(GtAgent(
             team_id=team_id,
             name=agent_name,
@@ -153,6 +158,11 @@ async def _import_team_from_config(team_config: TeamPreset) -> GtTeam | None:
         existing = await gtTeamManager.get_team(team_config.name)
     if existing is not None:
         logger.info("Team '%s' 已存在（或已删除），跳过导入", team_config.name)
+        return None
+
+    name_error = workspaceUtil.validate_dir_name(team_config.name)
+    if name_error is not None:
+        logger.warning("跳过 Team '%s'：%s", team_config.name, name_error)
         return None
 
     # 1. 预校验：在写入任何数据前确保配置逻辑正确
