@@ -2,6 +2,7 @@ import type {
   AgentActivity,
   AgentActivityStatus,
   AgentActivityType,
+  AgentExecEnv,
   AgentStatus,
   AgentTask,
   AgentTaskEvent,
@@ -32,6 +33,21 @@ export type FrontendRealtimeEvent =
     agentId: number;
     agentName: string;
     status: AgentStatus;
+  }
+  | {
+    /**
+     * 执行环境变化（进入 / 退出容器、改名回落）。
+     *
+     * payload 与 `agent_status` 同一套约定：`gt_agent` 是**完整对象**（不是 id），
+     * 见 `constants.py` 的 `AGENT_STATUS_CHANGED` 注释与后端 `messageBus.publish`
+     * 传的 `gt_agent=self.gt_agent`。
+     */
+    type: 'agent_container';
+    teamId: number;
+    agentId: number;
+    agentName: string;
+    execEnv: AgentExecEnv;
+    currentContainerId: string | null;
   }
   | {
     type: 'agent_activity';
@@ -80,6 +96,34 @@ export type FrontendRealtimeEvent =
   };
 
 type RawRecord = Record<string, unknown>;
+
+interface RawGtAgentIdentity {
+  teamId: number;
+  agentId: number;
+  agentName: string;
+}
+
+/**
+ * 从事件 payload 的 `gt_agent`（**完整对象**，不是 id）里取身份三元组。
+ *
+ * 与 `agent_status` 共用同一份护栏：`gt_agent` 缺失 / id 非数 / id<=0 一律判脏返回 null，
+ * 调用方直接 `return null` 丢弃该事件。抽出来是为了新事件 `agent_container` 复用而不是
+ * 复制一遍——两处各抄一份，将来只改一处就会分叉。
+ */
+function readGtAgentIdentity(raw: RawRecord): RawGtAgentIdentity | null {
+  const gtAgent = raw.gt_agent as RawRecord | undefined;
+  const teamId = Number(gtAgent?.team_id ?? 0);
+  const agentId = Number(gtAgent?.id ?? 0);
+  if (!Number.isFinite(teamId) || !Number.isFinite(agentId) || teamId <= 0 || agentId <= 0) {
+    return null;
+  }
+  return { teamId, agentId, agentName: String(gtAgent?.name ?? '') };
+}
+
+/** 执行环境取值收敛：只有显式 `container` 才认容器，其余（含脏值 / 缺失）一律回 `host`。 */
+function normalizeExecEnv(value: unknown): AgentExecEnv {
+  return String(value ?? '').trim().toLowerCase() === 'container' ? 'container' : 'host';
+}
 
 function normalizeAgentStatus(value: unknown): AgentStatus {
   const normalized = String(value ?? '').trim().toLowerCase();
@@ -203,19 +247,36 @@ export function normalizeWsEventPayload(payload: unknown): FrontendRealtimeEvent
   }
 
   if (eventType === 'agent_status') {
-    const gtAgent = raw.gt_agent as RawRecord | undefined;
-    const teamId = Number(gtAgent?.team_id ?? 0);
-    const agentId = Number(gtAgent?.id ?? 0);
-    if (!Number.isFinite(teamId) || !Number.isFinite(agentId) || teamId <= 0 || agentId <= 0) {
+    const identity = readGtAgentIdentity(raw);
+    if (!identity) {
       return null;
     }
 
     return {
       type: 'agent_status',
-      teamId,
-      agentId,
-      agentName: String(gtAgent?.name ?? ''),
+      ...identity,
       status: normalizeAgentStatus(raw.status),
+    };
+  }
+
+  if (eventType === 'agent_container') {
+    const identity = readGtAgentIdentity(raw);
+    if (!identity) {
+      return null;
+    }
+
+    const execEnv = normalizeExecEnv(raw.exec_env);
+    const rawContainerId = raw.current_container_id;
+    // 宿主环境恒为 null：即便 payload 里带了脏值也不透出，避免前端拿宿主态去高亮容器行。
+    const currentContainerId = execEnv === 'container' && rawContainerId != null
+      ? String(rawContainerId)
+      : null;
+
+    return {
+      type: 'agent_container',
+      ...identity,
+      execEnv,
+      currentContainerId,
     };
   }
 

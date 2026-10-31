@@ -14,6 +14,35 @@ export type RoomType = 'private' | 'group';
 export type I18nText = Record<string, string>;
 export type EntityI18n = Record<string, I18nText>;
 
+/** 执行环境：宿主 or 容器（内存态，后端重启一律回宿主）。 */
+export type AgentExecEnv = 'host' | 'container';
+
+/**
+ * 自建容器信息（对应后端 `model/coreModel/containerModel.py::ContainerInfo`）。
+ *
+ * 注意两个与直觉不同的点（照后端 `model_dump(mode="json")` 的真实字段，别按文档 §8 的字面猜）：
+ * 1. 容器 ID 字段名叫 `docker_id`，不是 `container_id`；预记录尚未回填时为 null。
+ * 2. 没有 `is_managed`；表示「当前所处环境」的是 `is_entered`。
+ *
+ * `docker_id` 可空是**契约的一部分**：创建流程先落 `docker_id=NULL` 的预记录，
+ * `docker create` 成功后才回填 12 位短 ID。预记录在列表里也可见，此时只能用
+ * `record_id` / `container_name` 标识。不要写成非空——`vue-tsc --noEmit` 会卡构建，
+ * 且运行期预记录行必然命中这条分支。
+ */
+export interface ContainerInfo {
+  /** `agent_containers.id`，前端表格行 key；预记录没有 docker_id 时用它删除。 */
+  record_id: number;
+  agent_id: number;
+  /** Docker 12 位短 ID；预记录为 null。 */
+  docker_id: string | null;
+  container_name: string;
+  image: string;
+  /** Docker `State.Status` 原值，直接展示不做翻译；查不到为 missing，inspect 失败为 unknown。 */
+  state: string;
+  /** 该容器是否为该 Agent 当前所处的执行环境。 */
+  is_entered: boolean;
+}
+
 export interface AgentInfo {
   id?: number | null;
   name: string;
@@ -28,6 +57,12 @@ export interface AgentInfo {
   special?: 'operator' | 'system' | null;
   allow_tools?: string[] | null;
   allow_skills?: string[] | null;
+  /** 当前执行环境；未加载的 Agent 后端恒给 host，此处仍按可空容错。 */
+  exec_env?: AgentExecEnv | null;
+  /** 当前所在容器的 12 位短 ID；宿主环境为 null。 */
+  current_container_id?: string | null;
+  /** `deleted=0` 的活跃自建容器数（含创建中的预记录），用于「n/3」徽标。 */
+  container_count?: number | null;
 }
 
 export interface AgentDetail extends AgentInfo {
@@ -35,6 +70,8 @@ export interface AgentDetail extends AgentInfo {
   driver_type: string;
   prompt: string;
   error_message?: string | null;
+  /** Agent 详情额外携带的实时容器列表；预记录 `docker_id` 为 null。 */
+  containers?: ContainerInfo[] | null;
 }
 
 export interface AgentActivity {

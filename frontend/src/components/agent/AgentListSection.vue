@@ -27,6 +27,19 @@ function statusLabel(status: AgentInfo['status']): string {
 function selectAgent(agent: AgentInfo): void {
   emit('selectAgent', agent.id as number);
 }
+
+/** 容器徽标文案：容器态显示 短ID/容器数，宿主态不显示徽标。 */
+function containerBadge(agent: AgentInfo): string | null {
+  if (agent.exec_env !== 'container') {
+    return null;
+  }
+  const shortId = agent.current_container_id;
+  const count = agent.container_count;
+  if (shortId && typeof count === 'number') {
+    return `${shortId} · ${count}`;
+  }
+  return shortId ?? null;
+}
 </script>
 
 <template>
@@ -50,6 +63,11 @@ function selectAgent(agent: AgentInfo): void {
             <strong class="agent-name-line">
               <span class="agent-name">{{ displayName(agent) }}</span>
               <span v-if="agent.isDepartmentLeader" class="agent-leader-badge">{{ t('agent.departmentLeader') }}</span>
+              <span
+                v-if="containerBadge(agent)"
+                class="agent-env-badge"
+                :title="t('agent.execEnv.label')"
+              >{{ containerBadge(agent) }}</span>
             </strong>
             <p>{{ agent.departmentPath || agent.model }}</p>
           </div>
@@ -168,6 +186,25 @@ function selectAgent(agent: AgentInfo): void {
   color: color-mix(in srgb, var(--state-success) 84%, var(--text-primary) 16%);
   font-size: 0.66rem;
   font-weight: 400;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+/* 容器徽标：复用 leader badge 的视觉规格，仅换配色以区分「执行环境」而非「部门主管」。 */
+.agent-env-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--state-info) 24%, var(--border-default) 76%);
+  background: color-mix(in srgb, var(--state-info) 12%, var(--surface-panel) 88%);
+  color: color-mix(in srgb, var(--state-info) 84%, var(--text-primary) 16%);
+  font-size: 0.66rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
   line-height: 1.1;
   white-space: nowrap;
 }

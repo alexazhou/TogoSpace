@@ -245,7 +245,25 @@
       "comment": "Comment"
     },
     "taskEventActorSystem": "System",
-    "taskEventActorOperator": "Operator"
+    "taskEventActorOperator": "Operator",
+    "execEnv": {
+      "host": "Host",
+      "container": "Container",
+      "label": "Execution Environment",
+      "currentContainer": "Current Container"
+    },
+    "containers": {
+      "label": "Containers",
+      "count": "Container Count",
+      "empty": "No containers",
+      "recordId": "Record ID",
+      "containerId": "Container ID",
+      "name": "Name",
+      "image": "Image",
+      "state": "State",
+      "entered": "In Use",
+      "pending": "Creating"
+    }
   },
   "room": {
     "chatRooms": "Chat Rooms",

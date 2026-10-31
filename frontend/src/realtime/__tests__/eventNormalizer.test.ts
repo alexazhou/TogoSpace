@@ -112,4 +112,78 @@ describe('normalizeWsEventPayload', () => {
 
     expect(event).toBeNull();
   });
+
+  // ─── agent_container：执行环境事件（payload 与 agent_status 同一套 gt_agent 约定）───
+  describe('agent_container', () => {
+    it('reads identity from the full gt_agent object, not a bare id', () => {
+      const event = normalizeWsEventPayload({
+        event: 'agent_container',
+        gt_agent: { id: 8, team_id: 2, name: '李哥' },
+        exec_env: 'container',
+        current_container_id: 'a1b2c3d4e5f6',
+      });
+
+      expect(event).toEqual({
+        type: 'agent_container',
+        teamId: 2,
+        agentId: 8,
+        agentName: '李哥',
+        execEnv: 'container',
+        currentContainerId: 'a1b2c3d4e5f6',
+      });
+    });
+
+    it('keeps host env with null container id after exiting a container', () => {
+      const event = normalizeWsEventPayload({
+        event: 'agent_container',
+        gt_agent: { id: 8, team_id: 2, name: '李哥' },
+        exec_env: 'host',
+        current_container_id: null,
+      });
+
+      expect(event).toMatchObject({ type: 'agent_container', execEnv: 'host', currentContainerId: null });
+    });
+
+    it('does not leak a container id when env is host (dirty payload)', () => {
+      // 宿主态却带了 container_id：若照单全收，前端会高亮一行其实没在用的容器。
+      const event = normalizeWsEventPayload({
+        event: 'agent_container',
+        gt_agent: { id: 8, team_id: 2, name: '李哥' },
+        exec_env: 'host',
+        current_container_id: 'deadbeef1234',
+      });
+
+      expect(event).toMatchObject({ execEnv: 'host', currentContainerId: null });
+    });
+
+    it('falls back to host for unknown exec_env values', () => {
+      const event = normalizeWsEventPayload({
+        event: 'agent_container',
+        gt_agent: { id: 8, team_id: 2, name: '李哥' },
+        exec_env: 'PODMAN',
+        current_container_id: null,
+      });
+
+      expect(event).toMatchObject({ execEnv: 'host' });
+    });
+
+    it('drops the event when gt_agent is missing or has invalid ids', () => {
+      expect(normalizeWsEventPayload({
+        event: 'agent_container',
+        exec_env: 'container',
+      })).toBeNull();
+
+      expect(normalizeWsEventPayload({
+        event: 'agent_container',
+        gt_agent: { id: 0, team_id: 2 },
+        exec_env: 'container',
+      })).toBeNull();
+
+      expect(normalizeWsEventPayload({
+        event: 'agent_container',
+        gt_agent: { id: 8, team_id: -1 },
+        exec_env: 'container',
+      })).toBeNull();
+    });
+  });
 });

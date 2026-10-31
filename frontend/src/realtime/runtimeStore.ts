@@ -14,6 +14,7 @@ import {
 import type {
   AgentActivity,
   AgentActivityType,
+  AgentExecEnv,
   AgentInfo,
   AgentStatus,
   AgentTask,
@@ -39,6 +40,13 @@ const teamRoomsState = ref<Record<number, RoomState[]>>({});
 const roomMessagesState = ref<Record<number, RoomMessagesEntry>>({});
 const agentActivitiesState = ref<Record<number, AgentActivity[]>>({});
 const agentStatusState = ref<Record<number, AgentStatus>>({});
+/**
+ * 执行环境内存态（`agent_id -> {execEnv, currentContainerId}`）。
+ *
+ * 后端不落库（重启一律回宿主），前端同理：只由接口返回与 `agent_container` 事件推进，
+ * 不做本地推测。宿主环境也存一条，用于「Agent 从容器退出」时把徽标正确清掉。
+ */
+const agentExecEnvState = ref<Record<number, { execEnv: AgentExecEnv; currentContainerId: string | null }>>({});
 const teamDeptTreeState = ref<Record<number, DeptTreeNode | null>>({});
 const teamTasksState = ref<Record<number, AgentTask[]>>({});
 const roleTemplatesState = ref<RoleTemplateSummary[]>([]);
@@ -238,6 +246,18 @@ export function seedTeamAgents(teamId: number, agents: AgentInfo[]): void {
     }
   }
   agentStatusState.value = nextStatusState;
+
+  // 接口返回的 exec_env 是权威初值；随后只由 `agent_container` 事件推进。
+  const nextExecEnvState = { ...agentExecEnvState.value };
+  for (const agent of agents) {
+    if (typeof agent.id === 'number' && agent.id > 0) {
+      nextExecEnvState[agent.id] = {
+        execEnv: agent.exec_env === 'container' ? 'container' : 'host',
+        currentContainerId: agent.current_container_id ?? null,
+      };
+    }
+  }
+  agentExecEnvState.value = nextExecEnvState;
   refreshTeamRoomPreviews(teamId);
 }
 
@@ -446,6 +466,14 @@ export function getAgentStatus(agentId: number | null): AgentStatus | null {
   return agentStatusState.value[agentId] ?? null;
 }
 
+/** 取某 Agent 的执行环境；无记录时按宿主处理（与后端「未加载恒为 host」一致）。 */
+export function getAgentExecEnv(agentId: number | null): { execEnv: AgentExecEnv; currentContainerId: string | null } {
+  if (agentId === null) {
+    return { execEnv: 'host', currentContainerId: null };
+  }
+  return agentExecEnvState.value[agentId] ?? { execEnv: 'host', currentContainerId: null };
+}
+
 export function getDeptTreeState(teamId: number | null): DeptTreeNode | null {
   if (teamId === null) {
     return null;
@@ -650,6 +678,38 @@ export function applyRealtimeEvent(event: FrontendRealtimeEvent): void {
     return;
   }
 
+  if (event.type === 'agent_container') {
+    // 先更新内存态：即便当前 team 尚未加载该 Agent 的列表，环境本身也要记下来，
+    // 否则「先进容器、后加载列表」的顺序会让徽标停留旧值。
+    agentExecEnvState.value = {
+      ...agentExecEnvState.value,
+      [event.agentId]: {
+        execEnv: event.execEnv,
+        currentContainerId: event.currentContainerId,
+      },
+    };
+
+    const currentAgents = teamAgentsState.value[event.teamId] ?? [];
+    if (!currentAgents.length) {
+      return;
+    }
+
+    // 同步回列表项，让依赖 AgentInfo 的展示（卡片徽标）无需另接一份 store。
+    teamAgentsState.value = {
+      ...teamAgentsState.value,
+      [event.teamId]: currentAgents.map((agent) =>
+        agent.id === event.agentId
+          ? {
+            ...agent,
+            exec_env: event.execEnv,
+            current_container_id: event.currentContainerId,
+          }
+          : agent,
+      ),
+    };
+    return;
+  }
+
   if (event.type === 'room_status') {
     updateTeamRooms(event.teamId, (rooms) =>
       rooms.map((room) =>
@@ -716,6 +776,7 @@ export function clearRuntimeStore(): void {
   roomMessagesState.value = {};
   agentActivitiesState.value = {};
   agentStatusState.value = {};
+  agentExecEnvState.value = {};
   teamDeptTreeState.value = {};
   teamTasksState.value = {};
   taskEventsState.value = {};

@@ -10,6 +10,7 @@ import type {
   AgentStatus,
   AgentDetail,
   AgentInfo,
+  ContainerInfo,
   CreateTeamPayload,
   DeptTreeNode,
   DirectoriesConfig,
@@ -470,6 +471,11 @@ function normalizeAgent(agent: RawAgentInfo): AgentInfo {
     special: normalizedSpecial,
     allow_tools: Array.isArray(agent.allow_tools) ? agent.allow_tools : null,
     allow_skills: Array.isArray(agent.allow_skills) ? agent.allow_skills : null,
+    exec_env: agent.exec_env === 'container' ? 'container' : 'host',
+    current_container_id: typeof agent.current_container_id === 'string' && agent.current_container_id
+      ? agent.current_container_id
+      : null,
+    container_count: typeof agent.container_count === 'number' ? agent.container_count : null,
   };
 }
 
@@ -481,13 +487,39 @@ function parseDriverType(detail: RawAgentDetail): string {
   return normalizeDriverTypeValue(typeof detail.driver === 'string' ? detail.driver : '');
 }
 
+function normalizeContainerInfo(raw: unknown): ContainerInfo | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const item = raw as Record<string, unknown>;
+  const recordId = Number(item.record_id ?? 0);
+  // 预记录也必须有 record_id（它是删除入口），没有就无法操作，直接丢弃。
+  if (!Number.isFinite(recordId) || recordId <= 0) {
+    return null;
+  }
+  const dockerId = typeof item.docker_id === 'string' && item.docker_id ? item.docker_id : null;
+  return {
+    record_id: recordId,
+    agent_id: Number(item.agent_id ?? 0),
+    docker_id: dockerId,
+    container_name: String(item.container_name ?? ''),
+    image: String(item.image ?? ''),
+    state: String(item.state ?? 'unknown'),
+    is_entered: item.is_entered === true,
+  };
+}
+
 function normalizeAgentDetail(agent: RawAgentDetail): AgentDetail {
+  const rawContainers = (agent as Record<string, unknown>).containers;
   return {
     ...normalizeAgent(agent),
     agent_name: String(agent.agent_name ?? agent.name ?? ''),
     driver_type: parseDriverType(agent),
     prompt: String(agent.prompt ?? ''),
     error_message: typeof agent.error_message === 'string' ? agent.error_message : null,
+    containers: Array.isArray(rawContainers)
+      ? rawContainers.map(normalizeContainerInfo).filter((item): item is ContainerInfo => item !== null)
+      : null,
   };
 }
 

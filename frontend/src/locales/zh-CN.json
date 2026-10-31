@@ -245,7 +245,25 @@
       "comment": "评论"
     },
     "taskEventActorSystem": "系统",
-    "taskEventActorOperator": "操作者"
+    "taskEventActorOperator": "操作者",
+    "execEnv": {
+      "host": "宿主",
+      "container": "容器",
+      "label": "执行环境",
+      "currentContainer": "当前容器"
+    },
+    "containers": {
+      "label": "容器",
+      "count": "容器数",
+      "empty": "暂无容器",
+      "recordId": "记录 ID",
+      "containerId": "容器 ID",
+      "name": "名称",
+      "image": "镜像",
+      "state": "状态",
+      "entered": "当前使用",
+      "pending": "创建中"
+    }
   },
   "room": {
     "chatRooms": "聊天室",

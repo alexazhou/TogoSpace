@@ -6,7 +6,9 @@ import {
   applyRealtimeEvent,
   clearRuntimeStore,
   getAgentActivities,
+  getAgentExecEnv,
   getAgentStatus,
+  getTeamAgents,
   getRoomMessageHistoryState,
   getRoomMessages,
   getTaskEvents,
@@ -184,8 +186,83 @@ describe('runtimeStore realtime events', () => {
     expect(room?.current_turn_agent_id).toBe(8);
   });
 
-  it('keeps the activity array stable when a realtime activity changes status', () => {
-    applyRealtimeEvent({
+  // ─── agent_container：执行环境内存态 ───────────────────────────────────
+  describe('agent_container events', () => {
+    it('takes exec env from the loaded agent list as the initial value', () => {
+      seedTeamAgents(2, [createAgent({ id: 8, exec_env: 'container', current_container_id: 'abc123def456' })]);
+
+      expect(getAgentExecEnv(8)).toEqual({ execEnv: 'container', currentContainerId: 'abc123def456' });
+    });
+
+    it('treats a missing exec_env as host (unloaded agents are always host)', () => {
+      seedTeamAgents(2, [createAgent({ id: 8 })]);
+
+      expect(getAgentExecEnv(8)).toEqual({ execEnv: 'host', currentContainerId: null });
+    });
+
+    it('records the env even when the team list is not loaded yet', () => {
+      // 先进容器、后加载列表：若只在列表存在时才记，徽标会停在旧值。
+      applyRealtimeEvent({
+        type: 'agent_container',
+        teamId: 2,
+        agentId: 8,
+        agentName: 'Alpha',
+        execEnv: 'container',
+        currentContainerId: 'abc123def456',
+      });
+
+      expect(getAgentExecEnv(8)).toEqual({ execEnv: 'container', currentContainerId: 'abc123def456' });
+    });
+
+    it('updates both the env store and the agent list entry', () => {
+      seedTeamAgents(2, [createAgent({ id: 8, exec_env: 'host', current_container_id: null })]);
+
+      applyRealtimeEvent({
+        type: 'agent_container',
+        teamId: 2,
+        agentId: 8,
+        agentName: 'Alpha',
+        execEnv: 'container',
+        currentContainerId: 'abc123def456',
+      });
+
+      expect(getAgentExecEnv(8)).toEqual({ execEnv: 'container', currentContainerId: 'abc123def456' });
+      const agent = getTeamAgents(2).find((item) => item.id === 8);
+      expect(agent?.exec_env).toBe('container');
+      expect(agent?.current_container_id).toBe('abc123def456');
+    });
+
+    it('clears the container id when the agent exits back to host', () => {
+      seedTeamAgents(2, [createAgent({ id: 8, exec_env: 'container', current_container_id: 'abc123def456' })]);
+
+      applyRealtimeEvent({
+        type: 'agent_container',
+        teamId: 2,
+        agentId: 8,
+        agentName: 'Alpha',
+        execEnv: 'host',
+        currentContainerId: null,
+      });
+
+      expect(getAgentExecEnv(8)).toEqual({ execEnv: 'host', currentContainerId: null });
+      const agent = getTeamAgents(2).find((item) => item.id === 8);
+      expect(agent?.current_container_id).toBeNull();
+    });
+
+    it('defaults to host for unknown agent ids', () => {
+      expect(getAgentExecEnv(999)).toEqual({ execEnv: 'host', currentContainerId: null });
+      expect(getAgentExecEnv(null)).toEqual({ execEnv: 'host', currentContainerId: null });
+    });
+
+    it('does not leave stale env behind after clearing the store', () => {
+      seedTeamAgents(2, [createAgent({ id: 8, exec_env: 'container', current_container_id: 'abc123def456' })]);
+      clearRuntimeStore();
+
+      expect(getAgentExecEnv(8)).toEqual({ execEnv: 'host', currentContainerId: null });
+    });
+  });
+
+  it('keeps the activity array stable when a realtime activity changes status', () => {    applyRealtimeEvent({
       type: 'agent_activity',
       agentId: 1,
       activity: createActivity(),
