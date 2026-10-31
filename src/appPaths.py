@@ -98,3 +98,44 @@ def get_gtsp_binary_path() -> str:
         )
 
     return binary_path
+
+
+# 容器内使用的 Linux 产物架构名（Docker image inspect 的 .Architecture 取值）
+_CONTAINER_ARCH_ALIASES = {
+    "x86_64": "amd64",
+    "amd64": "amd64",
+    "arm64": "arm64",
+    "aarch64": "arm64",
+}
+
+
+def normalize_container_arch(arch: str) -> str | None:
+    """把 Docker 侧返回的架构名归一到 amd64 / arm64；不支持的架构返回 None。"""
+    return _CONTAINER_ARCH_ALIASES.get((arch or "").strip().lower())
+
+
+def get_gtsp_linux_binary_path(arch: str) -> str:
+    """按目标容器架构返回容器内使用的 Linux gtsp 产物路径。
+
+    与 `get_gtsp_binary_path`（宿主自身平台）分开：容器内跑的永远是 Linux 产物，
+    与宿主系统无关。产物入库即为 0755，`docker cp` 原样保留权限位，
+    因此容器内不需要（也不允许）再做 chmod。
+
+    Args:
+        arch: `amd64` / `arm64`（也接受 x86_64 / aarch64 别名）
+
+    Raises:
+        ValueError: 架构不受支持
+        FileNotFoundError: 对应产物缺失
+    """
+    normalized = normalize_container_arch(arch)
+    if normalized is None:
+        raise ValueError(f"unsupported container arch: {arch!r}")
+
+    binary_path = os.path.join(ASSETS_DIR, "execute", "gtsp", f"gtsp-linux-{normalized}")
+    if not os.path.exists(binary_path):
+        raise FileNotFoundError(
+            f"gtsp linux binary not found for arch {normalized}: {binary_path}"
+        )
+
+    return binary_path

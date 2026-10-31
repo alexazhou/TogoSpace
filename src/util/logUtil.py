@@ -23,6 +23,7 @@ BACKEND_LOG_CONFIG: Dict[str, Dict[str, object]] = {
     "service.funcToolService": {"path": "service/funcToolService.log", "global": False},
     "service.messageBus": {"path": "service/messageBus.log", "global": False},
     "service.teamService": {"path": "service/teamService.log", "global": False},
+    "service.containerService": {"path": "service/containerService.log", "global": False},
     "service.ormService": {"path": "service/ormService.log", "global": False},
     "service.persistenceService": {"path": "service/persistenceService.log", "global": False},
     "service.llmService": {"path": "service/llmService.log", "global": False},

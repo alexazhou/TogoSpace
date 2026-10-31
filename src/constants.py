@@ -309,3 +309,49 @@ class ScheduleState(EnhanceEnum):
     STOPPED = auto()    # 调度未开启或已显式停止
     BLOCKED = auto()    # 前置条件不满足（如未配置 LLM）
     RUNNING = auto()    # 允许房间激活、创建 task、启动 consumer
+
+
+class ExecEnv(EnhanceEnum):
+    """Agent 当前执行环境。
+
+    只存在于 Driver 内存，不落库：后端重启后一律回到宿主（外部容器无法可靠恢复，
+    避免出现「DB 说在容器、实际不在」）。对外字段约定使用固定小写字符串。
+    """
+    HOST = "host"
+    CONTAINER = "container"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Docker 容器化 Agent 沙箱 —— 运行参数（本版不支持用户配置，全部硬编码）
+# 设计依据：docs/design/2026-10-31-docker-agent-sandbox/step2_technical.md §3.1
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 自建容器默认镜像。只做参数默认值，不做成系统配置项。
+DEFAULT_CONTAINER_IMAGE = "ubuntu:24.04"
+
+# 单个 Agent 自建容器上限（含创建中的预记录与已停止的；外部容器不占配额）
+MAX_CONTAINERS_PER_AGENT = 3
+
+# 创建容器超时（秒）
+CONTAINER_CREATE_TIMEOUT_SEC = 60
+
+# 进入容器与 gtsp 握手超时（秒）
+CONTAINER_ENTER_TIMEOUT_SEC = 60
+
+# docker inspect 状态查询超时（秒）：必须短，避免状态查询阻塞工具调用
+CONTAINER_INSPECT_TIMEOUT_SEC = 3
+
+# 容器内固定二进制注入路径。/tmp 必须已存在且可写（docker cp 不补父目录），
+# 缺失或不可写时按失败处理，本版不做兜底。
+CONTAINER_GTSP_PATH = "/tmp/gtsp"
+
+# 容器内日志目录（显式传给 gtsp 的 --log-path，必须是容器内可写路径）
+CONTAINER_LOG_DIR = "/tmp/togospace/logs"
+
+# Label 键：记录归属校验用。按容器名清理预记录前必须校验该 label 与期望值一致，
+# 否则绝不 docker rm -f——避免误删宿主上同名的外部容器（设计文档 §3.5）。
+CONTAINER_LABEL_RECORD_ID = "com.togospace.container_record_id"
+
+# 自建容器内的两个挂载点
+CONTAINER_SELF_MOUNT_PATH = "/workspace/self"
+CONTAINER_SHARED_MOUNT_PATH = "/workspace/team_shared"
