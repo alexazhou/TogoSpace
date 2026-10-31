@@ -91,7 +91,7 @@ Agent turn（后端进程）
 | 接口 | Agent 列表 / 详情 payload 增加执行环境字段；详情附带容器列表 |
 | Web | WS 事件、runtime store、Agent 卡片徽标、属性面板容器表、i18n |
 | 打包 | `scripts/togo_desktop.spec` 不再排除 `gtsp-linux-*`（容器内需要 Linux 版 gtsp） |
-| gtsp 构建 | `gtsp-linux-amd64` 改为静态链接（`CGO_ENABLED=0`），否则 `ubuntu:20.04` / alpine 等镜像直接跑不起来 |
+| gtsp 构建 | `gtsp-linux-amd64` 改静态链接（`CGO_ENABLED=0`）——**已完成**（TSP `8c5e131`，任务 #105）；否则 `ubuntu:20.04` / alpine 等镜像直接跑不起来 |
 | 测试 | 单元 / 集成 / 生命周期 / 工具 schema 快照 / 可选真实 Docker e2e |
 
 ---
@@ -349,7 +349,7 @@ class SettingConfig(BaseModel):
 
 | 项 | 值 | 理由 |
 |---|---|---|
-| `image` | `ubuntu:24.04` | 产品 §2.3 明确「默认镜像不做成系统配置项」。glibc 2.39 是所有主流基础镜像里最宽松的一档，不会因 glibc 过旧导致 gtsp 起不来；体积 78MB，与 debian:bookworm-slim 只差 3MB |
+| `image` | `ubuntu:24.04` | 产品 §2.3 明确「默认镜像不做成系统配置项」。gtsp 静态化后镜像选择已不受 glibc 约束，选它是因为：主流基础镜像中兼容性最宽松（glibc 2.39），体积 78MB 与 debian:bookworm-slim 只差 3MB |
 | 单 Agent 容器上限 | 3 | 产品硬约束 |
 | `--init` | 恒开 | 接管僵尸进程回收 |
 | gtsp 挂载路径 | `/opt/togospace/gtsp` | 常量 |
@@ -605,7 +605,7 @@ def get_gtsp_linux_binary_path(arch: str) -> str:
 
 | 二进制 | 链接方式 | 说明 |
 |---|---|---|
-| `gtsp-linux-amd64` | 必须静态链接 | 原先是动态链接，要求 glibc ≥ 2.34，导致 `ubuntu:20.04`（2.31）、`debian:bullseye`（2.31）、alpine（musl）全部跑不起来。改为 `CGO_ENABLED=0` 编译 |
+| `gtsp-linux-amd64` | 静态链接（已改造） | 原先是动态链接，要求 glibc ≥ 2.34，导致 `ubuntu:20.04`（2.31）、`debian:bullseye`（2.31）、alpine（musl）全部跑不起来。已在 TSP `8c5e131` 用 `CGO_ENABLED=0` 改为静态链接 |
 | `gtsp-linux-arm64` | 静态链接 | 原本已是静态 |
 
 glibc 对照（改造前实测）：
@@ -620,6 +620,8 @@ glibc 对照（改造前实测）：
 | `alpine:3.19` | musl | ❌ | ✅ |
 
 构建侧根因：CI（`ubuntu-latest`，默认 `CGO_ENABLED=1`）与 `gtsp/script/build.sh` 都未设 `CGO_ENABLED=0`，Go 的 `net` / `os/user` 走 cgo 路径产生动态链接。静态化后 Go 使用纯 Go 的 resolver，DNS 解析行为有细微差异（见 §13 风险）。
+
+**注意：静态化后镜像选择不再受 glibc 约束。** 默认镜像选 `ubuntu:24.04` 的理由（§4.2）是「主流基础镜像中兼容性最宽松、体积代价小」，而不是「别的镜像跑不了」——alpine、debian、ubuntu 各版本现在都能跑。Agent 若想用别的镜像，走 `docker run` + `enter_container` 这条路即可（产品 §2.3）。
 
 已知限制：
 
@@ -1883,7 +1885,7 @@ if msg.topic == MessageBusTopic.AGENT_CONTAINER_STATE_CHANGED:
 |------|------|------|
 | **关闭 stdin 不保证容器停止**（§5.12 未实测） | 退出慢（多等 15 秒）或残留 running 容器 | 三级兜底：关 stdin → `docker stop` → `docker kill` + warning；启动时 owner label sweep 收敛 |
 | **形态 B 关 stdin 可能把别人的容器停掉** | 违反产品 §3.1「进入运行中容器，退出后继续运行」 | 实现前先跑 §12.5 的 0a/0b/0c；若关 stdin 会让外部容器退出，改为「不等待状态 + 只要 `started_by_us=False` 就绝不 stop」，并在进入时提示「gtsp 退出可能影响容器主进程」 |
-| `gtsp-linux-amd64` 静态化不彻底 | `ubuntu:20.04` / alpine 仍跑不起来 | 任务 #105：改 4 处构建配置，`file` 必须 `statically linked`；验收覆盖四个镜像（alpine / 20.04 / bookworm-slim / 24.04） |
+| `gtsp-linux-amd64` 静态化不彻底 | `ubuntu:20.04` / alpine 仍跑不起来 | **已处理**：TSP `8c5e131` 用 `CGO_ENABLED=0` 静态化，4 处构建配置均加静态链接断言防回归；任务 #105 验收覆盖 alpine / 20.04 / bookworm-slim / 24.04 四镜像 |
 | `CGO_ENABLED=0` 后纯 Go resolver 的 DNS 行为差异 | 容器内解析 `/etc/hosts`、`localhost`、短域名可能与 cgo 版不同 | 静态化任务里要求写明差异；e2e 验证容器内 `getent hosts` / 短域名解析；必要时保留 `GODEBUG=netdns=cgo` 的开关说明 |
 | Docker Desktop 文件共享未包含 `STORAGE_ROOT` / Agent 工作目录 | 创建时 mount denied | 错误信息带原始 stderr + 提示在 Docker Desktop → Settings → Resources → File sharing 添加路径；默认装在 `~` 下通常已共享 |
 | 默认镜像 `ubuntu:24.04` 未 pull | 创建失败 | `container_image_missing` 明确提示 `docker pull ubuntu:24.04`；产品明确不自动拉取 |
@@ -1914,7 +1916,7 @@ if msg.topic == MessageBusTopic.AGENT_CONTAINER_STATE_CHANGED:
 
 ## 14. 实施顺序（建议）
 
-1. **gtsp 静态化验证（前置，已有任务 #105）**：先确认 §5.12 的 0a/0b/0c 三个未验证行为，这三条决定「退出流程」的最终形态。若形态 B 关 stdin 会停掉外部容器，§6.4 与 §8.3 的文案需要调整。
+1. **gtsp 静态化验证（前置，任务 #105 已进入 REVIEWING）**：构建侧已完成，验收由 gtsp_test 跑四镜像。同时先确认 §5.12 的 0a/0b/0c 三个未验证行为，这三条决定「退出流程」的最终形态。若形态 B 关 stdin 会停掉外部容器，§6.4 与 §8.3 的文案需要调整。
 2. **常量 / 配置 / 迁移 / model / DAL**：先把持久层与配置打通，跑迁移测试。
 3. **dockerCli + containerService（含 `resolve_target`、`gtspInContainer`）**：fake docker 单测覆盖创建 / 启动 / 停止 / 删除 / 状态 / 目标解析 / 错误分类 / 命令构造。
 4. **TSP driver 双 client 与进入退出**：先不接工具，用单测直接调用 `enter_container` / `exit_to_host`。
