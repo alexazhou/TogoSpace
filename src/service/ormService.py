@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import sqlite3
+import time
 from datetime import datetime
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 import aiosqlite
 import aiosqlite.core as _aiosqlite_core
 import peewee
+from peewee_async.connection import connection_context
 from peewee_async.databases import AioDatabase
 from peewee_async.pool import PoolBackend
+from peewee_async.transactions import Transaction
 from peewee_async.utils import ConnectionProtocol
 
 import appPaths
@@ -83,8 +87,75 @@ class SqlitePoolBackend(PoolBackend):
         return self._acquired_count > 0
 
 
+_tx_logger = logging.getLogger(f"{__name__}.transaction")
+
+# 超过该时长的事务升 WARNING（进 backend_warning.log），否则 INFO。
+_tx_slow_ms = float(os.environ.get("TOGO_TX_SLOW_MS", "200"))
+
+
+class _TxLogTransaction(Transaction):
+    """根事务发 `BEGIN IMMEDIATE` 并记录等锁时长；嵌套事务仍走 `SAVEPOINT`。
+
+    为什么必须是 IMMEDIATE：`peewee_async` 的根事务默认发裸 `BEGIN`
+    （= `BEGIN DEFERRED`），延迟事务在「先读后写」升级锁时若撞上别的写者，
+    SQLite 判定继续等待必然死锁，**不调用 busy handler 直接返回 SQLITE_BUSY**，
+    表现为 `database is locked`，`busy_timeout` 对此无效。
+    `BEGIN IMMEDIATE` 在事务开头（尚未持有任何锁时）就取 RESERVED，
+    拿不到时可安全排队等待，busy handler 正常生效。
+    """
+
+    begin_sec = 0.0  # 根事务 BEGIN 等锁时长；嵌套事务不更新
+
+    async def begin(self) -> None:
+        if self.savepoint:
+            await super().begin()
+            return
+        started = time.perf_counter()
+        try:
+            await self.execute("BEGIN IMMEDIATE")
+        finally:
+            self.begin_sec = time.perf_counter() - started
+
+
 class AioSqliteDatabase(AioDatabase, peewee.SqliteDatabase):
     pool_backend_cls = SqlitePoolBackend
+
+    @contextlib.asynccontextmanager
+    async def _aio_atomic(self, use_savepoint: bool = False) -> AsyncIterator[None]:
+        """覆写 peewee_async 的默认实现：根事务改 IMMEDIATE，并记录事务耗时。
+
+        `total` 与 `begin` 相差很大 ⇒ 事务内穿插了非 DB 操作（网络/IO/等待）；
+        `begin` 接近 `total` ⇒ 在等别的写者释放写锁。
+        """
+        async with self.aio_connection() as connection:
+            ctx = connection_context.get()
+            assert ctx is not None
+            is_root = not ctx.transaction_is_opened
+            if not is_root and not use_savepoint:
+                raise peewee.OperationalError("Transaction already opened")
+
+            tx = _TxLogTransaction(connection, is_savepoint=not is_root)
+            started = time.perf_counter()
+            failed = True
+            try:
+                async with tx:
+                    if is_root:
+                        ctx.transaction_is_opened = True
+                    yield
+                failed = False
+            finally:
+                if is_root:
+                    ctx.transaction_is_opened = False
+                    total_ms = (time.perf_counter() - started) * 1000
+                    message = "DBTX %s total=%.1fms begin=%.1fms" % (
+                        "ROLLBACK" if failed else "COMMIT",
+                        total_ms,
+                        tx.begin_sec * 1000,
+                    )
+                    if total_ms >= _tx_slow_ms:
+                        _tx_logger.warning(message)
+                    else:
+                        _tx_logger.info(message)
 
 
 _db: Optional[AioSqliteDatabase] = None
@@ -112,9 +183,11 @@ async def startup(db_path: str) -> None:
     abs_path = os.path.abspath(db_path)
     os.makedirs(os.path.dirname(abs_path), exist_ok=True)
 
+    # timeout 必须走 pool_params：peewee 的 timeout/pragmas 只在其同步 _connect() 生效，
+    # 而异步连接池自己 aiosqlite.connect()，只认 connect_params（即 pool_params 展开）。
     database = AioSqliteDatabase(
         abs_path,
-        timeout=30,
+        pool_params={"timeout": 30},
     )
     bind_database(database)
 
