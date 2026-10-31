@@ -26,7 +26,10 @@ Agent turn
 | **外部 / 他人容器（已停止）** | — | **不支持直接进入**。报错提示「该容器已停止，请先执行 docker start 启动」 | — |
 | **宿主环境** | — | 现有 `build_gtsp_command`，直接拉起宿主二进制 | — |
 
-- **自建容器为什么不需 `docker stop`**：gtsp 本身作为 PID 1 运行，关闭 stdio 后 gtsp 收到 EOF 退出，容器随之正常停止。
+- **自建容器 `--init` 与自动退出机制（为什么不需 `docker stop`）**：
+  - 自建容器使用 `--init` 参数启动，PID 1 为 Docker 内置的 `docker-init`（tini），`gtsp` 作为其主子进程运行；
+  - **`--init` 不会阻碍容器自动退出**：tini 的默认行为是将主子进程（`gtsp`）的生命周期等同于容器生命周期。当驱动端关闭 stdio 时，`gtsp` 收到 EOF 退出；tini 捕获到主子进程退出事件后，**会立即以 `gtsp` 的退出码自身退出**，绝不会因容器内残留后台进程而挂起等待；
+  - **Linux PID 1 内核机制保障**：在 Linux PID 命名空间中，一旦 PID 1（tini）退出，内核会立即向该命名空间内的所有其他存活进程广播 `SIGKILL` 并销毁命名空间。因此即便 Agent 在容器内后台启动了其他任务（如 `nohup`、编译守护进程等），只要 `gtsp` 退出，容器也必定在 0.1~0.2s 内自然停止转为 `exited` 状态。
 - **外部容器简化**：外部容器进入前必须已在运行。若处于停止状态，系统不自动代为拉起（因为 Agent 本身可用宿主命令 `docker start` 启动它），启动后再进入按运行中容器处理。退出时仅关闭 exec 的 stdio，不影响容器主进程，同样不涉及 `docker stop`。
 
 ### 1.3 关键决策
@@ -134,7 +137,13 @@ Agent turn
     --env HOME=/tmp --network bridge --security-opt no-new-privileges
     <image> --mode stdio --log-path /tmp/togospace/logs
   ```
-- **关键约束**：必须带 `-i`；绝不带 `-t`；`--entrypoint` 在镜像名之前；显式传可写的 `--log-path`；`--init` 回收孤儿；不传 `--workdir`（跟随镜像 `WORKDIR`）；创建后立即 `docker cp` 注入 `/tmp/gtsp`。
+- **关键约束**：
+  - 必须带 `-i`，绝不带 `-t`（保持原始流传输，不分配伪终端）；
+  - `--entrypoint` 必须置于镜像名之前；显式传容器内可写的 `--log-path`；
+  - 不传 `--workdir`（跟随镜像默认 `WORKDIR`）；创建后立即通过 `docker cp` 注入 `/tmp/gtsp`；
+  - **开启 `--init` 的双重保障**：
+    1. **回收孤儿僵尸进程**：Agent 执行命令或复杂脚本派生的子进程若先于孙子进程退出，孙子孤儿进程会被内核自动 reparent 到 PID 1（tini），由 tini 自动 `waitpid` 收割，防止 PID 资源耗尽；
+    2. **不影响自动退出**：tini 默认将 `gtsp` 视为主进程，`gtsp` 退出时 tini 立即同步退出，触发内核清理所有残留进程并使容器转为 `exited` 停止状态。
 
 ### 3.6 错误码分类
 
