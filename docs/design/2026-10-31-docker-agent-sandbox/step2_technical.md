@@ -114,10 +114,12 @@ Agent turn
 | 接口 | 说明 |
 |---|---|
 | `create_container(agent_id, image=None) -> ContainerInfo` | 校验配额（≤3）、生成命名与 label、执行 `docker create` 挂载目录、`docker cp` 注入 gtsp、写 DB、失败补偿清理 |
-| `delete_container(agent_id, docker_id) -> bool` | 校验不是当前使用中容器，执行 `docker rm -f` 并标记 DB 软删除 (`deleted=1`) |
+| `delete_container(agent_id, container_id: str) -> bool` | 校验不是当前使用中容器，执行 `docker rm -f` 并标记 DB 软删除 (`deleted=1`) |
+| `delete_agent_containers(agent_id: int) -> int` | Agent 离职/改名时，批量强制删除该 Agent 的所有自建容器并标记软删除 |
+| `delete_team_containers(team_id: int) -> int` | Team 删除/改名/工作目录迁移时，批量强制删除该 Team 下所有自建容器并标记软删除 |
 | `list_agent_containers(agent_id) -> list[ContainerInfo]` | 查询该 Agent 未删除的自建容器并并行 inspect 实时状态 |
 | `get_container_target(agent_id, container_id: str) -> ContainerTarget` | 校验 container_id，查验 DB / Docker 获取架构 arch 与 is_managed，组装 ContainerTarget |
-| `prepare_container_gtsp(target: ContainerTarget)` | 执行 `docker cp` 将 Linux gtsp 注入到 `/tmp/gtsp` 并赋权（自建容器在 create 时注入，外部容器在 enter 前注入） |
+| `prepare_container_gtsp(container: ContainerTarget)` | 执行 `docker cp` 将 Linux gtsp 注入到 `/tmp/gtsp` 并赋权（自建容器在 create 时注入，外部容器在 enter 前注入） |
 
 ### 3.5 容器创建与命名规范
 
@@ -268,7 +270,7 @@ sequenceDiagram
 3. **执行创建**：调用 `docker create` 绑定个人工作目录读写、团队共享目录只读，设置 `--entrypoint /tmp/gtsp`；
 4. **立即注入**：创建完成后立即调用 `docker cp` 将对应架构的 Linux `gtsp` 二进制注入到容器内部 `/tmp/gtsp`；
 5. **记录落库**：在 `agent_containers` 表中插入一条新记录（`agent_id`, `docker_id`, `container_name`, `image`, `deleted=0`, `created_at`）；
-6. **返回结果**：返回 `docker_id` 与提示信息，**当前执行环境保持在宿主不变**。
+6. **返回结果**：返回 `container_id` 与提示信息，**当前执行环境保持在宿主不变**。
 
 ### 5.4 容器删除流程（`delete_container(container_id)`）
 
@@ -308,7 +310,7 @@ sequenceDiagram
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `success` | `bool` | 是否创建成功 |
-| `docker_id` | `str` | 容器的 12 位短 ID |
+| `container_id` | `str` | 容器的 12 位短 ID |
 | `container_name` | `str` | 容器名称（`agent-<name>-<1..3>`） |
 | `image` | `str` | 实际使用的镜像名称 |
 | `state` | `str` | 容器初始状态（固定为 `"created"`） |
@@ -330,7 +332,7 @@ sequenceDiagram
 |---|---|---|
 | `success` | `bool` | 是否进入成功 |
 | `exec_env` | `str` | 切换后的执行环境（固定为 `"container"`） |
-| `docker_id` | `str` | 当前容器的 12 位 Docker ID |
+| `container_id` | `str` | 当前容器的 12 位 Docker ID |
 | `container_name` | `str` | 容器名称 |
 | `mounted` | `bool` | 是否挂载了个人工作目录（自建容器为 true，外部容器为 false） |
 | `workdir` | `str` | 当前所在工作目录 |
@@ -360,8 +362,8 @@ sequenceDiagram
 | `success` | `bool` | 是否查询成功 |
 | `docker_available` | `bool` | 本地 Docker 服务是否可用 |
 | `exec_env` | `str` | 当前 Agent 执行环境（`"host"` 或 `"container"`） |
-| `current_docker_id` | `str \| null` | 当前若在容器内，为该容器的 12 位 Docker ID；宿主下为 null |
-| `containers` | `list[object]` | 当前 Agent 的自建容器列表，每一项包含：`docker_id`、`container_name`、`state`（`created`/`running`/`stopped`/`missing`）、`is_entered`、`image`、`created_at` |
+| `current_container_id` | `str \| null` | 当前若在容器内，为该容器的 12 位 Docker ID；宿主下为 null |
+| `containers` | `list[object]` | 当前 Agent 的自建容器列表，每一项包含：`container_id`、`container_name`、`state`（`created`/`running`/`stopped`/`missing`）、`is_entered`、`image`、`created_at` |
 
 #### 5. `delete_container`（删除指定自建容器）
 
@@ -377,7 +379,7 @@ sequenceDiagram
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `success` | `bool` | 是否删除成功 |
-| `deleted_docker_id` | `str` | 被删除的容器 12 位 Docker ID |
+| `deleted_container_id` | `str` | 被删除的容器 12 位 Docker ID |
 | `message` | `str` | 删除成功提示说明 |
 
 ### 6.3 契约与 Schema 规范
@@ -417,10 +419,10 @@ sequenceDiagram
 
 ## 8. 接口与 Web
 
-- **Agent 列表**：增加 `exec_env`、`current_docker_id`、`container_count`（`count_map_by_agent_ids` 只查 DB）。未加载的 Agent 恒为 host。
+- **Agent 列表**：增加 `exec_env`、`current_container_id`、`container_count`（`count_map_by_agent_ids` 只查 DB）。未加载的 Agent 恒为 host。
 - **Agent 详情**：额外增加 `containers`（`list_agent_containers` 实时查询），用 `ContainerInfo.model_dump(mode="json")`。
-- **WebSocket**：新 topic `AGENT_CONTAINER_STATE_CHANGED`，事件名 `agent_container`，payload 为 `gt_agent`、`exec_env`、`current_docker_id`。只由 driver 在环境实际变化时发布（进入、退出、回落、改名回落）。
-- **活动记录**：`AgentActivityMeta` 增加 `exec_env` / `current_docker_id` / `container_name`，开始时写入，结束时 patch 为最终环境。
+- **WebSocket**：新 topic `AGENT_CONTAINER_STATE_CHANGED`，事件名 `agent_container`，payload 为 `gt_agent`、`exec_env`、`current_container_id`。只由 driver 在环境实际变化时发布（进入、退出、回落、改名回落）。
+- **活动记录**：`AgentActivityMeta` 增加 `exec_env` / `current_container_id` / `container_name`，开始时写入，结束时 patch 为最终环境。
 - **前端**：`types.ts` / `api.ts` / `eventNormalizer.ts` / `runtimeStore.ts` 增加字段与事件；Agent 卡片显示容器徽标；活动条目显示环境徽标；属性面板增加「执行环境」区块与容器表；i18n 增加 `agent.execEnv.*` / `agent.containers.*` / `agent.containerState.*`。
 - TUI 本次不改。
 
@@ -451,7 +453,7 @@ sequenceDiagram
 | 层 | 范围 |
 |---|---|
 | 单元 `tests/unit/service/containerService/` | CLI 路径解析；错误分类；创建 argv（`-i` 存在、`--entrypoint` 下标 < image 下标、无 `-t` / `--workdir` / `--read-only`、含 `--log-path` 与 `--init`）；中文名回退且长名不截断；image 参数（空值走默认、自定义值原样、非 linux / 架构不支持 / 缺失均不落库）；并发创建不超过 3；`get_container_target`（12 位 hex 格式校验、镜像名拒绝）；形态 A / B 命令构造与 distroless 兜底；二进制注入（docker cp 保留可执行权限）；工作目录继承；删除时 `container_in_use`；目录变更清理 |
-| 单元 `test_tsp_driver_container.py` | 自建 stopped 进入；自建 running 报错且不调用 stop / start；外部 running 进入与退出；外部 stopped 报错拒绝；同容器幂等；A → B 切换；握手失败恢复并回落；超时；关 stdin 容器自动退出；退出必回宿主；丢失时删记录（仅限 owner）；Docker 不可用保留记录；单 client 切换；Cancelled 清理；启动不恢复；只读 / 无 bash 提示（仅一次） |
+| 单元 `test_tsp_driver_container.py` | 自建 stopped 进入；自建 running 报错且不调用 stop / start；外部 running 进入与退出；外部 stopped 报错拒绝；同容器幂等；A → B 切换；握手失败恢复并回落；超时；关 stdin 容器自动退出；退出必回宿主；丢失且为自建容器时标记软删除；Docker 不可用保留记录；单 client 切换；Cancelled 清理；启动不恢复；只读 / 无 bash 提示（仅一次） |
 | 集成 | fake `docker` 脚本（JSON 状态），`start -a -i` / `exec -i` 挂真实宿主 gtsp 子进程，走 `run_tool_call` 跑完整链路 |
 | 生命周期 | 迁移 0017 幂等；`backend_main` 启停顺序 |
 | schema | 快照、参数顺序、分类契约；`get_tools()` 默认不含容器工具 |

@@ -17,7 +17,7 @@
 
 | 工具 | 作用 | 要点 |
 |---|---|---|
-| `create_container(image?)` | 创建容器 | 自动挂载个人目录与共享目录；**只创建，不切换执行环境**；返回 `docker_id` 与容器名 |
+| `create_container(image?)` | 创建容器 | 自动挂载个人目录与共享目录；**只创建，不切换执行环境**；返回 `container_id` 与容器名 |
 | `delete_container(container_id)` | 删除容器 | 只能删自己创建的（传目标容器 `container_id`）；正在使用的不能删，需先 `exit_to_host` |
 | `list_containers()` | 查看容器 | 返回当前执行环境 + **自己创建的**容器及状态，不枚举其他容器 |
 | `enter_container(container_id)` | 进入容器 | 传目标容器 `container_id`；不校验属主、不做挂载；**外部容器须为运行状态（已停止的需 Agent 自行命令启动）**；不接受镜像名 |
@@ -84,7 +84,7 @@
 
 ```text
 小马哥: create_container()
-        → 返回 docker_id: "7b1a2c3d4e5f"（agent-xiaomage-1 已创建，仍在宿主）
+        → 返回 container_id: "7b1a2c3d4e5f"（agent-xiaomage-1 已创建，仍在宿主）
         enter_container(container_id="7b1a2c3d4e5f")
         → 进入，工作目录 /
         execute_bash "cd /workspace/self/proj && npm install && npm run lint"
@@ -110,7 +110,7 @@
 ## 9. 验收标准
 
 **管理**
-- [ ] `create_container` 只创建不切换，自动挂载两个目录，返回 `docker_id` 与容器名。
+- [ ] `create_container` 只创建不切换，自动挂载两个目录，返回 `container_id` 与容器名。
 - [ ] 中文等非法 Agent 名回退为 `agent-<agent_id>-<1..3>`，不会创建失败。
 - [ ] 不传 `image` 时为 Ubuntu 24.04；传自定义镜像则使用之；本地不存在时报错并提示 `docker pull`。
 - [ ] 无 bash 镜像（如 `alpine:3.19`）能建、能进、文件工具可用，`execute_bash` 返回明确原因与出路。
