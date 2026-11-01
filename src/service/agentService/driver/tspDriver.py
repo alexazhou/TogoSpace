@@ -10,16 +10,20 @@ from pytspclient import TSPClient, TSPException, ToolResult, ToolCall
 from pytspclient.types import TSP_ERROR_STDOUT_CLOSED, TSP_ERROR_CONNECTION_CLOSED
 
 import appPaths
-from constants import CONTAINER_ENTER_TIMEOUT_SEC, ExecEnv, MessageBusTopic
+from constants import (
+    CONTAINER_ENTER_TIMEOUT_SEC,
+    ERROR_DOCKER_CLI_NOT_FOUND,
+    ExecEnv,
+    MessageBusTopic,
+)
+from exception import TogoException
 from model.coreModel import ContainerTarget, ExecEnvSnapshot
-from service.containerService import core as containerService
-from service.containerService import core as container_cli
 from service.agentService.driver.base import AgentDriverConfig
 
 from service import funcToolService, roomService, messageBus
 from service.agentService import toolRegistry
 from model.dbModel.gtScheculeTask import GtScheculeTask
-from util import llmApiUtil
+from util import containerUtil, llmApiUtil
 
 from .base import AgentDriver, AgentTurnSetup
 
@@ -123,12 +127,23 @@ class TspAgentDriver(AgentDriver):
         两种形态不能互换：对自建容器用 exec 会因容器未 running 而失败；对外部
         容器用 start 会二次启动主进程。
         """
-        docker = container_cli.get_cli()
-        if container.is_managed:
-            argv = containerService.build_container_start_argv(container.container_id)
-        else:
-            argv = containerService.build_container_exec_argv(container.container_id)
-        return [docker.binary_path, *argv]
+        docker_binary = containerUtil.resolve_docker_binary_path()
+        if docker_binary is None:
+            # 与 DockerCli 同一套探测逻辑；这里直接转成工具层可识别的错误码。
+            raise TogoException(
+                "未找到 docker 命令，请确认 Docker 已安装并在 PATH 中",
+                ERROR_DOCKER_CLI_NOT_FOUND,
+            )
+        return [
+            docker_binary,
+            *containerUtil.build_container_attach_argv(
+                container.container_id, is_managed=container.is_managed
+            ),
+        ]
+
+    def is_connected(self) -> bool:
+        """当前 stdio 连接是否仍存活（供 Agent 判定「已在目标容器」是否幂等）。"""
+        return self._is_client_connected()
 
     def _is_client_connected(self) -> bool:
         """检查 TSP client 进程是否仍然存活。

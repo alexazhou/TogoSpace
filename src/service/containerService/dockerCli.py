@@ -17,27 +17,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import shutil
 import signal
 from dataclasses import dataclass
 
+from constants import ERROR_DOCKER_CLI_NOT_FOUND
 from exception import TogoException
+from util import containerUtil
 
 logger = logging.getLogger(__name__)
 
-# Docker 未在 PATH 时的常见默认安装路径（按平台区分）。
-# 桌面应用从 GUI 启动时 PATH 往往不含 /usr/local/bin，这里做兜底探测。
-_DEFAULT_BINARY_CANDIDATES = (
-    "/usr/local/bin/docker",
-    "/opt/homebrew/bin/docker",
-    "/usr/bin/docker",
-    "/Applications/Docker.app/Contents/Resources/bin/docker",
-    "/Applications/OrbStack.app/Contents/MacOS/xbin/docker",
-    "/usr/local/lib/docker/cli-plugins/docker",
-)
-
-# 错误码（§3.6 Docker 环境类）
-ERROR_DOCKER_CLI_NOT_FOUND = "docker_cli_not_found"
+# 错误码（§3.6 Docker 环境类）。`docker_cli_not_found` 定义在 constants 里，
+# 因为 util 层的 argv 构造也要用；daemon 错误码只有本层使用，留在这里。
 ERROR_DOCKER_DAEMON_UNAVAILABLE = "docker_daemon_unavailable"
 
 # daemon 不可用的 stderr 特征。Docker Desktop / OrbStack / podman 各自措辞不同，
@@ -121,19 +111,15 @@ class DockerCli:
         """探测 docker 可执行文件：`which`（PATH）优先，其次常见默认安装路径。
 
         找不到时抛 `docker_cli_not_found`——这是环境问题，不重试、不猜测。
+        探测逻辑在 `util.containerUtil`，与 driver 的 argv 构造共用同一份路径表。
         """
-        found = shutil.which("docker")
-        if found:
-            return found
-
-        for candidate in _DEFAULT_BINARY_CANDIDATES:
-            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                return candidate
-
-        raise DockerCliError(
-            "未找到 docker 命令，请确认 Docker 已安装并在 PATH 中",
-            ERROR_DOCKER_CLI_NOT_FOUND,
-        )
+        found = containerUtil.resolve_docker_binary_path()
+        if found is None:
+            raise DockerCliError(
+                "未找到 docker 命令，请确认 Docker 已安装并在 PATH 中",
+                ERROR_DOCKER_CLI_NOT_FOUND,
+            )
+        return found
 
     async def run(
         self,

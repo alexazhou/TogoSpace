@@ -359,6 +359,10 @@ CONTAINER_CREATE_TIMEOUT_SEC = 60
 # 进入容器与 gtsp 握手超时（秒）
 CONTAINER_ENTER_TIMEOUT_SEC = 60
 
+# docker 可执行文件缺失。跨 service / util 共享：argv 构造在 util 层就能发现
+# 这个问题，不能为了同一个错误码再让 util 反向依赖 service。
+ERROR_DOCKER_CLI_NOT_FOUND = "docker_cli_not_found"
+
 # docker inspect 状态查询超时（秒）：必须短，避免状态查询阻塞工具调用
 CONTAINER_INSPECT_TIMEOUT_SEC = 3
 

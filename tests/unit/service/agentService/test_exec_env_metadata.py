@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,6 +15,7 @@ import pytest
 from constants import ExecEnv
 from model.coreModel import ContainerTarget, ExecEnvSnapshot, ExecEnvState
 from service.agentService import core
+from service.agentService.agent import Agent
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver.base import AgentDriverConfig
 from constants import DriverType
@@ -54,11 +54,15 @@ class _NoExecEnvDriver:
         return None
 
 
-def _fake_agent(agent_id: int, team_id: int, driver) -> SimpleNamespace:
-    return SimpleNamespace(
-        gt_agent=SimpleNamespace(id=agent_id, team_id=team_id),
-        task_consumer=SimpleNamespace(_turn_runner=SimpleNamespace(driver=driver)),
+def _fake_agent(agent_id: int, team_id: int, driver) -> Agent:
+    agent = Agent(
+        gt_agent=GtAgent(
+            id=agent_id, team_id=team_id, name=f"agent-{agent_id}", role_template_id=1
+        ),
+        system_prompt="",
     )
+    agent.task_consumer._turn_runner.driver = driver
+    return agent
 
 
 _MANAGED = ContainerTarget(
@@ -91,9 +95,8 @@ def test_exec_env_state_reports_container_when_loaded(monkeypatch):
 
 
 def test_exec_env_state_ignores_driver_without_exec_env(monkeypatch):
-    """Native driver 没有 `exec_env` ⇒ 当成未加载（恒 host），不做 instanceof 判断。"""
-    native_like = SimpleNamespace()  # 无 exec_env 属性
-    monkeypatch.setattr(core, "_agents", {3: _fake_agent(3, 1, native_like)})
+    """Native driver 不报告环境（`get_exec_env()` 返回 None）⇒ 恒 host。"""
+    monkeypatch.setattr(core, "_agents", {3: _fake_agent(3, 1, _NoExecEnvDriver())})
 
     assert core.get_exec_env_state(3) == ExecEnvState()
 
@@ -116,8 +119,8 @@ def test_team_exec_env_map_only_contains_loaded_agents_of_that_team(monkeypatch)
 
 
 def test_team_exec_env_map_skips_agents_without_driver(monkeypatch):
-    """没有可报告环境的 driver 的 Agent 直接跳过（由调用方回落 host）。"""
-    monkeypatch.setattr(core, "_agents", {3: _fake_agent(3, 1, SimpleNamespace())})
+    """不报告环境的 driver 直接跳过（由调用方回落 host）。"""
+    monkeypatch.setattr(core, "_agents", {3: _fake_agent(3, 1, _NoExecEnvDriver())})
 
     assert core.get_team_exec_env_map(1) == {}
 

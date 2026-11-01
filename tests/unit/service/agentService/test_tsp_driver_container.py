@@ -19,7 +19,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from constants import ExecEnv
+from constants import ERROR_DOCKER_CLI_NOT_FOUND, ExecEnv
+from exception import TogoException
 from model.coreModel import ContainerTarget
 from model.dbModel.gtAgent import GtAgent
 from service.agentService.agentHistoryStore import AgentHistoryStore
@@ -153,7 +154,9 @@ async def test_connect_managed_container_uses_start_attach(monkeypatch):
     关 stdin 即自动停回 exited。
     """
     captured = _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
 
     assert await driver.connect(ExecEnv.CONTAINER, _MANAGED) is True
@@ -178,7 +181,9 @@ async def test_connect_external_container_uses_exec(monkeypatch):
     外部容器的主进程不能被替换，只能额外 exec 一个 gtsp。
     """
     captured = _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
 
     assert await driver.connect(ExecEnv.CONTAINER, _EXTERNAL) is True
@@ -203,6 +208,25 @@ async def test_connect_container_without_target_returns_false(monkeypatch):
     assert driver.exec_env == ExecEnv.HOST
 
 
+async def test_connect_without_docker_binary_raises_cli_not_found(monkeypatch):
+    """docker 未安装时抛 `docker_cli_not_found`，环境保持 HOST。
+
+    驱动直接依赖 `util.containerUtil` 探测 docker：错误码必须与 DockerCli 一致，
+    否则工具层无法提示用户「请安装 Docker」。
+    """
+    _patch_client(monkeypatch)
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: None
+    )
+    driver = _build_driver()
+
+    with pytest.raises(TogoException) as excinfo:
+        await driver.connect(ExecEnv.CONTAINER, _MANAGED)
+
+    assert excinfo.value.error_code == ERROR_DOCKER_CLI_NOT_FOUND
+    assert driver.exec_env == ExecEnv.HOST
+
+
 # ---------------------------------------------------------------------------
 # 超时参数：request_timeout 不能被 enter_timeout 顶掉
 # ---------------------------------------------------------------------------
@@ -215,7 +239,9 @@ async def test_connect_uses_request_timeout_not_enter_timeout(monkeypatch):
     稍慢的编译就会假超时。这条是硬约束（§4.3）。
     """
     captured = _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver(request_timeout_sec=190)
 
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
@@ -238,7 +264,9 @@ async def test_connect_times_out_after_enter_timeout(monkeypatch):
 
     monkeypatch.setattr(tspDriver.TSPClient, "from_stdio", _SlowFactory)
     monkeypatch.setattr(tspDriver, "CONTAINER_ENTER_TIMEOUT_SEC", 0.2)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
 
     assert await driver.connect(ExecEnv.CONTAINER, _MANAGED) is False
@@ -254,7 +282,9 @@ async def test_connect_times_out_after_enter_timeout(monkeypatch):
 async def test_failed_connect_keeps_previous_env(monkeypatch):
     """`connect(CONTAINER)` 握手失败时环境**保持 HOST**（不能变成「说在容器」）。"""
     _patch_client(monkeypatch, fail_initialize=True)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
 
     assert await driver.connect(ExecEnv.CONTAINER, _MANAGED) is False
@@ -271,7 +301,9 @@ async def test_failed_exit_connect_keeps_container_env(monkeypatch):
     而 `_ensure_connected` 会重连容器。
     """
     _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
     assert driver.exec_env == ExecEnv.CONTAINER
@@ -288,7 +320,9 @@ async def test_failed_exit_connect_keeps_container_env(monkeypatch):
 async def test_failed_connect_closes_the_partially_created_client(monkeypatch):
     """握手失败必须关掉已拉起的进程（否则容器内 gtsp 一直挂着）。"""
     _patch_client(monkeypatch, fail_initialize=True)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
 
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
@@ -309,7 +343,9 @@ async def test_disconnect_does_not_reset_exec_env(monkeypatch):
     connect 失败时不丢状态。
     """
     _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
 
@@ -324,7 +360,9 @@ async def test_disconnect_does_not_reset_exec_env(monkeypatch):
 async def test_disconnect_closes_client(monkeypatch):
     """`disconnect()` 真的关闭了 client（关 stdin 是容器停回 exited 的唯一触发）。"""
     _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
     client = driver._client
@@ -345,7 +383,9 @@ async def test_ensure_connected_reconnects_current_container_not_host(monkeypatc
     回落宿主会让容器里写的文件突然写到宿主目录——比直接失败危险得多。
     """
     captured = _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
 
@@ -392,7 +432,9 @@ async def test_ensure_connected_does_not_deadlock_when_env_is_container(monkeypa
     失败，而不是把整个测试套件挂住。
     """
     _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
     driver._client = None
@@ -410,7 +452,9 @@ async def test_ensure_connected_does_not_deadlock_when_env_is_container(monkeypa
 async def test_switching_containers_closes_previous_client(monkeypatch):
     """A → B 切换时旧连接必须关闭（同一时刻只连一个环境，§1.3）。"""
     _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
     first = driver._client
@@ -448,7 +492,9 @@ async def test_publishes_container_state_on_enter(monkeypatch):
     这条事件会被整条丢弃。
     """
     _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     published = _capture_publishes(monkeypatch)
     driver = _build_driver()
 
@@ -465,7 +511,9 @@ async def test_publishes_container_state_on_enter(monkeypatch):
 async def test_publishes_host_state_on_exit(monkeypatch):
     """退出回宿主时也要广播，否则前端会一直显示「在容器里」。"""
     _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
 
@@ -498,7 +546,9 @@ async def test_does_not_publish_when_env_unchanged(monkeypatch):
 async def test_publishes_when_switching_between_containers(monkeypatch):
     """A 容器 → B 容器：`exec_env` 没变但容器变了，必须广播。"""
     _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     driver = _build_driver()
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
 
@@ -513,7 +563,9 @@ async def test_publishes_when_switching_between_containers(monkeypatch):
 async def test_publish_failure_does_not_break_connect(monkeypatch):
     """广播失败不能影响连接结果：状态通知的订阅者不该决定环境能否切换。"""
     _patch_client(monkeypatch)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
 
     def _boom(*_args, **_kwargs):
         raise RuntimeError("no running loop")
@@ -528,7 +580,9 @@ async def test_publish_failure_does_not_break_connect(monkeypatch):
 async def test_no_publish_on_failed_connect(monkeypatch):
     """连接失败时不广播：环境没变，广播会让 UI 提前显示「已进入」。"""
     _patch_client(monkeypatch, fail_initialize=True)
-    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    monkeypatch.setattr(
+        tspDriver.containerUtil, "resolve_docker_binary_path", lambda: "/fake/docker"
+    )
     published = _capture_publishes(monkeypatch)
     driver = _build_driver()
 

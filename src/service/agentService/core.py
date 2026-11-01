@@ -27,7 +27,6 @@ from constants import (
     AgentTaskStatus,
     DriverType,
     EmployStatus,
-    ExecEnv,
     SpecialAgent,
 )
 
@@ -42,34 +41,18 @@ async def rename_agent_workdir(
     team_id: int,
     old_name: str,
     new_name: str,
-    *,
-    agent_id: int | None = None,
 ) -> list[tuple[str, str]]:
     """按 team_id 重命名单个 Agent 的私有目录，返回实际执行的移动。
 
-    移动前先清理该 Agent 的自建容器（§7）：容器的 bind mount 在创建时固化了
-    `<team>/agent/<old_name>` 这个绝对路径，目录一改名旧容器就指向不存在的路径，
-    留着只会误导下一次 `enter_container`。
-
-    Args:
-        agent_id: 已知的 Agent ID。调用方（`save_agent` 工具）本来就持有它，
-            传进来可以省掉一次按名字反查；不传时按 `old_name` 查（查不到就跳过清理，
-            目录照常改名）。
+    只做目录移动。改名前的容器清理由调用方负责（见 `save_agent`）：容器的
+    bind mount 在创建时固化了 `<team>/agent/<old_name>` 这个绝对路径，目录一
+    改名旧容器就指向不存在的路径，所以调用方必须在移动前清掉旧容器（§7）。
     """
     if old_name == new_name:
         return []
     gt_team = await gtTeamManager.get_team_by_id(team_id)
     if gt_team is None:
         return []
-
-    # 复用 overwrite_team_agents 的同一条清理路径，保证两个改名入口行为一致
-    target_id = agent_id
-    if target_id is None:
-        existing = await gtAgentManager.get_agent(team_id, old_name)
-        target_id = existing.id if existing is not None else None
-    if target_id is not None:
-        await delete_agent_containers_and_reset_env(target_id)
-
     return workspaceUtil.rename_agent_workdirs(gt_team.name, gt_team.config, [(old_name, new_name)])
 
 
@@ -78,131 +61,30 @@ async def rename_agent_workdir(
 # ---------------------------------------------------------------------------
 
 
-def _get_loaded_driver(agent_id: int) -> Any:
-    """取已加载 Agent 的 driver；未加载或非 TSP driver 返回 None。
-
-    切环境与容器清理都要先判断「这个 Agent 有没有可切换的环境」：前者失败
-    必须报错，后者是 best-effort 收尾，所以这里只做查询、不抛异常。
-    """
-    agent = _agents.get(agent_id)
-    if agent is None:
-        return None
-    driver = getattr(agent.task_consumer._turn_runner, "driver", None)
-    # 用属性探测而不是 isinstance：这里只关心它能否报告执行环境，
-    # 显式 import TspAgentDriver 会把 agentService → driver → funcToolService 的
-    # 导入链拉进来，容易在第 6 步这种「service 层互调」的位置成环。
-    if driver is None or not hasattr(driver, "exec_env"):
-        return None
-    return driver
-
-
-def _require_loaded_driver(agent_id: int) -> Any:
-    """取已加载 Agent 的 driver；未加载或非 TSP driver 时拒绝切换。"""
-    driver = _get_loaded_driver(agent_id)
-    if driver is None:
-        raise TogoException(
-            "当前 Agent 未加载或执行驱动不支持容器沙箱（仅支持 TSP 驱动）",
-            containerService.ERROR_CONTAINER_INVALID_PARAMS,
-        )
-    return driver
-
-
 async def enter_container(agent_id: int, container_id: str) -> tuple[ContainerTarget, ContainerState]:
     """把 Agent 的执行环境切换到指定容器，返回 `(目标, 进入前状态)`。
 
-    流程严格按 §5.1：
-    1. 同容器幂等：已在目标容器且连接存活 → 直接成功；
-    2. `get_container_target` 解析目标（含 12 位 ID 校验、存在性、架构）；
-    3. 状态判定（`validate_enter_state`）：自建只收 created/exited，外部只收 running；
-    4. 外部容器先注入 gtsp（自建在 create 时已注入）；
-    5. `driver.disconnect()` → `driver.connect(CONTAINER, target)`；
-    6. connect 失败则重连宿主（**本次进入失败**，不属于运行中自动回落）。
-
-    Driver 由本层按 `agent_id` 解析：执行环境是 Agent 的状态，调用方不应持有
-    Driver。容器相关的目标解析、状态判定与 gtsp 注入都委托给 `containerService`。
-
-    Raises:
-        TogoException: Agent 未加载 / 驱动不支持 / 任一步失败
-
-    Returns:
-        `(target, previous_state)`；`previous_state` 是进入前的容器状态，
-        供工具层在 message 里说明「从 created 拉起」还是「从 exited 恢复」。
+    编排由 `Agent.enter_container` 负责；本层只按 `agent_id` 解析已加载实例。
+    执行环境是 Agent 的状态，调用方不应持有 Driver。
     """
-    driver = _require_loaded_driver(agent_id)
-
-    if driver.exec_env == ExecEnv.CONTAINER and driver.current_container_id == container_id:
-        # 幂等：已在目标容器。不重连（重连会打断正在进行的 turn）。
-        target = await containerService.get_container_target(agent_id, container_id)
-        return target, ContainerState.RUNNING
-
-    target = await containerService.get_container_target(agent_id, container_id)
-
-    state = await containerService.get_container_state(container_id)
-    if state is ContainerState.UNKNOWN:
+    agent = _agents.get(agent_id)
+    if agent is None:
         raise TogoException(
-            f"无法查询容器 {container_id} 的状态（Docker 不可用或查询超时），"
-            "请稍后重试",
-            containerService.ERROR_CONTAINER_ENTER_FAILED,
+            "当前 Agent 未加载，无法切换执行环境",
+            containerService.ERROR_CONTAINER_INVALID_PARAMS,
         )
-    containerService.validate_enter_state(target, state)
-
-    if not target.is_managed:
-        # 外部容器：镜像里没有 gtsp，必须进前注入
-        await containerService.prepare_container_gtsp(target)
-
-    # 切环境：先断开再显式连接。disconnect 不改环境状态（见 Driver 注释），
-    # 所以 connect 失败时环境仍是旧值，由下面的失败分支显式处理。
-    await driver.disconnect()
-    ok = await driver.connect(ExecEnv.CONTAINER, target)
-    if not ok:
-        # 进入失败：本次调用内把宿主连接恢复出来，避免 Agent 失去可用环境。
-        # 注意这是「该操作自身的失败处理」，不是运行中的自动回落（§4.3）。
-        restored = await driver.connect(ExecEnv.HOST)
-        if not restored:
-            logger.error(
-                "进入容器失败且无法恢复宿主连接: agent_id=%s, container=%s",
-                agent_id, container_id,
-            )
-        raise TogoException(
-            f"进入容器 {container_id} 失败：容器内 gtsp 启动或握手未成功。"
-            "请确认镜像内 /tmp 可写且能执行注入的二进制。",
-            containerService.ERROR_CONTAINER_ENTER_FAILED,
-        )
-
-    logger.info(
-        "已进入容器: agent_id=%s, container=%s, managed=%s, from_state=%s",
-        agent_id, container_id, target.is_managed, state,
-    )
-    return target, state
+    return await agent.enter_container(container_id)
 
 
 async def exit_to_host(agent_id: int) -> None:
-    """把 Agent 的执行环境切回宿主（§5.2）。
-
-    顺序：`disconnect()`（关容器连接 → 自建容器自然停回 exited）→
-    `connect(HOST)`。connect 失败时环境保持 CONTAINER，由 Agent 重试——
-    不能假装成功，否则后续工具会打在错误环境上。
-
-    Raises:
-        TogoException: Agent 未加载 / 驱动不支持 / 宿主连接失败
-    """
-    driver = _require_loaded_driver(agent_id)
-    if driver.exec_env == ExecEnv.HOST:
-        # 已经在宿主：幂等成功，不重连（重连会打断 turn）
-        return
-
-    # 先断开容器连接：关 stdin 后容器内 gtsp 退出，自建容器随之停回 exited
-    await driver.disconnect()
-
-    ok = await driver.connect(ExecEnv.HOST)
-    if not ok:
+    """把 Agent 的执行环境切回宿主（§5.2）；编排由 `Agent.exit_to_host` 负责。"""
+    agent = _agents.get(agent_id)
+    if agent is None:
         raise TogoException(
-            "退出容器失败：无法重新连接宿主环境。当前逻辑环境仍为容器，"
-            "请重试 exit_to_host。",
-            containerService.ERROR_CONTAINER_ENTER_FAILED,
+            "当前 Agent 未加载，无法切换执行环境",
+            containerService.ERROR_CONTAINER_INVALID_PARAMS,
         )
-
-    logger.info("已退回到宿主环境: agent_id=%s", agent_id)
+    await agent.exit_to_host()
 
 
 # ---------------------------------------------------------------------------
@@ -211,71 +93,21 @@ async def exit_to_host(agent_id: int) -> None:
 
 
 async def switch_agent_to_host(agent_id: int) -> bool:
-    """把已加载的 Agent 切回宿主环境；返回是否处于宿主。
-
-    为什么清理容器前必须先切回宿主：Agent 当前若正在某个容器里，`docker rm -f`
-    会把它的 stdio 连接打断，Driver 会进入「说在容器、实际连不上」的状态。
-    §7 的做法是显式断开再重连宿主。
-
-    本函数不抛异常：切换失败只记 warning，由调用方继续做清理（容器 rm 后
-    该连接反正也失效了，下一次工具调用时 `_ensure_connected` 会重连）。
-    """
-    driver = _get_loaded_driver(agent_id)
-    if driver is None:
+    """把已加载的 Agent 切回宿主环境；返回是否处于宿主（best-effort，不抛异常）。"""
+    agent = _agents.get(agent_id)
+    if agent is None:
         return True
-    if driver.exec_env == ExecEnv.HOST:
-        return True
-
-    try:
-        await driver.disconnect()
-        ok = await driver.connect(ExecEnv.HOST)
-    except Exception:
-        logger.warning("清理容器前切回宿主失败: agent_id=%s", agent_id, exc_info=True)
-        return False
-
-    if not ok:
-        logger.warning("清理容器前切回宿主未成功: agent_id=%s", agent_id)
-        return False
-    logger.info("清理容器前已切回宿主: agent_id=%s", agent_id)
-    return True
+    return await agent.switch_to_host()
 
 
-async def delete_agent_containers_and_reset_env(agent_id: int) -> int:
-    """Agent 改名 / 离职时的容器清理：先切回宿主，再删该 Agent 全部自建容器。
+async def switch_team_agents_to_host(team_id: int) -> None:
+    """容器清理前把该 Team **已加载**的 Agent 切回宿主（best-effort）。
 
-    Returns:
-        被标记软删除的容器记录数（best-effort，异常已在容器层吞掉）
+    只处理内存里的成员：切回宿主对未加载的 Agent 没有意义，所以这里不查库，
+    Team 改名这条路径因此完全不依赖 DB 可用性。
     """
-    await switch_agent_to_host(agent_id)
-    try:
-        return await containerService.delete_agent_containers(agent_id)
-    except Exception:
-        # 容器层本身已吞掉绝大多数异常，这里兜底防止「收尾动作」把目录操作带崩
-        logger.warning("删除 Agent 容器失败（忽略）: agent_id=%s", agent_id, exc_info=True)
-        return 0
-
-
-async def delete_team_containers_safely(team_id: int, *, agent_ids: list[int] | None = None) -> int:
-    """Team 改名 / 删除 / 目录迁移时的容器清理：先把该 Team 的 Agent 切回宿主再批量删。
-
-    整段都是 best-effort：连查成员这一步也不例外。调用方是 `rename_team` /
-    `delete_team` 这类**目录与 DB 操作的主流程**，收尾清理只要抛一次异常就会
-    让用户改不了 Team 名——那个代价远大于「留着几个没清掉的容器」。
-
-    Args:
-        team_id: 目标 Team
-        agent_ids: 限定要切回宿主的 Agent；None 表示取当前**已加载**的成员。
-            切回宿主本来就只对已加载的 Agent 有意义，所以默认取内存列表而不是查库，
-            这样 Team 改名这条路径完全不依赖 DB 可用性。
-    """
-    try:
-        ids = agent_ids if agent_ids is not None else _loaded_agent_ids_of_team(team_id)
-        for agent_id in ids:
-            await switch_agent_to_host(agent_id)
-        return await containerService.delete_team_containers(team_id)
-    except Exception:
-        logger.warning("删除 Team 容器失败（忽略）: team_id=%s", team_id, exc_info=True)
-        return 0
+    for agent_id in _loaded_agent_ids_of_team(team_id):
+        await switch_agent_to_host(agent_id)
 
 
 def _loaded_agent_ids_of_team(team_id: int) -> list[int]:
@@ -651,13 +483,10 @@ def get_exec_env_state(agent_id: int) -> ExecEnvState:
     未加载的 Agent 恒为 `host`：执行环境只存在于 Driver 内存，后端重启后一律
     回到宿主，所以「不在内存里」与「在宿主」是同一个事实，不能凭库里有什么去猜。
     """
-    driver = _get_loaded_driver(agent_id)
-    if driver is None:
+    agent = _agents.get(agent_id)
+    if agent is None:
         return ExecEnvState()
-    return ExecEnvState(
-        exec_env=driver.exec_env,
-        current_container_id=driver.current_container_id,
-    )
+    return agent.get_exec_env_state() or ExecEnvState()
 
 
 def get_team_exec_env_map(team_id: int) -> dict[int, ExecEnvState]:
@@ -666,13 +495,10 @@ def get_team_exec_env_map(team_id: int) -> dict[int, ExecEnvState]:
     for agent in _agents.values():
         if agent.gt_agent.team_id != team_id or agent.gt_agent.id is None:
             continue
-        driver = _get_loaded_driver(agent.gt_agent.id)
-        if driver is None:
+        state = agent.get_exec_env_state()
+        if state is None:
             continue
-        result[agent.gt_agent.id] = ExecEnvState(
-            exec_env=driver.exec_env,
-            current_container_id=driver.current_container_id,
-        )
+        result[agent.gt_agent.id] = state
     return result
 
 
@@ -816,7 +642,8 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
     #    所以必须在移动目录**之前**清掉旧容器（§7）。清理是 best-effort，
     #    失败不阻塞改名（rm 不掉的容器下次 enter_container 会报 container_lost）。
     for renaming_id in renamed_agent_ids:
-        await delete_agent_containers_and_reset_env(renaming_id)
+        await switch_agent_to_host(renaming_id)
+        await containerService.delete_agent_containers_safely(renaming_id)
 
     moved_dirs = workspaceUtil.rename_agent_workdirs(team.name, team.config, agent_renames)
 
@@ -842,7 +669,8 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
     #    加载，它们的容器只挂着自己的私有目录，目录一删就是死容器。
     #    名字被在岗成员复用时仍要清——容器属于离职者本人，不是名字。
     for offboard_id in ids_to_offboard:
-        await delete_agent_containers_and_reset_env(offboard_id)
+        await switch_agent_to_host(offboard_id)
+        await containerService.delete_agent_containers_safely(offboard_id)
 
     # 5. 写库成功后再删离职成员的个人目录；名字仍被在岗成员使用时保留
     workspaceUtil.remove_agent_workdirs(

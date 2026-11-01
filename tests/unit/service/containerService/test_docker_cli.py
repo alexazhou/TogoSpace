@@ -21,6 +21,7 @@ import pytest
 
 from service.containerService import dockerCli
 from service.containerService.dockerCli import DockerCli, DockerCliError
+from util import containerUtil
 
 
 def _write_script(path, body: str) -> str:
@@ -67,8 +68,8 @@ def test_missing_docker_reports_docker_cli_not_found(tmp_path, monkeypatch):
     这条不是「异常类型对不对」的形式检查：工具层要靠这个 error_code 提示用户
     「请安装 Docker」，而不是给一句看不懂的子进程错误。
     """
-    monkeypatch.setattr(dockerCli.shutil, "which", lambda _name: None)
-    monkeypatch.setattr(dockerCli.os.path, "isfile", lambda _path: False)
+    monkeypatch.setattr(containerUtil.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(containerUtil.os.path, "isfile", lambda _path: False)
 
     with pytest.raises(DockerCliError) as excinfo:
         DockerCli()
@@ -80,7 +81,7 @@ def test_missing_docker_reports_docker_cli_not_found(tmp_path, monkeypatch):
 def test_binary_resolved_from_path_first(tmp_path, monkeypatch):
     """PATH 里能找到时优先用 PATH 的结果（不猜默认安装路径）。"""
     found = _write_script(tmp_path / "docker", "exit 0\n")
-    monkeypatch.setattr(dockerCli.shutil, "which", lambda _name: found)
+    monkeypatch.setattr(containerUtil.shutil, "which", lambda _name: found)
 
     assert DockerCli().binary_path == found
 
@@ -88,9 +89,9 @@ def test_binary_resolved_from_path_first(tmp_path, monkeypatch):
 def test_binary_falls_back_to_default_candidate_paths(tmp_path, monkeypatch):
     """PATH 里没有时回退探测默认安装路径（GUI 启动的桌面应用 PATH 往往不含 docker）。"""
     candidate = _write_script(tmp_path / "docker", "exit 0\n")
-    monkeypatch.setattr(dockerCli.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(containerUtil.shutil, "which", lambda _name: None)
     monkeypatch.setattr(
-        dockerCli, "_DEFAULT_BINARY_CANDIDATES", (str(tmp_path / "missing"), candidate)
+        containerUtil, "_DEFAULT_BINARY_CANDIDATES", (str(tmp_path / "missing"), candidate)
     )
 
     assert DockerCli().binary_path == candidate

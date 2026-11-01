@@ -328,9 +328,16 @@ async def test_no_bash_image_passes_gtsp_error_through(neg_env, image, monkeypat
         ),
     )
 
-    # 本用例直接构造 Driver 验证真实握手，不经过已加载的 Agent；
-    # 切环境由 agentService 负责，这里把它的 Driver 查询指向本地实例。
-    monkeypatch.setattr(agentService.core, "_get_loaded_driver", lambda _agent_id: driver)
+    # 本用例直接构造 Driver 验证真实握手；把 Driver 挂到真实 Agent 上并注册，
+    # 环境切换仍走 Agent 的方法。
+    from service.agentService.agent import Agent
+
+    agent = Agent(
+        gt_agent=GtAgent(id=1, team_id=1, name="小美", role_template_id=1),
+        system_prompt="",
+    )
+    agent.task_consumer._turn_runner.driver = driver
+    monkeypatch.setattr(agentService.core, "_agents", {1: agent})
 
     entered = False
     try:
@@ -440,9 +447,16 @@ async def test_bash_exists_but_command_missing_reports_command_error(neg_env, mo
         ),
     )
 
-    # 本用例直接构造 Driver 验证真实握手，不经过已加载的 Agent；
-    # 切环境由 agentService 负责，这里把它的 Driver 查询指向本地实例。
-    monkeypatch.setattr(agentService.core, "_get_loaded_driver", lambda _agent_id: driver)
+    # 本用例直接构造 Driver 验证真实握手；把 Driver 挂到真实 Agent 上并注册，
+    # 环境切换仍走 Agent 的方法。
+    from service.agentService.agent import Agent
+
+    agent = Agent(
+        gt_agent=GtAgent(id=1, team_id=1, name="小美", role_template_id=1),
+        system_prompt="",
+    )
+    agent.task_consumer._turn_runner.driver = driver
+    monkeypatch.setattr(agentService.core, "_agents", {1: agent})
 
     entered = False
     try:

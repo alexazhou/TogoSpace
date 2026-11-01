@@ -218,3 +218,25 @@ async def test_delete_agent_containers_returns_zero_for_no_records(fake):
     """没有任何记录 ⇒ 0，且不调 docker。"""
     assert await core.delete_agent_containers(999) == 0
     assert fake.calls() == []
+
+
+async def test_delete_team_containers_safely_swallows_error(monkeypatch):
+    """查询/删除失败时返回 0，不冒泡到 Team 改名/删除的主流程（§7 best-effort）。"""
+
+    async def _boom(_team_id: int) -> int:
+        raise RuntimeError("db gone")
+
+    monkeypatch.setattr(core, "delete_team_containers", _boom)
+
+    assert await core.delete_team_containers_safely(1) == 0
+
+
+async def test_delete_agent_containers_safely_swallows_error(monkeypatch):
+    """Agent 改名/离职清理失败时返回 0，不阻塞目录与 DB 主流程（§7 best-effort）。"""
+
+    async def _boom(_agent_id: int) -> int:
+        raise RuntimeError("db gone")
+
+    monkeypatch.setattr(core, "delete_agent_containers", _boom)
+
+    assert await core.delete_agent_containers_safely(1) == 0

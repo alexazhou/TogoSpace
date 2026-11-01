@@ -4,7 +4,7 @@
 1. **默认工具集不含容器工具**（`get_tools()` 不带），只有 TSP driver 拿得到——
    Native / Claude SDK 的行为必须零变化；
 2. 每个工具都把 `TogoException` 转成带 `error_code` 的失败返回体（模型能据此自纠）；
-3. 工具**不自己判断环境状态**：进入 / 退出委托 `agentService`（执行环境属于
+3. 工具**不自己判断环境状态**：进入 / 退出委托 `Agent`（执行环境属于
    Agent），其余容器操作委托 `containerService`（避免状态语义两份实现）；
 4. docstring 面向 Agent，不出现 `attach` / `exec` / `client` / `stdio` 这类底层实现词。
 """
@@ -19,7 +19,7 @@ import pytest
 
 from constants import ContainerState, ExecEnv
 from exception import TogoException
-from model.coreModel import ContainerInfo
+from model.coreModel import ContainerInfo, ExecEnvState
 from service import funcToolService
 from service.funcToolService import tools as tools_module
 from service.roomService import ToolCallContext
@@ -43,14 +43,14 @@ def _ctx(agent_id: int = 1) -> ToolCallContext:
 
 
 @pytest.fixture
-def container_driver(monkeypatch):
-    """把 `_container_driver` 换成返回假 driver，绕开真实的 agent 查找。"""
-    driver = MagicMock()
-    driver.exec_env = ExecEnv.HOST
-    driver.current_container_id = None
-    driver.host.agent_workdir = "/tmp/agent-workdir"
-    monkeypatch.setattr(tools_module, "_container_driver", lambda _ctx: driver)
-    return driver
+def container_agent(monkeypatch):
+    """把 `_container_agent` 换成假 Agent，绕开真实的 agent 查找与驱动校验。"""
+    agent = MagicMock()
+    agent.gt_agent.id = 1
+    agent.agent_workdir = "/tmp/agent-workdir"
+    agent.get_exec_env_state.return_value = ExecEnvState(exec_env=ExecEnv.HOST)
+    monkeypatch.setattr(tools_module, "_container_agent", lambda _ctx: agent)
+    return agent
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ def test_tool_docstrings_have_args_section_only_when_needed(tool_name):
 # ---------------------------------------------------------------------------
 
 
-async def test_create_container_returns_contract_fields(monkeypatch, container_driver):
+async def test_create_container_returns_contract_fields(monkeypatch, container_agent):
     """返回字段与 §6.2 第 1 条一致：`state` 恒为 created，且明确「仍在宿主」。"""
     from service import containerService
 
@@ -158,7 +158,7 @@ async def test_create_container_returns_contract_fields(monkeypatch, container_d
     assert "enter_container" in result["message"]
 
 
-async def test_create_container_passes_image_through(monkeypatch, container_driver):
+async def test_create_container_passes_image_through(monkeypatch, container_agent):
     """`image` 原样透传（空值交给 service 走默认，不在工具层重复判断）。"""
     from service import containerService
 
@@ -171,7 +171,7 @@ async def test_create_container_passes_image_through(monkeypatch, container_driv
     assert mocked.await_args.kwargs["image"] == "python:3.11"
 
 
-async def test_create_container_maps_togo_exception_to_error_result(monkeypatch, container_driver):
+async def test_create_container_maps_togo_exception_to_error_result(monkeypatch, container_agent):
     """`TogoException` ⇒ `success=False` + `error_code`（模型据此自纠）。"""
     from service import containerService
 
@@ -192,17 +192,15 @@ async def test_create_container_maps_togo_exception_to_error_result(monkeypatch,
 # ---------------------------------------------------------------------------
 
 
-async def test_enter_container_reports_mount_info_for_managed(monkeypatch, container_driver):
+async def test_enter_container_reports_mount_info_for_managed(monkeypatch, container_agent):
     """自建容器：返回挂载说明与「退出后自动停止」的提示。"""
     from model.coreModel import ContainerTarget
-    from service import agentService
 
     target = ContainerTarget(
         container_id="c0ffee123456", is_managed=True, arch="arm64", container_name="agent-1-1"
     )
-    monkeypatch.setattr(
-        agentService, "enter_container",
-        AsyncMock(return_value=(target, ContainerState.CREATED)),
+    container_agent.enter_container = AsyncMock(
+        return_value=(target, ContainerState.CREATED)
     )
 
     result = await tools_module.enter_container("c0ffee123456", _context=_ctx())
@@ -217,15 +215,13 @@ async def test_enter_container_reports_mount_info_for_managed(monkeypatch, conta
     assert "自动停止" in result["message"]
 
 
-async def test_enter_container_reports_external_container_difference(monkeypatch, container_driver):
+async def test_enter_container_reports_external_container_difference(monkeypatch, container_agent):
     """外部容器：`mounted=False`、不报 workdir，并说明原进程不受影响。"""
     from model.coreModel import ContainerTarget
-    from service import agentService
 
     target = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="arm64")
-    monkeypatch.setattr(
-        agentService, "enter_container",
-        AsyncMock(return_value=(target, ContainerState.RUNNING)),
+    container_agent.enter_container = AsyncMock(
+        return_value=(target, ContainerState.RUNNING)
     )
 
     result = await tools_module.enter_container("deadbeef0002", _context=_ctx())
@@ -238,13 +234,10 @@ async def test_enter_container_reports_external_container_difference(monkeypatch
     assert "不是由你创建" in result["message"]
 
 
-async def test_enter_container_maps_state_errors(monkeypatch, container_driver):
+async def test_enter_container_maps_state_errors(monkeypatch, container_agent):
     """状态错误码要透传（`container_already_running` 等），不能统一成「进入失败」。"""
-    from service import agentService
-
-    monkeypatch.setattr(
-        agentService, "enter_container",
-        AsyncMock(side_effect=TogoException("running 残留", "container_already_running")),
+    container_agent.enter_container = AsyncMock(
+        side_effect=TogoException("running 残留", "container_already_running")
     )
 
     result = await tools_module.enter_container("c0ffee123456", _context=_ctx())
@@ -252,11 +245,9 @@ async def test_enter_container_maps_state_errors(monkeypatch, container_driver):
     assert result["error_code"] == "container_already_running"
 
 
-async def test_exit_to_host_reports_host_workdir(monkeypatch, container_driver):
+async def test_exit_to_host_reports_host_workdir(monkeypatch, container_agent):
     """退出后必须告诉模型宿主工作目录在哪、容器路径已失效。"""
-    from service import agentService
-
-    monkeypatch.setattr(agentService, "exit_to_host", AsyncMock(return_value=None))
+    container_agent.exit_to_host = AsyncMock(return_value=None)
 
     result = await tools_module.exit_to_host(_context=_ctx())
 
@@ -266,13 +257,10 @@ async def test_exit_to_host_reports_host_workdir(monkeypatch, container_driver):
     assert "/workspace/self" in result["message"]
 
 
-async def test_exit_to_host_propagates_failure(monkeypatch, container_driver):
+async def test_exit_to_host_propagates_failure(monkeypatch, container_agent):
     """退出失败（宿主连不上）必须报错——不能返回成功让 Agent 以为已在宿主。"""
-    from service import agentService
-
-    monkeypatch.setattr(
-        agentService, "exit_to_host",
-        AsyncMock(side_effect=TogoException("宿主连接失败", "container_enter_failed")),
+    container_agent.exit_to_host = AsyncMock(
+        side_effect=TogoException("宿主连接失败", "container_enter_failed")
     )
 
     result = await tools_module.exit_to_host(_context=_ctx())
@@ -286,7 +274,7 @@ async def test_exit_to_host_propagates_failure(monkeypatch, container_driver):
 # ---------------------------------------------------------------------------
 
 
-async def test_list_containers_returns_env_and_serialized_containers(monkeypatch, container_driver):
+async def test_list_containers_returns_env_and_serialized_containers(monkeypatch, container_agent):
     """返回 `exec_env` / `current_container_id` / `containers`，且容器已 JSON 化。"""
     from service import containerService
 
@@ -296,8 +284,10 @@ async def test_list_containers_returns_env_and_serialized_containers(monkeypatch
         created_at=datetime(2026, 11, 1, 10, 0, 0),
         state=ContainerState.EXITED, is_entered=True,
     )
-    container_driver.exec_env = ExecEnv.CONTAINER
-    container_driver.current_container_id = "c0ffee123456"
+    container_agent.get_exec_env_state.return_value = ExecEnvState(
+        exec_env=ExecEnv.CONTAINER,
+        current_container_id="c0ffee123456",
+    )
     monkeypatch.setattr(containerService, "is_docker_available", AsyncMock(return_value=True))
     monkeypatch.setattr(
         containerService, "list_agent_containers", AsyncMock(return_value=[info])
@@ -316,7 +306,7 @@ async def test_list_containers_returns_env_and_serialized_containers(monkeypatch
     assert isinstance(result["containers"][0]["created_at"], str)
 
 
-async def test_list_containers_keeps_records_when_docker_unavailable(monkeypatch, container_driver):
+async def test_list_containers_keeps_records_when_docker_unavailable(monkeypatch, container_agent):
     """Docker 不可用时仍返回记录（`docker_available=False`），不给空列表。
 
     给空列表会让模型以为「容器都没了」，进而重复创建。
@@ -345,7 +335,7 @@ async def test_list_containers_keeps_records_when_docker_unavailable(monkeypatch
 # ---------------------------------------------------------------------------
 
 
-async def test_delete_container_returns_deleted_ids(monkeypatch, container_driver):
+async def test_delete_container_returns_deleted_ids(monkeypatch, container_agent):
     """返回 `deleted_record_id` 与 `deleted_container_id`（预记录后者为 null）。"""
     from service import containerService
 
@@ -361,7 +351,7 @@ async def test_delete_container_returns_deleted_ids(monkeypatch, container_drive
     assert "文件不受影响" in result["message"]
 
 
-async def test_delete_container_reports_null_container_id_for_pre_record(monkeypatch, container_driver):
+async def test_delete_container_reports_null_container_id_for_pre_record(monkeypatch, container_agent):
     """删除预记录时 `deleted_container_id` 为 null（契约明确）。"""
     from service import containerService
 
@@ -375,11 +365,14 @@ async def test_delete_container_reports_null_container_id_for_pre_record(monkeyp
     assert result["deleted_container_id"] is None
 
 
-async def test_delete_container_passes_current_container_id(monkeypatch, container_driver):
+async def test_delete_container_passes_current_container_id(monkeypatch, container_agent):
     """必须把当前所处容器传给 service，否则「正在使用」的校验就失效了。"""
     from service import containerService
 
-    container_driver.current_container_id = "c0ffee123456"
+    container_agent.get_exec_env_state.return_value = ExecEnvState(
+        exec_env=ExecEnv.CONTAINER,
+        current_container_id="c0ffee123456",
+    )
     mocked = AsyncMock(return_value=MagicMock(id=7, container_id="c0ffee123456"))
     monkeypatch.setattr(containerService, "delete_container", mocked)
 
@@ -388,7 +381,7 @@ async def test_delete_container_passes_current_container_id(monkeypatch, contain
     assert mocked.await_args.kwargs["current_container_id"] == "c0ffee123456"
 
 
-async def test_delete_container_maps_in_use_error(monkeypatch, container_driver):
+async def test_delete_container_maps_in_use_error(monkeypatch, container_agent):
     """`container_in_use` 要透传，模型才知道该先 `exit_to_host`。"""
     from service import containerService
 
@@ -412,7 +405,10 @@ async def test_container_tools_reject_non_tsp_driver(monkeypatch):
     from service import agentService
 
     agent = MagicMock()
-    agent.task_consumer._turn_runner.driver = MagicMock()  # 不是 TspAgentDriver
+    agent.require_container_driver.side_effect = TogoException(
+        "当前 Agent 的执行驱动不支持容器沙箱（仅支持 TSP 驱动）",
+        "container_invalid_params",
+    )
     monkeypatch.setattr(agentService, "get_agent_or_none", lambda _id: agent)
 
     result = await tools_module.list_containers(_context=_ctx())

@@ -407,19 +407,6 @@ def test_create_argv_does_not_leak_api_keys_or_mount_docker_socket():
     assert "no-new-privileges" in joined
 
 
-def test_container_start_and_exec_argv_shapes():
-    """形态 A `start -a -i` / 形态 B `exec -i`（§3.2 两种启动方式，不能互换）。"""
-    assert core.build_container_start_argv("c0ffee123456") == [
-        "start", "-a", "-i", "c0ffee123456",
-    ]
-    exec_argv = core.build_container_exec_argv("c0ffee123456")
-    assert exec_argv[:4] == ["exec", "-i", "c0ffee123456", core.CONTAINER_GTSP_PATH]
-    assert exec_argv[4:6] == ["--mode", "stdio"]
-    # 形态 B 绝不能带 -a / start：外部容器主进程不能被动
-    assert "-a" not in exec_argv
-    assert "start" not in exec_argv
-
-
 # ---------------------------------------------------------------------------
 # create_container 编排：预记录 → create → 回填 → 注入
 # ---------------------------------------------------------------------------
@@ -504,6 +491,21 @@ async def test_create_container_rejects_unsupported_arch_before_touching_db(env)
         await core.create_container(1)
 
     assert excinfo.value.error_code == core.ERROR_CONTAINER_ARCH_UNSUPPORTED
+    assert await core.gtAgentContainerManager.count_active_by_agent(1) == 0
+
+
+async def test_create_image_arch_error_uses_create_failed_code(env):
+    """创建路径查架构失败不能报成 `container_enter_failed`（§3.6 兜底码由调用方定）。"""
+    env.set(
+        "image inspect --format {{.Architecture}}*",
+        stderr="Error response from daemon: boom",
+        returncode=1,
+    )
+
+    with pytest.raises(TogoException) as excinfo:
+        await core.create_container(1)
+
+    assert excinfo.value.error_code == core.ERROR_CONTAINER_CREATE_FAILED
     assert await core.gtAgentContainerManager.count_active_by_agent(1) == 0
 
 

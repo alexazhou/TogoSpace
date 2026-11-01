@@ -121,6 +121,7 @@ Agent turn
 
 - `containerService/core.py`：容器生命周期编排、配额管理、命名规则、目标元数据解析、二进制 `docker cp` 注入。
 - `containerService/dockerCli.py`：Docker 路径自动探测（`which` → 常见默认安装路径）、argv 执行（禁止 `shell=True`）、超时控制与错误分类。
+- `util/containerUtil.py`：纯 argv 构造（`start -a -i` / `exec -i`）与 docker 可执行文件探测；`agentService` 的 driver 直接用这里拼命令，无需依赖 `containerService`。
 
 ### 3.4 提供的核心接口
 
@@ -129,9 +130,13 @@ Agent turn
 | `create_container(agent_id, image=None) -> ContainerInfo` | 校验配额（≤3）、先插入 `container_id=NULL` 的预记录并回填按自增 ID 生成的名称、执行 `docker create` 挂载目录、截取 12 位短 ID 并回填、`docker cp` 注入 gtsp、失败补偿清理 |
 | `delete_container(agent_id, container_id: str \| None = None, record_id: int \| None = None) -> bool` | `container_id` / `record_id` 二选一；按 `agent_id + container_id / id(deleted=0)` 精确校验为当前 Agent 的活跃记录，且不是当前使用中容器；有 `container_id` 时执行 `docker rm -f <container_id>`，预记录按 `container_name` + label 校验后 best-effort 清理；标记 DB 软删除 (`deleted=1`) |
 | `delete_agent_containers(agent_id: int) -> int` | Agent 离职/改名时，批量强制删除该 Agent 的所有自建容器并标记软删除；`container_id IS NULL` 的预记录按 `container_name` + label 校验后清理，label 不匹配仅处理 DB 记录 |
+| `delete_agent_containers_safely(agent_id: int) -> int` | 同上，异常不外抛；供 Agent 改名/离职等目录与 DB 主流程调用 |
 | `delete_team_containers(team_id: int) -> int` | Team 删除/改名/工作目录迁移时，批量强制删除该 Team 下所有自建容器并标记软删除；`container_id IS NULL` 的预记录按 `container_name` + label 校验后清理，label 不匹配仅处理 DB 记录 |
+| `delete_team_containers_safely(team_id: int) -> int` | 同上，异常不外抛；供 Team 改名/删除等目录与 DB 主流程调用 |
 | `list_agent_containers(agent_id) -> list[ContainerInfo]` | 查询该 Agent 全部未删除的自建容器（含 `container_id IS NULL` 的预记录）；返回 `record_id`；已回填 ID 的按 `container_id` inspect，预记录按 `container_name` inspect，并行获取实时状态 |
 | `get_container_target(agent_id, container_id: str) -> ContainerTarget` | 校验 `container_id` 为 12 位十六进制短 ID；按 `agent_id + container_id(deleted=0)` 精确查 DB，命中即自建容器（`is_managed=True`）；未命中则 `docker inspect <container_id>` 取原始状态，并按容器 `.Image` → `docker image inspect` 取 arch，按外部容器处理（`is_managed=False`）；组装 ContainerTarget |
+| `resolve_enter_target(agent_id, container_id: str) -> tuple[ContainerTarget, ContainerState]` | 与 `get_container_target` 同一套解析规则，但复用同一次 `docker inspect` 的结果返回实时状态；进入流程用它避免目标解析与状态查询各 inspect 一次 |
+| `util.containerUtil.build_container_attach_argv(container_id: str, *, is_managed: bool) -> list[str]` | 按 `is_managed` 选择 gtsp 拉起形态：自建容器 `docker start -a -i`，外部容器 `docker exec -i`（不包含 docker 可执行文件路径，由调用方前置探测） |
 | `prepare_container_gtsp(container: ContainerTarget)` | 执行 `docker cp` 将 Linux gtsp 注入到 `/tmp/gtsp`（权限由源文件 `0755` 保留，不做容器内 `chmod`；自建容器在 create 时注入，外部容器在 enter 前注入） |
 
 ### 3.5 容器创建与命名规范
@@ -264,13 +269,13 @@ sequenceDiagram
     participant Docker as Docker Daemon / CLI
 
     Agent->>Tool: enter_container(container_id)
-    alt 当前已在目标容器且 _client 存活
+    Tool->>CS: resolve_enter_target(agent_id, container_id)
+    CS->>Docker: 校验存在并获取容器架构 (arch) 与实时状态
+    CS-->>Tool: 返回 (ContainerTarget, ContainerState)
+    alt 当前已在目标容器且连接存活
         Tool-->>Agent: 幂等返回成功
     end
-    Tool->>CS: get_container_target(agent_id, container_id)
-    CS->>Docker: 校验存在并获取容器架构 (arch)
-    CS-->>Tool: 返回 ContainerTarget(container_id, is_managed, arch)
-    
+
     alt 外部容器非 running
         Tool-->>Agent: 报错拒绝（提示先自行 docker start）
     else 自建容器处于 running
@@ -339,7 +344,7 @@ sequenceDiagram
 ### 6.1 注册与权限控制
 
 - **实现与注册**：统一在 `funcToolService/tools.py` 编写 5 个容器工具函数，在 `funcToolService/core.py` 中注册；
-- **动态导入约定**：遵循 `tools.py` 中已有工具函数的既有项目模式，在函数体内动态导入 `from service import agentService, containerService`，并通过 `_context.agent_id` 获取当前 Agent 的 Driver 进行环境切换，避免顶层模块循环导入；
+- **导入与调用约定**：`containerService` 在 `tools.py` 顶层导入（容器服务不依赖 `funcToolService`，无循环）；`agentService` 仍在函数体内动态导入（`agentService` 依赖 `funcToolService`，顶层互导会成环）。工具通过 `_context.agent_id` 取得当前 `Agent`，调用其公开的执行环境 API（`enter_container` / `exit_to_host` / `get_exec_env_state` / `agent_workdir`）完成环境切换；**工具层不持有、不访问 Driver**，能力校验由 `Agent.require_container_driver()` 统一完成；
 - **权限分类**：全部归入 `ToolCategory.EXECUTE`（角色无 Execute 权限则不可见）；
 - **生效范围**：仅对 `TspAgentDriver` 开放（`get_tools(include_container_tools=False)` 控制），Native / Claude SDK 等其他 Driver 不暴露；
 - **寻址原则**：**进入容器只接受 12 位短 ID（`container_id`，即 Docker ID 前 12 位）；删除容器接受 `container_id` 或 `record_id`（`agent_containers.id`）二选一**，不接受容器名称。`record_id` 用于预记录尚无 Docker ID 的场景；普通容器两种方式均可。Docker CLI 按唯一前缀解析短 ID；若本机存在前缀相同的其他容器，Docker 会报 `multiple IDs with prefix`，该错误原样透传给 Agent。
@@ -461,10 +466,10 @@ sequenceDiagram
 
 | 操作 | 处理 |
 |---|---|
-| Agent 改名 / 离职（`overwrite_team_agents`） | DB 提交后、删除目录前调用 `containerService.delete_agent_containers` |
-| Agent 改名（`save_agent` 工具 → `rename_agent_workdir`） | 在锁内先切回宿主（`disconnect()` + `connect(HOST)`）再清理自建容器 |
-| Team 改名 / 工作目录变更（目录实际移动时） | 移动目录前调用 `delete_team_containers` 清理自建容器 |
-| Team 删除 | 销毁 runtime 后调用 `delete_team_containers` 清理自建容器 |
+| Agent 改名 / 离职（`overwrite_team_agents`） | 调用 `agentService.switch_agent_to_host` 切回宿主，再调用 `containerService.delete_agent_containers_safely` |
+| Agent 改名（`save_agent` 工具） | 移动目录前同样先 `agentService.switch_agent_to_host`，再 `containerService.delete_agent_containers_safely` |
+| Team 改名 / 工作目录变更（目录实际移动时） | 移动目录前先 `agentService.switch_team_agents_to_host` 切回宿主，再调用 `containerService.delete_team_containers_safely` |
+| Team 删除 | 销毁 runtime（Agent 已卸载、连接已断开）后直接调用 `containerService.delete_team_containers_safely` |
 | 部门同步导致的离职 | 不删目录，也不清理容器 |
 
 `delete_*_containers` 是 best-effort：先 `rm -f` 再标记 DB 软删除 (`deleted=1`)；`rm` 失败也标记软删除，并记录 warning；内部吞掉所有异常，不阻塞目录操作。

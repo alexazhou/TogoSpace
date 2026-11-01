@@ -41,6 +41,10 @@ class AgentTaskConsumer:
         self._aio_consumer_task: asyncio.Task | None = None
         self._cancel_requested: bool = False
 
+    @property
+    def agent_workdir(self) -> str:
+        return self._turn_runner.agent_workdir
+
     async def _set_status(self, status: AgentStatus, error_message: str | None = None) -> None:
         """统一处理 Agent 状态切换：更新运行时状态、广播事件并记录活动。"""
         if self.status == status:

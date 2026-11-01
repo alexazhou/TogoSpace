@@ -15,14 +15,17 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 from constants import DriverType, EmployStatus, ExecEnv
+from model.coreModel import ExecEnvSnapshot
 from model.dbModel.gtAgent import GtAgent
 from service.agentService import core
+from service.agentService.agent import Agent
 from service import teamService
+from service.containerService import core as containerCore
 from util.configUtil.configTypes import AppConfig, SettingConfig
 
 
@@ -63,13 +66,22 @@ class _FakeDriver:
         self.current_container_id = container_id
         self.disconnect = AsyncMock()
         self.connect = AsyncMock(return_value=True)
+        self.is_connected = Mock(return_value=True)
+
+    def get_exec_env(self) -> ExecEnvSnapshot:
+        return ExecEnvSnapshot(
+            exec_env=self.exec_env,
+            current_container_id=self.current_container_id,
+        )
 
 
-def _fake_agent(driver) -> SimpleNamespace:
-    return SimpleNamespace(
-        gt_agent=SimpleNamespace(id=1, team_id=1),
-        task_consumer=SimpleNamespace(_turn_runner=SimpleNamespace(driver=driver)),
+def _fake_agent(driver) -> Agent:
+    agent = Agent(
+        gt_agent=GtAgent(id=1, team_id=1, name="小美", role_template_id=1),
+        system_prompt="",
     )
+    agent.task_consumer._turn_runner.driver = driver
+    return agent
 
 
 # ---------------------------------------------------------------------------
@@ -128,51 +140,6 @@ async def test_switch_to_host_swallows_driver_exception(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# delete_agent_containers_and_reset_env
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_delete_agent_containers_switches_host_before_deleting(monkeypatch):
-    """顺序断言：切回宿主发生在删容器之前。"""
-    order: list[str] = []
-    driver = _FakeDriver(env=ExecEnv.CONTAINER, container_id="c0ffee123456")
-
-    async def _disconnect():
-        order.append("disconnect")
-
-    async def _connect(_env):
-        order.append("connect_host")
-        return True
-
-    driver.disconnect.side_effect = _disconnect
-    driver.connect.side_effect = _connect
-    monkeypatch.setattr(core, "_agents", {1: _fake_agent(driver)})
-
-    async def _delete(agent_id: int) -> int:
-        order.append(f"delete:{agent_id}")
-        return 2
-
-    monkeypatch.setattr(core.containerService, "delete_agent_containers", _delete)
-
-    assert await core.delete_agent_containers_and_reset_env(1) == 2
-    assert order == ["disconnect", "connect_host", "delete:1"]
-
-
-@pytest.mark.asyncio
-async def test_delete_agent_containers_swallows_container_service_error(monkeypatch):
-    """容器层抛异常时返回 0，不向上冒泡。"""
-    monkeypatch.setattr(core, "_agents", {})
-
-    async def _boom(_agent_id: int) -> int:
-        raise RuntimeError("docker gone")
-
-    monkeypatch.setattr(core.containerService, "delete_agent_containers", _boom)
-
-    assert await core.delete_agent_containers_and_reset_env(1) == 0
-
-
-# ---------------------------------------------------------------------------
 # overwrite_team_agents：改名 / 离职
 # ---------------------------------------------------------------------------
 
@@ -193,7 +160,8 @@ def _mock_overwrite(monkeypatch, team, agents, save_agents, cleaned: list[int]):
     monkeypatch.setattr(core.gtAgentManager, "batch_save_agents", save_agents)
     monkeypatch.setattr(core.gtAgentManager, "batch_update_agent_status", AsyncMock())
     monkeypatch.setattr(core, "atomic", _noop_atomic)
-    monkeypatch.setattr(core, "delete_agent_containers_and_reset_env", _clean)
+    monkeypatch.setattr(core, "switch_agent_to_host", AsyncMock(return_value=True))
+    monkeypatch.setattr(core.containerService, "delete_agent_containers_safely", _clean)
     monkeypatch.setattr(core.configUtil, "get_app_config", lambda: _app_config("/tmp/ws"))
 
 
@@ -215,17 +183,23 @@ async def test_rename_cleans_containers_before_moving_dir(monkeypatch, tmp_path)
         order.append("rename_dir")
         return real_rename(*args, **kwargs)
 
+    async def _record_switch(agent_id: int) -> bool:
+        order.append(f"switch:{agent_id}")
+        return True
+
     async def _record_clean(agent_id: int) -> int:
         order.append(f"clean:{agent_id}")
         return 1
 
     monkeypatch.setattr(core.workspaceUtil, "rename_agent_workdirs", _record_rename)
-    monkeypatch.setattr(core, "delete_agent_containers_and_reset_env", _record_clean)
+    monkeypatch.setattr(core, "switch_agent_to_host", _record_switch)
+    monkeypatch.setattr(core.containerService, "delete_agent_containers_safely", _record_clean)
 
     payload = [GtAgent(id=11, team_id=1, name="bob", role_template_id=21, model="", driver=DriverType.NATIVE)]
     await core.overwrite_team_agents(1, payload)
 
-    assert order == ["clean:11", "rename_dir"]
+    # 顺序不可反：先切回宿主，再删容器，最后才移动目录（§7）
+    assert order == ["switch:11", "clean:11", "rename_dir"]
 
 
 @pytest.mark.asyncio
@@ -307,42 +281,6 @@ async def test_rename_and_offboard_are_both_cleaned(monkeypatch, tmp_path):
     assert cleaned == [11, 13]
 
 
-@pytest.mark.asyncio
-async def test_rename_agent_workdir_cleans_containers_first(monkeypatch, tmp_path):
-    """`save_agent` 工具走的单 Agent 改名入口也必须先清容器再动目录。"""
-    team = SimpleNamespace(id=1, name="demo", config={})
-    order: list[str] = []
-
-    async def _get_team(_team_id: int):
-        return team
-
-    async def _get_agent(_team_id: int, name: str, status=None):
-        return _make_agent(11, name)
-
-    async def _clean(agent_id: int) -> int:
-        order.append(f"clean:{agent_id}")
-        return 1
-
-    real_rename = core.workspaceUtil.rename_agent_workdirs
-
-    def _record_rename(*args, **kwargs):
-        order.append("rename_dir")
-        return real_rename(*args, **kwargs)
-
-    monkeypatch.setattr(core.gtTeamManager, "get_team_by_id", _get_team)
-    monkeypatch.setattr(core.gtAgentManager, "get_agent", _get_agent)
-    monkeypatch.setattr(core, "delete_agent_containers_and_reset_env", _clean)
-    monkeypatch.setattr(core.workspaceUtil, "rename_agent_workdirs", _record_rename)
-    monkeypatch.setattr(core.configUtil, "get_app_config", lambda: _app_config(tmp_path))
-
-    (tmp_path / "demo" / "agent" / "alice").mkdir(parents=True)
-
-    moved = await core.rename_agent_workdir(1, "alice", "bob")
-
-    assert order == ["clean:11", "rename_dir"]
-    assert moved  # 目录确实移动了
-
-
 # ---------------------------------------------------------------------------
 # teamService：Team 改名 / 工作目录变更 / 删除
 # ---------------------------------------------------------------------------
@@ -362,7 +300,8 @@ def _mock_team_service(monkeypatch, team, cleaned: list[int]):
     monkeypatch.setattr(teamService.gtTeamManager, "get_team_by_id", _get_team_by_id)
     monkeypatch.setattr(teamService.gtTeamManager, "get_team", AsyncMock(return_value=None))
     monkeypatch.setattr(teamService.gtTeamManager, "save_team", _save_team)
-    monkeypatch.setattr(teamService.agentService, "delete_team_containers_safely", _clean)
+    monkeypatch.setattr(teamService.agentService, "switch_team_agents_to_host", AsyncMock())
+    monkeypatch.setattr(teamService.containerService, "delete_team_containers_safely", _clean)
     monkeypatch.setattr(teamService.workspaceUtil.configUtil, "get_app_config", lambda: _app_config("/tmp/ws"))
 
 
@@ -386,7 +325,7 @@ async def test_rename_team_cleans_containers_before_moving_dir(monkeypatch, tmp_
         return 1
 
     monkeypatch.setattr(teamService.workspaceUtil, "rename_team_workdir", _record_move)
-    monkeypatch.setattr(teamService.agentService, "delete_team_containers_safely", _record_clean)
+    monkeypatch.setattr(teamService.containerService, "delete_team_containers_safely", _record_clean)
 
     (tmp_path / "old" / "shared").mkdir(parents=True)
 
@@ -458,7 +397,8 @@ async def test_delete_team_cleans_containers_after_runtime_stopped(monkeypatch):
     monkeypatch.setattr(teamService.gtTeamManager, "get_team", _get_team)
     monkeypatch.setattr(teamService.gtTeamManager, "delete_team", _delete)
     monkeypatch.setattr(teamService, "stop_team_runtime", _stop)
-    monkeypatch.setattr(teamService.agentService, "delete_team_containers_safely", _clean)
+    monkeypatch.setattr(teamService.agentService, "switch_team_agents_to_host", AsyncMock())
+    monkeypatch.setattr(teamService.containerService, "delete_team_containers_safely", _clean)
 
     await teamService.delete_team("demo")
 
@@ -467,15 +407,12 @@ async def test_delete_team_cleans_containers_after_runtime_stopped(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_delete_team_deletes_db_even_when_cleanup_raises(monkeypatch):
-    """容器清理异常也不能阻止 Team 从库里删除。"""
+    """容器清理异常由 containerService 吞掉，不能阻止 Team 从库里删除。"""
     team = SimpleNamespace(id=7, name="demo", config={}, enabled=True)
     deleted: list[str] = []
 
     async def _get_team(_name: str):
         return team
-
-    async def _clean(_team_id: int) -> int:
-        raise RuntimeError("docker gone")
 
     async def _delete(name: str):
         deleted.append(name)
@@ -483,20 +420,20 @@ async def test_delete_team_deletes_db_even_when_cleanup_raises(monkeypatch):
     monkeypatch.setattr(teamService.gtTeamManager, "get_team", _get_team)
     monkeypatch.setattr(teamService.gtTeamManager, "delete_team", _delete)
     monkeypatch.setattr(teamService, "stop_team_runtime", AsyncMock())
-    # 真实实现里 delete_team_containers_safely 自己吞掉异常；这里故意换成会抛的版本，
-    # 用来钉住 teamService.delete_team 里的顺序：清理失败不应影响 delete_team 的执行。
+    monkeypatch.setattr(teamService.agentService, "switch_team_agents_to_host", AsyncMock())
     monkeypatch.setattr(
-        teamService.agentService, "delete_team_containers_safely",
+        containerCore, "delete_team_containers",
         AsyncMock(side_effect=RuntimeError("docker gone")),
     )
 
-    with pytest.raises(RuntimeError, match="docker gone"):
-        await teamService.delete_team("demo")
+    await teamService.delete_team("demo")
+
+    assert deleted == ["demo"]
 
 
 @pytest.mark.asyncio
-async def test_delete_team_containers_safely_switches_all_loaded_agents_to_host(monkeypatch):
-    """Team 级清理要把该 Team 已加载的每个 Agent 都切回宿主，再批量删。"""
+async def test_switch_team_agents_to_host_switches_all_loaded_agents(monkeypatch):
+    """Team 级清理前要把该 Team 已加载的每个 Agent 都切回宿主。"""
     order: list[str] = []
 
     def _make_recording_driver(container_id: str) -> _FakeDriver:
@@ -518,18 +455,13 @@ async def test_delete_team_containers_safely_switches_all_loaded_agents_to_host(
     drivers = {1: _make_recording_driver("c0ffee123456"), 2: _make_recording_driver("deadbeef0002")}
     monkeypatch.setattr(core, "_agents", {aid: _fake_agent(d) for aid, d in drivers.items()})
 
-    async def _delete(_team_id: int) -> int:
-        order.append("delete_team")
-        return 2
+    await core.switch_team_agents_to_host(1)
 
-    monkeypatch.setattr(core.containerService, "delete_team_containers", _delete)
-
-    assert await core.delete_team_containers_safely(1, agent_ids=[1, 2]) == 2
-    assert order == ["disconnect", "connect_host", "disconnect", "connect_host", "delete_team"]
+    assert order == ["disconnect", "connect_host", "disconnect", "connect_host"]
 
 
 @pytest.mark.asyncio
-async def test_delete_team_containers_safely_defaults_to_loaded_agents(monkeypatch):
+async def test_switch_team_agents_to_host_defaults_to_loaded_agents(monkeypatch):
     """不传 agent_ids 时只处理**已加载**的成员，且不查库。
 
     切回宿主只对已加载的 Agent 有意义；Team 改名这条路径因此完全不依赖 DB。
@@ -561,24 +493,6 @@ async def test_delete_team_containers_safely_defaults_to_loaded_agents(monkeypat
 
     monkeypatch.setattr(core.gtAgentManager, "get_team_all_agents", _no_db)
 
-    async def _delete(_team_id: int) -> int:
-        order.append("delete_team")
-        return 1
+    await core.switch_team_agents_to_host(3)
 
-    monkeypatch.setattr(core.containerService, "delete_team_containers", _delete)
-
-    assert await core.delete_team_containers_safely(3) == 1
-    assert order == ["disconnect", "connect_host", "delete_team"]
-
-
-@pytest.mark.asyncio
-async def test_delete_team_containers_safely_swallows_container_error(monkeypatch):
-    """批量删容器失败时返回 0，不冒泡到 Team 改名/删除流程（§7 best-effort）。"""
-    monkeypatch.setattr(core, "_agents", {})
-
-    async def _boom(_team_id: int) -> int:
-        raise RuntimeError("docker gone")
-
-    monkeypatch.setattr(core.containerService, "delete_team_containers", _boom)
-
-    assert await core.delete_team_containers_safely(1, agent_ids=[]) == 0
+    assert order == ["disconnect", "connect_host"]

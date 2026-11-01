@@ -405,9 +405,16 @@ async def test_enter_then_exit_container_with_real_handshake(e2e_env, monkeypatc
         ),
     )
 
-    # 这套 e2e 直接构造 Driver 验证真实握手，不经过已加载的 Agent；
-    # 切环境本身由 agentService 负责，这里把它的 Driver 查询指向本地实例。
-    monkeypatch.setattr(agentService.core, "_get_loaded_driver", lambda _agent_id: driver)
+    # 这套 e2e 直接构造 Driver 验证真实握手；把 Driver 挂到真实 Agent 上并注册，
+    # 环境切换仍走 Agent 的方法。
+    from service.agentService.agent import Agent
+
+    agent = Agent(
+        gt_agent=GtAgent(id=1, team_id=1, name="小美", role_template_id=1),
+        system_prompt="",
+    )
+    agent.task_consumer._turn_runner.driver = driver
+    monkeypatch.setattr(agentService.core, "_agents", {1: agent})
 
     entered = False
     try:

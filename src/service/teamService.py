@@ -8,7 +8,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
-from service import deptService, roomService, schedulerService, agentService, serviceUtil
+from service import deptService, roomService, schedulerService, agentService, containerService, serviceUtil
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from util import assertUtil, fileUtil, workspaceUtil
 
@@ -179,8 +179,11 @@ async def update_team_base_info(team_id: int, working_directory: str | None = No
 
     # 工作目录一变，旧容器的 bind mount 就指向了不再使用的路径（§7）。只在实际发生
     # 变更时清理，否则「顺手保存一下配置」就会把用户正在用的容器全删掉。
+    # 顺序不能反：先把已加载成员切回宿主，再删容器，否则 `docker rm -f` 会打断
+    # 正在使用的 stdio 连接。
     if workspaceUtil.get_custom_workdir(config) != old_working_directory:
-        await agentService.delete_team_containers_safely(team_id)
+        await agentService.switch_team_agents_to_host(team_id)
+        await containerService.delete_team_containers_safely(team_id)
 
     team.config = config
     return await gtTeamManager.save_team(team)
@@ -204,8 +207,10 @@ async def rename_team(team_id: int, new_name: str) -> GtTeam:
     old_name = team.name
     # 托管目录移动后旧容器的 bind mount 就失效了，必须在移动前清理（§7）。
     # 自定义 working_directory 的 Team 不随改名移动目录，容器仍然有效，不必清。
+    # 顺序不能反：先切回宿主，再删容器。
     if not workspaceUtil.get_custom_workdir(team.config):
-        await agentService.delete_team_containers_safely(team.id)
+        await agentService.switch_team_agents_to_host(team.id)
+        await containerService.delete_team_containers_safely(team.id)
 
     # 先迁移目录再写库；写库失败时把目录改回去，避免两边不一致
     moved_dirs = workspaceUtil.rename_team_workdir(team.config, old_name, new_name)
@@ -223,9 +228,10 @@ async def delete_team(name: str) -> None:
     team = await gtTeamManager.get_team(name)
     if team is not None:
         await stop_team_runtime(team.id)
-        # 运行时销毁后清掉该 Team 全部自建容器（§7）：容器挂的目录随即被删，
-        # 留着只会变成一堆无法进入的死容器，还会继续占用人单位配额。
-        await agentService.delete_team_containers_safely(team.id)
+        # 运行时销毁后 Agent 已全部卸载，无需再切回宿主；直接清掉该 Team 全部
+        # 自建容器（§7）：容器挂的目录随即被删，留着只会变成无法进入的死容器，
+        # 还会继续占用配额。
+        await containerService.delete_team_containers_safely(team.id)
 
     await gtTeamManager.delete_team(name)
 

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
-from constants import DriverType
+from constants import DriverType, ExecEnv
 from model.coreModel.agentModel import ExecEnvSnapshot
+from model.coreModel.containerModel import ContainerTarget
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtScheculeTask import GtScheculeTask
 from service.agentService.agentHistoryStore import AgentHistoryStore
@@ -40,6 +41,41 @@ class AgentDriverHost(Protocol):
     tool_registry: AgentToolRegistry
 
     async def execute_pending_tools(self) -> None:
+        ...
+
+
+@runtime_checkable
+class ContainerCapableDriver(Protocol):
+    """支持容器沙箱的驱动契约（目前由 `TspAgentDriver` 实现）。
+
+    Agent 用 `isinstance(driver, ContainerCapableDriver)` 做能力探测：只有实现
+    本协议的驱动才有「当前执行环境」这个概念，才能被 `enter_container` /
+    `exit_to_host` 操作。用协议而不是具体驱动类型，避免 Agent 依赖 driver 的
+    实现模块（那会把 gtsp 相关导入链拉进来）。
+    """
+
+    @property
+    def exec_env(self) -> ExecEnv:
+        ...
+
+    @property
+    def current_container_id(self) -> str | None:
+        ...
+
+    def get_exec_env(self) -> ExecEnvSnapshot:
+        ...
+
+    def is_connected(self) -> bool:
+        ...
+
+    async def connect(
+        self,
+        env: ExecEnv = ExecEnv.HOST,
+        container: ContainerTarget | None = None,
+    ) -> bool:
+        ...
+
+    async def disconnect(self) -> None:
         ...
 
 

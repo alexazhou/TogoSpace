@@ -15,6 +15,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service.roomService import ToolCallContext
+import service.containerService as containerService
 import service.roomService as roomService
 import service.skillService as skillService
 import service.thirdPartyService as thirdPartyService
@@ -617,21 +618,19 @@ async def save_agent(
     agent.i18n = i18n or {}
 
     # 改名时同步迁移私有目录；写库失败则把目录改回去
-    from service.agentService.core import rename_agent_workdir
+    from service.agentService.core import rename_agent_workdir, switch_agent_to_host
     moved_dirs: list[tuple[str, str]] = []
     if existing is not None and old_name != normalized_name:
-        # 传 agent_id 而不是让 core 按名字反查：此时库里还叫 old_name，
-        # 反查是多余的一次往返，而且改名失败回滚时名字已经变了，更查不到。
-        moved_dirs = await rename_agent_workdir(
-            team_id, old_name, normalized_name, agent_id=existing.id,
-        )
+        # 容器的 bind mount 固化了旧目录的绝对路径，必须在移动目录前清掉旧容器（§7）。
+        await switch_agent_to_host(existing.id)
+        await containerService.delete_agent_containers_safely(existing.id)
+        moved_dirs = await rename_agent_workdir(team_id, old_name, normalized_name)
     try:
         await gtAgentManager.batch_save_agents(team_id, [agent])
     except Exception:
         if moved_dirs:
-            await rename_agent_workdir(
-                team_id, normalized_name, old_name, agent_id=existing.id if existing is not None else None,
-            )
+            # 回滚只恢复目录；容器已在改名时清掉，不重复删除
+            await rename_agent_workdir(team_id, normalized_name, old_name)
         raise
     saved = await gtAgentManager.get_agent_by_id(agent.id) if agent.id else await gtAgentManager.get_agent(team_id, normalized_name, status=None)
     if saved is None:
@@ -1382,15 +1381,19 @@ async def load_skill(
 def _tool_agent_id(_context: ToolCallContext | None) -> int:
     """取容器工具调用上下文里的 Agent ID；没有上下文时拒绝调用。"""
     if _context is None or _context.agent_id <= 0:
-        raise TogoException("容器工具需要在 Agent 上下文中调用", "container_invalid_params")
+        raise TogoException(
+            "容器工具需要在 Agent 上下文中调用",
+            containerService.ERROR_CONTAINER_INVALID_PARAMS,
+        )
     return _context.agent_id
 
 
-def _container_driver(_context: ToolCallContext | None):
-    """取当前 Agent 的 TspAgentDriver；不是 TSP driver 时抛错。
+def _container_agent(_context: ToolCallContext | None):
+    """取当前 Agent，并确认它的驱动支持容器沙箱。
 
     容器工具只对 TSP driver 开放（§6.1 生效范围）：Native / Claude SDK 的工具
     不经过 gtsp，切换「执行环境」对它们没有意义，暴露了只会误导模型。
+    能力校验由 Agent 自己完成（`require_container_driver`），工具层不碰 Driver。
 
     动态导入（不在模块顶层 import agentService）：`tools.py` 被
     `funcToolService` 导入，而 `agentService` 又导入 `funcToolService`，
@@ -1399,21 +1402,14 @@ def _container_driver(_context: ToolCallContext | None):
     from service import agentService
 
     agent_id = _tool_agent_id(_context)
-
     agent = agentService.get_agent_or_none(agent_id)
     if agent is None:
-        raise TogoException("当前 Agent 未加载，无法使用容器工具", "container_invalid_params")
-
-    driver = agent.task_consumer._turn_runner.driver
-    # 在函数内取类型：`tspDriver` 顶层 import 了 `funcToolService`，顶层互导会成环。
-    # 用 duck-typing 也行，但显式 isinstance 能挡住「别的 driver 恰好也有 exec_env」。
-    from service.agentService.driver.tspDriver import TspAgentDriver
-    if not isinstance(driver, TspAgentDriver):
         raise TogoException(
-            "当前 Agent 的执行驱动不支持容器沙箱（仅支持 TSP 驱动）",
-            "container_invalid_params",
+            "当前 Agent 未加载，无法使用容器工具",
+            containerService.ERROR_CONTAINER_INVALID_PARAMS,
         )
-    return driver
+    agent.require_container_driver()
+    return agent
 
 
 async def create_container(image: Optional[str] = None, _context: ToolCallContext = None) -> dict[str, Any]:
@@ -1430,10 +1426,8 @@ async def create_container(image: Optional[str] = None, _context: ToolCallContex
         image: 容器镜像名称，例如 "ubuntu:24.04"、"python:3.11"。必须是本地已存在的
             Linux 镜像，系统不会自动拉取；省略时使用默认镜像。
     """
-    from service import containerService
-
     try:
-        driver = _container_driver(_context)
+        _container_agent(_context)
         assert _context is not None
         record = await containerService.create_container(_context.agent_id, image=image)
         container_id = record.container_id
@@ -1457,7 +1451,7 @@ async def create_container(image: Optional[str] = None, _context: ToolCallContex
         return _tool_error_result(exc)
     except Exception as exc:
         logger.warning("create_container 失败: %s", exc, exc_info=True)
-        return {"success": False, "message": f"创建容器失败: {exc}", "error_code": "container_create_failed"}
+        return {"success": False, "message": f"创建容器失败: {exc}", "error_code": containerService.ERROR_CONTAINER_CREATE_FAILED}
 
 
 async def enter_container(container_id: str, _context: ToolCallContext = None) -> dict[str, Any]:
@@ -1473,11 +1467,9 @@ async def enter_container(container_id: str, _context: ToolCallContext = None) -
     Args:
         container_id: 目标容器的 12 位容器 ID（十六进制）。不接受容器名称或镜像名。
     """
-    from service import agentService
-
     try:
-        agent_id = _tool_agent_id(_context)
-        target, previous_state = await agentService.enter_container(agent_id, container_id)
+        agent = _container_agent(_context)
+        target, previous_state = await agent.enter_container(container_id)
         return {
             "success": True,
             "exec_env": ExecEnv.CONTAINER.value,
@@ -1503,7 +1495,7 @@ async def enter_container(container_id: str, _context: ToolCallContext = None) -
         return _tool_error_result(exc)
     except Exception as exc:
         logger.warning("enter_container 失败: %s", exc, exc_info=True)
-        return {"success": False, "message": f"进入容器失败: {exc}", "error_code": "container_enter_failed"}
+        return {"success": False, "message": f"进入容器失败: {exc}", "error_code": containerService.ERROR_CONTAINER_ENTER_FAILED}
 
 
 async def exit_to_host(_context: ToolCallContext = None) -> dict[str, Any]:
@@ -1512,16 +1504,13 @@ async def exit_to_host(_context: ToolCallContext = None) -> dict[str, Any]:
     退出后容器里的路径（如 /workspace/self）不再可用，宿主机的工作目录恢复生效。
     你自己创建的容器会自动停止，里面的文件不会丢失。
     """
-    from service import agentService
-
     try:
-        driver = _container_driver(_context)
-        assert _context is not None
-        await agentService.exit_to_host(_context.agent_id)
+        agent = _container_agent(_context)
+        await agent.exit_to_host()
         return {
             "success": True,
             "exec_env": ExecEnv.HOST.value,
-            "workdir": driver.host.agent_workdir,
+            "workdir": agent.agent_workdir,
             "message": (
                 "已退回到宿主机环境，宿主机工作目录恢复生效。"
                 "容器内的路径（如 /workspace/self）已不可用；"
@@ -1532,7 +1521,7 @@ async def exit_to_host(_context: ToolCallContext = None) -> dict[str, Any]:
         return _tool_error_result(exc)
     except Exception as exc:
         logger.warning("exit_to_host 失败: %s", exc, exc_info=True)
-        return {"success": False, "message": f"退出容器失败: {exc}", "error_code": "container_enter_failed"}
+        return {"success": False, "message": f"退出容器失败: {exc}", "error_code": containerService.ERROR_CONTAINER_ENTER_FAILED}
 
 
 async def list_containers(_context: ToolCallContext = None) -> dict[str, Any]:
@@ -1540,22 +1529,22 @@ async def list_containers(_context: ToolCallContext = None) -> dict[str, Any]:
 
     列表包含创建中与已停止的容器，不含宿主机上其他人或其他程序创建的容器。
     """
-    from service import containerService
-
     try:
-        driver = _container_driver(_context)
+        agent = _container_agent(_context)
         assert _context is not None
+        state = agent.get_exec_env_state()
+        assert state is not None
         docker_available = await containerService.is_docker_available()
         infos = await containerService.list_agent_containers(
             _context.agent_id,
-            current_container_id=driver.current_container_id,
+            current_container_id=state.current_container_id,
             docker_available=docker_available,
         )
         return {
             "success": True,
             "docker_available": docker_available,
-            "exec_env": driver.exec_env.value,
-            "current_container_id": driver.current_container_id,
+            "exec_env": state.exec_env.value,
+            "current_container_id": state.current_container_id,
             # 走 `to_tool_dict()` 而不是 `model_dump()`：§6.2 契约字段名是 `container_id`，
             # 且不该暴露内部字段 `agent_id`。这是全仓唯一的映射点。
             "containers": [info.to_tool_dict() for info in infos],
@@ -1564,7 +1553,7 @@ async def list_containers(_context: ToolCallContext = None) -> dict[str, Any]:
         return _tool_error_result(exc)
     except Exception as exc:
         logger.warning("list_containers 失败: %s", exc, exc_info=True)
-        return {"success": False, "message": f"查询容器列表失败: {exc}", "error_code": "container_enter_failed"}
+        return {"success": False, "message": f"查询容器列表失败: {exc}", "error_code": containerService.ERROR_CONTAINER_ENTER_FAILED}
 
 
 async def delete_container(
@@ -1583,16 +1572,16 @@ async def delete_container(
         container_id: 容器的 12 位容器 ID（十六进制）。
         record_id: 容器列表里的记录编号（整数），与 container_id 二选一。
     """
-    from service import containerService
-
     try:
-        driver = _container_driver(_context)
+        agent = _container_agent(_context)
         assert _context is not None
+        state = agent.get_exec_env_state()
+        assert state is not None
         record = await containerService.delete_container(
             _context.agent_id,
             container_id=container_id,
             record_id=record_id,
-            current_container_id=driver.current_container_id,
+            current_container_id=state.current_container_id,
         )
         return {
             "success": True,
@@ -1608,4 +1597,4 @@ async def delete_container(
         return _tool_error_result(exc)
     except Exception as exc:
         logger.warning("delete_container 失败: %s", exc, exc_info=True)
-        return {"success": False, "message": f"删除容器失败: {exc}", "error_code": "container_delete_failed"}
+        return {"success": False, "message": f"删除容器失败: {exc}", "error_code": containerService.ERROR_CONTAINER_DELETE_FAILED}
