@@ -18,6 +18,7 @@ from constants import (
 from dal.db import gtAgentManager, gtAgentTaskManager, gtAgentTaskEventManager
 from model.dbModel.base import atomic
 from model.dbModel.gtAgentTask import GtAgentTask
+from service import deptService
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +262,6 @@ async def create_task(
 
     # 验证 assignee 权限
     if assignee_id != creator_id:
-        from service import deptService
         subordinates = await deptService.get_sub_agent_ids(team_id, creator_id)
         if assignee_id not in subordinates:
             return {
@@ -632,8 +632,6 @@ async def resolve_visible_scope(team_id: int, caller_id: Optional[int]) -> Visib
     """
     if caller_id is None:
         return VisibleScope([], False)
-
-    from service import deptService
 
     tree = await deptService.get_dept_tree(team_id)
     if tree is not None and tree.manager_id == caller_id:

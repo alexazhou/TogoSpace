@@ -24,7 +24,7 @@ from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtScheculeTask import GtScheculeTask
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.historyUsage import CompactStage, HistoryUsage
-from service import agentActivityService, llmService, roomService
+from service import agentActivityService, llmService, roomService, taskService
 from service.agentActivityService import AgentActivityMeta
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService import compact, promptBuilder, visionFallback
@@ -200,7 +200,6 @@ class AgentTurnRunner:
         """
         if agent_task.assignee_id == self.gt_agent.id and agent_task.status in (TaskStatus.TODO, TaskStatus.IN_PROGRESS):
             return True
-        import service.taskService as taskService  # 局部导入：避免 agentService ↔ taskService 的模块级导入环
 
         return taskService.is_task_reviewer(agent_task, self.gt_agent.id) and agent_task.status == TaskStatus.REVIEWING
 
@@ -212,8 +211,6 @@ class AgentTurnRunner:
         - TODO_TASK：向 history 注入任务通知 prompt 后运行 turn loop，无房间依赖。
         若存在未完成 turn，则走续跑路径。
         """
-        import service.taskService as taskService  # 局部导入：避免 agentService ↔ taskService 的模块级导入环
-
         is_todo_task = task.task_type == AgentTaskType.TODO_TASK
 
         if is_todo_task:

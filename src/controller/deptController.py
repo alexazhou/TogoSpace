@@ -29,7 +29,7 @@ class DeptTreeUpdateHandler(BaseHandler):
 
         request_body = json.loads(self.request.body)
         dept_tree = jsonUtil.json_data_to_object(request_body.get("dept_tree", request_body), GtDept)
-        await deptService.overwrite_dept_tree(team_id, dept_tree)
+        await teamService.overwrite_team_dept_tree(team_id, dept_tree)
 
         # 触发热更新
         await teamService.hot_reload_team(team.name)

@@ -8,14 +8,19 @@ from dal.db import gtDeptManager, gtAgentManager, gtTeamManager
 from exception import TogoException
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtAgent import GtAgent
-from service import roomService, agentService
+from service import roomService
 from util import assertUtil
 
 logger = logging.getLogger(__name__)
 
 
 async def overwrite_dept_tree(team_id: int, root: GtDept) -> None:
-    """增量更新部门树，同步部门房间，更新 Agent employ_status。"""
+    """增量更新部门树，并同步部门房间。
+
+    这里只负责树本身。成员在岗状态依赖部门树，但同步动作是跨服务的编排，
+    由 `teamService.overwrite_team_dept_tree` 负责，避免 deptService 反向依赖
+    agentService（会与 taskService 一起形成导入环）。
+    """
     team = await gtTeamManager.get_team_by_id(team_id)
     assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
     assertUtil.assertFalse(team.enabled, error_message="团队必须处于停用状态才能编辑组织树", error_code="team_not_stopped")
@@ -29,7 +34,7 @@ async def overwrite_dept_tree(team_id: int, root: GtDept) -> None:
         raise
     except ValueError as exc:
         raise TogoException(str(exc), error_code="DEPT_MEMBERS_TOO_FEW") from exc
-    all_agent_ids, input_dept_ids = root.collect_dept_and_agent_ids()
+    _, input_dept_ids = root.collect_dept_and_agent_ids()
 
     # 先删除不在传入 id 集合中的旧部门，再执行覆盖保存。
     existing_depts = await gtDeptManager.get_all_depts(team_id)
@@ -43,10 +48,7 @@ async def overwrite_dept_tree(team_id: int, root: GtDept) -> None:
     # 同步部门房间（roomService 只接收房间信息，不感知部门树结构）
     await roomService.overwrite_dept_rooms(team_id, saved_root.collect_room_specs())
 
-    # 更新 Agent employ_status：树内 Agent ON_BOARD，其他 Agent OFF_BOARD
-    on_board_count, off_board_count = await agentService.overwrite_team_agent_employ_status(team_id, all_agent_ids)
-
-    logger.info(f"部门树已更新（team_id={team_id}，on_board={on_board_count}，off_board={off_board_count}）")
+    logger.info(f"部门树已更新（team_id={team_id}）")
 
 
 async def _overwrite_dept_subtree(

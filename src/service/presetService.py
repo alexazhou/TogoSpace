@@ -10,7 +10,7 @@ from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from model.dbModel.gtTeam import GtTeam
-from service import agentService, deptService, roleTemplateService, roomService, serviceUtil
+from service import agentService, deptService, roleTemplateService, roomService, serviceUtil, teamService
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from util import configUtil, i18nUtil, workspaceUtil
 from util.configUtil.configTypes import DeptNodePreset, TeamPreset, TeamRoomPreset
@@ -188,7 +188,7 @@ async def _import_team_from_config(team_config: TeamPreset) -> GtTeam | None:
         [await _to_gt_room(team.id, room) for room in team_config.preset_rooms],
     )
     if team_config.dept_tree is not None:
-        await deptService.overwrite_dept_tree(team.id, await _to_dept_tree_node(team.id, team_config.dept_tree))
+        await teamService.overwrite_team_dept_tree(team.id, await _to_dept_tree_node(team.id, team_config.dept_tree))
 
     # 导入完成后，根据 auto_start 决定是否启用团队
     if team_config.auto_start:

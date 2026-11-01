@@ -755,8 +755,8 @@ class TestDeptService(ServiceTestCase):
             room_agents = await self._get_room_agent_names(room.id)
             assert set(room_agents) == expected_agents
 
-    async def test_overwrite_dept_tree_auto_offboards_agents_outside_tree(self):
-        """验证 overwrite_dept_tree 将不在树中的成员自动设为 OFF_BOARD。"""
+    async def test_overwrite_team_dept_tree_auto_offboards_agents_outside_tree(self):
+        """验证 Team 层编排在覆盖部门树后，将不在树中的成员自动设为 OFF_BOARD。"""
         await self._reset_tables()
 
         team = await self._setup_team_with_agents("t_auto_offboard", ["alice", "bob", "charlie"])
@@ -768,7 +768,7 @@ class TestDeptService(ServiceTestCase):
             manager="alice",
             agents=["alice", "bob"],
         )
-        await deptService.overwrite_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
+        await teamService.overwrite_team_dept_tree(team.id, await self._to_dept_tree_node(team.id, tree))
 
         alice = await gtAgentManager.get_agent(team.id, "alice")
         bob = await gtAgentManager.get_agent(team.id, "bob")

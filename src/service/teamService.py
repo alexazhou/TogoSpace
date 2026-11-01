@@ -102,6 +102,16 @@ async def _sync_team_agent_status_with_dept_tree(team_id: int) -> None:
     await agentService.overwrite_team_agent_employ_status(team_id, on_board_agent_ids)
 
 
+async def overwrite_team_dept_tree(team_id: int, root: GtDept) -> None:
+    """覆盖 Team 的部门树，并按新树同步成员在岗状态。
+
+    部门树变更与在岗状态同步分属 deptService / agentService，编排放在 Team
+    生命周期层，避免 deptService 反向依赖 agentService。
+    """
+    await deptService.overwrite_dept_tree(team_id, root)
+    await _sync_team_agent_status_with_dept_tree(team_id)
+
+
 async def create_team(
     name: str,
     config: dict | None = None,
@@ -147,7 +157,7 @@ async def create_team(
     await agentService.overwrite_team_agents(team_id, agents or [])
 
     if dept_tree:
-        await deptService.overwrite_dept_tree(team_id, dept_tree)
+        await overwrite_team_dept_tree(team_id, dept_tree)
 
     if preset_rooms:
         await roomService.overwrite_team_rooms(team_id, preset_rooms)

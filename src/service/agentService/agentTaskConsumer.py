@@ -8,7 +8,7 @@ from constants import AgentTaskStatus, AgentStatus, AgentActivityType, AgentActi
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtScheculeTask import GtScheculeTask
 from dal.db import gtAgentTaskManager, gtScheculeTaskManager
-from service import messageBus, agentActivityService
+from service import messageBus, agentActivityService, taskService
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver import AgentDriverConfig
 from util import assertUtil, asyncUtil
@@ -112,8 +112,6 @@ class AgentTaskConsumer:
 
         系统操作、幂等、不唤醒 / 不通知；异常只记录、不阻断任务执行。
         """
-        import service.taskService as taskService
-
         try:
             await taskService.claim_task(self.gt_agent.id, agent_task_id)
         except Exception:
