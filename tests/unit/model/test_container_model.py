@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -252,6 +252,41 @@ def test_to_tool_dict_serializes_created_at_to_iso_string():
 
     assert isinstance(as_tool["created_at"], str)
     assert as_tool["created_at"].startswith("2026-11-01")
+
+
+def test_to_tool_dict_created_at_matches_api_serialization_exactly():
+    """工具层与 API 层的 `created_at` 必须**逐字节一致**。
+
+    `to_tool_dict()` 不能用 `datetime.isoformat()` 代替：带时区时 pydantic 输出 `...Z`，
+    而 `isoformat()` 输出 `...+00:00`。同一字段在两个方法里两种格式，前端和模型看到的
+    就是两个不同的值——这种差异只在带时区时才出现，最容易漏测。
+    """
+    cases = [
+        None,
+        datetime(2026, 11, 1, 10, 0, 0),
+        datetime(2026, 11, 1, 10, 0, 0, 123456),
+        datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc),
+        datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone(timedelta(hours=8))),
+    ]
+
+    for created_at in cases:
+        info = ContainerInfo(
+            record_id=7, agent_id=3, docker_id=None, container_name="agent-3-1",
+            image="ubuntu:24.04", created_at=created_at,
+        )
+
+        assert info.to_tool_dict()["created_at"] == info.to_json()["created_at"], created_at
+
+
+def test_to_tool_dict_created_at_uses_z_suffix_for_utc_not_offset():
+    """钉死 UTC 的具体形态：`...Z`（pydantic 口径），不是 `...+00:00`（isoformat 口径）。"""
+    info = ContainerInfo(
+        record_id=7, agent_id=3, docker_id=None, container_name="agent-3-1",
+        image="ubuntu:24.04", created_at=datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert info.to_tool_dict()["created_at"] == "2026-11-01T10:00:00Z"
+    assert info.to_tool_dict()["created_at"] != "2026-11-01T10:00:00+00:00"
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 # 容器状态取值说明（不归一化，直接透传 Docker inspect 的 State.Status 原值）：
 #   created / running / exited / paused / restarting / removing / dead …
@@ -12,6 +13,18 @@ from pydantic import BaseModel, ConfigDict
 #   unknown —— inspect 本身失败（Docker 不可用、超时等），不能据此判定容器已丢
 CONTAINER_STATE_MISSING = "missing"
 CONTAINER_STATE_UNKNOWN = "unknown"
+
+# 单字段的 JSON 序列化：必须与 `model_dump(mode="json")` **逐字节一致**，
+# 否则同一字段在 `to_json()`（API/前端）和 `to_tool_dict()`（工具）里会呈现两种格式。
+# 本仓 `created_at` 恒为 naive datetime（SQLite `datetime('now')`），但带时区时二者会分叉：
+# `model_dump` 输出 `...Z`，而 `datetime.isoformat()` 输出 `...+00:00`。走同一个 adapter 保证一致。
+_DATETIME_JSON: TypeAdapter[datetime | None] = TypeAdapter(datetime | None)
+
+
+def _json_datetime(value: datetime | None) -> str | None:
+    """把单个 `datetime` 转成与 `model_dump(mode="json")` 完全相同的字符串。"""
+    return json.loads(_DATETIME_JSON.dump_json(value))
+
 
 def to_container_id(docker_id: str | None) -> str | None:
     """单值场景的 `docker_id → container_id` 换名口径。
@@ -111,8 +124,11 @@ class ContainerInfo(BaseModel):
         - 去掉内部字段 `agent_id`：模型只看自己的容器，多一个 ID 只会诱导它去猜
           别人的容器（也容易把 `agent_id` 误当成容器标识传进参数）。
 
-        这是全仓**唯一**的 `docker_id → container_id` 映射点。工具层任何地方
-        手写一份字典就等于埋一个「工具返回 null 但 API 有值」的漏改点。
+        键是**显式白名单**，不是 `model_dump` 之后改键名：给 LLM 的契约必须逐个列出来，
+        将来给模型加字段时自动漏出去就是多一份误导（多一个内部字段就多一个可猜的东西）。
+
+        `container_id` 这个对外名字在全仓只出现在这里和 `to_container_id()` 两处，
+        两者相邻（`to_container_id` 在本文件上方），改一处必然看到另一处。
         """
         return {
             "record_id": self.record_id,
@@ -121,7 +137,7 @@ class ContainerInfo(BaseModel):
             "image": self.image,
             "state": self.state,
             "is_entered": self.is_entered,
-            "created_at": self.model_dump(mode="json")["created_at"],
+            "created_at": _json_datetime(self.created_at),
         }
 
 
