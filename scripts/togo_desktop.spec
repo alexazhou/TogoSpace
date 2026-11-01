@@ -84,57 +84,14 @@ EXCLUDE_PATTERNS = [
     "_tcl_data",
     "_tk_data",
     "tcl8",
-    # gtsp 的**运行期日志目录**（`assets/execute/gtsp/logs/`）。
-    #
-    # 排的是这个子目录，不是 gtsp 本体（下面那段说不能排除 `gtsp-linux-*`，两件事）。
-    #
-    # 为什么必须排：本 spec 的 datas 声明的是整棵 `assets/`，PyInstaller **不做
-    # .gitignore 感知**。该目录被 `.gitignore` 的 `logs` 规则忽略、不入库，但开发机
-    # 上物理存在（本仓库当前 26 个文件 / 212K）——生产构建 `tauri/scripts/build_backend.py`
-    # 从工作区主目录打包，日志会被原样打进安装包。
-    #
-    # 后果不只是体积：日志里有本机绝对路径（`/Volumes/PDATA/...`）与用户业务文件名
-    # （实测含 `wechat.JPG` 这类终端用户的真实图片名），等于把开发机信息带给终端用户。
-    #
-    # ⚠️ 措辞更正（勿再写回「base64 图片数据」）：日志里形如
-    # `"base64":"iVBORw0KGgoAAAANSUhEUgAA...[base64:100620 chars]"` 的片段，
-    # `[base64:N chars]` 是 **gtsp 自己打的截断占位符**，不是数据本体。实测
-    # 26 个日志：`[A-Za-z0-9+/]{200,}` 0 命中、`data:image/...;base64` 0 命中、
-    # `iVBOR` 后连续 base64 字符恒 24 个。真正敏感的是路径（暴露机器）与文件名
-    # （暴露用户业务内容）。
-    #
-    # 功能上无损：gtsp 运行期日志落 `appPaths.LOGS_DIR`（`~/.togospace/logs/backend`），
-    # 与包内这个目录无关；这里只是历史调试日志的残留。
+    # gtsp 运行期日志：.gitignore 忽略、不入库，但开发机上可能存在。
+    # PyInstaller 不读 .gitignore，整棵 assets/ 会原样打包；日志含构建机绝对路径
+    # 与用户文件名，必须排除。只排 logs 子目录，不能误伤同目录的 gtsp-linux-*：
+    # 容器沙箱要从 ASSETS_DIR 读取它们，排掉会让打包态容器功能整体不可用。
     "execute/gtsp/logs",
-    # ⚠️ 这里**不能**排除 `gtsp-linux-*`。
-    #
-    # 容器沙箱（§3.2）用 `docker cp` 把 Linux 产物注入容器，靠的是
-    # `appPaths.get_gtsp_linux_binary_path()` 从 ASSETS_DIR 读取。ASSETS_DIR 在
-    # 打包态指向 `_MEIPASS/assets`，而本 spec 的 datas 只声明了整棵 `assets/`，
-    # 所以排除规则一旦命中，安装包里就没有 Linux 产物 →
-    # `get_gtsp_linux_binary_path` 抛 FileNotFoundError → 容器功能在打包形态下
-    # 整体不可用（开发态因为读仓库 assets/ 反而正常，最难发现的一类差异）。
-    #
-    # 曾排除过（`56ddaede` 加桌面外壳时，那时还没有容器功能），总计约 12.7M；
-    # 现在它是功能必需物，不排除。
-    #
-    # ── 下面两条同源：都是「.gitignore 忽略、但开发机上物理存在」的东西 ──
-    # 字节码缓存目录。PyInstaller 同样不读 `.gitignore`，且 `.pyc` 的 `co_filename`
-    # 记录**构建机绝对路径**（实测 1470 个 .pyc 100% 含 `/Volumes/PDATA/GitDB`）。
-    # 排掉顺带省 20M；`fnmatch(basename)` 分支天然覆盖任意层级，不用逐层列举。
-    # 只按 basename 匹配 `__pycache__`，不会误伤 `.py` 源码。
+    # 字节码缓存：.pyc 的 co_filename 记录构建机绝对路径，顺带省体积
     "__pycache__",
-    # macOS Finder 元数据。同样不入库但物理存在（assets/ 下当前 5 个：
-    # assets/、assets/icons/、assets/execute/、assets/execute/gtsp/、
-    # assets/execute/gtsp/logs/），会被整棵 `assets/` 的 datas 原样带进包。
-    #
-    # ⚠️ 这条是**冗余保险，故意不删**（小马哥 2026-11-01 裁定）。
-    # PyInstaller 6.20.0 的 `Analysis.assemble()` 里确实有个 `if is_darwin:` 分支会
-    # 按 `basename(src_name) != '.DS_Store'` 自过滤，实测本机构建产物 .DS_Store 为 0。
-    # 但那是**构建平台判断**，不是目标平台：一旦 PyInstaller 换版本改掉这段，或改在
-    # Linux 上构建（CI 换 runner），就会静默回流。留着成本是一行 pattern，收益是
-    # 「不依赖上游默认行为 + 单测钉住 spec 自身契约」。
-    # 判据顺序：显式防护 > 依赖上游默认行为。别因为「上游已经兜了」就删掉这条。
+    # macOS Finder 元数据。PyInstaller 当前在 Darwin 上会自动过滤，留作冗余保险
     ".DS_Store",
 ]
 
