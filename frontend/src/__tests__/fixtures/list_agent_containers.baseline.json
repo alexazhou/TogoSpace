@@ -1,0 +1,53 @@
+{
+  "_meta": {
+    "source": "b47f2861 隔离 worktree，真实链路取样：assets/migrate/0017_agent_containers.sql 建表 → gtAgentContainerManager.create/set_docker_id/mark_deleted → containerService.list_agent_containers → ContainerInfo.to_json()",
+    "why_not_controller_fixture": "tests/unit/controller/test_agent_container_payload.py 把 containerService.list_agent_containers 整个打桩、返回手捏 ContainerInfo，验的是「controller 拿到对象后怎么拼包」，证不了 DB 记录经 list_agent_containers 之后的形状",
+    "inspect_note": "state 走真实 docker inspect 输出样本（.State.Status / .Config.Labels 子集），inspect 是外部进程边界，取样不改逻辑",
+    "record_ids": [1, 2, 3],
+    "record_3": "软删（deleted=1），两份输出里都不应出现"
+  },
+  "A_daemon_unavailable": [
+    {
+      "record_id": 1,
+      "agent_id": 3,
+      "docker_id": null,
+      "container_name": "agent-3-7",
+      "image": "ubuntu:24.04",
+      "state": "unknown",
+      "is_entered": false,
+      "created_at": "2026-11-01T12:09:12.049245"
+    },
+    {
+      "record_id": 2,
+      "agent_id": 3,
+      "docker_id": "deadbeef1234",
+      "container_name": "agent-3-8",
+      "image": "ubuntu:24.04",
+      "state": "unknown",
+      "is_entered": false,
+      "created_at": "2026-11-01T12:09:12.050430"
+    }
+  ],
+  "B_daemon_available_inspect_sample": [
+    {
+      "record_id": 1,
+      "agent_id": 3,
+      "docker_id": null,
+      "container_name": "agent-3-7",
+      "image": "ubuntu:24.04",
+      "state": "running",
+      "is_entered": false,
+      "created_at": "2026-11-01T12:09:12.049245"
+    },
+    {
+      "record_id": 2,
+      "agent_id": 3,
+      "docker_id": "deadbeef1234",
+      "container_name": "agent-3-8",
+      "image": "ubuntu:24.04",
+      "state": "exited",
+      "is_entered": true,
+      "created_at": "2026-11-01T12:09:12.050430"
+    }
+  ]
+}

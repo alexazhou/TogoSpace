@@ -20,6 +20,10 @@ import {
   testDeepSeekSearchService,
   testXiaomiMimoSearchService,
 } from '../api';
+// `list_agent_containers` 的真实链路取样（见该文件 _meta）。
+// 用 JSON 而不是内联字面量：它要能被别的用例原样复用，且改后端的人一眼能看出
+// 这是「后端产物样本」而不是前端手写的测试数据。
+import baselineContainers from './fixtures/list_agent_containers.baseline.json';
 
 describe('api request handling', () => {
   beforeEach(() => {
@@ -529,5 +533,82 @@ describe('getAgentDetail containers', () => {
     expect(containers.map((item) => item.state)).toEqual(['running', 'missing', 'exited']);
     // docker_id 为 null 的预记录不能丢（record_id 是删除入口）
     expect(containers[1].docker_id).toBeNull();
+  });
+});
+
+/**
+ * B 项基线：`list_agent_containers` 的**真实链路**输出喂给前端 normalize。
+ *
+ * 上面那个 describe 用的是手写 payload，验的是「normalize 本身的规则」。
+ * 这里换一份真取样（迁移 0017 建表 → 真实 DAL 写入 → list_agent_containers
+ * → to_json()），目的是**在阿张改 core.py / tools.py 之前钉住形状**：
+ * 他改完只要产物形状变了，这里就红，而不是等联调时才发现前端白屏。
+ *
+ * fixture 来源与「为什么不用 controller 那个测试的样例」写在
+ * fixtures/list_agent_containers.baseline.json 的 _meta 里。
+ */
+describe('getAgentDetail: list_agent_containers 真实基线', () => {
+  beforeEach(() => {
+    clearGlobalRequestError();
+    clearToken();
+    vi.restoreAllMocks();
+  });
+
+  it('daemon 不可用时预记录仍在表里、state 为 unknown、created_at 是 ISO 串', async () => {
+    const baseline = baselineContainers.A_daemon_unavailable;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 3, name: '小美', team_id: 2, exec_env: 'host', current_container_id: null,
+      containers: baseline, container_count: baseline.length,
+    }), { status: 200, headers: { 'content-type': 'application/json' } })));
+
+    const detail = await getAgentDetail(3);
+    const containers = detail.containers ?? [];
+
+    // 三项联调断言，逐条钉死：
+    // ① 预记录（docker_id=null）不丢，record_id 是唯一删除入口
+    expect(containers.map((item) => item.record_id)).toEqual([1, 2]);
+    expect(containers[0].docker_id).toBeNull();
+    expect(containers[0].container_name).toBe('agent-3-7');
+    // ② created_at 是真 ISO 8601 串，不是 int 时间戳，也不被 normalize 吃掉
+    expect(containers[0].created_at).toBe('2026-11-01T12:09:12.049245');
+    // ③ state 原值透传：daemon 不可用是 unknown（不是伪造成 missing）
+    expect(containers.map((item) => item.state)).toEqual(['unknown', 'unknown']);
+    // is_entered 只认 docker_id 命中当前容器
+    expect(containers.map((item) => item.is_entered)).toEqual([false, false]);
+  });
+
+  it('daemon 可用时 state 是 Docker 原值（running/exited），is_entered 命中当前容器', async () => {
+    const baseline = baselineContainers.B_daemon_available_inspect_sample;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 3, name: '小美', team_id: 2, exec_env: 'container',
+      current_container_id: 'deadbeef1234',
+      containers: baseline, container_count: baseline.length,
+    }), { status: 200, headers: { 'content-type': 'application/json' } })));
+
+    const detail = await getAgentDetail(3);
+    const containers = detail.containers ?? [];
+
+    // state 直接展示 Docker 原值，不做翻译（§8）
+    expect(containers.map((item) => item.state)).toEqual(['running', 'exited']);
+    // 当前容器是 record 2，只有它 is_entered
+    expect(containers.map((item) => item.is_entered)).toEqual([false, true]);
+    // 预记录（record 1）的 docker_id 仍是 null，且它没被 normalize 过滤掉
+    expect(containers[0].docker_id).toBeNull();
+    expect(containers).toHaveLength(2);
+    // 已回填的 docker_id 必须原样读出来 —— 没有这条，把 `item.docker_id`
+    // 改成文档字面的 `item.container_id` 也能全绿（undefined → null），
+    // 而那个改动会让容器表所有容器 ID 显示为空。
+    expect(containers[1].docker_id).toBe('deadbeef1234');
+    // exec_env 走 normalizeAgent 的收敛：非 'container' 一律 host
+    expect(detail.exec_env).toBe('container');
+    expect(detail.current_container_id).toBe('deadbeef1234');
+  });
+
+  it('软删记录不出现在两份基线里（list_active_by_agent 的过滤生效）', () => {
+    const all = [
+      ...baselineContainers.A_daemon_unavailable,
+      ...baselineContainers.B_daemon_available_inspect_sample,
+    ];
+    expect(all.every((item) => item.record_id !== 3)).toBe(true);
   });
 });
