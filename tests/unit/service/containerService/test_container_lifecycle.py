@@ -18,13 +18,19 @@ from service.containerService import core
 from .test_container_core import env as container_env  # noqa: F401
 
 
-def _inspect_json(*, status: str = "created", image: str = "sha256:abc", labels: dict | None = None) -> str:
+def _inspect_json(
+    *, status: str = "created", image: str = "sha256:abc", labels: dict | None = None,
+    name: str | None = None,
+) -> str:
     """构造 `docker inspect --format {{json .}}` 的输出。"""
-    return json.dumps({
+    data = {
         "State": {"Status": status},
         "Image": image,
         "Config": {"Labels": labels or {}},
-    })
+    }
+    if name is not None:
+        data["Name"] = name
+    return json.dumps(data)
 
 
 @pytest.fixture
@@ -74,6 +80,46 @@ async def test_get_target_returns_managed_when_record_matches_agent(fake):
     assert target.is_managed is True
     assert target.docker_id == "c0ffee123456"
     assert target.arch == "arm64"
+
+
+async def test_get_target_fills_container_name_for_managed(fake):
+    """自建容器的 `container_name` 取自 DB 记录（活动记录 §8 要显示这个名字）。
+
+    这里刻意让 inspect 返回的空缺名字和记录里的名字不同（不返回 Name 字段）：
+    自建容器是我们自己命名的，权威来源是记录而不是 `docker inspect`。
+    """
+    await _seed_record(docker_id="c0ffee123456", container_name="agent-xiao-mei-2")
+    fake.set("inspect", stdout=_inspect_json(status="exited", image="sha256:abc"))
+
+    target = await core.get_container_target(1, "c0ffee123456")
+
+    assert target.container_name == "agent-xiao-mei-2"
+
+
+async def test_get_target_strips_leading_slash_from_external_container_name(fake):
+    """外部容器的名字取自 inspect 的 `Name`，并去掉 Docker 加的前导 `/`。
+
+    不去掉会让活动记录里显示 `/my-container`，前端拿去做匹配/展示都会别扭。
+    """
+    fake.set("inspect", stdout=_inspect_json(status="running", name="/dev-box"))
+
+    target = await core.get_container_target(1, "deadbeef0002")
+
+    assert target.is_managed is False
+    assert target.container_name == "dev-box"
+
+
+async def test_get_target_tolerates_missing_name_for_external_container(fake):
+    """`Name` 缺失不能影响连接：它只用于展示，取不到就 None。
+
+    若这里抛错，一个字段缺失就会让「进入容器」整体失败——展示字段不该有这种权力。
+    """
+    fake.set("inspect", stdout=_inspect_json(status="running"))
+
+    target = await core.get_container_target(1, "deadbeef0002")
+
+    assert target.container_name is None
+    assert target.docker_id == "deadbeef0002"
 
 
 async def test_get_target_does_not_treat_other_agents_record_as_managed(fake):

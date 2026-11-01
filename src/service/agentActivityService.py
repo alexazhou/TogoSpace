@@ -67,6 +67,10 @@ class AgentActivityMeta:
     tool_result: Any = None
     # 收到消息
     messages: list[dict] | None = None  # MESSAGE_RECEIVED: [{"sender": str, "content": str}, ...]
+    # 执行环境（§8）：开始时写入，结束时 patch 为最终环境
+    exec_env: str | None = None
+    current_container_id: str | None = None
+    container_name: str | None = None
 
     def apply_progress(self, progress) -> None:
         """从 InferStreamProgress 更新流式进度字段。"""

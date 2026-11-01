@@ -62,6 +62,21 @@ def test_container_target_forbids_extra_fields():
         ContainerTarget(docker_id="c0ffee123456", is_manegd=True, arch="arm64")
 
 
+def test_container_target_container_name_is_optional():
+    """`container_name` 是可选展示字段：没有它也必须能构造出连接目标。
+
+    连接只依赖 `docker_id` / `is_managed` / `arch`。若把它写成必填，所有构造点
+    （含外部容器拿不到 `Name` 的情况）都会失败，等于用一个日志字段卡住连接。
+    """
+    target = ContainerTarget(docker_id="c0ffee123456", is_managed=True, arch="arm64")
+    assert target.container_name is None
+
+    named = ContainerTarget(
+        docker_id="c0ffee123456", is_managed=True, arch="arm64", container_name="agent-a-1"
+    )
+    assert named.container_name == "agent-a-1"
+
+
 # ---------------------------------------------------------------------------
 # ContainerInfo：对外展示记录
 # ---------------------------------------------------------------------------

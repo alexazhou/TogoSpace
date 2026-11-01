@@ -15,6 +15,7 @@ _WS_TOPICS = [
     MessageBusTopic.ROOM_STATUS_CHANGED,
     MessageBusTopic.ROOM_ADDED,
     MessageBusTopic.AGENT_STATUS_CHANGED,
+    MessageBusTopic.AGENT_CONTAINER_STATE_CHANGED,
     MessageBusTopic.AGENT_ACTIVITY_CHANGED,
     MessageBusTopic.SCHEDULE_STATE_CHANGED,
     MessageBusTopic.TEAM_RELOADED,
@@ -98,6 +99,10 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
             payload["event"] = "room_added"
         if msg.topic == MessageBusTopic.AGENT_STATUS_CHANGED:
             payload["event"] = "agent_status"
+        if msg.topic == MessageBusTopic.AGENT_CONTAINER_STATE_CHANGED:
+            # 与前端 `agent_container` 对齐：payload 直接带 gt_agent / exec_env /
+            # current_container_id，前端复用与 agent_status 同一套身份校验。
+            payload["event"] = "agent_container"
         if msg.topic == MessageBusTopic.AGENT_ACTIVITY_CHANGED:
             payload["event"] = "agent_activity"
         if msg.topic == MessageBusTopic.SCHEDULE_STATE_CHANGED:

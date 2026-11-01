@@ -34,6 +34,14 @@ class ContainerTarget(BaseModel):
     arch: str
     """架构（amd64 / arm64），用于挑选注入容器的那份 Linux gtsp 产物。"""
 
+    container_name: str | None = None
+    """容器名（自建取记录里的 `container_name`，外部取 `docker inspect` 的 `Name` 去前导 `/`）。
+
+    属于展示用途，**不参与连接决策**：连接只用 `docker_id`。放这里的原因只有一个——
+    活动记录（§8）要显示容器名，而 `AgentTurnRunner` 同步读 Driver 时手上只有本结构体，
+    为了一个名字去追加一次异步 DB/inspect 查询不值得。
+    """
+
     @property
     def display_name(self) -> str:
         """日志用短名，避免每个日志点都自己拼格式。"""

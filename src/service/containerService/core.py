@@ -273,6 +273,17 @@ async def _resolve_agent_names(agent_id: int) -> tuple[int, str, str, str]:
     return gt_agent.team_id, gt_agent.name, agent_workdir, shared_workdir
 
 
+def _inspect_container_name(inspect_data: dict) -> str | None:
+    """从 `docker inspect` 结果取容器名（去掉 Docker 加的前导 `/`）。
+
+    纯展示用，取不到就返回 None：容器名缺失不该让「进入容器」失败。
+    """
+    name = inspect_data.get("Name")
+    if not isinstance(name, str):
+        return None
+    return name.lstrip("/") or None
+
+
 async def _inspect_container(cli: DockerCli, ref: str) -> dict | None:
     """`docker inspect` 单个容器，返回 JSON 首元素；容器不存在返回 None。
 
@@ -563,7 +574,12 @@ async def get_container_target(agent_id: int, container_id: str) -> ContainerTar
                 f"无法获取容器 {container_id} 的镜像 ID", ERROR_CONTAINER_ENTER_FAILED
             )
         arch = await _resolve_image_arch(cli, image_id)
-        return ContainerTarget(docker_id=container_id, is_managed=True, arch=arch)
+        return ContainerTarget(
+            docker_id=container_id,
+            is_managed=True,
+            arch=arch,
+            container_name=record.container_name,
+        )
 
     # 外部容器：必须真实存在且 running
     try:
@@ -584,7 +600,12 @@ async def get_container_target(agent_id: int, container_id: str) -> ContainerTar
             f"无法获取容器 {container_id} 的镜像 ID", ERROR_CONTAINER_ENTER_FAILED
         )
     arch = await _resolve_image_arch(cli, image_id)
-    return ContainerTarget(docker_id=container_id, is_managed=False, arch=arch)
+    return ContainerTarget(
+        docker_id=container_id,
+        is_managed=False,
+        arch=arch,
+        container_name=_inspect_container_name(inspect_data),
+    )
 
 
 async def prepare_container_gtsp(target: ContainerTarget) -> None:

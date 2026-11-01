@@ -92,12 +92,46 @@ class AgentTurnRunner:
         return sessionUtil.build_agent_session_id(self.gt_agent.id, first_message_id)
 
     def _base_metadata(self, **extra) -> AgentActivityMeta:
-        """构建活动记录 metadata，自动附加 task_room_id（本次 turn 所在的任务房间）。"""
+        """构建活动记录 metadata，自动附加 task_room_id 与执行环境（§8）。
+
+        环境信息放在这一个入口而不是每个调用点各自传：活动类型有十来个，
+        漏一个就会出现「有的活动显示环境、有的不显示」这种前后不一致。
+        """
         meta = AgentActivityMeta(
             task_room_id=self._current_room.room_id if self._current_room is not None else None,
+            **self._exec_env_metadata(),
             **extra,
         )
         return meta
+
+    def _exec_env_metadata(self) -> dict:
+        """当前执行环境（取 Driver 内存态；driver 不报告环境时留空）。"""
+        driver = self.driver
+        exec_env = getattr(driver, "exec_env", None)
+        if exec_env is None:
+            return {}
+        container = getattr(driver, "current_container", None)
+        return {
+            "exec_env": exec_env.value,
+            "current_container_id": getattr(driver, "current_container_id", None),
+            "container_name": getattr(container, "container_name", None) if container else None,
+        }
+
+    def _with_exec_env(self, patch: AgentActivityMeta | None) -> AgentActivityMeta:
+        """把当前执行环境叠到 metadata patch 上，供终态回写（§8）。
+
+        一个 turn 内部可能 `enter_container`，活动开始时是宿主、结束时在容器里，
+        只在开始写会在 UI 上留下「在容器里跑的活动显示宿主机」。终态再写一次，
+        让记录结束时收敛到真实环境。
+        """
+        patch = patch if patch is not None else AgentActivityMeta()
+        env_meta = self._exec_env_metadata()
+        if not env_meta:
+            return patch
+        patch.exec_env = env_meta["exec_env"]
+        patch.current_container_id = env_meta["current_container_id"]
+        patch.container_name = env_meta["container_name"]
+        return patch
 
     def _extract_tool_command(self, tool_call: llmApiUtil.OpenAIToolCall) -> str | None:
         if tool_call.function_name != "execute_bash":
@@ -130,10 +164,10 @@ class AgentTurnRunner:
         error_message: str | None = None,
         metadata_patch: AgentActivityMeta | None = None,
     ) -> None:
-        """更新 activity 终态。"""
+        """更新 activity 终态（顺带回写当时真实执行环境，见 `_with_exec_env`）。"""
         if activity_id is None:
             return
-        await agentActivityService.update_activity_progress(activity_id, status=status, detail=detail, error_message=error_message, metadata_patch=metadata_patch)
+        await agentActivityService.update_activity_progress(activity_id, status=status, detail=detail, error_message=error_message, metadata_patch=self._with_exec_env(metadata_patch))
 
     # ─── Turn 运行方法 ──────────────────────────────────────
 

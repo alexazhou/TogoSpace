@@ -2,12 +2,12 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from constants import DriverType, AgentStatus, AgentTaskStatus, SpecialAgent
+from constants import DriverType, AgentStatus, AgentTaskStatus, ExecEnv, SpecialAgent
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtScheculeTaskManager
 from service.agentService.toolRegistry import validate_tool_allow_specs
 from model.dbModel.gtAgent import GtAgent
-from service import teamService, agentService, taskService, roomService
+from service import teamService, agentService, taskService, roomService, containerService
 from util import assertUtil
 
 
@@ -41,7 +41,40 @@ async def _build_agent_detail_payload(agent: GtAgent) -> dict:
     result["error_message"] = current_error_message
     result["allow_tools"] = agent.allow_tools
     result["allow_skills"] = agent.allow_skills
+
+    # 执行环境与容器列表（§8）：环境读 Driver 内存，容器走实时 inspect。
+    # 容器列表要在「已软删除」这件事上保持诚实，所以用活跃记录而不是全表。
+    exec_state = agentService.get_exec_env_state(agent.id)
+    result["exec_env"] = exec_state["exec_env"]
+    result["current_container_id"] = exec_state["current_container_id"]
+    containers = await containerService.list_agent_containers(
+        agent.id,
+        current_container_id=exec_state["current_container_id"],
+    )
+    result["containers"] = [item.model_dump(mode="json") for item in containers]
+    result["container_count"] = len(containers)
     return result
+
+
+_HOST_EXEC_STATE: dict = {"exec_env": ExecEnv.HOST.value, "current_container_id": None}
+
+
+def _build_agent_exec_fields(
+    agent_id: int | None,
+    exec_env_map: dict[int, dict],
+    container_count_map: dict[int, int],
+) -> dict:
+    """列表页的执行环境三字段（§8）。
+
+    未加载的 Agent 在 `exec_env_map` 里查不到，必须回落到 `host`：执行环境只存在
+    于 Driver 内存，读不到就是「不在容器」，不能凭库里有什么去猜。
+    """
+    exec_state = exec_env_map.get(agent_id, _HOST_EXEC_STATE)
+    return {
+        "exec_env": exec_state["exec_env"],
+        "current_container_id": exec_state["current_container_id"],
+        "container_count": container_count_map.get(agent_id, 0),
+    }
 
 
 class AgentListHandler(BaseHandler):
@@ -61,12 +94,19 @@ class AgentListHandler(BaseHandler):
         include_special = include_special_raw.strip().lower() in {"1", "true", "yes", "on"}
         agents = await gtAgentManager.get_team_all_agents(team.id, include_cross_team=include_special)
         runtime_status_map = agentService.get_team_runtime_status_map(team.id)
+        exec_env_map = agentService.get_team_exec_env_map(team.id)
+        # 容器数只查 DB（`count_map_by_agent_ids`），列表页不能因为 docker 慢而卡住
+        container_count_map = await containerService.count_containers_by_agent_ids(
+            [agent.id for agent in agents if agent.id is not None]
+        )
 
         items = []
         for agent in agents:
             result = agent.to_json()
             result["driver"] = agent.driver.value
             result["status"] = runtime_status_map.get(agent.id, AgentStatus.IDLE).name
+            # 未加载的 Agent 恒为 host（执行环境只在 Driver 内存里，§8）
+            result.update(_build_agent_exec_fields(agent.id, exec_env_map, container_count_map))
             if agent.team_id == -1:
                 special_agent = SpecialAgent.value_of(agent.id)
                 if special_agent is not None:

@@ -407,3 +407,117 @@ async def test_switching_containers_closes_previous_client(monkeypatch):
     assert first is not None and first.disconnected is True
     assert driver.current_container == other
     assert len(_FakeTSPClient.instances) == 2
+
+
+# ---------------------------------------------------------------------------
+# AGENT_CONTAINER_STATE_CHANGED：只在环境真的变了的时候广播（§8）
+# ---------------------------------------------------------------------------
+
+
+def _capture_publishes(monkeypatch) -> list[dict]:
+    """截获 messageBus.publish，返回已发布的 (topic, payload) 列表。"""
+    published: list[dict] = []
+
+    def _publish(topic, **payload):
+        published.append({"topic": topic, **payload})
+
+    # 打在 `service.messageBus.publish` 上（driver 里也是 `messageBus.publish`），
+    # 不替换整个 messageBus 模块，避免把订阅机制一起抹掉。
+    monkeypatch.setattr(tspDriver.messageBus, "publish", _publish)
+    return published
+
+
+async def test_publishes_container_state_on_enter(monkeypatch):
+    """进入容器时广播一次，payload 带完整 gt_agent / exec_env / current_container_id。
+
+    `gt_agent` 必须是完整对象：前端用 `readGtAgentIdentity` 做身份校验，缺字段
+    这条事件会被整条丢弃。
+    """
+    _patch_client(monkeypatch)
+    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    published = _capture_publishes(monkeypatch)
+    driver = _build_driver()
+
+    await driver.connect(ExecEnv.CONTAINER, _MANAGED)
+
+    assert len(published) == 1
+    event = published[0]
+    assert event["topic"] == tspDriver.MessageBusTopic.AGENT_CONTAINER_STATE_CHANGED
+    assert event["exec_env"] == "container"
+    assert event["current_container_id"] == "c0ffee123456"
+    assert event["gt_agent"] is driver.host.gt_agent
+
+
+async def test_publishes_host_state_on_exit(monkeypatch):
+    """退出回宿主时也要广播，否则前端会一直显示「在容器里」。"""
+    _patch_client(monkeypatch)
+    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    driver = _build_driver()
+    await driver.connect(ExecEnv.CONTAINER, _MANAGED)
+
+    published = _capture_publishes(monkeypatch)
+    await driver.disconnect()
+    await driver.connect(ExecEnv.HOST)
+
+    assert len(published) == 1
+    assert published[0]["exec_env"] == "host"
+    assert published[0]["current_container_id"] is None
+
+
+async def test_does_not_publish_when_env_unchanged(monkeypatch):
+    """重连同一个环境**不广播**：否则容器断线自动重连会反复刷「进入容器」。
+
+    这条同时守住「只在变化时发」这个语义——事件是给 UI 的增量，不是心跳。
+    """
+    _patch_client(monkeypatch)
+    driver = _build_driver()
+    await driver.connect(ExecEnv.HOST)
+
+    published = _capture_publishes(monkeypatch)
+    # 模拟连接断开后自动重连同一个环境
+    driver._client = None
+    await driver._ensure_connected()
+
+    assert published == []
+
+
+async def test_publishes_when_switching_between_containers(monkeypatch):
+    """A 容器 → B 容器：`exec_env` 没变但容器变了，必须广播。"""
+    _patch_client(monkeypatch)
+    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    driver = _build_driver()
+    await driver.connect(ExecEnv.CONTAINER, _MANAGED)
+
+    published = _capture_publishes(monkeypatch)
+    other = ContainerTarget(docker_id="deadbeef0002", is_managed=True, arch="arm64")
+    await driver.connect(ExecEnv.CONTAINER, other)
+
+    assert len(published) == 1
+    assert published[0]["current_container_id"] == "deadbeef0002"
+
+
+async def test_publish_failure_does_not_break_connect(monkeypatch):
+    """广播失败不能影响连接结果：状态通知的订阅者不该决定环境能否切换。"""
+    _patch_client(monkeypatch)
+    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("no running loop")
+
+    monkeypatch.setattr(tspDriver.messageBus, "publish", _boom)
+    driver = _build_driver()
+
+    assert await driver.connect(ExecEnv.CONTAINER, _MANAGED) is True
+    assert driver.exec_env == ExecEnv.CONTAINER
+
+
+async def test_no_publish_on_failed_connect(monkeypatch):
+    """连接失败时不广播：环境没变，广播会让 UI 提前显示「已进入」。"""
+    _patch_client(monkeypatch, fail_initialize=True)
+    monkeypatch.setattr(tspDriver.container_cli, "get_cli", lambda: MagicMock(binary_path="/fake/docker"))
+    published = _capture_publishes(monkeypatch)
+    driver = _build_driver()
+
+    assert await driver.connect(ExecEnv.CONTAINER, _MANAGED) is False
+
+    assert published == []

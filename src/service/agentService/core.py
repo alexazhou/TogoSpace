@@ -517,6 +517,41 @@ def get_team_runtime_status_map(team_id: int) -> dict[int, AgentStatus]:
         if agent.gt_agent.id > 0 and agent.gt_agent.team_id == team_id
     }
 
+
+def get_exec_env_state(agent_id: int) -> dict[str, Any]:
+    """读取某个 Agent 的执行环境（§8 列表页字段）。
+
+    未加载的 Agent 恒为 `host`：执行环境只存在于 Driver 内存，后端重启后一律
+    回到宿主，所以「不在内存里」与「在宿主」是同一个事实，不能凭库里有什么去猜。
+
+    Returns:
+        `{"exec_env": "host"|"container", "current_container_id": str|None}`
+    """
+    driver = _get_loaded_driver(agent_id)
+    if driver is None:
+        return {"exec_env": ExecEnv.HOST.value, "current_container_id": None}
+    return {
+        "exec_env": driver.exec_env.value,
+        "current_container_id": driver.current_container_id,
+    }
+
+
+def get_team_exec_env_map(team_id: int) -> dict[int, dict[str, Any]]:
+    """批量读取该 Team 已加载 Agent 的执行环境（列表页用，避免逐个查）。"""
+    result: dict[int, dict[str, Any]] = {}
+    for agent in _agents.values():
+        if agent.gt_agent.team_id != team_id or agent.gt_agent.id is None:
+            continue
+        driver = _get_loaded_driver(agent.gt_agent.id)
+        if driver is None:
+            continue
+        result[agent.gt_agent.id] = {
+            "exec_env": driver.exec_env.value,
+            "current_container_id": driver.current_container_id,
+        }
+    return result
+
+
 def get_room_agents(room_id: int) -> List["Agent"]:
     room = roomService.get_room(room_id)
     if room is None:

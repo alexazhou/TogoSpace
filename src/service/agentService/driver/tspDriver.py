@@ -10,13 +10,13 @@ from pytspclient import TSPClient, TSPException, ToolResult, ToolCall
 from pytspclient.types import TSP_ERROR_STDOUT_CLOSED, TSP_ERROR_CONNECTION_CLOSED
 
 import appPaths
-from constants import CONTAINER_ENTER_TIMEOUT_SEC, ExecEnv
+from constants import CONTAINER_ENTER_TIMEOUT_SEC, ExecEnv, MessageBusTopic
 from model.coreModel import ContainerTarget
 from service.containerService import core as containerService
 from service.containerService import core as container_cli
 from service.agentService.driver.base import AgentDriverConfig
 
-from service import funcToolService, roomService
+from service import funcToolService, roomService, messageBus
 from service.agentService import toolRegistry
 from model.dbModel.gtScheculeTask import GtScheculeTask
 from util import llmApiUtil
@@ -209,6 +209,8 @@ class TspAgentDriver(AgentDriver):
         self._client = client
         self._load_tsp_tools(client.tools)
         self._register_host_tools()
+        previous_env = self._exec_env
+        previous_container_id = self.current_container_id
         self._exec_env = env
         self._current_container = container
         logger.info(
@@ -217,7 +219,31 @@ class TspAgentDriver(AgentDriver):
             container.docker_id if container else None,
             len(self._tsp_tools),
         )
+
+        # 只在环境**实际变化**时广播（§8）：重连同一个环境不该刷 UI，
+        # 否则容器断了自动重连会把「进入容器」这个动作重复上报。
+        new_container_id = self.current_container_id
+        if env != previous_env or new_container_id != previous_container_id:
+            self._publish_container_state()
         return True
+
+    def _publish_container_state(self) -> None:
+        """广播当前执行环境（§8 `AGENT_CONTAINER_STATE_CHANGED`）。
+
+        用 `publish` 而不是 `await publish`：这是状态通知，不该让环境切换的
+        成功与否取决于订阅者；messageBus 自身也是同步投递。
+        """
+        try:
+            messageBus.publish(
+                MessageBusTopic.AGENT_CONTAINER_STATE_CHANGED,
+                gt_agent=self.host.gt_agent,
+                exec_env=self._exec_env.value,
+                current_container_id=self.current_container_id,
+            )
+        except Exception:
+            logger.warning(
+                "广播执行环境变更失败（忽略）: agent_id=%s", self.host.gt_agent.id, exc_info=True,
+            )
 
     @staticmethod
     async def _close_client_quietly(client: Optional[TSPClient]) -> None:
