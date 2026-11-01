@@ -148,6 +148,15 @@ async def e2e_env(tmp_path, monkeypatch, real_docker):
     bind_database(database)
     await database.aio_connect()
 
+    # 清空 agent 缓存：`gtAgentManager` 是进程级 `CacheStore`（按 `agent.id` 缓存，
+    # 命中即跳过 DB 查询）。同进程前序测试若把「id=1 → alice」塞进缓存，这里就会拿到
+    # 别人的 agent 名，容器名变 `agent-alice-1`、bind mount 指向不存在的
+    # `<team>/agent/alice`，docker create 报 `bind source path does not exist`。
+    # 表现为「单跑绿、与其他测试一起跑红」，与容器逻辑无关。
+    from dal.db import gtAgentManager
+
+    gtAgentManager.clear_agent_cache()
+
     # workspace：容器创建时把这两个目录以绝对路径 bind mount 进去
     workspace = tmp_path / "ws"
     team_dir = workspace / "e2e-team"
@@ -190,6 +199,10 @@ async def e2e_env(tmp_path, monkeypatch, real_docker):
                 pass
         await database.aio_close()
         unbind_database()
+        # 别让本用例临时库里的 agent 1 留在进程缓存里污染后续测试
+        from dal.db import gtAgentManager
+
+        gtAgentManager.clear_agent_cache()
 
 
 async def _create(env: E2EEnv):
