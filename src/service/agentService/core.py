@@ -12,11 +12,11 @@ from model.dbModel.gtAgent import GtAgent
 from service.agentService.agent import Agent
 from service.agentService.driver import normalize_driver_config
 from service.agentService.promptBuilder import build_agent_system_prompt
-from service import llmService, roomService, persistenceService, deptService, agentActivityService, serviceUtil
+from service import llmService, roomService, persistenceService, deptService, agentActivityService, serviceUtil, containerService
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtScheculeTaskManager
 from peewee import IntegrityError
 from exception import TogoException
-from constants import AgentStatus, AgentTaskStatus, DriverType, EmployStatus, SpecialAgent
+from constants import AgentStatus, AgentTaskStatus, DriverType, EmployStatus, ExecEnv, SpecialAgent
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +25,138 @@ _agents: dict[int, "Agent"] = {}
 s_status = ServiceStatusInfo(name="agentService")
 
 
-async def rename_agent_workdir(team_id: int, old_name: str, new_name: str) -> list[tuple[str, str]]:
-    """按 team_id 重命名单个 Agent 的私有目录，返回实际执行的移动。"""
+async def rename_agent_workdir(
+    team_id: int,
+    old_name: str,
+    new_name: str,
+    *,
+    agent_id: int | None = None,
+) -> list[tuple[str, str]]:
+    """按 team_id 重命名单个 Agent 的私有目录，返回实际执行的移动。
+
+    移动前先清理该 Agent 的自建容器（§7）：容器的 bind mount 在创建时固化了
+    `<team>/agent/<old_name>` 这个绝对路径，目录一改名旧容器就指向不存在的路径，
+    留着只会误导下一次 `enter_container`。
+
+    Args:
+        agent_id: 已知的 Agent ID。调用方（`save_agent` 工具）本来就持有它，
+            传进来可以省掉一次按名字反查；不传时按 `old_name` 查（查不到就跳过清理，
+            目录照常改名）。
+    """
     if old_name == new_name:
         return []
     gt_team = await gtTeamManager.get_team_by_id(team_id)
     if gt_team is None:
         return []
+
+    # 复用 overwrite_team_agents 的同一条清理路径，保证两个改名入口行为一致
+    target_id = agent_id
+    if target_id is None:
+        existing = await gtAgentManager.get_agent(team_id, old_name)
+        target_id = existing.id if existing is not None else None
+    if target_id is not None:
+        await delete_agent_containers_and_reset_env(target_id)
+
     return workspaceUtil.rename_agent_workdirs(gt_team.name, gt_team.config, [(old_name, new_name)])
+
+
+# ---------------------------------------------------------------------------
+# 容器清理（§7）——目录改名/删除前必须先把 bind mount 固化的旧容器清掉
+# ---------------------------------------------------------------------------
+
+
+def _get_loaded_driver(agent_id: int) -> Any:
+    """取已加载 Agent 的 driver；未加载或非 TSP driver 返回 None。
+
+    只用于读取 `exec_env` / `current_container_id`，不做任何断言：容器清理是
+    best-effort 的收尾动作，不能因为「这个 Agent 恰好没加载」就中断目录操作。
+    """
+    agent = _agents.get(agent_id)
+    if agent is None:
+        return None
+    driver = getattr(agent.task_consumer._turn_runner, "driver", None)
+    # 用属性探测而不是 isinstance：这里只关心它能否报告执行环境，
+    # 显式 import TspAgentDriver 会把 agentService → driver → funcToolService 的
+    # 导入链拉进来，容易在第 6 步这种「service 层互调」的位置成环。
+    if driver is None or not hasattr(driver, "exec_env"):
+        return None
+    return driver
+
+
+async def switch_agent_to_host(agent_id: int) -> bool:
+    """把已加载的 Agent 切回宿主环境；返回是否处于宿主。
+
+    为什么清理容器前必须先切回宿主：Agent 当前若正在某个容器里，`docker rm -f`
+    会把它的 stdio 连接打断，Driver 会进入「说在容器、实际连不上」的状态。
+    §7 的做法是显式断开再重连宿主。
+
+    本函数不抛异常：切换失败只记 warning，由调用方继续做清理（容器 rm 后
+    该连接反正也失效了，下一次工具调用时 `_ensure_connected` 会重连）。
+    """
+    driver = _get_loaded_driver(agent_id)
+    if driver is None:
+        return True
+    if driver.exec_env == ExecEnv.HOST:
+        return True
+
+    try:
+        await driver.disconnect()
+        ok = await driver.connect(ExecEnv.HOST)
+    except Exception:
+        logger.warning("清理容器前切回宿主失败: agent_id=%s", agent_id, exc_info=True)
+        return False
+
+    if not ok:
+        logger.warning("清理容器前切回宿主未成功: agent_id=%s", agent_id)
+        return False
+    logger.info("清理容器前已切回宿主: agent_id=%s", agent_id)
+    return True
+
+
+async def delete_agent_containers_and_reset_env(agent_id: int) -> int:
+    """Agent 改名 / 离职时的容器清理：先切回宿主，再删该 Agent 全部自建容器。
+
+    Returns:
+        被标记软删除的容器记录数（best-effort，异常已在容器层吞掉）
+    """
+    await switch_agent_to_host(agent_id)
+    try:
+        return await containerService.delete_agent_containers(agent_id)
+    except Exception:
+        # 容器层本身已吞掉绝大多数异常，这里兜底防止「收尾动作」把目录操作带崩
+        logger.warning("删除 Agent 容器失败（忽略）: agent_id=%s", agent_id, exc_info=True)
+        return 0
+
+
+async def delete_team_containers_safely(team_id: int, *, agent_ids: list[int] | None = None) -> int:
+    """Team 改名 / 删除 / 目录迁移时的容器清理：先把该 Team 的 Agent 切回宿主再批量删。
+
+    整段都是 best-effort：连查成员这一步也不例外。调用方是 `rename_team` /
+    `delete_team` 这类**目录与 DB 操作的主流程**，收尾清理只要抛一次异常就会
+    让用户改不了 Team 名——那个代价远大于「留着几个没清掉的容器」。
+
+    Args:
+        team_id: 目标 Team
+        agent_ids: 限定要切回宿主的 Agent；None 表示取当前**已加载**的成员。
+            切回宿主本来就只对已加载的 Agent 有意义，所以默认取内存列表而不是查库，
+            这样 Team 改名这条路径完全不依赖 DB 可用性。
+    """
+    try:
+        ids = agent_ids if agent_ids is not None else _loaded_agent_ids_of_team(team_id)
+        for agent_id in ids:
+            await switch_agent_to_host(agent_id)
+        return await containerService.delete_team_containers(team_id)
+    except Exception:
+        logger.warning("删除 Team 容器失败（忽略）: team_id=%s", team_id, exc_info=True)
+        return 0
+
+
+def _loaded_agent_ids_of_team(team_id: int) -> list[int]:
+    """该 Team 当前已加载到内存的 Agent id 列表。"""
+    return [
+        agent_id for agent_id, agent in _agents.items()
+        if agent.gt_agent.team_id == team_id
+    ]
 
 
 async def _reset() -> None:
@@ -428,6 +552,7 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
     # 1. 转换为 GtAgent 对象列表（同时校验 ID，不产生任何写入）
     agents_to_save: list[GtAgent] = []
     agent_renames: list[tuple[str, str]] = []
+    renamed_agent_ids: list[int] = []
     for data in agents_data:
         agent_id = data.id
 
@@ -441,6 +566,9 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
             agent = existing
             if agent.name != data.name:
                 agent_renames.append((agent.name, data.name))
+                # 必须在此处收集 id：下面几行会把 existing.name 就地改成新名，
+                # 之后再按旧名反查就查不到这个 Agent 了。
+                renamed_agent_ids.append(agent_id)
             agent.name = data.name
             agent.role_template_id = data.role_template_id
             agent.model = data.model or ""
@@ -463,6 +591,12 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
         agents_to_save.append(agent)
 
     # 2. 先同步 Agent 私有目录；目录冲突会在写库前报错，不会产生数据库变更
+    #    改名会改变私有目录的绝对路径，而容器 bind mount 在创建时已固化该路径，
+    #    所以必须在移动目录**之前**清掉旧容器（§7）。清理是 best-effort，
+    #    失败不阻塞改名（rm 不掉的容器下次 enter_container 会报 container_lost）。
+    for renaming_id in renamed_agent_ids:
+        await delete_agent_containers_and_reset_env(renaming_id)
+
     moved_dirs = workspaceUtil.rename_agent_workdirs(team.name, team.config, agent_renames)
 
     # 3. 离职处理 + 批量保存放在同一事务里，任一步失败都整体回滚；
@@ -483,7 +617,13 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
         workspaceUtil.rollback_agent_workdirs(team.name, moved_dirs)
         raise
 
-    # 4. 写库成功后再删离职成员的个人目录；名字仍被在岗成员使用时保留
+    # 4. 离职成员的容器要在删目录前清掉（§7）：DB 已提交，这些 Agent 不会再被
+    #    加载，它们的容器只挂着自己的私有目录，目录一删就是死容器。
+    #    名字被在岗成员复用时仍要清——容器属于离职者本人，不是名字。
+    for offboard_id in ids_to_offboard:
+        await delete_agent_containers_and_reset_env(offboard_id)
+
+    # 5. 写库成功后再删离职成员的个人目录；名字仍被在岗成员使用时保留
     workspaceUtil.remove_agent_workdirs(
         team.name,
         team.config,

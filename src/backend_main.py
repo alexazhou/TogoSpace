@@ -231,6 +231,10 @@ async def main(
     finally:
         web_server.stop()
         schedulerService.shutdown()
+        # `agentService.shutdown()` 会关掉各 Driver 的 stdio 连接；自建容器以 gtsp
+        # 为主进程运行，stdin 收到 EOF 后 gtsp 立即退出，容器随之停回 exited（§7）。
+        # 所以这里**不需要**再扫描或批量 stop 容器：既不会拖慢停机，也不会留下
+        # 「backend 说已停机、容器还在跑」的窗口。
         await agentService.shutdown()
         await persistenceService.shutdown()
         await ormService.shutdown()

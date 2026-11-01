@@ -620,12 +620,18 @@ async def save_agent(
     from service.agentService.core import rename_agent_workdir
     moved_dirs: list[tuple[str, str]] = []
     if existing is not None and old_name != normalized_name:
-        moved_dirs = await rename_agent_workdir(team_id, old_name, normalized_name)
+        # 传 agent_id 而不是让 core 按名字反查：此时库里还叫 old_name，
+        # 反查是多余的一次往返，而且改名失败回滚时名字已经变了，更查不到。
+        moved_dirs = await rename_agent_workdir(
+            team_id, old_name, normalized_name, agent_id=existing.id,
+        )
     try:
         await gtAgentManager.batch_save_agents(team_id, [agent])
     except Exception:
         if moved_dirs:
-            await rename_agent_workdir(team_id, normalized_name, old_name)
+            await rename_agent_workdir(
+                team_id, normalized_name, old_name, agent_id=existing.id if existing is not None else None,
+            )
         raise
     saved = await gtAgentManager.get_agent_by_id(agent.id) if agent.id else await gtAgentManager.get_agent(team_id, normalized_name, status=None)
     if saved is None:
