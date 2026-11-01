@@ -13,7 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from constants import ContainerState
-from model.coreModel import ContainerInfo, ContainerTarget
+from model.coreModel import ContainerRuntimeInfo, ContainerTarget
 from model.dbModel.gtAgentContainer import GtAgentContainer
 
 
@@ -75,7 +75,7 @@ def test_container_target_container_name_is_optional():
 
 
 # ---------------------------------------------------------------------------
-# ContainerInfo：对外展示记录
+# ContainerRuntimeInfo：对外展示记录
 # ---------------------------------------------------------------------------
 
 
@@ -93,10 +93,10 @@ def _record(**overrides) -> GtAgentContainer:
     return GtAgentContainer(**fields)
 
 
-def _info(record: GtAgentContainer | None = None, **overrides) -> ContainerInfo:
+def _info(record: GtAgentContainer | None = None, **overrides) -> ContainerRuntimeInfo:
     fields: dict = {"record": record or _record()}
     fields.update(overrides)
-    return ContainerInfo(**fields)
+    return ContainerRuntimeInfo(**fields)
 
 
 def test_container_info_pre_record_allows_null_container_id():

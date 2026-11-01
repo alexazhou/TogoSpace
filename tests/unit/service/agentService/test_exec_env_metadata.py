@@ -8,8 +8,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
 import pytest
 
 from constants import ExecEnv
@@ -17,7 +15,7 @@ from model.coreModel import ContainerTarget, ExecEnvState
 from service.agentService import core
 from service.agentService.agent import Agent
 from service.agentService.agentTurnRunner import AgentTurnRunner
-from service.agentService.driver.base import AgentDriverConfig
+from service.agentService.driver.base import AgentDriver, AgentDriverConfig
 from constants import DriverType
 from model.dbModel.gtAgent import GtAgent
 from service.agentActivityService import AgentActivityMeta
@@ -47,11 +45,9 @@ class _FakeDriver:
         )
 
 
-class _NoExecEnvDriver:
-    """模拟 Native / Claude SDK：基类方法返回 None，表示不报告环境。"""
-
-    def get_exec_env(self) -> None:
-        return None
+def _default_driver() -> AgentDriver:
+    """Native / Claude SDK 使用基类默认实现；这里只需要 `get_exec_env`。"""
+    return object.__new__(AgentDriver)
 
 
 def _fake_agent(agent_id: int, team_id: int, driver) -> Agent:
@@ -95,9 +91,14 @@ def test_exec_env_state_reports_container_when_loaded(monkeypatch):
     )
 
 
-def test_exec_env_state_ignores_driver_without_exec_env(monkeypatch):
-    """Native driver 不报告环境（`get_exec_env()` 返回 None）⇒ 恒 host。"""
-    monkeypatch.setattr(core, "_agents", {3: _fake_agent(3, 1, _NoExecEnvDriver())})
+def test_default_driver_reports_host_env():
+    """基类默认实现：不支持容器的驱动恒为 host。"""
+    assert _default_driver().get_exec_env() == ExecEnvState()
+
+
+def test_exec_env_state_for_default_driver_is_host(monkeypatch):
+    """Native / Claude SDK 走基类默认实现 ⇒ 恒 host。"""
+    monkeypatch.setattr(core, "_agents", {3: _fake_agent(3, 1, _default_driver())})
 
     assert core.get_exec_env_state(3) == ExecEnvState()
 
@@ -123,11 +124,13 @@ def test_team_exec_env_map_only_contains_loaded_agents_of_that_team(monkeypatch)
     }
 
 
-def test_team_exec_env_map_skips_agents_without_driver(monkeypatch):
-    """不报告环境的 driver 直接跳过（由调用方回落 host）。"""
-    monkeypatch.setattr(core, "_agents", {3: _fake_agent(3, 1, _NoExecEnvDriver())})
+def test_team_exec_env_map_includes_default_driver_as_host(monkeypatch):
+    """基类默认实现也要出现在批量结果里，值为 host。"""
+    monkeypatch.setattr(
+        core, "_agents", {3: _fake_agent(3, 1, _default_driver())}
+    )
 
-    assert core.get_team_exec_env_map(1) == {}
+    assert core.get_team_exec_env_map(1) == {3: ExecEnvState()}
 
 
 # ---------------------------------------------------------------------------
@@ -173,14 +176,11 @@ def test_base_metadata_keeps_host_state_without_container():
     assert meta.container_name is None
 
 
-def test_base_metadata_skips_env_fields_when_driver_returns_none():
-    """driver 不报告环境（Native）⇒ 不写这三个字段，而不是写一堆 None。"""
-    runner = _make_runner()
-    runner.driver = _NoExecEnvDriver()  # type: ignore[assignment]
+def test_base_metadata_reports_host_for_native_driver():
+    """Native driver 走基类默认实现，活动记录如实写 `host`，不伪造容器字段。"""
+    meta = _make_runner()._base_metadata()
 
-    meta = runner._base_metadata()
-
-    assert meta.exec_env is None
+    assert meta.exec_env == "host"
     assert meta.current_container_id is None
     assert meta.container_name is None
 
@@ -202,7 +202,7 @@ def test_merge_exec_env_overlays_fields_without_touching_others():
 
 
 def test_merge_exec_env_keeps_fields_empty_when_state_is_none():
-    """state 为 None ⇒ 环境字段保持为空（Native 的活动记录不该出现伪造的 host）。"""
+    """state 为 None ⇒ 环境字段保持为空（调用方没有可用快照）。"""
     meta = AgentActivityMeta().merge_exec_env(None)
 
     assert meta.exec_env is None

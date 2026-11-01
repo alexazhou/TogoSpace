@@ -99,8 +99,7 @@ class AgentActivityMeta:
     def merge_exec_env(self, state: ExecEnvState | None) -> "AgentActivityMeta":
         """把驱动当前执行环境合并进 metadata，返回自身以便链式调用。
 
-        `None` 表示驱动不报告环境（Native / Claude SDK），保持三个字段为空，
-        与新增此方法之前的行为一致。
+        `None` 表示调用方没有可用的环境快照，保持三个字段为空。
         """
         if state is None:
             return self

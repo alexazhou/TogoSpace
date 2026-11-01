@@ -9,7 +9,7 @@ from model.coreModel.agentModel import (
     AgentRuntimeInfo,
     ExecEnvState,
 )
-from model.coreModel.containerModel import ContainerInfo, ContainerTarget
+from model.coreModel.containerModel import ContainerRuntimeInfo, ContainerTarget
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from service.agentService.prompts import BASE_PROMPT, AGENT_IDENTITY_PROMPT
 from util import configUtil, i18nUtil, assertUtil, workspaceUtil
@@ -57,15 +57,15 @@ async def rename_agent_workdir(
 
 
 # ---------------------------------------------------------------------------
-# 执行环境切换（§5.1 / §5.2）——执行环境属于 Agent，容器侧只提供原语
+# 执行环境切换（§5.1 / §5.2）——执行环境属于 Driver，容器侧只提供原语
 # ---------------------------------------------------------------------------
 
 
 async def enter_container(agent_id: int, container_id: str) -> tuple[ContainerTarget, ContainerState]:
     """把 Agent 的执行环境切换到指定容器，返回 `(目标, 进入前状态)`。
 
-    编排由 `Agent.enter_container` 负责；本层只按 `agent_id` 解析已加载实例。
-    执行环境是 Agent 的状态，调用方不应持有 Driver。
+    编排由 Driver 负责；本层只按 `agent_id` 解析已加载实例并转发。
+    调用方不应持有 Driver。
     """
     agent = _agents.get(agent_id)
     if agent is None:
@@ -76,15 +76,15 @@ async def enter_container(agent_id: int, container_id: str) -> tuple[ContainerTa
     return await agent.enter_container(container_id)
 
 
-async def exit_to_host(agent_id: int) -> None:
-    """把 Agent 的执行环境切回宿主（§5.2）；编排由 `Agent.exit_to_host` 负责。"""
+async def exit_to_host(agent_id: int) -> bool:
+    """把 Agent 的执行环境切回宿主（§5.2）；编排由 Driver 负责。"""
     agent = _agents.get(agent_id)
     if agent is None:
         raise TogoException(
             "当前 Agent 未加载，无法切换执行环境",
             containerService.ERROR_CONTAINER_INVALID_PARAMS,
         )
-    await agent.exit_to_host()
+    return await agent.exit_to_host()
 
 
 # ---------------------------------------------------------------------------
@@ -93,11 +93,19 @@ async def exit_to_host(agent_id: int) -> None:
 
 
 async def switch_agent_to_host(agent_id: int) -> bool:
-    """把已加载的 Agent 切回宿主环境；返回是否处于宿主（best-effort，不抛异常）。"""
+    """把已加载的 Agent 切回宿主环境；返回是否处于宿主（best-effort，不抛异常）。
+
+    这是清理路径专用的容错包装：真正切换只有 `exit_to_host` 一套实现，
+    这里只负责把失败收敛成 `False`，避免一次 docker 抽风阻塞改名 / 离职。
+    """
     agent = _agents.get(agent_id)
     if agent is None:
         return True
-    return await agent.switch_to_host()
+    try:
+        return await agent.exit_to_host()
+    except Exception:
+        logger.warning("清理容器前切回宿主失败: agent_id=%s", agent_id, exc_info=True)
+        return False
 
 
 async def switch_team_agents_to_host(team_id: int) -> None:
@@ -486,7 +494,7 @@ def get_exec_env_state(agent_id: int) -> ExecEnvState:
     agent = _agents.get(agent_id)
     if agent is None:
         return ExecEnvState()
-    return agent.get_exec_env_state() or ExecEnvState()
+    return agent.get_exec_env_state()
 
 
 def get_team_exec_env_map(team_id: int) -> dict[int, ExecEnvState]:
@@ -495,10 +503,7 @@ def get_team_exec_env_map(team_id: int) -> dict[int, ExecEnvState]:
     for agent in _agents.values():
         if agent.gt_agent.team_id != team_id or agent.gt_agent.id is None:
             continue
-        state = agent.get_exec_env_state()
-        if state is None:
-            continue
-        result[agent.gt_agent.id] = state
+        result[agent.gt_agent.id] = agent.get_exec_env_state()
     return result
 
 
@@ -525,7 +530,7 @@ async def get_agent_error_message(agent_id: int) -> str | None:
     return None
 
 
-async def get_agent_containers(agent_id: int) -> list[ContainerInfo]:
+async def get_agent_containers(agent_id: int) -> list[ContainerRuntimeInfo]:
     """查询 Agent 的自建容器列表（含预记录），并标注当前进入的容器。"""
     exec_state = get_exec_env_state(agent_id)
     return await containerService.list_agent_containers(

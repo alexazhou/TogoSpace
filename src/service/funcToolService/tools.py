@@ -1389,11 +1389,11 @@ def _tool_agent_id(_context: ToolCallContext | None) -> int:
 
 
 def _container_agent(_context: ToolCallContext | None):
-    """取当前 Agent，并确认它的驱动支持容器沙箱。
+    """取当前 Agent。
 
     容器工具只对 TSP driver 开放（§6.1 生效范围）：Native / Claude SDK 的工具
     不经过 gtsp，切换「执行环境」对它们没有意义，暴露了只会误导模型。
-    能力校验由 Agent 自己完成（`require_container_driver`），工具层不碰 Driver。
+    执行环境切换由 Agent 转交 Driver，工具层不碰 Driver。
 
     动态导入（不在模块顶层 import agentService）：`tools.py` 被
     `funcToolService` 导入，而 `agentService` 又导入 `funcToolService`，
@@ -1408,7 +1408,6 @@ def _container_agent(_context: ToolCallContext | None):
             "当前 Agent 未加载，无法使用容器工具",
             containerService.ERROR_CONTAINER_INVALID_PARAMS,
         )
-    agent.require_container_driver()
     return agent
 
 
@@ -1533,7 +1532,6 @@ async def list_containers(_context: ToolCallContext = None) -> dict[str, Any]:
         agent = _container_agent(_context)
         assert _context is not None
         state = agent.get_exec_env_state()
-        assert state is not None
         docker_available = await containerService.is_docker_available()
         infos = await containerService.list_agent_containers(
             _context.agent_id,
@@ -1577,7 +1575,6 @@ async def delete_container(
         agent = _container_agent(_context)
         assert _context is not None
         state = agent.get_exec_env_state()
-        assert state is not None
         record = await containerService.delete_container(
             _context.agent_id,
             container_id=container_id,

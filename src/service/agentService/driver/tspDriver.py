@@ -13,6 +13,7 @@ import appPaths
 from constants import (
     CONTAINER_ENTER_TIMEOUT_SEC,
     ERROR_DOCKER_CLI_NOT_FOUND,
+    ContainerState,
     ExecEnv,
     MessageBusTopic,
 )
@@ -20,7 +21,7 @@ from exception import TogoException
 from model.coreModel import ContainerTarget, ExecEnvState
 from service.agentService.driver.base import AgentDriverConfig
 
-from service import funcToolService, roomService, messageBus
+from service import containerService, funcToolService, roomService, messageBus
 from service.agentService import toolRegistry
 from model.dbModel.gtScheculeTask import GtScheculeTask
 from util import containerUtil, llmApiUtil
@@ -115,6 +116,96 @@ class TspAgentDriver(AgentDriver):
             current_container_id=self.current_container_id,
             container_name=container.container_name if container else None,
         )
+
+    async def enter_container(self, container_id: str) -> tuple[ContainerTarget, ContainerState]:
+        """切换到指定容器，返回 `(目标, 进入前状态)`（§5.1）。
+
+        流程：
+        1. `resolve_enter_target` 解析目标并取实时状态（含 12 位 ID 校验、存在性、
+           架构；只做一次 `docker inspect`）；
+        2. 同容器幂等：已在目标容器且连接存活 → 直接成功；
+        3. 状态判定（`validate_enter_state`）：自建只收 created/exited，外部只收 running；
+        4. 外部容器先注入 gtsp（自建在 create 时已注入）；
+        5. `disconnect()` → `connect(CONTAINER, target)`；
+        6. connect 失败则重连宿主（**本次进入失败**，不属于运行中自动回落）。
+
+        Raises:
+            TogoException: 任一步失败
+        """
+        target, state = await containerService.resolve_enter_target(
+            self.host.gt_agent.id, container_id
+        )
+
+        if (
+            self._exec_env == ExecEnv.CONTAINER
+            and self.current_container_id == container_id
+            and self.is_connected()
+        ):
+            # 幂等：已在目标容器且连接存活。不重连（重连会打断正在进行的 turn）。
+            # 连接已断时不能返回成功，要走下面的正常流程重新拉起。
+            return target, state
+
+        if state is ContainerState.UNKNOWN:
+            raise TogoException(
+                f"无法查询容器 {container_id} 的状态（Docker 不可用或查询超时），"
+                "请稍后重试",
+                containerService.ERROR_CONTAINER_ENTER_FAILED,
+            )
+        containerService.validate_enter_state(target, state)
+
+        if not target.is_managed:
+            # 外部容器：镜像里没有 gtsp，必须进前注入
+            await containerService.prepare_container_gtsp(target)
+
+        # 切环境：先断开再显式连接。disconnect 不改环境状态（见 Driver 注释），
+        # 所以 connect 失败时环境仍是旧值，由下面的失败分支显式处理。
+        await self.disconnect()
+        ok = await self.connect(ExecEnv.CONTAINER, target)
+        if not ok:
+            # 进入失败：本次调用内把宿主连接恢复出来，避免 Agent 失去可用环境。
+            # 注意这是「该操作自身的失败处理」，不是运行中的自动回落（§4.3）。
+            restored = await self.connect(ExecEnv.HOST)
+            if not restored:
+                logger.error(
+                    "进入容器失败且无法恢复宿主连接: agent_id=%s, container=%s",
+                    self.host.gt_agent.id, container_id,
+                )
+            raise TogoException(
+                f"进入容器 {container_id} 失败：容器内 gtsp 启动或握手未成功。"
+                "请确认镜像内 /tmp 可写且能执行注入的二进制。",
+                containerService.ERROR_CONTAINER_ENTER_FAILED,
+            )
+
+        logger.info(
+            "已进入容器: agent_id=%s, container=%s, managed=%s, from_state=%s",
+            self.host.gt_agent.id, container_id, target.is_managed, state,
+        )
+        return target, state
+
+    async def exit_to_host(self) -> bool:
+        """切回宿主环境（§5.2），成功时返回 `True`。
+
+        顺序：`disconnect()`（关容器连接 → 自建容器自然停回 exited）→
+        `connect(HOST)`。connect 失败时环境保持 CONTAINER，由调用方重试——
+        不能假装成功，否则后续工具会打在错误环境上。
+        """
+        if self._exec_env == ExecEnv.HOST:
+            # 已经在宿主：幂等成功，不重连（重连会打断 turn）
+            return True
+
+        # 先断开容器连接：关 stdin 后容器内 gtsp 退出，自建容器随之停回 exited
+        await self.disconnect()
+
+        ok = await self.connect(ExecEnv.HOST)
+        if not ok:
+            raise TogoException(
+                "退出容器失败：无法重新连接宿主环境。当前逻辑环境仍为容器，"
+                "请重试 exit_to_host。",
+                containerService.ERROR_CONTAINER_ENTER_FAILED,
+            )
+
+        logger.info("已退回到宿主环境: agent_id=%s", self.host.gt_agent.id)
+        return True
 
     def _build_container_command(self, container: ContainerTarget) -> list[str]:
         """按容器类型构造 gtsp 拉起命令（§3.2 形态 A / B）。

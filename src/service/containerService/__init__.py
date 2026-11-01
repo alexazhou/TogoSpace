@@ -14,7 +14,7 @@ from .core import *  # noqa: F401,F403
 from .core import (  # noqa: F401  显式导出，便于 IDE 与静态检查
     ERROR_CONTAINER_LOST,
     ERROR_CONTAINER_NAME_CONFLICT,
-    ContainerInfo,
+    ContainerRuntimeInfo,
     ContainerTarget,
     build_container_name,
     build_create_argv,

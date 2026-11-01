@@ -1,10 +1,11 @@
 """进入 / 退出编排测试（§5.1 / §5.2）。
 
-执行环境属于 Agent，编排在 `Agent`；`agentService` 只按 id 解析已加载实例，
-`containerService` 只提供「解析目标与状态 / 判定 / 注入」这些容器原语，
-这里全部打桩。
+执行环境属于 Driver，编排在 `TspAgentDriver`；`agentService` / `Agent` 只按
+id 解析已加载实例并转发，`containerService` 只提供「解析目标与状态 / 判定 /
+注入」这些容器原语，这里全部打桩。
 
-Driver 用假对象（只记录调用顺序），因此这里断言的是**编排顺序与失败处理**，
+Driver 继承真实的 `TspAgentDriver`，只把 `connect` / `disconnect` /
+`is_connected` 换成记录调用顺序的假实现。因此这里断言的是**编排顺序与失败处理**，
 不含真实的 stdio 连接——连接本身已由 `test_tsp_driver_container.py` 覆盖。
 
 关键验收点：
@@ -16,27 +17,49 @@ Driver 用假对象（只记录调用顺序），因此这里断言的是**编�
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-from constants import ContainerState, ExecEnv
+from constants import ContainerState, DriverType, ExecEnv
 from exception import TogoException
 from model.coreModel import ContainerTarget, ExecEnvState
 from model.dbModel.gtAgent import GtAgent
 from service import containerService
 from service.agentService import core
 from service.agentService.agent import Agent
+from service.agentService.driver.base import (
+    ERROR_DRIVER_NOT_SUPPORT_CONTAINER,
+    AgentDriverConfig,
+)
+from service.agentService.driver.tspDriver import TspAgentDriver
 
 _MANAGED = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch="arm64")
 _EXTERNAL = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="arm64")
 
 
-class _FakeDriver:
-    """记录调用顺序的假 Driver（只实现编排用到的四个成员）。"""
+class _FakeDriver(TspAgentDriver):
+    """继承真实 TSP 编排，只替换连接原语并记录调用顺序。"""
 
     def __init__(self, *, connect_results: list[bool] | None = None, start_env: ExecEnv = ExecEnv.HOST,
                  start_container_id: str | None = None, connected: bool = True) -> None:
-        self.exec_env = start_env
-        self.current_container_id = start_container_id
+        super().__init__(
+            SimpleNamespace(
+                gt_agent=GtAgent(id=1, team_id=1, name="小美", role_template_id=1),
+                agent_workdir="/tmp/agent-workdir",
+            ),
+            AgentDriverConfig(
+                driver_type=DriverType.TSP,
+                options={"command": ["/fake/gtsp", "--mode", "stdio"]},
+            ),
+        )
+        self._exec_env = start_env
+        self._current_container = (
+            ContainerTarget(
+                container_id=start_container_id, is_managed=True, arch="arm64"
+            )
+            if start_container_id else None
+        )
         self.events: list[str] = []
         self._connected = connected
         # 默认全部连接成功；按顺序消费
@@ -48,27 +71,27 @@ class _FakeDriver:
     async def disconnect(self) -> None:
         self.events.append("disconnect")
         self._connected = False
-        # 真实 Driver 的 disconnect 不改环境，这里保持一致
+        # 真实 Driver 的 disconnect 不改环境状态，这里保持一致
 
     async def connect(self, env: ExecEnv = ExecEnv.HOST, container=None) -> bool:
         self.events.append(f"connect:{env.value}:{container.container_id if container else '-'}")
         ok = self._connect_results.pop(0) if self._connect_results else True
         if ok:
-            self.exec_env = env
-            self.current_container_id = container.container_id if container else None
+            self._exec_env = env
+            self._current_container = container
             self._connected = True
         return ok
 
     def get_exec_env(self) -> ExecEnvState:
         return ExecEnvState(
-            exec_env=self.exec_env,
+            exec_env=self._exec_env,
             current_container_id=self.current_container_id,
         )
 
 
 @pytest.fixture
 def patched(monkeypatch):
-    """打桩容器原语，注册一个真实 Agent 实例，编排逻辑在 `Agent` 上被测。
+    """打桩容器原语，注册一个真实 Agent 实例，编排逻辑在 `TspAgentDriver` 上被测。
 
     返回一个可配置的控制器：`set()` / `use_driver()` 决定后续行为，
     `prepared()` 返回被注入过的目标列表。
@@ -261,8 +284,14 @@ async def test_enter_rejects_driver_without_container_support(patched):
     with pytest.raises(TogoException) as excinfo:
         await core.enter_container(1, "c0ffee123456")
 
-    assert excinfo.value.error_code == containerService.ERROR_CONTAINER_INVALID_PARAMS
+    assert excinfo.value.error_code == ERROR_DRIVER_NOT_SUPPORT_CONTAINER
     assert patched.prepare_calls() == []
+
+
+async def test_exit_and_switch_are_noop_for_driver_without_containers(patched):
+    """不支持容器的驱动本来就在宿主：退出 / 清理前切换都应直接成功。"""
+    assert await core.exit_to_host(1) is True
+    assert await core.switch_agent_to_host(1) is True
 
 
 async def test_enter_rejects_unloaded_agent(monkeypatch):
@@ -317,3 +346,35 @@ async def test_exit_failure_keeps_container_env(patched):
     assert excinfo.value.error_code == containerService.ERROR_CONTAINER_ENTER_FAILED
     assert driver.exec_env == ExecEnv.CONTAINER
     assert driver.current_container_id == "c0ffee123456"
+
+
+# ---------------------------------------------------------------------------
+# switch_agent_to_host：清理路径对 exit_to_host 的 best-effort 包装
+# ---------------------------------------------------------------------------
+
+
+async def test_switch_agent_to_host_swallows_exit_failure(patched):
+    """回宿主失败不抛异常：清理仍要继续（容器删掉后连接反正也失效了）。"""
+    driver = _FakeDriver(
+        start_env=ExecEnv.CONTAINER,
+        start_container_id="c0ffee123456",
+        connect_results=[False],
+    )
+    patched.use_driver(driver)
+
+    assert await core.switch_agent_to_host(1) is False
+    assert driver.exec_env == ExecEnv.CONTAINER
+    assert driver.events == ["disconnect", "connect:host:-"]
+
+
+async def test_switch_agent_to_host_swallows_driver_exception(patched):
+    """driver 抛异常也不能冒泡：这是收尾动作，不能把目录操作带崩。"""
+    driver = _FakeDriver(start_env=ExecEnv.CONTAINER, start_container_id="c0ffee123456")
+
+    async def _boom() -> None:
+        raise RuntimeError("stdio boom")
+
+    driver.disconnect = _boom  # type: ignore[method-assign]
+    patched.use_driver(driver)
+
+    assert await core.switch_agent_to_host(1) is False

@@ -4,8 +4,8 @@
 1. **默认工具集不含容器工具**（`get_tools()` 不带），只有 TSP driver 拿得到——
    Native / Claude SDK 的行为必须零变化；
 2. 每个工具都把 `TogoException` 转成带 `error_code` 的失败返回体（模型能据此自纠）；
-3. 工具**不自己判断环境状态**：进入 / 退出委托 `Agent`（执行环境属于
-   Agent），其余容器操作委托 `containerService`（避免状态语义两份实现）；
+3. 工具**不自己判断环境状态**：进入 / 退出委托 `Agent`，再由 `Agent` 转交
+   Driver；其余容器操作委托 `containerService`（避免状态语义两份实现）；
 4. docstring 面向 Agent，不出现 `attach` / `exec` / `client` / `stdio` 这类底层实现词。
 """
 
@@ -19,7 +19,7 @@ import pytest
 
 from constants import ContainerState, ExecEnv
 from exception import TogoException
-from model.coreModel import ContainerInfo, ExecEnvState
+from model.coreModel import ContainerRuntimeInfo, ExecEnvState
 from model.dbModel.gtAgentContainer import GtAgentContainer
 from service import funcToolService
 from service.funcToolService import tools as tools_module
@@ -279,7 +279,7 @@ async def test_list_containers_returns_env_and_serialized_containers(monkeypatch
     """返回 `exec_env` / `current_container_id` / `containers`，且容器已 JSON 化。"""
     from service import containerService
 
-    info = ContainerInfo(
+    info = ContainerRuntimeInfo(
         record=GtAgentContainer(
             id=1,
             agent_id=1,
@@ -323,7 +323,7 @@ async def test_list_containers_keeps_records_when_docker_unavailable(monkeypatch
     """
     from service import containerService
 
-    info = ContainerInfo(
+    info = ContainerRuntimeInfo(
         record=GtAgentContainer(
             id=1,
             agent_id=1,
@@ -413,26 +413,8 @@ async def test_delete_container_maps_in_use_error(monkeypatch, container_agent):
 
 
 # ---------------------------------------------------------------------------
-# 非 TSP driver / 无上下文
+# 无上下文
 # ---------------------------------------------------------------------------
-
-
-async def test_container_tools_reject_non_tsp_driver(monkeypatch):
-    """非 TSP driver 调用容器工具 ⇒ 明确报错，而不是静默失败或 AttributeError。"""
-    from service import agentService
-
-    agent = MagicMock()
-    agent.require_container_driver.side_effect = TogoException(
-        "当前 Agent 的执行驱动不支持容器沙箱（仅支持 TSP 驱动）",
-        "container_invalid_params",
-    )
-    monkeypatch.setattr(agentService, "get_agent_or_none", lambda _id: agent)
-
-    result = await tools_module.list_containers(_context=_ctx())
-
-    assert result["success"] is False
-    assert result["error_code"] == "container_invalid_params"
-    assert "TSP" in result["message"]
 
 
 async def test_container_tools_reject_missing_context():

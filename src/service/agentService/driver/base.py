@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol
 
-from constants import DriverType, ExecEnv
+from constants import ContainerState, DriverType
+from exception import TogoException
 from model.coreModel.agentModel import ExecEnvState
 from model.coreModel.containerModel import ContainerTarget
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtScheculeTask import GtScheculeTask
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService.toolRegistry import AgentToolRegistry
+
+ERROR_DRIVER_NOT_SUPPORT_CONTAINER = "driver_not_support_container"
 
 
 @dataclass
@@ -44,41 +47,6 @@ class AgentDriverHost(Protocol):
         ...
 
 
-@runtime_checkable
-class ContainerCapableDriver(Protocol):
-    """支持容器沙箱的驱动契约（目前由 `TspAgentDriver` 实现）。
-
-    Agent 用 `isinstance(driver, ContainerCapableDriver)` 做能力探测：只有实现
-    本协议的驱动才有「当前执行环境」这个概念，才能被 `enter_container` /
-    `exit_to_host` 操作。用协议而不是具体驱动类型，避免 Agent 依赖 driver 的
-    实现模块（那会把 gtsp 相关导入链拉进来）。
-    """
-
-    @property
-    def exec_env(self) -> ExecEnv:
-        ...
-
-    @property
-    def current_container_id(self) -> str | None:
-        ...
-
-    def get_exec_env(self) -> ExecEnvState:
-        ...
-
-    def is_connected(self) -> bool:
-        ...
-
-    async def connect(
-        self,
-        env: ExecEnv = ExecEnv.HOST,
-        container: ContainerTarget | None = None,
-    ) -> bool:
-        ...
-
-    async def disconnect(self) -> None:
-        ...
-
-
 class AgentDriver:
     def __init__(self, host: AgentDriverHost, config: AgentDriverConfig):
         self.host = host
@@ -98,13 +66,23 @@ class AgentDriver:
     def host_managed_turn_loop(self) -> bool:
         return False
 
-    def get_exec_env(self) -> ExecEnvState | None:
-        """当前执行环境快照；不支持容器沙箱的驱动返回 None。
+    def get_exec_env(self) -> ExecEnvState:
+        """当前执行环境快照；不支持容器的驱动恒为宿主环境。"""
+        return ExecEnvState()
 
-        None 表示「不报告环境」，活动记录不会写入 `exec_env` 相关字段——
-        Native / Claude SDK 驱动保持原有行为，不为它们伪造一个宿主环境。
+    async def enter_container(self, container_id: str) -> tuple[ContainerTarget, ContainerState]:
+        """切换到容器执行环境；不支持容器的驱动显式拒绝。
+
+        不能返回成功：调用方会以为后续命令已经打在容器里，实际仍在宿主。
         """
-        return None
+        raise TogoException(
+            "当前 Agent 的执行驱动不支持容器沙箱（仅支持 TSP 驱动）",
+            ERROR_DRIVER_NOT_SUPPORT_CONTAINER,
+        )
+
+    async def exit_to_host(self) -> bool:
+        """切回宿主环境；不支持容器的驱动本来就在宿主，返回成功。"""
+        return True
 
     async def startup(self) -> None:
         self._started = True

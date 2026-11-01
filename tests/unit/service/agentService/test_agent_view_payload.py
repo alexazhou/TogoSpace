@@ -24,7 +24,7 @@ from constants import (
     EmployStatus,
     ExecEnv,
 )
-from model.coreModel import AgentRuntimeInfo, ContainerInfo, ExecEnvState
+from model.coreModel import AgentRuntimeInfo, ContainerRuntimeInfo, ExecEnvState
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentContainer import GtAgentContainer
 from service.agentService import core
@@ -42,8 +42,8 @@ def _agent(agent_id: int = 3, team_id: int = 1) -> GtAgent:
     )
 
 
-def _container_info(*, record_id: int = 7, container_id: str | None = "c0ffee123456") -> ContainerInfo:
-    return ContainerInfo(
+def _container_info(*, record_id: int = 7, container_id: str | None = "c0ffee123456") -> ContainerRuntimeInfo:
+    return ContainerRuntimeInfo(
         record=GtAgentContainer(
             id=record_id,
             agent_id=3,

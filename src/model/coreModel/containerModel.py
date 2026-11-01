@@ -43,8 +43,8 @@ class ContainerTarget(BaseModel):
         return f"{self.container_id}({'managed' if self.is_managed else 'external'},{self.arch})"
 
 
-class ContainerInfo(BaseModel):
-    """自建容器的一条对外展示记录（`list_containers` / Agent 容器接口共用）。
+class ContainerRuntimeInfo(BaseModel):
+    """自建容器的运行时信息（`list_containers` / Agent 容器接口共用）。
 
     直接持有 DB 记录 `record`，不再重复声明 `agent_id` / `container_id` /
     `container_name` / `image` / `created_at`；`state` / `is_entered` 是实时查询

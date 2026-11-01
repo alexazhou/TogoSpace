@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -59,14 +59,12 @@ def _make_agent(agent_id: int, name: str, team_id: int = 1) -> SimpleNamespace:
 
 
 class _FakeDriver:
-    """最小 driver 桩：只暴露清理路径用到的那几个成员。"""
+    """最小 driver 桩：只暴露清理路径用到的成员。"""
 
     def __init__(self, env: ExecEnv = ExecEnv.HOST, container_id: str | None = None) -> None:
         self.exec_env = env
         self.current_container_id = container_id
-        self.disconnect = AsyncMock()
-        self.connect = AsyncMock(return_value=True)
-        self.is_connected = Mock(return_value=True)
+        self.exit_to_host = AsyncMock(return_value=True)
 
     def get_exec_env(self) -> ExecEnvState:
         return ExecEnvState(
@@ -90,7 +88,7 @@ def _fake_agent(driver) -> Agent:
 
 
 @pytest.mark.asyncio
-async def test_switch_to_host_is_noop_when_agent_not_loaded(monkeypatch):
+async def test_switch_agent_to_host_is_noop_when_agent_not_loaded(monkeypatch):
     """未加载的 Agent 没有连接，无需切换，直接视为已在宿主。"""
     monkeypatch.setattr(core, "_agents", {})
 
@@ -98,45 +96,14 @@ async def test_switch_to_host_is_noop_when_agent_not_loaded(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_switch_to_host_is_noop_when_already_host(monkeypatch):
-    """已经在宿主时不能重连：重连会打断正在进行的 turn。"""
-    driver = _FakeDriver(env=ExecEnv.HOST)
-    monkeypatch.setattr(core, "_agents", {1: _fake_agent(driver)})
-
-    assert await core.switch_agent_to_host(1) is True
-    driver.disconnect.assert_not_awaited()
-    driver.connect.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_switch_to_host_disconnects_then_connects_host(monkeypatch):
-    """在容器里时，必须是「先 disconnect 再 connect(HOST)」这个顺序。"""
+async def test_switch_agent_to_host_delegates_to_exit_to_host(monkeypatch):
+    """切换只有 `exit_to_host` 一套实现；清理专用包装只负责转发与收敛。"""
     driver = _FakeDriver(env=ExecEnv.CONTAINER, container_id="c0ffee123456")
-    monkeypatch.setattr(core, "_agents", {1: _fake_agent(driver)})
-
-    assert await core.switch_agent_to_host(1) is True
-    driver.disconnect.assert_awaited_once()
-    driver.connect.assert_awaited_once_with(ExecEnv.HOST)
-
-
-@pytest.mark.asyncio
-async def test_switch_to_host_swallows_connect_failure(monkeypatch):
-    """回宿主失败不抛异常：清理仍要继续（容器删掉后连接反正也失效了）。"""
-    driver = _FakeDriver(env=ExecEnv.CONTAINER, container_id="c0ffee123456")
-    driver.connect.return_value = False
+    driver.exit_to_host.return_value = False
     monkeypatch.setattr(core, "_agents", {1: _fake_agent(driver)})
 
     assert await core.switch_agent_to_host(1) is False
-
-
-@pytest.mark.asyncio
-async def test_switch_to_host_swallows_driver_exception(monkeypatch):
-    """driver 抛异常也不能冒泡：这是收尾动作，不能把目录操作带崩。"""
-    driver = _FakeDriver(env=ExecEnv.CONTAINER, container_id="c0ffee123456")
-    driver.disconnect.side_effect = RuntimeError("stdio boom")
-    monkeypatch.setattr(core, "_agents", {1: _fake_agent(driver)})
-
-    assert await core.switch_agent_to_host(1) is False
+    driver.exit_to_host.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -439,17 +406,11 @@ async def test_switch_team_agents_to_host_switches_all_loaded_agents(monkeypatch
     def _make_recording_driver(container_id: str) -> _FakeDriver:
         driver = _FakeDriver(env=ExecEnv.CONTAINER, container_id=container_id)
 
-        async def _disconnect() -> None:
-            order.append("disconnect")
-
-        async def _connect(_env) -> bool:
-            order.append("connect_host")
+        async def _switch() -> bool:
+            order.append(f"switch:{container_id}")
             return True
 
-        # 必须改实例上的 AsyncMock（_FakeDriver.__init__ 已把它们挂到实例上），
-        # 在子类里重写同名方法会被实例属性遮蔽。
-        driver.disconnect.side_effect = _disconnect
-        driver.connect.side_effect = _connect
+        driver.exit_to_host.side_effect = _switch
         return driver
 
     drivers = {1: _make_recording_driver("c0ffee123456"), 2: _make_recording_driver("deadbeef0002")}
@@ -457,7 +418,7 @@ async def test_switch_team_agents_to_host_switches_all_loaded_agents(monkeypatch
 
     await core.switch_team_agents_to_host(1)
 
-    assert order == ["disconnect", "connect_host", "disconnect", "connect_host"]
+    assert order == ["switch:c0ffee123456", "switch:deadbeef0002"]
 
 
 @pytest.mark.asyncio
@@ -471,15 +432,11 @@ async def test_switch_team_agents_to_host_defaults_to_loaded_agents(monkeypatch)
     def _make_recording_driver(container_id: str) -> _FakeDriver:
         driver = _FakeDriver(env=ExecEnv.CONTAINER, container_id=container_id)
 
-        async def _disconnect() -> None:
-            order.append("disconnect")
-
-        async def _connect(_env) -> bool:
-            order.append("connect_host")
+        async def _switch() -> bool:
+            order.append("switch")
             return True
 
-        driver.disconnect.side_effect = _disconnect
-        driver.connect.side_effect = _connect
+        driver.exit_to_host.side_effect = _switch
         return driver
 
     loaded = _fake_agent(_make_recording_driver("c0ffee123456"))
@@ -495,4 +452,4 @@ async def test_switch_team_agents_to_host_defaults_to_loaded_agents(monkeypatch)
 
     await core.switch_team_agents_to_host(3)
 
-    assert order == ["disconnect", "connect_host"]
+    assert order == ["switch"]

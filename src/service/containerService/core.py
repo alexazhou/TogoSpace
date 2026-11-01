@@ -40,7 +40,7 @@ from constants import (
 from dal.db import gtAgentContainerManager
 from exception import TogoException
 from model.coreModel import (
-    ContainerInfo,
+    ContainerRuntimeInfo,
     ContainerTarget,
 )
 from model.dbModel.base import atomic
@@ -686,7 +686,7 @@ async def list_agent_containers(
     *,
     current_container_id: str | None = None,
     docker_available: bool | None = None,
-) -> list[ContainerInfo]:
+) -> list[ContainerRuntimeInfo]:
     """列出该 Agent 全部活跃自建容器，并实时填状态（§3.4 / §8）。
 
     两类记录的取状态方式不同：
@@ -738,7 +738,7 @@ async def list_agent_containers(
     if not docker_available:
         # daemon 不可用：不把状态伪造成 missing，用 unknown 表示「查不到」
         return [
-            ContainerInfo(
+            ContainerRuntimeInfo(
                 record=record,
                 state=ContainerState.UNKNOWN,
                 is_entered=record.container_id is not None
@@ -754,7 +754,7 @@ async def list_agent_containers(
     )
 
     return [
-        ContainerInfo(
+        ContainerRuntimeInfo(
             record=record,
             state=state,
             is_entered=record.container_id is not None
@@ -1095,8 +1095,8 @@ def validate_enter_state(target: ContainerTarget, state: ContainerState | str) -
 
 
 # ---------------------------------------------------------------------------
-# 进入 / 退出流程（§5.1 / §5.2）不在本层：执行环境属于 Agent，
-# 由 `Agent.enter_container` / `Agent.exit_to_host` 编排并调用
+# 进入 / 退出流程（§5.1 / §5.2）不在本层：执行环境属于 Driver，
+# 由 `TspAgentDriver.enter_container` / `exit_to_host` 编排并调用
 # 本层的 `resolve_enter_target` / `validate_enter_state` /
 # `prepare_container_gtsp` 原语。
 # ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ import type {
   AgentStatus,
   AgentDetail,
   AgentInfo,
-  ContainerInfo,
+  ContainerRuntimeInfo,
   CreateTeamPayload,
   DeptTreeNode,
   DirectoriesConfig,
@@ -517,7 +517,7 @@ function parseDriverType(detail: RawAgentDetail): string {
   return normalizeDriverTypeValue(typeof detail.driver === 'string' ? detail.driver : '');
 }
 
-function normalizeContainerInfo(raw: unknown): ContainerInfo | null {
+function normalizeContainerRuntimeInfo(raw: unknown): ContainerRuntimeInfo | null {
   if (!raw || typeof raw !== 'object') {
     return null;
   }
@@ -556,7 +556,7 @@ function normalizeAgentDetail(entry: RawAgentEntry): AgentDetail {
     prompt: String(detail.prompt ?? ''),
     error_message: typeof detail.error_message === 'string' ? detail.error_message : null,
     containers: Array.isArray(rawContainers)
-      ? rawContainers.map(normalizeContainerInfo).filter((item): item is ContainerInfo => item !== null)
+      ? rawContainers.map(normalizeContainerRuntimeInfo).filter((item): item is ContainerRuntimeInfo => item !== null)
       : null,
   };
 }
@@ -1002,12 +1002,12 @@ export async function createTeam(payload: CreateTeamPayload): Promise<{ status: 
   });
 }
 
-async function getAgentContainers(agentId: number): Promise<ContainerInfo[]> {
+async function getAgentContainers(agentId: number): Promise<ContainerRuntimeInfo[]> {
   const data = await requestJson<unknown>(`/agents/${agentId}/containers.json`);
   if (!Array.isArray(data)) {
     return [];
   }
-  return data.map(normalizeContainerInfo).filter((item): item is ContainerInfo => item !== null);
+  return data.map(normalizeContainerRuntimeInfo).filter((item): item is ContainerRuntimeInfo => item !== null);
 }
 
 async function getAgentErrorMessage(agentId: number): Promise<string | null> {

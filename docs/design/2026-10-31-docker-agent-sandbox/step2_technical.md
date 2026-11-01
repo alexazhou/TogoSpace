@@ -75,7 +75,7 @@ Agent turn
 - **按名清理的归属校验**：预记录清理前按 `container_name` inspect 并校验 label；label 不匹配时只处理 DB 记录，绝不 `docker rm -f` 外部同名容器。
 - **短 ID 唯一性**：`container_id` 保留唯一索引（NULL 不冲突）；回填时若与已有记录（含软删除）冲突（概率极低），删除本次新建容器、物理删除预记录并返回 `container_create_failed`。宿主上存在同前缀其他容器时，Docker CLI 会报 `multiple IDs with prefix`，直接透传该错误。
 - **失败清理**：`docker create` / `docker cp` / 回填任一步失败，均删除本次新建容器（若已创建）并物理删除预记录，不留下残留数据。
-- **`record_id` 工具层标识**：表主键 `id` 通过 `list_containers` 以 `record_id` 暴露；预记录没有 Docker ID 时，Agent 用 `record_id` 删除。HTTP 接口直接返回 `ContainerInfo.record`，主键为 `record.id`。
+- **`record_id` 工具层标识**：表主键 `id` 通过 `list_containers` 以 `record_id` 暴露；预记录没有 Docker ID 时，Agent 用 `record_id` 删除。HTTP 接口直接返回 `ContainerRuntimeInfo.record`，主键为 `record.id`。
 - **DAL `gtAgentContainerManager`**：提供 `create`（`container_id` 可空）、`set_container_name`（按自增 ID 回填名称）、`set_container_id`（回填）、`hard_delete`（创建失败清理）、软删除 `mark_deleted`、`list_active_by_agent`、`count_active_by_agent`、按 `id` / 名 / container_id 反查。
 
 ---
@@ -127,13 +127,13 @@ Agent turn
 
 | 接口 | 说明 |
 |---|---|
-| `create_container(agent_id, image=None) -> ContainerInfo` | 校验配额（≤3）、先插入 `container_id=NULL` 的预记录并回填按自增 ID 生成的名称、执行 `docker create` 挂载目录、截取 12 位短 ID 并回填、`docker cp` 注入 gtsp、失败补偿清理 |
+| `create_container(agent_id, image=None) -> GtAgentContainer` | 校验配额（≤3）、先插入 `container_id=NULL` 的预记录并回填按自增 ID 生成的名称、执行 `docker create` 挂载目录、截取 12 位短 ID 并回填、`docker cp` 注入 gtsp、失败补偿清理 |
 | `delete_container(agent_id, container_id: str \| None = None, record_id: int \| None = None) -> bool` | `container_id` / `record_id` 二选一；按 `agent_id + container_id / id(deleted=0)` 精确校验为当前 Agent 的活跃记录，且不是当前使用中容器；有 `container_id` 时执行 `docker rm -f <container_id>`，预记录按 `container_name` + label 校验后 best-effort 清理；标记 DB 软删除 (`deleted=1`) |
 | `delete_agent_containers(agent_id: int) -> int` | Agent 离职/改名时，批量强制删除该 Agent 的所有自建容器并标记软删除；`container_id IS NULL` 的预记录按 `container_name` + label 校验后清理，label 不匹配仅处理 DB 记录 |
 | `delete_agent_containers_safely(agent_id: int) -> int` | 同上，异常不外抛；供 Agent 改名/离职等目录与 DB 主流程调用 |
 | `delete_team_containers(team_id: int) -> int` | Team 删除/改名/工作目录迁移时，批量强制删除该 Team 下所有自建容器并标记软删除；`container_id IS NULL` 的预记录按 `container_name` + label 校验后清理，label 不匹配仅处理 DB 记录 |
 | `delete_team_containers_safely(team_id: int) -> int` | 同上，异常不外抛；供 Team 改名/删除等目录与 DB 主流程调用 |
-| `list_agent_containers(agent_id) -> list[ContainerInfo]` | 查询该 Agent 全部未删除的自建容器（含 `container_id IS NULL` 的预记录）；每条直接持有 `record: GtAgentContainer` 并附加 `state` / `is_entered`；已回填 ID 的按 `container_id` inspect，预记录按 `container_name` inspect，并行获取实时状态 |
+| `list_agent_containers(agent_id) -> list[ContainerRuntimeInfo]` | 查询该 Agent 全部未删除的自建容器（含 `container_id IS NULL` 的预记录）；每条直接持有 `record: GtAgentContainer` 并附加 `state` / `is_entered`；已回填 ID 的按 `container_id` inspect，预记录按 `container_name` inspect，并行获取实时状态 |
 | `get_container_target(agent_id, container_id: str) -> ContainerTarget` | 校验 `container_id` 为 12 位十六进制短 ID；按 `agent_id + container_id(deleted=0)` 精确查 DB，命中即自建容器（`is_managed=True`）；未命中则 `docker inspect <container_id>` 取原始状态，并按容器 `.Image` → `docker image inspect` 取 arch，按外部容器处理（`is_managed=False`）；组装 ContainerTarget |
 | `resolve_enter_target(agent_id, container_id: str) -> tuple[ContainerTarget, ContainerState]` | 与 `get_container_target` 同一套解析规则，但复用同一次 `docker inspect` 的结果返回实时状态；进入流程用它避免目标解析与状态查询各 inspect 一次 |
 | `util.containerUtil.build_container_attach_argv(container_id: str, *, is_managed: bool) -> list[str]` | 按 `is_managed` 选择 gtsp 拉起形态：自建容器 `docker start -a -i`，外部容器 `docker exec -i`（不包含 docker 可执行文件路径，由调用方前置探测） |
@@ -171,7 +171,8 @@ Agent turn
 - Docker 环境类：`docker_cli_not_found`、`docker_daemon_unavailable`、`container_mount_denied`；
 - 镜像类：`container_image_missing`（提示手动 `docker pull`）、`container_image_not_linux`、`container_arch_unsupported`；
 - 容器状态类：`container_not_found`、`container_lost`、`container_already_running`、`container_in_use`、`container_stopped`（外部容器非 `running` 提示，message 带实际状态）；
-- 执行类：`container_create_failed`、`container_enter_failed`、`container_not_executable`（无 `/tmp`、架构不匹配、gtsp 无法执行等）、`container_limit_reached`、`container_delete_failed`、`container_invalid_params`（`container_id` / `record_id` 二选一校验失败）。
+- 执行类：`container_create_failed`、`container_enter_failed`、`container_not_executable`（无 `/tmp`、架构不匹配、gtsp 无法执行等）、`container_limit_reached`、`container_delete_failed`、`container_invalid_params`（`container_id` / `record_id` 二选一校验失败）；
+- 能力类：`driver_not_support_container`（非 TSP 驱动不支持容器沙箱）。
 
 ---
 
@@ -204,9 +205,19 @@ Agent turn
 
 - `is_managed=True` 即当前 Agent 自建容器；运行中重连发现容器不存在时据此决定是否软删除，不再单独维护 `owned_by_current_agent`。
 
-### 4.3 Driver 连接控制接口
+### 4.3 Driver 执行环境接口
 
-Driver 专注于维护底层的 stdio 连接与 TSP 工具加载，提供两个核心接口供上层编排调用：
+`AgentDriver` 统一暴露执行环境接口，基类提供默认实现，上层不需要再做驱动能力探测：
+
+| 接口 | 基类默认行为 | TspAgentDriver |
+|---|---|---|
+| `get_exec_env() -> ExecEnvState` | 返回宿主环境（`ExecEnvState()`） | 返回当前环境快照 |
+| `enter_container(container_id)` | 抛 `driver_not_support_container` | 执行完整进入编排（§5.1） |
+| `exit_to_host() -> bool` | 返回 `True`（本就在宿主） | 执行退出编排（§5.2），成功返回 `True` |
+
+清理路径的 best-effort 语义不再单独提供 `switch_to_host`：由 `agentService.switch_agent_to_host` 包装 `exit_to_host` 并吞掉异常，避免重复实现环境切换。
+
+Agent / funcToolService 只调用上述高层接口。`TspAgentDriver` 内部仍使用下面两个底层 stdio 连接接口；它们不暴露给上层编排：
 
 #### 1. `disconnect() -> None`
 - **动作**：若当前 `_client` 存在，调用 `await self._client.disconnect()` 关闭 stdio 连接，并置 `_client = None`；
@@ -264,42 +275,43 @@ sequenceDiagram
     autonumber
     actor Agent
     participant Tool as funcToolService
-    participant CS as containerService
     participant Driver as TspAgentDriver
+    participant CS as containerService
     participant Docker as Docker Daemon / CLI
 
     Agent->>Tool: enter_container(container_id)
-    Tool->>CS: resolve_enter_target(agent_id, container_id)
+    Tool->>Driver: Agent.enter_container → driver.enter_container(container_id)
+    Driver->>CS: resolve_enter_target(agent_id, container_id)
     CS->>Docker: 校验存在并获取容器架构 (arch) 与实时状态
-    CS-->>Tool: 返回 (ContainerTarget, ContainerState)
+    CS-->>Driver: 返回 (ContainerTarget, ContainerState)
     alt 当前已在目标容器且连接存活
-        Tool-->>Agent: 幂等返回成功
+        Driver-->>Tool: 幂等返回成功
     end
 
     alt 外部容器非 running
-        Tool-->>Agent: 报错拒绝（提示先自行 docker start）
+        Driver-->>Tool: 报错拒绝（提示先自行 docker start）
     else 自建容器处于 running
-        Tool-->>Agent: 报错拒绝（提示容器异常残留）
+        Driver-->>Tool: 报错拒绝（提示容器异常残留）
     end
 
     alt 是外部容器 (not is_managed)
-        Tool->>CS: prepare_container_gtsp(target)
+        Driver->>CS: prepare_container_gtsp(target)
         CS->>Docker: docker cp 注入 /tmp/gtsp（权限随源文件）
     end
 
-    Note over Tool,Driver: 环境切换：先断开，再显式连接到 CONTAINER
-    Tool->>Driver: disconnect()
+    Note over Driver: 环境切换：先断开，再显式连接到 CONTAINER
+    Driver->>Driver: disconnect()
     Note over Driver,Docker: 关闭旧 client stdio，若前一个为自建容器则自然停止
-    Tool->>Driver: connect(ExecEnv.CONTAINER, container=target)
+    Driver->>Driver: connect(ExecEnv.CONTAINER, container=target)
     Driver->>Docker: 拉起 TSPClient.from_stdio(command)
     Driver->>Driver: client.initialize() 并重载工具列表
     
     alt 连接握手成功
-        Tool->>Tool: 发布 AGENT_CONTAINER_STATE_CHANGED WebSocket 事件
-        Tool-->>Agent: 返回成功（环境: container, 工作目录, 挂载提示）
+        Driver->>Driver: 发布 AGENT_CONTAINER_STATE_CHANGED WebSocket 事件
+        Driver-->>Tool: 返回成功（环境: container, 工作目录, 挂载提示）
     else 连接握手失败
-        Tool->>Driver: connect(ExecEnv.HOST) 重连宿主（本次进入失败）
-        Tool-->>Agent: 返回进入失败错误
+        Driver->>Driver: connect(ExecEnv.HOST) 重连宿主（本次进入失败）
+        Driver-->>Tool: 返回进入失败错误
     end
 ```
 
@@ -307,13 +319,13 @@ sequenceDiagram
 
 ### 5.2 退出容器流程（`exit_to_host()`）
 
-1. **Agent 发起**：调用 `exit_to_host()`；
-2. **断开当前环境**：调用 `driver.disconnect()`，关闭当前容器的 stdio 连接；
+1. **Agent 发起**：调用 `exit_to_host()`，由 `Agent` 转交 `driver.exit_to_host()`；
+2. **断开当前环境**：Driver 调用 `disconnect()`，关闭当前容器的 stdio 连接；
    - 自建容器：内部 `gtsp` 收到 EOF 退出，Docker 自动将容器停回 `exited`；
    - 外部容器：内部 `gtsp` 退出，`docker exec` 会话结束，外部容器原主进程保持 `running`；
    - `disconnect()` 返回时容器可能仍在停止过程中（实测约 0.2s 内收敛），退出流程不做轮询等待；
    - `disconnect()` 不修改 `_exec_env` / `_current_container`，此时逻辑环境仍为容器；
-3. **恢复宿主连接**：调用 `driver.connect(ExecEnv.HOST)`，重新拉起宿主 `gtsp` 并恢复宿主工具列表；成功后 `_exec_env` 才切换为 `HOST`；若失败，本次退出返回错误，环境状态保持 `CONTAINER`（下一次工具调用会重连容器），由 Agent 重试 `exit_to_host`；
+3. **恢复宿主连接**：Driver 调用 `connect(ExecEnv.HOST)`，重新拉起宿主 `gtsp` 并恢复宿主工具列表；成功后 `_exec_env` 才切换为 `HOST`；若失败，本次退出返回错误，环境状态保持 `CONTAINER`（下一次工具调用会重连容器），由调用方重试 `exit_to_host`；
 4. **发布事件与返回**：发布 WebSocket 环境变更事件，向 Agent 返回退出成功消息（提示宿主已就绪，`/workspace/self` 等路径已失效）。
 
 ### 5.3 容器创建流程（`create_container(image)`）
@@ -344,7 +356,7 @@ sequenceDiagram
 ### 6.1 注册与权限控制
 
 - **实现与注册**：统一在 `funcToolService/tools.py` 编写 5 个容器工具函数，在 `funcToolService/core.py` 中注册；
-- **导入与调用约定**：`containerService` 在 `tools.py` 顶层导入（容器服务不依赖 `funcToolService`，无循环）；`agentService` 仍在函数体内动态导入（`agentService` 依赖 `funcToolService`，顶层互导会成环）。工具通过 `_context.agent_id` 取得当前 `Agent`，调用其公开的执行环境 API（`enter_container` / `exit_to_host` / `get_exec_env_state` / `agent_workdir`）完成环境切换；**工具层不持有、不访问 Driver**，能力校验由 `Agent.require_container_driver()` 统一完成；
+- **导入与调用约定**：`containerService` 在 `tools.py` 顶层导入（容器服务不依赖 `funcToolService`，无循环）；`agentService` 仍在函数体内动态导入（`agentService` 依赖 `funcToolService`，顶层互导会成环）。工具通过 `_context.agent_id` 取得当前 `Agent`，调用其公开的执行环境 API（`enter_container` / `exit_to_host` / `get_exec_env_state` / `agent_workdir`）完成环境切换；**工具层不持有、不访问 Driver**，`Agent` 将进入 / 退出转交 Driver，能力默认拒绝由 `AgentDriver` 基类统一提供；
 - **权限分类**：全部归入 `ToolCategory.EXECUTE`（角色无 Execute 权限则不可见）；
 - **生效范围**：仅对 `TspAgentDriver` 开放（`get_tools(include_container_tools=False)` 控制），Native / Claude SDK 等其他 Driver 不暴露；
 - **寻址原则**：**进入容器只接受 12 位短 ID（`container_id`，即 Docker ID 前 12 位）；删除容器接受 `container_id` 或 `record_id`（`agent_containers.id`）二选一**，不接受容器名称。`record_id` 用于预记录尚无 Docker ID 的场景；普通容器两种方式均可。Docker CLI 按唯一前缀解析短 ID；若本机存在前缀相同的其他容器，Docker 会报 `multiple IDs with prefix`，该错误原样透传给 Agent。
@@ -478,7 +490,7 @@ sequenceDiagram
 
 - **Agent 列表**：增加 `exec_env_state`（`ExecEnvState`）与 `container_count`（`count_map_by_agent_ids` 只查 DB）。未加载的 Agent 恒为 host。
 - **Agent 详情**：只返回 Agent 自身与运行时信息（含 `container_count`），不内嵌容器列表或失败信息。
-- **Agent 容器列表**：独立接口 `GET /agents/<id>/containers.json`，返回 `list[ContainerInfo]`（`list_agent_containers` 实时查询），用 `ContainerInfo.model_dump(mode="json")`；每条形如 `{ record: {...DB 字段...}, state, is_entered }`，前端容器表以 `record.id` 作为行 key。
+- **Agent 容器列表**：独立接口 `GET /agents/<id>/containers.json`，返回 `list[ContainerRuntimeInfo]`（`list_agent_containers` 实时查询），用 `ContainerRuntimeInfo.model_dump(mode="json")`；每条形如 `{ record: {...DB 字段...}, state, is_entered }`，前端容器表以 `record.id` 作为行 key。
 - **Agent 失败信息**：独立接口 `GET /agents/<id>/error_message.json`，返回 `{"error_message": str | null}`（最早未完成任务的失败信息）。
 - **WebSocket**：新 topic `AGENT_CONTAINER_STATE_CHANGED`，事件名 `agent_container`，payload 为 `gt_agent`、`exec_env`、`current_container_id`。只由 driver 在环境实际变化时发布（进入、退出、改名回落）。
 - **活动记录**：`AgentActivityMeta` 增加 `exec_env` / `current_container_id` / `container_name`，开始时写入，结束时 patch 为最终环境。

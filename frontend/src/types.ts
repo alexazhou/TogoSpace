@@ -20,9 +20,9 @@ export type AgentExecEnv = 'host' | 'container';
 /**
  * 自建容器信息（前端归一化后的扁平结构）。
  *
- * 后端 `ContainerInfo` 直接持有 DB 记录，响应形如：
+ * 后端 `ContainerRuntimeInfo` 直接持有 DB 记录，响应形如：
  * `{ record: { id, agent_id, container_id, container_name, image, created_at }, state, is_entered }`。
- * `api.ts` 的 `normalizeContainerInfo` 把 `record.id` 映射为 `record_id`，供表格行 key 使用。
+ * `api.ts` 的 `normalizeContainerRuntimeInfo` 把 `record.id` 映射为 `record_id`，供表格行 key 使用。
  *
  * 两个容易踩错的点（照后端 `model_dump(mode="json")` 的真实字段，别按文档 §8 的字面猜）：
  * 1. 容器 ID 字段名叫 `container_id`；预记录尚未回填时为 null。
@@ -33,7 +33,7 @@ export type AgentExecEnv = 'host' | 'container';
  * `record_id` / `container_name` 标识。不要写成非空——`vue-tsc --noEmit` 会卡构建，
  * 且运行期预记录行必然命中这条分支。
  */
-export interface ContainerInfo {
+export interface ContainerRuntimeInfo {
   /** `record.id`，前端表格行 key；预记录没有 container_id 时用它删除。 */
   record_id: number;
   agent_id: number;
@@ -80,7 +80,7 @@ export interface AgentDetail extends AgentInfo {
   prompt: string;
   error_message?: string | null;
   /** Agent 详情额外携带的实时容器列表；预记录 `container_id` 为 null。 */
-  containers?: ContainerInfo[] | null;
+  containers?: ContainerRuntimeInfo[] | null;
 }
 
 export interface AgentActivity {
