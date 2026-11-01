@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import re
+from typing import Any
 
 from constants import (
     CONTAINER_CREATE_TIMEOUT_SEC,
@@ -33,6 +34,7 @@ from constants import (
     CONTAINER_SHARED_MOUNT_PATH,
     DEFAULT_CONTAINER_IMAGE,
     MAX_CONTAINERS_PER_AGENT,
+    ExecEnv,
 )
 from dal.db import gtAgentContainerManager
 from exception import TogoException
@@ -1001,3 +1003,110 @@ async def get_container_state(container_id: str) -> str:
         logger.warning("查询容器状态失败: id=%s, error=%s", container_id, exc.error_message)
         return CONTAINER_STATE_UNKNOWN
     return _state_of(inspect_data)
+
+
+# ---------------------------------------------------------------------------
+# 进入 / 退出编排（§5.1 / §5.2）——供工具层调用，Driver 只负责连接
+# ---------------------------------------------------------------------------
+
+
+async def enter_container(
+    agent_id: int,
+    container_id: str,
+    driver: Any,
+) -> tuple[ContainerTarget, str]:
+    """把 Agent 的执行环境切换到指定容器，返回 `(目标, 进入前状态)`。
+
+    流程严格按 §5.1：
+    1. 同容器幂等：已在目标容器且连接存活 → 直接成功；
+    2. `get_container_target` 解析目标（含 12 位 ID 校验、存在性、架构）；
+    3. 状态判定（`validate_enter_state`）：自建只收 created/exited，外部只收 running；
+    4. 外部容器先注入 gtsp（自建在 create 时已注入）；
+    5. `driver.disconnect()` → `driver.connect(CONTAINER, target)`；
+    6. connect 失败则重连宿主（**本次进入失败**，不属于运行中自动回落）。
+
+    Args:
+        agent_id: 发起方 Agent
+        container_id: 12 位短 ID
+        driver: `TspAgentDriver`（只用到 exec_env / current_container_id /
+            disconnect / connect）
+
+    Raises:
+        TogoException: 任一步失败
+
+    Returns:
+        `(target, previous_state)`；`previous_state` 是进入前的容器状态，
+        供工具层在 message 里说明「从 created 拉起」还是「从 exited 恢复」。
+    """
+    if driver.exec_env == ExecEnv.CONTAINER and driver.current_container_id == container_id:
+        # 幂等：已在目标容器。不重连（重连会打断正在进行的 turn）。
+        target = await get_container_target(agent_id, container_id)
+        return target, "running"
+
+    target = await get_container_target(agent_id, container_id)
+
+    state = await get_container_state(container_id)
+    if state == CONTAINER_STATE_UNKNOWN:
+        raise TogoException(
+            f"无法查询容器 {container_id} 的状态（Docker 不可用或查询超时），"
+            "请稍后重试",
+            ERROR_CONTAINER_ENTER_FAILED,
+        )
+    validate_enter_state(target, state)
+
+    if not target.is_managed:
+        # 外部容器：镜像里没有 gtsp，必须进前注入
+        await prepare_container_gtsp(target)
+
+    # 切环境：先断开再显式连接。disconnect 不改环境状态（见 Driver 注释），
+    # 所以 connect 失败时环境仍是旧值，由下面的失败分支显式处理。
+    await driver.disconnect()
+    ok = await driver.connect(ExecEnv.CONTAINER, target)
+    if not ok:
+        # 进入失败：本次调用内把宿主连接恢复出来，避免 Agent 失去可用环境。
+        # 注意这是「该操作自身的失败处理」，不是运行中的自动回落（§4.3）。
+        restored = await driver.connect(ExecEnv.HOST)
+        if not restored:
+            logger.error(
+                "进入容器失败且无法恢复宿主连接: agent_id=%s, container=%s",
+                agent_id, container_id,
+            )
+        raise TogoException(
+            f"进入容器 {container_id} 失败：容器内 gtsp 启动或握手未成功。"
+            "请确认镜像内 /tmp 可写且能执行注入的二进制。",
+            ERROR_CONTAINER_ENTER_FAILED,
+        )
+
+    logger.info(
+        "已进入容器: agent_id=%s, container=%s, managed=%s, from_state=%s",
+        agent_id, container_id, target.is_managed, state,
+    )
+    return target, state
+
+
+async def exit_to_host(agent_id: int, driver: Any) -> None:
+    """把 Agent 的执行环境切回宿主（§5.2）。
+
+    顺序：`disconnect()`（关容器连接 → 自建容器自然停回 exited）→
+    `connect(HOST)`。connect 失败时环境保持 CONTAINER，由 Agent 重试——
+    不能假装成功，否则后续工具会打在错误环境上。
+
+    Raises:
+        TogoException: 宿主连接失败
+    """
+    if driver.exec_env == ExecEnv.HOST:
+        # 已经在宿主：幂等成功，不重连（重连会打断 turn）
+        return
+
+    # 先断开容器连接：关 stdin 后容器内 gtsp 退出，自建容器随之停回 exited
+    await driver.disconnect()
+
+    ok = await driver.connect(ExecEnv.HOST)
+    if not ok:
+        raise TogoException(
+            "退出容器失败：无法重新连接宿主环境。当前逻辑环境仍为容器，"
+            "请重试 exit_to_host。",
+            ERROR_CONTAINER_ENTER_FAILED,
+        )
+
+    logger.info("已退回到宿主环境: agent_id=%s", agent_id)

@@ -10,6 +10,10 @@ from pytspclient import TSPClient, TSPException, ToolResult, ToolCall
 from pytspclient.types import TSP_ERROR_STDOUT_CLOSED, TSP_ERROR_CONNECTION_CLOSED
 
 import appPaths
+from constants import CONTAINER_ENTER_TIMEOUT_SEC, ExecEnv
+from model.coreModel import ContainerTarget
+from service.containerService import core as containerService
+from service.containerService import core as container_cli
 from service.agentService.driver.base import AgentDriverConfig
 
 from service import funcToolService, roomService
@@ -60,6 +64,14 @@ class TspAgentDriver(AgentDriver):
         self._local_tools: list[llmApiUtil.OpenAITool] = funcToolService.get_tools()
         self._connect_lock = asyncio.Lock()
 
+        # 执行环境（只在内存，重启一律回宿主，§4.1）。
+        # 环境状态**只由 connect() 成功时更新**：disconnect() 只关连接、清 client
+        # 与工具列表，不改这两个字段。这样「关掉连接但逻辑上仍在容器」的中间态
+        # 可表达，退出流程里 connect(HOST) 失败时环境保持 CONTAINER，下次工具
+        # 调用会重连容器而不是悄悄回落宿主。
+        self._exec_env: ExecEnv = ExecEnv.HOST
+        self._current_container: Optional[ContainerTarget] = None
+
         # 构建连接参数（用于首次连接和后续按需重连）
         options = config.options
         work_dir = str(options.get("workdir") or host.agent_workdir)
@@ -71,6 +83,39 @@ class TspAgentDriver(AgentDriver):
             "include": options.get("tool_include") or None,
             "exclude": options.get("tool_exclude") or None,
         }
+
+    # ─── 执行环境（§4.1 / §4.3）──────────────────────────────────────────
+
+    @property
+    def exec_env(self) -> ExecEnv:
+        return self._exec_env
+
+    @property
+    def current_container(self) -> Optional[ContainerTarget]:
+        return self._current_container
+
+    @property
+    def current_container_id(self) -> Optional[str]:
+        """当前所在容器的 12 位短 ID；宿主环境为 None（对外的 `current_container_id`）。"""
+        return self._current_container.docker_id if self._current_container else None
+
+    def _build_container_command(self, container: ContainerTarget) -> list[str]:
+        """按容器类型构造 gtsp 拉起命令（§3.2 形态 A / B）。
+
+        - 自建容器：`docker start -a -i <id>`——容器本身就是「gtsp + tini」，
+          attach 即接管 stdio，关 stdin 后 gtsp 退出、容器自然停回 exited；
+        - 外部容器：`docker exec -i <id> /tmp/gtsp ...`——外部容器的主进程必须
+          保持运行，只能额外 exec 一个 gtsp 进程。
+
+        两种形态不能互换：对自建容器用 exec 会因容器未 running 而失败；对外部
+        容器用 start 会二次启动主进程。
+        """
+        docker = container_cli.get_cli()
+        if container.is_managed:
+            argv = containerService.build_container_start_argv(container.docker_id)
+        else:
+            argv = containerService.build_container_exec_argv(container.docker_id)
+        return [docker.binary_path, *argv]
 
     def _is_client_connected(self) -> bool:
         """检查 TSP client 进程是否仍然存活。
@@ -87,31 +132,43 @@ class TspAgentDriver(AgentDriver):
         # returncode 为 None 表示进程仍在运行，非 None 表示已退出
         return process.returncode is None
 
-    async def _ensure_connected(self) -> bool:
-        """确保 TSP client 已连接，若断开则重新连接。
+    async def _connect_target(
+        self,
+        env: ExecEnv,
+        container: Optional[ContainerTarget],
+    ) -> bool:
+        """建立到指定环境的 stdio 连接并加载工具；**成功时才更新环境状态**。
 
-        使用锁防止并发连接，连接成功后重新注册工具。
-        返回 True 表示连接成功（或已连接），False 表示失败。
+        环境状态（`_exec_env` / `_current_container`）在函数末尾才更新：中途失败
+        时环境保持原值，避免出现「说是容器、实际连的是宿主」的不一致状态。
         """
-        async with self._connect_lock:
-            # 再次检查，防止其他协程已完成连接
-            if self._is_client_connected():
-                return True
+        assert (env == ExecEnv.CONTAINER) == (container is not None), (
+            f"环境与容器参数不匹配: env={env}, container={container}"
+        )
 
-            logger.info("TSP 服务未连接，尝试连接: agent_id=%s", self.host.gt_agent.id)
+        if env == ExecEnv.CONTAINER:
+            assert container is not None
+            command = self._build_container_command(container)
+            logger.info(
+                "连接容器环境: agent_id=%s, target=%s",
+                self.host.gt_agent.id, container.display_name,
+            )
+        else:
+            command = list(self._connect_params["command"])
+            logger.info("连接宿主环境: agent_id=%s", self.host.gt_agent.id)
 
-            # 清理旧 client
-            if self._client is not None:
-                try:
-                    await self._client.disconnect()
-                except Exception:
-                    pass
-                self._client = None
-
-            try:
-                # 使用新的工厂方法创建 client
+        client: Optional[TSPClient] = None
+        try:
+            async def _spawn_and_initialize() -> TSPClient:
+                nonlocal client
+                # 先赋给外层的 client：若 initialize 抛错，except 分支才能拿到
+                # 已拉起的进程并关掉它。否则容器内 gtsp 会一直挂着，且下次
+                # docker start 会因容器已 running 而报 container_already_running。
                 client = await TSPClient.from_stdio(
-                    self._connect_params["command"],
+                    command,
+                    # 必须用连接参数里的超时（默认 190s），**不能**用
+                    # enter_timeout_sec：后者只是「拉起 + 握手」的等待上限，
+                    # 用它会把容器内所有工具请求的响应上限压到 60s。
                     self._connect_params["timeout_sec"],
                 ).start()
                 await client.initialize(
@@ -119,14 +176,122 @@ class TspAgentDriver(AgentDriver):
                     include=self._connect_params.get("include"),
                     exclude=self._connect_params.get("exclude"),
                 )
-                self._load_tsp_tools(client.tools)
-                self._client = client
-                self._register_host_tools()
-                logger.info("TSP 连接成功: agent_id=%s, tools=%s", self.host.gt_agent.id, len(self._tsp_tools))
+                return client
+
+            client = await asyncio.wait_for(
+                _spawn_and_initialize(), timeout=CONTAINER_ENTER_TIMEOUT_SEC
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "TSP 连接超时: agent_id=%s, env=%s, timeout=%ss",
+                self.host.gt_agent.id, env.value, CONTAINER_ENTER_TIMEOUT_SEC,
+            )
+            await self._close_client_quietly(client)
+            return False
+        except asyncio.CancelledError:
+            # turn 被取消时也要把刚拉起的子进程收掉，否则容器内 gtsp 会一直挂着
+            await self._close_client_quietly(client)
+            raise
+        except Exception as e:
+            logger.error(
+                "TSP 连接失败: agent_id=%s, env=%s, error=%s",
+                self.host.gt_agent.id, env.value, e,
+            )
+            await self._close_client_quietly(client)
+            return False
+
+        # 连接成功：先换掉旧 client，再更新环境状态
+        await self._close_client_quietly(self._client)
+        self._client = client
+        self._load_tsp_tools(client.tools)
+        self._register_host_tools()
+        self._exec_env = env
+        self._current_container = container
+        logger.info(
+            "TSP 连接成功: agent_id=%s, env=%s, container=%s, tools=%s",
+            self.host.gt_agent.id, env.value,
+            container.docker_id if container else None,
+            len(self._tsp_tools),
+        )
+        return True
+
+    @staticmethod
+    async def _close_client_quietly(client: Optional[TSPClient]) -> None:
+        """关闭 client 并吞掉异常：清理路径不能盖住真正的错误。"""
+        if client is None:
+            return
+        try:
+            await client.disconnect()
+        except Exception:
+            logger.warning("关闭 TSP client 失败（忽略）", exc_info=True)
+
+    async def connect(
+        self,
+        env: ExecEnv = ExecEnv.HOST,
+        container: Optional[ContainerTarget] = None,
+    ) -> bool:
+        """切换到指定执行环境；成功返回 True，失败返回 False（环境保持原值）。
+
+        这是对外的环境切换入口（§4.3）。`enter_container` / `exit_to_host` 都
+        通过它切环境，因此「切一半失败」不会留下不一致的状态。
+
+        Args:
+            env: 目标环境
+            container: `env == CONTAINER` 时必传；HOST 时忽略
+
+        Returns:
+            是否切换成功
+        """
+        if env == ExecEnv.CONTAINER and container is None:
+            logger.error("connect(CONTAINER) 缺少 container 参数: agent_id=%s", self.host.gt_agent.id)
+            return False
+
+        async with self._connect_lock:
+            return await self._connect_target(env, container if env == ExecEnv.CONTAINER else None)
+
+    async def disconnect(self) -> None:
+        """关闭当前 stdio 连接并清空工具（**不重置环境状态**，§4.3）。
+
+        为什么不能重置环境状态：`exit_to_host` 的流程是
+        `disconnect()` → `connect(HOST)`。如果 disconnect 就把 `_exec_env` 改成
+        HOST，那么 connect(HOST) 失败时状态就变成了「说在宿主、实际连不上」，
+        Agent 下一次工具调用会去连宿主而不是重连容器，环境被静默改变。
+        现在的写法保证：只有 connect 成功才改环境，失败则保持原环境。
+        """
+        async with self._connect_lock:
+            await self._close_client_quietly(self._client)
+            self._client = None
+            self._tsp_tools = {}
+
+    def _current_target_or_none(self) -> Optional[ContainerTarget]:
+        return self._current_container if self._exec_env == ExecEnv.CONTAINER else None
+
+    async def _ensure_connected(self) -> bool:
+        """确保 TSP client 已连接，若断开则**只重连当前环境**。
+
+        绝不跨环境回落（§4.3）：容器断开就重连容器，宿主断开就重连宿主。
+        悄悄回落到宿主会让 Agent 的后续操作作用在错误的文件系统上——容器里写的
+        文件突然写到宿主，这比直接失败危险得多。
+
+        返回 True 表示连接成功（或已连接），False 表示失败。
+        """
+        async with self._connect_lock:
+            # 再次检查，防止其他协程已完成连接
+            if self._is_client_connected():
                 return True
-            except Exception as e:
-                logger.error("TSP 连接失败: agent_id=%s, error=%s", self.host.gt_agent.id, e)
-                return False
+
+            logger.info(
+                "TSP 服务未连接，尝试重连: agent_id=%s, env=%s",
+                self.host.gt_agent.id, self._exec_env.value,
+            )
+
+            # 清理旧 client（只清连接，不动环境状态）
+            await self._close_client_quietly(self._client)
+            self._client = None
+
+            # 注意：这里直接调用 `_connect_target`（已在锁内），不能再调
+            # `connect()` —— `asyncio.Lock` 不可重入，会直接死锁。
+            return await self._connect_target(self._exec_env, self._current_target_or_none())
 
     async def startup(self) -> None:
         await super().startup()
