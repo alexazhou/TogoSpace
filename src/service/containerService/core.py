@@ -33,6 +33,7 @@ from constants import (
     CONTAINER_LOG_DIR,
     CONTAINER_SELF_MOUNT_PATH,
     CONTAINER_SHARED_MOUNT_PATH,
+    ContainerArch,
     ContainerState,
     DEFAULT_CONTAINER_IMAGE,
     MAX_CONTAINERS_PER_AGENT,
@@ -333,8 +334,8 @@ def _state_of(inspect_data: dict | None | object) -> ContainerState:
     return parsed
 
 
-async def _resolve_image_arch(cli: DockerCli, image_ref: str, *, fallback: str) -> str:
-    """按镜像 ID 查架构，返回 amd64 / arm64；不支持时抛 `container_arch_unsupported`。
+async def _resolve_image_arch(cli: DockerCli, image_ref: str, *, fallback: str) -> ContainerArch:
+    """按镜像 ID 查架构；不支持时抛 `container_arch_unsupported`。
 
     容器 inspect 的 `.Platform` 只有 OS（如 `linux`），**没有架构**，
     必须先取 `.Image`（镜像 ID）再 `docker image inspect`（§3.2 实测结论）。
@@ -356,12 +357,13 @@ async def _resolve_image_arch(cli: DockerCli, image_ref: str, *, fallback: str) 
         ) from exc
 
     normalized = appPaths.normalize_container_arch(result.stdout.strip())
-    if normalized is None:
+    arch = ContainerArch.value_of(normalized)
+    if arch is None:
         raise TogoException(
             f"不支持的镜像架构: {result.stdout.strip()}",
             ERROR_CONTAINER_ARCH_UNSUPPORTED,
         )
-    return normalized
+    return arch
 
 
 async def _resolve_image_os(cli: DockerCli, image_ref: str) -> str:
@@ -527,7 +529,7 @@ async def _cleanup_failed_create(
         )
 
 
-async def _copy_gtsp(cli: DockerCli, container_id: str, arch: str) -> None:
+async def _copy_gtsp(cli: DockerCli, container_id: str, arch: ContainerArch) -> None:
     """`docker cp` 注入 Linux gtsp 到 `/tmp/gtsp`（§3.2）。
 
     权限由源文件 `0755` 保证（`docker cp` 保留权限位），**不做容器内 chmod**
@@ -538,7 +540,7 @@ async def _copy_gtsp(cli: DockerCli, container_id: str, arch: str) -> None:
 
     创建路径与外部容器进入路径共用本函数；arch 由调用方解析，避免重复 inspect。
     """
-    local_binary = appPaths.get_gtsp_linux_binary_path(arch)
+    local_binary = appPaths.get_gtsp_linux_binary_path(arch.value)
 
     try:
         await cli.run(

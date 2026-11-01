@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from constants import ERROR_DOCKER_CLI_NOT_FOUND, ExecEnv
+from constants import ERROR_DOCKER_CLI_NOT_FOUND, ContainerArch, ExecEnv
 from exception import TogoException
 from model.coreModel import ContainerTarget
 from model.dbModel.gtAgent import GtAgent
@@ -30,9 +30,9 @@ from service.agentService.driver.tspDriver import TspAgentDriver
 from service.agentService.toolRegistry import AgentToolRegistry
 
 _MANAGED = ContainerTarget(
-    container_id="c0ffee123456", is_managed=True, arch="arm64", container_name="agent-1-1"
+    container_id="c0ffee123456", is_managed=True, arch=ContainerArch.ARM64, container_name="agent-1-1"
 )
-_EXTERNAL = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="amd64")
+_EXTERNAL = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch=ContainerArch.AMD64)
 
 
 @dataclass
@@ -337,7 +337,7 @@ async def test_failed_connect_closes_the_partially_created_client(monkeypatch):
 
 
 async def test_disconnect_does_not_reset_exec_env(monkeypatch):
-    """`disconnect()` 不重置 `_exec_env` / `_current_container`（§4.3）。
+    """`disconnect()` 不重置当前容器状态（§4.3）。
 
     必须保持容器环境，才让「disconnect → connect(HOST)」这个退出流程在
     connect 失败时不丢状态。
@@ -459,7 +459,7 @@ async def test_switching_containers_closes_previous_client(monkeypatch):
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
     first = driver._client
 
-    other = ContainerTarget(container_id="deadbeef0002", is_managed=True, arch="arm64")
+    other = ContainerTarget(container_id="deadbeef0002", is_managed=True, arch=ContainerArch.ARM64)
     await driver.connect(ExecEnv.CONTAINER, other)
 
     assert first is not None and first.disconnected is True
@@ -553,7 +553,7 @@ async def test_publishes_when_switching_between_containers(monkeypatch):
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
 
     published = _capture_publishes(monkeypatch)
-    other = ContainerTarget(container_id="deadbeef0002", is_managed=True, arch="arm64")
+    other = ContainerTarget(container_id="deadbeef0002", is_managed=True, arch=ContainerArch.ARM64)
     await driver.connect(ExecEnv.CONTAINER, other)
 
     assert len(published) == 1

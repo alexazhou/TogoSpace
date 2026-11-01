@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_serializer
 
-from constants import ContainerState
+from constants import ContainerArch, ContainerState
 from model.dbModel.gtAgentContainer import GtAgentContainer
 from util import jsonUtil
 
@@ -26,8 +26,8 @@ class ContainerTarget(BaseModel):
     运行中重连发现容器不存在时，据 `is_managed` 决定是否软删除记录。
     """
 
-    arch: str
-    """架构（amd64 / arm64），用于挑选注入容器的那份 Linux gtsp 产物。"""
+    arch: ContainerArch
+    """架构，用于挑选注入容器的那份 Linux gtsp 产物。"""
 
     container_name: str | None = None
     """容器名（自建取记录里的 `container_name`，外部取 `docker inspect` 的 `Name` 去前导 `/`）。
@@ -40,7 +40,7 @@ class ContainerTarget(BaseModel):
     @property
     def display_name(self) -> str:
         """日志用短名，避免每个日志点都自己拼格式。"""
-        return f"{self.container_id}({'managed' if self.is_managed else 'external'},{self.arch})"
+        return f"{self.container_id}({'managed' if self.is_managed else 'external'},{self.arch.value})"
 
 
 class ContainerRuntimeInfo(BaseModel):

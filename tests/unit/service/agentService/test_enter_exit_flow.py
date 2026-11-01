@@ -21,9 +21,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from constants import ContainerState, DriverType, ExecEnv
+from constants import ContainerArch, ContainerState, DriverType, ExecEnv
 from exception import TogoException
-from model.coreModel import ContainerTarget, ExecEnvState
+from model.coreModel import ContainerTarget
 from model.dbModel.gtAgent import GtAgent
 from service import containerService
 from service.agentService import core
@@ -34,14 +34,14 @@ from service.agentService.driver.base import (
 )
 from service.agentService.driver.tspDriver import TspAgentDriver
 
-_MANAGED = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch="arm64")
-_EXTERNAL = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="arm64")
+_MANAGED = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch=ContainerArch.ARM64)
+_EXTERNAL = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch=ContainerArch.ARM64)
 
 
 class _FakeDriver(TspAgentDriver):
     """继承真实 TSP 编排，只替换连接原语并记录调用顺序。"""
 
-    def __init__(self, *, connect_results: list[bool] | None = None, start_env: ExecEnv = ExecEnv.HOST,
+    def __init__(self, *, connect_results: list[bool] | None = None,
                  start_container_id: str | None = None, connected: bool = True) -> None:
         super().__init__(
             SimpleNamespace(
@@ -53,10 +53,9 @@ class _FakeDriver(TspAgentDriver):
                 options={"command": ["/fake/gtsp", "--mode", "stdio"]},
             ),
         )
-        self._exec_env = start_env
         self._current_container = (
             ContainerTarget(
-                container_id=start_container_id, is_managed=True, arch="arm64"
+                container_id=start_container_id, is_managed=True, arch=ContainerArch.ARM64
             )
             if start_container_id else None
         )
@@ -77,16 +76,9 @@ class _FakeDriver(TspAgentDriver):
         self.events.append(f"connect:{env.value}:{container.container_id if container else '-'}")
         ok = self._connect_results.pop(0) if self._connect_results else True
         if ok:
-            self._exec_env = env
             self._current_container = container
             self._connected = True
         return ok
-
-    def get_exec_env(self) -> ExecEnvState:
-        return ExecEnvState(
-            exec_env=self._exec_env,
-            current_container_id=self.current_container_id,
-        )
 
 
 @pytest.fixture
@@ -216,7 +208,7 @@ async def test_enter_reports_enter_failed_when_state_is_unknown(patched):
 async def test_enter_is_idempotent_when_already_in_same_container(patched):
     """已在目标容器 ⇒ 直接成功，**不重连**（重连会打断正在进行的 turn）。"""
     patched.set(target=_MANAGED, state=ContainerState.RUNNING)
-    driver = _FakeDriver(start_env=ExecEnv.CONTAINER, start_container_id="c0ffee123456")
+    driver = _FakeDriver(start_container_id="c0ffee123456")
     patched.use_driver(driver)
 
     await core.enter_container(1, "c0ffee123456")
@@ -232,7 +224,6 @@ async def test_enter_reconnects_when_same_container_but_connection_lost(patched)
     """
     patched.set(target=_MANAGED, state=ContainerState.EXITED)
     driver = _FakeDriver(
-        start_env=ExecEnv.CONTAINER,
         start_container_id="c0ffee123456",
         connected=False,
     )
@@ -311,7 +302,7 @@ async def test_enter_rejects_unloaded_agent(monkeypatch):
 
 async def test_exit_disconnects_container_then_connects_host(patched):
     """退出顺序：先 disconnect（关 stdin → 容器停回 exited）再 connect(HOST)。"""
-    driver = _FakeDriver(start_env=ExecEnv.CONTAINER, start_container_id="c0ffee123456")
+    driver = _FakeDriver(start_container_id="c0ffee123456")
     patched.use_driver(driver)
 
     await core.exit_to_host(1)
@@ -322,7 +313,7 @@ async def test_exit_disconnects_container_then_connects_host(patched):
 
 async def test_exit_from_host_is_idempotent(patched):
     """已在宿主 ⇒ 幂等成功，不重连（避免打断正在进行的 turn）。"""
-    driver = _FakeDriver(start_env=ExecEnv.HOST)
+    driver = _FakeDriver()
     patched.use_driver(driver)
 
     await core.exit_to_host(1)
@@ -336,7 +327,7 @@ async def test_exit_failure_keeps_container_env(patched):
     不能因 connect(HOST) 失败就把环境标成 HOST：那会让后续工具打到宿主，
     而 Agent 以为自己还在容器里。
     """
-    driver = _FakeDriver(start_env=ExecEnv.CONTAINER, start_container_id="c0ffee123456")
+    driver = _FakeDriver(start_container_id="c0ffee123456")
     driver._connect_results = [False]
     patched.use_driver(driver)
 
@@ -356,7 +347,6 @@ async def test_exit_failure_keeps_container_env(patched):
 async def test_switch_agent_to_host_swallows_exit_failure(patched):
     """回宿主失败不抛异常：清理仍要继续（容器删掉后连接反正也失效了）。"""
     driver = _FakeDriver(
-        start_env=ExecEnv.CONTAINER,
         start_container_id="c0ffee123456",
         connect_results=[False],
     )
@@ -369,7 +359,7 @@ async def test_switch_agent_to_host_swallows_exit_failure(patched):
 
 async def test_switch_agent_to_host_swallows_driver_exception(patched):
     """driver 抛异常也不能冒泡：这是收尾动作，不能把目录操作带崩。"""
-    driver = _FakeDriver(start_env=ExecEnv.CONTAINER, start_container_id="c0ffee123456")
+    driver = _FakeDriver(start_container_id="c0ffee123456")
 
     async def _boom() -> None:
         raise RuntimeError("stdio boom")

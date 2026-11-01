@@ -327,6 +327,16 @@ class ExecEnv(EnhanceEnum):
 # 设计依据：docs/design/2026-10-31-docker-agent-sandbox/step2_technical.md §3.1
 # ─────────────────────────────────────────────────────────────────────────────
 
+class ContainerArch(EnhanceEnum):
+    """容器镜像架构（决定注入哪份 Linux gtsp 产物）。
+
+    只保留 Docker 实际会返回并支持的两种；`x86_64` / `aarch64` 等别名由
+    `appPaths.normalize_container_arch` 在进入本枚举前归一化。
+    """
+    AMD64 = "amd64"
+    ARM64 = "arm64"
+
+
 class ContainerState(EnhanceEnum):
     """容器状态。
 

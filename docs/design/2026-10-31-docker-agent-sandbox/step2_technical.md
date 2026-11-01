@@ -184,10 +184,10 @@ Agent turn
 
 | 变量 | 类型 | 说明 |
 |---|---|---|
-| `_exec_env` | `ExecEnv` | 当前执行环境：`HOST` 或 `CONTAINER`，默认 `HOST` |
-| `_current_container` | `Optional[ContainerTarget]` | 当前连接的目标容器，宿主环境下为 `None` |
+| `_current_container` | `Optional[ContainerTarget]` | 当前连接的目标容器；唯一状态源：`None` = 宿主，非 `None` = 容器 |
 | `_client` | `Optional[TSPClient]` | 活跃 TSP client 实例（同一时刻只连宿主或容器之一） |
 
+- `exec_env` / `current_container_id` 由 `_current_container` 派生，不单独存储，避免两个字段不同步。
 - `ExecEnv`：`host` / `container`。
 - `ContainerState`：直接使用 Docker inspect 的 `State.Status` 原值（`created` / `running` / `exited` / `paused` / `restarting` / `removing` / `dead` 等），不做归一化；容器不存在记 `missing`，inspect 失败记 `unknown`。
 - **外部容器进入判定**：只认 `running`；其他状态一律拒绝，返回 `container_stopped` 并在 message 中带原始状态；inspect 失败返回 `container_enter_failed`，不视为 `missing`，不触发软删除。自建容器进入判定见 §1.2：`created` / `exited` 拉起，`running` 报 `container_already_running`，其余异常状态统一返回 `container_enter_failed`（message 带实际状态与 Docker 原始错误，不自动恢复）。
@@ -201,7 +201,7 @@ Agent turn
 |---|---|---|
 | `container_id` | `str` | Docker 容器 12 位短 ID（用于 DB 查询与 CLI 参数） |
 | `is_managed` | `bool` | True: 当前 Agent 的 DB 记录（形态 A）；False: 外部/他人容器（形态 B） |
-| `arch` | `str` | 架构（`amd64` / `arm64`），用于外部容器注入匹配的 gtsp 二进制 |
+| `arch` | `ContainerArch` | 架构（`amd64` / `arm64`），用于外部容器注入匹配的 gtsp 二进制 |
 
 - `is_managed=True` 即当前 Agent 自建容器；运行中重连发现容器不存在时据此决定是否软删除，不再单独维护 `owned_by_current_agent`。
 
@@ -223,7 +223,7 @@ Agent / funcToolService 只调用上述高层接口。`TspAgentDriver` 内部仍
 - **动作**：若当前 `_client` 存在，调用 `await self._client.disconnect()` 关闭 stdio 连接，并置 `_client = None`；
 - **清理工具**：清空 `_tsp_tools`；
 - **环境收敛**：若原处于容器内，stdio 关闭后容器内 gtsp 收到 EOF 自然退出（自建容器随之停回 exited，外部容器仅 exec 退出、主进程保持运行）；
-- **不清理连接状态**：`disconnect()` 只关闭连接、清空 `_client` / `_tsp_tools`，**不修改** `_exec_env` / `_current_container`；环境状态由后续 `connect()` 成功时更新。需要回宿主时必须显式 `connect(ExecEnv.HOST)`。
+- **不清理连接状态**：`disconnect()` 只关闭连接、清空 `_client` / `_tsp_tools`，**不修改** `_current_container`；环境状态由后续 `connect()` 成功时更新。需要回宿主时必须显式 `connect(ExecEnv.HOST)`。
 
 #### 2. `connect(env: ExecEnv = ExecEnv.HOST, container: Optional[ContainerTarget] = None) -> bool`
 - **入参定义**：
@@ -237,7 +237,7 @@ Agent / funcToolService 只调用上述高层接口。`TspAgentDriver` 内部仍
   - 再用 `client.initialize(client_info=..., include=..., exclude=...)` 应用工具过滤（与现有驱动一致）；
   - 整段「拉起 + 握手」用 `asyncio.wait_for(..., enter_timeout_sec)` 包裹；超时 / 失败时先关闭已创建的 client（`disconnect()` 只清连接，不改环境状态），再返回 `False`；
 - **加载工具**：调用 `self._load_tsp_tools(client.tools)` 加载容器内/宿主工具，并在宿主 Driver 上重新注册；
-- **更新状态**：更新 `_client = client`、`_exec_env = env` 与 `_current_container = container`；
+- **更新状态**：更新 `_client = client` 与 `_current_container = container`（`exec_env` 随之派生）；
 - **返回值**：成功返回 `True`；失败返回 `False`。
 
 #### 3. 断连重试与容器丢失
@@ -247,17 +247,17 @@ Agent / funcToolService 只调用上述高层接口。`TspAgentDriver` 内部仍
 ```text
 _ensure_connected():
 1. _client 存活 → 直接返回
-2. 按 _exec_env 重连当前环境
+2. 按当前环境重连（由 _current_container 是否为空推导）
    ├─ HOST      → connect(ExecEnv.HOST)
    └─ CONTAINER → connect(ExecEnv.CONTAINER, container=_current_container)
-3. 重连失败 → 本次工具调用直接返回错误，_exec_env 保持 CONTAINER
+3. 重连失败 → 本次工具调用直接返回错误，_current_container 保持非空
    ├─ Docker 不可用          → docker_daemon_unavailable，保留 DB 记录
    ├─ inspect 显示容器不存在  → container_lost；is_managed=True 时标记软删除（幂等）
    └─ 其他（握手失败 / 超时） → container_enter_failed，保留记录
 4. 需要回宿主时，由 Agent 显式调用 exit_to_host；系统不自动切换
 ```
 
-- 清理失效 client 时只置 `_client = None`、清空工具列表，**不重置** `_exec_env` / `_current_container`；`disconnect()` 同样不重置，环境状态只由 `connect()` 成功时更新；
+- 清理失效 client 时只置 `_client = None`、清空工具列表，**不重置** `_current_container`；`disconnect()` 同样不重置，环境状态只由 `connect()` 成功时更新；
 - 上述 `container_lost` 自动软删除只发生在运行中重连；`enter_container` 首次校验发现容器不存在时只返回错误，不改 DB（见 §5.1）；
 - `enter_container` 握手失败属于该操作自身的失败处理：在本次调用内重连宿主并返回进入失败，不属于运行中的自动回落；
 - 提示处理：共享目录只读提示（`read-only file system`）、镜像无 bash 提示（`executable file not found` + `bash`，只提示一次）。
@@ -324,8 +324,8 @@ sequenceDiagram
    - 自建容器：内部 `gtsp` 收到 EOF 退出，Docker 自动将容器停回 `exited`；
    - 外部容器：内部 `gtsp` 退出，`docker exec` 会话结束，外部容器原主进程保持 `running`；
    - `disconnect()` 返回时容器可能仍在停止过程中（实测约 0.2s 内收敛），退出流程不做轮询等待；
-   - `disconnect()` 不修改 `_exec_env` / `_current_container`，此时逻辑环境仍为容器；
-3. **恢复宿主连接**：Driver 调用 `connect(ExecEnv.HOST)`，重新拉起宿主 `gtsp` 并恢复宿主工具列表；成功后 `_exec_env` 才切换为 `HOST`；若失败，本次退出返回错误，环境状态保持 `CONTAINER`（下一次工具调用会重连容器），由调用方重试 `exit_to_host`；
+   - `disconnect()` 不修改 `_current_container`，此时逻辑环境仍为容器；
+3. **恢复宿主连接**：Driver 调用 `connect(ExecEnv.HOST)`，重新拉起宿主 `gtsp` 并恢复宿主工具列表；成功后清空 `_current_container`，`exec_env` 随之为 `HOST`；若失败，本次退出返回错误，环境状态保持 `CONTAINER`（下一次工具调用会重连容器），由调用方重试 `exit_to_host`；
 4. **发布事件与返回**：发布 WebSocket 环境变更事件，向 Agent 返回退出成功消息（提示宿主已就绪，`/workspace/self` 等路径已失效）。
 
 ### 5.3 容器创建流程（`create_container(image)`）

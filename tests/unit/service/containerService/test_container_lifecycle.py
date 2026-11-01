@@ -11,7 +11,7 @@ import json
 import pytest
 
 from exception import TogoException
-from constants import ContainerState
+from constants import ContainerArch, ContainerState
 from service.containerService import core
 
 # 复用 create 测试里的环境夹具（假 docker + 真实迁移 DDL + 临时库）
@@ -79,7 +79,7 @@ async def test_get_target_returns_managed_when_record_matches_agent(fake):
 
     assert target.is_managed is True
     assert target.container_id == "c0ffee123456"
-    assert target.arch == "arm64"
+    assert target.arch == ContainerArch.ARM64
 
 
 async def test_get_target_fills_container_name_for_managed(fake):
@@ -174,7 +174,7 @@ async def test_get_target_uses_image_inspect_for_arch_not_container_platform(fak
 
     target = await core.get_container_target(1, "c0ffee123456")
 
-    assert target.arch == "amd64"
+    assert target.arch == ContainerArch.AMD64
     # 断言确实用镜像 ID 查过架构
     image_calls = fake.calls_of("image")
     assert any("sha256:deadbeef" in call for call in image_calls)
@@ -653,7 +653,7 @@ async def test_prepare_skips_copy_for_managed_container(fake):
     """自建容器在创建时已注入，进入前不再重复拷贝 6MB（§3.2）。"""
     from model.coreModel import ContainerTarget
 
-    target = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch="arm64")
+    target = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch=ContainerArch.ARM64)
 
     await core.prepare_container_gtsp(target)
 
@@ -664,7 +664,7 @@ async def test_prepare_injects_for_external_container(fake):
     """外部容器进入前必须注入（它的镜像里没有 gtsp）。"""
     from model.coreModel import ContainerTarget
 
-    target = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="amd64")
+    target = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch=ContainerArch.AMD64)
 
     await core.prepare_container_gtsp(target)
 
@@ -679,7 +679,7 @@ async def test_prepare_reports_not_executable_when_copy_fails(fake):
     from model.coreModel import ContainerTarget
 
     fake.set("cp", stderr="Error response from daemon: could not find /tmp", returncode=1)
-    target = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="arm64")
+    target = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch=ContainerArch.ARM64)
 
     with pytest.raises(TogoException) as excinfo:
         await core.prepare_container_gtsp(target)

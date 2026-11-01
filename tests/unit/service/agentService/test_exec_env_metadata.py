@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from constants import ExecEnv
+from constants import ContainerArch, ExecEnv
 from model.coreModel import ContainerTarget, ExecEnvState
 from service.agentService import core
 from service.agentService.agent import Agent
@@ -62,7 +62,7 @@ def _fake_agent(agent_id: int, team_id: int, driver) -> Agent:
 
 
 _MANAGED = ContainerTarget(
-    container_id="c0ffee123456", is_managed=True, arch="arm64", container_name="agent-3-1"
+    container_id="c0ffee123456", is_managed=True, arch=ContainerArch.ARM64, container_name="agent-3-1"
 )
 
 

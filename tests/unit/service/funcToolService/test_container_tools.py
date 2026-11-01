@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from constants import ContainerState, ExecEnv
+from constants import ContainerArch, ContainerState, ExecEnv
 from exception import TogoException
 from model.coreModel import ContainerRuntimeInfo, ExecEnvState
 from model.dbModel.gtAgentContainer import GtAgentContainer
@@ -198,7 +198,7 @@ async def test_enter_container_reports_mount_info_for_managed(monkeypatch, conta
     from model.coreModel import ContainerTarget
 
     target = ContainerTarget(
-        container_id="c0ffee123456", is_managed=True, arch="arm64", container_name="agent-1-1"
+        container_id="c0ffee123456", is_managed=True, arch=ContainerArch.ARM64, container_name="agent-1-1"
     )
     container_agent.enter_container = AsyncMock(
         return_value=(target, ContainerState.CREATED)
@@ -220,7 +220,7 @@ async def test_enter_container_reports_external_container_difference(monkeypatch
     """外部容器：`mounted=False`、不报 workdir，并说明原进程不受影响。"""
     from model.coreModel import ContainerTarget
 
-    target = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="arm64")
+    target = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch=ContainerArch.ARM64)
     container_agent.enter_container = AsyncMock(
         return_value=(target, ContainerState.RUNNING)
     )

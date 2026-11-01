@@ -74,11 +74,12 @@ class TspAgentDriver(AgentDriver):
         self._connect_lock = asyncio.Lock()
 
         # 执行环境（只在内存，重启一律回宿主，§4.1）。
+        # `_current_container` 是唯一状态源：None = 宿主，非 None = 容器；
+        # `exec_env` / `current_container_id` 都由它派生，避免两个字段不同步。
         # 环境状态**只由 connect() 成功时更新**：disconnect() 只关连接、清 client
-        # 与工具列表，不改这两个字段。这样「关掉连接但逻辑上仍在容器」的中间态
-        # 可表达，退出流程里 connect(HOST) 失败时环境保持 CONTAINER，下次工具
-        # 调用会重连容器而不是悄悄回落宿主。
-        self._exec_env: ExecEnv = ExecEnv.HOST
+        # 与工具列表，不改这个字段。这样「关掉连接但逻辑上仍在容器」的中间态
+        # 可表达，退出流程里 connect(HOST) 失败时环境保持容器，下次工具调用会
+        # 重连容器而不是悄悄回落宿主。
         self._current_container: Optional[ContainerTarget] = None
 
         # 构建连接参数（用于首次连接和后续按需重连）
@@ -97,7 +98,8 @@ class TspAgentDriver(AgentDriver):
 
     @property
     def exec_env(self) -> ExecEnv:
-        return self._exec_env
+        """当前执行环境；容器目标为空即宿主。"""
+        return ExecEnv.CONTAINER if self._current_container is not None else ExecEnv.HOST
 
     @property
     def current_container(self) -> Optional[ContainerTarget]:
@@ -112,7 +114,7 @@ class TspAgentDriver(AgentDriver):
         """上报当前执行环境；宿主态也返回快照（TSP 驱动始终支持环境切换）。"""
         container = self._current_container
         return ExecEnvState(
-            exec_env=self._exec_env,
+            exec_env=self.exec_env,
             current_container_id=self.current_container_id,
             container_name=container.container_name if container else None,
         )
@@ -137,7 +139,7 @@ class TspAgentDriver(AgentDriver):
         )
 
         if (
-            self._exec_env == ExecEnv.CONTAINER
+            self.current_container is not None
             and self.current_container_id == container_id
             and self.is_connected()
         ):
@@ -189,7 +191,7 @@ class TspAgentDriver(AgentDriver):
         `connect(HOST)`。connect 失败时环境保持 CONTAINER，由调用方重试——
         不能假装成功，否则后续工具会打在错误环境上。
         """
-        if self._exec_env == ExecEnv.HOST:
+        if self.current_container is None:
             # 已经在宿主：幂等成功，不重连（重连会打断 turn）
             return True
 
@@ -258,8 +260,8 @@ class TspAgentDriver(AgentDriver):
     ) -> bool:
         """建立到指定环境的 stdio 连接并加载工具；**成功时才更新环境状态**。
 
-        环境状态（`_exec_env` / `_current_container`）在函数末尾才更新：中途失败
-        时环境保持原值，避免出现「说是容器、实际连的是宿主」的不一致状态。
+        `_current_container` 在函数末尾才更新：中途失败时环境保持原值，避免
+        出现「说是容器、实际连的是宿主」的不一致状态。
         """
         assert (env == ExecEnv.CONTAINER) == (container is not None), (
             f"环境与容器参数不匹配: env={env}, container={container}"
@@ -324,9 +326,8 @@ class TspAgentDriver(AgentDriver):
         self._client = client
         self._load_tsp_tools(client.tools)
         self._register_host_tools()
-        previous_env = self._exec_env
+        previous_env = self.exec_env
         previous_container_id = self.current_container_id
-        self._exec_env = env
         self._current_container = container
         logger.info(
             "TSP 连接成功: agent_id=%s, env=%s, container=%s, tools=%s",
@@ -352,7 +353,7 @@ class TspAgentDriver(AgentDriver):
             messageBus.publish(
                 MessageBusTopic.AGENT_CONTAINER_STATE_CHANGED,
                 gt_agent=self.host.gt_agent,
-                exec_env=self._exec_env.value,
+                exec_env=self.exec_env.value,
                 current_container_id=self.current_container_id,
             )
         except Exception:
@@ -398,18 +399,16 @@ class TspAgentDriver(AgentDriver):
         """关闭当前 stdio 连接并清空工具（**不重置环境状态**，§4.3）。
 
         为什么不能重置环境状态：`exit_to_host` 的流程是
-        `disconnect()` → `connect(HOST)`。如果 disconnect 就把 `_exec_env` 改成
-        HOST，那么 connect(HOST) 失败时状态就变成了「说在宿主、实际连不上」，
-        Agent 下一次工具调用会去连宿主而不是重连容器，环境被静默改变。
-        现在的写法保证：只有 connect 成功才改环境，失败则保持原环境。
+        `disconnect()` → `connect(HOST)`。如果 disconnect 就把
+        `_current_container` 清空，那么 connect(HOST) 失败时状态就变成了
+        「说在宿主、实际连不上」，Agent 下一次工具调用会去连宿主而不是重连
+        容器，环境被静默改变。现在的写法保证：只有 connect 成功才改环境，
+        失败则保持原环境。
         """
         async with self._connect_lock:
             await self._close_client_quietly(self._client)
             self._client = None
             self._tsp_tools = {}
-
-    def _current_target_or_none(self) -> Optional[ContainerTarget]:
-        return self._current_container if self._exec_env == ExecEnv.CONTAINER else None
 
     async def _ensure_connected(self) -> bool:
         """确保 TSP client 已连接，若断开则**只重连当前环境**。
@@ -427,7 +426,7 @@ class TspAgentDriver(AgentDriver):
 
             logger.info(
                 "TSP 服务未连接，尝试重连: agent_id=%s, env=%s",
-                self.host.gt_agent.id, self._exec_env.value,
+                self.host.gt_agent.id, self.exec_env.value,
             )
 
             # 清理旧 client（只清连接，不动环境状态）
@@ -436,7 +435,7 @@ class TspAgentDriver(AgentDriver):
 
             # 注意：这里直接调用 `_connect_target`（已在锁内），不能再调
             # `connect()` —— `asyncio.Lock` 不可重入，会直接死锁。
-            return await self._connect_target(self._exec_env, self._current_target_or_none())
+            return await self._connect_target(self.exec_env, self._current_container)
 
     async def startup(self) -> None:
         await super().startup()

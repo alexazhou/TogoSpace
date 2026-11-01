@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from pydantic import ValidationError
 
-from constants import ContainerState
+from constants import ContainerArch, ContainerState
 from model.coreModel import ContainerRuntimeInfo, ContainerTarget
 from model.dbModel.gtAgentContainer import GtAgentContainer
 
@@ -46,8 +46,8 @@ def test_state_sentinels_do_not_collide_with_docker_status_values():
 
 def test_container_target_display_name_distinguishes_managed_and_external():
     """日志短名必须一眼看出「自建 / 外部」与架构，避免排障时误判能删哪个容器。"""
-    managed = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch="arm64")
-    external = ContainerTarget(container_id="deadbeef0001", is_managed=False, arch="amd64")
+    managed = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch=ContainerArch.ARM64)
+    external = ContainerTarget(container_id="deadbeef0001", is_managed=False, arch=ContainerArch.AMD64)
 
     assert managed.display_name == "c0ffee123456(managed,arm64)"
     assert external.display_name == "deadbeef0001(external,amd64)"
@@ -56,7 +56,7 @@ def test_container_target_display_name_distinguishes_managed_and_external():
 def test_container_target_forbids_extra_fields():
     """`extra="forbid"`：拼错字段名要立刻炸，而不是静默丢字段（`is_manegd` 这类）。"""
     with pytest.raises(ValidationError):
-        ContainerTarget(container_id="c0ffee123456", is_manegd=True, arch="arm64")
+        ContainerTarget(container_id="c0ffee123456", is_manegd=True, arch=ContainerArch.ARM64)
 
 
 def test_container_target_container_name_is_optional():
@@ -65,11 +65,11 @@ def test_container_target_container_name_is_optional():
     连接只依赖 `container_id` / `is_managed` / `arch`。若把它写成必填，所有构造点
     （含外部容器拿不到 `Name` 的情况）都会失败，等于用一个日志字段卡住连接。
     """
-    target = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch="arm64")
+    target = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch=ContainerArch.ARM64)
     assert target.container_name is None
 
     named = ContainerTarget(
-        container_id="c0ffee123456", is_managed=True, arch="arm64", container_name="agent-a-1"
+        container_id="c0ffee123456", is_managed=True, arch=ContainerArch.ARM64, container_name="agent-a-1"
     )
     assert named.container_name == "agent-a-1"
 
