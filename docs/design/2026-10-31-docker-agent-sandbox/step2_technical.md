@@ -59,7 +59,7 @@ Agent turn
 | `id` | `int` | 主键，自增；对外作为 `record_id` |
 | `agent_id` | `int` | 所属 Agent ID（建立索引） |
 | `docker_id` | `str \| null` | 唯一，Docker 容器 12 位短 ID（与对外 `container_id` 相同）；创建流程先插入空值，`docker create` 成功后回填 |
-| `container_name` | `str` | 容器名称（`agent-<name>-<index>`）；在 `deleted=0` 范围内唯一（部分唯一索引），删除后名称可复用 |
+| `container_name` | `str` | 容器名称（`agent-t<team_id>-<name>-<index>`）；在 `deleted=0` 范围内唯一（部分唯一索引），删除后名称可复用。**含 `team_id` 段是有意的**：跨团队同名 Agent 必须能并存，见 §3.5（依据 Operator 2026-11-01 指令修订） |
 | `image` | `str` | 创建时实际使用的镜像（默认 `ubuntu:24.04`） |
 | `deleted` | `int` | 软删除标记（默认 `0`，删除后置为时间戳或 `1`），便于链路排查与执行回溯 |
 | `created_at` | `int` | 创建时间戳 |
@@ -136,11 +136,12 @@ Agent turn
 
 ### 3.5 容器创建与命名规范
 
-- **命名**：`agent-<name>-<index>`（`index` 取 1..3 中未占用的最小编号），Agent 名非法字符（中文、空格等）回退为 `agent-<agent_id>-<index>`。
+- **命名**：`agent-t<team_id>-<name>-<index>`（`index` 取 1..3 中未占用的最小编号），Agent 名非法字符（中文、空格等）回退为 `agent-t<team_id>-<agent_id>-<index>`。
+  > 依据 Operator 2026-11-01 指令修订（原文为 `agent-<name>-<index>` / `agent-<agent_id>-<index>`）：原规则在 `deleted=0` 全局唯一约束下，跨团队同名 Agent 必然 `IntegrityError`。team 段**必须用 `team_id` 而非团队名**——`teams.name` 的唯一性约束是原值唯一，而「ToGo开发部」「ToGo研究部」规范化后同为 `togo`，用团队名区分不掉。
 - **Label 标识**：只打 `com.togospace.container_record_id=<record_id>`，用于按容器名清理预记录时校验归属，避免误删外部同名容器。
 - **创建参数**：
   ```text
-  docker create --name agent-<name>-<index>
+  docker create --name agent-t<team_id>-<name>-<index>
     --label com.togospace.container_record_id=<record_id>
     -i --init --entrypoint /tmp/gtsp
     --mount type=bind,src=<agent_workdir>,dst=/workspace/self
@@ -148,6 +149,7 @@ Agent turn
     --env HOME=/tmp --network bridge --security-opt no-new-privileges
     <image> --mode stdio --log-path /tmp/togospace/logs
   ```
+  > 依据 Operator 2026-11-01 指令修订：`--name` 由 `agent-<name>-<index>` 改为 `agent-t<team_id>-<name>-<index>`（理由见上条「命名」）。
 - **关键约束**：
   - 必须带 `-i`，绝不带 `-t`（保持原始流传输，不分配伪终端）；
   - `--entrypoint` 必须置于镜像名之前；显式传容器内可写的 `--log-path`；
@@ -312,7 +314,7 @@ sequenceDiagram
 ### 5.3 容器创建流程（`create_container(image)`）
 
 1. **Agent 发起**：调用 `create_container(image="...")`；
-2. **配额与命名**：`containerService` 校验该 Agent 当前活跃自建容器数（`deleted=0` 且 `< 3`），在 `{1, 2, 3}` 中选择未被占用的最小编号 `index`，生成容器名 `agent-<name>-<index>`；
+2. **配额与命名**：`containerService` 校验该 Agent 当前活跃自建容器数（`deleted=0` 且 `< 3`），在 `{1, 2, 3}` 中选择未被占用的最小编号 `index`，生成容器名 `agent-t<team_id>-<name>-<index>`（依据 Operator 2026-11-01 指令修订，原为 `agent-<name>-<index>`）；
 3. **预插记录**：先在 `agent_containers` 表中插入一条预记录（`agent_id`, `docker_id=NULL`, `container_name`, `image`, `deleted=0`, `created_at`），提前占用配额与容器名；
 4. **执行创建**：调用 `docker create` 绑定个人工作目录读写、团队共享目录只读，设置 `--entrypoint /tmp/gtsp`；从输出完整 ID 截取前 12 位作为 `docker_id`（短 ID）；创建失败则物理删除预记录并返回 `container_create_failed`；
 5. **回填 ID**：将 12 位短 ID 更新到预记录；若与已有记录冲突，`docker rm -f` 删除新建容器、物理删除预记录并返回 `container_create_failed`；
@@ -359,7 +361,7 @@ sequenceDiagram
 |---|---|---|
 | `success` | `bool` | 是否创建成功 |
 | `container_id` | `str` | 容器的 12 位短 ID |
-| `container_name` | `str` | 容器名称（`agent-<name>-<1..3>`） |
+| `container_name` | `str` | 容器名称（`agent-t<team_id>-<name>-<1..3>`；依据 Operator 2026-11-01 指令修订，原为 `agent-<name>-<1..3>`） |
 | `image` | `str` | 实际使用的镜像名称 |
 | `state` | `str` | 容器初始状态（固定为 `"created"`） |
 | `mounts` | `dict` | 挂载映射（`/workspace/self` 读写，`/workspace/team_shared` 只读） |
