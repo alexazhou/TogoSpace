@@ -195,7 +195,9 @@ async def test_enter_container_reports_mount_info_for_managed(monkeypatch, conta
     from model.coreModel import ContainerTarget
     from service import containerService
 
-    target = ContainerTarget(docker_id="c0ffee123456", is_managed=True, arch="arm64")
+    target = ContainerTarget(
+        docker_id="c0ffee123456", is_managed=True, arch="arm64", container_name="agent-1-1"
+    )
     monkeypatch.setattr(
         containerService, "enter_container",
         AsyncMock(return_value=(target, "created")),
@@ -205,6 +207,9 @@ async def test_enter_container_reports_mount_info_for_managed(monkeypatch, conta
 
     assert result["success"] is True
     assert result["exec_env"] == "container"
+    assert result["container_id"] == "c0ffee123456"
+    # §6.2 要求返回真实容器名，不能给 None
+    assert result["container_name"] == "agent-1-1"
     assert result["mounted"] is True
     assert result["workdir"] == "/workspace/self"
     assert "自动停止" in result["message"]
@@ -225,6 +230,9 @@ async def test_enter_container_reports_external_container_difference(monkeypatch
 
     assert result["mounted"] is False
     assert result["workdir"] == ""
+    # 外部容器名取不到 inspect 的 `Name` 时必须是 null，不能是空串
+    # （空串在 JSON 里看起来像一个合法的容器名）
+    assert result["container_name"] is None
     assert "不是由你创建" in result["message"]
 
 
@@ -299,7 +307,10 @@ async def test_list_containers_returns_env_and_serialized_containers(monkeypatch
     assert result["docker_available"] is True
     # 必须是可 JSON 序列化的 dict（created_at 已转字符串）
     assert isinstance(result["containers"][0], dict)
-    assert result["containers"][0]["docker_id"] == "c0ffee123456"
+    # §6.2 契约字段名是 `container_id`（内部叫 docker_id），且不能带内部字段 agent_id
+    assert result["containers"][0]["container_id"] == "c0ffee123456"
+    assert "docker_id" not in result["containers"][0]
+    assert "agent_id" not in result["containers"][0]
     assert result["containers"][0]["created_at"] is None
 
 

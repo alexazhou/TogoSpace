@@ -24,6 +24,8 @@ import logging
 import re
 from typing import Any
 
+from peewee import IntegrityError
+
 from constants import (
     CONTAINER_CREATE_TIMEOUT_SEC,
     CONTAINER_GTSP_PATH,
@@ -72,6 +74,12 @@ ERROR_CONTAINER_NOT_EXECUTABLE = "container_not_executable"
 ERROR_CONTAINER_LIMIT_REACHED = "container_limit_reached"
 ERROR_CONTAINER_DELETE_FAILED = "container_delete_failed"
 ERROR_CONTAINER_INVALID_PARAMS = "container_invalid_params"
+# 库里有记录、但容器本身已不存在（§5.1 只报错、不软删）。§3.6 表格没有这一项，
+# 但它是独立语义：混进 `container_not_found` 会让模型以为是自己 ID 传错了。
+ERROR_CONTAINER_LOST = "container_lost"
+# 容器名撞部分唯一索引（跨 Team 同名 Agent）。不加 team 前缀是当前设计（§3.5），
+# 但裸 `IntegrityError` 对模型不可行动，必须包成带明确码的 `TogoException`。
+ERROR_CONTAINER_NAME_CONFLICT = "container_name_conflict"
 
 # 容器 ID 必须是 12 位十六进制短 ID（§6.3 严格 ID 传参）。
 # 拒绝镜像名：`docker inspect` 接受镜像名，若放行会让 Agent 拿镜像名当容器 ID。
@@ -232,8 +240,14 @@ def build_container_exec_argv(docker_id: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _classify_docker_error(exc: DockerCliError) -> str:
-    """把 docker 的 stderr 归到 §3.6 的错误码；无法归类时给通用失败码。"""
+def _classify_docker_error(exc: DockerCliError, fallback: str) -> str:
+    """把 docker 的 stderr 归到 §3.6 的错误码；无法归类时用调用方给的 `fallback`。
+
+    **兜底码必须由调用方传**，不能在这里写死 `container_create_failed`：本函数同时被
+    创建路径和进入路径复用，写死会让「进入容器时 inspect 失败」报成「创建容器失败」，
+    模型据此改参数重试也是错的（它会去换镜像）。归不出来的错误属于哪个环节，
+    只有调用方知道。
+    """
     if exc.error_code in (ERROR_DOCKER_CLI_NOT_FOUND, ERROR_DOCKER_DAEMON_UNAVAILABLE):
         return exc.error_code
     lowered = (exc.stderr or "").lower()
@@ -243,7 +257,7 @@ def _classify_docker_error(exc: DockerCliError) -> str:
         return ERROR_CONTAINER_IMAGE_MISSING
     if "no such container" in lowered or "no such object" in lowered:
         return ERROR_CONTAINER_NOT_FOUND
-    return ERROR_CONTAINER_CREATE_FAILED
+    return fallback
 
 
 async def _resolve_agent_names(agent_id: int) -> tuple[int, str, str, str]:
@@ -284,11 +298,23 @@ def _inspect_container_name(inspect_data: dict) -> str | None:
     return name.lstrip("/") or None
 
 
-async def _inspect_container(cli: DockerCli, ref: str) -> dict | None:
-    """`docker inspect` 单个容器，返回 JSON 首元素；容器不存在返回 None。
+# `_inspect_container` 的三种返回：JSON 对象 / `None`（确认不存在）/ 本哨兵（查不清）。
+# 为什么必须区分：调用方对「容器没了」和「查不清楚」的反应完全不同——
+#   容器没了 → get_container_target 报 `container_lost`、清理时不必再 rm；
+#   查不清   → 绝不能当成容器已丢（会软删记录、跳过 rm 留下孤儿容器）。
+_INSPECT_UNKNOWN = object()
 
-    用 `--format "{{json .}}"` 避免解析整个数组。inspect **失败**（daemon 不可用、
-    超时）与「容器不存在」必须区分：前者抛 `DockerCliError`，后者返回 None。
+
+async def _inspect_container(cli: DockerCli, ref: str) -> dict | None | object:
+    """`docker inspect` 单个容器（`--format "{{json .}}"` 避免解析整个数组）。
+
+    Returns:
+        dict：inspect 成功；
+        `None`：**确认容器不存在**（Docker 明确回 no such）；
+        `_INSPECT_UNKNOWN`：有输出但解析不了 / 空输出 —— 查不清，不等于不存在。
+
+    Raises:
+        DockerCliError: daemon 不可用、超时等（除「no such」外的所有失败）
     """
     try:
         result = await cli.run(
@@ -302,18 +328,29 @@ async def _inspect_container(cli: DockerCli, ref: str) -> dict | None:
 
     text = (result.stdout or "").strip()
     if not text:
-        return None
+        # 退出码 0 但没有输出：无法判定容器状态。当成「不存在」会让上层软删记录，
+        # 删除预记录时还会跳过 rm —— 真实容器被漏删留成孤儿。
+        logger.warning("docker inspect 无输出，判定为查不清: ref=%s", ref)
+        return _INSPECT_UNKNOWN
     try:
-        return json.loads(text)
+        data = json.loads(text)
     except json.JSONDecodeError:
-        logger.warning("docker inspect 输出无法解析: ref=%s", ref)
-        return None
+        logger.warning("docker inspect 输出无法解析，判定为查不清: ref=%s", ref)
+        return _INSPECT_UNKNOWN
+    if not isinstance(data, dict):
+        # 真实 docker 返回对象；其他形态说明输出被污染，同样不能当成「不存在」
+        logger.warning("docker inspect 输出不是对象，判定为查不清: ref=%s", ref)
+        return _INSPECT_UNKNOWN
+    return data
 
 
-def _state_of(inspect_data: dict | None) -> str:
-    """取 `State.Status` 原值；不存在为 missing。"""
+def _state_of(inspect_data: dict | None | object) -> str:
+    """取 `State.Status` 原值；`None` 为 missing，查不清为 unknown。"""
+    if inspect_data is _INSPECT_UNKNOWN:
+        return CONTAINER_STATE_UNKNOWN
     if inspect_data is None:
         return CONTAINER_STATE_MISSING
+    assert isinstance(inspect_data, dict)
     state = (inspect_data.get("State") or {}).get("Status")
     return str(state) if state else CONTAINER_STATE_UNKNOWN
 
@@ -361,22 +398,6 @@ async def _resolve_image_os(cli: DockerCli, image_ref: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def _next_container_name(agent_id: int, agent_name: str) -> tuple[int, str]:
-    """取该 Agent 当前活跃记录里未被占用的最小编号，并生成容器名。
-
-    配额校验与编号选择必须和预记录插入在同一互斥区内（由调用方的锁保证），
-    否则并发创建会选到同一个编号，撞 `container_name` 部分唯一索引。
-    """
-    active = await gtAgentContainerManager.list_active_by_agent(agent_id)
-    index = pick_free_index([row.container_name for row in active], agent_id, agent_name)
-    if index is None:
-        raise TogoException(
-            f"自建容器数已达上限（{MAX_CONTAINERS_PER_AGENT}）",
-            ERROR_CONTAINER_LIMIT_REACHED,
-        )
-    return index, build_container_name(agent_id, agent_name, index)
-
-
 async def create_container(agent_id: int, image: str | None = None) -> GtAgentContainer:
     """创建自建容器并注入 gtsp，返回已回填 `docker_id` 的记录。
 
@@ -413,7 +434,8 @@ async def create_container(agent_id: int, image: str | None = None) -> GtAgentCo
         image_os = await _resolve_image_os(cli, image)
     except DockerCliError as exc:
         raise TogoException(
-            f"查询镜像失败: {exc.error_message}", _classify_docker_error(exc)
+            f"查询镜像失败: {exc.error_message}",
+            _classify_docker_error(exc, ERROR_CONTAINER_IMAGE_MISSING),
         ) from exc
     if image_os and image_os != "linux":
         raise TogoException(
@@ -440,11 +462,22 @@ async def create_container(agent_id: int, image: str | None = None) -> GtAgentCo
                 ERROR_CONTAINER_LIMIT_REACHED,
             )
         container_name = build_container_name(agent_id, agent_name, index)
-        record = await gtAgentContainerManager.create(
-            agent_id=agent_id,
-            container_name=container_name,
-            image=image,
-        )
+        try:
+            record = await gtAgentContainerManager.create(
+                agent_id=agent_id,
+                container_name=container_name,
+                image=image,
+            )
+        except IntegrityError as exc:
+            # `container_name` 在 `deleted=0` 范围内全局唯一，而 `(team_id, name)` 不唯一：
+            # 跨 Team 的同名 Agent 会撞名。命名规则加 team 前缀属设计变更（§3.5 写死
+            # `agent-<name>-<index>`），本版不改，但裸 `IntegrityError`（error_code=None）
+            # 对模型完全不可行动——它只能看到「数据库错误」，无从知道该换什么做法。
+            raise TogoException(
+                f"容器名冲突：{container_name} 已被其他团队的同名 Agent 占用。"
+                "请先把对方的容器清理掉，或改用不同名字的 Agent 创建容器。",
+                ERROR_CONTAINER_NAME_CONFLICT,
+            ) from exc
 
     record_id = record.id
     assert record_id is not None
@@ -463,7 +496,8 @@ async def create_container(agent_id: int, image: str | None = None) -> GtAgentCo
             created = await cli.run(argv, timeout_sec=CONTAINER_CREATE_TIMEOUT_SEC)
         except DockerCliError as exc:
             raise TogoException(
-                f"创建容器失败: {exc.error_message}", _classify_docker_error(exc)
+                f"创建容器失败: {exc.error_message}",
+                _classify_docker_error(exc, ERROR_CONTAINER_CREATE_FAILED),
             ) from exc
 
         full_id = (created.stdout or "").strip()
@@ -560,14 +594,21 @@ async def get_container_target(agent_id: int, container_id: str) -> ContainerTar
         except DockerCliError as exc:
             raise TogoException(
                 f"查询容器状态失败: {exc.error_message}",
-                _classify_docker_error(exc),
+                _classify_docker_error(exc, ERROR_CONTAINER_ENTER_FAILED),
             ) from exc
+        if inspect_data is _INSPECT_UNKNOWN:
+            # 查不清 ≠ 容器丢了：报 `container_lost` 会让上层去软删除记录
+            raise TogoException(
+                f"无法查询容器 {container_id} 的状态（docker inspect 输出异常），请稍后重试",
+                ERROR_CONTAINER_ENTER_FAILED,
+            )
         if inspect_data is None:
             # 库里有记录但容器没了：只报错，不在这里软删除（§5.1）
             raise TogoException(
                 f"容器 {container_id} 已不存在（记录仍保留，可用 delete_container 清理）",
-                "container_lost",
+                ERROR_CONTAINER_LOST,
             )
+        assert isinstance(inspect_data, dict)
         image_id = inspect_data.get("Image")
         if not image_id:
             raise TogoException(
@@ -587,12 +628,18 @@ async def get_container_target(agent_id: int, container_id: str) -> ContainerTar
     except DockerCliError as exc:
         raise TogoException(
             f"查询容器状态失败: {exc.error_message}",
-            _classify_docker_error(exc),
+            _classify_docker_error(exc, ERROR_CONTAINER_ENTER_FAILED),
         ) from exc
+    if inspect_data is _INSPECT_UNKNOWN:
+        raise TogoException(
+            f"无法查询容器 {container_id} 的状态（docker inspect 输出异常），请稍后重试",
+            ERROR_CONTAINER_ENTER_FAILED,
+        )
     if inspect_data is None:
         raise TogoException(
             f"容器 {container_id} 不存在", ERROR_CONTAINER_NOT_FOUND
         )
+    assert isinstance(inspect_data, dict)
 
     image_id = inspect_data.get("Image")
     if not image_id:
@@ -680,12 +727,26 @@ async def list_agent_containers(
 
     Returns:
         按 `record_id` 升序的容器信息列表（含预记录，`docker_id` 为 None）。
+
+    Note:
+        **本函数不因 docker 缺失而失败**。没装 Docker CLI 和 daemon 没起必须表现一致
+        （都返回记录、状态全 `unknown`）：只让其中一种整体失败，用户就会拿到空列表，
+        以为自己的容器都没了。所以 `get_cli()` 的异常在这里被吞成 `docker_available=False`；
+        需要区分两种环境问题的调用方走 `is_docker_available()` / 具体工具的错误码。
     """
-    cli = get_cli()
     records = await gtAgentContainerManager.list_active_by_agent(agent_id)
 
+    # `get_cli()` 必须在 docker 可用性判断**之内**：它是「找不到 docker 可执行文件」
+    # 的唯一抛出点，先调它会把「没装 Docker」变成一次整体失败，与「daemon 没起」
+    # 的处理路径分裂。
+    cli: DockerCli | None = None
     if docker_available is None:
-        docker_available = await cli.ping()
+        try:
+            cli = get_cli()
+        except DockerCliError:
+            docker_available = False
+        else:
+            docker_available = await cli.ping()
 
     if not docker_available:
         # daemon 不可用：不把状态伪造成 missing，用 unknown 表示「查不到」
@@ -704,6 +765,7 @@ async def list_agent_containers(
             for record in records
         ]
 
+    assert cli is not None
     states = await asyncio.gather(
         *(_resolve_record_state(cli, record) for record in records),
         return_exceptions=False,
@@ -730,7 +792,8 @@ async def _resolve_record_state(cli: DockerCli, record: GtAgentContainer) -> str
 
     - 预记录按名 inspect 后**校验 label**：label 不匹配 ⇒ 那个同名容器不是我们
       创建的，对本记录而言就是 `missing`（绝不当成自己的容器）。
-    - inspect 本身失败（daemon 抖动 / 超时）⇒ `unknown`，不能据此认定容器已丢。
+    - inspect 本身失败（daemon 抖动 / 超时）或输出解析不了 ⇒ `unknown`。
+      **不能报 missing**：前端会把 missing 当成「容器没了」，用户看到的就是假信息。
     """
     ref = record.docker_id or record.container_name
     try:
@@ -742,9 +805,12 @@ async def _resolve_record_state(cli: DockerCli, record: GtAgentContainer) -> str
         )
         return CONTAINER_STATE_UNKNOWN
 
+    if inspect_data is _INSPECT_UNKNOWN:
+        return CONTAINER_STATE_UNKNOWN
     if inspect_data is None:
         return CONTAINER_STATE_MISSING
 
+    assert isinstance(inspect_data, dict)
     if record.docker_id is None and not _label_matches(inspect_data, record.id):
         logger.info(
             "同名容器 label 不匹配，不视为本记录: record_id=%s, name=%s",
@@ -864,8 +930,18 @@ async def _rm_pre_record_container(cli: DockerCli, record: GtAgentContainer) -> 
         )
         return
 
+    if inspect_data is _INSPECT_UNKNOWN:
+        # 查不清时**不能**按名 rm：label 校验做不了，按名删可能删掉别人的同名容器（P-1）。
+        # 也不能像以前那样当成「容器不存在」静默跳过——那样真实容器会变成无人知晓的孤儿，
+        # 而调用方以为已经清干净了。这里用 error 级别明确要求人工检查。
+        logger.error(
+            "预记录容器查不清，跳过容器清理（可能残留，需人工检查）: record_id=%s, name=%s",
+            record.id, record.container_name,
+        )
+        return
     if inspect_data is None:
         return
+    assert isinstance(inspect_data, dict)
     if not _label_matches(inspect_data, record.id):
         logger.warning(
             "同名容器 label 不匹配，拒绝删除（可能属于其他程序）: record_id=%s, name=%s",

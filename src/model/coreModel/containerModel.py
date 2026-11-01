@@ -13,6 +13,21 @@ from pydantic import BaseModel, ConfigDict
 CONTAINER_STATE_MISSING = "missing"
 CONTAINER_STATE_UNKNOWN = "unknown"
 
+def to_container_id(docker_id: str | None) -> str | None:
+    """单值场景的 `docker_id → container_id` 换名口径。
+
+    为什么需要它（看着像恒等函数，但不是）：`ContainerInfo.to_tool_dict()` 只能覆盖
+    「返回一整个容器对象」的场合，而 `create_container` / `enter_container` /
+    `delete_container` 返回的是**单个 ID**，手上分别是 `GtAgentContainer` /
+    `ContainerTarget` / `GtAgentContainer`，都不是 `ContainerInfo`。
+
+    这三个点若各自手写 `"container_id": xxx.docker_id`，契约字段名就散落成 4 份拷贝，
+    将来改名字必然漏一处——而漏掉的那处只会表现为「某个工具返回 null」，代码里看不出来。
+    收敛到本函数后，`container_id` 这个对外名字在全仓只出现在这里和
+    `ContainerInfo.to_tool_dict()`，两处相邻，改一处就能看到另一处。
+    """
+    return docker_id
+
 
 class ContainerTarget(BaseModel):
     """底层连接目标：只描述「连哪个容器、怎么连」，不承载展示字段。
@@ -82,8 +97,32 @@ class ContainerInfo(BaseModel):
     """
 
     def to_json(self) -> dict[str, Any]:
-        """JSON 可序列化字典（`created_at` 由 `model_dump(mode="json")` 转成字符串）。"""
+        """JSON 可序列化字典（`created_at` 由 `model_dump(mode="json")` 转成字符串）。
+
+        给 controller / 前端用，保留模型原始字段名（`docker_id`）。
+        """
         return self.model_dump(mode="json")
+
+    def to_tool_dict(self) -> dict[str, Any]:
+        """工具返回值专用字典（§6.2 `list_containers.containers[]`）。
+
+        与 `to_json()` 的差别是**故意的**，两个方法不能合并：
+        - 对内字段名是 `docker_id`，对模型暴露的契约名是 `container_id`（§6.2）；
+        - 去掉内部字段 `agent_id`：模型只看自己的容器，多一个 ID 只会诱导它去猜
+          别人的容器（也容易把 `agent_id` 误当成容器标识传进参数）。
+
+        这是全仓**唯一**的 `docker_id → container_id` 映射点。工具层任何地方
+        手写一份字典就等于埋一个「工具返回 null 但 API 有值」的漏改点。
+        """
+        return {
+            "record_id": self.record_id,
+            "container_id": to_container_id(self.docker_id),
+            "container_name": self.container_name,
+            "image": self.image,
+            "state": self.state,
+            "is_entered": self.is_entered,
+            "created_at": self.model_dump(mode="json")["created_at"],
+        }
 
 
 class ContainerCreateResult(BaseModel):

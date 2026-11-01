@@ -14,6 +14,7 @@ from dal.db import gtAgentManager, gtRoomManager, gtRoleTemplateManager, gtTeamM
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
+from model.coreModel import to_container_id
 from service.roomService import ToolCallContext
 import service.roomService as roomService
 import service.skillService as skillService
@@ -1434,7 +1435,7 @@ async def create_container(image: Optional[str] = None, _context: ToolCallContex
         assert docker_id is not None
         return {
             "success": True,
-            "container_id": docker_id,
+            "container_id": to_container_id(docker_id),
             "container_name": record.container_name,
             "image": record.image,
             "state": "created",
@@ -1478,8 +1479,10 @@ async def enter_container(container_id: str, _context: ToolCallContext = None) -
         return {
             "success": True,
             "exec_env": ExecEnv.CONTAINER.value,
-            "container_id": target.docker_id,
-            "container_name": None,
+            "container_id": to_container_id(target.docker_id),
+            # 外部容器取 inspect 的 `Name`（可能拿不到），自建容器取 DB 记录名。
+            # 拿不到就给 null 而不是空串：空串在 JSON 里像一个合法容器名。
+            "container_name": target.container_name,
             "mounted": target.is_managed,
             "workdir": CONTAINER_SELF_MOUNT_PATH if target.is_managed else "",
             "message": (
@@ -1550,8 +1553,10 @@ async def list_containers(_context: ToolCallContext = None) -> dict[str, Any]:
             "success": True,
             "docker_available": docker_available,
             "exec_env": driver.exec_env.value,
-            "current_container_id": driver.current_container_id,
-            "containers": [info.to_json() for info in infos],
+            "current_container_id": to_container_id(driver.current_container_id),
+            # 走 `to_tool_dict()` 而不是 `to_json()`：§6.2 契约字段名是 `container_id`，
+            # 且不该暴露内部字段 `agent_id`。这是全仓唯一的映射点。
+            "containers": [info.to_tool_dict() for info in infos],
         }
     except TogoException as exc:
         return _tool_error_result(exc)
@@ -1590,7 +1595,7 @@ async def delete_container(
         return {
             "success": True,
             "deleted_record_id": record.id,
-            "deleted_container_id": record.docker_id,
+            "deleted_container_id": to_container_id(record.docker_id),
             "message": (
                 f"容器已删除（记录编号 {record.id}"
                 + (f"，容器 {record.docker_id}" if record.docker_id else "")

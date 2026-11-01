@@ -535,6 +535,31 @@ async def test_docker_absent_reports_cli_not_found_and_leaves_no_record(env, mon
     assert await core.gtAgentContainerManager.count_active_by_agent(1) == 0
 
 
+async def test_create_reports_name_conflict_as_togo_exception(env):
+    """容器名被其他 Team 的同名 Agent 占用 ⇒ `container_name_conflict`，不是裸 IntegrityError（#111 裁定 6）。
+
+    命名规则 `agent-<name>-<index>` 不带 team 前缀，而 `container_name` 在 `deleted=0`
+    范围内是**全局**唯一，所以两个 Team 各有「小美」时，第二个人创建容器必然撞名。
+    裸 `IntegrityError` 的 `error_code` 是 None，模型只会看到「数据库错误」，无从知道
+    该怎么改；包成明确错误码后它至少知道「这个名字被别人占了」。
+    """
+    # 另一个 Agent（模拟另一个 Team 的同名 Agent）先占住这个名字：
+    # 中文名会回退成 `agent-<agent_id>-<index>`，所以 agent 1 的名字是 `agent-1-1`。
+    await core.gtAgentContainerManager.create(
+        agent_id=2, container_name="agent-1-1", image="ubuntu:24.04"
+    )
+
+    with pytest.raises(TogoException) as excinfo:
+        await core.create_container(1)
+
+    assert excinfo.value.error_code == core.ERROR_CONTAINER_NAME_CONFLICT
+    # 不能是 peewee 的裸 IntegrityError（那类异常的 error_code 为 None）
+    assert not isinstance(excinfo.value.__cause__, type(None))
+    # 撞名时不该留下自己的记录，也不该调 docker create
+    assert await core.gtAgentContainerManager.count_active_by_agent(1) == 0
+    assert env.calls_of("create") == []
+
+
 async def test_pre_record_is_visible_in_list_and_counts_toward_quota(env):
     """创建中的预记录（`docker_id=NULL`）计入配额并出现在列表里（§2.1）。"""
     await core.gtAgentContainerManager.create(

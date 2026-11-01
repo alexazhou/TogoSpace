@@ -181,3 +181,87 @@ def test_container_create_result_forbids_extra_fields():
             mounts={},
             exec_env="container",  # 创建不切换环境，这个字段不该出现在这里
         )
+
+
+# ---------------------------------------------------------------------------
+# to_tool_dict / to_json：两个映射方法的职责分离（#111 裁定 1）
+# ---------------------------------------------------------------------------
+
+
+def test_to_tool_dict_uses_container_id_and_drops_agent_id():
+    """工具契约（§6.2）的字段名是 `container_id`，且不该暴露内部字段 `agent_id`。
+
+    这不只是「名字不同」：模型看到的字段名决定它下一次工具调用传什么参数。
+    给它 `docker_id` 会让它以为参数名也叫 `docker_id`，而 `enter_container` /
+    `delete_container` 的参数名是 `container_id`——模型照抄返回值就会传错。
+    """
+    info = ContainerInfo(
+        record_id=7,
+        agent_id=3,
+        docker_id="c0ffee123456",
+        container_name="agent-3-1",
+        image="ubuntu:24.04",
+        state="exited",
+        is_entered=True,
+    )
+
+    as_tool = info.to_tool_dict()
+
+    assert as_tool["container_id"] == "c0ffee123456"
+    assert "docker_id" not in as_tool
+    assert "agent_id" not in as_tool
+    assert as_tool["record_id"] == 7
+    assert as_tool["is_entered"] is True
+
+
+def test_to_tool_dict_keeps_null_container_id_for_pre_record():
+    """预记录的 `container_id` 必须是 null（不是省略字段）：模型靠它判断「还没有 ID」。"""
+    info = ContainerInfo(
+        record_id=8, agent_id=3, docker_id=None, container_name="agent-3-2", image="ubuntu:24.04"
+    )
+
+    as_tool = info.to_tool_dict()
+
+    assert "container_id" in as_tool
+    assert as_tool["container_id"] is None
+    assert as_tool["container_name"] == "agent-3-2"
+
+
+def test_to_json_keeps_internal_field_names_for_api():
+    """`to_json()` 保留内部字段名给 controller / 前端（前端契约就是 `docker_id`）。"""
+    info = ContainerInfo(
+        record_id=7, agent_id=3, docker_id="c0ffee123456", container_name="agent-3-1",
+        image="ubuntu:24.04",
+    )
+
+    as_api = info.to_json()
+
+    assert as_api["docker_id"] == "c0ffee123456"
+    assert as_api["agent_id"] == 3
+    assert "container_id" not in as_api
+
+
+def test_to_tool_dict_serializes_created_at_to_iso_string():
+    """`created_at` 必须是字符串：`datetime` 直接塞进工具返回值会让 JSON 序列化失败。"""
+    info = ContainerInfo(
+        record_id=7, agent_id=3, docker_id="c0ffee123456", container_name="agent-3-1",
+        image="ubuntu:24.04", created_at=datetime(2026, 11, 1, 10, 0, 0),
+    )
+
+    as_tool = info.to_tool_dict()
+
+    assert isinstance(as_tool["created_at"], str)
+    assert as_tool["created_at"].startswith("2026-11-01")
+
+
+# ---------------------------------------------------------------------------
+# to_container_id：单值场景的换名口径
+# ---------------------------------------------------------------------------
+
+
+def test_to_container_id_passes_through_both_forms():
+    """单值换名对 None 与字符串都要原样透传（预记录没有被删的 ID，就是 None）。"""
+    from model.coreModel import to_container_id
+
+    assert to_container_id("c0ffee123456") == "c0ffee123456"
+    assert to_container_id(None) is None

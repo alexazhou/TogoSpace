@@ -302,6 +302,49 @@ async def test_list_marks_unknown_for_every_record_when_daemon_down(fake):
     assert [info.state for info in infos] == [CONTAINER_STATE_UNKNOWN, CONTAINER_STATE_UNKNOWN]
 
 
+async def test_list_marks_unknown_when_docker_cli_missing(fake, monkeypatch):
+    """**没装 Docker CLI 也不能让列表整体失败**（P-5）：与「daemon 没起」表现一致。
+
+    `get_cli()` 是「找不到 docker 可执行文件」的唯一抛出点，必须落在可用性判断**之内**。
+    一旦被提到判断之外，这条用例就会拿到 `docker_cli_not_found` 异常——而另一个环境的
+    用户只是拿到列表 + 全 `unknown`。两条路径分叉，前端就得处理两种"没 docker"。
+    """
+    await _seed_record(container_name="agent-1-1")
+    await _seed_record(container_name="agent-1-2", docker_id="c0ffee123456")
+
+    from service.containerService import dockerCli as docker_cli_module
+
+    def _boom():
+        raise docker_cli_module.DockerCliError(
+            "no docker", docker_cli_module.ERROR_DOCKER_CLI_NOT_FOUND
+        )
+
+    monkeypatch.setattr(core, "get_cli", _boom)
+
+    infos = await core.list_agent_containers(1)
+
+    assert [info.state for info in infos] == [CONTAINER_STATE_UNKNOWN, CONTAINER_STATE_UNKNOWN]
+    assert [info.record_id for info in infos] == [1, 2]
+
+
+async def test_list_skips_detection_when_caller_says_unavailable(fake, monkeypatch):
+    """`docker_available=False` 由调用方给定时，**一次 docker 都不碰**（不 get_cli、不 ping）。
+
+    `list_containers` 工具已经在工具层探过一次可用性，服务层再探就是重复的进程往返。
+    """
+    await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
+
+    def _boom():
+        raise AssertionError("docker_available 已由调用方给出，不该再探测")
+
+    monkeypatch.setattr(core, "get_cli", _boom)
+
+    infos = await core.list_agent_containers(1, docker_available=False)
+
+    assert [info.state for info in infos] == [CONTAINER_STATE_UNKNOWN]
+    assert fake.calls() == []
+
+
 async def test_list_marks_is_entered_only_for_current_container(fake):
     """`is_entered` 只对当前所处容器为 True（前端据此显示「使用中」）。"""
     await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")

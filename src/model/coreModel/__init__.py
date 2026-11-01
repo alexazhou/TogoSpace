@@ -7,6 +7,7 @@ from .containerModel import (
     ContainerCreateResult,
     ContainerInfo,
     ContainerTarget,
+    to_container_id,
 )
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "ServiceStatusInfo",
     "CONTAINER_STATE_MISSING",
     "CONTAINER_STATE_UNKNOWN",
+    "to_container_id",
     "ContainerCreateResult",
     "ContainerInfo",
     "ContainerTarget",
