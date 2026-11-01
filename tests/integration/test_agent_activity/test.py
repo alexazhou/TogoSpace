@@ -318,6 +318,81 @@ class TestAgentActivityService(ServiceTestCase):
         assert updated.metadata["model"] == "override"
         assert updated.metadata["final_prompt_tokens"] == 100
 
+    # ── update_activity_progress：执行环境三元组是整体快照，不逐键浅合并 ──
+
+    async def test_update_progress_clears_container_keys_when_patch_is_host(self):
+        """容器 → 宿主：两个容器键必须被清掉，不能残留上一个容器的 ID / 名字。
+
+        `to_dict()` 会剔除 None 字段，所以宿主态的 patch 里根本没有那两个键。
+        若合并按逐键 `update()`，它们就永远留在 metadata 里 —— 用 `pop` 表达「清除」。
+        """
+        await self._reset()
+        activity = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(), activity_type=AgentActivityType.TOOL_CALL,
+            metadata=AgentActivityMeta(
+                exec_env="container",
+                current_container_id="c0ffee123456",
+                container_name="agent-3-1",
+            ),
+        )
+        assert activity.metadata["container_name"] == "agent-3-1"
+
+        updated = await agentActivityService.update_activity_progress(
+            activity.id, metadata_patch=AgentActivityMeta(exec_env="host"),
+        )
+
+        assert updated.metadata["exec_env"] == "host"
+        assert "current_container_id" not in updated.metadata
+        assert "container_name" not in updated.metadata
+
+    async def test_update_progress_does_not_keep_previous_container_name_for_nameless_external(self):
+        """容器 A → 外部容器 B（B 拿不到名字）：绝不能显示 A 的旧名字。
+
+        这是**错值**而不是空值：`exec_env` 仍是 `container`，前端会理直气壮地把残留的
+        A 的名字渲染成「当前所在容器」，而实际在 B 里。
+        """
+        await self._reset()
+        activity = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(), activity_type=AgentActivityType.TOOL_CALL,
+            metadata=AgentActivityMeta(
+                exec_env="container",
+                current_container_id="c0ffee123456",
+                container_name="agent-3-1",
+            ),
+        )
+
+        updated = await agentActivityService.update_activity_progress(
+            activity.id,
+            metadata_patch=AgentActivityMeta(
+                exec_env="container", current_container_id="deadbeef0002",
+            ),
+        )
+
+        assert updated.metadata["exec_env"] == "container"
+        assert updated.metadata["current_container_id"] == "deadbeef0002"
+        assert "container_name" not in updated.metadata
+
+    async def test_update_progress_keeps_container_keys_when_patch_has_no_exec_env(self):
+        """patch 不带 `exec_env` ⇒ 不是环境快照，容器键必须原样保留（流式进度刷新）。"""
+        await self._reset()
+        activity = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(), activity_type=AgentActivityType.LLM_INFER,
+            metadata=AgentActivityMeta(
+                exec_env="container",
+                current_container_id="c0ffee123456",
+                container_name="agent-3-1",
+            ),
+        )
+
+        updated = await agentActivityService.update_activity_progress(
+            activity.id, metadata_patch=AgentActivityMeta(current_completion_tokens=42),
+        )
+
+        assert updated.metadata["current_completion_tokens"] == 42
+        assert updated.metadata["exec_env"] == "container"
+        assert updated.metadata["current_container_id"] == "c0ffee123456"
+        assert updated.metadata["container_name"] == "agent-3-1"
+
     async def test_add_activity_keeps_tool_command_metadata(self):
         await self._reset()
         activity = await agentActivityService.add_activity(

@@ -157,7 +157,9 @@ async def update_activity_progress(
 
     - 不传 status 时，仅做进度刷新（如流式 token 更新）
     - 传入结束态时，自动补 finished_at 与 duration_ms
-    - metadata_patch 采用浅合并（读取 → merge → 写回）
+    - metadata_patch 采用浅合并（读取 → merge → 写回），但**执行环境三元组是整体快照**：
+      patch 带 `exec_env` 时会先清掉旧的 `current_container_id` / `container_name`，
+      见下面注释（空值 vs 错值）。
     - 调用约定：调用处统一写成单行，避免在业务代码里拆成多行
     """
     update_fields: dict = {}
@@ -175,6 +177,16 @@ async def update_activity_progress(
             current = await GtAgentActivity.aio_get_or_none(GtAgentActivity.id == activity_id)
             if current is not None:
                 merged = dict(current.metadata or {})
+                # 执行环境三元组（`exec_env` + 两个容器键）是**整体快照**，不能逐键浅合并。
+                # `to_dict()` 会剔除 None 字段，所以「合并到宿主」或「合并到拿不到名字的外部
+                # 容器」时 patch 里根本没有那两个容器键，`update()` 碰不到旧键，旧值就留下了。
+                # 最坏情形不是残留空值而是**错值**：容器 A → 外部容器 B 时 `exec_env` 仍是
+                # `container`，前端会把 A 的旧名字显示成 B 的名字。所以这里先清后合。
+                # 不在 `_with_exec_env` 里塞 None：`to_dict()` 照样会剔掉；塞空串更糟
+                # （JSON 里像一个合法的容器名）。清除只能在合并侧表达。
+                if "exec_env" in patch_dict:
+                    merged.pop("current_container_id", None)
+                    merged.pop("container_name", None)
                 merged.update(patch_dict)
                 update_fields["metadata"] = merged
 
