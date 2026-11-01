@@ -9,11 +9,14 @@ from model.dbModel.gtAgent import GtAgent
 from util import jsonUtil
 
 
-class ExecEnvSnapshot(BaseModel):
-    """驱动上报的执行环境快照，供活动记录 metadata 使用。
+class ExecEnvState(BaseModel):
+    """某个 Agent 当前执行环境的快照。
 
-    比 `ExecEnvState` 多一个 `container_name`（活动记录要展示容器名）；
-    它是内部结构，不进入 Agent 列表 / 详情接口的 `exec_env_state`。
+    Driver 上报、活动记录 metadata、Agent 列表 / 详情共用同一个结构；
+    只存在于 Driver 内存，不落库：未加载的 Agent 一律回落到宿主。
+
+    `container_name` 用于活动记录展示；`list_containers` 工具返回时会显式
+    只挑 `exec_env` / `current_container_id`，不把整个 state 下发给模型。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -21,18 +24,6 @@ class ExecEnvSnapshot(BaseModel):
     exec_env: ExecEnv = ExecEnv.HOST
     current_container_id: str | None = None
     container_name: str | None = None
-
-
-class ExecEnvState(BaseModel):
-    """某个 Agent 当前执行环境的快照。
-
-    只存在于 Driver 内存，不落库：未加载的 Agent 一律回落到宿主。
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    exec_env: ExecEnv = ExecEnv.HOST
-    current_container_id: str | None = None
 
 
 class AgentRuntimeInfo(BaseModel):

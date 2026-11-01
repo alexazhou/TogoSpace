@@ -498,37 +498,43 @@ describe('getAgentDetail containers', () => {
   it('keeps container created_at ISO string and nulls it out when absent or not a string', async () => {
     const containersPayload = [
       {
-        record_id: 11,
-        agent_id: 3,
-        container_id: 'sha256:abc',
-        container_name: 'togo-agent-3',
-        image: 'togo-sandbox:latest',
+        record: {
+          id: 11,
+          agent_id: 3,
+          container_id: 'sha256:abc',
+          container_name: 'togo-agent-3',
+          image: 'togo-sandbox:latest',
+          // 后端序列化时把 datetime 统一成 ISO 8601 字符串
+          created_at: '2026-10-31T08:15:00.123456',
+        },
         state: 'running',
         is_entered: true,
-        // 后端 model_dump(mode="json") 把 datetime 序列化成 ISO 8601 字符串
-        created_at: '2026-10-31T08:15:00.123456',
       },
       {
         // 预记录：容器尚未创建完成，container_id 与 created_at 都可能为空
-        record_id: 12,
-        agent_id: 3,
-        container_id: null,
-        container_name: '',
-        image: 'togo-sandbox:latest',
+        record: {
+          id: 12,
+          agent_id: 3,
+          container_id: null,
+          container_name: '',
+          image: 'togo-sandbox:latest',
+          created_at: null,
+        },
         state: 'missing',
         is_entered: false,
-        created_at: null,
       },
       {
         // 后端漏字段或给出非字符串时不能把非字符串透给 UI
-        record_id: 13,
-        agent_id: 3,
-        container_id: 'sha256:def',
-        container_name: 'togo-agent-3-b',
-        image: 'togo-sandbox:latest',
+        record: {
+          id: 13,
+          agent_id: 3,
+          container_id: 'sha256:def',
+          container_name: 'togo-agent-3-b',
+          image: 'togo-sandbox:latest',
+          created_at: 1730000000,
+        },
         state: 'exited',
         is_entered: false,
-        created_at: 1730000000,
       },
     ];
     stubAgentDetail({
@@ -633,6 +639,6 @@ describe('getAgentDetail: list_agent_containers 真实基线', () => {
       ...baselineContainers.A_daemon_unavailable,
       ...baselineContainers.B_daemon_available_inspect_sample,
     ];
-    expect(all.every((item) => item.record_id !== 3)).toBe(true);
+    expect(all.every((item) => item.record.id !== 3)).toBe(true);
   });
 });

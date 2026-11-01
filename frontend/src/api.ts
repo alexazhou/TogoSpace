@@ -85,6 +85,7 @@ type RawAgentRuntimeInfo = {
   exec_env_state?: {
     exec_env?: string;
     current_container_id?: string | null;
+    container_name?: string | null;
   };
   container_count?: number | null;
 };
@@ -521,21 +522,26 @@ function normalizeContainerInfo(raw: unknown): ContainerInfo | null {
     return null;
   }
   const item = raw as Record<string, unknown>;
-  const recordId = Number(item.record_id ?? 0);
-  // 预记录也必须有 record_id（它是删除入口），没有就无法操作，直接丢弃。
+  const recordRaw = item.record;
+  if (!recordRaw || typeof recordRaw !== 'object') {
+    return null;
+  }
+  const record = recordRaw as Record<string, unknown>;
+  const recordId = Number(record.id ?? 0);
+  // 预记录也必须有 record.id（它是删除入口），没有就无法操作，直接丢弃。
   if (!Number.isFinite(recordId) || recordId <= 0) {
     return null;
   }
-  const containerId = typeof item.container_id === 'string' && item.container_id ? item.container_id : null;
+  const containerId = typeof record.container_id === 'string' && record.container_id ? record.container_id : null;
   return {
     record_id: recordId,
-    agent_id: Number(item.agent_id ?? 0),
+    agent_id: Number(record.agent_id ?? 0),
     container_id: containerId,
-    container_name: String(item.container_name ?? ''),
-    image: String(item.image ?? ''),
+    container_name: String(record.container_name ?? ''),
+    image: String(record.image ?? ''),
     state: String(item.state ?? 'unknown'),
     is_entered: item.is_entered === true,
-    created_at: typeof item.created_at === 'string' && item.created_at ? item.created_at : null,
+    created_at: typeof record.created_at === 'string' && record.created_at ? record.created_at : null,
   };
 }
 

@@ -20,6 +20,7 @@ import pytest
 from constants import ContainerState, ExecEnv
 from exception import TogoException
 from model.coreModel import ContainerInfo, ExecEnvState
+from model.dbModel.gtAgentContainer import GtAgentContainer
 from service import funcToolService
 from service.funcToolService import tools as tools_module
 from service.roomService import ToolCallContext
@@ -279,14 +280,22 @@ async def test_list_containers_returns_env_and_serialized_containers(monkeypatch
     from service import containerService
 
     info = ContainerInfo(
-        record_id=1, agent_id=1, container_id="c0ffee123456",
-        container_name="agent-1-1", image="ubuntu:24.04",
-        created_at=datetime(2026, 11, 1, 10, 0, 0),
-        state=ContainerState.EXITED, is_entered=True,
+        record=GtAgentContainer(
+            id=1,
+            agent_id=1,
+            container_id="c0ffee123456",
+            container_name="agent-1-1",
+            image="ubuntu:24.04",
+            created_at=datetime(2026, 11, 1, 10, 0, 0),
+            updated_at=datetime(2026, 11, 1, 10, 0, 0),
+        ),
+        state=ContainerState.EXITED,
+        is_entered=True,
     )
     container_agent.get_exec_env_state.return_value = ExecEnvState(
         exec_env=ExecEnv.CONTAINER,
         current_container_id="c0ffee123456",
+        container_name="agent-1-1",
     )
     monkeypatch.setattr(containerService, "is_docker_available", AsyncMock(return_value=True))
     monkeypatch.setattr(
@@ -297,6 +306,7 @@ async def test_list_containers_returns_env_and_serialized_containers(monkeypatch
 
     assert result["exec_env"] == "container"
     assert result["current_container_id"] == "c0ffee123456"
+    assert "container_name" not in result  # 工具层只挑需要的字段，不整包下发
     assert result["docker_available"] is True
     # 必须是可 JSON 序列化的 dict（created_at 已转字符串）
     assert isinstance(result["containers"][0], dict)
@@ -314,8 +324,15 @@ async def test_list_containers_keeps_records_when_docker_unavailable(monkeypatch
     from service import containerService
 
     info = ContainerInfo(
-        record_id=1, agent_id=1, container_id=None,
-        container_name="agent-1-1", image="ubuntu:24.04", created_at=None,
+        record=GtAgentContainer(
+            id=1,
+            agent_id=1,
+            container_id=None,
+            container_name="agent-1-1",
+            image="ubuntu:24.04",
+            created_at=None,
+            updated_at=None,
+        ),
         state=ContainerState.UNKNOWN,
     )
     monkeypatch.setattr(containerService, "is_docker_available", AsyncMock(return_value=False))

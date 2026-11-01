@@ -1,9 +1,9 @@
 """`agent_containers` DAL 回归测试（Docker 容器化 Agent 沙箱，任务 #109 第 2 步）。
 
 **为什么用真实迁移 SQL 建表，而不是 `db.create_tables(...)`**：
-本表的关键约束有一半写在 `assets/migrate/0017_agent_containers.sql` 里、模型 `Meta`
-里并没有（`container_id` 全局唯一、`container_name` 的**部分**唯一索引
-`WHERE deleted = 0`）。用 `create_tables` 建出来的表会缺这些索引，测试就变成
+本表的关键约束写在 `assets/migrate/0017_agent_containers.sql` 里、模型 `Meta`
+里并没有（`container_id` 全局唯一）。`container_name` 不建唯一索引，名称唯一性
+由后缀 `record_id` 保证。用 `create_tables` 建出来的表会缺这些索引，测试就变成
 「在测试自己的假设上验证」，而不是验证生产 DDL。所以这里直接 `executescript`
 执行迁移文件，让下面每个用例都跑在**和线上一致的 schema** 上。
 
@@ -97,12 +97,12 @@ async def _raw_rows(db, sql: str, params: tuple = ()) -> list[tuple]:
 
 
 # ---------------------------------------------------------------------------
-# 迁移 DDL 本身：部分唯一索引是「软删除后名称可复用」的唯一保证
+# 迁移 DDL 本身：container_id 全局唯一是预记录回填与归属校验的基础
 # ---------------------------------------------------------------------------
 
 
-async def test_migration_creates_table_and_all_three_indexes(container_db):
-    """0017 必须建出表 + 3 个索引（含 2 个唯一索引），防迁移被改坏后无人察觉。"""
+async def test_migration_creates_table_and_indexes(container_db):
+    """0017 必须建出表 + 2 个索引（含 container_id 唯一索引），防迁移被改坏后无人察觉。"""
     rows = await _raw_rows(
         container_db, "SELECT name, [unique], partial FROM pragma_index_list('agent_containers')"
     )
@@ -111,11 +111,8 @@ async def test_migration_creates_table_and_all_three_indexes(container_db):
     assert set(index_map) == {
         "idx_agent_containers_agent",
         "idx_agent_containers_container_id",
-        "idx_agent_containers_name_active",
     }
     assert index_map["idx_agent_containers_container_id"] == (True, False)
-    # 名称唯一索引必须是**部分**索引，否则软删除后名称无法复用
-    assert index_map["idx_agent_containers_name_active"] == (True, True)
 
 
 async def test_container_id_is_not_null_uniqueness_for_pre_records(container_db):
@@ -140,20 +137,8 @@ async def test_duplicate_container_id_across_agents_raises(container_db):
         await _create_with_container_id(2, "agent-b-1", "deadbeef0001")
 
 
-async def test_active_container_name_must_be_unique(container_db):
-    """活跃记录内 `container_name` 唯一（部分唯一索引）：并发创建同名容器必须被库里拦住。"""
-    await _create(1, "agent-a-1")
-
-    with pytest.raises(peewee.IntegrityError):
-        await _create(2, "agent-a-1")
-
-
 async def test_container_name_is_reusable_after_soft_delete(container_db):
-    """软删除后名称可复用：`deleted = 1` 的行不参与部分唯一索引。
-
-    若这条挂了，说明索引退化成了普通唯一索引（`WHERE deleted = 0` 被去掉），
-    删容器后重建同名容器会永久失败。
-    """
+    """软删除后名称可复用：名称唯一性由后缀 `record_id` 保证，DB 不建唯一索引。"""
     first = await _create_with_container_id(1, "agent-a-1", "deadbeef0001")
     assert await gtAgentContainerManager.mark_deleted(first) is True
 

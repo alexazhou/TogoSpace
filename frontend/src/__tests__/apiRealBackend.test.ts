@@ -85,8 +85,8 @@ describe('真实后端响应喂给前端 normalize', () => {
       expect(item.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/);
     }
     // 逐值对账：不能因为 normalize 而丢失精度
-    expect(containers[0].created_at).toBe(containersReal[0].created_at);
-    expect(containers[1].created_at).toBe(containersReal[1].created_at);
+    expect(containers[0].created_at).toBe(containersReal[0].record.created_at);
+    expect(containers[1].created_at).toBe(containersReal[1].record.created_at);
   });
 
   it('③ state 原值透传：真实响应里的 created / missing 不被翻译、不被兜底改写', async () => {

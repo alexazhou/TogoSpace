@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from constants import ContainerState
 from model.coreModel import ContainerInfo, ContainerTarget
+from model.dbModel.gtAgentContainer import GtAgentContainer
 
 
 # ---------------------------------------------------------------------------
@@ -78,15 +79,22 @@ def test_container_target_container_name_is_optional():
 # ---------------------------------------------------------------------------
 
 
-def _info(**overrides) -> ContainerInfo:
+def _record(**overrides) -> GtAgentContainer:
     fields: dict = {
-        "record_id": 7,
+        "id": 7,
         "agent_id": 3,
         "container_id": "c0ffee123456",
         "container_name": "agent-3-1",
         "image": "ubuntu:24.04",
         "created_at": None,
+        "updated_at": None,
     }
+    fields.update(overrides)
+    return GtAgentContainer(**fields)
+
+
+def _info(record: GtAgentContainer | None = None, **overrides) -> ContainerInfo:
+    fields: dict = {"record": record or _record()}
     fields.update(overrides)
     return ContainerInfo(**fields)
 
@@ -95,12 +103,12 @@ def test_container_info_pre_record_allows_null_container_id():
     """预记录（DB `container_id IS NULL`）必须能构造出来——它在列表里是可见的一行。
 
     若 `container_id` 被写成必填，创建中的容器会从列表里消失（或构造直接抛错），
-    用户看不到「正在创建」的那一行，也就无法用 `record_id` 删除它。
+    用户看不到「正在创建」的那一行，也就无法用 `record.id` 删除它。
     """
-    info = _info(record_id=12, container_id=None, container_name="agent-a-1")
+    info = _info(_record(id=12, container_id=None, container_name="agent-a-1"))
 
-    assert info.container_id is None
-    assert info.record_id == 12
+    assert info.record.container_id is None
+    assert info.record.id == 12
     # 运行时字段有安全默认值：查不到状态时是 unknown，而不是空串
     assert info.state is ContainerState.UNKNOWN
     assert info.is_entered is False
@@ -113,35 +121,37 @@ def test_container_info_json_dump_serializes_created_at_and_keeps_null_container
     而 `container_id: null` 是「预记录」的契约标记，不能变成空串。
     """
     info = _info(
-        record_id=12,
-        container_id=None,
-        container_name="agent-a-1",
-        created_at=datetime(2026, 11, 1, 1, 30, 0),
+        _record(
+            id=12,
+            container_id=None,
+            container_name="agent-a-1",
+            created_at=datetime(2026, 11, 1, 1, 30, 0),
+        ),
         state=ContainerState.MISSING,
     )
 
     payload = info.model_dump(mode="json")
 
-    assert payload["container_id"] is None
+    assert payload["record"]["container_id"] is None
     assert payload["state"] == ContainerState.MISSING.value
-    assert payload["created_at"] == "2026-11-01T01:30:00"
-    assert isinstance(payload["created_at"], str)
-    # DB 字段与运行时字段平铺在同一层
-    assert set(payload) == {
-        "record_id", "agent_id", "container_id", "container_name",
-        "image", "created_at", "state", "is_entered",
+    assert payload["record"]["created_at"] == "2026-11-01T01:30:00"
+    assert isinstance(payload["record"]["created_at"], str)
+    # DB 记录整体在 `record` 里，运行时字段在外层；deleted / updated_at 是内部字段
+    assert set(payload) == {"record", "state", "is_entered"}
+    assert set(payload["record"]) == {
+        "id", "agent_id", "container_id", "container_name", "image", "created_at",
     }
 
 
 def test_container_info_exposes_record_id_and_container_id_separately():
-    """`record_id` 是表主键，`container_id` 是 Docker 短 ID，两者不能混用。
+    """`record.id` 是表主键，`record.container_id` 是 Docker 短 ID，两者不能混用。
 
-    前端表格行 key 与 `delete_container(record_id=...)` 依赖 `record_id`；
+    前端表格行 key 与 `delete_container(record_id=...)` 依赖表主键；
     `container_id` 在预记录时必然为 null，不能当主键用。
     """
     payload = _info().model_dump(mode="json")
-    assert payload["record_id"] == 7
-    assert payload["container_id"] == "c0ffee123456"
+    assert payload["record"]["id"] == 7
+    assert payload["record"]["container_id"] == "c0ffee123456"
 
 
 def test_container_info_forbids_extra_fields():
@@ -177,7 +187,7 @@ def test_to_tool_dict_uses_container_id_and_drops_agent_id():
 
 def test_to_tool_dict_keeps_null_container_id_for_pre_record():
     """预记录的 `container_id` 必须是 null（不是省略字段）：模型靠它判断「还没有 ID」。"""
-    info = _info(record_id=8, container_id=None, container_name="agent-3-2")
+    info = _info(_record(id=8, container_id=None, container_name="agent-3-2"))
 
     as_tool = info.to_tool_dict()
 
@@ -187,17 +197,17 @@ def test_to_tool_dict_keeps_null_container_id_for_pre_record():
 
 
 def test_model_dump_uses_container_id_for_api():
-    """API 直接暴露 `container_id`，并保留 `agent_id` 等 DB 字段。"""
+    """API 把 DB 记录放在 `record` 里，并保留 `agent_id` 等 DB 字段。"""
     as_api = _info().model_dump(mode="json")
 
-    assert as_api["container_id"] == "c0ffee123456"
-    assert as_api["agent_id"] == 3
-    assert as_api["record_id"] == 7
+    assert as_api["record"]["container_id"] == "c0ffee123456"
+    assert as_api["record"]["agent_id"] == 3
+    assert as_api["record"]["id"] == 7
 
 
 def test_to_tool_dict_serializes_created_at_to_iso_string():
     """`created_at` 必须是字符串：`datetime` 直接塞进工具返回值会让 JSON 序列化失败。"""
-    info = _info(created_at=datetime(2026, 11, 1, 10, 0, 0))
+    info = _info(_record(created_at=datetime(2026, 11, 1, 10, 0, 0)))
 
     as_tool = info.to_tool_dict()
 
@@ -221,14 +231,14 @@ def test_to_tool_dict_created_at_matches_api_serialization_exactly():
     ]
 
     for created_at in cases:
-        info = _info(container_id=None, created_at=created_at)
+        info = _info(_record(container_id=None, created_at=created_at))
 
-        assert info.to_tool_dict()["created_at"] == info.model_dump(mode="json")["created_at"], created_at
+        assert info.to_tool_dict()["created_at"] == info.model_dump(mode="json")["record"]["created_at"], created_at
 
 
 def test_to_tool_dict_created_at_uses_z_suffix_for_utc_not_offset():
     """钉死 UTC 的具体形态：`...Z`（pydantic 口径），不是 `...+00:00`（isoformat 口径）。"""
-    info = _info(container_id=None, created_at=datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc))
+    info = _info(_record(container_id=None, created_at=datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc)))
 
     assert info.to_tool_dict()["created_at"] == "2026-11-01T10:00:00Z"
     assert info.to_tool_dict()["created_at"] != "2026-11-01T10:00:00+00:00"

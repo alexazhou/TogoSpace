@@ -59,7 +59,9 @@ class TestAgentController(_ApiServiceCase):
         # 运行时字段在 agent 外层，不混进 DB 字段
         assert item["status"] in {"IDLE", "ACTIVE", "FAILED", "CLOSED"}
         assert item["exec_env_state"]["exec_env"] in {"host", "container"}
-        assert "current_container_id" in item["exec_env_state"]
+        assert set(item["exec_env_state"]) == {
+            "exec_env", "current_container_id", "container_name",
+        }
         assert isinstance(item["container_count"], int)
 
         agent = item["agent"]
@@ -93,6 +95,9 @@ class TestAgentController(_ApiServiceCase):
 
         assert data["status"] in {"IDLE", "ACTIVE", "FAILED", "CLOSED"}
         assert data["exec_env_state"]["exec_env"] in {"host", "container"}
+        assert set(data["exec_env_state"]) == {
+            "exec_env", "current_container_id", "container_name",
+        }
         assert isinstance(data["container_count"], int)
 
         agent = data["agent"]

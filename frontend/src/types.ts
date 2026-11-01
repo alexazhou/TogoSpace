@@ -18,7 +18,11 @@ export type EntityI18n = Record<string, I18nText>;
 export type AgentExecEnv = 'host' | 'container';
 
 /**
- * 自建容器信息（对应后端 `model/coreModel/containerModel.py::ContainerInfo`）。
+ * 自建容器信息（前端归一化后的扁平结构）。
+ *
+ * 后端 `ContainerInfo` 直接持有 DB 记录，响应形如：
+ * `{ record: { id, agent_id, container_id, container_name, image, created_at }, state, is_entered }`。
+ * `api.ts` 的 `normalizeContainerInfo` 把 `record.id` 映射为 `record_id`，供表格行 key 使用。
  *
  * 两个容易踩错的点（照后端 `model_dump(mode="json")` 的真实字段，别按文档 §8 的字面猜）：
  * 1. 容器 ID 字段名叫 `container_id`；预记录尚未回填时为 null。
@@ -30,7 +34,7 @@ export type AgentExecEnv = 'host' | 'container';
  * 且运行期预记录行必然命中这条分支。
  */
 export interface ContainerInfo {
-  /** `agent_containers.id`，前端表格行 key；预记录没有 container_id 时用它删除。 */
+  /** `record.id`，前端表格行 key；预记录没有 container_id 时用它删除。 */
   record_id: number;
   agent_id: number;
   /** Docker 12 位短 ID；预记录为 null。 */
@@ -42,7 +46,7 @@ export interface ContainerInfo {
   /** 该容器是否为该 Agent 当前所处的执行环境。 */
   is_entered: boolean;
   /**
-   * 记录创建时间，ISO 8601 字符串（`model_dump(mode="json")` 把 `datetime` 序列化的结果），
+   * 记录创建时间，ISO 8601 字符串（后端序列化时统一成 pydantic 口径），
    * 未创建完成或后端未给时为 null。**不是**文档 §2.1 写的 int 时间戳。
    */
   created_at: string | null;

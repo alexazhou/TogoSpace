@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from constants import ExecEnv
-from model.coreModel import ContainerTarget, ExecEnvSnapshot, ExecEnvState
+from model.coreModel import ContainerTarget, ExecEnvState
 from service.agentService import core
 from service.agentService.agent import Agent
 from service.agentService.agentTurnRunner import AgentTurnRunner
@@ -38,9 +38,9 @@ class _FakeDriver:
     def current_container_id(self) -> str | None:
         return self._container.container_id if self._container else None
 
-    def get_exec_env(self) -> ExecEnvSnapshot:
+    def get_exec_env(self) -> ExecEnvState:
         container = self._container
-        return ExecEnvSnapshot(
+        return ExecEnvState(
             exec_env=self.exec_env,
             current_container_id=self.current_container_id,
             container_name=container.container_name if container else None,
@@ -91,6 +91,7 @@ def test_exec_env_state_reports_container_when_loaded(monkeypatch):
     assert core.get_exec_env_state(3) == ExecEnvState(
         exec_env=ExecEnv.CONTAINER,
         current_container_id="c0ffee123456",
+        container_name="agent-3-1",
     )
 
 
@@ -113,7 +114,11 @@ def test_team_exec_env_map_only_contains_loaded_agents_of_that_team(monkeypatch)
     result = core.get_team_exec_env_map(1)
 
     assert result == {
-        3: ExecEnvState(exec_env=ExecEnv.CONTAINER, current_container_id="c0ffee123456"),
+        3: ExecEnvState(
+            exec_env=ExecEnv.CONTAINER,
+            current_container_id="c0ffee123456",
+            container_name="agent-3-1",
+        ),
         4: ExecEnvState(),
     }
 
@@ -183,7 +188,7 @@ def test_base_metadata_skips_env_fields_when_driver_returns_none():
 def test_merge_exec_env_overlays_fields_without_touching_others():
     """`merge_exec_env` 只覆盖环境三字段，其它 metadata 原样保留。"""
     meta = AgentActivityMeta(tool_result={"success": True}).merge_exec_env(
-        ExecEnvSnapshot(
+        ExecEnvState(
             exec_env=ExecEnv.CONTAINER,
             current_container_id="c0ffee123456",
             container_name="agent-3-1",
@@ -196,8 +201,8 @@ def test_merge_exec_env_overlays_fields_without_touching_others():
     assert meta.tool_result == {"success": True}
 
 
-def test_merge_exec_env_keeps_fields_empty_when_snapshot_is_none():
-    """快照为 None ⇒ 环境字段保持为空（Native 的活动记录不该出现伪造的 host）。"""
+def test_merge_exec_env_keeps_fields_empty_when_state_is_none():
+    """state 为 None ⇒ 环境字段保持为空（Native 的活动记录不该出现伪造的 host）。"""
     meta = AgentActivityMeta().merge_exec_env(None)
 
     assert meta.exec_env is None

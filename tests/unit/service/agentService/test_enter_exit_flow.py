@@ -20,7 +20,7 @@ import pytest
 
 from constants import ContainerState, ExecEnv
 from exception import TogoException
-from model.coreModel import ContainerTarget, ExecEnvSnapshot
+from model.coreModel import ContainerTarget, ExecEnvState
 from model.dbModel.gtAgent import GtAgent
 from service import containerService
 from service.agentService import core
@@ -59,8 +59,8 @@ class _FakeDriver:
             self._connected = True
         return ok
 
-    def get_exec_env(self) -> ExecEnvSnapshot:
-        return ExecEnvSnapshot(
+    def get_exec_env(self) -> ExecEnvState:
+        return ExecEnvState(
             exec_env=self.exec_env,
             current_container_id=self.current_container_id,
         )

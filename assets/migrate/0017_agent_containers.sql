@@ -20,6 +20,4 @@ CREATE INDEX IF NOT EXISTS idx_agent_containers_agent ON agent_containers (agent
 -- container_id 全局唯一（NULL 不参与唯一约束，兼容创建中的预记录）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_containers_container_id ON agent_containers (container_id);
 
--- container_name 只在活跃记录内唯一（部分唯一索引 WHERE deleted = 0）。
--- 名称带自增 record_id，正常路径下删除后新建不会复用旧名。
-CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_containers_name_active ON agent_containers (container_name) WHERE deleted = 0;
+-- container_name 不建唯一索引：名称末尾的 record_id（自增主键）已保证不重复。

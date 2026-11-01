@@ -1543,6 +1543,7 @@ async def list_containers(_context: ToolCallContext = None) -> dict[str, Any]:
         return {
             "success": True,
             "docker_available": docker_available,
+            # 显式白名单：state.container_name 只供活动记录展示，不下发给模型
             "exec_env": state.exec_env.value,
             "current_container_id": state.current_container_id,
             # 走 `to_tool_dict()` 而不是 `model_dump()`：§6.2 契约字段名是 `container_id`，

@@ -78,8 +78,8 @@ ERROR_CONTAINER_INVALID_PARAMS = "container_invalid_params"
 # 库里有记录、但容器本身已不存在（§5.1 只报错、不软删）。§3.6 表格没有这一项，
 # 但它是独立语义：混进 `container_not_found` 会让模型以为是自己 ID 传错了。
 ERROR_CONTAINER_LOST = "container_lost"
-# 容器名撞部分唯一索引（跨 Team 同名 Agent）。不加 team 前缀是当前设计（§3.5），
-# 但裸 `IntegrityError` 对模型不可行动，必须包成带明确码的 `TogoException`。
+# 容器记录写入时的数据库完整性错误（名称唯一性现由 record_id 保证）。
+# 裸 `IntegrityError` 对模型不可行动，必须包成带明确码的 `TogoException`。
 ERROR_CONTAINER_NAME_CONFLICT = "container_name_conflict"
 
 # 容器 ID 必须是 12 位十六进制短 ID（§6.3 严格 ID 传参）。
@@ -437,8 +437,8 @@ async def create_container(agent_id: int, image: str | None = None) -> GtAgentCo
                 f"自建容器数已达上限（{MAX_CONTAINERS_PER_AGENT}）",
                 ERROR_CONTAINER_LIMIT_REACHED,
             )
-        # 容器名要带 record_id，而 ID 只有插入预记录后才知道。名称列 NOT NULL
-        # 且活跃记录内唯一，所以事务内先用空串占位、拿到自增 ID 后立刻回填：
+        # 容器名要带 record_id，而 ID 只有插入预记录后才知道。名称列 NOT NULL，
+        # 所以事务内先用空串占位、拿到自增 ID 后立刻回填：
         # `BEGIN IMMEDIATE` 串行化写事务，其他连接看不到未提交的空名。
         try:
             async with atomic():
@@ -456,9 +456,8 @@ async def create_container(agent_id: int, image: str | None = None) -> GtAgentCo
                 )
                 await gtAgentContainerManager.set_container_name(record, container_name)
         except IntegrityError as exc:
-            # 正常路径下 record_id 已保证名称唯一；仍可能撞的只剩历史遗留命名
-            # （旧规则的后缀是 1..3）或手工改库。裸 `IntegrityError`（error_code=None）
-            # 对模型不可行动，因此包成明确错误码。
+            # 名称唯一性由 record_id 保证；仍兜底包装数据库完整性错误，避免裸
+            # `IntegrityError`（error_code=None）冒到工具层、让模型无法行动。
             raise TogoException(
                 "容器名冲突：生成的容器名已被占用（多为历史遗留记录），请先清理后重试。",
                 ERROR_CONTAINER_NAME_CONFLICT,
@@ -740,12 +739,7 @@ async def list_agent_containers(
         # daemon 不可用：不把状态伪造成 missing，用 unknown 表示「查不到」
         return [
             ContainerInfo(
-                record_id=record.id,
-                agent_id=record.agent_id,
-                container_id=record.container_id,
-                container_name=record.container_name,
-                image=record.image,
-                created_at=record.created_at,
+                record=record,
                 state=ContainerState.UNKNOWN,
                 is_entered=record.container_id is not None
                 and record.container_id == current_container_id,
@@ -761,12 +755,7 @@ async def list_agent_containers(
 
     return [
         ContainerInfo(
-            record_id=record.id,
-            agent_id=record.agent_id,
-            container_id=record.container_id,
-            container_name=record.container_name,
-            image=record.image,
-            created_at=record.created_at,
+            record=record,
             state=state,
             is_entered=record.container_id is not None
             and record.container_id == current_container_id,

@@ -578,25 +578,19 @@ async def test_docker_absent_reports_cli_not_found_and_leaves_no_record(env, mon
     assert await core.gtAgentContainerManager.count_active_by_agent(1) == 0
 
 
-async def test_create_reports_name_conflict_as_togo_exception(env):
-    """容器名撞车 ⇒ `container_name_conflict`，不是裸 IntegrityError（#111 裁定 6）。
+async def test_create_reports_integrity_error_as_togo_exception(env, monkeypatch):
+    """DAL 抛 IntegrityError ⇒ `container_name_conflict`，不是裸异常（#111 裁定 6）。
 
-    新规则下名称由 `record_id` 保证唯一，正常路径不会再撞。这里模拟**历史遗留
-    命名或手工改库**占用：先插一条记录拿到 ID `n`，把它改成「下一次创建（ID `n+1`）
-    会生成的名字」，让 `IntegrityError` 真实发生。
-
-    这条用例守的是**包装逻辑本身**：只要有人把 `except IntegrityError` 那段删掉，
-    裸 `IntegrityError` 就会冒出去，`error_code` 变成 None，这条立刻红。
+    名称唯一索引已移除，名称唯一性由 `record_id` 保证；这里直接模拟 DAL 抛错，
+    守住「IntegrityError → 明确错误码」的包装逻辑：只要有人把
+    `except IntegrityError` 那段删掉，裸异常就会冒出去，`error_code` 变成 None。
     """
-    seed = await core.gtAgentContainerManager.create(
-        agent_id=2, container_name="seed", image="ubuntu:24.04"
-    )
-    assert seed.id is not None
-    # 下一条预记录会是 seed.id + 1（本用例的临时库只有这一条记录）。
-    occupied = core.build_container_name(
-        team_id=1, agent_id=1, agent_name="小美", record_id=seed.id + 1,
-    )
-    await core.gtAgentContainerManager.set_container_name(seed, occupied)
+    from peewee import IntegrityError
+
+    async def _conflict(**_kwargs):
+        raise IntegrityError("UNIQUE constraint failed: agent_containers.container_name")
+
+    monkeypatch.setattr(core.gtAgentContainerManager, "create", _conflict)
 
     with pytest.raises(TogoException) as excinfo:
         await core.create_container(1)
@@ -606,7 +600,7 @@ async def test_create_reports_name_conflict_as_togo_exception(env):
     assert excinfo.value.__cause__ is not None, (
         "必须保留原始异常链（`raise ... from exc`），否则排查时看不到真实的数据库错误"
     )
-    # 撞名时事务应整体回滚：只能剩预置的那条记录，也不该调 docker create
+    # 落库失败时不该继续调 docker create
     assert await core.gtAgentContainerManager.count_active_by_agent(1) == 0
     assert env.calls_of("create") == []
 

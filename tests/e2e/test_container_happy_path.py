@@ -300,8 +300,8 @@ async def test_list_reports_real_docker_state(e2e_env):
     infos = await containerService.list_agent_containers(1)
 
     assert len(infos) == 1
-    assert infos[0].record_id == record.id
-    assert infos[0].container_id == record.container_id
+    assert infos[0].record.id == record.id
+    assert infos[0].record.container_id == record.container_id
     assert infos[0].state in {ContainerState.CREATED, ContainerState.EXITED}, (
         "状态必须是 Docker 原值，不归一化"
     )

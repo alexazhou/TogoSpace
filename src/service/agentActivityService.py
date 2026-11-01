@@ -8,7 +8,7 @@ from typing import Any
 
 from constants import AgentActivityStatus, AgentActivityType, InferRequestStateType, MessageBusTopic
 from dal.db import gtAgentActivityManager
-from model.coreModel.agentModel import ExecEnvSnapshot
+from model.coreModel.agentModel import ExecEnvState
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentActivity import GtAgentActivity
 from service import messageBus
@@ -96,17 +96,17 @@ class AgentActivityMeta:
         elif event.state == InferRequestStateType.RETRYING:
             self.retry_delay_seconds = 0
 
-    def merge_exec_env(self, snapshot: ExecEnvSnapshot | None) -> "AgentActivityMeta":
+    def merge_exec_env(self, state: ExecEnvState | None) -> "AgentActivityMeta":
         """把驱动当前执行环境合并进 metadata，返回自身以便链式调用。
 
         `None` 表示驱动不报告环境（Native / Claude SDK），保持三个字段为空，
         与新增此方法之前的行为一致。
         """
-        if snapshot is None:
+        if state is None:
             return self
-        self.exec_env = snapshot.exec_env.value
-        self.current_container_id = snapshot.current_container_id
-        self.container_name = snapshot.container_name
+        self.exec_env = state.exec_env.value
+        self.current_container_id = state.current_container_id
+        self.container_name = state.container_name
         return self
 
     def to_dict(self) -> dict:

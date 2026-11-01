@@ -106,13 +106,7 @@ class Agent:
 
     def get_exec_env_state(self) -> ExecEnvState | None:
         """读取当前执行环境；驱动不报告环境时返回 None。"""
-        snapshot = self.driver.get_exec_env()
-        if snapshot is None:
-            return None
-        return ExecEnvState(
-            exec_env=snapshot.exec_env,
-            current_container_id=snapshot.current_container_id,
-        )
+        return self.driver.get_exec_env()
 
     async def enter_container(self, container_id: str) -> tuple[ContainerTarget, ContainerState]:
         """把 Agent 的执行环境切换到指定容器，返回 `(目标, 进入前状态)`。

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 
-from util import jsonUtil
 from constants import ContainerState
+from model.dbModel.gtAgentContainer import GtAgentContainer
+from util import jsonUtil
 
 
 class ContainerTarget(BaseModel):
@@ -46,23 +46,15 @@ class ContainerTarget(BaseModel):
 class ContainerInfo(BaseModel):
     """自建容器的一条对外展示记录（`list_containers` / Agent 容器接口共用）。
 
-    字段是 `agent_containers` 活跃记录的对外投影（`id → record_id`，隐藏内部字段
-    `deleted` / `updated_at`）加上运行时字段，平铺成一层，`model_dump(mode="json")`
-    即可直接作为 API 响应。
+    直接持有 DB 记录 `record`，不再重复声明 `agent_id` / `container_id` /
+    `container_name` / `image` / `created_at`；`state` / `is_entered` 是实时查询
+    得到的运行时字段。`model_dump(mode="json")` 即可直接作为 API 响应。
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
-    record_id: int
-    """`agent_containers.id`，预记录没有 Docker ID 时用它删除。"""
-
-    agent_id: int
-    container_id: str | None
-    """Docker 容器 12 位短 ID；预记录尚未回填时为 None。"""
-    container_name: str
-    image: str
-    created_at: datetime | None
-    """记录创建时间（`agent_containers.created_at`），序列化为 ISO 8601 字符串。"""
+    record: GtAgentContainer
+    """`agent_containers` 的活跃记录；`record.id` 即预记录删除用的 `record_id`。"""
 
     state: ContainerState = ContainerState.UNKNOWN
     """Docker 原始状态；查不到为 missing，inspect 失败为 unknown。"""
@@ -70,22 +62,34 @@ class ContainerInfo(BaseModel):
     is_entered: bool = False
     """该容器是否为该 Agent 当前所处的执行环境。"""
 
+    @field_serializer("record")
+    def _serialize_record(self, value: GtAgentContainer) -> dict[str, Any]:
+        data = jsonUtil.object_to_json_data(value)
+        # 列表只含活跃记录：软删标记与更新时间属于内部字段，不对外
+        data.pop("deleted", None)
+        data.pop("updated_at", None)
+        # 保持与旧契约一致的 ISO 8601 格式，并与 to_tool_dict() 逐字节一致
+        data["created_at"] = jsonUtil.datetime_to_pydantic_json(value.created_at)
+        return data
+
     def to_tool_dict(self) -> dict[str, Any]:
         """工具返回值专用字典（§6.2 `list_containers.containers[]`）。
 
         与 API 的 `model_dump()` 差别是**故意的**，两者不能合并：
-        去掉内部字段 `agent_id`：模型只看自己的容器，多一个 ID 只会诱导它去猜
-        别人的容器（也容易把 `agent_id` 误当成容器标识传进参数）。
+        把 DB 主键映射为 `record_id`，并去掉内部字段 `agent_id`：模型只看自己的
+        容器，多一个 ID 只会诱导它去猜别人的容器（也容易把 `agent_id` 误当成容器
+        标识传进参数）。
 
         键是**显式白名单**，不是 `model_dump` 之后改键名：给 LLM 的契约必须逐个列出来，
         将来给模型加字段时自动漏出去就是多一份误导（多一个内部字段就多一个可猜的东西）。
         """
+        record = self.record
         return {
-            "record_id": self.record_id,
-            "container_id": self.container_id,
-            "container_name": self.container_name,
-            "image": self.image,
+            "record_id": record.id,
+            "container_id": record.container_id,
+            "container_name": record.container_name,
+            "image": record.image,
             "state": self.state.value,
             "is_entered": self.is_entered,
-            "created_at": jsonUtil.datetime_to_pydantic_json(self.created_at),
+            "created_at": jsonUtil.datetime_to_pydantic_json(record.created_at),
         }

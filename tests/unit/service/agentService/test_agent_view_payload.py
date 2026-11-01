@@ -26,6 +26,7 @@ from constants import (
 )
 from model.coreModel import AgentRuntimeInfo, ContainerInfo, ExecEnvState
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtAgentContainer import GtAgentContainer
 from service.agentService import core
 
 
@@ -43,12 +44,15 @@ def _agent(agent_id: int = 3, team_id: int = 1) -> GtAgent:
 
 def _container_info(*, record_id: int = 7, container_id: str | None = "c0ffee123456") -> ContainerInfo:
     return ContainerInfo(
-        record_id=record_id,
-        agent_id=3,
-        container_id=container_id,
-        container_name=f"agent-3-{record_id}",
-        image="ubuntu:24.04",
-        created_at=datetime(2026, 11, 1, 10, 0, 0),
+        record=GtAgentContainer(
+            id=record_id,
+            agent_id=3,
+            container_id=container_id,
+            container_name=f"agent-3-{record_id}",
+            image="ubuntu:24.04",
+            created_at=datetime(2026, 11, 1, 10, 0, 0),
+            updated_at=datetime(2026, 11, 1, 10, 0, 0),
+        ),
         state=ContainerState.EXITED,
         is_entered=container_id is not None,
     )
@@ -79,7 +83,11 @@ async def test_detail_info_reports_container_env(monkeypatch):
     """在容器里时，详情页要如实报告执行环境与当前容器。"""
     _patch_detail_deps(
         monkeypatch,
-        exec_state=ExecEnvState(exec_env=ExecEnv.CONTAINER, current_container_id="c0ffee123456"),
+        exec_state=ExecEnvState(
+            exec_env=ExecEnv.CONTAINER,
+            current_container_id="c0ffee123456",
+            container_name="agent-3-7",
+        ),
         count_map={3: 1},
     )
 
@@ -89,12 +97,15 @@ async def test_detail_info_reports_container_env(monkeypatch):
     assert isinstance(detail, AgentRuntimeInfo)
     assert detail.exec_env_state.exec_env == ExecEnv.CONTAINER
     assert detail.exec_env_state.current_container_id == "c0ffee123456"
+    # container_name 供活动记录 / 前端展示使用，随接口一起返回
+    assert detail.exec_env_state.container_name == "agent-3-7"
     assert detail.container_count == 1
 
     dumped = detail.model_dump(mode="json")
     assert dumped["exec_env_state"] == {
         "exec_env": "container",
         "current_container_id": "c0ffee123456",
+        "container_name": "agent-3-7",
     }
     # 容器列表 / 失败信息都走独立接口，详情不再内嵌
     assert "containers" not in dumped
@@ -118,6 +129,7 @@ async def test_detail_info_defaults_to_host(monkeypatch):
     assert detail.model_dump(mode="json")["exec_env_state"] == {
         "exec_env": "host",
         "current_container_id": None,
+        "container_name": None,
     }
 
 
@@ -174,7 +186,7 @@ async def test_get_agent_containers_forwards_current_container(monkeypatch):
 
     containers = await core.get_agent_containers(3)
 
-    assert [item.record_id for item in containers] == [7]
+    assert [item.record.id for item in containers] == [7]
     assert calls == {"agent_id": 3, "current_container_id": "c0ffee123456"}
 
 
@@ -224,7 +236,11 @@ async def test_list_info_falls_back_to_host_for_unloaded_agent(monkeypatch):
     assert calls["include_cross_team"] is False
 
     dumped = item.model_dump(mode="json")
-    assert dumped["exec_env_state"] == {"exec_env": "host", "current_container_id": None}
+    assert dumped["exec_env_state"] == {
+        "exec_env": "host",
+        "current_container_id": None,
+        "container_name": None,
+    }
     # DB 字段整体包在 `agent` 里，运行时字段在外面
     assert dumped["agent"]["id"] == 3
     assert "id" not in dumped

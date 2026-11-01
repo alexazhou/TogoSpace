@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from constants import DriverType, ExecEnv
-from model.coreModel.agentModel import ExecEnvSnapshot
+from model.coreModel.agentModel import ExecEnvState
 from model.coreModel.containerModel import ContainerTarget
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtScheculeTask import GtScheculeTask
@@ -62,7 +62,7 @@ class ContainerCapableDriver(Protocol):
     def current_container_id(self) -> str | None:
         ...
 
-    def get_exec_env(self) -> ExecEnvSnapshot:
+    def get_exec_env(self) -> ExecEnvState:
         ...
 
     def is_connected(self) -> bool:
@@ -98,7 +98,7 @@ class AgentDriver:
     def host_managed_turn_loop(self) -> bool:
         return False
 
-    def get_exec_env(self) -> ExecEnvSnapshot | None:
+    def get_exec_env(self) -> ExecEnvState | None:
         """当前执行环境快照；不支持容器沙箱的驱动返回 None。
 
         None 表示「不报告环境」，活动记录不会写入 `exec_env` 相关字段——

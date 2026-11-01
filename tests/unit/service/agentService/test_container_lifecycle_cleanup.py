@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from constants import DriverType, EmployStatus, ExecEnv
-from model.coreModel import ExecEnvSnapshot
+from model.coreModel import ExecEnvState
 from model.dbModel.gtAgent import GtAgent
 from service.agentService import core
 from service.agentService.agent import Agent
@@ -68,8 +68,8 @@ class _FakeDriver:
         self.connect = AsyncMock(return_value=True)
         self.is_connected = Mock(return_value=True)
 
-    def get_exec_env(self) -> ExecEnvSnapshot:
-        return ExecEnvSnapshot(
+    def get_exec_env(self) -> ExecEnvState:
+        return ExecEnvState(
             exec_env=self.exec_env,
             current_container_id=self.current_container_id,
         )
