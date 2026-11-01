@@ -1,6 +1,14 @@
 from .gtCoreChatModel import GtCoreAgentDialogContext
 from .gtCoreAgentEvent import GtCoreRoomMessageEvent
 from .serviceStatus import ServiceStatusInfo
+from .agentModel import (
+    AgentDetailInfo,
+    AgentInfo,
+    AgentListInfo,
+    AgentListItem,
+    AgentViewInfo,
+    ExecEnvState,
+)
 from .containerModel import (
     CONTAINER_STATE_MISSING,
     CONTAINER_STATE_UNKNOWN,
@@ -14,6 +22,12 @@ __all__ = [
     "GtCoreAgentDialogContext",
     "GtCoreRoomMessageEvent",
     "ServiceStatusInfo",
+    "AgentDetailInfo",
+    "AgentInfo",
+    "AgentListInfo",
+    "AgentListItem",
+    "AgentViewInfo",
+    "ExecEnvState",
     "CONTAINER_STATE_MISSING",
     "CONTAINER_STATE_UNKNOWN",
     "to_container_id",

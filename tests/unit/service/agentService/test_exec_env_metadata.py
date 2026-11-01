@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from constants import ExecEnv
-from model.coreModel import ContainerTarget
+from model.coreModel import ContainerTarget, ExecEnvState
 from service.agentService import core
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver.base import AgentDriverConfig
@@ -60,7 +60,7 @@ def test_exec_env_state_is_host_when_agent_not_loaded(monkeypatch):
     """未加载 ⇒ host / None：环境只存在内存，重启后一律回宿主（不查库猜）。"""
     monkeypatch.setattr(core, "_agents", {})
 
-    assert core.get_exec_env_state(3) == {"exec_env": "host", "current_container_id": None}
+    assert core.get_exec_env_state(3) == ExecEnvState()
 
 
 def test_exec_env_state_reports_container_when_loaded(monkeypatch):
@@ -69,10 +69,10 @@ def test_exec_env_state_reports_container_when_loaded(monkeypatch):
         core, "_agents", {3: _fake_agent(3, 1, _FakeDriver(ExecEnv.CONTAINER, _MANAGED))}
     )
 
-    assert core.get_exec_env_state(3) == {
-        "exec_env": "container",
-        "current_container_id": "c0ffee123456",
-    }
+    assert core.get_exec_env_state(3) == ExecEnvState(
+        exec_env=ExecEnv.CONTAINER,
+        current_container_id="c0ffee123456",
+    )
 
 
 def test_exec_env_state_ignores_driver_without_exec_env(monkeypatch):
@@ -80,7 +80,7 @@ def test_exec_env_state_ignores_driver_without_exec_env(monkeypatch):
     native_like = SimpleNamespace()  # 无 exec_env 属性
     monkeypatch.setattr(core, "_agents", {3: _fake_agent(3, 1, native_like)})
 
-    assert core.get_exec_env_state(3) == {"exec_env": "host", "current_container_id": None}
+    assert core.get_exec_env_state(3) == ExecEnvState()
 
 
 def test_team_exec_env_map_only_contains_loaded_agents_of_that_team(monkeypatch):
@@ -95,8 +95,8 @@ def test_team_exec_env_map_only_contains_loaded_agents_of_that_team(monkeypatch)
     result = core.get_team_exec_env_map(1)
 
     assert result == {
-        3: {"exec_env": "container", "current_container_id": "c0ffee123456"},
-        4: {"exec_env": "host", "current_container_id": None},
+        3: ExecEnvState(exec_env=ExecEnv.CONTAINER, current_container_id="c0ffee123456"),
+        4: ExecEnvState(),
     }
 
 

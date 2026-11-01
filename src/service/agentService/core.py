@@ -5,6 +5,13 @@ from typing import Any, List
 
 from model.dbModel.base import atomic
 from model.dbModel.gtDept import GtDept
+from model.coreModel.agentModel import (
+    AgentDetailInfo,
+    AgentInfo,
+    AgentListInfo,
+    AgentListItem,
+    ExecEnvState,
+)
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from service.agentService.prompts import BASE_PROMPT, AGENT_IDENTITY_PROMPT
 from util import configUtil, i18nUtil, assertUtil, workspaceUtil
@@ -518,38 +525,100 @@ def get_team_runtime_status_map(team_id: int) -> dict[int, AgentStatus]:
     }
 
 
-def get_exec_env_state(agent_id: int) -> dict[str, Any]:
+def get_exec_env_state(agent_id: int) -> ExecEnvState:
     """读取某个 Agent 的执行环境（§8 列表页字段）。
 
     未加载的 Agent 恒为 `host`：执行环境只存在于 Driver 内存，后端重启后一律
     回到宿主，所以「不在内存里」与「在宿主」是同一个事实，不能凭库里有什么去猜。
-
-    Returns:
-        `{"exec_env": "host"|"container", "current_container_id": str|None}`
     """
     driver = _get_loaded_driver(agent_id)
     if driver is None:
-        return {"exec_env": ExecEnv.HOST.value, "current_container_id": None}
-    return {
-        "exec_env": driver.exec_env.value,
-        "current_container_id": driver.current_container_id,
-    }
+        return ExecEnvState()
+    return ExecEnvState(
+        exec_env=driver.exec_env,
+        current_container_id=driver.current_container_id,
+    )
 
 
-def get_team_exec_env_map(team_id: int) -> dict[int, dict[str, Any]]:
+def get_team_exec_env_map(team_id: int) -> dict[int, ExecEnvState]:
     """批量读取该 Team 已加载 Agent 的执行环境（列表页用，避免逐个查）。"""
-    result: dict[int, dict[str, Any]] = {}
+    result: dict[int, ExecEnvState] = {}
     for agent in _agents.values():
         if agent.gt_agent.team_id != team_id or agent.gt_agent.id is None:
             continue
         driver = _get_loaded_driver(agent.gt_agent.id)
         if driver is None:
             continue
-        result[agent.gt_agent.id] = {
-            "exec_env": driver.exec_env.value,
-            "current_container_id": driver.current_container_id,
-        }
+        result[agent.gt_agent.id] = ExecEnvState(
+            exec_env=driver.exec_env,
+            current_container_id=driver.current_container_id,
+        )
     return result
+
+
+async def get_agent_detail_info(agent: GtAgent) -> AgentDetailInfo:
+    """组装详情页响应：Agent 字段 + 运行时状态 + 执行环境 + 容器列表。"""
+    runtime_status_map = get_team_runtime_status_map(agent.team_id)
+    first_task = await gtScheculeTaskManager.get_first_unfinish_task(agent.id)
+    error_message = None
+    if first_task is not None and first_task.status == AgentTaskStatus.FAILED:
+        error_message = first_task.error_message
+
+    exec_state = get_exec_env_state(agent.id)
+    containers = await containerService.list_agent_containers(
+        agent.id,
+        current_container_id=exec_state.current_container_id,
+    )
+
+    return AgentDetailInfo(
+        agent=AgentInfo.model_validate(agent),
+        status=runtime_status_map.get(agent.id, AgentStatus.IDLE),
+        error_message=error_message,
+        exec_env=exec_state.exec_env,
+        current_container_id=exec_state.current_container_id,
+        containers=containers,
+        container_count=len(containers),
+    )
+
+
+async def get_team_agent_list_info(
+    team_id: int,
+    *,
+    include_special: bool = False,
+) -> AgentListInfo:
+    """组装列表页响应：成员配置 + 运行时状态 + 执行环境 + 容器数。"""
+    agents = await gtAgentManager.get_team_all_agents(
+        team_id,
+        include_cross_team=include_special,
+    )
+    runtime_status_map = get_team_runtime_status_map(team_id)
+    exec_env_map = get_team_exec_env_map(team_id)
+    # 容器数只查 DB，列表页不能因为 docker 慢而卡住
+    container_count_map = await containerService.count_containers_by_agent_ids(
+        [agent.id for agent in agents if agent.id is not None]
+    )
+
+    items: list[AgentListItem] = []
+    for agent in agents:
+        exec_state = exec_env_map.get(agent.id, ExecEnvState())
+
+        special: str | None = None
+        if agent.team_id == -1:
+            special_agent = SpecialAgent.value_of(agent.id)
+            if special_agent is not None:
+                special = special_agent.name.lower()
+
+        items.append(
+            AgentListItem(
+                agent=AgentInfo.model_validate(agent),
+                status=runtime_status_map.get(agent.id, AgentStatus.IDLE),
+                exec_env=exec_state.exec_env,
+                current_container_id=exec_state.current_container_id,
+                container_count=container_count_map.get(agent.id, 0),
+                special=special,
+            )
+        )
+    return AgentListInfo(agents=items)
 
 
 def get_room_agents(room_id: int) -> List["Agent"]:
