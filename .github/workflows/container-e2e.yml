@@ -1,0 +1,50 @@
+name: Container E2E
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest-timeout
+
+      - name: Check Docker
+        run: docker info
+
+      - name: Pull test image
+        run: docker pull ubuntu:24.04
+
+      - name: Run real Docker e2e
+        env:
+          TOGOSPACE_TEST_DOCKER: '1'
+        run: |
+          PYTHONPATH=src python -m pytest \
+            tests/e2e/test_container_happy_path.py \
+            -v --timeout=300
+
+      - name: Cleanup leftover containers
+        if: always()
+        run: |
+          docker ps -aq \
+            --filter "label=com.togospace.container_record_id" \
+            | xargs -r docker rm -f
