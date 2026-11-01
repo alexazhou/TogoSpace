@@ -747,6 +747,17 @@ async def list_agent_containers(
             docker_available = False
         else:
             docker_available = await cli.ping()
+    elif docker_available:
+        # 调用方（`list_containers` 工具）已确认 daemon 可用，只是没把 cli 传下来。
+        # 这里必须补取：否则 `cli` 恒为 None，落到末尾 `assert` 就是 AssertionError——
+        # 而「Docker 正常」恰是生产环境的常态，等于让列表功能 100% 崩。
+        # 注意是 `elif`：写成 `else` 会让 `docker_available=False` 也调 `get_cli()`，
+        # 与「不可用时不碰 docker」的契约冲突。
+        try:
+            cli = get_cli()
+        except DockerCliError:
+            # 探测与调用之间 CLI 被删/环境变了：退化成「查不到」，仍返回记录 + unknown
+            docker_available = False
 
     if not docker_available:
         # daemon 不可用：不把状态伪造成 missing，用 unknown 表示「查不到」

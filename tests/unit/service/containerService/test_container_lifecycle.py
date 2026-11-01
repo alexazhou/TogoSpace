@@ -327,6 +327,81 @@ async def test_list_marks_unknown_when_docker_cli_missing(fake, monkeypatch):
     assert [info.record_id for info in infos] == [1, 2]
 
 
+async def test_list_uses_cli_when_caller_says_available(fake, monkeypatch):
+    """`docker_available=True` 由调用方给定时，**照常取真实状态**，且不重复 ping。
+
+    `list_containers` 工具先调 `is_docker_available()` 再把结果传进来 (`tools.py:1546`)，
+    生产环境走的正是这条分支。此前这里只有 `docker_available is None` 一个分支，
+    传 True 进来时 `cli` 恒为 `None`，落到函数末尾的 `assert cli is not None` 直接
+    `AssertionError` —— Docker 正常的机器上 `list_containers` 必然崩、拿不到任何容器信息。
+    """
+    await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
+    fake.set("inspect", stdout=_inspect_json(status="exited"))
+
+    infos = await core.list_agent_containers(1, docker_available=True)
+
+    assert [info.state for info in infos] == ["exited"]
+    # 可用性已由调用方给出，服务层不该再 ping 一次（ping 走 `version` 子命令）
+    assert fake.calls_of("version") == []
+    assert fake.calls_of("inspect")
+
+
+async def test_list_keeps_label_check_when_caller_says_available(fake, monkeypatch):
+    """`docker_available=True` 也不能绕过 label 校验：同名外部容器仍必须是 `missing`。
+
+    「修崩溃」最省事的写法是提前 `return` 或伪造状态，那样会把 P-1（误删他人容器）
+    的防线一起拆掉。这条用例把它钉住。
+    """
+    await _seed_record(container_name="agent-1-1")
+    fake.set(
+        "inspect",
+        stdout=_inspect_json(status="running", labels={"com.togospace.container_record_id": "999"}),
+    )
+
+    infos = await core.list_agent_containers(1, docker_available=True)
+
+    assert [info.state for info in infos] == [CONTAINER_STATE_MISSING]
+
+
+async def test_list_survives_cli_vanishing_after_caller_probe(fake, monkeypatch):
+    """调用方探到可用、服务层再取 CLI 时却取不到 ⇒ 退化成 `unknown`，不抛异常。
+
+    探测与调用之间隔着一次 await，环境可能已经变了（用户卸载了 Docker CLI）。
+    这时必须仍然返回记录 + `unknown`，不能整体失败——否则用户拿到的还是「容器全没了」。
+    """
+    await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
+
+    from service.containerService import dockerCli as docker_cli_module
+
+    def _boom():
+        raise docker_cli_module.DockerCliError(
+            "gone", docker_cli_module.ERROR_DOCKER_CLI_NOT_FOUND
+        )
+
+    monkeypatch.setattr(core, "get_cli", _boom)
+
+    infos = await core.list_agent_containers(1, docker_available=True)
+
+    assert [info.state for info in infos] == [CONTAINER_STATE_UNKNOWN]
+
+
+async def test_list_end_to_end_through_tool_layer_probe(fake):
+    """走 `list_containers` 工具的真实调用形态：先探测、再把 bool 传进来。
+
+    `tools.py:1546-1550` 就是这么调的。这条用例把「工具层 → 服务层」的接口串起来，
+    防止服务层单测全绿、实际链路仍崩（曾真实发生过：传 True 时 `cli` 恒为 None）。
+    """
+    await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
+    fake.set("inspect", stdout=_inspect_json(status="running"))
+
+    docker_available = await core.is_docker_available()
+    assert docker_available is True
+
+    infos = await core.list_agent_containers(1, docker_available=docker_available)
+
+    assert [info.state for info in infos] == ["running"]
+
+
 async def test_list_skips_detection_when_caller_says_unavailable(fake, monkeypatch):
     """`docker_available=False` 由调用方给定时，**一次 docker 都不碰**（不 get_cli、不 ping）。
 

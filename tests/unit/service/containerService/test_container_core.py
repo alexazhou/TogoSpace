@@ -182,6 +182,14 @@ async def env(tmp_path, monkeypatch):
     bind_database(db)
     await db.aio_connect()
 
+    # 1.5) 清空 agent 缓存：`gtAgentManager` 是进程级 `CacheStore`，按 `agent.id` 缓存。
+    # 本用例的临时库里 agent 1 是「小美」，但同进程前面跑过的某个测试可能已经把
+    # 「id=1 → alice」塞进缓存；缓存命中会**跳过 DB 查询**，于是这里拿到别人的 agent，
+    # 容器名变成 `agent-alice-1`、撞名用例也不再撞名。单跑绿、全量红，根因就在此。
+    from dal.db import gtAgentManager
+
+    gtAgentManager.clear_agent_cache()
+
     # 2) 工作目录（目录真实存在，因为 create argv 里会带上它们的绝对路径）
     workspace = tmp_path / "ws"
     (workspace / "team-a" / "agent" / "小美").mkdir(parents=True)
@@ -240,6 +248,8 @@ async def env(tmp_path, monkeypatch):
         core.reset_cli_for_test(None)
         await db.aio_close()
         unbind_database()
+        # 同样清一次：别让本用例临时库里的 agent 1 留在进程缓存里污染后续测试
+        gtAgentManager.clear_agent_cache()
 
 
 # ---------------------------------------------------------------------------
