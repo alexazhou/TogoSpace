@@ -84,8 +84,17 @@ EXCLUDE_PATTERNS = [
     "_tcl_data",
     "_tk_data",
     "tcl8",
-    # Linux 版本的 gtsp 可执行文件
-    "gtsp-linux-*",
+    # ⚠️ 这里**不能**排除 `gtsp-linux-*`。
+    #
+    # 容器沙箱（§3.2）用 `docker cp` 把 Linux 产物注入容器，靠的是
+    # `appPaths.get_gtsp_linux_binary_path()` 从 ASSETS_DIR 读取。ASSETS_DIR 在
+    # 打包态指向 `_MEIPASS/assets`，而本 spec 的 datas 只声明了整棵 `assets/`，
+    # 所以排除规则一旦命中，安装包里就没有 Linux 产物 →
+    # `get_gtsp_linux_binary_path` 抛 FileNotFoundError → 容器功能在打包形态下
+    # 整体不可用（开发态因为读仓库 assets/ 反而正常，最难发现的一类差异）。
+    #
+    # 曾排除过（`56ddaede` 加桌面外壳时，那时还没有容器功能），总计约 12.7M；
+    # 现在它是功能必需物，不排除。
 ]
 
 # tcl/tk 动态库文件名
