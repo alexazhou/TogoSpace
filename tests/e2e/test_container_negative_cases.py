@@ -18,21 +18,17 @@
 > 「修好就自动绿」这句话是错的。现在改成可判定的 `skipif(<开闸变量>)`：
 > skip 的理由变成「这是真实 Docker 用例」，而不是「实现没修」。
 
-## G1 已落地（原「实现缺口」记录，保留作背景）
+## 缺 bash 的归类归 gtsp（2026-11-01 裁定）
 
 `step1_product.md:119` 验收项要求：无 bash 镜像「能建、能进、文件工具可用，
-`execute_bash` 返回**明确原因与出路**」。修复前 `execute_bash` 返回 gtsp 原始错误
-```
-{"code":"server/internal_error",
- "error":"failed to start command: exec: \\"bash\\": executable file not found in $PATH"}
-```
-现由 `tspDriver._execute_tsp_tool` 识别（工具名限定 `execute_bash` + 完整 exec 特征），
-在**保留**协议层 `code` 的同时补出业务层 `error_code=container_missing_bash`
-与含「原因 + 出路」的 `message`。
+`execute_bash` 返回**明确原因与出路**」。该语义由 gtsp 负责：由它识别
+「镜像里没有 bash」并返回结构化错误，后端不做报文文本匹配。
 
-`test_no_bash_image_reports_actionable_reason` 的断言当初是**按文档要求**写的
-（不是按现状写），所以它在 G1 修好前必然红 —— 这是它当初保持 skip 的第二个原因。
-断言本身一个字没改（除常量名），修复后转绿。
+后端若按 `exec: "bash": executable file not found in $PATH` 之类的文案兜底，
+就把 gtsp 的文案变成了隐式契约——gtsp 一改文案，后端会静默失效。
+
+因此本文件对无 bash 的断言只钉「后端原样透出 gtsp 报文、不伪造业务错误码」；
+「明确原因与出路」由 gtsp 修复后再补对应断言。
 
 ## 环境口径（事件 343 / 344 + 小马哥 2026-11-01 裁定）
 
@@ -280,14 +276,14 @@ async def test_mount_denied_is_reported_as_mount_denied_not_as_container_missing
 
 
 # ---------------------------------------------------------------------------
-# ② 无 bash 镜像：容器可用，但 execute_bash 必须给「明确原因 + 出路」（G1 已落地）
+# ② 无 bash 镜像：容器可用，execute_bash 的失败报文由后端原样透出
 # ---------------------------------------------------------------------------
 
 
 @_DOCKER_E2E_SKIP
 @pytest.mark.parametrize("image", [_ALPINE_IMAGE, _DISTROLESS_IMAGE])
-async def test_no_bash_image_reports_actionable_reason(neg_env, image, monkeypatch):
-    """无 bash 镜像：能建、能进、文件工具可用；`execute_bash` 报原因与出路。
+async def test_no_bash_image_passes_gtsp_error_through(neg_env, image, monkeypatch):
+    """无 bash 镜像：能建、能进、文件工具可用；`execute_bash` 失败报文原样透出。
 
     **参数化的两个镜像属于同一类**（无 bash），不是「musl vs glibc」两类：
     - `alpine:3.20` —— musl libc，无 bash
@@ -296,10 +292,8 @@ async def test_no_bash_image_reports_actionable_reason(neg_env, image, monkeypat
     后者是这条用例的关键：它证明「没 bash 就挂」与 libc 无关。
     `gtsp-linux-arm64` 是静态链接 Go 二进制，在 alpine 上 `--version` 正常。
 
-    断言按 `step1_product.md:45` 写（不是按现状写）：
-    > 镜像里必须有 `bash` 才能用 `execute_bash`。此时文件工具正常，`execute_bash`
-    > 会明确提示「镜像内没有 bash」，并给出出路：换镜像，或在容器内装 bash。
-    > 系统不会偷偷用 `sh` 代替。
+    「明确原因与出路」由 gtsp 返回结构化错误实现；后端只透传，不按报文文案
+    自行补业务错误码，否则 gtsp 一改文案后端就静默失效。
     """
     from service.agentService.agentHistoryStore import AgentHistoryStore
     from service.agentService.driver.base import AgentDriverConfig
@@ -369,23 +363,21 @@ async def test_no_bash_image_reports_actionable_reason(neg_env, image, monkeypat
         )
         assert write_result.get("written") == 2, f"文件工具必须真写入: {write_result}"
 
-        # —— execute_bash 报「明确原因 + 出路」（G1 已落地，见 tspDriver._execute_tsp_tool）
+        # —— execute_bash 失败：后端透传 gtsp 报文，不做文案识别与业务码兜底
         bash_result = await driver._execute_tsp_tool(
             '{"command": "echo hi"}',
             context=roomService.ToolCallContext(agent_id=1, team_id=1, tool_name="execute_bash"),
         )
         assert bash_result.get("success") is False, f"无 bash 时必须明确失败: {bash_result}"
-
-        # G1 已落地：`tspDriver._execute_tsp_tool` 识别「exec: "bash": executable file
-        # not found in $PATH」后，在保留协议层 `code` 的同时补出业务层 `error_code`。
-        assert bash_result.get("error_code") == containerService.ERROR_CONTAINER_MISSING_BASH, (
-            "step1_product.md:45 要求此处给出明确原因；当前返回的是 gtsp 原始错误 "
-            f"{bash_result!r}（缺口 G1）。"
+        assert bash_result.get("code") == "server/internal_error", (
+            f"必须保留协议层 code: {bash_result!r}"
         )
-        mess = str(bash_result.get("message", "")).lower()
-        assert "bash" in mess, "原因必须点名「镜像里没有 bash」，否则模型会去查网络/权限"
-        assert any(token in mess for token in ("换", "install", "apt", "apk")), (
-            "必须给出路：换镜像，或在容器内装 bash。"
+        assert "error_code" not in bash_result, (
+            "后端不再按报文文案补业务错误码，缺 bash 的归类由 gtsp 返回: "
+            f"{bash_result!r}"
+        )
+        assert "bash" in str(bash_result.get("message", "")).lower(), (
+            f"gtsp 原始报文应点名 bash: {bash_result!r}"
         )
     finally:
         if entered:
@@ -395,20 +387,13 @@ async def test_no_bash_image_reports_actionable_reason(neg_env, image, monkeypat
 
 
 # ---------------------------------------------------------------------------
-# ②b 反向：**bash 在、命令不存在**绝不能报 `container_missing_bash`
+# ②b 对照：**bash 在、命令不存在**与「镜像缺 bash」不是同一条路径
 # ---------------------------------------------------------------------------
 
 
 @_DOCKER_E2E_SKIP
-async def test_bash_exists_but_command_missing_is_not_reported_as_missing_bash(neg_env, monkeypatch):
-    """反向用例：`bash: xxx: command not found` 不是「镜像缺 bash」。
-
-    ## 为什么必须有这条
-
-    正向用例（②）只证明「缺 bash 时报了 `container_missing_bash`」。它**不能**证明
-    匹配串够窄 —— 把匹配放宽成 `not found` 也能让正向用例变绿，而那时
-    「用户把命令写错」会被误报成「镜像缺 bash」，模型会去换镜像，真正该做的是改命令。
-    这就是「用错误方式让测试变绿」，本用例是它唯一的防线。
+async def test_bash_exists_but_command_missing_reports_command_error(neg_env, monkeypatch):
+    """对照用例：`bash: xxx: command not found` 是命令错误，不是镜像缺 bash。
 
     ## 真实报文（ubuntu:24.04 实测，与缺 bash **不是同一条路径**）
 
@@ -418,11 +403,10 @@ async def test_bash_exists_but_command_missing_is_not_reported_as_missing_bash(n
      "exit_code":127}}
     ```
 
-    注意它是 `type:"result"`（**成功调用，命令退出码 127**），压根不抛 `TSPException`，
-    所以走不到 `tspDriver.py` 的识别分支。这条用例因此是**双保险**：
-    - 现状下它天然绿（路径都进不去）；
-    - 但只要有人把识别逻辑下沉到能看见 `result` 分支的层（`tools.py` / 外层
-      `except Exception`），或把匹配串放宽成 `not found`，它立刻变红。
+    注意它是 `type:"result"`（**成功调用，命令退出码 127**），不是 `TSPException`。
+    后端对两种情况都不做报文识别：命令错误走 `return result.output`，
+    返回体中可见 `command not found` 与 `exit_code=127`，且不应出现 exec 层的
+    bash 缺失报文。两者语义不同，不应被前端或模型混为一谈。
     """
     from service.agentService.agentHistoryStore import AgentHistoryStore
     from service.agentService.driver.base import AgentDriverConfig
@@ -480,10 +464,7 @@ async def test_bash_exists_but_command_missing_is_not_reported_as_missing_bash(n
             context=roomService.ToolCallContext(agent_id=1, team_id=1, tool_name="execute_bash"),
         )
         assert bad_result.get("success") is False, f"命令不存在必须失败: {bad_result}"
-        assert bad_result.get("error_code") != containerService.ERROR_CONTAINER_MISSING_BASH, (
-            "「命令不存在」被误报成「镜像缺 bash」会让模型去换镜像，"
-            f"而真正该做的是改命令: {bad_result!r}"
-        )
+        assert "error_code" not in bad_result, f"后端不补业务错误码: {bad_result!r}"
         # 原文必须能看到是命令名的问题，不是 bash 的问题
         raw = f"{bad_result.get('stderr', '')}{bad_result.get('message', '')}".lower()
         assert "command not found" in raw, f"原文应指向命令不存在: {bad_result!r}"

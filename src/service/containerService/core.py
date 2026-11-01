@@ -78,12 +78,6 @@ ERROR_CONTAINER_LOST = "container_lost"
 # 容器名撞部分唯一索引（跨 Team 同名 Agent）。不加 team 前缀是当前设计（§3.5），
 # 但裸 `IntegrityError` 对模型不可行动，必须包成带明确码的 `TogoException`。
 ERROR_CONTAINER_NAME_CONFLICT = "container_name_conflict"
-# 镜像里没有 `bash`（alpine / distroless 一类）。`execute_bash` 依赖 `bash -c`，
-# 缺 bash 时 gtsp 的 exec 直接失败，只回 `server/internal_error` + 原始 exec 报文，
-# 模型拿到后无法行动（会去查网络、查权限）。§3.6 表格没有这一项，但
-# `step1_product.md:45` / `:119` 明确要求「给出明确原因与出路」，故必须独立成码。
-# 与 `container_image_missing` 区分：那个是**镜像没拉下来**，这个是**镜像在、但里面没 bash**。
-ERROR_CONTAINER_MISSING_BASH = "container_missing_bash"
 
 # 容器 ID 必须是 12 位十六进制短 ID（§6.3 严格 ID 传参）。
 # 拒绝镜像名：`docker inspect` 接受镜像名，若放行会让 Agent 拿镜像名当容器 ID。
