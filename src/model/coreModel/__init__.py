@@ -3,6 +3,7 @@ from .gtCoreAgentEvent import GtCoreRoomMessageEvent
 from .serviceStatus import ServiceStatusInfo
 from .agentModel import (
     AgentRuntimeInfo,
+    ExecEnvSnapshot,
     ExecEnvState,
 )
 from .containerModel import (
@@ -15,6 +16,7 @@ __all__ = [
     "GtCoreRoomMessageEvent",
     "ServiceStatusInfo",
     "AgentRuntimeInfo",
+    "ExecEnvSnapshot",
     "ExecEnvState",
     "ContainerInfo",
     "ContainerTarget",

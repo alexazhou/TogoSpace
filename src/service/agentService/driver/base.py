@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from constants import DriverType
+from model.coreModel.agentModel import ExecEnvSnapshot
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtScheculeTask import GtScheculeTask
 from service.agentService.agentHistoryStore import AgentHistoryStore
@@ -60,6 +61,14 @@ class AgentDriver:
     @property
     def host_managed_turn_loop(self) -> bool:
         return False
+
+    def get_exec_env(self) -> ExecEnvSnapshot | None:
+        """当前执行环境快照；不支持容器沙箱的驱动返回 None。
+
+        None 表示「不报告环境」，活动记录不会写入 `exec_env` 相关字段——
+        Native / Claude SDK 驱动保持原有行为，不为它们伪造一个宿主环境。
+        """
+        return None
 
     async def startup(self) -> None:
         self._started = True

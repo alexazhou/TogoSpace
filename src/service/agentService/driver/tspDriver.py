@@ -11,7 +11,7 @@ from pytspclient.types import TSP_ERROR_STDOUT_CLOSED, TSP_ERROR_CONNECTION_CLOS
 
 import appPaths
 from constants import CONTAINER_ENTER_TIMEOUT_SEC, ExecEnv, MessageBusTopic
-from model.coreModel import ContainerTarget
+from model.coreModel import ContainerTarget, ExecEnvSnapshot
 from service.containerService import core as containerService
 from service.containerService import core as container_cli
 from service.agentService.driver.base import AgentDriverConfig
@@ -157,6 +157,15 @@ class TspAgentDriver(AgentDriver):
     def current_container_id(self) -> Optional[str]:
         """当前所在容器的 12 位短 ID；宿主环境为 None（对外的 `current_container_id`）。"""
         return self._current_container.container_id if self._current_container else None
+
+    def get_exec_env(self) -> ExecEnvSnapshot:
+        """上报当前执行环境；宿主态也返回快照（TSP 驱动始终支持环境切换）。"""
+        container = self._current_container
+        return ExecEnvSnapshot(
+            exec_env=self._exec_env,
+            current_container_id=self.current_container_id,
+            container_name=container.container_name if container else None,
+        )
 
     def _build_container_command(self, container: ContainerTarget) -> list[str]:
         """按容器类型构造 gtsp 拉起命令（§3.2 形态 A / B）。

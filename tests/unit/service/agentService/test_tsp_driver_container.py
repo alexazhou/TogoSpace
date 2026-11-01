@@ -28,7 +28,9 @@ from service.agentService.driver import tspDriver
 from service.agentService.driver.tspDriver import TspAgentDriver
 from service.agentService.toolRegistry import AgentToolRegistry
 
-_MANAGED = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch="arm64")
+_MANAGED = ContainerTarget(
+    container_id="c0ffee123456", is_managed=True, arch="arm64", container_name="agent-1-1"
+)
 _EXTERNAL = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="amd64")
 
 
@@ -116,6 +118,12 @@ def test_driver_starts_in_host_env_without_container():
     assert driver.current_container is None
     assert driver.current_container_id is None
 
+    snapshot = driver.get_exec_env()
+    assert snapshot is not None
+    assert snapshot.exec_env == ExecEnv.HOST
+    assert snapshot.current_container_id is None
+    assert snapshot.container_name is None
+
 
 # ---------------------------------------------------------------------------
 # connect：宿主 / 自建容器 / 外部容器 三种命令
@@ -156,6 +164,12 @@ async def test_connect_managed_container_uses_start_attach(monkeypatch):
     assert driver.exec_env == ExecEnv.CONTAINER
     assert driver.current_container == _MANAGED
     assert driver.current_container_id == "c0ffee123456"
+
+    snapshot = driver.get_exec_env()
+    assert snapshot is not None
+    assert snapshot.exec_env == ExecEnv.CONTAINER
+    assert snapshot.current_container_id == "c0ffee123456"
+    assert snapshot.container_name == "agent-1-1"
 
 
 async def test_connect_external_container_uses_exec(monkeypatch):

@@ -8,6 +8,7 @@ from typing import Any
 
 from constants import AgentActivityStatus, AgentActivityType, InferRequestStateType, MessageBusTopic
 from dal.db import gtAgentActivityManager
+from model.coreModel.agentModel import ExecEnvSnapshot
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentActivity import GtAgentActivity
 from service import messageBus
@@ -94,6 +95,19 @@ class AgentActivityMeta:
             self.retry_delay_seconds = event.retry_delay_seconds
         elif event.state == InferRequestStateType.RETRYING:
             self.retry_delay_seconds = 0
+
+    def merge_exec_env(self, snapshot: ExecEnvSnapshot | None) -> "AgentActivityMeta":
+        """把驱动当前执行环境合并进 metadata，返回自身以便链式调用。
+
+        `None` 表示驱动不报告环境（Native / Claude SDK），保持三个字段为空，
+        与新增此方法之前的行为一致。
+        """
+        if snapshot is None:
+            return self
+        self.exec_env = snapshot.exec_env.value
+        self.current_container_id = snapshot.current_container_id
+        self.container_name = snapshot.container_name
+        return self
 
     def to_dict(self) -> dict:
         """序列化为 dict，排除值为 None 的字段。"""
@@ -182,7 +196,7 @@ async def update_activity_progress(
                 # 容器」时 patch 里根本没有那两个容器键，`update()` 碰不到旧键，旧值就留下了。
                 # 最坏情形不是残留空值而是**错值**：容器 A → 外部容器 B 时 `exec_env` 仍是
                 # `container`，前端会把 A 的旧名字显示成 B 的名字。所以这里先清后合。
-                # 不在 `_with_exec_env` 里塞 None：`to_dict()` 照样会剔掉；塞空串更糟
+                # 不在 `merge_exec_env` 里塞 None：`to_dict()` 照样会剔掉；塞空串更糟
                 # （JSON 里像一个合法的容器名）。清除只能在合并侧表达。
                 if "exec_env" in patch_dict:
                     merged.pop("current_container_id", None)

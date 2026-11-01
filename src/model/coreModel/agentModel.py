@@ -9,6 +9,20 @@ from model.dbModel.gtAgent import GtAgent
 from util import jsonUtil
 
 
+class ExecEnvSnapshot(BaseModel):
+    """驱动上报的执行环境快照，供活动记录 metadata 使用。
+
+    比 `ExecEnvState` 多一个 `container_name`（活动记录要展示容器名）；
+    它是内部结构，不进入 Agent 列表 / 详情接口的 `exec_env_state`。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    exec_env: ExecEnv = ExecEnv.HOST
+    current_container_id: str | None = None
+    container_name: str | None = None
+
+
 class ExecEnvState(BaseModel):
     """某个 Agent 当前执行环境的快照。
 

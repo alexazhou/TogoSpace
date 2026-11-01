@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from constants import ExecEnv
-from model.coreModel import ContainerTarget, ExecEnvState
+from model.coreModel import ContainerTarget, ExecEnvSnapshot, ExecEnvState
 from service.agentService import core
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver.base import AgentDriverConfig
@@ -37,6 +37,21 @@ class _FakeDriver:
     @property
     def current_container_id(self) -> str | None:
         return self._container.container_id if self._container else None
+
+    def get_exec_env(self) -> ExecEnvSnapshot:
+        container = self._container
+        return ExecEnvSnapshot(
+            exec_env=self.exec_env,
+            current_container_id=self.current_container_id,
+            container_name=container.container_name if container else None,
+        )
+
+
+class _NoExecEnvDriver:
+    """模拟 Native / Claude SDK：基类方法返回 None，表示不报告环境。"""
+
+    def get_exec_env(self) -> None:
+        return None
 
 
 def _fake_agent(agent_id: int, team_id: int, driver) -> SimpleNamespace:
@@ -150,46 +165,48 @@ def test_base_metadata_keeps_host_state_without_container():
     assert meta.container_name is None
 
 
-def test_base_metadata_skips_env_fields_for_driver_without_exec_env():
+def test_base_metadata_skips_env_fields_when_driver_returns_none():
     """driver 不报告环境（Native）⇒ 不写这三个字段，而不是写一堆 None。"""
     runner = _make_runner()
-    runner.driver = SimpleNamespace()  # type: ignore[assignment]
+    runner.driver = _NoExecEnvDriver()  # type: ignore[assignment]
 
     meta = runner._base_metadata()
 
     assert meta.exec_env is None
     assert meta.current_container_id is None
+    assert meta.container_name is None
 
 
-def test_with_exec_env_patches_terminal_metadata():
-    """终态回写：turn 内 `enter_container` 后，结束时的环境要覆盖开始时的。"""
-    runner = _make_runner()
-    runner.driver = _FakeDriver(ExecEnv.CONTAINER, _MANAGED)  # type: ignore[assignment]
+def test_merge_exec_env_overlays_fields_without_touching_others():
+    """`merge_exec_env` 只覆盖环境三字段，其它 metadata 原样保留。"""
+    meta = AgentActivityMeta(tool_result={"success": True}).merge_exec_env(
+        ExecEnvSnapshot(
+            exec_env=ExecEnv.CONTAINER,
+            current_container_id="c0ffee123456",
+            container_name="agent-3-1",
+        )
+    )
 
-    patch = runner._with_exec_env(AgentActivityMeta(tool_result={"success": True}))
-
-    assert patch.exec_env == "container"
-    assert patch.current_container_id == "c0ffee123456"
-    assert patch.container_name == "agent-3-1"
-    assert patch.tool_result == {"success": True}
+    assert meta.exec_env == "container"
+    assert meta.current_container_id == "c0ffee123456"
+    assert meta.container_name == "agent-3-1"
+    assert meta.tool_result == {"success": True}
 
 
-def test_with_exec_env_creates_patch_when_none():
-    """没有 patch 时也要能补上环境（否则终态的 LLM_INFER 记录会缺字段）。"""
-    runner = _make_runner()
-    runner.driver = _FakeDriver(ExecEnv.HOST)  # type: ignore[assignment]
+def test_merge_exec_env_keeps_fields_empty_when_snapshot_is_none():
+    """快照为 None ⇒ 环境字段保持为空（Native 的活动记录不该出现伪造的 host）。"""
+    meta = AgentActivityMeta().merge_exec_env(None)
 
-    patch = runner._with_exec_env(None)
-
-    assert patch.exec_env == "host"
-    assert patch.current_container_id is None
+    assert meta.exec_env is None
+    assert meta.current_container_id is None
+    assert meta.container_name is None
 
 
 @pytest.mark.asyncio
 async def test_finish_activity_reports_current_env_at_finish_time(monkeypatch):
     """`_finish_activity` 真的把环境透传给 `update_activity_progress`。
 
-    这条是「结束时 patch 为最终环境」的落地检查：只测 `_with_exec_env` 的话，
+    这条是「结束时 patch 为最终环境」的落地检查：只测 `merge_exec_env` 的话，
     忘记接到 `_finish_activity` 上仍然会绿。
     """
     runner = _make_runner()
