@@ -348,7 +348,15 @@ async def test_no_bash_image_reports_actionable_reason(neg_env, image):
             '{"file_path": "/workspace/self/probe.txt", "content": "hi"}',
             context=roomService.ToolCallContext(agent_id=1, team_id=1, tool_name="write_file"),
         )
-        assert write_result.get("success") is True, f"无 bash 镜像的文件工具必须可用: {write_result}"
+        # `write_file` 的成功返回体是 `{"file_path": ..., "written": N}`，**没有 `success` 键**
+        # （gtsp v0.4.17 在 alpine / distroless / ubuntu 三镜像实测一致）。工具层契约是
+        # `toolRegistry` 的 `tool_succeeded = raw_success is not False`，即**缺省即成功**。
+        # 故原写法 `write_result.get("success") is True` 恒为 False —— 与本用例要验的
+        # 「文件工具可用」无关却必红，只是被 `_NO_BASH_SKIP` 掩盖至今。
+        # 改为按真实契约断言，且比原写法更实：既验没被误判成失败（无 `error_code`），
+        # 又验真的写进去了（`written` 字节数）。
+        assert "error_code" not in write_result, f"无 bash 镜像的文件工具必须可用: {write_result}"
+        assert write_result.get("written") == 2, f"文件工具必须真写入: {write_result}"
 
         # —— execute_bash 报「明确原因 + 出路」（G1：当前实现不满足，故 skip）
         bash_result = await driver._execute_tsp_tool(
