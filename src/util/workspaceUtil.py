@@ -12,7 +12,7 @@ import logging
 import os
 import shutil
 import unicodedata
-from typing import Any
+from typing import Any, Iterable
 
 from exception import TogoException
 from util import configUtil
@@ -64,6 +64,26 @@ def validate_dir_name(name: str) -> str | None:
         invalid_display = ", ".join(repr(char) for char in invalid_chars)
         return f"不能包含非法字符: {invalid_display}"
     return None
+
+
+def assert_valid_dir_name(name: str, *, error_code: str) -> None:
+    """校验名称可作为目录名，不合法时抛 `TogoException`。
+
+    与 `validate_dir_name` 的区别只在错误表达方式：本函数供「非法即失败」的
+    调用方使用；需要日志降级或返回错误字典的调用方继续用 `validate_dir_name`。
+    """
+    error = validate_dir_name(name)
+    if error is not None:
+        raise TogoException(error, error_code=error_code)
+
+
+def assert_valid_dir_names(names: Iterable[str], *, error_code: str) -> None:
+    """逐个校验名称，任一不合法即抛 `TogoException`。
+
+    用于 Team 成员等批量入口：在写库 / 建目录之前一次性拦住非法名称。
+    """
+    for name in names:
+        assert_valid_dir_name(name, error_code=error_code)
 
 
 def get_custom_workdir(team_config: dict[str, Any] | None) -> str:

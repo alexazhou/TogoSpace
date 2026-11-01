@@ -571,10 +571,9 @@ async def overwrite_team_agents(team_id: int, agents_data: list[GtAgent]) -> lis
     request_ids = {agent.id for agent in agents_data if agent.id is not None}
 
     # 名称同时是 Agent 私有目录名，先校验字符与重名，避免路径问题或共用目录
-    for data in agents_data:
-        name_error = workspaceUtil.validate_dir_name(data.name)
-        if name_error is not None:
-            raise TogoException(name_error, error_code="invalid_agent_name")
+    workspaceUtil.assert_valid_dir_names(
+        (data.name for data in agents_data), error_code="invalid_agent_name",
+    )
 
     final_names = [agent.name for agent in agents_data]
     duplicate_names = sorted({name for name in final_names if final_names.count(name) > 1})
