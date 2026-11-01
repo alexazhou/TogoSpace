@@ -403,6 +403,102 @@ async def test_bash_command_not_found_is_not_reported_as_missing_bash(
 
 
 @pytest.mark.asyncio
+async def test_bash_command_not_found_result_branch_keeps_gtsp_payload_verbatim(
+    mock_tsp_host: MagicMock,
+) -> None:
+    """反向用例（**走 `return result.output` 的那条路**）：命令不存在不得被包装成缺 bash。
+
+    为什么上面那条 `test_bash_command_not_found_is_not_reported_as_missing_bash`
+    不够 —— 它把 `TSPException` 硬塞进 `except TSPException`（`:479`）分支，
+    而真实 ubuntu:24.04 的「命令不存在」**根本不进那个分支**：gtsp 返
+    `type:"result"`，`tspDriver.py:478` 直接 `return result.output`。
+
+    也就是说「只匹配宽串 `not found`」这个变异在异常分支那层能被抓到，但
+    **没有任何用例证明 `result` 分支不会被顺手加上包装**（比如有人把识别下沉到
+    `_execute_tsp_tool` 的公共出口，或改 `ToolResult` 处理）。这条用例钉的就是那条路：
+    识别逻辑一旦下沉出 `except TSPException`（含 `except Exception` 分支），
+    `result` 分支返回值就不再等于 gtsp 原文，这条立刻红。
+
+    报文是 ubuntu:24.04 实测原文（2026-11-01 真跑）：
+        {"success": false, "stdout": "", "exit_code": 127,
+         "stderr": "bash: line 1: this_command_does_not_exist_xyz: command not found\\n"}
+    """
+    from pytspclient import ToolResult
+
+    from service.agentService.driver.tspDriver import TspAgentDriver
+
+    gtsp_output = {
+        "success": False,
+        "stdout": "",
+        "exit_code": 127,
+        "stderr": "bash: line 1: this_command_does_not_exist_xyz: command not found\n",
+    }
+
+    driver = TspAgentDriver(mock_tsp_host, AgentDriverConfig(driver_type="tsp", options={}))
+    driver._client = MagicMock()
+    driver._client.process = MagicMock()
+    driver._client.process.returncode = None
+    driver._client.call_tool = AsyncMock(
+        return_value=ToolResult(call_id="call-1", name="execute_bash", output=gtsp_output)
+    )
+
+    ctx = ToolCallContext(agent_id=1, team_id=1, chat_room=MagicMock(), tool_name="execute_bash")
+    res = await driver._execute_tsp_tool(
+        '{"command": "this_command_does_not_exist_xyz"}', ctx
+    )
+
+    # 原文逐字透出：既不加 `error_code`，也不改任何键
+    assert res == gtsp_output, (
+        "result 分支必须原样返回 gtsp 报文：任何包装都会让模型以为要换镜像，"
+        f"而真正该做的是改命令。实际返回: {res!r}"
+    )
+    assert "error_code" not in res
+    # 具名断言：换镜像的出路文案绝不许出现在这条路径上
+    for token in ("ubuntu:24.04", "debian:bookworm-slim", "apt-get install", "apk add"):
+        assert token not in json.dumps(res, ensure_ascii=False), (
+            f"命令不存在却给出了「换镜像」的出路 {token!r}: {res!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_generic_exception_branch_never_carries_missing_bash(
+    mock_tsp_host: MagicMock,
+) -> None:
+    """`except Exception` 分支不许被污染（裁定：识别逻辑只许写在 `except TSPException` 内）。
+
+    上一层的两条用例都走 `except TSPException` / `return result.output`，
+    覆盖不到 `except Exception`（`:498`）。而「把识别下沉到公共出口」的一个常见写法
+    就是在最后那个兜底 `except` 里也加 `error_code`——它会让**任何** TSP 工具故障
+    都被说成「缺 bash」，模型于是去换镜像，真正的 bug 被掩盖。
+
+    这条钉两件事：兜底分支的返回结构仍只有 `success` + `message`；且不许出现
+    换镜像的出路文案。
+    """
+    from service.agentService.driver.tspDriver import TspAgentDriver
+
+    driver = TspAgentDriver(mock_tsp_host, AgentDriverConfig(driver_type="tsp", options={}))
+    driver._client = MagicMock()
+    driver._client.process = MagicMock()
+    driver._client.process.returncode = None
+    driver._client.call_tool = AsyncMock(side_effect=RuntimeError("network is unreachable"))
+
+    ctx = ToolCallContext(agent_id=1, team_id=1, chat_room=MagicMock(), tool_name="execute_bash")
+    res = await driver._execute_tsp_tool('{"command": "echo hi"}', ctx)
+
+    assert res["success"] is False
+    assert "error_code" not in res, (
+        f"兜底 except 不许带业务错误码，否则任何 TSP 故障都会被说成缺 bash: {res!r}"
+    )
+    # 既有结构不变：只有 success + message
+    assert set(res) == {"success", "message"}, f"兜底分支返回结构被改了: {res!r}"
+    assert "工具调用失败" in res["message"]
+    for token in ("ubuntu:24.04", "debian:bookworm-slim", "apt-get install", "apk add"):
+        assert token not in res["message"], (
+            f"通用 TSP 故障却给出了「换镜像」的出路 {token!r}: {res['message']!r}"
+        )
+
+
+@pytest.mark.asyncio
 async def test_missing_bash_marker_only_applies_to_execute_bash(
     mock_tsp_host: MagicMock,
 ) -> None:
