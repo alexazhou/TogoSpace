@@ -99,8 +99,15 @@ def test_gtsp_runtime_logs_are_excluded_from_bundle():
     `datas` 声明的是整棵 `assets/`，而 PyInstaller **不做 .gitignore 感知**：
     `assets/execute/gtsp/logs/` 虽然被 `.gitignore` 忽略、不入库，但开发机上物理
     存在，生产构建（`tauri/scripts/build_backend.py` 从工作区主目录打）会把它原样
-    打进去。实测该目录日志含本机绝对路径与工具入参原文（含 base64 图片数据），
+    打进去。实测该目录日志含本机绝对路径与用户业务文件名（如 `wechat.JPG`），
     打进交付包等于把开发机信息带给终端用户。
+
+    ⚠️ 措辞更正（勿再写回「base64 图片数据」）：日志里
+    `"base64":"iVBORw0KGgoAAAANSUhEUgAA...[base64:100620 chars]"` 的
+    `[base64:N chars]` 是 **gtsp 自己打的截断占位符**，不是数据本体。实测 26 个
+    日志 `[A-Za-z0-9+/]{200,}` 0 命中、`data:image/...;base64` 0 命中、`iVBOR`
+    后连续 base64 字符恒 24 个。真正敏感的是路径（暴露机器）与文件名（暴露用户
+    业务内容）。
 
     注意与 `test_spec_does_not_exclude_gtsp_linux_binaries` 的区别：排的是
     `logs` 子目录，不是 gtsp 本体。两个断言方向相反、必须同时成立。
@@ -151,6 +158,80 @@ def test_exclude_patterns_still_filters_litellm_bloat():
     ):
         excluded, _ = _excluded(dest_path, f"/tmp/site-packages/{dest_path}", patterns)
         assert excluded, f"{dest_path} 本应被排除，但没命中任何模式"
+
+
+def test_bytecode_caches_and_dsstore_are_excluded_from_bundle():
+    """`__pycache__` 与 `.DS_Store` 绝不能进包（包卫生 + 构建机路径外泄）。
+
+    这是包卫生的第二层，与 `logs` 同源：spec 的 `datas` 声明整棵 `assets/`，
+    PyInstaller **不读 `.gitignore`**。这两类东西被 `.gitignore` 忽略、不入库，
+    但开发机上物理存在：
+
+    - `.pyc` 的 `co_filename` 记录**构建机绝对路径**（实测 1470 个 .pyc 100% 含
+      `/Volumes/PDATA/GitDB`）；顺带省约 20M。
+    - `assets/` 下当前有 5 个 `.DS_Store`，会被整棵 `assets/` 的 datas 原样带进包。
+
+    判定靠 `fnmatch(basename)` 分支天然覆盖任意层级，所以这里同时覆盖
+    「多级深目录」与「assets 根下」两种位置。
+    """
+    patterns = _read_exclude_patterns()
+
+    for dest_path in (
+        # litellm 体积大头：site-packages 里千余个 .pyc
+        "litellm/x/__pycache__/a.cpython-311.pyc",
+        "litellm/proxy/__pycache__/proxy_server.cpython-311.pyc",
+        # 非 litellm 的 3 个（assets 里自带脚本的缓存）
+        "assets/migrate/__pycache__/0016_team_workspace_layout.cpython-311.pyc",
+        "assets/skills/skill-creator/scripts/__pycache__/quick_validate.cpython-311.pyc",
+        # 多级深目录也要命中
+        "assets/skills/skill-creator/scripts/__pycache__/__init__.cpython-311.pyc",
+        # macOS Finder 元数据：assets 根下
+        "assets/.DS_Store",
+        # assets 子目录下（当前 assets/icons、assets/execute、assets/execute/gtsp 都有）
+        "assets/icons/.DS_Store",
+        "assets/execute/gtsp/.DS_Store",
+    ):
+        excluded, pattern = _excluded(
+            dest_path=dest_path,
+            src_path=f"/tmp/pyi_build/{dest_path}",
+            patterns=patterns,
+        )
+        assert excluded, f"{dest_path} 本应被排除（会带进构建机脏文件），但没命中任何模式"
+
+    # 命中的必须是这两条新规则本身，而不是被别的既有规则顺带扫掉
+    for dest_path in ("litellm/x/__pycache__/a.cpython-311.pyc", "assets/.DS_Store"):
+        _, pattern = _excluded(dest_path, f"/tmp/{dest_path}", patterns)
+        assert pattern in {"__pycache__", ".DS_Store"}, (
+            f"{dest_path} 被 {pattern!r} 排掉，不是预期的 __pycache__/.DS_Store 规则"
+        )
+
+
+def test_bytecode_rules_do_not_swallow_python_sources_or_binaries():
+    """反向：`.py` 源码与 Linux gtsp 产物不能因新规则被误排。
+
+    `__pycache__` 按 basename 精确匹配，绝不能变成「排掉所有 .pyc」或
+    「排掉路径里带 pycache 字样的源码」；`gtsp-linux-*` 是功能必需物（见文件头）。
+    """
+    patterns = _read_exclude_patterns()
+
+    for dest_path in (
+        "litellm/x/a.py",
+        "litellm/proxy/proxy_server.py",
+        "assets/migrate/0016_team_workspace_layout.py",
+        "assets/skills/skill-creator/scripts/quick_validate.py",
+        # 反向：文件名里带 pycache 但不叫 `__pycache__`（fs 上不会是目录，
+        # 这里防的是把规则写成 `"pycache" in path` 那种宽匹配）
+        "assets/migrate/pycache_notes.py",
+        # 产物本体
+        "assets/execute/gtsp/gtsp-linux-arm64",
+        "assets/execute/gtsp/gtsp-linux-amd64",
+    ):
+        excluded, pattern = _excluded(
+            dest_path=dest_path,
+            src_path=f"/tmp/pyi_build/{dest_path}",
+            patterns=patterns,
+        )
+        assert not excluded, f"{dest_path} 被新规则误伤（命中模式 {pattern!r}）"
 
 
 def test_repo_ships_both_linux_gtsp_binaries_executable():

@@ -93,8 +93,15 @@ EXCLUDE_PATTERNS = [
     # 上物理存在（本仓库当前 26 个文件 / 212K）——生产构建 `tauri/scripts/build_backend.py`
     # 从工作区主目录打包，日志会被原样打进安装包。
     #
-    # 后果不只是体积：日志里有本机绝对路径（`/Volumes/PDATA/...`）和工具入参原文
-    # （实测含 base64 图片数据），等于把开发机信息带给终端用户。
+    # 后果不只是体积：日志里有本机绝对路径（`/Volumes/PDATA/...`）与用户业务文件名
+    # （实测含 `wechat.JPG` 这类终端用户的真实图片名），等于把开发机信息带给终端用户。
+    #
+    # ⚠️ 措辞更正（勿再写回「base64 图片数据」）：日志里形如
+    # `"base64":"iVBORw0KGgoAAAANSUhEUgAA...[base64:100620 chars]"` 的片段，
+    # `[base64:N chars]` 是 **gtsp 自己打的截断占位符**，不是数据本体。实测
+    # 26 个日志：`[A-Za-z0-9+/]{200,}` 0 命中、`data:image/...;base64` 0 命中、
+    # `iVBOR` 后连续 base64 字符恒 24 个。真正敏感的是路径（暴露机器）与文件名
+    # （暴露用户业务内容）。
     #
     # 功能上无损：gtsp 运行期日志落 `appPaths.LOGS_DIR`（`~/.togospace/logs/backend`），
     # 与包内这个目录无关；这里只是历史调试日志的残留。
@@ -110,6 +117,17 @@ EXCLUDE_PATTERNS = [
     #
     # 曾排除过（`56ddaede` 加桌面外壳时，那时还没有容器功能），总计约 12.7M；
     # 现在它是功能必需物，不排除。
+    #
+    # ── 下面两条同源：都是「.gitignore 忽略、但开发机上物理存在」的东西 ──
+    # 字节码缓存目录。PyInstaller 同样不读 `.gitignore`，且 `.pyc` 的 `co_filename`
+    # 记录**构建机绝对路径**（实测 1470 个 .pyc 100% 含 `/Volumes/PDATA/GitDB`）。
+    # 排掉顺带省 20M；`fnmatch(basename)` 分支天然覆盖任意层级，不用逐层列举。
+    # 只按 basename 匹配 `__pycache__`，不会误伤 `.py` 源码。
+    "__pycache__",
+    # macOS Finder 元数据。同样不入库但物理存在（assets/ 下当前 5 个：
+    # assets/、assets/icons/、assets/execute/、assets/execute/gtsp/、
+    # assets/execute/gtsp/logs/），会被整棵 `assets/` 的 datas 原样带进包。
+    ".DS_Store",
 ]
 
 # tcl/tk 动态库文件名
