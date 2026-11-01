@@ -36,7 +36,6 @@ from .core import (  # noqa: F401  显式导出，便于 IDE 与静态检查
     is_docker_available,
     is_short_id,
     list_agent_containers,
-    pick_free_index,
     prepare_container_gtsp,
     reset_cli_for_test,
     validate_enter_state,

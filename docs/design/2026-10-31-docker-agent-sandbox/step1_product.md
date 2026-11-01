@@ -47,8 +47,8 @@
 
 ### 3.3 命名与配额
 
-- 容器名：`agent-t<team_id>-<agent名>-<1..3>`，如 `agent-t2-xiaomage-1`。Agent 名含 Docker 不允许的字符（中文、空格、emoji 等）时回退为 `agent-t<team_id>-<agent_id>-<1..3>`，保证不会因名字创建失败。
-  > 依据 Operator 2026-11-01 指令修订（原规则 `agent-<agent名>-<1..3>`）：容器名在未删除范围内全局唯一，不带 team 段时两个团队各自都有同名 Agent（如都叫「小美」）会导致第二个永远建不出容器。team 段用 **`team_id`（数字）而非团队名**——「ToGo开发部」与「ToGo研究部」经字符规范化后都是 `togo`，用团队名等于没修。
+- 容器名：`agent-t<team_id>-<agent名>-<record_id>`，如 `agent-t2-xiaomage-42`。Agent 名含 Docker 不允许的字符（中文、空格、emoji 等）时回退为 `agent-t<team_id>-<agent_id>-<record_id>`，保证不会因名字创建失败。
+  > 依据 Operator 2026-11-01 指令修订（原规则 `agent-<agent名>-<1..3>` → `agent-t<team_id>-<agent名>-<1..3>` → 当前规则）：末尾改用容器记录 ID（`agent_containers.id`，全局唯一），不再在 1..3 中挑空闲编号。记录 ID 天然区分同名 Agent（含同一团队内的同名 Agent），删除后新建也不会复用旧名；`team_id` 与 Agent 名仅用于 `docker ps` 里辨认归属。
 - 每个 Agent 最多 3 个自己创建的容器（含已停止的）；满了提示先删除。外部容器不占配额。
 
 ## 4. 容器访问
@@ -88,7 +88,7 @@
 
 ```text
 小马哥: create_container()
-        → 返回 container_id: "7b1a2c3d4e5f"（agent-t2-xiaomage-1 已创建，仍在宿主）
+        → 返回 container_id: "7b1a2c3d4e5f"（agent-t2-xiaomage-42 已创建，仍在宿主）
         enter_container(container_id="7b1a2c3d4e5f")
         → 进入，工作目录 /
         execute_bash "cd /workspace/self/proj && npm install && npm run lint"
@@ -105,7 +105,7 @@
         → 报错：该自建容器处于运行状态（正常应为已停止），可 docker stop 后重试或删除重建
 ```
 
-> 示例中的容器名为 `agent-t2-xiaomage-1`，依据 Operator 2026-11-01 指令修订（原文为 `agent-xiaomage-1`），详见 §3.3。
+> 示例中的容器名为 `agent-t2-xiaomage-42`，末尾为容器记录 ID，依据 Operator 2026-11-01 指令修订（原文为 `agent-xiaomage-1`），详见 §3.3。
 
 ## 8. 范围
 
@@ -117,7 +117,7 @@
 
 **管理**
 - [ ] `create_container` 只创建不切换，自动挂载两个目录，返回 `container_id` 与容器名。
-- [ ] 中文等非法 Agent 名回退为 `agent-t<team_id>-<agent_id>-<1..3>`，不会创建失败。
+- [ ] 中文等非法 Agent 名回退为 `agent-t<team_id>-<agent_id>-<record_id>`，不会创建失败。
   > 依据 Operator 2026-11-01 指令修订（原文为 `agent-<agent_id>-<1..3>`）。
 - [ ] 两个不同团队的同名 Agent 各自都能建出容器，容器名不同（team 段用 `team_id` 区分）。
 - [ ] 不传 `image` 时为 Ubuntu 24.04；传自定义镜像则使用之；本地不存在时报错并提示 `docker pull`。

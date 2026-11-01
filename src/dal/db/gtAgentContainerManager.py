@@ -19,7 +19,10 @@ async def create(
 ) -> GtAgentContainer:
     """插入一条预记录（`docker_id = NULL`），返回带主键的对象。
 
-    预记录同时占用配额与容器名，避免并发创建绕过上限。
+    预记录同时占用配额，避免并发创建绕过上限。
+
+    注意：容器名依赖自增主键（`agent_containers.id`），调用方若需要按 ID 命名，
+    应在同一事务内先用占位名插入，拿到 `id` 后再调用 `set_container_name` 回填。
     """
     container = GtAgentContainer(
         agent_id=agent_id,
@@ -29,6 +32,13 @@ async def create(
         deleted=0,
     )
     await container.aio_save(force_insert=True)
+    return container
+
+
+async def set_container_name(container: GtAgentContainer, container_name: str) -> GtAgentContainer:
+    """回填容器名：插入预记录时还不知道自增 ID，名称要等 ID 出来后才能确定。"""
+    container.container_name = container_name
+    await container.aio_save(only=[GtAgentContainer.container_name, GtAgentContainer.updated_at])
     return container
 
 

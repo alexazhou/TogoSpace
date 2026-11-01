@@ -46,6 +46,7 @@ from model.coreModel import (
     ContainerInfo,
     ContainerTarget,
 )
+from model.dbModel.base import atomic
 from model.dbModel.gtAgentContainer import GtAgentContainer
 
 import appPaths
@@ -138,73 +139,36 @@ def is_short_id(value: str) -> bool:
     return isinstance(value, str) and bool(_SHORT_ID_PATTERN.fullmatch(value))
 
 
-def build_container_name(*, team_id: int, agent_id: int, agent_name: str, index: int) -> str:
-    """生成容器名 `agent-t<team_id>-<name>-<index>`，非法字符回退为 `agent-t<team_id>-<agent_id>-<index>`。
+def build_container_name(*, team_id: int, agent_id: int, agent_name: str, record_id: int) -> str:
+    """生成容器名 `agent-t<team_id>-<name>-<record_id>`，非法字符回退为 `agent-t<team_id>-<agent_id>-<record_id>`。
+
+    唯一性由 `record_id`（`agent_containers.id`，全局唯一）保证，不再需要
+    「在 1..3 中挑空闲编号」：两个同名 Agent 即使算出相同的可读前缀，记录 ID
+    也不同，容器名必然不同。前后缀只用于 `docker ps` 里辨认归属。
 
     Agent 名可以含中文、空格、emoji（`validate_dir_name` 只禁了路径分隔符等），
     但 Docker 容器名必须是 `[a-zA-Z0-9][a-zA-Z0-9_.-]*`。因此：
     - 先小写化并把非法字符压成 `-`；
-    - 若结果被削空（如纯中文名 → 全被替换），回退到 agent_id，保证唯一且合法。
+    - 若结果被削空（如纯中文名 → 全被替换），回退到 agent_id，保证可读且合法。
 
-    **长名不截断**：`container_name` 列参与部分唯一索引，截断会让两个不同 Agent
-    撞名；Docker 对容器名长度本身没有限制（它不是 hostname）。
-
-    **⚠️ 偏离 §3.5，依据 Operator 2026-11-01 指令修订**：§3.5 原文写的是
-    `agent-<name>-<index>`（不带 team 段）。改的原因是 `container_name` 在
-    `deleted=0` 范围内**全局唯一**，而 `agents` 的 `(team_id, name)` 索引**不唯一**
-    ——同一个名字可以在不同 Team 各存在一份。不带 team 段时，两个 Team 的「小美」
-    都会抢 `agent-xiao-mei-1`，第二个人必然 `IntegrityError`，永远建不出容器。
-
-    **为什么 team 段用 `team_id`（数字）而不是团队名** —— 这是本函数最容易改错的地方：
-    容器名只允许 `[a-z0-9_.-]`，团队名要经 `_CONTAINER_NAME_SAFE` 压缩。而
-    「ToGo开发部」与「ToGo研究部」压缩后**都是 `togo`**，两个不同团队的「小美」
-    仍会撞成 `agent-togo-xiao-mei-1`，等于绕一圈没修。`teams.name` 的 UNIQUE 约束是
-    **原值唯一**，不是压缩后唯一，所以只能用 `team_id`。
+    **长名不截断**：Docker 对容器名长度本身没有限制（它不是 hostname），
+    截断只会让 `docker ps` 更难辨认。
 
     Args:
-        team_id: 所属 Team ID（跨团队隔离的唯一可靠来源）
-        agent_id: Agent ID（回退名与唯一性来源）
+        team_id: 所属 Team ID（便于在 `docker ps` 中按团队辨认）
+        agent_id: Agent ID（可读名回退用）
         agent_name: Agent 名称（可含任意 Unicode）
-        index: 名称后缀编号 1..3
+        record_id: `agent_containers.id`，容器名的唯一性来源
 
     Returns:
-        合法的 Docker 容器名，形如 `agent-t2-xiao-mei-1` 或 `agent-t2-7-1`。
+        合法的 Docker 容器名，形如 `agent-t2-xiao-mei-42` 或 `agent-t2-7-42`。
     """
     sanitized = _CONTAINER_NAME_SAFE.sub("-", (agent_name or "").strip().lower())
     # 修剪首尾的分隔符（Docker 要求以字母数字开头）
     sanitized = sanitized.strip("-._")
     if not sanitized:
         sanitized = str(agent_id)
-    return f"{_FALLBACK_NAME_PREFIX}-t{team_id}-{sanitized}-{index}"
-
-
-def pick_free_index(
-    *,
-    active_names: list[str],
-    team_id: int,
-    agent_id: int,
-    agent_name: str,
-) -> int | None:
-    """在 1..MAX 中选未被占用的最小编号；全占满返回 None（交给调用方报超限）。
-
-    只认**本 Team 本 Agent** 的容器名：老记录（加 team 前缀之前建的，
-    形如 `agent-xiao-mei-1`）按本函数算出的新名永远对不上，于是那些编号看起来
-    是空的。这是有意的：老记录仍按 `docker_id` 正常操作，新容器不复用老名编号。
-    详见 `create_container` 里关于「不做数据回填」的说明。
-    """
-    used: set[int] = set()
-    for index in range(1, MAX_CONTAINERS_PER_AGENT + 1):
-        if (
-            build_container_name(
-                team_id=team_id, agent_id=agent_id, agent_name=agent_name, index=index
-            )
-            in active_names
-        ):
-            used.add(index)
-    for index in range(1, MAX_CONTAINERS_PER_AGENT + 1):
-        if index not in used:
-            return index
-    return None
+    return f"{_FALLBACK_NAME_PREFIX}-t{team_id}-{sanitized}-{record_id}"
 
 
 def build_create_argv(
@@ -223,8 +187,7 @@ def build_create_argv(
     - **不传 `--workdir`**：跟随镜像默认 WORKDIR；
     - **不传 `--read-only`**：gtsp 需要写 `/tmp`；
     - **恒开 `--init`**：由 tini 回收孤儿僵尸进程，且 gtsp 退出时同步退出；
-    - **必须显式传可写的 `--log-path`**：镜像默认没有 `/tmp/togospace/logs` 之外
-      的约定路径；
+    - **必须显式传可写的 `--log-path`**：镜像没有 `/tmp/gtsp-logs` 之外的约定路径；
     - 镜像名之后是容器 CMD（gtsp 的启动参数）。
     """
     return [
@@ -490,39 +453,30 @@ async def create_container(agent_id: int, image: str | None = None) -> GtAgentCo
                 f"自建容器数已达上限（{MAX_CONTAINERS_PER_AGENT}）",
                 ERROR_CONTAINER_LIMIT_REACHED,
             )
-        index = pick_free_index(
-            active_names=[row.container_name for row in active],
-            team_id=team_id,
-            agent_id=agent_id,
-            agent_name=agent_name,
-        )
-        if index is None:
-            # 理论上与上面的 len 判断等价；保留以防御「名称被占但行数未满」
-            raise TogoException(
-                f"自建容器数已达上限（{MAX_CONTAINERS_PER_AGENT}）",
-                ERROR_CONTAINER_LIMIT_REACHED,
-            )
-        container_name = build_container_name(
-            team_id=team_id, agent_id=agent_id, agent_name=agent_name, index=index
-        )
+        # 容器名要带 record_id，而 ID 只有插入预记录后才知道。名称列 NOT NULL
+        # 且活跃记录内唯一，所以事务内先用空串占位、拿到自增 ID 后立刻回填：
+        # `BEGIN IMMEDIATE` 串行化写事务，其他连接看不到未提交的空名。
         try:
-            record = await gtAgentContainerManager.create(
-                agent_id=agent_id,
-                container_name=container_name,
-                image=image,
-            )
+            async with atomic():
+                record = await gtAgentContainerManager.create(
+                    agent_id=agent_id,
+                    container_name="",
+                    image=image,
+                )
+                assert record.id is not None
+                container_name = build_container_name(
+                    team_id=team_id,
+                    agent_id=agent_id,
+                    agent_name=agent_name,
+                    record_id=record.id,
+                )
+                await gtAgentContainerManager.set_container_name(record, container_name)
         except IntegrityError as exc:
-            # `container_name` 在 `deleted=0` 范围内全局唯一。加了 team 段之后，
-            # **跨 Team 同名**已不会再撞（这正是 #117 修掉的洞）；仍会撞的只剩
-            # **同一 Team 内同名且同编号**——`agents` 的 `(team_id, name)` 是
-            # 非唯一索引，同团队允许两个同名 Agent 并存，二者算出的容器名完全相同。
-            # 另外手工改库、并发外部写入也可能造成。
-            # 裸 `IntegrityError`（error_code=None）对模型完全不可行动——它只能看到
-            # 「数据库错误」，无从知道该换什么做法，因此仍包成明确错误码。
+            # 正常路径下 record_id 已保证名称唯一；仍可能撞的只剩历史遗留命名
+            # （旧规则的后缀是 1..3）或手工改库。裸 `IntegrityError`（error_code=None）
+            # 对模型不可行动，因此包成明确错误码。
             raise TogoException(
-                f"容器名冲突：{container_name} 已被占用。"
-                "同一团队内存在同名 Agent，或该名称仍被未清理的容器占着。"
-                "请先清理对方容器，或改用不同名字的 Agent 创建容器。",
+                "容器名冲突：生成的容器名已被占用（多为历史遗留记录），请先清理后重试。",
                 ERROR_CONTAINER_NAME_CONFLICT,
             ) from exc
 

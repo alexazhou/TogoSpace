@@ -346,8 +346,9 @@ CONTAINER_INSPECT_TIMEOUT_SEC = 3
 # 缺失或不可写时按失败处理，本版不做兜底。
 CONTAINER_GTSP_PATH = "/tmp/gtsp"
 
-# 容器内日志目录（显式传给 gtsp 的 --log-path，必须是容器内可写路径）
-CONTAINER_LOG_DIR = "/tmp/togospace/logs"
+# 容器内日志目录（显式传给 gtsp 的 --log-path，必须是容器内可写路径）。
+# 不能取 /tmp/gtsp/logs：/tmp/gtsp 是二进制文件，gtsp 对日志目录做 MkdirAll 会失败。
+CONTAINER_LOG_DIR = "/tmp/gtsp-logs"
 
 # Label 键：记录归属校验用。按容器名清理预记录前必须校验该 label 与期望值一致，
 # 否则绝不 docker rm -f——避免误删宿主上同名的外部容器（设计文档 §3.5）。

@@ -260,99 +260,64 @@ async def env(tmp_path, monkeypatch):
 def test_container_name_sanitizes_unicode_but_keeps_ascii_readable():
     """ASCII 名保留可读性；纯中文名回退到 agent_id（Docker 不接受中文容器名）。
 
-    名字里必须带 `t<team_id>` 段：`container_name` 在 `deleted=0` 范围内全局唯一，
-    不带 team 段时两个团队的同一个名字会互撞（#117）。
+    名称最后一段是 `record_id`（`agent_containers.id`），唯一性由它保证。
     """
     assert (
-        core.build_container_name(team_id=2, agent_id=7, agent_name="xiao-mei", index=1)
-        == "agent-t2-xiao-mei-1"
+        core.build_container_name(team_id=2, agent_id=7, agent_name="xiao-mei", record_id=42)
+        == "agent-t2-xiao-mei-42"
     )
     assert (
-        core.build_container_name(team_id=2, agent_id=7, agent_name="Xiao Mei", index=2)
-        == "agent-t2-xiao-mei-2"
+        core.build_container_name(team_id=2, agent_id=7, agent_name="Xiao Mei", record_id=43)
+        == "agent-t2-xiao-mei-43"
     )
     # 纯中文名 → sanitize 后为空 → 回退 agent_id
     assert (
-        core.build_container_name(team_id=2, agent_id=7, agent_name="小美", index=1)
-        == "agent-t2-7-1"
+        core.build_container_name(team_id=2, agent_id=7, agent_name="小美", record_id=44)
+        == "agent-t2-7-44"
     )
 
 
-def test_container_name_differs_for_same_agent_name_in_different_teams():
-    """**#117 的核心**：同名 Agent 在不同 Team 必须得到不同容器名。
+def test_container_name_differs_by_record_id_even_for_same_agent_name():
+    """同名 Agent（同 Team 或跨 Team）靠 `record_id` 区分，不再依赖编号选择。
 
-    `teams.name` 的 UNIQUE 是**原值唯一**，不是 sanitize 后唯一：「ToGo开发部」与
-    「ToGo研究部」压成容器安全字符后**都是 `togo`**。若 team 段用团队名，两个团队
-    的同一个 Agent 仍会撞成 `agent-togo-xiao-mei-1`，等于绕一圈没修。所以必须用
-    `team_id`。这条用例直接钉住「用 id 不用 name」这个决定。
+    `agents` 的 `(team_id, name)` 是非唯一索引，同团队允许同名 Agent 并存；
+    记录 ID 全局唯一，因此两个 Agent 的容器名必然不同。
     """
     name_a = core.build_container_name(
-        team_id=2, agent_id=7, agent_name="xiao-mei", index=1
+        team_id=2, agent_id=7, agent_name="xiao-mei", record_id=42
     )
     name_b = core.build_container_name(
-        team_id=3, agent_id=7, agent_name="xiao-mei", index=1
+        team_id=2, agent_id=8, agent_name="xiao-mei", record_id=43
     )
 
-    assert name_a == "agent-t2-xiao-mei-1"
-    assert name_b == "agent-t3-xiao-mei-1"
-    assert name_a != name_b, "两个 Team 的同名 Agent 抢到了同一个容器名，#117 等于没修"
+    assert name_a == "agent-t2-xiao-mei-42"
+    assert name_b == "agent-t2-xiao-mei-43"
+    assert name_a != name_b
+
+
+def test_container_name_keeps_team_segment_for_readability():
+    """team 段不再承担唯一性（record_id 负责），仅用于 `docker ps` 辨认归属。"""
+    name_a = core.build_container_name(
+        team_id=2, agent_id=7, agent_name="xiao-mei", record_id=42
+    )
+    name_b = core.build_container_name(
+        team_id=3, agent_id=7, agent_name="xiao-mei", record_id=42
+    )
+
+    assert name_a == "agent-t2-xiao-mei-42"
+    assert name_b == "agent-t3-xiao-mei-42"
 
 
 def test_container_name_does_not_truncate_long_names():
-    """长名不截断：`container_name` 参与部分唯一索引，截断会让两个 Agent 撞名。
-
-    Docker 对容器名长度本身没有限制（它不影响 hostname），所以没有截断的必要。
-    """
+    """长名不截断：Docker 对容器名长度本身没有限制（它不影响 hostname）。"""
     long_name = "a" * 100
 
     name = core.build_container_name(
-        team_id=2, agent_id=7, agent_name=long_name, index=1
+        team_id=2, agent_id=7, agent_name=long_name, record_id=42
     )
 
     assert long_name in name
     assert len(name) > 100
-
-
-def test_pick_free_index_uses_smallest_available():
-    """在 1..3 中取未占用的最小编号（删除后编号应能被复用）。"""
-    names = [
-        core.build_container_name(team_id=2, agent_id=7, agent_name="xiao-mei", index=1),
-        core.build_container_name(team_id=2, agent_id=7, agent_name="xiao-mei", index=3),
-    ]
-
-    assert (
-        core.pick_free_index(
-            active_names=names, team_id=2, agent_id=7, agent_name="xiao-mei"
-        )
-        == 2
-    )
-
-
-def test_pick_free_index_ignores_names_from_other_teams():
-    """别的 Team 占着 `t3-...-1` 不影响本 Team 选 1（team 段就是隔离点）。"""
-    names = [
-        core.build_container_name(team_id=3, agent_id=7, agent_name="xiao-mei", index=1),
-    ]
-
-    assert (
-        core.pick_free_index(
-            active_names=names, team_id=2, agent_id=7, agent_name="xiao-mei"
-        )
-        == 1
-    )
-
-
-def test_pick_free_index_returns_none_when_full():
-    """三个编号全占满时返回 None（由调用方报 `container_limit_reached`）。"""
-    names = [
-        core.build_container_name(team_id=2, agent_id=7, agent_name="x", index=index)
-        for index in (1, 2, 3)
-    ]
-
-    assert (
-        core.pick_free_index(active_names=names, team_id=2, agent_id=7, agent_name="x")
-        is None
-    )
 
 
 def test_short_id_pattern_rejects_names_and_images():
@@ -468,8 +433,12 @@ async def test_create_container_follows_pre_record_then_create_then_inject(env):
     record = await core.create_container(1)
 
     assert record.docker_id == "c0ffee123456"
-    # 中文名 → 回退 agent_id；team-a 是 1 号 team（env fixture 只造了一个 team）
-    assert record.container_name == "agent-t1-1-1"
+    # 中文名 → 回退 agent_id；team-a 是 1 号 team（env fixture 只造了一个 team）。
+    # 最后一段是自增记录 ID，按实际返回的记录推导，避免把自增序列写死。
+    assert record.container_name == core.build_container_name(
+        team_id=1, agent_id=1, agent_name="小美", record_id=record.id,
+    )
+    assert record.container_name == f"agent-t1-1-{record.id}"
     assert record.image == "ubuntu:24.04"
 
     subcommands = env.subcommands()
@@ -502,9 +471,7 @@ async def test_create_container_hits_limit_after_three(env):
     for index in (1, 2, 3):
         await core.gtAgentContainerManager.create(
             agent_id=1,
-            container_name=core.build_container_name(
-                team_id=1, agent_id=1, agent_name="小美", index=index
-            ),
+            container_name=f"seed-{index}",
             image="ubuntu:24.04",
         )
     before = len(env.calls())
@@ -610,34 +577,24 @@ async def test_docker_absent_reports_cli_not_found_and_leaves_no_record(env, mon
 
 
 async def test_create_reports_name_conflict_as_togo_exception(env):
-    """容器名撞车 ⇒ `container_name_conflict`，不是裸 IntegrityError（#111 裁定 6 / #117）。
+    """容器名撞车 ⇒ `container_name_conflict`，不是裸 IntegrityError（#111 裁定 6）。
 
-    **这条用例在 #117 被改造过，没有删。** 改造理由：
-
-    原版预置 `container_name="agent-1-1"`（旧命名 `agent-<agent_id>-<index>`），
-    靠「另一个 Team 的同名 Agent 占住同名」制造冲突。加了 team 段之后，本 Agent
-    算出的新名是 `agent-t1-1-1`，**与 `agent-1-1` 不再相同**，原版会从「验证包装」
-    退化成「什么都不验证」的假绿——所以必须改造。
-
-    改造方式：预置**本 Agent 自己算出来的那个名字**（DB 层直接造同名活跃记录），
-    让 `IntegrityError` 真实发生。
-
-    为什么这个方向是有效的而不是作弊——请看 `test_two_teams_same_agent_name_both_create`：
-    **跨 Team 同名那条路已经被 #117 修掉了**，不该再撞。现在唯一合法会撞的场景只剩
-    「同一 Team 内两个同名 Agent」（`agents` 的 `(team_id, name)` 是**非唯一**索引，
-    允许并存，二者算出的容器名完全相同）。这里用 DB 层直造等价于那个场景，
-    且不依赖 fixture 里再塞一个同名 Agent。
+    新规则下名称由 `record_id` 保证唯一，正常路径不会再撞。这里模拟**历史遗留
+    命名或手工改库**占用：先插一条记录拿到 ID `n`，把它改成「下一次创建（ID `n+1`）
+    会生成的名字」，让 `IntegrityError` 真实发生。
 
     这条用例守的是**包装逻辑本身**：只要有人把 `except IntegrityError` 那段删掉，
     裸 `IntegrityError` 就会冒出去，`error_code` 变成 None，这条立刻红。
     """
-    # 本 Agent（team 1，中文名「小美」）算出的容器名是 `agent-t1-1-1`。
-    # 预置一条**同名的活跃记录**，模拟「同一 Team 内另一个同名 Agent 先占了」。
-    occupied = core.build_container_name(team_id=1, agent_id=1, agent_name="小美", index=1)
-    assert occupied == "agent-t1-1-1"
-    await core.gtAgentContainerManager.create(
-        agent_id=2, container_name=occupied, image="ubuntu:24.04"
+    seed = await core.gtAgentContainerManager.create(
+        agent_id=2, container_name="seed", image="ubuntu:24.04"
     )
+    assert seed.id is not None
+    # 下一条预记录会是 seed.id + 1（本用例的临时库只有这一条记录）。
+    occupied = core.build_container_name(
+        team_id=1, agent_id=1, agent_name="小美", record_id=seed.id + 1,
+    )
+    await core.gtAgentContainerManager.set_container_name(seed, occupied)
 
     with pytest.raises(TogoException) as excinfo:
         await core.create_container(1)
@@ -647,7 +604,7 @@ async def test_create_reports_name_conflict_as_togo_exception(env):
     assert excinfo.value.__cause__ is not None, (
         "必须保留原始异常链（`raise ... from exc`），否则排查时看不到真实的数据库错误"
     )
-    # 撞名时不该留下自己的记录，也不该调 docker create
+    # 撞名时事务应整体回滚：只能剩预置的那条记录，也不该调 docker create
     assert await core.gtAgentContainerManager.count_active_by_agent(1) == 0
     assert env.calls_of("create") == []
 
@@ -664,21 +621,13 @@ async def test_pre_record_is_visible_in_list_and_counts_toward_quota(env):
 
 
 async def test_two_teams_same_agent_name_both_create(env):
-    """**#117 的正向回归**：两个 Team 各有一个同名 Agent，都能成功建出容器。
+    """两个 Team 各有一个同名 Agent，都能成功建出容器（#117 的正向回归）。
 
-    这是本任务的验收核心 —— 没有这条等于没修。
-
-    **为什么必须用 ASCII 名（而不是中文名）**：纯中文名在 `build_container_name`
-    里会被 sanitize 成空、回退成 `agent_id`，而两个 Agent 的 `agent_id` 本来就不同，
-    旧规则下 `agent-1-1` / `agent-2-1` **本来就不撞**，用中文名写这条用例会假绿。
-    真正的撞名场景是**名字可用**的 Agent：两个团队的 `xiao-mei` 在旧规则下都算出
-    `agent-xiao-mei-1`，而 `container_name` 在 `deleted=0` 范围内全局唯一 ⇒
-    第二个人必然 `IntegrityError`。
-
-    断言三件事：
+    名称唯一性现在由 `record_id` 保证：两个 Agent 的记录 ID 不同，容器名必然不同，
+    与团队段、Agent 名是否可读无关。断言三件事：
     1. 两次 `create_container` 都成功（不抛异常）
     2. 传给 `docker create` 的 `--name` 两个值不同，且分别带 t1 / t2
-    3. DB 里两条记录都在，各自 `container_name` 正确
+    3. DB 里两条记录都在，各自 `container_name` 与记录 ID 一致
 
     注意：假 docker 对 `create` 恒返同一个短 ID，而 `docker_id` 是全局唯一索引，
     所以两次创建之间要换一个返回值（用现有 `env.set` 即可，不用改夹具）。
@@ -697,12 +646,7 @@ async def test_two_teams_same_agent_name_both_create(env):
     # 新插的 Agent 要清缓存，否则 `get_agent_by_id` 可能命中前面用例留下的旧对象
     gtAgentManager.clear_agent_cache()
 
-    # 2) 前提说明（不写断言）：旧规则是 `agent-<sanitized_name>-<index>`，不含 team/agent
-    #    段，所以两个 team 的 `xiao-mei` 都得到 `agent-xiao-mei-1`，必然撞名。
-    #    这里不用断言表达——同义反复的断言（`"a" == "a"`）只是噪音，真正的判据是下面
-    #    「新规则下两个名字必须不同」。
-
-    # 3) 两个团队各建一个容器。假 docker 每次返回同一个短 ID（会撞 docker_id 唯一索引），
+    # 2) 两个团队各建一个容器。假 docker 每次返回同一个短 ID（会撞 docker_id 唯一索引），
     #    所以在两次调用之间换一个返回值。
     env.set("create", stdout="aaaa1111222233334444\n")
     first = await core.create_container(2)
@@ -710,29 +654,37 @@ async def test_two_teams_same_agent_name_both_create(env):
     env.set("create", stdout="bbbb1111222233334444\n")
     second = await core.create_container(3)
 
-    # 4) 两次都真的建成功了
+    # 3) 两次都真的建成功了
     assert first.docker_id == "aaaa11112222"
     assert second.docker_id == "bbbb11112222"
 
-    # 5) 名字不同，且各带自己的 team 段
-    assert first.container_name == "agent-t1-xiao-mei-1"
-    assert second.container_name == "agent-t2-xiao-mei-1"
-    assert first.container_name != second.container_name, (
-        "两个 Team 的同名 Agent 抢到了同一个容器名 —— #117 等于没修"
+    # 4) 名字按 record_id 生成，两个 Agent 必然不同，且各带自己的 team 段
+    assert first.id is not None
+    assert second.id is not None
+    first_name = core.build_container_name(
+        team_id=1, agent_id=2, agent_name="xiao-mei", record_id=first.id,
     )
+    second_name = core.build_container_name(
+        team_id=2, agent_id=3, agent_name="xiao-mei", record_id=second.id,
+    )
+    assert first.container_name == first_name
+    assert second.container_name == second_name
+    assert first.container_name.startswith("agent-t1-xiao-mei-")
+    assert second.container_name.startswith("agent-t2-xiao-mei-")
+    assert first.container_name != second.container_name
 
-    # 6) 传给 docker create 的 --name 也必须是两个不同的值（DB 对了但 argv 错了也不行）
+    # 5) 传给 docker create 的 --name 也必须是两个不同的值（DB 对了但 argv 错了也不行）
     create_calls = env.calls_of("create")
     assert len(create_calls) >= 2
     names: list[str] = []
     for call in create_calls:
         assert "--name" in call
         names.append(call[call.index("--name") + 1])
-    assert names[0] == "agent-t1-xiao-mei-1"
-    assert names[1] == "agent-t2-xiao-mei-1"
+    assert names[0] == first_name
+    assert names[1] == second_name
 
-    # 7) DB 里两条活跃记录都在，没有互相覆盖或被清理
+    # 6) DB 里两条活跃记录都在，没有互相覆盖或被清理
     rows_a = await core.gtAgentContainerManager.list_active_by_agent(2)
     rows_b = await core.gtAgentContainerManager.list_active_by_agent(3)
-    assert [row.container_name for row in rows_a] == ["agent-t1-xiao-mei-1"]
-    assert [row.container_name for row in rows_b] == ["agent-t2-xiao-mei-1"]
+    assert [row.container_name for row in rows_a] == [first_name]
+    assert [row.container_name for row in rows_b] == [second_name]

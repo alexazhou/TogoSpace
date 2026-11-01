@@ -327,8 +327,8 @@ async def test_delete_container_removes_real_docker_container(e2e_env):
 
 
 @_DOCKER_SKIP
-async def test_container_name_freed_after_delete(e2e_env):
-    """容器名在活跃期唯一、删除后可复用（部分唯一索引 `WHERE deleted = 0` 的真实行为）。"""
+async def test_container_name_uses_record_id(e2e_env):
+    """容器名以自增记录 ID 结尾：删除后新建不会复用旧名（ID 持续递增）。"""
     first = await _create(e2e_env)
     first_name = first.container_name
     await containerService.delete_container(1, container_id=first.docker_id)
@@ -336,7 +336,9 @@ async def test_container_name_freed_after_delete(e2e_env):
 
     second = await _create(e2e_env)
 
-    assert second.container_name == first_name, "删除后编号应被复用（取最小空闲编号）"
+    assert first_name.endswith(f"-{first.id}")
+    assert second.container_name.endswith(f"-{second.id}")
+    assert second.container_name != first_name
 
 
 @_DOCKER_SKIP
