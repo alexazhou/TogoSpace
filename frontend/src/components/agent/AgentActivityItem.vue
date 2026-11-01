@@ -360,6 +360,46 @@ function getActivityToolResult(activity: AgentActivity): string {
   return t('agent.parseFailed');
 }
 
+/**
+ * 执行环境徽标文案（§8：容器状态直接展示 Docker 原值，不翻译）。
+ *
+ * 后端 `AgentActivityMeta.to_dict()` 会剔掉值为 None 的字段，所以宿主态下
+ * `current_container_id` / `container_name` 的**键可能直接不存在**（不是 null），
+ * 判断环境只能认 `metadata.exec_env` 本身，不能拿 `=== null` 猜。
+ * 三键全缺失（老记录、Native driver 不带该字段）时返回空串 ⇒ 不渲染任何徽标。
+ */
+function execEnvBadgeText(activity: AgentActivity): string {
+  const execEnv = activity.metadata?.exec_env;
+  if (execEnv === 'container') {
+    const containerName = readTrimmedString(activity.metadata?.container_name);
+    if (containerName) {
+      return containerName;
+    }
+    const containerId = readTrimmedString(activity.metadata?.current_container_id);
+    if (containerId) {
+      // 后端正常回填 12 位短 ID；长度不合预期时截断成短 ID，避免撑爆 chip。
+      return containerId.slice(0, 12);
+    }
+    // 环境已知是容器，但容器标识缺失：给环境名而不是空白胶囊。
+    return t('agent.execEnv.container');
+  }
+  if (execEnv === 'host') {
+    return t('agent.execEnv.host');
+  }
+  return '';
+}
+
+/** 徽标 hover 提示：容器态给完整容器 ID（徽标里是截断的短 ID）。 */
+function execEnvBadgeTitle(activity: AgentActivity): string {
+  if (activity.metadata?.exec_env !== 'container') {
+    return t('agent.execEnv.label');
+  }
+  const containerName = readTrimmedString(activity.metadata?.container_name);
+  const containerId = readTrimmedString(activity.metadata?.current_container_id);
+  const identity = [containerName, containerId].filter(Boolean).join(' · ');
+  return identity ? `${t('agent.execEnv.container')} · ${identity}` : t('agent.execEnv.container');
+}
+
 function activityMetaTokens(activity: AgentActivity): string {
   const metadata = activity.metadata ?? {};
   const currentTotal = typeof metadata.current_total_tokens === 'number' ? metadata.current_total_tokens : null;
@@ -553,6 +593,8 @@ const activityView = computed(() => {
     || hasExecuteBashDetails
     || (activity.activity_type === 'message_received' && receivedMessages.length > 0);
   const currentTaskTitle = getActivityTaskTitle(activity);
+  const currentExecEnvBadge = execEnvBadgeText(activity);
+  const currentExecEnvBadgeTitle = currentExecEnvBadge ? execEnvBadgeTitle(activity) : '';
   const currentSummary = activitySummary(
     activity,
     currentToolName,
@@ -579,6 +621,9 @@ const activityView = computed(() => {
     expandedContent,
     expandedMessage,
     expandedToolResult,
+    execEnvBadge: currentExecEnvBadge,
+    execEnvBadgeTitle: currentExecEnvBadgeTitle,
+    execEnvIsContainer: activity.metadata?.exec_env === 'container',
     taskRoomLabel: currentTaskRoomLabel,
     receivedMessages,
     exitCode: currentExitCode,
@@ -650,6 +695,13 @@ const activityView = computed(() => {
         :class="{ 'agent-activity-item__chip--danger': activity.status === 'failed' }"
         :title="activityView.displayToolName"
       >{{ activityView.displayToolName }}</span>
+      <span
+        v-if="activityView.execEnvBadge"
+        class="agent-activity-item__chip agent-activity-item__chip--env"
+        :class="{ 'agent-activity-item__chip--env-host': !activityView.execEnvIsContainer }"
+        :title="activityView.execEnvBadgeTitle"
+        :data-exec-env="activityView.execEnvIsContainer ? 'container' : 'host'"
+      >{{ activityView.execEnvBadge }}</span>
       <span
         v-if="activityView.showToolArguments"
         class="agent-activity-item__summary agent-activity-item__summary--code agent-activity-item__tool-args"
@@ -973,6 +1025,25 @@ const activityView = computed(() => {
 .agent-activity-item__chip--danger {
   background: var(--surface-chip-danger);
   color: var(--danger);
+}
+
+/* 执行环境徽标：容器态用 info 色区分，宿主态弱化成普通 chip 的观感。 */
+.agent-activity-item__chip--env {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  padding-bottom: 1px;
+  max-width: 140px;
+  border: 1px solid color-mix(in srgb, var(--state-info) 24%, var(--border-default) 76%);
+  background: color-mix(in srgb, var(--state-info) 12%, var(--surface-panel) 88%);
+  color: color-mix(in srgb, var(--state-info) 84%, var(--text-primary) 16%);
+}
+
+.agent-activity-item__chip--env-host {
+  border-color: var(--border-subtle);
+  background: var(--surface-chip);
+  color: var(--text-secondary);
 }
 
 .agent-activity-item__direction {
