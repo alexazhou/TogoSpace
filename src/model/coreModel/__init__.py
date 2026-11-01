@@ -3,7 +3,6 @@ from .gtCoreAgentEvent import GtCoreRoomMessageEvent
 from .serviceStatus import ServiceStatusInfo
 from .agentModel import (
     AgentDetailInfo,
-    AgentInfo,
     AgentListInfo,
     AgentListItem,
     AgentViewInfo,
@@ -23,7 +22,6 @@ __all__ = [
     "GtCoreRoomMessageEvent",
     "ServiceStatusInfo",
     "AgentDetailInfo",
-    "AgentInfo",
     "AgentListInfo",
     "AgentListItem",
     "AgentViewInfo",

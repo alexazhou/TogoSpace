@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
-from constants import AgentStatus, DriverType, EmployStatus, ExecEnv
+from constants import AgentStatus, ExecEnv
 from model.coreModel.containerModel import ContainerInfo
+from model.dbModel.gtAgent import GtAgent
+from util import jsonUtil
 
 
 class ExecEnvState(BaseModel):
@@ -21,62 +22,29 @@ class ExecEnvState(BaseModel):
     current_container_id: str | None = None
 
 
-class AgentInfo(BaseModel):
-    """`GtAgent` 的 DB 字段视图。
-
-    直接由 ORM 对象校验（`from_attributes`），不手抄列名；枚举的对外形态由
-    serializer 固定，避免 pydantic 把 `auto()` 的数值写进响应。
-    """
-
-    model_config = ConfigDict(extra="forbid", from_attributes=True)
-
-    id: int
-    team_id: int
-    name: str
-    role_template_id: int
-    employ_status: EmployStatus
-    """对外用枚举名（ON_BOARD / OFF_BOARD）。"""
-
-    model: str
-    driver: DriverType
-    """对外用枚举值（native / claude_sdk / tsp）。"""
-
-    employee_number: int
-    i18n: dict[str, Any] = Field(default_factory=dict)
-    allow_tools: list[str] | None = None
-    allow_skills: list[str] | None = None
-    created_at: datetime
-    updated_at: datetime
-
-    @field_serializer("created_at", "updated_at")
-    def _serialize_datetime(self, value: datetime) -> str:
-        """沿用接口原有时间格式（`jsonUtil` 默认的 `%Y-%m-%d %H:%M:%S.%f`）。"""
-        return value.strftime("%Y-%m-%d %H:%M:%S.%f")
-
-    @field_serializer("employ_status")
-    def _serialize_employ_status(self, value: EmployStatus) -> str:
-        return value.name
-
-    @field_serializer("driver")
-    def _serialize_driver(self, value: DriverType) -> str:
-        return value.value
-
-
 class AgentViewInfo(BaseModel):
-    """Agent 列表 / 详情的外层：原始 DB 视图 + 运行时状态。
+    """Agent 列表 / 详情的外层：原始 DB 对象 + 运行时状态。
 
-    运行时字段放在 `agent` 外面，不混进 DB 字段里。
+    `agent` 直接持有 `GtAgent`，序列化复用 ORM 自带的 `to_json()`；运行时字段
+    放在外层，不混进 DB 字段里。
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
-    agent: AgentInfo
+    agent: GtAgent
     status: AgentStatus
     """运行时状态（IDLE / ACTIVE / FAILED / CLOSED），来自内存而非 DB。"""
 
     exec_env: ExecEnv = ExecEnv.HOST
     current_container_id: str | None = None
     container_count: int = 0
+
+    @field_serializer("agent")
+    def _serialize_agent(self, value: GtAgent) -> dict[str, Any]:
+        data = jsonUtil.object_to_json_data(value)
+        # 接口契约要求 driver 用小写 value，jsonUtil 默认取枚举的 name
+        data["driver"] = value.driver.value
+        return data
 
     @field_serializer("status")
     def _serialize_status(self, value: AgentStatus) -> str:

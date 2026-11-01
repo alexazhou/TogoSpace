@@ -7,7 +7,6 @@ from model.dbModel.base import atomic
 from model.dbModel.gtDept import GtDept
 from model.coreModel.agentModel import (
     AgentDetailInfo,
-    AgentInfo,
     AgentListInfo,
     AgentListItem,
     ExecEnvState,
@@ -571,7 +570,7 @@ async def get_agent_detail_info(agent: GtAgent) -> AgentDetailInfo:
     )
 
     return AgentDetailInfo(
-        agent=AgentInfo.model_validate(agent),
+        agent=agent,
         status=runtime_status_map.get(agent.id, AgentStatus.IDLE),
         error_message=error_message,
         exec_env=exec_state.exec_env,
@@ -610,7 +609,7 @@ async def get_team_agent_list_info(
 
         items.append(
             AgentListItem(
-                agent=AgentInfo.model_validate(agent),
+                agent=agent,
                 status=runtime_status_map.get(agent.id, AgentStatus.IDLE),
                 exec_env=exec_state.exec_env,
                 current_container_id=exec_state.current_container_id,
