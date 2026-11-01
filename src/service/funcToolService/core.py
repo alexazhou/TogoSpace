@@ -12,10 +12,14 @@ from util import llmApiUtil
 from service.roomService import ToolCallContext
 from .funcToolType import FuncTool
 from .tools import (
+    create_container,
     create_task,
+    delete_container,
     delete_dept,
     delete_role_template,
     delete_room,
+    enter_container,
+    exit_to_host,
     finish_action,
     get_agent_info,
     get_dept_info,
@@ -24,6 +28,7 @@ from .tools import (
     get_task_detail,
     get_task_event,
     get_time,
+    list_containers,
     list_role_templates,
     list_task_events,
     list_tasks,
@@ -89,6 +94,29 @@ def load_func_tools() -> dict[str, FuncTool]:
     return _func_tools
 
 
+# 容器工具单独一组：只对 TspAgentDriver 暴露（§6.1 生效范围）。
+# 放在这里而不是混进 `load_func_tools` 的注册表，是为了让「默认工具集」保持原样
+# ——`get_tools()` 不带容器工具，Native / Claude SDK 的行为零变化。
+CONTAINER_TOOL_NAMES = (
+    "create_container",
+    "enter_container",
+    "exit_to_host",
+    "list_containers",
+    "delete_container",
+)
+
+_container_func_tools: dict[str, FuncTool] = {}
+
+
+def load_container_func_tools() -> dict[str, FuncTool]:
+    """加载容器工具（`startup` 时一并构建，避免每次 `get_tools` 现造）。"""
+    global _container_func_tools
+    _container_func_tools = {
+        name: FuncTool(name, globals()[name]) for name in CONTAINER_TOOL_NAMES
+    }
+    return _container_func_tools
+
+
 def get_func_tool(name: str) -> FuncTool | None:
     return _func_tools.get(name)
 
@@ -96,17 +124,28 @@ def get_func_tool(name: str) -> FuncTool | None:
 def _reset() -> None:
     """纯资源清理：正常 shutdown 与启动失败回滚共用；幂等。"""
     _func_tools.clear()
+    _container_func_tools.clear()
 
 
 @serviceUtil.service_start_wrapper(s_status, on_error=_reset)
 async def startup() -> None:
     """加载启用的函数列表，须在首次调用 get_tools 前调用一次。"""
     load_func_tools()
+    load_container_func_tools()
 
 
-def get_tools() -> list[llmApiUtil.OpenAITool]:
-    """返回已初始化的工具列表。"""
-    return build_tools(_func_tools.values())
+def get_tools(include_container_tools: bool = False) -> list[llmApiUtil.OpenAITool]:
+    """返回已初始化的工具列表。
+
+    Args:
+        include_container_tools: 是否包含容器沙箱工具。默认 False——只有
+            `TspAgentDriver` 需要（容器工具要切换 gtsp 执行环境），Native /
+            Claude SDK 暴露出来只会误导模型（§6.1 生效范围）。
+    """
+    tools = list(_func_tools.values())
+    if include_container_tools:
+        tools.extend(_container_func_tools.values())
+    return build_tools(tools)
 
 
 def get_tools_by_names(

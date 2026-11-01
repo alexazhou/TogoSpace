@@ -28,6 +28,12 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     "get_task_event": ToolCategory.BASIC,
     "list_tasks": ToolCategory.BASIC,
     "load_skill": ToolCategory.BASIC,
+    # 容器沙箱工具：只对 TspAgentDriver 暴露（§6.1），全部归为执行类
+    "create_container": ToolCategory.EXECUTE,
+    "enter_container": ToolCategory.EXECUTE,
+    "exit_to_host": ToolCategory.EXECUTE,
+    "list_containers": ToolCategory.EXECUTE,
+    "delete_container": ToolCategory.EXECUTE,
     "reload_team": ToolCategory.ADMIN,
     "list_role_templates": ToolCategory.ADMIN,
     "get_role_template": ToolCategory.ADMIN,

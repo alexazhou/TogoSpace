@@ -183,11 +183,20 @@ async def test_delete_dept_error_is_structured(monkeypatch):
     assert res["message"] == "部门 'd' 下还有子部门"
 
 
-def test_three_tool_except_branches_use_shared_helper():
-    """护栏：三处 `except ... str(exc)` 都已走统一 helper，别再各自拼返回体。"""
+def test_tool_except_branches_use_shared_helper():
+    """护栏：所有工具层的 `except ... str(exc)` 分支都走统一 helper，别再各自拼返回体。
+
+    这里断言**不出现**手拼返回体的写法，而不是钉一个精确的调用处数——钉数字会让
+    每新增一个工具都要改这条护栏，而它真正要防的是「有人绕过 helper 自己拼」。
+
+    历史背景：最初是 3 处（`save_room` / `delete_room` / `delete_dept`），后来
+    容器沙箱工具（#109）也用同一个 helper，处数随工具数增长。
+    """
     src = inspect.getsource(tools)
 
-    assert src.count("return _tool_error_result(exc)") == 3
+    # 至少有一处使用（防 helper 被完全弃用后这条用例永远绿）
+    assert src.count("return _tool_error_result(exc)") >= 3
+    # 关键否定断言：不许手拼 `str(exc)` 返回体（它会丢掉 error_code）
     assert 'return {"success": False, "message": str(exc)}' not in src
 
 

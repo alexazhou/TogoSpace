@@ -1110,3 +1110,16 @@ async def exit_to_host(agent_id: int, driver: Any) -> None:
         )
 
     logger.info("已退回到宿主环境: agent_id=%s", agent_id)
+
+
+async def is_docker_available() -> bool:
+    """探测 Docker 是否可用（供 `list_containers` 的 `docker_available` 字段）。
+
+    不可用不是错误：列表照常返回 DB 记录，只是状态全部为 `unknown`。
+    这样用户仍能看到「我有几个容器」，而不是拿到一个空列表以为容器都没了。
+    """
+    try:
+        cli = get_cli()
+    except DockerCliError:
+        return False
+    return await cli.ping()

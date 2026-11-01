@@ -1,4 +1,16 @@
 {
+  "create_container": {
+    "description": "创建一个属于你的沙箱容器，用于在隔离环境中执行命令。",
+    "parameters": {
+      "image": {
+        "description": "容器镜像名称，例如 \"ubuntu:24.04\"、\"python:3.11\"。必须是本地已存在的 Linux 镜像，系统不会自动拉取；省略时使用默认镜像。",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "required": []
+  },
   "create_task": {
     "description": "创建协作任务（**不会唤醒执行人**，需另发 send_chat_msg 通知对方）。",
     "parameters": {
@@ -59,6 +71,24 @@
       "assignee_id"
     ]
   },
+  "delete_container": {
+    "description": "删除一个你自己创建的容器。",
+    "parameters": {
+      "container_id": {
+        "description": "容器的 12 位容器 ID（十六进制）。",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "record_id": {
+        "description": "容器列表里的记录编号（整数），与 container_id 二选一。",
+        "schema": {
+          "type": "integer"
+        }
+      }
+    },
+    "required": []
+  },
   "delete_dept": {
     "description": "删除当前团队中的指定组织（部门）。",
     "parameters": {
@@ -118,6 +148,25 @@
     "required": [
       "name"
     ]
+  },
+  "enter_container": {
+    "description": "把执行环境切换到指定的容器，之后所有命令都在容器内执行。",
+    "parameters": {
+      "container_id": {
+        "description": "目标容器的 12 位容器 ID（十六进制）。不接受容器名称或镜像名。",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "container_id"
+    ]
+  },
+  "exit_to_host": {
+    "description": "退出当前容器，回到宿主机环境继续执行。",
+    "parameters": {},
+    "required": []
   },
   "finish_action": {
     "description": "结束行动，把行动机会让给下一位成员；完成所有发言和工具调用后，或确认无需行动时调用。",
@@ -225,6 +274,11 @@
         }
       }
     },
+    "required": []
+  },
+  "list_containers": {
+    "description": "查看你自己创建的容器列表、它们的实时状态，以及当前所处的执行环境。",
+    "parameters": {},
     "required": []
   },
   "list_role_templates": {

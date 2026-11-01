@@ -61,7 +61,11 @@ class TspAgentDriver(AgentDriver):
         super().__init__(host, config)
         self._client: Optional[TSPClient] = None
         self._tsp_tools: dict[str, llmApiUtil.OpenAITool] = {}
-        self._local_tools: list[llmApiUtil.OpenAITool] = funcToolService.get_tools()
+        # TSP driver 是唯一暴露容器工具的驱动（§6.1）：容器工具做的就是切换
+        # gtsp 的执行环境，别的驱动没有 gtsp 可切。
+        self._local_tools: list[llmApiUtil.OpenAITool] = funcToolService.get_tools(
+            include_container_tools=True
+        )
         self._connect_lock = asyncio.Lock()
 
         # 执行环境（只在内存，重启一律回宿主，§4.1）。

@@ -195,12 +195,16 @@ async def test_execute_tool_call_exception() -> None:
 # 枚举声明序是 ADMIN=1 / BASIC=2 / READ=3 / WRITE=4 / EXECUTE=5）：
 #   BASIC 15 / ADMIN 10 / READ 6 / EXECUTE 4 / WRITE 2
 EXPECTED_TOOL_CATEGORIES = {
+    "create_container": ToolCategory.EXECUTE,
     "create_task": ToolCategory.BASIC,
+    "delete_container": ToolCategory.EXECUTE,
     "delete_dept": ToolCategory.ADMIN,
     "delete_role_template": ToolCategory.ADMIN,
     "delete_room": ToolCategory.ADMIN,
     "edit": ToolCategory.WRITE,
+    "enter_container": ToolCategory.EXECUTE,
     "execute_bash": ToolCategory.EXECUTE,
+    "exit_to_host": ToolCategory.EXECUTE,
     "finish_action": ToolCategory.BASIC,
     "get_agent_info": ToolCategory.BASIC,
     "get_dept_info": ToolCategory.BASIC,
@@ -212,6 +216,7 @@ EXPECTED_TOOL_CATEGORIES = {
     "glob": ToolCategory.READ,
     "grep_search": ToolCategory.READ,
     "list_dir": ToolCategory.READ,
+    "list_containers": ToolCategory.EXECUTE,
     "list_role_templates": ToolCategory.ADMIN,
     "list_task_events": ToolCategory.BASIC,
     "list_tasks": ToolCategory.BASIC,

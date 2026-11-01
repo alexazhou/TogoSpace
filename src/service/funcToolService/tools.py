@@ -5,7 +5,11 @@ import datetime
 import logging
 from zoneinfo import ZoneInfo
 
-from constants import AgentStatus, AgentTaskType, DriverType, EmployStatus, RoleTemplateType, RoomState, SpecialAgent, TaskStatus
+from constants import (
+    AgentStatus, AgentTaskType, CONTAINER_SELF_MOUNT_PATH, CONTAINER_SHARED_MOUNT_PATH,
+    DriverType, EmployStatus, ExecEnv, RoleTemplateType, RoomState, SpecialAgent, TaskStatus,
+)
+from exception import TogoException
 from dal.db import gtAgentManager, gtRoomManager, gtRoleTemplateManager, gtTeamManager, gtAgentTaskManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
@@ -1362,3 +1366,233 @@ async def load_skill(
         "content": content,
         "files": files,
     }
+
+
+# ---------------------------------------------------------------------------
+# 容器沙箱工具（仅 TspAgentDriver 暴露，§6）
+# ---------------------------------------------------------------------------
+
+
+def _container_driver(_context: ToolCallContext | None):
+    """取当前 Agent 的 TspAgentDriver；不是 TSP driver 时抛错。
+
+    容器工具只对 TSP driver 开放（§6.1 生效范围）：Native / Claude SDK 的工具
+    不经过 gtsp，切换「执行环境」对它们没有意义，暴露了只会误导模型。
+
+    动态导入（不在模块顶层 import agentService）：`tools.py` 被
+    `funcToolService` 导入，而 `agentService` 又导入 `funcToolService`，
+    顶层互导会成环。
+    """
+    from service import agentService
+
+    if _context is None or _context.agent_id <= 0:
+        raise TogoException("容器工具需要在 Agent 上下文中调用", "container_invalid_params")
+
+    agent = agentService.get_agent_or_none(_context.agent_id)
+    if agent is None:
+        raise TogoException("当前 Agent 未加载，无法使用容器工具", "container_invalid_params")
+
+    driver = agent.task_consumer._turn_runner.driver
+    # 在函数内取类型：`tspDriver` 顶层 import 了 `funcToolService`，顶层互导会成环。
+    # 用 duck-typing 也行，但显式 isinstance 能挡住「别的 driver 恰好也有 exec_env」。
+    from service.agentService.driver.tspDriver import TspAgentDriver
+    if not isinstance(driver, TspAgentDriver):
+        raise TogoException(
+            "当前 Agent 的执行驱动不支持容器沙箱（仅支持 TSP 驱动）",
+            "container_invalid_params",
+        )
+    return driver
+
+
+async def create_container(image: Optional[str] = None, _context: ToolCallContext = None) -> dict[str, Any]:
+    """创建一个属于你的沙箱容器，用于在隔离环境中执行命令。
+
+    创建后容器处于「已创建」状态，仍未投入使用；需要再调用 enter_container 才会把
+    执行环境切换进去。容器内挂载两处目录：你的个人工作目录（可读写，对应
+    /workspace/self）与团队共享目录（只读，对应 /workspace/team_shared）。删除容器
+    不会删除这两处目录里的文件。
+
+    每个 Agent 最多同时保留 3 个自己创建的容器（含已停止的），达到上限时请先删除。
+
+    Args:
+        image: 容器镜像名称，例如 "ubuntu:24.04"、"python:3.11"。必须是本地已存在的
+            Linux 镜像，系统不会自动拉取；省略时使用默认镜像。
+    """
+    from service import containerService
+
+    try:
+        driver = _container_driver(_context)
+        assert _context is not None
+        record = await containerService.create_container(_context.agent_id, image=image)
+        docker_id = record.docker_id
+        assert docker_id is not None
+        return {
+            "success": True,
+            "container_id": docker_id,
+            "container_name": record.container_name,
+            "image": record.image,
+            "state": "created",
+            "mounts": {
+                CONTAINER_SELF_MOUNT_PATH: "读写",
+                CONTAINER_SHARED_MOUNT_PATH: "只读",
+            },
+            "message": (
+                f"容器已创建（{docker_id}，镜像 {record.image}），当前仍处于宿主环境。"
+                "如需在容器内执行操作，请调用 enter_container 切换进去。"
+            ),
+        }
+    except TogoException as exc:
+        return _tool_error_result(exc)
+    except Exception as exc:
+        logger.warning("create_container 失败: %s", exc, exc_info=True)
+        return {"success": False, "message": f"创建容器失败: {exc}", "error_code": "container_create_failed"}
+
+
+async def enter_container(container_id: str, _context: ToolCallContext = None) -> dict[str, Any]:
+    """把执行环境切换到指定的容器，之后所有命令都在容器内执行。
+
+    容器可以是你自己用 create_container 创建的（会自动启动并进入），也可以是宿主机上
+    已经在运行的其他容器（会借用进来执行，不影响它的原有进程）。如果容器当前不是运行中
+    状态且不是你创建的，需要先自行启动它。
+
+    退出容器请调用 exit_to_host；退出后你自己创建的容器会自动停止（已创建状态），
+    它里面的文件会保留。
+
+    Args:
+        container_id: 目标容器的 12 位容器 ID（十六进制）。不接受容器名称或镜像名。
+    """
+    from service import containerService
+
+    try:
+        driver = _container_driver(_context)
+        assert _context is not None
+        target, previous_state = await containerService.enter_container(
+            _context.agent_id, container_id, driver
+        )
+        return {
+            "success": True,
+            "exec_env": ExecEnv.CONTAINER.value,
+            "container_id": target.docker_id,
+            "container_name": None,
+            "mounted": target.is_managed,
+            "workdir": CONTAINER_SELF_MOUNT_PATH if target.is_managed else "",
+            "message": (
+                f"已进入容器 {target.docker_id}（进入前状态：{previous_state}），"
+                f"后续命令都在容器内执行。"
+                + (
+                    f"你的个人工作目录在容器内挂载为 {CONTAINER_SELF_MOUNT_PATH}（可读写），"
+                    f"团队共享目录为 {CONTAINER_SHARED_MOUNT_PATH}（只读）。"
+                    "该容器由你创建，退出后会自动停止但保留文件。"
+                    if target.is_managed
+                    else "该容器不是由你创建的，退出后它仍会继续运行。"
+                )
+            ),
+        }
+    except TogoException as exc:
+        return _tool_error_result(exc)
+    except Exception as exc:
+        logger.warning("enter_container 失败: %s", exc, exc_info=True)
+        return {"success": False, "message": f"进入容器失败: {exc}", "error_code": "container_enter_failed"}
+
+
+async def exit_to_host(_context: ToolCallContext = None) -> dict[str, Any]:
+    """退出当前容器，回到宿主机环境继续执行。
+
+    退出后容器里的路径（如 /workspace/self）不再可用，宿主机的工作目录恢复生效。
+    你自己创建的容器会自动停止，里面的文件不会丢失。
+    """
+    from service import containerService
+
+    try:
+        driver = _container_driver(_context)
+        assert _context is not None
+        await containerService.exit_to_host(_context.agent_id, driver)
+        return {
+            "success": True,
+            "exec_env": ExecEnv.HOST.value,
+            "workdir": driver.host.agent_workdir,
+            "message": (
+                "已退回到宿主机环境，宿主机工作目录恢复生效。"
+                "容器内的路径（如 /workspace/self）已不可用；"
+                "你自己创建的容器已自动停止，文件仍保留在容器与挂载目录中。"
+            ),
+        }
+    except TogoException as exc:
+        return _tool_error_result(exc)
+    except Exception as exc:
+        logger.warning("exit_to_host 失败: %s", exc, exc_info=True)
+        return {"success": False, "message": f"退出容器失败: {exc}", "error_code": "container_enter_failed"}
+
+
+async def list_containers(_context: ToolCallContext = None) -> dict[str, Any]:
+    """查看你自己创建的容器列表、它们的实时状态，以及当前所处的执行环境。
+
+    列表包含创建中与已停止的容器，不含宿主机上其他人或其他程序创建的容器。
+    """
+    from service import containerService
+
+    try:
+        driver = _container_driver(_context)
+        assert _context is not None
+        docker_available = await containerService.is_docker_available()
+        infos = await containerService.list_agent_containers(
+            _context.agent_id,
+            current_container_id=driver.current_container_id,
+            docker_available=docker_available,
+        )
+        return {
+            "success": True,
+            "docker_available": docker_available,
+            "exec_env": driver.exec_env.value,
+            "current_container_id": driver.current_container_id,
+            "containers": [info.to_json() for info in infos],
+        }
+    except TogoException as exc:
+        return _tool_error_result(exc)
+    except Exception as exc:
+        logger.warning("list_containers 失败: %s", exc, exc_info=True)
+        return {"success": False, "message": f"查询容器列表失败: {exc}", "error_code": "container_enter_failed"}
+
+
+async def delete_container(
+    container_id: Optional[str] = None,
+    record_id: Optional[int] = None,
+    _context: ToolCallContext = None,
+) -> dict[str, Any]:
+    """删除一个你自己创建的容器。
+
+    两种指定方式二选一：用容器的 12 位 ID，或用列表里的记录编号（创建中、还没有 ID
+    的容器只能用记录编号）。正在使用的容器不能删除，需要先调用 exit_to_host 退出。
+
+    删除会移除容器本身，但不会删除你的个人工作目录与团队共享目录里的文件。
+
+    Args:
+        container_id: 容器的 12 位容器 ID（十六进制）。
+        record_id: 容器列表里的记录编号（整数），与 container_id 二选一。
+    """
+    from service import containerService
+
+    try:
+        driver = _container_driver(_context)
+        assert _context is not None
+        record = await containerService.delete_container(
+            _context.agent_id,
+            container_id=container_id,
+            record_id=record_id,
+            current_container_id=driver.current_container_id,
+        )
+        return {
+            "success": True,
+            "deleted_record_id": record.id,
+            "deleted_container_id": record.docker_id,
+            "message": (
+                f"容器已删除（记录编号 {record.id}"
+                + (f"，容器 {record.docker_id}" if record.docker_id else "")
+                + "）。该容器挂载的目录里的文件不受影响。"
+            ),
+        }
+    except TogoException as exc:
+        return _tool_error_result(exc)
+    except Exception as exc:
+        logger.warning("delete_container 失败: %s", exc, exc_info=True)
+        return {"success": False, "message": f"删除容器失败: {exc}", "error_code": "container_delete_failed"}
