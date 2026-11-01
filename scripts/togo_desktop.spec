@@ -127,6 +127,14 @@ EXCLUDE_PATTERNS = [
     # macOS Finder 元数据。同样不入库但物理存在（assets/ 下当前 5 个：
     # assets/、assets/icons/、assets/execute/、assets/execute/gtsp/、
     # assets/execute/gtsp/logs/），会被整棵 `assets/` 的 datas 原样带进包。
+    #
+    # ⚠️ 这条是**冗余保险，故意不删**（小马哥 2026-11-01 裁定）。
+    # PyInstaller 6.20.0 的 `Analysis.assemble()` 里确实有个 `if is_darwin:` 分支会
+    # 按 `basename(src_name) != '.DS_Store'` 自过滤，实测本机构建产物 .DS_Store 为 0。
+    # 但那是**构建平台判断**，不是目标平台：一旦 PyInstaller 换版本改掉这段，或改在
+    # Linux 上构建（CI 换 runner），就会静默回流。留着成本是一行 pattern，收益是
+    # 「不依赖上游默认行为 + 单测钉住 spec 自身契约」。
+    # 判据顺序：显式防护 > 依赖上游默认行为。别因为「上游已经兜了」就删掉这条。
     ".DS_Store",
 ]
 
