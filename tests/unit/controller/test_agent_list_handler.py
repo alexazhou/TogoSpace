@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from controller import agentController
-from model.coreModel import AgentListInfo
+from controller.agentController import AgentListInfo
 
 
 async def test_list_handler_delegates_to_service(monkeypatch):
@@ -17,13 +17,12 @@ async def test_list_handler_delegates_to_service(monkeypatch):
         AsyncMock(return_value=SimpleNamespace(id=1)),
     )
 
-    expected = AgentListInfo()
     received: dict = {}
 
     async def _list(team_id: int, *, include_special: bool = False):
         received["team_id"] = team_id
         received["include_special"] = include_special
-        return expected
+        return []
 
     monkeypatch.setattr(agentController.agentService, "get_team_agent_list_info", _list)
 
@@ -36,7 +35,7 @@ async def test_list_handler_delegates_to_service(monkeypatch):
 
     await handler.get()
 
-    assert captured == [expected]
+    assert captured == [AgentListInfo()]
     assert received == {"team_id": 1, "include_special": True}
 
 
@@ -49,4 +48,4 @@ async def test_list_handler_returns_empty_when_team_id_missing():
 
     await handler.get()
 
-    assert captured == [{"agents": []}]
+    assert captured == [AgentListInfo()]

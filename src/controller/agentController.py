@@ -1,11 +1,12 @@
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from constants import DriverType, AgentStatus
 from controller.baseController import BaseHandler
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
 from service.agentService.toolRegistry import validate_tool_allow_specs
+from model.coreModel import AgentRuntimeInfo
 from model.dbModel.gtAgent import GtAgent
 from service import teamService, agentService, taskService, roomService
 from util import assertUtil
@@ -28,6 +29,12 @@ class AgentsSaveRequest(BaseModel):
 
 
 
+class AgentListInfo(BaseModel):
+    """Agent 列表接口的响应外壳（控制器层契约）。"""
+
+    agents: list[AgentRuntimeInfo] = Field(default_factory=list)
+
+
 class AgentListHandler(BaseHandler):
     """GET /agents/list.json?team_id=<id> - 获取 team 的成员配置列表"""
 
@@ -35,7 +42,7 @@ class AgentListHandler(BaseHandler):
         team_id_raw = self.get_query_argument("team_id", None)
         include_special_raw = self.get_query_argument("include_special", "false")
         if not team_id_raw:
-            self.return_json({"agents": []})
+            self.return_json(AgentListInfo())
             return
 
         team_id = int(team_id_raw)
@@ -43,9 +50,8 @@ class AgentListHandler(BaseHandler):
         assertUtil.assertNotNull(team, error_message=f"Team ID '{team_id}' not found", error_code="team_not_found")
 
         include_special = include_special_raw.strip().lower() in {"1", "true", "yes", "on"}
-        self.return_json(
-            await agentService.get_team_agent_list_info(team.id, include_special=include_special)
-        )
+        agents = await agentService.get_team_agent_list_info(team.id, include_special=include_special)
+        self.return_json(AgentListInfo(agents=agents))
 
 
 class TeamAgentsSaveHandler(BaseHandler):
@@ -152,6 +158,37 @@ class AgentDetailByIdHandler(BaseHandler):
             error_code="agent_not_found",
         )
         self.return_json(await agentService.get_agent_detail_info(agent))
+
+
+class AgentContainersHandler(BaseHandler):
+    """GET /agents/<id>/containers.json - 查询指定 Agent 的自建容器列表"""
+
+    async def get(self, agent_id_str: str) -> None:
+        agent_id = int(agent_id_str)
+        agents = await gtAgentManager.get_agents_by_ids([agent_id])
+        agent = agents[0] if agents else None
+        assertUtil.assertNotNull(
+            agent,
+            error_message=f"Agent ID '{agent_id}' not found",
+            error_code="agent_not_found",
+        )
+        self.return_json(await agentService.get_agent_containers(agent.id))
+
+
+class AgentErrorMessageHandler(BaseHandler):
+    """GET /agents/<id>/error_message.json - 查询 Agent 未完成任务的失败信息"""
+
+    async def get(self, agent_id_str: str) -> None:
+        agent_id = int(agent_id_str)
+        agents = await gtAgentManager.get_agents_by_ids([agent_id])
+        agent = agents[0] if agents else None
+        assertUtil.assertNotNull(
+            agent,
+            error_message=f"Agent ID '{agent_id}' not found",
+            error_code="agent_not_found",
+        )
+        error_message = await agentService.get_agent_error_message(agent.id)
+        self.return_json({"error_message": error_message})
 
 
 class AgentTasksHandler(BaseHandler):

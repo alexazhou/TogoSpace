@@ -6,11 +6,10 @@ from typing import Any, List
 from model.dbModel.base import atomic
 from model.dbModel.gtDept import GtDept
 from model.coreModel.agentModel import (
-    AgentDetailInfo,
-    AgentListInfo,
-    AgentListItem,
+    AgentRuntimeInfo,
     ExecEnvState,
 )
+from model.coreModel.containerModel import ContainerInfo
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from service.agentService.prompts import BASE_PROMPT, AGENT_IDENTITY_PROMPT
 from util import configUtil, i18nUtil, assertUtil, workspaceUtil
@@ -555,28 +554,35 @@ def get_team_exec_env_map(team_id: int) -> dict[int, ExecEnvState]:
     return result
 
 
-async def get_agent_detail_info(agent: GtAgent) -> AgentDetailInfo:
-    """组装详情页响应：Agent 字段 + 运行时状态 + 执行环境 + 容器列表。"""
+async def get_agent_detail_info(agent: GtAgent) -> AgentRuntimeInfo:
+    """组装详情页响应：Agent 字段 + 运行时状态 + 执行环境 + 容器数。"""
     runtime_status_map = get_team_runtime_status_map(agent.team_id)
-    first_task = await gtScheculeTaskManager.get_first_unfinish_task(agent.id)
-    error_message = None
-    if first_task is not None and first_task.status == AgentTaskStatus.FAILED:
-        error_message = first_task.error_message
-
     exec_state = get_exec_env_state(agent.id)
-    containers = await containerService.list_agent_containers(
-        agent.id,
-        current_container_id=exec_state.current_container_id,
-    )
+    # 容器列表走独立接口，详情只保留数量
+    container_count_map = await containerService.count_containers_by_agent_ids([agent.id])
 
-    return AgentDetailInfo(
+    return AgentRuntimeInfo(
         agent=agent,
         status=runtime_status_map.get(agent.id, AgentStatus.IDLE),
-        error_message=error_message,
-        exec_env=exec_state.exec_env,
+        exec_env_state=exec_state,
+        container_count=container_count_map.get(agent.id, 0),
+    )
+
+
+async def get_agent_error_message(agent_id: int) -> str | None:
+    """返回 Agent 最早未完成任务的失败信息；没有失败任务时为 None。"""
+    first_task = await gtScheculeTaskManager.get_first_unfinish_task(agent_id)
+    if first_task is not None and first_task.status == AgentTaskStatus.FAILED:
+        return first_task.error_message
+    return None
+
+
+async def get_agent_containers(agent_id: int) -> list[ContainerInfo]:
+    """查询 Agent 的自建容器列表（含预记录），并标注当前进入的容器。"""
+    exec_state = get_exec_env_state(agent_id)
+    return await containerService.list_agent_containers(
+        agent_id,
         current_container_id=exec_state.current_container_id,
-        containers=containers,
-        container_count=len(containers),
     )
 
 
@@ -584,8 +590,8 @@ async def get_team_agent_list_info(
     team_id: int,
     *,
     include_special: bool = False,
-) -> AgentListInfo:
-    """组装列表页响应：成员配置 + 运行时状态 + 执行环境 + 容器数。"""
+) -> list[AgentRuntimeInfo]:
+    """组装列表页数据：成员配置 + 运行时状态 + 执行环境 + 容器数。"""
     agents = await gtAgentManager.get_team_all_agents(
         team_id,
         include_cross_team=include_special,
@@ -597,27 +603,18 @@ async def get_team_agent_list_info(
         [agent.id for agent in agents if agent.id is not None]
     )
 
-    items: list[AgentListItem] = []
+    items: list[AgentRuntimeInfo] = []
     for agent in agents:
         exec_state = exec_env_map.get(agent.id, ExecEnvState())
-
-        special: str | None = None
-        if agent.team_id == -1:
-            special_agent = SpecialAgent.value_of(agent.id)
-            if special_agent is not None:
-                special = special_agent.name.lower()
-
         items.append(
-            AgentListItem(
+            AgentRuntimeInfo(
                 agent=agent,
                 status=runtime_status_map.get(agent.id, AgentStatus.IDLE),
-                exec_env=exec_state.exec_env,
-                current_container_id=exec_state.current_container_id,
+                exec_env_state=exec_state,
                 container_count=container_count_map.get(agent.id, 0),
-                special=special,
             )
         )
-    return AgentListInfo(agents=items)
+    return items
 
 
 def get_room_agents(room_id: int) -> List["Agent"]:

@@ -5,7 +5,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from constants import AgentStatus, ExecEnv
-from model.coreModel.containerModel import ContainerInfo
 from model.dbModel.gtAgent import GtAgent
 from util import jsonUtil
 
@@ -22,11 +21,11 @@ class ExecEnvState(BaseModel):
     current_container_id: str | None = None
 
 
-class AgentViewInfo(BaseModel):
+class AgentRuntimeInfo(BaseModel):
     """Agent 列表 / 详情的外层：原始 DB 对象 + 运行时状态。
 
     `agent` 直接持有 `GtAgent`，序列化复用 ORM 自带的 `to_json()`；运行时字段
-    放在外层，不混进 DB 字段里。
+    放在外层，不混进 DB 字段里。执行环境整体用 `ExecEnvState` 表达。
     """
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
@@ -35,8 +34,7 @@ class AgentViewInfo(BaseModel):
     status: AgentStatus
     """运行时状态（IDLE / ACTIVE / FAILED / CLOSED），来自内存而非 DB。"""
 
-    exec_env: ExecEnv = ExecEnv.HOST
-    current_container_id: str | None = None
+    exec_env_state: ExecEnvState = Field(default_factory=ExecEnvState)
     container_count: int = 0
 
     @field_serializer("agent")
@@ -49,25 +47,3 @@ class AgentViewInfo(BaseModel):
     @field_serializer("status")
     def _serialize_status(self, value: AgentStatus) -> str:
         return value.name
-
-
-class AgentListItem(AgentViewInfo):
-    """列表页的一条 Agent 记录。"""
-
-    special: str | None = None
-    """特殊 Agent 标识（operator / system），仅特殊团队使用。"""
-
-
-class AgentListInfo(BaseModel):
-    """列表页响应体。"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    agents: list[AgentListItem] = Field(default_factory=list)
-
-
-class AgentDetailInfo(AgentViewInfo):
-    """详情页响应体。"""
-
-    error_message: str | None = None
-    containers: list[ContainerInfo] = Field(default_factory=list)

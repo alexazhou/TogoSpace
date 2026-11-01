@@ -471,11 +471,13 @@ sequenceDiagram
 
 ## 8. 接口与 Web
 
-- **Agent 列表**：增加 `exec_env`、`current_container_id`、`container_count`（`count_map_by_agent_ids` 只查 DB）。未加载的 Agent 恒为 host。
-- **Agent 详情**：额外增加 `containers`（`list_agent_containers` 实时查询），用 `ContainerInfo.model_dump(mode="json")`；前端容器表以 `record_id` 作为行 key。
+- **Agent 列表**：增加 `exec_env_state`（`ExecEnvState`）与 `container_count`（`count_map_by_agent_ids` 只查 DB）。未加载的 Agent 恒为 host。
+- **Agent 详情**：只返回 Agent 自身与运行时信息（含 `container_count`），不内嵌容器列表或失败信息。
+- **Agent 容器列表**：独立接口 `GET /agents/<id>/containers.json`，返回 `list[ContainerInfo]`（`list_agent_containers` 实时查询），用 `ContainerInfo.model_dump(mode="json")`；前端容器表以 `record_id` 作为行 key。
+- **Agent 失败信息**：独立接口 `GET /agents/<id>/error_message.json`，返回 `{"error_message": str | null}`（最早未完成任务的失败信息）。
 - **WebSocket**：新 topic `AGENT_CONTAINER_STATE_CHANGED`，事件名 `agent_container`，payload 为 `gt_agent`、`exec_env`、`current_container_id`。只由 driver 在环境实际变化时发布（进入、退出、改名回落）。
 - **活动记录**：`AgentActivityMeta` 增加 `exec_env` / `current_container_id` / `container_name`，开始时写入，结束时 patch 为最终环境。
-- **前端**：`types.ts` / `api.ts` / `eventNormalizer.ts` / `runtimeStore.ts` 增加字段与事件；Agent 卡片显示容器徽标；活动条目显示环境徽标；属性面板增加「执行环境」区块与容器表（需兼容 `container_id` 为 null 的预记录，用容器名展示）；i18n 增加 `agent.execEnv.*` / `agent.containers.*`，容器状态直接展示 Docker 原始值，不做翻译，不增加 `agent.containerState.*`。
+- **前端**：`types.ts` / `api.ts` / `eventNormalizer.ts` / `runtimeStore.ts` 增加字段与事件；Agent 卡片显示容器徽标；活动条目显示环境徽标，失败原因通过独立接口加载；属性面板增加「执行环境」区块，容器表通过独立接口加载（需兼容 `container_id` 为 null 的预记录，用容器名展示）；i18n 增加 `agent.execEnv.*` / `agent.containers.*`，容器状态直接展示 Docker 原始值，不做翻译，不增加 `agent.containerState.*`。
 - TUI 本次不改。
 
 ## 9. 安全
