@@ -1,13 +1,6 @@
-"""#114 草稿：本机不可复现的容器负向用例（OrbStack 环境）
+"""#114：本机不可复现的容器负向用例（OrbStack 环境）
 
-**状态**：草稿，暂存 `agent/李哥/`。阿张的 e2e 骨架 `0f9b7120`
-（`tests/e2e/test_container_happy_path.py`）已在 docstring 里点名本文件
-`tests/e2e/test_container_negative_cases.py` 归我，骨架到达后整份搬过去即可，
-不需要改阿张的文件。
-
-## 这组用例为什么是 skip 而不是「造一个能跑的版本」
-
-三条理由，按重要度：
+## 这组用例为什么默认不跑
 
 1. **`container_mount_denied` 在本机不可能真实触发**。它的前置条件是
    **Docker Desktop 且工作目录不在 File sharing 白名单里**。本机是 OrbStack
@@ -15,30 +8,31 @@
    `/private/var/tmp`、`/System/Volumes/Data/Users` 全部挂载成功。
    要让它「跑起来」只能 mock 掉 docker 包装层，那测的是我自己的 mock（事件 344 明确禁止）。
 
-2. **无 bash 镜像的用例现在跑必然红，而且红的原因不是容器坏了**。
-   `execute_bash` 当前把 gtsp 的原始错误 `{"code":"server/internal_error"}` 原样返回，
-   没有 `step1_product.md:45` 要求的「明确原因 + 出路」。这是**实现缺口 G1**（见下），
-   与容器功能无关。把断言放宽到「只要失败就算过」，这个用例就变成永远绿的装饰品。
+2. **两个用例都会真的 create/start/rm 容器**。所以即便 `container_mount_denied`
+   在别的机器上可复现，也不该让 `pytest tests` 的默认结果依赖「本机有没有 Docker /
+   镜像拉没拉」。闸门与 `test_container_happy_path.py` 同口径：
+   `TOGOSPACE_TEST_DOCKER=1` 才跑。
 
-3. **skip 用例的正文必须是真的会跑的代码**。函数体完整、断言指向真实语义
-   （「挂载被拒 ≠ 容器不存在」「无 bash ≠ 容器不可用」），只把执行拦住。
-   后来人换成 Docker Desktop 就能直接放开跑，不需要重写。
+> ⚠️ 历史教训（G1 期间踩过）：这两个用例一度用**无条件** `@pytest.mark.skip` 拦住。
+> 无条件 skip **不会**因为实现修好而自动解除——G1 落地那天它仍然是 skip，
+> 「修好就自动绿」这句话是错的。现在改成可判定的 `skipif(<开闸变量>)`：
+> skip 的理由变成「这是真实 Docker 用例」，而不是「实现没修」。
 
-## 实现缺口 G1（本文件记录，不修）
+## G1 已落地（原「实现缺口」记录，保留作背景）
 
 `step1_product.md:119` 验收项要求：无 bash 镜像「能建、能进、文件工具可用，
-`execute_bash` 返回**明确原因与出路**」。
-
-实测当前：`execute_bash` 返回 gtsp 原始错误
+`execute_bash` 返回**明确原因与出路**」。修复前 `execute_bash` 返回 gtsp 原始错误
 ```
 {"code":"server/internal_error",
- "error":"failed to start command: exec: \"bash\": executable file not found in $PATH"}
+ "error":"failed to start command: exec: \\"bash\\": executable file not found in $PATH"}
 ```
-全仓 `grep "executable file not found"` / `"no_bash"` **零命中**，`tspDriver.py`
-无相关识别与包装。⇒ 文档承诺，实现缺失。
+现由 `tspDriver._execute_tsp_tool` 识别（工具名限定 `execute_bash` + 完整 exec 特征），
+在**保留**协议层 `code` 的同时补出业务层 `error_code=container_missing_bash`
+与含「原因 + 出路」的 `message`。
 
-`test_no_bash_image_reports_actionable_reason` 的断言按**文档要求**写（不是按现状写），
-所以它在 G1 修好之前必然红 —— 这正是它保持 skip 的第二个原因。
+`test_no_bash_image_reports_actionable_reason` 的断言当初是**按文档要求**写的
+（不是按现状写），所以它在 G1 修好前必然红 —— 这是它当初保持 skip 的第二个原因。
+断言本身一个字没改（除常量名），修复后转绿。
 
 ## 环境口径（事件 343 / 344 + 小马哥 2026-11-01 裁定）
 
@@ -53,6 +47,7 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -85,6 +80,23 @@ _MOUNT_DENIED_SKIP = pytest.mark.skip(
         "全部挂载成功，该场景不可复现 ⇒ skip，不 mock docker 包装层（事件 344）。"
         "换到 Docker Desktop 且不共享工作目录的机器上，去掉本 skip 即可直接跑。"
     )
+)
+
+# 真实 Docker e2e 闸门：**这两个用例会真的 create/start/rm 容器**，所以默认不跑。
+# 与 `test_container_happy_path.py` 同口径（`TOGOSPACE_TEST_DOCKER=1`）。
+#
+# G1 落地后 `_NO_BASH_SKIP` 必须摘掉（否则修好了也永远 skip），但摘掉后这两个用例
+# 就会在**默认口径**下真起容器 —— 那样 `pytest tests` 的默认结果会依赖本机有没有
+# Docker、镜像拉没拉，报数失去可比性。所以 skip 的**理由**从「实现没修」换成
+# 「这是真实 Docker 用例」，闸门形式从无条件 skip 换成可判定的 skipif。
+DOCKER_E2E_ENABLED = os.environ.get("TOGOSPACE_TEST_DOCKER") == "1"
+
+_DOCKER_E2E_SKIP = pytest.mark.skipif(
+    not DOCKER_E2E_ENABLED,
+    reason=(
+        "真实 Docker e2e：会 create/start/rm 真实容器（alpine:3.20 / distroless）。"
+        "需显式开闸 TOGOSPACE_TEST_DOCKER=1 才会运行"
+    ),
 )
 
 _MIGRATION_DIR = Path(__file__).resolve().parents[2] / "assets" / "migrate"
@@ -218,6 +230,7 @@ async def neg_env(tmp_path, monkeypatch, real_docker):
 
 
 @_MOUNT_DENIED_SKIP
+@_DOCKER_E2E_SKIP
 async def test_mount_denied_is_reported_as_mount_denied_not_as_container_missing(neg_env):
     """File sharing 拒绝挂载时，错误码必须是 `container_mount_denied`。
 
@@ -267,10 +280,11 @@ async def test_mount_denied_is_reported_as_mount_denied_not_as_container_missing
 
 
 # ---------------------------------------------------------------------------
-# ② 无 bash 镜像：容器可用，但 execute_bash 必须给「明确原因 + 出路」（skip：G1 未落地）
+# ② 无 bash 镜像：容器可用，但 execute_bash 必须给「明确原因 + 出路」（G1 已落地）
 # ---------------------------------------------------------------------------
 
 
+@_DOCKER_E2E_SKIP
 @pytest.mark.parametrize("image", [_ALPINE_IMAGE, _DISTROLESS_IMAGE])
 async def test_no_bash_image_reports_actionable_reason(neg_env, image):
     """无 bash 镜像：能建、能进、文件工具可用；`execute_bash` 报原因与出路。
@@ -335,13 +349,20 @@ async def test_no_bash_image_reports_actionable_reason(neg_env, image):
             context=roomService.ToolCallContext(agent_id=1, team_id=1, tool_name="write_file"),
         )
         # `write_file` 的成功返回体是 `{"file_path": ..., "written": N}`，**没有 `success` 键**
-        # （gtsp v0.4.17 在 alpine / distroless / ubuntu 三镜像实测一致）。工具层契约是
-        # `toolRegistry` 的 `tool_succeeded = raw_success is not False`，即**缺省即成功**。
-        # 故原写法 `write_result.get("success") is True` 恒为 False —— 与本用例要验的
-        # 「文件工具可用」无关却必红，只是被 `_NO_BASH_SKIP` 掩盖至今。
-        # 改为按真实契约断言，且比原写法更实：既验没被误判成失败（无 `error_code`），
-        # 又验真的写进去了（`written` 字节数）。
-        assert "error_code" not in write_result, f"无 bash 镜像的文件工具必须可用: {write_result}"
+        # （gtsp v0.4.17 在 alpine / distroless / ubuntu 三镜像实测一致）。
+        # 故原写法 `write_result.get("success") is True` 恒为 False，与本用例要验的
+        # 「文件工具可用」无关却必红 —— 这是本文件自己的 bug，被 skip 掩盖了很久。
+        #
+        # 改成两条按**真实契约**写的断言，缺一不可：
+        # ① `is not False`：与工具层 `toolRegistry` 的
+        #    `tool_succeeded = raw_success is not False` 完全同口径（缺省即成功）。
+        #    ⚠️ 不能写成「`error_code` 不存在」——`write_file` 真失败时返回的是
+        #    `{"success": False, "code": "server/internal_error", "message": ...}`，
+        #    **也没有 `error_code`**（只有缺 bash 那一类才有），那样写失败也会绿。
+        # ② `written == 2`：证明真的落盘了，不是「没报错但什么都没干」。
+        assert write_result.get("success") is not False, (
+            f"无 bash 镜像的文件工具必须可用: {write_result}"
+        )
         assert write_result.get("written") == 2, f"文件工具必须真写入: {write_result}"
 
         # —— execute_bash 报「明确原因 + 出路」（G1 已落地，见 tspDriver._execute_tsp_tool）
@@ -361,6 +382,105 @@ async def test_no_bash_image_reports_actionable_reason(neg_env, image):
         assert "bash" in mess, "原因必须点名「镜像里没有 bash」，否则模型会去查网络/权限"
         assert any(token in mess for token in ("换", "install", "apt", "apk")), (
             "必须给出路：换镜像，或在容器内装 bash。"
+        )
+    finally:
+        if entered:
+            await containerService.exit_to_host(1, driver)
+            assert driver.exec_env == ExecEnv.HOST, "退出必回宿主（§5.2）"
+        await driver.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# ②b 反向：**bash 在、命令不存在**绝不能报 `container_missing_bash`
+# ---------------------------------------------------------------------------
+
+
+@_DOCKER_E2E_SKIP
+async def test_bash_exists_but_command_missing_is_not_reported_as_missing_bash(neg_env):
+    """反向用例：`bash: xxx: command not found` 不是「镜像缺 bash」。
+
+    ## 为什么必须有这条
+
+    正向用例（②）只证明「缺 bash 时报了 `container_missing_bash`」。它**不能**证明
+    匹配串够窄 —— 把匹配放宽成 `not found` 也能让正向用例变绿，而那时
+    「用户把命令写错」会被误报成「镜像缺 bash」，模型会去换镜像，真正该做的是改命令。
+    这就是「用错误方式让测试变绿」，本用例是它唯一的防线。
+
+    ## 真实报文（ubuntu:24.04 实测，与缺 bash **不是同一条路径**）
+
+    ```
+    {"id":"4","type":"result","result":{"success":false,"stdout":"",
+     "stderr":"bash: line 1: this_command_does_not_exist_xyz: command not found\n",
+     "exit_code":127}}
+    ```
+
+    注意它是 `type:"result"`（**成功调用，命令退出码 127**），压根不抛 `TSPException`，
+    所以走不到 `tspDriver.py` 的识别分支。这条用例因此是**双保险**：
+    - 现状下它天然绿（路径都进不去）；
+    - 但只要有人把识别逻辑下沉到能看见 `result` 分支的层（`tools.py` / 外层
+      `except Exception`），或把匹配串放宽成 `not found`，它立刻变红。
+    """
+    from service.agentService.agentHistoryStore import AgentHistoryStore
+    from service.agentService.driver.base import AgentDriverConfig
+    from service.agentService.driver.tspDriver import TspAgentDriver
+    from service.agentService.toolRegistry import AgentToolRegistry
+
+    record = await containerService.create_container(1, image="ubuntu:24.04")
+    neg_env.track(record)
+    assert record.docker_id is not None
+
+    @dataclass
+    class _Host:
+        gt_agent: GtAgent = field(
+            default_factory=lambda: GtAgent(id=1, team_id=1, name="小美", role_template_id=1)
+        )
+        system_prompt: str = ""
+        agent_workdir: str = ""
+        _history: AgentHistoryStore = field(default_factory=lambda: AgentHistoryStore(agent_id=1))
+        tool_registry: AgentToolRegistry = field(default_factory=AgentToolRegistry)
+
+        async def execute_pending_tools(self) -> None:
+            return None
+
+    host = _Host()
+    host.agent_workdir = str(neg_env.team_dir / "agent" / "小美")
+    driver = TspAgentDriver(
+        host,
+        AgentDriverConfig(
+            driver_type=DriverType.TSP,
+            options={"request_timeout_sec": 190, "workdir": host.agent_workdir},
+        ),
+    )
+
+    entered = False
+    try:
+        assert await driver.connect(ExecEnv.HOST) is True
+        await containerService.enter_container(1, record.docker_id, driver)
+        entered = True
+        assert driver.exec_env == ExecEnv.CONTAINER
+
+        # —— 前置自证：这台镜像的 bash 确实在（用 `echo` 证明 execute_bash 正常）
+        ok_result = await driver._execute_tsp_tool(
+            '{"command": "echo hi"}',
+            context=roomService.ToolCallContext(agent_id=1, team_id=1, tool_name="execute_bash"),
+        )
+        assert ok_result.get("success") is True, f"ubuntu 镜像上 execute_bash 必须可用: {ok_result}"
+
+        # —— 反向：命令不存在
+        bad_result = await driver._execute_tsp_tool(
+            '{"command": "this_command_does_not_exist_xyz"}',
+            context=roomService.ToolCallContext(agent_id=1, team_id=1, tool_name="execute_bash"),
+        )
+        assert bad_result.get("success") is False, f"命令不存在必须失败: {bad_result}"
+        assert bad_result.get("error_code") != containerService.ERROR_CONTAINER_MISSING_BASH, (
+            "「命令不存在」被误报成「镜像缺 bash」会让模型去换镜像，"
+            f"而真正该做的是改命令: {bad_result!r}"
+        )
+        # 原文必须能看到是命令名的问题，不是 bash 的问题
+        raw = f"{bad_result.get('stderr', '')}{bad_result.get('message', '')}".lower()
+        assert "command not found" in raw, f"原文应指向命令不存在: {bad_result!r}"
+        assert "executable file not found" not in raw, (
+            f"不该出现 exec 层的 bash 缺失报文: {bad_result!r}"
         )
     finally:
         if entered:
