@@ -84,6 +84,21 @@ EXCLUDE_PATTERNS = [
     "_tcl_data",
     "_tk_data",
     "tcl8",
+    # gtsp 的**运行期日志目录**（`assets/execute/gtsp/logs/`）。
+    #
+    # 排的是这个子目录，不是 gtsp 本体（下面那段说不能排除 `gtsp-linux-*`，两件事）。
+    #
+    # 为什么必须排：本 spec 的 datas 声明的是整棵 `assets/`，PyInstaller **不做
+    # .gitignore 感知**。该目录被 `.gitignore` 的 `logs` 规则忽略、不入库，但开发机
+    # 上物理存在（本仓库当前 26 个文件 / 212K）——生产构建 `tauri/scripts/build_backend.py`
+    # 从工作区主目录打包，日志会被原样打进安装包。
+    #
+    # 后果不只是体积：日志里有本机绝对路径（`/Volumes/PDATA/...`）和工具入参原文
+    # （实测含 base64 图片数据），等于把开发机信息带给终端用户。
+    #
+    # 功能上无损：gtsp 运行期日志落 `appPaths.LOGS_DIR`（`~/.togospace/logs/backend`），
+    # 与包内这个目录无关；这里只是历史调试日志的残留。
+    "execute/gtsp/logs",
     # ⚠️ 这里**不能**排除 `gtsp-linux-*`。
     #
     # 容器沙箱（§3.2）用 `docker cp` 把 Linux 产物注入容器，靠的是

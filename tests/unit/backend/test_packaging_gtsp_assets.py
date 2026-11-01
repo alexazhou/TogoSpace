@@ -93,6 +93,45 @@ def test_spec_does_not_exclude_gtsp_linux_binaries(binary_name: str):
     assert not excluded, f"{binary_name} 被 spec 的 EXCLUDE_PATTERNS 排除了（命中模式 {pattern!r}）"
 
 
+def test_gtsp_runtime_logs_are_excluded_from_bundle():
+    """gtsp 的历史调试日志目录绝不能进包（包卫生 + 本机路径外泄）。
+
+    `datas` 声明的是整棵 `assets/`，而 PyInstaller **不做 .gitignore 感知**：
+    `assets/execute/gtsp/logs/` 虽然被 `.gitignore` 忽略、不入库，但开发机上物理
+    存在，生产构建（`tauri/scripts/build_backend.py` 从工作区主目录打）会把它原样
+    打进去。实测该目录日志含本机绝对路径与工具入参原文（含 base64 图片数据），
+    打进交付包等于把开发机信息带给终端用户。
+
+    注意与 `test_spec_does_not_exclude_gtsp_linux_binaries` 的区别：排的是
+    `logs` 子目录，不是 gtsp 本体。两个断言方向相反、必须同时成立。
+    """
+    patterns = _read_exclude_patterns()
+
+    # 日志文件（任意层级）必须被排除
+    for dest_path in (
+        "assets/execute/gtsp/logs/gt-agent.log",
+        "assets/execute/gtsp/logs/gt-agent-20260816-230917.502.log",
+        # 未来若出现子目录也要一起排掉
+        "assets/execute/gtsp/logs/archive/old.log",
+    ):
+        excluded, pattern = _excluded(
+            dest_path=dest_path, src_path="/tmp/assets/execute/gtsp/logs/gt-agent.log",
+            patterns=patterns,
+        )
+        assert excluded, f"{dest_path} 本应被排除（会把本机路径打进包），但没命中任何模式"
+
+    # 同目录下的**产物**不能被误伤：排除规则是按路径子串匹配的，
+    # `execute/gtsp/logs` 不该命中 `execute/gtsp/gtsp-linux-arm64`
+    for binary_name in _REQUIRED_LINUX_GTSPS:
+        dest_path = f"assets/execute/gtsp/{binary_name}"
+        excluded, pattern = _excluded(
+            dest_path=dest_path,
+            src_path=os.path.join(appPaths.ASSETS_DIR, "execute", "gtsp", binary_name),
+            patterns=patterns,
+        )
+        assert not excluded, f"{binary_name} 被 logs 排除规则误伤（命中模式 {pattern!r}）"
+
+
 def test_exclude_patterns_still_filters_litellm_bloat():
     """回归护栏：排除表本身的机制没被改坏（不是把列表清空来让上面的用例变绿）。
 
