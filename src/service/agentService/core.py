@@ -22,7 +22,7 @@ from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtSchec
 from peewee import IntegrityError
 from exception import TogoException
 from constants import (
-    CONTAINER_STATE_UNKNOWN,
+    ContainerState,
     AgentStatus,
     AgentTaskStatus,
     DriverType,
@@ -107,7 +107,7 @@ def _require_loaded_driver(agent_id: int) -> Any:
     return driver
 
 
-async def enter_container(agent_id: int, container_id: str) -> tuple[ContainerTarget, str]:
+async def enter_container(agent_id: int, container_id: str) -> tuple[ContainerTarget, ContainerState]:
     """把 Agent 的执行环境切换到指定容器，返回 `(目标, 进入前状态)`。
 
     流程严格按 §5.1：
@@ -133,12 +133,12 @@ async def enter_container(agent_id: int, container_id: str) -> tuple[ContainerTa
     if driver.exec_env == ExecEnv.CONTAINER and driver.current_container_id == container_id:
         # 幂等：已在目标容器。不重连（重连会打断正在进行的 turn）。
         target = await containerService.get_container_target(agent_id, container_id)
-        return target, "running"
+        return target, ContainerState.RUNNING
 
     target = await containerService.get_container_target(agent_id, container_id)
 
     state = await containerService.get_container_state(container_id)
-    if state == CONTAINER_STATE_UNKNOWN:
+    if state is ContainerState.UNKNOWN:
         raise TogoException(
             f"无法查询容器 {container_id} 的状态（Docker 不可用或查询超时），"
             "请稍后重试",

@@ -6,9 +6,7 @@ from .agentModel import (
     ExecEnvState,
 )
 from .containerModel import (
-    ContainerCreateResult,
     ContainerInfo,
-    ContainerRecordInfo,
     ContainerTarget,
 )
 
@@ -18,8 +16,6 @@ __all__ = [
     "ServiceStatusInfo",
     "AgentRuntimeInfo",
     "ExecEnvState",
-    "ContainerCreateResult",
     "ContainerInfo",
-    "ContainerRecordInfo",
     "ContainerTarget",
 ]

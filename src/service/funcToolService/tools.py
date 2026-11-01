@@ -1488,7 +1488,7 @@ async def enter_container(container_id: str, _context: ToolCallContext = None) -
             "mounted": target.is_managed,
             "workdir": CONTAINER_SELF_MOUNT_PATH if target.is_managed else "",
             "message": (
-                f"已进入容器 {target.container_id}（进入前状态：{previous_state}），"
+                f"已进入容器 {target.container_id}（进入前状态：{previous_state.value}），"
                 f"后续命令都在容器内执行。"
                 + (
                     f"你的个人工作目录在容器内挂载为 {CONTAINER_SELF_MOUNT_PATH}（可读写），"

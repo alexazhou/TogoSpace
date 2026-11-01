@@ -11,7 +11,7 @@ import json
 import pytest
 
 from exception import TogoException
-from constants import CONTAINER_STATE_MISSING, CONTAINER_STATE_UNKNOWN
+from constants import ContainerState
 from service.containerService import core
 
 # 复用 create 测试里的环境夹具（假 docker + 真实迁移 DDL + 临时库）
@@ -231,10 +231,10 @@ async def test_list_includes_pre_record_with_null_container_id(fake):
     infos = await core.list_agent_containers(1)
 
     assert len(infos) == 1
-    assert infos[0].container.record_id == record.id
-    assert infos[0].container.container_id is None
-    assert infos[0].container.container_name == "agent-1-1"
-    assert infos[0].state == "created"
+    assert infos[0].record_id == record.id
+    assert infos[0].container_id is None
+    assert infos[0].container_name == "agent-1-1"
+    assert infos[0].state is ContainerState.CREATED
 
 
 async def test_list_marks_missing_when_same_name_container_has_foreign_label(fake):
@@ -251,7 +251,7 @@ async def test_list_marks_missing_when_same_name_container_has_foreign_label(fak
 
     infos = await core.list_agent_containers(1)
 
-    assert infos[0].state == CONTAINER_STATE_MISSING
+    assert infos[0].state is ContainerState.MISSING
 
 
 async def test_list_accepts_matching_label_for_pre_record(fake):
@@ -267,7 +267,7 @@ async def test_list_accepts_matching_label_for_pre_record(fake):
 
     infos = await core.list_agent_containers(1)
 
-    assert infos[0].state == "exited"
+    assert infos[0].state is ContainerState.EXITED
 
 
 async def test_list_uses_container_id_not_name_for_backfilled_records(fake):
@@ -288,7 +288,7 @@ async def test_list_returns_unknown_when_inspect_fails(fake):
 
     infos = await core.list_agent_containers(1)
 
-    assert infos[0].state == CONTAINER_STATE_UNKNOWN
+    assert infos[0].state is ContainerState.UNKNOWN
 
 
 async def test_list_marks_unknown_for_every_record_when_daemon_down(fake):
@@ -299,7 +299,7 @@ async def test_list_marks_unknown_for_every_record_when_daemon_down(fake):
 
     infos = await core.list_agent_containers(1)
 
-    assert [info.state for info in infos] == [CONTAINER_STATE_UNKNOWN, CONTAINER_STATE_UNKNOWN]
+    assert [info.state for info in infos] == [ContainerState.UNKNOWN, ContainerState.UNKNOWN]
 
 
 async def test_list_marks_unknown_when_docker_cli_missing(fake, monkeypatch):
@@ -323,8 +323,8 @@ async def test_list_marks_unknown_when_docker_cli_missing(fake, monkeypatch):
 
     infos = await core.list_agent_containers(1)
 
-    assert [info.state for info in infos] == [CONTAINER_STATE_UNKNOWN, CONTAINER_STATE_UNKNOWN]
-    assert [info.container.record_id for info in infos] == [1, 2]
+    assert [info.state for info in infos] == [ContainerState.UNKNOWN, ContainerState.UNKNOWN]
+    assert [info.record_id for info in infos] == [1, 2]
 
 
 async def test_list_uses_cli_when_caller_says_available(fake, monkeypatch):
@@ -340,7 +340,7 @@ async def test_list_uses_cli_when_caller_says_available(fake, monkeypatch):
 
     infos = await core.list_agent_containers(1, docker_available=True)
 
-    assert [info.state for info in infos] == ["exited"]
+    assert [info.state for info in infos] == [ContainerState.EXITED]
     # 可用性已由调用方给出，服务层不该再 ping 一次（ping 走 `version` 子命令）
     assert fake.calls_of("version") == []
     assert fake.calls_of("inspect")
@@ -360,7 +360,7 @@ async def test_list_keeps_label_check_when_caller_says_available(fake, monkeypat
 
     infos = await core.list_agent_containers(1, docker_available=True)
 
-    assert [info.state for info in infos] == [CONTAINER_STATE_MISSING]
+    assert [info.state for info in infos] == [ContainerState.MISSING]
 
 
 async def test_list_survives_cli_vanishing_after_caller_probe(fake, monkeypatch):
@@ -382,7 +382,7 @@ async def test_list_survives_cli_vanishing_after_caller_probe(fake, monkeypatch)
 
     infos = await core.list_agent_containers(1, docker_available=True)
 
-    assert [info.state for info in infos] == [CONTAINER_STATE_UNKNOWN]
+    assert [info.state for info in infos] == [ContainerState.UNKNOWN]
 
 
 async def test_list_end_to_end_through_tool_layer_probe(fake):
@@ -399,7 +399,7 @@ async def test_list_end_to_end_through_tool_layer_probe(fake):
 
     infos = await core.list_agent_containers(1, docker_available=docker_available)
 
-    assert [info.state for info in infos] == ["running"]
+    assert [info.state for info in infos] == [ContainerState.RUNNING]
 
 
 async def test_list_skips_detection_when_caller_says_unavailable(fake, monkeypatch):
@@ -416,7 +416,7 @@ async def test_list_skips_detection_when_caller_says_unavailable(fake, monkeypat
 
     infos = await core.list_agent_containers(1, docker_available=False)
 
-    assert [info.state for info in infos] == [CONTAINER_STATE_UNKNOWN]
+    assert [info.state for info in infos] == [ContainerState.UNKNOWN]
     assert fake.calls() == []
 
 

@@ -40,7 +40,7 @@ from pathlib import Path
 
 import pytest
 
-from constants import ExecEnv
+from constants import ContainerState, ExecEnv
 from exception import TogoException
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtTeam import GtTeam
@@ -300,9 +300,11 @@ async def test_list_reports_real_docker_state(e2e_env):
     infos = await containerService.list_agent_containers(1)
 
     assert len(infos) == 1
-    assert infos[0].container.record_id == record.id
-    assert infos[0].container.container_id == record.container_id
-    assert infos[0].state in {"created", "exited"}, "状态必须是 Docker 原值，不归一化"
+    assert infos[0].record_id == record.id
+    assert infos[0].container_id == record.container_id
+    assert infos[0].state in {ContainerState.CREATED, ContainerState.EXITED}, (
+        "状态必须是 Docker 原值，不归一化"
+    )
     assert infos[0].is_entered is False
 
     as_tool = infos[0].to_tool_dict()

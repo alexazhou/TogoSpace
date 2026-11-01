@@ -12,14 +12,14 @@
 from __future__ import annotations
 
 import inspect
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from constants import ExecEnv
+from constants import ContainerState, ExecEnv
 from exception import TogoException
 from model.coreModel import ContainerInfo
-from model.dbModel.gtAgentContainer import GtAgentContainer
 from service import funcToolService
 from service.funcToolService import tools as tools_module
 from service.roomService import ToolCallContext
@@ -202,7 +202,7 @@ async def test_enter_container_reports_mount_info_for_managed(monkeypatch, conta
     )
     monkeypatch.setattr(
         agentService, "enter_container",
-        AsyncMock(return_value=(target, "created")),
+        AsyncMock(return_value=(target, ContainerState.CREATED)),
     )
 
     result = await tools_module.enter_container("c0ffee123456", _context=_ctx())
@@ -225,7 +225,7 @@ async def test_enter_container_reports_external_container_difference(monkeypatch
     target = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="arm64")
     monkeypatch.setattr(
         agentService, "enter_container",
-        AsyncMock(return_value=(target, "running")),
+        AsyncMock(return_value=(target, ContainerState.RUNNING)),
     )
 
     result = await tools_module.enter_container("deadbeef0002", _context=_ctx())
@@ -291,12 +291,10 @@ async def test_list_containers_returns_env_and_serialized_containers(monkeypatch
     from service import containerService
 
     info = ContainerInfo(
-        container=GtAgentContainer(
-            id=1, agent_id=1, container_id="c0ffee123456",
-            container_name="agent-1-1", image="ubuntu:24.04",
-        ),
-        state="exited",
-        is_entered=True,
+        record_id=1, agent_id=1, container_id="c0ffee123456",
+        container_name="agent-1-1", image="ubuntu:24.04",
+        created_at=datetime(2026, 11, 1, 10, 0, 0),
+        state=ContainerState.EXITED, is_entered=True,
     )
     container_driver.exec_env = ExecEnv.CONTAINER
     container_driver.current_container_id = "c0ffee123456"
@@ -326,11 +324,9 @@ async def test_list_containers_keeps_records_when_docker_unavailable(monkeypatch
     from service import containerService
 
     info = ContainerInfo(
-        container=GtAgentContainer(
-            id=1, agent_id=1, container_id=None,
-            container_name="agent-1-1", image="ubuntu:24.04",
-        ),
-        state="unknown",
+        record_id=1, agent_id=1, container_id=None,
+        container_name="agent-1-1", image="ubuntu:24.04", created_at=None,
+        state=ContainerState.UNKNOWN,
     )
     monkeypatch.setattr(containerService, "is_docker_available", AsyncMock(return_value=False))
     monkeypatch.setattr(

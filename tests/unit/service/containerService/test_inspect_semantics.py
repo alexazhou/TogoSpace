@@ -25,7 +25,7 @@ import json
 import pytest
 
 from exception import TogoException
-from constants import CONTAINER_STATE_MISSING, CONTAINER_STATE_UNKNOWN
+from constants import ContainerState
 from service.containerService import core
 
 from .test_container_core import env as container_env  # noqa: F401
@@ -141,8 +141,18 @@ async def test_list_shows_unknown_not_missing_for_unreadable(fake):
 
     infos = await core.list_agent_containers(1)
 
-    assert infos[0].state == CONTAINER_STATE_UNKNOWN
-    assert infos[0].state != CONTAINER_STATE_MISSING
+    assert infos[0].state is ContainerState.UNKNOWN
+    assert infos[0].state is not ContainerState.MISSING
+
+
+async def test_list_maps_unrecognized_status_to_unknown(fake):
+    """Docker 返回未收录的新状态 ⇒ 降级为 `unknown`，不让整份列表构造失败。"""
+    await _seed(container_id="c0ffee123456")
+    fake.set("inspect", stdout=_inspect_ok(status="hibernating"))
+
+    infos = await core.list_agent_containers(1)
+
+    assert infos[0].state is ContainerState.UNKNOWN
 
 
 async def test_list_shows_missing_for_confirmed_absent(fake):
@@ -152,7 +162,7 @@ async def test_list_shows_missing_for_confirmed_absent(fake):
 
     infos = await core.list_agent_containers(1)
 
-    assert infos[0].state == CONTAINER_STATE_MISSING
+    assert infos[0].state is ContainerState.MISSING
 
 
 async def test_delete_pre_record_does_not_rm_when_inspect_unreadable(fake):

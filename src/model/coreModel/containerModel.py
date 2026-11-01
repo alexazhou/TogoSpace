@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from util import jsonUtil
-from constants import CONTAINER_STATE_UNKNOWN
+from constants import ContainerState
 
 
 class ContainerTarget(BaseModel):
@@ -43,38 +43,28 @@ class ContainerTarget(BaseModel):
         return f"{self.container_id}({'managed' if self.is_managed else 'external'},{self.arch})"
 
 
-class ContainerRecordInfo(BaseModel):
-    """`agent_containers` 的对外视图：`id → record_id`，隐藏内部字段。
+class ContainerInfo(BaseModel):
+    """自建容器的一条对外展示记录（`list_containers` / Agent 容器接口共用）。
 
-    用 `from_attributes` 直接从 `GtAgentContainer` 读取，字段声明即序列化契约：
-    未声明的 `deleted` / `updated_at` 不会出现在响应里，`created_at` 也由 pydantic
-    自动转成 ISO 字符串——不需要再手写 field_serializer。
+    字段是 `agent_containers` 活跃记录的对外投影（`id → record_id`，隐藏内部字段
+    `deleted` / `updated_at`）加上运行时字段，平铺成一层，`model_dump(mode="json")`
+    即可直接作为 API 响应。
     """
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(extra="forbid")
 
-    record_id: int = Field(validation_alias="id")
+    record_id: int
+    """`agent_containers.id`，预记录没有 Docker ID 时用它删除。"""
+
     agent_id: int
     container_id: str | None
     """Docker 容器 12 位短 ID；预记录尚未回填时为 None。"""
     container_name: str
     image: str
     created_at: datetime | None
+    """记录创建时间（`agent_containers.created_at`），序列化为 ISO 8601 字符串。"""
 
-
-class ContainerInfo(BaseModel):
-    """自建容器的一条对外展示记录（`list_containers` / Agent 容器接口共用）。
-
-    外层只放运行时字段，DB 记录放在 `container` 里（`ContainerRecordInfo`），
-    `model_dump(mode="json")` 即可直接作为 API 响应。
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    container: ContainerRecordInfo
-    """`agent_containers` 的活跃记录（`container_id IS NULL` 表示创建中的预记录）。"""
-
-    state: str = CONTAINER_STATE_UNKNOWN
+    state: ContainerState = ContainerState.UNKNOWN
     """Docker 原始状态；查不到为 missing，inspect 失败为 unknown。"""
 
     is_entered: bool = False
@@ -84,32 +74,18 @@ class ContainerInfo(BaseModel):
         """工具返回值专用字典（§6.2 `list_containers.containers[]`）。
 
         与 API 的 `model_dump()` 差别是**故意的**，两者不能合并：
-        - 去掉内部字段 `agent_id`：模型只看自己的容器，多一个 ID 只会诱导它去猜
-          别人的容器（也容易把 `agent_id` 误当成容器标识传进参数）；
-        - `state` / `is_entered` 是运行时字段，不属于 DB 记录，这里平铺到同一层。
+        去掉内部字段 `agent_id`：模型只看自己的容器，多一个 ID 只会诱导它去猜
+        别人的容器（也容易把 `agent_id` 误当成容器标识传进参数）。
 
         键是**显式白名单**，不是 `model_dump` 之后改键名：给 LLM 的契约必须逐个列出来，
         将来给模型加字段时自动漏出去就是多一份误导（多一个内部字段就多一个可猜的东西）。
         """
-        record = self.container
         return {
-            "record_id": record.record_id,
-            "container_id": record.container_id,
-            "container_name": record.container_name,
-            "image": record.image,
-            "state": self.state,
+            "record_id": self.record_id,
+            "container_id": self.container_id,
+            "container_name": self.container_name,
+            "image": self.image,
+            "state": self.state.value,
             "is_entered": self.is_entered,
-            "created_at": jsonUtil.datetime_to_pydantic_json(record.created_at),
+            "created_at": jsonUtil.datetime_to_pydantic_json(self.created_at),
         }
-
-
-class ContainerCreateResult(BaseModel):
-    """`create_container` 的成功返回体。"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    container_id: str
-    container_name: str
-    image: str
-    state: str = "created"
-    mounts: dict[str, str]

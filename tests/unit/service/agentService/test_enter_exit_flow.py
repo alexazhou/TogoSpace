@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from constants import ExecEnv
+from constants import ContainerState, ExecEnv
 from exception import TogoException
 from model.coreModel import ContainerTarget
 from service import containerService
@@ -58,7 +58,7 @@ def patched(monkeypatch):
     返回一个可配置的控制器：`set_target()` / `set_state()` / `use_driver()`
     决定后续行为，`prepared()` 返回被注入过的目标列表。
     """
-    state = {"state": "created", "target": _MANAGED, "prepare_calls": [], "driver": None}
+    state = {"state": ContainerState.CREATED, "target": _MANAGED, "prepare_calls": [], "driver": None}
 
     async def _fake_get_target(agent_id, container_id):
         return state["target"]
@@ -97,20 +97,20 @@ async def test_enter_managed_container_from_created_disconnects_then_connects(pa
 
     注入这一步在 `create_container` 时已经做过，重复拷 6MB 没有意义。
     """
-    patched.set(target=_MANAGED, state="created")
+    patched.set(target=_MANAGED, state=ContainerState.CREATED)
     driver = _FakeDriver()
     patched.use_driver(driver)
 
     target, state = await core.enter_container(1, "c0ffee123456")
 
-    assert state == "created"
+    assert state is ContainerState.CREATED
     assert driver.events == ["disconnect", "connect:container:c0ffee123456"]
     assert patched.prepare_calls() == []
 
 
 async def test_enter_managed_container_from_exited_is_allowed(patched):
     """`exited` 也是合法稳态（上次会话结束后的常态），必须能再次进入。"""
-    patched.set(target=_MANAGED, state="exited")
+    patched.set(target=_MANAGED, state=ContainerState.EXITED)
     driver = _FakeDriver()
     patched.use_driver(driver)
 
@@ -121,7 +121,7 @@ async def test_enter_managed_container_from_exited_is_allowed(patched):
 
 async def test_enter_external_container_prepares_gtsp_before_connecting(patched):
     """外部容器必须**先注入再连接**，顺序不能反（连上后容器内没有可执行的 gtsp）。"""
-    patched.set(target=_EXTERNAL, state="running")
+    patched.set(target=_EXTERNAL, state=ContainerState.RUNNING)
     driver = _FakeDriver()
     patched.use_driver(driver)
 
@@ -136,7 +136,7 @@ async def test_enter_managed_running_is_rejected_without_touching_connection(pat
 
     不切连接很重要：失败时若已经断开旧环境，Agent 就掉进「没有可用环境」的坑。
     """
-    patched.set(target=_MANAGED, state="running")
+    patched.set(target=_MANAGED, state=ContainerState.RUNNING)
     driver = _FakeDriver()
     patched.use_driver(driver)
 
@@ -149,7 +149,7 @@ async def test_enter_managed_running_is_rejected_without_touching_connection(pat
 
 async def test_enter_external_stopped_is_rejected(patched):
     """外部容器非 running ⇒ `container_stopped`，同样不切连接、不注入。"""
-    patched.set(target=_EXTERNAL, state="exited")
+    patched.set(target=_EXTERNAL, state=ContainerState.EXITED)
     driver = _FakeDriver()
     patched.use_driver(driver)
 
@@ -163,7 +163,7 @@ async def test_enter_external_stopped_is_rejected(patched):
 
 async def test_enter_reports_enter_failed_when_state_is_unknown(patched):
     """状态查不到（unknown）⇒ `container_enter_failed`，不当成 missing 或放行。"""
-    patched.set(target=_MANAGED, state="unknown")
+    patched.set(target=_MANAGED, state=ContainerState.UNKNOWN)
     driver = _FakeDriver()
     patched.use_driver(driver)
 
@@ -176,7 +176,7 @@ async def test_enter_reports_enter_failed_when_state_is_unknown(patched):
 
 async def test_enter_is_idempotent_when_already_in_same_container(patched):
     """已在目标容器 ⇒ 直接成功，**不重连**（重连会打断正在进行的 turn）。"""
-    patched.set(target=_MANAGED, state="running")
+    patched.set(target=_MANAGED, state=ContainerState.RUNNING)
     driver = _FakeDriver(start_env=ExecEnv.CONTAINER, start_container_id="c0ffee123456")
     patched.use_driver(driver)
 
@@ -191,7 +191,7 @@ async def test_enter_failure_restores_host_connection(patched):
     这是 §4.3 明确要求的「该操作自身的失败处理」——与运行中的自动回落不同：
     这里是一次失败的进入操作，必须把 Agent 恢复到可用状态。
     """
-    patched.set(target=_MANAGED, state="created")
+    patched.set(target=_MANAGED, state=ContainerState.CREATED)
     # connect(CONTAINER) 失败，connect(HOST) 成功
     driver = _FakeDriver(connect_results=[False, True])
     patched.use_driver(driver)
@@ -210,7 +210,7 @@ async def test_enter_failure_restores_host_connection(patched):
 
 async def test_enter_failure_does_not_mask_error_when_host_restore_also_fails(patched):
     """宿主也恢复不了时仍抛「进入失败」，不因二次失败改写错误类型或吞掉异常。"""
-    patched.set(target=_MANAGED, state="created")
+    patched.set(target=_MANAGED, state=ContainerState.CREATED)
     driver = _FakeDriver(connect_results=[False, False])
     patched.use_driver(driver)
 

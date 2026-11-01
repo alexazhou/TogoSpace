@@ -33,8 +33,7 @@ from constants import (
     CONTAINER_LOG_DIR,
     CONTAINER_SELF_MOUNT_PATH,
     CONTAINER_SHARED_MOUNT_PATH,
-    CONTAINER_STATE_MISSING,
-    CONTAINER_STATE_UNKNOWN,
+    ContainerState,
     DEFAULT_CONTAINER_IMAGE,
     MAX_CONTAINERS_PER_AGENT,
 )
@@ -341,15 +340,25 @@ async def _inspect_container(cli: DockerCli, ref: str) -> dict | None | object:
     return data
 
 
-def _state_of(inspect_data: dict | None | object) -> str:
-    """取 `State.Status` 原值；`None` 为 missing，查不清为 unknown。"""
+def _state_of(inspect_data: dict | None | object) -> ContainerState:
+    """取 `State.Status` 原值；`None` 为 missing，查不清为 unknown。
+
+    Docker 返回的状态值本身就是枚举里的 `value`；遇到未收录的新状态时按
+    `unknown` 处理并记 warning —— 不能因此让整份列表构造失败。
+    """
     if inspect_data is _INSPECT_UNKNOWN:
-        return CONTAINER_STATE_UNKNOWN
+        return ContainerState.UNKNOWN
     if inspect_data is None:
-        return CONTAINER_STATE_MISSING
+        return ContainerState.MISSING
     assert isinstance(inspect_data, dict)
     state = (inspect_data.get("State") or {}).get("Status")
-    return str(state) if state else CONTAINER_STATE_UNKNOWN
+    if not state:
+        return ContainerState.UNKNOWN
+    parsed = ContainerState.value_of(str(state))
+    if parsed is None:
+        logger.warning("docker inspect 返回未知容器状态: %s", state)
+        return ContainerState.UNKNOWN
+    return parsed
 
 
 async def _resolve_image_arch(cli: DockerCli, image_ref: str) -> str:
@@ -762,8 +771,13 @@ async def list_agent_containers(
         # daemon 不可用：不把状态伪造成 missing，用 unknown 表示「查不到」
         return [
             ContainerInfo(
-                container=record,
-                state=CONTAINER_STATE_UNKNOWN,
+                record_id=record.id,
+                agent_id=record.agent_id,
+                container_id=record.container_id,
+                container_name=record.container_name,
+                image=record.image,
+                created_at=record.created_at,
+                state=ContainerState.UNKNOWN,
                 is_entered=record.container_id is not None
                 and record.container_id == current_container_id,
             )
@@ -778,7 +792,12 @@ async def list_agent_containers(
 
     return [
         ContainerInfo(
-            container=record,
+            record_id=record.id,
+            agent_id=record.agent_id,
+            container_id=record.container_id,
+            container_name=record.container_name,
+            image=record.image,
+            created_at=record.created_at,
             state=state,
             is_entered=record.container_id is not None
             and record.container_id == current_container_id,
@@ -787,7 +806,7 @@ async def list_agent_containers(
     ]
 
 
-async def _resolve_record_state(cli: DockerCli, record: GtAgentContainer) -> str:
+async def _resolve_record_state(cli: DockerCli, record: GtAgentContainer) -> ContainerState:
     """解析单条记录的真实状态。
 
     - 预记录按名 inspect 后**校验 label**：label 不匹配 ⇒ 那个同名容器不是我们
@@ -803,12 +822,12 @@ async def _resolve_record_state(cli: DockerCli, record: GtAgentContainer) -> str
             "查询容器状态失败: record_id=%s, ref=%s, error=%s",
             record.id, ref, exc.error_message,
         )
-        return CONTAINER_STATE_UNKNOWN
+        return ContainerState.UNKNOWN
 
     if inspect_data is _INSPECT_UNKNOWN:
-        return CONTAINER_STATE_UNKNOWN
+        return ContainerState.UNKNOWN
     if inspect_data is None:
-        return CONTAINER_STATE_MISSING
+        return ContainerState.MISSING
 
     assert isinstance(inspect_data, dict)
     if record.container_id is None and not _label_matches(inspect_data, record.id):
@@ -816,7 +835,7 @@ async def _resolve_record_state(cli: DockerCli, record: GtAgentContainer) -> str
             "同名容器 label 不匹配，不视为本记录: record_id=%s, name=%s",
             record.id, record.container_name,
         )
-        return CONTAINER_STATE_MISSING
+        return ContainerState.MISSING
 
     return _state_of(inspect_data)
 
@@ -1041,10 +1060,10 @@ async def count_containers_by_agent_ids(agent_ids: list[int]) -> dict[int, int]:
 
 # 自建容器允许拉起的稳态：只有 created / exited。空闲 running 是异常残留
 # （gtsp 退出后容器必然停回 exited），隐式 stop 会抹掉排查线索，所以报错而非修正。
-_MANAGED_ENTERABLE_STATES = frozenset({"created", "exited"})
+_MANAGED_ENTERABLE_STATES = frozenset({ContainerState.CREATED, ContainerState.EXITED})
 
 
-def validate_enter_state(target: ContainerTarget, state: str) -> None:
+def validate_enter_state(target: ContainerTarget, state: ContainerState | str) -> None:
     """校验「现在能不能进入这个容器」，不合法时抛 `TogoException`。
 
     自建与外部容器的规则**不同**，且不能合并（§4.1 核心不变量）：
@@ -1058,15 +1077,19 @@ def validate_enter_state(target: ContainerTarget, state: str) -> None:
 
     Args:
         target: 连接目标（据 `is_managed` 选规则）
-        state: `docker inspect` 得到的 `State.Status` 原值
+        state: `ContainerState` 或 `docker inspect` 得到的原始状态字符串；
+            未收录的状态按异常状态处理，message 保留原值
 
     Raises:
         TogoException: 状态不允许进入
     """
+    parsed = state if isinstance(state, ContainerState) else ContainerState.value_of(state)
+    actual = parsed.value if parsed is not None else str(state)
+
     if target.is_managed:
-        if state in _MANAGED_ENTERABLE_STATES:
+        if parsed in _MANAGED_ENTERABLE_STATES:
             return
-        if state == "running":
+        if parsed is ContainerState.RUNNING:
             raise TogoException(
                 "容器当前处于 running 状态，这是异常残留（自建容器空闲时应为 "
                 "created 或 exited）。请先排查该容器内是否有残留进程，"
@@ -1074,20 +1097,20 @@ def validate_enter_state(target: ContainerTarget, state: str) -> None:
                 ERROR_CONTAINER_ALREADY_RUNNING,
             )
         raise TogoException(
-            f"容器当前状态为 {state}，无法进入（仅 created / exited 可拉起）。"
+            f"容器当前状态为 {actual}，无法进入（仅 created / exited 可拉起）。"
             "系统不会自动恢复异常状态的容器，请排查或删除后重建。",
             ERROR_CONTAINER_ENTER_FAILED,
         )
 
-    if state == "running":
+    if parsed is ContainerState.RUNNING:
         return
     raise TogoException(
-        f"外部容器当前状态为 {state}，必须先自行启动（docker start）为 running 才能进入。",
+        f"外部容器当前状态为 {actual}，必须先自行启动（docker start）为 running 才能进入。",
         ERROR_CONTAINER_STOPPED,
     )
 
 
-async def get_container_state(container_id: str) -> str:
+async def get_container_state(container_id: str) -> ContainerState:
     """查容器实时状态；不存在返回 `missing`，inspect 失败返回 `unknown`。
 
     供进入流程在 `get_container_target` 之后做状态判定用，避免调用方自己拼
@@ -1098,7 +1121,7 @@ async def get_container_state(container_id: str) -> str:
         inspect_data = await _inspect_container(cli, container_id)
     except DockerCliError as exc:
         logger.warning("查询容器状态失败: id=%s, error=%s", container_id, exc.error_message)
-        return CONTAINER_STATE_UNKNOWN
+        return ContainerState.UNKNOWN
     return _state_of(inspect_data)
 
 
