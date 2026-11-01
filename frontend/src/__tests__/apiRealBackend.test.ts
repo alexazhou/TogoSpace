@@ -1,10 +1,10 @@
 /**
- * #113 前后端联调对账：真实 HTTP 响应 → 前端 normalize。
+ * 真实后端响应 → 前端 normalize 对账。
  *
- * 这两份 fixture 不是手写的，是 `curl 127.0.0.1:8199` 从真跑起来的后端抓的：
- * - `lg113_detail_real.json`：`GET /teams/1/agents/李哥.json`，该 Agent 库里有
+ * 两份 fixture 不是手写的，是 `curl 127.0.0.1:8199` 从真跑起来的后端抓的：
+ * - `agent_detail_real.json`：`GET /teams/1/agents/李哥.json`，该 Agent 库里有
  *   1 条已回填 docker_id 的真实容器 + 1 条 docker_id=NULL 的预记录；
- * - `lg113_list_real.json`：`GET /agents/list.json?team_id=1`。
+ * - `agent_list_real.json`：`GET /agents/list.json?team_id=1`。
  *
  * 与 `api.test.ts` 里那批手写用例的分工：
  * - 手写用例验「normalize 的规则本身」（我会不会把 int 收敛成 null 之类）；
@@ -12,13 +12,16 @@
  * 两者互补，不重复：手写用例永远不可能发现「后端实际不发这个字段」。
  *
  * 一旦后端改了字段名/形状，这批会先红——这正是它的价值。
+ *
+ * 注：fixture 是历史快照，抓取时容器名还是旧规则 `agent-3-1` 这种形态；
+ * 前端只把 container_name 当不透明字符串透传，不解析其结构。
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { clearGlobalRequestError } from '../appUiState';
 import { clearToken } from '../authStore';
 import { getAgentDetail, getAgentsByTeamId } from '../api';
-import detailReal from './fixtures/lg113_detail_real.json';
-import listReal from './fixtures/lg113_list_real.json';
+import detailReal from './fixtures/agent_detail_real.json';
+import listReal from './fixtures/agent_list_real.json';
 
 function stubJson(payload: unknown) {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
@@ -27,7 +30,7 @@ function stubJson(payload: unknown) {
   })));
 }
 
-describe('#113 联调：真实后端响应喂给前端 normalize', () => {
+describe('真实后端响应喂给前端 normalize', () => {
   beforeEach(() => {
     clearGlobalRequestError();
     clearToken();
