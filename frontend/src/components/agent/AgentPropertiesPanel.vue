@@ -239,7 +239,7 @@ async function handleSave() {
                 <span v-if="item.is_entered" class="entered-badge">{{ t('agent.containers.entered') }}</span>
               </td>
               <td class="mono">
-                {{ item.docker_id || t('agent.containers.pending') }}
+                {{ item.container_id || t('agent.containers.pending') }}
               </td>
               <td class="mono">{{ item.image }}</td>
               <!-- Docker 原始状态直接展示，不做翻译（文档 §8 明确不加 containerState.* 词条）。 -->

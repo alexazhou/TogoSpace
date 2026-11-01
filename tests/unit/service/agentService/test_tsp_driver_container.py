@@ -28,8 +28,8 @@ from service.agentService.driver import tspDriver
 from service.agentService.driver.tspDriver import TspAgentDriver
 from service.agentService.toolRegistry import AgentToolRegistry
 
-_MANAGED = ContainerTarget(docker_id="c0ffee123456", is_managed=True, arch="arm64")
-_EXTERNAL = ContainerTarget(docker_id="deadbeef0002", is_managed=False, arch="amd64")
+_MANAGED = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch="arm64")
+_EXTERNAL = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="amd64")
 
 
 @dataclass
@@ -401,7 +401,7 @@ async def test_switching_containers_closes_previous_client(monkeypatch):
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
     first = driver._client
 
-    other = ContainerTarget(docker_id="deadbeef0002", is_managed=True, arch="arm64")
+    other = ContainerTarget(container_id="deadbeef0002", is_managed=True, arch="arm64")
     await driver.connect(ExecEnv.CONTAINER, other)
 
     assert first is not None and first.disconnected is True
@@ -489,7 +489,7 @@ async def test_publishes_when_switching_between_containers(monkeypatch):
     await driver.connect(ExecEnv.CONTAINER, _MANAGED)
 
     published = _capture_publishes(monkeypatch)
-    other = ContainerTarget(docker_id="deadbeef0002", is_managed=True, arch="arm64")
+    other = ContainerTarget(container_id="deadbeef0002", is_managed=True, arch="arm64")
     await driver.connect(ExecEnv.CONTAINER, other)
 
     assert len(published) == 1

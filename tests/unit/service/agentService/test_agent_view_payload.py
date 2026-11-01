@@ -35,18 +35,18 @@ def _agent(agent_id: int = 3, team_id: int = 1) -> GtAgent:
     )
 
 
-def _container_info(*, record_id: int = 7, docker_id: str | None = "c0ffee123456") -> ContainerInfo:
+def _container_info(*, record_id: int = 7, container_id: str | None = "c0ffee123456") -> ContainerInfo:
     return ContainerInfo(
         container=GtAgentContainer(
             id=record_id,
             agent_id=3,
-            docker_id=docker_id,
+            container_id=container_id,
             container_name=f"agent-3-{record_id}",
             image="ubuntu:24.04",
             created_at=datetime(2026, 11, 1, 10, 0, 0),
         ),
         state="exited",
-        is_entered=docker_id is not None,
+        is_entered=container_id is not None,
     )
 
 
@@ -170,7 +170,7 @@ async def test_get_agent_containers_forwards_current_container(monkeypatch):
 
     containers = await core.get_agent_containers(3)
 
-    assert [item.container.id for item in containers] == [7]
+    assert [item.container.record_id for item in containers] == [7]
     assert calls == {"agent_id": 3, "current_container_id": "c0ffee123456"}
 
 

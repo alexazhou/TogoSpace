@@ -6,11 +6,11 @@
 （第 4 步）。本模块负责把「容器存在且可执行」、「库里有这条记录」两件事对齐。
 
 几个容易踩错、且都是设计要求（不是实现口味）的点：
-1. **先落预记录再 docker create**（§5.3）：`docker_id=NULL` 的预记录同时占住
+1. **先落预记录再 docker create**（§5.3）：`container_id=NULL` 的预记录同时占住
    配额与容器名，否则并发创建能绕过 `MAX_CONTAINERS_PER_AGENT`。
 2. **自建容器创建后立刻 `docker cp` 注入 gtsp**：`--entrypoint` 指向 `/tmp/gtsp`，
    容器内本来没有这个文件；注入失败要连带删容器 + 物理删除预记录。
-3. **补偿删除一律按 `docker_id`，只有 `docker_id IS NULL` 的预记录才按
+3. **补偿删除一律按 `container_id`，只有 `container_id IS NULL` 的预记录才按
    `container_name` + label 校验后删**：按名删外部同名容器是不可接受的破坏性操作，
    这是 P-1 风险的对策（§3.5 / §5.4）。
 4. **创建成功不切环境**：`create_container` 只在宿主侧准备好容器，Agent 仍是宿主
@@ -22,7 +22,6 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any
 
 from peewee import IntegrityError
 
@@ -34,15 +33,14 @@ from constants import (
     CONTAINER_LOG_DIR,
     CONTAINER_SELF_MOUNT_PATH,
     CONTAINER_SHARED_MOUNT_PATH,
+    CONTAINER_STATE_MISSING,
+    CONTAINER_STATE_UNKNOWN,
     DEFAULT_CONTAINER_IMAGE,
     MAX_CONTAINERS_PER_AGENT,
-    ExecEnv,
 )
 from dal.db import gtAgentContainerManager
 from exception import TogoException
 from model.coreModel import (
-    CONTAINER_STATE_MISSING,
-    CONTAINER_STATE_UNKNOWN,
     ContainerInfo,
     ContainerTarget,
 )
@@ -209,16 +207,16 @@ def build_create_argv(
     ]
 
 
-def build_container_start_argv(docker_id: str) -> list[str]:
+def build_container_start_argv(container_id: str) -> list[str]:
     """自建容器启动 argv：`docker start -a -i <id>`。
 
     `-a`（attach）把容器 stdio 接到当前进程；`-i` 保持 stdin 打开。
     关掉 stdin 后容器内 gtsp 收到 EOF 退出 → tini 同步退出 → 容器回 `exited`。
     """
-    return ["start", "-a", "-i", docker_id]
+    return ["start", "-a", "-i", container_id]
 
 
-def build_container_exec_argv(docker_id: str) -> list[str]:
+def build_container_exec_argv(container_id: str) -> list[str]:
     """外部容器启动 argv：`docker exec -i <id> /tmp/gtsp --mode stdio ...`。
 
     外部容器的主进程必须保持运行，所以只能 `exec` 进一个额外进程，
@@ -227,7 +225,7 @@ def build_container_exec_argv(docker_id: str) -> list[str]:
     return [
         "exec",
         "-i",
-        docker_id,
+        container_id,
         CONTAINER_GTSP_PATH,
         "--mode", "stdio",
         "--log-path", CONTAINER_LOG_DIR,
@@ -398,7 +396,7 @@ async def _resolve_image_os(cli: DockerCli, image_ref: str) -> str:
 
 
 async def create_container(agent_id: int, image: str | None = None) -> GtAgentContainer:
-    """创建自建容器并注入 gtsp，返回已回填 `docker_id` 的记录。
+    """创建自建容器并注入 gtsp，返回已回填 `container_id` 的记录。
 
     **只创建，不切换执行环境**（§6.2 第 1 条）：Agent 仍在宿主，
     要 `enter_container` 才真正进去。
@@ -484,7 +482,7 @@ async def create_container(agent_id: int, image: str | None = None) -> GtAgentCo
     assert record_id is not None
 
     # 从这一步起任何失败都要补偿：删容器（若已建）+ 物理删预记录
-    docker_id: str | None = None
+    container_id: str | None = None
     try:
         argv = build_create_argv(
             container_name=container_name,
@@ -507,34 +505,34 @@ async def create_container(agent_id: int, image: str | None = None) -> GtAgentCo
                 f"docker create 返回的容器 ID 异常: {full_id!r}",
                 ERROR_CONTAINER_CREATE_FAILED,
             )
-        docker_id = full_id[:12]
-        await gtAgentContainerManager.set_docker_id(record, docker_id)
+        container_id = full_id[:12]
+        await gtAgentContainerManager.set_container_id(record, container_id)
 
         # 注入口径：自建容器创建后立即注入（§3.2）
-        await _inject_gtsp(cli, docker_id, image)
+        await _inject_gtsp(cli, container_id, image)
     except BaseException:
-        # 补偿：先删容器（按 docker_id，绝不用名字去 rm 别人的容器），
+        # 补偿：先删容器（按 container_id，绝不用名字去 rm 别人的容器），
         # 再物理删除预记录（硬删除：不留占配额的行）。
-        await _cleanup_failed_create(cli, docker_id, record)
+        await _cleanup_failed_create(cli, container_id, record)
         raise
 
     logger.info(
-        "容器创建完成: agent_id=%s, record_id=%s, docker_id=%s, name=%s, image=%s",
-        agent_id, record_id, docker_id, container_name, image,
+        "容器创建完成: agent_id=%s, record_id=%s, container_id=%s, name=%s, image=%s",
+        agent_id, record_id, container_id, container_name, image,
     )
     return record
 
 
 async def _cleanup_failed_create(
-    cli: DockerCli, docker_id: str | None, record: GtAgentContainer
+    cli: DockerCli, container_id: str | None, record: GtAgentContainer
 ) -> None:
     """创建失败的补偿清理。任何异常都吞掉并记 warning，不能盖住原始错误。"""
-    if docker_id:
+    if container_id:
         try:
-            await cli.run(["rm", "-f", docker_id], timeout_sec=CONTAINER_CREATE_TIMEOUT_SEC)
+            await cli.run(["rm", "-f", container_id], timeout_sec=CONTAINER_CREATE_TIMEOUT_SEC)
         except Exception:
             logger.warning(
-                "补偿删除容器失败（需人工检查）: docker_id=%s", docker_id, exc_info=True
+                "补偿删除容器失败（需人工检查）: container_id=%s", container_id, exc_info=True
             )
     try:
         await gtAgentContainerManager.hard_delete(record)
@@ -544,7 +542,7 @@ async def _cleanup_failed_create(
         )
 
 
-async def _inject_gtsp(cli: DockerCli, docker_id: str, image: str) -> None:
+async def _inject_gtsp(cli: DockerCli, container_id: str, image: str) -> None:
     """`docker cp` 注入 Linux gtsp 到 `/tmp/gtsp`（§3.2）。
 
     权限由源文件 `0755` 保证（`docker cp` 保留权限位），**不做容器内 chmod**
@@ -558,7 +556,7 @@ async def _inject_gtsp(cli: DockerCli, docker_id: str, image: str) -> None:
 
     try:
         await cli.run(
-            ["cp", local_binary, f"{docker_id}:{CONTAINER_GTSP_PATH}"],
+            ["cp", local_binary, f"{container_id}:{CONTAINER_GTSP_PATH}"],
             timeout_sec=CONTAINER_CREATE_TIMEOUT_SEC,
         )
     except DockerCliError as exc:
@@ -587,8 +585,8 @@ async def get_container_target(agent_id: int, container_id: str) -> ContainerTar
 
     cli = get_cli()
 
-    # 自建容器：`agent_id + docker_id` 精确命中即视为 managed
-    record = await gtAgentContainerManager.get_active_by_docker_id(agent_id, container_id)
+    # 自建容器：`agent_id + container_id` 精确命中即视为 managed
+    record = await gtAgentContainerManager.get_active_by_container_id(agent_id, container_id)
     if record is not None:
         try:
             inspect_data = await _inspect_container(cli, container_id)
@@ -617,7 +615,7 @@ async def get_container_target(agent_id: int, container_id: str) -> ContainerTar
             )
         arch = await _resolve_image_arch(cli, image_id)
         return ContainerTarget(
-            docker_id=container_id,
+            container_id=container_id,
             is_managed=True,
             arch=arch,
             container_name=record.container_name,
@@ -649,7 +647,7 @@ async def get_container_target(agent_id: int, container_id: str) -> ContainerTar
         )
     arch = await _resolve_image_arch(cli, image_id)
     return ContainerTarget(
-        docker_id=container_id,
+        container_id=container_id,
         is_managed=False,
         arch=arch,
         container_name=_inspect_container_name(inspect_data),
@@ -668,7 +666,7 @@ async def prepare_container_gtsp(target: ContainerTarget) -> None:
     local_binary = appPaths.get_gtsp_linux_binary_path(target.arch)
     try:
         await cli.run(
-            ["cp", local_binary, f"{target.docker_id}:{CONTAINER_GTSP_PATH}"],
+            ["cp", local_binary, f"{target.container_id}:{CONTAINER_GTSP_PATH}"],
             timeout_sec=CONTAINER_CREATE_TIMEOUT_SEC,
         )
     except DockerCliError as exc:
@@ -715,8 +713,8 @@ async def list_agent_containers(
     """列出该 Agent 全部活跃自建容器，并实时填状态（§3.4 / §8）。
 
     两类记录的取状态方式不同：
-    - 已回填 `docker_id`：按 `docker_id` inspect；
-    - 预记录（`docker_id IS NULL`）：按 `container_name` inspect，**并且必须校验
+    - 已回填 `container_id`：按 `container_id` inspect；
+    - 预记录（`container_id IS NULL`）：按 `container_name` inspect，**并且必须校验
       label**。不校验就会把宿主上同名的外部容器当成自己的（§2.1 预记录可见性）。
 
     inspect 是并发发的：3 个容器串行 3s 超时会卡 9s，列表接口不能这么慢。
@@ -727,7 +725,7 @@ async def list_agent_containers(
         docker_available: 外部已探测的 daemon 可用性；None 表示本函数自己探测
 
     Returns:
-        按 `record_id` 升序的容器信息列表（含预记录，`docker_id` 为 None）。
+        按 `record_id` 升序的容器信息列表（含预记录，`container_id` 为 None）。
 
     Note:
         **本函数不因 docker 缺失而失败**。没装 Docker CLI 和 daemon 没起必须表现一致
@@ -766,8 +764,8 @@ async def list_agent_containers(
             ContainerInfo(
                 container=record,
                 state=CONTAINER_STATE_UNKNOWN,
-                is_entered=record.docker_id is not None
-                and record.docker_id == current_container_id,
+                is_entered=record.container_id is not None
+                and record.container_id == current_container_id,
             )
             for record in records
         ]
@@ -782,8 +780,8 @@ async def list_agent_containers(
         ContainerInfo(
             container=record,
             state=state,
-            is_entered=record.docker_id is not None
-            and record.docker_id == current_container_id,
+            is_entered=record.container_id is not None
+            and record.container_id == current_container_id,
         )
         for record, state in zip(records, states)
     ]
@@ -797,7 +795,7 @@ async def _resolve_record_state(cli: DockerCli, record: GtAgentContainer) -> str
     - inspect 本身失败（daemon 抖动 / 超时）或输出解析不了 ⇒ `unknown`。
       **不能报 missing**：前端会把 missing 当成「容器没了」，用户看到的就是假信息。
     """
-    ref = record.docker_id or record.container_name
+    ref = record.container_id or record.container_name
     try:
         inspect_data = await _inspect_container(cli, ref)
     except DockerCliError as exc:
@@ -813,7 +811,7 @@ async def _resolve_record_state(cli: DockerCli, record: GtAgentContainer) -> str
         return CONTAINER_STATE_MISSING
 
     assert isinstance(inspect_data, dict)
-    if record.docker_id is None and not _label_matches(inspect_data, record.id):
+    if record.container_id is None and not _label_matches(inspect_data, record.id):
         logger.info(
             "同名容器 label 不匹配，不视为本记录: record_id=%s, name=%s",
             record.id, record.container_name,
@@ -856,7 +854,7 @@ async def delete_container(
         TogoException: 参数非法 / 记录不存在 / 正在使用 / 删除失败
 
     Returns:
-        已标记 `deleted = 1` 的记录（调用方取 `docker_id` 作为 `deleted_container_id`）
+        已标记 `deleted = 1` 的记录（调用方取 `container_id` 作为 `deleted_container_id`）
     """
     if (container_id is None) == (record_id is None):
         raise TogoException(
@@ -869,7 +867,7 @@ async def delete_container(
                 "container_id 必须是 12 位十六进制容器短 ID",
                 ERROR_CONTAINER_INVALID_PARAMS,
             )
-        record = await gtAgentContainerManager.get_active_by_docker_id(agent_id, container_id)
+        record = await gtAgentContainerManager.get_active_by_container_id(agent_id, container_id)
     else:
         assert record_id is not None
         if record_id <= 0:
@@ -884,30 +882,30 @@ async def delete_container(
     if record is None:
         raise TogoException("容器记录不存在或不属于当前 Agent", ERROR_CONTAINER_NOT_FOUND)
 
-    if record.docker_id is not None and record.docker_id == current_container_id:
+    if record.container_id is not None and record.container_id == current_container_id:
         raise TogoException(
             "该容器是当前正在使用的执行环境，请先退出到宿主（exit_to_host）再删除",
             ERROR_CONTAINER_IN_USE,
         )
 
     cli = get_cli()
-    if record.docker_id is not None:
-        await _rm_container(cli, record.docker_id)
+    if record.container_id is not None:
+        await _rm_container(cli, record.container_id)
     else:
         await _rm_pre_record_container(cli, record)
 
     await gtAgentContainerManager.mark_deleted(record)
     logger.info(
-        "容器已删除: agent_id=%s, record_id=%s, docker_id=%s",
-        agent_id, record.id, record.docker_id,
+        "容器已删除: agent_id=%s, record_id=%s, container_id=%s",
+        agent_id, record.id, record.container_id,
     )
     return record
 
 
-async def _rm_container(cli: DockerCli, docker_id: str) -> None:
-    """按 `docker_id` 强制删除容器；「容器不存在」视为已达成目标。"""
+async def _rm_container(cli: DockerCli, container_id: str) -> None:
+    """按 `container_id` 强制删除容器；「容器不存在」视为已达成目标。"""
     try:
-        await cli.run(["rm", "-f", docker_id], timeout_sec=CONTAINER_CREATE_TIMEOUT_SEC)
+        await cli.run(["rm", "-f", container_id], timeout_sec=CONTAINER_CREATE_TIMEOUT_SEC)
     except DockerCliError as exc:
         if "no such" in (exc.stderr or "").lower():
             # 已被外部删除：目标状态已满足，不报错
@@ -1008,11 +1006,11 @@ async def _delete_records(
     deleted = 0
     for record in records:
         try:
-            if record.docker_id is not None and record.docker_id == current_container_id:
+            if record.container_id is not None and record.container_id == current_container_id:
                 logger.info("跳过正在使用的容器: record_id=%s", record.id)
                 continue
-            if record.docker_id is not None:
-                await _rm_container(cli, record.docker_id)
+            if record.container_id is not None:
+                await _rm_container(cli, record.container_id)
             else:
                 await _rm_pre_record_container(cli, record)
             if await gtAgentContainerManager.mark_deleted(record):
@@ -1105,110 +1103,11 @@ async def get_container_state(container_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 进入 / 退出编排（§5.1 / §5.2）——供工具层调用，Driver 只负责连接
+# 进入 / 退出流程（§5.1 / §5.2）不在本层：执行环境属于 Agent，
+# 由 `agentService.enter_container` / `agentService.exit_to_host` 编排并调用
+# 本层的 `get_container_target` / `get_container_state` /
+# `validate_enter_state` / `prepare_container_gtsp` 原语。
 # ---------------------------------------------------------------------------
-
-
-async def enter_container(
-    agent_id: int,
-    container_id: str,
-    driver: Any,
-) -> tuple[ContainerTarget, str]:
-    """把 Agent 的执行环境切换到指定容器，返回 `(目标, 进入前状态)`。
-
-    流程严格按 §5.1：
-    1. 同容器幂等：已在目标容器且连接存活 → 直接成功；
-    2. `get_container_target` 解析目标（含 12 位 ID 校验、存在性、架构）；
-    3. 状态判定（`validate_enter_state`）：自建只收 created/exited，外部只收 running；
-    4. 外部容器先注入 gtsp（自建在 create 时已注入）；
-    5. `driver.disconnect()` → `driver.connect(CONTAINER, target)`；
-    6. connect 失败则重连宿主（**本次进入失败**，不属于运行中自动回落）。
-
-    Args:
-        agent_id: 发起方 Agent
-        container_id: 12 位短 ID
-        driver: `TspAgentDriver`（只用到 exec_env / current_container_id /
-            disconnect / connect）
-
-    Raises:
-        TogoException: 任一步失败
-
-    Returns:
-        `(target, previous_state)`；`previous_state` 是进入前的容器状态，
-        供工具层在 message 里说明「从 created 拉起」还是「从 exited 恢复」。
-    """
-    if driver.exec_env == ExecEnv.CONTAINER and driver.current_container_id == container_id:
-        # 幂等：已在目标容器。不重连（重连会打断正在进行的 turn）。
-        target = await get_container_target(agent_id, container_id)
-        return target, "running"
-
-    target = await get_container_target(agent_id, container_id)
-
-    state = await get_container_state(container_id)
-    if state == CONTAINER_STATE_UNKNOWN:
-        raise TogoException(
-            f"无法查询容器 {container_id} 的状态（Docker 不可用或查询超时），"
-            "请稍后重试",
-            ERROR_CONTAINER_ENTER_FAILED,
-        )
-    validate_enter_state(target, state)
-
-    if not target.is_managed:
-        # 外部容器：镜像里没有 gtsp，必须进前注入
-        await prepare_container_gtsp(target)
-
-    # 切环境：先断开再显式连接。disconnect 不改环境状态（见 Driver 注释），
-    # 所以 connect 失败时环境仍是旧值，由下面的失败分支显式处理。
-    await driver.disconnect()
-    ok = await driver.connect(ExecEnv.CONTAINER, target)
-    if not ok:
-        # 进入失败：本次调用内把宿主连接恢复出来，避免 Agent 失去可用环境。
-        # 注意这是「该操作自身的失败处理」，不是运行中的自动回落（§4.3）。
-        restored = await driver.connect(ExecEnv.HOST)
-        if not restored:
-            logger.error(
-                "进入容器失败且无法恢复宿主连接: agent_id=%s, container=%s",
-                agent_id, container_id,
-            )
-        raise TogoException(
-            f"进入容器 {container_id} 失败：容器内 gtsp 启动或握手未成功。"
-            "请确认镜像内 /tmp 可写且能执行注入的二进制。",
-            ERROR_CONTAINER_ENTER_FAILED,
-        )
-
-    logger.info(
-        "已进入容器: agent_id=%s, container=%s, managed=%s, from_state=%s",
-        agent_id, container_id, target.is_managed, state,
-    )
-    return target, state
-
-
-async def exit_to_host(agent_id: int, driver: Any) -> None:
-    """把 Agent 的执行环境切回宿主（§5.2）。
-
-    顺序：`disconnect()`（关容器连接 → 自建容器自然停回 exited）→
-    `connect(HOST)`。connect 失败时环境保持 CONTAINER，由 Agent 重试——
-    不能假装成功，否则后续工具会打在错误环境上。
-
-    Raises:
-        TogoException: 宿主连接失败
-    """
-    if driver.exec_env == ExecEnv.HOST:
-        # 已经在宿主：幂等成功，不重连（重连会打断 turn）
-        return
-
-    # 先断开容器连接：关 stdin 后容器内 gtsp 退出，自建容器随之停回 exited
-    await driver.disconnect()
-
-    ok = await driver.connect(ExecEnv.HOST)
-    if not ok:
-        raise TogoException(
-            "退出容器失败：无法重新连接宿主环境。当前逻辑环境仍为容器，"
-            "请重试 exit_to_host。",
-            ERROR_CONTAINER_ENTER_FAILED,
-        )
-
-    logger.info("已退回到宿主环境: agent_id=%s", agent_id)
 
 
 async def is_docker_available() -> bool:

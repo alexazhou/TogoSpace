@@ -19,7 +19,7 @@ Docker 认不认」。只有真 daemon 才会暴露的问题：
 
 - **禁止**在仓库目录启动常驻开发服务器。本文件不起 HTTP 服务、只调 service 层，
   因此不受该约束；代价是**不覆盖** controller / WS 层（那部分由单测 + #113 覆盖）。
-- 每个用例自建临时 workspace，容器在 fixture 收尾时按 `docker_id` 兜底 `rm -f`。
+- 每个用例自建临时 workspace，容器在 fixture 收尾时按 `container_id` 兜底 `rm -f`。
 - 镜像用 `ubuntu:24.04`（glibc 系，当前唯一承诺兼容的发行版系列，事件 343）。
 
 ## 口径（事件 343 / 344）
@@ -44,7 +44,7 @@ from constants import ExecEnv
 from exception import TogoException
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtTeam import GtTeam
-from service import containerService
+from service import agentService, containerService
 from service.containerService import core as container_core
 from service.containerService.dockerCli import DockerCli, DockerCliError
 
@@ -106,8 +106,8 @@ class E2EEnv:
     created: list[str] = field(default_factory=list)
 
     def track(self, record) -> None:
-        if record.docker_id:
-            self.created.append(record.docker_id)
+        if record.container_id:
+            self.created.append(record.container_id)
 
 
 @pytest.fixture(scope="module")
@@ -191,10 +191,10 @@ async def e2e_env(tmp_path, monkeypatch, real_docker):
     try:
         yield env
     finally:
-        # 兜底清理：按 docker_id 删，绝不用名字（容器名跨 Team 可能重名）
-        for docker_id in env.created:
+        # 兜底清理：按 container_id 删，绝不用名字（容器名跨 Team 可能重名）
+        for container_id in env.created:
             try:
-                await real_docker.run(["rm", "-f", docker_id], timeout_sec=60)
+                await real_docker.run(["rm", "-f", container_id], timeout_sec=60)
             except Exception:  # noqa: BLE001 - 清理失败不能盖住用例结果
                 pass
         await database.aio_close()
@@ -212,8 +212,8 @@ async def _create(env: E2EEnv):
     return record
 
 
-async def _inspect(env: E2EEnv, docker_id: str):
-    return await container_core._inspect_container(env.cli, docker_id)
+async def _inspect(env: E2EEnv, container_id: str):
+    return await container_core._inspect_container(env.cli, container_id)
 
 
 # ---------------------------------------------------------------------------
@@ -226,8 +226,8 @@ async def test_create_container_really_creates_docker_container(e2e_env):
     """`create_container` 真的建出容器，且 DB 回填 12 位短 ID、不自动启动。"""
     record = await _create(e2e_env)
 
-    assert containerService.is_short_id(record.docker_id)
-    inspect = await _inspect(e2e_env, record.docker_id)
+    assert containerService.is_short_id(record.container_id)
+    inspect = await _inspect(e2e_env, record.container_id)
     assert isinstance(inspect, dict), "创建后容器应立刻能在 daemon 上查到"
 
     # 只创建、不切环境（§6.2 第 1 条）：容器处于未运行状态
@@ -242,7 +242,7 @@ async def test_created_container_honors_argv_contract(e2e_env):
     """
     record = await _create(e2e_env)
 
-    inspect = await _inspect(e2e_env, record.docker_id)
+    inspect = await _inspect(e2e_env, record.container_id)
     assert isinstance(inspect, dict)
 
     # 绝不能有 TTY：伪终端会改写 gtsp 的 stdio 原始流
@@ -276,7 +276,7 @@ async def test_gtsp_is_injected_with_executable_permission(e2e_env):
     local_copy = e2e_env.workspace / f"gtsp-check-{uuid.uuid4().hex}"
     try:
         await e2e_env.cli.run(
-            ["cp", f"{record.docker_id}:{containerService.CONTAINER_GTSP_PATH}", str(local_copy)],
+            ["cp", f"{record.container_id}:{containerService.CONTAINER_GTSP_PATH}", str(local_copy)],
             timeout_sec=60,
         )
         assert local_copy.is_file(), "注入的 gtsp 应能在容器内取到"
@@ -300,28 +300,27 @@ async def test_list_reports_real_docker_state(e2e_env):
     infos = await containerService.list_agent_containers(1)
 
     assert len(infos) == 1
-    assert infos[0].record_id == record.id
-    assert infos[0].docker_id == record.docker_id
+    assert infos[0].container.record_id == record.id
+    assert infos[0].container.container_id == record.container_id
     assert infos[0].state in {"created", "exited"}, "状态必须是 Docker 原值，不归一化"
     assert infos[0].is_entered is False
 
     as_tool = infos[0].to_tool_dict()
-    assert as_tool["container_id"] == record.docker_id
+    assert as_tool["container_id"] == record.container_id
     assert "agent_id" not in as_tool, "工具契约里不该出现内部字段 agent_id"
-    assert "docker_id" not in as_tool
 
 
 @_DOCKER_SKIP
 async def test_delete_container_removes_real_docker_container(e2e_env):
     """`delete_container` 真的删掉容器，并软删除记录（不再出现在活跃列表）。"""
     record = await _create(e2e_env)
-    docker_id = record.docker_id
-    assert docker_id is not None
+    container_id = record.container_id
+    assert container_id is not None
 
-    await containerService.delete_container(1, container_id=docker_id)
+    await containerService.delete_container(1, container_id=container_id)
 
     # daemon 上确实没了
-    assert await _inspect(e2e_env, docker_id) is None
+    assert await _inspect(e2e_env, container_id) is None
     # 活跃列表里也没了
     assert await containerService.list_agent_containers(1) == []
 
@@ -331,8 +330,8 @@ async def test_container_name_uses_record_id(e2e_env):
     """容器名以自增记录 ID 结尾：删除后新建不会复用旧名（ID 持续递增）。"""
     first = await _create(e2e_env)
     first_name = first.container_name
-    await containerService.delete_container(1, container_id=first.docker_id)
-    e2e_env.created.remove(first.docker_id)
+    await containerService.delete_container(1, container_id=first.container_id)
+    e2e_env.created.remove(first.container_id)
 
     second = await _create(e2e_env)
 
@@ -362,7 +361,7 @@ async def test_quota_is_enforced_against_real_docker(e2e_env):
 
 
 @_DOCKER_SKIP
-async def test_enter_then_exit_container_with_real_handshake(e2e_env):
+async def test_enter_then_exit_container_with_real_handshake(e2e_env, monkeypatch):
     """真实容器里拉起 gtsp 完成 TSP 握手，再退回宿主。
 
     这是「容器能当执行环境用」的唯一硬证据：glibc 兼容性、注入权限、stdio 连通性
@@ -376,7 +375,7 @@ async def test_enter_then_exit_container_with_real_handshake(e2e_env):
     from service.agentService.toolRegistry import AgentToolRegistry
 
     record = await _create(e2e_env)
-    assert record.docker_id is not None
+    assert record.container_id is not None
 
     @dataclass
     class _Host:
@@ -404,25 +403,29 @@ async def test_enter_then_exit_container_with_real_handshake(e2e_env):
         ),
     )
 
+    # 这套 e2e 直接构造 Driver 验证真实握手，不经过已加载的 Agent；
+    # 切环境本身由 agentService 负责，这里把它的 Driver 查询指向本地实例。
+    monkeypatch.setattr(agentService.core, "_get_loaded_driver", lambda _agent_id: driver)
+
     entered = False
     try:
         # 先连宿主，保证 driver 有可用的初始连接
         assert await driver.connect(ExecEnv.HOST) is True
 
-        await containerService.enter_container(1, record.docker_id, driver)
+        await agentService.enter_container(1, record.container_id)
         entered = True
 
         assert driver.exec_env == ExecEnv.CONTAINER
-        assert driver.current_container_id == record.docker_id
+        assert driver.current_container_id == record.container_id
     finally:
         if entered:
-            await containerService.exit_to_host(1, driver)
+            await agentService.exit_to_host(1)
             assert driver.exec_env == ExecEnv.HOST, "退出必回宿主（§5.2）"
             assert driver.current_container_id is None
         await driver.disconnect()
 
     # 关 stdin 后自建容器应停回 exited（gtsp os.Exit(0)），而不是仍在 running
-    inspect = await _inspect(e2e_env, record.docker_id)
+    inspect = await _inspect(e2e_env, record.container_id)
     assert isinstance(inspect, dict)
     assert inspect["State"]["Status"] in {"exited", "created"}, (
         "退出后容器应停止；若仍 running 说明 gtsp 没有随 stdin 关闭退出"

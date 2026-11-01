@@ -36,7 +36,7 @@ class _FakeDriver:
 
     @property
     def current_container_id(self) -> str | None:
-        return self._container.docker_id if self._container else None
+        return self._container.container_id if self._container else None
 
 
 def _fake_agent(agent_id: int, team_id: int, driver) -> SimpleNamespace:
@@ -47,7 +47,7 @@ def _fake_agent(agent_id: int, team_id: int, driver) -> SimpleNamespace:
 
 
 _MANAGED = ContainerTarget(
-    docker_id="c0ffee123456", is_managed=True, arch="arm64", container_name="agent-3-1"
+    container_id="c0ffee123456", is_managed=True, arch="arm64", container_name="agent-3-1"
 )
 
 

@@ -58,7 +58,7 @@ from constants import DriverType, ExecEnv
 from exception import TogoException
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtTeam import GtTeam
-from service import containerService, roomService
+from service import agentService, containerService, roomService
 from service.containerService import core as container_core
 from service.containerService.dockerCli import (
     ERROR_DOCKER_CLI_NOT_FOUND,
@@ -144,8 +144,8 @@ class NegativeEnv:
     created: list[str] = field(default_factory=list)
 
     def track(self, record) -> None:
-        if record.docker_id:
-            self.created.append(record.docker_id)
+        if record.container_id:
+            self.created.append(record.container_id)
 
 
 @pytest.fixture(scope="module")
@@ -214,10 +214,10 @@ async def neg_env(tmp_path, monkeypatch, real_docker):
     try:
         yield env
     finally:
-        # 兜底清理：按 docker_id 删，绝不用名字（容器名跨 Team 可能重名）
-        for docker_id in env.created:
+        # 兜底清理：按 container_id 删，绝不用名字（容器名跨 Team 可能重名）
+        for container_id in env.created:
             try:
-                await real_docker.run(["rm", "-f", docker_id], timeout_sec=60)
+                await real_docker.run(["rm", "-f", container_id], timeout_sec=60)
             except Exception:  # noqa: BLE001 - 清理失败不能盖住用例结果
                 pass
         await database.aio_close()
@@ -286,7 +286,7 @@ async def test_mount_denied_is_reported_as_mount_denied_not_as_container_missing
 
 @_DOCKER_E2E_SKIP
 @pytest.mark.parametrize("image", [_ALPINE_IMAGE, _DISTROLESS_IMAGE])
-async def test_no_bash_image_reports_actionable_reason(neg_env, image):
+async def test_no_bash_image_reports_actionable_reason(neg_env, image, monkeypatch):
     """无 bash 镜像：能建、能进、文件工具可用；`execute_bash` 报原因与出路。
 
     **参数化的两个镜像属于同一类**（无 bash），不是「musl vs glibc」两类：
@@ -309,7 +309,7 @@ async def test_no_bash_image_reports_actionable_reason(neg_env, image):
     # —— 能建：无 bash 不影响 docker create
     record = await containerService.create_container(1, image=image)
     neg_env.track(record)
-    assert record.docker_id is not None
+    assert record.container_id is not None
 
     @dataclass
     class _Host:
@@ -334,12 +334,16 @@ async def test_no_bash_image_reports_actionable_reason(neg_env, image):
         ),
     )
 
+    # 本用例直接构造 Driver 验证真实握手，不经过已加载的 Agent；
+    # 切环境由 agentService 负责，这里把它的 Driver 查询指向本地实例。
+    monkeypatch.setattr(agentService.core, "_get_loaded_driver", lambda _agent_id: driver)
+
     entered = False
     try:
         assert await driver.connect(ExecEnv.HOST) is True
 
         # —— 能进：gtsp 是静态二进制，无 bash 的镜像照样能拉起
-        await containerService.enter_container(1, record.docker_id, driver)
+        await agentService.enter_container(1, record.container_id)
         entered = True
         assert driver.exec_env == ExecEnv.CONTAINER
 
@@ -385,7 +389,7 @@ async def test_no_bash_image_reports_actionable_reason(neg_env, image):
         )
     finally:
         if entered:
-            await containerService.exit_to_host(1, driver)
+            await agentService.exit_to_host(1)
             assert driver.exec_env == ExecEnv.HOST, "退出必回宿主（§5.2）"
         await driver.disconnect()
 
@@ -396,7 +400,7 @@ async def test_no_bash_image_reports_actionable_reason(neg_env, image):
 
 
 @_DOCKER_E2E_SKIP
-async def test_bash_exists_but_command_missing_is_not_reported_as_missing_bash(neg_env):
+async def test_bash_exists_but_command_missing_is_not_reported_as_missing_bash(neg_env, monkeypatch):
     """反向用例：`bash: xxx: command not found` 不是「镜像缺 bash」。
 
     ## 为什么必须有这条
@@ -427,7 +431,7 @@ async def test_bash_exists_but_command_missing_is_not_reported_as_missing_bash(n
 
     record = await containerService.create_container(1, image="ubuntu:24.04")
     neg_env.track(record)
-    assert record.docker_id is not None
+    assert record.container_id is not None
 
     @dataclass
     class _Host:
@@ -452,10 +456,14 @@ async def test_bash_exists_but_command_missing_is_not_reported_as_missing_bash(n
         ),
     )
 
+    # 本用例直接构造 Driver 验证真实握手，不经过已加载的 Agent；
+    # 切环境由 agentService 负责，这里把它的 Driver 查询指向本地实例。
+    monkeypatch.setattr(agentService.core, "_get_loaded_driver", lambda _agent_id: driver)
+
     entered = False
     try:
         assert await driver.connect(ExecEnv.HOST) is True
-        await containerService.enter_container(1, record.docker_id, driver)
+        await agentService.enter_container(1, record.container_id)
         entered = True
         assert driver.exec_env == ExecEnv.CONTAINER
 
@@ -484,7 +492,7 @@ async def test_bash_exists_but_command_missing_is_not_reported_as_missing_bash(n
         )
     finally:
         if entered:
-            await containerService.exit_to_host(1, driver)
+            await agentService.exit_to_host(1)
             assert driver.exec_env == ExecEnv.HOST, "退出必回宿主（§5.2）"
         await driver.disconnect()
 

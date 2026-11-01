@@ -327,6 +327,14 @@ class ExecEnv(EnhanceEnum):
 # 设计依据：docs/design/2026-10-31-docker-agent-sandbox/step2_technical.md §3.1
 # ─────────────────────────────────────────────────────────────────────────────
 
+# 容器状态取值说明（不归一化，直接透传 Docker inspect 的 State.Status 原值）：
+#   created / running / exited / paused / restarting / removing / dead …
+# 另外两个是本系统补的哨兵值，用于「查不到」和「查失败」两种情形：
+#   missing —— 容器不存在（外部删除 / 预记录尚未真正创建）
+#   unknown —— inspect 本身失败（Docker 不可用、超时等），不能据此判定容器已丢
+CONTAINER_STATE_MISSING = "missing"
+CONTAINER_STATE_UNKNOWN = "unknown"
+
 # 自建容器默认镜像。只做参数默认值，不做成系统配置项。
 DEFAULT_CONTAINER_IMAGE = "ubuntu:24.04"
 

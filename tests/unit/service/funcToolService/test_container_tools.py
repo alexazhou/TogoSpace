@@ -4,7 +4,8 @@
 1. **默认工具集不含容器工具**（`get_tools()` 不带），只有 TSP driver 拿得到——
    Native / Claude SDK 的行为必须零变化；
 2. 每个工具都把 `TogoException` 转成带 `error_code` 的失败返回体（模型能据此自纠）；
-3. 工具**不自己判断环境状态**，一律委托 `containerService`（避免状态语义两份实现）；
+3. 工具**不自己判断环境状态**：进入 / 退出委托 `agentService`（执行环境属于
+   Agent），其余容器操作委托 `containerService`（避免状态语义两份实现）；
 4. docstring 面向 Agent，不出现 `attach` / `exec` / `client` / `stdio` 这类底层实现词。
 """
 
@@ -140,7 +141,7 @@ async def test_create_container_returns_contract_fields(monkeypatch, container_d
     from service import containerService
 
     record = MagicMock()
-    record.docker_id = "c0ffee123456"
+    record.container_id = "c0ffee123456"
     record.container_name = "agent-1-1"
     record.image = "ubuntu:24.04"
     monkeypatch.setattr(
@@ -161,7 +162,7 @@ async def test_create_container_passes_image_through(monkeypatch, container_driv
     """`image` 原样透传（空值交给 service 走默认，不在工具层重复判断）。"""
     from service import containerService
 
-    record = MagicMock(docker_id="c0ffee123456", container_name="n", image="python:3.11")
+    record = MagicMock(container_id="c0ffee123456", container_name="n", image="python:3.11")
     mocked = AsyncMock(return_value=record)
     monkeypatch.setattr(containerService, "create_container", mocked)
 
@@ -194,13 +195,13 @@ async def test_create_container_maps_togo_exception_to_error_result(monkeypatch,
 async def test_enter_container_reports_mount_info_for_managed(monkeypatch, container_driver):
     """自建容器：返回挂载说明与「退出后自动停止」的提示。"""
     from model.coreModel import ContainerTarget
-    from service import containerService
+    from service import agentService
 
     target = ContainerTarget(
-        docker_id="c0ffee123456", is_managed=True, arch="arm64", container_name="agent-1-1"
+        container_id="c0ffee123456", is_managed=True, arch="arm64", container_name="agent-1-1"
     )
     monkeypatch.setattr(
-        containerService, "enter_container",
+        agentService, "enter_container",
         AsyncMock(return_value=(target, "created")),
     )
 
@@ -219,11 +220,11 @@ async def test_enter_container_reports_mount_info_for_managed(monkeypatch, conta
 async def test_enter_container_reports_external_container_difference(monkeypatch, container_driver):
     """外部容器：`mounted=False`、不报 workdir，并说明原进程不受影响。"""
     from model.coreModel import ContainerTarget
-    from service import containerService
+    from service import agentService
 
-    target = ContainerTarget(docker_id="deadbeef0002", is_managed=False, arch="arm64")
+    target = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="arm64")
     monkeypatch.setattr(
-        containerService, "enter_container",
+        agentService, "enter_container",
         AsyncMock(return_value=(target, "running")),
     )
 
@@ -239,10 +240,10 @@ async def test_enter_container_reports_external_container_difference(monkeypatch
 
 async def test_enter_container_maps_state_errors(monkeypatch, container_driver):
     """状态错误码要透传（`container_already_running` 等），不能统一成「进入失败」。"""
-    from service import containerService
+    from service import agentService
 
     monkeypatch.setattr(
-        containerService, "enter_container",
+        agentService, "enter_container",
         AsyncMock(side_effect=TogoException("running 残留", "container_already_running")),
     )
 
@@ -253,9 +254,9 @@ async def test_enter_container_maps_state_errors(monkeypatch, container_driver):
 
 async def test_exit_to_host_reports_host_workdir(monkeypatch, container_driver):
     """退出后必须告诉模型宿主工作目录在哪、容器路径已失效。"""
-    from service import containerService
+    from service import agentService
 
-    monkeypatch.setattr(containerService, "exit_to_host", AsyncMock(return_value=None))
+    monkeypatch.setattr(agentService, "exit_to_host", AsyncMock(return_value=None))
 
     result = await tools_module.exit_to_host(_context=_ctx())
 
@@ -267,10 +268,10 @@ async def test_exit_to_host_reports_host_workdir(monkeypatch, container_driver):
 
 async def test_exit_to_host_propagates_failure(monkeypatch, container_driver):
     """退出失败（宿主连不上）必须报错——不能返回成功让 Agent 以为已在宿主。"""
-    from service import containerService
+    from service import agentService
 
     monkeypatch.setattr(
-        containerService, "exit_to_host",
+        agentService, "exit_to_host",
         AsyncMock(side_effect=TogoException("宿主连接失败", "container_enter_failed")),
     )
 
@@ -291,7 +292,7 @@ async def test_list_containers_returns_env_and_serialized_containers(monkeypatch
 
     info = ContainerInfo(
         container=GtAgentContainer(
-            id=1, agent_id=1, docker_id="c0ffee123456",
+            id=1, agent_id=1, container_id="c0ffee123456",
             container_name="agent-1-1", image="ubuntu:24.04",
         ),
         state="exited",
@@ -311,9 +312,8 @@ async def test_list_containers_returns_env_and_serialized_containers(monkeypatch
     assert result["docker_available"] is True
     # 必须是可 JSON 序列化的 dict（created_at 已转字符串）
     assert isinstance(result["containers"][0], dict)
-    # §6.2 契约字段名是 `container_id`（内部叫 docker_id），且不能带内部字段 agent_id
+    # §6.2 契约使用 `container_id`，且不能带内部字段 agent_id
     assert result["containers"][0]["container_id"] == "c0ffee123456"
-    assert "docker_id" not in result["containers"][0]
     assert "agent_id" not in result["containers"][0]
     assert isinstance(result["containers"][0]["created_at"], str)
 
@@ -327,7 +327,7 @@ async def test_list_containers_keeps_records_when_docker_unavailable(monkeypatch
 
     info = ContainerInfo(
         container=GtAgentContainer(
-            id=1, agent_id=1, docker_id=None,
+            id=1, agent_id=1, container_id=None,
             container_name="agent-1-1", image="ubuntu:24.04",
         ),
         state="unknown",
@@ -353,7 +353,7 @@ async def test_delete_container_returns_deleted_ids(monkeypatch, container_drive
     """返回 `deleted_record_id` 与 `deleted_container_id`（预记录后者为 null）。"""
     from service import containerService
 
-    record = MagicMock(id=7, docker_id="c0ffee123456")
+    record = MagicMock(id=7, container_id="c0ffee123456")
     monkeypatch.setattr(
         containerService, "delete_container", AsyncMock(return_value=record)
     )
@@ -369,7 +369,7 @@ async def test_delete_container_reports_null_container_id_for_pre_record(monkeyp
     """删除预记录时 `deleted_container_id` 为 null（契约明确）。"""
     from service import containerService
 
-    record = MagicMock(id=7, docker_id=None)
+    record = MagicMock(id=7, container_id=None)
     monkeypatch.setattr(
         containerService, "delete_container", AsyncMock(return_value=record)
     )
@@ -384,7 +384,7 @@ async def test_delete_container_passes_current_container_id(monkeypatch, contain
     from service import containerService
 
     container_driver.current_container_id = "c0ffee123456"
-    mocked = AsyncMock(return_value=MagicMock(id=7, docker_id="c0ffee123456"))
+    mocked = AsyncMock(return_value=MagicMock(id=7, container_id="c0ffee123456"))
     monkeypatch.setattr(containerService, "delete_container", mocked)
 
     await tools_module.delete_container(container_id="c0ffee123456", _context=_ctx())

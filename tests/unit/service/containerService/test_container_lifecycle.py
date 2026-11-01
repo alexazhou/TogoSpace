@@ -11,7 +11,7 @@ import json
 import pytest
 
 from exception import TogoException
-from model.coreModel import CONTAINER_STATE_MISSING, CONTAINER_STATE_UNKNOWN
+from constants import CONTAINER_STATE_MISSING, CONTAINER_STATE_UNKNOWN
 from service.containerService import core
 
 # 复用 create 测试里的环境夹具（假 docker + 真实迁移 DDL + 临时库）
@@ -38,13 +38,13 @@ def fake(container_env):  # noqa: F811
     return container_env
 
 
-async def _seed_record(agent_id: int = 1, container_name: str = "agent-1-1", docker_id: str | None = None):
+async def _seed_record(agent_id: int = 1, container_name: str = "agent-1-1", container_id: str | None = None):
     """直接往库里插一条记录（跳过 docker），返回对象。"""
     record = await core.gtAgentContainerManager.create(
         agent_id=agent_id, container_name=container_name, image="ubuntu:24.04"
     )
-    if docker_id:
-        await core.gtAgentContainerManager.set_docker_id(record, docker_id)
+    if container_id:
+        await core.gtAgentContainerManager.set_container_id(record, container_id)
     return record
 
 
@@ -68,8 +68,8 @@ async def test_get_target_rejects_names_and_images_before_calling_docker(fake):
 
 
 async def test_get_target_returns_managed_when_record_matches_agent(fake):
-    """`agent_id + docker_id` 命中即自建容器（`is_managed=True`），arch 从镜像取。"""
-    await _seed_record(docker_id="c0ffee123456")
+    """`agent_id + container_id` 命中即自建容器（`is_managed=True`），arch 从镜像取。"""
+    await _seed_record(container_id="c0ffee123456")
     fake.set(
         "inspect",
         stdout=_inspect_json(status="created", image="sha256:abc"),
@@ -78,7 +78,7 @@ async def test_get_target_returns_managed_when_record_matches_agent(fake):
     target = await core.get_container_target(1, "c0ffee123456")
 
     assert target.is_managed is True
-    assert target.docker_id == "c0ffee123456"
+    assert target.container_id == "c0ffee123456"
     assert target.arch == "arm64"
 
 
@@ -88,7 +88,7 @@ async def test_get_target_fills_container_name_for_managed(fake):
     这里刻意让 inspect 返回的空缺名字和记录里的名字不同（不返回 Name 字段）：
     自建容器是我们自己命名的，权威来源是记录而不是 `docker inspect`。
     """
-    await _seed_record(docker_id="c0ffee123456", container_name="agent-xiao-mei-2")
+    await _seed_record(container_id="c0ffee123456", container_name="agent-xiao-mei-2")
     fake.set("inspect", stdout=_inspect_json(status="exited", image="sha256:abc"))
 
     target = await core.get_container_target(1, "c0ffee123456")
@@ -119,16 +119,16 @@ async def test_get_target_tolerates_missing_name_for_external_container(fake):
     target = await core.get_container_target(1, "deadbeef0002")
 
     assert target.container_name is None
-    assert target.docker_id == "deadbeef0002"
+    assert target.container_id == "deadbeef0002"
 
 
 async def test_get_target_does_not_treat_other_agents_record_as_managed(fake):
-    """**别人的记录不算自己的**：即使 docker_id 命中，agent 不匹配就是外部容器。
+    """**别人的记录不算自己的**：即使 container_id 命中，agent 不匹配就是外部容器。
 
     这条是隔离性的核心：若这里返回 `is_managed=True`，后续 run 中「重连发现容器
     不存在就软删除记录」会去删别人的记录。
     """
-    await _seed_record(agent_id=2, container_name="agent-2-1", docker_id="c0ffee123456")
+    await _seed_record(agent_id=2, container_name="agent-2-1", container_id="c0ffee123456")
     fake.set("inspect", stdout=_inspect_json(status="running"))
 
     target = await core.get_container_target(1, "c0ffee123456")
@@ -141,7 +141,7 @@ async def test_get_target_reports_container_lost_when_record_exists_but_containe
 
     软删除只发生在「运行中重连」路径（第 4 步），首次校验只报错。
     """
-    record = await _seed_record(docker_id="c0ffee123456")
+    record = await _seed_record(container_id="c0ffee123456")
     fake.set("inspect", stderr="Error: No such container: c0ffee123456", returncode=1)
 
     with pytest.raises(TogoException) as excinfo:
@@ -168,7 +168,7 @@ async def test_get_target_uses_image_inspect_for_arch_not_container_platform(fak
     容器 inspect 的 `.Platform` 只有 OS，没有架构——直接读容器 inspect 会
     永远拿不到 arch，注入的二进制就可能是错的架构（在容器里直接 exec format error）。
     """
-    await _seed_record(docker_id="c0ffee123456")
+    await _seed_record(container_id="c0ffee123456")
     fake.set("inspect", stdout=_inspect_json(image="sha256:deadbeef"))
     fake.set_image_arch("x86_64")
 
@@ -182,7 +182,7 @@ async def test_get_target_uses_image_inspect_for_arch_not_container_platform(fak
 
 async def test_get_target_reports_unsupported_arch(fake):
     """镜像架构不是 amd64 / arm64 时报 `container_arch_unsupported`（不猜、不硬塞）。"""
-    await _seed_record(docker_id="c0ffee123456")
+    await _seed_record(container_id="c0ffee123456")
     fake.set("inspect", stdout=_inspect_json())
     fake.set_image_arch("s390x")
 
@@ -194,7 +194,7 @@ async def test_get_target_reports_unsupported_arch(fake):
 
 async def test_get_target_propagates_daemon_unavailable_as_is(fake):
     """inspect 因 daemon 不可用失败 ⇒ 透传 `docker_daemon_unavailable`，不当成容器丢失。"""
-    await _seed_record(docker_id="c0ffee123456")
+    await _seed_record(container_id="c0ffee123456")
     fake.set(
         "inspect",
         stderr="Cannot connect to the Docker daemon at unix:///var/run/docker.sock.",
@@ -214,8 +214,8 @@ async def test_get_target_propagates_daemon_unavailable_as_is(fake):
 # ---------------------------------------------------------------------------
 
 
-async def test_list_includes_pre_record_with_null_docker_id(fake):
-    """预记录必须出现在列表里，`docker_id` 为 None，状态按容器名查得。
+async def test_list_includes_pre_record_with_null_container_id(fake):
+    """预记录必须出现在列表里，`container_id` 为 None，状态按容器名查得。
 
     注意：预记录的状态查询**必须**带匹配的 label，否则会被判成 `missing`
     （见 `test_list_marks_missing_when_same_name_container_has_foreign_label`）。
@@ -231,8 +231,8 @@ async def test_list_includes_pre_record_with_null_docker_id(fake):
     infos = await core.list_agent_containers(1)
 
     assert len(infos) == 1
-    assert infos[0].container.id == record.id
-    assert infos[0].container.docker_id is None
+    assert infos[0].container.record_id == record.id
+    assert infos[0].container.container_id is None
     assert infos[0].container.container_name == "agent-1-1"
     assert infos[0].state == "created"
 
@@ -270,9 +270,9 @@ async def test_list_accepts_matching_label_for_pre_record(fake):
     assert infos[0].state == "exited"
 
 
-async def test_list_uses_docker_id_not_name_for_backfilled_records(fake):
-    """已回填的记录按 `docker_id` inspect（不看名字，也就不需要 label 校验）。"""
-    await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
+async def test_list_uses_container_id_not_name_for_backfilled_records(fake):
+    """已回填的记录按 `container_id` inspect（不看名字，也就不需要 label 校验）。"""
+    await _seed_record(container_name="agent-1-1", container_id="c0ffee123456")
     fake.set("inspect", stdout=_inspect_json(status="exited"))
 
     await core.list_agent_containers(1)
@@ -283,7 +283,7 @@ async def test_list_uses_docker_id_not_name_for_backfilled_records(fake):
 
 async def test_list_returns_unknown_when_inspect_fails(fake):
     """inspect 失败 ⇒ `unknown`，**不能**报 missing（否则前端会以为容器没了）。"""
-    await _seed_record(docker_id="c0ffee123456")
+    await _seed_record(container_id="c0ffee123456")
     fake.set("inspect", stderr="Error response from daemon: timeout", returncode=1)
 
     infos = await core.list_agent_containers(1)
@@ -294,7 +294,7 @@ async def test_list_returns_unknown_when_inspect_fails(fake):
 async def test_list_marks_unknown_for_every_record_when_daemon_down(fake):
     """daemon 不可用时不逐条 inspect，全部 `unknown`，且仍返回记录（不能空列表）。"""
     await _seed_record(container_name="agent-1-1")
-    await _seed_record(container_name="agent-1-2", docker_id="c0ffee123456")
+    await _seed_record(container_name="agent-1-2", container_id="c0ffee123456")
     fake.set("version", stderr="Cannot connect to the Docker daemon.", returncode=1)
 
     infos = await core.list_agent_containers(1)
@@ -310,7 +310,7 @@ async def test_list_marks_unknown_when_docker_cli_missing(fake, monkeypatch):
     用户只是拿到列表 + 全 `unknown`。两条路径分叉，前端就得处理两种"没 docker"。
     """
     await _seed_record(container_name="agent-1-1")
-    await _seed_record(container_name="agent-1-2", docker_id="c0ffee123456")
+    await _seed_record(container_name="agent-1-2", container_id="c0ffee123456")
 
     from service.containerService import dockerCli as docker_cli_module
 
@@ -324,7 +324,7 @@ async def test_list_marks_unknown_when_docker_cli_missing(fake, monkeypatch):
     infos = await core.list_agent_containers(1)
 
     assert [info.state for info in infos] == [CONTAINER_STATE_UNKNOWN, CONTAINER_STATE_UNKNOWN]
-    assert [info.container.id for info in infos] == [1, 2]
+    assert [info.container.record_id for info in infos] == [1, 2]
 
 
 async def test_list_uses_cli_when_caller_says_available(fake, monkeypatch):
@@ -335,7 +335,7 @@ async def test_list_uses_cli_when_caller_says_available(fake, monkeypatch):
     传 True 进来时 `cli` 恒为 `None`，落到函数末尾的 `assert cli is not None` 直接
     `AssertionError` —— Docker 正常的机器上 `list_containers` 必然崩、拿不到任何容器信息。
     """
-    await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
+    await _seed_record(container_name="agent-1-1", container_id="c0ffee123456")
     fake.set("inspect", stdout=_inspect_json(status="exited"))
 
     infos = await core.list_agent_containers(1, docker_available=True)
@@ -369,7 +369,7 @@ async def test_list_survives_cli_vanishing_after_caller_probe(fake, monkeypatch)
     探测与调用之间隔着一次 await，环境可能已经变了（用户卸载了 Docker CLI）。
     这时必须仍然返回记录 + `unknown`，不能整体失败——否则用户拿到的还是「容器全没了」。
     """
-    await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
+    await _seed_record(container_name="agent-1-1", container_id="c0ffee123456")
 
     from service.containerService import dockerCli as docker_cli_module
 
@@ -391,7 +391,7 @@ async def test_list_end_to_end_through_tool_layer_probe(fake):
     `tools.py:1546-1550` 就是这么调的。这条用例把「工具层 → 服务层」的接口串起来，
     防止服务层单测全绿、实际链路仍崩（曾真实发生过：传 True 时 `cli` 恒为 None）。
     """
-    await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
+    await _seed_record(container_name="agent-1-1", container_id="c0ffee123456")
     fake.set("inspect", stdout=_inspect_json(status="running"))
 
     docker_available = await core.is_docker_available()
@@ -407,7 +407,7 @@ async def test_list_skips_detection_when_caller_says_unavailable(fake, monkeypat
 
     `list_containers` 工具已经在工具层探过一次可用性，服务层再探就是重复的进程往返。
     """
-    await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
+    await _seed_record(container_name="agent-1-1", container_id="c0ffee123456")
 
     def _boom():
         raise AssertionError("docker_available 已由调用方给出，不该再探测")
@@ -422,8 +422,8 @@ async def test_list_skips_detection_when_caller_says_unavailable(fake, monkeypat
 
 async def test_list_marks_is_entered_only_for_current_container(fake):
     """`is_entered` 只对当前所处容器为 True（前端据此显示「使用中」）。"""
-    await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
-    await _seed_record(container_name="agent-1-2", docker_id="deadbeef0002")
+    await _seed_record(container_name="agent-1-1", container_id="c0ffee123456")
+    await _seed_record(container_name="agent-1-2", container_id="deadbeef0002")
     fake.set("inspect", stdout=_inspect_json(status="exited"))
 
     infos = await core.list_agent_containers(1, current_container_id="deadbeef0002")
@@ -433,7 +433,7 @@ async def test_list_marks_is_entered_only_for_current_container(fake):
 
 async def test_list_excludes_soft_deleted_records(fake):
     """软删除的记录不再出现在列表里（但行还在库里留痕）。"""
-    record = await _seed_record(docker_id="c0ffee123456")
+    record = await _seed_record(container_id="c0ffee123456")
     await core.gtAgentContainerManager.mark_deleted(record)
     fake.set("inspect", stdout=_inspect_json())
 
@@ -442,7 +442,7 @@ async def test_list_excludes_soft_deleted_records(fake):
 
 async def test_list_is_scoped_to_agent(fake):
     """只返回自己的容器（别人的记录不可见）。"""
-    await _seed_record(agent_id=2, container_name="agent-2-1", docker_id="deadbeef0002")
+    await _seed_record(agent_id=2, container_name="agent-2-1", container_id="deadbeef0002")
     fake.set("inspect", stdout=_inspect_json())
 
     assert await core.list_agent_containers(1) == []
@@ -464,9 +464,9 @@ async def test_delete_requires_exactly_one_identifier(fake):
     assert excinfo.value.error_code == core.ERROR_CONTAINER_INVALID_PARAMS
 
 
-async def test_delete_by_docker_id_removes_container_and_soft_deletes(fake):
-    """按 `docker_id` 删：执行 `rm -f <短ID>` 并标记软删除。"""
-    record = await _seed_record(docker_id="c0ffee123456")
+async def test_delete_by_container_id_removes_container_and_soft_deletes(fake):
+    """按 `container_id` 删：执行 `rm -f <短ID>` 并标记软删除。"""
+    record = await _seed_record(container_id="c0ffee123456")
 
     deleted = await core.delete_container(1, container_id="c0ffee123456")
 
@@ -476,7 +476,7 @@ async def test_delete_by_docker_id_removes_container_and_soft_deletes(fake):
 
 
 async def test_delete_by_record_id_works_for_pre_record(fake):
-    """预记录（`docker_id IS NULL`）只能用 `record_id` 删（§2.1）。"""
+    """预记录（`container_id IS NULL`）只能用 `record_id` 删（§2.1）。"""
     record = await _seed_record(container_name="agent-1-1")
     # 预记录按名 inspect 时容器不存在 → 跳过 rm，只标记 DB
     fake.set("inspect", stderr="Error: No such container: agent-1-1", returncode=1)
@@ -525,7 +525,7 @@ async def test_delete_pre_record_never_removes_container_with_foreign_label(fake
 
 async def test_delete_rejects_container_in_use(fake):
     """正在使用的容器不许删（必须先 `exit_to_host`）。"""
-    record = await _seed_record(docker_id="c0ffee123456")
+    record = await _seed_record(container_id="c0ffee123456")
 
     with pytest.raises(TogoException) as excinfo:
         await core.delete_container(1, container_id="c0ffee123456", current_container_id="c0ffee123456")
@@ -536,7 +536,7 @@ async def test_delete_rejects_container_in_use(fake):
 
 async def test_delete_rejects_other_agents_record_as_not_found(fake):
     """别人的记录按 record_id 删 ⇒ `container_not_found`（不泄露存在性）。"""
-    record = await _seed_record(agent_id=2, container_name="agent-2-1", docker_id="deadbeef0002")
+    record = await _seed_record(agent_id=2, container_name="agent-2-1", container_id="deadbeef0002")
 
     with pytest.raises(TogoException) as excinfo:
         await core.delete_container(1, record_id=record.id)
@@ -548,7 +548,7 @@ async def test_delete_rejects_other_agents_record_as_not_found(fake):
 
 async def test_delete_treats_already_removed_container_as_success(fake):
     """`rm` 报「容器不存在」视为已达成目标（不报错、照常软删除）。"""
-    record = await _seed_record(docker_id="c0ffee123456")
+    record = await _seed_record(container_id="c0ffee123456")
     fake.set("rm", stderr="Error: No such container: c0ffee123456", returncode=1)
 
     await core.delete_container(1, container_id="c0ffee123456")
@@ -558,7 +558,7 @@ async def test_delete_treats_already_removed_container_as_success(fake):
 
 async def test_delete_reports_failure_and_keeps_record_when_rm_fails(fake):
     """`rm` 因其他原因失败 ⇒ `container_delete_failed`，且**不**标记软删除（§5.4 第 4 步）。"""
-    record = await _seed_record(docker_id="c0ffee123456")
+    record = await _seed_record(container_id="c0ffee123456")
     fake.set("rm", stderr="Error response from daemon: container is paused", returncode=1)
 
     with pytest.raises(TogoException) as excinfo:
@@ -575,7 +575,7 @@ async def test_delete_reports_failure_and_keeps_record_when_rm_fails(fake):
 
 async def test_delete_agent_containers_is_best_effort_and_marks_all(fake):
     """批量清理：单个 `rm` 失败也要继续，且所有记录最终都被标记软删除（§7）。"""
-    await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
+    await _seed_record(container_name="agent-1-1", container_id="c0ffee123456")
     second = await _seed_record(container_name="agent-1-2")
     fake.set("rm", stderr="Error response from daemon: boom", returncode=1)
     fake.set("inspect", stderr="Error: No such container", returncode=1)
@@ -588,7 +588,7 @@ async def test_delete_agent_containers_is_best_effort_and_marks_all(fake):
 
 async def test_delete_agent_containers_skips_current_container(fake):
     """批量清理跳过当前正在使用的容器（由调用方先切回宿主）。"""
-    keep = await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
+    keep = await _seed_record(container_name="agent-1-1", container_id="c0ffee123456")
     fake.set("inspect", stdout=_inspect_json())
 
     deleted = await core.delete_agent_containers(1, current_container_id="c0ffee123456")
@@ -599,7 +599,7 @@ async def test_delete_agent_containers_skips_current_container(fake):
 
 async def test_delete_agent_containers_marks_db_even_when_docker_absent(fake, monkeypatch):
     """docker 不可用时也要标记 DB，避免记录永久占配额（§7 best-effort）。"""
-    await _seed_record(container_name="agent-1-1", docker_id="c0ffee123456")
+    await _seed_record(container_name="agent-1-1", container_id="c0ffee123456")
 
     from service.containerService import dockerCli as docker_cli_module
 
@@ -621,8 +621,8 @@ async def test_delete_team_containers_covers_all_team_agents(fake):
     await GtAgent(
         team_id=1, name="阿张", role_template_id=1, i18n={}
     ).aio_save(force_insert=True)
-    await _seed_record(agent_id=1, container_name="agent-1-1", docker_id="c0ffee123456")
-    await _seed_record(agent_id=2, container_name="agent-2-1", docker_id="deadbeef0002")
+    await _seed_record(agent_id=1, container_name="agent-1-1", container_id="c0ffee123456")
+    await _seed_record(agent_id=2, container_name="agent-2-1", container_id="deadbeef0002")
     fake.set("rm", stdout="")
 
     deleted = await core.delete_team_containers(1)
@@ -653,7 +653,7 @@ async def test_prepare_skips_copy_for_managed_container(fake):
     """自建容器在创建时已注入，进入前不再重复拷贝 6MB（§3.2）。"""
     from model.coreModel import ContainerTarget
 
-    target = ContainerTarget(docker_id="c0ffee123456", is_managed=True, arch="arm64")
+    target = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch="arm64")
 
     await core.prepare_container_gtsp(target)
 
@@ -664,7 +664,7 @@ async def test_prepare_injects_for_external_container(fake):
     """外部容器进入前必须注入（它的镜像里没有 gtsp）。"""
     from model.coreModel import ContainerTarget
 
-    target = ContainerTarget(docker_id="deadbeef0002", is_managed=False, arch="amd64")
+    target = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="amd64")
 
     await core.prepare_container_gtsp(target)
 
@@ -679,7 +679,7 @@ async def test_prepare_reports_not_executable_when_copy_fails(fake):
     from model.coreModel import ContainerTarget
 
     fake.set("cp", stderr="Error response from daemon: could not find /tmp", returncode=1)
-    target = ContainerTarget(docker_id="deadbeef0002", is_managed=False, arch="arm64")
+    target = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="arm64")
 
     with pytest.raises(TogoException) as excinfo:
         await core.prepare_container_gtsp(target)

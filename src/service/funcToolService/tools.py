@@ -14,7 +14,6 @@ from dal.db import gtAgentManager, gtRoomManager, gtRoleTemplateManager, gtTeamM
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
-from model.coreModel import to_container_id
 from service.roomService import ToolCallContext
 import service.roomService as roomService
 import service.skillService as skillService
@@ -1380,6 +1379,13 @@ async def load_skill(
 # ---------------------------------------------------------------------------
 
 
+def _tool_agent_id(_context: ToolCallContext | None) -> int:
+    """取容器工具调用上下文里的 Agent ID；没有上下文时拒绝调用。"""
+    if _context is None or _context.agent_id <= 0:
+        raise TogoException("容器工具需要在 Agent 上下文中调用", "container_invalid_params")
+    return _context.agent_id
+
+
 def _container_driver(_context: ToolCallContext | None):
     """取当前 Agent 的 TspAgentDriver；不是 TSP driver 时抛错。
 
@@ -1392,10 +1398,9 @@ def _container_driver(_context: ToolCallContext | None):
     """
     from service import agentService
 
-    if _context is None or _context.agent_id <= 0:
-        raise TogoException("容器工具需要在 Agent 上下文中调用", "container_invalid_params")
+    agent_id = _tool_agent_id(_context)
 
-    agent = agentService.get_agent_or_none(_context.agent_id)
+    agent = agentService.get_agent_or_none(agent_id)
     if agent is None:
         raise TogoException("当前 Agent 未加载，无法使用容器工具", "container_invalid_params")
 
@@ -1431,11 +1436,11 @@ async def create_container(image: Optional[str] = None, _context: ToolCallContex
         driver = _container_driver(_context)
         assert _context is not None
         record = await containerService.create_container(_context.agent_id, image=image)
-        docker_id = record.docker_id
-        assert docker_id is not None
+        container_id = record.container_id
+        assert container_id is not None
         return {
             "success": True,
-            "container_id": to_container_id(docker_id),
+            "container_id": container_id,
             "container_name": record.container_name,
             "image": record.image,
             "state": "created",
@@ -1444,7 +1449,7 @@ async def create_container(image: Optional[str] = None, _context: ToolCallContex
                 CONTAINER_SHARED_MOUNT_PATH: "只读",
             },
             "message": (
-                f"容器已创建（{docker_id}，镜像 {record.image}），当前仍处于宿主环境。"
+                f"容器已创建（{container_id}，镜像 {record.image}），当前仍处于宿主环境。"
                 "如需在容器内执行操作，请调用 enter_container 切换进去。"
             ),
         }
@@ -1468,25 +1473,22 @@ async def enter_container(container_id: str, _context: ToolCallContext = None) -
     Args:
         container_id: 目标容器的 12 位容器 ID（十六进制）。不接受容器名称或镜像名。
     """
-    from service import containerService
+    from service import agentService
 
     try:
-        driver = _container_driver(_context)
-        assert _context is not None
-        target, previous_state = await containerService.enter_container(
-            _context.agent_id, container_id, driver
-        )
+        agent_id = _tool_agent_id(_context)
+        target, previous_state = await agentService.enter_container(agent_id, container_id)
         return {
             "success": True,
             "exec_env": ExecEnv.CONTAINER.value,
-            "container_id": to_container_id(target.docker_id),
+            "container_id": target.container_id,
             # 外部容器取 inspect 的 `Name`（可能拿不到），自建容器取 DB 记录名。
             # 拿不到就给 null 而不是空串：空串在 JSON 里像一个合法容器名。
             "container_name": target.container_name,
             "mounted": target.is_managed,
             "workdir": CONTAINER_SELF_MOUNT_PATH if target.is_managed else "",
             "message": (
-                f"已进入容器 {target.docker_id}（进入前状态：{previous_state}），"
+                f"已进入容器 {target.container_id}（进入前状态：{previous_state}），"
                 f"后续命令都在容器内执行。"
                 + (
                     f"你的个人工作目录在容器内挂载为 {CONTAINER_SELF_MOUNT_PATH}（可读写），"
@@ -1510,12 +1512,12 @@ async def exit_to_host(_context: ToolCallContext = None) -> dict[str, Any]:
     退出后容器里的路径（如 /workspace/self）不再可用，宿主机的工作目录恢复生效。
     你自己创建的容器会自动停止，里面的文件不会丢失。
     """
-    from service import containerService
+    from service import agentService
 
     try:
         driver = _container_driver(_context)
         assert _context is not None
-        await containerService.exit_to_host(_context.agent_id, driver)
+        await agentService.exit_to_host(_context.agent_id)
         return {
             "success": True,
             "exec_env": ExecEnv.HOST.value,
@@ -1553,8 +1555,8 @@ async def list_containers(_context: ToolCallContext = None) -> dict[str, Any]:
             "success": True,
             "docker_available": docker_available,
             "exec_env": driver.exec_env.value,
-            "current_container_id": to_container_id(driver.current_container_id),
-            # 走 `to_tool_dict()` 而不是 `to_json()`：§6.2 契约字段名是 `container_id`，
+            "current_container_id": driver.current_container_id,
+            # 走 `to_tool_dict()` 而不是 `model_dump()`：§6.2 契约字段名是 `container_id`，
             # 且不该暴露内部字段 `agent_id`。这是全仓唯一的映射点。
             "containers": [info.to_tool_dict() for info in infos],
         }
@@ -1595,10 +1597,10 @@ async def delete_container(
         return {
             "success": True,
             "deleted_record_id": record.id,
-            "deleted_container_id": to_container_id(record.docker_id),
+            "deleted_container_id": record.container_id,
             "message": (
                 f"容器已删除（记录编号 {record.id}"
-                + (f"，容器 {record.docker_id}" if record.docker_id else "")
+                + (f"，容器 {record.container_id}" if record.container_id else "")
                 + "）。该容器挂载的目录里的文件不受影响。"
             ),
         }

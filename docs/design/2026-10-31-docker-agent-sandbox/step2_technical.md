@@ -58,7 +58,7 @@ Agent turn
 |---|---|---|
 | `id` | `int` | 主键，自增；对外作为 `record_id` |
 | `agent_id` | `int` | 所属 Agent ID（建立索引） |
-| `docker_id` | `str \| null` | 唯一，Docker 容器 12 位短 ID（与对外 `container_id` 相同）；创建流程先插入空值，`docker create` 成功后回填 |
+| `container_id` | `str \| null` | 唯一，Docker 容器 12 位短 ID；创建流程先插入空值，`docker create` 成功后回填 |
 | `container_name` | `str` | 容器名称（`agent-t<team_id>-<name>-<record_id>`）；在 `deleted=0` 范围内唯一（部分唯一索引）。唯一性由 `record_id` 保证，team 段与 Agent 名仅用于辨认归属，见 §3.5（依据 Operator 2026-11-01 指令修订） |
 | `image` | `str` | 创建时实际使用的镜像（默认 `ubuntu:24.04`） |
 | `deleted` | `int` | 软删除标记（默认 `0`，删除后置为时间戳或 `1`），便于链路排查与执行回溯 |
@@ -69,14 +69,14 @@ Agent turn
 - **架构 `arch`**：无需存库，创建或注入时通过 `docker inspect` 镜像/容器动态解析；
 - **名称后缀用自增主键**：容器名最后一段直接使用 `agent_containers.id`（全局唯一），无需额外的序号列，也无需在创建时扫描活跃容器名挑编号；删除后新建不会复用旧名；
 - **软删除设计**：`delete_container` 执行 `docker rm -f` 后，不物理删除 DB 行，而是更新 `deleted = 1`；配额统计与容器列表都统计 `deleted == 0` 的活跃记录（含创建中的预记录）。
-- **统一使用 12 位短 ID**：`docker create` 输出完整 ID 后截取前 12 位作为 `docker_id`；DB、对外 `container_id`、Docker CLI 参数统一使用该值，不再保存完整 ID，也不做短 ID → 全 ID 解析。
-- **先落预记录再回填 ID**：创建时先在 DB 插入一条 `docker_id = NULL` 的预记录（同时占用配额），拿到自增 ID 后在**同一事务内**回填容器名（`set_container_name`），`docker create` 成功后回填 12 位短 ID；配额校验与预记录插入在同一互斥区内完成（按 agent 加锁），创建中记录计入配额并出现在 `list_containers`，避免并发创建绕过上限。
-- **预记录可见性**：`list_containers` 返回全部 `deleted == 0` 的记录；`docker_id IS NULL` 的预记录 `container_id` 为 null，使用 `container_name` 执行 `docker inspect` 获取状态，并校验 `com.togospace.container_record_id` label；容器不存在或 label 不匹配时为 `missing`，不把外部同名容器当作自己的。
+- **统一使用 12 位短 ID**：`docker create` 输出完整 ID 后截取前 12 位作为 `container_id`；DB、对外 `container_id`、Docker CLI 参数统一使用该值，不再保存完整 ID，也不做短 ID → 全 ID 解析。
+- **先落预记录再回填 ID**：创建时先在 DB 插入一条 `container_id = NULL` 的预记录（同时占用配额），拿到自增 ID 后在**同一事务内**回填容器名（`set_container_name`），`docker create` 成功后回填 12 位短 ID；配额校验与预记录插入在同一互斥区内完成（按 agent 加锁），创建中记录计入配额并出现在 `list_containers`，避免并发创建绕过上限。
+- **预记录可见性**：`list_containers` 返回全部 `deleted == 0` 的记录；`container_id IS NULL` 的预记录使用 `container_name` 执行 `docker inspect` 获取状态，并校验 `com.togospace.container_record_id` label；容器不存在或 label 不匹配时为 `missing`，不把外部同名容器当作自己的。
 - **按名清理的归属校验**：预记录清理前按 `container_name` inspect 并校验 label；label 不匹配时只处理 DB 记录，绝不 `docker rm -f` 外部同名容器。
-- **短 ID 唯一性**：`docker_id` 保留唯一索引（NULL 不冲突）；回填时若与已有记录（含软删除）冲突（概率极低），删除本次新建容器、物理删除预记录并返回 `container_create_failed`。宿主上存在同前缀其他容器时，Docker CLI 会报 `multiple IDs with prefix`，直接透传该错误。
+- **短 ID 唯一性**：`container_id` 保留唯一索引（NULL 不冲突）；回填时若与已有记录（含软删除）冲突（概率极低），删除本次新建容器、物理删除预记录并返回 `container_create_failed`。宿主上存在同前缀其他容器时，Docker CLI 会报 `multiple IDs with prefix`，直接透传该错误。
 - **失败清理**：`docker create` / `docker cp` / 回填任一步失败，均删除本次新建容器（若已创建）并物理删除预记录，不留下残留数据。
 - **`record_id` 对外标识**：表主键 `id` 通过 `list_containers` 以 `record_id` 暴露；预记录没有 Docker ID 时，Agent 用 `record_id` 删除。
-- **DAL `gtAgentContainerManager`**：提供 `create`（`docker_id` 可空）、`set_container_name`（按自增 ID 回填名称）、`set_docker_id`（回填）、`hard_delete`（创建失败清理）、软删除 `mark_deleted`、`list_active_by_agent`、`count_active_by_agent`、按 `id` / 名 / docker_id 反查。
+- **DAL `gtAgentContainerManager`**：提供 `create`（`container_id` 可空）、`set_container_name`（按自增 ID 回填名称）、`set_container_id`（回填）、`hard_delete`（创建失败清理）、软删除 `mark_deleted`、`list_active_by_agent`、`count_active_by_agent`、按 `id` / 名 / container_id 反查。
 
 ---
 
@@ -110,7 +110,7 @@ Agent turn
 | 容器类型 | 注入时机 | 启动方式 |
 |---|---|---|
 | **自建容器** | `create_container` 成功后立即注入 | `docker create` 指定 `--entrypoint /tmp/gtsp`，进入时 `docker start -a -i` |
-| **外部容器** | `enter_container` 建立连接前注入 | `docker exec -i <docker_id> /tmp/gtsp --mode stdio ...` |
+| **外部容器** | `enter_container` 建立连接前注入 | `docker exec -i <container_id> /tmp/gtsp --mode stdio ...` |
 
 - **可执行权限由资源文件本身保证**：`assets/execute/gtsp/gtsp-linux-{amd64,arm64}` 入库即为 `0755`，`docker cp` 原样保留权限位；**不做容器内 `chmod`**（自建容器在 `created` / `exited` 状态也无法 `exec`）；
 - 权限由测试保障：单元测试断言源文件模式为 `0o755`，集成测试断言 `docker cp` 后容器内 `/tmp/gtsp` 仍可执行；
@@ -126,12 +126,12 @@ Agent turn
 
 | 接口 | 说明 |
 |---|---|
-| `create_container(agent_id, image=None) -> ContainerInfo` | 校验配额（≤3）、先插入 `docker_id=NULL` 的预记录并回填按自增 ID 生成的名称、执行 `docker create` 挂载目录、截取 12 位短 ID 并回填、`docker cp` 注入 gtsp、失败补偿清理 |
-| `delete_container(agent_id, container_id: str \| None = None, record_id: int \| None = None) -> bool` | `container_id` / `record_id` 二选一；按 `agent_id + docker_id / id(deleted=0)` 精确校验为当前 Agent 的活跃记录，且不是当前使用中容器；有 `docker_id` 时执行 `docker rm -f <docker_id>`，预记录按 `container_name` + label 校验后 best-effort 清理；标记 DB 软删除 (`deleted=1`) |
-| `delete_agent_containers(agent_id: int) -> int` | Agent 离职/改名时，批量强制删除该 Agent 的所有自建容器并标记软删除；`docker_id IS NULL` 的预记录按 `container_name` + label 校验后清理，label 不匹配仅处理 DB 记录 |
-| `delete_team_containers(team_id: int) -> int` | Team 删除/改名/工作目录迁移时，批量强制删除该 Team 下所有自建容器并标记软删除；`docker_id IS NULL` 的预记录按 `container_name` + label 校验后清理，label 不匹配仅处理 DB 记录 |
-| `list_agent_containers(agent_id) -> list[ContainerInfo]` | 查询该 Agent 全部未删除的自建容器（含 `docker_id IS NULL` 的预记录）；返回 `record_id`；已回填 ID 的按 `docker_id` inspect，预记录按 `container_name` inspect，并行获取实时状态 |
-| `get_container_target(agent_id, container_id: str) -> ContainerTarget` | 校验 `container_id` 为 12 位十六进制短 ID；按 `agent_id + docker_id(deleted=0)` 精确查 DB，命中即自建容器（`is_managed=True`）；未命中则 `docker inspect <container_id>` 取原始状态，并按容器 `.Image` → `docker image inspect` 取 arch，按外部容器处理（`is_managed=False`）；组装 ContainerTarget |
+| `create_container(agent_id, image=None) -> ContainerInfo` | 校验配额（≤3）、先插入 `container_id=NULL` 的预记录并回填按自增 ID 生成的名称、执行 `docker create` 挂载目录、截取 12 位短 ID 并回填、`docker cp` 注入 gtsp、失败补偿清理 |
+| `delete_container(agent_id, container_id: str \| None = None, record_id: int \| None = None) -> bool` | `container_id` / `record_id` 二选一；按 `agent_id + container_id / id(deleted=0)` 精确校验为当前 Agent 的活跃记录，且不是当前使用中容器；有 `container_id` 时执行 `docker rm -f <container_id>`，预记录按 `container_name` + label 校验后 best-effort 清理；标记 DB 软删除 (`deleted=1`) |
+| `delete_agent_containers(agent_id: int) -> int` | Agent 离职/改名时，批量强制删除该 Agent 的所有自建容器并标记软删除；`container_id IS NULL` 的预记录按 `container_name` + label 校验后清理，label 不匹配仅处理 DB 记录 |
+| `delete_team_containers(team_id: int) -> int` | Team 删除/改名/工作目录迁移时，批量强制删除该 Team 下所有自建容器并标记软删除；`container_id IS NULL` 的预记录按 `container_name` + label 校验后清理，label 不匹配仅处理 DB 记录 |
+| `list_agent_containers(agent_id) -> list[ContainerInfo]` | 查询该 Agent 全部未删除的自建容器（含 `container_id IS NULL` 的预记录）；返回 `record_id`；已回填 ID 的按 `container_id` inspect，预记录按 `container_name` inspect，并行获取实时状态 |
+| `get_container_target(agent_id, container_id: str) -> ContainerTarget` | 校验 `container_id` 为 12 位十六进制短 ID；按 `agent_id + container_id(deleted=0)` 精确查 DB，命中即自建容器（`is_managed=True`）；未命中则 `docker inspect <container_id>` 取原始状态，并按容器 `.Image` → `docker image inspect` 取 arch，按外部容器处理（`is_managed=False`）；组装 ContainerTarget |
 | `prepare_container_gtsp(container: ContainerTarget)` | 执行 `docker cp` 将 Linux gtsp 注入到 `/tmp/gtsp`（权限由源文件 `0755` 保留，不做容器内 `chmod`；自建容器在 create 时注入，外部容器在 enter 前注入） |
 
 ### 3.5 容器创建与命名规范
@@ -154,7 +154,7 @@ Agent turn
   - 必须带 `-i`，绝不带 `-t`（保持原始流传输，不分配伪终端）；
   - `--entrypoint` 必须置于镜像名之前；显式传容器内可写的 `--log-path`；
   - 不传 `--workdir`（跟随镜像默认 `WORKDIR`）；创建后立即通过 `docker cp` 注入 `/tmp/gtsp`；
-  - `docker create` 成功后截取输出完整 ID 的前 12 位作为 `docker_id`；后续 DB、API、CLI 统一使用该短 ID；
+  - `docker create` 成功后截取输出完整 ID 的前 12 位作为 `container_id`；后续 DB、API、CLI 统一使用该短 ID；
   - 创建或注入失败（如容器内无 `/tmp`）时，`docker rm -f` 清理刚创建的容器、物理删除预记录，并分别返回 `container_create_failed` / `container_not_executable`；
   - **开启 `--init` 的双重保障**：
     1. **回收孤儿僵尸进程**：Agent 执行命令或复杂脚本派生的子进程若先于孙子进程退出，孙子孤儿进程会被内核自动 reparent 到 PID 1（tini），由 tini 自动 `waitpid` 收割，防止 PID 资源耗尽；
@@ -193,7 +193,7 @@ Agent turn
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `docker_id` | `str` | Docker 容器 12 位短 ID（与对外 `container_id` 相同，用于 DB 查询与 CLI 参数） |
+| `container_id` | `str` | Docker 容器 12 位短 ID（用于 DB 查询与 CLI 参数） |
 | `is_managed` | `bool` | True: 当前 Agent 的 DB 记录（形态 A）；False: 外部/他人容器（形态 B） |
 | `arch` | `str` | 架构（`amd64` / `arm64`），用于外部容器注入匹配的 gtsp 二进制 |
 
@@ -215,7 +215,7 @@ Driver 专注于维护底层的 stdio 连接与 TSP 工具加载，提供两个�
   - `container`：当 `env == ExecEnv.CONTAINER` 时必传，传入容器连接描述体；`env == ExecEnv.HOST` 时忽略；
 - **命令构造**：
   - 若 `env == ExecEnv.HOST`：使用 `build_gtsp_command` 生成宿主机 gtsp 命令；
-  - 若 `env == ExecEnv.CONTAINER`：使用 Driver 内部 `_build_container_command(container)` 生成容器启动命令（自建为 `docker start -a -i <docker_id>`，外部为 `docker exec -i <docker_id> /tmp/gtsp --mode stdio ...`）；
+  - 若 `env == ExecEnv.CONTAINER`：使用 Driver 内部 `_build_container_command(container)` 生成容器启动命令（自建为 `docker start -a -i <container_id>`，外部为 `docker exec -i <container_id> /tmp/gtsp --mode stdio ...`）；
 - **拉起与初始化**：
   - 通过 `client = await TSPClient.from_stdio(command, request_timeout_sec).start()` 建立 stdio 连接；`request_timeout_sec` 沿用连接参数（默认 190s），**不能传 `enter_timeout_sec`**，否则容器内所有工具请求都会被压到 60s；
   - 再用 `client.initialize(client_info=..., include=..., exclude=...)` 应用工具过滤（与现有驱动一致）；
@@ -269,7 +269,7 @@ sequenceDiagram
     end
     Tool->>CS: get_container_target(agent_id, container_id)
     CS->>Docker: 校验存在并获取容器架构 (arch)
-    CS-->>Tool: 返回 ContainerTarget(docker_id, is_managed, arch)
+    CS-->>Tool: 返回 ContainerTarget(container_id, is_managed, arch)
     
     alt 外部容器非 running
         Tool-->>Agent: 报错拒绝（提示先自行 docker start）
@@ -315,8 +315,8 @@ sequenceDiagram
 
 1. **Agent 发起**：调用 `create_container(image="...")`；
 2. **配额与命名**：`containerService` 校验该 Agent 当前活跃自建容器数（`deleted=0` 且 `< 3`），先插入预记录拿到自增 `record_id`，再生成容器名 `agent-t<team_id>-<name>-<record_id>`（依据 Operator 2026-11-01 指令修订，原为 `agent-<name>-<index>`）；
-3. **预插记录**：先在 `agent_containers` 表中插入一条预记录（`agent_id`, `docker_id=NULL`, `container_name` 占位, `image`, `deleted=0`, `created_at`），提前占用配额；拿到自增 ID 后在同一事务内回填最终容器名；
-4. **执行创建**：调用 `docker create` 绑定个人工作目录读写、团队共享目录只读，设置 `--entrypoint /tmp/gtsp`；从输出完整 ID 截取前 12 位作为 `docker_id`（短 ID）；创建失败则物理删除预记录并返回 `container_create_failed`；
+3. **预插记录**：先在 `agent_containers` 表中插入一条预记录（`agent_id`, `container_id=NULL`, `container_name` 占位, `image`, `deleted=0`, `created_at`），提前占用配额；拿到自增 ID 后在同一事务内回填最终容器名；
+4. **执行创建**：调用 `docker create` 绑定个人工作目录读写、团队共享目录只读，设置 `--entrypoint /tmp/gtsp`；从输出完整 ID 截取前 12 位作为 `container_id`（短 ID）；创建失败则物理删除预记录并返回 `container_create_failed`；
 5. **回填 ID**：将 12 位短 ID 更新到预记录；若与已有记录冲突，`docker rm -f` 删除新建容器、物理删除预记录并返回 `container_create_failed`；
 6. **立即注入**：调用 `docker cp` 将对应架构的 Linux `gtsp` 二进制注入到容器内部 `/tmp/gtsp`；失败则 `docker rm -f` 删除容器、物理删除预记录并返回 `container_not_executable`；
 7. **返回结果**：返回 `container_id` 与提示信息，**当前执行环境保持在宿主不变**。
@@ -325,10 +325,10 @@ sequenceDiagram
 
 1. **Agent 发起**：调用 `delete_container(container_id="...")` 或 `delete_container(record_id=123)`；
 2. **参数校验**：`container_id` / `record_id` 必须二选一，同时传或都不传返回 `container_invalid_params`；
-3. **记录校验**：按 `agent_id + docker_id(deleted=0)` 或 `agent_id + id(deleted=0)` 精确查记录，未命中返回 `container_not_found`；若记录是当前正在使用的容器，返回 `container_in_use`（提示必须先 `exit_to_host`）；
+3. **记录校验**：按 `agent_id + container_id(deleted=0)` 或 `agent_id + id(deleted=0)` 精确查记录，未命中返回 `container_not_found`；若记录是当前正在使用的容器，返回 `container_in_use`（提示必须先 `exit_to_host`）；
 4. **执行删除**：
-   - 记录有 `docker_id`：执行 `docker rm -f <docker_id>`；Docker 报容器不存在时视为已删除，其他失败返回 `container_delete_failed`，不改 DB；
-   - 记录是预记录（`docker_id IS NULL`）：先 `docker inspect <container_name>` 并校验 `com.togospace.container_record_id` label；匹配才执行 `docker rm -f`（best-effort，失败记 warning），容器不存在或 label 不匹配则跳过，绝不删除外部同名容器；
+   - 记录有 `container_id`：执行 `docker rm -f <container_id>`；Docker 报容器不存在时视为已删除，其他失败返回 `container_delete_failed`，不改 DB；
+   - 记录是预记录（`container_id IS NULL`）：先 `docker inspect <container_name>` 并校验 `com.togospace.container_record_id` label；匹配才执行 `docker rm -f`（best-effort，失败记 warning），容器不存在或 label 不匹配则跳过，绝不删除外部同名容器；
 5. **标记软删除**：更新 `agent_containers` 对应行的 `deleted = 1`；
 6. **返回结果**：返回 `deleted_record_id` 与 `deleted_container_id`（预记录为 null）。
 
@@ -506,7 +506,7 @@ sequenceDiagram
 
 | 层 | 范围 |
 |---|---|
-| 单元 `tests/unit/service/containerService/` | CLI 路径解析；错误分类；创建 argv（`-i` 存在、`--entrypoint` 下标 < image 下标、无 `-t` / `--workdir` / `--read-only`、含 `--log-path` 与 `--init`）；中文名回退且长名不截断；image 参数（空值走默认、自定义值原样、非 linux / 架构不支持 / 缺失均不落库）；并发创建不超过 3；创建时先插入 `docker_id=NULL` 预记录、成功后回填 12 位短 ID，并计入配额 / 名称占用；`list_agent_containers` 包含 `docker_id IS NULL` 预记录（返回 `record_id`，`container_id=null`，按 `container_name` + label 校验；外部同名容器不显示为本记录）；回填冲突或注入失败时删除新容器并物理删除预记录；`get_container_target`（12 位十六进制短 ID 格式校验、镜像名拒绝、按 `agent_id + docker_id` 精确命中自建容器、未命中走外部 `docker inspect`）；arch 按容器 `.Image` → `docker image inspect` 获取（容器 inspect 无 `Architecture`）；形态 A / B 命令构造；容器无 `/tmp` 时注入失败返回 `container_not_executable`、删除容器并清理预记录 / 不做兜底；二进制可执行权限（资源文件模式 `0o755`、`docker cp` 后仍可执行）；工作目录继承；`delete_container` 的 `container_id` / `record_id` 二选一校验、非本人记录拒绝、预记录按 `container_name` + label 校验后 best-effort 清理、外部同名容器不误删；删除时 `container_in_use`；目录变更清理 |
+| 单元 `tests/unit/service/containerService/` | CLI 路径解析；错误分类；创建 argv（`-i` 存在、`--entrypoint` 下标 < image 下标、无 `-t` / `--workdir` / `--read-only`、含 `--log-path` 与 `--init`）；中文名回退且长名不截断；image 参数（空值走默认、自定义值原样、非 linux / 架构不支持 / 缺失均不落库）；并发创建不超过 3；创建时先插入 `container_id=NULL` 预记录、成功后回填 12 位短 ID，并计入配额 / 名称占用；`list_agent_containers` 包含 `container_id IS NULL` 预记录（返回 `record_id`，`container_id=null`，按 `container_name` + label 校验；外部同名容器不显示为本记录）；回填冲突或注入失败时删除新容器并物理删除预记录；`get_container_target`（12 位十六进制短 ID 格式校验、镜像名拒绝、按 `agent_id + container_id` 精确命中自建容器、未命中走外部 `docker inspect`）；arch 按容器 `.Image` → `docker image inspect` 获取（容器 inspect 无 `Architecture`）；形态 A / B 命令构造；容器无 `/tmp` 时注入失败返回 `container_not_executable`、删除容器并清理预记录 / 不做兜底；二进制可执行权限（资源文件模式 `0o755`、`docker cp` 后仍可执行）；工作目录继承；`delete_container` 的 `container_id` / `record_id` 二选一校验、非本人记录拒绝、预记录按 `container_name` + label 校验后 best-effort 清理、外部同名容器不误删；删除时 `container_in_use`；目录变更清理 |
 | 单元 `test_tsp_driver_container.py` | 自建 created / exited 进入；自建 running 报错且不调用 stop / start；外部 running 进入与退出；外部非 running（exited / paused 等）报错拒绝且 message 含实际状态；同容器幂等；A → B 切换；握手失败重连宿主；超时；关 stdin 容器自动退出；退出必回宿主；enter 时容器不存在返回错误且不改 DB；inspect 失败按 `container_enter_failed` 且不软删除；运行中重连丢失且为自建容器时标记软删除；Docker 不可用保留记录；单 client 切换；Cancelled 清理；启动不恢复；只读 / 无 bash 提示（仅一次） |
 | 集成 | fake `docker` 脚本（JSON 状态），`start -a -i` / `exec -i` 挂真实宿主 gtsp 子进程，走 `run_tool_call` 跑完整链路 |
 | 生命周期 | 迁移 0017 幂等；`backend_main` 启停顺序 |

@@ -12,8 +12,8 @@ from exception import TogoException
 from model.coreModel import ContainerTarget
 from service.containerService import core
 
-_MANAGED = ContainerTarget(docker_id="c0ffee123456", is_managed=True, arch="arm64")
-_EXTERNAL = ContainerTarget(docker_id="deadbeef0002", is_managed=False, arch="arm64")
+_MANAGED = ContainerTarget(container_id="c0ffee123456", is_managed=True, arch="arm64")
+_EXTERNAL = ContainerTarget(container_id="deadbeef0002", is_managed=False, arch="arm64")
 
 
 # ---------------------------------------------------------------------------

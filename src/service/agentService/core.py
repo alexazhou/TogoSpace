@@ -9,7 +9,7 @@ from model.coreModel.agentModel import (
     AgentRuntimeInfo,
     ExecEnvState,
 )
-from model.coreModel.containerModel import ContainerInfo
+from model.coreModel.containerModel import ContainerInfo, ContainerTarget
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from service.agentService.prompts import BASE_PROMPT, AGENT_IDENTITY_PROMPT
 from util import configUtil, i18nUtil, assertUtil, workspaceUtil
@@ -21,7 +21,15 @@ from service import llmService, roomService, persistenceService, deptService, ag
 from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtScheculeTaskManager
 from peewee import IntegrityError
 from exception import TogoException
-from constants import AgentStatus, AgentTaskStatus, DriverType, EmployStatus, ExecEnv, SpecialAgent
+from constants import (
+    CONTAINER_STATE_UNKNOWN,
+    AgentStatus,
+    AgentTaskStatus,
+    DriverType,
+    EmployStatus,
+    ExecEnv,
+    SpecialAgent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,15 +74,15 @@ async def rename_agent_workdir(
 
 
 # ---------------------------------------------------------------------------
-# 容器清理（§7）——目录改名/删除前必须先把 bind mount 固化的旧容器清掉
+# 执行环境切换（§5.1 / §5.2）——执行环境属于 Agent，容器侧只提供原语
 # ---------------------------------------------------------------------------
 
 
 def _get_loaded_driver(agent_id: int) -> Any:
     """取已加载 Agent 的 driver；未加载或非 TSP driver 返回 None。
 
-    只用于读取 `exec_env` / `current_container_id`，不做任何断言：容器清理是
-    best-effort 的收尾动作，不能因为「这个 Agent 恰好没加载」就中断目录操作。
+    切环境与容器清理都要先判断「这个 Agent 有没有可切换的环境」：前者失败
+    必须报错，后者是 best-effort 收尾，所以这里只做查询、不抛异常。
     """
     agent = _agents.get(agent_id)
     if agent is None:
@@ -86,6 +94,120 @@ def _get_loaded_driver(agent_id: int) -> Any:
     if driver is None or not hasattr(driver, "exec_env"):
         return None
     return driver
+
+
+def _require_loaded_driver(agent_id: int) -> Any:
+    """取已加载 Agent 的 driver；未加载或非 TSP driver 时拒绝切换。"""
+    driver = _get_loaded_driver(agent_id)
+    if driver is None:
+        raise TogoException(
+            "当前 Agent 未加载或执行驱动不支持容器沙箱（仅支持 TSP 驱动）",
+            containerService.ERROR_CONTAINER_INVALID_PARAMS,
+        )
+    return driver
+
+
+async def enter_container(agent_id: int, container_id: str) -> tuple[ContainerTarget, str]:
+    """把 Agent 的执行环境切换到指定容器，返回 `(目标, 进入前状态)`。
+
+    流程严格按 §5.1：
+    1. 同容器幂等：已在目标容器且连接存活 → 直接成功；
+    2. `get_container_target` 解析目标（含 12 位 ID 校验、存在性、架构）；
+    3. 状态判定（`validate_enter_state`）：自建只收 created/exited，外部只收 running；
+    4. 外部容器先注入 gtsp（自建在 create 时已注入）；
+    5. `driver.disconnect()` → `driver.connect(CONTAINER, target)`；
+    6. connect 失败则重连宿主（**本次进入失败**，不属于运行中自动回落）。
+
+    Driver 由本层按 `agent_id` 解析：执行环境是 Agent 的状态，调用方不应持有
+    Driver。容器相关的目标解析、状态判定与 gtsp 注入都委托给 `containerService`。
+
+    Raises:
+        TogoException: Agent 未加载 / 驱动不支持 / 任一步失败
+
+    Returns:
+        `(target, previous_state)`；`previous_state` 是进入前的容器状态，
+        供工具层在 message 里说明「从 created 拉起」还是「从 exited 恢复」。
+    """
+    driver = _require_loaded_driver(agent_id)
+
+    if driver.exec_env == ExecEnv.CONTAINER and driver.current_container_id == container_id:
+        # 幂等：已在目标容器。不重连（重连会打断正在进行的 turn）。
+        target = await containerService.get_container_target(agent_id, container_id)
+        return target, "running"
+
+    target = await containerService.get_container_target(agent_id, container_id)
+
+    state = await containerService.get_container_state(container_id)
+    if state == CONTAINER_STATE_UNKNOWN:
+        raise TogoException(
+            f"无法查询容器 {container_id} 的状态（Docker 不可用或查询超时），"
+            "请稍后重试",
+            containerService.ERROR_CONTAINER_ENTER_FAILED,
+        )
+    containerService.validate_enter_state(target, state)
+
+    if not target.is_managed:
+        # 外部容器：镜像里没有 gtsp，必须进前注入
+        await containerService.prepare_container_gtsp(target)
+
+    # 切环境：先断开再显式连接。disconnect 不改环境状态（见 Driver 注释），
+    # 所以 connect 失败时环境仍是旧值，由下面的失败分支显式处理。
+    await driver.disconnect()
+    ok = await driver.connect(ExecEnv.CONTAINER, target)
+    if not ok:
+        # 进入失败：本次调用内把宿主连接恢复出来，避免 Agent 失去可用环境。
+        # 注意这是「该操作自身的失败处理」，不是运行中的自动回落（§4.3）。
+        restored = await driver.connect(ExecEnv.HOST)
+        if not restored:
+            logger.error(
+                "进入容器失败且无法恢复宿主连接: agent_id=%s, container=%s",
+                agent_id, container_id,
+            )
+        raise TogoException(
+            f"进入容器 {container_id} 失败：容器内 gtsp 启动或握手未成功。"
+            "请确认镜像内 /tmp 可写且能执行注入的二进制。",
+            containerService.ERROR_CONTAINER_ENTER_FAILED,
+        )
+
+    logger.info(
+        "已进入容器: agent_id=%s, container=%s, managed=%s, from_state=%s",
+        agent_id, container_id, target.is_managed, state,
+    )
+    return target, state
+
+
+async def exit_to_host(agent_id: int) -> None:
+    """把 Agent 的执行环境切回宿主（§5.2）。
+
+    顺序：`disconnect()`（关容器连接 → 自建容器自然停回 exited）→
+    `connect(HOST)`。connect 失败时环境保持 CONTAINER，由 Agent 重试——
+    不能假装成功，否则后续工具会打在错误环境上。
+
+    Raises:
+        TogoException: Agent 未加载 / 驱动不支持 / 宿主连接失败
+    """
+    driver = _require_loaded_driver(agent_id)
+    if driver.exec_env == ExecEnv.HOST:
+        # 已经在宿主：幂等成功，不重连（重连会打断 turn）
+        return
+
+    # 先断开容器连接：关 stdin 后容器内 gtsp 退出，自建容器随之停回 exited
+    await driver.disconnect()
+
+    ok = await driver.connect(ExecEnv.HOST)
+    if not ok:
+        raise TogoException(
+            "退出容器失败：无法重新连接宿主环境。当前逻辑环境仍为容器，"
+            "请重试 exit_to_host。",
+            containerService.ERROR_CONTAINER_ENTER_FAILED,
+        )
+
+    logger.info("已退回到宿主环境: agent_id=%s", agent_id)
+
+
+# ---------------------------------------------------------------------------
+# 容器清理（§7）——目录改名/删除前必须先把 bind mount 固化的旧容器清掉
+# ---------------------------------------------------------------------------
 
 
 async def switch_agent_to_host(agent_id: int) -> bool:

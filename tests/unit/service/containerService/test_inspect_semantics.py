@@ -25,7 +25,7 @@ import json
 import pytest
 
 from exception import TogoException
-from model.coreModel import CONTAINER_STATE_MISSING, CONTAINER_STATE_UNKNOWN
+from constants import CONTAINER_STATE_MISSING, CONTAINER_STATE_UNKNOWN
 from service.containerService import core
 
 from .test_container_core import env as container_env  # noqa: F401
@@ -44,12 +44,12 @@ def _inspect_ok(*, status: str = "exited", labels: dict | None = None) -> str:
     })
 
 
-async def _seed(docker_id: str | None = None, name: str = "agent-1-1"):
+async def _seed(container_id: str | None = None, name: str = "agent-1-1"):
     record = await core.gtAgentContainerManager.create(
         agent_id=1, container_name=name, image="ubuntu:24.04"
     )
-    if docker_id:
-        await core.gtAgentContainerManager.set_docker_id(record, docker_id)
+    if container_id:
+        await core.gtAgentContainerManager.set_container_id(record, container_id)
     return record
 
 
@@ -122,7 +122,7 @@ async def test_inspect_raises_for_daemon_unavailable(fake):
 
 async def test_get_target_reports_enter_failed_not_container_lost_for_unreadable(fake):
     """查不清时不能报 `container_lost`：那会让上层去软删一条其实还活着的记录。"""
-    record = await _seed(docker_id="c0ffee123456")
+    record = await _seed(container_id="c0ffee123456")
     fake.set("inspect", stdout="garbage")
 
     with pytest.raises(TogoException) as excinfo:
@@ -136,7 +136,7 @@ async def test_get_target_reports_enter_failed_not_container_lost_for_unreadable
 
 async def test_list_shows_unknown_not_missing_for_unreadable(fake):
     """列表页显示 `unknown`（查不清），**不是** `missing`（没了）——两者对用户含义完全不同。"""
-    await _seed(docker_id="c0ffee123456")
+    await _seed(container_id="c0ffee123456")
     fake.set("inspect", stdout="garbage")
 
     infos = await core.list_agent_containers(1)
@@ -147,7 +147,7 @@ async def test_list_shows_unknown_not_missing_for_unreadable(fake):
 
 async def test_list_shows_missing_for_confirmed_absent(fake):
     """对照组：确认不存在才是 `missing`（证明上面那条不是「永远 unknown」）。"""
-    await _seed(docker_id="c0ffee123456")
+    await _seed(container_id="c0ffee123456")
     fake.set("inspect", stderr="Error: No such container: c0ffee123456", returncode=1)
 
     infos = await core.list_agent_containers(1)
@@ -193,7 +193,7 @@ async def test_classify_uses_caller_fallback_for_unknown_stderr(fake):
 
 async def test_enter_path_reports_enter_failed_not_create_failed(fake):
     """进入路径的兜底码必须是 `container_enter_failed`（模型据此换做法，报错就白费）。"""
-    record = await _seed(docker_id="c0ffee123456")
+    record = await _seed(container_id="c0ffee123456")
     assert record is not None
     fake.set("inspect", stderr="Error response from daemon: something unexpected", returncode=1)
 

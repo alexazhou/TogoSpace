@@ -484,7 +484,7 @@ describe('getAgentDetail containers', () => {
         {
           record_id: 11,
           agent_id: 3,
-          docker_id: 'sha256:abc',
+          container_id: 'sha256:abc',
           container_name: 'togo-agent-3',
           image: 'togo-sandbox:latest',
           state: 'running',
@@ -493,10 +493,10 @@ describe('getAgentDetail containers', () => {
           created_at: '2026-10-31T08:15:00.123456',
         },
         {
-          // 预记录：容器尚未创建完成，docker_id 与 created_at 都可能为空
+          // 预记录：容器尚未创建完成，container_id 与 created_at 都可能为空
           record_id: 12,
           agent_id: 3,
-          docker_id: null,
+          container_id: null,
           container_name: '',
           image: 'togo-sandbox:latest',
           state: 'missing',
@@ -507,7 +507,7 @@ describe('getAgentDetail containers', () => {
           // 后端漏字段或给出非字符串时不能把非字符串透给 UI
           record_id: 13,
           agent_id: 3,
-          docker_id: 'sha256:def',
+          container_id: 'sha256:def',
           container_name: 'togo-agent-3-b',
           image: 'togo-sandbox:latest',
           state: 'exited',
@@ -531,8 +531,8 @@ describe('getAgentDetail containers', () => {
     expect(containers[2].created_at).toBeNull();
     // state 直接透传 Docker 原值，不做翻译
     expect(containers.map((item) => item.state)).toEqual(['running', 'missing', 'exited']);
-    // docker_id 为 null 的预记录不能丢（record_id 是删除入口）
-    expect(containers[1].docker_id).toBeNull();
+    // container_id 为 null 的预记录不能丢（record_id 是删除入口）
+    expect(containers[1].container_id).toBeNull();
   });
 });
 
@@ -565,15 +565,15 @@ describe('getAgentDetail: list_agent_containers 真实基线', () => {
     const containers = detail.containers ?? [];
 
     // 三项联调断言，逐条钉死：
-    // ① 预记录（docker_id=null）不丢，record_id 是唯一删除入口
+    // ① 预记录（container_id=null）不丢，record_id 是唯一删除入口
     expect(containers.map((item) => item.record_id)).toEqual([1, 2]);
-    expect(containers[0].docker_id).toBeNull();
+    expect(containers[0].container_id).toBeNull();
     expect(containers[0].container_name).toBe('agent-3-7');
     // ② created_at 是真 ISO 8601 串，不是 int 时间戳，也不被 normalize 吃掉
     expect(containers[0].created_at).toBe('2026-11-01T12:09:12.049245');
     // ③ state 原值透传：daemon 不可用是 unknown（不是伪造成 missing）
     expect(containers.map((item) => item.state)).toEqual(['unknown', 'unknown']);
-    // is_entered 只认 docker_id 命中当前容器
+    // is_entered 只认 container_id 命中当前容器
     expect(containers.map((item) => item.is_entered)).toEqual([false, false]);
   });
 
@@ -592,13 +592,12 @@ describe('getAgentDetail: list_agent_containers 真实基线', () => {
     expect(containers.map((item) => item.state)).toEqual(['running', 'exited']);
     // 当前容器是 record 2，只有它 is_entered
     expect(containers.map((item) => item.is_entered)).toEqual([false, true]);
-    // 预记录（record 1）的 docker_id 仍是 null，且它没被 normalize 过滤掉
-    expect(containers[0].docker_id).toBeNull();
+    // 预记录（record 1）的 container_id 仍是 null，且它没被 normalize 过滤掉
+    expect(containers[0].container_id).toBeNull();
     expect(containers).toHaveLength(2);
-    // 已回填的 docker_id 必须原样读出来 —— 没有这条，把 `item.docker_id`
-    // 改成文档字面的 `item.container_id` 也能全绿（undefined → null），
-    // 而那个改动会让容器表所有容器 ID 显示为空。
-    expect(containers[1].docker_id).toBe('deadbeef1234');
+    // 已回填的 container_id 必须原样读出来 —— 没有这条，把 `item.container_id`
+    // 写错成别的字段名也能全绿（undefined → null），容器表所有 ID 会显示为空。
+    expect(containers[1].container_id).toBe('deadbeef1234');
     // exec_env 走 normalizeAgent 的收敛：非 'container' 一律 host
     expect(detail.exec_env).toBe('container');
     expect(detail.current_container_id).toBe('deadbeef1234');

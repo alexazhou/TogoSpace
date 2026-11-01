@@ -426,13 +426,13 @@ def test_container_start_and_exec_argv_shapes():
 
 
 async def test_create_container_follows_pre_record_then_create_then_inject(env):
-    """§5.3 顺序：先插 `docker_id=NULL` 预记录 → create → 回填 → cp 注入。
+    """§5.3 顺序：先插 `container_id=NULL` 预记录 → create → 回填 → cp 注入。
 
     顺序本身就是设计要点：先落预记录才能占住配额与名称，防并发绕过上限。
     """
     record = await core.create_container(1)
 
-    assert record.docker_id == "c0ffee123456"
+    assert record.container_id == "c0ffee123456"
     # 中文名 → 回退 agent_id；team-a 是 1 号 team（env fixture 只造了一个 team）。
     # 最后一段是自增记录 ID，按实际返回的记录推导，避免把自增序列写死。
     assert record.container_name == core.build_container_name(
@@ -521,7 +521,7 @@ async def test_create_failure_removes_pre_record(env):
 async def test_inject_failure_removes_container_and_pre_record(env):
     """注入失败 ⇒ 删容器 + 物理删除预记录，返回 `container_not_executable`（§5.3 第 6 步）。
 
-    这条同时钉住「补偿删除按 docker_id」：断言 rm 的参数是 12 位短 ID，
+    这条同时钉住「补偿删除按 container_id」：断言 rm 的参数是 12 位短 ID，
     而不是容器名——按名删有可能命中宿主上的外部同名容器（P-1 风险）。
     """
     env.set("cp", stderr="Error response from daemon: not found", returncode=1)
@@ -542,8 +542,8 @@ async def test_create_short_id_from_full_id_prefix(env):
 
     record = await core.create_container(1)
 
-    assert record.docker_id == "0123456789ab"
-    assert len(record.docker_id) == 12
+    assert record.container_id == "0123456789ab"
+    assert len(record.container_id) == 12
 
 
 async def test_create_rejects_abnormal_create_output(env):
@@ -610,14 +610,14 @@ async def test_create_reports_name_conflict_as_togo_exception(env):
 
 
 async def test_pre_record_is_visible_in_list_and_counts_toward_quota(env):
-    """创建中的预记录（`docker_id=NULL`）计入配额并出现在列表里（§2.1）。"""
+    """创建中的预记录（`container_id=NULL`）计入配额并出现在列表里（§2.1）。"""
     await core.gtAgentContainerManager.create(
         agent_id=1, container_name="agent-1-1", image="ubuntu:24.04"
     )
 
     assert await core.gtAgentContainerManager.count_active_by_agent(1) == 1
     records = await core.gtAgentContainerManager.list_active_by_agent(1)
-    assert [(row.container_name, row.docker_id) for row in records] == [("agent-1-1", None)]
+    assert [(row.container_name, row.container_id) for row in records] == [("agent-1-1", None)]
 
 
 async def test_two_teams_same_agent_name_both_create(env):
@@ -629,7 +629,7 @@ async def test_two_teams_same_agent_name_both_create(env):
     2. 传给 `docker create` 的 `--name` 两个值不同，且分别带 t1 / t2
     3. DB 里两条记录都在，各自 `container_name` 与记录 ID 一致
 
-    注意：假 docker 对 `create` 恒返同一个短 ID，而 `docker_id` 是全局唯一索引，
+    注意：假 docker 对 `create` 恒返同一个短 ID，而 `container_id` 是全局唯一索引，
     所以两次创建之间要换一个返回值（用现有 `env.set` 即可，不用改夹具）。
     """
     from dal.db import gtAgentManager
@@ -646,7 +646,7 @@ async def test_two_teams_same_agent_name_both_create(env):
     # 新插的 Agent 要清缓存，否则 `get_agent_by_id` 可能命中前面用例留下的旧对象
     gtAgentManager.clear_agent_cache()
 
-    # 2) 两个团队各建一个容器。假 docker 每次返回同一个短 ID（会撞 docker_id 唯一索引），
+    # 2) 两个团队各建一个容器。假 docker 每次返回同一个短 ID（会撞 container_id 唯一索引），
     #    所以在两次调用之间换一个返回值。
     env.set("create", stdout="aaaa1111222233334444\n")
     first = await core.create_container(2)
@@ -655,8 +655,8 @@ async def test_two_teams_same_agent_name_both_create(env):
     second = await core.create_container(3)
 
     # 3) 两次都真的建成功了
-    assert first.docker_id == "aaaa11112222"
-    assert second.docker_id == "bbbb11112222"
+    assert first.container_id == "aaaa11112222"
+    assert second.container_id == "bbbb11112222"
 
     # 4) 名字按 record_id 生成，两个 Agent 必然不同，且各带自己的 team 段
     assert first.id is not None

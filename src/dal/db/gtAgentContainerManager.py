@@ -17,7 +17,7 @@ async def create(
     container_name: str,
     image: str,
 ) -> GtAgentContainer:
-    """插入一条预记录（`docker_id = NULL`），返回带主键的对象。
+    """插入一条预记录（`container_id = NULL`），返回带主键的对象。
 
     预记录同时占用配额，避免并发创建绕过上限。
 
@@ -26,7 +26,7 @@ async def create(
     """
     container = GtAgentContainer(
         agent_id=agent_id,
-        docker_id=None,
+        container_id=None,
         container_name=container_name,
         image=image,
         deleted=0,
@@ -42,14 +42,14 @@ async def set_container_name(container: GtAgentContainer, container_name: str) -
     return container
 
 
-async def set_docker_id(container: GtAgentContainer, docker_id: str) -> GtAgentContainer:
+async def set_container_id(container: GtAgentContainer, container_id: str) -> GtAgentContainer:
     """回填 12 位短 ID。
 
-    依赖 `idx_agent_containers_docker_id` 唯一索引：冲突时抛 `IntegrityError`，
+    依赖 `idx_agent_containers_container_id` 唯一索引：冲突时抛 `IntegrityError`，
     由调用方补偿清理（本次新建容器 + 本条预记录）。
     """
-    container.docker_id = docker_id
-    await container.aio_save(only=[GtAgentContainer.docker_id, GtAgentContainer.updated_at])
+    container.container_id = container_id
+    await container.aio_save(only=[GtAgentContainer.container_id, GtAgentContainer.updated_at])
     return container
 
 
@@ -151,15 +151,15 @@ async def get_active_by_id(record_id: int) -> GtAgentContainer | None:
     )
 
 
-async def get_active_by_docker_id(agent_id: int, docker_id: str) -> GtAgentContainer | None:
-    """按 `agent_id + docker_id` 精确取活跃记录。
+async def get_active_by_container_id(agent_id: int, container_id: str) -> GtAgentContainer | None:
+    """按 `agent_id + container_id` 精确取活跃记录。
 
-    必须带 `agent_id`：`docker_id` 唯一索引只保证全局不重复，
+    必须带 `agent_id`：`container_id` 唯一索引只保证全局不重复，
     但语义上「是不是自己的容器」还得由 agent 维度确认。
     """
     return await GtAgentContainer.aio_get_or_none(
         (GtAgentContainer.agent_id == agent_id)
-        & (GtAgentContainer.docker_id == docker_id)
+        & (GtAgentContainer.container_id == container_id)
         & (GtAgentContainer.deleted == 0)
     )
 

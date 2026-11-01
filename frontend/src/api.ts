@@ -497,11 +497,11 @@ function normalizeContainerInfo(raw: unknown): ContainerInfo | null {
   if (!Number.isFinite(recordId) || recordId <= 0) {
     return null;
   }
-  const dockerId = typeof item.docker_id === 'string' && item.docker_id ? item.docker_id : null;
+  const containerId = typeof item.container_id === 'string' && item.container_id ? item.container_id : null;
   return {
     record_id: recordId,
     agent_id: Number(item.agent_id ?? 0),
-    docker_id: dockerId,
+    container_id: containerId,
     container_name: String(item.container_name ?? ''),
     image: String(item.image ?? ''),
     state: String(item.state ?? 'unknown'),

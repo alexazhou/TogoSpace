@@ -156,7 +156,7 @@ class TspAgentDriver(AgentDriver):
     @property
     def current_container_id(self) -> Optional[str]:
         """当前所在容器的 12 位短 ID；宿主环境为 None（对外的 `current_container_id`）。"""
-        return self._current_container.docker_id if self._current_container else None
+        return self._current_container.container_id if self._current_container else None
 
     def _build_container_command(self, container: ContainerTarget) -> list[str]:
         """按容器类型构造 gtsp 拉起命令（§3.2 形态 A / B）。
@@ -171,9 +171,9 @@ class TspAgentDriver(AgentDriver):
         """
         docker = container_cli.get_cli()
         if container.is_managed:
-            argv = containerService.build_container_start_argv(container.docker_id)
+            argv = containerService.build_container_start_argv(container.container_id)
         else:
-            argv = containerService.build_container_exec_argv(container.docker_id)
+            argv = containerService.build_container_exec_argv(container.container_id)
         return [docker.binary_path, *argv]
 
     def _is_client_connected(self) -> bool:
@@ -271,7 +271,7 @@ class TspAgentDriver(AgentDriver):
         logger.info(
             "TSP 连接成功: agent_id=%s, env=%s, container=%s, tools=%s",
             self.host.gt_agent.id, env.value,
-            container.docker_id if container else None,
+            container.container_id if container else None,
             len(self._tsp_tools),
         )
 

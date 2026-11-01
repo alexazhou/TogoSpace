@@ -11,7 +11,7 @@ import inspect
 from inspect import FullArgSpec
 from typing import TypeVar, Generic, Dict, List, Union, Optional, Any, Type, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 
 logger = logging.getLogger(__name__)
@@ -318,6 +318,20 @@ def get_cls_args_annotations(cls, args):
 
 def object_to_json_data(obj: object, config: Dict = None):
     return json_load(json_dump(obj, config))
+
+
+_DATETIME_JSON_ADAPTER: TypeAdapter[dt.datetime | None] = TypeAdapter(dt.datetime | None)
+
+
+def datetime_to_pydantic_json(value: dt.datetime | None) -> str | None:
+    """把单个 datetime 转成与 pydantic `model_dump(mode="json")` 完全相同的字符串。
+
+    必须**逐字节一致**，否则同一字段在 `to_json()`（API/前端）和 `to_tool_dict()`
+    （工具）里会呈现两种格式。本仓 `created_at` 恒为 naive datetime
+    （SQLite `datetime('now')`），但带时区时二者会分叉：`model_dump` 输出 `...Z`，
+    而 `datetime.isoformat()` 输出 `...+00:00`。走同一个 adapter 保证一致。
+    """
+    return json.loads(_DATETIME_JSON_ADAPTER.dump_json(value))
 
 
 def annotation_to_type(annotation_type) -> type:

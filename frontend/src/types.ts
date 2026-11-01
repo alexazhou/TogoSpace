@@ -20,21 +20,21 @@ export type AgentExecEnv = 'host' | 'container';
 /**
  * 自建容器信息（对应后端 `model/coreModel/containerModel.py::ContainerInfo`）。
  *
- * 注意两个与直觉不同的点（照后端 `model_dump(mode="json")` 的真实字段，别按文档 §8 的字面猜）：
- * 1. 容器 ID 字段名叫 `docker_id`，不是 `container_id`；预记录尚未回填时为 null。
+ * 两个容易踩错的点（照后端 `model_dump(mode="json")` 的真实字段，别按文档 §8 的字面猜）：
+ * 1. 容器 ID 字段名叫 `container_id`；预记录尚未回填时为 null。
  * 2. 没有 `is_managed`；表示「当前所处环境」的是 `is_entered`。
  *
- * `docker_id` 可空是**契约的一部分**：创建流程先落 `docker_id=NULL` 的预记录，
+ * `container_id` 可空是**契约的一部分**：创建流程先落 `container_id=NULL` 的预记录，
  * `docker create` 成功后才回填 12 位短 ID。预记录在列表里也可见，此时只能用
  * `record_id` / `container_name` 标识。不要写成非空——`vue-tsc --noEmit` 会卡构建，
  * 且运行期预记录行必然命中这条分支。
  */
 export interface ContainerInfo {
-  /** `agent_containers.id`，前端表格行 key；预记录没有 docker_id 时用它删除。 */
+  /** `agent_containers.id`，前端表格行 key；预记录没有 container_id 时用它删除。 */
   record_id: number;
   agent_id: number;
   /** Docker 12 位短 ID；预记录为 null。 */
-  docker_id: string | null;
+  container_id: string | null;
   container_name: string;
   image: string;
   /** Docker `State.Status` 原值，直接展示不做翻译；查不到为 missing，inspect 失败为 unknown。 */
@@ -75,7 +75,7 @@ export interface AgentDetail extends AgentInfo {
   driver_type: string;
   prompt: string;
   error_message?: string | null;
-  /** Agent 详情额外携带的实时容器列表；预记录 `docker_id` 为 null。 */
+  /** Agent 详情额外携带的实时容器列表；预记录 `container_id` 为 null。 */
   containers?: ContainerInfo[] | null;
 }
 

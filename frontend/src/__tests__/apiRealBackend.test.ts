@@ -3,7 +3,7 @@
  *
  * 两份 fixture 不是手写的，是 `curl 127.0.0.1:8199` 从真跑起来的后端抓的：
  * - `agent_detail_real.json`：`GET /teams/1/agents/李哥.json`，该 Agent 库里有
- *   1 条已回填 docker_id 的真实容器 + 1 条 docker_id=NULL 的预记录；
+ *   1 条已回填 container_id 的真实容器 + 1 条 container_id=NULL 的预记录；
  * - `agent_list_real.json`：`GET /agents/list.json?team_id=1`。
  *
  * 与 `api.test.ts` 里那批手写用例的分工：
@@ -37,7 +37,7 @@ describe('真实后端响应喂给前端 normalize', () => {
     vi.restoreAllMocks();
   });
 
-  it('① 预记录 docker_id=null 不丢，按 record_id 保留整条', async () => {
+  it('① 预记录 container_id=null 不丢，按 record_id 保留整条', async () => {
     stubJson(detailReal);
     const detail = await getAgentDetail(3);
     const containers = detail.containers ?? [];
@@ -47,11 +47,11 @@ describe('真实后端响应喂给前端 normalize', () => {
     expect(containers.map((item) => item.record_id)).toEqual([1, 2]);
 
     const pre = containers[1];
-    expect(pre.docker_id).toBeNull();
+    expect(pre.container_id).toBeNull();
     // 预记录靠 container_name 标识，这条必须留下来（它是唯一删除入口）
     expect(pre.container_name).toBe('agent-3-2');
     // 已回填那条的 ID 要原样读出（不是 undefined、不是空串）
-    expect(containers[0].docker_id).toBe('01dfe3847f7c');
+    expect(containers[0].container_id).toBe('01dfe3847f7c');
   });
 
   it('② created_at 真实形态是 ISO 8601 字符串，被原样保留', async () => {

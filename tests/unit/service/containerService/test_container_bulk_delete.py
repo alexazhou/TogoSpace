@@ -5,8 +5,8 @@ Team 改名/删除、目录迁移），一旦按名字误删就是批量事故�
 李哥把 `_delete_records` 的两条分支改成无条件 `docker rm -f <name>`，全绿零拦截。
 
 这里测的不是「删了几个」，而是**用哪个标识删的**：
-- 有 `docker_id` 的记录 → 必须 `rm -f <docker_id>`，绝不能碰容器名；
-- 预记录（`docker_id IS NULL`）→ 按名 inspect + label 校验，label 不匹配**绝不 rm**。
+- 有 `container_id` 的记录 → 必须 `rm -f <container_id>`，绝不能碰容器名；
+- 预记录（`container_id IS NULL`）→ 按名 inspect + label 校验，label 不匹配**绝不 rm**。
 
 每条用例都断言实际发出的 docker argv，而不是只看返回值 —— 返回值正确但 argv 按名删，
 正是这次要防的形态。
@@ -37,12 +37,12 @@ def fake(container_env):  # noqa: F811
     return container_env
 
 
-async def _seed(agent_id: int = 1, name: str = "agent-1-1", docker_id: str | None = None):
+async def _seed(agent_id: int = 1, name: str = "agent-1-1", container_id: str | None = None):
     record = await core.gtAgentContainerManager.create(
         agent_id=agent_id, container_name=name, image="ubuntu:24.04"
     )
-    if docker_id:
-        await core.gtAgentContainerManager.set_docker_id(record, docker_id)
+    if container_id:
+        await core.gtAgentContainerManager.set_container_id(record, container_id)
     return record
 
 
@@ -51,17 +51,17 @@ def _rm_calls(fake) -> list[list[str]]:
 
 
 # ---------------------------------------------------------------------------
-# 有 docker_id：只能按 ID 删
+# 有 container_id：只能按 ID 删
 # ---------------------------------------------------------------------------
 
 
-async def test_delete_agent_containers_uses_docker_id_not_name(fake):
-    """有 `docker_id` 时必须 `rm -f <docker_id>`，argv 里不能出现容器名。
+async def test_delete_agent_containers_uses_container_id_not_name(fake):
+    """有 `container_id` 时必须 `rm -f <container_id>`，argv 里不能出现容器名。
 
     这是 P-1 的主线：容器名不带 team 前缀，跨 Team 同名 Agent 可能重名，
     按名删会删掉别人的容器。
     """
-    record = await _seed(name="agent-1-1", docker_id="c0ffee123456")
+    record = await _seed(name="agent-1-1", container_id="c0ffee123456")
     fake.set("rm", stdout="")
 
     deleted = await core.delete_agent_containers(1)
@@ -74,9 +74,9 @@ async def test_delete_agent_containers_uses_docker_id_not_name(fake):
     assert await core.gtAgentContainerManager.get_active_by_id(record.id) is None
 
 
-async def test_delete_agent_containers_never_inspects_own_docker_id(fake):
-    """有 `docker_id` 时不需要按名 inspect：多一次 inspect 就多一处可被污染的判断。"""
-    await _seed(name="agent-1-1", docker_id="c0ffee123456")
+async def test_delete_agent_containers_never_inspects_own_container_id(fake):
+    """有 `container_id` 时不需要按名 inspect：多一次 inspect 就多一处可被污染的判断。"""
+    await _seed(name="agent-1-1", container_id="c0ffee123456")
     fake.set("rm", stdout="")
 
     await core.delete_agent_containers(1)
@@ -84,14 +84,14 @@ async def test_delete_agent_containers_never_inspects_own_docker_id(fake):
     assert fake.calls_of("inspect") == []
 
 
-async def test_delete_team_containers_uses_docker_id_for_every_record(fake):
-    """批量清理多个 Agent 时每条都按自己的 `docker_id` 删，不串号。"""
+async def test_delete_team_containers_uses_container_id_for_every_record(fake):
+    """批量清理多个 Agent 时每条都按自己的 `container_id` 删，不串号。"""
     # team 清理是按「该 Team 的全部 Agent」反查记录，所以 agent 2 必须真的存在于库里
     from model.dbModel.gtAgent import GtAgent
 
     await GtAgent(team_id=1, name="小刚", role_template_id=1).aio_save(force_insert=True)
-    await _seed(agent_id=1, name="agent-1-1", docker_id="c0ffee123456")
-    await _seed(agent_id=2, name="agent-2-1", docker_id="deadbeef0002")
+    await _seed(agent_id=1, name="agent-1-1", container_id="c0ffee123456")
+    await _seed(agent_id=2, name="agent-2-1", container_id="deadbeef0002")
     fake.set("rm", stdout="")
 
     deleted = await core.delete_team_containers(1)
@@ -104,7 +104,7 @@ async def test_delete_team_containers_uses_docker_id_for_every_record(fake):
 
 
 # ---------------------------------------------------------------------------
-# 预记录（docker_id IS NULL）：按名 + label 校验
+# 预记录（container_id IS NULL）：按名 + label 校验
 # ---------------------------------------------------------------------------
 
 
@@ -177,7 +177,7 @@ async def test_delete_agent_containers_does_not_rm_when_inspect_unreadable(fake)
 
 async def test_delete_agent_containers_skips_current_container(fake):
     """当前正在使用的容器跳过：删了会把正在跑的 turn 打断。"""
-    await _seed(name="agent-1-1", docker_id="c0ffee123456")
+    await _seed(name="agent-1-1", container_id="c0ffee123456")
     fake.set("rm", stdout="")
 
     deleted = await core.delete_agent_containers(1, current_container_id="c0ffee123456")
@@ -190,7 +190,7 @@ async def test_delete_agent_containers_skips_current_container(fake):
 
 async def test_delete_agent_containers_marks_db_even_when_rm_fails(fake):
     """rm 失败仍标记软删除：否则记录永久占配额，用户再也无法创建新容器（§7）。"""
-    await _seed(name="agent-1-1", docker_id="c0ffee123456")
+    await _seed(name="agent-1-1", container_id="c0ffee123456")
     fake.set("rm", stderr="Error response from daemon: device or resource busy", returncode=1)
 
     deleted = await core.delete_agent_containers(1)
@@ -201,7 +201,7 @@ async def test_delete_agent_containers_marks_db_even_when_rm_fails(fake):
 
 async def test_delete_agent_containers_marks_db_when_docker_cli_missing(fake, monkeypatch):
     """docker CLI 都没有时只标记 DB，且**不发任何 docker 调用**。"""
-    await _seed(name="agent-1-1", docker_id="c0ffee123456")
+    await _seed(name="agent-1-1", container_id="c0ffee123456")
 
     def _no_cli():
         raise core.DockerCliError("docker 未安装", core.ERROR_DOCKER_CLI_NOT_FOUND)

@@ -2,7 +2,7 @@
 
 **为什么用真实迁移 SQL 建表，而不是 `db.create_tables(...)`**：
 本表的关键约束有一半写在 `assets/migrate/0017_agent_containers.sql` 里、模型 `Meta`
-里并没有（`docker_id` 全局唯一、`container_name` 的**部分**唯一索引
+里并没有（`container_id` 全局唯一、`container_name` 的**部分**唯一索引
 `WHERE deleted = 0`）。用 `create_tables` 建出来的表会缺这些索引，测试就变成
 「在测试自己的假设上验证」，而不是验证生产 DDL。所以这里直接 `executescript`
 执行迁移文件，让下面每个用例都跑在**和线上一致的 schema** 上。
@@ -58,18 +58,18 @@ async def container_db(tmp_path):
 
 
 async def _create(agent_id: int, name: str, image: str = "ubuntu:24.04") -> GtAgentContainer:
-    """插一条预记录（`docker_id = NULL`），返回带主键的对象。"""
+    """插一条预记录（`container_id = NULL`），返回带主键的对象。"""
     return await gtAgentContainerManager.create(
         agent_id=agent_id, container_name=name, image=image
     )
 
 
-async def _create_with_docker_id(
-    agent_id: int, name: str, docker_id: str, image: str = "ubuntu:24.04"
+async def _create_with_container_id(
+    agent_id: int, name: str, container_id: str, image: str = "ubuntu:24.04"
 ) -> GtAgentContainer:
-    """插一条已回填 `docker_id` 的记录。"""
+    """插一条已回填 `container_id` 的记录。"""
     container = await _create(agent_id, name, image)
-    return await gtAgentContainerManager.set_docker_id(container, docker_id)
+    return await gtAgentContainerManager.set_container_id(container, container_id)
 
 
 def _names(rows: list[GtAgentContainer]) -> list[str]:
@@ -110,16 +110,16 @@ async def test_migration_creates_table_and_all_three_indexes(container_db):
 
     assert set(index_map) == {
         "idx_agent_containers_agent",
-        "idx_agent_containers_docker_id",
+        "idx_agent_containers_container_id",
         "idx_agent_containers_name_active",
     }
-    assert index_map["idx_agent_containers_docker_id"] == (True, False)
+    assert index_map["idx_agent_containers_container_id"] == (True, False)
     # 名称唯一索引必须是**部分**索引，否则软删除后名称无法复用
     assert index_map["idx_agent_containers_name_active"] == (True, True)
 
 
-async def test_docker_id_is_not_null_uniqueness_for_pre_records(container_db):
-    """`docker_id` 唯一索引**不约束 NULL**：同一 Agent 可以有多条创建中的预记录。
+async def test_container_id_is_not_null_uniqueness_for_pre_records(container_db):
+    """`container_id` 唯一索引**不约束 NULL**：同一 Agent 可以有多条创建中的预记录。
 
     这是「先落预记录占配额、create 成功再回填」能成立的前提——若 NULL 被当作
     重复值，第二次创建必然失败。
@@ -129,15 +129,15 @@ async def test_docker_id_is_not_null_uniqueness_for_pre_records(container_db):
 
     rows = await gtAgentContainerManager.list_active_by_agent(1)
     assert _names(rows) == ["agent-a-1", "agent-a-2"]
-    assert [row.docker_id for row in rows] == [None, None]
+    assert [row.container_id for row in rows] == [None, None]
 
 
-async def test_duplicate_docker_id_across_agents_raises(container_db):
-    """`docker_id` 全局唯一：即使分属不同 Agent 也不许重复（索引冲突要能冒到调用方补偿）。"""
-    await _create_with_docker_id(1, "agent-a-1", "deadbeef0001")
+async def test_duplicate_container_id_across_agents_raises(container_db):
+    """`container_id` 全局唯一：即使分属不同 Agent 也不许重复（索引冲突要能冒到调用方补偿）。"""
+    await _create_with_container_id(1, "agent-a-1", "deadbeef0001")
 
     with pytest.raises(peewee.IntegrityError):
-        await _create_with_docker_id(2, "agent-b-1", "deadbeef0001")
+        await _create_with_container_id(2, "agent-b-1", "deadbeef0001")
 
 
 async def test_active_container_name_must_be_unique(container_db):
@@ -154,28 +154,28 @@ async def test_container_name_is_reusable_after_soft_delete(container_db):
     若这条挂了，说明索引退化成了普通唯一索引（`WHERE deleted = 0` 被去掉），
     删容器后重建同名容器会永久失败。
     """
-    first = await _create_with_docker_id(1, "agent-a-1", "deadbeef0001")
+    first = await _create_with_container_id(1, "agent-a-1", "deadbeef0001")
     assert await gtAgentContainerManager.mark_deleted(first) is True
 
     second = await _create(1, "agent-a-1")
 
     assert second.id != first.id
-    assert second.docker_id is None
+    assert second.container_id is None
     assert _ids(await gtAgentContainerManager.list_active_by_agent(1)) == [second.id]
 
 
 # ---------------------------------------------------------------------------
-# create / set_docker_id：预记录 → 回填两段式
+# create / set_container_id：预记录 → 回填两段式
 # ---------------------------------------------------------------------------
 
 
-async def test_create_inserts_pre_record_with_null_docker_id(container_db):
-    """预记录必须 `docker_id = NULL`、`deleted = 0`，并立刻带出主键与时间戳。"""
+async def test_create_inserts_pre_record_with_null_container_id(container_db):
+    """预记录必须 `container_id = NULL`、`deleted = 0`，并立刻带出主键与时间戳。"""
     container = await _create(7, "agent-x-1", image="ubuntu:22.04")
 
     assert container.id is not None and container.id > 0
     assert container.agent_id == 7
-    assert container.docker_id is None
+    assert container.container_id is None
     assert container.container_name == "agent-x-1"
     assert container.image == "ubuntu:22.04"
     assert container.deleted == 0
@@ -186,28 +186,28 @@ async def test_create_inserts_pre_record_with_null_docker_id(container_db):
     assert isinstance(container.updated_at, datetime)
 
 
-async def test_set_docker_id_backfills_short_id_and_persists(container_db):
+async def test_set_container_id_backfills_short_id_and_persists(container_db):
     """回填 12 位短 ID 后必须落库（重新查出来的值一致，不是只改了内存对象）。"""
     container = await _create(7, "agent-x-1")
-    await gtAgentContainerManager.set_docker_id(container, "c0ffee123456")
+    await gtAgentContainerManager.set_container_id(container, "c0ffee123456")
 
     reloaded = await gtAgentContainerManager.get_active_by_id(container.id)
     assert reloaded is not None
-    assert reloaded.docker_id == "c0ffee123456"
+    assert reloaded.container_id == "c0ffee123456"
     assert reloaded.updated_at >= reloaded.created_at
 
 
-async def test_set_docker_id_conflict_leaves_record_unbackfilled(container_db):
-    """回填撞唯一索引时抛错、且原记录保持 `docker_id = NULL`（供调用方硬删除补偿）。"""
-    taken = await _create_with_docker_id(1, "agent-a-1", "deadbeef0001")
+async def test_set_container_id_conflict_leaves_record_unbackfilled(container_db):
+    """回填撞唯一索引时抛错、且原记录保持 `container_id = NULL`（供调用方硬删除补偿）。"""
+    taken = await _create_with_container_id(1, "agent-a-1", "deadbeef0001")
     pending = await _create(2, "agent-b-1")
 
     with pytest.raises(peewee.IntegrityError):
-        await gtAgentContainerManager.set_docker_id(pending, "deadbeef0001")
+        await gtAgentContainerManager.set_container_id(pending, "deadbeef0001")
 
     reloaded = await gtAgentContainerManager.get_active_by_id(pending.id)
-    assert reloaded is not None and reloaded.docker_id is None
-    assert taken.docker_id == "deadbeef0001"
+    assert reloaded is not None and reloaded.container_id is None
+    assert taken.container_id == "deadbeef0001"
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +239,7 @@ async def test_hard_delete_without_primary_key_is_noop(container_db):
 
 async def test_mark_deleted_keeps_row_and_frees_quota(container_db):
     """软删除保留行（留痕）但立刻让出配额，且第二次调用返回 False（幂等）。"""
-    container = await _create_with_docker_id(7, "agent-x-1", "c0ffee123456")
+    container = await _create_with_container_id(7, "agent-x-1", "c0ffee123456")
     assert await gtAgentContainerManager.count_active_by_agent(7) == 1
 
     assert await gtAgentContainerManager.mark_deleted(container) is True
@@ -256,20 +256,20 @@ async def test_mark_deleted_keeps_row_and_frees_quota(container_db):
     assert await gtAgentContainerManager.mark_deleted(container) is False
 
 
-async def test_soft_deleted_docker_id_can_be_reused_by_new_container(container_db):
-    """软删除后 `docker_id` 同样可复用（唯一索引不区分 deleted，但行已让位）。
+async def test_soft_deleted_container_id_can_be_reused_by_new_container(container_db):
+    """软删除后 `container_id` 同样可复用（唯一索引不区分 deleted，但行已让位）。
 
-    注意 `docker_id` 的唯一索引**没有** `WHERE deleted = 0`：软删除的行仍占着
+    注意 `container_id` 的唯一索引**没有** `WHERE deleted = 0`：软删除的行仍占着
     这个 ID。这里断言的是「删掉容器后，同一个 Docker 容器被重新纳管」这条真实
     路径——它需要先把旧行清掉，因此本用例只验证**活跃记录里查不到旧映射**。
     """
-    old = await _create_with_docker_id(1, "agent-a-1", "deadbeef0001")
+    old = await _create_with_container_id(1, "agent-a-1", "deadbeef0001")
     await gtAgentContainerManager.mark_deleted(old)
 
-    assert await gtAgentContainerManager.get_active_by_docker_id(1, "deadbeef0001") is None
-    # 旧行仍占着 docker_id，所以换个 ID 才是重纳管的正常姿势
-    new = await _create_with_docker_id(1, "agent-a-1", "deadbeef0002")
-    assert (await gtAgentContainerManager.get_active_by_docker_id(1, "deadbeef0002")).id == new.id
+    assert await gtAgentContainerManager.get_active_by_container_id(1, "deadbeef0001") is None
+    # 旧行仍占着 container_id，所以换个 ID 才是重纳管的正常姿势
+    new = await _create_with_container_id(1, "agent-a-1", "deadbeef0002")
+    assert (await gtAgentContainerManager.get_active_by_container_id(1, "deadbeef0002")).id == new.id
 
 
 # ---------------------------------------------------------------------------
@@ -302,8 +302,8 @@ async def test_list_active_by_agent_is_scoped_to_the_agent(container_db):
 
 async def test_count_active_by_agent_counts_pre_records(container_db):
     """配额口径含预记录、也不排除已停止（运行状态不落库，停止的容器照样占位）。"""
-    await _create(1, "agent-a-1")  # 预记录（docker_id = NULL）
-    await _create_with_docker_id(1, "agent-a-2", "deadbeef0002")
+    await _create(1, "agent-a-1")  # 预记录（container_id = NULL）
+    await _create_with_container_id(1, "agent-a-2", "deadbeef0002")
     await _create(1, "agent-a-3")
     await _create(2, "agent-b-1")
 
@@ -364,35 +364,35 @@ async def test_list_active_by_team_agents_matches_batch_query(container_db):
     assert sorted(_names(team_rows)) == sorted(_names(batch_rows)) == ["agent-a-1", "agent-b-1"]
 
 
-async def test_get_active_by_docker_id_requires_matching_agent(container_db):
-    """`docker_id` 全局唯一，但查询必须带 `agent_id`：不是自己的容器一律查不到。
+async def test_get_active_by_container_id_requires_matching_agent(container_db):
+    """`container_id` 全局唯一，但查询必须带 `agent_id`：不是自己的容器一律查不到。
 
-    这条是「绝不删别人容器」的 DAL 侧护栏——即使拿到了别人的 docker_id，
-    `get_active_by_docker_id` 也不会返回记录，调用方就没有删除依据。
+    这条是「绝不删别人容器」的 DAL 侧护栏——即使拿到了别人的 container_id，
+    `get_active_by_container_id` 也不会返回记录，调用方就没有删除依据。
     """
-    container = await _create_with_docker_id(1, "agent-a-1", "deadbeef0001")
+    container = await _create_with_container_id(1, "agent-a-1", "deadbeef0001")
 
-    assert (await gtAgentContainerManager.get_active_by_docker_id(1, "deadbeef0001")).id == container.id
-    assert await gtAgentContainerManager.get_active_by_docker_id(2, "deadbeef0001") is None
-    assert await gtAgentContainerManager.get_active_by_docker_id(1, "ffffffffffff") is None
+    assert (await gtAgentContainerManager.get_active_by_container_id(1, "deadbeef0001")).id == container.id
+    assert await gtAgentContainerManager.get_active_by_container_id(2, "deadbeef0001") is None
+    assert await gtAgentContainerManager.get_active_by_container_id(1, "ffffffffffff") is None
 
 
-async def test_get_active_by_docker_id_ignores_deleted_and_null(container_db):
+async def test_get_active_by_container_id_ignores_deleted_and_null(container_db):
     """软删除的记录查不到；预记录的 `NULL` 也不能被任何字符串命中。"""
-    removed = await _create_with_docker_id(1, "agent-a-1", "deadbeef0001")
+    removed = await _create_with_container_id(1, "agent-a-1", "deadbeef0001")
     await gtAgentContainerManager.mark_deleted(removed)
-    await _create(1, "agent-a-2")  # docker_id = NULL
+    await _create(1, "agent-a-2")  # container_id = NULL
 
-    assert await gtAgentContainerManager.get_active_by_docker_id(1, "deadbeef0001") is None
-    assert await gtAgentContainerManager.get_active_by_docker_id(1, "") is None
+    assert await gtAgentContainerManager.get_active_by_container_id(1, "deadbeef0001") is None
+    assert await gtAgentContainerManager.get_active_by_container_id(1, "") is None
 
 
 async def test_get_active_by_name_finds_pre_record(container_db):
-    """按名查用于「预记录按名清理」：必须能查到 `docker_id = NULL` 的那条。"""
+    """按名查用于「预记录按名清理」：必须能查到 `container_id = NULL` 的那条。"""
     container = await _create(1, "agent-a-1")
 
     found = await gtAgentContainerManager.get_active_by_name(1, "agent-a-1")
-    assert found is not None and found.id == container.id and found.docker_id is None
+    assert found is not None and found.id == container.id and found.container_id is None
     assert await gtAgentContainerManager.get_active_by_name(2, "agent-a-1") is None
     assert await gtAgentContainerManager.get_active_by_name(1, "agent-a-9") is None
 
