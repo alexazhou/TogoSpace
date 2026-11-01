@@ -87,19 +87,6 @@ _MOUNT_DENIED_SKIP = pytest.mark.skip(
     )
 )
 
-_NO_BASH_SKIP = pytest.mark.skip(
-    reason=(
-        "前置条件：无 `bash` 的镜像（alpine:3.20 / gcr.io/distroless/base-debian12）。"
-        "本机镜像齐全，但该用例断言的是「`execute_bash` 返回**明确原因与出路**」"
-        "（step1_product.md:45 / :119），而当前实现把 gtsp 原始错误 "
-        "`server/internal_error: exec: \"bash\": executable file not found in $PATH` "
-        "原样返回，未做识别与包装（缺口 G1，全仓 grep `executable file not found` 零命中）。"
-        "断言按文档要求写、不按现状写，故 G1 修好前必然红 ⇒ skip。"
-        "注意：失败原因与 libc 无关——gtsp 是静态链接 Go 二进制，"
-        "在 alpine 上 `--version` 正常；alpine 与 distroless 同属「无 bash 镜像」一类。"
-    )
-)
-
 _MIGRATION_DIR = Path(__file__).resolve().parents[2] / "assets" / "migrate"
 
 # 与 happy path 同口径：只建容器服务真正依赖的两张业务表，容器表走真实 0017 迁移。
@@ -284,7 +271,6 @@ async def test_mount_denied_is_reported_as_mount_denied_not_as_container_missing
 # ---------------------------------------------------------------------------
 
 
-@_NO_BASH_SKIP
 @pytest.mark.parametrize("image", [_ALPINE_IMAGE, _DISTROLESS_IMAGE])
 async def test_no_bash_image_reports_actionable_reason(neg_env, image):
     """无 bash 镜像：能建、能进、文件工具可用；`execute_bash` 报原因与出路。
@@ -358,17 +344,16 @@ async def test_no_bash_image_reports_actionable_reason(neg_env, image):
         assert "error_code" not in write_result, f"无 bash 镜像的文件工具必须可用: {write_result}"
         assert write_result.get("written") == 2, f"文件工具必须真写入: {write_result}"
 
-        # —— execute_bash 报「明确原因 + 出路」（G1：当前实现不满足，故 skip）
+        # —— execute_bash 报「明确原因 + 出路」（G1 已落地，见 tspDriver._execute_tsp_tool）
         bash_result = await driver._execute_tsp_tool(
             '{"command": "echo hi"}',
             context=roomService.ToolCallContext(agent_id=1, team_id=1, tool_name="execute_bash"),
         )
         assert bash_result.get("success") is False, f"无 bash 时必须明确失败: {bash_result}"
 
-        # 现状是原样透传 gtsp 的 `server/internal_error`，下面是文档要求、当前不满足的形态：
-        # 常量 `ERROR_CONTAINER_NO_BASH` 目前**不存在**（G1 的一部分：全仓无 no_bash 概念）。
-        # 用字面量占位，G1 落地时把它提升为 `core.py` 的常量并在这里引用。
-        assert bash_result.get("error_code") == "container_no_bash", (
+        # G1 已落地：`tspDriver._execute_tsp_tool` 识别「exec: "bash": executable file
+        # not found in $PATH」后，在保留协议层 `code` 的同时补出业务层 `error_code`。
+        assert bash_result.get("error_code") == containerService.ERROR_CONTAINER_MISSING_BASH, (
             "step1_product.md:45 要求此处给出明确原因；当前返回的是 gtsp 原始错误 "
             f"{bash_result!r}（缺口 G1）。"
         )

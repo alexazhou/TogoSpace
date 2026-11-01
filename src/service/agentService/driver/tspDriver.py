@@ -37,6 +37,61 @@ _RUN_CHAT_TURN_ERROR_ACTION_HINT = (
 )
 
 
+# ---------------------------------------------------------------------------
+# 「容器里没有 bash」的识别与包装（step1_product.md:45 / :119，缺口 G1）
+# ---------------------------------------------------------------------------
+
+# 真实报文（alpine:3.20 与 gcr.io/distroless/base-debian12 实测**逐字相同**）：
+#   {"code": "server/internal_error",
+#    "message": "failed to start command: exec: \"bash\": executable file not found in $PATH"}
+#
+# 为什么必须用完整三要素而**不能**只匹配 `not found`：
+#   bash 存在、命令不存在时（ubuntu:24.04 实测），返回的是**另一条路径**的成功调用：
+#   {"success": false, "stdout": "", "stderr": "bash: line 1: xxx: command not found\n",
+#    "exit_code": 127}
+#   它压根不是 `TSPException`，走不到这里；但用 `not found` 这种宽串做匹配，一旦
+#   将来 gtsp 把 exec 失败也塞进 stderr（或有人把本函数挪到通用异常分支），
+#   就会把「用户命令写错」误报成「镜像缺 bash」—— 那会让模型去换镜像，
+#   而真正该做的是改命令。所以三个片段必须同时命中：`exec:` / `"bash":` /
+#   `executable file not found in $path`（比较前两边统一转小写）。
+_MISSING_BASH_MARKERS = (
+    'exec: "bash": executable file not found in $path',
+    "exec: bash: executable file not found in $path",
+)
+
+_MISSING_BASH_MESSAGE = (
+    "容器内没有 bash，execute_bash 依赖 `bash -c` 执行命令，因此该工具不可用。"
+    "原因：当前镜像（如 alpine、distroless）默认不含 bash；这与 libc 无关，"
+    "容器本身、文件类工具均正常。"
+    "出路（二选一）：① 换自带 bash 的镜像，如 ubuntu:24.04 / debian:bookworm-slim；"
+    "② 在镜像里装 bash（Debian/Ubuntu 系 `apt-get install -y bash`，"
+    "Alpine 系 `apk add --no-cache bash`），并重新创建容器。"
+)
+
+
+def _is_missing_bash_failure(tool_name: str, message: str) -> bool:
+    """判断一次 TSP 失败是否为「容器内没有 bash」。
+
+    两个条件同时成立才算，缺一不可：
+
+    1. **工具必须是 `execute_bash`**。`bash` 缺失只影响这个工具；文件类工具
+       （`write_file` / `read_file`）由 gtsp 内部直接实现，不经过 `bash -c`。
+       不加这条限定，将来别的工具报同样报文会被误归类，指向「换镜像」这个
+       完全错误的出路。
+    2. **报文必须命中完整 exec 特征**（见 `_MISSING_BASH_MARKERS`），不是
+       只匹配 `not found` —— 否则「bash 在、命令不存在」会被误报。
+
+    注意本函数**不**做宽泛兜底：不认识的失败返回 False，由调用方原样透出。
+    """
+    if tool_name != "execute_bash":
+        return False
+    # 两边都降为小写再比：真实报文里是 `$PATH`（大写），而 `exec` 一行的大小写
+    # 在不同运行时/版本上并不稳定。统一小写化，避免因一个字母大小写让识别
+    # **静默失效**（失效时表现为「什么都没变」，是这类补丁最常见的翻车方式）。
+    lowered = (message or "").lower()
+    return any(marker in lowered for marker in _MISSING_BASH_MARKERS)
+
+
 def build_gtsp_command(raw_command: Optional[list[str]], workdir: str) -> list[str]:
     if raw_command is None:
         default_binary = appPaths.get_gtsp_binary_path()
@@ -426,7 +481,20 @@ class TspAgentDriver(AgentDriver):
             if e.code in (TSP_ERROR_STDOUT_CLOSED, TSP_ERROR_CONNECTION_CLOSED):
                 logger.warning("TSP 连接断开: agent_id=%s, code=%s, message=%s", self.host.gt_agent.id, e.code, e.message)
                 self._client = None
-            return {"success": False, "code": e.code, "message": e.message}
+            # 名字不能叫 `result`：上面 `try` 里已有 `result: ToolResult`，同名会让
+            # mypy 报 `Name "result" already defined`（两个分支的静态类型互不兼容）。
+            failure: dict[str, Any] = {"success": False, "code": e.code, "message": e.message}
+            # 业务层归纳叠加在协议层原文之上（`code` 保留，不覆盖）。
+            # 只处理「容器里没有 bash」这一类，其余异常原样透出——所以这里是
+            # **窄判定**（精确子串 + 工具名限定），不是宽泛 `except`。
+            if _is_missing_bash_failure(function_name, e.message):
+                logger.warning(
+                    "容器内缺少 bash，execute_bash 不可用: agent_id=%s, raw=%s",
+                    self.host.gt_agent.id, e.message,
+                )
+                failure["error_code"] = containerService.ERROR_CONTAINER_MISSING_BASH
+                failure["message"] = _MISSING_BASH_MESSAGE
+            return failure
         except Exception as e:
             logger.warning("TSP 工具执行异常: agent_id=%s, tool=%s, error=%s", self.host.gt_agent.id, function_name, e)
             # 兼容旧版 pytspclient 仍抛出 RuntimeError 的情况

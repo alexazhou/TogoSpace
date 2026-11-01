@@ -320,6 +320,138 @@ async def test_tsp_driver_execute_tsp_tool_error_handling(mock_tsp_host: MagicMo
     res = await driver._execute_tsp_tool("{}", ctx)
     assert "工具调用失败" in res["message"]
 
+
+# 真实报文原文（alpine:3.20 与 gcr.io/distroless/base-debian12 实测逐字相同）
+_MISSING_BASH_RAW = (
+    'failed to start command: exec: "bash": executable file not found in $PATH'
+)
+
+
+@pytest.mark.asyncio
+async def test_execute_bash_reports_missing_bash_with_reason_and_way_out(
+    mock_tsp_host: MagicMock,
+) -> None:
+    """G1：无 bash 镜像下 `execute_bash` 必须给「明确原因 + 出路」（step1_product.md:45/:119）。
+
+    同时钉住**两层语义分开**：
+    - `code` 保留 TSP 协议层原文（既有契约，不许改）
+    - `error_code` 是新增的业务层归纳
+    """
+    from service import containerService
+    from service.agentService.driver.tspDriver import TspAgentDriver
+
+    driver = TspAgentDriver(mock_tsp_host, AgentDriverConfig(driver_type="tsp", options={}))
+    driver._client = MagicMock()
+    driver._client.process = MagicMock()
+    driver._client.process.returncode = None
+    driver._client.call_tool = AsyncMock()
+    driver._client.call_tool.side_effect = TSPException("server/internal_error", _MISSING_BASH_RAW)
+
+    ctx = ToolCallContext(agent_id=1, team_id=1, chat_room=MagicMock(), tool_name="execute_bash")
+    res = await driver._execute_tsp_tool('{"command": "echo hi"}', ctx)
+
+    assert res["success"] is False
+    # 协议层原文必须保留：改成业务码会丢排查线索，且破既有契约
+    assert res["code"] == "server/internal_error"
+    # 业务层归纳
+    assert res["error_code"] == containerService.ERROR_CONTAINER_MISSING_BASH
+    assert containerService.ERROR_CONTAINER_MISSING_BASH == "container_missing_bash"
+    # 原因：必须点名 bash
+    mess = str(res["message"]).lower()
+    assert "bash" in mess, "原因必须点名「镜像里没有 bash」，否则模型会去查网络/权限"
+    # 出路：换镜像 / 装 bash 二选一都要写出来
+    for token in ("ubuntu:24.04", "debian:bookworm-slim", "apt-get install", "apk add"):
+        assert token in mess, f"出路必须给出可执行动作，缺 {token!r}: {res['message']!r}"
+
+
+@pytest.mark.asyncio
+async def test_bash_command_not_found_is_not_reported_as_missing_bash(
+    mock_tsp_host: MagicMock,
+) -> None:
+    """反向用例：**bash 在、命令不存在**绝不能报 `container_missing_bash`。
+
+    ubuntu:24.04 实测返回的是成功调用、`exit_code=127`、stderr 为
+    `bash: line 1: xxx: command not found`，压根不走 `TSPException` 分支；
+    这条用例钉的是「就算报文进了异常分支也不许误报」——只匹配 `not found`
+    这种宽串实现会让它变绿，那是用错误方式让测试变绿。
+    """
+    from service import containerService
+    from service.agentService.driver.tspDriver import TspAgentDriver
+
+    driver = TspAgentDriver(mock_tsp_host, AgentDriverConfig(driver_type="tsp", options={}))
+    driver._client = MagicMock()
+    driver._client.process = MagicMock()
+    driver._client.process.returncode = None
+    driver._client.call_tool = AsyncMock()
+    driver._client.call_tool.side_effect = TSPException(
+        "server/internal_error",
+        "bash: line 1: this_command_does_not_exist_xyz: command not found",
+    )
+
+    ctx = ToolCallContext(agent_id=1, team_id=1, chat_room=MagicMock(), tool_name="execute_bash")
+    res = await driver._execute_tsp_tool(
+        '{"command": "this_command_does_not_exist_xyz"}', ctx
+    )
+
+    assert res["success"] is False
+    assert "error_code" not in res, (
+        f"「命令不存在」被误报成缺 bash 会让模型去换镜像，而真正该做的是改命令: {res!r}"
+    )
+    # 原文透出，不包装
+    assert res["code"] == "server/internal_error"
+    assert "command not found" in res["message"]
+
+
+@pytest.mark.asyncio
+async def test_missing_bash_marker_only_applies_to_execute_bash(
+    mock_tsp_host: MagicMock,
+) -> None:
+    """同一条报文，工具不是 `execute_bash` 时不许包装。
+
+    文件类工具由 gtsp 内部实现，不经过 `bash -c`；把它们也报成「缺 bash」
+    会把「换镜像」这个错误出路塞给模型。
+    """
+    from service.agentService.driver.tspDriver import TspAgentDriver
+
+    driver = TspAgentDriver(mock_tsp_host, AgentDriverConfig(driver_type="tsp", options={}))
+    driver._client = MagicMock()
+    driver._client.process = MagicMock()
+    driver._client.process.returncode = None
+    driver._client.call_tool = AsyncMock()
+    driver._client.call_tool.side_effect = TSPException("server/internal_error", _MISSING_BASH_RAW)
+
+    ctx = ToolCallContext(agent_id=1, team_id=1, chat_room=MagicMock(), tool_name="read_file")
+    res = await driver._execute_tsp_tool('{"file_path": "/workspace/self/a.txt"}', ctx)
+
+    assert "error_code" not in res
+    assert res["message"] == _MISSING_BASH_RAW
+
+
+@pytest.mark.asyncio
+async def test_missing_bash_message_is_not_leaked_to_unrelated_tsp_errors(
+    mock_tsp_host: MagicMock,
+) -> None:
+    """窄匹配护栏：只含 `executable file not found` 但不含 `exec: "bash":` 的报文不认。"""
+    from service.agentService.driver.tspDriver import TspAgentDriver
+
+    driver = TspAgentDriver(mock_tsp_host, AgentDriverConfig(driver_type="tsp", options={}))
+    driver._client = MagicMock()
+    driver._client.process = MagicMock()
+    driver._client.process.returncode = None
+    driver._client.call_tool = AsyncMock()
+    driver._client.call_tool.side_effect = TSPException(
+        "server/internal_error", "exec: node: executable file not found in $PATH"
+    )
+
+    ctx = ToolCallContext(agent_id=1, team_id=1, chat_room=MagicMock(), tool_name="execute_bash")
+    res = await driver._execute_tsp_tool('{"command": "node -v"}', ctx)
+
+    assert "error_code" not in res, (
+        f"匹配串必须钉住 bash 本身，否则别的命令缺失会被误报成缺 bash: {res!r}"
+    )
+    assert "exec: node" in res["message"]
+
+
 @pytest.mark.asyncio
 async def test_tsp_client_fail_pending() -> None:
     client = TSPClient.from_stdio("mock")
