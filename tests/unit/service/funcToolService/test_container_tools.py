@@ -18,6 +18,7 @@ import pytest
 from constants import ExecEnv
 from exception import TogoException
 from model.coreModel import ContainerInfo
+from model.dbModel.gtAgentContainer import GtAgentContainer
 from service import funcToolService
 from service.funcToolService import tools as tools_module
 from service.roomService import ToolCallContext
@@ -289,8 +290,11 @@ async def test_list_containers_returns_env_and_serialized_containers(monkeypatch
     from service import containerService
 
     info = ContainerInfo(
-        record_id=1, agent_id=1, docker_id="c0ffee123456",
-        container_name="agent-1-1", image="ubuntu:24.04", state="exited",
+        container=GtAgentContainer(
+            id=1, agent_id=1, docker_id="c0ffee123456",
+            container_name="agent-1-1", image="ubuntu:24.04",
+        ),
+        state="exited",
         is_entered=True,
     )
     container_driver.exec_env = ExecEnv.CONTAINER
@@ -311,7 +315,7 @@ async def test_list_containers_returns_env_and_serialized_containers(monkeypatch
     assert result["containers"][0]["container_id"] == "c0ffee123456"
     assert "docker_id" not in result["containers"][0]
     assert "agent_id" not in result["containers"][0]
-    assert result["containers"][0]["created_at"] is None
+    assert isinstance(result["containers"][0]["created_at"], str)
 
 
 async def test_list_containers_keeps_records_when_docker_unavailable(monkeypatch, container_driver):
@@ -322,8 +326,11 @@ async def test_list_containers_keeps_records_when_docker_unavailable(monkeypatch
     from service import containerService
 
     info = ContainerInfo(
-        record_id=1, agent_id=1, docker_id=None,
-        container_name="agent-1-1", image="ubuntu:24.04", state="unknown",
+        container=GtAgentContainer(
+            id=1, agent_id=1, docker_id=None,
+            container_name="agent-1-1", image="ubuntu:24.04",
+        ),
+        state="unknown",
     )
     monkeypatch.setattr(containerService, "is_docker_available", AsyncMock(return_value=False))
     monkeypatch.setattr(

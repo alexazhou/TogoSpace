@@ -19,6 +19,7 @@ from model.coreModel import (
     ContainerInfo,
     ContainerTarget,
 )
+from model.dbModel.gtAgentContainer import GtAgentContainer
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +83,25 @@ def test_container_target_container_name_is_optional():
 # ---------------------------------------------------------------------------
 
 
+def _record(
+    *,
+    record_id: int = 7,
+    agent_id: int = 3,
+    docker_id: str | None = "c0ffee123456",
+    container_name: str = "agent-3-1",
+    image: str = "ubuntu:24.04",
+    created_at: datetime | None = None,
+) -> GtAgentContainer:
+    return GtAgentContainer(
+        id=record_id,
+        agent_id=agent_id,
+        docker_id=docker_id,
+        container_name=container_name,
+        image=image,
+        created_at=created_at,
+    )
+
+
 def test_container_info_pre_record_allows_null_docker_id():
     """预记录（`docker_id IS NULL`）必须能构造出来——它在列表里是可见的一行。
 
@@ -89,19 +109,14 @@ def test_container_info_pre_record_allows_null_docker_id():
     用户看不到「正在创建」的那一行，也就无法用 `record_id` 删除它。
     """
     info = ContainerInfo(
-        record_id=12,
-        agent_id=3,
-        docker_id=None,
-        container_name="agent-a-1",
-        image="ubuntu:24.04",
+        container=_record(record_id=12, docker_id=None, container_name="agent-a-1"),
     )
 
-    assert info.docker_id is None
-    assert info.record_id == 12
+    assert info.container.docker_id is None
+    assert info.container.id == 12
     # 运行时字段有安全默认值：查不到状态时是 unknown，而不是空串
     assert info.state == CONTAINER_STATE_UNKNOWN
     assert info.is_entered is False
-    assert info.created_at is None
 
 
 def test_container_info_json_dump_serializes_created_at_and_keeps_null_docker_id():
@@ -111,26 +126,25 @@ def test_container_info_json_dump_serializes_created_at_and_keeps_null_docker_id
     而 `docker_id: null` 是「预记录」的契约标记，不能变成空串。
     """
     info = ContainerInfo(
-        record_id=12,
-        agent_id=3,
-        docker_id=None,
-        container_name="agent-a-1",
-        image="ubuntu:24.04",
+        container=_record(
+            record_id=12, docker_id=None, container_name="agent-a-1",
+            created_at=datetime(2026, 11, 1, 1, 30, 0),
+        ),
         state=CONTAINER_STATE_MISSING,
         is_entered=False,
-        created_at=datetime(2026, 11, 1, 1, 30, 0),
     )
 
     payload = info.to_json()
 
-    assert payload["docker_id"] is None
+    assert payload["container"]["docker_id"] is None
     assert payload["state"] == CONTAINER_STATE_MISSING
-    assert payload["created_at"] == "2026-11-01T01:30:00"
-    assert isinstance(payload["created_at"], str)
-    # 字段集合与前端 `ContainerInfo` 接口一一对应
-    assert set(payload) == {
+    assert payload["container"]["created_at"] == "2026-11-01T01:30:00"
+    assert isinstance(payload["container"]["created_at"], str)
+    # 外层只有运行时字段，DB 字段在 `container` 里
+    assert set(payload) == {"container", "state", "is_entered"}
+    assert set(payload["container"]) == {
         "record_id", "agent_id", "docker_id", "container_name",
-        "image", "state", "is_entered", "created_at",
+        "image", "created_at",
     }
 
 
@@ -140,17 +154,15 @@ def test_container_info_exposes_record_id_not_container_id():
     前端表格行 key 与 `delete_container(record_id=...)` 都依赖这个名字；
     写成 `container_id` 会和「12 位短 ID」混淆，且预记录时它必然是空的。
     """
-    assert "record_id" in ContainerInfo.model_fields
-    assert "container_id" not in ContainerInfo.model_fields
+    payload = ContainerInfo(container=_record()).to_json()
+    assert "record_id" in payload["container"]
+    assert "container_id" not in payload["container"]
 
 
 def test_container_info_forbids_extra_fields():
     """未知字段一律拒绝：防止 service 层塞了前端不认识的字段还以为契约打通了。"""
     with pytest.raises(ValidationError):
-        ContainerInfo(
-            record_id=1, agent_id=1, docker_id=None,
-            container_name="agent-a-1", image="ubuntu:24.04", is_managed=True,
-        )
+        ContainerInfo(container=_record(), is_managed=True)
 
 
 # ---------------------------------------------------------------------------
@@ -196,11 +208,7 @@ def test_to_tool_dict_uses_container_id_and_drops_agent_id():
     `delete_container` 的参数名是 `container_id`——模型照抄返回值就会传错。
     """
     info = ContainerInfo(
-        record_id=7,
-        agent_id=3,
-        docker_id="c0ffee123456",
-        container_name="agent-3-1",
-        image="ubuntu:24.04",
+        container=_record(record_id=7, docker_id="c0ffee123456"),
         state="exited",
         is_entered=True,
     )
@@ -217,7 +225,7 @@ def test_to_tool_dict_uses_container_id_and_drops_agent_id():
 def test_to_tool_dict_keeps_null_container_id_for_pre_record():
     """预记录的 `container_id` 必须是 null（不是省略字段）：模型靠它判断「还没有 ID」。"""
     info = ContainerInfo(
-        record_id=8, agent_id=3, docker_id=None, container_name="agent-3-2", image="ubuntu:24.04"
+        container=_record(record_id=8, docker_id=None, container_name="agent-3-2"),
     )
 
     as_tool = info.to_tool_dict()
@@ -229,23 +237,20 @@ def test_to_tool_dict_keeps_null_container_id_for_pre_record():
 
 def test_to_json_keeps_internal_field_names_for_api():
     """`to_json()` 保留内部字段名给 controller / 前端（前端契约就是 `docker_id`）。"""
-    info = ContainerInfo(
-        record_id=7, agent_id=3, docker_id="c0ffee123456", container_name="agent-3-1",
-        image="ubuntu:24.04",
-    )
+    info = ContainerInfo(container=_record(record_id=7, docker_id="c0ffee123456"))
 
     as_api = info.to_json()
 
-    assert as_api["docker_id"] == "c0ffee123456"
-    assert as_api["agent_id"] == 3
-    assert "container_id" not in as_api
+    assert as_api["container"]["docker_id"] == "c0ffee123456"
+    assert as_api["container"]["agent_id"] == 3
+    assert "container_id" not in as_api["container"]
 
 
 def test_to_tool_dict_serializes_created_at_to_iso_string():
     """`created_at` 必须是字符串：`datetime` 直接塞进工具返回值会让 JSON 序列化失败。"""
     info = ContainerInfo(
-        record_id=7, agent_id=3, docker_id="c0ffee123456", container_name="agent-3-1",
-        image="ubuntu:24.04", created_at=datetime(2026, 11, 1, 10, 0, 0),
+        container=_record(record_id=7, docker_id="c0ffee123456",
+                          created_at=datetime(2026, 11, 1, 10, 0, 0)),
     )
 
     as_tool = info.to_tool_dict()
@@ -270,19 +275,18 @@ def test_to_tool_dict_created_at_matches_api_serialization_exactly():
     ]
 
     for created_at in cases:
-        info = ContainerInfo(
-            record_id=7, agent_id=3, docker_id=None, container_name="agent-3-1",
-            image="ubuntu:24.04", created_at=created_at,
-        )
+        info = ContainerInfo(container=_record(docker_id=None, created_at=created_at))
 
-        assert info.to_tool_dict()["created_at"] == info.to_json()["created_at"], created_at
+        assert info.to_tool_dict()["created_at"] == info.to_json()["container"]["created_at"], created_at
 
 
 def test_to_tool_dict_created_at_uses_z_suffix_for_utc_not_offset():
     """钉死 UTC 的具体形态：`...Z`（pydantic 口径），不是 `...+00:00`（isoformat 口径）。"""
     info = ContainerInfo(
-        record_id=7, agent_id=3, docker_id=None, container_name="agent-3-1",
-        image="ubuntu:24.04", created_at=datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc),
+        container=_record(
+            docker_id=None,
+            created_at=datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc),
+        ),
     )
 
     assert info.to_tool_dict()["created_at"] == "2026-11-01T10:00:00Z"

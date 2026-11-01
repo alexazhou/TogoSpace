@@ -764,15 +764,10 @@ async def list_agent_containers(
         # daemon 不可用：不把状态伪造成 missing，用 unknown 表示「查不到」
         return [
             ContainerInfo(
-                record_id=record.id,
-                agent_id=record.agent_id,
-                docker_id=record.docker_id,
-                container_name=record.container_name,
-                image=record.image,
+                container=record,
                 state=CONTAINER_STATE_UNKNOWN,
                 is_entered=record.docker_id is not None
                 and record.docker_id == current_container_id,
-                created_at=record.created_at,
             )
             for record in records
         ]
@@ -785,15 +780,10 @@ async def list_agent_containers(
 
     return [
         ContainerInfo(
-            record_id=record.id,
-            agent_id=record.agent_id,
-            docker_id=record.docker_id,
-            container_name=record.container_name,
-            image=record.image,
+            container=record,
             state=state,
             is_entered=record.docker_id is not None
             and record.docker_id == current_container_id,
-            created_at=record.created_at,
         )
         for record, state in zip(records, states)
     ]

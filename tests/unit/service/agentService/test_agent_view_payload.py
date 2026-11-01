@@ -20,6 +20,7 @@ import pytest
 from constants import AgentStatus, AgentTaskStatus, DriverType, EmployStatus, ExecEnv
 from model.coreModel import AgentDetailInfo, AgentListInfo, ContainerInfo, ExecEnvState
 from model.dbModel.gtAgent import GtAgent
+from model.dbModel.gtAgentContainer import GtAgentContainer
 from service.agentService import core
 
 
@@ -37,14 +38,16 @@ def _agent(agent_id: int = 3, team_id: int = 1) -> GtAgent:
 
 def _container_info(*, record_id: int = 7, docker_id: str | None = "c0ffee123456") -> ContainerInfo:
     return ContainerInfo(
-        record_id=record_id,
-        agent_id=3,
-        docker_id=docker_id,
-        container_name=f"agent-3-{record_id}",
-        image="ubuntu:24.04",
+        container=GtAgentContainer(
+            id=record_id,
+            agent_id=3,
+            docker_id=docker_id,
+            container_name=f"agent-3-{record_id}",
+            image="ubuntu:24.04",
+            created_at=datetime(2026, 11, 1, 10, 0, 0),
+        ),
         state="exited",
         is_entered=docker_id is not None,
-        created_at=datetime(2026, 11, 1, 10, 0, 0),
     )
 
 
@@ -100,11 +103,11 @@ async def test_detail_info_reports_container_env_and_containers(monkeypatch):
 
     dumped = detail.model_dump(mode="json")
     assert dumped["exec_env"] == "container"
-    assert dumped["containers"][0]["record_id"] == 7
-    assert dumped["containers"][0]["docker_id"] == "c0ffee123456"
+    assert dumped["containers"][0]["container"]["record_id"] == 7
+    assert dumped["containers"][0]["container"]["docker_id"] == "c0ffee123456"
     assert dumped["containers"][0]["is_entered"] is True
     # `created_at` 必须是 JSON 字符串（datetime 直接进 JSON 会序列化失败）
-    assert isinstance(dumped["containers"][0]["created_at"], str)
+    assert isinstance(dumped["containers"][0]["container"]["created_at"], str)
     # DB 字段整体包在 `agent` 里，运行时字段在外面
     assert dumped["agent"]["id"] == agent.id
     assert "id" not in dumped
@@ -127,7 +130,7 @@ async def test_detail_info_includes_pre_records_with_null_docker_id(monkeypatch)
     detail = await core.get_agent_detail_info(_agent())
 
     assert detail.container_count == 1
-    assert detail.containers[0].docker_id is None
+    assert detail.containers[0].container.docker_id is None
     assert detail.containers[0].is_entered is False
 
 

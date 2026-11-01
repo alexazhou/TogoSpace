@@ -231,9 +231,9 @@ async def test_list_includes_pre_record_with_null_docker_id(fake):
     infos = await core.list_agent_containers(1)
 
     assert len(infos) == 1
-    assert infos[0].record_id == record.id
-    assert infos[0].docker_id is None
-    assert infos[0].container_name == "agent-1-1"
+    assert infos[0].container.id == record.id
+    assert infos[0].container.docker_id is None
+    assert infos[0].container.container_name == "agent-1-1"
     assert infos[0].state == "created"
 
 
@@ -324,7 +324,7 @@ async def test_list_marks_unknown_when_docker_cli_missing(fake, monkeypatch):
     infos = await core.list_agent_containers(1)
 
     assert [info.state for info in infos] == [CONTAINER_STATE_UNKNOWN, CONTAINER_STATE_UNKNOWN]
-    assert [info.record_id for info in infos] == [1, 2]
+    assert [info.container.id for info in infos] == [1, 2]
 
 
 async def test_list_uses_cli_when_caller_says_available(fake, monkeypatch):

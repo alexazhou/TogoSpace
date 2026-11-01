@@ -4,7 +4,9 @@ import json
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, TypeAdapter
+from pydantic import BaseModel, ConfigDict, TypeAdapter, field_serializer
+
+from model.dbModel.gtAgentContainer import GtAgentContainer
 
 # 容器状态取值说明（不归一化，直接透传 Docker inspect 的 State.Status 原值）：
 #   created / running / exited / paused / restarting / removing / dead …
@@ -79,41 +81,34 @@ class ContainerTarget(BaseModel):
 class ContainerInfo(BaseModel):
     """自建容器的一条对外展示记录（`list_containers` / Agent 详情页共用）。
 
-    对应 `agent_containers` 的活跃记录；`docker_id IS NULL` 的预记录 `container_id` 为 None。
+    外层只放运行时字段，DB 记录整体放在 `container` 里，避免重复声明 ORM 字段。
+    `id` 对外序列化为 `record_id`（预记录没有 Docker ID 时用它删除），
+    `deleted` / `updated_at` 是内部字段，不对外暴露。
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
-    record_id: int
-    """`agent_containers.id`，预记录没有 Docker ID 时用它删除。"""
+    container: GtAgentContainer
+    """`agent_containers` 的活跃记录（`docker_id IS NULL` 表示创建中的预记录）。"""
 
-    agent_id: int
-    docker_id: str | None = None
-    """12 位短 ID；预记录尚未回填时为 None。"""
-
-    container_name: str
-    image: str
-
-    # 以下为运行时字段，不落库
     state: str = CONTAINER_STATE_UNKNOWN
     """Docker 原始状态；查不到为 missing，inspect 失败为 unknown。"""
 
     is_entered: bool = False
     """该容器是否为该 Agent 当前所处的执行环境。"""
 
-    created_at: datetime | None = None
-    """记录创建时间（`agent_containers.created_at`）。
-
-    设计文档 §2.1 写的是 `int` 时间戳，但仓库 `DbModelBase` 强制该字段为
-    `datetime`（`AutoTimestampMixin` 自动注入），这里按仓库约定透传 `datetime`，
-    `model_dump(mode="json")` 会序列化成 ISO 8601 字符串给前端。
-    """
+    @field_serializer("container")
+    def _serialize_container(self, value: GtAgentContainer) -> dict[str, Any]:
+        """DB 记录视图：换名 `id → record_id`，剔除内部字段，时间保持 ISO 格式。"""
+        data = value.to_json()
+        data["record_id"] = data.pop("id")
+        data.pop("deleted", None)
+        data.pop("updated_at", None)
+        data["created_at"] = _json_datetime(value.created_at)
+        return data
 
     def to_json(self) -> dict[str, Any]:
-        """JSON 可序列化字典（`created_at` 由 `model_dump(mode="json")` 转成字符串）。
-
-        给 controller / 前端用，保留模型原始字段名（`docker_id`）。
-        """
+        """JSON 可序列化字典：外层运行时字段 + `container`（DB 记录视图）。"""
         return self.model_dump(mode="json")
 
     def to_tool_dict(self) -> dict[str, Any]:
@@ -130,14 +125,15 @@ class ContainerInfo(BaseModel):
         `container_id` 这个对外名字在全仓只出现在这里和 `to_container_id()` 两处，
         两者相邻（`to_container_id` 在本文件上方），改一处必然看到另一处。
         """
+        record = self.container
         return {
-            "record_id": self.record_id,
-            "container_id": to_container_id(self.docker_id),
-            "container_name": self.container_name,
-            "image": self.image,
+            "record_id": record.id,
+            "container_id": to_container_id(record.docker_id),
+            "container_name": record.container_name,
+            "image": record.image,
             "state": self.state,
             "is_entered": self.is_entered,
-            "created_at": _json_datetime(self.created_at),
+            "created_at": _json_datetime(record.created_at),
         }
 
 
