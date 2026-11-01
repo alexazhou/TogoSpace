@@ -1,10 +1,11 @@
 /**
  * 真实后端响应 → 前端 normalize 对账。
  *
- * 两份 fixture 不是手写的，是 `curl 127.0.0.1:8199` 从真跑起来的后端抓的：
- * - `agent_detail_real.json`：`GET /teams/1/agents/李哥.json`，该 Agent 库里有
- *   1 条已回填 container_id 的真实容器 + 1 条 container_id=NULL 的预记录；
- * - `agent_list_real.json`：`GET /agents/list.json?team_id=1`。
+ * 三份 fixture 来自真跑起来的后端取样，并已按 AgentRuntimeInfo 外壳更新：
+ * - `agent_detail_real.json`：`GET /agents/3.json`，DB 字段在 `agent` 内，运行时字段在外层；
+ * - `agent_list_real.json`：`GET /agents/list.json?team_id=1`；
+ * - `agent_containers_real.json`：`GET /agents/3/containers.json`，含 1 条已回填
+ *   container_id 的真实容器 + 1 条 container_id=NULL 的预记录。
  *
  * 与 `api.test.ts` 里那批手写用例的分工：
  * - 手写用例验「normalize 的规则本身」（我会不会把 int 收敛成 null 之类）；
@@ -22,12 +23,31 @@ import { clearToken } from '../authStore';
 import { getAgentDetail, getAgentsByTeamId } from '../api';
 import detailReal from './fixtures/agent_detail_real.json';
 import listReal from './fixtures/agent_list_real.json';
+import containersReal from './fixtures/agent_containers_real.json';
 
-function stubJson(payload: unknown) {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+function jsonResponse(payload: unknown) {
+  return new Response(JSON.stringify(payload), {
     status: 200,
     headers: { 'content-type': 'application/json' },
-  })));
+  });
+}
+
+function stubJson(payload: unknown) {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(payload)));
+}
+
+/** 详情请求会并发取三个接口：详情、容器列表、失败信息。 */
+function stubAgentDetail(detail: unknown, containers: unknown[], errorMessage: string | null = null) {
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/containers.json')) {
+      return Promise.resolve(jsonResponse(containers));
+    }
+    if (url.includes('/error_message.json')) {
+      return Promise.resolve(jsonResponse({ error_message: errorMessage }));
+    }
+    return Promise.resolve(jsonResponse(detail));
+  }));
 }
 
 describe('真实后端响应喂给前端 normalize', () => {
@@ -38,7 +58,7 @@ describe('真实后端响应喂给前端 normalize', () => {
   });
 
   it('① 预记录 container_id=null 不丢，按 record_id 保留整条', async () => {
-    stubJson(detailReal);
+    stubAgentDetail(detailReal, containersReal);
     const detail = await getAgentDetail(3);
     const containers = detail.containers ?? [];
 
@@ -55,7 +75,7 @@ describe('真实后端响应喂给前端 normalize', () => {
   });
 
   it('② created_at 真实形态是 ISO 8601 字符串，被原样保留', async () => {
-    stubJson(detailReal);
+    stubAgentDetail(detailReal, containersReal);
     const detail = await getAgentDetail(3);
     const containers = detail.containers ?? [];
 
@@ -65,12 +85,12 @@ describe('真实后端响应喂给前端 normalize', () => {
       expect(item.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/);
     }
     // 逐值对账：不能因为 normalize 而丢失精度
-    expect(containers[0].created_at).toBe((detailReal as { containers: { created_at: string }[] }).containers[0].created_at);
-    expect(containers[1].created_at).toBe((detailReal as { containers: { created_at: string }[] }).containers[1].created_at);
+    expect(containers[0].created_at).toBe(containersReal[0].created_at);
+    expect(containers[1].created_at).toBe(containersReal[1].created_at);
   });
 
   it('③ state 原值透传：真实响应里的 created / missing 不被翻译、不被兜底改写', async () => {
-    stubJson(detailReal);
+    stubAgentDetail(detailReal, containersReal);
     const detail = await getAgentDetail(3);
     const containers = detail.containers ?? [];
 
@@ -79,7 +99,7 @@ describe('真实后端响应喂给前端 normalize', () => {
   });
 
   it('④ 详情页 container_count 与 containers.length 相等', async () => {
-    stubJson(detailReal);
+    stubAgentDetail(detailReal, containersReal);
     const detail = await getAgentDetail(3);
 
     expect(detail.container_count).toBe(2);
@@ -87,17 +107,22 @@ describe('真实后端响应喂给前端 normalize', () => {
   });
 
   it('无容器时详情返回 []（空数组），normalize 后不是 null', async () => {
-    // 用列表响应里 container_count=0 的那个 Agent 的详情形状构造
-    stubJson({
-      ...detailReal,
-      containers: [],
-      container_count: 0,
-    });
+    stubAgentDetail({ ...detailReal, container_count: 0 }, []);
     const detail = await getAgentDetail(3);
 
     expect(detail.containers).toEqual([]);
     expect(detail.containers).not.toBeNull();
     expect(detail.container_count).toBe(0);
+  });
+
+  it('详情外壳：状态与执行环境从外层读，不要求 agent 内重复字段', async () => {
+    stubAgentDetail(detailReal, containersReal);
+    const detail = await getAgentDetail(3);
+
+    expect(detail.id).toBe(3);
+    expect(detail.status).toBe('idle');
+    expect(detail.exec_env).toBe('host');
+    expect(detail.current_container_id).toBeNull();
   });
 
   it('列表接口：三字段经 normalizeAgent 后都在，且 exec_env 收敛正确', async () => {
@@ -122,13 +147,17 @@ describe('真实后端响应喂给前端 normalize', () => {
     expect(li?.container_count).toBe(2);
   });
 
-  it('后端原始响应：三字段逐条存在（缺字段时前端只能靠 undefined 猜）', () => {
-    const agents = (listReal as { agents: Record<string, unknown>[] }).agents;
-    for (const agent of agents) {
-      expect(agent).toHaveProperty('exec_env');
-      expect(agent).toHaveProperty('current_container_id');
-      expect(agent).toHaveProperty('container_count');
-      // 列表接口不该带 containers（详情才有），带上是浪费也不符合契约
+  it('后端原始响应：运行时字段在外层，DB 字段在内层（缺字段时前端只能靠 undefined 猜）', () => {
+    const items = (listReal as { agents: Record<string, unknown>[] }).agents;
+    for (const item of items) {
+      expect(item).toHaveProperty('status');
+      expect(item).toHaveProperty('exec_env_state');
+      expect(item).toHaveProperty('container_count');
+
+      const agent = item.agent as Record<string, unknown>;
+      expect(agent).toBeTypeOf('object');
+      expect(agent).not.toHaveProperty('status');
+      expect(agent).not.toHaveProperty('exec_env');
       expect(agent).not.toHaveProperty('containers');
     }
   });

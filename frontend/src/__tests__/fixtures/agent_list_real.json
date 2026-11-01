@@ -1,76 +1,88 @@
 {
     "agents": [
         {
-            "allow_skills": null,
-            "allow_tools": null,
-            "container_count": 0,
-            "created_at": "2026-11-01 12:13:57.012019",
-            "current_container_id": null,
-            "driver": "tsp",
-            "employ_status": "ON_BOARD",
-            "employee_number": 1,
-            "exec_env": "host",
-            "i18n": {
-                "display_name": {
-                    "en": "Ma",
-                    "zh-CN": "小马哥"
-                }
+            "agent": {
+                "allow_skills": null,
+                "allow_tools": null,
+                "created_at": "2026-11-01 12:13:57.012019",
+                "driver": "tsp",
+                "employ_status": "ON_BOARD",
+                "employee_number": 1,
+                "i18n": {
+                    "display_name": {
+                        "en": "Ma",
+                        "zh-CN": "小马哥"
+                    }
+                },
+                "id": 1,
+                "model": "",
+                "name": "小马哥",
+                "role_template_id": 11,
+                "team_id": 1,
+                "updated_at": "2026-11-01 12:13:57.128878"
             },
-            "id": 1,
-            "model": "",
-            "name": "小马哥",
-            "role_template_id": 11,
             "status": "IDLE",
-            "team_id": 1,
-            "updated_at": "2026-11-01 12:13:57.128878"
+            "exec_env_state": {
+                "exec_env": "host",
+                "current_container_id": null
+            },
+            "container_count": 0
         },
         {
-            "allow_skills": null,
-            "allow_tools": null,
-            "container_count": 2,
-            "created_at": "2026-11-01 12:13:57.012026",
-            "current_container_id": null,
-            "driver": "tsp",
-            "employ_status": "ON_BOARD",
-            "employee_number": 3,
-            "exec_env": "host",
-            "i18n": {
-                "display_name": {
-                    "en": "Brother Li",
-                    "zh-CN": "李哥"
-                }
+            "agent": {
+                "allow_skills": null,
+                "allow_tools": null,
+                "created_at": "2026-11-01 12:13:57.012026",
+                "driver": "tsp",
+                "employ_status": "ON_BOARD",
+                "employee_number": 3,
+                "i18n": {
+                    "display_name": {
+                        "en": "Brother Li",
+                        "zh-CN": "李哥"
+                    }
+                },
+                "id": 3,
+                "model": "",
+                "name": "李哥",
+                "role_template_id": 15,
+                "team_id": 1,
+                "updated_at": "2026-11-01 12:13:57.128878"
             },
-            "id": 3,
-            "model": "",
-            "name": "李哥",
-            "role_template_id": 15,
             "status": "IDLE",
-            "team_id": 1,
-            "updated_at": "2026-11-01 12:13:57.128878"
+            "exec_env_state": {
+                "exec_env": "host",
+                "current_container_id": null
+            },
+            "container_count": 2
         },
         {
-            "allow_skills": null,
-            "allow_tools": null,
-            "container_count": 0,
-            "created_at": "2026-11-01 12:13:57.012024",
-            "current_container_id": null,
-            "driver": "tsp",
-            "employ_status": "ON_BOARD",
-            "employee_number": 2,
-            "exec_env": "host",
-            "i18n": {
-                "display_name": {
-                    "en": "Azhang",
-                    "zh-CN": "阿张"
-                }
+            "agent": {
+                "allow_skills": null,
+                "allow_tools": null,
+                "created_at": "2026-11-01 12:13:57.012024",
+                "driver": "tsp",
+                "employ_status": "ON_BOARD",
+                "employee_number": 2,
+                "i18n": {
+                    "display_name": {
+                        "en": "Azhang",
+                        "zh-CN": "阿张"
+                    }
+                },
+                "id": 2,
+                "model": "",
+                "name": "阿张",
+                "role_template_id": 14,
+                "team_id": 1,
+                "updated_at": "2026-11-01 12:13:57.128878"
             },
-            "id": 2,
-            "model": "",
-            "name": "阿张",
-            "role_template_id": 14,
             "status": "IDLE",
-            "team_id": 1,
-            "updated_at": "2026-11-01 12:13:57.128878"
+            "exec_env_state": {
+                "exec_env": "host",
+                "current_container_id": null
+            },
+            "container_count": 0
         }
     ]
 }

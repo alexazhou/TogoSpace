@@ -467,6 +467,27 @@ describe('third-party service API', () => {
   });
 });
 
+function jsonResponse(payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+/** 详情请求会并发取详情、容器列表、失败信息三个接口，按 URL 分发。 */
+function stubAgentDetail(detail: unknown, containers: unknown[], errorMessage: string | null = null) {
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/containers.json')) {
+      return Promise.resolve(jsonResponse(containers));
+    }
+    if (url.includes('/error_message.json')) {
+      return Promise.resolve(jsonResponse({ error_message: errorMessage }));
+    }
+    return Promise.resolve(jsonResponse(detail));
+  }));
+}
+
 describe('getAgentDetail containers', () => {
   beforeEach(() => {
     clearGlobalRequestError();
@@ -475,51 +496,52 @@ describe('getAgentDetail containers', () => {
   });
 
   it('keeps container created_at ISO string and nulls it out when absent or not a string', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      id: 3,
-      name: 'coder',
-      team_id: 2,
-      created_at: '2026-10-31T08:15:00.123456',
-      containers: [
-        {
-          record_id: 11,
-          agent_id: 3,
-          container_id: 'sha256:abc',
-          container_name: 'togo-agent-3',
-          image: 'togo-sandbox:latest',
-          state: 'running',
-          is_entered: true,
-          // 后端 model_dump(mode="json") 把 datetime 序列化成 ISO 8601 字符串
-          created_at: '2026-10-31T08:15:00.123456',
-        },
-        {
-          // 预记录：容器尚未创建完成，container_id 与 created_at 都可能为空
-          record_id: 12,
-          agent_id: 3,
-          container_id: null,
-          container_name: '',
-          image: 'togo-sandbox:latest',
-          state: 'missing',
-          is_entered: false,
-          created_at: null,
-        },
-        {
-          // 后端漏字段或给出非字符串时不能把非字符串透给 UI
-          record_id: 13,
-          agent_id: 3,
-          container_id: 'sha256:def',
-          container_name: 'togo-agent-3-b',
-          image: 'togo-sandbox:latest',
-          state: 'exited',
-          is_entered: false,
-          created_at: 1730000000,
-        },
-      ],
-    }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }));
-    vi.stubGlobal('fetch', fetchMock);
+    const containersPayload = [
+      {
+        record_id: 11,
+        agent_id: 3,
+        container_id: 'sha256:abc',
+        container_name: 'togo-agent-3',
+        image: 'togo-sandbox:latest',
+        state: 'running',
+        is_entered: true,
+        // 后端 model_dump(mode="json") 把 datetime 序列化成 ISO 8601 字符串
+        created_at: '2026-10-31T08:15:00.123456',
+      },
+      {
+        // 预记录：容器尚未创建完成，container_id 与 created_at 都可能为空
+        record_id: 12,
+        agent_id: 3,
+        container_id: null,
+        container_name: '',
+        image: 'togo-sandbox:latest',
+        state: 'missing',
+        is_entered: false,
+        created_at: null,
+      },
+      {
+        // 后端漏字段或给出非字符串时不能把非字符串透给 UI
+        record_id: 13,
+        agent_id: 3,
+        container_id: 'sha256:def',
+        container_name: 'togo-agent-3-b',
+        image: 'togo-sandbox:latest',
+        state: 'exited',
+        is_entered: false,
+        created_at: 1730000000,
+      },
+    ];
+    stubAgentDetail({
+      agent: {
+        id: 3,
+        name: 'coder',
+        team_id: 2,
+        created_at: '2026-10-31T08:15:00.123456',
+      },
+      status: 'IDLE',
+      exec_env_state: { exec_env: 'host', current_container_id: null },
+      container_count: containersPayload.length,
+    }, containersPayload);
 
     const detail = await getAgentDetail(3);
     const containers = detail.containers ?? [];
@@ -556,10 +578,12 @@ describe('getAgentDetail: list_agent_containers 真实基线', () => {
 
   it('daemon 不可用时预记录仍在表里、state 为 unknown、created_at 是 ISO 串', async () => {
     const baseline = baselineContainers.A_daemon_unavailable;
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      id: 3, name: '小美', team_id: 2, exec_env: 'host', current_container_id: null,
-      containers: baseline, container_count: baseline.length,
-    }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    stubAgentDetail({
+      agent: { id: 3, name: '小美', team_id: 2 },
+      status: 'IDLE',
+      exec_env_state: { exec_env: 'host', current_container_id: null },
+      container_count: baseline.length,
+    }, baseline);
 
     const detail = await getAgentDetail(3);
     const containers = detail.containers ?? [];
@@ -579,11 +603,12 @@ describe('getAgentDetail: list_agent_containers 真实基线', () => {
 
   it('daemon 可用时 state 是 Docker 原值（running/exited），is_entered 命中当前容器', async () => {
     const baseline = baselineContainers.B_daemon_available_inspect_sample;
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      id: 3, name: '小美', team_id: 2, exec_env: 'container',
-      current_container_id: 'deadbeef1234',
-      containers: baseline, container_count: baseline.length,
-    }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    stubAgentDetail({
+      agent: { id: 3, name: '小美', team_id: 2 },
+      status: 'IDLE',
+      exec_env_state: { exec_env: 'container', current_container_id: 'deadbeef1234' },
+      container_count: baseline.length,
+    }, baseline);
 
     const detail = await getAgentDetail(3);
     const containers = detail.containers ?? [];
@@ -598,7 +623,7 @@ describe('getAgentDetail: list_agent_containers 真实基线', () => {
     // 已回填的 container_id 必须原样读出来 —— 没有这条，把 `item.container_id`
     // 写错成别的字段名也能全绿（undefined → null），容器表所有 ID 会显示为空。
     expect(containers[1].container_id).toBe('deadbeef1234');
-    // exec_env 走 normalizeAgent 的收敛：非 'container' 一律 host
+    // exec_env / current_container_id 从外壳的 exec_env_state 读
     expect(detail.exec_env).toBe('container');
     expect(detail.current_container_id).toBe('deadbeef1234');
   });

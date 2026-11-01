@@ -78,6 +78,29 @@ type RawAgentDetail = Partial<AgentDetail> & {
   driver?: string;
 };
 
+/** 后端 Agent 列表 / 详情的运行时外壳：DB 字段在 `agent`，运行时字段在外层。 */
+type RawAgentRuntimeInfo = {
+  agent?: RawAgentInfo;
+  status?: string;
+  exec_env_state?: {
+    exec_env?: string;
+    current_container_id?: string | null;
+  };
+  container_count?: number | null;
+};
+
+type RawAgentEntry = RawAgentInfo | RawAgentRuntimeInfo;
+
+function unwrapAgentEntry(entry: RawAgentEntry): {
+  agent: RawAgentInfo;
+  runtime: RawAgentRuntimeInfo | null;
+} {
+  if ('agent' in entry && entry.agent && typeof entry.agent === 'object') {
+    return { agent: entry.agent, runtime: entry };
+  }
+  return { agent: entry as RawAgentInfo, runtime: null };
+}
+
 type RawAgentActivity = Partial<AgentActivity> & {
   id?: unknown;
   agent_id?: unknown;
@@ -452,10 +475,16 @@ function normalizeDriverTypeValue(value?: string | null): string {
   return '';
 }
 
-function normalizeAgent(agent: RawAgentInfo): AgentInfo {
+function normalizeAgent(entry: RawAgentEntry): AgentInfo {
+  const { agent, runtime } = unwrapAgentEntry(entry);
   const normalizedSpecial = agent.special === 'operator' || agent.special === 'system'
     ? agent.special
     : null;
+
+  // 运行时字段优先取外壳，兼容仍返回扁平结构的老接口（如 agents/save.json）
+  const execEnv = runtime?.exec_env_state?.exec_env ?? agent.exec_env;
+  const currentContainerId = runtime?.exec_env_state?.current_container_id ?? agent.current_container_id;
+  const containerCount = runtime?.container_count ?? agent.container_count;
 
   return {
     id: typeof agent.id === 'number' ? agent.id : null,
@@ -465,17 +494,17 @@ function normalizeAgent(agent: RawAgentInfo): AgentInfo {
     role_template_id: typeof agent.role_template_id === 'number' ? agent.role_template_id : null,
     model: String(agent.model ?? ''),
     team_id: typeof agent.team_id === 'number' ? agent.team_id : null,
-    status: normalizeAgentStatus(agent.status),
+    status: normalizeAgentStatus(runtime?.status ?? agent.status),
     employ_status: agent.employ_status ?? null,
     driver: normalizeDriverTypeValue(typeof agent.driver === 'string' ? agent.driver : ''),
     special: normalizedSpecial,
     allow_tools: Array.isArray(agent.allow_tools) ? agent.allow_tools : null,
     allow_skills: Array.isArray(agent.allow_skills) ? agent.allow_skills : null,
-    exec_env: agent.exec_env === 'container' ? 'container' : 'host',
-    current_container_id: typeof agent.current_container_id === 'string' && agent.current_container_id
-      ? agent.current_container_id
+    exec_env: execEnv === 'container' ? 'container' : 'host',
+    current_container_id: typeof currentContainerId === 'string' && currentContainerId
+      ? currentContainerId
       : null,
-    container_count: typeof agent.container_count === 'number' ? agent.container_count : null,
+    container_count: typeof containerCount === 'number' ? containerCount : null,
   };
 }
 
@@ -510,14 +539,16 @@ function normalizeContainerInfo(raw: unknown): ContainerInfo | null {
   };
 }
 
-function normalizeAgentDetail(agent: RawAgentDetail): AgentDetail {
-  const rawContainers = (agent as Record<string, unknown>).containers;
+function normalizeAgentDetail(entry: RawAgentEntry): AgentDetail {
+  const { agent } = unwrapAgentEntry(entry);
+  const detail = agent as RawAgentDetail;
+  const rawContainers = (detail as Record<string, unknown>).containers;
   return {
-    ...normalizeAgent(agent),
-    agent_name: String(agent.agent_name ?? agent.name ?? ''),
-    driver_type: parseDriverType(agent),
-    prompt: String(agent.prompt ?? ''),
-    error_message: typeof agent.error_message === 'string' ? agent.error_message : null,
+    ...normalizeAgent(entry),
+    agent_name: String(detail.agent_name ?? detail.name ?? ''),
+    driver_type: parseDriverType(detail),
+    prompt: String(detail.prompt ?? ''),
+    error_message: typeof detail.error_message === 'string' ? detail.error_message : null,
     containers: Array.isArray(rawContainers)
       ? rawContainers.map(normalizeContainerInfo).filter((item): item is ContainerInfo => item !== null)
       : null,
@@ -749,12 +780,12 @@ function normalizeRoleTemplateDetail(template: RawRoleTemplateSummary, templateI
 }
 
 export async function getAgents(): Promise<AgentInfo[]> {
-  const data = await requestJson<{ agents: RawAgentInfo[] }>('/agents/list.json');
+  const data = await requestJson<{ agents: RawAgentEntry[] }>('/agents/list.json');
   return data.agents.map(normalizeAgent);
 }
 
 export async function getAgentsByTeamId(teamId: number, options?: { includeSpecial?: boolean }): Promise<AgentInfo[]> {
-  const data = await requestJson<{ agents: RawAgentInfo[] }>(
+  const data = await requestJson<{ agents: RawAgentEntry[] }>(
     withSearch('/agents/list.json', {
       team_id: teamId,
       include_special: options?.includeSpecial ? 1 : undefined,
@@ -965,9 +996,30 @@ export async function createTeam(payload: CreateTeamPayload): Promise<{ status: 
   });
 }
 
+async function getAgentContainers(agentId: number): Promise<ContainerInfo[]> {
+  const data = await requestJson<unknown>(`/agents/${agentId}/containers.json`);
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  return data.map(normalizeContainerInfo).filter((item): item is ContainerInfo => item !== null);
+}
+
+async function getAgentErrorMessage(agentId: number): Promise<string | null> {
+  const data = await requestJson<{ error_message?: unknown }>(`/agents/${agentId}/error_message.json`);
+  return typeof data.error_message === 'string' ? data.error_message : null;
+}
+
 export async function getAgentDetail(agentId: number): Promise<AgentDetail> {
-  const data = await requestJson<RawAgentDetail>(`/agents/${agentId}.json`);
-  return normalizeAgentDetail(data);
+  const [data, containers, errorMessage] = await Promise.all([
+    requestJson<RawAgentEntry>(`/agents/${agentId}.json`),
+    getAgentContainers(agentId),
+    getAgentErrorMessage(agentId),
+  ]);
+  return {
+    ...normalizeAgentDetail(data),
+    containers,
+    error_message: errorMessage,
+  };
 }
 
 export function getAgentControlRoom(agentId: number): Promise<{ room_id: number; created: boolean }> {
@@ -1183,10 +1235,11 @@ export async function updateAgentProperties(
   agentId: number,
   payload: { model?: string; allow_tools?: string[] | null; allow_skills?: string[] | null }
 ): Promise<AgentDetail> {
-  const data = await requestJson<RawAgentDetail>(`/agents/${agentId}/modify_properties.json`, {
+  const data = await requestJson<RawAgentEntry>(`/agents/${agentId}/modify_properties.json`, {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+  // 保存只改配置，容器与失败信息不由本接口负责；调用方保留已有详情即可
   return normalizeAgentDetail(data);
 }
 

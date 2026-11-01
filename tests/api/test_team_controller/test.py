@@ -175,7 +175,7 @@ class TestTeamController(_ApiServiceCase):
             async with client.post(f"{self.backend_base_url}/teams/{team_id}/delete.json") as resp:
                 assert resp.status == 200
 
-        tom = next(agent for agent in agents_data["agents"] if agent["name"] == "tom")
+        tom = next(item["agent"] for item in agents_data["agents"] if item["agent"]["name"] == "tom")
         assert tom["role_template_id"] == template_id
         assert tom["model"] == "gpt-4o"
         assert tom["driver"] == "native"
@@ -227,9 +227,12 @@ class TestTeamController(_ApiServiceCase):
                 agents_data = await resp.json()
 
         assert len(agents_data["agents"]) == 2
-        names = {a["name"] for a in agents_data["agents"]}
+        names = {item["agent"]["name"] for item in agents_data["agents"]}
         assert names == {"alice", "bob"}
-        agent = agents_data["agents"][0]
+        item = agents_data["agents"][0]
+        assert item["status"] in {"IDLE", "ACTIVE", "FAILED", "CLOSED"}
+        assert isinstance(item["container_count"], int)
+        agent = item["agent"]
         assert isinstance(agent["role_template_id"], int)
         assert "display_name" not in agent
         assert "i18n" in agent
@@ -243,13 +246,17 @@ class TestTeamController(_ApiServiceCase):
                 assert resp.status == 200
                 data = await resp.json()
 
-        assert data["name"] == "alice"
-        assert isinstance(data["role_template_id"], int)
-        assert "employ_status" in data
-        assert "model" in data
-        assert "driver" in data
-        assert "display_name" not in data
-        assert "i18n" in data
+        assert data["status"] in {"IDLE", "ACTIVE", "FAILED", "CLOSED"}
+        assert isinstance(data["container_count"], int)
+
+        agent = data["agent"]
+        assert agent["name"] == "alice"
+        assert isinstance(agent["role_template_id"], int)
+        assert "employ_status" in agent
+        assert "model" in agent
+        assert "driver" in agent
+        assert "display_name" not in agent
+        assert "i18n" in agent
 
     async def test_team_set_enabled(self):
         """验证 POST /teams/{id}/set_enabled.json 设置团队启用状态。"""

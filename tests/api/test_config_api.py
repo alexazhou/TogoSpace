@@ -26,7 +26,7 @@ class TestConfigApi(ServiceTestCase):
             async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
                 assert resp.status == 200
                 data = await resp.json()
-        return data["agents"]
+        return [item["agent"] for item in data["agents"]]
 
     async def test_team_modify_and_delete(self):
         # Create a temporary team for modification and deletion

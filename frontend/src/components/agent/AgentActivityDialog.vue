@@ -137,6 +137,13 @@ async function loadDetail(): Promise<void> {
   }
 }
 
+function handleAgentSaved(updated: AgentDetail): void {
+  // modify_properties 只返回配置信息，容器与失败信息保留详情页已加载的值
+  agent.value = agent.value
+    ? { ...agent.value, ...updated, containers: agent.value.containers, error_message: agent.value.error_message }
+    : updated;
+}
+
 async function handleResume(): Promise<void> {
   if (props.agentId === null || currentStatus.value !== 'failed' || resuming.value) {
     return;
@@ -340,7 +347,7 @@ watch(
         v-show="activeTab === 'properties'"
         :agent-id="agentId"
         :initial-agent="displayAgent"
-        @saved="agent = $event"
+        @saved="handleAgentSaved"
       />
     </template>
 

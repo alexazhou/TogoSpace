@@ -86,15 +86,16 @@ class ApiClient:
         async with session.get(f"{self._base_url}/agents/list.json", params=params) as resp:
             resp.raise_for_status()
             data = await resp.json()
+        # 列表项是运行时外壳：DB 字段在 agent 内，status 在外层
         return [
             AgentInfo(
-                name=a["name"],
-                model=a.get("model", ""),
-                team_name=a.get("team_name", ""),
-                agent_id=a.get("id", 0),
-                status=a.get("status", "idle"),
+                name=item["agent"]["name"],
+                model=item["agent"].get("model", ""),
+                team_name=item["agent"].get("team_name", ""),
+                agent_id=item["agent"].get("id", 0),
+                status=item.get("status", "idle"),
             )
-            for a in data["agents"]
+            for item in data["agents"]
         ]
 
     async def get_teams(self) -> list[TeamInfo]:

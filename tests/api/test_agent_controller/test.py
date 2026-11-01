@@ -51,10 +51,18 @@ class TestAgentController(_ApiServiceCase):
 
         assert "agents" in data
         assert len(data["agents"]) == 2
-        names = {a["name"] for a in data["agents"]}
+        names = {item["agent"]["name"] for item in data["agents"]}
         assert "alice" in names
         assert "bob" in names
-        agent = data["agents"][0]
+
+        item = data["agents"][0]
+        # 运行时字段在 agent 外层，不混进 DB 字段
+        assert item["status"] in {"IDLE", "ACTIVE", "FAILED", "CLOSED"}
+        assert item["exec_env_state"]["exec_env"] in {"host", "container"}
+        assert "current_container_id" in item["exec_env_state"]
+        assert isinstance(item["container_count"], int)
+
+        agent = item["agent"]
         assert "id" in agent
         assert "employee_number" in agent
         assert isinstance(agent["role_template_id"], int)
@@ -83,13 +91,40 @@ class TestAgentController(_ApiServiceCase):
                 assert resp.status == 200
                 data = await resp.json()
 
-        assert data["name"] == "alice"
-        assert isinstance(data["role_template_id"], int)
-        assert "employ_status" in data
-        assert "model" in data
-        assert "driver" in data
-        assert "display_name" not in data
-        assert "i18n" in data
+        assert data["status"] in {"IDLE", "ACTIVE", "FAILED", "CLOSED"}
+        assert data["exec_env_state"]["exec_env"] in {"host", "container"}
+        assert isinstance(data["container_count"], int)
+
+        agent = data["agent"]
+        assert agent["name"] == "alice"
+        assert isinstance(agent["role_template_id"], int)
+        assert "employ_status" in agent
+        assert "model" in agent
+        assert "driver" in agent
+        assert "display_name" not in agent
+        assert "i18n" in agent
+
+    async def test_agent_containers_and_error_message(self):
+        """验证容器列表与失败信息走独立接口，详情本身不再携带这两个字段。"""
+        team_id = await self._get_team_id("e2e")
+
+        async with aiohttp.ClientSession() as client:
+            async with client.get(f"{self.backend_base_url}/teams/{team_id}/agents/alice.json") as resp:
+                assert resp.status == 200
+                detail = await resp.json()
+            agent_id = detail["agent"]["id"]
+            assert "containers" not in detail
+            assert "error_message" not in detail
+
+            async with client.get(f"{self.backend_base_url}/agents/{agent_id}/containers.json") as resp:
+                assert resp.status == 200
+                containers = await resp.json()
+            async with client.get(f"{self.backend_base_url}/agents/{agent_id}/error_message.json") as resp:
+                assert resp.status == 200
+                error_data = await resp.json()
+
+        assert isinstance(containers, list)
+        assert error_data == {"error_message": None}
 
 
 class TestAgentsSave(_ApiServiceCase):
@@ -109,7 +144,7 @@ class TestAgentsSave(_ApiServiceCase):
         async with aiohttp.ClientSession() as client:
             async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
                 data = await resp.json()
-        return data["agents"]
+        return [item["agent"] for item in data["agents"]]
 
     async def _get_role_template_id(self, template_name: str) -> int:
         async with aiohttp.ClientSession() as client:
@@ -344,8 +379,11 @@ class TestAgentSupervise(_ApiServiceCase):
         async with aiohttp.ClientSession() as client:
             async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
                 data = await resp.json()
-        agent = next(a for a in data["agents"] if a["name"] == agent_name)
-        return agent["id"]
+        return next(
+            item["agent"]["id"]
+            for item in data["agents"]
+            if item["agent"]["name"] == agent_name
+        )
 
     async def test_supervise_creates_control_room(self):
         """首次调用应自动创建控制房间，返回 room_id 和 created=True。"""
@@ -432,8 +470,11 @@ class TestAgentControlRoom(_ApiServiceCase):
         async with aiohttp.ClientSession() as client:
             async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
                 data = await resp.json()
-        agent = next(a for a in data["agents"] if a["name"] == agent_name)
-        return agent["id"]
+        return next(
+            item["agent"]["id"]
+            for item in data["agents"]
+            if item["agent"]["name"] == agent_name
+        )
 
     async def test_get_control_room_creates(self):
         """调用接口应返回控制房间，如果不存在则自动创建。"""

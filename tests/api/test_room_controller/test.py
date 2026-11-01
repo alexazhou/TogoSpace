@@ -134,8 +134,11 @@ class TestRoomCreateValidation(_ApiServiceCase):
             async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
                 assert resp.status == 200
                 data = await resp.json()
-        agent = next(a for a in data["agents"] if a["name"] == agent_name)
-        return agent["id"]
+        return next(
+            item["agent"]["id"]
+            for item in data["agents"]
+            if item["agent"]["name"] == agent_name
+        )
 
     async def test_create_room_with_one_agent_is_rejected(self):
         """创建只有一个成员的房间应返回 400 room_agents_too_few。"""
@@ -288,7 +291,7 @@ class TestRoomControllerPrivate(_ApiServiceCase):
             async with client.get(f"{self.backend_base_url}/agents/list.json?team_id={team_id}") as resp:
                 assert resp.status == 200
                 agents_data = await resp.json()
-        alice_agent = next(a for a in agents_data["agents"] if a["name"] == "alice")
+        alice_agent = next(item["agent"] for item in agents_data["agents"] if item["agent"]["name"] == "alice")
         alice_id = alice_agent["id"]
 
         async with aiohttp.ClientSession() as client:
