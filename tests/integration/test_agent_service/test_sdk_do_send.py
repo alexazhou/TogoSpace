@@ -1,5 +1,6 @@
 """integration tests for ClaudeSdkAgentDriver send/skip routing behavior"""
 from collections.abc import AsyncIterator
+from datetime import datetime
 import os
 import sys
 from typing import Any
@@ -360,8 +361,8 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
 
         # 使用 YAML 格式构建 turn prompt
         turn_prompt = promptBuilder.build_turn_begin_prompt("lobby", [
-            ("系统提醒", "房间初始化"),
-            ("bob", "hello alice"),
+            ("系统提醒", "房间初始化", datetime(2024, 1, 1, 9, 0)),
+            ("bob", "hello alice", datetime(2024, 1, 1, 9, 1)),
         ])
         item = GtAgentHistory.build(
             AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, turn_prompt)),

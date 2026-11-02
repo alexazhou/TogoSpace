@@ -362,14 +362,10 @@ class TestAgentHistorySync(_agentServiceCase):
 
         synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
 
-        # 验证生成的 prompt 格式（YAML 格式）
-        system_msg = await room.build_initial_system_message()
-        bob_agent = await gtAgentManager.get_agent_by_id(bob_id)
-        assert bob_agent is not None
-        bob_display_name = bob_agent.display_name
+        # 验证生成的 prompt 格式（YAML 格式，包含每条消息的发送时间）
         expected_prompt = promptBuilder.build_turn_begin_prompt("general", [
-            ("系统提醒", system_msg),
-            (bob_display_name, "hello alice"),
+            (msg.sender_display_name, msg.content, msg.send_time)
+            for msg in room.messages
         ])
 
         assert synced_count == 1

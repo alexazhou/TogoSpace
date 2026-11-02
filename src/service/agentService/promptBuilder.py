@@ -43,9 +43,12 @@ class _PromptYamlDumper(yaml.Dumper):
 _PromptYamlDumper.add_representer(str, _PromptYamlDumper._str_representer)
 
 
-def _build_yaml_room_block(room_name: str, messages: list[tuple[str, str]]) -> str:
+def _build_yaml_room_block(room_name: str, messages: list[tuple[str, str, datetime | None]]) -> str:
     """将房间名和消息列表序列化为 YAML 块。"""
-    msg_data = [{"sender": sender, "content": content} for sender, content in messages]
+    msg_data = [
+        {"sender": sender, "sendTime": _format_time(send_time), "content": content}
+        for sender, content, send_time in messages
+    ]
     return yaml.dump(
         {"roomName": room_name, "messages": msg_data},
         Dumper=_PromptYamlDumper,
@@ -55,12 +58,12 @@ def _build_yaml_room_block(room_name: str, messages: list[tuple[str, str]]) -> s
     ).strip()
 
 
-def build_turn_begin_prompt(room_name: str, messages: list[tuple[str, str]]) -> str:
+def build_turn_begin_prompt(room_name: str, messages: list[tuple[str, str, datetime | None]]) -> str:
     """构建 turn begin prompt，使用 YAML 格式。
 
     Args:
         room_name: 房间名称
-        messages: 消息列表，每项为 (sender, content) 元组
+        messages: 消息列表，每项为 (sender, content, send_time) 元组
     """
     yaml_block = _build_yaml_room_block(room_name, messages)
     return (
@@ -76,11 +79,11 @@ def build_turn_begin_prompt_from_messages(
     exclude_agent_id: int,
 ) -> str:
     """从消息列表构建 turn begin prompt，自动过滤自己的消息。"""
-    filtered_messages: list[tuple[str, str]] = []
+    filtered_messages: list[tuple[str, str, datetime | None]] = []
     for msg in messages:
         if msg.sender_id == exclude_agent_id:
             continue
-        filtered_messages.append((msg.sender_display_name, msg.content))
+        filtered_messages.append((msg.sender_display_name, msg.content, msg.send_time))
     return build_turn_begin_prompt(room_name, filtered_messages)
 
 
@@ -96,8 +99,8 @@ def build_turn_update_prompt(
         messages: 消息列表
         exclude_agent_id: 需要过滤掉的 agent_id（通常为当前 Agent 自己）
     """
-    filtered: list[tuple[str, str]] = [
-        (msg.sender_display_name, msg.content)
+    filtered: list[tuple[str, str, datetime | None]] = [
+        (msg.sender_display_name, msg.content, msg.send_time)
         for msg in messages
         if msg.sender_id != exclude_agent_id
     ]
@@ -131,13 +134,13 @@ def _status_text(status: TaskStatus | str | None) -> str | None:
     return status.value if isinstance(status, TaskStatus) else str(status)
 
 
-def _format_event_time(created_at: datetime | None) -> str:
-    """事件时间（应用本地时区）格式化为 YYYY-MM-DD HH:MM。"""
-    if created_at is None:
+def _format_time(value: datetime | None) -> str:
+    """时间（应用本地时区）格式化为 YYYY-MM-DD HH:MM。"""
+    if value is None:
         return ""
-    if created_at.tzinfo is not None:
-        created_at = created_at.astimezone()
-    return created_at.strftime("%Y-%m-%d %H:%M")
+    if value.tzinfo is not None:
+        value = value.astimezone()
+    return value.strftime("%Y-%m-%d %H:%M")
 
 
 def build_task_event_line(
@@ -166,7 +169,7 @@ def build_task_event_line(
     else:
         action = f"{from_text}→{to_text}"
 
-    time_text = _format_event_time(created_at)
+    time_text = _format_time(created_at)
     prefix = f"- {time_text} " if time_text else "- "
     line = f"{prefix}{action}（{actor_name}）"
     body = format_task_event_content(content)

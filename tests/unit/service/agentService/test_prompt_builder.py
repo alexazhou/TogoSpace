@@ -11,9 +11,16 @@ from service.agentService import promptBuilder
 _TASK_ID = 7
 
 
-def _msg(agent_id: int, display_name: str, content: str, *, insert_immediately: bool = False) -> GtRoomMessage:
+def _msg(
+    agent_id: int,
+    display_name: str,
+    content: str,
+    *,
+    send_time: datetime | None = None,
+    insert_immediately: bool = False,
+) -> GtRoomMessage:
     m = GtRoomMessage(room_id=1, sender_id=agent_id, content=content,
-                      send_time=datetime(2024, 1, 1), insert_immediately=insert_immediately)
+                      send_time=send_time or datetime(2024, 1, 1), insert_immediately=insert_immediately)
     m.sender_display_name = display_name
     return m
 
@@ -27,10 +34,23 @@ def test_build_turn_update_prompt_contains_intro_text():
 
 
 def test_build_turn_update_prompt_yaml_format():
-    result = promptBuilder.build_turn_update_prompt("testRoom", [_msg(2, "Alice", "hello")], exclude_agent_id=1)
+    result = promptBuilder.build_turn_update_prompt(
+        "testRoom", [_msg(2, "Alice", "hello", send_time=datetime(2024, 1, 1, 9, 30))], exclude_agent_id=1)
     assert "roomName: testRoom" in result
     assert "sender: Alice" in result
+    assert "sendTime: 2024-01-01 09:30" in result
     assert "content: hello" in result
+
+
+def test_build_turn_update_prompt_includes_time_for_every_message():
+    msgs = [
+        _msg(2, "Alice", "first", send_time=datetime(2024, 1, 1, 9, 30)),
+        _msg(3, "Bob", "second", send_time=datetime(2024, 1, 1, 9, 31)),
+    ]
+    result = promptBuilder.build_turn_update_prompt("testRoom", msgs, exclude_agent_id=1)
+    assert result.count("sendTime:") == 2
+    assert "sendTime: 2024-01-01 09:30" in result
+    assert "sendTime: 2024-01-01 09:31" in result
 
 
 def test_build_turn_update_prompt_filters_own_messages():
@@ -57,9 +77,11 @@ def test_build_turn_update_prompt_multiline_content_uses_block_style():
 
 
 def test_build_turn_begin_prompt_yaml_format():
-    result = promptBuilder.build_turn_begin_prompt("myRoom", [("Charlie", "hi there")])
+    result = promptBuilder.build_turn_begin_prompt(
+        "myRoom", [("Charlie", "hi there", datetime(2024, 1, 1, 12, 34))])
     assert "roomName: myRoom" in result
     assert "sender: Charlie" in result
+    assert "sendTime: 2024-01-01 12:34" in result
     assert "content: hi there" in result
     assert "当前轮到你行动" in result
 
