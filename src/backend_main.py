@@ -3,8 +3,10 @@ import asyncio
 import logging
 import os
 import signal
+import sqlite3
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Callable
 
 import tornado.httpserver
@@ -35,6 +37,9 @@ def _setup_logger() -> None:
     logUtil.init_backend_logger()
 
 
+logger = logging.getLogger(__name__)
+
+
 _RUN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../run")
 _PID_FILE = os.path.join(_RUN_DIR, "backend.pid")
 _shutdown_event: asyncio.Event | None = None
@@ -52,6 +57,47 @@ class StartupCallbacks:
     on_ready: Callable[[str, int], None] | None = None
 
 
+def _backup_database_before_migration(abs_db_path: str) -> str:
+    """把 `abs_db_path` 备份到 `appPaths.DATA_DIR/backups`，返回备份文件路径。
+
+    **为什么不复用 `ormService.backup_database()`**：它依赖 `ormService.get_db_path()`，
+    而迁移恰好跑在 ORM 绑定数据库**之前**，此时 `get_db_path()` 返回 None 会直接
+    `raise RuntimeError("ormService not started")`。改用 sqlite3 原生
+    `Connection.backup()`：它在源库上开一个读事务做页级拷贝，会一并读到 WAL 里未落盘的
+    内容，也不需要目标库预先建好表结构。
+
+    命名沿用既有备份惯例（`data_20260705_194824_132501.db`）。
+
+    失败时**不吞异常**：清理掉可能写了一半的备份文件后继续向上抛，由调用方中止启动
+    —— 因为不支持降级兼容（方案 §6.4），备份是唯一的回滚路径，「没备份就迁移」不可接受。
+    """
+    backup_dir = os.path.join(appPaths.DATA_DIR, "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+
+    stem, suffix = os.path.splitext(os.path.basename(abs_db_path))
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    backup_path = os.path.join(backup_dir, f"{stem}_{timestamp}{suffix or '.db'}")
+
+    source_conn = sqlite3.connect(abs_db_path)
+    try:
+        target_conn = sqlite3.connect(backup_path)
+        try:
+            source_conn.backup(target_conn)
+        finally:
+            target_conn.close()
+    except BaseException:
+        # 半截备份文件会误导后续「恢复备份」操作，且看起来像可用的回滚点，必须删掉
+        try:
+            os.remove(backup_path)
+        except OSError:
+            pass
+        raise
+    finally:
+        source_conn.close()
+
+    return backup_path
+
+
 def _run_database_migrations(
     db_path: str,
     workspace_root: str,
@@ -59,15 +105,28 @@ def _run_database_migrations(
 ) -> None:
     """在 ORM 绑定数据库前执行迁移。
 
-    迁移本身由 db 模块负责；入口只做编排：确保目录存在，并在确有
-    待执行迁移时触发桌面外壳的迁移开始/结束回调。
+    迁移本身由 db 模块负责；入口只做编排：确保目录存在、**迁移前备份数据库**，
+    并在确有待执行迁移时触发桌面外壳的迁移开始/结束回调。
+
+    备份时机与条件（方案 §6.4 项 2）：
+    - 只在**确有**待执行迁移且**库文件已存在**时备份 —— 避免每次启动都堆备份，
+      也避免全新安装（库还没建）时去备份一个不存在的文件；
+    - 备份在 `migrate_database` **之前**；备份失败直接抛出、中止启动，
+      不允许「没备份就迁移」。
+    - 备份排在 `on_migration_start` **之前**：备份失败会中止启动，此时不该让桌面外壳
+      先显示「正在迁移」再崩掉；代价是备份期间没有进度提示（实测大库秒级，可接受）。
     """
     abs_db_path = os.path.abspath(db_path)
     os.makedirs(os.path.dirname(abs_db_path), exist_ok=True)
 
     has_pending = has_pending_migrations(abs_db_path)
-    if has_pending and callbacks is not None and callbacks.on_migration_start is not None:
-        callbacks.on_migration_start()
+
+    if has_pending:
+        if os.path.exists(abs_db_path):
+            backup_path = _backup_database_before_migration(abs_db_path)
+            logger.info("[启动] 迁移前已备份数据库：source=%s backup=%s", abs_db_path, backup_path)
+        if callbacks is not None and callbacks.on_migration_start is not None:
+            callbacks.on_migration_start()
 
     migrate_database(abs_db_path, workspace_root=workspace_root, verbose=True)
 
