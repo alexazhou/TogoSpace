@@ -205,6 +205,13 @@ def migration_status(
     *,
     migrations_dir: str | os.PathLike[str] | None = None,
 ) -> tuple[list[Migration], list[str]]:
+    """读取「已记账的迁移」与「迁移目录里的文件」。
+
+    ⚠️ **有副作用：会创建库文件**。内部走 `connect_sqlite()`，它 `os.makedirs` +
+    `sqlite3.connect`（连接时立即创建文件）+ `ensure_migrations_table()` 写入。
+    所以调用方**不能**用 `os.path.exists()` 判断「调用前库是否存在」（#121 M5b 踩过）。
+    需要只读探测请用 `check_database_initialized()`。
+    """
     resolved_db_path = resolve_db_path(str(db_path))
     resolved_migrations_dir = resolve_migrations_dir(
         str(migrations_dir) if migrations_dir is not None else None
@@ -222,7 +229,20 @@ def has_pending_migrations(
     *,
     migrations_dir: str | os.PathLike[str] | None = None,
 ) -> bool:
-    """判断数据库是否落后于迁移目录（存在尚未记账的迁移文件）。"""
+    """判断数据库是否落后于迁移目录（存在尚未记账的迁移文件）。
+
+    ⚠️ **有副作用：会创建库文件**（经 `migration_status()`）。
+    本函数名字看起来是纯查询，但它会把不存在的 `db_path` 建出来。
+    **调用方不要在它之后再判断 `os.path.exists()`** —— 那个判断恒为 True。
+
+    #121 M5b 就是踩了这个坑：`backend_main._run_database_migrations` 里
+    「全新安装不备份」的判断写在它之后，导致全新安装也会落一个空备份；
+    若 `data/backups` 不可写，全新安装用户会直接启动失败（他没有数据可丢）。
+
+    修法（当前实现）：调用方在调用**之前**先取 `db_existed = os.path.exists(...)`。
+    长期建议：把它改成只读（路径不存在 ⇒ 直接返回 True，不建库），
+    与 `check_database_initialized()` 保持一致。
+    """
     applied, files = migration_status(db_path, migrations_dir=migrations_dir)
     applied_names = {migration.name for migration in applied}
     return any(name not in applied_names for name in files)
