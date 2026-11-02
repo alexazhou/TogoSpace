@@ -145,7 +145,12 @@ def test_no_backup_when_no_pending_migration(monkeypatch, tmp_path: Path) -> Non
 
 
 def test_no_backup_when_db_file_absent(monkeypatch, tmp_path: Path) -> None:
-    """有待迁移但库文件还不存在（全新安装）：不备份，也不该因此报错。"""
+    """有待迁移但库文件还不存在（全新安装）：不备份，也不该因此报错。
+
+    ⚠️ 这条用例把 `has_pending_migrations` mock 掉了，**绕过了它的建库副作用**，
+    因此只能证明「`db_existed` 为 False 时不备份」，证不了真实路径。
+    真实路径由 `test_no_backup_on_fresh_install_with_real_has_pending` 守。
+    """
     backup_dir = _redirect_backup_dir(monkeypatch, tmp_path)
     db_path = tmp_path / "fresh" / "data.db"  # 故意不创建
 
@@ -157,6 +162,52 @@ def test_no_backup_when_db_file_absent(monkeypatch, tmp_path: Path) -> None:
 
     migrate_database.assert_called_once()
     assert not backup_dir.exists() or not list(backup_dir.glob("*.db")), "库不存在时不应生成备份"
+
+
+def test_no_backup_on_fresh_install_with_real_has_pending(monkeypatch, tmp_path: Path) -> None:
+    """全新安装：**不 mock `has_pending_migrations`**，走真实调用。
+
+    `has_pending_migrations()` → `migration_status()` → `connect_sqlite()` 里
+    `os.makedirs` + `sqlite3.connect` + `ensure_migrations_table()` 会把库文件创建出来，
+    所以 `os.path.exists` 若在它**之后**判断就恒为 True。这条用例专门抓这个顺序错误：
+    只要 `db_existed` 取早了/取晚了，`backups/` 下就会多出一个只有 `_migrations` 表的空备份。
+    """
+    backup_dir = _redirect_backup_dir(monkeypatch, tmp_path)
+    db_path = tmp_path / "fresh" / "data.db"
+    assert not db_path.exists(), "前置条件：全新安装时库文件不存在"
+
+    migrate_database = MagicMock()
+    monkeypatch.setattr(backend_main, "migrate_database", migrate_database)
+
+    # 故意不断言 has_pending 的返回值，只关心副作用与备份结果
+    backend_main._run_database_migrations(str(db_path), "", None)
+
+    migrate_database.assert_called_once()
+    assert db_path.exists(), "has_pending_migrations 本身会建库（这正是本 bug 的成因）"
+    backups = sorted(backup_dir.glob("*.db")) if backup_dir.exists() else []
+    assert backups == [], f"全新安装不应生成备份，实际：{[p.name for p in backups]}"
+
+
+def test_fresh_install_survives_unwritable_backup_dir(monkeypatch, tmp_path: Path) -> None:
+    """真实危害场景：全新安装 + `backups/` 不可写（只读卷/磁盘满/权限），启动不能失败。
+
+    用户此时没有任何数据可丢，却因为一个空备份写不进去而启动失败 —— 这就是必须先取
+    `db_existed` 的理由。这里用「同名路径被一个普通文件占位」来构造不可写。
+    """
+    data_dir = tmp_path / "storage_data"
+    data_dir.mkdir(parents=True)
+    (data_dir / "backups").write_text("occupied")  # 占位：既不是目录，makedirs 会失败
+    monkeypatch.setattr(appPaths, "DATA_DIR", str(data_dir))
+
+    db_path = tmp_path / "fresh" / "data.db"
+    assert not db_path.exists()
+
+    migrate_database = MagicMock()
+    monkeypatch.setattr(backend_main, "migrate_database", migrate_database)
+
+    backend_main._run_database_migrations(str(db_path), "", None)
+
+    migrate_database.assert_called_once()
 
 
 def test_backup_failure_aborts_startup(monkeypatch, tmp_path: Path) -> None:

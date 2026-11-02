@@ -115,14 +115,22 @@ def _run_database_migrations(
       不允许「没备份就迁移」。
     - 备份排在 `on_migration_start` **之前**：备份失败会中止启动，此时不该让桌面外壳
       先显示「正在迁移」再崩掉；代价是备份期间没有进度提示（实测大库秒级，可接受）。
+
+    ⚠️ **`db_existed` 必须在 `has_pending_migrations()` 之前取**：
+    后者经 `migration_status()` → `connect_sqlite()` 走 `os.makedirs` + `sqlite3.connect`，
+    **会立刻把库文件建出来**并写入 `_migrations` 表。若把 `os.path.exists` 放在它后面，
+    判断恒为 True，「全新安装不备份」就形同虚设 —— 全新安装用户会在没有任何数据可丢的
+    情况下，因为 `backups/` 写入失败（磁盘满/权限/只读卷）而直接启动失败。
     """
     abs_db_path = os.path.abspath(db_path)
+    db_existed = os.path.exists(abs_db_path)
+
     os.makedirs(os.path.dirname(abs_db_path), exist_ok=True)
 
     has_pending = has_pending_migrations(abs_db_path)
 
     if has_pending:
-        if os.path.exists(abs_db_path):
+        if db_existed:
             backup_path = _backup_database_before_migration(abs_db_path)
             logger.info("[启动] 迁移前已备份数据库：source=%s backup=%s", abs_db_path, backup_path)
         if callbacks is not None and callbacks.on_migration_start is not None:
