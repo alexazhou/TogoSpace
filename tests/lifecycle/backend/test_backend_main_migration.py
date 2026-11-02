@@ -170,7 +170,13 @@ def test_no_backup_on_fresh_install_with_real_has_pending(monkeypatch, tmp_path:
     `has_pending_migrations()` → `migration_status()` → `connect_sqlite()` 里
     `os.makedirs` + `sqlite3.connect` + `ensure_migrations_table()` 会把库文件创建出来，
     所以 `os.path.exists` 若在它**之后**判断就恒为 True。这条用例专门抓这个顺序错误：
-    只要 `db_existed` 取早了/取晚了，`backups/` 下就会多出一个只有 `_migrations` 表的空备份。
+    只要 `db_existed` 取错了位置，`backups/` 下就会多出一个只有 `_migrations` 表的空备份。
+
+    ⚠️ **本用例刻意不断言 `db_path.exists()`。** `has_pending_migrations()` 当前会建库，
+    但那是它的实现细节，不是这里要守的行为 —— 本用例要守的是「全新安装不生成备份」，
+    由末尾 `backups == []` 覆盖。
+    若将来有人把它改造成只读（`db.py` docstring 里的长期建议），本用例**应当仍然绿**，
+    不该因为它不再建库就误红、挡住一次正确的重构。
     """
     backup_dir = _redirect_backup_dir(monkeypatch, tmp_path)
     db_path = tmp_path / "fresh" / "data.db"
@@ -179,11 +185,9 @@ def test_no_backup_on_fresh_install_with_real_has_pending(monkeypatch, tmp_path:
     migrate_database = MagicMock()
     monkeypatch.setattr(backend_main, "migrate_database", migrate_database)
 
-    # 故意不断言 has_pending 的返回值，只关心副作用与备份结果
     backend_main._run_database_migrations(str(db_path), "", None)
 
     migrate_database.assert_called_once()
-    assert db_path.exists(), "has_pending_migrations 本身会建库（这正是本 bug 的成因）"
     backups = sorted(backup_dir.glob("*.db")) if backup_dir.exists() else []
     assert backups == [], f"全新安装不应生成备份，实际：{[p.name for p in backups]}"
 

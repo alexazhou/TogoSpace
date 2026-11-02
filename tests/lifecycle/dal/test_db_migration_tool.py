@@ -138,8 +138,15 @@ def test_check_database_initialized_does_not_create_db_file(tmp_path: Path) -> N
 
     放在一起是为了让「哪个函数有副作用」这件事在测试里显式可见 —— 曾经就是
     「名字听起来像纯查询、实际会写盘」导致误判。
+
+    ⚠️ **父目录要预先建好**，因为生产里 `DATA_DIR` 一定存在（启动时已 `makedirs`）。
+    若不建，`sqlite3.connect()` 会先抛 `OperationalError: unable to open database file`，
+    变异实验就「红在异常」而不是「红在断言」—— 读者看不出真正的问题
+    （悄悄建出一个 0 字节库文件）。父目录备好之后，变异会精确红在
+    `assert not database_path.exists()` 上，语义一目了然。
     """
     database_path = tmp_path / "fresh" / "data.db"
+    database_path.parent.mkdir(parents=True, exist_ok=True)  # 模拟生产：父目录已存在
     assert not database_path.exists()
 
     assert db.check_database_initialized(database_path) is False
