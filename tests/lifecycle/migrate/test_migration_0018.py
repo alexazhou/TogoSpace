@@ -224,6 +224,46 @@ def test_0018_declares_explicit_transaction() -> None:
     assert statements.index("COMMIT;") == len(statements) - 1, "COMMIT; 必须是最后一条语句"
 
 
+def test_0018_statement_lines_ignore_comments() -> None:
+    """`--` 行注释与 `/* */` 块注释都不算语句（李哥 2026-11-03 建议）。"""
+    text = "\n".join(
+        [
+            "-- 头注释里提 COMMIT; 不算",
+            "BEGIN;",
+            "ALTER TABLE t RENAME TO u; -- 行尾注释里提 COMMIT;",
+            "/* 单行块注释 COMMIT; */",
+            "/* 跨行块注释",
+            "   COMMIT;",
+            "   BEGIN;",
+            "*/",
+            "COMMIT;",
+        ]
+    )
+    statements = _statement_lines(text.splitlines())
+    assert statements == [
+        "BEGIN;",
+        "ALTER TABLE t RENAME TO u;",
+        "COMMIT;",
+    ], f"注释内容被误当成语句：{statements}"
+
+
+def test_0018_statement_lines_keep_quoted_comment_markers() -> None:
+    """引号字符串里的 `--` / `/* */` 是数据，不能被当注释剥掉。"""
+    text = "\n".join(
+        [
+            "BEGIN;",
+            "INSERT INTO t VALUES ('a -- b', 'c /* d */ e', 'it''s');",
+            "COMMIT;",
+        ]
+    )
+    statements = _statement_lines(text.splitlines())
+    assert statements == [
+        "BEGIN;",
+        "INSERT INTO t VALUES ('a -- b', 'c /* d */ e', 'it''s');",
+        "COMMIT;",
+    ], f"引号内的注释符号被误剥：{statements}"
+
+
 def test_0018_is_not_reapplied_after_success(tmp_path: Path) -> None:
     """迁移成功后再次启动不会重跑（已记账），也就不会因旧表不存在而报错。"""
     db_path = tmp_path / "test.db"
@@ -242,17 +282,33 @@ def test_0018_is_not_reapplied_after_success(tmp_path: Path) -> None:
 
 
 def _strip_sql_comments(text: str) -> str:
-    """去掉 SQL 里的 `--` 行内/整行注释，但**不碰单引号字符串里的内容**。
+    """去掉 SQL 里的 `--` 行注释与 `/* … */` 块注释，**不碰单引号字符串里的内容**。
 
     只按「行首 `--`」过滤是不够的（李哥 2026-11-03 建议）：有人写成
     `ALTER TABLE ...; -- 顺带说一句 COMMIT;` 时，尾部注释会被当成真语句，
     `test_0018_declares_explicit_transaction` 就会误红。
+
+    块注释同理（李哥 2026-11-03 补充建议）：`/* COMMIT; */` 是注释不是语句，
+    不处理会把 `COMMIT;` 数成 2 条而误红。块注释**可跨行**，所以这里引入
+    `in_block` 状态，并在块注释内部不响应 `--` 与单引号（SQLite 的块注释里
+    引号无特殊含义）。
     """
     out: list[str] = []
     in_quote = False
+    in_block = False
     i = 0
     while i < len(text):
         ch = text[i]
+        if in_block:
+            if text[i:i + 2] == "*/":
+                in_block = False
+                i += 2
+                continue
+            # 块注释整段丢弃，但要保留换行，避免把两行拼成一行
+            if ch == "\n":
+                out.append(ch)
+            i += 1
+            continue
         if ch == "'":
             # SQL 里 '' 表示转义的单引号
             if in_quote and i + 1 < len(text) and text[i + 1] == "'":
@@ -261,12 +317,16 @@ def _strip_sql_comments(text: str) -> str:
                 continue
             in_quote = not in_quote
             out.append(ch)
-        elif not in_quote and ch == "-" and text[i:i + 2] == "--":
+        elif not in_quote and text[i:i + 2] == "--":
             # 吃到本行末尾
             nl = text.find("\n", i)
             if nl == -1:
                 break
             i = nl  # 保留换行，交给下一轮
+            continue
+        elif not in_quote and text[i:i + 2] == "/*":
+            in_block = True
+            i += 2
             continue
         else:
             out.append(ch)
@@ -275,12 +335,17 @@ def _strip_sql_comments(text: str) -> str:
 
 
 def _statement_lines(raw_lines: list[str] | None = None) -> list[str]:
-    """取迁移文件里真正的 SQL 语句行（去掉整行 `--` 注释与行尾 `--` 注释）。"""
+    """取迁移文件里真正的 SQL 语句行（去掉整行 `--`、行尾 `--` 与 `/* */` 块注释）。
+
+    **必须先对整段文本剥注释、再按行拆**：块注释可以跨行（`/*` 在一行、`*/` 在下一行），
+    若逐行调用 `_strip_sql_comments`，`in_block` 状态无法跨行传递，跨行块注释的中间几行
+    会被当成真语句。这个 bug 正是本文件 `test_0018_statement_lines_ignore_comments`
+    第一次跑就抓出来的。
+    """
     if raw_lines is None:
         raw_lines = (MIGRATIONS_DIR / MIGRATION_0018).read_text(encoding="utf-8").splitlines()
-    return [
-        s for s in (_strip_sql_comments(ln).strip() for ln in raw_lines) if s
-    ]
+    stripped = _strip_sql_comments("\n".join(raw_lines))
+    return [s for s in (ln.strip() for ln in stripped.splitlines()) if s]
 
 
 def _sql_statement_lines() -> list[str]:
@@ -289,10 +354,14 @@ def _sql_statement_lines() -> list[str]:
 
 
 def _statement_line_indexes(raw_lines: list[str]) -> list[int]:
-    """真实语句行在 `raw_lines` 里的下标（供按行注入使用）。"""
-    return [
-        i for i, ln in enumerate(raw_lines) if _strip_sql_comments(ln).strip()
-    ]
+    """真实语句行在 `raw_lines` 里的下标（供按行注入使用）。
+
+    逐行剥注释在这里**可以**接受：注入点是「最后一条真语句」，而块注释若跨到文件末尾
+    必然写错（`*/` 没了）—— 那种脚本本来就不该通过 sanity。但仍按整段处理以保持一致，
+    避免两套语义。
+    """
+    stripped = _strip_sql_comments("\n".join(raw_lines)).splitlines()
+    return [i for i, ln in enumerate(stripped) if ln.strip()]
 
 
 def _make_broken_sql() -> str:
