@@ -15,6 +15,13 @@ gTSP
 assets/execute/*
 !assets/execute/gtsp/
 !assets/execute/gtsp/gtsp-*
+# 例外：Windows 版 gtsp 的 shell 依赖，必须随包分发（见 assets/execute/gtsp/COPYING.busybox）。
+# 这两条目前是冗余保险：靠上面 `!assets/execute/gtsp/` 已经能进来。写显式规则是因为
+# 它一旦丢失不会有任何报错 —— `shell_windows.go` 会静默回退到 PATH 的 bash（用户没装
+# Git for Windows 就直接不可用），只有到 Windows 真机才暴露。与 TSP 仓库
+# `!gtsp/third_party/busybox/*.exe` 保持同一套写法。
+!assets/execute/gtsp/busybox64u.exe
+!assets/execute/gtsp/COPYING.busybox
 assets/frontend/
 assets/icon.icns
 .pyinstaller/
