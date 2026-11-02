@@ -40,13 +40,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    # 注意：build-desktop.yml 用 upload-artifact 的 archive: false（Direct Uploads），
-    # 该模式下 upload 的 name 参数会被忽略，artifact 名直接取文件名本身：
-    #   TogoSpace_<version>_<arch>.dmg
-    # 所以这里必须按文件名匹配，不能按 macOS-dmg-<arch> 匹配。
+    # 不带 pattern：下载本 run 的全部 artifact 并合并到 build/。
+    # build-mac 是唯一产出 artifact 的 job（build-desktop.yml 上传为
+    # macOS-dmg-<arch> 的 zip），不写死名字可避免 artifact 命名约定一变就失效
+    # ——v0.4.1 首次发版正是因为只按 macOS-dmg-* 匹配而取不到产物。
     - uses: actions/download-artifact@v7
       with:
-        pattern: TogoSpace_*.dmg
         path: build
         merge-multiple: true
 
@@ -55,6 +54,19 @@ jobs:
         echo "--- downloaded files ---"
         find build -maxdepth 2 -type f | sort || true
         ls -lh build/*.dmg
+
+    # 两个架构缺一不可，缺了就直接失败，而不是发一个只有单架构的 Release
+    - name: Verify both arch DMGs present
+      run: |
+        set -e
+        missing=0
+        for arch in arm64 x86_64; do
+          if ! ls build/*_${arch}.dmg >/dev/null 2>&1; then
+            echo "::error::missing DMG for arch: ${arch}"
+            missing=1
+          fi
+        done
+        test "$missing" -eq 0
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v3

@@ -173,12 +173,14 @@ jobs:
     - name: Show artifact
       run: ls -lh build/*.dmg
 
-    # 安装包统一上传为 workflow artifact；Release 发布由 release.yml 处理
+    # 安装包统一上传为 workflow artifact；Release 发布由 release.yml 处理。
+    # 不要用 archive: false（Direct Uploads）：该模式下 artifact 不是 zip，
+    # actions/download-artifact 取回时会报 "Not a valid zip file" 而失败，
+    # 且 name 参数被忽略导致 artifact 退化成裸文件名。保持默认打 zip。
     - name: Upload DMG artifact
       uses: actions/upload-artifact@v7
       with:
         name: macOS-dmg-${{ inputs.arch }}
         path: build/*.dmg
-        archive: false
         if-no-files-found: error
         retention-days: 30
