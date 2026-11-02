@@ -14,7 +14,7 @@
 - `src/service/teamService.py`
 - `src/service/schedulerService.py`
 - `src/service/llmService.py`
-- `src/service/agentService/agentTaskConsumer.py`
+- `src/service/agentService/agentJobConsumer.py`
 
 ## 0. 当前基线
 
@@ -167,7 +167,7 @@ class ScheduleState(Enum):
 
 建议：
 
-- 调度状态非 `RUNNING` 时，既不创建 `GtScheculeTask`，也不启动 `agent.start_consumer_task()`
+- 调度状态非 `RUNNING` 时，既不创建 `GtScheduleJob`，也不启动 `agent.start_consumer_task()`
 - 仅在 `RUNNING` 状态下才进入完整的任务创建与消费链路
 
 理由：

@@ -90,11 +90,11 @@ def teardown_method(self):
 ```python
 # 反例：后续用例替前序用例收拾状态
 agent.inject_history_messages([])
-agent.task_consumer.status = AgentStatus.IDLE
+agent.job_consumer.status = AgentStatus.IDLE
 
 # 正例：断言前置条件成立，不满足就失败
 await self.wait_agents_settled()
-assert agent.task_consumer.status == AgentStatus.IDLE, f"前序用例遗留了运行中的 consumer: {name}"
+assert agent.job_consumer.status == AgentStatus.IDLE, f"前序用例遗留了运行中的 consumer: {name}"
 ```
 
 补救代码会把「某个用例没走到确定结束点」这个真实缺陷藏起来，只在更晚、更不相关的地方以奇怪的方式暴露。
@@ -116,7 +116,7 @@ turn 的确定结束点：
 await self.wait_until(
     lambda: all(
         agent.status == AgentStatus.IDLE
-        and not agent.task_consumer._turn_runner._history.has_active_turn()
+        and not agent.job_consumer._turn_runner._history.has_active_turn()
         for agent in agentService.get_team_agents(team_id)
     ),
     timeout=3.0,
@@ -133,7 +133,7 @@ await self.wait_until(
 需要历史数据时，走真实写路径拿到真实主键：
 
 ```python
-history = agent.task_consumer._turn_runner._history
+history = agent.job_consumer._turn_runner._history
 await history.append_history_message(item)
 ```
 

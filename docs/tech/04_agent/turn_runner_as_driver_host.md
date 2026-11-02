@@ -1,6 +1,12 @@
 # TurnRunner 成为 AgentDriverHost — 技术方案
 
-> **状态：已完成。** 本方案已全部实施。TurnRunner 实现 AgentDriverHost 协议，自建 driver/tool_registry/history，由 Consumer 内部创建。Agent 不再暴露 turn_runner。
+> **状态：已完成。** 本方案已全部实施。
+>
+> **历史方案快照（勿据此查代码）**：本文记录的是当时的实施过程，文中 `AgentTaskConsumer` /
+> `task_consumer` / `current_db_task` / `run_chat_turn` 等符号已于 0.5.0 统一改名为
+> `AgentJobConsumer` / `job_consumer` / `_current_job` / `run_task_turn`（其中 `current_db_task`
+> 已随 `3713f05a` 移除，现由 `AgentTurnRunner._current_job` 承担）。当前生效描述见
+> `docs/tech/04_agent/task_lifecycle.md` 与 `docs/tech/04_agent/scheduling_logic.md`。TurnRunner 实现 AgentDriverHost 协议，自建 driver/tool_registry/history，由 Consumer 内部创建。Agent 不再暴露 turn_runner。
 
 ## 背景
 

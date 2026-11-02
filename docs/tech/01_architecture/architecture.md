@@ -78,7 +78,7 @@ src/
 │   │   ├── core.py                 # Agent 生命周期管理
 │   │   ├── agent.py                # Agent 运行时实例
 │   │   ├── agentTurnRunner.py      # Turn 内部逻辑（推理 + 工具调用编排）
-│   │   ├── agentTaskConsumer.py    # 任务消费者
+│   │   ├── agentJobConsumer.py     # 任务消费者
 │   │   ├── agentHistoryStore.py    # 对话历史管理
 │   │   ├── compact.py              # Token 预算 & 上下文压缩
 │   │   ├── promptBuilder.py        # Prompt 构建
@@ -282,7 +282,7 @@ AppConfig
 | `GtRoleTemplate` | gt_role_template | 角色模板 |
 | `GtRoomMessage` | gt_room_message | 聊天消息记录 |
 | `GtAgentHistory` | gt_agent_history | Agent 对话历史（LLM 上下文） |
-| `GtScheculeTask` | schecule_tasks | 调度任务队列 |
+| `GtScheduleJob` | schedule_jobs | 调度任务队列 |
 | `GtAgentTask` | agent_tasks | 协作任务队列 |
 | `GtAgentActivity` | gt_agent_activity | Agent 活动记录（推理/工具调用） |
 | `GtSystemConfig` | gt_system_config | 系统配置 KV 存储 |
@@ -321,7 +321,7 @@ roomController → roomService.send_message()
 schedulerService（监听 ROOM_STATUS_CHANGED）
     │  调度下一个发言 Agent
     ▼
-agentTaskConsumer → AgentTurnRunner.run()
+agentJobConsumer → AgentTurnRunner.run()
     │  1. 构建 Prompt
     │  2. 调用 LLM Driver（nativeDriver / tspDriver / claudeSdkDriver）
     │  3. 解析工具调用 → funcToolService 执行

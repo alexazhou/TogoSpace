@@ -5,7 +5,7 @@
 - `src/service/roomService.py`
 - `src/service/schedulerService.py`
 - `src/service/agentService/agent.py`
-- `src/service/agentService/agentTaskConsumer.py`
+- `src/service/agentService/agentJobConsumer.py`
 - `src/service/agentService/agentTurnRunner.py`
 - `src/service/funcToolService/tools.py`
 
@@ -13,12 +13,12 @@
 
 - `ChatRoom`：房间级状态机，维护当前发言位、轮次计数、跳过窗口与 `INIT / SCHEDULING / IDLE` 状态。
 - `schedulerService`：订阅 `ROOM_AGENT_TURN`，为目标 Agent 创建数据库任务记录，并按需拉起消费协程。
-- `Agent`：纯 facade，对外暴露 `start_consumer_task()` 等高层接口，内部委托给 `AgentTaskConsumer`。
-- `AgentTaskConsumer`：串行消费数据库任务，管理 Agent 运行时状态（`status`、`current_db_task`）。
+- `Agent`：纯 facade，对外暴露 `start_consumer_task()` 等高层接口，内部委托给 `AgentJobConsumer`。
+- `AgentJobConsumer`：串行消费数据库任务，管理 Agent 运行时状态（`status`、消费协程句柄）。
 - `AgentTurnRunner`：执行一轮推理、工具调用与收尾。实现 `AgentDriverHost` 协议。
 - `funcToolService`：提供 `send_chat_msg` / `finish_action` 等工具，驱动 turn 真正推进。
 
-Scheduler 不维护独立的运行中 Agent / Task 列表，消费协程句柄归 `AgentTaskConsumer` 自身持有。
+Scheduler 不维护独立的运行中 Agent / Task 列表，消费协程句柄归 `AgentJobConsumer` 自身持有。
 
 ## 2. 关键状态
 
@@ -33,11 +33,11 @@ Scheduler 不维护独立的运行中 Agent / Task 列表，消费协程句柄�
 
 ### 2.2 Agent 运行时状态
 
-以下状态由 `AgentTaskConsumer` 持有，`Agent` 通过 property 代理暴露：
+以下状态由 `AgentJobConsumer` 持有，`Agent` 通过 property 代理暴露：
 
 - `status`：`ACTIVE / IDLE / FAILED`。
 - `_aio_consumer_task`：当前 Agent 的消费协程句柄。
-- `current_db_task`：当前认领中的数据库任务记录（`GtScheculeTask`）。
+- `_current_job`：由 `AgentTurnRunner` 持有，在 `run_task_turn` 执行期间指向当前调度任务记录（`GtScheduleJob`），turn 结束即清空。
 
 ### 2.3 消息总线事件
 
@@ -96,28 +96,27 @@ Scheduler 不维护独立的运行中 Agent / Task 列表，消费协程句柄�
 2. 检查调度闸门 `_schedule_state`，非 `RUNNING` 时跳过
 3. 从 payload 中读取 `current_turn_agent_id` 对应的 Agent
 4. 检查该 Agent 是否已经存在同一 `room_id` 的 `PENDING` 数据库任务
-5. 若无重复，则创建 `GtScheculeTask(type=ROOM_MESSAGE, task_data={"room_id": room_id})`
+5. 若无重复，则调用 `gtScheduleJobManager.create_job(agent_id, AgentJobType.ROOM_MESSAGE, {"room_id": room_id})`
 6. 调用 `agent.start_consumer_task()`
 
 这里的去重粒度是"同一 Agent、同一房间、仍处于 `PENDING` 的数据库任务"。
 
-### 4.3 AgentTaskConsumer 消费数据库任务
+### 4.3 AgentJobConsumer 消费数据库任务
 
-`Agent.start_consumer_task()` 转发给 `AgentTaskConsumer.start()`，后者只负责保证消费协程存在：
+`Agent.start_consumer_task()` 转发给 `AgentJobConsumer.start()`，后者只负责保证消费协程存在：
 
 - 若 `_aio_consumer_task` 仍在运行，则直接跳过
 - 否则创建 `asyncio.create_task(self.consume())`
 
-`AgentTaskConsumer.consume()` 的主要流程：
+`AgentJobConsumer.consume()` 的主要流程：
 
 1. 将 `status` 置为 `ACTIVE` 并发布 `AGENT_STATUS_CHANGED`
-2. 循环读取该 Agent 的首个 `PENDING` 任务
-3. 通过 `transition_task_status()` 原子认领任务（PENDING → RUNNING）
-4. 设置 `current_db_task`
-5. 调用 `_turn_runner.run_chat_turn(task)`
-6. 成功则将任务标记为 `COMPLETED`
-7. 失败则将任务标记为 `FAILED`，并将 Agent 状态置为 `FAILED`
-8. 循环直到没有待处理任务
+2. 循环读取该 Agent 的首个未完成 job（`get_first_unfinished_job`，按 `job_type ASC, id ASC`）
+3. 通过 `transition_job_status()` 原子认领 job（PENDING / FAILED → RUNNING）
+4. 调用 `_turn_runner.run_task_turn(job)`（`_current_job` 由 TurnRunner 在 turn 内维护）
+5. 成功则将 job 标记为 `COMPLETED`；若为 `TODO_TASK`，随后扫描协作任务并自动排程
+6. 失败则将 job 标记为 `FAILED`，并将 Agent 状态置为 `FAILED`
+7. 循环直到没有待处理 job
 
 在清理逻辑中：
 
@@ -128,16 +127,16 @@ Scheduler 不维护独立的运行中 Agent / Task 列表，消费协程句柄�
 因此当前模型是：
 
 - Scheduler 负责"投递数据库任务并唤起消费者"
-- AgentTaskConsumer 负责"串行消费数据库任务"
+- AgentJobConsumer 负责"串行消费数据库任务"
 
 ### 4.4 AgentTurnRunner 执行一轮聊天
 
-`AgentTurnRunner.run_chat_turn(task)` 会：
+`AgentTurnRunner.run_task_turn(job)` 会：
 
-1. 从 `task.task_data["room_id"]` 获取房间，设置 `_current_room` 上下文
+1. 若 `job.job_type == ROOM_MESSAGE`：从 `job.task_data["room_id"]` 获取房间，设置 `_current_room` 上下文；其它类型跳过房间同步
 2. 调用 `pull_room_messages_to_history(room)` 同步未读消息
-3. 调用 `driver.run_chat_turn(task, synced_count)` 执行本轮
-4. 清除 `_current_room` 上下文
+3. 调用 `driver.run_task_turn(job, synced_count)` 执行本轮
+4. 清除 `_current_room` / `_current_job` 上下文
 
 这里需要区分两个层级：
 
@@ -257,25 +256,25 @@ Scheduler 不维护独立的运行中 Agent / Task 列表，消费协程句柄�
 
 ### 8.3 `src/service/agentService/agent.py`
 
-- `Agent.start_consumer_task` → 转发 `task_consumer.start()`
-- `Agent.stop_consumer_task` → 转发 `task_consumer.stop()`
-- `Agent.startup` → 转发 `task_consumer._turn_runner.driver.startup()`
+- `Agent.start_consumer_task` → 转发 `job_consumer.start()`
+- `Agent.stop_consumer_task` → 转发 `job_consumer.stop()`
+- `Agent.startup` → 转发 `job_consumer._turn_runner.driver.startup()`
 - `Agent.close` → 停止消费 + driver.shutdown + tool_registry.clear
-- `Agent.dump_history_messages` → 转发 `task_consumer._turn_runner._history.dump()`
-- `Agent.inject_history_messages` → 转发 `task_consumer._turn_runner._history.replace()`
+- `Agent.dump_history_messages` → 转发 `job_consumer._turn_runner._history.dump()`
+- `Agent.inject_history_messages` → 转发 `job_consumer._turn_runner._history.replace()`
 
-### 8.4 `src/service/agentService/agentTaskConsumer.py`
+### 8.4 `src/service/agentService/agentJobConsumer.py`
 
-- `AgentTaskConsumer.start`
-- `AgentTaskConsumer.stop`
-- `AgentTaskConsumer.consume`
-- `AgentTaskConsumer._execute_task`
-- `AgentTaskConsumer.resume_failed`
-- `AgentTaskConsumer._publish_status`
+- `AgentJobConsumer.start`
+- `AgentJobConsumer.stop`
+- `AgentJobConsumer.consume`
+- `AgentJobConsumer._execute_task`
+- `AgentJobConsumer.resume_failed`
+- `AgentJobConsumer._publish_status`
 
 ### 8.5 `src/service/agentService/agentTurnRunner.py`
 
-- `AgentTurnRunner.run_chat_turn`
+- `AgentTurnRunner.run_task_turn`
 - `AgentTurnRunner._run_turn_loop`
 - `AgentTurnRunner._advance_step`
 - `AgentTurnRunner.pull_room_messages_to_history`

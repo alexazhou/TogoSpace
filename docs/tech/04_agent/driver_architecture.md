@@ -31,8 +31,8 @@
 
 ```
 Agent (facade)
- └── task_consumer: AgentTaskConsumer (任务管道)
-      ├── 拥有: status, current_db_task, 消费协程
+ └── job_consumer: AgentJobConsumer (任务管道)
+      ├── 拥有: status, 消费协程
       └── _turn_runner: AgentTurnRunner (内部创建，实现 AgentDriverHost)
            ├── gt_agent, system_prompt, agent_workdir
            ├── _history: AgentHistoryStore    (自建)
@@ -48,9 +48,9 @@ Agent (facade)
 1. `schedulerService` 收到 `ROOM_AGENT_TURN`
 2. scheduler 找到对应 `Agent`
 3. scheduler 创建数据库任务并调用 `agent.start_consumer_task()`
-4. `AgentTaskConsumer.consume()` 认领并执行任务
-5. Consumer 调用 `turn_runner.run_chat_turn(task)`
-6. TurnRunner 完成房间消息同步后，调用 `self.driver.run_chat_turn(task, synced_count)`
+4. `AgentJobConsumer.consume()` 认领并执行任务
+5. Consumer 调用 `turn_runner.run_task_turn(task)`
+6. TurnRunner 完成房间消息同步后，调用 `self.driver.run_task_turn(task, synced_count)`
 7. driver 用 TurnRunner 暴露的宿主能力完成这一轮
 
 调度器只依赖 `Agent` 的稳定接口，不感知具体 driver 或内部组件。
@@ -58,7 +58,7 @@ Agent (facade)
 ## 代码位置
 
 - `src/service/agentService/agent.py`
-- `src/service/agentService/agentTaskConsumer.py`
+- `src/service/agentService/agentJobConsumer.py`
 - `src/service/agentService/agentTurnRunner.py`
 - `src/service/agentService/core.py`
 - `src/service/agentService/driver/base.py`
@@ -131,14 +131,14 @@ class AgentDriver:
 
     async def startup(self) -> None: ...
     async def shutdown(self) -> None: ...
-    async def run_chat_turn(self, task: GtScheculeTask, synced_count: int) -> None: ...
+    async def run_task_turn(self, task: GtScheduleJob, synced_count: int) -> None: ...
 ```
 
 职责：
 
 - `startup`：初始化 driver 级资源（SDK client、外部进程句柄、会话对象）
 - `shutdown`：释放 driver 资源
-- `run_chat_turn`：驱动某个任务的一轮发言
+- `run_task_turn`：驱动某个任务的一轮发言
 
 ## `AgentTurnRunner` 的职责
 
@@ -154,7 +154,7 @@ TurnRunner 负责：
 
 其中有两个概念需要区分：
 
-- `turn`：处理“某个房间轮到当前 agent 发言”的整轮过程，对应 `run_chat_turn(...)`
+- `turn`：处理“某个房间轮到当前 agent 发言”的整轮过程，对应 `run_task_turn(...)`
 - `step`：turn 内部的一次推进动作，例如一次推理、一次执行工具、一次恢复待执行工具
 
 `TurnStepResult` 用于描述单个 step 执行后的结果：
@@ -186,9 +186,9 @@ class AgentTurnRunner:
 - **生命周期**：`startup()` / `close()`
 - **任务管理**：`start_consumer_task()` / `stop_consumer_task()` / `resume_failed()`
 - **历史操作**：`dump_history_messages()` / `inject_history_messages()`
-- **状态属性**：`status` / `current_db_task` / `is_active`
+- **状态属性**：`status` / `is_active`（当前调度 job 由 `AgentTurnRunner._current_job` 在 turn 内维护）
 
-Agent 内部只持有 `gt_agent`、`system_prompt` 和 `task_consumer`。不直接持有 driver、history 或 tool_registry。
+Agent 内部只持有 `gt_agent`、`system_prompt` 和 `job_consumer`。不直接持有 driver、history 或 tool_registry。
 
 ## Factory 设计
 
