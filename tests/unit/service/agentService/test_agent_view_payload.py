@@ -18,7 +18,7 @@ import pytest
 
 from constants import (
     AgentStatus,
-    AgentTaskStatus,
+    AgentJobStatus,
     ContainerState,
     DriverType,
     EmployStatus,
@@ -140,10 +140,10 @@ async def test_detail_info_defaults_to_host(monkeypatch):
 
 async def test_get_agent_error_message_returns_failed_task_message(monkeypatch):
     """最早未完成任务失败时返回其 error_message。"""
-    failed_task = SimpleNamespace(status=AgentTaskStatus.FAILED, error_message="boom")
+    failed_task = SimpleNamespace(status=AgentJobStatus.FAILED, error_message="boom")
     monkeypatch.setattr(
-        core.gtScheculeTaskManager,
-        "get_first_unfinish_task",
+        core.gtScheduleJobManager,
+        "get_first_unfinished_job",
         AsyncMock(return_value=failed_task),
     )
 
@@ -152,10 +152,10 @@ async def test_get_agent_error_message_returns_failed_task_message(monkeypatch):
 
 async def test_get_agent_error_message_returns_none_without_failure(monkeypatch):
     """没有未完成任务 / 最早任务未失败时返回 None。"""
-    for task in (None, SimpleNamespace(status=AgentTaskStatus.PENDING, error_message="")):
+    for task in (None, SimpleNamespace(status=AgentJobStatus.PENDING, error_message="")):
         monkeypatch.setattr(
-            core.gtScheculeTaskManager,
-            "get_first_unfinish_task",
+            core.gtScheduleJobManager,
+            "get_first_unfinished_job",
             AsyncMock(return_value=task),
         )
         assert await core.get_agent_error_message(3) is None

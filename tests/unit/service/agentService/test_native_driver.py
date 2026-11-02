@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from model.dbModel.gtScheculeTask import GtScheculeTask
+from model.dbModel.gtScheduleJob import GtScheduleJob
 from service.agentService.driver.base import AgentDriverConfig
 from service.agentService.driver.nativeDriver import NativeAgentDriver
 from service.agentService.toolRegistry import AgentToolRegistry
@@ -84,9 +84,9 @@ async def test_native_driver_setup_registers_tools(
 
 @pytest.mark.asyncio
 async def test_native_driver_run_task_turn_is_disabled(driver: NativeAgentDriver) -> None:
-    task = MagicMock(spec=GtScheculeTask)
+    job = MagicMock(spec=GtScheduleJob)
     with pytest.raises(RuntimeError, match="不再直接执行 run_task_turn"):
-        await driver.run_task_turn(task=task, synced_count=0)
+        await driver.run_task_turn(job=job, synced_count=0)
 
 
 @pytest.mark.asyncio

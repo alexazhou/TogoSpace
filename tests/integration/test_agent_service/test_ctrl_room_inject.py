@@ -63,7 +63,7 @@ class TestCtrlRoomMessageInjectionDuringGroupTurn(ServiceTestCase):
         """
         alice = await gtAgentManager.get_agent(self.team_id, "alice")
         alice_agent = agentService.get_agent(alice.id)
-        turn_runner = alice_agent.task_consumer._turn_runner
+        turn_runner = alice_agent.job_consumer._turn_runner
 
         # 获取控制房间，让 alice 完成一轮使其进入 IDLE
         ctrl_room, _ = await roomService.get_or_create_control_room(self.team_id, alice.id)
@@ -111,7 +111,7 @@ class TestCtrlRoomMessageInjectionDuringGroupTurn(ServiceTestCase):
         """
         alice = await gtAgentManager.get_agent(self.team_id, "alice")
         alice_agent = agentService.get_agent(alice.id)
-        consumer = alice_agent.task_consumer
+        consumer = alice_agent.job_consumer
 
         # 确保 consumer 处于 IDLE 状态（没有运行中的消费协程）
         consumer.stop()

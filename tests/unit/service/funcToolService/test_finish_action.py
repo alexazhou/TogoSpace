@@ -1,6 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
-from constants import AgentTaskType, TaskStatus
+from constants import AgentJobType, TaskStatus
 from service.funcToolService.tools import finish_action
 from service.roomService.core import ToolCallContext
 
@@ -21,17 +21,17 @@ def _make_collab_context(
     reviewer_id: int | None = None,
     creator_id: int = 2,
 ) -> tuple[ToolCallContext, MagicMock]:
-    """构造协作任务模式的 ToolCallContext（含 schedule_task 和 mock agent_task）。"""
-    schedule_task = MagicMock()
-    schedule_task.task_type = AgentTaskType.TODO_TASK
-    schedule_task.task_data = {"agent_task_id": 42}
+    """构造协作任务模式的 ToolCallContext（含 schedule_job 和 mock agent_task）。"""
+    schedule_job = MagicMock()
+    schedule_job.job_type = AgentJobType.TODO_TASK
+    schedule_job.task_data = {"agent_task_id": 42}
     agent_task = MagicMock()
     agent_task.title = "测试任务"
     agent_task.status = agent_task_status
     agent_task.assignee_id = assignee_id
     agent_task.reviewer_id = reviewer_id
     agent_task.creator_id = creator_id
-    return ToolCallContext(agent_id=agent_id, team_id=1, chat_room=None, schedule_task=schedule_task), agent_task
+    return ToolCallContext(agent_id=agent_id, team_id=1, chat_room=None, schedule_job=schedule_job), agent_task
 
 
 @pytest.mark.asyncio

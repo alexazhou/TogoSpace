@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from constants import AgentStatus, AgentTaskStatus, AgentTaskType
-from dal.db import gtTeamManager, gtAgentManager, gtAgentHistoryManager, gtScheculeTaskManager
+from constants import AgentStatus, AgentJobStatus, AgentJobType
+from dal.db import gtTeamManager, gtAgentManager, gtAgentHistoryManager, gtScheduleJobManager
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from model.dbModel.gtScheculeTask import GtScheculeTask
+from model.dbModel.gtScheduleJob import GtScheduleJob
 from model.dbModel.gtDept import GtDept
 from model.dbModel.gtTeam import GtTeam
 from service import presetService, agentService, ormService, persistenceService, roomService, messageBus, deptService
@@ -169,12 +169,12 @@ class TestRestoreAgentHistory(ServiceTestCase):
                 seq=1,
             )
         )
-        running_task = await gtScheculeTaskManager.create_task(
+        running_task = await gtScheduleJobManager.create_job(
             gt_alice.id,
-            AgentTaskType.ROOM_MESSAGE,
+            AgentJobType.ROOM_MESSAGE,
             {"room_id": 1},
         )
-        await gtScheculeTaskManager.update_task_status(running_task.id, AgentTaskStatus.RUNNING)
+        await gtScheduleJobManager.update_job_status(running_task.id, AgentJobStatus.RUNNING)
         cls.running_task_id = running_task.id
 
         # 模拟进程重启
@@ -199,13 +199,13 @@ class TestRestoreAgentHistory(ServiceTestCase):
         await ormService.shutdown()
 
     async def test_history_restored(self):
-        assert [m.content for m in self.fresh_agent.task_consumer._turn_runner._history] == ["u1", "a1"]
+        assert [m.content for m in self.fresh_agent.job_consumer._turn_runner._history] == ["u1", "a1"]
 
     async def test_running_task_marked_failed_after_restore(self):
         assert self.running_task_id is not None
-        task = await GtScheculeTask.aio_get_or_none(GtScheculeTask.id == self.running_task_id)
+        task = await GtScheduleJob.aio_get_or_none(GtScheduleJob.id == self.running_task_id)
         assert task is not None
-        assert task.status == AgentTaskStatus.FAILED
+        assert task.status == AgentJobStatus.FAILED
         assert task.error_message == "task interrupted by process restart"
 
     async def test_agent_runtime_status_marked_failed_after_restore(self):

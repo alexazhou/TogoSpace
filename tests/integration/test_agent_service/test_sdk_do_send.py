@@ -12,7 +12,7 @@ from dal.db import gtTeamManager
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from model.dbModel.gtScheculeTask import GtScheculeTask
+from model.dbModel.gtScheduleJob import GtScheduleJob
 from service import roomService, agentService, ormService, persistenceService
 from service import funcToolService, presetService
 from service.agentService import Agent
@@ -21,7 +21,7 @@ from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
 from service.funcToolService.core import get_tools
 from service.agentService.toolRegistry import CATEGORY_CONFIG
-from constants import DriverType, RoleTemplateType, AgentTaskType, SpecialAgent, ToolCategory
+from constants import DriverType, RoleTemplateType, AgentJobType, SpecialAgent, ToolCategory
 from util import llmApiUtil, configUtil
 from util.configUtil.configTypes import TeamPreset, AgentPreset, DeptNodePreset
 from ...base import ServiceTestCase
@@ -85,23 +85,23 @@ class TestSdkDoSend(ServiceTestCase):
         agent = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, agent_name))
 
         # 3. 模拟 schedulerService：进入该房间回合前注入运行时的 current_db_task
-        task = GtScheculeTask(
+        task = GtScheduleJob(
             id=1,
             agent_id=agent.gt_agent.id,
-            task_type=AgentTaskType.ROOM_MESSAGE,
+            task_type=AgentJobType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
-        agent.task_consumer.current_db_task = task
+        agent.job_consumer.current_db_task = task
 
         # 4. 模拟 TurnRunner.run_task_turn 中设置的 _current_room 上下文
-        agent.task_consumer._turn_runner._current_room = room
+        agent.job_consumer._turn_runner._current_room = room
 
         # 5. 驱动绑定（不调 startup，手动注册 tool_registry）
-        driver = ClaudeSdkAgentDriver(agent.task_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))
-        agent.task_consumer._turn_runner.tool_registry.clear()
+        driver = ClaudeSdkAgentDriver(agent.job_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))
+        agent.job_consumer._turn_runner.tool_registry.clear()
         for t in funcToolService.get_tools_by_names(["send_chat_msg", "finish_action"]):
             fn_name = t.function.name
-            agent.task_consumer._turn_runner.tool_registry.register(
+            agent.job_consumer._turn_runner.tool_registry.register(
                 t,
                 funcToolService.run_tool_call,
                 marks_turn_finish=fn_name == "finish_action",
@@ -201,11 +201,11 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             system_prompt="test",
             driver_config=AgentDriverConfig(driver_type="native"),
         )
-        driver = ClaudeSdkAgentDriver(agent.task_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))
-        task = GtScheculeTask(
+        driver = ClaudeSdkAgentDriver(agent.job_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))
+        task = GtScheduleJob(
             id=1,
             agent_id=1,
-            task_type=AgentTaskType.ROOM_MESSAGE,
+            task_type=AgentJobType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
 
@@ -221,7 +221,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             system_prompt="test",
             driver_config=AgentDriverConfig(driver_type="native"),
         )
-        driver = ClaudeSdkAgentDriver(agent.task_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))
+        driver = ClaudeSdkAgentDriver(agent.job_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))
 
         captured_options = {}
 
@@ -240,14 +240,14 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
              patch("service.agentService.driver.claudeSdkDriver.ClaudeSDKClient", side_effect=_FakeClaudeClient):
             await driver.startup()
 
-        exported_names = [tool.function.name for tool in agent.task_consumer._turn_runner.tool_registry.export_openai_tools()]
+        exported_names = [tool.function.name for tool in agent.job_consumer._turn_runner.tool_registry.export_openai_tools()]
         # expected 口径 = 「已归入 Category 且非 ADMIN」的本地工具（get_task 废弃别名已在 #71 删除）
         expected_names = {
             t.function.name for t in get_tools()
             if CATEGORY_CONFIG.get(t.function.name) not in (None, ToolCategory.ADMIN)
         }
         assert set(exported_names) == expected_names
-        assert "get_task" not in exported_names
+        assert "get_job" not in exported_names
         assert "allowed_tools" not in captured_options
 
     async def test_startup_with_tool_allow_specs_keeps_basic_tools_and_passes_sdk_allowlist(self) -> None:
@@ -257,7 +257,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             driver_config=AgentDriverConfig(driver_type="native"),
         )
         driver = ClaudeSdkAgentDriver(
-            agent.task_consumer._turn_runner,
+            agent.job_consumer._turn_runner,
             AgentDriverConfig(driver_type="claude_sdk", options={"tool_allow_specs": ["Read"]}),
         )
 
@@ -278,7 +278,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
              patch("service.agentService.driver.claudeSdkDriver.ClaudeSDKClient", side_effect=_FakeClaudeClient):
             await driver.startup()
 
-        exported_names = [tool.function.name for tool in agent.task_consumer._turn_runner.tool_registry.export_openai_tools()]
+        exported_names = [tool.function.name for tool in agent.job_consumer._turn_runner.tool_registry.export_openai_tools()]
         basic_tool_names = {name for name, cat in CATEGORY_CONFIG.items() if cat == ToolCategory.BASIC}
         assert set(exported_names) == basic_tool_names
         assert captured_options["allowed_tools"] == ["Read"]
@@ -290,7 +290,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             driver_config=AgentDriverConfig(driver_type="native"),
         )
         driver = ClaudeSdkAgentDriver(
-            agent.task_consumer._turn_runner,
+            agent.job_consumer._turn_runner,
             AgentDriverConfig(driver_type="claude_sdk", options={"local_tool_names": ["send_chat_msg", "finish_action"]}),
         )
 
@@ -311,7 +311,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
              patch("service.agentService.driver.claudeSdkDriver.ClaudeSDKClient", side_effect=_FakeClaudeClient):
             await driver.startup()
 
-        exported_names = [tool.function.name for tool in agent.task_consumer._turn_runner.tool_registry.export_openai_tools()]
+        exported_names = [tool.function.name for tool in agent.job_consumer._turn_runner.tool_registry.export_openai_tools()]
         assert exported_names == ["send_chat_msg", "finish_action"]
         assert "allowed_tools" not in captured_options
 
@@ -323,15 +323,15 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             system_prompt="test",
             driver_config=AgentDriverConfig(driver_type="native"),
         )
-        task = GtScheculeTask(
+        task = GtScheduleJob(
             id=1,
             agent_id=1,
-            task_type=AgentTaskType.ROOM_MESSAGE,
+            task_type=AgentJobType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
-        agent.task_consumer.current_db_task = task
-        agent.task_consumer._turn_runner._current_room = room
-        driver = ClaudeSdkAgentDriver(agent.task_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))
+        agent.job_consumer.current_db_task = task
+        agent.job_consumer._turn_runner._current_room = room
+        driver = ClaudeSdkAgentDriver(agent.job_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client
 
@@ -349,13 +349,13 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
             system_prompt="test",
             driver_config=AgentDriverConfig(driver_type="native"),
         )
-        task = GtScheculeTask(
+        task = GtScheduleJob(
             id=1,
             agent_id=1,
-            task_type=AgentTaskType.ROOM_MESSAGE,
+            task_type=AgentJobType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
-        driver = ClaudeSdkAgentDriver(agent.task_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))
+        driver = ClaudeSdkAgentDriver(agent.job_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))
         fake_client = _FakeClaudeClient()
         driver._sdk_client = fake_client
 

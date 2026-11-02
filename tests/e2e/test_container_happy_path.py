@@ -413,7 +413,7 @@ async def test_enter_then_exit_container_with_real_handshake(e2e_env, monkeypatc
         gt_agent=GtAgent(id=1, team_id=1, name="小美", role_template_id=1),
         system_prompt="",
     )
-    agent.task_consumer._turn_runner.driver = driver
+    agent.job_consumer._turn_runner.driver = driver
     monkeypatch.setattr(agentService.core, "_agents", {1: agent})
 
     entered = False

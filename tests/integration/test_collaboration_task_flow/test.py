@@ -13,10 +13,10 @@ import sys
 
 import pytest
 
-from constants import AgentTaskStatus, AgentTaskType, AgentStatus, TaskStatus
-from dal.db import gtAgentManager, gtTeamManager, gtScheculeTaskManager, gtAgentTaskManager
+from constants import AgentJobStatus, AgentJobType, AgentStatus, TaskStatus
+from dal.db import gtAgentManager, gtTeamManager, gtScheduleJobManager, gtAgentTaskManager
 from model.dbModel.gtAgentTask import GtAgentTask
-from model.dbModel.gtScheculeTask import GtScheculeTask
+from model.dbModel.gtScheduleJob import GtScheduleJob
 from service import presetService, agentService, roomService, ormService, persistenceService, funcToolService
 from util import configUtil
 from ...base import ServiceTestCase
@@ -80,41 +80,41 @@ class TestTaskPriority(_CollabTaskCase):
         """同时存在 ROOM_MESSAGE 和 TODO_TASK 调度时，get_first_unfinish_task 应先返回 ROOM_MESSAGE。"""
         team, alice_db, _ = await self._get_alice()
 
-        collab_sched = await gtScheculeTaskManager.create_task(
+        collab_sched = await gtScheduleJobManager.create_job(
             alice_db.id,
-            AgentTaskType.TODO_TASK,
+            AgentJobType.TODO_TASK,
             {"agent_task_id": 9999},
         )
-        room_sched = await gtScheculeTaskManager.create_task(
+        room_sched = await gtScheduleJobManager.create_job(
             alice_db.id,
-            AgentTaskType.ROOM_MESSAGE,
+            AgentJobType.ROOM_MESSAGE,
             {"room_id": 9999},
         )
         try:
-            first = await gtScheculeTaskManager.get_first_unfinish_task(alice_db.id)
+            first = await gtScheduleJobManager.get_first_unfinished_job(alice_db.id)
             assert first is not None
-            assert first.task_type == AgentTaskType.ROOM_MESSAGE, (
-                f"期望 ROOM_MESSAGE 优先，但得到 {first.task_type}"
+            assert first.job_type == AgentJobType.ROOM_MESSAGE, (
+                f"期望 ROOM_MESSAGE 优先，但得到 {first.job_type}"
             )
         finally:
-            await gtScheculeTaskManager.update_task_status(collab_sched.id, AgentTaskStatus.CANCELLED)
-            await gtScheculeTaskManager.update_task_status(room_sched.id, AgentTaskStatus.CANCELLED)
+            await gtScheduleJobManager.update_job_status(collab_sched.id, AgentJobStatus.CANCELLED)
+            await gtScheduleJobManager.update_job_status(room_sched.id, AgentJobStatus.CANCELLED)
 
     async def test_collaboration_task_scheduled_after_room_message_gone(self):
         """当 ROOM_MESSAGE 调度已完成时，get_first_unfinish_task 应返回 TODO_TASK。"""
         team, alice_db, _ = await self._get_alice()
 
-        collab_sched = await gtScheculeTaskManager.create_task(
+        collab_sched = await gtScheduleJobManager.create_job(
             alice_db.id,
-            AgentTaskType.TODO_TASK,
+            AgentJobType.TODO_TASK,
             {"agent_task_id": 9998},
         )
         try:
-            first = await gtScheculeTaskManager.get_first_unfinish_task(alice_db.id)
+            first = await gtScheduleJobManager.get_first_unfinished_job(alice_db.id)
             assert first is not None
-            assert first.task_type == AgentTaskType.TODO_TASK
+            assert first.job_type == AgentJobType.TODO_TASK
         finally:
-            await gtScheculeTaskManager.update_task_status(collab_sched.id, AgentTaskStatus.CANCELLED)
+            await gtScheduleJobManager.update_job_status(collab_sched.id, AgentJobStatus.CANCELLED)
 
 
 class TestAutoSchedule(_CollabTaskCase):
@@ -128,9 +128,9 @@ class TestAutoSchedule(_CollabTaskCase):
 
         agent_task = await self._create_collab_task(alice_db.id, team.id, title="待处理任务")
 
-        room_sched = await gtScheculeTaskManager.create_task(
+        room_sched = await gtScheduleJobManager.create_job(
             alice_db.id,
-            AgentTaskType.ROOM_MESSAGE,
+            AgentJobType.ROOM_MESSAGE,
             {"room_id": room.room_id},
         )
         await room.activate_scheduling()
@@ -143,16 +143,16 @@ class TestAutoSchedule(_CollabTaskCase):
             {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "已完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
-            await alice.task_consumer.consume()
+            await alice.job_consumer.consume()
 
         # ROOM_MESSAGE 调度应已完成
-        completed_sched = await gtScheculeTaskManager.get_task(room_sched.id)
-        assert completed_sched.status == AgentTaskStatus.COMPLETED
+        completed_sched = await gtScheduleJobManager.get_job(room_sched.id)
+        assert completed_sched.status == AgentJobStatus.COMPLETED
 
         # 应已自动创建并完成了 TODO_TASK 调度（验证 auto-schedule 机制）
-        all_scheds = list(await GtScheculeTask.select().where(
-            GtScheculeTask.agent_id == alice_db.id,
-            GtScheculeTask.task_type == AgentTaskType.TODO_TASK,
+        all_scheds = list(await GtScheduleJob.select().where(
+            GtScheduleJob.agent_id == alice_db.id,
+            GtScheduleJob.job_type == AgentJobType.TODO_TASK,
         ).aio_execute())
         assert len(all_scheds) >= 1, "ROOM_MESSAGE turn 完成后，应自动创建协作任务调度"
 
@@ -178,9 +178,9 @@ class TestAutoSchedule(_CollabTaskCase):
         )
         review_task = await create_task_with_event(review_task)
 
-        room_sched = await gtScheculeTaskManager.create_task(
+        room_sched = await gtScheduleJobManager.create_job(
             alice_db.id,
-            AgentTaskType.ROOM_MESSAGE,
+            AgentJobType.ROOM_MESSAGE,
             {"room_id": room.room_id},
         )
         await room.activate_scheduling()
@@ -191,14 +191,14 @@ class TestAutoSchedule(_CollabTaskCase):
             {"tool_calls": [{"name": "update_task", "arguments": {"task_id": review_task.id, "new_status": "DONE", "note": "验收通过"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
-            await alice.task_consumer.consume()
+            await alice.job_consumer.consume()
 
-        completed_sched = await gtScheculeTaskManager.get_task(room_sched.id)
-        assert completed_sched.status == AgentTaskStatus.COMPLETED
+        completed_sched = await gtScheduleJobManager.get_job(room_sched.id)
+        assert completed_sched.status == AgentJobStatus.COMPLETED
 
-        all_scheds = list(await GtScheculeTask.select().where(
-            GtScheculeTask.agent_id == alice_db.id,
-            GtScheculeTask.task_type == AgentTaskType.TODO_TASK,
+        all_scheds = list(await GtScheduleJob.select().where(
+            GtScheduleJob.agent_id == alice_db.id,
+            GtScheduleJob.job_type == AgentJobType.TODO_TASK,
         ).aio_execute())
         assert any(t.task_data.get("agent_task_id") == review_task.id for t in all_scheds), (
             "ROOM_MESSAGE turn 完成后，应自动创建待自己验收任务的协作调度"
@@ -211,23 +211,23 @@ class TestAutoSchedule(_CollabTaskCase):
         agent_task = await self._create_collab_task(alice_db.id, team.id, title="幂等测试任务")
 
         # 先手动创建一条
-        sched1 = await gtScheculeTaskManager.create_task(
+        sched1 = await gtScheduleJobManager.create_job(
             alice_db.id,
-            AgentTaskType.TODO_TASK,
+            AgentJobType.TODO_TASK,
             {"agent_task_id": agent_task.id},
         )
 
         # 再调用自动调度方法
-        consumer = agentService.get_agent(alice_db.id).task_consumer
+        consumer = agentService.get_agent(alice_db.id).job_consumer
         await consumer._check_and_schedule_collaboration_tasks()
 
         # 查询 PENDING 中的 TODO_TASK 调度，应只有 1 条
         all_tasks = list(
-            await GtScheculeTask.select()
+            await GtScheduleJob.select()
             .where(
-                GtScheculeTask.agent_id == alice_db.id,
-                GtScheculeTask.task_type == AgentTaskType.TODO_TASK,
-                GtScheculeTask.status == AgentTaskStatus.PENDING,
+                GtScheduleJob.agent_id == alice_db.id,
+                GtScheduleJob.job_type == AgentJobType.TODO_TASK,
+                GtScheduleJob.status == AgentJobStatus.PENDING,
             )
             .aio_execute()
         )
@@ -235,7 +235,7 @@ class TestAutoSchedule(_CollabTaskCase):
         assert len(matching) == 1, f"期望 1 条 PENDING TODO_TASK，实际 {len(matching)} 条"
 
         # 清理
-        await gtScheculeTaskManager.update_task_status(sched1.id, AgentTaskStatus.CANCELLED)
+        await gtScheduleJobManager.update_job_status(sched1.id, AgentJobStatus.CANCELLED)
         agent_task.status = TaskStatus.DONE
         await gtAgentTaskManager.update_task(agent_task, [GtAgentTask.status])
 
@@ -256,23 +256,23 @@ class TestAutoSchedule(_CollabTaskCase):
         review_task = await create_task_with_event(review_task)
 
         before_scheds = list(
-            await GtScheculeTask.select()
+            await GtScheduleJob.select()
             .where(
-                GtScheculeTask.agent_id == alice_db.id,
-                GtScheculeTask.task_type == AgentTaskType.TODO_TASK,
-                GtScheculeTask.status == AgentTaskStatus.PENDING,
+                GtScheduleJob.agent_id == alice_db.id,
+                GtScheduleJob.job_type == AgentJobType.TODO_TASK,
+                GtScheduleJob.status == AgentJobStatus.PENDING,
             )
             .aio_execute()
         )
 
-        await alice.task_consumer._check_and_schedule_collaboration_tasks()
+        await alice.job_consumer._check_and_schedule_collaboration_tasks()
 
         after_scheds = list(
-            await GtScheculeTask.select()
+            await GtScheduleJob.select()
             .where(
-                GtScheculeTask.agent_id == alice_db.id,
-                GtScheculeTask.task_type == AgentTaskType.TODO_TASK,
-                GtScheculeTask.status == AgentTaskStatus.PENDING,
+                GtScheduleJob.agent_id == alice_db.id,
+                GtScheduleJob.job_type == AgentJobType.TODO_TASK,
+                GtScheduleJob.status == AgentJobStatus.PENDING,
             )
             .aio_execute()
         )
@@ -285,23 +285,23 @@ class TestAutoSchedule(_CollabTaskCase):
         team, alice_db, alice = await self._get_alice()
 
         before_count = len(list(
-            await GtScheculeTask.select()
+            await GtScheduleJob.select()
             .where(
-                GtScheculeTask.agent_id == alice_db.id,
-                GtScheculeTask.task_type == AgentTaskType.TODO_TASK,
-                GtScheculeTask.status == AgentTaskStatus.PENDING,
+                GtScheduleJob.agent_id == alice_db.id,
+                GtScheduleJob.job_type == AgentJobType.TODO_TASK,
+                GtScheduleJob.status == AgentJobStatus.PENDING,
             )
             .aio_execute()
         ))
 
-        await alice.task_consumer._check_and_schedule_collaboration_tasks()
+        await alice.job_consumer._check_and_schedule_collaboration_tasks()
 
         after_count = len(list(
-            await GtScheculeTask.select()
+            await GtScheduleJob.select()
             .where(
-                GtScheculeTask.agent_id == alice_db.id,
-                GtScheculeTask.task_type == AgentTaskType.TODO_TASK,
-                GtScheculeTask.status == AgentTaskStatus.PENDING,
+                GtScheduleJob.agent_id == alice_db.id,
+                GtScheduleJob.job_type == AgentJobType.TODO_TASK,
+                GtScheduleJob.status == AgentJobStatus.PENDING,
             )
             .aio_execute()
         ))
@@ -320,9 +320,9 @@ class TestCollaborationTaskTurnExecution(_CollabTaskCase):
             title="编写单元测试",
             description="为 foo 模块添加测试",
         )
-        sched = await gtScheculeTaskManager.create_task(
+        sched = await gtScheduleJobManager.create_job(
             alice_db.id,
-            AgentTaskType.TODO_TASK,
+            AgentJobType.TODO_TASK,
             {"agent_task_id": agent_task.id},
         )
 
@@ -330,9 +330,9 @@ class TestCollaborationTaskTurnExecution(_CollabTaskCase):
             {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "已完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
-            await alice.task_consumer.consume()
+            await alice.job_consumer.consume()
         from constants import AgentHistoryTag
-        history = alice.task_consumer._turn_runner._history
+        history = alice.job_consumer._turn_runner._history
         turn_begin_entries = [h for h in history if AgentHistoryTag.ROOM_TURN_BEGIN in (h.tags or [])]
         assert len(turn_begin_entries) >= 1
         content = turn_begin_entries[-1].content or ""
@@ -340,8 +340,8 @@ class TestCollaborationTaskTurnExecution(_CollabTaskCase):
         assert "编写单元测试" in content
 
         # 调度记录应已 COMPLETED
-        completed_sched = await gtScheculeTaskManager.get_task(sched.id)
-        assert completed_sched.status == AgentTaskStatus.COMPLETED
+        completed_sched = await gtScheduleJobManager.get_job(sched.id)
+        assert completed_sched.status == AgentJobStatus.COMPLETED
 
         # 清理
         agent_task.status = TaskStatus.DONE
@@ -352,9 +352,9 @@ class TestCollaborationTaskTurnExecution(_CollabTaskCase):
         team, alice_db, alice = await self._get_alice()
 
         agent_task = await self._create_collab_task(alice_db.id, team.id, title="无房间任务")
-        sched = await gtScheculeTaskManager.create_task(
+        sched = await gtScheduleJobManager.create_job(
             alice_db.id,
-            AgentTaskType.TODO_TASK,
+            AgentJobType.TODO_TASK,
             {"agent_task_id": agent_task.id},
         )
 
@@ -364,13 +364,13 @@ class TestCollaborationTaskTurnExecution(_CollabTaskCase):
             {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "已完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
-            await alice.task_consumer.consume()
+            await alice.job_consumer.consume()
             completed = True
 
         assert completed, "TODO_TASK turn 应正常完成（不因缺少房间而异常）"
 
-        completed_sched = await gtScheculeTaskManager.get_task(sched.id)
-        assert completed_sched.status == AgentTaskStatus.COMPLETED
+        completed_sched = await gtScheduleJobManager.get_job(sched.id)
+        assert completed_sched.status == AgentJobStatus.COMPLETED
 
         # 清理
         agent_task.status = TaskStatus.DONE
@@ -382,9 +382,9 @@ class TestCollaborationTaskTurnExecution(_CollabTaskCase):
 
         # 创建一个保持 IN_PROGRESS 状态的协作任务（agent 不调用 update_task 更新为 DONE）
         agent_task = await self._create_collab_task(alice_db.id, team.id, title="未完成协作任务")
-        sched1 = await gtScheculeTaskManager.create_task(
+        sched1 = await gtScheduleJobManager.create_job(
             alice_db.id,
-            AgentTaskType.TODO_TASK,
+            AgentJobType.TODO_TASK,
             {"agent_task_id": agent_task.id},
         )
 
@@ -395,16 +395,16 @@ class TestCollaborationTaskTurnExecution(_CollabTaskCase):
             {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
-            await alice.task_consumer.consume()
+            await alice.job_consumer.consume()
 
         # 第一轮调度应 COMPLETED
-        completed_sched = await gtScheculeTaskManager.get_task(sched1.id)
-        assert completed_sched.status == AgentTaskStatus.COMPLETED
+        completed_sched = await gtScheduleJobManager.get_job(sched1.id)
+        assert completed_sched.status == AgentJobStatus.COMPLETED
 
         # 协作任务未完成时，应自动创建了第二条唤醒调度（重唤醒机制）
-        all_todo_scheds = list(await GtScheculeTask.select().where(
-            GtScheculeTask.agent_id == alice_db.id,
-            GtScheculeTask.task_type == AgentTaskType.TODO_TASK,
+        all_todo_scheds = list(await GtScheduleJob.select().where(
+            GtScheduleJob.agent_id == alice_db.id,
+            GtScheduleJob.job_type == AgentJobType.TODO_TASK,
         ).aio_execute())
         rewake_scheds = [s for s in all_todo_scheds if s.id != sched1.id]
         assert len(rewake_scheds) >= 1, "协作任务未完成时，应自动创建新的唤醒调度（重唤醒）"
@@ -422,9 +422,9 @@ class TestTaskDrivenToolUsage(_CollabTaskCase):
         team, alice_db, alice = await self._get_alice()
 
         agent_task = await self._create_collab_task(alice_db.id, team.id, title="汇报任务")
-        await gtScheculeTaskManager.create_task(
+        await gtScheduleJobManager.create_job(
             alice_db.id,
-            AgentTaskType.TODO_TASK,
+            AgentJobType.TODO_TASK,
             {"agent_task_id": agent_task.id},
         )
 
@@ -452,7 +452,7 @@ class TestTaskDrivenToolUsage(_CollabTaskCase):
         ]
 
         with self.patch_infer(responses=responses):
-            await alice.task_consumer.consume()
+            await alice.job_consumer.consume()
 
         # 验证消息是否送达
         messages = room.messages
@@ -471,22 +471,22 @@ class TestConsumeRetryBehavior(_CollabTaskCase):
         team, alice_db, alice = await self._get_alice()
 
         agent_task = await self._create_collab_task(alice_db.id, team.id, title="重试任务")
-        sched = await gtScheculeTaskManager.create_task(
+        sched = await gtScheduleJobManager.create_job(
             alice_db.id,
-            AgentTaskType.TODO_TASK,
+            AgentJobType.TODO_TASK,
             {"agent_task_id": agent_task.id},
         )
-        await gtScheculeTaskManager.update_task_status(sched.id, AgentTaskStatus.FAILED)
+        await gtScheduleJobManager.update_job_status(sched.id, AgentJobStatus.FAILED)
 
         with self.patch_infer(responses=[
             {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
-            await alice.task_consumer.consume()
+            await alice.job_consumer.consume()
 
-        completed_sched = await gtScheculeTaskManager.get_task(sched.id)
-        assert completed_sched.status == AgentTaskStatus.COMPLETED
-        assert alice.task_consumer.status == AgentStatus.IDLE
+        completed_sched = await gtScheduleJobManager.get_job(sched.id)
+        assert completed_sched.status == AgentJobStatus.COMPLETED
+        assert alice.job_consumer.status == AgentStatus.IDLE
 
         # 清理
         agent_task.status = TaskStatus.DONE
@@ -497,23 +497,23 @@ class TestConsumeRetryBehavior(_CollabTaskCase):
         team, alice_db, alice = await self._get_alice()
 
         agent_task = await self._create_collab_task(alice_db.id, team.id, title="状态重试任务")
-        sched = await gtScheculeTaskManager.create_task(
+        sched = await gtScheduleJobManager.create_job(
             alice_db.id,
-            AgentTaskType.TODO_TASK,
+            AgentJobType.TODO_TASK,
             {"agent_task_id": agent_task.id},
         )
-        await gtScheculeTaskManager.update_task_status(sched.id, AgentTaskStatus.FAILED)
-        alice.task_consumer.status = AgentStatus.FAILED
+        await gtScheduleJobManager.update_job_status(sched.id, AgentJobStatus.FAILED)
+        alice.job_consumer.status = AgentStatus.FAILED
 
         with self.patch_infer(responses=[
             {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task.id, "new_status": "DONE", "note": "完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
-            await alice.task_consumer.consume()
+            await alice.job_consumer.consume()
 
-        completed_sched = await gtScheculeTaskManager.get_task(sched.id)
-        assert completed_sched.status == AgentTaskStatus.COMPLETED
-        assert alice.task_consumer.status == AgentStatus.IDLE
+        completed_sched = await gtScheduleJobManager.get_job(sched.id)
+        assert completed_sched.status == AgentJobStatus.COMPLETED
+        assert alice.job_consumer.status == AgentStatus.IDLE
 
         # 清理
         agent_task.status = TaskStatus.DONE
@@ -524,12 +524,12 @@ class TestConsumeRetryBehavior(_CollabTaskCase):
         team, alice_db, alice = await self._get_alice()
 
         agent_task1 = await self._create_collab_task(alice_db.id, team.id, title="任务1")
-        sched1 = await gtScheculeTaskManager.create_task(
-            alice_db.id, AgentTaskType.TODO_TASK, {"agent_task_id": agent_task1.id}
+        sched1 = await gtScheduleJobManager.create_job(
+            alice_db.id, AgentJobType.TODO_TASK, {"agent_task_id": agent_task1.id}
         )
         agent_task2 = await self._create_collab_task(alice_db.id, team.id, title="任务2")
-        sched2 = await gtScheculeTaskManager.create_task(
-            alice_db.id, AgentTaskType.TODO_TASK, {"agent_task_id": agent_task2.id}
+        sched2 = await gtScheduleJobManager.create_job(
+            alice_db.id, AgentJobType.TODO_TASK, {"agent_task_id": agent_task2.id}
         )
 
         with self.patch_infer(responses=[
@@ -538,10 +538,10 @@ class TestConsumeRetryBehavior(_CollabTaskCase):
             {"tool_calls": [{"name": "update_task", "arguments": {"task_id": agent_task2.id, "new_status": "DONE", "note": "完成"}}]},
             {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
         ]):
-            await alice.task_consumer.consume()
+            await alice.job_consumer.consume()
 
-        sched1_result = await gtScheculeTaskManager.get_task(sched1.id)
-        sched2_result = await gtScheculeTaskManager.get_task(sched2.id)
-        assert sched1_result.status == AgentTaskStatus.COMPLETED
-        assert sched2_result.status == AgentTaskStatus.COMPLETED
-        assert alice.task_consumer.status == AgentStatus.IDLE
+        sched1_result = await gtScheduleJobManager.get_job(sched1.id)
+        sched2_result = await gtScheduleJobManager.get_job(sched2.id)
+        assert sched1_result.status == AgentJobStatus.COMPLETED
+        assert sched2_result.status == AgentJobStatus.COMPLETED
+        assert alice.job_consumer.status == AgentStatus.IDLE

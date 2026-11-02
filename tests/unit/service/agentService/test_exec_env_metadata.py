@@ -57,7 +57,7 @@ def _fake_agent(agent_id: int, team_id: int, driver) -> Agent:
         ),
         system_prompt="",
     )
-    agent.task_consumer._turn_runner.driver = driver
+    agent.job_consumer._turn_runner.driver = driver
     return agent
 
 

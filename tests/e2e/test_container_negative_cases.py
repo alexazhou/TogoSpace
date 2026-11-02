@@ -336,7 +336,7 @@ async def test_no_bash_image_passes_gtsp_error_through(neg_env, image, monkeypat
         gt_agent=GtAgent(id=1, team_id=1, name="小美", role_template_id=1),
         system_prompt="",
     )
-    agent.task_consumer._turn_runner.driver = driver
+    agent.job_consumer._turn_runner.driver = driver
     monkeypatch.setattr(agentService.core, "_agents", {1: agent})
 
     entered = False
@@ -455,7 +455,7 @@ async def test_bash_exists_but_command_missing_reports_command_error(neg_env, mo
         gt_agent=GtAgent(id=1, team_id=1, name="小美", role_template_id=1),
         system_prompt="",
     )
-    agent.task_consumer._turn_runner.driver = driver
+    agent.job_consumer._turn_runner.driver = driver
     monkeypatch.setattr(agentService.core, "_agents", {1: agent})
 
     entered = False

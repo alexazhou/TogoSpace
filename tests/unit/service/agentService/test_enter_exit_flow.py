@@ -110,7 +110,7 @@ def patched(monkeypatch):
             state.update(kwargs)
 
         def use_driver(self, driver):
-            agent.task_consumer._turn_runner.driver = driver
+            agent.job_consumer._turn_runner.driver = driver
 
         def prepare_calls(self):
             return state["prepare_calls"]

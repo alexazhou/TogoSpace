@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic, AgentStatus, AgentTaskStatus, AgentTaskType, SpecialAgent
-from dal.db import gtAgentManager, gtTeamManager, gtScheculeTaskManager
+from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic, AgentStatus, AgentJobStatus, AgentJobType, SpecialAgent
+from dal.db import gtAgentManager, gtTeamManager, gtScheduleJobManager
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from model.dbModel.gtScheculeTask import GtScheculeTask
+from model.dbModel.gtScheduleJob import GtScheduleJob
 from service import presetService, agentService, roomService, ormService, persistenceService, messageBus, teamService
 from service.agentService import promptBuilder
 from util import configUtil, llmApiUtil
@@ -248,15 +248,15 @@ class TestAgentStatus(_agentServiceCase):
         status_map = agentService.get_team_runtime_status_map(team.id)
         assert status_map[alice.gt_agent.id] == AgentStatus.IDLE
 
-        alice.task_consumer.status = AgentStatus.ACTIVE
+        alice.job_consumer.status = AgentStatus.ACTIVE
         status_map = agentService.get_team_runtime_status_map(team.id)
         assert status_map[alice.gt_agent.id] == AgentStatus.ACTIVE
 
-        alice.task_consumer.status = AgentStatus.FAILED
+        alice.job_consumer.status = AgentStatus.FAILED
         status_map = agentService.get_team_runtime_status_map(team.id)
         assert status_map[alice.gt_agent.id] == AgentStatus.FAILED
 
-        alice.task_consumer.status = AgentStatus.IDLE
+        alice.job_consumer.status = AgentStatus.IDLE
 
     async def test_agent_status_event_contains_real_team_id(self):
         """订阅 AGENT_STATUS_CHANGED，验证事件中的 gt_agent.team_id 正确。"""
@@ -274,7 +274,7 @@ class TestAgentStatus(_agentServiceCase):
         messageBus.subscribe(MessageBusTopic.AGENT_STATUS_CHANGED, _on_agent_status)
         try:
             # 无任务时也会经历 ACTIVE -> IDLE，并发布两次状态事件。
-            await alice.task_consumer.consume()
+            await alice.job_consumer.consume()
             await asyncio.sleep(0)
         finally:
             messageBus.unsubscribe(MessageBusTopic.AGENT_STATUS_CHANGED, _on_agent_status)
@@ -301,19 +301,19 @@ class TestAgentStatus(_agentServiceCase):
         room = roomService.get_room_by_key(f"resume_room@{TEAM}")
         alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
 
-        failed_task = await gtScheculeTaskManager.create_task(
+        failed_task = await gtScheduleJobManager.create_job(
             alice.gt_agent.id,
-            AgentTaskType.ROOM_MESSAGE,
+            AgentJobType.ROOM_MESSAGE,
             {"room_id": room.room_id},
         )
-        await gtScheculeTaskManager.update_task_status(
+        await gtScheduleJobManager.update_job_status(
             failed_task.id,
-            AgentTaskStatus.FAILED,
+            AgentJobStatus.FAILED,
             error_message="boom",
         )
-        alice.task_consumer.status = AgentStatus.FAILED
+        alice.job_consumer.status = AgentStatus.FAILED
         start_spy = MagicMock()
-        alice.task_consumer.start = start_spy
+        alice.job_consumer.start = start_spy
 
         alice.start_consumer_task()
 
@@ -332,18 +332,18 @@ class TestAgentHistorySync(_agentServiceCase):
         await room.add_message(bob_id, "hello alice")
 
         alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
-        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
+        synced_count = await alice.job_consumer._turn_runner.pull_room_messages_to_history(room)
 
         # 初始公告 + bob 消息会聚合成一条"轮到发言"上下文消息（YAML 格式）
         assert synced_count == 1
-        assert len(alice.task_consumer._turn_runner._history) == 1
-        content = alice.task_consumer._turn_runner._history[0].content or ""
+        assert len(alice.job_consumer._turn_runner._history) == 1
+        content = alice.job_consumer._turn_runner._history[0].content or ""
         assert content.startswith("当前轮到你行动，新消息如下:")
         assert "sender: 系统提醒" in content
         assert "sender: bob" in content
         assert "content: hello alice" in content
         assert "你现在可以开始发言（send_chat_msg）或调用工具。在全部完成后，请务必调用 finish_action 结束行动。" in content
-        assert alice.task_consumer._turn_runner._history[0].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
+        assert alice.job_consumer._turn_runner._history[0].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
     async def test_pull_room_messages_to_history_appends_complete_turn_prompt_as_last_history(self):
         """pull_room_messages_to_history 追加到 history 的最后一条必须是完整 turn prompt。"""
@@ -360,7 +360,7 @@ class TestAgentHistorySync(_agentServiceCase):
         item.seq = 0
         alice.inject_history_messages([item])
 
-        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
+        synced_count = await alice.job_consumer._turn_runner.pull_room_messages_to_history(room)
 
         # 验证生成的 prompt 格式（YAML 格式，包含每条消息的发送时间）
         expected_prompt = promptBuilder.build_turn_begin_prompt("general", [
@@ -369,11 +369,11 @@ class TestAgentHistorySync(_agentServiceCase):
         ])
 
         assert synced_count == 1
-        assert len(alice.task_consumer._turn_runner._history) == 2
-        assert alice.task_consumer._turn_runner._history[-1].content == expected_prompt
-        assert alice.task_consumer._turn_runner._history[-1].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
-        assert alice.task_consumer._turn_runner._history[0].content == "older context"
-        assert alice.task_consumer._turn_runner._history[0].tags == []
+        assert len(alice.job_consumer._turn_runner._history) == 2
+        assert alice.job_consumer._turn_runner._history[-1].content == expected_prompt
+        assert alice.job_consumer._turn_runner._history[-1].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
+        assert alice.job_consumer._turn_runner._history[0].content == "older context"
+        assert alice.job_consumer._turn_runner._history[0].tags == []
 
 
 class TestSyncRoomSkipsOwnMessages(_agentServiceCase):
@@ -393,11 +393,11 @@ class TestSyncRoomSkipsOwnMessages(_agentServiceCase):
         alice_id = agentService.get_agent_id_by_stable_name(room.team_id, "alice")
         await room.add_message(alice_id, "i am talking")
 
-        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(room)
+        synced_count = await alice.job_consumer._turn_runner.pull_room_messages_to_history(room)
         # 只应有初始公告，不应有自己的消息
         assert synced_count == 1
-        assert len(alice.task_consumer._turn_runner._history) == 1
-        assert "talking" not in alice.task_consumer._turn_runner._history[0].content
+        assert len(alice.job_consumer._turn_runner._history) == 1
+        assert "talking" not in alice.job_consumer._turn_runner._history[0].content
 
 
 class TestAgentHistoryCrossRoom(_agentServiceCase):
@@ -414,9 +414,9 @@ class TestAgentHistoryCrossRoom(_agentServiceCase):
 
         alice_id = agentService.get_agent_id_by_stable_name(general_room.team_id, "alice")
         alice = agentService.get_agent(alice_id)
-        synced_count = await alice.task_consumer._turn_runner.pull_room_messages_to_history(general_room)
+        synced_count = await alice.job_consumer._turn_runner.pull_room_messages_to_history(general_room)
         assert synced_count == 1
-        assert any("roomName: general" in (item.content or "") for item in alice.task_consumer._turn_runner._history)
+        assert any("roomName: general" in (item.content or "") for item in alice.job_consumer._turn_runner._history)
 
         await self.create_room(
             TEAM,
@@ -436,10 +436,10 @@ class TestAgentHistoryCrossRoom(_agentServiceCase):
 
         reloaded_alice = agentService.get_agent(alice_id)
         private_room = roomService.get_room_by_key(f"alice_private@{TEAM}")
-        private_synced_count = await reloaded_alice.task_consumer._turn_runner.pull_room_messages_to_history(private_room)
+        private_synced_count = await reloaded_alice.job_consumer._turn_runner.pull_room_messages_to_history(private_room)
 
         assert private_synced_count == 1
-        history_contents = [item.content or "" for item in reloaded_alice.task_consumer._turn_runner._history]
+        history_contents = [item.content or "" for item in reloaded_alice.job_consumer._turn_runner._history]
         assert any("roomName: general" in content for content in history_contents)
         assert any("roomName: alice_private" in content for content in history_contents)
 
@@ -456,10 +456,10 @@ class TestClearAgentData(_agentServiceCase):
         alice = agentService.get_agent(alice_id)
         bob = agentService.get_agent(bob_id)
 
-        alice_item = await alice.task_consumer._turn_runner._history.append_history_message(
+        alice_item = await alice.job_consumer._turn_runner._history.append_history_message(
             GtAgentHistory.build(AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "alice-before-clear")))
         )
-        bob_item = await bob.task_consumer._turn_runner._history.append_history_message(
+        bob_item = await bob.job_consumer._turn_runner._history.append_history_message(
             GtAgentHistory.build(AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(llmApiUtil.OpenaiApiRole.USER, "bob-keep")))
         )
         assert alice_item.id is not None
@@ -482,8 +482,8 @@ class TestClearAgentData(_agentServiceCase):
         reloaded_bob = agentService.get_agent(bob_id)
         assert reloaded_alice is not alice
         assert reloaded_bob is not bob
-        assert list(reloaded_alice.task_consumer._turn_runner._history) == []
-        assert [item.content for item in reloaded_bob.task_consumer._turn_runner._history] == ["bob-keep"]
+        assert list(reloaded_alice.job_consumer._turn_runner._history) == []
+        assert [item.content for item in reloaded_bob.job_consumer._turn_runner._history] == ["bob-keep"]
 
 
 class TestAgentSystemPrompt(_agentServiceCase):

@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from constants import AgentStatus, AgentTaskStatus
+from constants import AgentStatus, AgentJobStatus
 from service.agentService import core as agent_core
 
 
@@ -11,7 +11,7 @@ from service.agentService import core as agent_core
 async def test_restore_agent_runtime_state_skips_fail_running_tasks_in_demo_readonly(monkeypatch):
     agent = SimpleNamespace(
         gt_agent=SimpleNamespace(id=7),
-        task_consumer=SimpleNamespace(status=None),
+        job_consumer=SimpleNamespace(status=None),
         inject_history_messages=MagicMock(),
     )
     histories = [SimpleNamespace(id=1)]
@@ -21,7 +21,7 @@ async def test_restore_agent_runtime_state_skips_fail_running_tasks_in_demo_read
     monkeypatch.setattr(agent_core.persistenceService, "load_agent_history_message", AsyncMock(return_value=histories))
     monkeypatch.setattr(agent_core.persistenceService, "fail_running_tasks", fail_running_tasks)
     monkeypatch.setattr(agent_core.agentActivityService, "fail_started_activities", fail_started_activities)
-    monkeypatch.setattr(agent_core.gtScheculeTaskManager, "get_first_unfinish_task", AsyncMock(return_value=None))
+    monkeypatch.setattr(agent_core.gtScheduleJobManager, "get_first_unfinished_job", AsyncMock(return_value=None))
     monkeypatch.setattr(
         agent_core.configUtil,
         "get_app_config",
@@ -36,24 +36,24 @@ async def test_restore_agent_runtime_state_skips_fail_running_tasks_in_demo_read
     agent.inject_history_messages.assert_called_once_with(histories)
     fail_running_tasks.assert_not_awaited()
     fail_started_activities.assert_not_awaited()
-    assert agent.task_consumer.status == AgentStatus.IDLE
+    assert agent.job_consumer.status == AgentStatus.IDLE
 
 
 @pytest.mark.asyncio
 async def test_restore_agent_runtime_state_still_marks_failed_when_not_demo(monkeypatch):
     agent = SimpleNamespace(
         gt_agent=SimpleNamespace(id=8),
-        task_consumer=SimpleNamespace(status=None),
+        job_consumer=SimpleNamespace(status=None),
         inject_history_messages=MagicMock(),
     )
-    failed_task = SimpleNamespace(status=AgentTaskStatus.FAILED)
+    failed_task = SimpleNamespace(status=AgentJobStatus.FAILED)
     fail_running_tasks = AsyncMock()
     fail_started_activities = AsyncMock()
 
     monkeypatch.setattr(agent_core.persistenceService, "load_agent_history_message", AsyncMock(return_value=[]))
     monkeypatch.setattr(agent_core.persistenceService, "fail_running_tasks", fail_running_tasks)
     monkeypatch.setattr(agent_core.agentActivityService, "fail_started_activities", fail_started_activities)
-    monkeypatch.setattr(agent_core.gtScheculeTaskManager, "get_first_unfinish_task", AsyncMock(return_value=failed_task))
+    monkeypatch.setattr(agent_core.gtScheduleJobManager, "get_first_unfinished_job", AsyncMock(return_value=failed_task))
     monkeypatch.setattr(
         agent_core.configUtil,
         "get_app_config",
@@ -67,4 +67,4 @@ async def test_restore_agent_runtime_state_still_marks_failed_when_not_demo(monk
 
     fail_running_tasks.assert_awaited_once_with(8, error_message="restart-reason")
     fail_started_activities.assert_awaited_once_with(8, error_message="restart-reason")
-    assert agent.task_consumer.status == AgentStatus.FAILED
+    assert agent.job_consumer.status == AgentStatus.FAILED

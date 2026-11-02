@@ -10,7 +10,7 @@ from service import teamService
 async def test_clear_team_data_deletes_all_runtime_data(monkeypatch):
     """清空团队数据时应删除任务、历史、消息，并返回统计。"""
     monkeypatch.setattr(teamService, "stop_team_runtime", AsyncMock())
-    monkeypatch.setattr(teamService.gtScheculeTaskManager, "delete_tasks_by_team", AsyncMock(return_value=3))
+    monkeypatch.setattr(teamService.gtScheduleJobManager, "delete_jobs_by_team", AsyncMock(return_value=3))
     monkeypatch.setattr(teamService.gtAgentTaskManager, "delete_tasks_by_team", AsyncMock(return_value=2))
     monkeypatch.setattr(teamService.gtAgentHistoryManager, "delete_history_by_team", AsyncMock(return_value=5))
     monkeypatch.setattr(teamService.gtRoomMessageManager, "delete_messages_by_team", AsyncMock(return_value=10))
@@ -31,7 +31,7 @@ async def test_clear_team_data_deletes_all_runtime_data(monkeypatch):
 async def test_clear_team_data_deletes_non_dept_rooms(monkeypatch):
     """清空团队数据时应删除所有非 DEPT 房间，保留 DEPT 房间。"""
     monkeypatch.setattr(teamService, "stop_team_runtime", AsyncMock())
-    monkeypatch.setattr(teamService.gtScheculeTaskManager, "delete_tasks_by_team", AsyncMock(return_value=0))
+    monkeypatch.setattr(teamService.gtScheduleJobManager, "delete_jobs_by_team", AsyncMock(return_value=0))
     monkeypatch.setattr(teamService.gtAgentTaskManager, "delete_tasks_by_team", AsyncMock(return_value=0))
     monkeypatch.setattr(teamService.gtAgentHistoryManager, "delete_history_by_team", AsyncMock(return_value=0))
     monkeypatch.setattr(teamService.gtRoomMessageManager, "delete_messages_by_team", AsyncMock(return_value=0))

@@ -78,7 +78,7 @@ def _fake_agent(driver) -> Agent:
         gt_agent=GtAgent(id=1, team_id=1, name="小美", role_template_id=1),
         system_prompt="",
     )
-    agent.task_consumer._turn_runner.driver = driver
+    agent.job_consumer._turn_runner.driver = driver
     return agent
 
 

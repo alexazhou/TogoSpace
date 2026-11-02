@@ -16,10 +16,10 @@ import service.persistenceService as persistenceService
 import service.presetService as presetService
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from model.dbModel.gtScheculeTask import GtScheculeTask
+from model.dbModel.gtScheduleJob import GtScheduleJob
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
-from constants import AgentActivityStatus, AgentHistoryTag, AgentHistoryStatus, AgentStatus, AgentTaskType, OpenaiApiRole, RoomState, ScheduleState
+from constants import AgentActivityStatus, AgentHistoryTag, AgentHistoryStatus, AgentStatus, AgentJobType, OpenaiApiRole, RoomState, ScheduleState
 from service import messageBus
 from ...base import ServiceTestCase
 
@@ -36,7 +36,7 @@ async def _seed_history(agent, *items: GtAgentHistory) -> None:
     不走 inject_history_messages：那只是内存替换，条目没有主键，而 session id 依赖
     历史首行主键。这里用 history store 追加，既拿到真实 id，也不会破坏其他测试的状态。
     """
-    history = agent.task_consumer._turn_runner._history
+    history = agent.job_consumer._turn_runner._history
     for item in items:
         await history.append_history_message(item)
 
@@ -57,7 +57,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         )
         for agent in agentService.get_team_agents(self._general_room_team_id()):
             name = agent.gt_agent.name
-            assert not agent.task_consumer._turn_runner._history.has_active_turn(), (
+            assert not agent.job_consumer._turn_runner._history.has_active_turn(), (
                 f"用例结束遗留未完成 turn: {name}"
             )
             assert agent.status == AgentStatus.IDLE, (
@@ -74,7 +74,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await self.wait_until(
             lambda: all(
                 agent.status == AgentStatus.IDLE
-                and not agent.task_consumer._turn_runner._history.has_active_turn()
+                and not agent.job_consumer._turn_runner._history.has_active_turn()
                 for agent in agentService.get_team_agents(self._general_room_team_id())
             ),
             timeout=timeout,
@@ -172,16 +172,16 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
                 # 兜底返回 finish，避免并发调度时 side_effect 耗尽导致 StopIteration。
                 return self.normalize_to_mock({"tool_calls": [{"name": "finish_action", "arguments": {}}]})
 
-            task = GtScheculeTask(
+            task = GtScheduleJob(
                 id=1,
                 agent_id=alice.gt_agent.id,
-                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_type=AgentJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             )
             with self.patch_infer(handler=fake_infer):
-                await alice.task_consumer._turn_runner.run_task_turn(task)
+                await alice.job_consumer._turn_runner.run_task_turn(task)
 
-            tool_results = [m for m in alice.task_consumer._turn_runner._history if m.role == OpenaiApiRole.TOOL]
+            tool_results = [m for m in alice.job_consumer._turn_runner._history if m.role == OpenaiApiRole.TOOL]
             assert len(tool_results) >= 1
             assert json.loads(tool_results[0].content)["success"]
             assert tool_results[0].status == AgentHistoryStatus.SUCCESS
@@ -209,14 +209,14 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
                 {"tool_calls": [{"name": "send_chat_msg", "arguments": {"room_name": "turn_checker_room", "msg": "最终消息"}}]},
                 {"tool_calls": [{"name": "finish_action", "arguments": {}}]},
             ]
-            task = GtScheculeTask(
+            task = GtScheduleJob(
                 id=2,
                 agent_id=alice.gt_agent.id,
-                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_type=AgentJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             )
             with self.patch_infer(responses=resps):
-                await alice.task_consumer._turn_runner.run_task_turn(task)
+                await alice.job_consumer._turn_runner.run_task_turn(task)
 
             assert any(m.content == "最终消息" for m in room.messages)
         finally:
@@ -233,8 +233,8 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
         await self.wait_agents_settled()
         for agent_name in ["alice", "bob"]:
             agent = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, agent_name))
-            assert agent.task_consumer.status == AgentStatus.IDLE, f"前序用例遗留了运行中的 consumer: {agent_name}"
-            agent.task_consumer.current_db_task = None
+            assert agent.job_consumer.status == AgentStatus.IDLE, f"前序用例遗留了运行中的 consumer: {agent_name}"
+            agent.job_consumer.current_db_task = None
 
         # 预定义每个 agent 的调用序列
         call_seq = {
@@ -322,15 +322,15 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             await _seed_history(alice, user_item, assistant_item, tool_cancelled_item)
 
             # 验证：get_first_pending_tool_call 应返回 call_2
-            pending = alice.task_consumer._turn_runner._history.get_first_pending_tool_call()
+            pending = alice.job_consumer._turn_runner._history.get_first_pending_tool_call()
             assert pending is not None
             assert pending.id == "call_pending"
 
             # 后续推理：返回 finish_action 结束 turn
-            task = GtScheculeTask(
+            task = GtScheduleJob(
                 id=3,
                 agent_id=alice.gt_agent.id,
-                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_type=AgentJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             )
 
@@ -342,10 +342,10 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             with self.patch_infer(responses=responses):
                 # 旧代码：CANCELLED 状态的 TOOL 会抛出 RuntimeError
                 # 新代码：CANCELLED 状态的 TOOL 会跳过并继续推进
-                await alice.task_consumer._turn_runner.run_task_turn(task)
+                await alice.job_consumer._turn_runner.run_task_turn(task)
 
             # 验证：turn 正常完成，没有抛出异常
-            assert any(AgentHistoryTag.ROOM_TURN_FINISH in msg.tags for msg in alice.task_consumer._turn_runner._history)
+            assert any(AgentHistoryTag.ROOM_TURN_FINISH in msg.tags for msg in alice.job_consumer._turn_runner._history)
         finally:
             scheduler._schedule_state = ScheduleState.RUNNING
 
@@ -376,16 +376,16 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
                 {"tool_calls": [{"name": "finish_action", "arguments": {"confirm_no_need_talk": True}}]},     # 正确工具（本轮无发言）
             ]
 
-            task = GtScheculeTask(
+            task = GtScheduleJob(
                 id=10,
                 agent_id=alice.gt_agent.id,
-                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_type=AgentJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             )
             with self.patch_infer(responses=responses):
-                await alice.task_consumer._turn_runner.run_task_turn(task)
+                await alice.job_consumer._turn_runner.run_task_turn(task)
 
-            history = list(alice.task_consumer._turn_runner._history)
+            history = list(alice.job_consumer._turn_runner._history)
 
             # 幻觉工具的 TOOL 历史条目应为 FAILED，不是 INIT（防止重启循环）
             tool_items = [m for m in history if m.role == OpenaiApiRole.TOOL]

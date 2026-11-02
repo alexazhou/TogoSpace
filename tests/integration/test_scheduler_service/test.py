@@ -12,11 +12,11 @@ import service.agentService as agentService
 import service.schedulerService as scheduler
 from service.agentService import Agent
 from service.messageBus import EventBusMessage
-from model.dbModel.gtScheculeTask import GtScheculeTask
+from model.dbModel.gtScheduleJob import GtScheduleJob
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
-from constants import MessageBusTopic, AgentStatus, AgentTaskType, AgentTaskStatus, ScheduleState
+from constants import MessageBusTopic, AgentStatus, AgentJobType, AgentJobStatus, ScheduleState
 from util.configUtil.configTypes import TeamPreset
 from ...base import ServiceTestCase
 
@@ -114,14 +114,14 @@ class TestSchedulerRun(ServiceTestCase):
         _force_schedule_running()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
-             patch("service.schedulerService.gtScheculeTaskManager") as mock_task_manager:
-            mock_task_manager.create_task = AsyncMock(return_value=GtScheculeTask(
+             patch("service.schedulerService.gtScheduleJobManager") as mock_task_manager:
+            mock_task_manager.create_job = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_type=AgentJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             ))
-            mock_task_manager.has_pending_room_task = AsyncMock(return_value=False)
+            mock_task_manager.has_pending_room_job = AsyncMock(return_value=False)
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_STATUS_CHANGED,
                 payload=_make_scheduling_payload(room, alice.gt_agent.id),
@@ -139,36 +139,36 @@ class TestSchedulerRun(ServiceTestCase):
 
         assert alice.is_active is False
 
-        alice.task_consumer.status = AgentStatus.ACTIVE
+        alice.job_consumer.status = AgentStatus.ACTIVE
         assert alice.is_active is True
 
-        alice.task_consumer.status = AgentStatus.IDLE
+        alice.job_consumer.status = AgentStatus.IDLE
         assert alice.is_active is False
 
     async def test_handle_event_error_logged_in_agent(self):
-        """验证 Agent.task_consumer.consume 内部错误后进入 FAILED 状态。"""
+        """验证 Agent.job_consumer.consume 内部错误后进入 FAILED 状态。"""
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
 
-        with patch("service.agentService.agentTaskConsumer.gtScheculeTaskManager") as mock_task_manager, \
-             patch("service.agentService.agentTaskConsumer.agentActivityService") as mock_activity_svc:
+        with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_task_manager, \
+             patch("service.agentService.agentJobConsumer.agentActivityService") as mock_activity_svc:
             mock_activity_svc.add_activity = AsyncMock()
-            mock_task_manager.get_first_unfinish_task = AsyncMock(return_value=GtScheculeTask(
+            mock_task_manager.get_first_unfinished_job = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_type=AgentJobType.ROOM_MESSAGE,
                 task_data={"room_id": 1},
             ))
-            mock_task_manager.transition_task_status = AsyncMock(return_value=GtScheculeTask(
+            mock_task_manager.transition_job_status = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_type=AgentJobType.ROOM_MESSAGE,
                 task_data={"room_id": 1},
-                status=AgentTaskStatus.RUNNING,
+                status=AgentJobStatus.RUNNING,
             ))
-            mock_task_manager.update_task_status = AsyncMock()
+            mock_task_manager.update_job_status = AsyncMock()
 
-            with patch.object(real_agent.task_consumer._turn_runner, "run_task_turn", side_effect=RuntimeError("boom")):
-                await real_agent.task_consumer.consume()
+            with patch.object(real_agent.job_consumer._turn_runner, "run_task_turn", side_effect=RuntimeError("boom")):
+                await real_agent.job_consumer.consume()
 
         assert real_agent.status == AgentStatus.FAILED
 
@@ -176,29 +176,29 @@ class TestSchedulerRun(ServiceTestCase):
         """任务失败后，即使仍有 pending task，也不应自动续起消费。"""
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
 
-        with patch("service.agentService.agentTaskConsumer.gtScheculeTaskManager") as mock_task_manager, \
-             patch("service.agentService.agentTaskConsumer.agentActivityService") as mock_activity_svc:
+        with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_task_manager, \
+             patch("service.agentService.agentJobConsumer.agentActivityService") as mock_activity_svc:
             mock_activity_svc.add_activity = AsyncMock()
-            mock_task_manager.get_first_unfinish_task = AsyncMock(return_value=GtScheculeTask(
+            mock_task_manager.get_first_unfinished_job = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_type=AgentJobType.ROOM_MESSAGE,
                 task_data={"room_id": 1},
             ))
-            mock_task_manager.transition_task_status = AsyncMock(return_value=GtScheculeTask(
+            mock_task_manager.transition_job_status = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_type=AgentJobType.ROOM_MESSAGE,
                 task_data={"room_id": 1},
-                status=AgentTaskStatus.RUNNING,
+                status=AgentJobStatus.RUNNING,
             ))
-            mock_task_manager.update_task_status = AsyncMock()
-            mock_task_manager.has_consumable_task = AsyncMock(return_value=True)
+            mock_task_manager.update_job_status = AsyncMock()
+            mock_task_manager.has_consumable_job = AsyncMock(return_value=True)
 
-            with patch.object(real_agent.task_consumer._turn_runner, "run_task_turn", side_effect=RuntimeError("boom")):
+            with patch.object(real_agent.job_consumer._turn_runner, "run_task_turn", side_effect=RuntimeError("boom")):
                 restart_spy = MagicMock()
-                real_agent.task_consumer.start = restart_spy
-                await real_agent.task_consumer.consume()
+                real_agent.job_consumer.start = restart_spy
+                await real_agent.job_consumer.consume()
 
         assert real_agent.status == AgentStatus.FAILED
         restart_spy.assert_not_called()
@@ -226,14 +226,14 @@ class TestSchedulerRun(ServiceTestCase):
         _force_schedule_running()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
-             patch("service.schedulerService.gtScheculeTaskManager") as mock_task_manager:
-            mock_task_manager.create_task = AsyncMock(return_value=GtScheculeTask(
+             patch("service.schedulerService.gtScheduleJobManager") as mock_task_manager:
+            mock_task_manager.create_job = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_type=AgentJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             ))
-            mock_task_manager.has_pending_room_task = AsyncMock(return_value=False)
+            mock_task_manager.has_pending_room_job = AsyncMock(return_value=False)
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_STATUS_CHANGED,
                 payload=_make_scheduling_payload(room, alice.gt_agent.id),
@@ -246,14 +246,14 @@ class TestSchedulerRun(ServiceTestCase):
         """need_scheduling=False 时不应创建任务（特殊成员、IDLE 等场景均由 roomService 设置该标志）。"""
         await scheduler.startup()
 
-        with patch("service.schedulerService.gtScheculeTaskManager") as mock_task_manager:
+        with patch("service.schedulerService.gtScheduleJobManager") as mock_task_manager:
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_STATUS_CHANGED,
                 payload={"need_scheduling": False},
             )
             await scheduler._on_room_status_changed(msg)
 
-        mock_task_manager.create_task.assert_not_called()
+        mock_task_manager.create_job.assert_not_called()
 
     async def test_duplicate_room_event_is_skipped(self, monkeypatch):
         """同一房间连续触发两次调度事件，第二次应被跳过。"""
@@ -278,14 +278,14 @@ class TestSchedulerRun(ServiceTestCase):
         _force_schedule_running()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
-             patch("service.schedulerService.gtScheculeTaskManager") as mock_task_manager:
-            mock_task_manager.create_task = AsyncMock(return_value=GtScheculeTask(
+             patch("service.schedulerService.gtScheduleJobManager") as mock_task_manager:
+            mock_task_manager.create_job = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentTaskType.ROOM_MESSAGE,
+                task_type=AgentJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             ))
-            mock_task_manager.has_pending_room_task = AsyncMock(return_value=True)
+            mock_task_manager.has_pending_room_job = AsyncMock(return_value=True)
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_STATUS_CHANGED,
                 payload=_make_scheduling_payload(room, alice.gt_agent.id),
@@ -293,10 +293,10 @@ class TestSchedulerRun(ServiceTestCase):
             await scheduler._on_room_status_changed(msg)
 
             # 已存在同房间 pending 任务时，create_task 不应被调用
-            create_call_count = mock_task_manager.create_task.call_count
+            create_call_count = mock_task_manager.create_job.call_count
             await scheduler._on_room_status_changed(msg)
 
-            assert mock_task_manager.create_task.call_count == create_call_count
+            assert mock_task_manager.create_job.call_count == create_call_count
 
     async def test_different_rooms_not_deduplicated(self, monkeypatch):
         """不同房间的事件不应被去重，各自独立创建任务。"""
@@ -335,12 +335,12 @@ class TestSchedulerRun(ServiceTestCase):
         _force_schedule_running()
 
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
-             patch("service.schedulerService.gtScheculeTaskManager") as mock_task_manager:
-            mock_task_manager.create_task = AsyncMock(side_effect=[
-                GtScheculeTask(id=1, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": r1.room_id}),
-                GtScheculeTask(id=2, agent_id=1, task_type=AgentTaskType.ROOM_MESSAGE, task_data={"room_id": r2.room_id}),
+             patch("service.schedulerService.gtScheduleJobManager") as mock_task_manager:
+            mock_task_manager.create_job = AsyncMock(side_effect=[
+                GtScheduleJob(id=1, agent_id=1, task_type=AgentJobType.ROOM_MESSAGE, task_data={"room_id": r1.room_id}),
+                GtScheduleJob(id=2, agent_id=1, task_type=AgentJobType.ROOM_MESSAGE, task_data={"room_id": r2.room_id}),
             ])
-            mock_task_manager.has_pending_room_task = AsyncMock(side_effect=[False, False])
+            mock_task_manager.has_pending_room_job = AsyncMock(side_effect=[False, False])
             msg_r1 = EventBusMessage(
                 topic=MessageBusTopic.ROOM_STATUS_CHANGED,
                 payload=_make_scheduling_payload(r1, alice.gt_agent.id),
@@ -352,7 +352,7 @@ class TestSchedulerRun(ServiceTestCase):
             await scheduler._on_room_status_changed(msg_r1)
             await scheduler._on_room_status_changed(msg_r2)
 
-        assert mock_task_manager.create_task.call_count == 2
+        assert mock_task_manager.create_job.call_count == 2
 
     async def test_stop_scheduler_team(self, monkeypatch):
         """验证停止特定团队的调度。"""
@@ -489,7 +489,7 @@ class TestScheduleGate(ServiceTestCase):
         # startup 后状态为 STOPPED
         assert scheduler.get_schedule_state() == ScheduleState.STOPPED
 
-        with patch("service.schedulerService.gtScheculeTaskManager") as mock_task_manager:
+        with patch("service.schedulerService.gtScheduleJobManager") as mock_task_manager:
             msg = EventBusMessage(
                 topic=MessageBusTopic.ROOM_STATUS_CHANGED,
                 payload={
@@ -500,7 +500,7 @@ class TestScheduleGate(ServiceTestCase):
             )
             await scheduler._on_room_status_changed(msg)
 
-        mock_task_manager.create_task.assert_not_called()
+        mock_task_manager.create_job.assert_not_called()
 
     async def test_start_scheduling_skips_when_not_running(self):
         """start_scheduling 在非 RUNNING 状态下应跳过。"""
