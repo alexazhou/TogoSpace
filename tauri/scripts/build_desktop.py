@@ -4,7 +4,7 @@
 可用 action（逗号分隔，按顺序执行）：
   frontend  — 构建前端并同步到 assets/frontend（哈希校验双份一致）
   backend   — PyInstaller onedir 打包后端并复制到 tauri/build/backend
-  app       — 同步版本号并执行 `tauri build`（产出 .app）
+  app       — 执行 `tauri build`（产出 .app）
   sign      — 按「内层 Mach-O → 主程序 → .app」顺序签名（macOS）
   zip       — 生成 DMG（别名 dmg），有签名配置时顺带签 DMG
   notarize  — notarytool 公证 + stapler staple（macOS）
@@ -45,9 +45,7 @@ REPO_ROOT = os.path.dirname(TAURI_DIR)
 FRONTEND_DIR = os.path.join(REPO_ROOT, "frontend")
 FRONTEND_DIST = os.path.join(FRONTEND_DIR, "dist")
 BACKEND_ASSETS = os.path.join(REPO_ROOT, "assets", "frontend")
-TAURI_CONF = os.path.join(TAURI_DIR, "src-tauri", "tauri.conf.json")
-CARGO_TOML = os.path.join(TAURI_DIR, "src-tauri", "Cargo.toml")
-PACKAGE_JSON = os.path.join(TAURI_DIR, "package.json")
+VERIFY_VERSIONS_SCRIPT = os.path.join(REPO_ROOT, "scripts", "verify_versions.py")
 ENTITLEMENTS = os.path.join(SCRIPT_DIR, "entitlements.mac.plist")
 BUILD_CONFIG = os.path.join(REPO_ROOT, "scripts", "build_config.json")
 
@@ -82,6 +80,11 @@ def read_version() -> str:
     if not match:
         raise SystemExit("❌ 无法从 src/version.py 读取版本号")
     return match.group(1)
+
+
+def verify_versions() -> None:
+    """构建前校验所有版本文件一致；不一致时直接失败。"""
+    run_command([sys.executable, VERIFY_VERSIONS_SCRIPT])
 
 
 SIGN_CONFIG_FIELDS = {
@@ -194,39 +197,10 @@ def build_backend(arch: str) -> None:
 # ── app ──────────────────────────────────────────────────────────────────────
 
 
-def sync_version(version: str) -> None:
-    with open(TAURI_CONF, encoding="utf-8") as file:
-        conf = json.load(file)
-    if conf.get("version") != version:
-        conf["version"] = version
-        with open(TAURI_CONF, "w", encoding="utf-8") as file:
-            json.dump(conf, file, ensure_ascii=False, indent=2)
-            file.write("\n")
-        print(f"✅ tauri.conf.json version → {version}")
-
-    cargo = open(CARGO_TOML, encoding="utf-8").read()
-    updated_cargo = re.sub(
-        r'(?m)^version = "[^"]+"', f'version = "{version}"', cargo, count=1)
-    if updated_cargo != cargo:
-        open(CARGO_TOML, "w", encoding="utf-8").write(updated_cargo)
-        print(f"✅ Cargo.toml version → {version}")
-
-    with open(PACKAGE_JSON, encoding="utf-8") as file:
-        package = json.load(file)
-    if package.get("version") != version:
-        package["version"] = version
-        with open(PACKAGE_JSON, "w", encoding="utf-8") as file:
-            json.dump(package, file, ensure_ascii=False, indent=2)
-            file.write("\n")
-        print(f"✅ tauri/package.json version → {version}")
-
-
 def build_app(arch: str) -> None:
     print("\n--- app: tauri build ---")
     if not os.path.isfile(os.path.join(FRONTEND_DIST, "index.html")):
         raise SystemExit("❌ 前端尚未构建，请先执行 --action frontend")
-
-    sync_version(read_version())
 
     env = dict(os.environ)
     # Tauri CLI 会读取 APPLE_* 变量并在 tauri build 阶段自动签名/公证；
@@ -474,6 +448,7 @@ def main() -> int:
     args = parser.parse_args()
 
     actions = parse_actions(args.action)
+    verify_versions()
     print(f"ℹ️  version={read_version()} arch={args.arch} actions={','.join(actions)}")
 
     for action in actions:

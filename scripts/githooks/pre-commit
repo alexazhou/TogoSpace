@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+#
+# pre-commit hook：版本号不一致时阻止提交。
+#
+# 安装：
+#   ln -sf ../../scripts/githooks/pre-commit .git/hooks/pre-commit
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "❌ 版本号检测失败: 未找到 python3" >&2
+    exit 1
+fi
+
+exec python3 "$ROOT/scripts/verify_versions.py"

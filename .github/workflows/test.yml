@@ -25,6 +25,9 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Verify version consistency
+      run: python3 scripts/verify_versions.py
+
     - name: Cache pip dependencies
       uses: actions/cache@v5
       with:

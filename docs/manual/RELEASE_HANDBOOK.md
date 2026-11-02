@@ -4,18 +4,34 @@
 
 ## 1. 更新版本号
 
-只需要更新后端版本号。构建产物、桌面端展示和发布包名称均以该版本号为准。
+版本号唯一来源是 `src/version.py`。发布前需要把所有版本文件同步为同一版本号，
+并运行检测脚本确认：
 
-编辑 `src/version.py`：
-
-```python
-__version__ = "0.1.12"  # 替换为新版本号
+```bash
+python3 scripts/verify_versions.py
 ```
+
+本地可安装 pre-commit hook，在每次提交前自动执行同样的检查：
+
+```bash
+ln -sf ../../scripts/githooks/pre-commit .git/hooks/pre-commit
+```
+
+需要同步的文件：
+
+- `src/version.py`
+- `frontend/package.json`、`frontend/package-lock.json`
+- `tauri/package.json`、`tauri/package-lock.json`
+- `tauri/src-tauri/tauri.conf.json`
+- `tauri/src-tauri/Cargo.toml`、`tauri/src-tauri/Cargo.lock`
 
 提交版本号更新：
 
 ```bash
-git add src/version.py
+git add src/version.py \
+  frontend/package.json frontend/package-lock.json \
+  tauri/package.json tauri/package-lock.json \
+  tauri/src-tauri/tauri.conf.json tauri/src-tauri/Cargo.toml tauri/src-tauri/Cargo.lock
 git commit -m "chore: bump version to 0.1.12"
 git push origin master
 ```
@@ -93,10 +109,14 @@ Release Note 注意事项：
 ## 5. 完整流程示例
 
 ```bash
-# 1. 更新版本号
+# 1. 更新版本号（src/version.py、两个 package.json / package-lock.json、
+#    tauri.conf.json、Cargo.toml / Cargo.lock）
 vim src/version.py                    # 改为 0.1.12
+python3 scripts/verify_versions.py    # 确认所有文件版本一致
 
-git add src/version.py
+git add src/version.py frontend/package.json frontend/package-lock.json \
+  tauri/package.json tauri/package-lock.json \
+  tauri/src-tauri/tauri.conf.json tauri/src-tauri/Cargo.toml tauri/src-tauri/Cargo.lock
 git commit -m "chore: bump version to 0.1.12"
 git push origin master
 
