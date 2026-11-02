@@ -105,6 +105,48 @@ def test_has_pending_migrations_reflects_ledger(tmp_path: Path) -> None:
     assert db.has_pending_migrations(database_path, migrations_dir=migrations_dir) is False
 
 
+def test_has_pending_migrations_creates_db_file_as_side_effect(tmp_path: Path) -> None:
+    """**特征化测试：钉住 `has_pending_migrations()` 会创建库文件这个副作用。**
+
+    这个副作用曾经害人（#121 M5b）：`backend_main._run_database_migrations` 里
+    `os.path.exists()` 写在它之后，判断恒为 True，「全新安装不备份」失效，
+    全新安装用户会在没有任何数据可丢的情况下因 `data/backups` 写不进去而启动失败。
+
+    本条不是「想要这个行为」，而是**把现有行为钉住**：
+      - 若有人把它改造成纯只读（推荐方向），这条会红 —— 那正是提醒调用方可以简化 `db_existed` 前置；
+      - 若有人无意改动副作用（例如去掉 `ensure_migrations_table`），这条也会红 —— 提醒复查调用方是否依赖。
+    对比 `check_database_initialized()` 是只读的：路径不存在直接 `return False`，不建库。
+    """
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    (migrations_dir / "0001_create_demo.sql").write_text("CREATE TABLE demo (id INTEGER);", encoding="utf-8")
+    database_path = tmp_path / "fresh" / "data.db"
+
+    assert not database_path.exists(), "前置条件：全新路径，库文件不存在"
+
+    db.has_pending_migrations(database_path, migrations_dir=migrations_dir)
+
+    assert database_path.exists(), (
+        "has_pending_migrations 目前会创建库文件（经 connect_sqlite + ensure_migrations_table）。"
+        "若此处变红，说明它已被改造成只读语义 —— 请同步复查 backend_main._run_database_migrations "
+        "里 db_existed 前置的必要性，并更新本条测试。"
+    )
+
+
+def test_check_database_initialized_does_not_create_db_file(tmp_path: Path) -> None:
+    """同族对照：`check_database_initialized()` 是只读的，不会建库。
+
+    放在一起是为了让「哪个函数有副作用」这件事在测试里显式可见 —— 曾经就是
+    「名字听起来像纯查询、实际会写盘」导致误判。
+    """
+    database_path = tmp_path / "fresh" / "data.db"
+    assert not database_path.exists()
+
+    assert db.check_database_initialized(database_path) is False
+
+    assert not database_path.exists(), "check_database_initialized 不应创建库文件"
+
+
 def test_migrate_database_up_to_normalizes_unpadded_number(tmp_path: Path) -> None:
     """up_to 传 "11" 和 "0011" 必须得到完全相同的结果（迁移编号允许带前导零，要先归一化再比较）。"""
     db_path = tmp_path / "data.db"
