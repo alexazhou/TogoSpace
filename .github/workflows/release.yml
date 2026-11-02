@@ -40,14 +40,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+    # 注意：build-desktop.yml 用 upload-artifact 的 archive: false（Direct Uploads），
+    # 该模式下 upload 的 name 参数会被忽略，artifact 名直接取文件名本身：
+    #   TogoSpace_<version>_<arch>.dmg
+    # 所以这里必须按文件名匹配，不能按 macOS-dmg-<arch> 匹配。
     - uses: actions/download-artifact@v7
       with:
-        pattern: macOS-dmg-*
+        pattern: TogoSpace_*.dmg
         path: build
         merge-multiple: true
 
     - name: Show artifacts
-      run: ls -lh build/*.dmg
+      run: |
+        echo "--- downloaded files ---"
+        find build -maxdepth 2 -type f | sort || true
+        ls -lh build/*.dmg
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v3
