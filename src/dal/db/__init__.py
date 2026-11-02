@@ -1,7 +1,7 @@
 """DAL manager package."""
 
 from . import gtAgentActivityManager
-from . import gtScheculeTaskManager
+from . import gtScheduleJobManager
 from . import gtAgentHistoryManager
 from . import gtAgentManager
 from . import gtDeptManager
@@ -16,7 +16,7 @@ from . import gtAgentContainerManager
 
 __all__ = [
     "gtAgentActivityManager",
-    "gtScheculeTaskManager",
+    "gtScheduleJobManager",
     "gtAgentHistoryManager",
     "gtAgentManager",
     "gtDeptManager",

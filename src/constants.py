@@ -280,14 +280,19 @@ EVENT_TRUNCATED_SUFFIX = "…(已截断)"
 
 
 
-class AgentTaskType(EnhanceEnum):
-    """Agent 任务类型枚举。"""
+class AgentJobType(EnhanceEnum):
+    """Agent 调度任务类型枚举。
+
+    注意与协作任务（`GtAgentTask` / `TaskStatus`）区分：本枚举描述的是
+    scheduler 投递给 Agent 的**执行单元**，不是协作任务本体。
+    TODO_TASK 指「由协作任务驱动的调度任务」，值名保留历史叫法（Operator 11-03 决定）。
+    """
     ROOM_MESSAGE = auto()
     TODO_TASK = auto()  # 协作任务驱动（Agent 间结构化任务）
 
 
-class AgentTaskStatus(EnhanceEnum):
-    """Agent 任务状态枚举。"""
+class AgentJobStatus(EnhanceEnum):
+    """Agent 调度任务状态枚举。"""
     PENDING = auto()      # 待处理
     RUNNING = auto()      # 正在处理
     COMPLETED = auto()    # 已完成
