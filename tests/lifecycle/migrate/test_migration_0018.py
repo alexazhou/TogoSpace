@@ -28,7 +28,7 @@ import pytest
 
 import db
 
-MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "assets/migrate"
+MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "assets/migrate"
 MIGRATION_0018 = "0018_rename_schecule_tasks_to_schedule_jobs.sql"
 
 # 迁移前的存量分布，覆盖两个 job_type × 多个 status（枚举值名迁移前后必须一字不差）
@@ -56,7 +56,13 @@ def _seed(db_path: Path) -> None:
 
 
 def _snapshot(db_path: Path) -> dict:
-    """取一份「库结构 + 数据」快照，用于断言迁移失败后库完全未变。"""
+    """取一份「库结构 + 数据」快照，用于断言迁移失败后库完全未变。
+
+    `schecule_tasks` 已被改名的场景（= 没回滚成功）不直接抛异常，而是回填
+    `missing_table` 标记 —— 否则变异 B（删掉显式事务）下这条用例会红在
+    `PRAGMA table_info()` 的 `no such table` 上，真正守数据的 `assert after == before`
+    **根本没机会执行**，失败信息也看不出「表被改了」。李哥 2026-11-03 复核指出。
+    """
     with sqlite3.connect(str(db_path)) as conn:
         tables = {
             row[0]
@@ -65,24 +71,31 @@ def _snapshot(db_path: Path) -> dict:
                 " AND (name LIKE '%task%' OR name LIKE '%job%')"
             )
         }
-        columns = [row[1] for row in conn.execute("PRAGMA table_info(schecule_tasks)")]
-        indexes = sorted(
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='schecule_tasks'"
-                " AND name NOT LIKE 'sqlite_%'"
+        missing = "schecule_tasks" not in tables
+        if missing:
+            columns: list[str] = []
+            indexes: list[str] = []
+            rows: list[tuple] = []
+        else:
+            columns = [row[1] for row in conn.execute("PRAGMA table_info(schecule_tasks)")]
+            indexes = sorted(
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='schecule_tasks'"
+                    " AND name NOT LIKE 'sqlite_%'"
+                )
             )
-        )
-        rows = sorted(
-            conn.execute(
-                "SELECT agent_id, task_type, task_data, status FROM schecule_tasks"
-            ).fetchall()
-        )
+            rows = sorted(
+                conn.execute(
+                    "SELECT agent_id, task_type, task_data, status FROM schecule_tasks"
+                ).fetchall()
+            )
         applied = sorted(
             row[0] for row in conn.execute(f"SELECT name FROM {db.MIGRATIONS_TABLE}")
         )
     return {
         "tables": tables,
+        "missing_table": missing,
         "columns": columns,
         "indexes": indexes,
         "rows": rows,
@@ -156,7 +169,22 @@ def test_0018_rolls_back_entirely_when_last_statement_fails(tmp_path: Path) -> N
 
     这是本迁移最关键的一条：`executescript` 会隐式 COMMIT，没有显式 BEGIN/COMMIT 时
     失败会留下「表已改名、列没改」的脏状态，导致后续每次启动都 `no such table`。
+
+    **先跑一遍未注入的原始脚本做 sanity（李哥 2026-11-03 复核提的残余假绿）**：
+    「库未变」有两种原因 —— ① 事务回滚了，② 脚本压根没跑起来（语法错时
+    `executescript` 整段不执行）。只断「未变」区分不出这两者。若不先证明**同一份
+    原始 SQL 是能跑通的**，将来谁把 0018 写坏（少个分号、表名拼错），这条用例
+    会继续绿，而真正的结论是「什么都没发生」。
+    实测：把首句改成 `ALTER TABL ...`（脚本自身坏），加 sanity 前 3 failed/2 passed
+    （回滚用例仍绿），加 sanity 后 4 failed（回滚用例转红）。
     """
+    sanity_path = tmp_path / "sanity.db"
+    _migrate_to_0017(sanity_path)
+    _seed(sanity_path)
+    assert db.migrate_database(sanity_path, migrations_dir=MIGRATIONS_DIR, up_to="19") == [
+        MIGRATION_0018
+    ], "原始迁移脚本必须能跑通，否则下面的「库未变」无法区分「回滚了」与「根本没开始」"
+
     db_path = tmp_path / "test.db"
     _migrate_to_0017(db_path)
     _seed(db_path)
@@ -213,18 +241,64 @@ def test_0018_is_not_reapplied_after_success(tmp_path: Path) -> None:
     assert total == len(_SEED_ROWS), "重跑不得动数据"
 
 
-def _sql_statement_lines() -> list[str]:
-    """取迁移文件里真正的 SQL 语句行（去掉空行与 `--` 注释行）。"""
+def _strip_sql_comments(text: str) -> str:
+    """去掉 SQL 里的 `--` 行内/整行注释，但**不碰单引号字符串里的内容**。
+
+    只按「行首 `--`」过滤是不够的（李哥 2026-11-03 建议）：有人写成
+    `ALTER TABLE ...; -- 顺带说一句 COMMIT;` 时，尾部注释会被当成真语句，
+    `test_0018_declares_explicit_transaction` 就会误红。
+    """
+    out: list[str] = []
+    in_quote = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "'":
+            # SQL 里 '' 表示转义的单引号
+            if in_quote and i + 1 < len(text) and text[i + 1] == "'":
+                out.append("''")
+                i += 2
+                continue
+            in_quote = not in_quote
+            out.append(ch)
+        elif not in_quote and ch == "-" and text[i:i + 2] == "--":
+            # 吃到本行末尾
+            nl = text.find("\n", i)
+            if nl == -1:
+                break
+            i = nl  # 保留换行，交给下一轮
+            continue
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _statement_lines(raw_lines: list[str] | None = None) -> list[str]:
+    """取迁移文件里真正的 SQL 语句行（去掉整行 `--` 注释与行尾 `--` 注释）。"""
+    if raw_lines is None:
+        raw_lines = (MIGRATIONS_DIR / MIGRATION_0018).read_text(encoding="utf-8").splitlines()
     return [
-        ln for ln in (MIGRATIONS_DIR / MIGRATION_0018).read_text(encoding="utf-8").splitlines()
-        if ln.strip() and not ln.strip().startswith("--")
+        s for s in (_strip_sql_comments(ln).strip() for ln in raw_lines) if s
+    ]
+
+
+def _sql_statement_lines() -> list[str]:
+    """兼容旧名字：迁移文件里真正的 SQL 语句行。"""
+    return _statement_lines()
+
+
+def _statement_line_indexes(raw_lines: list[str]) -> list[int]:
+    """真实语句行在 `raw_lines` 里的下标（供按行注入使用）。"""
+    return [
+        i for i, ln in enumerate(raw_lines) if _strip_sql_comments(ln).strip()
     ]
 
 
 def _make_broken_sql() -> str:
     """在**最后一条**真实语句之前插一句必然失败的 SQL，其余逐字不动。
 
-    两个刻意的设计：
+    三个刻意的设计：
 
     1. **按行注入，不用 `str.replace("COMMIT;", ...)`**。文件头部注释里也出现了
        `COMMIT;` 字样，全局替换会把注释行生生截断成「半截注释 + 一条真语句」，
@@ -233,12 +307,10 @@ def _make_broken_sql() -> str:
     2. **注入点不绑定 `COMMIT`**。若绑定，去掉显式事务的变异版会因「找不到 COMMIT」
        直接红在 helper 里，而不是红在「库被改脏」这个真正要守的断言上 ——
        那样变异验证证明的是「helper 依赖 COMMIT」，不是「事务真的在保护库」。
+    3. **注释识别走 `_strip_sql_comments`**，行尾 `-- …` 不算语句。
     """
     raw_lines = (MIGRATIONS_DIR / MIGRATION_0018).read_text(encoding="utf-8").splitlines()
-    stmt_idx = [
-        i for i, ln in enumerate(raw_lines)
-        if ln.strip() and not ln.strip().startswith("--")
-    ]
+    stmt_idx = _statement_line_indexes(raw_lines)
     assert stmt_idx, "迁移文件里没有可执行的 SQL 语句"
     at = stmt_idx[-1]
     return "\n".join(
