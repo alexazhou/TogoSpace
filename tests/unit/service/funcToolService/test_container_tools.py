@@ -39,8 +39,8 @@ def _loaded():
     yield
 
 
-def _ctx(agent_id: int = 1) -> ToolCallContext:
-    return ToolCallContext(agent_id=agent_id, team_id=1, tool_name="test")
+def _ctx(agent_id: int = 1, tool_name: str = "test") -> ToolCallContext:
+    return ToolCallContext(agent_id=agent_id, team_id=1, tool_name=tool_name)
 
 
 @pytest.fixture
@@ -76,6 +76,38 @@ def test_include_container_tools_adds_exactly_the_five():
 
     assert with_containers - base == set(funcToolService.CONTAINER_TOOL_NAMES)
     assert len(funcToolService.CONTAINER_TOOL_NAMES) == 5
+
+
+async def test_container_tool_executes_through_run_tool_call(monkeypatch, container_agent):
+    """回归：容器工具必须能被 `run_tool_call` 按名字查到并执行。
+
+    TSP driver 把容器工具注册进 `AgentToolRegistry`，但执行统一走
+    `funcToolService.run_tool_call`。查找若只扫默认工具表，模型能看见
+    `create_container`，调用却返回 `Function create_container not found`。
+    """
+    from service import containerService
+
+    record = MagicMock(
+        container_id="c0ffee123456",
+        container_name="agent-1-1",
+        image="ubuntu:24.04",
+    )
+    monkeypatch.setattr(
+        containerService, "create_container", AsyncMock(return_value=record)
+    )
+
+    result = await funcToolService.run_tool_call(
+        "{}", _ctx(tool_name="create_container")
+    )
+
+    assert result["success"] is True, result
+    assert result["container_id"] == "c0ffee123456"
+
+
+def test_every_advertised_container_tool_is_resolvable_by_name():
+    """所有下发给模型的容器工具名，都必须能在执行注册表里按同名找到。"""
+    for tool_name in funcToolService.CONTAINER_TOOL_NAMES:
+        assert funcToolService.get_func_tool(tool_name) is not None, tool_name
 
 
 def test_tsp_driver_is_the_only_driver_requesting_container_tools():

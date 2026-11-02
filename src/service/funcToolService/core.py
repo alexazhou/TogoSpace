@@ -118,7 +118,9 @@ def load_container_func_tools() -> dict[str, FuncTool]:
 
 
 def get_func_tool(name: str) -> FuncTool | None:
-    return _func_tools.get(name)
+    # 执行时按名字查找必须覆盖两组工具：容器工具只是「默认不暴露」给
+    # Native / Claude SDK，并不代表它们不能被 TSP driver 执行。
+    return _func_tools.get(name) or _container_func_tools.get(name)
 
 
 def _reset() -> None:
