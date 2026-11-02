@@ -86,7 +86,7 @@ describe('AgentActivityItem 执行环境徽标', () => {
     expect(badge.attributes('data-exec-env')).toBe('container');
   });
 
-  it('宿主态（只有 exec_env，两个容器键缺失）展示宿主徽标', () => {
+  it('宿主态（只有 exec_env，两个容器键缺失）不显示宿主徽标', () => {
     // 键直接不存在，不是 null：`to_dict()` 剔除 None 后的真实形状
     const metadata: Record<string, unknown> = { tool_name: 'execute_bash', exec_env: 'host' };
     expect('current_container_id' in metadata).toBe(false);
@@ -94,10 +94,8 @@ describe('AgentActivityItem 执行环境徽标', () => {
 
     const wrapper = mountItem(activity({ metadata }));
 
-    const badge = envBadge(wrapper);
-    expect(badge.exists()).toBe(true);
-    expect(badge.text()).toBe('宿主');
-    expect(badge.attributes('data-exec-env')).toBe('host');
+    expect(envBadge(wrapper).exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('宿主');
   });
 
   it('三键全缺失（老记录 / Native driver 不报环境）不显示任何环境徽标', () => {

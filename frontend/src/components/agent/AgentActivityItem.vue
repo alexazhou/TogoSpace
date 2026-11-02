@@ -366,34 +366,28 @@ function getActivityToolResult(activity: AgentActivity): string {
  * 后端 `AgentActivityMeta.to_dict()` 会剔掉值为 None 的字段，所以宿主态下
  * `current_container_id` / `container_name` 的**键可能直接不存在**（不是 null），
  * 判断环境只能认 `metadata.exec_env` 本身，不能拿 `=== null` 猜。
- * 三键全缺失（老记录、Native driver 不带该字段）时返回空串 ⇒ 不渲染任何徽标。
+ * 宿主态是默认环境，不渲染徽标；三键全缺失（老记录、Native driver 不带该字段）
+ * 时同样返回空串 ⇒ 不渲染任何徽标。
  */
 function execEnvBadgeText(activity: AgentActivity): string {
-  const execEnv = activity.metadata?.exec_env;
-  if (execEnv === 'container') {
-    const containerName = readTrimmedString(activity.metadata?.container_name);
-    if (containerName) {
-      return containerName;
-    }
-    const containerId = readTrimmedString(activity.metadata?.current_container_id);
-    if (containerId) {
-      // 后端正常回填 12 位短 ID；长度不合预期时截断成短 ID，避免撑爆 chip。
-      return containerId.slice(0, 12);
-    }
-    // 环境已知是容器，但容器标识缺失：给环境名而不是空白胶囊。
-    return t('agent.execEnv.container');
+  if (activity.metadata?.exec_env !== 'container') {
+    return '';
   }
-  if (execEnv === 'host') {
-    return t('agent.execEnv.host');
+  const containerName = readTrimmedString(activity.metadata?.container_name);
+  if (containerName) {
+    return containerName;
   }
-  return '';
+  const containerId = readTrimmedString(activity.metadata?.current_container_id);
+  if (containerId) {
+    // 后端正常回填 12 位短 ID；长度不合预期时截断成短 ID，避免撑爆 chip。
+    return containerId.slice(0, 12);
+  }
+  // 环境已知是容器，但容器标识缺失：给环境名而不是空白胶囊。
+  return t('agent.execEnv.container');
 }
 
 /** 徽标 hover 提示：容器态给完整容器 ID（徽标里是截断的短 ID）。 */
 function execEnvBadgeTitle(activity: AgentActivity): string {
-  if (activity.metadata?.exec_env !== 'container') {
-    return t('agent.execEnv.label');
-  }
   const containerName = readTrimmedString(activity.metadata?.container_name);
   const containerId = readTrimmedString(activity.metadata?.current_container_id);
   const identity = [containerName, containerId].filter(Boolean).join(' · ');
@@ -623,7 +617,6 @@ const activityView = computed(() => {
     expandedToolResult,
     execEnvBadge: currentExecEnvBadge,
     execEnvBadgeTitle: currentExecEnvBadgeTitle,
-    execEnvIsContainer: activity.metadata?.exec_env === 'container',
     taskRoomLabel: currentTaskRoomLabel,
     receivedMessages,
     exitCode: currentExitCode,
@@ -698,9 +691,8 @@ const activityView = computed(() => {
       <span
         v-if="activityView.execEnvBadge"
         class="agent-activity-item__chip agent-activity-item__chip--env"
-        :class="{ 'agent-activity-item__chip--env-host': !activityView.execEnvIsContainer }"
         :title="activityView.execEnvBadgeTitle"
-        :data-exec-env="activityView.execEnvIsContainer ? 'container' : 'host'"
+        data-exec-env="container"
       >{{ activityView.execEnvBadge }}</span>
       <span
         v-if="activityView.showToolArguments"
@@ -1027,7 +1019,7 @@ const activityView = computed(() => {
   color: var(--danger);
 }
 
-/* 执行环境徽标：容器态用 info 色区分，宿主态弱化成普通 chip 的观感。 */
+/* 执行环境徽标：只在容器态渲染，用 info 色与普通 chip 区分。 */
 .agent-activity-item__chip--env {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.66rem;
@@ -1038,12 +1030,6 @@ const activityView = computed(() => {
   border: 1px solid color-mix(in srgb, var(--state-info) 24%, var(--border-default) 76%);
   background: color-mix(in srgb, var(--state-info) 12%, var(--surface-panel) 88%);
   color: color-mix(in srgb, var(--state-info) 84%, var(--text-primary) 16%);
-}
-
-.agent-activity-item__chip--env-host {
-  border-color: var(--border-subtle);
-  background: var(--surface-chip);
-  color: var(--text-secondary);
 }
 
 .agent-activity-item__direction {

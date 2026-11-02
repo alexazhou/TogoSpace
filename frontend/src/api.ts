@@ -476,11 +476,27 @@ function normalizeDriverTypeValue(value?: string | null): string {
   return '';
 }
 
+/**
+ * 特殊 Agent 标识。后端列表不再下发 `special` 字段，身份由固定 Agent ID 表达：
+ * `OPERATOR = -1`、`SYSTEM = -2`（`SpecialAgent` 的枚举值）。
+ */
+function normalizeAgentSpecial(agent: RawAgentInfo): AgentInfo['special'] {
+  if (agent.special === 'operator' || agent.special === 'system') {
+    return agent.special;
+  }
+  const agentId = typeof agent.id === 'number' ? agent.id : Number(agent.id);
+  if (agentId === -1) {
+    return 'operator';
+  }
+  if (agentId === -2) {
+    return 'system';
+  }
+  return null;
+}
+
 function normalizeAgent(entry: RawAgentEntry): AgentInfo {
   const { agent, runtime } = unwrapAgentEntry(entry);
-  const normalizedSpecial = agent.special === 'operator' || agent.special === 'system'
-    ? agent.special
-    : null;
+  const normalizedSpecial = normalizeAgentSpecial(agent);
 
   // 运行时字段优先取外壳，兼容仍返回扁平结构的老接口（如 agents/save.json）
   const execEnv = runtime?.exec_env_state?.exec_env ?? agent.exec_env;

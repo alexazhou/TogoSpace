@@ -9,6 +9,7 @@ import {
   getAgentActivities,
   getAgentActivitiesPage,
   getAgentDetail,
+  getAgentsByTeamId,
   getSystemStatus,
   getTaskDetail,
   getTaskEventsPage,
@@ -67,6 +68,21 @@ describe('api request handling', () => {
       'Content-Type': 'application/json',
     });
     expect(init.headers).not.toHaveProperty('Authorization');
+  });
+
+  it('derives special-agent markers from fixed IDs when the backend omits the field', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      agents: [
+        { agent: { id: 5, name: 'alice', team_id: 2 }, status: 'IDLE' },
+        { agent: { id: -1, name: 'OPERATOR', team_id: -1 }, status: 'IDLE' },
+        { agent: { id: -2, name: 'SYSTEM', team_id: -1 }, status: 'IDLE' },
+      ],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const agents = await getAgentsByTeamId(2, { includeSpecial: true });
+
+    expect(agents.map((agent) => agent.special)).toEqual([null, 'operator', 'system']);
   });
 
   it('opens token dialog on auth_required responses', async () => {
