@@ -166,7 +166,13 @@
       "create_task": "Create Task",
       "update_task": "Update Task",
       "finish_action": "Finish Action",
-      "start_chat": "Start Chat"
+      "start_chat": "Start Chat",
+      "create_container": "Create Container",
+      "enter_container": "Enter Container",
+      "list_containers": "List Containers",
+      "exit_to_host": "Exit to Host",
+      "get_time": "Get Time",
+      "get_room_info": "Get Room Info"
     },
     "tokenEstimate": "Est. {count}",
     "retryScheduled": "Retry in {seconds}s ({attempt}/{max})",

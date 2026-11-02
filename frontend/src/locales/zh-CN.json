@@ -166,7 +166,13 @@
       "create_task": "创建任务",
       "update_task": "更新任务",
       "finish_action": "结束行动",
-      "start_chat": "发起聊天"
+      "start_chat": "发起聊天",
+      "create_container": "创建容器",
+      "enter_container": "进入容器",
+      "list_containers": "查看容器",
+      "exit_to_host": "退出容器",
+      "get_time": "获取时间",
+      "get_room_info": "查询房间"
     },
     "tokenEstimate": "估算 {count}",
     "retryScheduled": "{seconds}s 后重试（{attempt}/{max}）",

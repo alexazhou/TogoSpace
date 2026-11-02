@@ -229,6 +229,32 @@ function getActivityToolArguments(activity: AgentActivity): string {
     }
   }
 
+  if (toolName.value === 'create_container') {
+    const image = readTrimmedString((toolArguments as { image?: unknown }).image);
+    return image || '';
+  }
+
+  if (toolName.value === 'enter_container') {
+    return readTrimmedString((toolArguments as { container_id?: unknown }).container_id);
+  }
+
+  if (toolName.value === 'list_containers' || toolName.value === 'exit_to_host') {
+    return '';
+  }
+
+  if (toolName.value === 'get_time') {
+    return readTrimmedString((toolArguments as { timezone?: unknown }).timezone);
+  }
+
+  if (toolName.value === 'get_room_info') {
+    return readTrimmedString((toolArguments as { room_name?: unknown }).room_name);
+  }
+
+  // 无参数工具不展示 `{}`，避免活动行出现无意义的参数胶囊。
+  if (Object.keys(toolArguments as Record<string, unknown>).length === 0) {
+    return '';
+  }
+
   return JSON.stringify(toolArguments);
 }
 

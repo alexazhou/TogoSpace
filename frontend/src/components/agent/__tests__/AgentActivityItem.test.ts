@@ -38,6 +38,86 @@ function envBadge(wrapper: ReturnType<typeof mountItem>) {
   return wrapper.find('.agent-activity-item__chip--env');
 }
 
+describe('AgentActivityItem 容器工具展示', () => {
+  it('创建容器展示本地化名称与镜像参数', () => {
+    const wrapper = mountItem(activity({
+      metadata: {
+        tool_name: 'create_container',
+        tool_arguments: { image: 'ubuntu:24.04' },
+      },
+    }));
+
+    expect(wrapper.find('.agent-activity-item__chip--mono').text()).toBe('创建容器');
+    expect(wrapper.find('.agent-activity-item__tool-args').text()).toBe('ubuntu:24.04');
+  });
+
+  it('进入容器展示本地化名称与容器 ID', () => {
+    const wrapper = mountItem(activity({
+      metadata: {
+        tool_name: 'enter_container',
+        tool_arguments: { container_id: 'c0ffee123456' },
+      },
+    }));
+
+    expect(wrapper.find('.agent-activity-item__chip--mono').text()).toBe('进入容器');
+    expect(wrapper.find('.agent-activity-item__tool-args').text()).toBe('c0ffee123456');
+  });
+
+  it('查看容器与退出容器展示本地化名称且不渲染空参数', () => {
+    for (const [toolName, label] of [
+      ['list_containers', '查看容器'],
+      ['exit_to_host', '退出容器'],
+    ] as const) {
+      const wrapper = mountItem(activity({
+        metadata: { tool_name: toolName, tool_arguments: {} },
+      }));
+
+      expect(wrapper.find('.agent-activity-item__chip--mono').text()).toBe(label);
+      expect(wrapper.find('.agent-activity-item__tool-args').exists()).toBe(false);
+    }
+  });
+});
+
+describe('AgentActivityItem 时间与房间工具展示', () => {
+  it('获取时间展示本地化名称与时区参数', () => {
+    const wrapper = mountItem(activity({
+      metadata: {
+        tool_name: 'get_time',
+        tool_arguments: { timezone: 'Asia/Shanghai' },
+      },
+    }));
+
+    expect(wrapper.find('.agent-activity-item__chip--mono').text()).toBe('获取时间');
+    expect(wrapper.find('.agent-activity-item__tool-args').text()).toBe('Asia/Shanghai');
+  });
+
+  it('查询房间展示本地化名称与房间名参数', () => {
+    const wrapper = mountItem(activity({
+      metadata: {
+        tool_name: 'get_room_info',
+        tool_arguments: { room_name: '研发组' },
+      },
+    }));
+
+    expect(wrapper.find('.agent-activity-item__chip--mono').text()).toBe('查询房间');
+    expect(wrapper.find('.agent-activity-item__tool-args').text()).toBe('研发组');
+  });
+
+  it('无参数调用时不渲染空参数', () => {
+    for (const [toolName, label] of [
+      ['get_time', '获取时间'],
+      ['get_room_info', '查询房间'],
+    ] as const) {
+      const wrapper = mountItem(activity({
+        metadata: { tool_name: toolName, tool_arguments: {} },
+      }));
+
+      expect(wrapper.find('.agent-activity-item__chip--mono').text()).toBe(label);
+      expect(wrapper.find('.agent-activity-item__tool-args').exists()).toBe(false);
+    }
+  });
+});
+
 describe('AgentActivityItem 执行环境徽标', () => {
   it('容器态有 container_name 时优先展示容器名', () => {
     const wrapper = mountItem(activity({
