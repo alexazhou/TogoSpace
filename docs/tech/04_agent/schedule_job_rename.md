@@ -99,7 +99,11 @@ COMMIT;
 ### 3.2 发版注意
 
 - 这是**破坏性变更**：旧版本代码无法读新库（找不到 `schecule_tasks`）。发版说明须写明。
-- 迁移前请备份 `data/data.db`（应用启动时的自动备份即可）。
+- **迁移前会自动备份**：`backend_main._run_database_migrations` 在确有**待执行迁移**且库文件已存在时，
+  先用 `sqlite3.Connection.backup()` 把 `data/data.db` 拷到 `data/backups/{stem}_{时间戳}.db`，再执行迁移。
+  备份失败会直接抛异常**中止启动**（不做降级兼容时，备份是唯一回滚路径，不允许「没备份就迁移」）。
+  无待迁移不备份，避免每次启动堆备份。
+- 降级到 0.4.x：用 `data/backups/` 里升级前那份备份覆盖 `data/data.db`（取时间早于本次启动的那份）。
 - 版本号 0.5.0。
 
 ## 4. 验证口径
