@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 import sys
 import textwrap
 
@@ -23,12 +24,45 @@ from service.containerService import dockerCli
 from service.containerService.dockerCli import DockerCli, DockerCliError
 from util import containerUtil
 
+# 预热标记：`_write_script` 写完脚本后会用这个参数 exec 一次，脚本见到就立刻退出。
+# 目的是把「macOS 首次 exec 一个新文件」的一次性开销（实测 ~0.15s，且并发下全局串行化，
+# max ≈ 并发数 × 0.15s）挪到**不计时的阶段**，见 conftest.py 的详细说明（#124）。
+_PREWARM_FLAG = "__prewarm__"
+
+# 必须排在用户脚本体第一行：本模块有两条用例把 `echo $$ > child.pid` 写在首行，
+# 且用 2s 窗口断言「子进程确实起来过」。首跑开销吃掉窗口时它们会红在
+# 「child.pid 不存在」，而不是红在真正要验的「超时会 kill 子进程」上。
+_PREWARM_GUARD = f'[ "${{1:-}}" = "{_PREWARM_FLAG}" ] && exit 0\n'
+
 
 def _write_script(path, body: str) -> str:
-    """写一个可执行的假 docker 脚本，返回其路径。"""
-    path.write_text("#!/bin/sh\n" + textwrap.dedent(body), encoding="utf-8")
+    """写一个可执行的假 docker 脚本，返回其路径。
+
+    写完立刻**预热一次**（用 `_PREWARM_FLAG` 尖速退出），原因见 `_PREWARM_GUARD` 与
+    conftest.py：本模块的用例用真实子进程 + 真实计时窗口，首跑 exec 开销会随机吃掉窗口。
+    """
+    path.write_text("#!/bin/sh\n" + _PREWARM_GUARD + textwrap.dedent(body), encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    return str(path)
+    script_path = str(path)
+    _prewarm(script_path)
+    return script_path
+
+
+def _prewarm(script_path: str) -> None:
+    """exec 一次把首跑成本吃掉；任何异常都吞掉（预热失败不该让用例红）。
+
+    超时给 60s：机器极忙时首次 exec 可能排队很久，但它只是预热，慢一点无妨。
+    """
+    try:
+        subprocess.run(
+            [script_path, _PREWARM_FLAG],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+            check=False,
+        )
+    except Exception:  # noqa: BLE001 - 预热是尽力而为，绝不能因此让用例失败
+        pass
 
 
 @pytest.fixture
@@ -234,6 +268,9 @@ async def test_cancellation_kills_child_process(tmp_path):
     with pytest.raises(asyncio.CancelledError):
         await task
 
+    # 子进程必须真的启动过；没有 pid 就说明假脚本没跑起来，先在这里明确报错，
+    # 否则下面的 read_text 会抛 FileNotFoundError，红在异常上而不是红在断言上。
+    assert pid_file.exists(), "假脚本未启动"
     pid = int(pid_file.read_text().strip())
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
