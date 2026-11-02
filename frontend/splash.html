@@ -32,30 +32,31 @@
     .brand {
       display: flex;
       align-items: center;
-      gap: 14px;
-      margin-bottom: 10px;
+      gap: 18px;
+      margin-bottom: 36px;
+    }
+
+    .brand-copy {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
     }
     .logo {
-      width: 56px;
-      height: 56px;
-      border-radius: 14px;
-      background: linear-gradient(135deg, #6d8cff, #a855f7);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 28px;
-      font-weight: 700;
-      color: #fff;
+      width: auto;
+      height: 72px;
+      object-fit: contain;
+      filter: drop-shadow(0 6px 16px rgba(45, 95, 235, 0.28));
     }
     .title {
-      font-size: 30px;
+      font-size: 42px;
       font-weight: 600;
+      line-height: 1.1;
       letter-spacing: 0.5px;
     }
     .subtitle {
-      font-size: 13px;
+      font-size: 17px;
       color: rgba(255, 255, 255, 0.55);
-      margin-bottom: 44px;
     }
     .loading-state {
       display: flex;
@@ -123,14 +124,16 @@
 <body>
   <div class="splash-card" data-tauri-drag-region>
     <div class="brand" data-tauri-drag-region>
-      <div class="logo">T</div>
-      <div class="title">TogoSpace</div>
+      <img class="logo" src="/togospace-icon.png" alt="TogoSpace" />
+      <div class="brand-copy" data-tauri-drag-region>
+        <div class="title">TogoSpace</div>
+        <div class="subtitle">Multi-Bot Team Console</div>
+      </div>
     </div>
-    <div class="subtitle">Multi-Agent Workspace</div>
 
     <div class="loading-state" id="loadingState">
       <div class="spinner"></div>
-      <div class="loading-text" id="loadingText">正在启动中…</div>
+      <div class="loading-text" id="loadingText">loading</div>
     </div>
 
     <div class="error-state" id="errorState">

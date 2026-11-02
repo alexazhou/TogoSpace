@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
-const STARTING_TEXT = '正在启动中…';
+const STARTING_TEXT = 'loading';
 const MIGRATING_TEXT = '数据库升级中，请等待，不要关闭程序';
 
 const splashStartedAt = performance.now();
