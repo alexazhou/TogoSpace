@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import asyncio
 
-from dal.db import gtAgentHistoryManager, gtScheculeTaskManager, gtRoomMessageManager, gtRoomManager
+from dal.db import gtAgentHistoryManager, gtScheduleJobManager, gtRoomMessageManager, gtRoomManager
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtRoomMessage import GtRoomMessage
-from constants import AgentHistoryTag, AgentTaskStatus
+from constants import AgentHistoryTag, AgentJobStatus
 from service import serviceUtil
 
 s_status = ServiceStatusInfo(name="persistenceService")
@@ -52,12 +52,12 @@ async def fail_running_tasks(
     *,
     error_message: str = "task interrupted by process restart",
 ) -> None:
-    """将 Agent 的 RUNNING 任务标记为 FAILED。"""
-    tasks = await gtScheculeTaskManager.get_running_tasks(agent_id)
-    for task in tasks:
-        await gtScheculeTaskManager.update_task_status(
-            task.id,
-            AgentTaskStatus.FAILED,
+    """将 Agent 的 RUNNING 调度任务标记为 FAILED。"""
+    jobs = await gtScheduleJobManager.get_running_jobs(agent_id)
+    for job in jobs:
+        await gtScheduleJobManager.update_job_status(
+            job.id,
+            AgentJobStatus.FAILED,
             error_message=error_message,
         )
 

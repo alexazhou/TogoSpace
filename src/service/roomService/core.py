@@ -13,7 +13,7 @@ from exception import TogoException
 from model.dbModel.gtDept import DeptRoomSpec
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtRoomMessage import GtRoomMessage
-from model.dbModel.gtScheculeTask import GtScheculeTask
+from model.dbModel.gtScheduleJob import GtScheduleJob
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
 from constants import MessageBusTopic, RoomState, RoomType, SpecialAgent
@@ -35,7 +35,7 @@ class ToolCallContext:
     team_id: int
     chat_room: ChatRoom | None = None
     tool_name: str = ""
-    schedule_task: GtScheculeTask | None = None
+    schedule_job: GtScheduleJob | None = None
 
 _rooms: Dict[str, ChatRoom] = {}  # room_key -> ChatRoom
 _rooms_by_id: Dict[int, ChatRoom] = {}

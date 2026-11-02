@@ -3,8 +3,8 @@ import logging
 from service import messageBus
 from service.messageBus import EventBusMessage
 from service import agentService, roomService as chat_room, serviceUtil
-from dal.db import gtScheculeTaskManager
-from constants import MessageBusTopic, AgentTaskType, SpecialAgent, ScheduleState
+from dal.db import gtScheduleJobManager
+from constants import MessageBusTopic, AgentJobType, SpecialAgent, ScheduleState
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from model.dbModel.gtAgent import GtAgent
 from util import configUtil
@@ -129,15 +129,15 @@ async def _on_room_status_changed(msg: EventBusMessage) -> None:
     agent = agentService.get_agent(agent_id)
 
     # 去重：检查数据库中是否已有该房间的 PENDING/FAILED 任务
-    if await gtScheculeTaskManager.has_pending_room_task(agent_id, room_id, include_failed=True):
+    if await gtScheduleJobManager.has_pending_room_job(agent_id, room_id, include_failed=True):
         logger.debug(f"跳过重复任务创建: agent_id={agent_id}, room_id={room_id}")
         agent.start_consumer_task()
         return
 
     # 创建任务记录
-    await gtScheculeTaskManager.create_task(
+    await gtScheduleJobManager.create_job(
         agent_id,
-        AgentTaskType.ROOM_MESSAGE,
+        AgentJobType.ROOM_MESSAGE,
         {"room_id": room_id},
     )
 

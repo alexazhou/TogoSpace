@@ -9,7 +9,7 @@ from exception import TogoException
 from model.coreModel.agentModel import ExecEnvState
 from model.coreModel.containerModel import ContainerTarget
 from model.dbModel.gtAgent import GtAgent
-from model.dbModel.gtScheculeTask import GtScheculeTask
+from model.dbModel.gtScheduleJob import GtScheduleJob
 from service.agentService.agentHistoryStore import AgentHistoryStore
 from service.agentService.toolRegistry import AgentToolRegistry
 
@@ -103,7 +103,7 @@ class AgentDriver:
     def turn_setup(self) -> AgentTurnSetup:
         return AgentTurnSetup()
 
-    async def run_task_turn(self, task: GtScheculeTask, synced_count: int) -> None:
+    async def run_task_turn(self, job: GtScheduleJob, synced_count: int) -> None:
         raise NotImplementedError
 
     async def cancel_turn(self) -> None:

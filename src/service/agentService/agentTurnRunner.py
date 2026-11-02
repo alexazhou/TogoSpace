@@ -13,7 +13,7 @@ from typing import List
 from constants import (
     AgentActivityStatus, AgentActivityType,
     AgentHistoryStatus, AgentHistoryTag,
-    AgentTaskType, DriverType, ModelInput, OpenaiApiRole, RoomState, SpecialAgent,
+    AgentJobType, DriverType, ModelInput, OpenaiApiRole, RoomState, SpecialAgent,
     TaskStatus, TurnStepResult,
 )
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
@@ -21,7 +21,7 @@ from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.agentMessage import AgentMessage
-from model.dbModel.gtScheculeTask import GtScheculeTask
+from model.dbModel.gtScheduleJob import GtScheduleJob
 from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.historyUsage import CompactStage, HistoryUsage
 from service import agentActivityService, llmService, roomService, taskService
@@ -76,7 +76,7 @@ class AgentTurnRunner:
         self.tool_registry: AgentToolRegistry = AgentToolRegistry()
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
         self._current_room: ChatRoom | None = None
-        self._current_task: GtScheculeTask | None = None
+        self._current_job: GtScheduleJob | None = None
 
     @property
     def _session_id(self) -> str:
@@ -203,7 +203,7 @@ class AgentTurnRunner:
 
         return taskService.is_task_reviewer(agent_task, self.gt_agent.id) and agent_task.status == TaskStatus.REVIEWING
 
-    async def run_task_turn(self, task: GtScheculeTask) -> None:
+    async def run_task_turn(self, job: GtScheduleJob) -> None:
         """执行一个完整 chat turn：同步消息 → 推理 → 工具调用循环。
 
         支持两种模式：
@@ -211,11 +211,11 @@ class AgentTurnRunner:
         - TODO_TASK：向 history 注入任务通知 prompt 后运行 turn loop，无房间依赖。
         若存在未完成 turn，则走续跑路径。
         """
-        is_todo_task = task.task_type == AgentTaskType.TODO_TASK
+        is_todo_task = job.job_type == AgentJobType.TODO_TASK
 
         if is_todo_task:
-            agent_task_id = task.task_data.get("agent_task_id")
-            assertNotNull(agent_task_id, error_message=f"task 缺少 agent_task_id, agent_id={self.gt_agent.id}, task_id={task.id}")
+            agent_task_id = job.task_data.get("agent_task_id")
+            assertNotNull(agent_task_id, error_message=f"job 缺少 agent_task_id, agent_id={self.gt_agent.id}, job_id={job.id}")
             agent_task = await gtAgentTaskManager.get_task(agent_task_id)
             assertNotNull(agent_task, error_message=f"agent_task_id={agent_task_id} 不存在, agent_id={self.gt_agent.id}")
             if not self._needs_task_attention(agent_task):
@@ -230,8 +230,8 @@ class AgentTurnRunner:
             logger.info(f"协作任务 turn 开始: {self.gt_agent.name}(agent_id={self.gt_agent.id}), agent_task_id={agent_task_id}, title={agent_task.title!r}")
             room = None
         else:
-            room_id = task.task_data.get("room_id")
-            assertNotNull(room_id, error_message=f"task 缺少 room_id, agent_id={self.gt_agent.id}, task_id={task.id}")
+            room_id = job.task_data.get("room_id")
+            assertNotNull(room_id, error_message=f"job 缺少 room_id, agent_id={self.gt_agent.id}, job_id={job.id}")
             room = roomService.get_room(room_id)
             assertNotNull(room, error_message=f"room_id={room_id} 不存在, agent_id={self.gt_agent.id}")
             assert room.state != RoomState.INIT, (
@@ -239,7 +239,7 @@ class AgentTurnRunner:
             )
 
         self._current_room = room
-        self._current_task = task
+        self._current_job = job
         try:
             if self.driver.host_managed_turn_loop:
                 assert self.driver.started is True, f"driver 尚未启动: agent_id={self.gt_agent.id}"
@@ -281,7 +281,7 @@ class AgentTurnRunner:
 
             else:
                 synced_count = 1 if is_todo_task else await self.pull_room_messages_to_history(room)
-                await self.driver.run_task_turn(task, synced_count)
+                await self.driver.run_task_turn(job, synced_count)
 
         except asyncio.CancelledError:
             if not is_todo_task and room is not None:
@@ -289,7 +289,7 @@ class AgentTurnRunner:
             raise
         finally:
             self._current_room = None
-            self._current_task = None
+            self._current_job = None
 
     async def pull_room_messages_to_history(self, room: ChatRoom) -> int:
         """从房间拉取未读消息并追加到 history。返回追加的消息条目数（0 或 1）。"""
@@ -902,7 +902,7 @@ class AgentTurnRunner:
             agent_id=self.gt_agent.id,
             team_id=team_id,
             chat_room=room,
-            schedule_task=self._current_task,
+            schedule_job=self._current_job,
         )
         exec_result:ToolExecutionResult = await self.tool_registry.execute_tool_call(tool_call, context)
 

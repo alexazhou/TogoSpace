@@ -6,7 +6,7 @@ import logging
 from zoneinfo import ZoneInfo
 
 from constants import (
-    AgentStatus, AgentTaskType, CONTAINER_SELF_MOUNT_PATH, CONTAINER_SHARED_MOUNT_PATH,
+    AgentStatus, AgentJobType, CONTAINER_SELF_MOUNT_PATH, CONTAINER_SHARED_MOUNT_PATH,
     DriverType, EmployStatus, ExecEnv, RoleTemplateType, RoomState, SpecialAgent, TaskStatus,
 )
 from exception import TogoException
@@ -347,14 +347,14 @@ async def get_agent_info(agent_name: Optional[str] = None, _context: ToolCallCon
         return {"success": False, "message": "当前没有可用的团队上下文。"}
 
     from service import agentService, deptService
-    from dal.db import gtScheculeTaskManager
+    from dal.db import gtScheduleJobManager
 
     team_agents = agentService.get_team_agents(team_id)
 
     async def _build_agent_dict(agent: Any, *, detail: bool) -> dict[str, Any]:
         agent_id = agent.gt_agent.id
         depts_with_paths: list[tuple[GtDept, str]] = await deptService.get_agent_depts(team_id, agent_id)
-        first_task = await gtScheculeTaskManager.get_first_unfinish_task(agent_id) if agent.status == AgentStatus.FAILED else None
+        first_task = await gtScheduleJobManager.get_first_unfinished_job(agent_id) if agent.status == AgentStatus.FAILED else None
         info: dict[str, Any] = {
             "id": agent_id,
             "name": agent.gt_agent.name,
@@ -1053,12 +1053,12 @@ async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: 
         logger.warning("结束行动失败，上下文未设置")
         return {"success": False, "message": "当前没有激活的上下文。"}
 
-    task_type = _context.schedule_task.task_type if _context.schedule_task is not None else AgentTaskType.ROOM_MESSAGE
+    job_type = _context.schedule_job.job_type if _context.schedule_job is not None else AgentJobType.ROOM_MESSAGE
 
-    if task_type == AgentTaskType.TODO_TASK:
+    if job_type == AgentJobType.TODO_TASK:
         import service.taskService as taskService
 
-        agent_task_id = _context.schedule_task.task_data.get("agent_task_id")
+        agent_task_id = _context.schedule_job.task_data.get("agent_task_id")
         agent_task = await gtAgentTaskManager.get_task(agent_task_id) if agent_task_id else None
         if agent_task is not None:
             is_assignee = agent_task.assignee_id == _context.agent_id
@@ -1100,7 +1100,7 @@ finish 失败，你负责验收的任务【{agent_task.title}】依然为 review
         logger.info(f"Agent 结束协作任务行动: agent_id={_context.agent_id}")
         return {"success": True, "message": "已结束了本轮行动."}
 
-    elif task_type == AgentTaskType.ROOM_MESSAGE:
+    elif job_type == AgentJobType.ROOM_MESSAGE:
         if _context.chat_room is None:
             logger.warning("结束行动失败，聊天室上下文未设置")
             return {"success": False, "message": "当前没有激活的房间上下文。"}

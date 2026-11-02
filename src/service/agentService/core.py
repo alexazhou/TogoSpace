@@ -18,13 +18,13 @@ from service.agentService.agent import Agent
 from service.agentService.driver import normalize_driver_config
 from service.agentService.promptBuilder import build_agent_system_prompt
 from service import llmService, roomService, persistenceService, deptService, agentActivityService, serviceUtil, containerService
-from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtScheculeTaskManager
+from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtScheduleJobManager
 from peewee import IntegrityError
 from exception import TogoException
 from constants import (
     ContainerState,
     AgentStatus,
-    AgentTaskStatus,
+    AgentJobStatus,
     DriverType,
     EmployStatus,
     SpecialAgent,
@@ -387,9 +387,9 @@ async def _restore_agent_runtime_state(
             error_message=running_task_error_message,
         )
 
-    first_task = await gtScheculeTaskManager.get_first_unfinish_task(agent.gt_agent.id)
-    agent.task_consumer.status = AgentStatus.FAILED if (
-        first_task is not None and first_task.status == AgentTaskStatus.FAILED
+    first_job = await gtScheduleJobManager.get_first_unfinished_job(agent.gt_agent.id)
+    agent.job_consumer.status = AgentStatus.FAILED if (
+        first_job is not None and first_job.status == AgentJobStatus.FAILED
     ) else AgentStatus.IDLE
 
 
@@ -524,9 +524,9 @@ async def get_agent_detail_info(agent: GtAgent) -> AgentRuntimeInfo:
 
 async def get_agent_error_message(agent_id: int) -> str | None:
     """返回 Agent 最早未完成任务的失败信息；没有失败任务时为 None。"""
-    first_task = await gtScheculeTaskManager.get_first_unfinish_task(agent_id)
-    if first_task is not None and first_task.status == AgentTaskStatus.FAILED:
-        return first_task.error_message
+    first_job = await gtScheduleJobManager.get_first_unfinished_job(agent_id)
+    if first_job is not None and first_job.status == AgentJobStatus.FAILED:
+        return first_job.error_message
     return None
 
 
