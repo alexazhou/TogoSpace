@@ -23,7 +23,8 @@ const props = defineProps<{
   isLightMode: boolean;
   statusLabel: string;
   reconnectProgress: number;
-  totalMessageCount: number;
+  activeAgentCount: number;
+  activeAgentNames: string[];
   teams: TeamSummary[];
   activeTeamId: number | null;
   activeTeamEnabled: boolean;
@@ -388,7 +389,24 @@ function closeLogoutConfirm(): void {
         ></span>
         {{ statusLabel }}
       </div>
-      <div v-if="showConnectionStatus" class="metric-pill">{{ t('topbar.messagesCount', { count: totalMessageCount }) }}</div>
+      <div v-if="showConnectionStatus" class="metric-pill-wrapper">
+        <div
+          class="metric-pill"
+          :class="{ 'metric-pill--active': activeAgentCount > 0 }"
+          tabindex="0"
+          aria-describedby="active-agents-tooltip"
+        >{{ t('topbar.activeAgentsCount', { count: activeAgentCount }) }}</div>
+        <div id="active-agents-tooltip" class="metric-tooltip" role="tooltip">
+          <p class="metric-tooltip__label">{{ t('topbar.activeAgentsLabel') }}</p>
+          <ul v-if="activeAgentNames.length" class="metric-tooltip__list">
+            <li v-for="(name, index) in activeAgentNames" :key="`${name}-${index}`" class="metric-tooltip__item">
+              <span class="metric-tooltip__dot" aria-hidden="true"></span>
+              <span class="metric-tooltip__name">{{ name }}</span>
+            </li>
+          </ul>
+          <p v-else class="metric-tooltip__empty">{{ t('topbar.noActiveAgents') }}</p>
+        </div>
+      </div>
       <div class="topbar-utility-group">
         <button
           class="theme-switch"
@@ -836,12 +854,15 @@ function closeLogoutConfirm(): void {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 28px;
+  box-sizing: border-box;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   padding: 3px 8px;
   background: var(--surface-pill);
   color: var(--text-secondary);
   font-size: 0.78rem;
+  line-height: 1.2;
   transition:
     border-color 140ms ease,
     background 140ms ease,
@@ -854,6 +875,100 @@ function closeLogoutConfirm(): void {
 .schedule-state-pill:hover {
   border-color: var(--interactive-focus-border);
   background: color-mix(in srgb, var(--interactive-selected) 18%, var(--surface-pill) 82%);
+}
+
+.metric-pill-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.metric-pill {
+  cursor: default;
+  outline: none;
+}
+
+.metric-pill--active {
+  color: color-mix(in srgb, var(--state-success) 82%, var(--text-primary) 18%);
+}
+
+.metric-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 160px;
+  max-width: 240px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  display: grid;
+  gap: 7px;
+  pointer-events: none;
+}
+
+.metric-pill-wrapper:hover .metric-tooltip,
+.metric-pill-wrapper:focus-within .metric-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.metric-tooltip__label,
+.metric-tooltip__empty {
+  margin: 0;
+}
+
+.metric-tooltip__label {
+  color: var(--text-tertiary);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.metric-tooltip__list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.metric-tooltip__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.metric-tooltip__dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--state-success);
+}
+
+.metric-tooltip__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-tooltip__empty {
+  color: var(--text-secondary);
 }
 
 .team-disabled-pill {
@@ -1427,6 +1542,7 @@ function closeLogoutConfirm(): void {
 
 :global(html.bp-console-short) .topbar.topbar-console .team-disabled-pill,
 :global(html.bp-console-short) .topbar.topbar-console .status-pill,
+:global(html.bp-console-short) .topbar.topbar-console .metric-pill,
 :global(html.bp-console-short) .topbar.topbar-console .schedule-state-pill {
   min-height: 28px;
   padding: 0 8px;

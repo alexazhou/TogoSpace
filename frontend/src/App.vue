@@ -21,7 +21,6 @@ import {
   hasUpdate,
   latestVersion,
   releaseUrl,
-  totalMessageCount,
   updateScheduleState,
 } from './appUiState';
 import { checkUpdate, getSystemStatus, resumeSchedule, setTeamEnabled } from './api';
@@ -31,10 +30,11 @@ import TokenDialog from './components/ui/TokenDialog.vue';
 import TopBar from './components/layout/TopBar.vue';
 import { DEFAULT_SETTINGS_SECTION } from './components/settings/sections';
 import ConfirmDialog from './components/ui/ConfirmDialog.vue';
+import { useTeamAgents } from './realtime/selectors';
 import { startRealtimeClient, stopRealtimeClient } from './realtime/wsClient';
 import { installViewportRootClasses } from './responsive/breakpoints';
 import { findTeamById, firstTeamId, loadTeams, preferredTeamId, setPreferredTeamId, teams, teamsLoaded } from './teamStore';
-import { formatConnectionState } from './utils';
+import { displayName, formatConnectionState } from './utils';
 
 type ThemeMode = 'dark' | 'light';
 type ConsoleMainView = 'chat' | 'tasks';
@@ -58,6 +58,12 @@ const teamIdFromRoute = computed<number | null>(() => {
 const currentTeam = computed(() => findTeamById(teamIdFromRoute.value));
 const activeTeamId = computed(() => currentTeam.value?.id ?? preferredTeamId.value ?? firstTeamId.value);
 const activeTeam = computed(() => findTeamById(activeTeamId.value));
+const teamAgents = useTeamAgents(activeTeamId);
+const activeAgents = computed(() =>
+  teamAgents.value.filter((agent) => agent.status === 'active'),
+);
+const activeAgentCount = computed(() => activeAgents.value.length);
+const activeAgentNames = computed(() => activeAgents.value.map((agent) => displayName(agent)));
 const activeTeamEnabled = computed(() => {
   const enabled = activeTeam.value?.enabled as boolean | number | undefined;
   return enabled !== false && enabled !== 0;
@@ -338,7 +344,8 @@ onBeforeUnmount(() => {
       :is-light-mode="isLightMode"
       :status-label="statusLabel"
       :reconnect-progress="reconnectProgress"
-      :total-message-count="totalMessageCount"
+      :active-agent-count="activeAgentCount"
+      :active-agent-names="activeAgentNames"
       :teams="teams"
       :active-team-id="activeTeamId"
       :active-team-enabled="activeTeamEnabled"

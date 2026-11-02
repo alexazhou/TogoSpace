@@ -12,11 +12,15 @@ const emit = defineEmits<{
 }>();
 
 const agents = useTeamAgentsWithDepartmentPath(() => props.teamId);
-const visibleAgents = computed(() =>
-  agents.value.filter((agent) =>
+const visibleAgents = computed(() => {
+  const members = agents.value.filter((agent) =>
     !agent.special && String(agent.employ_status ?? '').toUpperCase() !== 'OFF_BOARD',
-  ),
-);
+  );
+  // 活跃成员置顶；同组内保持接口原有顺序，避免空闲成员之间来回跳动。
+  return members.sort((a, b) =>
+    Number(b.status === 'active') - Number(a.status === 'active'),
+  );
+});
 </script>
 
 <template>
