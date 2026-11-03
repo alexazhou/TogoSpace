@@ -117,6 +117,41 @@ class TestCtrlRoomMessageInjectionDuringGroupTurn(ServiceTestCase):
             "immediate 触发后应连带收取全部未读（含前面的普通消息）"
         )
 
+    async def test_immediate_collects_following_regular_message_too(self):
+        """连带收取是「全部未读」，排 immediate **之后**的普通消息也要一起收走，且保序。
+
+        产品文档 §2.2 的原文是「当前所有尚未被 Agent 读取的消息（**含排在该立即注入
+        消息之前或之后**的未读普通消息）」。只测 M1(普通) → M2(immediate) 覆盖不到
+        「之后」那一半：M3 排在 immediate 后面，若实现写成「只收到 immediate 为止」，
+        M1 仍会被收走、has_unread 也会变 False，用例照样绿 —— 但 M3 被漏到下一轮，
+        正是要防的丢消息形态。
+        """
+        alice = await gtAgentManager.get_agent(self.team_id, "alice")
+        ctrl_room = await self._ctrl_room_idle_for(alice.id)
+
+        with patch("service.messageBus.publish"):
+            await ctrl_room.add_message(ctrl_room.OPERATOR_MEMBER_ID, "M1-普通")
+            await ctrl_room.add_message(ctrl_room.OPERATOR_MEMBER_ID, "M2-立即注入",
+                                        insert_immediately=True)
+            await ctrl_room.add_message(ctrl_room.OPERATOR_MEMBER_ID, "M3-普通")
+
+        alice_agent = agentService.get_agent(alice.id)
+        history = alice_agent.job_consumer._turn_runner._history
+        before = len(history)
+
+        await self._run_loop_once(alice.id)
+
+        assert ctrl_room.has_unread_messages(alice.id) is False, (
+            "immediate 之后的普通消息 M3 也应被连带走，不能漏到下一轮"
+        )
+        # 直接断言交给 Agent 的内容与顺序，而不是只看「有没有未读」这种间接信号
+        injected = "\n".join(item.content or "" for item in history[before:])
+        positions = [injected.find(tag) for tag in ("M1-普通", "M2-立即注入", "M3-普通")]
+        assert all(p >= 0 for p in positions), f"三条消息都应被收取，实际内容：{injected}"
+        assert positions == sorted(positions), (
+            f"收取顺序必须等于发送顺序 M1→M2→M3，实际偏移 {positions}"
+        )
+
     async def test_insert_immediately_message_wakes_idle_agent(self):
         """回归：Agent 空闲时发 insert_immediately 消息必须唤醒房间并触发调度。
 
