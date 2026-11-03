@@ -2,6 +2,7 @@ name: Release Desktop
 
 # tag 发版：构建 arm64 / x86_64 的签名 + 公证 DMG，并创建 GitHub Release。
 # 构建步骤与分支 CI 共用 build-desktop.yml；tag 形如 v0.3.12，-beta tag 只构建不发布。
+# 正式 tag 的 Release 默认建为 **draft**，需人工检查产物后手动发布。
 
 on:
   push:
@@ -73,7 +74,10 @@ jobs:
       with:
         name: "TogoSpace ${{ github.ref_name }}"
         tag_name: ${{ github.ref_name }}
-        draft: false
+        # 默认 draft：tag 推上去后只生成未发布的草稿，DMG 与说明都在里面，
+        # 由人检查过再手动点发布。这样即使 tag 误推、或产物有问题，也不会直接
+        # 对外可见。要改回自动发布就把这里改成 false。
+        draft: true
         prerelease: false
         files: build/*.dmg
       env:
