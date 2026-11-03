@@ -2,7 +2,7 @@
 
 > 本文档描述 Agent 任务从创建到结束的完整生命周期，包括状态流转、消费流程、失败处理与恢复机制。
 >
-> **命名说明（0.5.0 起）**：调度侧原 `GtScheculeTask` / `schecule_tasks` / `gtScheculeTaskManager` /
+> **命名说明（0.4.2-beta1 起）**：调度侧原 `GtScheculeTask` / `schecule_tasks` / `gtScheculeTaskManager` /
 > `AgentTaskType` / `AgentTaskStatus` / `AgentTaskConsumer` 已统一改名为 `GtScheduleJob` / `schedule_jobs` /
 > `gtScheduleJobManager` / `ScheduleJobType` / `ScheduleJobStatus` / `JobConsumer`。
 > **协作任务侧（`GtAgentTask` / `gtAgentTaskManager` / `taskService` / `TaskStatus` / `agent_task_id`）保持不变**，
