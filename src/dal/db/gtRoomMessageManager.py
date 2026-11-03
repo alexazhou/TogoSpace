@@ -26,21 +26,17 @@ async def append_room_message(
     )
 
 
-async def update_room_message_seq(message_id: int, seq: int) -> None:
-    """在注入时更新 immediately 消息的 seq 字段。"""
-    await (
-        GtRoomMessage
-        .update(seq=seq)
-        .where(GtRoomMessage.id == message_id)  # type: ignore[attr-defined]
-        .aio_execute()
-    )
-
-
 async def escalate_message_to_immediate(message_id: int) -> None:
-    """将已发送的普通消息升级为 immediately 消息：重置 seq=NULL，标记 insert_immediately=True。"""
+    """将已发出的普通消息升级为 immediately 消息：只置 insert_immediately=True。
+
+    不再重置 seq=NULL —— 顺序在消息发出的那一刻就已固定，升级改变的是
+    「什么时候被读到」而不是「排在哪」。重置 seq 正是旧实现乱序的根源：
+    升级后 seq 变 NULL，flush 时又拿到比原位置更靠后的新号，于是后发的
+    immediate 消息反而排到了先发的普通消息前面。
+    """
     await (
         GtRoomMessage
-        .update(seq=None, insert_immediately=True)
+        .update(insert_immediately=True)
         .where(GtRoomMessage.id == message_id)  # type: ignore[attr-defined]
         .aio_execute()
     )
@@ -59,7 +55,7 @@ async def get_room_messages(
     if limit is not None:
         rows = await (
             query
-            .order_by(GtRoomMessage.seq.desc(nulls='first'), GtRoomMessage.id.desc())
+            .order_by(GtRoomMessage.seq.desc(), GtRoomMessage.id.desc())
             .limit(limit + 1)
             .aio_execute()
         )
@@ -69,7 +65,7 @@ async def get_room_messages(
         rows.reverse()
         return rows, has_more
 
-    rows = await query.order_by(GtRoomMessage.seq.asc(nulls='last'), GtRoomMessage.id.asc()).aio_execute()
+    rows = await query.order_by(GtRoomMessage.seq.asc(), GtRoomMessage.id.asc()).aio_execute()
     return rows, False
 
 
@@ -82,7 +78,7 @@ async def get_last_messages_by_room_ids(room_ids: list[int]) -> list[GtRoomMessa
     window = peewee.Window(
         partition_by=[GtRoomMessage.room_id],
         order_by=[
-            GtRoomMessage.seq.desc(nulls='first'),
+            GtRoomMessage.seq.desc(),
             GtRoomMessage.id.desc(),
         ],
     ).alias("last_message_window")

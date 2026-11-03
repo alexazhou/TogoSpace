@@ -180,6 +180,8 @@ export interface RoomInfo {
   tags?: string[];
   biz_id?: string | null;
   current_turn_agent_id: number | null;
+  /** 各 Agent 的读游标：key 为 agent_id 字符串，value 为「下一条待读的 seq」。 */
+  agent_read_index?: Record<string, number>;
 }
 
 export interface MessageInfo {
@@ -188,7 +190,8 @@ export interface MessageInfo {
   sender_display_name: string;
   content: string;
   time: string;
-  seq: number | null;
+  /** 插入即分配，永远有值（旧版可能为 null，现由迁移 0019 补齐存量）。 */
+  seq: number;
   insert_immediately: boolean;
 }
 
@@ -230,6 +233,8 @@ export interface WsRoomStatusEvent {
   state: 'SCHEDULING' | 'IDLE';
   current_turn_agent_id: number | null;
   need_scheduling: boolean;
+  /** 各 Agent 最新读游标，随每次状态广播下发。 */
+  agent_read_index?: Record<string, number>;
 }
 
 export interface WsScheduleStateEvent {

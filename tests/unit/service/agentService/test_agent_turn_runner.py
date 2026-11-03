@@ -77,7 +77,7 @@ async def test_run_task_turn_raises_when_room_not_found(turn_runner):
 
 
 @pytest.mark.asyncio
-async def test_pull_room_messages_syncs_to_history(turn_runner):
+async def test_collect_room_messages_syncs_to_history(turn_runner):
     room = MagicMock(spec=ChatRoom)
     room.name = "test_room"
     room.team_id = 1
@@ -91,7 +91,7 @@ async def test_pull_room_messages_syncs_to_history(turn_runner):
     room.get_unread_messages = AsyncMock(return_value=[msg])
 
     with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock()):
-        count = await turn_runner.pull_room_messages_to_history(room)
+        count = await turn_runner.collect_room_messages(room, as_update=False)
 
     assert count == 1
     turn_runner._history.append_history_message.assert_called_once()
@@ -103,7 +103,7 @@ async def test_pull_room_messages_syncs_to_history(turn_runner):
 
 
 @pytest.mark.asyncio
-async def test_pull_room_messages_skips_own_messages(turn_runner):
+async def test_collect_room_messages_skips_own_messages(turn_runner):
     room = MagicMock(spec=ChatRoom)
     room.name = "test_room"
 
@@ -115,22 +115,113 @@ async def test_pull_room_messages_skips_own_messages(turn_runner):
 
     room.get_unread_messages = AsyncMock(return_value=[msg])
 
-    count = await turn_runner.pull_room_messages_to_history(room)
+    count = await turn_runner.collect_room_messages(room, as_update=False)
 
     assert count == 0
     turn_runner._history.append_history_message.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_pull_room_messages_returns_zero_when_empty(turn_runner):
+async def test_collect_room_messages_returns_zero_when_empty(turn_runner):
     room = MagicMock(spec=ChatRoom)
     room.name = "test_room"
     room.get_unread_messages = AsyncMock(return_value=[])
 
-    count = await turn_runner.pull_room_messages_to_history(room)
+    count = await turn_runner.collect_room_messages(room, as_update=False)
 
     assert count == 0
     turn_runner._history.append_history_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_collect_room_messages_as_update_has_no_turn_begin_tag(turn_runner):
+    """as_update=True：中途插话用 update prompt，不能伪装成新的 turn 开始。"""
+    room = MagicMock(spec=ChatRoom)
+    room.name = "test_room"
+
+    msg = MagicMock(spec=GtRoomMessage)
+    msg.sender_id = 2
+    msg.sender_display_name = "OtherAgent"
+    msg.content = "打断一下"
+    msg.send_time = datetime(2024, 1, 1, 9, 30)
+    room.get_unread_messages = AsyncMock(return_value=[msg])
+
+    with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock()):
+        count = await turn_runner.collect_room_messages(room, as_update=True)
+
+    assert count == 1
+    item = turn_runner._history.append_history_message.call_args.args[0]
+    assert AgentHistoryTag.ROOM_TURN_BEGIN not in item.tags
+    assert "打断一下" in (item.content or "")
+
+
+@pytest.mark.asyncio
+async def test_collect_room_messages_publishes_read_status_when_cursor_advanced(turn_runner):
+    """游标确实推进了就要广播，即使收到的是自己的消息（前端据此搬运消息）。"""
+    room = MagicMock(spec=ChatRoom)
+    room.name = "test_room"
+    own = MagicMock(spec=GtRoomMessage)
+    own.sender_id = 1
+    room.get_unread_messages = AsyncMock(return_value=[own])
+
+    count = await turn_runner.collect_room_messages(room, as_update=False)
+
+    assert count == 0
+    room.publish_read_status.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_collect_room_messages_no_publish_when_nothing_unread(turn_runner):
+    room = MagicMock(spec=ChatRoom)
+    room.name = "test_room"
+    room.get_unread_messages = AsyncMock(return_value=[])
+
+    await turn_runner.collect_room_messages(room, as_update=False)
+
+    room.publish_read_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_wake_next_turn_only_for_idle_private_room_with_unread(turn_runner):
+    """三个条件同时满足才唤醒：PRIVATE + IDLE + 有他人未读消息。"""
+    from constants import RoomType
+
+    room = MagicMock(spec=ChatRoom)
+    room.room_type = RoomType.PRIVATE
+    room.state = RoomState.IDLE
+    room.OPERATOR_MEMBER_ID = -1
+    room.has_unread_messages = MagicMock(return_value=True)
+    room.handle_finish_request = AsyncMock(return_value=True)
+
+    await turn_runner._wake_next_turn_if_unread(room)
+
+    room.handle_finish_request.assert_awaited_once_with(-1)
+
+
+@pytest.mark.parametrize("room_type,state,has_unread", [
+    ("GROUP", RoomState.IDLE, True),          # 群聊轮次推进由调度器负责
+    ("PRIVATE", RoomState.SCHEDULING, True),  # 后继有人，不该插队
+    ("PRIVATE", RoomState.IDLE, False),       # 只读到自己发的，唤醒会空转
+])
+@pytest.mark.asyncio
+async def test_wake_next_turn_skipped_when_any_condition_fails(turn_runner, room_type, state, has_unread):
+    from constants import RoomType
+
+    room = MagicMock(spec=ChatRoom)
+    room.room_type = getattr(RoomType, room_type)
+    room.state = state
+    room.OPERATOR_MEMBER_ID = -1
+    room.has_unread_messages = MagicMock(return_value=has_unread)
+    room.handle_finish_request = AsyncMock()
+
+    await turn_runner._wake_next_turn_if_unread(room)
+
+    room.handle_finish_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_wake_next_turn_ignores_none_room(turn_runner):
+    await turn_runner._wake_next_turn_if_unread(None)  # 不应抛异常
 
 
 @pytest.mark.asyncio

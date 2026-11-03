@@ -13,7 +13,7 @@ from typing import List
 from constants import (
     AgentActivityStatus, AgentActivityType,
     AgentHistoryStatus, AgentHistoryTag,
-    ScheduleJobType, DriverType, ModelInput, OpenaiApiRole, RoomState, SpecialAgent,
+    ScheduleJobType, DriverType, ModelInput, OpenaiApiRole, RoomState, RoomType, SpecialAgent,
     TaskStatus, TurnStepResult,
 )
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
@@ -268,19 +268,19 @@ class AgentTurnRunner:
                             metadata=self._base_metadata(),
                         )
                     else:
-                        synced_count = await self.pull_room_messages_to_history(room)
+                        synced_count = await self.collect_room_messages(room, as_update=False)
                         if synced_count == 0:
                             logger.info(f"无新消息，自动跳过本轮: {self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}")
                             await room.handle_finish_request(self.gt_agent.id)
-                            await room.flush_queued_messages()
+                            await self._wake_next_turn_if_unread(room)
                             return
 
                 await self._run_turn_loop(room)
                 if room is not None:
-                    await room.flush_queued_messages()
+                    await self._wake_next_turn_if_unread(room)
 
             else:
-                synced_count = 1 if is_todo_task else await self.pull_room_messages_to_history(room)
+                synced_count = 1 if is_todo_task else await self.collect_room_messages(room, as_update=False)
                 await self.driver.run_task_turn(job, synced_count)
 
         except asyncio.CancelledError:
@@ -291,25 +291,45 @@ class AgentTurnRunner:
             self._current_room = None
             self._current_job = None
 
-    async def pull_room_messages_to_history(self, room: ChatRoom) -> int:
-        """从房间拉取未读消息并追加到 history。返回追加的消息条目数（0 或 1）。"""
+    async def collect_room_messages(self, room: ChatRoom, *, as_update: bool) -> int:
+        """统一的房间消息收取入口：拉取未读 → 过滤自身 → 构造 prompt 写入 history。
+
+        `as_update` 决定语义，两个触发点共用同一套拉取与游标推进逻辑：
+
+        - `False`（Turn 开始）：构造「本轮开始」的 prompt，带 `ROOM_TURN_BEGIN` 标签。
+        - `True`（安全边界插话）：构造「更新」prompt，**不带** turn 标签，
+          避免把一次中途插话伪装成又一个 turn 开始。
+
+        返回 1 表示「追加了条目」，0 表示「没有他人消息」（游标照常推进）。
+        尾唤醒与安全边界两种触发对返回值的期望不同，故必须显式返回。
+        """
         new_msgs: List[GtRoomMessage] = await room.get_unread_messages(self.gt_agent.id)
+
+        # 游标已推进，先把最新读游标广播出去：前端据此把消息从浮动待读区移入主流。
+        # 放在「有无他人消息」判断之前，因为即便全是自己的消息，游标也确实前进了。
+        if new_msgs:
+            room.publish_read_status()
 
         own_count = sum(1 for msg in new_msgs if msg.sender_id == self.gt_agent.id)
         logger.info(f"同步房间消息: agent={self.gt_agent.name}(agent_id={self.gt_agent.id}), room={room.name}, raw={len(new_msgs)}, own={own_count}, others={len(new_msgs) - own_count}")
 
-        if len(new_msgs) == own_count:
+        others = [m for m in new_msgs if m.sender_id != self.gt_agent.id]
+        if not others:
             return 0
 
-        turn_prompt = promptBuilder.build_turn_begin_prompt_from_messages(
-            room.name, new_msgs, self.gt_agent.id
-        )
-        await self._history.append_history_message(GtAgentHistory.build(
-            AgentMessage(role=OpenaiApiRole.USER, content=turn_prompt),
-            tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
-        ))
-        other_msgs = [m for m in new_msgs if m.sender_id != self.gt_agent.id]
-        meta = self._base_metadata(messages=[{"sender": m.sender_display_name, "content": m.content} for m in other_msgs])
+        if as_update:
+            prompt = promptBuilder.build_turn_update_prompt(room.name, new_msgs, self.gt_agent.id)
+            await self._history.append_history_message(
+                GtAgentHistory.build(AgentMessage(role=OpenaiApiRole.USER, content=prompt))
+            )
+        else:
+            prompt = promptBuilder.build_turn_begin_prompt_from_messages(room.name, new_msgs, self.gt_agent.id)
+            await self._history.append_history_message(GtAgentHistory.build(
+                AgentMessage(role=OpenaiApiRole.USER, content=prompt),
+                tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+            ))
+
+        meta = self._base_metadata(messages=[{"sender": m.sender_display_name, "content": m.content} for m in others])
         await agentActivityService.add_activity(
             gt_agent=self.gt_agent,
             activity_type=AgentActivityType.MESSAGE_RECEIVED,
@@ -318,36 +338,35 @@ class AgentTurnRunner:
         )
         return 1
 
+    async def _wake_next_turn_if_unread(self, room: ChatRoom | None) -> None:
+        """Turn 结束后，若私聊控制房间仍有未读消息，唤醒下一轮（替代旧 flush_queued_messages）。
+
+        三个限定条件，每个都有对应的事故背景：
+
+        - `RoomType.PRIVATE`：群聊一轮结束后会推进到下一位 AI，state 仍是 SCHEDULING、
+          current_turn_agent_id 是下一位 AI。此时调 handle_finish_request(OPERATOR)
+          必然触发 `caller != current_id` 告警，纯噪声。
+        - `state == RoomState.IDLE`：只有私聊单 AI 说完切回 IDLE 时，由 OPERATOR
+          唤醒才正好进入下一轮调度；房间还在 SCHEDULING 说明后继有人接手，不该插队。
+        - `has_unread_messages`：只对「还有正经消息没读」唤醒。若只按
+          `insert_immediately` 唤醒，Agent 发完言后自己那条消息会把自己再叫醒一次（空转）。
+        """
+        if (
+            room is not None
+            and room.room_type == RoomType.PRIVATE
+            and room.state == RoomState.IDLE
+            and room.has_unread_messages(self.gt_agent.id)
+        ):
+            await room.handle_finish_request(room.OPERATOR_MEMBER_ID)
+
     async def _inject_immediate_messages(self, room: ChatRoom) -> None:
-        """在安全边界将待注入的 immediately 消息移入主消息列表，并通知 Agent。"""
-        await room.flush_pending_immediate_messages()
+        """安全边界插话：把该房间当前所有未读消息 **按 seq 顺序一次性**交给 Agent。
 
-        new_msgs: List[GtRoomMessage] = await room.get_unread_messages(self.gt_agent.id)
-        others = [m for m in new_msgs if m.sender_id != self.gt_agent.id]
-        if not others:
-            logger.debug(
-                "即时插入检查：无新消息: agent=%s(agent_id=%d), room=%s",
-                self.gt_agent.name, self.gt_agent.id, room.name,
-            )
-            return
-
-        update_prompt = promptBuilder.build_turn_update_prompt(
-            room.name, new_msgs, self.gt_agent.id
-        )
-        await self._history.append_history_message(GtAgentHistory.build(
-            AgentMessage(role=OpenaiApiRole.USER, content=update_prompt),
-        ))
-        logger.info(
-            "即时插入新消息: agent=%s(agent_id=%d), room=%s, msgs=%d",
-            self.gt_agent.name, self.gt_agent.id, room.name, len(others),
-        )
-        meta = self._base_metadata(messages=[{"sender": m.sender_display_name, "content": m.content} for m in others])
-        await agentActivityService.add_activity(
-            gt_agent=self.gt_agent,
-            activity_type=AgentActivityType.MESSAGE_RECEIVED,
-            status=AgentActivityStatus.SUCCEEDED,
-            metadata=meta,
-        )
+        不是「只取 immediate 那几条」——触发源是 immediate，但收取范围是全部未读。
+        否则会出现「先发的普通消息 M1 被跳过、后发的 immediate M2 先被读到」，
+        正是本次要消灭的乱序。
+        """
+        await self.collect_room_messages(room, as_update=True)
 
     async def _run_turn_loop(self, room: ChatRoom | None) -> None:
         """基于 history 状态推进的统一循环。room 为 None 时跳过房间相关操作（协作任务模式）。"""
@@ -357,13 +376,12 @@ class AgentTurnRunner:
         next_tool_choice: str | None = None
 
         while True:
-            # 检查 operator 私聊控制房间是否有待即时插入或未读的消息
+            # 检查 operator 私聊控制房间是否有未读的立即注入消息
+            # 注意：触发条件只看 immediate（'什么时候读'），但 _inject_immediate_messages
+            # 收取的是全部未读（'读哪些'）。两者刻意分开，见该方法 docstring。
             if self._history.is_safe_for_immediate_insert():
                 ctrl_room = await roomService.get_control_room_for_agent(self.gt_agent.team_id, self.gt_agent.id)
-                if ctrl_room is not None and (
-                    ctrl_room.has_pending_immediate_messages(self.gt_agent.id) or
-                    ctrl_room.has_unread_messages(self.gt_agent.id)
-                ):
+                if ctrl_room is not None and ctrl_room.has_unread_immediate_messages(self.gt_agent.id):
                     await self._inject_immediate_messages(ctrl_room)
 
             result = await self._advance_step(room, tools, tool_choice=next_tool_choice)

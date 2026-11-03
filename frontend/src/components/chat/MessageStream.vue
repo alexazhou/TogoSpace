@@ -14,6 +14,10 @@ const props = defineProps<{
   hasMoreHistory?: boolean;
   loadingOlderMessages?: boolean;
   escalatingMessageIds?: number[];
+  /** 是否私聊房间。「排队中 / 即将注入」只对私聊的 Operator 消息成立。 */
+  isPrivate?: boolean;
+  /** 目标 AI 的读游标（下一条待读的 seq）。未读判定：message.seq >= agentReadSeq。 */
+  agentReadSeq?: number;
 }>();
 
 const emit = defineEmits<{
@@ -103,15 +107,36 @@ function handleSenderAvatarClick(senderId: number): void {
 
 type MessageStatus = 'published' | 'immediate' | 'pending-immediate' | 'queued';
 
-function resolveMessageStatus(message: MessageInfo): MessageStatus {
-  if (message.seq !== null) {
-    return message.insert_immediately ? 'immediate' : 'published';
+/** OPERATOR 的虚拟身份 ID（与后端 `SpecialAgent.OPERATOR.value` 一致）。 */
+const OPERATOR_ID = -1;
+
+/**
+ * 是否为「Operator 发出、Agent 尚未读到」的消息。
+ *
+ * 三条缺一不可：
+ * - `isPrivate`：群聊没有排队/立即注入概念，全部直接进主流。
+ * - `sender_id === -1`：Agent 自己的回复、系统消息永远直接显示，不挂待读标记。
+ * - `seq >= agentReadSeq`：读游标语义是「下一条待读的 seq」，等于游标的也还没读。
+ */
+function isUnreadOperatorMessage(message: MessageInfo): boolean {
+  if (!props.isPrivate || message.sender_id !== OPERATOR_ID) {
+    return false;
   }
-  return message.insert_immediately ? 'pending-immediate' : 'queued';
+  return message.seq >= (props.agentReadSeq ?? 0);
 }
 
-const streamMessages = computed(() => props.messages.filter((message) => message.seq !== null));
-const floatingMessages = computed(() => props.messages.filter((message) => message.seq === null));
+function resolveMessageStatus(message: MessageInfo): MessageStatus {
+  if (!props.isPrivate || message.sender_id !== OPERATOR_ID) {
+    return 'published';
+  }
+  if (isUnreadOperatorMessage(message)) {
+    return message.insert_immediately ? 'pending-immediate' : 'queued';
+  }
+  return message.insert_immediately ? 'immediate' : 'published';
+}
+
+const streamMessages = computed(() => props.messages.filter((message) => !isUnreadOperatorMessage(message)));
+const floatingMessages = computed(() => props.messages.filter((message) => isUnreadOperatorMessage(message)));
 const shouldDockWorkingIndicator = computed(
   () => Boolean(props.workingAgent) && floatingMessages.value.length === 0,
 );

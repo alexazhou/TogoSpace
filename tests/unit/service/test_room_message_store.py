@@ -1,333 +1,454 @@
-"""RoomMessageStore 单元测试：测试纯内存操作（不依赖数据库）。"""
+"""RoomMessageStore 单元测试：测试纯内存操作（不依赖数据库）。
+
+本文件覆盖三个正交职责（见 messageStore.py 类 docstring）：
+
+1. 顺序（seq）：写入即分配，无 NULL 中间态；
+2. 未读（_agent_seq_read）：游标语义，且「是否有未读」必须排除自身消息；
+3. 立即注入（insert_immediately）：只是标志位，不参与排序与可见性。
+
+旧状态机（append_pending / flush_pending_immediate / flush_queued / _sort）已退役，
+不在本文件测试范围。
+"""
 from __future__ import annotations
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.roomService.messageStore import RoomMessageStore
+
+OPERATOR_ID = -1  # constants.SpecialAgent.OPERATOR
+AGENT_ID = 1
 
 
 @pytest.fixture(autouse=True)
 def mock_db_manager():
     with patch("service.roomService.messageStore.gtRoomMessageManager") as mock:
         mock.append_room_message = AsyncMock(return_value=MagicMock(id=999))
-        mock.update_room_message_seq = AsyncMock()
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def mock_message_bus():
+    with patch("service.roomService.messageStore.messageBus") as mock:
+        mock.publish = MagicMock()
         yield mock
 
 
 @pytest.fixture
 def mock_room():
-    return MagicMock(id=1, name="test_room", agent_ids=[1])
+    return MagicMock(id=1, name="test_room", agent_ids=[AGENT_ID])
 
 
-def _msg(agent_id: int = 1, content: str = "msg", *, insert_immediately: bool = False) -> GtRoomMessage:
-    m = GtRoomMessage(room_id=1, sender_id=agent_id, content=content,
+def _msg(sender_id: int = AGENT_ID, content: str = "msg", *,
+         insert_immediately: bool = False, db_id: int | None = None) -> GtRoomMessage:
+    m = GtRoomMessage(room_id=1, sender_id=sender_id, content=content,
                       send_time=datetime(2024, 1, 1), insert_immediately=insert_immediately)
     m.sender_display_name = "Sender"
+    if db_id is not None:
+        m.id = db_id
     return m
 
 
-class TestHasPendingImmediateMessages:
-    """has_pending_immediate_messages：immediately 消息在 pending 队列中的检测行为。"""
+# --------------------------------------------------------------------------- #
+# 1. seq 分配：唯一写入路径 append_and_assign_seq
+# --------------------------------------------------------------------------- #
+class TestAppendAndAssignSeq:
+    """append_and_assign_seq：追加即分配 seq，并透传 insert_immediately 落库。"""
 
-    def test_returns_false_when_no_messages(self, mock_room):
+    async def test_assigns_seq_from_zero_in_write_order(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        assert store.has_pending_immediate_messages(agent_id=1) is False
+        a, b, c = _msg(content="a"), _msg(content="b"), _msg(content="c")
+        await store.append_and_assign_seq(a)
+        await store.append_and_assign_seq(b)
+        await store.append_and_assign_seq(c)
+        assert [m.seq for m in store.messages] == [0, 1, 2]
 
-    async def test_returns_false_for_regular_unread_messages(self, mock_room):
+    async def test_seq_is_assigned_immediately_no_null_state(self, mock_room):
+        """不存在「seq 待分配」的中间态：写入返回后 seq 已就绪。"""
         store = RoomMessageStore(gt_room=mock_room)
-        await store.append_and_assign_seq(_msg(insert_immediately=False))
-        await store.append_and_assign_seq(_msg(insert_immediately=False))
-        assert store.has_pending_immediate_messages(agent_id=1) is False
+        m = _msg()
+        await store.append_and_assign_seq(m)
+        assert m.seq == 0
+        assert all(x.seq is not None for x in store.messages)
 
-    def test_returns_true_for_pending_immediate_message(self, mock_room):
+    async def test_persists_message_and_backfills_db_id(self, mock_room, mock_db_manager):
         store = RoomMessageStore(gt_room=mock_room)
-        store.append_pending(_msg(insert_immediately=True))
-        assert store.has_pending_immediate_messages(agent_id=1) is True
+        m = _msg(content="hello")
+        await store.append_and_assign_seq(m)
 
-    async def test_returns_false_after_flush(self, mock_room):
+        mock_db_manager.append_room_message.assert_awaited_once()
+        kwargs = mock_db_manager.append_room_message.await_args.kwargs
+        assert kwargs["room_id"] == 1
+        assert kwargs["content"] == "hello"
+        assert kwargs["seq"] == 0
+        assert m.id == 999
+
+    async def test_passes_insert_immediately_flag_to_db(self, mock_room, mock_db_manager):
+        """旧实现硬编码 False，导致重启后立即注入标志丢失；此处必须透传。"""
         store = RoomMessageStore(gt_room=mock_room)
-        store.append_pending(_msg(insert_immediately=True))
-        await store.flush_pending_immediate()
-        assert store.has_pending_immediate_messages(agent_id=1) is False
+        await store.append_and_assign_seq(_msg(insert_immediately=True))
+        kwargs = mock_db_manager.append_room_message.await_args.kwargs
+        assert kwargs["insert_immediately"] is True
 
-    def test_returns_false_for_pending_queued_message(self, mock_room):
-        """queued 消息（insert_immediately=False）不影响 has_pending_immediate_messages。"""
+    async def test_skips_db_write_when_message_already_has_id(self, mock_room, mock_db_manager):
+        """已落库的消息（如从 DB 取出后重新追加）不应重复插入。"""
         store = RoomMessageStore(gt_room=mock_room)
-        store.append_pending(_msg(insert_immediately=False))
-        assert store.has_pending_immediate_messages(agent_id=1) is False
+        m = _msg(db_id=42)
+        await store.append_and_assign_seq(m)
+        mock_db_manager.append_room_message.assert_not_awaited()
+        assert m.id == 42
+        assert m.seq == 0
 
-    def test_does_not_advance_read_index(self, mock_room):
-        """has_pending_immediate_messages 只检查，不推进游标。"""
+    async def test_publish_broadcasts_when_requested(self, mock_room, mock_message_bus):
         store = RoomMessageStore(gt_room=mock_room)
-        store.append_pending(_msg(insert_immediately=True))
-        store.has_pending_immediate_messages(agent_id=1)
-        store.has_pending_immediate_messages(agent_id=1)
-        # 还未 flush，get_unread 不含 pending 消息
-        unread = store.get_unread(agent_id=1)
-        assert len(unread) == 0
+        m = _msg()
+        await store.append_and_assign_seq(m, publish=True)
+        mock_message_bus.publish.assert_called_once()
 
-    async def test_flush_moves_to_main_list_and_assigns_seq(self, mock_room):
-        """flush_pending_immediate 只将 insert_immediately=True 的消息移入主列表并分配 seq。"""
+    async def test_no_broadcast_by_default(self, mock_room, mock_message_bus):
         store = RoomMessageStore(gt_room=mock_room)
-        await store.append_and_assign_seq(_msg(content="before"))  # seq=0
-        msg = _msg(insert_immediately=True, content="immediate")
-        store.append_pending(msg)
-        queued = _msg(insert_immediately=False, content="queued")
-        store.append_pending(queued)
+        await store.append_and_assign_seq(_msg())
+        mock_message_bus.publish.assert_not_called()
 
-        flushed = await store.flush_pending_immediate()
-        assert len(flushed) == 1
-        assert flushed[0].seq == 1  # 紧接在 seq=0 之后
-        assert len(store.messages) == 2  # before + immediate
-        assert store.has_pending_immediate_messages(agent_id=1) is False
-        assert len(store.pending_messages) == 1  # queued 仍在 pending
-
-    async def test_flush_messages_appear_in_get_unread(self, mock_room):
-        """flush 后 immediately 消息可通过 get_unread 读取。"""
+    async def test_messages_property_returns_all_regardless_of_flag(self, mock_room):
+        """messages 不再按 seq 过滤：普通消息与 immediate 消息一视同仁。"""
         store = RoomMessageStore(gt_room=mock_room)
-        store.append_pending(_msg(insert_immediately=True))
-        await store.flush_pending_immediate()
-        unread = store.get_unread(agent_id=1)
-        assert len(unread) == 1
-        assert unread[0].insert_immediately is True
+        await store.append_and_assign_seq(_msg(content="plain"))
+        await store.append_and_assign_seq(_msg(content="immediate", insert_immediately=True))
+        assert [m.content for m in store.messages] == ["plain", "immediate"]
 
-    async def test_global_queue_cleared_for_all_agents(self, mock_room):
-        """pending 队列是房间级别的，flush 后所有 agent 都看不到 pending immediate 消息。"""
+    async def test_messages_returns_copy(self, mock_room):
+        """返回值是副本，调用方改动不影响内部列表。"""
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg())
+        snapshot = store.messages
+        snapshot.clear()
+        assert len(store.messages) == 1
+
+
+# --------------------------------------------------------------------------- #
+# 2. 读游标：get_unread 推进游标，且包含自身消息
+# --------------------------------------------------------------------------- #
+class TestGetUnread:
+    """get_unread：取 seq >= 游标 的全部消息，并推进游标。"""
+
+    def test_returns_empty_when_no_messages(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        assert store.get_unread(agent_id=AGENT_ID) == []
+
+    async def test_returns_all_from_cursor_start(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(content="a"))
+        await store.append_and_assign_seq(_msg(content="b"))
+        assert [m.seq for m in store.get_unread(agent_id=AGENT_ID)] == [0, 1]
+
+    async def test_advances_cursor_so_second_call_is_empty(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg())
+        store.get_unread(agent_id=AGENT_ID)
+        assert store.get_unread(agent_id=AGENT_ID) == []
+
+    async def test_returns_only_new_messages_after_cursor(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(content="old"))
+        store.get_unread(agent_id=AGENT_ID)
+        await store.append_and_assign_seq(_msg(content="new"))
+        unread = store.get_unread(agent_id=AGENT_ID)
+        assert [m.content for m in unread] == ["new"]
+
+    async def test_includes_own_messages(self, mock_room):
+        """游标必须能越过自己的发言，否则会被自己的消息卡住。"""
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=AGENT_ID, content="mine"))
+        assert [m.content for m in store.get_unread(agent_id=AGENT_ID)] == ["mine"]
+
+    async def test_cursor_is_per_agent(self, mock_room):
         mock_room.agent_ids = [1, 2]
         store = RoomMessageStore(gt_room=mock_room)
-        store.append_pending(_msg(insert_immediately=True))
-        await store.flush_pending_immediate()
-        assert store.has_pending_immediate_messages(agent_id=1) is False
-        assert store.has_pending_immediate_messages(agent_id=2) is False
+        await store.append_and_assign_seq(_msg(sender_id=3))
+        store.get_unread(agent_id=1)
+        assert len(store.get_unread(agent_id=2)) == 1
 
-
-class TestFlushQueued:
-    """flush_queued()：处理所有 pending 消息（immediate + queued）。"""
-
-    async def test_flush_queued_assigns_seq_to_all_pending(self, mock_room):
-        """flush_queued 对所有 pending 消息（queued 和 immediate）分配 seq。"""
+    async def test_read_index_reflects_next_seq(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        await store.append_and_assign_seq(_msg(content="before"))  # seq=0
-        queued = _msg(insert_immediately=False, content="queued")
-        immediate = _msg(insert_immediately=True, content="immediate")
-        store.append_pending(queued)
-        store.append_pending(immediate)
+        await store.append_and_assign_seq(_msg())
+        await store.append_and_assign_seq(_msg())
+        store.get_unread(agent_id=AGENT_ID)
+        assert store.get_read_index()[AGENT_ID] == 2
 
-        flushed = await store.flush_queued()
-        assert len(flushed) == 2
-        assert all(m.seq is not None for m in flushed)
-        assert store.has_pending_immediate_messages(agent_id=1) is False
-        assert len(store.pending_messages) == 0
 
-    async def test_flush_queued_returns_empty_when_none(self, mock_room):
-        """无 pending 消息时返回空列表。"""
+# --------------------------------------------------------------------------- #
+# 3. 未读判定：has_unread_messages / has_unread_immediate_messages 必须排除自身
+# --------------------------------------------------------------------------- #
+class TestHasUnreadMessages:
+    """has_unread_messages：只判断，不推进游标；必须排除自己发的消息。"""
+
+    def test_false_when_no_messages(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        result = await store.flush_queued()
-        assert result == []
+        assert store.has_unread_messages(AGENT_ID) is False
 
-    async def test_flush_queued_flushes_immediate_only_pending(self, mock_room):
-        """只有 immediate pending 消息时，flush_queued 也应处理。"""
+    async def test_true_for_unread_other_message(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        store.append_pending(_msg(insert_immediately=True, content="immediate"))
-        flushed = await store.flush_queued()
-        assert len(flushed) == 1
-        assert flushed[0].seq == 0
-        assert store.has_pending_immediate_messages(agent_id=1) is False
+        await store.append_and_assign_seq(_msg(sender_id=2))
+        assert store.has_unread_messages(AGENT_ID) is True
 
-    async def test_flush_queued_seq_continues_from_main_list(self, mock_room):
-        """queued 消息的 seq 紧接在已有主流消息之后。"""
+    async def test_false_after_read(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        await store.append_and_assign_seq(_msg(content="a"))  # seq=0
-        await store.append_and_assign_seq(_msg(content="b"))  # seq=1
-        queued = _msg(insert_immediately=False, content="queued")
-        store.append_pending(queued)
+        await store.append_and_assign_seq(_msg(sender_id=2))
+        store.get_unread(agent_id=AGENT_ID)
+        assert store.has_unread_messages(AGENT_ID) is False
 
-        flushed = await store.flush_queued()
-        assert flushed[0].seq == 2
-
-    async def test_flush_queued_multiple_messages(self, mock_room):
-        """多条 queued 消息按追加顺序分配 seq。"""
+    async def test_false_for_own_message_only(self, mock_room):
+        """AI 自己刚发言时不能误判为「还有未读」，否则 Turn 结束会空转。"""
         store = RoomMessageStore(gt_room=mock_room)
-        d1 = _msg(insert_immediately=False, content="d1")
-        d2 = _msg(insert_immediately=False, content="d2")
-        store.append_pending(d1)
-        store.append_pending(d2)
+        await store.append_and_assign_seq(_msg(sender_id=AGENT_ID))
+        assert store.has_unread_messages(AGENT_ID) is False
 
-        flushed = await store.flush_queued()
-        assert len(flushed) == 2
-        assert flushed[0].seq == 0
-        assert flushed[1].seq == 1
-
-    async def test_flush_queued_messages_appear_in_get_unread(self, mock_room):
-        """flush 后 queued 消息可通过 get_unread 读取。"""
+    async def test_true_when_own_message_followed_by_other(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        store.append_pending(_msg(insert_immediately=False))
-        await store.flush_queued()
-        unread = store.get_unread(agent_id=1)
-        assert len(unread) == 1
-        assert unread[0].insert_immediately is False
+        await store.append_and_assign_seq(_msg(sender_id=AGENT_ID))
+        await store.append_and_assign_seq(_msg(sender_id=2))
+        assert store.has_unread_messages(AGENT_ID) is True
+
+    async def test_does_not_advance_cursor(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=2))
+        store.has_unread_messages(AGENT_ID)
+        store.has_unread_messages(AGENT_ID)
+        assert store.get_read_index() == {}
+        assert len(store.get_unread(agent_id=AGENT_ID)) == 1
+
+    async def test_per_agent(self, mock_room):
+        mock_room.agent_ids = [1, 2]
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=2))
+        assert store.has_unread_messages(1) is True
+        assert store.has_unread_messages(2) is False
 
 
+class TestHasUnreadImmediateMessages:
+    """has_unread_immediate_messages：语义是「有 immediate 消息还没被读」。"""
+
+    def test_false_when_no_messages(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        assert store.has_unread_immediate_messages(AGENT_ID) is False
+
+    async def test_false_for_regular_unread_messages(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=2, insert_immediately=False))
+        assert store.has_unread_immediate_messages(AGENT_ID) is False
+
+    async def test_true_for_unread_immediate_message(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=2, insert_immediately=True))
+        assert store.has_unread_immediate_messages(AGENT_ID) is True
+
+    async def test_false_after_read(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=2, insert_immediately=True))
+        store.get_unread(agent_id=AGENT_ID)
+        assert store.has_unread_immediate_messages(AGENT_ID) is False
+
+    async def test_false_for_own_immediate_message(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=AGENT_ID, insert_immediately=True))
+        assert store.has_unread_immediate_messages(AGENT_ID) is False
+
+    async def test_does_not_advance_cursor(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=2, insert_immediately=True))
+        assert store.has_unread_immediate_messages(AGENT_ID) is True
+        assert store.get_read_index() == {}
+
+
+# --------------------------------------------------------------------------- #
+# 4. 升级：只置标志位，不动 seq、不重排、不改变可见性
+# --------------------------------------------------------------------------- #
 class TestEscalateToImmediate:
-    """escalate_to_immediate：将主流未读或 pending queued 消息升级为 immediately。"""
+    """escalate_to_immediate：只置 insert_immediately=True。"""
 
-    def _msg_with_db_id(self, db_id: int, content: str = "msg") -> GtRoomMessage:
-        m = _msg(content=content)
-        m.id = db_id
-        return m
-
-    async def test_escalate_unread_message_succeeds(self, mock_room):
-        """未被任何 agent 读取的消息可以升级。"""
+    async def test_sets_flag_and_preserves_seq(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        m = self._msg_with_db_id(db_id=10)
+        m = _msg(sender_id=OPERATOR_ID, content="hi", db_id=10)
         await store.append_and_assign_seq(m)
 
         result = store.escalate_to_immediate(db_id=10)
 
-        assert result.seq is None
+        assert result is m
         assert result.insert_immediately is True
-        assert len(store.messages) == 0
-        assert len(store.pending_messages) == 1
+        assert result.seq == 0
 
-    def test_escalate_raises_if_db_id_not_found(self, mock_room):
-        """db_id 不存在时抛出 ValueError。"""
+    async def test_does_not_remove_from_messages(self, mock_room):
+        """升级不是「移入 pending 队列」：消息原地保留，可见性不变。"""
+        store = RoomMessageStore(gt_room=mock_room)
+        m = _msg(sender_id=OPERATOR_ID, db_id=10)
+        await store.append_and_assign_seq(m)
+        store.escalate_to_immediate(db_id=10)
+        assert len(store.messages) == 1
+        assert [x.seq for x in store.messages] == [0]
+
+    async def test_does_not_reorder(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        m0 = _msg(sender_id=OPERATOR_ID, content="before", db_id=5)
+        m1 = _msg(sender_id=OPERATOR_ID, content="target", db_id=10)
+        m2 = _msg(sender_id=OPERATOR_ID, content="after", db_id=15)
+        for m in (m0, m1, m2):
+            await store.append_and_assign_seq(m)
+
+        store.escalate_to_immediate(db_id=10)
+
+        assert [m.id for m in store.messages] == [5, 10, 15]
+        assert [m.seq for m in store.messages] == [0, 1, 2]
+
+    async def test_escalated_message_still_delivered_in_order(self, mock_room):
+        """升级后依然按原 seq 被读到，不会插队。"""
+        store = RoomMessageStore(gt_room=mock_room)
+        for db_id, content in ((5, "before"), (10, "target"), (15, "after")):
+            await store.append_and_assign_seq(_msg(sender_id=OPERATOR_ID, content=content, db_id=db_id))
+        store.escalate_to_immediate(db_id=10)
+        assert [m.content for m in store.get_unread(agent_id=AGENT_ID)] == ["before", "target", "after"]
+
+    async def test_raises_if_db_id_not_found(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
         with pytest.raises(ValueError):
             store.escalate_to_immediate(db_id=999)
 
-    async def test_escalate_raises_if_agent_already_read(self, mock_room):
-        """agent 已读取过该消息后，升级应抛出 RuntimeError。"""
+    async def test_raises_for_non_operator_sender(self, mock_room):
+        """只有操作者的消息有「立即引导」语义。"""
         store = RoomMessageStore(gt_room=mock_room)
-        m = self._msg_with_db_id(db_id=10)
-        await store.append_and_assign_seq(m)
-        store.get_unread(agent_id=1)  # agent reads it
+        await store.append_and_assign_seq(_msg(sender_id=AGENT_ID, db_id=10))
+        with pytest.raises(ValueError):
+            store.escalate_to_immediate(db_id=10)
+
+    async def test_raises_if_already_read_by_an_agent(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=OPERATOR_ID, db_id=10))
+        store.get_unread(agent_id=AGENT_ID)
 
         with pytest.raises(RuntimeError):
             store.escalate_to_immediate(db_id=10)
 
-        assert len(store.messages) == 1  # unchanged
-
-    async def test_escalate_unread_message_among_multiple_agents(self, mock_room):
-        """多 agent 场景：所有 agent 都未读时可升级。"""
+    async def test_raises_if_any_of_multiple_agents_read(self, mock_room):
         mock_room.agent_ids = [1, 2]
         store = RoomMessageStore(gt_room=mock_room)
-        m = self._msg_with_db_id(db_id=10)
-        await store.append_and_assign_seq(m)
-
-        result = store.escalate_to_immediate(db_id=10)
-        assert result.seq is None
-
-    async def test_escalate_raises_if_any_agent_already_read(self, mock_room):
-        """只要有一个 agent 已读，升级就应抛出 RuntimeError。"""
-        mock_room.agent_ids = [1, 2]
-        store = RoomMessageStore(gt_room=mock_room)
-        m = self._msg_with_db_id(db_id=10)
-        await store.append_and_assign_seq(m)
-        store.get_unread(agent_id=1)  # agent 1 reads it, agent 2 has not
+        await store.append_and_assign_seq(_msg(sender_id=OPERATOR_ID, db_id=10))
+        store.get_unread(agent_id=1)
 
         with pytest.raises(RuntimeError):
             store.escalate_to_immediate(db_id=10)
 
-    async def test_escalate_preserves_other_messages_and_read_index(self, mock_room):
-        """升级一条消息后，其他消息顺序与 agent 读取进度不受影响。"""
+    async def test_succeeds_when_no_agent_has_read(self, mock_room):
+        mock_room.agent_ids = [1, 2]
         store = RoomMessageStore(gt_room=mock_room)
-        m0 = self._msg_with_db_id(db_id=5, content="before")
-        m1 = self._msg_with_db_id(db_id=10, content="target")
-        m2 = self._msg_with_db_id(db_id=15, content="after")
-        await store.append_and_assign_seq(m0)
-        await store.append_and_assign_seq(m1)
-        await store.append_and_assign_seq(m2)
+        await store.append_and_assign_seq(_msg(sender_id=OPERATOR_ID, db_id=10))
+        assert store.escalate_to_immediate(db_id=10).insert_immediately is True
 
+    async def test_is_idempotent(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=OPERATOR_ID, insert_immediately=True, db_id=10))
         store.escalate_to_immediate(db_id=10)
-
-        assert len(store.messages) == 2
-        assert store.messages[0].id == 5
-        assert store.messages[1].id == 15
-        unread = store.get_unread(agent_id=1)
-        assert [m.id for m in unread] == [5, 15]
-
-    def test_escalate_pending_queued_message_succeeds(self, mock_room):
-        """pending queued 消息可直接升级为 pending immediate，无需先进入主流。"""
-        store = RoomMessageStore(gt_room=mock_room)
-        queued = self._msg_with_db_id(db_id=10, content="queued")
-        store.append_pending(queued)
-
         result = store.escalate_to_immediate(db_id=10)
-
-        assert result.seq is None
         assert result.insert_immediately is True
-        assert len(store.messages) == 0
-        assert len(store.pending_messages) == 1
-        assert store.pending_messages[0].id == 10
+        assert result.seq == 0
+        assert len(store.messages) == 1
 
-    def test_escalate_pending_immediate_is_idempotent(self, mock_room):
-        """已经是 pending immediate 的消息再次升级时应保持幂等。"""
+
+# --------------------------------------------------------------------------- #
+# 5. 旁路注入：inject 重建内存态，不写库、不广播
+# --------------------------------------------------------------------------- #
+class TestInject:
+    """inject：从 DB 灌历史与读游标，显式排序并推导 _next_seq。"""
+
+    def test_loads_messages(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        immediate = self._msg_with_db_id(db_id=10, content="immediate")
-        immediate.insert_immediately = True
-        store.append_pending(immediate)
+        store.inject(messages=[_msg(content="a"), _msg(content="b")])
+        assert [m.content for m in store.messages] == ["a", "b"]
 
-        result = store.escalate_to_immediate(db_id=10)
-
-        assert result.seq is None
-        assert result.insert_immediately is True
-        assert len(store.pending_messages) == 1
-
-
-class TestSort:
-    """_sort()：pending 消息按 db_id 升序排，主流消息按 seq 升序在前。"""
-
-    def _msg_with_db_id(self, db_id: int) -> GtRoomMessage:
-        m = _msg()
-        m.id = db_id
-        return m
-
-    def test_pending_messages_sorted_by_db_id(self, mock_room):
-        """多条 pending 消息应按 db_id 升序排列。"""
-        mock_room.agent_ids = []
+    def test_sorts_by_seq(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        m_high = self._msg_with_db_id(db_id=20)
-        m_low = self._msg_with_db_id(db_id=5)
-        m_mid = self._msg_with_db_id(db_id=10)
-        store.append_pending(m_high)
-        store.append_pending(m_low)
-        store.append_pending(m_mid)
+        a, b, c = _msg(content="a"), _msg(content="b"), _msg(content="c")
+        a.seq, b.seq, c.seq = 0, 1, 2
+        store.inject(messages=[c, a, b])
+        assert [m.content for m in store.messages] == ["a", "b", "c"]
 
-        # 触发一次排序（escalate 或 inject 都会触发；这里直接调用私有方法验证）
-        store._sort()  # noqa: SLF001
-
-        assert [m.id for m in store.pending_messages] == [5, 10, 20]
-
-    def test_seq_messages_come_before_pending(self, mock_room):
-        """seq 已赋值的消息整体排在 pending 消息前面。"""
-        mock_room.agent_ids = []
+    def test_next_seq_follows_max_seq(self, mock_room):
         store = RoomMessageStore(gt_room=mock_room)
-        pending = self._msg_with_db_id(db_id=1)
-        pending.seq = None
-        seq_msg = self._msg_with_db_id(db_id=99)
-        seq_msg.seq = 0
-        store._messages = [pending, seq_msg]  # noqa: SLF001
+        a, b = _msg(), _msg()
+        a.seq, b.seq = 0, 1
+        store.inject(messages=[a, b])
+        assert store._next_seq == 2  # noqa: SLF001
 
-        store._sort()  # noqa: SLF001
-
-        assert store._messages[0].seq == 0  # noqa: SLF001
-        assert store._messages[1].seq is None  # noqa: SLF001
-
-    async def test_escalate_multiple_pending_sorted_by_db_id(self, mock_room):
-        """连续 escalate 后 pending 列表按 db_id 排序。"""
-        mock_room.agent_ids = []
+    async def test_append_after_inject_continues_seq(self, mock_room):
+        """重启后新消息不能撞号，也不能跳号。"""
         store = RoomMessageStore(gt_room=mock_room)
-        m1 = self._msg_with_db_id(db_id=30)
-        m2 = self._msg_with_db_id(db_id=10)
-        m3 = self._msg_with_db_id(db_id=20)
-        for m in (m1, m2, m3):
-            await store.append_and_assign_seq(m)
+        a, b = _msg(), _msg()
+        a.seq, b.seq = 0, 1
+        store.inject(messages=[a, b])
+        m = _msg(content="new")
+        await store.append_and_assign_seq(m)
+        assert m.seq == 2
 
-        store.escalate_to_immediate(db_id=30)
-        store.escalate_to_immediate(db_id=10)
-        store.escalate_to_immediate(db_id=20)
+    def test_next_seq_skips_null_seq_messages(self, mock_room):
+        """历史 NULL seq 不影响起号，靠 DB 迁移补齐；此处只保证不因 NULL 归零。"""
+        store = RoomMessageStore(gt_room=mock_room)
+        legacy, ok = _msg(content="legacy"), _msg(content="ok")
+        ok.seq = 7
+        store.inject(messages=[legacy, ok])
+        assert store._next_seq == 8  # noqa: SLF001
 
-        assert [m.id for m in store.pending_messages] == [10, 20, 30]
+    def test_empty_messages_keeps_next_seq_zero(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        store.inject(messages=[])
+        assert store._next_seq == 0  # noqa: SLF001
+
+    def test_restores_read_index_with_int_keys(self, mock_room):
+        """WS/DB 传回的 key 是字符串，需转回 int。"""
+        store = RoomMessageStore(gt_room=mock_room)
+        store.inject(messages=[], agent_read_index={"1": 3})
+        assert store.get_read_index() == {1: 3}
+
+    def test_ignores_invalid_read_index_keys(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        store.inject(messages=[], agent_read_index={"abc": 1, "2": 5})
+        assert store.get_read_index() == {2: 5}
+
+    def test_restored_read_index_affects_unread(self, mock_room):
+        store = RoomMessageStore(gt_room=mock_room)
+        a, b = _msg(content="a"), _msg(content="b")
+        a.seq, b.seq = 0, 1
+        store.inject(messages=[a, b], agent_read_index={"1": 1})
+        assert [m.content for m in store.get_unread(agent_id=AGENT_ID)] == ["b"]
+
+    def test_inject_does_not_write_db_or_publish(self, mock_room, mock_db_manager, mock_message_bus):
+        store = RoomMessageStore(gt_room=mock_room)
+        a = _msg()
+        a.seq = 0
+        store.inject(messages=[a])
+        mock_db_manager.append_room_message.assert_not_awaited()
+        mock_message_bus.publish.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# 6. mark_all_read
+# --------------------------------------------------------------------------- #
+class TestMarkAllRead:
+    def test_sets_all_agents_cursor_to_next_seq(self, mock_room):
+        mock_room.agent_ids = [1, 2]
+        store = RoomMessageStore(gt_room=mock_room)
+        store.inject(messages=[_msg()])
+        store._messages[0].seq = 0  # noqa: SLF001
+        store._next_seq = 1  # noqa: SLF001
+        store.mark_all_read()
+        assert store.get_read_index() == {1: 1, 2: 1}
+
+    async def test_clears_unread(self, mock_room):
+        mock_room.agent_ids = [1, 2]
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=3, insert_immediately=True))
+        store.mark_all_read()
+        assert store.has_unread_messages(1) is False
+        assert store.has_unread_immediate_messages(1) is False
+        assert store.has_unread_messages(2) is False

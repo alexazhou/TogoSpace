@@ -52,6 +52,7 @@ class RoomApiResponse(BaseModel):
     need_scheduling: bool
     current_turn_agent_id: int | None = None
     agents: List[int] = Field(default_factory=list)
+    agent_read_index: dict[str, int] = Field(default_factory=dict)
 
     @classmethod
     def from_gt_room(cls, gt_room: GtRoom, runtime_room: ChatRoom | None = None) -> "RoomApiResponse":
@@ -67,6 +68,9 @@ class RoomApiResponse(BaseModel):
             need_scheduling=False,
             current_turn_agent_id=None,
             agents=list(gt_room.agent_ids or []),
+            # 无运行时房间时回退到持久化值：前端刷新页面后仍能正确判定「哪些消息已读」，
+            # 否则所有人都会看到未读态，直到 Agent 再次广播。
+            agent_read_index=dict(gt_room.agent_read_index or {}),
         )
 
 
@@ -238,8 +242,6 @@ class RoomMessagesHandler(BaseHandler):
             )
 
         await room.add_message(room.OPERATOR_MEMBER_ID, content, insert_immediately=request.insert_immediately)
-        if room.get_current_turn_agent_id() == room.OPERATOR_MEMBER_ID:
-            await room.handle_finish_request(room.OPERATOR_MEMBER_ID)
         self.return_success()
 
 

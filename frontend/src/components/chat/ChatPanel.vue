@@ -86,6 +86,27 @@ const workingAgent = computed<RoomMemberProfile | null>(() => {
 
 const isDeptRoom = computed(() => props.currentRoom?.tags?.includes('DEPT') ?? false);
 
+const isPrivateRoom = computed(() => props.currentRoom?.room_type === 'private');
+
+/**
+ * 目标 AI 的读游标：私聊房间里那个非 Operator、非 System 的 AI 成员。
+ * 私聊固定 1 个 AI，取第一个即可；取不到时返回 0（视作「全部未读」），
+ * 宁可多显示浮动待读区，也不要漏掉一条 Operator 消息。
+ */
+const targetAgentReadSeq = computed(() => {
+  const room = props.currentRoom;
+  if (!room || room.room_type !== 'private') {
+    return 0;
+  }
+  const index = room.agent_read_index ?? {};
+  const agentId = room.agents.find((id) => id > 0);
+  if (agentId === undefined) {
+    return 0;
+  }
+  const seq = index[String(agentId)];
+  return typeof seq === 'number' && Number.isFinite(seq) ? seq : 0;
+});
+
 const composerMetrics = computed(() => {
   if (!hasComposer.value) {
     return null;
@@ -407,6 +428,8 @@ onBeforeUnmount(() => {
         :has-more-history="hasMoreHistory"
         :loading-older-messages="loadingOlderMessages"
         :escalating-message-ids="escalatingMessageIds"
+        :is-private="isPrivateRoom"
+        :agent-read-seq="targetAgentReadSeq"
         @click-agent="emit('clickAgent', $event)"
         @click-working-agent="emit('clickWorkingAgent', $event)"
         @load-older-messages="emit('loadOlderMessages')"

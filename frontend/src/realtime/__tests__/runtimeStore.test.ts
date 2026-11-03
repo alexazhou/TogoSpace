@@ -58,7 +58,7 @@ function createMessage(overrides: Partial<MessageInfo>): MessageInfo {
     sender_display_name: 'OPERATOR',
     content: 'message',
     time: '2026-05-04 22:24:00',
-    seq: null,
+    seq: 0,
     insert_immediately: false,
     ...overrides,
   };
@@ -140,10 +140,11 @@ describe('runtimeStore realtime events', () => {
     expect(getRoomMessages(4).map((message) => message.db_id)).toEqual([21, 22]);
   });
 
-  it('re-sorts messages when a queued message receives seq via message_changed', () => {
+  it('re-sorts messages by seq when a message_changed event arrives', () => {
     seedRoomMessages(3, [
       createMessage({ db_id: 27, content: '测试27', seq: 0, time: '2026-05-04 22:24:29' }),
-      createMessage({ db_id: 28, content: '测试28', seq: null, time: '2026-05-04 22:24:41' }),
+      // seq 由后端插入即分配，缺失时归一化为 0 并靠 db_id 兜底排序。
+      createMessage({ db_id: 28, content: '测试28', seq: 0, time: '2026-05-04 22:24:41' }),
     ]);
 
     applyRealtimeEvent({

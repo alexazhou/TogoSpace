@@ -1,8 +1,11 @@
 """集成测试：Agent 控制房间的消息注入行为。
 
-测试场景：
-1. Agent 处理群聊 turn 期间，控制房间收到 OPERATOR 普通消息应被及时注入
-2. Agent IDLE 状态下发送 insert_immediately 消息，消息卡在 pending 无人唤醒（bug 复现）
+覆盖产品文档 §2.1 / §2.4 的两条规则：
+
+1. 普通消息不提前读取：Agent 在群聊 turn 期间，控制房间的普通消息保留未读，
+   留到本轮结束后的下一轮再读；
+2. 空闲时立即注入必须唤醒：Agent 空闲（IDLE）时发 insert_immediately 消息，
+   房间被唤醒并触发调度，不会停在「即将注入」无人处理的死状态。
 """
 import asyncio
 import os
@@ -12,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryTag, AgentStatus, OpenaiApiRole, TurnStepResult
+from constants import AgentHistoryTag, AgentStatus, MessageBusTopic, OpenaiApiRole, RoomState, TurnStepResult
 from dal.db import gtAgentManager, gtTeamManager
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -29,7 +32,7 @@ if os.name == "posix" and sys.platform == "darwin":
 
 
 class TestCtrlRoomMessageInjectionDuringGroupTurn(ServiceTestCase):
-    """agent 处理群聊 turn 期间，控制房间普通消息应被 loop 在安全边界注入。"""
+    """agent 处理群聊 turn 期间，控制房间消息按类型走不同路径。"""
 
     @classmethod
     async def async_setup_class(cls):
@@ -55,90 +58,98 @@ class TestCtrlRoomMessageInjectionDuringGroupTurn(ServiceTestCase):
         await persistenceService.shutdown()
         await ormService.shutdown()
 
-    async def test_ctrl_room_regular_message_injected_during_group_turn(self):
-        """OPERATOR 在控制房间（IDLE 状态）发普通消息，agent 在 turn loop 的安全边界应检测并注入。
+    async def _ctrl_room_idle_for(self, alice_id: int):
+        """取控制房间并推入 IDLE（alice 无内容结束 → 全部 AI skipped）。"""
+        ctrl_room, _ = await roomService.get_or_create_control_room(self.team_id, alice_id)
+        with patch("service.messageBus.publish"):
+            await ctrl_room.handle_finish_request(alice_id)
+        assert ctrl_room.state == RoomState.IDLE
+        await ctrl_room.get_unread_messages(alice_id)  # 消费历史未读，避免干扰断言
+        return ctrl_room
 
-        验证：_run_turn_loop 结束后 ctrl_room.has_unread_messages 为 False，
-        说明消息已被消费（注入到 agent history），而不是等到控制房间下次被调度。
-        """
-        alice = await gtAgentManager.get_agent(self.team_id, "alice")
-        alice_agent = agentService.get_agent(alice.id)
+    async def _run_loop_once(self, alice_id: int):
+        alice_agent = agentService.get_agent(alice_id)
         turn_runner = alice_agent.job_consumer._turn_runner
 
-        # 获取控制房间，让 alice 完成一轮使其进入 IDLE
-        ctrl_room, _ = await roomService.get_or_create_control_room(self.team_id, alice.id)
-        with patch("service.messageBus.publish"):
-            await ctrl_room.handle_finish_request(alice.id)
-
-        # 消费掉 ctrl_room 里 alice 的所有已有未读（系统初始消息等）
-        await ctrl_room.get_unread_messages(alice.id)
-        assert not ctrl_room.has_unread_messages(alice.id)
-
-        # OPERATOR 向 IDLE 状态的控制房间发普通消息（触发 IDLE→SCHEDULING，消息有 seq）
-        with patch("service.messageBus.publish"):
-            await ctrl_room.add_message(ctrl_room.OPERATOR_MEMBER_ID, "operator 在 agent 处理群聊时发的消息")
-        assert ctrl_room.has_unread_messages(alice.id), "消息应为 ctrl_room 中 alice 的未读消息"
-
-        # 设置 turn_runner history 末尾为 USER 消息，使 is_safe_for_immediate_insert() 返回 True
+        # history 末尾为 USER 消息 ⇒ is_safe_for_immediate_insert() 为 True
         await turn_runner._history.append_history_message(GtAgentHistory.build(
             AgentMessage.from_openai(llmApiUtil.OpenAIMessage.text(OpenaiApiRole.USER, "群聊消息")),
             tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
         ))
-
-        # mock driver（测试目标是注入逻辑，不测 driver 行为）
         turn_runner.driver = MagicMock()
         turn_runner.driver.turn_setup = SimpleNamespace(max_retries=1, hint_prompt="")
-
-        # mock _advance_step 避免真实 LLM 调用
         turn_runner._advance_step = AsyncMock(return_value=TurnStepResult.TURN_DONE)
 
-        # 模拟 alice 正在处理的群聊房间
         group_room = MagicMock(spec=ChatRoom)
-
         with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock()):
             await turn_runner._run_turn_loop(group_room)
 
-        # 验证：ctrl_room 的未读消息已被消费（注入后游标前进）
-        assert not ctrl_room.has_unread_messages(alice.id), (
-            "turn loop 应检测到 ctrl_room 的未读消息并注入，注入后 has_unread_messages 应为 False"
+    async def test_regular_message_not_read_during_group_turn(self):
+        """普通消息不提前读取：本轮 loop 期间保持未读，等本轮结束后的下一轮再读。"""
+        alice = await gtAgentManager.get_agent(self.team_id, "alice")
+        ctrl_room = await self._ctrl_room_idle_for(alice.id)
+
+        with patch("service.messageBus.publish"):
+            await ctrl_room.add_message(ctrl_room.OPERATOR_MEMBER_ID, "普通排队消息")
+        assert ctrl_room.has_unread_messages(alice.id) is True
+        assert ctrl_room.has_unread_immediate_messages(alice.id) is False
+
+        await self._run_loop_once(alice.id)
+
+        assert ctrl_room.has_unread_messages(alice.id) is True, (
+            "普通消息不应在 turn 的安全边界被提前读取（产品文档 §2.1）"
         )
 
-    async def test_insert_immediately_message_stuck_when_agent_idle(self):
-        """复现：Agent IDLE 时 send insert_immediately 消息，消息卡在 pending 无人唤醒。
+    async def test_immediate_message_read_at_safe_boundary(self):
+        """立即注入消息在安全边界被提前读取，且连带收取排在前面的普通消息。"""
+        alice = await gtAgentManager.get_agent(self.team_id, "alice")
+        ctrl_room = await self._ctrl_room_idle_for(alice.id)
 
-        验证：消息入了 pending 队列，但 Agent 的消费协程未被启动，
-        导致消息永远停留在"将尽快注入"状态。
+        with patch("service.messageBus.publish"):
+            await ctrl_room.add_message(ctrl_room.OPERATOR_MEMBER_ID, "先发的普通消息 M1")
+            await ctrl_room.add_message(ctrl_room.OPERATOR_MEMBER_ID, "后发的立即注入 M2",
+                                        insert_immediately=True)
+        assert ctrl_room.has_unread_immediate_messages(alice.id) is True
+
+        await self._run_loop_once(alice.id)
+
+        assert ctrl_room.has_unread_messages(alice.id) is False, (
+            "immediate 触发后应连带收取全部未读（含前面的普通消息）"
+        )
+
+    async def test_insert_immediately_message_wakes_idle_agent(self):
+        """回归：Agent 空闲时发 insert_immediately 消息必须唤醒房间并触发调度。
+
+        旧实现的 bug 表现：消息进入 pending 队列，但 agent 的消费协程没被唤醒，
+        消息永远停在「将尽快注入」。
         """
         alice = await gtAgentManager.get_agent(self.team_id, "alice")
         alice_agent = agentService.get_agent(alice.id)
         consumer = alice_agent.job_consumer
 
-        # 确保 consumer 处于 IDLE 状态（没有运行中的消费协程）
         consumer.stop()
         await asyncio.sleep(0)
         assert consumer.status in (AgentStatus.IDLE, None), f"agent 应为 IDLE，实际: {consumer.status}"
 
-        # 获取控制房间（处于 SCHEDULING 状态）
-        ctrl_room, _ = await roomService.get_or_create_control_room(self.team_id, alice.id)
+        ctrl_room = await self._ctrl_room_idle_for(alice.id)
 
-        # 发送 insert_immediately=True 消息
-        with patch("service.messageBus.publish"):
+        status_events: list[tuple] = []
+
+        def capture_publish(topic, **kwargs):
+            status_events.append((topic, kwargs))
+
+        with patch("service.messageBus.publish", side_effect=capture_publish):
             await ctrl_room.add_message(
                 ctrl_room.OPERATOR_MEMBER_ID, "紧急消息", insert_immediately=True,
             )
 
-        # 验证消息已进入 pending 队列
-        assert ctrl_room.has_pending_immediate_messages(alice.id), (
-            "insert_immediately 消息应进入 pending 队列"
-        )
+        # 消息写入即分配 seq、立即成为未读的 immediate 消息（不再有 pending 队列中间态）
+        assert ctrl_room.has_unread_immediate_messages(alice.id) is True
 
-        # 验证消费协程未被唤醒（bug 的核心表现）
-        consumer_task = consumer._aio_consumer_task
-        consumer_not_running = consumer_task is None or consumer_task.done()
-        assert consumer_not_running, (
-            f"BUG: IDLE agent 的 consumer 未被唤醒。"
-            f" consumer_task={consumer_task}, done={consumer_task.done() if consumer_task else 'N/A'}"
-        )
-        assert consumer.status == AgentStatus.IDLE, (
-            f"BUG: agent 仍为 IDLE，未被唤醒。status={consumer.status}"
-        )
+        scheduling_events = [
+            e for e in status_events
+            if e[0] == MessageBusTopic.ROOM_STATUS_CHANGED and e[1].get("need_scheduling") is True
+        ]
+        assert scheduling_events, "IDLE 房间收到 immediate 消息后应发布 need_scheduling=True 状态事件"
+        assert scheduling_events[-1][1]["current_turn_agent_id"] == alice.id
+        assert scheduling_events[-1][1]["state"] == RoomState.SCHEDULING

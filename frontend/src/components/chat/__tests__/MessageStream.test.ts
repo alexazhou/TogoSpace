@@ -64,13 +64,17 @@ describe('MessageStream', () => {
     const wrapper = mount(MessageStream, {
       props: {
         messages: [
+          // 浮动待读区只放「私聊 + Operator 发 + Agent 未读」的消息。
           createMessage({
             db_id: 2,
-            seq: null,
+            sender_id: -1,
+            seq: 5,
             content: 'Queue **now** with `code` and [link](https://example.com)',
           }),
         ],
         memberProfiles,
+        isPrivate: true,
+        agentReadSeq: 5,
       },
       global: {
         plugins: [i18n],
@@ -121,12 +125,15 @@ describe('MessageStream', () => {
           createMessage(),
           createMessage({
             db_id: 3,
-            seq: null,
+            sender_id: -1,
+            seq: 6,
             content: 'queued task',
           }),
         ],
         memberProfiles,
         workingAgent: createMember({ id: 9 }),
+        isPrivate: true,
+        agentReadSeq: 6,
       },
       global: {
         plugins: [i18n],

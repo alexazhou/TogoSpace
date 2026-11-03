@@ -12,6 +12,25 @@ import type {
 import { normalizeAgentTaskEvent } from '../api';
 import type { RawAgentTaskEvent } from '../api';
 
+/**
+ * 读游标归一化：只保留 value 可转成有限数字的条目，key 统一转成字符串。
+ * 后端下发的一定是 `{str(agent_id): next_seq}`，但 WS payload 不可信，
+ * 非法条目静默丢弃而不是让它变成 NaN 污染比较。
+ */
+function normalizeAgentReadIndex(raw: unknown): Record<string, number> | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const seq = Number(value);
+    if (Number.isFinite(seq)) {
+      out[String(key)] = seq;
+    }
+  }
+  return out;
+}
+
 export type FrontendRealtimeEvent =
   | {
     type: 'message';
@@ -61,6 +80,8 @@ export type FrontendRealtimeEvent =
     state: string;
     needScheduler: boolean;
     currentTurnAgentId: number | null;
+    /** 各 Agent 最新读游标；后端未下发时为 undefined，前端保留旧值。 */
+    agentReadIndex?: Record<string, number>;
   }
   | {
     type: 'schedule_state';
@@ -233,7 +254,7 @@ export function normalizeWsEventPayload(payload: unknown): FrontendRealtimeEvent
       sender_display_name: String(gtMessage.sender_display_name ?? ''),
       content: String(gtMessage.content ?? ''),
       time: String(gtMessage.send_time ?? ''),
-      seq: typeof gtMessage.seq === 'number' ? gtMessage.seq : null,
+      seq: typeof gtMessage.seq === 'number' ? gtMessage.seq : 0,
       insert_immediately: Boolean(gtMessage.insert_immediately),
     };
 
@@ -311,6 +332,7 @@ export function normalizeWsEventPayload(payload: unknown): FrontendRealtimeEvent
       currentTurnAgentId: Number.isFinite(currentTurnAgentId) && currentTurnAgentId > 0
         ? currentTurnAgentId
         : null,
+      agentReadIndex: normalizeAgentReadIndex(raw.agent_read_index),
     };
   }
 
@@ -355,6 +377,7 @@ export function normalizeWsEventPayload(payload: unknown): FrontendRealtimeEvent
         ? (gtRoom.biz_id as string)
         : null,
       current_turn_agent_id: null,
+      agent_read_index: {},
       preview: '',
       unread: 0,
     };

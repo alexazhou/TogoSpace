@@ -159,8 +159,8 @@ class ChatRoom:
             await self._scheduler.persist_state()
         return new_msgs
 
-    def has_pending_immediate_messages(self, agent_id: int) -> bool:
-        return self._store.has_pending_immediate_messages(agent_id)
+    def has_unread_immediate_messages(self, agent_id: int) -> bool:
+        return self._store.has_unread_immediate_messages(agent_id)
 
     def has_unread_messages(self, agent_id: int) -> bool:
         return self._store.has_unread_messages(agent_id)
@@ -182,19 +182,13 @@ class ChatRoom:
         )
         state = self._scheduler.state
 
-        # insert_immediately 仅限私聊 + 调度中
-        if insert_immediately and (self.room_type != RoomType.PRIVATE or state != RoomState.SCHEDULING):
-            logger.warning("房间 %s 不支持 immediately 消息 (room_type=%s, state=%s)，降级为普通消息",
-                           self.key, self.room_type, state)
+        # insert_immediately 仅限私聊。注意：**不能**再按 state == IDLE 降级。
+        # 旧实现在房间 IDLE 时把 immediate 降级成普通消息，导致「Agent 空闲时发督导指令
+        # 不唤醒、要等下一次有人说话」的缺陷 —— 恰恰是最需要立即生效的时刻失效。
+        if insert_immediately and self.room_type != RoomType.PRIVATE:
+            logger.warning("房间 %s 不支持 immediately 消息 (room_type=%s)，降级为普通消息",
+                           self.key, self.room_type)
             insert_immediately = False
-
-        # 私聊调度中 OPERATOR 普通消息 → queued
-        is_queued = (
-            not insert_immediately
-            and sender_id == self.OPERATOR_MEMBER_ID
-            and self.room_type == RoomType.PRIVATE
-            and state == RoomState.SCHEDULING
-        )
 
         agent = await gtAgentManager.get_agent_by_id(sender_id)
         assert agent, f"agent_id '{sender_id}' not found"
@@ -204,44 +198,39 @@ class ChatRoom:
                                 insert_immediately=insert_immediately)
         message.sender_display_name = agent.display_name
 
-        if insert_immediately or is_queued:
-            self._store.append_pending(message)
-        else:
-            await self._store.append_and_assign_seq(message, publish=True)
+        # 唯一写入路径：插入即分配 seq，无论 insert_immediately 与房间状态。
+        await self._store.append_and_assign_seq(message, publish=True)
 
         if state == RoomState.INIT:
             return
 
-        if insert_immediately or is_queued:
-            db_msg = await gtRoomMessageManager.append_room_message(
-                room_id=self.room_id, sender_id=sender_id, content=content,
-                send_time=message.send_time,
-                insert_immediately=insert_immediately, seq=message.seq,
-            )
-            message.id = db_msg.id
-            messageBus.publish(MessageBusTopic.ROOM_MSG_ADDED, gt_room=self.gt_room, gt_message=message)
-
-        if not insert_immediately and not is_queued and update_turn_state and self._agent_ids:
-            next_agent_id = self._scheduler.on_message(sender_id)
-            if next_agent_id is not None:
-                await self._scheduler.persist_state()
-                self._scheduler.publish_status(next_agent_id, need_scheduling=True)
-            if sender_id == self.OPERATOR_MEMBER_ID and next_agent_id is None:
-                await self.handle_finish_request(self.OPERATOR_MEMBER_ID)
-
-    async def flush_pending_immediate_messages(self) -> None:
-        await self._store.flush_pending_immediate()
-
-    async def flush_queued_messages(self) -> None:
-        flushed = await self._store.flush_queued()
-        if flushed:
-            await self.handle_finish_request(self.OPERATOR_MEMBER_ID)
+        # 调度推进不再区分 immediate / queued：两者走同一条 on_message。
+        # - 房间 IDLE 时，on_message 会把状态切到 SCHEDULING 并返回下一位 AI
+        #   ⇒ 普通消息和立即注入消息都能唤醒房间。
+        # - 房间已在 SCHEDULING 且当前发言人是 AI 时，sender 是 OPERATOR，
+        #   on_message 天然返回 None，不会打断当前 Turn。
+        if not update_turn_state or not self._agent_ids:
+            return
+        next_agent_id = self._scheduler.on_message(sender_id)
+        if next_agent_id is not None:
+            await self._scheduler.persist_state()
+            self._scheduler.publish_status(next_agent_id, need_scheduling=True)
 
     async def escalate_message_to_immediate(self, db_id: int) -> None:
         msg = self._store.escalate_to_immediate(db_id)
         await gtRoomMessageManager.escalate_message_to_immediate(db_id)
         messageBus.publish(MessageBusTopic.ROOM_MSG_CHANGED, gt_room=self.gt_room, gt_message=msg)
         logger.info("消息升级为 immediately: room=%s, db_id=%d", self.key, db_id)
+
+    def publish_read_status(self) -> None:
+        """广播最新读游标，供前端把「已读」消息从浮动待读区移入主流。
+
+        显式传当前发言人而不是 None：`publish_status` 的
+        `current_turn_agent_id` 参数缺省即 None，直接调用会把前端正在工作的
+        指示器（workingAgent）冲掉，看起来像 Agent 突然停了。
+        """
+        self._scheduler.publish_status(self._build_current_turn_agent_id(), need_scheduling=False)
+
 
     # ─── 运行时状态注入与导出 ─────────────────────────────────
 
@@ -257,6 +246,10 @@ class ChatRoom:
 
     def export_agent_read_index(self) -> Dict[int, int]:
         return dict(self._store.get_read_index().items())
+
+    def export_agent_read_index_str(self) -> Dict[str, int]:
+        """读游标的对外形态：key 统一为 str，供 API / WS 事件透传给前端。"""
+        return {str(k): v for k, v in self._store.get_read_index().items()}
 
     def mark_all_messages_read(self) -> None:
         self._store.mark_all_read()
@@ -312,4 +305,5 @@ class ChatRoom:
             "need_scheduling": self._scheduler.state == RoomState.SCHEDULING,
             "current_turn_agent_id": self._build_current_turn_agent_id(),
             "agents": list(self.get_agent_ids()),
+            "agent_read_index": self.export_agent_read_index_str(),
         }

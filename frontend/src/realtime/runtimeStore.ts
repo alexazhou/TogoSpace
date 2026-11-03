@@ -72,24 +72,26 @@ function normalizeMessage(teamId: number, raw: RawMessageInfo): MessageInfo {
     sender_display_name: resolveMessageSenderDisplayName(teamId, raw.sender_id),
     content: raw.content,
     time: raw.send_time,
-    seq: raw.seq,
+    // 类型上 seq 恒有值，运行时仍兜一层：旧库未跑迁移 0019 时后端可能给 null，
+    // 兜成 0 让它们排在最前面，而不是让 NaN 污染整个排序。
+    seq: Number.isFinite(raw.seq) ? raw.seq : 0,
     insert_immediately: raw.insert_immediately,
   };
 }
 
 function compareMessages(left: MessageInfo, right: MessageInfo): number {
-  if (left.seq !== null && right.seq !== null) {
+  if (left.seq !== right.seq) {
     return left.seq - right.seq;
   }
-  if (left.seq !== null) {
-    return -1;
-  }
-  if (right.seq !== null) {
-    return 1;
-  }
-
+  // seq 相同只可能来自旧数据兜底（都是 0），退化到 db_id / 时间保证稳定顺序。
   if (left.db_id !== null && right.db_id !== null) {
     return left.db_id - right.db_id;
+  }
+  if (left.db_id !== null) {
+    return -1;
+  }
+  if (right.db_id !== null) {
+    return 1;
   }
 
   return left.time.localeCompare(right.time);
@@ -719,6 +721,9 @@ export function applyRealtimeEvent(event: FrontendRealtimeEvent): void {
             state: event.state,
             need_scheduling: event.needScheduler,
             current_turn_agent_id: event.currentTurnAgentId,
+            // 每次状态广播都带最新读游标：Agent 一读，前端就能把消息从浮动待读区
+            // 搬进主流。保留旧值兜「这一版后端还没带该字段」的过渡期。
+            agent_read_index: event.agentReadIndex ?? room.agent_read_index,
           }
           : room,
       ),

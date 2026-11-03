@@ -323,8 +323,8 @@ class TestAgentStatus(_agentServiceCase):
 class TestAgentHistorySync(_agentServiceCase):
     """Agent 历史同步、消息拉取相关测试。"""
 
-    async def test_pull_room_messages_to_history(self):
-        """pull_room_messages_to_history 会把房间中的新增消息拉取进 agent 历史。"""
+    async def test_collect_room_messages(self):
+        """collect_room_messages 会把房间中的新增消息拉取进 agent 历史。"""
         await self.create_room(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
@@ -332,7 +332,7 @@ class TestAgentHistorySync(_agentServiceCase):
         await room.add_message(bob_id, "hello alice")
 
         alice = agentService.get_agent(agentService.get_agent_id_by_stable_name(room.team_id, "alice"))
-        synced_count = await alice.job_consumer._turn_runner.pull_room_messages_to_history(room)
+        synced_count = await alice.job_consumer._turn_runner.collect_room_messages(room, as_update=False)
 
         # 初始公告 + bob 消息会聚合成一条"轮到发言"上下文消息（YAML 格式）
         assert synced_count == 1
@@ -345,8 +345,8 @@ class TestAgentHistorySync(_agentServiceCase):
         assert "你现在可以开始发言（send_chat_msg）或调用工具。在全部完成后，请务必调用 finish_action 结束行动。" in content
         assert alice.job_consumer._turn_runner._history[0].tags == [AgentHistoryTag.ROOM_TURN_BEGIN]
 
-    async def test_pull_room_messages_to_history_appends_complete_turn_prompt_as_last_history(self):
-        """pull_room_messages_to_history 追加到 history 的最后一条必须是完整 turn prompt。"""
+    async def test_collect_room_messages_appends_complete_turn_prompt_as_last_history(self):
+        """collect_room_messages 追加到 history 的最后一条必须是完整 turn prompt。"""
         await self.create_room(TEAM, "general", ["alice", "bob"])
         room = roomService.get_room_by_key(f"general@{TEAM}")
         await room.activate_scheduling()
@@ -360,7 +360,7 @@ class TestAgentHistorySync(_agentServiceCase):
         item.seq = 0
         alice.inject_history_messages([item])
 
-        synced_count = await alice.job_consumer._turn_runner.pull_room_messages_to_history(room)
+        synced_count = await alice.job_consumer._turn_runner.collect_room_messages(room, as_update=False)
 
         # 验证生成的 prompt 格式（YAML 格式，包含每条消息的发送时间）
         expected_prompt = promptBuilder.build_turn_begin_prompt("general", [
@@ -380,7 +380,7 @@ class TestSyncRoomSkipsOwnMessages(_agentServiceCase):
     """单独测试类：验证同步时过滤自己的消息。
 
     注意：此测试需要独立的测试类，避免 TestAgentHistorySync 中其他测试（如
-    test_pull_room_messages_to_history）往 alice 的 history 里添加消息后污染历史状态。
+    test_collect_room_messages）往 alice 的 history 里添加消息后污染历史状态。
     """
 
     async def test_sync_room_skips_own_messages(self):
@@ -393,7 +393,7 @@ class TestSyncRoomSkipsOwnMessages(_agentServiceCase):
         alice_id = agentService.get_agent_id_by_stable_name(room.team_id, "alice")
         await room.add_message(alice_id, "i am talking")
 
-        synced_count = await alice.job_consumer._turn_runner.pull_room_messages_to_history(room)
+        synced_count = await alice.job_consumer._turn_runner.collect_room_messages(room, as_update=False)
         # 只应有初始公告，不应有自己的消息
         assert synced_count == 1
         assert len(alice.job_consumer._turn_runner._history) == 1
@@ -414,7 +414,7 @@ class TestAgentHistoryCrossRoom(_agentServiceCase):
 
         alice_id = agentService.get_agent_id_by_stable_name(general_room.team_id, "alice")
         alice = agentService.get_agent(alice_id)
-        synced_count = await alice.job_consumer._turn_runner.pull_room_messages_to_history(general_room)
+        synced_count = await alice.job_consumer._turn_runner.collect_room_messages(general_room, as_update=False)
         assert synced_count == 1
         assert any("roomName: general" in (item.content or "") for item in alice.job_consumer._turn_runner._history)
 
@@ -436,7 +436,7 @@ class TestAgentHistoryCrossRoom(_agentServiceCase):
 
         reloaded_alice = agentService.get_agent(alice_id)
         private_room = roomService.get_room_by_key(f"alice_private@{TEAM}")
-        private_synced_count = await reloaded_alice.job_consumer._turn_runner.pull_room_messages_to_history(private_room)
+        private_synced_count = await reloaded_alice.job_consumer._turn_runner.collect_room_messages(private_room, as_update=False)
 
         assert private_synced_count == 1
         history_contents = [item.content or "" for item in reloaded_alice.job_consumer._turn_runner._history]

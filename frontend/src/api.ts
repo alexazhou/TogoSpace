@@ -57,6 +57,7 @@ type RawRoomInfo = {
   need_scheduling?: boolean;
   current_turn_agent_id?: unknown;
   agents?: unknown;
+  agent_read_index?: unknown;
 };
 
 type RawAgentInfo = Partial<AgentInfo> & {
@@ -445,7 +446,23 @@ function normalizeRoom(room: RawRoomInfo): RoomInfo {
     current_turn_agent_id: Number.isFinite(currentTurnAgentId) && currentTurnAgentId > 0
       ? currentTurnAgentId
       : null,
+    agent_read_index: normalizeAgentReadIndex(room.agent_read_index),
   };
+}
+
+/** 读游标归一化：只保留「key 可转成有限整数、value 是有限数字」的条目。 */
+function normalizeAgentReadIndex(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== 'object') {
+    return {};
+  }
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const seq = Number(value);
+    if (Number.isFinite(seq)) {
+      out[String(key)] = seq;
+    }
+  }
+  return out;
 }
 
 function normalizeAgentStatus(status?: string): AgentStatus {
@@ -1147,7 +1164,8 @@ export type RawMessageInfo = {
   sender_id: number;
   content: string;
   send_time: string;
-  seq: number | null;
+  /** 插入即分配，业务层恒有值（迁移 0019 会补齐存量）。 */
+  seq: number;
   insert_immediately: boolean;
 };
 

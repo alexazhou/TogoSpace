@@ -229,7 +229,12 @@ class RoomScheduler:
 
     def publish_status(self, current_turn_agent_id: int | None = None, *,
                        need_scheduling: bool = False) -> None:
-        """广播房间状态，不推送 INIT 状态。"""
+        """广播房间状态，不推送 INIT 状态。
+
+        payload 中始终附带 `agent_read_index`（key 为 str）：前端靠它判断
+        「哪些 Operator 消息已被 Agent 读取」，从而在浮动待读区与主消息流之间搬消息。
+        不附带的话，前端只能等下一次 room_status 全量刷新，读到的消息会一直挂着「排队中」。
+        """
         if self._state == RoomState.INIT:
             return
         messageBus.publish(
@@ -238,6 +243,7 @@ class RoomScheduler:
             state=self._state,
             current_turn_agent_id=current_turn_agent_id,
             need_scheduling=need_scheduling,
+            agent_read_index={str(k): v for k, v in self._get_read_index().items()},
         )
 
     async def persist_state(self) -> None:
