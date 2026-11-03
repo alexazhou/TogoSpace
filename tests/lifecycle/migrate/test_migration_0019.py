@@ -168,6 +168,116 @@ def test_0019_is_idempotent(tmp_path: Path) -> None:
     assert after == before, "重复执行不得改动已补齐的数据"
 
 
+def test_0019_backfill_number_exceeds_existing_max_not_just_distinct(tmp_path: Path) -> None:
+    """补号必须严格 > 既有 MAX：COUNT 起号不会撞号，但会插队（更隐蔽）。
+
+    构造：已有 0, 1, 7，另 1 条 NULL。
+    - `COALESCE(MAX(seq),-1)+1` ⇒ 补 8，得到 [0,1,7,8] ✅
+    - `COUNT(*)`（错误实现）⇒ 共 4 条 ⇒ 补 4，得到 [0,1,4,7]
+      —— **不撞号**，所以「无重复」这类断言抓不住它，但它让新消息排到了
+      seq=7 的老消息前面，正是本次要消灭的「先发后至」。
+
+    这条与 test_0019_avoids_collision_on_historical_gap 互补：那条钉「撞号」，
+    这条钉「不撞号但插队」，后者更隐蔽，必须单独断言。
+    """
+    db_path = tmp_path / "test.db"
+    _migrate_to_0018(db_path)
+    _seed(db_path, [
+        (1, 0, 0),
+        (1, 1, 0),
+        (1, 7, 0),
+        (1, None, 0),
+    ])
+
+    db.migrate_database(db_path, migrations_dir=MIGRATIONS_DIR, up_to="20")
+
+    rows = _rows(db_path, 1)
+    seqs = [row[1] for row in rows]
+    assert _null_count(db_path) == 0
+    assert len(seqs) == len(set(seqs)), f"出现重复 seq：{seqs}"
+    new_seq = next(row[1] for row in rows if row[0] == 4)  # id=4 是那条 NULL
+    assert new_seq > 7, (
+        f"补出的号必须严格大于既有 MAX(seq)=7，实际 {new_seq}；"
+        f"若等于 4 说明用了 COUNT 起号，虽不撞号但会插队"
+    )
+    assert seqs == [0, 1, 7, 8]
+
+
+def _broken_migration(*, keep_transaction: bool) -> str:
+    """读真实迁移，在 UPDATE 之后注入一条必然失败的语句。
+
+    keep_transaction=True：保留原文件的 BEGIN;/COMMIT;（期望整体回滚）；
+    keep_transaction=False：剥掉 BEGIN;/COMMIT;，模拟「没有显式事务」的对照组。
+    """
+    sql = (MIGRATIONS_DIR / MIGRATION_0019).read_text(encoding="utf-8")
+    marker = "\nCOMMIT;"
+    assert marker in sql, "迁移尾部必须存在 COMMIT;，否则本用例的注入点失效"
+    sql = sql.replace(
+        marker,
+        "\nINSERT INTO table_that_does_not_exist (x) VALUES (1);\nCOMMIT;",
+        1,
+    )
+    if not keep_transaction:
+        # 剥掉事务语句，注入的失败语句保留原位
+        sql = "\n".join(
+            ln for ln in sql.splitlines()
+            if ln.strip() not in ("BEGIN;", "COMMIT;")
+        )
+    return sql
+
+
+def test_0019_rolls_back_entirely_on_midway_failure(tmp_path: Path) -> None:
+    """中途失败必须整体回滚：不留「部分房间已补齐、部分未补齐」的半状态。
+
+    为什么这条值得测：`db.py:apply_migration` 用 `conn.executescript(sql)`，
+    而 executescript 进入时会**隐式 COMMIT**，`with conn:` 的异常兜底并不覆盖
+    脚本内部；一旦脚本里没有显式 BEGIN，UPDATE 会逐条自动提交，后来的语句
+    失败时前面的改动已经落盘。这正是迁移自带 BEGIN;/COMMIT; 的唯一理由。
+    """
+    db_path = tmp_path / "test.db"
+    _migrate_to_0018(db_path)
+    _seed(db_path, [
+        (1, None, 0),
+        (1, None, 1),
+        (2, None, 0),
+        (2, 5, 0),
+    ])
+    before = {room: _rows(db_path, room) for room in (1, 2)}
+
+    with pytest.raises(sqlite3.OperationalError):
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.executescript(_broken_migration(keep_transaction=True))
+
+    after = {room: _rows(db_path, room) for room in (1, 2)}
+    assert after == before, "显式事务下中途失败必须整体回滚，seq 应保持原样（全 NULL）"
+    assert _null_count(db_path) == 3
+
+
+def test_0019_without_explicit_transaction_leaves_half_state(tmp_path: Path) -> None:
+    """对照组：剥掉 BEGIN;/COMMIT; 后，同样的失败会留下半状态。
+
+    这条不是测我们的迁移，而是把「为什么必须写显式事务」变成可执行证据 ——
+    否则后人删掉那两行时，没有任何用例会红。
+    """
+    db_path = tmp_path / "test.db"
+    _migrate_to_0018(db_path)
+    _seed(db_path, [
+        (1, None, 0),
+        (1, None, 1),
+        (2, None, 0),
+        (2, 5, 0),
+    ])
+
+    with pytest.raises(sqlite3.OperationalError):
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.executescript(_broken_migration(keep_transaction=False))
+
+    # UPDATE 已自动提交，失败语句只让它没能收尾
+    assert _null_count(db_path) == 0, (
+        "对照组预期：无显式事务时 UPDATE 已落盘，seq 被改掉（半状态）"
+    )
+
+
 def test_0019_declares_explicit_transaction() -> None:
     """迁移必须自带显式 `BEGIN; … COMMIT;`（与 0018 同一约定）。"""
     statements = _statement_lines()
