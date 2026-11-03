@@ -3879,7 +3879,7 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "togospace"
-version = "0.4.1"
+version = "0.4.2-beta1"
 dependencies = [
  "libc",
  "open",
