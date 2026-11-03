@@ -1,10 +1,10 @@
 # 调度任务重命名方案（schedule: task → job）
 
-- 日期：2026-10-29（初稿） / 2026-11-03（修订）
-- 状态：**方案已定稿，待实施**
+- 日期：2026-10-29（初稿） / 2026-11-03（修订） / 2026-11-04（实施完成）
+- 状态：**已实施**（随 0.4.2-beta1 发布）
 - 范围：调度任务的数据模型、DAL、service、controller 与相关测试
 - 目标：把「调度任务」（`GtScheculeTask`）从「协作任务」（`GtAgentTask`）的 "task" 一词中彻底剥离，消除两者同名混淆；顺带修正 `schecule` 的历史拼写错误
-- 实施分支：`refactor/schedule-job-rename`（**独立分支，不合 main，验收通过后再由项目经理决定合并窗口**）
+- 实施分支：`refactor/job-naming-complete`
 
 ---
 
@@ -432,7 +432,7 @@ docs/tech/04_agent/task_lifecycle.md                                           (
 docs/tech/01_architecture/architecture.md                                      (2)
 ```
 
-**注意**：`docs/design/` 下的历史设计文档是**当时状态的历史记录**，不建议批量改成新名字（会伪造历史）。建议只更新 `docs/tech/` 下的"当前生效"文档，历史 design 文档在开头加一行「本文档中 `GtScheculeTask` 已于 0.5.0 改名为 `GtScheduleJob`」即可。
+**注意**：`docs/design/` 下的历史设计文档是**当时状态的历史记录**，不建议批量改成新名字（会伪造历史）。建议只更新 `docs/tech/` 下的"当前生效"文档，历史 design 文档在开头加一行「本文档中 `GtScheculeTask` 已于 0.4.2-beta1 改名为 `GtScheduleJob`」即可。
 
 ### 5.4 累计规模
 
@@ -535,14 +535,14 @@ with conn:
 迁移是单向的：`schecule_tasks` 改名后，**老版本（0.4.1 及之前）读到 `no such table` 会直接起不来**。本次接受该代价，理由：产品未大规模分发，回滚场景靠 DB 备份恢复即可，引入视图 + 触发器的维护成本（每次后续迁移都要同步维护）不值得。
 
 **必须在发版时做到的两件事**：
-1. **升级说明明确写**：「0.5.0 含破坏性 DB 迁移，降级到 0.4.x 需从 0.5.0 升级前的备份恢复数据库」。
+1. **升级说明明确写**：「0.4.2-beta1 含破坏性 DB 迁移，降级到 0.4.1 及之前需从升级前的备份恢复数据库」。
 2. **迁移前自动备份 DB**：确认 `backend_main.py:72` 的 `migrate_database` 调用前已有备份动作；若没有，M1 阶段补一个（`dev_storage_root/data/backups/` 已有历史备份惯例，沿用即可）。
 
 > 留档（万一将来需要）：可写兼容视图 + 3 个 `INSTEAD OF` 触发器方案 SQL 已实测可行（视图可 SELECT/INSERT/UPDATE/DELETE，全部正确触发到 `schedule_jobs` 真表）。但本次 **不实施**。
 
 ### 6.5 版本号
 
-改 DB 表名属 **breaking change**，走 **0.5.0**（当前 0.4.1）。8 个版本号文件由 `scripts/verify_versions.py` 统一校验。
+改 DB 表名属 **breaking change**，随 **0.4.2-beta1** 发布（前一版为 0.4.1）。8 个版本号文件由 `scripts/verify_versions.py` 统一校验。
 
 ---
 
@@ -554,10 +554,10 @@ with conn:
 4. **运行时函数名本轮不动**：`run_task_turn`、`_run_turn_loop`、`handle_cancel_turn` 保留 "turn" 语义。
 5. **协作任务侧所有 "task" 保留**：`GtAgentTask`、`gtAgentTaskManager`（含其 `get_task`/`delete_tasks_by_team`）、`taskService`、`TaskStatus`、`agent_task_id`。
 6. **工具名与标准库 API 一律不动**：`asyncio.create_task`、工具 `create_task`/`get_task`/`list_tasks`。
-7. **独立分支开发**：`refactor/schedule-job-rename`，验收通过后再由项目经理排合并窗口。
+7. **独立分支开发**：`refactor/job-naming-complete`，验收通过后再由项目经理排合并窗口。
 8. **`task_data` 不改名**（Operator 2026-11-03 02:38，见 §3.7）。
 9. **不支持降级兼容**（Operator 2026-11-03 02:38，见 §6.4）；发版必须写清破坏性 + 迁移前自动备份。
-10. **版本号 0.5.0**（见 §6.5）。
+10. **版本号 0.4.2-beta1**（见 §6.5）。
 11. **开发方式：容器内改代码 + 跑测试，`git add/commit` 回宿主执行**。容器内 git 不可用（worktree gitdir 指向未挂载的宿主 `.git`），详见 `shared/开发环境-容器内开发加worktree加宿主提交-实测确认-20261103.md`。
 12. **worktree 必须建在 agent 私有目录** `~/.togospace/workspace/<team>/agent/<agent>/wt_<topic>`，否则容器内不可见。git 命令前须 `export PATH=/usr/local/bin:$PATH`（git-lfs 3.7.0 在此）。
 
