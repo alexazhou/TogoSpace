@@ -88,7 +88,7 @@ class TestSdkDoSend(ServiceTestCase):
         task = GtScheduleJob(
             id=1,
             agent_id=agent.gt_agent.id,
-            task_type=ScheduleJobType.ROOM_MESSAGE,
+            job_type=ScheduleJobType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
         agent.job_consumer.current_db_task = task
@@ -205,7 +205,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         task = GtScheduleJob(
             id=1,
             agent_id=1,
-            task_type=ScheduleJobType.ROOM_MESSAGE,
+            job_type=ScheduleJobType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
 
@@ -326,7 +326,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         task = GtScheduleJob(
             id=1,
             agent_id=1,
-            task_type=ScheduleJobType.ROOM_MESSAGE,
+            job_type=ScheduleJobType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
         agent.job_consumer.current_db_task = task
@@ -352,7 +352,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         task = GtScheduleJob(
             id=1,
             agent_id=1,
-            task_type=ScheduleJobType.ROOM_MESSAGE,
+            job_type=ScheduleJobType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
         driver = ClaudeSdkAgentDriver(agent.job_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))

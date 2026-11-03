@@ -175,7 +175,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task = GtScheduleJob(
                 id=1,
                 agent_id=alice.gt_agent.id,
-                task_type=ScheduleJobType.ROOM_MESSAGE,
+                job_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             )
             with self.patch_infer(handler=fake_infer):
@@ -212,7 +212,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task = GtScheduleJob(
                 id=2,
                 agent_id=alice.gt_agent.id,
-                task_type=ScheduleJobType.ROOM_MESSAGE,
+                job_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             )
             with self.patch_infer(responses=resps):
@@ -330,7 +330,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task = GtScheduleJob(
                 id=3,
                 agent_id=alice.gt_agent.id,
-                task_type=ScheduleJobType.ROOM_MESSAGE,
+                job_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             )
 
@@ -379,7 +379,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task = GtScheduleJob(
                 id=10,
                 agent_id=alice.gt_agent.id,
-                task_type=ScheduleJobType.ROOM_MESSAGE,
+                job_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             )
             with self.patch_infer(responses=responses):
