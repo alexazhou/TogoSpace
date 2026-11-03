@@ -6,7 +6,7 @@ import logging
 from zoneinfo import ZoneInfo
 
 from constants import (
-    AgentStatus, AgentJobType, CONTAINER_SELF_MOUNT_PATH, CONTAINER_SHARED_MOUNT_PATH,
+    AgentStatus, ScheduleJobType, CONTAINER_SELF_MOUNT_PATH, CONTAINER_SHARED_MOUNT_PATH,
     DriverType, EmployStatus, ExecEnv, RoleTemplateType, RoomState, SpecialAgent, TaskStatus,
 )
 from exception import TogoException
@@ -1053,9 +1053,9 @@ async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: 
         logger.warning("结束行动失败，上下文未设置")
         return {"success": False, "message": "当前没有激活的上下文。"}
 
-    job_type = _context.schedule_job.job_type if _context.schedule_job is not None else AgentJobType.ROOM_MESSAGE
+    job_type = _context.schedule_job.job_type if _context.schedule_job is not None else ScheduleJobType.ROOM_MESSAGE
 
-    if job_type == AgentJobType.TODO_TASK:
+    if job_type == ScheduleJobType.TODO_TASK:
         import service.taskService as taskService
 
         agent_task_id = _context.schedule_job.task_data.get("agent_task_id")
@@ -1100,7 +1100,7 @@ finish 失败，你负责验收的任务【{agent_task.title}】依然为 review
         logger.info(f"Agent 结束协作任务行动: agent_id={_context.agent_id}")
         return {"success": True, "message": "已结束了本轮行动."}
 
-    elif job_type == AgentJobType.ROOM_MESSAGE:
+    elif job_type == ScheduleJobType.ROOM_MESSAGE:
         if _context.chat_room is None:
             logger.warning("结束行动失败，聊天室上下文未设置")
             return {"success": False, "message": "当前没有激活的房间上下文。"}

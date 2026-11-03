@@ -16,7 +16,7 @@ from model.dbModel.gtScheduleJob import GtScheduleJob
 from model.dbModel.gtRoom import GtRoom
 from model.dbModel.gtTeam import GtTeam
 from model.dbModel.gtAgent import GtAgent
-from constants import MessageBusTopic, AgentStatus, AgentJobType, AgentJobStatus, ScheduleState
+from constants import MessageBusTopic, AgentStatus, ScheduleJobType, ScheduleJobStatus, ScheduleState
 from util.configUtil.configTypes import TeamPreset
 from ...base import ServiceTestCase
 
@@ -118,7 +118,7 @@ class TestSchedulerRun(ServiceTestCase):
             mock_task_manager.create_job = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentJobType.ROOM_MESSAGE,
+                task_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             ))
             mock_task_manager.has_pending_room_job = AsyncMock(return_value=False)
@@ -149,21 +149,21 @@ class TestSchedulerRun(ServiceTestCase):
         """验证 Agent.job_consumer.consume 内部错误后进入 FAILED 状态。"""
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
 
-        with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_task_manager, \
-             patch("service.agentService.agentJobConsumer.agentActivityService") as mock_activity_svc:
+        with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_task_manager, \
+             patch("service.agentService.jobConsumer.agentActivityService") as mock_activity_svc:
             mock_activity_svc.add_activity = AsyncMock()
             mock_task_manager.get_first_unfinished_job = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentJobType.ROOM_MESSAGE,
+                task_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": 1},
             ))
             mock_task_manager.transition_job_status = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentJobType.ROOM_MESSAGE,
+                task_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": 1},
-                status=AgentJobStatus.RUNNING,
+                status=ScheduleJobStatus.RUNNING,
             ))
             mock_task_manager.update_job_status = AsyncMock()
 
@@ -176,21 +176,21 @@ class TestSchedulerRun(ServiceTestCase):
         """任务失败后，即使仍有 pending task，也不应自动续起消费。"""
         real_agent = Agent(GtAgent(id=1, team_id=1, name="test", role_template_id=1, model="model"), "prompt")
 
-        with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_task_manager, \
-             patch("service.agentService.agentJobConsumer.agentActivityService") as mock_activity_svc:
+        with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_task_manager, \
+             patch("service.agentService.jobConsumer.agentActivityService") as mock_activity_svc:
             mock_activity_svc.add_activity = AsyncMock()
             mock_task_manager.get_first_unfinished_job = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentJobType.ROOM_MESSAGE,
+                task_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": 1},
             ))
             mock_task_manager.transition_job_status = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentJobType.ROOM_MESSAGE,
+                task_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": 1},
-                status=AgentJobStatus.RUNNING,
+                status=ScheduleJobStatus.RUNNING,
             ))
             mock_task_manager.update_job_status = AsyncMock()
             mock_task_manager.has_consumable_job = AsyncMock(return_value=True)
@@ -230,7 +230,7 @@ class TestSchedulerRun(ServiceTestCase):
             mock_task_manager.create_job = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentJobType.ROOM_MESSAGE,
+                task_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             ))
             mock_task_manager.has_pending_room_job = AsyncMock(return_value=False)
@@ -282,7 +282,7 @@ class TestSchedulerRun(ServiceTestCase):
             mock_task_manager.create_job = AsyncMock(return_value=GtScheduleJob(
                 id=1,
                 agent_id=1,
-                task_type=AgentJobType.ROOM_MESSAGE,
+                task_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             ))
             mock_task_manager.has_pending_room_job = AsyncMock(return_value=True)
@@ -337,8 +337,8 @@ class TestSchedulerRun(ServiceTestCase):
         with patch("service.schedulerService.agentService.get_agent", return_value=alice), \
              patch("service.schedulerService.gtScheduleJobManager") as mock_task_manager:
             mock_task_manager.create_job = AsyncMock(side_effect=[
-                GtScheduleJob(id=1, agent_id=1, task_type=AgentJobType.ROOM_MESSAGE, task_data={"room_id": r1.room_id}),
-                GtScheduleJob(id=2, agent_id=1, task_type=AgentJobType.ROOM_MESSAGE, task_data={"room_id": r2.room_id}),
+                GtScheduleJob(id=1, agent_id=1, task_type=ScheduleJobType.ROOM_MESSAGE, task_data={"room_id": r1.room_id}),
+                GtScheduleJob(id=2, agent_id=1, task_type=ScheduleJobType.ROOM_MESSAGE, task_data={"room_id": r2.room_id}),
             ])
             mock_task_manager.has_pending_room_job = AsyncMock(side_effect=[False, False])
             msg_r1 = EventBusMessage(

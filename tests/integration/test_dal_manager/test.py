@@ -8,7 +8,7 @@ import service.ormService as ormService
 import service.presetService as presetService
 import service.roomService as roomService
 import service.teamService as teamService
-from constants import AgentHistoryTag, AgentHistoryStatus, AgentJobStatus, AgentJobType, DriverType, EmployStatus, OpenaiApiRole, RoleTemplateType, RoomType
+from constants import AgentHistoryTag, AgentHistoryStatus, ScheduleJobStatus, ScheduleJobType, DriverType, EmployStatus, OpenaiApiRole, RoleTemplateType, RoomType
 from dal.db import (
     gtRoleTemplateManager,
     gtAgentHistoryManager,
@@ -840,8 +840,8 @@ class TestDalManagers(ServiceTestCase):
         assert alice is not None
 
         # 创建多个 pending 任务
-        task1 = await gtScheduleJobManager.create_job(alice.id, AgentJobType.ROOM_MESSAGE, {"room_id": 1})
-        task2 = await gtScheduleJobManager.create_job(alice.id, AgentJobType.ROOM_MESSAGE, {"room_id": 2})
+        task1 = await gtScheduleJobManager.create_job(alice.id, ScheduleJobType.ROOM_MESSAGE, {"room_id": 1})
+        task2 = await gtScheduleJobManager.create_job(alice.id, ScheduleJobType.ROOM_MESSAGE, {"room_id": 2})
 
         first = await gtScheduleJobManager.get_first_unfinished_job(alice.id)
         assert first is not None
@@ -860,17 +860,17 @@ class TestDalManagers(ServiceTestCase):
         assert alice is not None
 
         # 创建一个 failed 任务
-        task1 = await gtScheduleJobManager.create_job(alice.id, AgentJobType.ROOM_MESSAGE, {"room_id": 1})
-        await gtScheduleJobManager.update_job_status(task1.id, AgentJobStatus.FAILED, "something went wrong")
+        task1 = await gtScheduleJobManager.create_job(alice.id, ScheduleJobType.ROOM_MESSAGE, {"room_id": 1})
+        await gtScheduleJobManager.update_job_status(task1.id, ScheduleJobStatus.FAILED, "something went wrong")
 
         # 创建更多 pending 任务
-        await gtScheduleJobManager.create_job(alice.id, AgentJobType.ROOM_MESSAGE, {"room_id": 2})
-        await gtScheduleJobManager.create_job(alice.id, AgentJobType.ROOM_MESSAGE, {"room_id": 3})
+        await gtScheduleJobManager.create_job(alice.id, ScheduleJobType.ROOM_MESSAGE, {"room_id": 2})
+        await gtScheduleJobManager.create_job(alice.id, ScheduleJobType.ROOM_MESSAGE, {"room_id": 3})
 
         first = await gtScheduleJobManager.get_first_unfinished_job(alice.id)
         assert first is not None
         assert first.id == task1.id
-        assert first.status == AgentJobStatus.FAILED
+        assert first.status == ScheduleJobStatus.FAILED
 
     async def test_agent_task_manager_get_first_unfinish_task_returns_running(self):
         """恢复中的 running 任务，也应被视为最早未完成任务。"""
@@ -884,14 +884,14 @@ class TestDalManagers(ServiceTestCase):
         alice = await gtAgentManager.get_agent(team.id, "alice")
         assert alice is not None
 
-        task1 = await gtScheduleJobManager.create_job(alice.id, AgentJobType.ROOM_MESSAGE, {"room_id": 1})
-        await gtScheduleJobManager.update_job_status(task1.id, AgentJobStatus.RUNNING)
-        await gtScheduleJobManager.create_job(alice.id, AgentJobType.ROOM_MESSAGE, {"room_id": 2})
+        task1 = await gtScheduleJobManager.create_job(alice.id, ScheduleJobType.ROOM_MESSAGE, {"room_id": 1})
+        await gtScheduleJobManager.update_job_status(task1.id, ScheduleJobStatus.RUNNING)
+        await gtScheduleJobManager.create_job(alice.id, ScheduleJobType.ROOM_MESSAGE, {"room_id": 2})
 
         first = await gtScheduleJobManager.get_first_unfinished_job(alice.id)
         assert first is not None
         assert first.id == task1.id
-        assert first.status == AgentJobStatus.RUNNING
+        assert first.status == ScheduleJobStatus.RUNNING
 
     async def test_agent_task_manager_get_first_unfinish_task_no_unfinish(self):
         """没有未完成任务时返回 None。"""
@@ -921,13 +921,13 @@ class TestDalManagers(ServiceTestCase):
         alice = await gtAgentManager.get_agent(team.id, "alice")
         assert alice is not None
 
-        pending_task = await gtScheduleJobManager.create_job(alice.id, AgentJobType.ROOM_MESSAGE, {"room_id": 1})
-        running_task = await gtScheduleJobManager.create_job(alice.id, AgentJobType.ROOM_MESSAGE, {"room_id": 2})
-        await gtScheduleJobManager.update_job_status(running_task.id, AgentJobStatus.RUNNING)
+        pending_task = await gtScheduleJobManager.create_job(alice.id, ScheduleJobType.ROOM_MESSAGE, {"room_id": 1})
+        running_task = await gtScheduleJobManager.create_job(alice.id, ScheduleJobType.ROOM_MESSAGE, {"room_id": 2})
+        await gtScheduleJobManager.update_job_status(running_task.id, ScheduleJobStatus.RUNNING)
 
         tasks = await gtScheduleJobManager.get_running_jobs(alice.id)
         assert [task.id for task in tasks] == [running_task.id]
-        assert all(task.status == AgentJobStatus.RUNNING for task in tasks)
+        assert all(task.status == ScheduleJobStatus.RUNNING for task in tasks)
         assert pending_task.id not in [task.id for task in tasks]
 
     async def test_agent_task_manager_transition_task_status_switches_failed_to_running(self):
@@ -942,18 +942,18 @@ class TestDalManagers(ServiceTestCase):
         alice = await gtAgentManager.get_agent(team.id, "alice")
         assert alice is not None
 
-        failed_task = await gtScheduleJobManager.create_job(alice.id, AgentJobType.ROOM_MESSAGE, {"room_id": 1})
-        await gtScheduleJobManager.update_job_status(failed_task.id, AgentJobStatus.FAILED, "boom")
+        failed_task = await gtScheduleJobManager.create_job(alice.id, ScheduleJobType.ROOM_MESSAGE, {"room_id": 1})
+        await gtScheduleJobManager.update_job_status(failed_task.id, ScheduleJobStatus.FAILED, "boom")
 
         resumed_task = await gtScheduleJobManager.transition_job_status(
             failed_task.id,
-            AgentJobStatus.FAILED,
-            AgentJobStatus.RUNNING,
+            ScheduleJobStatus.FAILED,
+            ScheduleJobStatus.RUNNING,
         )
 
         assert resumed_task is not None
         assert resumed_task.id == failed_task.id
-        assert resumed_task.status == AgentJobStatus.RUNNING
+        assert resumed_task.status == ScheduleJobStatus.RUNNING
 
     async def test_agent_task_manager_delete_tasks_by_team_uses_team_filter(self):
         """按 team_id 删除任务时，应直接基于 Agent 表条件删除对应团队任务。"""
@@ -973,8 +973,8 @@ class TestDalManagers(ServiceTestCase):
         assert alice_a is not None
         assert alice_b is not None
 
-        task_a = await gtScheduleJobManager.create_job(alice_a.id, AgentJobType.ROOM_MESSAGE, {"room_id": 1})
-        task_b = await gtScheduleJobManager.create_job(alice_b.id, AgentJobType.ROOM_MESSAGE, {"room_id": 2})
+        task_a = await gtScheduleJobManager.create_job(alice_a.id, ScheduleJobType.ROOM_MESSAGE, {"room_id": 1})
+        task_b = await gtScheduleJobManager.create_job(alice_b.id, ScheduleJobType.ROOM_MESSAGE, {"room_id": 2})
 
         deleted_count = await gtScheduleJobManager.delete_jobs_by_team(team_a.id)
 

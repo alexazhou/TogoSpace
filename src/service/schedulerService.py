@@ -4,7 +4,7 @@ from service import messageBus
 from service.messageBus import EventBusMessage
 from service import agentService, roomService as chat_room, serviceUtil
 from dal.db import gtScheduleJobManager
-from constants import MessageBusTopic, AgentJobType, SpecialAgent, ScheduleState
+from constants import MessageBusTopic, ScheduleJobType, SpecialAgent, ScheduleState
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from model.dbModel.gtAgent import GtAgent
 from util import configUtil
@@ -137,7 +137,7 @@ async def _on_room_status_changed(msg: EventBusMessage) -> None:
     # 创建任务记录
     await gtScheduleJobManager.create_job(
         agent_id,
-        AgentJobType.ROOM_MESSAGE,
+        ScheduleJobType.ROOM_MESSAGE,
         {"room_id": room_id},
     )
 

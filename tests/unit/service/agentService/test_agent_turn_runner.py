@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryStatus, AgentHistoryTag, AgentJobType, DriverType, OpenaiApiRole, RoomState, SpecialAgent, TaskStatus, TurnStepResult
+from constants import AgentHistoryStatus, AgentHistoryTag, ScheduleJobType, DriverType, OpenaiApiRole, RoomState, SpecialAgent, TaskStatus, TurnStepResult
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgent import GtAgent
@@ -445,10 +445,10 @@ async def test_handle_cancel_turn_calls_driver_then_history(turn_runner):
 @pytest.mark.asyncio
 async def test_run_task_turn_room_message_still_checks_room_id(turn_runner):
     """ROOM_MESSAGE 类型仍走原有路径，缺少 room_id 时报错。"""
-    from constants import AgentJobType
+    from constants import ScheduleJobType
     task = MagicMock(spec=GtScheduleJob)
     task.id = 100
-    task.job_type = AgentJobType.ROOM_MESSAGE
+    task.job_type = ScheduleJobType.ROOM_MESSAGE
     task.task_data = {}
 
     from util.assertUtil import MakeSureException
@@ -460,10 +460,10 @@ async def test_run_task_turn_room_message_still_checks_room_id(turn_runner):
 @pytest.mark.asyncio
 async def test_run_task_turn_todo_task_raises_when_agent_task_id_missing(turn_runner):
     """TODO_TASK 模式缺少 agent_task_id 时应报错。"""
-    from constants import AgentJobType
+    from constants import ScheduleJobType
     task = MagicMock(spec=GtScheduleJob)
     task.id = 200
-    task.job_type = AgentJobType.TODO_TASK
+    task.job_type = ScheduleJobType.TODO_TASK
     task.task_data = {}  # 无 agent_task_id
 
     from util.assertUtil import MakeSureException
@@ -474,10 +474,10 @@ async def test_run_task_turn_todo_task_raises_when_agent_task_id_missing(turn_ru
 @pytest.mark.asyncio
 async def test_run_task_turn_todo_task_raises_when_agent_task_not_found(turn_runner):
     """TODO_TASK 模式 agent_task_id 对应记录不存在时应报错。"""
-    from constants import AgentJobType
+    from constants import ScheduleJobType
     task = MagicMock(spec=GtScheduleJob)
     task.id = 200
-    task.job_type = AgentJobType.TODO_TASK
+    task.job_type = ScheduleJobType.TODO_TASK
     task.task_data = {"agent_task_id": 999}
 
     from util.assertUtil import MakeSureException
@@ -506,7 +506,7 @@ def _make_agent_task(*, assignee_id: int = 1, reviewer_id: int | None = None, st
 def _make_todo_schedule_job(agent_task_id: int = 210) -> MagicMock:
     task = MagicMock(spec=GtScheduleJob)
     task.id = 200
-    task.job_type = AgentJobType.TODO_TASK
+    task.job_type = ScheduleJobType.TODO_TASK
     task.task_data = {"agent_task_id": agent_task_id}
     return task
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from constants import AgentStatus, AgentJobStatus, AgentJobType
+from constants import AgentStatus, ScheduleJobStatus, ScheduleJobType
 from dal.db import gtTeamManager, gtAgentManager, gtAgentHistoryManager, gtScheduleJobManager
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgent import GtAgent
@@ -171,10 +171,10 @@ class TestRestoreAgentHistory(ServiceTestCase):
         )
         running_task = await gtScheduleJobManager.create_job(
             gt_alice.id,
-            AgentJobType.ROOM_MESSAGE,
+            ScheduleJobType.ROOM_MESSAGE,
             {"room_id": 1},
         )
-        await gtScheduleJobManager.update_job_status(running_task.id, AgentJobStatus.RUNNING)
+        await gtScheduleJobManager.update_job_status(running_task.id, ScheduleJobStatus.RUNNING)
         cls.running_task_id = running_task.id
 
         # 模拟进程重启
@@ -205,7 +205,7 @@ class TestRestoreAgentHistory(ServiceTestCase):
         assert self.running_task_id is not None
         task = await GtScheduleJob.aio_get_or_none(GtScheduleJob.id == self.running_task_id)
         assert task is not None
-        assert task.status == AgentJobStatus.FAILED
+        assert task.status == ScheduleJobStatus.FAILED
         assert task.error_message == "task interrupted by process restart"
 
     async def test_agent_runtime_status_marked_failed_after_restore(self):

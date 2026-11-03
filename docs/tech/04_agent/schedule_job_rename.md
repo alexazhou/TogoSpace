@@ -10,7 +10,7 @@
 
 | 概念 | 含义 | 归属 |
 |------|------|------|
-| **调度 job**（本次改名对象） | scheduler 投递给 Agent 的一次执行单元，Agent 消费它就跑一个 turn | `GtScheduleJob` / `gtScheduleJobManager` / `AgentJobConsumer` |
+| **调度 job**（本次改名对象） | scheduler 投递给 Agent 的一次执行单元，Agent 消费它就跑一个 turn | `GtScheduleJob` / `gtScheduleJobManager` / `JobConsumer` |
 | **协作 task**（保持不变） | Agent 之间结构化的协作任务，有标题/描述/执行人/验收人/状态机 | `GtAgentTask` / `gtAgentTaskManager` / `taskService` / `TaskStatus` |
 
 旧命名里两者都叫 task（`GtScheculeTask` 甚至带个拼写错的 `schecule`），读代码时极易混淆：
@@ -30,8 +30,8 @@
 | 模型类 `GtScheculeTask` | `GtScheduleJob` |
 | Manager 文件 `dal/db/gtScheculeTaskManager.py` | `dal/db/gtScheduleJobManager.py` |
 | Manager 单例 `gtScheculeTaskManager` | `gtScheduleJobManager` |
-| 枚举 `AgentTaskType` | `AgentJobType` |
-| 枚举 `AgentTaskStatus` | `AgentJobStatus` |
+| 枚举 `AgentTaskType` | `ScheduleJobType` |
+| 枚举 `AgentTaskStatus` | `ScheduleJobStatus` |
 
 **列 `task_data` 保留原名**（决策 §3.7）：它是通用 payload（`{"room_id": …}` / `{"agent_task_id": …}`），
 不同 job 类型里语义不同，叫 `job_data` 反而不如 `task_data` 直白，且改名会牵动 22 处读写。
@@ -55,8 +55,8 @@
 
 | 旧 | 新 |
 |----|----|
-| 文件 `service/agentService/agentTaskConsumer.py` | `service/agentService/agentJobConsumer.py` |
-| 类 `AgentTaskConsumer` | `AgentJobConsumer` |
+| 文件 `service/agentService/agentTaskConsumer.py` | `service/agentService/jobConsumer.py` |
+| 类 `AgentTaskConsumer` | `JobConsumer` |
 | `Agent.task_consumer` | `Agent.job_consumer` |
 | `AgentTaskConsumer` 内 `current_db_task` | 已移除（`3713f05a`），现由 `AgentTurnRunner._current_job` 承担 |
 | `ToolCallContext.schedule_task` | `ToolCallContext.schedule_job` |

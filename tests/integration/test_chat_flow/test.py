@@ -19,7 +19,7 @@ from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtScheduleJob import GtScheduleJob
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
-from constants import AgentActivityStatus, AgentHistoryTag, AgentHistoryStatus, AgentStatus, AgentJobType, OpenaiApiRole, RoomState, ScheduleState
+from constants import AgentActivityStatus, AgentHistoryTag, AgentHistoryStatus, AgentStatus, ScheduleJobType, OpenaiApiRole, RoomState, ScheduleState
 from service import messageBus
 from ...base import ServiceTestCase
 
@@ -175,7 +175,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task = GtScheduleJob(
                 id=1,
                 agent_id=alice.gt_agent.id,
-                task_type=AgentJobType.ROOM_MESSAGE,
+                task_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             )
             with self.patch_infer(handler=fake_infer):
@@ -212,7 +212,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task = GtScheduleJob(
                 id=2,
                 agent_id=alice.gt_agent.id,
-                task_type=AgentJobType.ROOM_MESSAGE,
+                task_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             )
             with self.patch_infer(responses=resps):
@@ -330,7 +330,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task = GtScheduleJob(
                 id=3,
                 agent_id=alice.gt_agent.id,
-                task_type=AgentJobType.ROOM_MESSAGE,
+                task_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             )
 
@@ -379,7 +379,7 @@ class TestIntegrationMultiAgentChat(ServiceTestCase):
             task = GtScheduleJob(
                 id=10,
                 agent_id=alice.gt_agent.id,
-                task_type=AgentJobType.ROOM_MESSAGE,
+                task_type=ScheduleJobType.ROOM_MESSAGE,
                 task_data={"room_id": room.room_id},
             )
             with self.patch_infer(responses=responses):

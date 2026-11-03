@@ -210,7 +210,7 @@ logs/backend/service/agentService.log   — 消息同步与工具调用
 1. 搜索 `agentService.log` 中对应 Agent 的最后日志
 2. 检查是否有 `Agent 任务执行失败` 日志
 3. 检查是否有 `LLM 调用失败` 相关错误
-4. 确认 `agentJobConsumer.py` 的 Consumer 状态（是否在运行）
+4. 确认 `jobConsumer.py` 的 Consumer 状态（是否在运行）
 
 **可能原因**：
 - LLM 服务不可用或超时

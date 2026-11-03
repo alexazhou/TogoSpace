@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from constants import AgentStatus, AgentJobStatus
+from constants import AgentStatus, ScheduleJobStatus
 from service.agentService import core as agent_core
 
 
@@ -46,7 +46,7 @@ async def test_restore_agent_runtime_state_still_marks_failed_when_not_demo(monk
         job_consumer=SimpleNamespace(status=None),
         inject_history_messages=MagicMock(),
     )
-    failed_task = SimpleNamespace(status=AgentJobStatus.FAILED)
+    failed_task = SimpleNamespace(status=ScheduleJobStatus.FAILED)
     fail_running_tasks = AsyncMock()
     fail_started_activities = AsyncMock()
 

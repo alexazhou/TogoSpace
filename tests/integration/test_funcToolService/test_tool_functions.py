@@ -36,7 +36,7 @@ from service.funcToolService.tools import (
     finish_action,
     save_dept,
 )
-from constants import AgentStatus, AgentJobStatus, AgentJobType
+from constants import AgentStatus, ScheduleJobStatus, ScheduleJobType
 from ...base import ServiceTestCase
 
 TEAM = "test_team"
@@ -302,12 +302,12 @@ class TestToolFunctions(ServiceTestCase):
 
         task = await gtScheduleJobManager.create_job(
             bob.id,
-            AgentJobType.ROOM_MESSAGE,
+            ScheduleJobType.ROOM_MESSAGE,
             {"room_id": 1},
         )
         await gtScheduleJobManager.update_job_status(
             task.id,
-            AgentJobStatus.FAILED,
+            ScheduleJobStatus.FAILED,
             error_message="llm provider unavailable during team restore",
         )
 

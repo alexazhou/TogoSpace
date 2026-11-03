@@ -21,7 +21,7 @@ from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
 from service.agentService.driver.base import AgentDriverConfig
 from service.funcToolService.core import get_tools
 from service.agentService.toolRegistry import CATEGORY_CONFIG
-from constants import DriverType, RoleTemplateType, AgentJobType, SpecialAgent, ToolCategory
+from constants import DriverType, RoleTemplateType, ScheduleJobType, SpecialAgent, ToolCategory
 from util import llmApiUtil, configUtil
 from util.configUtil.configTypes import TeamPreset, AgentPreset, DeptNodePreset
 from ...base import ServiceTestCase
@@ -88,7 +88,7 @@ class TestSdkDoSend(ServiceTestCase):
         task = GtScheduleJob(
             id=1,
             agent_id=agent.gt_agent.id,
-            task_type=AgentJobType.ROOM_MESSAGE,
+            task_type=ScheduleJobType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
         agent.job_consumer.current_db_task = task
@@ -205,7 +205,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         task = GtScheduleJob(
             id=1,
             agent_id=1,
-            task_type=AgentJobType.ROOM_MESSAGE,
+            task_type=ScheduleJobType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
 
@@ -326,7 +326,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         task = GtScheduleJob(
             id=1,
             agent_id=1,
-            task_type=AgentJobType.ROOM_MESSAGE,
+            task_type=ScheduleJobType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
         agent.job_consumer.current_db_task = task
@@ -352,7 +352,7 @@ class TestClaudeSdkAgentDriver(ServiceTestCase):
         task = GtScheduleJob(
             id=1,
             agent_id=1,
-            task_type=AgentJobType.ROOM_MESSAGE,
+            task_type=ScheduleJobType.ROOM_MESSAGE,
             task_data={"room_id": room.room_id},
         )
         driver = ClaudeSdkAgentDriver(agent.job_consumer._turn_runner, AgentDriverConfig(driver_type="claude_sdk"))

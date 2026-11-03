@@ -10,7 +10,7 @@ from dal.db import gtAgentHistoryManager, gtScheduleJobManager, gtRoomMessageMan
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtRoomMessage import GtRoomMessage
-from constants import AgentHistoryTag, AgentJobStatus
+from constants import AgentHistoryTag, ScheduleJobStatus
 from service import serviceUtil
 
 s_status = ServiceStatusInfo(name="persistenceService")
@@ -57,7 +57,7 @@ async def fail_running_tasks(
     for job in jobs:
         await gtScheduleJobManager.update_job_status(
             job.id,
-            AgentJobStatus.FAILED,
+            ScheduleJobStatus.FAILED,
             error_message=error_message,
         )
 

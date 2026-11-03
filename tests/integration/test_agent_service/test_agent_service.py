@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic, AgentStatus, AgentJobStatus, AgentJobType, SpecialAgent
+from constants import AgentHistoryTag, DriverType, EmployStatus, MessageBusTopic, AgentStatus, ScheduleJobStatus, ScheduleJobType, SpecialAgent
 from dal.db import gtAgentManager, gtTeamManager, gtScheduleJobManager
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgent import GtAgent
@@ -303,12 +303,12 @@ class TestAgentStatus(_agentServiceCase):
 
         failed_task = await gtScheduleJobManager.create_job(
             alice.gt_agent.id,
-            AgentJobType.ROOM_MESSAGE,
+            ScheduleJobType.ROOM_MESSAGE,
             {"room_id": room.room_id},
         )
         await gtScheduleJobManager.update_job_status(
             failed_task.id,
-            AgentJobStatus.FAILED,
+            ScheduleJobStatus.FAILED,
             error_message="boom",
         )
         alice.job_consumer.status = AgentStatus.FAILED

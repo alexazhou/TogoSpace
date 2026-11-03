@@ -280,7 +280,7 @@ EVENT_TRUNCATED_SUFFIX = "…(已截断)"
 
 
 
-class AgentJobType(EnhanceEnum):
+class ScheduleJobType(EnhanceEnum):
     """Agent 调度任务类型枚举。
 
     注意与协作任务（`GtAgentTask` / `TaskStatus`）区分：本枚举描述的是
@@ -291,7 +291,7 @@ class AgentJobType(EnhanceEnum):
     TODO_TASK = auto()  # 协作任务驱动（Agent 间结构化任务）
 
 
-class AgentJobStatus(EnhanceEnum):
+class ScheduleJobStatus(EnhanceEnum):
     """Agent 调度任务状态枚举。"""
     PENDING = auto()      # 待处理
     RUNNING = auto()      # 正在处理

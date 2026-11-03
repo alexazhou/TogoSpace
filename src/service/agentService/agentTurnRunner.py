@@ -13,7 +13,7 @@ from typing import List
 from constants import (
     AgentActivityStatus, AgentActivityType,
     AgentHistoryStatus, AgentHistoryTag,
-    AgentJobType, DriverType, ModelInput, OpenaiApiRole, RoomState, SpecialAgent,
+    ScheduleJobType, DriverType, ModelInput, OpenaiApiRole, RoomState, SpecialAgent,
     TaskStatus, TurnStepResult,
 )
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
@@ -211,7 +211,7 @@ class AgentTurnRunner:
         - TODO_TASK：向 history 注入任务通知 prompt 后运行 turn loop，无房间依赖。
         若存在未完成 turn，则走续跑路径。
         """
-        is_todo_task = job.job_type == AgentJobType.TODO_TASK
+        is_todo_task = job.job_type == ScheduleJobType.TODO_TASK
 
         if is_todo_task:
             agent_task_id = job.task_data.get("agent_task_id")

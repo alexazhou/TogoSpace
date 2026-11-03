@@ -4,7 +4,7 @@
 >
 > **命名说明（0.5.0 起）**：调度侧原 `GtScheculeTask` / `schecule_tasks` / `gtScheculeTaskManager` /
 > `AgentTaskType` / `AgentTaskStatus` / `AgentTaskConsumer` 已统一改名为 `GtScheduleJob` / `schedule_jobs` /
-> `gtScheduleJobManager` / `AgentJobType` / `AgentJobStatus` / `AgentJobConsumer`。
+> `gtScheduleJobManager` / `ScheduleJobType` / `ScheduleJobStatus` / `JobConsumer`。
 > **协作任务侧（`GtAgentTask` / `gtAgentTaskManager` / `taskService` / `TaskStatus` / `agent_task_id`）保持不变**，
 > 文中出现「协作任务」时指的是后者。详见 `docs/tech/04_agent/schedule_job_rename.md`。
 
@@ -13,7 +13,7 @@
 任务生命周期涉及 4 个组件协作：
 
 ```
-schedulerService          AgentJobConsumer          gtScheduleJobManager          AgentTurnRunner
+schedulerService          JobConsumer          gtScheduleJobManager          AgentTurnRunner
     │                          │                          │                          │
     │ ── create_job ──────────>│                          │                          │
     │ ── start() ─────────────>│                          │                          │
@@ -26,13 +26,13 @@ schedulerService          AgentJobConsumer          gtScheduleJobManager        
 | 组件 | 职责 |
 |------|------|
 | `schedulerService` | 监听房间轮次事件，创建任务记录（DB），触发消费 |
-| `AgentJobConsumer` | 消费循环主体：认领任务 → 执行 → 状态流转 → 失败恢复 |
+| `JobConsumer` | 消费循环主体：认领任务 → 执行 → 状态流转 → 失败恢复 |
 | `gtScheduleJobManager` | DAL 层，所有任务状态的数据库读写 |
 | `AgentTurnRunner` | 单轮 turn 执行，内部再按 step 推进消息同步、推理与工具调用 |
 
 ## 2. 状态定义
 
-### 2.1 任务状态（AgentJobStatus）
+### 2.1 任务状态（ScheduleJobStatus）
 
 持久化在 `schedule_jobs` 表中，驱动消费循环的判断逻辑。
 
@@ -116,7 +116,7 @@ schedulerService._on_agent_turn()
 │        → 创建 PENDING 状态的任务记录
 │
 └── 3. 触发消费：agent.start_consumer_task()
-          → AgentJobConsumer.start()
+          → JobConsumer.start()
               → asyncio.create_task(self.consume())
 ```
 
@@ -139,7 +139,7 @@ async def consume():
         if job.status not in (PENDING, RUNNING, FAILED):   # 退出条件②：队头不可消费
             break
         claimed_job = (await gtScheduleJobManager.transition_job_status(
-            job.id, job.status, AgentJobStatus.RUNNING) if job.status in (PENDING, FAILED) else job)
+            job.id, job.status, ScheduleJobStatus.RUNNING) if job.status in (PENDING, FAILED) else job)
         if claimed_job is None:                  # CAS 失败，重试
             continue
 
@@ -197,7 +197,7 @@ await gtScheduleJobManager.update_job_status(claimed_job.id, COMPLETED)
 关键设计：
 
 - **失败即停**：任务执行异常后 Consumer 立即停止消费循环，不会跳过失败任务继续处理后续任务。
-- **`_current_job`**：由 `AgentTurnRunner` 在 `run_task_turn` 执行期间持有，turn 结束（无论成败）清空为 `None`。`AgentJobConsumer` 自身不再持有当前 job 引用（原 `current_db_task` 已随 `3713f05a` 移除）。
+- **`_current_job`**：由 `AgentTurnRunner` 在 `run_task_turn` 执行期间持有，turn 结束（无论成败）清空为 `None`。`JobConsumer` 自身不再持有当前 job 引用（原 `current_db_task` 已随 `3713f05a` 移除）。
 - **`resumed` 参数**：已随 `3713f05a` 移除；FAILED job 的重跑由 `consume()` 里 `FAILED → RUNNING` 的 CAS 直接覆盖。
 
 ## 5. FAILED job 的处理
@@ -235,7 +235,7 @@ Agent 处于 FAILED 状态（上一次执行抛异常）时，新 job 仍可正�
 
 ```
 schedulerService.create_job()   →  PENDING job 写入 DB
-agent.start_consumer_task()     →  AgentJobConsumer.start()
+agent.start_consumer_task()     →  JobConsumer.start()
                                     └── consume()
                                          └── get_first_unfinished_job()
                                               → 队头 job 可认领 → 继续执行
@@ -248,7 +248,7 @@ agent.start_consumer_task()     →  AgentJobConsumer.start()
 ```python
 async def has_consumable_job(agent_id):
     first_job = await get_first_unfinished_job(agent_id)
-    return first_job is not None and first_job.status == AgentJobStatus.PENDING
+    return first_job is not None and first_job.status == ScheduleJobStatus.PENDING
 ```
 
 仅当**队头** job 是 PENDING 时返回 True，用于 `consume()` 收尾时的「自动续起」判断。
@@ -264,7 +264,7 @@ async def has_consumable_job(agent_id):
 AgentResumeHandler.post()
 └── 前置断言：agent.status == FAILED
     └── Agent.start_consumer_task()
-        └── AgentJobConsumer.start()
+        └── JobConsumer.start()
             └── consume() 重新进入循环
                 ├── 查询：get_first_unfinished_job(agent_id)
                 │       → 队头是 FAILED job
@@ -344,7 +344,7 @@ async def consume():
 ## 8. 事件通知链路
 
 ```
-AgentJobConsumer._publish_status()
+JobConsumer._publish_status()
     │
     ▼
 messageBus.publish(AGENT_STATUS_CHANGED, gt_agent, status)
@@ -387,7 +387,7 @@ if self._aio_consumer_task is current_consumer:
 
 ## 10. 方法速查
 
-### AgentJobConsumer
+### JobConsumer
 
 | 方法 | 说明 |
 |------|------|

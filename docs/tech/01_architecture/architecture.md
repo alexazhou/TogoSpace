@@ -78,7 +78,7 @@ src/
 │   │   ├── core.py                 # Agent 生命周期管理
 │   │   ├── agent.py                # Agent 运行时实例
 │   │   ├── agentTurnRunner.py      # Turn 内部逻辑（推理 + 工具调用编排）
-│   │   ├── agentJobConsumer.py     # 任务消费者
+│   │   ├── jobConsumer.py     # 任务消费者
 │   │   ├── agentHistoryStore.py    # 对话历史管理
 │   │   ├── compact.py              # Token 预算 & 上下文压缩
 │   │   ├── promptBuilder.py        # Prompt 构建
@@ -321,7 +321,7 @@ roomController → roomService.send_message()
 schedulerService（监听 ROOM_STATUS_CHANGED）
     │  调度下一个发言 Agent
     ▼
-agentJobConsumer → AgentTurnRunner.run()
+jobConsumer → AgentTurnRunner.run()
     │  1. 构建 Prompt
     │  2. 调用 LLM Driver（nativeDriver / tspDriver / claudeSdkDriver）
     │  3. 解析工具调用 → funcToolService 执行

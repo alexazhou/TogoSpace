@@ -6,7 +6,7 @@ from model.coreModel.agentModel import ExecEnvState
 from model.coreModel.containerModel import ContainerTarget
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
-from service.agentService.agentJobConsumer import AgentJobConsumer
+from service.agentService.jobConsumer import JobConsumer
 from service.agentService.driver import (
     AgentDriver,
     AgentDriverConfig,
@@ -25,8 +25,8 @@ class Agent:
     - 对外 API 入口（start_consumer_task 等）的一层转发
 
     Turn 级资源（driver, tool_registry, history）在 AgentTurnRunner 中，
-    任务运行时状态与消费逻辑在 AgentJobConsumer 中。
-    AgentTurnRunner 由 AgentJobConsumer 内部创建和持有。
+    任务运行时状态与消费逻辑在 JobConsumer 中。
+    AgentTurnRunner 由 JobConsumer 内部创建和持有。
     """
 
 
@@ -43,7 +43,7 @@ class Agent:
         self.gt_agent: GtAgent = gt_agent
         self.system_prompt: str = system_prompt
         self.is_root_leader: bool = is_root_leader
-        self.job_consumer: AgentJobConsumer = AgentJobConsumer(
+        self.job_consumer: JobConsumer = JobConsumer(
             gt_agent=gt_agent,
             system_prompt=system_prompt,
             agent_workdir=agent_workdir,

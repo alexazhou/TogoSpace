@@ -1,6 +1,6 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
-from constants import AgentJobType, TaskStatus
+from constants import ScheduleJobType, TaskStatus
 from service.funcToolService.tools import finish_action
 from service.roomService.core import ToolCallContext
 
@@ -23,7 +23,7 @@ def _make_collab_context(
 ) -> tuple[ToolCallContext, MagicMock]:
     """构造协作任务模式的 ToolCallContext（含 schedule_job 和 mock agent_task）。"""
     schedule_job = MagicMock()
-    schedule_job.job_type = AgentJobType.TODO_TASK
+    schedule_job.job_type = ScheduleJobType.TODO_TASK
     schedule_job.task_data = {"agent_task_id": 42}
     agent_task = MagicMock()
     agent_task.title = "测试任务"

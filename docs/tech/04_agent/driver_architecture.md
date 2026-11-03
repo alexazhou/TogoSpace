@@ -31,7 +31,7 @@
 
 ```
 Agent (facade)
- └── job_consumer: AgentJobConsumer (任务管道)
+ └── job_consumer: JobConsumer (任务管道)
       ├── 拥有: status, 消费协程
       └── _turn_runner: AgentTurnRunner (内部创建，实现 AgentDriverHost)
            ├── gt_agent, system_prompt, agent_workdir
@@ -48,7 +48,7 @@ Agent (facade)
 1. `schedulerService` 收到 `ROOM_AGENT_TURN`
 2. scheduler 找到对应 `Agent`
 3. scheduler 创建数据库任务并调用 `agent.start_consumer_task()`
-4. `AgentJobConsumer.consume()` 认领并执行任务
+4. `JobConsumer.consume()` 认领并执行任务
 5. Consumer 调用 `turn_runner.run_task_turn(task)`
 6. TurnRunner 完成房间消息同步后，调用 `self.driver.run_task_turn(task, synced_count)`
 7. driver 用 TurnRunner 暴露的宿主能力完成这一轮
@@ -58,7 +58,7 @@ Agent (facade)
 ## 代码位置
 
 - `src/service/agentService/agent.py`
-- `src/service/agentService/agentJobConsumer.py`
+- `src/service/agentService/jobConsumer.py`
 - `src/service/agentService/agentTurnRunner.py`
 - `src/service/agentService/core.py`
 - `src/service/agentService/driver/base.py`

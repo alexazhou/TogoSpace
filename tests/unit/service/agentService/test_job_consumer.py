@@ -1,13 +1,13 @@
-"""AgentJobConsumer 单元测试：测试任务消费逻辑。"""
+"""JobConsumer 单元测试：测试任务消费逻辑。"""
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentActivityStatus, AgentActivityType, AgentStatus, AgentJobStatus, AgentJobType
+from constants import AgentActivityStatus, AgentActivityType, AgentStatus, ScheduleJobStatus, ScheduleJobType
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtScheduleJob import GtScheduleJob
-from service.agentService.agentJobConsumer import AgentJobConsumer
+from service.agentService.jobConsumer import JobConsumer
 
 @pytest.fixture
 def mock_gt_agent():
@@ -25,17 +25,17 @@ def mock_turn_runner():
 
 @pytest.fixture
 def consumer(mock_gt_agent, mock_turn_runner):
-    with patch("service.agentService.agentJobConsumer.AgentTurnRunner", return_value=mock_turn_runner):
-        with patch("service.agentService.agentJobConsumer.agentActivityService") as mock_activity_svc:
+    with patch("service.agentService.jobConsumer.AgentTurnRunner", return_value=mock_turn_runner):
+        with patch("service.agentService.jobConsumer.agentActivityService") as mock_activity_svc:
             mock_activity_svc.add_activity = AsyncMock()
-            c = AgentJobConsumer(gt_agent=mock_gt_agent, system_prompt="test")
+            c = JobConsumer(gt_agent=mock_gt_agent, system_prompt="test")
             c._mock_activity_service = mock_activity_svc
             yield c
 
 
 @pytest.mark.asyncio
 async def test_consume_no_task_returns_early(consumer, mock_gt_agent, mock_turn_runner):
-    with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_manager:
+    with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_manager:
         mock_manager.get_first_unfinished_job = AsyncMock(return_value=None)
         mock_manager.has_consumable_job = AsyncMock(return_value=False)
 
@@ -50,15 +50,15 @@ async def test_consume_no_task_returns_early(consumer, mock_gt_agent, mock_turn_
 async def test_consume_stops_on_failed_task(consumer, mock_gt_agent, mock_turn_runner):
     pending_task = MagicMock(spec=GtScheduleJob)
     pending_task.id = 100
-    pending_task.status = AgentJobStatus.PENDING
+    pending_task.status = ScheduleJobStatus.PENDING
     pending_task.task_data = {"room_id": 1}
 
     running_task = MagicMock(spec=GtScheduleJob)
     running_task.id = 100
-    running_task.status = AgentJobStatus.RUNNING
+    running_task.status = ScheduleJobStatus.RUNNING
     running_task.task_data = {"room_id": 1}
 
-    with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_manager:
+    with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_manager:
             mock_manager.get_first_unfinished_job = AsyncMock(return_value=pending_task)
             mock_manager.transition_job_status = AsyncMock(return_value=running_task)
             mock_manager.update_job_status = AsyncMock()
@@ -69,7 +69,7 @@ async def test_consume_stops_on_failed_task(consumer, mock_gt_agent, mock_turn_r
             await consumer.consume()
 
             assert consumer.status == AgentStatus.FAILED
-            mock_manager.update_job_status.assert_called_once_with(100, AgentJobStatus.FAILED, error_message="inference failed")
+            mock_manager.update_job_status.assert_called_once_with(100, ScheduleJobStatus.FAILED, error_message="inference failed")
             assert consumer._mock_activity_service.add_activity.await_args_list[-1].kwargs == {
                 "gt_agent": mock_gt_agent,
                 "activity_type": AgentActivityType.AGENT_STATE,
@@ -83,10 +83,10 @@ async def test_consume_stops_on_failed_task(consumer, mock_gt_agent, mock_turn_r
 async def test_consume_running_task_retries_and_keeps_failed_status_on_error(consumer, mock_gt_agent, mock_turn_runner):
     running_task = MagicMock(spec=GtScheduleJob)
     running_task.id = 101
-    running_task.status = AgentJobStatus.RUNNING
+    running_task.status = ScheduleJobStatus.RUNNING
     running_task.task_data = {"room_id": 42}
 
-    with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_manager:
+    with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_manager:
         mock_manager.get_first_unfinished_job = AsyncMock(return_value=running_task)
         mock_manager.update_job_status = AsyncMock()
 
@@ -95,7 +95,7 @@ async def test_consume_running_task_retries_and_keeps_failed_status_on_error(con
         await consumer.consume()
 
         mock_turn_runner.run_task_turn.assert_called_once_with(running_task)
-        mock_manager.update_job_status.assert_called_once_with(101, AgentJobStatus.FAILED, error_message="retry failed")
+        mock_manager.update_job_status.assert_called_once_with(101, ScheduleJobStatus.FAILED, error_message="retry failed")
         assert consumer.status == AgentStatus.FAILED
         assert consumer._mock_activity_service.add_activity.await_args_list[-1].kwargs == {
             "gt_agent": mock_gt_agent,
@@ -155,11 +155,11 @@ async def test_consume_handles_cancel_request(consumer, mock_gt_agent, mock_turn
     """人工取消：CancelledError + _cancel_requested=True → 执行 cancel 收尾逻辑。"""
     pending_task = MagicMock(spec=GtScheduleJob)
     pending_task.id = 200
-    pending_task.status = AgentJobStatus.PENDING
+    pending_task.status = ScheduleJobStatus.PENDING
 
     running_task = MagicMock(spec=GtScheduleJob)
     running_task.id = 200
-    running_task.status = AgentJobStatus.RUNNING
+    running_task.status = ScheduleJobStatus.RUNNING
 
     # 模拟 cancel_current_turn() 的行为：先设置标志，再引发 CancelledError
     def _simulate_cancel(*args, **kwargs):
@@ -169,7 +169,7 @@ async def test_consume_handles_cancel_request(consumer, mock_gt_agent, mock_turn
     mock_turn_runner.run_task_turn = AsyncMock(side_effect=_simulate_cancel)
     mock_turn_runner.handle_cancel_turn = AsyncMock()
 
-    with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_manager:
+    with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_manager:
         mock_manager.get_first_unfinished_job = AsyncMock(return_value=pending_task)
         mock_manager.transition_job_status = AsyncMock(return_value=running_task)
         mock_manager.update_job_status = AsyncMock()
@@ -180,7 +180,7 @@ async def test_consume_handles_cancel_request(consumer, mock_gt_agent, mock_turn
     # handle_cancel_turn 应被调用
     mock_turn_runner.handle_cancel_turn.assert_awaited_once()
     # task 应被标记为 CANCELLED
-    mock_manager.update_job_status.assert_called_once_with(200, AgentJobStatus.CANCELLED, error_message="cancelled by user")
+    mock_manager.update_job_status.assert_called_once_with(200, ScheduleJobStatus.CANCELLED, error_message="cancelled by user")
     # 活动记录应包含 CANCELLED
     cancel_activity_calls = [
         call for call in consumer._mock_activity_service.add_activity.await_args_list
@@ -198,16 +198,16 @@ async def test_consume_reraises_cancelled_error_when_not_human_stop(consumer, mo
     """非人工取消的 CancelledError（如 hot reload）应原样 re-raise。"""
     pending_task = MagicMock(spec=GtScheduleJob)
     pending_task.id = 300
-    pending_task.status = AgentJobStatus.PENDING
+    pending_task.status = ScheduleJobStatus.PENDING
 
     running_task = MagicMock(spec=GtScheduleJob)
     running_task.id = 300
-    running_task.status = AgentJobStatus.RUNNING
+    running_task.status = ScheduleJobStatus.RUNNING
 
     mock_turn_runner.run_task_turn = AsyncMock(side_effect=asyncio.CancelledError)
     mock_turn_runner.handle_cancel_turn = AsyncMock()
 
-    with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_manager:
+    with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_manager:
         mock_manager.get_first_unfinished_job = AsyncMock(return_value=pending_task)
         mock_manager.transition_job_status = AsyncMock(return_value=running_task)
         mock_manager.update_job_status = AsyncMock()
@@ -229,7 +229,7 @@ async def test_consume_resets_cancel_flag_at_entry(consumer, mock_turn_runner):
     """consume() 入口应防御性重置 _cancel_requested。"""
     consumer._cancel_requested = True  # 残留的脏状态
 
-    with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_manager:
+    with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_manager:
         mock_manager.get_first_unfinished_job = AsyncMock(return_value=None)
         mock_manager.has_consumable_job = AsyncMock(return_value=False)
 
@@ -248,7 +248,7 @@ async def test_check_and_schedule_creates_collaboration_task(consumer, mock_gt_a
     mock_agent_task.id = 42
     mock_agent_task.title = "整理文档"
 
-    with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_sched_mgr:
+    with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_sched_mgr:
         mock_sched_mgr.has_pending_collaboration_job = AsyncMock(return_value=False)
         mock_sched_mgr.create_job = AsyncMock()
 
@@ -257,7 +257,7 @@ async def test_check_and_schedule_creates_collaboration_task(consumer, mock_gt_a
 
         mock_sched_mgr.create_job.assert_awaited_once_with(
             mock_gt_agent.id,
-            AgentJobType.TODO_TASK,
+            ScheduleJobType.TODO_TASK,
             {"agent_task_id": 42},
         )
 
@@ -265,7 +265,7 @@ async def test_check_and_schedule_creates_collaboration_task(consumer, mock_gt_a
 @pytest.mark.asyncio
 async def test_check_and_schedule_skips_when_no_active_task(consumer):
     """无活跃协作任务时，不创建调度记录。"""
-    with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_sched_mgr:
+    with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_sched_mgr:
         mock_sched_mgr.create_job = AsyncMock()
 
         with patch("dal.db.gtAgentTaskManager.get_first_active_task", new=AsyncMock(return_value=None)):
@@ -281,7 +281,7 @@ async def test_check_and_schedule_idempotent_when_already_scheduled(consumer, mo
     mock_agent_task.id = 42
     mock_agent_task.title = "整理文档"
 
-    with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_sched_mgr:
+    with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_sched_mgr:
         mock_sched_mgr.has_pending_collaboration_job = AsyncMock(return_value=True)
         mock_sched_mgr.create_job = AsyncMock()
 
@@ -296,15 +296,15 @@ async def test_consume_triggers_collaboration_task_check_after_completion(consum
     """任务完成（COMPLETED）后，应调用 _check_and_schedule_collaboration_tasks。"""
     pending_task = MagicMock(spec=GtScheduleJob)
     pending_task.id = 100
-    pending_task.status = AgentJobStatus.PENDING
+    pending_task.status = ScheduleJobStatus.PENDING
     pending_task.task_data = {"room_id": 1}
 
     running_task = MagicMock(spec=GtScheduleJob)
     running_task.id = 100
-    running_task.status = AgentJobStatus.RUNNING
+    running_task.status = ScheduleJobStatus.RUNNING
     running_task.task_data = {"room_id": 1}
 
-    with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_manager:
+    with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_manager:
         mock_manager.get_first_unfinished_job = AsyncMock(side_effect=[pending_task, None])
         mock_manager.transition_job_status = AsyncMock(return_value=running_task)
         mock_manager.update_job_status = AsyncMock()
@@ -343,17 +343,17 @@ async def test_consume_continues_when_claim_task_raises(consumer, mock_gt_agent,
     """
     pending_task = MagicMock(spec=GtScheduleJob)
     pending_task.id = 100
-    pending_task.status = AgentJobStatus.PENDING
-    pending_task.job_type = AgentJobType.TODO_TASK
+    pending_task.status = ScheduleJobStatus.PENDING
+    pending_task.job_type = ScheduleJobType.TODO_TASK
     pending_task.task_data = {"room_id": 1, "agent_task_id": 42}
 
     running_task = MagicMock(spec=GtScheduleJob)
     running_task.id = 100
-    running_task.status = AgentJobStatus.RUNNING
-    running_task.job_type = AgentJobType.TODO_TASK
+    running_task.status = ScheduleJobStatus.RUNNING
+    running_task.job_type = ScheduleJobType.TODO_TASK
     running_task.task_data = {"room_id": 1, "agent_task_id": 42}
 
-    with patch("service.agentService.agentJobConsumer.gtScheduleJobManager") as mock_manager:
+    with patch("service.agentService.jobConsumer.gtScheduleJobManager") as mock_manager:
         mock_manager.get_first_unfinished_job = AsyncMock(side_effect=[pending_task, None])
         mock_manager.transition_job_status = AsyncMock(return_value=running_task)
         mock_manager.update_job_status = AsyncMock()
@@ -365,4 +365,4 @@ async def test_consume_continues_when_claim_task_raises(consumer, mock_gt_agent,
 
     # 任务照常执行完成（不因认领失败被中断）
     mock_turn_runner.run_task_turn.assert_awaited_once_with(running_task)
-    mock_manager.update_job_status.assert_any_await(100, AgentJobStatus.COMPLETED)
+    mock_manager.update_job_status.assert_any_await(100, ScheduleJobStatus.COMPLETED)

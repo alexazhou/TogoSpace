@@ -1,10 +1,10 @@
-"""AgentJobConsumer: 调度任务管道 — 取 job、执行、状态流转、恢复失败 job。"""
+"""JobConsumer: 调度任务管道 — 取 job、执行、状态流转、恢复失败 job。"""
 from __future__ import annotations
 
 import asyncio
 import logging
 
-from constants import AgentJobStatus, AgentStatus, AgentActivityType, AgentActivityStatus, MessageBusTopic, AgentJobType
+from constants import ScheduleJobStatus, AgentStatus, AgentActivityType, AgentActivityStatus, MessageBusTopic, ScheduleJobType
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtScheduleJob import GtScheduleJob
 from dal.db import gtAgentTaskManager, gtScheduleJobManager
@@ -16,7 +16,7 @@ from util import assertUtil, asyncUtil
 logger = logging.getLogger(__name__)
 
 
-class AgentJobConsumer:
+class JobConsumer:
     """调度任务管道：认领 → 执行 → 状态流转。合并了原 AgentTaskExecutor 的职责。
 
     自行构建 AgentTurnRunner，对外只暴露任务消费接口。
@@ -103,7 +103,7 @@ class AgentJobConsumer:
         logger.info(f"自动创建协作任务调度: {self.gt_agent.name}(agent_id={self.gt_agent.id}), agent_task_id={agent_task.id}, title={agent_task.title!r}")
         await gtScheduleJobManager.create_job(
             self.gt_agent.id,
-            AgentJobType.TODO_TASK,
+            ScheduleJobType.TODO_TASK,
             {"agent_task_id": agent_task.id},
         )
 
@@ -142,22 +142,22 @@ class AgentJobConsumer:
                 logger.info(f"无待处理任务，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id})")
                 break
 
-            if job.status not in (AgentJobStatus.PENDING, AgentJobStatus.RUNNING, AgentJobStatus.FAILED):
+            if job.status not in (ScheduleJobStatus.PENDING, ScheduleJobStatus.RUNNING, ScheduleJobStatus.FAILED):
                 logger.info(f"首个未完成任务状态不可消费，退出消费循环: {self.gt_agent.name}(agent_id={self.gt_agent.id}), job_id={job.id}, job_status={job.status}")
                 break
 
-            if job.status in (AgentJobStatus.PENDING, AgentJobStatus.FAILED):
-                claimed_job = await gtScheduleJobManager.transition_job_status(job.id, job.status, AgentJobStatus.RUNNING)
+            if job.status in (ScheduleJobStatus.PENDING, ScheduleJobStatus.FAILED):
+                claimed_job = await gtScheduleJobManager.transition_job_status(job.id, job.status, ScheduleJobStatus.RUNNING)
                 if claimed_job is None:
                     logger.debug(f"任务认领失败（已被其他消费者抢占），重试: {self.gt_agent.name}(agent_id={self.gt_agent.id}), job_id={job.id}")
                     continue
-                if job.status == AgentJobStatus.FAILED:
+                if job.status == ScheduleJobStatus.FAILED:
                     logger.info(f"重跑 FAILED 任务: {self.gt_agent.name}(agent_id={self.gt_agent.id}), job_id={job.id}")
             else:
                 claimed_job = job  # 已经是 RUNNING，直接使用
 
             # 认领置位（D5=(a)）：执行人认领协作任务时，系统把 TODO → IN_PROGRESS（同事务写系统事件，不唤醒）
-            if claimed_job.job_type == AgentJobType.TODO_TASK:
+            if claimed_job.job_type == ScheduleJobType.TODO_TASK:
                 agent_task_id = (claimed_job.task_data or {}).get("agent_task_id")
                 if agent_task_id:
                     await self._claim_collaboration_task(agent_task_id)
@@ -172,7 +172,7 @@ class AgentJobConsumer:
                 self._cancel_requested = False
                 logger.info(f"Agent 任务被人工停止: {self.gt_agent.name}(agent_id={self.gt_agent.id}), job_id={claimed_job.id}")
                 await self._turn_runner.handle_cancel_turn()
-                await gtScheduleJobManager.update_job_status(claimed_job.id, AgentJobStatus.CANCELLED, error_message="cancelled by user")
+                await gtScheduleJobManager.update_job_status(claimed_job.id, ScheduleJobStatus.CANCELLED, error_message="cancelled by user")
                 await agentActivityService.add_activity(
                     gt_agent=self.gt_agent, activity_type=AgentActivityType.AGENT_STATE,
                     status=AgentActivityStatus.CANCELLED, detail="Turn 被操作者停止",
@@ -180,12 +180,12 @@ class AgentJobConsumer:
                 break
             except Exception as e:
                 logger.error(f"Agent 任务执行失败: {self.gt_agent.name}(agent_id={self.gt_agent.id}), job_id={claimed_job.id}, error={e}")
-                await gtScheduleJobManager.update_job_status(claimed_job.id, AgentJobStatus.FAILED, error_message=str(e))
+                await gtScheduleJobManager.update_job_status(claimed_job.id, ScheduleJobStatus.FAILED, error_message=str(e))
                 await self._set_status(AgentStatus.FAILED, str(e))
                 break
 
             logger.info(f"任务执行完成: {self.gt_agent.name}(agent_id={self.gt_agent.id}), job_id={claimed_job.id}")
-            await gtScheduleJobManager.update_job_status(claimed_job.id, AgentJobStatus.COMPLETED)
+            await gtScheduleJobManager.update_job_status(claimed_job.id, ScheduleJobStatus.COMPLETED)
             await self._check_and_schedule_collaboration_tasks()
 
         # 清理逻辑

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from constants import AgentJobStatus, AgentJobType
+from constants import ScheduleJobStatus, ScheduleJobType
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtScheduleJob import GtScheduleJob
 
 
 async def create_job(
     agent_id: int,
-    job_type: AgentJobType,
+    job_type: ScheduleJobType,
     task_data: dict,
 ) -> GtScheduleJob:
     """创建 Agent 调度任务记录。"""
@@ -15,7 +15,7 @@ async def create_job(
         agent_id=agent_id,
         job_type=job_type,
         task_data=task_data,
-        status=AgentJobStatus.PENDING,
+        status=ScheduleJobStatus.PENDING,
     )
     await job.aio_save()
     return job
@@ -32,9 +32,9 @@ async def has_pending_room_job(
     Args:
         include_failed: 为 True 时，也将 FAILED 任务计入检查范围（用于防止重复创建任务）。
     """
-    statuses = [AgentJobStatus.PENDING]
+    statuses = [ScheduleJobStatus.PENDING]
     if include_failed:
-        statuses.append(AgentJobStatus.FAILED)
+        statuses.append(ScheduleJobStatus.FAILED)
     jobs = await (
         GtScheduleJob
         .select()
@@ -60,7 +60,7 @@ async def get_first_unfinished_job(agent_id: int) -> GtScheduleJob | None:
         .select()
         .where(
             GtScheduleJob.agent_id == agent_id,
-            GtScheduleJob.status.in_([AgentJobStatus.PENDING, AgentJobStatus.RUNNING, AgentJobStatus.FAILED]),  # type: ignore[attr-defined]
+            GtScheduleJob.status.in_([ScheduleJobStatus.PENDING, ScheduleJobStatus.RUNNING, ScheduleJobStatus.FAILED]),  # type: ignore[attr-defined]
         )
         .order_by(GtScheduleJob.job_type.asc(), GtScheduleJob.id.asc())  # type: ignore[attr-defined]
         .aio_first()
@@ -75,7 +75,7 @@ async def has_consumable_job(agent_id: int) -> bool:
     - 仅当最早的未完成任务为可认领的 PENDING 时返回 True
     """
     first_job = await get_first_unfinished_job(agent_id)
-    return first_job is not None and first_job.status == AgentJobStatus.PENDING
+    return first_job is not None and first_job.status == ScheduleJobStatus.PENDING
 
 
 async def has_pending_collaboration_job(agent_id: int, agent_task_id: int) -> bool:
@@ -85,8 +85,8 @@ async def has_pending_collaboration_job(agent_id: int, agent_task_id: int) -> bo
         .select()
         .where(
             GtScheduleJob.agent_id == agent_id,
-            GtScheduleJob.job_type == AgentJobType.TODO_TASK,
-            GtScheduleJob.status == AgentJobStatus.PENDING,
+            GtScheduleJob.job_type == ScheduleJobType.TODO_TASK,
+            GtScheduleJob.status == ScheduleJobStatus.PENDING,
         )
         .aio_execute()
     )
@@ -95,8 +95,8 @@ async def has_pending_collaboration_job(agent_id: int, agent_task_id: int) -> bo
 
 async def transition_job_status(
     job_id: int,
-    from_status: AgentJobStatus,
-    to_status: AgentJobStatus,
+    from_status: ScheduleJobStatus,
+    to_status: ScheduleJobStatus,
 ) -> GtScheduleJob | None:
     """原子地迁移调度任务状态。
 
@@ -124,7 +124,7 @@ async def get_running_jobs(agent_id: int) -> list[GtScheduleJob]:
         .select()
         .where(
             GtScheduleJob.agent_id == agent_id,
-            GtScheduleJob.status == AgentJobStatus.RUNNING,
+            GtScheduleJob.status == ScheduleJobStatus.RUNNING,
         )
         .order_by(GtScheduleJob.id.asc())  # type: ignore[attr-defined]
         .aio_execute()
@@ -133,7 +133,7 @@ async def get_running_jobs(agent_id: int) -> list[GtScheduleJob]:
 
 async def update_job_status(
     job_id: int,
-    status: AgentJobStatus,
+    status: ScheduleJobStatus,
     error_message: str | None = None,
 ) -> GtScheduleJob:
     """更新调度任务状态。"""

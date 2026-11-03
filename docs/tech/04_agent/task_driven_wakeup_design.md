@@ -13,7 +13,7 @@
 ## 3. 技术实现方案
 
 ### 3.1 数据模型扩展
-在 `src/constants.py` 的 `AgentJobType` 枚举中新增类型：
+在 `src/constants.py` 的 `ScheduleJobType` 枚举中新增类型：
 - `ROOM_MESSAGE`: 聊天驱动（现有）
 - `TODO_TASK`: 协作任务驱动（本文档早期写作 `COLLABORATION_TASK`，实际落库的枚举值名为 `TODO_TASK`，值名保留历史叫法）
 
@@ -23,7 +23,7 @@
 - 效果：只要有新消息待处理，Agent 优先回消息；只有消息处理完后，才会开始处理 TODO 任务。
 
 ### 3.3 自动排程机制 (Consumer 逻辑)
-在 `AgentJobConsumer.consume()` 循环中，当 Agent 执行完一次完整的行动（即调用了 `finish_action` 且当前调度记录已标记为 `COMPLETED`）后，增加“任务扫描”钩子：
+在 `JobConsumer.consume()` 循环中，当 Agent 执行完一次完整的行动（即调用了 `finish_action` 且当前调度记录已标记为 `COMPLETED`）后，增加“任务扫描”钩子：
 1. **触发时机**：Agent 调用 `finish_action` 结束本轮行动之后。
 2. **逻辑**：
    - 检查 `agent_tasks` 表，获取该 Agent 最早的一个 `status` 为 `TODO` 或 `IN_PROGRESS` 的任务。
@@ -53,8 +53,8 @@
 ## 4. 关键流程示例
 1. Agent A 正在回复房间消息。
 2. Agent A 调用 `finish_action` 结束本轮。
-3. `AgentJobConsumer` 发现消息任务已完成，扫描发现 A 还有一个 `TODO` 的“整理文档”任务。
-4. `AgentJobConsumer` 自动生成一个 `TODO_TASK` 并立即在下一轮循环中认领。
+3. `JobConsumer` 发现消息任务已完成，扫描发现 A 还有一个 `TODO` 的“整理文档”任务。
+4. `JobConsumer` 自动生成一个 `TODO_TASK` 并立即在下一轮循环中认领。
 5. Agent A 再次被唤醒，此时上下文只有“整理文档”的任务说明。
 6. Agent A 整理完文档，调用 `update_task(status="DONE")`，然后调用 `finish_action`。
 7. 调度器再次扫描，若无更多任务，Agent 进入 `IDLE` 状态。

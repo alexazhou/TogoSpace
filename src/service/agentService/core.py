@@ -24,7 +24,7 @@ from exception import TogoException
 from constants import (
     ContainerState,
     AgentStatus,
-    AgentJobStatus,
+    ScheduleJobStatus,
     DriverType,
     EmployStatus,
     SpecialAgent,
@@ -389,7 +389,7 @@ async def _restore_agent_runtime_state(
 
     first_job = await gtScheduleJobManager.get_first_unfinished_job(agent.gt_agent.id)
     agent.job_consumer.status = AgentStatus.FAILED if (
-        first_job is not None and first_job.status == AgentJobStatus.FAILED
+        first_job is not None and first_job.status == ScheduleJobStatus.FAILED
     ) else AgentStatus.IDLE
 
 
@@ -525,7 +525,7 @@ async def get_agent_detail_info(agent: GtAgent) -> AgentRuntimeInfo:
 async def get_agent_error_message(agent_id: int) -> str | None:
     """返回 Agent 最早未完成任务的失败信息；没有失败任务时为 None。"""
     first_job = await gtScheduleJobManager.get_first_unfinished_job(agent_id)
-    if first_job is not None and first_job.status == AgentJobStatus.FAILED:
+    if first_job is not None and first_job.status == ScheduleJobStatus.FAILED:
         return first_job.error_message
     return None
 

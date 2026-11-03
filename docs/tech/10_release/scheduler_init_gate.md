@@ -14,7 +14,7 @@
 - `src/service/teamService.py`
 - `src/service/schedulerService.py`
 - `src/service/llmService.py`
-- `src/service/agentService/agentJobConsumer.py`
+- `src/service/agentService/jobConsumer.py`
 
 ## 0. 当前基线
 
