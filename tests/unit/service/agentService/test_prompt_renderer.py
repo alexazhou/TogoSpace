@@ -123,6 +123,7 @@ def test_render_system_prompt_branches():
     assert "get_dept_info" in out_member
     assert "你可以使用以下任务工具" in out_member
     assert "你是当前团队的最高负责人" not in out_member
+    assert "部门主管职责" not in out_member
     assert "可用技能" not in out_member
 
     # 团队 Root Leader 模式 + 带 Skill
@@ -144,6 +145,10 @@ def test_render_system_prompt_branches():
     )
     assert "get_dept_info" in out_team
     assert "你可以使用以下任务工具" in out_team
+    assert "部门主管职责" in out_team
+    assert "依据必须能被指认" in out_team
+    assert "约束的举证责任在提出者" in out_team
+    assert "投入不产生正确性" in out_team
     assert "你是当前团队的最高负责人" in out_team
     assert "- 个人工作目录（当前工作目录）：/workspace/team\n- 团队共享目录：/workspace/shared" in out_team
     assert "\n\n# 团队与协作工具\n\n## 团队感知与沟通工具" in out_team
@@ -181,3 +186,32 @@ def test_render_system_prompt_branches():
     assert "    部门职责: 负责核心系统研发" in out_depts
     assert "    本部门主管: Alice（ID：2）" in out_depts
     assert "      - Charlie" in out_depts
+
+    # 4. 部门主管模式（非 Root Leader，担任部门主管）
+    out_dept_leader = render_prompt(
+        "system_prompt.j2",
+        base_prompt="",
+        identity_prompt="",
+        language="zh-CN",
+        agent_id=4,
+        agent_name="Alice",
+        template_name="DevLead",
+        dept_entries=[
+            {
+                "部门": "研发部",
+                "你在部门中的角色": "主管",
+                "部门职责": "负责核心系统研发",
+            }
+        ],
+        template_soul="把控研发质量",
+        workdir="/workspace/alice",
+        shared_workdir="/workspace/shared",
+        is_leader=True,
+        is_root_leader=False,
+        skills=[],
+    )
+    assert "部门主管职责" in out_dept_leader
+    assert "依据必须能被指认" in out_dept_leader
+    assert "约束的举证责任在提出者" in out_dept_leader
+    assert "投入不产生正确性" in out_dept_leader
+    assert "你是当前团队的最高负责人" not in out_dept_leader

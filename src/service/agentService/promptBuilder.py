@@ -9,10 +9,7 @@ from constants import EVENT_CONTENT_MAX_CHARS, EVENT_TRUNCATED_SUFFIX, TaskStatu
 from dal.db import gtAgentManager
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService.promptRenderer import render_prompt
-from service.agentService.prompts import (
-    BASE_PROMPT,
-    TURN_CONTEXT_SUFFIX,
-)
+from service.agentService.prompts import TURN_CONTEXT_SUFFIX
 from util import configUtil
 
 
@@ -264,7 +261,7 @@ async def build_agent_system_prompt(
         ).strip()
 
     custom_base_prompt = ""
-    if base_prompt_tmpl and base_prompt_tmpl.strip() != BASE_PROMPT.strip():
+    if base_prompt_tmpl and base_prompt_tmpl.strip():
         custom_base_prompt = base_prompt_tmpl.strip()
 
     is_leader = is_root_leader or any(entry.get("你在部门中的角色") == "主管" for entry in dept_entries)

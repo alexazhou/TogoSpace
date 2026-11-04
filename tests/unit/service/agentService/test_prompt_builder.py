@@ -314,9 +314,10 @@ def test_build_task_event_line_time_uses_local_timezone():
 
 def test_task_collaboration_guide_lists_get_task_event():
     """协作指南需包含按事件 id 查单条事件的工具 get_task_event。"""
-    from service.agentService.prompts import TASK_COLLABORATION_GUIDE
+    from service.agentService.promptRenderer import render_prompt
 
-    assert "`get_task_event`" in TASK_COLLABORATION_GUIDE
+    out = render_prompt("system_prompt.j2")
+    assert "`get_task_event`" in out
 
 
 def test_task_collaboration_guide_does_not_promise_unsupported_status_forms():
@@ -324,18 +325,18 @@ def test_task_collaboration_guide_does_not_promise_unsupported_status_forms():
 
     `claude_sdk` 侧 `status` 是 `array` + 7 个大写 enum，单值 `"TODO"` 会被 schema 拒掉
     （实测 `{"status": "TODO"}` → REJECT: 'TODO' is not of type 'array'）。
-    提示词对三种驱动都可见（`promptBuilder.py` 在 `team_id > 0` 时无条件拼接，
-    `claudeSdkDriver` 用的就是 `host.system_prompt`），写进去模型就会照着传。
+    提示词对三种驱动都可见，写进去模型就会照着传。
 
     过滤参数的细节统一由**工具 schema/description** 承载（见 `tools.list_tasks` 的
     docstring 与 `test_task_tools.py`），提示词只写一句「按条件搜索」。
     """
-    from service.agentService.prompts import TASK_COLLABORATION_GUIDE
+    from service.agentService.promptRenderer import render_prompt
 
-    assert "状态或状态数组" not in TASK_COLLABORATION_GUIDE
-    assert "可按状态、" not in TASK_COLLABORATION_GUIDE
-    assert "大小写不敏感" not in TASK_COLLABORATION_GUIDE
-    assert "不区分大小写" not in TASK_COLLABORATION_GUIDE
+    out = render_prompt("system_prompt.j2")
+    assert "状态或状态数组" not in out
+    assert "可按状态、" not in out
+    assert "大小写不敏感" not in out
+    assert "不区分大小写" not in out
 
 
 def test_task_collaboration_guide_does_not_enumerate_list_tasks_filters():
@@ -348,9 +349,10 @@ def test_task_collaboration_guide_does_not_enumerate_list_tasks_filters():
     所以这里钉住「不枚举」：一旦有人把参数名写回提示词，本用例必红，提醒他确认
     是否真的需要重复 schema 里的信息。
     """
-    from service.agentService.prompts import TASK_COLLABORATION_GUIDE
+    from service.agentService.promptRenderer import render_prompt
 
-    line = next(l for l in TASK_COLLABORATION_GUIDE.splitlines() if "list_tasks" in l)
+    out = render_prompt("system_prompt.j2")
+    line = next(l for l in out.splitlines() if "list_tasks" in l)
 
     assert "按条件搜索" in line
     for param in ("assignee", "reviewer", "status", "title_keyword", "open_only", "limit", "scope"):
@@ -365,14 +367,14 @@ def test_task_collaboration_guide_referenced_tools_all_exist():
     """
     import re
 
-    from service.agentService.prompts import TASK_COLLABORATION_GUIDE, TEAM_AWARENESS_TOOLS_GUIDE
+    from service.agentService.promptRenderer import render_prompt
     from service.funcToolService.core import load_func_tools
 
     registry = set(load_func_tools().keys())
     # 反引号里也会出现**参数**名（不是工具），逐个列白名单而不是放宽容错
     param_names = {"new_status", "note", "status", "assignee", "reviewer", "title_keyword"}
 
-    text = TEAM_AWARENESS_TOOLS_GUIDE + "\n" + TASK_COLLABORATION_GUIDE
+    text = render_prompt("system_prompt.j2")
     referenced = {
         n for n in re.findall(r"`([a-z][a-z0-9_]*)`", text)
         if n not in param_names
@@ -600,19 +602,20 @@ async def test_build_agent_system_prompt_native_render_without_custom_tmpls(monk
 
 
 def test_system_prompt_template_structure_and_placeholders():
-    """SYSTEM_PROMPT_TEMPLATE 必须包含关键段落占位符，以确保装配完整性。"""
-    from service.agentService.prompts import SYSTEM_PROMPT_TEMPLATE
+    """system_prompt.j2 必须包含各关键职责与工具段落，以确保装配完整性。"""
+    from service.agentService.promptRenderer import render_prompt
 
-    expected_placeholders = [
-        "{base_prompt}",
-        "{language_prompt}",
-        "{identity_prompt}",
-        "{workdir_prompt}",
-        "{team_awareness_section}",
-        "{task_collaboration_section}",
-        "{root_leader_section}",
-        "{skills_section}",
+    out = render_prompt("system_prompt.j2", is_leader=True, is_root_leader=True)
+    expected_sections = [
+        "# 行动指南",
+        "# 当前语言设置",
+        "# 身份信息",
+        "# 工作目录",
+        "## 团队感知与沟通工具",
+        "## 任务管理工具",
+        "## 部门主管职责",
+        "## 团队最高负责人职责",
     ]
-    for ph in expected_placeholders:
-        assert ph in SYSTEM_PROMPT_TEMPLATE, f"SYSTEM_PROMPT_TEMPLATE 缺失占位符 {ph}"
+    for sec in expected_sections:
+        assert sec in out, f"system_prompt 缺失关键段落: {sec}"
 
