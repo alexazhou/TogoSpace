@@ -267,6 +267,8 @@ async def build_agent_system_prompt(
     if base_prompt_tmpl and base_prompt_tmpl.strip() != BASE_PROMPT.strip():
         custom_base_prompt = base_prompt_tmpl.strip()
 
+    is_leader = is_root_leader or any(entry.get("你在部门中的角色") == "主管" for entry in dept_entries)
+
     return render_prompt(
         "system_prompt.j2",
         base_prompt=custom_base_prompt,
@@ -280,6 +282,7 @@ async def build_agent_system_prompt(
         template_soul=template_soul,
         workdir=workdir,
         shared_workdir=shared_workdir,
+        is_leader=is_leader,
         is_root_leader=is_root_leader,
         skills=skills_to_show,
     )

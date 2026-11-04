@@ -145,7 +145,7 @@ def test_render_system_prompt_branches():
     assert "get_dept_info" in out_team
     assert "你可以使用以下任务工具" in out_team
     assert "你是当前团队的最高负责人" in out_team
-    assert "当前工作目录：/workspace/team\n团队共享目录：/workspace/shared" in out_team
+    assert "- 个人工作目录（当前工作目录）：/workspace/team\n- 团队共享目录：/workspace/shared" in out_team
     assert "\n\n# 团队与协作工具\n\n## 团队感知与沟通工具" in out_team
     assert "# 可用技能" in out_team
     assert "- code_review: 代码审查" in out_team
