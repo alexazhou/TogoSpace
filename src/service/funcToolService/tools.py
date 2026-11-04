@@ -1015,12 +1015,13 @@ async def _resolve_effective_immediate(
     if target_room.room_type != RoomType.PRIVATE:
         return False, "（注：群聊不支持加急注入，已按普通消息送达）"
 
-    # 单聊里除发送者外的另一成员。另一方是 Operator(-1) 时没有 AI 接收方，
-    # 对操作者发消息本来就不存在「插入对方工作上下文」这回事，降级且不额外提示。
+    # 单聊里除发送者外的另一成员。另一方是 Operator(-1) 时没有 AI 接收方：
+    # 对操作者发消息不存在「插入对方工作上下文」，但仍要告知降级 ——
+    # Agent 主动传 true 意味着它认为「必须让对方立刻看到」，静默降级会让它按「已加急」继续推进。
     other_ids = [aid for aid in target_room.get_agent_ids() if aid != sender_agent_id]
     other_id = other_ids[0] if other_ids else None
     if other_id is None or other_id <= 0:
-        return False, ""
+        return False, "（注：对方是操作者，不存在运行中插入，已按普通消息送达）"
 
     from service import agentService
 

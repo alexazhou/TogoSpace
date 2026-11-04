@@ -74,14 +74,14 @@ async def test_group_room_downgrades_with_note() -> None:
 
 
 @pytest.mark.asyncio
-async def test_operator_private_room_downgrades_without_note() -> None:
-    """与 Operator 的单聊没有 AI 接收方 → 降级为普通消息，且不附多余说明。"""
+async def test_operator_private_room_downgrades_with_note() -> None:
+    """与 Operator 的单聊没有 AI 接收方 → 降级为普通消息，并附说明（step1 §5 要求三种降级都带文案）。"""
     room = _room(RoomType.PRIVATE, [OPERATOR_ID, 1])
     result = await _send(room, _context(agent_id=1), True)
 
     assert result["success"] is True
     assert room.add_message.await_args.kwargs["insert_immediately"] is False
-    assert "注：" not in result["message"]
+    assert "对方是操作者，不存在运行中插入" in result["message"]
 
 
 @pytest.mark.asyncio
