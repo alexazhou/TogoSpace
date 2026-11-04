@@ -107,6 +107,22 @@ async def test_missing_target_agent_downgrades_with_note() -> None:
 
 
 @pytest.mark.asyncio
+async def test_private_room_without_other_member_downgrades_with_neutral_note() -> None:
+    """单聊房间只有自己（无第二成员）→ 降级并给中性说明，不能说成「对方是操作者」。
+
+    文案断言的是一个事实：房间里有谁。混成一句会把「没有第二个人」说成「对方是操作者」，
+    Agent 会据此去催一个不存在的人。
+    """
+    room = _room(RoomType.PRIVATE, [1])
+    result = await _send(room, _context(agent_id=1), True)
+
+    assert result["success"] is True
+    assert room.add_message.await_args.kwargs["insert_immediately"] is False
+    assert "房间内无其他成员" in result["message"]
+    assert "对方是操作者" not in result["message"]
+
+
+@pytest.mark.asyncio
 async def test_default_false_sends_plain_message() -> None:
     """不传 insert_immediately → 普通消息，且不附加任何降级说明。"""
     room = _room(RoomType.PRIVATE, [1, 2])
