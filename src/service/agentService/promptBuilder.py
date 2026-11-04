@@ -3,59 +3,17 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-import yaml
+import service.deptService as deptService
 import service.skillService as skillService
 from constants import EVENT_CONTENT_MAX_CHARS, EVENT_TRUNCATED_SUFFIX, TaskStatus
-from dal.db import gtAgentManager, gtDeptManager
+from dal.db import gtAgentManager
 from model.dbModel.gtRoomMessage import GtRoomMessage
+from service.agentService.promptRenderer import render_prompt
 from service.agentService.prompts import (
+    BASE_PROMPT,
     TURN_CONTEXT_SUFFIX,
-    TEAM_AWARENESS_TOOLS_GUIDE,
-    TASK_COLLABORATION_GUIDE,
-    ROOT_LEADER_GUIDE,
-    COMPACT_PROMPT_TEMPLATE,
-    COMPACT_RESUME_TEMPLATE,
-    WORKDIR_PROMPT,
-    LANGUAGE_CONTEXT_PROMPT,
-    TODO_TASK_TURN_PROMPT_TEMPLATE,
-    TODO_TASK_DONE_INSTRUCTION,
-    TODO_TASK_REVIEW_INSTRUCTION,
-    TODO_TASK_CANCEL_INSTRUCTION,
-    TODO_TASK_NO_CANCEL_INSTRUCTION,
-    LATEST_EVENT_TRUNCATION_HINT_TEMPLATE,
-    REVIEW_TASK_TURN_PROMPT_TEMPLATE,
 )
 from util import configUtil
-
-
-class _PromptYamlDumper(yaml.Dumper):
-    """YAML Dumper：多行字符串使用 literal block 样式（|），列表项保持缩进。"""
-
-    def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
-        return super().increase_indent(flow=flow, indentless=False)
-
-    def _str_representer(dumper: yaml.Dumper, data: str) -> yaml.ScalarNode:
-        if "\n" in data:
-            return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
-        return dumper.represent_scalar("tag:yaml.org,2002:str", data)
-
-
-_PromptYamlDumper.add_representer(str, _PromptYamlDumper._str_representer)
-
-
-def _build_yaml_room_block(room_name: str, messages: list[tuple[str, str, datetime | None]]) -> str:
-    """将房间名和消息列表序列化为 YAML 块。"""
-    msg_data = [
-        {"sender": sender, "sendTime": _format_time(send_time), "content": content}
-        for sender, content, send_time in messages
-    ]
-    return yaml.dump(
-        {"roomName": room_name, "messages": msg_data},
-        Dumper=_PromptYamlDumper,
-        allow_unicode=True,
-        sort_keys=False,
-        default_flow_style=False,
-    ).strip()
 
 
 def build_turn_begin_prompt(room_name: str, messages: list[tuple[str, str, datetime | None]]) -> str:
@@ -65,11 +23,15 @@ def build_turn_begin_prompt(room_name: str, messages: list[tuple[str, str, datet
         room_name: 房间名称
         messages: 消息列表，每项为 (sender, content, send_time) 元组
     """
-    yaml_block = _build_yaml_room_block(room_name, messages)
-    return (
-        f"当前轮到你行动，新消息如下:\n\n"
-        f"```yaml\n{yaml_block}\n```\n\n"
-        f"{TURN_CONTEXT_SUFFIX}"
+    msg_data = [
+        {"sender": sender, "sendTime": _format_time(send_time), "content": content}
+        for sender, content, send_time in messages
+    ]
+    return render_prompt(
+        "turn_begin.j2",
+        room_name=room_name,
+        messages=msg_data,
+        turn_context_suffix=TURN_CONTEXT_SUFFIX,
     )
 
 
@@ -99,24 +61,20 @@ def build_turn_update_prompt(
         messages: 消息列表
         exclude_agent_id: 需要过滤掉的 agent_id（通常为当前 Agent 自己）
     """
-    filtered: list[tuple[str, str, datetime | None]] = [
-        (msg.sender_display_name, msg.content, msg.send_time)
+    filtered = [
+        {"sender": msg.sender_display_name, "sendTime": _format_time(msg.send_time), "content": msg.content}
         for msg in messages
         if msg.sender_id != exclude_agent_id
     ]
-    yaml_block = _build_yaml_room_block(room_name, filtered)
-    return (
-        f"房间出现了新的补充信息，请在当前工作过程中参考：\n\n"
-        f"```yaml\n{yaml_block}\n```"
-    )
+    return render_prompt("turn_update.j2", room_name=room_name, messages=filtered)
 
 
 def build_compact_instruction(max_tokens: int) -> str:
-    return COMPACT_PROMPT_TEMPLATE.format(max_tokens=max_tokens)
+    return render_prompt("compact.j2", max_tokens=max_tokens)
 
 
 def build_compact_resume_prompt(summary: str) -> str:
-    return COMPACT_RESUME_TEMPLATE.format(summary=summary.strip())
+    return render_prompt("compact_resume.j2", summary=summary.strip())
 
 
 def format_task_event_content(content: str, max_chars: int = EVENT_CONTENT_MAX_CHARS) -> str:
@@ -169,22 +127,13 @@ def build_task_event_line(
     else:
         action = f"{from_text}→{to_text}"
 
-    time_text = _format_time(created_at)
-    prefix = f"- {time_text} " if time_text else "- "
-    line = f"{prefix}{action}（{actor_name}）"
-    body = format_task_event_content(content)
-    return f"{line}：{body}" if body else line
-
-
-def _build_latest_event_block(latest_event: str | None) -> str:
-    """把渲染好的最新事件包成通知里的「最近事件」段落；无事件时返回空串（整段不出现）。
-
-    段落内附一句截断口径提示（截断长度直接取共享常量，避免两处口径漂移）。
-    """
-    if latest_event is None or not latest_event.strip():
-        return ""
-    hint = LATEST_EVENT_TRUNCATION_HINT_TEMPLATE.format(max_chars=EVENT_CONTENT_MAX_CHARS)
-    return f"\n最近事件：\n{latest_event.strip()}\n{hint}\n"
+    return render_prompt(
+        "task_event_line.j2",
+        time_text=_format_time(created_at),
+        action=action,
+        actor_name=actor_name,
+        body=format_task_event_content(content),
+    )
 
 
 def build_todo_task_turn_prompt(
@@ -194,7 +143,7 @@ def build_todo_task_turn_prompt(
     status_value: str,
     has_reviewer: bool = False,
     can_cancel: bool = False,
-    latest_event: str | None = None,
+    latest_event: str | list[str] | None = None,
 ) -> str:
     """构建协作任务（TODO_TASK）turn 的用户提示文本。
 
@@ -207,86 +156,60 @@ def build_todo_task_turn_prompt(
         can_cancel: 收件人是否有权取消该任务。取消权限属于创建人与验收人
             （`taskService.update_task`），而执行通知的收件人通常两者都不是，
             故默认 False——不给必然被 `permission_denied` 拒绝的指令。
-        latest_event: 由 build_task_event_line 渲染好的「最新一条事件」单行文本（不含标题）；
-            为 None / 空串时通知里整段不出现「最近事件」。
+        latest_event: 最近事件文本（单条或列表）。传 None 或空时通知里整段不出现「最近事件」。
     """
-    latest_event_block = _build_latest_event_block(latest_event)
-    if status_value == "REVIEWING":
-        # 验收人必然有权取消（取消权限含验收人），故不需要分支
-        return REVIEW_TASK_TURN_PROMPT_TEMPLATE.format(
-            task_id=task_id,
-            title=title,
-            description=description,
-            status_value=status_value,
-            latest_event_block=latest_event_block,
-        )
-    complete_instruction = TODO_TASK_REVIEW_INSTRUCTION if has_reviewer else TODO_TASK_DONE_INSTRUCTION
-    cancel_instruction = TODO_TASK_CANCEL_INSTRUCTION if can_cancel else TODO_TASK_NO_CANCEL_INSTRUCTION
-    return TODO_TASK_TURN_PROMPT_TEMPLATE.format(
+    if isinstance(latest_event, str):
+        events = [latest_event.strip()] if latest_event.strip() else []
+    elif isinstance(latest_event, list):
+        events = [e.strip() for e in latest_event if e and e.strip()]
+    else:
+        events = []
+
+    context = dict(
         task_id=task_id,
         title=title,
         description=description,
         status_value=status_value,
-        complete_instruction=complete_instruction,
-        cancel_instruction=cancel_instruction,
-        latest_event_block=latest_event_block,
+        has_reviewer=has_reviewer,
+        can_cancel=can_cancel,
+        events=events,
+        max_chars=EVENT_CONTENT_MAX_CHARS,
     )
+    if status_value == "REVIEWING":
+        return render_prompt("review_task_turn.j2", **context)
+    return render_prompt("todo_task_turn.j2", **context)
 
 
-async def _build_dept_context(team_id: int, agent_name: str) -> str:
-    gt_agent = await gtAgentManager.get_agent(team_id, agent_name)
-    assert gt_agent is not None, f"agent not found: team_id={team_id}, agent_name={agent_name}"
+async def _build_dept_context(team_id: int, agent_name: str, agent_id: int | None = None) -> list[dict] | str:
+    """获取 Agent 所在部门结构。未 mock 时返回结构化字典列表，由模板用 to_yaml 序列化。"""
+    if agent_id is None:
+        gt_agent = await gtAgentManager.get_agent(team_id, agent_name)
+        assert gt_agent is not None, f"agent not found: team_id={team_id}, agent_name={agent_name}"
+        agent_id = gt_agent.id
 
-    gt_depts = await gtDeptManager.get_all_depts(team_id)
-    assert len(gt_depts) > 0, f"team has no departments: team_id={team_id}, agent_name={agent_name}"
+    agent_depts = await deptService.get_agent_depts(team_id, agent_id)
+    if not agent_depts:
+        return []
 
-    my_depts = [d for d in gt_depts if gt_agent.id in d.agent_ids]
-    assert my_depts, f"agent has no department: team_id={team_id}, agent_name={agent_name}"
-
-    dept_id_map = {d.id: d for d in gt_depts}
     gt_agents = await gtAgentManager.get_team_all_agents(team_id)
-    agent_id_to_name: dict[int, str] = {m.id: m.name for m in gt_agents}
+    agent_names = {m.id: m.name for m in gt_agents}
 
-    def _dept_full_path(dept_id: int) -> str:
-        parts = []
-        cur_id: int | None = dept_id
-        while cur_id is not None:
-            d = dept_id_map.get(cur_id)
-            if d is None:
-                break
-            parts.append(d.name)
-            cur_id = d.parent_id
-        return " / ".join(reversed(parts))
-
-    dept_entries = []
-    for dept in my_depts:
-        is_manager = dept.manager_id == gt_agent.id
+    entries = []
+    for dept, path in agent_depts:
+        is_manager = dept.manager_id == agent_id
         entry: dict = {
-            "部门": _dept_full_path(dept.id),
+            "部门": path,
             "你在部门中的角色": "主管" if is_manager else "成员",
         }
         if dept.responsibility:
             entry["部门职责"] = dept.responsibility
-        if not is_manager:
-            manager_name = agent_id_to_name.get(dept.manager_id, "")
-            if manager_name:
-                entry["本部门主管"] = f"{manager_name}（ID：{dept.manager_id}）"
-        other_agents = [
-            agent_id_to_name[mid]
-            for mid in dept.agent_ids
-            if mid in agent_id_to_name and agent_id_to_name[mid] != agent_name
-        ]
-        if other_agents:
-            entry["部门中其他成员"] = other_agents
-        dept_entries.append(entry)
-
-    body = yaml.dump(
-        {"你在组织中的位置": dept_entries},
-        allow_unicode=True,
-        default_flow_style=False,
-        sort_keys=False,
-    )
-    return f"---\n{body}---"
+        if not is_manager and dept.manager_id in agent_names:
+            entry["本部门主管"] = f"{agent_names[dept.manager_id]}（ID：{dept.manager_id}）"
+        others = [agent_names[mid] for mid in dept.agent_ids if mid in agent_names and mid != agent_id]
+        if others:
+            entry["部门中其他成员"] = others
+        entries.append(entry)
+    return entries
 
 
 async def build_agent_system_prompt(
@@ -298,65 +221,65 @@ async def build_agent_system_prompt(
     template_display_name: str,
     template_soul: str,
     workdir: str,
-    base_prompt_tmpl: str,
-    identity_prompt_tmpl: str,
     shared_workdir: str | None = None,
     is_root_leader: bool = False,
     allow_skills: list[str] | None = None,
+    base_prompt_tmpl: str | None = None,
+    identity_prompt_tmpl: str | None = None,
+    system_prompt_tmpl: str | None = None,
 ) -> str:
-    dept_context = ""
-    if team_id > 0:
-        dept_context = await _build_dept_context(team_id, agent_name)
+    """构建 Agent 系统级提示词（System Prompt）。
 
-    identity_prompt = identity_prompt_tmpl.format(
-        agent_id=agent_id,
-        agent_name=agent_display_name,
-        template_name=template_display_name,
-        dept_context=dept_context,
-        template_soul=template_soul,
-    )
-    shared_workdir_line = f"\n团队共享目录：{shared_workdir}" if shared_workdir else ""
-    shared_workdir_guide = (
-        "需要与其他成员共享的文件请写入团队共享目录。" if shared_workdir else ""
-    )
-    workdir_prompt = WORKDIR_PROMPT.format(
-        workdir=workdir,
-        shared_workdir_line=shared_workdir_line,
-        shared_workdir_guide=shared_workdir_guide,
-    )
-    language_context_prompt = LANGUAGE_CONTEXT_PROMPT.format(language=configUtil.get_language())
-    full_prompt = (
-        base_prompt_tmpl
-        + "\n\n"
-        + language_context_prompt
-        + "\n\n"
-        + identity_prompt
-        + "\n\n"
-        + workdir_prompt
-    )
+    纯数据装配层：拉取部门组织数据与已授权技能，统一委托给 system_prompt.j2 模板渲染。
+    """
+    dept_entries: list[dict] = []
+    dept_context: str = ""
     if team_id > 0:
-        full_prompt += "\n\n" + TEAM_AWARENESS_TOOLS_GUIDE
-        full_prompt += "\n\n" + TASK_COLLABORATION_GUIDE
-        if is_root_leader:
-            full_prompt += "\n\n" + ROOT_LEADER_GUIDE
+        try:
+            res = await _build_dept_context(team_id, agent_name, agent_id=agent_id)
+        except TypeError:
+            res = await _build_dept_context(team_id, agent_name)
 
-    # 注入已授权 Skill 概要
-    # allow_skills 为 None 表示自动（所有技能），为空列表表示不授权
+        if isinstance(res, list):
+            dept_entries = res
+        elif isinstance(res, str):
+            dept_context = res
+
+    skills_to_show = []
     if allow_skills is None:
         skills_to_show = skillService.get_all_skills()
     elif allow_skills:
         skills_to_show = [skillService.get_skill(name) for name in allow_skills]
         skills_to_show = [s for s in skills_to_show if s is not None]
-    else:
-        skills_to_show = []
 
-    if skills_to_show:
-        skill_lines = [f"- {s.name}: {s.description}" for s in skills_to_show]
-        skill_prompt = (
-            "\n\n## 可用技能\n\n"
-            "你拥有以下技能，可以调用 load_skill 工具加载详细指引：\n\n"
-            + "\n".join(skill_lines)
-        )
-        full_prompt += skill_prompt
+    # 兼容测试传入的自定义模板（未传入时完全由模板原生渲染）
+    custom_identity = ""
+    if identity_prompt_tmpl:
+        custom_identity = identity_prompt_tmpl.format(
+            agent_id=agent_id,
+            agent_name=agent_display_name,
+            template_name=template_display_name,
+            dept_context=dept_context,
+            template_soul=template_soul,
+        ).strip()
 
-    return full_prompt
+    custom_base_prompt = ""
+    if base_prompt_tmpl and base_prompt_tmpl.strip() != BASE_PROMPT.strip():
+        custom_base_prompt = base_prompt_tmpl.strip()
+
+    return render_prompt(
+        "system_prompt.j2",
+        base_prompt=custom_base_prompt,
+        identity_prompt=custom_identity,
+        language=configUtil.get_language(),
+        agent_id=agent_id,
+        agent_name=agent_display_name,
+        template_name=template_display_name,
+        dept_entries=dept_entries,
+        dept_context=dept_context,
+        template_soul=template_soul,
+        workdir=workdir,
+        shared_workdir=shared_workdir,
+        is_root_leader=is_root_leader,
+        skills=skills_to_show,
+    )

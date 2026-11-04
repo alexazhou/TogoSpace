@@ -1,0 +1,11 @@
+当前轮到你行动，新消息如下:
+
+```yaml
+{% if yaml_block %}
+{{ yaml_block }}
+{% else %}
+{{ {"roomName": room_name, "messages": messages | default([])} | to_yaml }}
+{% endif %}
+```
+
+{{ turn_context_suffix | default("你现在可以开始发言（send_chat_msg）或调用工具。在全部完成后，请务必调用 finish_action 结束行动。") }}

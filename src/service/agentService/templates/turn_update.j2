@@ -1,0 +1,9 @@
+房间出现了新的补充信息，请在当前工作过程中参考：
+
+```yaml
+{% if yaml_block %}
+{{ yaml_block }}
+{% else %}
+{{ {"roomName": room_name, "messages": messages | default([])} | to_yaml }}
+{% endif %}
+```

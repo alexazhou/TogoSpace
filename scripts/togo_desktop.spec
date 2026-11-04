@@ -36,6 +36,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (os.path.join(REPO_ROOT, "assets"), "assets"),
+        (os.path.join(REPO_ROOT, "src", "service", "agentService", "templates"), "service/agentService/templates"),
         (LITELLM_PATH, "litellm"),
     ],
     hiddenimports=[

@@ -1,0 +1,19 @@
+【任务通知】
+你当前被唤醒以处理以下验收任务：
+- 任务 ID: {{ task_id }}
+- 标题: {{ title }}
+- 描述: {{ description }}
+- 状态: {{ status_value }}
+{% if events %}
+
+最近事件：
+{% for event in events %}
+{{ event }}
+{% endfor %}
+（事件内容超过 {{ max_chars | default(500) }} 字会被截断，需要完整原文可调 `get_task_event`）
+{% endif %}
+请直接开始验收。
+- 若验收通过，请调用 `update_task` 将状态改为 DONE，并在 `note` 中写明结果。
+- 若验收不通过，请调用 `update_task` 将状态改回 IN_PROGRESS，并在 `note` 中写明打回原因。
+- 其他少见情况：必要时也可改为 CANCELLED。
+- 无论成败，完成后必须调用 `finish_action`。

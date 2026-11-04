@@ -11,7 +11,6 @@ from model.coreModel.agentModel import (
 )
 from model.coreModel.containerModel import ContainerRuntimeInfo, ContainerTarget
 from model.coreModel.serviceStatus import ServiceStatusInfo
-from service.agentService.prompts import BASE_PROMPT, AGENT_IDENTITY_PROMPT
 from util import configUtil, i18nUtil, assertUtil, workspaceUtil
 from model.dbModel.gtAgent import GtAgent
 from service.agentService.agent import Agent
@@ -202,8 +201,6 @@ async def _init_and_start_agent(
         template_soul=gt_role_template.soul,
         workdir=agent_workdir,
         shared_workdir=shared_workdir,
-        base_prompt_tmpl=BASE_PROMPT.strip(),
-        identity_prompt_tmpl=AGENT_IDENTITY_PROMPT.strip(),
         is_root_leader=is_root_leader,
         allow_skills=gt_agent.allow_skills,
     )

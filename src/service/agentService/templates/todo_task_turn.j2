@@ -1,0 +1,27 @@
+【任务通知】
+你当前被唤醒以处理以下任务：
+- 任务 ID: {{ task_id }}
+- 标题: {{ title }}
+- 描述: {{ description }}
+- 状态: {{ status_value }}
+{% if events %}
+
+最近事件：
+{% for event in events %}
+{{ event }}
+{% endfor %}
+（事件内容超过 {{ max_chars | default(500) }} 字会被截断，需要完整原文可调 `get_task_event`）
+{% endif %}
+请直接开始工作。
+{% if has_reviewer %}
+- 本任务设有验收人：若完成，请先调用 `update_task` 将状态改为 REVIEWING 提交验收，并在 `note` 中写明结果；验收人审核通过后由验收人改为 DONE。
+{% else %}
+- 若完成，请调用 `update_task` 将状态改为 DONE，并在 `note` 中写明结果。
+{% endif %}
+- 若需暂缓（本轮无法完成），请调用 `update_task` 将状态改为 ON_HOLD。
+{% if can_cancel %}
+- 若需取消，请调用 `update_task` 将状态改为 CANCELLED。
+{% else %}
+- 你无权自行取消任务：若确实无法继续，请先调用 `update_task` 将状态改为 ON_HOLD 暂缓，并在房间说明原因，请创建人或验收人取消。
+{% endif %}
+- 无论成败，完成后必须调用 `finish_action`。

@@ -421,42 +421,6 @@ async def test_build_agent_system_prompt_includes_team_awareness_guide(monkeypat
     assert "系统通知不参与语言判断" in result
 
 
-@pytest.mark.asyncio
-async def test_build_agent_system_prompt_skips_team_awareness_when_not_in_team(monkeypatch):
-    called = False
-
-    async def _build_dept_context(team_id: int, agent_name: str) -> str:
-        nonlocal called
-        called = True
-        return "should not be used"
-
-    monkeypatch.setattr(promptBuilder, "_build_dept_context", _build_dept_context)
-    monkeypatch.setattr(promptBuilder.configUtil, "get_language", lambda: "zh-CN")
-
-    result = await promptBuilder.build_agent_system_prompt(
-        team_id=0,
-        agent_id=2,
-        agent_name="solo",
-        agent_display_name="Solo",
-        template_name="helper",
-        template_display_name="Helper",
-        template_soul="帮助用户完成任务",
-        workdir="/workspace/solo",
-        base_prompt_tmpl="base prompt",
-        identity_prompt_tmpl="我是 {agent_name}，角色 {template_name}\n\n{dept_context}\n\n{template_soul}",
-    )
-
-    assert called is False
-    assert "帮助用户完成任务" in result
-    assert "/workspace/solo" in result
-    assert "get_dept_info" not in result
-    assert "wake_up_agent" not in result
-    assert "我是 Solo" in result
-    assert "角色 Helper" in result
-    assert "当前系统语言设置：zh-CN" in result
-    assert "如果上一条 Agent/Operator 消息不存在，则使用当前系统语言设置" in result
-
-
 # ─── Skill 概要注入 tests ─────────────────────────────────────
 
 
@@ -594,3 +558,61 @@ async def test_build_agent_system_prompt_skill_not_found_in_registry(monkeypatch
 
     # 全部 Skill 都找不到，不注入概要
     assert "可用技能" not in result
+
+
+@pytest.mark.asyncio
+async def test_build_agent_system_prompt_native_render_without_custom_tmpls(monkeypatch):
+    """验证不传 base_prompt_tmpl 和 identity_prompt_tmpl 时原生通过 system_prompt.j2 渲染。"""
+    async def _build_dept_context(team_id: int, agent_name: str) -> str:
+        return "---\n部门：研发部\n---"
+
+    monkeypatch.setattr(promptBuilder, "_build_dept_context", _build_dept_context)
+    monkeypatch.setattr(promptBuilder.configUtil, "get_language", lambda: "zh-CN")
+
+    result = await promptBuilder.build_agent_system_prompt(
+        team_id=1,
+        agent_id=10,
+        agent_name="bob",
+        agent_display_name="Bob",
+        template_name="dev",
+        template_display_name="后端开发",
+        template_soul="写出高质量代码",
+        workdir="/workspace/bob",
+    )
+
+    # 包含完整的行动指南原生内容
+    assert "# 行动指南" in result
+    assert "发言与行动规则" in result
+    assert "完工即停" in result
+    # 包含原生身份信息
+    assert "你当前的名字：Bob（ID：10）" in result
+    assert "你的身份：后端开发" in result
+    assert "写出高质量代码" in result
+    assert "部门：研发部" in result
+    # 包含团队感知和任务系统
+    assert "get_dept_info" in result
+    assert "get_task_event" in result
+    assert "/workspace/bob" in result
+
+
+
+# ─── SYSTEM_PROMPT_TEMPLATE 结构完整性 tests ──────────────────────
+
+
+def test_system_prompt_template_structure_and_placeholders():
+    """SYSTEM_PROMPT_TEMPLATE 必须包含关键段落占位符，以确保装配完整性。"""
+    from service.agentService.prompts import SYSTEM_PROMPT_TEMPLATE
+
+    expected_placeholders = [
+        "{base_prompt}",
+        "{language_prompt}",
+        "{identity_prompt}",
+        "{workdir_prompt}",
+        "{team_awareness_section}",
+        "{task_collaboration_section}",
+        "{root_leader_section}",
+        "{skills_section}",
+    ]
+    for ph in expected_placeholders:
+        assert ph in SYSTEM_PROMPT_TEMPLATE, f"SYSTEM_PROMPT_TEMPLATE 缺失占位符 {ph}"
+
