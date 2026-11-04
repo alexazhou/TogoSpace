@@ -625,6 +625,12 @@
   "send_chat_msg": {
     "description": "向房间发送消息，消息对房间内所有成员可见。",
     "parameters": {
+      "insert_immediately": {
+        "description": "是否作为加急消息立即插入对方当前工作上下文，默认 false。仅在与另一名 Agent 的单聊房间（PRIVATE）、且遇到紧急叫停、重大纠偏等必须让对方在当前行动中立刻看到的场景下设为 true；群聊、与 Operator 私聊或日常沟通请保持 false。",
+        "schema": {
+          "type": "boolean"
+        }
+      },
       "msg": {
         "description": "要发送的消息正文",
         "schema": {

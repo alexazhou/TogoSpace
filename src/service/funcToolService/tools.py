@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from constants import (
     AgentStatus, ScheduleJobType, CONTAINER_SELF_MOUNT_PATH, CONTAINER_SHARED_MOUNT_PATH,
-    DriverType, EmployStatus, ExecEnv, RoleTemplateType, RoomState, SpecialAgent, TaskStatus,
+    DriverType, EmployStatus, ExecEnv, RoleTemplateType, RoomState, RoomType, SpecialAgent, TaskStatus,
 )
 from exception import TogoException
 from dal.db import gtAgentManager, gtRoomManager, gtRoleTemplateManager, gtTeamManager, gtAgentTaskManager
@@ -997,12 +997,52 @@ async def delete_role_template(role_name: str, _context: ToolCallContext = None)
     }
 
 
-async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = None) -> dict:
+async def _resolve_effective_immediate(
+    target_room,
+    sender_agent_id: int,
+    insert_immediately: bool,
+) -> tuple[bool, str]:
+    """计算实际生效的 insert_immediately 与降级说明。
+
+    只有「私聊 + 对方是 AI + 对方驱动支持 host_managed_turn_loop」才真正加急；
+    其余情况一律降级为普通消息，并返回一句说明拼进工具返回文案（不抛错）。
+
+    返回 (effective_immediate, downgrade_note)；downgrade_note 为空串表示未降级。
+    """
+    if not insert_immediately:
+        return False, ""
+
+    if target_room.room_type != RoomType.PRIVATE:
+        return False, "（注：群聊不支持加急注入，已按普通消息送达）"
+
+    # 单聊里除发送者外的另一成员。另一方是 Operator(-1) 时没有 AI 接收方，
+    # 对操作者发消息本来就不存在「插入对方工作上下文」这回事，降级且不额外提示。
+    other_ids = [aid for aid in target_room.get_agent_ids() if aid != sender_agent_id]
+    other_id = other_ids[0] if other_ids else None
+    if other_id is None or other_id <= 0:
+        return False, ""
+
+    from service import agentService
+
+    target_agent = agentService.get_agent_or_none(other_id)
+    if target_agent is None or not target_agent.host_managed_turn_loop:
+        return False, "（注：对方当前驱动不支持运行中加急注入，已按普通消息送达）"
+
+    return True, ""
+
+
+async def send_chat_msg(
+    room_name: str,
+    msg: str,
+    insert_immediately: bool = False,
+    _context: ToolCallContext = None,
+) -> dict:
     """向房间发送消息，消息对房间内所有成员可见。
 
     Args:
         room_name: 目标房间名，必须是本团队已存在的房间名
         msg: 要发送的消息正文
+        insert_immediately: 是否作为加急消息立即插入对方当前工作上下文，默认 false。仅在与另一名 Agent 的单聊房间（PRIVATE）、且遇到紧急叫停、重大纠偏等必须让对方在当前行动中立刻看到的场景下设为 true；群聊、与 Operator 私聊或日常沟通请保持 false。
     """
     if _context is None:
         logger.warning("发送消息失败，聊天室上下文未设置")
@@ -1035,12 +1075,20 @@ async def send_chat_msg(room_name: str, msg: str, _context: ToolCallContext = No
         )
         return {"success": False, "message": f"你不在房间 {target_room.name} 中，发送失败。"}
 
-    await target_room.add_message(_context.agent_id, msg)
+    effective_immediate, downgrade_note = await _resolve_effective_immediate(
+        target_room, _context.agent_id, insert_immediately
+    )
+
+    await target_room.add_message(
+        _context.agent_id,
+        msg,
+        insert_immediately=effective_immediate,
+    )
 
     if _context.chat_room is not None and target_room.room_id == _context.chat_room.room_id:
-        return {"success": True, "message": "消息已送达房间。如果你还有其他工具需要调用，请继续；如果本轮操作已全部完成，请调用 finish_action 结束行动。"}
+        return {"success": True, "message": f"消息已送达房间{downgrade_note}。如果你还有其他工具需要调用，请继续；如果本轮操作已全部完成，请调用 finish_action 结束行动。"}
 
-    return {"success": True, "message": f"消息已送达 {target_room.name}。如果你还有其他工具需要调用，请继续；如果本轮操作已全部完成，请调用 finish_action 结束行动。"}
+    return {"success": True, "message": f"消息已送达 {target_room.name}{downgrade_note}。如果你还有其他工具需要调用，请继续；如果本轮操作已全部完成，请调用 finish_action 结束行动。"}
 
 
 async def finish_action(_context: ToolCallContext = None, confirm_no_need_talk: bool = False) -> dict:

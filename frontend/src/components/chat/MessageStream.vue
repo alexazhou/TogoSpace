@@ -14,10 +14,14 @@ const props = defineProps<{
   hasMoreHistory?: boolean;
   loadingOlderMessages?: boolean;
   escalatingMessageIds?: number[];
-  /** 是否私聊房间。「排队中 / 即将注入」只对私聊的 Operator 消息成立。 */
+  /** 是否私聊房间。「排队中 / 即将注入」只对私聊中「发往 AI 接收方」的消息成立。 */
   isPrivate?: boolean;
   /** 目标 AI 的读游标（下一条待读的 seq）。未读判定：message.seq >= agentReadSeq。 */
   agentReadSeq?: number;
+  /** 私聊房间成员 ID 列表（含 Operator -1 与 AI 正数 ID），用于定位接收方 AI。 */
+  roomAgents?: number[];
+  /** 房间内各 Agent 的读游标：{ [agentId]: 下一条待读的 seq }。 */
+  agentReadIndex?: Record<string, number>;
 }>();
 
 const emit = defineEmits<{
@@ -110,33 +114,66 @@ type MessageStatus = 'published' | 'immediate' | 'pending-immediate' | 'queued';
 /** OPERATOR 的虚拟身份 ID（与后端 `SpecialAgent.OPERATOR.value` 一致）。 */
 const OPERATOR_ID = -1;
 
+/** SYSTEM 的虚拟身份 ID（与后端 `SpecialAgent.SYSTEM.value` 一致）。 */
+const SYSTEM_ID = -2;
+
 /**
- * 是否为「Operator 发出、Agent 尚未读到」的消息。
+ * 解析「这条私聊消息的接收方 AI 的读游标」。
  *
- * 三条缺一不可：
- * - `isPrivate`：群聊没有排队/立即注入概念，全部直接进主流。
- * - `sender_id === -1`：Agent 自己的回复、系统消息永远直接显示，不挂待读标记。
- * - `seq >= agentReadSeq`：读游标语义是「下一条待读的 seq」，等于游标的也还没读。
+ * 返回 null 表示「不存在接收方 AI 读游标」，即恒视为已读：
+ * - 非私聊（群聊没有排队/注入概念）；
+ * - SYSTEM 消息；
+ * - 单聊里找不到非发送者的 AI（典型是 Operator+AI 单聊中 AI 发给 Operator 的消息）。
+ *
+ * 优先用 `roomAgents` + `agentReadIndex`（一条规则同时覆盖 Operator↔AI 与 AI↔AI）；
+ * 仅在调用方只传了旧的 `agentReadSeq` 时回退到旧语义（兼容存量调用/测试）。
  */
-function isUnreadOperatorMessage(message: MessageInfo): boolean {
-  if (!props.isPrivate || message.sender_id !== OPERATOR_ID) {
+function resolveReceiverReadSeq(message: MessageInfo): number | null {
+  if (!props.isPrivate || message.sender_id === SYSTEM_ID) {
+    return null;
+  }
+  if (props.roomAgents && props.roomAgents.length > 0) {
+    const receiverId = props.roomAgents.find((id) => id > 0 && id !== message.sender_id);
+    if (receiverId === undefined) {
+      return null;
+    }
+    const seq = props.agentReadIndex?.[String(receiverId)];
+    return typeof seq === 'number' && Number.isFinite(seq) ? seq : 0;
+  }
+  // 兼容仅传入 agentReadSeq 的存量调用/测试
+  if (message.sender_id === OPERATOR_ID) {
+    return props.agentReadSeq ?? 0;
+  }
+  return null;
+}
+
+/**
+ * 是否为「私聊中发出、接收方 AI 尚未读到」的消息。
+ *
+ * 两条缺一不可：
+ * - `resolveReceiverReadSeq` 非 null：存在接收方 AI 读游标；
+ * - `seq >= readSeq`：读游标语义是「下一条待读的 seq」，等于游标的也还没读。
+ */
+function isUnreadPrivateMessage(message: MessageInfo): boolean {
+  const readSeq = resolveReceiverReadSeq(message);
+  if (readSeq === null) {
     return false;
   }
-  return message.seq >= (props.agentReadSeq ?? 0);
+  return message.seq >= readSeq;
 }
 
 function resolveMessageStatus(message: MessageInfo): MessageStatus {
-  if (!props.isPrivate || message.sender_id !== OPERATOR_ID) {
+  if (!props.isPrivate || message.sender_id === SYSTEM_ID) {
     return 'published';
   }
-  if (isUnreadOperatorMessage(message)) {
+  if (isUnreadPrivateMessage(message)) {
     return message.insert_immediately ? 'pending-immediate' : 'queued';
   }
   return message.insert_immediately ? 'immediate' : 'published';
 }
 
-const streamMessages = computed(() => props.messages.filter((message) => !isUnreadOperatorMessage(message)));
-const floatingMessages = computed(() => props.messages.filter((message) => isUnreadOperatorMessage(message)));
+const streamMessages = computed(() => props.messages.filter((message) => !isUnreadPrivateMessage(message)));
+const floatingMessages = computed(() => props.messages.filter((message) => isUnreadPrivateMessage(message)));
 const shouldDockWorkingIndicator = computed(
   () => Boolean(props.workingAgent) && floatingMessages.value.length === 0,
 );

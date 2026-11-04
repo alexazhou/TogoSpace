@@ -179,6 +179,22 @@ async def get_control_room_for_agent(team_id: int, agent_id: int) -> ChatRoom | 
     return _rooms_by_id.get(gt_room.id)
 
 
+def get_private_rooms_for_agent(team_id: int, agent_id: int) -> List[ChatRoom]:
+    """返回指定 Agent 所在的所有已激活 PRIVATE 房间（Operator 控制房优先，其余按 room_id 升序）。
+
+    纯内存过滤（走 `_rooms`），避免在每个安全边界都打一次 SQLite。
+    """
+    rooms = [
+        room for room in _rooms.values()
+        if room.team_id == team_id
+        and room.room_type == RoomType.PRIVATE
+        and room.state != RoomState.INIT
+        and agent_id in room._agent_ids
+    ]
+    rooms.sort(key=lambda r: (0 if ChatRoom.OPERATOR_MEMBER_ID in r._agent_ids else 1, r.room_id))
+    return rooms
+
+
 async def get_or_create_control_room(team_id: int, agent_id: int) -> tuple[ChatRoom, bool]:
     """获取或创建操作者与指定 Agent 的私聊控制房间。
 

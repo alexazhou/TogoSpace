@@ -93,7 +93,7 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     "save_dept": ["name", "responsibility", "manager_name", "member_names", "parent_name", "i18n", "overwrite_existing", "dept_id"],
     "save_role_template": ["name", "type", "soul", "i18n", "overwrite_existing"],
     "save_room": ["name", "member_names", "initial_topic", "max_rounds", "overwrite_existing", "room_id"],
-    "send_chat_msg": ["room_name", "msg"],
+    "send_chat_msg": ["room_name", "msg", "insert_immediately"],
     "start_chat": ["agent_name"],
     "update_task": ["task_id", "new_status", "note"],
     "wake_up_agent": ["agent_name"],

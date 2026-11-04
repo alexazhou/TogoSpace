@@ -350,6 +350,11 @@ class AgentTurnRunner:
           唤醒才正好进入下一轮调度；房间还在 SCHEDULING 说明后继有人接手，不该插队。
         - `has_unread_messages`：只对「还有正经消息没读」唤醒。若只按
           `insert_immediately` 唤醒，Agent 发完言后自己那条消息会把自己再叫醒一次（空转）。
+
+        唤醒触发者传「房间内除自己外的另一成员」而非恒传 OPERATOR：
+        双 AI 单聊 `[A, B]` 里 `handle_finish_request` 会把触发者记为 `_last_speaker_id` 并跳过，
+        传 OPERATOR 会跳过 OPERATOR（不在房间里），于是从 index=0 开始 → 误唤醒发送方 A。
+        传另一成员后，跳过它正好落到自己，`current_turn_agent_id` 为接收方 B。
         """
         if (
             room is not None
@@ -357,7 +362,11 @@ class AgentTurnRunner:
             and room.state == RoomState.IDLE
             and room.has_unread_messages(self.gt_agent.id)
         ):
-            await room.handle_finish_request(room.OPERATOR_MEMBER_ID)
+            other_id = next(
+                (aid for aid in room.get_agent_ids() if aid != self.gt_agent.id),
+                room.OPERATOR_MEMBER_ID,
+            )
+            await room.handle_finish_request(other_id)
 
     async def _inject_immediate_messages(self, room: ChatRoom) -> None:
         """安全边界插话：把该房间当前所有未读消息 **按 seq 顺序一次性**交给 Agent。
@@ -376,13 +385,14 @@ class AgentTurnRunner:
         next_tool_choice: str | None = None
 
         while True:
-            # 检查 operator 私聊控制房间是否有未读的立即注入消息
+            # 检查该 Agent 所在的所有已激活单聊房间是否有未读的立即注入消息
+            # （含 Operator 控制房，它在 get_private_rooms_for_agent 里排首位）。
             # 注意：触发条件只看 immediate（'什么时候读'），但 _inject_immediate_messages
-            # 收取的是全部未读（'读哪些'）。两者刻意分开，见该方法 docstring。
+            # 收取的是该房间的全部未读（'读哪些'）。两者刻意分开，见该方法 docstring。
             if self._history.is_safe_for_immediate_insert():
-                ctrl_room = await roomService.get_control_room_for_agent(self.gt_agent.team_id, self.gt_agent.id)
-                if ctrl_room is not None and ctrl_room.has_unread_immediate_messages(self.gt_agent.id):
-                    await self._inject_immediate_messages(ctrl_room)
+                for priv_room in roomService.get_private_rooms_for_agent(self.gt_agent.team_id, self.gt_agent.id):
+                    if priv_room.has_unread_immediate_messages(self.gt_agent.id):
+                        await self._inject_immediate_messages(priv_room)
 
             result = await self._advance_step(room, tools, tool_choice=next_tool_choice)
             next_tool_choice = None

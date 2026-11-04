@@ -80,7 +80,12 @@ class RoomScheduler:
         if self._state == RoomState.IDLE:
             logger.info("房间 %s 由 agent=%s 从 IDLE 唤醒调度",
                         self._key, gtAgentManager.get_agent_name(caller_agent_id))
-            self._last_speaker_id = None
+            # 唤醒触发者记为「上一位发言方」，与 on_message(sender_id) 的语义保持一致：
+            # 跳过触发者自身后自然落到另一位成员。双 AI 单聊（[A, B]）里若这里恒置 None，
+            # _advance_to_first_dispatchable 会从 index=0 开始，误唤醒发送方 A。
+            self._last_speaker_id = (
+                caller_agent_id if caller_agent_id != self.OPERATOR_MEMBER_ID else None
+            )
             self._round_count = 0
             self._current_round_skipped_set = set()
             self.current_turn_has_content = False
