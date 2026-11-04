@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import ConsoleChatPanel from '../ConsoleChatPanel.vue';
 import i18n from '../../../i18n';
+import { clearRuntimeStore, seedTeamAgents } from '../../../realtime/runtimeStore';
 import type { RoomState } from '../../../types';
 
 const {
@@ -37,6 +38,7 @@ function createRoom(overrides: Partial<RoomState> = {}): RoomState {
 
 describe('ConsoleChatPanel', () => {
   beforeEach(() => {
+    clearRuntimeStore();
     postRoomMessageMock.mockReset();
     escalateMessageToImmediateMock.mockReset();
   });
@@ -113,5 +115,42 @@ describe('ConsoleChatPanel', () => {
     await flushPromises();
 
     expect(postRoomMessageMock).toHaveBeenCalledWith(9, 'hello group');
+  });
+
+  it('shows working indicator when room is scheduling and turn agent is active even if need_scheduling is false', () => {
+    const activeAgent = {
+      id: 101,
+      name: 'Alice',
+      i18n: {},
+      status: 'active' as const,
+      model: 'gpt-4o',
+    };
+    seedTeamAgents(1, [activeAgent]);
+
+    const wrapper = mount(ConsoleChatPanel, {
+      props: {
+        currentRoom: createRoom({
+          state: 'scheduling',
+          need_scheduling: false,
+          current_turn_agent_id: 101,
+          agents: [-1, 101],
+        }),
+        agents: [activeAgent],
+        deptTree: null,
+        roleTemplates: [],
+        messages: [],
+        hasMoreHistory: false,
+        loadingOlderMessages: false,
+        errorMessage: '',
+        reloadingMessages: false,
+        teamEnabled: true,
+      },
+      global: {
+        plugins: [i18n],
+      },
+    });
+
+    expect(wrapper.find('.working-indicator').exists()).toBe(true);
+    expect(wrapper.find('.working-indicator').text()).toContain('Alice');
   });
 });

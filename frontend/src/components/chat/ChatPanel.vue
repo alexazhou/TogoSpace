@@ -74,8 +74,7 @@ const currentSpeaker = computed(() => {
 const turnAgentStatus = useAgentStatus(currentTurnAgentId);
 const workingAgent = computed<RoomMemberProfile | null>(() => {
   if (
-    props.currentRoom?.need_scheduling
-    && isScheduling.value
+    isScheduling.value
     && currentTurnAgent.value
     && turnAgentStatus.value === 'active'
   ) {

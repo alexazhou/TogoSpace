@@ -345,7 +345,7 @@ class WatcherApp(App):
             self.call_later(room_panel.update_unread_count, room.room_key, self._unread[room.room_key])
 
     def _update_working_status(self, message_view: MessageView) -> None:
-        """根据当前房间的 4 个条件判断是否展示工作状态指示器。"""
+        """根据当前房间的条件判断是否展示工作状态指示器。"""
         room = next((r for r in self._rooms if r.room_key == self._current_room_key), None)
         if room is None:
             self.run_worker(message_view.clear_working_status(), exclusive=True, group="working-status")
@@ -358,7 +358,7 @@ class WatcherApp(App):
             agent = next((a for a in self._agents if a.name == agent_name), None)
             agent_active = agent is not None and (agent.status or "").lower() == "active"
 
-        if room.need_scheduling and is_scheduling and agent_name and agent_active:
+        if is_scheduling and agent_name and agent_active:
             self.run_worker(message_view.set_working_status(agent_name), exclusive=True, group="working-status")
         else:
             self.run_worker(message_view.clear_working_status(), exclusive=True, group="working-status")
