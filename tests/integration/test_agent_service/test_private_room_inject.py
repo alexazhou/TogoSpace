@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from constants import AgentHistoryTag, OpenaiApiRole, RoomState, RoomType, TurnStepResult
+from constants import AgentHistoryTag, MessageBusTopic, OpenaiApiRole, RoomState, RoomType, TurnStepResult
 from dal.db import gtAgentManager, gtRoomManager, gtTeamManager
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -67,7 +67,7 @@ class TestPrivateRoomInjectionDuringGroupTurn(ServiceTestCase):
             await gtRoomManager.delete_room(existing.id)
         gt_room = await gtRoomManager.save_room(GtRoom(
             team_id=self.team_id,
-            name="alice_bob",
+            name=room_name,
             type=RoomType.PRIVATE,
             initial_topic="",
             max_rounds=-1,
@@ -157,3 +157,25 @@ class TestPrivateRoomInjectionDuringGroupTurn(ServiceTestCase):
         synced = await turn_runner.collect_room_messages(room, as_update=False)
 
         assert synced == 0, "已全部收取后再收一次应返回 0（调度任务据此跳过收尾）"
+
+    async def test_immediate_message_from_agent_wakes_idle_receiver(self):
+        """空闲唤醒：B 空闲时收到 A 的单聊加急消息 → 房间被唤醒并调度接收方 A。"""
+        room, alice, bob = await self._make_alice_bob_private_room("alice_bob_wake")
+        assert room.state == RoomState.IDLE
+
+        status_events: list[tuple] = []
+
+        def capture_publish(topic, **kwargs):
+            status_events.append((topic, kwargs))
+
+        with patch("service.messageBus.publish", side_effect=capture_publish):
+            await room.add_message(bob.id, "紧急叫停", insert_immediately=True)
+
+        assert room.has_unread_immediate_messages(alice.id) is True
+        scheduling_events = [
+            e for e in status_events
+            if e[0] == MessageBusTopic.ROOM_STATUS_CHANGED and e[1].get("need_scheduling") is True
+        ]
+        assert scheduling_events, "IDLE 房间收到另一 Agent 的 immediate 消息后应发布 need_scheduling=True"
+        assert scheduling_events[-1][1]["current_turn_agent_id"] == alice.id
+        assert scheduling_events[-1][1]["state"] == RoomState.SCHEDULING
