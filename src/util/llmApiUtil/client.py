@@ -288,10 +288,11 @@ async def send_request_stream(
             if not isinstance(chunk, ModelResponseStream):
                 raise TypeError(f"期望流式 chunk 类型 ModelResponseStream，实际为: {type(chunk).__name__}")
             chunks.append(chunk)
-            logger.info(
-                "LLM upstream stream chunk: request_id=%s, chunk_index=%d, payload=%s",
-                request_id, len(chunks), _to_log_json(chunk),
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "LLM upstream stream chunk: request_id=%s, chunk_index=%d, payload=%s",
+                    request_id, len(chunks), _to_log_json(chunk),
+                )
             if on_chunk is not None:
                 result = on_chunk(chunk)
                 if inspect.isawaitable(result):
