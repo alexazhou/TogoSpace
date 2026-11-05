@@ -17,6 +17,33 @@ export type EntityI18n = Record<string, I18nText>;
 /** 执行环境：宿主 or 容器（内存态，后端重启一律回宿主）。 */
 export type AgentExecEnv = 'host' | 'container';
 
+/** 长期记忆星标级别（对外小写字符串，见后端 `constants.MemoryStarLevel`）。 */
+export type AgentMemoryStarLevel = 'none' | 'title' | 'summary';
+
+/** 长期记忆状态（对外小写字符串，见后端 `constants.MemoryStatus`）。 */
+export type AgentMemoryStatus = 'active' | 'archived';
+
+/**
+ * Agent 长期记忆条目（`GET /agents/<id>/memories.json`）。
+ *
+ * 字段名与后端 `GtAgentMemory` 序列化结果一一对应（snake_case，不做驼峰转换）。
+ * `star_level` / `status` 是**小写字符串**：`EnumField` 落库存的是枚举 name
+ * （`SUMMARY` / `ACTIVE`），但接口层显式覆写成 `.value`，别按大写比较。
+ */
+export interface AgentMemory {
+  id: number;
+  team_id: number;
+  agent_id: number;
+  title: string;
+  summary: string;
+  content: string;
+  star_level: AgentMemoryStarLevel;
+  status: AgentMemoryStatus;
+  tags: string[];
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 /**
  * 自建容器信息（前端归一化后的扁平结构）。
  *

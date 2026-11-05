@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import AgentActivityDialogShell from '../AgentActivityDialogShell.vue';
 
-function mountShell(activeTab: 'activities' | 'tasks' | 'properties' | 'container' = 'activities') {
+function mountShell(activeTab: 'activities' | 'tasks' | 'memories' | 'properties' | 'container' = 'activities') {
   return mount(AgentActivityDialogShell, {
     props: {
       open: true,
@@ -11,11 +11,13 @@ function mountShell(activeTab: 'activities' | 'tasks' | 'properties' | 'containe
       panelTabsLabel: 'Agent 面板分页',
       activitiesLabel: '运行活动',
       tasksLabel: '任务',
+      memoriesLabel: '记忆',
       propertiesLabel: '属性',
       containerLabel: '容器',
       activityBadgeLabel: '已连接',
       activityRealtimeState: 'connected',
       taskCountLabel: '0 个任务',
+      memoryCountLabel: '0 条记忆',
       errorMessage: '',
       loadingMessage: '加载中',
       showLoading: false,
@@ -36,7 +38,7 @@ function tabLabels(wrapper: ReturnType<typeof mountShell>): string[] {
 
 describe('AgentActivityDialogShell 容器 Tab', () => {
   it('renders the container tab after properties', () => {
-    expect(tabLabels(mountShell())).toEqual(['运行活动', '任务', '属性', '容器']);
+    expect(tabLabels(mountShell())).toEqual(['运行活动', '任务', '记忆', '属性', '容器']);
   });
 
   it('emits update:activeTab with container when clicked', async () => {

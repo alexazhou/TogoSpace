@@ -2,15 +2,17 @@
 defineProps<{
   open: boolean;
   closeLabel: string;
-  activeTab: 'activities' | 'tasks' | 'properties' | 'container';
+  activeTab: 'activities' | 'tasks' | 'memories' | 'properties' | 'container';
   panelTabsLabel: string;
   activitiesLabel: string;
   tasksLabel: string;
+  memoriesLabel: string;
   propertiesLabel: string;
   containerLabel: string;
   activityBadgeLabel: string;
   activityRealtimeState: string;
   taskCountLabel: string;
+  memoryCountLabel: string;
   errorMessage: string;
   loadingMessage: string;
   showLoading: boolean;
@@ -20,7 +22,7 @@ defineProps<{
 
 const emit = defineEmits<{
   close: [];
-  'update:activeTab': [tab: 'activities' | 'tasks' | 'properties' | 'container'];
+  'update:activeTab': [tab: 'activities' | 'tasks' | 'memories' | 'properties' | 'container'];
 }>();
 </script>
 
@@ -55,6 +57,15 @@ const emit = defineEmits<{
               <button
                 type="button"
                 class="agent-activity-panel__tab"
+                :class="{ 'is-active': activeTab === 'memories' }"
+                :aria-selected="activeTab === 'memories'"
+                @click="emit('update:activeTab', 'memories')"
+              >
+                {{ memoriesLabel }}
+              </button>
+              <button
+                type="button"
+                class="agent-activity-panel__tab"
                 :class="{ 'is-active': activeTab === 'properties' }"
                 :aria-selected="activeTab === 'properties'"
                 @click="emit('update:activeTab', 'properties')"
@@ -80,6 +91,12 @@ const emit = defineEmits<{
             >
               <span class="agent-activity-panel__badge-dot"></span>
               {{ activityBadgeLabel }}
+            </span>
+            <span
+              v-else-if="showStage && activeTab === 'memories'"
+              class="agent-activity-panel__badge agent-activity-panel__badge--count"
+            >
+              {{ memoryCountLabel }}
             </span>
             <span
               v-else-if="showStage"
