@@ -33,6 +33,11 @@ from .tools import (
     list_task_events,
     list_tasks,
     load_skill,
+    memory_create,
+    memory_list,
+    memory_read,
+    memory_search,
+    memory_update,
     reload_team,
     save_agent,
     save_dept,
@@ -87,6 +92,11 @@ def load_func_tools() -> dict[str, FuncTool]:
         "get_task_event": get_task_event,
         "list_tasks": list_tasks,
         "load_skill": load_skill,
+        "memory_list": memory_list,
+        "memory_read": memory_read,
+        "memory_search": memory_search,
+        "memory_create": memory_create,
+        "memory_update": memory_update,
     }
     _func_tools = {}
     for name, func in _registry.items():
