@@ -273,6 +273,14 @@
       "state": "State",
       "entered": "In Use",
       "pending": "Creating"
+    },
+    "template": {
+      "sectionTitle": "Role Template",
+      "label": "Template",
+      "eyebrow": "Role Template",
+      "detailFallback": "Role Template Details",
+      "noSoul": "This template has no Soul content",
+      "loadFailed": "Failed to load template details."
     }
   },
   "room": {

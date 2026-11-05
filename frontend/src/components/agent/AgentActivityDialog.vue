@@ -349,6 +349,7 @@ watch(
         v-show="activeTab === 'properties'"
         :agent-id="agentId"
         :initial-agent="displayAgent"
+        :role-template-name="agentTemplateLabel"
         @saved="handleAgentSaved"
       />
       <AgentContainerPanel

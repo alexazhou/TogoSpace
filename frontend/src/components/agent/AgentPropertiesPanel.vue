@@ -5,12 +5,14 @@ import { getAvailableSkills, getAvailableTools, getFrontendConfig, updateAgentPr
 import { showGlobalSuccessToast } from '../../appUiState';
 import CustomMultiSelect from '../ui/CustomMultiSelect.vue';
 import CustomSelect from '../ui/CustomSelect.vue';
+import AgentTemplateViewDialog from './AgentTemplateViewDialog.vue';
 import type { AgentDetail, ModelSlotOption } from '../../types';
 import { MODEL_SLOT_LABELS } from '../../types';
 
 const props = defineProps<{
   agentId: number | null;
   initialAgent: AgentDetail | null;
+  roleTemplateName?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -56,6 +58,33 @@ const configModeTools = ref('auto');const configModeSkills = ref('auto');
 const selectedModel = ref('');
 const selectedTools = ref<string[]>([]);
 const selectedSkills = ref<string[]>([]);
+
+const templateDialogOpen = ref(false);
+
+/** 模板 ID 只认详情接口带回的 role_template_id；缺失或非正数视为未配置。 */
+const roleTemplateId = computed<number | null>(() => {
+  const id = props.initialAgent?.role_template_id;
+  return typeof id === 'number' && id > 0 ? id : null;
+});
+
+/** 名称优先用调用方传入的已解析展示名，否则退回「模板 #id」，最后才是「未配置模板」。 */
+const roleTemplateLabel = computed(() => {
+  const fromProps = props.roleTemplateName?.trim();
+  if (fromProps) {
+    return fromProps;
+  }
+  if (roleTemplateId.value !== null) {
+    return t('agent.templateFallback', { id: roleTemplateId.value });
+  }
+  return t('agent.noTemplate');
+});
+
+function openTemplateDialog(): void {
+  if (roleTemplateId.value === null) {
+    return;
+  }
+  templateDialogOpen.value = true;
+}
 
 async function loadConfig() {
   loadingConfig.value = true;
@@ -188,6 +217,24 @@ async function handleSave() {
     <div v-else class="properties-form">
       <div class="form-section">
         <h3 class="section-title">
+          {{ t('agent.template.sectionTitle') }}
+        </h3>
+        <div class="config-mode-row">
+          <span class="row-label">{{ t('agent.template.label') }}</span>
+          <span class="template-name">{{ roleTemplateLabel }}</span>
+          <button
+            v-if="roleTemplateId !== null"
+            type="button"
+            class="ghost-button template-view-button"
+            @click="openTemplateDialog"
+          >
+            {{ t('common.view') }}
+          </button>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3 class="section-title">
           {{ t('member.model') }}
         </h3>
         <div class="config-mode-row">
@@ -285,6 +332,13 @@ async function handleSave() {
         </button>
       </div>
     </div>
+
+    <AgentTemplateViewDialog
+      :open="templateDialogOpen"
+      :template-id="roleTemplateId"
+      :template-name="roleTemplateLabel"
+      @close="templateDialogOpen = false"
+    />
   </div>
 </template>
 
@@ -324,6 +378,20 @@ async function handleSave() {
   color: var(--text-secondary);
   width: 72px;
   flex-shrink: 0;
+}
+
+/* ─── 角色模板 ───────────────────────────────────────────────────── */
+.template-name {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.template-view-button {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 0.74rem;
+  border-radius: 6px;
 }
 
 .info-icon {

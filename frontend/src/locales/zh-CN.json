@@ -273,6 +273,14 @@
       "state": "状态",
       "entered": "当前使用",
       "pending": "创建中"
+    },
+    "template": {
+      "sectionTitle": "角色模板",
+      "label": "模板",
+      "eyebrow": "角色模板",
+      "detailFallback": "角色模板详情",
+      "noSoul": "该模板暂无 Soul 内容",
+      "loadFailed": "模板详情加载失败。"
     }
   },
   "room": {
