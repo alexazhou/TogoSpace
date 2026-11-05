@@ -196,3 +196,52 @@ describe('AgentActivityItem 执行环境徽标', () => {
     expect(envBadge(wrapper).exists()).toBe(false);
   });
 });
+
+/**
+ * bash 行首行「执行命令 + 描述」的中线对齐。
+ *
+ * `执行命令` 是固定 18px 高的 chip，右侧描述早先被 `--expanded` / `--tool-result`
+ * 的 font-size/line-height 带着走，行盒比 chip 高，视觉上比左侧低 1.5~2.5px。
+ * 修法是把描述钉成 18px 行盒并垂直居中（见组件里 `--bash-description` 规则）。
+ * jsdom 不做布局，所以这里只锁两件事：描述必须带上这个类；被压成单行后仍有 title 看全文。
+ */
+describe('AgentActivityItem bash 首行描述', () => {
+  const bashArguments = { command: 'cat src/version.py', description: '查版本号位置' };
+
+  it('执行中（尚未有结果）：描述带 --bash-description 类，和 chip 同行', () => {
+    const wrapper = mountItem(activity({
+      status: 'started',
+      metadata: { tool_name: 'execute_bash', tool_arguments: bashArguments },
+    }));
+
+    const summary = wrapper.find('.agent-activity-item__summary--bash-description');
+    expect(summary.exists()).toBe(true);
+    expect(summary.text()).toBe('查版本号位置');
+    expect(summary.classes()).toContain('agent-activity-item__summary--code');
+    expect(wrapper.find('.agent-activity-item__row').element.contains(summary.element)).toBe(true);
+  });
+
+  it('已完成（展开态）：描述仍是单行类，并保留 title 供查看全文', () => {
+    const wrapper = mountItem(activity({
+      metadata: {
+        tool_name: 'execute_bash',
+        tool_arguments: bashArguments,
+        tool_result: 'version = "0.4.2-beta2"',
+      },
+    }));
+
+    expect(wrapper.classes()).toContain('agent-activity-item--bash-result');
+    const summary = wrapper.find('.agent-activity-item__summary--bash-description');
+    expect(summary.exists()).toBe(true);
+    // 展开态以前把 title 置空；描述压成单行后必须保留，否则截断就看不到全文
+    expect(summary.attributes('title')).toBe('查版本号位置');
+  });
+
+  it('没有 description 时不套 --bash-description（不给其它工具的描述改行盒）', () => {
+    const wrapper = mountItem(activity({
+      metadata: { tool_name: 'execute_bash', tool_arguments: { command: 'ls' }, tool_result: 'a\nb' },
+    }));
+
+    expect(wrapper.find('.agent-activity-item__summary--bash-description').exists()).toBe(false);
+  });
+});
