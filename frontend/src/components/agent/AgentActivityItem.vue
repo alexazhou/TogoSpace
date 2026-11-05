@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getTeamRooms } from '../../realtime/runtimeStore';
 import type { AgentActivity } from '../../types';
@@ -12,7 +12,68 @@ const props = defineProps<{
   activity: AgentActivity;
 }>();
 
-const chatReplyCollapsed = ref(true);
+// 发言内容（send_chat_msg / chat_reply）默认展开，长内容仍可手动收起。
+const chatReplyCollapsed = ref(false);
+// 思考内容默认只露出三行，可展开看全文。
+const reasoningCollapsed = ref(true);
+const reasoningBodyRef = ref<HTMLElement | null>(null);
+const reasoningOverflows = ref(false);
+let reasoningResizeObserver: ResizeObserver | null = null;
+
+/**
+ * 判断思考内容是否确实被三行裁掉了（决定要不要给「展开」按钮）。
+ *
+ * 有布局时按真实溢出判断；无布局环境（jsdom / 首帧）`clientHeight` 为 0，
+ * 退回字数启发式，避免出现「被裁掉却没有展开入口」的情况。
+ */
+function measureReasoningOverflow(): void {
+  const el = reasoningBodyRef.value;
+  if (!el) {
+    reasoningOverflows.value = false;
+    return;
+  }
+  // 展开态不做判定：此时 scrollHeight == clientHeight，会误把按钮撤掉，导致收不回去。
+  if (!reasoningCollapsed.value) {
+    return;
+  }
+  if (el.clientHeight === 0) {
+    const content = props.activity.activity_type === 'reasoning' ? props.activity.detail.trim() : '';
+    reasoningOverflows.value = content.split('\n').length > 3 || content.length > 120;
+    return;
+  }
+  reasoningOverflows.value = el.scrollHeight - el.clientHeight > 1;
+}
+
+function toggleReasoning(): void {
+  reasoningCollapsed.value = !reasoningCollapsed.value;
+}
+
+/** 把观察目标换成当前的思考内容节点（内容块是 v-if 渲染的，节点可能换新）。 */
+function syncReasoningObserver(): void {
+  if (typeof ResizeObserver === 'undefined') {
+    return;
+  }
+  reasoningResizeObserver ??= new ResizeObserver(() => measureReasoningOverflow());
+  reasoningResizeObserver.disconnect();
+  if (reasoningBodyRef.value) {
+    reasoningResizeObserver.observe(reasoningBodyRef.value);
+  }
+}
+
+watch(
+  [() => props.activity, reasoningBodyRef, reasoningCollapsed],
+  async () => {
+    await nextTick();
+    syncReasoningObserver();
+    measureReasoningOverflow();
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  reasoningResizeObserver?.disconnect();
+  reasoningResizeObserver = null;
+});
 
 function readTrimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -548,6 +609,11 @@ function activitySummary(
     return '';
   }
 
+  // 思考内容单独成块展示（默认三行），不再挤进单行摘要里当 `💭 ...` 截断。
+  if (activity.activity_type === 'reasoning') {
+    return '';
+  }
+
   if ((activity.activity_type === 'llm_infer' || activity.activity_type === 'compact') && activity.status === 'failed') {
     return '';
   }
@@ -561,9 +627,6 @@ function activitySummary(
     return '';
   }
   if (detail && detail !== summaryToolName) {
-    if (activity.activity_type === 'reasoning') {
-      return `💭 ${detail}`;
-    }
     return detail;
   }
 
@@ -629,10 +692,14 @@ const activityView = computed(() => {
   ) || activity.activity_type === 'message_received' || activity.activity_type === 'compact';
   const chatReplyContent = activity.activity_type === 'chat_reply' ? activity.detail.trim() : '';
   const chatReplyIsLong = chatReplyContent.split('\n').length > 5 || chatReplyContent.length > 350;
+  // 思考内容默认展示三行（超出可展开），因此不看「是否很长」——三行以外的部分
+  // 一律由 CSS 裁掉，按钮只在确实有被裁内容时出现。
+  const reasoningContent = activity.activity_type === 'reasoning' ? activity.detail.trim() : '';
 
   return {
     chatReplyContent,
     chatReplyIsLong,
+    reasoningContent,
     durationText: formatDuration(activity.duration_ms),
     executeBashDescription: currentExecuteBashDescription,
     displayToolName: currentDisplayToolName,
@@ -789,6 +856,19 @@ const activityView = computed(() => {
         >{{ activityView.taskRoomLabel }}</span>
       </span>
     </div>
+    <template v-if="activityView.reasoningContent">
+      <div
+        ref="reasoningBodyRef"
+        class="agent-activity-item__reasoning"
+        :class="{ 'agent-activity-item__reasoning--collapsed': reasoningCollapsed }"
+      ><span class="agent-activity-item__reasoning-mark" aria-hidden="true">💭</span>{{ activityView.reasoningContent }}</div>
+      <button
+        v-if="reasoningOverflows"
+        type="button"
+        class="agent-activity-item__chat-reply-toggle agent-activity-item__reasoning-toggle"
+        @click="toggleReasoning"
+      >{{ reasoningCollapsed ? t('common.expand') : t('common.collapse') }}</button>
+    </template>
     <template v-if="activityView.sendChatMsgContent && !activityView.sendChatMsgError">
       <div
         class="agent-activity-item__chat-reply"
@@ -1360,6 +1440,31 @@ const activityView = computed(() => {
   color: var(--text);
 }
 
+/* 思考内容：默认只露三行（超出可展开），样式比正文更弱，避免抢注意力。
+   不缩进（省掉首行空白），用开头一个 ☁️ 标记这是思考而不是正文。 */
+.agent-activity-item__reasoning {
+  padding-left: 0;
+  padding-right: 4px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  min-width: 0;
+  color: var(--text-description);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-activity-item__reasoning-mark {
+  margin-right: 3px;
+}
+
+
+.agent-activity-item__reasoning--collapsed {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
 .agent-activity-item__chat-reply--collapsed {
   max-height: 7.5em;
   overflow: hidden;
@@ -1389,6 +1494,12 @@ const activityView = computed(() => {
 
 .agent-activity-item__chat-reply-toggle:hover {
   text-decoration: underline;
+}
+
+/* 思考内容不缩进，展开按钮也跟到左边缘（必须放在 .chat-reply-toggle 之后，
+   否则同优先级下 padding-left: 22px 会覆盖回来）。 */
+.agent-activity-item__reasoning-toggle {
+  padding-left: 0;
 }
 
 </style>
