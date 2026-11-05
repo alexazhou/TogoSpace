@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { getAgentTasks, getAgentsByTeamId } from '../../api';
 import type { AgentInfo, AgentTask } from '../../types';
 import { displayName } from '../../utils';
+import { sortTasksByLatestUpdate } from '../../utils/taskOrder';
 import { subscribeRealtimeEvents } from '../../realtime/wsClient';
 import AgentTaskCard from './AgentTaskCard.vue';
 import AgentTaskDetailModal from './AgentTaskDetailModal.vue';
@@ -43,7 +44,9 @@ const visibleTasks = computed(() => {
     : taskFilter.value === 'done'
       ? tasks.value.filter((task) => DONE_STATUSES.has(task.status))
       : tasks.value.filter((task) => !DONE_STATUSES.has(task.status));
-  return filtered.slice(0, 30);
+  // 后端按 updated_at 倒序取数；这里再排一次是为了实时推送的原地合并
+  // 也能把「刚改过的任务」顶到最上面（列表不重取接口）。
+  return sortTasksByLatestUpdate(filtered).slice(0, 30);
 });
 
 watch(

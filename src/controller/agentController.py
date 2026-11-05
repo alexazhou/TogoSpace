@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 from constants import DriverType, AgentStatus
 from controller.baseController import BaseHandler
-from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager
+from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtAgentTaskManager
 from service.agentService.toolRegistry import validate_tool_allow_specs
 from model.coreModel import AgentRuntimeInfo
 from model.dbModel.gtAgent import GtAgent
@@ -215,6 +215,8 @@ class AgentTasksHandler(BaseHandler):
                 assignee_id=agent.id,
                 open_only=not include_closed,
                 limit=limit,
+                # Agent 任务卡看「最近改过的在最上面」，与团队级列表的优先级优先区分开。
+                order=gtAgentTaskManager.ORDER_UPDATED_DESC,
             )
         )
 

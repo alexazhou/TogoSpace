@@ -303,6 +303,58 @@ def test_id_desc_order_is_latest_first(task_db):
     assert _ordered_ids(task_db, gtAgentTaskManager.ORDER_ID_DESC) == [3, 2, 1]
 
 
+def test_updated_desc_order_puts_recently_modified_first(task_db):
+    """`ORDER_UPDATED_DESC` ⇒ `updated_at desc`，与优先级、id 大小无关。
+
+    造 3 条任务，优先级与 id 顺序刻意相反，只让 `updated_at` 反映「谁最近被改过」，
+    以此证明排序靠的是修改时间而不是 id 或 priority。
+    """
+    import datetime
+
+    base = datetime.datetime(2026, 1, 1, 0, 0, 0)
+    # (id, priority, updated_at 偏移小时)：最新修改的是 id=1（优先级最低、id 最小）
+    rows = [
+        (1, TaskPriority.LOW, 10),
+        (2, TaskPriority.HIGH, 1),
+        (3, TaskPriority.NORMAL, 5),
+    ]
+    for task_id, priority, hours in rows:
+        GtAgentTask.create(
+            id=task_id,
+            team_id=1,
+            title=f"t{task_id}",
+            assignee_id=1,
+            creator_id=1,
+            reviewer_id=None,
+            status=TaskStatus.TODO,
+            priority=priority,
+            updated_at=base + datetime.timedelta(hours=hours),
+        )
+
+    assert _ordered_ids(task_db, gtAgentTaskManager.ORDER_UPDATED_DESC) == [1, 3, 2]
+
+
+def test_updated_desc_order_breaks_ties_by_id_desc(task_db):
+    """时间戳完全相同（SQLite 精度内撞车）时按 id desc 兜底，顺序稳定且偏新。"""
+    import datetime
+
+    same = datetime.datetime(2026, 1, 1, 0, 0, 0)
+    for task_id in (1, 2, 3):
+        GtAgentTask.create(
+            id=task_id,
+            team_id=1,
+            title=f"t{task_id}",
+            assignee_id=1,
+            creator_id=1,
+            reviewer_id=None,
+            status=TaskStatus.TODO,
+            priority=TaskPriority.HIGH,
+            updated_at=same,
+        )
+
+    assert _ordered_ids(task_db, gtAgentTaskManager.ORDER_UPDATED_DESC) == [3, 2, 1]
+
+
 def test_list_tasks_order_param_default_is_priority_first():
     """`list_tasks` 的 `order` 默认值必须是 `ORDER_PRIORITY_FIRST`（Web 列表接口共用）。
 

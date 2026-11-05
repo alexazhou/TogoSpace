@@ -8,10 +8,12 @@ from constants import TaskPriority, TaskStatus
 from model.dbModel.gtAgentTask import GtAgentTask
 
 # `list_tasks` 的排序口径（值即标识符，便于日志与测试直接比对）。
-# 默认值必须是「优先级优先」——这是 Web 列表接口（`agentController.py`）依赖的既有顺序，
-# 倒序只能显式要求，见 `list_tasks` 的 docstring。
+# 默认值必须是「优先级优先」——团队级列表（`TeamTasksHandler`）依赖的既有顺序，
+# 其他顺序只能显式要求，见 `list_tasks` 的 docstring。
 ORDER_PRIORITY_FIRST = "priority_first"
 ORDER_ID_DESC = "id_desc"
+# 「最近修改在前」：Agent 任务卡列表用这个口径（谁刚被改过谁在最上面）。
+ORDER_UPDATED_DESC = "updated_desc"
 
 # `priority` 以字符串（'HIGH'/'NORMAL'/'LOW'）落库，直接对字段排序会退化成字典序
 # （NORMAL > LOW > HIGH，HIGH 反而排最后）。用**显式权重映射**定义优先级顺序，
@@ -116,15 +118,19 @@ def _task_ordering(order: str) -> tuple:
     """把排序标识符翻译成 peewee 排序表达式。
 
     - `ORDER_PRIORITY_FIRST`（默认）：`priority desc, id asc` —— **与新增 `order` 参数前一致**；
-    - `ORDER_ID_DESC`：`id desc`（最新在前）。
+    - `ORDER_ID_DESC`：`id desc`（按创建顺序最新在前）；
+    - `ORDER_UPDATED_DESC`：`updated_at desc, id desc`（**最近修改在前**；
+      同一时间戳（SQLite 精度内撞车）时用 id desc 兜底，保证顺序稳定且偏新）。
     非法值抛 `ValueError`：排序写错不该静默兜底成一个「看起来正常」的顺序。
     """
     if order == ORDER_PRIORITY_FIRST:
         return (_PRIORITY_WEIGHT.desc(), GtAgentTask.id.asc())
     if order == ORDER_ID_DESC:
         return (GtAgentTask.id.desc(),)
+    if order == ORDER_UPDATED_DESC:
+        return (GtAgentTask.updated_at.desc(), GtAgentTask.id.desc())
     raise ValueError(
-        f"不支持的排序方式：{order}，有效值为 {ORDER_PRIORITY_FIRST} / {ORDER_ID_DESC}"
+        f"不支持的排序方式：{order}，有效值为 {ORDER_PRIORITY_FIRST} / {ORDER_ID_DESC} / {ORDER_UPDATED_DESC}"
     )
 
 
@@ -143,9 +149,10 @@ async def list_tasks(
 
     `order` 决定排序，**默认值与新增该参数前完全一致**——`taskService.list_tasks`
     同时被 Web 列表接口（`agentController.py` 的 Agent / Team 任务列表）使用，
-    改默认值会静默翻掉前端顺序，所以倒序只能由调用方显式要求：
+    改默认值会静默翻掉前端顺序，所以其他顺序只能由调用方显式要求：
     - `ORDER_PRIORITY_FIRST`（默认）：`priority desc, id asc`（HIGH → NORMAL → LOW）；
-    - `ORDER_ID_DESC`：`id desc`（最新在前，Agent 侧要看刚发生的事）。
+    - `ORDER_ID_DESC`：`id desc`（按创建顺序最新在前）；
+    - `ORDER_UPDATED_DESC`：`updated_at desc, id desc`（最近修改在前，Agent 任务卡列表用）。
     传其他值一律 `ValueError`，不做静默兜底（写错排序不该看起来正常）。
 
     `agent_ids` 非空时只返回「assignee 或 reviewer 落在集合内」的任务；
