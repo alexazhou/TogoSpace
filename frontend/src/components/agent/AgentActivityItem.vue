@@ -1388,12 +1388,13 @@ const activityView = computed(() => {
 /* bash 描述要和左侧 18px 高的 chip 落在同一条视觉中线上。
    expanded（0.8rem/1.55，flex-start）与 tool-result（1.2）给 summary 的行盒都比 chip 高，
    于是右侧「查版本号位置」比左侧「执行命令」低 1.5~2.5px。这里把描述钉成 18px 行盒、
-   垂直居中并单行省略，与 chip 同字号，执行中/已完成两种状态都贴合 chip 中线。
+   垂直居中并单行省略，执行中/已完成两种状态都贴合 chip 中线。
+   字号故意不写：沿用各状态原有字号（执行中 0.7rem、展开态 0.8rem），只改行盒和居中方式，
+   否则展开态的字会莫名变小。
    注意本规则必须在 --expanded / --tool-result 的 summary 规则之后，靠顺序覆盖它们。 */
 .agent-activity-item--bash-result .agent-activity-item__summary--bash-description {
   align-self: center;
   height: 18px;
-  font-size: 0.7rem;
   line-height: 18px;
   white-space: nowrap;
   overflow: hidden;
