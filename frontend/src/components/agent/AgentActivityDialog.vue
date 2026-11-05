@@ -39,6 +39,7 @@ const superviseContent = ref('');
 const supervising = ref(false);
 const superviseError = ref('');
 const superviseFocused = ref(false);
+const superviseComposing = ref(false);
 const superviseTextareaRef = ref<HTMLTextAreaElement | null>(null);
 const isActivitiesFollowing = ref(true);
 
@@ -220,6 +221,15 @@ function autoGrowSupervise(): void {
   el.style.height = `${el.scrollHeight}px`;
 }
 
+/** Enter 发送、Shift+Enter 换行（与聊天输入框一致）；输入法组词中的 Enter 不算发送。 */
+function handleSuperviseEnter(e: KeyboardEvent): void {
+  if (superviseComposing.value || e.isComposing || e.keyCode === 229) {
+    return;
+  }
+  e.preventDefault();
+  void sendSupervise();
+}
+
 watch(
   () => [props.open, props.agentId, props.agentName],
   () => {
@@ -372,8 +382,9 @@ watch(
               @focus="superviseFocused = true"
               @blur="superviseFocused = false"
               @input="autoGrowSupervise"
-              @keydown.ctrl.enter.prevent="sendSupervise"
-              @keydown.meta.enter.prevent="sendSupervise"
+              @compositionstart="superviseComposing = true"
+              @compositionend="superviseComposing = false"
+              @keydown.enter.exact="handleSuperviseEnter"
             />
           </div>
           <button

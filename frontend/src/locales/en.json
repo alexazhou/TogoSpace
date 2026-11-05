@@ -231,7 +231,7 @@
     "teamMembersLabel": "Team Members",
     "supervise": {
       "title": "Supervise",
-      "placeholder": "Enter instruction… (Ctrl+Enter to send)",
+      "placeholder": "Enter instruction… (Enter to send, Shift + Enter for a new line)",
       "send": "Send",
       "sending": "Sending…"
     },

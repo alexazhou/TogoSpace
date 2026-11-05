@@ -231,7 +231,7 @@
     "teamMembersLabel": "团队成员",
     "supervise": {
       "title": "追加指令",
-      "placeholder": "输入指令内容…（Ctrl+Enter 发送）",
+      "placeholder": "输入指令内容…（Enter 发送，Shift + Enter 换行）",
       "send": "发送",
       "sending": "发送中…"
     },
