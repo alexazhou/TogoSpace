@@ -8,7 +8,8 @@ from dal.db import gtTeamManager, gtAgentManager, gtRoleTemplateManager, gtAgent
 from service.agentService.toolRegistry import validate_tool_allow_specs
 from model.coreModel import AgentRuntimeInfo
 from model.dbModel.gtAgent import GtAgent
-from service import teamService, agentService, taskService, roomService
+from model.coreModel.memoryModel import memory_api_dict
+from service import teamService, agentService, taskService, roomService, memoryService
 from util import assertUtil
 
 
@@ -219,6 +220,30 @@ class AgentTasksHandler(BaseHandler):
                 order=gtAgentTaskManager.ORDER_UPDATED_DESC,
             )
         )
+
+
+class AgentMemoriesHandler(BaseHandler):
+    """GET /agents/<id>/memories.json - 获取指定 Agent 的长期记忆列表（只读）"""
+
+    async def get(self, agent_id_str: str) -> None:
+        agent_id = int(agent_id_str)
+        include_archived_raw = self.get_query_argument("include_archived", "false")
+        include_archived = include_archived_raw.strip().lower() in {"1", "true", "yes", "on"}
+
+        agents = await gtAgentManager.get_agents_by_ids([agent_id])
+        agent = agents[0] if agents else None
+        assertUtil.assertNotNull(
+            agent,
+            error_message=f"Agent ID '{agent_id}' not found",
+            error_code="agent_not_found",
+        )
+
+        memories = await memoryService.get_agent_memories_for_view(
+            agent.team_id, agent.id, include_archived=include_archived,
+        )
+        # 枚举对外必须是小写 value：`GtAgentMemory.to_json()` 会输出枚举 name
+        # （`SUMMARY` / `ACTIVE`），与前端契约不符，统一走 `memory_api_dict` 覆写。
+        self.return_json({"memories": [memory_api_dict(memory) for memory in memories]})
 
 
 class TeamTasksHandler(BaseHandler):

@@ -15,6 +15,7 @@ async def test_clear_team_data_deletes_all_runtime_data(monkeypatch):
     monkeypatch.setattr(teamService.gtAgentHistoryManager, "delete_history_by_team", AsyncMock(return_value=5))
     monkeypatch.setattr(teamService.gtRoomMessageManager, "delete_messages_by_team", AsyncMock(return_value=10))
     monkeypatch.setattr(teamService.gtAgentActivityManager, "delete_activities_by_team", AsyncMock(return_value=8))
+    monkeypatch.setattr(teamService.gtAgentMemoryManager, "delete_memories_by_team", AsyncMock(return_value=4))
     monkeypatch.setattr(teamService.gtRoomManager, "get_rooms_by_team", AsyncMock(return_value=[]))
     monkeypatch.setattr(teamService.gtRoomManager, "delete_rooms_by_ids", AsyncMock(return_value=0))
     reset_mock = AsyncMock()
@@ -22,7 +23,10 @@ async def test_clear_team_data_deletes_all_runtime_data(monkeypatch):
 
     result = await teamService.clear_team_data(1)
 
-    assert result == {"tasks": 5, "histories": 5, "messages": 10, "rooms": 0, "activities": 8}
+    assert result == {
+        "tasks": 5, "histories": 5, "messages": 10, "rooms": 0,
+        "activities": 8, "memories": 4,
+    }
     teamService.gtRoomManager.delete_rooms_by_ids.assert_not_called()
     reset_mock.assert_awaited_once_with(1)
 
@@ -36,6 +40,7 @@ async def test_clear_team_data_deletes_non_dept_rooms(monkeypatch):
     monkeypatch.setattr(teamService.gtAgentHistoryManager, "delete_history_by_team", AsyncMock(return_value=0))
     monkeypatch.setattr(teamService.gtRoomMessageManager, "delete_messages_by_team", AsyncMock(return_value=0))
     monkeypatch.setattr(teamService.gtAgentActivityManager, "delete_activities_by_team", AsyncMock(return_value=8))
+    monkeypatch.setattr(teamService.gtAgentMemoryManager, "delete_memories_by_team", AsyncMock(return_value=0))
 
     rooms = [
         SimpleNamespace(id=1, tags=["DEPT"]),

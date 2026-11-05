@@ -471,7 +471,8 @@ class TestClearAgentData(_agentServiceCase):
         assert [item.content for item in bob_histories_before] == ["bob-keep"]
 
         result = await teamService.clear_agent_data(alice_id)
-        assert result == {"histories": 1}
+        # 长期记忆随 Agent 历史数据一起清空（#134），计数键随之多一个
+        assert result == {"histories": 1, "memories": 0}
 
         alice_histories_after = await persistenceService.load_agent_history_message(alice_id)
         bob_histories_after = await persistenceService.load_agent_history_message(bob_id)
