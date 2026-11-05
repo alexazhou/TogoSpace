@@ -258,7 +258,8 @@
     "execEnv": {
       "host": "Host",
       "container": "Container",
-      "label": "Current Environment",
+      "sectionTitle": "Environment",
+      "label": "Execution Environment",
       "currentContainer": "Current Container"
     },
     "containers": {

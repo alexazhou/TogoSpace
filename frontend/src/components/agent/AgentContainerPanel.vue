@@ -37,9 +37,12 @@ const containerCount = computed(() => {
   <div class="agent-container-panel">
     <div class="form-section">
       <h3 class="section-title">
-        {{ t('agent.execEnv.label') }}
+        {{ t('agent.execEnv.sectionTitle') }}
       </h3>
-      <p class="env-value env-value--primary">{{ execEnvLabel }}</p>
+      <div class="config-mode-row">
+        <span class="row-label">{{ t('agent.execEnv.label') }}</span>
+        <span class="env-value">{{ execEnvLabel }}</span>
+      </div>
       <div v-if="currentContainerId" class="config-mode-row">
         <span class="row-label">{{ t('agent.execEnv.currentContainer') }}</span>
         <span class="env-value mono">{{ currentContainerId }}</span>
@@ -127,12 +130,6 @@ const containerCount = computed(() => {
 .env-value.mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--text-secondary);
-}
-
-/* 段标题已写明「当前环境」，此处只承载取值，不再重复一遍标签。 */
-.env-value--primary {
-  margin: 0 0 12px;
-  font-weight: 500;
 }
 
 .count-hint {

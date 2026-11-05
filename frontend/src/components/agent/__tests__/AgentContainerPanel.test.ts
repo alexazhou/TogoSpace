@@ -44,10 +44,17 @@ function mountPanel(agent: AgentDetail | null) {
 }
 
 describe('AgentContainerPanel', () => {
-  it('labels the environment section as 当前环境 rather than 执行环境', () => {
+  it('uses 环境 as the section title and 执行环境 as the row label', () => {
     const wrapper = mountPanel(createAgent());
-    expect(wrapper.text()).toContain('当前环境');
-    expect(wrapper.text()).not.toContain('执行环境');
+    expect(wrapper.find('.section-title').text()).toBe('环境');
+    expect(wrapper.find('.row-label').text()).toBe('执行环境');
+  });
+
+  it('renders the environment value as 执行环境：<value>', () => {
+    const wrapper = mountPanel(createAgent({ exec_env: 'host', current_container_id: null }));
+    const row = wrapper.findAll('.config-mode-row')[0];
+    expect(row.text()).toBe('执行环境宿主');
+    expect(row.find('.env-value').text()).toBe('宿主');
   });
 
   it('shows the container environment value and current container id', () => {
