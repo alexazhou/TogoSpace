@@ -30,7 +30,9 @@ def _msg(
 
 def test_build_turn_update_prompt_contains_intro_text():
     result = promptBuilder.build_turn_update_prompt("testRoom", [_msg(2, "Alice", "hello")], exclude_agent_id=1)
-    assert "房间出现了新的补充信息" in result
+    # 提示语必须带出房间名：Agent 可能同时在多个单聊房间，只说「补充信息」无法判断回哪个房间
+    assert "收到来自私聊房间【testRoom】的补充消息" in result
+    assert 'room_name="testRoom"' in result
 
 
 def test_build_turn_update_prompt_yaml_format():
@@ -372,7 +374,8 @@ def test_task_collaboration_guide_referenced_tools_all_exist():
 
     registry = set(load_func_tools().keys())
     # 反引号里也会出现**参数**名（不是工具），逐个列白名单而不是放宽容错
-    param_names = {"new_status", "note", "status", "assignee", "reviewer", "title_keyword"}
+    param_names = {"new_status", "note", "status", "assignee", "reviewer", "title_keyword",
+                   "insert_immediately"}
 
     text = render_prompt("system_prompt.j2")
     referenced = {

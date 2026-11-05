@@ -147,25 +147,31 @@ class RoomMessageStore:
         升级**只置标志位**：不清空 seq、不移动位置、不排序。
         顺序在消息发出的那一刻就固定了，升级改变的是「什么时候读」，不是「排在哪」。
 
+        允许升级：单聊中任意发往 AI 接收方、且该接收方尚未读取的消息
+        （既覆盖 Operator 发给 AI 的排队消息，也覆盖 Agent 之间单聊的排队消息）。
+
         拒绝条件：
         - 消息不存在 → ValueError
-        - 非 OPERATOR 消息 → ValueError（只有操作者的排队消息可以升级，
-          Agent 自己的发言与系统消息没有「立即引导」语义）
-        - 已被任一 AI Agent 读取 → RuntimeError（读都读过了，再升级无意义）
+        - SYSTEM 消息 → ValueError（系统消息没有「立即引导」语义）
+        - 房间内没有 AI 接收方（如 AI 发给 Operator 的消息）→ ValueError
+        - 已被任一 AI 接收方读取 → RuntimeError（读都读过了，再升级无意义）
         """
         msg = next((m for m in self._messages if m.id == db_id), None)
         if msg is None:
             raise ValueError(f"message db_id={db_id} not found")
 
-        if msg.sender_id != int(SpecialAgent.OPERATOR.value):
-            raise ValueError(
-                f"only OPERATOR messages can be escalated, db_id={db_id} sender_id={msg.sender_id}"
-            )
+        if msg.sender_id == int(SpecialAgent.SYSTEM.value):
+            raise ValueError(f"SYSTEM messages cannot be escalated, db_id={db_id}")
+
+        ai_receivers = [
+            aid for aid in self._agent_ids
+            if aid > 0 and aid != msg.sender_id
+        ]
+        if not ai_receivers:
+            raise ValueError(f"message has no AI recipient to escalate for, db_id={db_id}")
 
         if msg.seq is not None:
-            for agent_id in self._agent_ids:
-                if agent_id == int(SpecialAgent.OPERATOR.value):
-                    continue
+            for agent_id in ai_receivers:
                 if self._agent_seq_read.get(agent_id, 0) > msg.seq:
                     raise RuntimeError(f"message db_id={db_id} already read by agent_id={agent_id}")
 

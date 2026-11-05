@@ -57,8 +57,9 @@ def test_render_turn_begin_and_update():
     assert "roomName: demo" in out_begin
     assert "finish_action 结束行动" in out_begin
 
-    out_update = render_prompt("turn_update.j2", yaml_block="roomName: demo\nmessages: [content: hi]")
-    assert "房间出现了新的补充信息，请在当前工作过程中参考：" in out_update
+    out_update = render_prompt("turn_update.j2", room_name="room_a", yaml_block="roomName: demo\nmessages: [content: hi]")
+    assert "收到来自私聊房间【room_a】的补充消息，请在当前工作过程中参考" in out_update
+    assert 'room_name="room_a"' in out_update
     assert "content: hi" in out_update
 
 

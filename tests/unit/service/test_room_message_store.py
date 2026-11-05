@@ -20,6 +20,7 @@ from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.roomService.messageStore import RoomMessageStore
 
 OPERATOR_ID = -1  # constants.SpecialAgent.OPERATOR
+SYSTEM_ID = -2  # constants.SpecialAgent.SYSTEM
 AGENT_ID = 1
 
 
@@ -316,11 +317,40 @@ class TestEscalateToImmediate:
         with pytest.raises(ValueError):
             store.escalate_to_immediate(db_id=999)
 
-    async def test_raises_for_non_operator_sender(self, mock_room):
-        """只有操作者的消息有「立即引导」语义。"""
+    async def test_raises_for_system_sender(self, mock_room):
+        """SYSTEM 消息没有「立即引导」语义。"""
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=SYSTEM_ID, db_id=10))
+        with pytest.raises(ValueError):
+            store.escalate_to_immediate(db_id=10)
+
+    async def test_raises_when_no_ai_recipient(self, mock_room):
+        """AI 发给 Operator 的消息（房间内无 AI 接收方）不可升级。"""
+        mock_room.agent_ids = [OPERATOR_ID, AGENT_ID]
         store = RoomMessageStore(gt_room=mock_room)
         await store.append_and_assign_seq(_msg(sender_id=AGENT_ID, db_id=10))
         with pytest.raises(ValueError):
+            store.escalate_to_immediate(db_id=10)
+
+    async def test_agent_to_agent_unread_can_be_escalated(self, mock_room):
+        """双 AI 单聊：A 发给 B 的未读普通消息可升级为加急。"""
+        mock_room.agent_ids = [1, 2]
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=1, content="plain", db_id=10))
+
+        result = store.escalate_to_immediate(db_id=10)
+
+        assert result.insert_immediately is True
+        assert result.seq == 0
+
+    async def test_agent_to_agent_raises_after_receiver_read(self, mock_room):
+        """双 AI 单聊：接收方 B 已读后，A 那条消息不可再升级。"""
+        mock_room.agent_ids = [1, 2]
+        store = RoomMessageStore(gt_room=mock_room)
+        await store.append_and_assign_seq(_msg(sender_id=1, db_id=10))
+        store.get_unread(agent_id=2)
+
+        with pytest.raises(RuntimeError):
             store.escalate_to_immediate(db_id=10)
 
     async def test_raises_if_already_read_by_an_agent(self, mock_room):

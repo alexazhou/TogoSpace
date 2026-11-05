@@ -198,6 +198,70 @@ async def test_wake_next_turn_only_for_idle_private_room_with_unread(turn_runner
     room.handle_finish_request.assert_awaited_once_with(-1)
 
 
+@pytest.mark.asyncio
+async def test_wake_next_turn_passes_other_member_in_double_ai_private_room(turn_runner):
+    """双 AI 单聊：唤醒触发者传「另一成员」而非 OPERATOR，才能精确落到接收方自己。
+
+    旧实现恒传 OPERATOR，双 AI 房间 `[A, B]` 里调度从 index=0 开始 → 误唤醒发送方 A。
+    """
+    from constants import RoomType
+
+    room = MagicMock(spec=ChatRoom)
+    room.room_type = RoomType.PRIVATE
+    room.state = RoomState.IDLE
+    room.OPERATOR_MEMBER_ID = -1
+    room.get_agent_ids = MagicMock(return_value=[1, 2])  # 自己(1) + 另一成员(2)
+    room.has_unread_messages = MagicMock(return_value=True)
+    room.handle_finish_request = AsyncMock(return_value=True)
+
+    await turn_runner._wake_next_turn_if_unread(room)
+
+    room.handle_finish_request.assert_awaited_once_with(2)
+
+
+@pytest.mark.asyncio
+async def test_wake_next_turn_falls_back_to_operator_when_no_other_member(turn_runner):
+    """房间成员只有自己时回退 OPERATOR，行为与旧实现一致（不抛错）。"""
+    from constants import RoomType
+
+    room = MagicMock(spec=ChatRoom)
+    room.room_type = RoomType.PRIVATE
+    room.state = RoomState.IDLE
+    room.OPERATOR_MEMBER_ID = -1
+    room.get_agent_ids = MagicMock(return_value=[1])  # 只有自己
+    room.has_unread_messages = MagicMock(return_value=True)
+    room.handle_finish_request = AsyncMock(return_value=True)
+
+    await turn_runner._wake_next_turn_if_unread(room)
+
+    room.handle_finish_request.assert_awaited_once_with(-1)
+
+
+@pytest.mark.asyncio
+async def test_safe_boundary_scans_all_private_rooms(turn_runner):
+    """安全边界应遍历该 Agent 的全部单聊房间，不只 Operator 控制房。"""
+    from constants import RoomType
+
+    turn_runner._history.is_safe_for_immediate_insert = MagicMock(return_value=True)
+    turn_runner._inject_immediate_messages = AsyncMock()
+
+    ctrl_room = MagicMock(spec=ChatRoom)
+    ctrl_room.has_unread_immediate_messages = MagicMock(return_value=False)
+    private_room = MagicMock(spec=ChatRoom)
+    private_room.has_unread_immediate_messages = MagicMock(return_value=True)
+
+    turn_runner.driver = MagicMock()
+    turn_runner.driver.turn_setup = SimpleNamespace(max_retries=1, hint_prompt="")
+    turn_runner._advance_step = AsyncMock(return_value=TurnStepResult.TURN_DONE)
+
+    with patch.object(roomService, "get_private_rooms_for_agent",
+                      MagicMock(return_value=[ctrl_room, private_room])):
+        await turn_runner._run_turn_loop(MagicMock(spec=ChatRoom))
+
+    turn_runner._inject_immediate_messages.assert_awaited_once_with(private_room)
+
+
+
 @pytest.mark.parametrize("room_type,state,has_unread", [
     ("GROUP", RoomState.IDLE, True),          # 群聊轮次推进由调度器负责
     ("PRIVATE", RoomState.SCHEDULING, True),  # 后继有人，不该插队
