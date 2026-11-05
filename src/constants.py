@@ -280,6 +280,63 @@ EVENT_TRUNCATED_SUFFIX = "…(已截断)"
 
 
 
+class MemoryStarLevel(EnhanceEnum):
+    """长期记忆星标级别。
+
+    对外字段约定：保留固定小写字符串 value，不使用 auto()。
+
+    注意口径差异（勿混用）：
+    - **DB 与 JSON**：`EnumField.db_value()` 存的是枚举 **name**（NONE/TITLE/SUMMARY），
+      `jsonUtil.json_dump` 遇到 Enum 也输出 **name** —— 所以落库值、工具返回值、
+      HTTP 接口返回的 `star_level` 全是**大写**，前端与测试断言必须按大写比较。
+    - **模板**：`system_prompt.j2` 里读 `mem.star_level.value`，拿到的是这里的**小写** value。
+    """
+    NONE    = "none"     # 普通记忆，不进入 System Prompt
+    TITLE   = "title"    # 标题级星标：Agent 始终知道主题与 ID 存在
+    SUMMARY = "summary"  # 概要级星标：ID、标题与核心结论始终浮现在提示词中
+
+
+class MemoryStatus(EnhanceEnum):
+    """长期记忆状态（DB / JSON 口径同为枚举 name：ACTIVE / ARCHIVED）。"""
+    ACTIVE   = "active"    # 活跃：参与列表、检索与星标快照
+    ARCHIVED = "archived"  # 已归档：自动剥离星标，不参与检索；仅按 ID 读取或前端查阅
+
+
+# ---- 长期记忆校验与配额（集中在此，调整无需迁移表结构）----
+
+# 标题上限：单行主题标题（去首尾空白后非空、不含换行）
+MEMORY_TITLE_MAX_CHARS = 80
+# 概要上限：单句结论概要（去首尾空白后非空、不含换行）
+MEMORY_SUMMARY_MAX_CHARS = 120
+# 正文上限：完整可执行正文
+MEMORY_CONTENT_MAX_CHARS = 1000
+# 标签数量上限
+MEMORY_TAGS_MAX_COUNT = 5
+# 单个标签长度上限
+MEMORY_TAG_MAX_CHARS = 24
+# 单 Agent 活跃星标总上限（TITLE + SUMMARY）
+MEMORY_STAR_TOTAL_LIMIT = 12
+# 其中 SUMMARY 级星标上限
+MEMORY_STAR_SUMMARY_LIMIT = 6
+
+# `memory_search` 的 limit 边界（防止 Agent 传入极端值把整库拉出来）
+MEMORY_SEARCH_LIMIT_MIN = 1
+MEMORY_SEARCH_LIMIT_MAX = 20
+MEMORY_SEARCH_LIMIT_DEFAULT = 5
+
+# `extract_snippet` 命中窗口：命中关键词前 / 后各截取的字符数
+MEMORY_SNIPPET_PREFIX_CHARS = 40
+MEMORY_SNIPPET_SUFFIX_CHARS = 80
+# 片段被截断时首尾追加的省略号
+MEMORY_SNIPPET_ELLIPSIS = "…"
+
+# 多关键词检索字段权重（title / tags / summary / content）
+MEMORY_SEARCH_WEIGHT_TITLE = 4
+MEMORY_SEARCH_WEIGHT_TAGS = 3
+MEMORY_SEARCH_WEIGHT_SUMMARY = 2
+MEMORY_SEARCH_WEIGHT_CONTENT = 1
+
+
 class ScheduleJobType(EnhanceEnum):
     """Agent 调度任务类型枚举。
 

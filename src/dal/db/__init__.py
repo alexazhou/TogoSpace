@@ -13,6 +13,7 @@ from . import gtAgentTaskManager
 from . import gtAgentTaskEventManager
 from . import gtTeamManager
 from . import gtAgentContainerManager
+from . import gtAgentMemoryManager
 
 __all__ = [
     "gtAgentActivityManager",
@@ -28,4 +29,5 @@ __all__ = [
     "gtAgentTaskEventManager",
     "gtTeamManager",
     "gtAgentContainerManager",
+    "gtAgentMemoryManager",
 ]
