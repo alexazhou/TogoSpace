@@ -685,11 +685,13 @@ const activityView = computed(() => {
     currentToolArguments,
     currentToolCommand,
   );
-  const inlineTitle = !(
-    Boolean(currentSummary)
-    || showToolName
-    || (activity.activity_type !== 'tool_call' && Boolean(currentMetadataToolName))
-  ) || activity.activity_type === 'message_received' || activity.activity_type === 'compact';
+  const inlineTitle = (
+    !(
+      Boolean(currentSummary)
+      || showToolName
+      || (activity.activity_type !== 'tool_call' && Boolean(currentMetadataToolName))
+    ) || activity.activity_type === 'message_received' || activity.activity_type === 'compact'
+  ) && !(activity.activity_type === 'reasoning' && activity.detail.trim());
   const chatReplyContent = activity.activity_type === 'chat_reply' ? activity.detail.trim() : '';
   const chatReplyIsLong = chatReplyContent.split('\n').length > 5 || chatReplyContent.length > 350;
   // 思考内容默认展示三行（超出可展开），因此不看「是否很长」——三行以外的部分
@@ -758,9 +760,12 @@ const activityView = computed(() => {
     :data-status="activity.status"
     :data-activity-type="activity.activity_type"
   >
-    <!-- 思考条目不再单独占一行标题（那行只写「思考」），正文块的 💭 已足够标识；
-         内容为空时才退回原样显示标题，避免出现空白卡片。 -->
-    <div v-if="activity.activity_type !== 'reasoning' || !activityView.reasoningContent" class="agent-activity-item__row">
+    <!-- 思考条目不留「思考」标题文字（💭 已足够标识），但对勾与正文同行保留，
+         和其它卡片一致。内容为空时退回显示标题，避免出现空白卡片。 -->
+    <div
+      class="agent-activity-item__row"
+      :class="{ 'agent-activity-item__row--reasoning': Boolean(activityView.reasoningContent) }"
+    >
       <span class="agent-activity-item__state-anchor" tabindex="0">
         <span class="agent-activity-item__state" :data-status="activity.status">{{ activityView.stateSymbol }}</span>
         <span class="agent-activity-item__state-popover">
@@ -776,6 +781,12 @@ const activityView = computed(() => {
           </span>
         </span>
       </span>
+      <div
+        v-if="activityView.reasoningContent"
+        ref="reasoningBodyRef"
+        class="agent-activity-item__reasoning"
+        :class="{ 'agent-activity-item__reasoning--collapsed': reasoningCollapsed }"
+      ><span class="agent-activity-item__reasoning-mark" aria-hidden="true">💭</span>{{ activityView.reasoningContent }}</div>
       <strong v-if="activityView.inlineTitle" class="agent-activity-item__title">{{ activityView.title }}</strong>
       <span
         v-if="activityView.showToolName"
@@ -858,19 +869,12 @@ const activityView = computed(() => {
         >{{ activityView.taskRoomLabel }}</span>
       </span>
     </div>
-    <template v-if="activityView.reasoningContent">
-      <div
-        ref="reasoningBodyRef"
-        class="agent-activity-item__reasoning"
-        :class="{ 'agent-activity-item__reasoning--collapsed': reasoningCollapsed }"
-      ><span class="agent-activity-item__reasoning-mark" aria-hidden="true">💭</span>{{ activityView.reasoningContent }}</div>
-      <button
-        v-if="reasoningOverflows"
-        type="button"
-        class="agent-activity-item__chat-reply-toggle agent-activity-item__reasoning-toggle"
-        @click="toggleReasoning"
-      >{{ reasoningCollapsed ? t('common.expand') : t('common.collapse') }}</button>
-    </template>
+    <button
+      v-if="activityView.reasoningContent && reasoningOverflows"
+      type="button"
+      class="agent-activity-item__chat-reply-toggle agent-activity-item__reasoning-toggle"
+      @click="toggleReasoning"
+    >{{ reasoningCollapsed ? t('common.expand') : t('common.collapse') }}</button>
     <template v-if="activityView.sendChatMsgContent && !activityView.sendChatMsgError">
       <div
         class="agent-activity-item__chat-reply"
@@ -1442,9 +1446,18 @@ const activityView = computed(() => {
   color: var(--text);
 }
 
-/* 思考内容：默认只露三行（超出可展开），样式比正文更弱，避免抢注意力。
-   不缩进（省掉首行空白），用开头一个 ☁️ 标记这是思考而不是正文。 */
+/* 思考内容：与对勾同一行（不在下面另起一行），默认只露三行、超出可展开。
+   正文用 💭 起头，样式比正文更弱，避免抢注意力。 */
+.agent-activity-item__row--reasoning {
+  align-items: flex-start;
+}
+
+.agent-activity-item__row--reasoning .agent-activity-item__state-anchor {
+  margin-top: 0.18rem;
+}
+
 .agent-activity-item__reasoning {
+  flex: 1 1 auto;
   padding-left: 0;
   padding-right: 4px;
   font-size: 0.78rem;
@@ -1498,10 +1511,10 @@ const activityView = computed(() => {
   text-decoration: underline;
 }
 
-/* 思考内容不缩进，展开按钮也跟到左边缘（必须放在 .chat-reply-toggle 之后，
-   否则同优先级下 padding-left: 22px 会覆盖回来）。 */
+/* 思考内容的展开按钮与正文左对齐（对勾宽 14px + gap 6px），必须放在
+   .chat-reply-toggle 之后，否则同优先级下 padding-left: 22px 会覆盖回来。 */
 .agent-activity-item__reasoning-toggle {
-  padding-left: 0;
+  padding-left: 20px;
 }
 
 </style>

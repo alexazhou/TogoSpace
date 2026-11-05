@@ -59,13 +59,21 @@ describe('AgentActivityItem 思考内容默认三行', () => {
     expect(block.find('.agent-activity-item__reasoning-mark').exists()).toBe(true);
   });
 
-  it('思考条目不渲染「思考」标题行，正文块直接就是内容', async () => {
+  it('思考条目不渲染「思考」标题文字，但对勾保留在同一行', async () => {
     const wrapper = mountItem(activity({ detail: LONG_TEXT }));
     await flushPromises();
 
-    expect(wrapper.find('.agent-activity-item__row').exists()).toBe(false);
-    expect(wrapper.text()).not.toContain('思考');
-    expect(wrapper.find('.agent-activity-item__reasoning').exists()).toBe(true);
+    // 状态对勾仍在（和其它卡片一致）
+    const state = wrapper.find('.agent-activity-item__state');
+    expect(state.exists()).toBe(true);
+    expect(state.text()).toBe('✓');
+    // 但不出现「思考」标题文字（只有 hover 弹层里保留活动名），正文块跟对勾同一行
+    expect(wrapper.find('.agent-activity-item__title').exists()).toBe(false);
+    expect(wrapper.find('.agent-activity-item__summary').exists()).toBe(false);
+    expect(wrapper.find('.agent-activity-item__state-popover .agent-activity-item__state-title').text()).toBe('思考');
+    const row = wrapper.find('.agent-activity-item__row');
+    expect(row.classes()).toContain('agent-activity-item__row--reasoning');
+    expect(row.find('.agent-activity-item__reasoning').exists()).toBe(true);
   });
 
   it('思考内容为空时仍保留标题行，不出现空白卡片', async () => {
