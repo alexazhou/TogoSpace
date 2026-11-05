@@ -59,6 +59,28 @@ describe('AgentActivityItem 思考内容默认三行', () => {
     expect(block.find('.agent-activity-item__reasoning-mark').exists()).toBe(true);
   });
 
+  it('思考条目不渲染「思考」标题行，正文块直接就是内容', async () => {
+    const wrapper = mountItem(activity({ detail: LONG_TEXT }));
+    await flushPromises();
+
+    expect(wrapper.find('.agent-activity-item__row').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('思考');
+    expect(wrapper.find('.agent-activity-item__reasoning').exists()).toBe(true);
+  });
+
+  it('思考内容为空时仍保留标题行，不出现空白卡片', async () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'reasoning',
+      status: 'failed',
+      detail: '',
+      error_message: '模型返回空',
+    }));
+    await flushPromises();
+
+    expect(wrapper.find('.agent-activity-item__row').exists()).toBe(true);
+    expect(wrapper.text()).toContain('思考');
+  });
+
   it('内容超出三行时可展开看全文，再点可收起', async () => {
     const wrapper = mountItem(activity({ detail: LONG_TEXT }));
     await flushPromises();

@@ -758,7 +758,9 @@ const activityView = computed(() => {
     :data-status="activity.status"
     :data-activity-type="activity.activity_type"
   >
-    <div class="agent-activity-item__row">
+    <!-- 思考条目不再单独占一行标题（那行只写「思考」），正文块的 💭 已足够标识；
+         内容为空时才退回原样显示标题，避免出现空白卡片。 -->
+    <div v-if="activity.activity_type !== 'reasoning' || !activityView.reasoningContent" class="agent-activity-item__row">
       <span class="agent-activity-item__state-anchor" tabindex="0">
         <span class="agent-activity-item__state" :data-status="activity.status">{{ activityView.stateSymbol }}</span>
         <span class="agent-activity-item__state-popover">
