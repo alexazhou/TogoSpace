@@ -739,6 +739,10 @@ export function applyRealtimeEvent(event: FrontendRealtimeEvent): void {
   if (event.type === 'team_reloaded') {
     loadTeamRooms(event.teamId);
     loadTeamAgents(event.teamId, { includeSpecial: true });
+    // 成员的部门归属由部门树（manager_id / agent_ids）现算，成员列表重载不会
+    // 顺带更新它；组织树变更也走热更新，这里必须一并重载，否则成员卡片的
+    // 部门路径会一直是旧值。
+    loadDeptTree(event.teamId);
     showGlobalSuccessToast(t('topbar.teamReloaded'));
     return;
   }
