@@ -2,11 +2,12 @@
 defineProps<{
   open: boolean;
   closeLabel: string;
-  activeTab: 'activities' | 'tasks' | 'properties';
+  activeTab: 'activities' | 'tasks' | 'properties' | 'container';
   panelTabsLabel: string;
   activitiesLabel: string;
   tasksLabel: string;
   propertiesLabel: string;
+  containerLabel: string;
   activityBadgeLabel: string;
   activityRealtimeState: string;
   taskCountLabel: string;
@@ -19,7 +20,7 @@ defineProps<{
 
 const emit = defineEmits<{
   close: [];
-  'update:activeTab': [tab: 'activities' | 'tasks' | 'properties'];
+  'update:activeTab': [tab: 'activities' | 'tasks' | 'properties' | 'container'];
 }>();
 </script>
 
@@ -59,6 +60,15 @@ const emit = defineEmits<{
                 @click="emit('update:activeTab', 'properties')"
               >
                 {{ propertiesLabel }}
+              </button>
+              <button
+                type="button"
+                class="agent-activity-panel__tab"
+                :class="{ 'is-active': activeTab === 'container' }"
+                :aria-selected="activeTab === 'container'"
+                @click="emit('update:activeTab', 'container')"
+              >
+                {{ containerLabel }}
               </button>
             </div>
           </div>

@@ -5,12 +5,14 @@ import { getAvailableSkills, getAvailableTools, getFrontendConfig, updateAgentPr
 import { showGlobalSuccessToast } from '../../appUiState';
 import CustomMultiSelect from '../ui/CustomMultiSelect.vue';
 import CustomSelect from '../ui/CustomSelect.vue';
+import AgentTemplateViewDialog from './AgentTemplateViewDialog.vue';
 import type { AgentDetail, ModelSlotOption } from '../../types';
 import { MODEL_SLOT_LABELS } from '../../types';
 
 const props = defineProps<{
   agentId: number | null;
   initialAgent: AgentDetail | null;
+  roleTemplateName?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -52,27 +54,37 @@ const modelOptions = computed(() => [
   })),
 ]);
 
-const execEnvLabel = computed(() => (
-  props.initialAgent?.exec_env === 'container' ? t('agent.execEnv.container') : t('agent.execEnv.host')
-));
-
-const currentContainerId = computed(() => props.initialAgent?.current_container_id ?? null);
-
-const containers = computed(() => props.initialAgent?.containers ?? []);
-
-/** 徽标数字优先用接口的 container_count；缺失时退回列表长度，避免显示 0 而实际有行。 */
-const containerCount = computed(() => {
-  const fromApi = props.initialAgent?.container_count;
-  if (typeof fromApi === 'number') {
-    return fromApi;
-  }
-  return containers.value.length;
-});
-
 const configModeTools = ref('auto');const configModeSkills = ref('auto');
 const selectedModel = ref('');
 const selectedTools = ref<string[]>([]);
 const selectedSkills = ref<string[]>([]);
+
+const templateDialogOpen = ref(false);
+
+/** 模板 ID 只认详情接口带回的 role_template_id；缺失或非正数视为未配置。 */
+const roleTemplateId = computed<number | null>(() => {
+  const id = props.initialAgent?.role_template_id;
+  return typeof id === 'number' && id > 0 ? id : null;
+});
+
+/** 名称优先用调用方传入的已解析展示名，否则退回「模板 #id」，最后才是「未配置模板」。 */
+const roleTemplateLabel = computed(() => {
+  const fromProps = props.roleTemplateName?.trim();
+  if (fromProps) {
+    return fromProps;
+  }
+  if (roleTemplateId.value !== null) {
+    return t('agent.templateFallback', { id: roleTemplateId.value });
+  }
+  return t('agent.noTemplate');
+});
+
+function openTemplateDialog(): void {
+  if (roleTemplateId.value === null) {
+    return;
+  }
+  templateDialogOpen.value = true;
+}
 
 async function loadConfig() {
   loadingConfig.value = true;
@@ -205,48 +217,20 @@ async function handleSave() {
     <div v-else class="properties-form">
       <div class="form-section">
         <h3 class="section-title">
-          {{ t('agent.execEnv.label') }}
+          {{ t('agent.template.sectionTitle') }}
         </h3>
         <div class="config-mode-row">
-          <span class="row-label">{{ t('agent.execEnv.label') }}</span>
-          <span class="env-value">{{ execEnvLabel }}</span>
+          <span class="row-label">{{ t('agent.template.label') }}</span>
+          <span class="template-name">{{ roleTemplateLabel }}</span>
+          <button
+            v-if="roleTemplateId !== null"
+            type="button"
+            class="ghost-button template-view-button"
+            @click="openTemplateDialog"
+          >
+            {{ t('common.view') }}
+          </button>
         </div>
-        <div v-if="currentContainerId" class="config-mode-row">
-          <span class="row-label">{{ t('agent.execEnv.currentContainer') }}</span>
-          <span class="env-value mono">{{ currentContainerId }}</span>
-        </div>
-      </div>
-
-      <div class="form-section">
-        <h3 class="section-title">
-          {{ t('agent.containers.label') }}
-          <span v-if="containerCount > 0" class="count-hint">{{ containerCount }}</span>
-        </h3>
-        <p v-if="!containers.length" class="empty-hint">{{ t('agent.containers.empty') }}</p>
-        <table v-else class="container-table">
-          <thead>
-            <tr>
-              <th>{{ t('agent.containers.name') }}</th>
-              <th>{{ t('agent.containers.containerId') }}</th>
-              <th>{{ t('agent.containers.image') }}</th>
-              <th>{{ t('agent.containers.state') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in containers" :key="item.record_id">
-              <td>
-                {{ item.container_name }}
-                <span v-if="item.is_entered" class="entered-badge">{{ t('agent.containers.entered') }}</span>
-              </td>
-              <td class="mono">
-                {{ item.container_id || t('agent.containers.pending') }}
-              </td>
-              <td class="mono">{{ item.image }}</td>
-              <!-- Docker 原始状态直接展示，不做翻译（文档 §8 明确不加 containerState.* 词条）。 -->
-              <td class="mono">{{ item.state }}</td>
-            </tr>
-          </tbody>
-        </table>
       </div>
 
       <div class="form-section">
@@ -348,6 +332,13 @@ async function handleSave() {
         </button>
       </div>
     </div>
+
+    <AgentTemplateViewDialog
+      :open="templateDialogOpen"
+      :template-id="roleTemplateId"
+      :template-name="roleTemplateLabel"
+      @close="templateDialogOpen = false"
+    />
   </div>
 </template>
 
@@ -389,66 +380,18 @@ async function handleSave() {
   flex-shrink: 0;
 }
 
-/* ─── 执行环境 / 容器表 ───────────────────────────────────────────── */
-.env-value {
+/* ─── 角色模板 ───────────────────────────────────────────────────── */
+.template-name {
   font-size: 13px;
   color: var(--text-primary);
 }
 
-.count-hint {
-  margin-left: 8px;
-  padding: 0 6px;
+.template-view-button {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 0.74rem;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--state-info) 14%, var(--surface-panel) 86%);
-  color: color-mix(in srgb, var(--state-info) 84%, var(--text-primary) 16%);
-  font-size: 0.7rem;
-  font-weight: 500;
-}
-
-.empty-hint {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-tertiary);
-}
-
-.container-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.container-table th,
-.container-table td {
-  padding: 6px 8px;
-  text-align: left;
-  border-bottom: 1px solid var(--border-default);
-  vertical-align: top;
-}
-
-.container-table th {
-  color: var(--text-secondary);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.container-table td {
-  color: var(--text-primary);
-  word-break: break-all;
-}
-
-.container-table .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--text-secondary);
-}
-
-.entered-badge {
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--state-success) 14%, var(--surface-panel) 86%);
-  color: color-mix(in srgb, var(--state-success) 84%, var(--text-primary) 16%);
-  font-size: 0.66rem;
-  white-space: nowrap;
 }
 
 .info-icon {

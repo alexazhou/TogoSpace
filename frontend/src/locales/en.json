@@ -110,6 +110,7 @@
     "activities": "Activities",
     "tasks": "Tasks",
     "properties": "Properties",
+    "containerTab": "Containers",
     "allowTools": "Allowed Tools",
     "allowToolsDesc": "Authorized tool list. All tools are allowed by default",
     "toolList": "Tool List",
@@ -257,6 +258,7 @@
     "execEnv": {
       "host": "Host",
       "container": "Container",
+      "sectionTitle": "Environment",
       "label": "Execution Environment",
       "currentContainer": "Current Container"
     },
@@ -271,6 +273,14 @@
       "state": "State",
       "entered": "In Use",
       "pending": "Creating"
+    },
+    "template": {
+      "sectionTitle": "Role Template",
+      "label": "Template",
+      "eyebrow": "Role Template",
+      "detailFallback": "Role Template Details",
+      "noSoul": "This template has no Soul content",
+      "loadFailed": "Failed to load template details."
     }
   },
   "room": {

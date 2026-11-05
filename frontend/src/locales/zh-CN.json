@@ -110,6 +110,7 @@
     "activities": "运行活动",
     "tasks": "任务",
     "properties": "属性",
+    "containerTab": "容器",
     "allowTools": "允许工具",
     "allowToolsDesc": "授权使用的工具列表。默认允许使用所有的工具",
     "toolList": "工具列表",
@@ -257,6 +258,7 @@
     "execEnv": {
       "host": "宿主",
       "container": "容器",
+      "sectionTitle": "环境",
       "label": "执行环境",
       "currentContainer": "当前容器"
     },
@@ -271,6 +273,14 @@
       "state": "状态",
       "entered": "当前使用",
       "pending": "创建中"
+    },
+    "template": {
+      "sectionTitle": "角色模板",
+      "label": "模板",
+      "eyebrow": "角色模板",
+      "detailFallback": "角色模板详情",
+      "noSoul": "该模板暂无 Soul 内容",
+      "loadFailed": "模板详情加载失败。"
     }
   },
   "room": {
