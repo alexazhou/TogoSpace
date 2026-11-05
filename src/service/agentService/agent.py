@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Awaitable, Callable, List, Optional
 
 from constants import AgentStatus, ContainerState
 from model.coreModel.agentModel import ExecEnvState
@@ -39,6 +39,7 @@ class Agent:
         driver_config: Optional[AgentDriverConfig] = None,
         agent_workdir: str = "",
         is_root_leader: bool = False,
+        prompt_refresh_fn: Optional[Callable[[], Awaitable[str]]] = None,
     ):
         self.gt_agent: GtAgent = gt_agent
         self.system_prompt: str = system_prompt
@@ -48,6 +49,7 @@ class Agent:
             system_prompt=system_prompt,
             agent_workdir=agent_workdir,
             driver_config=driver_config,
+            prompt_refresh_fn=prompt_refresh_fn,
         )
 
     @property

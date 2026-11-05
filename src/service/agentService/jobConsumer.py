@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from typing import Awaitable, Callable
+
 from constants import ScheduleJobStatus, AgentStatus, AgentActivityType, AgentActivityStatus, MessageBusTopic, ScheduleJobType
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtScheduleJob import GtScheduleJob
@@ -29,6 +31,7 @@ class JobConsumer:
         system_prompt: str,
         agent_workdir: str = "",
         driver_config: AgentDriverConfig | None = None,
+        prompt_refresh_fn: Callable[[], Awaitable[str]] | None = None,
     ):
         self.gt_agent: GtAgent = gt_agent
         self._turn_runner: AgentTurnRunner = AgentTurnRunner(
@@ -36,6 +39,7 @@ class JobConsumer:
             system_prompt=system_prompt,
             agent_workdir=agent_workdir,
             driver_config=driver_config,
+            prompt_refresh_fn=prompt_refresh_fn,
         )
         self.status: AgentStatus = AgentStatus.IDLE
         self._aio_consumer_task: asyncio.Task | None = None

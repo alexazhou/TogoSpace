@@ -373,9 +373,16 @@ def test_task_collaboration_guide_referenced_tools_all_exist():
     from service.funcToolService.core import load_func_tools
 
     registry = set(load_func_tools().keys())
-    # 反引号里也会出现**参数**名（不是工具），逐个列白名单而不是放宽容错
+    # 反引号里也会出现**参数**名 / **字段**名 / **错误码**（不是工具），逐个列白名单
+    # 而不是放宽容错。长期记忆章节反引号里的这些词都不是工具名：
+    #   content / summary / title / star_level / status —— 记忆字段与工具参数
+    #   none —— 星标级别取值
+    #   star_limit_exceeded / summary_star_limit_exceeded —— 配额错误码
     param_names = {"new_status", "note", "status", "assignee", "reviewer", "title_keyword",
-                   "insert_immediately"}
+                   "insert_immediately",
+                   # 长期记忆章节
+                   "content", "summary", "title", "star_level", "status", "none",
+                   "star_limit_exceeded", "summary_star_limit_exceeded"}
 
     text = render_prompt("system_prompt.j2")
     referenced = {

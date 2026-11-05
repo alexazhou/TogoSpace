@@ -206,12 +206,34 @@ async def _init_and_start_agent(
     )
 
     assert gt_agent.id is not None and gt_agent.id > 0, f"invalid agent id: {gt_agent.id}"
+
+    async def prompt_refresh_fn() -> str:
+        """无参异步闭包：重新构建该 Agent 的 System Prompt（包含最新星标记忆快照）。
+
+        只在 compact 切新 session 时被 `AgentTurnRunner` 调用一次。把「重新装配所需
+        的全部参数」封在这里，Runner 不需要知道模板 / 目录 / 部门结构怎么来的。
+        """
+        return await build_agent_system_prompt(
+            team_id=team_id,
+            agent_id=gt_agent.id,
+            agent_name=agent_name,
+            agent_display_name=agent_display_name,
+            template_name=template_name,
+            template_display_name=template_display_name,
+            template_soul=gt_role_template.soul,
+            workdir=agent_workdir,
+            shared_workdir=shared_workdir,
+            is_root_leader=is_root_leader,
+            allow_skills=gt_agent.allow_skills,
+        )
+
     agent = Agent(
         gt_agent=gt_agent,
         system_prompt=full_prompt,
         driver_config=driver_config,
         agent_workdir=agent_workdir,
         is_root_leader=is_root_leader,
+        prompt_refresh_fn=prompt_refresh_fn,
     )
     
     logger.info(
