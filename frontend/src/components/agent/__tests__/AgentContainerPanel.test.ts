@@ -1,0 +1,95 @@
+import { describe, expect, it } from 'vitest';
+import { mount } from '@vue/test-utils';
+import AgentContainerPanel from '../AgentContainerPanel.vue';
+import i18n from '../../../i18n';
+import type { AgentDetail, ContainerRuntimeInfo } from '../../../types';
+
+function createContainer(overrides: Partial<ContainerRuntimeInfo> = {}): ContainerRuntimeInfo {
+  return {
+    record_id: 1,
+    agent_id: 5,
+    container_id: 'abc123def456',
+    container_name: 'agent-sandbox',
+    image: 'python:3.11',
+    state: 'running',
+    is_entered: false,
+    created_at: '2026-11-05T10:00:00',
+    ...overrides,
+  };
+}
+
+function createAgent(overrides: Partial<AgentDetail> = {}): AgentDetail {
+  return {
+    id: 5,
+    name: 'Alice',
+    agent_name: 'Alice',
+    i18n: {},
+    model: '',
+    status: 'idle',
+    driver_type: 'native',
+    prompt: '',
+    exec_env: 'container',
+    current_container_id: 'abc123def456',
+    container_count: 1,
+    containers: [createContainer()],
+    ...overrides,
+  };
+}
+
+function mountPanel(agent: AgentDetail | null) {
+  return mount(AgentContainerPanel, {
+    props: { initialAgent: agent },
+    global: { plugins: [i18n] },
+  });
+}
+
+describe('AgentContainerPanel', () => {
+  it('labels the environment section as 当前环境 rather than 执行环境', () => {
+    const wrapper = mountPanel(createAgent());
+    expect(wrapper.text()).toContain('当前环境');
+    expect(wrapper.text()).not.toContain('执行环境');
+  });
+
+  it('shows the container environment value and current container id', () => {
+    const wrapper = mountPanel(createAgent());
+    expect(wrapper.text()).toContain('容器');
+    expect(wrapper.text()).toContain('abc123def456');
+  });
+
+  it('renders one table row per container with the raw docker state', () => {
+    const wrapper = mountPanel(createAgent({
+      container_count: 2,
+      containers: [
+        createContainer({ record_id: 1, container_id: 'abc123def456', is_entered: true }),
+        createContainer({
+          record_id: 2,
+          container_id: null,
+          container_name: 'pending-box',
+          image: 'ubuntu:24.04',
+          state: 'created',
+        }),
+      ],
+    }));
+
+    const rows = wrapper.findAll('.container-table tbody tr');
+    expect(rows).toHaveLength(2);
+    // 预记录（container_id 为 null）显示「创建中」，而不是空白。
+    expect(rows[1].text()).toContain('创建中');
+    expect(rows[1].text()).toContain('created');
+    // 「当前使用」徽标只标在当前所处的容器上。
+    expect(rows[0].text()).toContain('当前使用');
+    expect(rows[1].text()).not.toContain('当前使用');
+  });
+
+  it('falls back to the empty hint when the agent has no containers', () => {
+    const wrapper = mountPanel(createAgent({ containers: [], container_count: 0 }));
+    expect(wrapper.find('.container-table').exists()).toBe(false);
+    expect(wrapper.text()).toContain('暂无容器');
+  });
+
+  it('treats a missing agent as host environment', () => {
+    const wrapper = mountPanel(null);
+    expect(wrapper.text()).toContain('宿主');
+    expect(wrapper.find('.mono').exists()).toBe(false);
+  });
+});

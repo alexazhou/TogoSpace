@@ -110,6 +110,7 @@
     "activities": "运行活动",
     "tasks": "任务",
     "properties": "属性",
+    "containerTab": "容器",
     "allowTools": "允许工具",
     "allowToolsDesc": "授权使用的工具列表。默认允许使用所有的工具",
     "toolList": "工具列表",
@@ -257,7 +258,7 @@
     "execEnv": {
       "host": "宿主",
       "container": "容器",
-      "label": "执行环境",
+      "label": "当前环境",
       "currentContainer": "当前容器"
     },
     "containers": {

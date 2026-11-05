@@ -110,6 +110,7 @@
     "activities": "Activities",
     "tasks": "Tasks",
     "properties": "Properties",
+    "containerTab": "Containers",
     "allowTools": "Allowed Tools",
     "allowToolsDesc": "Authorized tool list. All tools are allowed by default",
     "toolList": "Tool List",
@@ -257,7 +258,7 @@
     "execEnv": {
       "host": "Host",
       "container": "Container",
-      "label": "Execution Environment",
+      "label": "Current Environment",
       "currentContainer": "Current Container"
     },
     "containers": {
