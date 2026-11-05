@@ -126,6 +126,7 @@
     "loadingEarlierActivities": "Loading earlier activity records…",
     "loadingTasks": "Loading agent tasks…",
     "noActivities": "No activity records.",
+    "newActivitiesBelow": "New activity ↓",
     "noTasks": "No open tasks.",
     "taskFilterAll": "All",
     "taskFilterDone": "Done",
