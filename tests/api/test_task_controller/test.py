@@ -42,16 +42,29 @@ class TestTaskController(ServiceTestCase):
 
     def _seed_task(
         self, *, team_id: int, agent_id: int, title: str, priority: str = "NORMAL",
-        reviewer_id: int | None = None,
+        reviewer_id: int | None = None, updated_at: str | None = None,
     ) -> int:
-        """直接写一行任务 + 两条事件，返回 task_id。"""
+        """直接写一行任务 + 两条事件，返回 task_id。
+
+        `updated_at` 显式传入时按原样落库（格式 `YYYY-MM-DD HH:MM:SS.ffffff`）：
+        排序断言不能依赖「插入顺序 = 时间戳单调」这种巧合，需要可控时间戳时必须写死。
+        """
         with sqlite3.connect(self._get_test_db_path()) as conn:
-            cursor = conn.execute(
-                "INSERT INTO agent_tasks (team_id, title, description, assignee_id, creator_id,"
-                " reviewer_id, status, priority, depends_on)"
-                " VALUES (?, ?, '', ?, ?, ?, 'TODO', ?, '[]')",
-                (team_id, title, agent_id, agent_id, reviewer_id, priority),
-            )
+            if updated_at is None:
+                cursor = conn.execute(
+                    "INSERT INTO agent_tasks (team_id, title, description, assignee_id, creator_id,"
+                    " reviewer_id, status, priority, depends_on)"
+                    " VALUES (?, ?, '', ?, ?, ?, 'TODO', ?, '[]')",
+                    (team_id, title, agent_id, agent_id, reviewer_id, priority),
+                )
+            else:
+                cursor = conn.execute(
+                    "INSERT INTO agent_tasks (team_id, title, description, assignee_id, creator_id,"
+                    " reviewer_id, status, priority, depends_on, created_at, updated_at)"
+                    " VALUES (?, ?, '', ?, ?, ?, 'TODO', ?, '[]', ?, ?)",
+                    (team_id, title, agent_id, agent_id, reviewer_id, priority,
+                     updated_at, updated_at),
+                )
             task_id = cursor.lastrowid
             conn.execute(
                 "INSERT INTO agent_task_events (task_id, actor_id, from_status, to_status, content)"
@@ -140,22 +153,36 @@ class TestTaskController(ServiceTestCase):
         assert page2["events"][0]["id"] < page1["events"][0]["id"]
 
     # -----------------------------------------------------------------
-    # #83：Web 列表接口（`agentController.py` 的两个 tasks.json）回归
-    # 这条链路与 Agent 侧共用 `taskService.list_tasks`，改动必须**已验证**不破坏它。
+    # Web 列表接口（`agentController.py` 的两个 tasks.json）回归
+    # 两个 handler 共用 `taskService.list_tasks`，但 order 口径不同，必须分别钉住。
     # -----------------------------------------------------------------
 
-    async def test_agent_tasks_endpoint_keeps_priority_order_and_adds_names(self):
-        """`GET /agents/<id>/tasks.json`：仍是优先级优先（HIGH→NORMAL→LOW），并新增 name 字段。
+    async def test_agent_tasks_endpoint_orders_by_updated_desc_and_adds_names(self):
+        """`GET /agents/<id>/tasks.json`：**最近修改在前**（`updated_at desc, id desc`），并带 name 字段。
 
-        `#83` 把「最新在前」只放进了工具层（`order="id_desc"`），DAL 默认值没动；
-        本用例在 **HTTP 层**验证这一点，而不是靠「默认参数没改」推演。
+        `b310c3f5` 起该接口显式传 `order=ORDER_UPDATED_DESC`（Agent 任务卡看「刚改过的在最上面」），
+        不再走 `taskService.list_tasks` 的优先级优先默认值——那个默认值归团队级列表用
+        （见下一个用例）。本用例在 **HTTP 层**钉住这个口径。
+
+        三种口径的预期顺序刻意两两不同，断言才有鉴别力：
+          - updated_at desc（本接口）：low → high → normal
+          - priority first（旧口径）  ：high → normal → low
+          - id desc                  ：normal → high → low
+        `updated_at` 全部显式写死，不依赖「插入顺序 = 时间戳单调」这种巧合。
         """
         async with aiohttp.ClientSession() as session:
             team_id, agent_id = await self._resolve_ids(session)
-            low = self._seed_task(team_id=team_id, agent_id=agent_id, title="web low", priority="LOW")
-            high = self._seed_task(team_id=team_id, agent_id=agent_id, title="web high", priority="HIGH")
+            low = self._seed_task(
+                team_id=team_id, agent_id=agent_id, title="web low", priority="LOW",
+                updated_at="2026-01-01 03:00:00.000000",
+            )
+            high = self._seed_task(
+                team_id=team_id, agent_id=agent_id, title="web high", priority="HIGH",
+                updated_at="2026-01-01 02:00:00.000000",
+            )
             normal = self._seed_task(
-                team_id=team_id, agent_id=agent_id, title="web normal", priority="NORMAL"
+                team_id=team_id, agent_id=agent_id, title="web normal", priority="NORMAL",
+                updated_at="2026-01-01 01:00:00.000000",
             )
 
             async with session.get(f"{self.backend_base_url}/agents/{agent_id}/tasks.json") as resp:
@@ -164,10 +191,16 @@ class TestTaskController(ServiceTestCase):
 
         assert body["success"] is True
         # 同一 DB 里还有别的用例 seed 的任务，只看本用例这三条的相对顺序。
-        # 优先级优先（不是 id 倒序）：low 最后建却排在最后。
         ids = [t["id"] for t in body["tasks"]]
         picked = [task_id for task_id in ids if task_id in {high, normal, low}]
-        assert picked == [high, normal, low]
+        assert picked == [low, high, normal], (
+            f"应为 updated_at 倒序（low→high→normal），实际 {picked}；"
+            f"若是 [high,normal,low] 说明退化成了 priority first，"
+            f"若是 [normal,high,low] 说明退化成了 id desc"
+        )
+        # 顺手钉住「这确实不是优先级排序」：优先级序列不应是 HIGH→NORMAL→LOW
+        picked_priorities = [t["priority"] for t in body["tasks"] if t["id"] in {high, normal, low}]
+        assert picked_priorities == ["LOW", "HIGH", "NORMAL"]
         # 新增字段是**追加**的，不替换任何既有字段
         task = next(t for t in body["tasks"] if t["id"] == high)
         assert task["assignee_id"] == agent_id
