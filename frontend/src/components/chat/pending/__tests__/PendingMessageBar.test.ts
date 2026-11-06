@@ -195,6 +195,55 @@ describe('PendingMessageBar 单行截断与展开', () => {
     // 在全文里选字 / 点链接 / 拖滚动条都不该把卡片收起来
     expect(wrapper.emitted('toggle')).toBeUndefined();
   });
+
+  it('在本卡片里拖选文字后补发的 click 不收起卡片（回归 P2-1 拖选）', async () => {
+    const wrapper = mountBar({
+      item: createItem({ message: createMessage({ content: '一段可以复制的正文' }) }),
+      expanded: true,
+    });
+    markTruncated(wrapper);
+    await flushPromises();
+
+    const bar = wrapper.find('.pending-message-bar');
+    // 模拟拖选：选区锚点落在卡片内的全文区里
+    const full = wrapper.find('.pending-message-full').element;
+    const selection = { isCollapsed: false, toString: () => '一段可以复制的正文', anchorNode: full, focusNode: full };
+    const original = window.getSelection;
+    window.getSelection = (() => selection) as unknown as typeof window.getSelection;
+
+    try {
+      await bar.trigger('click');
+    } finally {
+      window.getSelection = original;
+    }
+
+    // 拖选收尾的 click 不该被当成「切换展开」
+    expect(wrapper.emitted('toggle')).toBeUndefined();
+  });
+
+  it('选区在本卡片之外时，点击仍然正常切换（不误伤）', async () => {
+    const wrapper = mountBar({ expanded: true });
+    markTruncated(wrapper);
+    await flushPromises();
+
+    // 选区在别处（例如另一个元素里），本卡片的点击必须照常生效，
+    // 否则页面上随手选中一段文字就能把卡片点死——那是新造一个缺陷。
+    const outside = document.createElement('p');
+    outside.textContent = '页面别处的文字';
+    document.body.appendChild(outside);
+    const selection = { isCollapsed: false, toString: () => '页面别处的文字', anchorNode: outside, focusNode: outside };
+    const original = window.getSelection;
+    window.getSelection = (() => selection) as unknown as typeof window.getSelection;
+
+    try {
+      await wrapper.find('.pending-message-bar').trigger('click');
+    } finally {
+      window.getSelection = original;
+      outside.remove();
+    }
+
+    expect(wrapper.emitted('toggle')).toHaveLength(1);
+  });
 });
 
 describe('PendingMessageBar 徽标 tooltip 不被浮层裁剪（回归 P1）', () => {

@@ -114,11 +114,37 @@ function measureTruncation(): void {
  * 收起通路的 gate 是 `canToggle`（截断 **或** 已展开），不是 `truncated`。
  * 只 gate 在 truncated 上时，展开后窗口变宽会让卡片彻底收不起来。
  */
-function handleToggle(): void {
+function handleToggle(event?: MouseEvent): void {
   if (!canToggle.value) {
     return;
   }
+  if (isSelectionInsideCard(event)) {
+    return;
+  }
   emit('toggle');
+}
+
+/**
+ * 本次点击是不是「拖选的收尾 click」。
+ *
+ * 拖选文字结束时浏览器仍会补一个 click，选中内容非空说明用户在选字（想复制正文），
+ * 不该把卡片收起来——否则「选中一段复制」这个动作永远做不成。
+ *
+ * 判据必须带上「选区在本卡片内」：只看 selection 非空的话，用户随便在页面上选中
+ * 一段文字后，本卡片就再也点不开了，那是新造一个缺陷。没有 event（键盘触发）时
+ * 不看选区，键盘用户本来就不会产生选区。
+ */
+function isSelectionInsideCard(event?: MouseEvent): boolean {
+  if (!event || typeof window === 'undefined') {
+    return false;
+  }
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+    return false;
+  }
+  const card = event.currentTarget as Node | null;
+  const anchors = [selection.anchorNode, selection.focusNode];
+  return anchors.some((node) => Boolean(node) && Boolean(card?.contains(node)));
 }
 
 function handleKeydown(event: KeyboardEvent): void {
