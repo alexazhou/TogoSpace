@@ -10,6 +10,7 @@ from model.coreModel import AgentRuntimeInfo
 from model.dbModel.gtAgent import GtAgent
 from model.coreModel.memoryModel import memory_api_dict
 from service import teamService, agentService, taskService, roomService, memoryService
+from service.agentService.compact import NoCompactableHistoryError
 from util import assertUtil
 
 
@@ -315,6 +316,67 @@ class AgentStopHandler(BaseHandler):
         agent.cancel_current_turn()
 
         self.return_json({"status": "stopped", "agent_id": agent.gt_agent.id})
+
+
+class AgentCompactHandler(BaseHandler):
+    """POST /agents/<agent_id>/compact.json - 手动触发上下文压缩（Compact）
+
+    错误映射（**只有第一种转 400，其余异常必须仍是 500**）：
+
+    | 情形 | 状态码 | error_code |
+    |---|---|---|
+    | agent 不存在 | 400 | `agent_not_found` |
+    | Agent 正在执行（ACTIVE） | 400 | `agent_is_active` |
+    | Agent 未装载进内存 | 400 | `agent_not_loaded` |
+    | 无可压缩历史 | 400 | `no_compactable_history` |
+    | LLM 失败 / 摘要为空 / 其他 | 500 | （原样透出） |
+
+    「无可压缩历史」走 `NoCompactableHistoryError` 类型判断而不是匹配异常文案：
+    文案改一个字就静默失效，而它决定的是「400 业务提示」还是「500 故障」，
+    这个分支不该建在错误字符串上。
+
+    副作用须知：`_execute_compact` 在判定「无可压缩」前**已经写了一条 COMPACT
+    活动并置 FAILED**（`agentTurnRunner.py` 里 add_activity 在前、build_plan 在后）。
+    这条活动保留不动——它准确记录了「用户点了压缩、系统判定没得压」，
+    删掉反而让面板少一条真实轨迹。
+    """
+
+    async def post(self, agent_id_str: str) -> None:
+        agent_id = int(agent_id_str)
+
+        runtime_agent = agentService.get_agent_or_none(agent_id)
+        assertUtil.assertNotNull(
+            runtime_agent, None,
+            f"运行时 Agent ID '{agent_id}' 不存在（Agent 未装载进内存）",
+            "agent_not_loaded",
+        )
+
+        # ACTIVE 期间改 _history 会与进行中的 turn 抢同一份历史。状态只有
+        # jobConsumer 在事件循环线程里切，本 handler 同样跑在事件循环线程，
+        # 且从检查到 `compact_context()` 的首个 await 之间没有让出控制权的机会，
+        # 所以这个「检查-执行」窗口不会被另一个 turn 插进来。
+        assertUtil.assertTrue(
+            runtime_agent.status != AgentStatus.ACTIVE, None,
+            f"Agent ID={agent_id} 正在执行任务，暂不支持手动压缩（当前: {runtime_agent.status.name}）",
+            "agent_is_active",
+        )
+
+        try:
+            usage = await runtime_agent.compact_context()
+        except NoCompactableHistoryError:
+            # 业务拒绝：不是故障，用户点了按钮但没有足够历史可压。
+            assertUtil.assertTrue(
+                False, None,
+                "当前无足够可压缩的历史消息",
+                "no_compactable_history",
+            )
+            return
+
+        self.return_json({
+            "success": True,
+            "agent_id": agent_id,
+            "context_usage": usage.model_dump(mode="json") if usage is not None else None,
+        })
 
 
 class AgentModifyPropertiesRequest(BaseModel):

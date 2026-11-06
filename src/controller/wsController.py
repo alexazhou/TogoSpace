@@ -18,6 +18,7 @@ _WS_TOPICS = [
     MessageBusTopic.AGENT_CONTAINER_STATE_CHANGED,
     MessageBusTopic.AGENT_ACTIVITY_CHANGED,
     MessageBusTopic.AGENT_MEMORY_CHANGED,
+    MessageBusTopic.AGENT_CONTEXT_USAGE_CHANGED,
     MessageBusTopic.SCHEDULE_STATE_CHANGED,
     MessageBusTopic.TEAM_RELOADED,
     MessageBusTopic.TASK_CREATED,
@@ -122,6 +123,10 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
             payload["event"] = "agent_activity"
         if msg.topic == MessageBusTopic.AGENT_MEMORY_CHANGED:
             payload["event"] = "agent_memory_changed"
+        if msg.topic == MessageBusTopic.AGENT_CONTEXT_USAGE_CHANGED:
+            # payload 直接带 team_id / agent_id / context_usage，前端走与 agent_status
+            # 同一套身份校验（agent_id 非数或 <=0 判脏丢弃）。
+            payload["event"] = "agent_context_usage"
         if msg.topic == MessageBusTopic.SCHEDULE_STATE_CHANGED:
             payload["event"] = "schedule_state"
         if msg.topic == MessageBusTopic.TEAM_RELOADED:

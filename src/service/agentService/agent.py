@@ -2,7 +2,7 @@ import logging
 from typing import Awaitable, Callable, List, Optional
 
 from constants import AgentStatus, ContainerState
-from model.coreModel.agentModel import ExecEnvState
+from model.coreModel.agentModel import AgentContextUsage, ExecEnvState
 from model.coreModel.containerModel import ContainerTarget
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
@@ -86,6 +86,25 @@ class Agent:
 
     def inject_history_messages(self, items: List[GtAgentHistory]) -> None:
         self.job_consumer._turn_runner._history.replace(items)
+
+    # ─── 上下文用量 ────────────────────────────────────────────
+
+    def snapshot_context_usage(self) -> AgentContextUsage | None:
+        """当前上下文占用快照；算不出来时 `None`（前端整条不渲染）。
+
+        走内存态 history 而不是另读一次 DB：内存与库在同一时刻可能不一致
+        （推理刚追加、尚未落盘），面板要反映的是「此刻这一轮实际在用的上下文」。
+        """
+        return self.job_consumer._turn_runner.snapshot_context_usage()
+
+    async def compact_context(self) -> AgentContextUsage | None:
+        """手动压缩：执行 compact 并返回压缩后的新用量。
+
+        `NoCompactableHistoryError` 原样上抛——接口层要据此回 400
+        `no_compactable_history` 而不是 500，翻译错误语义是接口层的职责，
+        facade 不替它做决定。
+        """
+        return await self.job_consumer._turn_runner.execute_manual_compact()
 
     # ─── 执行环境 ──────────────────────────────────────────────
 

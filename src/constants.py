@@ -117,6 +117,7 @@ class MessageBusTopic(EnhanceEnum):
     AGENT_CONTAINER_STATE_CHANGED = auto()  # Agent 执行环境变更；payload: gt_agent(GtAgent), exec_env(str), current_container_id(str|None)
     AGENT_ACTIVITY_CHANGED = auto()    # Agent 活动记录变更；payload: event, data
     AGENT_MEMORY_CHANGED = auto()      # Agent 长期记忆变更（新建/更新/归档）；payload: team_id(int), agent_id(int), action(str: created|updated), memory_id(int)
+    AGENT_CONTEXT_USAGE_CHANGED = auto()  # Agent 上下文用量变化；payload: team_id(int), agent_id(int), context_usage(dict)
     SCHEDULE_STATE_CHANGED = auto()    # 调度闸门状态变更；payload: schedule_state(str)
     TEAM_RELOADED = auto()             # Team 热更新完成；payload: team_id(int)
     TASK_CREATED = auto()              # 协作任务创建；payload: task(GtAgentTask)

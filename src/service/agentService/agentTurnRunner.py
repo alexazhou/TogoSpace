@@ -16,6 +16,7 @@ from constants import (
     ScheduleJobType, DriverType, ModelInput, OpenaiApiRole, RoomState, RoomType, SpecialAgent,
     TaskStatus, TurnStepResult,
 )
+from model.coreModel.agentModel import AgentContextUsage
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtAgent import GtAgent
@@ -27,7 +28,7 @@ from model.dbModel.historyUsage import CompactStage, HistoryUsage
 from service import agentActivityService, llmService, roomService, taskService
 from service.agentActivityService import AgentActivityMeta
 from service.agentService.agentHistoryStore import AgentHistoryStore
-from service.agentService import compact, promptBuilder, visionFallback
+from service.agentService import compact, contextUsage, promptBuilder, visionFallback
 from service.llmService.core import resolve_model
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
 from service.agentService.driver.factory import build_agent_driver
@@ -305,6 +306,10 @@ class AgentTurnRunner:
                             await room.handle_finish_request(self.gt_agent.id)
                             await self._wake_next_turn_if_unread(room)
                             return
+
+                # 本轮消息已注入 history、尚未开始推理：此刻广播一次，
+                # 让面板在「推理前的等待时间」里就能看到上下文涨了。
+                self._publish_context_usage()
 
                 await self._run_turn_loop(room)
                 if room is not None:
@@ -811,6 +816,12 @@ class AgentTurnRunner:
                 final_meta.last_retry_error = request_retry_meta.last_retry_error
             await self._finish_activity(activity_id, status=AgentActivityStatus.SUCCEEDED, metadata_patch=final_meta)
 
+            # 上下文用量：优先用模型返回的真实 `usage.prompt_tokens`（比估算准），
+            # 没有 usage 时退回估算。放在活动收尾之后，广播失败不影响推理结果。
+            self._publish_context_usage(
+                used_tokens=usage.prompt_tokens if usage and usage.prompt_tokens is not None else None,
+            )
+
             # 活动记录：思考内容和直接发言
             if assistant_message.reasoning_content and assistant_message.reasoning_content.strip():
                 await agentActivityService.add_activity(
@@ -1076,6 +1087,9 @@ class AgentTurnRunner:
                 f"estimated={estimated_tokens}, hard_limit={hard_limit_tokens}"
             )
 
+        # 压缩完成且刚算过新值：直接广播，不重复跑 tokenizer。
+        self._publish_context_usage(used_tokens=estimated_tokens)
+
         return messages, estimated_tokens, True
 
     async def _execute_compact(self) -> None:
@@ -1090,7 +1104,7 @@ class AgentTurnRunner:
         if compact_plan is None:
             logger.warning("compact 跳过：无可压缩消息, agent_id=%d", self.gt_agent.id)
             await self._finish_activity(compact_activity.id, status=AgentActivityStatus.FAILED, error_message="无可压缩消息")
-            raise RuntimeError("compact 跳过：无可压缩消息")
+            raise compact.NoCompactableHistoryError("compact 跳过：无可压缩消息")
 
         # 摘要 token 上限动态设为上下文长度的 10%，随模型配置自动伸缩
         compact_max_tokens = max(1, int(merged_llm_config.context_config.context_window_tokens * 0.1))
@@ -1122,3 +1136,63 @@ class AgentTurnRunner:
 
         # 活动记录：COMPACT SUCCEEDED
         await self._finish_activity(compact_activity.id, status=AgentActivityStatus.SUCCEEDED)
+        # 注意：这里**不广播**用量。压缩后的 token 数需要重新估算一次
+        # （`estimate_tokens` 要跑 tokenizer），而调用方 `_check_compact` 紧接着
+        # 就要算同一个值——在这里再算一遍等于同一轮里跑两次 tokenizer。
+        # 广播交给拿到数值的调用点（见 `_check_compact` / `execute_manual_compact`）。
+
+    # ─── 上下文用量 ────────────────────────────────────────────
+
+    def snapshot_context_usage(self) -> AgentContextUsage | None:
+        """按内存态未压缩历史算一份占用快照；算不出来时 `None`。"""
+        return contextUsage.calc_context_usage_from_history(
+            model_name=self.gt_agent.model,
+            items=list(self._history),
+            system_prompt=self.system_prompt,
+        )
+
+    def _publish_context_usage(self, *, used_tokens: int | None = None) -> None:
+        """算一次并广播；`used_tokens` 给定时跳过估算直接用它。
+
+        统一从这里出去的原因见 `contextUsage` 模块注释：分子分母各算一份就会分叉。
+        广播本身吞掉所有异常——**用量是观测指标，读不到指标不该让任务失败**。
+        """
+        try:
+            usage = contextUsage.calc_context_usage_from_history(
+                model_name=self.gt_agent.model,
+                items=list(self._history),
+                system_prompt=self.system_prompt,
+            ) if used_tokens is None else contextUsage.calc_context_usage(
+                model_name=self.gt_agent.model,
+                messages=[],
+                system_prompt=self.system_prompt,
+                used_tokens=used_tokens,
+            )
+            contextUsage.publish_context_usage(
+                team_id=self.gt_agent.team_id,
+                agent_id=self.gt_agent.id,
+                usage=usage,
+            )
+        except Exception as e:
+            logger.warning("[context-usage] 广播失败（不影响主流程）: agent_id=%s, error=%s", self.gt_agent.id, e)
+
+    async def execute_manual_compact(self) -> AgentContextUsage | None:
+        """手动压缩入口：执行 compact 并返回压缩后的新用量。
+
+        与自动路径共用 `_execute_compact`，区别是：
+        1. 先重载历史，保证「用户点按钮」这一刻的压缩基准是最新的；
+        2. 压缩后算一次新用量，**既作为接口返回值、也广播给其它打开的窗口**。
+
+        这里必须自己算一次（不像 `_check_compact` 那样有现成值可复用）：手动路径
+        没有后续的推理步骤，压缩完不广播的话，前端只能等下一次推理才发现值变了。
+        """
+        await self._history.reload_from_db()
+        await self._execute_compact()
+
+        usage = self.snapshot_context_usage()
+        contextUsage.publish_context_usage(
+            team_id=self.gt_agent.team_id,
+            agent_id=self.gt_agent.id,
+            usage=usage,
+        )
+        return usage

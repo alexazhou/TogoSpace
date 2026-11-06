@@ -6,6 +6,7 @@ from typing import Any, List
 from model.dbModel.base import atomic
 from model.dbModel.gtDept import GtDept
 from model.coreModel.agentModel import (
+    AgentContextUsage,
     AgentRuntimeInfo,
     ExecEnvState,
 )
@@ -527,7 +528,7 @@ def get_team_exec_env_map(team_id: int) -> dict[int, ExecEnvState]:
 
 
 async def get_agent_detail_info(agent: GtAgent) -> AgentRuntimeInfo:
-    """组装详情页响应：Agent 字段 + 运行时状态 + 执行环境 + 容器数。"""
+    """组装详情页响应：Agent 字段 + 运行时状态 + 执行环境 + 容器数 + 上下文用量。"""
     runtime_status_map = get_team_runtime_status_map(agent.team_id)
     exec_state = get_exec_env_state(agent.id)
     # 容器列表走独立接口，详情只保留数量
@@ -538,7 +539,32 @@ async def get_agent_detail_info(agent: GtAgent) -> AgentRuntimeInfo:
         status=runtime_status_map.get(agent.id, AgentStatus.IDLE),
         exec_env_state=exec_state,
         container_count=container_count_map.get(agent.id, 0),
+        context_usage=await build_context_usage_snapshot(agent),
     )
+
+
+async def build_context_usage_snapshot(agent: GtAgent) -> AgentContextUsage | None:
+    """详情页首屏用的上下文占用快照；「算不出来」时返回 `None`。
+
+    三种返回 `None` 的情形（前端据此整条不渲染，不渲染成 0%）：
+    1. 负 id 虚拟身份（Operator / SYSTEM）——它们不消耗 LLM 上下文；
+    2. Agent 未装载进内存——无从知道此刻的 history 边界；
+    3. 模型配置解析失败 / 分母非正——数值无意义（由 `contextUsage` 判定）。
+
+    内存态走 Agent 的实时 history（含尚未落盘的最新一轮），非内存态退回 DB 里
+    compact 之后的历史。注意第 2 条的取舍：**不为了「让进度条有数」去离线装配
+    history**——装配需要 system_prompt，而它要 team / 角色模板 / 工作目录一整套
+    初始化参数，复制这一坨的维护成本高于「这一个窗口没有进度条」。
+    """
+    if agent.id is None or agent.id <= 0:
+        return None
+
+    runtime_agent = _agents.get(agent.id)
+    if runtime_agent is not None:
+        return runtime_agent.snapshot_context_usage()
+
+    logger.debug("[context-usage] agent 未装载，context_usage 置 None: agent_id=%s", agent.id)
+    return None
 
 
 async def get_agent_error_message(agent_id: int) -> str | None:
