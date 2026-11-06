@@ -9,6 +9,7 @@ import AgentCardBase from './AgentCardBase.vue';
 import AgentActivityDialogShell from './AgentActivityDialogShell.vue';
 import AgentActivityPanel from './AgentActivityPanel.vue';
 import AgentTaskPanel from './AgentTaskPanel.vue';
+import AgentMemoryPanel from './AgentMemoryPanel.vue';
 import AgentPropertiesPanel from './AgentPropertiesPanel.vue';
 import AgentContainerPanel from './AgentContainerPanel.vue';
 import type { AgentDetail, AgentStatus } from '../../types';
@@ -33,8 +34,9 @@ const loading = ref(false);
 const errorMessage = ref('');
 const resuming = ref(false);
 const stopping = ref(false);
-const activeTab = ref<'activities' | 'tasks' | 'properties' | 'container'>('activities');
+const activeTab = ref<'activities' | 'tasks' | 'memories' | 'properties' | 'container'>('activities');
 const taskPanelCount = ref(0);
+const memoryPanelCount = ref(0);
 const superviseContent = ref('');
 const supervising = ref(false);
 const superviseError = ref('');
@@ -117,6 +119,7 @@ const activityBadgeLabel = computed(() =>
   activityRealtimeState.value === 'connected' ? t('agent.realtimeConnected') : formatConnectionState(activityRealtimeState.value),
 );
 const taskCountLabel = computed(() => t('agent.taskCount', { count: taskPanelCount.value }));
+const memoryCountLabel = computed(() => t('agent.memoryCount', { count: memoryPanelCount.value }));
 
 async function loadDetail(): Promise<void> {
   if (!props.open || props.agentId === null) {
@@ -279,11 +282,13 @@ watch(
     :panel-tabs-label="t('agent.panelTabs')"
     :activities-label="t('agent.activities')"
     :tasks-label="t('agent.tasks')"
+    :memories-label="t('agent.memories')"
     :properties-label="t('agent.properties')"
     :container-label="t('agent.containerTab')"
     :activity-badge-label="activityBadgeLabel"
     :activity-realtime-state="activityRealtimeState"
     :task-count-label="taskCountLabel"
+    :memory-count-label="memoryCountLabel"
     :error-message="errorMessage"
     :loading-message="t('agent.loadingInfo')"
     :show-loading="loading && !displayAgent && !agentName"
@@ -355,8 +360,15 @@ watch(
         :team-id="displayAgent?.team_id ?? null"
         @count-change="taskPanelCount = $event"
       />
+      <AgentMemoryPanel
+        v-show="activeTab === 'memories'"
+        :open="open"
+        :agent-id="agentId"
+        @count-change="memoryPanelCount = $event"
+      />
       <AgentPropertiesPanel
         v-show="activeTab === 'properties'"
+
         :agent-id="agentId"
         :initial-agent="displayAgent"
         :role-template-name="agentTemplateLabel"

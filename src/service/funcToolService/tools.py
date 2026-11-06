@@ -1649,3 +1649,177 @@ async def delete_container(
     except Exception as exc:
         logger.warning("delete_container 失败: %s", exc, exc_info=True)
         return {"success": False, "message": f"删除容器失败: {exc}", "error_code": containerService.ERROR_CONTAINER_DELETE_FAILED}
+
+
+# ---------------------------------------------------------------------------
+# 长期记忆工具（memory_*）
+#
+# 身份注入：5 个工具都通过 `_context: ToolCallContext` 拿 `agent_id` / `team_id`，
+# **不向 LLM 暴露 team_id / agent_id**——让模型传自己的 ID 只是多一个可以传错、
+# 或被诱导去传别人的参数。归属校验一律在 `memoryService` 里按上下文 ID 做。
+# ---------------------------------------------------------------------------
+
+
+def _require_memory_context(_context: ToolCallContext | None) -> tuple[int, int]:
+    """取记忆工具需要的 `(team_id, agent_id)`；缺上下文直接拒绝调用。"""
+    if _context is None or _context.agent_id <= 0 or _context.team_id <= 0:
+        raise TogoException(
+            "记忆工具需要在 Agent 上下文中调用（缺少有效的 agent_id / team_id）",
+        )
+    return _context.team_id, _context.agent_id
+
+
+async def memory_list(
+    include_archived: bool = False,
+    _context: ToolCallContext = None,
+) -> dict[str, Any]:
+    """列出你自己的长期记忆目录（L1：ID、标题、星标级别、标签、更新时间），不含正文。
+
+    默认只列活跃记忆。需要按 ID 恢复/反悔已归档的记忆时，把 include_archived 设为 true
+    才会拿到归档记忆的 ID（检索只覆盖活跃记忆）。
+
+    Args:
+        include_archived: 是否一并返回已归档记忆，默认 false（只看活跃记忆）
+    """
+    import service.memoryService as memoryService
+
+    try:
+        team_id, agent_id = _require_memory_context(_context)
+        memories = await memoryService.list_memories(
+            team_id, agent_id, include_archived=include_archived,
+        )
+        items = [memory.model_dump(mode="json") for memory in memories]
+        return {"success": True, "count": len(items), "memories": items}
+    except TogoException as exc:
+        return _tool_error_result(exc)
+
+
+async def memory_read(
+    memory_id: int,
+    _context: ToolCallContext = None,
+) -> dict[str, Any]:
+    """读取一条记忆的完整正文（L3）。只在确实需要具体执行依据、完整步骤时才用。
+
+    支持读取已归档记忆（例如刚归档就想反悔恢复）。ID 不存在或不属于你时统一报不存在。
+
+    Args:
+        memory_id: 记忆 ID（来自 memory_list / memory_search / 提示词里的 #id）
+    """
+    import service.memoryService as memoryService
+
+    try:
+        team_id, agent_id = _require_memory_context(_context)
+        detail = await memoryService.read_memory(team_id, agent_id, memory_id)
+        return {"success": True, "memory": detail.model_dump(mode="json")}
+    except TogoException as exc:
+        return _tool_error_result(exc)
+
+
+async def memory_search(
+    query: str,
+    limit: int = 5,
+    _context: ToolCallContext = None,
+) -> dict[str, Any]:
+    """用关键词检索你的长期记忆，返回概要 + 命中正文片段（L2），不含完整正文。
+
+    多个关键词用空格分隔，会按字段权重加权打分（标题 > 标签 > 概要 > 正文）后排序。
+    只在活跃记忆里检索。查不到时返回空列表（不会报错）。
+
+    Args:
+        query: 检索关键词，多个关键词用空格分隔；不能为空
+        limit: 返回条数上限，默认 5，取值 1-20（超出按边界收敛）
+    """
+    import service.memoryService as memoryService
+
+    try:
+        team_id, agent_id = _require_memory_context(_context)
+        results = await memoryService.search_memories(
+            team_id, agent_id, query=query, limit=limit,
+        )
+        items = [item.model_dump(mode="json") for item in results]
+        return {"success": True, "count": len(items), "memories": items}
+    except TogoException as exc:
+        return _tool_error_result(exc)
+
+
+async def memory_create(
+    title: str,
+    summary: str,
+    content: str,
+    star_level: str = "none",
+    tags: Optional[list[str]] = None,
+    _context: ToolCallContext = None,
+) -> dict[str, Any]:
+    """新建一条长期记忆槽位（一个槽位一个独立主题）。
+
+    只在信息具有跨任务长期价值时使用（用户偏好、已确认的技术决策、核心边界约束）。
+    不要把临时闲聊、敏感信息（密码 / 私钥 / Token）、未证实的推测记进来。
+    同一主题已有记忆时请改用 memory_update，不要重复建槽（同名活跃标题会被拒绝）。
+
+    Args:
+        title: 唯一主题标题，单行，≤ 80 字符
+        summary: 单句结论概要，单行，≤ 120 字符
+        content: 完整可执行正文，≤ 1000 字符（可含换行）
+        star_level: 星标级别，none（默认，平时不进提示词）/ title（始终知道主题存在）/ summary（ID、标题与结论始终可见）
+        tags: 标签数组，最多 5 个，单个 ≤ 24 字符
+    """
+    import service.memoryService as memoryService
+
+    try:
+        team_id, agent_id = _require_memory_context(_context)
+        detail = await memoryService.create_memory(
+            team_id,
+            agent_id,
+            title=title,
+            summary=summary,
+            content=content,
+            star_level=star_level,
+            tags=tags,
+        )
+        return {"success": True, "memory": detail.model_dump(mode="json")}
+    except TogoException as exc:
+        return _tool_error_result(exc)
+
+
+async def memory_update(
+    memory_id: int,
+    title: Optional[str] = None,
+    summary: Optional[str] = None,
+    content: Optional[str] = None,
+    star_level: Optional[str] = None,
+    status: Optional[str] = None,
+    tags: Optional[list[str]] = None,
+    _context: ToolCallContext = None,
+) -> dict[str, Any]:
+    """更新或归档一条已有记忆。未传的字段保持不变（传了就按该字段的规则校验）。
+
+    修改正文（content）时必须同时传入最新的 summary，保证概要与正文一致；
+    归档（status="archived"）会自动把星标重置为 none、释放星标额度。
+
+    Args:
+        memory_id: 记忆 ID
+        title: 新标题，单行，≤ 80 字符
+        summary: 新概要，单行，≤ 120 字符（改 content 时必传）
+        content: 新正文，≤ 1000 字符（可含换行）
+        star_level: 新星标级别：none / title / summary（活跃星标总数上限 12，其中 summary 上限 6）
+        status: 新状态：active / archived（归档自动剥离星标）
+        tags: 新标签数组，最多 5 个，单个 ≤ 24 字符
+    """
+    import service.memoryService as memoryService
+
+    try:
+        team_id, agent_id = _require_memory_context(_context)
+        detail = await memoryService.update_memory(
+            team_id,
+            agent_id,
+            memory_id,
+            title=title,
+            summary=summary,
+            content=content,
+            star_level=star_level,
+            status=status,
+            tags=tags,
+        )
+        return {"success": True, "memory": detail.model_dump(mode="json")}
+    except TogoException as exc:
+        return _tool_error_result(exc)

@@ -221,6 +221,12 @@ EXPECTED_TOOL_CATEGORIES = {
     "list_task_events": ToolCategory.BASIC,
     "list_tasks": ToolCategory.BASIC,
     "load_skill": ToolCategory.BASIC,
+    # 长期记忆工具（#134）：与任务 / 技能同属基础能力，默认对所有 Agent 生效
+    "memory_create": ToolCategory.BASIC,
+    "memory_list": ToolCategory.BASIC,
+    "memory_read": ToolCategory.BASIC,
+    "memory_search": ToolCategory.BASIC,
+    "memory_update": ToolCategory.BASIC,
     "process_list": ToolCategory.EXECUTE,
     "process_output": ToolCategory.EXECUTE,
     "process_stop": ToolCategory.EXECUTE,

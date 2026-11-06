@@ -398,6 +398,148 @@
       "skill_name"
     ]
   },
+  "memory_create": {
+    "description": "新建一条长期记忆槽位（一个槽位一个独立主题）。",
+    "parameters": {
+      "content": {
+        "description": "完整可执行正文，≤ 1000 字符（可含换行）",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "star_level": {
+        "description": "星标级别，none（默认，平时不进提示词）/ title（始终知道主题存在）/ summary（ID、标题与结论始终可见）",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "summary": {
+        "description": "单句结论概要，单行，≤ 120 字符",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "tags": {
+        "description": "标签数组，最多 5 个，单个 ≤ 24 字符",
+        "schema": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "title": {
+        "description": "唯一主题标题，单行，≤ 80 字符",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "title",
+      "summary",
+      "content"
+    ]
+  },
+  "memory_list": {
+    "description": "列出你自己的长期记忆目录（L1：ID、标题、星标级别、标签、更新时间），不含正文。",
+    "parameters": {
+      "include_archived": {
+        "description": "是否一并返回已归档记忆，默认 false（只看活跃记忆）",
+        "schema": {
+          "type": "boolean"
+        }
+      }
+    },
+    "required": []
+  },
+  "memory_read": {
+    "description": "读取一条记忆的完整正文（L3）。只在确实需要具体执行依据、完整步骤时才用。",
+    "parameters": {
+      "memory_id": {
+        "description": "记忆 ID（来自 memory_list / memory_search / 提示词里的 #id）",
+        "schema": {
+          "type": "integer"
+        }
+      }
+    },
+    "required": [
+      "memory_id"
+    ]
+  },
+  "memory_search": {
+    "description": "用关键词检索你的长期记忆，返回概要 + 命中正文片段（L2），不含完整正文。",
+    "parameters": {
+      "limit": {
+        "description": "返回条数上限，默认 5，取值 1-20（超出按边界收敛）",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "query": {
+        "description": "检索关键词，多个关键词用空格分隔；不能为空",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "query"
+    ]
+  },
+  "memory_update": {
+    "description": "更新或归档一条已有记忆。未传的字段保持不变（传了就按该字段的规则校验）。",
+    "parameters": {
+      "content": {
+        "description": "新正文，≤ 1000 字符（可含换行）",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "memory_id": {
+        "description": "记忆 ID",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "star_level": {
+        "description": "新星标级别：none / title / summary（活跃星标总数上限 12，其中 summary 上限 6）",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "status": {
+        "description": "新状态：active / archived（归档自动剥离星标）",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "summary": {
+        "description": "新概要，单行，≤ 120 字符（改 content 时必传）",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "tags": {
+        "description": "新标签数组，最多 5 个，单个 ≤ 24 字符",
+        "schema": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "title": {
+        "description": "新标题，单行，≤ 80 字符",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "memory_id"
+    ]
+  },
   "reload_team": {
     "description": "重载当前团队的运行时，可能中断团队内正在执行的任务。\n成员、组织或房间的配置变更需重载后才生效。",
     "parameters": {},

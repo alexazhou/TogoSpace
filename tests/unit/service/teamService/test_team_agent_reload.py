@@ -105,6 +105,7 @@ async def test_load_team_agents_allows_startup_without_available_llm(
             driver_config: Any = None,
             agent_workdir: str = "",
             is_root_leader: bool = False,
+            prompt_refresh_fn: Any = None,
         ) -> None:
             self.gt_agent = gt_agent
             self.system_prompt = system_prompt
@@ -172,6 +173,7 @@ async def test_load_team_agents_custom_working_directory_keeps_inner_layout(
             driver_config: Any = None,
             agent_workdir: str = "",
             is_root_leader: bool = False,
+            prompt_refresh_fn: Any = None,
         ) -> None:
             self.gt_agent = gt_agent
             self.agent_workdir = agent_workdir
@@ -225,6 +227,7 @@ async def test_load_team_agents_injects_admin_tools_only_for_top_manager(
             driver_config: Any = None,
             agent_workdir: str = "",
             is_root_leader: bool = False,
+            prompt_refresh_fn: Any = None,
         ) -> None:
             self.gt_agent = gt_agent
             self.system_prompt = system_prompt

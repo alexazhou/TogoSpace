@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 
@@ -11,6 +12,8 @@ from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService.promptRenderer import render_prompt
 from service.agentService.prompts import TURN_CONTEXT_SUFFIX
 from util import configUtil
+
+logger = logging.getLogger(__name__)
 
 
 def build_turn_begin_prompt(room_name: str, messages: list[tuple[str, str, datetime | None]]) -> str:
@@ -266,6 +269,22 @@ async def build_agent_system_prompt(
 
     is_leader = is_root_leader or any(entry.get("你在部门中的角色") == "主管" for entry in dept_entries)
 
+    # 星标记忆快照：只有真正归属某个团队/Agent 时才拉（`team_id > 0 and agent_id > 0`），
+    # 否则（如系统级 / 测试构造）保持不注入，模板里 `starred_memories` 为空即整段不渲染。
+    starred_memories: list = []
+    if team_id > 0 and agent_id > 0:
+        try:
+            import service.memoryService as memoryService
+
+            starred_memories = await memoryService.get_starred_memories(team_id, agent_id)
+        except Exception:
+            # 记忆是增强能力：读失败不能拖垮整个 Agent 启动（Agent 起不来比少一段提示词严重得多）。
+            logger.warning(
+                "拉取星标记忆失败，本次不注入记忆快照: team_id=%d, agent_id=%d",
+                team_id, agent_id, exc_info=True,
+            )
+            starred_memories = []
+
     return render_prompt(
         "system_prompt.j2",
         base_prompt=custom_base_prompt,
@@ -282,4 +301,5 @@ async def build_agent_system_prompt(
         is_leader=is_leader,
         is_root_leader=is_root_leader,
         skills=skills_to_show,
+        starred_memories=starred_memories,
     )

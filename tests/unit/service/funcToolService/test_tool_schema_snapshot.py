@@ -88,6 +88,13 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     "list_task_events": ["task_id", "limit", "before_id"],
     "list_tasks": ["assignee", "reviewer", "scope", "status", "title_keyword", "open_only", "limit"],
     "load_skill": ["skill_name"],
+    # 长期记忆工具（#134）。参数顺序统一「先定位（memory_id / query）、后修改字段、
+    # 最后是可选开关」：memory_list 只有开关；memory_update 的 memory_id 必填在最前。
+    "memory_create": ["title", "summary", "content", "star_level", "tags"],
+    "memory_list": ["include_archived"],
+    "memory_read": ["memory_id"],
+    "memory_search": ["query", "limit"],
+    "memory_update": ["memory_id", "title", "summary", "content", "star_level", "status", "tags"],
     "reload_team": [],
     "save_agent": ["name", "role_template_name", "model", "driver", "allow_tools", "allow_skills", "i18n", "overwrite_existing", "agent_id"],
     "save_dept": ["name", "responsibility", "manager_name", "member_names", "parent_name", "i18n", "overwrite_existing", "dept_id"],

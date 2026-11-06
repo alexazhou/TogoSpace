@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import List
+from typing import Awaitable, Callable, List
 
 from constants import (
     AgentActivityStatus, AgentActivityType,
@@ -68,15 +68,46 @@ class AgentTurnRunner:
         system_prompt: str,
         agent_workdir: str = "",
         driver_config: AgentDriverConfig | None = None,
+        prompt_refresh_fn: Callable[[], Awaitable[str]] | None = None,
     ):
         self.gt_agent: GtAgent = gt_agent
         self.system_prompt: str = system_prompt
         self.agent_workdir: str = agent_workdir
+        # 无参异步闭包：重新构建 System Prompt（含最新星标记忆快照）。
+        # 为 None 时行为与引入该参数前**完全一致**（prompt 一旦构造就不刷新），
+        # 这条「不传则不刷新」有专门的回归用例。
+        self._prompt_refresh_fn: Callable[[], Awaitable[str]] | None = prompt_refresh_fn
         self._history: AgentHistoryStore = AgentHistoryStore(gt_agent.id or 0)
         self.tool_registry: AgentToolRegistry = AgentToolRegistry()
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
         self._current_room: ChatRoom | None = None
         self._current_job: GtScheduleJob | None = None
+
+    async def _refresh_system_prompt(self) -> None:
+        """从数据库重建 System Prompt（只在 compact 切新 session 后调用）。
+
+        记忆写入是实时落库的，但**当前 session 的 prompt 故意不跟着变**：会话中途换
+        System Prompt 会让大模型侧的 Prompt Cache 全部失效（step2 §1.2 原则 3）。
+        所以刷新点只有一个——compact 切新 session 时。
+
+        刷新失败只记日志、不抛：compact 已经成功（新 session 已建立），
+        不能因为提示词刷新失败把整轮对话打挂；最坏情况是这一轮沿用旧快照。
+        """
+        if self._prompt_refresh_fn is None:
+            return
+        try:
+            refreshed = await self._prompt_refresh_fn()
+        except Exception:
+            logger.warning(
+                "刷新 System Prompt 失败，本轮沿用旧快照: agent_id=%s", self.gt_agent.id, exc_info=True,
+            )
+            return
+        if refreshed:
+            self.system_prompt = refreshed
+            logger.info(
+                "[memory-refresh] System Prompt 已按最新星标快照重建: agent_id=%s, chars=%d",
+                self.gt_agent.id, len(refreshed),
+            )
 
     @property
     def _session_id(self) -> str:
@@ -1083,6 +1114,11 @@ class AgentTurnRunner:
             AgentMessage(role=OpenaiApiRole.USER, content=summary_text),
             seq=compact_plan.insert_seq,
         )
+
+        # 新 session 已建立：此刻刷新 System Prompt，让后续 token 估算与新 session 首次推理
+        # 直接搭载最新星标快照（step2 §3.1）。放在 insert_compact_summary 之后、
+        # 活动收尾之前——刷新失败不影响 compact 本身的成功状态。
+        await self._refresh_system_prompt()
 
         # 活动记录：COMPACT SUCCEEDED
         await self._finish_activity(compact_activity.id, status=AgentActivityStatus.SUCCEEDED)

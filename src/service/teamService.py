@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from dal.db import gtTeamManager, gtAgentManager, gtScheduleJobManager, gtAgentHistoryManager, gtRoomMessageManager, gtRoomManager, gtAgentTaskManager, gtAgentActivityManager
+from dal.db import gtTeamManager, gtAgentManager, gtScheduleJobManager, gtAgentHistoryManager, gtRoomMessageManager, gtRoomManager, gtAgentTaskManager, gtAgentActivityManager, gtAgentMemoryManager
 from exception import TogoException
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
@@ -278,7 +278,7 @@ async def clear_team_data(team_id: int) -> dict[str, int]:
     保留团队配置（成员、房间结构、部门结构）。
 
     Returns:
-        删除统计 {"tasks": n, "histories": n, "messages": n}
+        删除统计 {"tasks": n, "histories": n, "messages": n, ..., "memories": n}
     """
     # 1. 停止运行时
     await stop_team_runtime(team_id)
@@ -289,6 +289,8 @@ async def clear_team_data(team_id: int) -> dict[str, int]:
     histories_deleted = await gtAgentHistoryManager.delete_history_by_team(team_id)
     messages_deleted = await gtRoomMessageManager.delete_messages_by_team(team_id)
     activities_deleted = await gtAgentActivityManager.delete_activities_by_team(team_id)
+    # 长期记忆随团队数据一起清空：重置后 Agent 必须彻底回到初始态，不残留旧项目规则
+    memories_deleted = await gtAgentMemoryManager.delete_memories_by_team(team_id)
 
     # 3. 删除所有非 DEPT 房间（保留部门树管理的房间）
     all_rooms = await gtRoomManager.get_rooms_by_team(team_id)
@@ -306,6 +308,7 @@ async def clear_team_data(team_id: int) -> dict[str, int]:
         "messages": messages_deleted,
         "rooms": rooms_deleted,
         "activities": activities_deleted,
+        "memories": memories_deleted,
     }
 
     logger.info(f"Team ID={team_id} 数据已清空: {result}")
@@ -318,7 +321,7 @@ async def clear_agent_data(agent_id: int) -> dict[str, int]:
     清除后触发 Agent 所在 Team 的热更新，重建运行态。
 
     Returns:
-        删除统计 {"histories": n}
+        删除统计 {"histories": n, "memories": n}
     """
     agent = await gtAgentManager.get_agent_by_id(agent_id)
     if agent is None:
@@ -329,8 +332,10 @@ async def clear_agent_data(agent_id: int) -> dict[str, int]:
         raise TogoException(f"Team ID '{agent.team_id}' not found for agent", "team_not_found")
 
     histories_deleted = await gtAgentHistoryManager.delete_history_by_agent(agent_id)
+    # 长期记忆属于「Agent 历史数据」的一部分：清除后必须回到空白初始态
+    memories_deleted = await gtAgentMemoryManager.delete_memories_by_agent(agent_id)
 
-    result = {"histories": histories_deleted}
+    result = {"histories": histories_deleted, "memories": memories_deleted}
     logger.info("Agent ID=%d 历史数据已清除: %s", agent_id, result)
 
     await hot_reload_team(team.name)
