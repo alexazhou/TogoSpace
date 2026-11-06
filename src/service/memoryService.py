@@ -199,6 +199,32 @@ async def _assert_star_quota(
 
 
 # ---------------------------------------------------------------------------
+# 变更广播
+# ---------------------------------------------------------------------------
+
+
+def _publish_memory_changed(team_id: int, agent_id: int, memory_id: int, action: str) -> None:
+    """广播「某个 Agent 的记忆变了」，供前端弹窗内的记忆 Tab 实时重拉。
+
+    **只在事务提交之后调用**：事务内 publish 会让前端先于落库去查，
+    查到旧数据后不再有第二次推送，界面就永远停在旧值上（比不推更糟）。
+
+    延迟 import 与 `taskService` 同一处理方式，避免 service 模块间的循环引用；
+    `messageBus.publish` 本身要求调用方在事件循环内，这里由调用链保证。
+    """
+    from constants import MessageBusTopic
+    from service import messageBus
+
+    messageBus.publish(
+        MessageBusTopic.AGENT_MEMORY_CHANGED,
+        team_id=team_id,
+        agent_id=agent_id,
+        memory_id=memory_id,
+        action=action,
+    )
+
+
+# ---------------------------------------------------------------------------
 # CRUD
 # ---------------------------------------------------------------------------
 
@@ -246,6 +272,7 @@ async def create_memory(
         "记忆已创建: team_id=%d, agent_id=%d, memory_id=%s, star_level=%s",
         team_id, agent_id, memory.id, level.value,
     )
+    _publish_memory_changed(team_id, agent_id, memory.id, "created")
     return MemoryDetail.from_memory(memory)
 
 
@@ -334,6 +361,7 @@ async def update_memory(
         "记忆已更新: team_id=%d, agent_id=%d, memory_id=%d, star_level=%s, status=%s",
         team_id, agent_id, memory_id, target_level.value, target_status.value,
     )
+    _publish_memory_changed(team_id, agent_id, memory_id, "updated")
     return MemoryDetail.from_memory(memory)
 
 

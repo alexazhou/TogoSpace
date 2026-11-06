@@ -74,6 +74,19 @@ export type FrontendRealtimeEvent =
     activity: AgentActivity;
   }
   | {
+    /**
+     * Agent 长期记忆变更（新建 / 更新 / 归档）。
+     *
+     * 只是「某某的记忆变了」的通知，**不携带记忆内容**：前端收到后自行重拉列表，
+     * 避免把整条记忆（正文可达 1000 字）塞进 WS 帧、也避免两处渲染口径分叉。
+     */
+    type: 'agent_memory_changed';
+    teamId: number;
+    agentId: number;
+    memoryId: number;
+    action: string;
+  }
+  | {
     type: 'room_status';
     teamId: number;
     roomId: number;
@@ -311,6 +324,23 @@ export function normalizeWsEventPayload(payload: unknown): FrontendRealtimeEvent
       type: 'agent_activity',
       agentId: activity.agent_id,
       activity,
+    };
+  }
+
+  if (eventType === 'agent_memory_changed') {
+    const teamId = Number(raw.team_id ?? 0);
+    const agentId = Number(raw.agent_id ?? 0);
+    if (!Number.isFinite(teamId) || !Number.isFinite(agentId) || teamId <= 0 || agentId <= 0) {
+      return null;
+    }
+
+    const memoryId = Number(raw.memory_id ?? 0);
+    return {
+      type: 'agent_memory_changed',
+      teamId,
+      agentId,
+      memoryId: Number.isFinite(memoryId) && memoryId > 0 ? memoryId : 0,
+      action: String(raw.action ?? ''),
     };
   }
 

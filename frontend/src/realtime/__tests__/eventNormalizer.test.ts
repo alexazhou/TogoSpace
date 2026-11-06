@@ -25,6 +25,46 @@ describe('normalizeWsEventPayload', () => {
     });
   });
 
+  describe('agent_memory_changed', () => {
+    it('normalizes team/agent/memory identity and action', () => {
+      const event = normalizeWsEventPayload({
+        event: 'agent_memory_changed',
+        team_id: 2,
+        agent_id: 7,
+        memory_id: 31,
+        action: 'created',
+      });
+
+      expect(event).toEqual({
+        type: 'agent_memory_changed',
+        teamId: 2,
+        agentId: 7,
+        memoryId: 31,
+        action: 'created',
+      });
+    });
+
+    it('drops the event when agent or team identity is invalid', () => {
+      // 脏 payload 不能进业务分发：面板按 agentId 比对，脏 id 会误触发别的 Agent 重拉。
+      expect(normalizeWsEventPayload({
+        event: 'agent_memory_changed', team_id: 2, agent_id: 0, memory_id: 31,
+      })).toBeNull();
+
+      expect(normalizeWsEventPayload({
+        event: 'agent_memory_changed', team_id: -1, agent_id: 7, memory_id: 31,
+      })).toBeNull();
+    });
+
+    it('keeps memory_id numeric even when the payload omits it', () => {
+      // 归档/删除类变更可能没有具体 id；这时仍要推给面板，只是 memoryId 归 0。
+      const event = normalizeWsEventPayload({
+        event: 'agent_memory_changed', team_id: 2, agent_id: 7, action: 'updated',
+      });
+
+      expect(event).toMatchObject({ type: 'agent_memory_changed', memoryId: 0 });
+    });
+  });
+
   it('normalizes message_changed db_id from id fallback', () => {
     const event = normalizeWsEventPayload({
       event: 'message_changed',

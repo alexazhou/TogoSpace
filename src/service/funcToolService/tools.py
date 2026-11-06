@@ -16,6 +16,7 @@ from model.dbModel.gtDept import GtDept
 from model.dbModel.gtRoleTemplate import GtRoleTemplate
 from service.roomService import ToolCallContext
 import service.containerService as containerService
+import service.memoryService as memoryService
 import service.roomService as roomService
 import service.skillService as skillService
 import service.thirdPartyService as thirdPartyService
@@ -1681,8 +1682,6 @@ async def memory_list(
     Args:
         include_archived: 是否一并返回已归档记忆，默认 false（只看活跃记忆）
     """
-    import service.memoryService as memoryService
-
     try:
         team_id, agent_id = _require_memory_context(_context)
         memories = await memoryService.list_memories(
@@ -1705,8 +1704,6 @@ async def memory_read(
     Args:
         memory_id: 记忆 ID（来自 memory_list / memory_search / 提示词里的 #id）
     """
-    import service.memoryService as memoryService
-
     try:
         team_id, agent_id = _require_memory_context(_context)
         detail = await memoryService.read_memory(team_id, agent_id, memory_id)
@@ -1729,8 +1726,6 @@ async def memory_search(
         query: 检索关键词，多个关键词用空格分隔；不能为空
         limit: 返回条数上限，默认 5，取值 1-20（超出按边界收敛）
     """
-    import service.memoryService as memoryService
-
     try:
         team_id, agent_id = _require_memory_context(_context)
         results = await memoryService.search_memories(
@@ -1763,8 +1758,6 @@ async def memory_create(
         star_level: 星标级别，none（默认，平时不进提示词）/ title（始终知道主题存在）/ summary（ID、标题与结论始终可见）
         tags: 标签数组，最多 5 个，单个 ≤ 24 字符
     """
-    import service.memoryService as memoryService
-
     try:
         team_id, agent_id = _require_memory_context(_context)
         detail = await memoryService.create_memory(
@@ -1805,8 +1798,6 @@ async def memory_update(
         status: 新状态：active / archived（归档自动剥离星标）
         tags: 新标签数组，最多 5 个，单个 ≤ 24 字符
     """
-    import service.memoryService as memoryService
-
     try:
         team_id, agent_id = _require_memory_context(_context)
         detail = await memoryService.update_memory(

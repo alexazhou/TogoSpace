@@ -163,14 +163,26 @@ function connectRealtimeSocket(): void {
       return;
     }
 
-    // 鉴权启用时，第一条消息到达表示认证成功
-    if (authEnabled.value && connectionState.value === 'connecting') {
-      connectionState.value = 'connected';
-      reconnectAttempt = 0;
-    }
-
     try {
       const payload = JSON.parse(messageEvent.data);
+
+      // 后端认证成功后显式回一帧 `{ event: 'auth_ok' }`，这是「连接就绪」的
+      // 权威信号：不依赖总线上恰好有业务事件（否则右上角会一直显示「连接中」）。
+      // 仍然兼容只发业务事件的旧后端——下面那条「首条消息即视为认证成功」保留，
+      // 旧后端的首条业务消息照样能把状态置绿。
+      const isAuthAck = authEnabled.value
+        && (payload as { event?: unknown } | null)?.event === 'auth_ok';
+
+      if (isAuthAck || (authEnabled.value && connectionState.value === 'connecting')) {
+        connectionState.value = 'connected';
+        reconnectAttempt = 0;
+      }
+
+      if (isAuthAck) {
+        // ack 只是连接层信号，没有业务含义，不进事件分发
+        return;
+      }
+
       const normalized = normalizeWsEventPayload(payload);
       if (normalized) {
         emitRealtimeEvent(normalized);

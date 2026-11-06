@@ -110,8 +110,11 @@ async def list_memories(
     return list(
         await query.order_by(
             _STAR_WEIGHT.desc(),
-            GtAgentMemory.updated_at.desc(),
-            GtAgentMemory.id.desc(),
+            # peewee 的类字段在 mypy 静态视角是 `datetime` / `int` 值类型（见
+            # `DbModelBase` 的注解），运行时才由 metaclass 暴露为 Field 对象。
+            # 与 `gtAgentHistoryManager` 同一处理方式：就地抑制 attr-defined。
+            GtAgentMemory.updated_at.desc(),  # type: ignore[attr-defined]
+            GtAgentMemory.id.desc(),  # type: ignore[attr-defined]
         ).aio_execute()
     )
 
@@ -132,8 +135,8 @@ async def list_starred_memories(team_id: int, agent_id: int) -> list[GtAgentMemo
         )
         .order_by(
             _STAR_WEIGHT.desc(),
-            GtAgentMemory.updated_at.desc(),
-            GtAgentMemory.id.desc(),
+            GtAgentMemory.updated_at.desc(),  # type: ignore[attr-defined]
+            GtAgentMemory.id.desc(),  # type: ignore[attr-defined]
         )
         .aio_execute()
     )

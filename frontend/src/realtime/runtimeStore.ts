@@ -758,6 +758,12 @@ export function applyRealtimeEvent(event: FrontendRealtimeEvent): void {
     return;
   }
 
+  if (event.type === 'agent_memory_changed') {
+    // 全局 store 不缓存记忆列表（记忆只在 Agent 卡片弹窗里按需拉取），
+    // 这里显式吞掉，由 `AgentMemoryPanel` 自己订阅同一事件重拉。
+    return;
+  }
+
   if (event.type === 'room_added') {
     updateTeamRooms(event.teamId, (rooms) => {
       const idx = rooms.findIndex((r) => r.room_id === event.room.room_id);
