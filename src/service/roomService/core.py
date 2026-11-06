@@ -58,13 +58,27 @@ async def startup() -> None:
     _reset()
 
 
-async def _load_room(gt_team: GtTeam, gt_room: GtRoom) -> None:
-    """将数据库房间装载到运行态。"""
+async def _load_room(gt_team: GtTeam, gt_room: GtRoom) -> ChatRoom:
+    """将数据库房间**造壳**装入运行态（不读消息 / 读游标）。
+
+    ⚠️ 仅内部使用：造出的房间未就绪，写入 / 激活会抛 `room_state_not_ready`。
+    """
     room = ChatRoom(team=gt_team, room=gt_room)
     _rooms[room.key] = room
     _rooms_by_id[room.room_id] = room
 
     logger.info(f"创建并初始化聊天室: room_id={room.room_id}, type={room.room_type.name}, agent_ids={gt_room.agent_ids}")
+    return room
+
+
+async def load_room_with_state(gt_team: GtTeam, gt_room: GtRoom) -> ChatRoom:
+    """装载房间并灌入运行时态（消息 / 读游标 / `_next_seq`）—— 唯一对外装载入口。
+
+    `_load_room` + `_restore_room_runtime_state` 一步到位；新建空房间同样置为就绪。
+    """
+    room = await _load_room(gt_team=gt_team, gt_room=gt_room)
+    await _restore_room_runtime_state(room)
+    return room
 
 
 async def load_team_rooms(team_id: int) -> None:
@@ -78,7 +92,7 @@ async def load_team_rooms(team_id: int) -> None:
 
     gt_rooms = await gtRoomManager.get_rooms_by_team(gt_team.id)
     for gt_room in gt_rooms:
-        await _load_room(gt_team=gt_team, gt_room=gt_room)
+        await load_room_with_state(gt_team=gt_team, gt_room=gt_room)
 
     logger.info(f"Team '{gt_team.name}' 的内存房间已重建，共 {len(gt_rooms)} 个房间")
 
@@ -87,7 +101,7 @@ async def load_all_rooms() -> None:
     """从数据库读取所有房间配置，并创建对应的内存房间对象。"""
     for gt_team in await gtTeamManager.get_all_teams():
         for gt_room in await gtRoomManager.get_rooms_by_team(gt_team.id):
-            await _load_room(gt_team=gt_team, gt_room=gt_room)
+            await load_room_with_state(gt_team=gt_team, gt_room=gt_room)
 
 
 async def close_team_rooms(team_id: int) -> None:
@@ -128,6 +142,10 @@ async def _restore_room_runtime_state(room: ChatRoom) -> None:
         room.mark_all_messages_read()
 
     room.rebuild_state_from_history(persisted_speaker_index=speaker_index if recovered_from_db else None)
+
+    # 无条件置位：走到这里就说明已读过库（读到 0 条也算）。
+    # 不能放进上面的 if —— 空房间不进该分支。
+    room.mark_runtime_state_ready()
 
 
 async def restore_team_rooms_runtime_state(team_id: int) -> None:
@@ -209,9 +227,8 @@ async def get_or_create_control_room(team_id: int, agent_id: int) -> tuple[ChatR
     if gt_room is not None:
         room = _rooms_by_id.get(gt_room.id)
         if room is None:
-            # DB 有记录但内存里没有（如重启后），重新装载
-            await _load_room(gt_team=gt_team, gt_room=gt_room)
-            room = _rooms_by_id[gt_room.id]
+            # 内存里没有但 DB 有：必须连运行时态一起装载，否则会被当成新房间补写 seq=0
+            room = await load_room_with_state(gt_team=gt_team, gt_room=gt_room)
         # 若房间仍处于 INIT（如热更新时调度闸门关闭导致未激活），补充激活
         await room.activate_scheduling()
         return room, False
@@ -486,7 +503,7 @@ async def load_and_activate_room(room_id: int) -> None:
     gt_team = await gtTeamManager.get_team_by_id(gt_room.team_id)
     if gt_team is None:
         raise RuntimeError(f"team_id={gt_room.team_id} 不存在，无法加载房间")
-    await _load_room(gt_team=gt_team, gt_room=gt_room)
+    await load_room_with_state(gt_team=gt_team, gt_room=gt_room)
     room = _rooms_by_id[room_id]
     await room.activate_scheduling()
 

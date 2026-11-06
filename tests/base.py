@@ -28,6 +28,7 @@ import service.roleTemplateService as roleTemplateService
 from dal.db import gtAgentManager, gtTeamManager, gtRoomManager, gtRoleTemplateManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtRoom import GtRoom
+from model.dbModel.gtRoomMessage import GtRoomMessage
 from util.configUtil.configTypes import AgentPreset
 from util import configUtil
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall
@@ -667,7 +668,15 @@ class ServiceTestCase:
         room_type: RoomType = RoomType.GROUP,
         max_rounds: int = -1,
     ) -> None:
-        """测试辅助：通过生产 API（gtRoomManager.save_room + load_all_rooms）创建或更新房间。"""
+        """测试辅助：通过生产 API（gtRoomManager.save_room + load_all_rooms）创建或更新房间。
+
+        **复用同名房间时显式清空其消息与读游标**，保证每个用例都从「空房间」起步。
+
+        为什么必须显式清：用例间复用同名房间（如 "general" / "test_room"）时，
+        旧实现靠 `load_all_rooms` 只造空壳的缺陷「顺带」清空了内存视图 ——
+        但库里消息仍在，`activate_scheduling` 又补写一条 seq=0（正是生产事故那个 bug）。
+        该缺陷修掉后装载会如实恢复历史，若不在这里显式清，用例就会读到上一个用例的残留。
+        """
         gt_team = await gtTeamManager.get_team(team_name)
         assert gt_team is not None, f"Team '{team_name}' 不存在"
         agents = await gtAgentManager.get_team_agents_by_names(gt_team.id, agent_names)
@@ -689,7 +698,15 @@ class ServiceTestCase:
             gt_room.initial_topic = initial_topic
             gt_room.max_rounds = max_rounds
             gt_room.agent_ids = agent_ids
-        await gtRoomManager.save_room(gt_room)
+        saved_room = await gtRoomManager.save_room(gt_room)
+        # 从「空房间」起步：清消息 + 清读游标/发言位
+        await (
+            GtRoomMessage
+            .delete()
+            .where(GtRoomMessage.room_id == saved_room.id)  # type: ignore[attr-defined]
+            .aio_execute()
+        )
+        await gtRoomManager.update_room_state(saved_room.id, {}, None)
         await roomService.load_all_rooms()
 
     @staticmethod

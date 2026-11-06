@@ -31,6 +31,9 @@ class ChatRoom:
     def __init__(self, team: GtTeam, room: GtRoom):
         self.gt_room: GtRoom = room
         self.gt_team: GtTeam = team
+        # 内存运行时态（消息/读游标/_next_seq）是否已与 DB 对齐过。
+        # 「读了但 DB 是空的」也算就绪；不能用 `if not self.messages` 代替。
+        self._runtime_state_ready: bool = False
         self._store = RoomMessageStore(gt_room=room)
         self._scheduler = RoomScheduler(
             room_key=self.key,
@@ -138,6 +141,13 @@ class ChatRoom:
         if self._scheduler.state != RoomState.INIT:
             return False
 
+        # 未装载就写初始消息，会把有历史的房间当新房间补写 seq=0（线上 bug 根因）
+        assertUtil.assertTrue(
+            self._runtime_state_ready,
+            error_message=f"房间运行时状态未装载，拒绝 activate_scheduling: {self.key}",
+            error_code="room_state_not_ready",
+        )
+
         if not self.messages:
             content = await self.build_initial_system_message()
             agent = await gtAgentManager.get_agent_by_id(self.SYSTEM_MEMBER_ID)
@@ -179,6 +189,12 @@ class ChatRoom:
             self.can_post_message(sender_id),
             error_message=f"sender_id '{sender_id}' is not an agent of room '{self.key}'",
             error_code="sender_not_in_room",
+        )
+        # 未装载时 _next_seq=0，会从 0 发号与历史 seq 撞车
+        assertUtil.assertTrue(
+            self._runtime_state_ready,
+            error_message=f"房间运行时状态未装载，拒绝写入: {self.key}",
+            error_code="room_state_not_ready",
         )
         state = self._scheduler.state
 
@@ -233,6 +249,14 @@ class ChatRoom:
 
 
     # ─── 运行时状态注入与导出 ─────────────────────────────────
+
+    @property
+    def runtime_state_ready(self) -> bool:
+        """内存运行时态（消息列表 / 读游标 / `_next_seq`）是否已与 DB 对齐过一次。"""
+        return self._runtime_state_ready
+
+    def mark_runtime_state_ready(self) -> None:
+        self._runtime_state_ready = True
 
     def inject_runtime_state(
         self,
