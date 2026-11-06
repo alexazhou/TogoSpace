@@ -287,6 +287,127 @@ describe('PendingMessageBar 徽标 tooltip 不被浮层裁剪（回归 P1）', (
   });
 });
 
+describe('PendingMessageBar tooltip 在滚动 / 卸载时的边界（P1-1 新机制）', () => {
+  /**
+   * happy-dom 不跑布局，`getBoundingClientRect` 恒为 0。这里手动喂一个可变的徽标几何，
+   * 用「改 top + 派发 scroll」模拟真实浏览器里 hover 期间滚动列表。
+   */
+  function stubBadgeRect(wrapper: ReturnType<typeof mount>, initialTop: number) {
+    const badge = wrapper.find('.pending-message-status').element as HTMLElement;
+    const state = { top: initialTop };
+    badge.getBoundingClientRect = () => ({
+      top: state.top,
+      bottom: state.top + 20,
+      left: 700,
+      right: 780,
+      x: 700,
+      y: state.top,
+      width: 80,
+      height: 20,
+      toJSON: () => ({}),
+    }) as DOMRect;
+    return state;
+  }
+
+  it('hover 期间滚动列表，tooltip 按徽标新位置重算而不是停在旧坐标', async () => {
+    const wrapper = mountBar({ item: createItem({ status: 'queued' }) });
+    await flushPromises();
+
+    const badgeState = stubBadgeRect(wrapper, 400);
+    await wrapper.find('.pending-message-status').trigger('mouseenter');
+
+    const tooltip = () => document.body.querySelector('.pending-message-tooltip') as HTMLElement | null;
+    expect(tooltip()).not.toBeNull();
+
+    // fixed 坐标是「距视口底部」：bottom = innerHeight - badgeTop + 6
+    const innerHeight = window.innerHeight;
+    const firstBottom = tooltip()!.style.bottom;
+    expect(firstBottom).toBe(`${innerHeight - 400 + 6}px`);
+
+    // 列表向下滚 40px → 徽标上移 40px。scroll 不冒泡，但捕获阶段能到 window。
+    badgeState.top = 360;
+    window.dispatchEvent(new Event('scroll'));
+    // 坐标是响应式状态，要等一次 patch 才落到 DOM style 上
+    await flushPromises();
+
+    expect(tooltip()!.style.bottom).toBe(`${innerHeight - 360 + 6}px`);
+    // 关键断言：真的变了。不变的话 tooltip 会压住徽标（真机实测滚 8px 后间距 +6 → -2）
+    expect(tooltip()!.style.bottom).not.toBe(firstBottom);
+
+    await wrapper.find('.pending-message-status').trigger('mouseleave');
+  });
+
+  it('tooltip 可见时才挂滚动重算监听，mouseleave 后成对摘掉（不留常驻监听）', async () => {
+    const addSpy = vi.spyOn(window, 'addEventListener');
+    const removeSpy = vi.spyOn(window, 'removeEventListener');
+
+    try {
+      const wrapper = mountBar({ item: createItem({ status: 'queued' }) });
+      await flushPromises();
+      stubBadgeRect(wrapper, 400);
+
+      const count = (spy: typeof addSpy) => spy.mock.calls.filter(([type]) => type === 'scroll').length;
+
+      // hover 之前一条都不该有：不然每个卡片常驻两个 window 监听
+      expect(count(addSpy)).toBe(0);
+
+      await wrapper.find('.pending-message-status').trigger('mouseenter');
+      expect(count(addSpy)).toBe(1);
+      expect(count(removeSpy)).toBe(0);
+
+      await wrapper.find('.pending-message-status').trigger('mouseleave');
+      expect(count(removeSpy)).toBe(1);
+      expect(count(addSpy)).toBe(count(removeSpy));
+    } finally {
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+    }
+  });
+
+  it('tooltip 还开着就被卸载时也要摘掉滚动监听', async () => {
+    const removeSpy = vi.spyOn(window, 'removeEventListener');
+
+    try {
+      const wrapper = mountBar({ item: createItem({ status: 'queued' }) });
+      await flushPromises();
+      stubBadgeRect(wrapper, 400);
+      await wrapper.find('.pending-message-status').trigger('mouseenter');
+
+      const scrollRemovesBefore = removeSpy.mock.calls.filter(([type]) => type === 'scroll').length;
+      expect(scrollRemovesBefore).toBe(0);
+
+      wrapper.unmount();
+
+      expect(removeSpy.mock.calls.filter(([type]) => type === 'scroll').length).toBe(1);
+      // Teleport 到 body 的节点也跟着消失，不留孤儿
+      expect(document.body.querySelector('.pending-message-tooltip')).toBeNull();
+    } finally {
+      removeSpy.mockRestore();
+    }
+  });
+
+  it('Teleport 到 body 的 tooltip 仍带着本组件的 scoped 属性（否则样式规则落不上）', async () => {
+    const wrapper = mountBar({ item: createItem({ status: 'queued' }) });
+    await flushPromises();
+
+    await wrapper.find('.pending-message-status').trigger('mouseenter');
+
+    const tooltip = document.body.querySelector('.pending-message-tooltip') as HTMLElement | null;
+    expect(tooltip).not.toBeNull();
+
+    // Vue 的 scoped CSS 是把 `[data-v-xxx]` 加到选择器上，规则本身挂在文档里不随节点走。
+    // 所以「Teleport 后样式还在」的必要条件是：节点自身保留组件实例的 data-v 属性。
+    // 真机上已用 getComputedStyle 交叉验证（见 evidence/pending/realbrowser/RESULT.txt）。
+    const tooltipScoped = tooltip!.getAttributeNames().filter((a) => a.startsWith('data-v-'));
+    const barScoped = wrapper.find('.pending-message-bar').element.getAttributeNames().filter((a) => a.startsWith('data-v-'));
+
+    expect(tooltipScoped.length).toBeGreaterThan(0);
+    expect(tooltipScoped).toEqual(barScoped);
+
+    await wrapper.find('.pending-message-status').trigger('mouseleave');
+  });
+});
+
 describe('PendingMessageBar 徽标与操作', () => {
   it('排队消息显示 ⏳ 与「排队中」', async () => {
     const wrapper = mountBar({ item: createItem({ status: 'queued' }) });

@@ -75,7 +75,14 @@ const tooltipVisible = ref(false);
 const tooltipStyle = ref<CSSProperties>({});
 const tooltipAnchorRef = useTemplateRef<HTMLElement>('tooltipAnchorRef');
 
-function showTooltip(): void {
+/**
+ * 按徽标当前位置重算 tooltip 坐标。
+ *
+ * 单独抽出来是因为它**不只 hover 时要用**：fixed 坐标是快照，hover 期间一旦发生滚动，
+ * 徽标跟着走而 tooltip 停在原地就会错位（实测滚 8px 后间距从 +6 变成 -2，即压住徽标）。
+ * 所以 visible 期间要在 capture 阶段监听 scroll / resize 重算。
+ */
+function repositionTooltip(): void {
   const rect = tooltipAnchorRef.value?.getBoundingClientRect();
   if (!rect || typeof window === 'undefined') {
     return;
@@ -86,11 +93,43 @@ function showTooltip(): void {
     bottom: `${window.innerHeight - rect.top + 6}px`,
     right: `${window.innerWidth - rect.right}px`,
   };
+}
+
+/**
+ * 滚动 / 尺寸变化的重算监听。
+ *
+ * `scroll` 事件不冒泡，但**捕获阶段**仍会从 window 往下走，所以在 window 上挂 capture
+ * 就能同时收到页面滚动与任意祖先滚动容器（待读浮层的 `__list`）的滚动，不用去猜哪个
+ * 祖先可滚。tooltip 不可见时立即摘掉，不留常驻监听。
+ */
+function attachRepositionListeners(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.addEventListener('scroll', repositionTooltip, true);
+  window.addEventListener('resize', repositionTooltip);
+}
+
+function detachRepositionListeners(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.removeEventListener('scroll', repositionTooltip, true);
+  window.removeEventListener('resize', repositionTooltip);
+}
+
+function showTooltip(): void {
+  if (!tooltipAnchorRef.value) {
+    return;
+  }
+  repositionTooltip();
   tooltipVisible.value = true;
+  attachRepositionListeners();
 }
 
 function hideTooltip(): void {
   tooltipVisible.value = false;
+  detachRepositionListeners();
 }
 
 /** 「立即引导」只对排队消息有意义：加急消息本来就会被尽快注入。 */
@@ -216,6 +255,8 @@ watch(
 onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   resizeObserver = null;
+  // tooltip 是 Teleport 出去的，卸载时 DOM 会跟着走，但 window 上的重算监听不会自己摘。
+  detachRepositionListeners();
 });
 </script>
 
