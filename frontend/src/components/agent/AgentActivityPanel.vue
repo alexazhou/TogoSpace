@@ -280,9 +280,17 @@ watch(
   <div class="agent-activity-panel-body">
     <div v-if="activitiesErrorMessage" class="error-banner">{{ activitiesErrorMessage }}</div>
     <div v-else-if="activitiesLoading && !visibleActivities.length" class="loading-card">{{ t('agent.loadingActivities') }}</div>
-    <div v-else-if="!activitiesLoading && !visibleActivities.length" class="agent-activity-empty">
+    <!--
+      空态只在「既没有活动、也没有待读」时出现：督导后第一帧活动表还是空的，但待读卡片
+      已经在下面了，这时说「暂无活动记录」会自相矛盾。
+    -->
+    <div
+      v-else-if="!activitiesLoading && !visibleActivities.length && !pendingItems.length"
+      class="agent-activity-empty"
+    >
       {{ t('agent.noActivities') }}
     </div>
+    <div v-else-if="!visibleActivities.length" class="agent-activity-list-spacer"></div>
     <div
       v-else
       ref="activityListRef"
@@ -389,6 +397,12 @@ watch(
   place-items: center;
   color: var(--muted);
   margin: 0 0 10px;
+}
+
+/* 有未读但还没有活动：占住列表区剩余空间，把待读区顶到底部。 */
+.agent-activity-list-spacer {
+  flex: 1;
+  min-height: 0;
 }
 
 .loading-card,

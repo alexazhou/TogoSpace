@@ -217,4 +217,26 @@ describe('AgentActivityPanel 待读区', () => {
     expect(escalateMessageToImmediateMock).toHaveBeenCalledTimes(1);
     expect(escalateMessageToImmediateMock).toHaveBeenCalledWith(CONTROL_ROOM_ID, 104);
   });
+
+  it('有未读但还没有任何活动时，不同时显示「暂无活动记录」（回归 P2）', async () => {
+    // 督导后第一帧：消息已落库、Agent 还没消费，活动表还是空的。
+    // 这时若空态照旧出现，面板会同时说「暂无活动记录」和「N 条待读」，自相矛盾。
+    serveControlRoomMessages([
+      createMessage({ db_id: 105, seq: 1, content: '刚发的督导' }),
+    ]);
+
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    expect(wrapper.find('.pending-message-dock').exists()).toBe(true);
+    expect(wrapper.find('.agent-activity-empty').exists()).toBe(false);
+  });
+
+  it('既没有活动也没有待读时仍然显示空态', async () => {
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    expect(wrapper.find('.pending-message-dock').exists()).toBe(false);
+    expect(wrapper.find('.agent-activity-empty').exists()).toBe(true);
+  });
 });
