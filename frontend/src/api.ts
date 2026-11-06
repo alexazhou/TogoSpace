@@ -1206,6 +1206,22 @@ export async function stopAgent(agentId: number): Promise<{ status: string; agen
   });
 }
 
+/**
+ * 手动触发上下文压缩（Compact）。
+ *
+ * 响应里的 `context_usage` **不用来写本地缓存**：压缩后的新数值由后端
+ * `AGENT_CONTEXT_USAGE_CHANGED` 广播推进。两处都写会让「推送先到、响应后到」
+ * 的时序把新值覆盖成旧值。这里只等它成功（或抛出）好收 loading。
+ *
+ * 失败时 `requestJson` 已经弹出后端的 `error_desc`（如「当前无足够可压缩的
+ * 历史消息」），调用方不需要再翻译一遍。
+ */
+export async function compactAgentContext(agentId: number): Promise<{ success: boolean; agent_id: number }> {
+  return requestJson(`/agents/${agentId}/compact.json`, {
+    method: 'POST',
+  });
+}
+
 export type RawMessageInfo = {
   id: number;
   room_id?: number;

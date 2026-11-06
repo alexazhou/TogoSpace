@@ -2,6 +2,7 @@ import type {
   AgentActivity,
   AgentActivityStatus,
   AgentActivityType,
+  AgentContextUsage,
   AgentExecEnv,
   AgentStatus,
   AgentTask,
@@ -67,6 +68,19 @@ export type FrontendRealtimeEvent =
     agentName: string;
     execEnv: AgentExecEnv;
     currentContainerId: string | null;
+  }
+  | {
+    /**
+     * 上下文用量变化（推理收尾 / compact 完成 / 轮次装载）。
+     *
+     * payload 是**扁平**的 `team_id` / `agent_id` / `context_usage`，不像
+     * `agent_status` 那样带整个 `gt_agent` —— 后端 publish 时就是这三个键。
+     * 守卫另写一份：没有 `gt_agent` 可读，只能校验 id 是正有限数。
+     */
+    type: 'agent_context_usage';
+    teamId: number;
+    agentId: number;
+    contextUsage: AgentContextUsage;
   }
   | {
     type: 'agent_activity';
@@ -238,8 +252,45 @@ function normalizeAgentTask(value: unknown): AgentTask | null {
   };
 }
 
-export function normalizeWsEventPayload(payload: unknown): FrontendRealtimeEvent | null {
-  if (!payload || typeof payload !== 'object') {
+/**
+ * 上下文用量取值收敛：任一必需字段不是有限数就整体判脏返回 null。
+ *
+ * 为什么「一个字段脏就整体丢」而不是逐字段补默认值：这条链路的数值全部参与
+ * 「距压缩线还有多远」的判断，补 0 会让面板显示一个看起来正常、实际错误的
+ * 百分比。丢整帧的后果只是「这一帧没更新」，下一帧会补上。
+ *
+ * `ratio` 允许任意有限数（含 >1，见 `AgentContextUsage` 注释），
+ * 负数则视为脏——占比不可能是负的。
+ */
+function normalizeContextUsage(raw: unknown): AgentContextUsage | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const data = raw as RawRecord;
+  const used = Number(data.used_tokens);
+  const limit = Number(data.limit_tokens);
+  const trigger = Number(data.compact_trigger_tokens);
+  const windowTokens = Number(data.context_window_tokens);
+  const ratio = Number(data.ratio);
+  if (
+    !Number.isFinite(used) || used < 0
+    || !Number.isFinite(limit) || limit <= 0
+    || !Number.isFinite(trigger) || trigger < 0
+    || !Number.isFinite(windowTokens) || windowTokens <= 0
+    || !Number.isFinite(ratio) || ratio < 0
+  ) {
+    return null;
+  }
+  return {
+    used_tokens: used,
+    limit_tokens: limit,
+    compact_trigger_tokens: trigger,
+    context_window_tokens: windowTokens,
+    ratio,
+  };
+}
+
+export function normalizeWsEventPayload(payload: unknown): FrontendRealtimeEvent | null {  if (!payload || typeof payload !== 'object') {
     return null;
   }
 
@@ -311,6 +362,27 @@ export function normalizeWsEventPayload(payload: unknown): FrontendRealtimeEvent
       ...identity,
       execEnv,
       currentContainerId,
+    };
+  }
+
+  if (eventType === 'agent_context_usage') {
+    // 扁平 payload：后端 publish 的是 team_id / agent_id / context_usage，
+    // 没有 `gt_agent` 对象可用，所以不走 `readGtAgentIdentity`。
+    const teamId = Number(raw.team_id ?? 0);
+    const agentId = Number(raw.agent_id ?? 0);
+    if (!Number.isFinite(teamId) || !Number.isFinite(agentId) || teamId <= 0 || agentId <= 0) {
+      return null;
+    }
+    const contextUsage = normalizeContextUsage(raw.context_usage);
+    if (!contextUsage) {
+      return null;
+    }
+
+    return {
+      type: 'agent_context_usage',
+      teamId,
+      agentId,
+      contextUsage,
     };
   }
 

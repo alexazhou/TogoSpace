@@ -14,6 +14,7 @@ import {
 import type {
   AgentActivity,
   AgentActivityType,
+  AgentContextUsage,
   AgentExecEnv,
   AgentInfo,
   AgentStatus,
@@ -47,6 +48,13 @@ const agentStatusState = ref<Record<number, AgentStatus>>({});
  * 不做本地推测。宿主环境也存一条，用于「Agent 从容器退出」时把徽标正确清掉。
  */
 const agentExecEnvState = ref<Record<number, { execEnv: AgentExecEnv; currentContainerId: string | null }>>({});
+/**
+ * 上下文用量内存态（`agent_id -> AgentContextUsage`）。
+ *
+ * 与 `agentStatusState` 同构：接口快照播种初值、`agent_context_usage` 事件增量推进。
+ * **没有记录 = 不知道**，不是 0——组件据此整条不渲染，避免把「算不出来」画成 0%。
+ */
+const agentContextUsageState = ref<Record<number, AgentContextUsage>>({});
 const teamDeptTreeState = ref<Record<number, DeptTreeNode | null>>({});
 const teamTasksState = ref<Record<number, AgentTask[]>>({});
 const roleTemplatesState = ref<RoleTemplateSummary[]>([]);
@@ -476,6 +484,36 @@ export function getAgentExecEnv(agentId: number | null): { execEnv: AgentExecEnv
   return agentExecEnvState.value[agentId] ?? { execEnv: 'host', currentContainerId: null };
 }
 
+/**
+ * 取某 Agent 的上下文用量；**无记录返回 null**（不是全 0 对象）。
+ *
+ * 返回 null 的语义是「不知道」：组件必须据此整条不渲染。用全 0 对象会让
+ * 进度条显示 0%，那是在断言「上下文是空的」——而它其实只是没算出来。
+ */
+export function getAgentContextUsage(agentId: number | null): AgentContextUsage | null {
+  if (agentId === null) {
+    return null;
+  }
+  return agentContextUsageState.value[agentId] ?? null;
+}
+
+/**
+ * 用接口快照播种上下文用量。
+ *
+ * `usage` 传 null / undefined 时**不写缓存也不删除已有值**：详情接口可能因为
+ * Agent 未装载而返回 null，但那不代表「之前推送过的数值已失效」——删掉会让
+ * 已经显示的进度条突然消失。
+ */
+export function seedAgentContextUsage(agentId: number | null, usage: AgentContextUsage | null | undefined): void {
+  if (agentId === null || agentId <= 0 || !usage) {
+    return;
+  }
+  agentContextUsageState.value = {
+    ...agentContextUsageState.value,
+    [agentId]: usage,
+  };
+}
+
 export function getDeptTreeState(teamId: number | null): DeptTreeNode | null {
   if (teamId === null) {
     return null;
@@ -680,6 +718,16 @@ export function applyRealtimeEvent(event: FrontendRealtimeEvent): void {
     return;
   }
 
+  if (event.type === 'agent_context_usage') {
+    // 只写内存态，不回写到 teamAgentsState：用量不属于 AgentInfo，
+    // 塞进列表项会让「列表接口不返回该字段」这条契约变得模糊。
+    agentContextUsageState.value = {
+      ...agentContextUsageState.value,
+      [event.agentId]: event.contextUsage,
+    };
+    return;
+  }
+
   if (event.type === 'agent_container') {
     // 先更新内存态：即便当前 team 尚未加载该 Agent 的列表，环境本身也要记下来，
     // 否则「先进容器、后加载列表」的顺序会让徽标停留旧值。
@@ -792,6 +840,7 @@ export function clearRuntimeStore(): void {
   agentActivitiesState.value = {};
   agentStatusState.value = {};
   agentExecEnvState.value = {};
+  agentContextUsageState.value = {};
   teamDeptTreeState.value = {};
   teamTasksState.value = {};
   taskEventsState.value = {};

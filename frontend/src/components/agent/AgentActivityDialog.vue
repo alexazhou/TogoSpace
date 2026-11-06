@@ -4,8 +4,10 @@ import { useI18n } from 'vue-i18n';
 import { getAgentDetail, resumeAgent, stopAgent, superviseAgent } from '../../api';
 import { connectionState, showGlobalSuccessToast } from '../../appUiState';
 import { displayName, formatConnectionState } from '../../utils';
-import { useAgentStatus } from '../../realtime/selectors';
+import { useAgentContextUsage, useAgentStatus } from '../../realtime/selectors';
+import { seedAgentContextUsage } from '../../realtime/runtimeStore';
 import AgentCardBase from './AgentCardBase.vue';
+import AgentContextCapacityMeter from './AgentContextCapacityMeter.vue';
 import AgentActivityDialogShell from './AgentActivityDialogShell.vue';
 import AgentActivityPanel from './AgentActivityPanel.vue';
 import AgentTaskPanel from './AgentTaskPanel.vue';
@@ -46,6 +48,8 @@ const superviseTextareaRef = ref<HTMLTextAreaElement | null>(null);
 const isActivitiesFollowing = ref(true);
 
 const runtimeStatus = useAgentStatus(() => props.agentId);
+// 上下文用量：先由详情接口播种初值，之后只由 WS 事件推进（见 runtimeStore）。
+const contextUsage = useAgentContextUsage(() => props.agentId);
 
 const displayAgent = computed<AgentDetail | null>(() => {
   if (!agent.value || agent.value.id !== props.agentId) {
@@ -133,7 +137,10 @@ async function loadDetail(): Promise<void> {
   errorMessage.value = '';
 
   try {
-    agent.value = await getAgentDetail(props.agentId);
+    const detail = await getAgentDetail(props.agentId);
+    agent.value = detail;
+    // 首屏快照：接口给的 `context_usage` 是权威初值（可能为 null = 不知道）。
+    seedAgentContextUsage(props.agentId, detail.context_usage);
   } catch (error) {
     errorMessage.value = t('agent.infoLoadFailed');
     console.error(error);
@@ -306,6 +313,11 @@ watch(
           :avatar-name="displayAgentName"
           variant="profile"
           readonly
+        />
+        <AgentContextCapacityMeter
+          :usage="contextUsage"
+          :status="currentStatus"
+          :agent-id="props.agentId"
         />
         <div class="agent-status-panel" :data-status="currentStatus ?? undefined">
           <span class="status-dot"></span>
