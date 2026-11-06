@@ -14,11 +14,12 @@ import {
 
 const getAgentActivitiesPageMock = vi.fn();
 const getRoomMessagesMock = vi.fn();
+const escalateMessageToImmediateMock = vi.fn();
 
 vi.mock('../../../api', () => ({
   getAgentActivitiesPage: (...args: unknown[]) => getAgentActivitiesPageMock(...args),
   getRoomMessages: (...args: unknown[]) => getRoomMessagesMock(...args),
-  escalateMessageToImmediate: vi.fn().mockResolvedValue(undefined),
+  escalateMessageToImmediate: (...args: unknown[]) => escalateMessageToImmediateMock(...args),
 }));
 
 const TEAM_ID = 2;
@@ -100,6 +101,8 @@ beforeEach(() => {
   getAgentActivitiesPageMock.mockResolvedValue({ activities: [], hasMore: false });
   getRoomMessagesMock.mockReset();
   getRoomMessagesMock.mockResolvedValue({ messages: [], hasMore: false });
+  escalateMessageToImmediateMock.mockReset();
+  escalateMessageToImmediateMock.mockResolvedValue(undefined);
 
   seedTeamAgents(TEAM_ID, [createAgent()]);
   seedTeamRooms(TEAM_ID, [createRoom()]);
@@ -194,5 +197,24 @@ describe('AgentActivityPanel 待读区', () => {
 
     expect(wrapper.find('.pending-message-status--pending-immediate').exists()).toBe(true);
     expect(wrapper.find('.pending-message-status--queued').exists()).toBe(false);
+  });
+
+  it('点排队消息的「立即引导」会打到控制房：room_id 是控制房、msg id 是消息 db_id', async () => {
+    serveControlRoomMessages([
+      createMessage({ db_id: 104, seq: 1, content: '这条要马上处理', insert_immediately: false }),
+    ]);
+
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    const escalateButton = wrapper.find('.pending-message-action');
+    expect(escalateButton.exists()).toBe(true);
+
+    await escalateButton.trigger('click');
+    await flushPromises();
+
+    // 两个参数都要断言：room_id 错了会打到别的房间，db_id 错了会引导错消息。
+    expect(escalateMessageToImmediateMock).toHaveBeenCalledTimes(1);
+    expect(escalateMessageToImmediateMock).toHaveBeenCalledWith(CONTROL_ROOM_ID, 104);
   });
 });
