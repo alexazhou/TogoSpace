@@ -31,6 +31,12 @@ class ChatRoom:
     def __init__(self, team: GtTeam, room: GtRoom):
         self.gt_room: GtRoom = room
         self.gt_team: GtTeam = team
+        # 内存运行时态（消息列表 / 读游标 / _next_seq）是否已与 DB 对齐过一次。
+        # 语义要点：**「读了、DB 是空的」也算就绪**。只有「压根没读」才是未就绪
+        # —— 这正是「团队停用期间点开单聊」那个 bug 的核心：裸 new 出来的 ChatRoom
+        # 看上去和「空房间」一模一样，但 `_next_seq=0` 会让后续写入与历史 seq 撞车。
+        # 因此不允用 `if not self.messages` 这类猜测代替本标记。
+        self._runtime_state_ready: bool = False
         self._store = RoomMessageStore(gt_room=room)
         self._scheduler = RoomScheduler(
             room_key=self.key,
@@ -138,6 +144,11 @@ class ChatRoom:
         if self._scheduler.state != RoomState.INIT:
             return False
 
+        # 写初始系统消息之前必须确认运行时态已与 DB 对齐过一次。
+        # 否则「DB 里有 N 条历史、内存里是空壳」会被误判成新房间，
+        # 在对已有房间补写一条 seq=0 的系统消息（生产库曾因此出现重复 seq=0）。
+        self._assert_runtime_state_ready("activate_scheduling")
+
         if not self.messages:
             content = await self.build_initial_system_message()
             agent = await gtAgentManager.get_agent_by_id(self.SYSTEM_MEMBER_ID)
@@ -180,6 +191,9 @@ class ChatRoom:
             error_message=f"sender_id '{sender_id}' is not an agent of room '{self.key}'",
             error_code="sender_not_in_room",
         )
+        # 任何写入前必须已就绪：否则 `_next_seq=0` 会从 0 重新发号，与历史 seq 撞车
+        # （排序键就是 seq，且 room_messages 上没有唯一约束，撞车后无法逆转）。
+        self._assert_runtime_state_ready("_append_message")
         state = self._scheduler.state
 
         # insert_immediately 仅限私聊。注意：**不能**再按 state == IDLE 降级。
@@ -233,6 +247,34 @@ class ChatRoom:
 
 
     # ─── 运行时状态注入与导出 ─────────────────────────────────
+
+    @property
+    def runtime_state_ready(self) -> bool:
+        """内存运行时态（消息列表 / 读游标 / `_next_seq`）是否已与 DB 对齐过一次。"""
+        return self._runtime_state_ready
+
+    def mark_runtime_state_ready(self) -> None:
+        """标记运行时态已与 DB 对齐过一次。
+
+        **只有** `roomService.core._restore_room_runtime_state` 在真正读库后调用。
+        「读了、DB 是空的」同样置 True：新建房间也走这条路，之后才允许写初始系统消息。
+        """
+        self._runtime_state_ready = True
+
+    def _assert_runtime_state_ready(self, operation: str) -> None:
+        """写入 / 激活前的前置校验：运行时态必须已装载。
+
+        不用裸 `assert`：`python -O` 会剥掉它，且验收要看 error_code。
+        """
+        assertUtil.assertTrue(
+            self._runtime_state_ready,
+            error_message=(
+                f"房间运行时状态未装载，拒绝 {operation}: room={self.key}, room_id={self.room_id}. "
+                f"装载房间必须走 roomService.load_room_with_state（或 create_room / load_all_rooms 等已配对的入口），"
+                f"否则内存消息列表为空、_next_seq=0，会与库中历史 seq 撞车"
+            ),
+            error_code="room_state_not_ready",
+        )
 
     def inject_runtime_state(
         self,
