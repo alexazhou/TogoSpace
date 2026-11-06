@@ -338,7 +338,9 @@
     "pendingImmediateLabel": "Injecting Soon",
     "pendingImmediateTip": "This is usually injected after the agent finishes its next tool call.",
     "guideNow": "Guide Now",
-    "guidingNow": "Guiding..."
+    "guidingNow": "Guiding...",
+    "pendingMore": "{count} more pending message | {count} more pending messages",
+    "pendingCollapse": "Collapse"
   },
   "console": {
     "loadFailed": "Failed to load messages. Check network or backend status.",
