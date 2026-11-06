@@ -159,6 +159,42 @@ describe('wsClient', () => {
     expect(connectionState.value).toBe('connected');
   });
 
+  it('marks connected on auth_ok ack without waiting for a business event', () => {
+    // need_fix_1.md P1-2：鉴权开启时后端认证成功后回 { event: 'auth_ok' }，
+    // 前端据此立即置绿；否则要等总线上恰好有业务事件才变绿（右上角一直「连接中」）。
+    authEnabled.value = true;
+    getTokenMock.mockReturnValue('secret-token');
+    const listener = vi.fn();
+    const unsubscribe = subscribeRealtimeEvents(listener);
+
+    startRealtimeClient();
+    sockets[0]?.emit('open');
+    expect(connectionState.value).toBe('connecting');
+
+    sockets[0]?.emit('message', JSON.stringify({ event: 'auth_ok' }));
+
+    expect(connectionState.value).toBe('connected');
+    // ack 只是连接层信号，不能当业务事件派发给监听方
+    expect(listener).not.toHaveBeenCalled();
+    // 也不能走 normalizer（否则会白跑一次解析）
+    expect(normalizeWsEventPayloadMock).not.toHaveBeenCalled();
+
+    unsubscribe();
+  });
+
+  it('still treats the first business message as connected for older backends', () => {
+    // 向后兼容：旧后端不发 auth_ok，只有业务事件；这条路径不能因为新增 ack 而回归。
+    authEnabled.value = true;
+    getTokenMock.mockReturnValue('secret-token');
+    normalizeWsEventPayloadMock.mockReturnValue(null);
+
+    startRealtimeClient();
+    sockets[0]?.emit('open');
+    sockets[0]?.emit('message', JSON.stringify({ event: 'schedule_state' }));
+
+    expect(connectionState.value).toBe('connected');
+  });
+
   it('shows token dialog when auth is enabled but no token is available', () => {
     authEnabled.value = true;
     getTokenMock.mockReturnValue(null);

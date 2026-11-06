@@ -17,6 +17,7 @@ _WS_TOPICS = [
     MessageBusTopic.AGENT_STATUS_CHANGED,
     MessageBusTopic.AGENT_CONTAINER_STATE_CHANGED,
     MessageBusTopic.AGENT_ACTIVITY_CHANGED,
+    MessageBusTopic.AGENT_MEMORY_CHANGED,
     MessageBusTopic.SCHEDULE_STATE_CHANGED,
     MessageBusTopic.TEAM_RELOADED,
     MessageBusTopic.TASK_CREATED,
@@ -79,9 +80,23 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
             self.close(code=1008, reason="Invalid token")
             return
 
-        # 认证成功，订阅事件
+        # 认证成功：先回一帧 ack，再订阅事件
         logger.info("[ws] Auth succeeded, subscribing events")
+        self._send_auth_ack()
         self._subscribe_events()
+
+    def _send_auth_ack(self) -> None:
+        """回一帧认证确认，前端据此把连接状态从「连接中」置为已连接。
+
+        为什么必须有这一帧：认证成功后原来只订阅事件、不回任何东西，但前端把
+        「收到首条消息」当作连接就绪的信号（`wsClient.ts` 的 message 监听）。
+        总线上没有事件时前端就一直显示「连接中」，要等到某条房间消息恰好推送
+        才变绿——鉴权开启时的稳定复现路径。
+
+        兼容性：旧版前端把「首条任意消息」当成功信号，收到 auth_ok 同样置绿，
+        所以新增这一帧对旧前端无害。
+        """
+        asyncio.create_task(self._send(jsonUtil.json_dump({"event": "auth_ok"})))
 
     def _subscribe_events(self):
         """订阅消息总线事件。"""
@@ -105,6 +120,8 @@ class EventsWsHandler(tornado.websocket.WebSocketHandler):
             payload["event"] = "agent_container"
         if msg.topic == MessageBusTopic.AGENT_ACTIVITY_CHANGED:
             payload["event"] = "agent_activity"
+        if msg.topic == MessageBusTopic.AGENT_MEMORY_CHANGED:
+            payload["event"] = "agent_memory_changed"
         if msg.topic == MessageBusTopic.SCHEDULE_STATE_CHANGED:
             payload["event"] = "schedule_state"
         if msg.topic == MessageBusTopic.TEAM_RELOADED:
