@@ -1,6 +1,6 @@
 [package]
 name = "togospace"
-version = "0.4.2-beta2"
+version = "0.4.2-beta3"
 description = "TogoSpace Desktop"
 authors = []
 edition = "2021"
