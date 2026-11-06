@@ -551,10 +551,10 @@ async def build_context_usage_snapshot(agent: GtAgent) -> AgentContextUsage | No
     2. Agent 未装载进内存——无从知道此刻的 history 边界；
     3. 模型配置解析失败 / 分母非正——数值无意义（由 `contextUsage` 判定）。
 
-    内存态走 Agent 的实时 history（含尚未落盘的最新一轮），非内存态退回 DB 里
-    compact 之后的历史。注意第 2 条的取舍：**不为了「让进度条有数」去离线装配
-    history**——装配需要 system_prompt，而它要 team / 角色模板 / 工作目录一整套
-    初始化参数，复制这一坨的维护成本高于「这一个窗口没有进度条」。
+    数值**只**来自内存态 Agent 的实时 history（含尚未落盘的最新一轮）。
+    **没有 DB 回退分支**：Agent 不在内存就直接返回 `None`（第 2 条）。离线装配
+    history 需要 system_prompt，而它要 team / 角色模板 / 工作目录一整套初始化参数，
+    复制这一坨的维护成本高于「这一个窗口没有进度条」。
     """
     if agent.id is None or agent.id <= 0:
         return None

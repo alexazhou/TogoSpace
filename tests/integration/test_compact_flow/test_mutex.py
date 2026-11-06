@@ -9,9 +9,14 @@
 1. `_items` 里 `COMPACT_SUMMARY` 条数 **== 1**；
 2. `build_infer_messages()` 里摘要条数 **≤ 1**（两条摘要同时进 LLM 请求 = token 与
    语义双污染，而「同 id 正文一致」在 A1 形态下是全绿的，所以不能当主判据）；
-3. 两个挂点（A1：`insert_compact_summary` 之前；A2：`_finish_activity` 之前）下，
-   第二次请求都必须是 400 `compact_in_progress`——A2 尤其不能是
-   `no_compactable_history`（用户点两下看到「历史不足」，会以为数据坏了）；
+3. 三个挂点下第二次请求都必须是 400 `compact_in_progress`——A2/D 尤其不能是
+   `no_compactable_history`（用户点两下看到「历史不足」，会以为数据坏了）：
+   - **A1**：`insert_compact_summary` 之前（摘要还没落库）；
+   - **A2**：`_refresh_system_prompt`（摘要已插入、正在收尾）；
+   - **D**：`_finish_activity(SUCCEEDED)`——`_execute_compact` 的**最后一个 await**。
+     A1/A2 的挂点都在它前面，只能覆盖「复位点在挂点之前」的实现；D 的挂点在最后一个
+     await 的入口，才覆盖「复位点落在 `_refresh_system_prompt` 返回之后、
+     `_finish_activity` 之前」这一类（PM 05:36 指出 A2 挂点覆盖不到，见 D 的 docstring）；
 4. 第一次彻底结束后追加一轮对话，第二次必须 200（防「忘了复位」）；
 5. compact 在途时新 job 不得把 turn 拉起来（`consume()` 的等待要真的起作用）。
 
@@ -29,6 +34,7 @@ import pytest
 import service.llmService as llmService
 import service.ormService as ormService
 from constants import (
+    AgentActivityStatus,
     AgentHistoryStatus,
     AgentHistoryTag,
     DriverType,
@@ -43,6 +49,7 @@ from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from service.agentService.agent import Agent
 from service.agentService.agentHistoryStore import AgentHistoryStore
+from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver import AgentDriverConfig
 from tests.base import ServiceTestCase
 from tests.integration.test_compact_flow.test import (
@@ -85,8 +92,12 @@ def _gated_refresh_fn(gate: _Gate):
 
     `_execute_compact` 的 await 顺序是
     `compact_messages` → `insert_compact_summary` → `_refresh_system_prompt` → `_finish_activity`，
-    所以停在这里 = 「摘要已插入、正在收尾」。任何在 `_finish_activity` 之前复位
-    `_compacting` 的实现，都会让第二次请求进来，本组用例转红。
+    所以停在这里 = 「摘要已插入、正在收尾」。
+
+    覆盖范围仅限「复位点在 `_refresh_system_prompt` 入口之前」的实现——挂在中间只能
+    看到挂点之前发生的事。复位点若落在 refresh 返回之后、`_finish_activity` 之前，
+    本用例**看不到**（那时 gate 已放行，没人再查）。这个窗口由 D 用例守（挂点就在
+    最后一个 await 的入口）。
     """
 
     async def _refresh() -> str:
@@ -95,6 +106,26 @@ def _gated_refresh_fn(gate: _Gate):
         return ""
 
     return _refresh
+
+
+def _gated_finish(gate: _Gate, calls: dict):
+    """D 挂点：卡在 `_finish_activity(SUCCEEDED)`——`_execute_compact` 的最后一个 await。
+
+    只在 `status == SUCCEEDED` 那一次挂住（FAILED 分支也会走 `_finish_activity`，
+    若不区分，`compact_messages` 失败路径会先触发挂点，用例就测不到正常收尾）。
+    `calls["succeeded"]` 记录成功分支被调用次数：它必须恰为 1，否则「只挂一次」
+    这个前提本身没被验证。
+    """
+    real = AgentTurnRunner._finish_activity  # ⚠ 必须在 patch 之前取原函数
+
+    async def _wrapper(self_runner, activity_id, *, status, **kwargs):
+        if status == AgentActivityStatus.SUCCEEDED:
+            calls["succeeded"] = calls.get("succeeded", 0) + 1
+            gate.entered.set()
+            await gate.release.wait()
+        return await real(self_runner, activity_id, status=status, **kwargs)
+
+    return _wrapper
 
 
 # ─── 构造真实对象 ──────────────────────────────────────────
@@ -270,6 +301,61 @@ class TestManualCompactMutex(ServiceTestCase):
             gate.release.set()
             await asyncio.wait_for(first, 10)
 
+        assert captured[0]["success"] is True
+        assert _memory_summary_count(history) == 1
+        assert _infer_summary_count(history) <= 1
+        assert len(await _db_summary_rows(_AGENT_ID)) == 1
+        assert agent.is_compacting is False
+
+    # ── 判据 3：D 挂点 = 最后一个 await ────────────────────────
+
+    async def test_second_request_at_last_await_gets_compact_in_progress(self, monkeypatch):
+        """D：第一次卡在 `_finish_activity(SUCCEEDED)`（`_execute_compact` 的最后一个
+        await 的入口），第二次必须 400 `compact_in_progress`。
+
+        与 A2 的区别（PM 05:36 指出）：A2 的 gate 停在 `_refresh_system_prompt` 内部，
+        那时 `_compacting` 还是 True，所以**「在 refresh 返回之后、`_finish_activity`
+        之前释放 `_compacting`」这个复位点 A2 完全看不到**。D 把 gate 放在最后一个 await
+        的入口，复位点无论落在 refresh 之后、还是 `_finish_activity` 调用之前，都会让
+        第二次请求挤进来 ⇒ 本用例转红。
+
+        只覆盖「复位点在 `_finish_activity` 入口之前」——`_finish_activity` 自身内部
+        释放属于更晚的窗口，但那已经不是 `_execute_compact` 的范围了（见 `calls`
+        计数断言：成功分支只应走一次）。
+        """
+        history = await _seed_history(_AGENT_ID)
+        agent = _make_agent(history)
+        _patch_runtime(monkeypatch, agent)
+
+        gate = _Gate()
+        calls: dict = {}
+        handler, captured = _build_handler()
+
+        with (
+            mock.patch(_CONFIG_PATCH, return_value=_mock_config()),
+            mock.patch(_INFER_PATCH, AsyncMock(
+                return_value=llmService.InferResult.success(_make_mock_response("这是压缩摘要：D 挂点。")),
+            )),
+            mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
+            mock.patch.object(AgentTurnRunner, "_finish_activity", _gated_finish(gate, calls)),
+        ):
+            first = asyncio.create_task(handler.post(str(_AGENT_ID)))
+            await asyncio.wait_for(gate.entered.wait(), 5)
+
+            # 业务断言放最前面（同 A1/A2）：复位点提前时这里直接红在「第二次拿到了
+            # 什么」，而不是先在前置 flag 上红，掩盖真正的病灶。
+            with pytest.raises(TogoException) as exc_info:
+                await handler.post(str(_AGENT_ID))
+            assert exc_info.value.error_code == "compact_in_progress"
+
+            # 前提自证：此刻已走到最后一个 await，摘要与内存裁剪都已完成。
+            assert _memory_summary_count(history) == 1
+            assert agent.is_compacting is True
+
+            gate.release.set()
+            await asyncio.wait_for(first, 10)
+
+        assert calls.get("succeeded") == 1, "成功分支的 _finish_activity 应只被调用一次"
         assert captured[0]["success"] is True
         assert _memory_summary_count(history) == 1
         assert _infer_summary_count(history) <= 1
