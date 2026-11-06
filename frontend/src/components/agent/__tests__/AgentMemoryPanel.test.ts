@@ -10,6 +10,26 @@ vi.mock('../../../api', () => ({
   getAgentMemories: (...args: unknown[]) => getAgentMemoriesMock(...args),
 }));
 
+// 面板订阅 `agent_memory_changed` 重拉列表；测试里把订阅换成可手动触发的收集器。
+const realtimeListeners: Array<(event: unknown) => void> = [];
+vi.mock('../../../realtime/wsClient', () => ({
+  subscribeRealtimeEvents: (listener: (event: unknown) => void) => {
+    realtimeListeners.push(listener);
+    return () => {
+      const idx = realtimeListeners.indexOf(listener);
+      if (idx >= 0) {
+        realtimeListeners.splice(idx, 1);
+      }
+    };
+  },
+}));
+
+function emitRealtime(event: unknown): void {
+  for (const listener of [...realtimeListeners]) {
+    listener(event);
+  }
+}
+
 function createMemory(overrides: Partial<AgentMemory> = {}): AgentMemory {
   return {
     id: 12,
@@ -68,6 +88,7 @@ async function mountWithData(memories: AgentMemory[] = SAMPLE) {
 beforeEach(() => {
   getAgentMemoriesMock.mockReset();
   getAgentMemoriesMock.mockResolvedValue([]);
+  realtimeListeners.length = 0;
 });
 
 describe('AgentMemoryPanel 筛选与列表', () => {
@@ -236,6 +257,47 @@ describe('AgentMemoryPanel 数据加载', () => {
     await flushPromises();
 
     expect(wrapper.find('.error-banner').text()).toBe('加载 Agent 记忆失败。');
+  });
+
+  it('收到本 Agent 的记忆变更推送后重拉列表（弹窗开着时也能刷新）', async () => {
+    // need_fix_1.md P1-3 b 段：面板 v-show 不销毁，弹窗开着时没有别的刷新路径。
+    const wrapper = await mountWithData();
+    expect(getAgentMemoriesMock).toHaveBeenCalledTimes(1);
+
+    getAgentMemoriesMock.mockResolvedValue([
+      ...SAMPLE,
+      createMemory({ id: 42, title: '新增的记忆' }),
+    ]);
+    emitRealtime({ type: 'agent_memory_changed', teamId: 2, agentId: 7, memoryId: 42, action: 'created' });
+    await flushPromises();
+
+    expect(getAgentMemoriesMock).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).toContain('新增的记忆');
+  });
+
+  it('忽略其他 Agent 的记忆变更', async () => {
+    await mountWithData();
+    expect(getAgentMemoriesMock).toHaveBeenCalledTimes(1);
+
+    emitRealtime({ type: 'agent_memory_changed', teamId: 2, agentId: 8, memoryId: 42, action: 'created' });
+    await flushPromises();
+
+    expect(getAgentMemoriesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('面板关闭时不再订阅，重新打开后恢复', async () => {
+    getAgentMemoriesMock.mockResolvedValue(SAMPLE);
+    const wrapper = mountPanel({ open: false });
+    await flushPromises();
+    expect(realtimeListeners).toHaveLength(0);
+
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+    expect(realtimeListeners).toHaveLength(1);
+
+    await wrapper.setProps({ open: false });
+    await flushPromises();
+    expect(realtimeListeners).toHaveLength(0);
   });
 
   it('向父组件同步当前可见条数', async () => {

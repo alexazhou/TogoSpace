@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getAgentMemories } from '../../api';
+import { subscribeRealtimeEvents } from '../../realtime/wsClient';
 import { formatBackendDateTime } from '../../utils';
 import type { AgentMemory } from '../../types';
 
@@ -126,6 +127,38 @@ watch(
   },
   { immediate: true },
 );
+
+/**
+ * 跟随 WS 推送重拉：Agent 在对话里调 memory_create / memory_update 后，
+ * 后端只推一条「某某的记忆变了」，列表数据仍需自己再取一次。
+ *
+ * 面板是 `v-show` 不销毁、弹窗开着时上面的 watch 不会触发，所以必须在这里
+ * 单独订阅——否则用户会看到旧列表，只能关掉弹窗重开才刷新（原本的缺陷）。
+ * 只认本面板对应的 agent，别的 Agent 变更不打扰这次请求。
+ */
+let unsubscribeMemoryEvents: (() => void) | null = null;
+watch(
+  () => [props.open, props.agentId] as const,
+  ([open, agentId]) => {
+    unsubscribeMemoryEvents?.();
+    unsubscribeMemoryEvents = null;
+    if (!open || agentId === null) {
+      return;
+    }
+    unsubscribeMemoryEvents = subscribeRealtimeEvents((event) => {
+      if (event.type !== 'agent_memory_changed' || event.agentId !== agentId) {
+        return;
+      }
+      loadMemories().catch(console.error);
+    });
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  unsubscribeMemoryEvents?.();
+  unsubscribeMemoryEvents = null;
+});
 
 function toggleExpanded(id: number): void {
   const next = new Set(expandedIds.value);
