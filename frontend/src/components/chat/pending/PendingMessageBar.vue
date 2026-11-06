@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch, type CSSProperties } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { renderMarkdownPreviewText } from '../../../utils/markdown';
 import MarkdownContent from '../../ui/MarkdownContent.vue';
@@ -41,7 +41,14 @@ let resizeObserver: ResizeObserver | null = null;
  */
 const previewText = computed(() => renderMarkdownPreviewText(props.item.message.content).replace(/\s+/g, ' ').trim());
 
-const canToggle = computed(() => truncated.value && !props.expanded);
+/**
+ * 卡片是否可交互（可点开 / 可收起）。
+ *
+ * 注意**不能**只写 `truncated`：展开后如果窗口变宽、预览行不再被截断，`truncated` 会变
+ * false，那样收起通路就断了（点击和 Esc 都被 gate 掉，卡片再也收不起来）。展开态本身
+ * 就是「可交互」的理由，两者取或。
+ */
+const canToggle = computed(() => truncated.value || props.expanded);
 
 const statusLabel = computed(() => (
   props.item.status === 'pending-immediate'
@@ -56,6 +63,35 @@ const statusTooltip = computed(() => (
 ));
 
 const isImmediate = computed(() => props.item.status === 'pending-immediate');
+
+/**
+ * 徽标提示的定位。
+ *
+ * 不能继续用 `::after` 画在徽标正上方：待读浮层的列表是滚动容器（`max-height` 超出要内部
+ * 滚动），伪元素落到滚动区外会被裁掉，实测第一条卡片的提示只剩 7px 可见。改成 Teleport
+ * 到 body + `position: fixed`，不受任何祖先 `overflow` 裁剪。
+ */
+const tooltipVisible = ref(false);
+const tooltipStyle = ref<CSSProperties>({});
+const tooltipAnchorRef = useTemplateRef<HTMLElement>('tooltipAnchorRef');
+
+function showTooltip(): void {
+  const rect = tooltipAnchorRef.value?.getBoundingClientRect();
+  if (!rect || typeof window === 'undefined') {
+    return;
+  }
+  tooltipStyle.value = {
+    position: 'fixed',
+    // 画在徽标上方，留 6px 间距；右对齐徽标右边缘。
+    bottom: `${window.innerHeight - rect.top + 6}px`,
+    right: `${window.innerWidth - rect.right}px`,
+  };
+  tooltipVisible.value = true;
+}
+
+function hideTooltip(): void {
+  tooltipVisible.value = false;
+}
 
 /** 「立即引导」只对排队消息有意义：加急消息本来就会被尽快注入。 */
 const showEscalate = computed(
@@ -74,15 +110,19 @@ function measureTruncation(): void {
   truncated.value = el.scrollWidth - el.clientWidth > 1;
 }
 
+/**
+ * 收起通路的 gate 是 `canToggle`（截断 **或** 已展开），不是 `truncated`。
+ * 只 gate 在 truncated 上时，展开后窗口变宽会让卡片彻底收不起来。
+ */
 function handleToggle(): void {
-  if (!truncated.value) {
+  if (!canToggle.value) {
     return;
   }
   emit('toggle');
 }
 
 function handleKeydown(event: KeyboardEvent): void {
-  if (!truncated.value) {
+  if (!canToggle.value) {
     return;
   }
   if (event.key === 'Enter' || event.key === ' ') {
@@ -94,6 +134,14 @@ function handleKeydown(event: KeyboardEvent): void {
     event.preventDefault();
     emit('toggle');
   }
+}
+
+/**
+ * 全文区内的点击不应触发展开 / 收起。
+ * 不拦的话在全文里选字、点链接、拖横向滚动条都会把卡片收起，40vh 全文区基本没法读。
+ */
+function handleFullClick(event: MouseEvent): void {
+  event.stopPropagation();
 }
 
 function handleEscalate(event: MouseEvent): void {
@@ -149,12 +197,12 @@ onBeforeUnmount(() => {
   <div
     class="pending-message-bar"
     :class="{
-      'pending-message-bar--expandable': truncated,
+      'pending-message-bar--expandable': canToggle,
       'pending-message-bar--expanded': expanded,
     }"
-    :role="truncated ? 'button' : undefined"
-    :tabindex="truncated ? 0 : undefined"
-    :aria-expanded="truncated ? expanded : undefined"
+    :role="canToggle ? 'button' : undefined"
+    :tabindex="canToggle ? 0 : undefined"
+    :aria-expanded="canToggle ? expanded : undefined"
     @click="handleToggle"
     @keydown="handleKeydown"
   >
@@ -168,19 +216,24 @@ onBeforeUnmount(() => {
     />
     <div class="pending-message-body">
       <div ref="previewRef" class="pending-message-content">{{ previewText }}</div>
-      <div v-if="expanded" class="pending-message-full">
+      <!-- 全文区自己拦点击：里面选字 / 点链接 / 拖滚动条都不该收起卡片。 -->
+      <div v-if="expanded" class="pending-message-full" @click="handleFullClick">
         <MarkdownContent :content="item.message.content" />
       </div>
     </div>
     <span
+      ref="tooltipAnchorRef"
       v-if="isImmediate"
       class="pending-message-status pending-message-status--pending-immediate"
-      :data-tooltip="statusTooltip"
+      @mouseenter="showTooltip"
+      @mouseleave="hideTooltip"
     >⚡ {{ statusLabel }}</span>
     <span
       v-else
+      ref="tooltipAnchorRef"
       class="pending-message-status pending-message-status--queued"
-      :data-tooltip="statusTooltip"
+      @mouseenter="showTooltip"
+      @mouseleave="hideTooltip"
     >⏳ {{ statusLabel }}</span>
     <button
       v-if="showEscalate"
@@ -191,7 +244,16 @@ onBeforeUnmount(() => {
     >
       {{ escalating ? t('chat.guidingNow') : t('chat.guideNow') }}
     </button>
-    <span v-if="truncated" class="pending-message-chevron" aria-hidden="true">{{ expanded ? '▾' : '▸' }}</span>
+    <span v-if="canToggle" class="pending-message-chevron" aria-hidden="true">{{ expanded ? '▾' : '▸' }}</span>
+    <!--
+      tooltip 挂到 body 上：待读浮层的列表是滚动容器，画在卡片内部的提示会被
+      overflow 裁掉（实测第一条只剩 7px 可见）。fixed 定位不受任何祖先裁剪。
+    -->
+    <Teleport to="body">
+      <span v-if="tooltipVisible" class="pending-message-tooltip" :style="tooltipStyle">
+        {{ statusTooltip }}
+      </span>
+    </Teleport>
   </div>
 </template>
 
@@ -285,13 +347,13 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, #f59e0b 14%, white 86%);
 }
 
-.pending-message-status[data-tooltip]:not([data-tooltip=''])::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  width: max-content;
-  max-width: min(320px, calc(100vw - 48px));
+/*
+ * 提示浮层用 fixed + Teleport 到 body，不参与祖先的 overflow 裁剪。
+ * 不用 ::after 是因为列表是滚动容器，画在卡片内的伪元素会被裁掉。
+ */
+.pending-message-tooltip {
+  position: fixed;
+  z-index: 9999;
   padding: 8px 10px;
   border-radius: 10px;
   background: var(--surface-overlay);
@@ -303,17 +365,9 @@ onBeforeUnmount(() => {
   line-height: 1.35;
   letter-spacing: 0;
   white-space: normal;
-  opacity: 0;
-  transform: translateY(4px);
+  width: max-content;
+  max-width: min(320px, calc(100vw - 48px));
   pointer-events: none;
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease;
-}
-
-.pending-message-status[data-tooltip]:not([data-tooltip='']):hover::after {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .pending-message-action {

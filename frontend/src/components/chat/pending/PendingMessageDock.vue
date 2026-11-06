@@ -184,13 +184,18 @@ watch(
   margin-top: auto;
 }
 
+/*
+ * 列表是滚动容器（限高后超出要内部滚动）。
+ * 不要再写 `overflow-x: visible`——有 `overflow-y: auto` 时它按规范被算成 auto，
+ * 那个声明只是误导。卡片内部的浮层提示画不出去，所以 Bar 的 tooltip 走 Teleport
+ * 到 body + fixed 定位，不依赖这里的 overflow。
+ */
 .pending-message-dock__list {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: visible;
 }
 
 .pending-message-dock__collapsed-bar {

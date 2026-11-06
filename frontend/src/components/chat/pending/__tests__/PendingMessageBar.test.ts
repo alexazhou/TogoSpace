@@ -75,6 +75,17 @@ function mountBar(props: Partial<{ item: PendingMessageItem; expanded: boolean; 
   });
 }
 
+/**
+ * 让预览元素报告「未截断」（默认几何在 happy-dom 里就是 0/0，但显式写出来更清楚）。
+ * 用于模拟「展开后窗口变宽」：预览行不再省略，但卡片已经展开。
+ */
+function markNotTruncated(wrapper: ReturnType<typeof mount>): void {
+  const el = wrapper.find('.pending-message-content').element as HTMLElement;
+  Object.defineProperty(el, 'scrollWidth', { configurable: true, value: 100 });
+  Object.defineProperty(el, 'clientWidth', { configurable: true, value: 100 });
+  FakeResizeObserver.instances[FakeResizeObserver.instances.length - 1]?.trigger();
+}
+
 beforeEach(() => {
   FakeResizeObserver.instances = [];
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
@@ -151,6 +162,79 @@ describe('PendingMessageBar 单行截断与展开', () => {
     expect(wrapper.emitted('toggle')).toHaveLength(2);
     expect(bar.attributes('role')).toBe('button');
     expect(bar.attributes('tabindex')).toBe('0');
+  });
+
+  it('展开后窗口变宽不再截断，点击 / Esc 仍能收起（回归 P1）', async () => {
+    // 场景：500 宽时截断 → 展开 → 拉宽到 2000，预览行不再省略。
+    // 收起通路若 gate 在 truncated 上，这里点击和 Esc 都会失效、卡片再也收不起来。
+    const wrapper = mountBar({ expanded: true });
+    markNotTruncated(wrapper);
+    await flushPromises();
+
+    const bar = wrapper.find('.pending-message-bar');
+    expect(bar.attributes('role')).toBe('button');
+    expect(bar.attributes('tabindex')).toBe('0');
+    expect(bar.attributes('aria-expanded')).toBe('true');
+
+    await bar.trigger('click');
+    await bar.trigger('keydown', { key: 'Escape' });
+
+    expect(wrapper.emitted('toggle')).toHaveLength(2);
+  });
+
+  it('全文区内的点击不会误收起卡片（回归 P2）', async () => {
+    const wrapper = mountBar({
+      item: createItem({ message: createMessage({ content: '**bold** body' }) }),
+      expanded: true,
+    });
+    markTruncated(wrapper);
+    await flushPromises();
+
+    await wrapper.find('.pending-message-full').trigger('click');
+
+    // 在全文里选字 / 点链接 / 拖滚动条都不该把卡片收起来
+    expect(wrapper.emitted('toggle')).toBeUndefined();
+  });
+});
+
+describe('PendingMessageBar 徽标 tooltip 不被浮层裁剪（回归 P1）', () => {
+  it('hover 徽标时 tooltip Teleport 到 body 并以 fixed 定位渲染', async () => {
+    const wrapper = mountBar(
+      { item: createItem({ status: 'queued' }) },
+    );
+    await flushPromises();
+
+    // tooltip 挂在组件根之外（Teleport 到 body），所以不从 wrapper 内部找
+    const tooltipBefore = document.body.querySelector('.pending-message-tooltip');
+    expect(tooltipBefore).toBeNull();
+
+    await wrapper.find('.pending-message-status').trigger('mouseenter');
+
+    const tooltip = document.body.querySelector('.pending-message-tooltip') as HTMLElement | null;
+    expect(tooltip).not.toBeNull();
+    // 关键：fixed 定位 + 不在滚动容器内 → 不会被 .pending-message-dock__list 的
+    // overflow-y:auto 裁掉（原先 ::after 方案在真渲染里只剩 7px 可见）
+    expect(tooltip!.style.position).toBe('fixed');
+    // tooltip 里放的是「说明」文案（queuedMessageTip），不是徽标上的短标签
+    expect(tooltip!.textContent).toContain('将在 Agent 结束当前行动后发送');
+    expect(wrapper.find('.pending-message-bar').element.contains(tooltip)).toBe(false);
+
+    await wrapper.find('.pending-message-status').trigger('mouseleave');
+    expect(document.body.querySelector('.pending-message-tooltip')).toBeNull();
+  });
+
+  it('加急徽标 hover 显示「将尽快注入」的提示文案', async () => {
+    const wrapper = mountBar({ item: createItem({ status: 'pending-immediate' }) });
+    await flushPromises();
+
+    await wrapper.find('.pending-message-status').trigger('mouseenter');
+
+    const tooltip = document.body.querySelector('.pending-message-tooltip') as HTMLElement | null;
+    expect(tooltip).not.toBeNull();
+    // 加急用 pendingImmediateTip，与排队消息的文案不同
+    expect(tooltip!.textContent).toContain('下一次工具调用结束后注入');
+
+    await wrapper.find('.pending-message-status').trigger('mouseleave');
   });
 });
 
