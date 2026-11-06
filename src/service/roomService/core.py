@@ -61,10 +61,7 @@ async def startup() -> None:
 async def _load_room(gt_team: GtTeam, gt_room: GtRoom) -> ChatRoom:
     """将数据库房间**造壳**装入运行态（不读消息 / 读游标）。
 
-    ⚠️ 内部实现：造出来的房间 `runtime_state_ready=False`，此时写消息或激活调度
-    都会抛 `room_state_not_ready`。**外部调用点一律走 `load_room_with_state`** ——
-    保持「装载了但没有状态」这条路径在结构上不存在（生产环境曾因只调本函数
-    导致内存空壳被当成新房间，往已有 999 条消息的房间补写了一条 seq=0 系统消息）。
+    ⚠️ 仅内部使用：造出的房间未就绪，写入 / 激活会抛 `room_state_not_ready`。
     """
     room = ChatRoom(team=gt_team, room=gt_room)
     _rooms[room.key] = room
@@ -75,11 +72,9 @@ async def _load_room(gt_team: GtTeam, gt_room: GtRoom) -> ChatRoom:
 
 
 async def load_room_with_state(gt_team: GtTeam, gt_room: GtRoom) -> ChatRoom:
-    """装载房间并立即灌入运行时态（消息 / 读游标 / `_next_seq`）—— 唯一对外装载入口。
+    """装载房间并灌入运行时态（消息 / 读游标 / `_next_seq`）—— 唯一对外装载入口。
 
-    `_load_room` + `_restore_room_runtime_state` 一步到位，使「壳装好了、状态没灌」
-    这个中间态不可能被外部观察到。新建房间同样走这里：DB 读出来是空的，
-    `runtime_state_ready` 照样置 True，之后才允许写初始系统消息。
+    `_load_room` + `_restore_room_runtime_state` 一步到位；新建空房间同样置为就绪。
     """
     room = await _load_room(gt_team=gt_team, gt_room=gt_room)
     await _restore_room_runtime_state(room)
@@ -148,10 +143,8 @@ async def _restore_room_runtime_state(room: ChatRoom) -> None:
 
     room.rebuild_state_from_history(persisted_speaker_index=speaker_index if recovered_from_db else None)
 
-    # **无条件**置位：走到这里就说明「已经读过库了」，无论读到的是 N 条还是 0 条。
-    # 不能挂进上面的 `if` 分支 —— 空房间不进那个分支（restored_messages 与
-    # agent_read_index 都是 None），漏掉它会让新建房间永远未就绪，第一次写初始
-    # 系统消息就撞 `room_state_not_ready`。
+    # 无条件置位：走到这里就说明已读过库（读到 0 条也算）。
+    # 不能放进上面的 if —— 空房间不进该分支。
     room.mark_runtime_state_ready()
 
 
@@ -234,8 +227,7 @@ async def get_or_create_control_room(team_id: int, agent_id: int) -> tuple[ChatR
     if gt_room is not None:
         room = _rooms_by_id.get(gt_room.id)
         if room is None:
-            # DB 有记录但内存里没有（如团队停用期间点开单聊 / 重启后）：
-            # 必须连运行时态一起装载，否则会把已有历史的房间当成新房间补写 seq=0。
+            # 内存里没有但 DB 有：必须连运行时态一起装载，否则会被当成新房间补写 seq=0
             room = await load_room_with_state(gt_team=gt_team, gt_room=gt_room)
         # 若房间仍处于 INIT（如热更新时调度闸门关闭导致未激活），补充激活
         await room.activate_scheduling()
