@@ -294,15 +294,27 @@ describe('runtimeStore realtime events', () => {
       expect(getAgentContextUsage(null)).toBeNull();
     });
 
-    it('seeding null / undefined neither writes nor deletes an existing value', () => {
-      // 详情接口可能因 Agent 未装载返回 null，但这不代表先前的推送值已失效；
-      // 删掉会让已经显示的进度条突然消失。
+    it('deletes the key when seeding null (后端明确说「算不出来」)', () => {
+      // null 是后端明确表态「此刻算不出用量」（模型配置解析失败 / limit 非正 /
+      // Agent 未装载）。进度条该消失：继续显示上一次的数值，等于在断言
+      // 「上下文还是那么多」，而实际是「不知道」。
       seedAgentContextUsage(8, createUsage({ used_tokens: 40000 }));
       seedAgentContextUsage(8, null);
-      expect(getAgentContextUsage(8)).toEqual(createUsage({ used_tokens: 40000 }));
+      expect(getAgentContextUsage(8)).toBeNull();
+    });
 
+    it('keeps the existing value when seeding undefined (字段缺省 ≠ 失效)', () => {
+      // undefined 是「这条响应里没有该字段」（老后端 / 详情先到推送后到），
+      // 不代表先前推送的值已失效。删掉会让刚显示的进度条突然消失。
+      seedAgentContextUsage(8, createUsage({ used_tokens: 40000 }));
       seedAgentContextUsage(8, undefined);
       expect(getAgentContextUsage(8)).toEqual(createUsage({ used_tokens: 40000 }));
+    });
+
+    it('seeding null for an unknown agent is a no-op, not an error', () => {
+      // 从没写过数据的 agent 收到 null：解构删除是幂等的，不能抛、也不能凭空造 key。
+      seedAgentContextUsage(8, null);
+      expect(getAgentContextUsage(8)).toBeNull();
     });
 
     it('ignores seeding for negative / null agent ids', () => {

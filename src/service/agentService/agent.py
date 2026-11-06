@@ -6,6 +6,7 @@ from model.coreModel.agentModel import AgentContextUsage, ExecEnvState
 from model.coreModel.containerModel import ContainerTarget
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtAgentHistory import GtAgentHistory
+from service.agentService.compact import CompactInProgressError
 from service.agentService.jobConsumer import JobConsumer
 from service.agentService.driver import (
     AgentDriver,
@@ -97,14 +98,47 @@ class Agent:
         """
         return self.job_consumer._turn_runner.snapshot_context_usage()
 
+    @property
+    def is_compacting(self) -> bool:
+        """是否正在执行手动 compact（接口层据此拒绝重复请求）。"""
+        return self.job_consumer._turn_runner.is_compacting
+
     async def compact_context(self) -> AgentContextUsage | None:
         """手动压缩：执行 compact 并返回压缩后的新用量。
 
         `NoCompactableHistoryError` 原样上抛——接口层要据此回 400
         `no_compactable_history` 而不是 500，翻译错误语义是接口层的职责，
         facade 不替它做决定。
+
+        ## 临界区在这里占用，不往内层放
+
+        `try_acquire_manual_compact()` 是「检查并占用」的同步动作。它必须与接口层
+        的前置检查（`compact_in_progress`）落在**同一个不让出事件循环的同步段**里，
+        两个并发请求才不会双双通过检查。
+
+        ⚠️ **`try_acquire_manual_compact()` 这一行之前、以及本方法在 await
+        `execute_manual_compact()` 之前的任何位置，都不得插入 `await`。**
+        插入 await 会让出控制权，「检查 → 占用」不再原子，并发防护**静默**失效
+        （另一请求会在置位前通过检查并一起进入 compact）。这条约束有对应的
+        并发测试守着：删掉防护后「第二次请求应得 400」那条断言会红。
+
+        占用失败即抛 `CompactInProgressError`，**拒绝而不是排队**：排队会把用户
+        连点两次变成串行压两次，用户看到的仍是「点了两次、摘要被压了两遍」。
+
+        ## 压缩不可取消
+
+        全程不碰 `status`（保持 IDLE），所以 `cancel_current_turn()` 会如实返回
+        False、接口层报 `agent_not_active`。这不是缺陷也不是遗漏：压缩的耗时主体是
+        一次 LLM 摘要调用，中途打断会留下「摘要已插库但内存未裁剪」的半成品，
+        比让它跑完更危险。本单不提供取消能力，前端按钮在压缩期间禁用。
         """
-        return await self.job_consumer._turn_runner.execute_manual_compact()
+        if not self.job_consumer._turn_runner.try_acquire_manual_compact():
+            raise CompactInProgressError("另一个手动压缩正在进行")
+        try:
+            # 纯转发，无本层 await——见上面对「禁止插入 await」的说明。
+            return await self.job_consumer._turn_runner.execute_manual_compact()
+        finally:
+            self.job_consumer._turn_runner.release_manual_compact()
 
     # ─── 执行环境 ──────────────────────────────────────────────
 

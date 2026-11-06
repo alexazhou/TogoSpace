@@ -83,6 +83,40 @@ class AgentTurnRunner:
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
         self._current_room: ChatRoom | None = None
         self._current_job: GtScheduleJob | None = None
+        # 手动 compact 的互斥标志。手动 compact 是**唯一**会「整体覆盖 _items」
+        # （`reload_from_db`）又不在 turn 里面跑的路径，必须与 turn 互斥：
+        # - 与 turn 互斥：`JobConsumer.consume()` 在取 job 前等它归位；
+        # - 与另一次手动 compact 互斥：`execute_manual_compact` 进门检查并占用。
+        # **不碰 `status`**：`status` 只是标签，`consume()` 进来无脑置 ACTIVE，
+        # 拿它当锁会让「状态显示空闲但 Agent 正在干活」且 stop 被静默拒绝。
+        self._compacting: bool = False
+
+    @property
+    def is_compacting(self) -> bool:
+        """是否正在执行手动 compact。
+
+        `JobConsumer.consume()` 据此在取 job 前等待，避免 turn 与 compact 抢同一份
+        `_history`（compact 的 `reload_from_db` 会整体覆盖 `_items`，把这期间 turn
+        在内存里 append 的消息抹掉）。
+        """
+        return self._compacting
+
+    def try_acquire_manual_compact(self) -> bool:
+        """检查并占用「手动 compact」临界区；已被占用返回 False。
+
+        **这是同步方法，且调用方必须保证它与自己的前置检查之间没有 await**——
+        「检查 + 置位」必须落在同一个不让出事件循环的同步段里，否则两个并发请求
+        会双双通过检查。占用失败的调用方应立即拒绝请求，不得排队等待：
+        排队会把「用户点了两次」变成「串行压了两次」。
+        """
+        if self._compacting:
+            return False
+        self._compacting = True
+        return True
+
+    def release_manual_compact(self) -> None:
+        """释放临界区。幂等（重复调用不会出错，也不会误放别人的占用）。"""
+        self._compacting = False
 
     async def _refresh_system_prompt(self) -> None:
         """从数据库重建 System Prompt（只在 compact 切新 session 后调用）。
@@ -1185,7 +1219,31 @@ class AgentTurnRunner:
 
         这里必须自己算一次（不像 `_check_compact` 那样有现成值可复用）：手动路径
         没有后续的推理步骤，压缩完不广播的话，前端只能等下一次推理才发现值变了。
+
+        ## 并发前提（这条注释和实现同等重要）
+
+        `reload_from_db()` 是**整体覆盖 `_items`**。它一旦与 turn 或另一次 compact
+        交错，就会把对方刚写进内存的行抹掉；而 `insert_compact_summary` 走
+        `on_conflict_ignore` + 按 `(agent_id, seq)` 回读，撞号不报错、静默取库里那行
+        ⇒ 内存与库的摘要正文分叉（用户点完看到 A，刷新变 B）。
+
+        所以本方法**必须**在 `_compacting` 临界区内运行：
+        - 与 turn 互斥：`JobConsumer.consume()` 取 job 前等 `is_compacting` 归位；
+        - 与另一次手动 compact 互斥：`Agent.compact_context()` 进门
+          `try_acquire_manual_compact()` 占用，已占用即抛 `CompactInProgressError`
+          （**拒绝，不排队**——排队等于让「点了两次」变成「压了两次」）。
+
+        **下面的实现不在方法内获锁**：临界区由最外层 `Agent.compact_context()` 负责
+        占用与释放（见该方法的注释——离接口层越近，将来被插入 await 破坏原子性的
+        概率越低）。这里只断言前提成立：绕过临界区直接调用本方法，会与 turn 抢同一份
+        `_history`，那种情况下宁可当场失败也不要静默产出分叉的数据。
         """
+        if not self._compacting:
+            raise RuntimeError(
+                f"execute_manual_compact 必须在 _compacting 临界区内调用: agent_id={self.gt_agent.id}。"
+                "绕过临界区会与 turn / 另一次 compact 争抢同一份 _history"
+                "（reload_from_db 整体覆盖 _items）。"
+            )
         await self._history.reload_from_db()
         await self._execute_compact()
 

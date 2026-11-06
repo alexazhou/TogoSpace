@@ -29,8 +29,20 @@ def _usage() -> AgentContextUsage:
     )
 
 
-def _agent(*, status: AgentStatus, compact_result=None, compact_error: Exception | None = None):
-    """构造一个「只实现本 handler 会用到的那几个成员」的 Agent 替身。"""
+def _agent(
+    *,
+    status: AgentStatus,
+    compact_result=None,
+    compact_error: Exception | None = None,
+    is_compacting: bool = False,
+):
+    """构造一个「只实现本 handler 会用到的那几个成员」的 Agent 替身。
+
+    `is_compacting` 必须显式给出：handler 在调 `compact_context()` 之前会读它
+    做「已有压缩在跑」的预检。替身漏掉这个属性会直接 AttributeError，
+    而 AttributeError 冒出去是 500——测试会以「莫名 500」的形态红掉，
+    看不出真正原因是替身不完整。
+    """
 
     async def _compact_context():
         if compact_error is not None:
@@ -39,6 +51,7 @@ def _agent(*, status: AgentStatus, compact_result=None, compact_error: Exception
 
     return SimpleNamespace(
         status=status,
+        is_compacting=is_compacting,
         compact_context=_compact_context,
         gt_agent=SimpleNamespace(id=5, team_id=2),
     )
@@ -137,6 +150,7 @@ async def test_compact_rejects_when_agent_is_active(monkeypatch):
 
     agent = SimpleNamespace(
         status=AgentStatus.ACTIVE,
+        is_compacting=False,
         compact_context=_should_not_run,
         gt_agent=SimpleNamespace(id=5, team_id=2),
     )
@@ -149,6 +163,65 @@ async def test_compact_rejects_when_agent_is_active(monkeypatch):
     assert exc_info.value.error_code == "agent_is_active"
     # 拦截必须发生在真正压缩之前
     assert called["count"] == 0
+    assert captured["json"] == []
+
+
+# ─── 并发互斥：已有压缩在跑 ───────────────────────────────
+
+
+async def test_compact_rejects_when_compaction_in_progress(monkeypatch):
+    """已有一次手动压缩在跑 → 400 `compact_in_progress`，且**不排队、不执行**。
+
+    这是「用户连点两次压缩」的入口形态。如果这里改成排队（等前一次结束再跑），
+    用户仍然会得到两次压缩，只是变成串行的——防并发变成串行执行，
+    两次压缩各自重算 insert_seq，正是 `agentHistoryStore` 同 id 覆盖的病灶入口。
+    所以断言的核心是 `called["count"] == 0`：第二次请求根本不进入压缩。
+    """
+    called = {"count": 0}
+
+    async def _should_not_run():
+        called["count"] += 1
+        return _usage()
+
+    agent = SimpleNamespace(
+        status=AgentStatus.IDLE,
+        is_compacting=True,
+        compact_context=_should_not_run,
+        gt_agent=SimpleNamespace(id=5, team_id=2),
+    )
+    _patch_runtime(monkeypatch, agent)
+
+    handler, captured = _build_handler()
+    with pytest.raises(TogoException) as exc_info:
+        await handler.post("5")
+
+    assert exc_info.value.error_code == "compact_in_progress"
+    assert called["count"] == 0
+    assert captured["json"] == []
+
+
+async def test_compact_maps_compact_in_progress_raised_inside_to_400(monkeypatch):
+    """预检通过、但 `compact_context()` 内部占用失败 → 仍是 400 `compact_in_progress`。
+
+    这条覆盖「检查 → 占用」之间被将来的 await 打开的窄窗口：
+    handler 先读 `is_compacting`（False），随后 `compact_context()` 进门同步占用
+    时发现已被别人占了，抛 `CompactInProgressError`。若不在这里翻译，
+    它会作为 RuntimeError 冒出去变成 500，前端拿到的就是「服务故障」而非「稍候」。
+    """
+    from service.agentService.compact import CompactInProgressError
+
+    agent = _agent(
+        status=AgentStatus.IDLE,
+        is_compacting=False,
+        compact_error=CompactInProgressError("已有一次手动压缩正在进行"),
+    )
+    _patch_runtime(monkeypatch, agent)
+
+    handler, captured = _build_handler()
+    with pytest.raises(TogoException) as exc_info:
+        await handler.post("5")
+
+    assert exc_info.value.error_code == "compact_in_progress"
     assert captured["json"] == []
 
 

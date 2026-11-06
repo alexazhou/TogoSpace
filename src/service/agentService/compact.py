@@ -147,6 +147,19 @@ class NoCompactableHistoryError(RuntimeError):
     """
 
 
+class CompactInProgressError(RuntimeError):
+    """「另一个 compact 正在跑」这一并发拒绝。
+
+    与 `NoCompactableHistoryError` 同族：都是**确定性业务拒绝**（回 400），
+    不是故障（500）。接口层用异常类型区分，理由同上——错误文案会改，类型不会。
+
+    为什么需要它而不只靠接口层的预检：预检与真正置位之间如果将来被插入 await，
+    两个请求会一起进临界区。置位动作本身是「检查并占用」的原子操作，
+    它拒绝时抛这个错，接口层兜住即可——预检只是让最常见的那条路径少一次
+    无效的协程进入，不是唯一防线。
+    """
+
+
 async def compact_messages(
     messages: list[AgentMessage],
     system_prompt: str,

@@ -17,6 +17,12 @@ from util import assertUtil, asyncUtil
 
 logger = logging.getLogger(__name__)
 
+#: 等待「手动 compact」结束时消费协程的轮询间隔。
+#: compact 的耗时主体是一次 LLM 摘要调用（秒级），50ms 的轮询在延迟与空转间取中；
+#: 这里刻意不用事件/条件变量：compact 是低频操作，多等 ≤50ms 无感知，而条件变量
+#: 一旦漏掉 notify（异常路径）会让消费协程永久卡死，代价不对称。
+_COMPACTING_POLL_INTERVAL_SECONDS = 0.05
+
 
 class JobConsumer:
     """调度任务管道：认领 → 执行 → 状态流转。合并了原 AgentTaskExecutor 的职责。
@@ -137,6 +143,20 @@ class JobConsumer:
             )
 
         while True:
+            # 与「手动 compact」互斥：compact 会 `reload_from_db()` 整体覆盖 `_items`，
+            # 这期间若开跑 turn，turn 在内存里 append 的消息会被旧快照抹掉（并进而
+            # 让 `_next_seq()` 与库里已占用的 seq 撞号、以及两次 compact 算出同一个
+            # `insert_seq` 后互相覆盖）。
+            #
+            # 等待放在 `_set_status(ACTIVE)` **之前**：此刻并没有 turn 在跑，状态就该
+            # 如实保持 IDLE，不让面板显示「忙碌」。这段窗口里点「停止」会拿到
+            # `agent_not_active`——与基线里「job 已落库但 turn 尚未开始」同构，
+            # 不是新引入的语义。
+            # 用 `is True` 而不是真值判断：runner 被替身/Mock 顶替时属性是任意对象，
+            # 真值判断会把它当「一直在压缩」而死等。
+            while self._turn_runner.is_compacting is True:
+                await asyncio.sleep(_COMPACTING_POLL_INTERVAL_SECONDS)
+
             await self._set_status(AgentStatus.ACTIVE)
             job = await gtScheduleJobManager.get_first_unfinished_job(self.gt_agent.id)
 

@@ -10,7 +10,7 @@ from model.coreModel import AgentRuntimeInfo
 from model.dbModel.gtAgent import GtAgent
 from model.coreModel.memoryModel import memory_api_dict
 from service import teamService, agentService, taskService, roomService, memoryService
-from service.agentService.compact import NoCompactableHistoryError
+from service.agentService.compact import CompactInProgressError, NoCompactableHistoryError
 from util import assertUtil
 
 
@@ -321,24 +321,33 @@ class AgentStopHandler(BaseHandler):
 class AgentCompactHandler(BaseHandler):
     """POST /agents/<agent_id>/compact.json - 手动触发上下文压缩（Compact）
 
-    错误映射（**只有第一种转 400，其余异常必须仍是 500**）：
+    错误映射（**前四种是业务拒绝转 400，其余异常必须仍是 500**）：
 
     | 情形 | 状态码 | error_code |
     |---|---|---|
-    | agent 不存在 | 400 | `agent_not_found` |
-    | Agent 正在执行（ACTIVE） | 400 | `agent_is_active` |
     | Agent 未装载进内存 | 400 | `agent_not_loaded` |
+    | Agent 正在执行（ACTIVE） | 400 | `agent_is_active` |
+    | 已有一次手动压缩在进行 | 400 | `compact_in_progress` |
     | 无可压缩历史 | 400 | `no_compactable_history` |
     | LLM 失败 / 摘要为空 / 其他 | 500 | （原样透出） |
 
+    没有 `agent_not_found` 这一行：运行时「不存在」与「未装载」**不可区分**——
+    两者都查内存 `_agents`，`get_agent_or_none` 都返回 None。补一条 SQL 查库的
+    判断只会造出一个永远进不去的假分支，所以统一归到 `agent_not_loaded`。
+
     「无可压缩历史」走 `NoCompactableHistoryError` 类型判断而不是匹配异常文案：
     文案改一个字就静默失效，而它决定的是「400 业务提示」还是「500 故障」，
-    这个分支不该建在错误字符串上。
+    这个分支不该建在错误字符串上。`CompactInProgressError` 同理。
 
     副作用须知：`_execute_compact` 在判定「无可压缩」前**已经写了一条 COMPACT
     活动并置 FAILED**（`agentTurnRunner.py` 里 add_activity 在前、build_plan 在后）。
     这条活动保留不动——它准确记录了「用户点了压缩、系统判定没得压」，
     删掉反而让面板少一条真实轨迹。
+
+    **压缩不可取消**：手动压缩全程不碰 `status`（保持 IDLE），所以此刻点「停止」
+    会拿到 `agent_not_active`——如实回答（确实没有 turn 可取消），不是回归。
+    中途打断会留下「摘要已插库但内存未裁剪」的半成品，比让它跑完更危险；
+    本单不提供取消能力，前端按钮在压缩期间禁用。
     """
 
     async def post(self, agent_id_str: str) -> None:
@@ -351,18 +360,41 @@ class AgentCompactHandler(BaseHandler):
             "agent_not_loaded",
         )
 
-        # ACTIVE 期间改 _history 会与进行中的 turn 抢同一份历史。状态只有
-        # jobConsumer 在事件循环线程里切，本 handler 同样跑在事件循环线程，
-        # 且从检查到 `compact_context()` 的首个 await 之间没有让出控制权的机会，
-        # 所以这个「检查-执行」窗口不会被另一个 turn 插进来。
+        # ACTIVE 期间改 _history 会与进行中的 turn 抢同一份历史。
+        #
+        # ⚠️ 这个检查**不是**并发防护的全部：`status` 不是锁，它只是个标签
+        # （`consume()` 进来无脑 `_set_status(ACTIVE)`，而 `_set_status` 在值相同时
+        # 直接 return）。真正的互斥由 `_compacting` 承担——`Agent.compact_context()`
+        # 进门同步占用，`consume()` 取 job 前等它归位。
+        #
+        # 本检查只是把「turn 正在跑」这条最常见的情形挡在更早的地方，
+        # 少走一次无效的协程进入。
         assertUtil.assertTrue(
             runtime_agent.status != AgentStatus.ACTIVE, None,
             f"Agent ID={agent_id} 正在执行任务，暂不支持手动压缩（当前: {runtime_agent.status.name}）",
             "agent_is_active",
         )
 
+        # 已有一次手动压缩在跑：直接拒绝，**不排队**。
+        # 排队会把「用户连点两次」变成「串行压两次」——防并发变成串行执行，
+        # 用户仍然得到两次压缩。这里同时兜住「检查→占用」被将来的 await 破坏
+        # 的情况：`compact_context()` 内部占用失败也会抛同一个异常。
+        assertUtil.assertTrue(
+            not runtime_agent.is_compacting, None,
+            f"Agent ID={agent_id} 已有一次手动压缩正在进行，请稍候",
+            "compact_in_progress",
+        )
+
         try:
             usage = await runtime_agent.compact_context()
+        except CompactInProgressError:
+            # 兜住「预检通过但占用失败」的窄窗口（见上一条注释）。
+            assertUtil.assertTrue(
+                False, None,
+                f"Agent ID={agent_id} 已有一次手动压缩正在进行，请稍候",
+                "compact_in_progress",
+            )
+            return
         except NoCompactableHistoryError:
             # 业务拒绝：不是故障，用户点了按钮但没有足够历史可压。
             assertUtil.assertTrue(

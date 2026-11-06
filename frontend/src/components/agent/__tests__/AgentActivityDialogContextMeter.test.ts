@@ -124,8 +124,34 @@ describe('AgentActivityDialog 上下文进度条接线', () => {
     wrapper.unmount();
   });
 
-  it('WS 推送先到、详情没有该字段时不会抹掉已推送的值', async () => {
-    // 真实竞态：推送先到、详情后到。详情缺字段不该清空 store。
+  it('已有推送值、详情明确返 null 时进度条消失（null ≠ 字段缺省）', async () => {
+    // 两种「没有数值」必须分开处理：
+    // - 字段缺省（undefined）= 这条响应没带该字段，不代表旧值失效 → 保留；
+    // - 明确 null = 后端表态「此刻算不出来」→ 必须清掉。
+    // 混淆任一侧都会造成「显示的数值与后端不一致」：保留旧值等于在断言
+    // 「上下文还是那么多」，而实际是「不知道」。
+    getAgentDetailMock.mockResolvedValue(baseDetail());
+    const wrapper = mountDialog();
+    await flushPromises();
+
+    applyRealtimeEvent({ type: 'agent_context_usage', teamId: 1, agentId: 7, contextUsage: USAGE });
+    await flushPromises();
+    expect(meterEl()).not.toBeNull();
+
+    // 重新打开弹窗，这次详情明确返回 null（如模型配置被改坏 / Agent 未装载）
+    getAgentDetailMock.mockResolvedValue(baseDetail({ context_usage: null }));
+    await wrapper.setProps({ open: false });
+    await flushPromises();
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+
+    expect(getAgentContextUsage(7)).toBeNull();
+    expect(meterEl()).toBeNull();
+
+    wrapper.unmount();
+  });
+
+  it('WS 推送先到、详情没有该字段时不会抹掉已推送的值', async () => {    // 真实竞态：推送先到、详情后到。详情缺字段不该清空 store。
     getAgentDetailMock.mockResolvedValue(baseDetail());
     const wrapper = mountDialog();
     await flushPromises();

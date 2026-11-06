@@ -500,12 +500,41 @@ export function getAgentContextUsage(agentId: number | null): AgentContextUsage 
 /**
  * 用接口快照播种上下文用量。
  *
- * `usage` 传 null / undefined 时**不写缓存也不删除已有值**：详情接口可能因为
- * Agent 未装载而返回 null，但那不代表「之前推送过的数值已失效」——删掉会让
- * 已经显示的进度条突然消失。
+ * 三态语义，**`null` 与 `undefined` 必须分开**：
+ *
+ * | 传值 | 含义 | 动作 |
+ * |---|---|---|
+ * | `AgentContextUsage` | 后端算出来了 | 写入 |
+ * | `null` | 后端**明确说**「算不出来」 | **删除** |
+ * | `undefined` | 响应里**根本没有这个字段**（老后端 / 字段缺省） | 保留不动 |
+ *
+ * 为什么 `null` 要删而不是「沿用上次」：`null` 的契约意思是「不知道」（见
+ * `types.ts` 的 `AgentDetail.context_usage` 与 `getAgentContextUsage` 注释），
+ * 「沿用上次」会把「不知道」悄悄变成「知道，而且值还是旧的」——用户看到一条
+ * 78% 的进度条，而后端其实已经算不出数了。这正是实测到的现象。
+ *
+ * 可达路径不止「Agent 未装载」：
+ * - `agentService/core.py` 的 `build_context_usage_snapshot`（未装载）；
+ * - `contextUsage.calc_context_usage` 返回 None（模型配置解析失败 / 分母非正）；
+ * - **手动 compact 成功后** `execute_manual_compact` 返回的 `snapshot_context_usage()`
+ *   为 None（例如刷新 System Prompt 后模型配置临时不可解析）。
+ *
+ * 为什么 `undefined` 反而要保留：那是「推送先到、详情后到」的真实时序——详情
+ * 由老后端或某个没带该字段的响应给出，不代表先前推送的值失效。删掉会让刚显示
+ * 出来的进度条突然消失。区分两者的成本只有一行，而混淆任一侧都会造成
+ * 「显示的数值与后端不一致」。
  */
 export function seedAgentContextUsage(agentId: number | null, usage: AgentContextUsage | null | undefined): void {
-  if (agentId === null || agentId <= 0 || !usage) {
+  if (agentId === null || agentId <= 0) {
+    return;
+  }
+  if (usage === undefined) {
+    return;
+  }
+  if (usage === null) {
+    // 原本没有该 key 时这里是 no-op，不会把「从来没有过数据」误变成别的语义。
+    const { [agentId]: _dropped, ...rest } = agentContextUsageState.value;
+    agentContextUsageState.value = rest;
     return;
   }
   agentContextUsageState.value = {
