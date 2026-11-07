@@ -13,7 +13,7 @@ from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtScheduleJob import GtScheduleJob
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService.agentTurnRunner import AgentTurnRunner
-from service.agentService.toolRegistry import ToolExecutionResult
+from service.agentService.toolRegistry import RegisteredTool, ToolExecutionResult
 from service.agentService.driver.base import AgentDriverConfig
 from service.roomService import ChatRoom
 import service.roomService as roomService
@@ -460,7 +460,12 @@ async def test_run_tool_to_item_persists_tool_result_into_activity_metadata(turn
         result={"success": True, "content": "demo"},
         success=True,
     ))
-    turn_runner.tool_registry.get_registered_tool = MagicMock(return_value=SimpleNamespace(marks_turn_finish=False, self_interrupt=False))
+    # 用真实的 RegisteredTool 而不是 SimpleNamespace：#154 起 `_run_tool_to_item`
+    # 调 `registered_tool.triggers_self_interrupt(tool_call)`（动态自中断判定），
+    # SimpleNamespace 上没这个方法，mock 会与生产对象走形。
+    turn_runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=RegisteredTool(tool=None, handler=None, marks_turn_finish=False)
+    )
 
     with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock(return_value=MagicMock(id=7))) as mock_add_activity, patch(
         "service.agentService.agentTurnRunner.agentActivityService.update_activity_progress",
@@ -888,7 +893,7 @@ async def test_run_tool_to_item_returns_turn_done_when_finish_tool_succeeds(turn
         return_value=_make_finish_tool_exec_result(success=True)
     )
     turn_runner.tool_registry.get_registered_tool = MagicMock(
-        return_value=SimpleNamespace(marks_turn_finish=True, self_interrupt=False)
+        return_value=RegisteredTool(tool=None, handler=None, marks_turn_finish=True)
     )
 
     with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock(return_value=MagicMock(id=1))), \
@@ -914,7 +919,7 @@ async def test_run_tool_to_item_returns_error_action_when_finish_tool_fails(turn
         return_value=_make_finish_tool_exec_result(success=False)
     )
     turn_runner.tool_registry.get_registered_tool = MagicMock(
-        return_value=SimpleNamespace(marks_turn_finish=True, self_interrupt=False)
+        return_value=RegisteredTool(tool=None, handler=None, marks_turn_finish=True)
     )
 
     with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock(return_value=MagicMock(id=2))), \
@@ -1067,9 +1072,9 @@ def _make_run_tool_fixture(turn_runner, room, result, *, tool_name="read_image",
         result=result,
         success=success,
     ))
-    turn_runner.tool_registry.get_registered_tool = MagicMock(return_value=SimpleNamespace(
-        marks_turn_finish=False, self_interrupt=False,
-    ))
+    turn_runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=RegisteredTool(tool=None, handler=None, marks_turn_finish=False)
+    )
     return tool_call, output_item
 
 
@@ -1357,3 +1362,138 @@ async def test_infer_to_item_switch_off_disables_recognize(turn_runner):
     recognize_mock.assert_not_called()
     update_history_mock.assert_not_called()
     infer_mock.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# #154 D6：动态自中断判定（`console` 只有路由到 reload 才自中断）
+# ---------------------------------------------------------------------------
+# 这几条专治两种**看不见的**错法：
+#   ① 静态 `self_interrupt=True` ⇒ 每条 console 命令都留下 SELF_INTERRUPT 标记，
+#      `dept ls` 这种正常返回的命令，重启后会被当成「已执行过的中断工具」自动判成功；
+#   ② 完全不判定 ⇒ `reload` 丢掉标记，重启后被重放成**第二次重载**（真的再停一次团队）。
+# 两种都只在真实重启时才显形，所以必须在 turn runner 这一层用桩钉死。
+
+
+def _patched_activity():
+    """把 activity 服务整段打桩：单元测试不建 DB，真实实现会碰 peewee。
+
+    返回一个 contextlib.ExitStack 以便在一个 with 里同时打两处补丁。
+    """
+    import contextlib
+
+    stack = contextlib.ExitStack()
+    stack.enter_context(
+        patch(
+            "service.agentService.agentTurnRunner.agentActivityService.add_activity",
+            new=AsyncMock(return_value=MagicMock(id=1)),
+        )
+    )
+    stack.enter_context(
+        patch(
+            "service.agentService.agentTurnRunner.agentActivityService.update_activity_progress",
+            new=AsyncMock(),
+        )
+    )
+    return stack
+
+
+def _self_interrupt_call() -> llmApiUtil.OpenAIToolCall:
+    return llmApiUtil.OpenAIToolCall(
+        id="tc-console",
+        function={"name": "console", "arguments": '{"command": "reload"}'},
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_tool_to_item_marks_tag_when_predicate_matches(turn_runner):
+    """判定器返回 True ⇒ 必须在 handler 执行前打上 SELF_INTERRUPT 标记。"""
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 31
+    output_item.tags = []
+    tool_call = _self_interrupt_call()
+
+    turn_runner.tool_registry.execute_tool_call = AsyncMock(
+        return_value=ToolExecutionResult(
+            tool_call_id="tc-console", result={"success": True}, success=True
+        )
+    )
+    turn_runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=RegisteredTool(
+            tool=None,
+            handler=None,
+            self_interrupt_predicate=lambda call: call.function_args == '{"command": "reload"}',
+        )
+    )
+    turn_runner._history.mark_self_interrupt_tag = AsyncMock()
+
+    with _patched_activity():
+        await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    turn_runner._history.mark_self_interrupt_tag.assert_awaited_once_with(31)
+
+
+@pytest.mark.asyncio
+async def test_run_tool_to_item_skips_tag_when_predicate_says_no(turn_runner):
+    """判定器返回 False ⇒ **不得**留标记（否则正常命令会被误记成中断过）。"""
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 32
+    output_item.tags = []
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tc-console-ls",
+        function={"name": "console", "arguments": '{"command": "dept ls"}'},
+    )
+
+    turn_runner.tool_registry.execute_tool_call = AsyncMock(
+        return_value=ToolExecutionResult(
+            tool_call_id="tc-console-ls", result={"success": True}, success=True
+        )
+    )
+    turn_runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=RegisteredTool(
+            tool=None,
+            handler=None,
+            self_interrupt_predicate=lambda call: call.function_args == '{"command": "reload"}',
+        )
+    )
+    turn_runner._history.mark_self_interrupt_tag = AsyncMock()
+
+    with _patched_activity():
+        await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    turn_runner._history.mark_self_interrupt_tag.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_tool_to_item_auto_succeeds_on_restart_when_tag_present(turn_runner):
+    """重启恢复：条目已带 SELF_INTERRUPT 标记 ⇒ **不再执行 handler**，直接判成功。
+
+    这条是「标记写没写」的下游验证：标记写了才有这条恢复路径，不写就会被重放。
+    """
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 33
+    output_item.tags = [AgentHistoryTag.SELF_INTERRUPT]
+    output_item.tool_call_id = "tc-console"
+    tool_call = _self_interrupt_call()
+
+    turn_runner.tool_registry.execute_tool_call = AsyncMock()
+    turn_runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=RegisteredTool(tool=None, handler=None, self_interrupt=True)
+    )
+
+    with patch(
+        "service.agentService.agentTurnRunner.agentActivityService.add_activity",
+        new=AsyncMock(return_value=MagicMock(id=9)),
+    ), patch(
+        "service.agentService.agentTurnRunner.agentActivityService.update_activity_progress",
+        new=AsyncMock(),
+    ):
+        result = await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    assert result == TurnStepResult.TOOL_EXECUTE_SUCCESS
+    turn_runner.tool_registry.execute_tool_call.assert_not_awaited(), "已标记过的条目不得重复执行"
