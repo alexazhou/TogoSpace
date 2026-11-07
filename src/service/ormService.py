@@ -18,6 +18,7 @@ from peewee_async.transactions import Transaction
 from peewee_async.utils import ConnectionProtocol
 
 import appPaths
+from dal.db import gtAgentManager
 from db import check_database_initialized, resolve_db_path
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from model.dbModel.base import bind_database, unbind_database
@@ -169,7 +170,10 @@ async def _reset() -> None:
         await _db.aio_close()
     _db = None
     _db_path = None
-    unbind_database()  # 解除 DatabaseProxy 绑定，防「悬空绑定」
+    unbind_database()  # 防「悬空绑定」
+    # 缓存依赖「当前库身份」，换库/停机必须清空；缓存属于 DAL，由 service 层
+    # 统一清理，避免 model -> dal 的反向依赖。
+    gtAgentManager.clear_agent_cache()
 
 
 @serviceUtil.service_start_wrapper(s_status, on_error=_reset)

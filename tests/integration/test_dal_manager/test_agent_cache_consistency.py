@@ -248,13 +248,13 @@ async def test_r3b_caller_mutation_must_not_poison_cache(agent_db):
 async def test_r4_switch_database_must_not_hit_old_object(agent_db):
     """§7.2④：换库后同 ID 复用不得命中上一份数据库的对象。
 
-    变异：拆掉 `unbind_database` 里的 `clear_agent_cache()` ⇒ 本用例红。
+    变异：拆掉 `ormService._reset()` 里的 `clear_agent_cache()` ⇒ 本用例红。
 
     ⚠️ **场景覆盖有用、判别力不足**，两个属性都记着：
       - ①覆盖「换库 + ID 复用」这个**场景本身**——B5 验「换库不清缓存」、
         B13 验「在途查询不回填」，**没有一条验 ID 复用**，这条是唯一的。
-      - ②判别力弱——`unbind_database()` 自身会清，所以它验的是「挂点存在」，
-        不是「在途读取跨换库」。在途那条以 B13 为准。
+      - ②判别力弱——`ormService._reset()` 自身会清，所以它验的是
+        「挂点存在」，不是「在途读取跨换库」。在途那条以 B13 为准。
     不要因为②就删掉这条：删了 ID 复用这个场景就没人守了。
     """
     first = await _new_agent("alice_before")
@@ -262,8 +262,8 @@ async def test_r4_switch_database_must_not_hit_old_object(agent_db):
     await gtAgentManager.get_agent_by_id(old_id)  # 缓存住旧库对象
     assert gtAgentManager.get_cached_agent(old_id) is not None
 
-    # 真实换库路径：走 `unbind_database`（本单的挂点）
-    unbind_database()
+    # 真实换库路径：走 ormService 的数据库解绑清理（生产 `_reset` 的同一挂点）
+    await ormService._reset()
     db2_path = agent_db.database + ".second"
     db_tool.migrate_database(db2_path)
     db2 = AioSqliteDatabase(db2_path, pool_params={"timeout": 30})

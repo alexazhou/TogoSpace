@@ -34,8 +34,6 @@ def unbind_database() -> None:
     仅解除绑定，不销毁传入的 database 对象。
     """
     _database_proxy.initialize(None)
-    from dal.db import gtAgentManager as _gam
-    _gam.clear_agent_cache()
 
 
 @asynccontextmanager
