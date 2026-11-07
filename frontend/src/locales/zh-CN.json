@@ -298,7 +298,14 @@
       "detailFallback": "角色模板详情",
       "noSoul": "该模板暂无 Soul 内容",
       "loadFailed": "模板详情加载失败。"
-    }
+    },
+    "contextUsage": "上下文",
+    "contextCompact": "压缩",
+    "contextCompacting": "压缩中",
+    "contextCompactSuccess": "上下文压缩已完成",
+    "contextCompactNoHistory": "当前无足够可压缩的历史消息",
+    "contextCompactAgentActive": "Agent 正在工作中，暂不支持手动压缩",
+    "contextUsageTooltip": "当前上下文: {used} / {limit} ({percent}%)\n压缩阈值: {trigger} ({triggerPercent}%)\n模型窗口: {window}"
   },
   "room": {
     "chatRooms": "聊天室",

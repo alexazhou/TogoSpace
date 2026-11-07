@@ -226,4 +226,105 @@ describe('normalizeWsEventPayload', () => {
       })).toBeNull();
     });
   });
+
+  // ─── agent_context_usage：扁平 payload（没有 gt_agent 对象）───────────────
+  describe('agent_context_usage', () => {
+    const validUsage = {
+      used_tokens: 40000,
+      limit_tokens: 114688,
+      compact_trigger_tokens: 97484,
+      context_window_tokens: 131072,
+      ratio: 0.3487,
+    };
+
+    it('normalizes the flat payload without a gt_agent wrapper', () => {
+      const event = normalizeWsEventPayload({
+        event: 'agent_context_usage',
+        team_id: 2,
+        agent_id: 7,
+        context_usage: validUsage,
+      });
+
+      expect(event).toEqual({
+        type: 'agent_context_usage',
+        teamId: 2,
+        agentId: 7,
+        contextUsage: validUsage,
+      });
+    });
+
+    it('keeps ratio above 1 untouched (over-limit is real diagnostic info)', () => {
+      const event = normalizeWsEventPayload({
+        event: 'agent_context_usage',
+        team_id: 2,
+        agent_id: 7,
+        context_usage: { ...validUsage, used_tokens: 200000, ratio: 200000 / 114688 },
+      });
+
+      expect(event?.type).toBe('agent_context_usage');
+      if (event?.type !== 'agent_context_usage') {
+        throw new Error('unexpected event type');
+      }
+      expect(event.contextUsage.ratio).toBeGreaterThan(1);
+    });
+
+    it('drops the event when team/agent ids are missing or non-positive', () => {
+      expect(normalizeWsEventPayload({
+        event: 'agent_context_usage',
+        agent_id: 7,
+        context_usage: validUsage,
+      })).toBeNull();
+
+      expect(normalizeWsEventPayload({
+        event: 'agent_context_usage',
+        team_id: 2,
+        agent_id: 0,
+        context_usage: validUsage,
+      })).toBeNull();
+
+      // 负 id（操作者 / SYSTEM）不该有上下文用量
+      expect(normalizeWsEventPayload({
+        event: 'agent_context_usage',
+        team_id: 2,
+        agent_id: -1,
+        context_usage: validUsage,
+      })).toBeNull();
+    });
+
+    it('drops the whole event when any usage field is dirty', () => {
+      // 半张脏数据不能透出：宁可不画进度条，也不画一个分母错误的条。
+      const dirtyCases: Array<Record<string, unknown>> = [
+        { ...validUsage, used_tokens: 'x' },
+        { ...validUsage, used_tokens: -1 },
+        { ...validUsage, limit_tokens: 0 },
+        { ...validUsage, limit_tokens: null },
+        { ...validUsage, compact_trigger_tokens: undefined },
+        { ...validUsage, context_window_tokens: -5 },
+        { ...validUsage, ratio: Number.NaN },
+        { ...validUsage, ratio: -0.1 },
+      ];
+
+      for (const context_usage of dirtyCases) {
+        expect(
+          normalizeWsEventPayload({ event: 'agent_context_usage', team_id: 2, agent_id: 7, context_usage }),
+          `应当丢弃脏载荷: ${JSON.stringify(context_usage)}`,
+        ).toBeNull();
+      }
+    });
+
+    it('drops the event when context_usage is absent or not an object', () => {
+      expect(normalizeWsEventPayload({
+        event: 'agent_context_usage',
+        team_id: 2,
+        agent_id: 7,
+      })).toBeNull();
+
+      expect(normalizeWsEventPayload({
+        event: 'agent_context_usage',
+        team_id: 2,
+        agent_id: 7,
+        context_usage: 'nope',
+      })).toBeNull();
+    });
+  });
 });

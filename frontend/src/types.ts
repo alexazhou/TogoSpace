@@ -17,6 +17,27 @@ export type EntityI18n = Record<string, I18nText>;
 /** 执行环境：宿主 or 容器（内存态，后端重启一律回宿主）。 */
 export type AgentExecEnv = 'host' | 'container';
 
+/**
+ * Agent 上下文占用快照（后端 `AgentContextUsage`）。
+ *
+ * **分母是 `limit_tokens`，不是模型窗口**：`limit_tokens = 窗口 − 为输出预留`，
+ * 这样 `compact_trigger_tokens` 才落在「距离压缩线还有多远」这个真问题上。
+ * `context_window_tokens` 只用于 tooltip 展示，**不参与任何计算**。
+ *
+ * `ratio` 由后端算好下发，前端**只用它画宽度**，不自己拿 used/limit 重算——
+ * 两处各算一遍，将来改口径必然分叉。
+ *
+ * `ratio` 可能 `> 1`：`used_tokens` 是估算值，`limit_tokens` 是配置值，
+ * 超限是真实可发生的状态，后端刻意不 clamp。压宽度时才夹。
+ */
+export interface AgentContextUsage {
+  used_tokens: number;
+  limit_tokens: number;
+  compact_trigger_tokens: number;
+  context_window_tokens: number;
+  ratio: number;
+}
+
 /** 长期记忆星标级别（对外小写字符串，见后端 `constants.MemoryStarLevel`）。 */
 export type AgentMemoryStarLevel = 'none' | 'title' | 'summary';
 
@@ -108,6 +129,12 @@ export interface AgentDetail extends AgentInfo {
   error_message?: string | null;
   /** Agent 详情额外携带的实时容器列表；预记录 `container_id` 为 null。 */
   containers?: ContainerRuntimeInfo[] | null;
+  /**
+   * 上下文占用快照。`null` / 缺省表示「不知道」，**不是 0**：
+   * Agent 未装载进内存、请求的是 Operator / SYSTEM 负 id、或模型配置解析失败。
+   * 这几种情况进度条整条不渲染——渲染成 0% 是在撒谎。
+   */
+  context_usage?: AgentContextUsage | null;
 }
 
 export interface AgentActivity {

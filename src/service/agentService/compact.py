@@ -47,11 +47,15 @@ _OVERFLOW_KEYWORDS = (
 
 # ─── 阈值计算 ────────────────────────────────────────────
 
-def calc_hard_limit_tokens(model_config: LlmModelConfig) -> int:
-    """计算模型当前请求允许使用的最大 prompt token。
+def resolve_context_window_tokens(model_config: LlmModelConfig) -> int:
+    """解析模型当前生效的上下文窗口原始值（未扣 `reserve_output_tokens`）。
 
     context_window 取值优先级：用户配置（模型级 > 全局）> 内置模型表 > 代码默认值。
     内置表只在用户未调整 context_window_tokens（仍为代码默认值）时生效。
+
+    单独抽出来是因为「model 的窗口是多少」有两个消费方：`calc_hard_limit_tokens`
+    要拿它扣 reserve，前端 tooltip 要直接展示它。两处各写一遍就等于把
+    DEFAULT_MODEL_CONTEXT_WINDOWS 的兜底规则复制了两份，将来只改一处就分叉。
     """
     setting = configUtil.get_app_config().setting
     context_cfg = model_config.context_config if model_config.context_config else setting.context_config
@@ -62,7 +66,18 @@ def calc_hard_limit_tokens(model_config: LlmModelConfig) -> int:
         # 用户没改过 → 用内置表兜底；表里没有该模型则保持代码默认值。
         context_window = DEFAULT_MODEL_CONTEXT_WINDOWS.get(model_config.name, context_window)
 
-    return context_window - context_cfg.reserve_output_tokens
+    return context_window
+
+
+def calc_hard_limit_tokens(model_config: LlmModelConfig) -> int:
+    """计算模型当前请求允许使用的最大 prompt token。
+
+    context_window 取值见 `resolve_context_window_tokens`；此处再扣掉为输出预留的
+    `reserve_output_tokens`。这个值就是上下文占用率的分母（见 `AgentContextUsage`）。
+    """
+    setting = configUtil.get_app_config().setting
+    context_cfg = model_config.context_config if model_config.context_config else setting.context_config
+    return resolve_context_window_tokens(model_config) - context_cfg.reserve_output_tokens
 
 
 def calc_compact_trigger_tokens(model_config: LlmModelConfig) -> int:
@@ -116,6 +131,34 @@ def is_context_overflow_error(error: Exception) -> bool:
 
 
 # ─── compact 执行 ─────────────────────────────────────────
+
+class NoCompactableHistoryError(RuntimeError):
+    """「当前没有可压缩的历史」这一确定性业务拒绝。
+
+    继承 `RuntimeError` 是**行为兼容**的选择：`_execute_compact` 原本就抛
+    `RuntimeError`，既有 `except RuntimeError` 的调用点（预检 / 复检 compact 路径）
+    照样接住并继续往外抛，语义不变。
+
+    引入它的唯一目的，是让**接口层**能把「用户点了压缩、但没有可压缩内容」这种
+    正常业务拒绝与真正的故障（LLM 失败、摘要为空返回值等）区分开：
+    前者回 400 + `no_compactable_history`，后者必须仍然是 500。
+    用 `str(exc)` 做子串匹配也能实现，但那等于把异常语义写进错误文案里，
+    改一句提示语就静默失效——所以用类型表达。
+    """
+
+
+class CompactInProgressError(RuntimeError):
+    """「另一个 compact 正在跑」这一并发拒绝。
+
+    与 `NoCompactableHistoryError` 同族：都是**确定性业务拒绝**（回 400），
+    不是故障（500）。接口层用异常类型区分，理由同上——错误文案会改，类型不会。
+
+    为什么需要它而不只靠接口层的预检：预检与真正置位之间如果将来被插入 await，
+    两个请求会一起进临界区。置位动作本身是「检查并占用」的原子操作，
+    它拒绝时抛这个错，接口层兜住即可——预检只是让最常见的那条路径少一次
+    无效的协程进入，不是唯一防线。
+    """
+
 
 async def compact_messages(
     messages: list[AgentMessage],

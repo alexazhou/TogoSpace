@@ -14,6 +14,7 @@ import {
 import type {
   AgentActivity,
   AgentActivityType,
+  AgentContextUsage,
   AgentExecEnv,
   AgentInfo,
   AgentStatus,
@@ -47,6 +48,13 @@ const agentStatusState = ref<Record<number, AgentStatus>>({});
  * 不做本地推测。宿主环境也存一条，用于「Agent 从容器退出」时把徽标正确清掉。
  */
 const agentExecEnvState = ref<Record<number, { execEnv: AgentExecEnv; currentContainerId: string | null }>>({});
+/**
+ * 上下文用量内存态（`agent_id -> AgentContextUsage`）。
+ *
+ * 与 `agentStatusState` 同构：接口快照播种初值、`agent_context_usage` 事件增量推进。
+ * **没有记录 = 不知道**，不是 0——组件据此整条不渲染，避免把「算不出来」画成 0%。
+ */
+const agentContextUsageState = ref<Record<number, AgentContextUsage>>({});
 const teamDeptTreeState = ref<Record<number, DeptTreeNode | null>>({});
 const teamTasksState = ref<Record<number, AgentTask[]>>({});
 const roleTemplatesState = ref<RoleTemplateSummary[]>([]);
@@ -476,6 +484,65 @@ export function getAgentExecEnv(agentId: number | null): { execEnv: AgentExecEnv
   return agentExecEnvState.value[agentId] ?? { execEnv: 'host', currentContainerId: null };
 }
 
+/**
+ * 取某 Agent 的上下文用量；**无记录返回 null**（不是全 0 对象）。
+ *
+ * 返回 null 的语义是「不知道」：组件必须据此整条不渲染。用全 0 对象会让
+ * 进度条显示 0%，那是在断言「上下文是空的」——而它其实只是没算出来。
+ */
+export function getAgentContextUsage(agentId: number | null): AgentContextUsage | null {
+  if (agentId === null) {
+    return null;
+  }
+  return agentContextUsageState.value[agentId] ?? null;
+}
+
+/**
+ * 用接口快照播种上下文用量。
+ *
+ * 三态语义，**`null` 与 `undefined` 必须分开**：
+ *
+ * | 传值 | 含义 | 动作 |
+ * |---|---|---|
+ * | `AgentContextUsage` | 后端算出来了 | 写入 |
+ * | `null` | 后端**明确说**「算不出来」 | **删除** |
+ * | `undefined` | 响应里**根本没有这个字段**（老后端 / 字段缺省） | 保留不动 |
+ *
+ * 为什么 `null` 要删而不是「沿用上次」：`null` 的契约意思是「不知道」（见
+ * `types.ts` 的 `AgentDetail.context_usage` 与 `getAgentContextUsage` 注释），
+ * 「沿用上次」会把「不知道」悄悄变成「知道，而且值还是旧的」——用户看到一条
+ * 78% 的进度条，而后端其实已经算不出数了。这正是实测到的现象。
+ *
+ * 可达路径不止「Agent 未装载」：
+ * - `agentService/core.py` 的 `build_context_usage_snapshot`（未装载）；
+ * - `contextUsage.calc_context_usage` 返回 None（模型配置解析失败 / 分母非正）；
+ * - **手动 compact 成功后** `execute_manual_compact` 返回的 `snapshot_context_usage()`
+ *   为 None（例如刷新 System Prompt 后模型配置临时不可解析）。
+ *
+ * 为什么 `undefined` 反而要保留：那是「推送先到、详情后到」的真实时序——详情
+ * 由老后端或某个没带该字段的响应给出，不代表先前推送的值失效。删掉会让刚显示
+ * 出来的进度条突然消失。区分两者的成本只有一行，而混淆任一侧都会造成
+ * 「显示的数值与后端不一致」。
+ */
+export function seedAgentContextUsage(agentId: number | null, usage: AgentContextUsage | null | undefined): void {
+  if (agentId === null || agentId <= 0) {
+    return;
+  }
+  if (usage === undefined) {
+    return;
+  }
+  if (usage === null) {
+    // 原本没有该 key 时这里是 no-op，不会把「从来没有过数据」误变成别的语义。
+    const { [agentId]: _dropped, ...rest } = agentContextUsageState.value;
+    agentContextUsageState.value = rest;
+    return;
+  }
+  agentContextUsageState.value = {
+    ...agentContextUsageState.value,
+    [agentId]: usage,
+  };
+}
+
 export function getDeptTreeState(teamId: number | null): DeptTreeNode | null {
   if (teamId === null) {
     return null;
@@ -680,6 +747,16 @@ export function applyRealtimeEvent(event: FrontendRealtimeEvent): void {
     return;
   }
 
+  if (event.type === 'agent_context_usage') {
+    // 只写内存态，不回写到 teamAgentsState：用量不属于 AgentInfo，
+    // 塞进列表项会让「列表接口不返回该字段」这条契约变得模糊。
+    agentContextUsageState.value = {
+      ...agentContextUsageState.value,
+      [event.agentId]: event.contextUsage,
+    };
+    return;
+  }
+
   if (event.type === 'agent_container') {
     // 先更新内存态：即便当前 team 尚未加载该 Agent 的列表，环境本身也要记下来，
     // 否则「先进容器、后加载列表」的顺序会让徽标停留旧值。
@@ -792,6 +869,7 @@ export function clearRuntimeStore(): void {
   agentActivitiesState.value = {};
   agentStatusState.value = {};
   agentExecEnvState.value = {};
+  agentContextUsageState.value = {};
   teamDeptTreeState.value = {};
   teamTasksState.value = {};
   taskEventsState.value = {};

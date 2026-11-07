@@ -16,6 +16,7 @@ from constants import (
     ScheduleJobType, DriverType, ModelInput, OpenaiApiRole, RoomState, RoomType, SpecialAgent,
     TaskStatus, TurnStepResult,
 )
+from model.coreModel.agentModel import AgentContextUsage
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from model.dbModel.gtAgent import GtAgent
@@ -27,7 +28,7 @@ from model.dbModel.historyUsage import CompactStage, HistoryUsage
 from service import agentActivityService, llmService, roomService, taskService
 from service.agentActivityService import AgentActivityMeta
 from service.agentService.agentHistoryStore import AgentHistoryStore
-from service.agentService import compact, promptBuilder, visionFallback
+from service.agentService import compact, contextUsage, promptBuilder, visionFallback
 from service.llmService.core import resolve_model
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
 from service.agentService.driver.factory import build_agent_driver
@@ -82,6 +83,40 @@ class AgentTurnRunner:
         self.driver = build_agent_driver(self, driver_config or AgentDriverConfig(driver_type=DriverType.NATIVE))
         self._current_room: ChatRoom | None = None
         self._current_job: GtScheduleJob | None = None
+        # 手动 compact 的互斥标志。手动 compact 是**唯一**会「整体覆盖 _items」
+        # （`reload_from_db`）又不在 turn 里面跑的路径，必须与 turn 互斥：
+        # - 与 turn 互斥：`JobConsumer.consume()` 在取 job 前等它归位；
+        # - 与另一次手动 compact 互斥：`execute_manual_compact` 进门检查并占用。
+        # **不碰 `status`**：`status` 只是标签，`consume()` 进来无脑置 ACTIVE，
+        # 拿它当锁会让「状态显示空闲但 Agent 正在干活」且 stop 被静默拒绝。
+        self._compacting: bool = False
+
+    @property
+    def is_compacting(self) -> bool:
+        """是否正在执行手动 compact。
+
+        `JobConsumer.consume()` 据此在取 job 前等待，避免 turn 与 compact 抢同一份
+        `_history`（compact 的 `reload_from_db` 会整体覆盖 `_items`，把这期间 turn
+        在内存里 append 的消息抹掉）。
+        """
+        return self._compacting
+
+    def try_acquire_manual_compact(self) -> bool:
+        """检查并占用「手动 compact」临界区；已被占用返回 False。
+
+        **这是同步方法，且调用方必须保证它与自己的前置检查之间没有 await**——
+        「检查 + 置位」必须落在同一个不让出事件循环的同步段里，否则两个并发请求
+        会双双通过检查。占用失败的调用方应立即拒绝请求，不得排队等待：
+        排队会把「用户点了两次」变成「串行压了两次」。
+        """
+        if self._compacting:
+            return False
+        self._compacting = True
+        return True
+
+    def release_manual_compact(self) -> None:
+        """释放临界区。幂等（重复调用不会出错，也不会误放别人的占用）。"""
+        self._compacting = False
 
     async def _refresh_system_prompt(self) -> None:
         """从数据库重建 System Prompt（只在 compact 切新 session 后调用）。
@@ -305,6 +340,10 @@ class AgentTurnRunner:
                             await room.handle_finish_request(self.gt_agent.id)
                             await self._wake_next_turn_if_unread(room)
                             return
+
+                # 本轮消息已注入 history、尚未开始推理：此刻广播一次，
+                # 让面板在「推理前的等待时间」里就能看到上下文涨了。
+                self._publish_context_usage()
 
                 await self._run_turn_loop(room)
                 if room is not None:
@@ -811,6 +850,12 @@ class AgentTurnRunner:
                 final_meta.last_retry_error = request_retry_meta.last_retry_error
             await self._finish_activity(activity_id, status=AgentActivityStatus.SUCCEEDED, metadata_patch=final_meta)
 
+            # 上下文用量：优先用模型返回的真实 `usage.prompt_tokens`（比估算准），
+            # 没有 usage 时退回估算。放在活动收尾之后，广播失败不影响推理结果。
+            self._publish_context_usage(
+                used_tokens=usage.prompt_tokens if usage and usage.prompt_tokens is not None else None,
+            )
+
             # 活动记录：思考内容和直接发言
             if assistant_message.reasoning_content and assistant_message.reasoning_content.strip():
                 await agentActivityService.add_activity(
@@ -1076,6 +1121,9 @@ class AgentTurnRunner:
                 f"estimated={estimated_tokens}, hard_limit={hard_limit_tokens}"
             )
 
+        # 压缩完成且刚算过新值：直接广播，不重复跑 tokenizer。
+        self._publish_context_usage(used_tokens=estimated_tokens)
+
         return messages, estimated_tokens, True
 
     async def _execute_compact(self) -> None:
@@ -1090,7 +1138,7 @@ class AgentTurnRunner:
         if compact_plan is None:
             logger.warning("compact 跳过：无可压缩消息, agent_id=%d", self.gt_agent.id)
             await self._finish_activity(compact_activity.id, status=AgentActivityStatus.FAILED, error_message="无可压缩消息")
-            raise RuntimeError("compact 跳过：无可压缩消息")
+            raise compact.NoCompactableHistoryError("compact 跳过：无可压缩消息")
 
         # 摘要 token 上限动态设为上下文长度的 10%，随模型配置自动伸缩
         compact_max_tokens = max(1, int(merged_llm_config.context_config.context_window_tokens * 0.1))
@@ -1122,3 +1170,87 @@ class AgentTurnRunner:
 
         # 活动记录：COMPACT SUCCEEDED
         await self._finish_activity(compact_activity.id, status=AgentActivityStatus.SUCCEEDED)
+        # 注意：这里**不广播**用量。压缩后的 token 数需要重新估算一次
+        # （`estimate_tokens` 要跑 tokenizer），而调用方 `_check_compact` 紧接着
+        # 就要算同一个值——在这里再算一遍等于同一轮里跑两次 tokenizer。
+        # 广播交给拿到数值的调用点（见 `_check_compact` / `execute_manual_compact`）。
+
+    # ─── 上下文用量 ────────────────────────────────────────────
+
+    def snapshot_context_usage(self) -> AgentContextUsage | None:
+        """按内存态未压缩历史算一份占用快照；算不出来时 `None`。"""
+        return contextUsage.calc_context_usage_from_history(
+            model_name=self.gt_agent.model,
+            items=list(self._history),
+            system_prompt=self.system_prompt,
+        )
+
+    def _publish_context_usage(self, *, used_tokens: int | None = None) -> None:
+        """算一次并广播；`used_tokens` 给定时跳过估算直接用它。
+
+        统一从这里出去的原因见 `contextUsage` 模块注释：分子分母各算一份就会分叉。
+        广播本身吞掉所有异常——**用量是观测指标，读不到指标不该让任务失败**。
+        """
+        try:
+            usage = contextUsage.calc_context_usage_from_history(
+                model_name=self.gt_agent.model,
+                items=list(self._history),
+                system_prompt=self.system_prompt,
+            ) if used_tokens is None else contextUsage.calc_context_usage(
+                model_name=self.gt_agent.model,
+                messages=[],
+                system_prompt=self.system_prompt,
+                used_tokens=used_tokens,
+            )
+            contextUsage.publish_context_usage(
+                team_id=self.gt_agent.team_id,
+                agent_id=self.gt_agent.id,
+                usage=usage,
+            )
+        except Exception as e:
+            logger.warning("[context-usage] 广播失败（不影响主流程）: agent_id=%s, error=%s", self.gt_agent.id, e)
+
+    async def execute_manual_compact(self) -> AgentContextUsage | None:
+        """手动压缩入口：执行 compact 并返回压缩后的新用量。
+
+        与自动路径共用 `_execute_compact`，区别是：
+        1. 先重载历史，保证「用户点按钮」这一刻的压缩基准是最新的；
+        2. 压缩后算一次新用量，**既作为接口返回值、也广播给其它打开的窗口**。
+
+        这里必须自己算一次（不像 `_check_compact` 那样有现成值可复用）：手动路径
+        没有后续的推理步骤，压缩完不广播的话，前端只能等下一次推理才发现值变了。
+
+        ## 并发前提（这条注释和实现同等重要）
+
+        `reload_from_db()` 是**整体覆盖 `_items`**。它一旦与 turn 或另一次 compact
+        交错，就会把对方刚写进内存的行抹掉；而 `insert_compact_summary` 走
+        `on_conflict_ignore` + 按 `(agent_id, seq)` 回读，撞号不报错、静默取库里那行
+        ⇒ 内存与库的摘要正文分叉（用户点完看到 A，刷新变 B）。
+
+        所以本方法**必须**在 `_compacting` 临界区内运行：
+        - 与 turn 互斥：`JobConsumer.consume()` 取 job 前等 `is_compacting` 归位；
+        - 与另一次手动 compact 互斥：`Agent.compact_context()` 进门
+          `try_acquire_manual_compact()` 占用，已占用即抛 `CompactInProgressError`
+          （**拒绝，不排队**——排队等于让「点了两次」变成「压了两次」）。
+
+        **下面的实现不在方法内获锁**：临界区由最外层 `Agent.compact_context()` 负责
+        占用与释放（见该方法的注释——离接口层越近，将来被插入 await 破坏原子性的
+        概率越低）。这里只断言前提成立：绕过临界区直接调用本方法，会与 turn 抢同一份
+        `_history`，那种情况下宁可当场失败也不要静默产出分叉的数据。
+        """
+        if not self._compacting:
+            raise RuntimeError(
+                f"execute_manual_compact 必须在 _compacting 临界区内调用: agent_id={self.gt_agent.id}。"
+                "绕过临界区会与 turn / 另一次 compact 争抢同一份 _history"
+                "（reload_from_db 整体覆盖 _items）。"
+            )
+        await self._history.reload_from_db()
+        await self._execute_compact()
+
+        usage = self.snapshot_context_usage()
+        contextUsage.publish_context_usage(
+            team_id=self.gt_agent.team_id,
+            agent_id=self.gt_agent.id,
+            usage=usage,
+        )
+        return usage

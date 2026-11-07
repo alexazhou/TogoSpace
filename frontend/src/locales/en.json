@@ -298,7 +298,14 @@
       "detailFallback": "Role Template Details",
       "noSoul": "This template has no Soul content",
       "loadFailed": "Failed to load template details."
-    }
+    },
+    "contextUsage": "Context",
+    "contextCompact": "Compact",
+    "contextCompacting": "Compacting",
+    "contextCompactSuccess": "Context compaction completed",
+    "contextCompactNoHistory": "No enough history to compact",
+    "contextCompactAgentActive": "Agent is working, manual compaction is unavailable",
+    "contextUsageTooltip": "Current context: {used} / {limit} ({percent}%)\nCompact threshold: {trigger} ({triggerPercent}%)\nModel window: {window}"
   },
   "room": {
     "chatRooms": "Chat Rooms",

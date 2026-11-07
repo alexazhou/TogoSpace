@@ -3,6 +3,7 @@ import { t } from '../i18n';
 import { i18nText, findDepartmentPath, isDepartmentLeader } from '../utils';
 import type {
   AgentActivity,
+  AgentContextUsage,
   AgentInfo,
   AgentStatus,
   DeptTreeNode,
@@ -12,6 +13,7 @@ import type {
 } from '../types';
 import {
   getAgentActivities,
+  getAgentContextUsage,
   getAgentStatus,
   getDeptTreeState,
   getRoomMessageHistoryState,
@@ -66,6 +68,15 @@ export function useAgentActivities(agentId: MaybeRefOrGetter<number | null>) {
 
 export function useAgentStatus(agentId: MaybeRefOrGetter<number | null>) {
   return computed<AgentStatus | null>(() => getAgentStatus(toValue(agentId)));
+}
+
+/**
+ * 上下文用量响应式读取；`null` 表示「不知道」（组件据此整条不渲染）。
+ *
+ * 与 `useAgentStatus` 同构：任何组件都能按 agentId 消费，无需自己订阅 WS。
+ */
+export function useAgentContextUsage(agentId: MaybeRefOrGetter<number | null>) {
+  return computed<AgentContextUsage | null>(() => getAgentContextUsage(toValue(agentId)));
 }
 
 export function useDeptTree(teamId: MaybeRefOrGetter<number | null>) {

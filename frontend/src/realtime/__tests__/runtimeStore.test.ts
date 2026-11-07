@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { scheduleNotRunningReason, scheduleState, totalMessageCount } from '../../appUiState';
-import type { AgentActivity, AgentInfo, AgentTask, AgentTaskEvent, MessageInfo, RoomState } from '../../types';
+import type { AgentActivity, AgentContextUsage, AgentInfo, AgentTask, AgentTaskEvent, MessageInfo, RoomState } from '../../types';
 import {
   appendTaskEvent,
   applyRealtimeEvent,
   clearRuntimeStore,
   getAgentActivities,
+  getAgentContextUsage,
   getAgentExecEnv,
   getAgentStatus,
   getTeamAgents,
@@ -17,6 +18,7 @@ import {
   getTeamTasks,
   mergeTaskEvents,
   prependTaskEvents,
+  seedAgentContextUsage,
   seedRoomMessages,
   seedTeamAgents,
   seedTeamRooms,
@@ -61,6 +63,20 @@ function createMessage(overrides: Partial<MessageInfo>): MessageInfo {
     seq: 0,
     insert_immediately: false,
     ...overrides,
+  };
+}
+
+const LIMIT = 114688;
+
+function createUsage(overrides: Partial<AgentContextUsage> = {}): AgentContextUsage {
+  const used = overrides.used_tokens ?? 40000;
+  const limit = overrides.limit_tokens ?? LIMIT;
+  return {
+    used_tokens: used,
+    limit_tokens: limit,
+    compact_trigger_tokens: overrides.compact_trigger_tokens ?? 97484,
+    context_window_tokens: overrides.context_window_tokens ?? 131072,
+    ratio: overrides.ratio ?? used / limit,
   };
 }
 
@@ -260,6 +276,85 @@ describe('runtimeStore realtime events', () => {
       clearRuntimeStore();
 
       expect(getAgentExecEnv(8)).toEqual({ execEnv: 'host', currentContainerId: null });
+    });
+  });
+
+  // ─── agent_context_usage：上下文用量内存态 ──────────────────────────────
+  describe('agent_context_usage events', () => {
+    it('seeds from the detail snapshot', () => {
+      seedAgentContextUsage(8, createUsage({ used_tokens: 40000 }));
+
+      expect(getAgentContextUsage(8)).toEqual(createUsage({ used_tokens: 40000 }));
+    });
+
+    it('returns null (not a zero-filled object) when nothing is known', () => {
+      // 语义是「不知道」：组件据此整条不渲染。若返回全 0 对象，进度条会画 0%，
+      // 那是在断言「上下文是空的」——而它只是没算出来。
+      expect(getAgentContextUsage(999)).toBeNull();
+      expect(getAgentContextUsage(null)).toBeNull();
+    });
+
+    it('deletes the key when seeding null (后端明确说「算不出来」)', () => {
+      // null 是后端明确表态「此刻算不出用量」（模型配置解析失败 / limit 非正 /
+      // Agent 未装载）。进度条该消失：继续显示上一次的数值，等于在断言
+      // 「上下文还是那么多」，而实际是「不知道」。
+      seedAgentContextUsage(8, createUsage({ used_tokens: 40000 }));
+      seedAgentContextUsage(8, null);
+      expect(getAgentContextUsage(8)).toBeNull();
+    });
+
+    it('keeps the existing value when seeding undefined (字段缺省 ≠ 失效)', () => {
+      // undefined 是「这条响应里没有该字段」（老后端 / 详情先到推送后到），
+      // 不代表先前推送的值已失效。删掉会让刚显示的进度条突然消失。
+      seedAgentContextUsage(8, createUsage({ used_tokens: 40000 }));
+      seedAgentContextUsage(8, undefined);
+      expect(getAgentContextUsage(8)).toEqual(createUsage({ used_tokens: 40000 }));
+    });
+
+    it('seeding null for an unknown agent is a no-op, not an error', () => {
+      // 从没写过数据的 agent 收到 null：解构删除是幂等的，不能抛、也不能凭空造 key。
+      seedAgentContextUsage(8, null);
+      expect(getAgentContextUsage(8)).toBeNull();
+    });
+
+    it('ignores seeding for negative / null agent ids', () => {
+      // 操作者与 SYSTEM 是负 id，永远不该有上下文用量
+      seedAgentContextUsage(-1, createUsage());
+      seedAgentContextUsage(null, createUsage());
+
+      expect(getAgentContextUsage(-1)).toBeNull();
+      expect(getAgentContextUsage(null)).toBeNull();
+    });
+
+    it('advances from realtime events without touching the team agent list', () => {
+      seedTeamAgents(2, [createAgent({ id: 8 })]);
+      seedAgentContextUsage(8, createUsage({ used_tokens: 40000 }));
+
+      const next = createUsage({ used_tokens: 90000, ratio: 90000 / 114688 });
+      applyRealtimeEvent({ type: 'agent_context_usage', teamId: 2, agentId: 8, contextUsage: next });
+
+      expect(getAgentContextUsage(8)).toEqual(next);
+      // 用量不属于 AgentInfo：不回写列表项，避免「列表接口返回该字段」的错觉
+      const agent = getTeamAgents(2).find((item) => item.id === 8) as unknown as Record<string, unknown>;
+      expect(agent.context_usage).toBeUndefined();
+    });
+
+    it('records usage even when the team list is not loaded yet', () => {
+      applyRealtimeEvent({
+        type: 'agent_context_usage',
+        teamId: 2,
+        agentId: 8,
+        contextUsage: createUsage({ used_tokens: 40000 }),
+      });
+
+      expect(getAgentContextUsage(8)).toEqual(createUsage({ used_tokens: 40000 }));
+    });
+
+    it('does not leave stale usage behind after clearing the store', () => {
+      seedAgentContextUsage(8, createUsage());
+      clearRuntimeStore();
+
+      expect(getAgentContextUsage(8)).toBeNull();
     });
   });
 
