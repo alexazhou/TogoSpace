@@ -1,8 +1,9 @@
 """`containerService.core` 的编排测试。
 
 用**假 docker 可执行文件**（Python 脚本，行为由 JSON 配置驱动）驱动真实子进程，
-DB 用真实的 `0017` 迁移 DDL + 临时文件库。这样测的是「编排是否按 §5 的顺序与
-补偿语义执行」，而不是我自己的 mock 是否自洽。
+DB 用**跑完整迁移到最新**的临时文件库（`tests/container_db_schema.migrate_all`）。
+这样测的是「编排是否按 §5 的顺序与补偿语义执行」，而不是我自己的 mock 是否自洽；
+也不用每加一个迁移就回来手改本文件的建表 SQL。
 
 每个用例都能断言「到底给 docker 传了什么、以什么顺序、失败后清理了什么」——
 这三件事正是 §5.3 补偿流程的验收点。
@@ -15,7 +16,6 @@ DB 用真实的 `0017` 迁移 DDL + 临时文件库。这样测的是「编排�
 from __future__ import annotations
 
 import json
-import sqlite3
 import string
 import sys
 from pathlib import Path
@@ -32,35 +32,7 @@ from service.containerService import core
 from service.containerService.dockerCli import DockerCli
 from service.ormService import AioSqliteDatabase
 
-_MIGRATION_DIR = Path(__file__).resolve().parents[4] / "assets" / "migrate"
-
-# 只建本模块依赖的两张表（teams / agents），容器表走真实的 0017 迁移。
-# 全量跑一遍迁移太慢，且与本模块无关。
-_SCHEMA_SQL = """
-CREATE TABLE teams (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    uuid TEXT UNIQUE,
-    config TEXT NOT NULL DEFAULT '{}',
-    i18n TEXT NOT NULL DEFAULT '{}',
-    enabled INTEGER NOT NULL DEFAULT 1,
-    deleted INTEGER NOT NULL DEFAULT 0,
-    created_at DATETIME, updated_at DATETIME
-);
-CREATE TABLE agents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    team_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    role_template_id INTEGER NOT NULL,
-    employ_status TEXT NOT NULL DEFAULT 'ON_BOARD',
-    model TEXT NOT NULL DEFAULT '',
-    driver TEXT NOT NULL DEFAULT 'NATIVE',
-    employee_number INTEGER NOT NULL DEFAULT 0,
-    i18n TEXT NOT NULL DEFAULT '{}',
-    allow_tools TEXT, allow_skills TEXT,
-    created_at DATETIME, updated_at DATETIME
-);
-"""
+from container_db_schema import migrate_all
 
 # 假 docker：把每次调用的 argv 追加到 calls.jsonl，再从 behavior.json 里找该
 # 子命令的 (stdout, stderr, returncode)。没配的子命令默认成功、无输出。
@@ -166,17 +138,9 @@ class FakeDocker:
 @pytest.fixture
 async def env(tmp_path, monkeypatch):
     """搭好「临时库 + 假 docker + 真实目录」的运行环境，返回 FakeDocker。"""
-    # 1) 数据库：依赖表 + 真实的 0017 迁移
+    # 1) 数据库：**跑完整迁移到最新**（不手写建表 SQL，见 tests/container_db_schema.py）
     db_path = tmp_path / "container.db"
-    conn = sqlite3.connect(str(db_path))
-    try:
-        conn.executescript(_SCHEMA_SQL)
-        conn.executescript(
-            (_MIGRATION_DIR / "0017_agent_containers.sql").read_text(encoding="utf-8")
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    migrate_all(db_path, workspace_root=tmp_path)
 
     db = AioSqliteDatabase(str(db_path), pool_params={"timeout": 30})
     bind_database(db)
@@ -633,11 +597,15 @@ async def test_two_teams_same_agent_name_both_create(env):
     # 1) 再补一个 team 与两个**同名** Agent：
     #    team-a(1) 下加一个 `xiao-mei`（agent 2），team-b(2) 下加一个 `xiao-mei`（agent 3）
     await GtTeam(name="team-b", config={}, i18n={}).aio_save(force_insert=True)
+    # `employee_number` 显式给：生产 schema 有唯一索引 `(team_id, employee_number)`，
+    # 而夹具里的 1 号 Agent 已占 team 1 的 0 号工号。
     await GtAgent(
-        team_id=1, name="xiao-mei", role_template_id=1, i18n={"display_name": "xiao-mei"}
+        team_id=1, name="xiao-mei", role_template_id=1, employee_number=1,
+        i18n={"display_name": "xiao-mei"},
     ).aio_save(force_insert=True)
     await GtAgent(
-        team_id=2, name="xiao-mei", role_template_id=1, i18n={"display_name": "xiao-mei"}
+        team_id=2, name="xiao-mei", role_template_id=1, employee_number=1,
+        i18n={"display_name": "xiao-mei"},
     ).aio_save(force_insert=True)
     # 新插的 Agent 要清缓存，否则 `get_agent_by_id` 可能命中前面用例留下的旧对象
     gtAgentManager.clear_agent_cache()

@@ -618,8 +618,10 @@ async def test_delete_team_containers_covers_all_team_agents(fake):
     """Team 级清理覆盖该 Team 下所有 Agent 的容器（§7 Team 删除 / 改名）。"""
     from model.dbModel.gtAgent import GtAgent
 
+    # `employee_number` 显式给：生产 schema 有唯一索引 `(team_id, employee_number)`，
+    # 夹具里的 1 号 Agent 已占 team 1 的 0 号工号。
     await GtAgent(
-        team_id=1, name="阿张", role_template_id=1, i18n={}
+        team_id=1, name="阿张", role_template_id=1, employee_number=1, i18n={}
     ).aio_save(force_insert=True)
     await _seed_record(agent_id=1, container_name="agent-1-1", container_id="c0ffee123456")
     await _seed_record(agent_id=2, container_name="agent-2-1", container_id="deadbeef0002")

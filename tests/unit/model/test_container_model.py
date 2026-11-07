@@ -86,6 +86,7 @@ def _record(**overrides) -> GtAgentContainer:
         "container_id": "c0ffee123456",
         "container_name": "agent-3-1",
         "image": "ubuntu:24.04",
+        "note": None,
         "created_at": None,
         "updated_at": None,
     }
@@ -139,7 +140,7 @@ def test_container_info_json_dump_serializes_created_at_and_keeps_null_container
     # DB 记录整体在 `record` 里，运行时字段在外层；deleted / updated_at 是内部字段
     assert set(payload) == {"record", "state", "is_entered"}
     assert set(payload["record"]) == {
-        "id", "agent_id", "container_id", "container_name", "image", "created_at",
+        "id", "agent_id", "container_id", "container_name", "image", "note", "created_at",
     }
 
 
@@ -179,7 +180,7 @@ def test_to_tool_dict_uses_container_id_and_drops_agent_id():
     assert "agent_id" not in as_tool
     assert set(as_tool) == {
         "record_id", "container_id", "container_name",
-        "image", "state", "is_entered", "created_at",
+        "image", "note", "state", "is_entered", "created_at",
     }
     assert as_tool["record_id"] == 7
     assert as_tool["is_entered"] is True

@@ -429,6 +429,10 @@ DEFAULT_CONTAINER_IMAGE = "ubuntu:24.04"
 # 单个 Agent 自建容器上限（含创建中的预记录与已停止的；外部容器不占配额）
 MAX_CONTAINERS_PER_AGENT = 3
 
+# 容器说明（note）长度上限（字符数，不是字节数）。超长**报错**、不截断：
+# 静默裁剪会让 Agent 以为自己写下的说明被保存了，实际丢了一半，且无法从返回里察觉。
+MAX_CONTAINER_NOTE_LENGTH = 200
+
 # 创建容器超时（秒）
 CONTAINER_CREATE_TIMEOUT_SEC = 60
 

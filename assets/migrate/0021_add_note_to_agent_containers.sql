@@ -1,0 +1,12 @@
+-- 0021: agent_containers 增加 note 说明字段（Operator 2026-11-08：创建容器时可传说明，
+-- list_containers 能看到）。
+--
+-- 只加列，不重建表：整表重建必须逐条复制 0017 的全部约束（container_name / image
+-- NOT NULL、deleted DEFAULT 0、created_at/updated_at 默认、idx_agent_containers_agent、
+-- container_id 唯一索引且 NULL 不参与唯一），漏抄任何一条都是静默丢约束；
+-- `ALTER TABLE ... ADD COLUMN` 由 SQLite 保证其余约束与索引原样保留。
+--
+-- 允许 NULL：存量行本来就没有说明，新建流程也允许不传（口径见
+-- docs/design/2026-10-31-docker-agent-sandbox/step2_technical.md §2.1 / §6.2：
+-- 不传或传空串一律存 NULL，不用空串表达「没有说明」）。
+ALTER TABLE agent_containers ADD COLUMN note TEXT;

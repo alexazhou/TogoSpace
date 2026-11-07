@@ -220,6 +220,57 @@ async def test_create_container_maps_togo_exception_to_error_result(monkeypatch,
     assert result["message"] == "已达上限"
 
 
+async def test_create_container_passes_note_through(monkeypatch, container_agent):
+    """`note` 原样透传给 service（校验只在 service 一处，工具层不重复判断）。"""
+    from service import containerService
+
+    record = MagicMock(container_id="c0ffee123456", container_name="n", image="ubuntu:24.04", note="构建用")
+    mocked = AsyncMock(return_value=record)
+    monkeypatch.setattr(containerService, "create_container", mocked)
+
+    result = await tools_module.create_container(note="构建用", _context=_ctx())
+
+    assert mocked.await_args.kwargs["note"] == "构建用"
+    # 返回值也带上 note：模型据此确认自己写的说明被收下了
+    assert result["note"] == "构建用"
+
+
+async def test_create_container_note_omitted_still_calls_service_with_none(monkeypatch, container_agent):
+    """不传 `note` 时也显式传 `None`，由 service 统一归一化成 NULL。"""
+    from service import containerService
+
+    record = MagicMock(container_id="c0ffee123456", container_name="n", image="ubuntu:24.04", note=None)
+    mocked = AsyncMock(return_value=record)
+    monkeypatch.setattr(containerService, "create_container", mocked)
+
+    result = await tools_module.create_container(_context=_ctx())
+
+    assert mocked.await_args.kwargs["note"] is None
+    assert result["note"] is None
+    assert "说明" not in result["message"]
+
+
+async def test_create_container_note_too_long_surfaces_error_code(monkeypatch, container_agent):
+    """超长时把 `container_note_too_long` 透给模型（不是吞成通用创建失败）。"""
+    from service import containerService
+
+    monkeypatch.setattr(
+        containerService, "create_container",
+        AsyncMock(
+            side_effect=TogoException(
+                "note 超长：201 字符，上限 200 字符，请缩短后重试",
+                "container_note_too_long",
+            )
+        ),
+    )
+
+    result = await tools_module.create_container(note="a" * 201, _context=_ctx())
+
+    assert result["success"] is False
+    assert result["error_code"] == "container_note_too_long"
+    assert "200" in result["message"]
+
+
 # ---------------------------------------------------------------------------
 # enter_container / exit_to_host
 # ---------------------------------------------------------------------------

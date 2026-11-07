@@ -33,7 +33,6 @@ Docker 认不认」。只有真 daemon 才会暴露的问题：
 from __future__ import annotations
 
 import os
-import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +46,8 @@ from model.dbModel.gtTeam import GtTeam
 from service import agentService, containerService
 from service.containerService import core as container_core
 from service.containerService.dockerCli import DockerCli, DockerCliError
+
+from container_db_schema import migrate_all
 
 DOCKER_E2E_ENABLED = os.environ.get("TOGOSPACE_TEST_DOCKER") == "1"
 
@@ -62,36 +63,8 @@ _DOCKER_SKIP = pytest.mark.skipif(
 # 必须始终运行——否则「ORM 加字段导致 fixture 建表缺列」这类问题要等到有人记得
 # 开闸跑 e2e 才会暴露。
 
-_MIGRATION_DIR = Path(__file__).resolve().parents[2] / "assets" / "migrate"
-
-# 容器服务真正依赖的两张业务表。字段与 `model/dbModel` 的一致性由文件末尾
-# `test_min_schema_covers_required_model_columns` 兜住——那份断言是防漂移的
-# 唯一保险，不要因为「e2e 反正会报错」就删掉它。
-_MIN_SCHEMA_SQL = """
-CREATE TABLE teams (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    uuid TEXT UNIQUE,
-    config TEXT NOT NULL DEFAULT '{}',
-    i18n TEXT NOT NULL DEFAULT '{}',
-    enabled INTEGER NOT NULL DEFAULT 1,
-    deleted INTEGER NOT NULL DEFAULT 0,
-    created_at DATETIME, updated_at DATETIME
-);
-CREATE TABLE agents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    team_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    role_template_id INTEGER NOT NULL,
-    employ_status TEXT NOT NULL DEFAULT 'ON_BOARD',
-    model TEXT NOT NULL DEFAULT '',
-    driver TEXT NOT NULL DEFAULT 'NATIVE',
-    employee_number INTEGER NOT NULL DEFAULT 0,
-    i18n TEXT NOT NULL DEFAULT '{}',
-    allow_tools TEXT, allow_skills TEXT,
-    created_at DATETIME, updated_at DATETIME
-);
-"""
+# 建库统一走「跑完整迁移到最新」：手写最小 schema 会在每次新增迁移时与生产分叉。
+# 见 `tests/container_db_schema.py`（#153 加 0021 `note` 列时四处手写建表全红）。
 
 _E2E_IMAGE = "ubuntu:24.04"
 
@@ -132,17 +105,8 @@ async def e2e_env(tmp_path, monkeypatch, real_docker):
     from service.ormService import AioSqliteDatabase
 
     db_path = tmp_path / "e2e.db"
-    conn = sqlite3.connect(str(db_path))
-    try:
-        # 只建容器模块依赖的两张业务表；容器表走真实的 0017 迁移。
-        # 这里**不从单测文件 import schema**：跨测试文件 import 会把别人的类型问题
-        # 带进本文件的静态检查，且让 e2e 依赖单测内部私有常量。
-        # 漂移风险由 `test_min_schema_matches_model_fields` 兜住（见文件末尾）。
-        conn.executescript(_MIN_SCHEMA_SQL)
-        conn.executescript((_MIGRATION_DIR / "0017_agent_containers.sql").read_text("utf-8"))
-        conn.commit()
-    finally:
-        conn.close()
+    # 跑完整迁移到最新（teams / agents / agent_containers 等全部表都在）
+    migrate_all(db_path, workspace_root=tmp_path)
 
     database = AioSqliteDatabase(str(db_path), pool_params={"timeout": 30})
     bind_database(database)
@@ -313,6 +277,47 @@ async def test_list_reports_real_docker_state(e2e_env):
 
 
 @_DOCKER_SKIP
+async def test_note_survives_real_create_and_shows_up_in_list(e2e_env):
+    """`note` 在真实 daemon 上跑通全链：DB 有值 → 列表项可见（§6.2）。
+
+    单测已经覆盖了「同一进程内写读」，这里补的是「容器真的建出来了，说明也没被
+    补偿清理顺手带走」——`create_container` 失败补偿会 `hard_delete` 预记录，
+    说明字段的写入时机必须早于它。
+    """
+    record = await containerService.create_container(1, image=_E2E_IMAGE, note="e2e 说明")
+    e2e_env.track(record)
+
+    from dal.db import gtAgentContainerManager
+
+    reloaded = await gtAgentContainerManager.get_active_by_id(record.id)
+    assert reloaded is not None and reloaded.note == "e2e 说明"
+
+    infos = await containerService.list_agent_containers(1)
+    target = next(info for info in infos if info.record.id == record.id)
+    assert target.to_tool_dict()["note"] == "e2e 说明"
+
+
+@_DOCKER_SKIP
+async def test_overlong_note_leaves_no_docker_container(e2e_env):
+    """201 字符说明必须在**真 daemon 也没有新容器**的前提下被拒（C3 的阴性侧）。
+
+    只断言「报错」不够：要证明校验发生在副作用之前，就得数一数 daemon 上的容器。
+    """
+    from dal.db import gtAgentContainerManager
+
+    before = await gtAgentContainerManager.list_active_by_agent(1)
+
+    with pytest.raises(TogoException) as excinfo:
+        await containerService.create_container(1, image=_E2E_IMAGE, note="a" * 201)
+
+    assert excinfo.value.error_code == containerService.ERROR_CONTAINER_NOTE_TOO_LONG
+    after = await gtAgentContainerManager.list_active_by_agent(1)
+    assert len(after) == len(before)
+    # 没有任何本次新建的容器残留在本用例登记的清理清单里
+    assert e2e_env.created == []
+
+
+@_DOCKER_SKIP
 async def test_delete_container_removes_real_docker_container(e2e_env):
     """`delete_container` 真的删掉容器，并软删除记录（不再出现在活跃列表）。"""
     record = await _create(e2e_env)
@@ -442,26 +447,34 @@ async def test_enter_then_exit_container_with_real_handshake(e2e_env, monkeypatc
 
 
 # ---------------------------------------------------------------------------
-# 防漂移：最小 schema 必须覆盖模型实际用到的列
+# 防漂移：迁移链建出的 schema 必须覆盖模型声明的全部列
 # ---------------------------------------------------------------------------
 
 
-def test_min_schema_covers_required_model_columns():
-    """本文件的最小建表必须覆盖 `GtTeam` / `GtAgent` 用到的列。
+def test_migrated_schema_covers_all_model_columns(tmp_path):
+    """`assets/migrate/` 全量跑出来的 schema 必须覆盖容器相关模型的每一列。
 
-    这条不是"锦上添花"：我第一版手写 schema 漏了 `teams.deleted`，整个 fixture 直接
-    `OperationalError: table teams has no column named deleted`。ORM 新增字段时这条会
-    在**不开 Docker 的前提下**立刻变红，比跑到 e2e 才发现便宜得多。
+    这条不是"锦上添花"：手写最小 schema 的年代漏过 `teams.deleted`，整个 fixture 直接
+    `OperationalError: table teams has no column named deleted`；#153 加 `note` 列时，
+    四处只 executescript 0017 的建库再次以 `no such column: note` 全红。
+
+    现在改成**校验全量迁移的产出**（而不是校验本文件手写的 SQL）：
+    - 迁移漏了某个模型字段 → 这里立刻红（不开 Docker、不建容器，秒级）；
+    - 模型加了字段但忘了写迁移 → 同样红；
+    - 顺带覆盖 `GtAgentContainer`（原来只覆盖 teams / agents，容器表反而没兜住）。
     """
     import sqlite3 as _sqlite3
 
     from model.dbModel.gtAgent import GtAgent
+    from model.dbModel.gtAgentContainer import GtAgentContainer
     from model.dbModel.gtTeam import GtTeam
 
-    conn = _sqlite3.connect(":memory:")
+    db_path = tmp_path / "schema_drift.db"
+    migrate_all(db_path, workspace_root=tmp_path)
+
+    conn = _sqlite3.connect(str(db_path))
     try:
-        conn.executescript(_MIN_SCHEMA_SQL)
-        for model in (GtTeam, GtAgent):
+        for model in (GtTeam, GtAgent, GtAgentContainer):
             table = model._meta.table_name
             actual = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
             # 模型声明的字段名（排除反向关系等非列属性）
@@ -469,6 +482,6 @@ def test_min_schema_covers_required_model_columns():
                 name for name, fld in model._meta.fields.items() if not getattr(fld, "backref", None)
             }
             missing = expected - actual
-            assert not missing, f"{table} 的最小 schema 缺少列: {sorted(missing)}"
+            assert not missing, f"{table} 缺少模型声明的列（迁移没跟上模型）: {sorted(missing)}"
     finally:
         conn.close()

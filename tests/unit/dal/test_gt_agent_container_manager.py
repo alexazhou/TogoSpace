@@ -1,11 +1,16 @@
 """`agent_containers` DAL 回归测试（Docker 容器化 Agent 沙箱，任务 #109 第 2 步）。
 
-**为什么用真实迁移 SQL 建表，而不是 `db.create_tables(...)`**：
-本表的关键约束写在 `assets/migrate/0017_agent_containers.sql` 里、模型 `Meta`
-里并没有（`container_id` 全局唯一）。`container_name` 不建唯一索引，名称唯一性
-由后缀 `record_id` 保证。用 `create_tables` 建出来的表会缺这些索引，测试就变成
-「在测试自己的假设上验证」，而不是验证生产 DDL。所以这里直接 `executescript`
-执行迁移文件，让下面每个用例都跑在**和线上一致的 schema** 上。
+**为什么用真实迁移建表，而不是 `db.create_tables(...)`**：
+本表的关键约束写在迁移文件里、模型 `Meta` 里并没有（`container_id` 全局唯一、
+`note` 列来自 0021）。用 `create_tables` 建出来的表会缺这些索引与列，测试就变成
+「在测试自己的假设上验证」，而不是验证生产 DDL。
+
+**为什么跑完整迁移到最新、而不是只 executescript 某个迁移文件**：
+本文件原先是 `executescript("0017_agent_containers.sql")`，理由写的是「与本模块无关」。
+#153 加 `0021`（`note` 列）时这条假设当场破了：模型带 `note` 去 insert，这里直接
+`no such column: note`。手写/单文件 schema 的代价不是「这次红了」，而是**以后每个
+新增迁移都要回来改一遍**，漏一处就是测试与生产分叉。全量迁移实测 0.037 秒，没有
+性能理由，统一走 `tests/container_db_schema.migrate_all`。
 
 **为什么用文件库而不是 `:memory:`**：本 DAL 全是 `async` 接口，走
 `peewee_async` 的连接池（`SqlitePoolBackend`），每次 `acquire()` 都是新开的
@@ -16,7 +21,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import peewee
@@ -27,25 +31,14 @@ from model.dbModel.base import bind_database, unbind_database
 from model.dbModel.gtAgentContainer import GtAgentContainer
 from service.ormService import AioSqliteDatabase
 
-# tests/unit/dal/<file> → parents[3] 是仓库根
-_MIGRATION_SQL = (
-    Path(__file__).resolve().parents[3] / "assets" / "migrate" / "0017_agent_containers.sql"
-)
+from container_db_schema import migrate_all
 
 
 @pytest.fixture
 async def container_db(tmp_path):
-    """把模型代理临时绑到「已跑过 0017 迁移」的临时 SQLite 文件上，结束后一定解绑。"""
-    assert _MIGRATION_SQL.exists(), f"迁移文件不存在：{_MIGRATION_SQL}"
-
+    """把模型代理临时绑到「已跑完全部迁移」的临时 SQLite 文件上，结束后一定解绑。"""
     db_path = tmp_path / "agent_containers.db"
-    # 用同步 sqlite3 建 schema：executescript 能吃多语句，且不干扰下面异步池的连接。
-    conn = sqlite3.connect(str(db_path))
-    try:
-        conn.executescript(_MIGRATION_SQL.read_text(encoding="utf-8"))
-        conn.commit()
-    finally:
-        conn.close()
+    migrate_all(db_path, workspace_root=tmp_path)
 
     db = AioSqliteDatabase(str(db_path), pool_params={"timeout": 30})
     bind_database(db)
@@ -102,7 +95,11 @@ async def _raw_rows(db, sql: str, params: tuple = ()) -> list[tuple]:
 
 
 async def test_migration_creates_table_and_indexes(container_db):
-    """0017 必须建出表 + 2 个索引（含 container_id 唯一索引），防迁移被改坏后无人察觉。"""
+    """迁移必须建出表 + 2 个索引（含 container_id 唯一索引），防迁移被改坏后无人察觉。
+
+    断言的对象是**全量迁移之后**的最终 schema（不再只验 0017）：索引与列都由同一条
+    迁移链产出，只验单个文件等于放过了「后续迁移把约束改坏」这类回归。
+    """
     rows = await _raw_rows(
         container_db, "SELECT name, [unique], partial FROM pragma_index_list('agent_containers')"
     )
@@ -113,6 +110,21 @@ async def test_migration_creates_table_and_indexes(container_db):
         "idx_agent_containers_container_id",
     }
     assert index_map["idx_agent_containers_container_id"] == (True, False)
+
+
+async def test_migration_adds_note_column_as_nullable(container_db):
+    """`note` 列必须存在且可空（0021）。
+
+    可空是硬要求：存量行升级后没有说明，创建流程的预记录也可能不带说明；
+    写成 NOT NULL 会让「不传 note」直接插不进去。
+    """
+    rows = await _raw_rows(
+        container_db, "SELECT name, [notnull] FROM pragma_table_info('agent_containers')"
+    )
+    columns = {row[0]: bool(row[1]) for row in rows}
+
+    assert "note" in columns, f"缺少 note 列，实际列：{sorted(columns)}"
+    assert columns["note"] is False
 
 
 async def test_container_id_is_not_null_uniqueness_for_pre_records(container_db):

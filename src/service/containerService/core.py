@@ -37,6 +37,7 @@ from constants import (
     ContainerState,
     DEFAULT_CONTAINER_IMAGE,
     MAX_CONTAINERS_PER_AGENT,
+    MAX_CONTAINER_NOTE_LENGTH,
 )
 from dal.db import gtAgentContainerManager
 from exception import TogoException
@@ -76,6 +77,10 @@ ERROR_CONTAINER_NOT_EXECUTABLE = "container_not_executable"
 ERROR_CONTAINER_LIMIT_REACHED = "container_limit_reached"
 ERROR_CONTAINER_DELETE_FAILED = "container_delete_failed"
 ERROR_CONTAINER_INVALID_PARAMS = "container_invalid_params"
+# 说明（note）超长：单独一个码，不复用 `container_invalid_params`。
+# 后者现在的语义是「ID 传参二选一校验失败」，混在一起模型无法判断该改什么；
+# 这个码对应唯一且自明的处置：把说明缩短到 200 字符以内再重试。
+ERROR_CONTAINER_NOTE_TOO_LONG = "container_note_too_long"
 # 库里有记录、但容器本身已不存在（§5.1 只报错、不软删）。§3.6 表格没有这一项，
 # 但它是独立语义：混进 `container_not_found` 会让模型以为是自己 ID 传错了。
 ERROR_CONTAINER_LOST = "container_lost"
@@ -132,6 +137,36 @@ def reset_cli_for_test(cli: DockerCli | None = None) -> None:
 def is_short_id(value: str) -> bool:
     """是否为 12 位十六进制短 ID。"""
     return isinstance(value, str) and bool(_SHORT_ID_PATTERN.fullmatch(value))
+
+
+def normalize_container_note(note: str | None) -> str | None:
+    """校验并归一化容器说明（`note`）。
+
+    口径（Operator 2026-11-08 已确认）：
+    - 上限 `MAX_CONTAINER_NOTE_LENGTH`（200）**字符**，按 `len()` 计（中文按 1 个算）；
+    - `None`、空串、纯空白一律归一成 `None`：不用空串表达「没写说明」，
+      否则 `list_containers` 里「未填写」会有 `null` 和 `""` 两种形态；
+    - 超长**直接报错**，绝不截断：静默裁剪的结果是 Agent 以为写进去了、实际丢了半截。
+
+    Raises:
+        TogoException: 长度超过上限（`container_note_too_long`）
+    """
+    if note is None:
+        return None
+    if not isinstance(note, str):
+        # 工具层已经声明了 str 类型，但 service 是公共入口，别让非字符串混进 DB
+        raise TogoException(
+            "note 必须是字符串", ERROR_CONTAINER_INVALID_PARAMS
+        )
+    stripped = note.strip()
+    if not stripped:
+        return None
+    if len(stripped) > MAX_CONTAINER_NOTE_LENGTH:
+        raise TogoException(
+            f"note 超长：{len(stripped)} 字符，上限 {MAX_CONTAINER_NOTE_LENGTH} 字符，请缩短后重试",
+            ERROR_CONTAINER_NOTE_TOO_LONG,
+        )
+    return stripped
 
 
 def build_container_name(*, team_id: int, agent_id: int, agent_name: str, record_id: int) -> str:
@@ -380,7 +415,9 @@ async def _resolve_image_os(cli: DockerCli, image_ref: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-async def create_container(agent_id: int, image: str | None = None) -> GtAgentContainer:
+async def create_container(
+    agent_id: int, image: str | None = None, note: str | None = None
+) -> GtAgentContainer:
     """创建自建容器并注入 gtsp，返回已回填 `container_id` 的记录。
 
     **只创建，不切换执行环境**（§6.2 第 1 条）：Agent 仍在宿主，
@@ -393,10 +430,16 @@ async def create_container(agent_id: int, image: str | None = None) -> GtAgentCo
     Args:
         agent_id: 所属 Agent
         image: 镜像名；None / 空串走 `DEFAULT_CONTAINER_IMAGE`
+        note: 说明文字；None / 空白串一律存 NULL（见 `normalize_container_note`）
 
     Raises:
-        TogoException: 配额超限、镜像不可用、创建或注入失败
+        TogoException: 说明超长、配额超限、镜像不可用、创建或注入失败
     """
+    # 说明校验是**第一件事**：它不依赖 docker / DB，却决定要不要产生任何副作用。
+    # 放到配额之后、镜像探测之后也能「不落库」，但那时已经花掉几次 docker 调用，
+    # 而这类错误纯粹是参数问题，一秒都不该等（也避免「先探测再报参数错」这种
+    # 顺序暴露给模型，让它以为要去修镜像）。
+    note = normalize_container_note(note)
     image = (image or "").strip() or DEFAULT_CONTAINER_IMAGE
     cli = get_cli()
 
@@ -448,6 +491,7 @@ async def create_container(agent_id: int, image: str | None = None) -> GtAgentCo
                     agent_id=agent_id,
                     container_name="",
                     image=image,
+                    note=note,
                 )
                 assert record.id is not None
                 container_name = build_container_name(

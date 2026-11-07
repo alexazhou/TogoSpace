@@ -14,6 +14,8 @@ from .core import *  # noqa: F401,F403
 from .core import (  # noqa: F401  显式导出，便于 IDE 与静态检查
     ERROR_CONTAINER_LOST,
     ERROR_CONTAINER_NAME_CONFLICT,
+    ERROR_CONTAINER_NOTE_TOO_LONG,
+    MAX_CONTAINER_NOTE_LENGTH,
     ContainerRuntimeInfo,
     ContainerTarget,
     build_container_name,
@@ -30,6 +32,7 @@ from .core import (  # noqa: F401  显式导出，便于 IDE 与静态检查
     is_docker_available,
     is_short_id,
     list_agent_containers,
+    normalize_container_note,
     prepare_container_gtsp,
     reset_cli_for_test,
     resolve_enter_target,

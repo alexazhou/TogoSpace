@@ -107,7 +107,7 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     "web_search": ["query"],
     # 容器沙箱工具（#109 第 5 步）。参数顺序按「先 ID、后记录编号」：
     # `container_id` 是常规寻址方式，`record_id` 只用于还没有 Docker ID 的预记录。
-    "create_container": ["image"],
+    "create_container": ["image", "note"],
     "enter_container": ["container_id"],
     "exit_to_host": [],
     "list_containers": [],

@@ -16,6 +16,7 @@ async def create(
     agent_id: int,
     container_name: str,
     image: str,
+    note: str | None = None,
 ) -> GtAgentContainer:
     """插入一条预记录（`container_id = NULL`），返回带主键的对象。
 
@@ -23,12 +24,17 @@ async def create(
 
     注意：容器名依赖自增主键（`agent_containers.id`），调用方若需要按 ID 命名，
     应在同一事务内先用占位名插入，拿到 `id` 后再调用 `set_container_name` 回填。
+
+    `note` 是 Agent 填写的说明，`None` 表示未填写。长度校验在
+    `containerService.create_container` 里、**任何副作用之前**完成，本模块只负责写入：
+    校验放在 DAL 会让「超长」变成写入时的异常，而那时预记录可能已经插入。
     """
     container = GtAgentContainer(
         agent_id=agent_id,
         container_id=None,
         container_name=container_name,
         image=image,
+        note=note,
         deleted=0,
     )
     await container.aio_save(force_insert=True)

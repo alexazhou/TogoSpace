@@ -89,6 +89,10 @@ class ContainerRuntimeInfo(BaseModel):
             "container_id": record.container_id,
             "container_name": record.container_name,
             "image": record.image,
+            # 不在这里加键，模型永远看不到：`note` 是 `create_container` 让模型自己填的，
+            # 填完却在 `list_containers` 里看不到，它就没有任何办法确认自己写进去了。
+            # 未填写时为 null（不用空串，见 `normalize_container_note`）。
+            "note": record.note,
             "state": self.state.value,
             "is_entered": self.is_entered,
             "created_at": jsonUtil.datetime_to_pydantic_json(record.created_at),

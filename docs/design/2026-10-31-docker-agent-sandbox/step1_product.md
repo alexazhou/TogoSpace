@@ -17,7 +17,7 @@
 
 | 工具 | 作用 | 要点 |
 |---|---|---|
-| `create_container(image?)` | 创建容器 | 自动挂载个人目录与共享目录；**只创建，不切换执行环境**；返回 `container_id` 与容器名 |
+| `create_container(image?, note?)` | 创建容器 | 自动挂载个人目录与共享目录；**只创建，不切换执行环境**；返回 `container_id`、容器名与说明（`note`）；`note` 为可选的用途说明，≤200 字符，创建后不可修改 |
 | `delete_container(container_id \| record_id)` | 删除容器 | 只能删自己创建的；普通容器传 `container_id`，预记录传 `record_id`（二选一）；正在使用的不能删，需先 `exit_to_host` |
 | `list_containers()` | 查看容器 | 返回当前执行环境 + **自己创建的**容器及状态（含创建中的预记录，返回 `record_id` 与可能为空的 `container_id`，按容器名展示），不枚举其他容器 |
 | `enter_container(container_id)` | 进入容器 | 传目标容器 `container_id`；不校验属主、不做挂载；**外部容器须为运行状态（非运行状态需 Agent 自行启动 / 恢复）**；不接受镜像名 |
@@ -117,6 +117,7 @@
 
 **管理**
 - [ ] `create_container` 只创建不切换，自动挂载两个目录，返回 `container_id` 与容器名。
+- [ ] `create_container` 可传 `note` 说明（≤200 字符）：创建后在 `list_containers` 里能看到同一条说明；不传时显示为空（`null`）；超过 200 字符直接报错，不截断、不留容器。
 - [ ] 中文等非法 Agent 名回退为 `agent-t<team_id>-<agent_id>-<record_id>`，不会创建失败。
   > 依据 Operator 2026-11-01 指令修订（原文为 `agent-<agent_id>-<1..3>`）。
 - [ ] 两个不同团队的同名 Agent 各自都能建出容器，容器名不同（team 段用 `team_id` 区分）。
