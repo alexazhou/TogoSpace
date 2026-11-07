@@ -516,3 +516,4 @@
 - [2026-08-01 Xiaomi MiMo 搜索服务集成开发计划](./2026-08-01-xiaomi-mimo-search-service/plan.md)
 - [2026-10-29 调度任务重命名方案（schedule task → job）](./2026-10-29-schedule-job-rename/schedule_job_rename_plan.md)
 - [2026-11-06 Agent 文本记忆系统](./2026-11-06-agent-memory-system/step1_product.md) · [技术设计](./2026-11-06-agent-memory-system/step2_technical.md)
+- [2026-11-07 Agent 上下文容量实时进度条](./2026-11-07-agent-context-capacity-meter/step1_product.md) · [技术设计](./2026-11-07-agent-context-capacity-meter/step2_technical.md)
