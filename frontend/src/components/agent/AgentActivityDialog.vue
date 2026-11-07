@@ -44,6 +44,7 @@ const superviseFocused = ref(false);
 const superviseComposing = ref(false);
 const superviseTextareaRef = ref<HTMLTextAreaElement | null>(null);
 const isActivitiesFollowing = ref(true);
+const activityPanelRef = ref<InstanceType<typeof AgentActivityPanel> | null>(null);
 
 const runtimeStatus = useAgentStatus(() => props.agentId);
 
@@ -203,10 +204,15 @@ async function sendSupervise(): Promise<void> {
   supervising.value = true;
   superviseError.value = '';
   try {
-    await superviseAgent(props.agentId, superviseContent.value.trim());
+    const result = await superviseAgent(props.agentId, superviseContent.value.trim());
     superviseContent.value = '';
     if (superviseTextareaRef.value) {
       superviseTextareaRef.value.style.height = '';
+    }
+    // 第一次督导时控制房是这次请求刚建出来的：把 room_id 交给面板，待读区立刻接上
+    // （此时 teamRooms 里可能还没有它，靠 WS room_added 推送会晚一拍）。
+    if (result && typeof result.room_id === 'number') {
+      activityPanelRef.value?.notifyControlRoom(result.room_id);
     }
   } catch (error) {
     superviseError.value = error instanceof Error ? error.message : String(error);
@@ -349,8 +355,10 @@ watch(
     <template #panel>
       <AgentActivityPanel
         v-show="activeTab === 'activities'"
+        ref="activityPanelRef"
         :open="open"
         :agent-id="agentId"
+        :team-id="displayAgent?.team_id ?? null"
         @follow-change="isActivitiesFollowing = $event"
       />
       <AgentTaskPanel

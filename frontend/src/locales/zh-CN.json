@@ -338,7 +338,9 @@
     "pendingImmediateLabel": "将尽快注入",
     "pendingImmediateTip": "通常会在 Agent 下一次工具调用结束后注入。",
     "guideNow": "立即引导",
-    "guidingNow": "引导中..."
+    "guidingNow": "引导中...",
+    "pendingMore": "还有 {count} 条待读消息",
+    "pendingCollapse": "收起"
   },
   "console": {
     "loadFailed": "加载消息失败，请检查网络或后端状态。",

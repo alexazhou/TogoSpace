@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { getAgentActivitiesPage } from '../../api';
+import { escalateMessageToImmediate, getAgentActivitiesPage } from '../../api';
 import { connectionState } from '../../appUiState';
 import { useAgentActivities } from '../../realtime/selectors';
 import { useStickToBottom } from '../../composables/useStickToBottom';
+import { useAgentPendingMessages } from '../../composables/useAgentPendingMessages';
 import type { AgentActivity } from '../../types';
 import AgentActivityItem from './AgentActivityItem.vue';
+import PendingMessageDock from '../chat/pending/PendingMessageDock.vue';
 
 const props = defineProps<{
   open: boolean;
   agentId: number | null;
+  /** 该 Agent 所属 team，用于定位控制房与读游标。 */
+  teamId?: number | null;
 }>();
 
 const emit = defineEmits<{
@@ -46,6 +50,60 @@ const hasNewActivitiesBelow = stickToBottom.hasNewContent;
 let lastActivityScrollTop = 0;
 
 const realtimeActivities = useAgentActivities(() => props.agentId);
+
+/**
+ * 待读消息（控制房里发给这个 Agent、它还没读到的）。
+ *
+ * 数据源独立于活动列表：待读条目不是 Activity，id 空间也不同，混进 `visibleActivities`
+ * 会污染排序和分页。这里只负责把算好的展示数据交给 `PendingMessageDock`。
+ */
+const pendingState = useAgentPendingMessages({
+  agentId: () => props.agentId,
+  teamId: () => props.teamId ?? null,
+  open: () => props.open,
+});
+const pendingItems = pendingState.pendingItems;
+const escalatingPendingIds = ref<number[]>([]);
+
+/**
+ * 待读条目增减也计入贴底跟随。
+ *
+ * 待读区挂在滚动容器外面、输入框上方，它一变高就把活动列表的视口压矮；贴底控制器
+ * 观察的是视口自身尺寸，本来就能感知到。这里再主动通知一次，是为了在视口 RO 回调
+ * 之前（同一次渲染里）就把位置补到底，避免出现一帧的可见跳动。
+ */
+watch(
+  () => pendingItems.value.length,
+  () => {
+    stickToBottom.notifyContentChanged();
+  },
+  { flush: 'post' },
+);
+
+async function handlePendingEscalate(dbId: number): Promise<void> {
+  const roomId = pendingState.controlRoomId.value;
+  if (roomId === null || escalatingPendingIds.value.includes(dbId)) {
+    return;
+  }
+  escalatingPendingIds.value = [...escalatingPendingIds.value, dbId];
+  try {
+    await escalateMessageToImmediate(roomId, dbId);
+  } catch (error) {
+    console.error(error);
+  } finally {
+    escalatingPendingIds.value = escalatingPendingIds.value.filter((id) => id !== dbId);
+  }
+}
+
+/**
+ * 供 `AgentActivityDialog` 在 `sendSupervise` 成功后调用：第一次督导时控制房是后端刚建的，
+ * 这时把返回的 `room_id` 直接告诉面板，待读区才能立刻接上。
+ */
+function notifyControlRoom(roomId: number): void {
+  pendingState.notifyControlRoom(roomId);
+}
+
+defineExpose({ notifyControlRoom });
 
 function sortActivitiesAscending(items: AgentActivity[]): AgentActivity[] {
   return [...items].sort((left, right) => left.id - right.id);
@@ -222,9 +280,17 @@ watch(
   <div class="agent-activity-panel-body">
     <div v-if="activitiesErrorMessage" class="error-banner">{{ activitiesErrorMessage }}</div>
     <div v-else-if="activitiesLoading && !visibleActivities.length" class="loading-card">{{ t('agent.loadingActivities') }}</div>
-    <div v-else-if="!activitiesLoading && !visibleActivities.length" class="agent-activity-empty">
+    <!--
+      空态只在「既没有活动、也没有待读」时出现：督导后第一帧活动表还是空的，但待读卡片
+      已经在下面了，这时说「暂无活动记录」会自相矛盾。
+    -->
+    <div
+      v-else-if="!activitiesLoading && !visibleActivities.length && !pendingItems.length"
+      class="agent-activity-empty"
+    >
       {{ t('agent.noActivities') }}
     </div>
+    <div v-else-if="!visibleActivities.length" class="agent-activity-list-spacer"></div>
     <div
       v-else
       ref="activityListRef"
@@ -249,6 +315,17 @@ watch(
       class="agent-activity-new-below"
       @click="stickToBottom.scrollToLatest()"
     >{{ t('agent.newActivitiesBelow') }}</button>
+    <!--
+      待读区固定在活动列表与输入框之间：它不在列表的滚动容器里，所以不会被历史分页影响，
+      也不会随列表一起滚走。条目标题、展开、折叠、限高全由共用组件负责。
+    -->
+    <PendingMessageDock
+      v-if="pendingItems.length"
+      class="agent-activity-pending"
+      :items="pendingItems"
+      :escalating-ids="escalatingPendingIds"
+      @escalate="handlePendingEscalate"
+    />
   </div>
 </template>
 
@@ -285,6 +362,12 @@ watch(
   text-align: center;
 }
 
+/* 待读区：贴在活动列表下方、输入框上方。sticky 由组件自带，这里只补外边距。 */
+.agent-activity-pending {
+  flex-shrink: 0;
+  padding: 0 2px 4px;
+}
+
 /* IDLE 状态下新内容到达时的可见出口：点一下回到底部并恢复跟随。 */
 .agent-activity-new-below {
   position: absolute;
@@ -314,6 +397,12 @@ watch(
   place-items: center;
   color: var(--muted);
   margin: 0 0 10px;
+}
+
+/* 有未读但还没有活动：占住列表区剩余空间，把待读区顶到底部。 */
+.agent-activity-list-spacer {
+  flex: 1;
+  min-height: 0;
 }
 
 .loading-card,

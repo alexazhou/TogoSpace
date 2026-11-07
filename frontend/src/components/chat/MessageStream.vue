@@ -4,8 +4,16 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, wa
 import { useI18n } from 'vue-i18n';
 import type { MessageInfo, RoomMemberProfile } from '../../types';
 import { bubbleSide, displayName, formatTime } from '../../utils';
-import { renderMarkdownPreviewText } from '../../utils/markdown';
 import MarkdownContent from '../ui/MarkdownContent.vue';
+import PendingMessageDock from './pending/PendingMessageDock.vue';
+import { buildPendingKey } from './pending/types';
+import type { PendingMessageItem } from './pending/types';
+import {
+  isUnreadPrivateMessage as isUnreadByReadCursor,
+  resolveMessageStatus as resolveMessageStatusByReadCursor,
+  resolvePendingStatus,
+} from '../../realtime/readCursor';
+import type { MessageStatusValue, ReadCursorContext } from '../../realtime/readCursor';
 
 const props = defineProps<{
   messages: MessageInfo[];
@@ -34,11 +42,13 @@ const emit = defineEmits<{
 const { t } = useI18n();
 
 const streamRef = useTemplateRef('streamRef');
+const pendingDockRef = useTemplateRef('pendingDockRef');
 const hasScrollbar = ref(false);
 const historyLoadRequested = ref(false);
 const stickToBottom = ref(true);
 let programmaticScroll = false;
 let resizeObserver: ResizeObserver | null = null;
+let pendingDockResizeObserver: ResizeObserver | null = null;
 let pendingPrependAnchor: { scrollHeight: number; scrollTop: number } | null = null;
 
 const TOP_HISTORY_LOAD_THRESHOLD_PX = 24;
@@ -109,43 +119,16 @@ function handleSenderAvatarClick(senderId: number): void {
   emit('clickAgent', agentId);
 }
 
-type MessageStatus = 'published' | 'immediate' | 'pending-immediate' | 'queued';
-
-/** OPERATOR 的虚拟身份 ID（与后端 `SpecialAgent.OPERATOR.value` 一致）。 */
-const OPERATOR_ID = -1;
-
-/** SYSTEM 的虚拟身份 ID（与后端 `SpecialAgent.SYSTEM.value` 一致）。 */
-const SYSTEM_ID = -2;
-
 /**
- * 解析「这条私聊消息的接收方 AI 的读游标」。
- *
- * 返回 null 表示「不存在接收方 AI 读游标」，即恒视为已读：
- * - 非私聊（群聊没有排队/注入概念）；
- * - SYSTEM 消息；
- * - 单聊里找不到非发送者的 AI（典型是 Operator+AI 单聊中 AI 发给 Operator 的消息）。
- *
- * 优先用 `roomAgents` + `agentReadIndex`（一条规则同时覆盖 Operator↔AI 与 AI↔AI）；
- * 仅在调用方只传了旧的 `agentReadSeq` 时回退到旧语义（兼容存量调用/测试）。
+ * 待读判定的上下文：把 props 里的房间类型、成员、读游标整成一份传给共用纯函数。
+ * 判定规则只在 `realtime/readCursor.ts` 里实现一次，聊天页与 Agent 活动面板不会各写一套。
  */
-function resolveReceiverReadSeq(message: MessageInfo): number | null {
-  if (!props.isPrivate || message.sender_id === SYSTEM_ID) {
-    return null;
-  }
-  if (props.roomAgents && props.roomAgents.length > 0) {
-    const receiverId = props.roomAgents.find((id) => id > 0 && id !== message.sender_id);
-    if (receiverId === undefined) {
-      return null;
-    }
-    const seq = props.agentReadIndex?.[String(receiverId)];
-    return typeof seq === 'number' && Number.isFinite(seq) ? seq : 0;
-  }
-  // 兼容仅传入 agentReadSeq 的存量调用/测试
-  if (message.sender_id === OPERATOR_ID) {
-    return props.agentReadSeq ?? 0;
-  }
-  return null;
-}
+const readCursorCtx = computed<ReadCursorContext>(() => ({
+  isPrivate: props.isPrivate,
+  roomAgents: props.roomAgents,
+  agentReadIndex: props.agentReadIndex,
+  agentReadSeq: props.agentReadSeq,
+}));
 
 /**
  * 是否为「私聊中发出、接收方 AI 尚未读到」的消息。
@@ -155,47 +138,57 @@ function resolveReceiverReadSeq(message: MessageInfo): number | null {
  * - `seq >= readSeq`：读游标语义是「下一条待读的 seq」，等于游标的也还没读。
  */
 function isUnreadPrivateMessage(message: MessageInfo): boolean {
-  const readSeq = resolveReceiverReadSeq(message);
-  if (readSeq === null) {
-    return false;
-  }
-  return message.seq >= readSeq;
+  return isUnreadByReadCursor(message, readCursorCtx.value);
 }
 
-function resolveMessageStatus(message: MessageInfo): MessageStatus {
-  if (!props.isPrivate || message.sender_id === SYSTEM_ID) {
-    return 'published';
-  }
-  if (isUnreadPrivateMessage(message)) {
-    return message.insert_immediately ? 'pending-immediate' : 'queued';
-  }
-  return message.insert_immediately ? 'immediate' : 'published';
+function resolveMessageStatus(message: MessageInfo): MessageStatusValue {
+  return resolveMessageStatusByReadCursor(message, readCursorCtx.value);
 }
 
 const streamMessages = computed(() => props.messages.filter((message) => !isUnreadPrivateMessage(message)));
-const floatingMessages = computed(() => props.messages.filter((message) => isUnreadPrivateMessage(message)));
+
+/**
+ * 待读条目的展示数据。`PendingMessageDock` / `PendingMessageBar` 只负责展示，
+ * 「哪些算待读、状态是什么、发送者怎么显示」全部在这里算好再传进去。
+ */
+const pendingItems = computed<PendingMessageItem[]>(() => {
+  const context = readCursorCtx.value;
+  return props.messages
+    .filter((message) => isUnreadByReadCursor(message, context))
+    .map((message, index) => ({
+      key: buildPendingKey(message, index),
+      message,
+      status: resolvePendingStatus(message, context) ?? 'queued',
+      sender: {
+        displayName: resolveSenderDisplayName(message.sender_id),
+        // SYSTEM 消息在主流里是居中的系统提示、不带头像，待读区保持同样处理。
+        avatarUrl: bubbleSide(message.sender_id) === 'center'
+          ? ''
+          : getAgentAvatarUrl(resolveSenderStableName(message.sender_id)),
+        clickable: resolveSenderAgentId(message.sender_id) !== null,
+      },
+    }));
+});
+
 const shouldDockWorkingIndicator = computed(
-  () => Boolean(props.workingAgent) && floatingMessages.value.length === 0,
+  () => Boolean(props.workingAgent) && pendingItems.value.length === 0,
 );
 
 function messageKey(message: MessageInfo, index: number): string {
   return String(message.db_id ?? `${message.time}-${message.sender_id}-${index}`);
 }
 
-function isEscalatingMessage(message: MessageInfo): boolean {
-  return message.db_id !== null && Boolean(props.escalatingMessageIds?.includes(message.db_id));
-}
-
 function pendingImmediateTooltip(): string {
   return t('chat.pendingImmediateTip');
 }
 
-function queuedTooltip(): string {
-  return t('chat.queuedMessageTip');
-}
-
-function messagePreviewContent(message: MessageInfo): string {
-  return renderMarkdownPreviewText(message.content);
+/** 待读卡片的头像点击：转成 Agent ID 后沿用既有 `clickAgent` 事件，Operator/SYSTEM 不可点。 */
+function handlePendingSenderClick(senderId: number): void {
+  const agentId = resolveSenderAgentId(senderId);
+  if (agentId === null) {
+    return;
+  }
+  emit('clickAgent', agentId);
 }
 
 function updateScrollbarState(): void {
@@ -313,6 +306,19 @@ watch(
   },
 );
 
+/**
+ * 浮层是 `v-if` 渲染的：从「没有待读」到「有 1 条」时元素才第一次出现，
+ * 这时要重新绑 `ResizeObserver`，否则后续展开/折叠的高度变化不会被观察到。
+ */
+watch(
+  () => pendingItems.value.length > 0,
+  async () => {
+    await nextTick();
+    observePendingDock();
+  },
+  { flush: 'post' },
+);
+
 watch(
   () => props.loadingOlderMessages,
   async (loadingOlderMessages, previousLoadingOlderMessages) => {
@@ -336,11 +342,36 @@ watch(
   },
 );
 
+/**
+ * 待读浮层高度变化（新增一条、展开、折叠、读走一条）时保持贴底。
+ *
+ * `.message-stream` 是滚动容器，内容变高不会触发它自身的 `ResizeObserver`（盒子尺寸没变），
+ * 所以这里单独观察浮层根元素。用户已经往上翻（`stickToBottom` 为 false）时不动，
+ * 否则会把用户正在看的历史内容拽走。
+ */
+function observePendingDock(): void {
+  pendingDockResizeObserver?.disconnect();
+  pendingDockResizeObserver = null;
+  const el = pendingDockRef.value?.$el as HTMLElement | undefined;
+  if (!el || typeof ResizeObserver === 'undefined') {
+    return;
+  }
+  pendingDockResizeObserver = new ResizeObserver(() => {
+    if (!stickToBottom.value) {
+      return;
+    }
+    scrollToBottom();
+    updateScrollbarState();
+  });
+  pendingDockResizeObserver.observe(el);
+}
+
 onMounted(() => {
   updateScrollbarState();
   scrollToBottom();
   streamRef.value?.addEventListener('scroll', handleStreamScroll, { passive: true });
   maybeLoadOlderMessagesForShortViewport();
+  observePendingDock();
   if (typeof ResizeObserver === 'undefined' || !streamRef.value) {
     return;
   }
@@ -356,6 +387,8 @@ onBeforeUnmount(() => {
   streamRef.value?.removeEventListener('scroll', handleStreamScroll);
   resizeObserver?.disconnect();
   resizeObserver = null;
+  pendingDockResizeObserver?.disconnect();
+  pendingDockResizeObserver = null;
   pendingPrependAnchor = null;
 });
 </script>
@@ -449,42 +482,14 @@ onBeforeUnmount(() => {
       <i class="fa-solid fa-chevron-right working-indicator-icon"></i>
     </div>
 
-    <div v-if="floatingMessages.length" class="floating-messages-dock">
-      <div
-        v-for="(message, index) in floatingMessages"
-        :key="messageKey(message, index)"
-        class="floating-message-bar"
-      >
-        <img
-          v-if="bubbleSide(message.sender_id) !== 'center'"
-          class="floating-message-avatar"
-          :class="{ 'floating-message-avatar--clickable': resolveSenderAgentId(message.sender_id) !== null }"
-          :src="getAgentAvatarUrl(resolveSenderStableName(message.sender_id))"
-          :alt="`${resolveSenderDisplayName(message.sender_id)} avatar`"
-          @click="handleSenderAvatarClick(message.sender_id)"
-        />
-        <div class="floating-message-content">{{ messagePreviewContent(message) }}</div>
-        <span
-          v-if="resolveMessageStatus(message) === 'queued'"
-          class="floating-message-status floating-message-status--queued"
-          :data-tooltip="queuedTooltip()"
-        >⏳ {{ t('chat.queuedMessageLabel') }}</span>
-        <span
-          v-else-if="resolveMessageStatus(message) === 'pending-immediate'"
-          class="floating-message-status floating-message-status--pending-immediate"
-          :data-tooltip="pendingImmediateTooltip()"
-        >⚡ {{ t('chat.pendingImmediateLabel') }}</span>
-        <button
-          v-if="resolveMessageStatus(message) === 'queued' && message.db_id !== null"
-          type="button"
-          class="floating-message-action"
-          :disabled="isEscalatingMessage(message)"
-          @click="emit('escalateMessage', message.db_id)"
-        >
-          {{ isEscalatingMessage(message) ? t('chat.guidingNow') : t('chat.guideNow') }}
-        </button>
-      </div>
-    </div>
+    <PendingMessageDock
+      v-if="pendingItems.length"
+      ref="pendingDockRef"
+      :items="pendingItems"
+      :escalating-ids="escalatingMessageIds ?? []"
+      @escalate="emit('escalateMessage', $event)"
+      @click-sender="handlePendingSenderClick"
+    />
   </div>
 </template>
 
@@ -705,164 +710,6 @@ onBeforeUnmount(() => {
 :global(html.bp-compact) .working-indicator {
   padding: 10px 8px;
   font-size: 0.76rem;
-}
-
-.floating-messages-dock {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: auto;
-  padding: 8px 0 2px;
-  background: transparent;
-}
-
-.floating-message-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid color-mix(in srgb, var(--interactive-focus-border) 14%, var(--border-default) 86%);
-  border-radius: 14px;
-  background: var(--chat-floating-message-bg);
-}
-
-.floating-message-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 9px;
-  object-fit: cover;
-  flex-shrink: 0;
-  border: 1px solid color-mix(in srgb, var(--border-strong) 28%, transparent);
-  background: color-mix(in srgb, var(--surface-elevated) 84%, var(--border-default) 16%);
-}
-
-.floating-message-avatar--clickable {
-  cursor: pointer;
-}
-
-.floating-message-status {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  min-height: 20px;
-  padding: 0 7px;
-  border-radius: 999px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
-.floating-message-status--queued {
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--surface-panel-muted) 78%, var(--surface-panel) 22%);
-}
-
-.floating-message-status--pending-immediate {
-  color: #b66a00;
-  background: color-mix(in srgb, #f59e0b 14%, white 86%);
-}
-
-.floating-message-status[data-tooltip]:not([data-tooltip=''])::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  width: max-content;
-  max-width: min(320px, calc(100vw - 48px));
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: var(--surface-overlay);
-  border: 1px solid var(--border-default);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
-  color: var(--text-primary);
-  font-size: 0.72rem;
-  font-weight: 500;
-  line-height: 1.35;
-  letter-spacing: 0;
-  white-space: normal;
-  opacity: 0;
-  transform: translateY(4px);
-  pointer-events: none;
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease;
-}
-
-.floating-message-status[data-tooltip]:not([data-tooltip='']):hover::after {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.floating-message-action {
-  flex-shrink: 0;
-  min-height: 24px;
-  padding: 0 10px;
-  border: 1px solid color-mix(in srgb, var(--interactive-focus-border) 38%, var(--border-default) 62%);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-chat) 70%, var(--surface-panel) 30%);
-  color: var(--text-primary);
-  font-size: 0.72rem;
-  font-weight: 600;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    border-color 140ms ease,
-    background 140ms ease,
-    color 140ms ease,
-    opacity 140ms ease;
-}
-
-.floating-message-action:hover:not(:disabled) {
-  border-color: var(--interactive-focus-border);
-  background: color-mix(in srgb, var(--interactive-selected) 18%, var(--surface-panel) 82%);
-}
-
-.floating-message-action:disabled {
-  opacity: 0.58;
-  cursor: default;
-}
-
-.floating-message-content {
-  min-width: 0;
-  flex: 1;
-  color: var(--text-primary);
-  font-size: 0.84rem;
-  line-height: 1.35;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-:global(html.bp-compact) .floating-messages-dock {
-  gap: 4px;
-  padding-top: 8px;
-}
-
-:global(html.bp-compact) .floating-message-bar {
-  padding: 7px 10px;
-  border-radius: 12px;
-}
-
-:global(html.bp-compact) .floating-message-avatar {
-  width: 24px;
-  height: 24px;
-  border-radius: 8px;
-}
-
-:global(html.bp-compact) .floating-message-content {
-  font-size: 0.8rem;
-}
-
-:global(html.bp-compact) .floating-message-action {
-  min-height: 22px;
-  padding: 0 8px;
-  font-size: 0.68rem;
 }
 
 .working-indicator {

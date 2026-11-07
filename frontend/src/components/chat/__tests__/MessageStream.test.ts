@@ -81,7 +81,7 @@ describe('MessageStream', () => {
       },
     });
 
-    const preview = wrapper.find('.floating-message-content').text();
+    const preview = wrapper.find('.pending-message-content').text();
     expect(preview).toContain('Queue now with code and link');
     expect(preview).not.toContain('**');
     expect(preview).not.toContain('`');
@@ -126,13 +126,13 @@ describe('MessageStream', () => {
     });
 
     // Agent 2 尚未读到 seq=5（游标语义：等于游标也还没读）→ 应挂在浮动待读区
-    expect(wrapper.find('.floating-messages-dock').exists()).toBe(true);
+    expect(wrapper.find('.pending-message-dock').exists()).toBe(true);
     expect(wrapper.findAll('.message-row').length).toBe(0);
 
     // Agent 2 读游标推进到 6 → 该消息转入主流，并保留「已立即注入」标记
     await wrapper.setProps({ agentReadIndex: { '2': 6 } });
 
-    expect(wrapper.find('.floating-messages-dock').exists()).toBe(false);
+    expect(wrapper.find('.pending-message-dock').exists()).toBe(false);
     expect(wrapper.findAll('.message-row').length).toBe(1);
     expect(wrapper.find('.msg-status--immediate').exists()).toBe(true);
   });
@@ -154,7 +154,7 @@ describe('MessageStream', () => {
     });
 
     // AI → Operator 方向没有 AI 接收方，恒视为已读
-    expect(wrapper.find('.floating-messages-dock').exists()).toBe(false);
+    expect(wrapper.find('.pending-message-dock').exists()).toBe(false);
     expect(wrapper.findAll('.message-row').length).toBe(1);
   });
 
@@ -174,7 +174,7 @@ describe('MessageStream', () => {
       },
     });
 
-    expect(wrapper.find('.floating-messages-dock').exists()).toBe(true);
+    expect(wrapper.find('.pending-message-dock').exists()).toBe(true);
     expect(wrapper.findAll('.message-row').length).toBe(0);
   });
 
@@ -195,7 +195,7 @@ describe('MessageStream', () => {
     });
 
     // 接收方 AI(1) 的读游标已是 9 > 5，该消息已读，应进主流
-    expect(wrapper.find('.floating-messages-dock').exists()).toBe(false);
+    expect(wrapper.find('.pending-message-dock').exists()).toBe(false);
     expect(wrapper.findAll('.message-row').length).toBe(1);
   });
 
