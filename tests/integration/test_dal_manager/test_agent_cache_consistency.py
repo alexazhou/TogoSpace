@@ -18,7 +18,7 @@
 | R5 | B7 | 同一条（§7.2⑤），独立实现 |
 | R6 | B6 / B6b | 采用 B6b 的 monkeypatch 方式（B6 的 unbind 方式只证明「没查库」，B6b 还证明「没调查询入口」） |
 | R7 | — | **本文件独有**：`save_agent` 的写后热更新语义（§7.2⑦） |
-| R8 | B12 | 同一条（洞1：批量读回填守卫），独立实现 |
+| R8 | B12 | 同一条（洞1：批量读回填检查），独立实现 |
 | R9 | S4 | **同一行为、两个层次，不替代**：R9 是**契约层**——断言「单 id 失效不连带阻断其他 id 的在途回填」这个**行为承诺**；S4 是**收益层**——断言「少做无谓失效」这个效率收益（红了=命中率退化，不是功能坏）。李哥把 M3 定成 S4 而非 B14，理由是「不回填在功能上仍正确，写成契约就是过度约束」，那是对**他判据包**的分层，不是对 R9 的否定 |
 
 **李哥独有、本文件没有的**：B4（§4.2 已知残留，断言缺陷存在）、B8（写入口不得缓存调用方对象）、
@@ -192,7 +192,7 @@ async def test_r3a_rollback_must_not_leave_cache_value(agent_db):
 
     db_value = await _db_status(agent.id, agent_db)
     assert db_value == "ON_BOARD", "事务应已回滚"
-    cached = gtAgentManager.get_cached_agent(agent.id)
+    cached = gtAgentManager._agent_cache.get(agent.id)
     assert cached is None or cached.employ_status == EmployStatus.ON_BOARD, (
         f"回滚后缓存留下未提交值：cache={cached.employ_status.name if cached else None} db={db_value}"
     )
@@ -215,7 +215,7 @@ async def test_r3b_caller_mutation_must_not_poison_cache(agent_db):
     #    脏值只落在调用方手上那份副本上，缓存对象没被污染，用例就恒真了。
     agent = await gtAgentManager.get_agent_by_id(agent_id)
     assert agent is not None
-    assert agent is gtAgentManager.get_cached_agent(agent_id), (
+    assert agent is gtAgentManager._agent_cache.get(agent_id), (
         "预热后 get_agent_by_id 应返回缓存实例；否则本用例守不住「共享对象被改脏」"
     )
     name_before = agent.name
@@ -225,11 +225,11 @@ async def test_r3b_caller_mutation_must_not_poison_cache(agent_db):
     agent.employee_number = other.employee_number
     agent.name = "renamed-should-not-stick"
     # 此刻缓存里那个对象已经是脏的（§4.2 已知残留），这就是失败的写入口必须障碍的场景
-    assert gtAgentManager.get_cached_agent(agent_id).name == "renamed-should-not-stick"  # type: ignore[union-attr]
+    assert gtAgentManager._agent_cache.get(agent_id).name == "renamed-should-not-stick"  # type: ignore[union-attr]
     with pytest.raises(Exception):
         await gtAgentManager.save_agent(agent)
 
-    after = gtAgentManager.get_cached_agent(agent_id)
+    after = gtAgentManager._agent_cache.get(agent_id)
     if after is not None:
         assert after.name == name_before, (
             f"写失败后缓存留下脏值：cache.name={after.name!r} 期望 {name_before!r}"
@@ -260,7 +260,7 @@ async def test_r4_switch_database_must_not_hit_old_object(agent_db):
     first = await _new_agent("alice_before")
     old_id = first.id
     await gtAgentManager.get_agent_by_id(old_id)  # 缓存住旧库对象
-    assert gtAgentManager.get_cached_agent(old_id) is not None
+    assert gtAgentManager._agent_cache.get(old_id) is not None
 
     # 真实换库路径：走 ormService 的数据库解绑清理（生产 `_reset` 的同一挂点）
     await ormService._reset()
@@ -290,7 +290,7 @@ async def test_r4_switch_database_must_not_hit_old_object(agent_db):
 async def test_r5_async_interleave_must_not_refill_stale(agent_db, monkeypatch):
     """§7.2⑤：读取旧值 → 写入并失效 → 旧查询不得把旧值填回缓存。
 
-    变异：拆掉代际守卫（`_fill_if_fresh` 直接 `cache_agents`）⇒ 本用例红。
+    变异：拆掉版本号检查（`_agent_cache.add_if_version` 改为直接 `_agent_cache.add`）⇒ 本用例红。
     """
     agent = await _new_agent("r5")
     agent_id = agent.id
@@ -305,7 +305,7 @@ async def test_r5_async_interleave_must_not_refill_stale(agent_db, monkeypatch):
             fired["done"] = True
             # 窗口期：另一个协程完成写入 + 失效
             await gtAgentManager.batch_update_agent_status([agent_id], EmployStatus.OFF_BOARD)
-        return stale  # 旧对象被返回 ⇒ 若无守卫会被填回缓存
+        return stale  # 旧对象被返回 ⇒ 若无版本号检查会被填回缓存
 
     monkeypatch.setattr(
         GtAgent, "aio_get_or_none",
@@ -372,17 +372,17 @@ async def test_r7_save_agent_then_id_read_sees_new_config(agent_db):
     )
 
 
-# ── M17 补的守卫：批量读的交错守卫 + 代际精确隔离 ────────────────────────────
+# ── M17 补的检查：批量读的交错检查 + 单 key 失效精确隔离 ────────────────────
 
 
 async def test_r8_get_agents_by_ids_must_not_refill_stale(agent_db, monkeypatch):
-    """`get_agents_by_ids` 的异步交错回填守卫（M17 补的洞1）。
+    """`get_agents_by_ids` 的异步交错回填检查（M17 补的洞1）。
 
-    M16 只给 `get_agent_by_id` 加了代际守卫，批量读仍是裸 `cache_agents(fetched)`，
+    M16 只给 `get_agent_by_id` 加了版本号检查，批量读仍是裸回填，
     而该函数有 11 个调用点。
 
-    变异：把 `_fill_if_fresh(fetched, snapshot)` 改回 `cache_agents(fetched)`
-    ⇒ 本用例红。
+    变异：把 `_agent_cache.add_many_if_version(fetched, version)` 改回不做版本号检查
+    直接回填 ⇒ 本用例红。
     """
     agent = await _new_agent("r8")
     agent_id = agent.id
@@ -410,7 +410,7 @@ async def test_r8_get_agents_by_ids_must_not_refill_stale(agent_db, monkeypatch)
 
     db_value = await _db_status(agent_id, agent_db)
     assert db_value == "OFF_BOARD", "库应已更新（本用例的事实基准）"
-    cached = gtAgentManager.get_cached_agent(agent_id)
+    cached = gtAgentManager._agent_cache.get(agent_id)
     assert cached is None, (
         f"批量读把失效前的旧值填回了缓存：cache={cached.employ_status.name if cached else None}"
     )
@@ -419,9 +419,9 @@ async def test_r8_get_agents_by_ids_must_not_refill_stale(agent_db, monkeypatch)
 
 
 async def test_r9_single_id_invalidate_must_not_block_other_ids(agent_db, monkeypatch):
-    """单 id 失效不得连带阻断其他 id 的在途读取（代际二元组的精确性）。
+    """单 id 失效不得连带阻断其他 id 的在途读取（版本号的精确性）。
 
-    保证「`invalidate_agent_cache(a1)` 只影响 a1」——否则任意一次写入都会让
+    保证「`_agent_cache.invalidate(a1)` 只影响 a1」——否则任意一次写入都会让
     所有其他 id 的在途读取白白放弃回填，缓存命中率无谓下降。
     """
     a1 = await _new_agent("r9_a1")
@@ -438,7 +438,7 @@ async def test_r9_single_id_invalidate_must_not_block_other_ids(agent_db, monkey
         rows_list = list(rows) if isinstance(rows, list) else rows
         if isinstance(rows_list, list) and len(rows_list) == 2 and not fired["done"]:
             fired["done"] = True
-            gtAgentManager.invalidate_agent_cache(a1.id)  # 只失效 a1
+            gtAgentManager._agent_cache.invalidate(a1.id)  # 只失效 a1
         return rows
 
     monkeypatch.setattr(AioQueryMixin, "aio_execute", _interleaved)
@@ -446,9 +446,9 @@ async def test_r9_single_id_invalidate_must_not_block_other_ids(agent_db, monkey
     await gtAgentManager.get_agents_by_ids([a1.id, a2.id])
     assert fired["done"], "交错窗口未触发，本用例退化为无效"
 
-    assert gtAgentManager.get_cached_agent(a1.id) is None, (
+    assert gtAgentManager._agent_cache.get(a1.id) is None, (
         "a1 被失效了，不应回填"
     )
-    assert gtAgentManager.get_cached_agent(a2.id) is not None, (
+    assert gtAgentManager._agent_cache.get(a2.id) is not None, (
         "a2 未被失效，应当正常回填（单 id 失效不得连带其他 id）"
     )
