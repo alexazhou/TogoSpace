@@ -251,35 +251,65 @@ jobs:
           fi
         done
 
-        echo "--- 判据2 其余 Mach-O 全量扫描（排除 ${MULTI}）---"
+        echo "--- 判据2 全量 Mach-O 扫描（非目标架构仅允许命中容忍清单）---"
+        # 不按目录排除，改成「精确相对路径」容忍清单：这样将来 assets/ 里新增别的
+        # 多架构产物时会被当场判红，而不是被目录排除悄悄漏掉。
+        TOLERATE_AMD64="Contents/Resources/backend/_internal/${MULTI}/gtsp-darwin-amd64"
+        TOLERATE_ARM64="Contents/Resources/backend/_internal/${MULTI}/gtsp-darwin-arm64"
         tot=0; bad=0
         while IFS= read -r f; do
           got=$(arch_of "${f}")
+          # 非 Mach-O（如 gtsp-linux-* 是 ELF）拿不到架构，跳过。
           [ -n "${got}" ] || continue
           tot=$((tot+1))
-          if [ "${got}" != "${EXPECT}" ]; then
-            echo "     ❌ ${f#"${APP}"/} → ${got}"; bad=$((bad+1))
+          rel="${f#"${APP}"/}"
+          if [ "${got}" = "${EXPECT}" ]; then continue; fi
+          case "${rel}" in
+            "${TOLERATE_AMD64}") want=x86_64 ;;
+            "${TOLERATE_ARM64}") want=arm64 ;;
+            *) echo "     ❌ ${rel} → ${got}（不在容忍清单）"; bad=$((bad+1)); continue ;;
+          esac
+          if [ "${got}" = "${want}" ]; then
+            echo "     容忍 ${rel} = ${want}"
+          else
+            echo "     ❌ ${rel} → ${got}，容忍清单声明 ${want}"; bad=$((bad+1))
           fi
-        done < <(/usr/bin/find "${APP}" -type f -perm -u+x 2>/dev/null | grep -v "/${MULTI}/" || true)
+        done < <(/usr/bin/find "${APP}" -type f -perm -u+x 2>/dev/null || true)
         echo "  Mach-O 合计 ${tot} 个，架构不符 ${bad} 个"
         # 守门下限：扫描本身失效（find 路径写错、过滤条件写错）时 tot 会是 0，
-        # 此时 bad 也是 0，不设下限就等于空跑判绿。beta2 实测每份 88 个，排除
-        # 两份 gtsp 后 86 个，取 80 作下限。
+        # 此时 bad 也是 0，不设下限就等于空跑判绿。beta2/首轮实测每份 88 个，取 80。
         if [ "${tot}" -lt 80 ]; then
-          echo "::error::只扫到 ${tot} 个 Mach-O（预期 ≥80，beta2 实测 88），扫描本身可疑"
+          echo "::error::只扫到 ${tot} 个 Mach-O（预期 ≥80，实测 88），扫描本身可疑"
           fail=1
         fi
         [ "${bad}" -eq 0 ] || fail=1
 
-        echo "--- 判据3 多平台辅助件（按设计双份）---"
+        echo "--- 判据3 多平台资产 ---"
+        # 必需：gtsp-linux-*。依据 src/appPaths.py:117 get_gtsp_linux_binary_path(arch)
+        #   按【容器架构】而非宿主架构选产物，arm64 宿主也要能跑 amd64 容器；
+        #   scripts/togo_desktop.spec:90-91 注释亦明确不能误伤同目录的 gtsp-linux-*。
+        for n in gtsp-linux-amd64 gtsp-linux-arm64; do
+          if [ -f "${APP}/Contents/Resources/backend/_internal/${MULTI}/${n}" ]; then
+            echo "  ✅ 必需资产存在 ${n}"
+          else
+            echo "::error::必需资产缺失 ${n}（打包态容器功能会整体不可用）"; fail=1
+          fi
+        done
+        # 容忍：gtsp-darwin-*。现状是整棵 assets/ 原样打包，两份都在；但运行期
+        #   只按宿主取一份，非目标那份无运行期需求。所以**不要求存在**（将来打包
+        #   按架构过滤掉时不该判红），存在则架构必须对。
         for pair in "gtsp-darwin-amd64:x86_64" "gtsp-darwin-arm64:arm64"; do
           n=${pair%%:*}; want=${pair##*:}
           p="${APP}/Contents/Resources/backend/_internal/${MULTI}/${n}"
+          if [ ! -f "${p}" ]; then
+            echo "  -- 容忍资产未打包 ${n}（允许）"
+            continue
+          fi
           got=$(arch_of "${p}")
           if [ "${got}" = "${want}" ]; then
             echo "  ✅ ${n} = ${want}"
           else
-            echo "::error::${n} 缺失或架构为「${got}」，期望「${want}」"; fail=1
+            echo "::error::${n} 架构为「${got}」，期望「${want}」"; fail=1
           fi
         done
 
