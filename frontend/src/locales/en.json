@@ -194,6 +194,8 @@
       "get_room_info": "Get Room Info"
     },
     "tokenEstimate": "Est. {count}",
+    "tokenCompactRange": "tokens {before} → {after}",
+    "tokenCompactProgress": "↑ {before} ↓ {count}",
     "retryScheduled": "Retry in {seconds}s ({attempt}/{max})",
     "retryingProgress": "Retrying ({attempt}/{max})",
     "retryUsed": "Retried {count} times",

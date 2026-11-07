@@ -487,6 +487,15 @@ function activityMetaTokens(activity: AgentActivity): string {
   const finalTotal = typeof metadata.final_total_tokens === 'number' ? metadata.final_total_tokens : null;
   const estimated = typeof metadata.estimated_prompt_tokens === 'number' ? metadata.estimated_prompt_tokens : null;
   const currentCompletion = typeof metadata.current_completion_tokens === 'number' ? metadata.current_completion_tokens : null;
+  // COMPACT：压缩中是「压缩前规模 + 摘要输出的持续估算」，结束后是「压缩前 → 压缩后」。
+  const contextBefore = typeof metadata.context_tokens_before === 'number' ? metadata.context_tokens_before : null;
+  const contextAfter = typeof metadata.context_tokens_after === 'number' ? metadata.context_tokens_after : null;
+  if (contextBefore !== null && contextAfter !== null) {
+    return t('agent.tokenCompactRange', { before: contextBefore, after: contextAfter });
+  }
+  if (contextBefore !== null) {
+    return t('agent.tokenCompactProgress', { before: contextBefore, count: currentCompletion ?? 0 });
+  }
   if (finalTotal !== null) {
     return `tokens ${finalTotal}`;
   }

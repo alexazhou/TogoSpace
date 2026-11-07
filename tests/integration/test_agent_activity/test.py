@@ -318,6 +318,37 @@ class TestAgentActivityService(ServiceTestCase):
         assert updated.metadata["model"] == "override"
         assert updated.metadata["final_prompt_tokens"] == 100
 
+    # ── update_activity_progress：persist=False 只广播不写库 ──
+
+    async def test_update_progress_persist_false_broadcasts_without_writing(self):
+        """流式进度专用：广播负载带新值，但数据库不落盘。"""
+        await self._reset()
+        activity = await agentActivityService.add_activity(
+            gt_agent=_fake_agent(), activity_type=AgentActivityType.LLM_INFER,
+            metadata=AgentActivityMeta(model="test-model"),
+        )
+
+        received = []
+        def listener(msg):
+            received.append(msg)
+
+        messageBus.subscribe(MessageBusTopic.AGENT_ACTIVITY_CHANGED, listener)
+        try:
+            updated = await agentActivityService.update_activity_progress(
+                activity.id, metadata_patch=AgentActivityMeta(current_completion_tokens=42), persist=False,
+            )
+            await asyncio.sleep(0.05)
+        finally:
+            messageBus.unsubscribe(MessageBusTopic.AGENT_ACTIVITY_CHANGED, listener)
+
+        assert updated.metadata["current_completion_tokens"] == 42
+        assert updated.metadata["model"] == "test-model"
+        assert len(received) == 1
+        assert received[0].payload["activity"].metadata["current_completion_tokens"] == 42
+
+        stored = await GtAgentActivity.aio_get_or_none(GtAgentActivity.id == activity.id)
+        assert "current_completion_tokens" not in (stored.metadata or {})
+
     # ── update_activity_progress：执行环境三元组是整体快照，不逐键浅合并 ──
 
     async def test_update_progress_clears_container_keys_when_patch_is_host(self):

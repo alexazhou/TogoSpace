@@ -198,7 +198,7 @@ def test_estimate_tokens_with_empty_messages():
 
 # ─── compact_messages ─────────────────────────────────────
 
-_INFER_PATCH = "service.agentService.compact.llmService.infer"
+_INFER_PATCH = "service.agentService.compact.llmService.infer_stream"
 
 
 def _make_mock_response(content: str):
@@ -237,7 +237,7 @@ async def test_compact_messages_success():
     tools = [_make_tool()]
     captured: dict[str, object] = {}
 
-    async def _fake_infer(model, ctx):
+    async def _fake_infer(model, ctx, on_progress=None):
         captured["model"] = model
         captured["ctx"] = ctx
         return llmService.InferResult.success(mock_resp)

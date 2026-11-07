@@ -51,6 +51,9 @@ class AgentActivityMeta:
     final_prompt_tokens: int | None = None
     final_completion_tokens: int | None = None
     final_total_tokens: int | None = None
+    # COMPACT 专用：压缩前后的上下文估算（与 LLM usage 口径不同，单独存放）
+    context_tokens_before: int | None = None
+    context_tokens_after: int | None = None
     # 溢出重试
     overflow_retry: bool | None = None
     error_kind: str | None = None
@@ -165,6 +168,7 @@ async def update_activity_progress(
     detail: str | None = None,
     error_message: str | None = None,
     metadata_patch: AgentActivityMeta | None = None,
+    persist: bool = True,
 ) -> GtAgentActivity:
     """更新活动记录进度。
 
@@ -173,6 +177,8 @@ async def update_activity_progress(
     - metadata_patch 采用浅合并（读取 → merge → 写回），但**执行环境三元组是整体快照**：
       patch 带 `exec_env` 时会先清掉旧的 `current_container_id` / `container_name`，
       见下面注释（空值 vs 错值）。
+    - persist=False 时只更新内存对象并广播，不写数据库。用于流式 token 这类高频、
+      纯观测的进度刷新：前端靠广播实时刷新即可，最终状态仍由收尾更新落库。
     - 调用约定：调用处统一写成单行，避免在业务代码里拆成多行
     """
     update_fields: dict = {}
@@ -214,6 +220,17 @@ async def update_activity_progress(
             if current is not None:
                 delta = now - current.started_at
                 update_fields["duration_ms"] = int(delta.total_seconds() * 1000)
+
+    if not persist:
+        # 不写库：把本次更新应用到读出的行上，仅用于广播。行不存在与写库路径同样报错。
+        if current is None:
+            current = await GtAgentActivity.aio_get_or_none(GtAgentActivity.id == activity_id)
+        if current is None:
+            raise RuntimeError(f"update_activity_progress failed: activity_id={activity_id}")
+        for field_name, value in update_fields.items():
+            setattr(current, field_name, value)
+        _broadcast(current)
+        return current
 
     activity = await gtAgentActivityManager.update_activity_by_id(activity_id, **update_fields)
     _broadcast(activity)

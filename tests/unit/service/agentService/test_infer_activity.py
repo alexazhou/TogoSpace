@@ -314,3 +314,41 @@ async def test_infer_updates_activity_with_retry_status_metadata():
     assert getattr(final_patch, "request_state", None) == ""
     assert getattr(final_patch, "retry_attempt", None) == 2
     assert getattr(final_patch, "retry_max_attempts", None) == 8
+
+
+@pytest.mark.asyncio
+async def test_infer_stream_progress_broadcasts_without_persisting():
+    """流式 token 进度只广播不写库：进度更新以 persist=False 调用。
+
+    节流规则是「每 10 个 chunk」或 200ms，所以连续 10 次进度才会产生一次更新。
+    """
+    runner, history = _make_runner_and_history()
+    runner._current_room = MagicMock()
+    runner._current_room.room_id = 1
+
+    resp = _make_mock_response(content="输出完成", usage=_make_usage())
+    resp.choices[0].finish_reason = "stop"
+    output_item = _make_history_item()
+
+    mock_activity_svc = _mock_activity_service()
+
+    async def _fake_infer_stream(model, ctx, on_progress=None, on_status_event=None):
+        assert on_progress is not None
+        for i in range(10):
+            await on_progress(llmService.InferStreamProgress(delta_text="x", current_completion_tokens=i + 1))
+        return llmService.InferResult.success(resp)
+
+    with (
+        patch(_CONFIG_PATCH, return_value=_mock_config()),
+        patch(_INFER_STREAM_PATCH, AsyncMock(side_effect=_fake_infer_stream)),
+        patch(_ESTIMATE_PATCH, return_value=1000),
+        patch(_ACTIVITY_PATCH, mock_activity_svc),
+    ):
+        await runner._infer_to_item(output_item, tools=[])
+
+    progress_calls = [
+        call for call in mock_activity_svc.update_activity_progress.call_args_list
+        if call.kwargs.get("persist") is False
+    ]
+    assert len(progress_calls) == 1
+    assert progress_calls[0].kwargs["metadata_patch"].current_completion_tokens == 10

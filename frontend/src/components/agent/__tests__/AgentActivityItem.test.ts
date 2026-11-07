@@ -245,3 +245,54 @@ describe('AgentActivityItem bash 首行描述', () => {
     expect(wrapper.find('.agent-activity-item__summary--bash-description').exists()).toBe(false);
   });
 });
+
+/**
+ * Token 展示：推理与上下文压缩共用同一个尾部位置。
+ * - 推理：流式中显示「估算 prompt + 已输出」，结束后显示后端 usage 总量。
+ * - 压缩：进行中显示「↑ 压缩前 ↓ 摘要输出估算」，结束后显示「压缩前 → 压缩后」。
+ */
+describe('AgentActivityItem token 展示', () => {
+  function tokenEl(wrapper: ReturnType<typeof mountItem>) {
+    return wrapper.find('.agent-activity-item__tokens');
+  }
+
+  it('推理中显示 prompt 与已输出 token 的估算', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'llm_infer',
+      status: 'started',
+      metadata: { estimated_prompt_tokens: 1000, current_completion_tokens: 20 },
+    }));
+
+    expect(tokenEl(wrapper).text()).toBe('估算 1020');
+  });
+
+  it('推理结束显示 usage 总量', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'llm_infer',
+      status: 'succeeded',
+      metadata: { estimated_prompt_tokens: 1000, final_total_tokens: 1200 },
+    }));
+
+    expect(tokenEl(wrapper).text()).toBe('tokens 1200');
+  });
+
+  it('压缩中显示压缩前规模与摘要输出估算（升降箭头）', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'compact',
+      status: 'started',
+      metadata: { context_tokens_before: 80000, current_completion_tokens: 120 },
+    }));
+
+    expect(tokenEl(wrapper).text()).toBe('↑ 80000 ↓ 120');
+  });
+
+  it('压缩结束显示压缩前后对比', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'compact',
+      status: 'succeeded',
+      metadata: { context_tokens_before: 80000, context_tokens_after: 4200 },
+    }));
+
+    expect(tokenEl(wrapper).text()).toBe('tokens 80000 → 4200');
+  });
+});

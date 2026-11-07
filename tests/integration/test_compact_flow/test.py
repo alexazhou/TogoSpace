@@ -25,10 +25,19 @@ from util import llmApiUtil
 # ── Mock 配置：故意把阈值设小，方便触发 compact ──
 
 _CONFIG_PATCH = "util.configUtil.get_app_config"
-_INFER_PATCH = "service.agentService.compact.llmService.infer"
+_COMPACT_LLM_PATCH = "service.agentService.compact.llmService"
 _INFER_STREAM_PATCH = "service.agentService.agentTurnRunner.llmService.infer_stream"
 _ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
 _ACTIVITY_PATCH = "service.agentService.agentTurnRunner.agentActivityService"
+
+
+def _patch_compact_infer(infer_stream_mock):
+    """用给定 mock 替换 compact 模块持有的 llmService.infer_stream。
+
+    不能直接 patch `llmService.infer_stream` 属性：compact 与 agentTurnRunner
+    引用同一个模块对象，两个 patch 会互相覆盖。
+    """
+    return mock.patch(_COMPACT_LLM_PATCH, MagicMock(infer_stream=infer_stream_mock))
 
 
 def _mock_activity_service():
@@ -137,8 +146,8 @@ class TestCompactFlow(ServiceTestCase):
 
         估算 token 序列：
         1. _infer_to_item 开始时估算 → 超过 trigger → 触发 _execute_compact
-        2. _execute_compact 内部不调 estimate（直接 llmService.infer）
-        3. compact 完成后 _check_compact 再次估算 → 低于 trigger → 通过
+        2. _execute_compact 内部在裁剪后估算新值，并返回给 _check_compact
+        3. _check_compact 复用该值 → 低于 trigger → 通过（不再重复估算）
         4. 主流程 _infer_to_item 发起正常 LLM 请求
         """
         history = await self._reset_and_build_history(agent_id=99, turns=5)
@@ -152,15 +161,12 @@ class TestCompactFlow(ServiceTestCase):
 
         # estimate 调用序列：
         # 1st: _infer_to_item 主流程估算 → 超 trigger
-        # 2nd: compact 后重新估算 → 低于 trigger
-        # 两次都是 _infer_to_item 中的 estimate_tokens 调用
+        # 2nd: _execute_compact 裁剪后估算 → 低于 trigger（_check_compact 复用它）
         estimate_calls = iter([_TRIGGER + 50, 100])
 
         with (
             mock.patch(_CONFIG_PATCH, return_value=_mock_config()),
-            mock.patch(_INFER_PATCH, AsyncMock(
-                return_value=llmService.InferResult.success(compact_summary_resp),
-            )),
+            _patch_compact_infer(AsyncMock(return_value=llmService.InferResult.success(compact_summary_resp))),
             mock.patch(_INFER_STREAM_PATCH, AsyncMock(
                 return_value=llmService.InferResult.success(normal_resp),
             )),
@@ -209,9 +215,7 @@ class TestCompactFlow(ServiceTestCase):
 
         with (
             mock.patch(_CONFIG_PATCH, return_value=_mock_config()),
-            mock.patch(_INFER_PATCH, AsyncMock(
-                return_value=llmService.InferResult.success(compact_resp),
-            )),
+            _patch_compact_infer(AsyncMock(return_value=llmService.InferResult.success(compact_resp))),
             mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
         ):
             await runner._execute_compact()
@@ -237,9 +241,7 @@ class TestCompactFlow(ServiceTestCase):
 
         with (
             mock.patch(_CONFIG_PATCH, return_value=_mock_config()),
-            mock.patch(_INFER_PATCH, AsyncMock(
-                return_value=llmService.InferResult.success(compact_resp),
-            )),
+            _patch_compact_infer(AsyncMock(return_value=llmService.InferResult.success(compact_resp))),
             mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
         ):
             await runner._execute_compact()
@@ -263,9 +265,7 @@ class TestCompactFlow(ServiceTestCase):
 
         with (
             mock.patch(_CONFIG_PATCH, return_value=_mock_config()),
-            mock.patch(_INFER_PATCH, AsyncMock(
-                return_value=llmService.InferResult.success(compact_resp),
-            )),
+            _patch_compact_infer(AsyncMock(return_value=llmService.InferResult.success(compact_resp))),
             mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
         ):
             await runner._execute_compact()

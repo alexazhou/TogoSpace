@@ -13,7 +13,7 @@ from model.dbModel.agentMessage import AgentMessage
 from service import serviceUtil
 from service.llmService.llmErrorClassifier import classify_llm_error, RETRYABLE_CATEGORIES
 from service.llmService.llmRequestRules import apply_llm_request_rules
-from util import configUtil, llmApiUtil
+from util import configUtil, llmApiUtil, tokenUtil
 
 from util.configUtil.configTypes import LlmModelConfig, LlmProviderConfig, LlmContextConfig
 import appPaths
@@ -444,19 +444,31 @@ async def infer_stream(
                 return
 
             delta_text = ""
+            reasoning_text = ""
+            tool_args_text = ""
             choices = getattr(chunk, "choices", None)
             if choices and len(choices) > 0:
                 delta = getattr(choices[0], "delta", None)
                 if delta:
                     delta_text = getattr(delta, "content", None) or ""
+                    # 思考模型（DeepSeek 等）在 reasoning 阶段只发 reasoning_content，
+                    # 不读它的话输出侧会一直显示 0。
+                    reasoning_text = getattr(delta, "reasoning_content", None) or ""
+                    for tool_call in (getattr(delta, "tool_calls", None) or []):
+                        function = getattr(tool_call, "function", None)
+                        if function is not None:
+                            tool_args_text += getattr(function, "arguments", None) or ""
 
             chunk_usage = getattr(chunk, "usage", None)
             if chunk_usage and getattr(chunk_usage, "completion_tokens", None) is not None:
                 current_ct = chunk_usage.completion_tokens
                 current_total = getattr(chunk_usage, "total_tokens", None)
             else:
-                if delta_text:
-                    completion_tokens += 1
+                # 网关不回 usage 时按增量估算：每个 delta 单独 tokenize 后累加，
+                # 总成本与输出长度成正比（不能每次重算全文，那是 O(n²)）。
+                delta_piece = delta_text + reasoning_text + tool_args_text
+                if delta_piece:
+                    completion_tokens += tokenUtil.estimate_text_tokens(model_config.name, delta_piece)
                 current_ct = completion_tokens
                 current_total = None
 
