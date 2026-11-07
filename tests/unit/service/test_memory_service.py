@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from constants import (
+    MEMORY_CONTENT_GRACE_CHARS,
     MEMORY_CONTENT_MAX_CHARS,
     MEMORY_SEARCH_LIMIT_MAX,
     MEMORY_STAR_SUMMARY_LIMIT,
@@ -277,8 +278,10 @@ async def test_update_summary_only_allowed(memory_db):
 
 
 async def test_content_too_long(memory_db):
+    """超出「上限 + 宽限」才拒绝（AI 对长度感知不强，宽限内允许落库）。"""
+    hard_limit = MEMORY_CONTENT_MAX_CHARS + MEMORY_CONTENT_GRACE_CHARS
     await _expect_error(
-        "content_too_long", _create("标题", content="正" * (MEMORY_CONTENT_MAX_CHARS + 1)),
+        "content_too_long", _create("标题", content="正" * (hard_limit + 1)),
     )
 
 
@@ -290,6 +293,13 @@ async def test_content_empty(memory_db):
 async def test_content_at_limit_is_accepted(memory_db):
     detail = await _create("标题", content="正" * MEMORY_CONTENT_MAX_CHARS)
     assert len(detail.content) == MEMORY_CONTENT_MAX_CHARS
+
+
+async def test_content_within_grace_is_accepted(memory_db):
+    """轻微超长（不超过宽限 100 字符）仍允许落库。"""
+    hard_limit = MEMORY_CONTENT_MAX_CHARS + MEMORY_CONTENT_GRACE_CHARS
+    detail = await _create("标题", content="正" * hard_limit)
+    assert len(detail.content) == hard_limit
 
 
 async def test_content_allows_newlines(memory_db):

@@ -1,7 +1,7 @@
 """Agent 长期记忆服务：校验、CRUD、多关键词检索与片段提取。
 
 **校验为什么放在这一层**：DB 的文本列统一 `TEXT`、不施加长度约束（step2 §2.1），
-标题 80 / 概要 120 / 正文 1000 / 标签 5×24 / 同名防重 / 星标配额（12 总、其中 6 概要）
+标题 80 / 概要 120 / 正文 1000（存储侧宽限 +100）/ 标签 5×24 / 同名防重 / 星标配额（12 总、其中 6 概要）
 全部在本模块集中拦截，后续调整配额只需改 `constants.py`，不动表结构。
 
 **对外错误码**：一律 `raise TogoException(message, error_code)`，由
@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 
 from constants import (
+    MEMORY_CONTENT_GRACE_CHARS,
     MEMORY_CONTENT_MAX_CHARS,
     MEMORY_SEARCH_LIMIT_DEFAULT,
     MEMORY_SEARCH_LIMIT_MAX,
@@ -91,11 +92,16 @@ def validate_summary(summary: str) -> str:
 def validate_content(content: str) -> str:
     """正文允许换行（代码块 / 分步说明），只校验非空与长度。
 
+    长度上限 = 面向 AI 的 `MEMORY_CONTENT_MAX_CHARS` + 存储侧宽限
+    `MEMORY_CONTENT_GRACE_CHARS`：AI 对长度感知不强，轻微超长（≤ 100 字符）仍允许落库，
+    报错文案仍以面向 AI 的上限为准，避免把模型的写作目标抬到更高水位。
+
     正文为空按 step2 §7.1 归 `content_too_long`（文档把「为空或超长」合并到同一码，
     这里照文档原样，不自行拆成两个码）。
     """
     cleaned = (content or "").strip()
-    if not cleaned or len(cleaned) > MEMORY_CONTENT_MAX_CHARS:
+    hard_limit = MEMORY_CONTENT_MAX_CHARS + MEMORY_CONTENT_GRACE_CHARS
+    if not cleaned or len(cleaned) > hard_limit:
         raise TogoException(
             f"记忆正文不能为空且不超过 {MEMORY_CONTENT_MAX_CHARS} 字符"
             f"（当前 {len(cleaned)} 字符），请精简或拆分为多个独立主题",

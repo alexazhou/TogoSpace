@@ -81,7 +81,7 @@ flowchart LR
 - **字符与格式限制**：
   - `title`：去首尾空白后非空、不含换行符、长度 `<= 80`（`MEMORY_TITLE_MAX_CHARS`）；
   - `summary`：去首尾空白后非空、不含换行符、长度 `<= 120`（`MEMORY_SUMMARY_MAX_CHARS`）；
-  - `content`：去首尾空白后非空、长度 `<= 1000`（`MEMORY_CONTENT_MAX_CHARS`）；
+  - `content`：去首尾空白后非空、长度 `<= 1000`（`MEMORY_CONTENT_MAX_CHARS`，面向 AI 的上限）；存储侧额外宽限 `100`（`MEMORY_CONTENT_GRACE_CHARS`）——AI 对长度感知不强，轻微超长仍允许落库，实际存储上限 `<= 1100`；
   - `tags`：最多 `5` 个（`MEMORY_TAGS_MAX_COUNT`），单个标签长度 `<= 24`。
 - **同名标题防重**：
   - 同一 `(team_id, agent_id)` 下处于 `ACTIVE` 状态的记忆中，不允许存在相同 `title`（更新时排除自身 `id`）。若冲突则报错并返回已有记忆 `#id`，引导 Agent 调用 `memory_update`。
