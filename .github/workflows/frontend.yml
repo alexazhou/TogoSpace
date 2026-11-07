@@ -1,0 +1,48 @@
+name: Frontend
+
+# 前端门：vitest + vue-tsc。
+#
+# 为什么单独一个 workflow：仓库原有的 6 个 workflow 里没有任何一条跑前端测试或类型检查
+# （build-desktop.yml 只在打包时 `npm ci` 装依赖，test.yml 四道门全在 Python 侧）。
+# 于是 47 files / 399 tests + vue-tsc 0 error 全靠人工跑，无回归保证。
+#
+# 触发条件与 test.yml 完全对齐，且**刻意不加 `paths:` 过滤**：
+# 路径过滤会漏跑——改了后端（比如接口字段改名）同样会打破前端契约，
+# 而那种改动不会命中 `frontend/**`。宁可多跑一次 6 秒，也不要在需要它的时候没跑。
+
+on:
+  push:
+    branches:
+      - '**'  # 所有分支 push，排除 tag（与 test.yml 一致）
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        lfs: true
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: '20'  # 与 build-desktop.yml 保持一致，不要自创版本
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install dependencies
+      working-directory: frontend
+      run: npm ci
+
+    # 两个门各自独立成 step：合成一个 `npm run build` 的话，
+    # 失败时分不清是「测试红」还是「类型红」，而这两类的修法完全不同。
+    - name: Run unit tests
+      working-directory: frontend
+      run: npx vitest run
+
+    - name: Type check
+      working-directory: frontend
+      run: npx vue-tsc --noEmit
