@@ -6,7 +6,7 @@
 //! 3. 启动超时定时器（generation 计数防误触发）
 
 use crate::utils::{self, StdioEvent, StdioStream};
-use crate::{config, logger, sys};
+use crate::{config, logger, login_shell, sys};
 use std::path::PathBuf;
 use std::process::ChildStdin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -172,6 +172,9 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
         // dev 模式下 Python 直接写管道，确保 marker 即时可见
         .env("PYTHONUNBUFFERED", "1");
 
+    // GUI 启动拿不到登录 shell 的 PATH；只注入 PATH，不覆盖上面的启动器变量。
+    login_shell::inject_path(&mut command);
+
     logger::log(
         "shell",
         format!(
@@ -181,6 +184,15 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
     );
 
     let mut platform_state = sys::platform::setup_command(&mut command);
+
+    if crate::is_quitting() {
+        logger::log(
+            "shell",
+            "quit requested before backend spawn, aborting start",
+        );
+        return Ok(());
+    }
+
     let mut child = command
         .spawn()
         .map_err(|e| format!("启动后端进程失败: {}", e))?;
@@ -207,9 +219,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
         StdioEvent::ReaderFinished(stream) => {
             logger::log("shell", format!("{}_READER_FINISHED", stream.label()))
         }
-        StdioEvent::Line(StdioStream::Stdout, line) => {
-            handle_stdout_line(&app_for_stdout, &line)
-        }
+        StdioEvent::Line(StdioStream::Stdout, line) => handle_stdout_line(&app_for_stdout, &line),
         StdioEvent::Line(StdioStream::Stderr, line) => logger::log("backend:err", line),
         StdioEvent::ReadError(stream, message) => logger::log(
             "backend:err",
@@ -281,10 +291,7 @@ fn handle_ready(app: &tauri::AppHandle, url: &str) {
     if !changed {
         logger::log(
             "shell",
-            format!(
-                "backend ready ignored, state={}",
-                snapshot().describe()
-            ),
+            format!("backend ready ignored, state={}", snapshot().describe()),
         );
         return;
     }

@@ -107,6 +107,24 @@ python3 tauri/scripts/build_desktop.py --arch x86_64
 Rust 持有后端子进程的 stdin。退出时关闭 stdin → 后端读到 EOF 调用 `request_shutdown()`；
 5 秒内未退出则强杀。父进程被 `kill -9` 时 OS 关闭管道，后端同样会自行停机，不产生孤儿进程。
 
+### 登录 shell PATH
+
+从 Dock / Finder 启动时，macOS / Linux 只提供会话管理器的最小 `PATH`。外壳在启动阶段通过
+`<shell> -ilc` 读取一次用户登录 shell 的 `PATH`，注入 Python sidecar；后端及其子进程自然继承。
+实现见 `src/login_shell.rs`，设计见
+[docs/design/2026-11-08-desktop-login-shell-path](../docs/design/2026-11-08-desktop-login-shell-path/step2_technical.md)。
+
+- 只同步 `PATH`；`JAVA_HOME`、`NVM_DIR`、`PNPM_HOME` 等仍不在后端环境中。
+- 结果在应用进程内缓存：修改 rc 文件后需重启桌面应用，托盘「重启后端」不会重新探测。
+- 默认总预算 5000ms，所有候选 shell 共享；超时或全部失败时回退继承的 `PATH`，不影响启动。
+- 账户 shell 为 `fish` / `nushell` 等非 POSIX shell 时跳过，依次尝试 `/bin/zsh`、`/bin/bash`、`/bin/sh`。
+- `PATH` 中的相对路径条目会被丢弃，只保留绝对路径；含空格路径正常保留；同一绝对路径重复出现时按首次出现保留，避免 sidecar 与 Agent 子进程拿到重复条目。
+- `tauri dev`（`debug_assertions`）默认跳过探测，以保留当前终端会话的临时 `PATH`；
+  设置 `TOGOSPACE_LOGIN_SHELL_PROBE=1` 可强制开启。`TOGOSPACE_LOGIN_SHELL_TIMEOUT_MS`
+  （500–30000）可调整总预算，仅用于终端排障。
+- Windows 不探测，行为与改动前一致。
+- 日志位于 `~/.togospace/logs/desktop/desktop.log`，关键字 `desktop login shell:`。
+
 ## 测试
 
 ```bash
@@ -119,6 +137,8 @@ cd frontend && npm run test:run
 
 - 桌面模式下后端只监听 `127.0.0.1`，并强制开启 token 鉴权。浏览器访问
   `http://127.0.0.1:<port>` 时需要从托盘菜单「复制访问 Token」获取 token。
+- 从 Dock / Finder 启动时会读取登录 shell 的 `PATH` 并注入后端，Homebrew、nvm、pnpm 等安装的命令
+  在 Agent 工具调用中可直接使用；只同步 `PATH`，其他环境变量不变。
 - 数据目录沿用 `~/.togospace`，老用户不需要迁移。
 - 关闭主窗口只是隐藏到托盘；`Cmd+Q`、托盘「退出」或启动画面「确认退出」才会停止后端。
 - 首次启动会生成 `~/.togospace/desktop.json`（权限 0600），删除后下次启动会重新生成端口与 token。

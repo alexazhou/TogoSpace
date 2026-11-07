@@ -82,7 +82,7 @@ pub fn inject_path(command: &mut std::process::Command)
 | `probe_shell(shell, timeout)` | 单候选探测：`setsid` spawn、轮询、超时/退出后的进程组回收 |
 | `spawn_stdout_reader(stdout)` | detached 读取线程：双端标记匹配、256 KiB 上限、忽略 `send` 错误并持续排水 |
 | `extract_framed_path(raw)` | 提取两个 `\0<DELIMITER>\0` 之间的片段 |
-| `sanitize_path_bytes(raw)` | 校验无 `\0` / `\r` / `\n`，按 `:` 过滤相对路径并统计保留/丢弃条目数 |
+| `sanitize_path_bytes(raw)` | 校验无 `\0` / `\r` / `\n`，按 `:` 过滤相对路径、按首次出现去重并统计保留/丢弃/去重条目数 |
 | `resolve_timeout_budget()` / `parse_timeout_budget(raw)` | 生产读取环境变量；纯函数解析 500–30000ms，非法值回退默认 |
 | `candidate_timeout(total, remaining)` | 纯函数：剩余 < 1000ms 返回 `None`，否则 `min(remaining, max(3000ms, total / 2))` |
 | `kill_group(pid)` | `libc::kill(-pid, SIGKILL)` + `wait` 回收 |
@@ -180,6 +180,7 @@ printf '\0__TOGOSPACE_LOGIN_SHELL_PATH__\0%s\0__TOGOSPACE_LOGIN_SHELL_PATH__\0' 
    - 忽略空片段（兼容首尾或连续 `:`）；
    - 丢弃非 `/` 开头的相对路径片段（如 `.`、`./node_modules/.bin`、未展开的 `~/bin`）：sidecar 工作目录与用户终端不同，相对路径本身无意义；
    - 保留以 `/` 开头的绝对路径片段（允许路径内含空格）；
+   - 对绝对路径按**首次出现**保序去重：登录 shell 的 rc 常无条件追加同一路径（`brew shellenv`、OrbStack / LM Studio init 等），重复条目对查找无意义，还会在 Agent 子进程再次执行 `bash -lc` 时被进一步放大；
 3. 过滤后至少保留 1 个绝对路径片段，按 `:` 重新拼接并通过 `OsStringExt::from_vec` 转换为 `OsString`；过滤后为空则判定当前候选失败，尝试下一个候选。
 
 ## 4. 启动时序与失败回退
@@ -209,7 +210,7 @@ Tauri 启动
 
 | 场景 | 日志示例 |
 |------|----------|
-| 成功 | `desktop login shell: resolved PATH from "/bin/zsh" (kept 12 entries, dropped 1 non-absolute)` |
+| 成功 | `desktop login shell: resolved PATH from "/bin/zsh" (kept 12 entries, dropped 1 non-absolute, deduped 2 duplicate entries)` |
 | 跳过非 POSIX 账户 shell | `desktop login shell: skipping non-POSIX account shell "/opt/homebrew/bin/fish"` |
 | 单候选失败 | shell 路径 + 原因：`spawn error` / `exit code` / `signal` / `timeout` / `invalid or unframed PATH` / `output exceeded limit` |
 | 全部失败 | `desktop login shell: all candidates failed, falling back to inherited PATH` |
@@ -223,7 +224,7 @@ Tauri 启动
 | 超时预算 | 默认 5000ms / 首候选 3000ms；`Some("10000")` → 10000ms / 5000ms；`remaining < 1000ms` 返回 `None`；越界、非数字、空串回退默认 |
 | 探测开关 | release 始终开启；debug 默认关闭，`1` / `true` 强制开启 |
 | 候选构造 | POSIX 账户 shell 优先且去重；非 POSIX 被过滤；`None` / 空路径只返回系统 shell |
-| 提取与清洗 | 忽略杂音；单侧标记、空输出、含换行/`\r`/`\0` 判失败；相对与绝对混合时只保留绝对；全相对判失败；单个绝对路径与含空格路径通过 |
+| 提取与清洗 | 忽略杂音；单侧标记、空输出、含换行/`\r`/`\0` 判失败；相对与绝对混合时只保留绝对；全相对判失败；单个绝对路径与含空格路径通过；重复绝对路径按首次出现去重并计数 |
 | 单候选成功/回退 | 模拟 rc 导出自定义 `PATH`；候选不存在、非零退出、输出非法时依次回退 |
 | 提前完成与排水 | 子进程输出第二个标记后启动独立会话的长进程持有 stdout，验证 `probe_shell` 仍在 100ms 宽限期内返回且无僵尸进程 |
 | 超时与进程组清理 | 候选超时返回 `timeout`；reader 在 receiver drop 后 `send` 失败不 panic；探针进程组被清理，耗时有界 |
@@ -248,7 +249,7 @@ Tauri 启动
 | R1 | 仅同步 `PATH` | `JAVA_HOME`、`NVM_DIR`、`PNPM_HOME`、`GOPATH`、代理变量仍缺失 | 本期接受；后续按白名单扩展 |
 | R2 | 冷启动执行用户交互式 rc 的副作用 | rc 中的网络拉取、自动更新、写缓存会被触发一次 | 常见插件用环境变量抑制；其余靠总预算兜底 |
 | R3 | 非 POSIX 账户 shell | 只在 `config.fish` / `config.nu` 维护的路径读不到 | 回退系统 shell；日志明确记录 |
-| R4 | 相对路径条目被丢弃 | 依赖当前目录的条目失效 | sidecar 工作目录与终端不同，本身无意义；日志记录丢弃数量 |
+| R4 | 相对路径条目被丢弃、重复条目被去重 | 依赖当前目录的条目失效 | sidecar 工作目录与终端不同，本身无意义；重复条目对查找无意义；日志记录丢弃与去重数量 |
 | R5 | 后台进程持有 stdout | detached 排水线程可能滞留到进程结束 | 主流程不 join；仅占一个后台线程 |
 | R6 | 结果缓存到进程结束 | 修改 rc 或修复卡死后需重启应用 | 文档说明；托盘重启后端不重新探测 |
 | R7 | Windows 不支持 | Windows 桌面端行为不变 | `#[cfg(not(unix))]` 返回 `None` |

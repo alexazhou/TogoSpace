@@ -1,6 +1,7 @@
 mod backend;
 mod config;
 mod logger;
+mod login_shell;
 mod sys;
 mod tray;
 pub mod utils;
@@ -51,10 +52,7 @@ pub(crate) fn is_quitting() -> bool {
 }
 
 fn to_box_error(message: String) -> Box<dyn std::error::Error> {
-    Box::new(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        message,
-    ))
+    Box::new(std::io::Error::new(std::io::ErrorKind::Other, message))
 }
 
 /// 后端实际使用的 URL，前端通过 Tauri 命令查询。
@@ -117,15 +115,12 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) {
         return;
     }
 
-    let mut builder = tauri::WebviewWindowBuilder::new(
-        app,
-        "main",
-        tauri::WebviewUrl::App("index.html".into()),
-    )
-    .title("TogoSpace")
-    .inner_size(1280.0, 800.0)
-    .min_inner_size(960.0, 600.0)
-    .resizable(true);
+    let mut builder =
+        tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+            .title("TogoSpace")
+            .inner_size(1280.0, 800.0)
+            .min_inner_size(960.0, 600.0)
+            .resizable(true);
 
     // 用 initialization_script 在页面脚本前注入，事后 eval 会晚于前端启动逻辑。
     // 统一挂在 window.tgconfig 下，便于后续扩展其他运行时配置。
@@ -153,7 +148,10 @@ pub(crate) fn launch_backend(app: &tauri::AppHandle, ensure_splash: bool) {
     if !backend::transition_to_starting() {
         logger::log(
             "shell",
-            format!("backend start skipped, state={}", backend::snapshot().describe()),
+            format!(
+                "backend start skipped, state={}",
+                backend::snapshot().describe()
+            ),
         );
         return;
     }
@@ -178,10 +176,16 @@ fn maybe_start_backend_after_splash_load(app: &tauri::AppHandle) {
     let gate = gate_snapshot();
     if !gate.is_ready() {
         if !gate.splash_loaded {
-            logger::log("shell", "backend start deferred, splash page not loaded yet");
+            logger::log(
+                "shell",
+                "backend start deferred, splash page not loaded yet",
+            );
         }
         if !gate.setup_finished {
-            logger::log("shell", "backend start deferred, app setup not finished yet");
+            logger::log(
+                "shell",
+                "backend start deferred, app setup not finished yet",
+            );
         }
         return;
     }
@@ -324,10 +328,16 @@ pub fn run() {
             }
             match payload.event() {
                 PageLoadEvent::Started => {
-                    logger::log("shell", format!("splash load started, url={}", payload.url()));
+                    logger::log(
+                        "shell",
+                        format!("splash load started, url={}", payload.url()),
+                    );
                 }
                 PageLoadEvent::Finished => {
-                    logger::log("shell", format!("splash load finished, url={}", payload.url()));
+                    logger::log(
+                        "shell",
+                        format!("splash load finished, url={}", payload.url()),
+                    );
                     with_gate(|gate| gate.splash_loaded = true);
                     maybe_start_backend_after_splash_load(webview.app_handle());
                 }
@@ -344,6 +354,19 @@ pub fn run() {
                 "shell",
                 format!("setup started, storage_root={:?}", storage_root),
             );
+
+            // 与 splash 加载并行预热登录 shell PATH 探测；backend::start 首次调用时直接读缓存。
+            if let Err(error) = std::thread::Builder::new()
+                .name("login-shell-probe".to_string())
+                .spawn(|| {
+                    let _ = login_shell::path();
+                })
+            {
+                logger::log(
+                    "shell",
+                    format!("login shell prewarm thread spawn failed: {}", error),
+                );
+            }
 
             let mut desktop = config::load_or_create(&storage_root).map_err(to_box_error)?;
             let selected_port = config::choose_port(desktop.port).map_err(to_box_error)?;

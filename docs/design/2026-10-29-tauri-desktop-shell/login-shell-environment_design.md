@@ -154,6 +154,7 @@ pub fn inject_path(command: &mut std::process::Command)
        - 忽略空片段（兼容首尾或连续 `:`，如 `PATH="$PATH:"`）；
        - **过滤并丢弃非 `/` 开头的相对路径片段**（如 `.`、`./node_modules/.bin`、未展开的 `~/bin`——sidecar 工作目录与用户终端不同，相对路径本身无意义，丢弃并记录日志即可，**不能因为存在相对路径条目而整段拒绝用户的 `PATH`**）；
        - 保留以 `/` 开头的绝对路径片段（允许路径内含空格，如 macOS 的 `/Applications/Visual Studio Code.app/Contents/Resources/app/bin`）；
+       - **对绝对路径按首次出现保序去重**：登录 shell 的 rc 常无条件追加同一路径（`brew shellenv`、OrbStack / LM Studio init、重复 `source` 等），重复条目对命令查找无意义，还会在 Agent 子进程再次执行 `bash -lc` 时被放大为多份；
      - 若过滤后剩余至少 1 个绝对路径片段，按 `:` 重新拼接并通过 `OsStringExt::from_vec` 转为 `OsString` 返回；若过滤后为空，则判定当前候选失败并尝试下一个候选。
 
 ### 5.2 模块内部结构
@@ -183,8 +184,8 @@ login_shell
     ├── spawn_stdout_reader(stdout)     # detached 读取线程：匹配双端完整标记、256KiB 上限、忽略 send 错误并持续排水
     ├── extract_framed_path(raw: &[u8]) -> Result<OsString, ProbeError>
     │                                   # 提取两个 \0<DELIMITER>\0 之间的片段并调用 sanitize_path_bytes
-    ├── sanitize_path_bytes(raw: &[u8]) -> Result<(OsString, usize, usize), ProbeError>
-    │                                   # 校验无 \0/\r/\n，按 : 过滤相对路径、保留绝对路径并统计保留/丢弃条目数
+    ├── sanitize_path_bytes(raw: &[u8]) -> Result<SanitizedPath, ProbeError>
+    │                                   # 校验无 \0/\r/\n，按 : 过滤相对路径、按首次出现去重并统计保留/丢弃/去重条目数
     ├── resolve_timeout_budget() -> Duration
     │                                   # 读 std::env::var(TIMEOUT_ENV) 后调用 parse_timeout_budget
     ├── parse_timeout_budget(raw: Option<&str>) -> Duration
@@ -212,7 +213,7 @@ login_shell
 
 使用现有 `logger::log("shell", ...)` 写入 `~/.togospace/logs/desktop/desktop.log`：
 
-- 成功：记录命中的 shell 路径、保留条目数及丢弃的非绝对路径条目数（如 `desktop login shell: resolved PATH from "/bin/zsh" (kept 12 entries, dropped 1 non-absolute)`）；
+- 成功：记录命中的 shell 路径、保留条目数、丢弃的非绝对路径条目数及去重条目数（如 `desktop login shell: resolved PATH from "/bin/zsh" (kept 12 entries, dropped 1 non-absolute, deduped 2 duplicate entries)`）；
 - 跳过非 POSIX 账户 shell：记录 `desktop login shell: skipping non-POSIX account shell "/opt/homebrew/bin/fish"`；
 - 单个候选失败：记录 shell 路径与原因（`spawn error` / `exit code` / `signal` / `timeout` / `invalid or unframed PATH` / `output exceeded limit`）；
 - 全部失败：记录 `desktop login shell: all candidates failed, falling back to inherited PATH`。
@@ -231,7 +232,7 @@ login_shell
 1. **启动延迟与阻塞边界**：探测在后台线程运行，**不阻塞 Tauri 主线程（UI 与 splash 正常响应）**；`setup()` 异步预热可与 `splashscreen` 加载重叠一部分时间，但在最坏情况下（所有候选超时）最多会推迟 sidecar 启动 `5000ms`，超时回退后继续正常启动 sidecar。
 2. **执行用户交互式 rc 的固有副作用**：每次桌面端冷启动都会在无 TTY、`stdin` 关闭的环境下实际执行一次用户的交互式登录配置文件（`~/.zprofile`、`~/.zshrc`、`~/.bash_profile`、`~/.bashrc` 等）。`DISABLE_AUTO_UPDATE=true` 等变量只能拦截 oh-my-zsh / zsh-tmux 等常见插件的阻塞行为；若用户在 rc 中编写了其他重度副作用（如网络拉取、工具自动更新、写本地缓存），只能依赖超时预算兜底。这是登录 shell 探测方案的固有代价。
 3. **仅同步 `PATH` 的已知限制**：本期刻意只同步 `PATH`，不同步其他环境变量。这意味着 `docker`、`git`、`node`、`pnpm`、`brew` 等可执行文件可以被正常定位，但依赖配套环境变量的工具链（如 `JAVA_HOME`、`NVM_DIR`、`PNPM_HOME`、`GOPATH`、`HTTP_PROXY` / `HTTPS_PROXY`）仍不在桌面后端环境中。后续若出现明确需求，再按白名单方式扩展。
-4. **非绝对路径条目会被自动丢弃**：若用户在 rc 中配置了相对路径条目（如 `PATH=.:$PATH` 或 `PATH=./node_modules/.bin:$PATH`），清洗逻辑会丢弃相对路径片段、保留其余以 `/` 开头的绝对路径片段（不会整段拒绝该候选 shell）。
+4. **非绝对路径条目会被自动丢弃、重复条目会被去重**：若用户在 rc 中配置了相对路径条目（如 `PATH=.:$PATH` 或 `PATH=./node_modules/.bin:$PATH`），清洗逻辑会丢弃相对路径片段、保留其余以 `/` 开头的绝对路径片段（不会整段拒绝该候选 shell）；同一绝对路径多次出现（常见于 `brew shellenv`、OrbStack / LM Studio init 或重复 `source`）时按首次出现保留，其余丢弃并计数。
 5. **非 POSIX shell**：若用户的账户 shell 是 `fish`、`nushell`、`csh`、`tcsh`，账户 shell 会被跳过并回退到 `/bin/zsh`、`/bin/bash`、`/bin/sh`。如果用户只在 `config.fish` / `config.nu` 中维护了自定义路径而未写入 `~/.profile` / `~/.zprofile` / `~/.zshrc`，回退到的系统 shell 将只能读到系统与 POSIX 配置文件中的 `PATH`。
 6. **后台子进程与 detached 排水线程**：rc 启动的后台进程若脱离探针进程组并长期持有 stdout，detached 排水线程会在后台持续读取直到进程结束，最坏在应用生命周期内滞留一个阻塞读取线程，但不会阻塞主流程返回。
 7. **缓存策略（失败或修改 rc 后需重启应用）**：`OnceLock<Option<OsString>>` 在单个应用进程生命周期内只探测一次，无论成功或失败均缓存结果；托盘「重启后端」不会重新执行登录 shell 探测，修改 rc 文件或修复卡死问题后需重启桌面应用。
@@ -258,6 +259,7 @@ login_shell
   - 忽略定界符前后的 rc 杂音；
   - 单侧定界符、空输出、含换行 `\n` / `\r` 或 `\0`、超出 `256 KiB` 缓冲区上限均判失败；
   - 混合相对路径与绝对路径（如 `.:./node_modules/.bin:/opt/homebrew/bin:/usr/bin:`）时，自动丢弃 `.` 与 `./node_modules/.bin` 及空段，保留 `/opt/homebrew/bin:/usr/bin`；
+  - 重复绝对路径（如 `/opt/homebrew/bin:/usr/bin:/opt/homebrew/bin:/usr/bin:/usr/local/bin`）按首次出现去重，保留 `/opt/homebrew/bin:/usr/bin:/usr/local/bin` 并统计去重数量；
   - 全部为相对路径（如 `.:./bin`）时判失败；
   - 支持单个绝对路径（无 `:`）与含空格绝对路径（如 `/Applications/Visual Studio Code.app/Contents/Resources/app/bin`）。
 - **单候选成功与失败回退（`resolve_path_from`）**：
