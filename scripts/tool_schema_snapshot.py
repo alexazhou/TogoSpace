@@ -52,6 +52,30 @@ def _param_schema_without_description(param_schema: dict) -> dict:
     return schema
 
 
+#: 除 `tools.py` 外还含本地工具函数的模块（#154 起 `console` 在独立模块里）。
+#: **不登记就会静默绕过护栏**：原来的 `getattr(tools, name)` 对不在 `tools.py` 里的
+#: 工具返回 None，而 None 被当成「不是本地工具」直接跳过 —— 新工具既不会让快照变红，
+#: 也不会出现在参数顺序基表里，三道护栏同时失效且全绿。
+_EXTRA_TOOL_MODULES: tuple[str, ...] = ("service.funcToolService.consoleTool",)
+
+
+def _resolve_local_func(tool_name: str):
+    """按名字找本地工具函数（`tools.py` 优先，其次 `_EXTRA_TOOL_MODULES`）。"""
+    from service.funcToolService import tools
+
+    func = getattr(tools, tool_name, None)
+    if func is not None:
+        return func
+    import importlib
+
+    for module_path in _EXTRA_TOOL_MODULES:
+        module = importlib.import_module(module_path)
+        func = getattr(module, tool_name, None)
+        if func is not None:
+            return func
+    return None
+
+
 def build_snapshot() -> dict:
     """计算当前快照。
 
@@ -72,8 +96,8 @@ def build_snapshot() -> dict:
 
     snapshot: dict[str, dict] = {}
     for tool_name in sorted(CATEGORY_CONFIG):
-        func = getattr(tools, tool_name, None)
-        if func is None:  # 非 tools.py 内的本地工具（如 TSP）
+        func = _resolve_local_func(tool_name)
+        if func is None:  # 非函数意义上的本地工具（如 TSP 的进程内工具）
             continue
         metadata = get_function_metadata(tool_name, func)
         parameters = metadata["parameters"]

@@ -193,8 +193,13 @@ async def test_execute_tool_call_exception() -> None:
 #
 # 分布（按 `ToolCategory.name` 统计，**不要按 `.value` 反推** ——
 # 枚举声明序是 ADMIN=1 / BASIC=2 / READ=3 / WRITE=4 / EXECUTE=5）：
-#   BASIC 15 / ADMIN 10 / READ 6 / EXECUTE 4 / WRITE 2
+#   BASIC 16 / ADMIN 10 / READ 6 / EXECUTE 4 / WRITE 2
+#   （#154 起 `console` 计入 BASIC：它是入口，真正的子命令权限在服务端逐条校验）
 EXPECTED_TOOL_CATEGORIES = {
+    # 管理控制台（#154）：注册为 BASIC 才不会让没有 Admin 的 Agent 连 `dept ls`
+    # 都失去。**子命令级权限在 `consoleParsing._assert_permitted` 里按等价原工具
+    # 的 category 逐个查**（D3）—— 这一行不代表「console 的子命令都是 BASIC」。
+    "console": ToolCategory.BASIC,
     "create_container": ToolCategory.EXECUTE,
     "create_task": ToolCategory.BASIC,
     "delete_container": ToolCategory.EXECUTE,

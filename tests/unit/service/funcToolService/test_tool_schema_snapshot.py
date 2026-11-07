@@ -72,6 +72,9 @@ def test_tool_schema_matches_committed_snapshot():
 # 维护口径：**新增/删除/重排参数都要同步改这张表**。这是有意的——参数顺序是模型看到的
 # 接口形态的一部分（必填在前更易被正确填充），变化必须显式、可读、有人签字。
 _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
+    # 管理控制台（#154）：`command` 必填在前，`payload` 可选在后。
+    # 顺序有意固定——把 `payload` 放前面会让模型先想配置再想命令，实测更易生成错命令。
+    "console": ["command", "payload"],
     "create_task": ["title", "assignee_id", "description", "reviewer_id", "priority", "parent_id", "depends_on", "room_id", "status", "note"],
     "delete_dept": ["name", "dept_id", "recursive"],
     "delete_role_template": ["role_name"],
@@ -126,13 +129,15 @@ def _live_parameter_order() -> dict[str, list[str]]:
     module._ensure_src_on_path()
 
     from service.agentService.toolRegistry import CATEGORY_CONFIG
-    from service.funcToolService import tools
     from service.funcToolService.funcToolType import get_function_metadata
 
     order: dict[str, list[str]] = {}
     for tool_name in sorted(CATEGORY_CONFIG):
-        func = getattr(tools, tool_name, None)
-        if func is None:  # 非 tools.py 内的本地工具（如 TSP）
+        # **必须复用脚本里的解析函数**：`tools.py` 之外还有本地工具模块
+        # （#154 的 `console` 在 `consoleTool.py`）。两边各写一套 `getattr(tools, ...)`
+        # 会让新工具在这条用例里静默跳过，顺序护栏对它失效且不报错。
+        func = module._resolve_local_func(tool_name)
+        if func is None:  # 非函数意义上的本地工具（如 TSP 的进程内工具）
             continue
         order[tool_name] = list(get_function_metadata(tool_name, func)["parameters"]["properties"])
     return order
