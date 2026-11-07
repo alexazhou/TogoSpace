@@ -1244,14 +1244,18 @@ async def update_task(
     task_id: int,
     new_status: Optional[str] = None,
     note: str = '',
+    reviewer_id: Optional[int] = None,
+    clear_reviewer: bool = False,
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
-    """更新协作任务：流转状态或追加评论（任何团队成员都可以追加评论）。
+    """更新协作任务：流转状态、追加评论，或修改/撤销验收人（任何团队成员都可以追加评论）。
 
     Args:
         task_id: 任务 ID
         new_status: 目标状态，可选 TODO、PENDING、IN_PROGRESS、ON_HOLD、REVIEWING、DONE、CANCELLED；省略或等于当前状态表示追加评论。权限：提交验收（→REVIEWING）只能由执行人发起，且任务须设有验收人；通过或打回验收（REVIEWING→DONE、REVIEWING→IN_PROGRESS）只能由验收人操作；取消（→CANCELLED）只能由验收人或创建人操作；其余流转只能由执行人操作。终态 DONE、CANCELLED 不可流转，只能追加评论；设有验收人的任务不能绕过验收直接到 DONE；依赖任务未全部 DONE 时 PENDING 不能转为 IN_PROGRESS。
-        note: 本次流转的说明；追加评论时必填，作为评论正文
+        note: 本次流转的说明；追加评论时必填，作为评论正文。修改验收人时作为变更原由写入时间线（可选）。
+        reviewer_id: 把验收人设为该团队成员（写时间线一条「验收人变更：旧 → 新」）。只有任务创建人或当前验收人可以操作，执行人不能操作；不能设成执行人自己；与当前验收人相同时不写事件。省略表示不改验收人。**不能与状态流转（非自环的 new_status）在同一次调用里做**。
+        clear_reviewer: 设为 true 表示撤销验收人（置空）。只有任务创建人可以操作，任务处于 REVIEWING 时不允许（会导致无人能通过验收）；撤销后执行人可直接把任务置为 DONE。与 reviewer_id 不能同时给。
     """
     import service.taskService as taskService
 
@@ -1265,6 +1269,8 @@ async def update_task(
         task_id=task_id,
         new_status=new_status,
         note=note,
+        reviewer_id=reviewer_id,
+        clear_reviewer=clear_reviewer,
     )
 
 

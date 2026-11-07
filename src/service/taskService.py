@@ -11,6 +11,7 @@ from typing import NamedTuple, Optional, Sequence, Union
 from constants import (
     EVENT_CONTENT_MAX_CHARS,
     EVENT_TRUNCATED_SUFFIX,
+    EmployStatus,
     SpecialAgent,
     TaskPriority,
     TaskStatus,
@@ -150,6 +151,209 @@ def _publish_event_appended(team_id: int, task: GtAgentTask, event) -> None:
         task=task,
         task_event=_serialize_event(event, truncate_content=False),
     )
+
+
+def _reviewer_label(agent_id: Optional[int], agent_name: Optional[str]) -> str:
+    """验收人的可读标签：`<id>/<名>`；无验收人 ⇒ 「无」；名字查不到只给 ID。"""
+    if agent_id is None:
+        return "无"
+    return f"{agent_id}/{agent_name}" if agent_name else str(agent_id)
+
+
+async def _resolve_display_names(agent_ids: Sequence[Optional[int]]) -> dict[int, str]:
+    """批量解析展示名（一次 `get_agents_by_ids`，带缓存），查不到的 ID 不在返回值里。"""
+    ids = [int(i) for i in dict.fromkeys(agent_ids) if i is not None]
+    if not ids:
+        return {}
+    agents = await gtAgentManager.get_agents_by_ids(ids)
+    return {agent.id: agent.display_name for agent in agents}
+
+
+async def _update_reviewer_with_event(
+    team_id: int,
+    task: GtAgentTask,
+    *,
+    actor_id: int,
+    new_reviewer_id: Optional[int],
+    content: str,
+) -> GtAgentTask:
+    """验收人变更的唯一写入口：**同一事务**内更新主表 `reviewer_id` + 追加一条事件，事务后推送。
+
+    - 事件 `from_status` / `to_status` 均为 NULL（= 评论格），与「评论」靠 `content` 前缀区分；
+      不改事件表结构、不加迁移；
+    - 任一写入失败即整体回滚：不允许出现「验收人改了但时间线没记录」；
+    - 推送放在事务块外（回滚时不会出现「推了但没落库」）。
+    """
+    async with atomic():
+        task.reviewer_id = new_reviewer_id  # 同步内存态，保证返回体与落库一致
+        await gtAgentTaskManager.save_task(task, only=[GtAgentTask.reviewer_id])
+        event = await gtAgentTaskEventManager.append_event(
+            task.id,
+            actor_id,
+            from_status=None,
+            to_status=None,
+            content=content,
+        )
+    _publish_event_appended(team_id, task, event)
+    return task
+
+
+async def _handle_reviewer_change(
+    team_id: int,
+    task: GtAgentTask,
+    *,
+    caller_id: int,
+    target: Optional[TaskStatus],
+    reviewer_id: Optional[int],
+    clear_reviewer: bool,
+    note: str,
+) -> dict:
+    """`update_task` 的「仅验收人变更」路径（D1-D7）。
+
+    与状态流转**互斥**（D5）：同时给了「非自环的 `new_status`」⇒ 直接拒绝，
+    否则执行人可以在「提交 REVIEWING」的同一次调用里把验收人换成自己人。
+    """
+    old_status = task.status
+    reason = (note or '').strip()
+
+    # D5：与状态流转不能在同一次调用里做（自环 `new_status` 只是评论意图，不透传到此路径）
+    if target is not None and target != old_status:
+        return {
+            "success": False,
+            "message": (
+                f"修改验收人不能与状态流转（{old_status.value} → {target.value}）在同一次调用里做，"
+                "请分两次调用：先改验收人，再流转状态"
+            ),
+            "error_code": "reviewer_change_must_be_separate",
+        }
+
+    # D3：终态一律不可改（挡住「用改验收人绕过终态收口」的口子）
+    if old_status in (TaskStatus.DONE, TaskStatus.CANCELLED):
+        return {
+            "success": False,
+            "message": f"任务已处于终态（{old_status.value}），不可修改验收人",
+            "error_code": "invalid_transition",
+        }
+
+    # D1：权限裁定。执行人**不能**改（否则执行人可自选验收人，验收门失效）——这条优先于
+    # 「创建人/验收人可改」，即 creator 与 assignee 同一人时也不放行。
+    is_assignee = (caller_id == task.assignee_id)
+    is_reviewer = is_task_reviewer(task, caller_id)
+    is_creator = (caller_id == task.creator_id)
+    if is_assignee:
+        return {
+            "success": False,
+            "message": "执行人（assignee）不能修改验收人，请由创建人或当前验收人操作",
+            "error_code": "permission_denied",
+        }
+    if not (is_creator or is_reviewer):
+        return {
+            "success": False,
+            "message": "只有创建人或当前验收人才能修改验收人",
+            "error_code": "permission_denied",
+        }
+
+    # D2：撤销（设 NULL）只能由创建人操作，且不能发生在 REVIEWING（否则「无人能通过验收」死锁）
+    if clear_reviewer:
+        if not is_creator:
+            return {
+                "success": False,
+                "message": "撤销验收人（clear_reviewer）只能由创建人操作；当前验收人只能把验收人交接给别人",
+                "error_code": "permission_denied",
+            }
+        if old_status == TaskStatus.REVIEWING:
+            return {
+                "success": False,
+                "message": "任务处于 REVIEWING，撤销验收人会导致无人能通过验收，请改为把验收人交接给别人",
+                "error_code": "reviewer_required_in_reviewing",
+            }
+
+    # D4：新验收人校验
+    if clear_reviewer:
+        new_reviewer_id: Optional[int] = None
+    else:
+        try:
+            new_reviewer_id = int(reviewer_id)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return {"success": False, "message": f"无效的验收人 ID：{reviewer_id}", "error_code": "invalid_reviewer"}
+        if new_reviewer_id == task.assignee_id:
+            return {
+                "success": False,
+                "message": "验收人与执行人是同一人时无需设置验收人，请换一个人",
+                "error_code": "invalid_reviewer",
+            }
+        candidates = await gtAgentManager.get_team_agents_by_ids(team_id, [new_reviewer_id])
+        candidate = next((a for a in candidates if a.id == new_reviewer_id), None)
+        if candidate is None or candidate.team_id != team_id:
+            return {
+                "success": False,
+                "message": f"验收人必须是本团队成员：agent_id={new_reviewer_id} 不存在或不属于当前团队",
+                "error_code": "invalid_reviewer",
+            }
+        # 离职（OFF_BOARD）成员无法验收，设成验收人等于制造「无人能通过验收」的死锁（同 D2 口径）
+        if candidate.employ_status == EmployStatus.OFF_BOARD:
+            return {
+                "success": False,
+                "message": f"验收人必须是在职成员：agent_id={new_reviewer_id} 已离职",
+                "error_code": "invalid_reviewer",
+            }
+
+    # D4：与当前验收人相同 ⇒ 无变化，不写无意义事件
+    if new_reviewer_id == task.reviewer_id:
+        return {
+            "success": True,
+            "action": "reviewer_unchanged",
+            "old_reviewer_id": task.reviewer_id,
+            "new_reviewer_id": new_reviewer_id,
+            "reviewer_name": None,
+            "message": "验收人未变化（与当前一致），未写入事件",
+        }
+
+    old_reviewer_id = task.reviewer_id
+    names = await _resolve_display_names([old_reviewer_id, new_reviewer_id])
+    old_label = _reviewer_label(old_reviewer_id, names.get(old_reviewer_id) if old_reviewer_id else None)
+    new_label = _reviewer_label(new_reviewer_id, names.get(new_reviewer_id) if new_reviewer_id else None)
+
+    # D6：事件文案必须以「验收人变更/撤销」开头，让人在时间线上一眼能认出来
+    verb = "验收人撤销" if new_reviewer_id is None else "验收人变更"
+    content = f"{verb}：{old_label} → {new_label}"
+    if reason:
+        content += f"（原由：{reason}）"
+
+    updated = await _update_reviewer_with_event(
+        team_id,
+        task,
+        actor_id=caller_id,
+        new_reviewer_id=new_reviewer_id,
+        content=content,
+    )
+    logger.info(
+        f"任务验收人变更：task_id={task.id}, {old_reviewer_id} → {new_reviewer_id}, caller={caller_id}"
+    )
+
+    # D7：事务外推「任务变更」（列表刷新；时间线由 _update_reviewer_with_event 内推 TASK_EVENT_APPENDED）
+    from service import messageBus as _mb
+    from constants import MessageBusTopic as _MBT
+    _mb.publish(_MBT.TASK_CHANGED, task=updated, old_status=old_status.value)
+
+    from playhouse.shortcuts import model_to_dict
+    message = f"验收人已{'撤销' if new_reviewer_id is None else '更新'}：{old_label} → {new_label}"
+    if new_reviewer_id is None:
+        message += "。提醒：撤销验收人后执行人可直接把任务置为 DONE（不再需要验收），请自行承担该后果。"
+    else:
+        message += "。请自行用 send_chat_msg 通知新的验收人（本工具不会自动唤醒对方）。"
+    if target is not None:
+        message += "（本次 new_status 与当前状态相同，未写评论事件；note 已作为变更原由记入时间线。）"
+
+    return {
+        "success": True,
+        "action": "reviewer_updated",
+        "old_reviewer_id": old_reviewer_id,
+        "new_reviewer_id": new_reviewer_id,
+        "reviewer_name": names.get(new_reviewer_id) if new_reviewer_id else None,
+        "task": model_to_dict(updated, recurse=False),
+        "message": message,
+    }
 
 
 async def _transition_with_event(
@@ -343,16 +547,23 @@ async def update_task(
     task_id: int,
     new_status: Optional[str] = None,
     note: str = '',
+    reviewer_id: Optional[int] = None,
+    clear_reviewer: bool = False,
 ) -> dict:
-    """更新协作任务：流转状态（`new_status`）或追加评论（省略 `new_status`）。
+    """更新协作任务：流转状态（`new_status`）、追加评论（省略 `new_status`），或修改验收人。
 
     - `new_status` 省略、或等于当前状态 ⇒ **评论事件**（`from_status`/`to_status` 均 NULL，PIN-1）；
     - `new_status` 给定且 ≠ 当前状态 ⇒ 权限校验 + **流转事件**（`from≠to`、`content=note`）；
     - **评论权限 = 团队内成员皆可**（不限 assignee / reviewer / creator）；
-    - **终态（`DONE`/`CANCELLED`）不可流转；仅允许追加评论**。
+    - **终态（`DONE`/`CANCELLED`）不可流转；仅允许追加评论**；
+    - `reviewer_id` 给定 ⇒ **修改验收人**；`clear_reviewer=True` ⇒ **撤销验收人**。
+      两者都省略 = 完全走上面的老路径（行为不变）。验收人变更的权限：
+      **创建人或当前验收人可以改；执行人不能改**（否则验收门失效）；撤销只能由创建人做，
+      且 `REVIEWING` 时不能撤销。变更**不能与状态流转在同一次调用里做**。
 
     Returns:
-        dict: success / action（`transitioned` | `commented`）/ task；失败时 message（+ error_code）。
+        dict: success / action（`transitioned` | `commented` | `reviewer_updated` | `reviewer_unchanged`）/ task；
+        失败时 message（+ error_code）。
     """
     # 先校验状态字符串（非法状态不应触达 DB）
     target: Optional[TaskStatus] = None
@@ -361,6 +572,16 @@ async def update_task(
         if target is None:
             return {"success": False, "message": f"无效的状态：{new_status}"}
 
+    # 两个参数都省略 ⇒ 老路径（流转 / 评论），行为完全不变
+    wants_reviewer_change = reviewer_id is not None or clear_reviewer
+
+    if wants_reviewer_change and reviewer_id is not None and clear_reviewer:
+        return {
+            "success": False,
+            "message": "reviewer_id 与 clear_reviewer=True 不能同时给：改人用 reviewer_id，撤销用 clear_reviewer=True",
+            "error_code": "ambiguous_reviewer_change",
+        }
+
     task = await gtAgentTaskManager.get_task(task_id)
     if task is None:
         return {"success": False, "message": f"任务不存在：task_id={task_id}"}
@@ -368,6 +589,18 @@ async def update_task(
         return {"success": False, "message": "任务不属于当前团队"}
 
     old_status = task.status
+
+    # ---- 验收人变更分支（必须先于评论分支：省略 new_status 时否则会落到「note 必填的评论」）----
+    if wants_reviewer_change:
+        return await _handle_reviewer_change(
+            team_id,
+            task,
+            caller_id=caller_id,
+            target=target,
+            reviewer_id=reviewer_id,
+            clear_reviewer=clear_reviewer,
+            note=note,
+        )
 
     # ---- 评论分支：省略 new_status，或 new_status == 当前状态（自环归评论，不建自环边）----
     if target is None or target == old_status:

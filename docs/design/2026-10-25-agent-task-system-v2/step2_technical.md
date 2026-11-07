@@ -227,6 +227,41 @@ flowchart TD
   }
   ```
 
+#### 3.1.1 验收人变更：`update_task` 的第三类动作（#158）
+
+```python
+def update_task(
+    task_id: int,
+    new_status: str | None = None,
+    note: str = "",
+    reviewer_id: int | None = None,      # 传 ID = 设为该人
+    clear_reviewer: bool = False,        # True = 撤销（置 NULL）
+) -> dict: ...
+```
+
+**为什么撤销要独立布尔开关**：JSON tool schema 里「不传 `reviewer_id`」与「传 `null`」不可区分，
+Python 默认值 `None` 同样区分不了；用 `reviewer_id=None` 表达撤销会导致「什么都不传」被误判成撤销。
+`reviewer_id` 与 `clear_reviewer=True` 同时给 ⇒ `ambiguous_reviewer_change`。
+
+| 项 | 口径 | error_code |
+|---|---|---|
+| 谁能改 | **创建人**、**当前验收人**；**执行人一律不能**（否则执行人可自选验收人，验收门失效；creator==assignee 时同样拒绝） | `permission_denied` |
+| 撤销权限 | **仅创建人**；当前验收人只能交接给别人 | `permission_denied` |
+| REVIEWING 时撤销 | 拒绝（否则「无人能通过验收」死锁）；**换人允许**（原验收人不可用时的交接场景） | `reviewer_required_in_reviewing` |
+| 终态 | `DONE` / `CANCELLED` 一律拒绝改验收人（挡住「改验收人绕过终态收口」） | `invalid_transition` |
+| 新验收人 | 必须本团队在职成员（跨团队 / 已删除 / 已离职均拒）；不能等于 `assignee_id` | `invalid_reviewer` |
+| 与当前相同 | 返回 `action="reviewer_unchanged"`，**不写事件** | — |
+| 与状态流转同一次调用 | 拒绝（否则执行人可在「提交 REVIEWING」的同一次调用里把验收人换成自己人）；`new_status` 等于当前状态的自环不算流转，允许同时改人，但**不写评论事件**，`note` 改作变更原由 | `reviewer_change_must_be_separate` |
+
+事件留痕：每次成功变更在 `agent_task_events` 追加 **1 条** `from_status` / `to_status` 均 NULL 的事件
+（**不新增字段、不加迁移**），`actor_id` = 调用者，`content` 以「验收人变更：」或「验收人撤销：」开头，
+形如 `验收人变更：20/测试员甲 → 21/测试员乙（原由：甲休假）`。
+
+事务与副作用：主表 `reviewer_id` 与事件在**同一事务**内；事务外先推 `TASK_EVENT_APPENDED`、再推
+`TASK_CHANGED`（与 `_transition_with_event` 同序）。事件写入失败 ⇒ 主表回滚，不出现「改了但时间线没记录」。
+**不自动唤醒新验收人**（与 `create_task` 一致），返回 message 提示调用方自行 `send_chat_msg`；
+撤销时 message 明确告知「执行人此后可直接置 DONE」。
+
 ### 3.2 任务详情查询更名：`get_task_detail`
 原 `get_task` 更名为 **`get_task_detail`**，使查询任务详情与列表查询 `list_tasks` 语义更加明确。
 

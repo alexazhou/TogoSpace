@@ -102,7 +102,10 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     "save_room": ["name", "member_names", "initial_topic", "max_rounds", "overwrite_existing", "room_id"],
     "send_chat_msg": ["room_name", "msg", "insert_immediately"],
     "start_chat": ["agent_name"],
-    "update_task": ["task_id", "new_status", "note"],
+    # #158：`update_task` 增加验收人变更能力。顺序「先定位、后流转/评论、最后改验收人」：
+    # `task_id` 必填在前；`reviewer_id` / `clear_reviewer` 是**互斥**的两种撤销/改人方式，
+    # 放在末尾（老参数的位置与顺序一律不动，避免影响既有调用方的填充习惯）。
+    "update_task": ["task_id", "new_status", "note", "reviewer_id", "clear_reviewer"],
     "wake_up_agent": ["agent_name"],
     "web_search": ["query"],
     # 容器沙箱工具（#109 第 5 步）。参数顺序按「先 ID、后记录编号」：
