@@ -295,6 +295,7 @@ watch(
       v-else
       ref="activityListRef"
       class="agent-activity-list sidebar-scroll"
+      :class="{ 'agent-activity-list--with-pending': pendingItems.length > 0 }"
       :data-activity-follow="activityFollowing ? '1' : '0'"
       @scroll="handleActivityListScroll"
     >
@@ -352,7 +353,14 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 4px 0 10px;
+  /* 底部 6px：supervise 分隔线定在自身顶部 -2px，最后一条卡片到分隔线的视觉间距
+     正好是 6 - 2 = 4px，与条目之间的 gap 一致。不能再小，否则会贴线。 */
+  padding: 4px 0 6px;
+}
+
+/* 有待读条紧跟其后时收窄到条目间距：此时下方是待读条而不是分隔线。 */
+.agent-activity-list--with-pending .agent-activity-list__content {
+  padding-bottom: 4px;
 }
 
 .agent-activity-list__loading-more {
@@ -362,10 +370,40 @@ watch(
   text-align: center;
 }
 
-/* 待读区：贴在活动列表下方、输入框上方。sticky 由组件自带，这里只补外边距。 */
-.agent-activity-pending {
+/*
+ * 待读区：贴在活动列表下方、输入框上方。
+ *
+ * 间距必须与列表内部同一个节奏（条目之间 4px），所以要把 dock 自带的内边距
+ * （8px 上 / 2px 下）清零，否则叠加后比列表条目之间的缝隙大一截。
+ * `.agent-activity-pending` 与 `.pending-message-dock` 是同一个元素，组合选择器
+ * 提高优先级才能压过子组件自己的 scoped 样式。
+ */
+.agent-activity-pending.agent-activity-pending {
   flex-shrink: 0;
-  padding: 0 2px 4px;
+  /* 不能留左右外边距：活动条目是通栏的，留 2px 会让待读条右边短一截。 */
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+/*
+ * 待读卡片与活动条目同属一个列表语境，外观必须一致：`PendingMessageBar` 的默认样式
+ * 是给聊天页「悬浮待读条」用的（14px 圆角 + `--chat-floating-message-bg`），放进活动
+ * 列表会像另一套设计。这里只在活动面板语境下把它对齐 `.agent-activity-item` 的口径，
+ * 聊天页不受影响。
+ */
+.agent-activity-pending :deep(.pending-message-bar) {
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: var(--surface-activity-item);
+  border-color: var(--border-activity-item);
+}
+
+.agent-activity-pending :deep(.pending-message-dock__list) {
+  gap: 4px;
+  /* `.sidebar-scroll` 自带 4px 右内边距（给滚动条让位），但活动列表这边已被
+     `.agent-activity-list` 的 `padding: 0` 覆盖。这里也清零，待读条才能和
+     活动条目、输入分隔线右缘对齐，否则右边短 4px。 */
+  padding-right: 0;
 }
 
 /* IDLE 状态下新内容到达时的可见出口：点一下回到底部并恢复跟随。 */
