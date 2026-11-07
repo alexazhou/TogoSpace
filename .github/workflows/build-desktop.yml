@@ -18,7 +18,10 @@ on:
 jobs:
   build-mac:
     name: Build macOS App (${{ inputs.arch }})
-    runs-on: macos-14          # Apple Silicon runner，x86_64 通过 Rosetta 2 构建
+    # macos-14 镜像已于 2026-11-02 被 GitHub 退役（排队阶段即被拒，
+    # runner_name 为空、job 1 秒 cancelled），故升到 macos-15（同为 Apple Silicon）。
+    # 不用浮动的 latest 标签：它指向的版本会漂移，下次镜像退役又是同样的坑。
+    runs-on: macos-15          # Apple Silicon runner，x86_64 通过 Rosetta 2 构建
     timeout-minutes: 60
 
     env:
@@ -76,6 +79,28 @@ jobs:
         .venv/bin/python -c "import platform; print(f'Venv Python arch: {platform.machine()}')"
 
     # ── x86_64: 通过 Rosetta 2 + uv 跨平台安装 x86_64 依赖（PyInstaller 不支持交叉编译） ──
+    #
+    # 下面的 `arch -x86_64` 依赖 Rosetta 2。macos-15 镜像当前预装（实测：pkgutil 有
+    # com.apple.pkg.RosettaUpdateAuto、`arch -x86_64 uname -m` → x86_64），但**不假设**
+    # 它一直在——镜像会变，缺了就直接在 `arch -x86_64 python3 -m venv` 处失败。
+    # 所以先显式探测，缺了再装。已装时 softwareupdate 也会成功退出，两种情形都容错。
+    - name: Ensure Rosetta 2 (x86_64 only)
+      if: inputs.arch == 'x86_64'
+      run: |
+        echo "=== runner ==="; sw_vers; uname -m; echo "ImageOS=$ImageOS ImageVersion=$ImageVersion"
+        if /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
+          echo "✅ Rosetta 2 已可用，跳过安装"
+        else
+          echo "ℹ️ Rosetta 2 不可用，开始安装"
+          sudo /usr/sbin/softwareupdate --install-rosetta --agree-to-license || true
+          if ! /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "::error::Rosetta 2 安装后仍不可用，x86_64 交叉编译无法进行"
+            exit 1
+          fi
+          echo "✅ Rosetta 2 安装完成"
+        fi
+        /usr/bin/arch -x86_64 /usr/bin/uname -m
+
     - name: Set up x86_64 Python environment via Rosetta 2
       if: inputs.arch == 'x86_64'
       run: |
@@ -172,6 +197,75 @@ jobs:
 
     - name: Show artifact
       run: ls -lh build/*.dmg
+
+    # ── 产物架构自检：job 绿 ≠ 产物对 ──
+    # x86_64 这一路是在 arm64 runner 上经 Rosetta 交叉编译出来的，构建成功只说明
+    # 命令没报错，产物到底是哪个架构只有 file/lipo 能证明。所以在这里当场判。
+    #
+    # 判据：
+    #   1) 主二进制 + 内嵌后端 TogoSpace-backend + 其余全部 Mach-O（86 个 .so/.dylib 等）
+    #      都要等于 TARGET_ARCH（beta2 实测每份 88 个 Mach-O）；
+    #   2) assets/execute/gtsp/ 下按设计同时带 darwin-amd64 与 darwin-arm64 两份，
+    #      两份 DMG 里逐字节相同 —— 这是既存现状，不算架构违例，但缺了说明打包漏资产。
+    - name: Verify DMG architecture
+      run: |
+        set -euo pipefail
+        EXPECT="$TARGET_ARCH"
+        DMG=$(ls build/*.dmg | head -1)
+        echo "DMG: $DMG   expect: $EXPECT"
+        MNT=$(mktemp -d /tmp/dmgmnt.XXXXXX)
+        hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MNT" -quiet
+        trap 'hdiutil detach "$MNT" -quiet 2>/dev/null || true' EXIT
+
+        APP=$(/usr/bin/find "$MNT" -maxdepth 1 -name '*.app' | head -1)
+        [ -n "$APP" ] || { echo "::error::DMG 内没有 .app"; exit 1; }
+        EXE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")
+        MAIN="$APP/Contents/MacOS/$EXE"
+        BACKEND="$APP/Contents/Resources/backend/TogoSpace-backend"
+        MULTI="assets/execute/gtsp"
+
+        fail=0
+        echo "--- 判据1 关键二进制 ---"
+        for f in "$MAIN" "$BACKEND"; do
+          if [ ! -f "$f" ]; then echo "::error::缺失 $f"; fail=1; continue; fi
+          info=$(file -b "$f")
+          echo "  ${f#$APP/}"
+          echo "    file: $info"
+          echo "    lipo: $(lipo -info "$f" 2>&1 || true)"
+          case "$info" in
+            *Mach-O*"$EXPECT"*) echo "     ✅ 等于 $EXPECT" ;;
+            *) echo "::error::${f#$APP/} 不是 $EXPECT"; fail=1 ;;
+          esac
+        done
+
+        echo "--- 判据2 其余 Mach-O 全量扫描（排除 $MULTI）---"
+        tot=0; bad=0
+        while IFS= read -r f; do
+          t=$(file -b "$f" 2>/dev/null || true)
+          case "$t" in
+            *Mach-O*)
+              tot=$((tot+1))
+              case "$t" in
+                *"$EXPECT"*) ;;
+                *) echo "     ❌ ${f#$APP/} → $t"; bad=$((bad+1)) ;;
+              esac ;;
+          esac
+        done < <(/usr/bin/find "$APP" -type f -perm -u+x 2>/dev/null | grep -v "/$MULTI/")
+        echo "  Mach-O 合计 $tot 个，架构不符 $bad 个"
+        [ "$bad" -eq 0 ] || fail=1
+
+        echo "--- 判据3 多平台辅助件（按设计双份）---"
+        for pair in "gtsp-darwin-amd64:x86_64" "gtsp-darwin-arm64:arm64"; do
+          n=${pair%%:*}; want=${pair##*:}
+          p="$APP/Contents/Resources/backend/_internal/$MULTI/$n"
+          if [ -f "$p" ] && file -b "$p" | grep -q "$want"; then
+            echo "  ✅ $n = $want"
+          else
+            echo "::error::$n 缺失或不是 $want"; fail=1
+          fi
+        done
+
+        if [ "$fail" -eq 0 ]; then echo "RESULT: PASS ($EXPECT)"; else echo "RESULT: FAIL"; exit 1; fi
 
     # 安装包统一上传为 workflow artifact；Release 发布由 release.yml 处理。
     # 不要用 archive: false（Direct Uploads）：该模式下 artifact 不是 zip，
