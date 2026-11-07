@@ -180,12 +180,19 @@ class AgentTurnRunner:
         推理与上下文压缩共用：两者都是持续输出的流式请求，前端活动行按
         `current_completion_tokens` 实时显示估算值。广播按 200ms 或 10 个 chunk
         节流；进度只是观测数据，`persist=False` 只广播不写库——最终值由收尾更新落库。
+
+        回调自身带 `last_completion_tokens`：节流会把中间值丢掉，收尾时若网关没回
+        usage，就用这里记下的**最新**估算值落库（否则「网关不回 usage」这个估算
+        存在的唯一场景，库里反而一条 completion token 都没有）。
         """
         last_progress_time = time.monotonic()
         chunk_count_since_update = 0
 
         async def _on_progress(progress: llmService.InferStreamProgress) -> None:
             nonlocal last_progress_time, chunk_count_since_update
+            # 每个 delta 都记（不受节流影响），供收尾兜底使用。
+            if progress.current_completion_tokens is not None:
+                _on_progress.last_completion_tokens = progress.current_completion_tokens
             chunk_count_since_update += 1
             now = time.monotonic()
             if (
@@ -198,6 +205,7 @@ class AgentTurnRunner:
                 last_progress_time = now
                 chunk_count_since_update = 0
 
+        _on_progress.last_completion_tokens = None
         return _on_progress
 
     def _extract_tool_command(self, tool_call: llmApiUtil.OpenAIToolCall) -> str | None:
@@ -857,6 +865,14 @@ class AgentTurnRunner:
             # 活动记录：LLM_INFER SUCCEEDED
             final_meta = AgentActivityMeta()
             final_meta.apply_usage(usage)
+            # 网关不回 usage 时（`apply_usage` 什么都不写），用流中估算的终值兜底落库。
+            # 不加这一条，「不回 usage」这个场景里库里一个 completion token 都没有——
+            # 而「按 delta 估算」正是为它做的。流中值只广播不落库（persist=False），
+            # 不在这里落一次就永久丢了：刷新页面 / 新窗口从 DB 读，显示为空。
+            # 键沿用 `current_completion_tokens`：前端 `activityMetaTokens` 读的就是它
+            # （`final_total_tokens` 优先被读，有 usage 时不需要这里兜底）。
+            if usage is None and _on_progress.last_completion_tokens is not None:
+                final_meta.current_completion_tokens = _on_progress.last_completion_tokens
             request_retry_meta = _build_request_retry_meta_for_terminal()
             if request_retry_meta is not None:
                 final_meta.request_state = request_retry_meta.request_state
