@@ -381,9 +381,10 @@ def _print_raw(result: subprocess.CompletedProcess) -> None:
 def verify_stapled_ticket(target: str) -> None:
     """校验 stapled 票据，判据全部是本地读取（不联网）。
 
-    替代原来的 `xcrun stapler validate`：后者会向 Apple 回查票据，网络抖动
-    （#146 的 NSURLErrorDomain -1005 / `Error 68`）会让已公证成功的 DMG 被判红
-    丢弃。实测断网下 validate 必挂，而下面这些判据照常工作。
+    替代原来的 `xcrun stapler validate`：后者会向 Apple 回查票据，该步在
+    #146 表现为间歇性、非确定性失败（NSURLErrorDomain -1005 / `Error 68`，
+    机制未定），会让已公证成功的 DMG 被判红丢弃。实测断网下 validate 必挂，
+    而下面这些判据照常工作。
 
     硬判据（任一不过即 SystemExit，不降级为警告）：
       ① `codesign --verify --deep --strict <DMG>` 返回码 0 —— 签名完整性
