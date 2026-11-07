@@ -33,15 +33,18 @@ function containerBadge(agent: AgentInfo): string | null {
   return agent.exec_env === 'container' ? t('agent.execEnv.container') : null;
 }
 
-/** 徽标 hover：容器名优先，缺名回退短 ID；有自建容器时补上总数。 */
+/** 徽标 hover：两行分别标注容器名与 Docker 短 ID。 */
 function containerBadgeTitle(agent: AgentInfo): string {
   const name = typeof agent.current_container_name === 'string' ? agent.current_container_name.trim() : '';
   const shortId = typeof agent.current_container_id === 'string' ? agent.current_container_id.trim() : '';
-  const identity = name || shortId;
-  const base = identity ? `${t('agent.execEnv.container')} · ${identity}` : t('agent.execEnv.container');
-  return typeof agent.container_count === 'number' && agent.container_count > 0
-    ? `${base}\n${t('agent.containers.count')}: ${agent.container_count}`
-    : base;
+  const lines: string[] = [];
+  if (name) {
+    lines.push(`${t('agent.containers.name')}: ${name}`);
+  }
+  if (shortId) {
+    lines.push(`${t('agent.containers.containerId')}: ${shortId}`);
+  }
+  return lines.length ? lines.join('\n') : t('agent.execEnv.container');
 }
 </script>
 

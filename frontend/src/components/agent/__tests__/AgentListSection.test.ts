@@ -29,7 +29,7 @@ describe('AgentListSection 团队成员徽标', () => {
     expect(wrapper.find('.agent-env-badge').exists()).toBe(false);
   });
 
-  it('容器态只显示「容器」，具体容器名放在 hover title', () => {
+  it('容器态只显示「容器」，容器名与 Docker ID 放在 hover title', () => {
     const wrapper = mountSection([
       createAgent({
         exec_env: 'container',
@@ -41,11 +41,11 @@ describe('AgentListSection 团队成员徽标', () => {
 
     const badge = wrapper.find('.agent-env-badge');
     expect(badge.text()).toBe('容器');
-    // 短 ID 不再占徽标位置；名称与容器总数只在 hover 时才出现
-    expect(badge.attributes('title')).toBe('容器 · agent-t2-xiao-mei-7\n容器数: 2');
+    // 徽标里不出现 ID/数量；hover 只给名称与 Docker ID，不显示容器总数
+    expect(badge.attributes('title')).toBe('容器名称: agent-t2-xiao-mei-7\n容器 ID: bd0fe74c76d4');
   });
 
-  it('没有容器名时回退到短 ID；没有自建容器时不追加数量', () => {
+  it('没有容器名时 hover 只保留 Docker ID 一行', () => {
     const wrapper = mountSection([
       createAgent({
         exec_env: 'container',
@@ -57,6 +57,6 @@ describe('AgentListSection 团队成员徽标', () => {
 
     const badge = wrapper.find('.agent-env-badge');
     expect(badge.text()).toBe('容器');
-    expect(badge.attributes('title')).toBe('容器 · bd0fe74c76d4');
+    expect(badge.attributes('title')).toBe('容器 ID: bd0fe74c76d4');
   });
 });

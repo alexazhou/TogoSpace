@@ -286,7 +286,7 @@
       "empty": "暂无容器",
       "recordId": "记录 ID",
       "containerId": "容器 ID",
-      "name": "名称",
+      "name": "容器名称",
       "image": "镜像",
       "state": "状态",
       "entered": "当前使用",

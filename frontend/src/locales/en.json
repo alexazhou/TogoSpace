@@ -286,7 +286,7 @@
       "empty": "No containers",
       "recordId": "Record ID",
       "containerId": "Container ID",
-      "name": "Name",
+      "name": "Container Name",
       "image": "Image",
       "state": "State",
       "entered": "In Use",
