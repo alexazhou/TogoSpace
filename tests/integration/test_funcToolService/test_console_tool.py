@@ -25,7 +25,7 @@ import service.deptService as deptService
 import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
-from constants import AgentStatus, RoleTemplateType
+from constants import AgentStatus, EmployStatus, RoleTemplateType
 from dal.db import gtAgentManager, gtDeptManager, gtRoleTemplateManager, gtRoomManager, gtTeamManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
@@ -1013,3 +1013,135 @@ class TestConsoleTool(ServiceTestCase):
             result = await console("help", _context=self._ctx(name))
             assert result["success"] is True
             assert "dept" in result["help"]
+
+
+class TestConsoleDuplicateAgentName(ServiceTestCase):
+    """同名成员（离职名字被复用）时 `agent get/update` 必须报错，不能静默换人。
+
+    为什么单独一组：`GtAgent` 的 `(team_id, name)` 是**非唯一**索引（离职成员的
+    名字允许被新成员复用），而 `gtAgentManager.get_agent()` 底层是
+    `peewee_async` 的 `aio_get` → `paginate(1,1)`，**不校验唯一性**：两行同名时
+    它返回行序靠前的那一行（通常是先建的、已离职的那个）。按 id 定位「A」却拿到
+    同名的「B」，返回体仍是 `success: True` —— 这是最贵的一类错：模型会当成成功
+    继续往下做。draft §4.2 明确要求「同名冲突时提示改用 id」。
+
+    这组用例是**回归钉**：改坏 `_resolve_agent_by_target` 或去掉 `agent get` 里的
+    一致性校验，这里必须变红。
+    """
+
+    @classmethod
+    async def async_setup_class(cls):
+        db_path = cls._get_test_db_path()
+        await ormService.startup(db_path)
+        await persistenceService.startup()
+        await agentService.startup()
+        await roomService.startup()
+
+        team = await gtTeamManager.save_team(GtTeam(name="dup_team"))
+        cls.team_id = team.id
+        template = await gtRoleTemplateManager.save_role_template(
+            GtRoleTemplate(name="dup_role", soul="dup role")
+        )
+        cls.role_template_id = template.id
+        await gtAgentManager.batch_save_agents(
+            team.id,
+            [
+                GtAgent(team_id=team.id, name="boss", role_template_id=template.id),
+                GtAgent(team_id=team.id, name="mate", role_template_id=template.id),
+                # 先建离职行、后建在职行：让「取第一条」必定落到离职那一个，
+                # 这样「按 id 拿错人」的缺陷才必然复现（而不是碰运气）。
+                GtAgent(
+                    team_id=team.id, name="dup", role_template_id=template.id,
+                    employ_status=EmployStatus.OFF_BOARD, model="old-model",
+                ),
+                GtAgent(team_id=team.id, name="dup", role_template_id=template.id, model="new-model"),
+            ],
+        )
+        rows = await gtAgentManager.get_team_all_agents(team.id)
+        cls.rows = rows
+        cls.boss_id = next(r.id for r in rows if r.name == "boss")
+        mate_id = next(r.id for r in rows if r.name == "mate")
+        cls.off_id = next(r.id for r in rows if r.name == "dup" and r.employ_status == EmployStatus.OFF_BOARD)
+        cls.on_id = next(r.id for r in rows if r.name == "dup" and r.employ_status == EmployStatus.ON_BOARD)
+
+        await gtTeamManager.set_team_enabled(team.id, False)
+        await deptService.overwrite_dept_tree(
+            team.id,
+            GtDept(name="root", responsibility="root", manager_id=cls.boss_id, agent_ids=[cls.boss_id, mate_id]),
+        )
+        await gtTeamManager.set_team_enabled(team.id, True)
+
+    def _ctx(self) -> ToolCallContext:
+        return ToolCallContext(agent_id=self.boss_id, team_id=self.team_id, chat_room=None)
+
+    def _runtime_stub(self, monkeypatch, statuses: dict[int, AgentStatus] | None = None):
+        """运行时桩只含 ON_BOARD —— 与真实 `agentService` 一致（它只加载在职）。"""
+        rows = [r for r in self.rows if r.employ_status == EmployStatus.ON_BOARD]
+        statuses = statuses or {}
+        fakes = [_FakeRuntimeAgent(r, statuses.get(r.id, AgentStatus.IDLE)) for r in rows]
+        monkeypatch.setattr(agentService, "get_team_agents", lambda team_id: fakes)
+        return fakes
+
+
+    async def test_agent_get_by_id_never_returns_a_different_agent(self, monkeypatch):
+        """按 id 查「同名的另一个人」时，绝不能返回别人的详情。"""
+        self._runtime_stub(monkeypatch)
+        result = await console(f"agent get {self.off_id}", _context=self._ctx())
+        assert result["success"] is False
+        assert result["error_code"] == "member_not_on_board"
+        assert str(self.off_id) in result["message"]
+
+    async def test_agent_get_on_board_by_id_returns_that_agent(self, monkeypatch):
+        """在职成员的 id 路径仍要正常（证明上面那条不是「id 路径一律拒绝」）。"""
+        self._runtime_stub(monkeypatch)
+        result = await console(f"agent get {self.on_id}", _context=self._ctx())
+        assert result["success"] is True, result
+        assert result["agent"]["id"] == self.on_id
+
+    async def test_agent_get_by_duplicate_name_is_ambiguous(self, monkeypatch):
+        """同名多行时按名字取必须报 `ambiguous_target`，并列出候选 id。"""
+        self._runtime_stub(monkeypatch)
+        result = await console("agent get dup", _context=self._ctx())
+        assert result["success"] is False
+        assert result["error_code"] == "ambiguous_target"
+        assert sorted(c["id"] for c in result["candidates"]) == sorted([self.off_id, self.on_id])
+
+    async def test_agent_update_by_duplicate_name_is_ambiguous_and_does_not_write(self):
+        """同名多行时 `agent update` 必须拒绝，且**库里一行都不能被改**。"""
+        before = {r.id: r.model for r in await gtAgentManager.get_team_all_agents(self.team_id) if r.name == "dup"}
+        result = await console("agent update dup '{\"model\":\"should-not-be-written\"}'", _context=self._ctx())
+        assert result["success"] is False
+        assert result["error_code"] == "ambiguous_target"
+        after = {r.id: r.model for r in await gtAgentManager.get_team_all_agents(self.team_id) if r.name == "dup"}
+        assert after == before, f"被拒的更新不得改库：{before} -> {after}"
+
+    async def test_agent_update_by_id_targets_exactly_that_row(self):
+        """按 id 更新必须只改那一行，同名兄弟行保持原值。"""
+        result = await console(f"agent update {self.on_id} '{{\"model\":\"only-this-one\"}}'", _context=self._ctx())
+        assert result["success"] is True, result
+        rows = {r.id: r.model for r in await gtAgentManager.get_team_all_agents(self.team_id) if r.name == "dup"}
+        assert rows[self.on_id] == "only-this-one"
+        assert rows[self.off_id] != "only-this-one"
+
+    async def test_agent_get_by_id_rejects_when_runtime_resolves_to_other_id(self, monkeypatch):
+        """**纵深防御**：运行时把该名字解析成另一个 id 时必须拒绝。
+
+        这条为什么要用桩：真实数据模型下「同名」只可能一行在职，`member_not_on_board`
+        会先短路，一致性校验根本轮不到执行 —— 于是删掉它也没人知道。这里直接构造
+        「请求 id=A、运行时同名解析出 id=B」，单独钉住那一层。
+        """
+        real_on = next(r for r in self.rows if r.id == self.on_id)
+        ghost = GtAgent(
+            team_id=self.team_id,
+            name=real_on.name,
+            role_template_id=self.role_template_id,
+            employ_status=EmployStatus.ON_BOARD,
+        )
+        ghost.id = self.on_id + 1000
+        monkeypatch.setattr(
+            agentService, "get_team_agents", lambda team_id: [_FakeRuntimeAgent(ghost, AgentStatus.IDLE)]
+        )
+        result = await console(f"agent get {self.on_id}", _context=self._ctx())
+        assert result["success"] is False
+        assert result["error_code"] == "ambiguous_target"
+        assert str(self.on_id) in result["message"]

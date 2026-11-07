@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
+from constants import EmployStatus
 from service.roomService import ToolCallContext
 
 from . import consoleCommands as cc
@@ -356,13 +357,33 @@ async def _route(
         return await legacy.get_agent_info(_context=context)
     if key == "agent get":
         # 原工具只认 name；`agent get <id>` 要先按 id 解析出 name（draft §4.2
-        # 「target 优先按 id，否则按名称」）。按 id 命中不了就原样透传，让底层
-        # 报它自己的「未找到成员」——不在这里另造一套错误文案。
+        # 「target 优先按 id，否则按名称；同名冲突时提示改用 id」）。
+        #
+        # 这里必须多做两件事，否则会**静默返回别的成员**：
+        # ① 已离职（OFF_BOARD）的成员不在运行时列表里（`agentService` 只加载
+        #    ON_BOARD），原工具会按名字找不到 → 直译成「未找到成员」是误导，
+        #    因为库里明明有这个人，只是配置还没 reload 生效；
+        # ② 名字不唯一时（离职成员名字可被复用）原工具取运行时列表里第一个，
+        #    按 id 查 A 却可能拿到同名的 B —— 这正是本用例集要防的「看起来成功」。
         agent_row = await cp._resolve_agent_by_target(context.team_id, target or "")
-        return await legacy.get_agent_info(
-            agent_name=agent_row.name if agent_row is not None else target,
-            _context=context,
-        )
+        agent_name = agent_row.name if agent_row is not None else target
+        result = await legacy.get_agent_info(agent_name=agent_name, _context=context)
+        if agent_row is not None:
+            if agent_row.employ_status != EmployStatus.ON_BOARD:
+                raise ConsoleError(
+                    "member_not_on_board",
+                    f"成员 {agent_row.name}（id={agent_row.id}）当前不在职"
+                    f"（{agent_row.employ_status.name}），未加载到运行时，"
+                    "无法返回房间与状态详情。若刚刚创建/修改，需要 reload 后才生效。",
+                )
+            returned_id = (result.get("agent") or {}).get("id")
+            if result.get("success") and returned_id is not None and returned_id != agent_row.id:
+                raise ConsoleError(
+                    "ambiguous_target",
+                    f"成员名 {agent_row.name} 在运行时对应 id={returned_id}，"
+                    f"与请求的 id={agent_row.id} 不一致；请改用 id 定位。",
+                )
+        return result
     if key == "agent create":
         data = cp._input_payload_for(parsed, payload)
         return await legacy.save_agent(

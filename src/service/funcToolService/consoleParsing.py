@@ -473,6 +473,18 @@ async def _resolve_room_by_target(team_id: int, target: str):
 
 
 async def _resolve_agent_by_target(team_id: int, target: str):
+    """按 id 或名称定位成员；**同名多行时必须报错要求改用 id**（draft §4.2）。
+
+    只有成员表允许同名：`GtAgent` 的 `(team_id, name)` 是**非唯一**索引（离职成员的
+    名字可以被新成员复用，见 `gtAgent.model` 注释）。部门/房间是唯一索引，角色模板
+    `name` 本身 unique，所以「同名」这件事只发生在成员上。
+
+    为什么不能像原工具那样「取第一条」：`gtAgentManager.get_agent()` 用
+    `aio_get_or_none` → `peewee_async` 的 `aio_get` 是 `paginate(1, 1)`，**不校验唯一性**，
+    两行同名时它返回行序靠前的那一行（通常是先建的、已离职的那一个）。`update` 走这条
+    路会**静默改到离职成员**，`get` 会静默给出别人的详情 —— 都不报错，模型会当成成功。
+    draft §4.2 因此要求「同名冲突时提示改用 id」，这里按设计稿执行。
+    """
     from dal.db import gtAgentManager
 
     stripped = target.strip()
@@ -481,11 +493,23 @@ async def _resolve_agent_by_target(team_id: int, target: str):
         if agent is not None and agent.team_id == team_id:
             return agent
         return None
-    # **必须传 status=None**：`get_agent` 默认只查 ON_BOARD，而新建成员在
-    # `reload_team` 之前是 OFF_BOARD（`save_agent` 建人时就是 OFF_BOARD）。
+    # **非 id 路径必须用 status=None 取全量再自己筛**：`get_agent` 默认只查 ON_BOARD，
+    # 而新建成员在 `reload_team` 之前是 OFF_BOARD（`save_agent` 建人时就是 OFF_BOARD），
     # 用默认值会导致「刚 create 出来的成员，同一次 turn 里 update 立刻 not_found」。
-    # 这与 `save_agent` 自己定位已有成员的口径一致（它也是 `status=None`）。
-    return await gtAgentManager.get_agent(team_id, stripped, status=None)
+    all_agents = await gtAgentManager.get_team_all_agents(team_id)
+    matched = [a for a in all_agents if a.name == stripped]
+    if not matched:
+        return None
+    if len(matched) > 1:
+        raise ConsoleError(
+            "ambiguous_target",
+            f"团队内有 {len(matched)} 个同名成员 {stripped}（含离职成员）；请改用 id 定位。",
+            candidates=[
+                {"id": a.id, "name": a.name, "employ_status": a.employ_status.name}
+                for a in matched
+            ],
+        )
+    return matched[0]
 
 
 async def _resolve_role_by_target(target: str):
