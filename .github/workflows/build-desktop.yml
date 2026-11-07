@@ -208,6 +208,10 @@ jobs:
     #   2) assets/execute/gtsp/ 下按设计同时带 darwin-amd64 与 darwin-arm64 两份，
     #      两份 DMG 里逐字节相同 —— 这是既存现状，不算架构违例，但缺了说明打包漏资产。
     - name: Verify DMG architecture
+      # always()：DMG 若已生成，即使后续公证/校验步骤失败也要把架构判定跑出来。
+      # 否则一次网络抖动就会让「产物到底是什么架构」无从证明——而 job 该红还是红，
+      # 本步骤只是让证据可见，不掩盖失败。
+      if: always()
       run: |
         set -euo pipefail
         EXPECT="${TARGET_ARCH}"
