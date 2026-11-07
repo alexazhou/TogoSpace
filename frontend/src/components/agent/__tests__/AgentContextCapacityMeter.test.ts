@@ -27,9 +27,13 @@ const { compactMock, toastMock } = vi.hoisted(() => ({
   toastMock: vi.fn(),
 }));
 
-vi.mock('../../../api', () => ({
-  compactAgentContext: (...args: unknown[]) => compactMock(...args),
-}));
+vi.mock('../../../api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api')>();
+  return {
+    ...actual,
+    compactAgentContext: (...args: unknown[]) => compactMock(...args),
+  };
+});
 
 vi.mock('../../../appUiState', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../appUiState')>();

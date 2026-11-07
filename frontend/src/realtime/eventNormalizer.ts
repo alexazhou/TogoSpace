@@ -10,7 +10,7 @@ import type {
   MessageInfo,
   RoomState,
 } from '../types';
-import { normalizeAgentTaskEvent } from '../api';
+import { normalizeAgentTaskEvent, normalizeContextUsage } from '../api';
 import type { RawAgentTaskEvent } from '../api';
 
 /**
@@ -249,44 +249,6 @@ function normalizeAgentTask(value: unknown): AgentTask | null {
     room_id: typeof raw.room_id === 'number' ? raw.room_id : null,
     created_at: typeof raw.created_at === 'string' ? raw.created_at : null,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : null,
-  };
-}
-
-/**
- * 上下文用量取值收敛：任一必需字段不是有限数就整体判脏返回 null。
- *
- * 为什么「一个字段脏就整体丢」而不是逐字段补默认值：这条链路的数值全部参与
- * 「距压缩线还有多远」的判断，补 0 会让面板显示一个看起来正常、实际错误的
- * 百分比。丢整帧的后果只是「这一帧没更新」，下一帧会补上。
- *
- * `ratio` 允许任意有限数（含 >1，见 `AgentContextUsage` 注释），
- * 负数则视为脏——占比不可能是负的。
- */
-function normalizeContextUsage(raw: unknown): AgentContextUsage | null {
-  if (!raw || typeof raw !== 'object') {
-    return null;
-  }
-  const data = raw as RawRecord;
-  const used = Number(data.used_tokens);
-  const limit = Number(data.limit_tokens);
-  const trigger = Number(data.compact_trigger_tokens);
-  const windowTokens = Number(data.context_window_tokens);
-  const ratio = Number(data.ratio);
-  if (
-    !Number.isFinite(used) || used < 0
-    || !Number.isFinite(limit) || limit <= 0
-    || !Number.isFinite(trigger) || trigger < 0
-    || !Number.isFinite(windowTokens) || windowTokens <= 0
-    || !Number.isFinite(ratio) || ratio < 0
-  ) {
-    return null;
-  }
-  return {
-    used_tokens: used,
-    limit_tokens: limit,
-    compact_trigger_tokens: trigger,
-    context_window_tokens: windowTokens,
-    ratio,
   };
 }
 

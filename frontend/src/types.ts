@@ -123,9 +123,6 @@ export interface AgentInfo {
 }
 
 export interface AgentDetail extends AgentInfo {
-  agent_name: string;
-  driver_type: string;
-  prompt: string;
   error_message?: string | null;
   /** Agent 详情额外携带的实时容器列表；预记录 `container_id` 为 null。 */
   containers?: ContainerRuntimeInfo[] | null;

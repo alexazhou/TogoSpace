@@ -22,12 +22,9 @@ function createAgent(overrides: Partial<AgentDetail> = {}): AgentDetail {
   return {
     id: 5,
     name: 'Alice',
-    agent_name: 'Alice',
     i18n: {},
     model: '',
     status: 'idle',
-    driver_type: 'native',
-    prompt: '',
     exec_env: 'container',
     current_container_id: 'abc123def456',
     container_count: 1,

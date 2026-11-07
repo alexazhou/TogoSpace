@@ -63,12 +63,9 @@ function baseDetail(overrides: Record<string, unknown> = {}) {
   return {
     id: 7,
     name: '阿张',
-    agent_name: '阿张',
     i18n: {},
     model: '',
     status: 'idle',
-    driver_type: 'native',
-    prompt: '',
     exec_env: 'host',
     current_container_id: null,
     role_template_id: 3,

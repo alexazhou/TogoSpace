@@ -2,6 +2,7 @@ import type {
   AgentActivity,
   AgentActivityStatus,
   AgentActivityType,
+  AgentContextUsage,
   AgentTask,
   AgentTaskDependencySummary,
   AgentTaskEvent,
@@ -74,14 +75,6 @@ type RawAgentInfo = Partial<AgentInfo> & {
   allow_skills?: string[] | null;
 };
 
-type RawAgentDetail = Partial<AgentDetail> & {
-  employee_number?: number;
-  status?: string;
-  role_template_id?: number;
-  employ_status?: string;
-  driver?: string;
-};
-
 /** 后端 Agent 列表 / 详情的运行时外壳：DB 字段在 `agent`，运行时字段在外层。 */
 type RawAgentRuntimeInfo = {
   agent?: RawAgentInfo;
@@ -92,6 +85,7 @@ type RawAgentRuntimeInfo = {
     container_name?: string | null;
   };
   container_count?: number | null;
+  context_usage?: unknown;
 };
 
 type RawAgentEntry = RawAgentInfo | RawAgentRuntimeInfo;
@@ -545,14 +539,6 @@ function normalizeAgent(entry: RawAgentEntry): AgentInfo {
   };
 }
 
-function parseDriverType(detail: RawAgentDetail): string {
-  if (detail.driver_type) {
-    return normalizeDriverTypeValue(String(detail.driver_type));
-  }
-
-  return normalizeDriverTypeValue(typeof detail.driver === 'string' ? detail.driver : '');
-}
-
 function normalizeContainerRuntimeInfo(raw: unknown): ContainerRuntimeInfo | null {
   if (!raw || typeof raw !== 'object') {
     return null;
@@ -582,18 +568,52 @@ function normalizeContainerRuntimeInfo(raw: unknown): ContainerRuntimeInfo | nul
 }
 
 function normalizeAgentDetail(entry: RawAgentEntry): AgentDetail {
-  const { agent } = unwrapAgentEntry(entry);
-  const detail = agent as RawAgentDetail;
-  const rawContainers = (detail as Record<string, unknown>).containers;
+  const { runtime } = unwrapAgentEntry(entry);
   return {
     ...normalizeAgent(entry),
-    agent_name: String(detail.agent_name ?? detail.name ?? ''),
-    driver_type: parseDriverType(detail),
-    prompt: String(detail.prompt ?? ''),
-    error_message: typeof detail.error_message === 'string' ? detail.error_message : null,
-    containers: Array.isArray(rawContainers)
-      ? rawContainers.map(normalizeContainerRuntimeInfo).filter((item): item is ContainerRuntimeInfo => item !== null)
-      : null,
+    // 顶层 `context_usage`（与 `agent` / `status` 平级）是首屏快照；缺省 / 判脏为 null。
+    context_usage: normalizeContextUsage(runtime?.context_usage),
+  };
+}
+
+/**
+ * 上下文用量取值收敛：任一必需字段不是有限数就整体判脏返回 null。
+ *
+ * 为什么「一个字段脏就整体丢」而不是逐字段补默认值：这条链路的数值全部参与
+ * 「距压缩线还有多远」的判断，补 0 会让面板显示一个看起来正常、实际错误的
+ * 百分比。丢整帧的后果只是「这一帧没更新」，下一帧会补上。
+ *
+ * `ratio` 允许任意有限数（含 >1，见 `AgentContextUsage` 注释），
+ * 负数则视为脏——占比不可能是负的。
+ *
+ * 注意：REST（详情接口）与 WS（`agent_context_usage` 广播）共用这一份口径，
+ * 所以放在 `api.ts` 供 `eventNormalizer` 复用，避免两处各写一遍后分叉。
+ */
+export function normalizeContextUsage(raw: unknown): AgentContextUsage | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const data = raw as Record<string, unknown>;
+  const used = Number(data.used_tokens);
+  const limit = Number(data.limit_tokens);
+  const trigger = Number(data.compact_trigger_tokens);
+  const windowTokens = Number(data.context_window_tokens);
+  const ratio = Number(data.ratio);
+  if (
+    !Number.isFinite(used) || used < 0
+    || !Number.isFinite(limit) || limit <= 0
+    || !Number.isFinite(trigger) || trigger < 0
+    || !Number.isFinite(windowTokens) || windowTokens <= 0
+    || !Number.isFinite(ratio) || ratio < 0
+  ) {
+    return null;
+  }
+  return {
+    used_tokens: used,
+    limit_tokens: limit,
+    compact_trigger_tokens: trigger,
+    context_window_tokens: windowTokens,
+    ratio,
   };
 }
 
