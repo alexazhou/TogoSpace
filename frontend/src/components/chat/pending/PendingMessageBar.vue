@@ -245,7 +245,8 @@ watch(
 watch(
   () => props.expanded,
   (expanded) => {
-    // 展开后预览行仍在（作为标题行），收起回来时需要重新判断它是否还被截断。
+    // 展开期间预览行被 v-show 隐藏（display:none 量出来是 0/0），收起回来
+    // 需要等 DOM 恢复可见后再重新判断它是否还被截断。
     if (!expanded) {
       nextTick(measureTruncation);
     }
@@ -282,7 +283,12 @@ onBeforeUnmount(() => {
       @click="handleSenderClick"
     />
     <div class="pending-message-body">
-      <div ref="previewRef" class="pending-message-content">{{ previewText }}</div>
+      <!--
+        展开后隐藏预览行：全文本身已包含首行，再留一行摘要就是重复展示。
+        用 `v-show` 而不是 `v-if`：元素保留在 DOM 里，截断测量用的 ref /
+        ResizeObserver 不用跟着卸载重建（收起时 nextTick 直接量即可）。
+      -->
+      <div v-show="!expanded" ref="previewRef" class="pending-message-content">{{ previewText }}</div>
       <!-- 全文区自己拦点击：里面选字 / 点链接 / 拖滚动条都不该收起卡片。 -->
       <div v-if="expanded" class="pending-message-full" @click="handleFullClick">
         <MarkdownContent :content="item.message.content" />
@@ -374,12 +380,14 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
 }
 
-/* 展开后的全文：限高在卡片内部滚动，避免单条把整屏撑爆。 */
+/* 展开后的全文：限高在卡片内部滚动，避免单条把整屏撑爆。
+   字号必须显式给：MarkdownContent 用 `1em`，不写就会继承面板/根字号（明显大于
+   收起态的 0.84rem 预览行）。展开后预览行已隐藏，也不再需要上边框做分隔。 */
 .pending-message-full {
   max-height: 40vh;
   overflow: auto;
-  padding-top: 4px;
-  border-top: 1px dashed color-mix(in srgb, var(--border-default) 70%, transparent);
+  font-size: 0.84rem;
+  line-height: 1.5;
 }
 
 .pending-message-chevron {
@@ -478,6 +486,10 @@ onBeforeUnmount(() => {
 }
 
 :global(html.bp-compact) .pending-message-content {
+  font-size: 0.8rem;
+}
+
+:global(html.bp-compact) .pending-message-full {
   font-size: 0.8rem;
 }
 

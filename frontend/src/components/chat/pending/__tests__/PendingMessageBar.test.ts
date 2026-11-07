@@ -128,7 +128,7 @@ describe('PendingMessageBar 单行截断与展开', () => {
     expect(text).not.toContain('\n');
   });
 
-  it('展开态渲染 Markdown 全文，预览行仍保留作为标题', async () => {
+  it('展开态渲染 Markdown 全文，预览行隐藏（避免首行重复）', async () => {
     const item = createItem({
       message: createMessage({ content: '**bold** body' }),
     });
@@ -137,8 +137,11 @@ describe('PendingMessageBar 单行截断与展开', () => {
 
     expect(wrapper.find('.pending-message-full').exists()).toBe(true);
     expect(wrapper.find('.pending-message-full strong').text()).toBe('bold');
-    // 预览行不消失：头像、徽标、按钮的位置不该因为展开而跳动
-    expect(wrapper.find('.pending-message-content').exists()).toBe(true);
+    // 预览行用 v-show 隐藏而非卸载：DOM 保留给截断测量复用。
+    // 断言内联样式而非 isVisible()：happy-dom 的 getComputedStyle 不反映内联 display。
+    const preview = wrapper.find('.pending-message-content');
+    expect(preview.exists()).toBe(true);
+    expect(preview.attributes('style')).toContain('display: none');
   });
 
   it('Esc 收起（仅在展开态）', async () => {
