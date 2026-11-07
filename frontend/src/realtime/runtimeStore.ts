@@ -782,6 +782,7 @@ export function applyRealtimeEvent(event: FrontendRealtimeEvent): void {
             ...agent,
             exec_env: event.execEnv,
             current_container_id: event.currentContainerId,
+            current_container_name: event.containerName,
           }
           : agent,
       ),

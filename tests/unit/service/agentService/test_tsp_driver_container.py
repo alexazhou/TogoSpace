@@ -505,6 +505,7 @@ async def test_publishes_container_state_on_enter(monkeypatch):
     assert event["topic"] == tspDriver.MessageBusTopic.AGENT_CONTAINER_STATE_CHANGED
     assert event["exec_env"] == "container"
     assert event["current_container_id"] == "c0ffee123456"
+    assert event["container_name"] == "agent-1-1"
     assert event["gt_agent"] is driver.host.gt_agent
 
 
@@ -524,6 +525,7 @@ async def test_publishes_host_state_on_exit(monkeypatch):
     assert len(published) == 1
     assert published[0]["exec_env"] == "host"
     assert published[0]["current_container_id"] is None
+    assert published[0]["container_name"] is None
 
 
 async def test_does_not_publish_when_env_unchanged(monkeypatch):

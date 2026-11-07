@@ -515,6 +515,7 @@ function normalizeAgent(entry: RawAgentEntry): AgentInfo {
   // 运行时字段优先取外壳，兼容仍返回扁平结构的老接口（如 agents/save.json）
   const execEnv = runtime?.exec_env_state?.exec_env ?? agent.exec_env;
   const currentContainerId = runtime?.exec_env_state?.current_container_id ?? agent.current_container_id;
+  const currentContainerName = runtime?.exec_env_state?.container_name ?? agent.current_container_name;
   const containerCount = runtime?.container_count ?? agent.container_count;
 
   return {
@@ -534,6 +535,9 @@ function normalizeAgent(entry: RawAgentEntry): AgentInfo {
     exec_env: execEnv === 'container' ? 'container' : 'host',
     current_container_id: typeof currentContainerId === 'string' && currentContainerId
       ? currentContainerId
+      : null,
+    current_container_name: typeof currentContainerName === 'string' && currentContainerName.trim()
+      ? currentContainerName
       : null,
     container_count: typeof containerCount === 'number' ? containerCount : null,
   };

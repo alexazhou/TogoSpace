@@ -68,6 +68,8 @@ export type FrontendRealtimeEvent =
     agentName: string;
     execEnv: AgentExecEnv;
     currentContainerId: string | null;
+    /** 当前容器名；宿主环境恒为 null（容器徽标 hover 展示）。 */
+    containerName: string | null;
   }
   | {
     /**
@@ -318,12 +320,15 @@ export function normalizeWsEventPayload(payload: unknown): FrontendRealtimeEvent
     const currentContainerId = execEnv === 'container' && rawContainerId != null
       ? String(rawContainerId)
       : null;
+    const rawContainerName = typeof raw.container_name === 'string' ? raw.container_name.trim() : '';
+    const containerName = execEnv === 'container' && rawContainerName ? rawContainerName : null;
 
     return {
       type: 'agent_container',
       ...identity,
       execEnv,
       currentContainerId,
+      containerName,
     };
   }
 

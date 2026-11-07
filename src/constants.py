@@ -114,7 +114,7 @@ class MessageBusTopic(EnhanceEnum):
     ROOM_STATUS_CHANGED = auto()       # 房间状态/发言人变更；payload: gt_room(GtRoom), state(RoomState), current_turn_agent_id(int|None), need_scheduling(bool)
     ROOM_ADDED = auto()                # 新房间创建（按需建控制房间）；payload: gt_room(GtRoom), team_id(int)
     AGENT_STATUS_CHANGED = auto()      # Agent 忙闲状态变更；payload: gt_agent(GtAgent), status(AgentStatus)
-    AGENT_CONTAINER_STATE_CHANGED = auto()  # Agent 执行环境变更；payload: gt_agent(GtAgent), exec_env(str), current_container_id(str|None)
+    AGENT_CONTAINER_STATE_CHANGED = auto()  # Agent 执行环境变更；payload: gt_agent(GtAgent), exec_env(str), current_container_id(str|None), container_name(str|None)
     AGENT_ACTIVITY_CHANGED = auto()    # Agent 活动记录变更；payload: event, data
     AGENT_MEMORY_CHANGED = auto()      # Agent 长期记忆变更（新建/更新/归档）；payload: team_id(int), agent_id(int), action(str: created|updated), memory_id(int)
     AGENT_CONTEXT_USAGE_CHANGED = auto()  # Agent 上下文用量变化；payload: team_id(int), agent_id(int), context_usage(dict)

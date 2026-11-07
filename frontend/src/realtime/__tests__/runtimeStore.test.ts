@@ -226,6 +226,7 @@ describe('runtimeStore realtime events', () => {
         agentName: 'Alpha',
         execEnv: 'container',
         currentContainerId: 'abc123def456',
+        containerName: 'agent-t2-alpha-7',
       });
 
       expect(getAgentExecEnv(8)).toEqual({ execEnv: 'container', currentContainerId: 'abc123def456' });
@@ -241,12 +242,14 @@ describe('runtimeStore realtime events', () => {
         agentName: 'Alpha',
         execEnv: 'container',
         currentContainerId: 'abc123def456',
+        containerName: 'agent-t2-alpha-7',
       });
 
       expect(getAgentExecEnv(8)).toEqual({ execEnv: 'container', currentContainerId: 'abc123def456' });
       const agent = getTeamAgents(2).find((item) => item.id === 8);
       expect(agent?.exec_env).toBe('container');
       expect(agent?.current_container_id).toBe('abc123def456');
+      expect(agent?.current_container_name).toBe('agent-t2-alpha-7');
     });
 
     it('clears the container id when the agent exits back to host', () => {
@@ -259,11 +262,13 @@ describe('runtimeStore realtime events', () => {
         agentName: 'Alpha',
         execEnv: 'host',
         currentContainerId: null,
+        containerName: null,
       });
 
       expect(getAgentExecEnv(8)).toEqual({ execEnv: 'host', currentContainerId: null });
       const agent = getTeamAgents(2).find((item) => item.id === 8);
       expect(agent?.current_container_id).toBeNull();
+      expect(agent?.current_container_name).toBeNull();
     });
 
     it('defaults to host for unknown agent ids', () => {

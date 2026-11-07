@@ -28,17 +28,20 @@ function selectAgent(agent: AgentInfo): void {
   emit('selectAgent', agent.id as number);
 }
 
-/** 容器徽标文案：容器态显示 短ID/容器数，宿主态不显示徽标。 */
+/** 容器徽标文案：只显示环境名，具体的容器信息放到 hover title。 */
 function containerBadge(agent: AgentInfo): string | null {
-  if (agent.exec_env !== 'container') {
-    return null;
-  }
-  const shortId = agent.current_container_id;
-  const count = agent.container_count;
-  if (shortId && typeof count === 'number') {
-    return `${shortId} · ${count}`;
-  }
-  return shortId ?? null;
+  return agent.exec_env === 'container' ? t('agent.execEnv.container') : null;
+}
+
+/** 徽标 hover：容器名优先，缺名回退短 ID；有自建容器时补上总数。 */
+function containerBadgeTitle(agent: AgentInfo): string {
+  const name = typeof agent.current_container_name === 'string' ? agent.current_container_name.trim() : '';
+  const shortId = typeof agent.current_container_id === 'string' ? agent.current_container_id.trim() : '';
+  const identity = name || shortId;
+  const base = identity ? `${t('agent.execEnv.container')} · ${identity}` : t('agent.execEnv.container');
+  return typeof agent.container_count === 'number' && agent.container_count > 0
+    ? `${base}\n${t('agent.containers.count')}: ${agent.container_count}`
+    : base;
 }
 </script>
 
@@ -66,7 +69,7 @@ function containerBadge(agent: AgentInfo): string | null {
               <span
                 v-if="containerBadge(agent)"
                 class="agent-env-badge"
-                :title="t('agent.execEnv.label')"
+                :title="containerBadgeTitle(agent)"
               >{{ containerBadge(agent) }}</span>
             </strong>
             <p>{{ agent.departmentPath || agent.model }}</p>
@@ -204,7 +207,6 @@ function containerBadge(agent: AgentInfo): string | null {
   color: color-mix(in srgb, var(--state-info) 84%, var(--text-primary) 16%);
   font-size: 0.66rem;
   font-weight: 400;
-  font-variant-numeric: tabular-nums;
   line-height: 1.1;
   white-space: nowrap;
 }

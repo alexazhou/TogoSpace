@@ -350,11 +350,14 @@ class TspAgentDriver(AgentDriver):
         成功与否取决于订阅者；messageBus 自身也是同步投递。
         """
         try:
+            container = self._current_container
             messageBus.publish(
                 MessageBusTopic.AGENT_CONTAINER_STATE_CHANGED,
                 gt_agent=self.host.gt_agent,
                 exec_env=self.exec_env.value,
                 current_container_id=self.current_container_id,
+                # 容器名供前端徽标 hover 展示；退出到宿主时为 None
+                container_name=container.container_name if container else None,
             )
         except Exception:
             logger.warning(

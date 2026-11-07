@@ -161,6 +161,7 @@ describe('normalizeWsEventPayload', () => {
         gt_agent: { id: 8, team_id: 2, name: '李哥' },
         exec_env: 'container',
         current_container_id: 'a1b2c3d4e5f6',
+        container_name: 'agent-t2-li-ge-42',
       });
 
       expect(event).toEqual({
@@ -170,7 +171,28 @@ describe('normalizeWsEventPayload', () => {
         agentName: '李哥',
         execEnv: 'container',
         currentContainerId: 'a1b2c3d4e5f6',
+        containerName: 'agent-t2-li-ge-42',
       });
+    });
+
+    it('drops a blank container name and does not leak it in host env', () => {
+      const blankName = normalizeWsEventPayload({
+        event: 'agent_container',
+        gt_agent: { id: 8, team_id: 2, name: '李哥' },
+        exec_env: 'container',
+        current_container_id: 'a1b2c3d4e5f6',
+        container_name: '   ',
+      });
+      expect(blankName).toMatchObject({ containerName: null });
+
+      const hostWithDirtyName = normalizeWsEventPayload({
+        event: 'agent_container',
+        gt_agent: { id: 8, team_id: 2, name: '李哥' },
+        exec_env: 'host',
+        current_container_id: null,
+        container_name: 'agent-t2-li-ge-42',
+      });
+      expect(hostWithDirtyName).toMatchObject({ execEnv: 'host', containerName: null });
     });
 
     it('keeps host env with null container id after exiting a container', () => {

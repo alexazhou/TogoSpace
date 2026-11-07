@@ -628,7 +628,11 @@ describe('getAgentDetail: list_agent_containers 真实基线', () => {
     stubAgentDetail({
       agent: { id: 3, name: '小美', team_id: 2 },
       status: 'IDLE',
-      exec_env_state: { exec_env: 'container', current_container_id: 'deadbeef1234' },
+      exec_env_state: {
+        exec_env: 'container',
+        current_container_id: 'deadbeef1234',
+        container_name: 'agent-t2-xiao-mei-7',
+      },
       container_count: baseline.length,
     }, baseline);
 
@@ -645,9 +649,10 @@ describe('getAgentDetail: list_agent_containers 真实基线', () => {
     // 已回填的 container_id 必须原样读出来 —— 没有这条，把 `item.container_id`
     // 写错成别的字段名也能全绿（undefined → null），容器表所有 ID 会显示为空。
     expect(containers[1].container_id).toBe('deadbeef1234');
-    // exec_env / current_container_id 从外壳的 exec_env_state 读
+    // exec_env / current_container_id / container_name 从外壳的 exec_env_state 读
     expect(detail.exec_env).toBe('container');
     expect(detail.current_container_id).toBe('deadbeef1234');
+    expect(detail.current_container_name).toBe('agent-t2-xiao-mei-7');
   });
 
   it('软删记录不出现在两份基线里（list_active_by_agent 的过滤生效）', () => {

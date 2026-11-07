@@ -118,6 +118,8 @@ export interface AgentInfo {
   exec_env?: AgentExecEnv | null;
   /** 当前所在容器的 12 位短 ID；宿主环境为 null。 */
   current_container_id?: string | null;
+  /** 当前所在容器名；宿主环境或未知时为 null。列表徽标 hover 展示用。 */
+  current_container_name?: string | null;
   /** `deleted=0` 的活跃自建容器数（含创建中的预记录），用于「n/3」徽标。 */
   container_count?: number | null;
 }
