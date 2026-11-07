@@ -324,7 +324,16 @@ jobs:
     # 不要用 archive: false（Direct Uploads）：该模式下 artifact 不是 zip，
     # actions/download-artifact 取回时会报 "Not a valid zip file" 而失败，
     # 且 name 参数被忽略导致 artifact 退化成裸文件名。保持默认打 zip。
+    #
+    # always()：DMG 做好之后才发生的失败（公证保外网校验、stapler validate 撞
+    # CloudKit -1005 等）不该让整个产物人间蒸发——runner 已跑满十几分钟，重来
+    # 一次代价很高。加 always() 后只要 DMG 落盘就上传，由人判断能否用。
+    # 不会因此放出半成品：本 job 结论仍是 failure，release.yml 的 release job
+    # 以 build-mac 成功为前置，失败 job 的 artifact 不会进 Release。
+    # DMG 不存在时 if-no-files-found: error 会让本步骤红，这是期望行为，
+    # 不许为了"绿"改成 warn。
     - name: Upload DMG artifact
+      if: always()
       uses: actions/upload-artifact@v7
       with:
         name: macOS-dmg-${{ inputs.arch }}
