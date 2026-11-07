@@ -256,19 +256,19 @@ function setFilter(next: MemoryFilter): void {
 
         <p class="agent-memory-card__summary">{{ memory.summary }}</p>
 
-        <div v-if="memory.tags.length" class="agent-memory-card__tags">
-          <span class="agent-memory-card__tags-label">{{ t('agent.memoryTagsLabel') }}</span>
-          <span v-for="tag in memory.tags" :key="tag" class="agent-memory-card__tag">{{ tag }}</span>
+        <div class="agent-memory-card__tags">
+          <template v-if="memory.tags.length">
+            <span v-for="tag in memory.tags" :key="tag" class="agent-memory-card__tag">{{ tag }}</span>
+          </template>
+          <button
+            type="button"
+            class="agent-memory-card__toggle"
+            :aria-expanded="isExpanded(memory.id)"
+            @click="toggleExpanded(memory.id)"
+          >
+            {{ isExpanded(memory.id) ? t('agent.memoryCollapse') : t('agent.memoryExpand') }}
+          </button>
         </div>
-
-        <button
-          type="button"
-          class="agent-memory-card__toggle"
-          :aria-expanded="isExpanded(memory.id)"
-          @click="toggleExpanded(memory.id)"
-        >
-          {{ isExpanded(memory.id) ? t('agent.memoryCollapse') : t('agent.memoryExpand') }}
-        </button>
 
         <pre v-if="isExpanded(memory.id)" class="agent-memory-card__content">{{ memory.content }}</pre>
       </article>
@@ -423,8 +423,11 @@ function setFilter(next: MemoryFilter): void {
   border: 1px solid var(--panel-border);
 }
 
+/* 与标签同一行、贴右：`margin-left: auto` 吃掉标签行剩余空间；
+   无标签时这一行只剩按钮，仍然靠右（模板里该行常驻渲染）。 */
 .agent-memory-card__toggle {
-  align-self: flex-start;
+  margin-left: auto;
+  flex-shrink: 0;
   padding: 2px 8px;
   border: none;
   border-radius: 8px;

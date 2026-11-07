@@ -142,7 +142,6 @@
     "memoryExpand": "Show content",
     "memoryCollapse": "Hide content",
     "memoryCount": "{count} memories",
-    "memoryTagsLabel": "Tags",
     "memoryUpdatedAt": "Updated {time}",
     "taskFilterAll": "All",
     "taskFilterDone": "Done",

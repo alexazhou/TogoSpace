@@ -142,7 +142,6 @@
     "memoryExpand": "展开正文",
     "memoryCollapse": "收起正文",
     "memoryCount": "{count} 条记忆",
-    "memoryTagsLabel": "标签",
     "memoryUpdatedAt": "更新于 {time}",
     "taskFilterAll": "全部任务",
     "taskFilterDone": "已完成",
