@@ -155,7 +155,7 @@ def test_v1_migration_context_config_defaults():
     cc = m["context_config"]
     assert cc["compact_trigger_ratio"] == 0.9
     assert cc["compact_summary_max_tokens"] == 8192
-    assert cc["context_window_tokens"] == 131072
+    assert cc["context_window_tokens"] == 262144
     assert cc["reserve_output_tokens"] == 16384
 
 

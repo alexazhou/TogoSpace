@@ -42,7 +42,7 @@
 ```
 
 - 用户调整过 `context_window_tokens` 时，以用户配置为准（即使模型名命中内置表）。
-- 未调整（字段仍等于代码默认值 `131072`）时，查询 `compact.DEFAULT_MODEL_CONTEXT_WINDOWS` 兜底；表中无该模型则保持默认值。
+- 未调整（字段仍等于代码默认值 `262144`）时，查询 `compact.DEFAULT_MODEL_CONTEXT_WINDOWS` 兜底；表中无该模型则保持默认值。
 - 内置表按模型名精确匹配，同名模型的版本号变体（如 `gpt-4o-2024-11-20`）不会命中。
 - 「仍等于默认值即视为未配置」与 `setting.json` 的 `exclude_defaults=True` 持久化行为一致。
 

@@ -122,7 +122,7 @@ class RoleTemplatePreset(BaseModel):
 
 class LlmContextConfig(BaseModel):
     """上下文与压缩策略配置"""
-    context_window_tokens: int = 131072
+    context_window_tokens: int = 262144
     reserve_output_tokens: int = 16384
     compact_trigger_ratio: float = Field(default=0.85, ge=0.0, le=1.0)
     compact_summary_max_tokens: int = 6144

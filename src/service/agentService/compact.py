@@ -167,7 +167,7 @@ async def compact_messages(
     *,
     session_id: str,
     tools: list[llmApiUtil.OpenAITool] | None = None,
-    max_tokens: int = 13107,  # 默认约为 131072 上下文长度的 10%，建议由调用方按实际 context_window_tokens 动态计算
+    max_tokens: int = 26214,  # 默认约为 262144 上下文长度的 10%，建议由调用方按实际 context_window_tokens 动态计算
 ) -> str:
     """压缩消息列表，返回已包含引导语的摘要文本，失败时抛出异常。
 

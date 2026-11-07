@@ -35,7 +35,7 @@
 | `temperature` | 否 | 模型的输出温度（0.0 ~ 2.0），控制随机性。 |
 | `extra_params` | 否 | 字典类型，透传给底层提供商的其他参数。注意：不能覆盖系统级保留字段（如 `messages`, `tools`, `stream` 等）。 |
 | `extra_headers` | 否 | 字典类型，自定义的 HTTP 请求头。 |
-| `context_config` | 否 | 模型级上下文配置，未配置时使用顶层 `context_config`。含 `context_window_tokens`（默认 `131072`）、`reserve_output_tokens`（默认 `16384`）、`compact_trigger_ratio`（默认 `0.85`）、`compact_summary_max_tokens`（默认 `6144`）。 |
+| `context_config` | 否 | 模型级上下文配置，未配置时使用顶层 `context_config`。含 `context_window_tokens`（默认 `262144`）、`reserve_output_tokens`（默认 `16384`）、`compact_trigger_ratio`（默认 `0.85`）、`compact_summary_max_tokens`（默认 `6144`）。 |
 
 ---
 

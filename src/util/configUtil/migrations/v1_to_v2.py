@@ -73,7 +73,7 @@ def migrate_v1_to_v2(cfg: dict) -> None:
                 "extra_params": svc.get("provider_params", {}),
                 "extra_headers": svc.get("extra_headers", {}),
                 "context_config": {
-                    "context_window_tokens": svc.get("context_window_tokens", 131072),
+                    "context_window_tokens": svc.get("context_window_tokens", 262144),
                     "reserve_output_tokens": reserve_tokens,
                     "compact_trigger_ratio": svc.get("compact_trigger_ratio", 0.85),
                     "compact_summary_max_tokens": svc.get("compact_summary_max_tokens", 6144)

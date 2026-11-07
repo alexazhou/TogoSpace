@@ -13,7 +13,7 @@ from model.dbModel.historyUsage import HistoryUsage
 
 def test_llm_config_default_token_budget_fields():
     cfg = LlmContextConfig()
-    assert cfg.context_window_tokens == 131072
+    assert cfg.context_window_tokens == 262144
     assert cfg.reserve_output_tokens == 16384
     assert cfg.compact_trigger_ratio == 0.85
     assert cfg.compact_summary_max_tokens == 6144

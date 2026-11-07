@@ -80,7 +80,7 @@ def test_calc_hard_limit_tokens_user_config_larger_than_builtin(mock_get_app_con
 
 @patch("service.agentService.compact.configUtil.get_app_config")
 def test_calc_hard_limit_tokens_unconfigured_model_not_in_table(mock_get_app_config):
-    """未配置且模型不在内置表里时，回落到代码默认值 131072。"""
+    """未配置且模型不在内置表里时，回落到代码默认值 262144。"""
     mock_app_config = MagicMock()
     mock_app_config.setting.context_config = LlmContextConfig()
     mock_get_app_config.return_value = mock_app_config
@@ -89,7 +89,7 @@ def test_calc_hard_limit_tokens_unconfigured_model_not_in_table(mock_get_app_con
         context_window_tokens=LlmContextConfig().context_window_tokens,
         reserve_output_tokens=4096,
     )
-    assert calc_hard_limit_tokens(cfg) == 126976  # 131072 - 4096
+    assert calc_hard_limit_tokens(cfg) == 258048  # 262144 - 4096
 
 
 @patch("service.agentService.compact.configUtil.get_app_config")
