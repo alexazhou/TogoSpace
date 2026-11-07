@@ -59,9 +59,13 @@ const roomDetailLabel = computed(() => {
   return typeof roomId === 'number' && roomId > 0 ? `#${roomId}` : t('common.none');
 });
 const dependencies = computed<AgentTaskDependencySummary[]>(() => view.value?.depends_on_details ?? []);
+/** 依赖列表的展示行：编号 + 标题 + 状态压成一行，供模板逐行渲染。 */
+const dependencyRows = computed(() =>
+  dependencies.value.map((dep) => ({ id: dep.task_id, label: dependencyLabel(dep) })),
+);
 
 function dependencyLabel(dep: AgentTaskDependencySummary): string {
-  const title = dep.title || `#${dep.task_id}`;
+  const title = dep.title || t('common.unknown');
   if (dep.status === 'UNKNOWN') {
     return t('agent.taskDependencyDeleted', { title });
   }
@@ -69,6 +73,11 @@ function dependencyLabel(dep: AgentTaskDependencySummary): string {
     title,
     status: t(`agent.taskStatus.${dep.status}`),
   });
+}
+
+/** 依赖行 hover 的完整文本（编号单独渲染，这里补回前缀）。 */
+function dependencyRowTitle(row: { id: number; label: string }): string {
+  return `#${row.id} ${row.label}`;
 }
 
 async function loadAll(id: number): Promise<void> {
@@ -292,15 +301,22 @@ function requestClose(): void {
 
         <div class="task-detail-modal__section">
           <p class="task-detail-modal__section-title">{{ t('agent.taskDependsOnLabel') }}</p>
-          <p class="task-detail-modal__section-body">
-            <template v-if="dependencies.length">
-              <span
-                v-for="dep in dependencies"
-                :key="dep.task_id"
-                class="task-detail-modal__dep"
-              >{{ dependencyLabel(dep) }}</span>
-            </template>
-            <template v-else-if="view.depends_on.length">
+          <ul
+            v-if="dependencyRows.length"
+            class="task-detail-modal__section-body task-detail-modal__dep-list"
+          >
+            <li
+              v-for="row in dependencyRows"
+              :key="row.id"
+              class="task-detail-modal__dep"
+              :title="dependencyRowTitle(row)"
+            >
+              <span class="task-detail-modal__dep-id">#{{ row.id }}</span>
+              <span class="task-detail-modal__dep-text">{{ row.label }}</span>
+            </li>
+          </ul>
+          <p v-else class="task-detail-modal__section-body">
+            <template v-if="view.depends_on.length">
               {{ view.depends_on.map((id) => `#${id}`).join(', ') }}
             </template>
             <template v-else>
@@ -579,9 +595,38 @@ function requestClose(): void {
   background-clip: padding-box;
 }
 
+/* 依赖任务：每个依赖一行（长标题省略），多条时自然形成列表 */
+.task-detail-modal__dep-list {
+  margin: 0;
+  padding: 10px 12px;
+  list-style: none;
+  white-space: normal;
+}
+
 .task-detail-modal__dep {
-  display: inline-block;
-  margin-right: 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 编号与正文区分：弱化色 + 等宽数字，不抢标题的注意力 */
+.task-detail-modal__dep-id {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.task-detail-modal__dep-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-detail-modal__dep + .task-detail-modal__dep {
+  margin-top: 2px;
 }
 
 .task-detail-modal__hint {
