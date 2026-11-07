@@ -15,33 +15,12 @@ from util.cacheUtil import CacheStore
 _agent_cache = CacheStore[int, GtAgent](key_extractor=lambda a: a.id)
 
 
-def cache_agents(agents: GtAgent | list[GtAgent]) -> None:
-    """将 agent(s) 加入缓存。支持单个 GtAgent 或列表。
-
-    注意：id 为 None 的 agent（尚未插入数据库）不会被缓存。
-    """
-    if isinstance(agents, GtAgent):
-        if agents.id is not None:
-            _agent_cache.add(agents)
-    else:
-        # 过滤掉 id 为 None 的 agent
-        valid_agents = [a for a in agents if a.id is not None]
-        if valid_agents:
-            _agent_cache.add_many(valid_agents)
-
-
-def get_cached_agent(agent_id: int) -> GtAgent | None:
-    """从缓存获取 agent（同步方法，无数据库查询）。"""
-    return _agent_cache.get(agent_id)
-
-
-def invalidate_agent_cache(agent_id: int) -> None:
-    """失效单个 agent 的缓存。"""
-    _agent_cache.invalidate(agent_id)
-
-
 def clear_agent_cache() -> None:
-    """清空全部 agent 缓存。"""
+    """清空全部 agent 缓存（换库 / 测试隔离）。
+
+    `CacheStore.clear()` 会推进版本号，换库前发出的在途查询（包括从未单独
+    失效过的 id）都不会再回填。
+    """
     _agent_cache.clear()
 
 
@@ -157,12 +136,13 @@ def get_agent_by_id_sync(agent_id: int) -> GtAgent | None:
 
     若缓存未命中则从数据库同步查询，并自动填充缓存。
     """
-    cached = get_cached_agent(agent_id)
+    cached: GtAgent | None = _agent_cache.get(agent_id)
     if cached is not None:
         return cached
-    agent = GtAgent.get_or_none(GtAgent.id == agent_id)
+    version: int = _agent_cache.version()
+    agent: GtAgent | None = GtAgent.get_or_none(GtAgent.id == agent_id)
     if agent is not None:
-        cache_agents(agent)
+        _agent_cache.add_if_version(agent, version)
     return agent
 
 
@@ -171,7 +151,7 @@ def get_agent_name(agent_id: int) -> str:
 
     仅从缓存查找；若不存在返回 "unknown({agent_id})"，不执行数据库查询。
     """
-    agent = get_cached_agent(agent_id)
+    agent: GtAgent | None = _agent_cache.get(agent_id)
     return agent.name if agent else f"unknown({agent_id})"
 
 
@@ -185,26 +165,27 @@ def get_agents_by_ids_sync(agent_ids: list[int]) -> list[GtAgent]:
     agents: list[GtAgent] = []
     uncached_ids: list[int] = []
     for agent_id in agent_ids:
-        cached = get_cached_agent(agent_id)
+        cached: GtAgent | None = _agent_cache.get(agent_id)
         if cached is not None:
             agents.append(cached)
         else:
             uncached_ids.append(agent_id)
     if uncached_ids:
-        fetched = list(
+        version: int = _agent_cache.version()
+        fetched: list[GtAgent] = list(
             GtAgent.select()
             .where(GtAgent.id.in_(uncached_ids))  # type: ignore[attr-defined]
             .execute()
         )
-        cache_agents(fetched)
-        fetched_map = {agent.id: agent for agent in fetched}
+        _agent_cache.add_many_if_version(fetched, version)
+        fetched_map: dict[int, GtAgent] = {agent.id: agent for agent in fetched}
         for agent_id in agent_ids:
             if agent_id not in [a.id for a in agents if a.id is not None]:
-                fetched_agent = fetched_map.get(agent_id)
+                fetched_agent: GtAgent | None = fetched_map.get(agent_id)
                 if fetched_agent is not None:
                     agents.append(fetched_agent)
     # 保持原始顺序
-    agent_map = {a.id: a for a in agents if a.id is not None}
+    agent_map: dict[int, GtAgent] = {a.id: a for a in agents if a.id is not None}
     return [agent_map[aid] for aid in agent_ids if aid in agent_map]
 
 
@@ -213,12 +194,13 @@ async def get_agent_by_id(agent_id: int) -> GtAgent | None:
 
     查询结果会自动填充缓存。
     """
-    cached = get_cached_agent(agent_id)
+    cached: GtAgent | None = _agent_cache.get(agent_id)
     if cached is not None:
         return cached
-    agent = await GtAgent.aio_get_or_none(GtAgent.id == agent_id)
+    version: int = _agent_cache.version()
+    agent: GtAgent | None = await GtAgent.aio_get_or_none(GtAgent.id == agent_id)
     if agent is not None:
-        cache_agents(agent)
+        _agent_cache.add_if_version(agent, version)
     return agent
 
 
@@ -232,21 +214,22 @@ async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
     agents: list[GtAgent] = []
     uncached_ids: list[int] = []
     for agent_id in agent_ids:
-        cached = get_cached_agent(agent_id)
+        cached: GtAgent | None = _agent_cache.get(agent_id)
         if cached is not None:
             agents.append(cached)
         else:
             uncached_ids.append(agent_id)
     if uncached_ids:
-        fetched = list(
+        version: int = _agent_cache.version()
+        fetched: list[GtAgent] = list(
             await GtAgent.select()
             .where(GtAgent.id.in_(uncached_ids))  # type: ignore[attr-defined]
             .aio_execute()
         )
-        cache_agents(fetched)
+        _agent_cache.add_many_if_version(fetched, version)
         agents.extend(fetched)
     # 保持原始顺序
-    agent_map = {a.id: a for a in agents if a.id is not None}
+    agent_map: dict[int, GtAgent] = {a.id: a for a in agents if a.id is not None}
     return [agent_map[aid] for aid in agent_ids if aid in agent_map]
 
 
@@ -260,17 +243,17 @@ async def batch_save_agents(team_id: int, agents: list[GtAgent]) -> None:
     if len(agents) == 0:
         return
 
-    invalid_team_ids = sorted({agent.team_id for agent in agents if agent.team_id != team_id})
+    invalid_team_ids: list[int] = sorted({agent.team_id for agent in agents if agent.team_id != team_id})
     if invalid_team_ids:
         raise ValueError(
             f"all agents must have team_id={team_id}, got mismatched team_ids={invalid_team_ids}"
         )
 
-    max_num = await get_max_employee_number(team_id)
-    next_num = max_num + 1
+    max_num: int = await get_max_employee_number(team_id)
+    next_num: int = max_num + 1
 
-    to_create = []
-    to_update = []
+    to_create: list[GtAgent] = []
+    to_update: list[GtAgent] = []
 
     for agent in agents:
         if agent.id is not None:
@@ -297,8 +280,27 @@ async def batch_save_agents(team_id: int, agents: list[GtAgent]) -> None:
             for agent in to_create
         ]).aio_execute()
 
-    for agent in to_update:
+    try:
+        for agent in to_update:
+            await agent.aio_save()
+    finally:
+        for agent in to_update:
+            if agent.id is not None:
+                _agent_cache.invalidate(agent.id)
+
+
+async def save_agent(agent: GtAgent) -> None:
+    """单条更新入口：持久化 + 缓存失效边界（文档 §5.1 示意接口）。
+
+    只处理**已存在**的 agent（id 非空）；新建仍走 `batch_save_agents`，
+    因为工号分配需要 `get_max_employee_number`。纯更新路径不该为一次 MAX 查询付钱。
+    """
+    if agent.id is None:
+        raise ValueError("save_agent 只用于更新已存在的 agent；新建请用 batch_save_agents")
+    try:
         await agent.aio_save()
+    finally:
+        _agent_cache.invalidate(agent.id)
 
 
 async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) -> None:
@@ -306,6 +308,8 @@ async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) 
     if len(agent_ids) == 0:
         return
     await GtAgent.update(employ_status=status).where(GtAgent.id.in_(agent_ids)).aio_execute()  # type: ignore[attr-defined]
+    for aid in agent_ids:
+        _agent_cache.invalidate(aid)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

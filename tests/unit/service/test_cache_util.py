@@ -119,3 +119,61 @@ class TestCacheStoreOverwrite:
         cache.add(_TestItem(id=1, name="alice"))
         cache.add(_TestItem(id=1, name="bob"))  # 覆盖
         assert cache.get(1).name == "bob"
+
+
+class TestCacheStoreVersionGuard:
+    """版本号检查：查询期间发生失效后，查到的旧值不得回填。"""
+
+    def test_add_if_version_writes_without_invalidation(self):
+        cache = CacheStore[int, _TestItem](key_extractor=lambda i: i.id)
+        version = cache.version()
+        assert cache.add_if_version(_TestItem(id=1, name="alice"), version) is True
+        assert cache.get(1).name == "alice"
+
+    def test_add_if_version_rejects_after_invalidate(self):
+        cache = CacheStore[int, _TestItem](key_extractor=lambda i: i.id)
+        version = cache.version()
+        cache.invalidate(1)  # 模拟查库期间另一个协程完成了写入 + 失效
+        assert cache.add_if_version(_TestItem(id=1, name="stale"), version) is False
+        assert cache.get(1) is None
+
+    def test_invalidate_other_key_does_not_block_fill(self):
+        cache = CacheStore[int, _TestItem](key_extractor=lambda i: i.id)
+        version = cache.version()
+        cache.invalidate(2)  # 只失效 2，不应连带阻断 1 的在途回填
+        assert cache.add_if_version(_TestItem(id=1, name="alice"), version) is True
+        assert cache.get(1) is not None
+
+    def test_add_if_version_rejects_after_clear(self):
+        cache = CacheStore[int, _TestItem](key_extractor=lambda i: i.id)
+        version = cache.version()
+        cache.clear()  # 模拟换库
+        assert cache.add_if_version(_TestItem(id=1, name="stale"), version) is False
+        assert cache.get(1) is None
+
+    def test_version_taken_after_invalidate_can_fill(self):
+        cache = CacheStore[int, _TestItem](key_extractor=lambda i: i.id)
+        cache.invalidate(1)
+        version = cache.version()  # 失效之后再取快照，属于新鲜读取
+        assert cache.add_if_version(_TestItem(id=1, name="alice"), version) is True
+
+    def test_add_many_if_version_filters_stale_items(self):
+        cache = CacheStore[int, _TestItem](key_extractor=lambda i: i.id)
+        version = cache.version()
+        cache.invalidate(2)  # 2 在查库期间被失效
+        cache.add_many_if_version(
+            [_TestItem(id=1, name="alice"), _TestItem(id=2, name="stale")],
+            version,
+        )
+        assert cache.get(1) is not None
+        assert cache.get(2) is None
+
+    def test_add_if_version_without_extractor_raises(self):
+        cache = CacheStore[int, str]()
+        with pytest.raises(ValueError, match="key_extractor is required"):
+            cache.add_if_version("alice", cache.version())
+
+    def test_add_many_if_version_without_extractor_raises(self):
+        cache = CacheStore[int, str]()
+        with pytest.raises(ValueError, match="key_extractor is required"):
+            cache.add_many_if_version(["alice", "bob"], cache.version())
