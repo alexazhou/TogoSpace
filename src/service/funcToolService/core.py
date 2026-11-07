@@ -1,6 +1,7 @@
 import inspect
 import json
 import logging
+import os
 from typing import Any, Iterable, Optional
 
 from pydantic import BaseModel
@@ -10,6 +11,8 @@ from model.coreModel.serviceStatus import ServiceStatusInfo
 from service import serviceUtil
 from util import llmApiUtil
 from service.roomService import ToolCallContext
+from .consoleCommands import ENV_KEEP_LEGACY_TOOLS, LEGACY_CONVERGED_TOOLS
+from .consoleTool import console, console_triggers_self_interrupt
 from .funcToolType import FuncTool
 from .tools import (
     create_container,
@@ -63,6 +66,25 @@ def build_tools(func_tools: Iterable[FuncTool]) -> list[llmApiUtil.OpenAITool]:
 _func_tools: dict[str, FuncTool] = {}
 
 
+def keep_legacy_admin_tools() -> bool:
+    """D2 单点开关：是否把被 `console` 收敛的 16 个原工具暴露给模型。
+
+    **只影响暴露面，不影响执行能力**：`console` 的路由是直接调 `tools.py` 里的函数，
+    不经过注册表查名字，所以关掉原工具后 console 依然能干活（这是收敛的前提）。
+
+    口径用环境变量而不是模块常量：测 token 收益时要在**不改代码**的前提下对比两种
+    暴露面，常量得改文件、重启才生效。默认 = 保留；任何无法识别的值也按保留处理
+    ——「悄悄收走一批工具」的后果比「多暴露几个工具」严重得多。
+    """
+    raw = os.environ.get(ENV_KEEP_LEGACY_TOOLS, "")
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _hidden_tool_names() -> set[str]:
+    """按 D2 开关算出要**隐藏**的工具名；保留时返回空集。"""
+    return set() if keep_legacy_admin_tools() else set(LEGACY_CONVERGED_TOOLS)
+
+
 def load_func_tools() -> dict[str, FuncTool]:
     global _func_tools
     _registry: dict[str, Any] = {
@@ -97,6 +119,9 @@ def load_func_tools() -> dict[str, FuncTool]:
         "memory_search": memory_search,
         "memory_create": memory_create,
         "memory_update": memory_update,
+        # 管理控制台（#154）：16 个管理工具收敛成这一条，与它们并存（D2 默认保留）。
+        # 注册名固定 `console`，schema 由 `console()` 的 docstring 生成。
+        "console": console,
     }
     _func_tools = {}
     for name, func in _registry.items():
@@ -133,6 +158,24 @@ def get_func_tool(name: str) -> FuncTool | None:
     return _func_tools.get(name) or _container_func_tools.get(name)
 
 
+#: 需要「按参数」而非「按注册名」判定是否自中断的工具（#154 D6 引入的机制）。
+#: `reload_team` 仍是静态自中断（driver 里直接传 `self_interrupt=True`），所以不在表里；
+#: 这里只登记参数相关的，避免把每次调用都变成一次 predicate 调用。
+_SELF_INTERRUPT_PREDICATES: dict[str, Any] = {
+    "console": console_triggers_self_interrupt,
+}
+
+
+def get_self_interrupt_predicate(name: str):
+    """返回该工具的动态自中断判定器；没有则返回 None。
+
+    三个 driver 注册本地工具时统一用
+    `funcToolService.get_self_interrupt_predicate(function_name)` 取值，
+    避免判定口径在三个 driver 里各抄一份后漂移。
+    """
+    return _SELF_INTERRUPT_PREDICATES.get(name)
+
+
 def _reset() -> None:
     """纯资源清理：正常 shutdown 与启动失败回滚共用；幂等。"""
     _func_tools.clear()
@@ -149,12 +192,16 @@ async def startup() -> None:
 def get_tools(include_container_tools: bool = False) -> list[llmApiUtil.OpenAITool]:
     """返回已初始化的工具列表。
 
+    被 `console` 收敛的原 16 个工具按 D2 开关决定是否暴露（默认暴露）；开关只作用于
+    **这里返回的 schema 列表**，`get_func_tool()` / `run_tool_call()` 仍能执行它们。
+
     Args:
         include_container_tools: 是否包含容器沙箱工具。默认 False——只有
             `TspAgentDriver` 需要（容器工具要切换 gtsp 执行环境），Native /
             Claude SDK 暴露出来只会误导模型（§6.1 生效范围）。
     """
-    tools = list(_func_tools.values())
+    hidden = _hidden_tool_names()
+    tools = [tool for name, tool in _func_tools.items() if name not in hidden]
     if include_container_tools:
         tools.extend(_container_func_tools.values())
     return build_tools(tools)

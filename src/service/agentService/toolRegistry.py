@@ -28,6 +28,11 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     "get_task_event": ToolCategory.BASIC,
     "list_tasks": ToolCategory.BASIC,
     "load_skill": ToolCategory.BASIC,
+    # 管理控制台（#154）：注册为 BASIC，否则所有没有 Admin 的 Agent 连 `dept ls` /
+    # `get_time` 这类只读查询都失去。**真正的权限校验在服务端按子命令逐个做**
+    # （`funcToolService/consoleParsing._assert_permitted`，D3 唯一不可降级项）——
+    # 这里的类别只决定「console 这个入口是否可用」，不决定「哪条子命令可用」。
+    "console": ToolCategory.BASIC,
     # 长期记忆工具：与任务/技能同属基础能力，默认对所有 Agent 生效
     "memory_list": ToolCategory.BASIC,
     "memory_read": ToolCategory.BASIC,
@@ -115,7 +120,20 @@ class RegisteredTool:
     category: ToolCategory | None = None
     marks_turn_finish: bool = False
     self_interrupt: bool = False
+    #: 动态自中断判定（#154 D6）：同一个工具「有时自中断、有时不自中断」时用它。
+    #: 例如 `console` 只有路由到 `reload` 子命令才自中断，其余子命令都是普通返回；
+    #: 这种情况静态 `self_interrupt` 表达不了 —— 它在注册时一次性定死，而这时
+    #: 还不知道模型会传什么参数。判定器接收本次 tool_call，返回是否需要自中断。
+    self_interrupt_predicate: Callable[[Any], bool] | None = None
     enabled: bool = True
+
+    def triggers_self_interrupt(self, tool_call: Any) -> bool:
+        """本次调用是否需要自中断（静态标志优先，其次看动态判定器）。"""
+        if self.self_interrupt:
+            return True
+        if self.self_interrupt_predicate is None:
+            return False
+        return bool(self.self_interrupt_predicate(tool_call))
 
 
 class AgentToolRegistry:
@@ -134,6 +152,7 @@ class AgentToolRegistry:
         *,
         marks_turn_finish: bool = False,
         self_interrupt: bool = False,
+        self_interrupt_predicate: Callable[[Any], bool] | None = None,
     ) -> None:
         name = tool.function.name
         category = tool.category or CATEGORY_CONFIG.get(name)
@@ -144,6 +163,7 @@ class AgentToolRegistry:
             category=category,
             marks_turn_finish=marks_turn_finish,
             self_interrupt=self_interrupt,
+            self_interrupt_predicate=self_interrupt_predicate,
         )
 
     def export_openai_tools(self) -> list[llmApiUtil.OpenAITool]:
