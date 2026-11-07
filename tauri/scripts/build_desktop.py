@@ -349,6 +349,113 @@ def build_dmg(arch: str) -> None:
 
 # ── notarize ─────────────────────────────────────────────────────────────────
 
+TICKET_MARKER = "Notarization Ticket=stapled"
+NOTARIZED_SOURCE = "Notarized Developer ID"
+
+
+def _capture(command: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
+    """跑命令并捕获输出，不抛异常，由调用方按返回码判定。
+
+    超时也折成「失败返回码」，避免半途卡死：本地判据单条最多 60s，
+    而这些命令实测都是毫秒级，超时本身就该算异常。
+    """
+    try:
+        return subprocess.run(
+            command, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            args=command, returncode=-1, stdout="",
+            stderr=f"（命令超时 {timeout}s: {' '.join(command)}）")
+
+
+def _raw_text(result: subprocess.CompletedProcess) -> str:
+    return (result.stdout + result.stderr).strip()
+
+
+def _print_raw(result: subprocess.CompletedProcess) -> None:
+    text = _raw_text(result)
+    for line in (text.splitlines() if text else ["（无输出）"]):
+        print(f"   {line}")
+
+
+def verify_stapled_ticket(target: str) -> None:
+    """校验 stapled 票据，判据全部是本地读取（不联网）。
+
+    替代原来的 `xcrun stapler validate`：后者会向 Apple 回查票据，该步在
+    #146 表现为间歇性、非确定性失败（NSURLErrorDomain -1005 / `Error 68`，
+    机制未定），会让已公证成功的 DMG 被判红丢弃。实测断网下 validate 必挂，
+    而下面这些判据照常工作。
+
+    硬判据（任一不过即 SystemExit，不降级为警告）：
+      ① `codesign --verify --deep --strict <DMG>` 返回码 0 —— 签名完整性
+      ② `codesign -dvvv <DMG>` 含 `Notarization Ticket=stapled` —— 主判据
+         （票据写在 DMG 容器的签名 blob 里，`.app` 上既无该字段也无 xattr）
+    辅助判据（不致命，只打 ::warning::）：
+      ③ `spctl --assess --type install <DMG>` 授 Notarized Developer ID
+         该项可能命中本机 Gatekeeper 缓存，在无缓存的 CI runner 上不可靠，
+         故只作信号，不作门槛（理由见 #148 实测）。
+
+    语义边界：①② 证明「票据已正确 stapled 到 DMG」，不等价于「Apple 认为该包
+    公证通过」——后者由前面的 `notarytool submit --wait` 返回码保证。
+    """
+    print(f"\n--- 票据校验（本地判据）: {target} ---")
+    failures: list[str] = []
+
+    print(f"$ codesign --verify --deep --strict {target}")
+    verify = _capture(["codesign", "--verify", "--deep", "--strict", target])
+    _print_raw(verify)
+    if verify.returncode == 0:
+        print("   ✅ 硬判据①签名完整")
+    else:
+        failures.append(
+            f"硬判据①签名校验失败 rc={verify.returncode}: "
+            f"{_raw_text(verify) or '（无输出）'}")
+
+    print(f"$ codesign -dvvv {target}")
+    detail = _capture(["codesign", "-dvvv", target])
+    _print_raw(detail)
+    raw_detail = _raw_text(detail)
+    tickets = [
+        line.strip() for line in raw_detail.splitlines()
+        if "Notarization Ticket" in line
+    ]
+    print(f"   ℹ️  Notarization Ticket 行: {' / '.join(tickets) if tickets else '（无）'}")
+    # 整行精确匹配而不是子串包含：`...=staple` 是 `...=stapled` 的前缀，
+    # 子串匹配会让写错的期望值照样命中（自测 V2 实测到过）。
+    if TICKET_MARKER in tickets:
+        print("   ✅ 硬判据②票据已 stapled")
+    else:
+        # 文案按「签名无效 / 无票据 / 读不到签名」三类区分，便于定位是哪一环坏了：
+        #   签名无效 —— codesign --verify 已失败（或被篡改致 dvvv 都读不出）
+        #   无票据   —— 签名完好（dvvv 正常输出、verify 通过）但缺该行
+        #   读不到   —— dvvv 自己非 0 而 verify 通过，异常态
+        if verify.returncode != 0 or detail.returncode != 0:
+            reason = "签名无效或未签名"
+        else:
+            reason = "已签名但未 staple，或票据已丢失"
+        failures.append(
+            f"硬判据②缺少 `{TICKET_MARKER}` 整行（{reason}；"
+            f"verify rc={verify.returncode}, dvvv rc={detail.returncode}），"
+            f"实际 Notarization Ticket 行: {' / '.join(tickets) if tickets else '（无）'}")
+
+    print(f"$ spctl --assess --type install --verbose=2 {target}")
+    assess = _capture(["spctl", "--assess", "--type", "install", "--verbose=2", target])
+    _print_raw(assess)
+    if assess.returncode == 0 and NOTARIZED_SOURCE in _raw_text(assess):
+        print("   ✅ 辅助判据③ Gatekeeper 认可 Notarized Developer ID")
+    else:
+        print(f"::warning::辅助判据③未通过 rc={assess.returncode}：Gatekeeper 未授 "
+              f"{NOTARIZED_SOURCE}。该项依赖本机 Gatekeeper 缓存，不作为失败条件（见 #148）。")
+
+    if failures:
+        # 先打印失败判据清单再抛：让日志本身就能分辨「哪几条判据翻了」，
+        # 不用靠 traceback 行号反推（两条判据的 raise 落在同一行）。
+        print(f"   ❌ 失败判据 {len(failures)} 项:", file=sys.stderr)
+        for item in failures:
+            print(f"      - {item}", file=sys.stderr)
+        raise SystemExit(
+            "❌ 公证票据校验失败（DMG 未通过本地判据）:\n   - " + "\n   - ".join(failures))
+
 
 def notarize_dmg(arch: str) -> None:
     print("\n--- notarize: 公证 + staple ---")
@@ -373,7 +480,8 @@ def notarize_dmg(arch: str) -> None:
     print(f"⏱️  公证耗时 {time.time() - started:.0f}s")
 
     run_command(["xcrun", "stapler", "staple", target])
-    run_command(["xcrun", "stapler", "validate", target])
+    # 原为 `xcrun stapler validate`（联网回查，-1005/Error 68 时丢弃已公证产物）
+    verify_stapled_ticket(target)
     print("✅ 公证与 staple 完成")
 
 
