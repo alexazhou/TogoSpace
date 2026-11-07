@@ -246,8 +246,15 @@ async def create_task(
     parent_id: Optional[int] = None,
     depends_on: Optional[list[int]] = None,
     room_id: Optional[int] = None,
+    status: Optional[str] = None,
+    note: str = '',
 ) -> dict:
     """创建协作任务。
+
+    `status` 可在创建时显式指定初始状态，只接受 `ON_HOLD` 和 `TODO`：
+    - `ON_HOLD`：创建即搁置，优先于依赖推导；
+    - `TODO`：与省略等价，由系统按依赖自动判断（无未完成依赖为 TODO，有则为 PENDING）。
+    `note` 写入创建事件；创建即搁置时即「当前搁置原因」。
 
     Returns:
         dict with keys: success, task_id (on success) or message (on failure)
@@ -255,6 +262,18 @@ async def create_task(
     priority_enum = TaskPriority.value_of(priority.upper())
     if priority_enum is None:
         return {"success": False, "message": f"无效的优先级：{priority}，有效值为 HIGH / NORMAL / LOW"}
+
+    # 显式初始状态只接受 ON_HOLD / TODO：PENDING 及在途状态由系统推导，不接受显式指定，
+    # 否则可以绕过「有未完成依赖时初始状态为 PENDING」的约束。
+    explicit_on_hold: bool = False
+    if status is not None:
+        explicit_status: Optional[TaskStatus] = TaskStatus.value_of(status)
+        if explicit_status not in (TaskStatus.ON_HOLD, TaskStatus.TODO):
+            return {
+                "success": False,
+                "message": f"无效的初始状态：{status}，创建任务时只支持 TODO / ON_HOLD（省略则按依赖推导 TODO / PENDING）",
+            }
+        explicit_on_hold = explicit_status == TaskStatus.ON_HOLD
 
     # 执行人与验收人不能是同一人
     if reviewer_id is not None and assignee_id == reviewer_id:
@@ -272,7 +291,7 @@ async def create_task(
 
     # 验证并解析依赖
     dep_ids: list[int] = list(depends_on or [])
-    initial_status = TaskStatus.TODO
+    initial_status = TaskStatus.ON_HOLD if explicit_on_hold else TaskStatus.TODO
     if dep_ids:
         dep_tasks = await gtAgentTaskManager.get_tasks_by_ids(dep_ids)
         found_ids = {t.id for t in dep_tasks}
@@ -282,7 +301,7 @@ async def create_task(
         wrong_team = [t.id for t in dep_tasks if t.team_id != team_id]
         if wrong_team:
             return {"success": False, "message": f"依赖任务不属于当前团队：{wrong_team}"}
-        if any(t.status != TaskStatus.DONE for t in dep_tasks):
+        if not explicit_on_hold and any(t.status != TaskStatus.DONE for t in dep_tasks):
             initial_status = TaskStatus.PENDING
 
     task = GtAgentTask(
@@ -305,7 +324,7 @@ async def create_task(
             creator_id,
             from_status=None,
             to_status=initial_status,
-            content='',
+            content=note,
         )
     logger.info(f"任务创建：task_id={task.id}, title={title!r}, assignee={assignee_id}, status={initial_status.value}")
 

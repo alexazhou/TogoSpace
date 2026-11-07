@@ -262,6 +262,85 @@ async def test_create_task_with_valid_depends_on_sets_pending_status(task_manage
 
 
 @pytest.mark.asyncio
+async def test_create_task_with_on_hold_status_creates_held_task(task_manager_mock, event_manager_mock):
+    """显式 status=ON_HOLD 时，任务创建即为搁置态，note 作为搁置原因写入创建事件。"""
+    result = await taskService.create_task(
+        team_id=1,
+        creator_id=11,
+        title="hold task",
+        assignee_id=11,
+        status="ON_HOLD",
+        note="等待三方授权",
+    )
+
+    assert result["success"] is True
+    created_task = task_manager_mock.save_task.await_args.args[0]
+    assert created_task.status == TaskStatus.ON_HOLD
+    event_manager_mock.append_event.assert_awaited_once()
+    event_kwargs = event_manager_mock.append_event.await_args.kwargs
+    assert event_kwargs["from_status"] is None
+    assert event_kwargs["to_status"] == TaskStatus.ON_HOLD
+    assert event_kwargs["content"] == "等待三方授权"
+    assert "ON_HOLD" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_create_task_on_hold_overrides_pending_from_unfinished_dependency(task_manager_mock):
+    """显式 ON_HOLD 优先于依赖推导：有未完成依赖时也按 ON_HOLD 创建。"""
+    dep_task = _build_task(id=7, team_id=1, status=TaskStatus.IN_PROGRESS)
+    task_manager_mock.get_tasks_by_ids = AsyncMock(return_value=[dep_task])
+
+    result = await taskService.create_task(
+        team_id=1,
+        creator_id=11,
+        title="hold dep task",
+        assignee_id=11,
+        depends_on=[7],
+        status="on_hold",
+    )
+
+    assert result["success"] is True
+    created_task = task_manager_mock.save_task.await_args.args[0]
+    assert created_task.status == TaskStatus.ON_HOLD
+
+
+@pytest.mark.asyncio
+async def test_create_task_with_todo_status_still_derives_pending(task_manager_mock):
+    """显式 status=TODO 与省略等价：有未完成依赖时仍由系统推导为 PENDING。"""
+    dep_task = _build_task(id=7, team_id=1, status=TaskStatus.IN_PROGRESS)
+    task_manager_mock.get_tasks_by_ids = AsyncMock(return_value=[dep_task])
+
+    result = await taskService.create_task(
+        team_id=1,
+        creator_id=11,
+        title="todo dep task",
+        assignee_id=11,
+        depends_on=[7],
+        status="TODO",
+    )
+
+    assert result["success"] is True
+    created_task = task_manager_mock.save_task.await_args.args[0]
+    assert created_task.status == TaskStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_create_task_rejects_unsupported_status(task_manager_mock):
+    """创建时只允许显式指定 TODO / ON_HOLD，其余状态由依赖推导。"""
+    result = await taskService.create_task(
+        team_id=1,
+        creator_id=11,
+        title="bad status",
+        assignee_id=11,
+        status="IN_PROGRESS",
+    )
+
+    assert result["success"] is False
+    assert "只支持 TODO / ON_HOLD" in result["message"]
+    task_manager_mock.save_task.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_update_task_assignee_submits_for_review(task_manager_mock, event_manager_mock):
     """执行人可将进行中的任务提交为 REVIEWING。"""
     task = _build_task(status=TaskStatus.IN_PROGRESS, assignee_id=11, creator_id=11, reviewer_id=20)

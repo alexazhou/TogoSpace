@@ -72,7 +72,7 @@ def test_tool_schema_matches_committed_snapshot():
 # 维护口径：**新增/删除/重排参数都要同步改这张表**。这是有意的——参数顺序是模型看到的
 # 接口形态的一部分（必填在前更易被正确填充），变化必须显式、可读、有人签字。
 _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
-    "create_task": ["title", "assignee_id", "description", "reviewer_id", "priority", "parent_id", "depends_on", "room_id"],
+    "create_task": ["title", "assignee_id", "description", "reviewer_id", "priority", "parent_id", "depends_on", "room_id", "status", "note"],
     "delete_dept": ["name", "dept_id", "recursive"],
     "delete_role_template": ["role_name"],
     "delete_room": ["name", "room_id"],

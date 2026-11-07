@@ -1200,6 +1200,8 @@ async def create_task(
     parent_id: Optional[int] = None,
     depends_on: Optional[list[int]] = None,
     room_id: Optional[int] = None,
+    status: Optional[Literal["TODO", "ON_HOLD"]] = None,
+    note: str = '',
     _context: Optional[ToolCallContext] = None,
 ) -> dict:
     """创建协作任务（**不会唤醒执行人**，需另发 send_chat_msg 通知对方）。
@@ -1213,6 +1215,8 @@ async def create_task(
         parent_id: 父任务 ID，用于任务树拆解。除了 Operator 直接下达的任务，其他任务应按拆解关系设置父任务 ID，使所有任务能形成以 Operator 任务为根的任务树
         depends_on: 依赖的任务 ID 列表。非空且其中任一尚未 DONE 时，新任务初始状态为 PENDING（依赖全部 DONE 后自动转 TODO）；为空则初始状态为 TODO
         room_id: 关联房间 ID，便于溯源
+        status: 指定初始状态，可选 TODO / ON_HOLD。ON_HOLD 表示创建即搁置（优先于依赖推导）；TODO 与省略等价，由系统按 depends_on 自动判断（有未完成依赖为 PENDING，否则 TODO）
+        note: 创建说明，写入创建事件；status=ON_HOLD 时作为「当前搁置原因」
     """
     import service.taskService as taskService
 
@@ -1231,6 +1235,8 @@ async def create_task(
         parent_id=parent_id,
         depends_on=[int(x) for x in (depends_on or [])],
         room_id=room_id,
+        status=status,
+        note=note,
     )
 
 
