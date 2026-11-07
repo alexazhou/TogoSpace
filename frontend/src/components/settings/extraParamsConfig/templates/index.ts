@@ -1,7 +1,7 @@
 import { ExtraParamsConfigTemplate } from '../types';
 import { Gpt5ReasoningTemplate, GptReasoningEffortTemplate } from './gpt';
 import { ClaudeThinkingBudgetTemplate } from './claude';
-import { Glm52ThinkingTemplate } from './glm52';
+import { Glm52ThinkingTemplate, Glm53ThinkingTemplate } from './glm52';
 import { GlmThinkingTemplate } from './glm5';
 import { DeepseekThinkingTemplate } from './deepseek';
 import { MimoReasoningTemplate } from './mimo';
@@ -19,6 +19,7 @@ export const extraParamsConfigTemplates: ExtraParamsConfigTemplate[] = [
   new ClaudeThinkingBudgetTemplate('claude_opus_4_8', 'Opus-4.8', /opus.*4[._]?8/i),
   new ClaudeThinkingBudgetTemplate('claude_legacy', 'Claude (Legacy)', /claude|anthropic/i),
   new Glm52ThinkingTemplate(),
+  new Glm53ThinkingTemplate(),
   new GlmThinkingTemplate('glm_5_1', 'GLM-5.1'),
   new GlmThinkingTemplate('glm_5_0', 'GLM-5.0'),
   new GlmThinkingTemplate('glm_4_7', 'GLM-4.7'),
@@ -27,6 +28,8 @@ export const extraParamsConfigTemplates: ExtraParamsConfigTemplate[] = [
   new DeepseekThinkingTemplate('deepseek_v4_pro', 'deepseek-v4-pro'),
   new MimoReasoningTemplate('mimo_v2_5', 'mimo-v2.5'),
   new MimoReasoningTemplate('mimo_v2_5_pro', 'mimo-v2.5-pro'),
+  new MimoReasoningTemplate('mimo_v2_6_flash', 'mimo-v2.6-flash'),
+  new MimoReasoningTemplate('mimo_v2_6_pro', 'mimo-v2.6-pro'),
   new OtherExtraParamsTemplate(),
 ];
 
