@@ -325,28 +325,39 @@ watch(
           :status="currentStatus"
           :agent-id="props.agentId"
         />
-        <div class="agent-status-panel" :data-status="currentStatus ?? undefined">
-          <span class="status-dot"></span>
-          <span class="agent-status-panel__value">{{ statusLabel }}</span>
+        <div class="agent-action-row">
+          <div class="agent-status-panel" :data-status="currentStatus ?? undefined">
+            <span class="status-dot"></span>
+            <span class="agent-status-panel__value">{{ statusLabel }}</span>
+          </div>
+          <button
+            v-if="currentStatus === 'active' && props.agentId"
+            type="button"
+            class="agent-icon-button agent-icon-button--danger"
+            :disabled="stopping"
+            :title="stopping ? t('agent.stopping') : t('agent.stop')"
+            :aria-label="stopping ? t('agent.stopping') : t('agent.stop')"
+            @click="handleStop"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <rect x="4.5" y="4.5" width="7" height="7" rx="1.5" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+          <button
+            v-if="currentStatus === 'failed' && props.agentId"
+            type="button"
+            class="agent-icon-button"
+            :disabled="resuming"
+            :title="resuming ? t('agent.resuming') : t('agent.resume')"
+            :aria-label="resuming ? t('agent.resuming') : t('agent.resume')"
+            @click="handleResume"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M13 8a5 5 0 1 1-1.6-3.7" />
+              <path d="M13 2.8V5.2h-2.4" />
+            </svg>
+          </button>
         </div>
-        <button
-          v-if="currentStatus === 'active' && props.agentId"
-          type="button"
-          class="secondary-button button-danger agent-action-button"
-          :disabled="stopping"
-          @click="handleStop"
-        >
-          {{ stopping ? t('agent.stopping') : t('agent.stop') }}
-        </button>
-        <button
-          v-if="currentStatus === 'failed' && props.agentId"
-          type="button"
-          class="secondary-button agent-action-button"
-          :disabled="resuming"
-          @click="handleResume"
-        >
-          {{ resuming ? t('agent.resuming') : t('agent.resume') }}
-        </button>
         <button
           v-if="props.agentId"
           type="button"
@@ -457,18 +468,21 @@ watch(
   transform: scale(0.96);
 }
 
-.agent-status-panel {
+/* 状态标记与操作图标同一行：状态在左，图标按钮紧跟其后。 */
+.agent-action-row {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-height: 42px;
-  width: auto;
-  max-width: 100%;
-  padding: 4px 0 0;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.agent-status-panel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
   border: 0;
-  border-radius: 0;
   background: transparent;
   color: var(--muted);
   font-size: 0.82rem;
@@ -496,6 +510,56 @@ watch(
   font-size: 0.78rem;
   border-radius: 6px;
   margin-top: 0;
+}
+
+/* 停止 / 重试：只保留图标，避免大通栏按钮压过卡片本身。 */
+.agent-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.agent-icon-button svg {
+  width: 8px;
+  height: 8px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.agent-icon-button:hover:not(:disabled) {
+  color: var(--text-strong);
+  border-color: var(--interactive-focus-border);
+}
+
+.agent-icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.agent-icon-button--danger {
+  color: #e5484d;
+  border-color: color-mix(in srgb, #e5484d 55%, transparent);
+}
+
+.agent-icon-button--danger:hover:not(:disabled) {
+  color: #e5484d;
+  border-color: #e5484d;
+  background: color-mix(in srgb, #e5484d 14%, transparent);
 }
 
 .agent-error-panel {
