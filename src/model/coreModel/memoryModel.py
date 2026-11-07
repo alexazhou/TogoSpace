@@ -97,7 +97,7 @@ class MemorySearchItem(_MemorySerializers):
 
 
 class MemoryDetail(_MemorySerializers):
-    """L3 正文层：完整字段。仅 `memory_read` / `memory_create` / `memory_update` 返回。"""
+    """L3 正文层：完整字段。仅 `memory_read` 返回（`memory_create` / `memory_update` 只回 `id` + `title`，避免回显正文占用上下文）。"""
 
     id: int
     title: str

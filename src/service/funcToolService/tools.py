@@ -1769,7 +1769,7 @@ async def memory_create(
             star_level=star_level,
             tags=tags,
         )
-        return {"success": True, "memory": detail.model_dump(mode="json")}
+        return {"success": True, "id": detail.id, "title": detail.title}
     except TogoException as exc:
         return _tool_error_result(exc)
 
@@ -1811,6 +1811,6 @@ async def memory_update(
             status=status,
             tags=tags,
         )
-        return {"success": True, "memory": detail.model_dump(mode="json")}
+        return {"success": True, "id": detail.id, "title": detail.title}
     except TogoException as exc:
         return _tool_error_result(exc)

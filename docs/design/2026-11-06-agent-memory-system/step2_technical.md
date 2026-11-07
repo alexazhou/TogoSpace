@@ -175,8 +175,8 @@ sequenceDiagram
 | `memory_list` | 无 | `count`, `memories` (`list[MemoryListItem]`) | 返回当前 Agent 所有 `active` 记忆的 L1 目录 |
 | `memory_read` | `memory_id: int` | `memory` (`MemoryDetail`) | 校验归属后返回单条记忆的 L3 完整详情（支持读取已归档记忆） |
 | `memory_search` | `query: str`, `limit: int = 5` | `count`, `memories` (`list[MemorySearchItem]`) | 多关键词加权匹配，返回带 `summary` 与 `snippet` 的 L2 候选列表 |
-| `memory_create` | `title`, `summary`, `content`, `star_level="none"`, `tags=None` | `memory` (`MemoryDetail`) | 校验长度、同名防重与星标配额后落库 |
-| `memory_update` | `memory_id: int`, 可选 `title`, `summary`, `content`, `star_level`, `status`, `tags` | `memory` (`MemoryDetail`) | 校验配额与 `summary` 同步规则后更新；`status="archived"` 时自动将 `star_level` 置为 `"none"` |
+| `memory_create` | `title`, `summary`, `content`, `star_level="none"`, `tags=None` | `id`, `title` | 校验长度、同名防重与星标配额后落库；不回显正文（避免占用上下文） |
+| `memory_update` | `memory_id: int`, 可选 `title`, `summary`, `content`, `star_level`, `status`, `tags` | `id`, `title` | 校验配额与 `summary` 同步规则后更新；`status="archived"` 时自动将 `star_level` 置为 `"none"`；不回显正文 |
 
 ### 4.3 后端 HTTP 查询接口（供前端卡片页使用）
 

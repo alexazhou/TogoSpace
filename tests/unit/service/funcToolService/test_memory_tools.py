@@ -250,7 +250,9 @@ async def test_memory_create_passes_through_all_fields():
         )
 
     assert result["success"] is True
-    assert result["memory"]["star_level"] == "summary"
+    assert result["id"] == 12
+    assert result["title"] == "方案输出规范"
+    assert "content" not in result  # 不回显正文，避免占用上下文
     assert mocked.await_args.args == (_TEAM_ID, _AGENT_ID)
     assert mocked.await_args.kwargs == {
         "title": "方案输出规范",
@@ -267,8 +269,12 @@ async def test_memory_update_partial_passthrough():
 
     detail = MemoryDetail.from_memory(_memory())
     with patch("service.memoryService.update_memory", new=AsyncMock(return_value=detail)) as mocked:
-        await tools.memory_update(memory_id=12, star_level="title", _context=_context())
+        result = await tools.memory_update(memory_id=12, star_level="title", _context=_context())
 
+    assert result["success"] is True
+    assert result["id"] == 12
+    assert result["title"] == "方案输出规范"
+    assert "content" not in result  # 不回显正文，避免占用上下文
     assert mocked.await_args.args == (_TEAM_ID, _AGENT_ID, 12)
     assert mocked.await_args.kwargs == {
         "title": None,
