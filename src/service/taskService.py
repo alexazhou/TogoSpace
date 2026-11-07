@@ -389,12 +389,18 @@ async def update_task(
         _publish_event_appended(team_id, task, event)
 
         from playhouse.shortcuts import model_to_dict
+        message = "已追加评论（任务状态未变更）"
+        if old_status in (TaskStatus.DONE, TaskStatus.CANCELLED):
+            message += (
+                f"；提醒：该任务已是终态（{old_status.value}），评论已记录，但不要在这张单上继续投入。"
+                "确实还有要处理的事项，请新建任务单（create_task）或汇报主管，由主管判断是否开新单。"
+            )
         return {
             "success": True,
             "action": "commented",
             "task": model_to_dict(task, recurse=False),
             "comment": _serialize_event(event),
-            "message": "已追加评论（任务状态未变更）",
+            "message": message,
         }
 
     # ---- 流转分支：target 非空且 ≠ 当前状态 ----
