@@ -244,7 +244,7 @@ function setFilter(next: MemoryFilter): void {
           <span v-if="starBadgeLabel(memory)" class="agent-memory-card__star">
             {{ starBadgeLabel(memory) }}
           </span>
-          <span class="agent-memory-card__title">{{ memory.title }}</span>
+          <span class="agent-memory-card__title" :title="memory.title">{{ memory.title }}</span>
           <span v-if="memory.status === 'archived'" class="agent-memory-card__archived">
             {{ t('agent.memoryArchived') }}
           </span>
@@ -358,10 +358,10 @@ function setFilter(next: MemoryFilter): void {
   opacity: 0.78;
 }
 
+/* 标题行不换行：标题过长时自身截断（省略号），保证右侧时间不会被挤到下一行。 */
 .agent-memory-card__head {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 8px;
   cursor: pointer;
 }
@@ -375,10 +375,15 @@ function setFilter(next: MemoryFilter): void {
   color: var(--text-strong);
 }
 
+/* `min-width: 0` 是截断的前提：flex 子项默认 min-width:auto 会拒绝收缩。 */
 .agent-memory-card__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
   color: var(--text-strong);
-  word-break: break-word;
 }
 
 .agent-memory-card__archived {
@@ -391,6 +396,7 @@ function setFilter(next: MemoryFilter): void {
 }
 
 .agent-memory-card__meta {
+  flex-shrink: 0;
   margin-left: auto;
   display: flex;
   align-items: center;
