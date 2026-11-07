@@ -174,6 +174,34 @@ describe('AgentContextCapacityMeter 宽度与 clamp 顺序', () => {
   });
 });
 
+describe('AgentContextCapacityMeter 压缩触发线', () => {
+  /** 触发线位置同样读内联 style（left 百分比）。 */
+  function triggerLeftPercent(wrapper: ReturnType<typeof mountMeter>): number | null {
+    const trigger = wrapper.find('.agent-context-meter__trigger');
+    if (!trigger.exists()) {
+      return null;
+    }
+    const style = trigger.attributes('style') ?? '';
+    const matched = /left:\s*([\d.]+)%/.exec(style);
+    expect(matched, `未找到触发线位置: ${style}`).not.toBeNull();
+    return Number(matched![1]);
+  }
+
+  it('位置取 trigger / limit，跟随后端阈值而不是写死 85%', () => {
+    // 默认口径 97484 / 114688 ≈ 84.9993%
+    expect(triggerLeftPercent(mountMeter())).toBeCloseTo(85, 1);
+
+    // 配置 ratio 改成 0.5 → trigger 57344，线应落在 50%
+    const usage = createUsage({ compact_trigger_tokens: 57344 });
+    expect(triggerLeftPercent(mountMeter({ usage }))).toBeCloseTo(50, 1);
+  });
+
+  it('limit 非法（<= 0）时不画线', () => {
+    const usage = createUsage({ used_tokens: 0, limit_tokens: 0, ratio: 0 });
+    expect(triggerLeftPercent(mountMeter({ usage }))).toBeNull();
+  });
+});
+
 describe('AgentContextCapacityMeter 不渲染的两种情形', () => {
   it('usage 为 null 时整条不渲染（不是渲染 0%）', () => {
     const wrapper = mountMeter({ usage: null });

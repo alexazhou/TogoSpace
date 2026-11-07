@@ -63,6 +63,21 @@ const widthPercent = computed(() => {
 });
 
 /**
+ * 压缩触发线的横向位置（百分比）：`trigger / limit`。
+ *
+ * 进度条刻度是 `limit`，而 `trigger` 是后端业务阈值——用户在配置里改
+ * `compact_trigger_ratio` 后这条线要跟着动，所以不能在 CSS 里写死 85%。
+ * `limit <= 0`（配置异常）时不画线，与组件其余部分的「不知道就不画」一致。
+ */
+const triggerPercent = computed(() => {
+  if (!props.usage || props.usage.limit_tokens <= 0) {
+    return null;
+  }
+  const percent = (props.usage.compact_trigger_tokens / props.usage.limit_tokens) * 100;
+  return Math.min(100, Math.max(0, percent));
+});
+
+/**
  * 色温档位。**判据用绝对值**，不看 `ratio`（理由见文件头）。
  *
  * 注意这里刻意没有 `Math.min`：`used` 超过 `trigger` 之后一路都是 `danger`，
@@ -151,6 +166,11 @@ async function handleCompact(): Promise<void> {
         class="agent-context-meter__fill"
         :style="{ width: `${widthPercent}%` }"
       ></div>
+      <div
+        v-if="triggerPercent !== null"
+        class="agent-context-meter__trigger"
+        :style="{ left: `${triggerPercent}%` }"
+      ></div>
     </div>
   </div>
 </template>
@@ -219,11 +239,25 @@ async function handleCompact(): Promise<void> {
 }
 
 .agent-context-meter__track {
+  position: relative;
   height: 4px;
   border-radius: 999px;
   /* 空槽用半透明次级文字色，比 `--surface-input`（几乎等于面板色）更易辨认。 */
   background: color-mix(in srgb, var(--text-secondary) 26%, transparent);
   overflow: hidden;
+}
+
+/* 压缩触发线：标出 `compact_trigger_tokens` 在条上的位置。
+   它只是刻度，不是状态（状态由 fill 色温表达），所以颜色压得比空槽略深、不抢眼；
+   比空槽更淡就看不见了，对比度也需保证两种主题下都能辨认。 */
+.agent-context-meter__trigger {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--text-secondary) 48%, transparent);
+  pointer-events: none;
 }
 
 .agent-context-meter__fill {
