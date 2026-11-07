@@ -13,6 +13,30 @@ from util.cacheUtil import CacheStore
 
 # Agent 缓存：key 为 agent_id，value 为 GtAgent 对象
 _agent_cache = CacheStore[int, GtAgent](key_extractor=lambda a: a.id)
+# 失效代际号，二元组 (_gen_global, _gen_id[id])：
+#   - clear_agent_cache 只递增 _gen_global ⇒ 换库后所有在途读取都不再回填
+#   - invalidate_agent_cache 递增 _gen_global + _gen_id[id]
+_gen_global = 0
+_gen_id: dict[int, int] = {}
+
+
+def _gen_of(agent_id: int) -> tuple[int, int]:
+    """读取当前代际快照。"""
+    return _gen_global, _gen_id.get(agent_id, 0)
+
+
+def _fill_if_fresh(rows: list[GtAgent], snapshot: dict[int, tuple[int, int]]) -> None:
+    """按代际守卫回填缓存：查库期间被失效过的 id 不回填（§7.2⑤）。
+
+    get_agent_by_id 与 get_agents_by_ids 共用这一处守卫逻辑，
+    避免两处各写一遍、将来改一处忘一处。
+    """
+    fresh = [
+        row for row in rows
+        if row.id is not None and _gen_of(row.id) == snapshot.get(row.id)
+    ]
+    if fresh:
+        cache_agents(fresh)
 
 
 def cache_agents(agents: GtAgent | list[GtAgent]) -> None:
@@ -36,13 +60,21 @@ def get_cached_agent(agent_id: int) -> GtAgent | None:
 
 
 def invalidate_agent_cache(agent_id: int) -> None:
-    """失效单个 agent 的缓存。"""
+    """失效单个 agent 的缓存（只影响该 id 的在途读取）。"""
     _agent_cache.invalidate(agent_id)
+    _gen_id[agent_id] = _gen_id.get(agent_id, 0) + 1
 
 
 def clear_agent_cache() -> None:
-    """清空全部 agent 缓存。"""
+    """清空全部 agent 缓存（换库 / 测试隔离）。
+
+    只递增全局代际号，不遍历逐 id 计数器：换库后**所有**在途读取都必须放弃回填，
+    包括从未失效过的 id（它们不在 _gen_id 里，遍历式 bump 碰不到 —— 这正是
+    `4f412256` 那类「同 ID 复用命中上一份库对象」的成因）。
+    """
+    global _gen_global
     _agent_cache.clear()
+    _gen_global += 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -216,9 +248,10 @@ async def get_agent_by_id(agent_id: int) -> GtAgent | None:
     cached = get_cached_agent(agent_id)
     if cached is not None:
         return cached
+    snapshot = {agent_id: _gen_of(agent_id)}
     agent = await GtAgent.aio_get_or_none(GtAgent.id == agent_id)
     if agent is not None:
-        cache_agents(agent)
+        _fill_if_fresh([agent], snapshot)
     return agent
 
 
@@ -238,12 +271,13 @@ async def get_agents_by_ids(agent_ids: list[int]) -> list[GtAgent]:
         else:
             uncached_ids.append(agent_id)
     if uncached_ids:
+        snapshot = {aid: _gen_of(aid) for aid in uncached_ids}
         fetched = list(
             await GtAgent.select()
             .where(GtAgent.id.in_(uncached_ids))  # type: ignore[attr-defined]
             .aio_execute()
         )
-        cache_agents(fetched)
+        _fill_if_fresh(fetched, snapshot)
         agents.extend(fetched)
     # 保持原始顺序
     agent_map = {a.id: a for a in agents if a.id is not None}
@@ -297,8 +331,27 @@ async def batch_save_agents(team_id: int, agents: list[GtAgent]) -> None:
             for agent in to_create
         ]).aio_execute()
 
-    for agent in to_update:
+    try:
+        for agent in to_update:
+            await agent.aio_save()
+    finally:
+        for agent in to_update:
+            if agent.id is not None:
+                invalidate_agent_cache(agent.id)
+
+
+async def save_agent(agent: GtAgent) -> None:
+    """单条更新入口：持久化 + 缓存失效边界（文档 §5.1 示意接口）。
+
+    只处理**已存在**的 agent（id 非空）；新建仍走 `batch_save_agents`，
+    因为工号分配需要 `get_max_employee_number`。纯更新路径不该为一次 MAX 查询付钱。
+    """
+    if agent.id is None:
+        raise ValueError("save_agent 只用于更新已存在的 agent；新建请用 batch_save_agents")
+    try:
         await agent.aio_save()
+    finally:
+        invalidate_agent_cache(agent.id)
 
 
 async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) -> None:
@@ -306,6 +359,8 @@ async def batch_update_agent_status(agent_ids: list[int], status: EmployStatus) 
     if len(agent_ids) == 0:
         return
     await GtAgent.update(employ_status=status).where(GtAgent.id.in_(agent_ids)).aio_execute()  # type: ignore[attr-defined]
+    for aid in agent_ids:
+        invalidate_agent_cache(aid)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

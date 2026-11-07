@@ -439,8 +439,7 @@ class AgentModifyPropertiesHandler(BaseHandler):
         if "allow_skills" in request.model_fields_set:
             agent.allow_skills = request.allow_skills
 
-        await agent.aio_save()
-        gtAgentManager.cache_agents(agent)
+        await gtAgentManager.save_agent(agent)
 
         await agentService.hot_reload_agent(agent_id)
 
