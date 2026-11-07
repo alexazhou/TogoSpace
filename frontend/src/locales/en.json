@@ -301,7 +301,6 @@
     },
     "contextUsage": "Context",
     "contextCompact": "Compact",
-    "contextCompacting": "Compacting",
     "contextCompactSuccess": "Context compaction completed",
     "contextCompactNoHistory": "No enough history to compact",
     "contextCompactAgentActive": "Agent is working, manual compaction is unavailable",

@@ -143,7 +143,7 @@ async function handleCompact(): Promise<void> {
         :title="status === 'active' ? t('agent.contextCompactAgentActive') : t('agent.contextCompact')"
         @click="handleCompact"
       >
-        {{ compacting ? t('agent.contextCompacting') : t('agent.contextCompact') }}
+        {{ t('agent.contextCompact') }}
       </button>
     </div>
     <div class="agent-context-meter__track">
@@ -174,6 +174,7 @@ async function handleCompact(): Promise<void> {
   --meter-color: #ef4444;
 }
 
+/* 顶行：文字 + 压缩按钮，常驻显示；进度条在下一行通栏。 */
 .agent-context-meter__head {
   display: flex;
   align-items: center;
@@ -220,7 +221,8 @@ async function handleCompact(): Promise<void> {
 .agent-context-meter__track {
   height: 4px;
   border-radius: 999px;
-  background: var(--surface-input, rgba(127, 127, 127, 0.2));
+  /* 空槽用半透明次级文字色，比 `--surface-input`（几乎等于面板色）更易辨认。 */
+  background: color-mix(in srgb, var(--text-secondary) 26%, transparent);
   overflow: hidden;
 }
 

@@ -301,7 +301,6 @@
     },
     "contextUsage": "上下文",
     "contextCompact": "压缩",
-    "contextCompacting": "压缩中",
     "contextCompactSuccess": "上下文压缩已完成",
     "contextCompactNoHistory": "当前无足够可压缩的历史消息",
     "contextCompactAgentActive": "Agent 正在工作中，暂不支持手动压缩",

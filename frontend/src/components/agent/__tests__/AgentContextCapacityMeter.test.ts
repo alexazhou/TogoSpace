@@ -237,7 +237,7 @@ describe('AgentContextCapacityMeter 手动压缩按钮', () => {
     expect(compactMock).not.toHaveBeenCalled();
   });
 
-  it('压缩进行中禁用并显示"压缩中"，请求结束后恢复', async () => {
+  it('压缩进行中禁用，请求结束后恢复', async () => {
     let resolveCompact: (() => void) | null = null;
     compactMock.mockImplementation(
       () => new Promise<void>((resolve) => {
@@ -249,14 +249,12 @@ describe('AgentContextCapacityMeter 手动压缩按钮', () => {
     await wrapper.find('.agent-context-meter__compact').trigger('click');
 
     const busyButton = wrapper.find('.agent-context-meter__compact');
-    expect(busyButton.text()).toBe('压缩中');
     expect(busyButton.attributes('disabled')).toBeDefined();
 
     resolveCompact!();
     await flushPromises();
 
     const idleButton = wrapper.find('.agent-context-meter__compact');
-    expect(idleButton.text()).toBe('压缩');
     expect(idleButton.attributes('disabled')).toBeUndefined();
   });
 });
