@@ -36,8 +36,9 @@ export class MimoReasoningTemplate extends ExtraParamsConfigTemplate {
   }
 
   getDefaultState(): VisualConfigState {
+    // 与 readVisualState 的缺省口径保持一致：未配置过 thinking 时按「开启」处理。
     return {
-      enabled: false,
+      enabled: true,
     };
   }
 
