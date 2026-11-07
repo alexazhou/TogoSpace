@@ -156,8 +156,10 @@ async def test_r2_team_query_write_then_id_read_not_stale(agent_db):
     reason=(
         "R3a：事务内读回填未提交值的场景，当前无调用路径可达"
         "（6 个 atomic 块：agentService/core.py:704、containerService/core.py:446、"
-        "taskService.py:170/301、memoryService.py:255/331 内均无 agent 读；"
-        "src/ 下 agent 的 aio_save 仅 gtAgentManager 两处）。"
+        "taskService.py:170/301、memoryService.py:255/331 内均无 agent 缓存填充路径"
+        "——注意不是「无 agent 读」：core.py:704 块内 batch_save_agents 会跑 "
+        "get_max_employee_number() → SELECT MAX(employee_number)，读 agents 表但"
+        "不过缓存、不回填；src/ 下 agent 的 aio_save 仅 gtAgentManager 两处）。"
         "若将来新增此类路径，本用例会转 XPASS(strict) 并报红，届时再补实现。"
     ),
 )
@@ -168,8 +170,11 @@ async def test_r3a_rollback_must_not_leave_cache_value(agent_db):
     写入口的 `try/finally: invalidate` 挡不住这条——它不是写路径，是读路径。
 
     为什么现在 xfail 而不是修：**先有入口，才谈修**。上面 reason 里的
-    「6 个 atomic 块内无 agent 读」是可验证的前提，不是「已知缺陷」的结论。
-    前提一变（有人新增事务内读 agent 的路径），strict 会让本用例报红。
+    「6 个 atomic 块内无 agent 缓存填充路径」是可验证的前提，不是「已知缺陷」的结论。
+    （措辞是「无缓存填充路径」而非「无 agent 读」：`agentService/core.py:704` 块内
+    `batch_save_agents` 会跑 `get_max_employee_number()` → `SELECT MAX(employee_number)`，
+    读的是 agents 表，只是不过缓存、不回填 —— 前提必须写得能被验，写宽了会被一句话推翻。）
+    前提一变（有人新增事务内 **读 agent 并回填缓存** 的路径），strict 会让本用例报红。
     """
     agent = await _new_agent("r3a")
     # 关键：不预热缓存，让事务内读未命中 → 才会走 查库 + 填缓存
