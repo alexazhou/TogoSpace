@@ -174,12 +174,12 @@ function isExpanded(id: number): boolean {
   return expandedIds.value.has(id);
 }
 
-function starBadgeLabel(memory: AgentMemory): string {
+function starBadgeHint(memory: AgentMemory): string {
   if (memory.star_level === 'summary') {
-    return t('agent.memoryStarSummary');
+    return t('agent.memoryStarSummaryHint');
   }
   if (memory.star_level === 'title') {
-    return t('agent.memoryStarTitle');
+    return t('agent.memoryStarTitleHint');
   }
   return '';
 }
@@ -241,8 +241,15 @@ function setFilter(next: MemoryFilter): void {
         :data-status="memory.status"
       >
         <header class="agent-memory-card__head" @click="toggleExpanded(memory.id)">
-          <span v-if="starBadgeLabel(memory)" class="agent-memory-card__star">
-            {{ starBadgeLabel(memory) }}
+          <span
+            v-if="memory.star_level !== 'none'"
+            class="agent-memory-card__star"
+            :data-star-level="memory.star_level"
+            :title="starBadgeHint(memory)"
+            :aria-label="starBadgeHint(memory)"
+            role="img"
+          >
+            <i class="fa-solid fa-star" aria-hidden="true"></i>
           </span>
           <span class="agent-memory-card__title" :title="memory.title">{{ memory.title }}</span>
           <span v-if="memory.status === 'archived'" class="agent-memory-card__archived">
@@ -366,13 +373,21 @@ function setFilter(next: MemoryFilter): void {
   cursor: pointer;
 }
 
+/* 星标等级用颜色区分：概要级黄金星，标题级白银星；文字标签保留在 title / aria-label。 */
 .agent-memory-card__star {
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
-  padding: 1px 8px;
-  border-radius: 99px;
-  font-size: 11px;
-  background: color-mix(in srgb, var(--accent) 18%, var(--surface-pill) 82%);
-  color: var(--text-strong);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.agent-memory-card__star[data-star-level='summary'] {
+  color: var(--state-warning);
+}
+
+.agent-memory-card__star[data-star-level='title'] {
+  color: color-mix(in srgb, var(--text-secondary) 55%, #ffffff 45%);
 }
 
 /* `min-width: 0` 是截断的前提：flex 子项默认 min-width:auto 会拒绝收缩。 */

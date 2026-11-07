@@ -140,12 +140,22 @@ describe('AgentMemoryPanel 筛选与列表', () => {
 });
 
 describe('AgentMemoryPanel 星标与状态标识', () => {
-  it('summary 级显示「概要星标」，title 级显示「标题星标」，普通记忆无徽标', async () => {
+  it('summary 级显示黄金星，title 级显示白银星，普通记忆无徽标', async () => {
     const wrapper = await mountWithData();
     const cards = wrapper.findAll('.agent-memory-card');
+    const summaryStar = cards[0].find('.agent-memory-card__star');
+    const titleStar = cards[1].find('.agent-memory-card__star');
 
-    expect(cards[0].find('.agent-memory-card__star').text()).toBe('概要星标');
-    expect(cards[1].find('.agent-memory-card__star').text()).toBe('标题星标');
+    // 徽标本身只渲染星星图标，等级文字保留在 title / aria-label 中。
+    expect(summaryStar.find('i.fa-star').exists()).toBe(true);
+    expect(summaryStar.attributes('data-star-level')).toBe('summary');
+    expect(summaryStar.attributes('title')).toBe('Agent 已加星：标题和概要会注入提示词');
+    expect(summaryStar.attributes('aria-label')).toBe('Agent 已加星：标题和概要会注入提示词');
+
+    expect(titleStar.find('i.fa-star').exists()).toBe(true);
+    expect(titleStar.attributes('data-star-level')).toBe('title');
+    expect(titleStar.attributes('title')).toBe('Agent 已加星：标题会注入提示词');
+    expect(titleStar.attributes('aria-label')).toBe('Agent 已加星：标题会注入提示词');
 
     // 普通记忆（none）不渲染星标徽标
     const plain = await mountWithData([createMemory({ id: 30, star_level: 'none', title: '普通记忆' })]);

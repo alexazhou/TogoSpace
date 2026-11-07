@@ -137,6 +137,8 @@
     "memoryStarUsage": "Starred {total}/{totalLimit} · Summary {summary}/{summaryLimit}",
     "memoryStarSummary": "Summary star",
     "memoryStarTitle": "Title star",
+    "memoryStarSummaryHint": "Starred by the agent: title and summary are injected into the prompt",
+    "memoryStarTitleHint": "Starred by the agent: title is injected into the prompt",
     "memoryArchived": "Archived",
     "memoryLoadFailed": "Failed to load agent memories.",
     "memoryExpand": "Show content",

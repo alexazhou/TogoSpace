@@ -137,6 +137,8 @@
     "memoryStarUsage": "星标 {total}/{totalLimit} · 概要 {summary}/{summaryLimit}",
     "memoryStarSummary": "概要星标",
     "memoryStarTitle": "标题星标",
+    "memoryStarSummaryHint": "Agent 已加星：标题和概要会注入提示词",
+    "memoryStarTitleHint": "Agent 已加星：标题会注入提示词",
     "memoryArchived": "已归档",
     "memoryLoadFailed": "加载 Agent 记忆失败。",
     "memoryExpand": "展开正文",
