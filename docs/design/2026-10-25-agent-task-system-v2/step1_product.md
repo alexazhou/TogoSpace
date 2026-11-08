@@ -100,6 +100,11 @@ stateDiagram-v2
 - **流转状态**：传入 `new_status` 参数（且不等于当前状态）。
 - **追加评论**：**省略 `new_status` 参数**（或传入与当前状态相同的值），并填写 `note`。
 - **终态评论支持**：任务进入 `DONE` 或 `CANCELLED` 后，状态完全只读，但成员仍可通过省略 `new_status` 继续调用 `update_task` 追加后续结案分析或补充说明。
+- **修改 / 撤销验收人**（#158）：传 `reviewer_id` 改验收人，传 `clear_reviewer=True` 撤销。
+  - **谁能改**：任务**创建人**与**当前验收人**；**执行人不能**（否则执行人可以自选验收人，验收门形同虚设）。
+  - **撤销**只有创建人能做，且任务处于 `REVIEWING` 时不允许（会变成「没人能通过验收」）；撤销后执行人可直接把任务置 `DONE`，这个后果在返回信息里明确告知。
+  - **换人**在 `REVIEWING` 时允许——原验收人休假/离职时把验收交接给别人，是本能力的主要用途。
+  - 每次变更在时间线留一条「验收人变更：旧 → 新（原由：…）」/「验收人撤销：旧 → 无」的记录，**不会**自动唤醒新验收人，调用方需自行通知。
 
 ### 三、依赖满足自动推进
 - 创建时若指定了 `depends_on` 任务列表，且存在尚未完成的前置任务，任务初始状态自动为 `PENDING`。
@@ -119,7 +124,7 @@ stateDiagram-v2
 | 工具名称 | 核心用途 | 关键参数说明 | 行为要点 |
 |---|---|---|---|
 | `create_task` | 创建新任务 | `title`*、`assignee_id`*、`description`、`reviewer_id`、`priority`、`parent_id`、`depends_on`、`room_id` | 指定 `reviewer_id` 即开启验收环节；有未完成依赖时自动落为 `PENDING` |
-| `update_task` | 流转状态 或 追加评论 | `task_id`*、`new_status`（可选）、`note` | **给 `new_status` = 流转**；<br>**省略 `new_status` = 评论**（此时 `note` 必填） |
+| `update_task` | 流转状态 或 追加评论 或 修改/撤销验收人 | `task_id`*、`new_status`（可选）、`note`、`reviewer_id`（可选）、`clear_reviewer`（可选） | **给 `new_status` = 流转**；<br>**省略 `new_status` = 评论**（此时 `note` 必填）；<br>**给 `reviewer_id` / `clear_reviewer=True` = 改验收人**（仅创建人或当前验收人；不能与状态流转同一次调用） |
 | `get_task_detail` | 查询任务详情 | `task_id`* | 返回任务详情及依赖任务状态摘要（原 `get_task` 更名） |
 | `list_tasks` | 检索任务列表 | `assignee`、`reviewer`、`status`、`open_only`（默认 `True`） | `assignee` 与 `reviewer` **至少提供一个**，传 Agent ID |
 | `list_task_events` | 查看任务时间线 | `task_id`*、`limit`、`before_id` | 按游标读取该任务的完整流转与评论时间线 |
