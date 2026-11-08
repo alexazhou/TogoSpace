@@ -237,10 +237,11 @@ def _wire_notarize(monkeypatch, module, staple_fails: int):
 
 
 def test_r6_notarytool_submitted_exactly_once_when_staple_always_fails(bd, monkeypatch):
-    """R6：staple 3 次全失败时，notarytool submit 只被调用 1 次（硬要求 1）。
+    """R6：staple 3 次全失败时，notarytool submit 只被调用 1 次。
 
-    这条是行为级：把 `notarytool submit` 包进 `for range(1, 4)` 时，
-    notarytool 会被调 3 次，这里立刻红。
+    覆盖范围：这类（如有人把 notarytool 包进**无条件**的 `for range(1,4)`，notarytool 会被调 3 次，这里立刻红）。
+    **不覆盖**：`notarytool` 自身失败后的重试循环（`for` + `try: run_command(...); break` + `except` 形态）——该形态下 notarytool 第一次就失败、循环内 break 前不会重入，本判据仍绿；此形态由 **R11** 覆盖。
+    ⇒ R6 与 R11 互补，共同构成硬要求 1 的自动判据。
     """
     records, _ = _wire_notarize(monkeypatch, bd, staple_fails=99)
 
