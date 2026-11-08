@@ -61,6 +61,7 @@ Agent turn
 | `container_id` | `str \| null` | 唯一，Docker 容器 12 位短 ID；创建流程先插入空值，`docker create` 成功后回填 |
 | `container_name` | `str` | 容器名称（`agent-t<team_id>-<name>-<record_id>`）；不建唯一索引，唯一性由 `record_id` 保证，team 段与 Agent 名仅用于辨认归属，见 §3.5（依据 Operator 2026-11-01 指令修订） |
 | `image` | `str` | 创建时实际使用的镜像（默认 `ubuntu:24.04`） |
+| `note` | `str \| null` | 容器说明，创建时由 Agent 填写（迁移 `0021_add_note_to_agent_containers.sql`）。**可空**：存量行升级后为 `NULL`；创建时未填（含空串 / 纯空白）也存 `NULL`，不存空串。上限 200 字符，超长报错不截断（见 §6.2） |
 | `deleted` | `int` | 软删除标记（默认 `0`，删除后置为时间戳或 `1`），便于链路排查与执行回溯 |
 | `created_at` | `int` | 创建时间戳 |
 
@@ -68,6 +69,8 @@ Agent turn
 - **不存当前进入状态**：执行环境只存在于内存中，重启后一律回到宿主；
 - **架构 `arch`**：无需存库，创建或注入时通过 `docker inspect` 镜像/容器动态解析；
 - **名称后缀用自增主键**：容器名最后一段直接使用 `agent_containers.id`（全局唯一），无需额外的序号列，也无需在创建时扫描活跃容器名挑编号；删除后新建不会复用旧名；
+- **`note` 只创建时写**：没有修改说明的工具/接口（Operator 2026-11-08 明确「只创建时写」）。它是描述性字段，不参与配额、命名、状态判定，也不进 `docker` 参数（不进容器 label）。
+- **`note` 的「未填写」只有一种形态**：`NULL`。`None` / 空串 / 纯空白在 `containerService.normalize_container_note` 里统一归一成 `NULL`，首尾空白 strip 后存。口径是「用 `NULL` 表示没写」而不是空串：存量行升级后必然是 `NULL`，再让新数据用空串表示同一种状态，前端与模型就要处理两种「空」。
 - **软删除设计**：`delete_container` 执行 `docker rm -f` 后，不物理删除 DB 行，而是更新 `deleted = 1`；配额统计与容器列表都统计 `deleted == 0` 的活跃记录（含创建中的预记录）。
 - **统一使用 12 位短 ID**：`docker create` 输出完整 ID 后截取前 12 位作为 `container_id`；DB、对外 `container_id`、Docker CLI 参数统一使用该值，不再保存完整 ID，也不做短 ID → 全 ID 解析。
 - **先落预记录再回填 ID**：创建时先在 DB 插入一条 `container_id = NULL` 的预记录（同时占用配额），拿到自增 ID 后在**同一事务内**回填容器名（`set_container_name`），`docker create` 成功后回填 12 位短 ID；配额校验与预记录插入在同一互斥区内完成（按 agent 加锁），创建中记录计入配额并出现在 `list_containers`，避免并发创建绕过上限。
@@ -171,7 +174,7 @@ Agent turn
 - Docker 环境类：`docker_cli_not_found`、`docker_daemon_unavailable`、`container_mount_denied`；
 - 镜像类：`container_image_missing`（提示手动 `docker pull`）、`container_image_not_linux`、`container_arch_unsupported`；
 - 容器状态类：`container_not_found`、`container_lost`、`container_already_running`、`container_in_use`、`container_stopped`（外部容器非 `running` 提示，message 带实际状态）；
-- 执行类：`container_create_failed`、`container_enter_failed`、`container_not_executable`（无 `/tmp`、架构不匹配、gtsp 无法执行等）、`container_limit_reached`、`container_delete_failed`、`container_invalid_params`（`container_id` / `record_id` 二选一校验失败）；
+- 执行类：`container_create_failed`、`container_enter_failed`、`container_not_executable`（无 `/tmp`、架构不匹配、gtsp 无法执行等）、`container_limit_reached`、`container_delete_failed`、`container_invalid_params`（`container_id` / `record_id` 二选一校验失败）、`container_note_too_long`（说明超过 200 字符，缩短后重试即可）；
 - 能力类：`driver_not_support_container`（非 TSP 驱动不支持容器沙箱）。
 
 ---
@@ -371,6 +374,7 @@ sequenceDiagram
 | 参数名 | 类型 | 必填 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `image` | `str` | 否 | `"ubuntu:24.04"` | Docker 镜像名称（如 `"python:3.11"`、`"ubuntu:24.04"`），必须为本地已存在的 Linux 镜像 |
+| `note` | `str \| null` | 否 | `null` | 容器用途说明（如「跑前端构建」）。**上限 200 字符**，超长直接报 `container_note_too_long`，**不截断**；省略 / 空串 / 纯空白一律存 `null`。创建后不可修改，可在 `list_containers` 中看到 |
 
 - **返回字段**：
 
@@ -380,6 +384,7 @@ sequenceDiagram
 | `container_id` | `str` | 容器的 12 位短 ID |
 | `container_name` | `str` | 容器名称（`agent-t<team_id>-<name>-<record_id>`；依据 Operator 2026-11-01 指令修订，原为 `agent-<name>-<1..3>`） |
 | `image` | `str` | 实际使用的镜像名称 |
+| `note` | `str \| null` | 实际写入的说明；未填写为 `null`（与 `list_containers` 里的取值一致） |
 | `state` | `str` | 容器初始状态（固定为 `"created"`） |
 | `mounts` | `dict` | 挂载映射（`/workspace/self` 读写，`/workspace/team_shared` 只读） |
 | `message` | `str` | 提示说明（提醒当前仍处于宿主环境，如需使用需调用 `enter_container`） |
@@ -430,7 +435,7 @@ sequenceDiagram
 | `docker_available` | `bool` | 本地 Docker 服务是否可用 |
 | `exec_env` | `str` | 当前 Agent 执行环境（`"host"` 或 `"container"`） |
 | `current_container_id` | `str \| null` | 当前若在容器内，为该容器的 12 位短 ID；宿主下为 null |
-| `containers` | `list[object]` | 当前 Agent 的自建容器列表（含创建中的预记录），每一项包含：`record_id`、`container_id`（12 位短 ID；预记录尚未回填时为 null）、`container_name`、`state`（Docker 原始状态，如 `created`/`running`/`exited`/`paused`/`restarting`/`dead`；预记录按 `container_name` inspect，不存在为 `missing`，inspect 失败为 `unknown`）、`is_entered`、`image`、`created_at` |
+| `containers` | `list[object]` | 当前 Agent 的自建容器列表（含创建中的预记录），每一项包含：`record_id`、`container_id`（12 位短 ID；预记录尚未回填时为 null）、`container_name`、`state`（Docker 原始状态，如 `created`/`running`/`exited`/`paused`/`restarting`/`dead`；预记录按 `container_name` inspect，不存在为 `missing`，inspect 失败为 `unknown`）、`is_entered`、`image`、`note`（未填写为 `null`）、`created_at` |
 
 #### 5. `delete_container`（删除指定自建容器）
 

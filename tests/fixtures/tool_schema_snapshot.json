@@ -7,6 +7,12 @@
         "schema": {
           "type": "string"
         }
+      },
+      "note": {
+        "description": "这个容器的用途说明，例如「跑前端构建」「临时验证 python 脚本」。 创建后不能修改，可以用 list_containers 看到。最多 200 个字符， 超长会直接报错而不是截断；省略表示不写说明。",
+        "schema": {
+          "type": "string"
+        }
       }
     },
     "required": []

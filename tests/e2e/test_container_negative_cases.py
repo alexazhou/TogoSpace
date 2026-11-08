@@ -44,7 +44,6 @@
 from __future__ import annotations
 
 import os
-import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -61,6 +60,8 @@ from service.containerService.dockerCli import (
     DockerCli,
     DockerCliError,
 )
+
+from container_db_schema import migrate_all
 
 # ---------------------------------------------------------------------------
 # 前置条件：两个用例都需要本机不具备的环境，因此无条件 skip
@@ -95,36 +96,8 @@ _DOCKER_E2E_SKIP = pytest.mark.skipif(
     ),
 )
 
-_MIGRATION_DIR = Path(__file__).resolve().parents[2] / "assets" / "migrate"
-
-# 与 happy path 同口径：只建容器服务真正依赖的两张业务表，容器表走真实 0017 迁移。
-# 不复用 `test_container_happy_path._MIN_SCHEMA_SQL`：跨测试文件 import 私有常量
-# 会把别人的类型问题带进来，且漂移风险由 happy path 末尾那条防漂移用例统一兜住。
-_MIN_SCHEMA_SQL = """
-CREATE TABLE teams (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    uuid TEXT UNIQUE,
-    config TEXT NOT NULL DEFAULT '{}',
-    i18n TEXT NOT NULL DEFAULT '{}',
-    enabled INTEGER NOT NULL DEFAULT 1,
-    deleted INTEGER NOT NULL DEFAULT 0,
-    created_at DATETIME, updated_at DATETIME
-);
-CREATE TABLE agents (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    team_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    role_template_id INTEGER NOT NULL,
-    employ_status TEXT NOT NULL DEFAULT 'ON_BOARD',
-    model TEXT NOT NULL DEFAULT '',
-    driver TEXT NOT NULL DEFAULT 'NATIVE',
-    employee_number INTEGER NOT NULL DEFAULT 0,
-    i18n TEXT NOT NULL DEFAULT '{}',
-    allow_tools TEXT, allow_skills TEXT,
-    created_at DATETIME, updated_at DATETIME
-);
-"""
+# 建库统一走「跑完整迁移到最新」，不再手写最小 schema：与 happy path 同口径，
+# 详见 `tests/container_db_schema.py`（#153 加 0021 `note` 列时手写建表全红）。
 
 _ALPINE_IMAGE = "alpine:3.20"
 _DISTROLESS_IMAGE = "gcr.io/distroless/base-debian12"
@@ -165,13 +138,7 @@ async def neg_env(tmp_path, monkeypatch, real_docker):
     from service.ormService import AioSqliteDatabase
 
     db_path = tmp_path / "neg.db"
-    conn = sqlite3.connect(str(db_path))
-    try:
-        conn.executescript(_MIN_SCHEMA_SQL)
-        conn.executescript((_MIGRATION_DIR / "0017_agent_containers.sql").read_text("utf-8"))
-        conn.commit()
-    finally:
-        conn.close()
+    migrate_all(db_path, workspace_root=tmp_path)
 
     database = AioSqliteDatabase(str(db_path), pool_params={"timeout": 30})
     bind_database(database)

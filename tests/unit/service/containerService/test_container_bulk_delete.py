@@ -89,7 +89,12 @@ async def test_delete_team_containers_uses_container_id_for_every_record(fake):
     # team 清理是按「该 Team 的全部 Agent」反查记录，所以 agent 2 必须真的存在于库里
     from model.dbModel.gtAgent import GtAgent
 
-    await GtAgent(team_id=1, name="小刚", role_template_id=1).aio_save(force_insert=True)
+    # `employee_number` 必须显式给：生产 schema（0001 迁移）有唯一索引
+    # `agents_team_id_employee_number (team_id, employee_number)`，env 夹具里的 1 号 Agent
+    # 已占 0。手写最小 schema 的年代没建这个索引，这条用例是靠「测试 schema 缺约束」才过的。
+    await GtAgent(
+        team_id=1, name="小刚", role_template_id=1, employee_number=1
+    ).aio_save(force_insert=True)
     await _seed(agent_id=1, name="agent-1-1", container_id="c0ffee123456")
     await _seed(agent_id=2, name="agent-2-1", container_id="deadbeef0002")
     fake.set("rm", stdout="")

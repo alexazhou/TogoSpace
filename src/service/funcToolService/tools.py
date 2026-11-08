@@ -1471,7 +1471,11 @@ def _container_agent(_context: ToolCallContext | None):
     return agent
 
 
-async def create_container(image: Optional[str] = None, _context: ToolCallContext = None) -> dict[str, Any]:
+async def create_container(
+    image: Optional[str] = None,
+    note: Optional[str] = None,
+    _context: ToolCallContext = None,
+) -> dict[str, Any]:
     """创建一个属于你的沙箱容器，用于在隔离环境中执行命令。
 
     创建后容器处于「已创建」状态，仍未投入使用；需要再调用 enter_container 才会把
@@ -1484,25 +1488,32 @@ async def create_container(image: Optional[str] = None, _context: ToolCallContex
     Args:
         image: 容器镜像名称，例如 "ubuntu:24.04"、"python:3.11"。必须是本地已存在的
             Linux 镜像，系统不会自动拉取；省略时使用默认镜像。
+        note: 这个容器的用途说明，例如「跑前端构建」「临时验证 python 脚本」。
+            创建后不能修改，可以用 list_containers 看到。最多 200 个字符，
+            超长会直接报错而不是截断；省略表示不写说明。
     """
     try:
         _container_agent(_context)
         assert _context is not None
-        record = await containerService.create_container(_context.agent_id, image=image)
+        record = await containerService.create_container(
+            _context.agent_id, image=image, note=note
+        )
         container_id = record.container_id
         assert container_id is not None
+        note_hint = f"，说明「{record.note}」" if record.note else ""
         return {
             "success": True,
             "container_id": container_id,
             "container_name": record.container_name,
             "image": record.image,
+            "note": record.note,
             "state": "created",
             "mounts": {
                 CONTAINER_SELF_MOUNT_PATH: "读写",
                 CONTAINER_SHARED_MOUNT_PATH: "只读",
             },
             "message": (
-                f"容器已创建（{container_id}，镜像 {record.image}），当前仍处于宿主环境。"
+                f"容器已创建（{container_id}，镜像 {record.image}{note_hint}），当前仍处于宿主环境。"
                 "如需在容器内执行操作，请调用 enter_container 切换进去。"
             ),
         }
