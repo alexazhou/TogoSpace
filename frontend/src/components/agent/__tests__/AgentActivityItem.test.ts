@@ -521,4 +521,33 @@ describe('AgentActivityItem token 展示', () => {
     expect(tokenEl(wrapper).text()).toBe('↑ 80000 ↓ 0');
     expect(estimatedTokensEl(wrapper).exists()).toBe(false);
   });
+
+  /**
+   * T6-f 真值为 **0** + 估算键并存：`??` 与 `||` 唯一能分出对错的形态。
+   *
+   * `completionTokensOut ?? estimatedCompletion ?? 0` 中 `??` 只对 `null`/`undefined`
+   * 回落，`0` 是真值 ⇒ 显示 `↓ 0`。若写成 `||`，`0` 会被当空、回落到估算 30
+   * ⇒ 显示 `↓ 30`（把「确实没有输出」显示成「输出了 30」，是错的）。
+   *
+   * 这个形态在 COMPACT 侧此前没有任何判据守着：T6-c/T6-d/T6-e 在 `??`→`||`
+   * 变异下**全部仍绿**（LLM_INFER 侧同族变异由 M10 咬住，缺口只在 COMPACT）。
+   * 可达性低但不是不可达：带 usage 的 chunk 且 `completion_tokens == 0` 会走真值
+   * 分支（`0 is not None`），与先前的估算值并存。
+   */
+  it('T6-f 压缩中真值为 0 + 估算并存：0 不得被当成空值回落', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'compact',
+      status: 'started',
+      metadata: {
+        context_tokens_before: 80000,
+        completion_tokens: 0,
+        estimated_completion_tokens: 30,
+      },
+    }));
+
+    expect(tokenEl(wrapper).text()).toBe('↑ 80000 ↓ 0');
+    // 反向对照：断死 `||` 会产生的那种错值。
+    expect(tokenEl(wrapper).text()).not.toBe('↑ 80000 ↓ 30');
+    expect(estimatedTokensEl(wrapper).exists()).toBe(false);
+  });
 });
