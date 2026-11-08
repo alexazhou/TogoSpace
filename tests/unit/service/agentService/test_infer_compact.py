@@ -48,8 +48,17 @@ TRIGGER_TOKENS = 23718
 HARD_LIMIT_TOKENS = 27904
 
 _CONFIG_PATCH = "util.configUtil.get_app_config"
-_INFER_PATCH = "service.agentService.compact.llmService.infer"
+_COMPACT_LLM_PATCH = "service.agentService.compact.llmService"
 _INFER_STREAM_PATCH = "service.agentService.agentTurnRunner.llmService.infer_stream"
+
+
+def _patch_compact_infer(result):
+    """只替换 compact 模块持有的 llmService 引用。
+
+    不能 patch `llmService.infer_stream` 属性：compact 与 agentTurnRunner
+    引用同一个模块对象，同时 patch 会互相覆盖。
+    """
+    return patch(_COMPACT_LLM_PATCH, MagicMock(infer_stream=AsyncMock(return_value=result)))
 _ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
 _ACTIVITY_PATCH = "service.agentService.agentTurnRunner.agentActivityService"
 
@@ -169,7 +178,7 @@ async def test_infer_pre_check_triggers_compact():
         patch(_INFER_STREAM_PATCH, AsyncMock(side_effect=[
             llmService.InferResult.success(main_resp),
         ])),
-        patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(compact_resp))),
+        _patch_compact_infer(llmService.InferResult.success(compact_resp)),
         patch(_ESTIMATE_PATCH, side_effect=[TRIGGER_TOKENS + 100, 5000]),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
@@ -189,7 +198,7 @@ async def test_infer_pre_check_still_over_after_compact():
 
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
-        patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(compact_resp))),
+        _patch_compact_infer(llmService.InferResult.success(compact_resp)),
         patch(_ESTIMATE_PATCH, side_effect=[TRIGGER_TOKENS + 100, HARD_LIMIT_TOKENS + 10]),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
@@ -225,7 +234,7 @@ async def test_infer_post_check_triggers_compact():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.success(main_resp))),
-        patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(compact_resp))),
+        _patch_compact_infer(llmService.InferResult.success(compact_resp)),
         patch(_ESTIMATE_PATCH, side_effect=[5000, 4000]),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
@@ -279,7 +288,7 @@ async def test_infer_overflow_triggers_compact_retry():
             llmService.InferResult.failure(overflow_error),
             llmService.InferResult.success(retry_resp),
         ])),
-        patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(compact_resp))),
+        _patch_compact_infer(llmService.InferResult.success(compact_resp)),
         patch(_ESTIMATE_PATCH, side_effect=[5000, 5000]),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
@@ -301,7 +310,7 @@ async def test_infer_overflow_after_precheck_no_retry():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.failure(overflow_error))),
-        patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(compact_resp))),
+        _patch_compact_infer(llmService.InferResult.success(compact_resp)),
         patch(_ESTIMATE_PATCH, side_effect=[TRIGGER_TOKENS + 100, 5000]),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
@@ -339,7 +348,7 @@ async def test_infer_overflow_compact_still_over_fails():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.failure(overflow_error))),
-        patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(compact_resp))),
+        _patch_compact_infer(llmService.InferResult.success(compact_resp)),
         patch(_ESTIMATE_PATCH, side_effect=[5000, HARD_LIMIT_TOKENS + 10]),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
@@ -395,7 +404,7 @@ async def test_execute_compact_inserts_summary_and_trims():
 
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
-        patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.success(compact_resp))),
+        _patch_compact_infer(llmService.InferResult.success(compact_resp)),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         await runner._execute_compact()
@@ -414,7 +423,7 @@ async def test_execute_compact_failure_raises():
 
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
-        patch(_INFER_PATCH, AsyncMock(return_value=llmService.InferResult.failure(error))),
+        _patch_compact_infer(llmService.InferResult.failure(error)),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         with pytest.raises(RuntimeError):

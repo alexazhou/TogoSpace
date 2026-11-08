@@ -43,14 +43,21 @@ class AgentActivityMeta:
     # 与 send_chat_msg 等工具的目标房间无关。
     task_room_id: int | None = None
     model: str | None = None
+    # token 用量：真值三键与上游 `OpenAIUsage` 同名（prompt/completion/total），
+    # 本侧估算用 `estimated_` 前缀区分。**必须平铺**——`update_activity_progress`
+    # 的 metadata 合并是浅合并（`merged.update(patch_dict)`），嵌成子对象会被
+    # 流中进度整体替换掉收尾写入的真值键。
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    # `estimated_prompt_tokens` 输入侧估算：名字一直就是 `estimated_` 前缀，沿用未改
+    # （历史行里它仍可读，前端照旧显示 ↑ 输入）。
     estimated_prompt_tokens: int | None = None
-    # 流式进度
-    current_completion_tokens: int | None = None
-    current_total_tokens: int | None = None
-    # 最终 usage
-    final_prompt_tokens: int | None = None
-    final_completion_tokens: int | None = None
-    final_total_tokens: int | None = None
+    # 输出侧估算（原「流中进度」键里按 delta 累加的那一半，语义不纯故拆开）
+    estimated_completion_tokens: int | None = None
+    # COMPACT 专用：压缩前后的上下文估算（与 LLM usage 口径不同，单独存放）
+    context_tokens_before: int | None = None
+    context_tokens_after: int | None = None
     # 溢出重试
     overflow_retry: bool | None = None
     error_kind: str | None = None
@@ -74,16 +81,29 @@ class AgentActivityMeta:
     container_name: str | None = None
 
     def apply_progress(self, progress) -> None:
-        """从 InferStreamProgress 更新流式进度字段。"""
-        self.current_completion_tokens = progress.current_completion_tokens
-        self.current_total_tokens = progress.current_total_tokens
+        """从 InferStreamProgress 更新流式进度字段。
+
+        真值与估算各走各的键，互不覆盖：上游 `InferStreamProgress` 已经把
+        「这个 chunk 带回 usage」与「本地按 delta 累加」拆成了两组字段。
+
+        **只写有值的字段**（不是无条件赋值）：同一个活动上可以先后出现真值 chunk
+        与估算 chunk，无条件赋值会让后到的进度把先前那组键清成 `None`
+        （`to_dict()` 剔除 None ⇒ 键直接消失，前端从「真值正常色」掉回「估算浅色」）。
+        真值一旦由网关给出就是稳定值，没有「用进度把它清空」的正当场景。
+        """
+        if progress.completion_tokens is not None:
+            self.completion_tokens = progress.completion_tokens
+        if progress.total_tokens is not None:
+            self.total_tokens = progress.total_tokens
+        if progress.estimated_completion_tokens is not None:
+            self.estimated_completion_tokens = progress.estimated_completion_tokens
 
     def apply_usage(self, usage) -> None:
         """从 LLM usage 对象更新最终 token 用量。"""
         if usage is not None:
-            self.final_prompt_tokens = usage.prompt_tokens
-            self.final_completion_tokens = usage.completion_tokens
-            self.final_total_tokens = usage.total_tokens
+            self.prompt_tokens = usage.prompt_tokens
+            self.completion_tokens = usage.completion_tokens
+            self.total_tokens = usage.total_tokens
 
     def apply_request_status_event(self, event) -> None:
         """从 InferRequestStatusEvent 更新请求重试状态字段。"""
@@ -165,6 +185,7 @@ async def update_activity_progress(
     detail: str | None = None,
     error_message: str | None = None,
     metadata_patch: AgentActivityMeta | None = None,
+    persist: bool = True,
 ) -> GtAgentActivity:
     """更新活动记录进度。
 
@@ -173,6 +194,8 @@ async def update_activity_progress(
     - metadata_patch 采用浅合并（读取 → merge → 写回），但**执行环境三元组是整体快照**：
       patch 带 `exec_env` 时会先清掉旧的 `current_container_id` / `container_name`，
       见下面注释（空值 vs 错值）。
+    - persist=False 时只更新内存对象并广播，不写数据库。用于流式 token 这类高频、
+      纯观测的进度刷新：前端靠广播实时刷新即可，最终状态仍由收尾更新落库。
     - 调用约定：调用处统一写成单行，避免在业务代码里拆成多行
     """
     update_fields: dict = {}
@@ -214,6 +237,17 @@ async def update_activity_progress(
             if current is not None:
                 delta = now - current.started_at
                 update_fields["duration_ms"] = int(delta.total_seconds() * 1000)
+
+    if not persist:
+        # 不写库：把本次更新应用到读出的行上，仅用于广播。行不存在与写库路径同样报错。
+        if current is None:
+            current = await GtAgentActivity.aio_get_or_none(GtAgentActivity.id == activity_id)
+        if current is None:
+            raise RuntimeError(f"update_activity_progress failed: activity_id={activity_id}")
+        for field_name, value in update_fields.items():
+            setattr(current, field_name, value)
+        _broadcast(current)
+        return current
 
     activity = await gtAgentActivityManager.update_activity_by_id(activity_id, **update_fields)
     _broadcast(activity)

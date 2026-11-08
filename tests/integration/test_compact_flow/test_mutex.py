@@ -55,10 +55,10 @@ from tests.base import ServiceTestCase
 from tests.integration.test_compact_flow.test import (
     _ACTIVITY_PATCH,
     _CONFIG_PATCH,
-    _INFER_PATCH,
     _make_mock_response,
     _mock_activity_service,
     _mock_config,
+    _patch_compact_infer,
 )
 
 _AGENT_ID = 99
@@ -231,7 +231,7 @@ class TestManualCompactMutex(ServiceTestCase):
 
         with (
             mock.patch(_CONFIG_PATCH, return_value=_mock_config()),
-            mock.patch(_INFER_PATCH, _gated_infer(gate, "这是压缩摘要：之前讨论了5轮对话。")),
+            _patch_compact_infer(_gated_infer(gate, "这是压缩摘要：之前讨论了5轮对话。")),
             mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
         ):
             first = asyncio.create_task(handler.post(str(_AGENT_ID)))
@@ -280,7 +280,7 @@ class TestManualCompactMutex(ServiceTestCase):
 
         with (
             mock.patch(_CONFIG_PATCH, return_value=_mock_config()),
-            mock.patch(_INFER_PATCH, AsyncMock(
+            _patch_compact_infer(AsyncMock(
                 return_value=llmService.InferResult.success(_make_mock_response("这是压缩摘要：A2 挂点。")),
             )),
             mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
@@ -333,7 +333,7 @@ class TestManualCompactMutex(ServiceTestCase):
 
         with (
             mock.patch(_CONFIG_PATCH, return_value=_mock_config()),
-            mock.patch(_INFER_PATCH, AsyncMock(
+            _patch_compact_infer(AsyncMock(
                 return_value=llmService.InferResult.success(_make_mock_response("这是压缩摘要：D 挂点。")),
             )),
             mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
@@ -377,7 +377,7 @@ class TestManualCompactMutex(ServiceTestCase):
 
         with (
             mock.patch(_CONFIG_PATCH, return_value=_mock_config()),
-            mock.patch(_INFER_PATCH, AsyncMock(
+            _patch_compact_infer(AsyncMock(
                 return_value=llmService.InferResult.success(_make_mock_response("第一次摘要")),
             )),
             mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
@@ -387,7 +387,7 @@ class TestManualCompactMutex(ServiceTestCase):
 
             await _append_one_round(history)
 
-            with mock.patch(_INFER_PATCH, AsyncMock(
+            with _patch_compact_infer(AsyncMock(
                 return_value=llmService.InferResult.success(_make_mock_response("第二次摘要")),
             )):
                 await handler.post(str(_AGENT_ID))
@@ -432,7 +432,7 @@ class TestManualCompactMutex(ServiceTestCase):
 
         with (
             mock.patch(_CONFIG_PATCH, return_value=_mock_config()),
-            mock.patch(_INFER_PATCH, _gated_infer(gate, "这是压缩摘要：turn 互斥。")),
+            _patch_compact_infer(_gated_infer(gate, "这是压缩摘要：turn 互斥。")),
             mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
             mock.patch(
                 "service.agentService.jobConsumer.gtScheduleJobManager.get_first_unfinished_job",

@@ -194,8 +194,8 @@ class ServiceTestCase:
     def patch_infer(self, responses: list[dict] = None, handler=None):
         """统一封装对 llmService.infer / infer_stream 的 Mock 注入。
 
-        同时 patch infer 和 infer_stream，使 compact（调用 infer）与
-        agentTurnRunner（调用 infer_stream）共享同一个 mock 队列。
+        同时 patch infer 和 infer_stream：compact / agentTurnRunner 都调用
+        infer_stream，视觉兜底仍调用 infer；三者共享同一个 mock 队列。
         
         用法 (简化字典):
             with self.patch_infer(responses=[{"content": "你好"}]):

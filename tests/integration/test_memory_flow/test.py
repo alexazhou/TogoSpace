@@ -54,7 +54,7 @@ _TEAM_ID = 2
 _AGENT_ID = 99
 
 _CONFIG_PATCH = "util.configUtil.get_app_config"
-_INFER_PATCH = "service.agentService.compact.llmService.infer"
+_INFER_PATCH = "service.agentService.compact.llmService.infer_stream"
 _ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
 _ACTIVITY_PATCH = "service.agentService.agentTurnRunner.agentActivityService"
 

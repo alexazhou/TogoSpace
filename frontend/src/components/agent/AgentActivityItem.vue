@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import { getTeamRooms } from '../../realtime/runtimeStore';
 import type { AgentActivity } from '../../types';
 import { displayName, stripAnsi } from '../../utils';
+import { useAnimatedNumber } from '../../composables/useAnimatedNumber';
 import MarkdownContent from '../ui/MarkdownContent.vue';
 
 const { t } = useI18n();
@@ -481,22 +482,88 @@ function execEnvBadgeTitle(activity: AgentActivity): string {
   return identity ? `${t('agent.execEnv.container')} · ${identity}` : t('agent.execEnv.container');
 }
 
-function activityMetaTokens(activity: AgentActivity): string {
+/**
+ * split 分支的一段：值 + 「这段是估算还是真值」。
+ *
+ * 估算标记必须**逐段**，不能整条一个 boolean：可以出现「输入已是 usage 真值、输出还只有
+ * 流中估算」的混色态，整条判定会让估算值按真值色显示，被用户当成权威数字。
+ */
+interface ActivityTokenSegment {
+  /** 该段的数值（未格式化；格式化在模板里做，好让补间后的中间值也走同一套文案） */
+  value: number;
+  /** `true` 表示这段用的是估算值（后端 usage 尚未给出该段真值） */
+  estimated: boolean;
+}
+
+/**
+ * 活动条目尾部的 token 显示数据。
+ *
+ * 为什么不再返回 `string`：一个字符串承载不了「这两个数是估算还是真值」，估算态就没法在
+ * 模板上挂 class 做浅色。所以拆成结构化对象，由模板分段渲染、按 `estimated` 挂 class。
+ *
+ * - `kind: 'text'`：单一文案（COMPACT 两条分支），与改造前逐字相同。
+ * - `kind: 'split'`：推理（LLM_INFER）的「↑ 输入 ↓ 输出」两段。
+ */
+interface ActivityTokenDisplay {
+  kind: 'text' | 'split';
+  /** 完整显示文本：COMPACT 分支直接渲染，split 分支用作 `title`（补间中也是目标文案） */
+  text: string;
+  /** split 专用：输入段；后端没有任何输入量时缺失 */
+  up?: ActivityTokenSegment;
+  /** split 专用：输出段；后端没有任何输出量时缺失 */
+  down?: ActivityTokenSegment;
+}
+
+function activityTokenDisplay(activity: AgentActivity): ActivityTokenDisplay | null {
+  // ⚠️ 所有 metadata token 键名只出现在这个函数里。
+  // #169 起真值三键与上游 `OpenAIUsage` 同名（`prompt_tokens` / `completion_tokens` /
+  // `total_tokens`），本侧估算用 `estimated_` 前缀，两者平铺、互不覆盖。
   const metadata = activity.metadata ?? {};
-  const currentTotal = typeof metadata.current_total_tokens === 'number' ? metadata.current_total_tokens : null;
-  const finalTotal = typeof metadata.final_total_tokens === 'number' ? metadata.final_total_tokens : null;
-  const estimated = typeof metadata.estimated_prompt_tokens === 'number' ? metadata.estimated_prompt_tokens : null;
-  const currentCompletion = typeof metadata.current_completion_tokens === 'number' ? metadata.current_completion_tokens : null;
-  if (finalTotal !== null) {
-    return `tokens ${finalTotal}`;
+  const readNumber = (key: string): number | null =>
+    typeof metadata[key] === 'number' ? (metadata[key] as number) : null;
+
+  // COMPACT：压缩中是「压缩前规模 + 摘要输出的持续估算」，结束后是「压缩前 → 压缩后」。
+  // 这两种形态已经是「两段 + 箭头」的形状，不在 token 拆分范围内，保持原样。
+  const contextBefore = readNumber('context_tokens_before');
+  const contextAfter = readNumber('context_tokens_after');
+  const estimatedCompletion = readNumber('estimated_completion_tokens');
+  if (contextBefore !== null && contextAfter !== null) {
+    return {
+      kind: 'text',
+      text: t('agent.tokenCompactRange', { before: contextBefore, after: contextAfter }),
+    };
   }
-  if (currentTotal !== null) {
-    return `tokens ${currentTotal}`;
+  if (contextBefore !== null) {
+    return {
+      kind: 'text',
+      text: t('agent.tokenCompactProgress', { before: contextBefore, count: estimatedCompletion ?? 0 }),
+    };
   }
-  if (estimated !== null) {
-    return t('agent.tokenEstimate', { count: estimated + (currentCompletion ?? 0) });
+
+  // 推理（LLM_INFER）：一律拆成「↑ 输入 ↓ 输出」。
+  // 结束后用后端 usage 真值；流中用估算（`estimated_prompt_tokens` + 已输出的 completion）。
+  // `total_tokens` 不参与显示（总量对「输入/输出」没有信息量，后端仍照旧写进 metadata）。
+  const promptTokens = readNumber('prompt_tokens');
+  const completionTokens = readNumber('completion_tokens');
+  const estimatedPrompt = readNumber('estimated_prompt_tokens');
+  const upValue = promptTokens ?? estimatedPrompt;
+  // 结束态但 usage 只回了 prompt（网关不回 usage 时的兜底路径只写
+  // `estimated_completion_tokens`）⇒ 输出量回落到流中估算的终值。
+  const downValue = completionTokens ?? estimatedCompletion;
+  if (upValue === null && downValue === null) {
+    // 两个都没有：不渲染 tokens 元素（与改造前返回空串的行为一致）。
+    return null;
   }
-  return '';
+  // 逐段判定：某段没有 usage 真值就是估算段。混色态（输入真值 + 输出估算）必须能表达。
+  const up = upValue === null ? undefined : { value: upValue, estimated: promptTokens === null };
+  const down = downValue === null ? undefined : { value: downValue, estimated: completionTokens === null };
+  return {
+    kind: 'split',
+    up,
+    down,
+    text: `${up ? t('agent.tokenInferenceUp', { count: up.value }) : ''}`
+      + `${down ? ` ${t('agent.tokenInferenceDown', { count: down.value })}` : ''}`,
+  };
 }
 
 function getActivityModel(activity: AgentActivity): string {
@@ -743,10 +810,58 @@ const activityView = computed(() => {
       ? ''
       : currentSummary,
     title: currentTitle,
-    tokenText: activityMetaTokens(activity),
+    tokenDisplay: activityTokenDisplay(activity),
     toolArguments: currentToolArguments,
     toolName: currentToolName,
     toolResult: currentToolResult,
+  };
+});
+
+/**
+ * token 两段各自的补间目标值。
+ *
+ * 只喂 `number | null` 给 `useAnimatedNumber`，让它不感知 metadata 结构（#169 会改键名，
+ * 那个改动不应波及补间实现）。
+ */
+const tokenUpTarget = computed<number | null>(() => {
+  const display = activityView.value.tokenDisplay;
+  return display && display.kind === 'split' && display.up ? display.up.value : null;
+});
+const tokenDownTarget = computed<number | null>(() => {
+  const display = activityView.value.tokenDisplay;
+  return display && display.kind === 'split' && display.down ? display.down.value : null;
+});
+
+// 两个值各自独立补间：输入与输出的推送节奏不同，共用一个进度条会出现「一段拖着另一段」。
+const animatedUpTokens = useAnimatedNumber(() => tokenUpTarget.value);
+const animatedDownTokens = useAnimatedNumber(() => tokenDownTarget.value);
+
+/**
+ * 模板实际渲染的 token 视图。
+ *
+ * 补间只改**数字**：哪段是输入/输出、哪段是估算（浅色）全部沿用 `activityView.tokenDisplay`
+ * 的判定，估算标记取**目标态**而不是当帧插值——估算态是数据来源的属性，与动画进度无关。
+ */
+const tokenView = computed(() => {
+  const display = activityView.value.tokenDisplay;
+  if (!display) {
+    return null;
+  }
+  if (display.kind === 'text') {
+    return { kind: 'text' as const, text: display.text, title: display.text };
+  }
+  const upValue = animatedUpTokens.value;
+  const downValue = animatedDownTokens.value;
+  const upText = display.up && upValue !== null ? t('agent.tokenInferenceUp', { count: upValue }) : '';
+  const downText = display.down && downValue !== null ? ` ${t('agent.tokenInferenceDown', { count: downValue })}` : '';
+  return {
+    kind: 'split' as const,
+    upText,
+    downText,
+    upEstimated: Boolean(display.up?.estimated),
+    downEstimated: Boolean(display.down?.estimated),
+    // `title` 用目标文案：悬停要看到的是最终权威值，不是动画中间帧。
+    title: display.text,
   };
 });
 </script>
@@ -862,8 +977,24 @@ const activityView = computed(() => {
         class="agent-activity-item__chip agent-activity-item__chip--mono"
         :title="activityView.metadataToolName"
       >{{ activityView.metadataToolName }}</span>
-      <span v-if="activityView.tokenText" class="agent-activity-item__tail">
-        <span class="agent-activity-item__tokens">{{ activityView.tokenText }}</span>
+      <span v-if="tokenView" class="agent-activity-item__tail">
+        <span
+          v-if="tokenView.kind === 'text'"
+          class="agent-activity-item__tokens"
+        >{{ tokenView.text }}</span>
+        <span
+          v-else
+          class="agent-activity-item__tokens"
+          :title="tokenView.title"
+        ><span
+          v-if="tokenView.upText"
+          class="agent-activity-item__tokens-segment"
+          :class="{ 'agent-activity-item__tokens-segment--estimated': tokenView.upEstimated }"
+        >{{ tokenView.upText }}</span><span
+          v-if="tokenView.downText"
+          class="agent-activity-item__tokens-segment"
+          :class="{ 'agent-activity-item__tokens-segment--estimated': tokenView.downEstimated }"
+        >{{ tokenView.downText }}</span></span>
       </span>
       <span v-if="activityView.taskRoomLabel" class="agent-activity-item__tail">
         <span
@@ -1191,6 +1322,24 @@ const activityView = computed(() => {
   min-width: 66px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* 推理的「↑ 输入 ↓ 输出」两段：`↓` 前的前导空格写在数据侧，所以这里不加 gap
+   —— 加了会让 DOM 文本与「完整文案」不一致。 */
+.agent-activity-item__tokens-segment {
+  white-space: pre;
+}
+
+/* 估算段：流中数字还没被后端 usage 校准，用次要文字色（`--text-secondary`）与真值区分。
+   逐段挂，因为可以出现「输入已是真值、输出还只有估算」的混色态。
+
+   `.agent-activity-item__row span` 是 (0,1,1)，本规则 (0,2,0) 压得住它。
+
+   失败条目不区分估算/真值（Operator 2026-11-09 00:45 定），失败态整行统一 danger 色：
+   `.agent-activity-item[data-status='failed'] .agent-activity-item__row span` = (0,3,1)
+   会盖掉本规则，这是**预期行为**，不在这里调特异性硬顶（硬顶会让失败条目只剩半行红）。 */
+.agent-activity-item__row .agent-activity-item__tokens-segment--estimated {
+  color: var(--text-secondary);
 }
 
 .agent-activity-item__finish-turn-room {

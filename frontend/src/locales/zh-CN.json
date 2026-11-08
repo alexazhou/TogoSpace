@@ -194,6 +194,10 @@
       "get_room_info": "查询房间"
     },
     "tokenEstimate": "估算 {count}",
+    "tokenCompactRange": "tokens {before} → {after}",
+    "tokenCompactProgress": "↑ {before} ↓ {count}",
+    "tokenInferenceUp": "↑ {count}",
+    "tokenInferenceDown": "↓ {count}",
     "retryScheduled": "{seconds}s 后重试（{attempt}/{max}）",
     "retryingProgress": "正在重试（{attempt}/{max}）",
     "retryUsed": "已重试 {count} 次",

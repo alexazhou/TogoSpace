@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import litellm
@@ -168,6 +169,7 @@ async def compact_messages(
     session_id: str,
     tools: list[llmApiUtil.OpenAITool] | None = None,
     max_tokens: int = 26214,  # 默认约为 262144 上下文长度的 10%，建议由调用方按实际 context_window_tokens 动态计算
+    on_progress: Callable[[llmService.InferStreamProgress], Awaitable[None] | None] | None = None,
 ) -> str:
     """压缩消息列表，返回已包含引导语的摘要文本，失败时抛出异常。
 
@@ -178,6 +180,7 @@ async def compact_messages(
         session_id: 被压缩的旧 session id（摘要请求算在旧 session 上）
         tools: 透传当前工具列表，以保持请求形态稳定
         max_tokens: 摘要最大 token 数，建议为 context_window_tokens 的 10%
+        on_progress: 流式进度回调；摘要生成同样是持续输出，前端据此实时显示估算 token
 
     Returns:
         摘要文本（已包含引导语）
@@ -193,7 +196,7 @@ async def compact_messages(
         tool_choice="none",
         session_id=session_id,
     )
-    infer_result = await llmService.infer(model, ctx)
+    infer_result = await llmService.infer_stream(model, ctx, on_progress=on_progress)
 
     if infer_result.ok is False:
         raise RuntimeError(infer_result.error_message or "LLM inference failed during compact")
