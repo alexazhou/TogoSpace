@@ -631,7 +631,7 @@ watch(
   },
 );
 
-function toGraphNode(node: DraftOrgNode, teamName: string): TeamGraphNode {
+function toGraphNode(node: DraftOrgNode): TeamGraphNode {
   if (node.kind === 'pending') {
     return {
       id: node.id,
@@ -654,13 +654,13 @@ function toGraphNode(node: DraftOrgNode, teamName: string): TeamGraphNode {
     subtitle: resolveRoleTemplateNameById(node.roleTemplateId),
     employeeNumber: node.employeeNumber,
     avatarName: node.memberName,
-    avatarSeed: `${teamName}::${node.memberName}`,
-    children: node.children.map((child) => toGraphNode(child, teamName)),
+    avatarSeed: node.memberName,
+    children: node.children.map((child) => toGraphNode(child)),
   };
 }
 
 const graphRootNode = computed<TeamGraphNode | null>(() => (
-  draftOrgTree.value ? toGraphNode(draftOrgTree.value, props.teamName) : null
+  draftOrgTree.value ? toGraphNode(draftOrgTree.value) : null
 ));
 
 function treeHasPendingNode(root: DraftOrgNode | null): boolean {
@@ -1199,7 +1199,6 @@ function openMemberViewerByNode(_agentId: number | null, nodeId: string, _agentN
     <p v-if="inlineTeamMemberStatus" class="team-member-status">{{ inlineTeamMemberStatus }}</p>
 
     <TeamMembersCard
-      :team-name="teamName"
       :selected-agents="selectedTeamMembers"
       :member-templates="selectedTeamMemberTemplates"
       :root-node="graphRootNode"
@@ -1222,7 +1221,6 @@ function openMemberViewerByNode(_agentId: number | null, nodeId: string, _agentN
       :open="memberEditorOpen"
       :editable="memberEditorEditable"
       :agent-id="memberEditorAgentId"
-      :team-name="teamName"
       :member-name="memberEditorName"
       :status="memberEditorStatus"
       :employee-number="currentEditingMemberEmployeeNumber"
