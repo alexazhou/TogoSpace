@@ -173,24 +173,16 @@ export function useStickToBottom(options: UseStickToBottomOptions = {}): StickTo
     if (!viewport) {
       return;
     }
-    const currentTop = viewport.scrollTop;
-    const movedUp = currentTop < lastScrollTop - MOVED_EPSILON_PX;
-    lastScrollTop = currentTop;
+    lastScrollTop = viewport.scrollTop;
 
-    // 回到硬底 → 恢复跟随（用户滚回来、拖滚动条回来、点按钮都走这条路）。
+    // 回到硬底 → 恢复跟随（用户滚回来、点按钮都走这条路）。
     if (distanceToBottom() <= HARD_BOTTOM_PX) {
       followToLatest();
-      return;
-    }
-    // 没有 wheel/touch/key 事件却向上移动了位置：拖动滚动条 thumb 属于这一类。
-    // 内容变化引起的 scroll anchoring 只会让 scrollTop 变大，不会误命中。
-    if (movedUp) {
-      detach();
     }
   }
 
   function handleWheel(event: WheelEvent): void {
-    if (event.deltaY === 0) {
+    if (Math.abs(event.deltaY) < INPUT_EPSILON_PX) {
       return;
     }
     scheduleIntent(event.deltaY < 0 ? 'up' : 'down');

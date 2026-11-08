@@ -139,17 +139,17 @@ describe('useStickToBottom', () => {
     expect(scroller.el.scrollTop).toBe(1300 - VIEWPORT_HEIGHT);
   });
 
-  it('拖滚动条向上（无 wheel 事件，位置变小）→ 脱离', async () => {
+  it('无输入事件的位置变小（内容折叠或重排回缩）→ 不误脱离跟随', async () => {
     const scroller = makeScroller();
     const stick = useStickToBottom();
     scroller.setContentHeight(900);
     stick.bind(scroller.el, scroller.content);
     await flush();
 
-    scroller.el.scrollTop = 400; // 只有 scroll 事件，没有输入事件
+    scroller.el.scrollTop = 400; // 仅位置变小，没有用户输入事件（如折叠/排版抖动）
     await flush();
 
-    expect(stick.following.value).toBe(false);
+    expect(stick.following.value).toBe(true);
   });
 
   it('向下滚回底部 → 恢复跟随并清掉「有新内容」', async () => {
@@ -159,6 +159,7 @@ describe('useStickToBottom', () => {
     stick.bind(scroller.el, scroller.content);
     await flush();
 
+    wheel(scroller.el, -120);
     scroller.el.scrollTop = 300;
     await flush();
     expect(stick.following.value).toBe(false);
@@ -178,6 +179,7 @@ describe('useStickToBottom', () => {
     stick.bind(scroller.el, scroller.content);
     await flush();
 
+    wheel(scroller.el, -120);
     scroller.el.scrollTop = 200;
     await flush();
     scroller.setContentHeight(1500);
@@ -205,6 +207,7 @@ describe('useStickToBottom', () => {
     stick.bind(scroller.el, scroller.content);
     await flush();
 
+    wheel(scroller.el, -120);
     scroller.el.scrollTop = 200;
     await flush();
     stick.scrollToLatest();
