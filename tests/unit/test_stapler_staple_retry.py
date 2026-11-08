@@ -9,12 +9,19 @@
   R3 三次全失败 → 抛出 CalledProcessError 且 rc 保留（不得降级为 warning）
   R4 恰好尝试 3 次（不是无限重试）
   R5 退避间隔真的被 sleep（不是只打日志）
-  R6 【行为级】staple 3 次全失败时，notarytool submit 只被调用 1 次
-     （硬要求 1：只重试 staple，不动 notarytool）
+  R6 【行为级，射程仅限 staple_with_retry 调用契约】staple 3 次全失败时
+     notarytool submit 只被调用 1 次。**注意：这不是硬要求 1 的判据** ——
+     硬要求 1（只重试 staple、不动 notarytool）**靠代码审查、无自动判据**，
+     理由见 test_r6 的 docstring。
   R7 命令形态与原实现一致（`xcrun stapler staple <target>`）
   R8 【行为级】notarize_dmg 确实通过 staple_with_retry 走 staple，
      且恰好一次、参数是 target（守「抽了函数没接调用点」/「调用被注释」/「包进 if False」）
   R9 【行为级】日志可事后区分「第 N 次成功」与「连续 N 次失败」（硬要求 3）
+  R10 docstring 不得把 staple 幂等写成结论（必须标为未验证假设）
+
+⚠️ 跨平台：`notarize_dmg` 开头 `if sys.platform != "darwin": raise SystemExit`，
+而 CI 的 `test.yml` 是 `runs-on: ubuntu-latest`。R6/R8 经 `_wire_notarize`
+把 `sys.platform` 钉成 "darwin"，否则在 CI 上必红（本机 darwin 全绿会掩盖）。
 
 R6/R8 是行为级替身断言，不是源码文本断言：
   早期版本用 `inspect.getsource` 文本匹配，对「包进 `if False:`」「调用被注释」
@@ -146,8 +153,17 @@ def _wire_notarize(monkeypatch, module, staple_fails: int):
     """把 notarize_dmg 的依赖全部换成替身，返回可观测的调用记录。
 
     staple 行为：前 staple_fails 次调用抛 CalledProcessError，之后成功。
+
+    ⚠️ 必须把 `sys.platform` 钉成 "darwin"：`notarize_dmg` 开头有
+    `if sys.platform != "darwin": raise SystemExit("❌ 公证仅支持 macOS")`，
+    而 CI 的 `test.yml` 是 `runs-on: ubuntu-latest`。不钉的话 R6/R8 在 CI 上
+    必红（本机 darwin 全绿，掩盖问题）。
+    `module.sys` 就是全局 `sys`，monkeypatch 结束自动还原；生产代码里的
+    平台检查不动（那是正确的）。
     """
     records = {"notarytool": 0, "staple": [], "verify": 0}
+
+    monkeypatch.setattr(module.sys, "platform", "darwin")
 
     # DMG 路径刻意不含 "notarytool" 字样，避免路径被误命中
     workdir = tempfile.mkdtemp(prefix="p172_safe_")
@@ -181,10 +197,20 @@ def _wire_notarize(monkeypatch, module, staple_fails: int):
 
 
 def test_r6_notarytool_submitted_exactly_once_when_staple_always_fails(bd, monkeypatch):
-    """R6：staple 3 次全失败时，notarytool submit 只被调用 1 次（硬要求 1）。
+    """R6：staple 3 次全失败时，notarytool submit 只被调用 1 次。
 
-    这条是行为级：把 `notarytool submit` 包进 `for range(1, 4)` 时，
-    notarytool 会被调 3 次，这里立刻红。
+    ⚠️ 射程仅限 `staple_with_retry` 的**调用契约**，不是硬要求 1 的判据。
+
+    硬要求 1 是「只重试 staple、不动 notarytool」。要给它建真判据，得先重构
+    `notarize_dmg`（抽出 `notarytool_submit` 之类可替身的单元）——重构风险
+    （受损方是所有使用者）远大于收益（防浪费公证额度）。故硬要求 1
+    **靠代码审查，无自动判据**，已明写在交付报告里。
+
+    本条能咬住的是：`staple_with_retry` 被调用的**次数与时机**没有把
+    notarytool 卷进去（例如有人把 staple 的重试循环套在 notarize_dmg 外面、
+    或让 notarytool 随 staple 一起重跑）。它咬不住「`notarize_dmg` 内部
+    另外给 notarytool 加了独立重试循环」——那种改动这条会红（notarytool
+    计数 >1），但如果重试循环写成不调用 `run_command` 的形式则仍可能漏。
     """
     records, _ = _wire_notarize(monkeypatch, bd, staple_fails=99)
 
