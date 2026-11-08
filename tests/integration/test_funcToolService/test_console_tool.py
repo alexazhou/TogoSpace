@@ -26,6 +26,7 @@ import service.ormService as ormService
 import service.persistenceService as persistenceService
 import service.roomService as roomService
 from constants import AgentStatus, EmployStatus, RoleTemplateType
+from exception import ForwardToolCall
 from dal.db import gtAgentManager, gtDeptManager, gtRoleTemplateManager, gtRoomManager, gtTeamManager
 from model.dbModel.gtAgent import GtAgent
 from model.dbModel.gtDept import GtDept
@@ -527,7 +528,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert upd["role_template"]["type"] == "USER"
 
     async def test_cc1_delete_dept(self):
-        """delete_dept ↔ `dept rm`（两步删除的完整等价见 CC4）。"""
+        """delete_dept ↔ `dept rm`：一次调用即删，返回体带 impact（#165 D/E）。"""
         via = await self._call(
             f"dept create '{{\"name\":\"cc1_dept_rm\",\"responsibility\":\"x\","
             f"\"manager_name\":\"mgr3\",\"parent_name\":\"root\"}}'",
@@ -535,74 +536,69 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         )
         assert via["success"] is True, via
 
-        first = await self._call("dept rm cc1_dept_rm", _context=self._ctx())
-        assert first["error_code"] == "confirm_required"
-        second = await self._call(
-            f"dept rm cc1_dept_rm --confirm {first['confirm_token']}", _context=self._ctx()
-        )
-        assert second["success"] is True, second
+        result = await self._call("dept rm cc1_dept_rm", _context=self._ctx())
+        assert result["success"] is True, result
+        # impact 是 console 独有信息（原工具返回体没有），删成功后必须回显。
+        assert any("cc1_dept_rm" in line for line in result["impact"]), result
         assert await gtDeptManager.get_dept_by_name(self.team_id, "cc1_dept_rm") is None
 
     async def test_cc1_delete_role_template(self):
-        """delete_role_template ↔ `role rm`（含 confirm 两步）。"""
+        """delete_role_template ↔ `role rm`：一次调用即删，返回体带 impact（#165 D/E）。"""
         via = await self._call(
             "role create '{\"name\":\"cc1_role_rm\",\"soul\":\"tmp\",\"type\":\"USER\"}'",
             _context=self._ctx(),
         )
         assert via["success"] is True, via
 
-        first = await self._call("role rm cc1_role_rm", _context=self._ctx())
-        assert first["error_code"] == "confirm_required"
-        # 未确认前必须还在。
-        assert await gtRoleTemplateManager.get_role_template_by_name("cc1_role_rm") is not None
-
-        second = await self._call(
-            f"role rm cc1_role_rm --confirm {first['confirm_token']}", _context=self._ctx()
-        )
-        assert second["success"] is True, second
+        result = await self._call("role rm cc1_role_rm", _context=self._ctx())
+        assert result["success"] is True, result
+        assert any("cc1_role_rm" in line for line in result["impact"]), result
         assert await gtRoleTemplateManager.get_role_template_by_name("cc1_role_rm") is None
 
     async def test_cc1_delete_room(self):
-        """delete_room ↔ `room rm`（含 confirm 两步）。"""
+        """delete_room ↔ `room rm`：一次调用即删，返回体带 impact（#165 D/E）。"""
         via = await self._call(
             "room create '{\"name\":\"cc1_room_rm\",\"member_names\":[\"alice\",\"mgr8\"]}'",
             _context=self._ctx(),
         )
         assert via["success"] is True, via
 
-        first = await self._call("room rm cc1_room_rm", _context=self._ctx())
-        assert first["error_code"] == "confirm_required"
-        assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc1_room_rm") is not None
-
-        second = await self._call(
-            f"room rm cc1_room_rm --confirm {first['confirm_token']}", _context=self._ctx()
-        )
-        assert second["success"] is True, second
+        result = await self._call("room rm cc1_room_rm", _context=self._ctx())
+        assert result["success"] is True, result
+        assert any("cc1_room_rm" in line for line in result["impact"]), result
         assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc1_room_rm") is None
 
-    async def test_cc1_reload_requires_confirm_and_predicate_matches(self):
-        """reload_team ↔ `reload`：**确认闸门 + 自中断判定**可测；真中断路径不可在进程内测。
+    async def test_cc1_reload_forwards_and_predicate_matches(self):
+        """reload_team ↔ `reload`：**无条件转发 + 自中断判定**可测；真中断路径不可在进程内测。
 
         `reload_team` 内部 `create_task(hot_reload)` 后挂在一个永不完成的 future 上，
-        真正的中断由 `AgentTurnRunner` 在 handler 外触发。所以这里只证明两件能证明的事：
-        ① 不带 `--confirm` 时**不执行**（只返回影响范围 + token）；
-        ② 带上**有效** token 时，动态自中断判定器返回 True（这正是 D6 要的语义）。
+        真正的中断由 `AgentTurnRunner` 在 handler 外触发。#165 删掉 confirm 闸门后，
+        `reload` 不再有「带 token 才执行」的前置条件，本用例证明能证明的三件事：
+        ① `reload` 直接抛出 `reload_team` 的转发（不带任何 token）；
+        ② 动态自中断判定器对 `reload` 返回 True（D6 要的语义）；
+        ③ 非 reload 命令返回 False。
         真中断 + 重启后自动判成功，需要真实运行时重启，列为「未验证项」写进报告。
         """
-        first = await self._call("reload", _context=self._ctx())
-        assert first["error_code"] == "confirm_required"
-        assert first["impact"], "必须返回影响范围"
-        # 不带 token 时判定器必须为 False —— 否则会留下假的中断标记。
-        assert console_triggers_self_interrupt(_tool_call("reload")) is False
+        # ① 无条件转发：不带 --confirm 也直接抛 ForwardToolCall 给 reload_team。
+        #
+        # **必须直接调 `console()` 而不是走 `self._call`**：`_call` 会一路执行到第 2 跳，
+        # 而 `reload_team` 内部 `create_task(hot_reload)` 后挂在一个永不完成的 future 上
+        # （设计如此，见 `_handle_reload` docstring）——走完整路径会让本用例永久挂起。
+        # 这里要验的是「console 层不再拦 confirm、直接抛转发信号」，停在抛点正好。
+        from service.funcToolService.consoleTool import console as _console
 
-        token = first["confirm_token"]
-        assert console_triggers_self_interrupt(
-            _tool_call(f"reload --confirm {token}")
-        ) is True, "带有效 token 的 reload 必须被判为自中断（D6）"
+        with pytest.raises(ForwardToolCall) as exc_info:
+            await _console("reload", _context=self._ctx())
+        assert exc_info.value.tool_name == "reload_team"
 
-        # 非 reload 命令永不自中断（静态标志若被误设会在这里露出来）。
+        # ② 判定器：reload 必中断（不再依赖 token）。
+        assert console_triggers_self_interrupt(_tool_call("reload")) is True, (
+            "reload 必须被判为自中断（D6）"
+        )
+        # ③ 非 reload 命令永不自中断（静态标志若被误设会在这里露出来）。
         assert console_triggers_self_interrupt(_tool_call("dept ls")) is False
         assert console_triggers_self_interrupt(_tool_call("help")) is False
+        assert console_triggers_self_interrupt(_tool_call("dept rm root")) is False
 
     # ==================================================================
     # CC2 权限真咬合（D3，本单唯一不可降级项）
@@ -675,12 +671,13 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert result["success"] is False
         assert f"工具无权限使用: {expected_tool}" in result["message"], result
 
-    async def test_cc2_admin_delete_and_reload_are_denied_after_confirm(self):
-        """带 confirm 闸门的 ADMIN 命令：token 拿到也没用，真删/真重载那一步被注册表拒。
+    async def test_cc2_admin_delete_and_reload_are_denied_without_confirm_gate(self):
+        """ADMIN 删除/重载命令对 BASIC 调用者关门，**且拒绝发生在执行之前**。
 
-        为什么单列：`rm` 与 `reload` 的确认闸门**留在 console 本地**（任务单要求），
-        它跑在转发**之前**，所以不带 token 时只会返回 `confirm_required`，权限判定
-        要等「带 token 的第二跳」才发生。这条把那个时点钉死，并证明 token 不是后门。
+        #165 删掉 confirm 闸门后，这条判据比原来更重要：以前「不带 token → 只拿到
+        `confirm_required`」这一步会先把调用挡在权限判定之外，现在没有这层缓冲，
+        **每一次 console 删除/重载调用都会立刻走到第 2 跳的注册表鉴权**。所以这里
+        必须证明「拒绝 + 目标仍在」，而不是只看返回体。
         """
         charlie = self._ctx("charlie")
         alice = self._ctx()
@@ -699,13 +696,9 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
             ("room rm cc2_rm_room", "delete_room"),
             ("reload", "reload_team"),
         ):
-            first = await self._call(command, _context=charlie)
-            assert first.get("error_code") == "confirm_required", (command, first)
-            second = await self._call(
-                f"{command} --confirm {first['confirm_token']}", _context=charlie
-            )
-            assert second["success"] is False, (command, second)
-            assert f"工具无权限使用: {expected_tool}" in second["message"], (command, second)
+            result = await self._call(command, _context=charlie)
+            assert result["success"] is False, (command, result)
+            assert f"工具无权限使用: {expected_tool}" in result["message"], (command, result)
 
         # 真正重要的一条：被拒之后目标必须还在（拒绝发生在删除之前）。
         assert await gtDeptManager.get_dept_by_name(self.team_id, "cc2_rm_dept") is not None
@@ -878,101 +871,56 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
     # 不是被测行为；不这样写，用例之间会因为房间名不同但成员相同而互相干扰。
     # ==================================================================
 
-    async def test_cc4_room_rm_without_confirm_does_not_delete(self):
-        """不带 `--confirm` → 只返回影响范围 + token，**DB 里房间还在**。"""
+    async def test_cc4_room_rm_deletes_in_one_call_and_reports_impact(self):
+        """一次调用即真删，返回体带 impact（#165 D/E：闸门已删，impact 仅回显）。
+
+        删除后查库证明真的删了（不能只看返回体）。
+        """
         ctx = self._ctx()
         await self.create_room(TEAM, "cc4_room", ["bob", "charlie"], max_rounds=3)
-        row = await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room")
-        assert row is not None
+        assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room") is not None
 
         result = await self._call("room rm cc4_room", _context=ctx)
+        assert result["success"] is True, result
+        assert any("cc4_room" in line for line in result["impact"]), result
+        assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room") is None
+
+    async def test_cc4_room_rm_unknown_target_reports_not_found(self):
+        """不存在的目标 → `not_found`，且不转发（解析失败在转发之前）。"""
+        result = await self._call("room rm cc4_no_such_room", _context=self._ctx())
         assert result["success"] is False
-        assert result["error_code"] == "confirm_required"
-        assert result["confirm_token"]
-        assert result["expires_in_seconds"] == 300
-        assert any("cc4_room" in line for line in result["impact"])
-        # 关键：查库证明没删（不能只看返回体）。
-        still_there = await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room")
-        assert still_there is not None, "未确认的 rm 不得真的删除"
+        assert result["error_code"] == "not_found"
 
-    async def test_cc4_room_rm_with_valid_token_deletes(self):
-        """带正确 token 再调 → 真删（查库证明）。"""
+    async def test_cc4_confirm_option_is_gone(self):
+        """`--confirm` 已不是合法选项 → `unknown_option`（#165 D 的负向判据）。
+
+        没有这条，把 `options=("confirm",)` 加回去也照样全绿。
+        """
+        for command in ("room rm whatever --confirm abc123", "reload --confirm abc123"):
+            result = await self._call(command, _context=self._ctx())
+            assert result["success"] is False, (command, result)
+            assert result["error_code"] == "unknown_option", (command, result)
+
+    async def test_cc4_impact_not_attached_to_failure_result(self):
+        """失败体**不叠** impact（#165 E：旧实现无条件 `{**result, "impact": ...}`）。
+
+        失败时"删掉了什么"没有意义，叠上去会让模型以为部分成功。
+        """
         ctx = self._ctx()
-        await self.create_room(TEAM, "cc4_room2", ["alice", "mgr1"], max_rounds=3)
-        first = await self._call("room rm cc4_room2", _context=ctx)
-        token = first["confirm_token"]
-
-        second = await self._call(f"room rm cc4_room2 --confirm {token}", _context=ctx)
-        assert second["success"] is True, second
-        assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room2") is None
-
-    async def test_cc4_token_is_single_use(self):
-        """同一个 token 用第二次必须被拒（否则等于永久免确认）。"""
-        ctx = self._ctx()
-        await self.create_room(TEAM, "cc4_room3", ["alice", "mgr2"], max_rounds=3)
-        first = await self._call("room rm cc4_room3", _context=ctx)
-        token = first["confirm_token"]
-
-        ok = await self._call(f"room rm cc4_room3 --confirm {token}", _context=ctx)
-        assert ok["success"] is True, ok
-
-        await self.create_room(TEAM, "cc4_room3", ["alice", "mgr2"], max_rounds=3)
-        replay = await self._call(f"room rm cc4_room3 --confirm {token}", _context=ctx)
-        assert replay["success"] is False
-        assert replay["error_code"] == "invalid_confirm_token"
-        assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room3") is not None
-
-    async def test_cc4_token_bound_to_target(self):
-        """A 目标发的 token 不能拿去删 B 目标（绑定 target）。"""
-        ctx = self._ctx()
-        await self.create_room(TEAM, "cc4_room_a", ["alice", "mgr3"], max_rounds=3)
-        await self.create_room(TEAM, "cc4_room_b", ["alice", "mgr4"], max_rounds=3)
-        first = await self._call("room rm cc4_room_a", _context=ctx)
-        token = first["confirm_token"]
-
-        crossed = await self._call(f"room rm cc4_room_b --confirm {token}", _context=ctx)
-        assert crossed["success"] is False
-        assert crossed["error_code"] == "invalid_confirm_token"
-        assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room_b") is not None
-
-    async def test_cc4_token_bound_to_caller(self):
-        """alice 拿到的 token 不能由 bob 使用（绑定调用者）。"""
-        await self.create_room(TEAM, "cc4_room_c", ["alice", "mgr5"], max_rounds=3)
-        first = await self._call("room rm cc4_room_c", _context=self._ctx("alice"))
-        token = first["confirm_token"]
-
-        crossed = await self._call(f"room rm cc4_room_c --confirm {token}", _context=self._ctx("bob"))
-        # bob 是 BASIC，先撞权限墙；就算放开权限，token 绑定也应当拒。
-        assert crossed["success"] is False
-        assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room_c") is not None
-
-    async def test_cc4_expired_token_rejected(self, monkeypatch):
-        """过期 token → 拒绝，且房间仍在。"""
-        ctx = self._ctx()
-        await self.create_room(TEAM, "cc4_room4", ["alice", "mgr6"], max_rounds=3)
-        first = await self._call("room rm cc4_room4", _context=ctx)
-        token = first["confirm_token"]
-
-        # 直接把表项的过期时间推到过去（比 sleep 300s 可控、也不会拖慢测试）。
-        import time as _time
-
-        cp._confirm_tokens[token]["expires_at"] = _time.time() - 1
-
-        result = await self._call(f"room rm cc4_room4 --confirm {token}", _context=ctx)
-        assert result["success"] is False
-        assert result["error_code"] == "invalid_confirm_token"
-        assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room4") is not None
-
-    async def test_cc4_unknown_token_rejected(self):
-        """随便编一个 token → 拒绝（**不得**因为「反正 token 无效」就跳过目标校验）。"""
-        await self.create_room(TEAM, "cc4_room_x", ["mgr8", "mgr9"], max_rounds=3)
-        result = await self._call("room rm cc4_room_x --confirm deadbeef", _context=self._ctx())
-        assert result["success"] is False
-        assert result["error_code"] == "invalid_confirm_token"
-        assert await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc4_room_x") is not None
+        # 删一个 DEPT 房间：原工具会拒绝（DEPT 房间不允许删除），这里只验 impact 不被叠上。
+        dept_room = await gtRoomManager.get_room_by_team_and_name(self.team_id, "root")
+        if dept_room is None:
+            pytest.skip("夹具里没有 root 房间，跳过")
+        result = await self._call("room rm root", _context=ctx)
+        assert result["success"] is False, result
+        assert "impact" not in result, f"失败体不得带 impact：{result}"
 
     async def test_cc4_dept_rm_recursive_required_lists_impact(self):
-        """`dept rm` 有子部门且未加 `--recursive` → `recursive_required`，且不删。"""
+        """`dept rm` 有子部门且未加 `--recursive` → `recursive_required`，且不删。
+
+        **这条与 confirm 无关，必须保留**：它是「一次误触删掉一棵子树」的物理阻断，
+        不随确认闸门一起移除。
+        """
         ctx = self._ctx()
         await self._call(
             "dept create '{\"name\":\"cc4_parent\",\"responsibility\":\"p\","
@@ -991,26 +939,39 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert await gtDeptManager.get_dept_by_name(self.team_id, "cc4_parent") is not None
 
     async def test_cc4_dept_rm_recursive_lists_children_then_deletes(self):
-        """`dept rm --recursive` → 影响范围里**列出子部门名**，确认后父子都删。"""
+        """`dept rm --recursive` → **一次调用**父子都删，impact 里列出被删的子部门名。
+
+        自建数据（不依赖上一条用例留下的 `cc4_parent`）：用例之间共享夹具状态是
+        `-k` 子集跑假红的来源，这里不再新增这种依赖。
+        """
         ctx = self._ctx()
-        first = await self._call("dept rm cc4_parent --recursive", _context=ctx)
-        assert first["error_code"] == "confirm_required"
-        impact_text = "\n".join(first["impact"])
-        assert "cc4_child" in impact_text, f"影响范围必须列出会被删的子部门名：{impact_text}"
+        # 自建两个独占负责人：夹具里 mgr1..mgr9 已被别的用例当部门负责人占用
+        # （deptService 规定一个成员只能担任一个部门的负责人），直接复用会撞
+        # DEPT_MANAGER_ALREADY_LEADS。用例自建就能独立跑，不依赖执行顺序。
+        for agent_name in ("cc4r_mgr_a", "cc4r_mgr_b"):
+            created_agent = await self._call(
+                f"agent create '{{\"name\":\"{agent_name}\","
+                f"\"role_template_name\":\"test_role\",\"driver\":\"tsp\"}}'",
+                _context=ctx,
+            )
+            assert created_agent["success"] is True, (agent_name, created_agent)
 
-        second = await self._call(
-            f"dept rm cc4_parent --recursive --confirm {first['confirm_token']}", _context=ctx
-        )
-        assert second["success"] is True, second
-        assert await gtDeptManager.get_dept_by_name(self.team_id, "cc4_parent") is None
-        assert await gtDeptManager.get_dept_by_name(self.team_id, "cc4_child") is None
-
-    async def test_cc4_reload_confirm_gate(self):
-        """`reload` 不带 `--confirm` → `confirm_required`，**不执行**（否则会真重载团队）。"""
-        result = await self._call("reload", _context=self._ctx())
-        assert result["success"] is False
-        assert result["error_code"] == "confirm_required"
-        assert result["confirm_token"]
+        for name, parent, mgr in (
+            ("cc4r_parent", "root", "cc4r_mgr_a"),
+            ("cc4r_child", "cc4r_parent", "cc4r_mgr_b"),
+        ):
+            created = await self._call(
+                f"dept create '{{\"name\":\"{name}\",\"responsibility\":\"x\","
+                f"\"manager_name\":\"{mgr}\",\"parent_name\":\"{parent}\"}}'",
+                _context=ctx,
+            )
+            assert created["success"] is True, (name, created)
+        result = await self._call("dept rm cc4r_parent --recursive", _context=ctx)
+        assert result["success"] is True, result
+        impact_text = "\n".join(result["impact"])
+        assert "cc4r_child" in impact_text, f"影响范围必须列出会被删的子部门名：{impact_text}"
+        assert await gtDeptManager.get_dept_by_name(self.team_id, "cc4r_parent") is None
+        assert await gtDeptManager.get_dept_by_name(self.team_id, "cc4r_child") is None
 
     # ==================================================================
     # CC5 PATCH 语义（D4/draft §4.3）
@@ -1294,3 +1255,106 @@ class TestConsoleDuplicateAgentName(_ConsoleViaRegistry, ServiceTestCase):
         assert result["success"] is False
         assert result["error_code"] == "ambiguous_target"
         assert str(self.on_id) in result["message"]
+
+
+# ======================================================================
+# #165 结构性护栏：A 死赋值 / B 转发目标唯一出口 / C 单次 resolve
+#
+# 这一组不是行为用例，而是**源码级判据**。理由：这三条改动的收益全是
+# 「少一处可能的漂移」，而漂移本身不会让任何行为用例变红——只有把结构钉死，
+# 后来的人把字面量写回去才会立刻被发现。
+# ======================================================================
+
+import re as _re  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+from service.funcToolService import consoleTool as _console_tool_module  # noqa: E402
+
+
+def _console_tool_source() -> str:
+    return _Path(_console_tool_module.__file__).read_text(encoding="utf-8")
+
+
+def test_p165_b_forward_tool_call_has_single_construction_site():
+    """`ForwardToolCall` 只在 `_forward` 里构造一次（#165 B）。
+
+    改动前有 4 处：`_forward` 一处 + `dept rm` / `room rm` / `role rm` 各手写一处字面量。
+    那 3 处绕开了命令表的 `legacy_tool`，于是 `_forward` docstring 里「目标名只从
+    命令表取」的不变式是假的——把 `dept rm` 的等价工具改成别的，静态护栏咬不住。
+    判据：源码里 `ForwardToolCall(` 的出现次数必须 == 1，且那一次在 `_forward` 内。
+    """
+    source = _console_tool_source()
+    sites = [m for m in _re.finditer(r"ForwardToolCall\(", source)]
+    assert len(sites) == 1, (
+        f"`ForwardToolCall` 构造点必须唯一（当前 {len(sites)} 处）："
+        f"{[source[max(0, m.start()-60):m.start()+20] for m in sites]}"
+    )
+    # 那唯一一处必须在 _forward 函数体内（用函数起点定位，避免行号脆断）。
+    forward_start = source.index("def _forward(")
+    next_def = source.index("\ndef ", forward_start) if "\ndef " in source[forward_start:] else len(source)
+    assert forward_start < sites[0].start() < next_def, "唯一的构造点必须在 `_forward` 内"
+
+
+def test_p165_a_no_dead_rest_assignment():
+    """`rest = tokens[...]` 必须只赋值一次（#165 A），且解析入口唯一。
+
+    旧代码是三行连击：`rest = tokens[1:]` → `if reload: rest = tokens[1:]` →
+    `else: rest = tokens[2:]`。第一行被两分支无条件覆盖，是死赋值；读代码的人会
+    以为「默认 tokens[1:]」，实际永远走不到。
+
+    **这条判据本轮抓到了真问题**：第一版修改后 `rest = tokens[...]` 出现 2 次 ——
+    `console()` 与 `console_triggers_self_interrupt` 各抄一遍，导致谓词只看命令名
+    不看选项，`reload --confirm xxx` 被误判「会中断」（假中断标记）。现已抽成
+    `_parse_command_tokens` 单一入口。所以这里不只数赋值次数，还要断言
+    「切 rest + 解析选项」只存在于那一个函数里。
+    """
+    source = _console_tool_source()
+    assignments = _re.findall(r"^\s*rest = tokens\[", source, flags=_re.MULTILINE)
+    assert len(assignments) == 1, f"`rest = tokens[...]` 必须只出现 1 次（当前 {len(assignments)} 次）"
+
+    # 解析入口唯一：`cp._parse_options(` 只许在 `_parse_command_tokens` 内出现。
+    parse_sites = [m.start() for m in _re.finditer(r"cp\._parse_options\(", source)]
+    assert len(parse_sites) == 1, f"`cp._parse_options` 必须只有一个调用点（当前 {len(parse_sites)} 处）"
+    owner_start = source.index("def _parse_command_tokens(")
+    owner_end = source.index("\ndef ", owner_start)
+    assert owner_start < parse_sites[0] < owner_end, (
+        "`cp._parse_options` 的唯一调用点必须在 `_parse_command_tokens` 内——"
+        "否则谓词与真执行又会各写一遍，重新长出「假中断标记」那个坑"
+    )
+
+
+def test_p165_c_destructive_commands_resolve_target_once():
+    """`dept rm` / `room rm` 每条命令的 resolve 只发生一次（#165 C）。
+
+    旧实现：`_route` 里先 `_resolve_*` 拿 id/row（为了拼转发参数），`_handle_rm` 内的
+    planner 又 resolve 一遍（为了拼 impact 文本）—— 同一请求查两次库，且两处结果
+    若在两次查询之间被改，行为无法预测。
+
+    **第一版判据是坏的（实测发现）**：只数 `_plan_*` 函数体内的 `_resolve_` 出现次数，
+    而重复的那一次在 `_route` 里 —— 于是基线 `1d1ee949` 上这条也绿，等于没测。
+    改成按「路由分支 + 它调用的 planner」合并统计：
+      `dept rm` 分支体 与 `_plan_dept_rm` 体内的 `_resolve_*` 调用合计必须 == 1。
+    """
+    source = _console_tool_source()
+
+    def _body_of(header: str, end_marker: str = "\n    if key ==") -> str:
+        start = source.index(header)
+        tail = source[start:]
+        cut = tail.find(end_marker)
+        return tail if cut == -1 else tail[:cut]
+
+    for branch_header, plan_name in (
+        ('if key == "dept rm":', "_plan_dept_rm"),
+        ('if key == "room rm":', "_plan_room_rm"),
+    ):
+        branch_body = _body_of(branch_header)
+        plan_start = source.index(f"async def {plan_name}(")
+        plan_tail = source[plan_start:]
+        plan_cut = plan_tail.find("\nasync def ")
+        plan_body = plan_tail if plan_cut == -1 else plan_tail[:plan_cut]
+        total = len(_re.findall(r"_resolve_\w+", branch_body)) + len(
+            _re.findall(r"_resolve_\w+", plan_body)
+        )
+        assert total == 1, (
+            f"{branch_header} 这条命令路径上 `_resolve_*` 共出现 {total} 次，必须恰好 1 次"
+            f"（旧实现是 2 次：_route 一次 + planner 一次）"
+        )

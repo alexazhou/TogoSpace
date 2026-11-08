@@ -1,6 +1,6 @@
 """`console` 工具的路由与 help 文本。
 
-与 `consoleParsing` 的分工：那边只管「命令长什么样」（解析、输入来源、confirm token），
+与 `consoleParsing` 的分工：那边只管「命令长什么样」（解析、输入来源），
 这边只管「解析完的命令怎么落到原工具上」。分开是为了让转发口径能被单独变异测试
 （#154 CC2）——把这里的路由改坏不该影响解析与 token 校验。
 
@@ -17,6 +17,7 @@ payload 里**出现的**键覆盖。数组字段一旦出现即全量替换，�
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any, Callable, NoReturn, Optional
 
 from constants import EmployStatus
@@ -57,8 +58,8 @@ HELP_DETAIL: dict[str, str] = {
         "PATCH 语义：只改出现的字段；member_names 出现即全量替换。"
     ),
     "dept rm": (
-        "dept rm <id|名称> [--recursive] [--confirm <token>]\n"
-        "不带 --confirm 时只返回影响范围与 token，不执行删除。"
+        "dept rm <id|名称> [--recursive]\n"
+        "有子部门时必须加 --recursive；返回体带 impact 说明实际删掉了什么。"
     ),
     "agent ls": "agent ls —— 列出所有成员。",
     "agent get": "agent get <名称|id> —— 查看成员详情（含房间与可唤醒状态）。",
@@ -82,10 +83,7 @@ HELP_DETAIL: dict[str, str] = {
         "room update <id|名称> '<json>' | --from payload\n"
         "PATCH 语义：只改出现的字段。"
     ),
-    "room rm": (
-        "room rm <id|名称> [--confirm <token>]\n"
-        "不带 --confirm 时只返回影响范围与 token，不执行删除。"
-    ),
+    "room rm": "room rm <id|名称> —— 删除房间；返回体带 impact。",
     "role ls": "role ls [--kw <关键词>] —— 列出角色模板（不含 soul）。",
     "role get": "role get <名称> —— 查看角色模板详情。",
     "role create": (
@@ -94,9 +92,9 @@ HELP_DETAIL: dict[str, str] = {
     "role update": (
         "role update <名称> '<json>' | --from payload\nPATCH 语义：只改出现的字段。"
     ),
-    "role rm": "role rm <名称> [--confirm <token>] —— 删除角色模板。",
+    "role rm": "role rm <名称> —— 删除角色模板；返回体带 impact。",
     "time get": "time get [--tz <IANA时区>] —— 获取当前时间。",
-    "reload": "reload —— 重载团队运行时；**会中断当前行动**，需要 --confirm。",
+    "reload": "reload —— 重载团队运行时；**会中断当前行动**。",
 }
 
 
@@ -254,20 +252,36 @@ async def _patch_role(
 
 
 # ---------------------------------------------------------------------------
-# 删除保护（#154 D4 / CC4）
+# 删除影响范围（#154 D4 / CC4）
+#
+# 这里的 `resolve` **只做一次**：一次查询同时产出
+#   ① `impact` —— 执行后回显给模型的影响范围描述（`impact` 从来不是校验凭据，
+#      旧实现把它存进 confirm token 却从不比对；#165 E 把它的定位写清楚）；
+#   ② `forward_args` —— 转发给原工具的定位参数（dept_id / room_id / role_name）。
+#
+# 顺带保留**防误删**校验：`dept rm` 有子部门时必须显式 `--recursive`。
+# 这条与「人确认」无关，是「一次误触删掉一棵子树」的物理阻断，不随 confirm 闸门移除。
 # ---------------------------------------------------------------------------
 
-async def _plan_dept_rm(team_id: int, target: str, recursive: bool) -> list[str]:
+@dataclass(frozen=True)
+class RmPlan:
+    """一次删除请求的解析结果（影响范围 + 转发参数）。"""
+
+    impact: list[str]
+    forward_args: dict[str, Any]
+
+
+async def _plan_dept_rm(team_id: int, target: str, recursive: bool) -> RmPlan:
+    """解析部门删除目标：产出影响范围与转发参数，并阻断「未加 --recursive 删子树」。"""
     existing = await cp._resolve_dept_id(team_id, target)
     if existing is None:
         raise ConsoleError("not_found", f"未找到部门：{target}")
-    from dal.db import gtDeptManager
+
     from service import deptService
+    from service.funcToolService.tools import _collect_descendant_ids, _find_dept_node
 
     impact = [f"部门 id={existing}（{target}）"]
     node = await deptService.get_dept_tree(team_id)
-    from service.funcToolService.tools import _collect_descendant_ids, _find_dept_node
-
     current = _find_dept_node(node, existing)
     descendants = sorted(_collect_descendant_ids(current) - {existing}) if current is not None else []
     if descendants:
@@ -276,31 +290,45 @@ async def _plan_dept_rm(team_id: int, target: str, recursive: bool) -> list[str]
                 "recursive_required",
                 f"部门 {target} 下还有 {len(descendants)} 个子部门；如需一并删除请加 --recursive。",
             )
+        from dal.db import gtDeptManager
+
         for did in descendants:
             dept = await gtDeptManager.get_dept_by_id(did)
             impact.append(f"子部门 id={did}（{dept.name if dept else '?'}）")
-    return impact
+    return RmPlan(
+        impact=impact,
+        forward_args={"name": target, "dept_id": existing, "recursive": recursive},
+    )
 
 
-async def _plan_room_rm(team_id: int, target: str) -> list[str]:
-    existing = await cp._resolve_room_by_target(team_id, target)
-    if existing is None:
+async def _plan_room_rm(team_id: int, target: str) -> RmPlan:
+    """解析房间删除目标：产出影响范围与转发参数（一次查询复用两者）。"""
+    room = await cp._resolve_room_by_target(team_id, target)
+    if room is None:
         raise ConsoleError("not_found", f"未找到房间：{target}")
-    return [f"房间 id={existing.id}（{existing.name}，类型 {existing.type.name}）"]
+    return RmPlan(
+        impact=[f"房间 id={room.id}（{room.name}，类型 {room.type.name}）"],
+        forward_args={"name": target, "room_id": room.id},
+    )
 
 
-async def _plan_role_rm(target: str) -> list[str]:
-    existing = await cp._resolve_role_by_target(target)
-    if existing is None:
+async def _plan_role_rm(target: str) -> RmPlan:
+    """解析角色模板删除目标：产出影响范围与转发参数。"""
+    template = await cp._resolve_role_by_target(target)
+    if template is None:
         raise ConsoleError("not_found", f"未找到角色模板：{target}")
-    return [f"角色模板 {existing.name}（类型 {existing.type.name}）"]
+    return RmPlan(
+        impact=[f"角色模板 {template.name}（类型 {template.type.name}）"],
+        forward_args={"role_name": template.name},
+    )
 
 
 # ---------------------------------------------------------------------------
 # 路由
 #
-# 每条分支只做两件事：① 把 console 特有的语义补齐（按 id/名称定位目标、PATCH 合并、
-# confirm token 校验）；② 把「目标工具名 + 完整参数」抛出去。**不查权限、不执行**。
+# 每条分支只做两件事：① 把 console 特有的语义补齐（按 id/名称定位目标、PATCH 合并）；
+# ② 把「目标工具名 + 完整参数」抛出去。**不查权限、不执行**。
+# 转发目标名一律由 `_forward` 从命令表取，路由里不写字面量（#165 B 的唯一性护栏）。
 # ---------------------------------------------------------------------------
 
 
@@ -357,14 +385,9 @@ async def _route(
         await _patch_dept(context.team_id, target or "", data, parsed)
     if key == "dept rm":
         recursive = bool(parsed.options.get("recursive"))
-        dept_id = await cp._resolve_dept_id(context.team_id, target or "")
-        return await _handle_rm(
-            parsed, context, target or "",
+        await _handle_rm(
+            parsed,
             planner=lambda: _plan_dept_rm(context.team_id, target or "", recursive),
-            forward=lambda: ForwardToolCall(
-                "delete_dept",
-                {"name": target or "", "dept_id": dept_id, "recursive": recursive},
-            ),
         )
 
     # ---- 成员 ----
@@ -437,14 +460,9 @@ async def _route(
         data = cp._input_payload_for(parsed, payload)
         await _patch_room(context.team_id, target or "", data, parsed)
     if key == "room rm":
-        room = await cp._resolve_room_by_target(context.team_id, target or "")
-        return await _handle_rm(
-            parsed, context, target or "",
+        await _handle_rm(
+            parsed,
             planner=lambda: _plan_room_rm(context.team_id, target or ""),
-            forward=lambda: ForwardToolCall(
-                "delete_room",
-                {"name": target or "", "room_id": room.id if room is not None else None},
-            ),
         )
 
     # ---- 角色模板 ----
@@ -467,17 +485,16 @@ async def _route(
         data = cp._input_payload_for(parsed, payload)
         await _patch_role(target or "", data, parsed)
     if key == "role rm":
-        return await _handle_rm(
-            parsed, context, target or "",
+        await _handle_rm(
+            parsed,
             planner=lambda: _plan_role_rm(target or ""),
-            forward=lambda: ForwardToolCall("delete_role_template", {"role_name": target or ""}),
         )
 
     # ---- 其他 ----
     if key == "time get":
         _forward(parsed, timezone=parsed.options.get("tz"))
     if key == "reload":
-        return await _handle_reload(parsed, context)
+        await _handle_reload(parsed)
 
     raise ConsoleError(
         "unknown_command",
@@ -512,94 +529,42 @@ def _guard_agent_get(agent_row) -> Callable[[dict[str, Any]], dict[str, Any]]:
     return _post
 
 
-async def _handle_rm(
-    parsed: ParsedCommand,
-    context: ToolCallContext | None,
-    target: str,
-    *,
-    planner,
-    forward: Callable[[], ForwardToolCall],
-) -> dict[str, Any]:
-    """两步删除：不带 token 只报影响范围，带 token 才真删（#154 D4）。
+async def _handle_rm(parsed: ParsedCommand, planner) -> NoReturn:
+    """删除命令的唯一执行路径：解析一次目标，真删，再把影响范围并回结果。
 
-    `impact` 是 console 自己的产物（原工具不知道删了哪些子部门），所以真删那一步
-    用 `post_process` 把它并回结果 —— 这是转发后唯一会丢信息的地方。
+    **没有确认闸门**（#165 D）：D2 默认把被收敛的 16 个原工具全暴露给模型，
+    `delete_dept` / `delete_room` / `delete_role_template` 都能被直接调用，闸门
+    对「真想删的模型」不产生任何阻碍（绕过成本 = 换一个工具名），只对「老实走
+    console 的调用方」多加一次往返。删掉后 console 与原工具语义一致，符合 #160
+    「直接调与经 console 调是同一份判定」的设计前提。
+
+    `impact` 仍然产出并回显：它描述「这次删掉了什么」（`dept rm` 会列出被一并
+    删除的子部门，这是原工具返回体里没有的信息），对模型后续判断有用，但它
+    **不是校验凭据**——旧实现把它存进 token 却从不比对（#165 E）。
     """
-    impact = await planner()
-    token = parsed.options.get("confirm")
-    if not token:
-        new_token = cp._issue_confirm_token(
-            command_key=parsed.key,
-            target=target,
-            agent_id=context.agent_id if context is not None else 0,
-            team_id=context.team_id if context is not None else 0,
-            impact=impact,
-        )
-        return {
-            "success": False,
-            "error_code": "confirm_required",
-            "message": "删除操作需要确认，尚未执行。确认后请带 --confirm <token> 重试。",
-            "impact": impact,
-            "confirm_token": new_token,
-            "expires_in_seconds": 300,
-        }
-    ok, code = cp._consume_confirm_token(
-        token,
-        command_key=parsed.key,
-        target=target,
-        agent_id=context.agent_id if context is not None else 0,
-        team_id=context.team_id if context is not None else 0,
-    )
-    if not ok:
-        raise ConsoleError(
-            code,
-            "confirm token 无效或已过期，请重新执行不带 --confirm 的命令获取新 token。",
-        )
-    pending = forward()
-    pending.post_process = lambda result: (
-        {**result, "impact": impact} if isinstance(result, dict) else result
-    )
-    raise pending
+    plan = await planner()
+
+    def _attach_impact(result: dict[str, Any]) -> dict[str, Any]:
+        # 失败体不叠 impact：失败时"删掉了什么"没有意义，叠上去反而让模型以为
+        # 部分成功。只给成功结果补这一层（旧实现在这里无条件 `{**result, "impact":...}`，
+        # 会把 impact 挂到 `{"success": False}` 上）。
+        if isinstance(result, dict) and result.get("success") is not False:
+            return {**result, "impact": plan.impact}
+        return result
+
+    _forward(parsed, post_process=_attach_impact, **plan.forward_args)
 
 
-async def _handle_reload(parsed: ParsedCommand, context: ToolCallContext | None) -> dict[str, Any]:
-    """`reload` 会自中断当前 turn（#154 D6）。
+async def _handle_reload(parsed: ParsedCommand) -> NoReturn:
+    """`reload` 直接转发 `reload_team`（#165 D 移除确认闸门）。
 
-    confirm 闸门**留在本地**：它是唯一一条「转发前有前置副作用」的命令——必须先
-    返回 `confirm_required`、验过 token 才允许转发，否则一次误触就停掉整个团队。
+    **它会自中断当前 turn**（#154 D6）：`reload_team` 内部 `create_task(hot_reload)`
+    后挂起在一个永不完成的 future 上，本协程随 turn 被取消。`self_interrupt` 的
+    标记与恢复由 `AgentTurnRunner` 负责（`register(self_interrupt_predicate=...)`），
+    第 2 跳的注册表命中 `reload_team` 自己的静态 `self_interrupt=True`。
 
-    真转发出去后**不会有返回值**：`reload_team` 内部 `create_task(hot_reload)` 后挂起
-    在一个永不完成的 future 上，本协程随 turn 被取消。`self_interrupt` 的标记与恢复
-    由 `AgentTurnRunner` 负责（见 driver 里 `register(self_interrupt_predicate=...)`），
-    第 2 跳的注册表命中即 `reload_team` 自己的静态 `self_interrupt=True`。
+    真转发出去后**不会有返回值**——这是设计如此，不是缺陷。
     """
-    token = parsed.options.get("confirm")
-    if not token:
-        new_token = cp._issue_confirm_token(
-            command_key=parsed.key,
-            target="reload",
-            agent_id=context.agent_id if context is not None else 0,
-            team_id=context.team_id if context is not None else 0,
-            impact=["重载团队运行时：会中断团队内正在执行的任务"],
-        )
-        return {
-            "success": False,
-            "error_code": "confirm_required",
-            "message": "reload 会中断当前行动，需要确认，尚未执行。",
-            "impact": ["重载团队运行时：会中断团队内正在执行的任务"],
-            "confirm_token": new_token,
-            "expires_in_seconds": 300,
-        }
-    ok, code = cp._consume_confirm_token(
-        token,
-        command_key=parsed.key,
-        target="reload",
-        agent_id=context.agent_id if context is not None else 0,
-        team_id=context.team_id if context is not None else 0,
-    )
-    if not ok:
-        raise ConsoleError(code, "confirm token 无效或已过期。")
-
     _forward(parsed)
 
 
@@ -636,20 +601,7 @@ async def console(command: str, payload: Optional[dict] = None, _context: ToolCa
         }
 
     try:
-        rest = tokens[1:]
-        if spec.resource == "reload":
-            rest = tokens[1:]
-        else:
-            rest = tokens[2:]
-        positional, options, input_source = cp._parse_options(spec, rest)
-        parsed = ParsedCommand(
-            spec,
-            positional=positional,
-            options=options,
-            input_source=input_source,
-            raw_tokens=tokens,
-        )
-        _check_arity(parsed)
+        parsed = _parse_command_tokens(spec, tokens)
         # 不接受配置输入的命令，传了 payload 必须报错而不是静默忽略（draft §4.5）。
         # 静默忽略的后果很隐蔽：模型以为配置生效了，实际什么都没改，它会接着
         # 报告「已改好」——比直接报错贵得多。
@@ -673,6 +625,29 @@ async def console(command: str, payload: Optional[dict] = None, _context: ToolCa
         from service.funcToolService.tools import _tool_error_result
 
         return _tool_error_result(exc)
+
+
+def _parse_command_tokens(spec: cc.CommandSpec, tokens: list[str]) -> ParsedCommand:
+    """把 token 列表解析成 `ParsedCommand` 并校验参数个数（**唯一**解析入口）。
+
+    为什么要抽出来（#165 实测教训）：`console()` 主入口和
+    `console_triggers_self_interrupt` 都要做「切选项 + 校验参数个数」，一开始两处各
+    抄一遍 —— 结果谓词只解析了命令名、没解析选项，于是 `reload --confirm xxx`（选项
+    非法、真执行会在 `_parse_options` 失败）被判定成「会中断」，留下**假的中断标记**。
+    两处口径各写一遍就一定会漂移，抽成一个函数后物理上不可能不一致。
+    """
+    # `reload` 是顶层命令（没有资源词），其余都是 `<资源> <操作>` 两段式。
+    rest = tokens[1:] if spec.resource == "reload" else tokens[2:]
+    positional, options, input_source = cp._parse_options(spec, rest)
+    parsed = ParsedCommand(
+        spec,
+        positional=positional,
+        options=options,
+        input_source=input_source,
+        raw_tokens=tokens,
+    )
+    _check_arity(parsed)
+    return parsed
 
 
 def _check_arity(parsed: ParsedCommand) -> None:
@@ -711,9 +686,16 @@ def console_triggers_self_interrupt(tool_call: Any) -> bool:
     都留下中断标记（`dept ls` 明明正常返回，重启后却被当成"已执行过的中断工具"
     自动判成功）；静态 `False` 则让 `reload` 丢掉标记，重启后被重放成第二次重载。
 
-    判定口径与 `_handle_reload` 完全对齐：**命令是 `reload` 且带了仍在有效期内的
-    `--confirm <token>`**。不带 token 时 `_handle_reload` 只返回 `confirm_required`，
-    并不中断，这里也必须返回 False。
+    判定口径：#165 删掉 confirm 闸门后，`reload` 不再有"带 token 才真执行"的
+    前置条件——**只要这条命令能成功执行，它就一定会中断**。旧口径「reload + 仍在
+    有效期内的 confirm token」随之失效（那个 token 已经不存在了）。
+
+    **必须走完整的解析链路，不能只看命令名**：`reload --confirm xxx` 现在会在
+    `_parse_options` 撞 `unknown_option` 直接失败、根本到不了转发，如果这里只按
+    「命令名是 reload」返回 True，历史条目就会带上一个**假的中断标记**——下次该条目
+    因别的原因停在 INIT 时，会被 `_advance_step` 当成「已执行过」自动判成功。
+    预警一句：这类“谓词说会中断、实际没执行”的错位比漏判更难查，所以这里复刻
+    `console()` 的三步（解析选项 → 校验参数个数），口径与真执行路径逐字对齐。
 
     任何解析异常都返回 False（不中断）——判定器在 turn runner 的调用链上，
     抛异常会把一次普通管理命令变成 turn 崩溃，代价远大于漏判。
@@ -728,10 +710,9 @@ def console_triggers_self_interrupt(tool_call: Any) -> bool:
         spec, _err = cc.resolve_command_spec(tokens)
         if spec is None or not spec.self_interrupt:
             return False
-        _positional, options, _source = cp._parse_options(spec, tokens[1:])
-        token = options.get("confirm")
-        if not token:
-            return False
-        return cp._confirm_token_is_live(token, command_key=spec.key)
+        # 走与 console() **完全相同**的解析链路：选项非法 / 参数个数不对的命令会在
+        # 执行前就失败，因此不能中断（否则留下假标记）。
+        _parse_command_tokens(spec, tokens)
+        return True
     except Exception:  # noqa: BLE001 —— 判定器绝不把异常抛进 turn runner
         return False

@@ -13,7 +13,6 @@ import json
 import pytest
 
 from service.agentService.toolRegistry import AgentToolRegistry, RegisteredTool
-from service.funcToolService import consoleParsing as cp
 from service.funcToolService.consoleTool import console_triggers_self_interrupt
 from util.llmApiUtil import OpenAIToolCall
 
@@ -23,13 +22,6 @@ def _call(command: str) -> OpenAIToolCall:
         id="c1",
         function={"name": "console", "arguments": json.dumps({"command": command}, ensure_ascii=False)},
     )
-
-
-@pytest.fixture(autouse=True)
-def _clean_tokens():
-    cp._reset_confirm_tokens()
-    yield
-    cp._reset_confirm_tokens()
 
 
 # ---------------------------------------------------------------------------
@@ -81,40 +73,25 @@ class TestTriggersSelfInterrupt:
 # ---------------------------------------------------------------------------
 
 class TestConsolePredicate:
-    def test_reload_without_token_does_not_interrupt(self):
-        """不带 `--confirm` 的 reload 只返回 confirm_required，**不中断**。
+    """#165 删 confirm 闸门后：判定口径从「reload + 有效 token」变成「命令是 reload」。"""
 
-        如果这里返回 True，历史条目会带上 `SELF_INTERRUPT` 标记，而实际什么都没执行。
-        下次该条目因别的原因停在 INIT 时，会被 `_advance_step` 当成「已执行过」自动
-        判成功 —— 一次「没重载」被永久记成「重载成功」。
+    def test_reload_always_interrupts(self):
+        """`reload` 无条件自中断（#165 D 删闸门后不再依赖 token）。
+
+        为什么这条必须精确：如果这里返回 False，`reload_team` 的取消就没有
+        `SELF_INTERRUPT` 标记，重启后会被重放成**第二次重载**；如果非 reload 命令
+        返回 True，`dept ls` 这种正常返回的命令会留下中断标记，下次停 INIT 时被
+        当成"已执行过"自动判成功 —— 一次「没重载」被永久记成「重载成功」。
         """
-        assert console_triggers_self_interrupt(_call("reload")) is False
+        assert console_triggers_self_interrupt(_call("reload")) is True
 
-    def test_reload_with_valid_token_interrupts(self):
-        """带**有效** token 的 reload 才自中断（这是 D6 的核心语义）。"""
-        token = cp._issue_confirm_token(
-            command_key="reload", target="reload", agent_id=1, team_id=2, impact=["x"]
-        )
-        assert console_triggers_self_interrupt(_call(f"reload --confirm {token}")) is True
+    def test_reload_with_leftover_confirm_syntax_does_not_interrupt(self):
+        """带已被删除的 `--confirm` 写法 → 解析期就报 unknown_option，判定器返回 False。
 
-    def test_reload_with_expired_token_does_not_interrupt(self):
-        """过期 token → 不中断（`_handle_reload` 会拒绝，也不该留标记）。"""
-        token = cp._issue_confirm_token(
-            command_key="reload", target="reload", agent_id=1, team_id=2, impact=["x"]
-        )
-        cp._confirm_tokens[token]["expires_at"] = 0
-        assert console_triggers_self_interrupt(_call(f"reload --confirm {token}")) is False
-
-    def test_reload_with_unknown_token_does_not_interrupt(self):
-        """编造的 token → 不中断。"""
-        assert console_triggers_self_interrupt(_call("reload --confirm nope")) is False
-
-    def test_token_for_other_command_does_not_interrupt(self):
-        """别的命令发的 token 不能触发 reload 的中断（绑定 command_key）。"""
-        token = cp._issue_confirm_token(
-            command_key="room rm", target="x", agent_id=1, team_id=2, impact=["x"]
-        )
-        assert console_triggers_self_interrupt(_call(f"reload --confirm {token}")) is False
+        防止有人把 `--confirm` 当成「合法但被忽略」：它现在是未知选项，命令直接
+        失败，因此谈不上中断。返回 False 才是正确口径（不回退到"反正要 reload"）。
+        """
+        assert console_triggers_self_interrupt(_call("reload --confirm deadbeef")) is False
 
     @pytest.mark.parametrize("command", ["dept ls", "help", "agent ls", "time get", "dept rm root"])
     def test_non_reload_commands_never_interrupt(self, command):

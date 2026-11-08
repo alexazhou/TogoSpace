@@ -4,10 +4,9 @@
 本模块负责三件事，顺序也是执行顺序：
 
 1. **解析**：`shlex` 切词（绝不 `eval`、绝不调 shell，D5），认出子命令；
-2. **校验输入来源**：内联 JSON 与 `--from payload` 二选一且互斥（D1、CC3）；
-3. **confirm token**（删除与 reload 的人确认凭据，D4）。
+2. **校验输入来源**：内联 JSON 与 `--from payload` 二选一且互斥（D1、CC3）。
 
-4. **路由**在 `consoleTool`：它只负责「命令 → 目标工具 + 参数」。
+3. **路由**在 `consoleTool`：它只负责「命令 → 目标工具 + 参数」。
 
 **权限校验不在这里**（#160 起）：`console` 自己不再重算一遍权限，而是把调用
 转发给等价的原工具，由唯一执行入口 `AgentToolRegistry.execute_tool_call` 做鉴权。
@@ -19,90 +18,9 @@
 from __future__ import annotations
 
 import shlex
-import time
-import uuid
 from typing import Any, Optional
 
 from . import consoleCommands as cc
-
-# ---------------------------------------------------------------------------
-# confirm_token 存储（#154 D4）：进程内存 + 有效期，**不落库**。
-# 理由：这是「人确认一次」的短期凭据，落库会引入清理与跨进程一致性问题，
-# 而它本身不承载任何需要持久化的语义（重启发 token 即可）。
-# ---------------------------------------------------------------------------
-_CONFIRM_TTL_SECONDS = 300
-
-#: token -> {command_key, target, agent_id, team_id, expires_at, impact}
-_confirm_tokens: dict[str, dict[str, Any]] = {}
-
-
-def _purge_expired_tokens(now: float | None = None) -> None:
-    current = time.time() if now is None else now
-    expired = [key for key, meta in _confirm_tokens.items() if meta["expires_at"] <= current]
-    for key in expired:
-        _confirm_tokens.pop(key, None)
-
-
-def _issue_confirm_token(
-    *, command_key: str, target: str, agent_id: int, team_id: int, impact: list[str]
-) -> str:
-    _purge_expired_tokens()
-    token = uuid.uuid4().hex[:12]
-    _confirm_tokens[token] = {
-        "command_key": command_key,
-        "target": target,
-        "agent_id": agent_id,
-        "team_id": team_id,
-        "expires_at": time.time() + _CONFIRM_TTL_SECONDS,
-        "impact": impact,
-    }
-    return token
-
-
-def _consume_confirm_token(
-    token: str, *, command_key: str, target: str, agent_id: int, team_id: int
-) -> tuple[bool, str]:
-    """校验并**一次性消耗** token。返回 (ok, 错误码)。"""
-    _purge_expired_tokens()
-    meta = _confirm_tokens.get(token)
-    if meta is None:
-        return False, "invalid_confirm_token"
-    if meta["expires_at"] <= time.time():
-        _confirm_tokens.pop(token, None)
-        return False, "expired_confirm_token"
-    bound = (meta["command_key"], meta["target"], meta["agent_id"], meta["team_id"])
-    if bound != (command_key, target, agent_id, team_id):
-        # 同一个 token 不能挪用到别的命令/目标/调用者上（否则等于免确认）。
-        return False, "invalid_confirm_token"
-    _confirm_tokens.pop(token, None)
-    return True, ""
-
-
-def _reset_confirm_tokens() -> None:
-    """测试用：清空 token 表。"""
-    _confirm_tokens.clear()
-
-
-def _confirm_token_is_live(token: str, *, command_key: str) -> bool:
-    """**只读**探测 token 是否仍可用于该命令（不消耗）。
-
-    存在的理由只有一个：自中断判定发生在 handler 执行**之前**（`AgentTurnRunner`
-    要看 `self_interrupt` 才知道要不要先打中断标记），而 `console reload` 只有在
-    带**有效** confirm token 时才会真去调 `reload_team`。如果这一步返回 True 但
-    实际没中断，历史条目上会留下一个误导性的 `SELF_INTERRUPT` 标记——下次该条目
-    处于 `INIT`（被别的原因此取消）时会被当成「已执行过」自动判成功。
-
-    这里只校验「命令 + 未过期」，不校验 agent/team 绑定：绑定的最终裁决仍在
-    `_consume_confirm_token`，重复一次只会让两处口径有机会漂移。
-    """
-    _purge_expired_tokens()
-    meta = _confirm_tokens.get(token)
-    if meta is None:
-        return False
-    if meta["expires_at"] <= time.time():
-        return False
-    return meta["command_key"] == command_key
-
 
 # ---------------------------------------------------------------------------
 # 解析
@@ -234,9 +152,6 @@ def _parse_options(spec: cc.CommandSpec, tokens: list[str]) -> tuple[list[str], 
 # ---------------------------------------------------------------------------
 # 配置输入（#154 D1：v1 只有内联 JSON + --from payload）
 # ---------------------------------------------------------------------------
-
-_CONFIRM_HANDLED_SEPARATELY = frozenset({"confirm"})
-
 
 def _resolve_input_payload(
     parsed: ParsedCommand, payload: dict[str, Any] | None

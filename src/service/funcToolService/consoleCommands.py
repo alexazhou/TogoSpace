@@ -123,7 +123,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     _spec(
         "dept", "rm", "delete_dept",
         needs_target=True, min_args=1, max_args=1,
-        options=("recursive", "confirm"),
+        options=("recursive",),
     ),
     # 成员
     _spec("agent", "ls", "get_agent_info"),
@@ -143,8 +143,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "room", "update", "save_room",
         accepts_input=True, needs_target=True, min_args=1, max_args=1,
     ),
-    _spec("room", "rm", "delete_room", needs_target=True, min_args=1, max_args=1,
-          options=("confirm",)),
+    _spec("room", "rm", "delete_room", needs_target=True, min_args=1, max_args=1),
     # 角色模板
     _spec("role", "ls", "list_role_templates", options=("kw",)),
     _spec("role", "get", "get_role_template", needs_target=True, min_args=1, max_args=1),
@@ -153,11 +152,10 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         "role", "update", "save_role_template",
         accepts_input=True, needs_target=True, min_args=1, max_args=1,
     ),
-    _spec("role", "rm", "delete_role_template", needs_target=True, min_args=1, max_args=1,
-          options=("confirm",)),
+    _spec("role", "rm", "delete_role_template", needs_target=True, min_args=1, max_args=1),
     # 其他
     _spec("time", "get", "get_time", options=("tz",)),
-    _spec("reload", "", "reload_team", self_interrupt=True, options=("confirm",)),
+    _spec("reload", "", "reload_team", self_interrupt=True),
 )
 
 #: `help` 是纯本地命令，不映射任何原工具，也不做权限校验（它不碰数据）。
@@ -201,7 +199,7 @@ def resolve_command_spec(tokens: list[str]) -> tuple[CommandSpec | None, str | N
     if head == "reload":
         if len(tokens) == 1:
             return COMMAND_INDEX["reload"], None
-        # `reload` 不接受位置参数，但允许 `reload --confirm <token>`
+        # `reload` 不接受任何位置参数（也不接受选项，见 #165 删 confirm 闸门）
         return COMMAND_INDEX["reload"], None
 
     spec = COMMAND_INDEX.get(f"{head} {tokens[1].lower()}" if len(tokens) > 1 else "")

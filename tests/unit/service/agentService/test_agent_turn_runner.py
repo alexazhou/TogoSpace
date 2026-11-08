@@ -1502,19 +1502,13 @@ def _forwarding_registry(reached: list[str]) -> AgentToolRegistry:
 
 
 @pytest.mark.asyncio
-async def test_reload_with_valid_token_writes_tag_and_forwards_to_reload_team(turn_runner):
-    """`reload --confirm <有效 token>` ⇒ 写 SELF_INTERRUPT tag **且**第 2 跳真到达 reload_team。
+async def test_reload_writes_tag_and_forwards_to_reload_team(turn_runner):
+    """`reload` ⇒ 写 SELF_INTERRUPT tag **且**第 2 跳真到达 reload_team。
 
-    两个断言缺一不可：
+    #165 删掉 confirm 闸门后，`reload` 不再需要 token——但**这一对断言的必要性没变**：
       ① 只有 tag 没有转发 ⇒ 中断标记留下，实际什么都没重载（重启后被当成功）；
       ② 只有转发没有 tag ⇒ 被取消后条目没有标记，重启后重放成**第二次**重载。
     """
-    from service.funcToolService import consoleParsing as cp
-
-    cp._reset_confirm_tokens()
-    token = cp._issue_confirm_token(
-        command_key="reload", target="reload", agent_id=1, team_id=1, impact=["x"]
-    )
     reached: list[str] = []
     turn_runner.tool_registry = _forwarding_registry(reached)
     turn_runner._history.mark_self_interrupt_tag = AsyncMock()
@@ -1526,7 +1520,7 @@ async def test_reload_with_valid_token_writes_tag_and_forwards_to_reload_team(tu
     output_item.tags = []
     tool_call = llmApiUtil.OpenAIToolCall(
         id="tc-reload",
-        function={"name": "console", "arguments": json.dumps({"command": f"reload --confirm {token}"})},
+        function={"name": "console", "arguments": json.dumps({"command": "reload"})},
     )
 
     with _patched_activity():
@@ -1534,19 +1528,15 @@ async def test_reload_with_valid_token_writes_tag_and_forwards_to_reload_team(tu
 
     turn_runner._history.mark_self_interrupt_tag.assert_awaited_once_with(41)
     assert reached == ["reload_team"], f"第 2 跳没到 reload_team，reached={reached}"
-    cp._reset_confirm_tokens()
 
 
 @pytest.mark.asyncio
-async def test_reload_without_token_neither_marks_tag_nor_forwards(turn_runner):
-    """反向对照：不带 `--confirm` 的 reload 只返回 `confirm_required`，不中断、不转发。
+async def test_non_reload_commands_neither_mark_tag_nor_forward_to_reload(turn_runner):
+    """反向对照：非 reload 命令**不写 tag、也不转发到 reload_team**。
 
     没有这条，把判定器写成恒 True 也照样能让上一条绿——而恒 True 会让每条 console
     命令都留中断标记（`dept ls` 也会被误判成「已执行过的中断工具」）。
     """
-    from service.funcToolService import consoleParsing as cp
-
-    cp._reset_confirm_tokens()
     reached: list[str] = []
     turn_runner.tool_registry = _forwarding_registry(reached)
     turn_runner._history.mark_self_interrupt_tag = AsyncMock()
@@ -1557,16 +1547,50 @@ async def test_reload_without_token_neither_marks_tag_nor_forwards(turn_runner):
     output_item.id = 42
     output_item.tags = []
     tool_call = llmApiUtil.OpenAIToolCall(
-        id="tc-reload-noconfirm",
-        function={"name": "console", "arguments": json.dumps({"command": "reload"})},
+        id="tc-dept-ls",
+        function={"name": "console", "arguments": json.dumps({"command": "dept ls"})},
     )
 
     with _patched_activity():
         await turn_runner._run_tool_to_item(tool_call, output_item, room)
 
     turn_runner._history.mark_self_interrupt_tag.assert_not_awaited()
-    assert reached == [], f"未确认的 reload 不得转发，reached={reached}"
-    cp._reset_confirm_tokens()
+    assert "reload_team" not in reached, f"非 reload 命令不得转发到 reload_team，reached={reached}"
+
+
+@pytest.mark.asyncio
+async def test_malformed_reload_syntax_does_not_mark_tag(turn_runner):
+    """`reload --confirm xxx`（选项已删除）⇒ 命令失败、**不写 tag**（#165 假标记防护）。
+
+    这条钉住的是本轮实测暴露的真坑：谓词一度只看命令名不看选项，`reload --confirm`
+    被判定会中断并写了 tag，而真执行在 `_parse_options` 就 `unknown_option` 失败了
+    —— 一次「没重载」被永久记成「重载成功」。现在谓词与执行共用
+    `_parse_command_tokens`，两处不可能漂移。
+    """
+    reached: list[str] = []
+    turn_runner.tool_registry = _forwarding_registry(reached)
+    turn_runner._history.mark_self_interrupt_tag = AsyncMock()
+
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 43
+    output_item.tags = []
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tc-reload-badopt",
+        function={
+            "name": "console",
+            "arguments": json.dumps({"command": "reload --confirm deadbeef"}),
+        },
+    )
+
+    with _patched_activity():
+        await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    turn_runner._history.mark_self_interrupt_tag.assert_not_awaited(), (
+        "解析失败的命令不得留下中断标记"
+    )
+    assert "reload_team" not in reached, f"解析失败的命令不得转发，reached={reached}"
 
 
 @pytest.mark.asyncio
