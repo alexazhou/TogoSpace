@@ -7,6 +7,7 @@ from typing import Any, Iterable, Optional
 from pydantic import BaseModel
 
 from constants import ToolCategory
+from exception import ForwardToolCall
 from model.coreModel.serviceStatus import ServiceStatusInfo
 from service import serviceUtil
 from util import llmApiUtil
@@ -264,6 +265,12 @@ async def run_tool_call(
         logger.info(f"函数执行结果: {result}")
         return result
 
+    except ForwardToolCall:
+        # 转发信号必须原样上抛（#160）：它是控制流，不是失败。
+        # 这一层是 `run_tool_call` 的兜底 `except Exception`，不先放行就会把
+        # `console` 抛出的 `ForwardToolCall` 转成「函数执行失败」返回体，
+        # 统一入口 `execute_tool_call` 再也看不到它 —— 整个转发设计会静默失效。
+        raise
     except Exception as e:
         if isinstance(e, TypeError):
             error = f"Invalid arguments for function {function_name}: {e}"

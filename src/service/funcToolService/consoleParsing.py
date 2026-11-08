@@ -1,17 +1,19 @@
 """`console` 工具：把 16 个团队管理工具收敛成一条命令行。
 
 设计依据是仓库根 `draft_v_console.md`（只读），落地口径见 #154 的 D1–D6。
-本模块负责四件事，顺序也是执行顺序：
+本模块负责三件事，顺序也是执行顺序：
 
 1. **解析**：`shlex` 切词（绝不 `eval`、绝不调 shell，D5），认出子命令；
 2. **校验输入来源**：内联 JSON 与 `--from payload` 二选一且互斥（D1、CC3）；
-3. **权限**：按子命令等价的原工具 category 逐个查调用者（D3，本单唯一不可降级项）；
-4. **路由**：调原工具函数，并对 `update` 做 PATCH 合并、对 `rm` 做 confirm_token 保护（D4）。
+3. **confirm token**（删除与 reload 的人确认凭据，D4）。
 
-为什么权限校验不放在命令表里一次性决定：`console` 本身注册为 BASIC（否则所有人都
-失去查询能力），所以「有没有权限调这条子命令」只能**在运行时按子命令**判断。
-`consoleCommands.COMMAND_SPECS` 里每条命令都填了 `legacy_tool`，这里就按它去查
-`CATEGORY_CONFIG`；漏填 `legacy_tool` 的命令会在校验时被判为无权限（fail-closed）。
+4. **路由**在 `consoleTool`：它只负责「命令 → 目标工具 + 参数」。
+
+**权限校验不在这里**（#160 起）：`console` 自己不再重算一遍权限，而是把调用
+转发给等价的原工具，由唯一执行入口 `AgentToolRegistry.execute_tool_call` 做鉴权。
+这样「原工具调不了、console 却能调」的错位在结构上不可能出现——判定只有一份实现。
+`consoleCommands` 里每条命令仍然声明 `legacy_tool`，它是**转发目标**（也是
+`CATEGORY_CONFIG` 里那一行对应的工具），不是「权限查表的键」。
 """
 
 from __future__ import annotations
@@ -20,9 +22,6 @@ import shlex
 import time
 import uuid
 from typing import Any, Optional
-
-from constants import ToolCategory
-from service.roomService import ToolCallContext
 
 from . import consoleCommands as cc
 
@@ -359,88 +358,6 @@ def _input_payload_for(parsed: ParsedCommand, payload: dict[str, Any] | None) ->
         )
         return _resolve_input_payload(restored, payload)
     return _resolve_input_payload(parsed, payload)
-
-
-# ---------------------------------------------------------------------------
-# 权限（#154 D3）
-# ---------------------------------------------------------------------------
-
-async def _resolve_allowed_categories(team_id: int, agent_id: int) -> tuple[set[ToolCategory], set[str]]:
-    """算出调用者运行时实际拥有的 (类别集合, 显式工具名集合)。
-
-    口径必须与 `toolRegistry.build_runtime_allow_specs` 一致，否则会出现
-    「原工具调不了、console 却能调」或反过来的错位：
-    - `allow_tools is None` → Basic/Read/Write/Execute（**不含 Admin**）
-    - 始终补 `Category:Basic`
-    - 调用者是团队根主管 → 补 `Category:Admin`
-    """
-    from dal.db import gtAgentManager
-    from service import deptService
-    from service.agentService import toolRegistry
-
-    gt_agent = await gtAgentManager.get_agent_by_id(agent_id)
-    if gt_agent is None or gt_agent.team_id != team_id:
-        return set(), set()
-
-    is_root_leader = False
-    dept_root = await deptService.get_dept_tree(team_id)
-    if dept_root is not None and dept_root.manager_id == agent_id:
-        is_root_leader = True
-
-    specs = toolRegistry.build_runtime_allow_specs(
-        gt_agent.allow_tools, is_root_leader=is_root_leader
-    )
-
-    categories: set[ToolCategory] = set()
-    explicit_names: set[str] = set()
-    for spec in specs:
-        category = ToolCategory.from_spec(spec)
-        if category is not None:
-            categories.add(category)
-            continue
-        explicit_names.add(spec)
-    return categories, explicit_names
-
-
-async def _assert_permitted(parsed: ParsedCommand, context: ToolCallContext | None) -> None:
-    """按子命令等价的原工具 category 校验权限。
-
-    `help` 是纯本地命令，不碰数据，跳过校验（否则没有 Admin 的人连 help 都看不到，
-    反而更容易瞎试命令）。
-    """
-    if parsed.spec.key == "help":
-        return
-    if context is None or not context.agent_id or context.team_id <= 0:
-        raise ConsoleError(
-            "permission_denied",
-            "无法确定调用者身份，拒绝执行。",
-        )
-
-    from service.agentService import toolRegistry
-
-    legacy_tool = parsed.spec.legacy_tool
-    if not legacy_tool:
-        # fail-closed：命令表漏填等价工具名 ⇒ 一律拒绝，绝不「没填就放行」。
-        raise ConsoleError(
-            "permission_denied",
-            f"内部错误：命令 {parsed.key} 未声明等价工具，已按无权限处理。",
-        )
-
-    categories, explicit_names = await _resolve_allowed_categories(
-        context.team_id, context.agent_id
-    )
-    legacy_category = toolRegistry.CATEGORY_CONFIG.get(legacy_tool)
-    allowed = legacy_tool in explicit_names or (
-        legacy_category is not None and legacy_category in categories
-    )
-    if not allowed:
-        raise ConsoleError(
-            "permission_denied",
-            f"无权限执行 `{parsed.key}`：它等价于 {legacy_tool}"
-            f"（类别 {legacy_category.name if legacy_category else '未知'}），当前调用者不具备该权限。",
-            legacy_tool=legacy_tool,
-            required_category=legacy_category.name if legacy_category else None,
-        )
 
 
 # ---------------------------------------------------------------------------

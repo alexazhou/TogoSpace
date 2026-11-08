@@ -115,7 +115,8 @@ def test_d2_get_tools_respects_switch_but_execution_does_not(monkeypatch):
     """开关只改 `get_tools()` 的暴露面，**不改** `get_func_tool()` 的执行能力。
 
     这条是收敛能成立的关键：停用原工具后，console 仍要能路由到底层函数
-    （它直接 import `tools` 里的函数，不经注册表查名）。
+    （#160 起它把调用转发给注册表的第 2 跳，而 `get_func_tool()` 不受这个开关影响，
+    所以「不暴露 ≠ 不能执行」这条前提必须一直成立）。
     """
     func_tool_core.load_func_tools()
     exposed_default = {t.function.name for t in func_tool_core.get_tools()}
@@ -139,17 +140,19 @@ def test_d2_get_tools_respects_switch_but_execution_does_not(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_every_command_declares_legacy_tool():
-    """每条命令都必须填 `legacy_tool`（D3 权限校验的唯一依据）。
+    """每条命令都必须填 `legacy_tool`（#160 起它是**转发目标**）。
 
-    漏填的后果不是「少个字段」，而是 fail-closed 把命令变成永久不可用；
-    更糟的是如果实现改成「没填就放行」，那就是给所有人开了 Admin 后门。
+    漏填的后果不是「少个字段」，而是 fail-closed 把命令变成永久不可用（转发目标为空
+    → 第 2 跳在注册表里查不到 → 按「未知工具」拒绝）；更糟的是如果实现改成
+    「没填就按原样执行」，那就是给所有人开了 Admin 后门。
     """
     for spec in cc.COMMAND_SPECS:
         assert spec.legacy_tool, f"命令 `{spec.key}` 未声明等价原工具"
 
 
 def test_every_legacy_tool_has_a_category():
-    """`legacy_tool` 必须能在 `CATEGORY_CONFIG` 里查到属于哪个类别。"""
+    """`legacy_tool` 必须能在 `CATEGORY_CONFIG` 里查到——否则那个工具不在任何
+    `Category:*` 里，任何身份的 allow_specs 都展开不到它，命令永久不可用。"""
     from service.agentService.toolRegistry import CATEGORY_CONFIG
 
     for spec in cc.COMMAND_SPECS:

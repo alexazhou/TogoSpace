@@ -1,19 +1,26 @@
 """`console` 工具的路由与 help 文本。
 
-与 `consoleParsing` 的分工：那边只管「命令长什么样、调用者有没有权限」，
-这边只管「解析完的命令怎么落到原工具上」。分开是为了让权限校验能被单独
-变异测试（#154 CC2）——把这里的路由改坏不该影响权限判定。
+与 `consoleParsing` 的分工：那边只管「命令长什么样」（解析、输入来源、confirm token），
+这边只管「解析完的命令怎么落到原工具上」。分开是为了让转发口径能被单独变异测试
+（#154 CC2）——把这里的路由改坏不该影响解析与 token 校验。
+
+**权限不在这里算**（#160）：每条子命令的处理方式是把「目标工具名 + 参数」装进
+`ForwardToolCall` 抛出去，由唯一执行入口 `AgentToolRegistry.execute_tool_call`
+在第 2 跳做鉴权与执行。所以同一个工具「直接调」和「经 console 调」永远走同一份
+权限判定，不会出现「原工具调不了、console 却能调」的错位。
 
 PATCH 语义（draft §4.3 / #154 CC5）在 `_patch_*` 里实现：先读已有资源，再用
 payload 里**出现的**键覆盖。数组字段一旦出现即全量替换，未出现则保持原值。
+读出来的现值全部装进转发参数——PATCH 的合并发生在这里，原工具收到的仍是完整参数。
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any, Callable, NoReturn, Optional
 
 from constants import EmployStatus
+from exception import ForwardToolCall
 from service.roomService import ToolCallContext
 
 from . import consoleCommands as cc
@@ -136,8 +143,8 @@ def _require(payload: dict[str, Any], key: str, command: str) -> Any:
 
 
 async def _patch_dept(
-    team_id: int, target: str, payload: dict[str, Any], context: ToolCallContext
-) -> dict[str, Any]:
+    team_id: int, target: str, payload: dict[str, Any], parsed: ParsedCommand
+) -> NoReturn:
     from dal.db import gtAgentManager, gtDeptManager
 
     existing = await gtDeptManager.get_dept_by_id(int(target)) if target.isdigit() else None
@@ -166,9 +173,7 @@ async def _patch_dept(
         parent = await _dm.get_dept_by_id(existing.parent_id)
         parent_name = parent.name if parent is not None else None
 
-    from service.funcToolService import tools as legacy
-
-    return await legacy.save_dept(
+    _forward(parsed,
         name=_pick(payload, "name", existing.name),
         responsibility=_pick(payload, "responsibility", existing.responsibility),
         manager_name=manager_name,
@@ -177,13 +182,12 @@ async def _patch_dept(
         i18n=_pick(payload, "i18n", existing.i18n or None),
         overwrite_existing=True,
         dept_id=existing.id,
-        _context=context,
     )
 
 
 async def _patch_agent(
-    team_id: int, target: str, payload: dict[str, Any], context: ToolCallContext
-) -> dict[str, Any]:
+    team_id: int, target: str, payload: dict[str, Any], parsed: ParsedCommand
+) -> NoReturn:
     from dal.db import gtRoleTemplateManager
 
     existing = await cp._resolve_agent_by_target(team_id, target)
@@ -195,9 +199,7 @@ async def _patch_agent(
     if role_template_name is None:
         role_template_name = template.name if template is not None else ""
 
-    from service.funcToolService import tools as legacy
-
-    return await legacy.save_agent(
+    _forward(parsed,
         name=_pick(payload, "name", existing.name),
         role_template_name=role_template_name,
         model=_pick(payload, "model", existing.model or None),
@@ -207,13 +209,12 @@ async def _patch_agent(
         i18n=_pick(payload, "i18n", existing.i18n or None),
         overwrite_existing=True,
         agent_id=existing.id,
-        _context=context,
     )
 
 
 async def _patch_room(
-    team_id: int, target: str, payload: dict[str, Any], context: ToolCallContext
-) -> dict[str, Any]:
+    team_id: int, target: str, payload: dict[str, Any], parsed: ParsedCommand
+) -> NoReturn:
     from dal.db import gtAgentManager
 
     existing = await cp._resolve_room_by_target(team_id, target)
@@ -226,35 +227,29 @@ async def _patch_room(
     if member_names is None:
         member_names = [id_to_name.get(aid, "") for aid in (existing.agent_ids or [])]
 
-    from service.funcToolService import tools as legacy
-
-    return await legacy.save_room(
+    _forward(parsed,
         name=_pick(payload, "name", existing.name),
         member_names=member_names,
         initial_topic=_pick(payload, "initial_topic", existing.initial_topic or ""),
         max_rounds=_pick(payload, "max_rounds", existing.max_rounds),
         overwrite_existing=True,
         room_id=existing.id,
-        _context=context,
     )
 
 
 async def _patch_role(
-    target: str, payload: dict[str, Any], context: ToolCallContext
-) -> dict[str, Any]:
+    target: str, payload: dict[str, Any], parsed: ParsedCommand
+) -> NoReturn:
     existing = await cp._resolve_role_by_target(target)
     if existing is None:
         raise ConsoleError("not_found", f"未找到角色模板：{target}")
 
-    from service.funcToolService import tools as legacy
-
-    return await legacy.save_role_template(
+    _forward(parsed,
         name=_pick(payload, "name", existing.name),
         type=_pick(payload, "type", existing.type.name),
         soul=_pick(payload, "soul", existing.soul),
         i18n=_pick(payload, "i18n", existing.i18n or None),
         overwrite_existing=True,
-        _context=context,
     )
 
 
@@ -303,29 +298,52 @@ async def _plan_role_rm(target: str) -> list[str]:
 
 # ---------------------------------------------------------------------------
 # 路由
+#
+# 每条分支只做两件事：① 把 console 特有的语义补齐（按 id/名称定位目标、PATCH 合并、
+# confirm token 校验）；② 把「目标工具名 + 完整参数」抛出去。**不查权限、不执行**。
 # ---------------------------------------------------------------------------
+
+
+def _forward(
+    parsed: ParsedCommand,
+    /,
+    *,
+    post_process: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
+    **args: Any,
+) -> NoReturn:
+    """把本次调用转交给 `parsed.spec.legacy_tool`（#160 唯一出口）。
+
+    目标名**只从命令表取**，不在路由里重复写一遍字面量：否则「声明的等价工具」与
+    「实际转发的工具」会各说各话，而 `test_every_legacy_tool_has_a_category` 这类
+    静态护栏就再也咬不住漂移。漏填 `legacy_tool` 的后果也随之明确——转发目标为空，
+    第 2 跳在注册表里查不到，按「未知工具」拒绝（fail-closed，而不是静默放行）。
+
+    参数组装保持在调用点（与原 `legacy.X(...)` 的字面形式一一对应），所以路由的
+    语义改动完全可从 diff 看出来。`_context` 不放进来：它由 `run_tool_call` 按当前
+    上下文注入。
+    """
+    raise ForwardToolCall(parsed.spec.legacy_tool, args, post_process=post_process)
+
 
 async def _route(
     parsed: ParsedCommand,
     payload: dict[str, Any] | None,
     context: ToolCallContext | None,
 ) -> dict[str, Any]:
-    from service.funcToolService import tools as legacy
-
     key = parsed.key
     target = parsed.target
 
     # ---- 部门 ----
     if key == "dept ls":
-        return await legacy.get_dept_info(_context=context)
+        _forward(parsed)
     if key == "dept get":
         dept_id = await cp._resolve_dept_id(context.team_id, target or "")
         if dept_id is None:
             raise ConsoleError("not_found", f"未找到部门：{target}")
-        return await legacy.get_dept_info(dept_id=dept_id, _context=context)
+        _forward(parsed, dept_id=dept_id)
     if key == "dept create":
         data = cp._input_payload_for(parsed, payload)
-        return await legacy.save_dept(
+        _forward(parsed,
             name=_require(data, "name", key),
             responsibility=_require(data, "responsibility", key),
             manager_name=_require(data, "manager_name", key),
@@ -333,28 +351,25 @@ async def _route(
             parent_name=_require(data, "parent_name", key),
             i18n=_pick(data, "i18n"),
             overwrite_existing=bool(_pick(data, "overwrite_existing", False)),
-            _context=context,
         )
     if key == "dept update":
         data = cp._input_payload_for(parsed, payload)
-        return await _patch_dept(context.team_id, target or "", data, context)
+        await _patch_dept(context.team_id, target or "", data, parsed)
     if key == "dept rm":
         recursive = bool(parsed.options.get("recursive"))
         dept_id = await cp._resolve_dept_id(context.team_id, target or "")
         return await _handle_rm(
             parsed, context, target or "",
             planner=lambda: _plan_dept_rm(context.team_id, target or "", recursive),
-            executor=lambda: legacy.delete_dept(
-                name=target or "",
-                dept_id=dept_id,
-                recursive=recursive,
-                _context=context,
+            forward=lambda: ForwardToolCall(
+                "delete_dept",
+                {"name": target or "", "dept_id": dept_id, "recursive": recursive},
             ),
         )
 
     # ---- 成员 ----
     if key == "agent ls":
-        return await legacy.get_agent_info(_context=context)
+        _forward(parsed)
     if key == "agent get":
         # 原工具只认 name；`agent get <id>` 要先按 id 解析出 name（draft §4.2
         # 「target 优先按 id，否则按名称；同名冲突时提示改用 id」）。
@@ -367,26 +382,22 @@ async def _route(
         #    按 id 查 A 却可能拿到同名的 B —— 这正是本用例集要防的「看起来成功」。
         agent_row = await cp._resolve_agent_by_target(context.team_id, target or "")
         agent_name = agent_row.name if agent_row is not None else target
-        result = await legacy.get_agent_info(agent_name=agent_name, _context=context)
-        if agent_row is not None:
-            if agent_row.employ_status != EmployStatus.ON_BOARD:
-                raise ConsoleError(
-                    "member_not_on_board",
-                    f"成员 {agent_row.name}（id={agent_row.id}）当前不在职"
-                    f"（{agent_row.employ_status.name}），未加载到运行时，"
-                    "无法返回房间与状态详情。若刚刚创建/修改，需要 reload 后才生效。",
-                )
-            returned_id = (result.get("agent") or {}).get("id")
-            if result.get("success") and returned_id is not None and returned_id != agent_row.id:
-                raise ConsoleError(
-                    "ambiguous_target",
-                    f"成员名 {agent_row.name} 在运行时对应 id={returned_id}，"
-                    f"与请求的 id={agent_row.id} 不一致；请改用 id 定位。",
-                )
-        return result
+        if agent_row is not None and agent_row.employ_status != EmployStatus.ON_BOARD:
+            # 这条判定只读库（不依赖原工具返回体），所以留在转发**之前**：
+            # 让「这个人没加载」的报错发生在任何执行之前。
+            raise ConsoleError(
+                "member_not_on_board",
+                f"成员 {agent_row.name}（id={agent_row.id}）当前不在职"
+                f"（{agent_row.employ_status.name}），未加载到运行时，"
+                "无法返回房间与状态详情。若刚刚创建/修改，需要 reload 后才生效。",
+            )
+        _forward(parsed,
+            agent_name=agent_name,
+            post_process=None if agent_row is None else _guard_agent_get(agent_row),
+        )
     if key == "agent create":
         data = cp._input_payload_for(parsed, payload)
-        return await legacy.save_agent(
+        _forward(parsed,
             name=_require(data, "name", key),
             role_template_name=_require(data, "role_template_name", key),
             model=_pick(data, "model"),
@@ -395,48 +406,44 @@ async def _route(
             allow_skills=_pick(data, "allow_skills"),
             i18n=_pick(data, "i18n"),
             overwrite_existing=bool(_pick(data, "overwrite_existing", False)),
-            _context=context,
         )
     if key == "agent update":
         data = cp._input_payload_for(parsed, payload)
-        return await _patch_agent(context.team_id, target or "", data, context)
+        await _patch_agent(context.team_id, target or "", data, parsed)
     if key == "agent wake":
-        return await legacy.wake_up_agent(agent_name=target or "", _context=context)
+        _forward(parsed, agent_name=target or "")
     if key == "agent dm":
-        return await legacy.start_chat(agent_name=target or "", _context=context)
+        _forward(parsed, agent_name=target or "")
 
     # ---- 房间 ----
     if key == "room ls":
-        return await legacy.get_room_info(_context=context)
+        _forward(parsed)
     if key == "room get":
         # 同 `agent get`：原工具只认 name，按 id 定位后转成 name 再调。
         room_row = await cp._resolve_room_by_target(context.team_id, target or "")
-        return await legacy.get_room_info(
+        _forward(parsed,
             room_name=room_row.name if room_row is not None else target,
-            _context=context,
         )
     if key == "room create":
         data = cp._input_payload_for(parsed, payload)
-        return await legacy.save_room(
+        _forward(parsed,
             name=_require(data, "name", key),
             member_names=_pick(data, "member_names", []),
             initial_topic=_pick(data, "initial_topic", ""),
             max_rounds=_pick(data, "max_rounds"),
             overwrite_existing=bool(_pick(data, "overwrite_existing", False)),
-            _context=context,
         )
     if key == "room update":
         data = cp._input_payload_for(parsed, payload)
-        return await _patch_room(context.team_id, target or "", data, context)
+        await _patch_room(context.team_id, target or "", data, parsed)
     if key == "room rm":
         room = await cp._resolve_room_by_target(context.team_id, target or "")
         return await _handle_rm(
             parsed, context, target or "",
             planner=lambda: _plan_room_rm(context.team_id, target or ""),
-            executor=lambda: legacy.delete_room(
-                name=target or "",
-                room_id=room.id if room is not None else None,
-                _context=context,
+            forward=lambda: ForwardToolCall(
+                "delete_room",
+                {"name": target or "", "room_id": room.id if room is not None else None},
             ),
         )
 
@@ -444,32 +451,31 @@ async def _route(
     if key == "role ls":
         kw = parsed.options.get("kw")
         keywords = [kw] if kw else None
-        return await legacy.list_role_templates(keywords=keywords, _context=context)
+        _forward(parsed, keywords=keywords)
     if key == "role get":
-        return await legacy.get_role_template(role_name=target or "", _context=context)
+        _forward(parsed, role_name=target or "")
     if key == "role create":
         data = cp._input_payload_for(parsed, payload)
-        return await legacy.save_role_template(
+        _forward(parsed,
             name=_require(data, "name", key),
             type=_pick(data, "type", "USER"),
             soul=_require(data, "soul", key),
             i18n=_pick(data, "i18n"),
             overwrite_existing=bool(_pick(data, "overwrite_existing", False)),
-            _context=context,
         )
     if key == "role update":
         data = cp._input_payload_for(parsed, payload)
-        return await _patch_role(target or "", data, context)
+        await _patch_role(target or "", data, parsed)
     if key == "role rm":
         return await _handle_rm(
             parsed, context, target or "",
             planner=lambda: _plan_role_rm(target or ""),
-            executor=lambda: legacy.delete_role_template(role_name=target or "", _context=context),
+            forward=lambda: ForwardToolCall("delete_role_template", {"role_name": target or ""}),
         )
 
     # ---- 其他 ----
     if key == "time get":
-        return legacy.get_time(timezone=parsed.options.get("tz"))
+        _forward(parsed, timezone=parsed.options.get("tz"))
     if key == "reload":
         return await _handle_reload(parsed, context)
 
@@ -479,15 +485,46 @@ async def _route(
     )
 
 
+def _guard_agent_get(agent_row) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """`agent get <id>` 的 id 一致性守卫（纵深防御）。
+
+    转发后 console 拿不到返回值，只能在 `execute_tool_call` 第 2 跳返回**之后**
+    用 `post_process` 校验：运行时按名字解析出的 id 必须与请求的 id 一致，否则
+    说明「按 id 查到了同名的另一个人」，必须报错而不是照原样返回别人的详情。
+
+    这里**只做一致性判定**，不碰权限：鉴权已在 `execute_tool_call` 里完成。
+    返回结构化失败体（而不是抛异常）——`post_process` 的契约是「进 dict、出 dict」，
+    抛异常会把一次工具调用升级成 turn 级异常。
+    """
+
+    def _post(result: dict[str, Any]) -> dict[str, Any]:
+        returned_id = (result.get("agent") or {}).get("id")
+        if result.get("success") and returned_id is not None and returned_id != agent_row.id:
+            return cp._error_payload(
+                ConsoleError(
+                    "ambiguous_target",
+                    f"成员名 {agent_row.name} 在运行时对应 id={returned_id}，"
+                    f"与请求的 id={agent_row.id} 不一致；请改用 id 定位。",
+                )
+            )
+        return result
+
+    return _post
+
+
 async def _handle_rm(
     parsed: ParsedCommand,
     context: ToolCallContext | None,
     target: str,
     *,
     planner,
-    executor,
+    forward: Callable[[], ForwardToolCall],
 ) -> dict[str, Any]:
-    """两步删除：不带 token 只报影响范围，带 token 才真删（#154 D4）。"""
+    """两步删除：不带 token 只报影响范围，带 token 才真删（#154 D4）。
+
+    `impact` 是 console 自己的产物（原工具不知道删了哪些子部门），所以真删那一步
+    用 `post_process` 把它并回结果 —— 这是转发后唯一会丢信息的地方。
+    """
     impact = await planner()
     token = parsed.options.get("confirm")
     if not token:
@@ -518,21 +555,23 @@ async def _handle_rm(
             code,
             "confirm token 无效或已过期，请重新执行不带 --confirm 的命令获取新 token。",
         )
-    result = await executor()
-    if isinstance(result, dict):
-        result = {**result, "impact": impact}
-    return result
+    pending = forward()
+    pending.post_process = lambda result: (
+        {**result, "impact": impact} if isinstance(result, dict) else result
+    )
+    raise pending
 
 
 async def _handle_reload(parsed: ParsedCommand, context: ToolCallContext | None) -> dict[str, Any]:
     """`reload` 会自中断当前 turn（#154 D6）。
 
-    这里**不做普通返回值包装**：`reload_team` 内部会 `create_task(hot_reload)` 后
-    挂起在一个永不完成的 future 上，本协程随 turn 被取消。`self_interrupt` 的
-    标记与恢复由 `AgentTurnRunner` 负责（见 `toolRegistry.register(self_interrupt=...)`），
-    所以这里只需要把调用原样转发出去。
+    confirm 闸门**留在本地**：它是唯一一条「转发前有前置副作用」的命令——必须先
+    返回 `confirm_required`、验过 token 才允许转发，否则一次误触就停掉整个团队。
 
-    `--confirm` 只加一层人确认，不改变自中断语义。
+    真转发出去后**不会有返回值**：`reload_team` 内部 `create_task(hot_reload)` 后挂起
+    在一个永不完成的 future 上，本协程随 turn 被取消。`self_interrupt` 的标记与恢复
+    由 `AgentTurnRunner` 负责（见 driver 里 `register(self_interrupt_predicate=...)`），
+    第 2 跳的注册表命中即 `reload_team` 自己的静态 `self_interrupt=True`。
     """
     token = parsed.options.get("confirm")
     if not token:
@@ -561,9 +600,7 @@ async def _handle_reload(parsed: ParsedCommand, context: ToolCallContext | None)
     if not ok:
         raise ConsoleError(code, "confirm token 无效或已过期。")
 
-    from service.funcToolService import tools as legacy
-
-    return await legacy.reload_team(_context=context)
+    _forward(parsed)
 
 
 # ---------------------------------------------------------------------------
@@ -622,10 +659,16 @@ async def console(command: str, payload: Optional[dict] = None, _context: ToolCa
                 f"`{spec.key}` 不接受配置输入，请去掉 payload 字段。",
                 example=spec.key,
             )
-        await cp._assert_permitted(parsed, _context)
         return await _route(parsed, payload, _context)
     except ConsoleError as exc:
         return cp._error_payload(exc)
+    except ForwardToolCall:
+        # 转发信号必须原样上抛（#160）：它是控制流，不是业务失败。
+        # 这个 `except` 必须排在下面的 `except Exception` **之前**——后者会把任何
+        # 异常转成 `_tool_error_result` 失败返回体，转发信号一旦在这里被吞，
+        # 统一入口 `execute_tool_call` 就再也看不到它，整个设计静默失效。
+        # （任务单只列了 `run_tool_call` 与 `execute_tool_call` 两处，这里是第三处。）
+        raise
     except Exception as exc:  # 业务异常透传（draft §6）
         from service.funcToolService.tools import _tool_error_result
 

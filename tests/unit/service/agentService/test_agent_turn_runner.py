@@ -1,4 +1,5 @@
 """AgentTurnRunner 单元测试：测试 Turn 执行逻辑。"""
+import json
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,7 +14,7 @@ from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtScheduleJob import GtScheduleJob
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService.agentTurnRunner import AgentTurnRunner
-from service.agentService.toolRegistry import RegisteredTool, ToolExecutionResult
+from service.agentService.toolRegistry import AgentToolRegistry, RegisteredTool, ToolExecutionResult
 from service.agentService.driver.base import AgentDriverConfig
 from service.roomService import ChatRoom
 import service.roomService as roomService
@@ -1465,6 +1466,106 @@ async def test_run_tool_to_item_skips_tag_when_predicate_says_no(turn_runner):
         await turn_runner._run_tool_to_item(tool_call, output_item, room)
 
     turn_runner._history.mark_self_interrupt_tag.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# #160：转发后「第 2 跳命中 reload_team」的自中断链路（交付标准第 2 条）
+#
+# 为什么必须用**真注册表**：改造前 `console` 自己 import `reload_team` 直接调；
+# 改造后它只抛 `ForwardToolCall`，`reload_team` 是第 2 跳查注册表才命中的。
+# 用桩 `RegisteredTool` + 桩 `execute_tool_call` 测不到这条——桩里没有转发循环，
+# 「转发断在第 1 跳」这种错法会静默通过。所以这里注册真 console（真 handler）
+# + 桩 handler 的 reload_team（真 reload_team 会 create_task 后挂死，不能真跑）。
+# ---------------------------------------------------------------------------
+
+
+def _forwarding_registry(reached: list[str]) -> AgentToolRegistry:
+    """console 走真 handler（真解析 + 真抛转发信号），reload_team 用计数桩。"""
+    from service.funcToolService import core as func_tool_core
+
+    func_tools = func_tool_core.load_func_tools()
+    registry = AgentToolRegistry()
+    registry.register(
+        func_tools["console"].to_openai_tool(),
+        func_tool_core.run_tool_call,
+        # 与三个 driver 完全同一条注册口径（静态标志 + 动态判定器）。
+        self_interrupt_predicate=func_tool_core.get_self_interrupt_predicate("console"),
+    )
+
+    async def _fake_reload(args_str: str, context) -> dict:
+        reached.append(context.tool_name or "")
+        return {"success": True, "message": "stub reload"}
+
+    registry.register(func_tools["reload_team"].to_openai_tool(), _fake_reload, self_interrupt=True)
+    return registry
+
+
+@pytest.mark.asyncio
+async def test_reload_with_valid_token_writes_tag_and_forwards_to_reload_team(turn_runner):
+    """`reload --confirm <有效 token>` ⇒ 写 SELF_INTERRUPT tag **且**第 2 跳真到达 reload_team。
+
+    两个断言缺一不可：
+      ① 只有 tag 没有转发 ⇒ 中断标记留下，实际什么都没重载（重启后被当成功）；
+      ② 只有转发没有 tag ⇒ 被取消后条目没有标记，重启后重放成**第二次**重载。
+    """
+    from service.funcToolService import consoleParsing as cp
+
+    cp._reset_confirm_tokens()
+    token = cp._issue_confirm_token(
+        command_key="reload", target="reload", agent_id=1, team_id=1, impact=["x"]
+    )
+    reached: list[str] = []
+    turn_runner.tool_registry = _forwarding_registry(reached)
+    turn_runner._history.mark_self_interrupt_tag = AsyncMock()
+
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 41
+    output_item.tags = []
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tc-reload",
+        function={"name": "console", "arguments": json.dumps({"command": f"reload --confirm {token}"})},
+    )
+
+    with _patched_activity():
+        await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    turn_runner._history.mark_self_interrupt_tag.assert_awaited_once_with(41)
+    assert reached == ["reload_team"], f"第 2 跳没到 reload_team，reached={reached}"
+    cp._reset_confirm_tokens()
+
+
+@pytest.mark.asyncio
+async def test_reload_without_token_neither_marks_tag_nor_forwards(turn_runner):
+    """反向对照：不带 `--confirm` 的 reload 只返回 `confirm_required`，不中断、不转发。
+
+    没有这条，把判定器写成恒 True 也照样能让上一条绿——而恒 True 会让每条 console
+    命令都留中断标记（`dept ls` 也会被误判成「已执行过的中断工具」）。
+    """
+    from service.funcToolService import consoleParsing as cp
+
+    cp._reset_confirm_tokens()
+    reached: list[str] = []
+    turn_runner.tool_registry = _forwarding_registry(reached)
+    turn_runner._history.mark_self_interrupt_tag = AsyncMock()
+
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 42
+    output_item.tags = []
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tc-reload-noconfirm",
+        function={"name": "console", "arguments": json.dumps({"command": "reload"})},
+    )
+
+    with _patched_activity():
+        await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    turn_runner._history.mark_self_interrupt_tag.assert_not_awaited()
+    assert reached == [], f"未确认的 reload 不得转发，reached={reached}"
+    cp._reset_confirm_tokens()
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,9 @@
+import json
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
+
+from exception import ForwardToolCall
 from constants import ToolCategory
 from service.agentService.toolRegistry import (
     CATEGORY_CONFIG,
@@ -182,6 +186,158 @@ async def test_execute_tool_call_exception() -> None:
 
 
 # ---------------------------------------------------------------------------
+# #160：转发（`ForwardToolCall`）——console 的鉴权与执行回到唯一入口
+#
+# 这几条为什么必须存在：console 改造后「自己的权限实现」被删掉了，正确性完全押在
+# 转发循环上。三种典型错法都不会让 console 的单测变红：
+#   ① 循环只跑 1 跳 ⇒ 转发目标根本没执行，console 变成「永远返回空」；
+#   ② 没有「目标是 console 自身」的拒绝 ⇒ 自指转发被跳数上限兜住，报错变成
+#      「链过长」，把实现缺陷伪装成配置问题；
+#   ③ 第 2 跳不查 enabled ⇒ console 成为绕过权限的后门（本单最严重的一种）。
+# ---------------------------------------------------------------------------
+
+
+def _register_tool(registry: AgentToolRegistry, name: str, handler) -> None:
+    registry.register(
+        llmApiUtil.OpenAITool(
+            function=llmApiUtil.OpenAIFunction(
+                name=name,
+                description="",
+                parameters=llmApiUtil.OpenAIFunctionParameter(
+                    type="object", properties={}, required=[]
+                ),
+            )
+        ),
+        handler,
+    )
+
+
+def _ctx() -> ToolCallContext:
+    return ToolCallContext(agent_id=1, team_id=1, chat_room=MagicMock())
+
+
+def _call(name: str, args: dict | None = None) -> llmApiUtil.OpenAIToolCall:
+    return llmApiUtil.OpenAIToolCall(
+        id="tc_forward", function={"name": name, "arguments": json.dumps(args or {})}
+    )
+
+
+@pytest.mark.asyncio
+async def test_forward_executes_target_tool_with_forwarded_args() -> None:
+    """第 1 跳抛 `ForwardToolCall` ⇒ 第 2 跳必须真的执行目标工具（参数原样过去）。"""
+    registry = AgentToolRegistry()
+    seen: dict = {}
+
+    async def console_like(args_str: str, context: ToolCallContext) -> dict:
+        raise ForwardToolCall("get_time", {"timezone": "UTC"})
+
+    async def target(args_str: str, context: ToolCallContext) -> dict:
+        seen["args"] = json.loads(args_str)
+        # 上下文里的 tool_name 也必须切到目标工具：`run_tool_call` 靠它选函数。
+        seen["tool_name"] = context.tool_name
+        return {"success": True, "message": "utc"}
+
+    _register_tool(registry, "console", console_like)
+    _register_tool(registry, "get_time", target)
+
+    result = await registry.execute_tool_call(_call("console", {"command": "time get"}), _ctx())
+
+    assert result.success is True
+    assert result.result["message"] == "utc"
+    assert seen == {"args": {"timezone": "UTC"}, "tool_name": "get_time"}
+
+
+@pytest.mark.asyncio
+async def test_forward_applies_post_process_to_target_result() -> None:
+    """`post_process` 必须被应用到**目标工具的返回体**上（`rm` 的 impact 靠它回来）。"""
+    registry = AgentToolRegistry()
+
+    async def console_like(args_str: str, context: ToolCallContext) -> dict:
+        raise ForwardToolCall(
+            "delete_room",
+            {"name": "r1"},
+            post_process=lambda r: {**r, "impact": ["房间 r1"]},
+        )
+
+    _register_tool(registry, "console", console_like)
+    _register_tool(registry, "delete_room", lambda *_: _ok({"deleted": True}))
+
+    result = await registry.execute_tool_call(_call("console"), _ctx())
+
+    assert result.success is True
+    assert result.result == {"success": True, "deleted": True, "impact": ["房间 r1"]}
+
+
+async def _ok(payload: dict) -> dict:
+    return {"success": True, **payload}
+
+
+@pytest.mark.asyncio
+async def test_forward_to_console_itself_is_rejected_before_execution() -> None:
+    """目标为 `console` 自身 ⇒ 直接拒绝，**不得**进第 2 跳（否则是自指死循环）。"""
+    registry = AgentToolRegistry()
+    hops: list[str] = []
+
+    async def console_like(args_str: str, context: ToolCallContext) -> dict:
+        hops.append(context.tool_name or "")
+        raise ForwardToolCall("console", {"command": "help"})
+
+    _register_tool(registry, "console", console_like)
+
+    result = await registry.execute_tool_call(_call("console"), _ctx())
+
+    assert result.success is False
+    assert "不允许转发到 console 自身" in result.result["message"]
+    assert hops == ["console"], f"只应跑第 1 跳，实际跑了 {hops}"
+
+
+@pytest.mark.asyncio
+async def test_forward_chain_longer_than_two_hops_is_rejected() -> None:
+    """两次转发 ⇒ 明确报「链过长」（而不是无限循环或静默成功）。"""
+    registry = AgentToolRegistry()
+
+    async def first(args_str: str, context: ToolCallContext) -> dict:
+        raise ForwardToolCall("second", {})
+
+    async def second(args_str: str, context: ToolCallContext) -> dict:
+        raise ForwardToolCall("third", {})
+
+    _register_tool(registry, "first", first)
+    _register_tool(registry, "second", second)
+    _register_tool(registry, "third", lambda *_: _ok({}))
+
+    result = await registry.execute_tool_call(_call("first"), _ctx())
+
+    assert result.success is False
+    assert "转发链过长" in result.result["message"]
+
+
+@pytest.mark.asyncio
+async def test_forward_target_respects_enabled_flag() -> None:
+    """**本单的核心性质**：转发目标被禁用时同样拒绝——转发不能成为绕权限的后门。"""
+    registry = AgentToolRegistry()
+    executed: list[str] = []
+
+    async def console_like(args_str: str, context: ToolCallContext) -> dict:
+        raise ForwardToolCall("save_agent", {"name": "x", "role_template_name": "r"})
+
+    async def save_agent(args_str: str, context: ToolCallContext) -> dict:
+        executed.append(context.tool_name or "")
+        return {"success": True}
+
+    _register_tool(registry, "console", console_like)
+    _register_tool(registry, "save_agent", save_agent)
+    # console 是 BASIC；只有它活着，才证明拒绝来自**第 2 跳**而不是入口就被挡。
+    registry.apply_tool_allow_specs(["Category:Basic"])
+
+    result = await registry.execute_tool_call(_call("console"), _ctx())
+
+    assert result.success is False
+    assert "工具无权限使用: save_agent" in result.result["message"]
+    assert executed == [], f"被拒的目标不得执行，实际执行了 {executed}"
+
+
+# ---------------------------------------------------------------------------
 # #75：CATEGORY_CONFIG 分类归属的字面量契约
 # ---------------------------------------------------------------------------
 
@@ -194,11 +350,13 @@ async def test_execute_tool_call_exception() -> None:
 # 分布（按 `ToolCategory.name` 统计，**不要按 `.value` 反推** ——
 # 枚举声明序是 ADMIN=1 / BASIC=2 / READ=3 / WRITE=4 / EXECUTE=5）：
 #   BASIC 16 / ADMIN 10 / READ 6 / EXECUTE 4 / WRITE 2
-#   （#154 起 `console` 计入 BASIC：它是入口，真正的子命令权限在服务端逐条校验）
+#   （#154 起 `console` 计入 BASIC：它只是入口；#160 起子命令权限由
+#    `execute_tool_call` 在转发后的第 2 跳按**目标工具自己的** category 判）
 EXPECTED_TOOL_CATEGORIES = {
     # 管理控制台（#154）：注册为 BASIC 才不会让没有 Admin 的 Agent 连 `dept ls`
-    # 都失去。**子命令级权限在 `consoleParsing._assert_permitted` 里按等价原工具
-    # 的 category 逐个查**（D3）—— 这一行不代表「console 的子命令都是 BASIC」。
+    # 都失去。**子命令级权限由 `execute_tool_call` 在转发后的第 2 跳按目标工具的
+    # enabled 判**（#160：`consoleParsing._assert_permitted` 已删除，判定只有一份实现）
+    # —— 这一行不代表「console 的子命令都是 BASIC」。
     "console": ToolCategory.BASIC,
     "create_container": ToolCategory.EXECUTE,
     "create_task": ToolCategory.BASIC,

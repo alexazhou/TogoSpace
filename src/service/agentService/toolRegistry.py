@@ -5,10 +5,16 @@ from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Iterable
 
 from constants import ToolCategory
+from exception import ForwardToolCall
 from service.roomService import ToolCallContext
 from util import llmApiUtil, jsonUtil
 
 ToolHandler = Callable[[str, ToolCallContext], Awaitable[dict[str, Any]]]
+
+#: 转发链最大跳数（#160）。第 1 跳是入口工具 `console`，第 2 跳是它等价的原工具。
+#: 写死 2 而不是可配：转发只允许「入口 → 原工具」这一段；更长的链说明实现已跑偏
+#: （例如两个入口互相转发），此时报错比悄悄多跑几层安全。
+MAX_FORWARD_HOPS = 2
 
 CATEGORY_CONFIG: dict[str, ToolCategory] = {
     # Local tools
@@ -29,9 +35,9 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     "list_tasks": ToolCategory.BASIC,
     "load_skill": ToolCategory.BASIC,
     # 管理控制台（#154）：注册为 BASIC，否则所有没有 Admin 的 Agent 连 `dept ls` /
-    # `get_time` 这类只读查询都失去。**真正的权限校验在服务端按子命令逐个做**
-    # （`funcToolService/consoleParsing._assert_permitted`，D3 唯一不可降级项）——
-    # 这里的类别只决定「console 这个入口是否可用」，不决定「哪条子命令可用」。
+    # `get_time` 这类只读查询都失去。这里的类别只决定「console 这个入口是否可用」，
+    # **不决定「哪条子命令可用」**——子命令的权限由本模块 `execute_tool_call` 在转发
+    # 后的第 2 跳按目标工具自己的 `enabled` 判定（#160：判定只有这一份实现）。
     "console": ToolCategory.BASIC,
     # 长期记忆工具：与任务/技能同属基础能力，默认对所有 Agent 生效
     "memory_list": ToolCategory.BASIC,
@@ -111,6 +117,20 @@ class ToolExecutionResult:
     result: dict[str, Any]
     success: bool = True
     error_message: str | None = None
+
+
+def _execution_result(tool_call_id: str, result: dict[str, Any]) -> ToolExecutionResult:
+    """把工具返回体包装成 `ToolExecutionResult`（成功判定与错误消息的唯一口径）。"""
+    tool_succeeded = result.get("success") is not False
+    error_message = None
+    if not tool_succeeded and result.get("message") is not None:
+        error_message = str(result.get("message"))
+    return ToolExecutionResult(
+        tool_call_id=tool_call_id,
+        result=result,
+        success=tool_succeeded,
+        error_message=error_message,
+    )
 
 
 @dataclass
@@ -214,53 +234,96 @@ class AgentToolRegistry:
         self._set_enabled_tool_names(enabled_names)
 
     async def execute_tool_call(self, tool_call: llmApiUtil.OpenAIToolCall, context: ToolCallContext) -> ToolExecutionResult:
+        """执行一次工具调用；工具可抛 `ForwardToolCall` 把调用转交给另一个工具（#160）。
+
+        转发循环存在的理由：`console` 的每条子命令都等价于一个原工具（`save_agent`
+        / `get_dept_info` …）。改造前它自己重算一遍权限（`consoleParsing._assert_permitted`），
+        于是同一个判定有了两份实现，一旦 `CATEGORY_CONFIG` 或运行时 spec 口径变化，
+        就会出现「原工具调不了、console 却能调」（或反过来）。改造后 console 只抛
+        `ForwardToolCall`，**鉴权与执行都回到这里**，只有一份实现。
+
+        循环上限固定 2 跳（`MAX_FORWARD_HOPS`）：第 1 跳是入口工具（`console`），
+        第 2 跳是它等价的原工具。第 2 跳再抛说明实现跑偏，直接返回明确错误，
+        绝不继续追——否则一个自指转发就是死循环。
+
+        每一跳都重新做 `registered` / `enabled` 检查，所以「转发目标」与「直接调用」
+        走的是同一条权限判定，这正是本设计要的性质。
+
+        `post_process` 回调在**转发成功后**按逆序应用（后转发的先处理）：它只用于
+        「依赖目标工具返回体」的本地逻辑（`rm` 把 impact 并回结果、`agent get` 的
+        id 一致性守卫），**不做权限判定**——鉴权在上面的循环里已经完成。
+        """
         tool_call.verify()
+        tool_call_id = tool_call.tool_call_id
         function_name = tool_call.function_name
         function_args = tool_call.function_args
-        tool_call_id = tool_call.tool_call_id
 
-        registered = self._tools_by_name.get(function_name)
-        if registered is None:
-            result = {"success": False, "message": f"未知工具: {function_name}"}
-            return ToolExecutionResult(
-                tool_call_id=tool_call_id,
-                result=result,
-                success=False,
-                error_message=str(result["message"]),
-            )
-        if registered.enabled is False:
-            result = {"success": False, "message": f"工具无权限使用: {function_name}"}
-            return ToolExecutionResult(
-                tool_call_id=tool_call_id,
-                result=result,
-                success=False,
-                error_message=str(result["message"]),
-            )
+        post_processors: list[Callable[[dict[str, Any]], dict[str, Any]]] = []
 
-        try:
-            enriched_context = replace(context, tool_name=function_name)
-            result = await registered.handler(function_args, enriched_context)
-            assert isinstance(result, dict), f"tool result must be dict, got {type(result).__name__}"
-            
-            # 关键修复：使用 jsonUtil 确保结果是纯 JSON 类型（处理 datetime 等）
+        for hop in range(MAX_FORWARD_HOPS):
+            # 每一跳都按当前 function_name 重新查注册表：转发目标与直接调用同一条判定。
+            registered = self._tools_by_name.get(function_name)
+            if registered is None:
+                return _execution_result(
+                    tool_call_id, {"success": False, "message": f"未知工具: {function_name}"}
+                )
+            if registered.enabled is False:
+                return _execution_result(
+                    tool_call_id, {"success": False, "message": f"工具无权限使用: {function_name}"}
+                )
+
             try:
-                result = jsonUtil.object_to_json_data(result)
-            except Exception as e:
-                result = {
-                    "success": False, 
-                    "message": f"工具返回结果处理失败 (Serialization Error): {e}"
-                }
-        except Exception as e:
-            result = {"success": False, "message": f"工具调用失败: {e}"}
+                enriched_context = replace(context, tool_name=function_name)
+                result = await registered.handler(function_args, enriched_context)
+                assert isinstance(result, dict), f"tool result must be dict, got {type(result).__name__}"
 
-        raw_success = result.get("success")
-        tool_succeeded = raw_success is not False
-        error_message = None
-        if not tool_succeeded and result.get("message") is not None:
-            error_message = str(result.get("message"))
-        return ToolExecutionResult(
-            tool_call_id=tool_call_id,
-            result=result,
-            success=tool_succeeded,
-            error_message=error_message,
-        )
+                # 关键修复：使用 jsonUtil 确保结果是纯 JSON 类型（处理 datetime 等）
+                try:
+                    result = jsonUtil.object_to_json_data(result)
+                except Exception as e:
+                    result = {
+                        "success": False,
+                        "message": f"工具返回结果处理失败 (Serialization Error): {e}",
+                    }
+            except ForwardToolCall as forward:
+                if forward.tool_name == "console":
+                    # 自指死循环的唯一入口：console 的某条子命令又转发回 console 自己。
+                    # 必须在**执行前**拒绝，否则第 2 跳会再进 console、再抛、被跳数上限兜住，
+                    # 错误信息变成「链过长」，把实现缺陷伪装成配置问题。
+                    return _execution_result(
+                        tool_call_id,
+                        {
+                            "success": False,
+                            "message": f"工具转发被拒绝: {function_name} 不允许转发到 console 自身",
+                        },
+                    )
+                if hop + 1 >= MAX_FORWARD_HOPS:
+                    return _execution_result(
+                        tool_call_id,
+                        {
+                            "success": False,
+                            "message": (
+                                f"工具转发链过长（最多 {MAX_FORWARD_HOPS} 跳）: "
+                                f"{function_name} -> {forward.tool_name}"
+                            ),
+                        },
+                    )
+                if forward.post_process is not None:
+                    post_processors.append(forward.post_process)
+                function_name = forward.tool_name
+                # 参数字典由转发方给出（**不含** `_context`：它由 run_tool_call 按当前
+                # 上下文注入），这里统一序列化成与模型侧同形的 JSON 字符串。
+                function_args = json.dumps(forward.tool_args, ensure_ascii=False)
+                continue
+            except Exception as e:
+                result = {"success": False, "message": f"工具调用失败: {e}"}
+
+            # 正常返回：把转发链上积攒的后处理按**逆序**应用（后转发的先处理）。
+            for post_process in reversed(post_processors):
+                result = post_process(result)
+            return _execution_result(tool_call_id, result)
+
+        # 理论不可达：循环体内每条路径都 return 或 continue，且 continue 只在
+        # `hop + 1 < MAX_FORWARD_HOPS` 时发生。
+        raise AssertionError(f"转发循环异常退出: tool={function_name}, hops={MAX_FORWARD_HOPS}")
+
