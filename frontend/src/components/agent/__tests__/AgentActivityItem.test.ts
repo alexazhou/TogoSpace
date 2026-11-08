@@ -249,7 +249,8 @@ describe('AgentActivityItem bash 首行描述', () => {
 /**
  * Token 展示：推理与上下文压缩共用同一个尾部位置。
  *
- * 推理（`llm_infer`）自 #167 起**拆成两个值**：`↑ 输入 ↓ 输出`。
+ * 推理（`llm_infer`）自 #167 起**拆成两个值**：`↑ 输入 ↓ 输出`；
+ * 自 #168 起**逐段**判定估算（可以「输入真值 + 输出估算」混色）。
  * - 流中：`estimated_prompt_tokens` + `current_completion_tokens`（**估算**，浅色 class）
  * - 结束后：`final_prompt_tokens` + `final_completion_tokens`（真值，正常色）；
  *   `final_completion_tokens` 缺失时回落 `current_completion_tokens`
@@ -264,13 +265,36 @@ describe('AgentActivityItem token 展示', () => {
     return wrapper.find('.agent-activity-item__tokens');
   }
 
+  /**
+   * 估算标记所在的元素。
+   *
+   * #168 起估算 class 挂在**每个段**（`--tokens-segment--estimated`）而不是容器上，
+   * 所以这里同时匹配两种写法：
+   * - 容器级 `--tokens--estimated`（#167 的形态，现在不再产生）
+   * - 段级 `--tokens-segment--estimated`（现在唯一的形态）
+   * 用组合选择器而不是留旧选择器，是为了让 T2/T6 那几条「不该有估算色」的断言
+   * 从「恒假」恢复成真正会咬人的判据（容器 class 已不存在，只查容器会让断言永远绿）。
+   */
   function estimatedTokensEl(wrapper: ReturnType<typeof mountItem>) {
-    return wrapper.find('.agent-activity-item__tokens--estimated');
+    return wrapper.find(
+      '.agent-activity-item__tokens--estimated, .agent-activity-item__tokens-segment--estimated',
+    );
+  }
+
+  /** 带估算 class 的**段**元素（按 DOM 顺序），用于逐段断言。 */
+  function estimatedSegments(wrapper: ReturnType<typeof mountItem>) {
+    return wrapper.findAll('.agent-activity-item__tokens-segment').filter(
+      (segment) => segment.classes().includes('agent-activity-item__tokens-segment--estimated'),
+    );
+  }
+
+  function segments(wrapper: ReturnType<typeof mountItem>) {
+    return wrapper.findAll('.agent-activity-item__tokens-segment');
   }
 
   // ---------------- 推理（LLM_INFER）：↑ 输入 ↓ 输出 ----------------
 
-  it('T1 推理流中：显示估算的 输入/输出 两个值，并带估算浅色 class', () => {
+  it('T1 推理流中：显示估算的 输入/输出 两个值，两段都带估算浅色 class', () => {
     const wrapper = mountItem(activity({
       activity_type: 'llm_infer',
       status: 'started',
@@ -278,9 +302,11 @@ describe('AgentActivityItem token 展示', () => {
     }));
 
     expect(tokenEl(wrapper).text()).toBe('↑ 1000 ↓ 20');
-    // 估算态必须能被视觉区分：class 挂在与 tokens 同一个元素上。
-    expect(estimatedTokensEl(wrapper).exists()).toBe(true);
-    expect(tokenEl(wrapper).classes()).toContain('agent-activity-item__tokens--estimated');
+    // 逐段着色：两段都是估算 ⇒ 两个段元素各带 class，容器本身不再带。
+    expect(segments(wrapper)).toHaveLength(2);
+    expect(estimatedSegments(wrapper)).toHaveLength(2);
+    // 用 textContent 而不是 text()：后者会 trim，断不出「↓ 前那个前导空格」是否还在。
+    expect(segments(wrapper).map((segment) => segment.element.textContent)).toEqual(['↑ 1000', ' ↓ 20']);
   });
 
   it('T2 推理结束：显示 usage 真值的 输入/输出，不带估算 class，且不再显示 total', () => {
@@ -301,6 +327,26 @@ describe('AgentActivityItem token 展示', () => {
     expect(tokenEl(wrapper).text()).not.toContain('1400');
   });
 
+  it('T2-b 结束后两个 completion 键共存（历史行 current=0）：取真值，不显示 ↓ 0', () => {
+    // 590eb102 之前流中进度是写库的，浅合并把 `current_completion_tokens` 留在历史行里。
+    // 48536 条（98.8%）LLM_INFER 两键共存，其中 44112 条 current=0 而 final>0。
+    // DB 读回的历史行会被 seedAgentActivities 渲染，写反优先级就是用户可见的 `↓ 0`。
+    const wrapper = mountItem(activity({
+      activity_type: 'llm_infer',
+      status: 'succeeded',
+      metadata: {
+        estimated_prompt_tokens: 1000,
+        final_prompt_tokens: 1200,
+        final_completion_tokens: 44,
+        current_completion_tokens: 0,
+      },
+    }));
+
+    expect(tokenEl(wrapper).text()).toBe('↑ 1200 ↓ 44');
+    expect(tokenEl(wrapper).text()).not.toContain('↓ 0');
+    expect(estimatedTokensEl(wrapper).exists()).toBe(false);
+  });
+
   it('T3 推理结束但缺 final_completion_tokens：输出量回落 current_completion_tokens', () => {
     const wrapper = mountItem(activity({
       activity_type: 'llm_infer',
@@ -309,8 +355,10 @@ describe('AgentActivityItem token 展示', () => {
     }));
 
     expect(tokenEl(wrapper).text()).toBe('↑ 1200 ↓ 200');
-    // 输入量已是真值 ⇒ 不按估算处理。
-    expect(estimatedTokensEl(wrapper).exists()).toBe(false);
+    // 逐段着色：输入量已是真值 ⇒ ↑ 段不是估算；输出量只有流中估算 ⇒ ↓ 段是估算。
+    expect(segments(wrapper).map((segment) => segment.element.textContent)).toEqual(['↑ 1200', ' ↓ 200']);
+    expect(segments(wrapper)[0].classes()).not.toContain('agent-activity-item__tokens-segment--estimated');
+    expect(segments(wrapper)[1].classes()).toContain('agent-activity-item__tokens-segment--estimated');
   });
 
   it('T4 只有输入量：只显示 ↑，不出现 ↓ 0 这种假值', () => {
@@ -343,6 +391,63 @@ describe('AgentActivityItem token 展示', () => {
     }));
 
     expect(tokenEl(wrapper).exists()).toBe(false);
+  });
+
+  // ---------------- 逐段着色（#168 P9–P12） ----------------
+
+  it('P9 半真半估：输入真值 + 输出估算 ⇒ ↑ 段无 class、↓ 段有 class', () => {
+    // ⚠️ 该 metadata 形态在当前后端**不可达**（`apply_usage` 里两个 final 键同生同死，
+    // DB 49015 条 LLM_INFER 中 fp_only / fc_only 均为 0）。这里守的是**组件契约**：
+    // 将来后端把 usage 字段改成 Optional 后，这个输入必须立刻显示正确。
+    const wrapper = mountItem(activity({
+      activity_type: 'llm_infer',
+      status: 'succeeded',
+      metadata: { final_prompt_tokens: 1200, current_completion_tokens: 200 },
+    }));
+
+    expect(tokenEl(wrapper).text()).toBe('↑ 1200 ↓ 200');
+    const parts = segments(wrapper);
+    expect(parts).toHaveLength(2);
+    expect(parts[0].classes()).not.toContain('agent-activity-item__tokens-segment--estimated');
+    expect(parts[1].classes()).toContain('agent-activity-item__tokens-segment--estimated');
+  });
+
+  it('P10 两段都估算：↑ ↓ 段都带 class', () => {
+    // 真正可达的「无真值」路径：`usage is None`（网关不回 usage），两键都缺。
+    const wrapper = mountItem(activity({
+      activity_type: 'llm_infer',
+      status: 'succeeded',
+      metadata: { estimated_prompt_tokens: 1000, current_completion_tokens: 20 },
+    }));
+
+    expect(tokenEl(wrapper).text()).toBe('↑ 1000 ↓ 20');
+    expect(estimatedSegments(wrapper)).toHaveLength(2);
+  });
+
+  it('P11 两段都真值：↑ ↓ 段都不带 class', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'llm_infer',
+      status: 'succeeded',
+      metadata: { final_prompt_tokens: 1200, final_completion_tokens: 200 },
+    }));
+
+    expect(tokenEl(wrapper).text()).toBe('↑ 1200 ↓ 200');
+    expect(estimatedTokensEl(wrapper).exists()).toBe(false);
+  });
+
+  it('P12 只有一段渲染：只出 ↑ 段（带 class），不存在 ↓ 段元素', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'llm_infer',
+      status: 'started',
+      metadata: { estimated_prompt_tokens: 1000 },
+    }));
+
+    const parts = segments(wrapper);
+    expect(parts).toHaveLength(1);
+    expect(parts[0].text()).toBe('↑ 1000');
+    expect(parts[0].classes()).toContain('agent-activity-item__tokens-segment--estimated');
+    // 「不存在 ↓ 段元素」比「文本里没有 ↓」更强：连残留的 class 都没地方挂。
+    expect(wrapper.find('.agent-activity-item__tokens-segment--estimated:nth-child(2)').exists()).toBe(false);
   });
 
   // ---------------- 压缩（COMPACT）：不在改动范围，断言原样 ----------------
