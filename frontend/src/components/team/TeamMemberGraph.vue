@@ -6,7 +6,6 @@ import type { TeamGraphNode } from './teamGraphTypes';
 import { useTeamGraphLayout } from './useTeamGraphLayout';
 
 const props = defineProps<{
-  teamName: string;
   selectedAgents: string[];
   selectedAgentIds?: Record<string, number | null>;
   memberTemplates?: Record<string, string>;
@@ -37,7 +36,6 @@ function buildFallbackRootNode(): TeamGraphNode | null {
     return null;
   }
 
-  const buildMemberAvatarSeed = (memberName: string): string => `${props.teamName}::${memberName}`;
   const resolveMemberSubtitle = (memberName: string): string => memberTemplates.value[memberName] || t('teamTree.noTemplate');
 
   return {
@@ -49,7 +47,7 @@ function buildFallbackRootNode(): TeamGraphNode | null {
     hasDepartment: true,
     subtitle: resolveMemberSubtitle(leaderName),
     avatarName: leaderName,
-    avatarSeed: buildMemberAvatarSeed(leaderName),
+    avatarSeed: leaderName,
     children: props.selectedAgents.slice(1).map((agentName) => ({
       id: agentName,
       agentId: selectedAgentIds.value[agentName] ?? null,
@@ -59,7 +57,7 @@ function buildFallbackRootNode(): TeamGraphNode | null {
       hasDepartment: false,
       subtitle: resolveMemberSubtitle(agentName),
       avatarName: agentName,
-      avatarSeed: buildMemberAvatarSeed(agentName),
+      avatarSeed: agentName,
       children: [],
     })),
   };

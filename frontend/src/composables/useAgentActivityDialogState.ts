@@ -20,6 +20,12 @@ export function useAgentActivityDialogState(
     return agent ? displayName(agent) : null;
   });
 
+  // 头像按 Agent 的稳定 name 取图（与列表 / 聊天保持一致），display_name 只用于文案展示。
+  const selectedAgentAvatarSeed = computed<string | null>(() => {
+    const agent = agents.value.find((item) => item.id === selectedAgentId.value);
+    return agent ? agent.name : null;
+  });
+
   const selectedAgentStatus = computed<AgentStatus | null>(
     () => agents.value.find((agent) => agent.id === selectedAgentId.value)?.status ?? null,
   );
@@ -47,6 +53,7 @@ export function useAgentActivityDialogState(
     open,
     selectedAgentId,
     selectedAgentName,
+    selectedAgentAvatarSeed,
     selectedAgentStatus,
     selectedAgentTemplateName,
     openAgent,

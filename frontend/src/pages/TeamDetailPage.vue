@@ -35,6 +35,11 @@ const selectedAgentName = computed<string | null>(() => {
   const agent = teamAgents.value.find((item) => item.id === selectedAgentId.value);
   return agent ? displayName(agent) : null;
 });
+// 头像按 Agent 的稳定 name 取图（与列表 / 聊天保持一致），display_name 只用于文案展示。
+const selectedAgentAvatarSeed = computed<string | null>(() => {
+  const agent = teamAgents.value.find((item) => item.id === selectedAgentId.value);
+  return agent ? agent.name : null;
+});
 const selectedAgentStatus = computed<AgentStatus | null>(() =>
   teamAgents.value.find((agent) => agent.id === selectedAgentId.value)?.status ?? null,
 );
@@ -129,7 +134,6 @@ onMounted(() => {
         />
 
         <TeamMembersCard
-          :team-name="team.name"
           :selected-agents="selectedAgents"
           :selected-agent-ids="selectedAgentIds"
           :member-templates="selectedAgentTemplates"
@@ -177,6 +181,7 @@ onMounted(() => {
       :open="agentDetailOpen"
       :agent-id="selectedAgentId"
       :agent-name="selectedAgentName"
+      :agent-avatar-seed="selectedAgentAvatarSeed"
       :agent-status="selectedAgentStatus"
       :role-template-name="selectedAgentTemplateName"
       @close="closeAgentDetail"

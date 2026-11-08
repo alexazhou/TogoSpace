@@ -11,7 +11,6 @@ const props = defineProps<{
   open: boolean;
   editable: boolean;
   agentId: number | null;
-  teamName: string;
   memberName: string;
   status: string;
   employeeNumber: string;
@@ -68,11 +67,7 @@ const driverModel = computed({
 const employeeNumberDisplay = computed(() => props.employeeNumber || t('member.employeePending'));
 const canSaveMember = computed(() => Boolean(props.memberName.trim() && props.selectedTemplateId !== null));
 const memberTemplateSoul = computed(() => props.currentTemplateSoul.trim() || t('member.noSoul'));
-const selectedMemberAvatarSeed = computed(() => (
-  props.teamName && props.memberName.trim()
-    ? `${props.teamName}::${props.memberName.trim()}`
-    : props.memberName.trim()
-));
+const selectedMemberAvatarSeed = computed(() => props.memberName.trim());
 </script>
 
 <template>

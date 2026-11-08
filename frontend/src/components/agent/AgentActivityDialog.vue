@@ -22,6 +22,8 @@ const props = defineProps<{
   open: boolean;
   agentId: number | null;
   agentName: string | null;
+  /** 头像取图种子：使用 Agent 的稳定 name，避免 i18n display_name 导致同一 Agent 头像不一致。 */
+  agentAvatarSeed?: string | null;
   agentStatus?: AgentStatus | null;
   roleTemplateName?: string | null;
 }>();
@@ -117,6 +119,10 @@ const displayAgentName = computed(() => {
   }
   return props.agentName ?? 'Agent';
 });
+
+const avatarSeed = computed(() => (
+  displayAgent.value?.name || props.agentAvatarSeed || displayAgentName.value
+));
 
 const displayEmployeeNumber = computed(() => String(displayAgent.value?.employee_number ?? ''));
 const activityRealtimeState = computed(() => connectionState.value);
@@ -317,6 +323,7 @@ watch(
           :subtitle="agentTemplateLabel"
           :employee-number="displayEmployeeNumber"
           :avatar-name="displayAgentName"
+          :avatar-seed="avatarSeed"
           variant="profile"
           readonly
         />

@@ -93,6 +93,7 @@ const {
   open: agentDetailOpen,
   selectedAgentId,
   selectedAgentName,
+  selectedAgentAvatarSeed,
   selectedAgentStatus,
   selectedAgentTemplateName,
   openAgent,
@@ -454,6 +455,7 @@ onBeforeUnmount(() => {
       :open="agentDetailOpen"
       :agent-id="selectedAgentId"
       :agent-name="selectedAgentName"
+      :agent-avatar-seed="selectedAgentAvatarSeed"
       :agent-status="selectedAgentStatus"
       :role-template-name="selectedAgentTemplateName"
       @close="closeAgentDetail"

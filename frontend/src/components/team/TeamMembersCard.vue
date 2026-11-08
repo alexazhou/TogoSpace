@@ -13,7 +13,6 @@ type MemberPanelAction = {
 };
 
 withDefaults(defineProps<{
-  teamName: string;
   selectedAgents: string[];
   selectedAgentIds?: Record<string, number | null>;
   memberTemplates?: Record<string, string>;
@@ -109,7 +108,6 @@ onBeforeUnmount(() => {
 
       <TeamMemberGraph
         v-else
-        :team-name="teamName"
         :selected-agents="selectedAgents"
         :selected-agent-ids="selectedAgentIds"
         :member-templates="memberTemplates"
