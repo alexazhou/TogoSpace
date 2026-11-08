@@ -111,13 +111,24 @@ def test_d2_switch_is_fail_safe(monkeypatch, value):
     assert func_tool_core._hidden_tool_names() == set()
 
 
-def test_d2_get_tools_respects_switch_but_execution_does_not(monkeypatch):
-    """开关只改 `get_tools()` 的暴露面，**不改** `get_func_tool()` 的执行能力。
+def test_d2_get_tools_respects_switch_for_exposure_only(monkeypatch):
+    """开关只改 `get_tools()` 的**暴露面**（schema 列表）。
 
-    这条是收敛能成立的关键：停用原工具后，console 仍要能路由到底层函数
-    （#160 起它把调用转发给注册表的第 2 跳，而 `get_func_tool()` 不受这个开关影响，
-    所以「不暴露 ≠ 不能执行」这条前提必须一直成立）。
+    这里**只**断言暴露面，因为这是本开关唯一被验证过的效果。
+    执行路径由下面 `test_d2_hidden_mode_console_forwarding_is_unavailable` 单独守。
+
+    ⚠️ 历史教训（#166）：本用例的前身 `..._but_execution_does_not` 在暴露面之外
+    还断言了 `get_func_tool()` 非 None，并据此声称「停用原工具后 console 仍要能
+    路由到底层函数」。但 `get_func_tool()` **不是 console 的执行路径**——#160 起
+    console 抛 `ForwardToolCall`，由注册表第 2 跳执行。所以那条断言恒真、基线也绿，
+    却守着一个**假的事实**（实测隐藏模式下 console 23 条命令全部返回「未知工具」）。
+    这正是「拿代理量当结论」：按名字和 docstring 在守"能执行"，按断言只在守
+    "字典里有这个 key"。现已拆开：暴露面归本用例，执行路径归下一条。
     """
+    # ⚠️ 必须**显式**清掉环境变量再测默认态：不能假定进程环境是干净的。
+    # 隐藏模式全量回归是用 `TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS=0` 起的，
+    # 这里若只 setenv 不 delenv，第一步的「默认态」断言就会红（#166 踩过）。
+    monkeypatch.delenv(cc.ENV_KEEP_LEGACY_TOOLS, raising=False)
     func_tool_core.load_func_tools()
     exposed_default = {t.function.name for t in func_tool_core.get_tools()}
     assert "console" in exposed_default
@@ -125,14 +136,9 @@ def test_d2_get_tools_respects_switch_but_execution_does_not(monkeypatch):
 
     monkeypatch.setenv(cc.ENV_KEEP_LEGACY_TOOLS, "0")
     exposed_off = {t.function.name for t in func_tool_core.get_tools()}
-    assert "console" in exposed_off
+    assert "console" in exposed_off, "console 本身必须始终暴露（收敛的前提）"
     assert not (set(cc.LEGACY_CONVERGED_TOOLS) & exposed_off), "开关置假后 16 个原工具不得再暴露"
 
-    # 执行侧不受影响。
-    for name in cc.LEGACY_CONVERGED_TOOLS:
-        assert func_tool_core.get_func_tool(name) is not None, (
-            f"{name} 不暴露但必须仍可执行（console 要路由到它）"
-        )
 
 
 # ---------------------------------------------------------------------------
