@@ -513,6 +513,131 @@ class TestTaskTools(ServiceTestCase):
         assert res["task"]["events"][0]["to_status"] == "ON_HOLD"
         assert res["task"]["current_block_reason"] == "缺少测试账号"
 
+    # -------------------------------------- B4 存活变异：多次搁置必须取最新那条 ----
+    async def test_block_reason_takes_latest_of_multiple_holds(self):
+        """多次「有原因」的搁置：必须取**最后一次**的原因，不能取第一次。
+
+        守卫的存活变异：把 DAL `get_latest_event_with_content_by_to_status` 的
+        `id.desc()` 改成 `id.asc()`，此前全量 181 条用例**全绿**——因为唯一覆盖
+        「跨搁置」的用例 `test_block_reason_ignores_bare_on_hold_without_note`
+        只回溯到唯一一条有内容的 ON_HOLD，取最新取最旧同值。
+
+        真库后果：`IN_PROGRESS → ON_HOLD('原因A-第一次搁置')` → 恢复 →
+        `ON_HOLD('原因B-第二次搁置')`，Agent 的 `get_task_detail` 会读到
+        **"原因A-第一次搁置"**，拿上一次的搁置原因去推进——真实的错误信息泄漏。
+
+        可红性：`id.desc()` → `id.asc()` 时，下面断言从
+        `'原因B-第二次搁置'` 变成 `'原因A-第一次搁置'` ⇒ 失败。
+        """
+        task = await self._make_task()
+        await transition_task(
+            task, actor_id=8, from_status=TaskStatus.TODO,
+            to_status=TaskStatus.ON_HOLD, content="原因A-第一次搁置",
+        )
+        await transition_task(
+            task, actor_id=8, from_status=TaskStatus.ON_HOLD,
+            to_status=TaskStatus.IN_PROGRESS, content="恢复",
+        )
+        await transition_task(
+            task, actor_id=8, from_status=TaskStatus.IN_PROGRESS,
+            to_status=TaskStatus.ON_HOLD, content="原因B-第二次搁置",
+        )
+
+        res = await tools.get_task_detail(task_id=task.id, _context=self._ctx())
+
+        reason = res["task"]["current_block_reason"]
+        assert reason == "原因B-第二次搁置", (
+            f"多次搁置应取最近一条 ON_HOLD 的原因（期望 '原因B-第二次搁置'），"
+            f"实际取到 {reason!r}；"
+            f"取到 '原因A-第一次搁置' 说明排序方向反了（id.asc 存活变异）"
+        )
+        # 两次搁置事件都真的在库里（否则上面断言证明不了「取最新」）
+        all_ev = await gtAgentTaskEventManager.list_events(task.id, limit=100)
+        hold_ids = [e.id for e in all_ev if e.to_status == TaskStatus.ON_HOLD]
+        assert len(hold_ids) == 2
+        assert hold_ids[0] > hold_ids[1]  # list_events 降序，最新在前
+
+    async def test_block_reason_backtracks_to_latest_non_empty_hold(self):
+        """反向：最后一次搁置没写原因时，回溯到**最近一条有内容**的搁置。
+
+        三段搁置：`ON_HOLD('原因A')` → 恢复 → `ON_HOLD('原因B')` → 恢复 →
+        `ON_HOLD('')`。正确结果是「原因B」，不是「原因A」、也不是 `''`。
+
+        `gtAgentTaskEventManager.py:99-100` 已登记这条回溯边界（空 content 无法区分
+        「忘了写」与「就是旧原因」），本用例**固化它，不修改实现**。
+
+        可红性（双变异）：
+          - `id.desc()` → `id.asc()` ⇒ 取到 `'原因A'` ⇒ 失败；
+          - 去掉 `content != ''` 条件 ⇒ 取到 `''` ⇒ 失败。
+        """
+        task = await self._make_task()
+        for from_status, to_status, content in (
+            (TaskStatus.TODO, TaskStatus.ON_HOLD, "原因A-第一次搁置"),
+            (TaskStatus.ON_HOLD, TaskStatus.IN_PROGRESS, "恢复1"),
+            (TaskStatus.IN_PROGRESS, TaskStatus.ON_HOLD, "原因B-第二次搁置"),
+            (TaskStatus.ON_HOLD, TaskStatus.IN_PROGRESS, "恢复2"),
+            (TaskStatus.IN_PROGRESS, TaskStatus.ON_HOLD, ""),
+        ):
+            await transition_task(
+                task, actor_id=8, from_status=from_status,
+                to_status=to_status, content=content,
+            )
+
+        res = await tools.get_task_detail(task_id=task.id, _context=self._ctx())
+
+        reason = res["task"]["current_block_reason"]
+        assert reason == "原因B-第二次搁置", (
+            f"最后一搁置无内容时应回溯到最近一条有内容的原因（'原因B-第二次搁置'），"
+            f"实际取到 {reason!r}：'' 说明空 content 被当成原因，"
+            f"'原因A-第一次搁置' 说明排序方向反了"
+        )
+
+    async def test_block_reason_honours_truncate_content_false(self):
+        """`truncate_content=False`（Web 口径）时搁置原因必须是**完整原文**。
+
+        守卫的第二个存活变异：把 `current_block_reason` 末尾的
+        `return _truncate_event_content(content) if truncate_content else content`
+        改成无条件截断（忽略入参），此前全量 181 条用例**全绿**——
+        既有截断用例 `test_get_task_detail_truncates_last_note_and_block_reason`
+        只走 `truncate_content=True`（默认）方向，False 方向对 `current_block_reason`
+        **零覆盖**（`TestTaskEventFullContent` 只断言了 `last_note` 与 `events`）。
+
+        真库后果：Web 时间线看到的是被截到 100 字 + `…(已截断)` 的搁置原因，
+        与 `TASK_EVENT_APPENDED` 推送的完整原文不一致。
+
+        前提（否则断言会落在 `None` 上恒真）：任务必须真推进到 `ON_HOLD`——
+        `taskService.current_block_reason` 第一行就是非 ON_HOLD 直接 `return None`。
+        故走 `transition_task` 真走路，不用固定 `status='TODO'` 的 seed 辅助。
+
+        可红性：
+          - 忽略 `truncate_content` 恒截断 ⇒ 第二个断言失败（取到截断串）；
+          - 恒不截断 ⇒ 第一个断言失败。
+        """
+        long_reason = "等待外部依赖：" + "很长的说明" * 30
+        assert len(long_reason) > EVENT_CONTENT_MAX_CHARS  # 前提：确实超长
+
+        task = await self._make_task()
+        await transition_task(
+            task, actor_id=8, from_status=TaskStatus.TODO,
+            to_status=TaskStatus.ON_HOLD, content=long_reason,
+        )
+
+        # Agent 口径（默认 True）：截断 + 省略标记
+        agent_view = await taskService.get_task(team_id=1, task_id=task.id)
+        truncated = long_reason[:EVENT_CONTENT_MAX_CHARS] + EVENT_TRUNCATED_SUFFIX
+        assert agent_view["task"]["current_block_reason"] == truncated
+
+        # Web 口径（False）：完整原文
+        web_view = await taskService.get_task(
+            team_id=1, task_id=task.id, truncate_content=False
+        )
+        reason = web_view["task"]["current_block_reason"]
+        assert reason == long_reason, (
+            f"truncate_content=False 时搁置原因应为完整原文（{len(long_reason)} 字符），"
+            f"实际取到 {len(reason) if isinstance(reason, str) else reason!r}："
+            f"被截断说明实现忽略了 truncate_content 入参"
+        )
+
 
 class TestListTasksTitleKeywordRealDb(ServiceTestCase):
     """`title_keyword` 的**真实库**链路：标题子串匹配进 SQL、`total` 同口径。
