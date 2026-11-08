@@ -546,10 +546,10 @@ async def _handle_rm(parsed: ParsedCommand, planner) -> NoReturn:
         执行，而第 2 跳要查 `registered`；`tspDriver._register_host_tools` 只注册
         `get_tools()` 返回的工具，隐藏模式下 `delete_dept` 等不在其中 ⇒ 第 2 跳
         返回「未知工具: delete_dept」，删除**发生不了**。实测隐藏模式下 23/23 条
-        带 `legacy_tool` 的命令**全部失败（0 成功）**；其中**能走到转发层**的一律
-        返回 `未知工具: <legacy_tool>`（`dept rm` / `room rm` / `role rm` / `reload`
-        在实体存在时实测均断在此处），其余在**参数解析 / 实体查找阶段**即失败——
-        那时还没抛 `ForwardToolCall`，断因在上游、与 D2 无关。
+        带 `legacy_tool` 的命令**全部失败（0 成功），且全部断在第 2 跳
+        `未知工具: <legacy_tool>`**（含 `dept rm` / `room rm` / `role rm` / `reload`）
+        ——前提是命令所需实体存在；实体不存在时会先报「未找到部门/房间/角色」，
+        那属**前置条件问题**，不是命令类别属性，也不属 D2。
         这是 #160（`a1e9a502`）「改抛 ForwardToolCall」引入的既有缺陷，不是本单
         造成的：#160 之前 console 直接 `await legacy.delete_dept(...)`、不查注册表，
         隐藏模式下仍能删。

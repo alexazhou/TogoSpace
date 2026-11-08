@@ -18,12 +18,15 @@
 - ⇒ **23 条带 `legacy_tool` 的命令、去重 16 个转发目标，全部不可达**
 
 ⚠️ 上句是**静态**口径（按命令表逐条比对其 `legacy_tool` 是否在隐藏清单内 ⇒ 目标层面
-23/23 不可达），不要读成「运行时 23 条都断在转发层」。真 console handler + 真 DB 逐条
-实跑：**23/23 条命令全部失败（0 成功）**，但只有**能走到转发层**的那批返回
-`未知工具: <legacy_tool>`；带 target / accepts_input 的命令（`dept get` / `dept update` /
-`dept rm` / `agent get` / `role update` / `role rm` …）在**参数解析 / 实体查找 / 字段校验
-阶段**即失败，那时还没抛 `ForwardToolCall`——断因在上游、**与 D2 无关**（那批在默认模式
-下同样失败）。报数按两层分开说，别用一个总数把上游失败算进 D2 账上。
+23/23 不可达）。运行时口径（真 console handler + 真 DB、**前置实体全部建成**后逐条跑）：
+**23/23 条命令全部失败（0 成功），且全部断在第 2 跳 `未知工具: <legacy_tool>`**，
+含 `dept get` / `dept update` / `dept rm` / `agent get` / `room update` / `room rm` /
+`role update` / `role rm` / `reload`。连跑 3 次结果一致。
+
+⚠️ 但**实体不存在时断点会漂到上游**：`dept get` / `dept rm` / `room rm` / `role rm` 这类
+带 target 的命令会先报「未找到部门/房间/角色」，那时还没抛 `ForwardToolCall`。那不是
+D2 的断因，是**前置条件没满足**——自测时若看到一批「未找到 X」，先怀疑探针实体没建好
+（#166 两轮探针在这里翻过车），不要据此改这层结论。
 
 这与 `keep_legacy_admin_tools()` 旧 docstring 的承诺「关掉原工具后 console 依然能干活」
 **相反**。该承诺自 #160（`a1e9a502`）起失效，已在 #165 `2da214f0` 的 docstring 中改正。

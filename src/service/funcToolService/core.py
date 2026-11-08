@@ -79,11 +79,10 @@ def keep_legacy_admin_tools() -> bool:
       `tspDriver._register_host_tools`（`:477`）只注册 `get_tools()` 返回的工具。
     - ⇒ 开关置假时 `delete_dept` / `reload_team` 等未注册 ⇒ console 转发到它们
       一律返回「未知工具: xxx」。
-    - 实测隐藏模式下 **23/23 条带 `legacy_tool` 的命令全部失败（0 成功）**；其中
-      **能走到转发层**的一律返回 `未知工具: <legacy_tool>`，其余（带 target /
-      accepts_input 的，如 `dept get` / `dept rm` / `role rm`）在**参数解析 / 实体查找
-      阶段**即失败——那时还没抛 `ForwardToolCall`，断因在上游、**与 D2 无关**
-      （那批在默认模式下同样失败）。所以不要只按「23 条都报未知工具」去查 D2。
+    - 实测隐藏模式下 **23/23 条带 `legacy_tool` 的命令全部失败（0 成功），且全部
+      断在第 2 跳 `未知工具: <legacy_tool>`**——前提是命令所需实体存在。实体不存在时
+      会先报「未找到部门 / 房间 / 角色」，那属**前置条件问题**（探针没建好实体就会
+      看到它），不是命令类别属性，也不属 D2。所以自测时先建实体，否则断点会漂到上游。
 
     **所以「关掉原工具后 console 依然能干活」这句话在 #160 之后已失真**（#160 之前
     才成立：那时 console 直接 `await legacy.delete_dept(...)`，不查注册表）。
