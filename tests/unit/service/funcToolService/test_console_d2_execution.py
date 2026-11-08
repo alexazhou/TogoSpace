@@ -20,13 +20,20 @@
 这与 `keep_legacy_admin_tools()` 旧 docstring 的承诺「关掉原工具后 console 依然能干活」
 **相反**。该承诺自 #160（`a1e9a502`）起失效，已在 #165 `2da214f0` 的 docstring 中改正。
 
-⚠️ **这些用例断言的是「不可达」，不是「可达」。** 理由：D2 的用途已确认为
-「测 token 收益」（`shared/夜间值守汇总-20261108.md:90`：切到隐藏才净省 86.9%，
-「要不要切由你定」——Operator 尚未拍板切产物），且 `keep_legacy_admin_tools()`
-全仓仅一个调用点（`get_tools()` 过滤），无业务逻辑依赖隐藏模式，故当前不做功能修复。
+⚠️ **这些用例断言的是「不可达」，不是「可达」。** 这不是把缺陷当成正确，而是
+**如实记录现状 + 把它变成切换前的拦路闸**：
 
-**若将来决定把隐藏模式切进产物，必须先修好转发链路，届时这些用例会变红——这是故意的，
-它是「切产物前先修好转发」的拦路闸。**
+隐藏模式下 console 的全部转发命令都会失败（见
+`test_d2_hidden_mode_console_forwarding_is_unavailable`）。**因此切换本开关前必须先修
+#166-A（注册表注册面与执行面解耦），否则 console 会整体失效。**
+A 未修是有意为之：当前无切换需求（`shared/夜间值守汇总-20261108.md:90` 记着
+「切到隐藏才净省 86.9%…要不要切由你定」——是**尚未拍板的开放决策**，不是已否决），
+且改动会触及 `execute_tool_call` 的权限判定单点。
+
+**注意「要不要切由你定」≠「不准备切」。** 它随时可能被拍成「切」，
+所以 A 不是「永远不用做」，而是**「切」这个决策的阻塞前置条件**：
+谁想切，第一件事不是改环境变量，是先做 A。届时本文件的「不可达」用例会变红——
+**那是故意的，它在喊「先修 A」。**
 """
 
 from __future__ import annotations
@@ -135,7 +142,7 @@ def test_forward_command_count():
 # ---------------------------------------------------------------------------
 
 async def test_d2_hidden_mode_console_forwarding_is_unavailable():
-    """隐藏模式下，console 的转发第 2 跳查不到目标 ⇒ 「未知工具」。
+    """隐藏模式下，console 的转发第 2 跳查不到目标 ⇒ 「未知工具: <具体目标>」。
 
     这是**对现状的断言**，不是对理想行为的断言。它替代旧判据
     `..._but_execution_does_not` —— 后者用 `get_func_tool()` 代理执行路径，恒真假绿。
@@ -144,6 +151,11 @@ async def test_d2_hidden_mode_console_forwarding_is_unavailable():
     - 旧判据在**任何**代码状态下都绿（因为它测的是字典 key）⇒ 证明它没测执行路径；
     - 本判据在 `2da214f0`（未修）上**绿**，记录现状「确实不可达」；
     - 把转发链路修好后本判据**红** ⇒ 证明它真的咬住了执行路径。
+
+    ⚠️ **必须断言到具体目标工具名**，不能只断言「含『未知工具』」：
+    后者在 console 自身故障、转发逻辑写错、目标名拼错等情况下**同样会绿**，
+    于是「坏了但看起来像预期现状」就被掩盖了。这里断言的是完整字符串
+    `未知工具: delete_dept`，把「按预期不可用」和「坏了」区分开。
     """
     monkeypatch = pytest.MonkeyPatch()
     try:
@@ -158,11 +170,13 @@ async def test_d2_hidden_mode_console_forwarding_is_unavailable():
         )
         assert registry.get_registered_tool("console") is not None, "console 本身必须仍在注册表"
 
-        # 主断言：真走一遍转发，确认是「未知工具」而不是别的失败
-        result = await _forward_via_registry(registry, "get_dept_info")
+        # 主断言：真走一遍转发，且必须是「未知工具: delete_dept」这个**精确**文案
+        result = await _forward_via_registry(registry, "delete_dept")
+        message = str(result.result.get("message", ""))
         assert result.success is False
-        assert "未知工具" in str(result.result.get("message")), (
-            f"期望「未知工具」，实际：{result.result}"
+        assert message == "未知工具: delete_dept", (
+            f"期望精确的「未知工具: delete_dept」，实际：{message!r}\n"
+            f"→ 若报的是别的工具名或别的失败原因，说明断的机制变了，不能当预期现状"
         )
     finally:
         monkeypatch.undo()
@@ -174,12 +188,15 @@ async def test_d2_hidden_mode_console_forwarding_is_unavailable():
 
 @pytest.mark.parametrize("target", FORWARD_TARGETS)
 async def test_d2_hidden_mode_every_forward_target_is_unreachable(target: str):
-    """隐藏模式下**逐个转发目标**验证第 2 跳不可达。
+    """隐藏模式下**逐个转发目标**验证第 2 跳不可达，且失败文案**精确指向该目标**。
 
     参数化而非循环，是为了失败时立刻看出是**哪一个**目标漏了。
 
-    归因严格：必须因「未知工具」失败——不是「无权限」、不是「参数错」。
-    若换成别的原因，说明断的机制变了，需要重新评估。
+    断言用**正向表述**：必须等于 `未知工具: <该目标>` —— 不是「含未知工具」，
+    也不是「success 为 False」。后两者太弱：
+    - 任何失败（console 自身坏了、转发逻辑写错）都能满足 success=False；
+    - 目标名拼错时「含未知工具」仍绿，掩盖了真实原因。
+    精确匹配才能区分「按预期不可用」与「坏了但看起来一样」。
     """
     monkeypatch = pytest.MonkeyPatch()
     try:
@@ -188,11 +205,12 @@ async def test_d2_hidden_mode_every_forward_target_is_unreachable(target: str):
         registry = _build_registry()
 
         result = await _forward_via_registry(registry, target)
-        msg = str(result.result.get("message", ""))
+        message = str(result.result.get("message", ""))
+        expected = f"未知工具: {target}"
         assert result.success is False, f"隐藏模式下转发到 `{target}` 竟成功了：{result.result}"
-        assert "未知工具" in msg, (
-            f"转发到 `{target}` 的失败原因不是「未知工具」而是：{msg!r}\n"
-            f"→ 断的原因变了，请重新评估隐藏模式的实际行为"
+        assert message == expected, (
+            f"转发到 `{target}` 期望精确文案 {expected!r}，实际 {message!r}\n"
+            f"→ 断的原因或目标名变了，请重新评估隐藏模式的实际行为"
         )
     finally:
         monkeypatch.undo()

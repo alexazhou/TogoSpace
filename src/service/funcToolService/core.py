@@ -82,8 +82,21 @@ def keep_legacy_admin_tools() -> bool:
 
     **所以「关掉原工具后 console 依然能干活」这句话在 #160 之后已失真**（#160 之前
     才成立：那时 console 直接 `await legacy.delete_dept(...)`，不查注册表）。
-    这是 #160 遗留的既有缺陷，未在本单修（超出范围），修它时须同时评估
-    `consoleTool._handle_rm` docstring 里 §6.2 的删除保护缺口。
+
+    ## ⚠️ 切换本开关前必须先修 #166-A
+
+    隐藏模式下 console 的**全部转发命令都会失败**（见
+    `tests/unit/service/funcToolService/test_console_d2_execution.py::
+    test_d2_hidden_mode_console_forwarding_is_unavailable`）。
+    **因此切换本开关前必须先修 #166-A（注册表注册面与执行面解耦），否则 console
+    会整体失效**——改环境变量不是第一步，修 A 才是。
+
+    A 未修是有意为之：当前无切换需求，且改动会触及 `execute_tool_call` 的**权限判定
+    单点**（`registered.enabled is False` 是权限判定的唯一所在）。若为「让隐藏的工具能被
+    转发到」而在第 2 跳加旁路，会产生「注册表里能查到、但模型调不到」的第三种状态——
+    这正是 #160 用 870 行消灭掉的东西。收益为零，风险是搅乱刚修好的结构。
+
+    修 A 时须同时评估 `consoleTool._handle_rm` docstring 里 §6.2 的删除保护缺口。
 
     口径用环境变量而不是模块常量：测 token 收益时要在**不改代码**的前提下对比两种
     暴露面，常量得改文件、重启才生效。默认 = 保留；任何无法识别的值也按保留处理
