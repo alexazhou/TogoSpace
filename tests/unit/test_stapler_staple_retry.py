@@ -240,8 +240,14 @@ def test_r6_notarytool_submitted_exactly_once_when_staple_always_fails(bd, monke
     """R6：staple 3 次全失败时，notarytool submit 只被调用 1 次。
 
     覆盖范围：这类（如有人把 notarytool 包进**无条件**的 `for range(1,4)`，notarytool 会被调 3 次，这里立刻红）。
-    **不覆盖**：`notarytool` 自身失败后的重试循环（`for` + `try: run_command(...); break` + `except` 形态）——该形态下 notarytool 第一次就失败、循环内 break 前不会重入，本判据仍绿；此形态由 **R11** 覆盖。
+    **不覆盖**：`notarytool` 自身失败后的重试循环（`for` + `try: run_command(...); break` + `except` 形态）。
+    盲的原因**不在被测代码，在本判据的替身**：`_wire_notarize` 里的 `run_command` 替身从不抛异常 ⇒
+    notarytool 永远第一次就成功 ⇒ 循环立刻 break ⇒ 计数恒为 1 ⇒ 本判据仍绿。
+    （实测 2×2：形态 A + 替身不让失败 → R6 passed（盲）；形态 A + 替身让失败 → R6 failed，assert 3 == 1。）
+    此形态由 **R11** 覆盖——R11 让 notarytool 自己失败，能咬住这种重试循环。
     ⇒ R6 与 R11 互补，共同构成硬要求 1 的自动判据。
+    ⚠️ 本段机制描述**没有任何判据在守，只能靠人读**（R10 只守 `staple_with_retry` 的幂等假设，不守这句）；
+    改回错误描述不会让任何用例变红。
     """
     records, _ = _wire_notarize(monkeypatch, bd, staple_fails=99)
 
