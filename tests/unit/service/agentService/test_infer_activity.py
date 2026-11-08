@@ -335,7 +335,7 @@ async def test_infer_stream_progress_broadcasts_without_persisting():
     async def _fake_infer_stream(model, ctx, on_progress=None, on_status_event=None):
         assert on_progress is not None
         for i in range(10):
-            await on_progress(llmService.InferStreamProgress(delta_text="x", current_completion_tokens=i + 1))
+            await on_progress(llmService.InferStreamProgress(delta_text="x", estimated_completion_tokens=i + 1))
         return llmService.InferResult.success(resp)
 
     with (
@@ -351,4 +351,4 @@ async def test_infer_stream_progress_broadcasts_without_persisting():
         if call.kwargs.get("persist") is False
     ]
     assert len(progress_calls) == 1
-    assert progress_calls[0].kwargs["metadata_patch"].current_completion_tokens == 10
+    assert progress_calls[0].kwargs["metadata_patch"].estimated_completion_tokens == 10

@@ -178,8 +178,9 @@ class AgentTurnRunner:
         """生成流式 token 进度回调：把累计估算写进活动 metadata（节流）。
 
         推理与上下文压缩共用：两者都是持续输出的流式请求，前端活动行按
-        `current_completion_tokens` 实时显示估算值。广播按 200ms 或 10 个 chunk
-        节流；进度只是观测数据，`persist=False` 只广播不写库——最终值由收尾更新落库。
+        `estimated_completion_tokens`（无 usage）或 `completion_tokens`（有 usage）实时显示。
+        广播按 200ms 或 10 个 chunk 节流；进度只是观测数据，`persist=False` 只广播不写库
+        ——最终值由收尾更新落库。
 
         回调自身带 `last_completion_tokens`：节流会把中间值丢掉，收尾时若网关没回
         usage，就用这里记下的**最新**估算值落库（否则「网关不回 usage」这个估算
@@ -191,8 +192,10 @@ class AgentTurnRunner:
         async def _on_progress(progress: llmService.InferStreamProgress) -> None:
             nonlocal last_progress_time, chunk_count_since_update
             # 每个 delta 都记（不受节流影响），供收尾兜底使用。
-            if progress.current_completion_tokens is not None:
-                _on_progress.last_completion_tokens = progress.current_completion_tokens
+            # 只认估算值：真值路径的 `completion_tokens` 已经由收尾的 `apply_usage` 落库，
+            # 这里记进去反而会把「真值」写进估算键（M5 守的就是这条不串）。
+            if progress.estimated_completion_tokens is not None:
+                _on_progress.last_completion_tokens = progress.estimated_completion_tokens
             chunk_count_since_update += 1
             now = time.monotonic()
             if (
@@ -869,10 +872,10 @@ class AgentTurnRunner:
             # 不加这一条，「不回 usage」这个场景里库里一个 completion token 都没有——
             # 而「按 delta 估算」正是为它做的。流中值只广播不落库（persist=False），
             # 不在这里落一次就永久丢了：刷新页面 / 新窗口从 DB 读，显示为空。
-            # 键沿用 `current_completion_tokens`：前端 `activityMetaTokens` 读的就是它
-            # （`final_total_tokens` 优先被读，有 usage 时不需要这里兜底）。
+            # 写 `estimated_completion_tokens` 而不是 `completion_tokens`：这是估算值，
+            # 写进真值键会让前端把它当 usage 显示成正常色（前端按「键在不在」判估算）。
             if usage is None and _on_progress.last_completion_tokens is not None:
-                final_meta.current_completion_tokens = _on_progress.last_completion_tokens
+                final_meta.estimated_completion_tokens = _on_progress.last_completion_tokens
             request_retry_meta = _build_request_retry_meta_for_terminal()
             if request_retry_meta is not None:
                 final_meta.request_state = request_retry_meta.request_state

@@ -401,10 +401,17 @@ def shutdown() -> None:
 
 @dataclass
 class InferStreamProgress:
-    """流式推理进度回调数据。"""
+    """流式推理进度回调数据。
+
+    `completion_tokens` / `total_tokens` 是**真值**（网关在该 chunk 里回了 usage）；
+    `estimated_completion_tokens` 是本地按 delta 累加的**估算**。
+    拆成两个键而不是共用一个：同一个键混两套语义，前端就无法判定该不该标「估算」。
+    二者可以同时出现在一条活动上（前面的 chunk 带 usage、后面的不带），浅合并下互不覆盖。
+    """
     delta_text: str
-    current_completion_tokens: int | None = None
-    current_total_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    estimated_completion_tokens: int | None = None
 
     def to_metadata_patch(self) -> dict:
         """返回适合 metadata 浅合并的字典（排除 delta_text 和 None 值）。"""
@@ -461,22 +468,24 @@ async def infer_stream(
 
             chunk_usage = getattr(chunk, "usage", None)
             if chunk_usage and getattr(chunk_usage, "completion_tokens", None) is not None:
-                current_ct = chunk_usage.completion_tokens
-                current_total = getattr(chunk_usage, "total_tokens", None)
+                # 网关带回了 usage ⇒ 真值路径，只写 `completion_tokens` / `total_tokens`。
+                progress = InferStreamProgress(
+                    delta_text=delta_text,
+                    completion_tokens=chunk_usage.completion_tokens,
+                    total_tokens=getattr(chunk_usage, "total_tokens", None),
+                )
             else:
                 # 网关不回 usage 时按增量估算：每个 delta 单独 tokenize 后累加，
                 # 总成本与输出长度成正比（不能每次重算全文，那是 O(n²)）。
                 delta_piece = delta_text + reasoning_text + tool_args_text
                 if delta_piece:
                     completion_tokens += tokenUtil.estimate_text_tokens(model_config.name, delta_piece)
-                current_ct = completion_tokens
-                current_total = None
-
-            progress = InferStreamProgress(
-                delta_text=delta_text,
-                current_completion_tokens=current_ct,
-                current_total_tokens=current_total,
-            )
+                # 估算路径只写 `estimated_completion_tokens`，绝不写 `completion_tokens`：
+                # 写了就会让前端把估算当 usage 真值显示成正常色。
+                progress = InferStreamProgress(
+                    delta_text=delta_text,
+                    estimated_completion_tokens=completion_tokens,
+                )
             result = on_progress(progress)
             if result is not None:
                 import inspect

@@ -117,7 +117,7 @@ async def _run_infer_with_deltas(delta_count: int, response) -> dict:
     async def _fake_infer_stream(model, ctx, on_progress=None, on_status_event=None):
         for i in range(delta_count):
             await on_progress(llmService.InferStreamProgress(
-                delta_text="ab", current_completion_tokens=(i + 1) * 2,
+                delta_text="ab", estimated_completion_tokens=(i + 1) * 2,
             ))
         return llmService.InferResult.success(response)
 
@@ -152,7 +152,7 @@ class TestNoUsagePersistsEstimate(ServiceTestCase):
         这条是「本提交引入信息丢失」的举证：基线有（不论值新旧），`590eb102` 没有。
         """
         metadata = await _run_infer_with_deltas(delta_count, _resp_no_usage())
-        stored = metadata.get("current_completion_tokens")
+        stored = metadata.get("estimated_completion_tokens")
         assert stored is not None, (
             f"网关不回 usage 时库里没有任何 completion token（这正是估算存在的场景）。"
             f"delta 数={delta_count}；metadata={metadata}"
@@ -167,7 +167,7 @@ class TestNoUsagePersistsEstimate(ServiceTestCase):
         """
         expected_final = delta_count * 2  # 每个 delta 记 2 token
         metadata = await _run_infer_with_deltas(delta_count, _resp_no_usage())
-        stored = metadata.get("current_completion_tokens")
+        stored = metadata.get("estimated_completion_tokens")
         assert stored == expected_final, (
             f"落库值不是流末终值。delta 数={delta_count}，流末终值={expected_final}，"
             f"库里实际={stored!r}；metadata={metadata}。"
@@ -185,11 +185,11 @@ class TestNoUsagePersistsEstimate(ServiceTestCase):
 
         # 25（非 10 的倍数）：确保估算值不会与节流写入点蒙对
         metadata = await _run_infer_with_deltas(25, resp)
-        assert metadata["final_completion_tokens"] == 88, (
+        assert metadata["completion_tokens"] == 88, (
             f"有 usage 时应以真实值为准，实际 {metadata}"
         )
-        assert metadata["final_total_tokens"] == 188
+        assert metadata["total_tokens"] == 188
         # 有 usage 时不应再有估算兜底值（避免同一行两套口径）
-        assert "current_completion_tokens" not in metadata, (
+        assert "estimated_completion_tokens" not in metadata, (
             f"有 usage 时不该写估算值，实际 {metadata}"
         )

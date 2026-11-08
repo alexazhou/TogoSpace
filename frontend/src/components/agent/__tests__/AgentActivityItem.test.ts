@@ -250,15 +250,16 @@ describe('AgentActivityItem bash 首行描述', () => {
  * Token 展示：推理与上下文压缩共用同一个尾部位置。
  *
  * 推理（`llm_infer`）自 #167 起**拆成两个值**：`↑ 输入 ↓ 输出`；
- * 自 #168 起**逐段**判定估算（可以「输入真值 + 输出估算」混色）。
- * - 流中：`estimated_prompt_tokens` + `current_completion_tokens`（**估算**，浅色 class）
- * - 结束后：`final_prompt_tokens` + `final_completion_tokens`（真值，正常色）；
- *   `final_completion_tokens` 缺失时回落 `current_completion_tokens`
+ * 自 #168 起**逐段**判定估算（可以「输入真值 + 输出估算」混色）；
+ * 自 #169 起 metadata 键名对齐上游 `OpenAIUsage`（真值三键同名，估算加 `estimated_` 前缀）。
+ * - 流中：`estimated_prompt_tokens` + `estimated_completion_tokens`（**估算**，浅色 class）
+ * - 结束后：`prompt_tokens` + `completion_tokens`（真值，正常色）；
+ *   `completion_tokens` 缺失时回落 `estimated_completion_tokens`
  *   （网关不回 usage 时 `agentTurnRunner` 的兜底路径只写这个键）
- * - `final_total_tokens` / `current_total_tokens` **不再参与显示**
+ * - `total_tokens` **不参与显示**（键仍在 metadata 里）
  *
- * 压缩（`compact`）**不在改动范围**：仍是「进行中 ↑ 压缩前 ↓ 摘要输出估算」与
- * 「结束后 压缩前 → 压缩后」，断言一字未改（T6，作为「没越界」的证据）。
+ * 压缩（`compact`）**显示行为不在改动范围**：仍是「进行中 ↑ 压缩前 ↓ 摘要输出估算」与
+ * 「结束后 压缩前 → 压缩后」。T6-a/T6-b 只随键名迁移改了 metadata 构造，断言文本一字未动。
  */
 describe('AgentActivityItem token 展示', () => {
   function tokenEl(wrapper: ReturnType<typeof mountItem>) {
@@ -298,7 +299,7 @@ describe('AgentActivityItem token 展示', () => {
     const wrapper = mountItem(activity({
       activity_type: 'llm_infer',
       status: 'started',
-      metadata: { estimated_prompt_tokens: 1000, current_completion_tokens: 20 },
+      metadata: { estimated_prompt_tokens: 1000, estimated_completion_tokens: 20 },
     }));
 
     expect(tokenEl(wrapper).text()).toBe('↑ 1000 ↓ 20');
@@ -315,30 +316,33 @@ describe('AgentActivityItem token 展示', () => {
       status: 'succeeded',
       metadata: {
         estimated_prompt_tokens: 1000,
-        final_prompt_tokens: 1200,
-        final_completion_tokens: 200,
-        final_total_tokens: 1400,
+        prompt_tokens: 1200,
+        completion_tokens: 200,
+        total_tokens: 1400,
       },
     }));
 
     expect(tokenEl(wrapper).text()).toBe('↑ 1200 ↓ 200');
     expect(estimatedTokensEl(wrapper).exists()).toBe(false);
-    // final_total_tokens 保留在 metadata 里但不再显示（1400 不得出现）。
+    // total_tokens 保留在 metadata 里但不再显示（1400 不得出现）。
     expect(tokenEl(wrapper).text()).not.toContain('1400');
   });
 
-  it('T2-b 结束后两个 completion 键共存（历史行 current=0）：取真值，不显示 ↓ 0', () => {
-    // 590eb102 之前流中进度是写库的，浅合并把 `current_completion_tokens` 留在历史行里。
-    // 48536 条（98.8%）LLM_INFER 两键共存，其中 44112 条 current=0 而 final>0。
-    // DB 读回的历史行会被 seedAgentActivities 渲染，写反优先级就是用户可见的 `↓ 0`。
+  it('T2-b 两个 completion 键共存（估算=0）：取真值，不显示 ↓ 0', () => {
+    // 共存是**活形态**：#169 起流中 chunk 带 usage 写 `completion_tokens`，后续不带
+    // usage 的 chunk 写 `estimated_completion_tokens`，浅合并下两键天然并存（M5）。
+    // 历史行同理（老键 `current_completion_tokens` 与 `final_completion_tokens` 共存
+    // 48536 条，其中 44112 条估算侧=0 而真值>0），只是老键名按 Operator 决定不做双读、
+    // 前端读不到即不显示，故本行用新键名构造。
+    // 写反优先级（`estimated ?? completion`）就是用户可见的 `↓ 0`。
     const wrapper = mountItem(activity({
       activity_type: 'llm_infer',
       status: 'succeeded',
       metadata: {
         estimated_prompt_tokens: 1000,
-        final_prompt_tokens: 1200,
-        final_completion_tokens: 44,
-        current_completion_tokens: 0,
+        prompt_tokens: 1200,
+        completion_tokens: 44,
+        estimated_completion_tokens: 0,
       },
     }));
 
@@ -347,11 +351,11 @@ describe('AgentActivityItem token 展示', () => {
     expect(estimatedTokensEl(wrapper).exists()).toBe(false);
   });
 
-  it('T3 推理结束但缺 final_completion_tokens：输出量回落 current_completion_tokens', () => {
+  it('T3 推理结束但缺 completion_tokens：输出量回落 estimated_completion_tokens', () => {
     const wrapper = mountItem(activity({
       activity_type: 'llm_infer',
       status: 'succeeded',
-      metadata: { final_prompt_tokens: 1200, current_completion_tokens: 200 },
+      metadata: { prompt_tokens: 1200, estimated_completion_tokens: 200 },
     }));
 
     expect(tokenEl(wrapper).text()).toBe('↑ 1200 ↓ 200');
@@ -376,10 +380,10 @@ describe('AgentActivityItem token 展示', () => {
     const wrapper = mountItem(activity({
       activity_type: 'llm_infer',
       status: 'succeeded',
-      metadata: { final_total_tokens: 1200 },
+      metadata: { total_tokens: 1200 },
     }));
 
-    // final_total_tokens 不再参与显示 ⇒ 没有可显示的输入/输出量 ⇒ 整个 tokens 元素不渲染。
+    // total_tokens 不再参与显示 ⇒ 没有可显示的输入/输出量 ⇒ 整个 tokens 元素不渲染。
     expect(tokenEl(wrapper).exists()).toBe(false);
   });
 
@@ -402,7 +406,7 @@ describe('AgentActivityItem token 展示', () => {
     const wrapper = mountItem(activity({
       activity_type: 'llm_infer',
       status: 'succeeded',
-      metadata: { final_prompt_tokens: 1200, current_completion_tokens: 200 },
+      metadata: { prompt_tokens: 1200, estimated_completion_tokens: 200 },
     }));
 
     expect(tokenEl(wrapper).text()).toBe('↑ 1200 ↓ 200');
@@ -417,7 +421,7 @@ describe('AgentActivityItem token 展示', () => {
     const wrapper = mountItem(activity({
       activity_type: 'llm_infer',
       status: 'succeeded',
-      metadata: { estimated_prompt_tokens: 1000, current_completion_tokens: 20 },
+      metadata: { estimated_prompt_tokens: 1000, estimated_completion_tokens: 20 },
     }));
 
     expect(tokenEl(wrapper).text()).toBe('↑ 1000 ↓ 20');
@@ -428,7 +432,7 @@ describe('AgentActivityItem token 展示', () => {
     const wrapper = mountItem(activity({
       activity_type: 'llm_infer',
       status: 'succeeded',
-      metadata: { final_prompt_tokens: 1200, final_completion_tokens: 200 },
+      metadata: { prompt_tokens: 1200, completion_tokens: 200 },
     }));
 
     expect(tokenEl(wrapper).text()).toBe('↑ 1200 ↓ 200');
@@ -456,7 +460,7 @@ describe('AgentActivityItem token 展示', () => {
     const wrapper = mountItem(activity({
       activity_type: 'compact',
       status: 'started',
-      metadata: { context_tokens_before: 80000, current_completion_tokens: 120 },
+      metadata: { context_tokens_before: 80000, estimated_completion_tokens: 120 },
     }));
 
     expect(tokenEl(wrapper).text()).toBe('↑ 80000 ↓ 120');

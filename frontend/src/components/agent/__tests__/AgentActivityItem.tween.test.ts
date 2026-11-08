@@ -102,14 +102,14 @@ afterEach(() => {
 describe('AgentActivityItem token 补间接线', () => {
   it('C1 流中数字增长有中间帧（不是文本直接跳变）', async () => {
     const wrapper = mountItem(activity({
-      metadata: { estimated_prompt_tokens: 100, current_completion_tokens: 10 },
+      metadata: { estimated_prompt_tokens: 100, estimated_completion_tokens: 10 },
     }));
     // 首值直显。
     expect(tokenText(wrapper)).toBe('↑ 100 ↓ 10');
 
     await wrapper.setProps({
       activity: activity({
-        metadata: { estimated_prompt_tokens: 300, current_completion_tokens: 10 },
+        metadata: { estimated_prompt_tokens: 300, estimated_completion_tokens: 10 },
       }),
     });
     expect(queue.length).toBeGreaterThan(0);
@@ -128,12 +128,12 @@ describe('AgentActivityItem token 补间接线', () => {
 
   it('C2 两段各自独立补间：↓ 不变时不被 ↑ 的动画拖着走', async () => {
     const wrapper = mountItem(activity({
-      metadata: { estimated_prompt_tokens: 100, current_completion_tokens: 10 },
+      metadata: { estimated_prompt_tokens: 100, estimated_completion_tokens: 10 },
     }));
 
     await wrapper.setProps({
       activity: activity({
-        metadata: { estimated_prompt_tokens: 300, current_completion_tokens: 10 },
+        metadata: { estimated_prompt_tokens: 300, estimated_completion_tokens: 10 },
       }),
     });
     await runFrames(7);
@@ -143,7 +143,7 @@ describe('AgentActivityItem token 补间接线', () => {
 
   it('C3 变小立即落位：同一 tick 就是新值，没有倒数中间帧', async () => {
     const wrapper = mountItem(activity({
-      metadata: { estimated_prompt_tokens: 300, current_completion_tokens: 10 },
+      metadata: { estimated_prompt_tokens: 300, estimated_completion_tokens: 10 },
     }));
     expect(tokenText(wrapper)).toBe('↑ 300 ↓ 10');
 
@@ -152,10 +152,10 @@ describe('AgentActivityItem token 补间接线', () => {
       activity: activity({
         status: 'succeeded',
         metadata: {
-          final_prompt_tokens: 260,
-          final_completion_tokens: 8,
+          prompt_tokens: 260,
+          completion_tokens: 8,
           estimated_prompt_tokens: 300,
-          current_completion_tokens: 10,
+          estimated_completion_tokens: 10,
         },
       }),
     });
@@ -168,11 +168,11 @@ describe('AgentActivityItem token 补间接线', () => {
 
   it('C4 title 用目标文案：补间中间帧也能看到最终权威值', async () => {
     const wrapper = mountItem(activity({
-      metadata: { estimated_prompt_tokens: 100, current_completion_tokens: 10 },
+      metadata: { estimated_prompt_tokens: 100, estimated_completion_tokens: 10 },
     }));
     await wrapper.setProps({
       activity: activity({
-        metadata: { estimated_prompt_tokens: 300, current_completion_tokens: 10 },
+        metadata: { estimated_prompt_tokens: 300, estimated_completion_tokens: 10 },
       }),
     });
     await runFrames(3);
@@ -183,7 +183,7 @@ describe('AgentActivityItem token 补间接线', () => {
 
   it('C5 估算色按目标态判定，不被补间进度影响', async () => {
     const wrapper = mountItem(activity({
-      metadata: { estimated_prompt_tokens: 100, current_completion_tokens: 10 },
+      metadata: { estimated_prompt_tokens: 100, estimated_completion_tokens: 10 },
     }));
     // 流中：两段都估算。
     expect(wrapper.findAll('.agent-activity-item__tokens-segment--estimated')).toHaveLength(2);
@@ -191,7 +191,7 @@ describe('AgentActivityItem token 补间接线', () => {
     await wrapper.setProps({
       activity: activity({
         status: 'succeeded',
-        metadata: { final_prompt_tokens: 300, final_completion_tokens: 10 },
+        metadata: { prompt_tokens: 300, completion_tokens: 10 },
       }),
     });
     // 目标态已是两段真值 ⇒ 动画还在跑，但估算色立刻消失。
@@ -201,7 +201,7 @@ describe('AgentActivityItem token 补间接线', () => {
   it('C6 COMPACT 文本分支不补间（原样文本，不建帧）', async () => {
     const wrapper = mountItem(activity({
       activity_type: 'compact',
-      metadata: { context_tokens_before: 80000, current_completion_tokens: 120 },
+      metadata: { context_tokens_before: 80000, estimated_completion_tokens: 120 },
     }));
     expect(tokenText(wrapper)).toBe('↑ 80000 ↓ 120');
     expect(queue.length).toBe(0);
@@ -220,11 +220,11 @@ describe('AgentActivityItem token 补间接线', () => {
 
   it('C7 卸载后 rAF 不再排帧', async () => {
     const wrapper = mountItem(activity({
-      metadata: { estimated_prompt_tokens: 100, current_completion_tokens: 10 },
+      metadata: { estimated_prompt_tokens: 100, estimated_completion_tokens: 10 },
     }));
     await wrapper.setProps({
       activity: activity({
-        metadata: { estimated_prompt_tokens: 300, current_completion_tokens: 10 },
+        metadata: { estimated_prompt_tokens: 300, estimated_completion_tokens: 10 },
       }),
     });
     await stepFrame();

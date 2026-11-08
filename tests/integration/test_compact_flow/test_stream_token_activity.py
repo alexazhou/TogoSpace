@@ -121,19 +121,19 @@ class TestPersistFalseDoesNotWrite(_DbCase):
         for value in (10, 20, 30, 40, 50):
             await agentActivityService.update_activity_progress(
                 activity.id,
-                metadata_patch=AgentActivityMeta(current_completion_tokens=value),
+                metadata_patch=AgentActivityMeta(estimated_completion_tokens=value),
                 persist=False,
             )
 
         # ① 新连接读库：节流中间值一个都不能有
         stored = _read_metadata_from_new_connection(self.test_db_path, activity.id)
         assert stored is not None
-        assert "current_completion_tokens" not in stored, f"persist=False 竟然落盘了：{stored}"
+        assert "estimated_completion_tokens" not in stored, f"persist=False 竟然落盘了：{stored}"
         assert stored["estimated_prompt_tokens"] == 1000
 
         # ② ORM 新查询也要一致（不是「只有一个连接看得见」的假象）
         fresh = await GtAgentActivity.aio_get_or_none(GtAgentActivity.id == activity.id)
-        assert "current_completion_tokens" not in (fresh.metadata or {})
+        assert "estimated_completion_tokens" not in (fresh.metadata or {})
 
     async def test_st1_dirty_instance_does_not_leak_on_later_real_save(self):
         """脏实例风险实证：先 persist=False 写内存值，再做真实收尾更新，库里只能是收尾值。"""
@@ -146,7 +146,7 @@ class TestPersistFalseDoesNotWrite(_DbCase):
 
         await agentActivityService.update_activity_progress(
             activity.id,
-            metadata_patch=AgentActivityMeta(current_completion_tokens=777),
+            metadata_patch=AgentActivityMeta(estimated_completion_tokens=777),
             persist=False,
         )
 
@@ -161,8 +161,8 @@ class TestPersistFalseDoesNotWrite(_DbCase):
         )
 
         stored = _read_metadata_from_new_connection(self.test_db_path, activity.id)
-        assert stored["final_completion_tokens"] == 88
-        assert "current_completion_tokens" not in stored, (
+        assert stored["completion_tokens"] == 88
+        assert "estimated_completion_tokens" not in stored, (
             f"脏实例把节流中间值带进库了：{stored}"
         )
 
@@ -171,7 +171,7 @@ class TestPersistFalseDoesNotWrite(_DbCase):
         await self._reset()
         with pytest.raises(RuntimeError):
             await agentActivityService.update_activity_progress(
-                424242, metadata_patch=AgentActivityMeta(current_completion_tokens=1), persist=False,
+                424242, metadata_patch=AgentActivityMeta(estimated_completion_tokens=1), persist=False,
             )
 
 

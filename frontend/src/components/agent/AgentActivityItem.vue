@@ -515,8 +515,9 @@ interface ActivityTokenDisplay {
 }
 
 function activityTokenDisplay(activity: AgentActivity): ActivityTokenDisplay | null {
-  // ⚠️ 所有 metadata token 键名只出现在这个函数里（#169 会把它们改名成
-  // `prompt_tokens` / `completion_tokens` / `estimated_*`，届时只改这里）。
+  // ⚠️ 所有 metadata token 键名只出现在这个函数里。
+  // #169 起真值三键与上游 `OpenAIUsage` 同名（`prompt_tokens` / `completion_tokens` /
+  // `total_tokens`），本侧估算用 `estimated_` 前缀，两者平铺、互不覆盖。
   const metadata = activity.metadata ?? {};
   const readNumber = (key: string): number | null =>
     typeof metadata[key] === 'number' ? (metadata[key] as number) : null;
@@ -525,7 +526,7 @@ function activityTokenDisplay(activity: AgentActivity): ActivityTokenDisplay | n
   // 这两种形态已经是「两段 + 箭头」的形状，不在 token 拆分范围内，保持原样。
   const contextBefore = readNumber('context_tokens_before');
   const contextAfter = readNumber('context_tokens_after');
-  const currentCompletion = readNumber('current_completion_tokens');
+  const estimatedCompletion = readNumber('estimated_completion_tokens');
   if (contextBefore !== null && contextAfter !== null) {
     return {
       kind: 'text',
@@ -535,28 +536,27 @@ function activityTokenDisplay(activity: AgentActivity): ActivityTokenDisplay | n
   if (contextBefore !== null) {
     return {
       kind: 'text',
-      text: t('agent.tokenCompactProgress', { before: contextBefore, count: currentCompletion ?? 0 }),
+      text: t('agent.tokenCompactProgress', { before: contextBefore, count: estimatedCompletion ?? 0 }),
     };
   }
 
   // 推理（LLM_INFER）：一律拆成「↑ 输入 ↓ 输出」。
   // 结束后用后端 usage 真值；流中用估算（`estimated_prompt_tokens` + 已输出的 completion）。
-  // `final_total_tokens` / `current_total_tokens` 不再参与显示（总量对「输入/输出」没有信息量，
-  // 后端仍照旧写进 metadata，只是这里不读）。
-  const finalPrompt = readNumber('final_prompt_tokens');
-  const finalCompletion = readNumber('final_completion_tokens');
+  // `total_tokens` 不参与显示（总量对「输入/输出」没有信息量，后端仍照旧写进 metadata）。
+  const promptTokens = readNumber('prompt_tokens');
+  const completionTokens = readNumber('completion_tokens');
   const estimatedPrompt = readNumber('estimated_prompt_tokens');
-  const upValue = finalPrompt ?? estimatedPrompt;
-  // 结束态但 usage 只回了 prompt（网关不回 usage 时的兜底路径只写 `current_completion_tokens`）
-  // ⇒ 输出量回落到流中估算的终值。
-  const downValue = finalCompletion ?? currentCompletion;
+  const upValue = promptTokens ?? estimatedPrompt;
+  // 结束态但 usage 只回了 prompt（网关不回 usage 时的兜底路径只写
+  // `estimated_completion_tokens`）⇒ 输出量回落到流中估算的终值。
+  const downValue = completionTokens ?? estimatedCompletion;
   if (upValue === null && downValue === null) {
     // 两个都没有：不渲染 tokens 元素（与改造前返回空串的行为一致）。
     return null;
   }
   // 逐段判定：某段没有 usage 真值就是估算段。混色态（输入真值 + 输出估算）必须能表达。
-  const up = upValue === null ? undefined : { value: upValue, estimated: finalPrompt === null };
-  const down = downValue === null ? undefined : { value: downValue, estimated: finalCompletion === null };
+  const up = upValue === null ? undefined : { value: upValue, estimated: promptTokens === null };
+  const down = downValue === null ? undefined : { value: downValue, estimated: completionTokens === null };
   return {
     kind: 'split',
     up,
@@ -1335,11 +1335,9 @@ const tokenView = computed(() => {
 
    `.agent-activity-item__row span` 是 (0,1,1)，本规则 (0,2,0) 压得住它。
 
-   ⚠️ 已知冲突（**本单不处理**）：失败条目有
-   `.agent-activity-item[data-status='failed'] .agent-activity-item__row span` = (0,3,1)，
-   会把整行 span 都刷成 `--text-danger-muted`，估算段与真值段变成同色。
-   定性是「failed 整条红」与「估算浅色」抢同一个 `color` 的设计冲突，不是实现 bug，
-   已上报由 Operator 决定，这里不调特异性硬顶（硬顶会让失败条目只剩半行红）。 */
+   失败条目不区分估算/真值（Operator 2026-11-09 00:45 定），失败态整行统一 danger 色：
+   `.agent-activity-item[data-status='failed'] .agent-activity-item__row span` = (0,3,1)
+   会盖掉本规则，这是**预期行为**，不在这里调特异性硬顶（硬顶会让失败条目只剩半行红）。 */
 .agent-activity-item__row .agent-activity-item__tokens-segment--estimated {
   color: var(--text-secondary);
 }

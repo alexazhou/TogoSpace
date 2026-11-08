@@ -376,7 +376,7 @@ describe('runtimeStore realtime events', () => {
         duration_ms: 3000,
         metadata: {
           model: 'test-model',
-          final_total_tokens: 128,
+          total_tokens: 128,
         },
       }),
     });
@@ -391,7 +391,7 @@ describe('runtimeStore realtime events', () => {
       status: 'succeeded',
       duration_ms: 3000,
       metadata: {
-        final_total_tokens: 128,
+        total_tokens: 128,
       },
     });
   });

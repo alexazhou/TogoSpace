@@ -313,10 +313,10 @@ class TestAgentActivityService(ServiceTestCase):
             gt_agent=_fake_agent(), activity_type=AgentActivityType.LLM_INFER,
             metadata=AgentActivityMeta(task_room_id=5, model="test-model"),
         )
-        updated = await agentActivityService.update_activity_progress(activity.id, metadata_patch=AgentActivityMeta(final_prompt_tokens=100, model="override"))
+        updated = await agentActivityService.update_activity_progress(activity.id, metadata_patch=AgentActivityMeta(prompt_tokens=100, model="override"))
         assert updated.metadata["task_room_id"] == 5
         assert updated.metadata["model"] == "override"
-        assert updated.metadata["final_prompt_tokens"] == 100
+        assert updated.metadata["prompt_tokens"] == 100
 
     # ── update_activity_progress：persist=False 只广播不写库 ──
 
@@ -335,19 +335,19 @@ class TestAgentActivityService(ServiceTestCase):
         messageBus.subscribe(MessageBusTopic.AGENT_ACTIVITY_CHANGED, listener)
         try:
             updated = await agentActivityService.update_activity_progress(
-                activity.id, metadata_patch=AgentActivityMeta(current_completion_tokens=42), persist=False,
+                activity.id, metadata_patch=AgentActivityMeta(estimated_completion_tokens=42), persist=False,
             )
             await asyncio.sleep(0.05)
         finally:
             messageBus.unsubscribe(MessageBusTopic.AGENT_ACTIVITY_CHANGED, listener)
 
-        assert updated.metadata["current_completion_tokens"] == 42
+        assert updated.metadata["estimated_completion_tokens"] == 42
         assert updated.metadata["model"] == "test-model"
         assert len(received) == 1
-        assert received[0].payload["activity"].metadata["current_completion_tokens"] == 42
+        assert received[0].payload["activity"].metadata["estimated_completion_tokens"] == 42
 
         stored = await GtAgentActivity.aio_get_or_none(GtAgentActivity.id == activity.id)
-        assert "current_completion_tokens" not in (stored.metadata or {})
+        assert "estimated_completion_tokens" not in (stored.metadata or {})
 
     # ── update_activity_progress：执行环境三元组是整体快照，不逐键浅合并 ──
 
@@ -416,10 +416,10 @@ class TestAgentActivityService(ServiceTestCase):
         )
 
         updated = await agentActivityService.update_activity_progress(
-            activity.id, metadata_patch=AgentActivityMeta(current_completion_tokens=42),
+            activity.id, metadata_patch=AgentActivityMeta(estimated_completion_tokens=42),
         )
 
-        assert updated.metadata["current_completion_tokens"] == 42
+        assert updated.metadata["estimated_completion_tokens"] == 42
         assert updated.metadata["exec_env"] == "container"
         assert updated.metadata["current_container_id"] == "c0ffee123456"
         assert updated.metadata["container_name"] == "agent-3-1"

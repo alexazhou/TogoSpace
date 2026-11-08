@@ -143,7 +143,7 @@ async def test_progress_after_overflow_retry_goes_to_new_activity():
             return llmService.InferResult.failure(overflow_error)
         for i in range(20):
             await on_progress(llmService.InferStreamProgress(
-                delta_text="x", current_completion_tokens=i + 1,
+                delta_text="x", estimated_completion_tokens=i + 1,
             ))
         return llmService.InferResult.success(_resp("重试成功"))
 
@@ -235,7 +235,7 @@ async def test_compact_progress_goes_to_compact_activity_not_infer():
     async def _fake_compact_infer_stream(model, ctx, on_progress=None, on_status_event=None):
         for i in range(20):
             await on_progress(llmService.InferStreamProgress(
-                delta_text="s", current_completion_tokens=i + 1,
+                delta_text="s", estimated_completion_tokens=i + 1,
             ))
         return llmService.InferResult.success(_resp("摘要"))
 

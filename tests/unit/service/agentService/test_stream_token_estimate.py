@@ -147,7 +147,7 @@ async def test_st2_content_reasoning_and_tool_arguments_all_counted(monkeypatch)
         _chunk(tool_args='{"cmd":"ls"}'),
     ])
 
-    assert recorder.items[-1].current_completion_tokens == _ST2_TOTAL
+    assert recorder.items[-1].estimated_completion_tokens == _ST2_TOTAL
     # 三路各被 tokenize 一次：缺任何一路都会让 totals / seen 对不上
     assert sorted(seen) == sorted(_ST2_WEIGHTS.keys())
 
@@ -165,8 +165,8 @@ async def test_st2_reasoning_only_delta_contributes_nonzero(monkeypatch):
         _chunk(reasoning="考"),
     ])
 
-    assert recorder.items[0].current_completion_tokens == 1
-    assert recorder.items[-1].current_completion_tokens == 2
+    assert recorder.items[0].estimated_completion_tokens == 1
+    assert recorder.items[-1].estimated_completion_tokens == 2
 
 
 # ── ST3：每个 delta 只 tokenize 一次，不重算全文 ──────────────────
@@ -193,7 +193,7 @@ async def test_st3_each_delta_tokenized_once_and_text_never_reaccumulated(monkey
     assert len(pieces) == n, f"tokenize 次数 {len(pieces)} != delta 数 {n}"
     assert sum(len(p) for p in pieces) == n * delta_len, "送入的文本被重复累加（疑似重算全文）"
     assert max(len(p) for p in pieces) == delta_len
-    assert recorder.items[-1].current_completion_tokens == n
+    assert recorder.items[-1].estimated_completion_tokens == n
 
 
 # ── ST4：网关给了 usage 就不本地累加 ────────────────────────────
@@ -212,8 +212,11 @@ async def test_st4_usage_branch_skips_local_estimation(monkeypatch):
     recorder = await _run_stream(monkeypatch, [_chunk(content="hello", usage=usage)])
 
     assert calls == []
-    assert recorder.items[-1].current_completion_tokens == 123
-    assert recorder.items[-1].current_total_tokens == 133
+    # 带 usage 走真值键：`completion_tokens` / `total_tokens`，
+    # 估算键必须**没有值**——否则前端会把真值显示成估算色（#169 M5）。
+    assert recorder.items[-1].completion_tokens == 123
+    assert recorder.items[-1].total_tokens == 133
+    assert recorder.items[-1].estimated_completion_tokens is None
 
 
 # ── ST5：tokenizer 抛异常时回退字符估算，流不中断 ────────────────
@@ -232,8 +235,8 @@ async def test_st5_token_counter_failure_falls_back_without_breaking_stream(monk
         ])
 
     # 回退口径：max(1, len(before) // 4)
-    assert recorder.items[0].current_completion_tokens == 2
-    assert recorder.items[-1].current_completion_tokens == 3
+    assert recorder.items[0].estimated_completion_tokens == 2
+    assert recorder.items[-1].estimated_completion_tokens == 3
     noisy = [r for r in caplog.records if r.name == "util.tokenUtil" and r.levelno >= logging.WARNING]
     assert noisy == [], f"回退路径不应刷 warning：{[r.getMessage() for r in noisy]}"
 
@@ -269,7 +272,7 @@ class _ThrottleHarness:
 
 
 def _progress(value: int):
-    return llmService.InferStreamProgress(delta_text="x", current_completion_tokens=value)
+    return llmService.InferStreamProgress(delta_text="x", estimated_completion_tokens=value)
 
 
 @pytest.mark.asyncio
@@ -284,7 +287,7 @@ async def test_st7_chunk_count_throttle_limits_updates(monkeypatch):
 
     assert harness.calls.await_count == 100 // _PROGRESS_THROTTLE_CHUNK_COUNT
     assert all(c.kwargs["persist"] is False for c in harness.calls.await_args_list)
-    pushed = [c.kwargs["metadata_patch"].current_completion_tokens for c in harness.calls.await_args_list]
+    pushed = [c.kwargs["metadata_patch"].estimated_completion_tokens for c in harness.calls.await_args_list]
     assert pushed == [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
 
