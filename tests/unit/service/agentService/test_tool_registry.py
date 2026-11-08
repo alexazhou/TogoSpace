@@ -418,3 +418,131 @@ def test_category_config_matches_expected_contract() -> None:
     """
     assert dict(CATEGORY_CONFIG) == EXPECTED_TOOL_CATEGORIES
     assert set(CATEGORY_CONFIG) == set(EXPECTED_TOOL_CATEGORIES)
+
+
+# ---------------------------------------------------------------------------
+# #164：post_process 是外部回调，抛异常/返回非 dict 都不得穿透 execute_tool_call
+#
+# 缺陷原状：`for post_process in reversed(...)` 与 `_execution_result(...)` 都在
+# `try` 块**之外**（`except Exception` 早已闭合），因此回调一抛异常就穿透本函数，
+# 一路冒到 `jobConsumer` 的 `except Exception` ⇒ job FAILED + agent 置 FAILED。
+# 这不是「工具调用失败」，是 **turn 级崩溃**；更糟的是崩在 `finalize_history_item`
+# 之前，TOOL 条目停在 INIT，续跑会把同一个 tool_call 再执行一遍（#163 V7b 实测 1→2）。
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_post_process_exception_is_downgraded_not_propagated() -> None:
+    """post_process 抛异常 ⇒ `execute_tool_call` **正常返回**失败体，异常不外抛（P1）。
+
+    这是本修复的全部意义：把 turn 级崩溃降级成工具级失败。若异常还能穿透，
+    下面的 `await` 就会直接把异常抛给用例——断言「能走到 assert」本身就是判据。
+    """
+    registry = AgentToolRegistry()
+
+    def _boom(_result: dict) -> dict:
+        raise RuntimeError("#164: post_process 故意抛异常")
+
+    async def console_like(args_str: str, context: ToolCallContext) -> dict:
+        raise ForwardToolCall("delete_room", {"name": "r1"}, post_process=_boom)
+
+    _register_tool(registry, "console", console_like)
+    _register_tool(registry, "delete_room", lambda *_: _ok({"deleted": True}))
+
+    result = await registry.execute_tool_call(_call("console"), _ctx())
+
+    assert result.success is False, f"后处理失败必须降级成工具失败：{result}"
+    assert result.result["success"] is False
+    assert "工具结果后处理失败" in result.result["message"]
+    assert result.error_message is not None, "失败体必须带 error_message（finalize 要写库）"
+
+
+@pytest.mark.asyncio
+async def test_post_process_exception_stops_remaining_processors(monkeypatch) -> None:
+    """一个 post_process 抛异常后，**后续 post_process 不再应用**（break 语义）。
+
+    继续应用会拿「失败返回体」去当正常结果处理（例如 `{**r, "impact": ...}` 会把
+    impact 叠到错误体上），最终返回体既像失败又带业务字段，误导模型。
+
+    **为什么要 monkeypatch 跳数上限**：`post_processors` 只在 `continue`（成功转发）
+    时入栈，而第 2 跳就撞上 `hop + 1 >= MAX_FORWARD_HOPS` 早退——所以默认 2 跳下
+    **最多只有 1 个 post_process 能进栈**，`break` 分支根本不可达。本用例原先把链
+    写成 3 跳、不 patch 上限，结果 `_boom` 压根没入栈（返回的是「转发链过长」），
+    **在修复前的代码上也是绿的**——假绿。改成 3 跳后才真正咬住：修复前 `_boom` 的
+    RuntimeError 直接穿透（本用例 ERROR 在 `execute_tool_call` 那行），修复后绿。
+    这也顺带证明 `MAX_FORWARD_HOPS` 若调大，break 语义仍然正确。
+    """
+    from service.agentService import toolRegistry as tool_registry_module
+
+    monkeypatch.setattr(tool_registry_module, "MAX_FORWARD_HOPS", 3)
+
+    registry = AgentToolRegistry()
+    applied: list[str] = []
+
+    def _boom(_result: dict) -> dict:
+        raise RuntimeError("boom")
+
+    def _after(result: dict) -> dict:
+        applied.append("after")
+        return {**result, "should_not_appear": True}
+
+    async def inner(args_str: str, context: ToolCallContext) -> dict:
+        # 第 1 跳转发给 outer，outer 再转发给真实目标：制造两级 post_process。
+        raise ForwardToolCall("mid", {"x": 1}, post_process=_after)
+
+    async def mid(args_str: str, context: ToolCallContext) -> dict:
+        raise ForwardToolCall("delete_room", {"name": "r1"}, post_process=_boom)
+
+    _register_tool(registry, "console", inner)
+    _register_tool(registry, "mid", mid)
+    _register_tool(registry, "delete_room", lambda *_: _ok({"deleted": True}))
+
+    result = await registry.execute_tool_call(_call("console"), _ctx())
+
+    # 逆序应用 ⇒ 先 _boom，_after 不该被调用。
+    assert applied == [], f"异常之后的 post_process 不得再应用：{applied}"
+    assert result.success is False
+    assert "should_not_appear" not in result.result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_return", [None, "str", [], 123], ids=["None", "str", "list", "int"])
+async def test_post_process_returning_non_dict_does_not_raise_attribute_error(bad_return) -> None:
+    """post_process 返回非 dict ⇒ 降级成失败体，**不得** AttributeError 穿透（P3）。
+
+    原状：`_execution_result` 第一行 `result.get("success")` 直接 AttributeError
+    （`AttributeError: 'NoneType' object has no attribute 'get'`），同在 try 之外。
+    `Callable[[dict], dict]` 的返回值类型只是注解，没有任何运行时强制力。
+    """
+    registry = AgentToolRegistry()
+
+    async def console_like(args_str: str, context: ToolCallContext) -> dict:
+        raise ForwardToolCall(
+            "delete_room", {"name": "r1"}, post_process=lambda _r: bad_return
+        )
+
+    _register_tool(registry, "console", console_like)
+    _register_tool(registry, "delete_room", lambda *_: _ok({"deleted": True}))
+
+    result = await registry.execute_tool_call(_call("console"), _ctx())
+
+    assert result.success is False
+    assert result.result["success"] is False
+    assert "工具结果格式异常" in result.result["message"]
+
+
+@pytest.mark.asyncio
+async def test_execution_result_wraps_non_dict_directly() -> None:
+    """`_execution_result` 自身对非 dict 兜底（B 的第一道闸，不依赖调用点）。
+
+    直接测这个私有函数是必要的：`execute_tool_call` 里 `assert isinstance(result, dict)`
+    只覆盖 handler 那一段，post_process 之后没有再校验；而 `_execution_result` 是
+    **所有**返回路径的收口，把校验放这里才保证「任何来源的坏形状都挡住了」。
+    """
+    from service.agentService.toolRegistry import _execution_result
+
+    for bad in (None, [], "x", 1, object()):
+        wrapped = _execution_result("tc", bad)  # type: ignore[arg-type]
+        assert wrapped.success is False
+        assert wrapped.result["success"] is False
+        assert "工具结果格式异常" in wrapped.result["message"]

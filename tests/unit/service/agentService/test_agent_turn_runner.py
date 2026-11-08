@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from constants import AgentHistoryStatus, AgentHistoryTag, ScheduleJobType, DriverType, OpenaiApiRole, RoomState, SpecialAgent, TaskStatus, TurnStepResult
+from exception import ForwardToolCall
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgent import GtAgent
@@ -1598,3 +1599,207 @@ async def test_run_tool_to_item_auto_succeeds_on_restart_when_tag_present(turn_r
 
     assert result == TurnStepResult.TOOL_EXECUTE_SUCCESS
     turn_runner.tool_registry.execute_tool_call.assert_not_awaited(), "已标记过的条目不得重复执行"
+
+
+# ---------------------------------------------------------------------------
+# #164 P2：post_process 抛异常后，「续跑不再重放同一 tool_call」（1→2 变 1→1）
+#
+# 这一条不用 mock 的 history：跑**真 `AgentHistoryStore`**（只把三个持久化函数换成
+# 内存实现，`last()` / `find_tool_call_by_id()` / `get_current_turn_start_index()` /
+# `has_active_turn()` / `get_first_pending_tool_call()` 全部真实现）、
+# **真 `_advance_step`**、**真 `_run_tool_to_item`**、**真 `AgentToolRegistry`**。
+#
+# 为什么必须这样：重复执行发生在「续跑」，而续跑的分支选择完全由 history 条目真实的
+# role/status 决定。若用 MagicMock 假造 `last()` 的返回值，测到的就只是「我构造的
+# 状态下分支怎么走」，而不是「真实续跑会不会重放」——#163 初版探针正是栽在这一点。
+# ---------------------------------------------------------------------------
+
+
+def _in_memory_history_store():
+    """真 `AgentHistoryStore` + 内存持久化（不建 DB）。"""
+    import contextlib
+
+    from service.agentService import agentHistoryStore as ahs
+
+    ids = {"next": 1}
+
+    async def _append(item):
+        item.id = ids["next"]
+        ids["next"] += 1
+        return item
+
+    async def _insert(item):
+        return await _append(item)
+
+    async def _update(history_id, **kwargs):
+        return None
+
+    stack = contextlib.ExitStack()
+    for name, fn in (
+        ("append_agent_history_message", _append),
+        ("insert_agent_history_message_at_seq", _insert),
+        ("update_agent_history_by_id", _update),
+    ):
+        stack.enter_context(patch.object(ahs.gtAgentHistoryManager, name, new=fn))
+    return stack
+
+
+def _seed_turn(store, tool_call: llmApiUtil.OpenAIToolCall) -> None:
+    """铺一条「真实形状」的 active turn：USER(ROOM_TURN_BEGIN) → ASSISTANT(tool_calls)。"""
+    user_item = GtAgentHistory.build(
+        AgentMessage(role=OpenaiApiRole.USER, content="去把房间删掉"),
+        tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+    )
+    user_item.id = 900
+    user_item.seq = 0
+    store.replace([user_item])
+
+    assistant_item = GtAgentHistory.build(
+        AgentMessage(
+            role=OpenaiApiRole.ASSISTANT, content="", tool_calls=[tool_call]
+        ),
+        status=AgentHistoryStatus.SUCCESS,
+    )
+    assistant_item.id = 901
+    assistant_item.seq = 1
+    store.replace([user_item, assistant_item])
+
+
+def _p2_registry(counter: dict[str, int]) -> AgentToolRegistry:
+    """console → 转发 delete_room，并挂一个**必定抛异常**的 post_process。"""
+    registry = AgentToolRegistry()
+
+    def _mk(name: str) -> llmApiUtil.OpenAITool:
+        return llmApiUtil.OpenAITool(
+            function=llmApiUtil.OpenAIFunction(
+                name=name,
+                description="",
+                parameters=llmApiUtil.OpenAIFunctionParameter(
+                    type="object", properties={}, required=[]
+                ),
+            )
+        )
+
+    def _boom(_result: dict) -> dict:
+        raise RuntimeError("#164 P2: post_process 故意抛异常")
+
+    async def console_like(args_str: str, context) -> dict:
+        raise ForwardToolCall("delete_room", {"name": "p2_room"}, post_process=_boom)
+
+    async def delete_room(args_str: str, context) -> dict:
+        counter["delete_room"] += 1
+        return {"success": True, "message": "deleted"}
+
+    registry.register(_mk("console"), console_like)
+    registry.register(_mk("delete_room"), delete_room)
+    return registry
+
+
+@pytest.mark.asyncio
+async def test_post_process_failure_does_not_replay_tool_call_on_resume():
+    """⭐ P2：post_process 抛异常后「崩溃 + 续跑」两轮，同一子命令只执行 **1** 次。
+
+    为什么要连跑两轮：缺陷的真实后果不在 `execute_tool_call` 的返回值上，而在
+    **续跑**。第 1 轮异常穿透 → `finalize_history_item` 没被调用 → TOOL 条目停在
+    `INIT` → job 被 `jobConsumer` 的 `except Exception` 置 FAILED 并重新唤醒 →
+    第 2 轮 `_advance_step` 命中 TOOL/INIT 分支 → `find_tool_call_by_id` 取回**同一个**
+    tool_call 重放 ⇒ 副作用发生两次。实测（`a1e9a502`，本用例原样跑）：
+    `delete_room` 计数 **1 → 2**、`finalize` **0** 次、续跑阶段 `_run_tool_to_item` **1** 次。
+
+    这里**不用 mock 的 history**：真 `AgentHistoryStore`（只把三个持久化函数换成内存
+    实现，`last()` / `find_tool_call_by_id()` / `get_current_turn_start_index()` 等
+    全部真实现）+ 真 `_advance_step` + 真 `_run_tool_to_item` + 真 `AgentToolRegistry`。
+    续跑的分支选择完全由条目真实的 role/status 决定，假造状态测的就不是「真实续跑」。
+    """
+    from service.agentService.agentHistoryStore import AgentHistoryStore
+
+    counter = {"delete_room": 0}
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tc-p2",
+        function={"name": "console", "arguments": json.dumps({"command": "dept rm p2_room"})},
+    )
+
+    gt_agent = GtAgent(id=1, team_id=1, name="TestAgent", role_template_id=1, model="mock")
+    runner = AgentTurnRunner(
+        gt_agent=gt_agent,
+        system_prompt="You are a test agent.",
+        driver_config=AgentDriverConfig(driver_type=DriverType.NATIVE),
+    )
+    runner.tool_registry = _p2_registry(counter)
+
+    # 续跑阶段会走 TOOL/FAILED 分支 → 追加 ASSISTANT → 调 LLM。只桩推理本身，
+    # **不桩 `_advance_step` / `append_history_init_item`**——那两个正是被测的分支决策者。
+    runner._infer_and_classify = AsyncMock(return_value=TurnStepResult.LLM_OUTPUT_NO_ACTION)
+
+    # spy：真实现照跑，只计数。用来证明「续跑阶段没有再执行工具」。
+    run_calls: list[str] = []
+    _real_run = runner._run_tool_to_item
+
+    async def _spy_run(tc, item, room):
+        run_calls.append(tc.id)
+        return await _real_run(tc, item, room)
+
+    runner._run_tool_to_item = _spy_run
+
+    with _in_memory_history_store(), _patched_activity():
+        store = AgentHistoryStore(agent_id=1)
+        _seed_turn(store, tool_call)
+        runner._history = store
+
+        finalize_calls: list[dict] = []
+        _real_finalize = store.finalize_history_item
+
+        async def _spy_finalize(history_id, message, status, error_message=None, tags=None, usage=None):
+            finalize_calls.append({"history_id": history_id, "status": status})
+            return await _real_finalize(
+                history_id, message, status,
+                error_message=error_message, tags=tags, usage=usage,
+            )
+
+        store.finalize_history_item = _spy_finalize
+
+        # ── 第 1 轮：真实执行。崩不崩都记下来（`jobConsumer` 也是这样把异常吞成 FAILED 的）──
+        await store.append_history_init_item(role=OpenaiApiRole.TOOL, tool_call_id="tc-p2")
+        crash: BaseException | None = None
+        try:
+            await runner._advance_step(None, [])
+        except BaseException as exc:  # noqa: BLE001 —— 这层在模拟 jobConsumer 的兜底
+            crash = exc
+        executed_before_resume = counter["delete_room"]
+        finalized_before_resume = list(finalize_calls)
+        # 续跑前取末条目：续跑会追加 ASSISTANT 占位，取晚了看到的就不是那条 TOOL 了。
+        last_tool_item = store.last()
+
+        # ── 第 2 轮：续跑（job 被重新认领后再次推进）──
+        calls_before_resume = len(run_calls)
+        try:
+            await runner._advance_step(None, [])
+        except BaseException:  # noqa: BLE001 —— 修复前这里会再抛一次，同样不该中断用例
+            pass
+        replayed = len(run_calls) - calls_before_resume
+        executed_after_resume = counter["delete_room"]
+
+    # ── 核心判据 1：副作用没有第二次（修复前 executed_after_resume=2）──
+    assert executed_before_resume == 1, (
+        f"第 1 轮必须真执行一次（否则没测到东西）：executed={executed_before_resume}, crash={crash!r}"
+    )
+    assert executed_after_resume == 1, (
+        f"续跑不得重放同一子命令：续跑前={executed_before_resume}, 续跑后={executed_after_resume}"
+        f"（修复前是 1→2）"
+    )
+    # ── 核心判据 2：续跑阶段根本没进工具执行 ──
+    # 「次数==1」有歧义：「没重放」和「根本没跑到那儿」在计数上长得一样。断言续跑阶段
+    # `_run_tool_to_item` 新增调用 == 0，才是「分支决策真的没重放」的直接证据。
+    assert replayed == 0, f"续跑阶段 `_run_tool_to_item` 必须 0 次，实际 {replayed} 次"
+    # ── 核心判据 3：条目被正常 finalize 成 FAILED（「不再重放」的机制原因）──
+    assert crash is None, f"post_process 异常必须降级成工具失败，不得炸 turn：{crash!r}"
+    assert len(finalized_before_resume) == 1, (
+        f"finalize 必须恰好 1 次（修复前是 0 次）：{finalized_before_resume}"
+    )
+    assert finalized_before_resume[0]["status"] == AgentHistoryStatus.FAILED, (
+        finalized_before_resume
+    )
+    assert last_tool_item.status == AgentHistoryStatus.FAILED, (
+        f"TOOL 条目必须被 finalize 成 FAILED（停在 INIT 就会续跑重放）：{last_tool_item.status}"
+    )
+    assert last_tool_item.role == OpenaiApiRole.TOOL

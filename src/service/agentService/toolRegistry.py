@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Iterable
 
@@ -8,6 +9,8 @@ from constants import ToolCategory
 from exception import ForwardToolCall
 from service.roomService import ToolCallContext
 from util import llmApiUtil, jsonUtil
+
+logger = logging.getLogger(__name__)
 
 ToolHandler = Callable[[str, ToolCallContext], Awaitable[dict[str, Any]]]
 
@@ -120,7 +123,24 @@ class ToolExecutionResult:
 
 
 def _execution_result(tool_call_id: str, result: dict[str, Any]) -> ToolExecutionResult:
-    """把工具返回体包装成 `ToolExecutionResult`（成功判定与错误消息的唯一口径）。"""
+    """把工具返回体包装成 `ToolExecutionResult`（成功判定与错误消息的唯一口径）。
+
+    返回体**必须是 dict**，但签名上的 `dict` 只是注解，没有任何运行时强制力（#164 V7c）：
+    `post_process` 是外部回调，返回 None / list / str 时，`result.get(...)` 会抛
+    AttributeError —— 而这里在调用链的最外层、`try` 之外，一抛就是 turn 级崩溃。
+    所以先判类型，坏形状降级成「结果格式异常」的失败返回体，口径与同函数族里
+    「序列化失败」的处理一致：**工具级失败，不外抛**。
+    """
+    if not isinstance(result, dict):
+        logger.warning(
+            "工具返回体不是 dict: tool_call_id=%s, type=%s, value=%r",
+            tool_call_id, type(result).__name__, result,
+        )
+        result = {
+            "success": False,
+            "message": f"工具结果格式异常: 期望 dict，实际 {type(result).__name__}",
+        }
+
     tool_succeeded = result.get("success") is not False
     error_message = None
     if not tool_succeeded and result.get("message") is not None:
@@ -319,8 +339,34 @@ class AgentToolRegistry:
                 result = {"success": False, "message": f"工具调用失败: {e}"}
 
             # 正常返回：把转发链上积攒的后处理按**逆序**应用（后转发的先处理）。
+            #
+            # 为什么要在这里兜 `except`（#164）：`post_process` 是外部回调，抛异常时
+            # 原来会穿透 `execute_tool_call` → `_run_tool_to_item` → `_advance_step` →
+            # `_run_turn_loop` → `run_task_turn`（只捕 CancelledError）→ `jobConsumer`
+            # 的 `except Exception`，结果是 **job FAILED + agent 置 FAILED**，属 turn 级
+            # 崩溃而非工具级失败。更糟的是崩在 `finalize_history_item` 之前，TOOL 条目
+            # 永久停在 INIT，续跑时会命中 `_advance_step` 的 TOOL/INIT 分支把**同一个
+            # tool_call 重放一遍**（实测 1→2，非幂等命令 = 重复副作用）。
+            # 降级成工具失败返回后：条目正常 finalize 成 FAILED，而 FAILED 的 tool
+            # 不重试（`_advance_step` 的 FAILED/CANCELLED 分支），执行次数停在 1。
             for post_process in reversed(post_processors):
-                result = post_process(result)
+                # 入参侧只留证据不强制（#164 C）：入参是上一步的产出，真出问题在
+                # 返回值侧兜；这里若 raise 就又制造了一个外抛点，与本次修复目的相反。
+                if not isinstance(result, dict):
+                    logger.debug(
+                        "post_process 入参不是 dict: tool_call_id=%s, type=%s",
+                        tool_call_id, type(result).__name__,
+                    )
+                try:
+                    result = post_process(result)
+                except Exception as e:  # noqa: BLE001 —— 外部回调，任何异常都只能降级
+                    logger.warning(
+                        "工具结果后处理失败: tool_call_id=%s, tool=%s, post_process=%r, error=%r",
+                        tool_call_id, function_name, post_process, e,
+                    )
+                    result = {"success": False, "message": f"工具结果后处理失败: {e}"}
+                    # 后续 post_process 面对的是失败返回体，继续应用只会叠加误导信息。
+                    break
             return _execution_result(tool_call_id, result)
 
         # 理论不可达：循环体内每条路径都 return 或 continue，且 continue 只在
