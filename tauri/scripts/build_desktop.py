@@ -466,7 +466,9 @@ def staple_with_retry(target: str, attempts: int = 3, backoff_seconds: int = 5) 
     退出（#146 记录过 validate 的同款失败；v0.5.0 的 x86_64 job 则是 staple
     本身被打中，公证已经 Accepted、产物却整份判红丢掉）。
 
-    重试是幂等的：DMG 已经 staple 过时再 staple 只是重写同一份票据。
+    **假设（未验证）**：重试会重写同一份票据，因此重复 staple 是安全的。
+    attempt 1 失败但可能已部分写票时，重试是否安全**未经验证**——这里没有
+    Apple 侧的行为证据，只是沿用「staple 幂等」的常识假设。
 
     失败仍必须判红（发版产物必须带票据），所以 attempts 用尽后**原样抛出**
     `subprocess.CalledProcessError`，不降级为警告、不吞异常。
