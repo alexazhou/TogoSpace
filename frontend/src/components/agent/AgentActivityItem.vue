@@ -481,31 +481,75 @@ function execEnvBadgeTitle(activity: AgentActivity): string {
   return identity ? `${t('agent.execEnv.container')} · ${identity}` : t('agent.execEnv.container');
 }
 
-function activityMetaTokens(activity: AgentActivity): string {
+/**
+ * 活动条目尾部的 token 显示数据。
+ *
+ * 为什么不再返回 `string`：一个字符串承载不了「这两个数是估算还是真值」，估算态就没法在
+ * 模板上挂 class 做浅色。所以拆成结构化对象，由模板分段渲染、按 `estimated` 挂 class。
+ *
+ * - `kind: 'text'`：单一文案（COMPACT 两条分支），与改造前逐字相同。
+ * - `kind: 'split'`：推理（LLM_INFER）的「↑ 输入 ↓ 输出」两段。
+ */
+interface ActivityTokenDisplay {
+  kind: 'text' | 'split';
+  /** 完整显示文本（含两段之间的空格）：COMPACT 分支直接渲染，split 分支用作 title */
+  text: string;
+  /** split 专用：输入段，如 `↑ 1200`；没有可信输入量时为空串 */
+  upText?: string;
+  /** split 专用：输出段，如 ` ↓ 200`（**前导空格**：拼在 `upText` 后面，保证 DOM 文本与 `text` 一致） */
+  downText?: string;
+  /** split 专用：两段都还是流中估算值（后端 usage 尚未到达）⇒ 整段浅色 */
+  estimated?: boolean;
+}
+
+function activityTokenDisplay(activity: AgentActivity): ActivityTokenDisplay | null {
   const metadata = activity.metadata ?? {};
-  const currentTotal = typeof metadata.current_total_tokens === 'number' ? metadata.current_total_tokens : null;
-  const finalTotal = typeof metadata.final_total_tokens === 'number' ? metadata.final_total_tokens : null;
-  const estimated = typeof metadata.estimated_prompt_tokens === 'number' ? metadata.estimated_prompt_tokens : null;
-  const currentCompletion = typeof metadata.current_completion_tokens === 'number' ? metadata.current_completion_tokens : null;
+  const readNumber = (key: string): number | null =>
+    typeof metadata[key] === 'number' ? (metadata[key] as number) : null;
+
   // COMPACT：压缩中是「压缩前规模 + 摘要输出的持续估算」，结束后是「压缩前 → 压缩后」。
-  const contextBefore = typeof metadata.context_tokens_before === 'number' ? metadata.context_tokens_before : null;
-  const contextAfter = typeof metadata.context_tokens_after === 'number' ? metadata.context_tokens_after : null;
+  // 这两种形态已经是「两段 + 箭头」的形状，不在 token 拆分范围内，保持原样。
+  const contextBefore = readNumber('context_tokens_before');
+  const contextAfter = readNumber('context_tokens_after');
+  const currentCompletion = readNumber('current_completion_tokens');
   if (contextBefore !== null && contextAfter !== null) {
-    return t('agent.tokenCompactRange', { before: contextBefore, after: contextAfter });
+    return {
+      kind: 'text',
+      text: t('agent.tokenCompactRange', { before: contextBefore, after: contextAfter }),
+    };
   }
   if (contextBefore !== null) {
-    return t('agent.tokenCompactProgress', { before: contextBefore, count: currentCompletion ?? 0 });
+    return {
+      kind: 'text',
+      text: t('agent.tokenCompactProgress', { before: contextBefore, count: currentCompletion ?? 0 }),
+    };
   }
-  if (finalTotal !== null) {
-    return `tokens ${finalTotal}`;
+
+  // 推理（LLM_INFER）：一律拆成「↑ 输入 ↓ 输出」。
+  // 结束后用后端 usage 真值；流中用估算（`estimated_prompt_tokens` + 已输出的 completion）。
+  // `final_total_tokens` / `current_total_tokens` 不再参与显示（总量对「输入/输出」没有信息量，
+  // 后端仍照旧写进 metadata，只是这里不读）。
+  const finalPrompt = readNumber('final_prompt_tokens');
+  const finalCompletion = readNumber('final_completion_tokens');
+  const estimatedPrompt = readNumber('estimated_prompt_tokens');
+  const up = finalPrompt ?? estimatedPrompt;
+  // 结束态但 usage 只回了 prompt（网关不回 usage 时的兜底路径只写 `current_completion_tokens`）
+  // ⇒ 输出量回落到流中估算的终值。
+  const down = finalCompletion ?? currentCompletion;
+  if (up === null && down === null) {
+    // 两个都没有：不渲染 tokens 元素（与改造前返回空串的行为一致）。
+    return null;
   }
-  if (currentTotal !== null) {
-    return `tokens ${currentTotal}`;
-  }
-  if (estimated !== null) {
-    return t('agent.tokenEstimate', { count: estimated + (currentCompletion ?? 0) });
-  }
-  return '';
+  const upText = up === null ? '' : t('agent.tokenInferenceUp', { count: up });
+  const downText = down === null ? '' : ` ${t('agent.tokenInferenceDown', { count: down })}`;
+  return {
+    kind: 'split',
+    upText,
+    downText,
+    text: `${upText}${downText}`,
+    // 没有拿到任何 usage 真值 ⇒ 这两个数都还是估算。
+    estimated: finalPrompt === null && finalCompletion === null,
+  };
 }
 
 function getActivityModel(activity: AgentActivity): string {
@@ -752,7 +796,7 @@ const activityView = computed(() => {
       ? ''
       : currentSummary,
     title: currentTitle,
-    tokenText: activityMetaTokens(activity),
+    tokenDisplay: activityTokenDisplay(activity),
     toolArguments: currentToolArguments,
     toolName: currentToolName,
     toolResult: currentToolResult,
@@ -871,8 +915,23 @@ const activityView = computed(() => {
         class="agent-activity-item__chip agent-activity-item__chip--mono"
         :title="activityView.metadataToolName"
       >{{ activityView.metadataToolName }}</span>
-      <span v-if="activityView.tokenText" class="agent-activity-item__tail">
-        <span class="agent-activity-item__tokens">{{ activityView.tokenText }}</span>
+      <span v-if="activityView.tokenDisplay" class="agent-activity-item__tail">
+        <span
+          v-if="activityView.tokenDisplay.kind === 'text'"
+          class="agent-activity-item__tokens"
+        >{{ activityView.tokenDisplay.text }}</span>
+        <span
+          v-else
+          class="agent-activity-item__tokens"
+          :class="{ 'agent-activity-item__tokens--estimated': activityView.tokenDisplay.estimated }"
+          :title="activityView.tokenDisplay.text"
+        ><span
+          v-if="activityView.tokenDisplay.upText"
+          class="agent-activity-item__tokens-segment"
+        >{{ activityView.tokenDisplay.upText }}</span><span
+          v-if="activityView.tokenDisplay.downText"
+          class="agent-activity-item__tokens-segment"
+        >{{ activityView.tokenDisplay.downText }}</span></span>
       </span>
       <span v-if="activityView.taskRoomLabel" class="agent-activity-item__tail">
         <span
@@ -1200,6 +1259,21 @@ const activityView = computed(() => {
   min-width: 66px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* 推理的「↑ 输入 ↓ 输出」两段：`↓` 前的前导空格写在数据侧，所以这里不加 gap
+   —— 加了会让 DOM 文本与「完整文案」不一致。 */
+.agent-activity-item__tokens-segment {
+  white-space: pre;
+}
+
+/* 估算态：流中数字还没被后端 usage 校准，用次要文字色（`--text-secondary`）与真值区分。
+   `.agent-activity-item__row span` 把行内所有 span 都设成 `--text-strong`，那条选择器的
+   特异性是 (0,1,1)，所以这里必须带 `.agent-activity-item__row` 前缀才压得住，
+   并同时覆盖两个子段（它们也命中了 `__row span`）。 */
+.agent-activity-item__row .agent-activity-item__tokens--estimated,
+.agent-activity-item__row .agent-activity-item__tokens--estimated span {
+  color: var(--text-secondary);
 }
 
 .agent-activity-item__finish-turn-room {

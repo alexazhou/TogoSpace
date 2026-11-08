@@ -248,35 +248,106 @@ describe('AgentActivityItem bash 首行描述', () => {
 
 /**
  * Token 展示：推理与上下文压缩共用同一个尾部位置。
- * - 推理：流式中显示「估算 prompt + 已输出」，结束后显示后端 usage 总量。
- * - 压缩：进行中显示「↑ 压缩前 ↓ 摘要输出估算」，结束后显示「压缩前 → 压缩后」。
+ *
+ * 推理（`llm_infer`）自 #167 起**拆成两个值**：`↑ 输入 ↓ 输出`。
+ * - 流中：`estimated_prompt_tokens` + `current_completion_tokens`（**估算**，浅色 class）
+ * - 结束后：`final_prompt_tokens` + `final_completion_tokens`（真值，正常色）；
+ *   `final_completion_tokens` 缺失时回落 `current_completion_tokens`
+ *   （网关不回 usage 时 `agentTurnRunner` 的兜底路径只写这个键）
+ * - `final_total_tokens` / `current_total_tokens` **不再参与显示**
+ *
+ * 压缩（`compact`）**不在改动范围**：仍是「进行中 ↑ 压缩前 ↓ 摘要输出估算」与
+ * 「结束后 压缩前 → 压缩后」，断言一字未改（T6，作为「没越界」的证据）。
  */
 describe('AgentActivityItem token 展示', () => {
   function tokenEl(wrapper: ReturnType<typeof mountItem>) {
     return wrapper.find('.agent-activity-item__tokens');
   }
 
-  it('推理中显示 prompt 与已输出 token 的估算', () => {
+  function estimatedTokensEl(wrapper: ReturnType<typeof mountItem>) {
+    return wrapper.find('.agent-activity-item__tokens--estimated');
+  }
+
+  // ---------------- 推理（LLM_INFER）：↑ 输入 ↓ 输出 ----------------
+
+  it('T1 推理流中：显示估算的 输入/输出 两个值，并带估算浅色 class', () => {
     const wrapper = mountItem(activity({
       activity_type: 'llm_infer',
       status: 'started',
       metadata: { estimated_prompt_tokens: 1000, current_completion_tokens: 20 },
     }));
 
-    expect(tokenEl(wrapper).text()).toBe('估算 1020');
+    expect(tokenEl(wrapper).text()).toBe('↑ 1000 ↓ 20');
+    // 估算态必须能被视觉区分：class 挂在与 tokens 同一个元素上。
+    expect(estimatedTokensEl(wrapper).exists()).toBe(true);
+    expect(tokenEl(wrapper).classes()).toContain('agent-activity-item__tokens--estimated');
   });
 
-  it('推理结束显示 usage 总量', () => {
+  it('T2 推理结束：显示 usage 真值的 输入/输出，不带估算 class，且不再显示 total', () => {
     const wrapper = mountItem(activity({
       activity_type: 'llm_infer',
       status: 'succeeded',
-      metadata: { estimated_prompt_tokens: 1000, final_total_tokens: 1200 },
+      metadata: {
+        estimated_prompt_tokens: 1000,
+        final_prompt_tokens: 1200,
+        final_completion_tokens: 200,
+        final_total_tokens: 1400,
+      },
     }));
 
-    expect(tokenEl(wrapper).text()).toBe('tokens 1200');
+    expect(tokenEl(wrapper).text()).toBe('↑ 1200 ↓ 200');
+    expect(estimatedTokensEl(wrapper).exists()).toBe(false);
+    // final_total_tokens 保留在 metadata 里但不再显示（1400 不得出现）。
+    expect(tokenEl(wrapper).text()).not.toContain('1400');
   });
 
-  it('压缩中显示压缩前规模与摘要输出估算（升降箭头）', () => {
+  it('T3 推理结束但缺 final_completion_tokens：输出量回落 current_completion_tokens', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'llm_infer',
+      status: 'succeeded',
+      metadata: { final_prompt_tokens: 1200, current_completion_tokens: 200 },
+    }));
+
+    expect(tokenEl(wrapper).text()).toBe('↑ 1200 ↓ 200');
+    // 输入量已是真值 ⇒ 不按估算处理。
+    expect(estimatedTokensEl(wrapper).exists()).toBe(false);
+  });
+
+  it('T4 只有输入量：只显示 ↑，不出现 ↓ 0 这种假值', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'llm_infer',
+      status: 'started',
+      metadata: { estimated_prompt_tokens: 1000 },
+    }));
+
+    expect(tokenEl(wrapper).text()).toBe('↑ 1000');
+    expect(tokenEl(wrapper).text()).not.toContain('↓');
+  });
+
+  it('T5 推理只有总量没有输入输出：不渲染 tokens 元素', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'llm_infer',
+      status: 'succeeded',
+      metadata: { final_total_tokens: 1200 },
+    }));
+
+    // final_total_tokens 不再参与显示 ⇒ 没有可显示的输入/输出量 ⇒ 整个 tokens 元素不渲染。
+    expect(tokenEl(wrapper).exists()).toBe(false);
+  });
+
+  it('T5-b 推理 metadata 完全为空：不渲染 tokens 元素', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'llm_infer',
+      status: 'succeeded',
+      metadata: {},
+    }));
+
+    expect(tokenEl(wrapper).exists()).toBe(false);
+  });
+
+  // ---------------- 压缩（COMPACT）：不在改动范围，断言原样 ----------------
+
+  it('T6-a 压缩中显示压缩前规模与摘要输出估算（升降箭头）', () => {
     const wrapper = mountItem(activity({
       activity_type: 'compact',
       status: 'started',
@@ -284,9 +355,11 @@ describe('AgentActivityItem token 展示', () => {
     }));
 
     expect(tokenEl(wrapper).text()).toBe('↑ 80000 ↓ 120');
+    // COMPACT 不是「估算/真值」两态语义，不该挂估算 class。
+    expect(estimatedTokensEl(wrapper).exists()).toBe(false);
   });
 
-  it('压缩结束显示压缩前后对比', () => {
+  it('T6-b 压缩结束显示压缩前后对比', () => {
     const wrapper = mountItem(activity({
       activity_type: 'compact',
       status: 'succeeded',
@@ -294,5 +367,6 @@ describe('AgentActivityItem token 展示', () => {
     }));
 
     expect(tokenEl(wrapper).text()).toBe('tokens 80000 → 4200');
+    expect(estimatedTokensEl(wrapper).exists()).toBe(false);
   });
 });
