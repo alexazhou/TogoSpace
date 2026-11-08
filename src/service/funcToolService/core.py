@@ -78,7 +78,12 @@ def keep_legacy_admin_tools() -> bool:
       第 2 跳每跳都查 `registered`（`toolRegistry.py:285`），而
       `tspDriver._register_host_tools`（`:477`）只注册 `get_tools()` 返回的工具。
     - ⇒ 开关置假时 `delete_dept` / `reload_team` 等未注册 ⇒ console 转发到它们
-      一律返回「未知工具: xxx」。实测 23/23 条转发命令全部断开。
+      一律返回「未知工具: xxx」。
+    - 实测隐藏模式下 **23/23 条带 `legacy_tool` 的命令全部失败（0 成功）**；其中
+      **能走到转发层**的一律返回 `未知工具: <legacy_tool>`，其余（带 target /
+      accepts_input 的，如 `dept get` / `dept rm` / `role rm`）在**参数解析 / 实体查找
+      阶段**即失败——那时还没抛 `ForwardToolCall`，断因在上游、**与 D2 无关**
+      （那批在默认模式下同样失败）。所以不要只按「23 条都报未知工具」去查 D2。
 
     **所以「关掉原工具后 console 依然能干活」这句话在 #160 之后已失真**（#160 之前
     才成立：那时 console 直接 `await legacy.delete_dept(...)`，不查注册表）。
@@ -97,6 +102,11 @@ def keep_legacy_admin_tools() -> bool:
     这正是 #160 用 870 行消灭掉的东西。收益为零，风险是搅乱刚修好的结构。
 
     修 A 时须同时评估 `consoleTool._handle_rm` docstring 里 §6.2 的删除保护缺口。
+
+    **A 的修法方向已实测可行**（不必再从零设计）：把第 2 跳「`registered is None`」改为
+    回落到 `get_func_tool(function_name)`，实测隐藏模式下 `get_time` 真返回了时间、
+    `delete_dept` 进到真函数才因缺参报错 ⇒ 执行面确实被打通，且 `get_tools()` 仍照旧
+    过滤、暴露面不受影响。该变异下本开关的「不可达」判据会全红（那是拦路闸在喊人）。
 
     口径用环境变量而不是模块常量：测 token 收益时要在**不改代码**的前提下对比两种
     暴露面，常量得改文件、重启才生效。默认 = 保留；任何无法识别的值也按保留处理

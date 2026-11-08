@@ -17,6 +17,14 @@
   ⇒ `execute_tool_call` 第 2 跳 `registered is None` ⇒ 返回「未知工具: xxx」
 - ⇒ **23 条带 `legacy_tool` 的命令、去重 16 个转发目标，全部不可达**
 
+⚠️ 上句是**静态**口径（按命令表逐条比对其 `legacy_tool` 是否在隐藏清单内 ⇒ 目标层面
+23/23 不可达），不要读成「运行时 23 条都断在转发层」。真 console handler + 真 DB 逐条
+实跑：**23/23 条命令全部失败（0 成功）**，但只有**能走到转发层**的那批返回
+`未知工具: <legacy_tool>`；带 target / accepts_input 的命令（`dept get` / `dept update` /
+`dept rm` / `agent get` / `role update` / `role rm` …）在**参数解析 / 实体查找 / 字段校验
+阶段**即失败，那时还没抛 `ForwardToolCall`——断因在上游、**与 D2 无关**（那批在默认模式
+下同样失败）。报数按两层分开说，别用一个总数把上游失败算进 D2 账上。
+
 这与 `keep_legacy_admin_tools()` 旧 docstring 的承诺「关掉原工具后 console 依然能干活」
 **相反**。该承诺自 #160（`a1e9a502`）起失效，已在 #165 `2da214f0` 的 docstring 中改正。
 
@@ -86,6 +94,13 @@ async def _forward_via_registry(
     所以注入一个只抛 `ForwardToolCall` 的 console 替身，把第 2 跳隔离出来测。
     它对应生产路径里 console handler 的唯一出口 `_forward`：
     `raise ForwardToolCall(parsed.spec.legacy_tool, args)`。
+
+    ⚠️ **替身注入的是去向，不是来源。** 这里的 `target` 由用例闭包给定，不经过
+    `parsed.spec.legacy_tool`，所以本文件验的是「给定 target 后第 2 跳如何」（去向），
+    **验不了「target 从哪来」**（来源）。实测反证：把 `consoleTool.py:353` 硬编码成
+    `raise ForwardToolCall("delete_dept", ...)`（来源彻底坏掉），本文件 35 条**全绿**，
+    一条都没咬住。咬住这一跳的是 `test_console_tool.py`（同一变异 50 failed）。
+    —— 别把「生产 `forward.tool_name` 传递已被验」记在本文件账上（#166 M9）。
     """
     async def _stub_console(args_str: str, ctx) -> dict:
         raise ForwardToolCall(target, {})
