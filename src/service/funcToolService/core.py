@@ -70,8 +70,20 @@ _func_tools: dict[str, FuncTool] = {}
 def keep_legacy_admin_tools() -> bool:
     """D2 单点开关：是否把被 `console` 收敛的 16 个原工具暴露给模型。
 
-    **只影响暴露面，不影响执行能力**：`console` 的路由是直接调 `tools.py` 里的函数，
-    不经过注册表查名字，所以关掉原工具后 console 依然能干活（这是收敛的前提）。
+    **只影响暴露面** —— 这是设计意图；但 ⚠️ **当前实现下它也影响 console 的执行能力**：
+
+    - `get_tools()` 按本开关过滤 schema，这一点符合设计。
+    - 但 #160（`a1e9a502`）之后，`console` 不再是「直接调 `tools.py` 里的函数」，
+      而是抛 `ForwardToolCall` 交给 `toolRegistry.execute_tool_call` 的**第 2 跳**执行。
+      第 2 跳每跳都查 `registered`（`toolRegistry.py:285`），而
+      `tspDriver._register_host_tools`（`:477`）只注册 `get_tools()` 返回的工具。
+    - ⇒ 开关置假时 `delete_dept` / `reload_team` 等未注册 ⇒ console 转发到它们
+      一律返回「未知工具: xxx」。实测 23/23 条转发命令全部断开。
+
+    **所以「关掉原工具后 console 依然能干活」这句话在 #160 之后已失真**（#160 之前
+    才成立：那时 console 直接 `await legacy.delete_dept(...)`，不查注册表）。
+    这是 #160 遗留的既有缺陷，未在本单修（超出范围），修它时须同时评估
+    `consoleTool._handle_rm` docstring 里 §6.2 的删除保护缺口。
 
     口径用环境变量而不是模块常量：测 token 收益时要在**不改代码**的前提下对比两种
     暴露面，常量得改文件、重启才生效。默认 = 保留；任何无法识别的值也按保留处理

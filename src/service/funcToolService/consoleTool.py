@@ -532,11 +532,27 @@ def _guard_agent_get(agent_row) -> Callable[[dict[str, Any]], dict[str, Any]]:
 async def _handle_rm(parsed: ParsedCommand, planner) -> NoReturn:
     """删除命令的唯一执行路径：解析一次目标，真删，再把影响范围并回结果。
 
-    **没有确认闸门**（#165 D）：D2 默认把被收敛的 16 个原工具全暴露给模型，
-    `delete_dept` / `delete_room` / `delete_role_template` 都能被直接调用，闸门
-    对「真想删的模型」不产生任何阻碍（绕过成本 = 换一个工具名），只对「老实走
-    console 的调用方」多加一次往返。删掉后 console 与原工具语义一致，符合 #160
-    「直接调与经 console 调是同一份判定」的设计前提。
+    **没有确认闸门**（#165 D）——但下面这条论证**有前提，用前先读**：
+
+    §6.1 适用前提：`keep_legacy_admin_tools()` 为真（默认）。
+        此时 D2 把被收敛的 16 个原工具全暴露给模型，`delete_dept` /
+        `delete_room` / `delete_role_template` 都能被直接调用，闸门对「真想删的
+        模型」不产生任何阻碍（绕过成本 = 换一个工具名），只对「老实走 console
+        的调用方」多加一次往返。删掉后 console 与原工具语义一致，符合 #160
+        「直接调与经 console 调是同一份判定」的设计前提。
+
+    §6.2 反前提：`TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS=0`（隐藏模式）下**本函数到不了
+        目标工具**。`console` 的每条命令都抛 `ForwardToolCall`，由注册表第 2 跳
+        执行，而第 2 跳要查 `registered`；`tspDriver._register_host_tools` 只注册
+        `get_tools()` 返回的工具，隐藏模式下 `delete_dept` 等不在其中 ⇒ 第 2 跳
+        返回「未知工具: delete_dept」，删除**发生不了**。实测隐藏模式下 23/23 条
+        转发命令全部断开（含 `dept rm` / `room rm` / `role rm` / `reload`）。
+        这是 #160（`a1e9a502`）「改抛 ForwardToolCall」引入的既有缺陷，不是本单
+        造成的：#160 之前 console 直接 `await legacy.delete_dept(...)`、不查注册表，
+        隐藏模式下仍能删。
+        ⇒ 所以「隐藏模式下闸门是唯一防线」**当前不成立**：那里没有可用通路，
+        谈不上拆防线。但**若将来修好隐藏模式的转发**（让 console 真能干活），
+        届时闸门确实不存在了，那是真降级——**修那条通路时必须回来重新评估本决策**。
 
     `impact` 仍然产出并回显：它描述「这次删掉了什么」（`dept rm` 会列出被一并
     删除的子部门，这是原工具返回体里没有的信息），对模型后续判断有用，但它
