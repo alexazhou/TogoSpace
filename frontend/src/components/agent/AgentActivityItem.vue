@@ -527,6 +527,7 @@ function activityTokenDisplay(activity: AgentActivity): ActivityTokenDisplay | n
   const contextBefore = readNumber('context_tokens_before');
   const contextAfter = readNumber('context_tokens_after');
   const estimatedCompletion = readNumber('estimated_completion_tokens');
+  const completionTokensOut = readNumber('completion_tokens');
   if (contextBefore !== null && contextAfter !== null) {
     return {
       kind: 'text',
@@ -534,9 +535,17 @@ function activityTokenDisplay(activity: AgentActivity): ActivityTokenDisplay | n
     };
   }
   if (contextBefore !== null) {
+    // 压缩中的摘要输出量：网关带 usage 的 chunk 走真值键 `completion_tokens`，
+    // 不带 usage 的 chunk 走估算键 `estimated_completion_tokens`（两者可能并存，
+    // 此时真值分支不累加估算器 ⇒ 真值更接近实际输出量，取真值优先，
+    // 与下方 LLM_INFER 分支 `completionTokens ?? estimatedCompletion` 同一口径）。
+    // 都没有时才回落到 0（仅「刚创建、尚无任何输出」这一形态）。
     return {
       kind: 'text',
-      text: t('agent.tokenCompactProgress', { before: contextBefore, count: estimatedCompletion ?? 0 }),
+      text: t('agent.tokenCompactProgress', {
+        before: contextBefore,
+        count: completionTokensOut ?? estimatedCompletion ?? 0,
+      }),
     };
   }
 

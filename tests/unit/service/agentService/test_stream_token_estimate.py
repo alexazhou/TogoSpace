@@ -150,6 +150,11 @@ async def test_st2_content_reasoning_and_tool_arguments_all_counted(monkeypatch)
     assert recorder.items[-1].estimated_completion_tokens == _ST2_TOTAL
     # 三路各被 tokenize 一次：缺任何一路都会让 totals / seen 对不上
     assert sorted(seen) == sorted(_ST2_WEIGHTS.keys())
+    # 生产者侧的负向约束：估算分支**不得**顺手把估算值填进真值键。
+    # 少了这一条，`core.py` 估算分支里加一行 `completion_tokens=completion_tokens`
+    # 全量测试一条都不会红（M3 断的是「落库」、M5-a 断的是消费者 `apply_progress`，
+    # 都不经过这个生产者）。前端的「估算/真值」着色完全依赖这个键的缺席。
+    assert recorder.items[-1].completion_tokens is None
 
 
 @pytest.mark.asyncio
@@ -194,6 +199,7 @@ async def test_st3_each_delta_tokenized_once_and_text_never_reaccumulated(monkey
     assert sum(len(p) for p in pieces) == n * delta_len, "送入的文本被重复累加（疑似重算全文）"
     assert max(len(p) for p in pieces) == delta_len
     assert recorder.items[-1].estimated_completion_tokens == n
+    assert recorder.items[-1].completion_tokens is None
 
 
 # ── ST4：网关给了 usage 就不本地累加 ────────────────────────────
@@ -237,6 +243,8 @@ async def test_st5_token_counter_failure_falls_back_without_breaking_stream(monk
     # 回退口径：max(1, len(before) // 4)
     assert recorder.items[0].estimated_completion_tokens == 2
     assert recorder.items[-1].estimated_completion_tokens == 3
+    # 回退路径同属估算分支，真值键同样必须缺席。
+    assert [r.completion_tokens for r in recorder.items] == [None, None]
     noisy = [r for r in caplog.records if r.name == "util.tokenUtil" and r.levelno >= logging.WARNING]
     assert noisy == [], f"回退路径不应刷 warning：{[r.getMessage() for r in noisy]}"
 
