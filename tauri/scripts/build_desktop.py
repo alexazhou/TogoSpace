@@ -457,6 +457,40 @@ def verify_stapled_ticket(target: str) -> None:
             "❌ 公证票据校验失败（DMG 未通过本地判据）:\n   - " + "\n   - ".join(failures))
 
 
+def staple_with_retry(target: str, attempts: int = 3, backoff_seconds: int = 5) -> None:
+    """对 DMG 执行 `xcrun stapler staple`，失败时有限次退避重试。
+
+    为什么要重试：staple 和 validate 一样**要联网**——它要向 Apple 的
+    ticket-delivery 取已公证的票据写进 DMG 的签名 blob。网络抖动会报
+    `NSURLErrorDomain -1005 "The network connection was lost"` 并以 `Error 68`
+    退出（#146 记录过 validate 的同款失败；v0.5.0 的 x86_64 job 则是 staple
+    本身被打中，公证已经 Accepted、产物却整份判红丢掉）。
+
+    重试是幂等的：DMG 已经 staple 过时再 staple 只是重写同一份票据。
+
+    失败仍必须判红（发版产物必须带票据），所以 attempts 用尽后**原样抛出**
+    `subprocess.CalledProcessError`，不降级为警告、不吞异常。
+
+    只重试 staple，不碰 `notarytool submit`：公证提交重复会浪费公证额度，
+    且 `--wait` 已经等到 Accepted，重提交没有意义。
+    """
+    command = ["xcrun", "stapler", "staple", target]
+    for attempt in range(1, attempts + 1):
+        try:
+            run_command(command)
+            if attempt > 1:
+                print(f"✅ stapler staple 第 {attempt} 次尝试成功")
+            return
+        except subprocess.CalledProcessError as exc:
+            if attempt == attempts:
+                print(f"❌ stapler staple 连续 {attempts} 次失败（最后一次 rc={exc.returncode}）",
+                      file=sys.stderr)
+                raise
+            print(f"⚠️  stapler staple 第 {attempt}/{attempts} 次失败（rc={exc.returncode}），"
+                  f"{backoff_seconds} 秒后重试")
+            time.sleep(backoff_seconds)
+
+
 def notarize_dmg(arch: str) -> None:
     print("\n--- notarize: 公证 + staple ---")
     if sys.platform != "darwin":
@@ -479,7 +513,10 @@ def notarize_dmg(arch: str) -> None:
     ], timeout=1800)
     print(f"⏱️  公证耗时 {time.time() - started:.0f}s")
 
-    run_command(["xcrun", "stapler", "staple", target])
+    # staple 要联网取票据，同一网络故障（-1005 / Error 68）会咬它，
+    # 见 `staple_with_retry` 的说明。#146/#148 只把 validate 换成本地判据，
+    # staple 这一步当时没管，所以同样的故障还能再来一次。
+    staple_with_retry(target)
     # 原为 `xcrun stapler validate`（联网回查，-1005/Error 68 时丢弃已公证产物）
     verify_stapled_ticket(target)
     print("✅ 公证与 staple 完成")
