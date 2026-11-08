@@ -4,24 +4,29 @@
 所以这里按文件路径直接 import 该脚本（它不是包，没有 `__init__.py`）。
 
 覆盖：
-  R1 首次成功 → 只调用一次（不得多跑）
-  R2 一次失败一次成功 → 恰好两次，且成功
-  R3 三次全失败 → 抛出 CalledProcessError 且 rc 保留（不得降级为 warning）
-  R4 恰好尝试 3 次（不是无限重试）
-  R5 退避间隔真的被 sleep（不是只打日志）
-  R6 【行为级，射程仅限 staple_with_retry 调用契约】staple 3 次全失败时
-     notarytool submit 只被调用 1 次。**注意：这不是硬要求 1 的判据** ——
-     硬要求 1（只重试 staple、不动 notarytool）**靠代码审查、无自动判据**，
-     理由见 test_r6 的 docstring。
-  R7 命令形态与原实现一致（`xcrun stapler staple <target>`）
-  R8 【行为级】notarize_dmg 确实通过 staple_with_retry 走 staple，
-     且恰好一次、参数是 target（守「抽了函数没接调用点」/「调用被注释」/「包进 if False」）
-  R9 【行为级】日志可事后区分「第 N 次成功」与「连续 N 次失败」（硬要求 3）
-  R10 docstring 不得把 staple 幂等写成结论（必须标为未验证假设）
+  R1  首次成功 → 只调用一次（不得多跑）
+  R2  一次失败一次成功 → 恰好两次，且成功
+  R3  三次全失败 → 抛出 CalledProcessError 且 rc 保留（不得降级为 warning）
+  R4  恰好尝试 3 次（不是无限重试）
+  R4-B attempts 参数真的被用（不是写死 3）
+  R5  退避间隔真的被 sleep（不是只打日志）
+  R5-B 默认退避为正（默认值改 0 等于紧循环连打）
+  R6  【行为级】staple 3 次全失败时，notarytool submit 只被调用 1 次
+  R7  命令形态与原实现一致（`xcrun stapler staple <target>`）
+  R7-B 重试那几次的命令形态与首次完全相同（不得第 2 次换成 validate）
+  R8  【行为级】notarize_dmg 确实通过 staple_with_retry 走 staple，
+      且恰好一次、参数是 target（守「抽了函数没接调用点」/「调用被注释」/「包进 if False」）
+  R9-A/R9-B 【行为级】日志可事后区分「第 N 次成功」与「连续 N 次失败」（硬要求 3）
+  R10 docstring 把幂等性标为未验证假设，不得写成结论
+  R11 【行为级】notarytool submit 自身失败不得被重试（硬要求 1 的真判据，R6 不覆盖此形态）
+  R12 票据校验必须发生在 staple 之后（顺序）
+  R13 非 CalledProcessError（如 xcrun 不存在）不得被重试（守 `except Exception` 宽捕获）
 
-⚠️ 跨平台：`notarize_dmg` 开头 `if sys.platform != "darwin": raise SystemExit`，
-而 CI 的 `test.yml` 是 `runs-on: ubuntu-latest`。R6/R8 经 `_wire_notarize`
-把 `sys.platform` 钉成 "darwin"，否则在 CI 上必红（本机 darwin 全绿会掩盖）。
+⚠️ CI 平台：`.github/workflows/test.yml` 是 `runs-on: ubuntu-latest`，而
+`notarize_dmg` 首行有 `if sys.platform != "darwin": raise SystemExit(...)`。
+R6/R8/R11/R12 走 `notarize_dmg`，故 `_wire_notarize` 里用
+`monkeypatch.setattr(module.sys, "platform", "darwin")` 在测试内声明平台，
+**不改生产代码的平台检查**（那个检查是对的）。改后须在非 darwin 下复跑。
 
 R6/R8 是行为级替身断言，不是源码文本断言：
   早期版本用 `inspect.getsource` 文本匹配，对「包进 `if False:`」「调用被注释」
@@ -130,6 +135,16 @@ def test_r4_bounded_attempts_exactly_three(bd, monkeypatch):
     )
 
 
+def test_r4b_attempts_parameter_is_honored(bd, monkeypatch):
+    """R4-B：attempts 参数必须真的被用（不是写死 3）。"""
+    _fail_on(monkeypatch, bd, fail_times=99)
+    with pytest.raises(subprocess.CalledProcessError):
+        bd.staple_with_retry(TARGET, attempts=5, backoff_seconds=1)
+    assert len(bd._test_state["calls"]) == 5, (
+        f"attempts=5 时应尝试 5 次，实得 {len(bd._test_state['calls'])} 次"
+    )
+
+
 def test_r5_backoff_actually_sleeps(bd, monkeypatch):
     """R5：退避间隔真的被 sleep（3 次全失败 → 前两次各 sleep 一次）。"""
     _fail_on(monkeypatch, bd, fail_times=99)
@@ -140,10 +155,34 @@ def test_r5_backoff_actually_sleeps(bd, monkeypatch):
     )
 
 
+def test_r5b_default_backoff_is_nonzero(bd, monkeypatch):
+    """R5-B：不传 backoff_seconds 时默认退避必须 > 0（硬要求是「有限重试 + 退避」）。
+
+    默认值改成 0 就等于紧循环连打 3 次，网络抖动场景下毫无意义。
+    """
+    _fail_on(monkeypatch, bd, fail_times=99)
+    with pytest.raises(subprocess.CalledProcessError):
+        bd.staple_with_retry(TARGET)
+    sleeps = bd._test_state["sleeps"]
+    assert len(sleeps) == 2 and all(s > 0 for s in sleeps), (
+        f"默认退避应为正数且有 2 次（3 次尝试之间），实得 {sleeps}"
+    )
+
+
 def test_r7_command_shape_unchanged(bd):
     """R7：命令形态与原实现一致 —— `xcrun stapler staple <target>`。"""
     bd.staple_with_retry(TARGET)
     assert bd._test_state["calls"][0] == ["xcrun", "stapler", "staple", TARGET]
+
+
+def test_r7b_retry_attempts_use_same_command_shape(bd, monkeypatch):
+    """R7-B：重试那几次的命令形态必须与首次完全相同（不得第 2 次偷偷换成 validate）。"""
+    _fail_on(monkeypatch, bd, fail_times=2)
+    bd.staple_with_retry(TARGET)
+    expected = ["xcrun", "stapler", "staple", TARGET]
+    assert bd._test_state["calls"] == [expected, expected, expected], (
+        f"3 次尝试的命令形态应完全相同，实得 {bd._test_state['calls']}"
+    )
 
 
 # ── notarize_dmg 调用契约（行为级替身，非源码文本断言）──────────────────────
@@ -153,16 +192,12 @@ def _wire_notarize(monkeypatch, module, staple_fails: int):
     """把 notarize_dmg 的依赖全部换成替身，返回可观测的调用记录。
 
     staple 行为：前 staple_fails 次调用抛 CalledProcessError，之后成功。
-
-    ⚠️ 必须把 `sys.platform` 钉成 "darwin"：`notarize_dmg` 开头有
-    `if sys.platform != "darwin": raise SystemExit("❌ 公证仅支持 macOS")`，
-    而 CI 的 `test.yml` 是 `runs-on: ubuntu-latest`。不钉的话 R6/R8 在 CI 上
-    必红（本机 darwin 全绿，掩盖问题）。
-    `module.sys` 就是全局 `sys`，monkeypatch 结束自动还原；生产代码里的
-    平台检查不动（那是正确的）。
     """
-    records = {"notarytool": 0, "staple": [], "verify": 0}
+    records = {"notarytool": 0, "staple": [], "verify": 0, "order": []}
 
+    # CI 跑在 ubuntu-latest（test.yml runs-on: ubuntu-latest），而 notarize_dmg
+    # 有 `if sys.platform != "darwin": raise SystemExit(...)` 的平台检查。
+    # 测试内声明成 darwin，不改生产代码的平台检查。
     monkeypatch.setattr(module.sys, "platform", "darwin")
 
     # DMG 路径刻意不含 "notarytool" 字样，避免路径被误命中
@@ -178,17 +213,22 @@ def _wire_notarize(monkeypatch, module, staple_fails: int):
         "signing_identity_hash": "HASH",
     })
     monkeypatch.setattr(module, "dmg_path", lambda arch: fake_dmg)
-    monkeypatch.setattr(module, "verify_stapled_ticket", lambda target: records.__setitem__(
-        "verify", records["verify"] + 1))
+    def _fake_verify(target):
+        records["verify"] += 1
+        records["order"].append("verify")
+
+    monkeypatch.setattr(module, "verify_stapled_ticket", _fake_verify)
 
     def _fake_run_command(command, cwd=None, env=None, timeout=None):
         if "notarytool" in command:
             records["notarytool"] += 1
+            records["order"].append("notarytool")
 
     monkeypatch.setattr(module, "run_command", _fake_run_command)
 
     def _fake_staple(target, attempts=3, backoff_seconds=5):
         records["staple"].append(target)
+        records["order"].append("staple")
         if len(records["staple"]) <= staple_fails:
             raise subprocess.CalledProcessError(68, ["xcrun", "stapler", "staple", target])
 
@@ -197,20 +237,10 @@ def _wire_notarize(monkeypatch, module, staple_fails: int):
 
 
 def test_r6_notarytool_submitted_exactly_once_when_staple_always_fails(bd, monkeypatch):
-    """R6：staple 3 次全失败时，notarytool submit 只被调用 1 次。
+    """R6：staple 3 次全失败时，notarytool submit 只被调用 1 次（硬要求 1）。
 
-    ⚠️ 射程仅限 `staple_with_retry` 的**调用契约**，不是硬要求 1 的判据。
-
-    硬要求 1 是「只重试 staple、不动 notarytool」。要给它建真判据，得先重构
-    `notarize_dmg`（抽出 `notarytool_submit` 之类可替身的单元）——重构风险
-    （受损方是所有使用者）远大于收益（防浪费公证额度）。故硬要求 1
-    **靠代码审查，无自动判据**，已明写在交付报告里。
-
-    本条能咬住的是：`staple_with_retry` 被调用的**次数与时机**没有把
-    notarytool 卷进去（例如有人把 staple 的重试循环套在 notarize_dmg 外面、
-    或让 notarytool 随 staple 一起重跑）。它咬不住「`notarize_dmg` 内部
-    另外给 notarytool 加了独立重试循环」——那种改动这条会红（notarytool
-    计数 >1），但如果重试循环写成不调用 `run_command` 的形式则仍可能漏。
+    这条是行为级：把 `notarytool submit` 包进 `for range(1, 4)` 时，
+    notarytool 会被调 3 次，这里立刻红。
     """
     records, _ = _wire_notarize(monkeypatch, bd, staple_fails=99)
 
@@ -287,4 +317,65 @@ def test_r10_docstring_marks_idempotency_as_unverified_assumption():
     )
     assert "重试是幂等的：" not in doc, (
         "docstring 不得把幂等性写成肯定结论（旧措辞「重试是幂等的：…」应已移除）"
+    )
+
+
+# ── 硬要求 1 的真判据：notarytool 自身失败不得被重试 ─────────────────────────
+
+def test_r11_notarytool_failure_is_not_retried(bd, monkeypatch):
+    """R11：notarytool submit 自身失败时必须立刻抛出，且只提交 1 次（硬要求 1）。
+
+    这条与 R6 互补：R6 只覆盖「staple 触发 notarytool」的场景，
+    对「notarytool 自身失败被重试」不敏感（实测把 submit 包进 `for range(1,4)`
+    时 R6 仍绿）。这里让 notarytool 自己失败，断言它只被调 1 次。
+    """
+    records, _ = _wire_notarize(monkeypatch, bd, staple_fails=0)
+
+    def _failing_run_command(command, cwd=None, env=None, timeout=None):
+        if "notarytool" in command:
+            records["notarytool"] += 1
+            records["order"].append("notarytool")
+            raise subprocess.CalledProcessError(1, list(command))
+
+    monkeypatch.setattr(bd, "run_command", _failing_run_command)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        bd.notarize_dmg("x86_64")
+
+    assert records["notarytool"] == 1, (
+        f"notarytool submit 自身失败不得重试（重复提交浪费公证额度），实得 {records['notarytool']} 次"
+    )
+    assert records["staple"] == [], "notarytool 未成功就不该走到 staple"
+
+
+def test_r12_verify_runs_after_staple_not_before(bd, monkeypatch):
+    """R12：票据校验必须发生在 staple 之后（先校验后 staple 等于校验了个空）。"""
+    records, _ = _wire_notarize(monkeypatch, bd, staple_fails=0)
+
+    bd.notarize_dmg("x86_64")
+
+    assert records["order"] == ["notarytool", "staple", "verify"], (
+        f"调用顺序应为 notarytool → staple → verify，实得 {records['order']}"
+    )
+
+
+def test_r13_non_calledprocesserror_is_not_retried(bd, monkeypatch):
+    """R13：`run_command` 抛非 CalledProcessError（如 FileNotFoundError）时必须立刻冒出。
+
+    守 `except Exception` 宽捕获：宽捕获会把「xcrun 不存在」这类配置错误
+    也重试 3 次再抛，掩盖真因、且多跑 2 次。
+    """
+    calls = []
+
+    def _raise_fnf(command, cwd=None, env=None, timeout=None):
+        calls.append(list(command))
+        raise FileNotFoundError("xcrun")
+
+    monkeypatch.setattr(bd, "run_command", _raise_fnf)
+
+    with pytest.raises(FileNotFoundError):
+        bd.staple_with_retry(TARGET)
+
+    assert len(calls) == 1, (
+        f"非 CalledProcessError 不应被重试（配置错误不是网络抖动），实得调用 {len(calls)} 次"
     )
