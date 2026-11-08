@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import time
+from dataclasses import dataclass, field
 from typing import Awaitable, Callable, List
 
 from constants import (
@@ -44,6 +45,46 @@ logger = logging.getLogger(__name__)
 # 推理与上下文压缩共用同一套节流参数。
 _PROGRESS_THROTTLE_INTERVAL_SECONDS = 0.2
 _PROGRESS_THROTTLE_CHUNK_COUNT = 10
+
+
+@dataclass(eq=False)
+class _ProgressTracker:
+    """流式 token 进度回调（可调用对象）：节流广播 + 记住最新估算值。
+
+    做成对象而不是「给函数挂属性」：后者运行时可行，但类型上是往
+    `Callable` 上塞未声明属性，mypy 报 `attr-defined`（CI 的 mypy 门禁会红）。
+    这里把 `last_completion_tokens` 变成真字段，`__call__` 保持原来的回调签名，
+    三个调用点（推理、overflow retry 重绑、compact）仍可当 `Callable` 直接传。
+
+    `last_completion_tokens` 的语义见 `_make_progress_callback` 的说明。
+    """
+
+    activity_id: int
+    # 收尾兜底用的最新估算值；从未收到估算 delta 时保持 None。
+    last_completion_tokens: int | None = None
+    # 用 lambda 而不是直接传 `time.monotonic`：直接传会在**类定义时**绑定函数对象，
+    # 而原闭包是在 `_make_progress_callback` **调用时**才读模块级 `time`。
+    # 两者在生产等价，但前者会让「替换模块级 time」的测试手段失效（语义承载变了）。
+    _last_progress_time: float = field(default_factory=lambda: time.monotonic())
+    _chunk_count_since_update: int = 0
+
+    async def __call__(self, progress: llmService.InferStreamProgress) -> None:
+        # 每个 delta 都记（不受节流影响），供收尾兜底使用。
+        # 只认估算值：真值路径的 `completion_tokens` 已经由收尾的 `apply_usage` 落库，
+        # 这里记进去反而会把「真值」写进估算键（M5 守的就是这条不串）。
+        if progress.estimated_completion_tokens is not None:
+            self.last_completion_tokens = progress.estimated_completion_tokens
+        self._chunk_count_since_update += 1
+        now = time.monotonic()
+        if (
+            self._chunk_count_since_update >= _PROGRESS_THROTTLE_CHUNK_COUNT
+            or (now - self._last_progress_time) >= _PROGRESS_THROTTLE_INTERVAL_SECONDS
+        ):
+            patch = AgentActivityMeta()
+            patch.apply_progress(progress)
+            await agentActivityService.update_activity_progress(self.activity_id, metadata_patch=patch, persist=False)
+            self._last_progress_time = now
+            self._chunk_count_since_update = 0
 
 
 def _detect_json_tool_call_in_content(content: str | None) -> bool:
@@ -174,7 +215,7 @@ class AgentTurnRunner:
         )
         return meta.merge_exec_env(self.driver.get_exec_env())
 
-    def _make_progress_callback(self, activity_id: int):
+    def _make_progress_callback(self, activity_id: int) -> _ProgressTracker:
         """生成流式 token 进度回调：把累计估算写进活动 metadata（节流）。
 
         推理与上下文压缩共用：两者都是持续输出的流式请求，前端活动行按
@@ -186,30 +227,7 @@ class AgentTurnRunner:
         usage，就用这里记下的**最新**估算值落库（否则「网关不回 usage」这个估算
         存在的唯一场景，库里反而一条 completion token 都没有）。
         """
-        last_progress_time = time.monotonic()
-        chunk_count_since_update = 0
-
-        async def _on_progress(progress: llmService.InferStreamProgress) -> None:
-            nonlocal last_progress_time, chunk_count_since_update
-            # 每个 delta 都记（不受节流影响），供收尾兜底使用。
-            # 只认估算值：真值路径的 `completion_tokens` 已经由收尾的 `apply_usage` 落库，
-            # 这里记进去反而会把「真值」写进估算键（M5 守的就是这条不串）。
-            if progress.estimated_completion_tokens is not None:
-                _on_progress.last_completion_tokens = progress.estimated_completion_tokens
-            chunk_count_since_update += 1
-            now = time.monotonic()
-            if (
-                chunk_count_since_update >= _PROGRESS_THROTTLE_CHUNK_COUNT
-                or (now - last_progress_time) >= _PROGRESS_THROTTLE_INTERVAL_SECONDS
-            ):
-                patch = AgentActivityMeta()
-                patch.apply_progress(progress)
-                await agentActivityService.update_activity_progress(activity_id, metadata_patch=patch, persist=False)
-                last_progress_time = now
-                chunk_count_since_update = 0
-
-        _on_progress.last_completion_tokens = None
-        return _on_progress
+        return _ProgressTracker(activity_id=activity_id)
 
     def _extract_tool_command(self, tool_call: llmApiUtil.OpenAIToolCall) -> str | None:
         if tool_call.function_name != "execute_bash":
