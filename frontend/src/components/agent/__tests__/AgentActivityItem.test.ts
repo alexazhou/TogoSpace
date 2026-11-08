@@ -478,4 +478,47 @@ describe('AgentActivityItem token 展示', () => {
     expect(tokenEl(wrapper).text()).toBe('tokens 80000 → 4200');
     expect(estimatedTokensEl(wrapper).exists()).toBe(false);
   });
+
+  /**
+   * T6-a 只覆盖了「压缩中 + 估算键」一种形态。`core.py` 在 chunk 带 usage 时
+   * 只写真值键 `completion_tokens`（不写估算键），这条路径此前没有 COMPACT 用例，
+   * 于是分支里 `estimatedCompletion ?? 0` 会把真值 120 丢掉、渲染成 `↓ 0`。
+   * 三条用例构成完整形态矩阵：只有 before（刚创建）、只有真值、两键并存。
+   */
+  it('T6-c 压缩中网关带 usage：输出量读真值键，不得回落成 ↓ 0', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'compact',
+      status: 'started',
+      metadata: { context_tokens_before: 80000, completion_tokens: 120 },
+    }));
+
+    // 反向对照：先把「不能出现」的写法钉死，再断正确值。
+    expect(tokenEl(wrapper).text()).not.toBe('↑ 80000 ↓ 0');
+    expect(tokenEl(wrapper).text()).toBe('↑ 80000 ↓ 120');
+    expect(estimatedTokensEl(wrapper).exists()).toBe(false);
+  });
+
+  it('T6-d 压缩中真值与估算并存：取真值（与 LLM_INFER 分支同一口径）', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'compact',
+      status: 'started',
+      metadata: { context_tokens_before: 80000, completion_tokens: 50, estimated_completion_tokens: 30 },
+    }));
+
+    // 真值 chunk 不累加估算器源文本 ⇒ 估算值可能落后于真值，取真值才不会倒退。
+    expect(tokenEl(wrapper).text()).toBe('↑ 80000 ↓ 50');
+    expect(estimatedTokensEl(wrapper).exists()).toBe(false);
+  });
+
+  it('T6-e 压缩刚开始（只有 before）：仍是唯一允许 ↓ 0 的形态', () => {
+    const wrapper = mountItem(activity({
+      activity_type: 'compact',
+      status: 'started',
+      metadata: { context_tokens_before: 80000 },
+    }));
+
+    // 既有行为，保持不变（不是回归）；与 T6-c 对照才能说明「↓ 0 只在无任何输出量时出现」。
+    expect(tokenEl(wrapper).text()).toBe('↑ 80000 ↓ 0');
+    expect(estimatedTokensEl(wrapper).exists()).toBe(false);
+  });
 });
