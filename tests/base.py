@@ -5,9 +5,11 @@ import hashlib
 import inspect
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import unittest.mock as mock
 import urllib.request
@@ -82,6 +84,28 @@ def _find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def _make_isolated_config_dir(source_dir: str, class_key: str) -> str:
+    """把 ``source_dir`` 复制到 per-worker 临时目录，返回临时目录路径。
+
+    为什么必须复制而不是原地用：会写配置的接口（`POST /config/llm.json`、
+    `/config/quick_init.json`、`/system/update_config.json` 等）走的是
+    `configUtil.update_setting()` → `_save_setting_to_file()` 真实写盘链路，
+    没有「只改内存」的模式。原地写会改到受版本控制的 tracked 文件，teardown 没执行
+    （Ctrl-C / kill / 用例失败提前退出）就永久留下脏文件。
+
+    必须连同 ``role_templates/`` 与 ``teams/`` 一起复制：`ServiceTestCase._load_config`
+    会把同一个 config 目录**同时**当作 preset 目录传给 `configUtil.load(preset_dir=...)`，
+    只复制 `setting.json` 会让 role_templates / teams 加载为空。
+
+    目录名带 worker 标识与类标识，避免 xdist 并行时不同 worker 撞同一目录。
+    """
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    class_hash = hashlib.md5(class_key.encode("utf-8")).hexdigest()[:10]
+    parent = os.path.join(tempfile.gettempdir(), f"togospace-test-config-{worker}")
+    os.makedirs(parent, exist_ok=True)
+    return tempfile.mkdtemp(prefix=f"{class_hash}-", dir=parent)
 
 
 def _no_proxy_urlopen(request: urllib.request.Request, timeout: float):
@@ -170,6 +194,8 @@ class ServiceTestCase:
     backend_base_url: str = None
     _backend_proc: subprocess.Popen = None
     _backend_config_dir: str = None
+    _source_config_dir: str = None
+    _isolated_config_dir: str = None
 
     mock_llm_server: MockLLMServer = None
 
@@ -437,18 +463,27 @@ class ServiceTestCase:
         """配置选择机制：
         - 若 use_custom_config = True，使用测试类自己的 config/ 目录
         - 否则使用 tests/config/ 默认配置目录
+
+        选定目录后会被**复制**到 per-worker 临时目录，后续所有读写都指向临时副本，
+        保证测试写配置时不会改到受版本控制的 tracked 文件（见 `_make_isolated_config_dir`）。
         """
         # 确定使用的配置目录
         if cls.use_custom_config:
             test_file = sys.modules[cls.__module__].__file__
             test_dir = os.path.dirname(os.path.abspath(test_file))
-            config_dir = os.path.join(test_dir, "config")
+            source_config_dir = os.path.join(test_dir, "config")
         else:
-            config_dir = os.path.join(os.path.dirname(__file__), "config")
+            source_config_dir = os.path.join(os.path.dirname(__file__), "config")
 
-        if not os.path.isdir(config_dir):
+        if not os.path.isdir(source_config_dir):
             return
 
+        class_key = f"{cls.__module__}.{cls.__name__}"
+        config_dir = _make_isolated_config_dir(source_config_dir, class_key)
+        shutil.copytree(source_config_dir, config_dir, dirs_exist_ok=True)
+
+        cls._source_config_dir = source_config_dir
+        cls._isolated_config_dir = config_dir
         cls._backend_config_dir = config_dir
 
         # 强制重写配置中的 DB 路径为 worker 专属路径
@@ -588,6 +623,27 @@ class ServiceTestCase:
         if cls.requires_mock_llm:
             with contextlib.suppress(Exception):
                 cls._stop_mock_llm()
+        cls._safe_cleanup_isolated_config_dir()
+
+    @classmethod
+    def _safe_cleanup_isolated_config_dir(cls):
+        """删除 `_load_config` 创建的临时配置目录副本。
+
+        必须在后端进程停掉之后调用：后端子进程的 `--config-dir` 指向这个目录，
+        进程未退出就删目录会留下「进程还在、配置没了」的不一致状态。
+
+        删除失败不影响测试结论（tmpdir 由系统兜底回收），但会留下目录垃圾，
+        所以这里用 ``suppress`` 而不是让异常冒泡改变测试结果。
+        """
+        config_dir = cls._isolated_config_dir
+        if not config_dir:
+            return
+        cls._isolated_config_dir = None
+        cls._source_config_dir = None
+        if not os.path.isdir(config_dir):
+            return
+        with contextlib.suppress(Exception):
+            shutil.rmtree(config_dir)
 
     @staticmethod
     def _read_process_output(proc: subprocess.Popen) -> str:
