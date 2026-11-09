@@ -1363,3 +1363,59 @@ async def test_infer_to_item_switch_off_disables_recognize(turn_runner):
     recognize_mock.assert_not_called()
     update_history_mock.assert_not_called()
     infer_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_infer_to_item_scene_b_invalidates_token_cache(turn_runner):
+    """场景 B 回填 recognition 后必须显式失效 token 缓存（生产调用点覆盖）。
+
+    为什么判据不是「估算值变了」：`MessageAttachment.recognition` 不进入
+    `AgentMessage.to_openai_message()`，因此也不进入 `estimate_messages_tokens`——
+    实测把 recognition 从空填到一大段，估算值一字不变（差 0）。所以这里只能断言
+    「生产调用点确实被走到」，用 M7（删掉 `agentTurnRunner.py` 里
+    `history.invalidate_token_cache()` 那一行）自证：删掉后本用例红。
+    """
+    img_msg = _image_user_message()
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 99
+
+    stack, infer_mock, recognize_mock, update_history_mock = _patch_infer_env(
+        turn_runner, supports_vision=False, vision_configured=True, auto_vision_fallback=True,
+        messages=[img_msg], history_items=[(42, img_msg)],
+    )
+    invalidate_mock = MagicMock()
+    turn_runner._history.invalidate_token_cache = invalidate_mock
+    with stack:
+        result = await turn_runner._infer_to_item(output_item, [])
+
+    assert result is not None
+    recognize_mock.assert_awaited_once()
+    update_history_mock.assert_awaited_once_with(42, message=img_msg)
+    invalidate_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_infer_to_item_scene_b_no_mutation_skips_invalidate(turn_runner):
+    """没有回填发生（图片已有 recognition）→ 不得失效缓存。
+
+    覆盖 `if mutated:` 守卫：一旦守卫被去掉，这里会变成多余的失效
+    （每次都丢弃 token 快照缓存，全部走重算）。
+    """
+    img_msg = _image_user_message()
+    img_msg.attachments[0].recognition = "之前已经识别过"
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 99
+
+    stack, infer_mock, recognize_mock, update_history_mock = _patch_infer_env(
+        turn_runner, supports_vision=False, vision_configured=True, auto_vision_fallback=True,
+        messages=[img_msg], history_items=[(42, img_msg)],
+    )
+    invalidate_mock = MagicMock()
+    turn_runner._history.invalidate_token_cache = invalidate_mock
+    with stack:
+        result = await turn_runner._infer_to_item(output_item, [])
+
+    assert result is not None
+    recognize_mock.assert_not_called()
+    update_history_mock.assert_not_called()
+    invalidate_mock.assert_not_called()

@@ -399,20 +399,32 @@ async def test_reload_from_db_invalidates_cache(monkeypatch) -> None:
 def test_invalidate_token_cache_bumps_revision() -> None:
     """视觉兜底回填 recognition 走的是原地修改，只能靠显式失效。
 
-    这里断言的是机制本身：失效后即使消息体没变，也必须重算一次。
+    判据必须与另外 5 个写操作同款：**读一次 → 原地改消息内容 → 同实例再读**，
+    断言数值变化。原地改内容是关键——`invalidate_token_cache` 的存在理由就是
+    「消息体被就地改写、`_revision` 无从自动感知」，所以只有原地改才能让
+    「漏掉失效」表现为「读到旧值」。
+
+    ⚠️ 曾经的写法 `assert store._token_cache is None or store._token_cache[0][3] != before`
+    是**恒真**的：`[0][3]` 是 `_revision`（int，值 1），`before` 是 token 数（值 19），
+    两个不同量纲的数必然不等。把 `_bump_revision()` 换成 `pass` 后该断言照样通过
+    （#186 验收实测：单测 1636 全绿零红）。现已改为下面的差分判据。
     """
+    msg = AgentMessage(role=OpenaiApiRole.USER, content="hi")
     store = AgentHistoryStore(1, [
-        _item(item_id=1, seq=0, role=OpenaiApiRole.USER, content="hi"),
+        _item(item_id=1, seq=0, role=OpenaiApiRole.USER, content=msg.content),
     ])
     before = _cached_estimate(store)
     assert store._token_cache is not None
 
+    # 原地改写消息体（等价于视觉兜底回填 recognition）：缓存不会自动感知
+    store[0].message.content = "回填后的识别结果：" + "一段明显更长的图片描述内容" * 5
     store.invalidate_token_cache()
 
-    # 缓存被丢弃（下次读取必然重算），但消息体未变 ⇒ 数值相同
-    assert store._token_cache is None or store._token_cache[0][3] != before
     after = _cached_estimate(store)
-    assert after == before  # 值相同是对的：失效的是缓存，不是内容
+    assert after != before, (
+        f"原地改消息体后 invalidate_token_cache 未生效：仍读到旧值 {before}"
+    )
+    assert after > before
 
 
 def test_cache_hit_returns_same_object_without_recomputing(monkeypatch) -> None:
