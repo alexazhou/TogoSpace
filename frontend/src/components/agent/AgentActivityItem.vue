@@ -512,6 +512,10 @@ interface ActivityTokenDisplay {
   up?: ActivityTokenSegment;
   /** split 专用：输出段；后端没有任何输出量时缺失 */
   down?: ActivityTokenSegment;
+  /** COMPACT「压缩中」专用：压缩前规模（恒定，不参与补间） */
+  compactBefore?: number;
+  /** COMPACT「压缩中」专用：摘要输出量（补间对象）；形态二没有这个字段 */
+  compactCount?: number;
 }
 
 function activityTokenDisplay(activity: AgentActivity): ActivityTokenDisplay | null {
@@ -540,12 +544,18 @@ function activityTokenDisplay(activity: AgentActivity): ActivityTokenDisplay | n
     // 此时真值分支不累加估算器 ⇒ 真值更接近实际输出量，取真值优先，
     // 与下方 LLM_INFER 分支 `completionTokens ?? estimatedCompletion` 同一口径）。
     // 都没有时才回落到 0（仅「刚创建、尚无任何输出」这一形态）。
+    //
+    // `compactCount` 是补间对象（#176）：逐 chunk 递增，跳变观感与 LLM_INFER 一样差。
+    // `before` 不补——压缩前规模在整个压缩过程中恒定，没有「在变」的量可补。
+    const count = completionTokensOut ?? estimatedCompletion ?? 0;
     return {
       kind: 'text',
       text: t('agent.tokenCompactProgress', {
         before: contextBefore,
-        count: completionTokensOut ?? estimatedCompletion ?? 0,
+        count,
       }),
+      compactBefore: contextBefore,
+      compactCount: count,
     };
   }
 
@@ -846,6 +856,26 @@ const animatedUpTokens = useAnimatedNumber(() => tokenUpTarget.value);
 const animatedDownTokens = useAnimatedNumber(() => tokenDownTarget.value);
 
 /**
+ * COMPACT「压缩中」的摘要输出量补间目标（#176）。
+ *
+ * 形态一 `↑ {before} ↓ {count}` 的 `count` 逐 chunk 递增，跳变观感与 LLM_INFER 的 `↓` 段
+ * 完全一样；`before` 恒定不补。形态二没有 `compactCount` ⇒ 这里恒为 `null` ⇒ 不排帧，
+ * 「形态二不补间」不靠额外的 if 去排除，由字段缺失天然表达。
+ *
+ * 形态一 → 形态二切换时 target 由数值变 `null`，`useAnimatedNumber` 只 cancel 不排帧，
+ * 立刻落到形态二原文案，不留残影。
+ */
+const tokenCompactCountTarget = computed<number | null>(() => {
+  const display = activityView.value.tokenDisplay;
+  if (!display || display.kind !== 'text') {
+    return null;
+  }
+  return display.compactCount ?? null;
+});
+
+const animatedCompactCount = useAnimatedNumber(() => tokenCompactCountTarget.value);
+
+/**
  * 模板实际渲染的 token 视图。
  *
  * 补间只改**数字**：哪段是输入/输出、哪段是估算（浅色）全部沿用 `activityView.tokenDisplay`
@@ -857,7 +887,23 @@ const tokenView = computed(() => {
     return null;
   }
   if (display.kind === 'text') {
-    return { kind: 'text' as const, text: display.text, title: display.text };
+    // COMPACT「压缩中」：`before` 恒定，只有 `count` 走补间；`title` 始终是**目标**文案
+    // （`display.text`），悬停要看最终权威值而不是动画中间帧。
+    // 形态二没有 `compactCount` ⇒ `tokenCompactCountTarget` 恒 `null` ⇒ `animatedCompactCount`
+    // 为 `null` ⇒ 走下面的 `display.text`，不补间（也不用额外判断形态二）。
+    if (display.compactBefore !== undefined && animatedCompactCount.value !== null) {
+      return {
+        kind: 'text' as const,
+        text: t('agent.tokenCompactProgress', {
+          before: display.compactBefore,
+          count: animatedCompactCount.value,
+        }),
+        title: display.text,
+      };
+    }
+    // 形态二 / 其余 text 分支：`title` 保持缺失（`undefined` ⇒ Vue 不渲染该属性），
+    // 与改造前逐字逐属性一致 —— 补间只该影响形态一，不许顺手给形态二加 tooltip。
+    return { kind: 'text' as const, text: display.text, title: undefined };
   }
   const upValue = animatedUpTokens.value;
   const downValue = animatedDownTokens.value;
@@ -990,6 +1036,7 @@ const tokenView = computed(() => {
         <span
           v-if="tokenView.kind === 'text'"
           class="agent-activity-item__tokens"
+          :title="tokenView.title"
         >{{ tokenView.text }}</span>
         <span
           v-else
