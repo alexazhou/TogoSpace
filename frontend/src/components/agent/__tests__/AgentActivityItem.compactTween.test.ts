@@ -271,4 +271,45 @@ describe('COMPACT 形态一 token 补间', () => {
     await runFrames(5);
     expect(tokenText(wrapper)).toBe('tokens 80000 → 4200');
   });
+
+  it('C1 起始 count=0 → 补间：屏幕上已有 ↓ 0，首个 chunk 必须从 0 数上去', async () => {
+    // `context_tokens_before` 有、两个输出量键都没有 ⇒ `?? 0` 回落到 0，
+    // 文案渲染成 `↑ 80000 ↓ 0`（T6-e 守的就是这个形态）。
+    const wrapper = mountItem(activity({
+      metadata: { context_tokens_before: 80000 },
+    }));
+    // 首值直显：count 从无到 0 不建帧（`current === null ⇒ snapTo`）。
+    expect(tokenText(wrapper)).toBe('↑ 80000 ↓ 0');
+    expect(queue.length).toBe(0);
+
+    // 首个 chunk 到达。
+    await wrapper.setProps({
+      activity: activity({
+        metadata: { context_tokens_before: 80000, estimated_completion_tokens: 400 },
+      }),
+    });
+    // 屏幕上已经有 `↓ 0`，所以 0 → 400 **必须补间**（不是首值直显）。
+    expect(queue.length).toBe(1);
+
+    // 逐帧采样 20 帧。第 1 帧只设 `startedAt`（elapsed=0）显示值仍是 0，
+    // 所以「严格中间值」的帧一定出现在第 2 帧之后 —— 只推 1 帧会误判"没补间"。
+    const samples: number[] = [downValue(wrapper)];
+    for (let index = 0; index < 20; index += 1) {
+      await stepFrame();
+      samples.push(downValue(wrapper));
+    }
+
+    // ① 确实存在「既不是 0 也不是 400」的过渡帧，且不止一帧。
+    const strictlyBetween = samples.filter((value) => value > 0 && value < 400);
+    expect(strictlyBetween.length).toBeGreaterThanOrEqual(3);
+
+    // ② 单调不减：从 0 数上去，不许中途回退。
+    const monotonic = samples.every((value, index) => index === 0 || value >= samples[index - 1]);
+    expect(monotonic).toBe(true);
+
+    // ③ 收敛到目标并停帧。
+    expect(samples[samples.length - 1]).toBe(400);
+    expect(tokenText(wrapper)).toBe('↑ 80000 ↓ 400');
+    expect(queue.length).toBe(0);
+  });
 });
