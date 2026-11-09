@@ -21,11 +21,12 @@ from service.agentService.agentHistoryStore import CompactPlan
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver.base import AgentDriverConfig
 from util.llmApiUtil import OpenAIMessage, OpenaiApiRole
+from tests.tokenSnapshotStub import snapshots
 
 _CONFIG_PATCH = "util.configUtil.get_app_config"
 _INFER_STREAM_PATCH = "service.agentService.agentTurnRunner.llmService.infer_stream"
 _COMPACT_LLM_PATCH = "service.agentService.compact.llmService"
-_ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
+_TOKEN_SNAPSHOT_PATCH = "service.agentService.agentTurnRunner.AgentTurnRunner._token_snapshot"
 _ACTIVITY_PATCH = "service.agentService.agentTurnRunner.agentActivityService"
 
 # context_window=32000, reserve=4096 -> hard=27904, trigger=floor(27904*0.85)=23718
@@ -153,7 +154,7 @@ async def test_progress_after_overflow_retry_goes_to_new_activity():
         patch(_COMPACT_LLM_PATCH, MagicMock(infer_stream=AsyncMock(
             return_value=llmService.InferResult.success(_resp("摘要")),
         ))),
-        patch(_ESTIMATE_PATCH, side_effect=[5000, 5000, 5000]),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(5000, 5000, 5000)),
         patch(_ACTIVITY_PATCH, svc),
     ):
         await runner._infer_to_item(output_item, tools=[])
@@ -204,7 +205,7 @@ async def test_status_event_after_overflow_retry_goes_to_new_activity():
         patch(_COMPACT_LLM_PATCH, MagicMock(infer_stream=AsyncMock(
             return_value=llmService.InferResult.success(_resp("摘要")),
         ))),
-        patch(_ESTIMATE_PATCH, side_effect=[5000, 5000, 5000]),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(5000, 5000, 5000)),
         patch(_ACTIVITY_PATCH, svc),
     ):
         await runner._infer_to_item(output_item, tools=[])
@@ -244,7 +245,7 @@ async def test_compact_progress_goes_to_compact_activity_not_infer():
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.success(_resp("答")))),
         patch(_COMPACT_LLM_PATCH, MagicMock(infer_stream=AsyncMock(side_effect=_fake_compact_infer_stream))),
         # 首次估算超 trigger -> pre-check 触发 compact；compact 内部再估一次（裁剪后）
-        patch(_ESTIMATE_PATCH, side_effect=[_TRIGGER_TOKENS + 100, 300]),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(_TRIGGER_TOKENS + 100, 300)),
         patch(_ACTIVITY_PATCH, svc),
     ):
         await runner._infer_to_item(output_item, tools=[])

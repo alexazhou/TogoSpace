@@ -498,6 +498,7 @@ async def test_run_turn_loop_raises_on_error_action_after_max_retries(turn_runne
 
 from util import configUtil
 from util.configUtil.configTypes import AppConfig, SettingConfig
+from tests.tokenSnapshotStub import make_snapshot
 
 
 @pytest.mark.asyncio
@@ -1204,7 +1205,9 @@ def _patch_infer_env(turn_runner, *, supports_vision, vision_configured, auto_vi
 
     stack.enter_context(patch.object(m.compact, "calc_compact_trigger_tokens", return_value=100000))
     stack.enter_context(patch.object(m.compact, "calc_hard_limit_tokens", return_value=200000))
-    stack.enter_context(patch.object(m.compact, "estimate_tokens", return_value=100))
+    stack.enter_context(patch.object(
+        turn_runner, "_token_snapshot", MagicMock(return_value=make_snapshot(100)),
+    ))
     stack.enter_context(patch.object(m.compact, "is_context_overflow_error", return_value=False))
 
     stack.enter_context(patch.object(m.agentActivityService, "add_activity", new=AsyncMock(return_value=MagicMock(id=1))))
@@ -1219,7 +1222,10 @@ def _patch_infer_env(turn_runner, *, supports_vision, vision_configured, auto_vi
     update_history_mock = AsyncMock()
     stack.enter_context(patch.object(m.gtAgentHistoryManager, "update_agent_history_by_id", update_history_mock))
 
-    stack.enter_context(patch.object(turn_runner, "_check_compact", new=AsyncMock(return_value=(messages, 100, False))))
+    stack.enter_context(patch.object(
+        turn_runner, "_check_compact",
+        new=AsyncMock(return_value=(make_snapshot(100), False)),
+    ))
     stack.enter_context(patch.object(turn_runner, "_finish_activity", new=AsyncMock()))
     stack.enter_context(patch.object(turn_runner, "_build_usage", MagicMock(return_value=None)))
 

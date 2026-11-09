@@ -4,9 +4,6 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Awaitable, Callable
-from typing import Any
-
-import litellm
 
 from constants import OpenaiApiRole
 from model.coreModel.gtCoreChatModel import GtCoreAgentDialogContext
@@ -90,40 +87,7 @@ def calc_compact_trigger_tokens(model_config: LlmModelConfig) -> int:
 
 
 
-# ─── token 估算 ──────────────────────────────────────────
-
-def estimate_tokens(
-    model: str,
-    messages: list[AgentMessage],
-    system_prompt: str | None = None,
-) -> int:
-    """估算消息列表的 token 数量，使用 litellm.token_counter。
-
-    内部把 AgentMessage 转回 OpenAIMessage（含多模态 content）再估算，
-    保证与实际发送形态一致。
-    """
-    try:
-        msg_dicts: list[dict[str, Any]] = []
-        if system_prompt:
-            msg_dicts.append({"role": "system", "content": system_prompt})
-        for msg in messages:
-            msg_dicts.append(msg.to_openai_message().to_dict())
-        return litellm.token_counter(model=model, messages=msg_dicts)
-    except Exception as e:
-        logger.warning("token 估算失败，回退到字符估算: error=%s", e)
-        return estimate_token_by_char(messages, system_prompt)
-
-
-def estimate_token_by_char(messages: list[AgentMessage], system_prompt: str | None = None) -> int:
-    """字符数 / 4 的粗略估算，作为 litellm 失败时的兜底。"""
-    total_chars = len(system_prompt or "")
-    for msg in messages:
-        total_chars += len(msg.content or "")
-        if msg.tool_calls:
-            for tc in msg.tool_calls:
-                total_chars += len(tc.function_args)
-    return total_chars // 4
-
+# ─── 上下文超长识别 ──────────────────────────────────────
 
 def is_context_overflow_error(error: Exception) -> bool:
     """判断异常是否属于"上下文超长"错误。"""

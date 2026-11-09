@@ -22,13 +22,14 @@ from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver import AgentDriverConfig
 from tests.base import ServiceTestCase
 from util import llmApiUtil
+from tests.tokenSnapshotStub import make_snapshot, snapshots
 
 _AGENT_ID = 99
 _TEAM_ID = 1
 
 _CONFIG_PATCH = "util.configUtil.get_app_config"
 _COMPACT_LLM_PATCH = "service.agentService.compact.llmService"
-_ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
+_TOKEN_SNAPSHOT_PATCH = "service.agentService.agentTurnRunner.AgentTurnRunner._token_snapshot"
 
 
 def _mock_config():
@@ -193,11 +194,12 @@ class TestCompactTokenRange(_DbCase):
                 return_value=llmService.InferResult.success(compact_resp),
             ))),
             # 压缩后的估算值由这里定，用来验证「after 跟着估算走而不是写死」
-            patch(_ESTIMATE_PATCH, return_value=post_tokens),
+            patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(post_tokens)),
         ):
-            returned = await runner._execute_compact(pre_compact_tokens=pre_tokens)
+            returned = await runner._execute_compact(pre_snapshot=make_snapshot(pre_tokens))
 
-        assert returned == post_tokens
+        # 压缩前后都从快照取，返回值也换成了快照本身。
+        assert returned.current_tokens == post_tokens
         rows = await GtAgentActivity.select().where(
             (GtAgentActivity.activity_type == AgentActivityType.COMPACT)
             & (GtAgentActivity.agent_id == _AGENT_ID)

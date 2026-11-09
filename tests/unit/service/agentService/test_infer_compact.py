@@ -13,6 +13,7 @@ from service import llmService
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver.base import AgentDriverConfig
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall, OpenaiApiRole
+from tests.tokenSnapshotStub import snapshots
 
 
 def _make_mock_response(content="ok", tool_calls=None, usage=None):
@@ -59,7 +60,7 @@ def _patch_compact_infer(result):
     引用同一个模块对象，同时 patch 会互相覆盖。
     """
     return patch(_COMPACT_LLM_PATCH, MagicMock(infer_stream=AsyncMock(return_value=result)))
-_ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
+_TOKEN_SNAPSHOT_PATCH = "service.agentService.agentTurnRunner.AgentTurnRunner._token_snapshot"
 _ACTIVITY_PATCH = "service.agentService.agentTurnRunner.agentActivityService"
 
 def _make_runner_and_history():
@@ -138,7 +139,7 @@ async def test_infer_normal_no_compact():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.success(resp))),
-        patch(_ESTIMATE_PATCH, return_value=1000),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(1000)),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         msg = await runner._infer_to_item(output_item, tools=[])
@@ -156,7 +157,7 @@ async def test_infer_reuses_pending_infer_item():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.success(resp))),
-        patch(_ESTIMATE_PATCH, return_value=500),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(500)),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         msg = await runner._infer_to_item(pending_item, tools=[])
@@ -179,7 +180,7 @@ async def test_infer_pre_check_triggers_compact():
             llmService.InferResult.success(main_resp),
         ])),
         _patch_compact_infer(llmService.InferResult.success(compact_resp)),
-        patch(_ESTIMATE_PATCH, side_effect=[TRIGGER_TOKENS + 100, 5000]),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(TRIGGER_TOKENS + 100, 5000)),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         msg = await runner._infer_to_item(output_item, tools=[])
@@ -199,7 +200,7 @@ async def test_infer_pre_check_still_over_after_compact():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         _patch_compact_infer(llmService.InferResult.success(compact_resp)),
-        patch(_ESTIMATE_PATCH, side_effect=[TRIGGER_TOKENS + 100, HARD_LIMIT_TOKENS + 10]),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(TRIGGER_TOKENS + 100, HARD_LIMIT_TOKENS + 10)),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         with pytest.raises(RuntimeError, match="compact 后仍超限"):
@@ -214,7 +215,7 @@ async def test_infer_pre_check_compact_failure_raises():
 
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
-        patch(_ESTIMATE_PATCH, return_value=TRIGGER_TOKENS + 100),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(TRIGGER_TOKENS + 100)),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         with pytest.raises(RuntimeError, match="compact 跳过：无可压缩消息"):
@@ -235,7 +236,12 @@ async def test_infer_post_check_triggers_compact():
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.success(main_resp))),
         _patch_compact_infer(llmService.InferResult.success(compact_resp)),
-        patch(_ESTIMATE_PATCH, side_effect=[5000, 4000]),
+        # 快照调用次序：pre-check → 广播 → post-check → compact 后。
+        # 触发判据统一走快照后，post-check 的输入不再是上游 usage.prompt_tokens，
+        # 所以必须由序列里第 3 个值显式造出「超过 trigger」。
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(
+            5000, 5000, TRIGGER_TOKENS + 100, 4000,
+        )),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         msg = await runner._infer_to_item(output_item, tools=[])
@@ -258,7 +264,10 @@ async def test_infer_post_check_compact_failure_raises():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.success(main_resp))),
-        patch(_ESTIMATE_PATCH, return_value=5000),
+        # 快照调用次序：pre-check → 广播 → post-check（此处超 trigger，触发 compact）。
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(
+            5000, 5000, TRIGGER_TOKENS + 100,
+        )),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         with pytest.raises(RuntimeError, match="compact 跳过：无可压缩消息"):
@@ -289,7 +298,7 @@ async def test_infer_overflow_triggers_compact_retry():
             llmService.InferResult.success(retry_resp),
         ])),
         _patch_compact_infer(llmService.InferResult.success(compact_resp)),
-        patch(_ESTIMATE_PATCH, side_effect=[5000, 5000]),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(5000, 5000)),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         msg = await runner._infer_to_item(output_item, tools=[])
@@ -311,7 +320,7 @@ async def test_infer_overflow_after_precheck_no_retry():
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.failure(overflow_error))),
         _patch_compact_infer(llmService.InferResult.success(compact_resp)),
-        patch(_ESTIMATE_PATCH, side_effect=[TRIGGER_TOKENS + 100, 5000]),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(TRIGGER_TOKENS + 100, 5000)),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         with pytest.raises(RuntimeError, match="context_length_exceeded"):
@@ -329,7 +338,7 @@ async def test_infer_non_overflow_failure_raises():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.failure(generic_error))),
-        patch(_ESTIMATE_PATCH, return_value=5000),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(5000)),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         with pytest.raises(RuntimeError, match="rate limit exceeded"):
@@ -349,7 +358,7 @@ async def test_infer_overflow_compact_still_over_fails():
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.failure(overflow_error))),
         _patch_compact_infer(llmService.InferResult.success(compact_resp)),
-        patch(_ESTIMATE_PATCH, side_effect=[5000, HARD_LIMIT_TOKENS + 10]),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(5000, HARD_LIMIT_TOKENS + 10)),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         with pytest.raises(RuntimeError, match="overflow compact 后仍超限"):
@@ -369,7 +378,7 @@ async def test_infer_usage_recorded_in_finalize():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.success(resp))),
-        patch(_ESTIMATE_PATCH, return_value=500),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(500)),
         patch(_ACTIVITY_PATCH, _mock_activity_service()),
     ):
         await runner._infer_to_item(output_item, tools=[])

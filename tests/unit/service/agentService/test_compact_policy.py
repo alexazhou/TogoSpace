@@ -13,7 +13,6 @@ from service.agentService.compact import (
     calc_compact_trigger_tokens,
     calc_hard_limit_tokens,
     compact_messages,
-    estimate_tokens,
     is_context_overflow_error,
 )
 from service.agentService.promptBuilder import (
@@ -179,21 +178,6 @@ def test_build_compact_resume_prompt_wraps_summary():
     context = build_compact_resume_prompt("  摘要内容  ")
     assert "以下是之前对话的压缩摘要" in context
     assert "摘要内容" in context
-
-
-# ─── estimate_tokens ─────────────────────────────────────
-
-def test_estimate_tokens_returns_positive_int():
-    msgs = [AgentMessage(role=OpenaiApiRole.USER, content="Hello world")]
-    result = estimate_tokens("gpt-4o", msgs, system_prompt="You are helpful.")
-    assert isinstance(result, int)
-    assert result > 0
-
-
-def test_estimate_tokens_with_empty_messages():
-    result = estimate_tokens("gpt-4o", [], system_prompt="sys")
-    assert isinstance(result, int)
-    assert result > 0
 
 
 # ─── compact_messages ─────────────────────────────────────
