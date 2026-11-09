@@ -9,6 +9,7 @@ import logging
 from typing import NamedTuple, Optional, Sequence, Union
 
 from constants import (
+    ALLOWED_CLEAR_FIELDS,
     EVENT_CONTENT_MAX_CHARS,
     EVENT_TRUNCATED_SUFFIX,
     EmployStatus,
@@ -205,13 +206,17 @@ async def _handle_reviewer_change(
     caller_id: int,
     target: Optional[TaskStatus],
     reviewer_id: Optional[int],
-    clear_reviewer: bool,
+    clearing: bool,
     note: str,
 ) -> dict:
     """`update_task` 的「仅验收人变更」路径（D1-D7）。
 
     与状态流转**互斥**（D5）：同时给了「非自环的 `new_status`」⇒ 直接拒绝，
     否则执行人可以在「提交 REVIEWING」的同一次调用里把验收人换成自己人。
+
+    `clearing` 是**归一后**的撤销意图：调用方按
+    `clearing = "reviewer_id" in (clear_fields or ())` 算出，本函数只认这个布尔值，
+    D1–D7 的判断逻辑与 #158 一字不差。
     """
     old_status = task.status
     reason = (note or '').strip()
@@ -254,11 +259,11 @@ async def _handle_reviewer_change(
         }
 
     # D2：撤销（设 NULL）只能由创建人操作，且不能发生在 REVIEWING（否则「无人能通过验收」死锁）
-    if clear_reviewer:
+    if clearing:
         if not is_creator:
             return {
                 "success": False,
-                "message": "撤销验收人（clear_reviewer）只能由创建人操作；当前验收人只能把验收人交接给别人",
+                "message": "撤销验收人只能由创建人操作；当前验收人只能把验收人交接给别人",
                 "error_code": "permission_denied",
             }
         if old_status == TaskStatus.REVIEWING:
@@ -269,7 +274,7 @@ async def _handle_reviewer_change(
             }
 
     # D4：新验收人校验
-    if clear_reviewer:
+    if clearing:
         new_reviewer_id: Optional[int] = None
     else:
         try:
@@ -548,7 +553,7 @@ async def update_task(
     new_status: Optional[str] = None,
     note: str = '',
     reviewer_id: Optional[int] = None,
-    clear_reviewer: bool = False,
+    clear_fields: Optional[Sequence[str]] = None,
 ) -> dict:
     """更新协作任务：流转状态（`new_status`）、追加评论（省略 `new_status`），或修改验收人。
 
@@ -556,10 +561,24 @@ async def update_task(
     - `new_status` 给定且 ≠ 当前状态 ⇒ 权限校验 + **流转事件**（`from≠to`、`content=note`）；
     - **评论权限 = 团队内成员皆可**（不限 assignee / reviewer / creator）；
     - **终态（`DONE`/`CANCELLED`）不可流转；仅允许追加评论**；
-    - `reviewer_id` 给定 ⇒ **修改验收人**；`clear_reviewer=True` ⇒ **撤销验收人**。
-      两者都省略 = 完全走上面的老路径（行为不变）。验收人变更的权限：
+    - `reviewer_id` 给定 ⇒ **修改验收人**；`"reviewer_id" in clear_fields` ⇒ **撤销验收人**。
+      `reviewer_id` 与 `clear_fields` 均省略 = 完全走上面的老路径（行为不变）。验收人变更的权限：
       **创建人或当前验收人可以改；执行人不能改**（否则验收门失效）；撤销只能由创建人做，
       且 `REVIEWING` 时不能撤销。变更**不能与状态流转在同一次调用里做**。
+
+    `clear_fields` 的三种边界（都是有意设计，不要"顺手统一"）：
+
+    1. **空数组 `[]` ⇒ 视为未提供**，不撤销任何字段、不写事件、走老路径。
+       理由：`clear_fields=[]` 的语义是"没要清任何字段"，含义明确，等价省略。
+       ⚠️ 这与 `list_tasks` 的 `status=[]` **相反**（那边报 `invalid_status`）——
+       因为 `status=[]` 是"过滤条件写了个空的"，用户意图不明，报错更安全。
+       两个空数组两种语义是有意的，各自都别改。
+    2. **白名单外的字段名 ⇒ 拒绝**，返回 `error_code="invalid_clear_field"`。
+       schema 里的 `enum` 只是给模型看的声明，**不是运行时校验**（native / tsp 驱动都不按
+       schema 拦），所以这里必须自己校验一遍。
+    3. **`reviewer_id` 与 `"reviewer_id" in clear_fields` 同给 ⇒ 冲突拒绝**
+       （`error_code="ambiguous_reviewer_change"`，不改库）：一个是"改人"、一个是"撤销"，
+       两种意图不可同时成立。
 
     Returns:
         dict: success / action（`transitioned` | `commented` | `reviewer_updated` | `reviewer_unchanged`）/ task；
@@ -572,13 +591,58 @@ async def update_task(
         if target is None:
             return {"success": False, "message": f"无效的状态：{new_status}"}
 
-    # 两个参数都省略 ⇒ 老路径（流转 / 评论），行为完全不变
-    wants_reviewer_change = reviewer_id is not None or clear_reviewer
-
-    if wants_reviewer_change and reviewer_id is not None and clear_reviewer:
+    # ---- clear_fields 类型收口 + 归一 + 白名单校验 ----
+    # ① 类型收口必须在归一之前：否则非可迭代值抛未捕获 `TypeError`
+    #    （`5` ⇒ "'int' object is not iterable"），绕过 `TogoException` 通道，
+    #    模型拿到的是 Python 堆栈措辞而不是错误码。
+    # ② 更危险的是 `dict`：可迭代 ⇒ 拿到 keys ⇒ 若 key 恰为 "reviewer_id" 会**静默撤销**，
+    #    属"输入形态错但意图被猜对"的静默取一边，正是 draft §4.3.2 要避免的。
+    # ③ `bytes` 也在这里挡掉：它会逐字节迭代成 114/101/118…（把 ASCII 码当字段名报给模型）。
+    # 口径：接受 `str`（裸字符串兼容，同 `list_tasks.status`）或元素全为 `str` 的
+    # `list`/`tuple`；其余一律 `invalid_clear_field`（复用同一码，不新增）。
+    if isinstance(clear_fields, str):
+        clear_field_names = [clear_fields]
+    elif isinstance(clear_fields, (list, tuple)) and all(isinstance(f, str) for f in clear_fields):
+        clear_field_names = list(clear_fields)
+    elif clear_fields is None:
+        clear_field_names = []
+    else:
         return {
             "success": False,
-            "message": "reviewer_id 与 clear_reviewer=True 不能同时给：改人用 reviewer_id，撤销用 clear_reviewer=True",
+            "message": (
+                f"clear_fields 必须是字段名数组（当前可用："
+                f"{' / '.join(sorted(ALLOWED_CLEAR_FIELDS))}），收到的是 {type(clear_fields).__name__}"
+            ),
+            "error_code": "invalid_clear_field",
+        }
+    # 去重保序（预防性：白名单目前只有 1 个成员，扩到多成员时才可能"同一字段处理两次"）
+    clear_field_names = list(dict.fromkeys(clear_field_names))
+    invalid_fields = [f for f in clear_field_names if f not in ALLOWED_CLEAR_FIELDS]
+    if invalid_fields:
+        return {
+            "success": False,
+            "message": (
+                f"不支持清除的字段：{'、'.join(str(f) for f in invalid_fields)}；"
+                f"当前可清除的字段只有 {' / '.join(sorted(ALLOWED_CLEAR_FIELDS))}"
+            ),
+            "error_code": "invalid_clear_field",
+        }
+    # 空数组归一成「未提供」：上面 `list(... or ())` 已把 None / [] 都变成空列表，
+    # 所以这里只按「集合是否含 reviewer_id」判断 —— 不存在"空数组当成功"的分支。
+    # ⚠️ 判定必须用 `in`（等价 `bool()`），**不能**写成 `clear_fields is not None`：
+    # 那样 `clear_fields=[]` 会静默进撤销分支，破坏「空数组=未提供」。
+    clearing = "reviewer_id" in clear_field_names
+
+    # 两个参数都省略 ⇒ 老路径（流转 / 评论），行为完全不变
+    wants_reviewer_change = reviewer_id is not None or clearing
+
+    if reviewer_id is not None and clearing:
+        return {
+            "success": False,
+            "message": (
+                "reviewer_id 与 clear_fields 不能同时给：改人用 reviewer_id，"
+                '撤销用 clear_fields=["reviewer_id"]'
+            ),
             "error_code": "ambiguous_reviewer_change",
         }
 
@@ -598,7 +662,7 @@ async def update_task(
             caller_id=caller_id,
             target=target,
             reviewer_id=reviewer_id,
-            clear_reviewer=clear_reviewer,
+            clearing=clearing,
             note=note,
         )
 

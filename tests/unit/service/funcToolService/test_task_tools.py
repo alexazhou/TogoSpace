@@ -12,29 +12,44 @@ from service.funcToolService.funcToolType import get_function_metadata
 
 
 def test_update_task_signature_uses_new_status_and_note():
-    """update_task 入参 = task_id / new_status / note / reviewer_id / clear_reviewer；无 result / block_reason / status。"""
+    """update_task 入参 = task_id / new_status / note / reviewer_id / clear_fields；无 result / block_reason / status。"""
     params = list(inspect.signature(tools.update_task).parameters)
-    assert params == ["task_id", "new_status", "note", "reviewer_id", "clear_reviewer", "_context"]
+    assert params == [
+        "task_id", "new_status", "note", "reviewer_id", "clear_fields", "_context",
+    ]
     assert "result" not in params
     assert "block_reason" not in params
     assert "status" not in params
 
 
 def test_update_task_reviewer_change_params_are_optional():
-    """两个新参数都有默认值：省略 ⇒ 老路径（回归底线，老调用方一行不改）。
+    """新参数都有默认值：省略 ⇒ 老路径（回归底线，老调用方一行不改）。
 
-    `reviewer_id` 与 `clear_reviewer` 必须**不能**靠「传 null」表达撤销
-    （JSON schema 里「不传」与「传 null」不可区分），所以撤销走独立布尔开关。
+    `reviewer_id` 与 `clear_fields` 必须**不能**靠「传 null」表达撤销
+    （JSON schema 里「不传」与「传 null」不可区分），所以撤销走独立开关。
     """
     sig = inspect.signature(tools.update_task)
     assert sig.parameters["reviewer_id"].default is None
-    assert sig.parameters["clear_reviewer"].default is False
+    assert sig.parameters["clear_fields"].default is None
 
     meta = get_function_metadata("update_task", tools.update_task)
     props = meta["parameters"]["properties"]
     assert props["reviewer_id"]["type"] == "integer"
-    assert props["clear_reviewer"]["type"] == "boolean"
     assert meta["parameters"]["required"] == ["task_id"]
+
+
+def test_update_task_clear_fields_schema_is_array_with_enum():
+    """`clear_fields` 的 schema 由类型注解自动产出（不手写 JSON schema）。
+
+    声明形状：`{"type": "array", "items": {"enum": ["reviewer_id"]}}`。
+    ⚠️ 这只是**给模型看的声明**，不是运行时校验 —— 野值拦截由
+    `test_task_reviewer_update.py::test_invalid_clear_field_is_rejected_by_runtime_check`
+    直接调真入口证明。这里只钉声明，不冒充拦截证据。
+    """
+    meta = get_function_metadata("update_task", tools.update_task)
+    schema = meta["parameters"]["properties"]["clear_fields"]
+    assert schema["type"] == "array"
+    assert schema["items"]["enum"] == ["reviewer_id"]
 
 
 def test_update_task_rejects_unknown_param_result():

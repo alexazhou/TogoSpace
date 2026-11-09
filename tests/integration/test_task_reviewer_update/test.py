@@ -216,10 +216,10 @@ class TestTaskReviewerUpdate(ServiceTestCase):
 
     # ---------------- R4：REVIEWING 撤销被拒 ----------------
 
-    async def test_clear_reviewer_in_reviewing_leaves_task_reviewable(self):
+    async def test_clear_fields_in_reviewing_leaves_task_reviewable(self):
         task = await self._make_task(status=TaskStatus.REVIEWING)
         res = await taskService.update_task(
-            team_id=self.team_id, caller_id=self._id("creator"), task_id=task.id, clear_reviewer=True,
+            team_id=self.team_id, caller_id=self._id("creator"), task_id=task.id, clear_fields=["reviewer_id"],
         )
 
         assert res["success"] is False
@@ -233,12 +233,12 @@ class TestTaskReviewerUpdate(ServiceTestCase):
         )
         assert done["success"] is True
 
-    async def test_clear_reviewer_by_creator_persists_null_and_warns(self):
+    async def test_clear_fields_by_creator_persists_null_and_warns(self):
         """创建人撤销 ⇒ DB `reviewer_id` 为 NULL、事件「验收人撤销：… → 无」、message 告知后果。"""
         task = await self._make_task()
         res = await taskService.update_task(
             team_id=self.team_id, caller_id=self._id("creator"), task_id=task.id,
-            clear_reviewer=True, note="不需要验收了",
+            clear_fields=["reviewer_id"], note="不需要验收了",
         )
 
         assert res["success"] is True
@@ -347,10 +347,10 @@ class TestTaskReviewerUpdate(ServiceTestCase):
         assert res["action"] == "reviewer_updated"
         assert (await gtAgentTaskManager.get_task(task.id)).reviewer_id == self._id("reviewer_b")
 
-    async def test_tool_forwards_clear_reviewer(self):
+    async def test_tool_forwards_clear_fields_only(self):
         task = await self._make_task()
         res = await tools.update_task(
-            task_id=task.id, clear_reviewer=True, _context=self._ctx("creator"),
+            task_id=task.id, clear_fields=["reviewer_id"], _context=self._ctx("creator"),
         )
 
         assert res["success"] is True
@@ -359,7 +359,7 @@ class TestTaskReviewerUpdate(ServiceTestCase):
     async def test_tool_rejects_both_params(self):
         task = await self._make_task()
         res = await tools.update_task(
-            task_id=task.id, reviewer_id=self._id("reviewer_b"), clear_reviewer=True,
+            task_id=task.id, reviewer_id=self._id("reviewer_b"), clear_fields=["reviewer_id"],
             _context=self._ctx("creator"),
         )
 
@@ -382,3 +382,107 @@ class TestTaskReviewerUpdate(ServiceTestCase):
         event = (await self._events(task.id))[0]
         assert event.content == "只是评论"
         assert event.from_status is None and event.to_status is None
+
+    # ---------------- #181：clear_fields 白名单（真库 + 工具层） ----------------
+
+    async def test_clear_fields_reviewer_id_persists_and_appends_one_event(self):
+        """`clear_fields=["reviewer_id"]` ⇒ 主表 `reviewer_id` 真置 NULL + 恰好一条 (NULL,NULL) 事件。"""
+        task = await self._make_task()
+        before = await gtAgentTaskEventManager.count_events(task.id)
+
+        res = await taskService.update_task(
+            team_id=self.team_id, caller_id=self._id("creator"), task_id=task.id,
+            clear_fields=["reviewer_id"],
+        )
+
+        assert res["success"] is True
+        assert res["action"] == "reviewer_updated"
+        assert (await gtAgentTaskManager.get_task(task.id)).reviewer_id is None
+        assert await gtAgentTaskEventManager.count_events(task.id) == before + 1
+        event = (await self._events(task.id))[0]
+        assert event.from_status is None and event.to_status is None
+        assert event.actor_id == self._id("creator")
+        assert event.content.startswith("验收人撤销：")
+
+    async def test_empty_clear_fields_keeps_reviewer_in_db(self):
+        """`clear_fields=[]` ⇒ 验收人在库里保持原值（不被当成"撤销成功"）。"""
+        task = await self._make_task()
+        original = self._id("reviewer_a")
+        events_before = await gtAgentTaskEventManager.count_events(task.id)
+
+        res = await taskService.update_task(
+            team_id=self.team_id, caller_id=self._id("creator"), task_id=task.id,
+            note="空数组不撤销", clear_fields=[],
+        )
+
+        assert res["success"] is True
+        assert res["action"] == "commented"
+        assert (await gtAgentTaskManager.get_task(task.id)).reviewer_id == original
+        assert await gtAgentTaskEventManager.count_events(task.id) == events_before + 1
+        event = (await self._events(task.id))[0]
+        assert event.content == "空数组不撤销"
+
+    async def test_tool_forwards_clear_fields(self):
+        """工具层透传（真入口）：`tools.update_task(clear_fields=["reviewer_id"])` ⇒ 库里置空。"""
+        task = await self._make_task()
+        res = await tools.update_task(
+            task_id=task.id, clear_fields=["reviewer_id"], _context=self._ctx("creator"),
+        )
+
+        assert res["success"] is True
+        assert (await gtAgentTaskManager.get_task(task.id)).reviewer_id is None
+
+    async def test_tool_rejects_invalid_clear_field(self):
+        """工具层真实返回野值拦截结果（**运行时校验**，不是靠 schema enum）。
+
+        这条是「schema 只产声明不产校验」的行为证据：直接调真入口传野值，
+        断言返回体里 `success=False` + `error_code="invalid_clear_field"`，且库里没动。
+        """
+        task = await self._make_task()
+        original = self._id("reviewer_a")
+
+        res = await tools.update_task(
+            task_id=task.id, clear_fields=["title"], _context=self._ctx("creator"),  # type: ignore[list-item]
+        )
+
+        assert res["success"] is False
+        assert res["error_code"] == "invalid_clear_field"
+        assert (await gtAgentTaskManager.get_task(task.id)).reviewer_id == original
+
+    async def test_tool_rejects_reviewer_id_with_clear_fields(self):
+        """工具层：`reviewer_id` + `clear_fields=["reviewer_id"]` ⇒ 冲突码，库里不改。"""
+        task = await self._make_task()
+        original = self._id("reviewer_a")
+
+        res = await tools.update_task(
+            task_id=task.id, reviewer_id=self._id("reviewer_b"),
+            clear_fields=["reviewer_id"], _context=self._ctx("creator"),
+        )
+
+        assert res["success"] is False
+        assert res["error_code"] == "ambiguous_reviewer_change"
+        assert (await gtAgentTaskManager.get_task(task.id)).reviewer_id == original
+
+    # ---------------- #181：非字符串输入收口（真库） ----------------
+
+    async def test_tool_rejects_non_string_clear_fields_in_db(self):
+        """非字符串 `clear_fields` ⇒ `invalid_clear_field`，**库里 `reviewer_id` 原值不动**。
+
+        最关键的是 dict 那条：收口前 `{"reviewer_id": True}` 会静默撤销验收人
+        （dict 可迭代 ⇒ keys ⇒ 命中白名单）。真库上确认「没被撤销」比单测的替身更有说服力。
+        """
+        for bad_value in (5, {"reviewer_id": True}, b"reviewer_id"):
+            task = await self._make_task()
+            original = self._id("reviewer_a")
+            events_before = await gtAgentTaskEventManager.count_events(task.id)
+
+            res = await tools.update_task(
+                task_id=task.id, clear_fields=bad_value, _context=self._ctx("creator"),  # type: ignore[arg-type]
+            )
+
+            assert res["success"] is False
+            assert res["error_code"] == "invalid_clear_field", f"输入 {bad_value!r} 未被类型收口拦下"
+            assert (await gtAgentTaskManager.get_task(task.id)).reviewer_id == original, (
+                f"输入 {bad_value!r} 竟然真的改了库 —— 收口失效"
+            )
+            assert await gtAgentTaskEventManager.count_events(task.id) == events_before

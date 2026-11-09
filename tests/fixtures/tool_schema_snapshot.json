@@ -829,10 +829,15 @@
   "update_task": {
     "description": "更新协作任务：流转状态、追加评论，或修改/撤销验收人（任何团队成员都可以追加评论）。",
     "parameters": {
-      "clear_reviewer": {
-        "description": "设为 true 表示撤销验收人（置空）。只有任务创建人可以操作，任务处于 REVIEWING 时不允许（会导致无人能通过验收）；撤销后执行人可直接把任务置为 DONE。与 reviewer_id 不能同时给。",
+      "clear_fields": {
+        "description": "要清除（置空）的字段名列表，白名单当前仅 \"reviewer_id\"。clear_fields=[\"reviewer_id\"] 表示撤销验收人（置空）：只有任务创建人可以操作，任务处于 REVIEWING 时不允许（会导致无人能通过验收），不能与状态流转或 reviewer_id 同时给。传空数组 [] 视为「未提供」，不会撤销任何字段（注意这与 list_tasks 的 status=[] 语义相反：status=[] 是「过滤条件写了个空的」，意图不明故报错；clear_fields=[] 是「没要清任何字段」，意图明确故等价省略）。白名单之外的字段名会被拒绝并返回 error_code=\"invalid_clear_field\"。",
         "schema": {
-          "type": "boolean"
+          "items": {
+            "enum": [
+              "reviewer_id"
+            ]
+          },
+          "type": "array"
         }
       },
       "new_status": {
