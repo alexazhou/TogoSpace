@@ -1377,6 +1377,8 @@ const tokenView = computed(() => {
 .agent-activity-item__tokens {
   min-width: 66px;
   text-align: right;
+  /* 流式 token 数字逐 chunk 递增，等宽字体保证字宽一致，避免尾部的数字左右跳动。 */
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
 }
 
