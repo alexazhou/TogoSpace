@@ -1,7 +1,7 @@
 """Agent 长期记忆服务：校验、CRUD、多关键词检索与片段提取。
 
 **校验为什么放在这一层**：DB 的文本列统一 `TEXT`、不施加长度约束（step2 §2.1），
-标题 80 / 概要 120 / 正文 1000（存储侧宽限 +100）/ 标签 5×24 / 同名防重 / 星标配额（12 总、其中 6 概要）
+标题 80 / 概要 100（存储侧宽限 +20）/ 正文 1000（存储侧宽限 +100）/ 标签 5×24 / 同名防重 / 星标配额（12 总、其中 6 概要）
 全部在本模块集中拦截，后续调整配额只需改 `constants.py`，不动表结构。
 
 **对外错误码**：一律 `raise TogoException(message, error_code)`，由
@@ -32,6 +32,7 @@ from constants import (
     MEMORY_SNIPPET_SUFFIX_CHARS,
     MEMORY_STAR_SUMMARY_LIMIT,
     MEMORY_STAR_TOTAL_LIMIT,
+    MEMORY_SUMMARY_GRACE_CHARS,
     MEMORY_SUMMARY_MAX_CHARS,
     MEMORY_TAG_MAX_CHARS,
     MEMORY_TAGS_MAX_COUNT,
@@ -56,8 +57,20 @@ _SNIPPET_BOUNDARIES = "。！？；\n\r.!?;"
 # ---------------------------------------------------------------------------
 
 
-def _require_single_line(value: str, *, field: str, max_chars: int, error_code: str) -> str:
-    """单行文本校验：去首尾空白后非空、不含换行、不超过上限。返回**清洗后**的值。"""
+def _require_single_line(
+    value: str, *, field: str, max_chars: int, error_code: str, grace_chars: int = 0,
+) -> str:
+    """单行文本校验：去首尾空白后非空、不含换行、不超过「上限 + 存储宽限」。返回**清洗后**的值。
+
+    `grace_chars` 是存储侧宽限（AI 对长度感知不强，轻微超长仍允许落库）。
+    比较用 `max_chars + grace_chars`，但**报错文案里的上限仍写 `max_chars`**，
+    与 `validate_content` 同一口径：对外文案以面向 AI 的上限为准，
+    避免把模型的写作目标抬到更高水位。
+
+    ⚠️ 本 helper 由 title / summary **共用**。两字段的宽限政策不同：
+    summary 有宽限、title 必须传 0（严格）。调用方漏传或传错会让 title 静默放宽，
+    所以 `tests/unit/service/test_memory_service.py` 里有一条 title 回归锁盯着这件事。
+    """
     cleaned = (value or "").strip()
     if not cleaned:
         raise TogoException(
@@ -69,7 +82,8 @@ def _require_single_line(value: str, *, field: str, max_chars: int, error_code: 
             f"记忆{field}不能包含换行符，请压缩为单行（≤ {max_chars} 字符）",
             error_code,
         )
-    if len(cleaned) > max_chars:
+    hard_limit = max_chars + grace_chars
+    if len(cleaned) > hard_limit:
         raise TogoException(
             f"记忆{field}长度 {len(cleaned)} 超过上限 {max_chars} 字符，请精简",
             error_code,
@@ -78,14 +92,24 @@ def _require_single_line(value: str, *, field: str, max_chars: int, error_code: 
 
 
 def validate_title(title: str) -> str:
+    # 标题保持严格：`grace_chars=0` 是刻意显式写出的，不要删——
+    # 它与 validate_summary 共用 `_require_single_line`，漏传就会让标题上限静默变成 100。
     return _require_single_line(
-        title, field="标题", max_chars=MEMORY_TITLE_MAX_CHARS, error_code="invalid_memory_title",
+        title,
+        field="标题",
+        max_chars=MEMORY_TITLE_MAX_CHARS,
+        error_code="invalid_memory_title",
+        grace_chars=0,
     )
 
 
 def validate_summary(summary: str) -> str:
     return _require_single_line(
-        summary, field="概要", max_chars=MEMORY_SUMMARY_MAX_CHARS, error_code="invalid_memory_summary",
+        summary,
+        field="概要",
+        max_chars=MEMORY_SUMMARY_MAX_CHARS,
+        error_code="invalid_memory_summary",
+        grace_chars=MEMORY_SUMMARY_GRACE_CHARS,
     )
 
 

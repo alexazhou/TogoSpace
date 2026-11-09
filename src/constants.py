@@ -308,8 +308,11 @@ class MemoryStatus(EnhanceEnum):
 
 # 标题上限：单行主题标题（去首尾空白后非空、不含换行）
 MEMORY_TITLE_MAX_CHARS = 80
-# 概要上限：单句结论概要（去首尾空白后非空、不含换行）
-MEMORY_SUMMARY_MAX_CHARS = 120
+# 概要上限：单句结论概要（去首尾空白后非空、不含换行）——
+# 面向 AI 的目标水位，写进提示词 / 工具说明；实际落库还允许加下面的存储宽限。
+MEMORY_SUMMARY_MAX_CHARS = 100
+# 概要存储宽限：AI 对长度感知不强，允许超出上述上限不超过该值仍可落库
+MEMORY_SUMMARY_GRACE_CHARS = 20
 # 正文上限：完整可执行正文（面向 AI 的上限，写进提示词 / 工具说明）
 MEMORY_CONTENT_MAX_CHARS = 1000
 # 正文存储宽限：AI 对长度感知不强，允许超出上述上限不超过该值仍可落库

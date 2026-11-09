@@ -23,6 +23,7 @@ from constants import (
     MEMORY_SEARCH_LIMIT_MAX,
     MEMORY_STAR_SUMMARY_LIMIT,
     MEMORY_STAR_TOTAL_LIMIT,
+    MEMORY_SUMMARY_GRACE_CHARS,
     MEMORY_SUMMARY_MAX_CHARS,
     MEMORY_TAG_MAX_CHARS,
     MEMORY_TAGS_MAX_COUNT,
@@ -210,9 +211,13 @@ async def test_invalid_memory_summary_empty(memory_db):
 
 
 async def test_invalid_memory_summary_too_long(memory_db):
-    await _expect_error(
-        "invalid_memory_summary", _create("标题", summary="概" * (MEMORY_SUMMARY_MAX_CHARS + 1)),
+    """超出「目标水位 + 存储宽限」（120+1）才拒绝；报错文案里的上限是 100（不是硬上限 120）。"""
+    hard_limit = MEMORY_SUMMARY_MAX_CHARS + MEMORY_SUMMARY_GRACE_CHARS
+    exc = await _expect_error(
+        "invalid_memory_summary", _create("标题", summary="概" * (hard_limit + 1)),
     )
+    assert str(MEMORY_SUMMARY_MAX_CHARS) in str(exc)
+    assert str(hard_limit) not in str(exc)
 
 
 async def test_invalid_memory_summary_with_newline(memory_db):
@@ -221,12 +226,199 @@ async def test_invalid_memory_summary_with_newline(memory_db):
 
 async def test_update_invalid_summary(memory_db):
     detail = await _create("标题")
+    hard_limit = MEMORY_SUMMARY_MAX_CHARS + MEMORY_SUMMARY_GRACE_CHARS
     await _expect_error(
         "invalid_memory_summary",
         memoryService.update_memory(
-            _TEAM_ID, _AGENT_ID, detail.id, summary="概" * (MEMORY_SUMMARY_MAX_CHARS + 1),
+            _TEAM_ID, _AGENT_ID, detail.id, summary="概" * (hard_limit + 1),
         ),
     )
+
+
+# ---- summary 存储侧宽限（与 content 同机制，#182）----
+#
+# 口径（主管 2026-11-09 23:40 定，覆盖建单时写法）：
+#   面向 AI 的目标水位 MAX = 100，存储宽限 GRACE = 20，硬上限 = 120（= 改前的上限）。
+#   即「不放宽，只把水位线挪位」：模型的目标从 120 降到 100，硬闸门仍是 120。
+# 下面除了按常量推导，还**写死 100 / 120 字面值**——常量是「实现怎么算」，
+# 字面值是「产品要什么」，两者都断言才能防住有人把两个常量一起改错。
+
+
+async def test_summary_grace_constants_match_product_definition():
+    """产品口径写死：MAX=100、GRACE=20、硬上限=120（与改前一致）。"""
+    assert MEMORY_SUMMARY_MAX_CHARS == 100
+    assert MEMORY_SUMMARY_GRACE_CHARS == 20
+    assert MEMORY_SUMMARY_MAX_CHARS + MEMORY_SUMMARY_GRACE_CHARS == 120
+
+
+async def test_summary_at_limit_is_accepted(memory_db):
+    """边界：正好 100（目标水位）必须通过。"""
+    detail = await _create("标题", summary="概" * MEMORY_SUMMARY_MAX_CHARS)
+    assert len(detail.summary) == MEMORY_SUMMARY_MAX_CHARS == 100
+
+
+async def test_summary_within_grace_is_accepted(memory_db):
+    """101（刚超目标）允许落库——这正是 #182 要的「超出一点可以接受」。"""
+    detail = await _create("标题", summary="概" * (MEMORY_SUMMARY_MAX_CHARS + 1))
+    assert len(detail.summary) == MEMORY_SUMMARY_MAX_CHARS + 1 == 101
+
+
+async def test_summary_mid_grace_is_accepted(memory_db):
+    """110（宽限中段）同样接受。"""
+    detail = await _create("标题", summary="概" * 110)
+    assert len(detail.summary) == 110
+
+
+async def test_summary_at_hard_limit_is_accepted(memory_db):
+    """恰好 120（硬上限）仍接受，落库长度 == 硬上限（边界是 ≤，不是 <）。"""
+    detail = await _create("标题", summary="概" * 120)
+    assert len(detail.summary) == 120
+    assert 120 == MEMORY_SUMMARY_MAX_CHARS + MEMORY_SUMMARY_GRACE_CHARS
+
+
+async def test_summary_over_hard_limit_rejected_shows_target(memory_db):
+    """121 拒绝，且 message 里的**上限**是 100（不是 120）。
+
+    文案形如「记忆概要长度 121 超过上限 100 字符，请精简」——`121` 是实际长度、
+    必然出现，所以只锁「上限 100」这个位置，不断言 `120`/`121` 整体不出现。
+    """
+    exc = await _expect_error(
+        "invalid_memory_summary", _create("标题", summary="概" * 121),
+    )
+    assert "上限 100 字符" in str(exc), str(exc)
+    assert "上限 120" not in str(exc), str(exc)
+
+
+async def test_update_summary_within_grace_is_accepted(memory_db):
+    """update_memory 路径同样接受 101（别只改 create）。"""
+    detail = await _create("标题")
+    updated = await memoryService.update_memory(
+        _TEAM_ID, _AGENT_ID, detail.id, summary="概" * 101,
+    )
+    assert len(updated.summary) == 101
+
+
+async def test_update_summary_at_hard_limit_is_accepted(memory_db):
+    detail = await _create("标题")
+    hard_limit = MEMORY_SUMMARY_MAX_CHARS + MEMORY_SUMMARY_GRACE_CHARS
+    updated = await memoryService.update_memory(
+        _TEAM_ID, _AGENT_ID, detail.id, summary="概" * hard_limit,
+    )
+    assert len(updated.summary) == hard_limit == 120
+
+
+async def test_update_summary_over_hard_limit_rejected(memory_db):
+    detail = await _create("标题")
+    hard_limit = MEMORY_SUMMARY_MAX_CHARS + MEMORY_SUMMARY_GRACE_CHARS
+    await _expect_error(
+        "invalid_memory_summary",
+        memoryService.update_memory(
+            _TEAM_ID, _AGENT_ID, detail.id, summary="概" * (hard_limit + 1),
+        ),
+    )
+
+
+async def test_title_stays_strict_without_grace(memory_db):
+    """**回归锁**：宽限只给 summary，title 仍严格 80。
+
+    `_require_single_line` 由 title / summary 共用，任何「grace 默认值非 0」或
+    「按字段名分支写错」都会让标题静默放宽到 100（注意：现在 summary 的目标水位
+    正好也是 100，标题若被误放宽就会和概要撞在同一个数上，更难察觉）。
+    这条是唯一能咬住共享 helper 的判据，变异自证见交付报告。
+    """
+    assert MEMORY_SUMMARY_GRACE_CHARS > 0, "概要宽限应为正值，否则本单无意义"
+    assert MEMORY_TITLE_MAX_CHARS == 80
+    # 81 字符：超过 title 上限 1，但落在「80 + 概要宽限 20」内——若 grace 被误加到 title 就会放行
+    await _expect_error(
+        "invalid_memory_title", _create("题" * (MEMORY_TITLE_MAX_CHARS + 1)),
+    )
+
+
+async def test_title_over_limit_error_message_shows_80(memory_db):
+    """报错文案里的上限写的是 80（面向 AI 的上限），不是被放宽后的硬上限。"""
+    exc = await _expect_error(
+        "invalid_memory_title", _create("题" * (MEMORY_TITLE_MAX_CHARS + 1)),
+    )
+    assert str(MEMORY_TITLE_MAX_CHARS) in str(exc)
+
+
+async def test_tools_memory_create_accepts_summary_within_grace(memory_db):
+    """入口可达性：经工具层 `tools.memory_create` 调进来，硬上限 120 同样生效（不是只在 service 层）。"""
+    from service.funcToolService import tools
+    from service.roomService import ToolCallContext
+
+    result = await tools.memory_create(
+        title="工具层宽限",
+        summary="概" * 120,
+        content="正文",
+        _context=ToolCallContext(agent_id=_AGENT_ID, team_id=_TEAM_ID),
+    )
+    assert result["success"] is True, result
+    detail = await memoryService.read_memory(_TEAM_ID, _AGENT_ID, result["id"])
+    assert len(detail.summary) == 120
+
+
+async def test_tools_memory_create_rejects_summary_over_hard_limit(memory_db):
+    """工具层 121 仍返回 `success=False` + `invalid_memory_summary`（错误码不被吞掉）。"""
+    from service.funcToolService import tools
+    from service.roomService import ToolCallContext
+
+    result = await tools.memory_create(
+        title="工具层超限",
+        summary="概" * 121,
+        content="正文",
+        _context=ToolCallContext(agent_id=_AGENT_ID, team_id=_TEAM_ID),
+    )
+    assert result["success"] is False
+    assert result["error_code"] == "invalid_memory_summary"
+    assert "100" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# 面向 AI 的文案口径（#182：水位线从 120 挪到 100）
+#
+# 这条不是「锦上添花」：`summary` 的两条路都靠文案把目标水位告诉模型 ——
+#   · `tools.py` 的 docstring ⇒ 进 tool schema，模型调用时看得到
+#   · `system_prompt.j2` 的写入规则 ⇒ 进 system prompt，每轮都在看
+# 只改常量不改文案，模型仍按 120 写，宽限就白加了（主管 23:56 点名这条）。
+# 所以直接渲染/读 schema 断言字面值，而不是断言「某常量 == 100」。
+# ---------------------------------------------------------------------------
+
+
+def test_system_prompt_states_summary_target_is_100():
+    """system prompt 里给模型看的概要上限必须是 100（不是 120）。"""
+    from service.agentService.promptRenderer import render_prompt
+
+    out = render_prompt(
+        "system_prompt.j2",
+        base_prompt="",
+        identity_prompt="",
+        language="zh-CN",
+        agent_id=1,
+        agent_name="文案口径",
+        template_name="Helper",
+        dept_context="",
+        template_soul="",
+        workdir="/workspace/x",
+        shared_workdir=None,
+        is_root_leader=False,
+        skills=[],
+    )
+    assert "概要 ≤ 100 字符" in out, "system prompt 仍写着旧水位"
+    assert "概要 ≤ 120 字符" not in out
+
+
+def test_memory_tool_schema_states_summary_target_is_100():
+    """工具 schema（模型看到的 docstring）里概要上限必须是 100。"""
+    from service.funcToolService.core import load_func_tools
+    from service.funcToolService.funcToolType import get_function_metadata
+
+    registry = load_func_tools()
+    for tool_name in ("memory_create", "memory_update"):
+        tool = registry[tool_name]
+        summary_desc = get_function_metadata(tool_name, tool.callable)["parameters"]["properties"]["summary"]["description"]
+        assert "≤ 100 字符" in summary_desc, f"{tool_name} 的 summary 说明仍写着旧水位：{summary_desc}"
+        assert "≤ 120 字符" not in summary_desc, f"{tool_name} 的 summary 说明仍是 120"
 
 
 # ---------------------------------------------------------------------------

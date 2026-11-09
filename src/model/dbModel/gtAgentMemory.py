@@ -10,7 +10,7 @@ from .base import DbModelBase, EnumField, JsonField
 class GtAgentMemory(DbModelBase):
     """Agent 长期记忆槽位（单 Agent 私有，严格按 team_id + agent_id 隔离）。
 
-    一槽一主题：`title` 唯一主题（单行 ≤ 80 字符）、`summary` 单句结论（≤ 120）、
+    一槽一主题：`title` 唯一主题（单行 ≤ 80 字符）、`summary` 单句结论（≤ 100）、
     `content` 完整正文（≤ 1000）。长度 / 同名防重 / 星标配额等规则一律在
     `service.memoryService` 集中校验，本模型与表结构不做 DB 层约束。
 

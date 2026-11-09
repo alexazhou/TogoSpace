@@ -435,7 +435,7 @@
         }
       },
       "summary": {
-        "description": "单句结论概要，单行，≤ 120 字符",
+        "description": "单句结论概要，单行，≤ 100 字符",
         "schema": {
           "type": "string"
         }
@@ -536,7 +536,7 @@
         }
       },
       "summary": {
-        "description": "新概要，单行，≤ 120 字符（改 content 时必传）",
+        "description": "新概要，单行，≤ 100 字符（改 content 时必传）",
         "schema": {
           "type": "string"
         }
