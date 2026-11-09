@@ -1,6 +1,6 @@
 import re
 from enum import Enum, auto
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union, get_args
 from typing_extensions import Self
 
 
@@ -269,6 +269,16 @@ class TaskPriority(EnhanceEnum):
     HIGH   = "HIGH"
     NORMAL = "NORMAL"
     LOW    = "LOW"
+
+
+# `update_task(clear_fields=[...])` 可清除字段的**唯一事实源**（#181）。
+#
+# 为什么是「Literal → frozenset」这个方向：工具层签名要给模型看到 `enum: ["reviewer_id"]`
+# 这类声明，只能写成字面量类型；服务层运行时校验要一个可迭代集合。若反向
+# （`Literal[*ALLOWED]`）则类型检查器与运行时不接受解包 frozenset，实测不通（#181 已试）。
+# 因此这里先声明 `ClearField`，再由它派生集合 —— 扩白名单只改一处。
+ClearField = Literal["reviewer_id"]
+ALLOWED_CLEAR_FIELDS: frozenset[str] = frozenset(get_args(ClearField))
 
 
 # 面向 Agent 呈现任务事件时的**单条内容**截断长度（Operator 2026-10-26 定调）：
