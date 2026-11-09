@@ -1776,7 +1776,7 @@ async def memory_create(
 
     Args:
         title: 唯一主题标题，单行，≤ 80 字符
-        summary: 单句结论概要，单行，≤ 120 字符
+        summary: 单句结论概要，单行，≤ 100 字符
         content: 完整可执行正文，≤ 1000 字符（可含换行）
         star_level: 星标级别，none（默认，平时不进提示词）/ title（始终知道主题存在）/ summary（ID、标题与结论始终可见）
         tags: 标签数组，最多 5 个，单个 ≤ 24 字符
@@ -1815,7 +1815,7 @@ async def memory_update(
     Args:
         memory_id: 记忆 ID
         title: 新标题，单行，≤ 80 字符
-        summary: 新概要，单行，≤ 120 字符（改 content 时必传）
+        summary: 新概要，单行，≤ 100 字符（改 content 时必传）
         content: 新正文，≤ 1000 字符（可含换行）
         star_level: 新星标级别：none / title / summary（活跃星标总数上限 12，其中 summary 上限 6）
         status: 新状态：active / archived（归档自动剥离星标）
