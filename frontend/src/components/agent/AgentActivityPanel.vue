@@ -344,7 +344,10 @@ watch(
   min-height: 0;
   overflow-y: auto;
   overflow-x: visible;
-  padding: 0;
+  /* 滚动条走廊：向右伸进 stage 预留的 10px，条目右缘保持不动，
+     滚动条不再压在卡片边框上。 */
+  margin-right: -10px;
+  padding: 0 10px 0 0;
   scroll-padding-bottom: 16px;
   box-sizing: border-box;
 }

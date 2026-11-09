@@ -260,7 +260,10 @@ const emit = defineEmits<{
   grid-template-columns: 248px minmax(0, 1fr);
   gap: 0;
   align-items: stretch;
-  padding: 0;
+  /* 右侧 10px 是给活动列表滚动条预留的走廊：stage 借用 dialog 的右内边距
+     （负 margin 抵消 padding），列表自身再伸进来画滚动条，卡片宽度不变。 */
+  margin-right: -10px;
+  padding: 0 10px 0 0;
   overflow: hidden;
 }
 
@@ -466,7 +469,7 @@ const emit = defineEmits<{
   .agent-detail-stage {
     grid-template-columns: 1fr;
     min-height: 0;
-    padding: 8px 0 0;
+    padding: 8px 10px 0 0;
     gap: 12px;
   }
 
