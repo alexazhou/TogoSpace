@@ -20,6 +20,7 @@ import service.memoryService as memoryService
 import service.roomService as roomService
 import service.skillService as skillService
 import service.thirdPartyService as thirdPartyService
+from service.funcToolService import webFetchTool
 from service.agentService.toolRegistry import validate_tool_allow_specs
 from service.agentService.prompts import (
     TODO_TASK_CANCEL_INSTRUCTION,
@@ -88,6 +89,29 @@ async def web_search(query: str, _context: ToolCallContext = None) -> ThirdParty
     """
     service_name = thirdPartyService.get_default_search_service()
     return await thirdPartyService.search(service_name, query)
+
+
+async def webfetch(url: str, _context: ToolCallContext = None) -> dict:
+    """读取一个网页并把正文转成 Markdown 返回，用于深入阅读搜索到的页面内容。
+    只做一次 HTTP 请求（至多跟随 5 次重定向）拿服务端返回的 HTML 转成 Markdown，
+    **不执行 JavaScript**（没有浏览器、不跑页面脚本）：静态渲染的文档站、博客、Wiki
+    效果最好；纯客户端渲染的 SPA 站点（React/Vue 首屏靠 JS 挂载）只能拿到空壳，通常
+    返回 `fetch_empty_content` —— 遇到这种情况请改用其它信息源，不要反复重试同一个
+    地址；不解析 PDF / Office / 图片，这类地址返回 `fetch_unsupported_content_type`。
+    返回的 Markdown 可能含残留的导航 / 侧栏文字（`Navigation`、`next`/`previous` 等），
+    请自行忽略；正文超过 100000 字符会被截断，末尾会写明原文长度。成功时还有 `url`
+    （最终地址，重定向后可能与入参不同）、`content_type`、`original_chars`（截断前
+    字符数）三个字段；失败时 `error_code` 取值 `fetch_invalid_url` /
+    `fetch_blocked_host` / `fetch_timeout` / `fetch_http_error` / `fetch_too_large` /
+    `fetch_empty_content` / `fetch_unsupported_content_type`。
+
+    Args:
+        url: 要读取的网页地址，必须是 http 或 https 的绝对地址。
+    """
+    try:
+        return await webFetchTool.fetch_markdown(url)
+    except Exception as exc:
+        return _tool_error_result(exc)
 
 
 def _require_team_context(_context: ToolCallContext | None) -> tuple[bool, int]:
