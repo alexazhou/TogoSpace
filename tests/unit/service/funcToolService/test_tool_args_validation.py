@@ -705,6 +705,182 @@ async def test_field_level_null_still_accepted_after_element_fix() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 穷举型判据（H3 熔断前置）：按 schema 递归生成**所有**可注入 null 的位置
+# --------------------------------------------------------------------------- #
+
+
+def _build_valid_args(parameters: dict) -> dict:
+    """按 schema 造一份**合法**参数（合法打底）。
+
+    纪律（#189 实测教训）：判据造参必须「合法打底 + 单点注入」—— 否则 `required`
+    错误会**前置遮住**后置缺陷（我先前的 2/10 vs 实际 10/10 就是这么来的）。
+    """
+
+    args: dict = {}
+    for name in parameters.get("required") or []:
+        prop = (parameters.get("properties") or {}).get(name) or {}
+        args[name] = _sample_value(prop)
+    return args
+
+
+def _sample_value(prop: dict) -> Any:
+    """按单个属性的 schema 造一个合法值。"""
+
+    if "enum" in prop:
+        return prop["enum"][0]
+    type_name = prop.get("type")
+    if type_name == "string":
+        return "x"
+    if type_name == "integer":
+        return 1
+    if type_name == "number":
+        return 1.5
+    if type_name == "boolean":
+        return True
+    if type_name == "array":
+        return [_sample_value(prop.get("items") or {})]
+    if type_name == "object":
+        return {}
+    return "x"
+
+
+def _injection_points(parameters: dict) -> list[tuple[str, str, bool]]:
+    """枚举所有可注入 null 的位置 ⇒ [(位置标识, 要发送的 function_args 原文, 是否应放行)]。
+
+    返回的是**已序列化的 function_args 字符串**，因为 P0（根节点）要发的字面量就是
+    `null`，不是 `{}` —— 用 dict 承载会把「整份参数为 null」偷偷变成「空对象」。
+
+    - **P0 根节点**：整份参数为 `null` ⇒ 永远应拦
+    - **P1 顶层字段**：`required` ⇒ 应拦；非必填 ⇒ 应放行（`Optional` 语义）
+    - **P2 数组元素**：`items` 声明不允许 null ⇒ 应拦
+    - **P3 嵌套 object 内部 key**：schema 为裸 `{"type":"object"}` 时**无可枚举的
+      `properties`** ⇒ 本单表达力边界，不计入可测位置（不手写规则去补）
+    """
+
+    points: list[tuple[str, str, bool]] = []
+    required = set(parameters.get("required") or [])
+    props = parameters.get("properties") or {}
+
+    # P0：根节点 —— 直接发字面量 `null`（不是 `{}`）
+    points.append(("P0:root", "null", False))
+
+    for name, prop in props.items():
+        # P1：顶层字段整体 null
+        base = _build_valid_args(parameters)
+        base.pop(name, None)  # 注入位置本身先摘掉，避免"必填缺失"与"注入 null"混为一谈
+        args = {**base}
+        args[name] = None
+        # 必填 ⇒ 应拦；非必填 ⇒ 应放行（Optional[T] 被剥成 T，null 合法性在 schema 外）
+        points.append((f"P1:{name}", json.dumps(args), name not in required))
+
+        # P2：数组元素（每个 array 取「第 2 个元素」注入 null，保留 1 个合法元素；
+        # 本单 10 个 array 的 items 类型各自统一，同一 array 内元素类型不异构，
+        # 故单点注入足以覆盖整类。`items` 缺 `type` 但有 `enum` 的 2 个
+        # （update_task.clear_fields / list_tasks.status）由 `_sample_value` 取首枚举值。）
+        if prop.get("type") == "array":
+            items = prop.get("items") or {}
+            element = _sample_value(items)
+            args2 = _build_valid_args(parameters)
+            args2[name] = [element, None]
+            points.append((f"P2:{name}[1]", json.dumps(args2), False))
+
+        # P3：嵌套 object 内部 key —— 只有 schema 真的给了 `properties` 才可枚举
+        if prop.get("type") == "object":
+            inner_props = prop.get("properties") or {}
+            inner_required = set(prop.get("required") or [])
+            for inner_name in inner_props:
+                args3 = _build_valid_args(parameters)
+                args3[name] = {inner_name: None}
+                points.append(
+                    (f"P3:{name}.{inner_name}", json.dumps(args3), inner_name not in inner_required)
+                )
+    return points
+
+
+@pytest.mark.asyncio
+async def test_null_injection_exhaustive_table() -> None:
+    """**穷举**：按 schema 递归枚举所有可注入 null 的位置，逐处断言「是否声明允许」并成表。
+
+    目的不是抓当前 bug，而是**证明不存在第三格** —— 本单已因「按 `path` 长度
+    枚举漏格」被打回两次（`len==0` 修了、`len>=2` 漏了）。人肉枚举长度不可靠，
+    所以这里按 schema 结构枚举位置。
+
+    ## 四个数（与三个锚点交叉校验枚举器自身）
+    - `P0` 根节点 = 工具数
+    - `P1-required` / `P1-optional`（预期相反：前者拦、后者放行）
+    - `P2` 数组元素
+    - `P3` 嵌套 object 字段数（内部 key 因 schema 为裸 `{"type":"object"}` 不可枚举）
+
+    ## 枚举器自校验
+    `get_tools()` == 32、`get_tools(include_container_tools=True)` == 37 ——
+    任一不等说明枚举器自己漏了工具（38 踩过：只拿 `_func_tools` 得到 32，漏容器组 5 个）。
+    """
+
+    from service.funcToolService.funcToolType import get_function_metadata
+
+    # ---- 锚点自校验：枚举器不许漏工具 ----
+    default_tools = funcCore.get_tools()
+    all_tools = funcCore.get_tools(include_container_tools=True)
+    assert len(default_tools) == DEFAULT_TOOL_COUNT, len(default_tools)
+    assert len(all_tools) == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT, len(all_tools)
+
+    p0 = p1_required = p1_optional = p2 = p3_fields = p3_enumerable = 0
+    mismatched: list[str] = []
+    table: list[str] = []
+
+    for tool in all_tools:
+        name = tool.function.name
+        func_tool = funcCore.get_func_tool(name)
+        assert func_tool is not None, name
+        parameters = get_function_metadata(name, func_tool.callable)["parameters"]
+
+        points = _injection_points(parameters)
+        for label, raw_args, should_pass in points:
+            if label == "P0:root":
+                p0 += 1
+            elif label.startswith("P1:"):
+                if should_pass:
+                    p1_optional += 1
+                else:
+                    p1_required += 1
+            elif label.startswith("P2:"):
+                p2 += 1
+            elif label.startswith("P3:"):
+                p3_enumerable += 1
+
+            result = await funcCore.run_tool_call(raw_args, _ctx(name))
+            rejected = result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS
+
+            ok = rejected != should_pass  # 应拦 ⇒ rejected True；应放行 ⇒ rejected False
+            if not ok:
+                mismatched.append(
+                    f"{name} {label} 期望{'放行' if should_pass else '拦'} "
+                    f"实际{'拦' if rejected else '放行'} {result.get('message', '')[:60]}"
+                )
+            table.append(
+                f"{name:22s} {label:26s} 期望={'放行' if should_pass else '拦  '} "
+                f"实际={'拦  ' if rejected else '放行'} {'OK' if ok else '**不符**'}"
+            )
+
+        p3_fields += sum(
+            1 for prop in (parameters.get("properties") or {}).values()
+            if prop.get("type") == "object" and not (prop.get("properties") or {})
+        )
+
+    # ---- 四个数独立成表（拆开报，不许只报总数）----
+    assert p0 == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT, f"P0={p0}"
+    assert p1_required + p1_optional == 99, (p1_required, p1_optional)
+    assert p2 == 10, f"P2={p2}"
+    assert p3_fields == 4, f"P3字段={p3_fields}"
+    # P3 内部 key 为 0 ⇒ 本单表达力边界（裸 {"type":"object"} 无 properties），不是漏点
+    assert p3_enumerable == 0, f"P3内部key={p3_enumerable}"
+
+    total = p0 + p1_required + p1_optional + p2 + p3_enumerable
+    assert total == 146, total
+    assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
+
+
+# --------------------------------------------------------------------------- #
 # 既有行为不被误杀
 # --------------------------------------------------------------------------- #
 
