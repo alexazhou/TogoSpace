@@ -13,6 +13,8 @@ from service import serviceUtil
 from util import llmApiUtil
 from service.roomService import ToolCallContext
 from .consoleCommands import ENV_KEEP_LEGACY_TOOLS, LEGACY_CONVERGED_TOOLS
+from .toolArgsValidation import validate_tool_args
+from toolResult import error_result, invalid_json_args
 from .consoleTool import console, console_triggers_self_interrupt
 from .funcToolType import FuncTool
 from .tools import (
@@ -258,7 +260,17 @@ async def run_tool_call(
     function_args: str,
     context: Optional[ToolCallContext] = None,
 ) -> dict[str, Any]:
-    """解析 function_args JSON 字符串并执行函数，返回结果字典。"""
+    """解析 function_args JSON 字符串并执行函数，返回结果字典。
+
+    这是**本地工具的唯一执行收口**（三个 driver 都把本函数注册为 handler），因此
+    schema 校验与内容错误（JSON 坏、参数类型不符）都在这里统一发生一次：
+
+    1. `json.loads` 失败 ⇒ 结构化失败返回体（#189 之前是**静默 `args = {}` 继续执行**，
+       坏 JSON 会让全可选参数的工具拿默认值真的跑起来）；
+    2. 参数形状/类型/枚举/必填按 `get_function_metadata()` 的 schema 校验 —— schema
+       与下发给模型的是同一份产出（单一事实源），失败返回字段级错误 + `error_code`；
+    3. 通过后才注入 `_context` 并调用函数。
+    """
     function_name = context.tool_name if context is not None else ""
     if not function_name:
         logger.error("函数执行失败: tool_name 为空")
@@ -266,9 +278,11 @@ async def run_tool_call(
 
     try:
         args: dict = json.loads(function_args)
-    except json.JSONDecodeError:
-        logger.warning(f"工具参数 JSON 解析失败，已忽略参数: tool={function_name}, args={function_args!r}")
-        args = {}
+    except json.JSONDecodeError as e:
+        logger.warning(
+            f"工具参数 JSON 解析失败，拒绝执行: tool={function_name}, args={function_args!r}"
+        )
+        return invalid_json_args(function_name, function_args, e)
 
     caller = context.agent_id if context is not None else "unknown"
     logger.info(f"use_tool: caller_id={caller}, tool={function_name}, args={args}")
@@ -282,6 +296,15 @@ async def run_tool_call(
 
         if not callable(func):
             raise ValueError(f"{function_name} is not callable")
+
+        # 校验在**取到 func 之后**：本地工具的 schema 来源就是它的签名，没有第二份。
+        invalid = validate_tool_args(function_name, args, func=func)
+        if invalid is not None:
+            logger.warning(
+                f"工具参数校验未通过: tool={function_name}, error_code={invalid.get('error_code')}, "
+                f"args={args!r}"
+            )
+            return invalid
 
         if context and "_context" in inspect.signature(func).parameters:
             args = {**args, "_context": context}
@@ -315,12 +338,9 @@ async def run_tool_call(
         # 日志用 `!r`：`str(e)` 现在是干净的业务消息，error_code 只留在 `args` /
         # `repr` 里；用 `{e}` 记日志会把错误码一起丢掉，排查时无法按码 grep。
         logger.error(f"函数执行失败: {e!r}")
-        failure: dict[str, Any] = {"success": False, "message": f"函数执行失败: {error}"}
-        # 结构化带上错误码，模型可据此自纠；非 TogoException 的异常没有该属性，跳过。
-        error_code = getattr(e, "error_code", None)
-        if error_code is not None:
-            failure["error_code"] = error_code
-        return failure
+        # 返回体形状与 error_code 口径收敛到 `toolResult.error_result`（#189：唯一实现）；
+        # 前缀 `函数执行失败: ` 是既有对外文案，保持不变。
+        return error_result(e, prefix="函数执行失败: ", message=error)
 
 
 @serviceUtil.service_stop_wrapper(s_status)

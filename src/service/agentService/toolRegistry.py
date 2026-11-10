@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable, Iterable
 
 from constants import ToolCategory
 from exception import ForwardToolCall
+from toolResult import error_result
 from service.roomService import ToolCallContext
 from util import llmApiUtil, jsonUtil
 
@@ -336,7 +337,11 @@ class AgentToolRegistry:
                 function_args = json.dumps(forward.tool_args, ensure_ascii=False)
                 continue
             except Exception as e:
-                result = {"success": False, "message": f"工具调用失败: {e}"}
+                # 这是 handler 之外的兜底（`run_tool_call` 已把自身异常转成返回体，能到这里的
+                # 是取 schema / 注入上下文时的意外，或第三方 handler 自己抛的）。
+                # #189：形状与 error_code 口径收敛到 `toolResult.error_result`，不再自己拼；
+                # 「工具调用失败:」前缀保留 —— 它是既有对外文案（`test_tool_registry` 有断言）。
+                result = error_result(e, prefix="工具调用失败: ")
 
             # 正常返回：把转发链上积攒的后处理按**逆序**应用（后转发的先处理）。
             #

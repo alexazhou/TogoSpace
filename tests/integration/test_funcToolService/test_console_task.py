@@ -48,6 +48,21 @@ if os.name == "posix" and sys.platform == "darwin":
 TEAM = "console_task_team"
 
 
+@pytest.fixture(autouse=True)
+def _restore_clear_field_enum():
+    """白名单扩展类用例会 monkeypatch `tools.ClearField`，必须让 schema 缓存不跨用例残留。
+
+    schema 缓存按可调用对象身份 + 注解指纹存储；`monkeypatch` 恢复注解后指纹回到原值，
+    键仍是原来那个 ⇒ 命中「扩展版 enum」的旧缓存就会让后面的用例假绿/假红。
+    """
+
+    from service.funcToolService import toolArgsValidation
+
+    toolArgsValidation.clear_schema_cache()
+    yield
+    toolArgsValidation.clear_schema_cache()
+
+
 def _tool_call(command: str, payload: dict | None = None) -> OpenAIToolCall:
     args: dict = {"command": command}
     if payload is not None:
@@ -321,21 +336,27 @@ class TestConsoleTaskCommand(ServiceTestCase):
         )
 
     # ==================================================================
-    # 判据 3b：野值拒绝走**服务层**（console 不校验、只透传）
+    # 判据 3b：野值拒绝走**运行时白名单**（console 不校验、只透传）
     # ==================================================================
 
     async def test_remove_field_invalid_value_rejected_by_service(self):
-        """`--remove-field title` ⇒ 服务层 `invalid_clear_field`，且候选里带真白名单。
+        """`--remove-field title` ⇒ 被拒，且候选里带真白名单。
 
-        同时证明「console 没有在解析层静默吞掉野值」：错误码来自服务层，
-        说明它确实被透传下去了。
+        ⚠️ #189 之后错误码是 `invalid_tool_args`，不再是 `invalid_clear_field`：
+        `update_task(clear_fields: Optional[list[ClearField]])` 的注解自动生成了
+        `enum: ["reviewer_id"]` 并下发给模型，所以野值在 `run_tool_call` 的 schema 校验
+        处就被拦下（第 2 跳），根本到不了 `taskService` 的白名单判定。这是 Operator
+        02:24「console 只查自己的 schema，剩下的转发之后检查」的直接后果，不是回归。
+
+        三条实质断言照旧（拒绝 / 消息里能看到合法候选 / 库未变），只把错误码换成
+        上游那一层的码——判据强度不变。
         """
         task = await self._make_task(reviewer_id=self.ids["rev_a"])
         result = await self._call(f"task update {task.id} --remove-field title")
 
         assert result["success"] is False, f"野值竟被接受：{result}"
-        assert result["error_code"] == "invalid_clear_field", (
-            f"期望服务层 invalid_clear_field，收到 {result.get('error_code')!r}"
+        assert result["error_code"] == "invalid_tool_args", (
+            f"期望 schema 层 invalid_tool_args，收到 {result.get('error_code')!r}"
         )
         for field in ALLOWED_CLEAR_FIELDS:
             assert field in result["message"], (
@@ -345,27 +366,54 @@ class TestConsoleTaskCommand(ServiceTestCase):
         assert row.reviewer_id == self.ids["rev_a"], "被拒绝的调用改了库"
 
     async def test_remove_field_whitelist_extension_changes_service_behaviour(self, monkeypatch):
-        """monkeypatch 扩 `taskService` 侧的 `ALLOWED_CLEAR_FIELDS` ⇒ 该字段不再被判野值。
+        """扩白名单 ⇒ 该字段不再被判野值，且 console 侧零改动跟着生效。
 
         这条是「白名单单一事实源」的行为侧证明，方向与上一条相反：
         上一条证明野值被拒，这条证明**白名单本身可扩**、且扩了之后 console 侧
         不需要任何改动就跟着生效（因为 console 没有第二份白名单）。
-        """
-        import service.taskService as taskService
 
+        ⚠️ #189 起白名单有**两层**，扩一层不够（原实现只扩 `taskService` 侧，
+        于是被 schema 的 `enum` 先拦下，断言 `!= invalid_clear_field` 恒成立 ⇒ 假绿）：
+
+        1. schema 层：`update_task` 的 `clear_fields` 注解是 `list[ClearField]`，
+           `ClearField = Literal["reviewer_id"]` 由 `constants` 派生 ⇒ 下发给模型的
+           `enum` 就是它。要让它放行 `zz_fake_field`，必须扩 `constants.ClearField`
+           **并清 schema 缓存**（缓存键含注解指纹，`monkeypatch` 换常量对象不会改指纹，
+           不清缓存会继续用旧 enum）。
+        2. 运行时层：`taskService.ALLOWED_CLEAR_FIELDS`，同样是 constants 派生。
+
+        两层都扩 ⇒ 调用应真正走下去（不再是任何一层报的野值错误）。这条用例因此变成了
+        「两层同源、扩一处常量两层同时放行」的证明——比原来只盯运行时层更强。
+        """
+        import typing
+
+        import constants
+        import service.taskService as taskService
+        from service.funcToolService import toolArgsValidation
+        from service.funcToolService import tools as func_tools
+
+        extended = frozenset(set(ALLOWED_CLEAR_FIELDS) | {"zz_fake_field"})
+        # schema 层的源头是 `update_task` 注解 `list[ClearField]`；`tools.py` 用了
+        # `from __future__ import annotations`，注解在 `get_type_hints` 时按**该模块的
+        # globals** 解析，所以必须 patch `tools.ClearField`（patch `constants` 不生效）。
         monkeypatch.setattr(
-            taskService,
-            "ALLOWED_CLEAR_FIELDS",
-            frozenset(set(ALLOWED_CLEAR_FIELDS) | {"zz_fake_field"}),
-            raising=True,
+            func_tools, "ClearField", typing.Literal["reviewer_id", "zz_fake_field"]
         )
+        monkeypatch.setattr(constants, "ALLOWED_CLEAR_FIELDS", extended)
+        monkeypatch.setattr(
+            taskService, "ALLOWED_CLEAR_FIELDS", extended, raising=True,
+        )
+        # schema 是从注解**当刻**算出来的，但缓存已热时不会重算；这里显式清缓存，
+        # 让判据打在「新注解」上（缓存键含注解指纹，见 toolArgsValidation 注释）。
+        toolArgsValidation.clear_schema_cache()
+
         task = await self._make_task(reviewer_id=self.ids["rev_a"])
         result = await self._call(f"task update {task.id} --remove-field zz_fake_field")
 
-        # 关键：不再报 invalid_clear_field。它可能因为「假字段清除后什么都没变」
-        # 而走到别的分支（例如 reviewer_unchanged / 无操作），但**绝不能**是野值错误。
-        assert result.get("error_code") != "invalid_clear_field", (
-            f"扩了白名单后仍被判野值 ⇒ console 或服务层用的是另一份固定清单：{result}"
+        # 关键：不再报野值错误。它可能因为「假字段清除后什么都没变」而走到别的分支
+        # （例如 reviewer_unchanged / 无操作），但**绝不能**是「野值」类错误。
+        assert result.get("error_code") not in ("invalid_clear_field", "invalid_tool_args"), (
+            f"扩了白名单后仍被判野值 ⇒ console / schema / 服务层用的是另一份固定清单：{result}"
         )
 
     # ==================================================================
@@ -485,13 +533,26 @@ class TestConsoleTaskCommand(ServiceTestCase):
         assert row.reviewer_id is None
 
     async def test_remove_field_csv_with_invalid_value_lists_only_invalid(self):
-        """`--remove-field reviewer_id,title` ⇒ 只把 `title` 报为非法（合法项不混进报错）。"""
+        """`--remove-field reviewer_id,title` ⇒ 只把 `title` 报为非法（合法项不混进报错）。
+
+        #189 起拒绝发生在 schema 的 `enum` 校验（见上一条说明），错误码为
+        `invalid_tool_args`；`title` 是**唯一**被举报的字段值——`reviewer_id` 不在消息里，
+        这条「合法项不混进报错」的判据反而更强（enum 校验只报违规元素）。
+        """
         task = await self._make_task(reviewer_id=self.ids["rev_a"])
         result = await self._call(f"task update {task.id} --remove-field reviewer_id,title")
 
         assert result["success"] is False
-        assert result["error_code"] == "invalid_clear_field"
+        assert result["error_code"] == "invalid_tool_args"
         assert "title" in result["message"]
+        # 「合法项不混进报错」的判据：只举报**一个**违规元素（枚举合法值列表里当然会
+        # 出现 `reviewer_id`，那是候选不是报错项）。
+        assert result["message"].count("实际收到") == 1, (
+            f"合法项被当成违规项报出：{result['message']!r}"
+        )
+        assert "clear_fields.1" in result["message"], (
+            f"没定位到违规的那一个下标：{result['message']!r}"
+        )
         row = await self._reload(task.id)
         assert row.reviewer_id == self.ids["rev_a"], (
             "多值里既有合法又有非法时应整单拒绝、不改库（不能「能清的先清了」）"
@@ -525,7 +586,8 @@ class TestConsoleTaskCommand(ServiceTestCase):
             f"task update {task.id} --remove-field reviewer_id --remove-field title"
         )
         assert result["success"] is False, f"野值 title 竟被接受：{result}"
-        assert result["error_code"] == "invalid_clear_field"
+        # #189：枚举野值在 schema 层被拦，错误码为 `invalid_tool_args`；`title` 仍在消息里。
+        assert result["error_code"] == "invalid_tool_args"
         assert "title" in result["message"]
         row = await self._reload(task.id)
         assert row.reviewer_id == self.ids["rev_a"], (

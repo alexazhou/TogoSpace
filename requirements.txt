@@ -23,3 +23,4 @@ pyyaml~=6.0.3
 types-PyYAML~=6.0.12
 typing_extensions~=4.15.0
 cryptography<49.0.0
+jsonschema>=4.26,<5

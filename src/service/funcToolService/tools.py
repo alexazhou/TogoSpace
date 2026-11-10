@@ -27,6 +27,7 @@ from service.agentService.prompts import (
 )
 from service.thirdPartyService.result import ThirdPartySearchResult
 from util import configUtil, i18nUtil, workspaceUtil
+import toolResult
 
 logger = logging.getLogger(__name__)
 
@@ -121,14 +122,13 @@ def _tool_error_result(exc: BaseException) -> dict[str, Any]:
 
     为什么不在 `run_tool_call` 一处兜底就完事：工具层自己 `except` 后 return 的分支
     （`save_room` / `delete_room` / `delete_dept`）根本不会经过 `run_tool_call` 的
-    兜底 `except`，所以必须在这三处各自转换。两处口径保持一致（都用本函数）。
+    兜底 `except`，所以必须在这三处各自转换。
+
+    #189 起这里**不再自己拼**：形状与「取哪段文本、要不要带 error_code」的口径收敛到
+    `toolResult.error_result`（唯一实现），本函数只保留名字供既有调用点/用例引用。
     """
-    message = getattr(exc, "error_message", None) or str(exc)
-    result: dict[str, Any] = {"success": False, "message": message}
-    error_code = getattr(exc, "error_code", None)
-    if error_code is not None:
-        result["error_code"] = error_code
-    return result
+
+    return toolResult.error_result(exc)
 
 
 def _serialize_dept_node(node: GtDept, id_to_name: dict[int, str]) -> dict[str, Any]:
