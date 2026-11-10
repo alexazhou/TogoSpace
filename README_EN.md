@@ -1,120 +1,199 @@
 ![TogoSpace](image/togo_agent_team.png)
 
+<div align="center">
+
 # TogoSpace 🚀
+
+**Turn a group of AIs into a real team.**
+
+They split up work, hold discussions, assign tasks, review each other's output — and remember what you told them. All you have to do is be the boss.
 
 [English](README_EN.md) | [中文](README.md)
 
-[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Framework](https://img.shields.io/badge/framework-Tornado-orange.svg)](https://www.tornadoweb.org/)
-[![UI](https://img.shields.io/badge/UI-Textual%20%2B%20Vue3-green.svg)](https://textual.textualize.io/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#)
+[![Release](https://img.shields.io/github/v/release/alexazhou/TogoSpace)](https://github.com/alexazhou/TogoSpace/releases)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ED.svg?logo=docker&logoColor=white)](https://github.com/alexazhou/TogoSpace/pkgs/container/togospace)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#-quick-start)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**TogoSpace** is an open-source multi-agent collaboration software designed for Large Language Models (LLM). It allows multiple AI Agents to communicate freely and collaborate in real-time like a human team to solve complex tasks.
+[📦 Download Desktop App](https://github.com/alexazhou/TogoSpace/releases) · [🌐 Live Demo](https://demo.togoagent.org) · [🐳 Docker Deployment](docs/manual/DOCKER.md) · [💬 Community](#-community)
 
-> **About the Name**: The project is named after the legendary sled dog **Togo** from the 1925 Serum Run to Nome. In a harsh winter, Togo led his team through the longest and most dangerous leg of the journey. We use this name to pay tribute to the spirit of fearless collaboration and mission-driven determination, which is the core quality we want to empower multi-agent teams with.
-
-### Powered by TSP
-
-TogoSpace's tool execution layer is powered by [TSP (Tool Service Protocol)](https://github.com/alexazhou/TSP) — a lightweight protocol for building LLM tool servers. With TSP, you can **build your own agent tools in 10 lines of code**.
+</div>
 
 ---
 
-## ✨ Key Features
+## 🤔 What is TogoSpace?
 
-### 1. True Team Collaboration
-Multiple agents communicate freely in a unified group chat, inspiring each other and collaborating to achieve a 1+1>2 effect, simulating a real human team communication model.
+Most AI tools give you **one** assistant — you still have to break down complex tasks, babysit them, and stitch the results together yourself.
+TogoSpace takes a different approach: it gives you an **AI team**.
+
+- Tell the "Project Manager" what you need. It breaks the work down for the "Engineer", who hands the result to the "Tester" for review — all communicated through group chat.
+- No flowcharts to draw: **the team decides for itself who steps up next**.
+- Every thought, every tool call, every token of every agent is laid out in real time. Stop, interject, or correct course whenever you like.
+
+> **About the name**: Togo was the legendary sled dog of the 1925 Serum Run to Nome, who led his team through the longest and most dangerous leg of the relay. We chose this name to honor that spirit of fearless, mission-driven collaboration — exactly what we want to bring to multi-agent teams.
 
 ![Chat Interface](image/en/chat.png)
 
-### 2. Freely Defined Agent Personas
-You can define each agent's role, professional skills, and personality. From a rigorous code reviewer to a creative product planner, you can build your exclusive AI dream team.
+---
 
-### 3. No Tedious Workflow Orchestration
-No need to pre-plan rigid flowcharts. Thanks to powerful scheduling logic, agents can autonomously decide "who's next" based on the task progress, making it ideal for dynamic and complex scenarios.
+## ✨ Why TogoSpace
 
-### 4. Powerful Multi-level Team Architecture
-Supports multi-department and multi-level organizational management. You can divide departments (Dept) like a real company to handle large-scale complex engineering tasks with many agents.
+### 🧑‍🤝‍🧑 Collaborate like a real team, not a rigid workflow
+
+- **Group chats + private chats**: Agents discuss in group rooms, coordinate one-on-one in private rooms, and speak up autonomously based on events — no pre-defined workflow required.
+- **Multi-department, multi-level org structure**: Organize departments and managers like a real company, scaling to large numbers of collaborating agents.
+- **Team awareness**: Agents can look up the org chart and their teammates' status — and will "wake up" a teammate that got stuck.
+- **Self-organizing teams**: Agents can create role templates, recruit new members, and open new rooms — let your project manager do its own hiring.
+- **Ready-to-use preset teams**: Software R&D Team (PM / Engineer / Tester), Software R&D Team Pro (adds Architect, Product Manager, UI Designer, Frontend Engineer), Creative Brainstorming Team, plus 17 carefully tuned role templates.
 
 ![Team Editor](image/en/team_editor.png)
 
-### 5. Fully Visualized Experience
-No more "black box" operations. Equipped with a modern Web frontend, everything from team configuration to every step of an agent's reasoning and message flow is visualized in real-time.
+### 📋 Structured task system: every assignment is tracked and reviewed
 
-### 6. Ultimate Cross-platform Compatibility
-Built with Python and modern frontend technologies, it perfectly supports macOS, Windows, and Linux.
+- Agents use tools to **create tasks, assign owners, and designate reviewers**, with support for subtasks and prerequisites.
+- **Dependencies advance automatically**: as soon as a prerequisite is done, downstream tasks move to To-Do — no one needs to chase them.
+- **Ticket-style event timeline**: every status change and comment is recorded; the web console shows global progress as a task tree.
+
+![Task Detail](image/cn/task.png)
+
+### 🧠 Long-term memory + context management: it gets to know you
+
+- **Long-term memory**: Agents remember the preferences and rules you give them. Starred "core rules" are always kept in mind; regular notes are retrieved when relevant.
+- **Automatic context compaction**: When a long conversation approaches the context limit, it is summarized and compacted automatically, so tasks can keep running.
+- **Context capacity meter**: See how much context each agent is using in real time, and compact manually with one click.
+
+![Agent Memory](image/cn/memory.png)
+
+### 🙋 Human in the loop: stop or interject at any time
+
+- **One-click stop** for any working agent — it returns to idle without affecting the rest of the team.
+- **Immediate instruction injection**: Send extra instructions straight from an agent's activity panel; the agent reads them **right after** its current step instead of waiting for the whole turn to finish.
+- **Agents can send urgent messages too**: A manager who spots a subordinate heading the wrong way can correct it immediately.
+- Failures can be retried with one click, and every intervention is recorded and traceable.
+
+### 🔍 Fully transparent, no black box
+
+- Live activity stream: reasoning, tool calls, and compaction shown step by step, with **input / output tokens ticking up in real time**.
+- Task timelines, container status, memory panel — see at a glance what your team is doing.
+- All events are pushed over WebSocket, no refresh needed.
+
+![Agent Activity](image/cn/active_list.png)
+
+### 🧰 Powerful and extensible
+
+| Capability | Description |
+|---|---|
+| **Docker sandbox** | Agents can create their own containers to read/write files and run commands without polluting the host, or enter existing containers (e.g. with GPU / database access) |
+| **Skills** | Load domain knowledge on demand from `SKILL.md` directories; built-in skills include frontend design, multi-agent collaborative development, and skill authoring |
+| **Web search** | Built-in `web_search`, backed by DeepSeek or Xiaomi MiMo search services |
+| **Multimodal** | Screenshots / images returned by tools are sent back to the model; if the main model lacks vision, a vision model is used automatically as fallback |
+| **Custom tools** | Built on [TSP (Tool Service Protocol)](https://github.com/alexazhou/TSP) — write your own agent tools in **10 lines of code** |
+| **Multiple drivers** | Native driver, TSP driver, and Claude Agent SDK driver |
+
+### 🔌 Model freedom, no lock-in
+
+Compatible with both **OpenAI** and **Anthropic** protocols, with one-click setup for popular providers:
+
+OpenAI · Anthropic Claude · Google Gemini · DeepSeek · Alibaba Cloud Qwen (incl. Coding Plan) · Volcengine Coding Plan · Xiaomi MiMo (incl. Token Plan) · OpenCode Go · any custom compatible endpoint
+
+Different agents can use different models: let the expensive model be the manager and the cheaper ones do the work.
+
+### 💻 Runs wherever you need it
+
+- **Desktop app** (macOS, Apple Silicon / Intel): native Tauri window, double-click to launch, stays in the tray when closed.
+- **One-command Docker deployment**: great for servers, NAS, or team sharing.
+- **Run from source**: web console (Vue 3) + terminal UI (Textual TUI).
+- Chinese & English UI, team export/import, HTTP token authentication.
 
 ---
 
 ## 🚀 Quick Start
 
-### Try the Demo
-- **English Demo**: [https://demo2.togoagent.org](https://demo2.togoagent.org)
+### Option 1: Download the desktop app (recommended for macOS)
 
-### Method 1: Download Pre-built App Package (Recommended for macOS Users)
-We currently provide a **macOS** Release package for a quick start.
-- **Download**: [Go to the Releases page](https://github.com/alexazhou/TogoAgent/releases)
-- **Usage**: Once running, TogoSpace stays in your system status bar. Click the icon to open the console, manage teams, or execute tasks.
+Grab the `.dmg` from the [Releases page](https://github.com/alexazhou/TogoSpace/releases) and open it after installing. On first launch you'll be guided through model setup, after which the default "Software R&D Team" gets to work.
 
 ![Status Bar Entry](image/en/entry.png)
 
-### Method 2: Run from Source
+### Option 2: Docker
+
 ```bash
-# Clone the repository
-git clone https://github.com/alexazhou/TogoAgent.git
-cd togo-agent
+docker run -d \
+  --name togospace \
+  -p 7180:7180 \
+  -v ~/togospace-data:/storage \
+  ghcr.io/alexazhou/togospace:latest
 
-# Install dependencies
-pip install -r requirements.txt
+# Open http://localhost:7180 in your browser
+```
 
-# Start backend service
+> The image is also published on Docker Hub: `alexazhou/togospace:latest`. See the [Docker Deployment Guide](docs/manual/DOCKER.md) for more options.
+
+### Option 3: Run from source
+
+```bash
+git clone https://github.com/alexazhou/TogoSpace.git
+cd TogoSpace
+
+# Create a virtual environment and install dependencies
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# Start the backend (default port 8180)
 ./scripts/start_backend.sh
 
-# Start Web console (requires entering frontend directory)
+# Start the web console
 cd frontend && npm install && npm run dev
 ```
 
-### Method 3: Docker Deployment
-```bash
-# Pull the image from GitHub Container Registry (recommended)
-docker pull ghcr.io/alexazhou/togospace:latest
+### Live demo
 
-# Or from Docker Hub
-# docker pull alexazhou/togospace:latest
-
-# Run with storage persistence and port mapping
-# /path/to/your/storage is the directory where TogoSpace data will be stored
-docker run \
-  --name togospace \
-  -p 7180:7180 \
-  -v /path/to/your/storage:/storage \
-  ghcr.io/alexazhou/togospace:latest
-
-# Access the Web console at http://localhost:7180
-```
-
-> 📖 For more Docker configuration (custom config, environment variables, health checks, etc.), see the [Docker Deployment Guide](docs/manual/DOCKER.md).
+Don't want to install anything? Try the [demo site](https://demo.togoagent.org) first.
 
 ---
 
-## 📂 Project Structure
+## 💡 What can you use it for?
 
-- `src/`: Backend core logic, including agent scheduling, drivers, and persistence.
-- `frontend/`: Visualization console based on Vue 3 + TypeScript.
-- `tui/`: Coming Soon High-performance terminal interface based on Textual (Coming Soon).
-- `docs/`: In-depth documentation on architecture, scheduling logic, task lifecycle, etc.
-- `assets/`: Preset role templates, team configurations, and i18n support.
+- **Software development**: The PM breaks down requirements → the engineer writes code in a Docker sandbox → the test engineer verifies it. You just look at the result.
+- **Creative brainstorming**: The host keeps things on track, "Spark" pitches ideas, "Frost" pokes holes, "Knowledge" digs up references, and "Doer" checks feasibility.
+- **Research & analysis**: A researcher searches the web, a critic challenges the conclusions, and you get a cross-checked report.
+- **Any team you can imagine**: Define your own roles, departments, and rooms to build your own AI dream team.
 
 ---
 
-## 🛠️ Troubleshooting
+## 📚 Documentation
 
-1.  **Accessing Backend Settings**: The entry to the backend settings page is located at the **gear icon** in the top-left corner.
-2.  **Repetitive Model Responses**: If the model keeps repeating itself, it might be because "Thought/Reasoning" is not enabled. Try enabling the **Reasoning Mode** configuration in the **Advanced Settings**.
-3.  **Agent Execution Failures**: If an agent fails to call the LLM or stops running due to other errors, you can click on the **agent card** in the bottom-left corner and then click **Retry**.
-4.  **Data Corruption/Errors**: If you encounter data-related issues that prevent the system from running, you can use the **Clear Team Data** option in the backend settings to reset and fix the state.
+- [Docker Deployment Guide](docs/manual/DOCKER.md)
+- [System Architecture](docs/tech/01_architecture/)
+- [Agent Drivers, Scheduling & Task Lifecycle](docs/tech/04_agent/)
+- [LLM Configuration Guide](docs/tech/05_llm/)
+- [Design Docs & Version History](docs/design/ROADMAP.md)
+
+> Most in-depth docs are currently written in Chinese.
+
+---
+
+## 🛠️ FAQ
+
+1. **Where are the settings?** Click the **gear icon** in the top-left corner.
+2. **The model keeps repeating itself?** Thinking mode is usually off — inject thinking-mode parameters in the model's **Advanced Settings**.
+3. **An agent failed or got stuck?** Click the **agent card** in the bottom-left and hit **Retry** in its activity panel.
+4. **Context too long, responses slowing down?** Click the **Compact** button next to the capacity meter in the agent's activity panel.
+5. **Data issues preventing startup?** Click **Clear Team Data** on the settings page.
+
+---
+
+## 💬 Community
+
+Join our WeChat group to report issues and share how you use your AI team:
+
+![WeChat QR Code](image/wechat.JPG)
+
+If TogoSpace helps you, please give it a ⭐ Star — it means a lot to us!
 
 ---
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is open-sourced under the [MIT License](LICENSE).
