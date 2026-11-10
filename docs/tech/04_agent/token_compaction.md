@@ -63,37 +63,93 @@ trigger_tokens = floor(hard_limit * compact_trigger_ratio)
 
 执行顺序：
 
-1. 构造当前 `infer_messages`
-2. 用 `compact.estimate_tokens(...)` 估算 prompt token
-3. 调用 `_check_compact(..., check_stage="pre-check")`
-4. 发起正常 `llmService.infer(...)`
-5. 若返回 overflow 且本轮未触发 pre-check compact，则执行一次 compact retry
-6. 正常响应时，先把 assistant 结果写入 history，并记录 usage
-7. assistant 写入成功后，再调用 `_check_compact(..., check_stage="post-check")`
-8. 若 post-check 触发 compact，则把同一条 assistant history 的 `usage.compact_stage` 回写为 `post`
+1. 调用 `_check_compact(check_stage="pre-check")`，内部通过 `_token_snapshot()` 取 token 口径
+2. 构造当前 `infer_messages`（compact 可能已裁剪历史，必须在之后重建）
+3. 发起正常 `llmService.infer(...)`
+4. 若返回 overflow 且本轮未触发 pre-check compact，则执行一次 compact retry
+5. 正常响应时，先把 assistant 结果写入 history，并记录 usage
+6. assistant 写入成功后，再调用 `_check_compact(check_stage="post-check")`
+7. 若 post-check 触发 compact，则把同一条 assistant history 的 `usage.compact_stage` 回写为 `post`
+
+### 3.1 token 口径：`HistoryTokenSnapshot`
+
+token 长度**只有一个来源**：`AgentHistoryStore.token_snapshot(model, system_prompt, tools)`。
+调用方（compact 判定、活动记录、上下文占用、手动压缩）都经
+`AgentTurnRunner._token_snapshot()` 取，不再各自拼消息列表去 tokenize。
+
+快照字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `estimated_tokens` | 全量本地估算：system prompt + tools + 全部未压缩消息（不含 pending 占位） |
+| `current_tokens` | 当前上下文长度口径（下详） |
+| `accurate_usage` | 最近一次上游返回的真实 usage（从 history 还原，`prompt_cache_usage` 恒为 `None`） |
+| `accurate_anchor_seq` | 该 usage 对应的锚点行 `seq` |
+
+`current_tokens` 计算规则：
+
+```text
+无可用锚点：current_tokens = estimated_tokens
+有可用锚点：current_tokens = anchor.usage.prompt_tokens + estimate(锚点行自身及其后消息)
+```
+
+tail **从锚点行自身开始**：真值只覆盖锚点之前的输入，锚点的 assistant 回复也要计入当前上下文。
+`tools` 参与全量估算（`litellm.token_counter(..., tools=...)`），保证新会话 / compact 后
+没有真值锚点时估算不漏掉工具定义。
+
+### 3.2 真值锚点与会话边界
+
+从 `_items` 尾部向前找满足以下条件的最近一行：
+
+- `item.usage is not None` 且 `item.usage.prompt_tokens is not None`；
+- 该行属于当前 session：`item.id > summary.id`，`summary` 是尾部向前第一条
+  `COMPACT_SUMMARY` 行。
+
+第二条**不能退化成「列表顺序在 summary 之后」**：`insert_compact_summary()` 会保留一段尾部
+旧行，它们顺序上排在 summary 之后，但 id 更小、`usage` 描述的是压缩前的上下文：
+
+```text
+_items = [COMPACT_SUMMARY(id=100), ASSISTANT(id=50, usage=压缩前), USER(id=51), ...]
+                                        ^ 列表在 summary 之后，但 id=50 < 100，不能当锚点
+```
+
+### 3.3 快照缓存
+
+缓存 key = `(model, system_prompt, tools_fingerprint, self._revision)`，只保留最后一份。
+六个写操作递增 `_revision` 使缓存失效：
+
+- `append_history_message`
+- `finalize_history_item`
+- `insert_compact_summary`
+- `replace`
+- `reload_from_db`
+- `invalidate_token_cache`（视觉兜底回填 recognition 等原地修改）
 
 ## 4. `_check_compact`
 
-`_check_compact(...)` 是统一的 compact 检测入口。
+`_check_compact(check_stage=...)` 是统一的 compact 检测入口。
 
-输入：
-
-- `trigger_prompt_tokens`
-- `estimated_tokens`
-- `check_stage`
+输入只有阶段名 —— **不再接收任何 token 数字**，长度口径由 `_token_snapshot()` 现取。
 
 行为：
 
-1. 若 `trigger_prompt_tokens < trigger_tokens`，直接返回
-2. 否则执行一次 `_execute_compact()`
+1. 取快照；若 `snapshot.current_tokens < trigger_tokens`，直接返回 `(snapshot, False)`
+2. 否则执行一次 `_execute_compact(pre_snapshot=snapshot)`
 3. compact 失败时，抛出带阶段名的异常
-4. compact 成功后，重建 infer 视图并重新估算 token
-5. 若 compact 后估算仍 `>= hard_limit_tokens`，抛出带阶段名的异常
+4. compact 成功后，重建 infer 视图（日志用）并取压缩后的新快照
+5. 若压缩后 `current_tokens >= hard_limit_tokens`，抛出带阶段名的异常
+6. 广播压缩后的用量（复用同一份快照，不重复跑 tokenizer）
+7. 返回 `(post_snapshot, True)`
 
 阶段说明：
 
-- `pre-check`：基于请求前的估算 token 触发
-- `post-check`：优先基于响应里的 `usage.prompt_tokens` 触发；若 usage 不可用，则退回估算值
+- `pre-check`：基于请求前的快照触发
+- `post-check`：assistant 已落库，history 里自然有最新真值锚点，因此 post-check
+  与 pre-check 走**完全相同的口径**，不再区分「有 usage 用 usage、没有用估算」
+
+`_execute_compact(pre_snapshot=None)` 返回 `HistoryTokenSnapshot`（不再返回 int）。
+压缩前后的数字都从快照取，`context_tokens_before` / `context_tokens_after`
+活动元数据与 `current_tokens` 同源。
 
 ## 5. Overflow Retry
 
@@ -107,10 +163,10 @@ overflow retry 是 compact 的兜底路径，只执行一次。
 
 处理流程：
 
-1. 执行一次 compact
+1. 执行一次 compact（`pre_snapshot` 传入当前快照，避免重复跑 tokenizer）
 2. 重建 infer 视图
-3. 重新估算 token
-4. 若 compact 后仍超限，则直接失败
+3. 取压缩后的新快照
+4. 若 `current_tokens` 仍 `>= hard_limit`，则直接失败
 5. 否则重试一次 `llmService.infer(...)`
 
 ## 6. History 形状
@@ -168,6 +224,12 @@ compact 完成后，运行时内存窗口的核心形状为：
 - `none`：本轮未触发 compact
 - `pre`：请求发出前触发了 compact
 - `post`：assistant 已成功写入 history，随后触发了 post-check compact
+
+口径说明：
+
+- `estimated_prompt_tokens` 存的是**本次请求发出前**的 `snapshot.current_tokens`；
+- `prompt_tokens` / `completion_tokens` / `total_tokens` 仍是本次请求的上游真值；
+- 活动 metadata 的 `estimated_prompt_tokens` 与 history 同源。
 
 注意：
 

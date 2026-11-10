@@ -45,6 +45,7 @@ from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver import AgentDriverConfig
 from service.ormService import AioSqliteDatabase
 from util import llmApiUtil
+from tests.tokenSnapshotStub import snapshots
 
 _MIGRATION_SQL = (
     Path(__file__).resolve().parents[3] / "assets" / "migrate" / "0020_add_agent_memories.sql"
@@ -55,7 +56,7 @@ _AGENT_ID = 99
 
 _CONFIG_PATCH = "util.configUtil.get_app_config"
 _INFER_PATCH = "service.agentService.compact.llmService.infer_stream"
-_ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
+_TOKEN_SNAPSHOT_PATCH = "service.agentService.agentTurnRunner.AgentTurnRunner._token_snapshot"
 _ACTIVITY_PATCH = "service.agentService.agentTurnRunner.agentActivityService"
 
 

@@ -505,6 +505,7 @@ async def test_run_turn_loop_raises_on_error_action_after_max_retries(turn_runne
 
 from util import configUtil
 from util.configUtil.configTypes import AppConfig, SettingConfig
+from tests.tokenSnapshotStub import make_snapshot
 
 
 @pytest.mark.asyncio
@@ -1211,7 +1212,9 @@ def _patch_infer_env(turn_runner, *, supports_vision, vision_configured, auto_vi
 
     stack.enter_context(patch.object(m.compact, "calc_compact_trigger_tokens", return_value=100000))
     stack.enter_context(patch.object(m.compact, "calc_hard_limit_tokens", return_value=200000))
-    stack.enter_context(patch.object(m.compact, "estimate_tokens", return_value=100))
+    stack.enter_context(patch.object(
+        turn_runner, "_token_snapshot", MagicMock(return_value=make_snapshot(100)),
+    ))
     stack.enter_context(patch.object(m.compact, "is_context_overflow_error", return_value=False))
 
     stack.enter_context(patch.object(m.agentActivityService, "add_activity", new=AsyncMock(return_value=MagicMock(id=1))))
@@ -1226,7 +1229,10 @@ def _patch_infer_env(turn_runner, *, supports_vision, vision_configured, auto_vi
     update_history_mock = AsyncMock()
     stack.enter_context(patch.object(m.gtAgentHistoryManager, "update_agent_history_by_id", update_history_mock))
 
-    stack.enter_context(patch.object(turn_runner, "_check_compact", new=AsyncMock(return_value=(messages, 100, False))))
+    stack.enter_context(patch.object(
+        turn_runner, "_check_compact",
+        new=AsyncMock(return_value=(make_snapshot(100), False)),
+    ))
     stack.enter_context(patch.object(turn_runner, "_finish_activity", new=AsyncMock()))
     stack.enter_context(patch.object(turn_runner, "_build_usage", MagicMock(return_value=None)))
 
@@ -1827,3 +1833,59 @@ async def test_post_process_failure_does_not_replay_tool_call_on_resume():
         f"TOOL 条目必须被 finalize 成 FAILED（停在 INIT 就会续跑重放）：{last_tool_item.status}"
     )
     assert last_tool_item.role == OpenaiApiRole.TOOL
+
+
+@pytest.mark.asyncio
+async def test_infer_to_item_scene_b_invalidates_token_cache(turn_runner):
+    """场景 B 回填 recognition 后必须显式失效 token 缓存（生产调用点覆盖）。
+
+    为什么判据不是「估算值变了」：`MessageAttachment.recognition` 不进入
+    `AgentMessage.to_openai_message()`，因此也不进入 `estimate_messages_tokens`——
+    实测把 recognition 从空填到一大段，估算值一字不变（差 0）。所以这里只能断言
+    「生产调用点确实被走到」，用 M7（删掉 `agentTurnRunner.py` 里
+    `history.invalidate_token_cache()` 那一行）自证：删掉后本用例红。
+    """
+    img_msg = _image_user_message()
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 99
+
+    stack, infer_mock, recognize_mock, update_history_mock = _patch_infer_env(
+        turn_runner, supports_vision=False, vision_configured=True, auto_vision_fallback=True,
+        messages=[img_msg], history_items=[(42, img_msg)],
+    )
+    invalidate_mock = MagicMock()
+    turn_runner._history.invalidate_token_cache = invalidate_mock
+    with stack:
+        result = await turn_runner._infer_to_item(output_item, [])
+
+    assert result is not None
+    recognize_mock.assert_awaited_once()
+    update_history_mock.assert_awaited_once_with(42, message=img_msg)
+    invalidate_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_infer_to_item_scene_b_no_mutation_skips_invalidate(turn_runner):
+    """没有回填发生（图片已有 recognition）→ 不得失效缓存。
+
+    覆盖 `if mutated:` 守卫：一旦守卫被去掉，这里会变成多余的失效
+    （每次都丢弃 token 快照缓存，全部走重算）。
+    """
+    img_msg = _image_user_message()
+    img_msg.attachments[0].recognition = "之前已经识别过"
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 99
+
+    stack, infer_mock, recognize_mock, update_history_mock = _patch_infer_env(
+        turn_runner, supports_vision=False, vision_configured=True, auto_vision_fallback=True,
+        messages=[img_msg], history_items=[(42, img_msg)],
+    )
+    invalidate_mock = MagicMock()
+    turn_runner._history.invalidate_token_cache = invalidate_mock
+    with stack:
+        result = await turn_runner._infer_to_item(output_item, [])
+
+    assert result is not None
+    recognize_mock.assert_not_called()
+    update_history_mock.assert_not_called()
+    invalidate_mock.assert_not_called()

@@ -13,6 +13,7 @@ from service import llmService
 from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver.base import AgentDriverConfig
 from util.llmApiUtil import OpenAIMessage, OpenAIToolCall, OpenaiApiRole
+from tests.tokenSnapshotStub import snapshots
 
 
 def _make_mock_response(content="ok", tool_calls=None, usage=None, reasoning_content=None):
@@ -113,7 +114,7 @@ def _mock_activity_service():
 
 _CONFIG_PATCH = "util.configUtil.get_app_config"
 _INFER_STREAM_PATCH = "service.agentService.agentTurnRunner.llmService.infer_stream"
-_ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
+_TOKEN_SNAPSHOT_PATCH = "service.agentService.agentTurnRunner.AgentTurnRunner._token_snapshot"
 _ACTIVITY_PATCH = "service.agentService.agentTurnRunner.agentActivityService"
 
 
@@ -144,7 +145,7 @@ async def test_infer_creates_reasoning_and_chat_reply_activities():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.success(resp))),
-        patch(_ESTIMATE_PATCH, return_value=1000),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(1000)),
         patch(_ACTIVITY_PATCH, mock_activity_svc),
     ):
         result_msg = await runner._infer_to_item(output_item, tools=[])
@@ -203,7 +204,7 @@ async def test_infer_creates_chat_reply_even_with_tool_calls():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.success(resp))),
-        patch(_ESTIMATE_PATCH, return_value=1000),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(1000)),
         patch(_ACTIVITY_PATCH, mock_activity_svc),
     ):
         result_msg = await runner._infer_to_item(output_item, tools=[])
@@ -246,7 +247,7 @@ async def test_infer_skips_activities_for_empty_content():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(return_value=llmService.InferResult.success(resp))),
-        patch(_ESTIMATE_PATCH, return_value=1000),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(1000)),
         patch(_ACTIVITY_PATCH, mock_activity_svc),
     ):
         await runner._infer_to_item(output_item, tools=[])
@@ -297,7 +298,7 @@ async def test_infer_updates_activity_with_retry_status_metadata():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(side_effect=_fake_infer_stream)),
-        patch(_ESTIMATE_PATCH, return_value=1000),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(1000)),
         patch(_ACTIVITY_PATCH, mock_activity_svc),
     ):
         result_msg = await runner._infer_to_item(output_item, tools=[])
@@ -341,7 +342,7 @@ async def test_infer_stream_progress_broadcasts_without_persisting():
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(side_effect=_fake_infer_stream)),
-        patch(_ESTIMATE_PATCH, return_value=1000),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(1000)),
         patch(_ACTIVITY_PATCH, mock_activity_svc),
     ):
         await runner._infer_to_item(output_item, tools=[])

@@ -28,7 +28,7 @@ from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.historyUsage import CompactStage, HistoryUsage
 from service import agentActivityService, llmService, roomService, taskService
 from service.agentActivityService import AgentActivityMeta
-from service.agentService.agentHistoryStore import AgentHistoryStore
+from service.agentService.agentHistoryStore import AgentHistoryStore, HistoryTokenSnapshot
 from service.agentService import compact, contextUsage, promptBuilder, visionFallback
 from service.llmService.core import resolve_model
 from service.agentService.driver import AgentDriverConfig, AgentTurnSetup
@@ -687,6 +687,7 @@ class AgentTurnRunner:
             return
         if not setting.default_models.vision:
             return
+        mutated = False
         for history_id, msg in history.get_messages_since_compact():
             for att in (getattr(msg, "attachments", None) or []):
                 if att.kind != "image":
@@ -699,6 +700,7 @@ class AgentTurnRunner:
                     # 降级：recognition 保持为空，由 llmService 转换层插入"无法读取图片"说明
                     logger.exception("vision fallback recognize failed, 保持 recognition 为空（降级处理）")
                     continue
+                mutated = True
                 if history_id is not None:
                     # message 为 PydanticJsonField，整条序列化落库（含 recognition）
                     await gtAgentHistoryManager.update_agent_history_by_id(history_id, message=msg)
@@ -706,6 +708,25 @@ class AgentTurnRunner:
                     "vision fallback recognize ok: history_id=%s, mime_type=%s, recognition_len=%d",
                     history_id, att.mime_type, len(att.recognition or ""),
                 )
+        if mutated:
+            # recognition 是原地回填到 AgentMessage 上的，token 快照必须显式失效，
+            # 否则后续 post-check / 占用广播会复用回填前的缓存值。
+            history.invalidate_token_cache()
+
+    # ─── Token 口径 ────────────────────────────────────────────
+
+    def _token_snapshot(self) -> HistoryTokenSnapshot:
+        """当前 history 的 token 口径（估算 + 真值锚点 + 缓存）。
+
+        薄封装：把 model / system_prompt / tools 三件套固定下来，
+        调用方（compact 判定、活动记录、上下文占用、手动压缩）都从这里取，
+        不再各自拼消息列表去 tokenize。测试可直接 patch 本方法。
+        """
+        return self._history.token_snapshot(
+            self.gt_agent.model,
+            self.system_prompt,
+            tools=self.tool_registry.export_openai_tools(),
+        )
 
     async def _infer_to_item(
         self,
@@ -755,15 +776,10 @@ class AgentTurnRunner:
         supports_vision = ModelInput.IMAGE in (merged_llm_config.input or [])
 
         try:
+            snapshot, pre_compact_triggered = await self._check_compact(check_stage="pre-check")
+            estimated_tokens = snapshot.current_tokens
+            # compact 可能已裁剪历史：消息列表必须在 compact 之后重建。
             messages = history.build_infer_messages()
-            estimated_tokens = compact.estimate_tokens(merged_llm_config.name, messages, self.system_prompt)
-
-            messages, estimated_tokens, pre_compact_triggered = await self._check_compact(
-                messages,
-                trigger_prompt_tokens=estimated_tokens,
-                estimated_tokens=estimated_tokens,
-                check_stage="pre-check",
-            )
             if pre_compact_triggered:
                 compact_stage = "pre"
 
@@ -822,7 +838,8 @@ class AgentTurnRunner:
                         overflow_meta.last_retry_error = request_retry_meta.last_retry_error
                     await self._finish_activity(activity_id, status=AgentActivityStatus.FAILED, error_message=infer_result.error_message, metadata_patch=overflow_meta)
 
-                    estimated_tokens = await self._execute_compact(pre_compact_tokens=estimated_tokens)
+                    snapshot = await self._execute_compact(pre_snapshot=snapshot)
+                    estimated_tokens = snapshot.current_tokens
                     messages = history.build_infer_messages()
                     if estimated_tokens >= hard_limit_tokens:
                         raise RuntimeError(f"overflow compact 后仍超限: agent_id={self.gt_agent.id}") from error
@@ -903,11 +920,10 @@ class AgentTurnRunner:
                 final_meta.last_retry_error = request_retry_meta.last_retry_error
             await self._finish_activity(activity_id, status=AgentActivityStatus.SUCCEEDED, metadata_patch=final_meta)
 
-            # 上下文用量：优先用模型返回的真实 `usage.prompt_tokens`（比估算准），
-            # 没有 usage 时退回估算。放在活动收尾之后，广播失败不影响推理结果。
-            self._publish_context_usage(
-                used_tokens=usage.prompt_tokens if usage and usage.prompt_tokens is not None else None,
-            )
+            # 上下文用量：assistant 行刚落库（带 usage），history 里已有最新真值锚点，
+            # 统一从快照取，不再由调用方判断「有 usage 用 usage、没有用估算」。
+            # 放在活动收尾之后，广播失败不影响推理结果。
+            self._publish_context_usage()
 
             # 活动记录：思考内容和直接发言
             if assistant_message.reasoning_content and assistant_message.reasoning_content.strip():
@@ -924,13 +940,7 @@ class AgentTurnRunner:
                     metadata=self._base_metadata(),
                 )
 
-            post_check_messages = history.build_infer_messages()
-            _, _, post_check_triggered = await self._check_compact(
-                post_check_messages,
-                trigger_prompt_tokens=usage.prompt_tokens if usage and usage.prompt_tokens is not None else estimated_tokens,
-                estimated_tokens=estimated_tokens,
-                check_stage="post-check",
-            )
+            _, post_check_triggered = await self._check_compact(check_stage="post-check")
             if post_check_triggered and compact_stage == "none":
                 compact_stage = "post"
                 await history.finalize_history_item(
@@ -1141,29 +1151,25 @@ class AgentTurnRunner:
             overflow_retry=overflow_retry,
         )
 
-    async def _check_compact(
-        self,
-        messages: list[AgentMessage],
-        *,
-        trigger_prompt_tokens: int,
-        estimated_tokens: int,
-        check_stage: str,
-    ) -> tuple[list[AgentMessage], int, bool]:
-        """在指定检查阶段检测 prompt token，必要时执行 compact。
+    async def _check_compact(self, *, check_stage: str) -> tuple[HistoryTokenSnapshot, bool]:
+        """在指定检查阶段检测当前上下文长度，必要时执行 compact。
 
-        Returns: (messages, estimated_tokens, compact_triggered)
+        长度口径统一来自 `_token_snapshot()`，调用方不再传 token 数字。
+
+        Returns: (压缩后的快照, 是否触发了 compact)
         """
-        provider_config, merged_llm_config = resolve_model(self.gt_agent.model)
+        _, merged_llm_config = resolve_model(self.gt_agent.model)
         trigger_tokens = compact.calc_compact_trigger_tokens(merged_llm_config)
         hard_limit_tokens = compact.calc_hard_limit_tokens(merged_llm_config)
-        if trigger_prompt_tokens < trigger_tokens:
-            return messages, estimated_tokens, False
+        snapshot = self._token_snapshot()
+        if snapshot.current_tokens < trigger_tokens:
+            return snapshot, False
 
         logger.info(
             f"{check_stage} compact 触发: {self.gt_agent.name}(agent_id={self.gt_agent.id}), "
-            f"prompt_tokens={trigger_prompt_tokens}, trigger={trigger_tokens}"
+            f"current_tokens={snapshot.current_tokens}, trigger={trigger_tokens}"
         )
-        post_compact_tokens = await self._execute_compact(pre_compact_tokens=trigger_prompt_tokens)
+        post_snapshot = await self._execute_compact(pre_snapshot=snapshot)
 
         messages = self._history.build_infer_messages()
         msg_summary = ", ".join(f"{m.role}:{len(m.content or '') if not m.tool_calls else 'TC'}" for m in messages)
@@ -1171,35 +1177,36 @@ class AgentTurnRunner:
             "[compact-recheck] agent_id=%d, message_count=%d, messages=[%s]",
             self.gt_agent.id, len(messages), msg_summary,
         )
-        # compact 内部已按裁剪后的历史算过新值，直接用（与 messages 同源）。
-        estimated_tokens = post_compact_tokens
-        if estimated_tokens >= hard_limit_tokens:
+        if post_snapshot.current_tokens >= hard_limit_tokens:
             raise RuntimeError(
                 f"{check_stage} compact 后仍超限: agent_id={self.gt_agent.id}, "
-                f"estimated={estimated_tokens}, hard_limit={hard_limit_tokens}"
+                f"current_tokens={post_snapshot.current_tokens}, hard_limit={hard_limit_tokens}"
             )
 
-        # 压缩完成且刚算过新值：直接广播，不重复跑 tokenizer。
-        self._publish_context_usage(used_tokens=estimated_tokens)
+        # 压缩完成且快照已是最新：直接广播，不重复跑 tokenizer。
+        self._publish_context_usage(post_snapshot)
 
-        return messages, estimated_tokens, True
+        return post_snapshot, True
 
-    async def _execute_compact(self, *, pre_compact_tokens: int | None = None) -> int:
+    async def _execute_compact(
+        self,
+        *,
+        pre_snapshot: HistoryTokenSnapshot | None = None,
+    ) -> HistoryTokenSnapshot:
         """执行一次 compact：生成摘要 → 插入 COMPACT_SUMMARY → 内存裁剪。失败时 raise。
 
         Args:
-            pre_compact_tokens: 压缩前的上下文估算。调用方通常已经算过（触发判定），
+            pre_snapshot: 压缩前的 token 快照。调用方通常已经算过（触发判定），
                 直接传进来可避免重复跑 tokenizer；省略时这里补算一次。
 
         Returns:
-            压缩后的上下文 token 估算。调用方复用它广播用量，不再重复跑 tokenizer。
+            压缩后的 token 快照。调用方复用它广播用量，不再重复跑 tokenizer。
         """
         _, merged_llm_config = resolve_model(self.gt_agent.model)
 
-        if pre_compact_tokens is None:
-            pre_compact_tokens = compact.estimate_tokens(
-                merged_llm_config.name, self._history.build_infer_messages(), self.system_prompt,
-            )
+        if pre_snapshot is None:
+            pre_snapshot = self._token_snapshot()
+        pre_compact_tokens = pre_snapshot.current_tokens
 
         compact_activity = await agentActivityService.add_activity(
             gt_agent=self.gt_agent, activity_type=AgentActivityType.COMPACT,
@@ -1241,45 +1248,38 @@ class AgentTurnRunner:
         # 活动收尾之前——刷新失败不影响 compact 本身的成功状态。
         await self._refresh_system_prompt()
 
-        # 压缩后的上下文估算：算一次后返回给调用方广播用量，同时写进活动记录，
+        # 压缩后的上下文快照：算一次后返回给调用方广播用量，同时写进活动记录，
         # 前端展示「压缩前 → 压缩后」。调用方复用返回值，不再重复跑 tokenizer。
-        post_compact_tokens = compact.estimate_tokens(
-            merged_llm_config.name, self._history.build_infer_messages(), self.system_prompt,
-        )
+        post_snapshot = self._token_snapshot()
+        post_compact_tokens = post_snapshot.current_tokens
 
         # 活动记录：COMPACT SUCCEEDED
         await self._finish_activity(
             compact_activity.id, status=AgentActivityStatus.SUCCEEDED,
             metadata_patch=AgentActivityMeta(context_tokens_after=post_compact_tokens),
         )
-        return post_compact_tokens
+        return post_snapshot
 
     # ─── 上下文用量 ────────────────────────────────────────────
 
     def snapshot_context_usage(self) -> AgentContextUsage | None:
         """按内存态未压缩历史算一份占用快照；算不出来时 `None`。"""
-        return contextUsage.calc_context_usage_from_history(
+        return contextUsage.calc_context_usage(
             model_name=self.gt_agent.model,
-            items=list(self._history),
-            system_prompt=self.system_prompt,
+            used_tokens=self._token_snapshot().current_tokens,
         )
 
-    def _publish_context_usage(self, *, used_tokens: int | None = None) -> None:
-        """算一次并广播；`used_tokens` 给定时跳过估算直接用它。
+    def _publish_context_usage(self, snapshot: HistoryTokenSnapshot | None = None) -> None:
+        """算一次并广播；`snapshot` 给定时跳过重算直接用它。
 
         统一从这里出去的原因见 `contextUsage` 模块注释：分子分母各算一份就会分叉。
         广播本身吞掉所有异常——**用量是观测指标，读不到指标不该让任务失败**。
         """
         try:
-            usage = contextUsage.calc_context_usage_from_history(
+            snapshot = snapshot or self._token_snapshot()
+            usage = contextUsage.calc_context_usage(
                 model_name=self.gt_agent.model,
-                items=list(self._history),
-                system_prompt=self.system_prompt,
-            ) if used_tokens is None else contextUsage.calc_context_usage(
-                model_name=self.gt_agent.model,
-                messages=[],
-                system_prompt=self.system_prompt,
-                used_tokens=used_tokens,
+                used_tokens=snapshot.current_tokens,
             )
             contextUsage.publish_context_usage(
                 team_id=self.gt_agent.team_id,
@@ -1325,14 +1325,12 @@ class AgentTurnRunner:
                 "（reload_from_db 整体覆盖 _items）。"
             )
         await self._history.reload_from_db()
-        post_compact_tokens = await self._execute_compact()
+        post_snapshot = await self._execute_compact()
 
-        # 复用 compact 返回的估算值，不再重算 tokenizer；messages 传空表示全部走 used_tokens。
+        # 复用 compact 返回的快照，不再重算 tokenizer。
         usage = contextUsage.calc_context_usage(
             model_name=self.gt_agent.model,
-            messages=[],
-            system_prompt=self.system_prompt,
-            used_tokens=post_compact_tokens,
+            used_tokens=post_snapshot.current_tokens,
         )
         contextUsage.publish_context_usage(
             team_id=self.gt_agent.team_id,

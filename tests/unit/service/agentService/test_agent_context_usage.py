@@ -8,7 +8,8 @@
 2. **阈值来自后端配置，不是硬编码 0.85**。把 `compact_trigger_ratio` 改成 0.5，
    断言 `compact_trigger_tokens == floor(limit * 0.5)`。若实现里写死 0.85，
    这个用例红。
-3. **`used_tokens` 传了就优先用**，不去跑 tokenizer；没传才算。
+3. **分子只有一个来源**：`used_tokens` 必传（由 `HistoryTokenSnapshot.current_tokens`
+   提供），本模块不再自己估 token —— 所以 `messages` / `system_prompt` 参数已删除。
 4. **`ratio` 不 clamp**：超限时 `ratio > 1`，把「已经超出容量」这个诊断信息留住。
 """
 from __future__ import annotations
@@ -16,8 +17,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from model.coreModel.agentModel import AgentContextUsage
-from model.dbModel.agentMessage import AgentMessage
-from constants import OpenaiApiRole
 from service.agentService import compact, contextUsage
 from util.configUtil.configTypes import LlmContextConfig, LlmModelConfig
 
@@ -82,7 +81,7 @@ def test_limit_tokens_is_hard_limit_not_context_window() -> None:
     cfg = _make_llm_config()
     with _patch_model(cfg):
         usage = contextUsage.calc_context_usage(
-            model_name="qwen-plus@test", messages=[], system_prompt=None, used_tokens=1000,
+            model_name="qwen-plus@test", used_tokens=1000,
         )
     assert usage is not None
     assert usage.limit_tokens == 114688
@@ -95,7 +94,7 @@ def test_ratio_uses_limit_tokens_as_denominator() -> None:
     cfg = _make_llm_config()
     with _patch_model(cfg):
         usage = contextUsage.calc_context_usage(
-            model_name="qwen-plus@test", messages=[], system_prompt=None, used_tokens=97484,
+            model_name="qwen-plus@test", used_tokens=97484,
         )
     assert usage is not None
     # 用 limit 做分母 → 接近 0.85（红区临界）；用窗口做分母会是 0.7437
@@ -115,7 +114,7 @@ def test_trigger_follows_configured_ratio_not_hardcoded_default() -> None:
     cfg = _make_llm_config(compact_trigger_ratio=0.5)
     with _patch_model(cfg):
         usage = contextUsage.calc_context_usage(
-            model_name="qwen-plus@test", messages=[], system_prompt=None, used_tokens=0,
+            model_name="qwen-plus@test", used_tokens=0,
         )
     assert usage is not None
     assert usage.compact_trigger_tokens == 57344  # floor(114688 * 0.5)
@@ -131,7 +130,7 @@ def test_trigger_uses_floor_so_it_never_exceeds_the_limit() -> None:
     cfg = _make_llm_config()
     with _patch_model(cfg):
         usage = contextUsage.calc_context_usage(
-            model_name="qwen-plus@test", messages=[], system_prompt=None, used_tokens=97484,
+            model_name="qwen-plus@test", used_tokens=97484,
         )
     assert usage is not None
     assert usage.compact_trigger_tokens == 97484
@@ -141,32 +140,18 @@ def test_trigger_uses_floor_so_it_never_exceeds_the_limit() -> None:
 # ─── 分子来源 ────────────────────────────────────────────
 
 
-def test_explicit_used_tokens_skips_estimation() -> None:
-    """给了 `used_tokens` 就不该再跑 tokenizer（推理收尾已拿到真实值）。"""
+def test_used_tokens_is_used_verbatim_as_numerator() -> None:
+    """`used_tokens` 原样成为分子：本模块不再有估算回退分支。
+
+    口径统一到 history 快照后，`messages` / `system_prompt` 参数已删除，
+    所以这里只断言「传什么就是什么」，实现若偷偷改数字会红。
+    """
     cfg = _make_llm_config()
-    with _patch_model(cfg), patch.object(compact, "estimate_tokens") as mock_est:
-        usage = contextUsage.calc_context_usage(
-            model_name="qwen-plus@test", messages=[], system_prompt="s", used_tokens=42000,
-        )
+    with _patch_model(cfg):
+        usage = contextUsage.calc_context_usage(model_name="qwen-plus@test", used_tokens=42000)
     assert usage is not None
     assert usage.used_tokens == 42000
-    mock_est.assert_not_called()
-
-
-def test_missing_used_tokens_falls_back_to_estimation() -> None:
-    """没给就用 `compact.estimate_tokens`，system_prompt 一起传进去。"""
-    cfg = _make_llm_config()
-    with _patch_model(cfg), patch.object(compact, "estimate_tokens", return_value=1234) as mock_est:
-        usage = contextUsage.calc_context_usage(
-            model_name="qwen-plus@test",
-            messages=[AgentMessage(role=OpenaiApiRole.USER, content="hi")],
-            system_prompt="SYS",
-        )
-    assert usage is not None
-    assert usage.used_tokens == 1234
-    mock_est.assert_called_once()
-    # 第三个位置参数是 system_prompt：漏传会让分子少算整段系统提示词
-    assert mock_est.call_args.args[2] == "SYS"
+    assert usage.ratio == 42000 / 114688
 
 
 # ─── ratio 不 clamp ──────────────────────────────────────
@@ -181,7 +166,7 @@ def test_ratio_not_clamped_when_over_limit() -> None:
     cfg = _make_llm_config()
     with _patch_model(cfg):
         usage = contextUsage.calc_context_usage(
-            model_name="qwen-plus@test", messages=[], system_prompt=None, used_tokens=200000,
+            model_name="qwen-plus@test", used_tokens=200000,
         )
     assert usage is not None
     assert usage.ratio > 1.0
@@ -195,7 +180,7 @@ def test_returns_none_when_model_config_unresolvable() -> None:
     """模型配置解析失败 → `None`（前端整条不渲染），不是「用量 0」。"""
     with patch.object(contextUsage, "resolve_model", side_effect=ValueError("未配置")):
         usage = contextUsage.calc_context_usage(
-            model_name="", messages=[], system_prompt=None, used_tokens=1,
+            model_name="", used_tokens=1,
         )
     assert usage is None
 
@@ -205,40 +190,9 @@ def test_returns_none_when_limit_is_not_positive() -> None:
     cfg = _make_llm_config(context_window_tokens=1000, reserve_output_tokens=2000)
     with _patch_model(cfg):
         usage = contextUsage.calc_context_usage(
-            model_name="qwen-plus@test", messages=[], system_prompt=None, used_tokens=10,
+            model_name="qwen-plus@test", used_tokens=10,
         )
     assert usage is None
-
-
-# ─── 从历史行计算 ────────────────────────────────────────
-
-
-class _FakeHistoryItem:
-    """只带 `message` 的最小历史行替身。"""
-
-    def __init__(self, message: AgentMessage | None) -> None:
-        self.message = message
-
-
-def test_history_items_without_message_are_skipped() -> None:
-    """pending infer 占位行（`message is None`）不计入分子。
-
-    把它们算进去会让用量虚高，而它们此刻还没有任何文本内容。
-    """
-    cfg = _make_llm_config()
-    items = [
-        _FakeHistoryItem(AgentMessage(role=OpenaiApiRole.USER, content="a")),
-        _FakeHistoryItem(None),  # pending 占位
-        _FakeHistoryItem(AgentMessage(role=OpenaiApiRole.ASSISTANT, content="b")),
-    ]
-    with _patch_model(cfg), patch.object(compact, "estimate_tokens", return_value=99) as mock_est:
-        usage = contextUsage.calc_context_usage_from_history(
-            model_name="qwen-plus@test", items=items, system_prompt="SYS",
-        )
-    assert usage is not None
-    assert usage.used_tokens == 99
-    passed_messages = mock_est.call_args.args[1]
-    assert len(passed_messages) == 2
 
 
 # ─── 广播 ────────────────────────────────────────────────
