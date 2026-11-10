@@ -56,9 +56,13 @@ async def main():
         result=_fake_tsp_result(),
         success=True,
     ))
-    runner.tool_registry.get_registered_tool = MagicMock(return_value=MagicMock(
-        marks_turn_finish=False, self_interrupt=False,
-    ))
+    # 真实 RegisteredTool：`_run_tool_to_item` 会调 `triggers_self_interrupt()`，
+    # 裸 MagicMock 走不出这条判定（#154 D6）。
+    from service.agentService.toolRegistry import RegisteredTool
+
+    runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=RegisteredTool(tool=None, handler=None, marks_turn_finish=False)
+    )
 
     # mock activity service
     import service.agentService.agentTurnRunner as m

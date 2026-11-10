@@ -1,4 +1,5 @@
 """AgentTurnRunner 单元测试：测试 Turn 执行逻辑。"""
+import json
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -6,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from constants import AgentHistoryStatus, AgentHistoryTag, ScheduleJobType, DriverType, OpenaiApiRole, RoomState, SpecialAgent, TaskStatus, TurnStepResult
+from exception import ForwardToolCall
 from model.dbModel.agentMessage import AgentMessage
 from model.dbModel.gtAgentHistory import GtAgentHistory
 from model.dbModel.gtAgent import GtAgent
@@ -13,7 +15,7 @@ from model.dbModel.gtAgentTask import GtAgentTask
 from model.dbModel.gtScheduleJob import GtScheduleJob
 from model.dbModel.gtRoomMessage import GtRoomMessage
 from service.agentService.agentTurnRunner import AgentTurnRunner
-from service.agentService.toolRegistry import ToolExecutionResult
+from service.agentService.toolRegistry import AgentToolRegistry, RegisteredTool, ToolExecutionResult
 from service.agentService.driver.base import AgentDriverConfig
 from service.roomService import ChatRoom
 import service.roomService as roomService
@@ -460,7 +462,12 @@ async def test_run_tool_to_item_persists_tool_result_into_activity_metadata(turn
         result={"success": True, "content": "demo"},
         success=True,
     ))
-    turn_runner.tool_registry.get_registered_tool = MagicMock(return_value=SimpleNamespace(marks_turn_finish=False, self_interrupt=False))
+    # 用真实的 RegisteredTool 而不是 SimpleNamespace：#154 起 `_run_tool_to_item`
+    # 调 `registered_tool.triggers_self_interrupt(tool_call)`（动态自中断判定），
+    # SimpleNamespace 上没这个方法，mock 会与生产对象走形。
+    turn_runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=RegisteredTool(tool=None, handler=None, marks_turn_finish=False)
+    )
 
     with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock(return_value=MagicMock(id=7))) as mock_add_activity, patch(
         "service.agentService.agentTurnRunner.agentActivityService.update_activity_progress",
@@ -888,7 +895,7 @@ async def test_run_tool_to_item_returns_turn_done_when_finish_tool_succeeds(turn
         return_value=_make_finish_tool_exec_result(success=True)
     )
     turn_runner.tool_registry.get_registered_tool = MagicMock(
-        return_value=SimpleNamespace(marks_turn_finish=True, self_interrupt=False)
+        return_value=RegisteredTool(tool=None, handler=None, marks_turn_finish=True)
     )
 
     with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock(return_value=MagicMock(id=1))), \
@@ -914,7 +921,7 @@ async def test_run_tool_to_item_returns_error_action_when_finish_tool_fails(turn
         return_value=_make_finish_tool_exec_result(success=False)
     )
     turn_runner.tool_registry.get_registered_tool = MagicMock(
-        return_value=SimpleNamespace(marks_turn_finish=True, self_interrupt=False)
+        return_value=RegisteredTool(tool=None, handler=None, marks_turn_finish=True)
     )
 
     with patch("service.agentService.agentTurnRunner.agentActivityService.add_activity", new=AsyncMock(return_value=MagicMock(id=2))), \
@@ -1067,9 +1074,9 @@ def _make_run_tool_fixture(turn_runner, room, result, *, tool_name="read_image",
         result=result,
         success=success,
     ))
-    turn_runner.tool_registry.get_registered_tool = MagicMock(return_value=SimpleNamespace(
-        marks_turn_finish=False, self_interrupt=False,
-    ))
+    turn_runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=RegisteredTool(tool=None, handler=None, marks_turn_finish=False)
+    )
     return tool_call, output_item
 
 
@@ -1357,3 +1364,466 @@ async def test_infer_to_item_switch_off_disables_recognize(turn_runner):
     recognize_mock.assert_not_called()
     update_history_mock.assert_not_called()
     infer_mock.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# #154 D6：动态自中断判定（`console` 只有路由到 reload 才自中断）
+# ---------------------------------------------------------------------------
+# 这几条专治两种**看不见的**错法：
+#   ① 静态 `self_interrupt=True` ⇒ 每条 console 命令都留下 SELF_INTERRUPT 标记，
+#      `dept ls` 这种正常返回的命令，重启后会被当成「已执行过的中断工具」自动判成功；
+#   ② 完全不判定 ⇒ `reload` 丢掉标记，重启后被重放成**第二次重载**（真的再停一次团队）。
+# 两种都只在真实重启时才显形，所以必须在 turn runner 这一层用桩钉死。
+
+
+def _patched_activity():
+    """把 activity 服务整段打桩：单元测试不建 DB，真实实现会碰 peewee。
+
+    返回一个 contextlib.ExitStack 以便在一个 with 里同时打两处补丁。
+    """
+    import contextlib
+
+    stack = contextlib.ExitStack()
+    stack.enter_context(
+        patch(
+            "service.agentService.agentTurnRunner.agentActivityService.add_activity",
+            new=AsyncMock(return_value=MagicMock(id=1)),
+        )
+    )
+    stack.enter_context(
+        patch(
+            "service.agentService.agentTurnRunner.agentActivityService.update_activity_progress",
+            new=AsyncMock(),
+        )
+    )
+    return stack
+
+
+def _self_interrupt_call() -> llmApiUtil.OpenAIToolCall:
+    return llmApiUtil.OpenAIToolCall(
+        id="tc-console",
+        function={"name": "console", "arguments": '{"command": "reload"}'},
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_tool_to_item_marks_tag_when_predicate_matches(turn_runner):
+    """判定器返回 True ⇒ 必须在 handler 执行前打上 SELF_INTERRUPT 标记。"""
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 31
+    output_item.tags = []
+    tool_call = _self_interrupt_call()
+
+    turn_runner.tool_registry.execute_tool_call = AsyncMock(
+        return_value=ToolExecutionResult(
+            tool_call_id="tc-console", result={"success": True}, success=True
+        )
+    )
+    turn_runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=RegisteredTool(
+            tool=None,
+            handler=None,
+            self_interrupt_predicate=lambda call: call.function_args == '{"command": "reload"}',
+        )
+    )
+    turn_runner._history.mark_self_interrupt_tag = AsyncMock()
+
+    with _patched_activity():
+        await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    turn_runner._history.mark_self_interrupt_tag.assert_awaited_once_with(31)
+
+
+@pytest.mark.asyncio
+async def test_run_tool_to_item_skips_tag_when_predicate_says_no(turn_runner):
+    """判定器返回 False ⇒ **不得**留标记（否则正常命令会被误记成中断过）。"""
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 32
+    output_item.tags = []
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tc-console-ls",
+        function={"name": "console", "arguments": '{"command": "dept ls"}'},
+    )
+
+    turn_runner.tool_registry.execute_tool_call = AsyncMock(
+        return_value=ToolExecutionResult(
+            tool_call_id="tc-console-ls", result={"success": True}, success=True
+        )
+    )
+    turn_runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=RegisteredTool(
+            tool=None,
+            handler=None,
+            self_interrupt_predicate=lambda call: call.function_args == '{"command": "reload"}',
+        )
+    )
+    turn_runner._history.mark_self_interrupt_tag = AsyncMock()
+
+    with _patched_activity():
+        await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    turn_runner._history.mark_self_interrupt_tag.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# #160：转发后「第 2 跳命中 reload_team」的自中断链路（交付标准第 2 条）
+#
+# 为什么必须用**真注册表**：改造前 `console` 自己 import `reload_team` 直接调；
+# 改造后它只抛 `ForwardToolCall`，`reload_team` 是第 2 跳查注册表才命中的。
+# 用桩 `RegisteredTool` + 桩 `execute_tool_call` 测不到这条——桩里没有转发循环，
+# 「转发断在第 1 跳」这种错法会静默通过。所以这里注册真 console（真 handler）
+# + 桩 handler 的 reload_team（真 reload_team 会 create_task 后挂死，不能真跑）。
+# ---------------------------------------------------------------------------
+
+
+def _forwarding_registry(reached: list[str]) -> AgentToolRegistry:
+    """console 走真 handler（真解析 + 真抛转发信号），reload_team 用计数桩。"""
+    from service.funcToolService import core as func_tool_core
+
+    func_tools = func_tool_core.load_func_tools()
+    registry = AgentToolRegistry()
+    registry.register(
+        func_tools["console"].to_openai_tool(),
+        func_tool_core.run_tool_call,
+        # 与三个 driver 完全同一条注册口径（静态标志 + 动态判定器）。
+        self_interrupt_predicate=func_tool_core.get_self_interrupt_predicate("console"),
+    )
+
+    async def _fake_reload(args_str: str, context) -> dict:
+        reached.append(context.tool_name or "")
+        return {"success": True, "message": "stub reload"}
+
+    registry.register(func_tools["reload_team"].to_openai_tool(), _fake_reload, self_interrupt=True)
+    return registry
+
+
+@pytest.mark.asyncio
+async def test_reload_writes_tag_and_forwards_to_reload_team(turn_runner):
+    """`reload` ⇒ 写 SELF_INTERRUPT tag **且**第 2 跳真到达 reload_team。
+
+    #165 删掉 confirm 闸门后，`reload` 不再需要 token——但**这一对断言的必要性没变**：
+      ① 只有 tag 没有转发 ⇒ 中断标记留下，实际什么都没重载（重启后被当成功）；
+      ② 只有转发没有 tag ⇒ 被取消后条目没有标记，重启后重放成**第二次**重载。
+    """
+    reached: list[str] = []
+    turn_runner.tool_registry = _forwarding_registry(reached)
+    turn_runner._history.mark_self_interrupt_tag = AsyncMock()
+
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 41
+    output_item.tags = []
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tc-reload",
+        function={"name": "console", "arguments": json.dumps({"command": "reload"})},
+    )
+
+    with _patched_activity():
+        await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    turn_runner._history.mark_self_interrupt_tag.assert_awaited_once_with(41)
+    assert reached == ["reload_team"], f"第 2 跳没到 reload_team，reached={reached}"
+
+
+@pytest.mark.asyncio
+async def test_non_reload_commands_neither_mark_tag_nor_forward_to_reload(turn_runner):
+    """反向对照：非 reload 命令**不写 tag、也不转发到 reload_team**。
+
+    没有这条，把判定器写成恒 True 也照样能让上一条绿——而恒 True 会让每条 console
+    命令都留中断标记（`dept ls` 也会被误判成「已执行过的中断工具」）。
+    """
+    reached: list[str] = []
+    turn_runner.tool_registry = _forwarding_registry(reached)
+    turn_runner._history.mark_self_interrupt_tag = AsyncMock()
+
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 42
+    output_item.tags = []
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tc-dept-ls",
+        function={"name": "console", "arguments": json.dumps({"command": "dept ls"})},
+    )
+
+    with _patched_activity():
+        await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    turn_runner._history.mark_self_interrupt_tag.assert_not_awaited()
+    assert "reload_team" not in reached, f"非 reload 命令不得转发到 reload_team，reached={reached}"
+
+
+@pytest.mark.asyncio
+async def test_malformed_reload_syntax_does_not_mark_tag(turn_runner):
+    """`reload --confirm xxx`（选项已删除）⇒ 命令失败、**不写 tag**（#165 假标记防护）。
+
+    这条钉住的是本轮实测暴露的真坑：谓词一度只看命令名不看选项，`reload --confirm`
+    被判定会中断并写了 tag，而真执行在 `_parse_options` 就 `unknown_option` 失败了
+    —— 一次「没重载」被永久记成「重载成功」。现在谓词与执行共用
+    `_parse_command_tokens`，两处不可能漂移。
+    """
+    reached: list[str] = []
+    turn_runner.tool_registry = _forwarding_registry(reached)
+    turn_runner._history.mark_self_interrupt_tag = AsyncMock()
+
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 43
+    output_item.tags = []
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tc-reload-badopt",
+        function={
+            "name": "console",
+            "arguments": json.dumps({"command": "reload --confirm deadbeef"}),
+        },
+    )
+
+    with _patched_activity():
+        await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    turn_runner._history.mark_self_interrupt_tag.assert_not_awaited(), (
+        "解析失败的命令不得留下中断标记"
+    )
+    assert "reload_team" not in reached, f"解析失败的命令不得转发，reached={reached}"
+
+
+@pytest.mark.asyncio
+async def test_run_tool_to_item_auto_succeeds_on_restart_when_tag_present(turn_runner):
+    """重启恢复：条目已带 SELF_INTERRUPT 标记 ⇒ **不再执行 handler**，直接判成功。
+
+    这条是「标记写没写」的下游验证：标记写了才有这条恢复路径，不写就会被重放。
+    """
+    room = MagicMock(spec=ChatRoom)
+    room.team_id = 1
+    output_item = MagicMock(spec=GtAgentHistory)
+    output_item.id = 33
+    output_item.tags = [AgentHistoryTag.SELF_INTERRUPT]
+    output_item.tool_call_id = "tc-console"
+    tool_call = _self_interrupt_call()
+
+    turn_runner.tool_registry.execute_tool_call = AsyncMock()
+    turn_runner.tool_registry.get_registered_tool = MagicMock(
+        return_value=RegisteredTool(tool=None, handler=None, self_interrupt=True)
+    )
+
+    with patch(
+        "service.agentService.agentTurnRunner.agentActivityService.add_activity",
+        new=AsyncMock(return_value=MagicMock(id=9)),
+    ), patch(
+        "service.agentService.agentTurnRunner.agentActivityService.update_activity_progress",
+        new=AsyncMock(),
+    ):
+        result = await turn_runner._run_tool_to_item(tool_call, output_item, room)
+
+    assert result == TurnStepResult.TOOL_EXECUTE_SUCCESS
+    turn_runner.tool_registry.execute_tool_call.assert_not_awaited(), "已标记过的条目不得重复执行"
+
+
+# ---------------------------------------------------------------------------
+# #164 P2：post_process 抛异常后，「续跑不再重放同一 tool_call」（1→2 变 1→1）
+#
+# 这一条不用 mock 的 history：跑**真 `AgentHistoryStore`**（只把三个持久化函数换成
+# 内存实现，`last()` / `find_tool_call_by_id()` / `get_current_turn_start_index()` /
+# `has_active_turn()` / `get_first_pending_tool_call()` 全部真实现）、
+# **真 `_advance_step`**、**真 `_run_tool_to_item`**、**真 `AgentToolRegistry`**。
+#
+# 为什么必须这样：重复执行发生在「续跑」，而续跑的分支选择完全由 history 条目真实的
+# role/status 决定。若用 MagicMock 假造 `last()` 的返回值，测到的就只是「我构造的
+# 状态下分支怎么走」，而不是「真实续跑会不会重放」——#163 初版探针正是栽在这一点。
+# ---------------------------------------------------------------------------
+
+
+def _in_memory_history_store():
+    """真 `AgentHistoryStore` + 内存持久化（不建 DB）。"""
+    import contextlib
+
+    from service.agentService import agentHistoryStore as ahs
+
+    ids = {"next": 1}
+
+    async def _append(item):
+        item.id = ids["next"]
+        ids["next"] += 1
+        return item
+
+    async def _insert(item):
+        return await _append(item)
+
+    async def _update(history_id, **kwargs):
+        return None
+
+    stack = contextlib.ExitStack()
+    for name, fn in (
+        ("append_agent_history_message", _append),
+        ("insert_agent_history_message_at_seq", _insert),
+        ("update_agent_history_by_id", _update),
+    ):
+        stack.enter_context(patch.object(ahs.gtAgentHistoryManager, name, new=fn))
+    return stack
+
+
+def _seed_turn(store, tool_call: llmApiUtil.OpenAIToolCall) -> None:
+    """铺一条「真实形状」的 active turn：USER(ROOM_TURN_BEGIN) → ASSISTANT(tool_calls)。"""
+    user_item = GtAgentHistory.build(
+        AgentMessage(role=OpenaiApiRole.USER, content="去把房间删掉"),
+        tags=[AgentHistoryTag.ROOM_TURN_BEGIN],
+    )
+    user_item.id = 900
+    user_item.seq = 0
+    store.replace([user_item])
+
+    assistant_item = GtAgentHistory.build(
+        AgentMessage(
+            role=OpenaiApiRole.ASSISTANT, content="", tool_calls=[tool_call]
+        ),
+        status=AgentHistoryStatus.SUCCESS,
+    )
+    assistant_item.id = 901
+    assistant_item.seq = 1
+    store.replace([user_item, assistant_item])
+
+
+def _p2_registry(counter: dict[str, int]) -> AgentToolRegistry:
+    """console → 转发 delete_room，并挂一个**必定抛异常**的 post_process。"""
+    registry = AgentToolRegistry()
+
+    def _mk(name: str) -> llmApiUtil.OpenAITool:
+        return llmApiUtil.OpenAITool(
+            function=llmApiUtil.OpenAIFunction(
+                name=name,
+                description="",
+                parameters=llmApiUtil.OpenAIFunctionParameter(
+                    type="object", properties={}, required=[]
+                ),
+            )
+        )
+
+    def _boom(_result: dict) -> dict:
+        raise RuntimeError("#164 P2: post_process 故意抛异常")
+
+    async def console_like(args_str: str, context) -> dict:
+        raise ForwardToolCall("delete_room", {"name": "p2_room"}, post_process=_boom)
+
+    async def delete_room(args_str: str, context) -> dict:
+        counter["delete_room"] += 1
+        return {"success": True, "message": "deleted"}
+
+    registry.register(_mk("console"), console_like)
+    registry.register(_mk("delete_room"), delete_room)
+    return registry
+
+
+@pytest.mark.asyncio
+async def test_post_process_failure_does_not_replay_tool_call_on_resume():
+    """⭐ P2：post_process 抛异常后「崩溃 + 续跑」两轮，同一子命令只执行 **1** 次。
+
+    为什么要连跑两轮：缺陷的真实后果不在 `execute_tool_call` 的返回值上，而在
+    **续跑**。第 1 轮异常穿透 → `finalize_history_item` 没被调用 → TOOL 条目停在
+    `INIT` → job 被 `jobConsumer` 的 `except Exception` 置 FAILED 并重新唤醒 →
+    第 2 轮 `_advance_step` 命中 TOOL/INIT 分支 → `find_tool_call_by_id` 取回**同一个**
+    tool_call 重放 ⇒ 副作用发生两次。实测（`a1e9a502`，本用例原样跑）：
+    `delete_room` 计数 **1 → 2**、`finalize` **0** 次、续跑阶段 `_run_tool_to_item` **1** 次。
+
+    这里**不用 mock 的 history**：真 `AgentHistoryStore`（只把三个持久化函数换成内存
+    实现，`last()` / `find_tool_call_by_id()` / `get_current_turn_start_index()` 等
+    全部真实现）+ 真 `_advance_step` + 真 `_run_tool_to_item` + 真 `AgentToolRegistry`。
+    续跑的分支选择完全由条目真实的 role/status 决定，假造状态测的就不是「真实续跑」。
+    """
+    from service.agentService.agentHistoryStore import AgentHistoryStore
+
+    counter = {"delete_room": 0}
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="tc-p2",
+        function={"name": "console", "arguments": json.dumps({"command": "dept rm p2_room"})},
+    )
+
+    gt_agent = GtAgent(id=1, team_id=1, name="TestAgent", role_template_id=1, model="mock")
+    runner = AgentTurnRunner(
+        gt_agent=gt_agent,
+        system_prompt="You are a test agent.",
+        driver_config=AgentDriverConfig(driver_type=DriverType.NATIVE),
+    )
+    runner.tool_registry = _p2_registry(counter)
+
+    # 续跑阶段会走 TOOL/FAILED 分支 → 追加 ASSISTANT → 调 LLM。只桩推理本身，
+    # **不桩 `_advance_step` / `append_history_init_item`**——那两个正是被测的分支决策者。
+    runner._infer_and_classify = AsyncMock(return_value=TurnStepResult.LLM_OUTPUT_NO_ACTION)
+
+    # spy：真实现照跑，只计数。用来证明「续跑阶段没有再执行工具」。
+    run_calls: list[str] = []
+    _real_run = runner._run_tool_to_item
+
+    async def _spy_run(tc, item, room):
+        run_calls.append(tc.id)
+        return await _real_run(tc, item, room)
+
+    runner._run_tool_to_item = _spy_run
+
+    with _in_memory_history_store(), _patched_activity():
+        store = AgentHistoryStore(agent_id=1)
+        _seed_turn(store, tool_call)
+        runner._history = store
+
+        finalize_calls: list[dict] = []
+        _real_finalize = store.finalize_history_item
+
+        async def _spy_finalize(history_id, message, status, error_message=None, tags=None, usage=None):
+            finalize_calls.append({"history_id": history_id, "status": status})
+            return await _real_finalize(
+                history_id, message, status,
+                error_message=error_message, tags=tags, usage=usage,
+            )
+
+        store.finalize_history_item = _spy_finalize
+
+        # ── 第 1 轮：真实执行。崩不崩都记下来（`jobConsumer` 也是这样把异常吞成 FAILED 的）──
+        await store.append_history_init_item(role=OpenaiApiRole.TOOL, tool_call_id="tc-p2")
+        crash: BaseException | None = None
+        try:
+            await runner._advance_step(None, [])
+        except BaseException as exc:  # noqa: BLE001 —— 这层在模拟 jobConsumer 的兜底
+            crash = exc
+        executed_before_resume = counter["delete_room"]
+        finalized_before_resume = list(finalize_calls)
+        # 续跑前取末条目：续跑会追加 ASSISTANT 占位，取晚了看到的就不是那条 TOOL 了。
+        last_tool_item = store.last()
+
+        # ── 第 2 轮：续跑（job 被重新认领后再次推进）──
+        calls_before_resume = len(run_calls)
+        try:
+            await runner._advance_step(None, [])
+        except BaseException:  # noqa: BLE001 —— 修复前这里会再抛一次，同样不该中断用例
+            pass
+        replayed = len(run_calls) - calls_before_resume
+        executed_after_resume = counter["delete_room"]
+
+    # ── 核心判据 1：副作用没有第二次（修复前 executed_after_resume=2）──
+    assert executed_before_resume == 1, (
+        f"第 1 轮必须真执行一次（否则没测到东西）：executed={executed_before_resume}, crash={crash!r}"
+    )
+    assert executed_after_resume == 1, (
+        f"续跑不得重放同一子命令：续跑前={executed_before_resume}, 续跑后={executed_after_resume}"
+        f"（修复前是 1→2）"
+    )
+    # ── 核心判据 2：续跑阶段根本没进工具执行 ──
+    # 「次数==1」有歧义：「没重放」和「根本没跑到那儿」在计数上长得一样。断言续跑阶段
+    # `_run_tool_to_item` 新增调用 == 0，才是「分支决策真的没重放」的直接证据。
+    assert replayed == 0, f"续跑阶段 `_run_tool_to_item` 必须 0 次，实际 {replayed} 次"
+    # ── 核心判据 3：条目被正常 finalize 成 FAILED（「不再重放」的机制原因）──
+    assert crash is None, f"post_process 异常必须降级成工具失败，不得炸 turn：{crash!r}"
+    assert len(finalized_before_resume) == 1, (
+        f"finalize 必须恰好 1 次（修复前是 0 次）：{finalized_before_resume}"
+    )
+    assert finalized_before_resume[0]["status"] == AgentHistoryStatus.FAILED, (
+        finalized_before_resume
+    )
+    assert last_tool_item.status == AgentHistoryStatus.FAILED, (
+        f"TOOL 条目必须被 finalize 成 FAILED（停在 INIT 就会续跑重放）：{last_tool_item.status}"
+    )
+    assert last_tool_item.role == OpenaiApiRole.TOOL

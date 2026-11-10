@@ -1026,7 +1026,11 @@ class AgentTurnRunner:
             await self._finish_activity(tool_activity.id, status=AgentActivityStatus.FAILED, error_message=error_msg)
             return TurnStepResult.TOOL_EXECUTE_FAILED_FINISH
 
-        if registered_tool.self_interrupt:
+        # 判定「本次调用是否会自中断」：静态标志（如 `reload_team`）与动态判定器
+        # （如 `console` 只有路由到 reload 子命令才自中断）统一走 `triggers_self_interrupt`。
+        # **必须在 handler 执行前判定**：handler 触发中断后本协程就被取消了，
+        # 中断标记这时还没写库就等于丢失，重启后会被重放成第二次 reload。
+        if registered_tool.triggers_self_interrupt(tool_call):
             if AgentHistoryTag.SELF_INTERRUPT in output_item.tags:
                 # 重启后：output_item 已有 SELF_INTERRUPT tag，说明上次已触发过，直接自动成功。
                 logger.info(
