@@ -8,26 +8,11 @@ from ...base import ServiceTestCase
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
-_CONFIG_DIR = os.path.join(os.path.dirname(__file__), "config")
-_SETTING_PATH = os.path.join(_CONFIG_DIR, "setting.json")
-
 
 class _ApiServiceCase(ServiceTestCase):
+    """`POST /config/llm.json` 会真实写盘；配置目录已复制到 per-worker 临时目录，
+    因此不需要「setup 备份原文 → teardown 写回」这套补丁。"""
     use_custom_config = True
-    _original_setting: str = None
-
-    @classmethod
-    def setup_class(cls) -> None:
-        with open(_SETTING_PATH, "r", encoding="utf-8") as f:
-            cls._original_setting = f.read()
-        super().setup_class()
-
-    @classmethod
-    def teardown_class(cls) -> None:
-        super().teardown_class()
-        if cls._original_setting is not None:
-            with open(_SETTING_PATH, "w", encoding="utf-8") as f:
-                f.write(cls._original_setting)
 
 
 class TestLlmConfigController(_ApiServiceCase):
