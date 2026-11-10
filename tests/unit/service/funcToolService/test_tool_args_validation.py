@@ -13,6 +13,10 @@
   **等值**而非同一对象）
 - TSP 兜底：`test_tsp_malformed_schema_still_calls_through`（缺键 / 非 object / 非法 schema）
 - JSON：`test_invalid_json_is_structured_and_does_not_execute`
+- **根节点 `null`（H1，38 打回）**：`test_root_null_rejected_default_tools` /
+  `test_root_null_rejected_container_tools` / `test_root_null_rejected_tsp_remote_tools`
+  —— 三组各一条，断言 `invalid_tool_args` 且文案**不含** `Invalid arguments for function`
+  （即不许退化成「英文解释器原话 + 无 error_code」的改造前形态）。
 """
 
 from __future__ import annotations
@@ -493,6 +497,99 @@ async def test_tsp_invalid_json_is_structured() -> None:
 
     assert result["success"] is False
     assert result["error_code"] == INVALID_JSON_ARGS
+    driver._client.call_tool.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# 根节点 null（H1，38 打回 04:48）：整份参数不是 JSON 对象
+# --------------------------------------------------------------------------- #
+
+#: 「改造前形态」的文案特征：英文解释器原话，且不带 error_code。
+#: 根节点 null 若被 `_is_ignorable_null` 误豁免，就会退化成它 —— 这是本组判据的红线。
+_LEGACY_MESSAGE_MARK = "Invalid arguments for function"
+
+
+@pytest.mark.asyncio
+async def test_root_null_rejected_default_tools() -> None:
+    """默认工具组：`function_args` 字面量为 `null` ⇒ **每一个**工具都被拦下。
+
+    H1 缺陷复现：修复前 `get_tools(include_container_tools=True)` 的 37 个工具逐个喂
+    `'null'` **漏网 37/37** —— 因为根节点的 `type: object` 错误 `absolute_path == []`、
+    `instance is None`，被 `_is_ignorable_null` 当成「非必填字段的 null」豁免掉了。
+
+    ⚠️ 必须断言**文案不含** `Invalid arguments for function`：只断言 `success is False`
+    不够 —— 漏网时 `func(**None)` 抛 `TypeError` 也会返回 `success: False`，只是丢了
+    `error_code` 且文案是英文原话。那样断言会**假绿**（这正是 H1 之前漏掉的原因）。
+    """
+
+    tools = funcCore.get_tools()
+    assert len(tools) == DEFAULT_TOOL_COUNT
+
+    covered = 0
+    for tool in tools:
+        name = tool.function.name
+        result = await funcCore.run_tool_call("null", _ctx(name))
+
+        assert result["success"] is False, (name, result)
+        assert result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS, (name, result)
+        assert _LEGACY_MESSAGE_MARK not in result["message"], (name, result)
+        assert "参数校验失败" in result["message"], (name, result)
+        covered += 1
+
+    assert covered == DEFAULT_TOOL_COUNT
+
+
+@pytest.mark.asyncio
+async def test_root_null_rejected_container_tools() -> None:
+    """容器工具组：同样的根节点 null，一个都不许漏。"""
+
+    names = list(funcToolService.CONTAINER_TOOL_NAMES)
+    assert len(names) == CONTAINER_TOOL_COUNT
+
+    covered = 0
+    for name in names:
+        result = await funcCore.run_tool_call("null", _ctx(name))
+
+        assert result["success"] is False, (name, result)
+        assert result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS, (name, result)
+        assert _LEGACY_MESSAGE_MARK not in result["message"], (name, result)
+        covered += 1
+
+    assert covered == CONTAINER_TOOL_COUNT
+
+
+@pytest.mark.asyncio
+async def test_root_null_rejected_tsp_remote_tools() -> None:
+    """TSP 远端组：与本地共用 `_is_ignorable_null`，同一漏洞必须同步堵住。
+
+    远端路径不走 `run_tool_call`，所以这条打在 `_execute_tsp_tool` 上，并断言
+    **没有进 `call_tool`**（校验发生在转发之前）。
+    """
+
+    specs = {
+        "remote_write": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+        "remote_read": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": [],
+        },
+    }
+    remote_tools = [
+        _remote_tool(name, parameters) for name, parameters in specs.items()
+    ]
+    driver = _make_tsp_driver(remote_tools)
+
+    for name in specs:
+        result = await driver._execute_tsp_tool("null", _ctx(name))
+
+        assert result["success"] is False, (name, result)
+        assert result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS, (name, result)
+        assert _LEGACY_MESSAGE_MARK not in result["message"], (name, result)
+
     driver._client.call_tool.assert_not_called()
 
 

@@ -252,18 +252,37 @@ def _truncate(text: str) -> str:
 
 
 def _is_ignorable_null(error: ValidationError, schema: Dict[str, Any]) -> bool:
-    """`null` 打到非必填字段 ⇒ 忽略该错误（不算参数类型错）。
+    """`null` 打到**非必填字段** ⇒ 忽略该错误（不算参数类型错）。
 
     原因：schema 生成器把 `Optional[T]` **剥成 T**（`python_type_to_json_schema`），
     `null` 的合法性在 schema 里已经丢失。若照 schema 硬拦，「显式传 null 走默认值」
     会从当前的合法行为变成非法 —— 那是本单新增的误杀，不是健壮性提升。
     Python 侧 `def f(x: str | None = None)` 完全接受 `None`。
+
+    ## 为什么必须单独排除「根节点」（H1，38 打回）
+
+    本函数只该豁免**字段级**的 `null`。根节点（`absolute_path == []`）的 `null`
+    是「整份参数不是 JSON 对象」（`function_args` 字面量就是 `null`），必须报错：
+
+    - `jsonschema` 对它的报告是 `validator="type"`、`instance=None`、`absolute_path=[]`；
+    - 若不加下面这道判断，`len(path)==1` 不成立 ⇒ 落到 `return True` ⇒ 这条错误被当
+      「可忽略的 null」过滤掉 ⇒ `iter_errors` 结果为空 ⇒ **放行** ⇒ 随后 `func(**None)`
+      抛 `TypeError`，最终返回「英文解释器原话 + 无 error_code」的旧形态。
+    - 实测（修前）：`get_tools(include_container_tools=True)` 的 **37 个工具逐个喂
+      `'null'` ⇒ 漏网 37/37**；而同类的 `'[]'` 能被正常拦下（根节点 `type` 错误
+      `absolute_path` 也是 `[]`，但 `instance` 非 None，走到上面的 `return False`）。
+      这正是本函数**只判 `instance is None`** 留下的口子。
+
+    ⇒ 根节点一律不豁免。字段级豁免的语义不变（`{"timezone": null}` 仍放行）。
     """
 
     if error.instance is not None or error.validator not in ("type", "enum"):
         return False
-    required = schema.get("required") or []
     path = list(error.absolute_path)
+    if not path:
+        # 根节点：整份参数本身不是对象（如字面量 `null`），必须报错。
+        return False
+    required = schema.get("required") or []
     if len(path) == 1 and path[0] in required:
         return False
     return True
