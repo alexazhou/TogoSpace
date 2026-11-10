@@ -24,6 +24,7 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     # Local tools
     "get_time": ToolCategory.BASIC,
     "web_search": ToolCategory.READ,
+    "webfetch": ToolCategory.READ,
     "get_dept_info": ToolCategory.BASIC,
     "get_room_info": ToolCategory.BASIC,
     "get_agent_info": ToolCategory.BASIC,

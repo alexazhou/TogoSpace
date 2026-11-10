@@ -39,7 +39,8 @@ WARNING_KEYWORD = "已跳过校验"
 
 #: 工具总数（`python scripts/tool_schema_snapshot.py` 口径）。写死是为了让「少遍历一组」
 #: 或「抽样」立刻变红——动态用 `len()` 自证会随实现一起漂移，等于没断言。
-DEFAULT_TOOL_COUNT = 32
+#: 32 → 33：webfetch（#191）进默认工具组，故默认组 33、合计 33+5=38。
+DEFAULT_TOOL_COUNT = 33
 CONTAINER_TOOL_COUNT = 5
 
 
@@ -812,8 +813,9 @@ async def test_null_injection_exhaustive_table() -> None:
     - `P3` 嵌套 object 字段数（内部 key 因 schema 为裸 `{"type":"object"}` 不可枚举）
 
     ## 枚举器自校验
-    `get_tools()` == 32、`get_tools(include_container_tools=True)` == 37 ——
-    任一不等说明枚举器自己漏了工具（38 踩过：只拿 `_func_tools` 得到 32，漏容器组 5 个）。
+    `get_tools()` == 33、`get_tools(include_container_tools=True)` == 38 ——
+    任一不等说明枚举器自己漏了工具（38 踩过：只拿 `_func_tools` 漏掉容器组 5 个）。
+    （#189 时为 32/37；webfetch 进默认组后为 33/38。）
     """
 
     from service.funcToolService.funcToolType import get_function_metadata
@@ -869,14 +871,16 @@ async def test_null_injection_exhaustive_table() -> None:
 
     # ---- 四个数独立成表（拆开报，不许只报总数）----
     assert p0 == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT, f"P0={p0}"
-    assert p1_required + p1_optional == 99, (p1_required, p1_optional)
+    # 100 = 36 required + 64 optional（#189 时为 99 = 35+64；webfetch.url 为必填 ⇒ +1）
+    assert p1_required + p1_optional == 100, (p1_required, p1_optional)
     assert p2 == 10, f"P2={p2}"
     assert p3_fields == 4, f"P3字段={p3_fields}"
     # P3 内部 key 为 0 ⇒ 本单表达力边界（裸 {"type":"object"} 无 properties），不是漏点
     assert p3_enumerable == 0, f"P3内部key={p3_enumerable}"
 
     total = p0 + p1_required + p1_optional + p2 + p3_enumerable
-    assert total == 146, total
+    # 148 = 38 + 36 + 64 + 10 + 0（#189 时为 146 = 37 + 35 + 64 + 10 + 0）
+    assert total == 148, total
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
 
 
@@ -958,7 +962,7 @@ async def test_local_tool_handlers_all_route_to_run_tool_call() -> None:
         name for name, handler in native_handlers.items() if handler is not expected
     ]
 
-    # tsp：本地组含容器工具（37 个），远端组此时为空
+    # tsp：本地组含容器工具（38 个），远端组此时为空
     tsp_host = _registry_host()
     tsp_driver = TspAgentDriver(tsp_host, AgentDriverConfig(driver_type="tsp", options={}))
     tsp_driver._client = MagicMock()

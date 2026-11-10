@@ -24,3 +24,7 @@ types-PyYAML~=6.0.12
 typing_extensions~=4.15.0
 cryptography<49.0.0
 jsonschema>=4.26,<5
+beautifulsoup4==4.15.0
+markdownify==1.2.3
+soupsieve==4.1
+charset-normalizer==3.4.7
