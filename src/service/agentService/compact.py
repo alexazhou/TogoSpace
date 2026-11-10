@@ -14,23 +14,9 @@ from model.dbModel.agentMessage import AgentMessage
 from service import llmService
 from service.agentService import promptBuilder
 from util import llmApiUtil, configUtil
-from util.configUtil.configTypes import LlmContextConfig, LlmModelConfig
+from util.configUtil.configTypes import LlmModelConfig
 
 logger = logging.getLogger(__name__)
-
-# 系统内置模型上下文长度表：仅在用户未显式调整 context_window_tokens 时作为兜底。
-# 按模型名精确匹配，因此只有名称与下表完全一致的模型才会命中。
-DEFAULT_MODEL_CONTEXT_WINDOWS: dict[str, int] = {
-    "glm-4.7": 128000,
-    "qwen-plus": 131072,
-    "gpt-4o": 128000,
-    "gpt-4o-mini": 128000,
-    "gpt-4": 8192,
-    "gpt-4-turbo": 128000,
-    "claude-3-5-sonnet-20241022": 200000,
-    "claude-sonnet-4-20250514": 200000,
-    "deepseek-chat": 128000,
-}
 
 # 用于识别上下文超长的错误关键词
 _OVERFLOW_KEYWORDS = (
@@ -51,23 +37,16 @@ _OVERFLOW_KEYWORDS = (
 def resolve_context_window_tokens(model_config: LlmModelConfig) -> int:
     """解析模型当前生效的上下文窗口原始值（未扣 `reserve_output_tokens`）。
 
-    context_window 取值优先级：用户配置（模型级 > 全局）> 内置模型表 > 代码默认值。
-    内置表只在用户未调整 context_window_tokens（仍为代码默认值）时生效。
+    context_window 取值优先级：模型级配置 > 全局配置 > 代码默认值。
+    `resolve_model()` 返回的 `merged_llm_config.context_config` 已完成这三层合并；
+    开箱模型的窗口由配置模板中的模型级 `context_config` 提供。
 
     单独抽出来是因为「model 的窗口是多少」有两个消费方：`calc_hard_limit_tokens`
-    要拿它扣 reserve，前端 tooltip 要直接展示它。两处各写一遍就等于把
-    DEFAULT_MODEL_CONTEXT_WINDOWS 的兜底规则复制了两份，将来只改一处就分叉。
+    要拿它扣 reserve，前端 tooltip 要直接展示它。
     """
     setting = configUtil.get_app_config().setting
     context_cfg = model_config.context_config if model_config.context_config else setting.context_config
-
-    # context_cfg 已按「模型级 > 全局 > 默认值」合并过，这里即用户最终生效的配置。
-    context_window = context_cfg.context_window_tokens
-    if context_window == LlmContextConfig().context_window_tokens:
-        # 用户没改过 → 用内置表兜底；表里没有该模型则保持代码默认值。
-        context_window = DEFAULT_MODEL_CONTEXT_WINDOWS.get(model_config.name, context_window)
-
-    return context_window
+    return context_cfg.context_window_tokens
 
 
 def calc_hard_limit_tokens(model_config: LlmModelConfig) -> int:

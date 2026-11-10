@@ -147,7 +147,7 @@
 ```json
 {
   "context_config": {
-    "context_window_tokens": 131072,
+    "context_window_tokens": 262144,
     "reserve_output_tokens": 16384,
     "compact_trigger_ratio": 0.85,
     "compact_summary_max_tokens": 6144
@@ -157,7 +157,7 @@
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `context_window_tokens` | int | `131072` | 上下文窗口大小 |
+| `context_window_tokens` | int | `262144` | 上下文窗口大小 |
 | `reserve_output_tokens` | int | `16384` | 预留输出 token 数 |
 | `compact_trigger_ratio` | float | `0.85` | 触发 compact 的比例（0.0~1.0） |
 | `compact_summary_max_tokens` | int | `6144` | compact 摘要 token 上限 |
@@ -390,7 +390,7 @@ Set global defaults for context window and compaction strategy. Individual model
 ```json
 {
   "context_config": {
-    "context_window_tokens": 131072,
+    "context_window_tokens": 262144,
     "reserve_output_tokens": 16384,
     "compact_trigger_ratio": 0.85,
     "compact_summary_max_tokens": 6144
@@ -400,7 +400,7 @@ Set global defaults for context window and compaction strategy. Individual model
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `context_window_tokens` | int | `131072` | Context window size. |
+| `context_window_tokens` | int | `262144` | Context window size. |
 | `reserve_output_tokens` | int | `16384` | Reserved output tokens. |
 | `compact_trigger_ratio` | float | `0.85` | Compaction trigger ratio (0.0~1.0). |
 | `compact_summary_max_tokens` | int | `6144` | Max tokens for compaction summary. |

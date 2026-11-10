@@ -20,13 +20,19 @@
         {
           "name": "qwen-plus",
           "protocol": "openai",
-          "enabled": true
+          "enabled": true,
+          "context_config": {
+            "context_window_tokens": 131072
+          }
         },
         {
           "name": "qwen-vl-plus",
           "protocol": "openai",
           "enabled": false,
-          "input": ["text", "image"]
+          "input": ["text", "image"],
+          "context_config": {
+            "context_window_tokens": 32768
+          }
         }
       ]
     }
@@ -40,7 +46,7 @@
   },
 
   "context_config": {
-    "context_window_tokens": 131072
+    "context_window_tokens": 262144
   },
 
   "third_party_services": {
