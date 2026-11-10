@@ -21,13 +21,14 @@ from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver import AgentDriverConfig
 from tests.base import ServiceTestCase
 from util import llmApiUtil
+from tests.tokenSnapshotStub import snapshots
 
 # ── Mock 配置：故意把阈值设小，方便触发 compact ──
 
 _CONFIG_PATCH = "util.configUtil.get_app_config"
 _COMPACT_LLM_PATCH = "service.agentService.compact.llmService"
 _INFER_STREAM_PATCH = "service.agentService.agentTurnRunner.llmService.infer_stream"
-_ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
+_TOKEN_SNAPSHOT_PATCH = "service.agentService.agentTurnRunner.AgentTurnRunner._token_snapshot"
 _ACTIVITY_PATCH = "service.agentService.agentTurnRunner.agentActivityService"
 
 
@@ -162,7 +163,7 @@ class TestCompactFlow(ServiceTestCase):
         # estimate 调用序列：
         # 1st: _infer_to_item 主流程估算 → 超 trigger
         # 2nd: _execute_compact 裁剪后估算 → 低于 trigger（_check_compact 复用它）
-        estimate_calls = iter([_TRIGGER + 50, 100])
+        estimate_calls = snapshots(_TRIGGER + 50, 100)
 
         with (
             mock.patch(_CONFIG_PATCH, return_value=_mock_config()),
@@ -170,7 +171,7 @@ class TestCompactFlow(ServiceTestCase):
             mock.patch(_INFER_STREAM_PATCH, AsyncMock(
                 return_value=llmService.InferResult.success(normal_resp),
             )),
-            mock.patch(_ESTIMATE_PATCH, side_effect=estimate_calls),
+            mock.patch(_TOKEN_SNAPSHOT_PATCH, side_effect=estimate_calls),
             mock.patch(_ACTIVITY_PATCH, _mock_activity_service()),
         ):
             output_item = await history.append_history_init_item(role=OpenaiApiRole.ASSISTANT)

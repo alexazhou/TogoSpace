@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator, cast
+
+import litellm
 
 from constants import AgentHistoryTag, AgentHistoryStatus, OpenaiApiRole
 from dal.db import gtAgentHistoryManager
@@ -29,6 +31,93 @@ class CompactPlan:
     insert_seq: int | None
 
 
+@dataclass(frozen=True)
+class HistoryTokenSnapshot:
+    """History 当前 token 口径（压缩、上下文占用条、活动记录三处共用）。
+
+    口径来源是「history 本身」：全量估算与上游真值都从 history 取，
+    调用方不再各自拼消息列表去 tokenize。
+    """
+
+    #: 全量本地估算：system prompt + 工具定义 + 全部未压缩消息（不含 pending 占位）。
+    estimated_tokens: int
+
+    #: 当前上下文长度口径：
+    #: - 有可用真值 = `accurate_usage.prompt_tokens` + 锚点行自身及其后消息的估算；
+    #: - 无可用真值 = `estimated_tokens`。
+    current_tokens: int
+
+    #: 最近一次上游返回的真实 usage（从 history 还原，故 `prompt_cache_usage` 恒为 None）。
+    accurate_usage: llmApiUtil.OpenAIUsage | None = None
+
+    #: `accurate_usage` 对应锚点行的 `seq`（产出这次请求的 assistant 行）。
+    accurate_anchor_seq: int | None = None
+
+
+# ─── token 估算（原 compact.estimate_tokens 迁移至此） ──────────────────
+
+def _tools_to_dicts(tools: list[llmApiUtil.OpenAITool] | None) -> list[dict[str, Any]] | None:
+    """把工具定义转成请求形态的 dict（与 `llmApiUtil.client` 实际发送的一致）。"""
+    if not tools:
+        return None
+    return [t.model_dump(exclude_none=True) for t in tools]
+
+
+def tools_fingerprint(tools: list[llmApiUtil.OpenAITool] | None) -> str:
+    """工具定义的稳定序列化结果，用于 token 快照缓存 key。
+
+    工具列表通常很小，序列化成本远低于重复跑 tokenizer。
+    """
+    return json.dumps(_tools_to_dicts(tools) or [], sort_keys=True, ensure_ascii=False)
+
+
+def estimate_messages_tokens(
+    model: str,
+    messages: list[AgentMessage],
+    system_prompt: str | None = None,
+    tools: list[llmApiUtil.OpenAITool] | None = None,
+) -> int:
+    """估算消息列表的 token 数量，使用 litellm.token_counter。
+
+    内部把 AgentMessage 转回 OpenAIMessage（含多模态 content）再估算，
+    保证与实际发送形态一致；`tools` 也一并交给 tokenizer，
+    避免新会话 / compact 后没有真值锚点时估算偏低。
+    """
+    try:
+        msg_dicts: list[dict[str, Any]] = []
+        if system_prompt:
+            msg_dicts.append({"role": "system", "content": system_prompt})
+        for msg in messages:
+            msg_dicts.append(msg.to_openai_message().to_dict())
+        return litellm.token_counter(
+            model=model,
+            messages=msg_dicts,
+            # 请求形态的 dict 与 litellm 的 ChatCompletionToolParam TypedDict 结构一致，
+            # 但 TypedDict 无法用 dict 字面量静态满足（参数是嵌套联合类型）。
+            tools=cast(Any, _tools_to_dicts(tools)),
+        )
+    except Exception as e:
+        logger.warning("token 估算失败，回退到字符估算: error=%s", e)
+        return estimate_token_by_char(messages, system_prompt, tools)
+
+
+def estimate_token_by_char(
+    messages: list[AgentMessage],
+    system_prompt: str | None = None,
+    tools: list[llmApiUtil.OpenAITool] | None = None,
+) -> int:
+    """字符数 / 4 的粗略估算，作为 litellm 失败时的兜底。"""
+    total_chars = len(system_prompt or "")
+    for msg in messages:
+        total_chars += len(msg.content or "")
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                total_chars += len(tc.function_args)
+    tools_dicts = _tools_to_dicts(tools)
+    if tools_dicts:
+        total_chars += len(json.dumps(tools_dicts, ensure_ascii=False))
+    return total_chars // 4
+
 
 class AgentHistoryStore:
     """Agent 历史消息存储：统一管理历史读写、查询与持久化。"""
@@ -36,6 +125,10 @@ class AgentHistoryStore:
     def __init__(self, agent_id: int, items: Iterable[GtAgentHistory] | None = None):
         self._agent_id = agent_id
         self._items: list[GtAgentHistory] = list(items or [])
+        #: 消息体版本号：任何会改变消息体或 usage 的写操作都递增，用于 token 快照缓存失效。
+        self._revision = 0
+        #: token 快照缓存：(cache_key, snapshot)，只保留最后一份。
+        self._token_cache: tuple[tuple, HistoryTokenSnapshot] | None = None
 
     @property
     def agent_id(self) -> int:
@@ -50,8 +143,17 @@ class AgentHistoryStore:
     def __getitem__(self, index):
         return self._items[index]
 
+    def _bump_revision(self) -> None:
+        """标记消息体已变化，令 token 快照缓存失效。"""
+        self._revision += 1
+
+    def invalidate_token_cache(self) -> None:
+        """消息体被原地修改（如视觉兜底回填 recognition）后调用。"""
+        self._bump_revision()
+
     def replace(self, items: Iterable[GtAgentHistory]) -> None:
         self._items = list(items)
+        self._bump_revision()
 
     async def reload_from_db(self) -> None:
         """从数据库重新加载历史消息，覆盖内存状态。
@@ -61,6 +163,7 @@ class AgentHistoryStore:
         """
         items = await gtAgentHistoryManager.get_agent_history_after_compact(self._agent_id)
         self._items = list(items)
+        self._bump_revision()
         logger.info("[reload] agent_id=%d, loaded %d items from db (after compact)", self._agent_id, len(self._items))
 
     @property
@@ -151,6 +254,7 @@ class AgentHistoryStore:
 
         if saved is not None:
             item.id = saved.id
+        self._bump_revision()
         return item
 
     async def append_history_init_item(
@@ -227,6 +331,7 @@ class AgentHistoryStore:
             update_kwargs["tool_call_id"] = agent_msg.tool_call_id
             update_kwargs["message"] = agent_msg
         await gtAgentHistoryManager.update_agent_history_by_id(**update_kwargs)
+        self._bump_revision()
 
     def get_last_assistant_message(self, start_idx: int = 0) -> llmApiUtil.OpenAIMessage | None:
         recent_history = self._items[start_idx:]
@@ -386,6 +491,95 @@ class AgentHistoryStore:
         logger.info("[cancel-turn] agent_id=%d, turn 已关闭", self._agent_id)
 
     # ─── Compact 相关方法 ─────────────────────────────────────
+
+    # ─── Token 口径 ──────────────────────────────────────────
+
+    def token_snapshot(
+        self,
+        model: str,
+        system_prompt: str | None = None,
+        tools: list[llmApiUtil.OpenAITool] | None = None,
+    ) -> HistoryTokenSnapshot:
+        """返回当前 token 口径（带缓存）。
+
+        - `estimated_tokens`：system prompt + tools + 全部未压缩消息的全量估算；
+        - `current_tokens`：有可用真值锚点时用「真值 + 锚点行起的尾部估算」，
+          否则退回 `estimated_tokens`。
+        """
+        cache_key = (model, system_prompt, tools_fingerprint(tools), self._revision)
+        if self._token_cache is not None and self._token_cache[0] == cache_key:
+            return self._token_cache[1]
+
+        messages = self.build_infer_messages()
+        estimated_tokens = estimate_messages_tokens(model, messages, system_prompt, tools)
+
+        anchor_idx = self._find_usage_anchor_index()
+        if anchor_idx is None:
+            snapshot = HistoryTokenSnapshot(
+                estimated_tokens=estimated_tokens,
+                current_tokens=estimated_tokens,
+            )
+        else:
+            anchor_item = self._items[anchor_idx]
+            usage = anchor_item.usage
+            assert usage is not None and usage.prompt_tokens is not None
+            # tail 从锚点行自身开始：真值只覆盖锚点之前的输入，
+            # 锚点行的 assistant 回复也要计入当前上下文。
+            tail_messages = [
+                msg for item in self._items[anchor_idx:] if (msg := item.message) is not None
+            ]
+            tail_tokens = estimate_messages_tokens(model, tail_messages)
+            snapshot = HistoryTokenSnapshot(
+                estimated_tokens=estimated_tokens,
+                current_tokens=usage.prompt_tokens + tail_tokens,
+                accurate_usage=llmApiUtil.OpenAIUsage(
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=usage.completion_tokens or 0,
+                    total_tokens=usage.total_tokens or 0,
+                    prompt_cache_usage=None,
+                ),
+                accurate_anchor_seq=anchor_item.seq,
+            )
+
+        self._token_cache = (cache_key, snapshot)
+        return snapshot
+
+    def estimate_tokens(
+        self,
+        model: str,
+        system_prompt: str | None = None,
+        tools: list[llmApiUtil.OpenAITool] | None = None,
+    ) -> int:
+        """当前完整上下文的本地全量估算（便捷方法，语义同 `estimated_tokens`）。"""
+        return self.token_snapshot(model, system_prompt, tools).estimated_tokens
+
+    def _find_usage_anchor_index(self) -> int | None:
+        """从尾部向前找可作为真值锚点的 history 行下标；无可用锚点返回 None。
+
+        判据（两条都要满足）：
+        1. `item.usage` 与 `usage.prompt_tokens` 均有值；
+        2. 该行属于当前 session：`item.id > summary.id`，`summary` 是尾部向前
+           第一条 `COMPACT_SUMMARY` 行。
+
+        第 2 条不能退化成「列表顺序在 summary 之后」：compact 会保留一段尾部旧行，
+        它们顺序上在 summary 之后，但 id 更小、usage 描述的是压缩前的上下文。
+        """
+        boundary_id = self._current_session_boundary_id()
+        for idx in range(len(self._items) - 1, -1, -1):
+            item = self._items[idx]
+            if item.usage is None or item.usage.prompt_tokens is None:
+                continue
+            if boundary_id is not None and (item.id is None or item.id <= boundary_id):
+                continue
+            return idx
+        return None
+
+    def _current_session_boundary_id(self) -> int | None:
+        """当前 session 的边界：尾部向前第一条 COMPACT_SUMMARY 行的 `id`。"""
+        for item in reversed(self._items):
+            if AgentHistoryTag.COMPACT_SUMMARY in item.tags:
+                return item.id
+        return None
 
     def build_infer_messages(self) -> list[AgentMessage]:
         """构造本次 _infer() 要发的消息列表（AgentMessage，转换由 llmService 统一完成）。"""
@@ -569,6 +763,7 @@ class AgentHistoryStore:
         )
 
         self._assert_compact_invariant()
+        self._bump_revision()
         return item
 
     def _assert_compact_invariant(self) -> None:

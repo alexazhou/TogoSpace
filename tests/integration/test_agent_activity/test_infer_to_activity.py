@@ -15,6 +15,7 @@ from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver.base import AgentDriverConfig
 from tests.base import ServiceTestCase
 from util.llmApiUtil import OpenAIMessage, OpenaiApiRole
+from tests.tokenSnapshotStub import snapshots
 
 if os.name == "posix" and sys.platform == "darwin":
     os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
@@ -90,7 +91,7 @@ class TestInferToActivity(ServiceTestCase):
         with (
             patch("util.configUtil.get_app_config", return_value=app_config),
             patch("service.agentService.agentTurnRunner.llmService.infer_stream", AsyncMock(return_value=llmService.InferResult.success(resp))),
-            patch("service.agentService.agentTurnRunner.compact.estimate_tokens", return_value=1000),
+            patch("service.agentService.agentTurnRunner.AgentTurnRunner._token_snapshot", side_effect=snapshots(1000)),
             patch("service.agentService.agentTurnRunner.compact.calc_compact_trigger_tokens", return_value=25000),
             patch("service.agentService.agentTurnRunner.compact.calc_hard_limit_tokens", return_value=30000),
         ):
@@ -172,7 +173,7 @@ class TestInferToActivity(ServiceTestCase):
         with (
             patch("util.configUtil.get_app_config", return_value=app_config),
             patch("service.agentService.agentTurnRunner.llmService.infer_stream", AsyncMock(return_value=llmService.InferResult.success(resp))),
-            patch("service.agentService.agentTurnRunner.compact.estimate_tokens", return_value=1000),
+            patch("service.agentService.agentTurnRunner.AgentTurnRunner._token_snapshot", side_effect=snapshots(1000)),
             patch("service.agentService.agentTurnRunner.compact.calc_compact_trigger_tokens", return_value=25000),
             patch("service.agentService.agentTurnRunner.compact.calc_hard_limit_tokens", return_value=30000),
         ):

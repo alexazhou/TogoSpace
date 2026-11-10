@@ -8,6 +8,9 @@
 如果三处各自算一遍 `used / total`，迟早出现「面板显示 85% 但没触发压缩」这种
 两边都对、口径不同的鬼故事。所以统一走这里，并且分母与触发线直接复用
 `compact.py` 的函数，不另写估算。
+
+分子的唯一来源是 `AgentHistoryStore.token_snapshot().current_tokens`
+（`agentTurnRunner._publish_context_usage` 负责取），本模块不再自己估 token。
 """
 from __future__ import annotations
 
@@ -15,8 +18,6 @@ import logging
 
 from constants import MessageBusTopic
 from model.coreModel.agentModel import AgentContextUsage
-from model.dbModel.gtAgentHistory import GtAgentHistory
-from model.dbModel.agentMessage import AgentMessage
 from service import messageBus
 from service.agentService import compact
 from service.llmService.core import resolve_model
@@ -27,19 +28,13 @@ logger = logging.getLogger(__name__)
 def calc_context_usage(
     *,
     model_name: str,
-    messages: list[AgentMessage],
-    system_prompt: str | None,
-    used_tokens: int | None = None,
+    used_tokens: int,
 ) -> AgentContextUsage | None:
     """按当前模型配置算一份占用快照；模型配置解析失败时返回 `None`。
 
     Args:
         model_name: Agent 的模型标识（可为空串，走系统默认槽位）。
-        messages: 未压缩的历史消息（**不含** System Prompt）。
-        system_prompt: System Prompt 正文；`estimate_tokens` 会把它的开销算进去。
-        used_tokens: 已知的精确用量（如推理返回的 `usage.prompt_tokens`）。
-            给了就直接用，跳过 token 估算——估算函数每次都要跑一遍 tokenizer，
-            在推理收尾这个已知精确值的场景里没必要重复算。
+        used_tokens: 当前上下文长度口径，由 `HistoryTokenSnapshot.current_tokens` 提供。
 
     Returns:
         `AgentContextUsage`；模型配置不可解析时 `None`（前端整条不渲染）。
@@ -61,9 +56,6 @@ def calc_context_usage(
         )
         return None
 
-    if used_tokens is None:
-        used_tokens = compact.estimate_tokens(merged_llm_config.name, messages, system_prompt)
-
     return AgentContextUsage(
         used_tokens=used_tokens,
         limit_tokens=limit_tokens,
@@ -71,25 +63,6 @@ def calc_context_usage(
         context_window_tokens=compact.resolve_context_window_tokens(merged_llm_config),
         # 不 clamp：超限是真实可发生的诊断信息，压掉就看不见了（见 AgentContextUsage 注释）。
         ratio=used_tokens / limit_tokens,
-    )
-
-
-def calc_context_usage_from_history(
-    *,
-    model_name: str,
-    items: list[GtAgentHistory],
-    system_prompt: str | None,
-) -> AgentContextUsage | None:
-    """从历史行列表算占用快照（内存态与 DB 态共用同一份转换规则）。
-
-    只取 `message` 非空的条目：pending infer 占位行、被中断的空行都没有消息体，
-    把它们算进去会让分子虚高。
-    """
-    messages = [msg for item in items if (msg := item.message) is not None]
-    return calc_context_usage(
-        model_name=model_name,
-        messages=messages,
-        system_prompt=system_prompt,
     )
 
 

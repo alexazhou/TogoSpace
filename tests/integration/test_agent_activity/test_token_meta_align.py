@@ -43,10 +43,11 @@ from service.agentService.agentTurnRunner import AgentTurnRunner
 from service.agentService.driver import AgentDriverConfig
 from tests.base import ServiceTestCase
 from util.llmApiUtil import OpenAIMessage, OpenaiApiRole
+from tests.tokenSnapshotStub import snapshots
 
 _CONFIG_PATCH = "util.configUtil.get_app_config"
 _INFER_STREAM_PATCH = "service.agentService.agentTurnRunner.llmService.infer_stream"
-_ESTIMATE_PATCH = "service.agentService.agentTurnRunner.compact.estimate_tokens"
+_TOKEN_SNAPSHOT_PATCH = "service.agentService.agentTurnRunner.AgentTurnRunner._token_snapshot"
 
 _AGENT_ID = 1
 _TEAM_ID = 1
@@ -149,7 +150,7 @@ async def _run_infer(stream_script, response) -> dict:
     with (
         patch(_CONFIG_PATCH, return_value=_mock_config()),
         patch(_INFER_STREAM_PATCH, AsyncMock(side_effect=stream_script)),
-        patch(_ESTIMATE_PATCH, return_value=1000),
+        patch(_TOKEN_SNAPSHOT_PATCH, side_effect=snapshots(1000)),
     ):
         await runner._infer_to_item(output_item, tools=[])
 

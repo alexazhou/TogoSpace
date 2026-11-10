@@ -40,7 +40,8 @@ class AgentContextUsage(BaseModel):
 
     ## `ratio` 可能 > 1
 
-    `used_tokens` 是估算值（`compact.estimate_tokens`），`limit_tokens` 是配置值，
+    `used_tokens` 是 `HistoryTokenSnapshot.current_tokens`（有上游真值锚点时
+    = 真值 + 锚点行起的尾部估算，否则为全量本地估算），`limit_tokens` 是配置值，
     两者口径不同，真实存在 `used > limit` 的窄窗口。这里**不做 clamp**：
     把超限压成 1.0 会让「已经超出容量」这个诊断信息消失，而前端画宽度本来就要
     `Math.min(100, …)` 兜底——clamp 放在唯一需要它的地方（渲染），别丢数据。
@@ -49,7 +50,7 @@ class AgentContextUsage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     used_tokens: int
-    """分子：当前会话未压缩上下文的估算 token 数（含 System Prompt）。"""
+    """分子：当前上下文长度口径（`AgentHistoryStore.token_snapshot().current_tokens`）。"""
 
     limit_tokens: int
     """分母：可用于 prompt 的容量 = context_window − reserve_output。"""

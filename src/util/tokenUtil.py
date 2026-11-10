@@ -5,7 +5,8 @@ litellm 自带的 tiktoken 编码文件（cl100k / o200k / anthropic）已随桌
 发布，`litellm.token_counter` 不会发起网络请求。
 
 这里只负责「一段文本大概多少 token」。消息列表级估算仍走
-`agentService.compact.estimate_tokens`（它会处理 AgentMessage 转换）。
+`agentService.agentHistoryStore.estimate_messages_tokens`（它会处理 AgentMessage
+转换并纳入 tools 定义）。
 """
 from __future__ import annotations
 
