@@ -98,6 +98,8 @@ class ClaudeSdkAgentDriver(AgentDriver):
                 funcToolService.run_tool_call,
                 marks_turn_finish=fn_name == "finish_action",
                 self_interrupt=fn_name == "reload_team",
+                # `console` 只有路由到 reload 子命令才自中断，靠参数判定（#154 D6）。
+                self_interrupt_predicate=funcToolService.get_self_interrupt_predicate(fn_name),
             )
         configured_names = self.config.options.get("local_tool_names")
         if configured_names:

@@ -482,6 +482,8 @@ class TspAgentDriver(AgentDriver):
                 funcToolService.run_tool_call,
                 marks_turn_finish=function_name == "finish_action",
                 self_interrupt=function_name == "reload_team",
+                # `console` 只有路由到 reload 子命令才自中断，靠参数判定（#154 D6）。
+                self_interrupt_predicate=funcToolService.get_self_interrupt_predicate(function_name),
             )
 
         for tool in self._tsp_tools.values():

@@ -1,4 +1,24 @@
 {
+  "console": {
+    "description": "团队/组织/成员/房间/角色模板的管理控制台，用命令行完成管理操作。",
+    "parameters": {
+      "command": {
+        "description": "要执行的命令。资源名：dept(部门) / agent(成员) / room(房间) / role(角色模板) / task(协作任务)。示例：'dept ls'、'agent create --from payload'、'room get 研发部'、'task ls --status TODO'、'task update 187 --remove-field reviewer_id'。输入 'help' 查看全部命令。",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "payload": {
+        "description": "仅当 command 使用 --from payload 时提供，作为 create/update 的 JSON 配置对象；其他命令不得提供。",
+        "schema": {
+          "type": "object"
+        }
+      }
+    },
+    "required": [
+      "command"
+    ]
+  },
   "create_container": {
     "description": "创建一个属于你的沙箱容器，用于在隔离环境中执行命令。",
     "parameters": {

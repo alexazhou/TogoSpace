@@ -1,4 +1,48 @@
-from typing import Any
+from typing import Any, Callable, Optional
+
+
+class ForwardToolCall(Exception):
+    """「把这次调用转发给另一个工具」的信号（#160）。
+
+    为什么用异常而不是返回值：`console` 的每条子命令都等价于一个原工具（`save_agent`
+    / `get_dept_info` …），而**权限与执行只有一份实现**才是本单的目标。若 console 自己
+    再算一遍权限（`_assert_permitted`），就必然出现「原工具调不了、console 却能调」这类
+    错位。改成抛这个信号后，console 只负责「命令 → 目标工具 + 参数」，真正的鉴权与执行
+    全部回到唯一入口 `AgentToolRegistry.execute_tool_call`。
+
+    为什么放在 `src/exception.py` 这种叶子模块：`toolRegistry` 要 import 它，而
+    `funcToolService/__init__.py` 会 `from .core import *` → `core` → `tools.py` →
+    `toolRegistry`。若把本异常放进 `funcToolService` 包内（任务单的建议落点），
+    `toolRegistry` 顶层 import 它就会触发上面这条链的**循环导入**
+    （`ImportError: cannot import name 'validate_tool_allow_specs' ... partially initialized`）。
+    `exception.py` 只依赖 `typing`，是叶子模块，任何模块都能安全 import。
+
+    Attributes:
+        tool_name: 转发目标工具名（必须是注册表里真实存在的名字）。
+        tool_args: 目标工具的关键字参数字典（**不要**包含 `_context`：它由
+            `run_tool_call` 按当前上下文注入，签名里有 `_context` 才会注入）。
+            **不能**叫 `args`：`BaseException.args` 是内置描述符，给它赋 dict 会被
+            强制转成 tuple（拿到的是**键的元组**），随后 `json.dumps` 出去变成 list，
+            `func(**list)` 直接 `TypeError: argument after ** must be a mapping`。
+            实测踩过这个坑，别改回 `args`。
+        post_process: 可选的返回值后处理回调。仅用于「依赖目标工具返回体」的本地逻辑
+            （例如 `rm` 把 `impact` 并回结果、`agent get` 的 id 一致性守卫）；
+            **不得**在其中做权限判定——鉴权已经执行完了。
+    """
+
+    def __init__(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        *,
+        post_process: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
+    ) -> None:
+        # 只把人类可读的一句话交给 BaseException.args，转发参数走独立属性
+        # （`tool_args` 而不是 `args`，原因见类 docstring）。
+        super().__init__(f"forward to {tool_name}")
+        self.tool_name = tool_name
+        self.tool_args = tool_args
+        self.post_process = post_process
 
 
 class TogoException(Exception):
