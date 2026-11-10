@@ -22,6 +22,8 @@ from model.coreModel import ContainerTarget, ExecEnvState
 from service.agentService.driver.base import AgentDriverConfig
 
 from service import containerService, funcToolService, roomService, messageBus
+from service.funcToolService import toolArgsValidation
+from toolResult import error_result, invalid_json_args
 from service.agentService import toolRegistry
 from model.dbModel.gtScheduleJob import GtScheduleJob
 from util import containerUtil, llmApiUtil
@@ -533,7 +535,26 @@ class TspAgentDriver(AgentDriver):
         try:
             parsed_args = json.loads(function_args)
         except json.JSONDecodeError as e:
-            return {"success": False, "message": f"TSP 参数 JSON 解析失败: {e}"}
+            return invalid_json_args(function_name, function_args, e)
+
+        # 远端工具的参数校验：schema 来自 `self._tsp_tools[name].function.parameters`
+        # ——它与 `_load_tsp_tools()` 用 `OpenAIFunctionParameter(**tool.input_schema)`
+        # 构造、下发给模型的是同一份结构，所以没有第二份真相（小马哥 1015 裁定 (a')）。
+        # 远端 schema 由对端决定，可能不合规范 ⇒ 取不到/schema 非法时本函数返回 None
+        # （已记 warning）并**继续执行**，绝不因为 schema 坏了把正常调用拦死。
+        remote_schema = toolArgsValidation.get_remote_tool_parameters_schema(
+            function_name, self._tsp_tools.get(function_name),
+        )
+        if remote_schema is not None:
+            invalid_args = toolArgsValidation.validate_tool_args(
+                function_name, parsed_args, schema=remote_schema,
+            )
+            if invalid_args is not None:
+                logger.warning(
+                    "TSP 工具参数校验未通过: agent_id=%s, tool=%s, error_code=%s, args=%r",
+                    self.host.gt_agent.id, function_name, invalid_args.get("error_code"), parsed_args,
+                )
+                return invalid_args
 
         try:
             call = ToolCall(name=function_name, input=parsed_args)
@@ -557,7 +578,7 @@ class TspAgentDriver(AgentDriver):
                 "TSP stdout closed" in err_str or "TSP request timeout" in err_str
             ):
                 self._client = None
-            return {"success": False, "message": f"TSP 工具调用失败: {e}"}
+            return error_result(e, prefix="TSP 工具调用失败: ")
 
     def _load_tsp_tools(self, tools: list[Any]) -> None:
         resolved: dict[str, llmApiUtil.OpenAITool] = {}

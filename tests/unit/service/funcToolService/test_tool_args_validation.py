@@ -1,0 +1,630 @@
+"""#189：tool call 参数 schema 校验的判据（覆盖级 / 行为级 / 结构级 / 兜底）。
+
+## 判据与用例的对应
+
+- 覆盖级（判据 1）：`test_all_default_tools_reject_invalid_args` /
+  `test_all_container_tools_reject_invalid_args` / `test_all_tsp_remote_tools_reject_invalid_args`
+  —— 三组**全遍历**，逐个断言被拦，并断言遍历计数 == 该组工具数（禁抽样）。
+- 行为级（小马哥 1020 替代判据）：`test_tightened_schema_rejects` /
+  `test_relaxed_schema_allows` / `test_unavailable_schema_skips_but_does_not_disable_others`
+- 缓存：`test_schema_is_cached_per_callable_identity`（先证明缓存真的生效，否则
+  「清缓存后施加 monkeypatch」是空操作）
+- 结构级：`test_schema_equals_what_is_sent_to_the_model`（同源证明，报告里写明是
+  **等值**而非同一对象）
+- TSP 兜底：`test_tsp_malformed_schema_still_calls_through`（缺键 / 非 object / 非法 schema）
+- JSON：`test_invalid_json_is_structured_and_does_not_execute`
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from service import funcToolService
+from service.agentService.driver import claudeSdkDriver as csd_module
+from service.funcToolService import core as funcCore
+from service.funcToolService import funcToolType, toolArgsValidation
+from service.funcToolService.funcToolType import FuncTool
+from service.roomService import ToolCallContext
+from toolResult import INVALID_JSON_ARGS
+
+WARNING_KEYWORD = "已跳过校验"
+
+#: 工具总数（`python scripts/tool_schema_snapshot.py` 口径）。写死是为了让「少遍历一组」
+#: 或「抽样」立刻变红——动态用 `len()` 自证会随实现一起漂移，等于没断言。
+DEFAULT_TOOL_COUNT = 32
+CONTAINER_TOOL_COUNT = 5
+
+
+# --------------------------------------------------------------------------- #
+# 夹具
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(autouse=True)
+def _cold_schema_cache():
+    """每个用例都在**冷缓存**下开始，结束后也清干净（不污染别的用例）。
+
+    1020 明确要求：monkeypatch 类判据必须在缓存未热时施加，否则「读不到新实现」会被
+    误判成「实现里有第二份 schema」。
+    """
+
+    funcCore.load_func_tools()
+    funcCore.load_container_func_tools()
+    toolArgsValidation.clear_schema_cache()
+    yield
+    toolArgsValidation.clear_schema_cache()
+
+
+def _ctx(tool_name: str) -> ToolCallContext:
+    return ToolCallContext(agent_id=1, team_id=1, tool_name=tool_name)
+
+
+def _schema_of(func: Any) -> dict:
+    from service.funcToolService.funcToolType import get_function_metadata
+
+    return get_function_metadata("x", func)["parameters"]
+
+
+def _invalid_args_for(schema: dict) -> Any:
+    """按 schema 造一份**必定非法**的参数。
+
+    - 有必填 ⇒ 空对象（触发 required）；
+    - 否则取第一个可违规的属性喂错类型/错枚举；
+    - 一个属性都没有（零参工具）⇒ 喂 JSON 数组，触发根节点的 `type: object`。
+
+    这样每组工具（含零参工具）都能拿到一条真实非法参数，不必为了「有东西可喂」而给
+    零参工具编造参数。
+    """
+
+    required = schema.get("required") or []
+    if required:
+        return {}
+
+    for name, prop in (schema.get("properties") or {}).items():
+        if "enum" in prop:
+            return {name: "__value_not_in_enum__"}
+        declared = prop.get("type")
+        replacement = {
+            "string": 12345,
+            "integer": "not-an-integer",
+            "number": "not-a-number",
+            "boolean": "not-a-boolean",
+            "array": "not-an-array",
+            "object": "not-an-object",
+        }.get(declared)
+        if replacement is not None:
+            return {name: replacement}
+    return []
+
+
+# --------------------------------------------------------------------------- #
+# 覆盖级：三组工具全遍历
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_all_default_tools_reject_invalid_args() -> None:
+    """默认工具组全遍历：每个工具喂非法参数都被校验拦下，且计数等于工具总数。"""
+
+    from service.funcToolService.funcToolType import get_function_metadata
+
+    tools = funcCore.get_tools()
+    assert len(tools) == DEFAULT_TOOL_COUNT, [tool.function.name for tool in tools]
+
+    covered = 0
+    for tool in tools:
+        name = tool.function.name
+        func = funcCore.get_func_tool(name)
+        assert func is not None, name
+        invalid_args = _invalid_args_for(get_function_metadata(name, func.callable)["parameters"])
+
+        result = await funcCore.run_tool_call(json.dumps(invalid_args), _ctx(name))
+
+        assert result["success"] is False, (name, invalid_args)
+        assert result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS, (name, result)
+        # 结构化的实质要求：文案里必须能定位「哪个参数、期望什么、收到什么」，
+        # 不许退化成 `Invalid arguments for function xxx` 这种无字段名的旧文案。
+        assert "参数校验失败" in result["message"], (name, result)
+        covered += 1
+
+    assert covered == DEFAULT_TOOL_COUNT
+
+
+@pytest.mark.asyncio
+async def test_all_container_tools_reject_invalid_args() -> None:
+    """容器工具组全遍历（判据 1 的「不许只覆盖一组」）。"""
+
+    from service.funcToolService.funcToolType import get_function_metadata
+
+    names = list(funcToolService.CONTAINER_TOOL_NAMES)
+    assert len(names) == CONTAINER_TOOL_COUNT, names
+
+    covered = 0
+    for name in names:
+        func_tool = funcCore.get_func_tool(name)
+        assert func_tool is not None, name
+        invalid_args = _invalid_args_for(
+            get_function_metadata(name, func_tool.callable)["parameters"]
+        )
+
+        result = await funcCore.run_tool_call(json.dumps(invalid_args), _ctx(name))
+
+        assert result["success"] is False, (name, invalid_args)
+        assert result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS, (name, result)
+        covered += 1
+
+    assert covered == CONTAINER_TOOL_COUNT
+
+
+def _make_tsp_driver(remote_tools: list[Any]):
+    """构造一个只走 `_execute_tsp_tool` 的 driver（client 为 MagicMock，进程视为存活）。"""
+
+    from service.agentService.driver.base import AgentDriverConfig
+    from service.agentService.driver.tspDriver import TspAgentDriver
+
+    host = MagicMock()
+    host.gt_agent = MagicMock(id=1)
+    host.tool_registry = MagicMock()
+    driver = TspAgentDriver(host, AgentDriverConfig(driver_type="tsp", options={}))
+    driver._client = MagicMock()
+    driver._client.process = MagicMock()
+    driver._client.process.returncode = None
+    driver._client.call_tool = AsyncMock(return_value=MagicMock(output={"success": True}))
+    driver._tsp_tools = {
+        tool.function.name: tool for tool in remote_tools
+    }
+    return driver
+
+
+def _remote_tool(name: str, parameters: Any) -> Any:
+    from util import llmApiUtil
+
+    tool = llmApiUtil.OpenAITool(
+        function=llmApiUtil.OpenAIFunction(
+            name=name,
+            description=f"remote {name}",
+            parameters=llmApiUtil.OpenAIFunctionParameter(
+                type="object",
+                properties={},
+                required=[],
+            ),
+        )
+    )
+    # 直接替换成「远端给什么就是什么」的原始值：真实路径由 `_load_tsp_tools` 校验成
+    # pydantic 模型，畸形场景则不会通过那一步校验，这里直接构造畸形对象。
+    tool.function.parameters = parameters  # type: ignore[assignment]
+    return tool
+
+
+@pytest.mark.asyncio
+async def test_all_tsp_remote_tools_reject_invalid_args() -> None:
+    """TSP 远端组全遍历：非法参数在 `call_tool` 之前被拦，计数等于远端工具数。"""
+
+    from util import llmApiUtil
+
+    specs = {
+        "remote_write": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "force": {"type": "boolean"}},
+            "required": ["path"],
+        },
+        "remote_read": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+        "remote_list": {
+            "type": "object",
+            "properties": {"mode": {"enum": ["a", "b"]}},
+            "required": [],
+        },
+    }
+    remote_tools = [
+        llmApiUtil.OpenAITool(
+            function=llmApiUtil.OpenAIFunction(
+                name=name,
+                description=f"remote {name}",
+                parameters=llmApiUtil.OpenAIFunctionParameter(
+                    type=parameters["type"],
+                    properties=parameters["properties"],
+                    required=parameters["required"],
+                ),
+            )
+        )
+        for name, parameters in specs.items()
+    ]
+    driver = _make_tsp_driver(remote_tools)
+    assert len(driver._tsp_tools) == len(specs)
+
+    covered = 0
+    for name, parameters in specs.items():
+        invalid_args = _invalid_args_for(parameters)
+
+        result = await driver._execute_tsp_tool(json.dumps(invalid_args), _ctx(name))
+
+        assert result["success"] is False, (name, invalid_args)
+        assert result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS, (name, result)
+        covered += 1
+
+    assert covered == len(specs)
+    # 「校验发生在转发之前」的硬证据：一条都没进 `call_tool`。
+    driver._client.call_tool.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# 行为级：收紧 / 放宽 / 异常兜底
+# --------------------------------------------------------------------------- #
+
+
+def _stub_tool(name: str, recorder: dict) -> Any:
+    def stub() -> dict:
+        recorder["called"] = recorder.get("called", 0) + 1
+        return {"success": True, "result": "ok"}
+
+    stub.__name__ = name
+    stub.__qualname__ = name
+    return stub
+
+
+@pytest.mark.asyncio
+async def test_tightened_schema_rejects(monkeypatch) -> None:
+    """a) 收紧：无参工具被插上 `required: ["x"]` ⇒ 空参数**确实被拒绝**。"""
+
+    recorder: dict = {}
+    stub = _stub_tool("stub_tighten", recorder)
+    monkeypatch.setattr(funcCore, "get_func_tool", lambda name: FuncTool(name=name, callable=stub))
+    tightened = {
+        "type": "object",
+        "properties": {"x": {"type": "string"}},
+        "required": ["x"],
+    }
+    monkeypatch.setattr(
+        funcToolType, "get_function_metadata",
+        lambda name, func: {"name": name, "description": "", "parameters": tightened},
+    )
+
+    result = await funcCore.run_tool_call("{}", _ctx("stub_tighten"))
+
+    assert result["success"] is False
+    assert result["error_code"] == toolArgsValidation.INVALID_TOOL_ARGS
+    assert "'x'" in result["message"]
+    assert recorder.get("called", 0) == 0, "校验没拦住，工具被执行了"
+
+
+@pytest.mark.asyncio
+async def test_relaxed_schema_allows(monkeypatch) -> None:
+    """b) 放宽：把同一份 schema 的必填删掉 ⇒ 空参数**确实放行**。
+
+    a + b 一起才能证明「校验行为真的跟着 schema 走」：只测其中一个，无论实现是「恒拒」
+    还是「恒放」都能过。
+    """
+
+    recorder: dict = {}
+    stub = _stub_tool("stub_relax", recorder)
+    monkeypatch.setattr(funcCore, "get_func_tool", lambda name: FuncTool(name=name, callable=stub))
+    relaxed = {"type": "object", "properties": {"x": {"type": "string"}}, "required": []}
+    monkeypatch.setattr(
+        funcToolType, "get_function_metadata",
+        lambda name, func: {"name": name, "description": "", "parameters": relaxed},
+    )
+
+    result = await funcCore.run_tool_call("{}", _ctx("stub_relax"))
+
+    assert result["success"] is True, result
+    assert recorder["called"] == 1
+
+
+@pytest.mark.asyncio
+async def test_unavailable_schema_skips_but_does_not_disable_others(
+    monkeypatch, caplog
+) -> None:
+    """c) 异常兜底：schema 提取抛异常 ⇒ ①该工具放行 ②一条 warning ③**别的工具照旧被拦**。
+
+    ③ 是精髓：如果实现写成在校验入口整体 `except: pass`，①②照样绿，但③会红 ——
+    「单点兜底」与「全局失能」必须被区分开。
+    """
+
+    recorder: dict = {}
+    stub = _stub_tool("stub_boom_schema", recorder)
+    real_get = funcToolType.get_function_metadata
+    real_lookup = funcCore.get_func_tool
+
+    def _maybe_boom(name: str, func: Any) -> dict:
+        if name == "stub_boom_schema":
+            raise RuntimeError("提取签名失败")
+        return real_get(name, func)
+
+    def _lookup(name: str) -> Any:
+        # 只替换被测的那个名字：另一条断言要打在**真工具** `get_time` 上，否则
+        # 「别的工具仍被拦」会变成「那个替身仍被拦」，判据就空了。
+        if name == "stub_boom_schema":
+            return FuncTool(name=name, callable=stub)
+        return real_lookup(name)
+
+    monkeypatch.setattr(funcCore, "get_func_tool", _lookup)
+    monkeypatch.setattr(funcToolType, "get_function_metadata", _maybe_boom)
+
+    with caplog.at_level("WARNING", logger="service.funcToolService.toolArgsValidation"):
+        boom_result = await funcCore.run_tool_call("{}", _ctx("stub_boom_schema"))
+        # 同一次运行里，另一条**真工具**（schema 正常）的非法参数必须仍被拦下。
+        other = await funcCore.run_tool_call('{"timezone": 123}', _ctx("get_time"))
+
+    assert boom_result["success"] is True, boom_result
+    assert recorder["called"] == 1
+
+    warnings = [record for record in caplog.records if WARNING_KEYWORD in record.getMessage()]
+    assert len(warnings) == 1, [record.getMessage() for record in caplog.records]
+    assert "stub_boom_schema" in warnings[0].getMessage()
+
+    assert other["success"] is False, other
+    assert other["error_code"] == toolArgsValidation.INVALID_TOOL_ARGS
+
+
+def test_schema_is_cached_per_callable_identity(monkeypatch) -> None:
+    """缓存证明（先证明缓存真的生效，否则「清缓存后 monkeypatch」是空操作）。
+
+    同时断言缓存键与**可调用对象身份**绑定：同一份函数定义连调两次只提取一次。
+    """
+
+    calls: list[str] = []
+    real_get = funcToolType.get_function_metadata
+
+    def _counting(name: str, func: Any) -> dict:
+        calls.append(name)
+        return real_get(name, func)
+
+    monkeypatch.setattr(funcToolType, "get_function_metadata", _counting)
+
+    func = funcCore.get_func_tool("get_time").callable  # type: ignore[union-attr]
+    first = toolArgsValidation.get_tool_parameters_schema("get_time", func)
+    second = toolArgsValidation.get_tool_parameters_schema("get_time", func)
+
+    assert calls == ["get_time"], f"schema 没被缓存：{calls}"
+    assert first == second
+    assert toolArgsValidation._callable_identity(func) in toolArgsValidation.get_cached_schema_keys()
+
+
+def test_schema_cache_key_changes_with_function_definition(monkeypatch) -> None:
+    """热重载场景：函数体变了 ⇒ 缓存键必须变（`id()` 会复用地址，挡不住这种情况）。"""
+
+    def tool_a() -> dict:
+        return {}
+
+    def tool_b() -> dict:
+        return {"success": True}
+
+    assert toolArgsValidation._callable_identity(tool_a) != toolArgsValidation._callable_identity(tool_b)
+
+
+# --------------------------------------------------------------------------- #
+# 结构级：与下发给模型的 schema 同源
+# --------------------------------------------------------------------------- #
+
+
+def test_schema_equals_what_is_sent_to_the_model() -> None:
+    """结构级同源：校验用 schema == `to_openai_tool()` 下发给模型的 parameters。
+
+    证法是**等值**（两个独立调用产出的 dict 逐键相等），不是「同一对象」——
+    `get_function_metadata` 每次现造 dict，对象同一性在这里不成立，报告里写明这一点。
+    """
+
+    names = [tool.function.name for tool in funcCore.get_tools(include_container_tools=True)]
+    assert len(names) == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT
+
+    for name in names:
+        func_tool = funcCore.get_func_tool(name)
+        assert func_tool is not None, name
+        from_model = func_tool.to_openai_tool().function.parameters.model_dump()
+        used_by_validation = toolArgsValidation.get_tool_parameters_schema(name, func_tool.callable)
+
+        assert used_by_validation == from_model, name
+
+
+# --------------------------------------------------------------------------- #
+# TSP 畸形 schema 兜底
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "parameters, reason",
+    [
+        (None, "缺少 function.parameters"),
+        (["type", "object"], "parameters 不是 dict"),
+        ({"type": "object", "properties": {"x": {"type": "no-such-type"}}}, "check_schema 判定非法"),
+    ],
+)
+async def test_tsp_malformed_schema_still_calls_through(parameters, reason, caplog) -> None:
+    """远端 schema 畸形 ⇒ **工具仍可调用 + 一条 warning**，绝不拦死正常 TSP 调用。
+
+    三种畸形分别对应三处兜底：取不到键、取到非 dict、`check_schema` 判非法。
+    """
+
+    driver = _make_tsp_driver([_remote_tool("remote_odd", parameters)])
+
+    with caplog.at_level("WARNING", logger="service.funcToolService.toolArgsValidation"):
+        result = await driver._execute_tsp_tool("{}", _ctx("remote_odd"))
+
+    assert result == {"success": True}, result
+    driver._client.call_tool.assert_awaited_once()
+
+    warnings = [record.getMessage() for record in caplog.records if WARNING_KEYWORD in record.getMessage()]
+    assert len(warnings) == 1, warnings
+    assert "remote_odd" in warnings[0]
+    assert reason in warnings[0]
+
+
+# --------------------------------------------------------------------------- #
+# JSON 解析失败：结构化 + 不执行
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_is_structured_and_does_not_execute(monkeypatch) -> None:
+    """坏 JSON 不许再「静默当空参数继续执行」，返回结构化错误且工具零调用。"""
+
+    recorder: dict = {}
+
+    def stub(room_name: str, msg: str) -> dict:
+        recorder["called"] = recorder.get("called", 0) + 1
+        return {"success": True}
+
+    monkeypatch.setattr(funcCore, "get_func_tool", lambda name: FuncTool(name=name, callable=stub))
+
+    result = await funcCore.run_tool_call("not json", _ctx("stub_json"))
+
+    assert result["success"] is False
+    assert result["error_code"] == INVALID_JSON_ARGS
+    assert "not json" in result["message"]
+    assert recorder.get("called", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_tsp_invalid_json_is_structured() -> None:
+    """TSP 路径同一份构造函数：错误码一致，且不进 `call_tool`。"""
+
+    driver = _make_tsp_driver([_remote_tool("remote_odd", {"type": "object"})])
+
+    result = await driver._execute_tsp_tool("invalid json", _ctx("remote_odd"))
+
+    assert result["success"] is False
+    assert result["error_code"] == INVALID_JSON_ARGS
+    driver._client.call_tool.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# 既有行为不被误杀
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_explicit_null_on_optional_param_is_still_accepted() -> None:
+    """显式传 `null` 给可选参数仍是合法调用。
+
+    schema 生成器把 `Optional[T]` 剥成 `T`，`null` 的合法性在 schema 里已经丢失；若照
+    schema 硬拦，「传 null 走默认值」就从合法变成非法 —— 那是本单新增的误杀。
+    """
+
+    result = await funcCore.run_tool_call('{"timezone": null}', _ctx("get_time"))
+
+    assert result.get("error_code") != toolArgsValidation.INVALID_TOOL_ARGS, result
+
+
+# --------------------------------------------------------------------------- #
+# 单点收口的旁路证明（小马哥 1007 决策 B 的验收条件）
+# --------------------------------------------------------------------------- #
+
+
+def _registry_host() -> Any:
+    """构造一个只带 tool_registry 的 host（driver 启动时用它注册 handler）。"""
+
+    from service.agentService.toolRegistry import AgentToolRegistry
+
+    host = MagicMock()
+    host.gt_agent = MagicMock(id=1)
+    host.tool_registry = AgentToolRegistry()
+    host.system_prompt = "p"
+    host.agent_workdir = "/tmp"
+    return host
+
+
+def _handlers_of(host: Any) -> dict[str, Any]:
+    registry = host.tool_registry
+    return {
+        name: registry.get_registered_tool(name).handler
+        for name in registry.list_registered_tool_names()
+    }
+
+
+@pytest.mark.asyncio
+async def test_local_tool_handlers_all_route_to_run_tool_call() -> None:
+    """**无旁路证明**：三个 driver 注册的本地工具 handler 都是 `run_tool_call` 本身。
+
+    小马哥 1007 决策 B：校验只做单点（`run_tool_call`），因此必须证明「不存在直接
+    `func(**args)` 的旁路」。这里用**身份相等**（`is`）而不是行为等价 —— 行为等价
+    在「handler 是包装函数、内部又调了一次 func」时也会成立，挡不住旁路。
+
+    三个 driver 各自的注册点：
+    - `NativeAgentDriver.startup` / `ClaudeSdkAgentDriver.startup`：`get_tools()`
+    - `TspAgentDriver._register_host_tools`：`get_tools(include_container_tools=True)`
+    - `TspAgentDriver._register_host_tools` 末尾另把远端工具注册成 `_execute_tsp_tool`
+      （那条路径的校验在 #189 里由 `tspDriver` 自己调同一个 `validate_tool_args`，见
+      `test_all_tsp_remote_tools_reject_invalid_args`）。
+    """
+
+    from service.agentService.driver.base import AgentDriverConfig
+    from service.agentService.driver.claudeSdkDriver import ClaudeSdkAgentDriver
+    from service.agentService.driver.nativeDriver import NativeAgentDriver
+    from service.agentService.driver.tspDriver import TspAgentDriver
+
+    expected = funcToolService.run_tool_call
+
+    # native
+    native_host = _registry_host()
+    await NativeAgentDriver(
+        native_host, AgentDriverConfig(driver_type="native", options={})
+    ).startup()
+    native_handlers = _handlers_of(native_host)
+    assert len(native_handlers) == DEFAULT_TOOL_COUNT
+    assert all(handler is expected for handler in native_handlers.values()), [
+        name for name, handler in native_handlers.items() if handler is not expected
+    ]
+
+    # tsp：本地组含容器工具（37 个），远端组此时为空
+    tsp_host = _registry_host()
+    tsp_driver = TspAgentDriver(tsp_host, AgentDriverConfig(driver_type="tsp", options={}))
+    tsp_driver._client = MagicMock()
+    tsp_driver._register_host_tools()
+    tsp_handlers = _handlers_of(tsp_host)
+    assert len(tsp_handlers) == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT
+    assert all(handler is expected for handler in tsp_handlers.values()), [
+        name for name, handler in tsp_handlers.items() if handler is not expected
+    ]
+
+    # claude sdk：启动要连 SDK，这里把 client / options 都替掉（只关心注册）
+    claude_host = _registry_host()
+    with patch.object(csd_module, "ClaudeSDKClient") as client_cls, patch.object(
+        csd_module, "ClaudeAgentOptions", MagicMock()
+    ):
+        client_cls.return_value.connect = AsyncMock()
+        driver = ClaudeSdkAgentDriver(
+            claude_host, AgentDriverConfig(driver_type="claude_sdk", options={})
+        )
+        await driver.startup()
+    claude_handlers = _handlers_of(claude_host)
+    assert len(claude_handlers) == DEFAULT_TOOL_COUNT
+    assert all(handler is expected for handler in claude_handlers.values()), [
+        name for name, handler in claude_handlers.items() if handler is not expected
+    ]
+
+
+@pytest.mark.asyncio
+async def test_invalid_args_are_rejected_through_registry_entry_point() -> None:
+    """端到端：从**注册表入口**（模型 tool_call 的真实入口）喂非法参数 ⇒ 被校验拦下。
+
+    上一条证明「handler 身份是 `run_tool_call`」，这一条证明「经过那个身份之后确实拦了」。
+    两条合起来才能排除「注册的是 run_tool_call，但它内部没校验」或「校验了但没走这条路径」。
+    """
+
+    from service.agentService.driver.base import AgentDriverConfig
+    from service.agentService.driver.nativeDriver import NativeAgentDriver
+    from util import llmApiUtil
+
+    host = _registry_host()
+    await NativeAgentDriver(host, AgentDriverConfig(driver_type="native", options={})).startup()
+
+    # `get_time` 的 timezone 是 str；喂 int 必须被拦（走 schema 的 type 约束）。
+    tool_call = llmApiUtil.OpenAIToolCall(
+        id="call_1", function={"name": "get_time", "arguments": '{"timezone": 123}'}
+    )
+    executed = await host.tool_registry.execute_tool_call(tool_call, _ctx("get_time"))
+
+    assert executed.success is False, executed.result
+    assert executed.result["error_code"] == toolArgsValidation.INVALID_TOOL_ARGS, executed.result
+    assert "参数校验失败" in executed.result["message"], executed.result
+    # 失败文案要能定位字段：`timezone` 必须出现在里面（不许退化成无字段名的旧文案）。
+    assert "timezone" in executed.result["message"], executed.result

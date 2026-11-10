@@ -23,6 +23,7 @@ from typing import Any, Callable, NoReturn, Optional
 from constants import ALLOWED_CLEAR_FIELDS, EmployStatus
 from exception import ForwardToolCall
 from service.roomService import ToolCallContext
+from toolResult import error_result
 
 from . import consoleCommands as cc
 from . import consoleParsing as cp
@@ -793,9 +794,9 @@ async def console(command: str, payload: Optional[dict] = None, _context: ToolCa
         # （任务单只列了 `run_tool_call` 与 `execute_tool_call` 两处，这里是第三处。）
         raise
     except Exception as exc:  # 业务异常透传（draft §6）
-        from service.funcToolService.tools import _tool_error_result
-
-        return _tool_error_result(exc)
+        # #189：直接走唯一实现 `toolResult.error_result`，不再绕 `tools._tool_error_result`
+        # —— 后者本身也只是它的别名，绕一层会让「第二份转换」有第二个落脚点。
+        return error_result(exc)
 
 
 def _parse_command_tokens(spec: cc.CommandSpec, tokens: list[str]) -> ParsedCommand:
