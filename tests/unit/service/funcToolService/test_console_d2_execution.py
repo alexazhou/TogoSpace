@@ -60,12 +60,20 @@ from service.funcToolService import core as func_tool_core
 from util import llmApiUtil
 
 
-#: 去重后的转发目标（与 `LEGACY_CONVERGED_TOOLS` 精确相等——隐藏模式下 100% 断的根据）。
+#: 去重后的**全部**转发目标（含 #187 新接进来的 task 三工具）。
 FORWARD_TARGETS: tuple[str, ...] = tuple(
     sorted({s.legacy_tool for s in cc.COMMAND_SPECS if s.legacy_tool})
 )
 #: 全部带转发目标的命令 key（参数化用，与 COMMAND_SPECS 同源，不手抄）。
 FORWARD_COMMANDS: tuple[str, ...] = tuple(s.key for s in cc.COMMAND_SPECS if s.legacy_tool)
+#: 落在 D2 隐藏清单内的转发目标 —— 隐藏模式下**应当**全部不可达。
+CONVERGED_FORWARD_TARGETS: tuple[str, ...] = tuple(
+    t for t in FORWARD_TARGETS if t in cc.LEGACY_CONVERGED_TOOLS
+)
+#: **不**在隐藏清单内的转发目标（#187：task 三工具）—— 隐藏模式下仍然可达。
+NON_CONVERGED_FORWARD_TARGETS: tuple[str, ...] = tuple(
+    t for t in FORWARD_TARGETS if t not in cc.LEGACY_CONVERGED_TOOLS
+)
 
 
 def _build_registry() -> toolRegistry.AgentToolRegistry:
@@ -131,26 +139,41 @@ async def _forward_via_registry(
 # ---------------------------------------------------------------------------
 
 def test_forward_targets_are_exactly_the_converged_set():
-    """去重的转发目标集合必须**精确等于** `LEGACY_CONVERGED_TOOLS`。
+    """**已收敛的**转发目标集合必须精确等于 `LEGACY_CONVERGED_TOOLS`。
 
-    这条是「隐藏模式下 100% 断」的根据：转发目标全部落在隐藏清单内 ⇒ 一个都到不了。
-    若将来新增的转发目标**不在**隐藏清单里，隐藏模式下它会仍然可达，那时本文件的
-    「不可达」断言会红，需要重新评估。
+    ⚠️ #187 起这条不再写成「全部转发目标 == 收敛清单」：`task ls|get|update` 把
+    `list_tasks` / `get_task_detail` / `update_task` 接成了转发目标，但按裁定②
+    **不**扩 `LEGACY_CONVERGED_TOOLS`（该清单是 D2 开关语义载体，扩它等于改所有
+    Agent 的工具面，须 Operator 决策）。于是「转发目标 ⊋ 收敛清单」。
+
+    因此这里守两条，比原来更精确：
+    ① 收敛清单里的每个工具**都必须**有命令在转发它（清单里不得有僵尸项）；
+    ② 差额只能是 `NON_CONVERGED_FORWARD_TARGETS` 这一组，且这组必须**显式非空**
+       地与下面「隐藏模式下仍可达」的事实对应 —— 不许悄悄为别的工具开口子。
     """
-    assert set(FORWARD_TARGETS) == set(cc.LEGACY_CONVERGED_TOOLS), (
-        f"转发目标与隐藏清单不一致：仅目标有={set(FORWARD_TARGETS) - set(cc.LEGACY_CONVERGED_TOOLS)}，"
-        f"仅清单有={set(cc.LEGACY_CONVERGED_TOOLS) - set(FORWARD_TARGETS)}"
+    assert set(CONVERGED_FORWARD_TARGETS) == set(cc.LEGACY_CONVERGED_TOOLS), (
+        f"有收敛清单成员没有任何命令转发它：{set(cc.LEGACY_CONVERGED_TOOLS) - set(CONVERGED_FORWARD_TARGETS)}"
     )
+    assert set(FORWARD_TARGETS) == (
+        set(cc.LEGACY_CONVERGED_TOOLS) | set(NON_CONVERGED_FORWARD_TARGETS)
+    )
+    # 未收敛的转发目标只能是那三个任务工具（若将来又多出别的，本行必须被改，
+    # 迫使作者回来重新评估「隐藏模式下它们仍可达」这件事）。
+    assert set(NON_CONVERGED_FORWARD_TARGETS) == {
+        "list_tasks", "get_task_detail", "update_task",
+    }, f"未收敛的转发目标集合变了：{set(NON_CONVERGED_FORWARD_TARGETS)}"
 
 
 def test_forward_command_count():
     """报总数：全部命令、带转发目标的命令、去重目标数。
 
     数字写死是有意的：命令表增删时要被迫回来看一眼隐藏模式是否还成立。
+    #187 起 26 / 26 / 19（原 23 / 23 / 16，新增 task ls|get|update 三条）。
     """
-    assert len(cc.COMMAND_SPECS) == 23, f"命令表已变化（现 {len(cc.COMMAND_SPECS)} 条），请复核本条"
-    assert len(FORWARD_COMMANDS) == 23
-    assert len(FORWARD_TARGETS) == 16
+    assert len(cc.COMMAND_SPECS) == 26, f"命令表已变化（现 {len(cc.COMMAND_SPECS)} 条），请复核本条"
+    assert len(FORWARD_COMMANDS) == 26
+    assert len(FORWARD_TARGETS) == 19
+    assert len(cc.LEGACY_CONVERGED_TOOLS) == 16, "收敛清单必须仍是 16 项（#187 裁定②：本单不动）"
     # help 是纯本地命令（legacy_tool 为空），单独定义、不在 COMMAND_SPECS 内。
     assert cc.HELP_SPEC.legacy_tool == ""
 
@@ -180,11 +203,13 @@ async def test_d2_hidden_mode_console_forwarding_is_unavailable():
         monkeypatch.setenv(cc.ENV_KEEP_LEGACY_TOOLS, "0")
         assert func_tool_core.keep_legacy_admin_tools() is False, "开关未生效，判据无意义"
 
-        # 前置：目标确实没注册（否则下面「未知工具」的归因就不成立）
+        # 前置：**已收敛**的目标确实没注册（否则下面「未知工具」的归因就不成立）
         registry = _build_registry()
-        unregistered = [n for n in FORWARD_TARGETS if registry.get_registered_tool(n) is None]
-        assert set(unregistered) == set(FORWARD_TARGETS), (
-            f"隐藏模式下应全部未注册，实际仍注册了：{set(FORWARD_TARGETS) - set(unregistered)}"
+        unregistered = [
+            n for n in CONVERGED_FORWARD_TARGETS if registry.get_registered_tool(n) is None
+        ]
+        assert set(unregistered) == set(CONVERGED_FORWARD_TARGETS), (
+            f"隐藏模式下应全部未注册，实际仍注册了：{set(CONVERGED_FORWARD_TARGETS) - set(unregistered)}"
         )
         assert registry.get_registered_tool("console") is not None, "console 本身必须仍在注册表"
 
@@ -201,12 +226,12 @@ async def test_d2_hidden_mode_console_forwarding_is_unavailable():
 
 
 # ---------------------------------------------------------------------------
-# C-2：逐个转发目标验证（16 个全覆盖）
+# C-2：逐个转发目标验证（覆盖范围见下，两组各自的期望不同）
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("target", FORWARD_TARGETS)
+@pytest.mark.parametrize("target", CONVERGED_FORWARD_TARGETS)
 async def test_d2_hidden_mode_every_forward_target_is_unreachable(target: str):
-    """隐藏模式下**逐个转发目标**验证第 2 跳不可达，且失败文案**精确指向该目标**。
+    """隐藏模式下**已收敛的**每个转发目标都不可达，且失败文案**精确指向该目标**。
 
     参数化而非循环，是为了失败时立刻看出是**哪一个**目标漏了。
 
@@ -240,7 +265,7 @@ async def test_d2_hidden_mode_every_forward_target_is_unreachable(target: str):
 
 @pytest.mark.parametrize("target", FORWARD_TARGETS)
 def test_default_mode_every_forward_target_is_registered(target: str):
-    """默认模式下 16 个转发目标**全部**在注册表里。
+    """默认模式下 19 个转发目标**全部**在注册表里。
 
     没有这一组，「隐藏模式不可达」就无法归因到 D2 —— 也可能只是目标名字写错了。
     本组绿 + 上一组绿 ⇒ 差异确实来自开关。
@@ -251,5 +276,38 @@ def test_default_mode_every_forward_target_is_registered(target: str):
         assert func_tool_core.keep_legacy_admin_tools() is True
         registry = _build_registry()
         assert registry.get_registered_tool(target) is not None, f"默认模式下 `{target}` 未注册"
+    finally:
+        monkeypatch.undo()
+
+
+# ---------------------------------------------------------------------------
+# 对现状的显式记录：#187 的 task 三工具在隐藏模式下**仍然可达**
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("target", NON_CONVERGED_FORWARD_TARGETS)
+def test_d2_hidden_mode_task_targets_stay_reachable(target: str):
+    """隐藏模式下 task 三工具**依然注册**——这是 `LEGACY_CONVERGED_TOOLS` 未扩的直接后果。
+
+    **本组是对现状的断言，不是对理想行为的断言。** 裁定②明确本单不扩收敛清单
+    （那是 D2 开关的语义载体，须 Operator 决策），所以「task 命令在隐藏模式下仍
+    可达」是已知且被接受的现状，性质是「未完成的收敛」，不是「不自洽」。
+
+    为什么要专门写一组来钉住「它可达」：如果只把上一组的参数化范围从 19 缩到 16，
+    「task 三工具在隐藏模式下能不能用」就变成了**没人守的空档**——将来有人顺手把
+    它们加进收敛清单，测试不会红，而工具面已经变了。本组存在的意义是把「现状」
+    变成可指认的事实：谁要改，谁就来改这条。
+
+    与 `consoleCommands.LEGACY_CONVERGED_TOOLS` 上方的注释、报告 §4「只报不改」
+    是同一件事的三处留痕。
+    """
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setenv(cc.ENV_KEEP_LEGACY_TOOLS, "0")
+        assert func_tool_core.keep_legacy_admin_tools() is False, "开关未生效，判据无意义"
+        registry = _build_registry()
+        assert registry.get_registered_tool(target) is not None, (
+            f"隐藏模式下 `{target}` 竟然未注册 —— 说明它已经被收进 LEGACY_CONVERGED_TOOLS，"
+            "与裁定②「本单保持 16 项」不符，请复核本组与收敛清单"
+        )
     finally:
         monkeypatch.undo()

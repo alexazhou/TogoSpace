@@ -31,6 +31,16 @@ ENV_KEEP_LEGACY_TOOLS = "TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS"
 _CONSOLE_NAME = "console"
 
 #: 被 `console` 收敛的 16 个原工具名（draft §1 的清单，逐条对齐）。
+#:
+#: ⚠️ **本清单目前未包含任务三工具**（`list_tasks` / `get_task_detail` / `update_task`），
+#: 而 `task ls|get|update` 三条命令已经把这三者作为转发目标接进来了（#187）。
+#: 也就是说：D2 开关置假（隐藏原工具）时，task 三条命令**仍可达**——因为它们的转发
+#: 目标不在本清单里，不会被隐藏。
+#:
+#: 这不是「不自洽」，性质是**未完成的收敛**：本清单是 D2 开关的语义载体，一旦改动
+#: 就等于改变所有启用 console 的 Agent 的工具暴露面，属 draft §1 已定死的口径，
+#: 须 Operator 决策，不能由实现单方面扩表（#187 裁定②）。故此处**保持 16 项不动**，
+#: 只留注释与报告里的一条「只报不改」记录，供后续收敛时一并处理。
 LEGACY_CONVERGED_TOOLS: tuple[str, ...] = (
     "get_dept_info",
     "save_dept",
@@ -65,6 +75,12 @@ class CommandSpec:
             由统一入口在第 2 跳做，所以它必须非空；只有 `help` 这种纯本地命令可以留空。
         accepts_input: 是否接受配置输入（内联 JSON / `--from`）。
         needs_target: 是否需要位置参数 target。
+        input_optional: `accepts_input` 为真时，「没有配置输入」是否合法（#187）。
+            默认 False ⇒ 沿用 create/update 的老语义：没输入就报 `missing_input_source`。
+            只有 `task update` 置 True：它的配置输入和 `--remove-field` 都是可选的，
+            两者都没有时才由路由层显式报 `no_update_action`（见 `consoleTool._route`）。
+            —— 为什么不用「先判断 options 再决定要不要输入」的做法：那样把「这条命令
+            能不能没有输入」这件事藏进路由的 if 分支里，命令表就不再是唯一事实源了。
         self_interrupt: 执行时会不会自中断当前 turn（#154 D6）。目前只有 `reload`。
         min_args / max_args: 位置参数个数约束。
     """
@@ -74,6 +90,7 @@ class CommandSpec:
     legacy_tool: str
     accepts_input: bool = False
     needs_target: bool = False
+    input_optional: bool = False
     self_interrupt: bool = False
     min_args: int = 0
     max_args: int = 0
@@ -92,6 +109,7 @@ def _spec(
     *,
     accepts_input: bool = False,
     needs_target: bool = False,
+    input_optional: bool = False,
     self_interrupt: bool = False,
     min_args: int = 0,
     max_args: int = 0,
@@ -103,6 +121,7 @@ def _spec(
         legacy_tool=legacy_tool,
         accepts_input=accepts_input,
         needs_target=needs_target,
+        input_optional=input_optional,
         self_interrupt=self_interrupt,
         min_args=min_args,
         max_args=max_args,
@@ -153,6 +172,29 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         accepts_input=True, needs_target=True, min_args=1, max_args=1,
     ),
     _spec("role", "rm", "delete_role_template", needs_target=True, min_args=1, max_args=1),
+    # 任务（#187）
+    #
+    # `legacy_tool` 照旧填转发目标，第 2 跳做权限校验与执行。task 三工具在主干上
+    # 都已是 `ToolCategory.BASIC`（见 `toolRegistry.CATEGORY_CONFIG`），所以这三条命令
+    # 的可达性由第 2 跳的原工具权限决定，console 侧不另算。
+    _spec(
+        "task", "ls", "list_tasks",
+        # `--status` 接受逗号分隔多值（`TODO,DONE`），`--kw` 映射 `title_keyword`。
+        # 选项名不带前导 `--`（见 `CommandSpec.options` 注释）。
+        # 刻意**不**暴露 `open-only`：工具层默认就是 True（只看未完结），而给布尔开关
+        # 只会得到一个「开了等于没开」的骗人选项；要含已完结任务请用 `--status` 显式列出。
+        options=("status", "assignee", "reviewer", "scope", "kw", "limit"),
+    ),
+    _spec("task", "get", "get_task_detail", needs_target=True, min_args=1, max_args=1),
+    _spec(
+        "task", "update", "update_task",
+        accepts_input=True, needs_target=True, min_args=1, max_args=1,
+        # 任务 id 是必填位置参数；配置输入与 `--remove-field` 都可省略 —— 单独给
+        # `task update 187 --remove-field reviewer_id` 是合法调用（撤销验收人），
+        # 它没有配置输入。详见 `CommandSpec.input_optional`。
+        input_optional=True,
+        options=("remove-field",),
+    ),
     # 其他
     _spec("time", "get", "get_time", options=("tz",)),
     _spec("reload", "", "reload_team", self_interrupt=True),

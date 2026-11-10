@@ -211,6 +211,16 @@ def _resolve_input_payload(
         )
 
     if not positional:
+        # `input_optional`（#187）：少数命令的配置输入是可选的（目前只有 `task update`
+        # ——「撤销验收人」这种调用本来就没有配置对象）。此时「无输入」返回空对象，
+        # 由路由层判断「输入 + 选项全都为空」并报 `no_update_action`。
+        # **默认 False**，所以 dept/agent/room/role 的 create/update 语义零变化。
+        #
+        # 为什么不在这里顺手检查「选项也空」：那让解析层知道某条命令的选项语义，
+        # 而「没输入且没动作算不算合法」是**命令的业务语义**，归路由。解析层只回答
+        # 「这条命令允不允许没有输入」——这一条写在命令表里（`CommandSpec.input_optional`）。
+        if parsed.spec.input_optional:
+            return {}
         raise ConsoleError(
             "missing_input_source",
             "create/update 需要配置输入：内联 JSON 或 --from payload。",

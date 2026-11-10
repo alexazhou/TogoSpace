@@ -20,7 +20,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable, NoReturn, Optional
 
-from constants import EmployStatus
+from constants import ALLOWED_CLEAR_FIELDS, EmployStatus
 from exception import ForwardToolCall
 from service.roomService import ToolCallContext
 
@@ -40,11 +40,22 @@ HELP_SUMMARY = """dept    ls|get|create|update|rm          部门管理
 agent   ls|get|create|update|wake|dm      成员管理
 room    ls|get|create|update|rm          房间管理
 role    ls|get|create|update|rm          角色模板
+task    ls|get|update                    协作任务
 time    get [--tz]                       当前时间
 reload                                   重载团队（会中断当前行动）
 用法：<资源> <操作> [位置参数] [--选项 ...]
 create/update 的配置输入：'<json>' 或 --from payload（payload 字段传 JSON object）
 详情：help <资源> 或 help <资源> <操作>"""
+
+
+#: `--remove-field` 可清除字段清单的**占位符**（#187 裁定③a）。
+#:
+#: 不让 help 文案手抄一份字段名：`taskService` 里曾残留一份手写副本遮蔽了派生常量，
+#: 扩 `ClearField` 对运行时毫无影响，而变异自证照样「红」——红错了理由（#181 现场）。
+#: 这里用占位符 + `_help_text` 运行时 `replace`，所以候选集合**永远**等于
+#: `constants.ALLOWED_CLEAR_FIELDS` 当刻的值；`test_console_task` 里用 monkeypatch
+#: 扩那个 frozenset，若文案不跟着变即红。
+_CLEAR_FIELDS_PLACEHOLDER = "{ALLOWED_CLEAR_FIELDS}"
 
 HELP_DETAIL: dict[str, str] = {
     "dept ls": "dept ls —— 列出部门树（含成员、负责人、子部门）。",
@@ -93,6 +104,21 @@ HELP_DETAIL: dict[str, str] = {
         "role update <名称> '<json>' | --from payload\nPATCH 语义：只改出现的字段。"
     ),
     "role rm": "role rm <名称> —— 删除角色模板；返回体带 impact。",
+    "task ls": (
+        "task ls [--status <状态[,状态]>] [--assignee <id>] [--reviewer <id>] "
+        "[--scope self|team] [--kw <标题关键词>] [--limit <1-50>]\n"
+        "只列未完结任务（要含已完结请用 --status 显式列出，如 --status DONE,CANCELLED）。\n"
+        "状态：TODO / PENDING / IN_PROGRESS / ON_HOLD / REVIEWING / DONE / CANCELLED"
+    ),
+    "task get": "task get <id> —— 查看任务详情（含依赖摘要与最近事件时间线）。",
+    "task update": (
+        "task update <id> '<json>' | --from payload [--remove-field <字段[,字段]>]\n"
+        "配置字段：new_status / note / reviewer_id。撤销验收人用 --remove-field reviewer_id。\n"
+        "可清除的字段：" + _CLEAR_FIELDS_PLACEHOLDER + "（白名单外的字段会被拒绝并列出候选）。\n"
+        "⚠️ 同一个 --选项 给两次**只有最后一个生效**：要传多个字段请用逗号写在一个里"
+        "（--remove-field a,b），逗号值会去重保序。\n"
+        "不传 note 不会清空已有 note（参数默认空串，不会覆盖）。"
+    ),
     "time get": "time get [--tz <IANA时区>] —— 获取当前时间。",
     "reload": "reload —— 重载团队运行时；**会中断当前行动**。",
 }
@@ -106,6 +132,12 @@ def _help_text(tokens: list[str]) -> dict[str, Any]:
     key = f"{resource} {action}".strip()
     detail = HELP_DETAIL.get(key)
     if detail is not None:
+        # 占位符在**返回前**替换成当刻的 `ALLOWED_CLEAR_FIELDS`（#187 裁定③a）：
+        # 候选字段集合因此永远跟着常量走，扩枚举后 help 自动更新，不会退化成快照。
+        detail = detail.replace(
+            _CLEAR_FIELDS_PLACEHOLDER,
+            " / ".join(sorted(ALLOWED_CLEAR_FIELDS)),
+        )
         return {"success": True, "help": detail}
     available = sorted(
         k for k in HELP_DETAIL if k == resource or k.startswith(resource + " ")
@@ -138,6 +170,67 @@ def _require(payload: dict[str, Any], key: str, command: str) -> Any:
             example=f"help {command}",
         )
     return payload[key]
+
+
+def _require_positive_int(raw: Any, *, what: str, command: str) -> int:
+    """把位置参数 / 选项值收敛成正整数，否则报 `invalid_target`。
+
+    只做「是不是正整数」这一件事，**不查库**（#187 裁定⑨：不建 `_resolve_task_id`）。
+    任务 id 是否存在由服务层判（`update_task` 返回「任务不存在：task_id=…」），
+    在这里再查一次库会造出第二个「存在性判定」，并且多一次查询。
+
+    为什么不能直接 `int(raw)`：`int()` 会接受 `" 187 "`、`"+187"`、`"１８７"`
+    这些「看起来像但不是纯数字」的形态，也会为 `"0x1"` 抛 `ValueError`、
+    让 `int(True)` 得 1 —— 都不该被当成合法 id。这里先用 `str.strip()` 去空白
+    再用 `str.isdigit()` 收口，`+` / `-` / `.` / 字母全被挡在外面。
+    """
+    text = str(raw).strip()
+    # 全角数字（"１８７"）`isdigit()` 为 True 且 `int()` 能正确解析，放行；
+    # 要挡的是符号 / 小数点 / 下划线 / 字母。实测见报告 §3.9。
+    if not text.isdigit():
+        raise ConsoleError(
+            "invalid_target",
+            f"`{command}` 的 {what} 必须是正整数，收到 {raw!r}。",
+            example=f"{command} 187",
+        )
+    value = int(text)
+    if value <= 0:
+        raise ConsoleError(
+            "invalid_target",
+            f"`{command}` 的 {what} 必须大于 0，收到 {value}。",
+            example=f"{command} 187",
+        )
+    return value
+
+
+def _split_csv(raw: Any) -> list[str]:
+    """逗号分隔的多值选项 → 去重保序的字符串列表（#187 裁定④）。
+
+    口径（help 里也写明，别只写在这里）：
+    - 逗号分隔，**两侧空白被 trim**，空段被丢弃（`"a, ,b"` → `["a","b"]`）；
+    - **去重保序**（`dict.fromkeys`），因为重复项对「清除字段」没有额外语义，
+      却会让下游的「非法字段」报错把同一个名字列两遍；
+    - 全空（`""` / `","` / 只有空白）⇒ 空列表，由调用方决定「空算不算错」。
+
+    ⚠️ 已知限制（#187 裁定④，**只报不改**）：`_parse_options` 对同名选项是
+    「后者覆盖前者」，所以 `--remove-field a --remove-field b` 只有 `b` 生效。
+    逗号写法是不丢数据的唯一方式。这是解析层的通用语义（同时影响 `--recursive`
+    等），不在本单改，已登记报告「只报不改」。
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple)):
+        parts = [str(item) for item in raw]
+    else:
+        parts = str(raw).split(",")
+    return list(dict.fromkeys(p.strip() for p in parts if p.strip()))
+
+
+def _optional_int_option(raw: Any, *, name: str, command: str) -> Optional[int]:
+    """把可选的整数选项（`--assignee` / `--limit`）转成 int；缺省返回 None。"""
+    if raw is None:
+        return None
+    return _require_positive_int(raw, what=f"--{name}", command=command)
 
 
 async def _patch_dept(
@@ -490,6 +583,65 @@ async def _route(
             planner=lambda: _plan_role_rm(target or ""),
         )
 
+    # ---- 任务（#187）----
+    if key == "task ls":
+        # `--status` 逗号分隔交给服务层归一（它已支持 `str` 或 `list[str]`，且非法值
+        # 整体报错并列出非法项）。**console 不校验状态白名单** —— 那会在服务层之外
+        # 造出第二个「合法状态」事实源（#187 裁定③的同一逻辑：只映射、不校验）。
+        status = _split_csv(parsed.options.get("status"))
+        _forward(parsed,
+            assignee=_optional_int_option(
+                parsed.options.get("assignee"), name="assignee", command=key
+            ),
+            reviewer=_optional_int_option(
+                parsed.options.get("reviewer"), name="reviewer", command=key
+            ),
+            scope=parsed.options.get("scope"),
+            status=status or None,
+            # 工具层参数名是 `title_keyword`，命令行选项是 `--kw`：这里显式映射，
+            # 不靠同名巧合（否则改名时两边会静默漂移）。
+            title_keyword=parsed.options.get("kw"),
+            limit=_optional_int_option(
+                parsed.options.get("limit"), name="limit", command=key
+            ),
+        )
+    if key == "task get":
+        _forward(parsed, task_id=_require_positive_int(target, what="task", command=key))
+    if key == "task update":
+        task_id = _require_positive_int(target, what="task", command=key)
+        # `input_optional=True` ⇒ 没有配置输入时这里是 `{}`，不是报错。
+        data = cp._input_payload_for(parsed, payload)
+        remove_fields = _split_csv(parsed.options.get("remove-field"))
+
+        new_status = _pick(data, "new_status")
+        note = _pick(data, "note", "")
+        reviewer_id = _pick(data, "reviewer_id")
+        # 「什么都没有」必须显式报错，**不许静默成功**（#187 裁定①的附加硬要求）：
+        # 一个什么都没做的 update 返回 success=True，模型会当成已改好继续往下走，
+        # 比直接报错贵得多。
+        #
+        # 判据口径刻意只看「会不会真的产生变更」，不看参数个数：
+        # `note=''` / `note='   '` 不会写任何事件（服务层要求非空 note），
+        # `new_status` 等于当前状态时服务层按评论处理、也需要非空 note，
+        # 所以这里只要 note 非空就放行（让服务层去判状态合法性/权限/自环）。
+        if not remove_fields and reviewer_id is None and new_status is None and not str(note).strip():
+            raise ConsoleError(
+                "no_update_action",
+                f"`{key} {task_id}` 没有可执行的动作：请至少给出 new_status / note / "
+                "reviewer_id 之一，或用 --remove-field 指定要清除的字段。",
+                example=f'{key} {task_id} \'{{"new_status":"IN_PROGRESS"}}\'',
+            )
+        # `--remove-field` 只**映射**成 `clear_fields`，不在这里校验白名单：
+        # 服务层 `taskService.update_task` 已完整校验并返回 `invalid_clear_field`
+        # （含候选集合）。两处校验会形成第二个行为源，扩白名单时会漂移（#187 裁定③）。
+        _forward(parsed,
+            task_id=task_id,
+            new_status=new_status,
+            note=note,
+            reviewer_id=reviewer_id,
+            clear_fields=remove_fields or None,
+        )
+
     # ---- 其他 ----
     if key == "time get":
         _forward(parsed, timezone=parsed.options.get("tz"))
@@ -595,7 +747,7 @@ async def console(command: str, payload: Optional[dict] = None, _context: ToolCa
     """团队/组织/成员/房间/角色模板的管理控制台，用命令行完成管理操作。
 
     Args:
-        command: 要执行的命令。资源名：dept(部门) / agent(成员) / room(房间) / role(角色模板)。示例：'dept ls'、'agent create --from payload'、'room get 研发部'。输入 'help' 查看全部命令。
+        command: 要执行的命令。资源名：dept(部门) / agent(成员) / room(房间) / role(角色模板) / task(协作任务)。示例：'dept ls'、'agent create --from payload'、'room get 研发部'、'task ls --status TODO'、'task update 187 --remove-field reviewer_id'。输入 'help' 查看全部命令。
         payload: 仅当 command 使用 --from payload 时提供，作为 create/update 的 JSON 配置对象；其他命令不得提供。
     """
     try:
