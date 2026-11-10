@@ -594,6 +594,117 @@ async def test_root_null_rejected_tsp_remote_tools() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 容器元素级 null（H2，38 二次打回）：`{"tags": [null]}`
+# --------------------------------------------------------------------------- #
+
+#: H2 的复现靶子：`create_task.depends_on` 是 `list[int]`，喂 `[None]` 曾整类放行。
+#: ⚠️ 必须带**完整的前置必填参数**（`title` / `assignee_id`）：否则 jsonschema 先报
+#: `required`，那条错误本身就会被正常拦下，**后置的元素级 null 错误被前置遮住**，
+#: 判据会假绿（我第一次复现就踩了这个，得到 2/10 而实际 10/10）。
+_FULL_ARGS_FOR_ELEMENT_NULL = {
+    "create_task": {"title": "t", "assignee_id": 38},
+    "list_role_templates": {},
+    "list_tasks": {},
+    "memory_create": {"title": "t", "content": "c"},
+    "memory_update": {"memory_id": 1},
+    "save_agent": {"name": "a"},
+    "save_dept": {"name": "d"},
+    "save_room": {"key": "r"},
+    "update_task": {"task_id": 1},
+}
+
+
+@pytest.mark.asyncio
+async def test_element_null_rejected_for_all_array_params() -> None:
+    """本地：**全部** array 型参数喂 `[None]` 都必须被拦（不只是 `depends_on` 一个）。
+
+    为什么遍历而不是只测 `depends_on`：H2 是「`path` 长度 ≥2 一律豁免」的**整类**
+    缺陷，只钉一个参数不足以证明整类被堵住。这里按 schema 现扫出全部 array 参数，
+    逐个断言，并断言扫描计数 == 10（少扫一个就说明判据退化了）。
+    """
+
+    from service.funcToolService.funcToolType import get_function_metadata
+
+    # 先扫出所有 array 型参数（(tool_name, param_name)）
+    array_params: list[tuple[str, str]] = []
+    for tool in funcCore.get_tools(include_container_tools=True):
+        name = tool.function.name
+        func_tool = funcCore.get_func_tool(name)
+        if func_tool is None:
+            continue
+        try:
+            parameters = get_function_metadata(name, func_tool.callable)["parameters"]
+        except Exception:  # noqa: BLE001 —— schema 不可用的工具不参与本判据
+            continue
+        for param_name, prop in (parameters.get("properties") or {}).items():
+            if prop.get("type") == "array":
+                array_params.append((name, param_name))
+
+    assert len(array_params) == 10, array_params
+
+    blocked = 0
+    for name, param_name in array_params:
+        args = dict(_FULL_ARGS_FOR_ELEMENT_NULL.get(name, {}))
+        args[param_name] = [None]  # 元素级 null
+
+        result = await funcCore.run_tool_call(json.dumps(args), _ctx(name))
+
+        assert result["success"] is False, (name, param_name, result)
+        assert result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS, (
+            name, param_name, result,
+        )
+        assert _LEGACY_MESSAGE_MARK not in result["message"], (name, param_name, result)
+        blocked += 1
+
+    assert blocked == 10
+
+
+@pytest.mark.asyncio
+async def test_element_null_rejected_tsp_remote() -> None:
+    """TSP 远端：元素级 null 必须**在转发前**被拦下（`call_tool` 零调用）。
+
+    这是 H2 里最严重的一格：修前远端 `{"tags":[null]}` 返回 `success: true` 且
+    `call_tool` 真的被调用了 —— 非法参数**已经越过进程边界**发给对端，对端可能
+    已按自己逻辑落库/建容器，**副作用收不回**。所以这里必须同时断言
+    `call_tool.assert_not_called()`，光断言 `success is False` 不够。
+    """
+
+    schema = {
+        "type": "object",
+        "properties": {"tags": {"type": "array", "items": {"type": "string"}}},
+        "required": [],
+    }
+    driver = _make_tsp_driver([_remote_tool("remote_tags", schema)])
+
+    result = await driver._execute_tsp_tool('{"tags": [null]}', _ctx("remote_tags"))
+
+    assert result["success"] is False, result
+    assert result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS, result
+    assert _LEGACY_MESSAGE_MARK not in result["message"], result
+    # 硬证据：脏参数没有越过进程边界。
+    driver._client.call_tool.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_field_level_null_still_accepted_after_element_fix() -> None:
+    """反向对照：收紧豁免面后，**字段整体为 null** 仍必须放行（防下次把豁免整个删掉）。
+
+    这条盯着两个方向：
+    - `{"timezone": null}`（非必填 str 参数整体 null）⇒ 放行
+    - `{"depends_on": null}`（非必填 array 参数整体 null）⇒ 放行
+      —— 后者尤其重要：H2 的修法若写成「array 一律不许 null」就会误杀它。
+    """
+
+    first = await funcCore.run_tool_call('{"timezone": null}', _ctx("get_time"))
+    assert first.get("error_code") != toolArgsValidation.INVALID_TOOL_ARGS, first
+
+    second = await funcCore.run_tool_call(
+        '{"title": "t", "assignee_id": 38, "depends_on": null}', _ctx("create_task")
+    )
+    assert second.get("error_code") != toolArgsValidation.INVALID_TOOL_ARGS, second
+
+
+# --------------------------------------------------------------------------- #
 # 既有行为不被误杀
 # --------------------------------------------------------------------------- #
 
