@@ -33,7 +33,7 @@ TogoSpace takes a different approach: it gives you an **AI team**.
 
 > **About the name**: Togo was the legendary sled dog of the 1925 Serum Run to Nome, who led his team through the longest and most dangerous leg of the relay. We chose this name to honor that spirit of fearless, mission-driven collaboration — exactly what we want to bring to multi-agent teams.
 
-![Chat Interface](image/en/chat.png)
+![night watch](image/cn/night.png)
 
 ---
 
@@ -47,6 +47,7 @@ TogoSpace takes a different approach: it gives you an **AI team**.
 - **Self-organizing teams**: Agents can create role templates, recruit new members, and open new rooms — let your project manager do its own hiring.
 - **Ready-to-use preset teams**: Software R&D Team (PM / Engineer / Tester), Software R&D Team Pro (adds Architect, Product Manager, UI Designer, Frontend Engineer), Creative Brainstorming Team, plus 17 carefully tuned role templates.
 
+![Chat Interface](image/en/chat.png)
 ![Team Editor](image/en/team_editor.png)
 
 ### 📋 Structured task system: every assignment is tracked and reviewed
