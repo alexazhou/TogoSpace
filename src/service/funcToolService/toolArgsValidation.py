@@ -252,14 +252,29 @@ def _truncate(text: str) -> str:
 
 
 def _is_ignorable_null(error: ValidationError, schema: Dict[str, Any]) -> bool:
-    """`null` 打到**单个非必填字段** ⇒ 忽略该错误（不算参数类型错）。
+    """【已停用 · #195，仅作历史证据保留】`null` 打到**单个非必填字段** ⇒ 忽略该错误。
 
-    原因：schema 生成器把 `Optional[T]` **剥成 T**（`python_type_to_json_schema`），
-    `null` 的合法性在 schema 里已经丢失。若照 schema 硬拦，「显式传 null 走默认值」
-    会从当前的合法行为变成非法 —— 那是本单新增的误杀，不是健壮性提升。
-    Python 侧 `def f(x: str | None = None)` 完全接受 `None`。
+    ⚠️ `validate_tool_args` **不再调用本函数**。保留原因：《本单正文 §3.2》要求
+    H1/H2 两轮打回的历史注释不删。**不要以为它还生效**——它现在的唯一作用是
+    让人知道「当年为什么加了这条豁免」，以及它本身错在哪（见下方「为什么这条思路
+    从根上不成立」）。
 
-    ## 豁免面必须恰好是「路径长度为 1 的字段」（H1 + H2，38 两轮打回）
+    ## 为什么这条思路从根上不成立（#195 的根因）
+
+    它的前提是「schema 里表达不出 null 的合法性」。这个前提在 #195 之前是真的：
+    `python_type_to_json_schema` 把 `Optional[T]` 剥成 `T`，于是 `{"timezone": null}`
+    只能靠豁免放行。但豁免面按**「是否必填」**切，而 null 合法性该按**「注解是否含
+    None」**切——两条线不重合的地方就是 19 个注解不含 None 的字段（`create_task.description`
+    / `.note` / `list_tasks.open_only` …）。它们本不该接受 null，却被一并放行，
+    一路撞到 `NOT NULL constraint failed`，用户看到裸数据库错误。
+
+    ⇒ 正确修法是让 schema 表达 nullability（TypeAdapter），**豁免随之失去存在理由**。
+    「把豁免面再收窄一点」是错方向：它治的是症状（哪一类错误被吃掉），不是病因
+    （schema 不知道自己能不能 null）。
+
+    ## 豁免面必须恰好是「路径长度为 1 的字段」（H1 + H2，38 两轮打回）【历史记录】
+
+    ⚠️ 以下三条是**当年**的处置口径，现在整条豁免已停用，请不要照它实现。
 
     本函数只该豁免**一个具名参数整体为 `null`** 这一种情形。`absolute_path` 长度
     决定了「错在哪一层」，三者必须分开处理：
@@ -365,10 +380,13 @@ def validate_tool_args(
     if validator is None:
         return None
 
-    errors = [
-        error for error in validator.iter_errors(args)
-        if not _is_ignorable_null(error, schema)
-    ]
+    # 不再豁免任何 null 错误（#195）：schema 生成器改用 pydantic `TypeAdapter` 后，
+    # `Optional[T]` 已由 schema 自身表达成 `type: [T, "null"]`，null 的合法性回到了
+    # schema 里；`_is_ignorable_null` 的存在前提（「schema 里表达不出 null」）消失了。
+    # 保留该函数及其 H1/H2 历史注释作为**历史证据**（见函数 docstring），
+    # 但实现处不再调用 —— 若是留着「非必填字段 null 豁免」，19 个注解不含 None 的字段
+    # （`create_task.description` 等）会继续放行 null，一路撞到 `NOT NULL constraint failed`。
+    errors = list(validator.iter_errors(args))
     if not errors:
         return None
 

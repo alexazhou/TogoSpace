@@ -4,8 +4,9 @@ import inspect
 import logging
 import re
 from dataclasses import dataclass
-from types import UnionType
-from typing import Any, Callable, Dict, Literal, Union, get_args, get_origin, get_type_hints
+from typing import Any, Callable, Dict, get_type_hints
+
+from pydantic import TypeAdapter
 
 from util import llmApiUtil
 
@@ -134,42 +135,138 @@ def _parse_param_descriptions(docstring: str, valid_names: set[str]) -> dict[str
     return descriptions
 
 
+def _type_adapter_json_schema(python_type: Any) -> Dict[str, Any]:
+    """把 Python 注解交给 pydantic `TypeAdapter` 产出 JSON Schema 片段。
+
+    为什么不再手写映射（#195，Operator 2026-11-12 00:20 批准）：
+    旧实现把 `Optional[T]` **剥成 T**（见下方 git 历史），于是
+    「给了键、值是 null」这件事在 schema 里彻底丢失，校验层只能靠一条
+    `_is_ignorable_null` 豁免兜住 —— 那条豁免同时把 19 个**注解不含 None**
+    的字段（`create_task.description` 等）的 null 也放行了，最终一路撞到
+    `NOT NULL constraint failed`。用 TypeAdapter 后 nullability 直接进 schema，
+    豁免的前提消失（豁免已在本单删除）。
+
+    两个例外保持原有语义（有既有用例钉住，不许静默变成别的东西）：
+    - 裸 `list`：TypeAdapter 会给 `{"type":"array","items":{}}`，即「元素类型未知」，
+      而本项目要求显式 `list[T]` ⇒ 仍抛 `TypeError`；
+    - 无法建 schema 的类型：抛 `TypeError`（不静默兜底成 object）。
+    """
+    if python_type is list:
+        raise TypeError("list 类型缺少元素类型注解，请使用 list[T] 形式")
+
+    try:
+        return TypeAdapter(python_type).json_schema()
+    except Exception as error:  # noqa: BLE001 —— 统一收敛成本项目原有异常契约
+        raise TypeError(
+            f"不支持的工具参数类型: {python_type}，请使用 str/int/float/bool/dict/list[T]"
+        ) from error
+
+
+#: 子 schema 会出现在这些键下面；逐个递归，别对 `required` / `enum` / `default`
+#: 这类「值不是 schema」的键做递归（否则会被当成 schema 误改）。
+_SCHEMA_DICT_KEYS = ("items", "additionalProperties", "not")
+_SCHEMA_LIST_KEYS = ("anyOf", "oneOf", "allOf")
+
+#: 这些关键字即使实例是 `null` 也会被判定，因此**不能**扁平化
+#: （扁平化把 `anyOf:[X, null]` 压成「X 的约束 + null」会把它们也套到 null 上）。
+#: 实测：`Optional[Literal['TODO','ON_HOLD']]` 若扁平化 ⇒
+#: `{"enum":["TODO","ON_HOLD"],"type":["string","null"]}`，
+#: jsonschema 对 `null` 会先查 `enum`（null 不在其中）而报错 ⇒ 合法用法被误杀。
+#: `type` / `items` / `properties` / `required` / `minimum` 等对 `null` 实例天然
+#: 不适用（JSON Schema 按实例类型分派），所以可以扁平化。
+_NULL_SENSITIVE_KEYS = frozenset({"enum", "const", "not", "anyOf", "oneOf", "allOf", "if", "patternProperties"})
+
+
+def _flatten_nullable(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """`{"anyOf":[X, {"type":"null"}]}`（恰好一支纯 null）⇒ `X` 的 `type` 变 `[t, "null"]`。
+
+    为什么扁平化而不是留着 `anyOf`（#195 实测）：
+    - 体积：`anyOf` 原样 11871→13333B（+12.3%）；扁平化 12473B（+5.1%）；
+    - 不引入结构嵌套，错误文案与 `_describe` 的既有形态一致。
+
+    只在下列条件**全部**成立时扁平化，否则原样保留 `anyOf`：
+    1. 恰好两支，其中一支是纯 `{"type": "null"}`；
+    2. 另一支的 `type` 是单值字符串；
+    3. 另一支不含 `_NULL_SENSITIVE_KEYS`（`enum` 等会对 null 也生效的约束）。
+
+    条件 3 是实测补的：`Optional[Literal[...]]` 扁平化后 `enum` 会咬 `null`，
+    `create_task.status` / `list_tasks.scope` 传 null 从「合法」变「被拒」——
+    那是本单不该引入的误杀（反向判据 4.2 抓到的）。
+    多分支 Union（`Optional[Union[str, list[str]]]` 是三分支）不满足条件 1，保留 `anyOf`。
+    """
+    any_of = schema.get("anyOf")
+    if not isinstance(any_of, list) or len(any_of) != 2:
+        return schema
+
+    null_branches = [branch for branch in any_of if branch == {"type": "null"}]
+    others = [branch for branch in any_of if branch != {"type": "null"}]
+    if len(null_branches) != 1 or len(others) != 1:
+        return schema
+
+    inner = others[0]
+    if not isinstance(inner, dict) or not isinstance(inner.get("type"), str):
+        # 无 `type` 的分支（如 `Optional[Literal[...]]` 之外的形态）：保留 anyOf，别猜。
+        return schema
+    if _NULL_SENSITIVE_KEYS & set(inner):
+        # `enum` 等会对 null 也生效 ⇒ 扁平化会让 null 被这些约束拒绝。
+        return schema
+
+    flattened = dict(inner)
+    flattened["type"] = [inner["type"], "null"]
+    return flattened
+
+
+def _normalize_schema(node: Any) -> Any:
+    """TypeAdapter 产物的两处规范化：`const` → `enum`、`anyOf` 形态的 null 扁平化。
+
+    1. **`const` → `enum:[v]`**：TypeAdapter 对 `Literal['reviewer_id']` 产
+       `{"const": "reviewer_id"}`，而 `_describe` 只会把 `enum` 译成
+       「只能取 [...] 之一」，`const` 会退化成「不满足 const 约束」——错误文案降级。
+       涉及参数：`update_task.clear_fields`（`list[Literal['reviewer_id']]`）。
+    2. **null 扁平化**：见 `_flatten_nullable`。
+    """
+    if not isinstance(node, dict):
+        return node
+
+    result: Dict[str, Any] = {}
+    for key, value in node.items():
+        if key == "properties" and isinstance(value, dict):
+            result[key] = {name: _normalize_schema(sub) for name, sub in value.items()}
+        elif key in _SCHEMA_DICT_KEYS:
+            result[key] = _normalize_schema(value) if isinstance(value, dict) else value
+        elif key in _SCHEMA_LIST_KEYS and isinstance(value, list):
+            result[key] = [_normalize_schema(sub) for sub in value]
+        else:
+            result[key] = value
+
+    if "const" in result:
+        result["enum"] = [result.pop("const")]
+    # `additionalProperties: true` 是 JSON Schema 的**默认值**，写出来零信息（只增字节、
+    # 让读 schema 的人误以为这里有什么约束）。裸 `dict` 注解会产出它；
+    # `dict[str, int]` 产出的是带真值的 dict，必须保留。
+    if result.get("additionalProperties") is True:
+        result.pop("additionalProperties")
+    return _flatten_nullable(result)
+
+
 def python_type_to_json_schema(python_type: Any) -> Dict[str, Any]:
-    """将 Python 类型转换为 JSON Schema 类型定义"""
-    # 处理 Optional[T] 或 Union[T, None]
-    if get_origin(python_type) in (Union, UnionType):
-        args: tuple[Any, ...] = get_args(python_type)
-        if len(args) == 2 and type(None) in args:
-            non_none_type = args[0] if args[1] is type(None) else args[1]
-            return python_type_to_json_schema(non_none_type)
-        return {"type": "object"}
+    """将 Python 类型转换为 JSON Schema 类型定义（基于 pydantic `TypeAdapter`）。
 
-    # 处理 Literal["a", "b", ...]
-    if get_origin(python_type) is Literal:
-        return {"enum": list(get_args(python_type))}
+    #195 改造前后对照（三个洞）：
 
-    origin = get_origin(python_type)
-    if origin is list:
-        args = get_args(python_type)
-        if not args:
-            raise TypeError(f"list 类型缺少元素类型注解，请使用 list[T] 形式")
-        return {"type": "array", "items": python_type_to_json_schema(args[0])}
-    if origin is dict:
-        return {"type": "object"}
+    | 注解 | 改造前 | 改造后 |
+    | --- | --- | --- |
+    | `Optional[str]` | `{"type": "string"}`（null 合法性丢失）| `{"type": ["string", "null"]}` |
+    | `dict[str, int]` | `{"type": "object"}` | `{"type": "object", "additionalProperties": {"type": "integer"}}` |
+    | `Union[str, int]` | `{"type": "object"}`（什么信息都没有）| `{"anyOf": [{"type": "string"}, {"type": "integer"}]}` |
 
-    type_mapping = {
-        str: {"type": "string"},
-        int: {"type": "integer"},
-        float: {"type": "number"},
-        bool: {"type": "boolean"},
-        dict: {"type": "object"},
-    }
+    **返回值每次都新建**（TypeAdapter 每个注解一份新 dict，本函数再复制结构），
+    因此调用方 `get_function_metadata` 往里写 `description` 不会串到别的参数上 ——
+    这也是这里**不加 `lru_cache`** 的原因：缓存会把 `description` 的写入带进共享对象，
+    同一个 `str` 注解的几十个参数会互相污染说明文案。
+    """
+    return _normalize_schema(_type_adapter_json_schema(python_type))
 
-    for py_type, schema in type_mapping.items():
-        if python_type is py_type:
-            return schema
-
-    raise TypeError(f"不支持的工具参数类型: {python_type}，请使用 str/int/float/bool/dict/list[T]")
 
 
 def get_function_metadata(func_name: str, func: Callable[..., Any]) -> Dict[str, Any]:

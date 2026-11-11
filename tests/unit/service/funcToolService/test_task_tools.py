@@ -27,6 +27,9 @@ def test_update_task_reviewer_change_params_are_optional():
 
     `reviewer_id` 与 `clear_fields` 必须**不能**靠「传 null」表达撤销
     （JSON schema 里「不传」与「传 null」不可区分），所以撤销走独立开关。
+
+    #195 起 `reviewer_id` 的 `type` 是 `["integer", "null"]`（注解 `Optional[int]`，
+    nullability 由 schema 自身表达，不再靠校验层豁免）。
     """
     sig = inspect.signature(tools.update_task)
     assert sig.parameters["reviewer_id"].default is None
@@ -34,21 +37,29 @@ def test_update_task_reviewer_change_params_are_optional():
 
     meta = get_function_metadata("update_task", tools.update_task)
     props = meta["parameters"]["properties"]
-    assert props["reviewer_id"]["type"] == "integer"
+    assert props["reviewer_id"]["type"] == ["integer", "null"]
     assert meta["parameters"]["required"] == ["task_id"]
 
 
 def test_update_task_clear_fields_schema_is_array_with_enum():
     """`clear_fields` 的 schema 由类型注解自动产出（不手写 JSON schema）。
 
-    声明形状：`{"type": "array", "items": {"enum": ["reviewer_id"]}}`。
+    声明形状：`{"type": ["array", "null"], "items": {"enum": ["reviewer_id"], "type": "string"}}`。
     ⚠️ 这只是**给模型看的声明**，不是运行时校验 —— 野值拦截由
     `test_task_reviewer_update.py::test_invalid_clear_field_is_rejected_by_runtime_check`
     直接调真入口证明。这里只钉声明，不冒充拦截证据。
+
+    #195 的两处变化（都有依据，不是顺手改的）：
+    1. `type` 变 `["array", "null"]`：注解是 `Optional[list[Literal['reviewer_id']]]`，
+       nullability 现在由 schema 自身表达；
+    2. `items` 多了 `"type": "string"`：TypeAdapter 对 `Literal['reviewer_id']` 产
+       `{"const": "reviewer_id", "type": "string"}`，生成器把 `const` 转成 `enum:[v]`
+       但保留 `type`（`_describe` 的错误文案靠 `enum`，`type` 是附加信息不是噪声）。
+       **`enum` 内容与顺序仍是硬检查项，一个字都不能少。**
     """
     meta = get_function_metadata("update_task", tools.update_task)
     schema = meta["parameters"]["properties"]["clear_fields"]
-    assert schema["type"] == "array"
+    assert schema["type"] == ["array", "null"]
     assert schema["items"]["enum"] == ["reviewer_id"]
 
 
@@ -95,7 +106,15 @@ def test_list_tasks_signature_has_open_only_default_true():
 
 
 def test_list_tasks_metadata_exposes_open_only_and_limit():
-    """工具 schema 由 docstring 解析：properties 含 open_only / limit（均带说明），且全部非必填。"""
+    """工具 schema 由 docstring 解析：properties 含 open_only / limit（均带说明），且全部非必填。
+
+    #195 起 `type` 的取值分成两种形态，这条用例**同时钉住两侧**，正好是本单的判别点：
+    - `open_only` 注解是 `bool`（不含 None）⇒ `type` 仍是单值 `"boolean"`，
+      传 null **必须被拒**（改造前被 null 豁免放行，一路撞到数据库 NOT NULL）；
+    - `limit` / `title_keyword` 注解是 `Optional[...]` ⇒ `type` 是
+      `["integer"|"string", "null"]`，传 null 仍放行。
+    若哪天有人把两者又统一成同一形态，这条必然红。
+    """
     meta = get_function_metadata("list_tasks", tools.list_tasks)
     props = meta["parameters"]["properties"]
     assert set(props) == {
@@ -103,9 +122,9 @@ def test_list_tasks_metadata_exposes_open_only_and_limit():
     }
     assert props["open_only"]["type"] == "boolean"
     assert props["open_only"].get("description")
-    assert props["limit"]["type"] == "integer"
+    assert props["limit"]["type"] == ["integer", "null"]
     assert props["limit"].get("description")
-    assert props["title_keyword"]["type"] == "string"
+    assert props["title_keyword"]["type"] == ["string", "null"]
     assert props["title_keyword"].get("description")
     assert meta["parameters"]["required"] == []
 
@@ -122,7 +141,13 @@ def test_list_tasks_scope_is_literal_enum_without_default():
 
     meta = get_function_metadata("list_tasks", tools.list_tasks)
     scope_schema = meta["parameters"]["properties"]["scope"]
-    assert scope_schema["enum"] == ["self", "team"]
+    # #195：`Optional[Literal[...]]` 保留 `anyOf` 形态（**不扁平化**），enum 在分支内。
+    # 扁平化成 `{"enum": [...], "type": ["string", "null"]}` 会让 jsonschema 对 null
+    # 先查 enum 而拒掉它 —— 那会把合法用法误杀（本单反向判据 4.2 抓到的）。
+    assert scope_schema["anyOf"] == [
+        {"enum": ["self", "team"], "type": "string"},
+        {"type": "null"},
+    ]
     assert scope_schema.get("description")
     # 非必填：老调用方（只传 assignee）不受影响
     assert "scope" not in meta["parameters"]["required"]
@@ -282,22 +307,42 @@ async def test_list_tasks_echoes_effective_limit_in_result(monkeypatch):
 _ALL_STATES = ["TODO", "PENDING", "IN_PROGRESS", "ON_HOLD", "REVIEWING", "DONE", "CANCELLED"]
 
 
-def test_list_tasks_status_schema_is_array_with_seven_item_enum():
-    """`status` 导出 schema **必须带 enum**：`{"type":"array","items":{"enum":[7 项]}}`。
+def _status_declared_types(schema: dict) -> set[str]:
+    """取 schema 声明的类型集合（`type` 可能是字符串或字符串数组）。
 
-    Operator 已裁定 B（`Optional[list[Literal[...]]]`）：宁可
-    `claude_sdk` 路径只支持列表，也不动全局 schema 生成器。
+    单值 `type == "array"` 这种写法在 #195 之后会**静默失效**：`Optional[list[...]]`
+    产 `type: ["array", "null"]`，等值比较直接 False，判据变成「永远红」或（更糟）
+    被别处的宽松写法掩盖成「永远绿」。
+    """
+    declared = schema.get("type")
+    if isinstance(declared, str):
+        return {declared}
+    return {item for item in declared or [] if isinstance(item, str)}
+
+
+def test_list_tasks_status_schema_is_array_with_seven_item_enum():
+    """`status` 导出 schema **必须带 enum**：`items.enum` 是 7 项、`type` 含 array。
+
+    ## 旧裁定的作废依据（必须写明，否则下一个人会把这次改动当成违规回潮）
+
+    Operator **2026-11-12 00:20** 授权（#195）改写生成器，**取代** #83 事件 215
+    （2026-10-28）「A 方案（anyOf）作废、`claude_sdk` 下只支持列表、不动全局生成器」的
+    旧裁定。旧裁定下这条断言是 `assert "anyOf" not in status_schema`；现在 schema 形态
+    变成什么由注解 + TypeAdapter 决定，所以断言改成**正面钉形态**。
+
     只断言 `type == array` 是不够的——`list[str]` 也能过，那样模型拿到的是
     「任意字符串数组」，7 个合法值一个都没告诉它，等于本单要根治的问题没治。
-    所以这里**逐项断言 enum 的内容与顺序**。
+    所以这里**逐项断言 enum 的内容与顺序**（#222 硬检查项），并额外断言
+    「`type` 声明里含 `array`」而不是恰等于某个字符串（`Optional[...]` 会多出 `null`）。
     """
     meta = get_function_metadata("list_tasks", tools.list_tasks)
     status_schema = meta["parameters"]["properties"]["status"]
 
-    assert status_schema["type"] == "array"
     assert status_schema["items"]["enum"] == _ALL_STATES
-    assert "anyOf" not in status_schema          # A 方案（anyOf）已作废，不得回潮
+    assert "array" in _status_declared_types(status_schema)
     assert "status" not in meta["parameters"]["required"]
+    # enum 顺序是产品约定（README/文档同序），换序要同时改这行 —— 有意为之。
+    assert status_schema["items"].get("type") == "string"
 
 
 def test_list_tasks_status_enum_guard_can_turn_red():
@@ -317,9 +362,9 @@ def test_list_tasks_status_enum_guard_can_turn_red():
     meta = get_function_metadata("degenerate_tool", degenerate_tool)
     degenerate = meta["parameters"]["properties"]["status"]
 
-    assert degenerate["type"] == "array"
+    assert "array" in _status_declared_types(degenerate)
     assert "enum" not in degenerate["items"]                    # 退化形态：没有 enum
-    assert degenerate["items"] != {"enum": _ALL_STATES}         # ⇒ 正常形态的断言会红
+    assert degenerate["items"] != {"enum": _ALL_STATES, "type": "string"}  # 正常形态的断言会红
 
 
 def test_list_tasks_status_description_does_not_promise_single_string():

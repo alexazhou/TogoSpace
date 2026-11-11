@@ -78,12 +78,15 @@ class TestPythonTypeToJsonSchema(ServiceTestCase):
         assert python_type_to_json_schema(bool) == {"type": "boolean"}
 
     async def test_optional_str(self):
-        """Optional[T] 退化到 T 的 schema。"""
-        assert python_type_to_json_schema(Optional[str]) == {"type": "string"}
+        """`Optional[T]` 保留 nullability：`type` 是 `[T, "null"]`（#195 前是剥成 T）。"""
+        assert python_type_to_json_schema(Optional[str]) == {"type": ["string", "null"]}
 
     async def test_optional_list_str(self):
-        """Optional[list[str]] 应映射为 array with items。"""
-        assert python_type_to_json_schema(Optional[list[str]]) == {"type": "array", "items": {"type": "string"}}
+        """`Optional[list[str]]` ⇒ array with items，且 `type` 含 null。"""
+        assert python_type_to_json_schema(Optional[list[str]]) == {
+            "type": ["array", "null"],
+            "items": {"type": "string"},
+        }
 
     async def test_list_int(self):
         """list[int] 映射为 array with integer items。"""
@@ -107,8 +110,11 @@ class TestPythonTypeToJsonSchema(ServiceTestCase):
             python_type_to_json_schema(list)
 
     async def test_optional_list_int(self):
-        """Optional[list[int]] 应映射为 array with integer items。"""
-        assert python_type_to_json_schema(Optional[list[int]]) == {"type": "array", "items": {"type": "integer"}}
+        """`Optional[list[int]]` ⇒ array with integer items，且 `type` 含 null。"""
+        assert python_type_to_json_schema(Optional[list[int]]) == {
+            "type": ["array", "null"],
+            "items": {"type": "integer"},
+        }
 
     async def test_unknown_type_raises(self):
         """未知类型应报错，不静默兜底。"""
