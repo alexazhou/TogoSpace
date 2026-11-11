@@ -5,6 +5,7 @@ import { getTeamRooms } from '../../realtime/runtimeStore';
 import type { AgentActivity } from '../../types';
 import { displayName, stripAnsi } from '../../utils';
 import { useAnimatedNumber } from '../../composables/useAnimatedNumber';
+import { useGrowingScale } from '../../composables/useGrowingScale';
 import MarkdownContent from '../ui/MarkdownContent.vue';
 
 const { t } = useI18n();
@@ -855,6 +856,10 @@ const tokenDownTarget = computed<number | null>(() => {
 const animatedUpTokens = useAnimatedNumber(() => tokenUpTarget.value);
 const animatedDownTokens = useAnimatedNumber(() => tokenDownTarget.value);
 
+// 增长放大只驱动视觉：哪段在变大，哪段按本次速度短暂放大再衰减，与数值补间相互独立。
+const tokenUpScale = useGrowingScale(() => tokenUpTarget.value);
+const tokenDownScale = useGrowingScale(() => tokenDownTarget.value);
+
 /**
  * COMPACT「压缩中」的摘要输出量补间目标（#176）。
  *
@@ -907,12 +912,16 @@ const tokenView = computed(() => {
   }
   const upValue = animatedUpTokens.value;
   const downValue = animatedDownTokens.value;
-  const upText = display.up && upValue !== null ? t('agent.tokenInferenceUp', { count: upValue }) : '';
-  const downText = display.down && downValue !== null ? ` ${t('agent.tokenInferenceDown', { count: downValue })}` : '';
+  const hasUp = Boolean(display.up) && upValue !== null;
+  const hasDown = Boolean(display.down) && downValue !== null;
   return {
     kind: 'split' as const,
-    upText,
-    downText,
+    // 箭头与数字拆成两个节点：箭头位置固定，只有数字本身参与放大动画。
+    // 空格放进箭头串里，DOM 文本与原来的「↑ 8421 ↓ 20」逐字一致。
+    upArrow: hasUp ? `${t('agent.tokenInferenceUpArrow')} ` : '',
+    upNumber: hasUp ? String(upValue) : '',
+    downArrow: hasDown ? ` ${t('agent.tokenInferenceDownArrow')} ` : '',
+    downNumber: hasDown ? String(downValue) : '',
     upEstimated: Boolean(display.up?.estimated),
     downEstimated: Boolean(display.down?.estimated),
     // `title` 用目标文案：悬停要看到的是最终权威值，不是动画中间帧。
@@ -1043,14 +1052,20 @@ const tokenView = computed(() => {
           class="agent-activity-item__tokens"
           :title="tokenView.title"
         ><span
-          v-if="tokenView.upText"
+          v-if="tokenView.upNumber"
           class="agent-activity-item__tokens-segment"
           :class="{ 'agent-activity-item__tokens-segment--estimated': tokenView.upEstimated }"
-        >{{ tokenView.upText }}</span><span
-          v-if="tokenView.downText"
+        ><span class="agent-activity-item__tokens-arrow">{{ tokenView.upArrow }}</span><span
+          class="agent-activity-item__tokens-number"
+          :style="{ transform: `scale(${tokenUpScale})` }"
+        >{{ tokenView.upNumber }}</span></span><span
+          v-if="tokenView.downNumber"
           class="agent-activity-item__tokens-segment"
           :class="{ 'agent-activity-item__tokens-segment--estimated': tokenView.downEstimated }"
-        >{{ tokenView.downText }}</span></span>
+        ><span class="agent-activity-item__tokens-arrow">{{ tokenView.downArrow }}</span><span
+          class="agent-activity-item__tokens-number"
+          :style="{ transform: `scale(${tokenDownScale})` }"
+        >{{ tokenView.downNumber }}</span></span></span>
       </span>
       <span v-if="activityView.taskRoomLabel" class="agent-activity-item__tail">
         <span
@@ -1385,7 +1400,23 @@ const tokenView = computed(() => {
 /* 推理的「↑ 输入 ↓ 输出」两段：`↓` 前的前导空格写在数据侧，所以这里不加 gap
    —— 加了会让 DOM 文本与「完整文案」不一致。 */
 .agent-activity-item__tokens-segment {
+  display: inline-block;
   white-space: pre;
+}
+
+/* 箭头固定：位置与大小都不参与动画。 */
+.agent-activity-item__tokens-arrow {
+  display: inline-block;
+}
+
+/* 放大由 `useGrowingScale` 逐帧写入 inline `transform`：峰值随本次速度变化，
+   再在 500ms 内衰减回 1。
+   左边缘锚定：数字向右生长，箭头和左侧文字都不动，不会被「顶着往左走」。
+   只动 `transform`，不动 `font-size`，不改变盒模型宽度。 */
+.agent-activity-item__tokens-number {
+  display: inline-block;
+  transform-origin: left center;
+  will-change: transform;
 }
 
 /* 估算段：流中数字还没被后端 usage 校准，用次要文字色（`--text-secondary`）与真值区分。

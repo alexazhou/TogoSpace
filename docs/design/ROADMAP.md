@@ -520,3 +520,4 @@
 - [2026-11-07 桌面端登录 shell 环境读取（DSH 对照与移植方案）](./2026-10-29-tauri-desktop-shell/login-shell-environment_design.md)
 - [2026-11-06 Agent 文本记忆系统](./2026-11-06-agent-memory-system/step1_product.md) · [技术设计](./2026-11-06-agent-memory-system/step2_technical.md)
 - [2026-11-07 Agent 上下文容量实时进度条](./2026-11-07-agent-context-capacity-meter/step1_product.md) · [技术设计](./2026-11-07-agent-context-capacity-meter/step2_technical.md)
+- [2026-11-11 Token 数字增长放大动画](./2026-11-11-token-growth-animation/token_growth_animation_design.md) · [Demo](./2026-11-11-token-growth-animation/demo/token-growth-demo.html)

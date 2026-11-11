@@ -198,6 +198,8 @@
     "tokenCompactProgress": "↑ {before} ↓ {count}",
     "tokenInferenceUp": "↑ {count}",
     "tokenInferenceDown": "↓ {count}",
+    "tokenInferenceUpArrow": "↑",
+    "tokenInferenceDownArrow": "↓",
     "retryScheduled": "{seconds}s 后重试（{attempt}/{max}）",
     "retryingProgress": "正在重试（{attempt}/{max}）",
     "retryUsed": "已重试 {count} 次",

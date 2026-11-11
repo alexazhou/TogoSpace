@@ -228,7 +228,9 @@ describe('AgentActivityItem token 补间接线', () => {
       }),
     });
     await stepFrame();
-    expect(queue.length).toBe(1);
+    // 补间与增长放大各自会排帧，这里只要求「还有在途帧」；
+    // 数量归哪个 composable 所有不是本用例的判据。
+    expect(queue.length).toBeGreaterThan(0);
 
     wrapper.unmount();
     // 卸载后即便还在途的帧被调用，也不能再排新帧。

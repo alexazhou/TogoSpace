@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Token 数字增长放大 · 独立 Demo</title>
+<style>
+  :root {
+    --bg: #0f1720;
+    --card: #16202c;
+    --card-active: #172433;
+    --border: #263445;
+    --text: #e5edf5;
+    --muted: #9fb0c2;
+    --good: #58c98a;
+    --accent: #7fd7a8;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  }
+
+  main {
+    max-width: 760px;
+    margin: 48px auto;
+    padding: 0 24px;
+  }
+
+  h1 {
+    font-size: 20px;
+    margin: 0 0 10px;
+  }
+
+  .hint {
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.7;
+    margin: 0 0 20px;
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--card) 78%, transparent);
+    font-size: 13px;
+  }
+
+  .controls label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+  }
+
+  .controls input[type="range"] {
+    width: 160px;
+    accent-color: var(--accent);
+  }
+
+  .controls input[type="checkbox"] {
+    accent-color: var(--accent);
+  }
+
+  .controls input[type="range"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .controls input[type="range"]:disabled ~ output {
+    opacity: 0.4;
+  }
+
+  .controls output {
+    min-width: 64px;
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  button {
+    border: 1px solid #3a4a5c;
+    background: #1b2735;
+    color: var(--text);
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  button:hover { background: #243447; }
+
+  .readout {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    margin: 0 0 18px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .readout strong {
+    color: var(--accent);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 600;
+  }
+
+  .list {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 22px;
+  }
+
+  .activity {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 9px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--card);
+    font-size: 0.82rem;
+  }
+
+  .activity--active {
+    background: var(--card-active);
+    border-color: #33475e;
+  }
+
+  .status-dot {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--good);
+  }
+
+  .status-check {
+    flex: none;
+    width: 14px;
+    text-align: center;
+    color: var(--good);
+    font-weight: 700;
+  }
+
+  .title {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .tokens {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding-left: 8px;
+    white-space: nowrap;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 15px;
+    color: var(--muted);
+  }
+
+  .token-arrow {
+    /* 箭头固定：不参与缩放，也不随数字变化移动。 */
+    display: inline-block;
+    margin-right: 0.35em;
+  }
+
+  .token-number {
+    /* 数字左边缘锚定，放大时向右生长；只动 transform，不改变布局宽度。 */
+    display: inline-block;
+    transform-origin: left center;
+    will-change: transform;
+  }
+
+  .legend {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.8;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #b7c7d8;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Token 数字增长放大</h1>
+  <p class="hint">
+    数字在每次 token 进度更新时变大，峰值由本次速度（tokens/s）决定，随后在 500ms 内衰减回原始大小。
+    箭头与左侧输入数字保持不动，只有数字本身缩放。下方是静态对照。
+  </p>
+
+  <section class="controls">
+    <label>
+      <input type="checkbox" id="random-speed" checked />
+      随机速度 50–100 t/s
+    </label>
+    <label>
+      固定速度
+      <input type="range" id="fixed-speed" min="10" max="150" step="5" value="75" disabled />
+      <output id="fixed-speed-output">75 t/s</output>
+    </label>
+    <button type="button" id="toggle">暂停</button>
+  </section>
+
+  <p class="readout">
+    <span>当前速度 <strong id="current-speed">–</strong></span>
+    <span>本次峰值 <strong id="current-peak">–</strong></span>
+    <span>当前缩放 <strong id="current-scale">1.000</strong></span>
+  </p>
+
+  <section class="list">
+    <article class="activity activity--active">
+      <span class="status-dot"></span>
+      <span class="title">模型推理</span>
+      <span class="tokens">
+        <span class="token-seg"><span class="token-arrow">↑</span><span class="token-number">8421</span></span>
+        <span class="token-seg"><span class="token-arrow">↓</span><span class="token-number" id="down-number">120</span></span>
+      </span>
+    </article>
+    <article class="activity">
+      <span class="status-check">✓</span>
+      <span class="title">模型推理</span>
+      <span class="tokens">
+        <span class="token-seg"><span class="token-arrow">↑</span><span class="token-number">8421</span></span>
+        <span class="token-seg"><span class="token-arrow">↓</span><span class="token-number">734</span></span>
+      </span>
+    </article>
+  </section>
+
+  <p class="legend">
+    峰值公式：<code>1 + clamp(speed × 0.0028, 0.06, 0.30)</code>，即 50 t/s → 1.14，100 t/s → 1.28，上限 1.30。<br />
+    本页面是独立模拟，算法与 <code>frontend/src/composables/useGrowingScale.ts</code> 一致。
+  </p>
+</main>
+
+<script>
+  // 与 frontend/src/composables/useGrowingScale.ts 中的常量保持一致。
+  const TICK_MS = 200;
+  const DECAY_MS = 500;
+  const SCALE_PER_SPEED = 0.0028;
+  const MIN_SCALE_EXTRA = 0.06;
+  const MAX_SCALE_EXTRA = 0.3;
+
+  function scaleForSpeed(speed) {
+    const extra = Math.min(MAX_SCALE_EXTRA, Math.max(MIN_SCALE_EXTRA, speed * SCALE_PER_SPEED));
+    return 1 + extra;
+  }
+
+  const els = {
+    number: document.getElementById('down-number'),
+    speed: document.getElementById('current-speed'),
+    peak: document.getElementById('current-peak'),
+    scale: document.getElementById('current-scale'),
+    toggle: document.getElementById('toggle'),
+    random: document.getElementById('random-speed'),
+    fixed: document.getElementById('fixed-speed'),
+    fixedOutput: document.getElementById('fixed-speed-output'),
+  };
+
+  const state = {
+    running: true,
+    lastValue: 120,
+    lastTime: performance.now(),
+    decayFrom: 1,
+    decayStart: 0,
+    scale: 1,
+    raf: null,
+    timer: null,
+  };
+
+  function renderScale() {
+    els.number.style.transform = `scale(${state.scale})`;
+    els.scale.textContent = state.scale.toFixed(3);
+  }
+
+  function frame() {
+    const progress = Math.min(1, (performance.now() - state.decayStart) / DECAY_MS);
+    state.scale = 1 + (state.decayFrom - 1) * (1 - progress);
+    renderScale();
+    if (progress < 1) {
+      state.raf = requestAnimationFrame(frame);
+    } else {
+      state.raf = null;
+      state.scale = 1;
+      renderScale();
+    }
+  }
+
+  function tick() {
+    if (!state.running) {
+      return;
+    }
+    const now = performance.now();
+    const elapsedMs = Math.max(1, now - state.lastTime);
+    state.lastTime = now;
+
+    const targetSpeed = els.random.checked
+      ? 50 + Math.random() * 50
+      : Number(els.fixed.value);
+    const delta = Math.max(1, Math.round(targetSpeed * elapsedMs / 1000));
+
+    state.lastValue += delta;
+    els.number.textContent = String(state.lastValue);
+
+    // 与生产一致：速度用「本次增量 / 实际经过的时间」算，再映射成峰值。
+    const speed = delta / (elapsedMs / 1000);
+    const peak = scaleForSpeed(speed);
+    state.decayFrom = Math.max(state.scale, peak);
+    state.decayStart = now;
+    state.scale = state.decayFrom;
+    renderScale();
+
+    els.speed.textContent = `${Math.round(speed)} t/s`;
+    els.peak.textContent = peak.toFixed(3);
+
+    if (state.raf === null) {
+      state.raf = requestAnimationFrame(frame);
+    }
+  }
+
+  function startTimer() {
+    if (state.timer !== null) {
+      clearInterval(state.timer);
+    }
+    state.lastTime = performance.now();
+    state.timer = setInterval(tick, TICK_MS);
+  }
+
+  function setRunning(running) {
+    state.running = running;
+    els.toggle.textContent = running ? '暂停' : '继续';
+    if (running) {
+      startTimer();
+    } else if (state.timer !== null) {
+      clearInterval(state.timer);
+      state.timer = null;
+    }
+  }
+
+  els.random.addEventListener('change', () => {
+    els.fixed.disabled = els.random.checked;
+  });
+
+  els.fixed.addEventListener('input', () => {
+    els.fixedOutput.textContent = `${els.fixed.value} t/s`;
+  });
+
+  els.toggle.addEventListener('click', () => {
+    setRunning(!state.running);
+  });
+
+  startTimer();
+</script>
+</body>
+</html>
