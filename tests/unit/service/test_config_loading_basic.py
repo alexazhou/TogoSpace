@@ -126,8 +126,16 @@ def test_load_creates_setting_json_when_missing(tmp_path):
     setting_data = json.loads(setting_file.read_text(encoding="utf-8"))
     assert setting_data["version"] == "v3"
     assert setting_data["development_mode"] is False
-    assert setting_data["llm_providers"][0]["name"] == "qwen"
-    assert setting_data["default_models"]["primary"] == "qwen-plus@qwen"
+    assert setting_data["llm_providers"][0]["name"] == "deepseek"
+    assert setting_data["default_models"]["primary"] == "deepseek-v4-flash@deepseek"
+    # 模板里两个示例模型的上下文窗口都是 512K（2 的幂口径 524288，不是 512000）
+    assert (
+        setting_data["llm_providers"][0]["models"][0]["context_config"]["context_window_tokens"]
+        == 524288
+    )
+    assert setting_data["llm_providers"][1]["models"][0]["name"] == "glm-5.3-prime"
+    # vision 槽位必须为空：模板两个示例模型都是纯文本，留旧引用会让槽位校验报「模型不存在」
+    assert setting_data["default_models"]["vision"] == ""
 
 
 
