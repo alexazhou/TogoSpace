@@ -2,7 +2,7 @@
 
 - 日期：2026-11-11
 - 状态：已实现
-- 影响范围：`frontend/src/components/agent/AgentActivityItem.vue`、`frontend/src/composables/useGrowingScale.ts`
+- 影响范围：`frontend/src/components/agent/AgentActivityToken.vue`、`frontend/src/components/agent/AgentActivityItem.vue`、`frontend/src/composables/useGrowingScale.ts`
 - Demo：[demo/token-growth-demo.html](./demo/token-growth-demo.html)
 
 ## 1. 背景与目标
@@ -115,7 +115,7 @@ export function useGrowingScale(
 
 ### 4.2 组件接线
 
-文件：`frontend/src/components/agent/AgentActivityItem.vue`
+token 展示块已经从 `AgentActivityItem.vue` 拆成独立组件 `AgentActivityToken.vue`：metadata 推导、数值补间、增长放大、箭头/数字渲染和 token 相关样式都收在组件内部；父组件只渲染 `<AgentActivityToken :activity="activity" />`。这样 `AgentActivityItem`（约 1700 行）不再承载 token 细节，token 规则也有单独的落点。
 
 ```ts
 const tokenUpScale = useGrowingScale(() => tokenUpTarget.value);
@@ -241,7 +241,8 @@ Demo 是给设计/评审看的可视化参考，不参与构建，也不被前�
 | 文件 | 作用 |
 |------|------|
 | `frontend/src/composables/useGrowingScale.ts` | 增长放大算法与生命周期 |
-| `frontend/src/components/agent/AgentActivityItem.vue` | 组件接线、箭头/数字 DOM 拆分、样式 |
+| `frontend/src/components/agent/AgentActivityToken.vue` | token 显示块：metadata 推导、补间、增长放大、箭头/数字 DOM 拆分、样式 |
+| `frontend/src/components/agent/AgentActivityItem.vue` | 活动行主体；渲染 `<AgentActivityToken>`，不再包含 token 细节 |
 | `frontend/src/locales/zh-CN.json` | 新增 `tokenInferenceUpArrow` / `tokenInferenceDownArrow` |
 | `frontend/src/locales/en.json` | 同上 |
 | `frontend/src/composables/__tests__/useGrowingScale.test.ts` | S1–S10 |
