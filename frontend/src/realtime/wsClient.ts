@@ -11,6 +11,9 @@ const connectTimeoutMs = 2000;
 
 const listeners = new Set<RealtimeListener>();
 
+/** 连接打开（鉴权已发出）时要通知的回调：前端日志桥据此 flush 积压。 */
+const openListeners = new Set<() => void>();
+
 let ws: WebSocket | null = null;
 let reconnectTimer: number | null = null;
 let reconnectCountdownTimer: number | null = null;
@@ -54,6 +57,56 @@ function emitRealtimeEvent(event: FrontendRealtimeEvent): void {
   for (const listener of listeners) {
     listener(event);
   }
+}
+
+/**
+ * 把连接状态推进到 connected，并通知等待上行的订阅者。
+ *
+ * 汇总成一个函数是刻意的：`connected` 有三条到达路径（鉴权关闭时 open、
+ * 收到 `auth_ok`、兼容旧后端的首条业务消息）。三处各写一遍「置状态 + 通知」
+ * 迟早会漏一处，漏掉的那条就是「日志一直积压不发送」。
+ */
+function markConnected(): void {
+  connectionState.value = 'connected';
+  reconnectAttempt = 0;
+  for (const listener of openListeners) {
+    listener();
+  }
+}
+
+/**
+ * 发送一条上行报文（前端日志桥用）。
+ *
+ * 返回是否真的发出去了：连接未就绪时返回 false，调用方据此**保留**数据等下次 flush。
+ * 静默丢弃是不可接受的 —— 排查白屏最需要的恰恰是启动最早那几行。
+ *
+ * 判据用 `connectionState === 'connected'` 而不是「socket 已 open」：鉴权开启时
+ * `open` 之后还要等 `auth_ok`，这期间后端**会丢弃**未授权的上行。早发等于白发，
+ * 而且从调用方看是「发出去了、日志却没了」，最难查。
+ */
+export function sendRealtimeUpstream(payload: Record<string, unknown>): boolean {
+  if (!isRealtimeConnected() || !ws) {
+    return false;
+  }
+  try {
+    ws.send(JSON.stringify(payload));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 订阅「连接已就绪（可发上行）」，返回取消函数。 */
+export function onRealtimeConnected(listener: () => void): () => void {
+  openListeners.add(listener);
+  return () => {
+    openListeners.delete(listener);
+  };
+}
+
+/** 当前是否已就绪到可以发上行。 */
+export function isRealtimeConnected(): boolean {
+  return socketOpen && connectionState.value === 'connected';
 }
 
 function scheduleReconnect(): void {
@@ -147,8 +200,7 @@ function connectRealtimeSocket(): void {
       }
     } else {
       // 鉴权未启用，直接标记为已连接
-      connectionState.value = 'connected';
-      reconnectAttempt = 0;
+      markConnected();
     }
 
     if (reconnectTimer !== null) {
@@ -174,8 +226,7 @@ function connectRealtimeSocket(): void {
         && (payload as { event?: unknown } | null)?.event === 'auth_ok';
 
       if (isAuthAck || (authEnabled.value && connectionState.value === 'connecting')) {
-        connectionState.value = 'connected';
-        reconnectAttempt = 0;
+        markConnected();
       }
 
       if (isAuthAck) {
