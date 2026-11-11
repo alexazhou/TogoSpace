@@ -18,9 +18,10 @@
       },
       "models": [
         {
-          "name": "deepseek-v4-flash",
+          "name": "deepseek-flash",
           "protocol": "openai",
           "enabled": true,
+          "input": ["text", "image"],
           "context_config": {
             "context_window_tokens": 524288
           }
@@ -37,7 +38,7 @@
       },
       "models": [
         {
-          "name": "glm-5.3-prime",
+          "name": "glm-5.3",
           "protocol": "openai",
           "enabled": false,
           "context_config": {
@@ -49,9 +50,9 @@
   ],
 
   "default_models": {
-    "primary": "deepseek-v4-flash@deepseek",
+    "primary": "deepseek-flash@deepseek",
     "lite": "",
-    "vision": "",
+    "vision": "deepseek-flash@deepseek",
     "advanced": ""
   },
 
