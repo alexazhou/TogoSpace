@@ -364,6 +364,51 @@ async def test_tsp_execute_rejects_illegal_null_before_crossing_process_boundary
 
 
 # --------------------------------------------------------------------------- #
+# ⑦ 事件 1113 形态表第 8 行：外部路径必须放行「schema 自己声明了可 null」的字段
+# --------------------------------------------------------------------------- #
+
+
+def test_external_schema_accepts_optional_null() -> None:
+    """远端·Optional 字段传 null ⇒ 放行（事件 1113 形态表第 8 行）。
+
+    gtsp 那份 schema 里**一个 null 分支都没有**，所以「远端 Optional null」在真实
+    gtsp schema 上 0 条可测。这里按 38 给的办法：**拿本地 schema 走 `schema=` 入口模拟**
+    —— 验证的是「外部路径对『schema 自己表达了 null』的字段仍会放行」。
+
+    ## 为什么这条不能省（变异实测，M16）
+
+    只打破**这一格**的变异（外部路径里，对 schema 自己声明了 null 的字段也拒）：
+
+    ```
+    M16 → 本用例 1 红；其余既有 38 条用例全绿（含 H1/H2/26 字段那几条）
+    ```
+
+    ⇒ 本文件原有的 `test_null_policy_is_decided_by_schema_source_not_by_requiredness`
+    **不覆盖这一格**：那条会被「外部一律拒所有顶层 null」的粗变异打红，但换成精确变异
+    （只拒「声明可 null」的那些）它就绿了。**红得宽 ≠ 打中了这一格。**
+    """
+
+    func_tool = funcCore.get_func_tool("create_task")
+    assert func_tool is not None
+    schema = toolArgsValidation.get_tool_parameters_schema("create_task", func_tool.callable)
+    assert schema is not None
+
+    # `depends_on` 在本地 schema 里是 `type: ["array","null"]` ⇒ 外部路径也必须放行
+    accepted = toolArgsValidation.validate_tool_args(
+        "create_task", {"title": "t", "assignee_id": 38, "depends_on": None}, schema=schema,
+    )
+    assert accepted is None, accepted
+
+    # 互锁：同一字段喂非法类型仍必须拒（不是「外部一律放行」）
+    rejected = toolArgsValidation.validate_tool_args(
+        "create_task", {"title": "t", "assignee_id": 38, "depends_on": "not-a-list"}, schema=schema,
+    )
+    assert rejected is not None, "外部路径对非法类型也放行了"
+    assert rejected.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS
+
+
+
+# --------------------------------------------------------------------------- #
 # ⑥ 快照防腐：checked-in 的 gtsp schema 必须与真实二进制一致
 # --------------------------------------------------------------------------- #
 
