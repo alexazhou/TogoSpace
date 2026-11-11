@@ -44,11 +44,13 @@
 以下示例展示 `llm_providers` 数组中的单个提供商条目。无需在 `model` 字段手动添加
 `提供商/` 前缀，系统已在底层映射。
 
-### 3.1 OpenAI 兼容接口（文本模型，如 Qwen、DeepSeek、OneAPI）
+### 3.1 OpenAI 兼容接口（文本模型，如 GLM、DeepSeek、OneAPI）
+
+下面这段与默认模板 `assets/config_template.json` 的 `llm_providers[1]` 一致（阿里云 DashScope 兼容模式，纯文本模型 `glm-5.3`，上下文窗口 512K）：
 
 ```json
 {
-  "name": "qwen",
+  "name": "aliyun",
   "type": "aliyun",
   "api_key": "sk-your-key",
   "enable": true,
@@ -57,36 +59,50 @@
   },
   "models": [
     {
-      "name": "qwen-plus",
+      "name": "glm-5.3",
       "protocol": "openai",
       "enabled": true,
-      "temperature": 0.7
+      "context_config": {
+        "context_window_tokens": 524288
+      }
     }
   ]
 }
 ```
+
+**纯文本模型不要写 `input`**：`input` 缺省即 `["text"]`，且落盘时 `input == ["text"]` 会被序列化器删掉（`configTypes.py` 的 `model_serializer`）。写了也不会报错，但没必要。
+
+同一个 `llm_providers` 数组里可以并列多个提供商，模板的另一个示例为 DeepSeek 官方（`type: deepseek`，`urls.openai` 写 `https://api.deepseek.com/v1`，视觉模型 `deepseek-flash`，窗口同样是 `524288`）。
+**完整示例（两个提供商）见 `assets/config_template.json`**，此处不再重复。
 
 ### 3.2 视觉模型（支持读图，`input` 含 `image`）
 
+模板里的 `deepseek-flash` 就是视觉模型，**必须显式写 `input`**（不写会被当成纯文本，读图能力静默失效）：
+
 ```json
 {
-  "name": "qwen",
-  "type": "aliyun",
+  "name": "deepseek",
+  "type": "deepseek",
   "api_key": "sk-your-key",
   "enable": true,
   "urls": {
-    "openai": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    "openai": "https://api.deepseek.com/v1"
   },
   "models": [
     {
-      "name": "qwen-vl-plus",
+      "name": "deepseek-flash",
       "protocol": "openai",
       "enabled": true,
-      "input": ["text", "image"]
+      "input": ["text", "image"],
+      "context_config": {
+        "context_window_tokens": 524288
+      }
     }
   ]
 }
 ```
+
+同时 `default_models.vision` 要指向它（`"vision": "deepseek-flash@deepseek"`）—— 该槽位为空时，`auto_vision_fallback` 整条链路不执行。
 
 ### 3.3 Anthropic (Claude)
 
@@ -123,7 +139,7 @@
 
 | `protocol` 配置值 | 底层映射的 provider | `model` 填写示例 |
 | :--- | :--- | :--- |
-| `openai` | `openai` | `gpt-4o`、`qwen-plus` |
+| `openai` | `openai` | `gpt-4o`、`deepseek-flash` |
 | `anthropic` | `anthropic` | `claude-3-5-sonnet-20240620` |
 
 *注意：系统**不会**直接修改你填写的 `model` 字符串拼接前缀，而是通过 API 参数显式声明提供商，这避免了前缀解析混乱的问题。*
@@ -139,9 +155,9 @@
 ```json
 {
   "default_models": {
-    "primary": "qwen-plus@qwen",
+    "primary": "deepseek-flash@deepseek",
     "lite": "",
-    "vision": "qwen-vl-plus@qwen",
+    "vision": "deepseek-flash@deepseek",
     "advanced": ""
   }
 }

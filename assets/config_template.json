@@ -9,7 +9,27 @@
 
   "llm_providers": [
     {
-      "name": "qwen",
+      "name": "deepseek",
+      "type": "deepseek",
+      "api_key": "YOUR_API_KEY_HERE",
+      "enable": false,
+      "urls": {
+        "openai": "https://api.deepseek.com/v1"
+      },
+      "models": [
+        {
+          "name": "deepseek-flash",
+          "protocol": "openai",
+          "enabled": true,
+          "input": ["text", "image"],
+          "context_config": {
+            "context_window_tokens": 524288
+          }
+        }
+      ]
+    },
+    {
+      "name": "aliyun",
       "type": "aliyun",
       "api_key": "YOUR_API_KEY_HERE",
       "enable": false,
@@ -18,20 +38,11 @@
       },
       "models": [
         {
-          "name": "qwen-plus",
-          "protocol": "openai",
-          "enabled": true,
-          "context_config": {
-            "context_window_tokens": 131072
-          }
-        },
-        {
-          "name": "qwen-vl-plus",
+          "name": "glm-5.3",
           "protocol": "openai",
           "enabled": false,
-          "input": ["text", "image"],
           "context_config": {
-            "context_window_tokens": 32768
+            "context_window_tokens": 524288
           }
         }
       ]
@@ -39,9 +50,9 @@
   ],
 
   "default_models": {
-    "primary": "qwen-plus@qwen",
+    "primary": "deepseek-flash@deepseek",
     "lite": "",
-    "vision": "qwen-vl-plus@qwen",
+    "vision": "deepseek-flash@deepseek",
     "advanced": ""
   },
 

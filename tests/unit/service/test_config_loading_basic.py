@@ -126,8 +126,28 @@ def test_load_creates_setting_json_when_missing(tmp_path):
     setting_data = json.loads(setting_file.read_text(encoding="utf-8"))
     assert setting_data["version"] == "v3"
     assert setting_data["development_mode"] is False
-    assert setting_data["llm_providers"][0]["name"] == "qwen"
-    assert setting_data["default_models"]["primary"] == "qwen-plus@qwen"
+    assert setting_data["llm_providers"][0]["name"] == "deepseek"
+    assert setting_data["llm_providers"][0]["models"][0]["name"] == "deepseek-flash"
+    # deepseek-flash 是视觉模型：必须显式声明 input，否则缺省 ["text"] 会被当成纯文本
+    assert setting_data["llm_providers"][0]["models"][0]["input"] == ["text", "image"]
+    assert setting_data["default_models"]["primary"] == "deepseek-flash@deepseek"
+    # vision 槽位必须指向唯一支持读图的模型；置空会让 auto_vision_fallback 整条不执行
+    assert setting_data["default_models"]["vision"] == "deepseek-flash@deepseek"
+    # 模板里两个示例模型的上下文窗口都是 512K（2 的幂口径 524288，不是 512000）
+    assert (
+        setting_data["llm_providers"][0]["models"][0]["context_config"]["context_window_tokens"]
+        == 524288
+    )
+    assert setting_data["llm_providers"][1]["models"][0]["name"] == "glm-5.3"
+    # glm-5.3 是纯文本：serializer 只删 input == ["text"] 的键，所以「本来没写」与「bug 丢了」
+    # 只能靠「键不存在」+「非 ["text"] 也不存在」两条一起区分
+    assert "input" not in setting_data["llm_providers"][1]["models"][0]
+    assert (
+        setting_data["llm_providers"][1]["models"][0]["context_config"]["context_window_tokens"]
+        == 524288
+    )
+    # 顶层全局兜底不动（Operator 只要求改模型示例）
+    assert setting_data["context_config"]["context_window_tokens"] == 262144
 
 
 

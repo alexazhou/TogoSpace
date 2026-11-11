@@ -41,7 +41,7 @@
 模型级配置 > 全局配置 > 代码默认值
 ```
 
-- 开箱模型的窗口由配置模板（`assets/config_template.json`）中的模型级 `context_config` 提供；例如 `qwen-plus` 为 `131072`、`qwen-vl-plus` 为 `32768`。
+- 开箱模型的窗口由配置模板（`assets/config_template.json`）中的模型级 `context_config` 提供；例如 `deepseek-flash` 为 `524288`、`glm-5.3` 为 `524288`。
 - 模型级 `context_config` 中，字段值等于代码默认值的项视为未显式设置，继承全局值；全局也未设置时使用代码默认值 `262144`。
 - 不再维护系统内置模型表，模型名不参与窗口解析。
 
