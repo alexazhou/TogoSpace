@@ -98,13 +98,23 @@
 
 ## 4. 配置文件加载逻辑
 
-测试环境下的配置文件加载遵循以下优先级和路径规则：
+### 4.1 加载优先级
 
-1. **默认公共配置**: `tests/config/`。包含通用的 LLM Mock 地址、基础 Team 和 Agent 定义。
-2. **自定义专用配置**: 若测试类设置 `use_custom_config = True`，基类会自动定位到该测试文件所在目录下的 `config/` 子目录。
-    - **路径选择**: `os.path.dirname(test_file) + "/config"`。
-    - **用途**: 适用于需要特定房间结构、特定 Prompt 或特殊持久化路径的测试场景。
-3. **加载机制**: 后端子进程启动时，通过 `--config-dir` 参数强制指定目标配置目录，确保测试环境与生产配置物理隔离。
+1. **自定义专用配置（优先）**: 测试类设置 `use_custom_config = True` 时，使用测试文件所在目录下的 `config/`（`os.path.dirname(test_file) + "/config"`），适用于需要特定房间结构、Prompt 或持久化路径的场景。
+2. **默认公共配置**: 未设置时使用 `tests/config/`，包含通用的 LLM Mock 地址、基础 Team 和 Agent 定义。
+
+由 `use_custom_config` 二选一，没有回退逻辑；自定义目录不存在时直接跳过配置加载。
+
+### 4.2 加载过程实现
+
+1. **复制配置目录**: 基类把选定的源目录整体复制到 per-worker 临时目录，后续读写都指向副本。
+    - 副本位置：`<系统临时目录>/togospace-test-config-<worker>/<class-hash>-*`。worker 来自 `PYTEST_XDIST_WORKER`，类标识为「模块名 + 类名」的 hash。
+    - 复制范围：整个配置目录，包括 `role_templates/`、`teams/`（该目录同时作为 preset 目录）。
+2. **接管 in-process 加载**: 基类包装 `configUtil.load()`，把 `db_path` 改写为 worker 专属数据库；需要 Mock LLM 时，把各 provider 的 OpenAI / Anthropic URL 指向当前 worker 的 Mock 端口。
+3. **启动后端**: 通过 `--config-dir` 指向同一份副本，保证 in-process 与子进程读写的是同一份配置。
+4. **清理**: 后端进程停止后删除副本（`_safe_cleanup_isolated_config_dir`）。
+
+> 复制到临时目录是写隔离的前提，原因与回归防线见 §5.2。
 
 ---
 
@@ -117,13 +127,19 @@
 - **并行策略**: 默认按测试类（`--dist loadscope`）分发任务，同一测试类的用例在同一个 Worker 中按序执行，不同测试类可并行。
 - **测试模式**: 后端进程在测试环境 (`TEAMAGENT_ENV=test`) 下跳过 PID 检查，允许多实例并行运行在不同端口。
 
-### 5.2 状态重置
+### 5.2 配置写隔离
+- 所有 `ServiceTestCase` 的配置读写在 per-worker 临时副本上进行（见 §4.2），不依赖 teardown 备份写回。
+- **为什么必须复制**: 会写配置的接口（`POST /config/llm.json`、`POST /config/quick_init.json`、`POST /system/update_config.json` 等）走 `update_setting()` → `_save_setting_to_file()` 的真实落盘链路，没有「只改内存」模式；原地写会改到受版本控制的文件，中断后就会留下脏文件。
+- 测试类**不需要**在 `setup_class` / `teardown_class` 里手动备份、恢复 `setting.json`；也不要绕过基类直接对 `tests/config/` 调 `configUtil.load()` / `update_setting()`（一次性脚本请用 `tmp_path` / 临时目录）。
+- **回归防线**: `tests/unit/test_config_write_isolation.py` 验证真实写盘可达、不碰源目录、副本会被清理、每次运行都重新复制。
+
+### 5.3 状态重置
 - **类级重置**: 在 `ServiceTestCase.setup_class` 中清空数据库、重建 Schema、启动外部依赖。
 - **Service 级重置**: 集成测试必须在 `async_setup_class` 中显式调用 `service.startup()`，并在 `async_teardown_class` 中调用对应的 `shutdown()`（成对，不可省略）。
 - **类内用例共享数据库**: 同一测试类的多个用例读写同一个 DB，用例需自行清理自己写入的数据，不能删除其他用例依赖的数据。
 - **内存全局无隔离**: 模块级变量（Agent 注册表、房间注册表、工具表、配置缓存等）在整个 Worker 生命周期内持续存在，只能靠类级 start/shutdown 兜住，详见 [unit_integration_boundary.md](./unit_integration_boundary.md)。
 
-### 5.3 端口隔离
+### 5.4 端口隔离
 - **自动偏移**: 基于 Worker ID 计算端口偏移量，避免多进程抢占。
     - **后端端口**: `18080 + worker_offset`
     - **Mock LLM 端口**: `19876 + worker_offset`
