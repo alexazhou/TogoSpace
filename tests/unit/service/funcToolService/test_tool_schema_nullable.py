@@ -243,10 +243,12 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
         '{"title": "t", "assignee_id": 38, "status": "__not_a_status__"}', _ctx("create_task")
     )
     assert illegal.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS, illegal
-    # 报错里仍要能看到**合法取值**（enum 没被吞掉）。文案模板本身不改（本单 §3.2 明确
-    # 「不要顺手改 _describe」），所以这里不断言固定句式，只断言「合法值可见」：
-    # Optional[Literal[...]] 会走 anyOf 分支 ⇒ 文案是「不满足 anyOf 约束 [...元组...]」，
-    # 里面逐个列出 enum 值；非 Optional 的 Literal 仍是「只能取 [...] 之一」。
+    # 文案必须与 #195 之前**逐字同形**：「只能取 [...] 之一」，而不是
+    # 「不满足 anyOf 约束 [{'enum': ..., 'type': 'string'}, {'type': 'null'}]」。
+    # 后者是 #195 首版引入的可见退化（38 的 S1）：anyOf 把 enum 的文案盖住了。
+    # `_describe` 里由 `_unwrap_nullable_any_of` 把 Optional 形态降回内层约束来保住文案。
+    assert "只能取" in illegal["message"], illegal
+    assert "anyOf" not in illegal["message"], illegal
     assert "'TODO'" in illegal["message"] and "'ON_HOLD'" in illegal["message"], illegal
 
 
