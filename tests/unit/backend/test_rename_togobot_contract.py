@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -54,6 +55,9 @@ _SCAN_SUFFIXES = {
     ".py", ".rs", ".toml", ".json", ".yml", ".yaml", ".md", ".txt", ".sh",
     ".html", ".vue", ".ts", ".js", ".ini",
 }
+# 无后缀但必须扫描的文本文件（Dockerfile 里有 10 处 TOGOSPACE_/togospace）。
+# 漏掉它会让「反向对账」少算 10 条，属于量具本身不准 —— 已实测校正。
+_SCAN_EXACT_NAMES = {"Dockerfile"}
 
 
 def _read(rel: str) -> str:
@@ -65,9 +69,13 @@ def _repo_text_files() -> list[Path]:
     for path in REPO_ROOT.rglob("*"):
         if not path.is_file():
             continue
+        # 符号链接（本仓 AGENTS.md -> CLAUDE.md）会让同一个文件被数两遍，
+        # 与 `git grep` 的口径不一致 ⇒ 跳过，保证量具可比。
+        if path.is_symlink():
+            continue
         if any(part in _SCAN_SKIP_DIRS for part in path.parts):
             continue
-        if path.suffix.lower() in _SCAN_SUFFIXES:
+        if path.suffix.lower() in _SCAN_SUFFIXES or path.name in _SCAN_EXACT_NAMES:
             out.append(path)
     return out
 
@@ -147,3 +155,65 @@ class TestCompatibilityGuard:
     def test_github_repo_name_unchanged(self) -> None:
         update = _read("src/service/updateService.py")
         assert "api.github.com/repos/alexazhou/TogoSpace/" in update, "GitHub 仓库名被改了——更新检查会 404"
+
+    def test_docker_image_name_still_togospace(self) -> None:
+        """本轮决定 Docker 镜像名**不改**：Docker Hub 的 alexazhou/togobot 尚不存在（404），
+        而 docker.yml 同时推 docker.io + ghcr.io，Hub 不会像 GHCR 那样 push 自动建库 ⇒
+        改了就首推必红。等 Operator 建好 Hub 仓库后另开一批只改这一处。
+
+        卷名 `togospace-storage` 同理保留，否则老用户的命名卷会脱挂。
+        """
+        docker_yml = _read(".github/workflows/docker.yml")
+        images = re.findall(r"(?:^|\s)(?:ghcr\.io/\$\{\{\s*github\.repository_owner\s*\}\}|\$\{\{\s*secrets\.DOCKERHUB_USERNAME\s*\}\})/([A-Za-z0-9._-]+)", docker_yml)
+        assert images, "docker.yml 里没提取到镜像名，锚点口径失效"
+        assert set(images) == {"togospace"}, f"镜像名被改了（当前应保持 togospace）: {set(images)}"
+
+        hub_script = _read("scripts/docker_hub_delete_platform_tags.sh")
+        assert "/togospace/tags/" in hub_script, "Docker Hub 清理脚本的仓库名被改了"
+
+        dockerfile = _read("Dockerfile")
+        assert "togospace-storage:/storage" in dockerfile, "Docker 卷名被改了——老用户命名卷会脱挂"
+
+    def test_unchanged_hit_counts_not_decreased(self) -> None:
+        """反向对账（逐文件）：三类「改了就断」的载体，**每个文件**的命中数不得少于改名前的基线。
+
+        为什么必须逐文件而不是只看总量：总量守恒会掩盖局部误伤 ——
+        A 文件少一条、B 文件多一条（比如把某处 `~/.togospace` 顺手改成 `~/.togobot`，
+        同一份文件里又新增了一行注释），总量仍是 0 变化。只有逐文件 `>=` 才咬得住。
+
+        基线表：``tests/unit/backend/rename_togobot_baseline.json``
+        （由 BASE `58214d05` 用**同一套扫描口径**生成，`_meta` 里写了量具定义）。
+        少一条即判红；若将来**合法**删除某个使用点，必须同步下调 JSON 并在提交说明里写明原因。
+        """
+        baseline_path = REPO_ROOT / "tests/unit/backend/rename_togobot_baseline.json"
+        assert baseline_path.is_file(), f"基线表缺失: {baseline_path}"
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+        assert baseline["_meta"]["base_sha"] == "58214d05d3d1f9e67a5c5051e914cb6174514fee", (
+            "基线表不是从声明的 BASE 生成的，反向对账失去意义"
+        )
+
+        self_rel = "tests/unit/backend/test_rename_togobot_contract.py"
+        current: dict[str, list[str]] = {}
+        for path in _repo_text_files():
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            if rel == self_rel:  # 本文件自带的断言字符串会污染计数
+                continue
+            current[rel] = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+
+        violations: list[str] = []
+        for group, spec in baseline.items():
+            if group == "_meta":
+                continue
+            regex = re.compile(spec["pattern"])
+            for rel, floor in spec["files"].items():
+                lines = current.get(rel)
+                if lines is None:
+                    violations.append(f"{spec['pattern']} | {rel} 文件消失（基线 {floor} 行）")
+                    continue
+                hits = sum(1 for line in lines if regex.search(line))
+                if hits < floor:
+                    violations.append(f"{spec['pattern']} | {rel} {floor} → {hits} 行")
+        assert not violations, (
+            "不改项命中数下降，疑似误伤（运行实例会读不到数据 / 容器 label 失配 / env 失效）：\n  "
+            + "\n  ".join(violations)
+        )
