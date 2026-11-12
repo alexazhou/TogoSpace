@@ -63,8 +63,8 @@ jobs:
       uses: docker/metadata-action@v6
       with:
         images: |
-          ${{ secrets.DOCKERHUB_USERNAME }}/togospace
-          ghcr.io/${{ github.repository_owner }}/togospace
+          ${{ secrets.DOCKERHUB_USERNAME }}/togobot
+          ghcr.io/${{ github.repository_owner }}/togobot
         flavor: |
           latest=false
           suffix=-${{ matrix.suffix }}
@@ -125,8 +125,8 @@ jobs:
       uses: docker/metadata-action@v6
       with:
         images: |
-          ${{ secrets.DOCKERHUB_USERNAME }}/togospace
-          ghcr.io/${{ github.repository_owner }}/togospace
+          ${{ secrets.DOCKERHUB_USERNAME }}/togobot
+          ghcr.io/${{ github.repository_owner }}/togobot
         flavor: |
           latest=false
         tags: |

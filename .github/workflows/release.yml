@@ -72,7 +72,7 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v3
       with:
-        name: "TogoSpace ${{ github.ref_name }}"
+        name: "Togobot ${{ github.ref_name }}"
         tag_name: ${{ github.ref_name }}
         # 默认 draft：tag 推上去后只生成未发布的草稿，DMG 与说明都在里面，
         # 由人检查过再手动点发布。这样即使 tag 误推、或产物有问题，也不会直接
