@@ -411,6 +411,8 @@ EXPECTED_TOOL_CATEGORIES = {
     "send_chat_msg": ToolCategory.BASIC,
     "start_chat": ToolCategory.BASIC,
     "update_task": ToolCategory.BASIC,
+    # #203：容器说明修改走 console（`container note`），与其它容器工具同属执行类。
+    "update_container_note": ToolCategory.EXECUTE,
     "wake_up_agent": ToolCategory.BASIC,
     "web_search": ToolCategory.READ,
     # #191：webfetch 与 web_search 同属只读联网能力，归 READ。

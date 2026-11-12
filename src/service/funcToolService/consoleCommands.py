@@ -415,6 +415,18 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         # `task update 187 --remove-field reviewer_id` 是合法调用（撤销验收人）。
         locator=_loc(id_param="task_id"),
     ),
+    # 容器（#203：只开 note 一条，其余容器命令不进 console）
+    #
+    # 两个位置参数：`container note <id> <text>`。位置参数按 `update_container_note`
+    # 的 schema 声明顺序映射（`container_id` → `note`），所以工具签名必须把
+    # `record_id` 排在 `note` 之后（见 `tools.update_container_note`）。
+    #
+    # 「清空」只认显式空串（`container note <id> ""`）：少给文本会被 arity 拒，
+    # **不允许静默清空** —— 漏写一个参数就把说明擦掉，代价远大于多打一对引号。
+    _spec(
+        "container", "note", "update_container_note", verb="DIRECT",
+        min_args=2, max_args=2,
+    ),
     # 其他
     _spec("time", "get", "get_time", verb="GET"),
     _spec("reload", "", "reload_team", verb="DIRECT", self_interrupt=True),
