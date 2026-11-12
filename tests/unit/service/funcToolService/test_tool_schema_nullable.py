@@ -238,6 +238,45 @@ def _tool_callable(tool_name: str):
     return func_tool.callable
 
 
+#: 两组建的**代表项**：用来判定「注册表加载完整」。
+#:
+#: 为什么不用「注册表条数 > 0」：注册表是两个 dict（`_func_tools` 33 个 + 容器组 5 个），
+#: 只 load 前一组时条数仍是 33 > 0，而容器组整组缺失 —— 实测其中 4 个字段正在
+#: `OPTIONAL_WITH_DEFAULT` 里（`create_container.image/note`、
+#: `delete_container.container_id/record_id`）。条数会骗人，代表项不会。
+_LOAD_PROBES: tuple[tuple[str, str], ...] = (
+    ("console", "默认组（_func_tools）"),
+    ("create_container", "容器组（_container_func_tools）"),
+)
+
+
+def _registered_tool_names() -> list[str]:
+    """**注册面**的全部工具名（两组都算，不受 D2 暴露面开关影响）。
+
+    ⚠️ 这里**不能用 `funcCore.get_tools()`** —— 那是**暴露面**：
+    `get_tools()` 会按 D2 开关（`_hidden_tool_names()`）过滤掉被 `console` 收敛的
+    16 个原工具。实测 D2 隐藏模式（`TOGOSPACE_KEEP_LEGACY_ADMIN_TOOLS=0`）下
+    `get_tools(include_container_tools=True)` 只剩 22 个，现算会少 36 条，
+    于是 `stale` 报「清单过期 36 项」—— **完全是误报，且指令是错的**
+    （会让人去删正确的清单项）。
+
+    判据要的是「**注册了哪些工具**」（签名事实），与「**暴露给模型哪些**」（D2 策略）
+    是两个维度。用后者算前者，等于让一个开关决定判据结论。
+
+    ⚠️ 也**不能调 `load_func_tools()` / `load_container_func_tools()` 来取名字**：
+    那两个函数会**重建注册表**（`_func_tools = {}` 后重新填），于是「未加载」这个
+    被测状态会被自己的枚举动作抹掉 —— 自检永远绿，等于没写（本单实测：第一版
+    就是这么错的，`default_only` / `container_only` 两种状态都算出 63 条）。
+
+    所以只能**只读**私有 dict，不做任何加载。读私有在这里是必要的：判断「加载了吗」
+    不能用「能加载」的接口。`getattr(..., {})` 兜底是为了让名字改动时报空列表
+    （随后 `_LOAD_PROBES` 自检会报「未加载完整」），而不是 `AttributeError`。
+    """
+    names = list(getattr(funcCore, "_func_tools", {}))
+    names.extend(getattr(funcCore, "_container_func_tools", {}))
+    return names
+
+
 def _declared_optional_pairs() -> set[tuple[str, str]]:
     """从**真实签名**现算「有默认值 且 注解含 None」的全部参数（同一个口径）。
 
@@ -245,10 +284,25 @@ def _declared_optional_pairs() -> set[tuple[str, str]]:
       - 跳过 `_context` 等私有参数；
       - 必须有默认值（`p.default is not empty`）；
       - 注解是 `Union[X, None]`（含 `Optional[X]` 与 `X | None` 两种写法）。
+
+    ⚠️ **先自检加载完整**（#198 第二版修的就是这里）：两组各断一个代表项。
+    不自检的后果实测过 —— 注册表没加载全时，现算集合偏小，`stale` 会报
+    「清单有过期项」，把人引去删正确的清单项（其中 4 条是容器工具的唯一覆盖）。
+    那比「判据不红」更糟：**判据给出错误指令**。
     """
+    loaded = set(_registered_tool_names())
+    missing_groups = [
+        f"{name}（{label}）" for name, label in _LOAD_PROBES if name not in loaded
+    ]
+    assert not missing_groups, (
+        "注册表未加载完整，现算结果不可信（会在下面报出假的「清单过期」）：\n  "
+        + "\n  ".join(missing_groups)
+        + "\n本文件应有 `_loaded_tools` autouse fixture 先 load 两组；"
+        "若是手动跑探针，请先调 `load_func_tools()` + `load_container_func_tools()`。"
+    )
+
     computed: set[tuple[str, str]] = set()
-    for tool in funcCore.get_tools(include_container_tools=True):
-        name = tool.function.name
+    for name in sorted(loaded):
         func = _tool_callable(name)
         hints = get_type_hints(func)
         for param_name, param in inspect.signature(func).parameters.items():
@@ -261,6 +315,7 @@ def _declared_optional_pairs() -> set[tuple[str, str]]:
             if origin in (Union, UnionType) and type(None) in get_args(hint):
                 computed.add((name, param_name))
     return computed
+
 
 
 #: schema 层拒绝文案的固定前缀 —— **从源码 import，本文件不再抄一份**。
@@ -474,7 +529,11 @@ def test_field_lists_cover_every_optional_param() -> None:
     assert not stale, (
         "这些清单项在真实签名里已不成立（参数被删 / 改成非 Optional / 已无默认值）：\n"
         + "\n".join(f"  {tool}.{param}" for tool, param in stale)
-        + "\n请从清单里删掉，或核实签名是否被误改。"
+        + "\n\n⚠️ 先排除「注册表没加载全」再动手：`_declared_optional_pairs()` 已在开头断过两组"
+        "\n   代表项（`console` / `create_container`），走到这里说明两组都在。若你是在"
+        "\n   子集环境下（只 load 一组、或绕开了 `_loaded_tools` fixture）看到这条，"
+        "\n   **不要删清单项** —— 那份清单是对的，缺的是加载。"
+        "\n   确认签名真的变了，才从 `OPTIONAL_WITH_DEFAULT` 里删掉。"
     )
 
 
