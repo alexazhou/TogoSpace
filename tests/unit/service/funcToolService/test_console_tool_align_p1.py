@@ -778,3 +778,99 @@ class TestP1dRequiredMovedToRuntime:
         tools.gtAgentManager.batch_save_agents.assert_not_called()
         deptService.upsert_dept.assert_not_called()
         roomService.upsert_room.assert_not_called()
+
+
+# =========================================================================== #
+# P1e：运行时校验的「错误码等效于 schema 层」（小马哥 12:02 / 12:16 阻塞项）
+#
+# 为什么单列一组：`error_code` 是**程序分支键**，不是措辞。文案点名只解决「人读得懂」，
+# 若码是 `None`，「参数缺失（补参数重试）」与「业务失败（换操作）」在机器层面不可辨。
+# 上一版这里 5 条路径全是 `None` —— 小马哥判为违反硬条件 1 的「等效」要求。
+#
+# ⚠️ 判据是**正向断言两条**：① 必须有 `error_code == "invalid_tool_args"`；
+# ② 必须与业务失败（「已存在需 overwrite」）的码取值**不同**。
+# 反例见 `test_no_naked_db_constraint_error_ever_surfaces`：它只断言「不得出现某串」
+# ——否定式断言在功能未发生时恒真，删掉运行时校验它照样 passed，故不计入本组覆盖。
+# =========================================================================== #
+
+
+class TestP1eRuntimeLocatorErrorCode:
+    """五个「缺定位参数」入口都必须给出与 schema 层同码的 `invalid_tool_args`。"""
+
+    def _patch_empty(self, monkeypatch) -> None:
+        monkeypatch.setattr(tools.gtAgentManager, "get_agent", AsyncMock(return_value=None))
+        monkeypatch.setattr(tools.gtAgentManager, "get_agent_by_id", AsyncMock(return_value=None))
+        monkeypatch.setattr(tools.gtAgentManager, "batch_save_agents", AsyncMock())
+        monkeypatch.setattr(deptService.gtDeptManager, "get_dept_by_name", AsyncMock(return_value=None))
+        monkeypatch.setattr(deptService, "upsert_dept", AsyncMock())
+        monkeypatch.setattr(tools.gtRoomManager, "get_room_by_team_and_name", AsyncMock(return_value=None))
+        monkeypatch.setattr(roomService, "upsert_room", AsyncMock())
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "invoke",
+        [
+            pytest.param(lambda: tools.save_agent(_context=_ctx()), id="save_agent"),
+            pytest.param(lambda: tools.save_dept(_context=_ctx()), id="save_dept"),
+            pytest.param(lambda: tools.save_room(_context=_ctx()), id="save_room"),
+            pytest.param(lambda: tools.delete_dept(_context=_ctx()), id="delete_dept"),
+            pytest.param(lambda: tools.delete_room(_context=_ctx()), id="delete_room"),
+        ],
+    )
+    async def test_missing_locator_code_equals_schema_layer(self, monkeypatch, invoke):
+        """缺定位参数 ⇒ `error_code == "invalid_tool_args"`（与 schema 层同码），文案点名参数。"""
+        self._patch_empty(monkeypatch)
+
+        result = await invoke()
+
+        assert result["success"] is False, result
+        assert result["error_code"] == "invalid_tool_args", result
+        # 同码之外仍点名参数：机器可分支、人可照着补。
+        assert "name" in result["message"], result
+
+    @pytest.mark.asyncio
+    async def test_missing_locator_code_is_distinguishable_from_business_failure(self, monkeypatch):
+        """「参数缺失」与「同名已存在需 overwrite」的码**取值不同**，调用方能选对下一步。
+
+        两条路径都在工具层、都 `success=False`；若都返回 `None`（上一版的状态），
+        调用方无法凭返回体判断「补参数重试」还是改传 `overwrite_existing=true`。
+        """
+        self._patch_empty(monkeypatch)
+        existing = _agent(11, "alice", model="old-model")
+        monkeypatch.setattr(tools.gtAgentManager, "get_agent", AsyncMock(return_value=existing))
+
+        missing = await tools.save_agent(_context=_ctx())
+        business = await tools.save_agent(name="alice", role_template_name="writer", _context=_ctx())
+
+        assert missing["success"] is False and business["success"] is False
+        assert missing["error_code"] == "invalid_tool_args", missing
+        # 取值写出来（不是「不相同」三个字）：业务失败这一档当前**不带** error_code。
+        assert "error_code" not in business, business
+        assert business.get("error_code") is None, business
+        assert "overwrite_existing" in business["message"], business
+
+
+class TestP1ePatchEchoName:
+    """按 id 做 PATCH、省略 name 时，返回体不得出现 `None` 名字（脏文案经 console 直达模型）。"""
+
+    @pytest.mark.asyncio
+    async def test_patch_by_id_echoes_existing_name(self, monkeypatch):
+        """`save_agent(agent_id=11, model="x")` ⇒ 无 `"None"` 字样，`agent.name` 回显非空。"""
+        agent = _agent(11, "alice", model="old-model")
+        monkeypatch.setattr(tools.gtAgentManager, "get_agent_by_id", AsyncMock(return_value=agent))
+        monkeypatch.setattr(tools.gtAgentManager, "batch_save_agents", AsyncMock())
+        monkeypatch.setattr(
+            tools.gtRoleTemplateManager, "get_role_template_by_id",
+            AsyncMock(return_value=SimpleNamespace(id=21, name="writer")),
+        )
+        monkeypatch.setattr(
+            tools.containerService, "delete_agent_containers_safely",
+            AsyncMock(side_effect=AssertionError("PATCH 不得触发改名（删容器）")),
+        )
+
+        result = await tools.save_agent(agent_id=11, model="new-model", _context=_ctx())
+
+        assert result["success"] is True, result
+        assert "None" not in result["message"], result["message"]
+        assert result["agent"]["name"] == "alice", result["agent"]
+        assert "alice" in result["message"], result["message"]

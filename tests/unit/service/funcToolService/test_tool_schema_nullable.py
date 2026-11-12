@@ -195,6 +195,25 @@ def _parameters(tool_name: str) -> dict:
     return get_function_metadata(tool_name, func_tool.callable)["parameters"]
 
 
+#: schema 层拒绝文案的固定前缀（与 `toolArgsValidation.validate_tool_args` 里那条对齐）。
+#:
+#: ⚠️ **不能只看 `error_code`**：`save_agent` / `save_dept` / `save_room` / `delete_dept` /
+#: `delete_room` 的 `required` 在 #196 后为空（PATCH 语义要求「未传」可达），必填校验
+#: 下移到运行时，且运行时给出的码**与 schema 层同码**（小马哥 12:02 硬条件 1）。
+#: 于是「两个定位参数都不给」在运行时被拒时也会带 `invalid_tool_args` ——
+#: 只看码会把 27 个合法 null 注入判成「被 schema 误拒」（本单实测）。
+#: 判据要问的是「**schema 层**放不放行 null」，所以必须同时匹配层文案。
+SCHEMA_LAYER_MARK = "参数校验失败（tool="
+
+
+def _rejected_by_schema(result: dict) -> bool:
+    """该返回体是否由 **schema 层**（而非运行时必填校验）拒绝。"""
+    return (
+        result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS
+        and SCHEMA_LAYER_MARK in result.get("message", "")
+    )
+
+
 async def _inject_null(tool_name: str, param_name: str) -> dict:
     """合法打底（补齐全部 required）+ 单点注入 `null`，返回工具调用结果。"""
 
@@ -249,8 +268,8 @@ async def test_field_null_rejected_for_all_non_optional_params() -> None:
     failures: list[str] = []
     for tool_name, param_name in NON_OPTIONAL_BUT_DEFAULTED:
         result = await _inject_null(tool_name, param_name)
-        if result.get("error_code") != toolArgsValidation.INVALID_TOOL_ARGS:
-            failures.append(f"{tool_name}.{param_name} 未被拒：{result}")
+        if not _rejected_by_schema(result):
+            failures.append(f"{tool_name}.{param_name} 未被 schema 拒：{result}")
 
     assert not failures, "以下字段传 null 仍被放行：\n" + "\n".join(failures)
 
@@ -270,7 +289,7 @@ async def test_field_null_accepted_for_all_optional_params() -> None:
     failures: list[str] = []
     for tool_name, param_name in OPTIONAL_WITH_DEFAULT:
         result = await _inject_null(tool_name, param_name)
-        if result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS:
+        if _rejected_by_schema(result):
             failures.append(f"{tool_name}.{param_name} 被误拒：{result.get('message')}")
 
     assert not failures, "以下 Optional 字段传 null 被误拒：\n" + "\n".join(failures)

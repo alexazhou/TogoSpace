@@ -68,6 +68,28 @@ def _ctx(tool_name: str) -> ToolCallContext:
     return ToolCallContext(agent_id=1, team_id=1, tool_name=tool_name)
 
 
+#: schema 层拒绝文案的固定前缀（`toolArgsValidation.validate_tool_args` 里那一条）。
+#:
+#: #196 起 `error_code == "invalid_tool_args"` 有**两个**产出层：
+#: - schema 层（`toolArgsValidation`）：文案 `参数校验失败（tool=<name>）：…`
+#: - 运行时层（`tools.py` 的函数体内，locator / 新建必填缺失）：文案点名参数
+#:   （如 `请用 agent_id 或 name 指定成员…`）。两者同码是**有意**的（小马哥 12:02
+#:   硬条件 1「与 schema 层同码」，让调用方一个码就能判「补参数重试」）。
+#:
+#: ⇒ 凡是要测「**schema 层**放不放行 null」的判据，不能只看 `error_code`
+#: （会把运行时拒绝误认成 schema 拒绝 ⇒ P1 注入表出现 27 处假红）；必须同时匹配层文案。
+#: 只看层文案不判码则更糟：schema 层一旦丢码，判据仍绿。两者一起判。
+SCHEMA_LAYER_MARK = "参数校验失败（tool="
+
+
+def _rejected_by_schema(result: dict) -> bool:
+    """该返回体是否由 **schema 层**（而非运行时必填校验）拒绝。"""
+    return (
+        result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS
+        and SCHEMA_LAYER_MARK in result.get("message", "")
+    )
+
+
 def _schema_of(func: Any) -> dict:
     from service.funcToolService.funcToolType import get_function_metadata
 
@@ -895,7 +917,7 @@ async def test_null_injection_exhaustive_table() -> None:
                 p3_enumerable += 1
 
             result = await funcCore.run_tool_call(raw_args, _ctx(name))
-            rejected = result.get("error_code") == toolArgsValidation.INVALID_TOOL_ARGS
+            rejected = _rejected_by_schema(result)
 
             ok = rejected != should_pass  # 应拦 ⇒ rejected True；应放行 ⇒ rejected False
             if not ok:

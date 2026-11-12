@@ -767,7 +767,11 @@ async def save_agent(
         return {"success": False, "message": "当前没有可用的团队上下文。"}
 
     if agent_id is None and name is None:
-        return {"success": False, "message": "请用 agent_id 或 name 指定成员；新建成员必须给 name。"}
+        return {
+            "success": False,
+            "message": "请用 agent_id 或 name 指定成员；新建成员必须给 name。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
 
     normalized_name: str | None = None
     if name is not None:
@@ -833,12 +837,26 @@ async def save_agent(
     if existing is not None and existing.team_id == -1:
         return {"success": False, "message": f"保留成员 {existing.name} 不允许通过工具创建或修改。"}
 
+    # PATCH 语义：只给 agent_id 时 name 省略 = 不改名。回显/日志/改名判定都要有名字，
+    # 故这里补上现值（与 `save_dept` / `save_room` 同口径）——否则返回体是
+    # 「已更新成员 None」，脏文案会经 console 直达模型。
+    if existing is not None and normalized_name is None:
+        normalized_name = existing.name
+
     if existing is None and normalized_name is None:
-        return {"success": False, "message": "新建成员必须给 name。"}
+        return {
+            "success": False,
+            "message": "新建成员必须给 name。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
 
     # 新建时的必填项在运行时补齐（schema 层已放开，见 docstring 上方说明）。
     if existing is None and normalized_role_template_name is None:
-        return {"success": False, "message": "新建成员时必须指定 role_template_name（角色模板名称）。"}
+        return {
+            "success": False,
+            "message": "新建成员时必须指定 role_template_name（角色模板名称）。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
 
     role_template = None
     if normalized_role_template_name is not None:
@@ -975,7 +993,11 @@ async def save_dept(
         return {"success": False, "message": "当前没有可用的团队上下文。"}
 
     if dept_id is None and name is None:
-        return {"success": False, "message": "请用 dept_id 或 name 指定组织；新建组织必须给 name。"}
+        return {
+            "success": False,
+            "message": "请用 dept_id 或 name 指定组织；新建组织必须给 name。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
 
     normalized_name: str | None = None
     if name is not None:
@@ -1025,6 +1047,7 @@ async def save_dept(
             return {
                 "success": False,
                 "message": f"新建组织时必须提供 {'、'.join(missing)}。",
+                "error_code": toolResult.INVALID_TOOL_ARGS,
             }
 
     all_agents = await gtAgentManager.get_team_all_agents(team_id)
@@ -1170,7 +1193,11 @@ async def save_room(
         return {"success": False, "message": "当前没有可用的团队上下文。"}
 
     if room_id is None and name is None:
-        return {"success": False, "message": "请用 room_id 或 name 指定房间；新建房间必须给 name。"}
+        return {
+            "success": False,
+            "message": "请用 room_id 或 name 指定房间；新建房间必须给 name。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
 
     normalized_name: str | None = None
     if name is not None:
@@ -1225,7 +1252,11 @@ async def save_room(
             }
         source_member_names = [id_to_name[aid] for aid in (existing.agent_ids or [])]
     else:
-        return {"success": False, "message": "新建房间时必须提供 member_names。"}
+        return {
+            "success": False,
+            "message": "新建房间时必须提供 member_names。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
 
     resolved_ids: list[int] = []
     for mname in source_member_names:
@@ -1325,7 +1356,11 @@ async def delete_room(
 
     normalized_name = None if name is None else name.strip()
     if room_id is None and not normalized_name:
-        return {"success": False, "message": "请用 room_id 或 name 指定要删除的房间。"}
+        return {
+            "success": False,
+            "message": "请用 room_id 或 name 指定要删除的房间。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
 
     if room_id is not None:
         target = await gtRoomManager.get_room_by_id(room_id)
@@ -1381,7 +1416,11 @@ async def delete_dept(
 
     normalized_name = None if name is None else name.strip()
     if dept_id is None and not normalized_name:
-        return {"success": False, "message": "请用 dept_id 或 name 指定要删除的组织。"}
+        return {
+            "success": False,
+            "message": "请用 dept_id 或 name 指定要删除的组织。",
+            "error_code": toolResult.INVALID_TOOL_ARGS,
+        }
 
     if dept_id is not None:
         target = await gtDeptManager.get_dept_by_id(dept_id)
