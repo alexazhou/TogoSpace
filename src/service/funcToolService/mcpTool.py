@@ -39,9 +39,31 @@ test_mcp_call.py` 的实跑用例。公开函数链（`load_openapi_spec → ext
 结果）。所以模块级加一把 `threading.Lock`，把「替换 stdout → 跑 → 取回」整段串行化：
 同时只有一次 mcp2cli 在写那个全局流。
 
-**代价（必须知情，不许当白送）**：`DEFAULT_TIMEOUT_SECONDS = 120`，因此**一条慢调用
-最多能把进程内所有 `mcp_call` 堵 120 秒**。实测读数见实现报告 §5.3（1 个慢 target
-在飞时另一快 target 的耗时）。收窄这个代价的两条路各自的问题：
+**代价（必须知情，不许当白送）**：串行化意味着**一次慢调用会把进程内其余 `mcp_call`
+挡在门外**。实测读数见实现报告 §5.3（1 个慢 target 在飞时另一快 target 的耗时）。
+
+**已知限制：`timeout` 到点不释放锁**（不是 bug，是取舍，但必须写下来）。`call_mcp`
+用 `asyncio.wait_for` 包 `asyncio.to_thread`，超时只是**不再等结果**：那个 worker 线程
+仍在跑、**仍持着 `_STDOUT_LOCK`**，直到 mcp2cli 那次调用真正结束才释放。实测
+（慢 target 服务端 sleep=3s、`timeout=1`）：
+
+- 超时返回瞬间 `_STDOUT_LOCK.locked() = True`，约 +2.0s 后才变 False；
+- 连发 3 个 `timeout=1` 打同一慢 target，随后快 target 等了 **6.03s**（3 个孤儿 worker
+  依次持锁）；
+- 更严重的一层（**改前形态下实测**，无锁 + `io.StringIO`）：孤儿 worker 结束时
+  `redirect_stdout` 恢复**全局** `sys.stdout`，会把**在飞调用**自己的捕获流一起打掉
+  ⇒ 后续调用**拿到的是别人的结果**（实测快调用返回 `{'marker': 'SLOW'}`，应为 `MID`）。
+  当前实现（线程隔离 + 锁）已消掉这一层，用例 `test_call_after_timeout_still_succeeds`
+  钉住它。
+
+**所以「锁最多被持有 N 秒」这种说法不成立**，正确的表述是：锁被持有到上游那次调用真正
+结束为止，而这个时长**没有硬上界** —— 上游 `httpx.Client(timeout=30/60)` 是**单次操作**
+超时（connect/read 各自计时，不是总时长；见 mcp2cli `__init__.py:3493` `execute_openapi`），
+服务端慢速滴流即可让总时长任意长。实测：滴流 target 每 1.5s 发 1 字节、总时长约 78s，
+`timeout=2` 的调用 2.01s 就返回了，但随后快 target 被堵 **74.92s**（>60s，证明无 60s 封顶）。
+⇒ 一次超时后，锁可能还被占几十秒，这段时间内**所有** `mcp_call` 都在排队，而调用方
+看到的是 `success=False, mcp_call_timeout`，下一个调用却莫名变慢 —— 别把它当随机故障。
+收窄这个代价的两条路各自的问题：
 
 - 「每次调用独立捕获」做不到：`print` 写的是 `sys.stdout` 这个**全局名字**，不是
   可注入的句柄，除非改上游或每调用开子进程；
@@ -464,6 +486,11 @@ async def call_mcp(
             asyncio.to_thread(_run_argv_sync, argv), timeout=timeout
         )
     except asyncio.TimeoutError:
+        # 注意：这里**只是不再等**，worker 线程仍在跑、仍持着 `_STDOUT_LOCK`
+        # （`wait_for` 无法取消 `to_thread` 里的同步调用）。所以本函数返回后，
+        # 后续 `mcp_call` 可能仍要排队等那个孤儿 worker 结束 —— 详见文件头
+        # 「已知限制：timeout 到点不释放锁」。这不是可修的错误，别改成 `return`
+        # 之后假装锁已释放。
         return {
             "success": False,
             "error_code": "mcp_call_timeout",

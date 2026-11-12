@@ -408,6 +408,48 @@ async def test_noise_from_other_coroutine_does_not_break_the_call(tmp_path: Path
     assert inflight.get("error_code") is None, inflight
 
 
+@pytest.mark.asyncio
+async def test_call_after_timeout_still_succeeds(tmp_path: Path, dynamic_server):
+    """B1b：一次调用超时返回后，**后续调用必须仍然成功、且拿到自己的结果**。
+
+    小马哥 05:13 实测发现的形态：`asyncio.wait_for` 超时只是「不再等」，`to_thread` 的
+    worker 仍在跑、**仍持着 `_STDOUT_LOCK`** ⇒ 超时之后那段时间里别的 `mcp_call` 会莫名
+    排队。实测（本机，慢 target 服务端 sleep=3s，timeout=1）：超时返回瞬间
+    `_STDOUT_LOCK.locked() = True`，持续到 worker 真正结束才 False；连发 3 个 timeout=1
+    后快 target 等了 6.03s（3 个孤儿 worker 依次持锁）。
+
+    **比「变慢」更严重的一层（本用例真正钉的东西）**：改前形态（无锁 + `io.StringIO`）
+    下，孤儿 worker 结束时会 `redirect_stdout` 恢复**全局** `sys.stdout`，把**在飞调用**
+    自己的捕获流一起打掉 ⇒ 快调用拿到的是**慢调用的结果**。实测：
+        `随后 mid target: 耗时 3.02s success=True result={'marker': 'SLOW'}`（应为 MID）
+    即「超时之后，后续调用返回**错误的结果**」。只断言 `success` 抓不到，必须断内容。
+
+    只断言「成功 + 结果正确」，**不断言耗时** —— 延迟是性能数，会随机负载漂移，不进判据。
+    """
+    routes, base_url = dynamic_server
+    routes["slow"] = (json.dumps({"marker": "SLOW"}).encode(), "application/json", 3.0)
+    routes["mid"] = (json.dumps({"marker": "MID"}).encode(), "application/json", 3.0)
+    slow_spec = _write_spec_with_paths(tmp_path, base_url, "spec_to_slow.json", ["/slow"])
+    mid_spec = _write_spec_with_paths(tmp_path, base_url, "spec_to_mid.json", ["/mid"])
+
+    # 直接用 `mcpTool.call_mcp`（`tools.mcp_call` 刻意不暴露 timeout —— 超时是服务端
+    # 策略，不该让模型自己设；要测超时路径就得走带 timeout 的那一层）。
+    timed_out = await mcpTool.call_mcp(
+        kind="openapi", target=slow_spec, action="call", tool="get-slow", timeout=1
+    )
+    assert timed_out["success"] is False
+    assert timed_out["error_code"] == "mcp_call_timeout", timed_out
+
+    # 关键：超时后的下一个调用，必须拿到**自己的**结果。
+    # 服务端同样 3s ⇒ 它必然与孤儿 worker 的收尾重叠，覆盖「退出时打掉在飞捕获流」这个形态。
+    after = await mcp_call(target=mid_spec, action="call", tool="get-mid")
+    assert after.get("success") is True, after
+    assert after["result"] == {"marker": "MID"}, (
+        f"超时后的调用拿到了别人的结果：{after.get('result')!r}（应为 MID）"
+    )
+    assert after.get("error_code") is None, after
+
+
 # ---------------------------------------------------------------------------
 # 3. 接入面：console 转发 + 第 2 跳真执行
 # ---------------------------------------------------------------------------
