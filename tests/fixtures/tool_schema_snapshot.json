@@ -563,6 +563,59 @@
       "skill_name"
     ]
   },
+  "mcp_call": {
+    "description": "调用任意外部 MCP server / OpenAPI spec / GraphQL 服务（mcp2cli 运行时转换）。",
+    "parameters": {
+      "action": {
+        "description": "`list` 只列工具，`call` 真调一次。",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "args": {
+        "description": "action=call 时的参数对象，键名与 list 里该工具的参数名一致。",
+        "schema": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "extra": {
+        "description": "透传 **mcp2cli 全局开关**，如 `{\"transport\": \"sse\", \"search\": \"关键词\"}`。 `search` 需与 `action=list` 配合；`head` 只对 `mcp` / `mcp_stdio` / `graphql` 生效（`kind=openapi` 下上游不传给执行函数，传了会给 `mcp_unsupported_extra`）； `raw` / `toon` 因本工具固定带 `--json` 而不生效，同样会被拒。",
+        "schema": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "kind": {
+        "description": "来源类型：`openapi` / `mcp` / `mcp_stdio` / `graphql`，默认 `openapi`。",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "target": {
+        "description": "spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint。",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "tool": {
+        "description": "action=call 时的工具名（从 list 结果里取）。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "required": [
+      "target"
+    ]
+  },
   "memory_create": {
     "description": "新建一条长期记忆槽位（一个槽位一个独立主题）。",
     "parameters": {

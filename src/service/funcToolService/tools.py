@@ -22,7 +22,7 @@ import service.memoryService as memoryService
 import service.roomService as roomService
 import service.skillService as skillService
 import service.thirdPartyService as thirdPartyService
-from service.funcToolService import webFetchTool
+from service.funcToolService import mcpTool, webFetchTool
 from service.agentService.toolRegistry import validate_tool_allow_specs
 from service.agentService.prompts import (
     TODO_TASK_CANCEL_INSTRUCTION,
@@ -115,6 +115,52 @@ async def webfetch(url: str, _context: ToolCallContext = None) -> dict:
         return await webFetchTool.fetch_markdown(url)
     except Exception as exc:
         return _tool_error_result(exc)
+
+
+async def mcp_call(
+    target: str,
+    action: str = "list",
+    tool: Optional[str] = None,
+    args: Optional[dict] = None,
+    kind: str = "openapi",
+    extra: Optional[dict] = None,
+    _context: ToolCallContext = None,
+) -> dict:
+    """调用任意外部 MCP server / OpenAPI spec / GraphQL 服务（mcp2cli 运行时转换）。
+
+    先用 `action=list` 拿到该目标的可调用工具清单（含参数说明），再用 `action=call`
+    调其中一个。这样外部服务的几十上百个工具只占「一次 list」的 token，不必每个都
+    预先塞成独立工具。`kind` 决定 target 怎么解释：`openapi` 填 spec 文件路径或 URL，
+    `mcp` 填 MCP server 的 HTTP/SSE 地址，`mcp_stdio` 填启动该 server 的本地命令，
+    `graphql` 填 GraphQL endpoint。返回成功时 `result` 是 mcp2cli 的 JSON 输出
+    （list 为命令数组，call 为结果 envelope），`result_type` 标出它是 object / array /
+    string 等（远端返回纯文本时 `result_type="string"`，不是调用失败）；`truncated=True`
+    时**不下发 `result`**，只给 `raw_excerpt` + `original_chars`，需缩小查询范围后重试。
+    失败时 `error_code` 取 `mcp_invalid_kind` / `mcp_invalid_target` / `mcp_missing_tool` /
+    `mcp_invalid_action` / `mcp_invalid_extra` / `mcp_unsupported_extra` /
+    `mcp_call_timeout` / `mcp2cli_exit` / `mcp2cli_error` / `mcp2cli_empty_output` /
+    `mcp2cli_bad_json`，其中 `mcp2cli_exit` 说明参数或目标有误（附 `stderr`），可直接
+    按提示改参数重试。
+
+    Args:
+        target: spec 文件路径 / MCP server URL / stdio 启动命令 / GraphQL endpoint。
+        action: `list` 只列工具，`call` 真调一次。
+        tool: action=call 时的工具名（从 list 结果里取）。
+        args: action=call 时的参数对象，键名与 list 里该工具的参数名一致。
+        kind: 来源类型：`openapi` / `mcp` / `mcp_stdio` / `graphql`，默认 `openapi`。
+        extra: 透传 **mcp2cli 全局开关**，如 `{"transport": "sse", "search": "关键词"}`。
+            `search` 需与 `action=list` 配合；`head` 只对 `mcp` / `mcp_stdio` / `graphql`
+            生效（`kind=openapi` 下上游不传给执行函数，传了会给 `mcp_unsupported_extra`）；
+            `raw` / `toon` 因本工具固定带 `--json` 而不生效，同样会被拒。
+    """
+    return await mcpTool.call_mcp(
+        kind=kind,
+        target=target,
+        action=action,
+        tool=tool,
+        args=args,
+        extra=extra,
+    )
 
 
 def _require_team_context(_context: ToolCallContext | None) -> tuple[bool, int]:

@@ -430,6 +430,27 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     # 其他
     _spec("time", "get", "get_time", verb="GET"),
     _spec("reload", "", "reload_team", verb="DIRECT", self_interrupt=True),
+    # 外部服务（#202 mcp2cli 接入）：一条 `mcp` 资源词转发到 `mcp_call`。
+    #
+    # 位置参数只承载 target（`mcp list ./openapi.json`）；`tool` / `args` 走选项，
+    # 因为现有 DIRECT 处理器只把**第一个**位置参数映射到第一个工具参数，要多段位置
+    # 参数就得改 console 核心语义（#202 明确不改既有语义）。选项面由 `mcp_call` 的
+    # signature 派生（`--tool` / `--args '{"k":"v"}'` / `--kind` / `--extra`），
+    # `args` 声明成 dict ⇒ 上游 `_convert_option` 按 object 走 JSON 解析。
+    #
+    # `mcp call` 用 SAVE 只为拿到 `input_defaults`（把 `action` 补成 `call`）；
+    # 它不落库、不吃 `overwrite`，`patch_by_name` 保持默认。
+    _spec(
+        "mcp", "ls", "mcp_call", verb="GET",
+        needs_target=True, min_args=1, max_args=1,
+        locator=_loc(name_param="target"),
+    ),
+    _spec(
+        "mcp", "call", "mcp_call", verb="SAVE",
+        accepts_input=True, needs_target=True, min_args=1, max_args=1,
+        locator=_loc(name_param="target"),
+        input_defaults=(("action", "call"),),
+    ),
 )
 
 #: `help` 是纯本地命令，不映射任何原工具，也不做权限校验（它不碰数据）。

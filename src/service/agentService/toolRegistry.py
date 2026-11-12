@@ -24,6 +24,8 @@ CATEGORY_CONFIG: dict[str, ToolCategory] = {
     "get_time": ToolCategory.BASIC,
     "web_search": ToolCategory.READ,
     "webfetch": ToolCategory.READ,
+    # mcp2cli 接入（#202）：会真去调外部 API（可能有副作用），归执行类。
+    "mcp_call": ToolCategory.EXECUTE,
     "get_dept_info": ToolCategory.BASIC,
     "get_room_info": ToolCategory.BASIC,
     "get_agent_info": ToolCategory.BASIC,

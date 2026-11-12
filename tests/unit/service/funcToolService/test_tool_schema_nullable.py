@@ -151,6 +151,11 @@ OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     ("list_tasks", "scope"),
     ("list_tasks", "status"),
     ("list_tasks", "title_keyword"),
+    # #202：`mcp_call` 的 3 个 `Optional[...] = None` 参数（`action` 有默认值但注解
+    # 不含 None，属另一张表）。
+    ("mcp_call", "args"),
+    ("mcp_call", "extra"),
+    ("mcp_call", "tool"),
     ("memory_create", "tags"),
     ("memory_update", "content"),
     ("memory_update", "star_level"),
@@ -505,7 +510,7 @@ def test_field_lists_match_signatures() -> None:
         assert has_none is expected, (tool_name, param_name, hints[param_name])
 
     assert len(NON_OPTIONAL_BUT_DEFAULTED) == 19
-    assert len(OPTIONAL_WITH_DEFAULT) == 68
+    assert len(OPTIONAL_WITH_DEFAULT) == 71
 
 
 def test_field_lists_cover_every_optional_param() -> None:
@@ -704,7 +709,21 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: 变为 `["name"]`；同时 `type` / `soul` 的参数说明改写为「新建必填 / 更新时省略
 #: 保持现值」。`save_agent.name` 的说明补充「同名多行 ⇒ ambiguous_target」。
 #: 工具数与参数数不变（38 / 108）。
-BASELINE_TEXT_DIGEST = "eec676b35fcb0e77648f2e5ede1136a8432b9aefc4b4c6fe6a5139e67ccc622e"
+#:
+#: #202 重算（`a0dc4b19…` → `c62aa930…`）：**新增一个工具** `mcp_call`（6 个参数），
+#: 其余 38 个工具的 description / required **一字未动**。工具数 38 → 39、参数数
+#: 108 → 114，全部增量来自 `mcp_call`（`target` 必填；`action` 有默认值但不含 None；
+#: `tool` / `args` / `kind` / `extra` 四个可选）。复核方式同 #196：把本常量换回旧值
+#: 跑本用例，diff 里只应出现 `[mcp_call]` 一项。
+#:
+#: #202 复验重算（`c62aa930…` → `4fa78af7…`）：**只改 `mcp_call.extra` 一个参数的说明**，
+#: 工具数 / 参数数 / 全部 required 不变（39 / 114）。原因：验收打回项 B4 实测确认
+#: `kind=openapi` 下 `extra={"head": N}` 被上游静默忽略（`_handle_openapi_mode` 不把
+#: `--head` 传给 `execute_openapi`，数组响应也照样返回全量），原说明却把 `head` 当示例
+#: 在教模型用。改后说明写清 `head` 的适用范围与 `raw` / `toon` 的失效，并新增
+#: `mcp_unsupported_extra` / `mcp_invalid_extra` 两个错误码。快照同步用
+#: `python scripts/tool_schema_snapshot.py --update` 更新，diff 应只有 `[mcp_call.extra]` 一项。
+BASELINE_TEXT_DIGEST = "50c763add3c0406cd51e5b8fc9b45fced2b1708c5e0857e5552f7e7a4df846f0"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -745,8 +764,9 @@ def test_descriptions_and_required_do_not_drift() -> None:
 
     digest, tools, params = _text_digest()
 
-    assert tools == 39, tools
-    assert params == 111, params
+    # 38 → 39 / 108 → 114：`mcp_call`（#202）。
+    assert tools == 40, tools
+    assert params == 117, params
     assert digest == BASELINE_TEXT_DIGEST, (
         "description 或 required 与基线不一致（摘要变化）。\n"
         "若确为有意变更，请先确认「模型看到的接口说明确实该变」，再更新本文件的 "

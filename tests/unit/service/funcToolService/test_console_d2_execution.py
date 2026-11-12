@@ -143,8 +143,10 @@ def test_forward_targets_are_exactly_the_converged_set():
         | set(NON_CONVERGED_FORWARD_TARGETS)
         | set(CONSOLE_ONLY_FORWARD_TARGETS)
     )
+    # #202：`mcp_call` 同理——它是 console 的转发目标，但不在 D2 收敛清单里
+    # （那份清单是 #154 定的 16 项，扩表属 Operator 决策），所以它是「未收敛转发目标」。
     assert set(NON_CONVERGED_FORWARD_TARGETS) == {
-        "list_tasks", "get_task_detail", "update_task",
+        "list_tasks", "get_task_detail", "update_task", "mcp_call",
     }, f"未收敛的转发目标集合变了：{set(NON_CONVERGED_FORWARD_TARGETS)}"
     assert set(CONSOLE_ONLY_FORWARD_TARGETS) == {"update_container_note"}, (
         "基准 CONSOLE_ONLY 的转发目标集合变了："
@@ -154,9 +156,9 @@ def test_forward_targets_are_exactly_the_converged_set():
 
 def test_forward_command_count():
     """报总数：全部命令、带转发目标的命令、去重目标数。"""
-    assert len(cc.COMMAND_SPECS) == 27, f"命令表已变化（现 {len(cc.COMMAND_SPECS)} 条），请复核本条"
-    assert len(FORWARD_COMMANDS) == 27
-    assert len(FORWARD_TARGETS) == 20
+    assert len(cc.COMMAND_SPECS) == 29, f"命令表已变化（现 {len(cc.COMMAND_SPECS)} 条）"
+    assert len(FORWARD_COMMANDS) == 29
+    assert len(FORWARD_TARGETS) == 21
     assert len(cc.LEGACY_CONVERGED_TOOLS) == 16, "收敛清单必须仍是 16 项（#187 裁定②：本单不动）"
     assert cc.HELP_SPEC.legacy_tool == ""
 

@@ -16,7 +16,10 @@ jinja2~=3.1.6
 dashscope~=1.25.13
 textual~=8.0.2
 claude-agent-sdk~=0.1.45
+# mcp2cli 接入（#202）：mcp2cli 依赖 mcp>=1.26,<3，不 pin 会解析到已知会红的 2.3.0；
+# 实测 mcp2cli==3.9.0 与 mcp==1.27.1 可共存，两者必须同批引入。
 mcp==1.27.1
+mcp2cli==3.9.0
 types-peewee==3.19.0.20260109
 mypy==1.8.0
 pytspclient~=0.2.7

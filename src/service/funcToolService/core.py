@@ -39,6 +39,7 @@ from .tools import (
     list_task_events,
     list_tasks,
     load_skill,
+    mcp_call,
     memory_create,
     memory_list,
     memory_read,
@@ -125,6 +126,8 @@ def load_func_tools() -> dict[str, FuncTool]:
         "get_time": get_time,
         "web_search": web_search,
         "webfetch": webfetch,
+        # mcp2cli 接入（#202）：任意外部 MCP / OpenAPI / GraphQL 服务的一条统一入口。
+        "mcp_call": mcp_call,
         "send_chat_msg": send_chat_msg,
         "finish_action": finish_action,
         "get_dept_info": get_dept_info,

@@ -93,6 +93,10 @@ _DECLARED_PARAMETER_ORDER: dict[str, list[str]] = {
     "list_task_events": ["task_id", "limit", "before_id"],
     "list_tasks": ["assignee", "reviewer", "scope", "status", "title_keyword", "open_only", "limit"],
     "load_skill": ["skill_name"],
+    # #202 mcp2cli 接入：`target` 必填在前（spec 路径 / MCP URL），其余按「动作 → 工具 →
+    # 参数 → 来源类型 → 透传」排列；`kind` 放在 tool/args 之后是因为绝大多数调用只改
+    # target，不动来源类型。
+    "mcp_call": ["target", "action", "tool", "args", "kind", "extra"],
     # 长期记忆工具（#134）。参数顺序统一「先定位（memory_id / query）、后修改字段、
     # 最后是可选开关」：memory_list 只有开关；memory_update 的 memory_id 必填在最前。
     "memory_create": ["title", "summary", "content", "star_level", "tags"],

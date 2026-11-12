@@ -40,8 +40,8 @@ WARNING_KEYWORD = "已跳过校验"
 #: 工具总数（`python scripts/tool_schema_snapshot.py` 口径）。写死是为了让「少遍历一组」
 #: 或「抽样」立刻变红——动态用 `len()` 自证会随实现一起漂移，等于没断言。
 #: 32 → 33：webfetch（#191）进默认工具组，故默认组 33、合计 33+5=38。
-#: 5 → 6：容器组加 `update_container_note`（#203），合计 33+6=39。
-DEFAULT_TOOL_COUNT = 33
+# 合并 #203 + #202：默认组 +1(mcp_call)、容器组 +1(update_container_note)
+DEFAULT_TOOL_COUNT = 34
 CONTAINER_TOOL_COUNT = 6
 
 
@@ -887,9 +887,9 @@ async def test_null_injection_exhaustive_table() -> None:
     - `P3` 嵌套 object 字段数（内部 key 因 schema 为裸 `{"type":"object"}` 不可枚举）
 
     ## 枚举器自校验
-    `get_all_tools()` == 33、`get_all_tools(include_container_tools=True)` == 38 ——
+    `get_all_tools()` == 34、`get_all_tools(include_container_tools=True)` == 39 ——
     任一不等说明枚举器自己漏了工具（38 踩过：只拿 `_func_tools` 漏掉容器组 5 个）。
-    （#189 时为 32/37；webfetch 进默认组后为 33/38。）
+    （#189 时为 32/37；webfetch 进默认组后为 33/38；`mcp_call` 进默认组后为 34/39。）
     """
 
     from service.funcToolService.funcToolType import get_function_metadata
@@ -945,28 +945,32 @@ async def test_null_injection_exhaustive_table() -> None:
 
     # ---- 四个数独立成表（拆开报，不许只报总数）----
     assert p0 == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT, f"P0={p0}"
-    # 111 = 43 + 68。**这里必须拆开看两个口径**（否则「总数对」会掩盖反向变动）：
+    # 114 = 46 + 68（#202 `mcp_call` 带来 +3 required（target）/ +3 optional
+    #   （tool / args / extra）+ 1 个「有默认值但注解不含 None」（action），
+    #   故 108→114、43→46、65→68）。**这里必须拆开看两个口径**
+    #   （否则「总数对」会掩盖反向变动）：
     #   · `p1_required` 数的是「P1 注入后**应被拦**的字段」，不是 `required` 列表长度：
     #     24 个 required + 19 个「有默认值但注解不含 None」= 43
     #     （`save_role_template.type/soul` 改为 Optional 后 required 少了 2；
     #      #196 前：36 required + 19 = 55，见
     #      `test_tool_schema_nullable.NON_OPTIONAL_BUT_DEFAULTED` 注释）
-    #   · `p1_optional` = 111 - 43 = 68（#196 前 100 - 55 = 45）
-    # 111 = 全部参数数（39 工具，含容器组）。#196 前为 100；#203 加
-    # `update_container_note`（3 个 Optional 参数，全落在 p1_optional）。
-    assert p1_required + p1_optional == 111, (p1_required, p1_optional)
-    assert p1_required == 43, p1_required
-    assert p1_optional == 68, p1_optional
+    #   · `p1_optional` = 108 - 43 = 65（#196 前 100 - 55 = 45）
+    # 114 = 全部参数数（39 工具，含容器组）。#196 前为 100、#202 前为 108。
+    assert p1_required + p1_optional == 117, (p1_required, p1_optional)
+    assert p1_required == 46, p1_required
+    assert p1_optional == 71, p1_optional
     assert p2 == 13, f"P2={p2}"
-    assert p3_fields == 4, f"P3字段={p3_fields}"
+    # #202：`mcp_call.args` / `mcp_call.extra` 是裸 `{"type":"object"}` ⇒ 4 → 6。
+    assert p3_fields == 6, f"P3字段={p3_fields}"
     # P3 内部 key 为 0 ⇒ 本单表达力边界（裸 {"type":"object"} 无 properties），不是漏点
     assert p3_enumerable == 0, f"P3内部key={p3_enumerable}"
 
     total = p0 + p1_required + p1_optional + p2 + p3_enumerable
-    # 163 = 39 + 43 + 68 + 13 + 0（`update_container_note` 的 `record_id` 是 integer，
-    # 不进 P2 的数组元素枚举，故 P2 仍 13）
+    # 166 = 39 + 46 + 68 + 13 + 0（#202 实测：工具 38→39、P1 108→114、P3 4→6，
+    # P2 恒 13 —— `mcp_call.args`/`extra` 是裸 `{"type":"object"}`，被计入 P1 与 P3，
+    # 不进 P2）。
     # （#196 前 148 = 38 + 55 + 45 + 10 + 0；#189 时 146 = 37 + 35 + 64 + 10 + 0）
-    assert total == 163, total
+    assert total == 170, total
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
 
 
