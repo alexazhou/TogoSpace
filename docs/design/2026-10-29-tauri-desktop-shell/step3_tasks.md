@@ -52,7 +52,7 @@
 - [x] `src/desktopEntry.py`：`_apply_desktop_overrides()`（强制 `127.0.0.1`、强制 `auth.enabled`、只在值变化时落盘），先不接 `backend_main`
 - [x] `scripts/togo_desktop.spec`：以 `togo_agent.spec` 为基线，改入口、`console=True`、去掉 BUNDLE、去掉 pystray/AppKit/PIL hiddenimports
 - [x] **R1 验证**：打包后确认 `appPaths.ASSETS_DIR` / `PRESET_DIR` / 迁移目录都指到正确位置；必要时改 `datas` 目标为 `_internal/assets`，或在 `appPaths` 增加「可执行文件同级 `assets/`」兜底
-- [x] `tauri/scripts/build_backend.py`：调 PyInstaller → 复制 `dist/TogoSpace-backend/` 到 `tauri/build/backend/`
+- [x] `tauri/scripts/build_backend.py`：调 PyInstaller → 复制 `dist/Togobot-backend/` 到 `tauri/build/backend/`
 - [x] 手工验证：直接运行产物可执行文件（`TOGOSPACE_DESKTOP=1 TOGOSPACE_DESKTOP_PORT=18180 …`），`curl http://127.0.0.1:18180/system/status.json` 返回 200
 
 **验收**: 单机直接运行 onedir 后端，HTTP 服务可用；`assets/` 路径全部解析正确。
@@ -78,7 +78,7 @@
 - [x] `appPaths.IS_DESKTOP_MODE` + `_detect_run_env()` 增加 `desktop`
 - [x] Python 单测：marker 格式、override 幂等（值相同不落盘）、stdin EOF 触发 shutdown
 
-**验收**: `pytest tests/unit -k desktop` 通过；手工 `echo | ./TogoSpace-backend` 后进程自动退出。
+**验收**: `pytest tests/unit -k desktop` 通过；手工 `echo | ./Togobot-backend` 后进程自动退出。
 
 ---
 
@@ -222,10 +222,10 @@
 - [x] `build_desktop.py`：`--action frontend,backend,app,sign,notarize,zip` 分步；默认全流程
 - [x] 前端单源构建 + 双份复制（Tauri `frontendDist` / 后端 `assets/frontend`）+ **哈希一致性校验**（R8）
 - [x] 版本号统一读取 `src/version.py`，写入 `tauri.conf.json` 的 `version`
-- [x] macOS 签名顺序：内层 Mach-O → `Contents/MacOS/TogoSpace` → 外层 `.app` → `--verify --deep --strict`
+- [x] macOS 签名顺序：内层 Mach-O → `Contents/MacOS/Togobot` → 外层 `.app` → `--verify --deep --strict`
 - [x] entitlements：网络客户端、JIT、未签名可执行内存、用户选择文件读写（`allow-jit` 对 Python 依赖必要）
 - [x] dmg 生成 + 签名 + `notarytool submit --wait` + `stapler staple`
-- [x] 架构参数 `--arch arm64|x86_64`，产物命名 `TogoSpace_<version>_<arch>.dmg`
+- [x] 架构参数 `--arch arm64|x86_64`，产物命名 `Togobot_<version>_<arch>.dmg`
 - [x] `--action check`：打印签名链、Gatekeeper 评估结果
 
 **验收**: 干净机器（无 Python、未装过 app）安装 → 打开无 Gatekeeper 警告 → 全功能可用。

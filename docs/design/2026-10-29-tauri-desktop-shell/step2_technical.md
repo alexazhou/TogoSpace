@@ -11,14 +11,14 @@
 最终产物是一个应用包，内部三个部分：
 
 ```text
-TogoSpace.app/                                （macOS 示例，其他平台结构等价）
+Togobot.app/                                （macOS 示例，其他平台结构等价）
 ├── Contents/
 │   ├── MacOS/
-│   │   └── TogoSpace                         # Rust/Tauri 主程序（唯一的前台进程）
+│   │   └── Togobot                           # Rust/Tauri 主程序（唯一的前台进程）
 │   ├── Resources/
 │   │   ├── frontend/                         # Tauri frontendDist（Vue 构建产物，含 splash.html）
-│   │   ├── backend/                          # PyInstaller onedir：TogoSpace-backend + 依赖树
-│   │   │   ├── TogoSpace-backend             # 后端可执行（sidecar 入口 = src/desktopEntry.py）
+│   │   ├── backend/                          # PyInstaller onedir：Togobot-backend + 依赖树
+│   │   │   ├── Togobot-backend             # 后端可执行（sidecar 入口 = src/desktopEntry.py）
 │   │   │   ├── assets/                       # preset / skills / migrate / frontend（浏览器访问用）
 │   │   │   └── ...（Python 运行时、动态库）
 │   │   └── icons/                            # 托盘图标（template png）
@@ -36,10 +36,10 @@ TogoSpace.app/                                （macOS 示例，其他平台结�
 ### 1.2 进程模型
 
 ```text
-TogoSpace（Rust，主进程）
+Togobot（Rust，主进程）
 ├── 主线程：Tauri 事件循环（窗口 / 托盘 / IPC）
 ├── 线程：backend stdout/stderr 读取循环 + 启动状态机
-└── 子进程：TogoSpace-backend（PyInstaller onedir）
+└── 子进程：Togobot-backend（PyInstaller onedir）
         ├── stdin  ← 父进程持有（存活探针：父进程死亡 → EOF → 优雅退出）
         ├── stdout → 行协议（READY / MIGRATION_START / MIGRATION_END / ERROR）
         └── stderr → 只落日志
@@ -223,7 +223,7 @@ utils::watch_piped_stdio(child, on_event);
 菜单：
 
 ```text
-TogoSpace  v0.3.12
+Togobot  v0.3.12
 ──────────
 显示窗口
 在浏览器中打开
@@ -360,7 +360,7 @@ DESKTOP_ALLOWED_ORIGINS = (
 sequenceDiagram
     participant Rust as Tauri (Rust)
     participant Splash as splash.html
-    participant Py as TogoSpace-backend (Python)
+    participant Py as Togobot-backend (Python)
     participant Main as 主窗口 (Vue)
 
     Rust->>Rust: 读/建 desktop.json，选端口
@@ -563,7 +563,7 @@ async function loadDesktopRuntime(): Promise<void> {
 
 ```json
 {
-  "productName": "TogoSpace",
+  "productName": "Togobot",
   "identifier": "com.togospace.desktop",
   "build": {
     "frontendDist": "../../frontend/dist",
@@ -618,11 +618,11 @@ python3 tauri/scripts/build_desktop.py --action backend,app     # 分步执行
 步骤：
 
 1. **前端**：`frontend/` → `npm run build` → 产物同步到 `assets/frontend/`（后端浏览器形态用）
-2. **后端**：`scripts/togo_desktop.spec` 走 PyInstaller **onedir** → `dist/TogoSpace-backend/`，再整体复制到 `tauri/build/backend/`
+2. **后端**：`scripts/togo_desktop.spec` 走 PyInstaller **onedir** → `dist/Togobot-backend/`，再整体复制到 `tauri/build/backend/`
 3. **Tauri**：`npm run tauri build`（`frontendDist` 吃 `frontend/dist`，`resources` 吃 `tauri/build/backend`）
 4. **签名（macOS）**：
    1. 逐个签 `Resources/backend/**` 里的 Mach-O（主可执行 + `.so`/`.dylib`），`--options=runtime` + entitlements
-   2. 签 `Contents/MacOS/TogoSpace`
+   2. 签 `Contents/MacOS/Togobot`
    3. `codesign --deep --force` 签整个 `.app` → `codesign --verify --deep --strict` 校验
 5. **打包与公证**：`hdiutil` 生成 dmg → 签 dmg → `notarytool submit --wait` → `stapler staple`
 
@@ -642,8 +642,8 @@ python3 tauri/scripts/build_desktop.py --action backend,app     # 分步执行
 产物内部结构（与 `appPaths` 的假设对齐）：
 
 ```text
-TogoSpace-backend/
-├── TogoSpace-backend            # 可执行
+Togobot-backend/
+├── Togobot-backend            # 可执行
 ├── _internal/                   # onedir 依赖（PyInstaller 6.x）
 └── assets/                      # datas 映射的目标目录
     ├── frontend/
@@ -666,8 +666,8 @@ TogoSpace-backend/
 
 | 平台 | sidecar 路径 | 子进程处理 | 打包目标 |
 |------|--------------|-----------|----------|
-| Windows | `Resources/backend/TogoSpace-backend.exe` | `CREATE_NO_WINDOW`；`stdin` 探针同 Unix | `nsis` → `.exe` |
-| Linux | `Resources/backend/TogoSpace-backend` | 同 Unix | `appimage` / `deb`（依赖 `webkit2gtk-4.1`） |
+| Windows | `Resources/backend/Togobot-backend.exe` | `CREATE_NO_WINDOW`；`stdin` 探针同 Unix | `nsis` → `.exe` |
+| Linux | `Resources/backend/Togobot-backend` | 同 Unix | `appimage` / `deb`（依赖 `webkit2gtk-4.1`） |
 
 本期只完成 macOS；Windows/Linux 保留 `sys/` 分支与构建脚本入口，不作为发布门槛。
 
@@ -711,7 +711,7 @@ TogoSpace-backend/
 按 [产品文档 §5](./step1_product.md#5-验收标准) 逐条走一遍，另加：
 
 - 干净机器（无 Python / 未装过 app）冷启动安装 → 启动 → 完成 Quick Init → 退出
-- `kill -9` 主程序 → `pgrep -f TogoSpace-backend` 为空
+- `kill -9` 主程序 → `pgrep -f Togobot-backend` 为空
 - 从老版本 `~/.togospace` 升级 → 数据完整、迁移提示可见
 - 断网启动（LLM 不可达）→ 主窗口仍可打开并给出可读错误
 

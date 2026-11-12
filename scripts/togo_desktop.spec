@@ -135,7 +135,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="TogoSpace-backend",
+    name="Togobot-backend",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -153,5 +153,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="TogoSpace-backend",
+    name="Togobot-backend",
 )

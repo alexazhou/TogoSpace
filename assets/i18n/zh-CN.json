@@ -9,7 +9,7 @@
   "reset_data": "重置数据",
   "version": "版本: v{v}",
   "quit": "退出",
-  "port_in_use": "端口 {port} 已被占用，TogoSpace 无法启动。\n请先关闭占用该端口的程序后重试。",
+  "port_in_use": "端口 {port} 已被占用，Togobot 无法启动。\n请先关闭占用该端口的程序后重试。",
   "confirm_reset": "确定要重置所有数据吗？\n所有聊天室、成员、消息记录将被删除，此操作不可撤销。",
   "reset_done_title": "重置成功",
   "reset_done_body": "数据已清除，请重新启动程序。",

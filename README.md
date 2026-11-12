@@ -1,8 +1,8 @@
-![TogoSpace](image/togo_agent_team.png)
+![Togobot](image/togo_agent_team.png)
 
 <div align="center">
 
-# TogoSpace 🚀
+# Togobot 🚀
 
 **把一群 AI 组成一支真正的团队。**
 
@@ -22,10 +22,10 @@
 
 ---
 
-## 🤔 TogoSpace 是什么？
+## 🤔 Togobot 是什么？
 
 大多数 AI 工具只有**一个**助手，复杂任务全靠你自己拆、自己盯、自己串。
-TogoSpace 换了个思路：给你一支 **AI 团队**。
+Togobot 换了个思路：给你一支 **AI 团队**。
 
 - 你对「项目经理」说一句需求，它会把任务拆给「工程师」，工程师写完交给「测试」验收，全程在群聊里沟通。
 - 不需要画流程图，**谁下一步上场由团队自己决定**。
@@ -37,7 +37,7 @@ TogoSpace 换了个思路：给你一支 **AI 团队**。
 
 ---
 
-## ✨ 为什么选择 TogoSpace
+## ✨ 为什么选择 Togobot
 
 ### 🧑‍🤝‍🧑 像真实团队一样协作，而不是死板的工作流
 
@@ -115,6 +115,12 @@ OpenAI · Anthropic Claude · Google Gemini · DeepSeek · 阿里云通义千问
 
 前往 [Releases 页面](https://github.com/alexazhou/TogoSpace/releases) 下载 `.dmg`，安装后打开即可。首次启动会引导你配置模型，配置完成后默认的「软件研发团队」就会开始工作。
 
+> ⚠️ **从 TogoSpace 升级过来？先删旧 app 再装新包。**
+> 新版应用名是 `Togobot`，但 **bundle identifier 沿用 `com.togospace.desktop`**（系统身份不变，权限/偏好/数据目录全部延续）。
+> 因为 `.app` 文件名变了，macOS **不会自动覆盖**旧的 `TogoSpace.app`，两者会并存 —— 表现为 Launchpad 出现两个图标、单实例逻辑互相把对方踢掉。
+> 正确做法：**先把 `/Applications/TogoSpace.app` 拖到废纸篓，再安装 `Togobot.app`**。
+> 数据目录（`~/.togospace`）没有改动，删旧 app 不会丢任何配置、会话或工作区。
+
 ![Status Bar Entry](image/cn/entry.png)
 
 ### 方式二：Docker 部署
@@ -189,7 +195,7 @@ cd frontend && npm install && npm run dev
 
 ![WeChat QR Code](image/wechat.JPG)
 
-如果 TogoSpace 对你有帮助，欢迎点一个 ⭐ Star，这是对我们最大的鼓励！
+如果 Togobot 对你有帮助，欢迎点一个 ⭐ Star，这是对我们最大的鼓励！
 
 ---
 

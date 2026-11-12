@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for TogoSpace desktop shell",
+  "description": "Default capabilities for Togobot desktop shell",
   "windows": ["main", "splashscreen"],
   "permissions": [
     "core:default",

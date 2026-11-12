@@ -282,9 +282,9 @@ def test_bundled_assets_keep_the_gtsp_subdirectory_layout():
 @pytest.fixture
 def frozen_paths(monkeypatch, tmp_path):
     """把 appPaths 切到"打包态"，并给一个可控的假 exe 目录。"""
-    exe_dir = tmp_path / "TogoSpace-backend"
+    exe_dir = tmp_path / "Togobot-backend"
     exe_dir.mkdir()
-    exe_path = exe_dir / "TogoSpace-backend"
+    exe_path = exe_dir / "Togobot-backend"
     exe_path.write_text("", encoding="utf-8")
 
     meipass = tmp_path / "_internal"

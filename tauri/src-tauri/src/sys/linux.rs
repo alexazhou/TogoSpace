@@ -19,7 +19,7 @@ pub fn get_command(resource_dir: &Path, repo_root: &Path) -> Result<Command, Str
     #[cfg(not(debug_assertions))]
     {
         let _ = repo_root;
-        let sidecar = resource_dir.join("backend/TogoSpace-backend");
+        let sidecar = resource_dir.join("backend/Togobot-backend");
         if !sidecar.exists() {
             return Err(format!("后端可执行文件不存在: {:?}", sidecar));
         }

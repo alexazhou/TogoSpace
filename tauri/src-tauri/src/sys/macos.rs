@@ -6,7 +6,7 @@ pub type PlatformState = crate::sys::unix::UnixPlatformState;
 /// 构造后端启动命令。
 ///
 /// - 开发（`tauri dev`，debug 构建）：直接运行仓库 `.venv` 里的 Python 入口
-/// - 发布：运行 `Resources/backend/TogoSpace-backend`
+/// - 发布：运行 `Resources/backend/Togobot-backend`
 pub fn get_command(resource_dir: &Path, repo_root: &Path) -> Result<Command, String> {
     #[cfg(debug_assertions)]
     {
@@ -27,7 +27,7 @@ pub fn get_command(resource_dir: &Path, repo_root: &Path) -> Result<Command, Str
     #[cfg(not(debug_assertions))]
     {
         let _ = repo_root;
-        let sidecar = resource_dir.join("backend/TogoSpace-backend");
+        let sidecar = resource_dir.join("backend/Togobot-backend");
         if !sidecar.exists() {
             return Err(format!("后端可执行文件不存在: {:?}", sidecar));
         }

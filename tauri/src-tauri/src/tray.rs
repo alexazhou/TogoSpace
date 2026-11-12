@@ -38,7 +38,7 @@ pub fn build(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let header = MenuItem::with_id(
         app,
         "header",
-        format!("TogoSpace  v{}", version),
+        format!("Togobot  v{}", version),
         false,
         None::<&str>,
     )?;
@@ -83,7 +83,7 @@ pub fn build(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(normal_icon.clone())
         .icon_as_template(true)
-        .tooltip("TogoSpace")
+        .tooltip("Togobot")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -114,7 +114,7 @@ pub fn build(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
                     app.dialog()
                         .message(message)
-                        .title("TogoSpace")
+                        .title("Togobot")
                         .kind(MessageDialogKind::Error)
                         .show(|_| {});
                 }
@@ -160,9 +160,9 @@ pub fn refresh(app: &AppHandle) {
         let _ = tray.set_icon(Some(icon));
         let _ = tray.set_icon_as_template(!alert);
         let _ = tray.set_tooltip(Some(if alert {
-            "TogoSpace — 后端未运行"
+            "Togobot — 后端未运行"
         } else {
-            "TogoSpace"
+            "Togobot"
         }));
     }
 }

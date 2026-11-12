@@ -1,0 +1,93 @@
+{
+  "_meta": {
+    "purpose": "#204 反向对账基线：三类「改了就断」的载体在 BASE 的逐文件命中行数（下限）",
+    "base_sha": "58214d05d3d1f9e67a5c5051e914cb6174514fee",
+    "measure": "每行只要正则命中即计 1；排除 .git/node_modules/build/dist/__pycache__/.venv/.mypy_cache/.pytest_cache；跳过符号链接（AGENTS.md -> CLAUDE.md）；无后缀文本按文件名白名单（Dockerfile）纳入",
+    "rule": "HEAD 上每个文件的命中数必须 >= 本表；少 1 行即视为误伤"
+  },
+  "storage_root": {
+    "pattern": "\\.togospace",
+    "files": {
+      ".github/workflows/container-e2e.yml": 1,
+      "CLAUDE.md": 3,
+      "assets/skills/skill-creator/SKILL.md": 1,
+      "docs/design/2026-04-25-togospace-rename/togospace_rename_plan.md": 10,
+      "docs/design/2026-10-29-schedule-job-rename/schedule_job_rename_plan.md": 1,
+      "docs/design/2026-10-29-tauri-desktop-shell/login-shell-environment_design.md": 2,
+      "docs/design/2026-10-29-tauri-desktop-shell/step1_product.md": 3,
+      "docs/design/2026-10-29-tauri-desktop-shell/step2_technical.md": 9,
+      "docs/design/2026-10-29-tauri-desktop-shell/step3_tasks.md": 3,
+      "docs/design/2026-10-31-docker-agent-sandbox/step2_technical.md": 4,
+      "docs/design/2026-11-08-desktop-login-shell-path/step1_product.md": 2,
+      "docs/design/2026-11-08-desktop-login-shell-path/step2_technical.md": 1,
+      "docs/design/ROADMAP.md": 1,
+      "docs/tech/06_i18n/design.md": 1,
+      "docs/tech/10_release/packaging_design.md": 2,
+      "frontend/src/locales/en.json": 1,
+      "frontend/src/locales/zh-CN.json": 1,
+      "src/appPaths.py": 2,
+      "src/constants.py": 1,
+      "src/service/containerService/core.py": 1,
+      "src/tests/config/setting.README.md": 1,
+      "tauri/README.md": 7,
+      "tauri/src-tauri/src/config.rs": 1,
+      "tauri/src-tauri/tauri.conf.json": 1,
+      "tests/unit/service/containerService/test_container_lifecycle.py": 2
+    },
+    "total": 62
+  },
+  "env_prefix": {
+    "pattern": "TOGOSPACE_",
+    "files": {
+      ".github/workflows/container-e2e.yml": 1,
+      "CLAUDE.md": 1,
+      "Dockerfile": 10,
+      "assets/docs/setting.README.md": 1,
+      "docs/design/2026-10-29-tauri-desktop-shell/login-shell-environment_design.md": 12,
+      "docs/design/2026-10-29-tauri-desktop-shell/step2_technical.md": 9,
+      "docs/design/2026-10-29-tauri-desktop-shell/step3_tasks.md": 2,
+      "docs/design/2026-10-31-docker-agent-sandbox/step2_technical.md": 1,
+      "docs/design/2026-11-08-desktop-login-shell-path/step1_product.md": 4,
+      "docs/design/2026-11-08-desktop-login-shell-path/step2_technical.md": 9,
+      "frontend/src/App.vue": 1,
+      "frontend/src/api.ts": 1,
+      "frontend/src/utils/desktopLog.ts": 2,
+      "frontend/src/utils/frontendLogBridge.ts": 1,
+      "src/appPaths.py": 1,
+      "src/backend_main.py": 1,
+      "src/desktopEntry.py": 4,
+      "src/service/funcToolService/consoleCommands.py": 1,
+      "src/util/frontendLog.py": 2,
+      "tauri/README.md": 1,
+      "tauri/scripts/build_backend.py": 1,
+      "tauri/scripts/build_desktop.py": 1,
+      "tauri/src-tauri/src/backend.rs": 4,
+      "tauri/src-tauri/src/lib.rs": 2,
+      "tauri/src-tauri/src/login_shell.rs": 8,
+      "tests/api/test_system_controller/test.py": 1,
+      "tests/api/test_ws_frontend_log/test.py": 1,
+      "tests/e2e/test_container_happy_path.py": 3,
+      "tests/e2e/test_container_negative_cases.py": 4,
+      "tests/integration/test_agent_service/test_sdk_do_send.py": 1,
+      "tests/lifecycle/backend/test_backend_main_shutdown.py": 5,
+      "tests/unit/backend/test_desktop_entry.py": 17,
+      "tests/unit/service/funcToolService/test_console_meta.py": 1,
+      "tests/unit/service/funcToolService/test_tool_schema_nullable.py": 1
+    },
+    "total": 115
+  },
+  "container_label": {
+    "pattern": "com\\.togospace",
+    "files": {
+      ".github/workflows/container-e2e.yml": 1,
+      "docs/design/2026-04-25-togospace-rename/togospace_rename_plan.md": 1,
+      "docs/design/2026-10-29-tauri-desktop-shell/step2_technical.md": 1,
+      "docs/design/2026-10-31-docker-agent-sandbox/step2_technical.md": 4,
+      "src/constants.py": 1,
+      "src/service/containerService/core.py": 1,
+      "tauri/src-tauri/tauri.conf.json": 1,
+      "tests/unit/service/containerService/test_container_lifecycle.py": 2
+    },
+    "total": 12
+  }
+}

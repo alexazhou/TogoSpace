@@ -1,4 +1,4 @@
-# TogoSpace 桌面外壳（Tauri）
+# Togobot 桌面外壳（Tauri）
 
 Tauri v2（Rust）负责窗口、启动画面、托盘、子进程与日志汇聚；Python 后端由 PyInstaller
 以 **onedir** 形态打包，作为 bundle resources 放在 `Resources/backend/`。
@@ -39,7 +39,7 @@ npm run dev          # 启动 Vite(8181) + Tauri 窗口 + Python 后端（debug 
 ```
 
 debug 构建下后端命令为 `.venv/bin/python3 src/desktopEntry.py`；release 构建下为
-`Resources/backend/TogoSpace-backend`。
+`Resources/backend/Togobot-backend`。
 
 ## 构建
 
@@ -65,7 +65,7 @@ python3 tauri/scripts/build_desktop.py --arch x86_64
 - 签名/公证配置按字段优先读环境变量 `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` /
   `APPLE_SIGNING_IDENTITY`，缺失时回退到 `scripts/build_config.json`
   （`apple_id` / `app_specific_password` / `team_id` / `signing_identity_hash`）。
-- 产物：`build/TogoSpace_<version>_<arch>.dmg`（根目录 `build/` 统一存放 PyInstaller 与 DMG 产物）。
+- 产物：`build/Togobot_<version>_<arch>.dmg`（根目录 `build/` 统一存放 PyInstaller 与 DMG 产物）。
 
 ### CI
 
