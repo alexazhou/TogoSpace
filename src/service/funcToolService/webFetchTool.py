@@ -12,8 +12,13 @@
    的阈值、不做重试/回退分支 —— 单次转换、直出结果。
    ⇒ **接受残留导航噪声**（`Navigation`、`[index]/[next]/[previous]`、breadcrumb），
    这是有意的取舍：为去噪加复杂度不划算。
-4. **安全兜底**（十几行代码，不算复杂度膨胀）：拦内网/回环/链路本地地址，
-   **先解析域名再判 IP**（防 DNS 绕过），**每次重定向后重新校验目标**。
+4. **安全兜底**：拦内网/回环/链路本地地址，**先解析域名再判 IP**（防 DNS 绕过），
+   **每次重定向后重新校验目标**。
+5. **校验与连接必须用同一份解析结果**（#194）：`_assert_host_allowed` 是预检，只负责
+   「早拒」；真正生效的是注入到 `TCPConnector` 的 `_GuardedResolver` —— 它自己解析、
+   自己校验、**只把通过校验的 IP 交给 connector**。connector 只会连它返回的地址，
+   因此不存在「校验用的 IP」与「实际连接的 IP」不是同一个的时间窗（DNS rebinding TOCTOU）。
+   ⚠️ 这条不能用「连接前再校验一次」替代：那只是把时间窗挪个位置。
 
 返回结构沿用项目既有口径：`{success, message, error_code?}`，成功时 `message`
 是 Markdown 正文（或 `text/plain` 原文）。
@@ -30,6 +35,7 @@ from urllib.parse import urljoin, urlsplit
 
 import aiohttp
 import certifi
+from aiohttp.abc import AbstractResolver, ResolveResult
 from bs4 import BeautifulSoup
 from markdownify import markdownify as _to_markdown
 
@@ -198,6 +204,80 @@ async def _assert_host_allowed(hostname: str, port: int) -> dict[str, Any] | Non
 
 
 # ── HTTP 取数 ────────────────────────────────────────────────────────────
+
+
+class _HostBlocked(Exception):
+    """resolver 侧拒绝：解析到的地址全部落在禁止网段（#194）。
+
+    **为什么不用「返回空列表」表达拒绝**：`connector.py` 的
+    `_DNSCacheTable.next_addrs` 对空列表 `next(loop)` 会抛 `StopIteration`，
+    再被包成 `RuntimeError`；它不是 `ClientError`，现有 except 链接不住，
+    错误码会一路丢到工具层兜底（实测：`RuntimeError: coroutine raised StopIteration`）。
+
+    **为什么不用 `OSError`**：会被 `connector` 包成 `ClientConnectorDNSError`，
+    进而被 `except aiohttp.ClientError` 吃掉并映射成 `fetch_http_error` —— 错误码错。
+
+    自定义异常能原样穿透 aiohttp，由 `fetch_markdown` 显式映射回
+    `fetch_blocked_host`（硬约束 3）。
+    """
+
+    def __init__(self, host: str, addresses: list[ipaddress._BaseAddress]) -> None:
+        self.host = host
+        self.addresses = addresses
+        detail = ", ".join(str(a) for a in addresses) or "无"
+        super().__init__(f"{host} 解析到的地址全部被拒: {detail}")
+
+
+class _GuardedResolver(AbstractResolver):
+    """把「解析」与「校验」合并成一次，只返回通过校验的地址（#194 核心）。
+
+    `TCPConnector` 只会连本 resolver 返回的地址 ⇒ **不存在第二次解析**，
+    因此「校验用的 IP」与「实际连接的 IP」不可能不同 —— DNS rebinding 的时间窗
+    从根上消失，而不是挪到别处。
+
+    两个细节：
+
+    1. **复用模块级 `_resolve_ips_sync` / `_ip_is_blocked`**，与
+       `_assert_host_allowed` 的预检共用同一份判定，杜绝两份规则漂移。
+    2. **多 IP 回退不需要本类实现**：`connector.py` 的 `_create_direct_connection`
+       在 `while addr_infos:` 里对**同一份返回列表**逐个尝试；本类每次都返回
+       完整的一份已校验集合，回退天然不会重新解析（硬约束 1）。
+    """
+
+    async def resolve(
+        self,
+        host: str,
+        port: int = 0,
+        family: socket.AddressFamily = socket.AF_INET,
+    ) -> list[ResolveResult]:
+        loop = asyncio.get_running_loop()
+        addresses = await loop.run_in_executor(None, _resolve_ips_sync, host, port)
+
+        if not addresses:
+            # 解析不到地址不是「被拦」，交给 connector 包成 DNS 错误。
+            raise OSError(f"{host} 解析不到任何地址")
+
+        allowed = [address for address in addresses if not _ip_is_blocked(address)]
+        if not allowed:
+            raise _HostBlocked(host, addresses)
+
+        results: list[ResolveResult] = []
+        for address in allowed:
+            text = str(address)
+            results.append(
+                ResolveResult(
+                    hostname=host,
+                    host=text,
+                    port=port,
+                    family=socket.AF_INET6 if ":" in text else socket.AF_INET,
+                    proto=socket.IPPROTO_TCP,
+                    flags=0,
+                )
+            )
+        return results
+
+    async def close(self) -> None:
+        return None
 
 
 class _FetchAbort(Exception):
@@ -377,10 +457,14 @@ async def fetch_markdown(url: str) -> dict[str, Any]:
     }
 
     current_url = url.strip()
+    # #194：校验与连接共用同一份解析结果。`_GuardedResolver` 自己解析、自己校验、
+    # 只把通过校验的 IP 交给 connector ⇒ connector 不会（也无法）再解析一次。
+    connector = aiohttp.TCPConnector(resolver=_GuardedResolver())
     try:
         async with aiohttp.ClientSession(
             timeout=timeout,
             headers=headers,
+            connector=connector,
             trust_env=False,
         ) as session:
             for _ in range(MAX_REDIRECTS + 1):
@@ -431,6 +515,14 @@ async def fetch_markdown(url: str) -> dict[str, Any]:
                 f"重定向超过 {MAX_REDIRECTS} 次，已中止: {url}",
             )
 
+    except _HostBlocked as blocked:
+        # resolver 侧的拒绝要映射回既有错误码（硬约束 3）。
+        # ⚠️ 这条必须排在 `aiohttp.ClientError` 之前不是必需的（它不是 ClientError），
+        # 但必须存在：否则会漏到工具层兜底、丢掉 error_code。
+        return _error(
+            "fetch_blocked_host",
+            f"拒绝访问内网或回环地址: {blocked.host} 解析到 {', '.join(str(a) for a in blocked.addresses)}",
+        )
     except asyncio.TimeoutError:
         return _error(
             "fetch_timeout",
@@ -442,3 +534,6 @@ async def fetch_markdown(url: str) -> dict[str, Any]:
         return _error("fetch_invalid_url", f"非法地址: {exc}")
     except aiohttp.ClientError as exc:
         return _error("fetch_http_error", f"请求失败: {exc}")
+    finally:
+        # 传了 connector 时 session 不持有它的所有权，必须自己关，否则连接池泄漏。
+        await connector.close()
