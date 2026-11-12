@@ -304,7 +304,11 @@ class AgentToolRegistry:
         tool_call.verify()
         tool_call_id = tool_call.tool_call_id
         function_name = tool_call.function_name
-        function_args = tool_call.function_args
+        # 显式声明为 `str | dict`：第 1 跳从 tool_call 取到的是 JSON 字符串，第 2 跳
+        # 起被下面的 `forward.tool_args` 换成 dict（省掉一次 json 往返）。handler 契约
+        # 就是 `str | dict`（见 `ToolHandler`），这里不声明就只剩 `str`，转发那一行
+        # 会与声明冲突（#205 修的 mypy error；只加宽局部声明，运行时行为不变）。
+        function_args: str | dict[str, Any] = tool_call.function_args
 
         post_processors: list[Callable[[dict[str, Any]], dict[str, Any]]] = []
 
