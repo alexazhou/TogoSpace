@@ -74,6 +74,7 @@ async def test_save_agent_renames_private_dir(monkeypatch, tmp_path) -> None:
         name="bob",
         role_template_name="writer",
         agent_id=11,
+        overwrite=True,
         _context=_context(),
     )
 
@@ -117,6 +118,7 @@ async def test_save_agent_cleans_containers_before_renaming_dir(monkeypatch, tmp
         name="bob",
         role_template_name="writer",
         agent_id=11,
+        overwrite=True,
         _context=_context(),
     )
 
@@ -142,6 +144,7 @@ async def test_save_agent_rollback_does_not_clean_containers_again(monkeypatch, 
             name="bob",
             role_template_name="writer",
             agent_id=11,
+            overwrite=True,
             _context=_context(),
         )
 
@@ -182,6 +185,7 @@ async def test_save_agent_rolls_back_dir_when_save_fails(monkeypatch, tmp_path) 
             name="bob",
             role_template_name="writer",
             agent_id=11,
+            overwrite=True,
             _context=_context(),
         )
 

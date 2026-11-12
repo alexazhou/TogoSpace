@@ -735,7 +735,7 @@
     "description": "在当前团队中创建或更新成员。",
     "parameters": {
       "agent_id": {
-        "description": "成员 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。",
+        "description": "成员 ID；传入后按 ID 精确定位，此时 name 用于重命名。",
         "schema": {
           "type": [
             "integer",
@@ -820,8 +820,8 @@
           ]
         }
       },
-      "overwrite_existing": {
-        "description": "同名成员已存在时需设为 true 才会覆盖更新，默认 false；传入 agent_id 时本参数不生效。",
+      "overwrite": {
+        "description": "更新已有成员**必须**设为 true（无论按 name 还是 agent_id 定位）；默认 false 只允许新建。这是防止误覆盖已有成员的保护开关。",
         "schema": {
           "type": "boolean"
         }
@@ -857,7 +857,7 @@
         }
       },
       "dept_id": {
-        "description": "组织 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。",
+        "description": "组织 ID；传入后按 ID 精确定位，此时 name 用于重命名。",
         "schema": {
           "type": [
             "integer",
@@ -904,8 +904,8 @@
           ]
         }
       },
-      "overwrite_existing": {
-        "description": "同名组织已存在时需设为 true 才会覆盖更新，默认 false；传入 dept_id 时本参数不生效。",
+      "overwrite": {
+        "description": "更新已有组织**必须**设为 true（无论按 name 还是 dept_id 定位）；默认 false 只允许新建。这是防止误覆盖已有组织的保护开关。",
         "schema": {
           "type": "boolean"
         }
@@ -949,8 +949,8 @@
           "type": "string"
         }
       },
-      "overwrite_existing": {
-        "description": "同名模板已存在时需设为 true 才会覆盖更新，默认 false。",
+      "overwrite": {
+        "description": "更新已有同名模板**必须**设为 true；默认 false 只允许新建。这是防止误覆盖已有模板的保护开关。",
         "schema": {
           "type": "boolean"
         }
@@ -1036,14 +1036,14 @@
           ]
         }
       },
-      "overwrite_existing": {
-        "description": "同名房间已存在时需设为 true 才会覆盖更新，默认 false；传入 room_id 时本参数不生效。",
+      "overwrite": {
+        "description": "更新已有房间**必须**设为 true（无论按 name 还是 room_id 定位）；默认 false 只允许新建。这是防止误覆盖已有房间的保护开关。",
         "schema": {
           "type": "boolean"
         }
       },
       "room_id": {
-        "description": "房间 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。",
+        "description": "房间 ID；传入后按 ID 精确定位，此时 name 用于重命名。",
         "schema": {
           "type": [
             "integer",

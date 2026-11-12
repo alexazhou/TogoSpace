@@ -1177,9 +1177,9 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         assert result["error_code"] == "ambiguous_input_source"
 
     async def test_cc6_update_with_only_mechanism_option_is_no_update_action(self):
-        """`--overwrite_existing` 只是机制参数，不构成字段变更 → no_update_action。"""
+        """`--overwrite` 只是机制参数，不构成字段变更 → no_update_action。"""
         result = await self._call(
-            "dept update cc6_dept --overwrite_existing", _context=self._ctx()
+            "dept update cc6_dept --overwrite", _context=self._ctx()
         )
         assert result["success"] is False
         assert result["error_code"] == "no_update_action"

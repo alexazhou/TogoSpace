@@ -681,7 +681,7 @@ async def save_role_template(
     type: Optional[str] = None,
     soul: Optional[str] = None,
     i18n: dict | None = None,
-    overwrite_existing: bool = False,
+    overwrite: bool = False,
     _context: ToolCallContext = None,
 ) -> dict:
     """创建或更新角色模板；只能操作 USER 类型，SYSTEM 内置模板只读不可改。
@@ -695,7 +695,7 @@ async def save_role_template(
         type: 角色模板类型，只允许 USER；传 SYSTEM 会被拒绝（内置模板只读）。新建时省略默认 USER，更新时省略表示保持现值。
         soul: 核心提示词，应包含身份定位、职责边界与行为准则；会作为核心指令注入该角色的 System Prompt。新建时必填，更新时省略表示保持现值。
         i18n: 多语言名称，如 {"display_name": {"zh-CN": "高级写手", "en": "Senior Writer"}}。新建时省略为 {}，更新时省略表示保持现值。
-        overwrite_existing: 同名模板已存在时需设为 true 才会覆盖更新，默认 false。
+        overwrite: 更新已有同名模板**必须**设为 true；默认 false 只允许新建。这是防止误覆盖已有模板的保护开关。
     """
     from service import roleTemplateService
 
@@ -721,10 +721,10 @@ async def save_role_template(
             "success": False,
             "message": f"不允许将角色模板 {normalized_name} 的类型从 USER 改为 SYSTEM。",
         }
-    if existing is not None and overwrite_existing is False:
+    if existing is not None and overwrite is not True:
         return {
             "success": False,
-            "message": f"角色模板 {normalized_name} 已存在；如需覆盖请将 overwrite_existing 设为 true。",
+            "message": f"角色模板 {normalized_name} 已存在；如需覆盖请将 overwrite 设为 true。",
         }
 
     if existing is None:
@@ -768,7 +768,7 @@ async def save_agent(
     allow_tools: list[str] | None = None,
     allow_skills: list[str] | None = None,
     i18n: dict | None = None,
-    overwrite_existing: bool = False,
+    overwrite: bool = False,
     agent_id: int | None = None,
     clear_fields: Optional[list[AgentClearField]] = None,
     _context: ToolCallContext = None,
@@ -788,8 +788,8 @@ async def save_agent(
         allow_tools: 可见工具列表，元素为工具名（如 "read_file"）或类别语法（如 "Category:Read"），类别与工具名自动合并。可分配类别只 Read、Write、Execute 三类（Basic 自动开启、Admin 拒绝显式分配，根主管自动获得 Admin）。新建时省略 = 默认授予 Basic、Read、Write、Execute；更新时省略 = 保持现值。clear_fields 含本字段 = 重置为默认授予。
         allow_skills: 可见技能名称列表，如 ["frontend-design"]；load_skill 只能加载已授权的技能。新建时省略 = 全部技能，[] = 不授权任何技能；更新时省略 = 保持现值。clear_fields 含本字段 = 重置为默认（全部技能）。
         i18n: 多语言名称，如 {"display_name": {"zh-CN": "Alice", "en": "Alice"}}。更新时省略表示保持现值。
-        overwrite_existing: 同名成员已存在时需设为 true 才会覆盖更新，默认 false；传入 agent_id 时本参数不生效。
-        agent_id: 成员 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。
+        overwrite: 更新已有成员**必须**设为 true（无论按 name 还是 agent_id 定位）；默认 false 只允许新建。这是防止误覆盖已有成员的保护开关。
+        agent_id: 成员 ID；传入后按 ID 精确定位，此时 name 用于重命名。
         clear_fields: 要清除（恢复默认）的字段名列表，可选 "model"、"allow_tools"、"allow_skills"。传空数组 [] 视为「未提供」。与给值同时出现同一字段会报 ambiguous_clear_field。白名单之外的字段名返回 invalid_clear_field。
     """
     ok, team_id = _require_team_context(_context)
@@ -883,11 +883,15 @@ async def save_agent(
                         for agent in same_name
                     ],
                 }
-            if overwrite_existing is False:
-                return {
-                    "success": False,
-                    "message": f"成员 {normalized_name} 已存在；如需覆盖请将 overwrite_existing 设为 true。",
-                }
+
+    # 更新保护对**两种定位方式一视同仁**：按 ID 也是更新已有记录，必须显式
+    # overwrite=true 确认，否则「只想改 model 的调用」可能悄无声息地覆盖整行。
+    # 放在同名消歧之后：多行同名时 ambiguous_target 更具体，先报它。
+    if existing is not None and overwrite is not True:
+        return {
+            "success": False,
+            "message": f"成员 {existing.name} 已存在；如需覆盖请将 overwrite 设为 true。",
+        }
 
     if existing is not None and existing.team_id == -1:
         return {"success": False, "message": f"保留成员 {existing.name} 不允许通过工具创建或修改。"}
@@ -1022,7 +1026,7 @@ async def save_dept(
     member_names: Optional[list[str]] = None,
     parent_name: str | None = None,
     i18n: dict | None = None,
-    overwrite_existing: bool = False,
+    overwrite: bool = False,
     dept_id: int | None = None,
     clear_fields: Optional[list[DeptClearField]] = None,
     _context: ToolCallContext = None,
@@ -1039,8 +1043,8 @@ async def save_dept(
         member_names: 成员名称列表，全量替换而非追加。新建时必须给；更新时省略表示保持现值（不是清空成员）。
         parent_name: 父组织名称，新建时必须指定；不能是自身或自身子组织。更新时省略表示**保持现有父组织**；要把组织变成根节点须显式 clear_fields=["parent_name"]（仅当它已是根组织时才允许，否则报错——创建/删除根组织属管理员通过组织树编辑器的操作）。
         i18n: 多语言数据，如 {"dept_name": {"zh-CN": "研发部", "en": "R&D"}, "responsibility": {"zh-CN": "负责研发"}}。更新时省略表示保持现值。
-        overwrite_existing: 同名组织已存在时需设为 true 才会覆盖更新，默认 false；传入 dept_id 时本参数不生效。
-        dept_id: 组织 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。
+        overwrite: 更新已有组织**必须**设为 true（无论按 name 还是 dept_id 定位）；默认 false 只允许新建。这是防止误覆盖已有组织的保护开关。
+        dept_id: 组织 ID；传入后按 ID 精确定位，此时 name 用于重命名。
         clear_fields: 要清除的字段名列表，当前仅 "parent_name"。clear_fields=["parent_name"] 表示把组织设为根节点（须已是根，否则报错）。传空数组 [] 视为「未提供」。与 parent_name 给值同时出现报 ambiguous_clear_field。白名单之外返回 invalid_clear_field。
     """
     ok, team_id = _require_team_context(_context)
@@ -1080,11 +1084,13 @@ async def save_dept(
             return {"success": False, "message": f"未找到 ID 为 {dept_id} 的组织。"}
     else:
         existing = await gtDeptManager.get_dept_by_name(team_id, normalized_name)
-        if existing is not None and not overwrite_existing:
-            return {
-                "success": False,
-                "message": f"组织 {normalized_name} 已存在；如需覆盖请将 overwrite_existing 设为 true。",
-            }
+
+    # 更新保护对两种定位方式一视同仁：按 ID 也是更新已有记录，必须显式确认。
+    if existing is not None and overwrite is not True:
+        return {
+            "success": False,
+            "message": f"组织 {existing.name} 已存在；如需覆盖请将 overwrite 设为 true。",
+        }
 
     # 新建时的必填项在运行时补齐（schema 层已放开，见上方说明）。
     if existing is None:
@@ -1224,7 +1230,7 @@ async def save_room(
     member_names: Optional[list[str]] = None,
     initial_topic: str | None = None,
     max_rounds: int | None = None,
-    overwrite_existing: bool = False,
+    overwrite: bool = False,
     room_id: int | None = None,
     clear_fields: Optional[list[RoomClearField]] = None,
     _context: ToolCallContext = None,
@@ -1239,8 +1245,8 @@ async def save_room(
         member_names: 成员名称列表，至少 2 人，全量替换。新建时必须给；更新时省略表示保持现成员集合。
         initial_topic: 房间初始话题。新建时省略 = 空话题（单聊会自动生成话题）；更新时省略 = 保持现值。清空用 clear_fields=["initial_topic"]。
         max_rounds: 最大轮次；<=0 表示不限轮次。新建时省略 = 用系统默认；更新时省略 = 保持现值。重置为系统默认用 clear_fields=["max_rounds"]。
-        overwrite_existing: 同名房间已存在时需设为 true 才会覆盖更新，默认 false；传入 room_id 时本参数不生效。
-        room_id: 房间 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。
+        overwrite: 更新已有房间**必须**设为 true（无论按 name 还是 room_id 定位）；默认 false 只允许新建。这是防止误覆盖已有房间的保护开关。
+        room_id: 房间 ID；传入后按 ID 精确定位，此时 name 用于重命名。
         clear_fields: 要清除（恢复默认）的字段名列表，可选 "initial_topic"、"max_rounds"。initial_topic 清空后：群聊为空话题；单聊仍会自动生成默认话题（沿用 `upsert_room` 既有行为，不是本次引入）。max_rounds 清除 = 回到系统默认（NULL）。传空数组 [] 视为「未提供」。与给值同时出现同一字段会报 ambiguous_clear_field。
     """
     ok, team_id = _require_team_context(_context)
@@ -1283,11 +1289,13 @@ async def save_room(
             return {"success": False, "message": f"未找到 ID 为 {room_id} 的房间。"}
     else:
         existing = await gtRoomManager.get_room_by_team_and_name(team_id, normalized_name)
-        if existing is not None and not overwrite_existing:
-            return {
-                "success": False,
-                "message": f"房间 {normalized_name} 已存在；如需覆盖请将 overwrite_existing 设为 true。",
-            }
+
+    # 更新保护对两种定位方式一视同仁：按 ID 也是更新已有记录，必须显式确认。
+    if existing is not None and overwrite is not True:
+        return {
+            "success": False,
+            "message": f"房间 {existing.name} 已存在；如需覆盖请将 overwrite 设为 true。",
+        }
 
     # ---- PATCH：省略的字段取现值（更新分支）----
     if existing is not None and normalized_name is None:

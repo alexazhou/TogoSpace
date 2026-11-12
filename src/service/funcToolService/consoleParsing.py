@@ -110,7 +110,7 @@ def parse_boolean_value(raw: str, *, name: str, command: str) -> bool:
     """`--flag=<文本>` 的布尔解析。
 
     裸 `--flag` 是 True；显式 `=false` 必须真的关闭（`role update` 的
-    `overwrite_existing` 依赖这一点，否则写了 false 反而被当成 true）。
+    `overwrite` 依赖这一点，否则写了 false 反而被当成 true）。
     """
     normalized = raw.strip().lower()
     if normalized in _TRUE_VALUES:

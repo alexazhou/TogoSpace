@@ -327,6 +327,19 @@ class TestP1bSaveAgentPatch:
         )
 
     @pytest.mark.asyncio
+    async def test_update_by_id_requires_overwrite(self, monkeypatch):
+        """按 ID 更新已有成员同样必须显式 `overwrite=true`（防止误覆盖）。"""
+        agent = _agent(11, "alice", model="old-model")
+        self._patch(monkeypatch, agent)
+
+        blocked = await tools.save_agent(agent_id=11, model="new-model", _context=_ctx())
+
+        assert blocked["success"] is False
+        assert "overwrite" in blocked["message"]
+        assert agent.model == "old-model"
+        tools.gtAgentManager.batch_save_agents.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_omitted_fields_keep_current_values(self, monkeypatch):
         """只给 model ⇒ 其余字段（driver / allow_tools / allow_skills / i18n / name）全保持。"""
         agent = _agent(11, "alice", model="old-model")
@@ -335,7 +348,9 @@ class TestP1bSaveAgentPatch:
         agent.i18n = {"display_name": {"zh-CN": "爱丽丝"}}
         self._patch(monkeypatch, agent)
 
-        result = await tools.save_agent(agent_id=11, model="new-model", _context=_ctx())
+        result = await tools.save_agent(
+            agent_id=11, overwrite=True, model="new-model", _context=_ctx()
+        )
 
         assert result["success"] is True, result
         assert agent.model == "new-model"
@@ -355,6 +370,7 @@ class TestP1bSaveAgentPatch:
 
         result = await tools.save_agent(
             agent_id=11,
+            overwrite=True,
             clear_fields=["model", "allow_tools", "allow_skills"],
             _context=_ctx(),
         )
@@ -430,13 +446,29 @@ class TestP1bSaveDeptPatch:
         monkeypatch.setattr(deptService, "get_dept_tree", AsyncMock(return_value=None))
 
     @pytest.mark.asyncio
+    async def test_update_by_id_requires_overwrite(self, monkeypatch):
+        """按 ID 更新已有组织同样必须显式 `overwrite=true`（防止误覆盖）。"""
+        child = _dept(2, "child", parent_id=1, manager_id=2)
+        self._patch(monkeypatch, child, agents=[_agent(1, "alice"), _agent(2, "bob")])
+
+        blocked = await tools.save_dept(
+            dept_id=2, responsibility="新职责", _context=_ctx()
+        )
+
+        assert blocked["success"] is False
+        assert "overwrite" in blocked["message"]
+        deptService.upsert_dept.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_omitted_parent_keeps_existing_parent(self, monkeypatch):
         """省略 `parent_name` ⇒ 保持现有父组织（改造前这里会报错或落成根）。"""
         parent = _dept(1, "root", manager_id=1)
         child = _dept(2, "child", parent_id=1, manager_id=2)
         self._patch(monkeypatch, child, agents=[_agent(1, "alice"), _agent(2, "bob")])
 
-        result = await tools.save_dept(dept_id=2, responsibility="新职责", _context=_ctx())
+        result = await tools.save_dept(
+            dept_id=2, overwrite=True, responsibility="新职责", _context=_ctx()
+        )
 
         assert result["success"] is True, result
         kwargs = deptService.upsert_dept.await_args.kwargs
@@ -453,11 +485,15 @@ class TestP1bSaveDeptPatch:
         agents = [_agent(1, "alice"), _agent(2, "bob")]
 
         self._patch(monkeypatch, root, agents=agents)
-        on_root = await tools.save_dept(dept_id=1, clear_fields=["parent_name"], _context=_ctx())
+        on_root = await tools.save_dept(
+            dept_id=1, overwrite=True, clear_fields=["parent_name"], _context=_ctx()
+        )
 
         self._patch(monkeypatch, child, agents=agents)
         deptService.upsert_dept.reset_mock()
-        on_child = await tools.save_dept(dept_id=2, clear_fields=["parent_name"], _context=_ctx())
+        on_child = await tools.save_dept(
+            dept_id=2, overwrite=True, clear_fields=["parent_name"], _context=_ctx()
+        )
 
         assert on_root["success"] is True, on_root
         assert on_child["success"] is False
@@ -495,12 +531,26 @@ class TestP1bSaveRoomPatch:
         )
 
     @pytest.mark.asyncio
+    async def test_update_by_id_requires_overwrite(self, monkeypatch):
+        """按 ID 更新已有房间同样必须显式 `overwrite=true`（防止误覆盖）。"""
+        room = self._room()
+        self._patch(monkeypatch, room, agents=[_agent(1, "alice"), _agent(2, "bob")])
+
+        blocked = await tools.save_room(
+            room_id=5, max_rounds=3, _context=_ctx()
+        )
+
+        assert blocked["success"] is False
+        assert "overwrite" in blocked["message"]
+        roomService.upsert_room.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_omitted_topic_keeps_current_value(self, monkeypatch):
         """省略 `initial_topic` ⇒ 保持现值（改造前默认 `""` 会把话题清空）。"""
         room = self._room()
         self._patch(monkeypatch, room, agents=[_agent(1, "alice"), _agent(2, "bob")])
 
-        result = await tools.save_room(room_id=5, max_rounds=3, _context=_ctx())
+        result = await tools.save_room(room_id=5, overwrite=True, max_rounds=3, _context=_ctx())
 
         assert result["success"] is True, result
         kwargs = roomService.upsert_room.await_args.kwargs
@@ -514,7 +564,7 @@ class TestP1bSaveRoomPatch:
         room = self._room()
         self._patch(monkeypatch, room, agents=[_agent(1, "alice"), _agent(2, "bob")])
 
-        result = await tools.save_room(room_id=5, clear_fields=["initial_topic"], _context=_ctx())
+        result = await tools.save_room(room_id=5, overwrite=True, clear_fields=["initial_topic"], _context=_ctx())
 
         assert result["success"] is True, result
         assert roomService.upsert_room.await_args.kwargs["initial_topic"] == ""
@@ -525,7 +575,7 @@ class TestP1bSaveRoomPatch:
         room = self._room()
         self._patch(monkeypatch, room, agents=[_agent(1, "alice"), _agent(2, "bob")])
 
-        result = await tools.save_room(room_id=5, clear_fields=["max_rounds"], _context=_ctx())
+        result = await tools.save_room(room_id=5, overwrite=True, clear_fields=["max_rounds"], _context=_ctx())
 
         assert result["success"] is True, result
         assert roomService.upsert_room.await_args.kwargs["max_rounds"] is None
@@ -834,7 +884,7 @@ class TestP1eRuntimeLocatorErrorCode:
         """「参数缺失」与「同名已存在需 overwrite」的码**取值不同**，调用方能选对下一步。
 
         两条路径都在工具层、都 `success=False`；若都返回 `None`（上一版的状态），
-        调用方无法凭返回体判断「补参数重试」还是改传 `overwrite_existing=true`。
+        调用方无法凭返回体判断「补参数重试」还是改传 `overwrite=true`。
         """
         self._patch_empty(monkeypatch)
         existing = _agent(11, "alice", model="old-model")
@@ -851,7 +901,7 @@ class TestP1eRuntimeLocatorErrorCode:
         # 取值写出来（不是「不相同」三个字）：业务失败这一档当前**不带** error_code。
         assert "error_code" not in business, business
         assert business.get("error_code") is None, business
-        assert "overwrite_existing" in business["message"], business
+        assert "overwrite" in business["message"], business
 
 
 class TestP1ePatchEchoName:
@@ -872,7 +922,9 @@ class TestP1ePatchEchoName:
             AsyncMock(side_effect=AssertionError("PATCH 不得触发改名（删容器）")),
         )
 
-        result = await tools.save_agent(agent_id=11, model="new-model", _context=_ctx())
+        result = await tools.save_agent(
+            agent_id=11, overwrite=True, model="new-model", _context=_ctx()
+        )
 
         assert result["success"] is True, result
         assert "None" not in result["message"], result["message"]

@@ -62,13 +62,13 @@ from service.roomService import ToolCallContext
 NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
     ("send_chat_msg", "insert_immediately"),
     ("finish_action", "confirm_no_need_talk"),
-    ("save_agent", "overwrite_existing"),
-    ("save_dept", "overwrite_existing"),
+    ("save_agent", "overwrite"),
+    ("save_dept", "overwrite"),
     ("delete_dept", "recursive"),
     ("delete_dept", "dry_run"),
-    ("save_room", "overwrite_existing"),
+    ("save_room", "overwrite"),
     ("delete_room", "dry_run"),
-    ("save_role_template", "overwrite_existing"),
+    ("save_role_template", "overwrite"),
     ("create_task", "description"),
     ("create_task", "priority"),
     ("create_task", "note"),
@@ -698,7 +698,7 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: 变为 `["name"]`；同时 `type` / `soul` 的参数说明改写为「新建必填 / 更新时省略
 #: 保持现值」。`save_agent.name` 的说明补充「同名多行 ⇒ ambiguous_target」。
 #: 工具数与参数数不变（38 / 108）。
-BASELINE_TEXT_DIGEST = "06ef7b7cd6c7280c3091a115566828593c187605b458b23f81257ecc7141ff62"
+BASELINE_TEXT_DIGEST = "a0dc4b192c33d05582d8fc0deb6d7776b99f9e754c2a92936b29e167a77228cf"
 
 
 def _text_digest() -> tuple[str, int, int]:

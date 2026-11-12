@@ -163,19 +163,16 @@ class CommandSpec:
         self_interrupt: 执行时会不会自中断当前 turn（#154 D6）。目前只有 `reload`。
         min_args / max_args: 位置参数个数约束。
         locator: 位置参数 target 落到哪个工具参数（见 `Locator`）。无 target 的命令留空。
-        patch_by_name: 该命令的**语义就是更新**，所以在只能按名字定位时要替调用方补
-            `overwrite_existing=True`。
+        patch_by_name: 该命令的**语义就是更新**，所以无条件替调用方补
+            `overwrite=True`（按 name 或按 id 定位都一样）。
 
-            `save_dept` / `save_agent` / `save_room` 的 `overwrite_existing` 原本用于
-            「create 撞到同名，是否覆盖」。但 `update` 命令按名字定位时（`dept update
-            root '{...}'`）走的是同一个参数：不传就会被判成「同名已存在、请设
-            overwrite_existing」——**连自己指定的目标都改不了**。旧实现靠先读库拿到
-            id 再传 `dept_id` 绕开（id 路径忽略 overwrite_existing），P2 改成纯转发后
-            必须显式表达「这是更新」。这里用命令表声明，而不是恢复读库：是否更新是
-            **命令的语义**，不是要去查的事实。
+            `save_dept` / `save_agent` / `save_room` 要求更新已有记录必须显式
+            `overwrite=true`（对两种定位方式一视同仁，防止误覆盖）。`update` 命令
+            不补这个参数就会在工具层被拒——**连自己指定的目标都改不了**。是否更新
+            是**命令的语义**，不是要去查的事实，所以用命令表声明，而不是读库探测。
 
-            `agent update` 也置真：按名字定位且唯一时仍要以「更新」语义落到原工具；
-            同名多行由 `save_agent` 直接返回 `ambiguous_target`（工具层保护）。
+            `agent update` 也置真：同名多行由 `save_agent` 直接返回
+            `ambiguous_target`（工具层保护）。
         input_defaults: 配置输入里**没出现**的字段用这里的值补上（只补「键不存在」，
             显式给 `null` 不覆盖）。
 
@@ -387,7 +384,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         accepts_input=True, needs_target=True, min_args=1, max_args=1,
         # `save_role_template` 的定位参数真名叫 `name`；对外统一叫 `role_name`
         # （别名见 `_OPTION_ALIASES`）。PATCH 语义已下沉到工具：省略 type/soul/i18n
-        # = 保持现值，所以这里只需按更新语义补 overwrite_existing。
+        # = 保持现值，所以这里只需按更新语义补 overwrite。
         locator=_loc(name_param="name"),
         patch_by_name=True,
     ),

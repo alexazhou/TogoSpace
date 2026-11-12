@@ -113,23 +113,23 @@ _CLEAR_FIELDS_PLACEHOLDER = "{ALLOWED_CLEAR_FIELDS}"
 _HELP_OVERLAY: dict[str, tuple[str, ...]] = {
     # create 与 update 共用同一个原工具，所以**选项面完全相同**（选项面 = schema
     # property，不按命令裁剪）。代价是 create 的参数清单里会出现只对更新有意义的
-    # 选项（--<资源>_id / --clear_fields / --overwrite_existing）。这里不删它们 ——
+    # 选项（--<资源>_id / --clear_fields / --overwrite）。这里不删它们 ——
     # 删了会让「schema 收得下、console 却说不知道」重新出现（那正是本单要消灭的
     # 口径分叉），只用一句话说清各自什么时候有意义。
     "dept create": (
         "新建必须给 --name / --responsibility / --member_names / --parent_name。",
-        "--dept_id / --clear_fields / --overwrite_existing 属更新语义，可在 create 时一并传入，"
-        "由原工具自己判定（如 --dept_id 命中已存在组织即转为更新）。",
+        "--dept_id / --clear_fields / --overwrite 属更新语义，可在 create 时一并传入；"
+        "命中已存在组织（含用 --dept_id 指定）时必须同时给 --overwrite true。",
     ),
     "agent create": (
         "新建必须给 --name / --role_template_name。",
-        "--agent_id / --clear_fields / --overwrite_existing 属更新语义，可在 create 时一并传入，"
-        "由原工具自己判定。",
+        "--agent_id / --clear_fields / --overwrite 属更新语义，可在 create 时一并传入；"
+        "命中已存在成员（含用 --agent_id 指定）时必须同时给 --overwrite true。",
     ),
     "room create": (
         "新建必须给 --name / --member_names（至少 2 人）。",
-        "--room_id / --clear_fields / --overwrite_existing 属更新语义，可在 create 时一并传入，"
-        "由原工具自己判定。",
+        "--room_id / --clear_fields / --overwrite 属更新语义，可在 create 时一并传入；"
+        "命中已存在房间（含用 --room_id 指定）时必须同时给 --overwrite true。",
     ),
     "dept update": (
         "PATCH 语义：只改出现的字段；member_names 出现即全量替换。",
@@ -507,9 +507,9 @@ def _handle_delete(parsed: ParsedCommand, _payload: dict[str, Any] | None = None
 
 
 #: 不属于「更新动作」的机制参数：只影响定位或覆盖保护，不产生字段变更。
-#: `dept update root --overwrite_existing` 若被当成「有动作」，原工具会按 PATCH
+#: `dept update root --overwrite` 若被当成「有动作」，原工具会按 PATCH
 #: 语义「无字段可改」仍返回 success=True —— 正是 #187 禁止的静默成功。
-_MECHANISM_OPTIONS = frozenset({"overwrite_existing"})
+_MECHANISM_OPTIONS = frozenset({"overwrite"})
 
 
 def _effective_action_names(spec: cc.CommandSpec, values: dict[str, Any]) -> set[str]:
@@ -595,11 +595,11 @@ def _handle_save(parsed: ParsedCommand, payload: dict[str, Any] | None = None) -
     args = dict(config)
     args.update(_locator_args(spec, parsed.target or "", require_positive_id=False))
 
-    if spec.patch_by_name and args.get("overwrite_existing") is None:
-        # `update` 的语义就是更新：按名字定位时原工具会把「同名已存在」判成冲突
-        # （`overwrite_existing` 默认 False，那是给 create 用的保护）。不表达更新意图
+    if spec.patch_by_name and args.get("overwrite") is None:
+        # `update` 的语义就是更新：原工具要求更新已有记录必须显式 overwrite=true
+        # （name / id 两种定位都一样）。不替调用方表达更新意图，`dept update root`
         # 就改不了自己的目标 —— 详见 `CommandSpec.patch_by_name`。
-        args["overwrite_existing"] = True
+        args["overwrite"] = True
 
     _forward(parsed, **args)
 

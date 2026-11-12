@@ -108,7 +108,7 @@ class TestSaveRoomMemberDedup(ServiceTestCase):
         assert await self._rooms() == []
 
     async def test_duplicate_reported_before_room_lookup(self):
-        """判重要在"房间已存在"之前：否则 repeats 会被误导成去改 overwrite_existing。"""
+        """判重要在"房间已存在"之前：否则 repeats 会被误导成去改 overwrite。"""
         await self._prepare()
         first = await tools.save_room(
             name="same_name", member_names=["alice", "bob"], _context=self.ctx
@@ -116,7 +116,7 @@ class TestSaveRoomMemberDedup(ServiceTestCase):
         assert first["success"] is True
 
         result = await tools.save_room(
-            name="same_name", member_names=["alice", "alice"], overwrite_existing=True, _context=self.ctx
+            name="same_name", member_names=["alice", "alice"], overwrite=True, _context=self.ctx
         )
 
         assert result["success"] is False

@@ -235,13 +235,13 @@ class TestRoleTemplateTools(ServiceTestCase):
             type="USER",
             soul="draft documentation",
             i18n={"display_name": {"zh-CN": "专业写手", "en": "Pro Writer"}},
-            overwrite_existing=True,
+            overwrite=True,
         )
         await save_role_template(
             name="search_coder",
             type="USER",
             soul="write python code",
-            overwrite_existing=True,
+            overwrite=True,
         )
 
         # 2. 搜索名称
@@ -288,7 +288,7 @@ class TestRoleTemplateTools(ServiceTestCase):
         assert len(res["role_templates"]) == 0
 
     async def test_save_role_template_creates_and_updates(self) -> None:
-        """save_role_template 应在 overwrite_existing=true 时覆盖同名模板。"""
+        """save_role_template 应在 overwrite=true 时覆盖同名模板。"""
         create_result = await save_role_template(
             name="writer",
             type="USER",
@@ -300,7 +300,7 @@ class TestRoleTemplateTools(ServiceTestCase):
             name="writer",
             soul="draft docs carefully",
             i18n={"display_name": {"zh-CN": "高级写手", "en": "Senior Writer"}},
-            overwrite_existing=True,
+            overwrite=True,
         )
 
         assert create_result["success"]
@@ -325,7 +325,7 @@ class TestRoleTemplateTools(ServiceTestCase):
         result = await save_role_template(
             name="patch_writer",
             soul="第二版",
-            overwrite_existing=True,
+            overwrite=True,
         )
 
         assert result["success"], result
@@ -335,7 +335,7 @@ class TestRoleTemplateTools(ServiceTestCase):
         assert detail.i18n["display_name"]["zh-CN"] == "补丁写手"
 
     async def test_save_role_template_rejects_existing_without_overwrite(self) -> None:
-        """同名模板默认不覆盖，需显式打开 overwrite_existing。"""
+        """同名模板默认不覆盖，需显式打开 overwrite。"""
         await save_role_template(
             name="writer_no_overwrite",
             type="USER",
@@ -349,7 +349,7 @@ class TestRoleTemplateTools(ServiceTestCase):
         )
 
         assert not result["success"]
-        assert "overwrite_existing" in result["message"]
+        assert "overwrite" in result["message"]
 
     async def test_save_role_template_rejects_invalid_type(self) -> None:
         """非法 type 应被工具层拒绝。"""
@@ -380,7 +380,7 @@ class TestRoleTemplateTools(ServiceTestCase):
             name="built_in_system_template",
             type="SYSTEM",
             soul="updated",
-            overwrite_existing=True,
+            overwrite=True,
         )
 
         assert not create_result["success"]
@@ -396,7 +396,7 @@ class TestRoleTemplateTools(ServiceTestCase):
             name="promote_me",
             type="SYSTEM",
             soul="第二版",
-            overwrite_existing=True,
+            overwrite=True,
         )
 
         assert not result["success"]
@@ -406,7 +406,7 @@ class TestRoleTemplateTools(ServiceTestCase):
         assert detail.soul == "第一版"
 
     async def test_save_agent_creates_and_updates(self) -> None:
-        """save_agent 应在当前 team 中创建成员，并在 overwrite_existing=true 时更新。"""
+        """save_agent 应在当前 team 中创建成员，并在 overwrite=true 时更新。"""
         await gtRoleTemplateManager.save_role_template(
             GtRoleTemplate(
                 name="agent_writer",
@@ -432,7 +432,7 @@ class TestRoleTemplateTools(ServiceTestCase):
             driver="claude_sdk",
             allow_tools=["Category:Read"],
             i18n={"display_name": {"zh-CN": "高级查理", "en": "Senior Charlie"}},
-            overwrite_existing=True,
+            overwrite=True,
             _context=ctx,
         )
 
@@ -451,7 +451,7 @@ class TestRoleTemplateTools(ServiceTestCase):
         assert detail.i18n["display_name"]["zh-CN"] == "高级查理"
 
     async def test_save_agent_rejects_existing_without_overwrite(self) -> None:
-        """同名成员默认不覆盖，需显式打开 overwrite_existing。"""
+        """同名成员默认不覆盖，需显式打开 overwrite。"""
         await gtRoleTemplateManager.save_role_template(
             GtRoleTemplate(
                 name="agent_no_overwrite_template",
@@ -475,7 +475,7 @@ class TestRoleTemplateTools(ServiceTestCase):
         assert first["success"]
         assert first["agent"]["employ_status"] == "OFF_BOARD"
         assert not second["success"]
-        assert "overwrite_existing" in second["message"]
+        assert "overwrite" in second["message"]
 
     async def test_save_agent_rejects_invalid_inputs(self) -> None:
         """save_agent 应拒绝非法模板、非法 driver、非法工具权限和保留成员名。"""

@@ -233,22 +233,22 @@ def _run(coro: Any) -> dict:
 
 def test_boolean_option_bare_flag_is_true() -> None:
     spec = cc.COMMAND_INDEX["role update"]
-    _, options, _ = cp._parse_options(spec, ["--overwrite_existing"])
-    assert options["overwrite_existing"] is True
+    _, options, _ = cp._parse_options(spec, ["--overwrite"])
+    assert options["overwrite"] is True
 
 
 def test_boolean_option_explicit_false_is_preserved() -> None:
     spec = cc.COMMAND_INDEX["role update"]
     positional, options, source = cp._parse_options(
-        spec, ["tpl", "--overwrite_existing=false"]
+        spec, ["tpl", "--overwrite=false"]
     )
     assert positional == ["tpl"]
     assert source is None
-    assert options["overwrite_existing"] is False
+    assert options["overwrite"] is False
 
 
 def test_boolean_option_invalid_text_is_rejected() -> None:
     spec = cc.COMMAND_INDEX["role update"]
     with pytest.raises(cp.ConsoleError) as exc:
-        cp._parse_options(spec, ["--overwrite_existing=maybe"])
+        cp._parse_options(spec, ["--overwrite=maybe"])
     assert exc.value.code == "invalid_option_value"
