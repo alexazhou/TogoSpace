@@ -183,6 +183,14 @@ describe('AgentActivityItem token 增长放大', () => {
     // 「目标文案」由 `title` 承载，一并断言，证明数字与箭头仍是同一串 `↑ {before} ↓ {count}`。
     expect(wrapper.find('.agent-activity-item__tokens').text()).toBe('↑ 80000 ↓ 120');
     expect(wrapper.find('.agent-activity-item__tokens').attributes('title')).toBe('↑ 80000 ↓ 400');
+
+    // ⚠️ 必须断**原始 `textContent`**，不能只靠上面的 `.text()`：
+    // Vue Test Utils 的 `.text()` 内部会 `trim()`，首尾空格被吃掉 ⇒ 「多一个/少一个空格」
+    // 这类拆节点最容易引入的错位会被静默放过（PM 2026-11-13 明确指出这个假绿风险）。
+    // 这里逐字比对整串，含中间两个空格，一位都不能差。
+    const tokensEl = wrapper.find('.agent-activity-item__tokens').element as HTMLElement;
+    expect(tokensEl.textContent).toBe('↑ 80000 ↓ 120');
+    expect(tokensEl.textContent?.length).toBe('↑ 80000 ↓ 120'.length);
   });
 
   it('G-A7 形态一 count 不变（仅无输出量→0）不放大', async () => {
