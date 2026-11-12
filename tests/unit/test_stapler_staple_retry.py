@@ -91,7 +91,7 @@ def _fail_on(monkeypatch, module, fail_times: int, rc: int = 68):
     monkeypatch.setattr(module, "run_command", _fake)
 
 
-TARGET = "/tmp/TogoSpace_0.5.0_x86_64.dmg"
+TARGET = "/tmp/Togobot_0.5.0_x86_64.dmg"
 
 
 # ── staple_with_retry 单元行为 ───────────────────────────────────────────────
@@ -202,7 +202,7 @@ def _wire_notarize(monkeypatch, module, staple_fails: int):
 
     # DMG 路径刻意不含 "notarytool" 字样，避免路径被误命中
     workdir = tempfile.mkdtemp(prefix="p172_safe_")
-    fake_dmg = os.path.join(workdir, "TogoSpace_0.5.0_x86_64.dmg")
+    fake_dmg = os.path.join(workdir, "Togobot_0.5.0_x86_64.dmg")
     with open(fake_dmg, "wb") as f:
         f.write(b"fake dmg")
 

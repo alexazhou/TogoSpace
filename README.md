@@ -1,8 +1,8 @@
-![TogoSpace](image/togo_agent_team.png)
+![Togobot](image/togo_agent_team.png)
 
 <div align="center">
 
-# TogoSpace 🚀
+# Togobot 🚀
 
 **把一群 AI 组成一支真正的团队。**
 
@@ -11,7 +11,7 @@
 [English](README_EN.md) | [中文](README.md)
 
 [![Release](https://img.shields.io/github/v/release/alexazhou/TogoSpace)](https://github.com/alexazhou/TogoSpace/releases)
-[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ED.svg?logo=docker&logoColor=white)](https://github.com/alexazhou/TogoSpace/pkgs/container/togospace)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ED.svg?logo=docker&logoColor=white)](https://github.com/alexazhou/TogoSpace/pkgs/container/togobot)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#-快速开始)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -22,10 +22,10 @@
 
 ---
 
-## 🤔 TogoSpace 是什么？
+## 🤔 Togobot 是什么？
 
 大多数 AI 工具只有**一个**助手，复杂任务全靠你自己拆、自己盯、自己串。
-TogoSpace 换了个思路：给你一支 **AI 团队**。
+Togobot 换了个思路：给你一支 **AI 团队**。
 
 - 你对「项目经理」说一句需求，它会把任务拆给「工程师」，工程师写完交给「测试」验收，全程在群聊里沟通。
 - 不需要画流程图，**谁下一步上场由团队自己决定**。
@@ -37,7 +37,7 @@ TogoSpace 换了个思路：给你一支 **AI 团队**。
 
 ---
 
-## ✨ 为什么选择 TogoSpace
+## ✨ 为什么选择 Togobot
 
 ### 🧑‍🤝‍🧑 像真实团队一样协作，而不是死板的工作流
 
@@ -121,15 +121,15 @@ OpenAI · Anthropic Claude · Google Gemini · DeepSeek · 阿里云通义千问
 
 ```bash
 docker run -d \
-  --name togospace \
+  --name togobot \
   -p 7180:7180 \
   -v ~/togospace-data:/storage \
-  ghcr.io/alexazhou/togospace:latest
+  ghcr.io/alexazhou/togobot:latest
 
 # 浏览器打开 http://localhost:7180
 ```
 
-> 镜像同时发布在 Docker Hub：`alexazhou/togospace:latest`。更多配置见 [Docker 部署指南](docs/manual/DOCKER.md)。
+> 镜像同时发布在 Docker Hub：`alexazhou/togobot:latest`。更多配置见 [Docker 部署指南](docs/manual/DOCKER.md)。
 
 ### 方式三：源码运行
 
@@ -189,7 +189,7 @@ cd frontend && npm install && npm run dev
 
 ![WeChat QR Code](image/wechat.JPG)
 
-如果 TogoSpace 对你有帮助，欢迎点一个 ⭐ Star，这是对我们最大的鼓励！
+如果 Togobot 对你有帮助，欢迎点一个 ⭐ Star，这是对我们最大的鼓励！
 
 ---
 

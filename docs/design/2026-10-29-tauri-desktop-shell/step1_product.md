@@ -8,7 +8,7 @@
 当前桌面形态是一条「Python 全包」路线：
 
 - `src/appEntry.py` 用 pystray 建系统托盘，后端 Tornado 跑在同一进程的子线程里
-- `scripts/build_mac.py` / `scripts/togo_agent.spec` 用 PyInstaller 打成 `TogoSpace.app`
+- `scripts/build_mac.py` / `scripts/togo_agent.spec` 用 PyInstaller 打成 `Togobot.app`
 - 窗口能力完全依赖外部浏览器：托盘菜单「打开 Web 界面」`webbrowser.open("http://localhost:8180")`
 
 这条路线能跑，但有几个结构性短板：
@@ -62,7 +62,7 @@
 
 ### 4.1 首次启动（未配置 LLM）
 
-1. 双击 `TogoSpace.app`
+1. 双击 `Togobot.app`
 2. 启动画面显示「正在启动中…」
 3. 后端就绪 → 启动画面关闭 → 主窗口打开
 4. 前端读取 `/system/status.json` 发现 `initialized=false`，弹出 Quick Init 引导
@@ -93,9 +93,9 @@
 
 ## 5. 验收标准
 
-- [ ] `scripts/build_desktop.py` 一条命令产出 `dist/TogoSpace_<version>_<arch>.dmg`，其中只有一个 `.app`
+- [ ] `scripts/build_desktop.py` 一条命令产出 `dist/Togobot_<version>_<arch>.dmg`，其中只有一个 `.app`
 - [ ] 首次启动 8 秒内（Apple Silicon，冷启动）出现主窗口；启动画面覆盖全过程
-- [ ] 退出应用后 `pgrep -f TogoSpace-backend` 为空；`kill -9` 主程序后 3 秒内后端自行退出
+- [ ] 退出应用后 `pgrep -f Togobot-backend` 为空；`kill -9` 主程序后 3 秒内后端自行退出
 - [ ] 关闭窗口后应用不退出、托盘可见、可重新唤起
 - [ ] 桌面模式下后端仅监听 `127.0.0.1`，局域网不可访问
 - [ ] 桌面模式下所有 API 与 WebSocket 调用均通过鉴权，前端无需用户手输 token

@@ -1,8 +1,8 @@
 # setting.json 说明
 
-`setting.json` 是 TogoSpace 的运行时配置文件，用于配置 LLM 服务、持久化路径和工作目录等参数。
+`setting.json` 是 Togobot 的运行时配置文件，用于配置 LLM 服务、持久化路径和工作目录等参数。
 
-**注意**：修改配置文件后，需要重启 TogoSpace 应用才能生效。
+**注意**：修改配置文件后，需要重启 Togobot 应用才能生效。
 
 **版本**：当前为 V2 格式。V1 格式（`llm_services`）会在启动时自动迁移到 V2。
 
@@ -238,9 +238,9 @@ API 鉴权配置，用于保护后端接口：
 
 # setting.json Description
 
-`setting.json` is the runtime configuration file for TogoSpace, used to configure LLM services, persistence paths, working directories, and other parameters.
+`setting.json` is the runtime configuration file for Togobot, used to configure LLM services, persistence paths, working directories, and other parameters.
 
-**Note**: After modifying the configuration file, you need to restart the TogoSpace application for the changes to take effect.
+**Note**: After modifying the configuration file, you need to restart the Togobot application for the changes to take effect.
 
 **Version**: Currently using V2 format. V1 format (`llm_services`) will be auto-migrated to V2 on startup.
 

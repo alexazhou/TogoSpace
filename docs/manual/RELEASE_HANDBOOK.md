@@ -1,4 +1,4 @@
-# TogoSpace 版本发布手册
+# Togobot 版本发布手册
 
 本文档描述发布新版本的最小流程。
 
@@ -59,8 +59,8 @@ gh release view v0.1.12
 ```
 
 确认包含两个安装包：
-- `TogoSpace_0.1.12_arm64.dmg` (CI 构建)
-- `TogoSpace_0.1.12_x86_64.dmg` (CI 构建)
+- `Togobot_0.1.12_arm64.dmg` (CI 构建)
+- `Togobot_0.1.12_x86_64.dmg` (CI 构建)
 
 ## 4. 补充 Release Note
 

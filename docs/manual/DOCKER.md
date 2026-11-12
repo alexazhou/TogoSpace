@@ -4,17 +4,17 @@
 
 ```bash
 # 1. 拉取镜像
-docker pull ghcr.io/alexazhou/togospace:latest
+docker pull ghcr.io/alexazhou/togobot:latest
 
 # 2. 创建数据目录
 mkdir -p ~/togospace-data
 
 # 3. 启动容器
 docker run -d \
-  --name togospace \
+  --name togobot \
   -p 7180:7180 \
   -v ~/togospace-data:/storage \
-  ghcr.io/alexazhou/togospace:latest
+  ghcr.io/alexazhou/togobot:latest
 ```
 
 启动后访问：http://localhost:7180
@@ -52,30 +52,30 @@ cp /path/to/your/setting.json ~/togospace-data/setting.json
 
 ```bash
 # 查看日志
-docker logs -f togospace
+docker logs -f togobot
 
 # 查看健康状态
-docker inspect --format='{{.State.Health.Status}}' togospace
+docker inspect --format='{{.State.Health.Status}}' togobot
 
 # 停止并删除容器
-docker stop togospace && docker rm togospace
+docker stop togobot && docker rm togobot
 ```
 
 ## 更新镜像
 
 ```bash
 # 1. 拉取最新镜像
-docker pull ghcr.io/alexazhou/togospace:latest
+docker pull ghcr.io/alexazhou/togobot:latest
 
 # 2. 停止并删除旧容器
-docker stop togospace && docker rm togospace
+docker stop togobot && docker rm togobot
 
 # 3. 用相同参数重新启动（数据目录不变，数据不会丢失）
 docker run -d \
-  --name togospace \
+  --name togobot \
   -p 7180:7180 \
   -v ~/togospace-data:/storage \
-  ghcr.io/alexazhou/togospace:latest
+  ghcr.io/alexazhou/togobot:latest
 ```
 
 ## 从源码构建
@@ -84,14 +84,14 @@ docker run -d \
 
 ```bash
 # 1. 构建镜像
-docker build -t togospace:latest .
+docker build -t togobot:latest .
 
 # 2. 启动容器
 docker run -d \
-  --name togospace \
+  --name togobot \
   -p 7180:7180 \
   -v ~/togospace-data:/storage \
-  togospace:latest
+  togobot:latest
 ```
 
 自定义构建参数：
@@ -100,5 +100,5 @@ docker run -d \
 docker build \
   --build-arg PYTHON_VERSION=3.12 \
   --build-arg NODE_VERSION=20 \
-  -t togospace:custom .
+  -t togobot:custom .
 ```
