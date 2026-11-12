@@ -50,6 +50,24 @@ class TestSystemStatus(_ApiServiceCase):
         assert data["hide_sensitive_info"] is False
         assert data["development_mode"] is False
 
+    async def test_status_exposes_frontend_debug_switch(self):
+        """状态响应必须带 `frontend_debug`，且未设环境变量时为 False。
+
+        前端据此决定是否经 ws 转发 console 日志（#197）。字段缺失时前端会拿到
+        `undefined`、按关闭处理，功能在「后端开关开着」的机器上依然不可用 —— 这种
+        「开关打开了却没生效」比报错更难查，所以字段本身要有测试兜住。
+
+        「未设环境变量」才断言为 False：后端子进程继承父进程环境，若跑测试的机器上
+        恰好设了该变量，断言恒 False 会变成一条与环境相关的假红。
+        """
+        async with aiohttp.ClientSession() as client:
+            data = await self._status(client)
+
+        assert "frontend_debug" in data
+        assert isinstance(data["frontend_debug"], bool)
+        if not os.environ.get("TOGOSPACE_FRONTEND_DEBUG"):
+            assert data["frontend_debug"] is False
+
     async def test_status_returns_default_llm_server(self):
         """已初始化时返回 default_llm_server 字段。"""
         async with aiohttp.ClientSession() as client:

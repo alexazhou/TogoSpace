@@ -27,6 +27,9 @@ vi.mock('../eventNormalizer', () => ({
 
 import {
   __resetWsClientForTests,
+  isRealtimeConnected,
+  onRealtimeConnected,
+  sendRealtimeUpstream,
   startRealtimeClient,
   stopRealtimeClient,
   subscribeRealtimeEvents,
@@ -235,5 +238,100 @@ describe('wsClient', () => {
 
     expect(sockets).toHaveLength(1);
     expect(connectionState.value).toBe('disconnected');
+  });
+
+  // -------------------------------------------------------------------------
+  // 上行通道（前端日志桥 #197 用）
+  // -------------------------------------------------------------------------
+
+  it('sends upstream payloads only after the connection is ready', () => {
+    // 「socket 已 open」不等于「可以发上行」：鉴权开启时 open 之后还要等 auth_ok，
+    // 这期间后端会丢弃未授权的上行。早发会让调用方以为发成功了、日志却没了。
+    startRealtimeClient();
+
+    expect(isRealtimeConnected()).toBe(false);
+    expect(sendRealtimeUpstream({ type: 'frontend_log', message: 'early' })).toBe(false);
+    expect(sockets[0]?.sentMessages).toEqual([]);
+
+    sockets[0]?.emit('open');
+
+    expect(isRealtimeConnected()).toBe(true);
+    expect(sendRealtimeUpstream({ type: 'frontend_log', message: 'ready' })).toBe(true);
+    expect(sockets[0]?.sentMessages).toEqual([
+      JSON.stringify({ type: 'frontend_log', message: 'ready' }),
+    ]);
+  });
+
+  it('withholds upstream payloads while auth is pending', () => {
+    // 鉴权开启：open 之后仍处于 connecting，此时发上行等于白发。
+    authEnabled.value = true;
+    getTokenMock.mockReturnValue('secret-token');
+    startRealtimeClient();
+    sockets[0]?.emit('open');
+
+    expect(connectionState.value).toBe('connecting');
+    expect(sendRealtimeUpstream({ type: 'frontend_log' })).toBe(false);
+
+    sockets[0]?.emit('message', JSON.stringify({ event: 'auth_ok' }));
+    expect(sendRealtimeUpstream({ type: 'frontend_log' })).toBe(true);
+  });
+
+  it('returns false instead of throwing when there is no socket', () => {
+    expect(sendRealtimeUpstream({ type: 'frontend_log' })).toBe(false);
+  });
+
+  it('notifies connected listeners when auth is disabled', () => {
+    const listener = vi.fn();
+    const unsubscribe = onRealtimeConnected(listener);
+
+    startRealtimeClient();
+    sockets[0]?.emit('open');
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it('notifies connected listeners on auth_ok rather than on open', () => {
+    // 三条到达 connected 的路径必须都通知到；漏一条就是「日志一直积压不发送」。
+    authEnabled.value = true;
+    getTokenMock.mockReturnValue('secret-token');
+    const listener = vi.fn();
+    const unsubscribe = onRealtimeConnected(listener);
+
+    startRealtimeClient();
+    sockets[0]?.emit('open');
+    expect(listener).not.toHaveBeenCalled();
+
+    sockets[0]?.emit('message', JSON.stringify({ event: 'auth_ok' }));
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+  });
+
+  it('notifies connected listeners on the legacy first-business-message path', () => {
+    // 兼容旧后端：没有 auth_ok，首条业务消息即视为就绪。
+    authEnabled.value = true;
+    getTokenMock.mockReturnValue('secret-token');
+    normalizeWsEventPayloadMock.mockReturnValue(null);
+    const listener = vi.fn();
+    const unsubscribe = onRealtimeConnected(listener);
+
+    startRealtimeClient();
+    sockets[0]?.emit('open');
+    sockets[0]?.emit('message', JSON.stringify({ event: 'schedule_state' }));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it('stops notifying an unsubscribed connected listener', () => {
+    const listener = vi.fn();
+    const unsubscribe = onRealtimeConnected(listener);
+    unsubscribe();
+
+    startRealtimeClient();
+    sockets[0]?.emit('open');
+
+    expect(listener).not.toHaveBeenCalled();
   });
 });

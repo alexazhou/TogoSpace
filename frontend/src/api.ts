@@ -1332,6 +1332,8 @@ export interface SystemStatus {
   development_mode?: boolean;
   version?: string;
   auto_check_update?: boolean;
+  /** 后端是否打开了前端日志开关（TOGOSPACE_FRONTEND_DEBUG），决定是否经 ws 转发日志。 */
+  frontend_debug?: boolean;
 }
 
 export async function checkSystemStatus(): Promise<{ initialized: boolean }> {

@@ -6,6 +6,11 @@ import { setApiBaseUrl } from './api';
 import { setToken } from './authStore';
 import { isTauri } from './utils/platform';
 import { logDesktopMountedState, setupDesktopLogging } from './utils/desktopLog';
+import {
+  frontendLogBridgeEnabledFromRuntimeConfig,
+  setFrontendLogBridgeEnabled,
+  setupFrontendLogBridge,
+} from './utils/frontendLogBridge';
 import '@fortawesome/fontawesome-free/css/fontawesome.min.css';
 import '@fortawesome/fontawesome-free/css/solid.min.css';
 import './theme/tokens.css';
@@ -27,6 +32,13 @@ async function loadDesktopRuntime(): Promise<void> {
 }
 
 async function bootstrap(): Promise<void> {
+  // 最先装前端日志桥：白屏类问题最需要的就是启动最早期那几行，任何 await 之后
+  // 再装都会漏掉它们。此时开关通常还没答案（浏览器要等 /system/status.json），
+  // 桥会先攒队列不发报文。
+  setupFrontendLogBridge();
+  // 桌面形态 Rust 已在页面脚本前注入 frontendDebug，可提前定态；浏览器返回 null。
+  setFrontendLogBridgeEnabled(frontendLogBridgeEnabledFromRuntimeConfig());
+
   if (isTauri()) {
     setupDesktopLogging();
     try {

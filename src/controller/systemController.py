@@ -4,7 +4,7 @@ import os
 from controller.baseController import BaseHandler
 from constants import ScheduleState
 from service import ormService, schedulerService, updateService
-from util import configUtil
+from util import configUtil, frontendLog
 from version import __version__
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,9 @@ class SystemStatusHandler(BaseHandler):
             "read_only": demo_mode.read_only,
             "hide_sensitive_info": demo_mode.hide_sensitive,
             "development_mode": setting.development_mode,
+            # 前端日志桥开关（#197）：前端据此决定是否往 ws 发 console 日志。
+            # 权威判定在**后端**（写入时再读一次环境变量），这里只是让前端少发无用流量。
+            "frontend_debug": frontendLog.frontend_debug_enabled(),
             "version": __version__,
             "auto_check_update": setting.auto_check_update,
         }

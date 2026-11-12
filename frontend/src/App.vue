@@ -35,6 +35,7 @@ import { startRealtimeClient, stopRealtimeClient } from './realtime/wsClient';
 import { installViewportRootClasses } from './responsive/breakpoints';
 import { findTeamById, firstTeamId, loadTeams, preferredTeamId, setPreferredTeamId, teams, teamsLoaded } from './teamStore';
 import { displayName, formatConnectionState } from './utils';
+import { setFrontendLogBridgeEnabled } from './utils/frontendLogBridge';
 
 type ThemeMode = 'dark' | 'light';
 type ConsoleMainView = 'chat' | 'tasks';
@@ -125,6 +126,11 @@ async function checkSystemStatus(): Promise<void> {
     setGlobalRequestErrorAutoDismiss(status.development_mode ? null : 5000);
     appVersion.value = status.version ?? '';
     autoCheckUpdate.value = status.auto_check_update ?? true;
+
+    // 后端是前端日志开关的权威来源：真正写盘的闸门在服务端（TOGOSPACE_FRONTEND_DEBUG），
+    // 前端这道只决定要不要发报文。桌面形态下 Rust 注入的标记可能相互不一致
+    // （例如只在后端设了环境变量），以这里的值为准。
+    setFrontendLogBridgeEnabled(status.frontend_debug === true);
 
     // 鉴权启用且无 token 时，触发 token 输入
     if (authEnabled.value && !getToken()) {
