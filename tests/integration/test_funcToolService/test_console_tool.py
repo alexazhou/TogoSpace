@@ -367,7 +367,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         runtimes = await self._fake_runtime_agents()
         monkeypatch.setattr(agentService, "get_team_agents", lambda team_id: runtimes)
         ctx = self._ctx()
-        direct = await get_agent_info(agent_name="bob", _context=ctx)
+        direct = await get_agent_info(name="bob", _context=ctx)
         by_name = await self._call("agent get bob", _context=ctx)
         by_id = await self._call(f"agent get {self.agent_ids['bob']}", _context=ctx)
         assert by_name["success"] is True and by_id["success"] is True
@@ -447,7 +447,7 @@ class TestConsoleTool(_ConsoleViaRegistry, ServiceTestCase):
         row = await gtRoomManager.get_room_by_team_and_name(self.team_id, "cc1_room")
         assert row is not None
 
-        direct = await get_room_info(room_name="cc1_room", _context=ctx)
+        direct = await get_room_info(name="cc1_room", _context=ctx)
         by_name = await self._call("room get cc1_room", _context=ctx)
         by_id = await self._call(f"room get {row.id}", _context=ctx)
         assert by_name["room"] == _as_tool_result(direct)["room"]

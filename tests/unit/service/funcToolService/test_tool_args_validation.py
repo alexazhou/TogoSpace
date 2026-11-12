@@ -648,7 +648,7 @@ async def test_element_null_rejected_for_all_array_params() -> None:
 
     为什么遍历而不是只测 `depends_on`：H2 是「`path` 长度 ≥2 一律豁免」的**整类**
     缺陷，只钉一个参数不足以证明整类被堵住。这里按 schema 现扫出全部 array 参数，
-    逐个断言，并断言扫描计数 == 10（少扫一个就说明判据退化了）。
+    逐个断言，并断言扫描计数 == 13（少扫一个就说明判据退化了）。
     """
 
     from service.funcToolService.funcToolType import get_function_metadata
@@ -668,7 +668,7 @@ async def test_element_null_rejected_for_all_array_params() -> None:
             if "array" in _declared_types(prop):
                 array_params.append((name, param_name))
 
-    assert len(array_params) == 10, array_params
+    assert len(array_params) == 13, array_params
 
     blocked = 0
     for name, param_name in array_params:
@@ -684,7 +684,7 @@ async def test_element_null_rejected_for_all_array_params() -> None:
         assert _LEGACY_MESSAGE_MARK not in result["message"], (name, param_name, result)
         blocked += 1
 
-    assert blocked == 10
+    assert blocked == 13
 
 
 @pytest.mark.asyncio
@@ -819,7 +819,7 @@ def _injection_points(parameters: dict) -> list[tuple[str, str, bool]]:
         points.append((f"P1:{name}", json.dumps(args), _allows_null(prop)))
 
         # P2：数组元素（每个 array 取「第 2 个元素」注入 null，保留 1 个合法元素；
-        # 本单 10 个 array 的 items 类型各自统一，同一 array 内元素类型不异构，
+        # 本单 13 个 array 的 items 类型各自统一，同一 array 内元素类型不异构，
         # 故单点注入足以覆盖整类。`items` 缺 `type` 但有 `enum` 的 2 个
         # （update_task.clear_fields / list_tasks.status）由 `_sample_value` 取首枚举值。）
         if "array" in _declared_types(prop):
@@ -915,16 +915,25 @@ async def test_null_injection_exhaustive_table() -> None:
 
     # ---- 四个数独立成表（拆开报，不许只报总数）----
     assert p0 == DEFAULT_TOOL_COUNT + CONTAINER_TOOL_COUNT, f"P0={p0}"
-    # 100 = 36 required + 64 optional（#189 时为 99 = 35+64；webfetch.url 为必填 ⇒ +1）
-    assert p1_required + p1_optional == 100, (p1_required, p1_optional)
-    assert p2 == 10, f"P2={p2}"
+    # 108 = 45 + 63。**这里必须拆开看两个口径**（否则「总数对」会掩盖反向变动）：
+    #   · `p1_required` 数的是「P1 注入后**应被拦**的字段」，不是 `required` 列表长度：
+    #     26 个 required + 19 个「有默认值但注解不含 None」= 45
+    #     （#196 前：36 required + 19 = 55；构成本身也变了，见
+    #      `test_tool_schema_nullable.NON_OPTIONAL_BUT_DEFAULTED` 注释）
+    #   · `p1_optional` = 108 - 45 = 63（#196 前 100 - 55 = 45）
+    # 108 = 全部参数数（38 工具，含容器组）。#196 前为 100。
+    assert p1_required + p1_optional == 108, (p1_required, p1_optional)
+    assert p1_required == 45, p1_required
+    assert p1_optional == 63, p1_optional
+    assert p2 == 13, f"P2={p2}"
     assert p3_fields == 4, f"P3字段={p3_fields}"
     # P3 内部 key 为 0 ⇒ 本单表达力边界（裸 {"type":"object"} 无 properties），不是漏点
     assert p3_enumerable == 0, f"P3内部key={p3_enumerable}"
 
     total = p0 + p1_required + p1_optional + p2 + p3_enumerable
-    # 148 = 38 + 36 + 64 + 10 + 0（#189 时为 146 = 37 + 35 + 64 + 10 + 0）
-    assert total == 148, total
+    # 159 = 38 + 45 + 63 + 13 + 0
+    # （#196 前 148 = 38 + 55 + 45 + 10 + 0；#189 时 146 = 37 + 35 + 64 + 10 + 0）
+    assert total == 159, total
     assert not mismatched, f"{len(mismatched)} 处不符预期：\n" + "\n".join(mismatched)
 
 

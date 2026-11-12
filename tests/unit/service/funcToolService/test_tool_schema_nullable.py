@@ -10,8 +10,12 @@ schema 里丢失，于是校验层用 `_is_ignorable_null` 按**「是否必填�
 ## 为什么必须**一对**判据（缺一条都会做出错实现）
 
 - `test_field_null_rejected_for_all_non_optional_params`：19 个字段传 null 必拒；
-- `test_field_null_accepted_for_all_optional_params`：41 个 `Optional` 字段传 null
+- `test_field_null_accepted_for_all_optional_params`：62 个 `Optional` 字段传 null
   必须**仍放行**。
+
+（两个数字随 #196 更新：19→19 —— 表内 `save_agent.driver` 移出（见下）+ `delete_dept` /
+`delete_room` 各新增一个 `dry_run: bool=False` 移入，净变化 0；41→62 见
+`OPTIONAL_WITH_DEFAULT` 上方注释。）
 
 只验第一条，会做出「一律拒 null」的实现（`get_time(timezone=null)`、`list_tasks(limit=null)`
 这些现网合法用法全被误杀）；只验第二条，则本单的缺陷原封不动。
@@ -36,17 +40,31 @@ from service.funcToolService import toolArgsValidation
 from service.funcToolService.funcToolType import get_function_metadata
 from service.roomService import ToolCallContext
 
-#: 任务单 §1 列出的 19 个字段（**外部锚点**，故意写死；从代码里现算会跟着实现一起漂移）。
-#: 口径：默认工具组（33 个工具 / 95 个参数）中「有默认值、但注解不含 None」的参数。
+#: 任务单 §1 列出的 19 个字段，#196 后仍为 19 个（移出 `save_agent.driver`、移入两个
+#: `dry_run`；**外部锚点**，故意写死，从代码里现算会跟着实现一起漂移）。
+#: 口径：默认工具组（33 个工具 / 103 个参数）中「有默认值、但注解不含 None」的参数。
+#: （#196 后参数数 95 → 103：+3 个 `clear_fields`、+2 个 `dry_run`、+2 个 `name`、
+#: +1 个 `get_dept_info.name`，改名 2 处不计数。）
+#:
+#: #196 更新（19 → 19，成员有换但数量不变）：新增 `delete_dept.dry_run` / `delete_room.dry_run` 两个
+#: `bool=False` 参数，同属「有默认值、注解不含 None」⇒ 必须进本表，否则它们传 null
+#: 的行为无人钉住。
+#:
+#: ⚠️ `save_agent.driver` **在本单移出本表**（-1 出、+2 入 ⇒ 仍 19）。这是本单唯一一处
+#: 「原以为要收严、实测必须放宽」的字段，详见报告 §「null 冲突消化 · driver」：
+#: PATCH 语义要求「省略 = 保持现值」可表达，而 Python 只有 `None` 默认值能表达它；
+#: `driver: str = "tsp"` 会让「只改 model 的 PATCH」把 native 悄悄改回 tsp（本单
+#: 实测抓到，见 commit 说明）。改成 `Optional[str] = None` 后，schema 自己声明了
+#: nullable ⇒ null ≡ 未传，符合 #195「合法性由 schema 表达」的哲学，不是绕它。
 NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
     ("send_chat_msg", "insert_immediately"),
     ("finish_action", "confirm_no_need_talk"),
-    ("save_agent", "driver"),
     ("save_agent", "overwrite_existing"),
     ("save_dept", "overwrite_existing"),
     ("delete_dept", "recursive"),
-    ("save_room", "initial_topic"),
+    ("delete_dept", "dry_run"),
     ("save_room", "overwrite_existing"),
+    ("delete_room", "dry_run"),
     ("save_role_template", "overwrite_existing"),
     ("create_task", "description"),
     ("create_task", "priority"),
@@ -60,49 +78,85 @@ NON_OPTIONAL_BUT_DEFAULTED: list[tuple[str, str]] = [
     ("memory_create", "star_level"),
 ]
 
-#: 任务单 §4.2 的 41 个 `Optional` 字段（同上：写死作外部锚点）。
+#: 任务单 §4.2 的 41 个 `Optional` 字段 + #196 新增的 21 个 = 62 个（同上：写死作外部锚点）。
+#:
+#: #196 更新（41 → 62，+21）：本单把 save 系列的定位/必填参数改成可选（PATCH 语义要求
+#: 「未传」可达），并新增三个 `clear_fields: Optional[list[...]]`（详见报告 §「save 系列
+#: required 放开」）。逐条对应：
+#:   `save_agent`   + name / role_template_name / clear_fields / driver (4)
+#:   `save_dept`    + name / responsibility / manager_name
+#:                    / member_names / clear_fields                   (5)
+#:   `save_room`    + name / member_names / initial_topic
+#:                    / clear_fields                                  (4)
+#:   `update_task`  + new_status / reviewer_id / clear_fields         (3)
+#: （`save_room.initial_topic` 由 `str=''` 改 `Optional[str]=None` 是**必须**的：`''` 无法
+#: 区分「未传」与「清空」，而 #195 之后 null 也不再是豁免通道。）
+#:
+#: 这张表是**外部锚点**，变化必须显式写在这里 —— 所以本单改动它是有意留痕，
+#: 不视为锚点腐化。
 OPTIONAL_WITH_DEFAULT: list[tuple[str, str]] = [
     ("create_container", "image"),
     ("create_container", "note"),
-    ("create_task", "reviewer_id"),
-    ("create_task", "parent_id"),
     ("create_task", "depends_on"),
+    ("create_task", "parent_id"),
+    ("create_task", "reviewer_id"),
     ("create_task", "room_id"),
     ("create_task", "status"),
     ("delete_container", "container_id"),
     ("delete_container", "record_id"),
     ("delete_dept", "dept_id"),
+    ("delete_dept", "name"),
+    ("delete_room", "name"),
     ("delete_room", "room_id"),
-    ("get_agent_info", "agent_name"),
+    ("get_agent_info", "agent_id"),
+    ("get_agent_info", "name"),
     ("get_dept_info", "dept_id"),
-    ("get_room_info", "room_name"),
+    ("get_dept_info", "name"),
+    ("get_room_info", "name"),
+    ("get_room_info", "room_id"),
     ("get_time", "timezone"),
     ("list_role_templates", "keywords"),
     ("list_task_events", "before_id"),
     ("list_tasks", "assignee"),
+    ("list_tasks", "limit"),
     ("list_tasks", "reviewer"),
     ("list_tasks", "scope"),
     ("list_tasks", "status"),
     ("list_tasks", "title_keyword"),
-    ("list_tasks", "limit"),
     ("memory_create", "tags"),
-    ("memory_update", "title"),
-    ("memory_update", "summary"),
     ("memory_update", "content"),
     ("memory_update", "star_level"),
     ("memory_update", "status"),
+    ("memory_update", "summary"),
     ("memory_update", "tags"),
-    ("save_agent", "model"),
-    ("save_agent", "allow_tools"),
-    ("save_agent", "allow_skills"),
-    ("save_agent", "i18n"),
+    ("memory_update", "title"),
     ("save_agent", "agent_id"),
-    ("save_dept", "parent_name"),
-    ("save_dept", "i18n"),
+    ("save_agent", "allow_skills"),
+    ("save_agent", "allow_tools"),
+    ("save_agent", "clear_fields"),
+    ("save_agent", "driver"),
+    ("save_agent", "i18n"),
+    ("save_agent", "model"),
+    ("save_agent", "name"),
+    ("save_agent", "role_template_name"),
+    ("save_dept", "clear_fields"),
     ("save_dept", "dept_id"),
+    ("save_dept", "i18n"),
+    ("save_dept", "manager_name"),
+    ("save_dept", "member_names"),
+    ("save_dept", "name"),
+    ("save_dept", "parent_name"),
+    ("save_dept", "responsibility"),
     ("save_role_template", "i18n"),
+    ("save_room", "clear_fields"),
+    ("save_room", "initial_topic"),
     ("save_room", "max_rounds"),
+    ("save_room", "member_names"),
+    ("save_room", "name"),
     ("save_room", "room_id"),
+    ("update_task", "clear_fields"),
+    ("update_task", "new_status"),
+    ("update_task", "reviewer_id"),
 ]
 
 
@@ -180,7 +234,7 @@ def test_field_lists_match_signatures() -> None:
         assert has_none is expected, (tool_name, param_name, hints[param_name])
 
     assert len(NON_OPTIONAL_BUT_DEFAULTED) == 19
-    assert len(OPTIONAL_WITH_DEFAULT) == 41
+    assert len(OPTIONAL_WITH_DEFAULT) == 62
 
 
 @pytest.mark.asyncio
@@ -203,7 +257,7 @@ async def test_field_null_rejected_for_all_non_optional_params() -> None:
 
 @pytest.mark.asyncio
 async def test_field_null_accepted_for_all_optional_params() -> None:
-    """41 个 `Optional` 字段传 `null` ⇒ 全部**不得**报 `invalid_tool_args`（防「修过头」）。
+    """62 个 `Optional` 字段传 `null` ⇒ 全部**不得**报 `invalid_tool_args`（防「修过头」）。
 
     这些是现网合法用法（`{"timezone": null}` 走默认时区等）。把 null 一律拒掉会同时
     打挂它们，且没有任何现有用例会红 —— 所以这条判据不能省。
@@ -257,7 +311,7 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 # --------------------------------------------------------------------------- #
 
 #: 基线 `e2d633036091ff7f157f5318ff14c05272ea235d` 上实测的
-#: 「全部 38 个工具的 description + 全部 100 个参数的 description + 工具级 required」
+#: 「全部 38 个工具的 description + 全部参数（当时 100 个）的 description + 工具级 required」
 #: 的 sha256 摘要（排序后 JSON 序列化）。**故意写死**：这是外部锚点，不是从当前代码
 #: 现算的（现算会跟着实现一起漂移，等于没断言）。
 #:
@@ -265,7 +319,32 @@ async def test_optional_enum_param_keeps_null_accepted() -> None:
 #: `scripts/tool_schema_snapshot.py --update` 更新，如果谁「改了 description + 顺手
 #: update 快照」，快照用例会绿。这条摘要要求**任何** description / required 变化都必须
 #: 显式改这个常量，改的时候才会看见「我在动模型的接口说明」。
-BASELINE_TEXT_DIGEST = "10a72bd6a30347af3aa8171b175d0a6c19bf9ed467251b49a0361c167a1a878f"
+#:
+#: #196 更新（100 → 108 参数，digest 重算）——**这是本单唯一一次动 #195 的锚点**，
+#: 理由与代价见报告 §「为何动 #195 的 BASELINE_TEXT_DIGEST 锚点」。要点：
+#:   1. 参数数 100 → 108（+8）。实测差集（新树 vs `5d231bf0` 旧树，逐工具）：
+#:      `save_agent`  +`clear_fields`
+#:      `save_dept`   +`clear_fields`
+#:      `save_room`   +`clear_fields`
+#:      `delete_dept` +`dry_run`
+#:      `delete_room` +`dry_run`
+#:      `get_dept_info`  +`name`（原仅 `dept_id`）
+#:      `get_agent_info` +`agent_id` `name`，-`agent_name`（净 +1）
+#:      `get_room_info`  +`room_id` `name`，-`room_name`（净 +1）
+#:      合计 +8；**两个改名**（`agent_name`→`name`、`room_name`→`name`）是唯一被删的参数。
+#:   2. 工具级 required 只在 5 处变化（其余 33 个工具 required 一字未动）：
+#:      `save_agent`  `["name","role_template_name"]` → `[]`
+#:      `save_dept`   `["name","responsibility","manager_name","member_names"]` → `[]`
+#:      `save_room`   `["name","member_names"]` → `[]`
+#:      `delete_dept` `["name"]` → `[]`
+#:      `delete_room` `["name"]` → `[]`
+#:      前三个是 PATCH 语义要求「未传」可达（报告 §「save 系列 required 放开」）；
+#:      后两个是「按 id 删 / 按名删二选一」，单给 name 才是必填是错的（dry_run 也一样）。
+#:   3. 逐条 description 与其余 35 个工具的 required **仍逐字不变**——这条锚点的语义
+#:      没有被稀释，只是随接口扩容重算了基线。
+#: 复核方式（可复现）：`git show 5d231bf0:src/...` 旧树算得 100 参数 /
+#: digest `10a72bd6…`，与旧常量逐字相同 ⇒ 本单没有在「顺手」改 description。
+BASELINE_TEXT_DIGEST = "6365f3f7b61aafe96cdf76e1366d4f31f3401d0e7b798fab082d0ad257d11de9"
 
 
 def _text_digest() -> tuple[str, int, int]:
@@ -294,7 +373,7 @@ def _text_digest() -> tuple[str, int, int]:
 
 
 def test_descriptions_and_required_do_not_drift() -> None:
-    """95/100 个参数的说明与 required 与基线**逐字相同**（本单最高风险点）。
+    """108 个参数的说明与 required 与基线**逐字相同**（本单最高风险点）。
 
     #195 把生成器换成 pydantic `TypeAdapter` —— 它**不产出 docstring 描述**。如果
     `_parse_param_descriptions` 的合并被漏掉，模型会失去全部参数说明，而「全量测试
@@ -306,7 +385,7 @@ def test_descriptions_and_required_do_not_drift() -> None:
     digest, tools, params = _text_digest()
 
     assert tools == 38, tools
-    assert params == 100, params
+    assert params == 108, params
     assert digest == BASELINE_TEXT_DIGEST, (
         "description 或 required 与基线不一致（摘要变化）。\n"
         "若确为有意变更，请先确认「模型看到的接口说明确实该变」，再更新本文件的 "

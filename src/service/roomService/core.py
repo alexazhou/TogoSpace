@@ -641,11 +641,14 @@ async def upsert_room(
     return saved
 
 
-async def delete_managed_room(team_id: int, room_id: int) -> None:
+async def delete_managed_room(team_id: int, room_id: int, dry_run: bool = False) -> None:
     """删除房间。
 
     - DEPT 房间（有 'DEPT' tag）禁止删除。
     - 处于 SCHEDULING 状态的房间禁止删除。
+
+    `dry_run=True` 时**零副作用**：校验照常执行、不落库（draft §2.3 实现红线：
+    算出来就返回，禁止「真执行 + 事务回滚」）。
     """
     room_db = await gtRoomManager.get_room_by_id(room_id)
     if room_db is None or room_db.team_id != team_id:
@@ -656,6 +659,9 @@ async def delete_managed_room(team_id: int, room_id: int) -> None:
     runtime_room = get_room(room_id)
     if runtime_room is not None and runtime_room.state == RoomState.SCHEDULING:
         raise TogoException("房间正在运行中，请先停止后再删除", error_code="ROOM_IS_ACTIVE")
+
+    if dry_run:
+        return
 
     await gtRoomManager.delete_room(room_id)
 

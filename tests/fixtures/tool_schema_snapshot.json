@@ -169,7 +169,7 @@
     "description": "删除当前团队中的指定组织（部门）。",
     "parameters": {
       "dept_id": {
-        "description": "可选组织 ID。传入后按 ID 精确定位组织，此时 name 仅用于确认提示。",
+        "description": "组织 ID。",
         "schema": {
           "type": [
             "integer",
@@ -177,10 +177,19 @@
           ]
         }
       },
-      "name": {
-        "description": "要删除的组织名称。",
+      "dry_run": {
+        "description": "是否只预演不执行。true 时同样执行全部校验（含根组织保护、有子组织未加 recursive 的阻断），只返回将要删除的清单，**不改动任何数据**。",
         "schema": {
-          "type": "string"
+          "type": "boolean"
+        }
+      },
+      "name": {
+        "description": "要删除的组织名称；与 dept_id 二选一（至少给一个），同时给出时以 dept_id 为准。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "recursive": {
@@ -190,9 +199,7 @@
         }
       }
     },
-    "required": [
-      "name"
-    ]
+    "required": []
   },
   "delete_role_template": {
     "description": "删除指定的角色模板。注意：仅能删除由用户创建（USER 类型）且当前未被任何成员使用的模板。",
@@ -211,14 +218,23 @@
   "delete_room": {
     "description": "删除当前团队中的指定房间。DEPT 房间不允许删除；运行中的房间不允许删除。",
     "parameters": {
-      "name": {
-        "description": "要删除的房间名称。",
+      "dry_run": {
+        "description": "是否只预演不执行。true 时同样执行全部校验（含 DEPT / 运行中保护），只返回将要删除的清单，**不改动任何数据**。",
         "schema": {
-          "type": "string"
+          "type": "boolean"
+        }
+      },
+      "name": {
+        "description": "要删除的房间名称；与 room_id 二选一（至少给一个），同时给出时以 room_id 为准。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "room_id": {
-        "description": "可选房间 ID。传入后按 ID 精确定位，此时 name 仅用于确认提示。",
+        "description": "房间 ID。",
         "schema": {
           "type": [
             "integer",
@@ -227,9 +243,7 @@
         }
       }
     },
-    "required": [
-      "name"
-    ]
+    "required": []
   },
   "enter_container": {
     "description": "把执行环境切换到指定的容器，之后所有命令都在容器内执行。",
@@ -265,8 +279,17 @@
   "get_agent_info": {
     "description": "查询成员，返回 ID、name、display_name、状态与所在部门；详情另含房间与可唤醒状态。",
     "parameters": {
-      "agent_name": {
-        "description": "Agent 名称（内部标识符 name，非 display_name）；省略时返回团队成员列表",
+      "agent_id": {
+        "description": "成员 ID；与 name 二选一，同时给出时以本参数为准。全部省略返回团队成员列表。",
+        "schema": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "name": {
+        "description": "Agent 名称（内部标识符 name，也接受 display_name）；纯数字名称请用本参数显式指定，避免被当作 ID。",
         "schema": {
           "type": [
             "string",
@@ -281,10 +304,19 @@
     "description": "查询部门，返回部门 ID、名称、职责、负责人、成员列表与子部门树。",
     "parameters": {
       "dept_id": {
-        "description": "部门 ID；省略时返回整个团队部门树",
+        "description": "部门 ID；与 name 二选一，同时给出时以本参数为准。全部省略返回整个团队部门树。",
         "schema": {
           "type": [
             "integer",
+            "null"
+          ]
+        }
+      },
+      "name": {
+        "description": "部门名称（内部标识，即 name 字段，非多语言展示名）；纯数字名称请用本参数显式指定，避免被当作 ID。",
+        "schema": {
+          "type": [
+            "string",
             "null"
           ]
         }
@@ -309,11 +341,20 @@
   "get_room_info": {
     "description": "查询房间，返回房间名、类型、状态、成员与标签；详情另含当前轮次与消息数。",
     "parameters": {
-      "room_name": {
-        "description": "房间名称；省略时返回团队全部房间的列表",
+      "name": {
+        "description": "房间名称；纯数字名称请用本参数显式指定，避免被当作 ID。",
         "schema": {
           "type": [
             "string",
+            "null"
+          ]
+        }
+      },
+      "room_id": {
+        "description": "房间 ID；与 name 二选一，同时给出时以本参数为准。全部省略返回团队全部房间的列表。",
+        "schema": {
+          "type": [
+            "integer",
             "null"
           ]
         }
@@ -703,7 +744,7 @@
         }
       },
       "allow_skills": {
-        "description": "可见技能名称列表，如 [\"frontend-design\"]；load_skill 只能加载已授权的技能。省略（None）= 全部技能；[] = 不授权任何技能；更新已有成员时省略会重置为该默认。",
+        "description": "可见技能名称列表，如 [\"frontend-design\"]；load_skill 只能加载已授权的技能。新建时省略 = 全部技能，[] = 不授权任何技能；更新时省略 = 保持现值。clear_fields 含本字段 = 重置为默认（全部技能）。",
         "schema": {
           "items": {
             "type": "string"
@@ -715,7 +756,7 @@
         }
       },
       "allow_tools": {
-        "description": "可见工具列表，元素为工具名（如 \"read_file\"）或类别语法（如 \"Category:Read\"），类别与工具名自动合并。可分配类别只 Read、Write、Execute 三类（Basic 自动开启、Admin 拒绝显式分配，根主管自动获得 Admin）。省略（None）= 默认授予 Basic、Read、Write、Execute；更新已有成员时省略会重置为该默认。",
+        "description": "可见工具列表，元素为工具名（如 \"read_file\"）或类别语法（如 \"Category:Read\"），类别与工具名自动合并。可分配类别只 Read、Write、Execute 三类（Basic 自动开启、Admin 拒绝显式分配，根主管自动获得 Admin）。新建时省略 = 默认授予 Basic、Read、Write、Execute；更新时省略 = 保持现值。clear_fields 含本字段 = 重置为默认授予。",
         "schema": {
           "items": {
             "type": "string"
@@ -726,14 +767,34 @@
           ]
         }
       },
-      "driver": {
-        "description": "驱动类型，可选 native、claude_sdk、tsp，默认 tsp。",
+      "clear_fields": {
+        "description": "要清除（恢复默认）的字段名列表，可选 \"model\"、\"allow_tools\"、\"allow_skills\"。传空数组 [] 视为「未提供」。与给值同时出现同一字段会报 ambiguous_clear_field。白名单之外的字段名返回 invalid_clear_field。",
         "schema": {
-          "type": "string"
+          "items": {
+            "enum": [
+              "model",
+              "allow_tools",
+              "allow_skills"
+            ],
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "driver": {
+        "description": "驱动类型，可选 native、claude_sdk、tsp。新建时省略 = tsp。**不可通过 clear_fields 清除**（无「无驱动」这一合法状态）。更新时省略表示保持现值。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "i18n": {
-        "description": "多语言名称，如 {\"display_name\": {\"zh-CN\": \"Alice\", \"en\": \"Alice\"}}。",
+        "description": "多语言名称，如 {\"display_name\": {\"zh-CN\": \"Alice\", \"en\": \"Alice\"}}。更新时省略表示保持现值。",
         "schema": {
           "type": [
             "object",
@@ -742,7 +803,7 @@
         }
       },
       "model": {
-        "description": "可选模型覆盖；省略表示不覆盖模板或系统默认模型。",
+        "description": "可选模型覆盖；新建时省略表示不覆盖模板或系统默认模型，更新时省略表示保持现值。",
         "schema": {
           "type": [
             "string",
@@ -751,9 +812,12 @@
         }
       },
       "name": {
-        "description": "成员名称，团队内唯一标识，不能使用系统保留名称，也不能包含路径分隔符、Windows 非法字符或控制字符。",
+        "description": "成员名称，团队内唯一标识，不能使用系统保留名称，也不能包含路径分隔符、Windows 非法字符或控制字符。新建成员时必须给；更新时可省略（用 agent_id 定位）。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "overwrite_existing": {
@@ -763,20 +827,35 @@
         }
       },
       "role_template_name": {
-        "description": "要绑定的角色模板名称。",
+        "description": "要绑定的角色模板名称。新建成员时必须给；更新时省略表示保持现有绑定。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
-    "required": [
-      "name",
-      "role_template_name"
-    ]
+    "required": []
   },
   "save_dept": {
     "description": "创建或更新组织（部门）。",
     "parameters": {
+      "clear_fields": {
+        "description": "要清除的字段名列表，当前仅 \"parent_name\"。clear_fields=[\"parent_name\"] 表示把组织设为根节点（须已是根，否则报错）。传空数组 [] 视为「未提供」。与 parent_name 给值同时出现报 ambiguous_clear_field。白名单之外返回 invalid_clear_field。",
+        "schema": {
+          "items": {
+            "enum": [
+              "parent_name"
+            ],
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
       "dept_id": {
         "description": "组织 ID；传入后按 ID 精确定位（忽略 overwrite_existing），此时 name 用于重命名。",
         "schema": {
@@ -787,7 +866,7 @@
         }
       },
       "i18n": {
-        "description": "多语言数据，如 {\"dept_name\": {\"zh-CN\": \"研发部\", \"en\": \"R&D\"}, \"responsibility\": {\"zh-CN\": \"负责研发\"}}。",
+        "description": "多语言数据，如 {\"dept_name\": {\"zh-CN\": \"研发部\", \"en\": \"R&D\"}, \"responsibility\": {\"zh-CN\": \"负责研发\"}}。更新时省略表示保持现值。",
         "schema": {
           "type": [
             "object",
@@ -796,24 +875,33 @@
         }
       },
       "manager_name": {
-        "description": "负责人成员名；不在 member_names 中会自动加入。",
+        "description": "负责人成员名；不在 member_names 中会自动加入。新建时必须给；更新时省略表示保持现值。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "member_names": {
-        "description": "成员名称列表，全量替换而非追加。",
+        "description": "成员名称列表，全量替换而非追加。新建时必须给；更新时省略表示保持现值（不是清空成员）。",
         "schema": {
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "name": {
-        "description": "组织名称，团队内唯一标识，建议使用小写字母和下划线。",
+        "description": "组织名称，团队内唯一标识，建议使用小写字母和下划线。新建时必须给；更新时可省略（用 dept_id 定位）。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "overwrite_existing": {
@@ -823,7 +911,7 @@
         }
       },
       "parent_name": {
-        "description": "父组织名称，新建时必须指定；不能是自身或自身子组织；更新根组织时可省略或传 null 以保持根节点。",
+        "description": "父组织名称，新建时必须指定；不能是自身或自身子组织。更新时省略表示**保持现有父组织**；要把组织变成根节点须显式 clear_fields=[\"parent_name\"]（仅当它已是根组织时才允许，否则报错——创建/删除根组织属管理员通过组织树编辑器的操作）。",
         "schema": {
           "type": [
             "string",
@@ -832,18 +920,16 @@
         }
       },
       "responsibility": {
-        "description": "组织职责描述。",
+        "description": "组织职责描述。新建时必须给；更新时省略表示保持现值。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
-    "required": [
-      "name",
-      "responsibility",
-      "manager_name",
-      "member_names"
-    ]
+    "required": []
   },
   "save_role_template": {
     "description": "创建或更新角色模板；只能操作 USER 类型，SYSTEM 内置模板只读不可改。",
@@ -891,14 +977,33 @@
   "save_room": {
     "description": "创建或更新房间；成员 2 人为单聊，3 人及以上为群聊。",
     "parameters": {
-      "initial_topic": {
-        "description": "房间初始话题，可选。",
+      "clear_fields": {
+        "description": "要清除（恢复默认）的字段名列表，可选 \"initial_topic\"、\"max_rounds\"。initial_topic 清空后：群聊为空话题；单聊仍会自动生成默认话题（沿用 `upsert_room` 既有行为，不是本次引入）。max_rounds 清除 = 回到系统默认（NULL）。传空数组 [] 视为「未提供」。与给值同时出现同一字段会报 ambiguous_clear_field。",
         "schema": {
-          "type": "string"
+          "items": {
+            "enum": [
+              "initial_topic",
+              "max_rounds"
+            ],
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "initial_topic": {
+        "description": "房间初始话题。新建时省略 = 空话题（单聊会自动生成话题）；更新时省略 = 保持现值。清空用 clear_fields=[\"initial_topic\"]。",
+        "schema": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "max_rounds": {
-        "description": "最大轮次，省略用系统默认；<=0 表示不限轮次。",
+        "description": "最大轮次；<=0 表示不限轮次。新建时省略 = 用系统默认；更新时省略 = 保持现值。重置为系统默认用 clear_fields=[\"max_rounds\"]。",
         "schema": {
           "type": [
             "integer",
@@ -907,18 +1012,24 @@
         }
       },
       "member_names": {
-        "description": "成员名称列表，至少 2 人，全量替换。",
+        "description": "成员名称列表，至少 2 人，全量替换。新建时必须给；更新时省略表示保持现成员集合。",
         "schema": {
           "items": {
             "type": "string"
           },
-          "type": "array"
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "name": {
-        "description": "房间名称，团队内唯一标识，建议使用小写字母和下划线。",
+        "description": "房间名称，团队内唯一标识，建议使用小写字母和下划线。新建时必须给；更新时可省略（用 room_id 定位）。",
         "schema": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "overwrite_existing": {
@@ -937,10 +1048,7 @@
         }
       }
     },
-    "required": [
-      "name",
-      "member_names"
-    ]
+    "required": []
   },
   "send_chat_msg": {
     "description": "向房间发送消息，消息对房间内所有成员可见。",

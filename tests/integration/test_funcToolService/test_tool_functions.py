@@ -272,7 +272,7 @@ class TestToolFunctions(ServiceTestCase):
 
         ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=team.id, chat_room=general)
         list_result = await get_room_info(_context=ctx)
-        detail_result = await get_room_info(room_name="general", _context=ctx)
+        detail_result = await get_room_info(name="general", _context=ctx)
 
         assert list_result["success"]
         assert {room["room_name"] for room in list_result["rooms"]} >= {"general", "pair"}
@@ -328,7 +328,7 @@ class TestToolFunctions(ServiceTestCase):
 
         ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=team.id, chat_room=None)
         list_result = await get_agent_info(_context=ctx)
-        detail_result = await get_agent_info(agent_name="bob", _context=ctx)
+        detail_result = await get_agent_info(name="bob", _context=ctx)
         wake_result = await wake_up_agent("bob", _context=ctx)
 
         assert list_result["success"]
@@ -384,9 +384,9 @@ class TestToolFunctions(ServiceTestCase):
 
         ctx = ToolCallContext(agent_id=self.agent_ids["alice"], team_id=team.id, chat_room=None)
         
-        alice_detail = await get_agent_info(agent_name="alice", _context=ctx)
-        bob_detail = await get_agent_info(agent_name="bob", _context=ctx)
-        char_detail = await get_agent_info(agent_name="char", _context=ctx)
+        alice_detail = await get_agent_info(name="alice", _context=ctx)
+        bob_detail = await get_agent_info(name="bob", _context=ctx)
+        char_detail = await get_agent_info(name="char", _context=ctx)
 
         assert alice_detail["success"]
         alice_depts = alice_detail["agent"]["departments"]

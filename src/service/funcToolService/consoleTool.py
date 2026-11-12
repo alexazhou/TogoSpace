@@ -509,7 +509,7 @@ async def _route(
                 "无法返回房间与状态详情。若刚刚创建/修改，需要 reload 后才生效。",
             )
         _forward(parsed,
-            agent_name=agent_name,
+            name=agent_name,
             post_process=None if agent_row is None else _guard_agent_get(agent_row),
         )
     if key == "agent create":
@@ -539,7 +539,7 @@ async def _route(
         # 同 `agent get`：原工具只认 name，按 id 定位后转成 name 再调。
         room_row = await cp._resolve_room_by_target(context.team_id, target or "")
         _forward(parsed,
-            room_name=room_row.name if room_row is not None else target,
+            name=room_row.name if room_row is not None else target,
         )
     if key == "room create":
         data = cp._input_payload_for(parsed, payload)
